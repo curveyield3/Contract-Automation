@@ -28,6 +28,7 @@ import {registerMasterTargetedTests,acceptMasterTargetedTestResults,verifyMaster
 import {admitPostCompletionFollowupV1} from './lib/lite-post-completion-followup-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
+import {isReassignedV13AuthorityV1} from './lib/lite-authority-lineup-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-discovery-v1.mjs';
 import {validatePhase6AttackerWorkV1,validatePhase8LinkageV1,validatePhase10CoverageLabelV1,appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
@@ -124,8 +125,9 @@ function receiptRef(root,campaignPath,rel,role){return {role,path:path.posix.rel
 function assignmentReviewer(sequence,authorityRoot=null,root=null){
  return boundReviewerForPhaseV1({root,authorityRoot,phase:sequence});
 }
-function isFreshBoundary(next,authorityRoot=null){
-  return isV13AuthorityV1(authorityRoot)?[2,5,8].includes(next):[2,6,8].includes(next);
+function isFreshBoundary(next,authorityRoot=null,controllerRoot=null){
+ if(controllerRoot&&isReassignedV13AuthorityV1({root:controllerRoot,authorityRoot}))return [4,5,8].includes(next);
+ return isV13AuthorityV1(authorityRoot)?[2,5,8].includes(next):[2,6,8].includes(next);
 }
 function maybeFile(root,rel){const f=repoFile(root,rel);return fs.existsSync(f)&&fs.statSync(f).isFile()?f:null;}
 function maybeJson(root,rel){const f=maybeFile(root,rel);if(!f)return null;try{return readJson(f);}catch{return null;}}
@@ -1428,7 +1430,13 @@ let nextSequence=sequence===10?null:sequence+1;
 let fresh=false;let nextAssignment=null;let nextDerivedInputs=[];
 let discoveryStarted=false,discoveryWake=null,discoveryWakes=[];
 let handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};
-if(sequence===1){nextSequence=2;fresh=true;handoff={required:true,boundary:'P1_TO_P2',incomingReviewer:'reviewer-2',assignedWork:'Combined Lite Phases 2-5',nextPhaseSequence:2,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
+if(sequence===1){
+ const same=isReassignedV13AuthorityV1({root,authorityRoot});
+ nextSequence=2;fresh=!same;
+ handoff=same
+  ?{required:false,boundary:'P1_TO_P2',incomingReviewer:'reviewer-1',assignedWork:'Phase 2',nextPhaseSequence:2,sameReviewer:true,status:'NOT_APPLICABLE'}
+  :{required:true,boundary:'P1_TO_P2',incomingReviewer:'reviewer-2',assignedWork:'Combined Lite Phases 2-5',nextPhaseSequence:2,sameReviewer:false,status:'SUCCESSOR_PENDING'};
+}
 if(isV13AuthorityV1(authorityRoot)&&sequence===4){
   nextSequence=5;fresh=true;handoff={required:true,boundary:'P4_TO_P5',incomingReviewer:'reviewer-3',assignedWork:'Phases 5-7 (Phase 7 automatic)',nextPhaseSequence:5,sameReviewer:false,status:'SUCCESSOR_PENDING'};
 }
@@ -1465,7 +1473,7 @@ packet.status='ACCEPTED';packet.controllerValidation.receiptPath=receiptRel;pack
 writeJson(packetFile,packet);
 
 let sealedReceiptRel=receiptRel;
-if(sequence===6){
+if(sequence===6&&!isReassignedV13AuthorityV1({root,authorityRoot})){
   const loaded7=loadPhaseSchema(root,authorityRoot,7);const schema7=loaded7.schema;
   const form7Rel=path.posix.join(campaignPath,schema7.workForm.campaignPath);const form7=readJson(requiredFile(root,path.posix.join(authorityRoot,schema7.workForm.template),'Phase-7 automation form template'));
   form7.actions['step-1'].outputs={predecessorPhase6Receipt:receiptRel,phase6DerivedInput:derivedRels[0]??'NONE_IDENTIFIED',markerDisposition:'SEALED_AUTOMATIC_MARKER',successorPhase:'8',successorReviewer:'reviewer-4'};
@@ -1489,7 +1497,10 @@ if(sequence===8&&nextSequence===10){
   skipped.sealedAt=now;if(masterAmendmentRefreshSha)skipped.masterAmendment=masterAmendmentReceipt(skippedRevision-1);writeJson(repoFile(root,skippedRel),skipped);sealedReceiptRel=skippedRel;
 }
 directory.lastSealedReceiptPath=sealedReceiptRel;
-const masterBoundary=isV13AuthorityV1(authorityRoot)?(sequence===1?1:sequence===4?4:sequence===6?7:sequence===10?10:null):(sequence===1?1:sequence===5?5:sequence===6?7:sequence===10?10:null);
+const masterBoundary=isReassignedV13AuthorityV1({root,authorityRoot})
+ ?([3,4,6,10].includes(sequence)?sequence:null)
+ :isV13AuthorityV1(authorityRoot)?(sequence===1?1:sequence===4?4:sequence===6?7:sequence===10?10:null)
+ :(sequence===1?1:sequence===5?5:sequence===6?7:sequence===10?10:null);
 if(gatedMasterReview&&masterBoundary!==null){
   const staged=stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase:masterBoundary,lastSealedReceiptPath:sealedReceiptRel,nextSequence,nextDerivedInputPaths:nextDerivedInputs,successorPrefillContext,now});
   writeJson(directoryFile,directory);
@@ -1513,9 +1524,11 @@ if(sequence===10){
 }
 else{
   const nextReviewer=assignmentReviewer(nextSequence,authorityRoot,root);
-  const nextStatus=fresh||isFreshBoundary(nextSequence,authorityRoot)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
-  nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
-  if(sequence===3&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
+  const nextStatus=fresh||isFreshBoundary(nextSequence,authorityRoot,root)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
+  nextAssignment=(sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)
+ ?null
+ :preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
+  if(sequence===3&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
     const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
       now,auditControllerRef:a['audit-controller-ref']??'main'});
     directory.discovery={statePath:started.statePath,status:started.completeImmediately?'COMPLETE':'RUNNING',
@@ -1534,7 +1547,7 @@ else{
       nextAssignment.status='WAITING_FOR_DISCOVERY';
     }
   }
-  directory.currentAssignment=nextAssignment;directory.campaignStatus=discoveryStarted?(directory.discovery.status==='COMPLETE'?'ACTIVE':'WAITING_FOR_DISCOVERY'):(nextStatus==='WAITING_FOR_SUCCESSOR_AGENT'?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE');directory.updatedAt=now;
+  directory.currentAssignment=nextAssignment;directory.campaignStatus=(sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)?'MASTER_AMENDMENT_REFRESH':discoveryStarted?(directory.discovery.status==='COMPLETE'?'ACTIVE':'WAITING_FOR_DISCOVERY'):(nextStatus==='WAITING_FOR_SUCCESSOR_AGENT'?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE');directory.updatedAt=now;
 }
 writeJson(directoryFile,directory);
 const feedback='CONTROLLER_PHASE_PASS: Phase '+sequence+' validated and sealed.'+(nextAssignment?' Next authorized assignment: Phase '+nextAssignment.phaseSequence+' / '+nextAssignment.reviewer+'.':' Campaign complete.');
