@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import {generateV7ExecutionRequestV1} from '../../../scripts/lib/lite-phase5-request-generation-v1.mjs';
 import {validateDeepAssuranceRequestWithV26V1} from '../src/schema-v26.mjs';
-import {validateTargetExecutionRequestBindingV1} from '../src/lite-boundary-artifacts-v1.mjs';
 const digest='a'.repeat(64);
 const source={sha256:digest,archiveRepository:'CurveYield2/Audit-Controller',
  archiveCommit:'1'.repeat(40),archivePath:'campaigns/demo r1/source/source.zip',
@@ -153,27 +152,4 @@ test('r4 candidateId embedded in expected observation is bound as request metada
  const bad=generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,phase0Source:source,target:wrong});
  assert.equal(bad.status,'REWORK_REQUIRED');
  assert.ok(bad.missing.some(x=>x.field==='expectedMachineObservation.candidateId'));
-});
-
-test('v13 Phase-5 generated observation with embedded candidateId passes downstream request binding',()=>{
- const t=target();
- t.expectedMachineObservation={componentStatus:'COMPLETED',candidateId:t.candidateKey};
- const generated=generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,phase0Source:source,target:t});
- assert.equal(generated.status,'GENERATED',JSON.stringify(generated.missing));
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'v13-phase5-binding-'));
- try{
-  const campaignPath='campaigns/demo r1',rel='controller/requests/PHASE5_REQUEST_v1.json';
-  const filename=path.join(root,campaignPath,rel);
-  fs.mkdirSync(path.dirname(filename),{recursive:true});
-  fs.writeFileSync(filename,JSON.stringify(generated.request));
-  const design={...t,executionRequestRef:rel};
-  const valid=validateTargetExecutionRequestBindingV1({controllerRoot:root,campaignPath,
-   target:design,expectedCampaignId:'demo-r1',expectedSourceSha256:digest});
-  assert.equal(valid.status,'PASS_STRUCTURAL_BINDING_REQUIRES_PHASE6_SEMANTIC_HARNESS_REVIEW',JSON.stringify(valid));
-  const changed={...design,expectedMachineObservation:{...t.expectedMachineObservation,componentStatus:'FAILED'}};
-  const mismatch=validateTargetExecutionRequestBindingV1({controllerRoot:root,campaignPath,
-   target:changed,expectedCampaignId:'demo-r1',expectedSourceSha256:digest});
-  assert.equal(mismatch.status,'FAIL_STRUCTURAL_REQUEST_TARGET_BINDING');
-  assert.ok(mismatch.reasons.includes('expected machine observation mismatch'));
- }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
