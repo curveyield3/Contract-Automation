@@ -852,6 +852,53 @@ function activeDetectionPolicyV1(receipt) {
   return detectionPolicyForAuthorityV1({repoRoot:root,authorityRoot,
     readJsonIfExists:(rel)=>fs.existsSync(repoFile(root,rel))?readJson(repoFile(root,rel)):null});
 }
+// Controller-owned post-master marker; the enclosing master transaction publishes atomically.
+async function materializeAcceptedPhase7V1({authorityRoot,phase6ReceiptPath,acceptedMasterRecordPath}){
+ const markerRel=path.posix.join(campaignPath,'receipts/PHASE_07_RECEIPT_v1.json');
+ const predecessor=readJson(requiredFile(root,phase6ReceiptPath,'accepted Phase-6 receipt'));
+ const masterRecord=readJson(requiredFile(root,acceptedMasterRecordPath,'accepted master record'));
+ if(Number(predecessor.phase?.sequence)!==6||predecessor.validation?.status!=='PASS'||
+   !['AMENDED','ACCEPT_WITHOUT_MODIFICATIONS'].includes(masterRecord.decision?.outcome))
+   throw new Error('Phase-7 marker requires final accepted Phase-6 and master evidence');
+ if(maybeFile(root,markerRel)){
+   const old=readJson(repoFile(root,markerRel));
+   if(old.inputs?.[0]?.path!==phase6ReceiptPath)throw new Error('Phase-7 marker references stale Phase-6 evidence');
+   return {markerRel,derivedInputPaths:resolveInputsForTarget({root,campaignPath,target:8})};
+ }
+ const loaded=loadPhaseSchema(root,authorityRoot,7),schema=loaded.schema;
+ const formRel=path.posix.join(campaignPath,schema.workForm.campaignPath);
+ const form=readJson(requiredFile(root,path.posix.join(authorityRoot,schema.workForm.template),'Phase-7 form template'));
+ const phase6Derived=resolveInputsForTarget({root,campaignPath,target:8});
+ form.actions['step-1'].outputs={predecessorPhase6Receipt:phase6ReceiptPath,
+   phase6DerivedInput:phase6Derived.find(p=>p.includes('/derived/phase-6/'))??'NONE_IDENTIFIED',
+   markerDisposition:'SEALED_AUTOMATIC_MARKER',successorPhase:'8',successorReviewer:'reviewer-4'};
+ form.automationInputs={predecessorReceiptPath:phase6ReceiptPath,derivedInputPaths:phase6Derived,
+   acceptedMasterRecordPath,acceptedMasterRecordSha256:shaFile(repoFile(root,acceptedMasterRecordPath))};
+ writeJson(repoFile(root,formRel),form);
+ const canonicalRel=path.posix.join(campaignPath,'derived/phase-7/PHASE_07_CANONICAL_DATA_v1.json');
+ const canonical={schemaVersion:'curveyield-lite-phase-canonical-data-v1',phase:7,
+   campaignId:directory.campaignId,workSchemaPath:loaded.rel,workFormPath:formRel,
+   finalReportPath:null,actions:form.actions,generatedAt:now};
+ writeJson(repoFile(root,canonicalRel),canonical);
+ const derived=buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical,canonicalRel,now});
+ const receiptLib=await import(pathToFileURL(repoFile(root,'packages/controller-core/src/lite-phase-receipt-v1.mjs')).href);
+ const evidence=[receiptRef(root,campaignPath,formRel,'AUTOMATIC_PHASE7_WORK_FORM'),
+   receiptRef(root,campaignPath,canonicalRel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),
+   receiptRef(root,campaignPath,acceptedMasterRecordPath,'ACCEPTED_MASTER_REVIEW'),
+   ...derived.map(p=>receiptRef(root,campaignPath,p,'DERIVED_DOWNSTREAM_DATA'))];
+ const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,
+   campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,
+   workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,
+   executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',revision:1,
+   authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,
+   status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:phase6ReceiptPath}],
+   evidence,outputs:evidence,globalControls:predecessor.globalControls,
+   validation:{status:'PASS',validatedAt:now,failures:[]},
+   handoff:{required:true,boundary:'P67_TO_P8',incomingReviewer:'reviewer-4',
+     assignedWork:'Combined Lite Phases 8-10',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'},now});
+ marker.sealedAt=now;writeJson(repoFile(root,markerRel),marker);
+ return {markerRel,derivedInputPaths:resolveInputsForTarget({root,campaignPath,target:8,immediate:[...phase6Derived,...derived]})};
+}
 if(reviewKind==='discovery'){
   if(['STOPPED_BY_HUMAN','BLOCKED'].includes(directory.campaignStatus))
     throw new Error('campaign is held by explicit human status');
