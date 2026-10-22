@@ -391,7 +391,7 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   if(!fs.existsSync(file)){waiting.push(id);continue;}
   const bytes=fs.readFileSync(file),sha=hex(bytes);
   if(sha===info.lastValidatedSubmissionSha){
-   unchanged.push(feedbackTextV1({errors:info.lastErrors},{attempt:info.attempts,maxAttempts:3,submissionPath:relative,unitId:id}));
+   unchanged.push(feedbackTextV1({errors:info.lastErrors},{attempt:info.attempts,maxAttempts:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,submissionPath:relative,unitId:id}));
    continue;
   }
   const packet=known(root,packetRel(campaignPath,id));
@@ -411,9 +411,13 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
    continue;
   }
   info.attempts++;
-  if(info.attempts<3){
+  // V13 correctness-first discovery never converts a malformed submission into covered work.
+  // The same reviewer remains responsible; an unchanged payload is not revalidated.
+  if(info.attempts<3||state.payload.reviewPolicy==='correctness-verdict-v13'){
    rework.push(id);
-   feedback.push(feedbackTextV1(result,{attempt:info.attempts,maxAttempts:3,submissionPath:relative,unitId:id}));
+   feedback.push(feedbackTextV1(result,{attempt:info.attempts,
+     maxAttempts:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,
+     submissionPath:relative,unitId:id}));
    continue;
   }
   info.status='GAP_RECORDED';exhausted.push(id);

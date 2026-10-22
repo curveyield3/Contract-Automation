@@ -440,7 +440,7 @@ jobs:
 
       - name: Record v13 controller delivery result and latest per-assignment identity
         id: delivery_state
-        if: steps.routing.outputs.stale != 'true' && steps.controller.outcome == 'success' && contains(steps.controller.outputs.authority_link_root, 'Audit_Litemode_v13')
+        if: steps.routing.outputs.stale != 'true' && steps.controller.outcome == 'success' && contains(steps.controller.outputs.authority_link_root, 'Audit_Litemode_v13') && ((steps.controller.outputs.status == 'PASS' && steps.controller.outputs.fresh == 'true') || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW')
         shell: bash
         run: |
           set -euo pipefail
@@ -459,6 +459,7 @@ jobs:
           ' "${{ steps.routing.outputs.campaign_path }}" "${{ steps.request.outputs.review_kind }}" "${{ steps.request.outputs.phase_sequence }}" "${{ github.run_id }}"
 
       - name: Publish validation response or successful phase transaction
+        id: publish_result
         if: ${{ steps.routing.outputs.stale != 'true' && steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' || steps.controller.outputs.status == 'FOLLOWUP_ADMITTED' || steps.controller.outputs.status == 'DISCOVERY_REWORK' || steps.controller.outputs.status == 'DISCOVERY_NEXT' || steps.controller.outputs.status == 'DISCOVERY_PARTIAL' || steps.controller.outputs.status == 'DISCOVERY_COMPLETE' || steps.controller.outputs.status == 'DISCOVERY_STALE_REQUEST' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID' || steps.controller.outputs.status == 'MASTER_REVIEW_HELD' || steps.controller.outputs.status == 'ALREADY_ACCEPTED' || steps.controller.outputs.status == 'CONTROLLER_ERROR') }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -477,6 +478,7 @@ jobs:
               timeout -k 10s 120s git pull --rebase origin "${{ steps.request.outputs.audit_controller_ref }}"
             done
           fi
+          echo 'published=true' >> "$GITHUB_OUTPUT"
 
       - name: Delegate v13 Phase-5 generated harness requests to test executor
         if: steps.routing.outputs.effective_hold != 'true' && steps.routing.outputs.stale != 'true' && contains(steps.controller.outputs.authority_link_root, 'Audit_Litemode_v13') && steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5' && (steps.phase5_preflight.outputs.harness_rework == 'true' || (steps.phase5_preflight.outputs.generated_count != '0' && steps.phase5_preflight.outputs.generated_count != ''))
@@ -546,9 +548,21 @@ jobs:
           # Reviewer-2 and the attacker work discovery windows in parallel: one wake per chat.
           printf '%s' "$WAKES_B64" | base64 -d > /tmp/discovery-wakes.json
           count="$(jq 'length' /tmp/discovery-wakes.json)"
+          if [ "$count" -eq 0 ]; then exit 0; fi
+          submitted_chat=""
+          if [ "${{ steps.request.outputs.review_kind }}" = discovery ]; then
+            state=".audit-controller/${{ steps.routing.outputs.campaign_path }}/work/phase-04/discovery/DISCOVERY_STATE_v1.json"
+            [ -s "$state" ] || { echo "::error::Discovery state unavailable for self-wake filtering"; exit 1; }
+            submitted_chat="$(jq -r --arg unit "${{ steps.request.outputs.unit_id }}" '.payload.units[$unit].chatKey // empty' "$state")"
+            [ -n "$submitted_chat" ] || { echo "::error::Submitting discovery reviewer identity missing"; exit 1; }
+          fi
           for index in $(seq 0 $((count - 1))); do
             jq -c ".[$index]" /tmp/discovery-wakes.json > /tmp/discovery-wake.json
             reviewer="$(jq -r '.chatKey' /tmp/discovery-wake.json)"
+            if [ -n "$submitted_chat" ] && [ "$reviewer" = "$submitted_chat" ]; then
+              echo "Same discovery reviewer $reviewer reads own run and continues without wake."
+              continue
+            fi
             case "$reviewer" in reviewer-2|reviewer-3|reviewer-3L) ;; *) echo "::error::Wrong discovery reviewer"; exit 1;; esac
             chat="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // empty' /tmp/discovery-registration.json)"
             [[ "$chat" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$chat" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || { echo "::error::No assigned discovery chat"; exit 1; }
@@ -571,47 +585,6 @@ jobs:
               -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
           done
 
-      - name: Resolve active reviewer chat
-        id: chat
-        if: steps.routing.outputs.effective_hold != 'true' && (steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID' || steps.controller.outputs.same == 'true' || (steps.controller.outputs.status == 'PASS' && steps.controller.outputs.fresh == 'true') || (steps.controller.outputs.status == 'PASS' && steps.controller.outputs.next_phase == ''))
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          safe_campaign="$(printf '%s' "${{ steps.request.outputs.campaign_id }}" | tr -c 'A-Za-z0-9._-' '_')"
-          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
-          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content' 2>/dev/null || true)"
-          if [ -z "$encoded" ]; then
-            echo "::warning::No active browser registration found for controller feedback."
-            echo "chat_url=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          printf '%s' "$encoded" | base64 -d > /tmp/registration.json
-          echo "chat_url=$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/registration.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Inform current reviewer of exact rework deficiencies
-        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'NEEDS_REWORK' && steps.chat.outputs.chat_url != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.delivery_state.outputs.wake_id || format('{0}-phase-{1}-packet-rework',steps.request.outputs.campaign_id,steps.request.outputs.phase_sequence) }}"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.request.outputs.phase_sequence }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="${{ steps.controller.outputs.feedback_b64 }}"             -f watchdog_enabled=true             -f worker_role=reviewer             -f gate_mode=LITE             -f gate_repository=CurveYield2/Audit-Controller             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}"             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"             -f gate_expected_phase_id="phase-${{ steps.request.outputs.phase_sequence }}"             -f gate_expected_milestone_id="PHASE_${{ steps.request.outputs.phase_sequence }}_WORK_PACKET"
-
-      - name: Inform same reviewer that next phase is authorized
-        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.same == 'true' && steps.chat.outputs.chat_url != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          shard_index="$(jq -r '.currentAssignment.workShardIndexPath // empty' ".audit-controller/${{ steps.routing.outputs.campaign_directory_path }}")"
-          msg="CONTROLLER_PHASE_PASS. Phase ${{ steps.request.outputs.phase_sequence }} is sealed. Proceed now to Phase ${{ steps.controller.outputs.next_phase }} using the new Audit Campaign Directory assignment and its schema-governed work form. Do not re-check Phase ${{ steps.request.outputs.phase_sequence }} bookkeeping."
-          if [ -n "$shard_index" ]; then
-            msg="$msg Read only the work shard INDEX at $shard_index, then work through BASE_v1.json and each listed shard in order; write all shards sequentially without a controller wait, submit ONE boundary request after the final shard."
-          fi
-          b64="$(printf '%s' "$msg" | base64 -w0)"
-          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.delivery_state.outputs.wake_id || format('{0}-phase-{1}-continue',steps.request.outputs.campaign_id,steps.controller.outputs.next_phase) }}"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=true             -f worker_role=reviewer             -f gate_mode=LITE             -f gate_repository=CurveYield2/Audit-Controller             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}"             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"             -f gate_expected_phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f gate_expected_milestone_id="PHASE_${{ steps.controller.outputs.next_phase }}_WORK_PACKET"
-
       - name: Dispatch fresh successor after controller PASS
         if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.fresh == 'true'
         env:
@@ -619,16 +592,6 @@ jobs:
         shell: bash
         run: |
           timeout -k 10s 90s gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f campaign_name="${{ steps.controller.outputs.campaign_name }}"             -f campaign_path="${{ steps.routing.outputs.campaign_path }}"             -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
-
-      - name: Authorize final reviewer retirement
-        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.next_phase == '' && steps.chat.outputs.chat_url != '' && (steps.request.outputs.review_kind == 'phase' || steps.controller.outputs.master_accepted == 'true')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          msg="CONTROLLER_PHASE_PASS. Phase 10 is sealed and the Lite campaign is COMPLETE. Your audit responsibility is complete; retire."
-          b64="$(printf '%s' "$msg" | base64 -w0)"
-          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-complete"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id=phase-10             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=false             -f worker_role=reviewer             -f gate_mode=LITE
 
       - name: Resolve reviewer for master-directed tests
         id: testchat
@@ -674,18 +637,16 @@ jobs:
             -f gate_stop_states_csv=STOPPED_BY_HUMAN \
             -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
 
-      - name: Wake master reviewer
-        if: steps.routing.outputs.effective_hold != 'true' && (steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID') && steps.controller.outputs.master_chat_url != ''
+      - name: Wake master reviewer for newly staged segment or delegated results
+        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' && steps.controller.outputs.master_chat_url != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          # The master is woken and supervised exactly like a normal reviewer;
-          # an invalid submission re-delivers the controller feedback.
+          # Distinct-chat master handoff only; the master reads invalid own submissions in its Actions run.
           poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
           purpose=initial_wake
-          [ "${{ steps.controller.outputs.status }}" != MASTER_REVIEW_INVALID ] || purpose=repair_notice
           browser_context_b64="$(jq -cn --arg purpose "$purpose" \
             '{routineId:"",projectName:"",projectUrl:"",chatName:"master-reviewer",repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:$purpose}' | base64 -w0)"
           timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
@@ -711,20 +672,106 @@ jobs:
 
       - name: Summary
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+          REVIEW_KIND: ${{ steps.request.outputs.review_kind }}
+          PHASE: ${{ steps.request.outputs.phase_sequence }}
+          SEGMENT: ${{ steps.request.outputs.segment_id }}
+          UNIT: ${{ steps.request.outputs.unit_id }}
+          CONTROLLER_STATUS: ${{ steps.controller.outputs.status }}
+          PUBLISHED: ${{ steps.publish_result.outputs.published }}
+          CAMPAIGN_PATH: ${{ steps.routing.outputs.campaign_path }}
+          CONTROLLER_REF: ${{ steps.request.outputs.audit_controller_ref }}
+        shell: bash
         run: |
+          set -euo pipefail
+          controller_status="${CONTROLLER_STATUS:-CONTROLLER_RESULT_UNAVAILABLE}"
+          publication=NOT_ATTEMPTED
+          if [ "${PUBLISHED:-}" = true ]; then publication=PUBLISHED
+          elif [ -n "${CONTROLLER_STATUS:-}" ]; then publication=FAILED
+          fi
+          result_file='/tmp/lite-phase-packet-result.json'
+          envelope_file='/tmp/lite-phase-packet-envelope.json'
+          detail_ref=""
+          digest=""
+          error_count=0
+          if [ -s "$envelope_file" ]; then
+            detail_ref="$(jq -r '.detailRef // empty' "$envelope_file" 2>/dev/null || true)"
+            digest="$(jq -r '.sha256 // empty' "$envelope_file" 2>/dev/null || true)"
+          fi
+          case "$controller_status" in
+            NEEDS_REWORK|DISCOVERY_REWORK|MASTER_REVIEW_INVALID)
+              decision=REWORK_THIS_SAME_AGENT
+              next="Read exact errors below, correct only reviewer-owned fields, increment the existing boundary request attempt and resubmit. Do not wait for a wake." ;;
+            DISCOVERY_NEXT) decision=CONTINUE_SAME_AGENT; next="Read the new active discovery window and complete its assigned units without waiting for a wake." ;;
+            DISCOVERY_PARTIAL) decision=CONTINUE_SAME_AGENT; next="Continue assigned discovery work; do not infer another reviewer's completion." ;;
+            DISCOVERY_COMPLETE) decision=CONTINUE_SAME_AGENT; next="Read the current Campaign Directory. Continue only if it assigns your chat the next phase; otherwise await the formal boundary." ;;
+            PASS)
+              if [ "${{ steps.controller.outputs.same }}" = true ]; then
+                decision=CONTINUE_SAME_AGENT; next="Read the current Campaign Directory and begin your next assigned phase immediately."
+              elif [ "${{ steps.controller.outputs.fresh }}" = true ]; then
+                decision=DELIVER_DISTINCT_AGENT; next="Your phase is accepted; the controller owns the distinct-agent handoff."
+              else
+                decision=ACCEPTED_TERMINAL; next="Verify the matching final master approval or terminal Campaign Directory before ending your assignment."
+              fi ;;
+            WAITING_FOR_MASTER_REVIEW) decision=AWAIT_MASTER_APPROVAL; next="This segment is sealed, NOT master-approved. The controller sends the new segment to the master; verify its matching acceptance before declaring final handoff." ;;
+            MASTER_TESTS_REQUESTED) decision=DELIVER_DISTINCT_AGENT; next="Master-directed executor is assigned; await its verified result, do not run its tests yourself." ;;
+            CONTROLLER_ERROR|MASTER_REVIEW_HELD) decision=AUTOMATION_BLOCKED; next="Do not edit correct reviewer data or blindly resubmit. Inspect failed component and report exact automation blocker." ;;
+            ALREADY_ACCEPTED) decision=VERIFY_ACCEPTED_STATE; next="Confirm the same accepted decision in the authoritative Campaign Directory; do not submit a duplicate." ;;
+            *) decision=CHECK_CURRENT_ASSIGNMENT; next="Inspect the precise current controller result and Campaign Directory; never infer approval from workflow success." ;;
+          esac
           {
-            echo "## Lite Phase Boundary Controller"
-            echo "- campaign: ${{ steps.request.outputs.campaign_id }}"
-            echo "- review kind: ${{ steps.request.outputs.review_kind }}"
-            echo "- phase: ${{ steps.request.outputs.phase_sequence }}"
-            echo "- segment: ${{ steps.controller.outputs.segment_id }}"
-            echo "- delivery hold: ${{ steps.routing.outputs.effective_hold }}"
-            echo "- result: ${{ steps.controller.outputs.status }}"
-            echo "- packet/report ownership: controller-generated"
-            echo "- bookkeeping before validation PASS: prohibited"
-            echo "- machine execution timing: only when exact Phase-5 evidence cannot be safely reused"
-            echo "- automation failure: ${{ steps.controller.outputs.status == 'CONTROLLER_ERROR' || steps.controller.outputs.status == 'MASTER_REVIEW_HELD' }}"
+            echo "## CurveYield Lite boundary result"
+            echo ""
+            echo "**GitHub Actions success does NOT mean controller PASS.** Only a published, correctly bound controller result and current assignment authorize action."
+            echo ""
+            echo "- Run ID: ${GITHUB_RUN_ID} | submission commit: ${GITHUB_SHA} | event: ${GITHUB_EVENT_NAME}"
+            echo "- Campaign: ${CAMPAIGN_ID:-UNKNOWN} | kind: ${REVIEW_KIND:-UNKNOWN} | phase: ${PHASE:-none} | segment: ${SEGMENT:-none} | discovery unit: ${UNIT:-none}"
+            echo "- Controller status: **$controller_status** | publication: **$publication**"
+            echo "- Decision: **$decision**"
+            echo "- Next action: $next"
+            echo "- Full controller result: ${CAMPAIGN_PATH:-UNKNOWN}/${detail_ref:-UNAVAILABLE} on Audit-Controller ref ${CONTROLLER_REF:-UNKNOWN}"
+            echo "- Full result SHA-256: ${digest:-UNAVAILABLE}"
+            echo "- Workflow status/conclusion: inspect this run's completed status; a failed job or failed publication is not an approval."
+            echo ""
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ -s "$result_file" ]; then
+            : > /tmp/boundary-deficiencies.txt
+            if [ "$controller_status" = NEEDS_REWORK ]; then
+              packet="$(jq -r '.packetPath // empty' "$result_file")"
+              if [ -n "$packet" ] && [ -s ".audit-controller/$packet" ]; then
+                jq -r '.controllerValidation.deficiencies[]? // empty' ".audit-controller/$packet" > /tmp/boundary-deficiencies.txt
+                jq -r '.controllerValidation.shardRework.shards[]? | "Shard: "+(.path//"unknown")+" | record keys: "+((.recordKeys//[])|join(","))' ".audit-controller/$packet" >> /tmp/boundary-deficiencies.txt
+              fi
+            fi
+            if [ ! -s /tmp/boundary-deficiencies.txt ]; then
+              jq -r '.feedbackText // empty' "$result_file" | sed -n '1,120p' > /tmp/boundary-deficiencies.txt
+            fi
+            error_count="$(wc -l </tmp/boundary-deficiencies.txt | tr -d ' ')"
+            if [ "$controller_status" = NEEDS_REWORK ] || [ "$controller_status" = DISCOVERY_REWORK ] || [ "$controller_status" = MASTER_REVIEW_INVALID ]; then
+              {
+                echo "### Exact errors to correct"
+                echo "Owner: REVIEWER_FIX for reviewer-owned semantic fields; never modify controller-prefilled records or run additional tests to silence a form error."
+                echo ""
+              } >> "$GITHUB_STEP_SUMMARY"
+              sed -n '1,30p' /tmp/boundary-deficiencies.txt | while IFS= read -r line; do
+                [ -n "$line" ] || continue
+                clean="$(printf '%s' "$line" | tr '\r\n' '  ' | cut -c1-1100)"
+                printf -- '- %s\n' "$clean" >> "$GITHUB_STEP_SUMMARY"
+                echo "::warning::CONTROLLER_REWORK [${CAMPAIGN_ID:-UNKNOWN}/${PHASE:-${SEGMENT:-${UNIT:-UNKNOWN}}}]: $clean. Correct the cited reviewer-owned field; preserve all other existing work."
+              done
+              if [ "$error_count" -gt 30 ]; then
+                echo "- Additional errors: $((error_count-30)); read full controller result at $detail_ref." >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+          else
+            echo "::warning::CONTROLLER_RESULT_UNAVAILABLE: No controller JSON result found in this run; inspect the exact failing job step before any resubmission."
+          fi
+          echo "- Detailed diagnostic lines: $error_count (first 30 shown where applicable)." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$publication" = FAILED ]; then
+            echo "::error::CONTROLLER_RESULT_NOT_PUBLISHED: Controller status $controller_status has no confirmed Audit-Controller publication. Do not treat this as accepted or repeat an identical request."
+          fi
 
       - name: Fail on infrastructure error or held machine-evidence gate
         if: steps.controller.outputs.status == 'CONTROLLER_ERROR' || steps.controller.outputs.status == 'MASTER_REVIEW_HELD'
