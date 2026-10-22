@@ -1014,6 +1014,9 @@ if(reviewKind==='master'){
     const plan=result.successorPlan??{};
     if(plan.nextPhaseSequence===null||plan.nextPhaseSequence===undefined){
       directory.campaignStatus='COMPLETE';directory.currentAssignment=null;
+    }else if(isReassignedV13AuthorityV1({root,authorityRoot:masterAuthorityRoot})&&pending.boundaryPhase===6){
+      // Phase-8 delivery must wait for the master-accepted Phase-7 marker.
+      directory.currentAssignment=null;directory.campaignStatus='MASTER_AMENDMENT_REFRESH';
     }else{
       nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:plan.nextPhaseSequence,reviewer:assignmentReviewer(plan.nextPhaseSequence,masterAuthorityRoot,root),predecessorReceiptPath:pending.lastSealedReceiptPath,derivedInputPaths:plan.derivedInputPaths??[],status:'WAITING_FOR_SUCCESSOR_AGENT',prefillContext:plan.prefillContext??{}});
       directory.currentAssignment=nextAssignment;directory.campaignStatus='WAITING_FOR_SUCCESSOR_AGENT';
@@ -1025,9 +1028,55 @@ if(reviewKind==='master'){
   writeJson(repoFile(root,pending.recordPath),record);
   const acceptedSegment=pending.segmentId;
   directory.lastAcceptedMasterReview={segmentId:acceptedSegment,outcome:result.outcome,recordPath:pending.recordPath,manifestSha256:pending.manifestSha256,...(decision.postAmendmentManifestSha256?{postAmendmentManifestSha256:decision.postAmendmentManifestSha256}:{}),acceptedAt:now,masterChatUrl:directory.masterReview.chatUrl};
-  delete directory.pendingMasterReview;directory.updatedAt=now;writeJson(directoryFile,directory);
+  delete directory.pendingMasterReview;
+  let acceptedDiscoveryWakes=[],acceptedDiscoveryWake=null;
+  if(isReassignedV13AuthorityV1({root,authorityRoot:masterAuthorityRoot})&&pending.boundaryPhase===3){
+    const phase3Receipt=directory.lastSealedReceiptPath;
+    const sourceReceipt=readJson(requiredFile(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'),'Phase-0 source receipt'));
+    if(activeDetectionPolicyV1(sourceReceipt)){
+      const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot:masterAuthorityRoot,
+        automationRoot:process.cwd(),now,auditControllerRef:a['audit-controller-ref']??'main'});
+      directory.discovery={statePath:started.statePath,status:started.completeImmediately?'COMPLETE':'RUNNING',
+        activeUnitId:started.state.payload.activeUnitId,
+        activeUnitIds:started.state.payload.order.filter(id=>started.state.payload.units[id]?.status==='ACTIVE')};
+      acceptedDiscoveryWakes=started.wakes??(started.wake?[started.wake]:[]);
+      acceptedDiscoveryWake=started.wake;
+      if(started.completeImmediately){
+        const completed=completeDiscoveryV1({root,campaignPath,directory,authorityRoot:masterAuthorityRoot,
+          automationRoot:process.cwd(),state:started.state,now});
+        acceptedDiscoveryWake=completed.wake;acceptedDiscoveryWakes=completed.wake?[completed.wake]:[];
+      }
+      nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:4,
+        reviewer:'reviewer-2',predecessorReceiptPath:phase3Receipt,
+        derivedInputPaths:[...(pending.successorPlan?.derivedInputPaths??[]),
+          ...(started.completeImmediately?[path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')]:[])],
+        status:started.completeImmediately?'ACTIVE':'WAITING_FOR_DISCOVERY'});
+      directory.currentAssignment=nextAssignment;
+      directory.campaignStatus=started.completeImmediately?'ACTIVE':'WAITING_FOR_DISCOVERY';
+    }
+  }
+  if(isReassignedV13AuthorityV1({root,authorityRoot:masterAuthorityRoot})&&pending.boundaryPhase===6){
+    const marker=await materializeAcceptedPhase7V1({authorityRoot:masterAuthorityRoot,
+      phase6ReceiptPath:directory.lastSealedReceiptPath,acceptedMasterRecordPath:pending.recordPath});
+    directory.lastSealedReceiptPath=marker.markerRel;
+    nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:8,
+      reviewer:'reviewer-4',predecessorReceiptPath:marker.markerRel,
+      derivedInputPaths:marker.derivedInputPaths,status:'WAITING_FOR_SUCCESSOR_AGENT',
+      prefillContext:pending.successorPlan?.prefillContext??{}});
+    directory.currentAssignment=nextAssignment;directory.campaignStatus='WAITING_FOR_SUCCESSOR_AGENT';
+  }
+  directory.updatedAt=now;writeJson(directoryFile,directory);
   const feedback='MASTER_REVIEW_ACCEPTED: '+acceptedSegment+' '+result.outcome+'.'+(decision.superseded?.length?' '+decision.superseded.length+' replaced file(s) preserved under '+SUPERSEDED_DIRECTORY_V1+'/.':'')+(nextAssignment?' Successor Phase '+nextAssignment.phaseSequence+' may now be launched.':' Campaign is now COMPLETE.');
-  emit('PASS',feedback,{masterReviewAccepted:true,masterOutcome:result.outcome,freshSuccessorRequired:Boolean(nextAssignment),nextAssignment});
+  emit('PASS',feedback,{masterReviewAccepted:true,masterOutcome:result.outcome,
+    freshSuccessorRequired:Boolean(nextAssignment)&&directory.campaignStatus==='WAITING_FOR_SUCCESSOR_AGENT',
+    discoveryStarted:directory.campaignStatus==='WAITING_FOR_DISCOVERY',
+    discoveryWakeChatKey:acceptedDiscoveryWake?.chatKey??'',
+    discoveryWakeId:acceptedDiscoveryWake?.wakeId??'',
+    discoveryWakePhaseId:acceptedDiscoveryWake?.phaseId??'',
+    discoveryWakeMilestoneId:acceptedDiscoveryWake?.milestoneId??'',
+    discoveryWakeMessageB64:acceptedDiscoveryWake?.messageB64??'',
+    discoveryWakesB64:Buffer.from(JSON.stringify(acceptedDiscoveryWakes)).toString('base64'),
+    nextAssignment});
 }
 let sealedRework=null;
 if(reviewKind==='phase'&&!masterAmendmentRefreshSha&&['STOPPED_BY_HUMAN','BLOCKED'].includes(String(directory.campaignStatus??'')))throw new Error('campaign is held by explicit human status '+directory.campaignStatus);
