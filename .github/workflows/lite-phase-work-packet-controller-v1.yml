@@ -715,7 +715,7 @@ jobs:
               else
                 decision=ACCEPTED_TERMINAL; next="Verify the matching final master approval or terminal Campaign Directory before ending your assignment."
               fi ;;
-            WAITING_FOR_MASTER_REVIEW) decision=AWAIT_MASTER_APPROVAL; next="This segment is sealed, NOT master-approved. The controller sends the new segment to the master; verify its matching acceptance before declaring final handoff." ;;
+            WAITING_FOR_MASTER_REVIEW) decision=CONTROLLER_ACCEPTED_REVIEWER_RELEASED; next="Controller accepted and sealed your final segment. Your assignment is complete; stop. Master review and onward handoff belong to the controller; do not wait for the master." ;;
             MASTER_TESTS_REQUESTED) decision=DELIVER_DISTINCT_AGENT; next="Master-directed executor is assigned; await its verified result, do not run its tests yourself." ;;
             CONTROLLER_ERROR|MASTER_REVIEW_HELD) decision=AUTOMATION_BLOCKED; next="Do not edit correct reviewer data or blindly resubmit. Inspect failed component and report exact automation blocker." ;;
             ALREADY_ACCEPTED) decision=VERIFY_ACCEPTED_STATE; next="Confirm the same accepted decision in the authoritative Campaign Directory; do not submit a duplicate." ;;
