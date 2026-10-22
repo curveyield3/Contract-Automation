@@ -178,6 +178,77 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
      err(errors,'V13_CANDIDATE_SEVERITY_REQUIRED','typedCandidates['+i+'].severity',
        'Severity is required for independent qualification');
  }
+
+ // V13 still requires the packet's end-to-end flows and integration questions.
+ // Per-function correctness verdicts do not discharge cross-contract review.
+ const requiredFlows=new Set(packetIds(packet,'flows').length?
+   packetIds(packet,'flows'):packetIds(packet,'flowIds'));
+ const noted=new Set();
+ if(submission?.flowNotes!==undefined&&!Array.isArray(submission.flowNotes))
+   err(errors,'SUBMISSION_SCHEMA','flowNotes','Flow notes must be an array');
+ for(const [i,note] of arr2(submission?.flowNotes).entries()){
+   const p='flowNotes['+i+']',id=note?.flowId;
+   if(!requiredFlows.has(id))err(errors,'FLOW_NOTE_EXTRA',p+'.flowId','Flow was not assigned to this unit');
+   if(noted.has(id))err(errors,'FLOW_NOTE_DUPLICATE',p+'.flowId','Flow note repeated');
+   noted.add(id);
+   const count=validAnchors(note?.anchors,inventory,errors,p+'.anchors');
+   if(emptyEvidence(note?.note??note?.summary??note?.description)||count===0)
+     err(errors,'FLOW_NOTE_EMPTY',p,'Explain the end-to-end flow with source anchors');
+ }
+ for(const id of requiredFlows)if(!noted.has(id))
+   err(errors,'FLOW_NOTE_MISSING','flowNotes','Missing assigned end-to-end flow '+id);
+
+ const questions=new Set(packetIds(packet,'integrationQuestions').length?
+   packetIds(packet,'integrationQuestions'):packetIds(packet,'integrationQuestionIds'));
+ const answered=new Set();
+ if(submission?.integrationAnswers!==undefined&&!Array.isArray(submission.integrationAnswers))
+   err(errors,'SUBMISSION_SCHEMA','integrationAnswers','Integration answers must be an array');
+ for(const [i,answer] of arr2(submission?.integrationAnswers).entries()){
+   const p='integrationAnswers['+i+']',id=answer?.obligationId;
+   if(!questions.has(id))err(errors,'QUESTION_EXTRA',p+'.obligationId','Question is not assigned');
+   if(answered.has(id))err(errors,'QUESTION_DUPLICATE',p+'.obligationId','Question repeated');
+   answered.add(id);
+   if(!REVIEW_RESULTS.has(answer?.assessment))
+     err(errors,'ASSESSMENT_UNKNOWN',p+'.assessment','Use a recognized integration assessment');
+   if(emptyEvidence(answer?.reasoning))
+     err(errors,'REASONING_EMPTY',p+'.reasoning','Source-specific integration reasoning required');
+   if(validAnchors(answer?.anchors,inventory,errors,p+'.anchors')===0)
+     err(errors,'ANCHOR_REQUIRED',p+'.anchors','Integration answer must cite source');
+   if(answer?.assessment==='CONCERN'&&!obj(answer?.candidate))
+     err(errors,'CONCERN_WITHOUT_CANDIDATE',p+'.candidate','Integration concern needs a candidate');
+   if(obj(answer?.candidate))validateCandidate(answer.candidate,inventory,errors,p+'.candidate');
+ }
+ for(const id of questions)if(!answered.has(id))
+   err(errors,'QUESTION_UNANSWERED','integrationAnswers','Unanswered assigned integration question '+id);
+
+ // Upgrade, initializer and storage review is a contract-level obligation,
+ // intentionally removed from individual function prompts by the packet builder.
+ const requiredContracts=arr2(packet?.contractChecks);
+ const observedContracts=new Set();
+ if(submission?.contractChecks!==undefined&&!Array.isArray(submission.contractChecks))
+   err(errors,'SUBMISSION_SCHEMA','contractChecks','Contract checks must be an array');
+ for(const [i,check] of arr2(submission?.contractChecks).entries()){
+   const p='contractChecks['+i+']',key=String(check?.contract)+'|'+String(check?.classId);
+   if(!requiredContracts.some(x=>x.contract===check?.contract&&x.classId===check?.classId))
+     err(errors,'CONTRACT_CHECK_EXTRA',p,'Check is not assigned to this unit');
+   if(observedContracts.has(key))err(errors,'CONTRACT_CHECK_DUPLICATE',p,'Contract check repeated');
+   observedContracts.add(key);
+   if(!REVIEW_RESULTS.has(check?.assessment))
+     err(errors,'ASSESSMENT_UNKNOWN',p+'.assessment','Use a recognized contract-level assessment');
+   if((check?.assessment==='NOT_APPLICABLE')!==(check?.applicability==='NOT_APPLICABLE'))
+     err(errors,'NA_MISMATCH',p+'.applicability','Applicability disagrees with assessment');
+   if(emptyEvidence(check?.evidence))
+     err(errors,'EVIDENCE_EMPTY',p+'.evidence','Source-grounded upgrade/storage evidence required');
+   if(validAnchors(check?.anchors,inventory,errors,p+'.anchors')===0)
+     err(errors,'ANCHOR_REQUIRED',p+'.anchors','Contract check must cite source');
+   if(check?.assessment==='CONCERN'&&!obj(check?.candidate))
+     err(errors,'CONCERN_WITHOUT_CANDIDATE',p+'.candidate','Concern needs a candidate');
+   if(obj(check?.candidate))validateCandidate(check.candidate,inventory,errors,p+'.candidate');
+ }
+ for(const check of requiredContracts)
+   if(!observedContracts.has(String(check.contract)+'|'+String(check.classId)))
+     err(errors,'CONTRACT_CHECK_MISSING','contractChecks',
+       'Missing '+check.classId+' for '+check.contract);
  for(const [i,c] of allCandidates.entries())validateCandidate(c,inventory,errors,'candidates['+i+']');
  return finish(errors,submission);
 }

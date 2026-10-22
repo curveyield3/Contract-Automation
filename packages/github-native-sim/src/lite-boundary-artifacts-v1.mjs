@@ -52,7 +52,13 @@ export function validateTargetExecutionRequestBindingV1({controllerRoot,campaign
   else{
     if(reproduction.candidateId!==key) reasons.push('reproduction candidateId mismatch');
     if(String(reproduction.reproductionType??'')!==String(target?.reproductionType??'')) reasons.push('reproductionType mismatch');
-    if(stableJson(reproduction.expectedObservation)!==stableJson(target?.expectedMachineObservation)) reasons.push('expected machine observation mismatch');
+    // Generator places the optional, validated candidateId in reproduction metadata,
+    // not inside the type-specific expectedObservation payload. Apply the same
+    // canonicalization during binding instead of rejecting our own request.
+    const expectedObservation=structuredClone(target?.expectedMachineObservation);
+    if(expectedObservation?.candidateId===key)delete expectedObservation.candidateId;
+    if(stableJson(reproduction.expectedObservation)!==stableJson(expectedObservation))
+      reasons.push('expected machine observation mismatch');
     const type=String(reproduction.reproductionType??'');
     if(['FOUNDRY_TEST','MEDUSA_PROPERTY'].includes(type)&&request.phaseId!=='build-and-test') reasons.push('Foundry/Medusa reproduction must use build-and-test');
     if(type==='ANVIL_WORKFLOW'&&request.phaseId!=='fork-simulation-lifecycle') reasons.push('Anvil reproduction must use fork-simulation-lifecycle');
