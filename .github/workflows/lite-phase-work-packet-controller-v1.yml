@@ -67,14 +67,48 @@ permissions:
   contents: write
   actions: write
 
-concurrency:
-  # Push requests do not have workflow_dispatch inputs. A stable global lock
-  # protects all campaign mutations from concurrent stale-state publishing.
-  group: lite-phase-boundary-controller-v1
-  cancel-in-progress: false
-
 jobs:
+  # Both push and manual dispatch resolve an exact campaign before locking.
+  # Jobs for distinct campaigns can proceed without waiting for Phase-5 work.
+  resolve_campaign_lock:
+    runs-on: ubuntu-latest
+    outputs:
+      campaign_id: ${{ steps.identity.outputs.campaign_id }}
+    steps:
+      - name: Resolve exact campaign lock key
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_CAMPAIGN_ID: ${{ inputs.campaign_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            campaign_id="$DISPATCH_CAMPAIGN_ID"
+          else
+            mapfile -t request_paths < <(
+              timeout -k 10s 60s gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status != "removed") | .filename' |
+                grep -E '^process/agent-upload/lite-phase-boundary/[^/]+\.json$' || true
+            )
+            [ "${#request_paths[@]}" -eq 1 ] || {
+              echo "::error::Expected exactly one Lite boundary request to resolve campaign lock"
+              exit 1
+            }
+            encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/${request_paths[0]}?ref=$GITHUB_SHA" --jq '.content')"
+            campaign_id="$(printf '%s' "$encoded" | base64 -d | jq -r '.campaignId // empty')"
+          fi
+          [[ "$campaign_id" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || {
+            echo "::error::Cannot lock Lite controller without a valid campaign ID"
+            exit 1
+          }
+          echo "campaign_id=$campaign_id" >> "$GITHUB_OUTPUT"
+
   validate-bookkeep-advance:
+    needs: resolve_campaign_lock
+    # Same-campaign push and manual dispatch share a lock. Keep cancel off.
+    concurrency:
+      group: lite-phase-boundary-controller-${{ needs.resolve_campaign_lock.outputs.campaign_id }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     # Phase 5 may run multiple 35-minute candidate-specific V7 executions.
     # Preflight fails immediately on missing RPC; this is only the outer ceiling.
