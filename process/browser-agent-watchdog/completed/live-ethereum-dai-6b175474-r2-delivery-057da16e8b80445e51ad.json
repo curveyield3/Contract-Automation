@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "curveyield-browser-agent-watchdog-state-v1",
+  "wakeId": "live-ethereum-dai-6b175474-r2-delivery-057da16e8b80445e51ad",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "phaseId": "master-review",
+  "workerRole": "reviewer",
+  "status": "COMPLETED_CANONICAL_GATE",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
+  "lastProvider": "normal-system-chrome-x11-phase1-visual-evidence",
+  "armedAt": "2026-10-23T06:16:50Z",
+  "intervalMinutes": 5,
+  "pokeIntervalMinutes": 40,
+  "deliveryConfirmed": true,
+  "ackPath": "campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_master-reviewer_v1.json",
+  "ackId": "live-ethereum-dai-6b175474-r2-delivery-057da16e8b80445e51ad/39910315247",
+  "idleMessage": "GET BACK TO WORK",
+  "observation": {
+    "assistantCount": 0,
+    "lastAssistantHash": "",
+    "observedAt": "2026-10-23T06:16:50Z"
+  },
+  "gate": {
+    "mode": "LITE",
+    "repository": "CurveYield2/Audit-Controller",
+    "ref": "main",
+    "statePath": "Audit Campaign Directory/campaigns/live-ethereum-dai-6b175474.json",
+    "expectedPhaseId": "master-review",
+    "expectedMilestoneId": "reviewer-1-phases-01-03",
+    "activePointerPath": "",
+    "interphase": {
+      "handoffPath": "",
+      "workPacketPath": "",
+      "completionPath": "",
+      "workPacketSha256": ""
+    },
+    "stopStates": [
+      "STOPPED_BY_HUMAN"
+    ],
+    "stopCampaignStatuses": [
+      "COMPLETE",
+      "STOPPED_BY_HUMAN",
+      "WAITING_FOR_TARGETED_TESTS"
+    ]
+  },
+  "repair": {
+    "enabled": true,
+    "idlePokeThreshold": 3,
+    "unviewableThreshold": 2,
+    "consecutiveIdlePokes": 0,
+    "consecutiveUnviewable": 0
+  },
+  "watchdogRunId": "39912346575",
+  "watchdogSweepStartedAt": "2026-10-23T06:37:56Z",
+  "lastDecision": "WAITING_NO_CHATGPT_READ",
+  "lastNoReadSweepAt": "2026-10-23T06:17:50Z",
+  "elapsedSinceLastPokeMinutes": 1,
+  "completionReason": "LITE_ASSIGNMENT_FRESH_SUCCESSOR_PENDING_phase-4",
+  "completedAt": "2026-10-23T06:38:00Z"
+}
