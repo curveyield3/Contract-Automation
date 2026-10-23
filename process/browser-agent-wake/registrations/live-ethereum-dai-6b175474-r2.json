@@ -3,7 +3,7 @@
   "singleAgentSimulation": false,
   "campaignId": "live-ethereum-dai-6b175474-r2",
   "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5e9f-3970-83e8-bc63-f10d2e09e1e9",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
   "browserRoutine": "",
   "agentChats": {
     "reviewer-1": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
@@ -26,17 +26,17 @@
     "url": ""
   },
   "activeChat": {
-    "name": "reviewer-2",
-    "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5e9f-3970-83e8-bc63-f10d2e09e1e9"
+    "name": "master-reviewer",
+    "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c"
   },
-  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-discovery-F-001-r1/39911508013\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_reviewer-2_v1.json on CurveYield2/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nYou are reviewer-2. Campaign live-ethereum-dai-6b175474-r2\n\nUse the GitHub connector app for every repository read and write.\n\nInstructions: https://github.com/CurveYield2/Audit-Controller/blob/main/Audit%20Skill%20-%20Current%20Authority/Audit_Litemode_v13/discovery/FLOW_REVIEW_START_HERE.md\n\nUnits to complete now (2): F-001, R-001.\n\nDiscovery folder: https://github.com/CurveYield2/Audit-Controller/blob/main/campaigns/live-ethereum-Dai-6b175474%20r2/work/phase-04/discovery . For each unit <id>, read <id>/ASSIGNMENT_PACKET_v1.json and write <id>/SUBMISSION_v1.json.\n\nEach packet has a submissionGuide: use trivialReviews only for eligible literal constants, groupChecks (functions sharing a modifier) and the listed contractChecks to avoid repeating the same check.\n\nThis is your entire discovery workload for this phase. Complete every unit in one continuous pass without stopping or asking to continue, then push ONE boundary request.\n\nThe controller validates every unit with a new submission in a single run and wakes you only if a unit needs rework. Do not push a request per unit.\n\nBoundary request location: process/agent-upload/lite-phase-boundary/\n\nExact boundary request JSON: {\"schemaVersion\":\"curveyield-lite-phase-boundary-request-v1\",\"campaignId\":\"live-ethereum-dai-6b175474-r2\",\"reviewKind\":\"discovery\",\"unitId\":\"F-001\",\"auditControllerRef\":\"main\",\"attempt\":1}\n\nRead the exact Actions result by submitted Git SHA; inspect the controller's result and use existing recovery for infrastructure failure rather than blindly resubmitting.",
+  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-delivery-6645ce2717ddff98691a/39918762171\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_master-reviewer_v1.json on CurveYield2/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nMASTER_REVIEW_REQUIRED: campaign live-ethereum-dai-6b175474-r2, segment reviewer-2-phase-04 (reviewer-2, Phase 4). Read the segment record campaigns/live-ethereum-Dai-6b175474 r2/work/master-review/reviewer-2-phase-04/MASTER_REVIEW_RECORD_v1.json in Audit-Controller. Follow the authoritative Audit Skill guide Audit Skill - Current Authority/Audit_Litemode_v13/master-review/START_HERE.md for review, amendment limits, and submission. Use the campaign ref main.\nAs challenger, review every item in https://github.com/CurveYield2/Audit-Controller/blob/main/campaigns/live-ethereum-Dai-6b175474%20r2/work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json: attacker findings and contradictions, unresolved checks, not-applicable claims and coverage gaps. Amend reviewer work or order targeted tests through the existing directive; accept a gap only with a stated reason.",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
-    "phaseId": "phase-4",
-    "milestoneId": "DISCOVERY_F-001",
+    "phaseId": "master-review",
+    "milestoneId": "reviewer-2-phase-04",
     "workerRole": "reviewer",
-    "reviewer": "reviewer-2",
+    "reviewer": "master-reviewer",
     "thinkingEffort": "high"
   },
   "watchdog": {
@@ -48,8 +48,8 @@
       "repository": "CurveYield2/Audit-Controller",
       "ref": "main",
       "statePath": "Audit Campaign Directory/campaigns/live-ethereum-dai-6b175474.json",
-      "expectedPhaseId": "phase-4",
-      "expectedMilestoneId": "DISCOVERY_F-001",
+      "expectedPhaseId": "master-review",
+      "expectedMilestoneId": "reviewer-2-phase-04",
       "activePointerPath": "",
       "stopStates": [
         "STOPPED_BY_HUMAN"
@@ -65,12 +65,12 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-23T07:11:16Z",
+  "updatedAt": "2026-10-23T07:38:12Z",
   "wakeDelivery": {
-    "milestoneId": "DISCOVERY_F-001",
-    "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5e9f-3970-83e8-bc63-f10d2e09e1e9",
-    "deliveredAt": "2026-10-23T07:11:16Z",
+    "milestoneId": "reviewer-2-phase-04",
+    "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
+    "deliveredAt": "2026-10-23T07:38:12Z",
     "verification": "REVIEWER_GITHUB_CHECK_IN",
-    "ackId": "live-ethereum-dai-6b175474-r2-discovery-F-001-r1/39911508013"
+    "ackId": "live-ethereum-dai-6b175474-r2-delivery-6645ce2717ddff98691a/39918762171"
   }
 }
