@@ -200,12 +200,43 @@ jobs:
       - name: Set up isolated browser-agent runtime
         uses: ./.github/actions/setup-browser-agent-runtime
 
+      # GitHub-hosted runners are fresh on each wake; reuse verified Ubuntu package
+      # archives rather than re-downloading the same VNC/image utilities every run.
+      # Rotate weekly to capture security updates without discarding prior packages.
+      - name: Set private VNC APT cache epoch
+        shell: bash
+        run: echo "VNC_APT_CACHE_WEEK=$(date -u +%G-W%V)" >> "$GITHUB_ENV"
+
+      - name: Restore private VNC APT package cache
+        id: private-vnc-apt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/browser-agent-vnc-apt/archives
+          key: browser-agent-vnc-apt-${{ runner.os }}-ubuntu24.04-v1-${{ env.VNC_APT_CACHE_WEEK }}
+          restore-keys: |
+            browser-agent-vnc-apt-${{ runner.os }}-ubuntu24.04-v1-
+
       - name: Install private VNC helper
         shell: bash
         run: |
           set -euo pipefail
+          apt_archives="$HOME/.cache/browser-agent-vnc-apt/archives"
+          mkdir -p "$apt_archives/partial"
+          chmod 755 "$apt_archives" "$apt_archives/partial"
           sudo apt-get update -qq
-          sudo apt-get install -y x11vnc xclip xdotool scrot imagemagick
+          sudo apt-get \
+            -o Dir::Cache::archives="$apt_archives" \
+            -o APT::Keep-Downloaded-Packages=true \
+            install -y x11vnc xclip xdotool scrot imagemagick
+          echo "Reusable VNC APT archives: $(find "$apt_archives" -maxdepth 1 -type f -name '*.deb' | wc -l) packages"
+
+      # Save now: browser delivery may fail later, but its APT download can still be reused.
+      - name: Save private VNC APT package cache
+        if: steps.private-vnc-apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/browser-agent-vnc-apt/archives
+          key: browser-agent-vnc-apt-${{ runner.os }}-ubuntu24.04-v1-${{ env.VNC_APT_CACHE_WEEK }}
 
       - name: Record runner egress before home exit node
         shell: bash
