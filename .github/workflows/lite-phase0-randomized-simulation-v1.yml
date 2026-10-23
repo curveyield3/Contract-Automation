@@ -62,15 +62,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::RPC_ETHEREUM secret is missing"; exit 1; }
-          chain_id="$(curl -fsS --max-time 15 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
-          test "$chain_id" = "0x1" || { echo "::error::Fork source must report Ethereum chain ID 1"; exit 1; }
+          # LIVE_SCAN Katana submissions are bound to RPC_KATANA; they do not
+          # require a second, unused Ethereum fork secret. Legacy ZIP mode
+          # retains its original Ethereum preflight and runner behavior.
+          upstream="$ETHEREUM_FORK_RPC_URL"
+          required_chain="0x1"
+          receipt=".audit-controller/$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"
+          source_mode="$(jq -r '.source.inputMode // "ZIP"' "$receipt")"
+          if [ "$source_mode" = 'LIVE_SCAN' ]; then
+            manifest_rel="$(jq -r '.source.scanManifestPath' "$receipt")"
+            [[ "$manifest_rel" == "$CAMPAIGN_PATH/source/"* ]] || { echo "::error::Unsafe LIVE_SCAN manifest path"; exit 1; }
+            manifest=".audit-controller/$manifest_rel"
+            test -f "$manifest" || { echo "::error::LIVE_SCAN manifest missing"; exit 1; }
+            requested_chain="$(jq -r '.chainId' "$manifest")"
+            case "$requested_chain" in
+              1) upstream="$ETHEREUM_FORK_RPC_URL"; required_chain="0x1"; required_secret="RPC_ETHEREUM" ;;
+              747474) upstream="$KATANA_FORK_RPC_URL"; required_chain="0xb67d2"; required_secret="RPC_KATANA" ;;
+              *) echo "::error::Unsupported LIVE_SCAN chain"; exit 1 ;;
+            esac
+          else
+            required_secret="RPC_ETHEREUM"
+          fi
+          test -n "${upstream:-}" || { echo "::error::$required_secret secret is missing"; exit 1; }
+          chain_id="$(curl -fsS --max-time 15 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$upstream" | jq -r '.result // empty')"
+          [[ "$chain_id" = "$required_chain" || "$((chain_id))" = "$((required_chain))" ]] || {
+            echo "::error::Fork source reports incorrect chain ID"; exit 1
+          }
           rm -rf .phase0-deploy-output
           python3 scripts/audit-command-guard-v1.py --label phase0-fork-deploy --wall 2400 --idle 900 --log "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" -- node scripts/run-phase0-fork-deploy-config-v1.mjs \
             --controller-root .audit-controller \
             --campaign-path "$CAMPAIGN_PATH" \
             --output .phase0-deploy-output \
-            --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-deploy-result.json
+            --fork-url "$upstream" | tee /tmp/phase0-deploy-result.json
 
       - name: Reconcile verified non-execution script exclusions
         shell: bash
