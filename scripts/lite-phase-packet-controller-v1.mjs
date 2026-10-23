@@ -760,14 +760,18 @@ if(directory.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2') thr
 if(directory.campaignId!==expectedCampaignId) throw new Error('campaign-id does not match Audit Campaign Directory');
 if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does not match Audit Campaign Directory workspacePath');
 const authorityReceiptPath=directory.lastSealedReceiptPath??directory.currentAssignment?.predecessorReceiptPath;
-if(authorityReceiptPath) validateBoundAuthorityV1({root,receipt:readJson(requiredFile(root,authorityReceiptPath,'admitted authority receipt'))});
+const effectiveAuthorityRoot=authorityReceiptPath
+  ?validateBoundAuthorityV1({root,receipt:readJson(requiredFile(root,authorityReceiptPath,'admitted authority receipt'))})
+  :null;
 const boundAuthorityHome=directory.lastSealedReceiptPath
   ?readJson(requiredFile(root,directory.lastSealedReceiptPath,'bound authority receipt'))?.authority?.homepagePath
   :directory.skillAuthority?.current?.homepagePath;
 const boundAuthorityRoot=typeof boundAuthorityHome==='string'&&boundAuthorityHome.endsWith('/SKILL.md')
   ?boundAuthorityHome.slice(0,-'/SKILL.md'.length)
   :String(directory.currentAssignment?.workSchemaPath??'').split('/phases/')[0];
-const authorityLinkRoot=boundAuthorityRoot?authorityLinkPathV1(root,boundAuthorityRoot):'';
+const authorityLinkRoot=effectiveAuthorityRoot
+  ?authorityLinkPathV1(root,effectiveAuthorityRoot)
+  :boundAuthorityRoot?authorityLinkPathV1(root,boundAuthorityRoot):'';
 // Stage every master decision in an isolated controller checkout. Only a
 // fully successful acceptance or targeted-test directive may change Git state.
 if(['master','master-test-result'].includes(reviewKind)&&a['master-transaction-child']!=='true'&&!(reviewKind==='master'&&a['master-outcome']==='REQUEST_TARGETED_TESTS')){
