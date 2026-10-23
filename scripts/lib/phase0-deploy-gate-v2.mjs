@@ -13,6 +13,24 @@ export function assertDeployGateEvidenceV2(e){
     for(const row of rows){
       if(row.sourceBinding!=='EXACT_COMPILED_RUNTIME'||!/^0x[0-9a-f]{64}$/i.test(row.runtimeCodeHash??'')||row.runtimeCodeHash!==row.compiledRuntimeCodeHash||!e.deploymentProfile.contracts.some(x=>x.address.toLowerCase()===row.address?.toLowerCase()&&x.qualifiedName===row.qualifiedName))throw new Error('LIVE target runtime/source mismatch');
     }
+    if(e.scanSourceSnapshot){
+      const snapshot=e.scanSourceSnapshot,targets=snapshot.resolvedTargets??[];
+      if(!/^0x[0-9a-f]{64}$/i.test(snapshot.frozenBlock?.hash??'')||snapshot.frozenBlock.number!==live.blockNumber||
+        snapshot.frozenBlock.hash.toLowerCase()!==live.blockHash.toLowerCase()||snapshot.chainId!==e.fork.chainId||
+        !/^[0-9a-f]{64}$/.test(snapshot.manifestDigestSha256??'')||
+        !Array.isArray(targets)||targets.length!==rows.length||
+        !Array.isArray(snapshot.requestedTargets)||!snapshot.requestedTargets.length)
+        throw new Error('SCAN_SOURCE_SNAPSHOT_FORK_IDENTITY_MISMATCH');
+      for(const target of targets){
+        const observed=rows.find(row=>row.address?.toLowerCase()===target.address);
+        if(!observed||observed.runtimeSha256!==target.runtimeSha256||
+          observed.qualifiedName!==target.qualifiedName||observed.compilationUnitId!==target.compilationUnitId)
+          throw new Error('SCAN_SOURCE_SNAPSHOT_TARGET_MISMATCH: '+target.address);
+      }
+      for(const address of snapshot.requestedTargets){
+        if(!targets.some(target=>target.address===address&&target.role==='REQUESTED'))throw new Error('SCAN_REQUESTED_TARGET_MISSING: '+address);
+      }
+    }
     return true;
   }
   if(e.status==='NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'){
