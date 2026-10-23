@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "dai-runtime-qualification-v1",
+  "chainId": 1,
+  "blockNumber": 26253174,
+  "expectedBlockHash": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f",
+  "contract": "0x6b175474e89094c44da98b954eedeac495271d0f",
+  "sourceCompiler": "0.5.12+commit.7709ece9",
+  "results": [
+    {
+      "name": "source-input-as-is",
+      "optimizer": {
+        "enabled": false,
+        "runs": 200
+      },
+      "bytes": 7904,
+      "sha256": "5230b924dad23dab334727ba9d4b62c95a6cd4a48242932f8a2946cef264ab97",
+      "exactMatch": false,
+      "firstMismatchByte": 7861,
+      "withoutLast43Bytes": true
+    },
+    {
+      "name": "optimizer-on-200",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "bytes": 4265,
+      "sha256": "c36a121da4a289857a14f85cb79e5cea24dee1762e9fdef04308dd2306a539ce",
+      "exactMatch": false,
+      "firstMismatchByte": 62,
+      "withoutLast43Bytes": false
+    },
+    {
+      "name": "optimizer-on-1",
+      "optimizer": {
+        "enabled": true,
+        "runs": 1
+      },
+      "bytes": 4181,
+      "sha256": "f88b2d2af0bfc86018394024c91e013dc0ec9513e803e8351b103ac6337656d6",
+      "exactMatch": false,
+      "firstMismatchByte": 24,
+      "withoutLast43Bytes": false
+    },
+    {
+      "name": "optimizer-on-1000000",
+      "optimizer": {
+        "enabled": true,
+        "runs": 1000000
+      },
+      "bytes": 5584,
+      "sha256": "d72b8a9b2208863c51fdc630955531fc0ee6e86a9158838334c26f5f17b63444",
+      "exactMatch": false,
+      "firstMismatchByte": 24,
+      "withoutLast43Bytes": false
+    },
+    {
+      "name": "optimizer-off-runs-0",
+      "optimizer": {
+        "enabled": false,
+        "runs": 0
+      },
+      "bytes": 7856,
+      "sha256": "b176b1565c0991e277dfec30953afb30f5f48a4a50531e22f4e623f7cbd0c09f",
+      "exactMatch": false,
+      "firstMismatchByte": 24,
+      "withoutLast43Bytes": false
+    }
+  ],
+  "errors": [],
+  "deployed": {
+    "bytes": 7904,
+    "sha256": "5ce810033426a017721777f241665c27bdd4663ca8a1c27558b4b372a1731f4e"
+  }
+}
