@@ -16,7 +16,7 @@ if(deploy.reconciliation){
   const original=await fs.readFile(rawPath);
   if(digestV2(original)!==deploy.reconciliation.originalEvidenceSha256)throw new Error('Original deployment evidence digest mismatch');
 }
-if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||!['PASS','NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'].includes(deploy.status))throw new Error('Deployment evidence does not satisfy Phase-0 deploy/config-only gate');
+if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||!['PASS','PASS_LIVE_DEPLOYMENT','NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'].includes(deploy.status))throw new Error('Deployment evidence does not satisfy Phase-0 deploy/config-only gate');
 const destination=path.join(campaignRoot,'evidence/phase0');
 await fs.mkdir(destination,{recursive:true});
 await fs.writeFile(path.join(destination,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),raw);
