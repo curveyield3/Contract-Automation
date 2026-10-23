@@ -1,0 +1,34 @@
+name: DAI Controller Credential Preflight v1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/dai-controller-token-preflight-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Classify token access without disclosing secrets
+        env:
+          CONTROLLER_PAT: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$CONTROLLER_PAT" ]; then
+            echo "::error::AUDIT_CONTROLLER_GITHUB_TOKEN is absent"
+            exit 1
+          fi
+          for spec in 'identity https://api.github.com/user' 'controller-repo https://api.github.com/repos/CurveYield2/Audit-Controller'; do
+            name="${spec%% *}"
+            url="${spec#* }"
+            status="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $CONTROLLER_PAT" "$url")"
+            echo "$name HTTP $status"
+            if [ "$status" != "200" ]; then echo "::warning::$name probe failed"; fi
+          done
