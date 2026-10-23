@@ -32,6 +32,46 @@ export function authorityRootFromReceipt(receipt){
  }
  return logical;
 }
+// New Phase-0 receipts bind the entire authority package, not just SKILL.md.
+// Old receipts keep their admitted legacy resolver; they are never silently
+// upgraded to a different manifest or rewritten in-place.
+export function validateBoundAuthorityV1({root,receipt}={}){
+ const authority=receipt?.authority,authorityRoot=authorityRootFromReceipt(receipt);
+ if(authority?.manifestSha256===undefined)return authorityRoot;
+ const hex64=/^[a-f0-9]{64}$/,hex40=/^[a-f0-9]{40}$/;
+ if(!hex64.test(String(authority.manifestSha256))||
+    !hex64.test(String(authority.liteSkillSha256))||
+    !hex40.test(String(authority.manifestGitBlobSha))||
+    !hex40.test(String(authority.authorityCommitSha)))
+   throw new Error('bound authority manifest/commit identity is invalid');
+ const manifestFile=requiredFile(root,path.posix.join(authorityRoot,'MANIFEST.json'),'bound authority manifest');
+ const manifestBytes=fs.readFileSync(manifestFile);
+ if(createHash('sha256').update(manifestBytes).digest('hex')!==authority.manifestSha256)
+   throw new Error('bound authority manifest changed; original campaign authority must be restored, not rebound');
+ const blobBytes=Buffer.concat([Buffer.from('blob '+manifestBytes.length+'\\0'),manifestBytes]);
+ if(createHash('sha1').update(blobBytes).digest('hex')!==authority.manifestGitBlobSha)
+   throw new Error('bound authority manifest Git blob identity changed');
+ const manifest=JSON.parse(manifestBytes.toString('utf8'));
+ if(manifest.release!==authority.liteRelease||manifest.packageRevision!==authority.packageRevision||
+    manifest.entrypoint!=='SKILL.md'||!Array.isArray(manifest.files)||manifest.files.length===0)
+   throw new Error('bound authority manifest release/entrypoint identity mismatch');
+ const seen=new Set();
+ for(const entry of manifest.files){
+   const rel=safeRel(entry?.path,'authority manifest path');
+   if(seen.has(rel)||!hex64.test(String(entry.sha256))||!Number.isInteger(entry.bytes)||entry.bytes<0)
+     throw new Error('invalid or duplicate bound authority manifest entry '+rel);
+   seen.add(rel);
+   const target=requiredFile(root,path.posix.join(authorityRoot,rel),'bound authority package file');
+   const bytes=fs.readFileSync(target);
+   if(bytes.length!==entry.bytes||createHash('sha256').update(bytes).digest('hex')!==entry.sha256)
+     throw new Error('bound authority package content changed: '+rel);
+ }
+ if(!seen.has('SKILL.md'))throw new Error('bound authority manifest omits SKILL.md');
+ const home=requiredFile(root,path.posix.join(authorityRoot,'SKILL.md'),'bound authority homepage');
+ if(createHash('sha256').update(fs.readFileSync(home)).digest('hex')!==authority.liteSkillSha256)
+   throw new Error('bound authority homepage digest changed');
+ return authorityRoot;
+}
 export function phaseSchemaRepoPath(authorityRoot,sequence){return path.posix.join(authorityRoot,'phases/phase-'+sequence,'PHASE_'+String(sequence).padStart(2,'0')+'_SCHEMA_v1.json');}
 export function loadPhaseSchema(root,authorityRoot,sequence){const rel=phaseSchemaRepoPath(authorityRoot,sequence);const schema=readJson(requiredFile(root,rel,'phase schema'));if(schema.schemaVersion!=='curveyield-lite-phase-work-schema-v1'||schema.phase!==sequence) throw new Error('phase schema identity mismatch: '+rel);return {schema,rel};}
 export function fullCampaignPath(campaignPath,rel){return path.posix.join(campaignPath,safeRel(rel));}
