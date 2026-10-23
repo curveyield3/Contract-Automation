@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import {repoFile,requiredFile,readJson} from './lib/lite-phase-work-v1.mjs';
+import {repoFile,requiredFile,readJson,validateBoundAuthorityV1} from './lib/lite-phase-work-v1.mjs';
 import {authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -22,6 +22,7 @@ if(assignment.finalReportPath){
   if(fs.existsSync(repoFile(root,assignment.finalReportPath))) throw new Error('incoming phase final report must not exist before reviewer semantic work; controller owns report generation at validation time');
 }
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'sealed predecessor receipt'));
+validateBoundAuthorityV1({root,receipt:predecessor});
 if(!['SEALED','SKIPPED'].includes(predecessor.phase?.status)) throw new Error('predecessor receipt is not sealed/skipped');
 const controllerRef=a['audit-controller-ref'];
 const encodeRepoPath=p=>String(p).split('/').map(encodeURIComponent).join('/');
