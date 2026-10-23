@@ -1,8 +1,77 @@
-import { collectSoliditySources, compileProject } from './compiler.mjs';
+import { collectSoliditySources, compileProject, loadSolcVersion, contractArtifactMap } from './compiler.mjs';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { compileRepoHermeticStandardJson, shouldUseHermeticStandardJson } from './hermetic-standard-json.mjs';
 import { compileRepoNativeHardhat, detectNativeBuild } from './native-build.mjs';
 import { compileRepoEmbeddedProfiles, detectEmbeddedProfileBuild } from './embedded-profile-build-v1.mjs';
 import { compileVyperSources as defaultCompileVyperSources } from './vyper-build.mjs';
+
+
+const scanHash = x => createHash('sha256').update(x).digest('hex');
+
+// Scan inputs are Etherscan-published Solidity Standard-JSON compiler units. Preserve
+// original source names, compiler versions and settings; never rebuild them from a
+// flattened combined project or accept artifact/name collisions.
+async function compileVerifiedScanProject(projectRoot) {
+  const manifest=JSON.parse(await fs.readFile(path.join(projectRoot,'scan-source-manifest.json'),'utf8'));
+  if(manifest.schemaVersion!=='curveyield-scan-source-manifest-v1'||manifest.inputMode!=='LIVE_SCAN')throw new Error('INVALID_SCAN_SOURCE_MANIFEST');
+  if(!Array.isArray(manifest.compilerUnits)||manifest.compilerUnits.length<1||manifest.compilerUnits.length>64)throw new Error('INVALID_SCAN_COMPILER_UNITS');
+  const units=[],artifacts=[],seen=new Set(),sourceNames=new Set(),allAsts={},diagnostics=[];
+  for(const info of manifest.compilerUnits){
+    if(!/^scan-[0-9a-f]{16}$/.test(info.unitId)||info.file!==('scan-compiler-units/'+info.unitId+'.json'))throw new Error('INVALID_SCAN_COMPILER_UNIT_PATH');
+    const unit=JSON.parse(await fs.readFile(path.join(projectRoot,info.file),'utf8'));
+    if(unit.compilerVersion!==info.compilerVersion||unit.input?.language!=='Solidity')throw new Error('SCAN_COMPILER_INPUT_IDENTITY_MISMATCH');
+    const standard=structuredClone(unit.input);
+    if(!standard.sources||!Object.keys(standard.sources).length)throw new Error('SCAN_SOURCE_CONTENT_MISSING');
+    const originalDigest=scanHash(JSON.stringify(unit.input,Object.keys(unit.input).sort()));
+    // Hash comparison uses the exact canonical JSON algorithm used by the Etherscan resolver.
+    const canonical=x=>Array.isArray(x)?'['+x.map(canonical).join(',')+']':x&&typeof x==='object'?'{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canonical(x[k])).join(',')+'}':JSON.stringify(x);
+    if(scanHash(canonical(unit.input))!==info.originalInputSha256)throw new Error('SCAN_ORIGINAL_INPUT_DIGEST_MISMATCH');
+    for(const [name,entry] of Object.entries(standard.sources)){
+      if(typeof entry?.content!=='string')throw new Error('SCAN_COMPILER_SOURCE_UNRESOLVED: '+name);
+      const file=path.resolve(projectRoot,name);
+      if(!file.startsWith(path.resolve(projectRoot)+path.sep))throw new Error('SCAN_UNSAFE_SOURCE_PATH');
+      if(scanHash(await fs.readFile(file))!==scanHash(Buffer.from(entry.content)))throw new Error('SCAN_SOURCE_FILE_BINDING_MISMATCH: '+name);
+      sourceNames.add(name);
+    }
+    standard.settings??={};
+    // Extra output selection does not change compiler creation/runtime bytecode or metadata.
+    standard.settings.outputSelection={'*':{'*':['abi','metadata','storageLayout','devdoc','userdoc','evm.bytecode','evm.deployedBytecode','evm.methodIdentifiers','evm.gasEstimates'],'':['ast']}};
+    const compiler=await loadSolcVersion(info.compilerVersion.split('+')[0]);
+    if(!String(compiler.version()).startsWith(info.compilerVersion.split('+')[0]+'+'))throw new Error('SCAN_COMPILER_VERSION_MISMATCH');
+    const inputText=JSON.stringify(standard);
+    const outputText=typeof compiler.compileStandard==='function'
+      ?compiler.compileStandard(inputText):compiler.compile(inputText);
+    const output=JSON.parse(outputText);
+    const unitDiagnostics=output.errors??[];
+    if(unitDiagnostics.some(d=>d.severity==='error'))throw new Error('SCAN_STANDARD_JSON_COMPILATION_FAILED: '+unitDiagnostics.filter(d=>d.severity==='error').map(d=>d.formattedMessage??d.message).join('; ').slice(0,900));
+    const unitArtifacts=contractArtifactMap(output).all.map(a=>({...a,compilationUnitId:info.unitId,compilerVersion:info.compilerVersion,profile:info.unitId}));
+    if(!unitArtifacts.some(a=>a.sourceName+':'+a.contractName===info.qualifiedName))throw new Error('SCAN_VERIFIED_TARGET_ARTIFACT_MISSING: '+info.qualifiedName);
+    for(const a of unitArtifacts){
+      const key=a.sourceName+':'+a.contractName;
+      if(seen.has(key))throw new Error('AMBIGUOUS_COMPILATION_TARGET: '+key);
+      seen.add(key);artifacts.push(a);
+    }
+    const sourceAsts=Object.fromEntries(Object.entries(output.sources??{}).filter(([,v])=>v?.ast).map(([n,v])=>[n,v.ast]));
+    Object.assign(allAsts,sourceAsts);
+    units.push({unitId:info.unitId,profile:info.unitId,compilerVersion:info.compilerVersion,compilerPackage:'solc',
+      settings:standard.settings,compilerInputSha256:scanHash(inputText),compilerOutputSha256:scanHash(outputText),
+      sourceAsts,sourceContents:Object.fromEntries(Object.entries(standard.sources).map(([n,v])=>[n,v.content])),
+      artifacts:unitArtifacts,diagnostics:unitDiagnostics});
+    diagnostics.push(...unitDiagnostics);
+  }
+  const names=new Set(units.flatMap(u=>u.artifacts.map(a=>a.sourceName+':'+a.contractName)));
+  for(const target of manifest.resolvedTargets??[]){
+    if(!names.has(target.qualifiedName)||!units.some(u=>u.unitId===target.compilationUnitId&&u.artifacts.some(a=>a.sourceName+':'+a.contractName===target.qualifiedName)))throw new Error('SCAN_TARGET_COMPILATION_BINDING_MISSING');
+  }
+  return{status:'completed',system:'etherscan-verified-standard-json',compilerVersion:units.length===1?units[0].compilerVersion:'multi-profile',
+    compilerVersions:[...new Set(units.map(u=>u.compilerVersion))].sort(),
+    compilerProfiles:units.map(u=>({name:u.unitId,compilerVersion:u.compilerVersion,settings:u.settings})),
+    compilerDiagnostics:diagnostics,sourceAsts:allAsts,
+    artifacts:artifacts.sort((a,b)=>(a.sourceName+':'+a.contractName).localeCompare(b.sourceName+':'+b.contractName)),
+    compilationUnits:units,sourceInventory:[...sourceNames].sort(),sourceInventoryFiles:sourceNames.size};
+}
 
 export { compileVyperSources } from './vyper-build.mjs';
 
@@ -41,6 +110,9 @@ export async function buildProject({
   compileHermetic = compileRepoHermeticStandardJson
 }) {
   const compiler = requestedSolidityCompiler(request);
+  const scanManifestPath=path.join(projectRoot,'scan-source-manifest.json');
+  try { await fs.access(scanManifestPath); return await compileVerifiedScanProject(projectRoot); }
+  catch(error){if(error?.code!=='ENOENT')throw error;}
   const detected = await detectNativeBuild(projectRoot, { ...(fsApi ? { fsApi } : {}) });
   const embedded = await detectEmbeddedProfileBuild(projectRoot, { ...(fsApi ? { fsApi } : {}) });
   let solidityBuild;
