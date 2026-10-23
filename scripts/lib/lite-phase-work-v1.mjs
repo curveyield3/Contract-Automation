@@ -19,7 +19,19 @@ export function requiredFile(root,rel,label='file'){
   if(frozen&&fs.existsSync(frozen)&&fs.statSync(frozen).isFile())return frozen;
   throw new Error('missing '+label+': '+rel);
 }
-export function authorityRootFromReceipt(receipt){const home=receipt?.authority?.homepagePath;if(typeof home!=='string'||!home.endsWith('/SKILL.md')) throw new Error('receipt authority.homepagePath missing');return path.posix.dirname(home);}
+export function authorityRootFromReceipt(receipt){
+ const authority=receipt?.authority,home=authority?.homepagePath;
+ if(typeof home!=='string'||!home.endsWith('/SKILL.md'))throw new Error('receipt authority.homepagePath missing');
+ const logical=path.posix.dirname(home);
+ if(logical==='Audit Skill - Current Authority/Audit_Litemode_v13'){
+   const originalSha='31555f32434fc6d568e9c63eb1f04a4f071b06fb81e559ea849ec9c8c233b50f';
+   if(authority.liteSkillSha256===originalSha)
+     return 'audit-process/v7/frozen-authorities/Audit_Litemode_v13';
+   if(authority.packageRevision==='v13')
+     throw new Error('frozen v13 campaign authority digest does not match the admitted immutable original; refuse silent topology rebind');
+ }
+ return logical;
+}
 export function phaseSchemaRepoPath(authorityRoot,sequence){return path.posix.join(authorityRoot,'phases/phase-'+sequence,'PHASE_'+String(sequence).padStart(2,'0')+'_SCHEMA_v1.json');}
 export function loadPhaseSchema(root,authorityRoot,sequence){const rel=phaseSchemaRepoPath(authorityRoot,sequence);const schema=readJson(requiredFile(root,rel,'phase schema'));if(schema.schemaVersion!=='curveyield-lite-phase-work-schema-v1'||schema.phase!==sequence) throw new Error('phase schema identity mismatch: '+rel);return {schema,rel};}
 export function fullCampaignPath(campaignPath,rel){return path.posix.join(campaignPath,safeRel(rel));}
