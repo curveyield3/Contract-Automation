@@ -1629,7 +1629,7 @@ if(gatedMasterReview&&masterBoundary!==null){
   const staged=stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase:masterBoundary,lastSealedReceiptPath:sealedReceiptRel,nextSequence,nextDerivedInputPaths:nextDerivedInputs,successorPrefillContext,now});
   writeJson(directoryFile,directory);
   const ref=a['audit-controller-ref']??'main';
-  const blob=(rel)=>'https://github.com/CurveYield2/Audit-Controller/blob/'+ref+'/'+
+  const blob=(rel)=>'https://github.com/curveyield3/Audit-Controller/blob/'+ref+'/'+
     rel.split('/').map(encodeURIComponent).join('/');
   const extraLines=[];
   if(activeDetectionPolicyV1(predecessor)){
