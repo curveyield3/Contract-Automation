@@ -18,7 +18,7 @@ export function assertDeployGateEvidenceV2(e){
   if(e.status==='NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'){
     // No deployment script is a machine-discovered negative, never an agent
     // choice that can hide failed or unexecuted source-native deployment.
-    if(!Array.isArray(e.detectedScripts)||e.detectedScripts.length
+    if(!e.detectedScripts||!['foundry','hardhat','unsafeHardhat','genericPackageScripts'].every(key=>Array.isArray(e.detectedScripts[key])&&e.detectedScripts[key].length===0)
       ||!Array.isArray(e.scriptDispositions)||e.scriptDispositions.length
       ||!Array.isArray(e.attempts)||e.attempts.length
       ||!Array.isArray(e.deployedContracts)||e.deployedContracts.length
