@@ -549,7 +549,7 @@ jobs:
             # All GitHub reads/writes here are registry bookkeeping; the actual
             # ChatGPT message is still delivered by the existing human-style sender.
             [ "$worker_role" = reviewer ] && [ "$gate_mode" = LITE ] || return 1
-            [ "$gate_repo" = 'CurveYield2/Audit-Controller' ] || return 1
+            [ "$gate_repo" = 'curveyield3/Audit-Controller' ] || return 1
             [ -s /tmp/audit-campaign-directory.json ] || return 1
             local safe_campaign registration api sha planned updated backup message
             safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
@@ -671,7 +671,7 @@ jobs:
             chat_url="$(jq -r '.chatUrl // empty' /tmp/watchdog-state.json)"
 
             gate_mode="$(jq -r '.gate.mode // "FULL_V26"' /tmp/watchdog-state.json)"
-            gate_repo="$(jq -r '.gate.repository // "CurveYield2/Audit-Controller"' /tmp/watchdog-state.json)"
+            gate_repo="$(jq -r '.gate.repository // "curveyield3/Audit-Controller"' /tmp/watchdog-state.json)"
             gate_ref="$(jq -r '.gate.ref // "main"' /tmp/watchdog-state.json)"
             gate_path="$(jq -r '.gate.statePath // empty' /tmp/watchdog-state.json)"
             gate_expected_phase="$(jq -r '.gate.expectedPhaseId // empty' /tmp/watchdog-state.json)"
