@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "curveyield-lite-phase0-bootstrap-recovery-v1",
+  "campaign_id": "live-ethereum-dai-6b175474-r1",
+  "campaign_path": "campaigns/live-ethereum-Dai-6b175474 r1",
+  "audit_controller_ref": "main"
+}
