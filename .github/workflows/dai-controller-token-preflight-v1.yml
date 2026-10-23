@@ -18,6 +18,9 @@ jobs:
       - name: Classify token access without disclosing secrets
         env:
           CONTROLLER_PAT: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          RPC_ETHEREUM_CONFIGURED: ${{ secrets.RPC_ETHEREUM }}
+          ETHEREUM_RPC_CONFIGURED: ${{ secrets.ETHEREUM_RPC }}
+          ETHERSCAN_KEY_CONFIGURED: ${{ secrets.ETHERSCAN_API_KEY }}
         shell: bash
         run: |
           set -euo pipefail
@@ -31,4 +34,7 @@ jobs:
             status="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $CONTROLLER_PAT" "$url")"
             echo "$name HTTP $status"
             if [ "$status" != "200" ]; then echo "::warning::$name probe failed"; fi
+          done
+          for n in RPC_ETHEREUM_CONFIGURED ETHEREUM_RPC_CONFIGURED ETHERSCAN_KEY_CONFIGURED; do
+            if [ -n "${!n}" ]; then echo "$n is present"; else echo "$n is absent"; fi
           done
