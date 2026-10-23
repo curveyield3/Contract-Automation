@@ -42,9 +42,11 @@ jobs:
             .schemaVersion=="curveyield-lite-phase0-bootstrap-recovery-v1" and
             (.campaign_id|type=="string" and length>0) and
             (.campaign_path|type=="string" and startswith("campaigns/")) and
-            (.audit_controller_ref|type=="string" and length>0)
+            (.audit_controller_ref|type=="string" and length>0) and
+            ((.resume_from_finalize // false)|type=="boolean")
           ' "$req" >/dev/null
           {
+            echo "resume_from_finalize=$(jq -r '.resume_from_finalize // false' "$req")"
             echo "campaign_id=$(jq -r '.campaign_id' "$req")"
             echo "campaign_path=$(jq -r '.campaign_path' "$req")"
             echo "audit_controller_ref=$(jq -r '.audit_controller_ref' "$req")"
@@ -59,7 +61,8 @@ jobs:
           gh workflow run lite-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
             -f campaign_path="${{ steps.request.outputs.campaign_path }}" \
-            -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
+            -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}" \
+            -f resume_from_finalize="${{ steps.request.outputs.resume_from_finalize }}"
 
       - name: Summarize
         shell: bash
