@@ -48,7 +48,7 @@ export function validateBoundAuthorityV1({root,receipt}={}){
  const manifestBytes=fs.readFileSync(manifestFile);
  if(createHash('sha256').update(manifestBytes).digest('hex')!==authority.manifestSha256)
    throw new Error('bound authority manifest changed; original campaign authority must be restored, not rebound');
- const blobBytes=Buffer.concat([Buffer.from('blob '+manifestBytes.length+'\\0'),manifestBytes]);
+ const blobBytes=Buffer.concat([Buffer.from('blob '+manifestBytes.length),Buffer.from([0]),manifestBytes]);
  if(createHash('sha1').update(blobBytes).digest('hex')!==authority.manifestGitBlobSha)
    throw new Error('bound authority manifest Git blob identity changed');
  const manifest=JSON.parse(manifestBytes.toString('utf8'));
