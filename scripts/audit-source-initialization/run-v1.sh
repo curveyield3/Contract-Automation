@@ -95,6 +95,20 @@ else
     git reset --hard origin/main
     git clean -fdx
 
+    # Freeze the complete authority identity from this exact initialization
+    # snapshot, not a pre-retry tree that might have moved on main.
+    skill_manifest="${authority_packages[0]}/MANIFEST.json"
+    test -f "$skill_home" && test -f "$skill_manifest"
+    skill_sha="$(sha256sum "$skill_home" | awk '{print $1}')"
+    skill_blob="$(git rev-parse "HEAD:$skill_home")"
+    manifest_sha="$(sha256sum "$skill_manifest" | awk '{print $1}')"
+    manifest_blob="$(git rev-parse "HEAD:$skill_manifest")"
+    authority_commit="$(git rev-parse HEAD)"
+    jq -e --arg sha "$skill_sha" '
+      (.files | type) == "array" and
+      any(.files[]; .path=="SKILL.md" and .sha256==$sha)
+    ' "$skill_manifest" >/dev/null
+
     max=0
     while IFS= read -r f; do
       id="$(jq -r '.campaignId // empty' "$f" 2>/dev/null || true)"
@@ -142,6 +156,7 @@ else
     CREATED_AT="$created_at" SKILL_RELEASE="$skill_release" SKILL_REVISION="$skill_revision" SKILL_HOME="$skill_home" \
     MASTER_CHAT_URL="$MASTER_CHAT_URL" TEST_EXECUTOR_CHAT_URL="$TEST_EXECUTOR_CHAT_URL" \
     SKILL_SHA="$skill_sha" SKILL_BLOB="$skill_blob" SKILL_REPO_PATH="$skill_repo_path" \
+    MANIFEST_SHA="$manifest_sha" MANIFEST_BLOB="$manifest_blob" AUTHORITY_COMMIT="$authority_commit" \
     RECEIPTS_DIR="$receipts_dir" CAMPAIGN_DIRECTORY_PATH="$campaign_directory_path" \
       python3 "$ROOT/scripts/audit-source-initialization/write-phase0-receipt-v1.py"
 
