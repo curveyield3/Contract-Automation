@@ -29,3 +29,12 @@ Scope: demonstrated instruction errors, process blockers, redundant work and ope
 | PI-018 | Scan URLs copied from an explorer frequently contain harmless tab fragments, and internally generated archives can exceed GitHub's content API size ceiling. | Valid copy/paste URL rejection or late partial campaign admission. | Resolver now strips optional UI query/fragment and rejects oversized generated archives before campaign creation (`9e20674503045e39ddd1f2b0476f81cb205db78c`). |
 | PI-019 | Explorer API proxy-slot evidence should not be trusted as an independent read of the fork state. | An unexpected implementation binding at the frozen runtime could go undetected. | LIVE_SCAN Anvil lane reads the EIP-1967 slot on the frozen fork and rejects disagreements in commit `43062284e4861dd4174b951ca54d08635c90eae8`. |
 | PI-020 | Accepted v13 authority now includes scan-link intake instructions and SHA-bound manifest entries. | A stale manifest or unbound authority change would block exact authority validation. | Static current-main checks verified both modified authority files' SHA-256 and byte lengths match `Audit_Litemode_v13/MANIFEST.json` revision `v13.2`. No workflows/tests launched; first authenticated live scan remains unverified. |
+
+## Scan-link DAI campaign continuation
+
+- Campaign: `live-ethereum-dai-6b175474-r1`; generation `live-ethereum-dai-6b175474-r1-g1-20261023T034128Z`.
+- Run 39896333994 successfully collected Etherscan source directly from the page link; no human upload supplied.
+- Run 39896358837 compiled successfully but blocked on exact runtime comparison. Its later fork identity error masked the original runtime mismatch.
+- Diagnostic run 39897248934 retained both runtimes. Both are 7,904 bytes; all 32 differing bytes are positions 7861–7892 in the legacy CBOR Swarm content hash. Executable bytes and compiler version match exactly.
+- Repair commits `e7149ea514a7ad4ff5b23c73279f3aa8ba6aba56`, `86b403f248b5a1ba5c76de4936ea1416b8b4700e`, `1a3d63a17cca5401211710857f8905c3cba70218`: recognize only the proven legacy CBOR layout, require all executable bytes identical, preserve both full runtime hashes, disclose metadata-only source binding, and have the gate recompute comparison from retained bytes. Other mismatches remain failures. Live retry pending.
+- Original execution errors now surface in wrapper logs; exact mismatch bytes stay in existing execution artifacts. No parallel workflow or test suite was introduced.
