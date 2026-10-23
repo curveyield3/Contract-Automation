@@ -48,7 +48,7 @@ on:
         options: [FULL_V26, LITE]
       gate_repository:
         required: false
-        default: CurveYield2/Audit-Controller
+        default: curveyield3/Audit-Controller
         type: string
       gate_ref:
         required: false
@@ -327,7 +327,7 @@ jobs:
           if [ "$(cat /tmp/wake-message.txt)" != 'GET BACK TO WORK' ] \
             && [ "${{ inputs.gate_mode }}" = 'LITE' ] \
             && [[ "$WORKER_ROLE" == 'reviewer' || "$WORKER_ROLE" == 'master_reviewer' || "$WORKER_ROLE" == 'test-executor' ]] \
-            && [ "${{ inputs.gate_repository }}" = 'CurveYield2/Audit-Controller' ]; then
+            && [ "${{ inputs.gate_repository }}" = 'curveyield3/Audit-Controller' ]; then
             token="${AUDIT_CONTROLLER_GITHUB_TOKEN:-}"
             gate_ref="${{ inputs.gate_ref }}"
             [ -n "$gate_ref" ] || gate_ref=main
@@ -347,7 +347,7 @@ jobs:
             fi
             if [ -n "$token" ] && [ -n "$reviewer" ] && [[ "$gate_path" == "Audit Campaign Directory/campaigns/"*.json ]]; then
               encoded_gate="${gate_path// /%20}"
-              encoded="$(GH_TOKEN="$token" gh api "repos/CurveYield2/Audit-Controller/contents/$encoded_gate?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+              encoded="$(GH_TOKEN="$token" gh api "repos/curveyield3/Audit-Controller/contents/$encoded_gate?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
               workspace="$(printf '%s' "$encoded" | base64 -d 2>/dev/null | jq -r --arg campaign "$CAMPAIGN_ID" 'select(.campaignId==$campaign) | .workspacePath // empty' 2>/dev/null || true)"
               if [[ "$workspace" == campaigns/* ]] && [[ "$reviewer" =~ ^(reviewer-[1234]|reviewer-3L|master-reviewer|test-executor)$ ]]; then
                 ack_file="$workspace/work/browser/WAKE_ACK_${reviewer}_v1.json"
@@ -355,7 +355,7 @@ jobs:
                 # ackId already binds wake and run; the reviewer is bound by the file path.
                 ack_payload="$(jq -cn --arg id "$ack_id" '{ack:$id}')"
                 {
-                  echo "FIRST, before anything else: write exactly $ack_payload as the whole file $ack_file on CurveYield2/Audit-Controller branch $gate_ref (update with its current SHA if it exists, create it only on 404, stop on any other error)."
+                  echo "FIRST, before anything else: write exactly $ack_payload as the whole file $ack_file on curveyield3/Audit-Controller branch $gate_ref (update with its current SHA if it exists, create it only on 404, stop on any other error)."
                   echo 'Do nothing else until that write succeeds, then follow the instructions below.'
                   echo
                   cat /tmp/wake-message.txt
@@ -449,7 +449,7 @@ jobs:
           echo 'verified=false' >> "$GITHUB_OUTPUT"
           ack_ref="${{ inputs.gate_ref }}"
           [ -n "$ack_ref" ] || ack_ref=main
-          ack_url="repos/CurveYield2/Audit-Controller/contents/${WAKE_ACK_PATH// /%20}?ref=$ack_ref"
+          ack_url="repos/curveyield3/Audit-Controller/contents/${WAKE_ACK_PATH// /%20}?ref=$ack_ref"
           for i in $(seq 0 10); do
             encoded="$(gh api "$ack_url" --jq '.content' 2>/dev/null || true)"
             if [ -n "$encoded" ] && printf '%s' "$encoded" | base64 -d 2>/dev/null \
@@ -476,7 +476,7 @@ jobs:
             echo "::error::Exact wake ack path required to mark delivered"; exit 1;
           }
           campaign="${WAKE_ACK_PATH%/work/browser/*}"
-          api="repos/CurveYield2/Audit-Controller/contents/${campaign// /%20}/controller/delivery/DELIVERY_LEDGER_v1.json"
+          api="repos/curveyield3/Audit-Controller/contents/${campaign// /%20}/controller/delivery/DELIVERY_LEDGER_v1.json"
           for attempt in 1 2 3; do
             response="$(gh api "$api?ref=${{ inputs.gate_ref }}" )"
             sha="$(printf '%s' "$response" | jq -r '.sha')"
@@ -758,7 +758,7 @@ jobs:
           case "$DIRECTORY_PATH" in "Audit Campaign Directory/campaigns/"*.json) ;; *) exit 0;; esac
           gh auth setup-git
           rm -rf .audit-controller-wake
-          gh repo clone CurveYield2/Audit-Controller .audit-controller-wake -- --filter=blob:none --no-checkout
+          gh repo clone curveyield3/Audit-Controller .audit-controller-wake -- --filter=blob:none --no-checkout
           cd .audit-controller-wake
           git fetch origin "$AUDIT_CONTROLLER_REF"
           directory_schema="$(git show "origin/$AUDIT_CONTROLLER_REF:$DIRECTORY_PATH" | jq -r '.schemaVersion // empty')"
