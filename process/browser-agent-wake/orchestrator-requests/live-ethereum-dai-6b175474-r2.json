@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-lite-browser-orchestrator-request-v1",
+  "requestId": "live-ethereum-dai-6b175474-r2-phase1-wake-recovery-v1",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "campaignName": "live-ethereum-Dai-6b175474 r2",
+  "campaignPath": "campaigns/live-ethereum-Dai-6b175474 r2",
+  "auditControllerRef": "main"
+}
