@@ -1,8 +1,13 @@
 {
-  "source_url": "REPLACE_WITH_DIRECT_SINGLE_ZIP_FILE_URL",
+  "_source_input_instructions": "Choose exactly one: fill source_url for one direct ZIP, OR fill scan_urls with one or more Etherscan/KatanaScan address-page links. scan_urls needs ETHERSCAN_API_KEY repository secret; no uploaded artifacts, deployment scripts, ABIs or compiler versions.",
+  "source_url": "",
+  "scan_urls": [],
   "agent_chat_1_url": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_1_CHAT_ID",
   "agent_chat_2_url": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_2_CHAT_ID",
-  "agent_chat_3_url": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_3L_CHAT_ID",
+  "agent_chat_3_url": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_3_CHAT_ID",
   "agent_chat_4_url": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_4_CHAT_ID",
-  "master_chat_url": "https://chatgpt.com/c/REPLACE_WITH_MASTER_REVIEWER_CHAT_ID"
+  "master_chat_url": "https://chatgpt.com/c/REPLACE_WITH_MASTER_REVIEWER_CHAT_ID",
+  "test_executor_chat_url": "https://chatgpt.com/c/REPLACE_WITH_TEST_EXECUTOR_CHAT_ID",
+  "backup_chat_url": "https://chatgpt.com/c/REPLACE_WITH_BACKUP_CHAT_ID",
+  "single_agent_simulation": false
 }
