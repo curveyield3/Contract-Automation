@@ -20,6 +20,21 @@ source={
   "extractedContentPath":e["SOURCE_DIR"],
   "extractedTreeSha256":e["TREE_SHA"]
 }
+if e.get("SOURCE_INPUT_MODE") == "LIVE_SCAN":
+  targets=json.loads(e["SCAN_TARGETS_JSON"])
+  if not isinstance(targets,list) or not targets or not e.get("SCAN_MANIFEST_SHA"):
+    raise ValueError("LIVE_SCAN_RECEIPT_PROVENANCE_MISSING")
+  source["kind"]="EXPLORER_INITIALIZED_VERIFIED_LIVE_SNAPSHOT"
+  source["inputMode"]="LIVE_SCAN"
+  source["originProvider"]="etherscan-v2"
+  source["originUrls"]=targets
+  source["generatedArchiveFilename"]=source.pop("uploadedFilename")
+  source["scanManifestPath"]=f"{e['SOURCE_DIR']}/live-scan-project/scan-source-manifest.json"
+  source["scanManifestSha256"]=e["SCAN_MANIFEST_SHA"]
+  source["scanTargetSetSha256"]=e["SCAN_TARGET_SET_SHA"]
+else:
+  source["inputMode"]="ZIP"
+
 authority={
   "repository":"CurveYield2/Audit-Controller",
   "ref":"main",
@@ -49,7 +64,11 @@ receipt={
   "authority":authority,
   "source":source,
   "startedAt":e["CREATED_AT"],"updatedAt":e["CREATED_AT"],"sealedAt":None,
-  "inputs":[{"role":"SOURCE_ZIP","path":e["SOURCE_PATH"],"sha256":e["SOURCE_SHA"]}],
+  "inputs":([{"role":"SCAN_URL_SET","urls":json.loads(e["SCAN_TARGETS_JSON"]),"sha256":e["SCAN_TARGET_SET_SHA"]},
+              {"role":"GENERATED_SOURCE_ARCHIVE","path":e["SOURCE_PATH"],"sha256":e["SOURCE_SHA"]},
+              {"role":"FROZEN_DEPLOYED_TARGETS","path":source["scanManifestPath"],"sha256":e["SCAN_MANIFEST_SHA"]}]
+              if e.get("SOURCE_INPUT_MODE")=="LIVE_SCAN" else
+              [{"role":"SOURCE_ZIP","path":e["SOURCE_PATH"],"sha256":e["SOURCE_SHA"]}]),
   "evidence":[],"outputs":[],
   "globalControls":{"securityTraceabilityGraph":None,"carriedForwardObligationLedger":None,"evidenceInvalidationMatrix":None,"sourceIntelligenceBundle":None},
   "obligations":{"due":[],"created":[],"closed":[],"carriedForward":[]},
