@@ -74,6 +74,17 @@ export function parseDeploymentProfile(text){
   if(parsed?.schemaVersion!==AUDIT_DEPLOYMENT_SCHEMA)fail(`schemaVersion must be ${AUDIT_DEPLOYMENT_SCHEMA}`);
   const chain=PHASE0_FORK_CHAINS[parsed.chain];
   if(!chain)fail(`unsupported chain ${JSON.stringify(parsed.chain)}; supported: ${Object.keys(PHASE0_FORK_CHAINS).join(', ')}`);
+  if(parsed.mode==='LIVE'){
+    if(parsed.scripts!==undefined||parsed.hardhat!==undefined||parsed.foundryRoot!==undefined)fail('LIVE mode does not accept deployment scripts');
+    if(!Array.isArray(parsed.contracts)||parsed.contracts.length<1||parsed.contracts.length>64)fail('LIVE contracts must list 1-64 exact runtime targets');
+    const contracts=parsed.contracts.map((row,index)=>{
+      if(!row||!/^0x[0-9a-fA-F]{40}$/.test(row.address??'')||/^0x0{40}$/i.test(row.address))fail('invalid LIVE contract address at '+index);
+      if(typeof row.qualifiedName!=='string'||!/^.+\.sol:[A-Za-z_][A-Za-z0-9_]*$/.test(row.qualifiedName))fail('LIVE qualifiedName must identify an admitted compiler artifact');
+      return{address:row.address,qualifiedName:row.qualifiedName};
+    });
+    if(new Set(contracts.map(x=>x.address.toLowerCase())).size!==contracts.length)fail('duplicate LIVE address');
+    return{chain:chain.chain,chainId:chain.chainId,mode:'LIVE',contracts};
+  }
   if(typeof parsed.deployer!=='string'||!/^0x[0-9a-fA-F]{40}$/.test(parsed.deployer))fail('deployer must be a 20-byte hex address');
   const base={chain:chain.chain,chainId:chain.chainId,deployer:parsed.deployer};
   if(parsed.hardhat!==undefined){
@@ -106,6 +117,7 @@ export async function loadDeploymentProfile(projectRoot){
   catch(error){if(error?.code==='ENOENT')return null;throw error;}
   const profile=parseDeploymentProfile(bytes.toString('utf8'));
   const fileSha256=sha256(bytes);
+  if(profile.mode==='LIVE')return{...profile,file:AUDIT_DEPLOYMENT_FILE,fileSha256};
   if(profile.mode==='HARDHAT')return{...profile,hardhat:await loadHardhatEntry(projectRoot,profile.hardhat),file:AUDIT_DEPLOYMENT_FILE,fileSha256};
   const root=profile.foundryRoot==='.'?projectRoot:path.join(projectRoot,...profile.foundryRoot.split('/'));
   let foundryToml;
