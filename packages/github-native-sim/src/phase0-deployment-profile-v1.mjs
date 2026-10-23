@@ -174,3 +174,20 @@ export function assertPhase0ForkIdentity(e){
   }
   return true;
 }
+
+ // Flattened explorer sources may reconstruct the same executable runtime with a
+ // different Swarm content hash. Admit only the proven legacy CBOR layout:
+ // {bzzr1: bytes32, solc: bytes3}, with all other runtime bytes identical.
+ export function compareLiveRuntimeV1(observed,compiled,{allowScanMetadata=false}={}){
+   const normalize=value=>typeof value==='string'&&/^0x(?:[0-9a-f]{2})+$/i.test(value)?value.toLowerCase():null;
+   const a=normalize(observed),b=normalize(compiled);
+   if(!a||!b)return{sourceBinding:'MISMATCH'};
+   if(a===b)return{sourceBinding:'EXACT_COMPILED_RUNTIME'};
+   if(!allowScanMetadata||a.length!==b.length)return{sourceBinding:'MISMATCH'};
+   const layout=/a265627a7a72315820([0-9a-f]{64})64736f6c6343([0-9a-f]{6})0032$/;
+   const am=a.match(layout),bm=b.match(layout);
+   if(!am||!bm||am[2]!==bm[2]||a.slice(0,-104)!==b.slice(0,-104))return{sourceBinding:'MISMATCH'};
+   return{sourceBinding:'EXECUTABLE_RUNTIME_MATCH_METADATA_HASH_ONLY',
+     metadataDifference:{format:'SOLC_LEGACY_CBOR_BZZR1_SOLC',compilerBytes:am[2],observedSwarmHash:am[1],compiledSwarmHash:bm[1]},
+     executableRuntimeSha256:sha256(Buffer.from(a.slice(2,-104),'hex'))};
+ }
