@@ -167,7 +167,7 @@ jobs:
              | .browserInteractionPolicy=$interactionPolicy
              | .activeAssignment={phaseId:$phaseId,milestoneId:$boundary,workerRole:"reviewer",reviewer:$reviewer,thinkingEffort:"high"}
              | .watchdog=((.watchdog // {}) + {enabled:true,idleMessage:"GET BACK TO WORK"})
-             | .watchdog.gate={mode:"LITE",repository:"CurveYield2/Audit-Controller",ref:$ref,statePath:$directoryPath,expectedPhaseId:$phaseId,expectedMilestoneId:$boundary,activePointerPath:"",stopStates:["STOPPED_BY_HUMAN"],stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]}
+             | .watchdog.gate={mode:"LITE",repository:"curveyield3/Audit-Controller",ref:$ref,statePath:$directoryPath,expectedPhaseId:$phaseId,expectedMilestoneId:$boundary,activePointerPath:"",stopStates:["STOPPED_BY_HUMAN"],stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]}
              | .repair=((.repair // {}) + {enabled:true,idlePokeThreshold:3,unviewableThreshold:2})
              | .updatedAt=(now|todate)' \
             /tmp/existing-registration.json > /tmp/registration.json
@@ -206,7 +206,7 @@ jobs:
             -f worker_role=reviewer \
             -f watchdog_message_b64="$poke_b64" \
             -f gate_mode=LITE \
-            -f gate_repository=CurveYield2/Audit-Controller \
+            -f gate_repository=curveyield3/Audit-Controller \
             -f gate_ref="$AUDIT_CONTROLLER_REF" \
             -f gate_state_path="${{ steps.directory.outputs.path }}" \
             -f gate_expected_phase_id="$phase_id" \
