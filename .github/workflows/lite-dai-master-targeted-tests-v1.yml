@@ -218,14 +218,14 @@ jobs:
             }
             out.deployments=deployed;
             const target='0x6b175474e89094c44da98b954eedeac495271d0f',block='0x'+(26253174).toString(16),hash='0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f';
-            let chain=null,endpoint=null,failures=[];
-            const candidates=[process.env.ETHEREUM_RPC,'https://ethereum-rpc.publicnode.com','https://eth.llamarpc.com'].filter(Boolean);
+            let chain=null,endpoint=null,endpointLabel=null,failures=[];
+            const candidates=[{url:process.env.ETHEREUM_RPC,label:'configured-RPC_ETHEREUM'},{url:'https://ethereum-rpc.publicnode.com',label:'publicnode'},{url:'https://eth.llamarpc.com',label:'llamarpc'}].filter(x=>Boolean(x.url));
             async function rpc(url,method,params){
               const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),18000);
               try{const res=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:ctrl.signal});const o=await res.json();if(o.error)throw Error(JSON.stringify(o.error));if(!res.ok)throw Error('HTTP '+res.status);return o.result;}finally{clearTimeout(timer)}
             }
-            for(const url of candidates){try{let b=await rpc(url,'eth_getBlockByNumber',[block,false]);if(!b||b.hash?.toLowerCase()!==hash)throw Error('frozen block hash mismatch or missing: '+b?.hash);endpoint=url;chain=b;break;}catch(e){failures.push({url,error:String(e).slice(0,350)})}}
-            out.historical={target,blockNumber:26253174,expectedBlockHash:hash,endpoint,endpointErrors:failures,blockHash:chain?.hash||null,readOnly:true};
+            for(const candidate of candidates){const url=candidate.url;try{let b=await rpc(url,'eth_getBlockByNumber',[block,false]);if(!b||b.hash?.toLowerCase()!==hash)throw Error('frozen block hash mismatch or missing: '+b?.hash);endpoint=url;endpointLabel=candidate.label;chain=b;break;}catch(e){failures.push({endpoint:candidate.label,error:String(e).replaceAll(url,'[RPC_ENDPOINT]').slice(0,350)})}}
+            out.historical={target,blockNumber:26253174,expectedBlockHash:hash,endpoint: endpointLabel,endpointErrors:failures,blockHash:chain?.hash||null,readOnly:true};
             if(chain){
               try{
                 const code=await rpc(endpoint,'eth_getCode',[target,block]);
@@ -267,6 +267,17 @@ jobs:
           main().then(()=>{save();console.log('RUN_COMPLETE '+JSON.stringify(Object.fromEntries(Object.entries(out.candidates).map(([k,v])=>[k,{calls:v.executedCalls,assertions:v.assertionCount,failed:v.failedAssertions}]))));}).catch(e=>{out.errors.push({fatal:String(e),stack:String(e?.stack||'').slice(0,4000)});save();console.error('RUN_FATAL',e);process.exitCode=1;});
           NODE
           echo "$?" > dai-targeted-raw/EXECUTION_EXIT_v1.txt
+          node <<'REDACT_DAI_EVIDENCE'
+          const fs=require('fs');
+          const secrets=[process.env.ETHEREUM_RPC,process.env.ETHERSCAN_API_KEY].filter(Boolean);
+          for(const name of fs.readdirSync('dai-targeted-raw')){
+            const p='dai-targeted-raw/'+name;
+            if(!fs.statSync(p).isFile())continue;
+            let data=fs.readFileSync(p,'utf8');
+            for(const value of secrets)data=data.split(value).join('[REDACTED_CREDENTIAL]');
+            fs.writeFileSync(p,data);
+          }
+          REDACT_DAI_EVIDENCE
           {
             node --version
             npm --version
