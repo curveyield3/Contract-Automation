@@ -41,7 +41,7 @@ case "$mode" in branch|detach) ;; *) echo 'unknown private checkout mode' >&2;ex
 gh auth setup-git
 rm -rf -- "$destination"
 git init --quiet "$destination"
-git -C "$destination" remote add origin https://github.com/CurveYield2/Audit-Controller.git
+git -C "$destination" remote add origin https://github.com/curveyield3/Audit-Controller.git
 git -C "$destination" fetch --no-tags --depth=1 --filter=blob:none origin "$ref"
 expected="$(git -C "$destination" rev-parse FETCH_HEAD)"
 if [ -n "$campaign_path" ]; then
