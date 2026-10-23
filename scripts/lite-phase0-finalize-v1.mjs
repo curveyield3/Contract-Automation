@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {assertDeployGateEvidenceV2,digestV2} from './lib/phase0-deploy-gate-v2.mjs';
+import {compareLiveRuntimeV1} from '../packages/github-native-sim/src/phase0-deployment-profile-v1.mjs';
 import { createHash } from 'node:crypto';
 import {preparePhaseWork} from './lib/lite-phase-work-v1.mjs';
 import {detectionPolicyForAuthorityV1,authorityRootFromHomepageV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
@@ -93,10 +94,15 @@ if(receipt.source?.inputMode==='LIVE_SCAN'){
     const t=targets[i],d=declared[i],live=observed[i];
     if(d.address.toLowerCase()!==t.address||live.address.toLowerCase()!==t.address||
        d.qualifiedName!==t.qualifiedName||live.compilationUnitId!==t.compilationUnitId||
-       live.runtimeSha256!==t.runtimeSha256||live.sourceBinding!=='EXACT_COMPILED_RUNTIME')
+       live.runtimeSha256!==t.runtimeSha256)
       throw new Error('SCAN_TARGET_CODE_BINDING_MISMATCH: '+t.address);
-    if(!compiled.some(a=>a.compilationUnitId===t.compilationUnitId&&a.qualifiedName===t.qualifiedName))
-      throw new Error('SCAN_TARGET_ARTIFACT_BINDING_MISSING: '+t.address);
+    const artifact=compiled.find(a=>a.compilationUnitId===t.compilationUnitId&&a.qualifiedName===t.qualifiedName);
+    if(!artifact)throw new Error('SCAN_TARGET_ARTIFACT_BINDING_MISSING: '+t.address);
+    if(live.sourceBinding==='EXECUTABLE_RUNTIME_MATCH_METADATA_HASH_ONLY'){
+      if(live.runtimeComparison?.compiled?.toLowerCase()!==artifact.deployedBytecode?.toLowerCase()||
+         compareLiveRuntimeV1(live.runtimeComparison?.observed,artifact.deployedBytecode,{allowScanMetadata:true}).sourceBinding!==live.sourceBinding)
+        throw new Error('SCAN_TARGET_COMPILED_RUNTIME_BINDING_MISMATCH: '+t.address);
+    }else if(live.sourceBinding!=='EXACT_COMPILED_RUNTIME')throw new Error('SCAN_TARGET_CODE_BINDING_MISMATCH: '+t.address);
     if(!units.some(u=>u.unitId===t.compilationUnitId&&(u.targetBindings??[{address:u.address,qualifiedName:u.qualifiedName}]).some(binding=>binding.qualifiedName===t.qualifiedName&&binding.address===t.address)))
       throw new Error('SCAN_TARGET_COMPILER_INPUT_BINDING_MISSING: '+t.address);
     if(t.proxyImplementation&&!targets.some(candidate=>candidate.address===t.proxyImplementation&&candidate.role==='IMPLEMENTATION'))
