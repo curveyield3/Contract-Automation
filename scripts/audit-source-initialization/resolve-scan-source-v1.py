@@ -107,7 +107,8 @@ def source_input(info):
     elif not isinstance(candidate, dict):
         # Flattened source does not carry all original Standard-JSON settings. The
         # exact-bytecode verification later is mandatory; reconstruction is never attested by assumption.
-        n = safe_name(str(info.get("ContractFileName") or info.get("ContractName") or "Verified") + ".sol")
+        base = str(info.get("ContractFileName") or info.get("ContractName") or "Verified")
+        n = safe_name(base if base.endswith(".sol") else base + ".sol")
         inp = {"language": "Solidity", "sources": {n: {"content": raw}}, "settings": {}}
     else:
         fail("UNSUPPORTED_EXPLORER_SOURCE_FORMAT")
@@ -170,6 +171,7 @@ def main():
     target_records = []
     queue = [(x, "REQUESTED") for x in requested]
     visited = set()
+    first_contract_name = None
     while queue:
         item, role = queue.pop(0)
         address = item["address"]
@@ -182,6 +184,8 @@ def main():
         if not isinstance(source_rows, list) or len(source_rows) != 1:
             fail("UNVERIFIED_SOURCE", address)
         info = source_rows[0]
+        if first_contract_name is None:
+            first_contract_name = str(info.get("ContractName") or "contract")
         compiler_input, compiler_version, qualified = source_input(info)
         code = proxy(chain_id, "eth_getCode", address=address, tag=tag)
         if not isinstance(code, str) or not re.fullmatch(r"0x(?:[0-9a-fA-F]{2})+", code):
@@ -255,7 +259,7 @@ def main():
     manifest["manifestDigestSha256"] = digest
     files["live-scan-project/scan-source-manifest.json"] = (
         json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
-    label = re.sub("[^a-zA-Z0-9_-]+", "-", str(source_rows[0].get("ContractName") or "contract")).strip("-")[:35]
+    label = re.sub("[^a-zA-Z0-9_-]+", "-", first_contract_name or "contract").strip("-")[:35]
     if not label:
         label = "live-contract"
     display = ("live-" + chain + "-" + label + "-" + requested[0]["address"][2:10] +
