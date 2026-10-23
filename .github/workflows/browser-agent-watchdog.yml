@@ -181,7 +181,8 @@ jobs:
         id: private-vnc-apt-cache
         uses: actions/cache/restore@v4
         with:
-          path: ~/.cache/browser-agent-vnc-apt/archives
+          # Cache packages only: APT lock and partial/ are root-owned and break tar.
+          path: ~/.cache/browser-agent-vnc-apt/archives/*.deb
           key: browser-agent-vnc-apt-${{ runner.os }}-ubuntu24.04-v1-${{ env.VNC_APT_CACHE_WEEK }}
           restore-keys: |
             browser-agent-vnc-apt-${{ runner.os }}-ubuntu24.04-v1-
@@ -192,8 +193,11 @@ jobs:
         run: |
           set -euo pipefail
           apt_archives="$HOME/.cache/browser-agent-vnc-apt/archives"
-          mkdir -p "$apt_archives/partial"
-          chmod 755 "$apt_archives" "$apt_archives/partial"
+          mkdir -p "$apt_archives"
+          chmod 755 "$apt_archives"
+          # APT downloads as _apt; keep its scratch directory writable only by _apt.
+          # Cache restore/save intentionally excludes partial/ and the root-owned lock.
+          sudo install -d -o _apt -g root -m 0700 "$apt_archives/partial"
           sudo apt-get update -qq
           sudo apt-get \
             -o Dir::Cache::archives="$apt_archives" \
@@ -208,7 +212,8 @@ jobs:
         if: steps.target.outputs.valid == 'true' && steps.private-vnc-apt-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ~/.cache/browser-agent-vnc-apt/archives
+          # Cache packages only: APT lock and partial/ are root-owned and break tar.
+          path: ~/.cache/browser-agent-vnc-apt/archives/*.deb
           key: browser-agent-vnc-apt-${{ runner.os }}-ubuntu24.04-v1-${{ env.VNC_APT_CACHE_WEEK }}
 
       - name: Record runner egress before home exit node
