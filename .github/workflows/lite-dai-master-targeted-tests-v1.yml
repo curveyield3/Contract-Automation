@@ -23,7 +23,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Fetch exact DAI compiler unit and install isolated EVM
-        env:
         shell: bash
         run: |
           set -euo pipefail
