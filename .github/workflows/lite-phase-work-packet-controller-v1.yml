@@ -258,7 +258,7 @@ jobs:
             # post-completion follow-up keep the full clone.
             campaign_id="${{ steps.request.outputs.campaign_id }}"
             [[ "$campaign_id" =~ ^(.+)-r[0-9]+$ ]] || { echo "::error::campaign_id must end in -rN"; exit 1; }
-            directory_api="repos/CurveYield2/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/${BASH_REMATCH[1]}.json?ref=$ref"
+            directory_api="repos/curveyield3/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/${BASH_REMATCH[1]}.json?ref=$ref"
             campaign_path="$(gh api "$directory_api" --jq '.content' | base64 -d | jq -r '.workspacePath')"
             timeout -k 10s 300s bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$ref" branch "$campaign_path"
             exit 0
