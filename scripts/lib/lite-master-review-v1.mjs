@@ -299,7 +299,7 @@ function currentArtifactFailures(root,campaignPath,rows){
   }
   return failures;
 }
-function currentBindingFailures(root,campaignPath,record,directory){
+function currentBindingFailures(root,campaignPath,record,directory,authorityRoot){
   const failures=[];
   const bindings=record.bindings??{};
   const build=bindings.build;
@@ -314,7 +314,8 @@ function currentBindingFailures(root,campaignPath,record,directory){
   if(!authority||typeof authority.homepagePath!=='string'||!SHA256.test(String(authority.sha256??'')))failures.push('authority binding is incomplete');
   else{
     try{
-      const file=requiredFile(root,authority.homepagePath,'bound master-review authority');
+      const boundHome=authorityRoot?path.posix.join(authorityRoot,'SKILL.md'):authority.homepagePath;
+      const file=requiredFile(root,boundHome,'bound master-review authority');
       if(digestFile(file)!==authority.sha256)failures.push('bound authority digest changed: '+authority.homepagePath);
     }catch(error){failures.push(String(error.message||error));}
   }
@@ -397,7 +398,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   const record=readJson(requiredFile(root,pending.recordPath,'master review record'));
   const failures=[
     ...validateLockedRecord(record,pending,directory,cfg),
-    ...currentBindingFailures(root,campaignPath,record,directory)
+    ...currentBindingFailures(root,campaignPath,record,directory,authorityRoot)
   ];
   // Independent master-review gate: even a previously SEALED/PASS receipt is
   // insufficient when required machine execution never occurred. Never mutate
