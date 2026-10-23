@@ -3,5 +3,6 @@
   "campaign_id": "controller-dry-run-erc20-20261022-r1",
   "campaign_path": "campaigns/controller-dry-run-erc20-20261022 r1",
   "audit_controller_ref": "main",
-  "repairCommit": "8c25b27afbecc74a6ab992e7f1421f78956c396d"
+  "repairCommit": "8c25b27afbecc74a6ab992e7f1421f78956c396d",
+  "recoveryReason": "Producer omitted requiredScripts coverage counter consumed by no-script gate"
 }
