@@ -174,7 +174,7 @@ else
     admission_commit="$(git rev-parse HEAD)"
     source_blob="$(git rev-parse "HEAD:$source_path")"
 
-    CAMPAIGN_ID="$campaign_id" GENERATION_ID="$generation_id" CAMPAIGN_NAME="$campaign_name" SLUG="$slug" \
+    REQUEST_ID="$REQUEST_ID" CAMPAIGN_ID="$campaign_id" GENERATION_ID="$generation_id" CAMPAIGN_NAME="$campaign_name" SLUG="$slug" \
     CAMPAIGN_ROOT="$campaign_root" SOURCE_PROVIDER="$provider" SOURCE_URL_CANONICAL="$canonical_url" \
     SOURCE_FILENAME="$filename" SOURCE_SHA="$source_sha" SOURCE_SIZE="$source_size" SOURCE_PATH="$source_path" \
     SOURCE_DIR="$source_dir" ADMISSION_COMMIT="$admission_commit" SOURCE_BLOB="$source_blob" TREE_SHA="$tree_sha" \
