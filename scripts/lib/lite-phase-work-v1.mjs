@@ -100,6 +100,12 @@ export function validateWorkForm(schema,form){
         else if(v.length===1&&typeof v[0]==='string'&&EXPLICIT_NEGATIVES.has(v[0])){}
         else for(let i=0;i<v.length;i++){
           const item=v[i];
+          // A v13 indexed work-form may have an immutable first-slot negative
+          // sentinel while the reviewer appends actual records. The sentinel
+          // remains identity-bound in the original shard; real records still
+          // undergo every required-field and allowed-value check below.
+          if(i===0&&v.length>1&&typeof item==='string'&&EXPLICIT_NEGATIVES.has(item)&&
+             v.slice(1).every(x=>x&&typeof x==='object'&&!Array.isArray(x)))continue;
           if(!item||typeof item!=='object'||Array.isArray(item)){deficiencies.push(p+'['+i+'] must be an object or explicit negative sentinel');continue;}
           for(const k of field.itemRequiredFields??[]) if(isPlaceholder(item[k])||item[k]===null||item[k]===undefined) deficiencies.push(p+'['+i+'].'+k+' is missing');
           for(const [k,allowed] of Object.entries(field.itemFieldAllowedValues??{})){
