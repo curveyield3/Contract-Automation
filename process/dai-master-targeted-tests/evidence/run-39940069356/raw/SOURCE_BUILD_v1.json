@@ -1,0 +1,40 @@
+{
+  "compiler": "0.5.12+commit.7709ece9.Emscripten.clang",
+  "unitCompiler": "0.5.12+commit.7709ece9",
+  "unitInputSha256": "b1329a30421516f01ef5323f461020dac47f45cecc3784c0e548b71da67ad718",
+  "soliditySourceSha256": "d2a7e0a5fb6f68c1f651a7e7f954efcc4bfb77bcb4c92f8c3d39c9b68507fb87",
+  "compiledRuntimeSha256": "5230b924dad23dab334727ba9d4b62c95a6cd4a48242932f8a2946cef264ab97",
+  "compiledRuntimeKeccak256": "0xa62dcac63ba20bc6e08a9de45d9d2c0706410f0d2aeec0f92230c31b28201aa3",
+  "creationBytecodeSha256": "50550186a3eaf8cffbfadcaa1ba8ab7ee220fe199889bbe9c93295315608872a",
+  "compiledRuntimeBytes": 7904,
+  "methods": [
+    "DOMAIN_SEPARATOR",
+    "PERMIT_TYPEHASH",
+    "allowance",
+    "approve",
+    "balanceOf",
+    "burn",
+    "decimals",
+    "deny",
+    "mint",
+    "move",
+    "name",
+    "nonces",
+    "permit",
+    "pull",
+    "push",
+    "rely",
+    "symbol",
+    "totalSupply",
+    "transfer",
+    "transferFrom",
+    "version",
+    "wards"
+  ],
+  "sourceAuthMethods": [
+    "rely",
+    "deny",
+    "mint"
+  ],
+  "noExternalRecoveryFunction": true
+}
