@@ -3,7 +3,7 @@
   "singleAgentSimulation": false,
   "campaignId": "live-ethereum-dai-6b175474-r2",
   "mode": "resume_existing",
-  "chatUrl": "",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
   "browserRoutine": "",
   "agentChats": {
     "reviewer-1": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
@@ -26,22 +26,44 @@
     "url": ""
   },
   "activeChat": {
-    "name": "",
-    "url": ""
+    "name": "reviewer-1",
+    "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5e98-5e58-83e8-a901-838dea1fe9df"
   },
   "wakeMessage": "",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
-  "activeAssignment": {},
+  "activeAssignment": {
+    "phaseId": "phase-1",
+    "milestoneId": "PHASE_1_WORK_PACKET",
+    "workerRole": "reviewer",
+    "reviewer": "reviewer-1",
+    "thinkingEffort": "high"
+  },
   "watchdog": {
     "enabled": true,
     "idleMessage": "GET BACK TO WORK",
-    "pokeIntervalMinutes": 20
+    "pokeIntervalMinutes": 20,
+    "gate": {
+      "mode": "LITE",
+      "repository": "CurveYield2/Audit-Controller",
+      "ref": "main",
+      "statePath": "Audit Campaign Directory/campaigns/live-ethereum-dai-6b175474.json",
+      "expectedPhaseId": "phase-1",
+      "expectedMilestoneId": "PHASE_1_WORK_PACKET",
+      "activePointerPath": "",
+      "stopStates": [
+        "STOPPED_BY_HUMAN"
+      ],
+      "stopCampaignStatuses": [
+        "COMPLETE",
+        "STOPPED_BY_HUMAN"
+      ]
+    }
   },
   "repair": {
     "enabled": true,
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-23T05:16:22Z"
+  "updatedAt": "2026-10-23T05:18:19Z"
 }
