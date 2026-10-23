@@ -117,7 +117,7 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
     }
   }
 
-  applyObligationDispositionsToLedger({ledger,canonical,sequence:schema.phase,canonicalRel,now});
+  applyObligationDispositionsToLedger({ledger,canonical,sequence:schema.phase,canonicalRel,now,root,authorityRoot});
   writeJson(repoFile(root,graphRel),graph);writeJson(repoFile(root,ledgerRel),ledger);writeJson(repoFile(root,invalidRel),invalid);
   return {graphRel,ledgerRel,invalidRel};
 }
@@ -481,7 +481,7 @@ function restoreLedgerBeforeMasterPhase({root,campaignPath,authorityRoot,earlies
         ledger,items:registry.generatedObligations??[],originPhase:phase,canonicalRel,now,root,authorityRoot
       });
     }
-    applyObligationDispositionsToLedger({ledger,canonical,sequence:phase,canonicalRel,now});
+    applyObligationDispositionsToLedger({ledger,canonical,sequence:phase,canonicalRel,now,root,authorityRoot});
   }
   // Preserve immutable predecessor bookkeeping timestamps and imports. Only
   // the later phases under amendment are rebuilt and stamped with this replay.
