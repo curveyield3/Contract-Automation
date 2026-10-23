@@ -19,7 +19,6 @@ jobs:
         env:
           CONTROLLER_PAT: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           RPC_ETHEREUM_CONFIGURED: ${{ secrets.RPC_ETHEREUM }}
-          ETHEREUM_RPC_CONFIGURED: ${{ secrets.ETHEREUM_RPC }}
           ETHERSCAN_KEY_CONFIGURED: ${{ secrets.ETHERSCAN_API_KEY }}
         shell: bash
         run: |
@@ -35,6 +34,6 @@ jobs:
             echo "$name HTTP $status"
             if [ "$status" != "200" ]; then echo "::warning::$name probe failed"; fi
           done
-          for n in RPC_ETHEREUM_CONFIGURED ETHEREUM_RPC_CONFIGURED ETHERSCAN_KEY_CONFIGURED; do
+          for n in RPC_ETHEREUM_CONFIGURED ETHERSCAN_KEY_CONFIGURED; do
             if [ -n "${!n}" ]; then echo "$n is present"; else echo "$n is absent"; fi
           done
