@@ -3,5 +3,6 @@
   "campaign_id": "live-ethereum-dai-6b175474-r1",
   "campaign_path": "campaigns/live-ethereum-Dai-6b175474 r1",
   "audit_controller_ref": "main",
-  "recoveryReason": "Proven 32-byte legacy Swarm metadata hash difference only; executable runtime identical"
+  "recoveryReason": "Deployment evidence passed; finalizer now recognizes gate-validated metadata-only match bound to actual compiler artifact",
+  "resume_from_finalize": true
 }
