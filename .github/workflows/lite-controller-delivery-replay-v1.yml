@@ -52,7 +52,7 @@ jobs:
           slug="${BASH_REMATCH[1]}"
           [[ "$CONTROLLER_REF" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$CONTROLLER_REF" != *..* ]] || exit 1
           [[ "$DETAIL_REF" =~ ^controller/results/[a-f0-9]{20}/INDEX_v1.json$ ]] || exit 1
-          repo='CurveYield2/Audit-Controller'
+          repo='curveyield3/Audit-Controller'
           directory="Audit Campaign Directory/campaigns/$slug.json"
           api="repos/$repo/contents/Audit%20Campaign%20Directory/campaigns/$slug.json?ref=$CONTROLLER_REF"
           gh api "$api" --jq '.content' | base64 -d > /tmp/replay-directory.json
@@ -84,7 +84,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ledger_api="repos/CurveYield2/Audit-Controller/contents/${CAMPAIGN// /%20}/controller/delivery/DELIVERY_LEDGER_v1.json"
+          ledger_api="repos/curveyield3/Audit-Controller/contents/${CAMPAIGN// /%20}/controller/delivery/DELIVERY_LEDGER_v1.json"
           response="$(gh api "$ledger_api?ref=${{ inputs.audit_controller_ref }}")"
           sha="$(printf '%s' "$response" | jq -r '.sha')"
           printf '%s' "$response" | jq -r '.content' | base64 -d > /tmp/replay-ledger.json
@@ -144,7 +144,7 @@ jobs:
             -f wake_id="$WAKE_ID" -f campaign_id="$CAMPAIGN_ID" -f phase_id="$PHASE_ID" \
             -f mode=resume_existing -f chat_url="$CHAT_URL" \
             -f wake_message_b64="$WAKE_B64" -f watchdog_enabled=true -f worker_role=reviewer \
-            -f gate_mode=LITE -f gate_repository=CurveYield2/Audit-Controller -f gate_ref="$CONTROLLER_REF" \
+            -f gate_mode=LITE -f gate_repository=curveyield3/Audit-Controller -f gate_ref="$CONTROLLER_REF" \
             -f gate_state_path="${{ steps.replay.outputs.directory }}" \
             -f gate_expected_phase_id="$PHASE_ID" -f gate_expected_milestone_id="$MILESTONE"
       - name: Retry fresh successor dispatch without recomputation
