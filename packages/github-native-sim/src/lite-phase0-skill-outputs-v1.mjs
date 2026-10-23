@@ -224,34 +224,40 @@ async function buildCore({campaignRoot,skillRoot}){
     otherCriticalConfiguration:asArray(dep.configFiles).map(p=>({path:p,status:'DISCOVERED_NOT_SEMANTICALLY_ACCEPTED'})),
     rawEvidenceRefs:['evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json']
   };
-  // LIVE_SCAN identities originate from the pinned fork evidence, not textual
-  // address mentions in the source tree. Security interpretation stays deferred.
+  // The core Source Intelligence bundle is sealed BEFORE the deployment-only
+  // workflow. Record the explorer snapshot as a PENDING candidate here; never
+  // promote its runtime binding to VERIFIED until the later deploy gate/finalizer.
   if(receipt.source?.inputMode==='LIVE_SCAN'){
-    const frozen=deployExecution.scanSourceSnapshot;
-    const live=deployExecution.liveDeployment;
-    if(deployExecution.status!=='PASS_LIVE_DEPLOYMENT'||!frozen||live?.status!=='VERIFIED')throw new Error('SCAN_RUNTIME_OVERLAY_REQUIRES_VERIFIED_DEPLOYMENT');
+    const rel=String(receipt.source.scanManifestPath??'');
+    const manifestFile=path.resolve(campaignRoot,'../..',...rel.split('/'));
+    const relative=path.relative(campaignRoot,manifestFile).replaceAll('\\','/');
+    if(!relative.startsWith('source/')||relative.includes('..'))throw new Error('SCAN_MANIFEST_PATH_NOT_IN_CAMPAIGN');
+    const bytes=await fs.readFile(manifestFile);
+    if(sha256(bytes)!==receipt.source.scanManifestSha256)throw new Error('SCAN_MANIFEST_SOURCE_IDENTITY_MISMATCH');
+    const snapshot=JSON.parse(bytes.toString('utf8'));
+    if(snapshot.schemaVersion!=='curveyield-scan-source-manifest-v1'||snapshot.inputMode!=='LIVE_SCAN')throw new Error('SCAN_MANIFEST_INVALID');
     runtime.deploymentIdentity={
-      status:'FROZEN_RUNTIME_SOURCE_VERIFIED',
-      chainId:String(frozen.chainId),
-      networkOrForkIdentity:deployExecution.fork?.chain??'UNRESOLVED',
-      blockNumberOrTag:frozen.frozenBlock.number,
-      blockHash:frozen.frozenBlock.hash,
-      deployments:asArray(live.contracts).map(t=>({
-        address:t.address,qualifiedName:t.qualifiedName,compilationUnitId:t.compilationUnitId,
-        role:t.scanRole,runtimeCodeHash:t.runtimeCodeHash,sourceBinding:t.sourceBinding,
-        proxyImplementation:t.proxyImplementation??null
+      status:'FROZEN_EXPLORER_SNAPSHOT_PENDING_FORK_VERIFICATION',
+      chainId:String(snapshot.chainId),networkOrForkIdentity:snapshot.chain,
+      blockNumberOrTag:snapshot.frozenBlock?.number??'UNRESOLVED',
+      blockHash:snapshot.frozenBlock?.hash??'UNRESOLVED',
+      deployments:asArray(snapshot.resolvedTargets).map(t=>({
+        address:t.address,qualifiedName:t.qualifiedName,role:t.role,
+        compilationUnitId:t.compilationUnitId,runtimeSha256:t.runtimeSha256,
+        proxyImplementation:t.proxyImplementation??null,
+        status:'EXPLORER_OBSERVED_PENDING_FORK_VERIFICATION'
       })),
-      scanManifestDigestSha256:frozen.manifestDigestSha256,
-      rawEvidenceRefs:['evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',
-        'source/live-scan-project/scan-source-manifest.json']
+      scanManifestDigestSha256:snapshot.manifestDigestSha256,
+      rawEvidenceRefs:[relative]
     };
     runtime.liveConfiguration={
-      ...runtime.liveConfiguration,status:'VERIFIED_RUNTIME_BINDING_SECURITY_INTERPRETATION_PENDING',
-      proxyImplementationAdminBindings:asArray(live.contracts)
-        .filter(t=>t.proxyImplementation).map(t=>({proxy:t.address,implementation:t.proxyImplementation,
-          binding:'EIP1967_IMPLEMENTATION_SLOT_VERIFIED_AT_FROZEN_BLOCK',blockHash:frozen.frozenBlock.hash})),
-      rawEvidenceRefs:['evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',
-        'source/live-scan-project/scan-source-manifest.json']
+      ...runtime.liveConfiguration,status:'EXPLORER_CLAIM_PENDING_FORK_VERIFICATION',
+      proxyImplementationAdminBindings:asArray(snapshot.resolvedTargets)
+        .filter(t=>t.proxyImplementation).map(t=>({
+          proxy:t.address,implementation:t.proxyImplementation,
+          status:'EIP1967_IMPLEMENTATION_SLOT_OBSERVED_PENDING_FORK_VERIFICATION',
+          blockHash:snapshot.frozenBlock?.hash??null
+        })),rawEvidenceRefs:[relative]
     };
     core.identity.scanSourceManifestSha256=receipt.source.scanManifestSha256;
     core.identity.scanTargetSetSha256=receipt.source.scanTargetSetSha256;
