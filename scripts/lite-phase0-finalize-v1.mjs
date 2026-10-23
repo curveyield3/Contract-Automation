@@ -60,6 +60,53 @@ const deploy=read(evidence.deployConfigExecution);
 if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||deploy.executionMode!=='ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY')throw new Error('Phase-0 requires only source package forked deployment evidence');
 if(deploy.campaignId!==receipt.campaign.campaignId||deploy.sourceSha256!==sourceSha||deploy.fork?.engine!=='anvil')throw new Error('Phase-0 fork deployment identity mismatch');
 assertDeployGateEvidenceV2(deploy);
+if(receipt.source?.inputMode==='LIVE_SCAN'){
+  if(receipt.source.kind!=='EXPLORER_INITIALIZED_VERIFIED_LIVE_SNAPSHOT'||!Array.isArray(receipt.source.originUrls))throw new Error('SCAN_RECEIPT_PROVENANCE_MISSING');
+  const manifestPath=path.resolve(controllerRoot,...String(receipt.source.scanManifestPath??'').split('/'));
+  if(!manifestPath.startsWith(campaignRoot+path.sep))throw new Error('SCAN_MANIFEST_PATH_ESCAPES_CAMPAIGN');
+  required(manifestPath,'frozen LIVE_SCAN source manifest');
+  if(digestFile(manifestPath)!==receipt.source.scanManifestSha256)throw new Error('SCAN_MANIFEST_FILE_DIGEST_MISMATCH');
+  const manifest=read(manifestPath);
+  const {manifestDigestSha256,...unsigned}=manifest;
+  const canonical=x=>Array.isArray(x)?'['+x.map(canonical).join(',')+']':x&&typeof x==='object'?'{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canonical(x[k])).join(',')+'}':JSON.stringify(x);
+  if(manifest.schemaVersion!=='curveyield-scan-source-manifest-v1'||manifest.inputMode!=='LIVE_SCAN'||
+     sha(canonical(unsigned))!==manifestDigestSha256||
+     manifestDigestSha256!==receipt.source.scanTargetSetSha256)
+    throw new Error('SCAN_TARGET_SET_IDENTITY_MISMATCH');
+  const requested=manifest.requestedTargets??[],targets=manifest.resolvedTargets??[],units=manifest.compilerUnits??[];
+  if(!requested.length||!targets.length||targets.length>64||!units.length)throw new Error('SCAN_SOURCE_TARGETS_INCOMPLETE');
+  if(requested.length!==receipt.source.originUrls.length)throw new Error('SCAN_SOURCE_REQUEST_COUNT_MISMATCH');
+  for(let i=0;i<requested.length;i++){
+    const u=new URL(receipt.source.originUrls[i]);
+    if(requested[i].toLowerCase()!==u.pathname.split('/').pop()?.toLowerCase())throw new Error('SCAN_REQUEST_URL_ADDRESS_MISMATCH');
+  }
+  if(deploy.status!=='PASS_LIVE_DEPLOYMENT'||deploy.deploymentProfile?.mode!=='LIVE'||
+     deploy.fork?.chainId!==manifest.chainId||deploy.fork?.initialBlock!==manifest.frozenBlock.number||
+     deploy.liveDeployment?.blockNumber!==manifest.frozenBlock.number||
+     deploy.liveDeployment?.blockHash?.toLowerCase()!==manifest.frozenBlock.hash.toLowerCase()||
+     deploy.scanSourceSnapshot?.manifestDigestSha256!==manifestDigestSha256)
+    throw new Error('SCAN_FROZEN_LIVE_EVIDENCE_MISMATCH');
+  const declared=deploy.deploymentProfile.contracts??[],observed=deploy.liveDeployment.contracts??[];
+  if(declared.length!==targets.length||observed.length!==targets.length)throw new Error('SCAN_LIVE_TARGET_COVERAGE_INCOMPLETE');
+  const compiled=artifacts.artifacts??[];
+  for(let i=0;i<targets.length;i++){
+    const t=targets[i],d=declared[i],live=observed[i];
+    if(d.address.toLowerCase()!==t.address||live.address.toLowerCase()!==t.address||
+       d.qualifiedName!==t.qualifiedName||live.compilationUnitId!==t.compilationUnitId||
+       live.runtimeSha256!==t.runtimeSha256||live.sourceBinding!=='EXACT_COMPILED_RUNTIME')
+      throw new Error('SCAN_TARGET_CODE_BINDING_MISMATCH: '+t.address);
+    if(!compiled.some(a=>a.compilationUnitId===t.compilationUnitId&&a.qualifiedName===t.qualifiedName))
+      throw new Error('SCAN_TARGET_ARTIFACT_BINDING_MISSING: '+t.address);
+    if(!units.some(u=>u.unitId===t.compilationUnitId&&u.qualifiedName===t.qualifiedName&&u.address===t.address))
+      throw new Error('SCAN_TARGET_COMPILER_INPUT_BINDING_MISSING: '+t.address);
+    if(t.proxyImplementation&&!targets.some(candidate=>candidate.address===t.proxyImplementation&&candidate.role==='IMPLEMENTATION'))
+      throw new Error('SCAN_PROXY_IMPLEMENTATION_COVERAGE_MISSING: '+t.address);
+  }
+  for(const address of requested)if(!targets.some(t=>t.address===address&&t.role==='REQUESTED'))
+    throw new Error('SCAN_REQUESTED_TARGET_NOT_VERIFIED: '+address);
+  evidence.scanSourceManifest=manifestPath;
+}
+
 if(deploy.reconciliation){
   const rawFile=required(path.join(campaignRoot,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json'),'immutable original fork deploy evidence');
   if(digestV2(fs.readFileSync(rawFile))!==deploy.reconciliation.originalEvidenceSha256)throw new Error('Phase-0 original deployment evidence is not byte-identical');
