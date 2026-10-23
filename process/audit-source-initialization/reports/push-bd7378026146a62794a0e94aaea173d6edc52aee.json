@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "curveyield-audit-source-initialization-report-v1",
+  "request": {
+    "requestId": "push-bd7378026146a62794a0e94aaea173d6edc52aee",
+    "singleAgentSimulation": false,
+    "sourceUrl": "",
+    "scanUrls": [
+      "https://etherscan.io/address/0x6b175474e89094c44da98b954eedeac495271d0f#code"
+    ],
+    "inputMode": "LIVE_SCAN",
+    "agentChats": {
+      "reviewer-1": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
+      "reviewer-2": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5e9f-3970-83e8-bc63-f10d2e09e1e9",
+      "reviewer-3": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5ea6-cf04-83e8-9fa0-1d01648d86f0",
+      "reviewer-4": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5eab-0ff8-83e8-821f-a065d3c45384"
+    },
+    "masterChatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
+    "testExecutorChatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5eb2-9a00-83e8-8c6e-711003caf181",
+    "backupChatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6adaeaa8-a1f4-83e8-a1e1-c421fdb12a65"
+  },
+  "status": "PASS",
+  "source": {
+    "provider": "etherscan-v2",
+    "inputMode": "LIVE_SCAN",
+    "canonicalUrl": "https://etherscan.io/address/0x6b175474e89094c44da98b954eedeac495271d0f",
+    "filename": "live-ethereum-Dai-6b175474.zip",
+    "sha256": "457b6121c4a613730251f2f81ae17d27c9c08674696b73d1f5828c623e705ee5",
+    "byteLength": 9054,
+    "repository": "CurveYield2/Audit-Controller",
+    "ref": "main",
+    "path": "campaigns/live-ethereum-Dai-6b175474 r2/source/live-ethereum-Dai-6b175474.zip",
+    "gitBlobSha": "97ead54056592ef2bc9f74e4b18c5dbd98b3fd10",
+    "admissionCommit": "5b3768e47fe0db6fcf912c7a2a8e06919754e6ff",
+    "unpackedTreeSha256": "8cb9b22e43269d7db8d73dfd0604d616245d0fc281f7931c9a50a076d6765de3"
+  },
+  "campaign": {
+    "campaignId": "live-ethereum-dai-6b175474-r2",
+    "campaignGenerationId": "live-ethereum-dai-6b175474-r2-g1-20261023T051618Z",
+    "campaignName": "live-ethereum-Dai-6b175474 r2",
+    "workspacePath": "campaigns/live-ethereum-Dai-6b175474 r2",
+    "controllerRef": "main",
+    "initializationCommit": "2f2123ece7ec1a3425d9237c8d76dcbcff633366"
+  },
+  "workflowRunId": "39904810700",
+  "completedAt": "2026-10-23T05:16:20Z"
+}
