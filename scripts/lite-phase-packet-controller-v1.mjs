@@ -1643,7 +1643,11 @@ if(sequence===10){
 else{
   const nextReviewer=assignmentReviewer(nextSequence,authorityRoot,root);
   const nextStatus=fresh||isFreshBoundary(nextSequence,authorityRoot,root)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
-  nextAssignment=(sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)
+  // Master-amended Phase 3 must not pre-create Phase-4 work before the
+  // accepted-master transaction initializes the single discovery assignment.
+  const postMasterDiscovery=Boolean(sequence===3&&masterAmendmentRefreshSha&&
+    isReassignedV13AuthorityV1({root,authorityRoot})&&activeDetectionPolicyV1(predecessor));
+  nextAssignment=((sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)||postMasterDiscovery)
  ?null
  :preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
   if(sequence===3&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
@@ -1665,7 +1669,7 @@ else{
       nextAssignment.status='WAITING_FOR_DISCOVERY';
     }
   }
-  directory.currentAssignment=nextAssignment;directory.campaignStatus=(sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)?'MASTER_AMENDMENT_REFRESH':discoveryStarted?(directory.discovery.status==='COMPLETE'?'ACTIVE':'WAITING_FOR_DISCOVERY'):(nextStatus==='WAITING_FOR_SUCCESSOR_AGENT'?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE');directory.updatedAt=now;
+  directory.currentAssignment=nextAssignment;directory.campaignStatus=((sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)||postMasterDiscovery)?'MASTER_AMENDMENT_REFRESH':discoveryStarted?(directory.discovery.status==='COMPLETE'?'ACTIVE':'WAITING_FOR_DISCOVERY'):(nextStatus==='WAITING_FOR_SUCCESSOR_AGENT'?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE');directory.updatedAt=now;
 }
 writeJson(directoryFile,directory);
 const feedback='CONTROLLER_PHASE_PASS: Phase '+sequence+' validated and sealed.'+(nextAssignment?' Next authorized assignment: Phase '+nextAssignment.phaseSequence+' / '+nextAssignment.reviewer+'.':' Campaign complete.');
