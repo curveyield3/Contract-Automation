@@ -14,7 +14,7 @@ on:
       - 'process/dai-master-targeted-tests/trigger_v1.json'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   execute:
