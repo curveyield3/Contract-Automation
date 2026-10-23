@@ -1,4 +1,4 @@
-name: Audit Source Initialization v2
+name: Audit Source Initialization v3
 
 on:
   workflow_dispatch:
@@ -9,8 +9,12 @@ on:
         default: false
         type: boolean
       source_url:
-        description: Direct URL to one ZIP file on Google Drive or GitHub
-        required: true
+        description: Optional direct ZIP file URL (mutually exclusive with scan_urls)
+        required: false
+        type: string
+      scan_urls:
+        description: "One or more Etherscan/KatanaScan contract page links, separated by newlines (instead of ZIP)"
+        required: false
         type: string
       agent_chat_1_url:
         description: Existing ChatGPT conversation URL for reviewer-1
@@ -70,6 +74,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           DISPATCH_URL: ${{ inputs.source_url }}
+          DISPATCH_SCAN_URLS: ${{ inputs.scan_urls }}
           DISPATCH_SIMULATION: ${{ inputs.single_agent_simulation }}
           DISPATCH_CHAT_1_URL: ${{ inputs.agent_chat_1_url }}
           DISPATCH_CHAT_2_URL: ${{ inputs.agent_chat_2_url }}
@@ -85,6 +90,7 @@ jobs:
 
           if [ "$EVENT_NAME" = 'workflow_dispatch' ]; then
             source_url="$DISPATCH_URL"
+            scan_urls="$(SCAN_INPUT="$DISPATCH_SCAN_URLS" python3 -c 'import os,json; s=os.environ.get("SCAN_INPUT",""); print(json.dumps([x.strip() for x in s.splitlines() if x.strip()],separators=(",",":")))')"
             agent_chat_1_url="$DISPATCH_CHAT_1_URL"
             agent_chat_2_url="$DISPATCH_CHAT_2_URL"
             agent_chat_3_url="$DISPATCH_CHAT_3_URL"
@@ -105,6 +111,7 @@ jobs:
             }
             request="${requests[0]}"
             source_url="$(jq -r '.source_url // empty' "$request")"
+            scan_urls="$(jq -c 'if (.scan_urls // null) == null then [] elif (.scan_urls | type) == "array" then .scan_urls else [(.scan_urls | tostring)] end' "$request")"
             agent_chat_1_url="$(jq -r '.agent_chat_1_url // empty' "$request")"
             agent_chat_2_url="$(jq -r '.agent_chat_2_url // empty' "$request")"
             agent_chat_3_url="$(jq -r '.agent_chat_3_url // empty' "$request")"
@@ -116,7 +123,15 @@ jobs:
             request_id="push-$GITHUB_SHA"
           fi
 
-          test -n "$source_url" || { echo "::error::source_url is required"; exit 1; }
+          if [ -n "$source_url" ] && [ "$scan_urls" != '[]' ]; then
+            echo "::error::SOURCE_INPUT_CONFLICT: provide source_url OR scan_urls, never both"; exit 1
+          fi
+          if [ -z "$source_url" ] && [ "$scan_urls" = '[]' ]; then
+            echo "::error::SOURCE_INPUT_MISSING: provide source_url or scan_urls"; exit 1
+          fi
+          echo "$scan_urls" | jq -e 'type=="array" and length>=0 and length<=64 and all(.[]; type=="string")' >/dev/null || {
+            echo "::error::scan_urls must contain at most 64 strings"; exit 1
+          }
           if printf '%s' "$source_url" | grep -q $'[\r\n]'; then
             echo "::error::source_url contains a line break"
             exit 1
@@ -176,6 +191,7 @@ jobs:
           {
             echo "single_agent_simulation=$single_agent_simulation"
             echo "source_url=$source_url"
+            echo "scan_urls=$scan_urls"
             echo "agent_chat_1_url=$agent_chat_1_url"
             echo "agent_chat_2_url=$agent_chat_2_url"
             echo "agent_chat_3_url=$agent_chat_3_url"
@@ -200,6 +216,8 @@ jobs:
           CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
           AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           SOURCE_URL: ${{ steps.request.outputs.source_url }}
+          SCAN_URLS: ${{ steps.request.outputs.scan_urls }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
           AGENT_CHAT_1_URL: ${{ steps.request.outputs.agent_chat_1_url }}
           AGENT_CHAT_2_URL: ${{ steps.request.outputs.agent_chat_2_url }}
           AGENT_CHAT_3_URL: ${{ steps.request.outputs.agent_chat_3_url }}
