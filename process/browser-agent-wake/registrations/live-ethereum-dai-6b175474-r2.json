@@ -3,20 +3,20 @@
   "singleAgentSimulation": false,
   "campaignId": "live-ethereum-dai-6b175474-r2",
   "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
   "browserRoutine": "",
   "agentChats": {
-    "reviewer-1": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
-    "reviewer-2": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5e9f-3970-83e8-bc63-f10d2e09e1e9",
-    "reviewer-3": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5ea6-cf04-83e8-9fa0-1d01648d86f0",
-    "reviewer-4": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5eab-0ff8-83e8-821f-a065d3c45384",
-    "master-reviewer": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
-    "test-executor": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5eb2-9a00-83e8-8c6e-711003caf181",
-    "backup": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6adaeaa8-a1f4-83e8-a1e1-c421fdb12a65"
+    "reviewer-1": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
+    "reviewer-2": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5e9f-3970-83e8-bc63-f10d2e09e1e9",
+    "reviewer-3": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5ea6-cf04-83e8-9fa0-1d01648d86f0",
+    "reviewer-4": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eab-0ff8-83e8-821f-a065d3c45384",
+    "master-reviewer": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
+    "test-executor": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eb2-9a00-83e8-8c6e-711003caf181",
+    "backup": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adaeaa8-a1f4-83e8-a1e1-c421fdb12a65"
   },
-  "backupChatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6adaeaa8-a1f4-83e8-a1e1-c421fdb12a65",
+  "backupChatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adaeaa8-a1f4-83e8-a1e1-c421fdb12a65",
   "masterReviewer": {
-    "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
+    "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
     "reasoning": "MAXIMUM",
     "repairModel": "SOL",
     "repairReasoning": "HIGH"
@@ -27,7 +27,7 @@
   },
   "activeChat": {
     "name": "reviewer-1",
-    "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5e98-5e58-83e8-a901-838dea1fe9df"
+    "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5e98-5e58-83e8-a901-838dea1fe9df"
   },
   "wakeMessage": "",
   "thinkingEffort": "high",
