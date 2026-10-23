@@ -967,9 +967,9 @@ if(reviewKind==='master'){
     const evidenceFailures=verifyMasterTargetedTestEvidence({root,campaignPath,directory});
     if(evidenceFailures.length)emit('MASTER_REVIEW_INVALID','Master-directed targeted-test evidence failed exact revalidation: '+evidenceFailures.join('; '));
   }
-  // Legacy sealed Phase-5 machine failures cannot be accepted unchanged
-  // at the Reviewer-2 master-review boundary. An amended segment is
-  // reexecuted through the new mandatory pre-seal gate.
+  // A sealed Phase-5 machine failure cannot be accepted unchanged at any
+  // bound master-review segment containing Phase 5. An amended segment is
+  // reexecuted through the mandatory pre-seal gate.
   if(result.status==='MASTER_REVIEW_ACCEPTED'&&pending.boundaryPhase===10){
     const unresolved=unresolvedFinalCandidateFailures({root,campaignPath,directory});
     if(unresolved.length)emit('MASTER_REVIEW_INVALID','Final audit cannot COMPLETE with unresolved material candidates. Request reviewer-directed targeted tests: '+unresolved.join('; '));
@@ -1025,6 +1025,11 @@ if(reviewKind==='master'){
     }else if(isReassignedV13AuthorityV1({root,authorityRoot:masterAuthorityRoot})&&pending.boundaryPhase===6){
       // Phase-8 delivery must wait for the master-accepted Phase-7 marker.
       directory.currentAssignment=null;directory.campaignStatus='MASTER_AMENDMENT_REFRESH';
+    }else if(isReassignedV13AuthorityV1({root,authorityRoot:masterAuthorityRoot})&&pending.boundaryPhase===3&&
+      activeDetectionPolicyV1(readJson(requiredFile(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'),'Phase-0 source receipt')))){
+      // Discovery is the successor admission. Prepare the Phase-4 work form once,
+      // after discovery state exists, rather than writing an ordinary assignment first.
+      directory.currentAssignment=null;directory.campaignStatus='WAITING_FOR_DISCOVERY';
     }else{
       nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:plan.nextPhaseSequence,reviewer:assignmentReviewer(plan.nextPhaseSequence,masterAuthorityRoot,root),predecessorReceiptPath:pending.lastSealedReceiptPath,derivedInputPaths:plan.derivedInputPaths??[],status:'WAITING_FOR_SUCCESSOR_AGENT',prefillContext:plan.prefillContext??{}});
       directory.currentAssignment=nextAssignment;directory.campaignStatus='WAITING_FOR_SUCCESSOR_AGENT';
@@ -1638,7 +1643,11 @@ if(sequence===10){
 else{
   const nextReviewer=assignmentReviewer(nextSequence,authorityRoot,root);
   const nextStatus=fresh||isFreshBoundary(nextSequence,authorityRoot,root)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
-  nextAssignment=(sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)
+  // Master-amended Phase 3 must not pre-create Phase-4 work before the
+  // accepted-master transaction initializes the single discovery assignment.
+  const postMasterDiscovery=Boolean(sequence===3&&masterAmendmentRefreshSha&&
+    isReassignedV13AuthorityV1({root,authorityRoot})&&activeDetectionPolicyV1(predecessor));
+  nextAssignment=((sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)||postMasterDiscovery)
  ?null
  :preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
   if(sequence===3&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
@@ -1660,7 +1669,7 @@ else{
       nextAssignment.status='WAITING_FOR_DISCOVERY';
     }
   }
-  directory.currentAssignment=nextAssignment;directory.campaignStatus=(sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)?'MASTER_AMENDMENT_REFRESH':discoveryStarted?(directory.discovery.status==='COMPLETE'?'ACTIVE':'WAITING_FOR_DISCOVERY'):(nextStatus==='WAITING_FOR_SUCCESSOR_AGENT'?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE');directory.updatedAt=now;
+  directory.currentAssignment=nextAssignment;directory.campaignStatus=((sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)||postMasterDiscovery)?'MASTER_AMENDMENT_REFRESH':discoveryStarted?(directory.discovery.status==='COMPLETE'?'ACTIVE':'WAITING_FOR_DISCOVERY'):(nextStatus==='WAITING_FOR_SUCCESSOR_AGENT'?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE');directory.updatedAt=now;
 }
 writeJson(directoryFile,directory);
 const feedback='CONTROLLER_PHASE_PASS: Phase '+sequence+' validated and sealed.'+(nextAssignment?' Next authorized assignment: Phase '+nextAssignment.phaseSequence+' / '+nextAssignment.reviewer+'.':' Campaign complete.');

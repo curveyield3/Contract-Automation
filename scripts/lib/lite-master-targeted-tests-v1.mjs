@@ -40,7 +40,7 @@ export function registerMasterTargetedTests({root,campaignPath,directory,planPat
     throw new Error('targeted-test plan campaign/segment/source binding mismatch');
   const dedicated=hasTestExecutor(directory);
   if(['reviewer-3-phases-05-07','reviewer-3-phases-05-06'].includes(pending.segmentId)&&!dedicated)
-    throw new Error('v13 phase-5-to-7 master test directives require a registered independent test-executor chat');
+    throw new Error('Phase-5/6 master test directives (and legacy Phase-5/7 directives) require a registered independent test-executor chat');
   if(plan.assignedReviewer===TEST_EXECUTOR?!dedicated:(!REVIEWERS.has(plan.assignedReviewer)||plan.assignedReviewer===pending.reviewerId))
     throw new Error('targeted tests must be assigned to the test executor or a different registered reviewer');
   const assignedReviewer=dedicated?TEST_EXECUTOR:plan.assignedReviewer;

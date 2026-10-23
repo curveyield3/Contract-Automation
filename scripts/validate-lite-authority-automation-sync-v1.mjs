@@ -88,6 +88,11 @@ for(let phase=1;phase<=10;phase++){
   need(contract.phase?.id===`phase-${phase}`,`phase ${phase}: contract phase.id must match runtime assignment phaseId`);
   need(schema.phase===phase,`phase ${phase}: schema sequence mismatch`);
   need(template.phase===phase,`phase ${phase}: template sequence mismatch`);
+  if(modernV13){
+    const expectedReviewer=boundReviewerForPhaseV1({root:controllerRoot,authorityRoot:authorityRel,phase});
+    need(schema.executor===expectedReviewer,`phase ${phase}: schema executor disagrees with bound reviewer lineup`);
+    need(contract.phase?.reviewerLineage===expectedReviewer,`phase ${phase}: contract reviewer lineage disagrees with bound reviewer lineup`);
+  }
   need(contract.workSchema===`phases/phase-${phase}/PHASE_${n}_SCHEMA_v1.json`,`phase ${phase}: contract workSchema mismatch`);
   need(contract.workForm===schema.workForm?.campaignPath,`phase ${phase}: work-form path mismatch`);
   need(schema.workForm?.template===`phases/phase-${phase}/resources/PHASE_${n}_WORK_FORM_TEMPLATE_v1.json`,`phase ${phase}: schema template path mismatch`);
