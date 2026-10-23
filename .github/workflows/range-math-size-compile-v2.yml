@@ -1,0 +1,61 @@
+name: RangeManager and RangeMath runtime compilation v2
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/range-math-size-compile-v2.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Compile source, print deployed bytecode sizes (no tests)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd scratch/range-math-v2
+          mkdir -p source vendor
+          cp RangeManager_v2.sol RangeMath_v2.sol source/
+          cp -R router lib positions source/
+          git clone --depth 1 -q --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git vendor/openzeppelin-contracts
+          cat > foundry.toml <<'EOF'
+          [profile.default]
+          src = "source"
+          out = "out"
+          test = "unused"
+          libs = ["vendor"]
+          solc_version = "0.8.30"
+          optimizer = true
+          optimizer_runs = 1
+          via_ir = true
+          bytecode_hash = "ipfs"
+          remappings = ["@openzeppelin/contracts/=vendor/openzeppelin-contracts/contracts/"]
+          EOF
+          for runs in 1 200; do
+            sed -i "s/^optimizer_runs = .*/optimizer_runs = $runs/" foundry.toml
+            rm -rf out cache
+            echo "=== BUILD runs=$runs ==="
+            forge build --skip unused
+            python3 - "$runs" <<'PY'
+          import json,sys
+          from pathlib import Path
+          expected=("RangeManager","RangeMath","BotSwapRouter")
+          for name in expected:
+              found=list(Path("out").rglob(name+".json"))
+              assert len(found)==1,(name,found)
+              data=json.loads(found[0].read_text())
+              b=data.get("deployedBytecode",{}).get("object","")
+              assert b.startswith("0x") and len(b)>2,(name,found)
+              n=(len(b)-2)//2
+              print(f"DEPLOYED_BYTES contract={name} runs={sys.argv[1]} bytes={n} under_eip170={n<24576}")
+          PY
+          done
