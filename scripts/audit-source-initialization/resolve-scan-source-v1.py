@@ -247,8 +247,10 @@ def main():
             if p.endswith(".sol"):
                 files["live-scan-project/contracts/" + p.rsplit("/", 1)[-1]] = data
                 break
-    primary_paths = sorted({u["qualifiedName"].split(":")[0] for u in units
-                            if next(t for t in target_records if t["address"] == u["address"])["role"] == "REQUESTED"})
+    # Every executed implementation is an audit surface, even when the user
+    # supplied only the proxy address. Do not silently demote verified proxy
+    # implementations to excluded/dependency-only source.
+    primary_paths = sorted({t["qualifiedName"].split(":")[0] for t in target_records})
     files["live-scan-project/audit-scope.json"] = (json.dumps({
         "schemaVersion": "curveyield-audit-scope-v1", "inScopePaths": primary_paths},
         sort_keys=True, indent=2) + "\n").encode()
