@@ -705,7 +705,9 @@ async function runNormalChromeExistingSession(chromium) {
 
     // Text box: on the button's row, left of it, when the button was found.
     const composerX = discRow ? Math.max(Math.round(width * 0.40), discRow.x - 300) : Math.round(width * 0.63);
-    const composerY = discRow ? discRow.y : Math.round(height - 72);
+    // Project chats anchor the composer higher than standalone /c/ chats on
+    // the fixed 1920x1080 X11 desktop (observed Y≈885, versus Y≈1008).
+    const composerY = discRow ? discRow.y : Math.round(height - (requestedUrl.includes('/g/g-p-') ? 195 : 72));
     await x11Key(['mousemove', '--sync', String(composerX), String(composerY)], 'x11-composer-move');
     await page.waitForTimeout(randomDelayMs(180, 360));
     await x11Key(['click', '1'], 'x11-composer-click');
