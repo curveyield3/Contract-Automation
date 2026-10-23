@@ -27,7 +27,7 @@ jobs:
             echo "::error::AUDIT_CONTROLLER_GITHUB_TOKEN is absent"
             exit 1
           fi
-          for spec in 'identity https://api.github.com/user' 'controller-repo https://api.github.com/repos/CurveYield2/Audit-Controller'; do
+          for spec in 'identity https://api.github.com/user' 'controller-repo https://api.github.com/repos/curveyield3/Audit-Controller'; do
             name="${spec%% *}"
             url="${spec#* }"
             status="$(curl --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' -H 'Accept: application/vnd.github+json' -H "Authorization: Bearer $CONTROLLER_PAT" "$url")"
