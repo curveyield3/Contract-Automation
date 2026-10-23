@@ -1,0 +1,11 @@
+{
+  "single_agent_simulation": true,
+  "source_url": "https://github.com/CurveYield2/Contract-Automation/raw/refs/heads/main/process/audit-source-initialization/controller-dry-run-erc20-20261022.zip",
+  "agent_chat_1_url": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+  "agent_chat_2_url": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+  "agent_chat_3_url": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+  "agent_chat_4_url": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+  "master_chat_url": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+  "test_executor_chat_url": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+  "backup_chat_url": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b"
+}
