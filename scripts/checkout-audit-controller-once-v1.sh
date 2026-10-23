@@ -54,17 +54,28 @@ if [ -n "$campaign_path" ]; then
   [ -n "$directory_entry" ] || { echo 'receipt lacks campaign.campaignDirectoryEntryPath' >&2; exit 1; }
   [ -n "$homepage" ] || { echo 'receipt lacks authority.homepagePath' >&2; exit 1; }
   authority_package="$(dirname -- "$homepage")"
+  authority_sha="$(printf '%s' "$receipt_json" | jq -r '.authority.liteSkillSha256 // empty')"
+  [[ "$authority_sha" =~ ^[a-f0-9]{64}$ ]] || { echo 'receipt lacks exact authority SKILL digest' >&2; exit 1; }
   for p in "$directory_entry" "$authority_package"; do
     case "/$p/" in */../*|*/./*|//*) echo "unsafe receipt path: $p" >&2; exit 1;; esac
   done
-  # A superseded release leaves Current Authority; its frozen copy then resolves.
+  # A current logical package may exist even when the campaign is bound to its
+  # older immutable contents. Select frozen authority by EXACT receipt digest,
+  # never by directory existence alone.
   registry='audit-process/v7/frozen-authorities/FROZEN_AUTHORITY_REGISTRY_v1.json'
   frozen_package=''
-  if ! git -C "$destination" cat-file -e "FETCH_HEAD:$authority_package/SKILL.md" 2>/dev/null; then
-    frozen_package="$(git -C "$destination" show "FETCH_HEAD:$registry" 2>/dev/null \
-      | jq -r --arg p "$authority_package" '.entries[] | select(.logicalRoot == $p) | .frozenRoot' | head -n1)"
-    [ -n "$frozen_package" ] || { echo "authority package missing and not frozen: $authority_package" >&2; exit 1; }
+  frozen_package="$(git -C "$destination" show "FETCH_HEAD:$registry" 2>/dev/null \
+    | jq -r --arg p "$authority_package" --arg sha "$authority_sha" \
+      '.entries[]? | select(.logicalRoot == $p and .skillSha256 == $sha) | .frozenRoot' | head -n1)"
+  if [ -n "$frozen_package" ]; then
     case "/$frozen_package/" in */../*|*/./*|//*) echo "unsafe frozen path: $frozen_package" >&2; exit 1;; esac
+  else
+    current_skill="$(git -C "$destination" show "FETCH_HEAD:$authority_package/SKILL.md" 2>/dev/null \
+      | sha256sum | awk '{print $1}')"
+    [ "$current_skill" = "$authority_sha" ] || {
+      echo "receipt-bound authority is neither the current package nor an admitted frozen package: $authority_package" >&2
+      exit 1
+    }
   fi
   git -C "$destination" config core.sparseCheckout true
   git -C "$destination" config core.sparseCheckoutCone false
