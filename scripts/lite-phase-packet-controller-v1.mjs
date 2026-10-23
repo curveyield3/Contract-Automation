@@ -967,9 +967,9 @@ if(reviewKind==='master'){
     const evidenceFailures=verifyMasterTargetedTestEvidence({root,campaignPath,directory});
     if(evidenceFailures.length)emit('MASTER_REVIEW_INVALID','Master-directed targeted-test evidence failed exact revalidation: '+evidenceFailures.join('; '));
   }
-  // Legacy sealed Phase-5 machine failures cannot be accepted unchanged
-  // at the Reviewer-2 master-review boundary. An amended segment is
-  // reexecuted through the new mandatory pre-seal gate.
+  // A sealed Phase-5 machine failure cannot be accepted unchanged at any
+  // bound master-review segment containing Phase 5. An amended segment is
+  // reexecuted through the mandatory pre-seal gate.
   if(result.status==='MASTER_REVIEW_ACCEPTED'&&pending.boundaryPhase===10){
     const unresolved=unresolvedFinalCandidateFailures({root,campaignPath,directory});
     if(unresolved.length)emit('MASTER_REVIEW_INVALID','Final audit cannot COMPLETE with unresolved material candidates. Request reviewer-directed targeted tests: '+unresolved.join('; '));
@@ -1025,6 +1025,11 @@ if(reviewKind==='master'){
     }else if(isReassignedV13AuthorityV1({root,authorityRoot:masterAuthorityRoot})&&pending.boundaryPhase===6){
       // Phase-8 delivery must wait for the master-accepted Phase-7 marker.
       directory.currentAssignment=null;directory.campaignStatus='MASTER_AMENDMENT_REFRESH';
+    }else if(isReassignedV13AuthorityV1({root,authorityRoot:masterAuthorityRoot})&&pending.boundaryPhase===3&&
+      activeDetectionPolicyV1(readJson(requiredFile(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'),'Phase-0 source receipt')))){
+      // Discovery is the successor admission. Prepare the Phase-4 work form once,
+      // after discovery state exists, rather than writing an ordinary assignment first.
+      directory.currentAssignment=null;directory.campaignStatus='WAITING_FOR_DISCOVERY';
     }else{
       nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:plan.nextPhaseSequence,reviewer:assignmentReviewer(plan.nextPhaseSequence,masterAuthorityRoot,root),predecessorReceiptPath:pending.lastSealedReceiptPath,derivedInputPaths:plan.derivedInputPaths??[],status:'WAITING_FOR_SUCCESSOR_AGENT',prefillContext:plan.prefillContext??{}});
       directory.currentAssignment=nextAssignment;directory.campaignStatus='WAITING_FOR_SUCCESSOR_AGENT';
