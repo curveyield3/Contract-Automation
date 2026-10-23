@@ -79,7 +79,7 @@ async function detectProjectRoot(extractRoot){
     if(/(^|\/)package\.json$/.test(f)||/(^|\/)package-lock\.json$/.test(f)||/(^|\/)hardhat\.config\.(?:js|cjs|mjs|ts)$/.test(f)){
       candidates.add(path.posix.dirname(f));
     }
-    const m=f.match(/^(.*?)(?:\/contracts\/|\/src\/).+\.sol$/);
+    const m=f.match(/^(?:(.*?)\/)?(?:contracts|src)\/.+\.sol$/);
     if(m)candidates.add(m[1]||'.');
   }
   const scored=[];
