@@ -621,8 +621,12 @@ contract RangeManager {
             _path(tokenIn, tokenOut, x);
             return;
         }
-        // Dust pass: only the router failure is ignored; approval failures remain fatal.
-        _routerSwap(tokenIn, tokenOut, x, false);
+        // dust pass: one direct router swap, its failure ignored
+        _safe(tokenIn, abi.encodeCall(IERC20M.approve, (address(router), x)));
+        SAFE.execTransactionFromModule(
+            address(router), 0, abi.encodeCall(IRouterV2.swapExactInput, (tokenIn, tokenOut, x, 0, address(SAFE), block.timestamp)), 0
+        );
+        _safe(tokenIn, abi.encodeCall(IERC20M.approve, (address(router), 0)));
     }
 
     function _nextAllowed(uint256 id) internal view returns (uint256 at) {
@@ -782,17 +786,10 @@ contract RangeManager {
     function _swap(address tokenIn, address tokenOut, uint256 x) internal returns (uint256 out) {
         if (x == 0) return 0;
         uint256 b0 = _bal(tokenOut);
-        _routerSwap(tokenIn, tokenOut, x, true);
-        out = _bal(tokenOut) - b0;
-    }
-
-    /// @dev Shared approvals; only dust-router execution may fail without reverting.
-    function _routerSwap(address tokenIn, address tokenOut, uint256 x, bool strict) internal {
         _safe(tokenIn, abi.encodeCall(IERC20M.approve, (address(router), x)));
-        bytes memory data = abi.encodeCall(IRouterV2.swapExactInput, (tokenIn, tokenOut, x, 0, address(SAFE), block.timestamp));
-        if (strict) _safe(address(router), data);
-        else SAFE.execTransactionFromModule(address(router), 0, data, 0);
+        _safe(address(router), abi.encodeCall(IRouterV2.swapExactInput, (tokenIn, tokenOut, x, 0, address(SAFE), block.timestamp)));
         _safe(tokenIn, abi.encodeCall(IERC20M.approve, (address(router), 0)));
+        out = _bal(tokenOut) - b0;
     }
 
     function _setDeps(address[4] memory deps) internal {
