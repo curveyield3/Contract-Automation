@@ -312,3 +312,7 @@ jobs:
             dai-targeted-raw/
             TARGETED_RESULT_v1.json
           if-no-files-found: warn
+
+      - name: Preserve raw evidence for controller relay
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: bash scripts/dai-targeted-preserve-evidence-v1.sh
