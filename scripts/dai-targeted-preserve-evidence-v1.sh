@@ -8,4 +8,14 @@ git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 git add "$dest"
 git commit -m "test(dai): preserve raw evidence for execution ${GITHUB_RUN_ID}"
-git push origin HEAD:main
+for attempt in 1 2 3 4; do
+  git fetch origin main
+  git rebase origin/main
+  if git push origin HEAD:main; then
+    echo "Evidence committed after attempt $attempt"
+    exit 0
+  fi
+  sleep "$attempt"
+done
+echo "::error::Evidence retention push failed after four rebases" >&2
+exit 1
