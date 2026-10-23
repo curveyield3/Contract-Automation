@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
-import {assertPhase0ForkIdentity} from '../../packages/github-native-sim/src/phase0-deployment-profile-v1.mjs';
+import {keccak256} from 'ethers';
+import {assertPhase0ForkIdentity,compareLiveRuntimeV1} from '../../packages/github-native-sim/src/phase0-deployment-profile-v1.mjs';
 export const EXCLUSIONS_V2=new Set(['EXCLUDED_DUPLICATE_FRAMEWORK','EXCLUDED_NON_DEPLOYMENT_UTILITY','EXCLUDED_OTHER_CHAIN']);
 export const digestV2=value=>createHash('sha256').update(value).digest('hex');
 export function assertDeployGateEvidenceV2(e){
@@ -11,7 +12,16 @@ export function assertDeployGateEvidenceV2(e){
     if(!/^[0-9a-f]{64}$/.test(e.sourceSha256??'')||!Array.isArray(rows)||!rows.length||rows.length!==e.deploymentProfile.contracts?.length||rows.length!==live.contracts?.length)throw new Error('Incomplete source-bound LIVE inventory');
     if(!Array.isArray(e.attempts)||e.attempts.length||!Array.isArray(e.scriptDispositions)||e.scriptDispositions.length)throw new Error('LIVE path must not execute deployment scripts');
     for(const row of rows){
-      if(row.sourceBinding!=='EXACT_COMPILED_RUNTIME'||!/^0x[0-9a-f]{64}$/i.test(row.runtimeCodeHash??'')||row.runtimeCodeHash!==row.compiledRuntimeCodeHash||!e.deploymentProfile.contracts.some(x=>x.address.toLowerCase()===row.address?.toLowerCase()&&x.qualifiedName===row.qualifiedName))throw new Error('LIVE target runtime/source mismatch');
+      const exact=row.sourceBinding==='EXACT_COMPILED_RUNTIME'&&row.runtimeCodeHash===row.compiledRuntimeCodeHash;
+      let metadataOnly=false;
+      if(e.scanSourceSnapshot&&row.sourceBinding==='EXECUTABLE_RUNTIME_MATCH_METADATA_HASH_ONLY'&&row.runtimeComparison){
+        const match=compareLiveRuntimeV1(row.runtimeComparison.observed,row.runtimeComparison.compiled,{allowScanMetadata:true});
+        metadataOnly=match.sourceBinding===row.sourceBinding&&match.executableRuntimeSha256===row.executableRuntimeSha256&&
+          JSON.stringify(match.metadataDifference)===JSON.stringify(row.metadataDifference)&&
+          keccak256(row.runtimeComparison.observed)===row.runtimeCodeHash&&keccak256(row.runtimeComparison.compiled)===row.compiledRuntimeCodeHash&&
+          digestV2(Buffer.from(row.runtimeComparison.observed.slice(2),'hex'))===row.runtimeSha256&&Boolean(row.sourceBindingLimitation);
+      }
+      if((!exact&&!metadataOnly)||!/^0x[0-9a-f]{64}$/i.test(row.runtimeCodeHash??'')||!e.deploymentProfile.contracts.some(x=>x.address.toLowerCase()===row.address?.toLowerCase()&&x.qualifiedName===row.qualifiedName))throw new Error('LIVE target runtime/source mismatch');
     }
     if(e.scanSourceSnapshot){
       const snapshot=e.scanSourceSnapshot,targets=snapshot.resolvedTargets??[];
