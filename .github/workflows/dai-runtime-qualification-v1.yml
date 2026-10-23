@@ -36,6 +36,7 @@ jobs:
               const j=await r.json();if(j.error)throw Error('RPC error code '+j.error.code);
               if(!r.ok)throw Error('RPC HTTP '+r.status);return j.result;}finally{clearTimeout(timer);}
           }
+          (async()=>{
           const block='0x1909776',chain=await rpc('eth_chainId',[]);
           if(chain!=='0x1')throw Error('Wrong chain ID: '+chain);
           const head=await rpc('eth_getBlockByNumber',[block,false]);if(head?.hash?.toLowerCase()!==output.expectedBlockHash)throw Error('historical block hash mismatch');
@@ -67,6 +68,7 @@ jobs:
           const target='process/dai-master-targeted-tests/qualification/bytecode-39945819265-v1.json';
           fs.writeFileSync(target,JSON.stringify(output,null,2)+'\n');
           console.log('Historical RPC and compiler comparison:',JSON.stringify(output));
+          })().catch(e=>{console.error('QUALIFICATION_FAILED',String(e));process.exitCode=1;});
           NODE
       - name: Upload qualification evidence
         if: always()
