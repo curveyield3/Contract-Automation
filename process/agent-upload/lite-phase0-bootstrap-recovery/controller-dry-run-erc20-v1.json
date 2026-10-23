@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "curveyield-lite-phase0-bootstrap-recovery-v1",
+  "campaign_id": "controller-dry-run-erc20-20261022-r1",
+  "campaign_path": "campaigns/controller-dry-run-erc20-20261022 r1",
+  "audit_controller_ref": "main"
+}
