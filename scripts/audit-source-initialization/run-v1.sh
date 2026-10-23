@@ -114,6 +114,51 @@ else
     jq -e '.reviewerLineup.schemaVersion=="curveyield-v13-reviewer-lineup-v1" and .reviewerLineup.discoveryAttacker=="reviewer-2"' "${authority_packages[0]}/MANIFEST.json" >/dev/null
   fi
 
+  # A previous attempt can publish the campaign and receipt before the report
+  # or browser registration write succeeds. Recover by immutable request ID;
+  # never create a new rN for that same request after a 409/interruption.
+  recovered=false
+  while IFS= read -r directory_file; do
+    if jq -e --arg id "$REQUEST_ID" '.sourceInitializationRequestId==$id' "$directory_file" >/dev/null; then
+      [ "$recovered" = false ] || { echo "::error::AMBIGUOUS_SOURCE_REQUEST_RECOVERY"; exit 1; }
+      recovered=true
+      campaign_id="$(jq -r '.campaignId' "$directory_file")"
+      generation_id="$(jq -r '.campaignGenerationId' "$directory_file")"
+      campaign_name="$(jq -r '.campaignName' "$directory_file")"
+      campaign_root="$(jq -r '.workspacePath' "$directory_file")"
+    fi
+  done < <(find 'Audit Campaign Directory/campaigns' -type f -name '*.json' -print 2>/dev/null | LC_ALL=C sort)
+  if [ "$recovered" = true ]; then
+    literal_recovery="$(printf '%s' "$campaign_root" | sed -e 's/[][*?!#\\]/\\&/g')"
+    git sparse-checkout add "/$literal_recovery/"
+    prior_receipt="$campaign_root/receipts/PHASE_00_RECEIPT_v1.json"
+    test -f "$prior_receipt" || { echo "::error::SOURCE_ALREADY_ADMITTED_RECEIPT_MISSING"; exit 1; }
+    jq -e --arg id "$REQUEST_ID" '.campaign.sourceInitializationRequestId==$id' "$prior_receipt" >/dev/null || {
+      echo "::error::SOURCE_REQUEST_RECOVERY_IDENTITY_CONFLICT"; exit 1
+    }
+    if [ "$input_mode" = LIVE_SCAN ]; then
+      jq -e --argjson urls "$SCAN_URLS" '.source.inputMode=="LIVE_SCAN" and .source.originUrls==$urls' "$prior_receipt" >/dev/null || {
+        echo "::error::SOURCE_REQUEST_RECOVERY_URL_SET_CONFLICT"; exit 1
+      }
+    else
+      jq -e --arg url "$canonical_url" '.source.inputMode=="ZIP" and .source.originUrl==$url' "$prior_receipt" >/dev/null || {
+        echo "::error::SOURCE_REQUEST_RECOVERY_ZIP_CONFLICT"; exit 1
+      }
+    fi
+    source_sha="$(jq -r '.source.sha256' "$prior_receipt")"
+    source_size="$(jq -r '.source.byteLength' "$prior_receipt")"
+    source_path="$(jq -r '.source.archivePath' "$prior_receipt")"
+    source_blob="$(jq -r '.source.archiveGitBlobSha' "$prior_receipt")"
+    admission_commit="$(jq -r '.source.archiveCommit' "$prior_receipt")"
+    tree_sha="$(jq -r '.source.extractedTreeSha256' "$prior_receipt")"
+    provider="$(jq -r '.source.originProvider' "$prior_receipt")"
+    canonical_url="$(jq -r '.source.originUrl' "$prior_receipt")"
+    filename="$(jq -r '.source.generatedArchiveFilename // .source.uploadedFilename' "$prior_receipt")"
+    init_commit="$(git rev-parse HEAD)"
+    echo "::notice::SOURCE_ALREADY_ADMITTED: recovering existing $campaign_id for request $REQUEST_ID"
+  fi
+
+  if [ "$recovered" = false ]; then
   success=false
   for attempt in 1 2 3 4 5; do
     git fetch --depth 1 --filter=blob:none origin main
@@ -201,6 +246,7 @@ else
     sleep $((attempt * 2))
   done
   [ "$success" = true ] || { echo "::error::Failed to publish Audit Source Initialization to Audit-Controller main."; exit 1; }
+  fi
 
   export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
   jq -n \
