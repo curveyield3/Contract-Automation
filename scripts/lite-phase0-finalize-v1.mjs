@@ -97,7 +97,7 @@ if(receipt.source?.inputMode==='LIVE_SCAN'){
       throw new Error('SCAN_TARGET_CODE_BINDING_MISMATCH: '+t.address);
     if(!compiled.some(a=>a.compilationUnitId===t.compilationUnitId&&a.qualifiedName===t.qualifiedName))
       throw new Error('SCAN_TARGET_ARTIFACT_BINDING_MISSING: '+t.address);
-    if(!units.some(u=>u.unitId===t.compilationUnitId&&u.qualifiedName===t.qualifiedName&&u.address===t.address))
+    if(!units.some(u=>u.unitId===t.compilationUnitId&&(u.targetBindings??[{address:u.address,qualifiedName:u.qualifiedName}]).some(binding=>binding.qualifiedName===t.qualifiedName&&binding.address===t.address)))
       throw new Error('SCAN_TARGET_COMPILER_INPUT_BINDING_MISSING: '+t.address);
     if(t.proxyImplementation&&!targets.some(candidate=>candidate.address===t.proxyImplementation&&candidate.role==='IMPLEMENTATION'))
       throw new Error('SCAN_PROXY_IMPLEMENTATION_COVERAGE_MISSING: '+t.address);
