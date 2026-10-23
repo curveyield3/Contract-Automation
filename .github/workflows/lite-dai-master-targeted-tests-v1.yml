@@ -1,10 +1,17 @@
 name: Lite DAI Master Targeted Tests v1
 
 on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/lite-dai-master-targeted-tests-v1.yml'
+      - 'process/dai-master-targeted-tests/trigger_v1.json'
   push:
     branches: [main]
     paths:
       - '.github/workflows/lite-dai-master-targeted-tests-v1.yml'
+      - 'process/dai-master-targeted-tests/trigger_v1.json'
 
 permissions:
   contents: read
@@ -15,20 +22,13 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - name: Select Audit-Controller credential
-        env:
-          AUDIT_CONTROLLER_PRIMARY_TOKEN: \${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          PREFLIGHTSIM_FALLBACK_TOKEN: \${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
-        run: bash scripts/select-audit-controller-token.sh
       - name: Fetch exact DAI compiler unit and install isolated EVM
         env:
-          GH_TOKEN: \${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dai-targeted-raw
-          gh api "repos/CurveYield2/Audit-Controller/contents/campaigns/live-ethereum-Dai-6b175474%20r2/source/live-scan-project/scan-compiler-units/scan-77be660f6569a392.json?ref=main" --jq '.content' | base64 -d > dai-targeted-raw/compiler-unit.json
+          cp process/dai-master-targeted-tests/source-compiler-unit_v1.json dai-targeted-raw/compiler-unit.json
           sha256sum dai-targeted-raw/compiler-unit.json > dai-targeted-raw/COMPILER_UNIT_SHA256_v1.txt
           set +e
           npm install --prefix /tmp/dai-targeted-deps --no-package-lock --no-audit --no-fund solc@0.5.12 ethers@6.15.0 ganache@7.9.2 > dai-targeted-raw/INSTALL_LOG_v1.txt 2>&1
@@ -37,9 +37,8 @@ jobs:
           exit 0
       - name: Execute real EVM assertions, chain reads and preserve traces
         env:
-          GH_TOKEN: \${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          ETHEREUM_RPC: \${{ secrets.ETHEREUM_RPC }}
-          ETHERSCAN_API_KEY: \${{ secrets.ETHERSCAN_API_KEY }}
+          ETHEREUM_RPC: ${{ secrets.ETHEREUM_RPC }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
         shell: bash
         run: |
           set +e
@@ -57,7 +56,7 @@ jobs:
           const U=(v)=>String(v);
           async function main(){
             const ethers=require('ethers'),ganache=require('ganache'),solc=require('solc');
-            out.toolchain.solc=solc.version();out.toolchain.ethers=require('ethers/package.json').version;out.toolchain.ganache=require('ganache/package.json').version;
+            out.toolchain.solc=solc.version();out.toolchain.ethers=ethers.version;out.toolchain.ganache='7.9.2';
             const unit=JSON.parse(fs.readFileSync(root+'compiler-unit.json','utf8'));
             const source=unit.input.sources['Dai.sol'].content;
             const input=JSON.parse(JSON.stringify(unit.input));
@@ -277,9 +276,7 @@ jobs:
             cat dai-targeted-raw/EXECUTION_EXIT_v1.txt
           } > dai-targeted-raw/TOOLCHAIN_v1.txt
           exit 0
-      - name: Publish SHA-256 bound raw results and digest-bound master result
-        env:
-          GH_TOKEN: \${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+      - name: Build SHA-256 bound raw results and digest-bound master result
         shell: bash
         run: |
           set -euo pipefail
@@ -306,21 +303,7 @@ jobs:
           fs.writeFileSync('TARGETED_RESULT_v1.json',JSON.stringify(result,null,2)+'\n');
           fs.writeFileSync(root+'EVIDENCE_DIGESTS_v1.json',JSON.stringify({schemaVersion:'dai-targeted-evidence-digests-v1',evidence},null,2)+'\n');
           NODE
-          dir='campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4'
-          for file in dai-targeted-raw/*; do
-            name="$(basename "$file")"
-            content="$(base64 -w0 "$file")"
-            jq -n --arg message "audit(evidence): DAI targeted test $name" --arg content "$content" '{message:$message,content:$content,branch:"main"}' > /tmp/dai-gh-payload.json
-            for i in 1 2 3; do
-              if gh api -X PUT "repos/CurveYield2/Audit-Controller/contents/$dir/$name" --input /tmp/dai-gh-payload.json > /tmp/dai-gh-response.json 2>/tmp/dai-gh-error.log; then break; fi
-              if [ "$i" -eq 3 ]; then cat /tmp/dai-gh-error.log; exit 1; fi
-              sleep $((i*2))
-            done
-          done
-          result_path='campaigns/live-ethereum-Dai-6b175474 r2/work/master-review/reviewer-2-phase-04/targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/RESULT_v1.json'
-          jq -n --arg message "audit(result): DAI targeted tests v1" --arg content "$(base64 -w0 TARGETED_RESULT_v1.json)" '{message:$message,content:$content,branch:"main"}' > /tmp/dai-gh-payload.json
-          gh api -X PUT "repos/CurveYield2/Audit-Controller/contents/$result_path" --input /tmp/dai-gh-payload.json > /tmp/dai-gh-response.json
-          echo "Result submitted to $result_path"
+          echo 'Machine evidence and result staged in immutable GitHub Actions artifact; upload to original campaign requires post-run verification.'
       - name: Upload runner evidence
         if: always()
         uses: actions/upload-artifact@v4
