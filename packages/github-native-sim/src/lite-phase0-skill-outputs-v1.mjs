@@ -224,6 +224,38 @@ async function buildCore({campaignRoot,skillRoot}){
     otherCriticalConfiguration:asArray(dep.configFiles).map(p=>({path:p,status:'DISCOVERED_NOT_SEMANTICALLY_ACCEPTED'})),
     rawEvidenceRefs:['evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json']
   };
+  // LIVE_SCAN identities originate from the pinned fork evidence, not textual
+  // address mentions in the source tree. Security interpretation stays deferred.
+  if(receipt.source?.inputMode==='LIVE_SCAN'){
+    const frozen=deployExecution.scanSourceSnapshot;
+    const live=deployExecution.liveDeployment;
+    if(deployExecution.status!=='PASS_LIVE_DEPLOYMENT'||!frozen||live?.status!=='VERIFIED')throw new Error('SCAN_RUNTIME_OVERLAY_REQUIRES_VERIFIED_DEPLOYMENT');
+    runtime.deploymentIdentity={
+      status:'FROZEN_RUNTIME_SOURCE_VERIFIED',
+      chainId:String(frozen.chainId),
+      networkOrForkIdentity:deployExecution.fork?.chain??'UNRESOLVED',
+      blockNumberOrTag:frozen.frozenBlock.number,
+      blockHash:frozen.frozenBlock.hash,
+      deployments:asArray(live.contracts).map(t=>({
+        address:t.address,qualifiedName:t.qualifiedName,compilationUnitId:t.compilationUnitId,
+        role:t.scanRole,runtimeCodeHash:t.runtimeCodeHash,sourceBinding:t.sourceBinding,
+        proxyImplementation:t.proxyImplementation??null
+      })),
+      scanManifestDigestSha256:frozen.manifestDigestSha256,
+      rawEvidenceRefs:['evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',
+        'source/live-scan-project/scan-source-manifest.json']
+    };
+    runtime.liveConfiguration={
+      ...runtime.liveConfiguration,status:'VERIFIED_RUNTIME_BINDING_SECURITY_INTERPRETATION_PENDING',
+      proxyImplementationAdminBindings:asArray(live.contracts)
+        .filter(t=>t.proxyImplementation).map(t=>({proxy:t.address,implementation:t.proxyImplementation,
+          binding:'EIP1967_IMPLEMENTATION_SLOT_VERIFIED_AT_FROZEN_BLOCK',blockHash:frozen.frozenBlock.hash})),
+      rawEvidenceRefs:['evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',
+        'source/live-scan-project/scan-source-manifest.json']
+    };
+    core.identity.scanSourceManifestSha256=receipt.source.scanManifestSha256;
+    core.identity.scanTargetSetSha256=receipt.source.scanTargetSetSha256;
+  }
   runtime.gasAcceptance={
     acceptanceOwnerPhase:'phase-6',
     status:'PENDING_PHASE6_INTERPRETATION',
