@@ -53,6 +53,7 @@ receipt={
   "schemaVersion":"curveyield-lite-phase-receipt-v1",
   "campaign":{
     "campaignId":e["CAMPAIGN_ID"],
+    "sourceInitializationRequestId":e["REQUEST_ID"],
     "campaignGenerationId":e["GENERATION_ID"],
     "campaignName":e["CAMPAIGN_NAME"],
     "workspacePath":workspace,
@@ -82,6 +83,7 @@ directory={
   "schemaVersion":"curveyield-audit-campaign-directory-entry-v1",
   "campaignId":e["CAMPAIGN_ID"],"campaignGenerationId":e["GENERATION_ID"],"campaignName":e["CAMPAIGN_NAME"],
   "workspacePath":workspace,"mode":"LITE","sourceSha256":e["SOURCE_SHA"],
+  "sourceInitializationRequestId":e["REQUEST_ID"],
   "masterReview":{"chatUrl":e["MASTER_CHAT_URL"],"reasoning":"MAXIMUM","repairModel":"SOL","repairReasoning":"HIGH"},
   "testExecutor":{"chatUrl":e["TEST_EXECUTOR_CHAT_URL"]},
   "pendingMasterReview":None,
