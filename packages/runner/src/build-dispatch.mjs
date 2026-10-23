@@ -24,7 +24,6 @@ async function compileVerifiedScanProject(projectRoot) {
     if(unit.compilerVersion!==info.compilerVersion||unit.input?.language!=='Solidity')throw new Error('SCAN_COMPILER_INPUT_IDENTITY_MISMATCH');
     const standard=structuredClone(unit.input);
     if(!standard.sources||!Object.keys(standard.sources).length)throw new Error('SCAN_SOURCE_CONTENT_MISSING');
-    const originalDigest=scanHash(JSON.stringify(unit.input,Object.keys(unit.input).sort()));
     // Hash comparison uses the exact canonical JSON algorithm used by the Etherscan resolver.
     const canonical=x=>Array.isArray(x)?'['+x.map(canonical).join(',')+']':x&&typeof x==='object'?'{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canonical(x[k])).join(',')+'}':JSON.stringify(x);
     if(scanHash(canonical(unit.input))!==info.originalInputSha256)throw new Error('SCAN_ORIGINAL_INPUT_DIGEST_MISMATCH');
@@ -39,7 +38,7 @@ async function compileVerifiedScanProject(projectRoot) {
     // Extra output selection does not change compiler creation/runtime bytecode or metadata.
     standard.settings.outputSelection={'*':{'*':['abi','metadata','storageLayout','devdoc','userdoc','evm.bytecode','evm.deployedBytecode','evm.methodIdentifiers','evm.gasEstimates'],'':['ast']}};
     const compiler=await loadSolcVersion(info.compilerVersion.split('+')[0]);
-    if(!String(compiler.version()).startsWith(info.compilerVersion.split('+')[0]+'+'))throw new Error('SCAN_COMPILER_VERSION_MISMATCH');
+    if(!String(compiler.version()).startsWith(info.compilerVersion))throw new Error('SCAN_EXACT_COMPILER_BUILD_MISMATCH: '+info.compilerVersion);
     const inputText=JSON.stringify(standard);
     const outputText=typeof compiler.compileStandard==='function'
       ?compiler.compileStandard(inputText):compiler.compile(inputText);
