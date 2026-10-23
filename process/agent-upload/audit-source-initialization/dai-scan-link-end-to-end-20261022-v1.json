@@ -1,0 +1,13 @@
+{
+  "scan_urls": [
+    "https://etherscan.io/address/0x6b175474e89094c44da98b954eedeac495271d0f#code"
+  ],
+  "single_agent_simulation": false,
+  "agent_chat_1_url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
+  "agent_chat_2_url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5e9f-3970-83e8-bc63-f10d2e09e1e9",
+  "agent_chat_3_url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5ea6-cf04-83e8-9fa0-1d01648d86f0",
+  "agent_chat_4_url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5eab-0ff8-83e8-821f-a065d3c45384",
+  "master_chat_url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
+  "test_executor_chat_url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6ada5eb2-9a00-83e8-8c6e-711003caf181",
+  "backup_chat_url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f/c/6adaeaa8-a1f4-83e8-a1e1-c421fdb12a65"
+}
