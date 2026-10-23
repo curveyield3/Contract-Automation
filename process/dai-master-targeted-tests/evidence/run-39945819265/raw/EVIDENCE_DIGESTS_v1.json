@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "dai-targeted-evidence-digests-v1",
+  "evidence": [
+    {
+      "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/COMPILER_UNIT_SHA256_v1.txt",
+      "sha256": "18400558906cc33fad4b0829c9c6cdd8a77eb54cdab42422b70a64f506c4af61"
+    },
+    {
+      "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_EXIT_v1.txt",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_LOG_v1.txt",
+      "sha256": "925fb361fc3fafad5406f3e9a7d0b15cc1fc5202279a6b85adddba2d0a6ab8ab"
+    },
+    {
+      "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_v1.json",
+      "sha256": "f59a7782e3549f360ffc6dd0c37d26293552b29aa10dda29c76bcd18d808e85f"
+    },
+    {
+      "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/INSTALL_EXIT_v1.txt",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/INSTALL_LOG_v1.txt",
+      "sha256": "c32df01b0e2861c19e99e3b655604db15e8ee95ac79530a579b99ef95d7461d6"
+    },
+    {
+      "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/SOURCE_BUILD_v1.json",
+      "sha256": "f9a012a856b45d8feb105f9e1359909b8486a09f42a1ea5929cc8f3684d1acc4"
+    },
+    {
+      "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/TOOLCHAIN_v1.txt",
+      "sha256": "21785ed312ac34cfaa281fb22f4994167d823d16545db4fe8fb222a5fe9fb4fe"
+    },
+    {
+      "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/compiler-unit.json",
+      "sha256": "0753e0b401b4227aef41508e772dbd8a575cfd2f17b2c4d369b59b1143d1c018"
+    }
+  ]
+}

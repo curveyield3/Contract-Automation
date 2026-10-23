@@ -1,0 +1,149 @@
+{
+  "schemaVersion": "curveyield-lite-master-targeted-test-result-v1",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "segmentId": "reviewer-2-phase-04",
+  "requestId": "9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4",
+  "sourceSha256": "457b6121c4a613730251f2f81ae17d27c9c08674696b73d1f5828c623e705ee5",
+  "reviewer": "test-executor",
+  "tests": [
+    {
+      "candidateId": "X001-ADMIN-LOCKOUT",
+      "disposition": "CONFIRMED",
+      "executionNarrative": "Executed exact Solidity 0.5.12 Dai bytecode with isolated Ganache EVM accounts, mined transaction receipts, pre/post getter snapshots and explicit adversarial ordering. Synthetic local roles/funding are not live Ethereum state. https://github.com/curveyield3/Contract-Automation/actions/runs/39945819265",
+      "observedAssertions": "{\"assertions\":37,\"failed\":0,\"executedCalls\":20,\"sample\":[{\"label\":\"deployed code equals exact compiled runtime\",\"pass\":true},{\"label\":\"healthy A rely(D) transaction outcome\",\"pass\":true},{\"label\":\"healthy A mint(D,1) transaction outcome\",\"pass\":true},{\"label\":\"C rely transaction outcome\",\"pass\":true},{\"label\":\"C rely reverted without storage/log mutation\",\"pass\":true},{\"label\":\"C deny transaction outcome\",\"pass\":true},{\"label\":\"C deny reverted without storage/log mutation\",\"pass\":true},{\"label\":\"C mint transaction outcome\",\"pass\":true},{\"label\":\"C mint reverted without storage/log mutation\",\"pass\":true},{\"label\":\"deployed code equals exact compiled runtime\",\"pass\":true},{\"label\":\"sole ward A funds H 500 transaction outcome\",\"pass\":true},{\"label\":\"sole fixture exactly one known ward\",\"pass\":true},{\"label\":\"sole ward A deny(A) transaction outcome\",\"pass\":true},{\"label\":\"sole A,B,C,D ward getters zero\",\"pass\":true},{\"label\":\"post deny actor 0 rely(D) transaction outcome\",\"pass\":true},{\"label\":\"post deny actor 0 rely(D) reverted without storage/log mutation\",\"pass\":true},{\"label\":\"post deny actor 0 mint(D,1) transaction outcome\",\"pass\":true},{\"label\":\"post deny actor 0 mint(D,1) reverted without storage/log mutation\",\"pass\":true},{\"label\":\"post deny actor 2 rely(D) transaction outcome\",\"pass\":true},{\"label\":\"post deny actor 2 rely(D) reverted without storage/log mutation\",\"pass\":true},{\"label\":\"post deny actor 2 mint(D,1) transaction outcome\",\"pass\":true},{\"label\":\"post deny actor 2 mint(D,1) reverted without storage/log mutation\",\"pass\":true},{\"label\":\"post deny actor 3 rely(D) transaction outcome\",\"pass\":true},{\"label\":\"post deny actor 3 rely(D) reverted without storage/log mutation\",\"pass\":true},{\"label\":\"post deny actor 3 mint(D,1) transaction outcome\",\"pass\":true},{\"label\":\"post deny actor 3 mint(D,1) reverted without storage/log mutation\",\"pass\":true},{\"label\":\"post deny H transfer(T,1) transaction outcome\",\"pass\":true},{\"label\":\"public ABI has no alternative authority recovery path\",\"pass\":true},{\"label\":\"deployed code equals exact compiled runtime\",\"pass\":true},{\"label\":\"two-ward A rely(B) transaction outcome\",\"pass\":true},{\"label\":\"two-ward A deny(A) transaction outcome\",\"pass\":true},{\"label\":\"remaining B rely(D) transaction outcome\",\"pass\":true},{\"label\":\"remaining B mint(H,1) transaction outcome\",\"pass\":true},{\"label\":\"unwarded A mint(H,1) transaction outcome\",\"pass\":true},{\"label\":\"unwarded A mint(H,1) reverted without storage/log mutation\",\"pass\":true},{\"label\":\"unwarded C mint(H,1) transaction outcome\",\"pass\":true},{\"label\":\"unwarded C mint(H,1) reverted without storage/log mutation\",\"pass\":true}]}",
+      "impactAssessment": "Conditional authority liveness loss after last-ward removal in isolated fixture. Existing user transfers remain available; no proven live compromise or dollar loss.",
+      "executedCalls": 20,
+      "evidence": [
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/COMPILER_UNIT_SHA256_v1.txt",
+          "sha256": "18400558906cc33fad4b0829c9c6cdd8a77eb54cdab42422b70a64f506c4af61"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_EXIT_v1.txt",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_LOG_v1.txt",
+          "sha256": "925fb361fc3fafad5406f3e9a7d0b15cc1fc5202279a6b85adddba2d0a6ab8ab"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_v1.json",
+          "sha256": "f59a7782e3549f360ffc6dd0c37d26293552b29aa10dda29c76bcd18d808e85f"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/INSTALL_EXIT_v1.txt",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/INSTALL_LOG_v1.txt",
+          "sha256": "c32df01b0e2861c19e99e3b655604db15e8ee95ac79530a579b99ef95d7461d6"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/SOURCE_BUILD_v1.json",
+          "sha256": "f9a012a856b45d8feb105f9e1359909b8486a09f42a1ea5929cc8f3684d1acc4"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/TOOLCHAIN_v1.txt",
+          "sha256": "21785ed312ac34cfaa281fb22f4994167d823d16545db4fe8fb222a5fe9fb4fe"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/compiler-unit.json",
+          "sha256": "0753e0b401b4227aef41508e772dbd8a575cfd2f17b2c4d369b59b1143d1c018"
+        }
+      ]
+    },
+    {
+      "candidateId": "X001-ALLOWANCE-RACE",
+      "disposition": "CONFIRMED",
+      "executionNarrative": "Executed exact Solidity 0.5.12 Dai bytecode with isolated Ganache EVM accounts, mined transaction receipts, pre/post getter snapshots and explicit adversarial ordering. Synthetic local roles/funding are not live Ethereum state. https://github.com/curveyield3/Contract-Automation/actions/runs/39945819265",
+      "observedAssertions": "{\"assertions\":36,\"failed\":0,\"executedCalls\":24,\"sample\":[{\"label\":\"deployed code equals exact compiled runtime\",\"pass\":true},{\"label\":\"control A fund H transaction outcome\",\"pass\":true},{\"label\":\"control approve 100 transaction outcome\",\"pass\":true},{\"label\":\"control spend 100 transaction outcome\",\"pass\":true},{\"label\":\"control overspend 1 transaction outcome\",\"pass\":true},{\"label\":\"control overspend 1 reverted without storage/log mutation\",\"pass\":true},{\"label\":\"control remaining allowance zero\",\"pass\":true},{\"label\":\"deployed code equals exact compiled runtime\",\"pass\":true},{\"label\":\"control B fund H transaction outcome\",\"pass\":true},{\"label\":\"replacement approve 100 transaction outcome\",\"pass\":true},{\"label\":\"replacement approve 50 transaction outcome\",\"pass\":true},{\"label\":\"replacement spend 50 transaction outcome\",\"pass\":true},{\"label\":\"replacement overspend 1 transaction outcome\",\"pass\":true},{\"label\":\"replacement overspend 1 reverted without storage/log mutation\",\"pass\":true},{\"label\":\"deployed code equals exact compiled runtime\",\"pass\":true},{\"label\":\"adversarial fund H transaction outcome\",\"pass\":true},{\"label\":\"adversarial approve 100 transaction outcome\",\"pass\":true},{\"label\":\"adversarial front-run spend 100 transaction outcome\",\"pass\":true},{\"label\":\"adversarial replace approve 50 transaction outcome\",\"pass\":true},{\"label\":\"adversarial spend 50 transaction outcome\",\"pass\":true},{\"label\":\"adversarial overspend 1 transaction outcome\",\"pass\":true},{\"label\":\"adversarial overspend 1 reverted without storage/log mutation\",\"pass\":true},{\"label\":\"ordered adversarial debit 150 credit 150 supply unchanged allowance zero\",\"pass\":true},{\"label\":\"deployed code equals exact compiled runtime\",\"pass\":true},{\"label\":\"zero control fund H transaction outcome\",\"pass\":true},{\"label\":\"zero-control approve 100 transaction outcome\",\"pass\":true},{\"label\":\"zero-control reset 0 transaction outcome\",\"pass\":true},{\"label\":\"zero-control grant 50 transaction outcome\",\"pass\":true},{\"label\":\"zero-control spend 50 transaction outcome\",\"pass\":true},{\"label\":\"zero-control overspend transaction outcome\",\"pass\":true},{\"label\":\"zero-control overspend reverted without storage/log mutation\",\"pass\":true},{\"label\":\"deployed code equals exact compiled runtime\",\"pass\":true},{\"label\":\"infinity control fund H transaction outcome\",\"pass\":true},{\"label\":\"infinity approve max transaction outcome\",\"pass\":true},{\"label\":\"infinity spend 1 transaction outcome\",\"pass\":true},{\"label\":\"max allowance remains unchanged after spend\",\"pass\":true}]}",
+      "impactAssessment": "When prior allowance A=100 is spent before replacement B=50, recorded cumulative debit should be 150 raw base units, 100 above intended new cap, bounded by holder balance.",
+      "executedCalls": 24,
+      "evidence": [
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/COMPILER_UNIT_SHA256_v1.txt",
+          "sha256": "18400558906cc33fad4b0829c9c6cdd8a77eb54cdab42422b70a64f506c4af61"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_EXIT_v1.txt",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_LOG_v1.txt",
+          "sha256": "925fb361fc3fafad5406f3e9a7d0b15cc1fc5202279a6b85adddba2d0a6ab8ab"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_v1.json",
+          "sha256": "f59a7782e3549f360ffc6dd0c37d26293552b29aa10dda29c76bcd18d808e85f"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/INSTALL_EXIT_v1.txt",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/INSTALL_LOG_v1.txt",
+          "sha256": "c32df01b0e2861c19e99e3b655604db15e8ee95ac79530a579b99ef95d7461d6"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/SOURCE_BUILD_v1.json",
+          "sha256": "f9a012a856b45d8feb105f9e1359909b8486a09f42a1ea5929cc8f3684d1acc4"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/TOOLCHAIN_v1.txt",
+          "sha256": "21785ed312ac34cfaa281fb22f4994167d823d16545db4fe8fb222a5fe9fb4fe"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/compiler-unit.json",
+          "sha256": "0753e0b401b4227aef41508e772dbd8a575cfd2f17b2c4d369b59b1143d1c018"
+        }
+      ]
+    },
+    {
+      "candidateId": "X001-ROLE-VERIFY",
+      "disposition": "INCONCLUSIVE",
+      "executionNarrative": "Isolated exact-compiled-code permit signature and invalid-signature controls; independently attempted frozen Ethereum mainnet runtime/domain reads and full authority-log enumeration; do not conflate fixture with deployed roster.",
+      "observedAssertions": "{\"assertions\":21,\"failed\":1,\"executedCalls\":8,\"sample\":[{\"label\":\"deployed code equals exact compiled runtime\",\"pass\":true},{\"label\":\"fixture domain equals typed-domain chain 1 hash\",\"pass\":true},{\"label\":\"valid permit transaction outcome\",\"pass\":true},{\"label\":\"valid permit nonce increments and allowance max\",\"pass\":true},{\"label\":\"replay nonce zero transaction outcome\",\"pass\":true},{\"label\":\"replay nonce zero reverted without storage/log mutation\",\"pass\":true},{\"label\":\"altered spender signature transaction outcome\",\"pass\":true},{\"label\":\"altered spender signature reverted without storage/log mutation\",\"pass\":true},{\"label\":\"altered allowed signature transaction outcome\",\"pass\":true},{\"label\":\"altered allowed signature reverted without storage/log mutation\",\"pass\":true},{\"label\":\"wrong-chain signature transaction outcome\",\"pass\":true},{\"label\":\"wrong-chain signature reverted without storage/log mutation\",\"pass\":true},{\"label\":\"wrong-contract signature transaction outcome\",\"pass\":true},{\"label\":\"wrong-contract signature reverted without storage/log mutation\",\"pass\":true},{\"label\":\"expired signature transaction outcome\",\"pass\":true},{\"label\":\"expired signature reverted without storage/log mutation\",\"pass\":true},{\"label\":\"invalid permits did not increment nonce or change allowance\",\"pass\":true},{\"label\":\"valid disallow transaction outcome\",\"pass\":true},{\"label\":\"valid disallow clears allowance and increments nonce\",\"pass\":true},{\"label\":\"frozen mainnet stored domain equality is bound to verified hash\",\"pass\":true},{\"label\":\"historical runtime identical to compiled source\",\"pass\":false}]}",
+      "impactAssessment": "Potential unbounded ward mint power if held by an authorized ward, but actual effective live roster/policy unresolved. Valid max-permit allowance only risks holders that sign it.",
+      "executedCalls": 8,
+      "evidence": [
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/COMPILER_UNIT_SHA256_v1.txt",
+          "sha256": "18400558906cc33fad4b0829c9c6cdd8a77eb54cdab42422b70a64f506c4af61"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_EXIT_v1.txt",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_LOG_v1.txt",
+          "sha256": "925fb361fc3fafad5406f3e9a7d0b15cc1fc5202279a6b85adddba2d0a6ab8ab"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/EXECUTION_v1.json",
+          "sha256": "f59a7782e3549f360ffc6dd0c37d26293552b29aa10dda29c76bcd18d808e85f"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/INSTALL_EXIT_v1.txt",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/INSTALL_LOG_v1.txt",
+          "sha256": "c32df01b0e2861c19e99e3b655604db15e8ee95ac79530a579b99ef95d7461d6"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/SOURCE_BUILD_v1.json",
+          "sha256": "f9a012a856b45d8feb105f9e1359909b8486a09f42a1ea5929cc8f3684d1acc4"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/TOOLCHAIN_v1.txt",
+          "sha256": "21785ed312ac34cfaa281fb22f4994167d823d16545db4fe8fb222a5fe9fb4fe"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/compiler-unit.json",
+          "sha256": "0753e0b401b4227aef41508e772dbd8a575cfd2f17b2c4d369b59b1143d1c018"
+        }
+      ],
+      "remainingUncertainty": "Complete authenticated deployment-to-frozen-block rely/deny event replay, constructor deployer identity and governance policy required; correlate archive RPC, Etherscan creation/events, and final wards getters. Verify any RPC read errors."
+    }
+  ]
+}
