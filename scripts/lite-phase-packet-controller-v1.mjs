@@ -1066,7 +1066,7 @@ if(reviewKind==='master'){
     directory.currentAssignment=nextAssignment;directory.campaignStatus='WAITING_FOR_SUCCESSOR_AGENT';
   }
   directory.updatedAt=now;writeJson(directoryFile,directory);
-  const feedback='MASTER_REVIEW_ACCEPTED: '+acceptedSegment+' '+result.outcome+'.'+(decision.superseded?.length?' '+decision.superseded.length+' replaced file(s) preserved under '+SUPERSEDED_DIRECTORY_V1+'/.':'')+(nextAssignment?' Successor Phase '+nextAssignment.phaseSequence+' may now be launched.':' Campaign is now COMPLETE.');
+  const feedback='MASTER_REVIEW_ACCEPTED: '+acceptedSegment+' '+result.outcome+'.'+(decision.superseded?.length?' '+decision.superseded.length+' replaced file(s) preserved under '+SUPERSEDED_DIRECTORY_V1+'/.':'')+(directory.campaignStatus==='WAITING_FOR_DISCOVERY'?' Phase-4 discovery is initialized for reviewer-2; it is not yet ordinary active Phase-4 work.':nextAssignment?' Successor Phase '+nextAssignment.phaseSequence+' may now be launched.':' Campaign is now COMPLETE.');
   emit('PASS',feedback,{masterReviewAccepted:true,masterOutcome:result.outcome,
     freshSuccessorRequired:Boolean(nextAssignment)&&directory.campaignStatus==='WAITING_FOR_SUCCESSOR_AGENT',
     discoveryStarted:directory.campaignStatus==='WAITING_FOR_DISCOVERY',
@@ -1534,13 +1534,22 @@ if(sequence===1){
   :{required:true,boundary:'P1_TO_P2',incomingReviewer:'reviewer-2',assignedWork:'Combined Lite Phases 2-5',nextPhaseSequence:2,sameReviewer:false,status:'SUCCESSOR_PENDING'};
 }
 if(isV13AuthorityV1(authorityRoot)&&sequence===4){
-  nextSequence=5;fresh=true;handoff={required:true,boundary:'P4_TO_P5',incomingReviewer:'reviewer-3',assignedWork:'Phases 5-7 (Phase 7 automatic)',nextPhaseSequence:5,sameReviewer:false,status:'SUCCESSOR_PENDING'};
+  nextSequence=5;fresh=true;handoff={required:true,boundary:'P4_TO_P5',incomingReviewer:'reviewer-3',assignedWork:isReassignedV13AuthorityV1({root,authorityRoot})?'Phases 5–6':'Phases 5-7 (Phase 7 automatic)',nextPhaseSequence:5,sameReviewer:false,status:'SUCCESSOR_PENDING'};
 }
 if(sequence===5&&!isV13AuthorityV1(authorityRoot)){nextSequence=6;fresh=true;handoff={required:true,boundary:'P5_TO_P6',incomingReviewer:'reviewer-3L',assignedWork:'Merged Lite Phases 6-7',nextPhaseSequence:6,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
 if(sequence===6){nextSequence=8;}
 if(sequence===8){nextSequence=hasRemediation(campaignRoot)?9:10;handoff={required:false,boundary:null,incomingReviewer:'reviewer-4',assignedWork:'Phase '+nextSequence,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};}
 if(sequence===9){nextSequence=10;}
 if(sequence===10){handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:null,sameReviewer:false,status:'NOT_APPLICABLE'};}
+if(isReassignedV13AuthorityV1({root,authorityRoot})&&[3,4,6].includes(sequence)){
+ const segments={3:'reviewer-1-phases-01-03',4:'reviewer-2-phase-04',6:'reviewer-3-phases-05-06'};
+ const boundaries={3:'P3_TO_P4',4:'P4_TO_P5',6:'P67_TO_P8'};
+ handoff={required:true,boundary:boundaries[sequence],incomingReviewer:'master-reviewer',
+   assignedWork:'Review '+segments[sequence],nextPhaseSequence:nextSequence,
+   sameReviewer:false,status:'SUCCESSOR_PENDING'};
+ fresh=false;
+}
+
 if(nextSequence!==null) nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:nextSequence,immediate:[...derivedRels,...boundaryArtifactRels]});
 
 const ledgerAfter=maybeJson(root,controls.ledgerRel)??{};
