@@ -22,7 +22,7 @@ if(assignment.finalReportPath){
   if(fs.existsSync(repoFile(root,assignment.finalReportPath))) throw new Error('incoming phase final report must not exist before reviewer semantic work; controller owns report generation at validation time');
 }
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'sealed predecessor receipt'));
-validateBoundAuthorityV1({root,receipt:predecessor});
+const effectiveAuthorityRoot=validateBoundAuthorityV1({root,receipt:predecessor});
 if(!['SEALED','SKIPPED'].includes(predecessor.phase?.status)) throw new Error('predecessor receipt is not sealed/skipped');
 const controllerRef=a['audit-controller-ref'];
 const encodeRepoPath=p=>String(p).split('/').map(encodeURIComponent).join('/');
@@ -30,7 +30,7 @@ const controllerTreeUrl=p=>'https://github.com/CurveYield2/Audit-Controller/tree
 const controllerBlobUrl=p=>'https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
 const logicalAuthorityHome=predecessor.authority?.homepagePath??assignment.workSchemaPath.replace(/\/phases\/phase-[^/]+\/[^/]+$/,'/SKILL.md');
 const authorityLinkPath=p=>authorityLinkPathV1(root,p);
-const linkedAuthorityHome=authorityLinkPath(logicalAuthorityHome);
+const linkedAuthorityHome=authorityLinkPath(path.posix.join(effectiveAuthorityRoot,'SKILL.md'));
 if(predecessor.authority?.homepagePath)requiredFile(root,logicalAuthorityHome,'bound successor authority homepage');
 const campaignUrl=controllerTreeUrl(directory.workspacePath);
 const authorityUrl=controllerBlobUrl(linkedAuthorityHome);
