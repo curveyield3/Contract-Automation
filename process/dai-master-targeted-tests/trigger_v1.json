@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "dai-master-targeted-evm-run-v1",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "requestId": "9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4",
+  "mode": "exact-source-isolated-evm-adversarial-admin-allowance-permit",
+  "runNumber": 1
+}
