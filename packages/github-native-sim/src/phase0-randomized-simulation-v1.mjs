@@ -2662,7 +2662,13 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         if(!artifact)throw new Error('LIVE target has no admitted artifact: '+target.qualifiedName);
         const code=await provider.getCode(target.address);
         const expected=typeof artifact.deployedBytecode==='string'?artifact.deployedBytecode:artifact.deployedBytecode?.object;
-        if(!code||code==='0x'||!expected||code.toLowerCase()!==('0x'+expected.replace(/^0x/,'')).toLowerCase())throw new Error('LIVE runtime does not exactly match admitted artifact: '+target.qualifiedName);
+        if(!code||code==='0x'||!expected||code.toLowerCase()!==('0x'+expected.replace(/^0x/,'')).toLowerCase()){
+          const normalizedExpected='0x'+String(expected??'').replace(/^0x/,'');
+          let firstDifference=0;while(firstDifference<Math.min(code.length,normalizedExpected.length)&&code[firstDifference].toLowerCase()===normalizedExpected[firstDifference].toLowerCase())firstDifference++;
+          const comparison={qualifiedName:target.qualifiedName,address:target.address,observedByteLength:(code.length-2)/2,expectedByteLength:(normalizedExpected.length-2)/2,firstDifferingByte:Math.max(0,Math.floor((firstDifference-2)/2)),observedTail:code.slice(-160),expectedTail:normalizedExpected.slice(-160),observedCode:code,expectedCode:normalizedExpected};
+          await fs.writeFile(path.join(outputRoot,'LIVE_RUNTIME_MISMATCH_v1.json'),JSON.stringify(comparison,null,2)+'\n');
+          throw new Error('LIVE runtime does not exactly match admitted artifact: '+target.qualifiedName+'; comparison=LIVE_RUNTIME_MISMATCH_v1.json; firstDifferingByte='+comparison.firstDifferingByte+'; observedBytes='+comparison.observedByteLength+'; expectedBytes='+comparison.expectedByteLength);
+        }
         const admitted=scanManifest?.resolvedTargets?.find(x=>x.address.toLowerCase()===target.address.toLowerCase());
         if(scanManifest&&!admitted)throw new Error('SCAN_LIVE_RUNTIME_TARGET_UNDECLARED');
         if(admitted?.proxyImplementation){
