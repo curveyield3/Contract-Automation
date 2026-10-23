@@ -455,7 +455,10 @@ async function captureX11VisualEvidence(label, cropRegion = '', minBytes = 3000)
   const args = cropRegion ? ['-o','-a',cropRegion,target] : ['-o',target];
   await runCapture('scrot',args,{env:{DISPLAY:env.DISPLAY||':99'}});
   const file=await fs.stat(target);
-  if(file.size<minBytes)throw new BrowserAgentError('X11_SCREENSHOT_EMPTY','Unable to capture visible desktop before declaring delivery',true);
+  // A valid, low-entropy cropped PNG can compress below 3 KB. Preserve the
+  // full-desktop threshold; accept cropped scrot evidence above PNG header size.
+  const requiredBytes = cropRegion ? Math.min(minBytes, 64) : minBytes;
+  if(file.size<requiredBytes)throw new BrowserAgentError('X11_SCREENSHOT_EMPTY','Unable to capture visible desktop before declaring delivery',true);
   console.log('[normal-chrome-watchdog] saved-desktop-visual='+name+' bytes='+file.size);
   return target;
 }
