@@ -5,6 +5,16 @@ export const digestV2=value=>createHash('sha256').update(value).digest('hex');
 export function assertDeployGateEvidenceV2(e){
   if(e?.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||e.executionMode!=='ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY')throw new Error('Invalid Phase 0 deploy evidence schema/mode');
   assertPhase0ForkIdentity(e);
+  if(e.status==='PASS_LIVE_DEPLOYMENT'){
+    const live=e.liveDeployment,rows=e.deployedContracts;
+    if(e.deploymentProfile?.mode!=='LIVE'||live?.status!=='VERIFIED'||!Number.isSafeInteger(live.blockNumber)||!/^0x[0-9a-f]{64}$/i.test(live.blockHash??''))throw new Error('Missing pinned LIVE deployment identity');
+    if(!/^[0-9a-f]{64}$/.test(e.sourceSha256??'')||!Array.isArray(rows)||!rows.length||rows.length!==e.deploymentProfile.contracts?.length||rows.length!==live.contracts?.length)throw new Error('Incomplete source-bound LIVE inventory');
+    if(!Array.isArray(e.attempts)||e.attempts.length||!Array.isArray(e.scriptDispositions)||e.scriptDispositions.length)throw new Error('LIVE path must not execute deployment scripts');
+    for(const row of rows){
+      if(row.sourceBinding!=='EXACT_COMPILED_RUNTIME'||!/^0x[0-9a-f]{64}$/i.test(row.runtimeCodeHash??'')||row.runtimeCodeHash!==row.compiledRuntimeCodeHash||!e.deploymentProfile.contracts.some(x=>x.address.toLowerCase()===row.address?.toLowerCase()&&x.qualifiedName===row.qualifiedName))throw new Error('LIVE target runtime/source mismatch');
+    }
+    return true;
+  }
   if(e.status==='NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'){
     // No deployment script is a machine-discovered negative, never an agent
     // choice that can hide failed or unexecuted source-native deployment.
