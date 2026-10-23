@@ -392,7 +392,7 @@ export function normalizeFormalObligationsIntoLedger({ledger,items=[],originPhas
   });
   return created;
 }
-export function applyObligationDispositionsToLedger({ledger,canonical,sequence,canonicalRel,now}){
+export function applyObligationDispositionsToLedger({ledger,canonical,sequence,canonicalRel,now,root=null,authorityRoot=null}){
   ledger.obligations??=[];
   const byId=new Map(ledger.obligations.map(o=>[String(o?.obligationId??''),o]).filter(([id])=>id));
   const rows=[];
@@ -418,12 +418,12 @@ export function applyObligationDispositionsToLedger({ledger,canonical,sequence,c
     }else if(disposition==='CARRY_FORWARD'){
       obligation.status='OPEN';
       obligation.requiredPhase=carry;
-      obligation.requiredReviewer=reviewerForRequiredPhase(carry);
+      obligation.requiredReviewer=reviewerForRequiredPhase(carry,root,authorityRoot);
       obligation.closureEvidenceRefs=[];
     }else if(disposition==='BLOCKED_CARRIED'){
       obligation.status='BLOCKED_CARRIED';
       obligation.requiredPhase=carry;
-      obligation.requiredReviewer=reviewerForRequiredPhase(carry);
+      obligation.requiredReviewer=reviewerForRequiredPhase(carry,root,authorityRoot);
       obligation.closureEvidenceRefs=refs;
     }else{
       throw new Error('Unsupported obligation disposition '+disposition+' for '+id);
