@@ -64,9 +64,9 @@ export function buildCompilerInput(sources, settings = {}) {
   );
   const compilerSettings = {
     optimizer: settings.optimizer ?? { enabled: true, runs: 200 },
-    viaIR: settings.viaIR ?? false,
     outputSelection: { '*': { '*': OUTPUT_SELECTION, '': ['ast'] } }
   };
+  if (settings.viaIR === true) compilerSettings.viaIR = true;
   if (settings.evmVersion) compilerSettings.evmVersion = settings.evmVersion;
   return {
     language: 'Solidity',
@@ -176,7 +176,7 @@ export async function compileProject({ sources, compilerVersion, settings, openZ
     sourceLocation: item.sourceLocation
   }));
   if (diagnostics.some((item) => item.severity === 'error')) {
-    const failure = new Error('Solidity compilation failed');
+    const failure = new Error('Solidity compilation failed: '+diagnostics.filter(item=>item.severity==='error').map(item=>item.formattedMessage??item.message).join('\n').slice(0,6000));
     failure.compilerDiagnostics = diagnostics;
     throw failure;
   }
