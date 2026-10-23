@@ -318,7 +318,9 @@ export function secureRestoreWorkFormV13({root,indexRel}){
    for(const [j,entry] of item.entries.entries()){
      const pos=desc.startIndex+j;
      const expected=desc.append?prefix+'APPEND-'+String(j+1).padStart(4,'0'):prefix+desc.recordKeys[j];
-     if(entry.key!==expected||(!desc.append&&recordKey(desc.path,entry.value,pos)!==expected))
+     const templateIdentity=!desc.append&&/^(tempKey|findingTempKey)=<REQUIRED(?:_OR_EXPLICIT_NEGATIVE)?>$/.test(desc.recordKeys[j]);
+     const completedTemplateIdentity=templateIdentity&&recordKey(desc.path,entry.value,pos).startsWith(prefix+desc.recordKeys[j].split('=')[0]+'=');
+     if(entry.key!==expected||(!desc.append&&!completedTemplateIdentity&&recordKey(desc.path,entry.value,pos)!==expected))
        throw new Error('v13 mandatory work record key changed: '+desc.file);
      if(positions.has(pos))throw new Error('v13 duplicate work record: '+desc.file);
      const identity=recordKey(desc.path,entry.value,pos);
