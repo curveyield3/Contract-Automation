@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { PHASE0_DEPLOYMENT_PROFILE_FRAMEWORKS, loadDeploymentProfile, phase0ForkChainForProfile, resolvePhase0ForkUrl } from './phase0-deployment-profile-v1.mjs';
+import { compareLiveRuntimeV1, PHASE0_DEPLOYMENT_PROFILE_FRAMEWORKS, loadDeploymentProfile, phase0ForkChainForProfile, resolvePhase0ForkUrl } from './phase0-deployment-profile-v1.mjs';
 import fss from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -2662,7 +2662,8 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         if(!artifact)throw new Error('LIVE target has no admitted artifact: '+target.qualifiedName);
         const code=await provider.getCode(target.address);
         const expected=typeof artifact.deployedBytecode==='string'?artifact.deployedBytecode:artifact.deployedBytecode?.object;
-        if(!code||code==='0x'||!expected||code.toLowerCase()!==('0x'+expected.replace(/^0x/,'')).toLowerCase()){
+        const comparison=compareLiveRuntimeV1(code,expected,{allowScanMetadata:Boolean(scanManifest)});
+        if(comparison.sourceBinding==='MISMATCH'){
           const normalizedExpected='0x'+String(expected??'').replace(/^0x/,'');
           let firstDifference=0;while(firstDifference<Math.min(code.length,normalizedExpected.length)&&code[firstDifference].toLowerCase()===normalizedExpected[firstDifference].toLowerCase())firstDifference++;
           const comparison={qualifiedName:target.qualifiedName,address:target.address,observedByteLength:(code.length-2)/2,expectedByteLength:(normalizedExpected.length-2)/2,firstDifferingByte:Math.max(0,Math.floor((firstDifference-2)/2)),observedTail:code.slice(-160),expectedTail:normalizedExpected.slice(-160),observedCode:code,expectedCode:normalizedExpected};
@@ -2682,7 +2683,8 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         if(admitted&&observedSha256!==admitted.runtimeSha256)throw new Error('SCAN_LIVE_RUNTIME_CHANGED_FROM_INTAKE: '+target.address);
         liveContracts.push({...target,contractName:artifact.contractName,sourceName:artifact.sourceName,
           ...(admitted?{compilationUnitId:admitted.compilationUnitId,scanRole:admitted.role,proxyImplementation:admitted.proxyImplementation}:{}),
-          runtimeSha256:observedSha256,runtimeCodeHash:ethers.keccak256(code),compiledRuntimeCodeHash:ethers.keccak256(code),sourceBinding:'EXACT_COMPILED_RUNTIME',origin:'EXISTING_LIVE_DEPLOYMENT'});
+          runtimeSha256:observedSha256,runtimeCodeHash:ethers.keccak256(code),compiledRuntimeCodeHash:ethers.keccak256(expected),...comparison,
+          ...(comparison.sourceBinding==='EXECUTABLE_RUNTIME_MATCH_METADATA_HASH_ONLY'?{runtimeComparison:{observed:code,compiled:expected},sourceBindingLimitation:'Executable runtime matches exactly; original Swarm metadata hash differs from explorer-source reconstruction.'}:{}),origin:'EXISTING_LIVE_DEPLOYMENT'});
       }
     }
     const deployment=deploymentProfile?.mode==='LIVE'
