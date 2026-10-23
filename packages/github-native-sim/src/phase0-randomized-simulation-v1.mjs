@@ -2665,6 +2665,13 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         if(!code||code==='0x'||!expected||code.toLowerCase()!==('0x'+expected.replace(/^0x/,'')).toLowerCase())throw new Error('LIVE runtime does not exactly match admitted artifact: '+target.qualifiedName);
         const admitted=scanManifest?.resolvedTargets?.find(x=>x.address.toLowerCase()===target.address.toLowerCase());
         if(scanManifest&&!admitted)throw new Error('SCAN_LIVE_RUNTIME_TARGET_UNDECLARED');
+        if(admitted?.proxyImplementation){
+          const implementationSlot='0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
+          const stored=await provider.send('eth_getStorageAt',[target.address,implementationSlot,'latest']);
+          if(!/^0x[0-9a-f]{64}$/i.test(String(stored))||
+            ('0x'+stored.slice(-40).toLowerCase())!==admitted.proxyImplementation.toLowerCase())
+            throw new Error('SCAN_PROXY_IMPLEMENTATION_CHANGED_FROM_INTAKE: '+target.address);
+        }
         const observedSha256=sha256(Buffer.from(code.slice(2),'hex'));
         if(admitted&&observedSha256!==admitted.runtimeSha256)throw new Error('SCAN_LIVE_RUNTIME_CHANGED_FROM_INTAKE: '+target.address);
         liveContracts.push({...target,contractName:artifact.contractName,sourceName:artifact.sourceName,
