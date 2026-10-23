@@ -47,7 +47,9 @@ async function compileVerifiedScanProject(projectRoot) {
     const unitDiagnostics=output.errors??[];
     if(unitDiagnostics.some(d=>d.severity==='error'))throw new Error('SCAN_STANDARD_JSON_COMPILATION_FAILED: '+unitDiagnostics.filter(d=>d.severity==='error').map(d=>d.formattedMessage??d.message).join('; ').slice(0,900));
     const unitArtifacts=contractArtifactMap(output).all.map(a=>({...a,compilationUnitId:info.unitId,compilerVersion:info.compilerVersion,profile:info.unitId}));
-    if(!unitArtifacts.some(a=>a.sourceName+':'+a.contractName===info.qualifiedName))throw new Error('SCAN_VERIFIED_TARGET_ARTIFACT_MISSING: '+info.qualifiedName);
+    for(const binding of info.targetBindings??[{qualifiedName:info.qualifiedName}]){
+      if(!unitArtifacts.some(a=>a.sourceName+':'+a.contractName===binding.qualifiedName))throw new Error('SCAN_VERIFIED_TARGET_ARTIFACT_MISSING: '+binding.qualifiedName);
+    }
     for(const a of unitArtifacts){
       const key=a.sourceName+':'+a.contractName;
       if(seen.has(key))throw new Error('AMBIGUOUS_COMPILATION_TARGET: '+key);
