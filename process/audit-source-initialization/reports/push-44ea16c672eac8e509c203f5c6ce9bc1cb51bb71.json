@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "curveyield-audit-source-initialization-report-v1",
+  "request": {
+    "requestId": "push-44ea16c672eac8e509c203f5c6ce9bc1cb51bb71",
+    "singleAgentSimulation": true,
+    "sourceUrl": "https://github.com/CurveYield2/Contract-Automation/raw/refs/heads/main/process/audit-source-initialization/controller-dry-run-erc20-20261022.zip",
+    "agentChats": {
+      "reviewer-1": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+      "reviewer-2": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+      "reviewer-3": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+      "reviewer-4": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b"
+    },
+    "masterChatUrl": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+    "testExecutorChatUrl": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+    "backupChatUrl": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b"
+  },
+  "status": "PASS",
+  "source": {
+    "provider": "github",
+    "canonicalUrl": "https://github.com/CurveYield2/Contract-Automation/raw/refs/heads/main/process/audit-source-initialization/controller-dry-run-erc20-20261022.zip",
+    "filename": "controller-dry-run-erc20-20261022.zip",
+    "sha256": "fdab7e73eba0444cedf9e84eb6d8027cda7b288a567bdefb39470b54a8d12fb9",
+    "byteLength": 941,
+    "repository": "CurveYield2/Audit-Controller",
+    "ref": "main",
+    "path": "campaigns/controller-dry-run-erc20-20261022 r1/source/controller-dry-run-erc20-20261022.zip",
+    "gitBlobSha": "d75984f1471b6b668ff42619f11538407e2ef579",
+    "admissionCommit": "e11cd91afef313d725a19f760dcb7b8d83594a91",
+    "unpackedTreeSha256": "dbc76c465ad439272aa914a8796c6031b1fc694686d79a2ad54d981c227833d6"
+  },
+  "campaign": {
+    "campaignId": "controller-dry-run-erc20-20261022-r1",
+    "campaignGenerationId": "controller-dry-run-erc20-20261022-r1-g1-20261023T021615Z",
+    "campaignName": "controller-dry-run-erc20-20261022 r1",
+    "workspacePath": "campaigns/controller-dry-run-erc20-20261022 r1",
+    "controllerRef": "main",
+    "initializationCommit": "91706d831224470948eb8f200856d1ed391ffe45"
+  },
+  "workflowRunId": "39888634423",
+  "completedAt": "2026-10-23T02:16:17Z"
+}
