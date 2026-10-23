@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repository="${AUDIT_CONTROLLER_PROBE_REPOSITORY:-CurveYield2/Audit-Controller}"
+repository="${AUDIT_CONTROLLER_PROBE_REPOSITORY:-curveyield3/Audit-Controller}"
 primary="${AUDIT_CONTROLLER_PRIMARY_TOKEN:-}"
 fallback="${PREFLIGHTSIM_FALLBACK_TOKEN:-}"
 required="${AUDIT_CONTROLLER_TOKEN_REQUIRED:-true}"
