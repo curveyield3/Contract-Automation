@@ -858,11 +858,19 @@ async function materializeAcceptedPhase7V1({authorityRoot,phase6ReceiptPath,acce
  const predecessor=readJson(requiredFile(root,phase6ReceiptPath,'accepted Phase-6 receipt'));
  const masterRecord=readJson(requiredFile(root,acceptedMasterRecordPath,'accepted master record'));
  if(Number(predecessor.phase?.sequence)!==6||predecessor.validation?.status!=='PASS'||
-   !['AMENDED','ACCEPT_WITHOUT_MODIFICATIONS'].includes(masterRecord.decision?.outcome))
-   throw new Error('Phase-7 marker requires final accepted Phase-6 and master evidence');
+   masterRecord.segmentId!=='reviewer-3-phases-05-06'||masterRecord.boundaryPhase!==6||
+   masterRecord.bindings?.authority?.sha256!==predecessor.authority?.liteSkillSha256||
+   masterRecord.bindings?.source?.sha256!==predecessor.source?.sha256||
+   !['AMENDED','ACCEPT_WITHOUT_MODIFICATIONS'].includes(masterRecord.decision?.outcome)||
+   latestPhaseReceiptInfo(root,campaignPath,6).rel!==phase6ReceiptPath)
+   throw new Error('Phase-7 marker requires the latest final accepted Phase-6 receipt and bound master decision');
+ const acceptedMasterSha=shaFile(repoFile(root,acceptedMasterRecordPath));
  if(maybeFile(root,markerRel)){
    const old=readJson(repoFile(root,markerRel));
-   if(old.inputs?.[0]?.path!==phase6ReceiptPath)throw new Error('Phase-7 marker references stale Phase-6 evidence');
+   if(old.inputs?.[0]?.path!==phase6ReceiptPath||
+     !(old.evidence??[]).some(e=>e.role==='ACCEPTED_MASTER_REVIEW'&&
+       e.path===path.posix.relative(campaignPath,acceptedMasterRecordPath)&&e.sha256===acceptedMasterSha))
+     throw new Error('Phase-7 marker references stale Phase-6 or master evidence');
    return {markerRel,derivedInputPaths:resolveInputsForTarget({root,campaignPath,target:8})};
  }
  const loaded=loadPhaseSchema(root,authorityRoot,7),schema=loaded.schema;
@@ -873,7 +881,7 @@ async function materializeAcceptedPhase7V1({authorityRoot,phase6ReceiptPath,acce
    phase6DerivedInput:phase6Derived.find(p=>p.includes('/derived/phase-6/'))??'NONE_IDENTIFIED',
    markerDisposition:'SEALED_AUTOMATIC_MARKER',successorPhase:'8',successorReviewer:'reviewer-4'};
  form.automationInputs={predecessorReceiptPath:phase6ReceiptPath,derivedInputPaths:phase6Derived,
-   acceptedMasterRecordPath,acceptedMasterRecordSha256:shaFile(repoFile(root,acceptedMasterRecordPath))};
+   acceptedMasterRecordPath,acceptedMasterRecordSha256:acceptedMasterSha};
  writeJson(repoFile(root,formRel),form);
  const canonicalRel=path.posix.join(campaignPath,'derived/phase-7/PHASE_07_CANONICAL_DATA_v1.json');
  const canonical={schemaVersion:'curveyield-lite-phase-canonical-data-v1',phase:7,
@@ -979,7 +987,7 @@ if(reviewKind==='master'){
     });
     if(failures.length)emit('MASTER_REVIEW_INVALID',[
       'A sealed Phase 5 with missing or inconclusive mandatory simulations cannot be accepted unchanged.',
-      'Submit a substantive AMENDED reviewer-2 work-form correction; the controller will rerun Phase 5 before resealing.',
+      'Submit a substantive AMENDED reviewer-owned Phase-5 work-form correction; the controller will rerun Phase 5 before resealing.',
       ...failures.map(x=>'- '+x)
     ].join('\n'));
   }
