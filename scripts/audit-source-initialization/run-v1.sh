@@ -5,6 +5,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/scripts/audit-source-initialization/resolve-source-v1.sh"
 source "$ROOT/scripts/audit-source-initialization/extract-v1.sh"
 
+SINGLE_AGENT_SIMULATION="${SINGLE_AGENT_SIMULATION:-false}"
+[[ "$SINGLE_AGENT_SIMULATION" == true || "$SINGLE_AGENT_SIMULATION" == false ]] || {
+  echo "::error::SINGLE_AGENT_SIMULATION must be true or false" >&2
+  exit 1
+}
+
 : "${SOURCE_URL:?SOURCE_URL is required}"
 : "${REQUEST_ID:?REQUEST_ID is required}"
 : "${GH_TOKEN:?GH_TOKEN is required}"
@@ -184,10 +190,12 @@ else
     --arg init "$init_commit" --arg run "$GITHUB_RUN_ID" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
     --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg masterChat "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
+    --argjson singleAgentSimulation "$SINGLE_AGENT_SIMULATION" \
     '{
       schemaVersion:"curveyield-audit-source-initialization-report-v1",
       request:{
         requestId:$requestId,
+        singleAgentSimulation:$singleAgentSimulation,
         sourceUrl:$sourceUrl,
         agentChats:{
           "reviewer-1":$chat1,
@@ -238,7 +246,9 @@ if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
     --arg campaignId "$campaign_id" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
     --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
-    '.schemaVersion="curveyield-browser-agent-wake-registration-v1"
+    --argjson singleAgentSimulation "$SINGLE_AGENT_SIMULATION" \
+    '.singleAgentSimulation=$singleAgentSimulation
+     | .schemaVersion="curveyield-browser-agent-wake-registration-v1"
      | .campaignId=$campaignId
      | .agentChats={
          "reviewer-1":$chat1,
@@ -261,8 +271,10 @@ else
     --arg campaignId "$campaign_id" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
     --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
+    --argjson singleAgentSimulation "$SINGLE_AGENT_SIMULATION" \
     '{
       schemaVersion:"curveyield-browser-agent-wake-registration-v1",
+      singleAgentSimulation:$singleAgentSimulation,
       campaignId:$campaignId,
       mode:"resume_existing",
       chatUrl:"",
@@ -315,6 +327,7 @@ gh workflow run lite-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref m
   echo "- Workspace: $campaign_root"
   echo '- Source ZIP and unpacked source are both under campaign source/.'
   echo '- Audit-Controller ref: main'
+  echo "- Single-agent simulation: $SINGLE_AGENT_SIMULATION (automatic reviewer wakes remain enabled)"
   echo '- Fully automated Phase 0: dispatched'
   echo '- Four pre-created reviewer chats are bound to reviewer-1 through reviewer-4.'
   echo '- One persistent Maximum master-review chat is bound for every reviewer-segment gate.'
