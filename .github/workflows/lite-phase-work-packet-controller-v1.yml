@@ -265,7 +265,7 @@ jobs:
           fi
           gh auth setup-git
           rm -rf .audit-controller
-          timeout -k 10s 300s gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
+          timeout -k 10s 300s gh repo clone curveyield3/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
           cd .audit-controller
           timeout -k 10s 180s git fetch origin "${{ steps.request.outputs.audit_controller_ref }}"
           git checkout -B "${{ steps.request.outputs.audit_controller_ref }}" "origin/${{ steps.request.outputs.audit_controller_ref }}"
@@ -539,7 +539,7 @@ jobs:
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" -f phase_id=phase-5 \
             -f mode=resume_existing -f chat_url="$chat" -f wake_message_b64="$b64" \
             -f watchdog_enabled=true -f worker_role=test-executor -f gate_mode=LITE \
-            -f gate_repository=CurveYield2/Audit-Controller -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
+            -f gate_repository=curveyield3/Audit-Controller -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
             -f gate_expected_phase_id=phase-5 -f gate_expected_milestone_id=PHASE_5_WORK_PACKET
 
@@ -611,7 +611,7 @@ jobs:
               -f watchdog_enabled=true \
               -f worker_role=reviewer \
               -f gate_mode=LITE \
-              -f gate_repository=CurveYield2/Audit-Controller \
+              -f gate_repository=curveyield3/Audit-Controller \
               -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
               -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
               -f gate_expected_phase_id="$(jq -r '.phaseId' /tmp/discovery-wake.json)" \
@@ -652,7 +652,7 @@ jobs:
         run: |
           set -euo pipefail
           guide="${{ steps.controller.outputs.authority_link_root }}/master-review/TARGETED_TEST_DIRECTIVE_v1.md"
-          message_b64="$({ printf 'TARGETED TEST EXECUTOR: your only task is to run the tests in the plan named below and submit their results; you are not auditing. Read only that plan, the source files its tests need, and the "Instructions for the executing reviewer" section of %s in CurveYield2/Audit-Controller; do not open other phases, reports or authority files. Every later action must run a test, repair a test run, preserve its raw evidence or submit the result. A run that executed zero test assertions is a failure to repair, not progress.\n\n' "$guide"; printf '%s' "${{ steps.controller.outputs.feedback_b64 }}" | base64 -d; } | base64 -w0)"
+          message_b64="$({ printf 'TARGETED TEST EXECUTOR: your only task is to run the tests in the plan named below and submit their results; you are not auditing. Read only that plan, the source files its tests need, and the "Instructions for the executing reviewer" section of %s in curveyield3/Audit-Controller; do not open other phases, reports or authority files. Every later action must run a test, repair a test run, preserve its raw evidence or submit the result. A run that executed zero test assertions is a failure to repair, not progress.\n\n' "$guide"; printf '%s' "${{ steps.controller.outputs.feedback_b64 }}" | base64 -d; } | base64 -w0)"
           timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.test_request_id }}-test-reviewer" \
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
@@ -663,7 +663,7 @@ jobs:
             -f watchdog_enabled=true \
             -f worker_role=reviewer \
             -f gate_mode=LITE \
-            -f gate_repository=CurveYield2/Audit-Controller \
+            -f gate_repository=curveyield3/Audit-Controller \
             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
             -f gate_expected_phase_id=master-targeted-tests \
@@ -694,7 +694,7 @@ jobs:
             -f worker_role=reviewer \
             -f watchdog_message_b64="$poke_b64" \
             -f gate_mode=LITE \
-            -f gate_repository=CurveYield2/Audit-Controller \
+            -f gate_repository=curveyield3/Audit-Controller \
             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
             -f gate_expected_phase_id=master-review \
