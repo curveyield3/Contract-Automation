@@ -35,8 +35,8 @@ def canonical(value):
     parts = [p for p in url.path.split("/") if p]
     if len(parts) != 2 or parts[0] not in ("address", "token") or not ADDRESS.fullmatch(parts[1]) or int(parts[1], 16) == 0:
         fail("INVALID_CONTRACT_SCAN_URL")
-    if url.query or url.fragment:
-        fail("SCAN_URL_MUST_IDENTIFY_ONE_CONTRACT")
+    # Explorer UI fragments (e.g. #code) and optional tracking parameters do
+    # not alter contract identity; they are stripped before calling the API.
     chain_id, chain = CHAINS[host]
     address = "0x" + parts[1][2:].lower()
     return {"url": "https://" + host + "/address/" + address, "chainId": chain_id,
@@ -77,7 +77,7 @@ def proxy(chain_id, action, **params):
     return result
 
 def safe_name(name):
-    if not isinstance(name, str) or len(name) > 260 or not name or "\\" in name or "\x00" in name:
+    if not isinstance(name, str) or len(name) > 260 or not name or "\\" in name or any(ord(ch)<32 for ch in name):
         fail("UNSAFE_EXPLORER_SOURCE_PATH")
     p = name.split("/")
     if name.startswith("/") or ":" in name or any(x in ("", ".", "..") for x in p):
@@ -283,6 +283,10 @@ def main():
             entry.compress_type = zipfile.ZIP_DEFLATED
             entry.external_attr = 0o100644 << 16
             archive.writestr(entry, files[location], compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+    # GitHub's contents API rejects files above 100 MiB. Refuse admission before
+    # any campaign/revision is created rather than failing after partial writes.
+    if (work / name).stat().st_size > 95 * 1024 * 1024:
+        fail("SOURCE_ARCHIVE_EXCEEDS_GITHUB_CONTENTS_LIMIT")
     raw_archive = (work / name).read_bytes()
     for label_file, value in {
         "filename": name, "sha256": SHA(raw_archive), "size": str(len(raw_archive)),
