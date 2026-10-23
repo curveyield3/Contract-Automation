@@ -3,6 +3,11 @@ name: Audit Source Initialization v2
 on:
   workflow_dispatch:
     inputs:
+      single_agent_simulation:
+        description: "Explicit test-only mode: one existing ChatGPT chat plays every reviewer, master, executor, and backup role"
+        required: false
+        default: false
+        type: boolean
       source_url:
         description: Direct URL to one ZIP file on Google Drive or GitHub
         required: true
@@ -65,6 +70,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           DISPATCH_URL: ${{ inputs.source_url }}
+          DISPATCH_SIMULATION: ${{ inputs.single_agent_simulation }}
           DISPATCH_CHAT_1_URL: ${{ inputs.agent_chat_1_url }}
           DISPATCH_CHAT_2_URL: ${{ inputs.agent_chat_2_url }}
           DISPATCH_CHAT_3_URL: ${{ inputs.agent_chat_3_url }}
@@ -86,6 +92,7 @@ jobs:
             master_chat_url="$DISPATCH_MASTER_CHAT_URL"
             test_executor_chat_url="$DISPATCH_TEST_EXECUTOR_CHAT_URL"
             backup_chat_url="$DISPATCH_BACKUP_CHAT_URL"
+            single_agent_simulation="${DISPATCH_SIMULATION:-false}"
             request_id="dispatch-$GITHUB_RUN_ID"
           else
             mapfile -t requests < <(
@@ -105,6 +112,7 @@ jobs:
             master_chat_url="$(jq -r '.master_chat_url // empty' "$request")"
             test_executor_chat_url="$(jq -r '.test_executor_chat_url // empty' "$request")"
             backup_chat_url="$(jq -r '.backup_chat_url // empty' "$request")"
+            single_agent_simulation="$(jq -r '.single_agent_simulation // false' "$request")"
             request_id="push-$GITHUB_SHA"
           fi
 
@@ -139,6 +147,21 @@ jobs:
           validate_chat_url master_chat_url "$master_chat_url"
           validate_chat_url test_executor_chat_url "$test_executor_chat_url"
           validate_chat_url backup_chat_url "$backup_chat_url"
+          # Test-only explicit shared-chat operation. Production still requires
+          # independent master, execution, and backup chats as before.
+          [[ "$single_agent_simulation" == true || "$single_agent_simulation" == false ]] || {
+            echo "::error::single_agent_simulation must be boolean"
+            exit 1
+          }
+          if [ "$single_agent_simulation" = true ]; then
+            for slot_url in "$agent_chat_2_url" "$agent_chat_3_url" "$agent_chat_4_url" "$master_chat_url" "$test_executor_chat_url" "$backup_chat_url"; do
+              [ "$slot_url" = "$agent_chat_1_url" ] || {
+                echo "::error::Single-agent simulation requires the same existing chat URL in ALL seven role slots"
+                exit 1
+              }
+            done
+            echo "::notice::Single-agent simulation: one chat accepts all roles; normal audit validation and automatic reviewer wakes remain enabled."
+          else
           for reviewer_chat_url in "$agent_chat_1_url" "$agent_chat_2_url" "$agent_chat_3_url" "$agent_chat_4_url"; do
             [ "$master_chat_url" != "$reviewer_chat_url" ] || { echo "::error::master_chat_url must be distinct from every normal reviewer chat URL"; exit 1; }
             [ "$test_executor_chat_url" != "$reviewer_chat_url" ] || { echo "::error::test_executor_chat_url must be distinct from every normal reviewer chat URL"; exit 1; }
@@ -148,7 +171,10 @@ jobs:
             [ "$backup_chat_url" != "$reserved_chat" ] || { echo "::error::backup_chat_url must be a distinct unused chat"; exit 1; }
           done
 
+          fi
+
           {
+            echo "single_agent_simulation=$single_agent_simulation"
             echo "source_url=$source_url"
             echo "agent_chat_1_url=$agent_chat_1_url"
             echo "agent_chat_2_url=$agent_chat_2_url"
@@ -182,5 +208,6 @@ jobs:
           TEST_EXECUTOR_CHAT_URL: ${{ steps.request.outputs.test_executor_chat_url }}
           BACKUP_CHAT_URL: ${{ steps.request.outputs.backup_chat_url }}
           REQUEST_ID: ${{ steps.request.outputs.request_id }}
+          SINGLE_AGENT_SIMULATION: ${{ steps.request.outputs.single_agent_simulation }}
         shell: bash
         run: python3 scripts/audit-command-guard-v1.py --label audit-source-initialization --wall 1080 --idle 720 --log /tmp/audit-source-initialization-guard-v1.log -- bash scripts/audit-source-initialization/run-v1.sh
