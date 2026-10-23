@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {buildMasterDepthSpotCheckV1,validateMasterDepthSpotCheckV1} from './lite-master-depth-spotcheck-v1.mjs';
-import {readJson,writeJson,repoFile,requiredFile,loadPhaseSchema,getByPath} from './lite-phase-work-v1.mjs';
+import {readJson,writeJson,repoFile,requiredFile,loadPhaseSchema,getByPath,authorityRootFromReceipt} from './lite-phase-work-v1.mjs';
 import {validatePhaseScaffold} from './lite-phase-prefill-v1.mjs';
 import {isV13AuthorityV1,boundReviewerLineupV13,boundReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
 export {isV13AuthorityV1,boundReviewerLineupV13,boundReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
@@ -132,7 +132,7 @@ export function collectSegmentArtifacts({root,campaignPath,segment,directory,exp
     }else if(receiptKind!=='SKIP_MARKER'){
       const canonical=canonicalRel(campaignPath,phase);
       const canonicalData=readJson(requiredFile(root,canonical,'Phase '+phase+' canonical data'));
-      const authorityRoot=path.posix.dirname(expectedAuthority.homepagePath);
+      const authorityRoot=authorityRootFromReceipt({authority:expectedAuthority});
       const phaseSchema=loadPhaseSchema(root,authorityRoot,phase).schema;
       if(phaseSchema.finalReport&&!canonicalData.finalReportPath)throw new Error('required Phase '+phase+' report path is missing from canonical data');
       pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,'CANONICAL_DATA',canonical));
