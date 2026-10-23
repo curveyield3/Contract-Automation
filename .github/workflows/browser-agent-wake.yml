@@ -299,7 +299,12 @@ jobs:
             registration_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json?ref=main"
             registration_b64="$(GH_TOKEN="${{ github.token }}" gh api "$registration_api" --jq '.content' 2>/dev/null || true)"
             registration_json="$(printf '%s' "$registration_b64" | base64 -d 2>/dev/null || true)"
-            reviewer="$(printf '%s' "$registration_json" | jq -r --arg chat "$CHAT_URL" '.agentChats // {} | to_entries[] | select(.value==$chat) | .key' 2>/dev/null || true)"
+            reviewer="$(printf '%s' "$registration_json" | jq -r --arg chat "$CHAT_URL" '
+              if .singleAgentSimulation==true then
+                . as $r | .activeAssignment.reviewer as $role |
+                if ($role|type)=="string" and $r.agentChats[$role]==$chat then $role else empty end
+              else [.agentChats // {} | to_entries[] | select(.value==$chat) | .key] |
+                if length==1 then .[0] else empty end end' 2>/dev/null || true)"
             gate_path="${{ inputs.gate_state_path }}"
             if [ -z "$gate_path" ]; then
               gate_path="$(printf '%s' "$registration_json" | jq -r '.watchdog.gate.statePath // empty' 2>/dev/null || true)"
