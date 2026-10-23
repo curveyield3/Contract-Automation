@@ -86,7 +86,7 @@ else
   third_reviewer_key="reviewer-3L"
   if [ "$skill_release" = "Audit_Litemode_v13" ]; then
     third_reviewer_key="reviewer-3"
-    jq -e '.reviewerLineup.schemaVersion=="curveyield-v13-reviewer-lineup-v1" and .reviewerLineup.discoveryAttacker=="reviewer-3"' "${authority_packages[0]}/MANIFEST.json" >/dev/null
+    jq -e '.reviewerLineup.schemaVersion=="curveyield-v13-reviewer-lineup-v1" and .reviewerLineup.discoveryAttacker=="reviewer-2"' "${authority_packages[0]}/MANIFEST.json" >/dev/null
   fi
 
   success=false

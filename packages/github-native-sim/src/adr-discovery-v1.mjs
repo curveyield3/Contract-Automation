@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {isReassignedV13AuthorityV1} from '../../../scripts/lib/lite-authority-lineup-v1.mjs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {classesForTriggersV1,loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
@@ -100,7 +101,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
   requirement:'Code initializers and getters are observations, not independent specifications'
  }));
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
-  unitId,role,chatKey:role==='ATTACK'?(verdictV13?'reviewer-3':'reviewer-3L'):'reviewer-2',instructionsPath,
+  unitId,role,chatKey:role==='ATTACK'?(isReassignedV13AuthorityV1({root,authorityRoot})?'reviewer-2':verdictV13?'reviewer-3':'reviewer-3L'):'reviewer-2',instructionsPath,
   submissionPath:submissionRel(campaignPath,unitId),boundaryRequestPath:'process/agent-upload/lite-phase-boundary/',
   sourceRoot:campaignPath+'/source',sourceInventoryPath:asset(root,campaignPath,'REVIEW_INVENTORY_v1.json'),
   flowPlanPath:asset(root,campaignPath,'FLOW_PLAN_v1.json'),
@@ -148,18 +149,18 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  return packet;
 }
 
-export function discoveryWakeMessageV1({directory,auditControllerRef,packetPath,submissionPath,instructionsPath,boundaryRequestPath,unitId,role,attempt,feedbackText=null}){
+export function discoveryWakeMessageV1({directory,auditControllerRef,packetPath,submissionPath,instructionsPath,boundaryRequestPath,unitId,role,attempt,feedbackText=null,singleReviewer=false}){
  const base='https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
  const link=(p)=>base+p.split('/').map(encodeURIComponent).join('/');
- const lines=[role==='ATTACK'?'You are the attacker reviewer. Campaign '+directory.campaignId:'You are reviewer-2. Campaign '+directory.campaignId,
+ const lines=[role==='ATTACK'?(singleReviewer?'You are reviewer-2 performing a second, adversarial Phase-4 pass in the same chat. Campaign '+directory.campaignId:'You are the attacker reviewer. Campaign '+directory.campaignId):'You are reviewer-2. Campaign '+directory.campaignId,
   'Use the GitHub connector app for every repository read and write.',
   'Instructions: '+link(instructionsPath),'Assignment packet: '+link(packetPath),'Submission path: '+link(submissionPath)];
  if(feedbackText)lines.push('Controller feedback: '+feedbackText);
  lines.push('Boundary request location: '+(boundaryRequestPath??'process/agent-upload/lite-phase-boundary/'));
  lines.push('Exact boundary request JSON: '+JSON.stringify({schemaVersion:'curveyield-lite-phase-boundary-request-v1',
   campaignId:directory.campaignId,reviewKind:'discovery',unitId,auditControllerRef:auditControllerRef??'main',attempt}));
- lines.push('If no controller response arrives within 30 minutes of pushing the request, push the same request again with attempt increased by 1.');
- if(role==='ATTACK')lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any other unit's folder under work/phase-04/discovery/.");
+ lines.push('Read the exact Actions result by submitted Git SHA; inspect the controller's result and use existing recovery for infrastructure failure rather than blindly resubmitting.');
+ if(role==='ATTACK'&&!singleReviewer)lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any other unit's folder under work/phase-04/discovery/.");
  return lines.join('\n\n');
 }
 // Each reviewer chat receives its entire discovery workload in one window and completes it in
@@ -172,7 +173,9 @@ const activeIdsOf=(state,chatKey=null)=>state.payload.order.filter(id=>state.pay
 const pendingIdsOf=(state,chatKey)=>state.payload.order.filter(id=>state.payload.units[id]?.status==='PENDING'&&state.payload.units[id].chatKey===chatKey);
 const chatKeysOf=(state)=>[...new Set(state.payload.order.map(id=>state.payload.units[id]?.chatKey).filter(Boolean))];
 function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey}){
- const ids=pendingIdsOf(state,chatKey);
+ const ids=state.payload.sequentialSingleReviewer
+   ?pendingIdsOf(state,chatKey).filter(id=>state.payload.units[id].role!==(pendingIdsOf(state,chatKey).some(x=>state.payload.units[x].role!=='ATTACK')?'ATTACK':'FLOW_REVIEW'))
+   :pendingIdsOf(state,chatKey);
  for(const id of ids){
   buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now});
   state.payload.units[id].status='ACTIVE';
@@ -212,10 +215,10 @@ function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
   writeJson(repoFile(root,indexRel),index);
   return indexRel;
 }
-export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText=null,indexPath=null}){
+export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText=null,indexPath=null,singleReviewer=false}){
  const base='https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
  const link=(p)=>base+p.split('/').map(encodeURIComponent).join('/');
- const lines=[role==='ATTACK'?'You are the attacker reviewer. Campaign '+directory.campaignId:'You are reviewer-2. Campaign '+directory.campaignId,
+ const lines=[role==='ATTACK'?(singleReviewer?'You are reviewer-2 performing a second, adversarial Phase-4 pass in the same chat. Campaign '+directory.campaignId:'You are the attacker reviewer. Campaign '+directory.campaignId):'You are reviewer-2. Campaign '+directory.campaignId,
   'Use the GitHub connector app for every repository read and write.',
   'Instructions: '+link(instructionsPath)];
  if(feedbackText)lines.push('Controller feedback:\n'+feedbackText);
@@ -231,8 +234,8 @@ export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campa
  lines.push('Boundary request location: process/agent-upload/lite-phase-boundary/');
  lines.push('Exact boundary request JSON: '+JSON.stringify({schemaVersion:'curveyield-lite-phase-boundary-request-v1',
   campaignId:directory.campaignId,reviewKind:'discovery',unitId:ids[0],auditControllerRef:auditControllerRef??'main',attempt}));
- lines.push('If no controller response arrives within 30 minutes of pushing the request, push the same request again with attempt increased by 1.');
- if(role==='ATTACK')lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any unit folder under work/phase-04/discovery/ other than the ones listed above.");
+ lines.push('Read the exact Actions result by submitted Git SHA; inspect the controller's result and use existing recovery for infrastructure failure rather than blindly resubmitting.');
+ if(role==='ATTACK'&&!singleReviewer)lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any unit folder under work/phase-04/discovery/ other than the ones listed above.");
  return lines.join('\n\n');
 }
 function wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef='main',feedbackText=null}){
@@ -242,7 +245,7 @@ function wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditContr
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
  const indexPath=/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot)
     ?writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}):null;
- const message=discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText,indexPath});
+ const message=discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText,indexPath,singleReviewer:state.payload.sequentialSingleReviewer===true});
  return {chatKey:state.payload.units[ids[0]].chatKey,
   wakeId:directory.campaignId+'-discovery-'+ids[0]+'-r'+round,
   phaseId:'phase-4',milestoneId:'DISCOVERY_'+ids[0],messageB64:Buffer.from(message).toString('base64')};
@@ -253,8 +256,9 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
  const missing=!plan||!units.length;
  const state=head(directory,now,'curveyield-discovery-state-v1',{
   status:missing?'COMPLETE':'RUNNING',order,activeUnitId:missing?null:order[0],
+   sequentialSingleReviewer:isReassignedV13AuthorityV1({root,authorityRoot}),
   ...( /Audit_Litemode_v13(?:\/|$)/.test(authorityRoot)?{reviewPolicy:'correctness-verdict-v13'}:{}),
-  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?( /Audit_Litemode_v13(?:\/|$)/.test(authorityRoot)?'reviewer-3':'reviewer-3L'):'reviewer-2',
+  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?(isReassignedV13AuthorityV1({root,authorityRoot})?'reviewer-2':/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot)?'reviewer-3':'reviewer-3L'):'reviewer-2',
    status:'PENDING',attempts:0,lastValidatedSubmissionSha:null,lastErrors:[],acceptedSubmissionSha:null}])),
   gaps:missing?[{code:'INVENTORY_INCOMPLETE',detail:'No flow plan'}]:structuredClone(arr(plan.payload.gaps))
  });
@@ -391,7 +395,7 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   if(!fs.existsSync(file)){waiting.push(id);continue;}
   const bytes=fs.readFileSync(file),sha=hex(bytes);
   if(sha===info.lastValidatedSubmissionSha){
-   unchanged.push(feedbackTextV1({errors:info.lastErrors},{attempt:info.attempts,maxAttempts:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,submissionPath:relative,unitId:id}));
+   unchanged.push(feedbackTextV1({errors:info.lastErrors},{attempt:info.attempts,maxAttempts:state.payload.sequentialSingleReviewer?3:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,submissionPath:relative,unitId:id}));
    continue;
   }
   const packet=known(root,packetRel(campaignPath,id));
@@ -413,10 +417,10 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   info.attempts++;
   // V13 correctness-first discovery never converts a malformed submission into covered work.
   // The same reviewer remains responsible; an unchanged payload is not revalidated.
-  if(info.attempts<3||state.payload.reviewPolicy==='correctness-verdict-v13'){
+  if(info.attempts<3||(!state.payload.sequentialSingleReviewer&&state.payload.reviewPolicy==='correctness-verdict-v13')){
    rework.push(id);
    feedback.push(feedbackTextV1(result,{attempt:info.attempts,
-     maxAttempts:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,
+     maxAttempts:state.payload.sequentialSingleReviewer?3:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,
      submissionPath:relative,unitId:id}));
    continue;
   }
@@ -452,7 +456,11 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   return finish('DISCOVERY_PARTIAL',summary,null);
  }
  const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey});
- if(ids.length)return finish('DISCOVERY_NEXT',summary,wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:summary}));
+ if(ids.length){
+   const next=wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:summary});
+   const self=state.payload.sequentialSingleReviewer?'\nDISCOVERY_NEXT: reviewer-2 must complete the next ATTACK window in this same chat immediately after reading this result.\n'+Buffer.from(next.messageB64,'base64').toString('utf8'):'';
+   return finish('DISCOVERY_NEXT',summary+self,next);
+ }
  // This reviewer's discovery share is done; the other reviewer may still be working.
  if(activeIdsOf(state).length)return finish('DISCOVERY_PARTIAL',summary+'\nAll of your discovery units are complete; the other discovery reviewer is still working.',null);
  return completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});

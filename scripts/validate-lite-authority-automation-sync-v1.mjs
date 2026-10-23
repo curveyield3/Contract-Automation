@@ -33,15 +33,21 @@ need(authorityRoot.startsWith(controllerRoot+path.sep),'authority root must be w
 need(fs.existsSync(path.join(authorityRoot,'SKILL.md')),'authority root is not an unpacked Lite package');
 const authorityRel=path.relative(controllerRoot,authorityRoot).split(path.sep).join('/');
 
+const modernV13=authorityRel.includes('Audit_Litemode_v13')&&json(path.join(authorityRoot,'MANIFEST.json')).reviewerLineup?.phaseReviewers?.['7']==='phase7-automation';
 if(authorityRel.includes('Audit_Litemode_v13')){
  const lineup=boundReviewerLineupV13({root:controllerRoot,authorityRoot:authorityRel});
- const expectedPhases={1:'reviewer-1',2:'reviewer-2',3:'reviewer-2',4:'reviewer-2',
-   5:'reviewer-3',6:'reviewer-3',7:'reviewer-3',8:'reviewer-4',9:'reviewer-4',10:'reviewer-4'};
+ const expectedPhases=modernV13
+  ?{1:'reviewer-1',2:'reviewer-1',3:'reviewer-1',4:'reviewer-2',5:'reviewer-3',6:'reviewer-3',7:'phase7-automation',8:'reviewer-4',9:'reviewer-4',10:'reviewer-4'}
+  :{1:'reviewer-1',2:'reviewer-2',3:'reviewer-2',4:'reviewer-2',5:'reviewer-3',6:'reviewer-3',7:'reviewer-3',8:'reviewer-4',9:'reviewer-4',10:'reviewer-4'};
  for(const [phase,role] of Object.entries(expectedPhases))
    need(boundReviewerForPhaseV1({root:controllerRoot,authorityRoot:authorityRel,phase:Number(phase)})===role,
      'V13 reviewer lineup disagrees at Phase '+phase);
- const expected=MASTER_REVIEW_SEGMENTS_V13.filter(x=>x.segmentId!=='reviewer-4-followup-v1')
-   .map(x=>({segmentId:x.segmentId,reviewerId:x.reviewerId,phases:[...x.phases],boundaryPhase:x.boundaryPhase}));
+ const expected=modernV13
+  ?MASTER_REVIEW_SEGMENTS_V13.map(x=>({segmentId:x.segmentId,reviewerId:x.reviewerId,phases:[...x.phases],boundaryPhase:x.boundaryPhase}))
+  :[{segmentId:'reviewer-1-phase-01',reviewerId:'reviewer-1',phases:[1],boundaryPhase:1},
+    {segmentId:'reviewer-2-phases-02-04',reviewerId:'reviewer-2',phases:[2,3,4],boundaryPhase:4},
+    {segmentId:'reviewer-3-phases-05-07',reviewerId:'reviewer-3',phases:[5,6,7],boundaryPhase:7},
+    {segmentId:'reviewer-4-phases-08-10',reviewerId:'reviewer-4',phases:[8,9,10],boundaryPhase:10}];
  need(JSON.stringify(lineup.masterSegments)===JSON.stringify(expected),
    'V13 master segments differ from CA routing');
  const init=read(join(automationRoot,'scripts/audit-source-initialization/run-v1.sh'));
@@ -135,15 +141,15 @@ for(let phase=1;phase<=10;phase++){
   need(sameSet(contractDerived,schemaDerived),`phase ${phase}: contract/schema derived outputs mismatch`);
   need(packetController.includes('buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical'),`phase ${phase}: generic schema-driven derived-output generation is missing from boundary controller`);
   const expectedNextStates={
-    1:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
+    1:modernV13?['REWORK_REQUIRED','ACTIVE']:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
     2:['REWORK_REQUIRED','ACTIVE'],
-    3:['REWORK_REQUIRED','ACTIVE'],
+    3:modernV13?['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT']:['REWORK_REQUIRED','ACTIVE'],
     4:authorityRel.includes('Audit_Litemode_v13')?
       ['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT']:['REWORK_REQUIRED','ACTIVE'],
     5:authorityRel.includes('Audit_Litemode_v13')?
       ['REWORK_REQUIRED','ACTIVE']:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
     6:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
-    7:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
+    7:modernV13?['WAITING_FOR_SUCCESSOR_AGENT']:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
     8:['REWORK_REQUIRED','ACTIVE'],
     9:['REWORK_REQUIRED','ACTIVE'],
     10:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','COMPLETE']

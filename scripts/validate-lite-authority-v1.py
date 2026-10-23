@@ -108,8 +108,12 @@ for phase in range(1,11):
     if auth.get("activeReceiptExistsDuringAgentWork") is not False:
         errors.append(f"phase-{phase}: activeReceiptExistsDuringAgentWork must be false")
     if automation_only:
-        if phase==7 and auth.get("controllerBookkeepingTiming")!="IN_SAME_PHASE6_CONTROLLER_PASS_TRANSACTION":
-            errors.append("phase-7: controllerBookkeepingTiming must bind the automatic marker to the Phase-6 PASS transaction")
+        if phase==7:
+            bound_manifest=json.loads((pkg/"MANIFEST.json").read_text())
+            new_topology=bound_manifest.get("reviewerLineup",{}).get("phaseReviewers",{}).get("7")=="phase7-automation"
+            expected="AFTER_PHASE6_MASTER_REVIEW_ACCEPTED" if new_topology else "IN_SAME_PHASE6_CONTROLLER_PASS_TRANSACTION"
+            if auth.get("controllerBookkeepingTiming")!=expected:
+                errors.append("phase-7: controllerBookkeepingTiming must match the exactly bound manifest topology")
     elif auth.get("controllerBookkeepingTiming")!="AFTER_PACKET_VALIDATION_PASS_ONLY":
         errors.append(f"phase-{phase}: controllerBookkeepingTiming mismatch")
     submission=contract.get("submissionPolicy",{})

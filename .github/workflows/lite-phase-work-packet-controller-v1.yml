@@ -321,7 +321,7 @@ jobs:
 
       - name: Determine whether master amendment needs Phase-5 execution
         id: phase5_plan
-        if: steps.routing.outputs.stale != 'true' && steps.request.outputs.review_kind == 'master' && (steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' || steps.request.outputs.segment_id == 'reviewer-3-phases-05-07') && steps.request.outputs.master_outcome == 'AMENDED'
+        if: steps.routing.outputs.stale != 'true' && steps.request.outputs.review_kind == 'master' && (steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' || (steps.request.outputs.segment_id == 'reviewer-3-phases-05-07' || steps.request.outputs.segment_id == 'reviewer-3-phases-05-06')) && steps.request.outputs.master_outcome == 'AMENDED'
         shell: bash
         run: |
           set -euo pipefail
@@ -545,7 +545,7 @@ jobs:
           registration="process/browser-agent-wake/registrations/$safe_campaign.json"
           encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content')"
           printf '%s' "$encoded" | base64 -d > /tmp/discovery-registration.json
-          # Reviewer-2 and the attacker work discovery windows in parallel: one wake per chat.
+          # Reassigned v13: one reviewer-2 chat, flow then attack; frozen campaigns retain their own registered reviewer windows.
           printf '%s' "$WAKES_B64" | base64 -d > /tmp/discovery-wakes.json
           count="$(jq 'length' /tmp/discovery-wakes.json)"
           if [ "$count" -eq 0 ]; then exit 0; fi

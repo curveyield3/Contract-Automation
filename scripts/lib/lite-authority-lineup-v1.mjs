@@ -12,11 +12,22 @@ export function boundReviewerLineupV13({root,authorityRoot}={}){
  const lineup=manifest.reviewerLineup;
  if(manifest.release!=='Audit_Litemode_v13'||lineup?.schemaVersion!=='curveyield-v13-reviewer-lineup-v1')
    throw new Error('v13 role authority manifest is missing or mismatched');
- for(let n=1;n<=10;n++)if(!/^reviewer-[1-4]$/.test(lineup.phaseReviewers?.[String(n)]??''))
-   throw new Error('missing bound v13 reviewer for phase '+n);
- if(!Array.isArray(lineup.masterSegments)||lineup.masterSegments.length!==4||
-   lineup.discoveryAttacker!=='reviewer-3'||lineup.testExecutor!=='test-executor')
-   throw new Error('invalid bound v13 segment and executor identities');
+ const modern=lineup.masterSegments?.[0]?.segmentId==='reviewer-1-phases-01-03';
+ const owners=modern
+  ?['reviewer-1','reviewer-1','reviewer-1','reviewer-2','reviewer-3','reviewer-3','phase7-automation','reviewer-4','reviewer-4','reviewer-4']
+  :['reviewer-1','reviewer-2','reviewer-2','reviewer-2','reviewer-3','reviewer-3','reviewer-3','reviewer-4','reviewer-4','reviewer-4'];
+ for(let n=1;n<=10;n++)if(lineup.phaseReviewers?.[String(n)]!==owners[n-1])
+   throw new Error('bound v13 phase owner mismatch '+n);
+ const expected=modern
+  ?[['reviewer-1-phases-01-03','reviewer-1',[1,2,3],3],['reviewer-2-phase-04','reviewer-2',[4],4],['reviewer-3-phases-05-06','reviewer-3',[5,6],6],['reviewer-4-phases-08-10','reviewer-4',[8,9,10],10]]
+  :[['reviewer-1-phase-01','reviewer-1',[1],1],['reviewer-2-phases-02-04','reviewer-2',[2,3,4],4],['reviewer-3-phases-05-07','reviewer-3',[5,6,7],7],['reviewer-4-phases-08-10','reviewer-4',[8,9,10],10]];
+ if(JSON.stringify(lineup.automaticPhases)!=='[7]'||lineup.discoveryAttacker!==(modern?'reviewer-2':'reviewer-3')||lineup.testExecutor!=='test-executor'||lineup.masterSegments?.length!==4)
+  throw new Error('invalid bound v13 segment and executor identities');
+ for(let i=0;i<4;i++){
+   const [segmentId,reviewerId,phases,boundaryPhase]=expected[i],row=lineup.masterSegments[i];
+   if(row?.segmentId!==segmentId||row?.reviewerId!==reviewerId||JSON.stringify(row?.phases)!==JSON.stringify(phases)||row?.boundaryPhase!==boundaryPhase)
+     throw new Error('bound v13 segment mismatch '+segmentId);
+ }
  return lineup;
 }
 export function boundReviewerForPhaseV1({root,authorityRoot,phase}={}){
@@ -28,4 +39,9 @@ export function boundReviewerForPhaseV1({root,authorityRoot,phase}={}){
  if(n===6||n===7)return 'reviewer-3L';
  if(n>=8&&n<=10)return 'reviewer-4';
  throw new Error('unknown phase reviewer '+phase);
+}
+
+// Distinguish reassigned v13 from frozen campaign manifests at the bound revision.
+export function isReassignedV13AuthorityV1({root,authorityRoot}={}){
+ return Boolean(isV13AuthorityV1(authorityRoot)&&boundReviewerLineupV13({root,authorityRoot}).masterSegments[0].segmentId==='reviewer-1-phases-01-03');
 }
