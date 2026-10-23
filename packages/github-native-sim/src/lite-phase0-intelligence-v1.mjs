@@ -124,6 +124,10 @@ async function detectBuildConfig(projectRoot){
     const abs=path.join(projectRoot,...rel.split('/')); if(await exists(abs)){texts.push({path:rel,text:await readMaybe(abs)});evidence.push(rel);}
   }
   const candidates=[];
+  const foundryText=await readMaybe(path.join(projectRoot,'foundry.toml'));
+  const foundryDefault=foundryText.match(/^\[profile\.default\][^\S\r\n]*(?:\r?\n|$)([\s\S]*?)(?=^\[|$(?![\s\S]))/m)?.[1]??'';
+  const foundryVersion=foundryDefault.match(/^\s*solc(?:_version)?\s*=\s*['"](\d+\.\d+\.\d+)['"]\s*(?:#.*)?$/m)?.[1];
+  if(foundryVersion){candidates.push({version:foundryVersion,basis:'foundry.toml profile.default',label:'explicit Foundry compiler',priority:120});evidence.push('foundry.toml');}
   for(const t of texts){
     for(const [re,priority,label] of [
       [/solidity\s*:\s*['"](\d+\.\d+\.\d+)['"]/g,120,'explicit solidity version'],
@@ -145,10 +149,10 @@ async function detectBuildConfig(projectRoot){
   const compiler=candidates[0];
   const allText=texts.map(x=>x.text).join('\n');
   const opt=allText.match(/optimizer\s*:\s*\{[\s\S]{0,240}?enabled\s*:\s*(true|false)[\s\S]{0,240}?runs\s*:\s*(\d+)/);
-  const runs=opt?Number(opt[2]):200; const enabled=opt?opt[1]==='true':true;
+  const runs=opt?Number(opt[2]):Number(foundryDefault.match(/^\s*optimizer_runs\s*=\s*(\d+)/m)?.[1]??200); const enabled=opt?opt[1]==='true':!foundryText||foundryDefault.match(/^\s*optimizer\s*=\s*(true|false)/m)?.[1]==='true';
   const via=allText.match(/viaIR\s*:\s*(true|false)/);
   const evm=allText.match(/evmVersion\s*:\s*['"]([^'"]+)['"]/);
-  return{compilerVersion:compiler.version,compilerCandidates:candidates,optimizer:{enabled,runs},viaIR:via?via[1]==='true':false,evmVersion:evm?.[1]??null,evidence};
+  return{compilerVersion:compiler.version,compilerCandidates:candidates,optimizer:{enabled,runs},viaIR:via?via[1]==='true':foundryDefault.match(/^\s*via_ir\s*=\s*(true|false)/m)?.[1]==='true',evmVersion:evm?.[1]??foundryDefault.match(/^\s*evm_version\s*=\s*['"]([^'"]+)['"]/m)?.[1]??null,evidence};
 }
 
 
