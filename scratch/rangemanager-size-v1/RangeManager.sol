@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {FullMath} from "./lib/FullMath.sol";
-import {TickMath} from "./lib/TickMath.sol";
 import {IRouterV2, CyHopR} from "./lib/IRouterV2.sol";
 import {IPositionAdapter, SafeCall} from "./positions/IPositionAdapter.sol";
+
+/// @dev Read-only ratio mathematics implemented by the bot router.
+interface IRangeRouterMathV1 {
+    function exactToken0Value(uint256 amount0, uint160 sqrtPriceX96) external pure returns (uint256);
+    function planRangeSwap(
+        uint160 sqrtPriceX96, int24 lo, int24 hi, uint256 a0, uint256 a1, uint24 fee
+    ) external pure returns (bool sellToken0, uint256 amountIn);
+    function exactMulDiv(uint256 a, uint256 b, uint256 denominator) external pure returns (uint256);
+}
 
 interface ISafeM {
     function execTransactionFromModule(address to, uint256 value, bytes calldata data, uint8 operation)
@@ -132,7 +139,6 @@ contract RangeManager {
     IMorphoM public immutable MORPHO;
     address public immutable KAT;
     address public immutable AVKAT;
-    uint256 internal constant Q96 = 1 << 96;
 
     uint8 public constant CENTER = 0;
     uint8 public constant ONE_SIDED = 1;
@@ -543,7 +549,7 @@ contract RangeManager {
         } else if (r.mode == ONE_SIDED) {
             // the token worth more decides the side: token0 only sits above the price (higher ticks), token1 below
             int24 w = _round(r, r.lowerSpec + r.upperSpec);
-            if (_toToken1(a0, sp) >= a1) lo = _floor(r, tick) + r.spacing;
+            if (IRangeRouterMathV1(address(router)).exactToken0Value(a0, sp) >= a1) lo = _floor(r, tick) + r.spacing;
             else lo = _floor(r, tick) - w;
             hi = lo + w;
         } else {
@@ -602,22 +608,12 @@ contract RangeManager {
     /// `strict`: a failed swap reverts; else it is skipped (dust).
     function _swapToRatio(Range storage r, int24 lo, int24 hi, uint256 a0, uint256 a1, bool strict) internal {
         (uint160 sp,,,,,,) = r.pool.slot0();
-        (uint256 u0, uint256 u1) = _amounts(sp, lo, hi);
-        uint256 w0 = _toToken1(u0, sp);
-        if (w0 + u1 == 0) return;
-        uint256 s0 = FullMath.mulDiv(w0, 1e18, w0 + u1); // token0's value share (1e18)
-        uint256 v0 = _toToken1(a0, sp);
-        uint256 want0 = FullMath.mulDiv(v0 + a1, s0, 1e18);
-        uint256 f = uint256(r.fee) * 1e12;
-        if (v0 > want0) {
-            uint256 x0 = FullMath.mulDiv(a0, FullMath.mulDiv(v0 - want0, 1e18, 1e18 - FullMath.mulDiv(s0, f, 1e18)), v0);
-            if (x0 > a0) x0 = a0;
-            if (x0 != 0) _swapMaybe(r.token0, r.token1, x0, strict);
-        } else if (want0 > v0) {
-            uint256 x1 = FullMath.mulDiv(want0 - v0, 1e18, 1e18 - FullMath.mulDiv(f, 1e18 - s0, 1e18));
-            if (x1 > a1) x1 = a1;
-            if (x1 != 0) _swapMaybe(r.token1, r.token0, x1, strict);
-        }
+        (bool sellToken0, uint256 amountIn) = IRangeRouterMathV1(address(router)).planRangeSwap(
+            sp, lo, hi, a0, a1, r.fee
+        );
+        if (amountIn == 0) return;
+        if (sellToken0) _swapMaybe(r.token0, r.token1, amountIn, strict);
+        else _swapMaybe(r.token1, r.token0, amountIn, strict);
     }
 
     function _swapMaybe(address tokenIn, address tokenOut, uint256 x, bool strict) internal {
@@ -660,21 +656,7 @@ contract RangeManager {
     /// @dev (a0, a1) valued in token1 at spot
     function _value(Range storage r, uint256 a0, uint256 a1) internal view returns (uint256) {
         (uint160 sp,,,,,,) = r.pool.slot0();
-        return _toToken1(a0, sp) + a1;
-    }
-
-    function _toToken1(uint256 a0, uint160 sp) internal pure returns (uint256) {
-        return FullMath.mulDiv(FullMath.mulDiv(a0, sp, Q96), sp, Q96);
-    }
-
-    /// @dev token amounts of 1e18 liquidity in [lo, hi] at sqrt price `sp` (only the ratio is used)
-    function _amounts(uint160 sp, int24 lo, int24 hi) internal pure returns (uint256 a0, uint256 a1) {
-        uint160 sa = TickMath.getSqrtRatioAtTick(lo);
-        uint160 sb = TickMath.getSqrtRatioAtTick(hi);
-        uint256 liq = 1e18;
-        if (sp <= sa) a0 = FullMath.mulDiv(liq << 96, sb - sa, sb) / sa;
-        else if (sp < sb) (a0, a1) = (FullMath.mulDiv(liq << 96, sb - sp, sb) / sp, FullMath.mulDiv(liq, sp - sa, Q96));
-        else a1 = FullMath.mulDiv(liq, sb - sa, Q96);
+        return IRangeRouterMathV1(address(router)).exactToken0Value(a0, sp) + a1;
     }
 
     function _staked(Range storage r, uint256 tid) internal view returns (bool) {
@@ -775,7 +757,7 @@ contract RangeManager {
             uint256 over = (1e18 - shares[i]) * v;
             uint256 under = shares[i] * kept;
             if (v == 0 || over <= under) continue;
-            uint256 y = FullMath.mulDiv(amounts[i], (over - under) / (1e18 - shares[i] * h.fee / 1e6), v);
+            uint256 y = IRangeRouterMathV1(address(router)).exactMulDiv(amounts[i], (over - under) / (1e18 - shares[i] * h.fee / 1e6), v);
             if (y == 0) continue;
             kept += _swap(tokens[i], KAT, y);
             amounts[i] -= y;
