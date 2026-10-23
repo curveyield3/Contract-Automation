@@ -28,6 +28,9 @@ authority={
   "liteSkillPath":e["SKILL_REPO_PATH"],
   "liteSkillBlobSha":e["SKILL_BLOB"],
   "liteSkillSha256":e["SKILL_SHA"],
+  "manifestSha256":e["MANIFEST_SHA"],
+  "manifestGitBlobSha":e["MANIFEST_BLOB"],
+  "authorityCommitSha":e["AUTHORITY_COMMIT"],
   "liteRelease":e["SKILL_RELEASE"],
   "packageRevision":e["SKILL_REVISION"]
 }
