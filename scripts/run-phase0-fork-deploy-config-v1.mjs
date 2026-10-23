@@ -9,6 +9,7 @@ process.stdout.write(JSON.stringify({status:deployEvidence?.status??'BLOCKED',ex
 // secrets are never passed to package scripts, but redact them defensively anyway.
 const secrets=[a['fork-url'],process.env.KATANA_FORK_RPC_URL].filter(x=>typeof x==='string'&&x.length>8);
 const redact=text=>secrets.reduce((t,s)=>t.split(s).join('[REDACTED_RPC]'),String(text??''));
+for(const gap of deployEvidence?.gaps??[]){process.stderr.write('::error::'+redact(gap.message??gap.type)+'\n');}
 for(const attempt of deployEvidence?.attempts??[]){
   if(attempt.status==='PASS')continue;
   const tail=text=>redact(text).split('\n').slice(-150).join('\n');
