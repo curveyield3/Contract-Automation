@@ -215,7 +215,7 @@ def main():
         units.append({"unitId": unit_id, "file": unit_path, "compilerVersion": compiler_version,
                       "qualifiedName": qualified, "address": address,
                       "originalInputSha256": SHA(json.dumps(compiler_input, sort_keys=True,
-                                                           separators=(",", ":")).encode())})
+                                                           separators=(",", ":"), ensure_ascii=False).encode("utf8"))})
         target_records.append({"address": address, "chainId": chain_id, "role": role,
                                "url": item["url"], "qualifiedName": qualified, "compilationUnitId": unit_id,
                                "runtimeSha256": SHA(bytes.fromhex(code[2:])),
@@ -255,7 +255,7 @@ def main():
         "limits": ["Historical deployment/constructor execution is not replayed",
                    "External calls and dynamic dependencies require later audit investigation"]
     }
-    digest = SHA(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode())
+    digest = SHA(json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf8"))
     manifest["manifestDigestSha256"] = digest
     files["live-scan-project/scan-source-manifest.json"] = (
         json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
