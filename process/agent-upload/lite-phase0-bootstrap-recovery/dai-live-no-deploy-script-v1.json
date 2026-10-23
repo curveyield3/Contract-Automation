@@ -2,5 +2,6 @@
   "schemaVersion": "curveyield-lite-phase0-bootstrap-recovery-v1",
   "campaign_id": "dai-live-no-deploy-script-v1-r1",
   "campaign_path": "campaigns/dai-live-no-deploy-script-v1 r1",
-  "audit_controller_ref": "main"
+  "audit_controller_ref": "main",
+  "recoveryReason": "Legacy compiler rejected unsupported disabled viaIR setting; compiler diagnostics now surfaced"
 }
