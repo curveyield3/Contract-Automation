@@ -1,8 +1,9 @@
 {
   "schemaVersion": "curveyield-lite-browser-orchestrator-request-v1",
-  "requestId": "live-ethereum-dai-6b175474-r2-phase1-wake-recovery-v1",
+  "requestId": "live-ethereum-dai-6b175474-r2-phase1-wake-recovery-v2",
   "campaignId": "live-ethereum-dai-6b175474-r2",
   "campaignName": "live-ethereum-Dai-6b175474 r2",
   "campaignPath": "campaigns/live-ethereum-Dai-6b175474 r2",
-  "auditControllerRef": "main"
+  "auditControllerRef": "main",
+  "repairReason": "Resume same sealed Phase0/Phase1 assignment after exact unscaled X11 composer coordinate correction. Prior wake no send and no reviewer ACK."
 }
