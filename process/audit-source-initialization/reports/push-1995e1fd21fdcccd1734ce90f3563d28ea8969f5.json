@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "curveyield-audit-source-initialization-report-v1",
+  "request": {
+    "requestId": "push-1995e1fd21fdcccd1734ce90f3563d28ea8969f5",
+    "singleAgentSimulation": true,
+    "sourceUrl": "",
+    "scanUrls": [
+      "https://etherscan.io/address/0x6b175474e89094c44da98b954eedeac495271d0f#code"
+    ],
+    "inputMode": "LIVE_SCAN",
+    "agentChats": {
+      "reviewer-1": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+      "reviewer-2": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+      "reviewer-3": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+      "reviewer-4": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b"
+    },
+    "masterChatUrl": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+    "testExecutorChatUrl": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b",
+    "backupChatUrl": "https://chatgpt.com/c/6adabfbe-2aa8-83e8-9aac-ff596ca5549b"
+  },
+  "status": "PASS",
+  "source": {
+    "provider": "etherscan-v2",
+    "inputMode": "LIVE_SCAN",
+    "canonicalUrl": "https://etherscan.io/address/0x6b175474e89094c44da98b954eedeac495271d0f",
+    "filename": "live-ethereum-Dai-6b175474.zip",
+    "sha256": "cc83b8a04452e1f8bf23bbb362795e49d5ff659a261852959c14691bef8027d2",
+    "byteLength": 9051,
+    "repository": "CurveYield2/Audit-Controller",
+    "ref": "main",
+    "path": "campaigns/live-ethereum-Dai-6b175474 r1/source/live-ethereum-Dai-6b175474.zip",
+    "gitBlobSha": "a97c520f92201198cbaa7909cf4fe71f93f7ffe8",
+    "admissionCommit": "d0acc3b52451539a909dbcc2015399330d62df94",
+    "unpackedTreeSha256": "75dc04ad8f0a0f416a8c4822e3ca179445ef147e5b5837b9933ae212351d3834"
+  },
+  "campaign": {
+    "campaignId": "live-ethereum-dai-6b175474-r1",
+    "campaignGenerationId": "live-ethereum-dai-6b175474-r1-g1-20261023T034128Z",
+    "campaignName": "live-ethereum-Dai-6b175474 r1",
+    "workspacePath": "campaigns/live-ethereum-Dai-6b175474 r1",
+    "controllerRef": "main",
+    "initializationCommit": "3f25043d5f544f4f15dcb7d807d173a0ccf14d48"
+  },
+  "workflowRunId": "39896333994",
+  "completedAt": "2026-10-23T03:41:30Z"
+}
