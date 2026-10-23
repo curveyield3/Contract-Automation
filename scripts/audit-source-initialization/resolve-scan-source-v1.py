@@ -168,6 +168,7 @@ def main():
 
     files = {}
     units = []
+    units_by_id = {}
     target_records = []
     queue = [(x, "REQUESTED") for x in requested]
     visited = set()
@@ -200,7 +201,9 @@ def main():
             queue.append(({"address": implementation, "chainId": chain_id, "chain": chain,
                           "url": "https://" + ("etherscan.io" if chain_id == 1 else "katanascan.com") +
                                  "/address/" + implementation}, "IMPLEMENTATION"))
-        unit_id = "scan-" + SHA((str(chain_id) + address + json.dumps(compiler_input, sort_keys=True)).encode())[:16]
+        unit_id = "scan-" + SHA((str(chain_id) + compiler_version +
+                    json.dumps(compiler_input, sort_keys=True, separators=(",", ":"),
+                               ensure_ascii=False)).encode("utf8"))[:16]
         for name, entry in compiler_input["sources"].items():
             # Multiple units may share an identical source name ONLY if its content is identical.
             data = entry["content"].encode("utf8")
@@ -212,18 +215,25 @@ def main():
         files["live-scan-project/" + unit_path] = (
             json.dumps({"compilerVersion": compiler_version, "input": compiler_input},
                        sort_keys=True, separators=(",", ":")) + "\n").encode()
-        units.append({"unitId": unit_id, "file": unit_path, "compilerVersion": compiler_version,
-                      "qualifiedName": qualified, "address": address,
+        if unit_id not in units_by_id:
+            record = {"unitId": unit_id, "file": unit_path, "compilerVersion": compiler_version,
+                      "qualifiedName": qualified, "address": address, "targetBindings": [],
                       "originalInputSha256": SHA(json.dumps(compiler_input, sort_keys=True,
-                                                           separators=(",", ":"), ensure_ascii=False).encode("utf8"))})
+                                                           separators=(",", ":"), ensure_ascii=False).encode("utf8"))}
+            units.append(record)
+            units_by_id[unit_id] = record
+        units_by_id[unit_id]["targetBindings"].append({"address": address, "qualifiedName": qualified})
         target_records.append({"address": address, "chainId": chain_id, "role": role,
                                "url": item["url"], "qualifiedName": qualified, "compilationUnitId": unit_id,
                                "runtimeSha256": SHA(bytes.fromhex(code[2:])),
                                "proxyImplementation": implementation if str(info.get("Proxy") or "0") == "1" else None,
                                "verifiedCompiler": compiler_version})
-    unit_names = [u["qualifiedName"] for u in units]
-    if len(set(unit_names)) != len(unit_names):
-        fail("AMBIGUOUS_COMPILATION_TARGET", "Different deployed targets share a qualified name")
+    names_by_unit = {}
+    for row in target_records:
+        existing = names_by_unit.get(row["qualifiedName"])
+        if existing is not None and existing != row["compilationUnitId"]:
+            fail("AMBIGUOUS_COMPILATION_TARGET", "Same qualified name from distinct compiler units")
+        names_by_unit[row["qualifiedName"]] = row["compilationUnitId"]
     first = units[0]
     version = first["compilerVersion"].split("+")[0]
     # Detection only; exact build always uses the individually recorded compiler inputs.
