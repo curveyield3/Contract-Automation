@@ -1,0 +1,92 @@
+name: DAI Historical Runtime Compilation Qualification v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/dai-runtime-qualification-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare deterministic solc
+        shell: bash
+        run: npm install --prefix /tmp/dai-qualification --no-audit --no-fund --no-package-lock solc@0.5.12
+      - name: Compare deployed bytecode against source build variants at exact historical block
+        shell: bash
+        env:
+          RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM }}
+        run: |
+          set -euo pipefail
+          NODE_PATH=/tmp/dai-qualification/node_modules node <<'NODE'
+          const fs=require('fs'),crypto=require('crypto'),solc=require('solc');
+          const output={schemaVersion:'dai-runtime-qualification-v1',chainId:1,blockNumber:26253174,expectedBlockHash:'0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f',contract:'0x6b175474e89094c44da98b954eedeac495271d0f',sourceCompiler:'0.5.12+commit.7709ece9',results:[],errors:[]};
+          if(!process.env.RPC_ETHEREUM)throw Error('RPC_ETHEREUM is missing');
+          async function rpc(method,params){
+            const body=JSON.stringify({jsonrpc:'2.0',method,params,id:1});
+            const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),20000);
+            try{const r=await fetch(process.env.RPC_ETHEREUM,{method:'POST',headers:{'Content-Type':'application/json'},body,signal:controller.signal});
+              const j=await r.json();if(j.error)throw Error('RPC error code '+j.error.code);
+              if(!r.ok)throw Error('RPC HTTP '+r.status);return j.result;}finally{clearTimeout(timer);}
+          }
+          const block='0x1909776',chain=await rpc('eth_chainId',[]);
+          if(chain!=='0x1')throw Error('Wrong chain ID: '+chain);
+          const head=await rpc('eth_getBlockByNumber',[block,false]);if(head?.hash?.toLowerCase()!==output.expectedBlockHash)throw Error('historical block hash mismatch');
+          const deployed=await rpc('eth_getCode',[output.contract,block]);if(!deployed||deployed==='0x')throw Error('no historical runtime');
+          const raw=deployed.slice(2).toLowerCase(),unit=JSON.parse(fs.readFileSync('process/dai-master-targeted-tests/source-compiler-unit_v1.json'));
+          const hash=x=>crypto.createHash('sha256').update(Buffer.from(x,'hex')).digest('hex');
+          output.deployed={bytes:raw.length/2,sha256:hash(raw)};
+          const cases=[
+            {name:'source-input-as-is',optimizer:{enabled:false,runs:200}},
+            {name:'optimizer-on-200',optimizer:{enabled:true,runs:200}},
+            {name:'optimizer-on-1',optimizer:{enabled:true,runs:1}},
+            {name:'optimizer-on-1000000',optimizer:{enabled:true,runs:1000000}},
+            {name:'optimizer-off-runs-0',optimizer:{enabled:false,runs:0}},
+          ];
+          const basicDiff=(a,b)=>{for(let i=0;i<Math.min(a.length,b.length);i+=2)if(a.slice(i,i+2)!==b.slice(i,i+2))return i/2;return a.length===b.length?-1:Math.min(a.length,b.length)/2;};
+          for(const entry of cases){
+            try{
+              const input=JSON.parse(JSON.stringify(unit.input));input.settings.optimizer=entry.optimizer;
+              input.settings.outputSelection={'*':{'*':['evm.deployedBytecode.object']}};
+              const compiled=JSON.parse(solc.compile(JSON.stringify(input)));
+              if(compiled.errors?.some(x=>x.severity==='error'))throw Error('compilation error');
+              const code=compiled.contracts['Dai.sol'].Dai.evm.deployedBytecode.object.toLowerCase();
+              const cut=86;
+              output.results.push({name:entry.name,optimizer:entry.optimizer,bytes:code.length/2,sha256:hash(code),exactMatch:code===raw,firstMismatchByte:basicDiff(code,raw),
+                withoutLast43Bytes:code.length>cut&&raw.length>cut&&code.slice(0,-cut)===raw.slice(0,-cut)});
+            }catch(e){output.errors.push({name:entry.name,error:String(e).slice(0,300)});}
+          }
+          fs.mkdirSync('process/dai-master-targeted-tests/qualification',{recursive:true});
+          const target='process/dai-master-targeted-tests/qualification/bytecode-39945819265-v1.json';
+          fs.writeFileSync(target,JSON.stringify(output,null,2)+'\n');
+          console.log('Historical RPC and compiler comparison:',JSON.stringify(output));
+          NODE
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dai-runtime-qualification
+          path: process/dai-master-targeted-tests/qualification/
+      - name: Commit qualified public-bytecode comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add process/dai-master-targeted-tests/qualification/
+          git diff --cached --quiet && exit 0
+          git commit -m 'audit(dai): record historical onchain vs compiler identity evidence'
+          for attempt in 1 2 3 4; do
+            git fetch origin main
+            git rebase origin/main
+            if git push origin HEAD:main; then exit 0; fi
+            sleep "$attempt"
+          done
+          exit 1
