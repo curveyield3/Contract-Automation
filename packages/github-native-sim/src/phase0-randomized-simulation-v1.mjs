@@ -2629,7 +2629,20 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const provider=new ethers.JsonRpcProvider(localRequest,forkChain.chainId,{staticNetwork:true,cacheTimeout:-1});
     const actors=(await provider.send('eth_accounts',[])).slice(0,4),initialBlock=Number(await provider.getBlockNumber());
     console.log('[phase0-smoke-progress] START native deployment scripts');
-    const deployment=deploymentProfile
+    const liveContracts=[];
+    if(deploymentProfile?.mode==='LIVE'){
+      for(const target of deploymentProfile.contracts){
+        const artifact=artifactByQualified.get(target.qualifiedName);
+        if(!artifact)throw new Error('LIVE target has no admitted artifact: '+target.qualifiedName);
+        const code=await provider.getCode(target.address);
+        const expected=typeof artifact.deployedBytecode==='string'?artifact.deployedBytecode:artifact.deployedBytecode?.object;
+        if(!code||code==='0x'||!expected||code.toLowerCase()!==('0x'+expected.replace(/^0x/,'')).toLowerCase())throw new Error('LIVE runtime does not exactly match admitted artifact: '+target.qualifiedName);
+        liveContracts.push({...target,contractName:artifact.contractName,sourceName:artifact.sourceName,runtimeCodeHash:ethers.keccak256(code),compiledRuntimeCodeHash:ethers.keccak256(code),sourceBinding:'EXACT_COMPILED_RUNTIME',origin:'EXISTING_LIVE_DEPLOYMENT'});
+      }
+    }
+    const deployment=deploymentProfile?.mode==='LIVE'
+      ? {attempts:[],scriptDispositions:[],limitations:[],status:'PASS'}
+      : deploymentProfile
       ? await executeDeploymentProfileV1({projectRoot:staged.projectRoot,anvilUrl:anvil.url,profile:deploymentProfile,chain:forkChain})
       : await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],localSigner:anvil.localSigner,detected});
     console.log(`[phase0-smoke-progress] END native deployment scripts; attempts=${deployment.attempts.length}; failed=${deployment.attempts.filter(x=>x.status==='FAILED').length}`);
@@ -2643,18 +2656,19 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       const gaps=[...deployment.limitations,...reported.limitations];
       const sourceHasDeploymentSurface=(readiness?.deploymentAndConfiguration?.deploymentFiles??[]).length>0;
       const incomplete=dispositions.some(row=>row.disposition!=='EXECUTED_PASS')||deployment.attempts.some(row=>row.status!=='PASS')||packageDependencyInstall.status==='BLOCKED';
-      const status=dispositions.length===0?(sourceHasDeploymentSurface?'BLOCKED_NO_RUNNABLE_DEPLOYMENT_SCRIPT':'NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'):(incomplete?'BLOCKED_SCRIPT_FAILURE':'PASS');
+      const status=deploymentProfile?.mode==='LIVE'?'PASS_LIVE_DEPLOYMENT':dispositions.length===0?(sourceHasDeploymentSurface?'BLOCKED_NO_RUNNABLE_DEPLOYMENT_SCRIPT':'NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'):(incomplete?'BLOCKED_SCRIPT_FAILURE':'PASS');
       const witness={
         schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v3',
         executionMode:'ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY',status,
         campaignId:receipt.campaign.campaignId,sourceSha256:archiveSha256,
         fork:{engine:'anvil',source:forkChain.rpcSecret,chain:forkChain.chain,chainId:forkChain.chainId,initialBlock,finalBlock:scriptEnd,upstreamChainId:anvil.upstreamChainId??null,identityNormalized:anvil.identityNormalized===true},
-        deploymentProfile:deploymentProfile?{file:deploymentProfile.file,fileSha256:deploymentProfile.fileSha256,mode:deploymentProfile.mode,chain:deploymentProfile.chain,chainId:deploymentProfile.chainId,deployer:deploymentProfile.deployer,...(deploymentProfile.mode==='HARDHAT'?{hardhat:deploymentProfile.hardhat}:{foundryRoot:deploymentProfile.foundryRoot,scripts:deploymentProfile.scripts.map(x=>({entry:x.entry,sha256:x.sha256,env:x.env,timeoutSeconds:x.timeoutSeconds}))})}:null,
+        deploymentProfile:deploymentProfile?{file:deploymentProfile.file,fileSha256:deploymentProfile.fileSha256,mode:deploymentProfile.mode,chain:deploymentProfile.chain,chainId:deploymentProfile.chainId,deployer:deploymentProfile.deployer,...(deploymentProfile.mode==='LIVE'?{contracts:deploymentProfile.contracts}:deploymentProfile.mode==='HARDHAT'?{hardhat:deploymentProfile.hardhat}:{foundryRoot:deploymentProfile.foundryRoot,scripts:deploymentProfile.scripts.map(x=>({entry:x.entry,sha256:x.sha256,env:x.env,timeoutSeconds:x.timeoutSeconds}))})}:null,
         targetEvmChainIds:targetChainIds,
+        ...(deploymentProfile?.mode==='LIVE'?{liveDeployment:{status:'VERIFIED',blockNumber:initialBlock,blockHash:(await provider.getBlock(initialBlock)).hash,contracts:liveContracts},deploymentLimitation:'Historical deployment transaction and constructor execution were not replayed.'}:{}),
         policy:'PACKAGE_NATIVE_SCRIPT_EXECUTION_ONLY_NO_FALLBACK_NO_FUZZ_NO_MEDUSA_NO_ABI_TELEMETRY',
         packageDependencyInstall,detectedScripts:detected,scriptDispositions:dispositions,
         attempts:deployment.attempts,
-        deployedContracts:[...new Map([...discoveredScriptDeployments,...reported.rows].map(row=>[String(row.address).toLowerCase(),row])).values()],
+        deployedContracts:[...new Map([...liveContracts,...discoveredScriptDeployments,...reported.rows].map(row=>[String(row.address).toLowerCase(),row])).values()],
         gaps,limitations:gaps,
         coverage:{detectedScripts:dispositions.length,requiredScripts:dispositions.length,executedScripts:deployment.attempts.length,passedScripts:deployment.attempts.filter(row=>row.status==='PASS').length,failedOrUnsupportedScripts:dispositions.filter(row=>row.disposition!=='EXECUTED_PASS').length,excludedScripts:0}
       };
@@ -2664,7 +2678,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       try { deployedStateSnapshot = await captureDeployedStateSnapshotV1({provider, deployedContracts: witness.deployedContracts ?? [], artifactByQualified}); }
       catch (e) { deployedStateSnapshot = {schemaVersion:'curveyield-deployed-state-snapshot-v1', status:'ERROR', rows:[], error:String(e?.message ?? e).slice(0,2000)}; }
       await fs.writeFile(path.join(outputRoot,'DEPLOYED_STATE_SNAPSHOT_v1.json'), JSON.stringify(deployedStateSnapshot,null,2)+'\n');
-      if(status==='PASS'&&(process.env.PHASE0_FORK_STATE_REUSE_V1==='true'||/Audit_Litemode_v13(?:\/|$)/.test(receipt.authority?.homepagePath??''))){
+      if(['PASS','PASS_LIVE_DEPLOYMENT'].includes(status)&&(process.env.PHASE0_FORK_STATE_REUSE_V1==='true'||/Audit_Litemode_v13(?:\/|$)/.test(receipt.authority?.homepagePath??''))){
         try{
           const retained=await capturePhase0ForkStateV1({
             rpc:(method,params)=>rpc(anvil.url,method,params),outputDir:outputRoot,
