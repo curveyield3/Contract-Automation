@@ -2656,7 +2656,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         attempts:deployment.attempts,
         deployedContracts:[...new Map([...discoveredScriptDeployments,...reported.rows].map(row=>[String(row.address).toLowerCase(),row])).values()],
         gaps,limitations:gaps,
-        coverage:{detectedScripts:dispositions.length,executedScripts:deployment.attempts.length,passedScripts:deployment.attempts.filter(row=>row.status==='PASS').length,failedOrUnsupportedScripts:dispositions.filter(row=>row.disposition!=='EXECUTED_PASS').length,excludedScripts:0}
+        coverage:{detectedScripts:dispositions.length,requiredScripts:dispositions.length,executedScripts:deployment.attempts.length,passedScripts:deployment.attempts.filter(row=>row.status==='PASS').length,failedOrUnsupportedScripts:dispositions.filter(row=>row.disposition!=='EXECUTED_PASS').length,excludedScripts:0}
       };
       deploymentEvidence=witness;
       await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(witness,null,2)+'\n');
