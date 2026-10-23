@@ -102,7 +102,7 @@ async function rpc(url,method,params=[]){
   if(body.error)throw new Error(`RPC ${method}: ${body.error.message??JSON.stringify(body.error)}`);
   return body.result;
 }
-export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainId=1,requireUpstreamChainId=false}){
+export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainId=1,requireUpstreamChainId=false,forkBlockNumber=null}){
   let identityProxy;
   try{
     const ethers=await import('ethers');
@@ -126,6 +126,10 @@ export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainI
     const port=8545,url='http://127.0.0.1:8545';
     const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
     const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id',String(chainId),'--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--auto-impersonate','--no-rate-limit','--silent'];
+    if(forkBlockNumber!==null){
+      if(!Number.isSafeInteger(forkBlockNumber)||forkBlockNumber<=0)throw new Error('SCAN_FROZEN_BLOCK_INVALID');
+      args.push('--fork-block-number',String(forkBlockNumber));
+    }
     const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
     let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
     const started=Date.now();
@@ -2590,6 +2594,17 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   if(deploymentProfile&&!deploymentOnly)throw new Error('audit-deployment.json is supported only by the Phase-0 deployment-only lane');
   const forkChain=phase0ForkChainForProfile(deploymentProfile);
   const effectiveForkUrl=resolvePhase0ForkUrl({profile:deploymentProfile,forkUrl,forkUrls});
+  const scanManifestFile=path.join(staged.projectRoot,'scan-source-manifest.json');
+  let scanManifest=null;
+  try {scanManifest=JSON.parse(await fs.readFile(scanManifestFile,'utf8'));}
+  catch(error){if(error?.code!=='ENOENT')throw error;}
+  if(scanManifest){
+    if(receipt.source?.inputMode!=='LIVE_SCAN'||deploymentProfile?.mode!=='LIVE'||scanManifest.schemaVersion!=='curveyield-scan-source-manifest-v1')throw new Error('SCAN_SOURCE_LIVE_PROFILE_REQUIRED');
+    if(scanManifest.chainId!==forkChain.chainId||!Number.isSafeInteger(scanManifest.frozenBlock?.number)||!/^0x[0-9a-f]{64}$/i.test(scanManifest.frozenBlock.hash))throw new Error('SCAN_FROZEN_CHAIN_IDENTITY_INVALID');
+    const {manifestDigestSha256,...unsigned}=scanManifest;
+    const canonical=x=>Array.isArray(x)?'['+x.map(canonical).join(',')+']':x&&typeof x==='object'?'{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canonical(x[k])).join(',')+'}':JSON.stringify(x);
+    if(sha256(canonical(unsigned))!==manifestDigestSha256)throw new Error('SCAN_MANIFEST_DIGEST_MISMATCH');
+  }else if(receipt.source?.inputMode==='LIVE_SCAN')throw new Error('SCAN_MANIFEST_MISSING');
   const detected=await detectDeploymentScripts(staged.projectRoot);
   const packageDependencyInstall=await installPackageRuntimeDependenciesV1(staged.projectRoot,detected);
   const build={
@@ -2621,13 +2636,24 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const artifactByQualified=new Map();
     for(const artifact of build.artifacts??[])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
     const artifacts=[...artifactByQualified.values()];
-    anvil=await startAnvil({forkUrl:effectiveForkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion,chainId:forkChain.chainId,requireUpstreamChainId:Boolean(deploymentProfile)});
+    anvil=await startAnvil({forkUrl:effectiveForkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion,chainId:forkChain.chainId,requireUpstreamChainId:Boolean(deploymentProfile),forkBlockNumber:scanManifest?.frozenBlock.number??null});
     const localRequest=new ethers.FetchRequest(anvil.url);
     localRequest.timeout=20000;
     // Keep a small representative actor set; Medusa's four separate actors are funded below.
     // The previous 20+4 actor set multiplied ERC20/Permit2 approvals by each deployed target.
     const provider=new ethers.JsonRpcProvider(localRequest,forkChain.chainId,{staticNetwork:true,cacheTimeout:-1});
     const actors=(await provider.send('eth_accounts',[])).slice(0,4),initialBlock=Number(await provider.getBlockNumber());
+    if(scanManifest){
+      const block=await provider.getBlock(initialBlock);
+      if(initialBlock!==scanManifest.frozenBlock.number||block?.hash?.toLowerCase()!==scanManifest.frozenBlock.hash.toLowerCase())throw new Error('SCAN_FORK_FROZEN_BLOCK_HASH_MISMATCH');
+      const manifestTargets=scanManifest.resolvedTargets??[];
+      if(manifestTargets.length!==deploymentProfile.contracts.length||manifestTargets.length<1)throw new Error('SCAN_LIVE_TARGET_COUNT_MISMATCH');
+      for(let i=0;i<manifestTargets.length;i++){
+        const target=manifestTargets[i], declared=deploymentProfile.contracts[i];
+        if(target.address.toLowerCase()!==declared.address.toLowerCase()||target.qualifiedName!==declared.qualifiedName)throw new Error('SCAN_LIVE_TARGET_ORDER_MISMATCH');
+        if(!build.artifacts.some(a=>a.compilationUnitId===target.compilationUnitId&&a.sourceName+':'+a.contractName===target.qualifiedName))throw new Error('SCAN_LIVE_COMPILER_UNIT_MISMATCH');
+      }
+    }
     console.log('[phase0-smoke-progress] START native deployment scripts');
     const liveContracts=[];
     if(deploymentProfile?.mode==='LIVE'){
@@ -2637,7 +2663,13 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         const code=await provider.getCode(target.address);
         const expected=typeof artifact.deployedBytecode==='string'?artifact.deployedBytecode:artifact.deployedBytecode?.object;
         if(!code||code==='0x'||!expected||code.toLowerCase()!==('0x'+expected.replace(/^0x/,'')).toLowerCase())throw new Error('LIVE runtime does not exactly match admitted artifact: '+target.qualifiedName);
-        liveContracts.push({...target,contractName:artifact.contractName,sourceName:artifact.sourceName,runtimeCodeHash:ethers.keccak256(code),compiledRuntimeCodeHash:ethers.keccak256(code),sourceBinding:'EXACT_COMPILED_RUNTIME',origin:'EXISTING_LIVE_DEPLOYMENT'});
+        const admitted=scanManifest?.resolvedTargets?.find(x=>x.address.toLowerCase()===target.address.toLowerCase());
+        if(scanManifest&&!admitted)throw new Error('SCAN_LIVE_RUNTIME_TARGET_UNDECLARED');
+        const observedSha256=sha256(Buffer.from(code.slice(2),'hex'));
+        if(admitted&&observedSha256!==admitted.runtimeSha256)throw new Error('SCAN_LIVE_RUNTIME_CHANGED_FROM_INTAKE: '+target.address);
+        liveContracts.push({...target,contractName:artifact.contractName,sourceName:artifact.sourceName,
+          ...(admitted?{compilationUnitId:admitted.compilationUnitId,scanRole:admitted.role,proxyImplementation:admitted.proxyImplementation}:{}),
+          runtimeSha256:observedSha256,runtimeCodeHash:ethers.keccak256(code),compiledRuntimeCodeHash:ethers.keccak256(code),sourceBinding:'EXACT_COMPILED_RUNTIME',origin:'EXISTING_LIVE_DEPLOYMENT'});
       }
     }
     const deployment=deploymentProfile?.mode==='LIVE'
@@ -2664,6 +2696,9 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         fork:{engine:'anvil',source:forkChain.rpcSecret,chain:forkChain.chain,chainId:forkChain.chainId,initialBlock,finalBlock:scriptEnd,upstreamChainId:anvil.upstreamChainId??null,identityNormalized:anvil.identityNormalized===true},
         deploymentProfile:deploymentProfile?{file:deploymentProfile.file,fileSha256:deploymentProfile.fileSha256,mode:deploymentProfile.mode,chain:deploymentProfile.chain,chainId:deploymentProfile.chainId,deployer:deploymentProfile.deployer,...(deploymentProfile.mode==='LIVE'?{contracts:deploymentProfile.contracts}:deploymentProfile.mode==='HARDHAT'?{hardhat:deploymentProfile.hardhat}:{foundryRoot:deploymentProfile.foundryRoot,scripts:deploymentProfile.scripts.map(x=>({entry:x.entry,sha256:x.sha256,env:x.env,timeoutSeconds:x.timeoutSeconds}))})}:null,
         targetEvmChainIds:targetChainIds,
+        ...(scanManifest?{scanSourceSnapshot:{schemaVersion:scanManifest.schemaVersion,manifestDigestSha256:scanManifest.manifestDigestSha256,
+          frozenBlock:scanManifest.frozenBlock,chainId:scanManifest.chainId,
+          requestedTargets:scanManifest.requestedTargets,resolvedTargets:scanManifest.resolvedTargets}}:{}),
         ...(deploymentProfile?.mode==='LIVE'?{liveDeployment:{status:'VERIFIED',blockNumber:initialBlock,blockHash:(await provider.getBlock(initialBlock)).hash,contracts:liveContracts},deploymentLimitation:'Historical deployment transaction and constructor execution were not replayed.'}:{}),
         policy:'PACKAGE_NATIVE_SCRIPT_EXECUTION_ONLY_NO_FALLBACK_NO_FUZZ_NO_MEDUSA_NO_ABI_TELEMETRY',
         packageDependencyInstall,detectedScripts:detected,scriptDispositions:dispositions,
