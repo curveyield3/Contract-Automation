@@ -159,7 +159,7 @@ export function discoveryWakeMessageV1({directory,auditControllerRef,packetPath,
  lines.push('Boundary request location: '+(boundaryRequestPath??'process/agent-upload/lite-phase-boundary/'));
  lines.push('Exact boundary request JSON: '+JSON.stringify({schemaVersion:'curveyield-lite-phase-boundary-request-v1',
   campaignId:directory.campaignId,reviewKind:'discovery',unitId,auditControllerRef:auditControllerRef??'main',attempt}));
- lines.push('Read the exact Actions result by submitted Git SHA; inspect the controller's result and use existing recovery for infrastructure failure rather than blindly resubmitting.');
+ lines.push("Read the exact Actions result by submitted Git SHA; inspect the controller\'s result and use existing recovery for infrastructure failure rather than blindly resubmitting.");
  if(role==='ATTACK'&&!singleReviewer)lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any other unit's folder under work/phase-04/discovery/.");
  return lines.join('\n\n');
 }
