@@ -11,7 +11,19 @@ SINGLE_AGENT_SIMULATION="${SINGLE_AGENT_SIMULATION:-false}"
   exit 1
 }
 
-: "${SOURCE_URL:?SOURCE_URL is required}"
+SOURCE_URL="${SOURCE_URL:-}"
+SCAN_URLS="${SCAN_URLS:-[]}"
+if [ -n "$SOURCE_URL" ] && [ "$SCAN_URLS" != '[]' ]; then
+  echo "::error::SOURCE_INPUT_CONFLICT" >&2; exit 1
+fi
+if [ -z "$SOURCE_URL" ] && [ "$SCAN_URLS" = '[]' ]; then
+  echo "::error::SOURCE_INPUT_MISSING" >&2; exit 1
+fi
+input_mode='ZIP'
+if [ "$SCAN_URLS" != '[]' ]; then
+  input_mode='LIVE_SCAN'
+  : "${ETHERSCAN_API_KEY:?ETHERSCAN_API_KEY secret must be configured for LIVE_SCAN}"
+fi
 : "${REQUEST_ID:?REQUEST_ID is required}"
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${AUDIT_CONTROLLER_TOKEN:?AUDIT_CONTROLLER_TOKEN is required}"
@@ -35,12 +47,13 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   encoded="$(gh api "$report_api?ref=main" --jq '.content')"
   printf '%s' "$encoded" | base64 -d > /tmp/prior-source-init.json
   jq -e \
-    --arg u "$SOURCE_URL" \
+    --arg u "$SOURCE_URL" --argjson scans "$SCAN_URLS" \
     --arg c1 "$AGENT_CHAT_1_URL" --arg c2 "$AGENT_CHAT_2_URL" \
     --arg c3 "$AGENT_CHAT_3_URL" --arg c4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
     '.schemaVersion=="curveyield-audit-source-initialization-report-v1"
      and .status=="PASS"
      and .request.sourceUrl==$u
+     and (.request.scanUrls // [])==$scans
      and .request.agentChats["reviewer-1"]==$c1
      and .request.agentChats["reviewer-2"]==$c2
      and (.request.agentChats["reviewer-3"] // .request.agentChats["reviewer-3L"])==$c3
@@ -57,7 +70,13 @@ else
   export GH_TOKEN="$AUDIT_CONTROLLER_TOKEN"
   gh auth setup-git
   work='/tmp/audit-source-initialization'
-  resolve_audit_source_zip "$SOURCE_URL" "$work" "$AUDIT_CONTROLLER_TOKEN"
+  if [ "$input_mode" = 'LIVE_SCAN' ]; then
+    rm -rf "$work"
+    mkdir -p "$work"
+    python3 "$ROOT/scripts/audit-source-initialization/resolve-scan-source-v1.py" "$SCAN_URLS" "$work"
+  else
+    resolve_audit_source_zip "$SOURCE_URL" "$work" "$AUDIT_CONTROLLER_TOKEN"
+  fi
 
   filename="$(cat "$work/filename")"
   source_sha="$(cat "$work/sha256")"
@@ -159,6 +178,9 @@ else
     CAMPAIGN_ROOT="$campaign_root" SOURCE_PROVIDER="$provider" SOURCE_URL_CANONICAL="$canonical_url" \
     SOURCE_FILENAME="$filename" SOURCE_SHA="$source_sha" SOURCE_SIZE="$source_size" SOURCE_PATH="$source_path" \
     SOURCE_DIR="$source_dir" ADMISSION_COMMIT="$admission_commit" SOURCE_BLOB="$source_blob" TREE_SHA="$tree_sha" \
+    SOURCE_INPUT_MODE="$input_mode" SCAN_TARGETS_JSON="$SCAN_URLS" \
+    SCAN_MANIFEST_SHA="$(cat "$work/scan-manifest-sha256" 2>/dev/null || true)" \
+    SCAN_TARGET_SET_SHA="$(cat "$work/scan-target-set-sha256" 2>/dev/null || true)" \
     CREATED_AT="$created_at" SKILL_RELEASE="$skill_release" SKILL_REVISION="$skill_revision" SKILL_HOME="$skill_home" \
     MASTER_CHAT_URL="$MASTER_CHAT_URL" TEST_EXECUTOR_CHAT_URL="$TEST_EXECUTOR_CHAT_URL" \
     SKILL_SHA="$skill_sha" SKILL_BLOB="$skill_blob" SKILL_REPO_PATH="$skill_repo_path" \
@@ -182,7 +204,7 @@ else
 
   export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
   jq -n \
-    --arg requestId "$REQUEST_ID" --arg sourceUrl "$SOURCE_URL" --arg provider "$provider" \
+    --arg requestId "$REQUEST_ID" --arg sourceUrl "$SOURCE_URL" --argjson scanUrls "$SCAN_URLS" --arg mode "$input_mode" --arg provider "$provider" \
     --arg canonicalUrl "$canonical_url" --arg filename "$filename" --arg sha "$source_sha" \
     --argjson size "$source_size" --arg campaignId "$campaign_id" --arg generation "$generation_id" \
     --arg campaignName "$campaign_name" --arg workspace "$campaign_root" --arg sourcePath "$source_path" \
@@ -197,6 +219,8 @@ else
         requestId:$requestId,
         singleAgentSimulation:$singleAgentSimulation,
         sourceUrl:$sourceUrl,
+        scanUrls:$scanUrls,
+        inputMode:$mode,
         agentChats:{
           "reviewer-1":$chat1,
           "reviewer-2":$chat2,
@@ -209,7 +233,7 @@ else
       },
       status:"PASS",
       source:{
-        provider:$provider,canonicalUrl:$canonicalUrl,filename:$filename,sha256:$sha,byteLength:$size,
+        provider:$provider,inputMode:$mode,canonicalUrl:$canonicalUrl,filename:$filename,sha256:$sha,byteLength:$size,
         repository:"CurveYield2/Audit-Controller",ref:"main",path:$sourcePath,
         gitBlobSha:$blob,admissionCommit:$admission,unpackedTreeSha256:$tree
       },
@@ -325,7 +349,7 @@ gh workflow run lite-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref m
   echo "- Campaign ID: $campaign_id"
   echo "- Generation: $generation_id"
   echo "- Workspace: $campaign_root"
-  echo '- Source ZIP and unpacked source are both under campaign source/.'
+  echo '- Source archive (user ZIP or generated from verified scan pages) and unpacked source are both under campaign source/.'
   echo '- Audit-Controller ref: main'
   echo "- Single-agent simulation: $SINGLE_AGENT_SIMULATION (automatic reviewer wakes remain enabled)"
   echo '- Fully automated Phase 0: dispatched'
