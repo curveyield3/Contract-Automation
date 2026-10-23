@@ -27,9 +27,12 @@ jobs:
           cd "$ROOT"
           mkdir -p vendor
           git clone --depth 1 -q --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git vendor/openzeppelin-contracts
+          mkdir -p source
+          cp RangeManager.sol RangeManager_original.sol source/
+          cp -R router lib positions source/
           cat > foundry.toml <<'EOF'
           [profile.default]
-          src = "."
+          src = "source"
           out = "out"
           test = "unused"
           libs = ["vendor"]
