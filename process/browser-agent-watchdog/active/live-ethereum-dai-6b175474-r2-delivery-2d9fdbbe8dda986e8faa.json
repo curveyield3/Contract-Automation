@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "curveyield-browser-agent-watchdog-state-v1",
+  "wakeId": "live-ethereum-dai-6b175474-r2-delivery-2d9fdbbe8dda986e8faa",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "phaseId": "master-review",
+  "workerRole": "reviewer",
+  "status": "ACTIVE",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
+  "lastProvider": "normal-system-chrome-x11-phase1-visual-evidence",
+  "armedAt": "2026-10-24T15:56:23Z",
+  "intervalMinutes": 5,
+  "pokeIntervalMinutes": 40,
+  "deliveryConfirmed": false,
+  "ackPath": "campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_master-reviewer_v1.json",
+  "ackId": "live-ethereum-dai-6b175474-r2-delivery-2d9fdbbe8dda986e8faa/40108755209",
+  "idleMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-delivery-2d9fdbbe8dda986e8faa/40108755209\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_master-reviewer_v1.json on curveyield3/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nMASTER_TARGETED_TESTS_EVIDENCE_SUBMITTED: ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa. Master must inspect raw evidence and amend the reviewer-owned work forms before acceptance. Unresolved candidates still block final COMPLETE.",
+  "observation": {
+    "assistantCount": 0,
+    "lastAssistantHash": "",
+    "observedAt": "2026-10-24T15:56:23Z"
+  },
+  "gate": {
+    "mode": "LITE",
+    "repository": "curveyield3/Audit-Controller",
+    "ref": "main",
+    "statePath": "Audit Campaign Directory/campaigns/live-ethereum-dai-6b175474.json",
+    "expectedPhaseId": "master-review",
+    "expectedMilestoneId": "reviewer-2-phase-04",
+    "activePointerPath": "",
+    "interphase": {
+      "handoffPath": "",
+      "workPacketPath": "",
+      "completionPath": "",
+      "workPacketSha256": ""
+    },
+    "stopStates": [
+      "WAITING_FOR_HUMAN_RESPONSE",
+      "WAITING_FOR_SUCCESSOR_AGENT",
+      "CLOSED",
+      "STOPPED_BY_HUMAN"
+    ],
+    "stopCampaignStatuses": [
+      "COMPLETE",
+      "STOPPED_BY_HUMAN"
+    ]
+  },
+  "repair": {
+    "enabled": false,
+    "idlePokeThreshold": 3,
+    "unviewableThreshold": 2,
+    "consecutiveIdlePokes": 0,
+    "consecutiveUnviewable": 0
+  }
+}
