@@ -7,17 +7,17 @@
   "status": "ACTIVE",
   "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
   "lastProvider": "normal-system-chrome-x11-phase1-visual-evidence",
-  "armedAt": "2026-10-24T12:36:01Z",
+  "armedAt": "2026-10-24T13:24:41Z",
   "intervalMinutes": 5,
-  "pokeIntervalMinutes": 20,
-  "deliveryConfirmed": false,
+  "pokeIntervalMinutes": 40,
+  "deliveryConfirmed": true,
   "ackPath": "campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_master-reviewer_v1.json",
   "ackId": "live-ethereum-dai-6b175474-r2-delivery-80f1434e6a478cc63c5c/40094103394",
-  "idleMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-delivery-80f1434e6a478cc63c5c/40094103394\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_master-reviewer_v1.json on curveyield3/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nMASTER_TARGETED_TESTS_EVIDENCE_SUBMITTED: 9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4. Master must inspect raw evidence and amend the reviewer-owned work forms before acceptance. Unresolved candidates still block final COMPLETE.",
+  "idleMessage": "GET BACK TO WORK",
   "observation": {
     "assistantCount": 0,
     "lastAssistantHash": "",
-    "observedAt": "2026-10-24T12:36:01Z"
+    "observedAt": "2026-10-24T13:24:41Z"
   },
   "gate": {
     "mode": "LITE",
@@ -45,27 +45,10 @@
     ]
   },
   "repair": {
-    "enabled": true,
+    "enabled": false,
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2,
-    "consecutiveIdlePokes": 1,
+    "consecutiveIdlePokes": 0,
     "consecutiveUnviewable": 0
-  },
-  "watchdogRunId": "40097435710",
-  "watchdogSweepStartedAt": "2026-10-24T13:19:11Z",
-  "lastDecision": "TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ",
-  "lastNoReadSweepAt": "2026-10-24T13:13:33Z",
-  "elapsedSinceLastPokeMinutes": 37,
-  "lastStopClick": {
-    "x": null,
-    "y": null,
-    "darkPixels": 0,
-    "darkAround": null,
-    "onButton": false,
-    "clicked": false,
-    "areaChanged": null,
-    "status": "STOP_BUTTON_NOT_FOUND"
-  },
-  "lastPokedAt": "2026-10-24T13:20:32Z",
-  "pokeCount": 1
+  }
 }
