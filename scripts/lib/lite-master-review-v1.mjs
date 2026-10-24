@@ -6,7 +6,7 @@ import {readJson,writeJson,repoFile,requiredFile,loadPhaseSchema,getByPath,autho
 import {validatePhaseScaffold} from './lite-phase-prefill-v1.mjs';
 import {isV13AuthorityV1,boundReviewerLineupV13,boundReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
 export {isV13AuthorityV1,boundReviewerLineupV13,boundReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
-import {validateRecordedPhase5MachineEvidenceV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
+import {validateRecordedPhase5MachineEvidenceV1,inspectPhase5OwnerEvidenceDeferralV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 
 export const MASTER_REVIEW_SEGMENTS_V1=Object.freeze([
   Object.freeze({segmentId:'reviewer-1-phase-01',reviewerId:'reviewer-1',phases:Object.freeze([1]),boundaryPhase:1}),
@@ -428,7 +428,16 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   if(segment.boundaryPhase>=5&&!machineRepairReplay&&outcome!=='REQUEST_TARGETED_TESTS'&&!isPostCompletionFollowup){
     try{
       const prior=readJson(requiredFile(root,canonicalRel(campaignPath,5),'Phase-5 canonical data'));
-      failures.push(...validateRecordedPhase5MachineEvidenceV1({
+      const ownerDeferral=inspectPhase5OwnerEvidenceDeferralV1({
+        controllerRoot:root,campaignPath,campaignId:directory.campaignId,
+        sourceSha256:directory.sourceSha256,
+        targetDesigns:prior?.actions?.['step-3']?.outputs?.targetDesigns??[]
+      });
+      if(ownerDeferral){
+        if(prior?.automationOutputs?.phase5MachineExecutionGate?.status!=='DEFERRED_UNVERIFIED'||
+           prior?.automationOutputs?.phase5MachineExecutionGate?.ownerDirectivePath!==ownerDeferral.path)
+          failures.push('Owner evidence deferral is not bound to exact Phase-5 canonical data');
+      }else failures.push(...validateRecordedPhase5MachineEvidenceV1({
         controllerRoot:root,campaignPath,
         targetDesigns:prior?.actions?.['step-3']?.outputs?.targetDesigns??[],
         expectedCampaignId:directory.campaignId,expectedSourceSha256:directory.sourceSha256,
