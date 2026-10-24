@@ -201,30 +201,25 @@ Phase 6 stages exact source, verifies any archive, and materializes the approved
 
 Do not add a second network checkout, second archive extraction, or second harness-overlay materialization to the normal Phase-6 path. Snapshot digest mismatch is an integrity failure.
 
-## Existing mutable Anvil RPC — mandatory shared execution boundary
+## Canonical archival Anvil execution — all Lite phases and technical review
 
-`SIM_ARCHIVE_PRIMARY_ETHEREUM_01` is the existing approved CurveYield mutable Ethereum Anvil RPC used by the trusted Contract-Automation execution lane.
+The **only** Ethereum archive upstream for this audit process is the existing GitHub Actions secret `RPC_ETHEREUM` (authenticated dRPC), projected by the trusted GitHub Actions execution step to `ETHEREUM_FORK_RPC_URL`. It is NOT a direct mutable RPC and must never receive test writes. The runner's `packages/runner/src/anvil-engine.mjs` launches an ephemeral **127.0.0.1 Anvil fork**, pinned to the authenticated historical block, and only the localhost RPC receives transactions, impersonation, snapshot/revert and fuzz/Medusa/Forge actions.
 
-Any audit operation requiring fork-state access or mutable JSON-RPC semantics MUST use this existing runner-managed path.
+The authoritative, stepwise agent launch/recovery policy is `docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md`, section **Anvil/RPC rule**. Read it before any technical test design or request. The frozen campaign-specific Audit_Litemode_v13 authority governs *which* obligations exist; this infrastructure guide governs *how* existing technical execution is launched. Never change a frozen skill or sealed receipt to fix an execution issue.
 
-- Do not request, accept, invent, or substitute another mutable RPC URL.
-- Do not create a parallel local or remote Anvil fork system when the existing path applies.
-- The secret is runner-owned and must never be serialized into requests, committed configs, corpora, artifacts, logs, or reports.
-- Evidence may record the profile name, chain identity, frozen block number/hash, and policy disposition, never the URL.
-- Missing/unreachable/wrong-chain mutable RPC is infrastructure failure; do not fall back to another provider.
+- Phase 0: source-initialization/bootstrap uses `lite-phase0-randomized-simulation-v1.yml` (the deployed/config lane) and `scripts/run-phase0-fork-deploy-config-v1.mjs`. It pins historical block/hash for both LIVE_SCAN and ZIP scripts, and LIVE_SCAN additionally proves deployed target runtime code. No fabricated off-fork replacement.
+- Phase 1–4: review/adversarial planning reads previously captured evidence. When an **authorized** master-targeted test requires mutable state, dispatch only the existing trusted V7 execution via Contract-Automation. No old Ganache, source fixture, public RPC, synthetic mock or private local chain counts as historical fork evidence.
+- Phase 5: reviewer writes source-bound `ANVIL_WORKFLOW` target designs, never runs tests. The boundary controller may automatically run candidates; do **not** submit it merely to see whether the runner was repaired without separate audit-owner authorization. For authorized execution, `lite-phase-work-packet-controller-v1.yml` injects the secret to the V7 runner, which verifies pinned archive state and local Anvil; Medusa/Forge receive **only localhost** and only if explicitly selected.
+- Phase 6: reviewer interprets real Phase-0/5 receipts; designs baseline/attacker harnesses; registered test-executor uses the existing `process/agent-upload/lite-v7-execution/` request dispatch and `audit-controller-execution.yml` for specifically authorized executions. Full raw ledgers and bound receipts are required.
+- Phase 7: automatic milestone/marker, no new simulation. Phases 8–10: source-bound remediation/retest when authorized uses the same runner, historical pin and receipt requirements; no private/public fork alternatives.
+- Never invent `SIM_ARCHIVE_PRIMARY_ETHEREUM_01` or request a replacement mutable RPC credential; this is a deprecated misleading identifier, not the actual GitHub Actions secret. GitHub connector lacking `workflow_dispatch` does not mean Anvil/dRPC are missing. Use the existing documented push-triggered request and verify exact run and jobs.
+- For each required archive action, record: upstream chain, pinned block and hash, Anvil PID/session identity, chain verification, deployed bytecode/address checks, isolated-fork write traces, real ABI/oracle observations, and raw evidence digest. Do not expose the secret/URL, private-key material or browser tokens.
+- Fail closed on missing/unreachable/wrong-chain RPC, missing history/code, unsupported chain, hash mismatch, absent fork, synthetic fixture, stale snapshot or missing test permission. A local chain started without `--fork-url` is **not** archive-backed evidence. No fallback to Ganache, unauthenticated public RPC, latest unpinned chain, copied/static fixture or arbitrary local chain.
+- Approval to **inspect, repair or document** is not permission to run any test. Do not submit a test-triggering request, push a test fixture, rerun a failed workflow or create a new execution workflow without explicit audit-owner test authorization.
 
-For applicable Phase 6:
+## Full simulation backend — historical Anvil only
 
-- preflight verifies Ethereum identity and freezes the observed block number/hash;
-- Medusa runs in fork mode through that RPC;
-- Foundry uses the same frozen fork identity;
-- Medusa must reach terminal evidence before native Foundry begins.
-
-## Full simulation backend — Anvil only
-
-All authoritative full/live/archive/mainnet-fork/deployment/lifecycle/Phase-7 simulation uses Anvil.
-
-Do not use Ganache as a full-simulation compatibility fallback and do not downgrade the requested EVM profile to make another backend work. Static repository checks reject Ganache imports from authoritative V7 execution modules.
+All authoritative simulation/attacker/deployment/lifecycle evidence requiring live state uses a locally writable Anvil **fork of verified historical chain state**. Standalone local simulation is permitted only for development/unit-test machinery and must be explicitly labeled `SYNTHETIC_NOT_AUDIT_EVIDENCE`; it cannot seal a Lite campaign or satisfy a candidate security claim.
 
 ## V7 qualification
 
