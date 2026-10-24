@@ -64,21 +64,27 @@ Current assignment-v2 repair is resume-first and uses the assigned pre-created r
 
 Legacy reviewer repair that could create a fresh Playwright-driven chat is retired. A campaign that has not been migrated to the current Audit Campaign Directory assignment-v2 registration fails closed instead of using the legacy browser path.
 
-## Tailnet connection — native GitHub OIDC (tag-free workflow configuration)
+## Tailnet connection — native GitHub OIDC with authorized device tag
 
-The five browser workflows now call `.github/actions/connect-browser-tailnet-oidc/action.yml`, which runs `scripts/browser-agent-tailnet-oidc.sh` with the stored `TS_OAUTH_CLIENT_ID` GitHub secret and GitHub's short-lived OIDC identity. The workflow no longer supplies a device tag and does not use the GitHub Actions variable `TAILSCALE_NODE_TAG`.
+The five browser workflows call `.github/actions/connect-browser-tailnet-oidc/action.yml`, which runs `scripts/browser-agent-tailnet-oidc.sh` with the existing `TS_OAUTH_CLIENT_ID` secret and the **fixed** device identity `tag:audit-browser`. GitHub Actions supplies its signed OIDC identity using `id-token: write`. Tailscale validates the federated identity and internally creates a short-lived, tagged node authorization. No separate `TS_AUDIENCE`, `TAILSCALE_AUTHKEY`, or `TAILSCALE_NODE_TAG` is required.
 
-```sh
-sudo -E tailscale up --client-id="$TS_OAUTH_CLIENT_ID" \
-  --audience="api.tailscale.com/$TS_OAUTH_CLIENT_ID" \
+The effective Tailscale command is:
+
+```bash
+sudo -E tailscale up --client-id="$TS_CLIENT_ID" \
+  --audience="api.tailscale.com/$TS_CLIENT_ID" \
+  --advertise-tags="tag:audit-browser" \
   --accept-dns=false
 ```
 
-One-time GitHub configuration: set the existing `TS_OAUTH_CLIENT_ID` and `CHATGPT_STORAGE_STATE_B64` secrets, and keep the existing home-exit-node variable. No additional TS_AUDIENCE, TS_OAUTH_SECRET, TAILSCALE_AUTHKEY, or TAILSCALE_NODE_TAG setting is required by these workflow files.
+**Tailnet administrator configuration (handled separately from GitHub):** Define `tag:audit-browser` in the tailnet `tagOwners` policy (without replacing existing policy) and authorize that device tag for the existing GitHub OpenID Connect credential. The verified GitHub federated identity subject for this repository is `repo:curveyield3@346794407/Contract-Automation@1430753271:ref:refs/heads/main`. The relevant Tailscale trust credential must allow tagged node registration and `auth_keys` write. Preserve the issuer URL, Client ID, and scopes.
 
-**Important compatibility limit:** Tailscale's documented workload identity provisioning flow expects a device tag authorized by the federated identity, even when using the native `tailscale up --client-id` mode. The absence of `--advertise-tags` is a user-requested configuration change, **not evidence that tag-free OIDC node registration works**. If Tailscale refuses the connection, do not bypass the network/exit-node gate or claim the browser wake succeeded. A separate user-bound authentication approach would require deliberate approval and different credential provisioning. See https://tailscale.com/docs/features/workload-identity-federation and https://tailscale.com/docs/features/tags.
+The home exit-node peer must remain reachable by this tagged runner, and the existing private VNC access policy must continue to restrict access to authorized tailnet devices. Keep the existing `BROWSER_HOME_EXIT_NODE` repository variable (or its fallback). The `CHATGPT_STORAGE_STATE_B64` secret is required for the separate authenticated ChatGPT browser session.
 
-All runner device state remains in memory, and the existing private VNC and exit-node constraints still apply. Do not create parallel browser runs. Only a verified campaign wake acknowledgment confirms that the next agent received its instructions.
+**Prior failures and evidence:** The tag-free wake reported `federated identity authkeys require --advertise-tags`. A tagged attempt reported `requested tags [tag:audit-browser] are invalid or not permitted`, showing that the Tailscale-side tag definition/authorization must be corrected. Do not claim success or rerun the wake until the Tailscale administrator confirms the tag is authorized. Only the campaign's current `WAKE_ACK` and controller state can establish successful reviewer takeover.
+
+Official documentation: https://tailscale.com/docs/features/workload-identity-federation and https://tailscale.com/docs/features/tags.
+
 ## Shared browser ownership
 
 All live audit browser owners serialize on:
