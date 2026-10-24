@@ -1,6 +1,10 @@
 name: Lite Controller Delivery Replay v1
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/browser-agent-wake/delivery-replay-requests/*.json'
   workflow_dispatch:
     inputs:
       campaign_id:
@@ -20,7 +24,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: lite-controller-delivery-replay-${{ inputs.campaign_id }}
+  group: lite-controller-delivery-replay-${{ github.event_name == 'workflow_dispatch' && inputs.campaign_id || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -30,8 +34,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.sha }}
           persist-credentials: false
+          fetch-depth: 2
+      - name: Resolve exact bounded delivery replay request
+        id: request
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_CAMPAIGN: ${{ inputs.campaign_id }}
+          DISPATCH_DETAIL_REF: ${{ inputs.detail_ref }}
+          DISPATCH_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = 'push' ]; then
+            mapfile -t requests < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- 'process/browser-agent-wake/delivery-replay-requests/*.json')
+            [ "${#requests[@]}" -eq 1 ] || { echo '::error::Exactly one bounded delivery-replay request must change'; exit 1; }
+            request="${requests[0]}"
+            jq -e '.schemaVersion=="curveyield-lite-controller-delivery-replay-request-v1" and (.campaignId|type=="string") and (.detailRef|type=="string") and (.auditControllerRef=="main")' "$request" >/dev/null
+            campaign="$(jq -r '.campaignId' "$request")"
+            detail="$(jq -r '.detailRef' "$request")"
+            ref="$(jq -r '.auditControllerRef' "$request")"
+            [ "$request" = "process/browser-agent-wake/delivery-replay-requests/$campaign.json" ] || { echo '::error::Replay request filename mismatches campaign'; exit 1; }
+          else
+            campaign="$DISPATCH_CAMPAIGN"
+            detail="$DISPATCH_DETAIL_REF"
+            ref="${DISPATCH_CONTROLLER_REF:-main}"
+          fi
+          [[ "$campaign" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || exit 1
+          [[ "$detail" =~ ^controller/results/[a-f0-9]{20}/INDEX_v1.json$ ]] || exit 1
+          [ "$ref" = main ] || exit 1
+          { echo "campaign_id=$campaign"; echo "detail_ref=$detail"; echo "audit_controller_ref=$ref"; } >> "$GITHUB_OUTPUT"
       - name: Select controller credential
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -42,9 +75,9 @@ jobs:
         id: replay
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          CAMPAIGN_ID: ${{ inputs.campaign_id }}
-          DETAIL_REF: ${{ inputs.detail_ref }}
-          CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+          DETAIL_REF: ${{ steps.request.outputs.detail_ref }}
+          CONTROLLER_REF: ${{ steps.request.outputs.audit_controller_ref }}
         shell: bash
         run: |
           set -euo pipefail
@@ -85,7 +118,7 @@ jobs:
         run: |
           set -euo pipefail
           ledger_api="repos/curveyield3/Audit-Controller/contents/${CAMPAIGN// /%20}/controller/delivery/DELIVERY_LEDGER_v1.json"
-          response="$(gh api "$ledger_api?ref=${{ inputs.audit_controller_ref }}")"
+          response="$(gh api "$ledger_api?ref=${{ steps.request.outputs.audit_controller_ref }}")"
           sha="$(printf '%s' "$response" | jq -r '.sha')"
           printf '%s' "$response" | jq -r '.content' | base64 -d > /tmp/replay-ledger.json
           node --input-type=module -e '
@@ -101,7 +134,7 @@ jobs:
           '
           encoded="$(base64 -w0 /tmp/replay-ledger-next.json)"
           gh api --method PUT "$ledger_api" \
-            -f branch="${{ inputs.audit_controller_ref }}" \
+            -f branch="${{ steps.request.outputs.audit_controller_ref }}" \
             -f message="audit(delivery): claim bounded replay $CAMPAIGN $CLAIMED_SHA" \
             -f content="$encoded" -f sha="$sha" >/dev/null
           echo "Atomic one-time replay claim accepted" >> "$GITHUB_STEP_SUMMARY"
@@ -111,7 +144,7 @@ jobs:
         if: steps.replay.outputs.kind != 'ORCHESTRATOR'
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
           ROLE: ${{ steps.replay.outputs.role }}
         shell: bash
         run: |
@@ -130,8 +163,8 @@ jobs:
         if: steps.replay.outputs.kind == 'REVIEWER' || steps.replay.outputs.kind == 'MASTER'
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          CAMPAIGN_ID: ${{ inputs.campaign_id }}
-          CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+          CONTROLLER_REF: ${{ steps.request.outputs.audit_controller_ref }}
           CHAT_URL: ${{ steps.chat.outputs.url }}
           WAKE_ID: ${{ steps.replay.outputs.wake_id }}
           WAKE_B64: ${{ steps.replay.outputs.wake_b64 }}
@@ -151,8 +184,8 @@ jobs:
         if: steps.replay.outputs.kind == 'ORCHESTRATOR'
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          CAMPAIGN_ID: ${{ inputs.campaign_id }}
-          CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+          CONTROLLER_REF: ${{ steps.request.outputs.audit_controller_ref }}
           CAMPAIGN_PATH: ${{ steps.replay.outputs.campaign_path }}
         shell: bash
         run: |
