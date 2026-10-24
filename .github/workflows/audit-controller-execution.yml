@@ -52,9 +52,20 @@ jobs:
           # An Oct-2026 qualification of older code must not silently authorize
           # a new fork/Anvil implementation. In particular, an obsolete runner
           # cannot be trusted to apply today's pinned-block/hash repairs.
-          current_main="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq '.sha')"
-          if [ "$qualified_commit" != "$current_main" ]; then
-            echo "::error::V7_QUALIFIED_RUNNER_STALE: qualified commit differs from current main. Historical fork execution is HELD until the audit owner authorizes a qualified runner rebind; no old-code fallback."
+          # Compare security-relevant runner inputs rather than raw HEAD:
+          # status bookkeeping and documentation commits must not make a newly
+          # qualified runner permanently impossible to use.
+          diff_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/$qualified_commit...main")" || {
+            echo "::error::V7_QUALIFIED_RUNNER_STALE: unable to compare qualified runner and current source."
+            exit 1
+          }
+          changed_count="$(printf '%s' "$diff_json" | jq -r '.files|length')"
+          if [ "$changed_count" -ge 300 ]; then
+            echo "::error::V7_QUALIFIED_RUNNER_STALE: comparison too large to prove safe; requalification required."
+            exit 1
+          fi
+          if printf '%s' "$diff_json" | jq -r '.files[]?.filename' | grep -Eq '^(packages/runner/src/|packages/github-native-sim/src/|scripts/|\.github/workflows/audit-controller-execution\.yml$|\.github/actions/setup-v7-toolchain/)'; then
+            echo "::error::V7_QUALIFIED_RUNNER_STALE: execution code changed since qualified commit. Human-authorized runner requalification and exact evidence rebind required; no stale runner fallback."
             exit 1
           fi
           echo "commit=$qualified_commit" >> "$GITHUB_OUTPUT"
