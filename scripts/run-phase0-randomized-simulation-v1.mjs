@@ -13,6 +13,7 @@ function args(argv){
   return out;
 }
 const a=args(process.argv);
+throw new Error('RETIRED_PHASE0_RANDOMIZED_CLI: use trusted Phase-0 forked deployment/config workflow. Unverified network-free state cannot be reported as historical proof.');
 for(const k of ['controller-root','campaign-path','output'])if(!a[k])throw new Error('missing --'+k);
 if(!a['completed-stages-manifest']&&!a['fork-url'])throw new Error('missing --fork-url');
 const result=a['completed-stages-manifest'] ? await importCompletedPhase0StagesV1({controllerRoot:path.resolve(a['controller-root']),campaignPath:a['campaign-path'],manifestPath:a['completed-stages-manifest'],outputRoot:path.resolve(a.output),repository:process.env.GITHUB_REPOSITORY,githubToken:process.env.GH_TOKEN}) : await runPhase0RandomizedSimulationV1({
