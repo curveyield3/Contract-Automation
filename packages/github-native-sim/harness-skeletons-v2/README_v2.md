@@ -12,17 +12,17 @@ Agents working on Phase 6 MUST start here before authoring or repairing Medusa/F
 
 ## Non-negotiable mutable-RPC rule
 
-Any Phase 6 operation that consumes fork state or requires mutable-RPC semantics MUST use the existing trusted runner secret `SIM_ARCHIVE_PRIMARY_ETHEREUM_01`. Auditors and request authors MUST NOT provide another RPC URL, create a parallel Anvil service, use a public/read-only RPC directly, or serialize the secret into a request, harness manifest, corpus, artifact, log, or report.
+Any Phase 6 operation that consumes fork state or requires mutable-RPC semantics MUST use the existing GitHub Actions dRPC archive secret `RPC_ETHEREUM`, projected only at runtime as `ETHEREUM_FORK_RPC_URL`. Auditors and request authors MUST NOT provide another RPC URL, create a parallel Anvil service, use a public/read-only RPC directly, or serialize the secret into a request, harness manifest, corpus, artifact, log, or report.
 
 The trusted runner performs the binding automatically:
 
-1. Phase 6 preflight resolves `SIM_ARCHIVE_PRIMARY_ETHEREUM_01` from the GitHub Actions environment.
-2. It probes Ethereum chain identity and freezes the currently observed block number and block hash.
+1. Phase 6 preflight resolves `ETHEREUM_FORK_RPC_URL` from `secrets.RPC_ETHEREUM` in the trusted V7 execution workflow. It is the **upstream archival provider** for a locally launched Anvil fork, not an RPC URL the agent provides.
+2. It verifies Ethereum chain ID 1 and freezes the requested historical block number and block hash when the request supplies a pin. Required historical state must come from the archive-backed Anvil fork; do not substitute a latest-state local deployment.
 3. Medusa is invoked with `--rpc-url <runtime-secret> --rpc-block <frozen-block>`, which forces Medusa fork mode even if a target config attempts otherwise.
 4. Foundry is invoked with `--fork-url <runtime-secret> --fork-block-number <frozen-block>` and receives the same URL through runtime environment only.
 5. Evidence records the secret profile name, block number/hash, and policy identity, never the URL.
 
-This is the same existing mutable Anvil RPC setup used by Contract-Automation simulation infrastructure; Phase 6 does not provision a new mutable RPC system.
+This is the same existing **local ephemeral Anvil** fork setup used by Contract-Automation simulation infrastructure: Anvil fetches historical state through dRPC and allows local state-changing ABI calls with no mainnet writes. Phase 6 does not provision a separate remote mutable RPC system. A missing `ETHEREUM_FORK_RPC_URL` is an execution-workflow secret-routing failure to repair, **not** a conclusion that the `RPC_ETHEREUM` archive source is unavailable.
 
 ## Runtime materialization
 
