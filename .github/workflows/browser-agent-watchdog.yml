@@ -750,9 +750,36 @@ jobs:
                     exit 0
                   fi
 
-                  # A completed segment is handed to the master reviewer; the outgoing
-                  # reviewer's watchdog retires exactly as at a successor handoff.
+                  # A finished reviewer's browser may have held the single
+                  # shared session while the master wake was queued. GitHub
+                  # permits only one waiting concurrency run and may cancel
+                  # the master wake when a subsequent watchdog starts. Replay
+                  # ONLY an already-published, exact master delivery (never
+                  # a controller request, tests, or a new master decision).
                   if [ "$campaign_status" = "WAITING_FOR_MASTER_REVIEW" ] && [ "$gate_expected_phase" != "master-review" ]; then
+                    if [ "$gate_repo" = "curveyield3/Audit-Controller" ] &&
+                       [ -n "${AUDIT_CONTROLLER_GITHUB_TOKEN:-}" ]; then
+                      master_segment="$(jq -r '.pendingMasterReview.segmentId // empty' /tmp/audit-campaign-directory.json)"
+                      master_boundary="$(jq -r '.pendingMasterReview.boundaryPhase // empty' /tmp/audit-campaign-directory.json)"
+                      if [[ "$master_segment" =~ ^[A-Za-z0-9._-]+$ ]] && [[ "$master_boundary" =~ ^([1-9]|10)$ ]]; then
+                        ledger_api="repos/$gate_repo/contents/${campaign_root// /%20}/controller/delivery/DELIVERY_LEDGER_v1.json?ref=$gate_ref"
+                        encoded_ledger="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "$ledger_api" --jq '.content' 2>/dev/null || true)"
+                        if [ -n "$encoded_ledger" ]; then
+                          printf '%s' "$encoded_ledger" | base64 -d > /tmp/master-handoff-delivery-ledger.json
+                          replay_ref="$(jq -r --arg lane "phase:$master_boundary:none" --arg segment "$master_segment" '
+                            (.latestByLane[$lane] // "") as $digest
+                            | (.results[$digest] // {})
+                            | select(.state=="PUBLISHED" and .status=="WAITING_FOR_MASTER_REVIEW" and .segmentId==$segment)
+                            | .detailRef // empty' /tmp/master-handoff-delivery-ledger.json)"
+                          if [[ "$replay_ref" =~ ^controller/results/[a-f0-9]{20}/INDEX_v1.json$ ]]; then
+                            timeout -k 10s 90s gh workflow run lite-controller-delivery-replay-v1.yml \
+                              --repo "$GITHUB_REPOSITORY" --ref main \
+                              -f campaign_id="$campaign_id" -f detail_ref="$replay_ref" \
+                              -f audit_controller_ref="$gate_ref" || echo "::warning::Published master handoff replay dispatch failed; retain exact PUBLISHED delivery for retry."
+                          fi
+                        fi
+                      fi
+                    fi
                     retire_state "LITE_SEGMENT_HANDED_TO_MASTER_REVIEW"
                     exit 0
                   fi
