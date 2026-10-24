@@ -320,7 +320,10 @@ export function secureRestoreWorkFormV13({root,indexRel}){
      const expected=desc.append?prefix+'APPEND-'+String(j+1).padStart(4,'0'):prefix+desc.recordKeys[j];
      const templateIdentity=!desc.append&&/^(tempKey|findingTempKey)=<REQUIRED(?:_OR_EXPLICIT_NEGATIVE)?>$/.test(desc.recordKeys[j]);
      const completedTemplateIdentity=templateIdentity&&recordKey(desc.path,entry.value,pos).startsWith(prefix+desc.recordKeys[j].split('=')[0]+'=');
-     if(entry.key!==expected||(!desc.append&&!completedTemplateIdentity&&recordKey(desc.path,entry.value,pos)!==expected))
+     // Placeholder-keyed optional record slots may be completed with a
+     // schema-approved negative sentinel rather than a fabricated finding.
+     const completedTemplateNegative=templateIdentity&&['NONE_IDENTIFIED','NO_CANDIDATE'].includes(entry.value);
+     if(entry.key!==expected||(!desc.append&&!completedTemplateIdentity&&!completedTemplateNegative&&recordKey(desc.path,entry.value,pos)!==expected))
        throw new Error('v13 mandatory work record key changed: '+desc.file);
      if(positions.has(pos))throw new Error('v13 duplicate work record: '+desc.file);
      const identity=recordKey(desc.path,entry.value,pos);
