@@ -5,6 +5,11 @@ set -euo pipefail
 
 : "${RUNNER_TEMP:?RUNNER_TEMP required}"
 : "${TS_CLIENT_ID:?TS_OAUTH_CLIENT_ID is not configured}"
+: "${TAILNET_TAG:?Tailscale federated device tag required}"
+if [[ ! "$TAILNET_TAG" =~ ^tag:[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "::error::Expected a valid authorized Tailscale tag: tag:name" >&2
+  exit 1
+fi
 : "${ACTIONS_ID_TOKEN_REQUEST_URL:?GitHub OIDC token URL unavailable; grant id-token: write}"
 : "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:?GitHub OIDC request token unavailable}"
 
@@ -58,12 +63,13 @@ if [ "$ready" != true ]; then
 fi
 
 # Supported natively by Tailscale >= 1.94.0. The Tailscale daemon discovers
-# the GitHub Actions OIDC JWT and joins directly; do not create an API auth key.
+# the GitHub Actions OIDC JWT and requests a short-lived tagged node authorization.
 # -E preserves GitHub's ACTIONS_ID_TOKEN_REQUEST_* environment for discovery.
-echo "Connecting via native Tailscale OIDC (no separately created auth key)."
+echo "Connecting via native Tailscale OIDC as an authorized tagged ephemeral runner."
 if ! timeout -k 5s 120s sudo -E /usr/local/bin/tailscale up \
   --client-id="$TS_CLIENT_ID" \
   --audience="api.tailscale.com/$TS_CLIENT_ID" \
+  --advertise-tags="$TAILNET_TAG" \
   --accept-dns=false; then
   echo "::error::Native Tailscale OIDC registration failed; inspect the runner step and tailnet trust policy." >&2
   exit 1
