@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "curveyield-lite-phase-boundary-request-v1",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "reviewKind": "master",
+  "segmentId": "reviewer-2-phase-04",
+  "masterOutcome": "REQUEST_TARGETED_TESTS",
+  "testPlanPath": "campaigns/live-ethereum-Dai-6b175474 r2/work/master-review/reviewer-2-phase-04/TARGETED_TEST_REQUEST_v2.json",
+  "summary": "Independent master reviewed all 19 SHA256-verified raw evidence files and reconstructed all 197145 bytes of exact raw EVM evidence (sha256 9088df2cab5bf6531ec0f10c1a65882f62dcb206c9dfaa5a18c553a2de93097b) from round 1: 52 local mined transactions, 92 passed assertions. Confirmed conditional ward lockout and allowance replacement ordering behavior in exact Solidity 0.5.12 test deployments. Reviewer-owned phase-04 work-form fields amended at Audit-Controller/main commit a877442364c3384c3f505e26c6c49cf1e821441d; controller-prefilled IDs and original sealed receipts untouched. Live Ethereum ward roster and deployed DOMAIN_SEPARATOR remain inconclusive: block hash verified but publicnode historical eth_call and role logs failed -32602 requires archive token, and Etherscan creator lookup lacked ETHERSCAN_API_KEY. Request round 2 for targeted authenticated archival onchain/role-policy evidence only; do not release Phase 4 review or final COMPLETE while this material unresolved assurance persists.",
+  "auditControllerRef": "main",
+  "attempt": 1
+}
