@@ -51,19 +51,12 @@
   "watchdogRunId": "40118744389",
   "watchdogSweepStartedAt": "2026-10-24T18:01:46Z",
   "lastProgressAt": "2026-10-24T17:28:42Z",
-  "lastDecision": "TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ",
+  "lastDecision": "PHASE1_X11_POKE_TRANSPORT_FAILED_RETRY_LATER",
   "lastNoReadSweepAt": "2026-10-24T17:28:02Z",
   "elapsedSinceLastPokeMinutes": 5,
-  "lastStopClick": {
-    "x": null,
-    "y": null,
-    "darkPixels": 0,
-    "darkAround": null,
-    "onButton": false,
-    "clicked": false,
-    "areaChanged": null,
-    "status": "STOP_BUTTON_NOT_FOUND"
-  },
+  "lastStopClick": null,
   "lastPokedAt": "2026-10-24T17:45:12Z",
-  "pokeCount": 1
+  "pokeCount": 1,
+  "lastPokeFailureAt": "2026-10-24T18:04:05Z",
+  "pokeFailureCount": 1
 }
