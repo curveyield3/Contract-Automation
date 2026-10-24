@@ -1,10 +1,9 @@
 {
   "schemaVersion": "curveyield-lite-controller-delivery-replay-request-v1",
   "campaignId": "live-ethereum-dai-6b175474-r2",
-  "detailRef": "controller/results/2d9fdbbe8dda986e8faa/INDEX_v1.json",
+  "detailRef": "controller/results/c5667ed30279747c8035/INDEX_v1.json",
   "auditControllerRef": "main",
-  "purpose": "Retry current accepted round-2 Phase-4 master-review handoff after fixing direct-only Tailscale ping in the existing runner; preserve controller state and evidence",
-  "expectedWakeId": "live-ethereum-dai-6b175474-r2-delivery-2d9fdbbe8dda986e8faa",
-  "deliveryAttempt": 1,
-  "authentication": "native-tailscale-github-oidc-advertise-tags-audit-browser"
+  "purpose": "Re-deliver already-published reviewer-3 phases 05-06 independent MASTER wake cancelled by shared-browser concurrency. No tests, controller rerun or security PASS.",
+  "expectedWakeId": "live-ethereum-dai-6b175474-r2-delivery-c5667ed30279747c8035",
+  "deliveryAttempt": 1
 }
