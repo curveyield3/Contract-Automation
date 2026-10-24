@@ -64,27 +64,29 @@ Current assignment-v2 repair is resume-first and uses the assigned pre-created r
 
 Legacy reviewer repair that could create a fresh Playwright-driven chat is retired. A campaign that has not been migrated to the current Audit Campaign Directory assignment-v2 registration fails closed instead of using the legacy browser path.
 
-## Tailscale runner authentication — GitHub OIDC (current)
+## Tailnet connection — native GitHub OIDC (current)
 
-The live `browser-agent-wake.yml` and `browser-agent-watchdog.yml` workflows, plus the home-exit, active-screenshare and stop-click workflows, use Tailscale GitHub Action v4 with **OIDC workload identity federation**. They do **not** consume `TAILSCALE_AUTHKEY` or any long-lived Tailscale OAuth client secret.
+**One credential, no API-generated auth keys.** The five browser workflows use the existing `TS_OAUTH_CLIENT_ID` federated identity plus GitHub's runtime OIDC token. They invoke the shared local action `.github/actions/connect-browser-tailnet-oidc/action.yml`, which runs `scripts/browser-agent-tailnet-oidc.sh`. It installs the pinned Tailscale static binaries (cached by OS/architecture), starts `tailscaled --state=mem:`, and runs the supported direct native registration command:
 
-One-time tailnet setup:
+```sh
+sudo -E tailscale up --client-id="$TS_OAUTH_CLIENT_ID" \
+  --audience="api.tailscale.com/$TS_OAUTH_CLIENT_ID" \
+  --advertise-tags=tag:audit-browser --accept-dns=false
+```
 
-1. In the Tailscale tailnet policy, define `tag:audit-browser` with an authorized tag owner (for example, `"tag:audit-browser": ["autogroup:admin"]` inside the existing `tagOwners` map). Preserve all other policy entries.
-2. In https://console.tailscale.com/admin/settings/trust-credentials select **Credential → OpenID Connect**, choose **GitHub Actions** as issuer (or its issuer `https://token.actions.githubusercontent.com` if entering a custom issuer), and use the exact Subject `repo:curveyield3@346794407/Contract-Automation@1430753271:ref:refs/heads/main`. Grant only the `auth_keys` scope with the `tag:audit-browser` tag. The workflow must run on `main` to match this Subject.
-3. Copy the generated **Client ID**. At https://github.com/curveyield3/Contract-Automation/settings/secrets/actions configure only `TS_OAUTH_CLIENT_ID`. Tailscale automatically generates the audience as `api.tailscale.com/<Client ID>`; no `TS_AUDIENCE` secret is needed. Store the exact Client ID, without the audience prefix, in that single secret.
-4. Retain the existing exit-node setting (`BROWSER_HOME_EXIT_NODE`, or the current fallback), and make sure the tag has access to use an exit node. Tailnets with restrictive policies require a grant from `tag:audit-browser` to `autogroup:internet` with `ip: ["*"]`. Separately, allow only authorized operator devices to connect to the runner's private VNC port 5900 (and 6080 for noVNC, when applicable). Never expose these ports publicly.
-5. Keep `CHATGPT_STORAGE_STATE_B64` configured separately for the browser's authenticated ChatGPT session. OIDC connects only the GitHub runner to Tailscale; it does not log in to ChatGPT.
+Tailscale v1.94+ supports native GitHub OIDC discovery with `--client-id` and `--audience`. With `id-token: write`, Tailscale retrieves the existing GitHub-signed workload token itself and joins the tailnet directly. The wrapper intentionally does not call the separate Tailscale API auth-key creation endpoint; this avoids the `unexpected error while creating authkey: Status: 404` failure previously seen with `tailscale/github-action@v4`. The runner still registers as a distinct temporary device using in-memory state, and the daemon logs out on exit.
 
-Workflow configuration: `permissions: id-token: write` plus the pre-existing `contents`/`actions` permissions; `tailscale/github-action@v4` uses `oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}`, `audience: api.tailscale.com/${{ secrets.TS_OAUTH_CLIENT_ID }}`, `tags: tag:audit-browser`, and the existing exit-node `ping` value.
+Setup:
 
-Do not add or rotate `TAILSCALE_AUTHKEY` for these five workflows. The OIDC-issued runner identity is ephemeral and is automatically removed when the job ends. An absence or mismatch of OIDC configuration must fail the wake instead of silently bypassing tailnet routing.
+1. Configure a GitHub Actions OpenID Connect federated identity at https://login.tailscale.com/admin/settings/trust-credentials with the exact issuer and subject reported by GitHub. For this repository the verified subject was `repo:curveyield3@346794407/Contract-Automation@1430753271:ref:refs/heads/main`. Authorize `tag:audit-browser` and `auth_keys` write.
+2. At https://github.com/curveyield3/Contract-Automation/settings/secrets/actions store its Client ID as `TS_OAUTH_CLIENT_ID`. The audience is derived as `api.tailscale.com/<Client ID>`; there is no `TS_AUDIENCE`, `TS_OAUTH_SECRET` or `TAILSCALE_AUTHKEY` requirement.
+3. Preserve `CHATGPT_STORAGE_STATE_B64`, the authenticated ChatGPT browser-session secret. This is unrelated to Tailscale authentication.
+4. Preserve the existing `BROWSER_HOME_EXIT_NODE` variable (or its configured fallback) and allow `tag:audit-browser` to reach that exit node. Only authorized tailnet peers may reach the runner's private VNC port 5900 (and noVNC port 6080 where used). Do not expose VNC publicly.
+5. Run just one authorized wake; before testing check that no other shared browser session/wake/watchdog job is active.
 
-Before re-running a blocked browser wake, verify no wake/watchdog job is already operating on the shared browser session; re-run only the failed handoff after credentials, Tailscale policy, and ChatGPT session state are in place.
+Workflow authentication is `permissions: id-token: write` and local `uses: ./.github/actions/connect-browser-tailnet-oidc` with `client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}` plus the existing `ping` home exit-node input. The workflow fails closed if the identity or session state is missing, or the direct tailnet connection cannot authenticate; it must never bypass the home exit-node contract.
 
-If `tailscale/github-action@v4` reports `failed to exchange JWT for access token: ... 403 Unauthorized`, the token was requested from GitHub but the Tailscale federated identity refused it. Open https://login.tailscale.com/admin/settings/trust-credentials and select the matching OpenID Connect credential → View or Edit for the **specific rejected-claim diagnostics**. Verify issuer GitHub Actions (`https://token.actions.githubusercontent.com`), exact subject `repo:curveyield3@346794407/Contract-Automation@1430753271:ref:refs/heads/main`, generated audience `api.tailscale.com/<Client ID>`, writable `auth_keys` scope and requested `tag:audit-browser`. If the credential is an OAuth client rather than an OpenID Connect federated identity, replace it with the latter and update `TS_OAUTH_CLIENT_ID`. Do not repeatedly dispatch an unchanged failing wake; retry the already-failed run once the trust policy is corrected.
-
-Official references: https://tailscale.com/docs/integrations/github/github-action and https://tailscale.com/docs/features/workload-identity-federation
+Official reference: https://tailscale.com/docs/features/workload-identity-federation — *Register new nodes using workload identity* and *Automatic cloud token discovery and exchange*. Linux binary installation: https://tailscale.com/docs/install/linux.
 
 ## Shared browser ownership
 
