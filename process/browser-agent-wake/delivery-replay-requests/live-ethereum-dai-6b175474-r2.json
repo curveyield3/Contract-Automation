@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-lite-controller-delivery-replay-request-v1",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "detailRef": "controller/results/80f1434e6a478cc63c5c/INDEX_v1.json",
+  "auditControllerRef": "main",
+  "purpose": "redeliver master reviewer wake for admitted Phase 4 targeted test evidence",
+  "expectedWakeId": "live-ethereum-dai-6b175474-r2-delivery-80f1434e6a478cc63c5c"
+}
