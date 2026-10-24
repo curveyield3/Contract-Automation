@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "curveyield-lite-phase-boundary-request-v1",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "reviewKind": "master-test-result",
+  "segmentId": "reviewer-2-phase-04",
+  "testResultPath": "campaigns/live-ethereum-Dai-6b175474 r2/work/master-review/reviewer-2-phase-04/targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/RESULT_v1.json",
+  "auditControllerRef": "main",
+  "attempt": 1
+}
