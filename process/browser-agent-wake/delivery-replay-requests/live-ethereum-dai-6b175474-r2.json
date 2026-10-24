@@ -3,8 +3,8 @@
   "campaignId": "live-ethereum-dai-6b175474-r2",
   "detailRef": "controller/results/80f1434e6a478cc63c5c/INDEX_v1.json",
   "auditControllerRef": "main",
-  "purpose": "redeliver accepted Phase 4 master review instruction after migrating to native GitHub OIDC Tailnet join without API auth-key creation",
+  "purpose": "retry admitted reviewer-2-phase-04 master-review handoff after Tailscale console authorized tag:audit-browser and current main restored OIDC device tag",
   "expectedWakeId": "live-ethereum-dai-6b175474-r2-delivery-80f1434e6a478cc63c5c",
-  "deliveryAttempt": 2,
-  "authentication": "native-tailscale-up-client-id-audience"
+  "deliveryAttempt": 3,
+  "authentication": "native-tailscale-github-oidc-advertise-tags-audit-browser"
 }
