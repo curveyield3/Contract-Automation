@@ -41,8 +41,8 @@
   },
   "watchdog": {
     "enabled": true,
-    "idleMessage": "GET BACK TO WORK",
-    "pokeIntervalMinutes": 20,
+    "idleMessage": "IMPORTANT LIVE REPOSITORY CORRECTION for existing campaign live-ethereum-dai-6b175474-r2: The earlier Phase-5 wake mistakenly contained CurveYield2 URLs. Do NOT use CurveYield2 for this campaign. Use curveyield3/Audit-Controller for the canonical campaign, bound Audit_Litemode_v13 authority, evidence and work shards, and curveyield3/Contract-Automation for controller boundary requests and Actions. Keep identical relative paths when historical bound authority text says CurveYield2; never edit the frozen authority. The Phase-4 master controller accepted AMENDED with the HIGH unresolved X001-ROLE-VERIFY governance-policy assurance limitation carried forward; do not treat it as proven safe. Do not create, modify, or run tests without explicit audit-owner authorization. Continue reviewer-3 Phase 5 then Phase 6 in this same chat, complete all assigned substantive shards and submit to the live controller.",
+    "pokeIntervalMinutes": 10,
     "gate": {
       "mode": "LITE",
       "repository": "curveyield3/Audit-Controller",
