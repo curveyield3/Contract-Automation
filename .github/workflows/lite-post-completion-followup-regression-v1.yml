@@ -1,13 +1,6 @@
 name: Lite Post-Completion Followup Admission Regression v1
+# Regression execution requires explicit audit-owner permission; never auto-run on source push.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/lib/lite-post-completion-followup-v1.mjs'
-      - 'scripts/lib/lite-master-review-v1.mjs'
-      - 'scripts/lite-phase-packet-controller-v1.mjs'
-      - 'scripts/tests/lite-post-completion-followup-v1.test.mjs'
-      - '.github/workflows/lite-post-completion-followup-regression-v1.yml'
   workflow_dispatch:
 permissions:
   contents: read
