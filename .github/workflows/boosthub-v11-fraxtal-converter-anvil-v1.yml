@@ -1,11 +1,7 @@
 name: BoostHub v11 Fraxtal Converter Anvil Simulation v1
 
+# Only explicitly authorized execution; no test-on-push.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/boosthub-v11-fraxtal-converter-anvil-v1.yml'
-      - 'github-native-sim/boosthub-v11-fraxtal-fork-v1/**'
   workflow_dispatch:
 
 permissions:
@@ -40,7 +36,8 @@ jobs:
           FRA_RPC: ${{ secrets.RPC_FRAXTAL }}
         run: |
           set -euo pipefail
-          URL="${FRA_RPC:-https://rpc.frax.com}"
+          URL="${FRA_RPC:-}"
+          test -n "$URL" || { echo "::error::RPC_FRAXTAL secret required; no public RPC fallback"; exit 1; }
           for i in 1 2 3; do
             if chainid=$(cast chain-id --rpc-url "$URL" 2>/dev/null); then break; fi
             sleep 4
@@ -50,16 +47,26 @@ jobs:
           echo "coin0: $(cast call "$POOL" 'coins(uint256)(address)' 0 --rpc-url "$URL")"
           echo "coin1: $(cast call "$POOL" 'coins(uint256)(address)' 1 --rpc-url "$URL")"
           (cast call "$POOL" 'price_oracle()(uint256)' --rpc-url "$URL" || cast call "$POOL" 'price_oracle(uint256)(uint256)' 0 --rpc-url "$URL") | tee fraxtal-ema-oracle-v1.txt
+          PIN="$(cast block-number --rpc-url "$URL")"
+          [[ "$PIN" =~ ^[0-9]+$ ]] && [ "$PIN" -gt 0 ]
+          HASH="$(cast block "$PIN" --field hash --rpc-url "$URL" | tr -d '\r\n')"
+          [[ "$HASH" =~ ^0x[0-9a-fA-F]{64}$ ]] || { echo "::error::Fraxtal historical block hash missing"; exit 1; }
+          echo "FRAXTAL_FORK_BLOCK=$PIN" >> "$GITHUB_ENV"
+          echo "FRAXTAL_FORK_HASH=$HASH" >> "$GITHUB_ENV"
           echo "FRAXTAL_FORK_UPSTREAM=$URL" >> "$GITHUB_ENV"
       - name: Start isolated Anvil Fraxtal fork
         shell: bash
         run: |
           set -euo pipefail
-          anvil --fork-url "$FRAXTAL_FORK_UPSTREAM" --chain-id 252 --port 8545 > fraxtal-anvil-v1.log 2>&1 &
+          anvil --fork-url "$FRAXTAL_FORK_UPSTREAM" --fork-block-number "$FRAXTAL_FORK_BLOCK" --chain-id 252 --port 8545 > fraxtal-anvil-v1.log 2>&1 &
           echo $! > .fraxtal-anvil.pid
           for i in $(seq 1 90); do
             if cid=$(cast chain-id --rpc-url http://127.0.0.1:8545 2>/dev/null); then
-              if [ "$cid" = '252' ]; then echo "Fraxtal fork online"; exit 0; fi
+              if [ "$cid" = '252' ]; then
+                  LOCAL_HASH="$(cast block "$FRAXTAL_FORK_BLOCK" --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
+                  test "${LOCAL_HASH,,}" = "${FRAXTAL_FORK_HASH,,}" || { echo "::error::Fraxtal fork historical hash mismatch"; exit 1; }
+                  echo "Fraxtal historical Anvil fork verified"; exit 0
+                fi
             fi
             sleep 2
           done
