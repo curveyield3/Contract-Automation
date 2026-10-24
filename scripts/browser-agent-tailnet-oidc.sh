@@ -5,6 +5,11 @@ set -euo pipefail
 
 : "${RUNNER_TEMP:?RUNNER_TEMP required}"
 : "${TS_CLIENT_ID:?TS_OAUTH_CLIENT_ID is not configured}"
+: "${TAILNET_TAG:?Authorized Tailscale device tag is not configured}"
+if [[ ! "$TAILNET_TAG" =~ ^tag:[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+  echo "::error::Invalid Tailscale device tag (expected tag:name)" >&2
+  exit 1
+fi
 : "${ACTIONS_ID_TOKEN_REQUEST_URL:?GitHub OIDC token URL unavailable; grant id-token: write}"
 : "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:?GitHub OIDC request token unavailable}"
 
@@ -64,7 +69,7 @@ echo "Connecting via native Tailscale OIDC (no separately created auth key)."
 if ! timeout -k 5s 120s sudo -E /usr/local/bin/tailscale up \
   --client-id="$TS_CLIENT_ID" \
   --audience="api.tailscale.com/$TS_CLIENT_ID" \
-  --advertise-tags=tag:audit-browser \
+  --advertise-tags="$TAILNET_TAG" \
   --accept-dns=false; then
   echo "::error::Native Tailscale OIDC registration failed; inspect the runner step and tailnet trust policy." >&2
   exit 1
