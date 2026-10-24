@@ -60,6 +60,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   # One saved ChatGPT browser state is shared by every browser workflow.
@@ -166,7 +167,9 @@ jobs:
       - name: Connect runner to tailnet
         uses: tailscale/github-action@v4
         with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:audit-browser
           ping: ${{ steps.request.outputs.home_exit_node }}
 
       - name: Start visible Chrome display and private tailnet VNC
