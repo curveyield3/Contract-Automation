@@ -120,7 +120,8 @@ jobs:
             [ -n "$reviewer" ] && [ -n "$phase_id" ] && [ -n "$schema_path" ] && [ -n "$form_path" ] && [ -n "$packet_path" ]
             feedback=""
             if [ "$assignment_status" = "REWORK_REQUIRED" ]; then
-              packet_encoded="$(gh api "repos/$gate_repo/contents/$packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+              encoded_packet_path="$(printf '%s' "$packet_path" | sed 's/ /%20/g')"
+              packet_encoded="$(gh api "repos/$gate_repo/contents/$encoded_packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
               if [ -n "$packet_encoded" ]; then
                 printf '%s' "$packet_encoded" | base64 -d > /tmp/current-packet.json
                 feedback="$(jq -r '.controllerValidation.deficiencies // [] | map("- "+.) | join("\n")' /tmp/current-packet.json)"
@@ -285,7 +286,7 @@ jobs:
           gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' /tmp/failed-repair-registration.json)"
           gate_ref="$(jq -r '.watchdog.gate.ref // "main"' /tmp/failed-repair-registration.json)"
           gate_path="$(jq -r '.watchdog.gate.statePath // empty' /tmp/failed-repair-registration.json)"
-          [ "$gate_repo" = CurveYield2/Audit-Controller ] && [[ "$gate_path" == "Audit Campaign Directory/campaigns/"*.json ]] || {
+          { [ "$gate_repo" = curveyield3/Audit-Controller ] || [ "$gate_repo" = CurveYield2/Audit-Controller ]; } && [[ "$gate_path" == "Audit Campaign Directory/campaigns/"*.json ]] || {
             echo "::warning::No trusted campaign directory binding for standby"
             exit 0
           }
