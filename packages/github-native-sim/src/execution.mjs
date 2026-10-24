@@ -110,7 +110,12 @@ export async function checkoutExactSource({ repository, commit, destination, spa
   const initArgs = ['init', resolvedDestination];
   const init = await runCommand({ command: 'git', args: initArgs, cwd: resolvedParent });
   await requireSuccess(init, 'SOURCE_CHECKOUT_FAILURE', 'git', initArgs);
-  const remote = `https://github.com/${repository}.git`;
+  // Legacy frozen request metadata may name CurveYield2. For this live audit
+  // always fetch the EXACT SAME pinned Git commit from canonical curveyield3,
+  // without ever contacting the suspended historical owner.
+  const effectiveRepository = repository === 'CurveYield2/Audit-Controller'
+    ? 'curveyield3/Audit-Controller' : repository;
+  const remote = `https://github.com/${effectiveRepository}.git`;
   const addRemote = await runCommand({ command: 'git', args: ['remote', 'add', 'origin', remote], cwd: resolvedDestination });
   await requireSuccess(addRemote, 'SOURCE_CHECKOUT_FAILURE', 'git', ['remote', 'add', 'origin', remote]);
   // Optional no-cone sparse patterns: fetch blobs lazily and materialize only the listed paths.
@@ -125,24 +130,8 @@ export async function checkoutExactSource({ repository, commit, destination, spa
     cwd: resolvedDestination,
     env: authenticatedGitEnvironment(environment)
   });
-  // Repository continuity only: the historical CurveYield2 controller commit
-  // also exists, byte-identically, in the accessible curveyield3 migration.
-  // Fetch the SAME pinned commit from that mirror if the old owner is unavailable.
-  // The HEAD comparison below and archive SHA-256 check remain mandatory.
-  if (fetch.exitCode !== 0 && repository === 'CurveYield2/Audit-Controller') {
-    const mirrorArgs = ['remote', 'add', 'source-continuity', 'https://github.com/curveyield3/Audit-Controller.git'];
-    await requireSuccess(await runCommand({ command: 'git', args: mirrorArgs, cwd: resolvedDestination }), 'SOURCE_CHECKOUT_FAILURE', 'git', mirrorArgs);
-    const mirrorFetchArgs = sparse
-      ? ['fetch', '--depth', '1', '--filter=blob:none', 'source-continuity', commit]
-      : ['fetch', '--depth', '1', 'source-continuity', commit];
-    fetch = await runCommand({
-      command: 'git', args: mirrorFetchArgs, cwd: resolvedDestination,
-      env: authenticatedGitEnvironment(environment)
-    });
-    await requireSuccess(fetch, 'SOURCE_CHECKOUT_FAILURE', 'git', mirrorFetchArgs);
-  } else {
-    await requireSuccess(fetch, 'SOURCE_CHECKOUT_FAILURE', 'git', fetchArgs);
-  }
+  // Git HEAD and archive digest checks below retain the frozen source identity.
+  await requireSuccess(fetch, 'SOURCE_CHECKOUT_FAILURE', 'git', fetchArgs);
   if (sparse) {
     for (const args of [['config', 'core.sparseCheckout', 'true'], ['config', 'core.sparseCheckoutCone', 'false']]) {
       await requireSuccess(await runCommand({ command: 'git', args, cwd: resolvedDestination }), 'SOURCE_CHECKOUT_FAILURE', 'git', args);
