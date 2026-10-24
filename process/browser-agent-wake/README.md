@@ -2,7 +2,7 @@
 
 ## Current authority
 
-This directory documents the live audit browser pathway in `CurveYield2/Contract-Automation`.
+This directory documents the live audit browser pathway in `curveyield3/Contract-Automation`.
 
 The audit-browser interaction invariant is:
 
@@ -63,6 +63,26 @@ The retired legacy create-fresh successor launcher in the watchdog fails closed.
 Current assignment-v2 repair is resume-first and uses the assigned pre-created reviewer chat through `browser-agent-wake.yml`.
 
 Legacy reviewer repair that could create a fresh Playwright-driven chat is retired. A campaign that has not been migrated to the current Audit Campaign Directory assignment-v2 registration fails closed instead of using the legacy browser path.
+
+## Tailscale runner authentication — GitHub OIDC (current)
+
+The live `browser-agent-wake.yml` and `browser-agent-watchdog.yml` workflows, plus the home-exit, active-screenshare and stop-click workflows, use Tailscale GitHub Action v4 with **OIDC workload identity federation**. They do **not** consume `TAILSCALE_AUTHKEY` or any long-lived Tailscale OAuth client secret.
+
+One-time tailnet setup:
+
+1. In the Tailscale tailnet policy, define `tag:audit-browser` with an authorized tag owner (for example, `"tag:audit-browser": ["autogroup:admin"]` inside the existing `tagOwners` map). Preserve all other policy entries.
+2. In https://login.tailscale.com/admin/settings/trust-credentials select **Credential → OpenID Connect**, choose **GitHub Actions** as issuer (or its issuer `https://token.actions.githubusercontent.com` if entering a custom issuer), and use the exact Subject `repo:curveyield3/Contract-Automation:ref:refs/heads/main`. Grant only the `auth_keys` scope with the `tag:audit-browser` tag. The workflow must run on `main` to match this Subject.
+3. Copy the generated **Client ID** and **Audience**. At https://github.com/curveyield3/Contract-Automation/settings/secrets/actions add secrets `TS_OAUTH_CLIENT_ID` (Client ID) and `TS_AUDIENCE` (Audience). These identifiers are not private authentication passwords, but are stored as repository secrets to follow Tailscale's documented convention.
+4. Retain the existing exit-node setting (`BROWSER_HOME_EXIT_NODE`, or the current fallback), and make sure the tag has access to use an exit node. Tailnets with restrictive policies require a grant from `tag:audit-browser` to `autogroup:internet` with `ip: ["*"]`. Separately, allow only authorized operator devices to connect to the runner's private VNC port 5900 (and 6080 for noVNC, when applicable). Never expose these ports publicly.
+5. Keep `CHATGPT_STORAGE_STATE_B64` configured separately for the browser's authenticated ChatGPT session. OIDC connects only the GitHub runner to Tailscale; it does not log in to ChatGPT.
+
+Workflow configuration: `permissions: id-token: write` plus the pre-existing `contents`/`actions` permissions; `tailscale/github-action@v4` uses `oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}`, `audience: ${{ secrets.TS_AUDIENCE }}`, `tags: tag:audit-browser`, and the existing exit-node `ping` value.
+
+Do not add or rotate `TAILSCALE_AUTHKEY` for these five workflows. The OIDC-issued runner identity is ephemeral and is automatically removed when the job ends. An absence or mismatch of OIDC configuration must fail the wake instead of silently bypassing tailnet routing.
+
+Before re-running a blocked browser wake, verify no wake/watchdog job is already operating on the shared browser session; re-run only the failed handoff after credentials, Tailscale policy, and ChatGPT session state are in place.
+
+Official references: https://tailscale.com/docs/integrations/github/github-action and https://tailscale.com/docs/features/workload-identity-federation
 
 ## Shared browser ownership
 
