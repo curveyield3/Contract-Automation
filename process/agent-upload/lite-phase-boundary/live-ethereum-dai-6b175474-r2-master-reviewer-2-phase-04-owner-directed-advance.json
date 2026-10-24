@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "curveyield-lite-phase-boundary-request-v1",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "reviewKind": "master",
+  "segmentId": "reviewer-2-phase-04",
+  "masterOutcome": "AMENDED",
+  "summary": "EXPLICIT HUMAN AUDIT-OWNER OVERRIDE (2026-10-24): stop requesting additional Phase-4 targeted tests and advance into normal Phase 5 despite the remaining HIGH assurance gap; this is an owner-directed exceptional advancement, NOT evidence that independent master concluded historical governance-policy authorization is proven. Phase-4 work form was amended only in reviewer-owned candidate/limitation fields to incorporate round-2 historical Ethereum evidence (real deployed EIP712 domain matched expected chain 1, historic sole effective ward 0x9759a6ac90977b93b58547b4a71c78317f391a28, round-2 9 calls/16 assertions), explicitly retain X001-ROLE-VERIFY as INCONCLUSIVE pending authenticated intended-governance policy, and carry the HIGH risk into normal Phase 5/8/10 analysis. Both master-targeted-test rounds have controller-admitted EVIDENCE_SUBMITTED results, and no further Phase-4 tests are authorized. Do not equate this administrative override with clean configuration, a security PASS, or exemption from later mandatory audit stages or tests.",
+  "auditControllerRef": "main",
+  "attempt": 1
+}
