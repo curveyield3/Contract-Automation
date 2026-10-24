@@ -22,6 +22,8 @@ The trusted runner performs the binding automatically:
 4. Foundry is invoked with `--fork-url <runtime-secret> --fork-block-number <frozen-block>` and receives the same URL through runtime environment only.
 5. Evidence records the secret profile name, block number/hash, and policy identity, never the URL.
 
+**Provider rate and query limits are not fork-unavailability.** For archived deployment/governance verification, use pinned Anvil local state to execute real ABI actions. If dRPC returns `eth_getLogs` code 35 / >10,000-block range errors, split log reads into at most 9,000-block inclusive chunks, validate full contiguous coverage, deduplicate receipts/log indices and cross-check the reconstructed ward/role roster against frozen-block getters. Do not substitute synthetic state or claim `RPC_ETHEREUM` is absent: DAI r2 historical proof recorded successful archive `eth_call` and `eth_getCode` on this endpoint. Log-query history is distinct from the mutable Anvil fork.
+
 This is the same existing **local ephemeral Anvil** fork setup used by Contract-Automation simulation infrastructure: Anvil fetches historical state through dRPC and allows local state-changing ABI calls with no mainnet writes. Phase 6 does not provision a separate remote mutable RPC system. A missing `ETHEREUM_FORK_RPC_URL` is an execution-workflow secret-routing failure to repair, **not** a conclusion that the `RPC_ETHEREUM` archive source is unavailable.
 
 ## Runtime materialization
