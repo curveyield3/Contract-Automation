@@ -624,13 +624,16 @@ async function runNormalChromeExistingSession(chromium) {
           return /^(?:ChatGPT|New chat)(?:\s+-\s+ChatGPT)?$/i.test(withoutChrome);
         };
         let title = await windowTitle();
-        if (isUnloadedTitle(title)) {
+        if (!title || isUnloadedTitle(title)) {
           console.log('[normal-chrome-watchdog] target-conversation-not-yet-loaded; one visible Ctrl+R recovery');
           await x11Key(['key', '--clearmodifiers', 'ctrl+r'], 'x11-reload-stalled-chat');
-          await page.waitForTimeout(25000);
+          const deadline = Date.now() + 90000;
+          do {
+            await page.waitForTimeout(5000);
+            title = await windowTitle();
+          } while ((!title || isUnloadedTitle(title)) && Date.now() < deadline);
           await captureX11VisualEvidence('02b_after_single_reload');
           await verifyX11VisibleChatAddress(requestedUrl);
-          title = await windowTitle();
         }
         if (!title || isUnloadedTitle(title)) {
           throw new BrowserAgentError('TARGET_CHAT_NOT_LOADED',
