@@ -119,13 +119,30 @@ export async function checkoutExactSource({ repository, commit, destination, spa
     throw new V7ExecutionError('SOURCE_INTEGRITY_FAILURE', 'sparse patterns must be anchored single-line repository paths');
   }
   const fetchArgs = sparse ? ['fetch', '--depth', '1', '--filter=blob:none', 'origin', commit] : ['fetch', '--depth', '1', 'origin', commit];
-  const fetch = await runCommand({
+  let fetch = await runCommand({
     command: 'git',
     args: fetchArgs,
     cwd: resolvedDestination,
     env: authenticatedGitEnvironment(environment)
   });
-  await requireSuccess(fetch, 'SOURCE_CHECKOUT_FAILURE', 'git', fetchArgs);
+  // Repository continuity only: the historical CurveYield2 controller commit
+  // also exists, byte-identically, in the accessible curveyield3 migration.
+  // Fetch the SAME pinned commit from that mirror if the old owner is unavailable.
+  // The HEAD comparison below and archive SHA-256 check remain mandatory.
+  if (fetch.exitCode !== 0 && repository === 'CurveYield2/Audit-Controller') {
+    const mirrorArgs = ['remote', 'add', 'source-continuity', 'https://github.com/curveyield3/Audit-Controller.git'];
+    await requireSuccess(await runCommand({ command: 'git', args: mirrorArgs, cwd: resolvedDestination }), 'SOURCE_CHECKOUT_FAILURE', 'git', mirrorArgs);
+    const mirrorFetchArgs = sparse
+      ? ['fetch', '--depth', '1', '--filter=blob:none', 'source-continuity', commit]
+      : ['fetch', '--depth', '1', 'source-continuity', commit];
+    fetch = await runCommand({
+      command: 'git', args: mirrorFetchArgs, cwd: resolvedDestination,
+      env: authenticatedGitEnvironment(environment)
+    });
+    await requireSuccess(fetch, 'SOURCE_CHECKOUT_FAILURE', 'git', mirrorFetchArgs);
+  } else {
+    await requireSuccess(fetch, 'SOURCE_CHECKOUT_FAILURE', 'git', fetchArgs);
+  }
   if (sparse) {
     for (const args of [['config', 'core.sparseCheckout', 'true'], ['config', 'core.sparseCheckoutCone', 'false']]) {
       await requireSuccess(await runCommand({ command: 'git', args, cwd: resolvedDestination }), 'SOURCE_CHECKOUT_FAILURE', 'git', args);
