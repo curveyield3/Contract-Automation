@@ -526,7 +526,7 @@ jobs:
           encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content')"
           printf '%s' "$encoded" | base64 -d > /tmp/phase5-test-executor-registration.json
           chat="$(jq -r '.agentChats["test-executor"] // empty' /tmp/phase5-test-executor-registration.json)"
-          [[ "$chat" =~ ^https://chatgpt\\.com/c/[A-Za-z0-9_-]+/?$ || "$chat" =~ ^https://chatgpt\\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || {
+          [[ "$chat" =~ ^https://chatgpt[.]com/c/[A-Za-z0-9_-]+/?$ || "$chat" =~ ^https://chatgpt[.]com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || {
             echo "::error::V13 requires a distinct registered test-executor chat"
             exit 1
           }
