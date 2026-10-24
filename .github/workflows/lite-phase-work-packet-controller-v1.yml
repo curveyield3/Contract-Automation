@@ -518,7 +518,7 @@ jobs:
       # the workflow ended green, while the reviewer was expected to poll Actions.
       # Reuse the existing acknowledged browser wake; never repeat machine tests here.
       - name: Resume same reviewer after published phase rework
-        if: steps.routing.outputs.effective_hold != 'true' && steps.routing.outputs.stale != 'true' && steps.controller.outputs.status == 'NEEDS_REWORK' && steps.publish_result.outputs.published == 'true'
+        if: steps.routing.outputs.effective_hold != 'true' && steps.routing.outputs.stale != 'true' && steps.request.outputs.review_kind == 'phase' && steps.controller.outputs.status == 'NEEDS_REWORK' && steps.publish_result.outputs.published == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           AUDIT_CAMPAIGN: ${{ steps.request.outputs.campaign_id }}
