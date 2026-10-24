@@ -9,11 +9,11 @@
   "lastProvider": "normal-system-chrome-x11-phase1-visual-evidence",
   "armedAt": "2026-10-24T16:47:47Z",
   "intervalMinutes": 5,
-  "pokeIntervalMinutes": 40,
+  "pokeIntervalMinutes": 10,
   "deliveryConfirmed": true,
   "ackPath": "campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_reviewer-3_v1.json",
   "ackId": "live-ethereum-dai-6b175474-r2-PHASE_5_WORK_PACKET-reviewer-3/40113006996",
-  "idleMessage": "GET BACK TO WORK",
+  "idleMessage": "IMPORTANT LIVE REPOSITORY CORRECTION for existing campaign live-ethereum-dai-6b175474-r2: The earlier Phase-5 wake mistakenly contained CurveYield2 URLs. Do NOT use CurveYield2 for this campaign. Use curveyield3/Audit-Controller for the canonical campaign, bound Audit_Litemode_v13 authority, evidence and work shards, and curveyield3/Contract-Automation for controller boundary requests and Actions. Keep identical relative paths when historical bound authority text says CurveYield2; never edit the frozen authority. The Phase-4 master controller accepted AMENDED with the HIGH unresolved X001-ROLE-VERIFY governance-policy assurance limitation carried forward; do not treat it as proven safe. Do not create, modify, or run tests without explicit audit-owner authorization. Continue reviewer-3 Phase 5 then Phase 6 in this same chat, complete all assigned substantive shards and submit to the live controller.",
   "observation": {
     "assistantCount": 0,
     "lastAssistantHash": "",
