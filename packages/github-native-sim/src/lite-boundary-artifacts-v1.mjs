@@ -327,6 +327,22 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
       if(!Array.isArray(raw.simulation?.steps)||raw.simulation.steps.length===0){
         failures.push('Phase 5 mandatory '+key+' has no executed Anvil simulation steps');
       }
+      // A successful oracle on a synthetic standalone chain must never seal a
+      // campaign: verify the machine's own historical preflight and fork proof,
+      // not just a source-bound request and a list of completed calls.
+      const fork=raw.simulation,pre=raw.preflight,checks=pre?.checks??{};
+      if(fork?.engine!=='anvil'||fork?.pinnedFork!==true||
+         !Number.isSafeInteger(fork?.block)||fork.block<1||
+         pre?.pinnedBlock!==fork.block||
+         checks.anvilLauncher?.status!=='PASS'||
+         checks.chainIdentity?.status!=='PASS'||
+         checks.pinnedBlockState?.status!=='PASS'||
+         !['PASS','UNAVAILABLE'].includes(checks.targetCode?.status)){
+        failures.push('Phase 5 mandatory '+key+' lacks verified local Anvil chain, historical block/hash or deployed-code preflight; standalone/synthetic simulation evidence is not admissible');
+      }
+      if(fork?.chain==='ethereum'&&fork?.chainId!==1){
+        failures.push('Phase 5 mandatory '+key+' Ethereum simulation did not execute with verified chain ID 1');
+      }
     }else failures.push('Phase 5 mandatory '+key+' has unsupported reproductionType');
 
   return failures;
