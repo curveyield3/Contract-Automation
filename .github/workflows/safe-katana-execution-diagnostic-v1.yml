@@ -1,0 +1,115 @@
+name: Temporary Safe Katana read-only transaction inspection v1
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/safe-katana-execution-diagnostic-v1.yml'
+permissions:
+  contents: read
+jobs:
+  read-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Read failed Safe execution and successful comparison candidates (no transactions, no tests)
+        env:
+          PYTHONUNBUFFERED: '1'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request,collections,time
+          RPCS=['https://rpc.katana.network/','https://rpc.katanarpc.com/']
+          SAFE='0xf39087af2107eadbf81f10a64051740a76b6291d'
+          FAILED='0xa37937f20458b7cfd30a694474c919a8024a2e692b4901dcf3aec6aa202f114b'
+          TARGET='0xbe12e1b5c4859a3d141412748279b67458f729e9'
+          endpoint=RPCS[0]
+          def rpc(method,params,optional=False):
+            global endpoint
+            payload=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode()
+            last=None
+            for url in [endpoint]+[x for x in RPCS if x!=endpoint]:
+              try:
+                req=urllib.request.Request(url,payload,headers={'Content-Type':'application/json'},method='POST')
+                with urllib.request.urlopen(req,timeout=18) as res: obj=json.load(res)
+                if 'error' in obj: raise Exception(str(obj['error'])[:500])
+                endpoint=url
+                return obj.get('result')
+              except Exception as e: last=str(e)[:260]
+            if optional:
+              print('RPC_UNAVAILABLE',method,last);return None
+            raise RuntimeError(method+': '+str(last))
+          def integer(x):return int(x,16) if isinstance(x,str) else int(x or 0)
+          def decode_exec(tx):
+            if not tx: return None
+            x=tx.get('input') or tx.get('data') or '0x'
+            if x[:10].lower()!='0x6a761202':return {'outer_selector':x[:10]}
+            a=bytes.fromhex(x[10:])
+            word=lambda i:int.from_bytes(a[32*i:32*(i+1)],'big')
+            off=word(2)
+            length=int.from_bytes(a[off:off+32],'big')
+            data=a[off+32:off+32+length]
+            sigOff=word(9);sigLen=int.from_bytes(a[sigOff:sigOff+32],'big')
+            return {
+              'to':'0x'+word(0).to_bytes(32,'big')[-20:].hex(),
+              'value':word(1),
+              'operation':word(3),
+              'safeTxGas':word(4),
+              'baseGas':word(5),
+              'gasPrice':word(6),
+              'gasToken':'0x'+word(7).to_bytes(32,'big')[-20:].hex(),
+              'refundReceiver':'0x'+word(8).to_bytes(32,'big')[-20:].hex(),
+              'innerSelector':'0x'+data[:4].hex(),
+              'innerData':'0x'+data.hex()[:400],
+              'innerDataByteCount':length,
+              'tokenId_if_uint256_first_arg':int.from_bytes(data[4:36],'big') if len(data)>=36 else None,
+              'signatureBytes':sigLen
+            }
+          tx=rpc('eth_getTransactionByHash',[FAILED]);receipt=rpc('eth_getTransactionReceipt',[FAILED])
+          print('FAILED_OUTER',json.dumps({k:tx.get(k) for k in ['hash','from','to','nonce','gas','gasPrice','maxFeePerGas','maxPriorityFeePerGas','blockNumber','value','type','chainId']},sort_keys=True))
+          print('FAILED_RECEIPT',json.dumps({k:receipt.get(k) for k in ['status','gasUsed','blockNumber','effectiveGasPrice','revertReason']},sort_keys=True))
+          print('FAILED_SAFE_CALL',json.dumps(decode_exec(tx),sort_keys=True))
+          print('RPC_IN_USE',endpoint)
+          def show_trace(label,hash_):
+            trace=rpc('debug_traceTransaction',[hash_,{'tracer':'callTracer','timeout':'12s'}],True)
+            if trace:
+              def walk(t,depth=0):
+                if depth>8:return
+                d={k:t.get(k) for k in ['type','from','to','value','gas','gasUsed','error','revertReason'] if t.get(k) is not None}
+                d['input_selector']=(t.get('input') or '0x')[:10]
+                d['output_prefix']=(t.get('output') or '0x')[:270]
+                print(label+'_TRACE',depth,json.dumps(d))
+                for c in (t.get('calls') or [])[:15]:walk(c,depth+1)
+              walk(trace)
+            else:
+              trace=rpc('trace_transaction',[hash_],True)
+              if trace:
+                for f in trace[:22]:print(label+'_PARITY_TRACE',json.dumps(f)[:700])
+          show_trace('FAILED',FAILED)
+          failedBlock=integer(receipt['blockNumber'])
+          latest=integer(rpc('eth_blockNumber',[]))
+          print('BLOCK_INFO',json.dumps({'failed':failedBlock,'head':latest}))
+          # Read the Safe's execution events. Calls are bounded to small block ranges.
+          interesting=[]
+          ranges=[(max(0,failedBlock-30000),min(latest,failedBlock+30000)),(max(0,latest-40000),latest)]
+          seen=set()
+          for start,end in ranges:
+            for b in range(start,end+1,2000):
+              z=min(b+1999,end)
+              logs=rpc('eth_getLogs',[{'address':SAFE,'fromBlock':hex(b),'toBlock':hex(z)}],True)
+              if logs is None: continue
+              for event in logs:
+                h=event.get('transactionHash')
+                if h and h not in seen:
+                  seen.add(h)
+                  interesting.append((integer(event['blockNumber']),h,event.get('topics',[''])[0]))
+          interesting.sort(reverse=True)
+          print('SAFE_LOG_TRANSACTIONS_FOUND',len(interesting))
+          for block,h,topic in interesting[:60]:
+            try:
+              t=rpc('eth_getTransactionByHash',[h],True)
+              rc=rpc('eth_getTransactionReceipt',[h],True)
+              if not t or not rc: continue
+              info=decode_exec(t) if (t.get('to') or '').lower()==SAFE else {'outer_selector':(t.get('input') or '0x')[:10],'to':t.get('to')}
+              print('SAFE_EVENT_TX',json.dumps({'block':block,'hash':h,'eventTopic':topic,'from':t.get('from'),'status':rc.get('status'),'nonce':t.get('nonce'),'outerGas':t.get('gas'),'gasUsed':rc.get('gasUsed'),'call':info},sort_keys=True))
+            except Exception as e:print('EVENT_DECODE_ERROR',h,str(e)[:200])
+          PY
