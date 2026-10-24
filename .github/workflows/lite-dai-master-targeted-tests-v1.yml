@@ -339,7 +339,7 @@ jobs:
           set -euo pipefail
           mkdir -p dai-historical-raw
           node --version > dai-historical-raw/TOOLCHAIN_v2.txt
-          npm install --prefix /tmp/dai-archival-deps --no-package-lock --no-audit --no-fund ethers@6.15.0 > dai-historical-raw/INSTALL_LOG_v2.txt 2>&1 || echo "npm install failed" >> dai-historical-raw/INSTALL_LOG_v2.txt
+          npm install --prefix /tmp/dai-archival-deps --no-package-lock --no-audit --no-fund ethers@6.15.0 solc@0.5.12 > dai-historical-raw/INSTALL_LOG_v2.txt 2>&1 || echo "npm install failed" >> dai-historical-raw/INSTALL_LOG_v2.txt
           set +e
           NODE_PATH=/tmp/dai-archival-deps/node_modules node scripts/dai-targeted-historical-v2.cjs > dai-historical-raw/EXECUTION_LOG_v2.txt 2>&1
           code=$?
