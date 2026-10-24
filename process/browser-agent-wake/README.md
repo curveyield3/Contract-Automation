@@ -82,6 +82,8 @@ Do not add or rotate `TAILSCALE_AUTHKEY` for these five workflows. The OIDC-issu
 
 Before re-running a blocked browser wake, verify no wake/watchdog job is already operating on the shared browser session; re-run only the failed handoff after credentials, Tailscale policy, and ChatGPT session state are in place.
 
+If `tailscale/github-action@v4` reports `failed to exchange JWT for access token: ... 403 Unauthorized`, the token was requested from GitHub but the Tailscale federated identity refused it. Open https://login.tailscale.com/admin/settings/trust-credentials and select the matching OpenID Connect credential → View or Edit for the **specific rejected-claim diagnostics**. Verify issuer GitHub Actions (`https://token.actions.githubusercontent.com`), exact subject `repo:curveyield3/Contract-Automation:ref:refs/heads/main`, generated audience `api.tailscale.com/<Client ID>`, writable `auth_keys` scope and requested `tag:audit-browser`. If the credential is an OAuth client rather than an OpenID Connect federated identity, replace it with the latter and update `TS_OAUTH_CLIENT_ID`. Do not repeatedly dispatch an unchanged failing wake; retry the already-failed run once the trust policy is corrected.
+
 Official references: https://tailscale.com/docs/integrations/github/github-action and https://tailscale.com/docs/features/workload-identity-federation
 
 ## Shared browser ownership
