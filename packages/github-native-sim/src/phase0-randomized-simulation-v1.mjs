@@ -123,13 +123,19 @@ export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainI
       const e=new Error(`Phase-0 fork RPC reports chainId=${upstreamChainId}; the deployment profile requires chainId=${chainId}`);
       e.code='PHASE0_FORK_RPC_WRONG_CHAIN';throw e;
     }
+    // Every Phase-0 Anvil must be bound to an actual upstream block hash.
+    // ZIP/script campaigns pin observed latest once; live scans preserve the manifest pin.
+    const blockTag=forkBlockNumber===null?'latest':'0x'+forkBlockNumber.toString(16);
+    const upstreamBlock=await rpc(identityProxy.url,'eth_getBlockByNumber',[blockTag,false]);
+    const pinnedBlockNumber=Number(BigInt(upstreamBlock?.number??'0x0'));
+    const pinnedBlockHash=upstreamBlock?.hash;
+    if(!Number.isSafeInteger(pinnedBlockNumber)||pinnedBlockNumber<=0||!/^0x[0-9a-fA-F]{64}$/.test(String(pinnedBlockHash??''))||
+       (forkBlockNumber!==null&&pinnedBlockNumber!==forkBlockNumber))
+      throw new Error('PHASE0_ARCHIVE_UPSTREAM_BLOCK_HASH_UNAVAILABLE_OR_MISMATCHED');
     const port=8545,url='http://127.0.0.1:8545';
     const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
     const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id',String(chainId),'--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--auto-impersonate','--no-rate-limit','--silent'];
-    if(forkBlockNumber!==null){
-      if(!Number.isSafeInteger(forkBlockNumber)||forkBlockNumber<=0)throw new Error('SCAN_FROZEN_BLOCK_INVALID');
-      args.push('--fork-block-number',String(forkBlockNumber));
-    }
+    args.push('--fork-block-number',String(pinnedBlockNumber));
     const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
     let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
     const started=Date.now();
@@ -139,6 +145,10 @@ export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainI
       await sleep(100);
     }
     if(Date.now()-started>=30000){child.kill('SIGKILL');throw new Error('Anvil RPC readiness timeout');}
+    const localChainId=Number(BigInt(await rpc(url,'eth_chainId',[])));
+    const localBlock=await rpc(url,'eth_getBlockByNumber',['0x'+pinnedBlockNumber.toString(16),false]);
+    if(localChainId!==chainId||String(localBlock?.hash??'').toLowerCase()!==pinnedBlockHash.toLowerCase())
+      throw new Error('PHASE0_LOCAL_ANVIL_HISTORICAL_CHAIN_OR_HASH_MISMATCH');
     const accounts=await rpc(url,'eth_accounts',[]);
     const account0=String(accounts?.[0]??'').toLowerCase();
     if(account0!==ephemeralWallet.address.toLowerCase()){
@@ -148,6 +158,7 @@ export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainI
     }
     return{
       url,upstreamChainId,identityNormalized:true,child,
+      pinnedBlockNumber,pinnedBlockHash,verifiedHistoricalFork:true,
       localSigner:{address:account0,privateKey:ephemeralWallet.privateKey},
       async close(){
         if(child.exitCode===null){
@@ -2708,7 +2719,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v3',
         executionMode:'ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY',status,
         campaignId:receipt.campaign.campaignId,sourceSha256:archiveSha256,
-        fork:{engine:'anvil',source:forkChain.rpcSecret,chain:forkChain.chain,chainId:forkChain.chainId,initialBlock,finalBlock:scriptEnd,upstreamChainId:anvil.upstreamChainId??null,identityNormalized:anvil.identityNormalized===true},
+        fork:{engine:'anvil',source:forkChain.rpcSecret,chain:forkChain.chain,chainId:forkChain.chainId,initialBlock,finalBlock:scriptEnd,upstreamChainId:anvil.upstreamChainId??null,identityNormalized:anvil.identityNormalized===true,pinnedHistoricalBlock:anvil.pinnedBlockNumber,pinnedHistoricalHash:anvil.pinnedBlockHash,verifiedHistoricalFork:anvil.verifiedHistoricalFork===true},
         deploymentProfile:deploymentProfile?{file:deploymentProfile.file,fileSha256:deploymentProfile.fileSha256,mode:deploymentProfile.mode,chain:deploymentProfile.chain,chainId:deploymentProfile.chainId,deployer:deploymentProfile.deployer,...(deploymentProfile.mode==='LIVE'?{contracts:deploymentProfile.contracts}:deploymentProfile.mode==='HARDHAT'?{hardhat:deploymentProfile.hardhat}:{foundryRoot:deploymentProfile.foundryRoot,scripts:deploymentProfile.scripts.map(x=>({entry:x.entry,sha256:x.sha256,env:x.env,timeoutSeconds:x.timeoutSeconds}))})}:null,
         targetEvmChainIds:targetChainIds,
         ...(scanManifest?{scanSourceSnapshot:{schemaVersion:scanManifest.schemaVersion,manifestDigestSha256:scanManifest.manifestDigestSha256,
