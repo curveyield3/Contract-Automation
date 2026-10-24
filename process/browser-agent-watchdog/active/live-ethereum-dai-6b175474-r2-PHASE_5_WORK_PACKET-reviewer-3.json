@@ -51,7 +51,7 @@
   "watchdogRunId": "40116156042",
   "watchdogSweepStartedAt": "2026-10-24T17:27:51Z",
   "lastProgressAt": "2026-10-24T17:22:41Z",
-  "lastDecision": "DURABLE_PROGRESS_RESETS_POKE_CLOCK",
-  "lastNoReadSweepAt": "2026-10-24T17:06:23Z",
-  "elapsedSinceLastPokeMinutes": 1
+  "lastDecision": "WAITING_NO_CHATGPT_READ",
+  "lastNoReadSweepAt": "2026-10-24T17:28:02Z",
+  "elapsedSinceLastPokeMinutes": 5
 }
