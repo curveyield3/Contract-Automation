@@ -174,7 +174,7 @@ jobs:
 
       - name: Start pinned Ethereum mainnet Anvil fork
         env:
-          FORK_RPC: https://rpc.flashbots.net
+          FORK_RPC: ${{ secrets.RPC_ETHEREUM }}
           EXPECTED_BLOCK_HASH: '0x0b184e111de903ae1bf4618377a20763cabb3db48a3652bdda4f622a47eb46b8'
         shell: bash
         run: |
@@ -190,7 +190,7 @@ jobs:
           test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = '1'
           BLOCK_HASH="$(cast block 25835948 --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
           test "${BLOCK_HASH,,}" = "${EXPECTED_BLOCK_HASH,,}"
-          printf 'fork_block=25835948\nfork_block_hash=%s\nfork_provider=flashbots\n' "$BLOCK_HASH" | tee cyvlsdt-v30-fork-identity-v1.txt
+          printf 'fork_block=25835948\nfork_block_hash=%s\nfork_provider=authenticated_RPC_ETHEREUM\n' "$BLOCK_HASH" | tee cyvlsdt-v30-fork-identity-v1.txt
 
       - name: Prove live cyGOV identity and owner
         shell: bash
