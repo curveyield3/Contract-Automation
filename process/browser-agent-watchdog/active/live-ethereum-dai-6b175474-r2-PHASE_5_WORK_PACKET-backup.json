@@ -52,5 +52,18 @@
     "consecutiveUnviewable": 0
   },
   "watchdogRunId": "40123365288",
-  "watchdogSweepStartedAt": "2026-10-24T19:01:58Z"
+  "watchdogSweepStartedAt": "2026-10-24T19:01:58Z",
+  "lastStopClick": {
+    "x": null,
+    "y": null,
+    "darkPixels": 0,
+    "darkAround": null,
+    "onButton": false,
+    "clicked": false,
+    "areaChanged": null,
+    "status": "STOP_BUTTON_NOT_FOUND"
+  },
+  "lastDecision": "PHASE1_X11_POKE_TRANSPORT_FAILED_RETRY_LATER",
+  "lastPokeFailureAt": "2026-10-24T19:03:08Z",
+  "pokeFailureCount": 1
 }
