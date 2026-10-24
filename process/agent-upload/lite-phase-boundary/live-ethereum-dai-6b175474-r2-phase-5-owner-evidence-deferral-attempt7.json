@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-lite-phase-boundary-request-v1",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "reviewKind": "phase",
+  "phaseSequence": 5,
+  "auditControllerRef": "main",
+  "attempt": 7
+}
