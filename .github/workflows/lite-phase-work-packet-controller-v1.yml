@@ -565,6 +565,8 @@ jobs:
           Confirm your wake ACK, then continue working on the current assignment and report only genuinely blocked work.
           First reported deficiencies:
           $brief"
+          message+="
+          INFRASTRUCTURE: Read curveyield3/Contract-Automation/docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md, Anvil/RPC rule. Historical Ethereum upstream is RPC_ETHEREUM projected by trusted Actions as ETHEREUM_FORK_RPC_URL; only a pinned/hash-verified LOCAL Anvil fork may receive mutable test calls. No synthetic fixture or alternate RPC. Diagnose stale runner commit/secret/pin first. Do not execute or automatically resubmit tests without owner authorization."
           b64="$(printf '%s' "$message" | base64 -w0)"
           timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="$AUDIT_CAMPAIGN-phase-$phase-$reviewer-rework-${{ github.run_id }}" \
@@ -597,6 +599,8 @@ jobs:
           refs="$(jq -r '[.generated[:12][]?.executionRequestRef] | join(", ")' /tmp/lite-phase5-preflight.json)"
           count="$(jq '.generated|length' /tmp/lite-phase5-preflight.json)"
           message="PHASE5_TEST_EXECUTOR_HANDOFF: v13 campaign ${{ steps.request.outputs.campaign_id }}. $count candidate-bound requests are published. Read ${{ steps.routing.outputs.campaign_path }}/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json and the listed request and *.design-v1.json sidecars from Audit-Controller. First request paths (possibly none until the required harness is authored): $refs. Preflight may list exact missing executionBlueprint fields; implement those runner-owned harnesses, then pass valid bundle IDs back to the reviewer for shard entry. You are the TEST EXECUTOR: author/verify exact runnable harnesses, preserve every required ABI method/actor/transaction sequence and oracle, do not impose arbitrary native-fuzz quotas; only execute candidate-bound fuzz when explicitly selected and authorized, retain raw execution evidence. Do NOT alter reviewer shards or fabricate successful executions. Unready targets remain preflight REWORK."
+          message+="
+          EXECUTION RULES: curveyield3/Audit-Controller is canonical; use curveyield3/Contract-Automation existing qualified Actions lane, RPC_ETHEREUM -> ETHEREUM_FORK_RPC_URL, frozen chain/block/hash proof and local Anvil 127.0.0.1, no Ganache/standalone/public fallback or unpinned snapshot. Read docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md, Anvil/RPC rule. Obtain explicit audit-owner authorization for this specific test before any execution; preserve all raw receipts and unresolved governance uncertainty."
           b64="$(printf '%s' "$message" | base64 -w0)"
           timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="${{ steps.request.outputs.campaign_id }}-phase5-test-executor-${{ github.run_id }}" \
