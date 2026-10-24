@@ -54,6 +54,7 @@ function constructorArgument(input,actor,tokenAddress){
   return null;
 }
 async function startAnvil(){
+  throw new Error('RETIRED_SOURCE_ONLY_SIMULATION: standalone fixtures are not historical fork evidence. Use authorized V7 archive Anvil execution.');
   const bin=path.resolve('node_modules/@foundry-rs/anvil/bin.mjs');
   await fs.access(bin);
   const fork=process.env.ETHEREUM_FORK_RPC_URL;
