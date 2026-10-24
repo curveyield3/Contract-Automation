@@ -2,7 +2,7 @@
 
 Version: v1
 
-This file is the browser-agent entrypoint for blockchain development, testing, simulation, and Audit V7 work in the CurveYield2 GitHub organization.
+This file is the browser-agent entrypoint for blockchain development, testing, simulation, and Audit V7 work in the curveyield3 GitHub organization.
 
 ## Audit-process authority and progressive disclosure
 
@@ -19,7 +19,7 @@ When an audit is active:
 
 ## Repository roles
 
-### CurveYield2/Audit-Controller
+### curveyield3/Audit-Controller
 Control plane only.
 
 Use it for:
@@ -34,7 +34,7 @@ Use it for:
 
 Do not move generic compilation, fuzzing, Foundry/Medusa, Anvil, fork simulation, or reusable technical workloads into Audit-Controller.
 
-### CurveYield2/Contract-Automation
+### curveyield3/Contract-Automation
 Execution plane.
 
 Use it for:
@@ -65,9 +65,9 @@ Do not create duplicate workflows, duplicate runners, alternate RPC systems, or 
 
 ## Private Actions budget rule — mandatory
 
-`CurveYield2/Audit-Controller` is a private control/evidence plane and its limited private GitHub Actions allotment must be preserved.
+`curveyield3/Audit-Controller` is a private control/evidence plane and its limited private GitHub Actions allotment must be preserved.
 
-- Put new generic, reusable, compute-heavy, recurring, technical, audit, testing, orchestration, packet-generation, validation, reconciliation, and recovery workloads in public `CurveYield2/Contract-Automation` whenever technically possible.
+- Put new generic, reusable, compute-heavy, recurring, technical, audit, testing, orchestration, packet-generation, validation, reconciliation, and recovery workloads in public `curveyield3/Contract-Automation` whenever technically possible.
 - Use the existing Audit-Controller → Contract-Automation bridge/request/event pattern so Audit-Controller supplies authority/state and Contract-Automation supplies execution.
 - Audit-Controller may contain deterministic controller/library code and durable campaign state that Contract-Automation checks out and executes on the public runner.
 - Do not add a new Audit-Controller workflow merely because it is convenient.
@@ -128,7 +128,7 @@ First inspect:
 
 If the current status is `PASS`, use the admitted qualified runner identity recorded there. Do not assume a newer raw `main` commit is qualified.
 
-If a fresh qualification is required, a browser agent can trigger the existing qualification bridge by creating a GitHub issue in `CurveYield2/Contract-Automation` with this exact title:
+If a fresh qualification is required, a browser agent can trigger the existing qualification bridge by creating a GitHub issue in `curveyield3/Contract-Automation` with this exact title:
 
 `[agent] run-v7-qualification`
 
@@ -181,6 +181,40 @@ npm run v7:harness:validate -- --bundle <bundle-id> --request <request.json>
 Missing harness support is not permission to modify production source or bypass required testing.
 
 ## Anvil/RPC rule
+
+### Before any archive-dependent audit execution (mandatory for every agent)
+
+1. **Identify the owner and permission.** Read the live campaign directory and current bound Phase START_HERE; confirm your reviewer or test-executor assignment. Reviewer-1/2/3/4 or master can design/interpret technical security work, but only the assigned registered `test-executor` or already authorized controller execution may perform authorized tests. User instructions prohibiting tests override general auto-advance language. Do not trigger any Actions workflow that runs simulations merely to diagnose a defect without audit-owner authorization.
+2. **Locate the existing runner, not a substitute.** Technical execution is in `curveyield3/Contract-Automation`, not in the private `curveyield3/Audit-Controller`. For Phase 0 use `lite-phase0-bootstrap-v1.yml` → `lite-phase0-randomized-simulation-v1.yml` → `scripts/run-phase0-fork-deploy-config-v1.mjs`. For Phase 5 use the existing `lite-phase-work-packet-controller-v1.yml` (its Phase-5 boundary request **does run tests**). For Phase 6/9 explicit V7 requests use `process/agent-upload/lite-v7-execution/` → `lite-v7-execution-dispatch-v1.yml` → `audit-controller-execution.yml`. For other authorized phases reuse the same trusted V7 runner and existing owner-specific request path; never invent a new GitHub Actions workflow.
+3. **Find the authenticated secret mapping.** GitHub Actions must project the existing `secrets.RPC_ETHEREUM` to `ETHEREUM_FORK_RPC_URL`. This dRPC URL is the upstream for history **only**, not a wallet endpoint. RPC configuration lives on the GitHub Actions runner, not in ChatGPT's local shell. The absence of local Forge/Anvil or of a direct connector dispatch button is not a missing secret.
+4. **Pin and prove history before mutation.** For Ethereum, expected chain ID is 1. Resolve the request's historical block and full block hash from the authenticated source. Live-scan uses its signed source-manifest frozen block; ZIP/script mode now freezes the fetched upstream block/hash before running anything. Start the existing local Anvil on `127.0.0.1` with `--fork-url` pointed at the approved upstream (or trusted identity proxy), `--chain-id 1`, `--fork-block-number` equal to the frozen block, and the source-compatible hardfork. Query the local Anvil block number/hash, chain ID, code at every actual deployed target, and ensure they match the pinned upstream/deployed contract. A chain-ID-only handshake is insufficient.
+5. **Use only the proven localhost session for writes and fuzzers.** Real ABI transactions, `anvil_impersonateAccount`, `anvil_setBalance`, `evm_snapshot`, `evm_revert`, targeted exploit sequences, Foundry `--fork-url`, and Medusa fork mode target the verified localhost Anvil. Never send transaction/impersonation RPCs to dRPC, a public upstream, a frontend endpoint, a bare standalone Anvil or a synthetic Ganache. Use per-run isolated state; restore only checksum-verified Phase-0 snapshots with the original historical upstream attached to serve untouched account storage. Close the session after the run.
+6. **Save and evaluate actual proof.** Preserve request/source/build digest, run ID + exact runner SHA, chain/block/hash, local fork identity, deployed address/code proof, ABI transactions and mined receipts, assertions/oracles, reverts, unexecuted actions, coverage and raw transcript references. A failed or missing fork is `BLOCKED_INFRASTRUCTURE`, not `NOT_APPLICABLE`, `PASS`, `SAFE` or a fabricated finding. A synthetically executed developer-unit test is never audit evidence.
+
+### Phase-by-phase launch ownership and action (Lite v13)
+
+| Phase or checkpoint | Who acts and what actually launches | Historical state and audit rule |
+| --- | --- | --- |
+| **0 — source/bootstrap** | Automatic existing Phase-0 initializer and deployment/config GitHub Actions; reviewer does not manually run a test | LIVE_SCAN pins scan manifest number/hash, chain and deployed runtime; ZIP pins observed upstream history. Anvil receives local writes; abort on missing archive source. Phase 0 alone is not proof of all properties |
+| **1 — structural inventory** | Reviewer-1 reads sealed build/fork/source evidence; no new default execution | If missing Phase-0 artifact, report controller infrastructure hold; never substitute locally deployed mock |
+| **2 — specification** | Reviewer-1 maps properties and source evidence; no default execution | If a question needs a live-fork experiment, record an exact test design and owner authorization requirement |
+| **3 — threat model** | Reviewer-1 designs material attack invariants, then master gate | No rerunning a sealed phase or unapproved deployment; inherited Phase-0 provenance stays immutable |
+| **4 — correctness/discovery/master** | Reviewer-2 analyzes and master may request targeted tests from distinct registered executor | For each authorized experiment, use the existing V7 archive Anvil; direct historical `eth_call` is read-only observation, not proof of simulated attack state. DAI X001-ROLE-VERIFY's HIGH uncertainty remains until an authenticated intended policy exists |
+| **5 — economics/targets** | Reviewer-3 authors three-part semantic attacker/oracle plans, bound `ANVIL_WORKFLOW` / other selected V7 adapters; the existing phase-boundary controller may automatically execute | Verify execution authority **before** boundary submission. The runner preflights authenticated Ethereum history; Foundry/Medusa are optional only if truly selected and must share a verified local Anvil fork. No arbitrary 100,000 fuzz-call quota |
+| **6 — machine interpretation and adversarial baseline** | Reviewer-3 reads raw Phase-0/5 evidence and designs baseline/candidate harnesses; authorized registered test-executor uses existing V7 dispatch | Match candidate and control assertions, receipt hash, source, local fork, exact historical block and test group. Never treat unavailable test evidence as a negative result |
+| **7 — automated marker** | Controller only; no simulation or reviewer | Marks prior verified progression, never manufactures fork evidence |
+| **8 — findings/remediation** | Reviewer-4 reviews findings and evidence; propose targeted retests if justified | Archive-backed execution via the same V7 path **only on authorization**; carry unresolved limitations |
+| **9 — conditional remediation** | Reviewer-4 uses existing Phase-9 rerun request and V7 dispatcher only if remediation exists and owner authorized | Reproduce original historical starting state, test repaired code on isolated Anvil, record before/after and unchanged upstream reference |
+| **10 — final conclusion/master** | Reviewer-4 and master reconcile all receipts and exceptions | Do not claim complete assurance where any historical RPC, oracle, configuration/governance policy or evidence obligation is inconclusive |
+
+### Exact GitHub-connector procedure for an authorized existing execution
+
+Read the target workflow's `on:` path filter before modifying the corresponding **existing** request file. Identify the canonical `curveyield3/Audit-Controller` request and bound source SHA/receipt. If the audit owner authorized this specific test run, write/update only the expected `curveyield3/Contract-Automation` request, record its full commit SHA, then look up `https://api.github.com/repos/curveyield3/Contract-Automation/actions/runs?head_sha=<SHA>&event=push`; select only the exact expected workflow. Read its job steps/logs and published controller receipt. A green Actions run does not establish controller PASS. Missing local binaries are irrelevant; missing secret projection, frozen block/hash, local fork session, or mined assertions are genuine failures. Do not resubmit the same rejected request without a concrete correction and renewed permission.
+
+### Historical-RPC failure triage order
+
+Use the failed run ID, current runner commit, controller packet and the **specific** failing job step. Check secret-to-environment projection (presence only; never print credential), upstream `eth_chainId`, `eth_getBlockByNumber` at the exact pin, `eth_getCode` at the recorded deployed target, local Anvil launch/chain/hash, RPC proxy behavior, local writable methods, actual ABI receipts, executor ownership, and artifact ingestion. dRPC's `eth_getLogs` range limit is separate from archive-state availability; use complete bounded log ranges with receipt reconciliation when log evidence is required. If the runner repair postdates the failed job, the old error is **stale evidence**, not proof the repair failed; never self-trigger a new run when prohibited.
+
 
 Authoritative Audit V7 full simulation uses Anvil only.
 
