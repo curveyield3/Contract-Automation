@@ -26,8 +26,8 @@ const effectiveAuthorityRoot=validateBoundAuthorityV1({root,receipt:predecessor}
 if(!['SEALED','SKIPPED'].includes(predecessor.phase?.status)) throw new Error('predecessor receipt is not sealed/skipped');
 const controllerRef=a['audit-controller-ref'];
 const encodeRepoPath=p=>String(p).split('/').map(encodeURIComponent).join('/');
-const controllerTreeUrl=p=>'https://github.com/CurveYield2/Audit-Controller/tree/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
-const controllerBlobUrl=p=>'https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
+const controllerTreeUrl=p=>'https://github.com/curveyield3/Audit-Controller/tree/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
+const controllerBlobUrl=p=>'https://github.com/curveyield3/Audit-Controller/blob/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
 const logicalAuthorityHome=predecessor.authority?.homepagePath??assignment.workSchemaPath.replace(/\/phases\/phase-[^/]+\/[^/]+$/,'/SKILL.md');
 const authorityLinkPath=p=>authorityLinkPathV1(root,p);
 const linkedAuthorityHome=authorityLinkPath(path.posix.join(effectiveAuthorityRoot,'SKILL.md'));
