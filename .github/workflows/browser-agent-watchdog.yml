@@ -23,6 +23,7 @@ jobs:
     outputs:
       targets: ${{ steps.targets.outputs.targets }}
       has_targets: ${{ steps.targets.outputs.has_targets }}
+      browser_ready: ${{ steps.credentials.outputs.browser_ready }}
     steps:
       - name: Discover active watchdog targets
         id: targets
@@ -56,11 +57,26 @@ jobs:
           echo "has_targets=$has_targets" >> "$GITHUB_OUTPUT"
           echo "watchdog_targets=$count" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Check Tailscale OIDC and browser-session readiness
+        id: credentials
+        shell: bash
+        env:
+          TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_AUDIENCE_VALUE: ${{ secrets.TS_AUDIENCE }}
+          CHATGPT_STATE: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TS_CLIENT_ID" ] && [ -n "$TS_AUDIENCE_VALUE" ] && [ -n "$CHATGPT_STATE" ]; then
+            echo 'browser_ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'browser_ready=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::Watchdog browser work is paused until TS_OAUTH_CLIENT_ID, TS_AUDIENCE and CHATGPT_STORAGE_STATE_B64 are all configured.'
+          fi
   # GitHub drops scheduled runs under load (hours between cron sweeps), so while any
   # target stays active the watchdog re-dispatches itself every 15 minutes; one pending re-arm at a time.
   rearm:
     needs: [discover, supervise]
-    if: always() && needs.discover.outputs.has_targets == 'true'
+    if: always() && needs.discover.outputs.has_targets == 'true' && needs.discover.outputs.browser_ready == 'true'
     concurrency:
       group: browser-agent-watchdog-rearm
       cancel-in-progress: true
@@ -82,7 +98,7 @@ jobs:
 
   supervise:
     needs: discover
-    if: needs.discover.outputs.has_targets == 'true'
+    if: needs.discover.outputs.has_targets == 'true' && needs.discover.outputs.browser_ready == 'true'
     strategy:
       fail-fast: false
       max-parallel: 1
