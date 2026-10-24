@@ -2586,6 +2586,12 @@ function baselineTargetRows({medusa,telemetry}){
   ];
 }
 export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl,forkUrls={},medusaSmokeCalls=null,telemetrySmokeCalls=null,deploymentOnly=false}){
+  // The old randomized/Medusa lane duplicated mutable state in a network-free
+  // node; unqueried upstream slots could become zero. It cannot establish full
+  // historical Ethereum assurance and must never be issued as audit evidence.
+  // The live caller explicitly sets deploymentOnly:true and uses an exact
+  // historical Anvil fork verified by block hash and live target code.
+  if(deploymentOnly!==true)throw new Error('PHASE0_UNVERIFIED_SIMULATION_RETIRED: only historical Anvil deployment/configuration lane is permitted');
   // Smoke budgets are independent and never produce campaign evidence. Medusa-only preserves the prior smoke behavior.
   const medusaSmoke=Number.isInteger(medusaSmokeCalls)&&medusaSmokeCalls>0;
   const telemetrySmoke=Number.isInteger(telemetrySmokeCalls)&&telemetrySmokeCalls>0;
