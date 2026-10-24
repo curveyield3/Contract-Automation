@@ -1,0 +1,239 @@
+{
+  "schemaVersion": "dai-mainnet-archival-evidence-v2",
+  "requestId": "ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "sourceSha256": "457b6121c4a613730251f2f81ae17d27c9c08674696b73d1f5828c623e705ee5",
+  "previousFixtureRawSha256": "9088df2cab5bf6531ec0f10c1a65882f62dcb206c9dfaa5a18c553a2de93097b",
+  "runUrl": "https://github.com/curveyield3/Contract-Automation/actions/runs/40099123677",
+  "runnerCommit": "217d026a761c9b336f727379600d80b4e8ad61b7",
+  "target": "0x6b175474e89094c44da98b954eedeac495271d0f",
+  "frozenBlock": 26253174,
+  "expectedBlockHash": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f",
+  "expectedRuntimeSha256": "5230b924dad23dab334727ba9d4b62c95a6cd4a48242932f8a2946cef264ab97",
+  "credentialsPresent": {
+    "RPC_ETHEREUM": true,
+    "ETHERSCAN_API_KEY": true
+  },
+  "providerTrials": [
+    {
+      "provider": "configured-RPC_ETHEREUM",
+      "attempts": [
+        {
+          "method": "eth_chainId",
+          "result": "0x1"
+        },
+        {
+          "method": "eth_getBlockByNumber",
+          "resultHash": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f"
+        }
+      ],
+      "acceptedAsArchive": true,
+      "codeSha256": "5ce810033426a017721777f241665c27bdd4663ca8a1c27558b4b372a1731f4e"
+    }
+  ],
+  "observed": {
+    "domain": {
+      "provider": "configured-RPC_ETHEREUM",
+      "blockHash": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f",
+      "calldata": "0x3644e515",
+      "raw": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "stored": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "expected": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "equal": true
+    },
+    "supply": {
+      "provider": "configured-RPC_ETHEREUM",
+      "blockTag": "0x1909776",
+      "raw": "0x00000000000000000000000000000000000000000eae8f7b523bbb405f3b80e3",
+      "rawBaseUnits": "4543820803393883483972272355",
+      "decimals": 18,
+      "wholeDai": "4543820803.393883483972272355"
+    }
+  },
+  "assertions": [
+    {
+      "name": "independent EIP712 preimage and TypedDataEncoder agree",
+      "pass": true,
+      "actual": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "expected": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "context": null
+    },
+    {
+      "name": "configured-RPC_ETHEREUM chainId",
+      "pass": true,
+      "actual": "0x1",
+      "expected": "0x1",
+      "context": null
+    },
+    {
+      "name": "configured-RPC_ETHEREUM pinned block hash",
+      "pass": true,
+      "actual": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f",
+      "expected": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f",
+      "context": null
+    },
+    {
+      "name": "configured-RPC_ETHEREUM deployed runtime matches accepted source",
+      "pass": false,
+      "actual": "5ce810033426a017721777f241665c27bdd4663ca8a1c27558b4b372a1731f4e",
+      "expected": "5230b924dad23dab334727ba9d4b62c95a6cd4a48242932f8a2946cef264ab97",
+      "context": null
+    },
+    {
+      "name": "configured-RPC_ETHEREUM deployed DOMAIN_SEPARATOR equals EIP712 chain 1",
+      "pass": true,
+      "actual": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "expected": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "context": null
+    },
+    {
+      "name": "historical totalSupply raw is nonnegative",
+      "pass": true,
+      "actual": true,
+      "expected": true,
+      "context": null
+    },
+    {
+      "name": "independent explorer creators agree",
+      "pass": false,
+      "actual": "0xb5b06a16621616875a6c2637948bf98ea57c58fa",
+      "expected": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+      "context": null
+    },
+    {
+      "name": "verified creation receipt status",
+      "pass": true,
+      "actual": "0x1",
+      "expected": "0x1",
+      "context": null
+    },
+    {
+      "name": "verified creation contract address",
+      "pass": false,
+      "actual": "null",
+      "expected": "0x6b175474e89094c44da98b954eedeac495271d0f",
+      "context": null
+    },
+    {
+      "name": "verified creation sender agrees with indexer",
+      "pass": true,
+      "actual": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+      "expected": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+      "context": null
+    }
+  ],
+  "readOnly": true,
+  "successfulRPC": 8,
+  "failedRPC": 5,
+  "successfulHistoricalCalls": 5,
+  "roleScan": {
+    "complete": false,
+    "coveredRanges": [],
+    "missingRanges": [
+      {
+        "from": 8928158,
+        "to": 26253174,
+        "reason": "provider limit, RPC error or finite 12-minute scan budget"
+      }
+    ],
+    "events": [],
+    "reconciled": [
+      {
+        "address": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+        "calldata": "0xbf353dbb000000000000000000000000ddb108893104de4e1c6d0e47c42237db4e617acc",
+        "raw": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "actual": "0",
+        "predicted": null,
+        "agrees": false
+      }
+    ],
+    "receiptChecks": [],
+    "errors": [
+      {
+        "from": 8928158,
+        "to": 8930157,
+        "error": "JSON-RPC {\"message\":\"ranges over 10000 blocks are not supported on free plan\",\"code\":35}"
+      }
+    ],
+    "topics": {
+      "rely": "0x65fae35e00000000000000000000000000000000000000000000000000000000",
+      "deny": "0x9c52a7f100000000000000000000000000000000000000000000000000000000"
+    },
+    "scanProvider": "configured-RPC_ETHEREUM",
+    "startBlock": 8928158,
+    "endBlock": 26253174,
+    "rangeRequests": 5,
+    "computedEffectiveWards": {},
+    "receiptsComplete": true,
+    "rosterCompletenessProven": false
+  },
+  "errors": [
+    "Historical ward roster not proven complete, or creation/receipts/archival ward state lacks authenticated coverage",
+    "Approved governance role policy has not been independently established; avoid calling deployment configuration safe"
+  ],
+  "eip712": {
+    "domain": {
+      "name": "Dai Stablecoin",
+      "version": "1",
+      "chainId": 1,
+      "verifyingContract": "0x6b175474e89094c44da98b954eedeac495271d0f"
+    },
+    "abiEncodedPreimage": "0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f0b1461ddc0c1d5ded79a1db0f74dae949050a7c0b28728c724b24958c27a328bc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc600000000000000000000000000000000000000000000000000000000000000010000000000000000000000006b175474e89094c44da98b954eedeac495271d0f",
+    "keccak256": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+    "typedDataHash": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7"
+  },
+  "creationLookup": {
+    "provider": "Blockscout Ethereum v2 public indexed address",
+    "path": "/api/v2/addresses/0x6b175474e89094c44da98b954eedeac495271d0f",
+    "attempted": true,
+    "httpStatus": 200,
+    "fields": {
+      "creator_address_hash": "0xb5b06a16621616875A6C2637948bF98eA57c58fa",
+      "creation_tx_hash": null,
+      "creation_block": null,
+      "is_verified": true
+    }
+  },
+  "etherscanCreationLookup": {
+    "provider": "Etherscan v2",
+    "action": "getcontractcreation",
+    "attempted": true,
+    "httpStatus": 200,
+    "status": "1",
+    "message": "OK",
+    "result": [
+      {
+        "contractAddress": "0x6b175474e89094c44da98b954eedeac495271d0f",
+        "contractCreator": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+        "txHash": "0x495402df7d45fe36329b0bd94487f49baee62026d50f654600f6771bd2a596ab",
+        "blockNumber": "8928158",
+        "timestamp": "1573672677",
+        "contractFactory": "0xb5b06a16621616875a6c2637948bf98ea57c58fa",
+        "creationBytecode": ""
+      }
+    ]
+  },
+  "creation": {
+    "creator": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+    "transactionHash": "0x495402df7d45fe36329b0bd94487f49baee62026d50f654600f6771bd2a596ab",
+    "authenticatedByReceipt": false,
+    "indexerOnly": true,
+    "transaction": {
+      "hash": "0x495402df7d45fe36329b0bd94487f49baee62026d50f654600f6771bd2a596ab",
+      "from": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+      "to": "0xbaa65281c2fa2baacb2cb550ba051525a480d3f4",
+      "input": "0x64b07f210000000000000000000000000000000000000000000000000000000000000001",
+      "blockNumber": "0x883b9e"
+    },
+    "receipt": {
+      "status": "0x1",
+      "contractAddress": null,
+      "blockNumber": "0x883b9e",
+      "transactionIndex": "0x19"
+    }
+  },
+  "expectedGovernancePolicy": {
+    "status": "UNESTABLISHED",
+    "reason": "No independently authenticated historic allowed-ward governance roster provided or verified by approved test endpoints. Effective role authority does not itself prove intended operator policy."
+  }
+}
