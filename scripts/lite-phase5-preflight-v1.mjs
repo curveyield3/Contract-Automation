@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
 import {materializeShardedWorkFormV1,shardWorkFormV1} from './lib/lite-work-shards-v1.mjs';
-import {validateTargetExecutionRequestBindingV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
+import {validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
 const [root,campaignPath,campaignId,sourceSha256]=process.argv.slice(2);
@@ -98,8 +98,15 @@ else for(const [i,target] of designs.entries()){
 }
 
 if(sharded)shardWorkFormV1({root,formRel:fullRel,phase:5,retireFull:true,force:true});
+// When the exact audit owner has directed continuation with unverified
+// candidate evidence, preflight still validates all requests but must NEVER
+// permit toolchain installation or machine execution as an incidental effect.
+const deferral=inspectPhase5OwnerEvidenceDeferralV1({
+  controllerRoot:root,campaignPath,campaignId,sourceSha256,targetDesigns:designs
+});
 const report={schemaVersion:'curveyield-phase5-request-preflight-v1',campaignId,sourceSha256,
-  status:failures.length?'REWORK_REQUIRED':'PREFLIGHT_PASS',runnable:failures.length===0&&ready.length>0,
+  status:failures.length?'REWORK_REQUIRED':'PREFLIGHT_PASS',runnable:failures.length===0&&ready.length>0&&!deferral,
+  ...(deferral?{evidenceDisposition:'DEFERRED_UNVERIFIED',deferralPath:deferral.path}:{}),
   designCount:designs?.length??0,readyCount:ready.length,generated,failures,
   ...(sharded?{workShardIndexPath:indexRel}:{})};
 process.stdout.write(JSON.stringify(report)+'\n');
