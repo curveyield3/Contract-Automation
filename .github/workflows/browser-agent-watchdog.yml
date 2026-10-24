@@ -1081,16 +1081,24 @@ jobs:
             prior_idle_pokes="$(jq -r '.repair.consecutiveIdlePokes // 0' /tmp/watchdog-state.json)"
             idle_threshold="$(jq -r '.repair.idlePokeThreshold // 3' /tmp/watchdog-state.json)"
             if [ "$prior_idle_pokes" -ge "$idle_threshold" ]; then
-              # First repair the currently registered reviewer. Standby is
-              # consumed only after the repair dispatch itself has failed.
-              if dispatch_reviewer_repair "NO_CONTROLLER_ADVANCE_AFTER_${prior_idle_pokes}_PHASE1_X11_POKES"; then
-                retire_state "REVIEWER_REPAIR_DISPATCHED_AFTER_${prior_idle_pokes}_NO_READ_POKES"
-                exit 0
-              fi
+              # Three visibly delivered pokes with no verified reviewer-authored
+              # Git progress prove that re-waking the same chat has not recovered
+              # the assignment. A successfully QUEUED repair of that same chat is
+              # not proof of takeover. Promote the already registered one-time
+              # standby first, preserving the current phase/receipt/work shards.
+              # Do not launch controller simulation or tests from this watchdog.
               if dispatch_registered_backup; then
-                retire_state "BACKUP_CHAT_REBOUND_AFTER_REPAIR_DISPATCH_FAILURE_${prior_idle_pokes}"
+                retire_state "BACKUP_CHAT_REBOUND_AFTER_${prior_idle_pokes}_NO_PROGRESS_POKES"
                 exit 0
               fi
+              # If no eligible standby remains, use existing reviewer repair
+              # as a bounded last-resort wake, without inventing another chat.
+              if dispatch_reviewer_repair "NO_CONTROLLER_ADVANCE_AFTER_${prior_idle_pokes}_PHASE1_X11_POKES"; then
+                retire_state "REVIEWER_REPAIR_DISPATCHED_AFTER_${prior_idle_pokes}_NO_PROGRESS_POKES"
+                exit 0
+              fi
+              echo "::error::Reviewer recovery could not dispatch either registered standby or repair."
+              exit 1
             fi
 
             echo "Watchdog $WAKE_ID: elapsed-time gate reached; sending configured GET BACK TO WORK using the proven Phase-1 fixed X11 path."
