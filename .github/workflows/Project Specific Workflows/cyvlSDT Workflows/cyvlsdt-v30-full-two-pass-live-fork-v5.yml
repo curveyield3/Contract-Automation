@@ -17,7 +17,7 @@ jobs:
     env:
       DEPLOYMENT_TAG: v30-remediation-v5-full-two-pass-livefork
       LOCAL_RPC: http://127.0.0.1:8545
-      FORK_RPC: https://rpc.flashbots.net
+      FORK_RPC: ${{ secrets.RPC_ETHEREUM }}
       FORK_BLOCK: '25835948'
       EXPECTED_BLOCK_HASH: '0x0b184e111de903ae1bf4618377a20763cabb3db48a3652bdda4f622a47eb46b8'
       CYGOV: '0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b'
