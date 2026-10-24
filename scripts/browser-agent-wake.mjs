@@ -388,6 +388,13 @@ async function verifyX11VisibleChatAddress(requested) {
   if(actual.origin!=='https://chatgpt.com')throw new BrowserAgentError('WRONG_VISIBLE_ORIGIN','Chrome is not displaying ChatGPT',false);
   if(/^\/(?:auth|login|signup|register)(?:\/|$)/i.test(current))
     throw new BrowserAgentError('AUTH_REQUIRED','Visible Chrome window redirected to ChatGPT login; refresh browser session secret before sending',false);
+  // ChatGPT may redirect an authenticated-looking browser to the home screen
+  // when its account/browser check fails. This is not a missing chat, wrong
+  // project URL, RPC failure, or a reason to paste into the home composer.
+  // Use only the visibly copied Chrome URL (OS clipboard), never DOM/API reads.
+  if(current==='/'||current==='/home')
+    throw new BrowserAgentError('CHATGPT_ACCOUNT_SESSION_CHECK_FAILED',
+      'Chrome redirected from the registered conversation to ChatGPT home. Inspect the saved visual evidence for an account/browser-check failure and re-authorize the browser session before replaying the published delivery. No message was sent.',false);
   const actualId=current.match(/\/c\/([^/]+)$/)?.[1]||'';
   const requestedId=expectedPath.match(/\/c\/([^/]+)$/)?.[1]||'';
   if(!requestedId||actualId!==requestedId)
