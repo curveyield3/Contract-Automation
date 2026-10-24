@@ -1,10 +1,7 @@
 name: cyvbUSDC Deployment Simulation v8
 
+# Exact historical fork simulations require explicit audit-owner authorization.
 on:
-  push:
-    paths:
-      - 'packages/github-native-sim/audit-harnesses/cyvbusdc-deployment-simulation-v1/requests/request-v8.json'
-      - '.github/workflows/cyvbusdc-deployment-simulation-v8.yml'
   workflow_dispatch:
 
 permissions:
@@ -46,14 +43,17 @@ jobs:
         working-directory: .smart-contracts
         run: forge install foundry-rs/forge-std --no-git
 
-      - name: Execute exact cyvbUSDC deployment sequence on dRPC-backed Katana Anvil fork
+      - name: Execute exact cyvbUSDC deployment sequence on authenticated historical Katana Anvil fork
+        env:
+          KATANA_UPSTREAM: ${{ secrets.RPC_KATANA }}
         shell: bash
         run: |
           set -euo pipefail
+          test -n "${KATANA_UPSTREAM:-}" || { echo "::error::RPC_KATANA secret missing"; exit 1; }
           rm -rf cyvbusdc-deployment-simulation-output-v8
           node packages/github-native-sim/audit-harnesses/cyvbusdc-deployment-simulation-v1/run-v7.mjs \
             --smart-contracts-root .smart-contracts \
-            --fork-url https://katana.drpc.org/ \
+            --fork-url "$KATANA_UPSTREAM" \
             --output cyvbusdc-deployment-simulation-output-v8
 
       - name: Show deployment simulation summary
