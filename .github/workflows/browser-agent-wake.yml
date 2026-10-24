@@ -328,6 +328,15 @@ jobs:
             printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
             test -s /tmp/wake-message.txt
           fi
+          # Mandatory current infrastructure notice for EVERY substantive Lite
+          # reviewer/master/test-executor wake; preserves the caller's first-action
+          # ACK and skips pure watchdog pokes.
+          if [ "${{ inputs.gate_mode }}" = 'LITE' ] \
+            && [ "${{ inputs.gate_repository }}" = 'curveyield3/Audit-Controller' ] \
+            && [ "$(cat /tmp/wake-message.txt)" != 'GET BACK TO WORK' ] \
+            && ! grep -q 'docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md' /tmp/wake-message.txt; then
+            printf '\n\n%s\n' 'REQUIRED LIVE-FORK ROUTING: The bound Lite skill remains frozen. For all simulation design, technical execution or recovery, read curveyield3/Contract-Automation/docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md (Anvil/RPC rule and phase table). Use only curveyield3/Audit-Controller and curveyield3/Contract-Automation. The authenticated archive is GitHub Actions secret RPC_ETHEREUM mapped to ETHEREUM_FORK_RPC_URL, which feeds a verified chain-1 historical, pinned-block/hash, writable LOCAL Anvil fork. Never use synthetic fixtures, bare Anvil or public RPC as historical audit evidence. Tests/boundary reruns require explicit audit-owner authorization; the registered executor runs approved tests and the reviewer interprets their raw evidence.' >> /tmp/wake-message.txt
+          fi
           printf '%s\n' 'GET BACK TO WORK' > /tmp/watchdog-message.txt
 
           # Every substantive Lite reviewer/master-reviewer wake requires a check-in,
