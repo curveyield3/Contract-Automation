@@ -87,11 +87,9 @@ jobs:
           sudo apt-get install -y x11vnc novnc websockify openbox xdotool
 
       - name: Connect runner to tailnet
-        uses: tailscale/github-action@v4
+        uses: ./.github/actions/connect-browser-tailnet-oidc
         with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          audience: api.tailscale.com/${{ secrets.TS_OAUTH_CLIENT_ID }}
-          tags: tag:audit-browser
+          client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           ping: ${{ steps.request.outputs.home_exit_node }}
 
       - name: Start interactive desktop and noVNC
