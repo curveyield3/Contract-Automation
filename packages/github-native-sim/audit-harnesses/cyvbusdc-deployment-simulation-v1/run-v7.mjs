@@ -121,18 +121,52 @@ async function verifyPinnedSource(root) {
 }
 
 async function startKatanaFork({ forkUrl }) {
+  // Chain data is fetched only from the workflow's configured RPC_KATANA
+  // upstream. Pin once before any writable local execution.
+  const upstream = async (method, params = []) => {
+    const reply = await fetch(forkUrl, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!reply.ok) throw new Error('KATANA_ARCHIVE_HTTP_FAILURE: ' + reply.status);
+    const body = await reply.json();
+    if (body?.error || body?.result == null) throw new Error('KATANA_ARCHIVE_RESPONSE_FAILURE: ' + method);
+    return body.result;
+  };
+  const chainId = Number(BigInt(await upstream('eth_chainId')));
+  if (chainId !== 747474) throw new Error('KATANA_UPSTREAM_CHAIN_MISMATCH');
+  const pinnedBlock = Number(BigInt(await upstream('eth_blockNumber')));
+  if (!Number.isSafeInteger(pinnedBlock) || pinnedBlock < 1) throw new Error('KATANA_ARCHIVE_BLOCK_INVALID');
+  const tag = '0x' + pinnedBlock.toString(16);
+  const upstreamBlock = await upstream('eth_getBlockByNumber', [tag, false]);
+  const pinnedHash = upstreamBlock?.hash;
+  if (Number(BigInt(upstreamBlock?.number ?? '0x0')) !== pinnedBlock ||
+      !/^0x[0-9a-fA-F]{64}$/.test(String(pinnedHash ?? '')))
+    throw new Error('KATANA_ARCHIVE_BLOCK_HASH_UNAVAILABLE');
   let lastError;
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
-      return await startAnvilEngine({
+      const engine = await startAnvilEngine({
         artifacts: [],
         workflow: { steps: [] },
         chainId: 747474,
         forkUrl,
+        block: pinnedBlock,
         evmVersion: 'cancun',
         cwd: process.cwd(),
         quiet: true,
       });
+      try {
+        const localId = Number(BigInt(await engine.provider.send('eth_chainId', [])));
+        const localBlock = await engine.provider.send('eth_getBlockByNumber', [tag, false]);
+        if (localId !== 747474 || localBlock?.hash?.toLowerCase() !== pinnedHash.toLowerCase())
+          throw new Error('KATANA_LOCAL_ANVIL_HISTORICAL_HASH_MISMATCH');
+        return { ...engine, pinnedHistoricalBlock: pinnedBlock, pinnedHistoricalHash: pinnedHash };
+      } catch (error) {
+        await engine.close().catch(() => {});
+        throw error;
+      }
     } catch (error) {
       lastError = error;
       if (attempt === 4) break;
@@ -618,6 +652,9 @@ async function main() {
     };
 
     engine = await startKatanaFork({ forkUrl });
+    summary.fork.pinnedHistoricalBlock = engine.pinnedHistoricalBlock;
+    summary.fork.pinnedHistoricalHash = engine.pinnedHistoricalHash;
+    summary.fork.verifiedHistoricalFork = true;
     const provider = engine.provider;
     assert(BigInt(await provider.send('eth_chainId', [])) === 747474n, 'Anvil chain id mismatch');
 
