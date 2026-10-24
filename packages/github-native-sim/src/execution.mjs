@@ -255,12 +255,27 @@ export async function stageExactArchiveSource({
     await fsApi.writeFile(destination, bytes);
   }
 
-  const projectRoot = safeRepositoryProjectPath(extractionRoot, projectPath);
+  let projectRoot = safeRepositoryProjectPath(extractionRoot, projectPath);
   let projectStats;
   try {
     projectStats = await fsApi.stat(projectRoot);
   } catch (error) {
-    throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `archive project root is missing: ${projectPath}`, { cause: error.message });
+    // Scan-initialized campaigns identify their project from the repository
+    // root, while their verified ZIP stores paths relative to its source dir.
+    // The archive digest above still gates every byte, and this only removes
+    // the archive's own parent prefix, never searches for arbitrary content.
+    const archiveDir = path.posix.dirname(archivePath);
+    const relativeProject = projectPath.startsWith(archiveDir + '/')
+      ? projectPath.slice(archiveDir.length + 1) : null;
+    if (!relativeProject) {
+      throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `archive project root is missing: ${projectPath}`, { cause: error.message });
+    }
+    projectRoot = safeRepositoryProjectPath(extractionRoot, relativeProject);
+    try {
+      projectStats = await fsApi.stat(projectRoot);
+    } catch (relativeError) {
+      throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `archive project root is missing: ${projectPath}`, { cause: relativeError.message });
+    }
   }
   if (!projectStats.isDirectory()) {
     throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `archive project root is not a directory: ${projectPath}`);
