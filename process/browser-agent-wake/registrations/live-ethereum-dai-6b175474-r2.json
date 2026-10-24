@@ -29,7 +29,7 @@
     "name": "reviewer-3",
     "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5ea6-cf04-83e8-9fa0-1d01648d86f0"
   },
-  "wakeMessage": "",
+  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-PHASE_5_WORK_PACKET-reviewer-3/40113006996\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_reviewer-3_v1.json on curveyield3/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nLITE audit: live-ethereum-Dai-6b175474 r2\nReviewer: reviewer-3\nCurrent phase: phase-5\nCampaign: https://github.com/CurveYield2/Audit-Controller/tree/main/campaigns/live-ethereum-Dai-6b175474%20r2\nCurrent Audit Skill Authority: https://github.com/CurveYield2/Audit-Controller/blob/main/Audit%20Skill%20-%20Current%20Authority/Audit_Litemode_v13/SKILL.md\n\nThe Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority.\n\nStart phase-5 now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.\nSharded work assignment. Start with the INDEX only: https://github.com/CurveYield2/Audit-Controller/blob/main/campaigns/live-ethereum-Dai-6b175474%20r2/work/phase-05/shards/INDEX_v1.json\nRead BASE_v1.json and every shard listed in the index. Edit each shard and save it separately, in index order. Complete every shard without waiting for a controller response; submit exactly ONE phase boundary request after the final shard. The controller reconstructs the canonical form and validates every record and digest. Do not edit the generated full form directly.\nSubmit the boundary validation request using schema curveyield-lite-phase-boundary-request-v1 under process/agent-upload/lite-phase-boundary/ for the exact campaign and phase; do not bookkeep receipts yourself.",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
@@ -65,12 +65,12 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-24T16:45:07Z",
+  "updatedAt": "2026-10-24T16:47:50Z",
   "wakeDelivery": {
-    "milestoneId": "ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa",
-    "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eb2-9a00-83e8-8c6e-711003caf181",
-    "deliveredAt": "2026-10-24T13:30:30Z",
+    "milestoneId": "PHASE_5_WORK_PACKET",
+    "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5ea6-cf04-83e8-9fa0-1d01648d86f0",
+    "deliveredAt": "2026-10-24T16:47:50Z",
     "verification": "REVIEWER_GITHUB_CHECK_IN",
-    "ackId": "live-ethereum-dai-6b175474-r2-ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa-test-reviewer/40098258971"
+    "ackId": "live-ethereum-dai-6b175474-r2-PHASE_5_WORK_PACKET-reviewer-3/40113006996"
   }
 }
