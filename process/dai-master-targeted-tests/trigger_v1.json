@@ -1,9 +1,9 @@
 {
   "schemaVersion": "dai-master-targeted-evm-run-v1",
   "campaignId": "live-ethereum-dai-6b175474-r2",
-  "requestId": "9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4",
-  "runType": "execute-exact-source-isolated-evm",
+  "requestId": "ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa",
+  "runType": "read-only-historical-mainnet-proof",
   "source": "process/dai-master-targeted-tests/source-compiler-unit_v1.json",
-  "attempt": 2,
+  "attempt": 1,
   "trigger": "main-push"
 }
