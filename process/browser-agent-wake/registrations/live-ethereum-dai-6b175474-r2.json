@@ -3,7 +3,7 @@
   "singleAgentSimulation": false,
   "campaignId": "live-ethereum-dai-6b175474-r2",
   "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eb2-9a00-83e8-8c6e-711003caf181",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
   "browserRoutine": "",
   "agentChats": {
     "reviewer-1": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
@@ -26,30 +26,30 @@
     "url": ""
   },
   "activeChat": {
-    "name": "test-executor",
-    "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eb2-9a00-83e8-8c6e-711003caf181"
+    "name": "master-reviewer",
+    "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c"
   },
-  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4-test-reviewer/39919850386\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_test-executor_v1.json on CurveYield2/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nTARGETED TEST EXECUTOR: your only task is to run the tests in the plan named below and submit their results; you are not auditing. Read only that plan, the source files its tests need, and the \"Instructions for the executing reviewer\" section of Audit Skill - Current Authority/Audit_Litemode_v13/master-review/TARGETED_TEST_DIRECTIVE_v1.md in CurveYield2/Audit-Controller; do not open other phases, reports or authority files. Every later action must run a test, repair a test run, preserve its raw evidence or submit the result. A run that executed zero test assertions is a failure to repair, not progress.\n\nMASTER_TARGETED_TESTS_REQUIRED: Execute the exact plan at campaigns/live-ethereum-Dai-6b175474 r2/work/master-review/reviewer-2-phase-04/TARGETED_TEST_REQUEST_v1.json for live-ethereum-dai-6b175474-r2. Reviewer test-executor must run decisive tests, retain raw evidence under campaign evidence/master-targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4, submit a digest-bound RESULT_v1.json at campaigns/live-ethereum-Dai-6b175474 r2/work/master-review/reviewer-2-phase-04/targeted-tests/9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4/RESULT_v1.json and then submit a master-test-result boundary request. Do not edit any sealed phase or controller bookkeeping. Master acceptance and campaign COMPLETE remain held.",
+  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-delivery-80f1434e6a478cc63c5c/40094103394\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_master-reviewer_v1.json on curveyield3/Audit-Controller branch main (update using current Git blob SHA if it exists; create only on 404; stop on other write error). Do nothing else until the write succeeds. Re-fetch and verify the exact ACK. Then follow the active Lite v13 master review authority for reviewer-2-phase-04. The test-executor round 9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4 is EVIDENCE_SUBMITTED in the active curveyield3/Audit-Controller campaign; review the raw evidence and update only authorized reviewer-owned fields as necessary. Submit the master decision via the EXISTING phase-boundary request workflow in curveyield3/Contract-Automation and verify the controller response; do not claim publication or approval based on chat output alone. No retests or invented ACKs.",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
-    "phaseId": "master-targeted-tests",
-    "milestoneId": "9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4",
+    "phaseId": "master-review",
+    "milestoneId": "reviewer-2-phase-04",
     "workerRole": "reviewer",
-    "reviewer": "test-executor",
+    "reviewer": "master-reviewer",
     "thinkingEffort": "high"
   },
   "watchdog": {
     "enabled": true,
-    "idleMessage": "GET BACK TO WORK",
+    "idleMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-delivery-80f1434e6a478cc63c5c/40094103394\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_master-reviewer_v1.json on curveyield3/Audit-Controller branch main (update using current Git blob SHA if it exists; create only on 404; stop on other write error). Do nothing else until the write succeeds. Re-fetch and verify the exact ACK. Then follow the active Lite v13 master review authority for reviewer-2-phase-04. The test-executor round 9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4 is EVIDENCE_SUBMITTED in the active curveyield3/Audit-Controller campaign; review the raw evidence and update only authorized reviewer-owned fields as necessary. Submit the master decision via the EXISTING phase-boundary request workflow in curveyield3/Contract-Automation and verify the controller response; do not claim publication or approval based on chat output alone. No retests or invented ACKs.",
     "pokeIntervalMinutes": 20,
     "gate": {
       "mode": "LITE",
-      "repository": "CurveYield2/Audit-Controller",
+      "repository": "curveyield3/Audit-Controller",
       "ref": "main",
       "statePath": "Audit Campaign Directory/campaigns/live-ethereum-dai-6b175474.json",
-      "expectedPhaseId": "master-targeted-tests",
-      "expectedMilestoneId": "9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4",
+      "expectedPhaseId": "master-review",
+      "expectedMilestoneId": "reviewer-2-phase-04",
       "activePointerPath": "",
       "stopStates": [
         "STOPPED_BY_HUMAN"
@@ -65,12 +65,12 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-23T07:46:49Z",
+  "updatedAt": "2026-10-24T13:14:00Z",
   "wakeDelivery": {
-    "milestoneId": "9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4",
-    "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eb2-9a00-83e8-8c6e-711003caf181",
-    "deliveredAt": "2026-10-23T07:46:49Z",
-    "verification": "REVIEWER_GITHUB_CHECK_IN",
-    "ackId": "live-ethereum-dai-6b175474-r2-9a2224086736252ebea4be900c7f5574407a30a814a669b973c5e56e7f1197e4-test-reviewer/39919850386"
+    "milestoneId": "reviewer-2-phase-04",
+    "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
+    "deliveredAt": "2026-10-24T12:30:55Z",
+    "verification": "X11_VISIBLE_COMPOSER_TRANSITION_ONLY_NOT_ACKNOWLEDGED",
+    "ackId": "live-ethereum-dai-6b175474-r2-delivery-80f1434e6a478cc63c5c/40094103394"
   }
 }
