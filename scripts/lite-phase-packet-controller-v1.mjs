@@ -15,7 +15,7 @@ import {
 } from './lib/lite-phase-work-v1.mjs';
 import {
   executePhase5TargetsV1,selectReusablePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
-  validateTargetExecutionRequestBindingV1
+  validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
   buildControllerPacket,renderControllerPhaseReport,validatePhaseScaffold,
@@ -759,6 +759,9 @@ const now=new Date().toISOString();
 if(directory.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2') throw new Error('packet controller requires Audit Campaign Directory v2');
 if(directory.campaignId!==expectedCampaignId) throw new Error('campaign-id does not match Audit Campaign Directory');
 if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does not match Audit Campaign Directory workspacePath');
+const phase5OwnerDeferral=[5,6,8,10].includes(sequence)
+  ?inspectPhase5OwnerEvidenceDeferralV1({controllerRoot:root,campaignPath,campaignId:directory.campaignId,sourceSha256:directory.sourceSha256})
+  :null;
 const authorityReceiptPath=directory.lastSealedReceiptPath??directory.currentAssignment?.predecessorReceiptPath;
 const effectiveAuthorityRoot=authorityReceiptPath
   ?validateBoundAuthorityV1({root,receipt:readJson(requiredFile(root,authorityReceiptPath,'admitted authority receipt'))})
@@ -1304,12 +1307,18 @@ if([6,8].includes(sequence)&&deficiencies.length===0){
     if(actual.length!==new Set(actual).size)deficiencies.push('Phase '+sequence+' contains duplicate candidate dispositions');
     for(const key of mandatory)if(!actual.includes(key))
       deficiencies.push('Phase '+sequence+' skipped mandatory predecessor candidate '+key);
-    if(sequence===6)deficiencies.push(...validateRecordedPhase5MachineEvidenceV1({
-      controllerRoot:root,campaignPath,
-      targetDesigns:phaseOutput(sealedP5,'step-3','targetDesigns')??[],
-      expectedCampaignId:directory.campaignId,
-      expectedSourceSha256:directory.sourceSha256,requireCompletedMatrix:true
-    }));
+    if(sequence===6){
+      if(phase5OwnerDeferral){
+        if(sealedP5?.automationOutputs?.phase5MachineExecutionGate?.status!=='DEFERRED_UNVERIFIED'||
+           sealedP5.automationOutputs.phase5MachineExecutionGate.ownerDirectivePath!==phase5OwnerDeferral.path)
+          deficiencies.push('Phase 6 cannot carry unverified evidence without exact Phase-5 deferral record');
+      }else deficiencies.push(...validateRecordedPhase5MachineEvidenceV1({
+        controllerRoot:root,campaignPath,
+        targetDesigns:phaseOutput(sealedP5,'step-3','targetDesigns')??[],
+        expectedCampaignId:directory.campaignId,
+        expectedSourceSha256:directory.sourceSha256,requireCompletedMatrix:true
+      }));
+    }
   }catch(e){deficiencies.push('Phase '+sequence+' mandatory predecessor/evidence gate failed: '+String(e.message||e));}
 }
 
@@ -1333,21 +1342,33 @@ if(sequence===5){
   const {keys:materialCandidateKeys,sourceAnchors:candidateSourceAnchors}=
     materialPhase5Candidates({root,campaignPath,form});
   try{
-    phase5MachineResults=await executePhase5TargetsV1({
-      controllerRoot:root,campaignPath,targetDesigns,
-      expectedCampaignId:directory.campaignId,expectedSourceSha256:directory.sourceSha256,
-      reuseCandidateKeys:phase5ReuseCandidateKeys
-    });
-    deficiencies.push(...validatePhase5TargetExecutionGateV1({
-      controllerRoot:root,campaignPath,targetDesigns,
-      materialCandidateKeys,candidateSourceAnchors,executionResults:phase5MachineResults,
-      expectedSourceSha256:directory.sourceSha256
-    }));
+    if(phase5OwnerDeferral){
+      if(JSON.stringify(materialCandidateKeys.slice().sort())!==JSON.stringify(phase5OwnerDeferral.candidateKeys.slice().sort()))
+        throw new Error('Owner Phase-5 deferral does not cover exactly the mandatory candidate set');
+      phase5MachineResults=Object.fromEntries(phase5OwnerDeferral.candidateKeys.map(key=>[key,{
+        status:'DEFERRED_UNVERIFIED',exitCode:null,evidenceRef:'NO_MACHINE_EVIDENCE',
+        requestBindingStatus:targetDesigns.find(x=>x.candidateKey===key)?.requestBindingStatus??'UNVERIFIED',
+        requestBindingEvidenceRef:targetDesigns.find(x=>x.candidateKey===key)?.executionRequestRef??'NO_REQUEST',
+        requestBindingReasons:['OWNER_DEFERRED_NOT_AN_EXECUTION_RESULT'],
+        rawResult:null
+      }]));
+    }else{
+      phase5MachineResults=await executePhase5TargetsV1({
+        controllerRoot:root,campaignPath,targetDesigns,
+        expectedCampaignId:directory.campaignId,expectedSourceSha256:directory.sourceSha256,
+        reuseCandidateKeys:phase5ReuseCandidateKeys
+      });
+      deficiencies.push(...validatePhase5TargetExecutionGateV1({
+        controllerRoot:root,campaignPath,targetDesigns,
+        materialCandidateKeys,candidateSourceAnchors,executionResults:phase5MachineResults,
+        expectedSourceSha256:directory.sourceSha256
+      }));
+    }
     // Report the actual runner cause, not merely BLOCKED. The shadow
     // campaign is discarded on failed master refresh, so these diagnostics
     // are essential to distinguish harness defects from RPC or build faults.
     for(const [key,machine] of Object.entries(phase5MachineResults??{})){
-      if(machine?.status==='PASS'||machine?.status==='NOT_APPLICABLE')continue;
+      if(machine?.status==='PASS'||machine?.status==='NOT_APPLICABLE'||machine?.status==='DEFERRED_UNVERIFIED')continue;
       let cli=null;
       try{cli=JSON.parse(String(machine?.stdout??''));}catch{}
       const failed=(machine?.rawResult?.failedSteps??[]).slice(0,3).map(x=>({
@@ -1422,8 +1443,11 @@ if(sequence===4) canonical.automationOutputs.phase4Coverage=
     ? phase4DiscoveryCoverageV1({summary:(()=>{const rel=path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');return fs.existsSync(repoFile(root,rel))?readJson(repoFile(root,rel)):null;})()})
     : phase4CoverageFromForm(form);
 if(sequence===5) canonical.automationOutputs.phase5MachineExecutionGate={
-  status:'PASS',targetKeys:Object.keys(phase5MachineResults??{}).sort(),
-  evidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef).filter(Boolean)
+  status:phase5OwnerDeferral?'DEFERRED_UNVERIFIED':'PASS',
+  targetKeys:Object.keys(phase5MachineResults??{}).sort(),
+  evidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef).filter(x=>x&&x!=='NO_MACHINE_EVIDENCE'),
+  ...(phase5OwnerDeferral?{ownerDirectivePath:phase5OwnerDeferral.path,
+    securityConclusion:'UNVERIFIED',unresolvedCandidateKeys:phase5OwnerDeferral.candidateKeys}:{}),
 };
 if(sequence===8){
   canonical.actions['step-2'].outputs.validatedFindings=materializeValidatedFindings(canonical.actions?.['step-2']?.outputs?.candidateValidations??[]);
@@ -1455,7 +1479,13 @@ if(schema.finalReport){
 if(deficiencies.length) throw new Error('controller-generated report validation failed: '+deficiencies.join('; '));
 
 packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS',
-  ...(sequence===5?{machineExecutionGate:'PASS',machineEvidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef)}:{})
+  ...(sequence===5?{
+    machineExecutionGate:phase5OwnerDeferral?'DEFERRED_UNVERIFIED':'PASS',
+    machineEvidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef).filter(x=>x&&x!=='NO_MACHINE_EVIDENCE'),
+    ...(phase5OwnerDeferral?{ownerEvidenceDeferralPath:phase5OwnerDeferral.path,
+      unresolvedCandidateKeys:phase5OwnerDeferral.candidateKeys,
+      securityConclusion:'UNVERIFIED'}:{})
+  }:{})
 };
 const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now,authorityRoot,replacePhase:Boolean(masterAmendmentRefreshSha)});
 if(sealedRework){
@@ -1536,6 +1566,7 @@ evidence.push(receiptRef(root,campaignPath,canonicalRel,'PHASE_CANONICAL_DATA'))
 for(const rel of derivedRels) evidence.push(receiptRef(root,campaignPath,rel,'DERIVED_DOWNSTREAM_DATA'));
 for(const rel of boundaryArtifactRels) evidence.push(receiptRef(root,campaignPath,rel,'BOUNDARY_MACHINE_ARTIFACT'));
 if(sequence===5){
+  if(phase5OwnerDeferral)evidence.push(receiptRef(root,campaignPath,phase5OwnerDeferral.path,'OWNER_EVIDENCE_DEFERRAL_UNVERIFIED'));
   for(const result of Object.values(phase5MachineResults??{})){
     if(result.status==='PASS')evidence.push(receiptRef(root,campaignPath,result.evidenceRef,'PHASE5_BOUNDARY_RAW_RESULT'));
   }
@@ -1582,6 +1613,12 @@ const receipt=receiptLib.createLitePhaseReceiptV1({
   obligations:receiptObligationSummary({ledger:ledgerAfter,canonical,form,sequence,now}),
   validation:{status:'PASS',validatedAt:now,failures:[]},handoff,now
 });
+if(sequence===5&&phase5OwnerDeferral)receipt.machineExecutionDisclaimer={
+  status:'DEFERRED_UNVERIFIED',securityConclusion:'UNVERIFIED',
+  ownerDirectivePath:phase5OwnerDeferral.path,
+  unresolvedCandidateKeys:phase5OwnerDeferral.candidateKeys,
+  notAMachinePass:true,finalAuditSecurityAssurance:'INCOMPLETE'
+};
 receipt.sealedAt=now;receipt.updatedAt=now;
 if(masterAmendmentRefreshSha)receipt.masterAmendment=masterAmendmentReceipt(phaseRevision-1);
 if(sealedRework){
