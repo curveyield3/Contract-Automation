@@ -63,13 +63,13 @@
     "areaChanged": null,
     "status": "STOP_BUTTON_NOT_FOUND"
   },
-  "lastDecision": "DURABLE_PROGRESS_RESETS_POKE_CLOCK",
+  "lastDecision": "WAITING_NO_CHATGPT_READ",
   "lastPokeFailureAt": "2026-10-24T19:03:08Z",
   "pokeFailureCount": 0,
   "lastPokedAt": "2026-10-24T19:05:37Z",
   "lastReworkNotifiedIdentity": "6:2026-10-24T17:21:49.089Z:FAIL",
   "pokeCount": 1,
-  "lastNoReadSweepAt": "2026-10-24T19:39:15Z",
-  "elapsedSinceLastPokeMinutes": 33,
+  "lastNoReadSweepAt": "2026-10-24T19:55:49Z",
+  "elapsedSinceLastPokeMinutes": 12,
   "lastProgressAt": "2026-10-24T19:43:22Z"
 }
