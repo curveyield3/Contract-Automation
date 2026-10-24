@@ -62,15 +62,14 @@ jobs:
         shell: bash
         env:
           TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          TS_AUDIENCE_VALUE: ${{ secrets.TS_AUDIENCE }}
           CHATGPT_STATE: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
         run: |
           set -euo pipefail
-          if [ -n "$TS_CLIENT_ID" ] && [ -n "$TS_AUDIENCE_VALUE" ] && [ -n "$CHATGPT_STATE" ]; then
+          if [ -n "$TS_CLIENT_ID" ] && [ -n "$CHATGPT_STATE" ]; then
             echo 'browser_ready=true' >> "$GITHUB_OUTPUT"
           else
             echo 'browser_ready=false' >> "$GITHUB_OUTPUT"
-            echo '::notice::Watchdog browser work is paused until TS_OAUTH_CLIENT_ID, TS_AUDIENCE and CHATGPT_STORAGE_STATE_B64 are all configured.'
+            echo '::notice::Watchdog browser work is paused until TS_OAUTH_CLIENT_ID and CHATGPT_STORAGE_STATE_B64 are all configured.'
           fi
   # GitHub drops scheduled runs under load (hours between cron sweeps), so while any
   # target stays active the watchdog re-dispatches itself every 15 minutes; one pending re-arm at a time.
@@ -247,7 +246,7 @@ jobs:
         uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ secrets.TS_AUDIENCE }}
+          audience: api.tailscale.com/${{ secrets.TS_OAUTH_CLIENT_ID }}
           tags: tag:audit-browser
           ping: ${{ env.HOME_EXIT_NODE }}
 
