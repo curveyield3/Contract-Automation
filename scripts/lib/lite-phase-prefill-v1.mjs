@@ -617,7 +617,11 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     const p5=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json')));
     const sources=[...(p4?.actions?.['step-3']?.outputs?.candidateRecords??[]),
       ...(p5?.actions?.['step-2']?.outputs?.newCandidateRecords??[])].filter(x=>x&&typeof x==='object');
-    const status=new Map(targetRows.map(x=>[x.candidateKey,x.reproductionStatus]));
+    // This policy-specific Phase-6 branch has a separate lexical scope from
+    // the ordinary Phase-6 prefill above; read the persisted output instead.
+    const candidateTargets=(form.actions?.['step-2']?.outputs?.targetDispositions??[])
+      .filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
+    const status=new Map(candidateTargets.map(x=>[x.candidateKey,x.reproductionStatus]));
     const candidateRows=new Map();
     for(const item of sources){
       const key=item.tempKey??item.candidateKey;
