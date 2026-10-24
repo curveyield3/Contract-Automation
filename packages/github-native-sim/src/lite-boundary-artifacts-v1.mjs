@@ -22,6 +22,56 @@ function stableJson(value){
   return JSON.stringify(value);
 }
 
+// Narrow owner-directed disposition for this frozen DAI campaign. This does
+// not assert, simulate, or waive a security finding. Every skipped machine
+// reproduction is carried forward with explicit UNVERIFIED evidence status.
+export function inspectPhase5OwnerEvidenceDeferralV1({
+  controllerRoot,campaignPath,campaignId,sourceSha256,targetDesigns=null
+}={}){
+  const rel=path.posix.join(campaignPath,'controller/PHASE5_OWNER_EVIDENCE_DEFERRAL_v1.json');
+  const file=path.join(controllerRoot,...rel.split('/'));
+  if(!fs.existsSync(file))return null;
+  const d=JSON.parse(fs.readFileSync(file,'utf8'));
+  const requiredCampaign='live-ethereum-dai-6b175474-r2';
+  const requiredSource='457b6121c4a613730251f2f81ae17d27c9c08674696b73d1f5828c623e705ee5';
+  const expectedKeys=['CAND-001','CAND-002','CAND-003'];
+  const reject=x=>{throw new Error('PHASE5_OWNER_DEFERRAL_INVALID: '+x);};
+  if(campaignId!==requiredCampaign||d.campaignId!==requiredCampaign||
+     sourceSha256!==requiredSource||d.sourceSha256!==requiredSource||
+     campaignPath!=='campaigns/live-ethereum-Dai-6b175474 r2')
+    reject('scope/source mismatch');
+  if(d.schemaVersion!=='curveyield-phase5-owner-evidence-deferral-v1'||
+     d.decision!=='CARRY_UNVERIFIED_WITHOUT_ADDITIONAL_TESTS'||
+     d.phase!==5||d.failedPacketAttempt!==6||
+     d.machineExecutionStatus!=='NOT_EXECUTED_DEFERRED'||
+     d.securityConclusion!=='UNVERIFIED'||
+     d.authorizationBasis!=='AUDIT_OWNER_CHAT_DIRECTIVES_2026_10_24')
+    reject('missing typed owner-direction and limitations');
+  if(JSON.stringify(d.candidateKeys)!==JSON.stringify(expectedKeys))reject('candidate list mismatch');
+  if(targetDesigns!==null){
+    const observed=arr(targetDesigns).map(x=>x?.candidateKey);
+    if(JSON.stringify(observed)!==JSON.stringify(expectedKeys))reject('active target designs mismatch');
+  }
+  const receiptPath=path.join(controllerRoot,...campaignPath.split('/'),'receipts/PHASE_00_RECEIPT_v1.json');
+  const phase0=JSON.parse(fs.readFileSync(receiptPath,'utf8'));
+  if(phase0.source?.sha256!==requiredSource||phase0.authority?.packageRevision!=='v13.2')
+    reject('original receipt identity mismatch');
+  for(const key of expectedKeys){
+    const relative='work/phase-05/execution-requests/'+key+'.json';
+    const req=JSON.parse(fs.readFileSync(path.join(controllerRoot,...campaignPath.split('/'),relative),'utf8'));
+    if(req.campaignId!==requiredCampaign||req.source?.archiveSha256!==requiredSource||
+       req.configuration?.v26?.reproduction?.candidateId!==key||
+       req.configuration?.v26?.reproduction?.reproductionType!=='ANVIL_WORKFLOW'||
+       req.configuration?.analysis?.nativeFuzz?.enabled===true||
+       req.configuration?.analysis?.medusa||
+       req.requestDigest!==d.requestDigests?.[key]||
+       req.requestId!=='dar-'+req.requestDigest.slice(0,32))
+      reject('candidate request identity or optional-fuzz policy mismatch: '+key);
+  }
+  return {path:rel,candidateKeys:expectedKeys,requestDigests:d.requestDigests,
+    status:'DEFERRED_UNVERIFIED',securityConclusion:'UNVERIFIED'};
+}
+
 export function validateTargetExecutionRequestBindingV1({controllerRoot,campaignPath,target,expectedCampaignId=null,expectedSourceSha256=null}={}){
   const key=String(target?.candidateKey??'').trim();
   const method=String(target?.executionMethod??'').toUpperCase();
