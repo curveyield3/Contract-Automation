@@ -1,11 +1,7 @@
 name: Katana cyvbUSDC Morpho Venue Fork Simulation v2
 
+# Simulation execution only after explicit audit-owner authorization.
 on:
-  push:
-    paths:
-      - '.github/workflows/katana-cyvbusdc-morpho-fork-simulation-v2.yml'
-      - 'test/katana/cyvbusdc-morpho-venue-fork-v2.mjs'
-      - 'scripts/katana/cyvbusdc-morpho-venue-v2.mjs'
   workflow_dispatch:
 
 permissions:
@@ -31,11 +27,19 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Start ephemeral Katana Anvil fork
+      - name: Start authenticated, historical pinned Katana Anvil fork
+        env:
+          KATANA_UPSTREAM: ${{ secrets.RPC_KATANA }}
         shell: bash
         run: |
           set -euo pipefail
-          (timeout 13m anvil --fork-url https://katana.drpc.org/ --chain-id 747474 --port 8545 --host 127.0.0.1 > "$RUNNER_TEMP/anvil.log" 2>&1 &)
+          test -n "${KATANA_UPSTREAM:-}" || { echo "::error::RPC_KATANA secret missing"; exit 1; }
+          test "$(cast chain-id --rpc-url "$KATANA_UPSTREAM")" = 747474
+          PIN="$(cast block-number --rpc-url "$KATANA_UPSTREAM")"
+          [[ "$PIN" =~ ^[0-9]+$ ]] && [ "$PIN" -gt 0 ]
+          UPSTREAM_HASH="$(cast block "$PIN" --field hash --rpc-url "$KATANA_UPSTREAM" | tr -d '\r\n')"
+          [[ "$UPSTREAM_HASH" =~ ^0x[0-9a-fA-F]{64}$ ]]
+          (timeout 13m anvil --fork-url "$KATANA_UPSTREAM" --fork-block-number "$PIN" --chain-id 747474 --port 8545 --host 127.0.0.1 > "$RUNNER_TEMP/anvil.log" 2>&1 &)
           ready=0
           for i in $(seq 1 100); do
             if curl --fail --silent --max-time 2 -H 'Content-Type: application/json' \
@@ -51,7 +55,9 @@ jobs:
             echo '::error::Katana fork did not start with the requested chain ID'
             exit 1
           fi
-          echo 'Ephemeral Katana fork ready; no mainnet writes.'
+          LOCAL_HASH="$(cast block "$PIN" --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
+          test "${LOCAL_HASH,,}" = "${UPSTREAM_HASH,,}" || { echo "::error::Historical Katana block hash mismatch"; exit 1; }
+          echo "Authenticated pinned Katana Anvil fork: chain=747474 block=$PIN hash=$LOCAL_HASH (no mainnet writes)" >> "$GITHUB_STEP_SUMMARY"
       - name: Inspect live config and simulate governance on fork
         env:
           KATANA_RPC_URL: http://127.0.0.1:8545
