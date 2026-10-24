@@ -166,7 +166,9 @@ jobs:
         if: env.V7_REQUEST_KIND == 'v7-execution'
         env:
           AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          ETHEREUM_FORK_RPC_URL: ${{ secrets.ETHEREUM_RPC }}
+          # Same authenticated dRPC archive upstream already used by Lite Phase 0.
+          # Anvil starts locally; only its upstream fork transport uses this secret.
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
         run: npm run v7:execute -- --request .v7-request/request.json
 
       - name: Checkout exact private controller for controller operation
