@@ -89,22 +89,39 @@ export async function createPhase6MutableRpcSession({
 
   let engine;
   try {
-    const requestPinned = Number.isSafeInteger(frozenBlockNumber)
-      && frozenBlockNumber >= 0
-      && typeof frozenBlockHash === 'string';
+    const suppliedNumber=frozenBlockNumber!==null&&frozenBlockNumber!==undefined;
+    const suppliedHash=frozenBlockHash!==null&&frozenBlockHash!==undefined;
+    if(suppliedNumber!==suppliedHash)throw new Error('HISTORICAL_PIN_INCOMPLETE: both block and hash must be supplied together');
+    const requestPinned = suppliedNumber
+      && Number.isSafeInteger(frozenBlockNumber) && frozenBlockNumber >= 0
+      && /^0x[0-9a-fA-F]{64}$/.test(String(frozenBlockHash));
+    if(suppliedNumber&&!requestPinned)throw new Error('HISTORICAL_PIN_INVALID');
+    let admittedBlockNumber=frozenBlockNumber;
+    let admittedBlockHash=frozenBlockHash;
+    // Even the no-explicit-pin route freezes a real block from the approved
+    // archive upstream before creating the mutable Anvil. 'latest' must never
+    // mean an unbound changing fork that cannot be independently reconciled.
+    if(!requestPinned){
+      const head=hexQuantity(await rpcCall(upstreamUrl,'eth_blockNumber',[],fetchImpl),'upstream eth_blockNumber');
+      const block=await rpcCall(upstreamUrl,'eth_getBlockByNumber',[`0x${head.toString(16)}`,false],fetchImpl);
+      if(head<1||Number(BigInt(block?.number??'0x0'))!==head||
+         !/^0x[0-9a-fA-F]{64}$/.test(String(block?.hash??'')))
+        throw new Error('ARCHIVE_UPSTREAM_BLOCK_HASH_UNAVAILABLE');
+      admittedBlockNumber=head; admittedBlockHash=block.hash;
+    }
     const placeholderArtifacts = { get() { throw new Error('Phase 6 local-Anvil session does not deploy artifacts directly'); } };
     engine = await startEngine({
       artifacts: placeholderArtifacts,
       workflow: { steps: [] },
       chainId: PHASE6_MUTABLE_RPC_CHAIN_ID,
       forkUrl: upstreamUrl,
-      block: requestPinned ? frozenBlockNumber : 'latest',
+      block: admittedBlockNumber,
       evmVersion: 'cancun',
       quiet: true,
       fetchImpl,
     });
 
-    const normalized = await probeNormalizedRpc(engine.url, fetchImpl, { frozenBlockNumber, frozenBlockHash });
+    const normalized = await probeNormalizedRpc(engine.url, fetchImpl, { frozenBlockNumber: admittedBlockNumber, frozenBlockHash: admittedBlockHash });
     const upstreamChainId = await probeUpstreamChainId(upstreamUrl, fetchImpl);
     if (normalized.status !== 'PASS') {
       await engine.close().catch(() => {});
@@ -122,7 +139,7 @@ export async function createPhase6MutableRpcSession({
           chainIdMatchesExpected: normalized.chainIdMatchesExpected,
           blockNumber: normalized.blockNumber,
           blockHash: normalized.blockHash,
-          requestPinned: normalized.requestPinned,
+          requestPinned, pinSource: requestPinned ? 'REQUEST_FROZEN_BLOCK_HASH' : 'AUTHENTICATED_UPSTREAM_HEAD_FROZEN',
           expectedBlockNumber: normalized.expectedBlockNumber,
           expectedBlockHash: normalized.expectedBlockHash,
           blockHashMatchesExpected: normalized.blockHashMatchesExpected,
@@ -142,7 +159,7 @@ export async function createPhase6MutableRpcSession({
       status: 'PASS', failureKind: null, profile: PHASE6_MUTABLE_RPC_ENV, chain: PHASE6_MUTABLE_RPC_CHAIN,
       expectedChainId: PHASE6_MUTABLE_RPC_CHAIN_ID, observedChainId: normalized.chainId, chainIdMatchesExpected: true,
       blockNumber: normalized.blockNumber, blockHash: normalized.blockHash,
-      requestPinned: normalized.requestPinned,
+      requestPinned, pinSource: requestPinned ? 'REQUEST_FROZEN_BLOCK_HASH' : 'AUTHENTICATED_UPSTREAM_HEAD_FROZEN',
       expectedBlockNumber: normalized.expectedBlockNumber,
       expectedBlockHash: normalized.expectedBlockHash,
       blockHashMatchesExpected: normalized.blockHashMatchesExpected,
@@ -157,7 +174,7 @@ export async function createPhase6MutableRpcSession({
     };
     const runtime = {
       url: engine.url, blockNumber: normalized.blockNumber, blockHash: normalized.blockHash,
-      requestPinned: normalized.requestPinned,
+      requestPinned, pinSource: requestPinned ? 'REQUEST_FROZEN_BLOCK_HASH' : 'AUTHENTICATED_UPSTREAM_HEAD_FROZEN',
       chain: PHASE6_MUTABLE_RPC_CHAIN, chainId: PHASE6_MUTABLE_RPC_CHAIN_ID,
       profile: PHASE6_MUTABLE_RPC_ENV, identityNormalized: true,
     };
