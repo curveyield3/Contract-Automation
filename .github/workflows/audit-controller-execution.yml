@@ -49,6 +49,14 @@ jobs:
           qualification_run="$(printf '%s' "$status_json" | jq -r '.workflowRunId // empty')"
           [[ "$qualified_commit" =~ ^[0-9a-f]{40}$ ]]
           [[ "$qualification_run" =~ ^[0-9]+$ ]]
+          # An Oct-2026 qualification of older code must not silently authorize
+          # a new fork/Anvil implementation. In particular, an obsolete runner
+          # cannot be trusted to apply today's pinned-block/hash repairs.
+          current_main="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq '.sha')"
+          if [ "$qualified_commit" != "$current_main" ]; then
+            echo "::error::V7_QUALIFIED_RUNNER_STALE: qualified commit differs from current main. Historical fork execution is HELD until the audit owner authorizes a qualified runner rebind; no old-code fallback."
+            exit 1
+          fi
           echo "commit=$qualified_commit" >> "$GITHUB_OUTPUT"
           echo "run_id=$qualification_run" >> "$GITHUB_OUTPUT"
 
