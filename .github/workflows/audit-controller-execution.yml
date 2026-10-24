@@ -101,10 +101,10 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${GH_TOKEN:-}"
-          gh api repos/CurveYield2/Audit-Controller --silent
+          gh api repos/curveyield3/Audit-Controller --silent
           rm -rf .controller-request
           gh auth setup-git
-          gh repo clone CurveYield2/Audit-Controller .controller-request -- --filter=blob:none --no-checkout
+          gh repo clone curveyield3/Audit-Controller .controller-request -- --filter=blob:none --no-checkout
           cd .controller-request
           git fetch --depth=1 origin "$CONTROLLER_REF"
           git checkout --detach FETCH_HEAD
@@ -179,10 +179,10 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${GH_TOKEN:-}"
-          gh api repos/CurveYield2/Audit-Controller --silent
+          gh api repos/curveyield3/Audit-Controller --silent
           rm -rf .controller-operation
           gh auth setup-git
-          gh repo clone CurveYield2/Audit-Controller .controller-operation -- --filter=blob:none --no-checkout
+          gh repo clone curveyield3/Audit-Controller .controller-operation -- --filter=blob:none --no-checkout
           cd .controller-operation
           git fetch --depth=1 origin "$AUDIT_CONTROLLER_REF"
           git checkout --detach FETCH_HEAD
@@ -668,7 +668,7 @@ jobs:
               processId:"audit-v7-independent-review",
               requestId:$request_id,
               controller:{
-                repository:"CurveYield2/Audit-Controller",
+                repository:"curveyield3/Audit-Controller",
                 commit:$commit,
                 requestPath:$request_path
               },
@@ -823,7 +823,7 @@ jobs:
           watchdog_enabled=false
           watchdog_message='GET BACK TO WORK'
           gate_mode="$(jq -r '.watchdog.gate.mode // "FULL_V26"' "$registration")"
-          gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' "$registration")"
+          gate_repo="$(jq -r '.watchdog.gate.repository // "curveyield3/Audit-Controller"' "$registration")"
           gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$registration")"
           gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' "$registration")"
           gate_expected_phase="$semantic_phase_id"
