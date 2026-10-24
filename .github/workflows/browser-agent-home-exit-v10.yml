@@ -168,6 +168,7 @@ jobs:
         uses: ./.github/actions/connect-browser-tailnet-oidc
         with:
           client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          tag: tag:audit-browser
           ping: ${{ steps.request.outputs.home_exit_node }}
 
       - name: Start visible Chrome display and private tailnet VNC
