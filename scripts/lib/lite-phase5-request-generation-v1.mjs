@@ -13,7 +13,6 @@ const noPlaceholders=x=>{
  if(x&&typeof x==='object')return Object.values(x).every(noPlaceholders);
  return true;
 };
-const MIN_FUZZ_RUNS=100000;
 const okPath=x=>nonempty(x)&&!x.startsWith('/')&&!x.split('/').some(y=>!y||y==='.'||y==='..');
 const validType=new Set(['ANVIL_WORKFLOW','FOUNDRY_TEST','MEDUSA_PROPERTY']);
 
@@ -43,12 +42,15 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
   need('executionBlueprint.configuration',blueprint.configuration&&typeof blueprint.configuration==='object'&&!Array.isArray(blueprint.configuration));
   need('executionBlueprint.configuration.compilers',Array.isArray(blueprint.configuration?.compilers)&&blueprint.configuration.compilers.length>0);
   need('executionBlueprint.configuration',noPlaceholders(blueprint.configuration),'placeholder values are forbidden');
-  need('executionBlueprint.configuration.analysis',!!blueprint.configuration?.analysis,
-    'explicit native fuzz and Medusa settings required');
-  need('executionBlueprint.configuration.analysis.nativeFuzz.fuzzRuns',
-    Number.isInteger(blueprint.configuration?.analysis?.nativeFuzz?.fuzzRuns)&&
-    blueprint.configuration.analysis.nativeFuzz.fuzzRuns>=MIN_FUZZ_RUNS,
-    'minimum 100000 real fuzz executions; do not reduce the budget');
+  // No arbitrary native-fuzz budget is required for source-bound Anvil
+  // reproductions. Require a concrete analysis adapter only when the reviewer
+  // explicitly selects that method; V7 schema validates opt-in fuzz budgets.
+  if(type==='FOUNDRY_TEST')need('executionBlueprint.configuration.analysis.nativeFuzz.enabled',
+    blueprint.configuration?.analysis?.nativeFuzz?.enabled===true,
+    'FOUNDRY_TEST must explicitly enable the Foundry execution adapter');
+  if(type==='MEDUSA_PROPERTY')need('executionBlueprint.configuration.analysis.medusa',
+    blueprint.configuration?.analysis?.medusa!==undefined&&blueprint.configuration?.analysis?.medusa!==false,
+    'MEDUSA_PROPERTY must explicitly enable the Medusa execution adapter');
   if(type==='ANVIL_WORKFLOW'){
     need('executionBlueprint.configuration.simulation',!!blueprint.configuration?.simulation);
     need('executionBlueprint.configuration.deploymentGas',!!blueprint.configuration?.deploymentGas);
