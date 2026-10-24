@@ -191,6 +191,11 @@ jobs:
           phase_id="${{ steps.successor.outputs.incoming_phase }}"
           chat_url="${{ steps.registration.outputs.chat_url }}"
 
+          # Operational routing guidance supplements, never edits, the frozen skill.
+          original_wake="$(printf '%s' '${{ steps.successor.outputs.wake_b64 }}' | base64 -d)"
+          fork_note="EXECUTION ROUTING: Use ONLY curveyield3/Audit-Controller as canonical evidence/authority repository and curveyield3/Contract-Automation for GitHub Actions. Read docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md (Anvil/RPC rule) BEFORE a live-fork test design or execution. The authenticated archive source is GitHub Actions secret RPC_ETHEREUM projected to ETHEREUM_FORK_RPC_URL; the trusted runner verifies pinned historical chain/block/hash and creates a writable 127.0.0.1 Anvil fork. No standalone/Ganache/public-RPC fixture counts as audit evidence. Do not launch test-triggering requests, phase-boundary machine runs, or regressions without explicit audit-owner authorization. Reviewer owns analysis/design; registered test-executor owns authorized machine runs; preserve all high-risk unresolved limitations."
+          wake_b64="$(printf '%s\\n\\n%s' "$original_wake" "$fork_note" | base64 -w0)"
+
           browser_context_b64="$(jq -cn \
             --arg reviewer "${{ steps.successor.outputs.incoming_reviewer }}" \
             '{routineId:"",projectName:"",projectUrl:"",chatName:$reviewer,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"initial_wake"}' | base64 -w0)"
@@ -201,7 +206,7 @@ jobs:
             -f phase_id="$phase_id" \
             -f mode=resume_existing \
             -f chat_url="$chat_url" \
-            -f wake_message_b64="${{ steps.successor.outputs.wake_b64 }}" \
+            -f wake_message_b64="$wake_b64" \
             -f watchdog_enabled=true \
             -f worker_role=reviewer \
             -f watchdog_message_b64="$poke_b64" \
