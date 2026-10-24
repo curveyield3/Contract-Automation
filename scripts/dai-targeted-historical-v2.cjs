@@ -129,12 +129,15 @@ async function main(){
    assert('historical totalSupply raw is nonnegative',supply>=0n,true);
   }catch(e){output.observed.supplyError=asText(e)}
  }
- const creatorA=output.creationLookup?.fields?.creator_address_hash;
- const creatorB=output.etherscanCreationLookup?.result?.[0]?.contractCreator;
- const transactionHash=output.creationLookup?.fields?.creation_tx_hash||output.etherscanCreationLookup?.result?.[0]?.txHash||null;
- const creator=creatorB||creatorA||null;
- output.creation={creator,transactionHash,authenticatedByReceipt:false,indexerOnly:!!creator};
- if(creatorA&&creatorB)assert('independent explorer creators agree',creatorA.toLowerCase(),creatorB.toLowerCase());
+ const factoryFromBlockscout=output.creationLookup?.fields?.creator_address_hash||null;
+ const creationDetails=output.etherscanCreationLookup?.result?.[0]||{};
+ const factoryFromEtherscan=creationDetails.contractFactory||null;
+ const originEOA=creationDetails.contractCreator||null;
+ const transactionHash=output.creationLookup?.fields?.creation_tx_hash||creationDetails.txHash||null;
+ const factory=factoryFromBlockscout||factoryFromEtherscan||null;
+ output.creation={factory,originEOA,transactionHash,authenticatedByReceipt:false,creationBlockAuthenticated:false,initialFactoryWardProven:false};
+ if(factoryFromBlockscout&&factoryFromEtherscan)
+  assert('independent factory identities agree',factoryFromBlockscout.toLowerCase(),factoryFromEtherscan.toLowerCase());
  if(transactionHash){
   try {
    const tx=await rpc(chainPeer,'eth_getTransactionByHash',[transactionHash]);
@@ -142,39 +145,114 @@ async function main(){
    output.creation.transaction=tx?{hash:tx.hash,from:tx.from,to:tx.to,input:tx.input,blockNumber:tx.blockNumber}:null;
    output.creation.receipt=receipt?{status:receipt.status,contractAddress:receipt.contractAddress,blockNumber:receipt.blockNumber,transactionIndex:receipt.transactionIndex}:null;
    if(tx&&receipt){
-    assert('verified creation receipt status',receipt.status,'0x1');
-    assert('verified creation contract address',String(receipt.contractAddress).toLowerCase(),target);
-    assert('verified creation sender agrees with indexer',String(tx.from).toLowerCase(),String(creator).toLowerCase());
-    output.creation.authenticatedByReceipt=receipt.status==='0x1'&&String(receipt.contractAddress).toLowerCase()===target&&String(tx.from).toLowerCase()===String(creator).toLowerCase();
+    assert('deployment parent transaction success',receipt.status,'0x1');
+    if(originEOA)assert('parent transaction EOA matches Etherscan initiator',String(tx.from).toLowerCase(),String(originEOA).toLowerCase());
+    // The DAI contract was created internally by a factory: a null receipt.contractAddress on the parent tx is normal.
+    output.creation.parentReceiptVerified=receipt.status==='0x1'&&(!originEOA||String(tx.from).toLowerCase()===String(originEOA).toLowerCase());
+    const blockNum=Number(BigInt(receipt.blockNumber));
+    try{
+     const before=await rpc(chainPeer,'eth_getCode',[target,'0x'+(blockNum-1).toString(16)]);
+     const after=await rpc(chainPeer,'eth_getCode',[target,'0x'+blockNum.toString(16)]);
+     output.creation.blockCodeTransition={blockNumber:blockNum,beforeSha256:sha256(Buffer.from(before.slice(2),'hex')),afterSha256:sha256(Buffer.from(after.slice(2),'hex')),emptyBefore:before==='0x',codeAfter:after!=='0x'};
+     assert('DAI contract code appears at indexed creation block',before==='0x'&&after!=='0x',true);
+     output.creation.creationBlockAuthenticated=before==='0x'&&after!=='0x'&&output.creation.parentReceiptVerified;
+    }catch(e){output.creation.creationBlockError=asText(e)}
+    if(factory){
+     try{
+      const data=iface.encodeFunctionData('wards',[factory]);
+      const raw=await rpc(chainPeer,'eth_call',[{to:target,data},'0x'+blockNum.toString(16)]);
+      const ward=BigInt(iface.decodeFunctionResult('wards',raw)[0]).toString();
+      output.creation.initialFactoryWard={factory,data,raw,ward,blockNumber:blockNum};
+      assert('verified creation-block factory ward is one',ward,'1');
+      output.creation.initialFactoryWardProven=ward==='1'&&output.creation.creationBlockAuthenticated;
+     }catch(e){output.creation.initialWardError=asText(e)}
+    }
    }
   }catch(e){output.creation.receiptLookupError=asText(e)}
+  // Independent index of internal contract-creation traces, if supported; no blockchain writes.
+  try{
+   const url='https://eth.blockscout.com/api/v2/transactions/'+transactionHash+'/internal-transactions';
+   const response=await timeoutFetch(url,{headers:{accept:'application/json'}},18000);
+   const body=await response.json();
+   const rows=Array.isArray(body.items)?body.items:[];
+   const matching=rows.filter(x=>[x.created_contract?.hash,x.created_contract_addr_hash,x.to?.hash,x.to_address_hash].some(v=>String(v||'').toLowerCase()===target));
+   output.creation.indexedInternalCreation={provider:'Blockscout v2',httpStatus:response.status,pages:(body.next_page_params?'>1':'1'),matching,returnedRows:rows.length,allPagesFetched:!body.next_page_params};
+  }catch(e){output.creation.indexedInternalCreation={error:asText(e)}}
  }
  const scanPeer=archivePeer||readCodePeer||chainPeer;
  const firstBlock=output.creation.receipt&&output.creation.receipt.blockNumber?Number(BigInt(output.creation.receipt.blockNumber)):0;
- output.roleScan.scanProvider=scanPeer.label;output.roleScan.startBlock=firstBlock;
- output.roleScan.endBlock=frozen;
- const end=Date.now()+12*60*1000;
- let from=firstBlock,chunk=30000,ops=0;
+ output.roleScan.scanProvider=process.env.ETHERSCAN_API_KEY?'Etherscan v2 indexed archival logs':scanPeer.label;
+ output.roleScan.startBlock=firstBlock;output.roleScan.endBlock=frozen;
  const all=[];
- while(from<=frozen&&ops<850&&Date.now()<end){
-  const to=Math.min(frozen,from+chunk-1),filter={address:target,fromBlock:'0x'+from.toString(16),toBlock:'0x'+to.toString(16),topics:[[topics.rely,topics.deny]]};
-  ops++;
-  try{
-   const logs=await rpc(scanPeer,'eth_getLogs',[filter],28000);
-   if(!Array.isArray(logs))throw Error('non-array log response');
-   output.roleScan.coveredRanges.push({from,to,count:logs.length,provider:scanPeer.label});
-   for(const l of logs)all.push(l);
-   from=to+1;
-   if(chunk<70000&&logs.length<30)chunk=Math.min(70000,chunk+2500);
-  }catch(e){
-   if(chunk>2000){chunk=Math.max(2000,Math.floor(chunk/2));continue}
-   output.roleScan.errors.push({from,to,error:asText(e)});
-   break;
+ let ops=0;
+ if(process.env.ETHERSCAN_API_KEY){
+  const deadline=Date.now()+13*60*1000;
+  for(const [operation,topic0] of Object.entries(topics)){
+   let from=firstBlock,chunk=20000000;
+   while(from<=frozen && ops<1200 && Date.now()<deadline){
+    const to=Math.min(frozen,from+chunk-1),pages=[];
+    let page=1,ok=true,tooMany=false,err=null;
+    while(page<=25 && Date.now()<deadline){
+     ops++;
+     const request={chainid:'1',module:'logs',action:'getLogs',fromBlock:String(from),toBlock:String(to),address:target,topic0,page:String(page),offset:'1000',apikey:process.env.ETHERSCAN_API_KEY};
+     const u=new URL('https://api.etherscan.io/v2/api');
+     for(const [k,v] of Object.entries(request))u.searchParams.set(k,v);
+     const rec={index:ops,provider:'Etherscan v2',method:'getLogs',operation,topic0,fromBlock:from,toBlock:to,page,offset:1000};
+     try{
+      const res=await timeoutFetch(u.toString(),{headers:{accept:'application/json'}},30000);
+      rec.httpStatus=res.status;
+      const body=await res.json();
+      rec.status=body.status;rec.message=body.message;
+      const noRecords=body.status==='0'&&String(body.result)===''||body.status==='0'&&/no records found/i.test(String(body.message));
+      if(!res.ok || (body.status!=='1'&&!noRecords) || (body.status==='1'&&!Array.isArray(body.result))){
+       throw Error('API response '+JSON.stringify({status:body.status,message:body.message,result:String(body.result).slice(0,250)}));
+      }
+      const rows=Array.isArray(body.result)?body.result:[];
+      rec.count=rows.length;rec.results=rows;
+      transcript.push(rec);output.successfulRPC++;output.successfulHistoricalCalls++;
+      pages.push(...rows);
+      if(rows.length<1000)break;
+      page++;
+      if(page>25){tooMany=true;break}
+     }catch(e){
+      rec.error=asText(e);transcript.push(rec);output.failedRPC++;ok=false;err=rec.error;break;
+     }
+    }
+    if(ok&&!tooMany){
+     output.roleScan.coveredRanges.push({from,to,count:pages.length,provider:'Etherscan v2',topic:operation});
+     all.push(...pages);
+     from=to+1;
+    }else if(chunk>5000){
+     chunk=Math.max(5000,Math.floor(chunk/2));
+     output.roleScan.errors.push({operation,from,to,reason:'range reduced on indexed provider error',error:err});
+    }else{
+     output.roleScan.errors.push({operation,from,to,error:err||'max pagination reached'});
+     break;
+    }
+   }
+   if(from<=frozen)output.roleScan.missingRanges.push({operation,from,to:frozen,reason:'indexed provider limit, refusal or bounded scan budget'});
   }
+  output.roleScan.indexedEvidenceProvider='Etherscan API v2, signed Ethereum mainnet chainid 1';
+  output.roleScan.indexerCompletenessLimit='Availability of records from external indexer is independently checked by creation block state, receipts and final wards reads';
+ }else{
+  output.roleScan.errors.push({error:'ETHERSCAN_API_KEY missing; public RPC log fallback used'});
+  let from=firstBlock,chunk=9500;
+  const deadline=Date.now()+8*60*1000;
+  while(from<=frozen&&ops<850&&Date.now()<deadline){
+   const to=Math.min(frozen,from+chunk-1);
+   ops++;
+   try{
+    const logs=await rpc(scanPeer,'eth_getLogs',[{address:target,fromBlock:'0x'+from.toString(16),toBlock:'0x'+to.toString(16),topics:[[topics.rely,topics.deny]]}],18000);
+    if(!Array.isArray(logs))throw Error('non-array role logs');
+    output.roleScan.coveredRanges.push({from,to,count:logs.length,provider:scanPeer.label,topic:'OR'});
+    all.push(...logs);from=to+1;
+   }catch(e){output.roleScan.errors.push({from,to,error:asText(e)});break}
+  }
+  if(from<=frozen)output.roleScan.missingRanges.push({from,to:frozen,reason:'RPC limit or bounded historical scan budget'});
  }
  output.roleScan.rangeRequests=ops;
- if(from<=frozen)output.roleScan.missingRanges.push({from,to:frozen,reason:'provider limit, RPC error or finite 12-minute scan budget'});
- output.roleScan.complete=from>frozen&&output.roleScan.missingRanges.length===0;
+ output.roleScan.complete=output.roleScan.missingRanges.length===0 && output.roleScan.coveredRanges.length>0;
+ if(all.length===0){output.roleScan.complete=false;output.roleScan.errors.push({reason:'zero historic role logs is implausible without independent source receipts confirming no role actions; do not accept completeness'});}
  const keyed=new Map();
  for(const l of all){
   const tt=l.topics||[];
@@ -189,7 +267,7 @@ async function main(){
  const events=[...keyed.values()].sort((a,b)=>a.blockNumber-b.blockNumber||a.transactionIndex-b.transactionIndex||a.logIndex-b.logIndex);
  output.roleScan.events=events;
  const effective=new Map();
- if(output.creation.authenticatedByReceipt&&creator)effective.set(ethers.getAddress(creator).toLowerCase(),1);
+ if(output.creation.initialFactoryWardProven&&output.creation.factory)effective.set(ethers.getAddress(output.creation.factory).toLowerCase(),1);
  for(const e of events)effective.set(e.guy.toLowerCase(),e.operation==='rely'?1:0);
  output.roleScan.computedEffectiveWards=Object.fromEntries([...effective.entries()].sort());
  const receiptList=[...new Set(events.map(e=>e.transactionHash))].slice(0,150);
@@ -203,7 +281,7 @@ async function main(){
  output.roleScan.receiptsComplete=output.roleScan.receiptChecks.length===new Set(events.map(e=>e.transactionHash)).size&&output.roleScan.receiptChecks.every(r=>r.success);
  if(archivePeer){
   const candidates=new Set([...effective.keys()]);
-  if(creator)candidates.add(creator.toLowerCase());
+  if(output.creation.factory)candidates.add(output.creation.factory.toLowerCase());
   for(const address of candidates){
    try{
     const data=iface.encodeFunctionData('wards',[address]);
@@ -215,7 +293,7 @@ async function main(){
    }catch(e){output.roleScan.reconciled.push({address,error:asText(e),agrees:false})}
   }
  }
- output.roleScan.rosterCompletenessProven=output.creation.authenticatedByReceipt&&output.roleScan.complete&&output.roleScan.receiptsComplete&&output.roleScan.reconciled.length>0&&output.roleScan.reconciled.every(r=>r.agrees);
+ output.roleScan.rosterCompletenessProven=output.creation.initialFactoryWardProven&&output.roleScan.complete&&output.roleScan.receiptsComplete&&output.roleScan.reconciled.length>0&&output.roleScan.reconciled.every(r=>r.agrees);
  if(output.roleScan.rosterCompletenessProven)assert('authenticated effective ward reconciliation',true,true);
  output.expectedGovernancePolicy={status:'UNESTABLISHED',reason:'No independently authenticated historic allowed-ward governance roster provided or verified by approved test endpoints. Effective role authority does not itself prove intended operator policy.'};
  if(!output.observed.domain)output.errors.push('Missing pinned archival stored DOMAIN_SEPARATOR');
