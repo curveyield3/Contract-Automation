@@ -139,11 +139,9 @@ jobs:
         shell: bash
         env:
           TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          TS_AUDIENCE_VALUE: ${{ secrets.TS_AUDIENCE }}
         run: |
           set -euo pipefail
           [ -n "$TS_CLIENT_ID" ] || { echo '::error::Missing TS_OAUTH_CLIENT_ID (Tailscale OIDC client ID)'; exit 1; }
-          [ -n "$TS_AUDIENCE_VALUE" ] || { echo '::error::Missing TS_AUDIENCE (Tailscale OIDC audience)'; exit 1; }
           [ -n "$CHATGPT_STORAGE_STATE_B64" ] || { echo '::error::Missing CHATGPT_STORAGE_STATE_B64 for existing browser session'; exit 1; }
           echo 'OIDC identity and browser-session configuration present; no credentials printed.'
       - name: Select Audit-Controller credential
@@ -268,7 +266,7 @@ jobs:
         uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ secrets.TS_AUDIENCE }}
+          audience: api.tailscale.com/${{ secrets.TS_OAUTH_CLIENT_ID }}
           tags: tag:audit-browser
           ping: ${{ env.HOME_EXIT_NODE }}
 
