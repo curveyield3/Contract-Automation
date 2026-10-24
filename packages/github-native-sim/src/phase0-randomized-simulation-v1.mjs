@@ -104,6 +104,7 @@ async function rpc(url,method,params=[]){
 }
 export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainId=1,requireUpstreamChainId=false,forkBlockNumber=null}){
   let identityProxy;
+  let child;
   try{
     const ethers=await import('ethers');
     const ephemeralWallet=ethers.Wallet.createRandom();
@@ -136,7 +137,7 @@ export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainI
     const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
     const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id',String(chainId),'--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--auto-impersonate','--no-rate-limit','--silent'];
     args.push('--fork-block-number',String(pinnedBlockNumber));
-    const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
+    child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
     let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
     const started=Date.now();
     while(Date.now()-started<30000){
@@ -170,6 +171,14 @@ export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainI
       }
     };
   }catch(error){
+    // Historical-pin, identity and signer failures can occur after Anvil spawns.
+    // Tear it down even if the fork preflight fails; do not leave port 8545
+    // occupied by an unverified or stale local chain.
+    if(child&&child.exitCode===null) {
+      try{child.kill('SIGTERM');}catch{}
+      await Promise.race([new Promise(r=>child.once('exit',r)),sleep(2000)]);
+      if(child.exitCode===null){try{child.kill('SIGKILL');}catch{}}
+    }
     if(identityProxy)await identityProxy.close().catch(()=>{});
     throw error;
   }
