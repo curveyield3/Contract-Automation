@@ -18,7 +18,7 @@ sourceInput.settings.outputSelection={'*':{'*':['evm.deployedBytecode.object']}}
 const sourceOutput=JSON.parse(solc.compile(JSON.stringify(sourceInput)));
 if(sourceOutput.errors?.some(x=>x.severity==='error'))throw Error('DAI compiler error');
 const sourceRuntime='0x'+sourceOutput.contracts['Dai.sol'].Dai.evm.deployedBytecode.object;
-const sourceRuntimeSha=sha256(Buffer.from(sourceRuntime.slice(2),'hex'));
+const sourceRuntimeSha=crypto.createHash('sha256').update(Buffer.from(sourceRuntime.slice(2),'hex')).digest('hex');
 const sourceConstructorSeedsWard=sourceUnit.input.sources['Dai.sol'].content.includes('wards[msg.sender] = 1;');
 
 const round1Sha256='9088df2cab5bf6531ec0f10c1a65882f62dcb206c9dfaa5a18c553a2de93097b';
