@@ -66,25 +66,26 @@ Legacy reviewer repair that could create a fresh Playwright-driven chat is retir
 
 ## Tailnet connection — native GitHub OIDC (current)
 
-**One credential, no API-generated auth keys.** The five browser workflows use the existing `TS_OAUTH_CLIENT_ID` federated identity plus GitHub's runtime OIDC token. They invoke the shared local action `.github/actions/connect-browser-tailnet-oidc/action.yml`, which runs `scripts/browser-agent-tailnet-oidc.sh`. It installs the pinned Tailscale static binaries (cached by OS/architecture), starts `tailscaled --state=mem:`, and runs the supported direct native registration command:
+**One stored federated credential, with short-lived device authorization created internally by Tailscale.** The five browser workflows use the existing `TS_OAUTH_CLIENT_ID` federated identity plus GitHub's runtime OIDC token. They invoke the shared local action `.github/actions/connect-browser-tailnet-oidc/action.yml`, which runs `scripts/browser-agent-tailnet-oidc.sh`. It installs the pinned Tailscale static binaries (cached by OS/architecture), starts `tailscaled --state=mem:`, and runs the supported native registration command:
 
 ```sh
 sudo -E tailscale up --client-id="$TS_OAUTH_CLIENT_ID" \
   --audience="api.tailscale.com/$TS_OAUTH_CLIENT_ID" \
-  --advertise-tags=tag:audit-browser --accept-dns=false
+  --advertise-tags="$TAILNET_TAG" --accept-dns=false
 ```
 
-Tailscale v1.94+ supports native GitHub OIDC discovery with `--client-id` and `--audience`. With `id-token: write`, Tailscale retrieves the existing GitHub-signed workload token itself and joins the tailnet directly. The wrapper intentionally does not call the separate Tailscale API auth-key creation endpoint; this avoids the `unexpected error while creating authkey: Status: 404` failure previously seen with `tailscale/github-action@v4`. The runner still registers as a distinct temporary device using in-memory state, and the daemon logs out on exit.
+Tailscale v1.94+ supports native GitHub OIDC discovery with `--client-id` and `--audience`. With `id-token: write`, Tailscale retrieves the existing GitHub-signed workload token itself and joins the tailnet directly. The wrapper does not make a separate API-key request, but Tailscale still creates a short-lived device authorization internally during the join. Therefore native OIDC does **not** eliminate the need for an authorized tag or the `auth_keys` scope. The runner registers as a distinct temporary device using in-memory state, and the daemon logs out on exit.
 
 Setup:
 
 1. Configure a GitHub Actions OpenID Connect federated identity at https://login.tailscale.com/admin/settings/trust-credentials with the exact issuer and subject reported by GitHub. For this repository the verified subject was `repo:curveyield3@346794407/Contract-Automation@1430753271:ref:refs/heads/main`. Authorize `tag:audit-browser` and `auth_keys` write.
 2. At https://github.com/curveyield3/Contract-Automation/settings/secrets/actions store its Client ID as `TS_OAUTH_CLIENT_ID`. The audience is derived as `api.tailscale.com/<Client ID>`; there is no `TS_AUDIENCE`, `TS_OAUTH_SECRET` or `TAILSCALE_AUTHKEY` requirement.
 3. Preserve `CHATGPT_STORAGE_STATE_B64`, the authenticated ChatGPT browser-session secret. This is unrelated to Tailscale authentication.
-4. Preserve the existing `BROWSER_HOME_EXIT_NODE` variable (or its configured fallback) and allow `tag:audit-browser` to reach that exit node. Only authorized tailnet peers may reach the runner's private VNC port 5900 (and noVNC port 6080 where used). Do not expose VNC publicly.
-5. Run just one authorized wake; before testing check that no other shared browser session/wake/watchdog job is active.
+4. Preserve the existing `BROWSER_HOME_EXIT_NODE` variable (or its configured fallback) and allow the actual configured device tag to reach that exit node. Only authorized tailnet peers may reach the runner's private VNC port 5900 (and noVNC port 6080 where used). Do not expose VNC publicly.
+5. Open https://github.com/curveyield3/Contract-Automation/settings/variables/actions and set the **repository variable** `TAILSCALE_NODE_TAG` to the exact tag authorized under your Tailscale federated identity (for example `tag:ci` if that is the *actual granted tag*). Without this variable the previous `tag:audit-browser` default remains. A tag merely existing in tailnet ACL is insufficient if the federated identity does not own or have permission to assign it.
+6. Run just one authorized wake; before testing check that no other shared browser session/wake/watchdog job is active.
 
-Workflow authentication is `permissions: id-token: write` and local `uses: ./.github/actions/connect-browser-tailnet-oidc` with `client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}` plus the existing `ping` home exit-node input. The workflow fails closed if the identity or session state is missing, or the direct tailnet connection cannot authenticate; it must never bypass the home exit-node contract.
+Workflow authentication is `permissions: id-token: write` and local `uses: ./.github/actions/connect-browser-tailnet-oidc` with `client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}`, `tag: ${{ vars.TAILSCALE_NODE_TAG || 'tag:audit-browser' }}` and the existing `ping` home exit-node input. The workflow fails closed if the identity or session state is missing, or the direct tailnet connection cannot authenticate; it must never bypass the home exit-node contract.
 
 Official reference: https://tailscale.com/docs/features/workload-identity-federation — *Register new nodes using workload identity* and *Automatic cloud token discovery and exchange*. Linux binary installation: https://tailscale.com/docs/install/linux.
 
@@ -192,3 +193,5 @@ If a proposed feature cannot satisfy these requirements, it must fail closed rat
 
 
 If the token exchange succeeds but `tailscale up` reports `unexpected error while creating authkey: Status: 404, Message: "not found"`, the OIDC subject and audience are no longer the immediate blocker; key creation failed at the Tailscale API. First check that the same federated identity has **Keys → Auth Keys → Write** (scope `auth_keys`) and is authorized for the exact `tag:audit-browser` requested by this workflow; the tag must exist in `tagOwners`. This error does not establish whether the missing resource is the auth-key permission, tag, or another tailnet-specific setting; inspect the trust credential's assigned permissions and tag before retrying. Never change tags or retry an unchanged failed run speculatively.
+
+Failure diagnostic from DAI wake run 40091109139: native `tailscale up` successfully reached credential authorization but Tailscale returned HTTP 400 `requested tags [tag:audit-browser] are invalid or not permitted`. The exact tag must be authorized by the trust credential. No additional Tailscale API secret is necessary. Do not try arbitrary tags or rerun with identical settings.
