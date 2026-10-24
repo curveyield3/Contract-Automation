@@ -612,6 +612,33 @@ async function runNormalChromeExistingSession(chromium) {
       await page.waitForTimeout(10000);
       await captureX11VisualEvidence('02_after_40s_navigation');
       await verifyX11VisibleChatAddress(requestedUrl);
+      if (action === 'wake') {
+        // A stuck Project chat can show a blank "New chat" page with a live
+        // composer. An address-bar match alone does not prove chat hydration.
+        // Read only the OS-visible Chrome window title; no ChatGPT page reads.
+        const windowTitle = async () => (await x11Capture(
+          ['getwindowname', chromeWindow], 'x11-visible-conversation-title'
+        )).stdout.trim();
+        const isUnloadedTitle = title => {
+          const withoutChrome = title.replace(/\s+-\s+(?:Google Chrome|Chromium).*$/i, '').trim();
+          return /^(?:ChatGPT|New chat)(?:\s+-\s+ChatGPT)?$/i.test(withoutChrome);
+        };
+        let title = await windowTitle();
+        if (isUnloadedTitle(title)) {
+          console.log('[normal-chrome-watchdog] target-conversation-not-yet-loaded; one visible Ctrl+R recovery');
+          await x11Key(['key', '--clearmodifiers', 'ctrl+r'], 'x11-reload-stalled-chat');
+          await page.waitForTimeout(25000);
+          await captureX11VisualEvidence('02b_after_single_reload');
+          await verifyX11VisibleChatAddress(requestedUrl);
+          title = await windowTitle();
+        }
+        if (!title || isUnloadedTitle(title)) {
+          throw new BrowserAgentError('TARGET_CHAT_NOT_LOADED',
+            'Chrome still displays the generic New chat/ChatGPT title instead of the registered reviewer conversation; refuse to paste or send into an unhydrated page',
+            false);
+        }
+        console.log('[normal-chrome-watchdog] visible-conversation-title-ready=true');
+      }
     }
     if (bool(env.WAKE_DIAGNOSTIC_ONLY)) {
       await page.waitForTimeout(25000);
