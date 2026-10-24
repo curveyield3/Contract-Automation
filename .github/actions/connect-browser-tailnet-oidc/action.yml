@@ -4,6 +4,9 @@ inputs:
   client-id:
     description: Tailscale federated identity Client ID (TS_OAUTH_CLIENT_ID).
     required: true
+  tag:
+    description: Tailscale tag authorized on the federated identity.
+    required: true
   ping:
     description: Existing home exit-node Tailscale IP or hostname to verify reachability.
     required: false
@@ -20,5 +23,6 @@ runs:
       shell: bash
       env:
         TS_CLIENT_ID: ${{ inputs.client-id }}
+        TAILNET_TAG: ${{ inputs.tag }}
         TAILNET_PING: ${{ inputs.ping }}
       run: bash "$GITHUB_WORKSPACE/scripts/browser-agent-tailnet-oidc.sh"
