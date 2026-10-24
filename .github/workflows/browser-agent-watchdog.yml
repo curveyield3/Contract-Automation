@@ -779,7 +779,8 @@ jobs:
                      [ "$worker_role" = "reviewer" ] &&
                      [ "$assignment_phase" = "$gate_expected_phase" ] &&
                      [ -n "$packet_path" ]; then
-                    encoded_packet="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+                    packet_api_path="$(printf '%s' "$packet_path" | sed 's/ /%20/g')"
+                    encoded_packet="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$packet_api_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
                     if [ -n "$encoded_packet" ] &&
                        printf '%s' "$encoded_packet" | base64 -d > /tmp/lite-rework-packet.json &&
                        jq -e --arg id "$campaign_id" --argjson phase "$assignment_seq" '
@@ -1119,6 +1120,7 @@ jobs:
                  | (if $force and $rework!="" then .lastReworkNotifiedIdentity=$rework else . end)
                  | .pokeCount=((.pokeCount // 0)+1)
                  | .repair.consecutiveIdlePokes=((.repair.consecutiveIdlePokes // 0)+1)
+                 | .pokeFailureCount=0
                  | .lastDecision="TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ"
                  | .pokeIntervalMinutes=$interval' \
                 /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
@@ -1136,6 +1138,13 @@ jobs:
 
             mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
             persist_state || true
+            if [ "$poke_ok" != true ] && [ -z "$poke_skipped" ] &&
+               [ "$(jq -r '.pokeFailureCount // 0' /tmp/watchdog-state.json)" -ge 2 ]; then
+              # Green workflow runs must not mask repeated failed browser delivery.
+              # Existing rearm keeps the target active for the next recovery sweep.
+              echo "::error::Watchdog browser transport failed on consecutive sweeps; canonical target remains ACTIVE for recovery."
+              exit 1
+            fi
            done
 
           if fetch_state; then
