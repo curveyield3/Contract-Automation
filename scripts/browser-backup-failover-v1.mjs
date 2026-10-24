@@ -11,7 +11,7 @@ export function planBackupChatFailoverV1({registration,directory,failedChatUrl,n
  const delegatedRole=registration.activeChat?.name;
  const privileged=['master-reviewer','test-executor'].includes(delegatedRole);
  if(!assignment||!['ACTIVE','WAITING_FOR_SUCCESSOR_AGENT','WAITING_FOR_MASTER_REVIEW'].includes(directory.campaignStatus)||
-    (!privileged&&!['ACTIVE','WAITING_FOR_SUCCESSOR_AGENT'].includes(assignment.status)))
+    (!privileged&&!['ACTIVE','WAITING_FOR_SUCCESSOR_AGENT','REWORK_REQUIRED'].includes(assignment.status)))
   return fail('no active reviewer assignment');
  const role=privileged?delegatedRole:assignment.reviewer;
  if(!/^(?:reviewer-[1-4](?:L)?|master-reviewer|test-executor)$/.test(String(role??'')))return fail('invalid reviewer role');
@@ -25,10 +25,14 @@ export function planBackupChatFailoverV1({registration,directory,failedChatUrl,n
   return fail('standby already owned by another active role');
  if(registration.backupFailover?.status==='USED')return fail('standby already consumed');
  const index=assignment.workShardIndexPath;
- const nextWork=index?('Read shard INDEX '+index+
-   ' and BASE_v1.json. Complete every indexed shard in order and submit ONE phase boundary request after the final shard, without waiting for controller between shards.')
+ const isRework=assignment.status==='REWORK_REQUIRED';
+ const nextWork=isRework
+   ?('Current assignment is REWORK_REQUIRED. FIRST read the latest exact controller failure packet '+
+     assignment.packetPath+' and the latest controller result, then identify which deficiencies belong to reviewer data and which are runner/machine-execution defects. Preserve already completed indexed shards and the last sealed receipt. Compare the failed runner commit and time to current main before calling a repaired defect still open. Resume every presently executable non-test repair; do not re-submit a machine-executing boundary or create, modify, or run any test without explicit audit-owner authorization. Record the precise remaining blocker.')
+   :index?('Read shard INDEX '+index+
+     ' and BASE_v1.json. Complete every indexed shard in order and submit ONE phase boundary request after the final shard, without waiting for controller between shards.')
    :('Use the exact assigned work form at '+assignment.workFormPath+' and submit its existing boundary request only after all work is complete.');
- const message=['CONTROLLER_BACKUP_CHAT_HANDOFF: the prior reviewer chat did not acknowledge after the watchdog repair threshold.',
+ const message=['CONTROLLER_BACKUP_CHAT_HANDOFF: the prior reviewer chat made no verified durable progress after the watchdog recovery threshold.',
   'Campaign '+directory.campaignId+', role '+role+', current phase '+assignment.phaseSequence+'.',
   'Read the bound authority from the Phase-0 receipt; preserve frozen authority and sealed earlier phases.',
   nextWork,
