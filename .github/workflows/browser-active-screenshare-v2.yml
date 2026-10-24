@@ -90,7 +90,7 @@ jobs:
         uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ secrets.TS_AUDIENCE }}
+          audience: api.tailscale.com/${{ secrets.TS_OAUTH_CLIENT_ID }}
           tags: tag:audit-browser
           ping: ${{ steps.request.outputs.home_exit_node }}
 
