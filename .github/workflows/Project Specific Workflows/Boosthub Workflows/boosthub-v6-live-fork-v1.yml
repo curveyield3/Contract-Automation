@@ -157,10 +157,14 @@ jobs:
 
       - name: Start pinned Ethereum mainnet fork
         env:
-          ARCHIVE_RPC: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          ARCHIVE_RPC: ${{ secrets.RPC_ETHEREUM }}
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$ARCHIVE_RPC"
+          test "$(cast chain-id --rpc-url "$ARCHIVE_RPC")" = 1
+          UPSTREAM_HASH="$(cast block 25737717 --field hash --rpc-url "$ARCHIVE_RPC" | tr -d '\\r\\n')"
+          [[ "$UPSTREAM_HASH" =~ ^0x[0-9a-fA-F]{64}$ ]] || { echo "::error::Authenticated archive block hash unavailable"; exit 1; }
           anvil --fork-url "$ARCHIVE_RPC" --fork-block-number 25737717 --chain-id 1 --port 8545 > boosthub-v6-anvil-v1.log 2>&1 &
           echo $! > .anvil.pid
           for i in $(seq 1 45); do
@@ -168,6 +172,9 @@ jobs:
             sleep 1
           done
           test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = '1'
+          LOCAL_HASH="$(cast block 25737717 --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\\r\\n')"
+          test "${LOCAL_HASH,,}" = "${UPSTREAM_HASH,,}" || { echo "::error::Local Anvil historical block hash mismatch"; exit 1; }
+          test "$(cast code 0xFbEF8941Da53EA724385B44E91ae9672061D0263 --rpc-url http://127.0.0.1:8545)" != '0x' || { echo "::error::Deployed target code missing"; exit 1; }
 
       - name: Materialize fork-only operator inputs from live BoostHub owner
         shell: bash
