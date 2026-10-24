@@ -798,8 +798,23 @@ jobs:
             detail_ref="$(jq -r '.detailRef // empty' "$envelope_file" 2>/dev/null || true)"
             digest="$(jq -r '.sha256 // empty' "$envelope_file" 2>/dev/null || true)"
           fi
+          machine_gate=NOT_APPLICABLE
+          if [ "$controller_status" = NEEDS_REWORK ] && [ -s "$result_file" ]; then
+            packet="$(jq -r '.packetPath // empty' "$result_file")"
+            if [ -n "$packet" ] && [ -s ".audit-controller/$packet" ]; then
+              machine_gate="$(jq -r '.controllerValidation.machineExecutionGate // "NOT_APPLICABLE"' ".audit-controller/$packet")"
+            fi
+          fi
           case "$controller_status" in
-            NEEDS_REWORK|DISCOVERY_REWORK|MASTER_REVIEW_INVALID)
+            NEEDS_REWORK)
+              if [ "$machine_gate" = BLOCKED ]; then
+                decision=MACHINE_EVIDENCE_BLOCKED
+                next="Preserve accepted reviewer shards. Compare failed runner SHA/time to current main and repair any remaining runner defect. Do not re-dispatch machine execution or resubmit without explicit audit-owner authorization."
+              else
+                decision=REWORK_THIS_SAME_AGENT
+                next="Read exact errors below, correct only reviewer-owned fields, increment the existing boundary request attempt and resubmit. Do not wait for a wake."
+              fi ;;
+            DISCOVERY_REWORK|MASTER_REVIEW_INVALID)
               decision=REWORK_THIS_SAME_AGENT
               next="Read exact errors below, correct only reviewer-owned fields, increment the existing boundary request attempt and resubmit. Do not wait for a wake." ;;
             DISCOVERY_NEXT) decision=CONTINUE_SAME_AGENT; next="Read the new active discovery window and complete its assigned units without waiting for a wake." ;;
@@ -848,16 +863,23 @@ jobs:
             fi
             error_count="$(wc -l </tmp/boundary-deficiencies.txt | tr -d ' ')"
             if [ "$controller_status" = NEEDS_REWORK ] || [ "$controller_status" = DISCOVERY_REWORK ] || [ "$controller_status" = MASTER_REVIEW_INVALID ]; then
+              if [ "$controller_status" = NEEDS_REWORK ] && [ "$machine_gate" = BLOCKED ]; then
+                owner_notice="Owner: MACHINE_EXECUTION_BLOCKED. Preserve accepted reviewer shards and sealed receipts; compare failure SHA/time to current repaired runner. No machine-executing resubmission without explicit audit-owner authorization."
+                warning_suffix="Machine-evidence blocker, not a reviewer-field defect. Preserve all existing work; no unauthorized test or rerun."
+              else
+                owner_notice="Owner: REVIEWER_FIX for reviewer-owned semantic fields; never modify controller-prefilled records or run additional tests to silence a form error."
+                warning_suffix="Correct the cited reviewer-owned field; preserve all other existing work."
+              fi
               {
                 echo "### Exact errors to correct"
-                echo "Owner: REVIEWER_FIX for reviewer-owned semantic fields; never modify controller-prefilled records or run additional tests to silence a form error."
+                echo "$owner_notice"
                 echo ""
               } >> "$GITHUB_STEP_SUMMARY"
               sed -n '1,30p' /tmp/boundary-deficiencies.txt | while IFS= read -r line; do
                 [ -n "$line" ] || continue
                 clean="$(printf '%s' "$line" | tr '\r\n' '  ' | cut -c1-1100)"
                 printf -- '- %s\n' "$clean" >> "$GITHUB_STEP_SUMMARY"
-                echo "::warning::CONTROLLER_REWORK [${CAMPAIGN_ID:-UNKNOWN}/${PHASE:-${SEGMENT:-${UNIT:-UNKNOWN}}}]: $clean. Correct the cited reviewer-owned field; preserve all other existing work."
+                echo "::warning::CONTROLLER_REWORK [${CAMPAIGN_ID:-UNKNOWN}/${PHASE:-${SEGMENT:-${UNIT:-UNKNOWN}}}]: $clean. $warning_suffix"
               done
               if [ "$error_count" -gt 30 ]; then
                 echo "- Additional errors: $((error_count-30)); read full controller result at $detail_ref." >> "$GITHUB_STEP_SUMMARY"
