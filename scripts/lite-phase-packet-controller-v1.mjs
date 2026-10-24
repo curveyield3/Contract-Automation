@@ -1219,7 +1219,7 @@ function materialPhase5Candidates({root,campaignPath,form}){
   const keys=[],sourceAnchors={};
   for(const record of [...phase4,...newCandidates]){
     if(record==='NONE_IDENTIFIED')continue;
-    const key=String(record?.tempKey??'').trim();
+    const key=String(record?.canonicalId??record?.tempKey??'').trim();
     if(!key)throw new Error('Phase 5 material candidate has no key');
     const anchor=String(record?.sourceAnchor??'').trim();
     if(sourceAnchors[key]!==undefined&&sourceAnchors[key]!==anchor)
