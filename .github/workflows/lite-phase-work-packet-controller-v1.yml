@@ -514,6 +514,70 @@ jobs:
           fi
           echo 'published=true' >> "$GITHUB_OUTPUT"
 
+      # Previously a published NEEDS_REWORK had no durable continuation event:
+      # the workflow ended green, while the reviewer was expected to poll Actions.
+      # Reuse the existing acknowledged browser wake; never repeat machine tests here.
+      - name: Resume same reviewer after published phase rework
+        if: steps.routing.outputs.effective_hold != 'true' && steps.routing.outputs.stale != 'true' && steps.controller.outputs.status == 'NEEDS_REWORK' && steps.publish_result.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_CAMPAIGN: ${{ steps.request.outputs.campaign_id }}
+          AUDIT_DIRECTORY: ${{ steps.routing.outputs.campaign_directory_path }}
+          AUDIT_REF: ${{ steps.request.outputs.audit_controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          directory=".audit-controller/$AUDIT_DIRECTORY"
+          test -s "$directory"
+          test "$(jq -r '.campaignId' "$directory")" = "$AUDIT_CAMPAIGN"
+          test "$(jq -r '.campaignStatus' "$directory")" = ACTIVE
+          test "$(jq -r '.currentAssignment.status' "$directory")" = REWORK_REQUIRED
+          reviewer="$(jq -r '.currentAssignment.reviewer' "$directory")"
+          phase="$(jq -r '.currentAssignment.phaseSequence' "$directory")"
+          case "$reviewer" in reviewer-1|reviewer-2|reviewer-3|reviewer-4) ;; *) echo "::error::Invalid active rework reviewer"; exit 1;; esac
+          [[ "$phase" =~ ^([1-9]|10)$ ]] || { echo "::error::Invalid rework phase"; exit 1; }
+          test "$phase" = "${{ steps.request.outputs.phase_sequence }}"
+          packet="$(jq -r '.currentAssignment.packetPath // empty' "$directory")"
+          test -n "$packet" && test -s ".audit-controller/$packet"
+          jq -e --arg id "$AUDIT_CAMPAIGN" --argjson p "$phase" \
+            '.campaignId==$id and .phaseSequence==$p and .controllerValidation.status=="FAIL"' \
+            ".audit-controller/$packet" >/dev/null
+
+          safe_campaign="$(printf '%s' "$AUDIT_CAMPAIGN" | tr -c 'A-Za-z0-9._-' '_')"
+          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content')"
+          printf '%s' "$encoded" | base64 -d > /tmp/rework-registration.json
+          test "$(jq -r '.campaignId' /tmp/rework-registration.json)" = "$AUDIT_CAMPAIGN"
+          chat="$(jq -r --arg r "$reviewer" '.agentChats[$r] // empty' /tmp/rework-registration.json)"
+          [[ "$chat" =~ ^https://chatgpt[.]com/c/[A-Za-z0-9_-]+/?$ || "$chat" =~ ^https://chatgpt[.]com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || {
+            echo "::error::Current rework reviewer has no registered chat"
+            exit 1
+          }
+
+          # The controller result is an actual workflow outcome, not a reviewer
+          # response. A new first-action ACK is required by browser-agent-wake.
+          brief="$(jq -r '.controllerValidation.deficiencies[:4][]? // empty' ".audit-controller/$packet" | cut -c1-1400)"
+          message="CONTROLLER NEEDS_REWORK — $AUDIT_CAMPAIGN, $reviewer, phase $phase.
+          The controller has published a REWORK_REQUIRED assignment. Do not stop, wait for a reminder, or treat the green Actions job as phase PASS.
+          Read the exact latest controller work packet at $packet and the corresponding result pages on curveyield3/Audit-Controller main.
+          Preserve accepted reviewer shards, source identity, sealed predecessor receipts, and unresolved risk. Diagnose the exact rejected fields or runner evidence. Before repeating an infrastructure diagnosis compare the failing Actions run timestamp and head commit to current curveyield3/Contract-Automation main.
+          Fix every currently executable non-test issue using the EXISTING mechanisms. Tests and machine-executing Phase-5 boundary reruns remain prohibited without explicit audit-owner authorization; do not invent evidence or issue redundant submissions.
+          Confirm your wake ACK, then continue working on the current assignment and report only genuinely blocked work.
+          First reported deficiencies:
+          $brief"
+          b64="$(printf '%s' "$message" | base64 -w0)"
+          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$AUDIT_CAMPAIGN-phase-$phase-$reviewer-rework-${{ github.run_id }}" \
+            -f campaign_id="$AUDIT_CAMPAIGN" -f phase_id="phase-$phase" \
+            -f mode=resume_existing -f chat_url="$chat" -f wake_message_b64="$b64" \
+            -f watchdog_enabled=true -f worker_role=reviewer -f gate_mode=LITE \
+            -f gate_repository=curveyield3/Audit-Controller -f gate_ref="$AUDIT_REF" \
+            -f gate_state_path="$AUDIT_DIRECTORY" -f gate_expected_phase_id="phase-$phase" \
+            -f gate_expected_milestone_id="PHASE_${phase}_WORK_PACKET" \
+            -f gate_stop_states_csv=STOPPED_BY_HUMAN \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
+          echo "Dispatched exact rework reviewer wake; ACK and real progress required for recovery." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Delegate v13 Phase-5 generated harness requests to test executor
         if: steps.routing.outputs.effective_hold != 'true' && steps.routing.outputs.stale != 'true' && contains(steps.controller.outputs.authority_link_root, 'Audit_Litemode_v13') && steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5' && (steps.phase5_preflight.outputs.harness_rework == 'true' || (steps.phase5_preflight.outputs.generated_count != '0' && steps.phase5_preflight.outputs.generated_count != ''))
         env:
