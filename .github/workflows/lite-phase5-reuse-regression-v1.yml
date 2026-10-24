@@ -1,15 +1,7 @@
 name: Lite Phase 5 Evidence Reuse Regression v1
 
+# Regression execution requires explicit audit-owner permission; never auto-run on source push.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/lite-phase5-reuse-regression-v1.yml'
-      - 'scripts/lite-phase-packet-controller-v1.mjs'
-      - 'packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs'
-      - 'packages/github-native-sim/src/v7-compact-result-v1.mjs'
-      - 'packages/github-native-sim/src/v7-cli.mjs'
-      - 'packages/github-native-sim/test/lite-phase5-execution-gate-v1.test.mjs'
   workflow_dispatch:
 
 permissions:
