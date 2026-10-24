@@ -82,7 +82,7 @@ sudo /usr/local/bin/tailscale status --json | jq -e '.BackendState == "Running"'
 
 # Preserve prior action's ping-to-home exit-node readiness contract.
 if [ -n "${TAILNET_PING:-}" ]; then
-  timeout -k 5s 70s sudo /usr/local/bin/tailscale ping --timeout=15s "$TAILNET_PING" >/dev/null || {
+  timeout -k 5s 70s sudo /usr/local/bin/tailscale ping --until-direct=false --c=2 --timeout=10s "$TAILNET_PING" >/dev/null || {
     echo "::error::Tailscale established but home exit-node peer is unreachable" >&2
     exit 1
   }
