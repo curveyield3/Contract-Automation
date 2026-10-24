@@ -987,13 +987,22 @@ if(reviewKind==='master'){
     const phase5=canonicalFor(root,campaignPath,5);
     // The successor prefill is deliberately metadata-only; verify the actual
     // campaign-local machine artifacts instead of trusting inherited PASS text.
-    const failures=validateRecordedPhase5MachineEvidenceV1({
-      controllerRoot:root,campaignPath,
-      targetDesigns:phaseOutput(phase5,'step-3','targetDesigns')??[],
-      expectedCampaignId:directory.campaignId,
-      expectedSourceSha256:directory.sourceSha256,
-      requireCompletedMatrix:true
+    const deferral=inspectPhase5OwnerEvidenceDeferralV1({
+      controllerRoot:root,campaignPath,campaignId:directory.campaignId,
+      sourceSha256:directory.sourceSha256,
+      targetDesigns:phaseOutput(phase5,'step-3','targetDesigns')??[]
     });
+    const failures=deferral
+      ?(phase5?.automationOutputs?.phase5MachineExecutionGate?.status==='DEFERRED_UNVERIFIED'&&
+         phase5.automationOutputs.phase5MachineExecutionGate.ownerDirectivePath===deferral.path
+        ?[]:['Phase 5 owner evidence deferral is not bound to sealed canonical work'])
+      :validateRecordedPhase5MachineEvidenceV1({
+        controllerRoot:root,campaignPath,
+        targetDesigns:phaseOutput(phase5,'step-3','targetDesigns')??[],
+        expectedCampaignId:directory.campaignId,
+        expectedSourceSha256:directory.sourceSha256,
+        requireCompletedMatrix:true
+      });
     if(failures.length)emit('MASTER_REVIEW_INVALID',[
       'A sealed Phase 5 with missing or inconclusive mandatory simulations cannot be accepted unchanged.',
       'Submit a substantive AMENDED reviewer-owned Phase-5 work-form correction; the controller will rerun Phase 5 before resealing.',
