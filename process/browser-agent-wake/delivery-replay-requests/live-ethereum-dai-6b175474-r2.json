@@ -1,10 +1,10 @@
 {
   "schemaVersion": "curveyield-lite-controller-delivery-replay-request-v1",
   "campaignId": "live-ethereum-dai-6b175474-r2",
-  "detailRef": "controller/results/80f1434e6a478cc63c5c/INDEX_v1.json",
+  "detailRef": "controller/results/2d9fdbbe8dda986e8faa/INDEX_v1.json",
   "auditControllerRef": "main",
-  "purpose": "retry admitted reviewer-2-phase-04 master-review handoff after Tailscale console authorized tag:audit-browser and current main restored OIDC device tag",
-  "expectedWakeId": "live-ethereum-dai-6b175474-r2-delivery-80f1434e6a478cc63c5c",
-  "deliveryAttempt": 3,
+  "purpose": "Retry current accepted round-2 Phase-4 master-review handoff after fixing direct-only Tailscale ping in the existing runner; preserve controller state and evidence",
+  "expectedWakeId": "live-ethereum-dai-6b175474-r2-delivery-2d9fdbbe8dda986e8faa",
+  "deliveryAttempt": 1,
   "authentication": "native-tailscale-github-oidc-advertise-tags-audit-browser"
 }
