@@ -58,6 +58,16 @@ No reviewer successor may bypass this path with a direct browser write.
 
 The retired legacy create-fresh successor launcher in the watchdog fails closed.
 
+## Controller rework continuation and terminal recovery
+
+A published phase `NEEDS_REWORK` is an active, incomplete assignment, **not** a successful phase or a terminal stop. The existing Lite boundary controller now dispatches the existing `browser-agent-wake.yml` to the same registered reviewer after publishing that result. Its substantive message names the current controller work packet and requires a new first-action GitHub acknowledgement; a green boundary Actions job is not a phase PASS. The controller does not rerun test execution merely to wake the reviewer.
+
+The existing watchdog independently checks the active campaign and exact failed packet. It counts reviewer-authored Git progress, not controller-produced submission/evidence commits, and immediately surfaces a newly rejected attempt. A browser `sendAttempted` or successful watchdog job does not prove the reviewer resumed: only a matching new acknowledgement and subsequent durable work can establish takeover/progress.
+
+After the configured number of verified no-progress pokes, the watchdog must hand the still-active `REWORK_REQUIRED` assignment to the **already registered, one-time standby chat** (preserving the campaign, receipt, shards, reviewer identity and unresolved obligations), rather than repeatedly re-dispatching the same unproductive reviewer chat and declaring a successful recovery. If no standby is eligible, use the existing reviewer-repair path and surface its outcome; never invent a chat or a new workflow. The standby is eligible even while `currentAssignment.status` is `REWORK_REQUIRED`.
+
+No controller or watchdog notification authorizes extra tests. An environment/runner defect must be assessed against the actual failed execution's SHA/time and the current runner code before another diagnosis. If progressing requires machine execution and the audit owner has not authorized it, preserve the failure and report that precise authorization blocker; do not execute tests, bypass evidence, or advance the phase.
+
 ## Reviewer repair
 
 Current assignment-v2 repair is resume-first and uses the assigned pre-created reviewer chat through `browser-agent-wake.yml`.
