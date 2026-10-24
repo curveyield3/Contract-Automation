@@ -1,0 +1,427 @@
+{
+  "schemaVersion": "dai-mainnet-archival-evidence-v2",
+  "requestId": "ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "sourceSha256": "457b6121c4a613730251f2f81ae17d27c9c08674696b73d1f5828c623e705ee5",
+  "previousFixtureRawSha256": "9088df2cab5bf6531ec0f10c1a65882f62dcb206c9dfaa5a18c553a2de93097b",
+  "runUrl": "https://github.com/curveyield3/Contract-Automation/actions/runs/40099996664",
+  "runnerCommit": "5261d323e3038b335dfd76423750ec43c740029e",
+  "target": "0x6b175474e89094c44da98b954eedeac495271d0f",
+  "frozenBlock": 26253174,
+  "expectedBlockHash": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f",
+  "expectedRuntimeSha256": "5230b924dad23dab334727ba9d4b62c95a6cd4a48242932f8a2946cef264ab97",
+  "credentialsPresent": {
+    "RPC_ETHEREUM": true,
+    "ETHERSCAN_API_KEY": true
+  },
+  "providerTrials": [
+    {
+      "provider": "configured-RPC_ETHEREUM",
+      "attempts": [
+        {
+          "method": "eth_chainId",
+          "result": "0x1"
+        },
+        {
+          "method": "eth_getBlockByNumber",
+          "resultHash": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f"
+        }
+      ],
+      "acceptedAsArchive": true,
+      "codeSha256": "5ce810033426a017721777f241665c27bdd4663ca8a1c27558b4b372a1731f4e"
+    }
+  ],
+  "observed": {
+    "runtime": {
+      "provider": "configured-RPC_ETHEREUM",
+      "sha256": "5ce810033426a017721777f241665c27bdd4663ca8a1c27558b4b372a1731f4e",
+      "blockHash": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f",
+      "sourceExecutableMatch": true
+    },
+    "domain": {
+      "provider": "configured-RPC_ETHEREUM",
+      "blockHash": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f",
+      "calldata": "0x3644e515",
+      "raw": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "stored": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "expected": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "equal": true
+    },
+    "supply": {
+      "provider": "configured-RPC_ETHEREUM",
+      "blockTag": "0x1909776",
+      "raw": "0x00000000000000000000000000000000000000000eae8f7b523bbb405f3b80e3",
+      "rawBaseUnits": "4543820803393883483972272355",
+      "decimals": 18,
+      "wholeDai": "4543820803.393883483972272355"
+    }
+  },
+  "assertions": [
+    {
+      "name": "independent EIP712 preimage and TypedDataEncoder agree",
+      "pass": true,
+      "actual": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "expected": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "context": null
+    },
+    {
+      "name": "configured-RPC_ETHEREUM chainId",
+      "pass": true,
+      "actual": "0x1",
+      "expected": "0x1",
+      "context": null
+    },
+    {
+      "name": "configured-RPC_ETHEREUM pinned block hash",
+      "pass": true,
+      "actual": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f",
+      "expected": "0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f",
+      "context": null
+    },
+    {
+      "name": "configured-RPC_ETHEREUM compile reproduces accepted frozen runtime digest",
+      "pass": true,
+      "actual": "5230b924dad23dab334727ba9d4b62c95a6cd4a48242932f8a2946cef264ab97",
+      "expected": "5230b924dad23dab334727ba9d4b62c95a6cd4a48242932f8a2946cef264ab97",
+      "context": null
+    },
+    {
+      "name": "configured-RPC_ETHEREUM deployed executable matches accepted source aside from compiler metadata",
+      "pass": true,
+      "actual": true,
+      "expected": true,
+      "context": null
+    },
+    {
+      "name": "configured-RPC_ETHEREUM deployed DOMAIN_SEPARATOR equals EIP712 chain 1",
+      "pass": true,
+      "actual": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "expected": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+      "context": null
+    },
+    {
+      "name": "historical totalSupply raw is nonnegative",
+      "pass": true,
+      "actual": true,
+      "expected": true,
+      "context": null
+    },
+    {
+      "name": "independent factory identities agree",
+      "pass": true,
+      "actual": "0xb5b06a16621616875a6c2637948bf98ea57c58fa",
+      "expected": "0xb5b06a16621616875a6c2637948bf98ea57c58fa",
+      "context": null
+    },
+    {
+      "name": "deployment parent transaction success",
+      "pass": true,
+      "actual": "0x1",
+      "expected": "0x1",
+      "context": null
+    },
+    {
+      "name": "parent transaction EOA matches Etherscan initiator",
+      "pass": true,
+      "actual": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+      "expected": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+      "context": null
+    },
+    {
+      "name": "DAI contract code appears at indexed creation block",
+      "pass": true,
+      "actual": true,
+      "expected": true,
+      "context": null
+    },
+    {
+      "name": "constructor factory authorization and same-transaction self-deny established",
+      "pass": true,
+      "actual": true,
+      "expected": true,
+      "context": null
+    },
+    {
+      "name": "historical wards matches replay for 0xbaa65281c2fa2baacb2cb550ba051525a480d3f4",
+      "pass": true,
+      "actual": "0",
+      "expected": "0",
+      "context": null
+    },
+    {
+      "name": "historical wards matches replay for 0xb5b06a16621616875a6c2637948bf98ea57c58fa",
+      "pass": true,
+      "actual": "0",
+      "expected": "0",
+      "context": null
+    },
+    {
+      "name": "historical wards matches replay for 0x9759a6ac90977b93b58547b4a71c78317f391a28",
+      "pass": true,
+      "actual": "1",
+      "expected": "1",
+      "context": null
+    },
+    {
+      "name": "authenticated effective ward reconciliation",
+      "pass": true,
+      "actual": true,
+      "expected": true,
+      "context": null
+    }
+  ],
+  "readOnly": true,
+  "successfulRPC": 17,
+  "failedRPC": 0,
+  "successfulHistoricalCalls": 9,
+  "roleScan": {
+    "complete": true,
+    "coveredRanges": [
+      {
+        "from": 8928158,
+        "to": 26253174,
+        "count": 2,
+        "provider": "Etherscan v2",
+        "topic": "rely"
+      },
+      {
+        "from": 8928158,
+        "to": 26253174,
+        "count": 2,
+        "provider": "Etherscan v2",
+        "topic": "deny"
+      }
+    ],
+    "missingRanges": [],
+    "events": [
+      {
+        "operation": "rely",
+        "guy": "0xbaa65281c2FA2baAcb2cb550BA051525A480D3F4",
+        "caller": "0xb5b06a16621616875A6C2637948bF98eA57c58fa",
+        "blockNumber": 8928158,
+        "transactionIndex": 25,
+        "logIndex": 51,
+        "transactionHash": "0x495402df7d45fe36329b0bd94487f49baee62026d50f654600f6771bd2a596ab",
+        "topics": [
+          "0x65fae35e00000000000000000000000000000000000000000000000000000000",
+          "0x000000000000000000000000b5b06a16621616875a6c2637948bf98ea57c58fa",
+          "0x000000000000000000000000baa65281c2fa2baacb2cb550ba051525a480d3f4",
+          "0x0000000000000000000000000000000000000000000000000000000000000000"
+        ],
+        "data": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000e065fae35e000000000000000000000000baa65281c2fa2baacb2cb550ba051525a480d3f40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "operation": "deny",
+        "guy": "0xb5b06a16621616875A6C2637948bF98eA57c58fa",
+        "caller": "0xb5b06a16621616875A6C2637948bF98eA57c58fa",
+        "blockNumber": 8928158,
+        "transactionIndex": 25,
+        "logIndex": 52,
+        "transactionHash": "0x495402df7d45fe36329b0bd94487f49baee62026d50f654600f6771bd2a596ab",
+        "topics": [
+          "0x9c52a7f100000000000000000000000000000000000000000000000000000000",
+          "0x000000000000000000000000b5b06a16621616875a6c2637948bf98ea57c58fa",
+          "0x000000000000000000000000b5b06a16621616875a6c2637948bf98ea57c58fa",
+          "0x0000000000000000000000000000000000000000000000000000000000000000"
+        ],
+        "data": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000e09c52a7f1000000000000000000000000b5b06a16621616875a6c2637948bf98ea57c58fa0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "operation": "rely",
+        "guy": "0x9759A6Ac90977b93B58547b4A71c78317f391A28",
+        "caller": "0xbaa65281c2FA2baAcb2cb550BA051525A480D3F4",
+        "blockNumber": 8928158,
+        "transactionIndex": 25,
+        "logIndex": 53,
+        "transactionHash": "0x495402df7d45fe36329b0bd94487f49baee62026d50f654600f6771bd2a596ab",
+        "topics": [
+          "0x65fae35e00000000000000000000000000000000000000000000000000000000",
+          "0x000000000000000000000000baa65281c2fa2baacb2cb550ba051525a480d3f4",
+          "0x0000000000000000000000009759a6ac90977b93b58547b4a71c78317f391a28",
+          "0x0000000000000000000000000000000000000000000000000000000000000000"
+        ],
+        "data": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000e065fae35e0000000000000000000000009759a6ac90977b93b58547b4a71c78317f391a280000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "operation": "deny",
+        "guy": "0xbaa65281c2FA2baAcb2cb550BA051525A480D3F4",
+        "caller": "0xbaa65281c2FA2baAcb2cb550BA051525A480D3F4",
+        "blockNumber": 8928244,
+        "transactionIndex": 4,
+        "logIndex": 6,
+        "transactionHash": "0xa5876703f51a7a39e023f07a04bd3dc356a208b6563e863dcd008ab0c5c3d2bd",
+        "topics": [
+          "0x9c52a7f100000000000000000000000000000000000000000000000000000000",
+          "0x000000000000000000000000baa65281c2fa2baacb2cb550ba051525a480d3f4",
+          "0x000000000000000000000000baa65281c2fa2baacb2cb550ba051525a480d3f4",
+          "0x0000000000000000000000000000000000000000000000000000000000000000"
+        ],
+        "data": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000e09c52a7f1000000000000000000000000baa65281c2fa2baacb2cb550ba051525a480d3f40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "reconciled": [
+      {
+        "address": "0xbaa65281c2fa2baacb2cb550ba051525a480d3f4",
+        "calldata": "0xbf353dbb000000000000000000000000baa65281c2fa2baacb2cb550ba051525a480d3f4",
+        "raw": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "actual": "0",
+        "predicted": "0",
+        "agrees": true
+      },
+      {
+        "address": "0xb5b06a16621616875a6c2637948bf98ea57c58fa",
+        "calldata": "0xbf353dbb000000000000000000000000b5b06a16621616875a6c2637948bf98ea57c58fa",
+        "raw": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "actual": "0",
+        "predicted": "0",
+        "agrees": true
+      },
+      {
+        "address": "0x9759a6ac90977b93b58547b4a71c78317f391a28",
+        "calldata": "0xbf353dbb0000000000000000000000009759a6ac90977b93b58547b4a71c78317f391a28",
+        "raw": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "actual": "1",
+        "predicted": "1",
+        "agrees": true
+      }
+    ],
+    "receiptChecks": [
+      {
+        "hash": "0x495402df7d45fe36329b0bd94487f49baee62026d50f654600f6771bd2a596ab",
+        "status": "0x1",
+        "blockHash": "0xa91f7cf409a6b1b69ffc77d15c59eb8c8c442f197be9487c3d8b019448d5aa8b",
+        "receiptAvailable": true,
+        "success": true
+      },
+      {
+        "hash": "0xa5876703f51a7a39e023f07a04bd3dc356a208b6563e863dcd008ab0c5c3d2bd",
+        "status": "0x1",
+        "blockHash": "0xcd864ad87756c78ac18ba655218a19d6f0052d73009be831d28a8a432273173b",
+        "receiptAvailable": true,
+        "success": true
+      }
+    ],
+    "errors": [],
+    "topics": {
+      "rely": "0x65fae35e00000000000000000000000000000000000000000000000000000000",
+      "deny": "0x9c52a7f100000000000000000000000000000000000000000000000000000000"
+    },
+    "scanProvider": "Etherscan v2 indexed archival logs",
+    "startBlock": 8928158,
+    "endBlock": 26253174,
+    "indexedEvidenceProvider": "Etherscan API v2, signed Ethereum mainnet chainid 1",
+    "indexerCompletenessLimit": "Availability of records from external indexer is independently checked by creation block state, receipts and final wards reads",
+    "rangeRequests": 2,
+    "computedEffectiveWards": {
+      "0x9759a6ac90977b93b58547b4a71c78317f391a28": 1,
+      "0xb5b06a16621616875a6c2637948bf98ea57c58fa": 0,
+      "0xbaa65281c2fa2baacb2cb550ba051525a480d3f4": 0
+    },
+    "receiptsComplete": true,
+    "rosterCompletenessProven": true
+  },
+  "errors": [
+    "Approved governance role policy has not been independently established; avoid calling deployment configuration safe"
+  ],
+  "eip712": {
+    "domain": {
+      "name": "Dai Stablecoin",
+      "version": "1",
+      "chainId": 1,
+      "verifyingContract": "0x6b175474e89094c44da98b954eedeac495271d0f"
+    },
+    "abiEncodedPreimage": "0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f0b1461ddc0c1d5ded79a1db0f74dae949050a7c0b28728c724b24958c27a328bc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc600000000000000000000000000000000000000000000000000000000000000010000000000000000000000006b175474e89094c44da98b954eedeac495271d0f",
+    "keccak256": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7",
+    "typedDataHash": "0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7"
+  },
+  "creationLookup": {
+    "provider": "Blockscout Ethereum v2 public indexed address",
+    "path": "/api/v2/addresses/0x6b175474e89094c44da98b954eedeac495271d0f",
+    "attempted": true,
+    "httpStatus": 200,
+    "fields": {
+      "creator_address_hash": "0xb5b06a16621616875A6C2637948bF98eA57c58fa",
+      "creation_tx_hash": null,
+      "creation_block": null,
+      "is_verified": true
+    }
+  },
+  "etherscanCreationLookup": {
+    "provider": "Etherscan v2",
+    "action": "getcontractcreation",
+    "attempted": true,
+    "httpStatus": 200,
+    "status": "1",
+    "message": "OK",
+    "result": [
+      {
+        "contractAddress": "0x6b175474e89094c44da98b954eedeac495271d0f",
+        "contractCreator": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+        "txHash": "0x495402df7d45fe36329b0bd94487f49baee62026d50f654600f6771bd2a596ab",
+        "blockNumber": "8928158",
+        "timestamp": "1573672677",
+        "contractFactory": "0xb5b06a16621616875a6c2637948bf98ea57c58fa",
+        "creationBytecode": ""
+      }
+    ]
+  },
+  "sourceRuntimeReconciliation": {
+    "provider": "configured-RPC_ETHEREUM",
+    "deployedSha256": "5ce810033426a017721777f241665c27bdd4663ca8a1c27558b4b372a1731f4e",
+    "compiledSha256": "5230b924dad23dab334727ba9d4b62c95a6cd4a48242932f8a2946cef264ab97",
+    "bytes": 7904,
+    "metadataSuffixBytes": 43,
+    "exactByteMatch": false,
+    "executablePrefixMatches": true
+  },
+  "creation": {
+    "factory": "0xb5b06a16621616875A6C2637948bF98eA57c58fa",
+    "originEOA": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+    "transactionHash": "0x495402df7d45fe36329b0bd94487f49baee62026d50f654600f6771bd2a596ab",
+    "authenticatedByReceipt": false,
+    "creationBlockAuthenticated": true,
+    "initialFactoryWardProven": true,
+    "transaction": {
+      "hash": "0x495402df7d45fe36329b0bd94487f49baee62026d50f654600f6771bd2a596ab",
+      "from": "0xddb108893104de4e1c6d0e47c42237db4e617acc",
+      "to": "0xbaa65281c2fa2baacb2cb550ba051525a480d3f4",
+      "input": "0x64b07f210000000000000000000000000000000000000000000000000000000000000001",
+      "blockNumber": "0x883b9e"
+    },
+    "receipt": {
+      "status": "0x1",
+      "contractAddress": null,
+      "blockNumber": "0x883b9e",
+      "transactionIndex": "0x19"
+    },
+    "parentReceiptVerified": true,
+    "blockCodeTransition": {
+      "blockNumber": 8928158,
+      "beforeSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterSha256": "5ce810033426a017721777f241665c27bdd4663ca8a1c27558b4b372a1731f4e",
+      "emptyBefore": true,
+      "codeAfter": true
+    },
+    "initialFactoryWard": {
+      "factory": "0xb5b06a16621616875A6C2637948bF98eA57c58fa",
+      "data": "0xbf353dbb000000000000000000000000b5b06a16621616875a6c2637948bf98ea57c58fa",
+      "raw": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "ward": "0",
+      "blockNumber": 8928158
+    },
+    "creationBlockFactoryWard": "0",
+    "indexedInternalCreation": {
+      "error": "This operation was aborted"
+    },
+    "factoryAuthorizationSequence": {
+      "constructorSeedsWard": true,
+      "firstSuccessfulAuthByFactory": true,
+      "orderedFactorySelfDeny": true,
+      "postCreationBlockWardZero": true
+    }
+  },
+  "expectedGovernancePolicy": {
+    "status": "UNESTABLISHED",
+    "reason": "No independently authenticated historic allowed-ward governance roster provided or verified by approved test endpoints. Effective role authority does not itself prove intended operator policy."
+  }
+}

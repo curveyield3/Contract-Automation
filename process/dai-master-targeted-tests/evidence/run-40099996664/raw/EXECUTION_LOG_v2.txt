@@ -1,0 +1,1 @@
+{"completed":true,"runUrl":"https://github.com/curveyield3/Contract-Automation/actions/runs/40099996664","successfulRPC":17,"failedRPC":0,"historical":9,"assertions":16,"pass":16,"fail":0,"domain":true,"roster":true,"errors":["Approved governance role policy has not been independently established; avoid calling deployment configuration safe"]}

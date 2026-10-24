@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "curveyield-lite-master-targeted-test-result-v1",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "segmentId": "reviewer-2-phase-04",
+  "requestId": "ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa",
+  "sourceSha256": "457b6121c4a613730251f2f81ae17d27c9c08674696b73d1f5828c623e705ee5",
+  "reviewer": "test-executor",
+  "tests": [
+    {
+      "candidateId": "X001-ROLE-VERIFY",
+      "disposition": "INCONCLUSIVE",
+      "executionNarrative": "Read-only pinned Ethereum mainnet follow-up, no synthetic permit retest. https://github.com/curveyield3/Contract-Automation/actions/runs/40099996664. Pinned block 26253174, DAI 0x6b175474e89094c44da98b954eedeac495271d0f; existing round-one fixture 9088df2cab5bf6531ec0f10c1a65882f62dcb206c9dfaa5a18c553a2de93097b retained, not rerun.",
+      "observedAssertions": "{\"assertions\":16,\"passed\":16,\"failed\":0,\"successfulRPC\":17,\"failedRPC\":0,\"successfulHistoricalCalls\":9,\"creationAuthenticated\":false,\"roleCoverageComplete\":true,\"roleReceiptsComplete\":true,\"effectiveRosterComplete\":true,\"historicalDomain\":{\"provider\":\"configured-RPC_ETHEREUM\",\"blockHash\":\"0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f\",\"calldata\":\"0x3644e515\",\"raw\":\"0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7\",\"stored\":\"0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7\",\"expected\":\"0xdbb8cf42e1ecb028be3f3dbc922e1d878b963f411dc388ced501601c60f7c6f7\",\"equal\":true},\"totalSupply\":{\"provider\":\"configured-RPC_ETHEREUM\",\"blockTag\":\"0x1909776\",\"raw\":\"0x00000000000000000000000000000000000000000eae8f7b523bbb405f3b80e3\",\"rawBaseUnits\":\"4543820803393883483972272355\",\"decimals\":18,\"wholeDai\":\"4543820803.393883483972272355\"},\"governancePolicy\":{\"status\":\"UNESTABLISHED\",\"reason\":\"No independently authenticated historic allowed-ward governance roster provided or verified by approved test endpoints. Effective role authority does not itself prove intended operator policy.\"},\"gapReport\":[],\"runnerExit\":\"0\",\"errors\":[\"Approved governance role policy has not been independently established; avoid calling deployment configuration safe\"]}",
+      "impactAssessment": "Every deployed ward can mint uncapped under source; actual authorized ward identities, independent permitted governance policy and monetary exposure require authenticated evidence. No live contract mutation or asset loss measured. A valid signed infinite permit is not forged approval. Historical raw supply, if present, is supply—not measured theft.",
+      "executedCalls": 9,
+      "evidence": [
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/EIP712_PREIMAGE_v2.json",
+          "sha256": "02e8ff5748abc6ed638a6b7ff2477296e3acff472c02582363424315d8ee1df6"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/EXECUTION_EXIT_v2.txt",
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/EXECUTION_LOG_v2.txt",
+          "sha256": "b0015283b10d6951a055ed2e58cb571594766032bc72351ac0896019e317cbaa"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/EXECUTION_v2.json",
+          "sha256": "93651a7cd2bc004d4d649a6c0961d443a8e01207f91b6d188fa9df8044dce60a"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/INSTALL_LOG_v2.txt",
+          "sha256": "c36fe6ab204496ac40f6803709755b90d095ff2fdfae2e286ac589369d2890c0"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/RPC_TRANSCRIPT_v2.json",
+          "sha256": "bf8a9f755a9ee8061cc403d7fe7787473d172b17bf44c4ea670b8aabc3a19b0f"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/SUMMARY_v2.json",
+          "sha256": "341fba138f8012c33af9e578fc9e7911dedd9e1eaa2ff57b4fbe6f20512e2bed"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/TOOLCHAIN_v2.txt",
+          "sha256": "33e26f35db6e57ce0c486ddc815fe966867e4f649e418eaf323f75f4720eb8e9"
+        }
+      ],
+      "remainingUncertainty": "A material deployed-domain/role-configuration finding is unresolved unless the historical DOMAIN_SEPARATOR, authenticated deployment-to-bound-block role log coverage and reconciled wards reads, and independent intended governance role policy are all established. Inspect raw RPC errors and exact missing ranges; obtain authorized archival/indexed sources as needed. Do not issue final audit PASS with missing proof."
+    }
+  ]
+}
