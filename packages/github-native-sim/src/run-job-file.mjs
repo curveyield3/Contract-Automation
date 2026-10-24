@@ -310,7 +310,7 @@ export async function runGitHubNativeJob(input, {
     }
   } else {
     const requestedAnalysis = request.configuration.analysis ?? {};
-    const stage2aConfig = { slither: requestedAnalysis.slither !== false, medusa: requestedAnalysis.medusa !== false, nativeFuzz: requestedAnalysis.nativeFuzz?.enabled === true };
+    const stage2aConfig = { slither: requestedAnalysis.slither !== false, medusa: requestedAnalysis.medusa !== false && requestedAnalysis.medusa !== undefined, nativeFuzz: requestedAnalysis.nativeFuzz?.enabled === true };
     try {
       await runStage2aAnalysis(stage2aConfig, {
         runSlither: async () => {
