@@ -135,6 +135,17 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Validate OIDC runner and browser session credentials
+        shell: bash
+        env:
+          TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_AUDIENCE_VALUE: ${{ secrets.TS_AUDIENCE }}
+        run: |
+          set -euo pipefail
+          [ -n "$TS_CLIENT_ID" ] || { echo '::error::Missing TS_OAUTH_CLIENT_ID (Tailscale OIDC client ID)'; exit 1; }
+          [ -n "$TS_AUDIENCE_VALUE" ] || { echo '::error::Missing TS_AUDIENCE (Tailscale OIDC audience)'; exit 1; }
+          [ -n "$CHATGPT_STORAGE_STATE_B64" ] || { echo '::error::Missing CHATGPT_STORAGE_STATE_B64 for existing browser session'; exit 1; }
+          echo 'OIDC identity and browser-session configuration present; no credentials printed.'
       - name: Select Audit-Controller credential
         if: inputs.gate_mode == 'LITE'
         env:
