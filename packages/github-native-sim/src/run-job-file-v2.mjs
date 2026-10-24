@@ -227,23 +227,66 @@ export async function runGitHubNativeJobV2(input, {
     return attachExecutionDisposition({ request: v26Request, result: preflightFailure(v26Request, preflight), requestPath });
   }
 
-  let result = await runGitHubNativeJobV1(request, {
-    workspaceRoot: path.join(workspaceRoot, 'execution'),
-    environment:executionEnvironment,
-    ...delegateOptions,
-    verifiedPhase0ForkState:verifiedState,
-  });
-  result = { ...result, preflight, ...(verifiedState?{phase0ForkStateReuse:{
-    status:'VERIFIED',sha256:verifiedState.sha256,chainId:verifiedState.chainId,
-    finalBlock:verifiedState.finalBlock}}:{}) };
+  // Phase-5 lifecycle requests may also require Foundry fuzz / explicit
+  // Medusa execution BEFORE the deterministic lifecycle steps. Both adapters
+  // require the trusted local Anvil URL; the archive dRPC endpoint is only
+  // the upstream state source and must never be handed to mutation tools.
+  const analysis = request.configuration?.analysis ?? {};
+  const forkAnalysisRequested = v26Request.phaseId === 'fork-simulation-lifecycle'
+    && (analysis.nativeFuzz?.enabled === true
+      || (analysis.medusa !== false && analysis.medusa !== undefined));
+  let forkAnalysisSession = null;
+  try {
+    if (forkAnalysisRequested) {
+      const simulation = request.configuration?.simulation;
+      const frozenBlockHash = preflight?.checks?.pinnedBlockState?.upstreamHash;
+      const frozenBlockNumber = simulation?.block;
+      // This shared mutable-Anvil adapter is presently qualified for chain 1.
+      // Do not silently downgrade non-Ethereum/Phase-0 snapshot requests.
+      if (simulation?.chain !== 'ethereum'
+        || !Number.isSafeInteger(frozenBlockNumber)
+        || !/^0x[0-9a-fA-F]{64}$/.test(String(frozenBlockHash ?? ''))) {
+        const blocked = {status:'FAIL',failureKind:'FORK_ANALYSIS_HISTORICAL_PIN_MISSING',
+          reason:'Foundry/Medusa requires a verified Ethereum historical block/hash from trusted fork preflight',
+          nextState:'PHASE7_FORK_PREFLIGHT'};
+        return attachExecutionDisposition({request:v26Request,
+          result:preflightFailure(v26Request,blocked),requestPath});
+      }
+      forkAnalysisSession = await createMutableRpcSession({
+        environment:executionEnvironment, frozenBlockNumber, frozenBlockHash,
+      });
+      if (forkAnalysisSession?.evidence?.status !== 'PASS' || !forkAnalysisSession?.runtime?.url) {
+        const blocked={status:'FAIL',
+          failureKind:forkAnalysisSession?.evidence?.failureKind ?? 'MUTABLE_RPC_UNAVAILABLE',
+          reason:forkAnalysisSession?.evidence?.reason ?? 'Trusted historical Anvil fork failed identity/pin preflight',
+          nextState:'PHASE7_FORK_PREFLIGHT'};
+        return attachExecutionDisposition({request:v26Request,
+          result:preflightFailure(v26Request,blocked),requestPath});
+      }
+    }
+    let result = await runGitHubNativeJobV1(request, {
+      workspaceRoot: path.join(workspaceRoot, 'execution'),
+      environment:executionEnvironment,
+      ...delegateOptions,
+      ...(forkAnalysisSession ? {phase6MutableRpc:phase6MutableRpcRuntime({session:forkAnalysisSession})} : {}),
+      verifiedPhase0ForkState:verifiedState,
+    });
+    result = { ...result, preflight, ...(verifiedState?{phase0ForkStateReuse:{
+      status:'VERIFIED',sha256:verifiedState.sha256,chainId:verifiedState.chainId,
+      finalBlock:verifiedState.finalBlock}}:{}) };
 
-  if (v26Request.phaseId === 'fork-simulation-lifecycle') {
-    result = await enrichPhase7V26EvidenceV1({ request: v26Request, result, environment, fetchImpl: delegateOptions.fetchImpl ?? globalThis.fetch });
-  } else {
-    result = attachReproductionEvidenceV1(v26Request, result);
+    if (v26Request.phaseId === 'fork-simulation-lifecycle') {
+      result = await enrichPhase7V26EvidenceV1({ request: v26Request, result, environment, fetchImpl: delegateOptions.fetchImpl ?? globalThis.fetch });
+    } else {
+      result = attachReproductionEvidenceV1(v26Request, result);
+    }
+
+    return attachExecutionDisposition({ request: v26Request, result, requestPath });
+  } finally {
+    // Release the ephemeral local Anvil even when compilation, analysis,
+    // lifecycle assertions or evidence serialization fails.
+    if (forkAnalysisSession?.close) await forkAnalysisSession.close().catch(() => {});
   }
-
-  return attachExecutionDisposition({ request: v26Request, result, requestPath });
 }
 
 export const runGitHubNativeJob = runGitHubNativeJobV2;
