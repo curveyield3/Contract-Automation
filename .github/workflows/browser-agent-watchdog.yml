@@ -698,6 +698,11 @@ jobs:
             gate_interphase_work_packet_path="$(jq -r '.gate.interphase.workPacketPath // empty' /tmp/watchdog-state.json)"
             gate_interphase_completion_path="$(jq -r '.gate.interphase.completionPath // empty' /tmp/watchdog-state.json)"
             receipt_gate_mode=false
+            # Preserve controller rejection identity across sweeps; only an actual
+            # browser delivery marks that rework as notified.
+            rework_identity=""
+            rework_feedback=""
+            force_rework_poke=false
             if [ "$gate_mode" = "LITE" ] && [[ "$gate_path" == "Audit Campaign Directory/campaigns/"*.json ]] && [ -n "${AUDIT_CONTROLLER_GITHUB_TOKEN:-}" ]; then
               receipt_gate_mode=true
               encoded_directory="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$gate_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
@@ -763,6 +768,40 @@ jobs:
                     mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
                     persist_state || true
                     gate_expected_phase="$assignment_phase"
+                  fi
+
+                  # A rejected phase has no PASS successor and no controller-driven
+                  # reviewer wake. Read the already published work packet and deliver
+                  # exact errors to the existing reviewer at the NEXT watchdog sweep.
+                  # Do not start a controller run here: Phase 5 can execute tests,
+                  # which require separate explicit audit-owner authorization.
+                  if [ "$assignment_status" = "REWORK_REQUIRED" ] &&
+                     [ "$worker_role" = "reviewer" ] &&
+                     [ "$assignment_phase" = "$gate_expected_phase" ] &&
+                     [ -n "$packet_path" ]; then
+                    encoded_packet="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+                    if [ -n "$encoded_packet" ] &&
+                       printf '%s' "$encoded_packet" | base64 -d > /tmp/lite-rework-packet.json &&
+                       jq -e --arg id "$campaign_id" --argjson phase "$assignment_seq" '
+                         .campaignId==$id and .phaseSequence==$phase
+                         and .controllerValidation.status=="FAIL"
+                         and (.submissionAttempt|type=="number")
+                       ' /tmp/lite-rework-packet.json >/dev/null; then
+                      rework_identity="$(jq -r '[.submissionAttempt, .submittedAt, .controllerValidation.status] | map(tostring) | join(":")' /tmp/lite-rework-packet.json)"
+                      rework_feedback="$(jq -r --arg packet "$packet_path" '
+                        "CONTROLLER NEEDS_REWORK: inspect the CURRENT failed phase packet " + $packet
+                        + " (submission attempt " + (.submissionAttempt|tostring) + ").\n"
+                        + ((.controllerValidation.deficiencies // [])[:8] | join("\n- "))
+                        + "\nThis is not an accepted phase or a successful simulation. Compare failed runner commit/timestamp against CURRENT Contract-Automation main before diagnosing; do not repeat an obsolete error after a subsequent repair. Fix the precise cause using the existing runner and controller, and keep all accepted reviewer shards. Do not create, modify, or run tests or re-dispatch Phase 5 machine execution without explicit audit-owner authorization. Resume all non-test work immediately, then report the exact remaining authorization/dependency."
+                      ' /tmp/lite-rework-packet.json | cut -c1-3800)"
+                      previously_notified="$(jq -r '.lastReworkNotifiedIdentity // empty' /tmp/watchdog-state.json)"
+                      if [ "$rework_identity" != "$previously_notified" ]; then
+                        force_rework_poke=true
+                        echo "Controller rejection $rework_identity requires immediate reviewer notification." >> "$GITHUB_STEP_SUMMARY"
+                      fi
+                    else
+                      echo "::warning::Rework packet missing or invalid; watchdog retains the target and retries."
+                    fi
                   fi
 
                   # Assignment-v2 controller validation is reviewer-request driven.
@@ -988,8 +1027,12 @@ jobs:
                 phase_dir="$(printf 'work/phase-%02d' "$phase_n")"
                 if [[ "$(jq -r '.gate.expectedMilestoneId // empty' /tmp/watchdog-state.json)" == DISCOVERY_* ]]; then
                   chat_paths+=("$campaign_root/$phase_dir/discovery")
+                elif [ "$phase_n" = "5" ]; then
+                  # Controller writes generated Phase-5 submissions/reports and
+                  # evidence. Those commits are NOT reviewer progress.
+                  chat_paths+=("$campaign_root/$phase_dir/shards")
                 else
-                  chat_paths+=("$campaign_root/$phase_dir" "$campaign_root/submissions")
+                  chat_paths+=("$campaign_root/$phase_dir")
                 fi
               fi
               [ "${#chat_paths[@]}" -gt 0 ] || chat_paths=("$campaign_root")
@@ -1021,7 +1064,7 @@ jobs:
             fi
             elapsed_minutes="$(( (now_epoch - reference_epoch) / 60 ))"
 
-            if [ "$elapsed_minutes" -lt "$poke_interval_minutes" ]; then
+            if [ "$force_rework_poke" != true ] && [ "$elapsed_minutes" -lt "$poke_interval_minutes" ]; then
               echo "Watchdog $WAKE_ID: controller still active; no ChatGPT read. Next X11 poke eligible after ${poke_interval_minutes} minutes (elapsed=${elapsed_minutes})."
               jq --argjson elapsed "$elapsed_minutes" --argjson interval "$poke_interval_minutes" \
                 '.lastDecision="WAITING_NO_CHATGPT_READ"
@@ -1052,7 +1095,11 @@ jobs:
             echo "Watchdog $WAKE_ID: elapsed-time gate reached; sending configured GET BACK TO WORK using the proven Phase-1 fixed X11 path."
             export WAKE_MODE='resume_existing'
             export CHAT_URL="$chat_url"
-            export WAKE_MESSAGE="$(jq -r '.idleMessage' /tmp/watchdog-state.json)"
+            if [ "$force_rework_poke" = true ] && [ -n "$rework_feedback" ]; then
+              export WAKE_MESSAGE="$rework_feedback"
+            else
+              export WAKE_MESSAGE="$(jq -r '.idleMessage' /tmp/watchdog-state.json)"
+            fi
             export WAKE_RESULT_PATH="/tmp/$safe_id-poke.json"
             # A stalled chat still showing the stop button is stopped first so the poke lands.
             export STOP_BEFORE_SEND='true'
@@ -1066,7 +1113,10 @@ jobs:
 
             if [ "$poke_ok" = true ]; then
               jq --argjson interval "$poke_interval_minutes" \
+                 --arg rework "$rework_identity" \
+                 --argjson force "$force_rework_poke" \
                 '.lastPokedAt=(now|todate)
+                 | (if $force and $rework!="" then .lastReworkNotifiedIdentity=$rework else . end)
                  | .pokeCount=((.pokeCount // 0)+1)
                  | .repair.consecutiveIdlePokes=((.repair.consecutiveIdlePokes // 0)+1)
                  | .lastDecision="TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ"
