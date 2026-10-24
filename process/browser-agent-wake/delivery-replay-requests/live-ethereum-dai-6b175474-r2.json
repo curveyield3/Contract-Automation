@@ -3,6 +3,8 @@
   "campaignId": "live-ethereum-dai-6b175474-r2",
   "detailRef": "controller/results/80f1434e6a478cc63c5c/INDEX_v1.json",
   "auditControllerRef": "main",
-  "purpose": "redeliver master reviewer wake for admitted Phase 4 targeted test evidence",
-  "expectedWakeId": "live-ethereum-dai-6b175474-r2-delivery-80f1434e6a478cc63c5c"
+  "purpose": "redeliver accepted Phase 4 master review instruction after migrating to native GitHub OIDC Tailnet join without API auth-key creation",
+  "expectedWakeId": "live-ethereum-dai-6b175474-r2-delivery-80f1434e6a478cc63c5c",
+  "deliveryAttempt": 2,
+  "authentication": "native-tailscale-up-client-id-audience"
 }
