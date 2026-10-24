@@ -184,9 +184,11 @@ Missing harness support is not permission to modify production source or bypass 
 
 Authoritative Audit V7 full simulation uses Anvil only.
 
-The approved Audit V7 mutable Ethereum RPC profile is:
+The approved Ethereum archive credential is the existing **GitHub Actions secret `RPC_ETHEREUM`** (the provided dRPC archival endpoint). The trusted `audit-controller-execution.yml` job maps it to **`ETHEREUM_FORK_RPC_URL`**, the environment profile consumed by the existing Anvil-based V7/Phase-6 engine.
 
-`SIM_ARCHIVE_PRIMARY_ETHEREUM_01`
+**Required simulation behavior:** launch the existing local ephemeral Anvil fork with that upstream credential and a pinned historical Ethereum block; verify chain ID, pinned block number/hash, deployed address/code, and required archive state; run actual ABI actions on the isolated Anvil fork. Anvil's local writable fork and dRPC's upstream historical state are complementary, not alternatives. No transactions may be broadcast to mainnet.
+
+If a reviewer claims an archival endpoint is missing, check the existing `RPC_ETHEREUM` → `ETHEREUM_FORK_RPC_URL` workflow mapping, workflow run ID, pinned-block access and Anvil readiness **before** declaring the tests impossible. Do not create a synthetic substitute, custom unauthenticated RPC URL, or another per-campaign workflow.
 
 Never serialize its URL into requests, configs, logs, artifacts, or reports.
 
