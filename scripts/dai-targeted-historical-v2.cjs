@@ -11,6 +11,16 @@ const frozen=26253174,tag='0x'+frozen.toString(16);
 const hash='0x2f25fb08063d74fbdc6eaf56d1482019b6055b07c72c6b14c46d48df1ab7f83f';
 const expectedRuntimeSha256='5230b924dad23dab334727ba9d4b62c95a6cd4a48242932f8a2946cef264ab97';
 const sourceSha256='457b6121c4a613730251f2f81ae17d27c9c08674696b73d1f5828c623e705ee5';
+const sourceUnit=JSON.parse(fs.readFileSync('process/dai-master-targeted-tests/source-compiler-unit_v1.json','utf8'));
+const solc=require('solc');
+const sourceInput=JSON.parse(JSON.stringify(sourceUnit.input));
+sourceInput.settings.outputSelection={'*':{'*':['evm.deployedBytecode.object']}};
+const sourceOutput=JSON.parse(solc.compile(JSON.stringify(sourceInput)));
+if(sourceOutput.errors?.some(x=>x.severity==='error'))throw Error('DAI compiler error');
+const sourceRuntime='0x'+sourceOutput.contracts['Dai.sol'].Dai.evm.deployedBytecode.object;
+const sourceRuntimeSha=sha256(Buffer.from(sourceRuntime.slice(2),'hex'));
+const sourceConstructorSeedsWard=sourceUnit.input.sources['Dai.sol'].content.includes('wards[msg.sender] = 1;');
+
 const round1Sha256='9088df2cab5bf6531ec0f10c1a65882f62dcb206c9dfaa5a18c553a2de93097b';
 const runUrl='https://github.com/'+process.env.GITHUB_REPOSITORY+'/actions/runs/'+process.env.GITHUB_RUN_ID;
 const sha256=x=>crypto.createHash('sha256').update(x).digest('hex');
@@ -105,8 +115,13 @@ async function main(){
     const code=await rpc(p,'eth_getCode',[target,tag]);
     const got=sha256(Buffer.from((code||'0x').slice(2),'hex'));
     trial.codeSha256=got;
-    assert(p.label+' deployed runtime matches accepted source',got,expectedRuntimeSha256);
-    if(got===expectedRuntimeSha256){readCodePeer=p;output.observed.runtime={provider:p.label,sha256:got,blockHash:block.hash}};
+    const sameSource=sourceRuntimeSha===expectedRuntimeSha256;
+    const sameExecutable=sameSource&&code.length===sourceRuntime.length&&code.slice(0,-86).toLowerCase()===sourceRuntime.slice(0,-86).toLowerCase();
+    output.sourceRuntimeReconciliation={provider:p.label,deployedSha256:got,compiledSha256:sourceRuntimeSha,bytes:(code.length-2)/2,
+      metadataSuffixBytes:43,exactByteMatch:code.toLowerCase()===sourceRuntime.toLowerCase(),executablePrefixMatches:sameExecutable};
+    assert(p.label+' compile reproduces accepted frozen runtime digest',sourceRuntimeSha,expectedRuntimeSha256);
+    assert(p.label+' deployed executable matches accepted source aside from compiler metadata',sameExecutable,true);
+    if(sameExecutable){readCodePeer=p;output.observed.runtime={provider:p.label,sha256:got,blockHash:block.hash,sourceExecutableMatch:true}};
    }catch(e){trial.codeError=asText(e)}
    try {
     const raw=await rpc(p,'eth_call',[{to:target,data:iface.encodeFunctionData('DOMAIN_SEPARATOR',[])},tag]);
@@ -163,8 +178,8 @@ async function main(){
       const raw=await rpc(chainPeer,'eth_call',[{to:target,data},'0x'+blockNum.toString(16)]);
       const ward=BigInt(iface.decodeFunctionResult('wards',raw)[0]).toString();
       output.creation.initialFactoryWard={factory,data,raw,ward,blockNumber:blockNum};
-      assert('verified creation-block factory ward is one',ward,'1');
-      output.creation.initialFactoryWardProven=ward==='1'&&output.creation.creationBlockAuthenticated;
+      // Getter is post-transaction; a same-tx self-deny returns zero here.
+      output.creation.creationBlockFactoryWard=ward;
      }catch(e){output.creation.initialWardError=asText(e)}
     }
    }
@@ -279,6 +294,26 @@ async function main(){
   }catch(e){output.roleScan.receiptChecks.push({hash:txh,error:asText(e),success:false})}
  }
  output.roleScan.receiptsComplete=output.roleScan.receiptChecks.length===new Set(events.map(e=>e.transactionHash)).size&&output.roleScan.receiptChecks.every(r=>r.success);
+ // The initial factory ward is authorized within the constructor, but the
+ // factory grants a new ward and denies itself in the SAME creation transaction.
+ // Source-grounded positive proof is the receipt-successful authenticated rely
+ // by that factory before its self-deny, not a post-transaction getter of 1.
+ const first=events[0]||null;
+ const factoryLower=String(output.creation.factory||'').toLowerCase();
+ const firstAuthenticated=Boolean(sourceConstructorSeedsWard&&output.creation.creationBlockAuthenticated&&
+   first?.operation==='rely'&&first.caller.toLowerCase()===factoryLower&&
+   first.transactionHash===output.creation.transactionHash&&
+   output.roleScan.receiptChecks.some(r=>r.hash===first.transactionHash&&r.success));
+ const ownDeny=events.some(e=>e.operation==='deny'&&e.guy.toLowerCase()===factoryLower&&
+   e.caller.toLowerCase()===factoryLower&&e.transactionHash===output.creation.transactionHash&&
+   e.logIndex>first?.logIndex);
+ const postTransactionZero=output.creation.creationBlockFactoryWard==='0';
+ output.creation.factoryAuthorizationSequence={constructorSeedsWard:sourceConstructorSeedsWard,
+   firstSuccessfulAuthByFactory:firstAuthenticated,orderedFactorySelfDeny:ownDeny,
+   postCreationBlockWardZero:postTransactionZero};
+ output.creation.initialFactoryWardProven=firstAuthenticated&&ownDeny&&postTransactionZero&&output.roleScan.receiptsComplete;
+ assert('constructor factory authorization and same-transaction self-deny established',output.creation.initialFactoryWardProven,true);
+
  if(archivePeer){
   const candidates=new Set([...effective.keys()]);
   if(output.creation.factory)candidates.add(output.creation.factory.toLowerCase());
