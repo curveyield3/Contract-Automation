@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "curveyield-lite-master-targeted-test-result-v1",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "segmentId": "reviewer-2-phase-04",
+  "requestId": "ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa",
+  "sourceSha256": "457b6121c4a613730251f2f81ae17d27c9c08674696b73d1f5828c623e705ee5",
+  "reviewer": "test-executor",
+  "tests": [
+    {
+      "candidateId": "X001-ROLE-VERIFY",
+      "disposition": "INCONCLUSIVE",
+      "executionNarrative": "Read-only pinned Ethereum mainnet follow-up, no synthetic permit retest. https://github.com/curveyield3/Contract-Automation/actions/runs/40099873392. Pinned block 26253174, DAI 0x6b175474e89094c44da98b954eedeac495271d0f; existing round-one fixture 9088df2cab5bf6531ec0f10c1a65882f62dcb206c9dfaa5a18c553a2de93097b retained, not rerun.",
+      "observedAssertions": "{\"assertions\":0,\"passed\":0,\"failed\":0,\"successfulRPC\":0,\"failedRPC\":0,\"successfulHistoricalCalls\":0,\"creationAuthenticated\":false,\"roleCoverageComplete\":false,\"roleReceiptsComplete\":false,\"effectiveRosterComplete\":false,\"historicalDomain\":null,\"totalSupply\":null,\"governancePolicy\":null,\"gapReport\":[],\"runnerExit\":\"1\",\"errors\":[\"Execution JSON unavailable; inspect machine execution log\"]}",
+      "impactAssessment": "Every deployed ward can mint uncapped under source; actual authorized ward identities, independent permitted governance policy and monetary exposure require authenticated evidence. No live contract mutation or asset loss measured. A valid signed infinite permit is not forged approval. Historical raw supply, if present, is supply—not measured theft.",
+      "executedCalls": 0,
+      "evidence": [
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/EXECUTION_EXIT_v2.txt",
+          "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/EXECUTION_LOG_v2.txt",
+          "sha256": "bc51d887536fb4f72ccccb44901bb8614a9186de9226fd6195d3431e1cc5cc02"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/INSTALL_LOG_v2.txt",
+          "sha256": "d632032163de88073cc29737f7696177ac7c5c7feb5c077563525aa0d29a461f"
+        },
+        {
+          "path": "campaigns/live-ethereum-Dai-6b175474 r2/evidence/master-targeted-tests/ee047e2d311043c6fe268f665f881376cc54f5d52daa51130a8273da720d4faa/TOOLCHAIN_v2.txt",
+          "sha256": "33e26f35db6e57ce0c486ddc815fe966867e4f649e418eaf323f75f4720eb8e9"
+        }
+      ],
+      "remainingUncertainty": "A material deployed-domain/role-configuration finding is unresolved unless the historical DOMAIN_SEPARATOR, authenticated deployment-to-bound-block role log coverage and reconciled wards reads, and independent intended governance role policy are all established. Inspect raw RPC errors and exact missing ranges; obtain authorized archival/indexed sources as needed. Do not issue final audit PASS with missing proof."
+    }
+  ]
+}
