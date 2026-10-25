@@ -119,28 +119,6 @@ jobs:
           git commit -m "audit(phase0): seal automated bootstrap $CAMPAIGN_ID"
           git push origin "HEAD:$AUDIT_CONTROLLER_REF"
 
-      - name: Deliver Phase 1 directly to the single lite-solo chat
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          slug="$(printf '%s' "$CAMPAIGN_ID" | sed -E 's/-r[0-9]+$//')"
-          directory="Audit Campaign Directory/campaigns/$slug.json"
-          file=".audit-controller/$directory"
-          test -s "$file"
-          jq -e --arg campaign "$CAMPAIGN_ID" \
-            '.campaignId==$campaign and .mode=="LITE_SOLO" and .agent.actorId=="lite-solo-agent" and .currentAssignment.reviewer=="lite-solo-agent" and .currentAssignment.phaseSequence==1 and .campaignStatus=="ACTIVE" and .deliveryTransport=="AGENT_DELIVERY"' "$file" >/dev/null
-          chat="$(jq -r '.agent.chatUrl' "$file")"
-          authority='Audit Skill - Lite-Solo Authority/lite-solo/SKILL.md'
-          message="You are lite-solo-agent, the only auditor for $CAMPAIGN_ID. In curveyield3/Audit-Controller open $authority and $directory, then the exact Phase-1 START_HERE at phases/phase-1/START_HERE.md inside the bound authority. Complete substantive fields in the currentAssignment shards. Submit only to process/agent-upload/lite-solo-phase-boundary/ using schemaVersion curveyield-lite-solo-phase-boundary-request-v1, inspect the controller response, repair and resubmit until PASS, and continue every subsequent assignment in THIS SAME CHAT without handoffs or master review. No tests without the explicit human authorization applicable to that execution."
-          encoded="$(printf '%s' "$message" | base64 -w0)"
-          gh workflow run lite-work-relay-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            -f operation=deliver -f campaign_id="$CAMPAIGN_ID" -f campaign_path="$CAMPAIGN_PATH" \
-            -f wake_id="$CAMPAIGN_ID-lite-solo-phase-1" -f phase_id=phase-1 \
-            -f chat_url="$chat" -f wake_message_b64="$encoded" -f worker_role=lite-solo-agent \
-            -f gate_state_path="$directory" -f gate_expected_milestone_id=PHASE_1_WORK_PACKET
-
       - name: Summarize
         shell: bash
         run: |
@@ -152,5 +130,5 @@ jobs:
             echo "- Phase 0 agent: none"
             echo "- Phase-0 receipt: sealed and validated"
             echo "- Separate completion/validation/handoff receipt files: not created"
-            echo "- First lite-solo assignment delivered to the sole bound chat using existing Agent Delivery transport"
+            echo "- Phase 1 assignment materialized; auditor opens Campaign Directory directly; no wake or delivery"
           } >> "$GITHUB_STEP_SUMMARY"
