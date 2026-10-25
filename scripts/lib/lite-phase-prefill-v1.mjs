@@ -622,13 +622,25 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     const candidateTargets=(form.actions?.['step-2']?.outputs?.targetDispositions??[])
       .filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
     const status=new Map(candidateTargets.map(x=>[x.candidateKey,x.reproductionStatus]));
+    // Phase 4 assigns discovery keys (X001-*), whereas Phase 5 often assigns
+    // controller target keys (CAND-*). Never interpret an unmatched ID as a
+    // candidate-wide evidence failure. Bind only through a unique exact source
+    // anchor in the recorded Phase-5 reconciliation, not array position.
+    const p5Reconciliation=p5?.actions?.['step-2']?.outputs?.reconciliationRecords??[];
+    const anchorTargets=new Map(),duplicateAnchors=new Set();
+    for(const row of p5Reconciliation){
+      if(!row||typeof row!=='object'||!row.sourceAnchor||!row.subjectKey||!status.has(row.subjectKey))continue;
+      if(anchorTargets.has(row.sourceAnchor))duplicateAnchors.add(row.sourceAnchor);
+      else anchorTargets.set(row.sourceAnchor,row.subjectKey);
+    }
+    for(const anchor of duplicateAnchors)anchorTargets.delete(anchor);
     const candidateRows=new Map();
     for(const item of sources){
       const key=item.tempKey??item.candidateKey;
       if(!key||candidateRows.has(key))continue;
       candidateRows.set(key,{
         candidateKey:key,sourceAnchor:item.sourceAnchor??item.anchors?.[0]??'NONE_IDENTIFIED',
-        phase5Result:status.get(key)??'NOT_EXECUTED',
+        phase5Result:status.get(key)??status.get(anchorTargets.get(item.sourceAnchor??item.anchors?.[0]))??'NOT_EXECUTED',
         requestDirectory:'controller/phase6-tests/CP-'+String(key).replace(/[^A-Za-z0-9._-]/g,'_')+'/',
         verdict:'<REQUIRED>',harnessDesign:'<REQUIRED>',dispatchRounds:'<REQUIRED>',
         requestPaths:'<REQUIRED>',ledgerRef:'<REQUIRED>',
