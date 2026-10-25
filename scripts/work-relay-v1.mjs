@@ -238,13 +238,13 @@ function sweepOne(campaign){
     }
     const age=p=>p?(Date.now()-Date.parse(p))/60000:Infinity;
     if(s.current){
-      if(age(s.current.issuedAt)>30 && s.transportTimeouts<3){
-        const newValue=Math.max(s.transportTimeouts,Math.floor(age(s.current.issuedAt)/30));
+      if(age(s.current.issuedAt)>10 && s.transportTimeouts<3){
+        const newValue=Math.max(s.transportTimeouts,Math.floor(age(s.current.issuedAt)/10));
         if(newValue!==s.transportTimeouts){s.transportTimeouts=Math.min(3,newValue);changed=true;}
       }
       if(s.transportTimeouts>=3){
         console.error('AGENT_DELIVERY_UNCONFIRMED: '+campaign+
-          ' no first-line receipt for 90 minutes; archiving failed command and requesting repair');
+          ' no first-line receipt for 30 minutes; archiving failed command and requesting repair');
         const stranded=s.current;
         s.unconfirmedCommands=(s.unconfirmedCommands||[]).slice(-9).concat([{
           commandId:stranded.commandId,chatUrl:stranded.chatUrl,
@@ -258,7 +258,7 @@ function sweepOne(campaign){
             phaseId:stranded.phaseId,workerRole:'repair_child',
             chatUrl:backup,workspacePath:d.workspacePath,transportEpoch:epoch,
             message:'AGENT DELIVERY UNCONFIRMED: Original delivery '+stranded.commandId+
-              ' to '+stranded.chatUrl+' has no first-line check-in after 90 minutes. '+
+              ' to '+stranded.chatUrl+' has no first-line check-in after 30 minutes. '+
               'Read the authoritative campaign directory and the unconfirmedCommands entry in this same file. '+
               'Diagnose the previous recipient, check the assigned chat and resume the required work. '+
               'If Agent Delivery cannot deliver and browser transport is ready, switch this campaign to GITHUB_BROWSER via the existing lite-work-relay-v1.yml switch operation. '+
