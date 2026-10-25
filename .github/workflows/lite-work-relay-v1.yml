@@ -154,16 +154,22 @@ jobs:
           chat="$(jq -r --arg r "$role" '.agentChats[$r] // empty' /tmp/switch-registration.json)"
           phase="$(jq -r '.activeAssignment.phaseId // empty' /tmp/switch-registration.json)"
           worker_role=reviewer
+          pending_is_current=false
           if [ "$TARGET_MODE" = GITHUB_BROWSER ]; then
             pending_chat="$(jq -r '.pendingCommand.chatUrl // empty' /tmp/switch.json)"
-            if [ -n "$pending_chat" ]; then
-              chat="$pending_chat"
+            if [ -n "$pending_chat" ] && [ "$pending_chat" = "$chat" ]; then
+              pending_is_current=true
               phase="$(jq -r '.pendingCommand.phaseId // empty' /tmp/switch.json)"
               worker_role="$(jq -r '.pendingCommand.workerRole // "reviewer"' /tmp/switch.json)"
+            elif [ -n "$pending_chat" ]; then
+              echo "::warning::Archived pending command is for a different chat; using canonical current assignment instead."
             fi
           fi
           [ -n "$chat" ] || { echo "::warning::No registered active chat; next controller handoff will use selected mode."; exit 0; }
-          message="$(jq -r '.pendingCommand.message // empty' /tmp/switch.json)"
+          message=""
+          if [ "$pending_is_current" = true ]; then
+            message="$(jq -r '.pendingCommand.message // empty' /tmp/switch.json)"
+          fi
           if [ -z "$message" ]; then
             message="DELIVERY TRANSPORT SWITCH — RESUME NOW. Campaign: $CAMPAIGN_ID. Canonical directory: https://github.com/curveyield3/Audit-Controller/blob/main/Audit%20Campaign%20Directory/campaigns/$slug.json. Current campaign status: $status. Read the current assignment, bound audit authority and exact latest controller packet; continue the unfinished phase, discovery or master-review assignment. Preserve sealed phases and accepted shards. If a previous controller result needs rework, diagnose and repair it rather than waiting. Do not run tests or machine simulations without the owner's separate authorization."
           fi
