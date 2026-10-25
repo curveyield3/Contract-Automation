@@ -17,7 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          # Checkout the triggering request commit. A newer main commit otherwise
+          # leaves GITHUB_SHA outside shallow history and the diff-tree returns empty.
+          ref: ${{ github.sha }}
           fetch-depth: 2
           persist-credentials: false
       - name: Select Audit-Controller credential
