@@ -8,6 +8,12 @@ on:
         required: false
         default: false
         type: boolean
+      delivery_transport:
+        description: "ChatGPT instruction transport (original browser unchanged; Work uses campaign command file)"
+        type: choice
+        required: false
+        default: GITHUB_BROWSER
+        options: [GITHUB_BROWSER, CHATGPT_WORK]
       source_url:
         description: Optional direct ZIP file URL (mutually exclusive with scan_urls)
         required: false
@@ -76,6 +82,7 @@ jobs:
           DISPATCH_URL: ${{ inputs.source_url }}
           DISPATCH_SCAN_URLS: ${{ inputs.scan_urls }}
           DISPATCH_SIMULATION: ${{ inputs.single_agent_simulation }}
+          DISPATCH_DELIVERY_TRANSPORT: ${{ inputs.delivery_transport }}
           DISPATCH_CHAT_1_URL: ${{ inputs.agent_chat_1_url }}
           DISPATCH_CHAT_2_URL: ${{ inputs.agent_chat_2_url }}
           DISPATCH_CHAT_3_URL: ${{ inputs.agent_chat_3_url }}
@@ -99,6 +106,7 @@ jobs:
             test_executor_chat_url="$DISPATCH_TEST_EXECUTOR_CHAT_URL"
             backup_chat_url="$DISPATCH_BACKUP_CHAT_URL"
             single_agent_simulation="${DISPATCH_SIMULATION:-false}"
+            delivery_transport="${DISPATCH_DELIVERY_TRANSPORT:-GITHUB_BROWSER}"
             request_id="dispatch-$GITHUB_RUN_ID"
           else
             mapfile -t requests < <(
@@ -120,6 +128,7 @@ jobs:
             test_executor_chat_url="$(jq -r '.test_executor_chat_url // empty' "$request")"
             backup_chat_url="$(jq -r '.backup_chat_url // empty' "$request")"
             single_agent_simulation="$(jq -r '.single_agent_simulation // false' "$request")"
+            delivery_transport="$(jq -r '.delivery_transport // "GITHUB_BROWSER"' "$request")"
             request_id="push-$GITHUB_SHA"
           fi
 
@@ -168,6 +177,9 @@ jobs:
             echo "::error::single_agent_simulation must be boolean"
             exit 1
           }
+          [[ "$delivery_transport" == GITHUB_BROWSER || "$delivery_transport" == CHATGPT_WORK ]] || {
+            echo "::error::delivery_transport must be GITHUB_BROWSER or CHATGPT_WORK"; exit 1;
+          }
           if [ "$single_agent_simulation" = true ]; then
             for slot_url in "$agent_chat_2_url" "$agent_chat_3_url" "$agent_chat_4_url" "$master_chat_url" "$test_executor_chat_url" "$backup_chat_url"; do
               [ "$slot_url" = "$agent_chat_1_url" ] || {
@@ -190,6 +202,7 @@ jobs:
 
           {
             echo "single_agent_simulation=$single_agent_simulation"
+            echo "delivery_transport=$delivery_transport"
             echo "source_url=$source_url"
             echo "scan_urls=$scan_urls"
             echo "agent_chat_1_url=$agent_chat_1_url"
@@ -227,5 +240,6 @@ jobs:
           BACKUP_CHAT_URL: ${{ steps.request.outputs.backup_chat_url }}
           REQUEST_ID: ${{ steps.request.outputs.request_id }}
           SINGLE_AGENT_SIMULATION: ${{ steps.request.outputs.single_agent_simulation }}
+          DELIVERY_TRANSPORT: ${{ steps.request.outputs.delivery_transport }}
         shell: bash
         run: python3 scripts/audit-command-guard-v1.py --label audit-source-initialization --wall 1080 --idle 720 --log /tmp/audit-source-initialization-guard-v1.log -- bash scripts/audit-source-initialization/run-v1.sh
