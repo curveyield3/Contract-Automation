@@ -69,6 +69,7 @@ export function acceptCandidateBatchV1({
    phase===5?form.actions?.['step-2']?.outputs?.reconciliationRecords:
      form.actions?.['step-2']?.outputs?.targetDispositions;
  const designs=phase===5?records(form.actions?.['step-3']?.outputs?.targetDesigns):[];
+ let selectedBudgetBytes=0;
  const selected=[],issues=[];
  for(const key of readyCandidateKeys){
   try{
@@ -86,12 +87,16 @@ export function acceptCandidateBatchV1({
      throw new Error('candidate row does not bind to a canonical/source candidate');
     validatePhase6SemanticRow(row,section);
    }
+   const actualRecordBytes=Buffer.byteLength(JSON.stringify({source,row,target:target??null}));
+   if(actualRecordBytes>MAX_BYTES||selectedBudgetBytes+actualRecordBytes>MAX_BYTES)
+    throw new Error('actual candidate/source/target record bytes exceed the 256 KiB selected-batch budget; submit fewer records or separate the oversized source-backed entry');
+   selectedBudgetBytes+=actualRecordBytes;
    selected.push({key:keyOf(source),sourceAnchor:source.sourceAnchor??source.anchors?.[0]??null,
     sourceDigest:sha(source),recordDigest:sha(row),...(target?{targetDigest:sha(target)}:{})});
   }catch(error){issues.push({candidateKey:key,reason:String(error?.message??error)});}
  }
  if(issues.length)return {status:'CANDIDATE_BATCH_REWORK',issues,accepted:0,selectedKeys:readyCandidateKeys};
- if(Buffer.byteLength(JSON.stringify(selected))>MAX_BYTES)
+ if(selectedBudgetBytes>MAX_BYTES)
   return {status:'CANDIDATE_BATCH_REWORK',issues:[{reason:'selected candidate batch exceeds 256 KiB budget; submit fewer candidates'}],accepted:0};
  const rel=path.posix.join(campaignPath,'controller/candidate-batches/PHASE_'+String(phase).padStart(2,'0')+'_CHECKPOINT_v1.json');
  let prior=null;
