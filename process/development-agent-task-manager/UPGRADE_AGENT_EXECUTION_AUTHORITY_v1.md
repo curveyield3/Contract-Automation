@@ -68,9 +68,9 @@ Do not create a second task or replacement implementation branch for merge repai
 
 ## Repository boundaries
 
-GitHub Actions workflows belong in `CurveYield2/Contract-Automation`.
+GitHub Actions workflows belong in `curveyield3/Contract-Automation`.
 
-Never add a GitHub Actions workflow to `CurveYield2/Audit-Controller`.
+Never add a GitHub Actions workflow to `curveyield3/Audit-Controller`.
 
 A development task may modify audit automation code when that is explicitly the task, but development task-lock instructions must not be injected into audit execution reviewer wakes, audit campaign watchdog policy, audit campaign handoffs, or audit methodology unless the human explicitly requests that change.
 

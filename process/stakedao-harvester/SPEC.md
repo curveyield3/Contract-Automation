@@ -154,7 +154,7 @@ New function next to the existing per-vault `harvest` (kept as fallback):
   `C:SERSSERDESKTOPCLAUDESTAKEDAO-UPGRADE-V11.PS1` (DEPLOY + VERIFY + WORKER `HARVESTER` + `HARVESTER_V11 = "1"`).
 
 ## Vault tracking inside the Worker — prediction, not polling (DRAFT for approval, 2026-10-03)
-Why: GitHub runs scheduled workflows in CurveYield2/Contract-Automation only every 3–6 h (the repo's own
+Why: GitHub runs scheduled workflows in curveyield3/Contract-Automation only every 3–6 h (the repo's own
 `browser-agent-watchdog`, set to every 5 min, shows the same), so the hot list goes stale. And polling is pointless:
 **a gauge's CRV accrues at a fixed rate within an epoch** (rates change only when gauge weights update, weekly,
 Thursday 00:00 UTC). So each vault's fee is *predicted*, and read on-chain only when the prediction says it matters.

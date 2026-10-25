@@ -4,7 +4,7 @@ Status: active implementation/qualification handoff. This file is durable recove
 
 ## 1. Primary task
 
-Implement and qualify the reviewed Phase-0 automated Medusa and ABI telemetry v2 specification in `CurveYield2/Contract-Automation`.
+Implement and qualify the reviewed Phase-0 automated Medusa and ABI telemetry v2 specification in `curveyield3/Contract-Automation`.
 
 Do not stop at code review or unit tests. Completion requires the bounded acceptance package requested by the user:
 - reviewable implementation PR(s);
@@ -20,13 +20,13 @@ All compile/install/run activity must remain in GitHub. Use the existing qualifi
 
 ## 2. Current implementation state
 
-Repository: https://github.com/CurveYield2/Contract-Automation
+Repository: https://github.com/curveyield3/Contract-Automation
 
 Implementation branch:
 `impl/phase0-medusa-telemetry-v2`
 
 Draft implementation PR:
-https://github.com/CurveYield2/Contract-Automation/pull/544
+https://github.com/curveyield3/Contract-Automation/pull/544
 
 Current branch/PR head when this handoff was written:
 `82b31fac3a9094e66259d9d846e8ce03b4219da9`
@@ -45,34 +45,34 @@ Do not merge this PR without separate user authorization.
 Read these in order before changing implementation behavior:
 
 1. README/scope:
-https://github.com/CurveYield2/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/README_v2.md
+https://github.com/curveyield3/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/README_v2.md
 
 2. Live-state diagnosis:
-https://github.com/CurveYield2/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/CURRENT_LIVE_STATE_v2.md
+https://github.com/curveyield3/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/CURRENT_LIVE_STATE_v2.md
 
 3. System specification:
-https://github.com/CurveYield2/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/PHASE0_AUTOMATED_TESTING_SYSTEM_SPEC_v2.md
+https://github.com/curveyield3/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/PHASE0_AUTOMATED_TESTING_SYSTEM_SPEC_v2.md
 
 4. Data contracts:
-https://github.com/CurveYield2/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/PHASE0_EXECUTION_DATA_CONTRACTS_v2.md
+https://github.com/curveyield3/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/PHASE0_EXECUTION_DATA_CONTRACTS_v2.md
 
 5. Test/acceptance plan:
-https://github.com/CurveYield2/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/TEST_AND_ACCEPTANCE_PLAN_v2.md
+https://github.com/curveyield3/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/TEST_AND_ACCEPTANCE_PLAN_v2.md
 
 6. Implementation plan:
-https://github.com/CurveYield2/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/PHASE0_AUTOMATED_TESTING_IMPLEMENTATION_PLAN_v2.md
+https://github.com/curveyield3/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/PHASE0_AUTOMATED_TESTING_IMPLEMENTATION_PLAN_v2.md
 
 7. Source map:
-https://github.com/CurveYield2/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/SOURCE_MAP_AND_REFERENCE_FILES_v2.md
+https://github.com/curveyield3/Contract-Automation/blob/94207081af8c4a292750a0bfdc20176b5ead6ad7/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/SOURCE_MAP_AND_REFERENCE_FILES_v2.md
 
 Current Audit Skill authority:
-https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority
+https://github.com/curveyield3/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority
 
 Specification snapshot authority:
-https://github.com/CurveYield2/Audit-Controller/blob/78943917711d0c56ebedd2ddc4ec267d1b1efc89/Audit%20Skill%20-%20Current%20Authority/Audit_Litemode_v10.3/SKILL.md
+https://github.com/curveyield3/Audit-Controller/blob/78943917711d0c56ebedd2ddc4ec267d1b1efc89/Audit%20Skill%20-%20Current%20Authority/Audit_Litemode_v10.3/SKILL.md
 
 Diagnostic campaign review context:
-https://github.com/CurveYield2/Audit-Controller/pull/113
+https://github.com/curveyield3/Audit-Controller/pull/113
 
 ## 4. Core implementation already completed
 
@@ -165,7 +165,7 @@ Existing qualification workflow:
 `.github/workflows/v7-execution-infrastructure-qualification.yml`
 
 Latest inspected run:
-https://github.com/CurveYield2/Contract-Automation/actions/runs/37223524257
+https://github.com/curveyield3/Contract-Automation/actions/runs/37223524257
 Run number: 1167
 Head:
 `82b31fac3a9094e66259d9d846e8ce03b4219da9`

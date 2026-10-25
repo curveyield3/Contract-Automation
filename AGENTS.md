@@ -12,7 +12,7 @@ These rules govern all repository work unless a more specific local `AGENTS.md` 
 - Before creating a file, search the repository for the same or substantially similar responsibility. Reuse or edit the existing canonical file whenever possible.
 - Do not create retry/version trash such as `foo-v2`, `foo-v3`, `foo-fixed`, `foo-final`, `foo-new`, `foo-copy`, or equivalent siblings merely because an attempt failed.
 - If a genuine version bump is required, the same change MUST remove or archive the superseded active version. Never leave a chain of old active siblings behind.
-- Historical files belong in `CurveYield2/archive` when preservation is required. Git history is sufficient when no separate historical copy is required.
+- Historical files belong in `curveyield3/archive` when preservation is required. Git history is sufficient when no separate historical copy is required.
 - Temporary diagnostics, scratch output, screenshots, generated probes, and transient execution data MUST use temporary runtime storage or the existing artifact/results location. Do not commit them as new permanent top-level files unless they are required durable evidence.
 
 ### File placement is not optional
@@ -87,10 +87,10 @@ That guide is the browser-agent navigation layer. It does not replace this polic
 
 ## Archive boundary — mandatory
 
-`CurveYield2/archive` is the only repository-level home for superseded, deprecated, obsolete, historical-only, backup, or replaced Contract-Automation files.
+`curveyield3/archive` is the only repository-level home for superseded, deprecated, obsolete, historical-only, backup, or replaced Contract-Automation files.
 
 - Active Contract-Automation paths contain only current operational files and current instructions.
-- When an active file is superseded, preserve the old file in `CurveYield2/archive/Contract-Automation/<original-path>` and remove it from this repository.
+- When an active file is superseded, preserve the old file in `curveyield3/archive/Contract-Automation/<original-path>` and remove it from this repository.
 - Do not keep version chains such as active `foo-v1`, `foo-v2`, `foo-v3` siblings when only one version is current.
 - Git history remains available, but do not use Git history as an excuse to leave obsolete files beside live files.
 - Agents MUST NOT use Archive files as current execution instructions, current schemas, current workflows, current skeletons, or current policy unless a human explicitly requests historical recovery/comparison.
@@ -106,7 +106,7 @@ Every branch created by an agent must end in exactly one of these states:
 
 1. **MERGED_AND_DELETED** — completed reusable infrastructure work is merged into its intended base branch and the working branch is deleted;
 2. **ACTIVE_WITH_OPEN_PR** — unfinished or review-pending work has an open pull request that states the owner/purpose, remaining work, intended base branch, and whether the branch is an execution/request branch that must not be merged; or
-3. **CLOSED_WITH_RECORDED_DISPOSITION** — the branch is intentionally not being merged because it is obsolete, superseded, rejected, a completed trace/request branch, or preserved only for recovery/history. Before retiring it, preserve any uniquely valuable code/evidence in the appropriate active path or `CurveYield2/archive` and record why it is not being merged.
+3. **CLOSED_WITH_RECORDED_DISPOSITION** — the branch is intentionally not being merged because it is obsolete, superseded, rejected, a completed trace/request branch, or preserved only for recovery/history. Before retiring it, preserve any uniquely valuable code/evidence in the appropriate active path or `curveyield3/archive` and record why it is not being merged.
 
 Mandatory rules:
 
@@ -223,7 +223,7 @@ All authoritative simulation/attacker/deployment/lifecycle evidence requiring li
 
 ## V7 qualification
 
-The repository-wide full V7 qualification workflow was retired on 2026-10-11 and preserved in CurveYield2/archive. Lite execution evidence records the exact runner commit of each run in EXECUTION_EVIDENCE_v1.json; Lite campaigns do not require a qualification rebind. Do not restore the archived suite.
+The repository-wide full V7 qualification workflow was retired on 2026-10-11 and preserved in curveyield3/archive. Lite execution evidence records the exact runner commit of each run in EXECUTION_EVIDENCE_v1.json; Lite campaigns do not require a qualification rebind. Do not restore the archived suite.
 
 ## Dependency locking status
 

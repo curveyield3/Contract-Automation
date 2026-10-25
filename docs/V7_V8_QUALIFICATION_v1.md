@@ -2,7 +2,7 @@
 
 ## Candidate
 
-- Active request base: `CurveYield2/Contract-Automation@612fa50264e587e3f24550bf4dae35719b04211c`
+- Active request base: `curveyield3/Contract-Automation@612fa50264e587e3f24550bf4dae35719b04211c`
 - Upgrade branch: `upgrade/v7-v8-conformance-v2`
 - Request schema: `deep-assurance-github-request-v2`
 - Process: `audit-v7-independent-review`

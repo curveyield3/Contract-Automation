@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           gh auth setup-git
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/CurveYield2/Audit-Controller.git .audit-controller
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/curveyield3/Audit-Controller.git .audit-controller
           git -C .audit-controller sparse-checkout set --no-cone "$SOURCE_ARCHIVE"
           test -s ".audit-controller/$SOURCE_ARCHIVE"
           mkdir -p .source-zip-smoke .source-project

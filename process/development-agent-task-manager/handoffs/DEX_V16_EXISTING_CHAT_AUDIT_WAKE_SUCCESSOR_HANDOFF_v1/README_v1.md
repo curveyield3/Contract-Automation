@@ -11,7 +11,7 @@ No Project creation. No Project URL capture. No new reviewer chats.
 ## Fixed inputs
 
 Source:
-https://github.com/CurveYield2/Audit-Controller/blob/main/campaigns/CurveYield%20DEX%20v16%20Source.zip
+https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/CurveYield%20DEX%20v16%20Source.zip
 
 Reviewer chats:
 - reviewer-1: https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da50-e3a0-83e8-88ea-843db6f426f0
@@ -46,7 +46,7 @@ Do not trust GitHub Actions success by itself.
 
 ### False-positive run 37192624049
 
-https://github.com/CurveYield2/Contract-Automation/actions/runs/37192624049
+https://github.com/curveyield3/Contract-Automation/actions/runs/37192624049
 
 This run concluded success but did not send the full initial wake.
 
@@ -58,7 +58,7 @@ Treat this run as a false positive.
 
 ### Earlier full-wake attempt 37192140753
 
-https://github.com/CurveYield2/Contract-Automation/actions/runs/37192140753
+https://github.com/curveyield3/Contract-Automation/actions/runs/37192140753
 
 This run entered the full ~2916-character wake and clicked Send.
 

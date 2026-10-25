@@ -34,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           gh auth setup-git
-          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --sparse
+          gh repo clone curveyield3/Audit-Controller .audit-controller -- --filter=blob:none --sparse
           cd .audit-controller
           git sparse-checkout set 'campaigns/CurveYield DEX v16 Source r4/evidence/phase5-boundary' 'campaigns/CurveYield DEX v16 Source r4/work/phase-05/execution-requests' 'Audit Campaign Directory/campaigns'
           jq -e '.campaignId=="curveyield-dex-v16-source-r4" and .campaignStatus=="COMPLETE" and .sourceSha256=="201a70f61f14e1919d111a972d090b07cf13e5fc06fee10738785adfb6760f4e"' 'Audit Campaign Directory/campaigns/curveyield-dex-v16-source.json'

@@ -110,7 +110,7 @@ Request body should minimally support:
 {
   "taskName": "Upgrade the development manager",
   "instruction": "Implement the requested repository change.",
-  "targetRepository": "CurveYield2/Contract-Automation"
+  "targetRepository": "curveyield3/Contract-Automation"
 }
 ```
 
@@ -162,7 +162,7 @@ Example completed response:
 {
   "managerId": "upgrade-example-r1",
   "status": "COMPLETE",
-  "outputUrl": "https://github.com/CurveYield2/Contract-Automation/pull/123",
+  "outputUrl": "https://github.com/curveyield3/Contract-Automation/pull/123",
   "projectUrl": "https://chatgpt.com/...",
   "artifactUrl": null
 }

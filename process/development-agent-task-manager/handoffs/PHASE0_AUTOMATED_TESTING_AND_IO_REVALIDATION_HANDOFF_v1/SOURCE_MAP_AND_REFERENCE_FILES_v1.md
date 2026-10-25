@@ -2,7 +2,7 @@
 
 ## Live methodology authority
 
-Repository: \`CurveYield2/Audit-Controller\`
+Repository: \`curveyield3/Audit-Controller\`
 
 Stable folder:
 
@@ -31,7 +31,7 @@ Read first:
 
 ## Contract-Automation Phase-0 path
 
-Repository: \`CurveYield2/Contract-Automation\`
+Repository: \`curveyield3/Contract-Automation\`
 
 Primary files to inspect:
 

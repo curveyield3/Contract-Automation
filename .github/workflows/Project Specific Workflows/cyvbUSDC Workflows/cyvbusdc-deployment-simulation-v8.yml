@@ -21,7 +21,7 @@ jobs:
       - name: Checkout exact Smart-Contracts candidate
         uses: actions/checkout@v4
         with:
-          repository: CurveYield2/Smart-Contracts
+          repository: curveyield3/Smart-Contracts
           ref: fd0a01ab0e4a066a4e4ef8d28a6987a194ab5f45
           path: .smart-contracts
           persist-credentials: false

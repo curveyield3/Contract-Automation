@@ -10,7 +10,7 @@ The immediate task is **not** general browser redesign, Tailscale work, audit-pr
 
 Repository:
 
-- https://github.com/CurveYield2/Contract-Automation
+- https://github.com/curveyield3/Contract-Automation
 
 Evidence-capture main head before this handoff documentation commit:
 
@@ -21,13 +21,13 @@ Before doing any code work, refetch current `main`. Do **not** assume the SHA ab
 ### Already merged — do not restart these branches
 
 1. `browser-bootstrap-secret-only-v1`
-   - PR #505: https://github.com/CurveYield2/Contract-Automation/pull/505
+   - PR #505: https://github.com/curveyield3/Contract-Automation/pull/505
    - Merge commit: `3bcea11b624a08da94681261766964f124afc09a`
    - Purpose: immutable bootstrap-secret state, exact human Project flow, randomized human pacing.
    - Both validation lanes passed.
 
 2. `browser-project-sidebar-scroll-v1`
-   - PR #506: https://github.com/CurveYield2/Contract-Automation/pull/506
+   - PR #506: https://github.com/curveyield3/Contract-Automation/pull/506
    - Merge commit: `aaddd6dc3915ab9e6551e75b314b04039bfa4816`
    - Purpose: correctly treat the sidebar as potentially already open and human-scroll it until Projects is visible.
    - Both validation lanes passed.
@@ -180,7 +180,7 @@ The post-PR-505 Project-wake test successfully reached ChatGPT using:
 
 First merged Project-wake run after PR #505:
 
-- Run: https://github.com/CurveYield2/Contract-Automation/actions/runs/37152260428
+- Run: https://github.com/curveyield3/Contract-Automation/actions/runs/37152260428
 - Result: failure in Project navigation.
 - Narrow cause: Projects was not visible and the routine incorrectly treated absence of an explicit sidebar-open button as failure.
 
@@ -190,7 +190,7 @@ PR #506 fixed that by allowing an already-open sidebar and human-scrolling the s
 
 Latest merged Project-wake run:
 
-- Run: https://github.com/CurveYield2/Contract-Automation/actions/runs/37152694131
+- Run: https://github.com/curveyield3/Contract-Automation/actions/runs/37152694131
 - Browser job ID: `111289642878`
 - Home exit: success.
 - Fresh immutable bootstrap state: success.

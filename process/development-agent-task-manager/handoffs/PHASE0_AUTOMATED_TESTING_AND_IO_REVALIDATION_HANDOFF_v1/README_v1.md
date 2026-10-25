@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This folder is the durable successor-agent handoff for the next CurveYield2 audit-automation upgrade.
+This folder is the durable successor-agent handoff for the next curveyield3 audit-automation upgrade.
 
 It has **two coupled objectives**:
 
@@ -15,7 +15,7 @@ Do not treat this folder as audit methodology authority. The live Lite authority
 
 Stable authority folder:
 
-\`CurveYield2/Audit-Controller/Audit Skill - Current Authority/\`
+\`curveyield3/Audit-Controller/Audit Skill - Current Authority/\`
 
 Authority snapshot at handoff creation:
 

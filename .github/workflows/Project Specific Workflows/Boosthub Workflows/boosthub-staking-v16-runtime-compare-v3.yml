@@ -40,7 +40,7 @@ jobs:
 
       - name: Select working private controller credential
         env:
-          AUDIT_CONTROLLER_PROBE_REPOSITORY: CurveYield2/Solo-Audit-Controller
+          AUDIT_CONTROLLER_PROBE_REPOSITORY: curveyield3/Solo-Audit-Controller
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
@@ -50,7 +50,7 @@ jobs:
       - name: Checkout exact Solo Audit Controller source commit
         uses: actions/checkout@v4
         with:
-          repository: CurveYield2/Solo-Audit-Controller
+          repository: curveyield3/Solo-Audit-Controller
           ref: 93062463611e798ab26544a88c4e119f9620be9a
           token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: .controller

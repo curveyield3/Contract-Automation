@@ -21,7 +21,7 @@ Cloudflare Worker
         |
         | one atomic GitHub admission commit
         v
-CurveYield2/Contract-Automation main
+curveyield3/Contract-Automation main
         |
         v
 existing Development Agent Task Manager
@@ -81,12 +81,12 @@ Default visible fields:
 
 Default target repository:
 
-`CurveYield2/Contract-Automation`
+`curveyield3/Contract-Automation`
 
 Allowed target repositories are server-side allowlisted and must include at least:
 
-- `CurveYield2/Contract-Automation`
-- `CurveYield2/Audit-Controller`
+- `curveyield3/Contract-Automation`
+- `curveyield3/Audit-Controller`
 
 Defaults:
 

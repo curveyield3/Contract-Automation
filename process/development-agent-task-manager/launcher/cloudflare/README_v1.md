@@ -24,7 +24,7 @@ For local-only testing, set `CF_ACCESS_REQUIRED=false`.
 
 ## GitHub authentication
 
-Preferred: a dedicated GitHub App installed only on the required CurveYield2 repositories.
+Preferred: a dedicated GitHub App installed only on the required curveyield3 repositories.
 
 The Worker supports PKCS#1 or PKCS#8 GitHub App private-key PEM values.
 

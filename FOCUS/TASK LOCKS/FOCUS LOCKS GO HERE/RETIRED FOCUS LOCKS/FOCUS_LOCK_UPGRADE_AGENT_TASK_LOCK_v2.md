@@ -2,7 +2,7 @@
 
 ## END-STATE INVARIANT
 
-Upgrade the development-agent control plane in `CurveYield2/Contract-Automation` so development/upgrade agents:
+Upgrade the development-agent control plane in `curveyield3/Contract-Automation` so development/upgrade agents:
 
 1. remain anchored to one explicit human-requested end-state;
 2. work only the smallest remaining live delta;
@@ -69,7 +69,7 @@ Audit browser files may be inspected as the current source of the corrected gene
 
 ## CURRENT MAIN BASELINE
 
-- Repository: `CurveYield2/Contract-Automation`
+- Repository: `curveyield3/Contract-Automation`
 - Baseline main commit: `5a34b046e2211a4cb4a3f4065156ab91d8770c80`
 - Working branch: `upgrade-agent-focus-lock-v1`
 

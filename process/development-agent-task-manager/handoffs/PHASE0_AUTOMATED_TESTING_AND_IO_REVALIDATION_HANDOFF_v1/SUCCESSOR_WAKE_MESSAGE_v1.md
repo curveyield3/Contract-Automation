@@ -1,18 +1,18 @@
 # Successor Wake Message v1
 
-Continue upgrading the CurveYield2 Lite audit automation.
+Continue upgrading the curveyield3 Lite audit automation.
 
 Use the GitHub connector app only for repository work.
 
 The live methodology/process authority is the current package under:
 
-\`CurveYield2/Audit-Controller/Audit Skill - Current Authority/\`
+\`curveyield3/Audit-Controller/Audit Skill - Current Authority/\`
 
 At handoff creation it is \`Audit_Litemode_v10.3\`. Read its root \`SKILL.md\` first and treat it as the ultimate audit-process authority.
 
 Then read this handoff folder in order:
 
-\`CurveYield2/Contract-Automation/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/\`
+\`curveyield3/Contract-Automation/process/development-agent-task-manager/handoffs/PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1/\`
 
 Start at \`README_v1.md\`.
 

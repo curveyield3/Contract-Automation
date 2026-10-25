@@ -32,7 +32,7 @@ jobs:
 
       - name: Select working private controller credential
         env:
-          AUDIT_CONTROLLER_PROBE_REPOSITORY: CurveYield2/Audit-Controller
+          AUDIT_CONTROLLER_PROBE_REPOSITORY: curveyield3/Audit-Controller
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
@@ -42,7 +42,7 @@ jobs:
       - name: Checkout Audit Controller source
         uses: actions/checkout@v4
         with:
-          repository: CurveYield2/Audit-Controller
+          repository: curveyield3/Audit-Controller
           ref: main
           token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: .controller

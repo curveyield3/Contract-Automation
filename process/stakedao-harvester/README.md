@@ -18,7 +18,7 @@ forge create src/StakeDaoHarvester.sol:StakeDaoHarvester --rpc-url <mainnet rpc>
 ```
 Put the deployed address in `worker/wrangler.toml` → `HARVESTER`.
 
-## 3. GitHub monitor (CurveYield2/Contract-Automation) — manual backup only
+## 3. GitHub monitor (curveyield3/Contract-Automation) — manual backup only
 The bot tracks every vault itself inside the Worker (SPEC.md "Vault tracking inside the Worker"); this workflow only
 runs on demand (Actions → Stake DAO Harvester Monitor → Run workflow).
 Code lives in `process/stakedao-harvester/`; the workflow is `.github/workflows/stakedao-harvester-monitor.yml`

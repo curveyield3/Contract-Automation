@@ -2,7 +2,7 @@
 
 ## END-STATE INVARIANT
 
-CurveYield2/Smart-Contracts contains a complete, reviewable cyvbETH IPOR vault contract plus deployment and testing stack derived by minimal modification from the current proven cyvbWBTC implementation. cyvbETH must preserve cyvbWBTC behavior, fee/accounting/LTV/keeper/admin/deployment semantics, and testing expectations except where vbETH necessarily replaces vbWBTC and where the keeper may allocate any chosen portion of vault-held vbETH to the Katana Morpho variable market `0x2c4f26c76b4de51d3c9260c15a796cd2a35efab17786d0aa78ca2e638b0f8ba8` (vbETH / yvvbUSDC) as a lending-supply position instead of deploying 100% of vbETH into f(x)/fxMINT. The resulting stack must support keeper-controlled movement/allocation between idle vbETH, the existing cyvbWBTC-equivalent f(x)/fxMINT path adapted to vbETH, and the specified Morpho lending market; compile and focused tests must pass; deployment configuration must be explicit and reproducible; and the available Katana fork/deployment lifecycle validation must pass without weakening existing cyvbWBTC safety or accounting behavior.
+curveyield3/Smart-Contracts contains a complete, reviewable cyvbETH IPOR vault contract plus deployment and testing stack derived by minimal modification from the current proven cyvbWBTC implementation. cyvbETH must preserve cyvbWBTC behavior, fee/accounting/LTV/keeper/admin/deployment semantics, and testing expectations except where vbETH necessarily replaces vbWBTC and where the keeper may allocate any chosen portion of vault-held vbETH to the Katana Morpho variable market `0x2c4f26c76b4de51d3c9260c15a796cd2a35efab17786d0aa78ca2e638b0f8ba8` (vbETH / yvvbUSDC) as a lending-supply position instead of deploying 100% of vbETH into f(x)/fxMINT. The resulting stack must support keeper-controlled movement/allocation between idle vbETH, the existing cyvbWBTC-equivalent f(x)/fxMINT path adapted to vbETH, and the specified Morpho lending market; compile and focused tests must pass; deployment configuration must be explicit and reproducible; and the available Katana fork/deployment lifecycle validation must pass without weakening existing cyvbWBTC safety or accounting behavior.
 
 ## CURRENT MAIN
 
@@ -16,7 +16,7 @@ CurveYield2/Smart-Contracts contains a complete, reviewable cyvbETH IPOR vault c
 - Human specification: everything else remains exactly the same as cyvbWBTC.
 - Human requirement: create this task/focus lock in Contract-Automation before any Smart-Contracts implementation work.
 - `FOCUS/TASK LOCKS/TASK_LOCK_PROTOCOL_v1.md`.
-- Live `CurveYield2/Smart-Contracts` current main and its current cyvbWBTC implementation, deployment stack, tests, and repository-local instructions once inspected.
+- Live `curveyield3/Smart-Contracts` current main and its current cyvbWBTC implementation, deployment stack, tests, and repository-local instructions once inspected.
 - Existing proven public/protocol code must be reused where possible; make the smallest modifications required rather than replacing working implementations.
 
 ## SATISFIED

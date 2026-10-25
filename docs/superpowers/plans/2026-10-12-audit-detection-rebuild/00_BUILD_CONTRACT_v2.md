@@ -64,8 +64,8 @@ This plan fixes the system. It does not repair, rerun or measure any past campai
 ## 4. Implementer rules
 
 1. **Repositories:**
-   - Code, workflows, tests and these plans live in `CurveYield2/Contract-Automation` (CA).
-   - Skill files, campaign state and frozen authorities live in `CurveYield2/Audit-Controller` (AC).
+   - Code, workflows, tests and these plans live in `curveyield3/Contract-Automation` (CA).
+   - Skill files, campaign state and frozen authorities live in `curveyield3/Audit-Controller` (AC).
    - Never add a workflow to AC.
 2. **Branch names:** `upgrade/adr-T<number>-<short-slug>` from current `main`. Open a PR into `main`. Merge only after the T0 workflow is green on the PR head. Delete the branch after merge.
 3. **Before editing:**

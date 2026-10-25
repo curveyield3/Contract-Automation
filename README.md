@@ -30,7 +30,7 @@ Phase 6 Medusa and Foundry use the same preflight-frozen mutable Anvil RPC ident
 
 ## Archive policy
 
-Superseded, deprecated, obsolete, or historical-only repository files do **not** remain beside current files. They belong in private `CurveYield2/archive` under:
+Superseded, deprecated, obsolete, or historical-only repository files do **not** remain beside current files. They belong in private `curveyield3/archive` under:
 
 `Contract-Automation/<original-path>`
 

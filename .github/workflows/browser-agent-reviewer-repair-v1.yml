@@ -94,7 +94,7 @@ jobs:
             echo "::error::Current Lite campaigns have no reset-to-handoff control state. Repair resumes from the current assignment/work form and Git history."
             exit 1
           fi
-          gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' "$REGISTRATION")"
+          gate_repo="$(jq -r '.watchdog.gate.repository // "curveyield3/Audit-Controller"' "$REGISTRATION")"
           gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$REGISTRATION")"
           directory_path="$(jq -r '.watchdog.gate.statePath' "$REGISTRATION")"
           milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' "$REGISTRATION")"
@@ -283,10 +283,10 @@ jobs:
           api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
           response="$(gh api "$api?ref=main")"
           printf '%s' "$response" | jq -r '.content' | base64 -d > /tmp/failed-repair-registration.json
-          gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' /tmp/failed-repair-registration.json)"
+          gate_repo="$(jq -r '.watchdog.gate.repository // "curveyield3/Audit-Controller"' /tmp/failed-repair-registration.json)"
           gate_ref="$(jq -r '.watchdog.gate.ref // "main"' /tmp/failed-repair-registration.json)"
           gate_path="$(jq -r '.watchdog.gate.statePath // empty' /tmp/failed-repair-registration.json)"
-          { [ "$gate_repo" = curveyield3/Audit-Controller ] || [ "$gate_repo" = CurveYield2/Audit-Controller ]; } && [[ "$gate_path" == "Audit Campaign Directory/campaigns/"*.json ]] || {
+          { [ "$gate_repo" = curveyield3/Audit-Controller ] || [ "$gate_repo" = curveyield3/Audit-Controller ]; } && [[ "$gate_path" == "Audit Campaign Directory/campaigns/"*.json ]] || {
             echo "::warning::No trusted campaign directory binding for standby"
             exit 0
           }

@@ -1,12 +1,12 @@
 # Phase 6 Harness Skeleton Kit v2
 
-Purpose: repo-native Audit V7 Phase 6 harness templates for `CurveYield2/Contract-Automation`, with mandatory use of the existing CurveYield mutable Anvil RPC system.
+Purpose: repo-native Audit V7 Phase 6 harness templates for `curveyield3/Contract-Automation`, with mandatory use of the existing CurveYield mutable Anvil RPC system.
 
 ## Canonical discovery contract
 
 This file is the canonical Phase-6 skeleton entrypoint:
 
-`CurveYield2/Contract-Automation/packages/github-native-sim/harness-skeletons-v2/README_v2.md`
+`curveyield3/Contract-Automation/packages/github-native-sim/harness-skeletons-v2/README_v2.md`
 
 Agents working on Phase 6 MUST start here before authoring or repairing Medusa/Foundry harness code. If a caller reaches this repository through a stale/guessed path, search the repository for `harness-skeletons-v2` or one of the exact filenames in the Skeleton map below and return to this README. Do not ask the human where the skeleton code is and do not recreate it from memory while this repository is accessible.
 

@@ -13,7 +13,7 @@ The task manager is derived from the existing browser-agent watchdog architectur
 
 It does **not** create another browser driver or another private-repository workflow system.
 
-All GitHub Actions workflows remain in `CurveYield2/Contract-Automation`. `CurveYield2/Audit-Controller` must not gain GitHub Actions workflows.
+All GitHub Actions workflows remain in `curveyield3/Contract-Automation`. `curveyield3/Audit-Controller` must not gain GitHub Actions workflows.
 
 ## Starting a managed development task
 

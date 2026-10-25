@@ -13,8 +13,8 @@ Do **not** tell the human that something cannot be found until the applicable se
 
 ## GitHub repositories
 
-- **Audit controller / durable campaign ledger:** [`CurveYield2/Audit-Controller`](https://github.com/CurveYield2/Audit-Controller)
-- **Trusted technical execution / harness skeletons:** [`CurveYield2/Contract-Automation`](https://github.com/CurveYield2/Contract-Automation)
+- **Audit controller / durable campaign ledger:** [`curveyield3/Audit-Controller`](https://github.com/curveyield3/Audit-Controller)
+- **Trusted technical execution / harness skeletons:** [`curveyield3/Contract-Automation`](https://github.com/curveyield3/Contract-Automation)
 
 The links identify repositories for humans. **Agents must use the GitHub connector app to access them.**
 
@@ -22,7 +22,7 @@ For GitHub Actions, do **not** assume the absence of a direct `workflow_dispatch
 
 ## Start or resume the exact audit
 
-Use the GitHub connector app against `CurveYield2/Audit-Controller`:
+Use the GitHub connector app against `curveyield3/Audit-Controller`:
 
 1. Inspect `.deep-assurance/active/` first.
 2. Resolve the active pointer matching the requested project/audit token; do not choose by filename similarity when generations differ.

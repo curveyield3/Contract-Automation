@@ -1,6 +1,6 @@
 ### Repository recovery/context-loss handoff folder
 
-For fresh-reviewer or context-loss handoffs, use the exact **campaign-local successor handoff** referenced by the current campaign state / Phase Contract. Current repository-level agent guidance lives under `docs/agent-guides/` in `CurveYield2/Audit-Controller`. Material under `archive/recovery/` is historical provenance only and MUST NOT be treated as active handoff authority.
+For fresh-reviewer or context-loss handoffs, use the exact **campaign-local successor handoff** referenced by the current campaign state / Phase Contract. Current repository-level agent guidance lives under `docs/agent-guides/` in `curveyield3/Audit-Controller`. Material under `archive/recovery/` is historical provenance only and MUST NOT be treated as active handoff authority.
 
 ## Something broke? — Recovery Router
 

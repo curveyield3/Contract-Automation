@@ -329,7 +329,7 @@ done
    1. read the registration exactly like the step "Resolve reviewer for master-directed tests";
    2. resolve the URL as `.agentChats[<chat key>]` (`reviewer-2` or `reviewer-3L`);
    3. validate it with the same two regexes;
-   4. run `gh workflow run browser-agent-wake.yml` with `mode=resume_existing`, `worker_role=reviewer`, `gate_mode=LITE`, `gate_repository=CurveYield2/Audit-Controller`, `gate_ref`, `gate_state_path`, `gate_expected_phase_id`, `gate_expected_milestone_id`, `gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN`, `wake_id`, `chat_url` and `wake_message_b64`;
+   4. run `gh workflow run browser-agent-wake.yml` with `mode=resume_existing`, `worker_role=reviewer`, `gate_mode=LITE`, `gate_repository=curveyield3/Audit-Controller`, `gate_ref`, `gate_state_path`, `gate_expected_phase_id`, `gate_expected_milestone_id`, `gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN`, `wake_id`, `chat_url` and `wake_message_b64`;
    5. set `watchdog_enabled=true` only if the watchdog gate (read `browser-agent-watchdog.yml`) treats the chat as on task while the campaign is `WAITING_FOR_DISCOVERY`. Otherwise use `false` and give the reason in the PR. The 30-minute re-push rule covers lost runs.
 7. **Do not change the concurrency group.**
 

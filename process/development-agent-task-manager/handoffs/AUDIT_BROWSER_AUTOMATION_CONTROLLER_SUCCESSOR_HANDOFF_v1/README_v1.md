@@ -6,11 +6,11 @@ This handoff preserves the critical browser-automation and automated-audit contr
 
 Repository:
 
-`CurveYield2/Contract-Automation`
+`curveyield3/Contract-Automation`
 
 Related controller repository:
 
-`CurveYield2/Audit-Controller`
+`curveyield3/Audit-Controller`
 
 This handoff is intentionally focused on the live audit automation pathway:
 
@@ -736,4 +736,4 @@ At handoff creation there are no active browser runs, so the successor has a cle
 
 Use this to brief the next agent:
 
-> Continue the audit-browser automation recovery in CurveYield2/Contract-Automation from `process/development-agent-task-manager/handoffs/AUDIT_BROWSER_AUTOMATION_CONTROLLER_SUCCESSOR_HANDOFF_v1/README_v1.md`. Preserve all newer controller/master-review work. First inspect whether the proven browser path was overwritten. The browser invariant is normal system Chrome + home exit + fixed Phase-1 X11 composer point + X11 typing + X11 Enter, using pre-created registered reviewer chats and one shared browser owner. Do not use Playwright/DOM ChatGPT writes or watchdog ChatGPT DOM reads. Restore only minimal browser sections, verify no active browser workflow, then continue the current DEX v16 r3 Phase-2 automation from canonical Audit-Controller state.
+> Continue the audit-browser automation recovery in curveyield3/Contract-Automation from `process/development-agent-task-manager/handoffs/AUDIT_BROWSER_AUTOMATION_CONTROLLER_SUCCESSOR_HANDOFF_v1/README_v1.md`. Preserve all newer controller/master-review work. First inspect whether the proven browser path was overwritten. The browser invariant is normal system Chrome + home exit + fixed Phase-1 X11 composer point + X11 typing + X11 Enter, using pre-created registered reviewer chats and one shared browser owner. Do not use Playwright/DOM ChatGPT writes or watchdog ChatGPT DOM reads. Restore only minimal browser sections, verify no active browser workflow, then continue the current DEX v16 r3 Phase-2 automation from canonical Audit-Controller state.

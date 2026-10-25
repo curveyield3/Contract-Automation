@@ -38,7 +38,7 @@ The machine schema is:
     "size": 123
   },
   "target": {
-    "repository": "CurveYield2/Contract-Automation",
+    "repository": "curveyield3/Contract-Automation",
     "branch": "main",
     "path": "process/development-agent-task-manager/<SAFE_DESTINATION>/<EXACT_FILENAME>"
   }
@@ -49,7 +49,7 @@ Use `format: "zip"` for ZIP authority objects. ZIP magic is then verified before
 
 ## Hard boundaries
 
-- Target repository is exactly `CurveYield2/Contract-Automation`.
+- Target repository is exactly `curveyield3/Contract-Automation`.
 - Target branch is exactly `main`.
 - Target path must stay under `process/development-agent-task-manager/`.
 - Target basename must equal the exact source filename.

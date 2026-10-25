@@ -188,7 +188,7 @@ jobs:
           gh auth setup-git
           work='/tmp/audit-skill-authority-import'
           rm -rf "$work"
-          gh repo clone 'CurveYield2/Audit-Controller' "$work" -- --depth=1 --branch main
+          gh repo clone 'curveyield3/Audit-Controller' "$work" -- --depth=1 --branch main
           cd "$work"
           mkdir -p "$(dirname "$TARGET_PATH")"
           cp "/tmp/$FILENAME" "$TARGET_PATH"
@@ -306,7 +306,7 @@ jobs:
                 schemaVersion:"curveyield-audit-skill-authority-import-report-v1",
                 requestId:$requestId,campaignId:$campaignId,auditName:$auditName,status:"PASS",
                 source:{type:"google-drive",driveFileId:$driveFileId,url:$sourceUrl,filename:$filename,sha256:$sha256,size:$size},
-                destination:{repository:"CurveYield2/Audit-Controller",ref:"main",path:$path,sha256:$remoteSha,size:$remoteSize,commit:$remoteCommit,gitBlobSha:$remoteBlob,verified:true},
+                destination:{repository:"curveyield3/Audit-Controller",ref:"main",path:$path,sha256:$remoteSha,size:$remoteSize,commit:$remoteCommit,gitBlobSha:$remoteBlob,verified:true},
                 workflowRunId:$runId,
                 completedAt:(now|todate)
               }' > /tmp/import-report.json

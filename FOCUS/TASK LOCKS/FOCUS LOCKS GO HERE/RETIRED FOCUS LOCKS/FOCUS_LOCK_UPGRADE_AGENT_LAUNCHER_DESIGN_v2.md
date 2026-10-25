@@ -12,7 +12,7 @@ The Cloudflare page is intentionally minimal and is not a dashboard or control p
 
 ## CURRENT MAIN
 
-- Repository: `CurveYield2/Contract-Automation`
+- Repository: `curveyield3/Contract-Automation`
 - Baseline main commit: `9b3e5556d173567b04b31c37fd5f97c356e54fc5`
 - Design branch: `upgrade-agent-launcher-design-v1`
 

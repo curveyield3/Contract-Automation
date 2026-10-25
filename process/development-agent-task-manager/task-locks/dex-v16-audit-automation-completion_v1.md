@@ -7,8 +7,8 @@ END-STATE INVARIANT:
 From the existing sealed Phase-0 state of `curveyield-dex-v16-source-r3`, the development/supervision work must keep the existing automated audit pathway on one repair-and-execution path until the audit system verifiably advances through every remaining required phase and Audit-Controller records the campaign COMPLETE with all required final receipts/deliverables present. The currently missing reviewer-1 Phase-1 wake must first be delivered and verified as a real rendered user-role message. Completed/sealed work must not be restarted; the four fixed reviewer chat URLs must not be replaced; false-positive wake/watchdog state must not count as progress. This task lock governs only the development/repair/supervision agent and must never be injected into audit reviewer wakes, audit watchdog prompts, or audit phase authority.
 
 CURRENT MAIN:
-- CurveYield2/Contract-Automation main: `599bd028cbfa1b597c2e1ef8bad790e05744469f`
-- CurveYield2/Audit-Controller main checked for campaign state: `e1292fd6c77a97801e49d739a5bf1411dbb6d964`
+- curveyield3/Contract-Automation main: `599bd028cbfa1b597c2e1ef8bad790e05744469f`
+- curveyield3/Audit-Controller main checked for campaign state: `e1292fd6c77a97801e49d739a5bf1411dbb6d964`
 
 AUTHORITY:
 - Task-lock protocol: `process/development-agent-task-manager/TASK_LOCK_PROTOCOL_v1.md` @ Contract-Automation main, blob `1f464444e1f0d148b46aeba2bd93ffda7846f834`

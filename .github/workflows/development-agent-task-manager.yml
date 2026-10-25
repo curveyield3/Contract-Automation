@@ -35,7 +35,7 @@ on:
       target_repository:
         description: Repository the development agents must modify
         required: false
-        default: CurveYield2/Contract-Automation
+        default: curveyield3/Contract-Automation
         type: string
       target_branch:
         description: Durable development branch
@@ -166,7 +166,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$TARGET_REPOSITORY" = 'CurveYield2/Audit-Controller' ]; then
+          if [ "$TARGET_REPOSITORY" = 'curveyield3/Audit-Controller' ]; then
             bash scripts/select-audit-controller-token.sh
           fi
 
@@ -567,7 +567,7 @@ jobs:
         run: |
           set -euo pipefail
           target_repo="$(jq -r '.target.repository' /tmp/task-manager-state.json)"
-          if [ "$target_repo" = 'CurveYield2/Audit-Controller' ]; then
+          if [ "$target_repo" = 'curveyield3/Audit-Controller' ]; then
             bash scripts/select-audit-controller-token.sh
           fi
 

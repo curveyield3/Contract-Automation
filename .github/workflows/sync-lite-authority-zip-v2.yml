@@ -43,7 +43,7 @@ jobs:
           # the full audit history and fail fast instead of spending 10m hung.
           for attempt in 1 2; do
             rm -rf .audit-controller-authority
-            if timeout -k 10s 150s gh repo clone CurveYield2/Audit-Controller .audit-controller-authority -- --branch main --filter=blob:none --sparse; then
+            if timeout -k 10s 150s gh repo clone curveyield3/Audit-Controller .audit-controller-authority -- --branch main --filter=blob:none --sparse; then
               if (cd .audit-controller-authority && timeout -k 10s 90s git sparse-checkout set 'Audit Skill - Current Authority'); then
                 break
               fi

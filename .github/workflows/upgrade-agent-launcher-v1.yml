@@ -14,11 +14,11 @@ on:
       target_repository:
         description: Repository the development agent must modify
         required: true
-        default: CurveYield2/Contract-Automation
+        default: curveyield3/Contract-Automation
         type: choice
         options:
-          - CurveYield2/Contract-Automation
-          - CurveYield2/Audit-Controller
+          - curveyield3/Contract-Automation
+          - curveyield3/Audit-Controller
       base_ref:
         description: Base ref for the generated implementation branch
         required: false
@@ -80,7 +80,7 @@ jobs:
           fetch-depth: 0
 
       - name: Select target-repository credential
-        if: inputs.target_repository == 'CurveYield2/Audit-Controller'
+        if: inputs.target_repository == 'curveyield3/Audit-Controller'
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
@@ -97,7 +97,7 @@ jobs:
           test -n "$INSTRUCTION"
           test -n "$TARGET_REPOSITORY"
           case "$TARGET_REPOSITORY" in
-            CurveYield2/Contract-Automation|CurveYield2/Audit-Controller) ;;
+            curveyield3/Contract-Automation|curveyield3/Audit-Controller) ;;
             *) echo "::error::Target repository is not allowlisted."; exit 1 ;;
           esac
           case "$CONTINUITY_MODE" in managed_project|standalone) ;; *) echo "::error::Invalid continuity mode."; exit 1;; esac

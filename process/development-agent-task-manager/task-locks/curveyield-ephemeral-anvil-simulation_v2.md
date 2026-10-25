@@ -4,7 +4,7 @@ MANAGER ID:
 curveyield-ephemeral-anvil-simulation
 
 END-STATE INVARIANT:
-CurveYield2/Contract-Automation runs required Ethereum fork simulations entirely inside ordinary GitHub-hosted Ubuntu Actions jobs. dRPC (`https://eth.drpc.org/`) supplies read-only upstream Ethereum fork state; each workflow launches and uses its own local mutable Anvil instance for deployment, mutation, Medusa, ABI telemetry, randomized testing, targeted testing, and evidence generation. No persistent remote Anvil service, public RPC endpoint, Cloudflare service, Codespace, VM, self-hosted runner, DNS, proxy, or persistent hosting is required.
+curveyield3/Contract-Automation runs required Ethereum fork simulations entirely inside ordinary GitHub-hosted Ubuntu Actions jobs. dRPC (`https://eth.drpc.org/`) supplies read-only upstream Ethereum fork state; each workflow launches and uses its own local mutable Anvil instance for deployment, mutation, Medusa, ABI telemetry, randomized testing, targeted testing, and evidence generation. No persistent remote Anvil service, public RPC endpoint, Cloudflare service, Codespace, VM, self-hosted runner, DNS, proxy, or persistent hosting is required.
 
 CURRENT MAIN:
 - Contract-Automation main verified at `b04294466dc5e8808a5fd2ac2c087b081b9b432a`.
@@ -43,7 +43,7 @@ REMAINING DELTA:
 - None
 
 PARKED OBSERVATIONS:
-- `CurveYield2/anvil-node` commit `79ee877cbeee3a783e1e065dc4f1cea3c7524379` remains intact but is superseded and not required by this architecture.
+- `curveyield3/anvil-node` commit `79ee877cbeee3a783e1e065dc4f1cea3c7524379` remains intact but is superseded and not required by this architecture.
 - This task lock was created directly from explicit human instruction rather than through an active Development Agent Task Manager request/state record, so there is no matching manager instance to retire with a machine completion receipt.
 - Future replacement of dRPC, if ever required, can use the preserved workflow-level `--fork-url` interface without redesigning the local Anvil simulation engine.
 

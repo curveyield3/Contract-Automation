@@ -107,7 +107,7 @@ Also create these two files:
 1. `process/adr-verify/AUDIT_CONTROLLER_REF_v1.txt` containing the single line `main`. Later tasks change this line to an Audit-Controller branch name inside their CA PR, so the job tests that branch, and set it back to `main` before merging.
 2. `scripts/adr-audit-controller-checks-v1.sh` (bash, `set -euo pipefail`). It:
    1. Reads the ref from `process/adr-verify/AUDIT_CONTROLLER_REF_v1.txt` with whitespace stripped. The ref must match `^[A-Za-z0-9._/-]+$`.
-   2. Runs `gh auth setup-git`, then clones `CurveYield2/Audit-Controller` twice with `gh repo clone CurveYield2/Audit-Controller <dir> -- --filter=blob:none --no-checkout` into `.ac-main` and `.ac-target`. In each clone it:
+   2. Runs `gh auth setup-git`, then clones `curveyield3/Audit-Controller` twice with `gh repo clone curveyield3/Audit-Controller <dir> -- --filter=blob:none --no-checkout` into `.ac-main` and `.ac-target`. In each clone it:
       1. runs `git sparse-checkout init --no-cone`;
       2. writes the three lines `/*`, `!/campaigns/` and `!/Phase0 Build Cache/` to `.git/info/sparse-checkout`;
       3. runs `git fetch origin "<ref>"` and then `git checkout --detach FETCH_HEAD`, where `<ref>` is `main` for `.ac-main` and the target ref for `.ac-target`.
@@ -153,7 +153,7 @@ Owner decision, 2026-10-12: the no-telemetry Phase 0 fork is discontinued and se
 
 This task is one Contract-Automation PR, `upgrade/adr-T0-archive-no-telemetry`. It is explicitly authorized to touch the workflows named here (exception to N7).
 
-1. **Archive.** Copy each file below byte-for-byte to `CurveYield2/archive` at `Contract-Automation/<original path>`. Use one archive PR or commit. Then delete each one from Contract-Automation.
+1. **Archive.** Copy each file below byte-for-byte to `curveyield3/archive` at `Contract-Automation/<original path>`. Use one archive PR or commit. Then delete each one from Contract-Automation.
    - `.github/workflows/lite-phase0-bootstrap-no-telemetry-v1.yml`
    - `.github/workflows/lite-phase0-bootstrap-recovery-dispatch-no-telemetry-v1.yml`
    - `.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml`
@@ -466,7 +466,7 @@ adr_policy=""
 if [ -n "$homepage" ]; then
   manifest_path="$(dirname "$homepage")/MANIFEST.json"
   encoded="$(jq -rn --arg p "$manifest_path" '$p|split("/")|map(@uri)|join("/")')"
-  if gh api "repos/CurveYield2/Audit-Controller/contents/$encoded?ref=$AUDIT_CONTROLLER_REF" --jq '.content' > /tmp/adr-manifest.b64 2>/dev/null; then
+  if gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=$AUDIT_CONTROLLER_REF" --jq '.content' > /tmp/adr-manifest.b64 2>/dev/null; then
     adr_policy="$(base64 -d /tmp/adr-manifest.b64 2>/dev/null | jq -r '.detectionPolicy // empty' 2>/dev/null || true)"
   fi
 fi

@@ -3,7 +3,7 @@
 ## Manager
 
 - Manager ID: `upgrade-launcher-live-smoke-r1`
-- Target repository: `CurveYield2/Contract-Automation`
+- Target repository: `curveyield3/Contract-Automation`
 - Target branch: `upgrade/launcher-live-smoke-r1`
 - Base ref: `main`
 - Final merge target: `main`

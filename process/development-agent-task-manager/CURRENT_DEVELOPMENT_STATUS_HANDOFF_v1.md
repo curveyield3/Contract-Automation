@@ -12,7 +12,7 @@ Updated: 2026-09-25 UTC
 ## Governing implementation ethos
 
 - Existing-process-first: reuse an existing workflow/module/process whenever possible; extend/refactor before creating parallel infrastructure.
-- GitHub Actions workflows belong in `CurveYield2/Contract-Automation` only. `CurveYield2/Audit-Controller` must not gain workflows.
+- GitHub Actions workflows belong in `curveyield3/Contract-Automation` only. `curveyield3/Audit-Controller` must not gain workflows.
 - Durable GitHub state is recovery authority; chat memory is not.
 - Replacement development agents must resume from exact committed state and must not repeat completed work.
 - Liveness failure policy: if the chat is unviewable, replace; otherwise on an unanswered watchdog prompt wait 120 seconds, refresh immediately, retry; after three consecutive unanswered prompts replace. There is no five-minute delay between those three attempts.

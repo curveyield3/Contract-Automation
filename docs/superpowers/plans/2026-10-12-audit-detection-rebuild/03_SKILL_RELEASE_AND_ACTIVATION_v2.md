@@ -33,7 +33,7 @@ This task has two PRs: first Contract-Automation, then Audit-Controller.
    **How to copy whole package directories (T8.2, T9.2, T9.4).** These folders hold about 150 files each. Never recreate them one file at a time through the API. Use a local clone with line-ending conversion **disabled**, otherwise the frozen digests will not match:
 
 ```bash
-git clone https://github.com/CurveYield2/Audit-Controller.git ac && cd ac
+git clone https://github.com/curveyield3/Audit-Controller.git ac && cd ac
 git config core.autocrlf false && git config core.longpaths true
 git checkout -b <task branch>
 # copy:   cp -a "<source dir>/." "<destination dir>/"     (T8.2, T9.2)
@@ -202,7 +202,7 @@ Do not initialize any campaign before this point.
 
 The full V7 infrastructure qualification was retired on 2026-10-11 (see `.github/workflows/README.md`), and `process/V7_QUALIFICATION_STATUS.json` is legacy. Align the documents with that fact. Change text only.
 
-1. **Contract-Automation `AGENTS.md`, section "V7 qualification".** Replace the paragraph naming `.github/workflows/v7-execution-infrastructure-qualification.yml` with: "The repository-wide full V7 qualification workflow was retired on 2026-10-11 and preserved in CurveYield2/archive. Lite execution evidence records the exact runner commit of each run in EXECUTION_EVIDENCE_v1.json; Lite campaigns do not require a qualification rebind. Do not restore the archived suite."
+1. **Contract-Automation `AGENTS.md`, section "V7 qualification".** Replace the paragraph naming `.github/workflows/v7-execution-infrastructure-qualification.yml` with: "The repository-wide full V7 qualification workflow was retired on 2026-10-11 and preserved in curveyield3/archive. Lite execution evidence records the exact runner commit of each run in EXECUTION_EVIDENCE_v1.json; Lite campaigns do not require a qualification rebind. Do not restore the archived suite."
 2. **Contract-Automation `AGENTS.md`, list "Canonical V7 control surface".** Remove the qualification workflow line.
 3. **Audit-Controller `AGENTS.md`, section "V7 qualified runner rebind".** Add as its first sentence: "Applies only to Full V7 (v26) campaigns. Lite campaigns bind the exact runner commit recorded in each execution evidence file and need no rebind."
 4. **Audit-Controller `docs/agent-guides/V7_RUNNER_REBIND_PROTOCOL_v1.md`.** Add the same sentence under "## Purpose".
@@ -435,7 +435,7 @@ Create these files in the v12 package with exactly this content.
      - set its scope to "independent Phase 4 attack units; Phase 6 attacker testing (baseline properties, candidate proof/disproof, new findings); master-directed targeted tests".
    - In the phase map, set the row for Phases 2–5 to add "Phase 4 starts with reviewer-2 flow-review units, then independent attacker units; reviewer-2 reconciles; the master challenges at segment review."
    - Add a section "## Coverage model" stating:
-     - coverage = contexts × applicable taxonomy classes (`CurveYield2/Contract-Automation/protocol/taxonomy/curveyield-defect-taxonomy-v1.json`) × detection method;
+     - coverage = contexts × applicable taxonomy classes (`curveyield3/Contract-Automation/protocol/taxonomy/curveyield-defect-taxonomy-v1.json`) × detection method;
      - reviewers may read and cite any source file;
      - gaps are recorded, never relabelled;
      - the final verdict states `FULL_COVERAGE` or `PARTIAL_COVERAGE`.

@@ -1,6 +1,6 @@
 name: Retired Phase 0 Randomized Simulation Rebind v2
 # Legacy Phase 0 random simulation rebind has been retired and its workflow trigger removed.
-# Historical implementations are preserved in CurveYield2/archive/sim enabled simulator.
+# Historical implementations are preserved in curveyield3/archive/sim enabled simulator.
 on:
   workflow_dispatch:
 permissions:

@@ -43,7 +43,7 @@ jobs:
             -f watchdog_enabled=false \
             -f worker_role=reviewer \
             -f gate_mode=LITE \
-            -f gate_repository=CurveYield2/Audit-Controller \
+            -f gate_repository=curveyield3/Audit-Controller \
             -f gate_ref=main \
             -f gate_state_path='Audit Campaign Directory/campaigns/curveyield-dex-v16-source.json' \
             -f gate_expected_phase_id=phase-1 \

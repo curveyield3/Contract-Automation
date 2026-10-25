@@ -17,7 +17,7 @@ On the assigned durable target branch:
    - `schemaVersion: "curveyield-development-task-manager-live-smoke-v1"`
    - `managerId: "task-manager-live-smoke-v1"`
    - `status: "PASS"`
-   - `repository: "CurveYield2/Contract-Automation"`
+   - `repository: "curveyield3/Contract-Automation"`
    - `branch: "task-manager-live-smoke-v1"`
    - `note: "fresh agent created and durable GitHub write succeeded"`
 4. Commit that file as the implementation commit.

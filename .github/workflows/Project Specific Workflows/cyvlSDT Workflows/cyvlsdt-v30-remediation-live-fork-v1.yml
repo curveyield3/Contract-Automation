@@ -24,7 +24,7 @@ jobs:
 
       - name: Select working private controller credential
         env:
-          AUDIT_CONTROLLER_PROBE_REPOSITORY: CurveYield2/Audit-Controller
+          AUDIT_CONTROLLER_PROBE_REPOSITORY: curveyield3/Audit-Controller
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
@@ -34,7 +34,7 @@ jobs:
       - name: Checkout exact frozen v30 source
         uses: actions/checkout@v4
         with:
-          repository: CurveYield2/Audit-Controller
+          repository: curveyield3/Audit-Controller
           ref: 6bde63416a4611e127b8bb3a5958e6b6d874c188
           token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: .controller-source
@@ -44,7 +44,7 @@ jobs:
       - name: Checkout exact remediation fixture
         uses: actions/checkout@v4
         with:
-          repository: CurveYield2/Audit-Controller
+          repository: curveyield3/Audit-Controller
           ref: 37319eab51d1ac1fc6a58916683114716157b922
           token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: .controller-fixture

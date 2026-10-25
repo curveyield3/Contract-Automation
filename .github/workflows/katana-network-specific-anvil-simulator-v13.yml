@@ -26,7 +26,7 @@ jobs:
       - name: Checkout verified Smart-Contracts candidate
         uses: actions/checkout@v4
         with:
-          repository: CurveYield2/Smart-Contracts
+          repository: curveyield3/Smart-Contracts
           ref: 9c9a28f06eef0ed55498b630098d49f8a8a778c5
           path: .smart-contracts
           persist-credentials: false
@@ -80,7 +80,7 @@ jobs:
           DEST=packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/results/KATANA_CYVBWBTC_LIFECYCLE_RESULT_v13.json
           mkdir -p "$(dirname "$DEST")"
           cp "$RESULT" "$DEST"
-          git config user.name "CurveYield2 CI"
+          git config user.name "curveyield3 CI"
           git config user.email "actions@users.noreply.github.com"
           git add "$DEST"
           if ! git diff --cached --quiet; then

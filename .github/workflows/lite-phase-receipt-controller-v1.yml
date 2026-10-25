@@ -48,7 +48,7 @@ jobs:
           set -euo pipefail
           gh auth setup-git
           rm -rf .audit-controller
-          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
+          gh repo clone curveyield3/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
           cd .audit-controller
           git fetch origin "${{ inputs.audit_controller_ref }}"
           git checkout -B "${{ inputs.audit_controller_ref }}" "origin/${{ inputs.audit_controller_ref }}"
