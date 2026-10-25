@@ -830,7 +830,7 @@ export async function executePhase5TargetsV1({
     const machine={
       status:result.exitCode===0&&rawResult?'PASS':(rawResult?.blocking?'BLOCKED':'INCONCLUSIVE'),
       exitCode:result.exitCode,
-      evidenceRef:path.posix.join(campaignPath,evidenceRef),
+      evidenceRef,
       requestBindingStatus:binding.status,
       requestBindingEvidenceRef:binding.requestRef,
       requestBindingReasons:binding.reasons,
