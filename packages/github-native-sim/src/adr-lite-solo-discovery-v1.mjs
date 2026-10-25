@@ -456,6 +456,11 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   waiting.length?'Requested unit has no submission: '+waiting.join(', '):''].filter(Boolean).join('\n');
  const others=openIdleSoloWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,except:chatKey});
  const finish=(status,feedbackText,currentWindow=null)=>{
+  const stillActive=activeIdsOf(state,chatKey);
+  // Legacy solo campaigns already opened 85+ units at once. Preserve their
+  // accepted/draft state, but expose only two current units in the paged index.
+  if(!currentWindow&&stillActive.length)
+   currentWindow=recordWindowV1({root,ids:stillActive.slice(0,SOLO_WINDOW_MAX_UNITS),state,campaignPath,authorityRoot});
   state.payload.activeUnitId=activeIdsOf(state)[0]??null;
   writeJson(repoFile(root,stateRel(campaignPath)),state);
   const windows=[...(currentWindow?[currentWindow]:[]),...others];
