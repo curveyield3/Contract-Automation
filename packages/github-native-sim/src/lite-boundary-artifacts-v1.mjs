@@ -390,6 +390,12 @@ export function validatePhase5CandidateDispositionV1({
       const candidateRefs=phase5EvidenceRefsV1(candidate.record);
       if(!refs.length||!refs.some(x=>x===sourceAnchor||candidateRefs.includes(x)))
         failures.push(prefix+'.dispositionEvidenceRefs must cite the exact source anchor or a source-bound candidate evidence reference');
+      // Pure narrative source citations are not independently verified
+      // disproof; retain the candidate until a controller-verified proof
+      // record binds the exact claim to a historical source identity.
+      if(row.controllerProofVerification?.status!=='PASS'||
+         String(row.controllerProofVerification?.candidateKey??'')!==candidate.key)
+        failures.push(prefix+' RESOLVED_NON_MATERIAL requires independently controller-verified proof; prose and source anchors alone cannot close a security candidate');
       if(!phase5TextV1(row.rationale,80)||!phase5TextV1(row.phase5Observation,40)||String(row.downstreamValidationNeed??'')!=='NONE_IDENTIFIED')
         failures.push(prefix+' RESOLVED_NON_MATERIAL requires a source-contradiction/out-of-scope explanation, supporting evidence and downstreamValidationNeed=NONE_IDENTIFIED; non-reproduction or uncertainty is not sufficient');
       if(row.requiredPhase!==undefined||row.requiredAction||row.completionCondition)
@@ -402,8 +408,12 @@ export function validatePhase5CandidateDispositionV1({
         failures.push(prefix+'.obligationId must be a stable unique OBL-P5-* identifier');
       else if(obligationIds.has(obligationId))failures.push(prefix+'.obligationId duplicates '+obligationId);
       else obligationIds.add(obligationId);
-      if(![6,8,9,10].includes(requiredPhase))
-        failures.push(prefix+'.requiredPhase must be a future Lite phase (6, 8, 9 or 10)');
+      // The current bound Lite-Solo authority only provides a schema-governed
+      // obligationDispositions closure field in Phase 6. Carry-to-8/9/10
+      // cannot be offered as a completed assurance route until a new bound
+      // authority release actually provides those fields.
+      if(requiredPhase!==6)
+        failures.push(prefix+'.requiredPhase must be 6 under lite-solo-v1: phases 8, 9 and 10 have no obligation-closure field; do not silently defer mandatory security work beyond Phase 6');
       if(!phase5TextV1(row.requiredAction,20))failures.push(prefix+'.requiredAction must specify the concrete closure action');
       if(!phase5TextV1(row.completionCondition,20))failures.push(prefix+'.completionCondition must state observable evidence required for closure');
       const originRefs=arr(row.originatingEvidenceRefs).map(x=>String(x??'').trim()).filter(Boolean);
