@@ -1,9 +1,5 @@
 name: Lite-Solo Source Initialization v1
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'process/lite-solo-source-initialization/requests/*.json'
   workflow_dispatch:
     inputs:
       source_url:
@@ -15,7 +11,7 @@ on:
         type: string
         required: false
       request_id:
-        description: Stable idempotency identifier
+        description: Stable idempotency identifier (defaults to workflow run ID)
         type: string
         required: false
       authorize_phase0_execution:
@@ -36,43 +32,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
-          fetch-depth: 2
+          ref: main
+          fetch-depth: 1
           persist-credentials: false
-      - name: Resolve a direct GitHub request or manually dispatched input
+      - name: Resolve manually dispatched source (no request files or chat)
         id: request
         env:
-          DISPATCH_SOURCE_URL: ${{ inputs.source_url }}
-          DISPATCH_RAW_SCAN_URLS: ${{ inputs.scan_urls }}
-          DISPATCH_REQUEST_ID: ${{ inputs.request_id }}
-          DISPATCH_AUTHORIZATION: ${{ inputs.authorize_phase0_execution }}
+          RAW_SOURCE_URL: ${{ inputs.source_url }}
+          RAW_SCAN_URLS: ${{ inputs.scan_urls }}
+          RAW_REQUEST_ID: ${{ inputs.request_id }}
+          RAW_AUTHORIZATION: ${{ inputs.authorize_phase0_execution }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
-            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/lite-solo-source-initialization/requests/)
-            test "${#changed[@]}" -eq 1
-            request="${changed[0]}"
-            [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]]
-            test -f "$request"
-            jq -e '
-              .schemaVersion=="curveyield-lite-solo-source-request-v1" and
-              .mode=="LITE_SOLO" and (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and
-              (.sourceUrl|type=="string") and
-              ((.scanUrls // [])|type=="array") and
-              (.authorizePhase0Execution|type=="boolean") and
-              (.agentChatUrl==null) and (.deliveryTransport==null or .deliveryTransport=="DIRECT")
-            ' "$request" >/dev/null
-            source_url="$(jq -r .sourceUrl "$request")"
-            scans="$(jq -c '.scanUrls // []' "$request")"
-            request_id="$(jq -r .requestId "$request")"
-            authorization="$(jq -r .authorizePhase0Execution "$request")"
-          else
-            source_url="$DISPATCH_SOURCE_URL"
-            scans="$(printf '%s' "$DISPATCH_RAW_SCAN_URLS" | jq -Rsc 'split("\n")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))')"
-            request_id="${DISPATCH_REQUEST_ID:-$GITHUB_RUN_ID}"
-            authorization="${DISPATCH_AUTHORIZATION:-false}"
-          fi
+          test "$GITHUB_REF_NAME" = main
+          source_url="$RAW_SOURCE_URL"
+          scans="$(printf '%s' "$RAW_SCAN_URLS" | jq -Rsc 'split("\n")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))')"
+          request_id="${RAW_REQUEST_ID:-$GITHUB_RUN_ID}"
+          authorization="${RAW_AUTHORIZATION:-false}"
           [[ "$request_id" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$authorization" == true || "$authorization" == false ]]
           [[ "$source_url" != *$'\n'* && "$source_url" != *$'\r'* ]]
