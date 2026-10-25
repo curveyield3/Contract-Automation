@@ -1,0 +1,64 @@
+name: Lite-Solo Source Initialization v1
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: ZIP URL (mutually exclusive with scan URLs)
+        type: string
+        required: false
+      scan_urls:
+        description: One or more verified Etherscan/KatanaScan contract page URLs, newline separated
+        type: string
+        required: false
+      agent_chat_url:
+        description: One existing ChatGPT conversation URL
+        type: string
+        required: true
+      request_id:
+        description: Stable request ID for retry (default GitHub run ID)
+        type: string
+        required: false
+      authorize_phase0_execution:
+        description: Explicit human authorization to execute Phase-0 machine simulations
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: lite-solo-source-initialization
+  cancel-in-progress: false
+jobs:
+  initialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Initialize source in separate lite-solo lane
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          SOURCE_URL: ${{ inputs.source_url }}
+          SOLO_CHAT_URL: ${{ inputs.agent_chat_url }}
+          REQUEST_ID: ${{ inputs.request_id || github.run_id }}
+          AUTHORIZE_PHASE0_EXECUTION: ${{ inputs.authorize_phase0_execution }}
+          RAW_SCAN_URLS: ${{ inputs.scan_urls }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCAN_URLS="$(printf '%s' "$RAW_SCAN_URLS" | jq -Rsc 'split("\n")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))')"
+          export SCAN_URLS
+          bash scripts/lite-solo-source-initialization/run-v1.sh
