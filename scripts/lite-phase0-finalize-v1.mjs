@@ -226,6 +226,8 @@ const directoryV2={
   campaignName:receipt.campaign.campaignName,
   workspacePath:campaignPath,
   mode:'LITE',
+  deliveryTransport:directory.deliveryTransport||'GITHUB_BROWSER',
+  transportEpoch:Number(directory.transportEpoch||0),
   sourceSha256:sourceSha,
   masterReview:directory.masterReview,
   ...(directory.testExecutor?{testExecutor:directory.testExecutor}:{}),
