@@ -1,0 +1,13 @@
+{
+  "source_url": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/cyavKATv25b.zip",
+  "scan_urls": [],
+  "single_agent_simulation": false,
+  "delivery_transport": "AGENT_DELIVERY",
+  "agent_chat_1_url": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a29-94c8-83e8-a920-8c4c36aee623",
+  "agent_chat_2_url": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a2f-2a60-83e8-b008-f48d222075a7",
+  "agent_chat_3_url": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a35-9a84-83e8-b418-15503d85645a",
+  "agent_chat_4_url": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a3b-b5c4-83e8-99c7-60c7265d3e49",
+  "master_chat_url": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a72-21ac-83e8-9476-885fc6c504e5",
+  "test_executor_chat_url": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a4d-3918-83e8-84da-c3f47566c5e5",
+  "backup_chat_url": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a55-7ce8-83e8-91c7-554e10deda28"
+}
