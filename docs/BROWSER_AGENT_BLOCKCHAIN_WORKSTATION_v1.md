@@ -207,6 +207,46 @@ Missing harness support is not permission to modify production source or bypass 
 | **9 — conditional remediation** | Reviewer-4 uses existing Phase-9 rerun request and V7 dispatcher only if remediation exists and owner authorized | Reproduce original historical starting state, test repaired code on isolated Anvil, record before/after and unchanged upstream reference |
 | **10 — final conclusion/master** | Reviewer-4 and master reconcile all receipts and exceptions | Do not claim complete assurance where any historical RPC, oracle, configuration/governance policy or evidence obligation is inconclusive |
 
+### Evidence provenance versus per-phase execution verdict — mandatory for Lite reviews
+
+**Never turn a missing NEW simulation into a claim that earlier independently
+supported behavior is disproven or wholly unverified.** Every material candidate
+must retain two separate axes:
+
+- **Evidence-backed security conclusion:** which behavior was reproduced or
+  falsified, with exact source, EVM environment (synthetic fixture vs authenticated
+  historical Anvil), actors, limits, and original raw evidence references.
+  A previously proven *conditional* behavior remains a conditional behavior.
+  Neither an isolated fixture nor a read-only historic role lookup proves live
+  exploitation or governance authorization.
+- **Current-phase execution result:** whether this particular Phase-5/6
+  target/harness ran against the required pinned, archive-backed local Anvil,
+  and its actually executed receipts, assertions, and runner identity.
+  `DEFERRED_UNVERIFIED`, `NOT_EXECUTED` and `INCONCLUSIVE` remain correct for
+  missing NEW execution, **without erasing the prior evidence**.
+
+Controller-generated Phase-6/8/10 output carries
+`automationOutputs.candidateEvidenceContinuity`, built from reviewer-recorded
+Phase-5 reconciliations and separately recorded Phase-6 execution/proof status.
+Do not map `X001-*` discovery IDs to `CAND-*` phase target IDs by positional
+order; only use an exact unique source-anchor binding, otherwise mark unlinked.
+This continuity output is not new machine proof, does not override a verdict,
+and does not authorize a test.
+
+Generated reports must derive unresolved questions from nested
+`targetDispositions`, `candidateProofRecords` and `BLOCKED_CARRIED`
+obligations, not solely fields literally named `unresolved`. Never print
+`NONE_IDENTIFIED` when those nested records contain unresolved risks.
+
+**DAI campaign r2 owner restriction:** no new candidate, fuzz, fork,
+master-targeted, or baseline test requests or executions for the remainder of
+`live-ethereum-dai-6b175474-r2`. The existing owner deferral remains binding.
+Use only the admitted raw evidence and its verified provenance for downstream
+review. Controller/master correction of an evidence classification must not
+trigger a simulation or rewrite sealed historical proof. Unresolved historical
+governance policy remains explicit and cannot be converted to a safe result or
+silently erased to obtain a terminal COMPLETE.
+
 ### Exact GitHub-connector procedure for an authorized existing execution
 
 Read the target workflow's `on:` path filter before modifying the corresponding **existing** request file. Identify the canonical `curveyield3/Audit-Controller` request and bound source SHA/receipt. If the audit owner authorized this specific test run, write/update only the expected `curveyield3/Contract-Automation` request, record its full commit SHA, then look up `https://api.github.com/repos/curveyield3/Contract-Automation/actions/runs?head_sha=<SHA>&event=push`; select only the exact expected workflow. Read its job steps/logs and published controller receipt. A green Actions run does not establish controller PASS. Missing local binaries are irrelevant; missing secret projection, frozen block/hash, local fork session, or mined assertions are genuine failures. Do not resubmit the same rejected request without a concrete correction and renewed permission.
