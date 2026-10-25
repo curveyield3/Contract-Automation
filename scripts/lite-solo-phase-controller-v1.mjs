@@ -14,7 +14,7 @@ import {
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-solo-phase-work-v1.mjs';
 import {
-  executePhase5TargetsV1,selectReusablePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
+  executePhase5TargetsV1,selectReusablePhase5TargetsV1,validatePhase5CandidateDispositionV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
   validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
@@ -92,6 +92,21 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
   }
   const graphRecords=importedRecords(canonical,schema.bookkeepingMappings?.graphRecordPaths);
   const obligationRecords=importedRecords(canonical,schema.bookkeepingMappings?.obligationRecordPaths);
+  // Existing formal obligation ledger is the single closure authority.
+  // Import every source-reconciled unresolved Phase-5 candidate here, rather
+  // than creating a second candidate-lifecycle tracking system.
+  if(schema.phase===5){
+    const dispositions=phaseOutput(canonical,'step-2','reconciliationRecords')??[];
+    const opened=dispositions.filter(row=>row&&typeof row==='object'&&
+      ['RETAIN_OPEN_OBLIGATION','CONDITIONAL_PENDING_EVIDENCE'].includes(String(row.phase5ExecutionDisposition??'').toUpperCase()));
+    if(opened.length)obligationRecords.push({path:'actions.step-2.outputs.reconciliationRecords.PHASE5_OPEN_OBLIGATIONS',
+      value:opened.map(row=>({
+        obligationId:row.obligationId,requiredPhase:row.requiredPhase,requiredAction:row.requiredAction,
+        completionCondition:row.completionCondition,mandatory:true,
+        originatingEvidenceRefs:row.originatingEvidenceRefs,
+        originFactKeys:[String(row.subjectKey??'')].filter(Boolean)
+      }))});
+  }
   const invalidationRecords=importedRecords(canonical,schema.bookkeepingMappings?.invalidationRecordPaths);
   graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:graphRecords,importedAt:now});
   ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:obligationRecords,importedAt:now});
@@ -281,14 +296,20 @@ function importedFormalObligations(ledger){
   return out;
 }
 function finalIndexObligations(ledger){
-  const normalized=(ledger?.obligations??[]).filter(o=>!['CLOSED','SATISFIED','NOT_APPLICABLE','SUPERSEDED'].includes(String(o.status??'OPEN').toUpperCase()));
-  const imported=importedFormalObligations(ledger);
-  const byId=new Map();
-  for(const o of [...normalized,...imported]){
-    const id=String(o.obligationId??'').trim(); if(!id) continue;
-    if(!byId.has(id)||String(byId.get(id)?.status??'').startsWith('OPEN_IMPORTED')) byId.set(id,o);
+  const closed=new Set(['CLOSED','SATISFIED','NOT_APPLICABLE','SUPERSEDED']);
+  const recorded=new Map((ledger?.obligations??[])
+    .map(o=>[String(o?.obligationId??'').trim(),o]).filter(([id])=>id));
+  const unresolved=new Map();
+  for(const [id,obligation] of recorded){
+    if(!closed.has(String(obligation.status??'OPEN').toUpperCase()))unresolved.set(id,obligation);
   }
-  return [...byId.values()];
+  // A previously imported obligation that was later SATISFIED must never be
+  // resurrected as OPEN_IMPORTED during final-evidence indexing.
+  for(const obligation of importedFormalObligations(ledger)){
+    const id=String(obligation.obligationId??'').trim();
+    if(id&&!recorded.has(id)&&!unresolved.has(id))unresolved.set(id,obligation);
+  }
+  return [...unresolved.values()];
 }
 
 function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
@@ -934,19 +955,14 @@ function annotateShardReworkV1(packet,errors){
 }
 function materialPhase5Candidates({root,campaignPath,form}){
   const prior=canonicalFor(root,campaignPath,4);
-  const phase4=phaseOutput(prior,'step-3','candidateRecords')??[];
-  const newCandidates=form?.actions?.['step-2']?.outputs?.newCandidateRecords??[];
-  const keys=[],sourceAnchors={};
-  for(const record of [...phase4,...newCandidates]){
-    if(record==='NONE_IDENTIFIED')continue;
-    const key=String(record?.canonicalId??record?.tempKey??'').trim();
-    if(!key)throw new Error('Phase 5 material candidate has no key');
-    const anchor=String(record?.sourceAnchor??'').trim();
-    if(sourceAnchors[key]!==undefined&&sourceAnchors[key]!==anchor)
-      throw new Error('Phase 5 material candidate '+key+' has inconsistent source anchors');
-    keys.push(key);sourceAnchors[key]=anchor;
-  }
-  return {keys:[...new Set(keys)],sourceAnchors};
+  if(!prior)throw new Error('Phase-5 candidate ledger cannot find sealed Phase-4 canonical source');
+  const priorRecords=phaseOutput(prior,'step-3','candidateRecords')??[];
+  const newRecords=form?.actions?.['step-2']?.outputs?.newCandidateRecords??[];
+  return validatePhase5CandidateDispositionV1({
+    phase4CandidateRecords:priorRecords,newCandidateRecords:newRecords,
+    reconciliationRecords:form?.actions?.['step-2']?.outputs?.reconciliationRecords??[],
+    targetDesigns:form?.actions?.['step-3']?.outputs?.targetDesigns??[]
+  });
 }
 if(sequence===5&&form&&deficiencies.length===0){
   const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
@@ -1005,26 +1021,31 @@ if(sequence===5&&form&&deficiencies.length===0){
 
 if(sequence===5&&form&&deficiencies.length===0){
   try{
+    const disposition=materialPhase5Candidates({root,campaignPath,form});
+    deficiencies.push(...disposition.failures);
     deficiencies.push(...validatePhase5TargetCoverageV1({
       targetDesigns:form.actions['step-3'].outputs.targetDesigns,
-      materialCandidateKeys:materialPhase5Candidates({root,campaignPath,form}).keys,
-      candidateSourceAnchors:materialPhase5Candidates({root,campaignPath,form}).sourceAnchors
+      materialCandidateKeys:disposition.candidateKeys,
+      requiredTargetKeys:disposition.requiredTargetKeys,
+      candidateSourceAnchors:disposition.candidateSourceAnchors
     }));
-  }catch(e){deficiencies.push('Phase 5 coverage validation failed: '+String(e.message||e));}
+  }catch(e){deficiencies.push('Phase 5 candidate disposition/coverage validation failed: '+String(e.message||e));}
 }
 // Downstream gates must independently reconstruct the mandatory candidate set
 // and read actual V7 machine artifacts. A prior phase PASS/receipt is not proof.
 if([6,8].includes(sequence)&&deficiencies.length===0){
   try{
     const sealedP5=canonicalFor(root,campaignPath,5);
-    const mandatory=materialPhase5Candidates({root,campaignPath,form:sealedP5}).keys;
+    const material=materialPhase5Candidates({root,campaignPath,form:sealedP5});
+    if(material.failures.length)deficiencies.push(...material.failures.map(x=>'Sealed Phase-5 candidate ledger: '+x));
+    const mandatory=material.candidateKeys;
     const rows=sequence===6?(form.actions?.['step-2']?.outputs?.targetDispositions??[])
       :(form.actions?.['step-2']?.outputs?.candidateValidations??[]);
     const actual=rows.filter(x=>x&&typeof x==='object').map(x=>String(x.candidateKey??'').trim()).filter(Boolean);
     if(actual.length!==new Set(actual).size)deficiencies.push('Phase '+sequence+' contains duplicate candidate dispositions');
     for(const key of mandatory)if(!actual.includes(key))
       deficiencies.push('Phase '+sequence+' skipped mandatory predecessor candidate '+key);
-    if(sequence===6){
+    if([6,8].includes(sequence)){
       if(phase5OwnerDeferral){
         if(sealedP5?.automationOutputs?.phase5MachineExecutionGate?.status!=='DEFERRED_UNVERIFIED'||
            sealedP5.automationOutputs.phase5MachineExecutionGate.ownerDirectivePath!==phase5OwnerDeferral.path)
@@ -1061,7 +1082,7 @@ if(sequence===5 && !(directory.machineExecutionAuthorization?.status==='APPROVED
 let phase5MachineResults=null;
 if(sequence===5){
   const targetDesigns=form.actions['step-3'].outputs.targetDesigns;
-  const {keys:materialCandidateKeys,sourceAnchors:candidateSourceAnchors}=
+  const {candidateKeys:materialCandidateKeys,candidateSourceAnchors,requiredTargetKeys}=
     materialPhase5Candidates({root,campaignPath,form});
   try{
     if(phase5OwnerDeferral){
