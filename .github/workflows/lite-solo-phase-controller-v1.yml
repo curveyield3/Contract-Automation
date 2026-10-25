@@ -277,4 +277,6 @@ jobs:
             echo "- Durable response: $detail"
             echo "- Next action is represented by currentAssignment in the canonical campaign directory"
             echo "- No separate chat, wake, or delivery transport"
+            echo "- Phase 4/5/6 controller operations guide: https://github.com/curveyield3/Contract-Automation/blob/main/docs/lite-solo-phase-4-5-6-bounded-workflow-v1.md"
+            echo "- Phase 5/6 partial candidate batches validate source-bound records only; neither a batch acceptance nor a green Actions run is a sealed security PASS"
           } >> "$GITHUB_STEP_SUMMARY"
