@@ -419,7 +419,7 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   const info=state.payload.units[id],relative=submissionRel(campaignPath,id),file=repoFile(root,relative);
   if(!fs.existsSync(file)){waiting.push(id);continue;}
   const bytes=fs.readFileSync(file),sha=hex(bytes);
-  if(sha===info.lastValidatedSubmissionSha){
+  if(sha===info.lastValidatedSubmissionSha&&!legacyGapRecovery){
    unchanged.push(feedbackTextV1({errors:info.lastErrors},{attempt:info.attempts,maxAttempts:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,submissionPath:relative,unitId:id}));
    continue;
   }
