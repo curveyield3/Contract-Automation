@@ -73,7 +73,7 @@ jobs:
             (.masterReview==null) and (.pendingMasterReview==null) and
             (.workspacePath|startswith("campaigns/"))' /tmp/lite-solo-campaign-directory.json >/dev/null
           campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
-          bash scripts/checkout-audit-controller-once-v1.sh .audit-controller main branch "$campaign_path"
+          bash scripts/lite-solo-checkout-audit-controller-once-v1.sh .audit-controller main branch "$campaign_path"
           jq -e --arg id "$AUDIT_CAMPAIGN" '.campaignId==$id and .mode=="LITE_SOLO"' ".audit-controller/$AUDIT_DIRECTORY" >/dev/null
           echo "path=$campaign_path" >> "$GITHUB_OUTPUT"
       - name: Set up Node.js for the existing validation engine
