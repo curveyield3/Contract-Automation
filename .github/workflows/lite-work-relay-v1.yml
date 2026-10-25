@@ -73,13 +73,16 @@ jobs:
           CHAT_URL: ${{ inputs.chat_url }}
           MESSAGE_B64: ${{ inputs.wake_message_b64 }}
           WORKER_ROLE: ${{ inputs.worker_role }}
+          GATE_STATE_PATH: ${{ inputs.gate_state_path }}
+          GATE_MILESTONE: ${{ inputs.gate_expected_milestone_id }}
         shell: bash
         run: |
           set -euo pipefail
           node scripts/work-relay-v1.mjs --operation deliver \
             --campaign-id "$CAMPAIGN_ID" --wake-id "$WAKE_ID" \
             --phase-id "$PHASE_ID" --chat-url "$CHAT_URL" \
-            --worker-role "$WORKER_ROLE" --wake-message-b64 "$MESSAGE_B64"
+            --worker-role "$WORKER_ROLE" --wake-message-b64 "$MESSAGE_B64" \
+            --gate-state-path "$GATE_STATE_PATH" --gate-expected-milestone-id "$GATE_MILESTONE"
       - name: Prepare and queue successor using existing reviewer assignment generator
         if: github.event_name == 'workflow_dispatch' && inputs.operation == 'successor'
         env:
@@ -102,11 +105,12 @@ jobs:
           [ -n "$chat" ] && [ "$chat" != null ]
           wake="$(jq -r '.wakeMessageB64' /tmp/work-successor.json)"
           phase="$(jq -r '.incomingPhaseId // .incomingPhase // empty' /tmp/work-successor.json)"
-          boundary="$(jq -r '.boundary // empty' /tmp/work-successor.json)"
+          boundary="PHASE_$(jq -r '.incomingPhaseSequence' /tmp/work-successor.json)_WORK_PACKET"
           node scripts/work-relay-v1.mjs --operation deliver \
             --campaign-id "$CAMPAIGN_ID" --wake-id "$CAMPAIGN_ID-$boundary-$reviewer" \
             --phase-id "$phase" --chat-url "$chat" --worker-role reviewer \
-            --wake-message-b64 "$wake"
+            --wake-message-b64 "$wake" --gate-state-path "$directory_path" \
+            --gate-expected-milestone-id "$boundary"
       - name: Change delivery lane during active campaign
         if: github.event_name == 'workflow_dispatch' && inputs.operation == 'switch'
         env:
@@ -138,7 +142,10 @@ jobs:
               -f phase_id="$phase" -f mode=resume_existing -f chat_url="$chat" \
               -f wake_message_b64="$b64" -f worker_role=reviewer \
               -f watchdog_enabled=true -f gate_mode=LITE \
-              -f gate_repository=curveyield3/Audit-Controller -f gate_ref=main
+              -f gate_repository=curveyield3/Audit-Controller -f gate_ref=main \
+              -f gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' /tmp/switch-registration.json)" \
+              -f gate_expected_phase_id="$phase" \
+              -f gate_expected_milestone_id="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' /tmp/switch-registration.json)"
           fi
       - name: Summary
         if: always()
