@@ -1,25 +1,25 @@
 name: Lite-Solo Source Initialization v1
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/lite-solo-source-initialization/requests/*.json'
   workflow_dispatch:
     inputs:
       source_url:
-        description: ZIP URL (mutually exclusive with scan URLs)
+        description: Direct ZIP URL (mutually exclusive with scan URLs)
         type: string
         required: false
       scan_urls:
-        description: One or more verified Etherscan/KatanaScan contract page URLs, newline separated
+        description: Etherscan/KatanaScan URLs, one per line
         type: string
         required: false
-      agent_chat_url:
-        description: One existing ChatGPT conversation URL
-        type: string
-        required: true
       request_id:
-        description: Stable request ID for retry (default GitHub run ID)
+        description: Stable idempotency identifier
         type: string
         required: false
       authorize_phase0_execution:
-        description: Explicit human authorization to execute Phase-0 machine simulations
+        description: Explicit authorization for Phase-0 simulations and machine work
         type: boolean
         required: true
         default: false
@@ -36,29 +36,72 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
-          fetch-depth: 1
+          ref: ${{ github.sha }}
+          fetch-depth: 2
           persist-credentials: false
+      - name: Resolve a direct GitHub request or manually dispatched input
+        id: request
+        env:
+          DISPATCH_SOURCE_URL: ${{ inputs.source_url }}
+          DISPATCH_RAW_SCAN_URLS: ${{ inputs.scan_urls }}
+          DISPATCH_REQUEST_ID: ${{ inputs.request_id }}
+          DISPATCH_AUTHORIZATION: ${{ inputs.authorize_phase0_execution }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/lite-solo-source-initialization/requests/)
+            test "${#changed[@]}" -eq 1
+            request="${changed[0]}"
+            [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]]
+            test -f "$request"
+            jq -e '
+              .schemaVersion=="curveyield-lite-solo-source-request-v1" and
+              .mode=="LITE_SOLO" and (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and
+              (.sourceUrl|type=="string") and
+              ((.scanUrls // [])|type=="array") and
+              (.authorizePhase0Execution|type=="boolean") and
+              (.agentChatUrl==null) and (.deliveryTransport==null or .deliveryTransport=="DIRECT")
+            ' "$request" >/dev/null
+            source_url="$(jq -r .sourceUrl "$request")"
+            scans="$(jq -c '.scanUrls // []' "$request")"
+            request_id="$(jq -r .requestId "$request")"
+            authorization="$(jq -r .authorizePhase0Execution "$request")"
+          else
+            source_url="$DISPATCH_SOURCE_URL"
+            scans="$(printf '%s' "$DISPATCH_RAW_SCAN_URLS" | jq -Rsc 'split("\n")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))')"
+            request_id="${DISPATCH_REQUEST_ID:-$GITHUB_RUN_ID}"
+            authorization="${DISPATCH_AUTHORIZATION:-false}"
+          fi
+          [[ "$request_id" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$authorization" == true || "$authorization" == false ]]
+          [[ "$source_url" != *$'\n'* && "$source_url" != *$'\r'* ]]
+          if [ -n "$source_url" ]; then [[ "$source_url" =~ ^https:// ]]; fi
+          jq -e 'type=="array" and all(.[]; type=="string" and startswith("https://"))' <<<"$scans" >/dev/null
+          if [ -n "$source_url" ]; then test "$scans" = '[]'; else test "$scans" != '[]'; fi
+          {
+            echo "source_url=$source_url"
+            echo "scan_urls_json=$scans"
+            echo "request_id=$request_id"
+            echo "authorize_phase0_execution=$authorization"
+          } >> "$GITHUB_OUTPUT"
       - name: Select Audit-Controller credential
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         run: bash scripts/select-audit-controller-token.sh
-      - name: Initialize source in separate lite-solo lane
+      - name: Initialize exact source in direct lite-solo mode
         env:
           GH_TOKEN: ${{ github.token }}
           CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
           AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-          SOURCE_URL: ${{ inputs.source_url }}
-          SOLO_CHAT_URL: ${{ inputs.agent_chat_url }}
-          REQUEST_ID: ${{ inputs.request_id || github.run_id }}
-          AUTHORIZE_PHASE0_EXECUTION: ${{ inputs.authorize_phase0_execution }}
-          RAW_SCAN_URLS: ${{ inputs.scan_urls }}
+          SOURCE_URL: ${{ steps.request.outputs.source_url }}
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
+          AUTHORIZE_PHASE0_EXECUTION: ${{ steps.request.outputs.authorize_phase0_execution }}
+          SCAN_URLS: ${{ steps.request.outputs.scan_urls_json }}
         shell: bash
         run: |
           set -euo pipefail
-          SCAN_URLS="$(printf '%s' "$RAW_SCAN_URLS" | jq -Rsc 'split("\n")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))')"
-          export SCAN_URLS
           bash scripts/lite-solo-source-initialization/run-v1.sh
