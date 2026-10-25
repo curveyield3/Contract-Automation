@@ -28,14 +28,18 @@ export function loadFrozenAuthorityRegistryV1(root){
   if(registry.schemaVersion!=='curveyield-frozen-authority-registry-v1'||!Array.isArray(registry.entries)||!registry.entries.length)
     throw new Error('frozen authority registry is malformed');
   const roots=new Set();
+  const frozenRoots=new Set();
   for(const entry of registry.entries){
     if(!entry||typeof entry.release!=='string'||!/^Audit_Litemode_v[0-9]+(?:\.[0-9]+)?$/.test(entry.release)
       ||typeof entry.logicalRoot!=='string'||typeof entry.frozenRoot!=='string'
       ||!/^([0-9a-f]{64})$/.test(entry.skillSha256)||!/^([0-9a-f]{64})$/.test(entry.manifestSha256))
       throw new Error('frozen authority registry entry is malformed');
     safeRel(entry.logicalRoot);safeRel(entry.frozenRoot);
-    if(roots.has(entry.logicalRoot))throw new Error('duplicate frozen authority logical root: '+entry.logicalRoot);
-    roots.add(entry.logicalRoot);
+    // Multiple immutable revisions may share one historical logical root;
+    // discriminate by exact receipt-bound SKILL hash, never by release label.
+    const identity=entry.logicalRoot+'#'+entry.skillSha256;
+    if(roots.has(identity)||frozenRoots.has(entry.frozenRoot))throw new Error('duplicate frozen authority identity/root: '+identity);
+    roots.add(identity);frozenRoots.add(entry.frozenRoot);
   }
   return registry;
 }
@@ -68,7 +72,9 @@ export function resolveFrozenAuthorityFileV1(root,rel){
   safeRel(rel);
   const logical=absolute(root,rel);
   if(fs.existsSync(logical))return null;
-  const entry=loadFrozenAuthorityRegistryV1(root).entries.find(e=>matching(e,rel));
+  const matches=loadFrozenAuthorityRegistryV1(root).entries.filter(e=>matching(e,rel));
+  if(matches.length>1)throw new Error('ambiguous frozen authority logical root; resolve from receipt digest first: '+rel);
+  const entry=matches[0];
   if(!entry)return null;
   const {frozenRoot,seen}=inspectFrozenAuthorityV1(root,entry);
   const suffix=rel.slice(entry.logicalRoot.length).replace(/^\//,'');
@@ -80,7 +86,9 @@ export function resolveFrozenAuthorityFileV1(root,rel){
 export function authorityLinkPathV1(root,rel){
   if(typeof rel!=='string')return rel;
   if(fs.existsSync(absolute(root,rel)))return rel;
-  const entry=loadFrozenAuthorityRegistryV1(root).entries.find(e=>matching(e,rel));
+  const matches=loadFrozenAuthorityRegistryV1(root).entries.filter(e=>matching(e,rel));
+  if(matches.length>1)throw new Error('ambiguous authority link; select exact frozen root from receipt identity: '+rel);
+  const entry=matches[0];
   if(!entry)return rel;
   // Fail closed on corrupt frozen copies before exposing a reviewer authority link.
   resolveFrozenAuthorityFileV1(root,rel);
