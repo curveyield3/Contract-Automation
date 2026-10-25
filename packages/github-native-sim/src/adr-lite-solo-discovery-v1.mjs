@@ -17,6 +17,9 @@ const asset=(root,campaign,name)=>reviewInventoryRelV1(root,campaign,name);
 const known=(root,rel)=>{const file=repoFile(root,rel);return fs.existsSync(file)?readJson(file):null;};
 const hex=bytes=>createHash('sha256').update(bytes).digest('hex');
 const arr=x=>Array.isArray(x)?x:[];
+const SOLO_WINDOW_MAX_UNITS=2;
+const SOLO_WINDOW_MAX_PACKET_BYTES=256*1024;
+const SOLO_PACKET_PAGE_MAX_BYTES=24*1024;
 const sort=(a,b)=>String(a).localeCompare(String(b));
 const head=(directory,now,schemaVersion,payload)=>({schemaVersion,campaignId:directory.campaignId,
  campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
@@ -156,14 +159,23 @@ const activeIdsOf=(state,chatKey=null)=>state.payload.order.filter(id=>state.pay
 const pendingIdsOf=(state,chatKey)=>state.payload.order.filter(id=>state.payload.units[id]?.status==='PENDING'&&state.payload.units[id].chatKey===chatKey);
 const chatKeysOf=(state)=>[...new Set(state.payload.order.map(id=>state.payload.units[id]?.chatKey).filter(Boolean))];
 function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey}){
- const ids=state.payload.sequentialSingleReviewer
-   ?pendingIdsOf(state,chatKey).filter(id=>state.payload.units[id].role!==(pendingIdsOf(state,chatKey).some(x=>state.payload.units[x].role!=='ATTACK')?'ATTACK':'FLOW_REVIEW'))
-   :pendingIdsOf(state,chatKey);
- for(const id of ids){
-  buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now});
+ const pending=pendingIdsOf(state,chatKey);
+ const correctnessPending=pending.some(id=>state.payload.units[id].role!=='ATTACK');
+ const eligible=state.payload.sequentialSingleReviewer
+   ?pending.filter(id=>state.payload.units[id].role===(correctnessPending?'FLOW_REVIEW':'ATTACK'))
+   :pending;
+ const ids=[];
+ let packetBytes=0;
+ for(const id of eligible){
+  if(ids.length>=SOLO_WINDOW_MAX_UNITS)break;
+  const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now});
+  const size=Buffer.byteLength(JSON.stringify(packet));
+  // An oversized existing unit is still assigned by itself; no obligation is dropped.
+  if(ids.length && packetBytes+size>SOLO_WINDOW_MAX_PACKET_BYTES)break;
+  packetBytes+=size;
   state.payload.units[id].status='ACTIVE';
-  if(/(?:Audit_Litemode_v13|lite-solo)(?:\/|$)/.test(authorityRoot))
-    state.payload.units[id].openedAt??=now;
+  state.payload.units[id].openedAt??=now;
+  ids.push(id);
  }
  return ids;
 }
@@ -339,15 +351,18 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
  const chatKey=state.payload.units[unitId]?.chatKey;
  const active=chatKey?activeIdsOf(state,chatKey):[];
  if(!active.includes(unitId))return {status:'DISCOVERY_STALE_REQUEST',
-  feedbackText:'Unit '+unitId+' is not active; active units are '+(activeIdsOf(state).join(', ')||'none')+'. No action taken.'};
+  feedbackText:'Unit '+unitId+' is not active. Current active unit: '+(active[0]??'none')+'; '+active.length+' unit(s) active. No action taken.'};
+ // The boundary request names the one completed unit for validation. Every other
+ // active submission remains a draft, regardless of whether its file exists.
+ const requestedUnits=[unitId];
  const inventory=getInputs({root,campaignPath,automationRoot}).inventory;
  const accepted=[],rework=[],exhausted=[],waiting=[],unchanged=[],feedback=[];
- for(const id of active){
+ for(const id of requestedUnits){
   const info=state.payload.units[id],relative=submissionRel(campaignPath,id),file=repoFile(root,relative);
   if(!fs.existsSync(file)){waiting.push(id);continue;}
   const bytes=fs.readFileSync(file),sha=hex(bytes);
   if(sha===info.lastValidatedSubmissionSha){
-   unchanged.push(feedbackTextV1({errors:info.lastErrors},{attempt:info.attempts,maxAttempts:state.payload.sequentialSingleReviewer?3:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,submissionPath:relative,unitId:id}));
+   unchanged.push(feedbackTextV1({errors:info.lastErrors},{attempt:info.attempts,maxAttempts:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,submissionPath:relative,unitId:id}));
    continue;
   }
   const packet=known(root,packetRel(campaignPath,id));
@@ -369,10 +384,10 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   info.attempts++;
   // V13 correctness-first discovery never converts a malformed submission into covered work.
   // The same reviewer remains responsible; an unchanged payload is not revalidated.
-  if(info.attempts<3||(!state.payload.sequentialSingleReviewer&&state.payload.reviewPolicy==='correctness-verdict-v13')){
+  if(info.attempts<3||state.payload.reviewPolicy==='correctness-verdict-v13'){
    rework.push(id);
    feedback.push(feedbackTextV1(result,{attempt:info.attempts,
-     maxAttempts:state.payload.sequentialSingleReviewer?3:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,
+     maxAttempts:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,
      submissionPath:relative,unitId:id}));
    continue;
   }
@@ -383,10 +398,10 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
  }
  // Nothing new to validate: report and leave state untouched.
  if(!accepted.length&&!rework.length&&!exhausted.length)return {status:'DISCOVERY_REWORK',
-  feedbackText:unchanged.length?unchanged.join('\n\n'):'No new submission found for active units '+active.join(', ')+'. Write them, then push the boundary request again.'};
+  feedbackText:unchanged.length?unchanged.join('\n\n'):'No submission found for selected unit '+unitId+'. No other draft was inspected or penalized.'};
  const summary=[accepted.length?'Accepted: '+accepted.join(', '):'',
   exhausted.length?'Validation attempts exhausted, recorded as gaps: '+exhausted.join(', '):'',
-  waiting.length?'Still awaiting submission: '+waiting.join(', '):''].filter(Boolean).join('\n');
+  waiting.length?'Requested unit has no submission: '+waiting.join(', '):''].filter(Boolean).join('\n');
  const others=openIdleSoloWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,except:chatKey});
  const finish=(status,feedbackText,currentWindow=null)=>{
   state.payload.activeUnitId=activeIdsOf(state)[0]??null;
