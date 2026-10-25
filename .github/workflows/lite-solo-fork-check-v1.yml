@@ -57,6 +57,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh repo clone curveyield3/Audit-Controller .lite-solo-authority-check -- --depth 1 --filter=blob:none --sparse
+          gh repo clone curveyield3/Audit-Controller .lite-solo-authority-check -- --branch feature/lite-solo-v1 --depth 1 --filter=blob:none --sparse
           git -C .lite-solo-authority-check sparse-checkout set --no-cone '/Audit Skill - Lite-Solo Authority/lite-solo/'
           node scripts/lite-solo-verify-authority-v1.mjs '.lite-solo-authority-check/Audit Skill - Lite-Solo Authority/lite-solo'
