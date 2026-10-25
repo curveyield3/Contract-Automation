@@ -169,7 +169,7 @@ function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,
  for(const id of eligible){
   if(ids.length>=SOLO_WINDOW_MAX_UNITS)break;
   const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now});
-  const size=Buffer.byteLength(JSON.stringify(packet));
+  const size=Buffer.byteLength(JSON.stringify(packet,null,2)+'\n');
   // An oversized existing unit is still assigned by itself; no obligation is dropped.
   if(ids.length && packetBytes+size>SOLO_WINDOW_MAX_PACKET_BYTES)break;
   packetBytes+=size;
