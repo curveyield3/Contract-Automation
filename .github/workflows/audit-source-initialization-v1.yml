@@ -12,8 +12,8 @@ on:
         description: "Delivery method: original Browser Automation or Agent Delivery (fixed campaign command file)"
         type: choice
         required: false
-        default: GITHUB_BROWSER
-        options: [GITHUB_BROWSER, AGENT_DELIVERY]
+        default: "Original Browser Automation"
+        options: ["Original Browser Automation", "Agent Delivery"]
       source_url:
         description: Optional direct ZIP file URL (mutually exclusive with scan_urls)
         required: false
@@ -106,7 +106,12 @@ jobs:
             test_executor_chat_url="$DISPATCH_TEST_EXECUTOR_CHAT_URL"
             backup_chat_url="$DISPATCH_BACKUP_CHAT_URL"
             single_agent_simulation="${DISPATCH_SIMULATION:-false}"
-            delivery_transport="${DISPATCH_DELIVERY_TRANSPORT:-GITHUB_BROWSER}"
+            case "${DISPATCH_DELIVERY_TRANSPORT:-Original Browser Automation}" in
+              "Agent Delivery") delivery_transport=AGENT_DELIVERY ;;
+              "Original Browser Automation"|"GITHUB_BROWSER") delivery_transport=GITHUB_BROWSER ;;
+              "AGENT_DELIVERY") delivery_transport=AGENT_DELIVERY ;;
+              *) echo "::error::Unknown delivery option"; exit 1 ;;
+            esac
             request_id="dispatch-$GITHUB_RUN_ID"
           else
             mapfile -t requests < <(
