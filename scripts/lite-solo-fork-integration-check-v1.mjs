@@ -30,4 +30,24 @@ if(!fs.readFileSync('scripts/lib/lite-solo-phase-work-v1.mjs','utf8').includes("
  throw Error('solo work forms are not using secure sharding');
 if(!fs.readFileSync('scripts/lite-solo-phase0-finalize-v1.mjs','utf8').includes("mode:'LITE_SOLO'"))
  throw Error('solo source finalization does not bind campaign mode');
-console.log('PASS: static fork inventory, mode-bound guards, phase routing and source sharding');
+const sourceWorkflow=fs.readFileSync('.github/workflows/lite-solo-source-initialization-v1.yml','utf8');
+const sourceScript=fs.readFileSync('scripts/lite-solo-source-initialization/run-v1.sh','utf8');
+const phase0Workflow=fs.readFileSync('.github/workflows/lite-solo-phase0-bootstrap-v1.yml','utf8');
+const phaseControllerWorkflow=fs.readFileSync('.github/workflows/lite-solo-phase-controller-v1.yml','utf8');
+if(!sourceWorkflow.includes('workflow_dispatch:')||
+   sourceWorkflow.includes('  push:')||
+   sourceWorkflow.includes('process/lite-solo-source-initialization/requests/')||
+   /agent_chat_url|agentChatUrl|wake_message_b64|SOLO_CHAT_URL/.test(sourceWorkflow))
+ throw Error('Lite-Solo launch must require only a direct workflow dispatch, never chat or request-file delivery');
+if(/SOLO_CHAT_URL|process\/browser-agent-wake\/registrations|lite-work-relay-v1\.yml|WAKE_ACK/.test(sourceScript))
+ throw Error('Lite-Solo initialization still attempts a browser registration, chat binding or message delivery');
+if(!discovery.includes('sequentialSingleReviewer:true')||
+   /discoveryWakeMessageV1|discoveryWindowWakeMessageV1|wakeFor\(|wakeId:|messageB64:/.test(discovery))
+ throw Error('Lite-Solo discovery must use separate sequential flow/attack windows without wake generation');
+if(/discoveryWake|SUCCESSOR_DELIVERY_HOLD/.test(controller)||
+   /lite-work-relay-v1\.yml|wake_message_b64|gh workflow run browser-agent-wake/.test(phase0Workflow+phaseControllerWorkflow))
+ throw Error('Lite-Solo controller or Phase0 still carries a chat wake/delivery system');
+if(!fs.readFileSync('scripts/lite-solo-phase0-finalize-v1.mjs','utf8').includes("directory.deliveryTransport!=='DIRECT'"))
+ throw Error('Lite-Solo Phase0 does not fail closed on a non-direct campaign');
+console.log('PASS: static fork inventory, controller routing, source sharding and zero chat or message delivery');
+

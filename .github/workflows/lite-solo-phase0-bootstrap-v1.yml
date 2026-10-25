@@ -205,10 +205,12 @@ jobs:
       - name: Summarize
         shell: bash
         run: |
-          echo "## Phase 0 forked deploy/config only" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Native package deploy/configuration scripts on isolated Anvil fork" >> "$GITHUB_STEP_SUMMARY"
-          echo "- No randomized Medusa calls, ABI telemetry, or required baseline simulation inputs" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Script failures and unsafe adapters remain hard gate failures" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Phase 0 forked deploy/config only"
+            echo "- Native package deploy/configuration scripts on isolated Anvil fork"
+            echo "- No randomized Medusa calls, ABI telemetry, or required baseline simulation inputs"
+            echo "- Script failures and unsafe adapters remain hard gate failures"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   finalize-and-launch-reviewer1:
     needs: [fork-deploy-config]
