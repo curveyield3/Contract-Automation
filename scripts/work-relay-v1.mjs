@@ -87,6 +87,12 @@ function readState(content){
   if(end<0)throw Error('Work relay metadata terminator missing');
   const data=JSON.parse(content.slice(start+marker.length,end));
   if(data.schemaVersion!=='curveyield-work-delivery-command-v1')throw Error('Wrong Work relay schema');
+  if(first!=='PENDING' && first!=='IDLE'){
+    const rest=content.slice(content.indexOf('\n'));
+    const expected=view(data,'PENDING');
+    if(rest!==expected.slice(expected.indexOf('\n')))
+      throw Error('Receipt edit changed command body; only line one may be replaced');
+  }
   return {first,data};
 }
 function view(state,first){
@@ -143,7 +149,7 @@ function enqueue(campaign,fields){
     const command={commandId:id,wakeId:fields.wakeId,phaseId:fields.phaseId,
       workerRole:fields.workerRole,chatUrl:fields.chatUrl,message:fields.message,
       workspacePath:d.workspacePath,transportEpoch:epoch,
-      expectedCode:'COMPLETE-'+randomBytes(12).toString('hex').toUpperCase(),
+      expectedCode:'COMPLETE-'+randomBytes(8).toString('hex').toUpperCase(),
       issuedAt:now()};
     if(!s.current)s.current=command;
     else {
@@ -216,8 +222,8 @@ function sweepOne(campaign){
         const newValue=Math.max(s.transportTimeouts,Math.floor(age(s.current.issuedAt)/30));
         if(newValue!==s.transportTimeouts){s.transportTimeouts=Math.min(3,newValue);changed=true;}
       }
-      if(s.transportTimeouts>=3)console.error('WORK_RELAY_DELIVERY_UNCONFIRMED: '+campaign+
-          ' three 30-minute receipt windows without first-line ACK; repair agent should switch mode after verifying browser readiness');
+      if(s.transportTimeouts>=3){process.exitCode=1;console.error('WORK_RELAY_DELIVERY_UNCONFIRMED: '+campaign+
+          ' three 30-minute receipt windows without first-line ACK; repair agent should switch mode after verifying browser readiness');}
     }else if(s.queue.length){s.current=s.queue.shift();changed=true;}
     else{
       const assignment=d.currentAssignment||{},who=assignment.reviewer||d.currentReviewer;
@@ -242,7 +248,7 @@ function sweepOne(campaign){
           workerRole:escalate?'repair_child':'reviewer',chatUrl:escalate?backup:chat,
           message:escalate?repairMessage:'GET BACK TO WORK',
           workspacePath:d.workspacePath,transportEpoch:epoch,
-          expectedCode:'COMPLETE-'+randomBytes(12).toString('hex').toUpperCase(),issuedAt:now()};
+          expectedCode:'COMPLETE-'+randomBytes(8).toString('hex').toUpperCase(),issuedAt:now()};
         s.lastPokedAt=now();s.noProgressPokes++;if(escalate)s.repairNoticeIssuedAt=now();changed=true;
       }
     }
