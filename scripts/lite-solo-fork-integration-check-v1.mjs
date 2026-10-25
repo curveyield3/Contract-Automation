@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import {independentSpecItemsV13 as soloSpecItems} from './packages/github-native-sim/src/adr-lite-solo-independent-spec-v1.mjs';
 import {secureShardWorkFormV13,secureRestoreWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
 const required=[
  'scripts/lite-solo-phase-controller-v1.mjs',
@@ -84,6 +85,27 @@ try {
  if(!rejected)throw Error('tampered lite-solo locked base fragment was accepted');
 } finally {fs.rmSync(workRoot,{recursive:true,force:true});}
 console.log('PASS: 64KiB-bounded large immutable solo BASE sharding, full round trip, and tamper rejection');
+
+
+const specRoot=fs.mkdtempSync(path.join(os.tmpdir(),'lite-solo-spec-'));
+try {
+ const source=path.join(specRoot,'campaigns','solo-test','source');
+ fs.mkdirSync(path.join(source,'src'),{recursive:true});
+ fs.mkdirSync(path.join(source,'docs'),{recursive:true});
+ fs.writeFileSync(path.join(source,'src','Vault.sol'),'contract Vault { function withdraw() external {} }\n');
+ const context={contextId:'CTX-SOLO-001',path:'src/Vault.sol',lineStart:1,canonicalSignature:'withdraw()'};
+ const lines=Array.from({length:40},(_,i)=>'Requirement '+(i+1)+': withdraw must enforce the documented invariant.');
+ fs.writeFileSync(path.join(source,'docs','spec.md'),lines.join('\n'));
+ const found=soloSpecItems({root:specRoot,campaignPath:'campaigns/solo-test',context});
+ if(found.documentationItems.length!==40||new Set(found.documentationItems.map(x=>x.ruleId)).size!==40)
+   throw Error('Solo spec extraction lost one or more of 40 documented rules');
+ fs.writeFileSync(path.join(source,'docs','spec.md'),Array.from({length:513},(_,i)=>'Rule '+i+': withdraw must enforce invariant.').join('\n'));
+ let failedClosed=false;
+ try {soloSpecItems({root:specRoot,campaignPath:'campaigns/solo-test',context});}
+ catch(e){failedClosed=String(e.message).includes('LITE_SOLO_SPEC_RULE_LIMIT');}
+ if(!failedClosed)throw Error('Oversized spec extraction did not fail closed above 512 matching rules');
+} finally { fs.rmSync(specRoot,{recursive:true,force:true}); }
+console.log('PASS: Lite-Solo retains all 40 matching specification rules and fails closed above bounded capacity');
 
 console.log('PASS: static fork inventory, controller routing, source sharding and zero chat or message delivery');
 
