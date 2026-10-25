@@ -1,0 +1,147 @@
+name: Lite ChatGPT Work Relay v1
+on:
+  schedule:
+    - cron: '3-59/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        required: false
+        default: deliver
+        options: [deliver, successor, switch]
+      campaign_id: {type: string, required: false}
+      campaign_name: {type: string, required: false}
+      campaign_path: {type: string, required: false}
+      audit_controller_ref: {type: string, required: false, default: main}
+      wake_id: {type: string, required: false}
+      phase_id: {type: string, required: false}
+      mode: {type: string, required: false}
+      chat_url: {type: string, required: false}
+      wake_message_b64: {type: string, required: false}
+      watchdog_enabled: {type: boolean, required: false, default: true}
+      worker_role: {type: string, required: false, default: reviewer}
+      watchdog_message_b64: {type: string, required: false}
+      gate_mode: {type: string, required: false}
+      gate_repository: {type: string, required: false}
+      gate_ref: {type: string, required: false, default: main}
+      gate_state_path: {type: string, required: false}
+      gate_expected_phase_id: {type: string, required: false}
+      gate_expected_milestone_id: {type: string, required: false}
+      gate_active_pointer_path: {type: string, required: false}
+      gate_stop_states_csv: {type: string, required: false}
+      gate_stop_campaign_statuses_csv: {type: string, required: false}
+      browser_context_b64: {type: string, required: false}
+      target_mode:
+        type: choice
+        required: false
+        options: [GITHUB_BROWSER, CHATGPT_WORK]
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: lite-work-relay-${{ github.event_name == 'schedule' && 'sweep' || inputs.campaign_id }}
+  cancel-in-progress: false
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CAMPAIGN_ID: ${{ inputs.campaign_id }}
+      CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+      AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref || 'main' }}
+      CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Work watchdog — GitHub state only, never browser
+        if: github.event_name == 'schedule'
+        run: node scripts/work-relay-v1.mjs --operation sweep
+      - name: Publish exact message in Work relay file
+        if: github.event_name == 'workflow_dispatch' && inputs.operation == 'deliver'
+        env:
+          WAKE_ID: ${{ inputs.wake_id }}
+          PHASE_ID: ${{ inputs.phase_id }}
+          CHAT_URL: ${{ inputs.chat_url }}
+          MESSAGE_B64: ${{ inputs.wake_message_b64 }}
+          WORKER_ROLE: ${{ inputs.worker_role }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/work-relay-v1.mjs --operation deliver \
+            --campaign-id "$CAMPAIGN_ID" --wake-id "$WAKE_ID" \
+            --phase-id "$PHASE_ID" --chat-url "$CHAT_URL" \
+            --worker-role "$WORKER_ROLE" --wake-message-b64 "$MESSAGE_B64"
+      - name: Prepare and queue successor using existing reviewer assignment generator
+        if: github.event_name == 'workflow_dispatch' && inputs.operation == 'successor'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$AUDIT_CONTROLLER_REF" = main
+          [[ "$CAMPAIGN_PATH" == campaigns/* ]] && [[ "$CAMPAIGN_ID" =~ ^(.+)-r[0-9]+$ ]]
+          slug="$(printf '%s' "$CAMPAIGN_ID" | sed -E 's/-r[0-9]+$//')"
+          directory_path="Audit Campaign Directory/campaigns/$slug.json"
+          bash scripts/checkout-audit-controller-once-v1.sh .audit-controller main branch "$CAMPAIGN_PATH"
+          test "$(jq -r '.campaignId' ".audit-controller/$directory_path")" = "$CAMPAIGN_ID"
+          node scripts/prepare-lite-assignment-successor-v2.mjs \
+            --controller-root .audit-controller --campaign-directory-path "$directory_path" \
+            --audit-controller-ref main > /tmp/work-successor.json
+          reviewer="$(jq -r '.currentAssignment.reviewer' ".audit-controller/$directory_path")"
+          encoded="$(GH_TOKEN="$GITHUB_TOKEN" gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_').json?ref=main" --jq '.content')"
+          chat="$(printf '%s' "$encoded" | base64 -d | jq -r --arg r "$reviewer" '.agentChats[$r] // empty')"
+          [ -n "$chat" ] && [ "$chat" != null ]
+          wake="$(jq -r '.wakeMessageB64' /tmp/work-successor.json)"
+          phase="$(jq -r '.incomingPhaseId // .incomingPhase // empty' /tmp/work-successor.json)"
+          boundary="$(jq -r '.boundary // empty' /tmp/work-successor.json)"
+          node scripts/work-relay-v1.mjs --operation deliver \
+            --campaign-id "$CAMPAIGN_ID" --wake-id "$CAMPAIGN_ID-$boundary-$reviewer" \
+            --phase-id "$phase" --chat-url "$chat" --worker-role reviewer \
+            --wake-message-b64 "$wake"
+      - name: Change delivery lane during active campaign
+        if: github.event_name == 'workflow_dispatch' && inputs.operation == 'switch'
+        env:
+          TARGET_MODE: ${{ inputs.target_mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/work-relay-v1.mjs --operation switch \
+            --campaign-id "$CAMPAIGN_ID" --target-mode "$TARGET_MODE" | tee /tmp/switch.json
+          if [ "$(jq -r '.status' /tmp/switch.json)" = ALREADY_SET ]; then exit 0; fi
+          encoded="$(GH_TOKEN="$GITHUB_TOKEN" gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_').json?ref=main" --jq '.content')"
+          printf '%s' "$encoded" | base64 -d > /tmp/switch-registration.json
+          role="$(jq -r '.activeAssignment.reviewer // .activeChat.name // empty' /tmp/switch-registration.json)"
+          chat="$(jq -r --arg r "$role" '.agentChats[$r] // empty' /tmp/switch-registration.json)"
+          phase="$(jq -r '.activeAssignment.phaseId // empty' /tmp/switch-registration.json)"
+          [ -n "$chat" ] || { echo "::warning::No registered active chat; next controller handoff will use selected mode."; exit 0; }
+          message="$(jq -r '.pendingCommand.message // empty' /tmp/switch.json)"
+          [ -n "$message" ] || message='GET BACK TO WORK'
+          b64="$(printf '%s' "$message" | base64 -w0)"
+          wake_id="$CAMPAIGN_ID-switch-$(jq -r '.epoch' /tmp/switch.json)-$role"
+          if [ "$TARGET_MODE" = CHATGPT_WORK ]; then
+            node scripts/work-relay-v1.mjs --operation deliver \
+              --campaign-id "$CAMPAIGN_ID" --wake-id "$wake_id" \
+              --phase-id "$phase" --chat-url "$chat" --worker-role reviewer \
+              --wake-message-b64 "$b64"
+          else
+            gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              -f wake_id="$wake_id" -f campaign_id="$CAMPAIGN_ID" \
+              -f phase_id="$phase" -f mode=resume_existing -f chat_url="$chat" \
+              -f wake_message_b64="$b64" -f worker_role=reviewer \
+              -f watchdog_enabled=true -f gate_mode=LITE \
+              -f gate_repository=curveyield3/Audit-Controller -f gate_ref=main
+          fi
+      - name: Summary
+        if: always()
+        run: |
+          echo 'Work relay never opens ChatGPT, runs tests or marks a phase PASS.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The receiving agent places its exact COMPLETE code as FIRST LINE of DELIVERY_COMMAND_v1.md.' >> "$GITHUB_STEP_SUMMARY"
