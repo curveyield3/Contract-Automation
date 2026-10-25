@@ -89,6 +89,8 @@ That guide is the browser-agent navigation layer. It does not replace this polic
 
 `curveyield3/archive` is the only repository-level home for superseded, deprecated, obsolete, historical-only, backup, or replaced Contract-Automation files.
 
+**Migration safety gate:** The `curveyield3/archive` repository has not been confirmed accessible (GitHub returned 404 on October 24, 2026). Before any archive migration, verify that the target repository exists and accepts writes. Until confirmed, do not delete, move, overwrite, or retire a uniquely valuable active file on the assumption that its archive copy exists. Report the missing archive destination rather than silently attempting archival.
+
 - Active Contract-Automation paths contain only current operational files and current instructions.
 - When an active file is superseded, preserve the old file in `curveyield3/archive/Contract-Automation/<original-path>` and remove it from this repository.
 - Do not keep version chains such as active `foo-v1`, `foo-v2`, `foo-v3` siblings when only one version is current.
