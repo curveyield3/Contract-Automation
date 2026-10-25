@@ -150,7 +150,20 @@ function maybeFile(root,rel){const f=repoFile(root,rel);return fs.existsSync(f)&
 function maybeJson(root,rel){const f=maybeFile(root,rel);if(!f)return null;try{return readJson(f);}catch{return null;}}
 function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNum(phase)+'_CANONICAL_DATA_v1.json');}
 function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRelFor(campaignPath,phase));}
-function uniqueExisting(root,rels){return [...new Set(rels.filter(Boolean))].filter(rel=>Boolean(maybeFile(root,rel)));}
+function uniqueExisting(root,rels){
+ const result=[],seen=new Set();
+ const include=rel=>{if(rel&&!seen.has(rel)&&maybeFile(root,rel)){seen.add(rel);result.push(rel);}};
+ for(const rel of rels.filter(Boolean)){
+   include(rel);
+   // Generated Lite-Solo reading indexes are optional views; the original
+   // canonical derived input always remains the authority.
+   if(/_v[0-9]+\.json$/.test(rel)){
+     const indexRel=rel.replace(/_v[0-9]+\.json$/,'_INDEX_v1.json');
+     include(indexRel);
+   }
+ }
+ return result;
+}
 function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const derived=(phase,name)=>path.posix.join(campaignPath,`derived/phase-${phase}/${name}`);
   const buildIdentity=path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
