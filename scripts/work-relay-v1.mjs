@@ -120,7 +120,12 @@ function settle(state,first){
       state.updatedAt=now();
       return true;
     }
-    throw Error('Unrecognized check-in: '+first);
+    state.invalidReceipts=(state.invalidReceipts||[]).slice(-9).concat([{
+      attemptedCode:first.slice(0,100),receivedAt:now(),
+      disposition:'INVALID_CODE_CURRENT_COMMAND_STILL_PENDING'
+    }]);
+    state.updatedAt=now();
+    return true;
   }
   const old=state.current;
   state.lastReceipt={commandId:old.commandId,phaseId:old.phaseId,targetChatUrl:old.chatUrl,
