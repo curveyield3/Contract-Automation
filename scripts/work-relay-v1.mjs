@@ -293,7 +293,7 @@ function sweepOne(campaign){
       const missedSuccessor=waiting && expectedChat &&
         !(s.lastReceipt?.phaseId===assignment.phaseId &&
           s.lastReceipt?.targetChatUrl===expectedChat);
-      const reworkIdentity=assignment.packetPath?
+      const reworkIdentity=rework && assignment.packetPath?
         assignment.packetPath+':'+fetch(CONTROLLER,assignment.packetPath,ctlToken).sha:
         (assignment.workShardIndexPath||assignment.phaseId);
       const missedRework=rework && expectedChat && s.lastReworkIdentity!==reworkIdentity;
