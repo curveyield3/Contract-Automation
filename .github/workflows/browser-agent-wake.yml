@@ -631,10 +631,12 @@ jobs:
             --arg ackPath "$WAKE_ACK_PATH" \
             --arg ackId "$WAKE_ACK_ID" \
             --arg acknowledgementVerified "$ACKNOWLEDGEMENT_VERIFIED" \
+            --arg wakeAckReviewer "$WAKE_ACK_REVIEWER" \
             --argjson assistantCount "${ASSISTANT_COUNT:-0}" \
             '{
               schemaVersion:$schemaVersion,wakeId:$wakeId,campaignId:$campaignId,phaseId:$phaseId,workerRole:$workerRole,
-              status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,pokeIntervalMinutes:40,
+              status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,
+              pokeIntervalMinutes:(if $wakeAckReviewer=="master-reviewer" and $acknowledgementVerified!="true" then 10 else 40 end),
               deliveryConfirmed:($acknowledgementVerified=="true"),ackPath:$ackPath,ackId:$ackId,
               idleMessage:$idleMessage,
               observation:{assistantCount:$assistantCount,lastAssistantHash:$lastHash,observedAt:$armedAt},
@@ -867,6 +869,13 @@ jobs:
         run: |
           set -euo pipefail
           gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$WAKE_ID"
+
+      - name: Fail unacknowledged substantive wake after watchdog is armed
+        if: ${{ env.WAKE_ACK_PATH != '' && steps.receipt.outputs.verified != 'true' && (steps.deliver.outputs.ok == 'true' || steps.deliver.outputs.send_attempted == 'true') }}
+        shell: bash
+        run: |
+          echo "::error::X11 send attempt is NOT reviewer takeover. No exact first-action GitHub ACK was written. A 10-minute recovery watchdog is armed for unconfirmed master wakes; keep this run red until the reviewer acknowledges."
+          exit 1
 
       - name: Upload browser wake evidence
         if: always()
