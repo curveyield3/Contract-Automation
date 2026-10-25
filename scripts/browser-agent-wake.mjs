@@ -452,6 +452,37 @@ async function x11FindButton(file, originX, originY) {
   return best?{x:originX+best.x+S/2,y:originY+best.y+S/2,darkPixels:best.count,darkAround:best.around}:null;
 }
 
+// Inspect only a saved OS screenshot of the bottom composer row, never ChatGPT
+// DOM/accessibility/network state. A live bright-blue Send disc is proof that
+// the long pasted prompt remains unsent; a generic pixel change is NOT.
+async function findX11VisibleBlueSend(file, screenshotWidth, screenshotHeight) {
+  const originX=Math.floor(screenshotWidth*0.50);
+  const originY=Math.floor(screenshotHeight*0.55);
+  const roiW=Math.max(1,Math.floor(screenshotWidth*0.30));
+  const roiH=screenshotHeight-originY;
+  const {stdout}=await runCapture('convert',[
+    file,'-crop',roiW+'x'+roiH+'+'+originX+'+'+originY,
+    '+repage','-alpha','off','-colorspace','sRGB','-depth','8','txt:-'
+  ],{maxBuffer:1<<26});
+  let total=0,sumX=0,sumY=0;
+  for(const line of stdout.split('\n')){
+    const m=line.match(/^(\d+),(\d+):.*?#([0-9A-Fa-f]{6})/);
+    if(!m)continue;
+    const c=parseInt(m[3],16),r=(c>>16)&255,g=(c>>8)&255,b=c&255;
+    if(b>150&&b>r*1.25&&b>g*1.10&&r<180){
+      total++;sumX+=+m[1];sumY+=+m[2];
+    }
+  }
+  if(total<180)return null;
+  const x=originX+Math.round(sumX/total);
+  const y=originY+Math.round(sumY/total);
+  // Limit OS clicking to the known Send-disc neighborhood. Never click text,
+  // arbitrary images, the chat transcript, or the page navigation.
+  if(x<screenshotWidth*0.57||x>screenshotWidth*0.78||
+     y<screenshotHeight*0.68||y>screenshotHeight*0.98)return null;
+  return {x,y,pixels:total};
+}
+
 async function captureX11VisualEvidence(label, cropRegion = '', minBytes = 3000) {
   const root = '/tmp/browser-wake-evidence-v1';
   await fs.mkdir(root, {recursive:true});
@@ -775,32 +806,57 @@ async function runNormalChromeExistingSession(chromium) {
         false);
     }
 
-    await page.waitForTimeout(randomDelayMs(350, 700));
-    console.log('[normal-chrome-watchdog] send=OS-X11-Return');
-    await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-send-return');
-    await page.waitForTimeout(5000);
-    await captureX11VisualEvidence('04_after_return_key');
-    let afterReturn = await captureX11VisualEvidence('composer_after_return', crop);
-    let sendChanged = !(await fs.readFile(afterInput)).equals(await fs.readFile(afterReturn));
-    if (!sendChanged) {
-      await page.waitForTimeout(3000);
-      afterReturn = await captureX11VisualEvidence('composer_after_return_recheck', crop);
-      sendChanged = !(await fs.readFile(afterInput)).equals(await fs.readFile(afterReturn));
+    // The Phase-6 master handoff screenshot from run 40156956246 proved the
+    // previous heuristic was wrong: Return scrolled a long composer, leaving
+    // the BLUE SEND DISC active, yet a pixel diff was marked "posted".
+    // Keep the human Return gesture, then hover/click the visible Send disc
+    // if the composer still holds a pending message.
+    const beforeSendDisc=await findX11VisibleBlueSend(afterInput,cropWidth,cropHeight);
+    if(!beforeSendDisc){
+      throw new BrowserAgentError('VISIBLE_SEND_DISC_NOT_FOUND',
+        'Pasted text visibly changed but the enabled Send button could not be located in the OS screenshot; never guess a click or assert delivery.',false);
     }
-
-    // This is an OS-visible submission transition, NOT proof that ChatGPT
-    // durably stored the message. Never call it persisted or delivered.
-    const status = sendChanged ? 'SEND_ATTEMPTED_VISUAL_TRANSITION' : 'SEND_UNVERIFIED_NO_VISUAL_TRANSITION';
-    const result = {
-      ok: sendChanged, provider:'normal-system-chrome-x11-phase1-visual-evidence',
-      action, wakeId, posted: sendChanged, sendAttempted: true, persisted:false,
-      ...(stopClick ? { stopClick } : {}),
+    await page.waitForTimeout(randomDelayMs(350,700));
+    console.log('[normal-chrome-watchdog] send=OS-X11-Return');
+    await x11Key(['key','--clearmodifiers','Return'],'x11-send-return');
+    await page.waitForTimeout(1600);
+    await captureX11VisualEvidence('04_after_return_key');
+    let afterSend=await captureX11VisualEvidence('composer_after_return',crop);
+    let pendingDisc=await findX11VisibleBlueSend(afterSend,cropWidth,cropHeight);
+    let clickedSend=false;
+    if(pendingDisc){
+      const sx=cropX+pendingDisc.x,sy=cropY+pendingDisc.y;
+      console.log('[normal-chrome-watchdog] Return left enabled Send disc visible; clicking OS-visible Send at '+sx+','+sy);
+      await x11Key(['mousemove','--sync',String(sx),String(sy)],'x11-hover-visible-send');
+      await page.waitForTimeout(randomDelayMs(250,500));
+      await x11Key(['click','1'],'x11-click-visible-send');
+      clickedSend=true;
+      await page.waitForTimeout(3300);
+      await captureX11VisualEvidence('05_after_visible_send_click');
+      afterSend=await captureX11VisualEvidence('composer_after_visible_send_click',crop);
+      pendingDisc=await findX11VisibleBlueSend(afterSend,cropWidth,cropHeight);
+    }
+    if(pendingDisc){
+      // A second blind Return/click can post unintended duplicate messages.
+      // Keep the screenshot and report a real failure for human inspection.
+      throw new BrowserAgentError('SEND_REMAINED_IN_COMPOSER',
+        'After Return and a visible Send-button click the composer still has an enabled blue Send disc. Message not verified sent; inspect OS screenshots.',false);
+    }
+    // Disappearance of the enabled Send control from the unchanged visible
+    // composer neighborhood provides an OS-only submission transition.
+    // Only a matching first-action GitHub ACK confirms durable delivery.
+    const sendChanged=!(await fs.readFile(afterInput)).equals(await fs.readFile(afterSend));
+    if(!sendChanged)throw new BrowserAgentError('SEND_UNVERIFIED_NO_COMPOSER_RESET',
+      'Active Send disc disappeared but the composer did not visibly reset.',false);
+    const status='SEND_ATTEMPTED_VISIBLE_SEND_CONTROL_RESET';
+    const result={
+      ok:true,provider:'normal-system-chrome-x11-phase1-visual-evidence',
+      action,wakeId,posted:true,sendAttempted:true,persisted:false,
+      usedVisibleSendButton:clickedSend,
+      ...(stopClick?{stopClick}:{}),
       chatUrl:requestedUrl,
-      verification:'X11_VISIBLE_COMPOSER_TRANSITION_ONLY',
-      ...(!sendChanged ? {failures:[{provider:'normal-system-chrome-x11',
-        code:'SEND_UNVERIFIED_NO_VISUAL_TRANSITION',retryable:false,
-        error:'X11 Enter was pressed but the composer region did not visibly change; inspect screenshots before retrying.'}]} : {}),
-      delivery:{status,persisted:false,verification:'X11_VISIBLE_COMPOSER_TRANSITION_ONLY'}
+      verification:'X11_VISIBLE_SEND_CONTROL_RESET_ONLY',
+      delivery:{status,persisted:false,verification:'X11_VISIBLE_SEND_CONTROL_RESET_ONLY'}
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n', 'utf8');
     return result;
