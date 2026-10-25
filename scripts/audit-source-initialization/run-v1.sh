@@ -268,8 +268,6 @@ else
       request:{
         requestId:$requestId,
         singleAgentSimulation:$singleAgentSimulation,
-       deliveryTransport:$deliveryTransport,
-       transportEpoch:0,
         deliveryTransport:$deliveryTransport,
         sourceUrl:$sourceUrl,
         scanUrls:$scanUrls,
@@ -350,10 +348,12 @@ else
     --arg campaignId "$campaign_id" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
     --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
-    --argjson singleAgentSimulation "$SINGLE_AGENT_SIMULATION" \
+    --argjson singleAgentSimulation "$SINGLE_AGENT_SIMULATION" --arg deliveryTransport "$DELIVERY_TRANSPORT" \
     '{
       schemaVersion:"curveyield-browser-agent-wake-registration-v1",
       singleAgentSimulation:$singleAgentSimulation,
+      deliveryTransport:$deliveryTransport,
+      transportEpoch:0,
       campaignId:$campaignId,
       mode:"resume_existing",
       chatUrl:"",
