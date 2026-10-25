@@ -273,13 +273,16 @@ function switchMode(campaign,target){
     const path=filePath(dir.data);
     const existing=readState(fetch(CONTROLLER,path,ctlToken,true)?.content||null);
     if(target===BROWSER && existing?.data.deliveryTransport===WORK){
-      if(existing.data.queue.length)throw Error('Multiple pending Work commands still need ordered handoff');
       let pendingCommand=null;
       mutate(CONTROLLER,path,ctlToken,raw=>{
         const v=readState(raw);
         pendingCommand=v?.first==='PENDING'?v.data.current:null;
         if(!v)return null;
+        const queued=[...(v.data.current?[v.data.current]:[]),...v.data.queue];
+        pendingCommand=queued.length?queued[queued.length-1]:null;
         const updated={...v.data,deliveryTransport:BROWSER,current:null,queue:[],
+          supersededByTransportSwitch:queued.map(c=>({commandId:c.commandId,
+            chatUrl:c.chatUrl,phaseId:c.phaseId,message:c.message})),
           transportEpoch:Number(dir.data.transportEpoch||0),retiredAt:now(),updatedAt:now()};
         return view(updated,'IDLE');
       });
@@ -300,17 +303,15 @@ function switchMode(campaign,target){
     Number(reg.data.transportEpoch||0)===Number(dir.data.transportEpoch||0)+1;
   if(before!==regBefore && !recovery)throw Error('Mode divergence; manual reconcile before switching');
   if(target===WORK && before===BROWSER && !recovery){
-    for(const workflow of ['browser-agent-wake.yml','browser-agent-watchdog.yml']){
-      const state=github(AUTOMATION,autoToken,[
-        'repos/'+AUTOMATION+'/actions/workflows/'+workflow+'/runs?status=in_progress&per_page=10']);
-      if(Number(state.total_count||0)>0)
-        throw Error('Browser workflow '+workflow+' is still running. Retire/cancel it before selecting Work.');
+    // Never block this campaign because a different campaign owns a browser runner.
+    // A known in-progress wake *for this campaign* must finish before the switch.
+    const runId=Number(reg.data.wakeDelivery?.runId||reg.data.wakeDelivery?.workflowRunId||0);
+    if(Number.isSafeInteger(runId)&&runId>0){
+      const run=github(AUTOMATION,autoToken,[
+        'repos/'+AUTOMATION+'/actions/runs/'+runId]);
+      if(run.status==='queued'||run.status==='in_progress'||run.status==='waiting')
+        throw Error('This campaign has an active browser wake; retry transport switch after run '+runId+' completes');
     }
-  }
-  if(target===BROWSER && before===WORK){
-    const existing=readState(fetch(CONTROLLER,filePath(dir.data),ctlToken,true)?.content||null);
-    if(existing?.data.queue?.length)
-      throw Error('Multiple queued Work messages need ordered handoff; do not discard them during mode switch');
   }
   const epoch=recovery?Number(reg.data.transportEpoch):Number(dir.data.transportEpoch||0)+1;
   // Registration first; if the second write fails, retrying recovers its epoch.
@@ -350,10 +351,13 @@ function switchMode(campaign,target){
     mutate(CONTROLLER,filePath(d),ctlToken,raw=>{
       const lastState=readState(raw);
       if(!lastState)return null;
-      if(lastState.data.queue.length)throw Error('Cannot retire command file with unsent queued instructions');
-      oldCommand=lastState.first==='PENDING'?lastState.data.current:null;
+      const queued=[...(lastState.data.current?[lastState.data.current]:[]),...lastState.data.queue];
+      oldCommand=queued.length?queued[queued.length-1]:null;
       const state={...lastState.data,deliveryTransport:BROWSER,
-        transportEpoch:epoch,current:null,queue:[],retiredAt:now(),updatedAt:now()};
+        transportEpoch:epoch,current:null,queue:[],
+        supersededByTransportSwitch:queued.map(c=>({commandId:c.commandId,
+          chatUrl:c.chatUrl,phaseId:c.phaseId,message:c.message})),
+        retiredAt:now(),updatedAt:now()};
       return view(state,'IDLE');
     });
   }
