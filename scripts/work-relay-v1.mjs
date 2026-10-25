@@ -221,7 +221,7 @@ function sweepOne(campaign){
     }
     const progress=newestProgress(d,r);
     if(progress && progress.key!==s.lastProgressKey){
-      s.lastProgressKey=progress.key;s.lastProgressAt=progress.at;s.noProgressPokes=0;changed=true;
+      s.lastProgressKey=progress.key;s.lastProgressAt=progress.at;s.noProgressPokes=0;delete s.repairNoticeIssuedAt;changed=true;
     }
     const age=p=>p?(Date.now()-Date.parse(p))/60000:Infinity;
     if(s.current){
