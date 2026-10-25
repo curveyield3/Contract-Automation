@@ -406,9 +406,15 @@ gh workflow run lite-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref m
   echo "- Workspace: $campaign_root"
   echo '- Source archive (user ZIP or generated from verified scan pages) and unpacked source are both under campaign source/.'
   echo '- Audit-Controller ref: main'
-  echo "- Single-agent simulation: $SINGLE_AGENT_SIMULATION (automatic reviewer wakes remain enabled)"
+  echo "- Single-agent simulation: $SINGLE_AGENT_SIMULATION"
+  echo "- Selected delivery: $DELIVERY_TRANSPORT"
   echo '- Fully automated Phase 0: dispatched'
   echo '- Four pre-created reviewer chats are bound to reviewer-1 through reviewer-4.'
   echo '- One persistent Maximum master-review chat is bound for every reviewer-segment gate.'
-  echo '- After validated P0_TO_P1 completion, the phase wake opens the assigned existing chat and then arms the watchdog.'
+  if [ "$DELIVERY_TRANSPORT" = AGENT_DELIVERY ]; then
+    echo "- After P0_TO_P1, Agent Delivery publishes the instruction to $campaign_root/work/browser/DELIVERY_COMMAND_v1.md and the GitHub watchdog supervises it."
+    echo '- A separately started, authorized ChatGPT Work delivery agent must poll that file and forward instructions through its connected extension.'
+  else
+    echo '- After validated P0_TO_P1 completion, the original browser automation opens the assigned chat and arms its original watchdog.'
+  fi
 } >> "$GITHUB_STEP_SUMMARY"
