@@ -68,7 +68,7 @@ export function independentSpecItemsV13({root,campaignPath,context,otherContexts
     const rel=path.relative(sourceRoot,doc).split(path.sep).join('/');
     rules.push({type:'README_OR_DOC',ruleId:'DOC:'+context.contextId+':'+rel+':'+(i+1),
      sourceAnchor:'source/'+rel+':L'+(i+1),rule:lines[i].trim().slice(0,2048)});
-    if(rules.length>MAX_SOLO_MATCHED_SPEC_RULES)throw new Error('V13_SPEC_RULE_LIMIT: more than ${MAX_SOLO_MATCHED_SPEC_RULES} rules match '+context.contextId+'; do not silently truncate');
+    if(rules.length>MAX_SOLO_MATCHED_SPEC_RULES)throw new Error('SOLO_SPEC_RULE_LIMIT: more than '+MAX_SOLO_MATCHED_SPEC_RULES+' rules match '+context.contextId+'; do not silently truncate');
    }
   }
  }
