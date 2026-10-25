@@ -483,6 +483,20 @@ switch(op){
       gateStatePath:args['gate-state-path']||'',gateExpectedMilestoneId:args['gate-expected-milestone-id']||''});
     break;
   }
+  case 'active-count':{
+    let count=0;
+    for(const path of listActive()){
+      const v=fetch(AUTOMATION,path,autoToken);
+      const r=JSON.parse(v.content);
+      if(r.deliveryTransport!==WORK)continue;
+      const d=directory(r.campaignId).data;
+      if((d.deliveryTransport||BROWSER)!==WORK)continue;
+      if(['COMPLETE','STOPPED_BY_HUMAN'].includes(d.campaignStatus||d.status))continue;
+      count++;
+    }
+    console.log(count);
+    break;
+  }
   case 'sweep':{
     for(const path of listActive()){
       const v=fetch(AUTOMATION,path,autoToken),r=JSON.parse(v.content);
