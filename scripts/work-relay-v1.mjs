@@ -264,10 +264,21 @@ function switchMode(campaign,target){
   if(before===(reg.data.deliveryTransport||BROWSER) && before===target){
     console.log(JSON.stringify({status:'ALREADY_SET',campaignId:campaign,transport:target}));return;
   }
-  if(before!==(reg.data.deliveryTransport||BROWSER))throw Error('Mode divergence; manual reconcile before switching');
-  const epoch=Number(dir.data.transportEpoch||0)+1;
-  // Update registration first; delivery jobs fail closed on the temporary disagreement.
-  mutate(AUTOMATION,registrationPath(campaign),autoToken,raw=>{
+  const regBefore=reg.data.deliveryTransport||BROWSER;
+  const recovery=before!==regBefore && regBefore===target &&
+    Number(reg.data.transportEpoch||0)===Number(dir.data.transportEpoch||0)+1;
+  if(before!==regBefore && !recovery)throw Error('Mode divergence; manual reconcile before switching');
+  if(target===WORK && before===BROWSER && !recovery){
+    for(const workflow of ['browser-agent-wake.yml','browser-agent-watchdog.yml']){
+      const state=github(AUTOMATION,autoToken,[
+        'repos/'+AUTOMATION+'/actions/workflows/'+workflow+'/runs?status=in_progress&per_page=10']);
+      if(Number(state.total_count||0)>0)
+        throw Error('Browser workflow '+workflow+' is still running. Retire/cancel it before selecting Work.');
+    }
+  }
+  const epoch=recovery?Number(reg.data.transportEpoch):Number(dir.data.transportEpoch||0)+1;
+  // Registration first; if the second write fails, retrying recovers its epoch.
+  if(!recovery)mutate(AUTOMATION,registrationPath(campaign),autoToken,raw=>{
     const data=JSON.parse(raw);
     if(data.campaignId!==campaign)throw Error('Registration changed campaign');
     data.deliveryTransport=target;data.transportEpoch=epoch;data.updatedAt=now();
