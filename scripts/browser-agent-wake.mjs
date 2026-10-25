@@ -491,6 +491,47 @@ async function findX11VisibleBlueSend(file, screenshotWidth, screenshotHeight) {
   return {x,y,pixels:total,kind:centerWhite>=65?'STOP':'SEND',centerWhite};
 }
 
+// The visible Chrome title may briefly say "Chat 4 Ready" while the SPA
+// immediately re-enters a full-page spinner. The old 10-second delay could
+// therefore paste during an account/project hydration reload. Read only an
+// X11 desktop screenshot of the existing conversation history region: an
+// established reviewer chat has visible text there; a loading spinner does
+// not. Require multiple stable samples before typing. Never inspect the
+// ChatGPT DOM, accessibility tree, network, or internal APIs.
+async function x11VisibleHistoryFraction(screenshot, width, height) {
+  const x = Math.round(width * 0.36);
+  const y = Math.round(height * 0.19);
+  const w = Math.round(width * 0.43);
+  const h = Math.round(height * 0.59);
+  const {stdout} = await runCapture('convert', [
+    screenshot, '-crop', w+'x'+h+'+'+x+'+'+y, '+repage',
+    '-colorspace', 'Gray', '-threshold', '70%', '-negate',
+    '-format', '%[fx:mean]', 'info:'
+  ]);
+  const fraction = Number(stdout.trim());
+  if (!Number.isFinite(fraction)) throw new BrowserAgentError(
+    'CHAT_HISTORY_VISUAL_UNREADABLE','Desktop screenshot history readiness could not be measured',true);
+  return fraction;
+}
+async function waitForX11ConversationHydrated(page, width, height) {
+  const deadline = Date.now() + 120000;
+  let stable = 0;
+  while (Date.now() < deadline) {
+    const imagePath = await captureX11VisualEvidence('x11_chat_hydration_check', '', 3000);
+    const fraction = await x11VisibleHistoryFraction(imagePath,width,height);
+    const ready = fraction >= 0.004;
+    console.log('[normal-chrome-watchdog] real-chat-history-visible=' + ready +
+      ' darkPixelFraction=' + fraction.toFixed(5) + ' stableSamples=' + stable);
+    // Four spaced checks rule out the observed loaded -> spinner -> loaded
+    // oscillation. A page-title change alone is NOT conversation readiness.
+    stable = ready ? stable+1 : 0;
+    if (stable >= 4) return true;
+    await page.waitForTimeout(4000);
+  }
+  throw new BrowserAgentError('CHAT_CONVERSATION_HYDRATION_TIMEOUT',
+    'Established reviewer chat did not remain visibly loaded for four OS screenshots; no typing or Send attempted',true);
+}
+
 async function captureX11VisualEvidence(label, cropRegion = '', minBytes = 3000) {
   const root = '/tmp/browser-wake-evidence-v1';
   await fs.mkdir(root, {recursive:true});
@@ -687,6 +728,10 @@ async function runNormalChromeExistingSession(chromium) {
             false);
         }
         console.log('[normal-chrome-watchdog] visible-conversation-title-ready=true');
+        // A loaded title is a transient signal; confirm on-screen history
+        // hydration, not a generic empty composer / central loading spinner.
+        await waitForX11ConversationHydrated(page,w,h);
+        await captureX11VisualEvidence('02c_confirmed_conversation_history_ready');
       }
     }
     if (bool(env.WAKE_DIAGNOSTIC_ONLY)) {
@@ -808,6 +853,16 @@ async function runNormalChromeExistingSession(chromium) {
     await captureX11VisualEvidence('03_after_text_entry');
     const afterInput = await captureX11VisualEvidence('composer_after_input', crop);
     const inputChanged = !(await fs.readFile(beforeInput)).equals(await fs.readFile(afterInput));
+    // If project/account hydration restarts while the paste is happening,
+    // the bottom crop may change despite the prompt being lost. This is
+    // precisely the failure observed in run 40160350747: history vanished
+    // and only a central loading spinner remained. No Return/click is safe.
+    const historyAfterPaste = await captureX11VisualEvidence('03b_history_after_text_entry');
+    const historyFraction = await x11VisibleHistoryFraction(historyAfterPaste,width,height);
+    if(historyFraction < 0.004) {
+      throw new BrowserAgentError('CHAT_RELOADED_DURING_PASTE',
+        'The established chat disappeared into a visible loading spinner while pasting; no Send attempted. Recover on a fresh runner.',true);
+    }
     if (!inputChanged) {
       throw new BrowserAgentError('CHAT_COMPOSER_NOT_RESPONSIVE',
         'Visible composer region did not change after X11 typing; no Enter was sent. See desktop screenshots.',
@@ -819,6 +874,11 @@ async function runNormalChromeExistingSession(chromium) {
     // the BLUE SEND DISC active, yet a pixel diff was marked "posted".
     // Keep the human Return gesture, then hover/click the visible Send disc
     // if the composer still holds a pending message.
+    const preSendHistory = await captureX11VisualEvidence('03c_history_before_send');
+    if((await x11VisibleHistoryFraction(preSendHistory,width,height))<0.004) {
+      throw new BrowserAgentError('CHAT_RELOADED_BEFORE_SEND',
+        'Loading spinner returned between text entry and Send; no send attempt was made',true);
+    }
     const beforeSendDisc=await findX11VisibleBlueSend(afterInput,cropWidth,cropHeight);
     if(!beforeSendDisc||beforeSendDisc.kind!=='SEND'){
       throw new BrowserAgentError('VISIBLE_SEND_DISC_NOT_FOUND',
