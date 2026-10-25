@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "curveyield-browser-agent-watchdog-state-v1",
+  "wakeId": "live-ethereum-dai-6b175474-r2-delivery-c5667ed30279747c8035",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "phaseId": "master-review",
+  "workerRole": "reviewer",
+  "status": "ACTIVE",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
+  "lastProvider": "normal-system-chrome-x11-phase1-visual-evidence",
+  "armedAt": "2026-10-25T03:13:02Z",
+  "intervalMinutes": 5,
+  "pokeIntervalMinutes": 40,
+  "deliveryConfirmed": false,
+  "ackPath": "campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_master-reviewer_v1.json",
+  "ackId": "live-ethereum-dai-6b175474-r2-delivery-c5667ed30279747c8035/40156956246",
+  "idleMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-delivery-c5667ed30279747c8035/40156956246\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_master-reviewer_v1.json on curveyield3/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nMASTER_REVIEW_REQUIRED: campaign live-ethereum-dai-6b175474-r2, segment reviewer-3-phases-05-06 (reviewer-3, Phases 5-6). Read the segment record campaigns/live-ethereum-Dai-6b175474 r2/work/master-review/reviewer-3-phases-05-06/MASTER_REVIEW_RECORD_v1.json in Audit-Controller. Follow the authoritative Audit Skill guide Audit Skill - Current Authority/Audit_Litemode_v13/master-review/START_HERE.md for review, amendment limits, and submission. Use the campaign ref main.\n\nREQUIRED LIVE-FORK ROUTING: The bound Lite skill remains frozen. For all simulation design, technical execution or recovery, read curveyield3/Contract-Automation/docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md (Anvil/RPC rule and phase table). Use only curveyield3/Audit-Controller and curveyield3/Contract-Automation. The authenticated archive is GitHub Actions secret RPC_ETHEREUM mapped to ETHEREUM_FORK_RPC_URL, which feeds a verified chain-1 historical, pinned-block/hash, writable LOCAL Anvil fork. Never use synthetic fixtures, bare Anvil or public RPC as historical audit evidence. Tests/boundary reruns require explicit audit-owner authorization; the registered executor runs approved tests and the reviewer interprets their raw evidence.",
+  "observation": {
+    "assistantCount": 0,
+    "lastAssistantHash": "",
+    "observedAt": "2026-10-25T03:13:02Z"
+  },
+  "gate": {
+    "mode": "LITE",
+    "repository": "curveyield3/Audit-Controller",
+    "ref": "main",
+    "statePath": "Audit Campaign Directory/campaigns/live-ethereum-dai-6b175474.json",
+    "expectedPhaseId": "master-review",
+    "expectedMilestoneId": "reviewer-3-phases-05-06",
+    "activePointerPath": "",
+    "interphase": {
+      "handoffPath": "",
+      "workPacketPath": "",
+      "completionPath": "",
+      "workPacketSha256": ""
+    },
+    "stopStates": [
+      "WAITING_FOR_HUMAN_RESPONSE",
+      "WAITING_FOR_SUCCESSOR_AGENT",
+      "CLOSED",
+      "STOPPED_BY_HUMAN"
+    ],
+    "stopCampaignStatuses": [
+      "COMPLETE",
+      "STOPPED_BY_HUMAN"
+    ]
+  },
+  "repair": {
+    "enabled": false,
+    "idlePokeThreshold": 3,
+    "unviewableThreshold": 2,
+    "consecutiveIdlePokes": 0,
+    "consecutiveUnviewable": 0
+  }
+}
