@@ -87,7 +87,7 @@ function readState(content){
   if(end<0)throw Error('Work relay metadata terminator missing');
   const data=JSON.parse(content.slice(start+marker.length,end));
   if(data.schemaVersion!=='curveyield-work-delivery-command-v1')throw Error('Wrong Work relay schema');
-  if(first!=='PENDING' && first!=='IDLE'){
+  if(first!=='PENDING' && first!=='IDLE' && !(data.deliveryTransport===BROWSER && data.retiredAt)){
     const rest=content.slice(content.indexOf('\n'));
     const expected=view(data,'PENDING');
     if(rest!==expected.slice(expected.indexOf('\n')))
