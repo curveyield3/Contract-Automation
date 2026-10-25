@@ -31,3 +31,29 @@ if(!fs.readFileSync('scripts/lib/lite-solo-phase-work-v1.mjs','utf8').includes("
 if(!fs.readFileSync('scripts/lite-solo-phase0-finalize-v1.mjs','utf8').includes("mode:'LITE_SOLO'"))
  throw Error('solo source finalization does not bind campaign mode');
 console.log('PASS: static fork inventory, mode-bound guards, phase routing and source sharding');
+
+const transportFreeFiles=[
+ '.github/workflows/lite-solo-source-initialization-v1.yml',
+ '.github/workflows/lite-solo-phase0-bootstrap-v1.yml',
+ '.github/workflows/lite-solo-phase-controller-v1.yml',
+ 'scripts/lite-solo-source-initialization/run-v1.sh',
+ 'scripts/lite-solo-source-initialization/write-phase0-receipt-v1.py',
+ 'scripts/lite-solo-phase0-finalize-v1.mjs',
+ 'scripts/lite-solo-phase-controller-v1.mjs',
+ 'packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs'
+];
+for(const file of transportFreeFiles){
+ const s=fs.readFileSync(file,'utf8');
+ if(/agent_chat_url|SOLO_CHAT_URL|agent\\.chatUrl|lite-work-relay-v1|browser-agent-wake|DELIVERY_COMMAND_v1|discoveryWakeMessageB64|discoveryWakesB64|AGENT_DELIVERY/.test(s))
+   throw new Error('Unexpected chat/delivery dependency in '+file);
+}
+const init=fs.readFileSync(transportFreeFiles[3],'utf8');
+if(!init.includes('slug="lite-solo-$(cat "$work/slug")"')||!init.includes('if [ "$AUTHORIZE_PHASE0_EXECUTION" != true ]'))
+ throw new Error('lite-solo initializer is not namespaced and owner-gated');
+const sourceWorkflow=fs.readFileSync(transportFreeFiles[0],'utf8');
+if(sourceWorkflow.includes('agent_chat_url:')||sourceWorkflow.includes('agent_chat_url }'))
+ throw new Error('lite-solo source workflow contains chat URL input');
+const discoverySource=fs.readFileSync(transportFreeFiles[7],'utf8');
+if(discoverySource.includes('wakeFor(')||discoverySource.includes('discoveryWakeMessageV1('))
+ throw new Error('lite-solo still creates discovery wake messages');
+console.log('PASS: chat-URL-free initialization, transport-free phase routing, sequential discovery state');
