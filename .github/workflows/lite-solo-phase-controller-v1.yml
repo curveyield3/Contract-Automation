@@ -49,10 +49,12 @@ jobs:
           fi
           campaign_id="$(jq -r .campaignId "$request")"
           slug="$(printf '%s' "$campaign_id" | sed -E 's/-r[0-9]+$//')"
-          echo "request=$request" >> "$GITHUB_OUTPUT"
-          echo "kind=$kind" >> "$GITHUB_OUTPUT"
-          echo "id=$campaign_id" >> "$GITHUB_OUTPUT"
-          echo "directory=Audit Campaign Directory/campaigns/$slug.json" >> "$GITHUB_OUTPUT"
+          {
+            echo "request=$request"
+            echo "kind=$kind"
+            echo "id=$campaign_id"
+            echo "directory=Audit Campaign Directory/campaigns/$slug.json"
+          } >> "$GITHUB_OUTPUT"
       - name: Checkout exact campaign and assert lite-solo authority
         id: scope
         env:
