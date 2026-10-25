@@ -171,7 +171,13 @@ function enqueue(campaign,fields){
     data.activeChat={name:reviewer,url:fields.chatUrl};
     data.activeAssignment={...(data.activeAssignment||{}),reviewer,
       phaseId:fields.phaseId,workerRole:fields.workerRole,
-      milestoneId:fields.wakeId};
+      milestoneId:fields.gateExpectedMilestoneId||fields.wakeId};
+    data.watchdog=data.watchdog||{};
+    data.watchdog.gate={...(data.watchdog.gate||{}),
+      mode:'LITE',repository:CONTROLLER,ref:'main',
+      statePath:fields.gateStatePath||directoryPath(campaign),
+      expectedPhaseId:fields.phaseId,
+      expectedMilestoneId:fields.gateExpectedMilestoneId||fields.wakeId};
     data.chatUrl=fields.chatUrl;
     data.wakeMessage=fields.message;
     data.updatedAt=now();
@@ -318,7 +324,9 @@ switch(op){
     const campaign=args['campaign-id'],wakeId=args['wake-id'],chat=args['chat-url'];
     const message=Buffer.from(args['wake-message-b64']||'','base64').toString('utf8');
     if(!campaign||!wakeId||!chat||!message)throw Error('Required delivery fields missing');
-    enqueue(campaign,{wakeId,chatUrl:chat,message,phaseId:args['phase-id']||'',workerRole:args['worker-role']||'reviewer'});
+    enqueue(campaign,{wakeId,chatUrl:chat,message,phaseId:args['phase-id']||'',
+      workerRole:args['worker-role']||'reviewer',
+      gateStatePath:args['gate-state-path']||'',gateExpectedMilestoneId:args['gate-expected-milestone-id']||''});
     break;
   }
   case 'sweep':{
