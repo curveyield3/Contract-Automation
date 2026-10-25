@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {verifyDerivedInputIndexV1} from './lite-solo-work-shards-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {boundReviewerForPhaseV1 as originalReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
 const boundReviewerForPhaseV1=({authorityRoot,...params})=>authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo'?'lite-solo-agent':originalReviewerForPhaseV1({authorityRoot,...params});
@@ -162,7 +163,13 @@ function domainObligations(matrix,assessments,{originPhase=3}={}){
 
 function loadDerived(root,paths){
   const out=[];
-  for(const rel of paths??[]){const j=readJsonIf(repoFile(root,rel));if(j)out.push(j);}
+  for(const rel of paths??[]){
+    const j=readJsonIf(repoFile(root,rel));
+    if(!j)continue;
+    if(['curveyield-lite-derived-input-index-v1','curveyield-lite-derived-input-large-index-v1'].includes(j.schemaVersion))
+      verifyDerivedInputIndexV1({root,indexRel:rel});
+    out.push(j);
+  }
   return out;
 }
 function findAutomationInput(derived,key){
