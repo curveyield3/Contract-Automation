@@ -189,26 +189,78 @@ export function openIdleSoloWindowsV1({root,campaignPath,directory,authorityRoot
  }
  return windows;
 }
-function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
-  if(ids.length<40)return null;
-  const dir=pathJoin(campaignPath,'index/'+(role==='ATTACK'?'attacker':'flow-review'));
-  const pages=[];
-  for(let i=0;i<ids.length;i+=25){
-    const chunk=ids.slice(i,i+25);
-    const file='PART_'+String(pages.length+1).padStart(4,'0')+'_v1.json';
-    const rel=path.posix.join(dir,file);
-    const payload={schemaVersion:'curveyield-discovery-unit-index-page-v1',
-      unitIds:chunk,units:chunk.map(unitId=>({unitId,
-        packetPath:packetRel(campaignPath,unitId),submissionPath:submissionRel(campaignPath,unitId)}))};
-    if(Buffer.byteLength(JSON.stringify(payload))>32*1024)throw new Error('discovery window page exceeds 32 KiB');
-    writeJson(repoFile(root,rel),payload);
-    pages.push({path:rel,unitCount:chunk.length});
+// Extend the existing discovery index with bounded, lossless views of large
+// assignment packets. The canonical packet remains unchanged for validation.
+function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
+ const packetPath=packetRel(campaignPath,unitId);
+ const packet=known(root,packetPath);
+ if(!packet?.payload)throw new Error('missing issued discovery packet for '+unitId);
+ const payload=packet.payload;
+ const dir=pathJoin(campaignPath,'index/'+(role==='ATTACK'?'attacker':'flow-review'));
+ const pages=[];
+ let pageNumber=0;
+ const writeSection=(section,items)=>{
+  if(!items.length)return;
+  let chunk=[],offset=0;
+  const emit=()=>{
+   if(!chunk.length)return;
+   const file='UNIT_'+unitId+'_PAGE_'+String(++pageNumber).padStart(4,'0')+'_v1.json';
+   const rel=path.posix.join(dir,file);
+   const body={schemaVersion:'curveyield-discovery-packet-page-v1',unitId,sourcePacketPath:packetPath,
+    section,offset,items:chunk};
+   const bytes=Buffer.byteLength(JSON.stringify(body));
+   writeJson(repoFile(root,rel),body);
+   pages.push({path:rel,section,offset,count:chunk.length,bytes,
+    ...(bytes>SOLO_PACKET_PAGE_MAX_BYTES?{oversizedSingleItem:true}:{})});
+   offset+=chunk.length;chunk=[];
+  };
+  for(const item of items){
+   const trial={schemaVersion:'curveyield-discovery-packet-page-v1',unitId,sourcePacketPath:packetPath,
+    section,offset,items:[...chunk,item]};
+   if(chunk.length&&Buffer.byteLength(JSON.stringify(trial))>SOLO_PACKET_PAGE_MAX_BYTES)emit();
+   chunk.push(item);
   }
-  const indexRel=path.posix.join(dir,'INDEX_v1.json');
-  const index={schemaVersion:'curveyield-discovery-unit-index-v1',role,unitCount:ids.length,pages};
-  if(Buffer.byteLength(JSON.stringify(index))>32*1024)throw new Error('discovery window index exceeds 32 KiB');
-  writeJson(repoFile(root,indexRel),index);
-  return indexRel;
+  emit();
+ };
+ for(const field of ['primaryContexts','documentationItems','siblingChecks','flows','integrationQuestions',
+  'contractChecks','specContext'])writeSection(field,arr(payload[field]));
+ if(payload.requiredClasses&&typeof payload.requiredClasses==='object')
+  writeSection('requiredClasses',Object.entries(payload.requiredClasses).map(([contextId,classes])=>({contextId,classes})));
+ for(const [field,items] of Object.entries(payload.systemFacts??{}))
+  if(Array.isArray(items))writeSection('systemFacts.'+field,items);
+ const indexRel=path.posix.join(dir,'UNIT_'+unitId+'_INDEX_v1.json');
+ const index={schemaVersion:'curveyield-discovery-packet-section-index-v1',unitId,role,
+  packetPath,submissionPath:submissionRel(campaignPath,unitId),
+  readingGuide:'Read section pages by path and offset, not the entire assignment packet at once. Pages are lossless copies of packet sections; keep all documented rules, flows, checks, and attacker facts. The full packet remains authoritative for controller validation. Commit one complete unit then submit a boundary request naming that unitId.',
+  primaryContextIds:arr(payload.primaryContextIds),
+  flowIds:arr(payload.flowIds),integrationQuestionIds:arr(payload.integrationQuestionIds),
+  trivialContextIds:arr(payload.trivialContextIds),
+  sectionPages:pages};
+ writeJson(repoFile(root,indexRel),index);
+ return indexRel;
+}
+function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
+ const dir=pathJoin(campaignPath,'index/'+(role==='ATTACK'?'attacker':'flow-review'));
+ const pages=[];
+ for(let i=0;i<ids.length;i+=25){
+  const chunk=ids.slice(i,i+25);
+  const file='PART_'+String(pages.length+1).padStart(4,'0')+'_v1.json';
+  const rel=path.posix.join(dir,file);
+  const payload={schemaVersion:'curveyield-discovery-unit-index-page-v1',
+   unitIds:chunk,units:chunk.map(unitId=>({unitId,
+    packetPath:packetRel(campaignPath,unitId),
+    packetIndexPath:writeUnitPacketIndexV1({root,campaignPath,unitId,role}),
+    submissionPath:submissionRel(campaignPath,unitId)}))};
+  if(Buffer.byteLength(JSON.stringify(payload))>32*1024)throw new Error('discovery window page exceeds 32 KiB');
+  writeJson(repoFile(root,rel),payload);
+  pages.push({path:rel,unitCount:chunk.length});
+ }
+ const indexRel=path.posix.join(dir,'INDEX_v1.json');
+ const index={schemaVersion:'curveyield-discovery-unit-index-v1',role,unitCount:ids.length,pages,
+  readingGuide:'Read a window page then its packetIndexPath. Complete and submit each unit individually; other submissions stay drafts. Discovery windows are bounded and the correctness/ATTACK passes remain separate.'};
+ if(Buffer.byteLength(JSON.stringify(index))>32*1024)throw new Error('discovery window index exceeds 32 KiB');
+ writeJson(repoFile(root,indexRel),index);
+ return indexRel;
 }
 function recordWindowV1({root,ids,state,campaignPath,authorityRoot}){
  const role=state.payload.units[ids[0]].role==='ATTACK'?'ATTACK':'FLOW_REVIEW';
@@ -416,7 +468,7 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
    // Detailed rework feedback is durable in the discovery folder; no delivery message is generated.
    const feedbackRel=pathJoin(campaignPath,'DISCOVERY_FEEDBACK_v1.md');
    fs.writeFileSync(repoFile(root,feedbackRel),text+'\n');
-   return finish('DISCOVERY_REWORK',text,recordWindowV1({root,ids:remaining,state,campaignPath,authorityRoot}));
+   return finish('DISCOVERY_REWORK',text,recordWindowV1({root,ids:rework,state,campaignPath,authorityRoot}));
   }
   // Some units still unsubmitted and nothing failed: the solo actor is mid-window.
   return finish('DISCOVERY_PARTIAL',summary,null);
