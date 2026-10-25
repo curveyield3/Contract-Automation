@@ -506,8 +506,14 @@ function restoreLedgerBeforeMasterPhase({root,campaignPath,authorityRoot,earlies
 }
 
 function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRoot,result,now}){
-  const segment=segmentsForAuthorityV1(authorityRoot,root).find(x=>x.segmentId===result.pending.segmentId);
-  if(!segment)throw new Error('master amendment refresh segment is unsupported');
+  // Reuse the exact segment already resolved and validated against the sealed
+  // master record. Frozen authority revisions may have a versioned directory
+  // suffix; never reject their bound lineup by re-guessing from a path string.
+  const segment=result.segment?.segmentId===result.pending.segmentId
+    ?result.segment
+    :segmentsForAuthorityV1(authorityRoot,root).find(x=>x.segmentId===result.pending.segmentId);
+  if(!segment)throw new Error('master amendment refresh segment is unsupported: '+
+    String(result.pending.segmentId)+' @ '+String(authorityRoot));
   const affected=result.affectedPhases??[];
   if(!affected.length)throw new Error('master amendment refresh has no affected phases');
   const earliest=Math.min(...affected);
