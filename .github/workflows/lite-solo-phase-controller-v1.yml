@@ -39,13 +39,24 @@ jobs:
           [[ "$request" =~ ^process/agent-upload/lite-solo-phase-boundary/[A-Za-z0-9._-]+\.json$ ]]
           test -f "$request"
           jq -e '.schemaVersion=="curveyield-lite-solo-phase-boundary-request-v1" and
-            (.reviewKind=="phase" or .reviewKind=="discovery") and
+            (.reviewKind=="phase" or .reviewKind=="discovery" or .reviewKind=="candidate-batch") and
             (.campaignId|type=="string") and (.campaignId|test("^[a-zA-Z0-9_.-]+-r[0-9]+$")) and
             (.auditControllerRef=="main") and
             (.attempt|type=="number") and (.attempt>=1)' "$request" >/dev/null
           kind="$(jq -r .reviewKind "$request")"
           if [ "$kind" = phase ]; then
             jq -e '.phaseSequence|type=="number" and (.==1 or .==2 or .==3 or .==4 or .==5 or .==6 or .==8 or .==9 or .==10)' "$request" >/dev/null
+          elif [ "$kind" = candidate-batch ]; then
+            jq -e '
+              (.phaseSequence==5 or .phaseSequence==6) and
+              (.readyCandidateKeys|type=="array") and
+              (.readyCandidateKeys|length)>=1 and (.readyCandidateKeys|length)<=16 and
+              ([.readyCandidateKeys[]|select(type!="string" or
+                (test("^[A-Za-z0-9._-]+$")|not))]|length)==0 and
+              ([.readyCandidateKeys[]]|unique|length)==(.readyCandidateKeys|length) and
+              ((.reviewSection//"step-2")=="step-2" or
+                (.phaseSequence==6 and .reviewSection=="step-5"))
+            ' "$request" >/dev/null
           else
             jq -e '.unitId|type=="string" and test("^[FRX]-[0-9]{3}$")' "$request" >/dev/null
             jq -e 'if .readyUnitIds==null then true else
@@ -142,13 +153,17 @@ jobs:
             if jq -e '.readyUnitIds != null' "$REQUEST_FILE" >/dev/null; then
               args+=(--ready-unit-ids-b64 "$(jq -c .readyUnitIds "$REQUEST_FILE" | base64 -w0)")
             fi
+          elif [ "$REVIEW_KIND" = candidate-batch ]; then
+            args+=(--phase-sequence "$(jq -r .phaseSequence "$REQUEST_FILE")")
+            args+=(--ready-candidate-keys-b64 "$(jq -c .readyCandidateKeys "$REQUEST_FILE" | base64 -w0)")
+            args+=(--review-section "$(jq -r '.reviewSection//"step-2"' "$REQUEST_FILE")")
           else
             args+=(--phase-sequence "$(jq -r .phaseSequence "$REQUEST_FILE")")
           fi
           node scripts/lite-solo-phase-controller-v1.mjs "${args[@]}" > /tmp/lite-solo-envelope.json
           test "$(wc -c </tmp/lite-solo-envelope.json)" -le 8192
           jq -es 'length==1 and .[0].schemaVersion=="curveyield-lite-controller-envelope-v1" and
-            (.[0].status|IN("PASS","NEEDS_REWORK","DISCOVERY_REWORK","DISCOVERY_NEXT","DISCOVERY_PARTIAL","DISCOVERY_COMPLETE","DISCOVERY_STALE_REQUEST","ALREADY_ACCEPTED","CONTROLLER_ERROR")) and
+            (.[0].status|IN("PASS","NEEDS_REWORK","DISCOVERY_REWORK","DISCOVERY_NEXT","DISCOVERY_PARTIAL","DISCOVERY_COMPLETE","DISCOVERY_STALE_REQUEST","ALREADY_ACCEPTED","CANDIDATE_BATCH_ACCEPTED","CANDIDATE_BATCH_REWORK","CONTROLLER_ERROR")) and
             (.[0].detailRef|type=="string") and (.[0].sha256|test("^[a-f0-9]{64}$"))' /tmp/lite-solo-envelope.json >/dev/null
           node --input-type=module -e '
             import fs from "node:fs";
