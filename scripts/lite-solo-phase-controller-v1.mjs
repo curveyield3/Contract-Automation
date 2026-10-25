@@ -1115,8 +1115,20 @@ if(deficiencies.length){
 // Explicit human authorization is mandatory before machine test execution.
 if(sequence===5 && !(directory.machineExecutionAuthorization?.status==='APPROVED' &&
   directory.machineExecutionAuthorization?.sourceSha256===directory.sourceSha256 &&
-  directory.machineExecutionAuthorization?.scope==='PHASE5_TARGET_EXECUTION'))
- throw new Error('LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: Phase 5 machine execution has no exact human-approved source-bound authorization.');
+  directory.machineExecutionAuthorization?.scope==='PHASE5_TARGET_EXECUTION')){
+  const reason='LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: Phase 5 semantic candidate review passed, but machine execution has no human-approved source-bound authorization. No test was executed and no receipt was issued.';
+  persistReviewerReworkShardsV1();
+  packet.status='REWORK_REQUIRED';
+  packet.controllerValidation={status:'FAIL',machineExecutionGate:'NOT_AUTHORIZED',
+    validatedAt:now,deficiencies:[reason]};
+  directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
+  writeJson(packetFile,packet);writeJson(directoryFile,directory);
+  process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',
+    campaignId:directory.campaignId,campaignName:directory.campaignName,
+    phaseSequence:5,phaseId:'phase-5',reviewer:assignment.reviewer,
+    feedbackText:reason,packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
+  process.exit(0);
+}
 // Execute mandatory Phase-5 candidate tests before any PASS, bookkeeping or seal.
 let phase5MachineResults=null;
 let phase5PendingCandidateKeys=[];
