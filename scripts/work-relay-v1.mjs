@@ -221,17 +221,29 @@ function sweepOne(campaign){
     }else if(s.queue.length){s.current=s.queue.shift();changed=true;}
     else{
       const assignment=d.currentAssignment||{},who=assignment.reviewer||d.currentReviewer;
-      const chat=r.agentChats?.[who];
-      const relevant=assignment.status==='ACTIVE'||assignment.status==='REWORK_REQUIRED'||d.status==='ACTIVE';
+      let chat=r.agentChats?.[who];
+      let phaseId=assignment.phaseId||'phase-'+(assignment.phaseSequence||d.currentPhaseSequence);
+      const special=['WAITING_FOR_MASTER_REVIEW','WAITING_FOR_TARGETED_TESTS','MASTER_TESTS_REQUESTED'];
+      if(special.includes(d.campaignStatus) && s.lastReceipt?.targetChatUrl &&
+          Object.values(r.agentChats||{}).includes(s.lastReceipt.targetChatUrl)){
+        chat=s.lastReceipt.targetChatUrl;
+        phaseId=s.lastReceipt.phaseId||phaseId;
+      }
+      const relevant=assignment.status==='ACTIVE'||assignment.status==='REWORK_REQUIRED'||
+        d.status==='ACTIVE'||special.includes(d.campaignStatus);
       const since=Math.max(Date.parse(s.lastProgressAt||0)||0,Date.parse(s.lastPokedAt||0)||0,Date.parse(s.lastReceipt?.receivedAt||0)||0);
       const elapsed=since?(Date.now()-since)/60000:Infinity;
       if(relevant&&chat&&elapsed>=20){
         const id=createHash('sha256').update([campaign,epoch,who,'POKE',Math.floor(Date.now()/1200000)].join('\0')).digest('hex').slice(0,26);
-        s.current={commandId:id,wakeId:campaign+'-work-watchdog-'+id,phaseId:assignment.phaseId||'phase-'+(assignment.phaseSequence||d.currentPhaseSequence),
-          workerRole:'reviewer',chatUrl:chat,message:'GET BACK TO WORK',
+        const backup=r.agentChats?.backup;
+        const escalate=s.noProgressPokes>=3 && backup && backup!==chat && !s.repairNoticeIssuedAt;
+        const repairMessage='REPAIR REQUIRED: The campaign has had three acknowledged idle reminders with no reviewer-authored progress. Inspect the current Audit Campaign Directory, exact failed packet and accepted work. Resume the existing assignment; do not fabricate a PASS, repeat sealed phases, or run tests without explicit owner authorization. Diagnose the delivery transport; if this transport repeatedly fails and the other is ready, use the lite-work-relay-v1.yml switch operation to change the campaign mode.';
+        s.current={commandId:id,wakeId:campaign+'-work-watchdog-'+id,phaseId:phaseId,
+          workerRole:escalate?'repair_child':'reviewer',chatUrl:escalate?backup:chat,
+          message:escalate?repairMessage:'GET BACK TO WORK',
           workspacePath:d.workspacePath,transportEpoch:epoch,
           expectedCode:'COMPLETE-'+randomBytes(12).toString('hex').toUpperCase(),issuedAt:now()};
-        s.lastPokedAt=now();s.noProgressPokes++;changed=true;
+        s.lastPokedAt=now();s.noProgressPokes++;if(escalate)s.repairNoticeIssuedAt=now();changed=true;
       }
     }
     if(!changed)return null;
