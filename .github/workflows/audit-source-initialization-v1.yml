@@ -9,11 +9,11 @@ on:
         default: false
         type: boolean
       delivery_transport:
-        description: "ChatGPT instruction transport (original browser unchanged; Work uses campaign command file)"
+        description: "Delivery method: original Browser Automation or Agent Delivery (fixed campaign command file)"
         type: choice
         required: false
         default: GITHUB_BROWSER
-        options: [GITHUB_BROWSER, CHATGPT_WORK]
+        options: [GITHUB_BROWSER, AGENT_DELIVERY]
       source_url:
         description: Optional direct ZIP file URL (mutually exclusive with scan_urls)
         required: false
@@ -177,8 +177,8 @@ jobs:
             echo "::error::single_agent_simulation must be boolean"
             exit 1
           }
-          [[ "$delivery_transport" == GITHUB_BROWSER || "$delivery_transport" == CHATGPT_WORK ]] || {
-            echo "::error::delivery_transport must be GITHUB_BROWSER or CHATGPT_WORK"; exit 1;
+          [[ "$delivery_transport" == GITHUB_BROWSER || "$delivery_transport" == AGENT_DELIVERY ]] || {
+            echo "::error::delivery_transport must be GITHUB_BROWSER or AGENT_DELIVERY"; exit 1;
           }
           if [ "$single_agent_simulation" = true ]; then
             for slot_url in "$agent_chat_2_url" "$agent_chat_3_url" "$agent_chat_4_url" "$master_chat_url" "$test_executor_chat_url" "$backup_chat_url"; do
