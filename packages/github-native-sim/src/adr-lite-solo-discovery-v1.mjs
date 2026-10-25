@@ -414,7 +414,7 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
  // active submission remains a draft, regardless of whether its file exists.
  const requestedUnits=[unitId];
  const inventory=getInputs({root,campaignPath,automationRoot}).inventory;
- const accepted=[],rework=[],exhausted=[],waiting=[],unchanged=[],feedback=[];
+ const accepted=[],rework=[],waiting=[],unchanged=[],feedback=[];
  for(const id of requestedUnits){
   const info=state.payload.units[id],relative=submissionRel(campaignPath,id),file=repoFile(root,relative);
   if(!fs.existsSync(file)){waiting.push(id);continue;}
@@ -445,25 +445,16 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
    continue;
   }
   info.attempts++;
-  // V13 correctness-first discovery never converts a malformed submission into covered work.
-  // The same reviewer remains responsible; an unchanged payload is not revalidated.
-  if(info.attempts<3||state.payload.reviewPolicy==='correctness-verdict-v13'){
-   rework.push(id);
-   feedback.push(feedbackTextV1(result,{attempt:info.attempts,
-     maxAttempts:state.payload.reviewPolicy==='correctness-verdict-v13'?'until valid':3,
-     submissionPath:relative,unitId:id}));
-   continue;
-  }
-  info.status='GAP_RECORDED';exhausted.push(id);
-  const affected=info.role==='ATTACK'?arr(packet.payload.flowIds):arr(packet.payload.primaryContextIds);
-  for(const ctx of affected)state.payload.gaps.push({code:'VALIDATION_ATTEMPTS_EXHAUSTED',
-   ...(info.role==='ATTACK'?{flowId:ctx}:{contextId:ctx}),unitId:id});
+  // An invalid submission remains reviewer-owned rework for as many distinct
+  // corrections as necessary; never degrade missing verification into coverage.
+  rework.push(id);
+  feedback.push(feedbackTextV1(result,{attempt:info.attempts,
+   maxAttempts:'until valid',submissionPath:relative,unitId:id}));
  }
  // Nothing new to validate: report and leave state untouched.
- if(!accepted.length&&!rework.length&&!exhausted.length)return {status:'DISCOVERY_REWORK',
+ if(!accepted.length&&!rework.length)return {status:'DISCOVERY_REWORK',
   feedbackText:unchanged.length?unchanged.join('\n\n'):'No submission found for selected unit '+unitId+'. No other draft was inspected or penalized.'};
  const summary=[accepted.length?'Accepted: '+accepted.join(', '):'',
-  exhausted.length?'Validation attempts exhausted, recorded as gaps: '+exhausted.join(', '):'',
   waiting.length?'Requested unit has no submission: '+waiting.join(', '):''].filter(Boolean).join('\n');
  const others=openIdleSoloWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,except:chatKey});
  const finish=(status,feedbackText,currentWindow=null)=>{
