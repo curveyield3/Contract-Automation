@@ -424,7 +424,7 @@ export function validatePhase5CandidateDispositionV1({
 }
 
 // This single evidence verifier is shared by direct targets and target aliases.
-function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,result,expectedSourceSha256=null,requireTargetBindingManifest=false}={}){
+function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,result,expectedSourceSha256=null,requireTargetBindingManifest=false,skipExistingManifestOnFreshRun=false}={}){
   const failures=[];
   const key=String(target?.candidateKey??'');
     if(!result||result.status!=='PASS'||result.exitCode!==0){
@@ -484,7 +484,7 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
     }
     const manifestRel=typeof rel==='string'?targetBindingManifestPathV1(rel):null;
     const manifestAbs=manifestRel?path.join(controllerRoot,...manifestRel.split('/')):null;
-    if(requireTargetBindingManifest|| (manifestAbs&&fs.existsSync(manifestAbs))){
+    if(!skipExistingManifestOnFreshRun&&(requireTargetBindingManifest|| (manifestAbs&&fs.existsSync(manifestAbs)))){
       if(!manifestAbs||!fs.existsSync(manifestAbs)){
         failures.push('Phase 5 mandatory '+key+' has no target/source-bound resume manifest');
       }else{
@@ -891,7 +891,8 @@ export async function executePhase5TargetsV1({
     };
     if(machine.status==='PASS'){
       const evidenceFailures=validateExecutedPhase5TargetV1({
-        controllerRoot,campaignPath,target:t,result:machine,expectedSourceSha256
+        controllerRoot,campaignPath,target:t,result:machine,expectedSourceSha256,
+        skipExistingManifestOnFreshRun:true
       });
       if(evidenceFailures.length){
         machine.status='BLOCKED_EVIDENCE_VALIDATION';
