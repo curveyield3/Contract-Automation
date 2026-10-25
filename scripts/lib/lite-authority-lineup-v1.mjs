@@ -3,7 +3,10 @@ import path from 'node:path';
 
 // The bound, versioned skill manifest owns the v13 reviewer lineup.
 // Frozen v12 audit campaigns preserve their historical caller identity.
-export const isV13AuthorityV1=authorityRoot=>/Audit_Litemode_v13(?:\/|$)/.test(String(authorityRoot??''));
+// Both live logical v13 and its immutable digest-bound archive revisions use the
+// same reviewer assignment topology. Authority bytes are still verified from
+// the exact frozen manifest; matching the directory name is not a rebind.
+export const isV13AuthorityV1=authorityRoot=>/(?:^|\/)Audit_Litemode_v13(?:_v13_[0-9]+)?(?:\/|$)/.test(String(authorityRoot??''));
 
 export function boundReviewerLineupV13({root,authorityRoot}={}){
  if(!isV13AuthorityV1(authorityRoot))return null;
