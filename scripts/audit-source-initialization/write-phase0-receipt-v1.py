@@ -84,6 +84,8 @@ directory={
   "campaignId":e["CAMPAIGN_ID"],"campaignGenerationId":e["GENERATION_ID"],"campaignName":e["CAMPAIGN_NAME"],
   "workspacePath":workspace,"mode":"LITE","sourceSha256":e["SOURCE_SHA"],
   "sourceInitializationRequestId":e["REQUEST_ID"],
+  "deliveryTransport":e.get("DELIVERY_TRANSPORT","GITHUB_BROWSER"),
+  "transportEpoch":0,
   "masterReview":{"chatUrl":e["MASTER_CHAT_URL"],"reasoning":"MAXIMUM","repairModel":"SOL","repairReasoning":"HIGH"},
   "testExecutor":{"chatUrl":e["TEST_EXECUTOR_CHAT_URL"]},
   "pendingMasterReview":None,
