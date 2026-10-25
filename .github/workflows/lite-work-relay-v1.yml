@@ -1,4 +1,4 @@
-name: Lite ChatGPT Work Relay v1
+name: Lite Agent Delivery v1
 on:
   schedule:
     - cron: '3-59/5 * * * *'
@@ -34,7 +34,7 @@ on:
       target_mode:
         type: choice
         required: false
-        options: [GITHUB_BROWSER, CHATGPT_WORK]
+        options: [GITHUB_BROWSER, AGENT_DELIVERY]
 permissions:
   contents: write
   actions: write
@@ -140,7 +140,7 @@ jobs:
           [ -n "$message" ] || message='GET BACK TO WORK'
           b64="$(printf '%s' "$message" | base64 -w0)"
           wake_id="$CAMPAIGN_ID-switch-$(jq -r '.epoch' /tmp/switch.json)-$role"
-          if [ "$TARGET_MODE" = CHATGPT_WORK ]; then
+          if [ "$TARGET_MODE" = AGENT_DELIVERY ]; then
             node scripts/work-relay-v1.mjs --operation deliver \
               --campaign-id "$CAMPAIGN_ID" --wake-id "$wake_id" \
               --phase-id "$phase" --chat-url "$chat" --worker-role reviewer \
