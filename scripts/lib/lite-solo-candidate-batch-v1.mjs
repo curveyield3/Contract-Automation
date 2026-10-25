@@ -102,13 +102,34 @@ export function acceptCandidateBatchV1({
     prior.schemaVersion!=='curveyield-lite-candidate-batch-checkpoint-v1'))
   throw new Error('candidate batch checkpoint identity/source mismatch');
  const previous=records(prior?.acceptedRecords);
- const byKey=new Map(previous.map(item=>[item.section+':'+item.key,item]));
+ const byKey=new Map();
+ for(const item of previous){
+  // Checkpoints are authoritative only about the exact immutable source and
+  // reviewer record digest accepted. Edited rows must be re-reviewed.
+  try{
+   const source=exactCandidate(sources,item.key);
+   const row=exactRow(
+    item.section==='step-5'?form.actions?.['step-5']?.outputs?.candidateProofRecords:
+      phase===5?form.actions?.['step-2']?.outputs?.reconciliationRecords:
+        form.actions?.['step-2']?.outputs?.targetDispositions,
+    source,item.key);
+   const target=phase===5?designs.find(d=>aliases(source).has(String(d.candidateKey??''))):null;
+   if(sha(source)===item.sourceDigest&&sha(row)===item.recordDigest&&
+      (!item.targetDigest||target&&sha(target)===item.targetDigest))
+    byKey.set(item.section+':'+item.key,item);
+  }catch{}
+ }
  for(const item of selected)byKey.set(section+':'+item.key,{...item,section,acceptedAt:now});
+ const complete=new Set([...byKey.values()].filter(i=>i.section===section).map(i=>i.key));
+ const allCandidateKeys=[...new Set(sources.map(keyOf).filter(Boolean))];
+ const remaining=allCandidateKeys.filter(k=>!complete.has(k));
  const checkpoint={schemaVersion:'curveyield-lite-candidate-batch-checkpoint-v1',
   campaignId:directory.campaignId,sourceSha256:directory.sourceSha256,phase,
   lastBatchAt:now,acceptedRecords:[...byKey.values()].sort((a,b)=>(a.section+':'+a.key).localeCompare(b.section+':'+b.key)),
+  progress:{section,total:allCandidateKeys.length,accepted:complete.size,remaining:remaining.length,
+    nextCandidateKeys:remaining.slice(0,LIMIT)},
   reviewGuarantee:'SOURCE/STRUCTURE_CHECKPOINT_ONLY__FINAL_PHASE_AND_MACHINE_EVIDENCE_VALIDATION_STILL_REQUIRED'};
  write(root,rel,checkpoint);
  return {status:'CANDIDATE_BATCH_ACCEPTED',accepted:selected.length,checkpointRel:rel,
-  checkpointTotal:checkpoint.acceptedRecords.length,selectedKeys:readyCandidateKeys};
+  checkpointTotal:checkpoint.acceptedRecords.length,progress:checkpoint.progress,selectedKeys:readyCandidateKeys};
 }
