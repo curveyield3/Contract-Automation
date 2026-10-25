@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
 import {materializeShardedWorkFormV1,shardWorkFormV1} from './lib/lite-solo-work-shards-v1.mjs';
-import {validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
+import {validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1,validatePhase5CandidateDispositionV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
 const [root,campaignPath,campaignId,sourceSha256]=process.argv.slice(2);
@@ -43,6 +43,22 @@ if(fs.existsSync(path.join(root,...stateManifestRef.split('/')))){
 const form=read('work/phase-05/PHASE_05_WORK_FORM_v1.json');
 const designs=form?.actions?.['step-3']?.outputs?.targetDesigns;
 const failures=[],ready=[],generated=[];
+let candidateDispositions=null;
+try{
+  const phase4=read('derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json');
+  candidateDispositions=validatePhase5CandidateDispositionV1({
+    phase4CandidateRecords:phase4?.actions?.['step-3']?.outputs?.candidateRecords??[],
+    newCandidateRecords:form?.actions?.['step-2']?.outputs?.newCandidateRecords??[],
+    reconciliationRecords:form?.actions?.['step-2']?.outputs?.reconciliationRecords??[],
+    targetDesigns:designs??[]
+  });
+  for(const reason of candidateDispositions.failures)
+    failures.push({path:'actions.step-2.outputs.reconciliationRecords',
+      reason:'PHASE5_CANDIDATE_DISPOSITION_GATE: '+reason});
+}catch(error){
+  failures.push({path:'actions.step-2.outputs.reconciliationRecords',
+    reason:'Cannot verify source-bound candidate dispositions: '+String(error?.message??error)});
+}
 const shardFor=(index,key)=>{
   const descriptors=index?.schemaVersion==='curveyield-work-shard-index-v13'
     ?index.pages.flatMap(p=>JSON.parse(fs.readFileSync(path.join(root,...path.posix.dirname(indexRel).split('/'),p.file),'utf8')).shards)
@@ -55,6 +71,9 @@ const index=sharded?JSON.parse(fs.readFileSync(indexFile,'utf8')):null;
 
 if(!Array.isArray(designs)||!designs.length)
   failures.push({path:'actions.step-3.outputs.targetDesigns',reason:'Missing target designs'});
+else if(candidateDispositions?.failures?.length||!candidateDispositions)
+  failures.push({path:'actions.step-3.outputs.targetDesigns',
+    reason:'No machine execution is authorized until every Phase-4/5 candidate has a source-backed, controller-valid Phase-5 disposition'});
 else for(const [i,target] of designs.entries()){
   const prefix='targetDesigns['+i+']';
   const key=String(target?.candidateKey??'').trim();
