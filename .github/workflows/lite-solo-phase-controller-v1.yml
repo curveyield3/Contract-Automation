@@ -69,7 +69,7 @@ jobs:
           printf '%s' "$encoded" | base64 -d >/tmp/lite-solo-campaign-directory.json
           jq -e --arg id "$AUDIT_CAMPAIGN" '.schemaVersion=="curveyield-audit-campaign-directory-entry-v2" and
             .campaignId==$id and .mode=="LITE_SOLO" and .agentModel=="ONE_PERSISTENT_AGENT" and
-            .agent.actorId=="lite-solo-agent" and .deliveryTransport=="AGENT_DELIVERY" and
+            .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT" and (.agent.chatUrl==null) and
             (.masterReview==null) and (.pendingMasterReview==null) and
             (.workspacePath|startswith("campaigns/"))' /tmp/lite-solo-campaign-directory.json >/dev/null
           campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
@@ -167,28 +167,20 @@ jobs:
               git pull --rebase origin main
             done
           fi
-      - name: Deliver the controller result to the sole bound agent
-        if: ${{ steps.controller.outputs.status != 'CONTROLLER_ERROR' && steps.controller.outputs.status != 'DISCOVERY_STALE_REQUEST' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CAMPAIGN_ID: ${{ steps.request.outputs.id }}
-          CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
-          AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
+      - name: Record durable controller result without agent delivery
         shell: bash
         run: |
           set -euo pipefail
-          file=".audit-controller/$AUDIT_DIRECTORY"
-          test "$(jq -r .agent.actorId "$file")" = lite-solo-agent
-          chat="$(jq -r .agent.chatUrl "$file")"
+          file=".audit-controller/${{ steps.request.outputs.directory }}"
+          jq -e '.mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and
+            .agent.actorId=="lite-solo-agent" and (.agent.chatUrl==null)' "$file" >/dev/null
           status="$(jq -r .status /tmp/lite-solo-controller-result.json)"
-          phase="$(jq -r '.nextAssignment.phaseSequence // .phaseSequence // 4' /tmp/lite-solo-controller-result.json)"
-          feedback="$(jq -r '.feedbackText // .status' /tmp/lite-solo-controller-result.json)"
           detail="$(jq -r '.detailRef // empty' /tmp/lite-solo-envelope.json)"
-          message="lite-solo campaign $CAMPAIGN_ID controller result: $status. $feedback. Exact durable controller result: $detail. Continue in this same chat only. Open bound lite-solo/SKILL.md and $AUDIT_DIRECTORY. For discovery, finish the current flow or attack window and submit to process/agent-upload/lite-solo-phase-boundary/. For NEEDS_REWORK repair the cited shards then resubmit. For PASS resume currentAssignment without any master review, unless campaignStatus is COMPLETE. No tests without separately authorized scope."
-          if [ "$status" = PASS ] && [ "$(jq -r .campaignStatus "$file")" = COMPLETE ]; then exit 0; fi
-          message_b64="$(printf '%s' "$message" | base64 -w0)"
-          gh workflow run lite-work-relay-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            -f operation=deliver -f campaign_id="$CAMPAIGN_ID" -f campaign_path="$CAMPAIGN_PATH" \
-            -f wake_id="$CAMPAIGN_ID-lite-solo-boundary-$GITHUB_RUN_ID" -f phase_id="phase-$phase" \
-            -f chat_url="$chat" -f wake_message_b64="$message_b64" -f worker_role=lite-solo-agent \
-            -f gate_state_path="$AUDIT_DIRECTORY" -f gate_expected_milestone_id="PHASE_${phase}_WORK_PACKET"
+          {
+            echo "### Lite-Solo direct controller result"
+            echo "- Campaign: ${{ steps.request.outputs.id }}"
+            echo "- Status: $status"
+            echo "- Durable response: $detail"
+            echo "- Next action is represented by currentAssignment in the canonical campaign directory"
+            echo "- No separate chat, wake, or delivery transport"
+          } >> "$GITHUB_STEP_SUMMARY"
