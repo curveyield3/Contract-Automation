@@ -111,7 +111,17 @@ function settle(state,first){
   if(first==='IDLE' && !state.current)return false;
   if(!state.current)throw Error('Unexpected first line with no current command: '+first);
   if(first==='PENDING')return false;
-  if(first!==state.current.expectedCode)throw Error('Unrecognized check-in: '+first);
+  if(first!==state.current.expectedCode){
+    const prior=(state.unconfirmedCommands||[]).find(x=>x.expectedCode===first);
+    if(prior){
+      state.lateReceipts=(state.lateReceipts||[]).slice(-9).concat([{
+        commandId:prior.commandId,receivedAt:now(),disposition:'STALE_COMMAND_NOT_ACCEPTED'
+      }]);
+      state.updatedAt=now();
+      return true;
+    }
+    throw Error('Unrecognized check-in: '+first);
+  }
   const old=state.current;
   state.lastReceipt={commandId:old.commandId,phaseId:old.phaseId,targetChatUrl:old.chatUrl,
     code:first,receivedAt:now(),transportEpoch:old.transportEpoch};
@@ -235,7 +245,7 @@ function sweepOne(campaign){
         const stranded=s.current;
         s.unconfirmedCommands=(s.unconfirmedCommands||[]).slice(-9).concat([{
           commandId:stranded.commandId,chatUrl:stranded.chatUrl,
-          phaseId:stranded.phaseId,message:stranded.message,
+          phaseId:stranded.phaseId,message:stranded.message,expectedCode:stranded.expectedCode,
           declaredUnconfirmedAt:now()}]);
         const backup=r.agentChats?.backup;
         if(backup && backup!==stranded.chatUrl){
