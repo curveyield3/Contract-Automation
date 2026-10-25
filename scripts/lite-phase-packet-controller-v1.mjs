@@ -789,7 +789,7 @@ if(['master','master-test-result'].includes(reviewKind)&&a['master-transaction-c
   try{
     const pending=directory.pendingMasterReview;
     if(!pending){
-      const prior=directory.lastAcceptedMasterReview;
+      const prior=directory.lastClosedMasterReview?.outcome==='CLOSE_INCOMPLETE'?directory.lastClosedMasterReview:directory.lastAcceptedMasterReview;
       const record=prior?.recordPath?maybeJson(root,prior.recordPath):null;
       const summary=a['master-summary-b64']?Buffer.from(a['master-summary-b64'],'base64').toString('utf8').trim():null;
       response=prior?.segmentId===a['segment-id']&&prior?.outcome===a['master-outcome']&&record?.decision?.summary===summary
@@ -812,7 +812,7 @@ if(['master','master-test-result'].includes(reviewKind)&&a['master-transaction-c
       childArgs.push('--master-transaction-child','true');
       const output=execFileSync(process.execPath,[process.argv[1],...childArgs],{encoding:'utf8',stdio:['ignore','pipe','inherit'],maxBuffer:16*1024*1024});
       response=JSON.parse(output.trim());
-      if(['PASS','MASTER_TESTS_REQUESTED','WAITING_FOR_MASTER_REVIEW'].includes(response.status)){
+      if(['PASS','MASTER_TESTS_REQUESTED','WAITING_FOR_MASTER_REVIEW','CLOSED_INCOMPLETE'].includes(response.status)){
         // Mirror the entire validated campaign tree, including deletions. A
         // plain cpSync overlay resurrects artifacts removed into superseded/.
         // Any failure leaves this Actions checkout unpublished.
