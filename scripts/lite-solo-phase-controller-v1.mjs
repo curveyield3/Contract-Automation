@@ -30,6 +30,7 @@ import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/a
 import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 import {isReassignedV13AuthorityV1} from './lib/lite-authority-lineup-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
+import {acceptCandidateBatchV1} from './lib/lite-solo-candidate-batch-v1.mjs';
 import {validatePhase6AttackerWorkV1,validatePhase8LinkageV1,validatePhase10CoverageLabelV1,appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -775,12 +776,12 @@ if(a['phase5-reuse-keys-b64']&&!masterAmendmentRefreshSha)
 
 if(masterAmendmentRefreshSha&&reviewKind!=='phase')throw new Error('master-amendment-refresh-sha is internal to phase refresh');
 for(const k of ['controller-root','campaign-id','campaign-path','campaign-directory-path']) if(a[k]===undefined) throw new Error('missing --'+k);
-if(['phase','sealed-rework','post-completion-followup'].includes(reviewKind)&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
+if(['phase','candidate-batch','sealed-rework','post-completion-followup'].includes(reviewKind)&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
 if(reviewKind==='discovery'&&!a['unit-id'])throw new Error('missing --unit-id');
 if(reviewKind==='master-test-result'&&!a['test-result-path'])throw new Error('missing --test-result-path');
 if(reviewKind==='master'&&a['master-outcome']==='REQUEST_TARGETED_TESTS'&&!a['test-plan-path'])throw new Error('missing --test-plan-path');
 if(['sealed-rework','post-completion-followup'].includes(reviewKind)&&!a['rework-request-path']) throw new Error('missing --rework-request-path');
-if(!['phase','discovery'].includes(reviewKind)) throw new Error('unsupported review-kind');
+if(!['phase','discovery','candidate-batch'].includes(reviewKind)) throw new Error('unsupported review-kind');
 const root=path.resolve(a['controller-root']);
 const expectedCampaignId=a['campaign-id'];
 const campaignPath=a['campaign-path']; const campaignRoot=repoFile(root,campaignPath);
@@ -865,7 +866,7 @@ if(reviewKind==='discovery'){
 }
 // Lite-Solo accepts phase/discovery only. No successor-delivery holds or master rework routes.
 const sealedRework=null;
-if(reviewKind==='phase'&&!masterAmendmentRefreshSha&&['STOPPED_BY_HUMAN','BLOCKED'].includes(String(directory.campaignStatus??'')))
+if(['phase','candidate-batch'].includes(reviewKind)&&!masterAmendmentRefreshSha&&['STOPPED_BY_HUMAN','BLOCKED'].includes(String(directory.campaignStatus??'')))
  throw new Error('campaign is held by explicit human status '+directory.campaignStatus);
 const assignment=directory.currentAssignment;
 if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current assignment does not match submitted phase');
@@ -877,6 +878,31 @@ if(authorityRoot!=='Audit Skill - Lite-Solo Authority/lite-solo'||predecessor.au
 if(assignment?.status==='WAITING_FOR_SUCCESSOR_AGENT')throw new Error('lite-solo cannot require reviewer handoff');
 const gatedMasterReview=false; // lite-solo never stages master acceptance
 if(assignment.workSchemaPath!==loaded.rel) throw new Error('assignment workSchemaPath mismatch');
+
+if(reviewKind==='candidate-batch'){
+  // Partial validation never writes phase receipts, canonical phase outputs,
+  // source approvals, or machine execution results. It consumes exactly the
+  // same integrity-checked reviewer work-shard form as the full phase gate.
+  if(![5,6].includes(sequence))throw new Error('candidate-batch only supported in phases 5/6');
+  if(!assignment.workShardIndexPath)
+    throw new Error('candidate-batch requires controller-bound work-shard index');
+  const keys=JSON.parse(Buffer.from(a['ready-candidate-keys-b64']??'','base64').toString('utf8'));
+  materializeShardedWorkFormV1({root,formRel:assignment.workFormPath,refreshDigests:true});
+  const candidateForm=readJson(requiredFile(root,assignment.workFormPath,'candidate work form'));
+  const batch=acceptCandidateBatchV1({root,campaignPath,directory,form:candidateForm,phase:sequence,
+    readyCandidateKeys:keys,reviewSection:a['review-section']??'step-2',now});
+  fs.rmSync(repoFile(root,assignment.workFormPath),{force:true}); // shards remain canonical
+  const feedback=batch.status==='CANDIDATE_BATCH_ACCEPTED'
+    ?'Validated '+batch.accepted+' candidate records in '+(a['review-section']??'step-2')+
+      '. Phase '+sequence+' remains ACTIVE; remaining work and full security gates still required.'
+    :'Candidate review batch needs corrections: '+(batch.issues??[]).map(i=>i.candidateKey+': '+i.reason).join('; ');
+  process.stdout.write(JSON.stringify({authorityLinkRoot,status:batch.status,
+    campaignId:directory.campaignId,campaignName:directory.campaignName,
+    phaseSequence:sequence,reviewSection:a['review-section']??'step-2',
+    selectedKeys:batch.selectedKeys??keys,checkpointRel:batch.checkpointRel??null,
+    checkpointTotal:batch.checkpointTotal??0,issues:batch.issues??[],feedbackText:feedback})+'\n');
+  process.exit(0);
+}
 
 const packetFile=repoFile(root,assignment.packetPath);
 const existingPacket=fs.existsSync(packetFile)?readJson(packetFile):null;
