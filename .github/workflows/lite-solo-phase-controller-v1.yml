@@ -120,10 +120,12 @@ jobs:
           if [ "$REVIEW_KIND" != phase ] || [ "$(jq -r .phaseSequence "$REQUEST_FILE")" != 5 ]; then exit 0; fi
           directory=".audit-controller/$AUDIT_DIRECTORY"
           source_sha="$(jq -r .sourceSha256 "$directory")"
-          jq -e --arg sha "$source_sha" '.machineExecutionAuthorization.status=="APPROVED" and .machineExecutionAuthorization.scope=="PHASE5_TARGET_EXECUTION" and .machineExecutionAuthorization.sourceSha256==$sha' "$directory" >/dev/null || {
-            echo '::error::LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: exact Phase-5 source-bound human approval is missing'
-            exit 1
-          }
+          if jq -e --arg sha "$source_sha" '.machineExecutionAuthorization.status=="APPROVED" and .machineExecutionAuthorization.scope=="PHASE5_TARGET_EXECUTION" and .machineExecutionAuthorization.sourceSha256==$sha' "$directory" >/dev/null; then
+            echo 'machine_authorized=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'machine_authorized=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::Phase 5 semantic preflight is validation-only; no test toolchain will be installed without human-approved source-bound authorization'
+          fi
           if ! node scripts/lite-phase5-preflight-v1.mjs .audit-controller "$AUDIT_CAMPAIGN_PATH" "$AUDIT_CAMPAIGN" "$source_sha" > /tmp/lite-solo-phase5-preflight.json; then
             jq -e '.status=="REWORK_REQUIRED" and (.failures|type=="array") and (.failures|length)>0' /tmp/lite-solo-phase5-preflight.json >/dev/null
           fi
@@ -131,7 +133,7 @@ jobs:
           cp /tmp/lite-solo-phase5-preflight.json ".audit-controller/$AUDIT_CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
           echo "runnable=$(jq -r .runnable /tmp/lite-solo-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
       - name: Install existing pinned Anvil execution toolchain only for authorized runnable Phase 5
-        if: ${{ steps.phase5.outputs.runnable == 'true' }}
+        if: ${{ steps.phase5.outputs.runnable == 'true' && steps.phase5.outputs.machine_authorized == 'true' }}
         uses: ./.github/actions/setup-v7-toolchain
       - name: Validate, seal and generate exact solo controller response
         id: controller
