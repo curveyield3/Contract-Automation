@@ -86,7 +86,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" branch "${{ inputs.campaign_path }}"
+          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" "${{ inputs.campaign_path }}"
 
       - name: Run package deployment and configuration scripts on isolated Anvil fork
         env:
@@ -244,7 +244,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" branch "$CAMPAIGN_PATH"
+          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" "$CAMPAIGN_PATH"
 
       - name: Finalize machine Phase 0 receipt
         id: finalize
