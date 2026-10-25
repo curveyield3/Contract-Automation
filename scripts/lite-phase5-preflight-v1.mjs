@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
-import {materializeShardedWorkFormV1,shardWorkFormV1} from './lib/lite-work-shards-v1.mjs';
+import {materializeShardedWorkFormV1,shardWorkFormV1} from './lib/lite-solo-work-shards-v1.mjs';
 import {validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
