@@ -225,6 +225,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          count="$(node scripts/work-relay-v1.mjs --operation active-count)"
+          if [ "$count" -eq 0 ]; then
+            echo "No active Agent Delivery campaigns; stop rearm without an idle runner delay." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           sleep 900
           count="$(node scripts/work-relay-v1.mjs --operation active-count)"
           if [ "$count" -gt 0 ]; then
