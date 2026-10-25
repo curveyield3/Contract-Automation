@@ -667,11 +667,13 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     for(const anchor of duplicateAnchors)anchorTargets.delete(anchor);
     const candidateRows=new Map();
     for(const item of sources){
-      const key=item.tempKey??item.candidateKey;
+      // Use the same canonical candidate identity as Phase 5 and Phase 8.
+      // Retain temporary aliases only for deterministic source-bound joins.
+      const key=item.canonicalId??item.tempKey??item.candidateKey;
       if(!key||candidateRows.has(key))continue;
       candidateRows.set(key,{
         candidateKey:key,sourceAnchor:item.sourceAnchor??item.anchors?.[0]??'NONE_IDENTIFIED',
-        phase5Result:status.get(key)??status.get(anchorTargets.get(item.sourceAnchor??item.anchors?.[0]))??'NOT_EXECUTED',
+        phase5Result:status.get(key)??status.get(item.tempKey)??status.get(anchorTargets.get(item.sourceAnchor??item.anchors?.[0]))??'NOT_EXECUTED',
         requestDirectory:'controller/phase6-tests/CP-'+String(key).replace(/[^A-Za-z0-9._-]/g,'_')+'/',
         verdict:'<REQUIRED>',harnessDesign:'<REQUIRED>',dispatchRounds:'<REQUIRED>',
         requestPaths:'<REQUIRED>',ledgerRef:'<REQUIRED>',
