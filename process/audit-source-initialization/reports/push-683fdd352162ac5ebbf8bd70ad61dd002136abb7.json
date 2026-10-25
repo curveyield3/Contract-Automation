@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "curveyield-audit-source-initialization-report-v1",
+  "request": {
+    "requestId": "push-683fdd352162ac5ebbf8bd70ad61dd002136abb7",
+    "singleAgentSimulation": false,
+    "deliveryTransport": "AGENT_DELIVERY",
+    "sourceUrl": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/cyavKATv25b.zip",
+    "scanUrls": [],
+    "inputMode": "ZIP",
+    "agentChats": {
+      "reviewer-1": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a29-94c8-83e8-a920-8c4c36aee623",
+      "reviewer-2": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a2f-2a60-83e8-b008-f48d222075a7",
+      "reviewer-3": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a35-9a84-83e8-b418-15503d85645a",
+      "reviewer-4": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a3b-b5c4-83e8-99c7-60c7265d3e49"
+    },
+    "masterChatUrl": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a72-21ac-83e8-9476-885fc6c504e5",
+    "testExecutorChatUrl": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a4d-3918-83e8-84da-c3f47566c5e5",
+    "backupChatUrl": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a55-7ce8-83e8-91c7-554e10deda28"
+  },
+  "status": "PASS",
+  "source": {
+    "provider": "github",
+    "inputMode": "ZIP",
+    "canonicalUrl": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/cyavKATv25b.zip",
+    "filename": "cyavKATv25b.zip",
+    "sha256": "7c620ff30c79ceff532af3ad0977d184e66d76a4e00b600d61050799f5b9c8be",
+    "byteLength": 931653,
+    "repository": "curveyield3/Audit-Controller",
+    "ref": "main",
+    "path": "campaigns/cyavKATv25b r5/source/cyavKATv25b.zip",
+    "gitBlobSha": "c0aa2ced72fed6cf3bedbbb23d5a0922f6cff53f",
+    "admissionCommit": "9ebadae5b1c9c44018902b00fb561cddc0038f0b",
+    "unpackedTreeSha256": "47bca51211b095eb0d82af63a8267ff51128d07c7e6d4a6accdb6edf643d0082"
+  },
+  "campaign": {
+    "campaignId": "cyavkatv25b-r5",
+    "campaignGenerationId": "cyavkatv25b-r5-g1-20261025T050519Z",
+    "campaignName": "cyavKATv25b r5",
+    "workspacePath": "campaigns/cyavKATv25b r5",
+    "controllerRef": "main",
+    "initializationCommit": "1ddaf7e3147508043b847fb4fc8013337b232e0b"
+  },
+  "workflowRunId": "40164241139",
+  "completedAt": "2026-10-25T05:05:21Z"
+}
