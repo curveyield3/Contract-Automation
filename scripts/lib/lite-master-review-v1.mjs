@@ -89,7 +89,7 @@ export function validateMasterReviewConfiguration(directory,{required=false}={})
 }
 
 export function masterReviewRequired(directory,authorityRoot){
-  const rev=Number((String(authorityRoot??'').match(/Audit_Litemode_v(\d+)(?:\.\d+)?(?:\/|$)/)||[])[1]??0);
+  const rev=Number((String(authorityRoot??'').match(/Audit_Litemode_v(\d+)(?:\.\d+)?(?:_v\d+_\d+)?(?:\/|$)/)||[])[1]??0);
   const isV11OrLater=rev>=11;
   if(isV11OrLater)return Boolean(validateMasterReviewConfiguration(directory,{required:true}));
   return Boolean(directory?.masterReview&&validateMasterReviewConfiguration(directory));
