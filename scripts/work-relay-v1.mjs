@@ -255,8 +255,10 @@ function sweepOne(campaign){
           s.transportTimeouts=0;
           changed=true;
         }else{
-          s.lastTransportFailureAt=now();
-          changed=true;
+          if(!s.lastTransportFailureAt){
+            s.lastTransportFailureAt=now();
+            changed=true;
+          }
           process.exitCode=1;
         }
       }
