@@ -93,11 +93,11 @@ directory={
   "status":"ACTIVE","updatedAt":e["CREATED_AT"]
 }
 rp=Path(e["RECEIPTS_DIR"]); rp.mkdir(parents=True,exist_ok=True)
-if e.get("DELIVERY_TRANSPORT","GITHUB_BROWSER")=="CHATGPT_WORK":
+if e.get("DELIVERY_TRANSPORT","GITHUB_BROWSER")=="AGENT_DELIVERY":
   command_path=Path(workspace)/"work"/"browser"/"DELIVERY_COMMAND_v1.md"
   command_path.parent.mkdir(parents=True,exist_ok=True)
   command_state={"schemaVersion":"curveyield-work-delivery-command-v1",
-    "campaignId":e["CAMPAIGN_ID"],"deliveryTransport":"CHATGPT_WORK",
+    "campaignId":e["CAMPAIGN_ID"],"deliveryTransport":"AGENT_DELIVERY",
     "transportEpoch":0,"current":None,"queue":[],
     "lastPokedAt":None,"lastProgressAt":None,"lastProgressKey":None,
     "noProgressPokes":0,"transportTimeouts":0,"updatedAt":e["CREATED_AT"]}
