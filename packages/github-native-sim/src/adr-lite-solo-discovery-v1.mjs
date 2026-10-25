@@ -208,7 +208,7 @@ function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
    const rel=path.posix.join(dir,file);
    const body={schemaVersion:'curveyield-discovery-packet-page-v1',unitId,sourcePacketPath:packetPath,
     section,offset,items:chunk};
-   const bytes=Buffer.byteLength(JSON.stringify(body));
+   const bytes=Buffer.byteLength(JSON.stringify(body,null,2)+'\n');
    writeJson(repoFile(root,rel),body);
    pages.push({path:rel,section,offset,count:chunk.length,bytes,
     ...(bytes>SOLO_PACKET_PAGE_MAX_BYTES?{oversizedSingleItem:true}:{})});
