@@ -6,6 +6,8 @@ source "$ROOT/scripts/audit-source-initialization/resolve-source-v1.sh"
 source "$ROOT/scripts/audit-source-initialization/extract-v1.sh"
 
 SINGLE_AGENT_SIMULATION="${SINGLE_AGENT_SIMULATION:-false}"
+DELIVERY_TRANSPORT="${DELIVERY_TRANSPORT:-GITHUB_BROWSER}"
+[[ "$DELIVERY_TRANSPORT" == GITHUB_BROWSER || "$DELIVERY_TRANSPORT" == CHATGPT_WORK ]] || { echo "::error::Invalid DELIVERY_TRANSPORT" >&2; exit 1; }
 [[ "$SINGLE_AGENT_SIMULATION" == true || "$SINGLE_AGENT_SIMULATION" == false ]] || {
   echo "::error::SINGLE_AGENT_SIMULATION must be true or false" >&2
   exit 1
@@ -47,11 +49,12 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   encoded="$(gh api "$report_api?ref=main" --jq '.content')"
   printf '%s' "$encoded" | base64 -d > /tmp/prior-source-init.json
   jq -e \
-    --arg u "$SOURCE_URL" --argjson scans "$SCAN_URLS" \
+    --arg u "$SOURCE_URL" --argjson scans "$SCAN_URLS" --arg transport "$DELIVERY_TRANSPORT" \
     --arg c1 "$AGENT_CHAT_1_URL" --arg c2 "$AGENT_CHAT_2_URL" \
     --arg c3 "$AGENT_CHAT_3_URL" --arg c4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
     '.schemaVersion=="curveyield-audit-source-initialization-report-v1"
      and .status=="PASS"
+     and (.request.deliveryTransport // "GITHUB_BROWSER")==$transport
      and .request.sourceUrl==$u
      and (.request.scanUrls // [])==$scans
      and .request.agentChats["reviewer-1"]==$c1
@@ -227,13 +230,14 @@ else
     SCAN_MANIFEST_SHA="$(cat "$work/scan-manifest-sha256" 2>/dev/null || true)" \
     SCAN_TARGET_SET_SHA="$(cat "$work/scan-target-set-sha256" 2>/dev/null || true)" \
     CREATED_AT="$created_at" SKILL_RELEASE="$skill_release" SKILL_REVISION="$skill_revision" SKILL_HOME="$skill_home" \
-    MASTER_CHAT_URL="$MASTER_CHAT_URL" TEST_EXECUTOR_CHAT_URL="$TEST_EXECUTOR_CHAT_URL" \
+    MASTER_CHAT_URL="$MASTER_CHAT_URL" TEST_EXECUTOR_CHAT_URL="$TEST_EXECUTOR_CHAT_URL" DELIVERY_TRANSPORT="$DELIVERY_TRANSPORT" \
     SKILL_SHA="$skill_sha" SKILL_BLOB="$skill_blob" SKILL_REPO_PATH="$skill_repo_path" \
     MANIFEST_SHA="$manifest_sha" MANIFEST_BLOB="$manifest_blob" AUTHORITY_COMMIT="$authority_commit" \
     RECEIPTS_DIR="$receipts_dir" CAMPAIGN_DIRECTORY_PATH="$campaign_directory_path" \
       python3 "$ROOT/scripts/audit-source-initialization/write-phase0-receipt-v1.py"
 
     git add -- "$receipts_dir" "$campaign_directory_path"
+    if [ "$DELIVERY_TRANSPORT" = CHATGPT_WORK ]; then git add -- "$campaign_root/work/browser/DELIVERY_COMMAND_v1.md"; fi
     git commit -m "audit(receipt): initialize $campaign_id phase 0"
     init_commit="$(git rev-parse HEAD)"
 
@@ -258,12 +262,15 @@ else
     --arg init "$init_commit" --arg run "$GITHUB_RUN_ID" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
     --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg masterChat "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
-    --argjson singleAgentSimulation "$SINGLE_AGENT_SIMULATION" \
+    --argjson singleAgentSimulation "$SINGLE_AGENT_SIMULATION" --arg deliveryTransport "$DELIVERY_TRANSPORT" \
     '{
       schemaVersion:"curveyield-audit-source-initialization-report-v1",
       request:{
         requestId:$requestId,
         singleAgentSimulation:$singleAgentSimulation,
+       deliveryTransport:$deliveryTransport,
+       transportEpoch:0,
+        deliveryTransport:$deliveryTransport,
         sourceUrl:$sourceUrl,
         scanUrls:$scanUrls,
         inputMode:$mode,
@@ -316,9 +323,11 @@ if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
     --arg campaignId "$campaign_id" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
     --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
-    --argjson singleAgentSimulation "$SINGLE_AGENT_SIMULATION" \
+    --argjson singleAgentSimulation "$SINGLE_AGENT_SIMULATION" --arg deliveryTransport "$DELIVERY_TRANSPORT" \
     '.singleAgentSimulation=$singleAgentSimulation
      | .schemaVersion="curveyield-browser-agent-wake-registration-v1"
+     | .deliveryTransport=$deliveryTransport
+     | .transportEpoch=(.transportEpoch // 0)
      | .campaignId=$campaignId
      | .agentChats={
          "reviewer-1":$chat1,
