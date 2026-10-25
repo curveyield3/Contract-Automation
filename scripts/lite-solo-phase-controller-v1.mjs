@@ -768,7 +768,7 @@ if(directory.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2') thr
 
 if(directory.campaignId!==expectedCampaignId) throw new Error('campaign-id does not match Audit Campaign Directory');
 if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does not match Audit Campaign Directory workspacePath');
-if(directory.mode!=='LITE_SOLO'||directory.agentModel!=='ONE_PERSISTENT_AGENT'||directory.agent?.actorId!=='lite-solo-agent'||!directory.agent?.chatUrl)
+if(directory.mode!=='LITE_SOLO'||directory.agentModel!=='ONE_PERSISTENT_AGENT'||directory.agent?.actorId!=='lite-solo-agent')
  throw new Error('not an admitted lite-solo single-actor campaign');
 if(directory.pendingMasterReview||directory.masterReview||directory.lastAcceptedMasterReview||directory.testExecutor)throw new Error('legacy master/executor state in lite-solo campaign');
 if(directory.skillAuthority?.current?.release && directory.skillAuthority.current.release!=='lite-solo-v1')throw new Error('lite-solo bound release mismatch');
