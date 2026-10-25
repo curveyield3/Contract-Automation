@@ -25,8 +25,14 @@ export function authorityRootFromReceipt(receipt){
  const logical=path.posix.dirname(home);
  if(logical==='Audit Skill - Current Authority/Audit_Litemode_v13'){
    const originalSha='31555f32434fc6d568e9c63eb1f04a4f071b06fb81e559ea849ec9c8c233b50f';
+   const receiptBoundV13_2Sha='8c94a27e6a2bf534576aff2e5e792402c837024511976a92e0179e8114a6639e';
    if(authority.liteSkillSha256===originalSha)
      return 'audit-process/v7/frozen-authorities/Audit_Litemode_v13';
+   // The DAI r2 Phase-0 receipt binds immutable v13.2 bytes from historical
+   // commit f48bb763..., while the live logical root now points at CurveYield3
+   // links. Select the exact archived historical tree; never rebind its digest.
+   if(authority.liteSkillSha256===receiptBoundV13_2Sha)
+     return 'audit-process/v7/frozen-authorities/Audit_Litemode_v13_v13_2';
    if(authority.packageRevision==='v13')
      throw new Error('frozen v13 campaign authority digest does not match the admitted immutable original; refuse silent topology rebind');
  }
