@@ -31,7 +31,7 @@
     "idleMessage": "GET BACK TO WORK",
     "gate": {
       "mode": "LITE",
-      "repository": "CurveYield2/Audit-Controller",
+      "repository": "curveyield3/Audit-Controller",
       "ref": "main",
       "statePath": "Audit Campaign Directory/campaigns/REPLACE_WITH_CAMPAIGN_SLUG.json",
       "expectedPhaseId": "",
