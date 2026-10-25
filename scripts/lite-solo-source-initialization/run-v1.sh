@@ -36,8 +36,8 @@ report_sha="$(gh api "$report_api?ref=main" --jq '.sha // empty' 2>/dev/null || 
 if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   encoded="$(gh api "$report_api?ref=main" --jq '.content')"
   printf '%s' "$encoded" | base64 -d > /tmp/prior-source-init.json
-  jq -e --arg sha "$(cat /tmp/prior-source-init.json | jq -r '.source.sha256 // empty')" --arg chat "$SOLO_CHAT_URL" \
-    '.schemaVersion=="curveyield-lite-solo-source-report-v1" and .mode=="LITE_SOLO" and .actor.chatUrl==$chat and .source.sha256==$sha' \
+  jq -e --arg url "$SOURCE_URL" --argjson scans "$SCAN_URLS" --arg chat "$SOLO_CHAT_URL" \
+    '.schemaVersion=="curveyield-lite-solo-source-report-v1" and .mode=="LITE_SOLO" and .status=="PASS" and .actor.chatUrl==$chat and .source.inputUrl==$url and .source.scanUrls==$scans' \
     /tmp/prior-source-init.json >/dev/null
   campaign_id="$(jq -r '.campaign.campaignId' /tmp/prior-source-init.json)"
   generation_id="$(jq -r '.campaign.campaignGenerationId' /tmp/prior-source-init.json)"
@@ -97,6 +97,7 @@ else
     fi
   done < <(find 'Audit Campaign Directory/campaigns' -type f -name '*.json' -print 2>/dev/null | LC_ALL=C sort)
   if [ "$recovered" = true ]; then
+    jq -e --arg chat "$SOLO_CHAT_URL" '.mode=="LITE_SOLO" and .agent.actorId=="lite-solo-agent" and .agent.chatUrl==$chat' "Audit Campaign Directory/campaigns/${campaign_id%-r*}.json" >/dev/null || { echo "::error::SOLO_REQUEST_IDENTITY_MISMATCH"; exit 1; }
     literal_recovery="$(printf '%s' "$campaign_root" | sed -e 's/[][*?!#\\]/\\&/g')"
     git sparse-checkout add "/$literal_recovery/"
     prior_receipt="$campaign_root/receipts/PHASE_00_RECEIPT_v1.json"
@@ -218,8 +219,8 @@ else
   fi
 
   export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
-  jq -n --arg requestId "$REQUEST_ID" --arg chat "$SOLO_CHAT_URL" --arg campaignId "$campaign_id" --arg generation "$generation_id" --arg campaignName "$campaign_name" --arg workspace "$campaign_root" --arg sha "$source_sha" \
-    '{schemaVersion:"curveyield-lite-solo-source-report-v1",mode:"LITE_SOLO",status:"PASS",requestId:$requestId,actor:{actorId:"lite-solo-agent",chatUrl:$chat},source:{sha256:$sha},campaign:{campaignId:$campaignId,campaignGenerationId:$generation,campaignName:$campaignName,workspacePath:$workspace},completedAt:(now|todate)}' > /tmp/source-init-report.json
+  jq -n --arg requestId "$REQUEST_ID" --arg chat "$SOLO_CHAT_URL" --arg inputUrl "$SOURCE_URL" --argjson scanUrls "$SCAN_URLS" --arg campaignId "$campaign_id" --arg generation "$generation_id" --arg campaignName "$campaign_name" --arg workspace "$campaign_root" --arg sha "$source_sha" \
+    '{schemaVersion:"curveyield-lite-solo-source-report-v1",mode:"LITE_SOLO",status:"PASS",requestId:$requestId,actor:{actorId:"lite-solo-agent",chatUrl:$chat},source:{sha256:$sha,inputUrl:$inputUrl,scanUrls:$scanUrls},campaign:{campaignId:$campaignId,campaignGenerationId:$generation,campaignName:$campaignName,workspacePath:$workspace},completedAt:(now|todate)}' > /tmp/source-init-report.json
 
   body="$(base64 -w0 /tmp/source-init-report.json)"
   api="repos/$GITHUB_REPOSITORY/contents/$report_path"
