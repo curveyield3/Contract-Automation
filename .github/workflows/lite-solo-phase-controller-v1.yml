@@ -48,6 +48,13 @@ jobs:
             jq -e '.phaseSequence|type=="number" and (.==1 or .==2 or .==3 or .==4 or .==5 or .==6 or .==8 or .==9 or .==10)' "$request" >/dev/null
           else
             jq -e '.unitId|type=="string" and test("^[FRX]-[0-9]{3}$")' "$request" >/dev/null
+            jq -e 'if .readyUnitIds==null then true else
+              (. as $r | ($r.readyUnitIds|type)=="array" and
+                ($r.readyUnitIds|length)>=1 and ($r.readyUnitIds|length)<=4 and
+                ($r.readyUnitIds[0]==$r.unitId) and
+                (($r.readyUnitIds|unique|length)==($r.readyUnitIds|length)) and
+                ($r.readyUnitIds|all(.[]; type=="string" and test("^[FRX]-[0-9]{3}$"))))
+              end' "$request" >/dev/null
           fi
           campaign_id="$(jq -r .campaignId "$request")"
           slug="$(printf '%s' "$campaign_id" | sed -E 's/-r[0-9]+$//')"
@@ -132,6 +139,9 @@ jobs:
           args=(--controller-root .audit-controller --campaign-id "$AUDIT_CAMPAIGN" --campaign-path "$AUDIT_CAMPAIGN_PATH" --campaign-directory-path "$AUDIT_DIRECTORY" --review-kind "$REVIEW_KIND" --audit-controller-ref main)
           if [ "$REVIEW_KIND" = discovery ]; then
             args+=(--unit-id "$(jq -r .unitId "$REQUEST_FILE")")
+            if jq -e '.readyUnitIds != null' "$REQUEST_FILE" >/dev/null; then
+              args+=(--ready-unit-ids-b64 "$(jq -c .readyUnitIds "$REQUEST_FILE" | base64 -w0)")
+            fi
           else
             args+=(--phase-sequence "$(jq -r .phaseSequence "$REQUEST_FILE")")
           fi
