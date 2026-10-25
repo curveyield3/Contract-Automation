@@ -123,7 +123,7 @@ jobs:
           safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
           encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json?ref=main" --jq '.content')"
           transport="$(printf '%s' "$encoded" | base64 -d | jq -r '.deliveryTransport // "GITHUB_BROWSER"')"
-          if [ "$transport" = CHATGPT_WORK ]; then
+          if [ "$transport" = AGENT_DELIVERY ]; then
             gh workflow run lite-work-relay-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
               -f operation=successor -f campaign_id="$CAMPAIGN_ID" \
               -f campaign_name="${{ steps.finalize.outputs.campaign_name }}" \
