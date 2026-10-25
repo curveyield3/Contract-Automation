@@ -800,9 +800,11 @@ if(reviewKind==='discovery'){
   if(!directory.discovery?.statePath)throw new Error('campaign has no discovery state');
   const sourceReceipt=readJson(requiredFile(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'),'Phase 0 authority receipt'));
   if(!activeDetectionPolicyV1(sourceReceipt))throw new Error('discovery is not authorized for legacy campaign');
+  const readyUnitIds=a['ready-unit-ids-b64']
+    ?JSON.parse(Buffer.from(a['ready-unit-ids-b64'],'base64').toString('utf8')):[a['unit-id']];
   const result=advanceDiscoveryV1({root,campaignPath,directory,
     authorityRoot:authorityRootFromReceipt(sourceReceipt),automationRoot:process.cwd(),
-    unitId:a['unit-id'],now,auditControllerRef:a['audit-controller-ref']??'main'});
+    unitId:a['unit-id'],readyUnitIds,now,auditControllerRef:a['audit-controller-ref']??'main'});
   if(result.status==='DISCOVERY_STALE_REQUEST'){
     process.stdout.write(JSON.stringify({authorityLinkRoot,status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName})+'\n');
     process.exit(0);
