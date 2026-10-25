@@ -251,7 +251,7 @@ export function shardFailureIndexV1({root,indexRel,deficiencies=[]}={}){
    const message=String(description);
    const explicit=message.match(/(?:actions\.)?(step-[0-9]+)\.outputs\.([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/);
    const loose=message.match(/targetDesigns\[([0-9]+)\]/);
-   const candidate=message.match(/(?:Phase 5 (?:candidate|target)|candidateKey=)([A-Za-z0-9._-]+)/);
+   const candidate=message.match(/(?:Phase 5 (?:candidate|target)\s+|candidateKey=)([A-Za-z0-9._-]+)/);
    let chosen=null;
    let marker=null;
    if(explicit){
