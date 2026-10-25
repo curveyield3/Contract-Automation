@@ -532,7 +532,7 @@ jobs:
             mode=GITHUB_BROWSER
           fi
           case "$mode" in
-            CHATGPT_WORK) wake=lite-work-relay-v1.yml; successor=lite-work-relay-v1.yml ;;
+            AGENT_DELIVERY) wake=lite-work-relay-v1.yml; successor=lite-work-relay-v1.yml ;;
             GITHUB_BROWSER) wake=browser-agent-wake.yml; successor=lite-audit-browser-orchestrator-v1.yml ;;
             *) echo "::error::Unknown delivery transport $mode"; exit 1 ;;
           esac
@@ -715,7 +715,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          if [ "${{ steps.delivery_transport.outputs.mode }}" = CHATGPT_WORK ]; then
+          if [ "${{ steps.delivery_transport.outputs.mode }}" = AGENT_DELIVERY ]; then
             timeout -k 10s 90s gh workflow run lite-work-relay-v1.yml --repo "$GITHUB_REPOSITORY" --ref main -f operation=successor -f campaign_id="${{ steps.request.outputs.campaign_id }}" -f campaign_name="${{ steps.controller.outputs.campaign_name }}" -f campaign_path="${{ steps.routing.outputs.campaign_path }}" -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
           else
             timeout -k 10s 90s gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f campaign_name="${{ steps.controller.outputs.campaign_name }}"             -f campaign_path="${{ steps.routing.outputs.campaign_path }}"             -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
