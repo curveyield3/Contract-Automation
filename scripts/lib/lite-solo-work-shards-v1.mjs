@@ -3,6 +3,9 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 
 const MAX_SHARD=64*1024, MAX_INDEX=32*1024, TARGET_SHARD=58*1024;
+// The immutable index bounds fixed rows; its agent-owned append slots need capacity
+// for large discovery reconciliation without changing the campaign-bound index.
+const MAX_V13_APPEND_BYTES=1024*1024, MAX_V13_APPEND_RECORDS=1024;
 const bytes=x=>Buffer.byteLength(JSON.stringify(x,null,2)+'\n');
 const digest=x=>createHash('sha256').update(x).digest('hex');
 const pretty=x=>JSON.stringify(x,null,2)+'\n';
@@ -357,11 +360,13 @@ export function secureRestoreWorkFormV13({root,indexRel}){
    if(!/^shard-[0-9]{4}_v1\.json$/.test(desc.file))throw new Error('invalid v13 shard filename');
    const rel=path.posix.join(workDir,desc.file);
    const raw=fs.readFileSync(relfile(root,rel),'utf8');
-   if(Buffer.byteLength(raw)>MAX_SHARD)throw new Error('v13 shard exceeds 64 KiB: '+desc.file);
+   const maxBytes=desc.append?MAX_V13_APPEND_BYTES:MAX_SHARD;
+   const maxRecords=desc.append?MAX_V13_APPEND_RECORDS:25;
+   if(Buffer.byteLength(raw)>maxBytes)throw new Error('v13 shard exceeds authorized bound: '+desc.file);
    const item=JSON.parse(raw);
    if(item.schemaVersion!=='curveyield-work-shard-v13'||item.kind!==desc.kind||
      !secureSameV13(item.path,desc.path)||item.startIndex!==desc.startIndex||
-     !Array.isArray(item.entries)||item.entries.length>25)
+     !Array.isArray(item.entries)||item.entries.length>maxRecords)
      throw new Error('v13 shard structure mismatch: '+desc.file);
    const prefix=JSON.stringify(desc.path)+':';
    let cursor=full;
