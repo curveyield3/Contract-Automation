@@ -10,10 +10,6 @@ on:
         description: One or more verified Etherscan/KatanaScan contract page URLs, newline separated
         type: string
         required: false
-      agent_chat_url:
-        description: One existing ChatGPT conversation URL
-        type: string
-        required: true
       request_id:
         description: Stable request ID for retry (default GitHub run ID)
         type: string
@@ -52,7 +48,6 @@ jobs:
           AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
           SOURCE_URL: ${{ inputs.source_url }}
-          SOLO_CHAT_URL: ${{ inputs.agent_chat_url }}
           REQUEST_ID: ${{ inputs.request_id || github.run_id }}
           AUTHORIZE_PHASE0_EXECUTION: ${{ inputs.authorize_phase0_execution }}
           RAW_SCAN_URLS: ${{ inputs.scan_urls }}

@@ -92,16 +92,5 @@ directory={
   "status":"ACTIVE","updatedAt":e["CREATED_AT"]
 }
 rp=Path(e["RECEIPTS_DIR"]); rp.mkdir(parents=True,exist_ok=True)
-if e.get("DELIVERY_TRANSPORT","AGENT_DELIVERY")=="AGENT_DELIVERY":
-  command_path=Path(workspace)/"work"/"browser"/"DELIVERY_COMMAND_v1.md"
-  command_path.parent.mkdir(parents=True,exist_ok=True)
-  command_state={"schemaVersion":"curveyield-work-delivery-command-v1",
-    "campaignId":e["CAMPAIGN_ID"],"deliveryTransport":"AGENT_DELIVERY",
-    "transportEpoch":0,"current":None,"queue":[],
-    "lastPokedAt":None,"lastProgressAt":None,"lastProgressKey":None,
-    "noProgressPokes":0,"transportTimeouts":0,"updatedAt":e["CREATED_AT"]}
-  content="IDLE\n\n## MESSAGE TO DELIVER\n\nNo delivery command pending.\n\n"
-  content+="## CONTROL\n~~~json\n"+json.dumps(command_state,indent=2)+"\n~~~\n"
-  command_path.write_text(content)
 (rp/"PHASE_00_RECEIPT_v1.json").write_text(json.dumps(receipt,indent=2)+"\n")
 dp=Path(directory_path); dp.parent.mkdir(parents=True,exist_ok=True); dp.write_text(json.dumps(directory,indent=2)+"\n")

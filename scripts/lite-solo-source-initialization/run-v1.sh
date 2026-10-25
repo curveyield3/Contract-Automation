@@ -5,7 +5,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/scripts/audit-source-initialization/resolve-source-v1.sh"
 source "$ROOT/scripts/audit-source-initialization/extract-v1.sh"
 
-DELIVERY_TRANSPORT=AGENT_DELIVERY
 AUTHORIZE_PHASE0_EXECUTION="${AUTHORIZE_PHASE0_EXECUTION:-false}"
 [[ "$AUTHORIZE_PHASE0_EXECUTION" == true || "$AUTHORIZE_PHASE0_EXECUTION" == false ]] || exit 1
 SOURCE_URL="${SOURCE_URL:-}"
@@ -25,7 +24,6 @@ fi
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${AUDIT_CONTROLLER_TOKEN:?AUDIT_CONTROLLER_TOKEN is required}"
 : "${CONTRACT_AUTOMATION_TOKEN:?CONTRACT_AUTOMATION_TOKEN is required}"
-: "${SOLO_CHAT_URL:?SOLO_CHAT_URL is required}"
 safe_request="$(printf '%s' "$REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
 report_path="process/lite-solo-source-initialization/reports/$safe_request.json"
 
@@ -36,8 +34,8 @@ report_sha="$(gh api "$report_api?ref=main" --jq '.sha // empty' 2>/dev/null || 
 if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   encoded="$(gh api "$report_api?ref=main" --jq '.content')"
   printf '%s' "$encoded" | base64 -d > /tmp/prior-source-init.json
-  jq -e --arg url "$SOURCE_URL" --argjson scans "$SCAN_URLS" --arg chat "$SOLO_CHAT_URL" \
-    '.schemaVersion=="curveyield-lite-solo-source-report-v1" and .mode=="LITE_SOLO" and .status=="PASS" and .actor.chatUrl==$chat and .source.inputUrl==$url and .source.scanUrls==$scans' \
+  jq -e --arg url "$SOURCE_URL" --argjson scans "$SCAN_URLS" \
+    '.schemaVersion=="curveyield-lite-solo-source-report-v1" and .mode=="LITE_SOLO" and .status=="PASS" and .source.inputUrl==$url and .source.scanUrls==$scans' \
     /tmp/prior-source-init.json >/dev/null
   campaign_id="$(jq -r '.campaign.campaignId' /tmp/prior-source-init.json)"
   generation_id="$(jq -r '.campaign.campaignGenerationId' /tmp/prior-source-init.json)"
@@ -60,8 +58,9 @@ else
   source_size="$(cat "$work/size")"
   provider="$(cat "$work/provider")"
   canonical_url="$(cat "$work/canonical-url")"
-  display_base="$(cat "$work/display-base")"
-  slug="$(cat "$work/slug")"
+  display_base="lite-solo $(cat "$work/display-base")"
+  slug="lite-solo-$(cat "$work/slug")"
+  [[ "$slug" =~ ^lite-solo-[A-Za-z0-9._-]+$ ]] || { echo "::error::INVALID_LITE_SOLO_SLUG"; exit 1; }
 
   repo='/tmp/audit-controller-source-init'
   rm -rf "$repo"
@@ -97,7 +96,7 @@ else
     fi
   done < <(find 'Audit Campaign Directory/campaigns' -type f -name '*.json' -print 2>/dev/null | LC_ALL=C sort)
   if [ "$recovered" = true ]; then
-    jq -e --arg chat "$SOLO_CHAT_URL" '.mode=="LITE_SOLO" and .agent.actorId=="lite-solo-agent" and .agent.chatUrl==$chat' "Audit Campaign Directory/campaigns/${campaign_id%-r*}.json" >/dev/null || { echo "::error::SOLO_REQUEST_IDENTITY_MISMATCH"; exit 1; }
+    jq -e '.mode=="LITE_SOLO" and .agent.actorId=="lite-solo-agent" and (.agent|keys==["actorId"])' "Audit Campaign Directory/campaigns/${campaign_id%-r*}.json" >/dev/null || { echo "::error::SOLO_REQUEST_IDENTITY_MISMATCH"; exit 1; }
     literal_recovery="$(printf '%s' "$campaign_root" | sed -e 's/[][*?!#\\]/\\&/g')"
     git sparse-checkout add "/$literal_recovery/"
     prior_receipt="$campaign_root/receipts/PHASE_00_RECEIPT_v1.json"
@@ -196,14 +195,12 @@ else
     SCAN_MANIFEST_SHA="$(cat "$work/scan-manifest-sha256" 2>/dev/null || true)" \
     SCAN_TARGET_SET_SHA="$(cat "$work/scan-target-set-sha256" 2>/dev/null || true)" \
     CREATED_AT="$created_at" SKILL_RELEASE="$skill_release" SKILL_REVISION="$skill_revision" SKILL_HOME="$skill_home" \
-    SOLO_CHAT_URL="$SOLO_CHAT_URL" DELIVERY_TRANSPORT="$DELIVERY_TRANSPORT" \
-    SKILL_SHA="$skill_sha" SKILL_BLOB="$skill_blob" SKILL_REPO_PATH="$skill_repo_path" \
+        SKILL_SHA="$skill_sha" SKILL_BLOB="$skill_blob" SKILL_REPO_PATH="$skill_repo_path" \
     MANIFEST_SHA="$manifest_sha" MANIFEST_BLOB="$manifest_blob" AUTHORITY_COMMIT="$authority_commit" \
     RECEIPTS_DIR="$receipts_dir" CAMPAIGN_DIRECTORY_PATH="$campaign_directory_path" \
       python3 "$ROOT/scripts/lite-solo-source-initialization/write-phase0-receipt-v1.py"
 
     git add -- "$receipts_dir" "$campaign_directory_path"
-    if [ "$DELIVERY_TRANSPORT" = AGENT_DELIVERY ]; then git add -- "$campaign_root/work/browser/DELIVERY_COMMAND_v1.md"; fi
     git commit -m "audit(receipt): initialize $campaign_id phase 0"
     init_commit="$(git rev-parse HEAD)"
 
@@ -219,8 +216,8 @@ else
   fi
 
   export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
-  jq -n --arg requestId "$REQUEST_ID" --arg chat "$SOLO_CHAT_URL" --arg inputUrl "$SOURCE_URL" --argjson scanUrls "$SCAN_URLS" --arg campaignId "$campaign_id" --arg generation "$generation_id" --arg campaignName "$campaign_name" --arg workspace "$campaign_root" --arg sha "$source_sha" \
-    '{schemaVersion:"curveyield-lite-solo-source-report-v1",mode:"LITE_SOLO",status:"PASS",requestId:$requestId,actor:{actorId:"lite-solo-agent",chatUrl:$chat},source:{sha256:$sha,inputUrl:$inputUrl,scanUrls:$scanUrls},campaign:{campaignId:$campaignId,campaignGenerationId:$generation,campaignName:$campaignName,workspacePath:$workspace},completedAt:(now|todate)}' > /tmp/source-init-report.json
+  jq -n --arg requestId "$REQUEST_ID" --arg inputUrl "$SOURCE_URL" --argjson scanUrls "$SCAN_URLS" --arg campaignId "$campaign_id" --arg generation "$generation_id" --arg campaignName "$campaign_name" --arg workspace "$campaign_root" --arg sha "$source_sha" \
+    '{schemaVersion:"curveyield-lite-solo-source-report-v1",mode:"LITE_SOLO",status:"PASS",requestId:$requestId,actor:{actorId:"lite-solo-agent"},source:{sha256:$sha,inputUrl:$inputUrl,scanUrls:$scanUrls},campaign:{campaignId:$campaignId,campaignGenerationId:$generation,campaignName:$campaignName,workspacePath:$workspace},completedAt:(now|todate)}' > /tmp/source-init-report.json
 
   body="$(base64 -w0 /tmp/source-init-report.json)"
   api="repos/$GITHUB_REPOSITORY/contents/$report_path"
@@ -236,32 +233,20 @@ fi
 
 export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
 
-safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
-registration_path="process/browser-agent-wake/registrations/$safe_campaign.json"
-registration_api="repos/$GITHUB_REPOSITORY/contents/$registration_path"
-existing_sha="$(gh api "$registration_api?ref=main" --jq '.sha' 2>/dev/null || true)"
-if [[ ! "$existing_sha" =~ ^[a-f0-9]{40}$ ]]; then
-  jq -n --arg id "$campaign_id" --arg chat "$SOLO_CHAT_URL" \
-    '{schemaVersion:"curveyield-browser-agent-wake-registration-v1",campaignId:$id,mode:"resume_existing",deliveryTransport:"AGENT_DELIVERY",transportEpoch:0,agentChats:{"lite-solo-agent":$chat},activeChat:{name:"lite-solo-agent",url:$chat},watchdog:{enabled:true,pokeIntervalMinutes:20},repair:{enabled:true},updatedAt:(now|todate)}' >/tmp/lite-solo-registration.json
-  gh api --method PUT "$registration_api" -f message="audit(lite-solo): bind one chat" -f content="$(base64 -w0 /tmp/lite-solo-registration.json)" -f branch=main >/dev/null
-else
-  encoded="$(gh api "$registration_api?ref=main" --jq .content)"
-  printf '%s' "$encoded" | base64 -d | jq -e --arg chat "$SOLO_CHAT_URL" '.agentChats["lite-solo-agent"]==$chat' >/dev/null
-fi
 if [ "$AUTHORIZE_PHASE0_EXECUTION" != true ]; then
- echo "::notice::lite-solo admitted source but Phase-0 execution requires separate approval."
- exit 0
-fi
+ echo "::notice::lite-solo source admitted, Phase-0 execution not authorized."
+else
 gh workflow run lite-solo-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
   -f campaign_id="$campaign_id" \
   -f campaign_path="$campaign_root" \
   -f audit_controller_ref=main \
   -f authorization_confirmed=true
+fi
 
 {
  echo "## lite-solo Source Initialization"
  echo "- Campaign: $campaign_id"
- echo "- Sole agent chat: $SOLO_CHAT_URL"
+ echo "- Sole agent identity: lite-solo-agent (no chat registration or delivery)"
  echo "- Authority: $skill_home"
- echo "- Phase-0 machine work dispatched only with explicit authorization"
+ echo "- Phase-0 machine work explicitly authorized: $AUTHORIZE_PHASE0_EXECUTION"
 } >> "$GITHUB_STEP_SUMMARY"
