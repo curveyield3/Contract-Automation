@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Work relay control plane. Only the CHATGPT_WORK delivery lane uses this file.
+// Work relay control plane. Only the AGENT_DELIVERY delivery lane uses this file.
 // It does not interact with ChatGPT, execute audit phases, or certify a phase PASS.
 import {execFileSync} from 'node:child_process';
 import {randomBytes,createHash} from 'node:crypto';
 
 const CONTROLLER='curveyield3/Audit-Controller';
 const AUTOMATION='curveyield3/Contract-Automation';
-const WORK='CHATGPT_WORK';
+const WORK='AGENT_DELIVERY';
 const BROWSER='GITHUB_BROWSER';
 const ctlToken=process.env.AUDIT_CONTROLLER_GITHUB_TOKEN || process.env.AUDIT_CONTROLLER_TOKEN;
 const autoToken=process.env.CONTRACT_AUTOMATION_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
