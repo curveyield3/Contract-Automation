@@ -152,6 +152,25 @@ function enqueue(campaign,fields){
     }
     s.updatedAt=now();return view(s);
   },true);
+  // Keep the existing campaign registration current for a later optional switch
+  // back to the untouched browser implementation.
+  mutate(AUTOMATION,registrationPath(campaign),autoToken,raw=>{
+    const data=JSON.parse(raw);
+    if(data.campaignId!==campaign || data.deliveryTransport!==WORK || Number(data.transportEpoch||0)!==epoch)
+      throw Error('Transport changed during Work handoff');
+    const eligible=Object.entries(data.agentChats||{}).filter(([,url])=>url===fields.chatUrl).map(([role])=>role);
+    const assigned=d.currentAssignment?.reviewer;
+    const reviewer=eligible.includes(assigned)?assigned:eligible[0];
+    if(!reviewer)throw Error('Cannot associate target chat with registered role');
+    data.activeChat={name:reviewer,url:fields.chatUrl};
+    data.activeAssignment={...(data.activeAssignment||{}),reviewer,
+      phaseId:fields.phaseId,workerRole:fields.workerRole,
+      milestoneId:fields.wakeId};
+    data.chatUrl=fields.chatUrl;
+    data.wakeMessage=fields.message;
+    data.updatedAt=now();
+    return JSON.stringify(data,null,2)+'\n';
+  });
   console.log(JSON.stringify({status:result,campaignId:campaign,commandId:id,path}));
 }
 function listActive(){
@@ -204,7 +223,7 @@ function sweepOne(campaign){
       const assignment=d.currentAssignment||{},who=assignment.reviewer||d.currentReviewer;
       const chat=r.agentChats?.[who];
       const relevant=assignment.status==='ACTIVE'||assignment.status==='REWORK_REQUIRED'||d.status==='ACTIVE';
-      const since=Math.max(Date.parse(s.lastProgressAt||0)||0,Date.parse(s.lastPokedAt||0)||0);
+      const since=Math.max(Date.parse(s.lastProgressAt||0)||0,Date.parse(s.lastPokedAt||0)||0,Date.parse(s.lastReceipt?.receivedAt||0)||0);
       const elapsed=since?(Date.now()-since)/60000:Infinity;
       if(relevant&&chat&&elapsed>=20){
         const id=createHash('sha256').update([campaign,epoch,who,'POKE',Math.floor(Date.now()/1200000)].join('\0')).digest('hex').slice(0,26);
