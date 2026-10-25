@@ -423,7 +423,7 @@ export function validatePhase5CandidateDispositionV1({
 }
 
 // This single evidence verifier is shared by direct targets and target aliases.
-function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,result,expectedSourceSha256=null}={}){
+function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,result,expectedSourceSha256=null,requireTargetBindingManifest=false}={}){
   const failures=[];
   const key=String(target?.candidateKey??'');
     if(!result||result.status!=='PASS'||result.exitCode!==0){
@@ -481,6 +481,33 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
           failures.push('Phase 5 mandatory '+key+' persisted evidence does not match the exact request digest and source commit');
       }catch(e){failures.push('Phase 5 mandatory '+key+' bound request cannot be re-read: '+String(e.message||e));}
     }
+    const manifestRel=typeof rel==='string'?targetBindingManifestPathV1(rel):null;
+    const manifestAbs=manifestRel?path.join(controllerRoot,...manifestRel.split('/')):null;
+    if(requireTargetBindingManifest|| (manifestAbs&&fs.existsSync(manifestAbs))){
+      if(!manifestAbs||!fs.existsSync(manifestAbs)){
+        failures.push('Phase 5 mandatory '+key+' has no target/source-bound resume manifest');
+      }else{
+        try{
+          const manifest=JSON.parse(fs.readFileSync(manifestAbs,'utf8'));
+          const rawBytes=fs.readFileSync(rawFile);
+          const manifestBinding=validateTargetExecutionRequestBindingV1({
+            controllerRoot,campaignPath,target,expectedSourceSha256
+          });
+          const request=JSON.parse(fs.readFileSync(path.join(controllerRoot,...campaignPath.split('/'),...manifestBinding.requestRef.split('/')),'utf8'));
+          if(manifest.schemaVersion!=='curveyield-phase5-target-binding-v1'||
+             manifest.campaignId!==request.campaignId||
+             manifest.sourceSha256!==request.source?.archiveSha256||
+             manifest.candidateKey!==key||
+             manifest.targetDesignSha256!==targetDesignSha256V1(target)||
+             manifest.requestRef!==manifestBinding.requestRef||
+             manifest.requestId!==request.requestId||
+             manifest.requestDigest!==request.requestDigest||
+             manifest.rawResultRef!==rel||
+             manifest.rawResultSha256!==createHash('sha256').update(rawBytes).digest('hex'))
+            failures.push('Phase 5 mandatory '+key+' target-binding manifest does not match the current target, exact request, source or raw-result bytes');
+        }catch(e){failures.push('Phase 5 mandatory '+key+' target-binding manifest is invalid: '+String(e.message||e));}
+      }
+    }
     const reproduction=raw.reproduction;
     const terminalOutcome=reproduction?.status==='REPRODUCED'&&reproduction?.observedPredicate?.matched===true||
       reproduction?.status==='NOT_REPRODUCED'&&reproduction?.observedPredicate?.matched===false;
@@ -531,7 +558,7 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
   return failures;
 }
 
-export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath,targetDesigns=[],executionResults={},materialCandidateKeys=[],requiredTargetKeys=null,candidateSourceAnchors={},expectedSourceSha256=null}={}){
+export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath,targetDesigns=[],executionResults={},materialCandidateKeys=[],requiredTargetKeys=null,candidateSourceAnchors={},expectedSourceSha256=null,requireTargetBindingManifest=false}={}){
   const failures=validatePhase5TargetCoverageV1({targetDesigns,materialCandidateKeys,requiredTargetKeys,candidateSourceAnchors});
   for(const target of arr(targetDesigns)){
     if(!target||typeof target!=='object'||Array.isArray(target))continue;
@@ -544,14 +571,14 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
       const coveredResult=executionResults?.[coveredKey];
       if(coveringDesign?.executionMethod==='V7_REQUEST'&&coveredKey!==key){
         const evidenceFailures=validateExecutedPhase5TargetV1({
-          controllerRoot,campaignPath,target:coveringDesign,result:coveredResult,expectedSourceSha256
+          controllerRoot,campaignPath,target:coveringDesign,result:coveredResult,expectedSourceSha256,requireTargetBindingManifest
         });
         for(const error of evidenceFailures)failures.push('Phase 5 '+key+' NOT_APPLICABLE covering evidence: '+error);
       }else failures.push('Phase 5 '+key+' NOT_APPLICABLE has no verified covering execution');
       continue;
     }
     failures.push(...validateExecutedPhase5TargetV1({
-      controllerRoot,campaignPath,target,result:executionResults?.[key],expectedSourceSha256
+      controllerRoot,campaignPath,target,result:executionResults?.[key],expectedSourceSha256,requireTargetBindingManifest
     }));
   }
   return failures;
@@ -564,39 +591,57 @@ export function validateRecordedPhase5MachineEvidenceV1({controllerRoot,campaign
   const failures=[];
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
   const readJsonRel=rel=>JSON.parse(fs.readFileSync(path.join(controllerRoot,...rel.split('/')),'utf8'));
-  let materialCandidateKeys=[];
+  let phase4Records=[],phase5NewRecords=[],reconciliationRecords=[],materialCandidateKeys=[],candidateSourceAnchors={};
+  let phase5Canonical=null,requireTargetBindingManifest=false,requiredTargetKeys=[];
   try{
     const p4=readJsonRel(path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json'));
-    const p5=readJsonRel(path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json'));
-    materialCandidateKeys=[
-      ...(p4.actions?.['step-3']?.outputs?.candidateRecords??[]),
-      ...(p5.actions?.['step-2']?.outputs?.newCandidateRecords??[])
-    ].filter(x=>x&&typeof x==='object').map(x=>String(x.tempKey??'').trim()).filter(Boolean);
-  }catch(e){failures.push('Cannot derive required candidate coverage from sealed Phase 4/5 canonical artifacts: '+String(e.message||e));}
+    phase5Canonical=readJsonRel(path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json'));
+    phase4Records=arr(p4.actions?.['step-3']?.outputs?.candidateRecords).filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
+    phase5NewRecords=arr(phase5Canonical.actions?.['step-2']?.outputs?.newCandidateRecords).filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
+    reconciliationRecords=arr(phase5Canonical.actions?.['step-2']?.outputs?.reconciliationRecords);
+    const candidates=[...phase4Records,...phase5NewRecords];
+    materialCandidateKeys=candidates.map(phase5KeyV1).filter(Boolean);
+    candidateSourceAnchors=Object.fromEntries(candidates.map(x=>[phase5KeyV1(x),String(x.sourceAnchor??x.anchors?.[0]??'').trim()]).filter(([key])=>key));
+    const liteSolo=String(phase5Canonical.workSchemaPath??'').includes('Audit Skill - Lite-Solo Authority/lite-solo/phases/phase-5/');
+    if(liteSolo){
+      const disposition=validatePhase5CandidateDispositionV1({
+        phase4CandidateRecords:phase4Records,newCandidateRecords:phase5NewRecords,
+        reconciliationRecords,targetDesigns
+      });
+      failures.push(...disposition.failures);
+      requiredTargetKeys=disposition.requiredTargetKeys;
+      requireTargetBindingManifest=phase5Canonical.automationOutputs?.phase5MachineExecutionGate?.targetBindingManifestPolicy==='REQUIRED';
+    }else requiredTargetKeys=materialCandidateKeys;
+  }catch(e){
+    failures.push('Cannot derive required Phase-5 candidate dispositions/evidence from sealed Phase 4/5 canonical artifacts: '+String(e.message||e));
+  }
   const executionResults={};
   for(const target of arr(targetDesigns)){
     if(!target||typeof target!=='object'||Array.isArray(target))continue;
     const key=String(target.candidateKey??'').trim();
-    if(!key||target.executionMethod==='NOT_APPLICABLE')continue;
+    if(!key||String(target.executionMethod??'').toUpperCase()==='NOT_APPLICABLE')continue;
     const binding=validateTargetExecutionRequestBindingV1({controllerRoot,campaignPath,target,expectedCampaignId,expectedSourceSha256});
     if(!String(binding.status).startsWith('PASS_')){
       failures.push(key+': sealed execution request failed binding validation: '+String(binding.status));
       continue;
     }
     let req=null;
-    try{req=readJsonRel(path.posix.join(campaignPath,binding.requestRef));}catch(e){failures.push(key+': bound request cannot be read: '+String(e.message||e));continue;}
+    try{req=readJsonRel(path.posix.join(campaignPath,binding.requestRef));}
+    catch(e){failures.push(key+': bound request cannot be read: '+String(e.message||e));continue;}
     if(!/^dar-[0-9a-f]{32}$/.test(String(req.requestId??''))){failures.push(key+': invalid bound request ID');continue;}
     const rel=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key),req.requestId,'raw-result.json');
     let raw=null;
-    try{raw=readV7RawResultV1(path.join(controllerRoot,...rel.split('/')));}catch(e){failures.push(key+': required V7 raw result is missing: '+rel);continue;}
+    try{raw=readV7RawResultV1(path.join(controllerRoot,...rel.split('/')));}
+    catch(e){failures.push(key+': required V7 raw result is missing: '+rel);continue;}
     executionResults[key]={
       status:raw.status==='completed'&&raw.blocking!==true?'PASS':'BLOCKED',
       exitCode:raw.status==='completed'&&raw.blocking!==true?0:1,
-      evidenceRef:rel,requestBindingStatus:binding.status,rawResult:raw
+      evidenceRef:rel,requestBindingStatus:binding.status,requestBindingEvidenceRef:binding.requestRef,rawResult:raw
     };
   }
   failures.push(...validatePhase5TargetExecutionGateV1({
-    controllerRoot,campaignPath,targetDesigns,executionResults,materialCandidateKeys,expectedSourceSha256
+    controllerRoot,campaignPath,targetDesigns,executionResults,materialCandidateKeys,
+    requiredTargetKeys,candidateSourceAnchors,expectedSourceSha256,requireTargetBindingManifest
   }));
   if(requireCompletedMatrix){
     const matrixPath=path.join(campaignRoot,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
