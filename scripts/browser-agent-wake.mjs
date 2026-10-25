@@ -465,10 +465,12 @@ async function findX11VisibleBlueSend(file, screenshotWidth, screenshotHeight) {
     '+repage','-alpha','off','-colorspace','sRGB','-depth','8','txt:-'
   ],{maxBuffer:1<<26});
   let total=0,sumX=0,sumY=0;
+  const whitePixels=[];
   for(const line of stdout.split('\n')){
     const m=line.match(/^(\d+),(\d+):.*?#([0-9A-Fa-f]{6})/);
     if(!m)continue;
     const c=parseInt(m[3],16),r=(c>>16)&255,g=(c>>8)&255,b=c&255;
+    if(r>200&&g>200&&b>200)whitePixels.push([+m[1],+m[2]]);
     if(b>150&&b>r*1.25&&b>g*1.10&&r<180){
       total++;sumX+=+m[1];sumY+=+m[2];
     }
@@ -480,7 +482,13 @@ async function findX11VisibleBlueSend(file, screenshotWidth, screenshotHeight) {
   // arbitrary images, the chat transcript, or the page navigation.
   if(x<screenshotWidth*0.57||x>screenshotWidth*0.78||
      y<screenshotHeight*0.68||y>screenshotHeight*0.98)return null;
-  return {x,y,pixels:total};
+  // The active Send arrow has a thin central white stem/chevron.
+  // A generating chat displays a filled white STOP SQUARE at the same location.
+  // Count the center's 12x12 white pixels; a stop square occupies >=65 of them
+  // (observed on actual Chrome screenshots), whereas the send arrow does not.
+  const localX=x-originX,localY=y-originY;
+  const centerWhite=whitePixels.filter(([px,py])=>Math.abs(px-localX)<=5&&Math.abs(py-localY)<=5).length;
+  return {x,y,pixels:total,kind:centerWhite>=65?'STOP':'SEND',centerWhite};
 }
 
 async function captureX11VisualEvidence(label, cropRegion = '', minBytes = 3000) {
@@ -812,7 +820,7 @@ async function runNormalChromeExistingSession(chromium) {
     // Keep the human Return gesture, then hover/click the visible Send disc
     // if the composer still holds a pending message.
     const beforeSendDisc=await findX11VisibleBlueSend(afterInput,cropWidth,cropHeight);
-    if(!beforeSendDisc){
+    if(!beforeSendDisc||beforeSendDisc.kind!=='SEND'){
       throw new BrowserAgentError('VISIBLE_SEND_DISC_NOT_FOUND',
         'Pasted text visibly changed but the enabled Send button could not be located in the OS screenshot; never guess a click or assert delivery.',false);
     }
@@ -824,7 +832,7 @@ async function runNormalChromeExistingSession(chromium) {
     let afterSend=await captureX11VisualEvidence('composer_after_return',crop);
     let pendingDisc=await findX11VisibleBlueSend(afterSend,cropWidth,cropHeight);
     let clickedSend=false;
-    if(pendingDisc){
+    if(pendingDisc?.kind==='SEND'){
       const sx=cropX+pendingDisc.x,sy=cropY+pendingDisc.y;
       console.log('[normal-chrome-watchdog] Return left enabled Send disc visible; clicking OS-visible Send at '+sx+','+sy);
       await x11Key(['mousemove','--sync',String(sx),String(sy)],'x11-hover-visible-send');
@@ -836,7 +844,7 @@ async function runNormalChromeExistingSession(chromium) {
       afterSend=await captureX11VisualEvidence('composer_after_visible_send_click',crop);
       pendingDisc=await findX11VisibleBlueSend(afterSend,cropWidth,cropHeight);
     }
-    if(pendingDisc){
+    if(pendingDisc?.kind==='SEND'){
       // A second blind Return/click can post unintended duplicate messages.
       // Keep the screenshot and report a real failure for human inspection.
       throw new BrowserAgentError('SEND_REMAINED_IN_COMPOSER',
