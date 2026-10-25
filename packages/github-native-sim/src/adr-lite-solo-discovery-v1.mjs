@@ -9,7 +9,7 @@ import {deriveBaselineObligationsV1} from './adr-baseline-obligations-v1.mjs';
 import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1,TRIVIAL_KINDS_V1,isLiteralConstantV13} from './adr-discovery-validators-v1.mjs';
 import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-solo-phase-work-v1.mjs';
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
-import {independentSpecItemsV13} from './adr-independent-spec-v1.mjs';
+import {independentSpecItemsV13} from './adr-lite-solo-independent-spec-v1.mjs';
 // V13 qualification status is assessed independently after real blinded audit runs.
 
 const pathJoin=(campaign,relative)=>path.posix.join(campaign,'work/phase-04/discovery',relative);
