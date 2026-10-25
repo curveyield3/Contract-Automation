@@ -47,9 +47,9 @@ export function writeDerivedInputPagesV1({root,rel,targetBytes=DERIVED_PAGE_TARG
  }
  let parsed;
  try{parsed=JSON.parse(raw);}catch(e){throw new Error('large derived input is not valid JSON: '+rel+' ('+String(e.message||e)+')');}
- const sourceSha256=digest(raw),sections=[],writtenNames=new Set();
+ const sourceSha256=digest(raw),sections=[],writtenNames=new Set();let nextSectionNumber=0;
  const writeSection=(fieldPath,items)=>{
-  const sectionId=String(sections.length+1).padStart(4,'0');
+  const sectionId=String(++nextSectionNumber).padStart(4,'0');
   const pages=[];let offset=0,pageNo=0,chunk=[];
   const emit=()=>{
    if(!chunk.length)return;
