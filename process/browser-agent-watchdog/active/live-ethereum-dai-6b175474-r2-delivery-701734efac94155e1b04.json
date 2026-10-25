@@ -52,6 +52,6 @@
   "watchdogRunId": "40165707110",
   "watchdogSweepStartedAt": "2026-10-25T05:30:13Z",
   "lastDecision": "WAITING_NO_CHATGPT_READ",
-  "lastNoReadSweepAt": "2026-10-25T05:12:33Z",
-  "elapsedSinceLastPokeMinutes": 3
+  "lastNoReadSweepAt": "2026-10-25T05:30:21Z",
+  "elapsedSinceLastPokeMinutes": 21
 }
