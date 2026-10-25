@@ -400,9 +400,15 @@ export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,a
 export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,now,auditControllerRef='main'}){
  const state=known(root,stateRel(campaignPath));
  if(!state)throw new Error('discovery state missing');
- const chatKey=state.payload.units[unitId]?.chatKey;
+ const unitState=state.payload.units[unitId];
+ const chatKey=unitState?.chatKey;
  const active=chatKey?activeIdsOf(state,chatKey):[];
- if(!active.includes(unitId))return {status:'DISCOVERY_STALE_REQUEST',
+ // Older controller versions exhausted three validation attempts into a coverage
+ // gap. An explicitly named, corrected unit may recover through real validation.
+ const legacyGapRecovery=state.payload.reviewPolicy==='correctness-verdict-v13'&&
+  unitState?.status==='GAP_RECORDED'&&
+  arr(state.payload.gaps).some(x=>x.unitId===unitId&&x.code==='VALIDATION_ATTEMPTS_EXHAUSTED');
+ if(!active.includes(unitId)&&!legacyGapRecovery)return {status:'DISCOVERY_STALE_REQUEST',
   feedbackText:'Unit '+unitId+' is not active. Current active unit: '+(active[0]??'none')+'; '+active.length+' unit(s) active. No action taken.'};
  // The boundary request names the one completed unit for validation. Every other
  // active submission remains a draft, regardless of whether its file exists.
@@ -429,6 +435,8 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
    fs.mkdirSync(path.dirname(repoFile(root,pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json'))),{recursive:true});
    fs.writeFileSync(repoFile(root,pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json')),bytes);
    info.status='ACCEPTED';info.acceptedSubmissionSha=sha;
+   if(legacyGapRecovery)state.payload.gaps=arr(state.payload.gaps)
+    .filter(g=>!(g.unitId===id&&g.code==='VALIDATION_ATTEMPTS_EXHAUSTED'));
    if(packet.payload?.reviewPolicy==='correctness-verdict-v13')info.acceptedAt=now;
    accepted.push(id);
    continue;
