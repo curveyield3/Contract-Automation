@@ -246,6 +246,11 @@ function sweepOne(campaign){
         console.error('AGENT_DELIVERY_UNCONFIRMED: '+campaign+
           ' no first-line receipt for 30 minutes; archiving failed command and requesting repair');
         const stranded=s.current;
+        // After the backup checks in, allow the canonical still-required wake to
+        // be reconstructed. A timed-out send is never evidence of delivery.
+        if(stranded.phaseId==='master-review')delete s.lastMasterIdentity;
+        if(stranded.phaseId==='phase-4')delete s.lastDiscoveryIdentity;
+        if(stranded.message.startsWith('CONTROLLER NEEDS_REWORK'))delete s.lastReworkIdentity;
         s.unconfirmedCommands=(s.unconfirmedCommands||[]).slice(-9).concat([{
           commandId:stranded.commandId,chatUrl:stranded.chatUrl,
           phaseId:stranded.phaseId,message:stranded.message,expectedCode:stranded.expectedCode,
