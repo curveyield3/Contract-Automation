@@ -13,7 +13,7 @@ source={
   "originUrl":e["SOURCE_URL_CANONICAL"],
   "uploadedFilename":e["SOURCE_FILENAME"],
   "byteLength":int(e["SOURCE_SIZE"]),
-  "archiveRepository":"CurveYield2/Audit-Controller",
+  "archiveRepository":"curveyield3/Audit-Controller",
   "archiveCommit":e["ADMISSION_COMMIT"],
   "archivePath":e["SOURCE_PATH"],
   "archiveGitBlobSha":e["SOURCE_BLOB"],
@@ -36,7 +36,7 @@ else:
   source["inputMode"]="ZIP"
 
 authority={
-  "repository":"CurveYield2/Audit-Controller",
+  "repository":"curveyield3/Audit-Controller",
   "ref":"main",
   "authorityFolderPath":"Audit Skill - Current Authority",
   "homepagePath":e["SKILL_HOME"],
