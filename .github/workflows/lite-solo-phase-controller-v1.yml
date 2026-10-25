@@ -113,12 +113,11 @@ jobs:
         uses: ./.github/actions/setup-v7-toolchain
       - name: Validate, seal and generate exact solo controller response
         id: controller
+        shell: bash
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
           RPC_KATANA: ${{ secrets.RPC_KATANA }}
           RPC_BASE: ${{ secrets.RPC_BASE }}
-        shell: bash
-        env:
           AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
           AUDIT_CAMPAIGN: ${{ steps.request.outputs.id }}
           AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
