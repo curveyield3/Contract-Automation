@@ -1291,6 +1291,13 @@ if(sequence===10){
   const p6=canonicalFor(root,campaignPath,6);
   const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
   const open=finalIndexObligations(ledger);
+  const mandatoryOpen=open.filter(o=>o.mandatory!==false);
+  canonical.automationOutputs.securityAssurance={
+    processCompletionDoesNotImplySecurityProof:true,
+    status:mandatoryOpen.length?'INCOMPLETE_MANDATORY_OBLIGATIONS_OPEN':'NO_MANDATORY_OBLIGATIONS_OPEN',
+    mandatoryOpenCount:mandatoryOpen.length,
+    mandatoryOpenObligationIds:mandatoryOpen.map(o=>o.obligationId).sort()
+  };
   const carriedLimitations=collectCarriedLimitations({root,campaignPath,maxPhase:9});
   const omissions=phaseOutput(p6,'step-3','fullOnlyOmissions')??[];
   canonical.automationOutputs.residualLimitations=[
@@ -1443,6 +1450,13 @@ if(sequence===5&&phase5OwnerDeferral)receipt.machineExecutionDisclaimer={
   unresolvedCandidateKeys:phase5OwnerDeferral.candidateKeys,
   notAMachinePass:true,finalAuditSecurityAssurance:'INCOMPLETE'
 };
+if(sequence===10){
+  const assurance=canonical.automationOutputs.securityAssurance;
+  receipt.securityAssurance=structuredClone(assurance);
+  // COMPLETE describes process termination, not a security proof or a
+  // waiver of retained obligations. Publish this distinction explicitly.
+  directory.securityAssurance=structuredClone(assurance);
+}
 receipt.sealedAt=now;receipt.updatedAt=now;
 if(masterAmendmentRefreshSha)receipt.masterAmendment=masterAmendmentReceipt(phaseRevision-1);
 if(sealedRework){
