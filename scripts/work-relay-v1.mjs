@@ -243,6 +243,7 @@ function sweepOne(campaign){
         phaseId=s.lastReceipt.phaseId||phaseId;
       }
       const relevant=assignment.status==='ACTIVE'||assignment.status==='REWORK_REQUIRED'||
+        (assignment.status==='WAITING_FOR_SUCCESSOR_AGENT' && s.lastReceipt?.targetChatUrl===chat)||
         d.status==='ACTIVE'||special.includes(d.campaignStatus);
       const since=Math.max(Date.parse(s.lastProgressAt||0)||0,Date.parse(s.lastPokedAt||0)||0,Date.parse(s.lastReceipt?.receivedAt||0)||0);
       const elapsed=since?(Date.now()-since)/60000:Infinity;
