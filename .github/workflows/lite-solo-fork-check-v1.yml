@@ -1,0 +1,62 @@
+name: Lite-Solo Fork Integration Checks v1
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/lite-solo-*.yml'
+      - 'scripts/lite-solo-*'
+      - 'scripts/lib/lite-solo-*'
+      - 'packages/github-native-sim/src/*lite-solo*'
+permissions:
+  contents: read
+jobs:
+  static-and-authority-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check all fork source syntaxes
+        shell: bash
+        run: |
+          set -euo pipefail
+          find scripts packages/github-native-sim/src -type f -name '*lite-solo*.mjs' -print0 | xargs -0 -r -n1 node --check
+          node --check scripts/lite-solo-phase0-finalize-v1.mjs
+          node --check scripts/lite-solo-phase-controller-v1.mjs
+          bash -n scripts/lite-solo-source-initialization/run-v1.sh
+          python3 -m py_compile scripts/lite-solo-source-initialization/write-phase0-receipt-v1.py
+          node scripts/lite-solo-fork-integration-check-v1.mjs
+      - name: Check GitHub Actions YAML shapes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet pyyaml
+          python3 - <<'PY'
+          from pathlib import Path
+          import yaml
+          for p in sorted(Path('.github/workflows').glob('lite-solo-*.yml')):
+            y=yaml.safe_load(p.read_text())
+            assert isinstance(y,dict) and isinstance(y.get('jobs'),dict),p
+            assert y.get('permissions',{}).get('contents') in ('write','read'),p
+            print('VALID',p)
+          PY
+      - name: Select read credential for private forked authority verification
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Verify the complete 149-entry fork authority against exact hashes
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh repo clone curveyield3/Audit-Controller .lite-solo-authority-check -- --depth 1 --filter=blob:none --sparse
+          git -C .lite-solo-authority-check sparse-checkout set --no-cone '/Audit Skill - Lite-Solo Authority/lite-solo/'
+          node scripts/lite-solo-verify-authority-v1.mjs '.lite-solo-authority-check/Audit Skill - Lite-Solo Authority/lite-solo'
