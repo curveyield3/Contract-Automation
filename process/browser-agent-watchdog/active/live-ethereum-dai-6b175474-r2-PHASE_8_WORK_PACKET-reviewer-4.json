@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "curveyield-browser-agent-watchdog-state-v1",
+  "wakeId": "live-ethereum-dai-6b175474-r2-PHASE_8_WORK_PACKET-reviewer-4",
+  "campaignId": "live-ethereum-dai-6b175474-r2",
+  "phaseId": "phase-8",
+  "workerRole": "reviewer",
+  "status": "ACTIVE",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eab-0ff8-83e8-821f-a065d3c45384",
+  "lastProvider": "normal-system-chrome-x11-phase1-visual-evidence",
+  "armedAt": "2026-10-25T04:53:44Z",
+  "intervalMinutes": 5,
+  "pokeIntervalMinutes": 40,
+  "deliveryConfirmed": true,
+  "ackPath": "campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_reviewer-4_v1.json",
+  "ackId": "live-ethereum-dai-6b175474-r2-PHASE_8_WORK_PACKET-reviewer-4/40160350747",
+  "idleMessage": "GET BACK TO WORK",
+  "observation": {
+    "assistantCount": 0,
+    "lastAssistantHash": "",
+    "observedAt": "2026-10-25T04:53:44Z"
+  },
+  "gate": {
+    "mode": "LITE",
+    "repository": "curveyield3/Audit-Controller",
+    "ref": "main",
+    "statePath": "Audit Campaign Directory/campaigns/live-ethereum-dai-6b175474.json",
+    "expectedPhaseId": "phase-8",
+    "expectedMilestoneId": "PHASE_8_WORK_PACKET",
+    "activePointerPath": "",
+    "interphase": {
+      "handoffPath": "",
+      "workPacketPath": "",
+      "completionPath": "",
+      "workPacketSha256": ""
+    },
+    "stopStates": [
+      "STOPPED_BY_HUMAN"
+    ],
+    "stopCampaignStatuses": [
+      "COMPLETE",
+      "STOPPED_BY_HUMAN"
+    ]
+  },
+  "repair": {
+    "enabled": true,
+    "idlePokeThreshold": 3,
+    "unviewableThreshold": 2,
+    "consecutiveIdlePokes": 0,
+    "consecutiveUnviewable": 0
+  }
+}
