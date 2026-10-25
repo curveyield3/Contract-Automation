@@ -1080,6 +1080,7 @@ if(sequence===5 && !(directory.machineExecutionAuthorization?.status==='APPROVED
  throw new Error('LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: Phase 5 machine execution has no exact human-approved source-bound authorization.');
 // Execute mandatory Phase-5 candidate tests before any PASS, bookkeeping or seal.
 let phase5MachineResults=null;
+let phase5PendingCandidateKeys=[];
 if(sequence===5){
   const targetDesigns=form.actions['step-3'].outputs.targetDesigns;
   const {candidateKeys:materialCandidateKeys,candidateSourceAnchors,requiredTargetKeys}=
@@ -1096,22 +1097,28 @@ if(sequence===5){
         rawResult:null
       }]));
     }else{
-      phase5MachineResults=await executePhase5TargetsV1({
+      const batch=await executePhase5TargetsV1({
         controllerRoot:root,campaignPath,targetDesigns,
         expectedCampaignId:directory.campaignId,expectedSourceSha256:directory.sourceSha256,
         reuseCandidateKeys:phase5ReuseCandidateKeys
       });
-      deficiencies.push(...validatePhase5TargetExecutionGateV1({
-        controllerRoot:root,campaignPath,targetDesigns,
-        materialCandidateKeys,candidateSourceAnchors,executionResults:phase5MachineResults,
-        expectedSourceSha256:directory.sourceSha256
-      }));
+      phase5MachineResults=batch.executionResults;
+      phase5PendingCandidateKeys=batch.pendingCandidateKeys;
+      // The next boundary resumes verified evidence; pending is not PASS or
+      // a failed security assertion.
+      if(!phase5PendingCandidateKeys.length)
+        deficiencies.push(...validatePhase5TargetExecutionGateV1({
+          controllerRoot:root,campaignPath,targetDesigns,
+          materialCandidateKeys,requiredTargetKeys,candidateSourceAnchors,
+          executionResults:phase5MachineResults,
+          expectedSourceSha256:directory.sourceSha256,requireTargetBindingManifest:true
+        }));
     }
     // Report the actual runner cause, not merely BLOCKED. The shadow
     // campaign is discarded on failed master refresh, so these diagnostics
     // are essential to distinguish harness defects from RPC or build faults.
     for(const [key,machine] of Object.entries(phase5MachineResults??{})){
-      if(machine?.status==='PASS'||machine?.status==='NOT_APPLICABLE'||machine?.status==='DEFERRED_UNVERIFIED')continue;
+      if(['PASS','NOT_APPLICABLE','DEFERRED_UNVERIFIED','PENDING_EXECUTION'].includes(machine?.status))continue;
       let cli=null;
       try{cli=JSON.parse(String(machine?.stdout??''));}catch{}
       const failed=(machine?.rawResult?.failedSteps??[]).slice(0,3).map(x=>({
@@ -1147,6 +1154,23 @@ if(sequence===5){
   fs.writeFileSync(repoFile(root,matrixRel),renderTargetedTestMatrixV1({
     targetDesigns,executionResults:phase5MachineResults??{},baselineRows
   }));
+  if(phase5PendingCandidateKeys.length&&!deficiencies.length){
+    persistReviewerReworkShardsV1();
+    packet.status='PENDING_EXECUTION';
+    packet.controllerValidation={status:'PENDING_BATCH',machineExecutionGate:'PENDING_BATCH',
+      validatedAt:now,pendingCandidateKeys:phase5PendingCandidateKeys,deficiencies:[]};
+    directory.currentAssignment.status='ACTIVE';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
+    writeJson(packetFile,packet);writeJson(directoryFile,directory);
+    const feedback='Phase 5 bounded execution batch finished. '+phase5PendingCandidateKeys.length+
+      ' candidate(s) remain PENDING_EXECUTION. No receipt, PASS or finding was issued. '+
+      'Invoke the existing Phase-5 boundary again to resume from exact source/request/target/raw-result verified evidence. Pending: '+
+      phase5PendingCandidateKeys.join(', ');
+    process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',machineExecutionGate:'PENDING_BATCH',
+      campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:5,phaseId:'phase-5',
+      reviewer:assignment.reviewer,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),
+      packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
+    process.exit(0);
+  }
   if(deficiencies.length){
     // Evidence and diagnostic matrix may persist; receipt and graph cannot.
     persistReviewerReworkShardsV1();
@@ -1187,6 +1211,7 @@ if(sequence===4) canonical.automationOutputs.phase4Coverage=
     : phase4CoverageFromForm(form);
 if(sequence===5) canonical.automationOutputs.phase5MachineExecutionGate={
   status:phase5OwnerDeferral?'DEFERRED_UNVERIFIED':'PASS',
+  targetBindingManifestPolicy:phase5OwnerDeferral?'DEFERRED_UNVERIFIED':'REQUIRED',
   targetKeys:Object.keys(phase5MachineResults??{}).sort(),
   evidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef).filter(x=>x&&x!=='NO_MACHINE_EVIDENCE'),
   ...(phase5OwnerDeferral?{ownerDirectivePath:phase5OwnerDeferral.path,
@@ -1275,7 +1300,15 @@ if(sequence===5){
       stderr:String(result?.stderr??'').slice(-900)
     }])
   );
-  successorPrefillContext={targetDesigns,phase5ExecutionResults:compactMachineResults};
+  const p4=canonicalFor(root,campaignPath,4);
+  successorPrefillContext={
+    targetDesigns,phase5ExecutionResults:compactMachineResults,
+    phase5CandidateRecords:[
+      ...(phaseOutput(p4,'step-3','candidateRecords')??[]),
+      ...(phaseOutput(canonical,'step-2','newCandidateRecords')??[])
+    ],
+    phase5CandidateDispositionRecords:phaseOutput(canonical,'step-2','reconciliationRecords')??[]
+  };
   boundaryArtifactRels.push(path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md'));
 }
 if(sequence===8&&hasRemediation(campaignRoot)){
