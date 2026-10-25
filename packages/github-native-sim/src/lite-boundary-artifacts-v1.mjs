@@ -358,9 +358,10 @@ export function validatePhase5CandidateDispositionV1({
       failures.push(prefix+'.phase5Observation must record the actual Phase-5 source/economic reconciliation, not a placeholder');
     if(!phase5TextV1(row.rationale,40))
       failures.push(prefix+'.rationale must substantiate the candidate disposition with source-backed reasoning');
-    if(!phase5TextV1(row.downstreamValidationNeed,20))
-      failures.push(prefix+'.downstreamValidationNeed must state the next validation or NONE_IDENTIFIED');
     const disposition=String(row.phase5ExecutionDisposition??'').trim().toUpperCase();
+    if(!phase5TextV1(row.downstreamValidationNeed,20)&&
+       !(disposition==='RESOLVED_NON_MATERIAL'&&String(row.downstreamValidationNeed??'')==='NONE_IDENTIFIED'))
+      failures.push(prefix+'.downstreamValidationNeed must state the next validation or NONE_IDENTIFIED only for a source-resolved non-material candidate');
     if(!PHASE5_CANDIDATE_DISPOSITIONS_V1.has(disposition)){
       failures.push(prefix+'.phase5ExecutionDisposition is missing/invalid; choose EXECUTE, DUPLICATE_OF, RESOLVED_NON_MATERIAL, RETAIN_OPEN_OBLIGATION, or CONDITIONAL_PENDING_EVIDENCE');
       continue;
@@ -602,7 +603,12 @@ export function validateRecordedPhase5MachineEvidenceV1({controllerRoot,campaign
     const candidates=[...phase4Records,...phase5NewRecords];
     materialCandidateKeys=candidates.map(phase5KeyV1).filter(Boolean);
     candidateSourceAnchors=Object.fromEntries(candidates.map(x=>[phase5KeyV1(x),String(x.sourceAnchor??x.anchors?.[0]??'').trim()]).filter(([key])=>key));
-    const liteSolo=String(phase5Canonical.workSchemaPath??'').includes('Audit Skill - Lite-Solo Authority/lite-solo/phases/phase-5/');
+    let phase5AuthorityPath=String(phase5Canonical.workSchemaPath??'');
+    try{
+      const receipt=readJsonRel(path.posix.join(campaignPath,'receipts/PHASE_05_RECEIPT_v1.json'));
+      phase5AuthorityPath+=' '+String(receipt?.authority?.homepagePath??'');
+    }catch{}
+    const liteSolo=phase5AuthorityPath.includes('Audit Skill - Lite-Solo Authority/lite-solo');
     if(liteSolo){
       const disposition=validatePhase5CandidateDispositionV1({
         phase4CandidateRecords:phase4Records,newCandidateRecords:phase5NewRecords,
