@@ -418,7 +418,7 @@ jobs:
               "MASTER_TESTS_REQUESTED","FOLLOWUP_ADMITTED","DISCOVERY_REWORK",
               "DISCOVERY_NEXT","DISCOVERY_PARTIAL","DISCOVERY_COMPLETE",
               "DISCOVERY_STALE_REQUEST","MASTER_REVIEW_INVALID","MASTER_REVIEW_HELD",
-              "ALREADY_ACCEPTED","CONTROLLER_ERROR")) and
+              "ALREADY_ACCEPTED","CONTROLLER_ERROR","CLOSED_INCOMPLETE")) and
             (.[0].detailRef|type=="string") and
             (.[0].sha256|test("^[a-f0-9]{64}$"))
           ' /tmp/lite-phase-packet-envelope.json >/dev/null
@@ -494,7 +494,7 @@ jobs:
 
       - name: Publish validation response or successful phase transaction
         id: publish_result
-        if: ${{ steps.routing.outputs.stale != 'true' && steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' || steps.controller.outputs.status == 'FOLLOWUP_ADMITTED' || steps.controller.outputs.status == 'DISCOVERY_REWORK' || steps.controller.outputs.status == 'DISCOVERY_NEXT' || steps.controller.outputs.status == 'DISCOVERY_PARTIAL' || steps.controller.outputs.status == 'DISCOVERY_COMPLETE' || steps.controller.outputs.status == 'DISCOVERY_STALE_REQUEST' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID' || steps.controller.outputs.status == 'MASTER_REVIEW_HELD' || steps.controller.outputs.status == 'ALREADY_ACCEPTED' || steps.controller.outputs.status == 'CONTROLLER_ERROR') }}
+        if: ${{ steps.routing.outputs.stale != 'true' && steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' || steps.controller.outputs.status == 'FOLLOWUP_ADMITTED' || steps.controller.outputs.status == 'DISCOVERY_REWORK' || steps.controller.outputs.status == 'DISCOVERY_NEXT' || steps.controller.outputs.status == 'DISCOVERY_PARTIAL' || steps.controller.outputs.status == 'DISCOVERY_COMPLETE' || steps.controller.outputs.status == 'DISCOVERY_STALE_REQUEST' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID' || steps.controller.outputs.status == 'MASTER_REVIEW_HELD' || steps.controller.outputs.status == 'ALREADY_ACCEPTED' || steps.controller.outputs.status == 'CONTROLLER_ERROR' || steps.controller.outputs.status == 'CLOSED_INCOMPLETE') }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
