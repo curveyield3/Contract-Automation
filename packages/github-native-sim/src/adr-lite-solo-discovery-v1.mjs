@@ -150,26 +150,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  return packet;
 }
 
-export function discoveryWakeMessageV1({directory,auditControllerRef,packetPath,submissionPath,instructionsPath,boundaryRequestPath,unitId,role,attempt,feedbackText=null,singleReviewer=false}){
- const base='https://github.com/curveyield3/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
- const link=(p)=>base+p.split('/').map(encodeURIComponent).join('/');
- const lines=[role==='ATTACK'?(singleReviewer?'You are lite-solo-agent performing a second, adversarial Phase-4 pass in the same chat. Campaign '+directory.campaignId:'You are the attacker reviewer. Campaign '+directory.campaignId):'You are lite-solo-agent. Campaign '+directory.campaignId,
-  'Use the GitHub connector app for every repository read and write.',
-  'Instructions: '+link(instructionsPath),'Assignment packet: '+link(packetPath),'Submission path: '+link(submissionPath)];
- if(feedbackText)lines.push('Controller feedback: '+feedbackText);
- lines.push('Boundary request location: '+(boundaryRequestPath??'process/agent-upload/lite-solo-phase-boundary/'));
- lines.push('Exact boundary request JSON: '+JSON.stringify({schemaVersion:'curveyield-lite-solo-phase-boundary-request-v1',
-  campaignId:directory.campaignId,reviewKind:'discovery',unitId,auditControllerRef:auditControllerRef??'main',attempt}));
- lines.push("Read the exact Actions result by submitted Git SHA; inspect the controller\'s result and use existing recovery for infrastructure failure rather than blindly resubmitting.");
- if(role==='ATTACK'&&!singleReviewer)lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any other unit's folder under work/phase-04/discovery/.");
- return lines.join('\n\n');
-}
-// Each reviewer chat receives its entire discovery workload in one window and completes it in
-// one round. Packets depend only on the Phase 0 inventory, flow plan and system facts, never on
-// earlier units, so every unit can be issued at once and validated in one controller run; only
-// units that fail validation come back as rework.
-// Reviewer-2 (flow and residual units) and the attacker (attack units) work their windows in
-// parallel: attack packets never contain lite-solo-agent work, so independence is unaffected.
+// Discovery units are read directly from the durable campaign state.
 const activeIdsOf=(state,chatKey=null)=>state.payload.order.filter(id=>state.payload.units[id]?.status==='ACTIVE'&&(!chatKey||state.payload.units[id].chatKey===chatKey));
 const pendingIdsOf=(state,chatKey)=>state.payload.order.filter(id=>state.payload.units[id]?.status==='PENDING'&&state.payload.units[id].chatKey===chatKey);
 const chatKeysOf=(state)=>[...new Set(state.payload.order.map(id=>state.payload.units[id]?.chatKey).filter(Boolean))];
@@ -185,15 +166,16 @@ function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,
  }
  return ids;
 }
-// Opens a window for every chat that has pending units but nothing active, returning its wakes.
-export function openIdleChatWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,auditControllerRef,except=null}){
- const wakes=[];
- for(const chatKey of chatKeysOf(state)){
-  if(chatKey===except||activeIdsOf(state,chatKey).length||!pendingIdsOf(state,chatKey).length)continue;
-  const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey});
-  wakes.push(wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef}));
+// Open pending correctness or attack work without notifying a browser session.
+export function openIdleSoloWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,except=null}){
+ const windows=[];
+ for(const actor of chatKeysOf(state)){
+  if(actor===except||activeIdsOf(state,actor).length||!pendingIdsOf(state,actor).length)continue;
+  const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey:actor});
+  if(ids.length)windows.push({unitIds:ids,role:state.payload.units[ids[0]].role,
+   indexPath:writeDiscoveryWindowIndexV1({root,campaignPath,ids,role:state.payload.units[ids[0]].role})});
  }
- return wakes;
+ return windows;
 }
 function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
   if(ids.length<40)return null;
@@ -216,41 +198,6 @@ function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
   writeJson(repoFile(root,indexRel),index);
   return indexRel;
 }
-export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText=null,indexPath=null,singleReviewer=false}){
- const base='https://github.com/curveyield3/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
- const link=(p)=>base+p.split('/').map(encodeURIComponent).join('/');
- const lines=[role==='ATTACK'?(singleReviewer?'You are lite-solo-agent performing a second, adversarial Phase-4 pass in the same chat. Campaign '+directory.campaignId:'You are the attacker reviewer. Campaign '+directory.campaignId):'You are lite-solo-agent. Campaign '+directory.campaignId,
-  'Use the GitHub connector app for every repository read and write.',
-  'Instructions: '+link(instructionsPath)];
- if(feedbackText)lines.push('Controller feedback:\n'+feedbackText);
- // Compact: one folder link plus unit-id ranges keeps the typed wake short.
- const ranges=[];for(const id of ids){const [p,n]=[id[0],Number(id.slice(2))],last=ranges.at(-1);
-  if(last&&last.p===p&&last.to===n-1){last.to=n;last.toId=id;}else ranges.push({p,from:n,to:n,fromId:id,toId:id});}
- lines.push('Units to complete now ('+ids.length+'): '+ranges.map(r=>r.fromId===r.toId?r.fromId:r.fromId+' to '+r.toId).join(', ')+'.');
- if(indexPath)lines.push('Complete assignment index: '+link(indexPath)+'. Read each page and save each unit submission without stopping or waiting for a controller message.');
- else lines.push('Discovery folder: '+link(pathJoin(campaignPath,''))+' . For each unit <id>, read <id>/ASSIGNMENT_PACKET_v1.json and write <id>/SUBMISSION_v1.json.');
- if(role!=='ATTACK')lines.push('Each packet has a submissionGuide: use trivialReviews only for eligible literal constants, groupChecks (functions sharing a modifier) and the listed contractChecks to avoid repeating the same check.');
- lines.push(feedbackText?'Fix every unit listed in the feedback, then push ONE boundary request.':'This is your entire discovery workload for this phase. Complete every unit in one continuous pass without stopping or asking to continue, then push ONE boundary request.');
- lines.push('The controller validates every unit with a new submission in a single run and wakes you only if a unit needs rework. Do not push a request per unit.');
- lines.push('Boundary request location: process/agent-upload/lite-solo-phase-boundary/');
- lines.push('Exact boundary request JSON: '+JSON.stringify({schemaVersion:'curveyield-lite-solo-phase-boundary-request-v1',
-  campaignId:directory.campaignId,reviewKind:'discovery',unitId:ids[0],auditControllerRef:auditControllerRef??'main',attempt}));
- lines.push("Read the exact Actions result by submitted Git SHA; inspect the controller\'s result and use existing recovery for infrastructure failure rather than blindly resubmitting.");
- if(role==='ATTACK'&&!singleReviewer)lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any unit folder under work/phase-04/discovery/ other than the ones listed above.");
- return lines.join('\n\n');
-}
-function wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef='main',feedbackText=null}){
- const role=state.payload.units[ids[0]].role==='ATTACK'?'ATTACK':'FLOW_REVIEW';
- const round=state.payload.wakeRound=(state.payload.wakeRound??0)+1;
- const attempt=Math.max(...ids.map(id=>state.payload.units[id]?.attempts??0))+1;
- const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
- const indexPath=/(?:Audit_Litemode_v13|lite-solo)(?:\/|$)/.test(authorityRoot)
-    ?writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}):null;
- const message=discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText,indexPath,singleReviewer:state.payload.sequentialSingleReviewer===true});
- return {chatKey:state.payload.units[ids[0]].chatKey,
-  wakeId:directory.campaignId+'-discovery-'+ids[0]+'-r'+round,
-  phaseId:'phase-4',milestoneId:'DISCOVERY_'+ids[0],messageB64:Buffer.from(message).toString('base64')};
-}
 export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,now,auditControllerRef='main'}){
  const plan=known(root,asset(root,campaignPath,'FLOW_PLAN_v1.json'));
  const units=unitList(plan),order=units.map(x=>x.unitId);
@@ -265,11 +212,11 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
   gaps:missing?[{code:'INVENTORY_INCOMPLETE',detail:'No flow plan'}]:structuredClone(arr(plan.payload.gaps))
  });
  writeJson(repoFile(root,stateRel(campaignPath)),state);
- if(missing)return {completeImmediately:true,state,statePath:stateRel(campaignPath),wake:null};
- const wakes=openIdleChatWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,auditControllerRef});
+ if(missing)return {completeImmediately:true,state,statePath:stateRel(campaignPath)};
+ const windows=openIdleSoloWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});
  state.payload.activeUnitId=activeIdsOf(state)[0]??null;
  writeJson(repoFile(root,stateRel(campaignPath)),state);
- return {completeImmediately:false,state,statePath:stateRel(campaignPath),wake:wakes[0]??null,wakes};
+ return {completeImmediately:false,state,statePath:stateRel(campaignPath),windows};
 }
 export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmissions,taxonomy,now}){
  const rows=arr(acceptedSubmissions),checks=new Map(),candidates=[],paths=[],answers=[],na=[],contractLevel=[];
@@ -378,18 +325,17 @@ export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,a
  writeJson(repoFile(root,pathJoin(campaignPath,'DISCOVERY_SUMMARY_v1.json')),summary);
  const obligations=deriveBaselineObligationsV1({inventory,taxonomy:inputs.taxonomy,summary});
  writeJson(repoFile(root,path.posix.join(campaignPath,'work/phase-06/BASELINE_OBLIGATIONS_v1.json')),obligations);
- const message='CONTROLLER: Phase 4 discovery is complete. Phase 4 is now ACTIVE for lite-solo-agent. Follow phases/phase-4/START_HERE.md of the bound authority: Step 1 reconciles every record prefilled from work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json, then complete Steps 2 and 3 and invoke controller validation as usual.';
- return {status:'DISCOVERY_COMPLETE',feedbackText:message,wake:{chatKey:'lite-solo-agent',
-  wakeId:directory.campaignId+'-discovery-complete',phaseId:'phase-4',
-  milestoneId:'PHASE_4_WORK_PACKET',messageB64:Buffer.from(message).toString('base64')},summary};
+ const feedback='Phase 4 discovery is complete. Open Phase-4 START_HERE, reconcile the durable discovery summary, and finish the phase form.';
+ return {status:'DISCOVERY_COMPLETE',feedbackText:feedback,summary};
 }
+
 export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,now,auditControllerRef='main'}){
  const state=known(root,stateRel(campaignPath));
  if(!state)throw new Error('discovery state missing');
  const chatKey=state.payload.units[unitId]?.chatKey;
  const active=chatKey?activeIdsOf(state,chatKey):[];
  if(!active.includes(unitId))return {status:'DISCOVERY_STALE_REQUEST',
-  feedbackText:'Unit '+unitId+' is not active; active units are '+(activeIdsOf(state).join(', ')||'none')+'. No action taken.',wake:null,wakes:[]};
+  feedbackText:'Unit '+unitId+' is not active; active units are '+(activeIdsOf(state).join(', ')||'none')+'. No action taken.'};
  const inventory=getInputs({root,campaignPath,automationRoot}).inventory;
  const accepted=[],rework=[],exhausted=[],waiting=[],unchanged=[],feedback=[];
  for(const id of active){
@@ -433,16 +379,15 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
  }
  // Nothing new to validate: report and leave state untouched.
  if(!accepted.length&&!rework.length&&!exhausted.length)return {status:'DISCOVERY_REWORK',
-  feedbackText:unchanged.length?unchanged.join('\n\n'):'No new submission found for active units '+active.join(', ')+'. Write them, then push the boundary request again.',wake:null,wakes:[]};
+  feedbackText:unchanged.length?unchanged.join('\n\n'):'No new submission found for active units '+active.join(', ')+'. Write them, then push the boundary request again.'};
  const summary=[accepted.length?'Accepted: '+accepted.join(', '):'',
   exhausted.length?'Validation attempts exhausted, recorded as gaps: '+exhausted.join(', '):'',
   waiting.length?'Still awaiting submission: '+waiting.join(', '):''].filter(Boolean).join('\n');
- const others=openIdleChatWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,auditControllerRef,except:chatKey});
- const finish=(status,feedbackText,wake)=>{
+ openIdleSoloWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,except:chatKey});
+ const finish=(status,feedbackText)=>{
   state.payload.activeUnitId=activeIdsOf(state)[0]??null;
   writeJson(repoFile(root,stateRel(campaignPath)),state);
-  const wakes=[...(wake?[wake]:[]),...others];
-  return {status,feedbackText,wake:wakes[0]??null,wakes};
+  return {status,feedbackText};
  };
  const remaining=activeIdsOf(state,chatKey);
  if(remaining.length){
@@ -451,19 +396,21 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
    // Full feedback is durable in the discovery folder; the typed wake carries a bounded excerpt.
    const feedbackRel=pathJoin(campaignPath,'DISCOVERY_FEEDBACK_v1.md');
    fs.writeFileSync(repoFile(root,feedbackRel),text+'\n');
-   const excerpt=text.length>1500?text.slice(0,1500)+'\n… full feedback: '+feedbackRel:text+'\n(Also saved at '+feedbackRel+')';
-   return finish('DISCOVERY_REWORK',text,wakeFor({root,directory,ids:remaining,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:excerpt}));
+   return finish('DISCOVERY_REWORK',text);
   }
   // Some units still unsubmitted and nothing failed: the reviewer is mid-window; no wake.
-  return finish('DISCOVERY_PARTIAL',summary,null);
+  return finish('DISCOVERY_PARTIAL',summary);
  }
  const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey});
  if(ids.length){
-   const next=wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:summary});
-   const self=state.payload.sequentialSingleReviewer?'\nDISCOVERY_NEXT: lite-solo-agent must complete the next ATTACK window in this same chat immediately after reading this result.\n'+Buffer.from(next.messageB64,'base64').toString('utf8'):'';
-   return finish('DISCOVERY_NEXT',summary+self,next);
+  const role=state.payload.units[ids[0]].role;
+  const indexPath=writeDiscoveryWindowIndexV1({root,campaignPath,ids,role});
+  const label=role==='ATTACK'?'adversarial ATTACK':'correctness/FLOW';
+  const next='DISCOVERY_NEXT: complete the '+label+' window in the current agent. Read unit packets for '+ids.join(', ')+
+    (indexPath?' (index '+indexPath+')':'')+', then submit one discovery boundary request.';
+  return finish('DISCOVERY_NEXT',summary+'\n'+next);
  }
  // This reviewer's discovery share is done; the other reviewer may still be working.
- if(activeIdsOf(state).length)return finish('DISCOVERY_PARTIAL',summary+'\nAll of your discovery units are complete; the other discovery reviewer is still working.',null);
+ if(activeIdsOf(state).length)return finish('DISCOVERY_PARTIAL',summary+'\nSome discovery units remain active; inspect the discovery state.');
  return completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});
 }
