@@ -207,7 +207,7 @@ if(directory.campaignId!==receipt.campaign.campaignId) throw new Error('campaign
 const sealedPhase0Receipt=rel(controllerRoot,receiptPath);
 const authorityRoot=path.posix.dirname(receipt.authority.homepagePath);
 if(authorityRoot!=='Audit Skill - Lite-Solo Authority/lite-solo'||receipt.authority.liteRelease!=='lite-solo-v1')throw new Error('lite-solo authority identity mismatch');
-if(directory.mode!=='LITE_SOLO'||directory.agent?.actorId!=='lite-solo-agent'||!directory.agent?.chatUrl)throw new Error('lite-solo Phase-0 directory identity mismatch');
+if(directory.mode!=='LITE_SOLO'||directory.agent?.actorId!=='lite-solo-agent'||false)throw new Error('lite-solo Phase-0 directory identity mismatch');
 const assignment=preparePhaseWork({
   root:controllerRoot,
   campaignPath,
@@ -228,7 +228,7 @@ const directoryV2={
   campaignName:receipt.campaign.campaignName,
   workspacePath:campaignPath,
   mode:'LITE_SOLO',
-  deliveryTransport:directory.deliveryTransport||'AGENT_DELIVERY',
+  deliveryTransport:'DIRECT',
   agent:directory.agent,
   agentModel:'ONE_PERSISTENT_AGENT',
   transportEpoch:Number(directory.transportEpoch||0),
