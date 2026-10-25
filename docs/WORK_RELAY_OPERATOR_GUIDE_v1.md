@@ -1,12 +1,12 @@
-# ChatGPT Work Relay — Operator and Repair Instructions v1
+# Agent Delivery — Operator and Repair Instructions v1
 
 ## Purpose and strict isolation
 
-This is the optional `CHATGPT_WORK` campaign transport. The original `GITHUB_BROWSER` wake workflow, X11 browser sender, browser watchdog, and `WAKE_ACK` mechanism remain independent and unchanged. Neither transport changes audit phase validation, audit authority, or test authorization.
+This is the optional `AGENT_DELIVERY` campaign transport. The original `GITHUB_BROWSER` wake workflow, X11 browser sender, browser watchdog, and `WAKE_ACK` mechanism remain independent and unchanged. Neither transport changes audit phase validation, audit authority, or test authorization.
 
 ## Start a new Work-mode campaign
 
-Run `.github/workflows/audit-source-initialization-v1.yml`, choose `delivery_transport=CHATGPT_WORK`, and supply the same seven existing reviewer/master/test/standby chat URLs. The initializer creates exactly one command document in `curveyield3/Audit-Controller`:
+Run `.github/workflows/audit-source-initialization-v1.yml`, choose `delivery_transport=AGENT_DELIVERY`, and supply the same seven existing reviewer/master/test/standby chat URLs. The initializer creates exactly one command document in `curveyield3/Audit-Controller`:
 
 `campaigns/<CAMPAIGN_NAME>/work/browser/DELIVERY_COMMAND_v1.md`
 
@@ -41,9 +41,9 @@ The scheduled branch of `lite-work-relay-v1.yml` runs every five minutes (subjec
 
 ## Mid-campaign change or transport repair
 
-Use the existing new Work-relay workflow's manual dispatch with `operation=switch`, exact `campaign_id`, and `target_mode=GITHUB_BROWSER` or `CHATGPT_WORK`. The switch increments the delivery epoch, preserves all substantive audit artifacts and bound chat URLs, and directs further messages only through the selected path. Do not switch based on a failed audit test or rejected reviewer work: switch only for repeated **transport** failure and verify the other option is ready.
+Use the existing new Work-relay workflow's manual dispatch with `operation=switch`, exact `campaign_id`, and `target_mode=GITHUB_BROWSER` or `AGENT_DELIVERY`. The switch increments the delivery epoch, preserves all substantive audit artifacts and bound chat URLs, and directs further messages only through the selected path. Do not switch based on a failed audit test or rejected reviewer work: switch only for repeated **transport** failure and verify the other option is ready.
 
-After three successive thirty-minute windows without a valid Work command check-in, classify the Work transport `UNCONFIRMED`; have a repair agent inspect GitHub permissions, Work task activity, browser-extension access, and exact chat availability. If Work delivery still cannot be restored but the original browser path is ready, the repair agent should dispatch `operation=switch`, `target_mode=GITHUB_BROWSER`. Conversely, repeated verified original browser transport failure warrants switching to `CHATGPT_WORK` **only once** the dedicated Work relay session is visibly active. Avoid flip-flopping modes without new failure evidence.
+After three successive thirty-minute windows without a valid Work command check-in, classify the Work transport `UNCONFIRMED`; have a repair agent inspect GitHub permissions, Work task activity, browser-extension access, and exact chat availability. If Work delivery still cannot be restored but the original browser path is ready, the repair agent should dispatch `operation=switch`, `target_mode=GITHUB_BROWSER`. Conversely, repeated verified original browser transport failure warrants switching to `AGENT_DELIVERY` **only once** the dedicated Work relay session is visibly active. Avoid flip-flopping modes without new failure evidence.
 
 Current assignments, submitted shards, receipts, master decisions, and prior validation errors remain unchanged during switching. A switch is not authorization to run simulation tests. Existing controller and reviewer start instructions continue to govern audit work.
 
