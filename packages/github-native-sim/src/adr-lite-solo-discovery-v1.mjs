@@ -397,7 +397,7 @@ export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,a
  const message='CONTROLLER: Phase 4 discovery is complete. Phase 4 is now ACTIVE for lite-solo-agent. Follow phases/phase-4/START_HERE.md of the bound authority: Step 1 reconciles every record prefilled from work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json, then complete Steps 2 and 3 and invoke controller validation as usual.';
  return {status:'DISCOVERY_COMPLETE',feedbackText:message,summary};
 }
-export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,now,auditControllerRef='main'}){
+export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,readyUnitIds=[unitId],now,auditControllerRef='main'}){
  const state=known(root,stateRel(campaignPath));
  if(!state)throw new Error('discovery state missing');
  const unitState=state.payload.units[unitId];
@@ -410,9 +410,13 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   arr(state.payload.gaps).some(x=>x.unitId===unitId&&x.code==='VALIDATION_ATTEMPTS_EXHAUSTED');
  if(!active.includes(unitId)&&!legacyGapRecovery)return {status:'DISCOVERY_STALE_REQUEST',
   feedbackText:'Unit '+unitId+' is not active. Current active unit: '+(active[0]??'none')+'; '+active.length+' unit(s) active. No action taken.'};
- // The boundary request names the one completed unit for validation. Every other
- // active submission remains a draft, regardless of whether its file exists.
- const requestedUnits=[unitId];
+ // Only explicitly submitted ready IDs are validated. An existing submission file
+ // alone never implies readiness. Bounds prevent one expensive unbounded review.
+ if(!Array.isArray(readyUnitIds)||readyUnitIds.length<1||readyUnitIds.length>4||
+   readyUnitIds[0]!==unitId||new Set(readyUnitIds).size!==readyUnitIds.length||
+   readyUnitIds.some(id=>!active.includes(id)&&id!==unitId))
+  throw new Error('invalid explicit ready discovery unit batch');
+ const requestedUnits=readyUnitIds;
  const inventory=getInputs({root,campaignPath,automationRoot}).inventory;
  const accepted=[],rework=[],waiting=[],unchanged=[],feedback=[];
  for(const id of requestedUnits){
