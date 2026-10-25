@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import {independentSpecItemsV13} from '../packages/github-native-sim/src/adr-lite-solo-independent-spec-v1.mjs';
 import {secureShardWorkFormV13,secureRestoreWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
 const required=[
  'scripts/lite-solo-phase-controller-v1.mjs',
@@ -84,6 +85,18 @@ try {
  if(!rejected)throw Error('tampered lite-solo locked base fragment was accepted');
 } finally {fs.rmSync(workRoot,{recursive:true,force:true});}
 console.log('PASS: 64KiB-bounded large immutable solo BASE sharding, full round trip, and tamper rejection');
+
+
+const specFixture=fs.mkdtempSync(path.join(os.tmpdir(),'lite-solo-spec-all-rules-'));
+try{
+ const sourceRoot=path.join(specFixture,'campaigns','fixture','source');
+ fs.mkdirSync(sourceRoot,{recursive:true});
+ fs.writeFileSync(path.join(sourceRoot,'README.md'),Array.from({length:30},(_,i)=>'The settle operation must validate independent policy rule '+(i+1)).join('\n'));
+ const result=independentSpecItemsV13({root:specFixture,campaignPath:'campaigns/fixture',
+  context:{contextId:'CTX-SOLO-FIXTURE',path:'src/Mock.sol',lineStart:1,canonicalSignature:'settle(uint256)'},otherContexts:[]});
+ if(result.documentationItems.length!==30)throw Error('solo independent-spec reader lost matching documentation rules');
+}finally{fs.rmSync(specFixture,{recursive:true,force:true});}
+console.log('PASS: solo independent-spec reader retains all 30 documented rules without truncation');
 
 console.log('PASS: static fork inventory, controller routing, source sharding and zero chat or message delivery');
 
