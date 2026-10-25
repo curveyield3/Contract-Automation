@@ -978,6 +978,82 @@ if(reviewKind==='master'){
       emit('MASTER_TESTS_REQUESTED',feedback,{testReviewer:assignment.assignedReviewer,testPlanPath:assignment.planPath,testResultPath:assignment.resultPath,testRequestId:assignment.requestId});
     }catch(error){emit('MASTER_REVIEW_INVALID','Invalid targeted-test directive: '+String(error?.message??error));}
   }
+  if(result.status==='MASTER_REVIEW_CLOSE_INCOMPLETE_READY'){
+    // Do not reclassify master acceptance or final security as PASS. This
+    // administrative closure is available only after the existing owner
+    // deferral, exact sealed-record integrity validation and Phase-10 gaps.
+    const unresolved=unresolvedFinalCandidateFailures({root,campaignPath,directory});
+    if(!unresolved.length)
+      emit('MASTER_REVIEW_INVALID','CLOSE_INCOMPLETE requires unresolved material candidates; do not use to replace an eligible normal final review');
+    const closureRel=path.posix.join(campaignPath,'controller/INCOMPLETE_CLOSURE_v1.json');
+    if(existing(root,closureRel))
+      emit('MASTER_REVIEW_INVALID','An incomplete-closure record already exists; refusing overwrite');
+    const phase5=canonicalFor(root,campaignPath,5);
+    const deferral=inspectPhase5OwnerEvidenceDeferralV1({
+      controllerRoot:root,campaignPath,campaignId:directory.campaignId,
+      sourceSha256:directory.sourceSha256,
+      targetDesigns:phaseOutput(phase5,'step-3','targetDesigns')??[]
+    });
+    if(!deferral || phase5?.automationOutputs?.phase5MachineExecutionGate?.ownerDirectivePath!==deferral.path)
+      emit('MASTER_REVIEW_INVALID','No exact authenticated owner directive preserving the Phase-5 no-tests disposition');
+    const closure={
+      schemaVersion:'curveyield-lite-closed-incomplete-v1',
+      campaignId:directory.campaignId,
+      campaignGenerationId:directory.campaignGenerationId,
+      segmentId:pending.segmentId,
+      finalStatus:'CLOSED_INCOMPLETE',
+      securityAssurance:'NOT_SECURITY_CLEARED',
+      detectionQualification:'NOT_YET_QUALIFIED',
+      coverageLabel:result.incompleteEvidence.coverageLabel,
+      coverageGapCount:result.incompleteEvidence.coverageGapCount,
+      contradictedContextIds:result.incompleteEvidence.contradictedContexts,
+      blockedObligationIds:result.incompleteEvidence.blockedObligationIds,
+      deferredCandidates:['CAND-001','CAND-002','CAND-003'],
+      unresolvedMaterialCandidateFailures:unresolved,
+      approvedNoFurtherTestsOwnerDirective:deferral.path,
+      phase9Disposition:'SKIPPED_NO_REMEDIATION',
+      phase10ReceiptPath:pending.lastSealedReceiptPath,
+      coverageMatrixPath:path.posix.join(campaignPath,'work/phase-10/COVERAGE_MATRIX_v1.json'),
+      masterRecordPath:pending.recordPath,
+      dispositionMeaning:'Administrative evidence-limited terminal closure, NOT master acceptance, audit PASS, COMPLETE, or security clearance. Prior conditional source findings remain supported; unresolved governance and property obligations remain open.',
+      createdAt:now
+    };
+    const record=readJson(requiredFile(root,pending.recordPath,'master review record'));
+    record.decision={
+      outcome:'CLOSE_INCOMPLETE',
+      decisionStatus:'CLOSED_INCOMPLETE',
+      accepted:false,
+      securityAssurance:'NOT_SECURITY_CLEARED',
+      summary:result.summary,
+      submittedAt:now,
+      closurePath:closureRel,
+      retainedUnresolvedMaterialCandidates:unresolved
+    };
+    record.updatedAt=now;
+    writeJson(repoFile(root,closureRel),closure);
+    writeJson(repoFile(root,pending.recordPath),record);
+    directory.lastClosedMasterReview={
+      segmentId:pending.segmentId,outcome:'CLOSE_INCOMPLETE',
+      recordPath:pending.recordPath,closurePath:closureRel,
+      coverageLabel:closure.coverageLabel,
+      securityAssurance:closure.securityAssurance,
+      closedAt:now
+    };
+    delete directory.pendingMasterReview;
+    directory.currentAssignment=null;
+    directory.campaignStatus='CLOSED_INCOMPLETE';
+    directory.lastSealedReceiptPath=pending.lastSealedReceiptPath;
+    directory.updatedAt=now;
+    writeJson(directoryFile,directory);
+    emit('CLOSED_INCOMPLETE',
+      'MASTER_REVIEW_CLOSED_INCOMPLETE: '+pending.segmentId+
+      '. Final evidence is PARTIAL_COVERAGE, NOT_YET_QUALIFIED and NOT_SECURITY_CLEARED; '+
+      result.incompleteEvidence.coverageGapCount+' uncovered property contexts and '+
+      result.incompleteEvidence.blockedObligationIds.length+
+      ' blocked obligations preserved. No new tests or security PASS authorized. Closure: '+closureRel,
+      {masterReviewAccepted:false,masterOutcome:'CLOSE_INCOMPLETE',
+        terminalIncomplete:true,closurePath:closureRel,securityAssurance:'NOT_SECURITY_CLEARED'});
+  }
   if(['MASTER_REVIEW_ACCEPTED','MASTER_AMENDMENT_READY_FOR_REFRESH'].includes(result.status)){
     const evidenceFailures=verifyMasterTargetedTestEvidence({root,campaignPath,directory});
     if(evidenceFailures.length)emit('MASTER_REVIEW_INVALID','Master-directed targeted-test evidence failed exact revalidation: '+evidenceFailures.join('; '));
@@ -985,7 +1061,7 @@ if(reviewKind==='master'){
   // A sealed Phase-5 machine failure cannot be accepted unchanged at any
   // bound master-review segment containing Phase 5. An amended segment is
   // reexecuted through the mandatory pre-seal gate.
-  if(result.status==='MASTER_REVIEW_ACCEPTED'&&pending.boundaryPhase===10){
+  if(['MASTER_REVIEW_ACCEPTED','MASTER_AMENDMENT_READY_FOR_REFRESH'].includes(result.status)&&pending.boundaryPhase===10){
     const unresolved=unresolvedFinalCandidateFailures({root,campaignPath,directory});
     if(unresolved.length)emit('MASTER_REVIEW_INVALID','Final audit cannot COMPLETE with unresolved material candidates. Request reviewer-directed targeted tests: '+unresolved.join('; '));
   }
