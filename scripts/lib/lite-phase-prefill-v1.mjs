@@ -810,6 +810,59 @@ function compact(v){
   if(v&&typeof v==='object')return JSON.stringify(v);
   return String(v??'NONE_IDENTIFIED');
 }
+// Separate a finding's retained prior evidence from the execution state of
+// the CURRENT phase. A missing new harness cannot negate an older proof.
+export function buildCandidateEvidenceContinuityV1({phase5,phase6}){
+  const prior=phase5?.actions?.['step-2']?.outputs?.reconciliationRecords??[];
+  const runs=phase6?.actions?.['step-2']?.outputs?.targetDispositions??[];
+  const proofs=phase6?.actions?.['step-5']?.outputs?.candidateProofRecords??[];
+  const byKey=new Map(runs.filter(x=>x&&typeof x==='object'&&x.candidateKey).map(x=>[String(x.candidateKey),x]));
+  const priorCounts=new Map(),proofCounts=new Map();
+  for(const x of prior)if(x&&typeof x==='object'&&x.sourceAnchor)
+    priorCounts.set(x.sourceAnchor,(priorCounts.get(x.sourceAnchor)??0)+1);
+  for(const x of proofs)if(x&&typeof x==='object'&&x.sourceAnchor)
+    proofCounts.set(x.sourceAnchor,(proofCounts.get(x.sourceAnchor)??0)+1);
+  return prior.filter(x=>x&&typeof x==='object'&&x.subjectKey).map(x=>{
+    const execution=byKey.get(String(x.subjectKey));
+    const proof=priorCounts.get(x.sourceAnchor)===1&&proofCounts.get(x.sourceAnchor)===1
+      ?proofs.find(y=>y&&typeof y==='object'&&y.sourceAnchor===x.sourceAnchor):null;
+    return {
+      candidateKey:String(x.subjectKey),
+      sourceAnchor:x.sourceAnchor??'UNBOUND_SOURCE_ANCHOR',
+      priorEvidenceInterpretation:x.priorConclusion??'NOT_RECORDED',
+      priorEvidenceDisposition:x.disposition??'NOT_RECORDED',
+      priorEvidenceBasis:'REVIEWER_INTERPRETATION_NOT_AUTOMATICALLY_REVALIDATED',
+      currentPhaseExecutionStatus:execution?.reproductionStatus??'NO_PHASE6_EXECUTION_STATUS',
+      currentPhaseOracleOutcome:execution?.oracleOutcome??'NO_PHASE6_ORACLE',
+      phase6ProofVerdict:proof?.verdict??'NOT_LINKED_OR_UNRESOLVED',
+      phase6ProofCandidateKey:proof?.candidateKey??null,
+      phase6ExecutionRounds:proof?.dispatchRounds??null,
+      residualLimitation:execution?.limitations??x.downstreamValidationNeed??'SEE_ACCEPTED_SOURCE_EVIDENCE'
+    };
+  });
+}
+function nestedUnresolvedEvidenceV1(sourceActions,controllerOutputs){
+  const rows=[];
+  for(const r of sourceActions?.['step-2']?.outputs?.targetDispositions??[]){
+    if(!r||typeof r!=='object'||Array.isArray(r))continue;
+    if(['DEFERRED_UNVERIFIED','INCONCLUSIVE','UNRESOLVED','NOT_EXECUTED'].includes(String(r.reproductionStatus??''))||
+       ['DEFERRED_UNVERIFIED','INCONCLUSIVE','UNRESOLVED'].includes(String(r.oracleOutcome??'')))
+      rows.push('Candidate '+r.candidateKey+': current-phase machine status '+r.reproductionStatus+'; earlier evidence remains separately evaluated');
+  }
+  for(const r of sourceActions?.['step-5']?.outputs?.candidateProofRecords??[]){
+    if(!r||typeof r!=='object'||Array.isArray(r))continue;
+    if(['INCONCLUSIVE','NOT_EXECUTED','DEFERRED_UNVERIFIED'].includes(String(r.verdict??''))||
+       ['NOT_EXECUTED','DEFERRED_UNVERIFIED'].includes(String(r.phase5Result??'')))
+      rows.push('Candidate '+r.candidateKey+': current-phase proof '+r.verdict+'; prior finding not automatically disproved');
+  }
+  for(const r of sourceActions?.['step-3']?.outputs?.obligationDispositions??[]){
+    if(r&&typeof r==='object'&&!Array.isArray(r)&&r.disposition==='BLOCKED_CARRIED')
+      rows.push('Open security obligation '+r.obligationId+' (BLOCKED_CARRIED to Phase '+r.carryForwardPhaseOrNone+')');
+  }
+  const gate=controllerOutputs.find(x=>x.key==='phase5MachineExecutionGate')?.value;
+  if(gate?.status==='DEFERRED_UNVERIFIED')rows.push('Phase-5 machine evidence DEFERRED_UNVERIFIED; controller phase PASS is not a machine/security PASS');
+  return [...new Set(rows)];
+}
 export function renderControllerPhaseReport({schema,form,canonical}){
   const phase=schema.phase;
   const sourceActions=canonical?.actions??form?.actions??{};
@@ -828,7 +881,19 @@ export function renderControllerPhaseReport({schema,form,canonical}){
     ...controllerOutputs.filter(x=>/unresolved/i.test(x.key))
   ];
   const limitations=limitationRows.map(x=>`- ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
-  const unresolved=unresolvedRows.map(x=>`- ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
+  const nestedUnresolved=nestedUnresolvedEvidenceV1(sourceActions,controllerOutputs);
+  const unresolved=[...unresolvedRows.map(x=>'- '+x.key+': '+compact(x.value)),
+    ...nestedUnresolved.map(x=>'- '+x)].join('\n')||'- NONE_IDENTIFIED';
+  const continuity=canonical?.automationOutputs?.candidateEvidenceContinuity??[];
+  const reconcile=sourceActions?.['step-2']?.outputs?.reconciliationRecords??[];
+  const lines=Array.isArray(continuity)&&continuity.length
+    ?continuity.map(x=>'- '+x.candidateKey+': PRIOR EVIDENCE — '+x.priorEvidenceInterpretation+
+        ' | CURRENT PHASE — '+x.currentPhaseExecutionStatus+
+        ' | PHASE-6 PROOF — '+x.phase6ProofVerdict+' | LIMITATION — '+x.residualLimitation)
+    :reconcile.filter(x=>x&&typeof x==='object'&&x.subjectKey)
+      .map(x=>'- '+x.subjectKey+': PRIOR EVIDENCE — '+String(x.priorConclusion??'NOT_RECORDED')+
+        ' | CURRENT-PHASE DISPOSITION — '+String(x.disposition??'NOT_RECORDED'));
+  const continuitySection=lines.length?'\n## Prior Evidence vs New Execution\n\n'+lines.join('\n')+'\n':'';
   return `# Phase ${phase} Final Report
 
 > **CONTROLLER-GENERATED:** Deterministically rendered from the accepted schema-governed work form and controller-owned outputs. No hashes, handoff bookkeeping, or predecessor restatement is authored by the reviewer.
@@ -840,7 +905,7 @@ ${text(executive)}
 ## Material Results
 
 ${material}
-
+${continuitySection}
 ## Limitations
 
 ${limitations}
