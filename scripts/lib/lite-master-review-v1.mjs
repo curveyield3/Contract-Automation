@@ -176,7 +176,7 @@ function bindingRecord({root,campaignPath,directory,predecessor,authorityRoot,re
   };
 }
 
-export const MASTER_OUTCOMES_V1=Object.freeze(['AMENDED','ACCEPT_WITHOUT_MODIFICATIONS','REQUEST_TARGETED_TESTS']);
+export const MASTER_OUTCOMES_V1=Object.freeze(['AMENDED','ACCEPT_WITHOUT_MODIFICATIONS','REQUEST_TARGETED_TESTS','CLOSE_INCOMPLETE']);
 export const SUPERSEDED_DIRECTORY_V1='superseded';
 
 function gitBlobSha1(bytes){return createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');}
@@ -473,6 +473,68 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
     return {status:'MASTER_TARGETED_TESTS_REQUEST_READY',failures:[],record,pending,segment,outcome};
   if((pending.targetedTests??[]).some(x=>x.status!=='EVIDENCE_SUBMITTED'))
     return {status:'MASTER_REVIEW_INVALID',failures:['required targeted-test assignment has not returned verified evidence'],record,pending};
+  if(outcome==='CLOSE_INCOMPLETE'){
+    // Administrative terminal close, NOT master acceptance or security PASS.
+    // Only this owner-deferred historical campaign may use it. It never replays
+    // Phase 5, creates a test directive, or alters a sealed audit artifact.
+    if(directory.campaignId!=='live-ethereum-dai-6b175474-r2'||
+       pending.segmentId!=='reviewer-4-phases-08-10'||
+       pending.boundaryPhase!==10||
+       pending.successorPlan?.nextPhaseSequence!==null)
+      failures.push('CLOSE_INCOMPLETE requires the exact DAI r2 terminal Phase-10 segment');
+    if(changed.length)
+      failures.push('CLOSE_INCOMPLETE cannot amend sealed work forms; found changes: '+
+        changed.map(x=>x.sealed.path).join(', '));
+    if((pending.targetedTests??[]).length)
+      failures.push('CLOSE_INCOMPLETE cannot bypass pending master-targeted-test directives');
+    if(!String(summary??'').includes('NOT_SECURITY_CLEARED'))
+      failures.push('CLOSE_INCOMPLETE summary must explicitly state NOT_SECURITY_CLEARED');
+    try{
+      const matrix=readJson(requiredFile(root,path.posix.join(campaignPath,
+        'work/phase-10/COVERAGE_MATRIX_v1.json'),'final coverage matrix'));
+      const form=readJson(requiredFile(root,path.posix.join(campaignPath,
+        'work/phase-10/PHASE_10_WORK_FORM_v1.json'),'final reviewer verdict'));
+      const ledger=readJson(requiredFile(root,path.posix.join(campaignPath,
+        'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),'final obligation ledger'));
+      const phase9=readJson(requiredFile(root,path.posix.join(campaignPath,
+        'receipts/PHASE_09_RECEIPT_v1.json'),'Phase-9 skip receipt'));
+      const verdict=String(form?.actions?.['step-3']?.outputs?.liteVerdict??'');
+      const incompleteVerdict=verdict.includes('PARTIAL_COVERAGE')&&
+        verdict.includes('NOT_YET_QUALIFIED')&&verdict.includes('NOT_SECURITY_CLEARED')&&
+        verdict.includes('INCONCLUSIVE_MATERIAL_SECURITY_ASSURANCE');
+      const rows=matrix?.rows??[];
+      const blocked=(ledger?.obligations??[]).filter(x=>x.status==='BLOCKED_CARRIED').map(x=>x.obligationId);
+      const phase9Raw=JSON.stringify(phase9);
+      if(!incompleteVerdict)failures.push('Phase-10 reviewer verdict does not explicitly state materially incomplete/non-cleared assurance');
+      if(matrix?.label!=='PARTIAL_COVERAGE'||!Number.isInteger(matrix.gapCount)||matrix.gapCount<1||
+         !Array.isArray(rows)||rows.length!==matrix.gapCount||
+         !rows.some(x=>x.reviewStatus==='CONTRADICTED')||
+         !rows.every(x=>x.testStatus==='INCONCLUSIVE'))
+        failures.push('Phase-10 coverage matrix does not prove nonzero unresolved, fully inconclusive property-test gaps');
+      if(!['OBL-P3-CUSTOM-LIVE-WARD','OBL-P3-AUTO-DOM-015','OBL-P3-AUTO-DOM-019']
+        .every(id=>blocked.includes(id)))
+        failures.push('The three material blocked obligations must remain BLOCKED_CARRIED');
+      if(!phase9Raw.includes('SKIPPED_NO_REMEDIATION'))
+        failures.push('Phase 9 must remain explicitly SKIPPED_NO_REMEDIATION');
+      const phase5=readJson(requiredFile(root,canonicalRel(campaignPath,5),'Phase-5 canonical data'));
+      if(phase5?.automationOutputs?.phase5MachineExecutionGate?.status!=='DEFERRED_UNVERIFIED')
+        failures.push('DAI owner-deferred Phase-5 machine status was modified');
+      const continuity=readJson(requiredFile(root,canonicalRel(campaignPath,10),'Phase-10 canonical data'))
+        ?.automationOutputs?.candidateEvidenceContinuity??[];
+      if(!['CAND-001','CAND-002','CAND-003'].every(id=>continuity.some(x=>
+        x.candidateKey===id&&x.currentPhaseExecutionStatus==='DEFERRED_UNVERIFIED'&&
+        x.phase6ProofVerdict==='INCONCLUSIVE')))
+        failures.push('All three evidence-continuity records must preserve their unexecuted/inconclusive status');
+      if(!failures.length)return {status:'MASTER_REVIEW_CLOSE_INCOMPLETE_READY',
+        failures:[],record,pending,segment,outcome,summary,amendedForms:[],successorPlan:pending.successorPlan,
+        incompleteEvidence:{coverageLabel:matrix.label,coverageGapCount:matrix.gapCount,
+          contradictedContexts:rows.filter(x=>x.reviewStatus==='CONTRADICTED').map(x=>x.contextId),
+          blockedObligationIds:blocked,candidateExecutionStatus:'DEFERRED_UNVERIFIED',
+          securityAssurance:'NOT_SECURITY_CLEARED',detectionQualification:'NOT_YET_QUALIFIED',
+          phase9Disposition:'SKIPPED_NO_REMEDIATION'}};
+    }catch(error){failures.push('Cannot validate incomplete-closure evidence: '+String(error?.message??error));}
+    return {status:'MASTER_REVIEW_INVALID',failures,record,pending};
+  }
   if(outcome==='ACCEPT_WITHOUT_MODIFICATIONS'){
     if(changed.length)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT_WITHOUT_MODIFICATIONS was submitted but work forms changed; submit AMENDED instead: '+changed.map(x=>x.sealed.path).join(', ')],record,pending};
     return {status:'MASTER_REVIEW_ACCEPTED',failures:[],record,pending,segment,outcome,summary,amendedForms:[],successorPlan:pending.successorPlan};
