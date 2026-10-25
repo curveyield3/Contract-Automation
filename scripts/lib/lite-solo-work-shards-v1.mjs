@@ -136,6 +136,45 @@ export function writeDerivedInputPagesV1({root,rel,targetBytes=DERIVED_PAGE_TARG
 }
 
 
+
+export function verifyDerivedInputIndexV1({root,indexRel}={}){
+ const index=JSON.parse(fs.readFileSync(relfile(root,indexRel),'utf8'));
+ if(!['curveyield-lite-derived-input-index-v1','curveyield-lite-derived-input-large-index-v1'].includes(index.schemaVersion))
+  throw new Error('unsupported derived reading-index schema');
+ if(typeof index.sourcePath!=='string'||!index.sourcePath.startsWith('campaigns/')||
+    index.sourcePath.split('/').includes('..'))throw new Error('unsafe derived reading-index source path');
+ if(path.posix.dirname(index.sourcePath)!==path.posix.dirname(indexRel))
+  throw new Error('derived reading-index source is not colocated');
+ const sourceBytes=fs.readFileSync(relfile(root,index.sourcePath));
+ if(sourceBytes.length!==index.sourceBytes||digest(sourceBytes)!==index.sourceSha256)
+  throw new Error('derived source changed since reading view was generated');
+ if(index.schemaVersion==='curveyield-lite-derived-input-large-index-v1')return {status:'CANONICAL_SOURCE_REQUIRED',sourcePath:index.sourcePath};
+ if(!Array.isArray(index.sections))throw new Error('derived index missing sections');
+ const seen=new Set();
+ for(const section of index.sections){
+  let offset=0,count=0;
+  for(const page of section.pages??[]){
+   if(typeof page.path!=='string'||path.posix.dirname(page.path)!==path.posix.dirname(indexRel)||
+      !path.posix.basename(page.path).startsWith(path.posix.basename(index.sourcePath).replace(/_v[0-9]+\.json$/,'')+'_SECTION_'))
+    throw new Error('invalid derived section page path');
+   if(seen.has(page.path))throw new Error('duplicate derived section page');
+   seen.add(page.path);
+   const bytes=fs.readFileSync(relfile(root,page.path));
+   if(bytes.length!==page.bytes||digest(bytes)!==page.sha256)
+    throw new Error('derived reading page hash/byte length mismatch');
+   const body=JSON.parse(bytes.toString('utf8'));
+   if(body.sourceSha256!==index.sourceSha256||body.sourcePath!==index.sourcePath||
+      body.sectionId!==section.sectionId||JSON.stringify(body.fieldPath)!==JSON.stringify(section.fieldPath)||
+      body.offset!==offset||!Array.isArray(body.items)||body.items.length!==page.count)
+    throw new Error('derived reading page lineage/offset mismatch');
+   offset+=body.items.length;count+=body.items.length;
+  }
+  if(count!==section.itemCount||section.pageCount!==(section.pages??[]).length)
+   throw new Error('derived reading section has omitted or repeated items');
+ }
+ return {status:'VERIFIED',sourcePath:index.sourcePath,sectionCount:index.sections.length,pageCount:seen.size};
+}
+
 // Group large arrays into no more than 25 records and no more than 64 KiB per shard.
 // Small editable arrays and scalar fields remain in the BASE shard.
 export function shardWorkFormV1({root,formRel,phase,retireFull=true,force=false}){
