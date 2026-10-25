@@ -264,7 +264,47 @@ function sweepOne(campaign){
       }
     }else if(s.queue.length){s.current=s.queue.shift();changed=true;}
     else{
-      const assignment=d.currentAssignment||{},who=assignment.reviewer||d.currentReviewer;
+      // Recover missing dispatches directly from the canonical, already-published
+      // controller state. The watchdog only sends instructions; it never advances
+      // an audit boundary or creates a receipt.
+      const assignment=d.currentAssignment||{};
+      const expectedChat=r.agentChats?.[assignment.reviewer];
+      const waiting=assignment.status==='WAITING_FOR_SUCCESSOR_AGENT' &&
+        d.campaignStatus==='WAITING_FOR_SUCCESSOR_AGENT';
+      const rework=assignment.status==='REWORK_REQUIRED';
+      const missedSuccessor=waiting && expectedChat &&
+        !(s.lastReceipt?.phaseId===assignment.phaseId &&
+          s.lastReceipt?.targetChatUrl===expectedChat);
+      const reworkIdentity=assignment.packetPath||assignment.workShardIndexPath||assignment.phaseId;
+      const missedRework=rework && expectedChat && s.lastReworkIdentity!==reworkIdentity;
+      const masterChat=d.masterReview?.chatUrl||r.agentChats?.['master-reviewer'];
+      const masterIdentity=d.pendingMasterReview?.segmentId||
+        d.pendingMasterReview?.recordPath||'MASTER_REVIEW';
+      const missedMaster=d.campaignStatus==='WAITING_FOR_MASTER_REVIEW'&&masterChat &&
+        s.lastMasterIdentity!==masterIdentity;
+      if(missedSuccessor||missedRework||missedMaster){
+        const target=missedMaster?masterChat:expectedChat;
+        const phaseId=missedMaster?'master-review':assignment.phaseId;
+        const identity=missedMaster?masterIdentity:reworkIdentity;
+        const kind=missedMaster?'master':missedRework?'rework':'successor';
+        const msg=missedMaster?
+          'MASTER REVIEW REQUIRED: '+campaign+'. Open the current Audit Campaign Directory and pendingMasterReview record in curveyield3/Audit-Controller. Complete the exact assigned segment following its bound audit skill authority, preserve all accepted evidence, and submit the master review through the existing controller pathway. Do not run tests without separate owner authorization.':
+          missedRework?
+          'CONTROLLER NEEDS_REWORK: '+campaign+' '+assignment.phaseId+'. Read the exact rejected packet '+assignment.packetPath+' in curveyield3/Audit-Controller and the authoritative current assignment. Repair the specific deficiencies while preserving accepted reviewer shards and sealed receipts; continue until controller PASS. Do not execute tests without separate owner authorization.':
+          'LITE AUDIT SUCCESSOR: '+campaign+' reviewer '+assignment.reviewer+' '+assignment.phaseId+
+          '. Canonical campaign: https://github.com/'+CONTROLLER+'/tree/main/'+pathUrl(d.workspacePath)+
+          '. Read the Phase 0 receipt for the exact bound Audit Skill authority, and follow its current phase START_HERE. Complete your assigned work and submit to the existing controller; do not repeat sealed phases or run tests without separate owner authorization.';
+        const id=createHash('sha256').update([campaign,epoch,kind,identity,target].join('\0')).digest('hex').slice(0,26);
+        s.current={commandId:id,wakeId:campaign+'-'+kind+'-'+id,phaseId,
+          workerRole:missedMaster?'master_reviewer':'reviewer',chatUrl:target,
+          message:msg,workspacePath:d.workspacePath,transportEpoch:epoch,
+          expectedCode:'COMPLETE-'+randomBytes(8).toString('hex').toUpperCase(),issuedAt:now()};
+        if(missedRework)s.lastReworkIdentity=reworkIdentity;
+        if(missedMaster)s.lastMasterIdentity=masterIdentity;
+        s.updatedAt=now();
+        return view(s);
+      }
+      const who=assignment.reviewer||d.currentReviewer;
       let chat=r.agentChats?.[who];
       let phaseId=assignment.phaseId||'phase-'+(assignment.phaseSequence||d.currentPhaseSequence);
       const special=['WAITING_FOR_MASTER_REVIEW','WAITING_FOR_TARGETED_TESTS','MASTER_TESTS_REQUESTED'];
