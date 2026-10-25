@@ -435,8 +435,11 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
    fs.mkdirSync(path.dirname(repoFile(root,pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json'))),{recursive:true});
    fs.writeFileSync(repoFile(root,pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json')),bytes);
    info.status='ACCEPTED';info.acceptedSubmissionSha=sha;
-   if(legacyGapRecovery)state.payload.gaps=arr(state.payload.gaps)
-    .filter(g=>!(g.unitId===id&&g.code==='VALIDATION_ATTEMPTS_EXHAUSTED'));
+   // Close a historical validation gap only on successful semantic validation,
+   // whether it was explicitly retried or reopened by the controller.
+   if(state.payload.reviewPolicy==='correctness-verdict-v13')
+    state.payload.gaps=arr(state.payload.gaps)
+     .filter(g=>!(g.unitId===id&&g.code==='VALIDATION_ATTEMPTS_EXHAUSTED'));
    if(packet.payload?.reviewPolicy==='correctness-verdict-v13')info.acceptedAt=now;
    accepted.push(id);
    continue;
@@ -491,6 +494,16 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
    const next=recordWindowV1({root,ids,state,campaignPath,authorityRoot});
    const detail='\nDISCOVERY_NEXT: lite-solo-agent must complete the '+next.role+' window before advancing. Active unit IDs: '+ids.join(', ')+(next.indexPath?' (index: '+next.indexPath+')':'')+'.';
    return finish('DISCOVERY_NEXT',summary+detail,next);
+ }
+ // Historical three-attempt gaps cannot silently finish correctness coverage.
+ // Reopen only those formerly failed units; do not redo accepted work.
+ const legacyGaps=state.payload.reviewPolicy==='correctness-verdict-v13'
+  ?state.payload.order.filter(id=>state.payload.units[id]?.status==='GAP_RECORDED'): [];
+ if(legacyGaps.length){
+  const reopen=legacyGaps.slice(0,SOLO_WINDOW_MAX_UNITS);
+  for(const id of reopen)state.payload.units[id].status='ACTIVE';
+  const next=recordWindowV1({root,ids:reopen,state,campaignPath,authorityRoot});
+  return finish('DISCOVERY_NEXT',summary+'\nPreviously exhausted correctness units require actual revalidation: '+reopen.join(', ')+'. No other work was discarded.',next);
  }
  // A partial state may remain only while current solo units await submission.
  if(activeIdsOf(state).length)return finish('DISCOVERY_PARTIAL',summary+'\nSome solo discovery units are still active.',null);
