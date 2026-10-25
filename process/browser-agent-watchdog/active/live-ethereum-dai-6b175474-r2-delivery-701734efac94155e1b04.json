@@ -49,8 +49,8 @@
     "consecutiveIdlePokes": 0,
     "consecutiveUnviewable": 0
   },
-  "watchdogRunId": "40166692544",
-  "watchdogSweepStartedAt": "2026-10-25T05:46:37Z",
+  "watchdogRunId": "40167654166",
+  "watchdogSweepStartedAt": "2026-10-25T06:03:01Z",
   "lastDecision": "WAITING_NO_CHATGPT_READ",
   "lastNoReadSweepAt": "2026-10-25T05:46:43Z",
   "elapsedSinceLastPokeMinutes": 37
