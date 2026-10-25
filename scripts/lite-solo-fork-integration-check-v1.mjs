@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import {secureShardWorkFormV13,secureRestoreWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
 const required=[
  'scripts/lite-solo-phase-controller-v1.mjs',
  'scripts/lib/lite-solo-phase-work-v1.mjs',
@@ -49,5 +51,39 @@ if(/discoveryWake|SUCCESSOR_DELIVERY_HOLD/.test(controller)||
  throw Error('Lite-Solo controller or Phase0 still carries a chat wake/delivery system');
 if(!fs.readFileSync('scripts/lite-solo-phase0-finalize-v1.mjs','utf8').includes("directory.deliveryTransport!=='DIRECT'"))
  throw Error('Lite-Solo Phase0 does not fail closed on a non-direct campaign');
+
+const workRoot=fs.mkdtempSync(path.join(os.tmpdir(),'lite-solo-locked-base-'));
+try {
+ const formRel='campaigns/solo-fixture/work/phase-01/PHASE_01_WORK_FORM_v1.json';
+ const file=path.join(workRoot,...formRel.split('/'));
+ fs.mkdirSync(path.dirname(file),{recursive:true});
+ const original={schemaVersion:'solo-work-form-fixture',automationInputs:{lockedFacts:'contract-and-source-bound-context:'.repeat(9500)},
+   actions:{'step-1':{section:'scope',outputs:{records:[{id:'REC-001',note:'evidence'},{id:'REC-002',note:'evidence'}]}}}};
+ fs.writeFileSync(file,JSON.stringify(original,null,2)+'\n');
+ const generated=secureShardWorkFormV13({root:workRoot,formRel,phase:1,retireFull:true});
+ if(!generated||!fs.existsSync(path.join(workRoot,...generated.indexRel.split('/'))) || fs.existsSync(file))
+   throw Error('solo protected sharding failed to retire full work form');
+ const shardDir=path.dirname(path.join(workRoot,...generated.indexRel.split('/')));
+ const desc=JSON.parse(fs.readFileSync(path.join(shardDir,'BASE_v1.json'),'utf8'));
+ if(desc.schemaVersion!=='curveyield-lite-solo-locked-base-v1'||desc.pages.length<2)
+   throw Error('large controller-owned base was not paginated');
+ for(const page of desc.pages){
+   if(fs.statSync(path.join(shardDir,page.file)).size>64*1024)
+     throw Error('solo locked-base fragment exceeded 64 KiB');
+ }
+ const restored=secureRestoreWorkFormV13({root:workRoot,indexRel:generated.indexRel});
+ if(JSON.stringify(JSON.parse(restored.content))!==JSON.stringify(original))
+   throw Error('solo immutable base and editable shards lost source-bound content');
+ const part=path.join(shardDir,desc.pages[0].file);
+ const saved=fs.readFileSync(part,'utf8');
+ const mutated=JSON.parse(saved);mutated.contentBase64='AAAA'+mutated.contentBase64.slice(4);
+ fs.writeFileSync(part,JSON.stringify(mutated,null,2)+'\n');
+ let rejected=false;
+ try { secureRestoreWorkFormV13({root:workRoot,indexRel:generated.indexRel}); }
+ catch { rejected=true; }
+ if(!rejected)throw Error('tampered lite-solo locked base fragment was accepted');
+} finally {fs.rmSync(workRoot,{recursive:true,force:true});}
+console.log('PASS: 64KiB-bounded large immutable solo BASE sharding, full round trip, and tamper rejection');
+
 console.log('PASS: static fork inventory, controller routing, source sharding and zero chat or message delivery');
 
