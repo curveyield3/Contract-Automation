@@ -120,7 +120,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main             -f campaign_id="$CAMPAIGN_ID"             -f campaign_name="${{ steps.finalize.outputs.campaign_name }}"             -f campaign_path="$CAMPAIGN_PATH"             -f audit_controller_ref="$AUDIT_CONTROLLER_REF"
+          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json?ref=main" --jq '.content')"
+          transport="$(printf '%s' "$encoded" | base64 -d | jq -r '.deliveryTransport // "GITHUB_BROWSER"')"
+          if [ "$transport" = CHATGPT_WORK ]; then
+            gh workflow run lite-work-relay-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              -f operation=successor -f campaign_id="$CAMPAIGN_ID" \
+              -f campaign_name="${{ steps.finalize.outputs.campaign_name }}" \
+              -f campaign_path="$CAMPAIGN_PATH" -f audit_controller_ref="$AUDIT_CONTROLLER_REF"
+          elif [ "$transport" = GITHUB_BROWSER ]; then
+            gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              -f campaign_id="$CAMPAIGN_ID" \
+              -f campaign_name="${{ steps.finalize.outputs.campaign_name }}" \
+              -f campaign_path="$CAMPAIGN_PATH" -f audit_controller_ref="$AUDIT_CONTROLLER_REF"
+          else
+            echo "::error::Unknown campaign delivery transport $transport"; exit 1
+          fi
 
       - name: Summarize
         shell: bash
