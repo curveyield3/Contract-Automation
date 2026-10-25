@@ -22,7 +22,7 @@ import {
   phase4CoverageFromForm,phase4DiscoveryCoverageV1,materializeValidatedFindings,resolveTargetExecutionRequestRef,
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
-} from './lib/lite-phase-prefill-v1.mjs';
+} from './lib/lite-solo-phase-prefill-v1.mjs';
 import {MASTER_REVIEW_SEGMENTS_V1,boundReviewerForPhaseV1,segmentsForAuthorityV1,isV13AuthorityV1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
 import {registerMasterTargetedTests,acceptMasterTargetedTestResults,verifyMasterTargetedTestEvidence,unresolvedFinalCandidateFailures} from './lib/lite-master-targeted-tests-v1.mjs';
 import {admitPostCompletionFollowupV1} from './lib/lite-post-completion-followup-v1.mjs';

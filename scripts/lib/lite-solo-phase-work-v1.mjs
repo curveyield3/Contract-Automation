@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {shardWorkFormV1,secureShardWorkFormV13} from './lite-work-shards-v1.mjs';
-import {applyPhaseBoundaryPrefill} from './lite-phase-prefill-v1.mjs';
+import {applyPhaseBoundaryPrefill} from './lite-solo-phase-prefill-v1.mjs';
 import {resolveFrozenAuthorityFileV1} from '../../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 
 export const EXPLICIT_NEGATIVES=new Set(['NONE_IDENTIFIED','NOT_APPLICABLE','NOT_TRIGGERED','NO_CANDIDATE','NO_REMEDIATION','INSUFFICIENT_EVIDENCE','UNRESOLVED','NO_ADDITIONAL_OBLIGATION','NO_CONTRADICTION']);
