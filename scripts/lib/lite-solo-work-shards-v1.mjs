@@ -58,7 +58,8 @@ export function writeDerivedInputPagesV1({root,rel,targetBytes=DERIVED_PAGE_TARG
    const body={schemaVersion:'curveyield-lite-derived-input-page-v1',sourcePath:rel,sourceSha256,
     sectionId,fieldPath,offset,items:chunk};
    const content=pretty(body),pageBytes=Buffer.byteLength(content);
-   if(pageBytes>targetBytes)throw new Error('derived input page exceeds actual stored-byte budget ('+pageBytes+' > '+targetBytes+'): '+pageRel);
+   if(pageBytes>targetBytes&&chunk.length!==1)
+    throw new Error('multi-record derived input page exceeds actual stored-byte budget ('+pageBytes+' > '+targetBytes+'): '+pageRel);
    fs.writeFileSync(relfile(root,pageRel),content);
    pages.push({path:pageRel,offset,count:chunk.length,bytes:pageBytes,sha256:digest(content)});
    writtenNames.add(file);offset+=chunk.length;chunk=[];
@@ -73,8 +74,18 @@ export function writeDerivedInputPagesV1({root,rel,targetBytes=DERIVED_PAGE_TARG
    if(chunk.length&&bytes(proposed)>targetBytes)emit();
    const single={schemaVersion:'curveyield-lite-derived-input-page-v1',sourcePath:rel,sourceSha256,
     sectionId,fieldPath,offset,items:[item]};
-   if(bytes(single)>targetBytes)
-    throw new Error('single derived input item exceeds actual stored-byte budget at '+JSON.stringify(fieldPath)+'['+i+']; split the source record before generating the derived input');
+   if(bytes(single)>targetBytes){
+    // Do not discard an indivisible security record or stop a phase merely
+    // because one source-bound item is larger than the preferred reading page.
+    // Its exact bytes and explicit oversized marker remain auditable.
+    if(chunk.length)emit();
+    chunk.push(item);
+    emit();
+    const last=pages.at(-1);
+    last.oversizedSingleItem=true;
+    last.recoveryInstruction='Read this single mandatory item in its entirety; it was not truncated.';
+    continue;
+   }
    chunk.push(item);
   }
   emit();
@@ -89,13 +100,35 @@ export function writeDerivedInputPagesV1({root,rel,targetBytes=DERIVED_PAGE_TARG
   if(!node||typeof node!=='object')return node;
   return Object.fromEntries(Object.entries(node).map(([key,value])=>[key,visit(value,[...tokens,key])]));
  };
- const skeleton=visit(parsed,[]);
+ let skeleton;
+ try{ skeleton=visit(parsed,[]); }
+ catch(error){
+  const guide={schemaVersion:'curveyield-lite-derived-input-large-index-v1',
+    sourcePath:rel,sourceSha256,sourceBytes,status:'CANONICAL_SOURCE_REQUIRED',
+    recoveryInstruction:'Optional bounded reading views cannot represent an oversized record; read the unchanged canonical source. No audit record was omitted.',
+    diagnostic:String(error?.message??error).slice(0,500)};
+  fs.mkdirSync(relfile(root,dir),{recursive:true});
+  removeGenerated(new Set());
+  fs.writeFileSync(relfile(root,indexRel),pretty(guide));
+  return {indexRel,sourcePath:rel,sourceSha256,sourceBytes,status:'CANONICAL_SOURCE_REQUIRED',pageCount:0};
+ }
  const index={schemaVersion:'curveyield-lite-derived-input-index-v1',sourcePath:rel,sourceSha256,sourceBytes,
   pageTargetBytes:targetBytes,representation:'LOSSLESS_ARRAY_PAGES_WITH_STRUCTURAL_SKELETON',skeleton,sections,
   readingGuide:'This is a bounded view of the exact canonical derived JSON identified by sourceSha256. Follow each array reference in skeleton to its section pages; each page preserves its original array offset and items. The original source file remains authoritative. Page and index byte counts are measured from the exact pretty-printed files stored in Git.'};
  const indexText=pretty(index);
- if(Buffer.byteLength(indexText)>DERIVED_PAGE_INDEX_MAX_BYTES)
-  throw new Error('derived input page index exceeds actual stored-byte budget ('+Buffer.byteLength(indexText)+' > '+DERIVED_PAGE_INDEX_MAX_BYTES+'): '+indexRel);
+ if(Buffer.byteLength(indexText)>DERIVED_PAGE_INDEX_MAX_BYTES){
+  const guide={schemaVersion:'curveyield-lite-derived-input-large-index-v1',
+    sourcePath:rel,sourceSha256,sourceBytes,
+    status:'CANONICAL_SOURCE_REQUIRED',
+    recoveryInstruction:'Reading index would exceed 32 KiB; use the exact canonical source file. The phase remains valid; no underlying candidate or evidence is removed.',
+    sectionCount:sections.length,pageCount:sections.reduce((n,x)=>n+x.pageCount,0)};
+  const guideText=pretty(guide);
+  fs.mkdirSync(relfile(root,dir),{recursive:true});
+  removeGenerated(new Set()); // Never publish incomplete or unreachable pages.
+  fs.writeFileSync(relfile(root,indexRel),guideText);
+  return {indexRel,sourcePath:rel,sourceSha256,sourceBytes,
+    pageCount:0,sectionCount:sections.length,status:'CANONICAL_SOURCE_REQUIRED'};
+ }
  fs.mkdirSync(relfile(root,dir),{recursive:true});
  removeGenerated(writtenNames);
  fs.writeFileSync(relfile(root,indexRel),indexText);
