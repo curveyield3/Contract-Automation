@@ -241,25 +241,52 @@ export function shardFailureIndexV1({root,indexRel,deficiencies=[]}={}){
  const descriptors=index.schemaVersion==='curveyield-work-shard-index-v13'
    ?index.pages.flatMap(p=>secureReadV13(root,path.posix.join(path.posix.dirname(indexRel),p.file)).shards)
    :index.shards;
+ const appendFor=(step,field)=>descriptors.find(s=>s.append&&s.path.includes(step)&&s.path.includes(field));
+ const byPosition=(step,field,position)=>{
+   const all=descriptors.filter(s=>s.path.includes(step)&&s.path.includes(field));
+   return all.find(s=>!s.append&&position>=s.startIndex&&position<s.startIndex+s.recordKeys.length)
+     ??all.find(s=>s.append&&position>=s.startIndex&&position<s.startIndex+MAX_V13_APPEND_RECORDS);
+ };
  for(const description of deficiencies){
-  const message=String(description);
-  const ref=message.match(/(step-[0-9]+)\.outputs\.([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/);
-  const loose=message.match(/targetDesigns\[([0-9]+)\]/);
-  const indexInArray=ref?Number(ref[3]):loose?Number(loose[1]):null;
-  const step=ref?.[1]??'step-3',field=ref?.[2]??'targetDesigns';
-  if(indexInArray===null){unmapped.push(message);continue;}
-  const shard=descriptors.find(s=>s.path.includes(step)&&s.path.includes(field)&&
-    indexInArray>=s.startIndex&&indexInArray<s.startIndex+s.recordKeys.length);
-  if(!shard){unmapped.push(message);continue;}
-  const rel=path.posix.join(path.posix.dirname(indexRel),shard.file);
-  const item=matches.get(rel)??{path:rel,recordKeys:[],defects:[]};
-  const key=shard.recordKeys[indexInArray-shard.startIndex];
-  if(!item.recordKeys.includes(key))item.recordKeys.push(key);
-  item.defects.push(message);matches.set(rel,item);
+   const message=String(description);
+   const explicit=message.match(/(?:actions\.)?(step-[0-9]+)\.outputs\.([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/);
+   const loose=message.match(/targetDesigns\[([0-9]+)\]/);
+   const candidate=message.match(/(?:Phase 5 (?:candidate|target)|candidateKey=)([A-Za-z0-9._-]+)/);
+   let chosen=null;
+   let marker=null;
+   if(explicit){
+     const indexInArray=Number(explicit[3]);
+     chosen=byPosition(explicit[1],explicit[2],indexInArray);
+     marker='index='+indexInArray;
+   }else if(loose){
+     chosen=byPosition('step-3','targetDesigns',Number(loose[1]));
+     marker='index='+loose[1];
+   }
+   if(!chosen&&candidate){
+     const key=candidate[1];
+     chosen=descriptors.find(s=>s.recordKeys?.some(k=>
+       k==='candidateKey='+key||k==='tempKey='+key||k==='canonicalId='+key));
+     if(chosen)marker='candidate='+key;
+   }
+   if(!chosen&&/Phase 5 candidate .*no source-backed disposition|reconciliationRecords|phase5ExecutionDisposition|duplicateOfCandidateKey|resolutionBasis|dispositionEvidenceRefs|conditionOrDependency/.test(message)){
+     chosen=appendFor('step-2','reconciliationRecords');
+     marker='ADD_SOURCE_BOUND_DISPOSITION';
+   }
+   if(!chosen&&/target design|targetDesigns|target execution|executionRequestRef/.test(message)){
+     chosen=appendFor('step-3','targetDesigns');
+     marker='ADD_TARGET_IF_EXECUTION_REQUIRED';
+   }
+   if(!chosen){unmapped.push(message);continue;}
+   const rel=path.posix.join(path.posix.dirname(indexRel),chosen.file);
+   const item=matches.get(rel)??{path:rel,recordKeys:[],defects:[]};
+   const id=chosen.append
+     ?'CONTROLLER_ASSIGNED_APPEND@'+chosen.startIndex+(marker?':'+marker:'')
+     :marker??chosen.recordKeys?.[0]??'REVIEW_INDEX';
+   if(!item.recordKeys.includes(id))item.recordKeys.push(id);
+   item.defects.push(message);matches.set(rel,item);
  }
  return {shards:[...matches.values()].sort((a,b)=>a.path.localeCompare(b.path)),unmapped};
 }
-
 
 // v13 only: editable outputs live in work shards; the controller's expected
 // structure is stored separately from every reviewer-facing index and shard.
