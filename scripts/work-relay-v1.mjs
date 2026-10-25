@@ -196,8 +196,9 @@ function newestProgress(d,r){
   const phase=Number(ass.phaseSequence||d.currentPhaseSequence||0);
   const dir=d.workspacePath+'/work/phase-'+String(phase).padStart(2,'0');
   if(!Number.isInteger(phase)||phase<1||phase>10)return null;
-  let progressPath=dir;
-  if(phase===5)progressPath=dir+'/shards';
+  let progressPath=ass.workShardIndexPath?
+    ass.workShardIndexPath.replace(/\/INDEX[^/]*$/,''):
+    (ass.workFormPath||dir);
   if(phase===4)progressPath=dir+'/discovery';
   const q='repos/'+CONTROLLER+'/commits?sha=main&per_page=1&path='+pathUrl(progressPath);
   try{
