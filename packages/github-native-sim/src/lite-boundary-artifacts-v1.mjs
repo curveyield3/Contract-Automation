@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {readV7RawResultV1} from './v7-compact-result-v1.mjs';
 import {inspectForgeTestEvidenceV1} from './native-fuzz.mjs';
 
@@ -264,14 +265,16 @@ function verifiedNotApplicableDesignV1(target,targets,candidateSourceAnchors={})
   }
   return [];
 }
-export function validatePhase5TargetCoverageV1({targetDesigns=[],materialCandidateKeys=[],candidateSourceAnchors={}}={}){
+export function validatePhase5TargetCoverageV1({
+  targetDesigns=[],materialCandidateKeys=[],requiredTargetKeys=null,candidateSourceAnchors={}
+}={}){
   const failures=[];
-  const required=[...new Set(arr(materialCandidateKeys).filter(x=>typeof x==='string'&&x&&x!=='NONE_IDENTIFIED'))];
-  const seen=new Set();
-  const targets=arr(targetDesigns);
+  const allKeys=[...new Set(arr(materialCandidateKeys).filter(x=>typeof x==='string'&&x&&x!=='NONE_IDENTIFIED'))];
+  const required=[...new Set(arr(requiredTargetKeys??materialCandidateKeys).filter(x=>typeof x==='string'&&x&&x!=='NONE_IDENTIFIED'))];
+  const allSet=new Set(allKeys),seen=new Set(),targets=arr(targetDesigns);
   for(const [i,target] of targets.entries()){
     if(target==='NONE_IDENTIFIED'){
-      if(required.length||targets.length!==1) failures.push('Phase 5 NONE_IDENTIFIED is invalid while material candidates exist or other targets are listed');
+      if(required.length||targets.length!==1) failures.push('Phase 5 NONE_IDENTIFIED is invalid while execution/alias targets are required or other targets are listed');
       continue;
     }
     if(!target||typeof target!=='object'||Array.isArray(target)){
@@ -280,13 +283,143 @@ export function validatePhase5TargetCoverageV1({targetDesigns=[],materialCandida
     }
     const key=String(target.candidateKey??'').trim();
     if(!key||key==='NONE_IDENTIFIED'){failures.push('Phase 5 target index '+i+' has no material candidateKey');continue;}
+    if(!allSet.has(key))failures.push('Phase 5 target '+key+' is not bound to a Phase-4/5 candidate identity');
     if(seen.has(key))failures.push('Phase 5 duplicate candidate target '+key);
     seen.add(key);
     if(target.executionMethod==='NOT_APPLICABLE') failures.push(...verifiedNotApplicableDesignV1(target,targets,candidateSourceAnchors));
   }
-  for(const key of required)if(!seen.has(key))failures.push('Phase 5 mandatory material candidate '+key+' has no targeted machine execution');
-  if(!targets.length) failures.push('Phase 5 targetDesigns missing; explicit NONE_IDENTIFIED is allowed only when no material candidates exist');
+  for(const key of required)if(!seen.has(key))failures.push(
+    'Phase 5 candidate '+key+' requires a target design but has no targetDesigns record; append the exact source-bound target to the controller-assigned targetDesigns shard'
+  );
+  if(!targets.length) failures.push('Phase 5 targetDesigns missing; use explicit NONE_IDENTIFIED only when no execution or alias targets are required');
   return failures;
+}
+
+
+const PHASE5_CANDIDATE_DISPOSITIONS_V1=new Set([
+  'EXECUTE','DUPLICATE_OF','RESOLVED_NON_MATERIAL',
+  'RETAIN_OPEN_OBLIGATION','CONDITIONAL_PENDING_EVIDENCE'
+]);
+const phase5KeyV1=record=>String(record?.canonicalId??record?.tempKey??record?.candidateKey??'').trim();
+const phase5AliasesV1=record=>[record?.canonicalId,record?.tempKey,record?.candidateKey,phase5KeyV1(record)]
+  .map(x=>String(x??'').trim()).filter(Boolean);
+const phase5EvidenceRefsV1=record=>arr(record?.evidenceRefs).map(x=>String(x??'').trim()).filter(Boolean);
+function phase5TextV1(value,min=1){return typeof value==='string'&&value.trim().length>=min&&!value.trim().startsWith('<');}
+
+// The candidate ledger separates actionable executions from duplicate aliases,
+// source-resolved non-material observations, and open/conditional obligations.
+// A missing disposition never becomes an implicit waiver.
+export function validatePhase5CandidateDispositionV1({
+  phase4CandidateRecords=[],newCandidateRecords=[],reconciliationRecords=[],targetDesigns=[]
+}={}){
+  const failures=[],candidates=[],candidateKeys=[],candidateSourceAnchors={},candidateByKey=new Map();
+  for(const record of [...arr(phase4CandidateRecords),...arr(newCandidateRecords)]){
+    if(!record||typeof record!=='object'||Array.isArray(record)||record==='NONE_IDENTIFIED')continue;
+    const key=phase5KeyV1(record);
+    if(!key) {failures.push('Phase 5 material candidate has no canonical/temp key in its source record');continue;}
+    if(candidateByKey.has(key)){failures.push('Phase 5 duplicate source candidate identity '+key);continue;}
+    const candidate={key,record,aliases:phase5AliasesV1(record)};
+    candidateByKey.set(key,candidate);candidates.push(candidate);candidateKeys.push(key);
+    const anchor=String(record.sourceAnchor??record.anchors?.[0]??'').trim();
+    candidateSourceAnchors[key]=anchor;
+    if(!anchor)failures.push('Phase 5 candidate '+key+' has no source anchor; cannot classify or waive execution');
+  }
+  const targets=new Map();
+  for(const target of arr(targetDesigns)){
+    if(!target||typeof target!=='object'||Array.isArray(target)||!target.candidateKey)continue;
+    const key=String(target.candidateKey).trim();
+    if(targets.has(key))failures.push('Phase 5 duplicate target design '+key);
+    else targets.set(key,target);
+  }
+  const rows=arr(reconciliationRecords),requiredTargetKeys=[],dispositionByKey=new Map(),obligationIds=new Set();
+  for(const candidate of candidates){
+    const aliases=new Set(candidate.aliases);
+    const matches=[];
+    for(let i=0;i<rows.length;i++){
+      const row=rows[i];
+      if(!row||typeof row!=='object'||Array.isArray(row))continue;
+      const rowKeys=[row.subjectKey,row.candidateKey,row.tempKey,row.canonicalId].map(x=>String(x??'').trim()).filter(Boolean);
+      if(rowKeys.some(x=>aliases.has(x)))matches.push({row,index:i});
+    }
+    const rowKey=candidate.record.tempKey??candidate.key;
+    if(matches.length===0){
+      failures.push('Phase 5 candidate '+candidate.key+' (tempKey='+String(rowKey)+') has no source-backed disposition; append actions.step-2.outputs.reconciliationRecords['+rows.length+'] with subjectKey='+String(rowKey)+' and phase5ExecutionDisposition');
+      continue;
+    }
+    if(matches.length!==1){
+      failures.push('Phase 5 candidate '+candidate.key+' maps to '+matches.length+' reconciliationRecords rows; retain exactly one canonical disposition row');
+      continue;
+    }
+    const {row,index}=matches[0],prefix='actions.step-2.outputs.reconciliationRecords['+index+']';
+    const sourceAnchor=String(candidate.record.sourceAnchor??candidate.record.anchors?.[0]??'').trim();
+    if(String(row.sourceAnchor??'').trim()!==sourceAnchor)
+      failures.push(prefix+'.sourceAnchor must exactly match candidate '+candidate.key+' source anchor '+sourceAnchor);
+    if(!phase5TextV1(row.phase5Observation,30))
+      failures.push(prefix+'.phase5Observation must record the actual Phase-5 source/economic reconciliation, not a placeholder');
+    if(!phase5TextV1(row.rationale,40))
+      failures.push(prefix+'.rationale must substantiate the candidate disposition with source-backed reasoning');
+    if(!phase5TextV1(row.downstreamValidationNeed,20))
+      failures.push(prefix+'.downstreamValidationNeed must state the next validation or NONE_IDENTIFIED');
+    const disposition=String(row.phase5ExecutionDisposition??'').trim().toUpperCase();
+    if(!PHASE5_CANDIDATE_DISPOSITIONS_V1.has(disposition)){
+      failures.push(prefix+'.phase5ExecutionDisposition is missing/invalid; choose EXECUTE, DUPLICATE_OF, RESOLVED_NON_MATERIAL, RETAIN_OPEN_OBLIGATION, or CONDITIONAL_PENDING_EVIDENCE');
+      continue;
+    }
+    dispositionByKey.set(candidate.key,{...candidate,row,index,disposition});
+    const target=targets.get(candidate.key);
+    if(disposition==='EXECUTE'){
+      if(!target){
+        failures.push('Phase 5 candidate '+candidate.key+' is classified EXECUTE but has no target design; append actions.step-3.outputs.targetDesigns['+arr(targetDesigns).length+']');
+      }else if(String(target.executionMethod??'').toUpperCase()!=='V7_REQUEST'){
+        failures.push('Phase 5 candidate '+candidate.key+' is classified EXECUTE but its target must use V7_REQUEST');
+      }else requiredTargetKeys.push(candidate.key);
+    }else if(disposition==='DUPLICATE_OF'){
+      const covered=String(row.duplicateOfCandidateKey??'').trim();
+      if(!covered)failures.push(prefix+'.duplicateOfCandidateKey must name the canonical candidate whose exact execution covers this duplicate');
+      if(!target||String(target.executionMethod??'').toUpperCase()!=='NOT_APPLICABLE')
+        failures.push('Phase 5 candidate '+candidate.key+' classified DUPLICATE_OF requires a NOT_APPLICABLE target alias with controller-verifiable exact equivalence');
+      else if(String(target.notApplicableDisposition?.coveredByCandidateKey??'')!==covered)
+        failures.push(prefix+'.duplicateOfCandidateKey must match targetDesigns candidate '+candidate.key+' notApplicableDisposition.coveredByCandidateKey');
+      requiredTargetKeys.push(candidate.key);
+    }else if(disposition==='RESOLVED_NON_MATERIAL'){
+      if(target)failures.push('Phase 5 candidate '+candidate.key+' is RESOLVED_NON_MATERIAL but still has a target design; choose EXECUTE or a verified duplicate alias instead');
+      if(!['SOURCE_CONTRADICTION','PROVEN_OUT_OF_SCOPE'].includes(String(row.resolutionBasis??'')))
+        failures.push(prefix+'.resolutionBasis must be SOURCE_CONTRADICTION or PROVEN_OUT_OF_SCOPE');
+      const refs=arr(row.dispositionEvidenceRefs).map(x=>String(x??'').trim()).filter(Boolean);
+      const candidateRefs=phase5EvidenceRefsV1(candidate.record);
+      if(!refs.length||!refs.some(x=>x===sourceAnchor||candidateRefs.includes(x)))
+        failures.push(prefix+'.dispositionEvidenceRefs must cite the exact source anchor or a source-bound candidate evidence reference');
+      if(!phase5TextV1(row.rationale,80)||!phase5TextV1(row.phase5Observation,40)||String(row.downstreamValidationNeed??'')!=='NONE_IDENTIFIED')
+        failures.push(prefix+' RESOLVED_NON_MATERIAL requires a source-contradiction/out-of-scope explanation, supporting evidence and downstreamValidationNeed=NONE_IDENTIFIED; non-reproduction or uncertainty is not sufficient');
+      if(row.requiredPhase!==undefined||row.requiredAction||row.completionCondition)
+        failures.push(prefix+' RESOLVED_NON_MATERIAL cannot simultaneously declare an open obligation');
+    }else{
+      if(target)failures.push('Phase 5 candidate '+candidate.key+' classified '+disposition+' must not have a target design; if a test is still required, classify EXECUTE and complete it');
+      const obligationId=String(row.obligationId??'').trim();
+      const requiredPhase=Number(row.requiredPhase);
+      if(!/^OBL-P5-[A-Za-z0-9._-]+$/.test(obligationId))
+        failures.push(prefix+'.obligationId must be a stable unique OBL-P5-* identifier');
+      else if(obligationIds.has(obligationId))failures.push(prefix+'.obligationId duplicates '+obligationId);
+      else obligationIds.add(obligationId);
+      if(![6,8,9,10].includes(requiredPhase))
+        failures.push(prefix+'.requiredPhase must be a future Lite phase (6, 8, 9 or 10)');
+      if(!phase5TextV1(row.requiredAction,20))failures.push(prefix+'.requiredAction must specify the concrete closure action');
+      if(!phase5TextV1(row.completionCondition,20))failures.push(prefix+'.completionCondition must state observable evidence required for closure');
+      const originRefs=arr(row.originatingEvidenceRefs).map(x=>String(x??'').trim()).filter(Boolean);
+      const candidateRefs=phase5EvidenceRefsV1(candidate.record);
+      if(!originRefs.length||!originRefs.some(x=>x===sourceAnchor||candidateRefs.includes(x)))
+        failures.push(prefix+'.originatingEvidenceRefs must bind the obligation to the candidate source/evidence');
+      if(row.mandatory===false)failures.push(prefix+'.mandatory cannot be false for an unresolved security candidate');
+      if(disposition==='CONDITIONAL_PENDING_EVIDENCE'&&!phase5TextV1(row.conditionOrDependency,20))
+        failures.push(prefix+'.conditionOrDependency must name the external state/dependency that makes the question conditional');
+      if(!phase5TextV1(row.rationale,40)||!phase5TextV1(row.phase5Observation,30))
+        failures.push(prefix+' unresolved/conditional candidates must preserve the actual uncertainty and why it remains open');
+    }
+  }
+  for(const [key,target] of targets){
+    if(!candidateByKey.has(key))failures.push('Phase 5 target '+key+' is not present in the Phase-4/5 candidate ledger');
+  }
+  return {failures,candidateKeys,candidateSourceAnchors,requiredTargetKeys:[...new Set(requiredTargetKeys)],dispositionByKey};
 }
 
 // This single evidence verifier is shared by direct targets and target aliases.
@@ -398,8 +531,8 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
   return failures;
 }
 
-export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath,targetDesigns=[],executionResults={},materialCandidateKeys=[],candidateSourceAnchors={},expectedSourceSha256=null}={}){
-  const failures=validatePhase5TargetCoverageV1({targetDesigns,materialCandidateKeys,candidateSourceAnchors});
+export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath,targetDesigns=[],executionResults={},materialCandidateKeys=[],requiredTargetKeys=null,candidateSourceAnchors={},expectedSourceSha256=null}={}){
+  const failures=validatePhase5TargetCoverageV1({targetDesigns,materialCandidateKeys,requiredTargetKeys,candidateSourceAnchors});
   for(const target of arr(targetDesigns)){
     if(!target||typeof target!=='object'||Array.isArray(target))continue;
     const key=String(target.candidateKey??'').trim();
