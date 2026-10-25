@@ -986,7 +986,7 @@ if(reviewKind==='master'){
     if(!unresolved.length)
       emit('MASTER_REVIEW_INVALID','CLOSE_INCOMPLETE requires unresolved material candidates; do not use to replace an eligible normal final review');
     const closureRel=path.posix.join(campaignPath,'controller/INCOMPLETE_CLOSURE_v1.json');
-    if(existing(root,closureRel))
+    if(fs.existsSync(repoFile(root,closureRel)))
       emit('MASTER_REVIEW_INVALID','An incomplete-closure record already exists; refusing overwrite');
     const phase5=canonicalFor(root,campaignPath,5);
     const deferral=inspectPhase5OwnerEvidenceDeferralV1({
