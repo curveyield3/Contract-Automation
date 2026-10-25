@@ -3,7 +3,7 @@
   "singleAgentSimulation": false,
   "campaignId": "live-ethereum-dai-6b175474-r2",
   "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eab-0ff8-83e8-821f-a065d3c45384",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
   "browserRoutine": "",
   "agentChats": {
     "reviewer-1": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
@@ -25,17 +25,17 @@
     "url": ""
   },
   "activeChat": {
-    "name": "reviewer-4",
-    "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eab-0ff8-83e8-821f-a065d3c45384"
+    "name": "master-reviewer",
+    "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c"
   },
-  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-PHASE_8_WORK_PACKET-reviewer-4/40160350747\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_reviewer-4_v1.json on curveyield3/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nLITE audit: live-ethereum-Dai-6b175474 r2\nReviewer: reviewer-4\nCurrent phase: phase-8\nCampaign: https://github.com/curveyield3/Audit-Controller/tree/main/campaigns/live-ethereum-Dai-6b175474%20r2\nCurrent Audit Skill Authority: https://github.com/curveyield3/Audit-Controller/blob/main/audit-process/v7/frozen-authorities/Audit_Litemode_v13_v13_2/SKILL.md\n\nLIVE REPOSITORY ROUTING: For this campaign use ONLY curveyield3/Audit-Controller for campaign/skill/source records and curveyield3/Contract-Automation for boundary requests and GitHub Actions. Any legacy-organization repository names or URLs embedded in the frozen authority are historical/stale; resolve the same relative paths against curveyield3. Never edit the frozen bound authority to correct those historical links.\nDo not create, modify, or execute tests without explicit audit-owner authorization; preserve all completed evidence and use existing mechanisms.\n\nThe Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority.\n\nStart phase-8 now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.\nSharded work assignment. Start with the INDEX only: https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/live-ethereum-Dai-6b175474%20r2/work/phase-08/shards/INDEX_v1.json\nRead BASE_v1.json and every shard listed in the index. Edit each shard and save it separately, in index order. Complete every shard without waiting for a controller response; submit exactly ONE phase boundary request after the final shard. The controller reconstructs the canonical form and validates every record and digest. Do not edit the generated full form directly.\nSubmit the boundary validation request using schema curveyield-lite-phase-boundary-request-v1 under process/agent-upload/lite-phase-boundary/ for the exact campaign and phase; do not bookkeep receipts yourself.\\n\\nEXECUTION ROUTING: Use ONLY curveyield3/Audit-Controller as canonical evidence/authority repository and curveyield3/Contract-Automation for GitHub Actions. Read docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md (Anvil/RPC rule) BEFORE a live-fork test design or execution. The authenticated archive source is GitHub Actions secret RPC_ETHEREUM projected to ETHEREUM_FORK_RPC_URL; the trusted runner verifies pinned historical chain/block/hash and creates a writable 127.0.0.1 Anvil fork. No standalone/Ganache/public-RPC fixture counts as audit evidence. Do not launch test-triggering requests, phase-boundary machine runs, or regressions without explicit audit-owner authorization. Reviewer owns analysis/design; registered test-executor owns authorized machine runs; preserve all high-risk unresolved limitations.",
+  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-delivery-701734efac94155e1b04/40164253000\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_master-reviewer_v1.json on curveyield3/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nMASTER_REVIEW_REQUIRED: campaign live-ethereum-dai-6b175474-r2, segment reviewer-4-phases-08-10 (reviewer-4, Phases 8-10). Read the segment record campaigns/live-ethereum-Dai-6b175474 r2/work/master-review/reviewer-4-phases-08-10/MASTER_REVIEW_RECORD_v1.json in Audit-Controller. Follow the authoritative Audit Skill guide audit-process/v7/frozen-authorities/Audit_Litemode_v13_v13_2/master-review/START_HERE.md for review, amendment limits, and submission. Use the campaign ref main.\nCheck the coverage label and every gap in https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/live-ethereum-Dai-6b175474%20r2/work/phase-10/COVERAGE_MATRIX_v1.json before accepting.\n\nREQUIRED LIVE-FORK ROUTING: The bound Lite skill remains frozen. For all simulation design, technical execution or recovery, read curveyield3/Contract-Automation/docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md (Anvil/RPC rule and phase table). Use only curveyield3/Audit-Controller and curveyield3/Contract-Automation. The authenticated archive is GitHub Actions secret RPC_ETHEREUM mapped to ETHEREUM_FORK_RPC_URL, which feeds a verified chain-1 historical, pinned-block/hash, writable LOCAL Anvil fork. Never use synthetic fixtures, bare Anvil or public RPC as historical audit evidence. Tests/boundary reruns require explicit audit-owner authorization; the registered executor runs approved tests and the reviewer interprets their raw evidence.",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
-    "phaseId": "phase-8",
-    "milestoneId": "PHASE_8_WORK_PACKET",
+    "phaseId": "master-review",
+    "milestoneId": "reviewer-4-phases-08-10",
     "workerRole": "reviewer",
-    "reviewer": "reviewer-4",
+    "reviewer": "master-reviewer",
     "thinkingEffort": "high"
   },
   "watchdog": {
@@ -47,8 +47,8 @@
       "repository": "curveyield3/Audit-Controller",
       "ref": "main",
       "statePath": "Audit Campaign Directory/campaigns/live-ethereum-dai-6b175474.json",
-      "expectedPhaseId": "phase-8",
-      "expectedMilestoneId": "PHASE_8_WORK_PACKET",
+      "expectedPhaseId": "master-review",
+      "expectedMilestoneId": "reviewer-4-phases-08-10",
       "activePointerPath": "",
       "stopStates": [
         "STOPPED_BY_HUMAN"
@@ -64,13 +64,13 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-25T04:53:47Z",
+  "updatedAt": "2026-10-25T05:09:01Z",
   "wakeDelivery": {
-    "milestoneId": "PHASE_8_WORK_PACKET",
-    "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eab-0ff8-83e8-821f-a065d3c45384",
-    "deliveredAt": "2026-10-25T04:53:47Z",
+    "milestoneId": "reviewer-4-phases-08-10",
+    "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adae7ae-9ca8-83e8-bd5f-262e21f8b26c",
+    "deliveredAt": "2026-10-25T05:09:01Z",
     "verification": "REVIEWER_GITHUB_CHECK_IN",
-    "ackId": "live-ethereum-dai-6b175474-r2-PHASE_8_WORK_PACKET-reviewer-4/40160350747"
+    "ackId": "live-ethereum-dai-6b175474-r2-delivery-701734efac94155e1b04/40164253000"
   },
   "retiredChats": {
     "reviewer-3": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5ea6-cf04-83e8-9fa0-1d01648d86f0"
