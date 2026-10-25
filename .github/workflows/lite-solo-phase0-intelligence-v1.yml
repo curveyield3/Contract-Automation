@@ -162,7 +162,7 @@ jobs:
           fi
           cd .audit-controller-output
 
-          authority_folder="Audit Skill - Current Authority"
+          authority_folder="Audit Skill - Lite-Solo Authority"
           mapfile -t authority_packages < <(find "$authority_folder" -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/SKILL.md' ';' -print | sort)
           [ "${#authority_packages[@]}" -eq 1 ] || { echo "::error::Authority folder must contain exactly one unpacked package directory with root SKILL.md."; exit 1; }
           skill_root="${authority_packages[0]}"
