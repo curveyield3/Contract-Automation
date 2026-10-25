@@ -8,7 +8,7 @@ on:
         type: choice
         required: false
         default: deliver
-        options: [deliver, successor, switch]
+        options: [deliver, successor, switch, sweep]
       campaign_id: {type: string, required: false}
       campaign_name: {type: string, required: false}
       campaign_path: {type: string, required: false}
@@ -39,7 +39,7 @@ permissions:
   contents: write
   actions: write
 concurrency:
-  group: lite-work-relay-${{ github.event_name == 'schedule' && 'sweep' || inputs.campaign_id }}
+  group: lite-work-relay-${{ (github.event_name == 'schedule' || inputs.operation == 'sweep') && 'sweep' || inputs.campaign_id }}
   cancel-in-progress: false
 jobs:
   relay:
@@ -63,7 +63,7 @@ jobs:
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         run: bash scripts/select-audit-controller-token.sh
       - name: Work watchdog — GitHub state only, never browser
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || inputs.operation == 'sweep'
         run: node scripts/work-relay-v1.mjs --operation sweep
       - name: Publish exact message in Work relay file
         if: github.event_name == 'workflow_dispatch' && inputs.operation == 'deliver'
@@ -196,3 +196,41 @@ jobs:
         run: |
           echo 'Work relay never opens ChatGPT, runs tests or marks a phase PASS.' >> "$GITHUB_STEP_SUMMARY"
           echo 'The receiving agent places its exact COMPLETE code as FIRST LINE of DELIVERY_COMMAND_v1.md.' >> "$GITHUB_STEP_SUMMARY"
+  rearm:
+    needs: relay
+    if: always() && (github.event_name == 'schedule' || inputs.operation == 'sweep')
+    concurrency:
+      group: agent-delivery-watchdog-rearm-v1
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Select private Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Re-arm supervision while a nonterminal Agent Delivery campaign exists
+        env:
+          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 900
+          count="$(node scripts/work-relay-v1.mjs --operation active-count)"
+          if [ "$count" -gt 0 ]; then
+            gh workflow run lite-work-relay-v1.yml --repo "$GITHUB_REPOSITORY" --ref main -f operation=sweep
+            echo "Agent Delivery watchdog re-armed for $count nonterminal campaign(s)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No active Agent Delivery campaigns; watchdog re-arm stopped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
