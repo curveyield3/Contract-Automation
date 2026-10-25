@@ -7,7 +7,7 @@ source "$ROOT/scripts/audit-source-initialization/extract-v1.sh"
 
 SINGLE_AGENT_SIMULATION="${SINGLE_AGENT_SIMULATION:-false}"
 DELIVERY_TRANSPORT="${DELIVERY_TRANSPORT:-GITHUB_BROWSER}"
-[[ "$DELIVERY_TRANSPORT" == GITHUB_BROWSER || "$DELIVERY_TRANSPORT" == CHATGPT_WORK ]] || { echo "::error::Invalid DELIVERY_TRANSPORT" >&2; exit 1; }
+[[ "$DELIVERY_TRANSPORT" == GITHUB_BROWSER || "$DELIVERY_TRANSPORT" == AGENT_DELIVERY ]] || { echo "::error::Invalid DELIVERY_TRANSPORT" >&2; exit 1; }
 [[ "$SINGLE_AGENT_SIMULATION" == true || "$SINGLE_AGENT_SIMULATION" == false ]] || {
   echo "::error::SINGLE_AGENT_SIMULATION must be true or false" >&2
   exit 1
@@ -237,7 +237,7 @@ else
       python3 "$ROOT/scripts/audit-source-initialization/write-phase0-receipt-v1.py"
 
     git add -- "$receipts_dir" "$campaign_directory_path"
-    if [ "$DELIVERY_TRANSPORT" = CHATGPT_WORK ]; then git add -- "$campaign_root/work/browser/DELIVERY_COMMAND_v1.md"; fi
+    if [ "$DELIVERY_TRANSPORT" = AGENT_DELIVERY ]; then git add -- "$campaign_root/work/browser/DELIVERY_COMMAND_v1.md"; fi
     git commit -m "audit(receipt): initialize $campaign_id phase 0"
     init_commit="$(git rev-parse HEAD)"
 
