@@ -315,7 +315,8 @@ function switchMode(campaign,target){
       if(state.campaignId===campaign)remove(AUTOMATION,f.path,autoToken,obj.sha,'chore(work-relay): retire old browser watcher '+campaign);
     }
   }
-  const oldCommand=readState(fetch(CONTROLLER,filePath(d),ctlToken,true)?.content||null)?.data?.current||null;
+  const lastState=readState(fetch(CONTROLLER,filePath(d),ctlToken,true)?.content||null);
+  const oldCommand=lastState?.first==='PENDING'?lastState.data.current:null;
   console.log(JSON.stringify({status:'SWITCHED',campaignId:campaign,from:before,to:target,epoch,
     pendingCommand:target===BROWSER?oldCommand:null}));
 }
