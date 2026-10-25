@@ -229,8 +229,37 @@ function sweepOne(campaign){
         const newValue=Math.max(s.transportTimeouts,Math.floor(age(s.current.issuedAt)/30));
         if(newValue!==s.transportTimeouts){s.transportTimeouts=Math.min(3,newValue);changed=true;}
       }
-      if(s.transportTimeouts>=3){process.exitCode=1;console.error('WORK_RELAY_DELIVERY_UNCONFIRMED: '+campaign+
-          ' three 30-minute receipt windows without first-line ACK; repair agent should switch mode after verifying browser readiness');}
+      if(s.transportTimeouts>=3){
+        console.error('AGENT_DELIVERY_UNCONFIRMED: '+campaign+
+          ' no first-line receipt for 90 minutes; archiving failed command and requesting repair');
+        const stranded=s.current;
+        s.unconfirmedCommands=(s.unconfirmedCommands||[]).slice(-9).concat([{
+          commandId:stranded.commandId,chatUrl:stranded.chatUrl,
+          phaseId:stranded.phaseId,message:stranded.message,
+          declaredUnconfirmedAt:now()}]);
+        const backup=r.agentChats?.backup;
+        if(backup && backup!==stranded.chatUrl){
+          s.current={
+            commandId:createHash('sha256').update(campaign+':repair:'+stranded.commandId).digest('hex').slice(0,26),
+            wakeId:campaign+'-agent-delivery-repair-'+stranded.commandId,
+            phaseId:stranded.phaseId,workerRole:'repair_child',
+            chatUrl:backup,workspacePath:d.workspacePath,transportEpoch:epoch,
+            message:'AGENT DELIVERY UNCONFIRMED: Original delivery '+stranded.commandId+
+              ' to '+stranded.chatUrl+' has no first-line check-in after 90 minutes. '+
+              'Read the authoritative campaign directory and the unconfirmedCommands entry in this same file. '+
+              'Diagnose the previous recipient, check the assigned chat and resume the required work. '+
+              'If Agent Delivery cannot deliver and browser transport is ready, switch this campaign to GITHUB_BROWSER via the existing lite-work-relay-v1.yml switch operation. '+
+              'Do not run tests or seal a phase merely because a delivery was attempted.',
+            expectedCode:'COMPLETE-'+randomBytes(8).toString('hex').toUpperCase(),issuedAt:now()
+          };
+          s.transportTimeouts=0;
+          changed=true;
+        }else{
+          s.lastTransportFailureAt=now();
+          changed=true;
+          process.exitCode=1;
+        }
+      }
     }else if(s.queue.length){s.current=s.queue.shift();changed=true;}
     else{
       const assignment=d.currentAssignment||{},who=assignment.reviewer||d.currentReviewer;
