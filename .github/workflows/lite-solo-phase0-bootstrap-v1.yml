@@ -54,7 +54,7 @@ jobs:
 
   fork-deploy-config:
     needs: intelligence
-    if: ${{ inputs.authorization_confirmed && !inputs.resume_from_finalize && (needs.intelligence.result == 'success' || inputs.resume_from_deploy) }}
+    if: ${{ always() && inputs.authorization_confirmed && !inputs.resume_from_finalize && (needs.intelligence.result == 'success' || inputs.resume_from_deploy) }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
