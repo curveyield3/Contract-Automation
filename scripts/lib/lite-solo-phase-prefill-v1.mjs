@@ -333,10 +333,7 @@ function reviewerForRequiredPhase(phase,root=null,authorityRoot=null){
  const n=Number(phase);
  if(root&&authorityRoot)return boundReviewerForPhaseV1({root,authorityRoot,phase:n});
  if(n===7)return 'phase7-automation';
- if(n===1)return 'reviewer-1';
- if(n>=2&&n<=5)return 'reviewer-2';
- if(n===6)return 'reviewer-3L';
- if(n>=8&&n<=10)return 'reviewer-4';
+ if(n>=1&&n<=10)return 'lite-solo-agent';
  return 'UNRESOLVED_REVIEWER';
 }
 function evidenceList(value){
