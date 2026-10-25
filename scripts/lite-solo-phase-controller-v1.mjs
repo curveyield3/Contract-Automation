@@ -8,7 +8,7 @@ import {createHash} from 'node:crypto';
 import {readV7RawResultV1} from '../packages/github-native-sim/src/v7-compact-result-v1.mjs';
 import {pathToFileURL} from 'node:url';
 import {storeControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
-import {materializeShardedWorkFormV1,shardWorkFormV1,shardFailureIndexV1} from './lib/lite-work-shards-v1.mjs';
+import {materializeShardedWorkFormV1,shardWorkFormV1,shardFailureIndexV1} from './lib/lite-solo-work-shards-v1.mjs';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,validateBoundAuthorityV1,loadPhaseSchema,
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
