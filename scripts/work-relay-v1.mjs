@@ -279,17 +279,25 @@ function sweepOne(campaign){
         assignment.packetPath+':'+fetch(CONTROLLER,assignment.packetPath,ctlToken).sha:
         (assignment.workShardIndexPath||assignment.phaseId);
       const missedRework=rework && expectedChat && s.lastReworkIdentity!==reworkIdentity;
+      const discoveryStatePath=d.discovery?.statePath||'';
+      const discoveryIdentity=d.campaignStatus==='WAITING_FOR_DISCOVERY' && discoveryStatePath?
+        discoveryStatePath+':'+fetch(CONTROLLER,discoveryStatePath,ctlToken).sha:'';
+      const discoveryChat=r.agentChats?.['reviewer-2']||r.agentChats?.['reviewer-3L'];
+      const missedDiscovery=Boolean(discoveryIdentity && discoveryChat &&
+        s.lastDiscoveryIdentity!==discoveryIdentity);
       const masterChat=d.masterReview?.chatUrl||r.agentChats?.['master-reviewer'];
       const masterIdentity=[d.pendingMasterReview?.segmentId,
         d.pendingMasterReview?.recordPath,d.lastSealedReceiptPath].filter(Boolean).join('|')||'MASTER_REVIEW';
       const missedMaster=d.campaignStatus==='WAITING_FOR_MASTER_REVIEW'&&masterChat &&
         s.lastMasterIdentity!==masterIdentity;
-      if(missedSuccessor||missedRework||missedMaster){
-        const target=missedMaster?masterChat:expectedChat;
-        const phaseId=missedMaster?'master-review':assignment.phaseId;
-        const identity=missedMaster?masterIdentity:reworkIdentity;
-        const kind=missedMaster?'master':missedRework?'rework':'successor';
-        const msg=missedMaster?
+      if(missedSuccessor||missedRework||missedMaster||missedDiscovery){
+        const target=missedMaster?masterChat:missedDiscovery?discoveryChat:expectedChat;
+        const phaseId=missedMaster?'master-review':missedDiscovery?'phase-4':assignment.phaseId;
+        const identity=missedMaster?masterIdentity:missedDiscovery?discoveryIdentity:reworkIdentity;
+        const kind=missedMaster?'master':missedDiscovery?'discovery':missedRework?'rework':'successor';
+        const msg=missedDiscovery?
+          'DISCOVERY PHASE 4 WAKE: '+campaign+'. Follow the bound audit skill discovery instructions for reviewer-2. Read the exact current '+discoveryStatePath+' on curveyield3/Audit-Controller main, complete the active flow and attacker windows in sequence, submit each required controller boundary and verify receipt. Preserve accepted discovery work. No tests without separate audit-owner authorization.':
+          missedMaster?
           'MASTER REVIEW REQUIRED: '+campaign+'. Open the current Audit Campaign Directory and pendingMasterReview record in curveyield3/Audit-Controller. Complete the exact assigned segment following its bound audit skill authority, preserve all accepted evidence, and submit the master review through the existing controller pathway. Do not run tests without separate owner authorization.':
           missedRework?
           'CONTROLLER NEEDS_REWORK: '+campaign+' '+assignment.phaseId+'. Read the exact rejected packet '+assignment.packetPath+' in curveyield3/Audit-Controller and the authoritative current assignment. Repair the specific deficiencies while preserving accepted reviewer shards and sealed receipts; continue until controller PASS. Do not execute tests without separate owner authorization.':
@@ -302,12 +310,13 @@ function sweepOne(campaign){
           message:msg,workspacePath:d.workspacePath,transportEpoch:epoch,
           expectedCode:'COMPLETE-'+randomBytes(8).toString('hex').toUpperCase(),issuedAt:now()};
         if(missedRework)s.lastReworkIdentity=reworkIdentity;
+        if(missedDiscovery)s.lastDiscoveryIdentity=discoveryIdentity;
         if(missedMaster)s.lastMasterIdentity=masterIdentity;
         s.updatedAt=now();
         return view(s);
       }
       const who=assignment.reviewer||d.currentReviewer;
-      let chat=r.agentChats?.[who];
+      let chat=d.campaignStatus==='WAITING_FOR_DISCOVERY'?discoveryChat:r.agentChats?.[who];
       let phaseId=assignment.phaseId||'phase-'+(assignment.phaseSequence||d.currentPhaseSequence);
       const special=['WAITING_FOR_MASTER_REVIEW','WAITING_FOR_TARGETED_TESTS','MASTER_TESTS_REQUESTED'];
       if(special.includes(d.campaignStatus) && s.lastReceipt?.targetChatUrl &&
@@ -317,7 +326,7 @@ function sweepOne(campaign){
       }
       const relevant=assignment.status==='ACTIVE'||assignment.status==='REWORK_REQUIRED'||
         (assignment.status==='WAITING_FOR_SUCCESSOR_AGENT' && s.lastReceipt?.targetChatUrl===chat)||
-        d.status==='ACTIVE'||special.includes(d.campaignStatus);
+        d.status==='ACTIVE'||d.campaignStatus==='WAITING_FOR_DISCOVERY'||special.includes(d.campaignStatus);
       const since=Math.max(Date.parse(s.lastProgressAt||0)||0,Date.parse(s.lastPokedAt||0)||0,Date.parse(s.lastReceipt?.receivedAt||0)||0);
       const elapsed=since?(Date.now()-since)/60000:Infinity;
       if(relevant&&chat&&elapsed>=20){
