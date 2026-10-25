@@ -378,6 +378,15 @@ function amendmentFailures({root,authorityRoot,sealed,original,amended}){
       failures.push('amended field changed schema-protected controller-prefilled record attributes: '+sealed.path+'#'+field.path);
     }
   }
+  // Some reviewer-visible outputs are separately included in the sealed
+  // controller digest (for example Phase-6 typedExecutionLimitations).
+  // Name the exact protected path before reporting a generic digest error, so
+  // the master can restore the original rather than retrying blindly.
+  for(const dot of original?.automationInputs?.controllerOwnedOutputPaths??[]){
+    if(!exactJson(valueAt(original,dot),valueAt(amended,dot)))
+      failures.push('Controller-owned output modified: '+sealed.path+'#'+dot+
+        ' (restore the sealed original value; explain needed corrections in an unprotected reviewer-owned field)');
+  }
   // Historical bookkeeping mappings are valid reviewer outputs. The controller
   // must replay them from sealed predecessors, not reject their correction.
   for(const deficiency of validatePhaseScaffold(sealed.phase,amended,original?.automationInputs?.controllerPrefillDigestSha256??null))failures.push(sealed.path+': '+deficiency);
