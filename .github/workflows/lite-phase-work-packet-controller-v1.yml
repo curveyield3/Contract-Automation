@@ -524,13 +524,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          safe_campaign="$(printf '%s' "${{ steps.request.outputs.campaign_id }}" | tr -c 'A-Za-z0-9._-' '_')"
-          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json?ref=main" --jq '.content' 2>/dev/null || true)"
-          if [ -n "$encoded" ]; then
-            mode="$(printf '%s' "$encoded" | base64 -d | jq -r '.deliveryTransport // "GITHUB_BROWSER"')"
-          else
-            mode=GITHUB_BROWSER
-          fi
+          directory=".audit-controller/${{ steps.routing.outputs.campaign_directory_path }}"
+          [ -s "$directory" ] || { echo "::error::Canonical campaign directory unavailable"; exit 1; }
+          mode="$(jq -r '.deliveryTransport // "GITHUB_BROWSER"' "$directory")"
           case "$mode" in
             AGENT_DELIVERY) wake=lite-work-relay-v1.yml; successor=lite-work-relay-v1.yml ;;
             GITHUB_BROWSER) wake=browser-agent-wake.yml; successor=lite-audit-browser-orchestrator-v1.yml ;;
