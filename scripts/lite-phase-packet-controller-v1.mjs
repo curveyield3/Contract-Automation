@@ -18,7 +18,7 @@ import {
   validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
-  buildControllerPacket,renderControllerPhaseReport,validatePhaseScaffold,
+  buildControllerPacket,renderControllerPhaseReport,buildCandidateEvidenceContinuityV1,validatePhaseScaffold,
   phase4CoverageFromForm,phase4DiscoveryCoverageV1,materializeValidatedFindings,resolveTargetExecutionRequestRef,
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
@@ -1458,6 +1458,19 @@ if(sequence===5) canonical.automationOutputs.phase5MachineExecutionGate={
   ...(phase5OwnerDeferral?{ownerDirectivePath:phase5OwnerDeferral.path,
     securityConclusion:'UNVERIFIED',unresolvedCandidateKeys:phase5OwnerDeferral.candidateKeys}:{}),
 };
+// Explicit evidence continuity: previously supported conditional behaviors
+// survive an owner-deferred Phase-5/6 execution without becoming machine PASS.
+if(sequence===6){
+  const sealedPhase5=canonicalFor(root,campaignPath,5);
+  canonical.automationOutputs.candidateEvidenceContinuity=
+    buildCandidateEvidenceContinuityV1({phase5:sealedPhase5,phase6:canonical});
+}
+if(sequence===8||sequence===10){
+  const sealedPhase6=canonicalFor(root,campaignPath,6);
+  const lineage=sealedPhase6?.automationOutputs?.candidateEvidenceContinuity;
+  if(Array.isArray(lineage)&&lineage.length)
+    canonical.automationOutputs.candidateEvidenceContinuity=structuredClone(lineage);
+}
 if(sequence===8){
   canonical.actions['step-2'].outputs.validatedFindings=materializeValidatedFindings(canonical.actions?.['step-2']?.outputs?.candidateValidations??[]);
   canonical.automationOutputs.validatedFindingsMaterialized=true;
