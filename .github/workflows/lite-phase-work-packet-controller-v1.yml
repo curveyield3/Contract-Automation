@@ -517,6 +517,24 @@ jobs:
       # Previously a published NEEDS_REWORK had no durable continuation event:
       # the workflow ended green, while the reviewer was expected to poll Actions.
       # Reuse the existing acknowledged browser wake; never repeat machine tests here.
+      - name: Resolve optional Work relay transport (original browser implementation unchanged)
+        id: delivery_transport
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "${{ steps.request.outputs.campaign_id }}" | tr -c 'A-Za-z0-9._-' '_')"
+          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json?ref=main" --jq '.content')"
+          mode="$(printf '%s' "$encoded" | base64 -d | jq -r '.deliveryTransport // "GITHUB_BROWSER"')"
+          case "$mode" in
+            CHATGPT_WORK) wake=lite-work-relay-v1.yml; successor=lite-work-relay-v1.yml ;;
+            GITHUB_BROWSER) wake=browser-agent-wake.yml; successor=lite-audit-browser-orchestrator-v1.yml ;;
+            *) echo "::error::Unknown delivery transport $mode"; exit 1 ;;
+          esac
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "wake_workflow=$wake" >> "$GITHUB_OUTPUT"
+          echo "successor_workflow=$successor" >> "$GITHUB_OUTPUT"
       - name: Resume same reviewer after published phase rework
         if: steps.routing.outputs.effective_hold != 'true' && steps.routing.outputs.stale != 'true' && steps.request.outputs.review_kind == 'phase' && steps.controller.outputs.status == 'NEEDS_REWORK' && steps.publish_result.outputs.published == 'true'
         env:
@@ -568,7 +586,7 @@ jobs:
           message+="
           INFRASTRUCTURE: Read curveyield3/Contract-Automation/docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md, Anvil/RPC rule. Historical Ethereum upstream is RPC_ETHEREUM projected by trusted Actions as ETHEREUM_FORK_RPC_URL; only a pinned/hash-verified LOCAL Anvil fork may receive mutable test calls. No synthetic fixture or alternate RPC. Diagnose stale runner commit/secret/pin first. Do not execute or automatically resubmit tests without owner authorization."
           b64="$(printf '%s' "$message" | base64 -w0)"
-          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+          timeout -k 10s 90s gh workflow run "${{ steps.delivery_transport.outputs.wake_workflow }}" --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="$AUDIT_CAMPAIGN-phase-$phase-$reviewer-rework-${{ github.run_id }}" \
             -f campaign_id="$AUDIT_CAMPAIGN" -f phase_id="phase-$phase" \
             -f mode=resume_existing -f chat_url="$chat" -f wake_message_b64="$b64" \
@@ -602,7 +620,7 @@ jobs:
           message+="
           EXECUTION RULES: curveyield3/Audit-Controller is canonical; use curveyield3/Contract-Automation existing qualified Actions lane, RPC_ETHEREUM -> ETHEREUM_FORK_RPC_URL, frozen chain/block/hash proof and local Anvil 127.0.0.1, no Ganache/standalone/public fallback or unpinned snapshot. Read docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md, Anvil/RPC rule. Obtain explicit audit-owner authorization for this specific test before any execution; preserve all raw receipts and unresolved governance uncertainty."
           b64="$(printf '%s' "$message" | base64 -w0)"
-          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+          timeout -k 10s 90s gh workflow run "${{ steps.delivery_transport.outputs.wake_workflow }}" --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="${{ steps.request.outputs.campaign_id }}-phase5-test-executor-${{ github.run_id }}" \
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" -f phase_id=phase-5 \
             -f mode=resume_existing -f chat_url="$chat" -f wake_message_b64="$b64" \
@@ -669,7 +687,7 @@ jobs:
             chat="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // empty' /tmp/discovery-registration.json)"
             [[ "$chat" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$chat" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || { echo "::error::No assigned discovery chat"; exit 1; }
             # Progress-aware watchdog: any campaign commit resets its clock, so it only pokes a stalled chat.
-            timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            timeout -k 10s 90s gh workflow run "${{ steps.delivery_transport.outputs.wake_workflow }}" --repo "$GITHUB_REPOSITORY" --ref main \
               -f wake_id="$(jq -r '.wakeId' /tmp/discovery-wake.json)" \
               -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
               -f phase_id="$(jq -r '.phaseId' /tmp/discovery-wake.json)" \
@@ -693,7 +711,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          timeout -k 10s 90s gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f campaign_name="${{ steps.controller.outputs.campaign_name }}"             -f campaign_path="${{ steps.routing.outputs.campaign_path }}"             -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
+          if [ "${{ steps.delivery_transport.outputs.mode }}" = CHATGPT_WORK ]; then
+            timeout -k 10s 90s gh workflow run lite-work-relay-v1.yml --repo "$GITHUB_REPOSITORY" --ref main -f operation=successor -f campaign_id="${{ steps.request.outputs.campaign_id }}" -f campaign_name="${{ steps.controller.outputs.campaign_name }}" -f campaign_path="${{ steps.routing.outputs.campaign_path }}" -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
+          else
+            timeout -k 10s 90s gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f campaign_name="${{ steps.controller.outputs.campaign_name }}"             -f campaign_path="${{ steps.routing.outputs.campaign_path }}"             -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
+          fi
 
       - name: Resolve reviewer for master-directed tests
         id: testchat
@@ -721,7 +743,7 @@ jobs:
           set -euo pipefail
           guide="${{ steps.controller.outputs.authority_link_root }}/master-review/TARGETED_TEST_DIRECTIVE_v1.md"
           message_b64="$({ printf 'TARGETED TEST EXECUTOR: your only task is to run the tests in the plan named below and submit their results; you are not auditing. Read the exact plan and needed source files, the "Instructions for the executing reviewer" section of %s in curveyield3/Audit-Controller, and ONLY these execution guides in curveyield3/Contract-Automation: docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md, packages/github-native-sim/harness-skeletons-v2/README_v2.md, docs/CHATGPT_GITHUB_ACTIONS_VIA_GITHUB_APP.md. Do not open unrelated audit phases. Use existing trusted GitHub Actions execution infrastructure; the configured secret RPC_ETHEREUM is the archive-capable dRPC upstream mapped by the runner to ETHEREUM_FORK_RPC_URL. The runner must start a local ephemeral Anvil fork at the exact historical chain-1 block and independently verify its block hash, chain identity and target code. Send state-changing ABI calls only to local Anvil, never upstream mainnet. Foundry and Medusa require the LOCAL verified Anvil URL, not an absent local command or a second private RPC. A connector without direct workflow_dispatch access or a public eth_getLogs range error does NOT mean archive RPC is unavailable. Check actual workflow env mapping and run logs, repair the existing runner first, use the existing event/trigger, and never invent a campaign-specific RPC provider or parallel workflow. Preserve raw evidence, submit the separate controller result boundary, and verify the controller accepts it. A run executing zero assertions is a failure to repair, not progress.\n\n' "$guide"; printf '%s' "${{ steps.controller.outputs.feedback_b64 }}" | base64 -d; } | base64 -w0)"
-          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+          timeout -k 10s 90s gh workflow run "${{ steps.delivery_transport.outputs.wake_workflow }}" --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.test_request_id }}-test-reviewer" \
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
             -f phase_id=master-targeted-tests \
@@ -751,7 +773,7 @@ jobs:
           purpose=initial_wake
           browser_context_b64="$(jq -cn --arg purpose "$purpose" \
             '{routineId:"",projectName:"",projectUrl:"",chatName:"master-reviewer",repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:$purpose}' | base64 -w0)"
-          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+          timeout -k 10s 90s gh workflow run "${{ steps.delivery_transport.outputs.wake_workflow }}" --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="${{ steps.delivery_state.outputs.wake_id || format('{0}-{1}-master-reviewer',steps.request.outputs.campaign_id,steps.controller.outputs.segment_id) }}" \
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
             -f phase_id=master-review \
