@@ -21,6 +21,88 @@ const recordKey=(pathTokens,value,i)=>{
 };
 const clone=x=>structuredClone(x);
 
+const DERIVED_PAGE_TARGET_BYTES=24*1024;
+const DERIVED_PAGE_INDEX_MAX_BYTES=32*1024;
+
+// Lossless bounded views for large derived inputs. The original derived JSON
+// remains canonical; the index contains its exact digest and a structural
+// skeleton, while each non-empty array is represented by verified page refs.
+export function writeDerivedInputPagesV1({root,rel,targetBytes=DERIVED_PAGE_TARGET_BYTES,thresholdBytes=64*1024}={}){
+ if(!root||typeof rel!=='string'||!rel)throw new Error('derived input paging requires root and campaign-relative path');
+ const sourceFile=relfile(root,rel),raw=fs.readFileSync(sourceFile,'utf8'),sourceBytes=Buffer.byteLength(raw);
+ const dir=path.posix.dirname(rel);
+ const baseName=path.posix.basename(rel).replace(/_v[0-9]+\.json$/,'');
+ const indexRel=path.posix.join(dir,baseName+'_INDEX_v1.json');
+ const pagePrefix=baseName+'_SECTION_';
+ const removeGenerated=keep=>{
+  try{for(const name of fs.readdirSync(relfile(root,dir))){
+   if(name.startsWith(pagePrefix)&&/_PAGE_[0-9]{4}_v1\.json$/.test(name)&&!keep.has(name))
+    fs.rmSync(relfile(root,path.posix.join(dir,name)),{force:true});
+  }}catch{}
+ };
+ if(sourceBytes<=thresholdBytes){
+  removeGenerated(new Set());
+  fs.rmSync(relfile(root,indexRel),{force:true});
+  return null;
+ }
+ let parsed;
+ try{parsed=JSON.parse(raw);}catch(e){throw new Error('large derived input is not valid JSON: '+rel+' ('+String(e.message||e)+')');}
+ const sourceSha256=digest(raw),sections=[],writtenNames=new Set();
+ const writeSection=(fieldPath,items)=>{
+  const sectionId=String(sections.length+1).padStart(4,'0');
+  const pages=[];let offset=0,pageNo=0,chunk=[];
+  const emit=()=>{
+   if(!chunk.length)return;
+   const file=pagePrefix+sectionId+'_PAGE_'+String(++pageNo).padStart(4,'0')+'_v1.json';
+   const pageRel=path.posix.join(dir,file);
+   const body={schemaVersion:'curveyield-lite-derived-input-page-v1',sourcePath:rel,sourceSha256,
+    sectionId,fieldPath,offset,items:chunk};
+   const content=pretty(body),pageBytes=Buffer.byteLength(content);
+   if(pageBytes>targetBytes)throw new Error('derived input page exceeds actual stored-byte budget ('+pageBytes+' > '+targetBytes+'): '+pageRel);
+   fs.writeFileSync(relfile(root,pageRel),content);
+   pages.push({path:pageRel,offset,count:chunk.length,bytes:pageBytes,sha256:digest(content)});
+   writtenNames.add(file);offset+=chunk.length;chunk=[];
+  };
+  for(let i=0;i<items.length;i++){
+   let item=items[i];
+   const itemBytes=bytes(item);
+   if(itemBytes>targetBytes&&item&&typeof item==='object'&&!Array.isArray(item))
+    item=visit(item,[...fieldPath,i]);
+   const proposed={schemaVersion:'curveyield-lite-derived-input-page-v1',sourcePath:rel,sourceSha256,
+    sectionId,fieldPath,offset,items:[...chunk,item]};
+   if(chunk.length&&bytes(proposed)>targetBytes)emit();
+   const single={schemaVersion:'curveyield-lite-derived-input-page-v1',sourcePath:rel,sourceSha256,
+    sectionId,fieldPath,offset,items:[item]};
+   if(bytes(single)>targetBytes)
+    throw new Error('single derived input item exceeds actual stored-byte budget at '+JSON.stringify(fieldPath)+'['+i+']; split the source record before generating the derived input');
+   chunk.push(item);
+  }
+  emit();
+  sections.push({sectionId,fieldPath,itemCount:items.length,pageCount:pages.length,pages});
+  return {schemaVersion:'curveyield-lite-derived-array-reference-v1',sectionId,fieldPath,itemCount:items.length,pageCount:pages.length};
+ };
+ const visit=(node,tokens)=>{
+  if(Array.isArray(node)){
+   if(!node.length)return [];
+   return writeSection(tokens,node);
+  }
+  if(!node||typeof node!=='object')return node;
+  return Object.fromEntries(Object.entries(node).map(([key,value])=>[key,visit(value,[...tokens,key])]));
+ };
+ const skeleton=visit(parsed,[]);
+ const index={schemaVersion:'curveyield-lite-derived-input-index-v1',sourcePath:rel,sourceSha256,sourceBytes,
+  pageTargetBytes:targetBytes,representation:'LOSSLESS_ARRAY_PAGES_WITH_STRUCTURAL_SKELETON',skeleton,sections,
+  readingGuide:'This is a bounded view of the exact canonical derived JSON identified by sourceSha256. Follow each array reference in skeleton to its section pages; each page preserves its original array offset and items. The original source file remains authoritative. Page and index byte counts are measured from the exact pretty-printed files stored in Git.'};
+ const indexText=pretty(index);
+ if(Buffer.byteLength(indexText)>DERIVED_PAGE_INDEX_MAX_BYTES)
+  throw new Error('derived input page index exceeds actual stored-byte budget ('+Buffer.byteLength(indexText)+' > '+DERIVED_PAGE_INDEX_MAX_BYTES+'): '+indexRel);
+ fs.mkdirSync(relfile(root,dir),{recursive:true});
+ removeGenerated(writtenNames);
+ fs.writeFileSync(relfile(root,indexRel),indexText);
+ return {indexRel,sourcePath:rel,sourceSha256,sourceBytes,pageCount:sections.reduce((n,x)=>n+x.pageCount,0),sectionCount:sections.length};
+}
+
+
 // Group large arrays into no more than 25 records and no more than 64 KiB per shard.
 // Small editable arrays and scalar fields remain in the BASE shard.
 export function shardWorkFormV1({root,formRel,phase,retireFull=true,force=false}){
