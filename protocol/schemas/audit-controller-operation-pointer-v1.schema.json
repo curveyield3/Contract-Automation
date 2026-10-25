@@ -17,7 +17,7 @@
       "additionalProperties": false,
       "required": ["repository", "commit", "requestPath"],
       "properties": {
-        "repository": { "const": "CurveYield2/Audit-Controller" },
+        "repository": { "const": "curveyield3/Audit-Controller" },
         "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
         "requestPath": {
           "type": "string",
