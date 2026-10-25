@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
+  "singleAgentSimulation": false,
+  "deliveryTransport": "AGENT_DELIVERY",
+  "transportEpoch": 0,
+  "campaignId": "cyavkatv25b-r5",
+  "mode": "resume_existing",
+  "chatUrl": "",
+  "browserRoutine": "",
+  "agentChats": {
+    "reviewer-1": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a29-94c8-83e8-a920-8c4c36aee623",
+    "reviewer-2": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a2f-2a60-83e8-b008-f48d222075a7",
+    "reviewer-3": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a35-9a84-83e8-b418-15503d85645a",
+    "reviewer-4": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a3b-b5c4-83e8-99c7-60c7265d3e49",
+    "master-reviewer": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a72-21ac-83e8-9476-885fc6c504e5",
+    "test-executor": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a4d-3918-83e8-84da-c3f47566c5e5",
+    "backup": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a55-7ce8-83e8-91c7-554e10deda28"
+  },
+  "backupChatUrl": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a55-7ce8-83e8-91c7-554e10deda28",
+  "masterReviewer": {
+    "chatUrl": "https://chatgpt.com/g/g-p-6add8a25475c8191aa144ebc8c319574/c/6add8a72-21ac-83e8-9476-885fc6c504e5",
+    "reasoning": "MAXIMUM",
+    "repairModel": "SOL",
+    "repairReasoning": "HIGH"
+  },
+  "chatgptProject": {
+    "name": "",
+    "url": ""
+  },
+  "activeChat": {
+    "name": "",
+    "url": ""
+  },
+  "wakeMessage": "",
+  "thinkingEffort": "high",
+  "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
+  "activeAssignment": {},
+  "watchdog": {
+    "enabled": true,
+    "idleMessage": "GET BACK TO WORK",
+    "pokeIntervalMinutes": 20
+  },
+  "repair": {
+    "enabled": true,
+    "idlePokeThreshold": 3,
+    "unviewableThreshold": 2
+  },
+  "updatedAt": "2026-10-25T05:05:22Z"
+}
