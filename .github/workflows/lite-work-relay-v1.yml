@@ -36,7 +36,7 @@ on:
         required: false
         options: [GITHUB_BROWSER, CHATGPT_WORK]
 permissions:
-  contents: read
+  contents: write
   actions: write
 concurrency:
   group: lite-work-relay-${{ github.event_name == 'schedule' && 'sweep' || inputs.campaign_id }}
