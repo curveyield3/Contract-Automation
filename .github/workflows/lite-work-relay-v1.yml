@@ -120,7 +120,9 @@ jobs:
           set -euo pipefail
           node scripts/work-relay-v1.mjs --operation switch \
             --campaign-id "$CAMPAIGN_ID" --target-mode "$TARGET_MODE" | tee /tmp/switch.json
-          if [ "$(jq -r '.status' /tmp/switch.json)" = ALREADY_SET ]; then exit 0; fi
+          # Re-dispatch a canonical wake even when a previous switch updated the
+          # mode but failed before delivering the wake. The command ID is stable,
+          # so the Agent Delivery file deduplicates retries.
           encoded="$(GH_TOKEN="$GITHUB_TOKEN" gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_').json?ref=main" --jq '.content')"
           printf '%s' "$encoded" | base64 -d > /tmp/switch-registration.json
           slug="$(printf '%s' "$CAMPAIGN_ID" | sed -E 's/-r[0-9]+$//')"
