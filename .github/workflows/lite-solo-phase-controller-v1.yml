@@ -4,6 +4,21 @@ on:
     branches: [main]
     paths:
       - 'process/agent-upload/lite-solo-phase-boundary/*.json'
+  workflow_dispatch:
+    inputs:
+      request_path:
+        description: Existing accepted Phase-5 boundary request path
+        type: string
+        required: true
+      request_sha256:
+        description: Exact SHA-256 of the existing request (prevents drift)
+        type: string
+        required: true
+      batch_index:
+        description: Authorized bounded execution continuation attempt
+        type: number
+        required: true
+        default: 1
 permissions:
   contents: write
   actions: write
@@ -31,11 +46,26 @@ jobs:
       - name: Parse strictly isolated lite-solo request
         id: request
         shell: bash
+        env:
+          REPEAT_REQUEST_PATH: ${{ inputs.request_path }}
+          REPEAT_REQUEST_SHA256: ${{ inputs.request_sha256 }}
+          REPEAT_BATCH_INDEX: ${{ inputs.batch_index }}
         run: |
           set -euo pipefail
-          mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/agent-upload/lite-solo-phase-boundary/)
-          test "${#changed[@]}" -eq 1
-          request="${changed[0]}"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            request="$REPEAT_REQUEST_PATH"
+            [[ "$REPEAT_REQUEST_SHA256" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$REPEAT_BATCH_INDEX" =~ ^[0-9]+$ ]]
+            test "$REPEAT_BATCH_INDEX" -ge 1
+            test "$REPEAT_BATCH_INDEX" -le 16
+            test -f "$request"
+            test "$(sha256sum "$request" | cut -d' ' -f1)" = "$REPEAT_REQUEST_SHA256"
+            jq -e '.reviewKind=="phase" and .phaseSequence==5' "$request" >/dev/null
+          else
+            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/agent-upload/lite-solo-phase-boundary/)
+            test "${#changed[@]}" -eq 1
+            request="${changed[0]}"
+          fi
           [[ "$request" =~ ^process/agent-upload/lite-solo-phase-boundary/[A-Za-z0-9._-]+\.json$ ]]
           test -f "$request"
           jq -e '.schemaVersion=="curveyield-lite-solo-phase-boundary-request-v1" and
@@ -196,6 +226,41 @@ jobs:
               git pull --rebase origin main
             done
           fi
+      - name: Continue only a source-authorized pending Phase-5 machine batch
+        if: ${{ steps.phase5.outputs.machine_authorized == 'true' && steps.controller.outputs.status == 'NEEDS_REWORK' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_FILE: ${{ steps.request.outputs.request }}
+          AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
+          AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
+          PREVIOUS_BATCH_INDEX: ${{ inputs.batch_index }}
+        run: |
+          set -euo pipefail
+          if [ "$(jq -r '.machineExecutionGate // ""' /tmp/lite-solo-controller-result.json)" != PENDING_BATCH ]; then
+            exit 0
+          fi
+          index="${PREVIOUS_BATCH_INDEX:-0}"
+          [[ "$index" =~ ^[0-9]+$ ]]
+          next=$((index+1))
+          if [ "$next" -gt 16 ]; then
+            echo '::warning::Phase-5 automatic continuation paused after 16 source-bound batches. Retained progress and exact evidence can be resumed by submitting the existing boundary request.' 
+            exit 0
+          fi
+          directory=".audit-controller/$AUDIT_DIRECTORY"
+          source_sha="$(jq -r .sourceSha256 "$directory")"
+          jq -e --arg sha "$source_sha" '
+            .currentAssignment.phaseSequence==5 and
+            .machineExecutionAuthorization.status=="APPROVED" and
+            .machineExecutionAuthorization.scope=="PHASE5_TARGET_EXECUTION" and
+            .machineExecutionAuthorization.sourceSha256==$sha
+          ' "$directory" >/dev/null
+          request_digest="$(sha256sum "$REQUEST_FILE" | cut -d' ' -f1)"
+          gh workflow run lite-solo-phase-controller-v1.yml --ref main \
+            -f request_path="$REQUEST_FILE" \
+            -f request_sha256="$request_digest" \
+            -f batch_index="$next"
+          echo "Authorized Phase-5 continuation batch $next dispatched; no new audit authorization was created." >> "$GITHUB_STEP_SUMMARY"
       - name: Record durable controller result without agent delivery
         shell: bash
         run: |
