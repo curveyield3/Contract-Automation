@@ -126,6 +126,15 @@ jobs:
           role="$(jq -r '.activeAssignment.reviewer // .activeChat.name // empty' /tmp/switch-registration.json)"
           chat="$(jq -r --arg r "$role" '.agentChats[$r] // empty' /tmp/switch-registration.json)"
           phase="$(jq -r '.activeAssignment.phaseId // empty' /tmp/switch-registration.json)"
+          worker_role=reviewer
+          if [ "$TARGET_MODE" = GITHUB_BROWSER ]; then
+            pending_chat="$(jq -r '.pendingCommand.chatUrl // empty' /tmp/switch.json)"
+            if [ -n "$pending_chat" ]; then
+              chat="$pending_chat"
+              phase="$(jq -r '.pendingCommand.phaseId // empty' /tmp/switch.json)"
+              worker_role="$(jq -r '.pendingCommand.workerRole // "reviewer"' /tmp/switch.json)"
+            fi
+          fi
           [ -n "$chat" ] || { echo "::warning::No registered active chat; next controller handoff will use selected mode."; exit 0; }
           message="$(jq -r '.pendingCommand.message // empty' /tmp/switch.json)"
           [ -n "$message" ] || message='GET BACK TO WORK'
@@ -140,7 +149,7 @@ jobs:
             gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
               -f wake_id="$wake_id" -f campaign_id="$CAMPAIGN_ID" \
               -f phase_id="$phase" -f mode=resume_existing -f chat_url="$chat" \
-              -f wake_message_b64="$b64" -f worker_role=reviewer \
+              -f wake_message_b64="$b64" -f worker_role="$worker_role" \
               -f watchdog_enabled=true -f gate_mode=LITE \
               -f gate_repository=curveyield3/Audit-Controller -f gate_ref=main \
               -f gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' /tmp/switch-registration.json)" \
