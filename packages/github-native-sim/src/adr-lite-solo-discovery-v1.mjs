@@ -217,7 +217,7 @@ function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
   for(const item of items){
    const trial={schemaVersion:'curveyield-discovery-packet-page-v1',unitId,sourcePacketPath:packetPath,
     section,offset,items:[...chunk,item]};
-   if(chunk.length&&Buffer.byteLength(JSON.stringify(trial))>SOLO_PACKET_PAGE_MAX_BYTES)emit();
+   if(chunk.length&&Buffer.byteLength(JSON.stringify(trial,null,2))+1>SOLO_PACKET_PAGE_MAX_BYTES)emit();
    chunk.push(item);
   }
   emit();
