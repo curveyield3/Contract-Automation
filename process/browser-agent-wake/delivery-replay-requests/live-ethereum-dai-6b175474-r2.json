@@ -3,7 +3,7 @@
   "campaignId": "live-ethereum-dai-6b175474-r2",
   "detailRef": "controller/results/c5667ed30279747c8035/INDEX_v1.json",
   "auditControllerRef": "main",
-  "purpose": "Re-deliver already-published reviewer-3 phases 05-06 independent MASTER wake cancelled by shared-browser concurrency. No tests, controller rerun or security PASS.",
+  "purpose": "Retry exact PUBLISHED Phase 6 master reviewer handoff after owner reauthenticated ChatGPT browser session. Delivery only: do not rerun controller or tests; no reviewer or master PASS presumed.",
   "expectedWakeId": "live-ethereum-dai-6b175474-r2-delivery-c5667ed30279747c8035",
-  "deliveryAttempt": 1
+  "deliveryAttempt": 2
 }
