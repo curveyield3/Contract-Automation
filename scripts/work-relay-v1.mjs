@@ -199,7 +199,10 @@ function listActive(){
   try{
     return github(AUTOMATION,autoToken,['repos/'+AUTOMATION+'/contents/process/browser-agent-wake/registrations?ref=main'])
       .filter(x=>x.type==='file'&&x.name.endsWith('.json')).map(x=>x.path);
-  }catch(e){throw Error('Cannot list existing campaign registrations: '+e);}
+  }catch(e){
+    if(/404|Not Found/.test(String(e.stderr||e.message)))return [];
+    throw Error('Cannot list existing campaign registrations: '+String(e.stderr||e.message));
+  }
 }
 function newestProgress(d,r){
   const ass=d.currentAssignment||{};
