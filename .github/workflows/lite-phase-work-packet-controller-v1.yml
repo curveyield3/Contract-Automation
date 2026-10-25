@@ -525,8 +525,12 @@ jobs:
         run: |
           set -euo pipefail
           safe_campaign="$(printf '%s' "${{ steps.request.outputs.campaign_id }}" | tr -c 'A-Za-z0-9._-' '_')"
-          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json?ref=main" --jq '.content')"
-          mode="$(printf '%s' "$encoded" | base64 -d | jq -r '.deliveryTransport // "GITHUB_BROWSER"')"
+          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json?ref=main" --jq '.content' 2>/dev/null || true)"
+          if [ -n "$encoded" ]; then
+            mode="$(printf '%s' "$encoded" | base64 -d | jq -r '.deliveryTransport // "GITHUB_BROWSER"')"
+          else
+            mode=GITHUB_BROWSER
+          fi
           case "$mode" in
             CHATGPT_WORK) wake=lite-work-relay-v1.yml; successor=lite-work-relay-v1.yml ;;
             GITHUB_BROWSER) wake=browser-agent-wake.yml; successor=lite-audit-browser-orchestrator-v1.yml ;;
