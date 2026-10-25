@@ -36,7 +36,7 @@ on:
         default: ''
         type: string
       master_outcome:
-        description: Master review outcome (AMENDED or ACCEPT_WITHOUT_MODIFICATIONS)
+        description: Master review outcome (AMENDED, ACCEPT_WITHOUT_MODIFICATIONS, REQUEST_TARGETED_TESTS, or owner-deferred CLOSE_INCOMPLETE)
         required: false
         default: ''
         type: string
@@ -170,7 +170,7 @@ jobs:
               ((.campaignId|type)=="string") and (.campaignId|length)>0 and
               (((.reviewKind // "phase")=="phase" and ((.phaseSequence|type)=="number") and ((.phaseSequence|floor)==.phaseSequence) and .phaseSequence>=1 and .phaseSequence<=10) or
                ((.reviewKind // "phase")=="discovery" and ((.unitId|type)=="string") and (.unitId|test("^[FRX]-[0-9]{3}$"))) or
-               ((.reviewKind // "phase")=="master" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and (.masterOutcome=="AMENDED" or .masterOutcome=="ACCEPT_WITHOUT_MODIFICATIONS" or (.masterOutcome=="REQUEST_TARGETED_TESTS" and ((.testPlanPath|type)=="string") and (.testPlanPath|length)>0)) and ((.summary // "")|type)=="string") or
+               ((.reviewKind // "phase")=="master" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and (.masterOutcome=="AMENDED" or .masterOutcome=="ACCEPT_WITHOUT_MODIFICATIONS" or .masterOutcome=="CLOSE_INCOMPLETE" or (.masterOutcome=="REQUEST_TARGETED_TESTS" and ((.testPlanPath|type)=="string") and (.testPlanPath|length)>0)) and ((.summary // "")|type)=="string") or
                ((.reviewKind // "phase")=="master-test-result" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and ((.testResultPath|type)=="string") and (.testResultPath|length)>0) or
                ((.reviewKind // "phase")=="sealed-rework" and ((.phaseSequence|type)=="number") and .phaseSequence==1 and ((.reworkRequestPath|type)=="string") and (.reworkRequestPath|length)>0 and .holdSuccessorDelivery==true) or
                ((.reviewKind // "phase")=="post-completion-followup" and .phaseSequence==5 and ((.reworkRequestPath|type)=="string") and (.reworkRequestPath|length)>0 and .holdSuccessorDelivery==true)) and
