@@ -45,6 +45,12 @@ jobs:
             assert y.get('permissions',{}).get('contents') in ('write','read'),p
             print('VALID',p)
           PY
+      - name: Lint the exact forked GitHub Actions workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          "$(go env GOPATH)/bin/actionlint" -color .github/workflows/lite-solo-*.yml
       - name: Select read credential for private forked authority verification
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
