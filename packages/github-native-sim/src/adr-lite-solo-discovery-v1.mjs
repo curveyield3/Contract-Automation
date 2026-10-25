@@ -251,14 +251,14 @@ function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
     packetPath:packetRel(campaignPath,unitId),
     packetIndexPath:writeUnitPacketIndexV1({root,campaignPath,unitId,role}),
     submissionPath:submissionRel(campaignPath,unitId)}))};
-  if(Buffer.byteLength(JSON.stringify(payload))>32*1024)throw new Error('discovery window page exceeds 32 KiB');
+  if(Buffer.byteLength(JSON.stringify(payload,null,2))+1>32*1024)throw new Error('discovery window page exceeds actual stored-byte bound of 32 KiB');
   writeJson(repoFile(root,rel),payload);
   pages.push({path:rel,unitCount:chunk.length});
  }
  const indexRel=path.posix.join(dir,'INDEX_v1.json');
  const index={schemaVersion:'curveyield-discovery-unit-index-v1',role,unitCount:ids.length,pages,
   readingGuide:'Read a window page then its packetIndexPath. Complete and submit each unit individually; other submissions stay drafts. Discovery windows are bounded and the correctness/ATTACK passes remain separate.'};
- if(Buffer.byteLength(JSON.stringify(index))>32*1024)throw new Error('discovery window index exceeds 32 KiB');
+ if(Buffer.byteLength(JSON.stringify(index,null,2))+1>32*1024)throw new Error('discovery window index exceeds actual stored-byte bound of 32 KiB');
  writeJson(repoFile(root,indexRel),index);
  return indexRel;
 }
