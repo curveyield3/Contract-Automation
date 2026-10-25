@@ -238,11 +238,32 @@ if [ "$AUTHORIZE_PHASE0_EXECUTION" != true ]; then
  echo "::notice::lite-solo admitted source but Phase-0 execution requires separate approval."
  exit 0
 fi
+# Idempotent retry: retain successful, source-bound Phase-0 intelligence
+# instead of recompiling solely because a later deploy/config checkout failed.
+resume_from_deploy=false
+if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  export GH_TOKEN="$AUDIT_CONTROLLER_TOKEN"
+  evidence_ready=true
+  for evidence in \
+    evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json \
+    evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json \
+    evidence/static-analysis/SLITHER_v1.json \
+    evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json; do
+    encoded="$(jq -rn --arg p "$campaign_root/$evidence" '$p|split("/")|map(@uri)|join("/")')"
+    if ! gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=main" --jq '.sha' >/dev/null 2>&1; then
+      evidence_ready=false
+      break
+    fi
+  done
+  if [ "$evidence_ready" = true ]; then resume_from_deploy=true; fi
+fi
+export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
 gh workflow run lite-solo-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
   -f campaign_id="$campaign_id" \
   -f campaign_path="$campaign_root" \
   -f audit_controller_ref=main \
-  -f authorization_confirmed=true
+  -f authorization_confirmed=true \
+  -f resume_from_deploy="$resume_from_deploy"
 
 {
  echo "## lite-solo Source Initialization"
