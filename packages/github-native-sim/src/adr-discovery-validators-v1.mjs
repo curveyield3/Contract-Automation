@@ -147,12 +147,17 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
      if(!Array.isArray(row?.siblingComparisons)||!row.siblingComparisons.length)
        err(errors,'SIBLING_CHECK_REQUIRED',p+'.siblingComparisons',
          'Compare the exact same-signature sibling implementation');
-     else for(const group of siblings)
+     else for(const group of siblings){
+       // Multiple inheritors may share an identical implementation/context ID.
+       const distinct=group.members.some(m=>m.contextId!==id);
        if(!row.siblingComparisons.some(entry=>entry.signature===group.signature&&
-          group.members.some(m=>m.contextId===entry.siblingContextId&&m.contextId!==id)&&
+          group.members.some(m=>m.contextId===entry.siblingContextId&&
+            (distinct?m.contextId!==id:m.contextId===id))&&
           !blank(entry.comparison)))
          err(errors,'SIBLING_IDENTITY_MISSING',p+'.siblingComparisons',
-           'Name exact sibling signature and distinct sibling contextId');
+           distinct?'Name exact sibling signature and distinct sibling contextId':
+           'Name exact shared inherited contextId and signature');
+     }
    }
    if(row?.siblingComparisons!==undefined&&(!Array.isArray(row.siblingComparisons)||
        row.siblingComparisons.some(x=>blank(x?.comparison)||!x?.siblingContextId||!x?.signature)))
