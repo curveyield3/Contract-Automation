@@ -133,3 +133,41 @@ export function acceptCandidateBatchV1({
  return {status:'CANDIDATE_BATCH_ACCEPTED',accepted:selected.length,checkpointRel:rel,
   checkpointTotal:checkpoint.acceptedRecords.length,progress:checkpoint.progress,selectedKeys:readyCandidateKeys};
 }
+
+
+// Controller-generated cross-phase identity map: no new reviewer-owned schema.
+// Fail on collisions so Phase 6 and 8 never join different candidates by
+// position or an ambiguous matching source anchor.
+export function writeCandidateIdentityIndexV1({root,campaignPath,directory,phase4Canonical,phase5Canonical,now}={}){
+ const phase4=records(phase4Canonical?.actions?.['step-3']?.outputs?.candidateRecords);
+ const phase5=records(phase5Canonical?.actions?.['step-2']?.outputs?.newCandidateRecords);
+ const reconciliation=records(phase5Canonical?.actions?.['step-2']?.outputs?.reconciliationRecords);
+ const targets=records(phase5Canonical?.actions?.['step-3']?.outputs?.targetDesigns);
+ const ids=new Set(),aliasToId=new Map(),rows=[];
+ for(const source of [...phase4,...phase5]){
+  const key=keyOf(source),tempKey=String(source.tempKey??''),anchor=String(source.sourceAnchor??source.anchors?.[0]??'');
+  if(!key||!anchor||ids.has(key))throw new Error('candidate identity index contains duplicate/missing canonical ID or source anchor: '+key);
+  ids.add(key);
+  for(const alias of aliases(source)){
+   if(aliasToId.has(alias)&&aliasToId.get(alias)!==key)
+    throw new Error('candidate alias '+alias+' resolves ambiguously to multiple canonical candidate IDs');
+   aliasToId.set(alias,key);
+  }
+  const matched= reconciliation.filter(r=>[r.subjectKey,r.tempKey,r.canonicalId,r.candidateKey].some(v=>aliases(source).has(String(v??''))));
+  if(matched.length!==1)throw new Error('Phase-5 candidate '+key+' has '+matched.length+' canonical reconciliation rows');
+  rows.push({candidateKey:key,sourceTempKey:tempKey||null,sourceAnchor:anchor,
+   sourceSha256:directory.sourceSha256,sourceRecordSha256:sha(source),
+   phase5Disposition:matched[0].phase5ExecutionDisposition,
+   phase5DispositionSha256:sha(matched[0]),
+   targetCandidateKey:targets.find(t=>aliases(source).has(String(t.candidateKey??'')))?.candidateKey??null,
+   obligationId:matched[0].obligationId??null});
+ }
+ const rel=path.posix.join(campaignPath,'controller/CANDIDATE_IDENTITY_INDEX_v1.json');
+ write(root,rel,{schemaVersion:'curveyield-lite-candidate-identity-index-v1',
+  campaignId:directory.campaignId,sourceSha256:directory.sourceSha256,generatedAt:now,
+  sourcePhase4Canonical:path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json'),
+  sourcePhase5Canonical:path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json'),
+  rowCount:rows.length,rows:rows.sort((a,b)=>a.candidateKey.localeCompare(b.candidateKey)),
+  readingGuide:'Controller-validated stable canonical IDs. Use candidateKey for Phase 6/8; sourceTempKey is a lookup alias only. Source-anchor coincidence alone never merges candidates.'});
+ return rel;
+}
