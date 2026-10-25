@@ -60,8 +60,9 @@ else
   source_size="$(cat "$work/size")"
   provider="$(cat "$work/provider")"
   canonical_url="$(cat "$work/canonical-url")"
-  display_base="$(cat "$work/display-base")"
-  slug="$(cat "$work/slug")"
+  display_base="lite-solo $(cat "$work/display-base")"
+  slug="lite-solo-$(cat "$work/slug")"
+  [[ "$slug" =~ ^lite-solo-[A-Za-z0-9._-]+$ ]] || { echo "::error::INVALID_LITE_SOLO_SLUG"; exit 1; }
 
   repo='/tmp/audit-controller-source-init'
   rm -rf "$repo"
