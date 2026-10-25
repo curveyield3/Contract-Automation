@@ -822,32 +822,15 @@ if(reviewKind==='discovery'){
   directory.updatedAt=now;writeJson(directoryFile,directory);
   const feedback=result.feedbackText??result.status;
   process.stdout.write(JSON.stringify({authorityLinkRoot,status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName,
-    feedbackB64:Buffer.from(feedback).toString('base64'),
-    discoveryWakeChatKey:result.wake?.chatKey??'',discoveryWakeId:result.wake?.wakeId??'',
-    discoveryWakePhaseId:result.wake?.phaseId??'',discoveryWakeMilestoneId:result.wake?.milestoneId??'',
-    discoveryWakeMessageB64:result.wake?.messageB64??'',
-    discoveryWakesB64:Buffer.from(JSON.stringify(result.wakes??(result.wake?[result.wake]:[]))).toString('base64')})+'\n');
+    feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),
+    currentDiscoveryWindow:result.currentWindow??null,
+    activeDiscoveryUnitIds:directory.discovery.activeUnitIds})+'\n');
   process.exit(0);
 }
-let sealedRework=null;
-if(reviewKind==='phase'&&!masterAmendmentRefreshSha&&['STOPPED_BY_HUMAN','BLOCKED'].includes(String(directory.campaignStatus??'')))throw new Error('campaign is held by explicit human status '+directory.campaignStatus);
-if(reviewKind==='sealed-rework'){
-  sealedRework=admitSealedPhaseRework({root,campaignPath,directory,requestPath:a['rework-request-path'],now});
-  const deliveryHoldRel=path.posix.join(campaignPath,'controller/SUCCESSOR_DELIVERY_HOLD_v1.json');
-  writeJson(repoFile(root,deliveryHoldRel),{
-    schemaVersion:'curveyield-lite-successor-delivery-hold-v1',
-    campaignId:directory.campaignId,
-    campaignGenerationId:directory.campaignGenerationId,
-    sourceSha256:directory.sourceSha256,
-    scopeId:sealedRework.request.humanAuthorization.scopeId,
-    requestPath:a['rework-request-path'],
-    status:'ACTIVE',
-    reason:'HUMAN_AUTHORIZED_SEALED_REWORK_BRANCH_QUALIFICATION',
-    createdAt:now,
-    releaseRequiresExplicitHumanAuthorization:true
-  });
-  directory.currentAssignment=sealedRework.assignment;directory.campaignStatus='ACTIVE';directory.updatedAt=now;
-}
+// Lite-Solo accepts phase/discovery only. No successor-delivery holds or master rework routes.
+const sealedRework=null;
+if(reviewKind==='phase'&&!masterAmendmentRefreshSha&&['STOPPED_BY_HUMAN','BLOCKED'].includes(String(directory.campaignStatus??'')))
+ throw new Error('campaign is held by explicit human status '+directory.campaignStatus);
 const assignment=directory.currentAssignment;
 if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current assignment does not match submitted phase');
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'predecessor sealed receipt'));
@@ -1326,7 +1309,7 @@ if(sequence===5){
 
 let nextSequence=sequence===10?null:sequence+1;
 let fresh=false;let nextAssignment=null;let nextDerivedInputs=[];
-let discoveryStarted=false,discoveryWake=null,discoveryWakes=[];
+let discoveryStarted=false;
 let handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};
 if(sequence===6)nextSequence=8;
 if(sequence===8)nextSequence=hasRemediation(campaignRoot)?9:10;
@@ -1412,7 +1395,7 @@ else{
     directory.discovery={statePath:started.statePath,status:started.completeImmediately?'COMPLETE':'RUNNING',
       activeUnitId:started.state.payload.activeUnitId,
       activeUnitIds:started.state.payload.order.filter(id=>started.state.payload.units[id]?.status==='ACTIVE')};
-    discoveryStarted=true;discoveryWake=started.wake;discoveryWakes=started.wakes??(started.wake?[started.wake]:[]);
+    discoveryStarted=true;
     if(started.completeImmediately){
       const finished=completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
         state:started.state,now});
@@ -1420,7 +1403,7 @@ else{
         predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:[
           ...nextDerivedInputs,path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')],
         status:'ACTIVE'});
-      directory.discovery.status='COMPLETE';directory.discovery.activeUnitId=null;directory.discovery.activeUnitIds=[];discoveryWake=finished.wake;discoveryWakes=finished.wake?[finished.wake]:[];
+      directory.discovery.status='COMPLETE';directory.discovery.activeUnitId=null;directory.discovery.activeUnitIds=[];
     }else{
       nextAssignment.status='WAITING_FOR_DISCOVERY';
     }
@@ -1429,4 +1412,4 @@ else{
 }
 writeJson(directoryFile,directory);
 const feedback='CONTROLLER_PHASE_PASS: Phase '+sequence+' validated and sealed.'+(nextAssignment?' Next authorized assignment: Phase '+nextAssignment.phaseSequence+' / '+nextAssignment.reviewer+'.':' Campaign complete.');
-process.stdout.write(JSON.stringify({authorityLinkRoot,status:'PASS',controllerPassToken:'CONTROLLER_PHASE_PASS',sealedRework:Boolean(sealedRework),masterAmendmentRefresh:Boolean(masterAmendmentRefreshSha),campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:false,sameReviewerAdvanced:!discoveryStarted&&Boolean(nextAssignment&&nextAssignment.status==='ACTIVE'),discoveryStarted,discoveryWakeChatKey:discoveryWake?.chatKey??'',discoveryWakeId:discoveryWake?.wakeId??'',discoveryWakePhaseId:discoveryWake?.phaseId??'',discoveryWakeMilestoneId:discoveryWake?.milestoneId??'',discoveryWakeMessageB64:discoveryWake?.messageB64??'',discoveryWakesB64:Buffer.from(JSON.stringify(discoveryWakes)).toString('base64'),nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+process.stdout.write(JSON.stringify({authorityLinkRoot,status:'PASS',controllerPassToken:'CONTROLLER_PHASE_PASS',sealedRework:Boolean(sealedRework),masterAmendmentRefresh:Boolean(masterAmendmentRefreshSha),campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:false,sameReviewerAdvanced:!discoveryStarted&&Boolean(nextAssignment&&nextAssignment.status==='ACTIVE'),discoveryStarted,activeDiscoveryUnitIds:directory.discovery?.activeUnitIds??[],nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
