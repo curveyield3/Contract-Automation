@@ -1,12 +1,13 @@
 import fs from 'node:fs';
-import {isReassignedV13AuthorityV1} from '../../../scripts/lib/lite-authority-lineup-v1.mjs';
+import {isReassignedV13AuthorityV1 as originalV13SingleV1} from '../../../scripts/lib/lite-authority-lineup-v1.mjs';
+const isReassignedV13AuthorityV1=({authorityRoot,...params})=>authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo'||originalV13SingleV1({authorityRoot,...params});
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {classesForTriggersV1,loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
 import {buildCoverageMatrixV1} from './adr-coverage-matrix-v1.mjs';
 import {deriveBaselineObligationsV1} from './adr-baseline-obligations-v1.mjs';
 import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1,TRIVIAL_KINDS_V1,isLiteralConstantV13} from './adr-discovery-validators-v1.mjs';
-import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
+import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-solo-phase-work-v1.mjs';
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
 import {independentSpecItemsV13} from './adr-independent-spec-v1.mjs';
 // V13 qualification status is assessed independently after real blinded audit runs.
