@@ -275,11 +275,13 @@ function sweepOne(campaign){
       const missedSuccessor=waiting && expectedChat &&
         !(s.lastReceipt?.phaseId===assignment.phaseId &&
           s.lastReceipt?.targetChatUrl===expectedChat);
-      const reworkIdentity=assignment.packetPath||assignment.workShardIndexPath||assignment.phaseId;
+      const reworkIdentity=assignment.packetPath?
+        assignment.packetPath+':'+fetch(CONTROLLER,assignment.packetPath,ctlToken).sha:
+        (assignment.workShardIndexPath||assignment.phaseId);
       const missedRework=rework && expectedChat && s.lastReworkIdentity!==reworkIdentity;
       const masterChat=d.masterReview?.chatUrl||r.agentChats?.['master-reviewer'];
-      const masterIdentity=d.pendingMasterReview?.segmentId||
-        d.pendingMasterReview?.recordPath||'MASTER_REVIEW';
+      const masterIdentity=[d.pendingMasterReview?.segmentId,
+        d.pendingMasterReview?.recordPath,d.lastSealedReceiptPath].filter(Boolean).join('|')||'MASTER_REVIEW';
       const missedMaster=d.campaignStatus==='WAITING_FOR_MASTER_REVIEW'&&masterChat &&
         s.lastMasterIdentity!==masterIdentity;
       if(missedSuccessor||missedRework||missedMaster){
