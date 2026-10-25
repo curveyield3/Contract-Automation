@@ -3,7 +3,7 @@
   "singleAgentSimulation": false,
   "campaignId": "live-ethereum-dai-6b175474-r2",
   "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adaeaa8-a1f4-83e8-a1e1-c421fdb12a65",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eab-0ff8-83e8-821f-a065d3c45384",
   "browserRoutine": "",
   "agentChats": {
     "reviewer-1": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5e98-5e58-83e8-a901-838dea1fe9df",
@@ -25,17 +25,17 @@
     "url": ""
   },
   "activeChat": {
-    "name": "reviewer-3",
-    "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adaeaa8-a1f4-83e8-a1e1-c421fdb12a65"
+    "name": "reviewer-4",
+    "url": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6ada5eab-0ff8-83e8-821f-a065d3c45384"
   },
-  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"live-ethereum-dai-6b175474-r2-PHASE_5_WORK_PACKET-backup/40123144819\"} as the whole file campaigns/live-ethereum-Dai-6b175474 r2/work/browser/WAKE_ACK_reviewer-3_v1.json on curveyield3/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nCONTROLLER_BACKUP_CHAT_HANDOFF: the prior reviewer chat made no verified durable progress after the watchdog recovery threshold.\nCampaign live-ethereum-dai-6b175474-r2, role reviewer-3, current phase 5.\nRead the bound authority from the Phase-0 receipt; preserve frozen authority and sealed earlier phases.\nCurrent assignment is REWORK_REQUIRED. FIRST read the latest exact controller failure packet campaigns/live-ethereum-Dai-6b175474 r2/submissions/PHASE_05_WORK_PACKET_v1.json and the latest controller result, then identify which deficiencies belong to reviewer data and which are runner/machine-execution defects. Preserve already completed indexed shards and the last sealed receipt. Compare the failed runner commit and time to current main before calling a repaired defect still open. Resume every presently executable non-test repair; do not re-submit a machine-executing boundary or create, modify, or run any test without explicit audit-owner authorization. Record the precise remaining blocker.\nDo not author tests as the test executor; continue only this reviewer role. Do not repeat earlier bookkeeping.",
+  "wakeMessage": "",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
-    "phaseId": "phase-5",
-    "milestoneId": "PHASE_5_WORK_PACKET",
+    "phaseId": "phase-8",
+    "milestoneId": "PHASE_8_WORK_PACKET",
     "workerRole": "reviewer",
-    "reviewer": "reviewer-3",
+    "reviewer": "reviewer-4",
     "thinkingEffort": "high"
   },
   "watchdog": {
@@ -47,8 +47,8 @@
       "repository": "curveyield3/Audit-Controller",
       "ref": "main",
       "statePath": "Audit Campaign Directory/campaigns/live-ethereum-dai-6b175474.json",
-      "expectedPhaseId": "phase-5",
-      "expectedMilestoneId": "PHASE_5_WORK_PACKET",
+      "expectedPhaseId": "phase-8",
+      "expectedMilestoneId": "PHASE_8_WORK_PACKET",
       "activePointerPath": "",
       "stopStates": [
         "STOPPED_BY_HUMAN"
@@ -64,7 +64,7 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-24T19:01:06Z",
+  "updatedAt": "2026-10-25T04:01:17Z",
   "wakeDelivery": {
     "milestoneId": "PHASE_5_WORK_PACKET",
     "chatUrl": "https://chatgpt.com/g/g-p-6ada5e94bc988191a70ac0bc13f3327f-dex-audit-v17b/c/6adaeaa8-a1f4-83e8-a1e1-c421fdb12a65",
