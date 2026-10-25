@@ -84,7 +84,7 @@ on:
         type: string
       gate_stop_campaign_statuses_csv:
         required: false
-        default: COMPLETE,STOPPED_BY_HUMAN
+        default: COMPLETE,CLOSED_INCOMPLETE,STOPPED_BY_HUMAN
         type: string
       runner_retry_attempt:
         description: Internal fresh-runner retry attempt counter
