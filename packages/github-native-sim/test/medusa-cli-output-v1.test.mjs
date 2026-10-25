@@ -6,7 +6,7 @@ const medusaInput = () => ({
   projectRoot: '/tmp/project',
   version: '1.5.1',
   sourceCommit: '1'.repeat(40),
-  rawArtifactRef: 'github-actions://CurveYield2/Contract-Automation/runs/1/artifacts/medusa/raw.txt',
+  rawArtifactRef: 'github-actions://curveyield3/Contract-Automation/runs/1/artifacts/medusa/raw.txt',
   rpcUrl: 'http://127.0.0.1:18545',
   rpcBlock: 25817400,
   rpcBlockHash: `0x${'2'.repeat(64)}`,

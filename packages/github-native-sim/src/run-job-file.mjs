@@ -17,7 +17,7 @@ import { V7_POLICY } from './v7-policy.mjs';
 function nowIso(now = () => new Date()) { return now().toISOString(); }
 
 function rawArtifactRef(component) {
-  const repository = process.env.GITHUB_REPOSITORY ?? 'CurveYield2/Contract-Automation';
+  const repository = process.env.GITHUB_REPOSITORY ?? 'curveyield3/Contract-Automation';
   const runId = process.env.GITHUB_RUN_ID ?? 'recovery';
   return `github-actions://${repository}/runs/${runId}/artifacts/v7-execution/${component}`;
 }

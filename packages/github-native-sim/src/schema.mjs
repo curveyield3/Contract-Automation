@@ -2,7 +2,7 @@ import { validateWorkflow } from '../../protocol/src/index.mjs';
 import { V7_POLICY } from './v7-policy.mjs';
 
 export const V2_AUTOMATION_RELEASE = Object.freeze({
-  repository: 'CurveYield2/Contract-Automation',
+  repository: 'curveyield3/Contract-Automation',
   branch: 'recovery/v7-execution-layer-v1',
   commit: '612fa50264e587e3f24550bf4dae35719b04211c',
   contractVersion: 'contract-automation-v7-relocated-v1'

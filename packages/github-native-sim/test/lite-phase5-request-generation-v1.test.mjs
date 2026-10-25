@@ -6,7 +6,7 @@ import path from 'node:path';
 import {generateV7ExecutionRequestV1} from '../../../scripts/lib/lite-phase5-request-generation-v1.mjs';
 import {validateDeepAssuranceRequestWithV26V1} from '../src/schema-v26.mjs';
 const digest='a'.repeat(64);
-const source={sha256:digest,archiveRepository:'CurveYield2/Audit-Controller',
+const source={sha256:digest,archiveRepository:'curveyield3/Audit-Controller',
  archiveCommit:'1'.repeat(40),archivePath:'campaigns/demo r1/source/source.zip',
  extractedContentPath:'campaigns/demo r1/source'};
 const target=()=>({candidateKey:'C-005',executionMethod:'V7_REQUEST',reproductionType:'FOUNDRY_TEST',

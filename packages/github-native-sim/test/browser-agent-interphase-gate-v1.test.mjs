@@ -81,14 +81,14 @@ function exercise(mutate = () => {}, launch = false) {
           campaignId: 'synthetic',
           campaignGenerationId: 'synthetic-g1',
           workspacePath: 'campaigns/synthetic',
-          campaignFolderUrl: 'https://github.com/CurveYield2/Audit-Controller/tree/main/campaigns/synthetic',
-          campaignLink: 'https://github.com/CurveYield2/Audit-Controller/tree/main/campaigns/synthetic'
+          campaignFolderUrl: 'https://github.com/curveyield3/Audit-Controller/tree/main/campaigns/synthetic',
+          campaignLink: 'https://github.com/curveyield3/Audit-Controller/tree/main/campaigns/synthetic'
         },
         reviewers: { outgoing: 'web-bootstrap-agent', incoming: 'reviewer-1' },
         assignment: { incomingReviewer: 'reviewer-1', assignedLitePhaseOrMilestone: 'Phase 1' },
         authority: {
-          liteSkillRepositoryPath: 'CurveYield2/Audit-Controller/Audit Skill - Current Authority',
-          liteSkillUrl: 'https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority'
+          liteSkillRepositoryPath: 'curveyield3/Audit-Controller/Audit Skill - Current Authority',
+          liteSkillUrl: 'https://github.com/curveyield3/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority'
         }
       }),
       wake: [
@@ -100,7 +100,7 @@ function exercise(mutate = () => {}, launch = false) {
         '- Campaign ID / generation: `synthetic / synthetic-g1`',
         '- Incoming reviewer: `reviewer-1`',
         '- Assigned Lite phase/milestone: `Phase 1`',
-        '- Repository path: `CurveYield2/Audit-Controller/Audit Skill - Current Authority`',
+        '- Repository path: `curveyield3/Audit-Controller/Audit Skill - Current Authority`',
         ''
       ].join('\n') };
     for (const [name, value] of Object.entries(named)) fs.writeFileSync(path.join(temp, name), value);
@@ -131,7 +131,7 @@ gate_interphase_work_packet_path="$PACKET_PATH"
 gate_interphase_completion_path="$COMPLETION_PATH"
 gate_interphase_handoff_path="$HANDOFF_PATH"
 AUDIT_CONTROLLER_GITHUB_TOKEN=synthetic
-GITHUB_REPOSITORY=CurveYield2/Contract-Automation
+GITHUB_REPOSITORY=curveyield3/Contract-Automation
 GITHUB_RUN_ID=123
 cycle=1
 gate_path=campaigns/synthetic/state.json
@@ -141,21 +141,21 @@ cp "$FIXTURE_DIR/campaignState" /tmp/canonical-campaign-state.json
 `;
     const command = script + functions + (launch === 'mechanical'
       ? String.raw`
-if launch_lite_successor campaigns/synthetic/pointer.json P0_BOOTSTRAP CurveYield2/Audit-Controller main; then
+if launch_lite_successor campaigns/synthetic/pointer.json P0_BOOTSTRAP curveyield3/Audit-Controller main; then
   exit 42
 else
   [ "$?" -eq 4 ]
 fi
 `
       : launch ? String.raw`
-if verify_lite_interphase_completion "$PACKET_PATH" "$COMPLETION_PATH" "$HANDOFF_PATH" P0_BOOTSTRAP CurveYield2/Audit-Controller main; then
-  launch_lite_successor campaigns/synthetic/pointer.json P0_BOOTSTRAP CurveYield2/Audit-Controller main
+if verify_lite_interphase_completion "$PACKET_PATH" "$COMPLETION_PATH" "$HANDOFF_PATH" P0_BOOTSTRAP curveyield3/Audit-Controller main; then
+  launch_lite_successor campaigns/synthetic/pointer.json P0_BOOTSTRAP curveyield3/Audit-Controller main
 else
   exit 41
 fi
 `
       : String.raw`
-verify_lite_interphase_completion "$PACKET_PATH" "$COMPLETION_PATH" "$HANDOFF_PATH" P0_BOOTSTRAP CurveYield2/Audit-Controller main
+verify_lite_interphase_completion "$PACKET_PATH" "$COMPLETION_PATH" "$HANDOFF_PATH" P0_BOOTSTRAP curveyield3/Audit-Controller main
 `);
     const result = spawnSync('bash', ['-c', command], { encoding: 'utf8', env: {
       ...process.env, FIXTURE_DIR: temp, PACKET_PATH: packetPath,

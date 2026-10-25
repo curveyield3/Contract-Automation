@@ -10,7 +10,7 @@ test('authority zip sync v2 keeps deterministic packaging and runs only on expli
   assert.doesNotMatch(workflow,/^\s+(schedule|push):/m);
   assert.doesNotMatch(workflow,/^\s+workflow_run:/m);
   assert.match(workflow,/git diff --quiet --/);
-  assert.match(workflow,/CurveYield2\/Audit-Controller/);
+  assert.match(workflow,/curveyield3\/Audit-Controller/);
   assert.match(workflow,/python3 \.sync-lite-authority-zip-v1\.py/);
   assert.match(script,/date_time=\(1980, 1, 1, 0, 0, 0\)/);
   assert.match(script,/sorted\(p for p in package\.rglob/);

@@ -20,8 +20,8 @@ export const V26_QUALIFIED_CAPABILITIES_V1 = Object.freeze({
 
 export function buildRunnerManifestV2() {
   return {
-    schemaVersion: 'curveyield2-v7-runner-manifest-v2',
-    repository: 'CurveYield2/Contract-Automation',
+    schemaVersion: 'curveyield3-v7-runner-manifest-v2',
+    repository: 'curveyield3/Contract-Automation',
     processId: V7_POLICY.processId,
     requestSchema: V7_POLICY.requestSchema,
     profiles: Object.values(V7_POLICY.profiles),

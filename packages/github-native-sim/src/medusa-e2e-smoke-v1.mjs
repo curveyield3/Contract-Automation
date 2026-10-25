@@ -126,7 +126,7 @@ export async function runMedusaEndToEndSmokeV1({
         projectRoot,
         version: '1.5.1',
         sourceCommit,
-        rawArtifactRef: `github-actions://CurveYield2/Contract-Automation/qualification/medusa-smoke/${name}/raw.txt`,
+        rawArtifactRef: `github-actions://curveyield3/Contract-Automation/qualification/medusa-smoke/${name}/raw.txt`,
         rpcUrl,
         rpcBlock,
         rpcBlockHash,

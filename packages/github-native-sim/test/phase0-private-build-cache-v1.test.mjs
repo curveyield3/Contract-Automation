@@ -5,8 +5,8 @@ import {privateBuildCacheIdentityV1,compileWithPrivateCacheV1,splitPrivateCompil
 
 const sourceSha='a'.repeat(64),sourceCommit='b'.repeat(40),toolIdentity='c'.repeat(64);
 const request={
-  source:{repository:'CurveYield2/Audit-Controller',commit:sourceCommit,archivePath:'campaigns/example/source/source.zip',archiveSha256:sourceSha},
-  destination:{repository:'CurveYield2/Audit-Controller',ref:'main',campaignPath:'campaigns/example'},
+  source:{repository:'curveyield3/Audit-Controller',commit:sourceCommit,archivePath:'campaigns/example/source/source.zip',archiveSha256:sourceSha},
+  destination:{repository:'curveyield3/Audit-Controller',ref:'main',campaignPath:'campaigns/example'},
   campaignId:'example',campaignGenerationId:'generation-1'
 };
 const pseudo={source:{projectPath:'contracts',archiveSha256:sourceSha},
@@ -54,7 +54,7 @@ test('compilation outputs live only in an isolated folder on private Audit-Contr
   assert.match(source,/PRIVATE_CACHE_REF = 'main'/);
   assert.match(source,/ref:PRIVATE_CACHE_REF/);
   assert.match(source,/PRIVATE_CACHE_ROOT/);
-  assert.match(source,/const REPO='CurveYield2\/Audit-Controller'/);
+  assert.match(source,/const REPO='curveyield3\/Audit-Controller'/);
   assert.match(source,/git\/trees/);
   assert.match(source,/git\/blobs/);
   assert.match(source,/git\/refs\/heads/);

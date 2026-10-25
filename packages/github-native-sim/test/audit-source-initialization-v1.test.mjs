@@ -108,8 +108,8 @@ test('workflow writes one Phase-0 receipt plus the separate Audit Campaign Direc
   assert.match(receipt, /curveyield-lite-phase-receipt-v1/);
   assert.match(receipt, /campaignDirectoryEntryPath/);
   assert.match(receipt, /curveyield-audit-campaign-directory-entry-v1/);
-  assert.match(run, /export GH_TOKEN="\$AUDIT_CONTROLLER_TOKEN"[\s\S]*gh auth setup-git[\s\S]*gh repo clone CurveYield2\/Audit-Controller/);
-  assert.ok(run.indexOf('gh auth setup-git') < run.indexOf('gh repo clone CurveYield2/Audit-Controller'));
+  assert.match(run, /export GH_TOKEN="\$AUDIT_CONTROLLER_TOKEN"[\s\S]*gh auth setup-git[\s\S]*gh repo clone curveyield3\/Audit-Controller/);
+  assert.ok(run.indexOf('gh auth setup-git') < run.indexOf('gh repo clone curveyield3/Audit-Controller'));
   assert.match(run, /Audit Campaign Directory\/campaigns/);
   assert.doesNotMatch(run, /write-state-v1\.py|CAMPAIGN_STATE_v1|ACTIVE_PHASE_POINTER_v1|SOLO_AUDIT_STATE_v1/);
   assert.match(run, /git push origin HEAD:main/);

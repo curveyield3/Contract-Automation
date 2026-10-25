@@ -9,7 +9,7 @@ const sourceSha='a'.repeat(64);
 const campaignGenerationId='g1';
 const request={
   requestId:'r1',requestDigest:'d'.repeat(64),campaignId:'c1',campaignGenerationId,
-  source:{repository:'CurveYield2/Audit-Controller',commit:'b'.repeat(40),archivePath:'campaigns/x/source/x.zip',archiveSha256:sourceSha,projectPath:'.'},
+  source:{repository:'curveyield3/Audit-Controller',commit:'b'.repeat(40),archivePath:'campaigns/x/source/x.zip',archiveSha256:sourceSha,projectPath:'.'},
   configuration:{compilers:[{language:'solidity',version:'0.8.30'}],optimizer:{enabled:true,runs:200},evmVersion:'cancun',viaIR:false}
 };
 const build={

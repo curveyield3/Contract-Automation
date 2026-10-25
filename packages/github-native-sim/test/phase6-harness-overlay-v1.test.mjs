@@ -21,7 +21,7 @@ async function fixture() {
     schemaVersion: 'phase6-audit-harness-overlay-v1',
     bundleId: 'cyvlsdt-v30-phase6-v1',
     sourceBinding: {
-      repository: 'CurveYield2/Solo-Audit-Controller',
+      repository: 'curveyield3/Solo-Audit-Controller',
       commit: '6bde63416a4611e127b8bb3a5958e6b6d874c188',
       archiveSha256: 'cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a'
     },
@@ -44,7 +44,7 @@ test('materializes a runner-owned audit harness overlay without modifying frozen
     runnerRoot,
     bundleId: 'cyvlsdt-v30-phase6-v1',
     source: {
-      repository: 'CurveYield2/Solo-Audit-Controller',
+      repository: 'curveyield3/Solo-Audit-Controller',
       commit: '6bde63416a4611e127b8bb3a5958e6b6d874c188',
       archiveSha256: 'cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a'
     }
@@ -70,7 +70,7 @@ test('rejects an audit harness overlay whose immutable source binding does not m
       runnerRoot,
       bundleId: 'cyvlsdt-v30-phase6-v1',
       source: {
-        repository: 'CurveYield2/Solo-Audit-Controller',
+        repository: 'curveyield3/Solo-Audit-Controller',
         commit: '0000000000000000000000000000000000000000',
         archiveSha256: 'cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a'
       }

@@ -80,7 +80,7 @@ test('development authority schema is strict and Contract-Automation-only', () =
   assert.equal(schema.properties.schema.const, 'curveyield-development-authority-import/v1');
   assert.equal(schema.properties.source.properties.type.const, 'google-drive');
   assert.deepEqual(schema.properties.source.properties.format.enum, ['raw', 'zip']);
-  assert.equal(schema.properties.target.properties.repository.const, 'CurveYield2/Contract-Automation');
+  assert.equal(schema.properties.target.properties.repository.const, 'curveyield3/Contract-Automation');
   assert.equal(schema.properties.target.properties.branch.const, 'main');
   assert.match(schema.properties.target.properties.path.pattern, /process\/development-agent-task-manager/);
 });

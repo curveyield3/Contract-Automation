@@ -165,7 +165,7 @@ test('completion schema is strict and requires passing tests', () => {
 test('manager remains a Contract-Automation workflow and encodes the repository-boundary rule', () => {
   assert.match(workflow, /Audit-Controller must contain no GitHub Actions workflows; workflows belong in Contract-Automation/);
   assert.match(workflow, /Never add a GitHub Actions workflow to Audit-Controller/);
-  assert.doesNotMatch(workflow, /gh workflow run[^\n]*--repo\s+CurveYield2\/Audit-Controller/);
+  assert.doesNotMatch(workflow, /gh workflow run[^\n]*--repo\s+curveyield3\/Audit-Controller/);
 });
 
 test('task-manager changes stay in the control-light qualification lane', () => {

@@ -57,7 +57,7 @@ for(const wf of [
   test(wf+' uses one checked private repository fetch per job',()=>{
     const src=read(wf);
     assert.match(src,/bash scripts\/checkout-audit-controller-once-v1.sh/);
-    assert.doesNotMatch(src,/gh repo clone CurveYield2\/Audit-Controller/);
+    assert.doesNotMatch(src,/gh repo clone curveyield3\/Audit-Controller/);
     assert.doesNotMatch(src,/git checkout -B "\$AUDIT_CONTROLLER_REF" "origin\/\$AUDIT_CONTROLLER_REF"/);
   });
 }

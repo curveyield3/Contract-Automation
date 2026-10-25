@@ -64,7 +64,7 @@ export function createLitePhaseReceiptV1(input){return {schemaVersion:'curveyiel
 
   const predecessorRel=campaign+'/receipts/PHASE_00_RECEIPT_v1.json';
   writeJson(path.join(root,predecessorRel),{
-    authority:{homepagePath:authority+'/SKILL.md',repository:'CurveYield2/Audit-Controller'},
+    authority:{homepagePath:authority+'/SKILL.md',repository:'curveyield3/Audit-Controller'},
     source:{sha256:source},
     globalControls:{sourceIntelligenceBundle:'evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json'},
     phase:{sequence:0,status:'SEALED'}

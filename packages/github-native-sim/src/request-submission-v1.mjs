@@ -94,7 +94,7 @@ async function ensureTracePullRequest({ repository, token, base, branch, request
 
 export async function submitV7Request({
   requestPath,
-  repository = 'CurveYield2/Contract-Automation',
+  repository = 'curveyield3/Contract-Automation',
   base = 'main',
   branch = null,
   token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN,

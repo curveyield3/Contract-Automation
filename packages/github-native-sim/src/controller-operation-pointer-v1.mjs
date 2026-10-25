@@ -1,6 +1,6 @@
 const SCHEMA_VERSION='audit-controller-operation-pointer-v1';
 const PROCESS_ID='audit-v7-independent-review';
-const CONTROLLER_REPOSITORY='CurveYield2/Audit-Controller';
+const CONTROLLER_REPOSITORY='curveyield3/Audit-Controller';
 
 function fail(message){throw new Error(`Controller operation pointer v1: ${message}`);}
 function safePath(value,label){

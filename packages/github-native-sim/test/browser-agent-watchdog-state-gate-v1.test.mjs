@@ -15,7 +15,7 @@ const valid = {
   wakeId: 'synthetic-v1', campaignId: 'synthetic-v1', phaseId: 'smoke',
   workerRole: 'reviewer', status: 'ACTIVE', chatUrl: '',
   idleMessage: 'SMOKE ONLY', observation: { assistantCount: 0 },
-  gate: { mode: 'FULL_V26', repository: 'CurveYield2/Audit-Controller',
+  gate: { mode: 'FULL_V26', repository: 'curveyield3/Audit-Controller',
     ref: 'main', statePath: '' }
 };
 const accepts = (state, wake = 'synthetic-v1') =>

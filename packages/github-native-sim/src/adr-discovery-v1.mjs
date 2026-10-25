@@ -150,7 +150,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
 }
 
 export function discoveryWakeMessageV1({directory,auditControllerRef,packetPath,submissionPath,instructionsPath,boundaryRequestPath,unitId,role,attempt,feedbackText=null,singleReviewer=false}){
- const base='https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
+ const base='https://github.com/curveyield3/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
  const link=(p)=>base+p.split('/').map(encodeURIComponent).join('/');
  const lines=[role==='ATTACK'?(singleReviewer?'You are reviewer-2 performing a second, adversarial Phase-4 pass in the same chat. Campaign '+directory.campaignId:'You are the attacker reviewer. Campaign '+directory.campaignId):'You are reviewer-2. Campaign '+directory.campaignId,
   'Use the GitHub connector app for every repository read and write.',
@@ -216,7 +216,7 @@ function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
   return indexRel;
 }
 export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText=null,indexPath=null,singleReviewer=false}){
- const base='https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
+ const base='https://github.com/curveyield3/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
  const link=(p)=>base+p.split('/').map(encodeURIComponent).join('/');
  const lines=[role==='ATTACK'?(singleReviewer?'You are reviewer-2 performing a second, adversarial Phase-4 pass in the same chat. Campaign '+directory.campaignId:'You are the attacker reviewer. Campaign '+directory.campaignId):'You are reviewer-2. Campaign '+directory.campaignId,
   'Use the GitHub connector app for every repository read and write.',

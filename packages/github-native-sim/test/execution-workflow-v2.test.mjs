@@ -17,12 +17,12 @@ test('canonical V7 execution workflow scopes private controller auth and archive
   assert.match(workflow, /AUDIT_CONTROLLER_PRIMARY_TOKEN:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
   assert.match(workflow, /PREFLIGHTSIM_FALLBACK_TOKEN:\s*\$\{\{ secrets\.PREFLIGHTSIM_GITHUB_TOKEN \}\}/);
   assert.match(workflow, /GH_TOKEN:\s*\$\{\{ env\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
-  assert.match(workflow, /gh api repos\/CurveYield2\/Audit-Controller --silent/);
-  assert.match(workflow, /gh repo clone CurveYield2\/Audit-Controller \.controller-request/);
+  assert.match(workflow, /gh api repos\/curveyield3\/Audit-Controller --silent/);
+  assert.match(workflow, /gh repo clone curveyield3\/Audit-Controller \.controller-request/);
 
   assert.match(workflow, /name:\s*Checkout exact private controller for controller operation/);
   assert.match(workflow, /if:\s*env\.V7_REQUEST_KIND == 'controller-operation'/);
-  assert.match(workflow, /gh repo clone CurveYield2\/Audit-Controller \.controller-operation/);
+  assert.match(workflow, /gh repo clone curveyield3\/Audit-Controller \.controller-operation/);
   assert.match(workflow, /git fetch --depth=1 origin "\$AUDIT_CONTROLLER_REF"/);
   assert.match(workflow, /test "\$\(git rev-parse HEAD\)" = "\$AUDIT_CONTROLLER_REF"/);
   assert.match(workflow, /name:\s*Write controller-operation result back to exact private branch/);

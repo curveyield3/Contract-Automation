@@ -14,7 +14,7 @@ function request(profileId = 'github-native-compile-v2') {
     schemaVersion: 'deep-assurance-github-request-v2',
     processId: 'audit-v7-independent-review',
     contractAutomationRelease: {
-      repository: 'CurveYield2/Contract-Automation',
+      repository: 'curveyield3/Contract-Automation',
       branch: 'recovery/v7-execution-layer-v1',
       commit: '612fa50264e587e3f24550bf4dae35719b04211c',
       contractVersion: 'contract-automation-v7-relocated-v1'
@@ -29,7 +29,7 @@ function request(profileId = 'github-native-compile-v2') {
     gateId: 'exact-scope-provenance-complete',
     profileId,
     source: {
-      repository: 'CurveYield2/Audits',
+      repository: 'curveyield3/Audits',
       commit: commit('1'),
       projectPath: 'audit-targets/example'
     },

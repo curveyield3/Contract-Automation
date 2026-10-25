@@ -68,8 +68,8 @@ test('canonical V7 bridge keeps untrusted PR request checkout free of private cr
   assert.match(privateLane, /PREFLIGHTSIM_FALLBACK_TOKEN:\s*\$\{\{ secrets\.PREFLIGHTSIM_GITHUB_TOKEN \}\}/);
   assert.match(privateLane, /GH_TOKEN:\s*\$\{\{ env\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
   assert.doesNotMatch(privateLane, /AUDIT_CONTROLLER_GITHUB_TOKEN\s*\|\|\s*secrets\.PREFLIGHTSIM_GITHUB_TOKEN/);
-  assert.match(privateLane, /gh api repos\/CurveYield2\/Audit-Controller --silent/);
-  assert.match(privateLane, /gh repo clone CurveYield2\/Audit-Controller/);
+  assert.match(privateLane, /gh api repos\/curveyield3\/Audit-Controller --silent/);
+  assert.match(privateLane, /gh repo clone curveyield3\/Audit-Controller/);
 });
 
 test('controller operation pointer is exact, minimal, and bound to one private request path', () => {
@@ -78,7 +78,7 @@ test('controller operation pointer is exact, minimal, and bound to one private r
     processId: 'audit-v7-independent-review',
     requestId: 'awr-test-v1',
     controller: {
-      repository: 'CurveYield2/Audit-Controller',
+      repository: 'curveyield3/Audit-Controller',
       commit: 'a'.repeat(40),
       requestPath: '.deep-assurance/operator/requests/awr-test-v1.json',
     },
@@ -92,7 +92,7 @@ test('controller operation pointer is exact, minimal, and bound to one private r
   }), /requestPath/);
   assert.throws(() => validateControllerOperationPointerV1({
     ...pointer,
-    controller: { ...pointer.controller, repository: 'CurveYield2/Other' },
+    controller: { ...pointer.controller, repository: 'curveyield3/Other' },
   }), /repository/);
 });
 

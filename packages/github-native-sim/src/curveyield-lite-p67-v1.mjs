@@ -10,7 +10,7 @@ import { runProcess } from './execution.mjs';
 const EXACT = Object.freeze({
   campaignId: 'curveyield-dex-fresh-audit-r1',
   phaseId: 'lite-p67',
-  sourceRepository: 'CurveYield2/Audit-Controller',
+  sourceRepository: 'curveyield3/Audit-Controller',
   sourceCommit: 'c41958422daf46c3b929182f90e53b872cedada6',
   archiveSha256: '526a729ce73d493f2ccbb568378a18dd1eec0788d0165e02dc5ceb773b9953ed',
   actionKind: 'curveyield-lite-p67-v1',

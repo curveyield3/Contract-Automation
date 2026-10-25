@@ -37,7 +37,7 @@ authorityTest('Lite Phase-0 automation emits the exact skill-required canonical 
     campaignGenerationId: 'test-lite-g1',
     source: {
       sha256: sourceSha,
-      archiveRepository: 'CurveYield2/Audit-Controller',
+      archiveRepository: 'curveyield3/Audit-Controller',
       archiveCommit: '2'.repeat(40),
       archivePath: 'campaigns/Test Lite Audit/source/source.zip'
     },
@@ -47,7 +47,7 @@ authorityTest('Lite Phase-0 automation emits the exact skill-required canonical 
     campaignId: 'test-lite-r1',
     status: 'PASS',
     source: {
-      repository: 'CurveYield2/Audit-Controller',
+      repository: 'curveyield3/Audit-Controller',
       commit: '2'.repeat(40),
       archivePath: 'campaigns/Test Lite Audit/source/source.zip',
       archiveSha256Observed: sourceSha

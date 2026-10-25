@@ -15,7 +15,7 @@ const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const markCompilation=message=>fsSync.writeSync(2,'[phase0-build-cache] '+message+'\n');
 const PRIVATE_CACHE_ROOT = 'Phase0 Build Cache';
 const PRIVATE_CACHE_REF = 'main';
-const REPO='CurveYield2/Audit-Controller';
+const REPO='curveyield3/Audit-Controller';
 const MAX_BYTES=768*1024*1024;
 const MAX_GZIP_BYTES=256*1024*1024;
 const CHUNK_BYTES=4*1024*1024;

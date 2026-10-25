@@ -9,7 +9,7 @@ function request() {
     schemaVersion: 'deep-assurance-github-request-v2',
     processId: 'audit-v7-independent-review',
     contractAutomationRelease: {
-      repository: 'CurveYield2/Contract-Automation',
+      repository: 'curveyield3/Contract-Automation',
       branch: 'recovery/v7-execution-layer-v1',
       commit: '612fa50264e587e3f24550bf4dae35719b04211c',
       contractVersion: 'contract-automation-v7-relocated-v1'
@@ -24,7 +24,7 @@ function request() {
     gateId: 'phase7-anvil-only',
     profileId: 'github-native-simulate-v2',
     source: {
-      repository: 'CurveYield2/Solo-Audit-Controller',
+      repository: 'curveyield3/Solo-Audit-Controller',
       commit: sourceCommit,
       projectPath: 'target'
     },

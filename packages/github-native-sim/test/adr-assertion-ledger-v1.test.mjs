@@ -28,7 +28,7 @@ test('Forge parser extracts named suites, fuzz tests, colored text, failure reas
 });
 test('native fuzz attaches named assertions on completed and failed results preserving status',async()=>{
  const base={projectRoot:'/tmp/source',sourceCommit:'a'.repeat(40),
-  rawArtifactRef:'github-actions://CurveYield2/Contract-Automation/1/artifacts/fuzz',
+  rawArtifactRef:'github-actions://curveyield3/Contract-Automation/1/artifacts/fuzz',
   command:'forge',args:['test']};
  const success=await runNativeFuzzAnalysis(base,{runCommand:async()=>({exitCode:0,
   stdout:'Ran 1 test for test/A.t.sol:Vault\n[PASS] test_prop_BOB_0001() \nSuite result: ok. 1 passed; 0 failed;',stderr:''})});

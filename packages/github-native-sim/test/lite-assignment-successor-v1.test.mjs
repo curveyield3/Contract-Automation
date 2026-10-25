@@ -41,8 +41,8 @@ test('fresh successor preparation accepts absent controller-owned final report a
   assert.match(result.wakeMessage,/Current phase: phase-2/);
   assert.match(result.wakeMessage,/Start phase-2 now/);
   // Short successor message (restored in 0338cfc7): campaign and authority links only.
-  assert.match(result.wakeMessage,/Campaign: https:\/\/github\.com\/CurveYield2\/Audit-Controller\/tree\/campaign%2Fref-v1\/campaigns\/demo/);
-  assert.match(result.wakeMessage,/Current Audit Skill Authority: https:\/\/github\.com\/CurveYield2\/Audit-Controller\/blob\/campaign%2Fref-v1\/Audit%20Skill%20-%20Current%20Authority\/Audit_Litemode_v10\.2\/SKILL\.md/);
+  assert.match(result.wakeMessage,/Campaign: https:\/\/github\.com\/curveyield3\/Audit-Controller\/tree\/campaign%2Fref-v1\/campaigns\/demo/);
+  assert.match(result.wakeMessage,/Current Audit Skill Authority: https:\/\/github\.com\/curveyield3\/Audit-Controller\/blob\/campaign%2Fref-v1\/Audit%20Skill%20-%20Current%20Authority\/Audit_Litemode_v10\.2\/SKILL\.md/);
   assert.match(result.wakeMessage,/ultimate authority/i);
   assert.match(result.wakeMessage,/in order, precisely, with no deviation/i);
   assert.match(result.wakeMessage,/do not redo sealed earlier phases/i);

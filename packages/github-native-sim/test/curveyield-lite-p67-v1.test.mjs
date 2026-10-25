@@ -10,7 +10,7 @@ function request() {
     schemaVersion: 'deep-assurance-github-request-v2',
     processId: 'audit-v7-independent-review',
     contractAutomationRelease: {
-      repository: 'CurveYield2/Contract-Automation',
+      repository: 'curveyield3/Contract-Automation',
       branch: 'recovery/v7-execution-layer-v1',
       commit: '612fa50264e587e3f24550bf4dae35719b04211c',
       contractVersion: 'contract-automation-v7-relocated-v1',
@@ -25,7 +25,7 @@ function request() {
     gateId: 'P67',
     profileId: 'github-native-compile-v2',
     source: {
-      repository: 'CurveYield2/Audit-Controller',
+      repository: 'curveyield3/Audit-Controller',
       commit: 'c41958422daf46c3b929182f90e53b872cedada6',
       projectPath: 'CurveYield_DEX_Fresh_Audit_Package_2026-08-16/workspace/contracts-repo/CurveYield DEX',
       archivePath: 'staging/9aad3d30-2e47-4661-a88e-0bde262f5210.zip',

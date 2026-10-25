@@ -100,7 +100,7 @@ test('every direct private controller checkout selects a probed credential first
   let checked = 0;
   for (const name of workflows) {
     const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows', name), 'utf8');
-    const repositories = [...workflow.matchAll(/^          repository: (CurveYield2\/(?:Solo-)?Audit-Controller)$/gm)]
+    const repositories = [...workflow.matchAll(/^          repository: (curveyield3\/(?:Solo-)?Audit-Controller)$/gm)]
       .map((match) => match[1]);
     if (repositories.length === 0) continue;
     checked += repositories.length;

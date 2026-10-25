@@ -110,10 +110,10 @@ export async function checkoutExactSource({ repository, commit, destination, spa
   const initArgs = ['init', resolvedDestination];
   const init = await runCommand({ command: 'git', args: initArgs, cwd: resolvedParent });
   await requireSuccess(init, 'SOURCE_CHECKOUT_FAILURE', 'git', initArgs);
-  // Legacy frozen request metadata may name CurveYield2. For this live audit
+  // Legacy frozen request metadata may name curveyield3. For this live audit
   // always fetch the EXACT SAME pinned Git commit from canonical curveyield3,
   // without ever contacting the suspended historical owner.
-  const effectiveRepository = repository === 'CurveYield2/Audit-Controller'
+  const effectiveRepository = repository === 'curveyield3/Audit-Controller'
     ? 'curveyield3/Audit-Controller' : repository;
   const remote = `https://github.com/${effectiveRepository}.git`;
   const addRemote = await runCommand({ command: 'git', args: ['remote', 'add', 'origin', remote], cwd: resolvedDestination });
