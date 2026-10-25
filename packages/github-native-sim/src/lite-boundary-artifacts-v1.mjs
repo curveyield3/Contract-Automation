@@ -663,6 +663,15 @@ export function selectReusablePhase5TargetsV1({
 
 // Reading raw-result.json never counts as evidence unless the SAME strict
 // machine-evidence verifier used by the phase gate accepts it.
+function targetDesignSha256V1(target){
+  return createHash('sha256').update(stableJson(executionSensitiveTargetV1(target))).digest('hex');
+}
+function targetBindingManifestPathV1(evidenceRef){
+  return path.posix.join(path.posix.dirname(evidenceRef),'TARGET_BINDING_v1.json');
+}
+
+// Raw result alone is not enough to resume a prior run: bind it to the exact
+// current semantic target, source, request digest and persisted raw bytes.
 export function verifiedReusablePhase5ResultV1({
   controllerRoot,campaignPath,target,expectedCampaignId,expectedSourceSha256
 }={}){
@@ -673,10 +682,26 @@ export function verifiedReusablePhase5ResultV1({
   });
   if(!String(binding.status).startsWith('PASS_'))return null;
   try{
-    const request=JSON.parse(fs.readFileSync(path.join(controllerRoot,...campaignPath.split('/'),...binding.requestRef.split('/')),'utf8'));
+    const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
+    const request=JSON.parse(fs.readFileSync(path.join(campaignRoot,...binding.requestRef.split('/')),'utf8'));
     if(!/^dar-[0-9a-f]{32}$/.test(String(request.requestId??'')))return null;
     const evidenceRef=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key),request.requestId,'raw-result.json');
-    const rawResult=readV7RawResultV1(path.join(controllerRoot,...evidenceRef.split('/')));
+    const rawPath=path.join(controllerRoot,...evidenceRef.split('/'));
+    const manifestPath=path.join(controllerRoot,...targetBindingManifestPathV1(evidenceRef).split('/'));
+    if(!fs.existsSync(rawPath)||!fs.existsSync(manifestPath))return null;
+    const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));
+    const rawBytes=fs.readFileSync(rawPath);
+    if(manifest.schemaVersion!=='curveyield-phase5-target-binding-v1'||
+       manifest.campaignId!==expectedCampaignId||
+       manifest.sourceSha256!==expectedSourceSha256||
+       manifest.candidateKey!==key||
+       manifest.targetDesignSha256!==targetDesignSha256V1(target)||
+       manifest.requestRef!==binding.requestRef||
+       manifest.requestId!==request.requestId||
+       manifest.requestDigest!==request.requestDigest||
+       manifest.rawResultRef!==evidenceRef||
+       manifest.rawResultSha256!==createHash('sha256').update(rawBytes).digest('hex'))return null;
+    const rawResult=readV7RawResultV1(rawPath);
     const result={
       status:'PASS',exitCode:0,evidenceRef,rawResult,
       requestBindingStatus:binding.status,
@@ -693,14 +718,16 @@ export function verifiedReusablePhase5ResultV1({
 export async function executePhase5TargetsV1({
   controllerRoot,campaignPath,targetDesigns=[],
   expectedCampaignId=null,expectedSourceSha256=null,
-  reuseCandidateKeys=[],runProcessFn=null
+  reuseCandidateKeys=[],runProcessFn=null,
+  batchBudgetMs=70*60*1000,maxCandidateMs=40*60*1000,reserveMs=20*60*1000
 }={}){
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
-  const executionResults={};
+  const executionResults={},pendingCandidateKeys=[];
   let runProcessV1=null;
+  const batchStartedAt=Date.now();
   for(const t of arr(targetDesigns)){
     const key=String(t?.candidateKey??'').trim();
-    if(!key) continue;
+    if(!key)continue;
     const method=String(t.executionMethod??'').toUpperCase();
     if(method==='NOT_APPLICABLE'){
       executionResults[key]={status:'NOT_APPLICABLE',
@@ -712,17 +739,23 @@ export async function executePhase5TargetsV1({
       executionResults[key]={status:'BLOCKED_UNSUPPORTED_EXECUTION_METHOD',evidenceRef:'NO_MACHINE_EVIDENCE'};
       continue;
     }
-    if(reuseCandidateKeys.includes(key)){
+    // Empty reuseCandidateKeys means normal resumable execution: any exact,
+    // manifest-verified result is reusable. A non-empty allowlist remains
+    // restrictive for callers that explicitly scope reuse.
+    if(!reuseCandidateKeys.length||reuseCandidateKeys.includes(key)){
       const reused=verifiedReusablePhase5ResultV1({
         controllerRoot,campaignPath,target:t,expectedCampaignId,expectedSourceSha256
       });
-      if(reused){process.stderr.write(`[phase5-sim] REUSE ${key}: verified exact completed machine evidence\n`);executionResults[key]=reused;continue;}
+      if(reused){
+        process.stderr.write('[phase5-sim] REUSE '+key+': exact target/source/request/raw evidence verified\n');
+        executionResults[key]=reused;continue;
+      }
     }
     const binding=validateTargetExecutionRequestBindingV1({
       controllerRoot,campaignPath,target:t,expectedCampaignId,expectedSourceSha256
     });
     if(!String(binding.status).startsWith('PASS_')){
-      process.stderr.write(`[phase5-sim] BLOCKED ${key}: request binding ${binding.status}\n`);
+      process.stderr.write('[phase5-sim] BLOCKED '+key+': request binding '+binding.status+'\n');
       executionResults[key]={
         status:'BLOCKED_REQUEST_TARGET_BINDING_MISMATCH',
         requestBindingStatus:binding.status,
@@ -730,6 +763,20 @@ export async function executePhase5TargetsV1({
         requestBindingEvidenceRef:binding.requestRef??'NO_REQUEST',
         evidenceRef:binding.requestRef??'NO_MACHINE_EVIDENCE'
       };
+      continue;
+    }
+    const elapsed=Date.now()-batchStartedAt;
+    const remaining=batchBudgetMs-elapsed;
+    // Keep at least one full candidate timeout plus a 20-minute publication
+    // reserve. Remaining candidates are resumed from verified manifests on
+    // the next boundary request; no completed target is rerun.
+    if(remaining<maxCandidateMs+reserveMs){
+      executionResults[key]={
+        status:'PENDING_EXECUTION',exitCode:null,evidenceRef:'PENDING_EXECUTION',
+        requestBindingStatus:binding.status,requestBindingEvidenceRef:binding.requestRef,
+        requestBindingReasons:binding.reasons,rawResult:null
+      };
+      pendingCandidateKeys.push(key);
       continue;
     }
     const rel=binding.requestRef;
@@ -741,14 +788,12 @@ export async function executePhase5TargetsV1({
       if(runProcessFn)runProcessV1=runProcessFn;
       else ({runProcess:runProcessV1}=await import('./execution.mjs'));
     }
-    // Each candidate is independently observable and time-bounded. The
-    // stdout evidence channel stays structured; progress goes only to stderr.
     const startedAt=Date.now();
-    const candidateTimeoutMs=40*60*1000;
-    process.stderr.write(`[phase5-sim] START ${key} V7 execution (max 40 minutes)\n`);
+    const timeoutMs=Math.min(maxCandidateMs,batchBudgetMs-(startedAt-batchStartedAt)-reserveMs);
+    process.stderr.write('[phase5-sim] START '+key+' V7 execution (max '+Math.floor(timeoutMs/60000)+' minutes)\n');
     const heartbeat=setInterval(()=>{
-      const elapsed=Math.floor((Date.now()-startedAt)/60000);
-      process.stderr.write(`[phase5-sim] RUNNING ${key} elapsed=${elapsed}m; awaiting runner result\n`);
+      const elapsedMinutes=Math.floor((Date.now()-startedAt)/60000);
+      process.stderr.write('[phase5-sim] RUNNING '+key+' elapsed='+elapsedMinutes+'m; awaiting runner result\n');
     },60_000);
     let result;
     let markerBuffer='';
@@ -758,7 +803,6 @@ export async function executePhase5TargetsV1({
       while((index=markerBuffer.indexOf('\n'))!==-1){
         const line=markerBuffer.slice(0,index).trimEnd();
         markerBuffer=markerBuffer.slice(index+1);
-        // Machine stderr can contain RPC URLs; relay only our fixed markers.
         if(line.startsWith('[phase5-v7]'))process.stderr.write(line+'\n');
       }
       if(markerBuffer.length>8192)markerBuffer=markerBuffer.slice(-8192);
@@ -769,25 +813,24 @@ export async function executePhase5TargetsV1({
         args:['packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace,'--compact-raw-result'],
         cwd:process.cwd(),
         env:{...process.env,PHASE5_BOUNDARY_PROGRESS:'true',PHASE5_CONTROLLER_ROOT:path.resolve(controllerRoot)},
-        timeoutMs:candidateTimeoutMs,
+        timeoutMs,
         onStderr:relayProgress
       });
     } finally {
       clearInterval(heartbeat);
     }
-    process.stderr.write(`[phase5-sim] END ${key} exitCode=${result?.exitCode??'UNKNOWN'} elapsed=${Math.floor((Date.now()-startedAt)/1000)}s${result?.timedOut?' TIMED_OUT':''}\n`);
-    // V7 CLI nests evidence under the request ID; the parent directory has no
-    // raw-result.json. Never issue PASS for a missing or unparsable raw result.
+    process.stderr.write('[phase5-sim] END '+key+' exitCode='+(result?.exitCode??'UNKNOWN')+' elapsed='+Math.floor((Date.now()-startedAt)/1000)+'s'+(result?.timedOut?' TIMED_OUT':'')+'\n');
     const request=JSON.parse(fs.readFileSync(requestAbs,'utf8'));
     const requestId=request.requestId;
     const validId=typeof requestId==='string'&&/^dar-[0-9a-f]{32}$/.test(requestId);
     const rawPath=validId?path.join(evAbs,requestId,'raw-result.json'):null;
     let rawResult=null;
     try{if(rawPath)rawResult=readV7RawResultV1(rawPath);}catch{}
-    executionResults[key]={
+    const evidenceRef=validId?path.posix.join(evRel,requestId,'raw-result.json'):'NO_MACHINE_EVIDENCE';
+    const machine={
       status:result.exitCode===0&&rawResult?'PASS':(rawResult?.blocking?'BLOCKED':'INCONCLUSIVE'),
       exitCode:result.exitCode,
-      evidenceRef:validId?path.posix.join(evRel,requestId,'raw-result.json'):'NO_MACHINE_EVIDENCE',
+      evidenceRef:path.posix.join(campaignPath,evidenceRef),
       requestBindingStatus:binding.status,
       requestBindingEvidenceRef:binding.requestRef,
       requestBindingReasons:binding.reasons,
@@ -795,18 +838,47 @@ export async function executePhase5TargetsV1({
       stdout:String(result.stdout??'').slice(-12000),
       stderr:String(result.stderr??'').slice(-12000)
     };
+    if(machine.status==='PASS'){
+      const evidenceFailures=validateExecutedPhase5TargetV1({
+        controllerRoot,campaignPath,target:t,result:machine,expectedSourceSha256
+      });
+      if(evidenceFailures.length){
+        machine.status='BLOCKED_EVIDENCE_VALIDATION';
+        machine.validationFailures=evidenceFailures;
+      }else{
+        const manifest={
+          schemaVersion:'curveyield-phase5-target-binding-v1',
+          campaignId:expectedCampaignId,sourceSha256:expectedSourceSha256,
+          candidateKey:key,targetDesignSha256:targetDesignSha256V1(t),
+          requestRef:binding.requestRef,requestId,requestDigest:request.requestDigest,
+          rawResultRef:machine.evidenceRef,
+          rawResultSha256:createHash('sha256').update(fs.readFileSync(rawPath)).digest('hex')
+        };
+        const manifestPath=path.join(path.dirname(rawPath),'TARGET_BINDING_v1.json');
+        fs.mkdirSync(path.dirname(manifestPath),{recursive:true});
+        fs.writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\n');
+      }
+    }
+    executionResults[key]=machine;
   }
-  // All covering runs are finished before an omitted duplicate receives
-  // an inherited evidence reference. The gate separately verifies identity.
+  // Alias rows inherit evidence only from a completed covering execution.
+  // A covering target still pending keeps the alias pending rather than
+  // manufacturing a failed execution or a false NOT_APPLICABLE result.
   for(const target of arr(targetDesigns)){
-    if(target?.executionMethod!=='NOT_APPLICABLE')continue;
+    if(String(target?.executionMethod??'').toUpperCase()!=='NOT_APPLICABLE')continue;
     const key=String(target.candidateKey??'').trim();
     const coveredKey=target.notApplicableDisposition?.coveredByCandidateKey;
-    if(executionResults[key]&&executionResults[coveredKey]?.evidenceRef){
-      executionResults[key].evidenceRef=executionResults[coveredKey].evidenceRef;
+    const covered=executionResults[coveredKey];
+    if(covered?.status==='PASS'&&covered.evidenceRef){
+      executionResults[key].evidenceRef=covered.evidenceRef;
+      executionResults[key].coveredByEvidenceRef=covered.evidenceRef;
+    }else if(covered?.status==='PENDING_EXECUTION'){
+      executionResults[key].status='PENDING_EXECUTION';
+      executionResults[key].evidenceRef='PENDING_EXECUTION';
+      pendingCandidateKeys.push(key);
     }
   }
-  return executionResults;
+  return {executionResults,pendingCandidateKeys:[...new Set(pendingCandidateKeys)]};
 }
 
 export function renderRemediationDeltaLedgerV1({validatedFindings=[],deltaRows=[],noRemediation=false}={}){
