@@ -325,7 +325,7 @@ export function secureShardWorkFormV13({root,formRel,phase,retireFull=true}){
  }
  flush();
  const index={schemaVersion:'curveyield-work-shard-index-v13',phase,formRel,
-   baseFile:'BASE_v1.json',baseSha256:secureHashV13(base),pages};
+   baseFile:'BASE_v1.json',baseSha256:secureHashV13(secureReadV13(root,path.posix.join(workDir,'BASE_v1.json'))),pages};
  if(bytes(index)>MAX_INDEX)throw new Error('v13 root index exceeds 32 KiB');
  secureWriteV13(root,path.posix.join(workDir,'INDEX_v1.json'),index);
  secureWriteV13(root,path.posix.join(controllerDir,'INDEX_v1.json'),index);
