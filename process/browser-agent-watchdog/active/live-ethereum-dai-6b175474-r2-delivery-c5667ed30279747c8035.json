@@ -53,8 +53,8 @@
   },
   "watchdogRunId": "40159420231",
   "watchdogSweepStartedAt": "2026-10-25T03:46:53Z",
-  "lastDecision": "VERIFIED_MASTER_REVIEWER_CHECK_IN_40158197733",
-  "lastNoReadSweepAt": "2026-10-25T03:30:37Z",
-  "elapsedSinceLastPokeMinutes": 1,
+  "lastDecision": "WAITING_NO_CHATGPT_READ",
+  "lastNoReadSweepAt": "2026-10-25T03:46:59Z",
+  "elapsedSinceLastPokeMinutes": 18,
   "lastProgressAt": "2026-10-25T03:28:41Z"
 }
