@@ -430,7 +430,10 @@ function switchMode(campaign,target){
     // registration before new Work commands can be enqueued.
     let active=[];
     try{active=github(AUTOMATION,autoToken,['repos/'+AUTOMATION+'/contents/process/browser-agent-watchdog/active?ref=main']);}
-    catch(e){console.error('Cannot enumerate old browser watchdog state: '+e);throw e;}
+    catch(e){
+      if(/404|Not Found/.test(String(e.stderr||e.message)))active=[];
+      else throw Error('Cannot enumerate old browser watchdog state: '+String(e.stderr||e.message));
+    }
     for(const f of active){
       if(f.type!=='file'||!f.name.endsWith('.json'))continue;
       const obj=fetch(AUTOMATION,f.path,autoToken);
