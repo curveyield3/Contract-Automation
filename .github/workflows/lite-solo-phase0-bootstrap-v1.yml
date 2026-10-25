@@ -1,0 +1,156 @@
+name: Lite-Solo Fully Automated Phase 0 v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        description: Exact campaign ID created by Audit Source Initialization
+        required: true
+        type: string
+      campaign_path:
+        description: Exact Audit-Controller campaign workspace path
+        required: true
+        type: string
+      audit_controller_ref:
+        description: Audit-Controller ref containing the campaign
+        required: false
+        default: main
+        type: string
+
+      authorization_confirmed:
+        description: Explicit human authorization for required fork simulations
+        required: true
+        default: false
+        type: boolean
+      resume_from_finalize:
+        description: Finalize already-published Phase 0 build and forked native deployment/configuration evidence
+        required: false
+        default: false
+        type: boolean
+
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: lite-solo-phase0-bootstrap-${{ inputs.campaign_id }}
+  cancel-in-progress: false
+
+jobs:
+  intelligence:
+    if: ${{ inputs.authorization_confirmed && !inputs.resume_from_finalize }}
+    uses: ./.github/workflows/lite-solo-phase0-intelligence-v1.yml
+    with:
+      campaign_id: ${{ inputs.campaign_id }}
+      campaign_path: ${{ inputs.campaign_path }}
+      audit_controller_ref: ${{ inputs.audit_controller_ref }}
+    secrets: inherit
+
+  fork-deploy-config:
+    needs: intelligence
+    if: ${{ inputs.authorization_confirmed && !inputs.resume_from_finalize && needs.intelligence.result == 'success' }}
+    uses: ./.github/workflows/lite-phase0-randomized-simulation-v1.yml
+    with:
+      campaign_id: ${{ inputs.campaign_id }}
+      campaign_path: ${{ inputs.campaign_path }}
+      audit_controller_ref: ${{ inputs.audit_controller_ref }}
+    secrets: inherit
+
+  finalize-and-launch-reviewer1:
+    needs: [fork-deploy-config]
+    if: ${{ always() && inputs.authorization_confirmed && (needs.fork-deploy-config.result == 'success' || inputs.resume_from_finalize) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CAMPAIGN_ID: ${{ inputs.campaign_id }}
+      CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+      AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Restore pinned Node dependencies (shared Phase 0 cache)
+        uses: ./.github/actions/setup-phase0-node-cache
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Checkout exact Audit-Controller campaign
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" branch "$CAMPAIGN_PATH"
+
+      - name: Finalize machine Phase 0 receipt
+        id: finalize
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/lite-solo-phase0-finalize-v1.mjs             --controller-root .audit-controller             --campaign-path "$CAMPAIGN_PATH"             --contract-automation-sha "$GITHUB_SHA" --bootstrap-sha "$GITHUB_SHA"             --workflow-run-id "$GITHUB_RUN_ID" | tee /tmp/phase0-finalize.json
+          test "$(jq -r '.status' /tmp/phase0-finalize.json)" = PASS
+          echo "campaign_name=$(jq -r '.campaignName' /tmp/phase0-finalize.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish sealed Phase 0 receipt
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git config user.name 'CurveYield Phase0 Automation'
+          git config user.email 'phase0-automation@users.noreply.github.com'
+          git add -- "$CAMPAIGN_PATH" "Audit Campaign Directory/campaigns"
+          if git diff --cached --quiet; then
+            echo "::error::Phase 0 finalizer produced no durable changes"
+            exit 1
+          fi
+          git commit -m "audit(phase0): seal automated bootstrap $CAMPAIGN_ID"
+          git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+
+      - name: Deliver Phase 1 directly to the single lite-solo chat
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          slug="$(printf '%s' "$CAMPAIGN_ID" | sed -E 's/-r[0-9]+$//')"
+          directory="Audit Campaign Directory/campaigns/$slug.json"
+          file=".audit-controller/$directory"
+          test -s "$file"
+          jq -e --arg campaign "$CAMPAIGN_ID" \
+            '.campaignId==$campaign and .mode=="LITE_SOLO" and .agent.actorId=="lite-solo-agent" and .currentAssignment.reviewer=="lite-solo-agent" and .currentAssignment.phaseSequence==1 and .campaignStatus=="ACTIVE" and .deliveryTransport=="AGENT_DELIVERY"' "$file" >/dev/null
+          chat="$(jq -r '.agent.chatUrl' "$file")"
+          authority='Audit Skill - Lite-Solo Authority/lite-solo/SKILL.md'
+          message="You are lite-solo-agent, the only auditor for $CAMPAIGN_ID. In curveyield3/Audit-Controller open $authority and $directory, then the exact Phase-1 START_HERE at phases/phase-1/START_HERE.md inside the bound authority. Complete substantive fields in the currentAssignment shards. Submit only to process/agent-upload/lite-solo-phase-boundary/ using schemaVersion curveyield-lite-solo-phase-boundary-request-v1, inspect the controller response, repair and resubmit until PASS, and continue every subsequent assignment in THIS SAME CHAT without handoffs or master review. No tests without the explicit human authorization applicable to that execution."
+          encoded="$(printf '%s' "$message" | base64 -w0)"
+          gh workflow run lite-work-relay-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f operation=deliver -f campaign_id="$CAMPAIGN_ID" -f campaign_path="$CAMPAIGN_PATH" \
+            -f wake_id="$CAMPAIGN_ID-lite-solo-phase-1" -f phase_id=phase-1 \
+            -f chat_url="$chat" -f wake_message_b64="$encoded" -f worker_role=lite-solo-agent \
+            -f gate_state_path="$directory" -f gate_expected_milestone_id=PHASE_1_WORK_PACKET
+
+      - name: Summarize
+        shell: bash
+        run: |
+          {
+            echo "## Fully automated Lite Phase 0"
+            echo
+            echo "- Campaign: $CAMPAIGN_ID"
+            echo "- Source input surface: one ZIP URL through Audit Source Initialization"
+            echo "- Phase 0 agent: none"
+            echo "- Phase-0 receipt: sealed and validated"
+            echo "- Separate completion/validation/handoff receipt files: not created"
+            echo "- First lite-solo assignment delivered to the sole bound chat using existing Agent Delivery transport"
+          } >> "$GITHUB_STEP_SUMMARY"
