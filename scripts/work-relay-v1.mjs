@@ -284,6 +284,11 @@ function switchMode(campaign,target){
         throw Error('Browser workflow '+workflow+' is still running. Retire/cancel it before selecting Work.');
     }
   }
+  if(target===BROWSER && before===WORK){
+    const existing=readState(fetch(CONTROLLER,filePath(dir.data),ctlToken,true)?.content||null);
+    if(existing?.data.queue?.length)
+      throw Error('Multiple queued Work messages need ordered handoff; do not discard them during mode switch');
+  }
   const epoch=recovery?Number(reg.data.transportEpoch):Number(dir.data.transportEpoch||0)+1;
   // Registration first; if the second write fails, retrying recovers its epoch.
   if(!recovery)mutate(AUTOMATION,registrationPath(campaign),autoToken,raw=>{
@@ -317,8 +322,18 @@ function switchMode(campaign,target){
       if(state.campaignId===campaign)remove(AUTOMATION,f.path,autoToken,obj.sha,'chore(work-relay): retire old browser watcher '+campaign);
     }
   }
-  const lastState=readState(fetch(CONTROLLER,filePath(d),ctlToken,true)?.content||null);
-  const oldCommand=lastState?.first==='PENDING'?lastState.data.current:null;
+  let oldCommand=null;
+  if(target===BROWSER){
+    mutate(CONTROLLER,filePath(d),ctlToken,raw=>{
+      const lastState=readState(raw);
+      if(!lastState)return null;
+      if(lastState.data.queue.length)throw Error('Cannot retire command file with unsent queued instructions');
+      oldCommand=lastState.first==='PENDING'?lastState.data.current:null;
+      const state={...lastState.data,deliveryTransport:BROWSER,
+        transportEpoch:epoch,current:null,queue:[],retiredAt:now(),updatedAt:now()};
+      return view(state,'IDLE');
+    });
+  }
   console.log(JSON.stringify({status:'SWITCHED',campaignId:campaign,from:before,to:target,epoch,
     pendingCommand:target===BROWSER?oldCommand:null}));
 }
