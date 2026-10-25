@@ -722,7 +722,7 @@ jobs:
                   assignment_reviewer="$(jq -r '.currentAssignment.reviewer // empty' /tmp/audit-campaign-directory.json)"
                   packet_path="$(jq -r '.currentAssignment.packetPath // empty' /tmp/audit-campaign-directory.json)"
 
-                  if [ "$campaign_status" = "COMPLETE" ] || [ "$campaign_status" = "STOPPED_BY_HUMAN" ]; then
+                  if [ "$campaign_status" = "COMPLETE" ] || [ "$campaign_status" = "STOPPED_BY_HUMAN" ] || [ "$campaign_status" = "CLOSED_INCOMPLETE" ]; then
                     retire_state "LITE_ASSIGNMENT_CAMPAIGN_TERMINAL_$campaign_status"
                     exit 0
                   fi
@@ -838,7 +838,7 @@ jobs:
                 else
                   directory_status="$(jq -r '.status // empty' /tmp/audit-campaign-directory.json)"
                   current_receipt_path="$(jq -r '.currentReceiptPath // empty' /tmp/audit-campaign-directory.json)"
-                  if [ "$directory_status" = "COMPLETE" ] || [ "$directory_status" = "STOPPED_BY_HUMAN" ]; then
+                  if [ "$directory_status" = "COMPLETE" ] || [ "$directory_status" = "STOPPED_BY_HUMAN" ] || [ "$directory_status" = "CLOSED_INCOMPLETE" ]; then
                     retire_state "LITE_RECEIPT_CAMPAIGN_TERMINAL_$directory_status"
                     exit 0
                   fi
@@ -930,7 +930,7 @@ jobs:
                       fi
                     fi
                     lite_campaign_status="$(jq -r '.campaignCompletionStatus // .campaignStatus // empty' /tmp/canonical-campaign-state.json)"
-                    if [ "$lite_campaign_status" = "COMPLETE" ] || [ "$lite_campaign_status" = "STOPPED_BY_HUMAN" ]; then
+                    if [ "$lite_campaign_status" = "COMPLETE" ] || [ "$lite_campaign_status" = "STOPPED_BY_HUMAN" ] || [ "$lite_campaign_status" = "CLOSED_INCOMPLETE" ]; then
                       retire_state "LITE_CAMPAIGN_TERMINAL_DURING_INTERPHASE_$lite_campaign_status"
                       exit 0
                     fi
@@ -943,7 +943,7 @@ jobs:
 
                   # Overall automation terminates only at campaign-level terminal status.
                   # A closed/sealed phase or internal phase-number change is not terminal.
-                  if [ "$lite_campaign_status" = "COMPLETE" ] || [ "$lite_campaign_status" = "STOPPED_BY_HUMAN" ]; then
+                  if [ "$lite_campaign_status" = "COMPLETE" ] || [ "$lite_campaign_status" = "STOPPED_BY_HUMAN" ] || [ "$lite_campaign_status" = "CLOSED_INCOMPLETE" ]; then
                     echo "Lite campaign reached terminal campaign status $lite_campaign_status; retiring watchdog."
                     retire_state "LITE_CAMPAIGN_TERMINAL_$lite_campaign_status"
                     exit 0
