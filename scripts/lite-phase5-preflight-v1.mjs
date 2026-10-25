@@ -74,7 +74,13 @@ if(!Array.isArray(designs)||!designs.length)
 else if(candidateDispositions?.failures?.length||!candidateDispositions)
   failures.push({path:'actions.step-3.outputs.targetDesigns',
     reason:'No machine execution is authorized until every Phase-4/5 candidate has a source-backed, controller-valid Phase-5 disposition'});
-else for(const [i,target] of designs.entries()){
+else if(designs.length===1&&designs[0]==='NONE_IDENTIFIED'){
+  if(candidateDispositions.requiredTargetKeys.length)
+    failures.push({path:'actions.step-3.outputs.targetDesigns',
+      reason:'NONE_IDENTIFIED cannot replace required executable or duplicate-covered targets'});
+  // All remaining security questions stay in mandatory carried obligations.
+  // No machine executor exists for this phase when zero tests are due.
+}else for(const [i,target] of designs.entries()){
   const prefix='targetDesigns['+i+']';
   const key=String(target?.candidateKey??'').trim();
   const shardPath=shardFor(index,key);
