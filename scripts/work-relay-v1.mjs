@@ -270,6 +270,29 @@ function switchMode(campaign,target){
   const dir=directory(campaign),reg=registration(campaign);
   const before=dir.data.deliveryTransport||BROWSER;
   if(before===(reg.data.deliveryTransport||BROWSER) && before===target){
+    const path=filePath(dir.data);
+    const existing=readState(fetch(CONTROLLER,path,ctlToken,true)?.content||null);
+    if(target===BROWSER && existing?.data.deliveryTransport===WORK){
+      if(existing.data.queue.length)throw Error('Multiple pending Work commands still need ordered handoff');
+      let pendingCommand=null;
+      mutate(CONTROLLER,path,ctlToken,raw=>{
+        const v=readState(raw);
+        pendingCommand=v?.first==='PENDING'?v.data.current:null;
+        if(!v)return null;
+        const updated={...v.data,deliveryTransport:BROWSER,current:null,queue:[],
+          transportEpoch:Number(dir.data.transportEpoch||0),retiredAt:now(),updatedAt:now()};
+        return view(updated,'IDLE');
+      });
+      console.log(JSON.stringify({status:'SWITCHED',campaignId:campaign,from:WORK,to:BROWSER,
+        epoch:Number(dir.data.transportEpoch||0),pendingCommand}));
+      return;
+    }
+    if(target===WORK && (!existing || existing.data.transportEpoch!==Number(dir.data.transportEpoch||0))){
+      mutate(CONTROLLER,path,ctlToken,()=>view(emptyState(campaign,Number(dir.data.transportEpoch||0)),'IDLE'),true);
+      console.log(JSON.stringify({status:'SWITCHED',campaignId:campaign,from:BROWSER,to:WORK,
+        epoch:Number(dir.data.transportEpoch||0),pendingCommand:null}));
+      return;
+    }
     console.log(JSON.stringify({status:'ALREADY_SET',campaignId:campaign,transport:target}));return;
   }
   const regBefore=reg.data.deliveryTransport||BROWSER;
