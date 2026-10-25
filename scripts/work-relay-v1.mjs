@@ -376,8 +376,8 @@ function switchMode(campaign,target){
       let pendingCommand=null;
       mutate(CONTROLLER,path,ctlToken,raw=>{
         const v=readState(raw);
-        pendingCommand=v?.first==='PENDING'?v.data.current:null;
         if(!v)return null;
+        if(v.first!=='PENDING'&&v.first!=='IDLE')settle(v.data,v.first);
         const queued=[...(v.data.current?[v.data.current]:[]),...v.data.queue];
         pendingCommand=queued.length?queued[queued.length-1]:null;
         const updated={...v.data,deliveryTransport:BROWSER,current:null,queue:[],
@@ -454,6 +454,7 @@ function switchMode(campaign,target){
     mutate(CONTROLLER,filePath(d),ctlToken,raw=>{
       const lastState=readState(raw);
       if(!lastState)return null;
+      if(lastState.first!=='PENDING'&&lastState.first!=='IDLE')settle(lastState.data,lastState.first);
       const queued=[...(lastState.data.current?[lastState.data.current]:[]),...lastState.data.queue];
       oldCommand=queued.length?queued[queued.length-1]:null;
       const state={...lastState.data,deliveryTransport:BROWSER,
