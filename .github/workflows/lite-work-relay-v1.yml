@@ -123,7 +123,27 @@ jobs:
           if [ "$(jq -r '.status' /tmp/switch.json)" = ALREADY_SET ]; then exit 0; fi
           encoded="$(GH_TOKEN="$GITHUB_TOKEN" gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_').json?ref=main" --jq '.content')"
           printf '%s' "$encoded" | base64 -d > /tmp/switch-registration.json
+          slug="$(printf '%s' "$CAMPAIGN_ID" | sed -E 's/-r[0-9]+$//')"
+          directory_path="Audit Campaign Directory/campaigns/$slug.json"
+          directory_b64="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$(printf '%s' "$directory_path" | sed 's/ /%20/g')?ref=main" --jq '.content')"
+          printf '%s' "$directory_b64" | base64 -d > /tmp/switch-directory.json
+          status="$(jq -r '.campaignStatus // empty' /tmp/switch-directory.json)"
+          campaign_path="$(jq -r '.workspacePath' /tmp/switch-directory.json)"
+          if [ "$status" = WAITING_FOR_SUCCESSOR_AGENT ] && [ "$(jq -r '.currentAssignment.status // empty' /tmp/switch-directory.json)" = WAITING_FOR_SUCCESSOR_AGENT ]; then
+            if [ "$TARGET_MODE" = AGENT_DELIVERY ]; then
+              gh workflow run lite-work-relay-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+                -f operation=successor -f campaign_id="$CAMPAIGN_ID" \
+                -f campaign_path="$campaign_path" -f audit_controller_ref=main
+            else
+              gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+                -f campaign_id="$CAMPAIGN_ID" -f campaign_name="$(jq -r '.campaignName' /tmp/switch-directory.json)" \
+                -f campaign_path="$campaign_path" -f audit_controller_ref=main
+            fi
+            echo 'A full canonical successor instruction has been dispatched after switching transport.'
+            exit 0
+          fi
           role="$(jq -r '.activeAssignment.reviewer // .activeChat.name // empty' /tmp/switch-registration.json)"
+          if [ "$status" = WAITING_FOR_MASTER_REVIEW ]; then role=master-reviewer; fi
           chat="$(jq -r --arg r "$role" '.agentChats[$r] // empty' /tmp/switch-registration.json)"
           phase="$(jq -r '.activeAssignment.phaseId // empty' /tmp/switch-registration.json)"
           worker_role=reviewer
@@ -137,7 +157,9 @@ jobs:
           fi
           [ -n "$chat" ] || { echo "::warning::No registered active chat; next controller handoff will use selected mode."; exit 0; }
           message="$(jq -r '.pendingCommand.message // empty' /tmp/switch.json)"
-          [ -n "$message" ] || message='GET BACK TO WORK'
+          if [ -z "$message" ]; then
+            message="DELIVERY TRANSPORT SWITCH — RESUME NOW. Campaign: $CAMPAIGN_ID. Canonical directory: https://github.com/curveyield3/Audit-Controller/blob/main/Audit%20Campaign%20Directory/campaigns/$slug.json. Current campaign status: $status. Read the current assignment, bound audit authority and exact latest controller packet; continue the unfinished phase, discovery or master-review assignment. Preserve sealed phases and accepted shards. If a previous controller result needs rework, diagnose and repair it rather than waiting. Do not run tests or machine simulations without the owner's separate authorization."
+          fi
           b64="$(printf '%s' "$message" | base64 -w0)"
           wake_id="$CAMPAIGN_ID-switch-$(jq -r '.epoch' /tmp/switch.json)-$role"
           if [ "$TARGET_MODE" = AGENT_DELIVERY ]; then
