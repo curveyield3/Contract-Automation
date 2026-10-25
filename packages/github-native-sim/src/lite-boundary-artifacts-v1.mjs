@@ -393,9 +393,10 @@ export function validatePhase5CandidateDispositionV1({
       // Pure narrative source citations are not independently verified
       // disproof; retain the candidate until a controller-verified proof
       // record binds the exact claim to a historical source identity.
-      if(row.controllerProofVerification?.status!=='PASS'||
-         String(row.controllerProofVerification?.candidateKey??'')!==candidate.key)
-        failures.push(prefix+' RESOLVED_NON_MATERIAL requires independently controller-verified proof; prose and source anchors alone cannot close a security candidate');
+      // A reviewer-owned object cannot certify its own proof status.
+      // Future source-verification support must read independent immutable
+      // controller evidence, not this mutable reconciliation record.
+      failures.push(prefix+' RESOLVED_NON_MATERIAL is not independently provable by lite-solo-v1. Keep this candidate EXECUTE or RETAIN_OPEN_OBLIGATION; an agent-supplied PASS flag is not accepted');
       if(!phase5TextV1(row.rationale,80)||!phase5TextV1(row.phase5Observation,40)||String(row.downstreamValidationNeed??'')!=='NONE_IDENTIFIED')
         failures.push(prefix+' RESOLVED_NON_MATERIAL requires a source-contradiction/out-of-scope explanation, supporting evidence and downstreamValidationNeed=NONE_IDENTIFIED; non-reproduction or uncertainty is not sufficient');
       if(row.requiredPhase!==undefined||row.requiredAction||row.completionCondition)
