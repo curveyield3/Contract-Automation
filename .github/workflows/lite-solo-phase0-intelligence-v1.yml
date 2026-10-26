@@ -162,10 +162,19 @@ jobs:
           fi
           cd .audit-controller-output
 
-          authority_folder="Audit Skill - Lite-Solo Authority"
-          mapfile -t authority_packages < <(find "$authority_folder" -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/SKILL.md' ';' -print | sort)
-          [ "${#authority_packages[@]}" -eq 1 ] || { echo "::error::Authority folder must contain exactly one unpacked package directory with root SKILL.md."; exit 1; }
-          skill_root="${authority_packages[0]}"
+          # Resolve this campaign's frozen authority; v1 and v2 legitimately coexist.
+          receipt="$campaign_path/receipts/PHASE_00_RECEIPT_v1.json"
+          test -f "$receipt"
+          skill_home="$(jq -r '.authority.homepagePath // empty' "$receipt")"
+          case "$skill_home" in
+            "Audit Skill - Lite-Solo Authority/lite-solo/SKILL.md"|"Audit Skill - Lite-Solo Authority/lite-solo-v2/SKILL.md") ;;
+            *) echo "::error::Unexpected campaign-bound lite-solo skill: $skill_home"; exit 1 ;;
+          esac
+          test -f "$skill_home"
+          recorded_skill_sha="$(jq -r '.authority.liteSkillSha256 // empty' "$receipt")"
+          actual_skill_sha="$(sha256sum "$skill_home" | awk '{print $1}')"
+          test "$actual_skill_sha" = "$recorded_skill_sha" || { echo "::error::Campaign-bound skill digest mismatch"; exit 1; }
+          skill_root="${skill_home%/SKILL.md}"
 
           mkdir -p "$campaign_path/evidence/build"
           mkdir -p "$campaign_path/evidence/dependencies"
