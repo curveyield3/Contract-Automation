@@ -30,7 +30,7 @@ import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/a
 import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 import {isReassignedV13AuthorityV1} from './lib/lite-authority-lineup-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
-import {acceptCandidateBatchV1,writeCandidateIdentityIndexV1} from './lib/lite-solo-candidate-batch-v1.mjs';
+import {acceptSelectedCandidateBatchV1,writeCandidateIdentityIndexV1} from './lib/lite-solo-candidate-batch-v1.mjs';
 import {validatePhase6AttackerWorkV1,validatePhase8LinkageV1,validatePhase10CoverageLabelV1,appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -898,11 +898,11 @@ if(reviewKind==='candidate-batch'){
   if(!assignment.workShardIndexPath)
     throw new Error('candidate-batch requires controller-bound work-shard index');
   const keys=JSON.parse(Buffer.from(a['ready-candidate-keys-b64']??'','base64').toString('utf8'));
-  materializeShardedWorkFormV1({root,formRel:assignment.workFormPath,refreshDigests:true});
-  const candidateForm=readJson(requiredFile(root,assignment.workFormPath,'candidate work form'));
-  const batch=acceptCandidateBatchV1({root,campaignPath,directory,form:candidateForm,phase:sequence,
+  const batch=acceptSelectedCandidateBatchV1({root,campaignPath,directory,
+    indexRel:assignment.workShardIndexPath,phase:sequence,
     readyCandidateKeys:keys,reviewSection:a['review-section']??'step-2',now});
-  fs.rmSync(repoFile(root,assignment.workFormPath),{force:true}); // shards remain canonical
+  // Never recreate/remove the full form during a validation-only request.
+  // The normal final boundary still reconstructs and verifies all shards.
   const feedback=batch.status==='CANDIDATE_BATCH_ACCEPTED'
     ?'Validated '+batch.accepted+' candidate records in '+(a['review-section']??'step-2')+
       '. Phase '+sequence+' remains ACTIVE; remaining work and full security gates still required.'
@@ -911,7 +911,8 @@ if(reviewKind==='candidate-batch'){
     campaignId:directory.campaignId,campaignName:directory.campaignName,
     phaseSequence:sequence,reviewSection:a['review-section']??'step-2',
     selectedKeys:batch.selectedKeys??keys,checkpointRel:batch.checkpointRel??null,
-    checkpointTotal:batch.checkpointTotal??0,issues:batch.issues??[],feedbackText:feedback})+'\n');
+    checkpointTotal:batch.checkpointTotal??0,progress:batch.progress??null,
+    issues:batch.issues??[],feedbackText:feedback})+'\n');
   process.exit(0);
 }
 
