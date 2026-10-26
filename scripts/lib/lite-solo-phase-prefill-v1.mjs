@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {verifyDerivedInputIndexV1} from './lite-solo-work-shards-v1.mjs';
-import {readVerifiedCandidateIdentityIndexV1} from './lite-solo-candidate-batch-v1.mjs';
+import {readVerifiedCandidateIdentityIndexV1,verifyPhase6ProofScheduleV1} from './lite-solo-candidate-batch-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {boundReviewerForPhaseV1 as originalReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
 const boundReviewerForPhaseV1=({authorityRoot,...params})=>authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo'?'lite-solo-agent':originalReviewerForPhaseV1({authorityRoot,...params});
@@ -633,6 +633,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     const mapped=new Set(predecessor.filter(x=>x&&typeof x==='object').map(x=>String(x.canonicalId??x.tempKey??x.candidateKey??'')));
     if(identity.rows.size!==mapped.size||[...identity.rows.keys()].some(key=>!mapped.has(key)))
       throw new Error('Phase-6 candidate identity does not match exact sealed Phase-5 predecessor inventory');
+    verifyPhase6ProofScheduleV1({root,campaignPath,canonicalKeys:identity.canonicalKeys});
     const deployRows=deployAssessmentScaffold(root,campaignPath);
     const phase5Rows=targetDispositionScaffold(prefillContext.targetDesigns??[],prefillContext.phase5ExecutionResults??{},prefillContext.phase5CandidateRecords??[],prefillContext.phase5CandidateDispositionRecords??[]);
     const targetRows=Array.isArray(phase5Rows)?phase5Rows.filter(x=>typeof x==='object'):[];
