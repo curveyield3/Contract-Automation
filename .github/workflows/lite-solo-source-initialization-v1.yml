@@ -55,7 +55,7 @@ jobs:
             mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/lite-solo-source-initialization/requests/)
             test "${#changed[@]}" -eq 1
             request="${changed[0]}"
-            [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\\.json$ ]]
+            [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]]
             jq -e '.schemaVersion=="curveyield-lite-solo-source-request-v1" and .mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and (.sourceUrl|type=="string" and startswith("https://")) and (.scanUrls|type=="array" and length==0) and (.authorizePhase0Execution==false)' "$request" >/dev/null
             source_url="$(jq -r .sourceUrl "$request")"
             scans="$(jq -c .scanUrls "$request")"
