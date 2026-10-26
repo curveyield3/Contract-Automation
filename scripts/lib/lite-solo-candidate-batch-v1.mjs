@@ -3,7 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {validatePhase5CandidateDispositionV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {readSelectedWorkShardRecordsV13,listIndexedWorkShardCandidateKeysV13} from './lite-solo-work-shards-v1.mjs';
-import {readCandidateSourceSubsetV1} from './lite-solo-candidate-source-pages-v1.mjs';
+import {readCandidateSourceSubsetV1,verifySealedCanonicalSourceV1} from './lite-solo-candidate-source-pages-v1.mjs';
 
 // Candidate-batch checkpoints are validation-only. They never replace a phase
 // boundary, authorize tests, or act as security disposition evidence.
@@ -291,6 +291,11 @@ function digestFileV1(root,rel){
 // one: every row is checked against both sealed canonical sources and Phase-5
 // reconciliation exactly once.
 export function readVerifiedCandidateIdentityIndexV1({root,campaignPath}={}){
+ const phase4Source=verifySealedCanonicalSourceV1({root,campaignPath,phase:4});
+ const phase5Source=verifySealedCanonicalSourceV1({root,campaignPath,phase:5});
+ if(phase4Source.archiveSha256!==phase5Source.archiveSha256||
+    phase4Source.campaignId!==phase5Source.campaignId)
+  throw new Error('Phase-4/5 receipt source/campaign lineage mismatch');
  const indexRel=path.posix.join(campaignPath,'controller/CANDIDATE_IDENTITY_INDEX_v1.json');
  const index=read(root,indexRel);
  const p4=read(root,path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json'));
