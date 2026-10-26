@@ -379,3 +379,36 @@ export function writePhase6ProofScheduleV1({root,campaignPath,directory,phase4Ca
  return rootRel;
 }
 const jsonProofV1=x=>JSON.stringify(x,null,2)+'\n';
+
+
+export function verifyPhase6ProofScheduleV1({root,campaignPath,canonicalKeys=[]}={}){
+ const indexRel=path.posix.join(campaignPath,'work/phase-06/PROOF_SCHEDULE_INDEX_v1.json');
+ const index=read(root,indexRel);
+ if(index.schemaVersion!=='curveyield-lite-phase6-proof-schedule-index-v1'||
+    !Array.isArray(index.pages)||!Number.isInteger(index.totalCandidates))
+  throw new Error('Phase-6 proof schedule index invalid');
+ const receipt=read(root,path.posix.join(campaignPath,'receipts/PHASE_04_RECEIPT_v1.json'));
+ if(index.sourceSha256!==receipt.sourceSha256||index.campaignId!==receipt.campaignId)
+  throw new Error('Phase-6 proof schedule source identity mismatch');
+ const found=[];
+ for(const [i,page] of index.pages.entries()){
+  const expected=path.posix.join(campaignPath,'work/phase-06',
+    'PROOF_SCHEDULE_PAGE_'+String(i+1).padStart(4,'0')+'_v1.json');
+  if(page.rel!==expected||page.bytes>64*1024||page.bytes<1)throw new Error('Phase-6 proof page descriptor invalid');
+  const bytes=fs.readFileSync(path.join(root,...page.rel.split('/')));
+  if(bytes.length!==page.bytes||createHash('sha256').update(bytes).digest('hex')!==page.sha256)
+   throw new Error('Phase-6 proof page digest mismatch');
+  const obj=JSON.parse(bytes.toString('utf8'));
+  if(obj.schemaVersion!=='curveyield-lite-phase6-proof-page-v1'||
+     obj.campaignId!==index.campaignId||obj.sourceSha256!==index.sourceSha256||
+     obj.firstRecord!==i*16||!Array.isArray(obj.records)||obj.records.length!==page.count)
+   throw new Error('Phase-6 proof page offset/identity mismatch');
+  found.push(...obj.records.map(row=>String(row.candidateKey??'')));
+ }
+ if(found.length!==index.totalCandidates||new Set(found).size!==found.length)
+  throw new Error('Phase-6 proof schedule has missing/duplicate candidates');
+ if(canonicalKeys.length&&
+   (canonicalKeys.length!==found.length||canonicalKeys.some(key=>!found.includes(key))))
+  throw new Error('Phase-6 proof schedule omits a registered Phase-4/5 candidate');
+ return {indexRel,total:index.totalCandidates,pages:index.pages.length};
+}
