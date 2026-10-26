@@ -61,3 +61,19 @@ Controller errors are durably stored in the campaign's phase packet and paginate
 ## Bound authority caveat
 
 The existing `Audit Skill - Lite-Solo Authority/lite-solo/` is receipt-bound. Do **not** modify its frozen instruction/schema digests. The older Phase-5 instruction's arbitrary fuzz budget, separate test executor, and stale workflow names are known inconsistencies; the authoritative active controller and exact source-bound human-test authorization remain mandatory. A future skill-authority release/migration must be versioned, with receipt compatibility and explicit human signoff, not silently replaced mid-campaign.
+
+## Additional Phase 4/5/6 repair integration (post-audit)
+
+**Selected validation.** The candidate-batch route reads only selected source-candidate pages and trusted record shards, not the complete work form. The final phase submission still restores and validates the full work form.
+
+**Sealed source integrity.** Phase-4 source candidates must match the canonical evidence digest in the Phase-4 sealed receipt. Phase-6 identity checks also verify the Phase-5 canonical evidence digest against the Phase-5 sealed receipt. Hash or identity mismatches fail closed.
+
+**Candidate identity and Phase-6 proof schedule.** The Phase-5 controller emits a canonical identity index and an exhaustive bounded Phase-6 proof-schedule index. Phase-6 prefill and Phase-6/8 gates validate source, identity and schedule completeness. Each predecessor candidate remains mandatory; grouping does not waive evidence.
+
+**Phase-6 obligations.** Under the frozen Lite-Solo-v1 authority no later phase has an obligationDispositions closure schema. The controller therefore returns substantive Phase-6 rework for unsupported carries and unresolved due obligations before sealing. Never mistake a process completion label for an evidence-backed security proof.
+
+**No unsupported source disproof.** RESOLVED_NON_MATERIAL is disabled while independently verified semantic source-disproof support is absent. Use an authorized executable proof or preserve the unresolved security obligation.
+
+**Authority v2 staging.** The script scripts/lite-solo-stage-authority-v2-v1.mjs copies a previously manifest-verified v1 authority to a separate new v2 tree, rewrites its internal authority links, applies new v2 Phase-6 schema restrictions, and regenerates file hashes. It is not invoked by live campaigns and does not authorize receipt rebinding. Frozen v1 and existing sealed receipts remain unchanged.
+
+**Verification boundary.** These repairs are committed code, not evidence of a successful live Phase-5/6 execution. Review integration and authority compatibility separately before any production migration.
