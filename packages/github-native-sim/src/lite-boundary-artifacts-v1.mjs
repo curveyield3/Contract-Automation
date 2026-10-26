@@ -297,7 +297,7 @@ export function validatePhase5TargetCoverageV1({
 
 
 const PHASE5_CANDIDATE_DISPOSITIONS_V1=new Set([
-  'EXECUTE','DUPLICATE_OF','RESOLVED_NON_MATERIAL',
+  'EXECUTE','DUPLICATE_OF',
   'RETAIN_OPEN_OBLIGATION','CONDITIONAL_PENDING_EVIDENCE'
 ]);
 const phase5KeyV1=record=>String(record?.canonicalId??record?.tempKey??record?.candidateKey??'').trim();
@@ -363,7 +363,7 @@ export function validatePhase5CandidateDispositionV1({
        !(disposition==='RESOLVED_NON_MATERIAL'&&String(row.downstreamValidationNeed??'')==='NONE_IDENTIFIED'))
       failures.push(prefix+'.downstreamValidationNeed must state the next validation or NONE_IDENTIFIED only for a source-resolved non-material candidate');
     if(!PHASE5_CANDIDATE_DISPOSITIONS_V1.has(disposition)){
-      failures.push(prefix+'.phase5ExecutionDisposition is missing/invalid; choose EXECUTE, DUPLICATE_OF, RESOLVED_NON_MATERIAL, RETAIN_OPEN_OBLIGATION, or CONDITIONAL_PENDING_EVIDENCE');
+      failures.push(prefix+'.phase5ExecutionDisposition is missing/unsupported; choose EXECUTE, DUPLICATE_OF, RETAIN_OPEN_OBLIGATION, or CONDITIONAL_PENDING_EVIDENCE. RESOLVED_NON_MATERIAL is disabled until independent source-disproof verification is deployed');
       continue;
     }
     dispositionByKey.set(candidate.key,{...candidate,row,index,disposition});
