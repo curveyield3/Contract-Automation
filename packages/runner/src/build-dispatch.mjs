@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { compileRepoHermeticStandardJson, shouldUseHermeticStandardJson } from './hermetic-standard-json.mjs';
-import { compileRepoNativeHardhat, detectNativeBuild } from './native-build.mjs';
+import { compileRepoNativeHardhat, detectNativeBuild, compileRepoNativeFoundry, detectNativeFoundry } from './native-build.mjs';
 import { compileRepoEmbeddedProfiles, detectEmbeddedProfileBuild } from './embedded-profile-build-v1.mjs';
 import { compileVyperSources as defaultCompileVyperSources } from './vyper-build.mjs';
 
@@ -115,6 +115,7 @@ export async function buildProject({
   try { await fs.access(scanManifestPath); return await compileVerifiedScanProject(projectRoot); }
   catch(error){if(error?.code!=='ENOENT')throw error;}
   const detected = await detectNativeBuild(projectRoot, { ...(fsApi ? { fsApi } : {}) });
+  const foundry = await detectNativeFoundry(projectRoot, { ...(fsApi ? { fsApi } : {}) });
   const embedded = await detectEmbeddedProfileBuild(projectRoot, { ...(fsApi ? { fsApi } : {}) });
   let solidityBuild;
 
@@ -122,6 +123,12 @@ export async function buildProject({
     solidityBuild = await compileHermetic({
       projectRoot,
       request,
+      ...(runCommand ? { runCommand } : {}),
+      ...(fsApi ? { fsApi } : {})
+    });
+  } else if (foundry.system === 'foundry-native') {
+    solidityBuild = await compileRepoNativeFoundry({
+      projectRoot,
       ...(runCommand ? { runCommand } : {}),
       ...(fsApi ? { fsApi } : {})
     });
