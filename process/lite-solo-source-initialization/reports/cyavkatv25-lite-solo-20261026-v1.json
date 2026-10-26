@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-report-v1",
+  "mode": "LITE_SOLO",
+  "status": "PASS",
+  "requestId": "cyavkatv25-lite-solo-20261026-v1",
+  "actor": {
+    "actorId": "lite-solo-agent"
+  },
+  "source": {
+    "sha256": "a0a23b5f96059efba6883b66b5243e6ae13560c08e6e1730a5c0b3890ce9fd46",
+    "inputUrl": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/cyavKATv25.zip",
+    "scanUrls": []
+  },
+  "campaign": {
+    "campaignId": "cyavkatv25-r1",
+    "campaignGenerationId": "cyavkatv25-r1-g1-20261026T232250Z",
+    "campaignName": "cyavKATv25 r1",
+    "workspacePath": "campaigns/cyavKATv25 r1"
+  },
+  "completedAt": "2026-10-26T23:22:52Z"
+}
