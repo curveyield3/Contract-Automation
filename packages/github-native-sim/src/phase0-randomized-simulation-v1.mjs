@@ -2635,8 +2635,10 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   const detected=await detectDeploymentScripts(staged.projectRoot);
   // Use the same isolated, source-configured Foundry dependency resolution as
   // Phase-0 compilation before invoking any declared Forge deployment entry.
+  const foundryDependencyRoot=deploymentProfile?.mode==='FOUNDRY' && deploymentProfile.foundryRoot!=='.'
+    ? path.join(staged.projectRoot,...deploymentProfile.foundryRoot.split('/')) : staged.projectRoot;
   const foundryDependencyInstall=(detected.foundry.length || deploymentProfile?.mode==='FOUNDRY')
-    ? await installNativeFoundryDependencies({projectRoot:staged.projectRoot}) : [];
+    ? await installNativeFoundryDependencies({projectRoot:foundryDependencyRoot}) : [];
   const packageDependencyInstall=await installPackageRuntimeDependenciesV1(staged.projectRoot,detected);
   const build={
     status:'completed',
