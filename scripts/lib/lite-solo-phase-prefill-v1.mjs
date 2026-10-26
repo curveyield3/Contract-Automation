@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {verifyDerivedInputIndexV1} from './lite-solo-work-shards-v1.mjs';
+import {readVerifiedCandidateIdentityIndexV1} from './lite-solo-candidate-batch-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {boundReviewerForPhaseV1 as originalReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
 const boundReviewerForPhaseV1=({authorityRoot,...params})=>authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo'?'lite-solo-agent':originalReviewerForPhaseV1({authorityRoot,...params});
@@ -621,6 +622,11 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
   }
 
   if(sequence===6){
+    const identity=readVerifiedCandidateIdentityIndexV1({root,campaignPath});
+    const predecessor=Array.isArray(prefillContext.phase5CandidateRecords)?prefillContext.phase5CandidateRecords:[];
+    const mapped=new Set(predecessor.filter(x=>x&&typeof x==='object').map(x=>String(x.canonicalId??x.tempKey??x.candidateKey??'')));
+    if(identity.rows.size!==mapped.size||[...identity.rows.keys()].some(key=>!mapped.has(key)))
+      throw new Error('Phase-6 candidate identity does not match exact sealed Phase-5 predecessor inventory');
     const deployRows=deployAssessmentScaffold(root,campaignPath);
     const phase5Rows=targetDispositionScaffold(prefillContext.targetDesigns??[],prefillContext.phase5ExecutionResults??{},prefillContext.phase5CandidateRecords??[],prefillContext.phase5CandidateDispositionRecords??[]);
     const targetRows=Array.isArray(phase5Rows)?phase5Rows.filter(x=>typeof x==='object'):[];
@@ -659,7 +665,10 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     // the ordinary Phase-6 prefill above; read the persisted output instead.
     const candidateTargets=(form.actions?.['step-2']?.outputs?.targetDispositions??[])
       .filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
+    const identity=readVerifiedCandidateIdentityIndexV1({root,campaignPath});
     const status=new Map(candidateTargets.map(x=>[x.candidateKey,x.reproductionStatus]));
+    if(identity.rows.size!==status.size||[...identity.rows.keys()].some(key=>!status.has(key)))
+      throw new Error('Phase-6 proof prefill requires an exact, complete canonical target-disposition inventory');
     // Phase 4 assigns discovery keys (X001-*), whereas Phase 5 often assigns
     // controller target keys (CAND-*). Never interpret an unmatched ID as a
     // candidate-wide evidence failure. Bind only through a unique exact source
@@ -677,10 +686,11 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       // Use the same canonical candidate identity as Phase 5 and Phase 8.
       // Retain temporary aliases only for deterministic source-bound joins.
       const key=item.canonicalId??item.tempKey??item.candidateKey;
-      if(!key||candidateRows.has(key))continue;
+      if(!key||candidateRows.has(key))throw new Error('Duplicate or missing Phase-6 proof candidate key '+String(key));
+      if(!identity.rows.has(String(key)))throw new Error('Phase-6 proof candidate not in verified canonical identity index: '+key);
       candidateRows.set(key,{
         candidateKey:key,sourceAnchor:item.sourceAnchor??item.anchors?.[0]??'NONE_IDENTIFIED',
-        phase5Result:status.get(key)??status.get(item.tempKey)??status.get(anchorTargets.get(item.sourceAnchor??item.anchors?.[0]))??'NOT_EXECUTED',
+        phase5Result:status.get(key)??'NOT_EXECUTED',
         requestDirectory:'controller/phase6-tests/CP-'+String(key).replace(/[^A-Za-z0-9._-]/g,'_')+'/',
         verdict:'<REQUIRED>',harnessDesign:'<REQUIRED>',dispatchRounds:'<REQUIRED>',
         requestPaths:'<REQUIRED>',ledgerRef:'<REQUIRED>',
