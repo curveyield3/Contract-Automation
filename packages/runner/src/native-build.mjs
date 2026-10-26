@@ -467,7 +467,7 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
     if(diagnosticRows.some(item=>item.severity==='error'))throw new Error('Foundry compiler build-info includes errors');
     diagnostics.push(...diagnosticRows);
     const inputText=JSON.stringify(data.input),outputText=JSON.stringify(data.output);
-    units.push({unitId,profile:'foundry-native',compilerVersion:data.solcLongVersion??data.solcVersion,
+    units.push({unitId,profile:'foundry-native',compilerVersion:data.solcVersion??data.solcLongVersion?.split('+')[0],
       compilerPackage:'foundry-solc',settings:data.input.settings??{},sourceContents,sourceAsts:asts,
       compilerInputSha256:createHash('sha256').update(inputText).digest('hex'),
       compilerOutputSha256:createHash('sha256').update(outputText).digest('hex'),artifacts:these});
