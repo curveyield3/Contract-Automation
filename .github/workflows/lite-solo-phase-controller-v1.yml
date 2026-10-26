@@ -50,7 +50,7 @@ jobs:
             jq -e '.unitId|type=="string" and test("^[FRX]-[0-9]{3}$")' "$request" >/dev/null
             jq -e 'if .readyUnitIds==null then true else
               (. as $r | ($r.readyUnitIds|type)=="array" and
-                ($r.readyUnitIds|length)>=1 and ($r.readyUnitIds|length)<=4 and
+                ($r.readyUnitIds|length)>=1 and ($r.readyUnitIds|length)<=8 and
                 ($r.readyUnitIds[0]==$r.unitId) and
                 (($r.readyUnitIds|unique|length)==($r.readyUnitIds|length)) and
                 ($r.readyUnitIds|all(.[]; type=="string" and test("^[FRX]-[0-9]{3}$"))))
