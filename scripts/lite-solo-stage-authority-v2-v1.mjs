@@ -21,6 +21,16 @@ for(const entry of manifest.files){
   throw Error('v1 authority digest mismatch: '+entry.path);
 }
 fs.cpSync(source,destination,{recursive:true,force:false,errorOnExist:true});
+// All new-release internal links resolve within v2. Frozen provenance remains
+// unchanged and explicitly records the v1 ancestry.
+for(const entry of manifest.files){
+ if(entry.path==='PACKAGE_PROVENANCE.md'||!/(?:\.md|\.json|\.yaml|\.yml)$/.test(entry.path))continue;
+ const location=path.join(destination,entry.path);
+ const before=fs.readFileSync(location,'utf8');
+ const after=before.replaceAll('Audit Skill - Lite-Solo Authority/lite-solo/',
+   'Audit Skill - Lite-Solo Authority/lite-solo-v2/');
+ if(after!==before)fs.writeFileSync(location,after);
+}
 const override=[
  '# Lite-Solo v2: controller integration and security precedence',
  '',
