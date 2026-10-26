@@ -2,17 +2,17 @@
   "schemaVersion": "curveyield-lite-solo-phase-boundary-request-v1",
   "campaignId": "cyavkatv25b-r7",
   "reviewKind": "discovery",
-  "unitId": "R-009",
+  "unitId": "R-017",
   "readyUnitIds": [
-    "R-009",
-    "R-010",
-    "R-011",
-    "R-012",
-    "R-013",
-    "R-014",
-    "R-015",
-    "R-016"
+    "R-017",
+    "R-018",
+    "R-019",
+    "R-020",
+    "R-021",
+    "R-022",
+    "R-023",
+    "R-024"
   ],
   "auditControllerRef": "main",
-  "attempt": 12
+  "attempt": 13
 }
