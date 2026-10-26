@@ -20,7 +20,13 @@ for(const entry of manifest.files){
  if(data.length!==entry.bytes||digest(data)!==entry.sha256)
   throw Error('v1 authority digest mismatch: '+entry.path);
 }
-fs.cpSync(source,destination,{recursive:true,force:false,errorOnExist:true});
+fs.mkdirSync(destination,{recursive:true});
+for(const entry of manifest.files){
+ const output=path.join(destination,entry.path);
+ fs.mkdirSync(path.dirname(output),{recursive:true});
+ fs.copyFileSync(path.join(source,entry.path),output);
+}
+// Only manifest-authorized source files can enter the staged authority.
 // All new-release internal links resolve within v2. Frozen provenance remains
 // unchanged and explicitly records the v1 ancestry.
 for(const entry of manifest.files){
