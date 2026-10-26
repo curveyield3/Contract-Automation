@@ -30,7 +30,7 @@ import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/a
 import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 import {isReassignedV13AuthorityV1} from './lib/lite-authority-lineup-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
-import {acceptSelectedCandidateBatchV1,writeCandidateIdentityIndexV1,writePhase6ProofScheduleV1} from './lib/lite-solo-candidate-batch-v1.mjs';
+import {acceptSelectedCandidateBatchV1,writeCandidateIdentityIndexV1,writePhase6ProofScheduleV1,readVerifiedCandidateIdentityIndexV1,verifyPhase6ProofScheduleV1} from './lib/lite-solo-candidate-batch-v1.mjs';
 import {validatePhase6AttackerWorkV1,validatePhase8LinkageV1,validatePhase10CoverageLabelV1,appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -1122,6 +1122,18 @@ if(sequence===6&&form){
 // Downstream gates must independently reconstruct the mandatory candidate set
 // and read actual V7 machine artifacts. A prior phase PASS/receipt is not proof.
 if([6,8].includes(sequence)&&deficiencies.length===0){
+  try{
+    const identity=readVerifiedCandidateIdentityIndexV1({root,campaignPath});
+    verifyPhase6ProofScheduleV1({root,campaignPath,canonicalKeys:identity.canonicalKeys});
+    const rows=(form.actions?.['step-2']?.outputs?.[sequence===6?'targetDispositions':'candidateValidations']??[])
+      .filter(row=>row&&typeof row==='object'&&!Array.isArray(row));
+    const keys=rows.map(row=>String(row.candidateKey??''));
+    if(new Set(keys).size!==keys.length)deficiencies.push('Phase '+sequence+' contains duplicate source candidate IDs');
+    for(const key of identity.canonicalKeys)if(!keys.includes(key))
+      deficiencies.push('Phase '+sequence+' lacks canonical predecessor candidate '+key);
+    for(const key of keys)if(identity.aliasMap.has(key)&&identity.aliasMap.get(key)!==key)
+      deficiencies.push('Phase '+sequence+' used a temporary predecessor alias '+key+' instead of '+identity.aliasMap.get(key));
+  }catch(error){deficiencies.push('Phase '+sequence+' controller identity/schedule validation failed: '+String(error.message||error));}
   try{
     const sealedP5=canonicalFor(root,campaignPath,5);
     const material=materialPhase5Candidates({root,campaignPath,form:sealedP5});
