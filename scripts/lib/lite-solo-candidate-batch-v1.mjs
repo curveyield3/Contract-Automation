@@ -329,3 +329,53 @@ export function readVerifiedCandidateIdentityIndexV1({root,campaignPath}={}){
    throw new Error('candidate identity index includes unsealed row '+r.candidateKey);
  return {indexRel,rows,aliasMap,canonicalKeys:[...rows.keys()]};
 }
+
+
+// A lossless Phase-6 work scheduler: classification determines what evidence
+// is necessary, not which source candidates can be ignored. Every Phase-4/5
+// candidate remains scheduled and the final phase still proves exact coverage.
+export function writePhase6ProofScheduleV1({root,campaignPath,directory,phase4Canonical,phase5Canonical,executionResults={},now}={}){
+ const sources=[...records(phase4Canonical?.actions?.['step-3']?.outputs?.candidateRecords),
+   ...records(phase5Canonical?.actions?.['step-2']?.outputs?.newCandidateRecords)];
+ const rows=records(phase5Canonical?.actions?.['step-2']?.outputs?.reconciliationRecords);
+ const outputRows=[];
+ for(const source of sources){
+  const key=keyOf(source),matches=rows.filter(row=>[row.subjectKey,row.candidateKey,row.tempKey,row.canonicalId]
+    .filter(Boolean).some(k=>aliases(source).has(String(k))));
+  if(matches.length!==1)throw new Error('Phase-6 proof scheduling needs one Phase-5 disposition for '+key);
+  const disposition=matches[0],classification=String(disposition.phase5ExecutionDisposition??'').toUpperCase();
+  const result=executionResults[key]??executionResults[source.tempKey]??null;
+  const mode=classification==='EXECUTE'
+    ?result?.rawResult?.reproduction?.status==='REPRODUCED'&&result?.rawResult?.reproduction?.observedPredicate?.matched===true
+      ?'PHASE5_REPRODUCTION_VERIFY_DECISIVENESS':'PHASE6_TARGETED_ASSERTION_PROOF'
+    :classification==='DUPLICATE_OF'?'VERIFY_COVERING_EXECUTION_AND_SECURITY_EQUIVALENCE'
+    :['RETAIN_OPEN_OBLIGATION','CONDITIONAL_PENDING_EVIDENCE'].includes(classification)
+      ?'MANDATORY_PHASE6_OBLIGATION_CLOSURE':'UNSUPPORTED_DISPOSITION_REQUIRES_CORRECTION';
+  outputRows.push({candidateKey:key,sourceAnchor:source.sourceAnchor??source.anchors?.[0]??null,
+    classification,mode,obligationId:disposition.obligationId??null,
+    coveringCandidateKey:disposition.duplicateOfCandidateKey??null,
+    phase5EvidenceRef:result?.evidenceRef??'NO_MACHINE_EVIDENCE',
+    mandatory:true});
+ }
+ const rootRel=path.posix.join(campaignPath,'work/phase-06/PROOF_SCHEDULE_INDEX_v1.json');
+ const workDir=path.posix.dirname(rootRel),pageRefs=[];
+ for(let i=0;i<outputRows.length;i+=16){
+  const file='PROOF_SCHEDULE_PAGE_'+String(Math.floor(i/16)+1).padStart(4,'0')+'_v1.json';
+  const rel=path.posix.join(workDir,file);
+  const content=jsonProofV1({schemaVersion:'curveyield-lite-phase6-proof-page-v1',
+    campaignId:directory.campaignId,sourceSha256:directory.sourceSha256,
+    firstRecord:i,records:outputRows.slice(i,i+16)});
+  const bytes=Buffer.byteLength(content);
+  if(bytes>64*1024)throw new Error('Phase-6 proof page exceeds 64 KiB; split candidate metadata');
+  const abs=path.join(root,...rel.split('/'));
+  fs.mkdirSync(path.dirname(abs),{recursive:true});fs.writeFileSync(abs,content);
+  pageRefs.push({rel,count:Math.min(16,outputRows.length-i),bytes,sha256:createHash('sha256').update(content).digest('hex')});
+ }
+ const index={schemaVersion:'curveyield-lite-phase6-proof-schedule-index-v1',
+   campaignId:directory.campaignId,sourceSha256:directory.sourceSha256,createdAt:now,
+   totalCandidates:outputRows.length,pages:pageRefs,
+   invariant:'EVERY_PREDECESSOR_CANDIDATE_REMAINS_MANDATORY__MODES_ARE_EVIDENCE_REQUIREMENTS_NOT_WAIVERS'};
+ write(root,rootRel,index);
+ return rootRel;
+}
+const jsonProofV1=x=>JSON.stringify(x,null,2)+'\n';
