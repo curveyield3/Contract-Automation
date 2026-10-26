@@ -121,10 +121,10 @@ async function firstPresent(root, names, fsApi) {
   return null;
 }
 
-async function buildInfoFiles(projectRoot, fsApi = fs) {
+async function buildInfoFiles(projectRoot, fsApi = fs, { includeFoundry = false } = {}) {
   const rootEntries = await fsApi.readdir(projectRoot, { withFileTypes: true });
   const artifactDirs = rootEntries
-    .filter((entry) => entry.isDirectory() && (entry.name.startsWith('artifacts') || entry.name === 'out'))
+    .filter((entry) => entry.isDirectory() && (entry.name.startsWith('artifacts') || (includeFoundry && entry.name === 'out')))
     .map((entry) => entry.name)
     .sort();
   const files = [];
@@ -436,7 +436,7 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
     const error=new Error('Foundry native production compilation failed: '+String(result?.stderr??result?.stdout??'').slice(-4000));
     error.code='FOUNDRY_NATIVE_COMPILATION_FAILED';throw error;
   }
-  const paths=await buildInfoFiles(projectRoot,fsApi);
+  const paths=await buildInfoFiles(projectRoot,fsApi,{includeFoundry:true});
   if(!paths.length)throw new Error('Foundry native build produced no compiler build-info');
   const units=[],artifacts=[],sourceAsts={},inventory=new Set(),diagnostics=[];
   for(const [index,file] of paths.entries()){
