@@ -293,10 +293,10 @@ export function readVerifiedCandidateIdentityIndexV1({root,campaignPath}={}){
  const index=read(root,indexRel);
  const p4=read(root,path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json'));
  const p5=read(root,path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json'));
+ const predecessor=read(root,path.posix.join(campaignPath,'receipts/PHASE_04_RECEIPT_v1.json'));
  if(index.schemaVersion!=='curveyield-lite-candidate-identity-index-v1'||
-    !Array.isArray(index.rows)||index.sourceSha256!==p4.automationInputs?.sourceSha256&&
-      index.sourceSha256!==p5.automationInputs?.sourceSha256&&
-      index.campaignId!==p5.campaignId)
+    !Array.isArray(index.rows)||index.sourceSha256!==predecessor.sourceSha256||
+    index.campaignId!==p5.campaignId||index.campaignId!==predecessor.campaignId)
    throw new Error('candidate identity index schema/source/campaign mismatch');
  if(index.campaignId!==p5.campaignId||index.rowCount!==index.rows.length)
    throw new Error('candidate identity index total/campaign mismatch');
