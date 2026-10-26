@@ -39,7 +39,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 2
           persist-credentials: false
-      - name: Resolve manually dispatched source (no request files or chat)
+      - name: Resolve direct lite-solo source request (no chat)
         id: request
         env:
           RAW_SOURCE_URL: ${{ inputs.source_url }}
@@ -56,7 +56,7 @@ jobs:
             test "${#changed[@]}" -eq 1
             request="${changed[0]}"
             [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]]
-            jq -e '.schemaVersion=="curveyield-lite-solo-source-request-v1" and .mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and (.sourceUrl|type=="string" and startswith("https://")) and (.scanUrls|type=="array" and length==0) and (.authorizePhase0Execution==false)' "$request" >/dev/null
+            jq -e '.schemaVersion=="curveyield-lite-solo-source-request-v1" and .mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and (.sourceUrl|type=="string" and startswith("https://")) and (.scanUrls|type=="array" and length==0) and (.authorizePhase0Execution|type=="boolean")' "$request" >/dev/null
             source_url="$(jq -r .sourceUrl "$request")"
             scans="$(jq -c .scanUrls "$request")"
             request_id="$(jq -r .requestId "$request")"
