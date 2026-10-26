@@ -76,7 +76,7 @@ async function detectProjectRoot(extractRoot){
   const files=await walk(extractRoot);
   const candidates=new Set();
   for(const f of files){
-    if(/(^|\/)package\.json$/.test(f)||/(^|\/)package-lock\.json$/.test(f)||/(^|\/)hardhat\.config\.(?:js|cjs|mjs|ts)$/.test(f)){
+    if(/(^|\/)package\.json$/.test(f)||/(^|\/)package-lock\.json$/.test(f)||/(^|\/)hardhat\.config\.(?:js|cjs|mjs|ts)$/.test(f)||/(^|\/)foundry\.toml$/.test(f)){
       candidates.add(path.posix.dirname(f));
     }
     const m=f.match(/^(?:(.*?)\/)?(?:contracts|src)\/.+\.sol$/);
@@ -91,6 +91,7 @@ async function detectProjectRoot(extractRoot){
     const sol=child.filter(f=>f.endsWith('.sol')).length;
     if(sol===0)continue;
     const names=new Set(child.filter(f=>!f.slice(prefix.length).includes('/')).map(f=>f.slice(prefix.length)));
+    const hasFoundry=names.has('foundry.toml');
     const hasPkg=names.has('package.json');
     const hasLock=names.has('package-lock.json');
     const hasHardhat=[...names].some(n=>/^hardhat\.config\.(js|cjs|mjs|ts)$/.test(n));
@@ -98,8 +99,8 @@ async function detectProjectRoot(extractRoot){
     const hasTooling=child.some(f=>f.startsWith(prefix+'tooling/'));
     const hasVendor=child.some(f=>f.startsWith(prefix+'vendor/'));
     const depth=rel?rel.split('/').length:0;
-    const score=(hasPkg?120:0)+(hasLock?110:0)+(hasContracts?100:0)+(hasHardhat?70:0)+(hasTooling?60:0)+(hasVendor?40:0)+Math.min(sol,80)-depth;
-    scored.push({relativePath:rel||'.',score,solidityFiles:sol,hasPkg,hasLock,hasHardhat,hasContracts,hasTooling,hasVendor});
+    const score=(hasFoundry?240:0)+(hasPkg?120:0)+(hasLock?110:0)+(hasContracts?100:0)+(hasHardhat?70:0)+(hasTooling?60:0)+(hasVendor?40:0)+Math.min(sol,80)-depth;
+    scored.push({relativePath:rel||'.',score,solidityFiles:sol,hasFoundry,hasPkg,hasLock,hasHardhat,hasContracts,hasTooling,hasVendor});
   }
   scored.sort((a,b)=>b.score-a.score||b.solidityFiles-a.solidityFiles||a.relativePath.localeCompare(b.relativePath));
   if(!scored.length)throw new Error('unable to detect Solidity project root from archive');
