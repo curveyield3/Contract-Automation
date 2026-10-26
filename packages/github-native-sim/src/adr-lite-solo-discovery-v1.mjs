@@ -17,7 +17,10 @@ const asset=(root,campaign,name)=>reviewInventoryRelV1(root,campaign,name);
 const known=(root,rel)=>{const file=repoFile(root,rel);return fs.existsSync(file)?readJson(file):null;};
 const hex=bytes=>createHash('sha256').update(bytes).digest('hex');
 const arr=x=>Array.isArray(x)?x:[];
-const SOLO_WINDOW_MAX_UNITS=2;
+const SOLO_WINDOW_MAX_UNITS=8;
+// A round is bounded by the harder of source-context bytes and substantive
+// analysis effort, not an arbitrary tiny unit count.
+const SOLO_WINDOW_MAX_WORK_ITEMS=150;
 const SOLO_WINDOW_MAX_PACKET_BYTES=256*1024;
 const SOLO_PACKET_PAGE_MAX_BYTES=24*1024;
 const sort=(a,b)=>String(a).localeCompare(String(b));
@@ -41,8 +44,8 @@ const submissionRel=(campaign,unit)=>pathJoin(campaign,unit+'/SUBMISSION_v1.json
 const stateRel=(campaign)=>pathJoin(campaign,'DISCOVERY_STATE_v1.json');
 const stubObligations=(directory,now)=>head(directory,now,'curveyield-baseline-obligations-v1',{obligations:[],testGroups:[]});
 
-export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,state,now}){
- const {inventory,plan,facts,taxonomy}=getInputs({root,campaignPath,automationRoot}),unit=resolveUnit(plan,unitId);
+export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,state,now,sharedInputs=null}){
+ const {inventory,plan,facts,taxonomy}=sharedInputs??getInputs({root,campaignPath,automationRoot}),unit=resolveUnit(plan,unitId);
  if(!unit)throw new Error('unknown discovery unit '+unitId);
  const role=unit.role==='ATTACK'?'ATTACK':'FLOW_REVIEW',primary=arr(unit.primaryContextIds);
  const contextIds=role==='ATTACK'?arr(inventory?.payload?.contexts).filter(c=>unit.contracts?.some(n=>c.qualifiedContainer===n||c.effectiveIn?.includes(n))).map(c=>c.contextId):primary;
@@ -165,14 +168,22 @@ function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,
    ?pending.filter(id=>state.payload.units[id].role===(correctnessPending?'FLOW_REVIEW':'ATTACK'))
    :pending;
  const ids=[];
- let packetBytes=0;
+ let packetBytes=0,workItems=0;
+ const sharedInputs=getInputs({root,campaignPath,automationRoot});
  for(const id of eligible){
   if(ids.length>=SOLO_WINDOW_MAX_UNITS)break;
-  const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now});
-  const size=Buffer.byteLength(JSON.stringify(packet));
-  // An oversized existing unit is still assigned by itself; no obligation is dropped.
-  if(ids.length && packetBytes+size>SOLO_WINDOW_MAX_PACKET_BYTES)break;
-  packetBytes+=size;
+  const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now,sharedInputs});
+  const size=Buffer.byteLength(JSON.stringify(packet)),p=packet.payload??{};
+  // Estimate actual reviewer effort as well as input size. Small units can
+  // share a round, while an unusually large unit can always advance alone.
+  const effort=2*arr(p.primaryContexts).length+3*arr(p.flows).length+
+    2*arr(p.integrationQuestions).length+Math.ceil(arr(p.documentationItems).length/3)+
+    2*arr(p.contractChecks).length+Math.max(1,arr(p.specContext).length);
+  // Skip an oversized next unit rather than stopping and wasting the space
+  // remaining in this round. The skipped unit stays pending in original order.
+  if(ids.length&&(packetBytes+size>SOLO_WINDOW_MAX_PACKET_BYTES||
+     workItems+effort>SOLO_WINDOW_MAX_WORK_ITEMS))continue;
+  packetBytes+=size;workItems+=effort;
   state.payload.units[id].status='ACTIVE';
   state.payload.units[id].openedAt??=now;
   ids.push(id);
@@ -412,7 +423,7 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   feedbackText:'Unit '+unitId+' is not active. Current active unit: '+(active[0]??'none')+'; '+active.length+' unit(s) active. No action taken.'};
  // Only explicitly submitted ready IDs are validated. An existing submission file
  // alone never implies readiness. Bounds prevent one expensive unbounded review.
- if(!Array.isArray(readyUnitIds)||readyUnitIds.length<1||readyUnitIds.length>4||
+ if(!Array.isArray(readyUnitIds)||readyUnitIds.length<1||readyUnitIds.length>SOLO_WINDOW_MAX_UNITS||
    readyUnitIds[0]!==unitId||new Set(readyUnitIds).size!==readyUnitIds.length||
    readyUnitIds.some(id=>!active.includes(id)&&id!==unitId))
   throw new Error('invalid explicit ready discovery unit batch');
