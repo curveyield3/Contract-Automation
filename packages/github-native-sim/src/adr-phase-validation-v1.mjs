@@ -4,6 +4,7 @@ import {repoFile,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 import {buildCoverageMatrixV1,renderCoverageMarkdownV1} from './adr-coverage-matrix-v1.mjs';
 import {loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
+import {readVerifiedCandidateIdentityIndexV1} from '../../../scripts/lib/lite-solo-candidate-batch-v1.mjs';
 
 const arr=x=>Array.isArray(x)?x:[];
 const obj=x=>x&&typeof x==='object'&&!Array.isArray(x);
@@ -52,7 +53,19 @@ function assertions(record,field,allowed,found,errors,prefix,{nonEmpty=true,requ
 export function validatePhase6AttackerWorkV1({root,campaignPath,form}={}){
  const errors=[];
  try{
-  if(!form?.actions?.['step-4']||!form?.actions?.['step-5'])return [];
+  const identity=readVerifiedCandidateIdentityIndexV1({root,campaignPath});
+  const dispositions=arr(output(form,2,'targetDispositions')).filter(obj);
+  const proofRows=arr(output(form,5,'candidateProofRecords')).filter(obj);
+  for(const [label,rows] of [['targetDispositions',dispositions],['candidateProofRecords',proofRows]]){
+    const actual=rows.map(r=>String(r.candidateKey??''));
+    const unique=new Set(actual);
+    if(unique.size!==actual.length)errors.push('Phase 6 '+label+' contains duplicate candidate identities');
+    for(const key of identity.canonicalKeys)if(!unique.has(key))
+      errors.push('Phase 6 '+label+' omits source-bound candidate '+key);
+    for(const key of actual)if(!identity.rows.has(key))
+      errors.push('Phase 6 '+label+' uses unregistered predecessor identity '+key);
+  }
+  if(!form?.actions?.['step-4']||!form?.actions?.['step-5'])return errors;
   const groups=output(form,4,'baselineTestRecords');
   for(const row of arr(groups).filter(obj)){
    const id=row.testGroupId,p=id+': ';
@@ -108,6 +121,7 @@ export function validatePhase6AttackerWorkV1({root,campaignPath,form}={}){
 }
 export function validatePhase8LinkageV1({root,campaignPath,form}={}){
  try{
+  const identity=readVerifiedCandidateIdentityIndexV1({root,campaignPath});
   const p6=read(rootFile(root,campaignPath,'derived/phase-6/PHASE_06_CANONICAL_DATA_v1.json'));
   if(!p6)return [];
   const expected=new Set();
@@ -117,8 +131,19 @@ export function validatePhase8LinkageV1({root,campaignPath,form}={}){
   for(const row of arr(output(p6,5,'candidateProofRecords')).filter(obj))
    if(['CONFIRMED','INCONCLUSIVE'].includes(row.verdict))expected.add(row.candidateKey);
   for(const row of arr(output(p6,5,'newCandidateRecords')).filter(obj))expected.add(row.tempKey);
-  const found=new Set(arr(output(form,2,'candidateValidations')).filter(obj).map(x=>x.candidateKey));
-  return [...expected].sort().filter(k=>!found.has(k)).map(k=>'Phase 8 missing Phase 6 candidate '+k);
+  // Every inherited Phase-4/5 candidate must resolve to the exact canonical
+  // identity that Phase-5 sealed, not a temporary or source-anchor alias.
+  for(const key of identity.canonicalKeys)expected.add(key);
+  const recorded=arr(output(form,2,'candidateValidations')).filter(obj);
+  const found=new Set(recorded.map(x=>x.candidateKey));
+  const failures=[...expected].sort().filter(k=>!found.has(k)).map(k=>'Phase 8 missing Phase 6/5 candidate '+k);
+  if(found.size!==recorded.length)failures.push('Phase 8 candidateValidations contains duplicate candidate identities');
+  for(const row of recorded){
+    const key=String(row.candidateKey??'');
+    if(identity.aliasMap.has(key)&&identity.aliasMap.get(key)!==key)
+      failures.push('Phase 8 uses noncanonical predecessor alias '+key+'; use '+identity.aliasMap.get(key));
+  }
+  return failures;
  }catch(e){return ['Phase 8 linkage validation error: '+String(e.message??e)];}
 }
 export function validatePhase10CoverageLabelV1({root,campaignPath,form}={}){
