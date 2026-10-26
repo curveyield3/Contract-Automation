@@ -77,7 +77,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const contractChecks=role==='ATTACK'?[]:[...new Set(primary.map(id=>contextFor(inventory,id)?.qualifiedContainer).filter(Boolean))]
   .filter(name=>ownerUnit.get(name)===unitId).sort()
   .map(contract=>({contract,classId:'UPGRADE_INIT_STORAGE',reviewChecks:arr(upgradeClass?.reviewChecks)}));
- const verdictV13=/(?:Audit_Litemode_v13|lite-solo)(?:\/|$)/.test(authorityRoot);
+ const verdictV13=/(?:Audit_Litemode_v13|lite-solo(?:-v2)?)(?:\/|$)/.test(authorityRoot);
  const trivialContextIds=role==='ATTACK'?[]:primary.filter(id=>verdictV13?
    isLiteralConstantV13(contextFor(inventory,id)):TRIVIAL_KINDS_V1.has(contextFor(inventory,id)?.kind));
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
@@ -285,12 +285,12 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
  const plan=known(root,asset(root,campaignPath,'FLOW_PLAN_v1.json'));
  const units=unitList(plan),order=units.map(x=>x.unitId);
  const missing=!plan||!units.length;
- if(directory.mode!=='LITE_SOLO'||authorityRoot!=='Audit Skill - Lite-Solo Authority/lite-solo')throw new Error('lite-solo discovery authority mismatch');
+ if(directory.mode!=='LITE_SOLO'||![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2' ].includes(authorityRoot))throw new Error('lite-solo discovery authority mismatch');
  const state=head(directory,now,'curveyield-discovery-state-v1',{
   status:missing?'COMPLETE':'RUNNING',order,activeUnitId:missing?null:order[0],
    sequentialSingleReviewer:true,
-  ...( /(?:Audit_Litemode_v13|lite-solo)(?:\/|$)/.test(authorityRoot)?{reviewPolicy:'correctness-verdict-v13'}:{}),
-  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?(isReassignedV13AuthorityV1({root,authorityRoot})?'lite-solo-agent':/(?:Audit_Litemode_v13|lite-solo)(?:\/|$)/.test(authorityRoot)?'lite-solo-agent':'lite-solo-agent'):'lite-solo-agent',
+  ...( /(?:Audit_Litemode_v13|lite-solo(?:-v2)?)(?:\/|$)/.test(authorityRoot)?{reviewPolicy:'correctness-verdict-v13'}:{}),
+  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?(isReassignedV13AuthorityV1({root,authorityRoot})?'lite-solo-agent':/(?:Audit_Litemode_v13|lite-solo(?:-v2)?)(?:\/|$)/.test(authorityRoot)?'lite-solo-agent':'lite-solo-agent'):'lite-solo-agent',
    status:'PENDING',attempts:0,lastValidatedSubmissionSha:null,lastErrors:[],acceptedSubmissionSha:null}])),
   gaps:missing?[{code:'INVENTORY_INCOMPLETE',detail:'No flow plan'}]:structuredClone(arr(plan.payload.gaps))
  });
