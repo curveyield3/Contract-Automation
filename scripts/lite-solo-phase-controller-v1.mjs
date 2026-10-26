@@ -1083,6 +1083,42 @@ if(sequence===5&&form&&deficiencies.length===0){
     }));
   }catch(e){deficiencies.push('Phase 5 candidate disposition/coverage validation failed: '+String(e.message||e));}
 }
+// Lite-Solo-v1 has no schema-governed closure step after Phase 6. Validate
+// these decisions as actionable rework, not a late controller-bookkeeping
+// exception after a report or canonical product has been generated.
+if(sequence===6&&form){
+  const rel=path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json');
+  const ledger=maybeJson(root,rel)??{};
+  const due=(ledger.obligations??[]).filter(x=>x?.mandatory!==false&&
+    ['OPEN','IN_PROGRESS','BLOCKED_CARRIED'].includes(String(x.status??'OPEN').toUpperCase())&&
+    Number(x.requiredPhase)<=6);
+  const rows=(form.actions?.['step-3']?.outputs?.obligationDispositions??[]).filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
+  const mapped=new Map();
+  for(const [i,row] of rows.entries()){
+    const key=String(row.obligationId??'');
+    if(mapped.has(key))deficiencies.push('Phase 6 duplicate obligation disposition '+key);
+    else mapped.set(key,row);
+    if(['CARRY_FORWARD','BLOCKED_CARRIED'].includes(String(row.disposition??'').toUpperCase()))
+      deficiencies.push('Phase 6 obligation '+key+' cannot carry to Phase '+String(row.carryForwardPhaseOrNone??'UNKNOWN')+
+        ': the bound Lite-Solo-v1 Phase 8/9/10 schemas provide no subsequent obligation-closure field. Provide source-bound closure evidence or arrange an explicit versioned authority migration.');
+  }
+  for(const item of due){
+    const row=mapped.get(String(item.obligationId??''));
+    if(!row){deficiencies.push('Phase 6 mandatory due obligation '+item.obligationId+' has no disposition row');continue;}
+    if(!['SATISFIED','NOT_APPLICABLE'].includes(String(row.disposition??'').toUpperCase()))
+      deficiencies.push('Phase 6 mandatory due obligation '+item.obligationId+' lacks a completed disposition under bound authority');
+    const refs=Array.isArray(row.evidenceRefs)?row.evidenceRefs:[];
+    const verified=refs.filter(ref=>{
+      if(typeof ref!=='string'||!ref||ref==='NONE_IDENTIFIED'||ref.startsWith('<')||
+        ref.startsWith('/')||ref.includes('\\')||ref.split('/').includes('..'))return false;
+      const resolved=ref.startsWith(campaignPath+'/')?ref:path.posix.join(campaignPath,ref);
+      return fs.existsSync(repoFile(root,resolved));
+    });
+    if(!verified.length)deficiencies.push('Phase 6 obligation '+item.obligationId+
+      ' has no existing independent referenced evidence artifact. Phase-6 narrative alone cannot prove mandatory closure');
+  }
+}
+
 // Downstream gates must independently reconstruct the mandatory candidate set
 // and read actual V7 machine artifacts. A prior phase PASS/receipt is not proof.
 if([6,8].includes(sequence)&&deficiencies.length===0){
