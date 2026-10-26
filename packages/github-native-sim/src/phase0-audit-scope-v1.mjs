@@ -28,7 +28,21 @@ export async function loadAuditScope(projectRoot){
   let text;
   try{text=await fs.readFile(path.join(projectRoot,AUDIT_SCOPE_FILE),'utf8');}
   catch(error){
-    if(error?.code==='ENOENT')return{source:'default',inScopePaths:[...DEFAULT_IN_SCOPE_PATHS],excludedPaths:[]};
+    if(error?.code==='ENOENT'){
+      // Foundry packages put production contracts in src/. The absence of
+      // audit-scope.json must not silently classify all audited src/ files
+      // as external dependencies just because this is not a Hardhat layout.
+      try{
+        const toml=await fs.readFile(path.join(projectRoot,'foundry.toml'),'utf8');
+        const src=toml.match(/^\s*src\s*=\s*["']([^"']+)["']/m)?.[1]??'src';
+        const normalized=normalizePrefix(src);
+        if(!normalized.endsWith('/'))throw new Error('Foundry source root is not a directory');
+        return{source:'foundry.toml',inScopePaths:[normalized],excludedPaths:[]};
+      }catch(foundryError){
+        if(foundryError?.code!=='ENOENT')throw foundryError;
+      }
+      return{source:'default',inScopePaths:[...DEFAULT_IN_SCOPE_PATHS],excludedPaths:[]};
+    }
     throw error;
   }
   return parseAuditScope(text);
