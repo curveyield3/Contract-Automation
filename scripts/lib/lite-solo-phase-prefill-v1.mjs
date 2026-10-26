@@ -574,6 +574,29 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
 
   if(sequence===5){
     form.actions['step-1'].outputs.economicReviewRecords=economicScaffold(si??{},form.actions['step-1'].outputs.economicReviewRecords);
+    // Prepopulate the same existing reconciliation list from accepted Phase-4
+    // sources. Agents must supply substantive interpretations, but no longer
+    // hand-transcribe hundreds of subject keys, anchors or prior conclusions.
+    const p4=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json')));
+    const priorCandidates=p4?.actions?.['step-3']?.outputs?.candidateRecords??[];
+    const priorRows=Array.isArray(form.actions?.['step-2']?.outputs?.reconciliationRecords)
+      ?form.actions['step-2'].outputs.reconciliationRecords.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)):[];
+    const already=new Set(priorRows.map(x=>String(x.subjectKey??'')));
+    for(const item of priorCandidates){
+      if(!item||typeof item!=='object'||Array.isArray(item))continue;
+      const subjectKey=item.tempKey??item.canonicalId??item.candidateKey;
+      if(!subjectKey||already.has(String(subjectKey)))continue;
+      already.add(String(subjectKey));
+      priorRows.push({
+        subjectKey,subjectType:'PHASE4_SOURCE_CANDIDATE',
+        priorConclusion:item.description??item.securityRationale??'PRIOR_CANDIDATE',
+        sourceAnchor:item.sourceAnchor??item.anchors?.[0]??'NONE_IDENTIFIED',
+        phase5Observation:'<REQUIRED>',disposition:'<REQUIRED>',
+        rationale:'<REQUIRED>',downstreamValidationNeed:'<REQUIRED>',
+        automationOwnedFields:['subjectKey','subjectType','priorConclusion','sourceAnchor']
+      });
+    }
+    if(priorRows.length)form.actions['step-2'].outputs.reconciliationRecords=priorRows;
     // Phase 5 designs its own candidate-specific simulations from reviewed source evidence.
     // No Phase-0 randomized simulation, telemetry, or Medusa baseline is required.
     delete form.automationInputs.phase0BaselineSimulation;
