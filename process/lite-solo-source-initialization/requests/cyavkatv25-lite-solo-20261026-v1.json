@@ -4,6 +4,6 @@
   "requestId": "cyavkatv25-lite-solo-20261026-v1",
   "sourceUrl": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/cyavKATv25.zip",
   "scanUrls": [],
-  "authorizePhase0Execution": false,
+  "authorizePhase0Execution": true,
   "deliveryTransport": "DIRECT"
 }
