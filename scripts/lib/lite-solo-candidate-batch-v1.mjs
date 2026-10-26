@@ -282,3 +282,50 @@ function digestFileV1(root,rel){
  const abs=path.join(root,...rel.split('/'));
  return createHash('sha256').update(fs.readFileSync(abs)).digest('hex');
 }
+
+
+// Source-derived identity verifier used at full Phase-6/8 preparation and
+// validation. The sidecar cannot invent candidates or map two identities to
+// one: every row is checked against both sealed canonical sources and Phase-5
+// reconciliation exactly once.
+export function readVerifiedCandidateIdentityIndexV1({root,campaignPath}={}){
+ const indexRel=path.posix.join(campaignPath,'controller/CANDIDATE_IDENTITY_INDEX_v1.json');
+ const index=read(root,indexRel);
+ const p4=read(root,path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json'));
+ const p5=read(root,path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json'));
+ if(index.schemaVersion!=='curveyield-lite-candidate-identity-index-v1'||
+    !Array.isArray(index.rows)||index.sourceSha256!==p4.automationInputs?.sourceSha256&&
+      index.sourceSha256!==p5.automationInputs?.sourceSha256&&
+      index.campaignId!==p5.campaignId)
+   throw new Error('candidate identity index schema/source/campaign mismatch');
+ if(index.campaignId!==p5.campaignId||index.rowCount!==index.rows.length)
+   throw new Error('candidate identity index total/campaign mismatch');
+ const sources=[...records(p4.actions?.['step-3']?.outputs?.candidateRecords),
+    ...records(p5.actions?.['step-2']?.outputs?.newCandidateRecords)];
+ const reconciliation=records(p5.actions?.['step-2']?.outputs?.reconciliationRecords);
+ if(sources.length!==index.rowCount)throw new Error('candidate identity index source count changed');
+ const ids=new Set(),aliasMap=new Map(),rows=new Map();
+ for(const source of sources){
+   const id=keyOf(source);
+   if(!id||ids.has(id))throw new Error('duplicate canonical candidate '+id);
+   ids.add(id);
+   const matched=index.rows.filter(row=>row.candidateKey===id);
+   if(matched.length!==1||matched[0].sourceRecordSha256!==sha(source)||
+      matched[0].sourceAnchor!==String(source.sourceAnchor??source.anchors?.[0]??''))
+     throw new Error('candidate identity row differs from sealed source '+id);
+   const r=matched[0],dispositions=reconciliation.filter(x=>[x.subjectKey,x.candidateKey,x.tempKey,x.canonicalId]
+      .filter(Boolean).some(alias=>aliases(source).has(String(alias))));
+   if(dispositions.length!==1||sha(dispositions[0])!==r.phase5DispositionSha256||
+      String(dispositions[0].phase5ExecutionDisposition??'')!==String(r.phase5Disposition??''))
+     throw new Error('candidate identity disposition changed or ambiguous for '+id);
+   for(const alias of aliases(source)){
+     if(aliasMap.has(alias)&&aliasMap.get(alias)!==id)
+       throw new Error('candidate index alias collision '+alias);
+     aliasMap.set(alias,id);
+   }
+   rows.set(id,r);
+ }
+ for(const r of index.rows)if(!rows.has(r.candidateKey))
+   throw new Error('candidate identity index includes unsealed row '+r.candidateKey);
+ return {indexRel,rows,aliasMap,canonicalKeys:[...rows.keys()]};
+}
