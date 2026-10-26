@@ -598,6 +598,42 @@ export function readSelectedWorkShardRecordsV13({root,indexRel,queries=[]}={}){
  return results;
 }
 
+
+// Enumerate one output's work-record identifiers from controller-owned pages.
+// Immutable keys need no record-body reads; only bounded authorized append
+// shards are opened to discover newly assigned candidate IDs.
+export function listIndexedWorkShardCandidateKeysV13({root,indexRel,step,field}={}){
+ const working=secureReadV13(root,indexRel);
+ if(working.schemaVersion!=='curveyield-work-shard-index-v13')throw new Error('v13 index required');
+ const controller=secureLocationV13(working.formRel,working.phase),workDir=path.posix.dirname(indexRel);
+ const trusted=secureReadV13(root,path.posix.join(controller,'INDEX_v1.json'));
+ if(!secureSameV13(working,trusted))throw new Error('candidate-key enumeration index mismatch');
+ const keys=new Set();
+ for(const page of trusted.pages){
+  const expected=secureReadV13(root,path.posix.join(controller,page.file));
+  const actual=secureReadV13(root,path.posix.join(workDir,page.file));
+  if(!secureSameV13(actual,expected)||secureHashV13(actual)!==page.sha256)
+   throw new Error('candidate-key enumeration page mismatch');
+  for(const d of actual.shards??[]){
+   if(!secureSameV13(d.path,['actions',step,'outputs',field])||d.kind!=='array')continue;
+   if(d.append){
+    const item=secureReadV13(root,path.posix.join(workDir,d.file));
+    if(bytes(item)>MAX_V13_APPEND_BYTES||item.entries.length>MAX_V13_APPEND_RECORDS||
+       !secureSameV13(item.path,d.path)||item.startIndex!==d.startIndex)
+      throw new Error('append candidate key shard changed');
+    for(const e of item.entries){
+     const key=e.value?.canonicalId??e.value?.tempKey??e.value?.candidateKey;
+     if(typeof key==='string'&&key&&!key.startsWith('<'))keys.add(key);
+    }
+   }else for(const id of d.recordKeys??[]){
+    const match=String(id).match(/^(?:canonicalId|tempKey|candidateKey)=([A-Za-z0-9._-]+)$/);
+    if(match&&match[1]!=='NONE_IDENTIFIED')keys.add(match[1]);
+   }
+  }
+ }
+ return [...keys];
+}
+
 export function secureRestoreWorkFormV13({root,indexRel}){
  const working=secureReadV13(root,indexRel),phase=working.phase;
  const trustedDir=secureLocationV13(working.formRel,phase),workDir=path.posix.dirname(indexRel);
