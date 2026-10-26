@@ -159,7 +159,7 @@ export function preparePhaseWork({root,campaignPath,authorityRoot,sequence,revie
   let form=readJson(requiredFile(root,formTemplateRel,'work-form template'));
   form=applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths,predecessorReceiptPath,prefillContext});
   writeJson(repoFile(root,formRel),form);
-  const shards=(String(authorityRoot).includes('Audit_Litemode_v13')||authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo')
+  const shards=(String(authorityRoot).includes('Audit_Litemode_v13')||[ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2' ].includes(authorityRoot))
     ?secureShardWorkFormV13({root,formRel,phase:sequence,retireFull:true})
     :shardWorkFormV1({root,formRel,phase:sequence,retireFull:true});
   const reportRel=schema.finalReport?fullCampaignPath(campaignPath,schema.finalReport.campaignPath):null;
