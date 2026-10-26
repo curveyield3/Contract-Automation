@@ -34,7 +34,10 @@ authority_digest="$(read_field '.authority.liteSkillSha256')"
 manifest_digest="$(read_field '.authority.manifestSha256')"
 directory_entry="$(read_field '.campaign.campaignDirectoryEntryPath')"
 [[ "$authority_commit" =~ ^[0-9a-f]{40}$ && "$authority_digest" =~ ^[0-9a-f]{64}$ && "$manifest_digest" =~ ^[0-9a-f]{64}$ ]] || { echo 'invalid bound authority identity' >&2; exit 1; }
-[ "$directory_entry" = 'Audit Campaign Directory/campaigns/cyavkatv25b.json' ] || { echo 'unexpected campaign directory entry' >&2; exit 1; }
+campaign_id="$(read_field '.campaign.campaignId')"
+[[ "$campaign_id" =~ ^[A-Za-z0-9_.-]+-r[0-9]+$ ]] || { echo 'invalid Lite-Solo campaign id' >&2; exit 1; }
+expected_directory="Audit Campaign Directory/campaigns/${campaign_id%-r*}.json"
+[ "$directory_entry" = "$expected_directory" ] || { echo 'unexpected campaign directory entry' >&2; exit 1; }
 # GitHub permits fetching this historical commit by object ID. It must match
 # the Phase-0 receipt; never substitute the latest authority contents.
 git -C "$destination" fetch --no-tags --depth=1 --filter=blob:none origin "$authority_commit"
