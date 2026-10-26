@@ -30,7 +30,7 @@ import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/a
 import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 import {isReassignedV13AuthorityV1} from './lib/lite-authority-lineup-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
-import {acceptSelectedCandidateBatchV1,writeCandidateIdentityIndexV1} from './lib/lite-solo-candidate-batch-v1.mjs';
+import {acceptSelectedCandidateBatchV1,writeCandidateIdentityIndexV1,writePhase6ProofScheduleV1} from './lib/lite-solo-candidate-batch-v1.mjs';
 import {validatePhase6AttackerWorkV1,validatePhase8LinkageV1,validatePhase10CoverageLabelV1,appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -183,6 +183,7 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const remediation=path.posix.join(campaignPath,'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md');
   const finalIndex=path.posix.join(campaignPath,'work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
   const identityIndex=path.posix.join(campaignPath,'controller/CANDIDATE_IDENTITY_INDEX_v1.json');
+  const proofSchedule=path.posix.join(campaignPath,'work/phase-06/PROOF_SCHEDULE_INDEX_v1.json');
   const p2=derived(2,'PHASE3_INPUT_v1.json');
   const p3=derived(3,'PHASE4_INPUT_v1.json');
   const p4=derived(4,'PHASE5_INPUT_v1.json');
@@ -194,8 +195,8 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const p9Final=derived(9,'PHASE10_REMEDIATION_INPUT_v1.json');
   if(target===4) return uniqueExisting(root,[p2,p3]);
   if(target===5) return uniqueExisting(root,[p2,p3,p4]);
-  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,identityIndex,buildIdentity,deploy,targets]);
-  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,p7,identityIndex,buildIdentity,deploy,targets]);
+  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,identityIndex,proofSchedule,buildIdentity,deploy,targets]);
+  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,p7,identityIndex,proofSchedule,buildIdentity,deploy,targets]);
   if(target===9) return uniqueExisting(root,[p8Remediation,remediation]);
   if(target===10) return uniqueExisting(root,[p8Final,p9Final,finalIndex]);
   return uniqueExisting(root,immediate);
@@ -1356,6 +1357,10 @@ if(sequence===5){
   const p4=canonicalFor(root,campaignPath,4);
   boundaryArtifactRels.push(writeCandidateIdentityIndexV1({
     root,campaignPath,directory,phase4Canonical:p4,phase5Canonical:canonical,now
+  }));
+  boundaryArtifactRels.push(writePhase6ProofScheduleV1({
+    root,campaignPath,directory,phase4Canonical:p4,phase5Canonical:canonical,
+    executionResults:phase5MachineResults??{},now
   }));
 }
 let successorPrefillContext={};
