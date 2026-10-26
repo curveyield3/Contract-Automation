@@ -9,6 +9,19 @@ const read=(root,rel)=>fs.readFileSync(path.join(root,...rel.split('/')));
 const output=(canonical,phase)=>phase===4?canonical.actions?.['step-3']?.outputs?.candidateRecords:
  canonical.actions?.['step-2']?.outputs?.newCandidateRecords;
 const json=x=>JSON.stringify(x,null,2)+'\n';
+export function verifySealedCanonicalSourceV1({root,campaignPath,phase}={}){
+ if(![4,5].includes(phase))throw new Error('unsupported sealed canonical phase');
+ const rel=path.posix.join(campaignPath,'derived/phase-'+phase+'/PHASE_0'+phase+'_CANONICAL_DATA_v1.json');
+ const receipt=JSON.parse(read(root,path.posix.join(campaignPath,'receipts/PHASE_0'+phase+'_RECEIPT_v1.json')).toString('utf8'));
+ const expected=path.posix.relative(campaignPath,rel);
+ const entries=(receipt.evidence??[]).filter(x=>x?.role==='PHASE_CANONICAL_DATA'&&x.path===expected);
+ if(entries.length!==1||!entries[0].sha256||!receipt.source?.sha256||!receipt.campaign?.campaignId)
+  throw new Error('sealed Phase-'+phase+' canonical digest is missing or ambiguous');
+ const observed=digest(read(root,rel));
+ if(observed!==entries[0].sha256)
+  throw new Error('sealed Phase-'+phase+' canonical source bytes differ from receipt digest');
+ return {rel,sha256:observed,archiveSha256:receipt.source.sha256,campaignId:receipt.campaign.campaignId};
+}
 // Controller-created read acceleration only; source canonical and receipt
 // remain the security authority. Never accept candidate pages without exact
 // hash/source binding, and never use this index for final phase sealing.
@@ -17,6 +30,8 @@ export function readCandidateSourceSubsetV1({root,campaignPath,phase=5,keys=[]}=
   throw new Error('candidate-source subset requires Phase 5/6 and 1–16 keys');
  const sourceRefs=[path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json')];
  if(phase===6)sourceRefs.push(path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json'));
+ for(const sourcePhase of phase===6?[4,5]:[4])
+  verifySealedCanonicalSourceV1({root,campaignPath,phase:sourcePhase});
  const sourceDigests=sourceRefs.map(rel=>({rel,sha256:digest(read(root,rel))}));
  const prefix=path.posix.join(campaignPath,'controller/candidate-source-pages');
  const indexRel=path.posix.join(prefix,'PHASE_'+String(phase).padStart(2,'0')+'_INDEX_v1.json');
