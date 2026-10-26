@@ -445,6 +445,12 @@ export function applyObligationDispositionsToLedger({ledger,canonical,sequence,c
     if(!obligation) throw new Error('Obligation disposition references unknown obligation '+id);
     const disposition=String(row.disposition??'').toUpperCase();
     const carry=String(row.carryForwardPhaseOrNone??'NONE_IDENTIFIED');
+    if(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo'&&
+       ['CARRY_FORWARD','BLOCKED_CARRIED'].includes(disposition)&&
+       ![6].some(next=>Number(next)>Number(sequence)&&String(next)===carry))
+      throw new Error('LITE_SOLO_UNSUPPORTED_OBLIGATION_CARRY: '+id+
+        ' cannot be carried to Phase '+carry+
+        '; no future Lite-Solo-v1 schema has an obligationDispositions closure field. Resolve with verifiable evidence in Phase 6 or use a new, explicitly bound authority release. Never mark a carried question satisfied.');
     const refs=uniq([canonicalRel,...evidenceList(row.evidenceRefs)]);
     obligation.statusReason=String(row.rationale??'');
     obligation.updatedAt=now;
