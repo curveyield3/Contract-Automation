@@ -165,7 +165,9 @@ function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,
  const pending=pendingIdsOf(state,chatKey);
  const correctnessPending=pending.some(id=>state.payload.units[id].role!=='ATTACK');
  const eligible=state.payload.sequentialSingleReviewer
-   ?pending.filter(id=>state.payload.units[id].role===(correctnessPending?'FLOW_REVIEW':'ATTACK'))
+   ?pending.filter(id=>correctnessPending
+     ?state.payload.units[id].role!=='ATTACK'
+     :state.payload.units[id].role==='ATTACK')
    :pending;
  const ids=[];
  let packetBytes=0,workItems=0;
@@ -243,7 +245,7 @@ function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
  const indexRel=path.posix.join(dir,'UNIT_'+unitId+'_INDEX_v1.json');
  const index={schemaVersion:'curveyield-discovery-packet-section-index-v1',unitId,role,
   packetPath,submissionPath:submissionRel(campaignPath,unitId),
-  readingGuide:'Read section pages by path and offset, not the entire assignment packet at once. Pages are lossless copies of packet sections; keep all documented rules, flows, checks, and attacker facts. The full packet remains authoritative for controller validation. Commit one complete unit then submit a boundary request naming that unitId.',
+  readingGuide:'Read the current window index, then the needed section pages by path and offset without loading the entire assignment. Preserve all required source-backed rules, flows, checks and attacker facts. Complete and save each unit submission as substantive work finishes; one saved unit is not a session boundary. After completing the active window, submit ONE existing boundary request with readyUnitIds naming all completed active units (up to eight). On DISCOVERY_NEXT continue the next window in this same session; on rework correct named submissions and retain accepted work.',
   primaryContextIds:arr(payload.primaryContextIds),
   flowIds:arr(payload.flowIds),integrationQuestionIds:arr(payload.integrationQuestionIds),
   trivialContextIds:arr(payload.trivialContextIds),
@@ -269,7 +271,7 @@ function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
  }
  const indexRel=path.posix.join(dir,'INDEX_v1.json');
  const index={schemaVersion:'curveyield-discovery-unit-index-v1',role,unitCount:ids.length,pages,
-  readingGuide:'Read each listed unit packet index in manageable pages. Complete all ready units together using ONE existing boundary request with readyUnitIds (up to 8); do not submit a separate workflow request per unit. Keep unfinished submissions as drafts. Correctness and ATTACK windows remain separate.'};
+  readingGuide:'Read each unit index and only its needed section pages; save complete substantive submissions as work proceeds. Issue ONE existing boundary request with readyUnitIds listing completed active units (up to 8), not one workflow per unit. If a unit is blocked, preserve its unresolved facts in its existing fields and finish independent active units. Keep unfinished submissions as drafts; on DISCOVERY_NEXT immediately continue the next window in the same agent session. Rework only named failures; accepted work persists. All non-ATTACK correctness work, including RESIDUAL_REVIEW, precedes ATTACK.'};
  if(Buffer.byteLength(JSON.stringify(index))>32*1024)throw new Error('discovery window index exceeds 32 KiB');
  writeJson(repoFile(root,indexRel),index);
  return indexRel;
@@ -393,6 +395,10 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
 }
 export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now}){
  state??=known(root,stateRel(campaignPath));
+ // A missing-plan initialization has an empty unit order intentionally. In
+ // populated plans, unaccepted units must never be sealed, even by a direct caller.
+ const incomplete=state.payload.order.filter(id=>state.payload.units[id]?.status!=='ACCEPTED');
+ if(incomplete.length)throw new Error('discovery cannot complete with required units outstanding: '+incomplete.join(', '));
  state.payload.status='COMPLETE';state.payload.activeUnitId=null;
  writeJson(repoFile(root,stateRel(campaignPath)),state);
  const inputs=getInputs({root,campaignPath,automationRoot});
@@ -406,7 +412,7 @@ export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,a
  writeJson(repoFile(root,pathJoin(campaignPath,'DISCOVERY_SUMMARY_v1.json')),summary);
  const obligations=deriveBaselineObligationsV1({inventory,taxonomy:inputs.taxonomy,summary});
  writeJson(repoFile(root,path.posix.join(campaignPath,'work/phase-06/BASELINE_OBLIGATIONS_v1.json')),obligations);
- const message='CONTROLLER: Phase 4 discovery is complete. Phase 4 is now ACTIVE for lite-solo-agent. Follow phases/phase-4/START_HERE.md of the bound authority: Step 1 reconciles every record prefilled from work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json, then complete Steps 2 and 3 and invoke controller validation as usual.';
+ const message='CONTROLLER: Phase 4 discovery is complete. Phase 4 is now ACTIVE for lite-solo-agent. Follow currentAssignment.workShardIndexPath and process the indexed editable shards; reconcile every prefilled discovery row using original source evidence when needed. The full DISCOVERY_SUMMARY is a controller input, not a required context dump. Finish Steps 1–3 in one session before one phase boundary request.';
  return {status:'DISCOVERY_COMPLETE',feedbackText:message,summary};
 }
 export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,readyUnitIds=[unitId],now,auditControllerRef='main'}){
@@ -512,7 +518,11 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   const next=recordWindowV1({root,ids:reopen,state,campaignPath,authorityRoot});
   return finish('DISCOVERY_NEXT',summary+'\nPreviously exhausted correctness units require actual revalidation: '+reopen.join(', ')+'. No other work was discarded.',next);
  }
- // A partial state may remain only while current solo units await submission.
+ // An empty eligible window is not proof that all required work is accepted.
  if(activeIdsOf(state).length)return finish('DISCOVERY_PARTIAL',summary+'\nSome solo discovery units are still active.',null);
+ const incomplete=state.payload.order.filter(id=>state.payload.units[id]?.status!=='ACCEPTED');
+ if(incomplete.length)return finish('DISCOVERY_REWORK',summary+
+  '\nRequired discovery units remain unaccepted or unschedulable: '+incomplete.join(', ')+
+  '. Correct the scheduling/state conflict; no work was sealed or discarded.',null);
  return completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});
 }
