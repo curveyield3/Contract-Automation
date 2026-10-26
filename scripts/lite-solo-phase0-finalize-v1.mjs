@@ -206,7 +206,7 @@ const directory=read(required(directoryPath,'Audit Campaign Directory entry'));
 if(directory.campaignId!==receipt.campaign.campaignId) throw new Error('campaign directory identity mismatch');
 const sealedPhase0Receipt=rel(controllerRoot,receiptPath);
 const authorityRoot=path.posix.dirname(receipt.authority.homepagePath);
-if(authorityRoot!=='Audit Skill - Lite-Solo Authority/lite-solo'||receipt.authority.liteRelease!=='lite-solo-v1')throw new Error('lite-solo authority identity mismatch');
+if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2' ].includes(authorityRoot)||receipt.authority.liteRelease!==(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v2'?'lite-solo-v2':'lite-solo-v1'))throw new Error('lite-solo authority identity mismatch');
 if(directory.mode!=='LITE_SOLO'||directory.agent?.actorId!=='lite-solo-agent'||directory.deliveryTransport!=='DIRECT'||directory.agent?.chatUrl!=null)throw new Error('lite-solo Phase-0 directory identity mismatch');
 const assignment=preparePhaseWork({
   root:controllerRoot,
