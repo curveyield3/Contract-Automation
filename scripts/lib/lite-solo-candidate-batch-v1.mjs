@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {validatePhase5CandidateDispositionV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
-import {readSelectedWorkShardRecordsV13} from './lite-solo-work-shards-v1.mjs';
+import {readSelectedWorkShardRecordsV13,listIndexedWorkShardCandidateKeysV13} from './lite-solo-work-shards-v1.mjs';
 import {readCandidateSourceSubsetV1} from './lite-solo-candidate-source-pages-v1.mjs';
 
 // Candidate-batch checkpoints are validation-only. They never replace a phase
@@ -265,7 +265,9 @@ export function acceptSelectedCandidateBatchV1({root,campaignPath,directory,inde
  }
  for(const item of selected)accepted.set(item.section+':'+item.key,{...item,acceptedAt:now});
  const completed=new Set([...accepted.values()].filter(x=>x.section===reviewSection).map(x=>x.key));
- const totalKeys=[...new Set([...sourceSubset.keys,...sources.map(keyOf)])];
+ const liveNewKeys=phase===5
+   ?listIndexedWorkShardCandidateKeysV13({root,indexRel,step:'step-2',field:'newCandidateRecords'}):[];
+ const totalKeys=[...new Set([...sourceSubset.keys,...liveNewKeys,...sources.map(keyOf)])];
  const remaining=totalKeys.filter(x=>!completed.has(x));
  const checkpoint={schemaVersion:'curveyield-lite-candidate-batch-checkpoint-v1',
    campaignId:directory.campaignId,sourceSha256:directory.sourceSha256,phase,
