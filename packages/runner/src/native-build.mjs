@@ -124,7 +124,7 @@ async function firstPresent(root, names, fsApi) {
 async function buildInfoFiles(projectRoot, fsApi = fs) {
   const rootEntries = await fsApi.readdir(projectRoot, { withFileTypes: true });
   const artifactDirs = rootEntries
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith('artifacts'))
+    .filter((entry) => entry.isDirectory() && (entry.name.startsWith('artifacts') || entry.name === 'out'))
     .map((entry) => entry.name)
     .sort();
   const files = [];
@@ -334,4 +334,156 @@ export async function compileRepoNativeHardhat({
     sourceInventoryFiles: sources.length,
     vendorRootAdapter
   };
+}
+
+
+// Native Foundry projects are compiled using the package's foundry.toml. A
+// generic solc compilation of the script/ directory is not equivalent: Forge
+// remappings, external libraries, and script-only cheatcodes need native
+// resolution. Build production src/ only; retain scripts for the separate,
+// explicitly authorized fork deployment lane.
+const FOUNDRY_NPM_PINS = Object.freeze({
+  '@openzeppelin/contracts': '5.4.0',
+  '@openzeppelin/contracts-upgradeable': '5.4.0',
+  '@morpho-org/morpho-blue': '1.0.0',
+  '@uniswap/v3-core': '1.0.1'
+});
+const FOUNDRY_NPM_SCOPES = Object.freeze({
+  '@openzeppelin/': ['@openzeppelin/contracts', '@openzeppelin/contracts-upgradeable'],
+  '@morpho-org/morpho-blue/': ['@morpho-org/morpho-blue'],
+  '@uniswap/v3-core/': ['@uniswap/v3-core']
+});
+
+export async function detectNativeFoundry(projectRoot, {fsApi=fs}={}) {
+  if (!await exists(path.join(projectRoot,'foundry.toml'),fsApi)) return {system:null};
+  const text=await fsApi.readFile(path.join(projectRoot,'foundry.toml'),'utf8');
+  const root=text.match(/^\s*\[profile\.default\]\s*$/m);
+  if (!root) throw new Error('Foundry exact build requires a [profile.default] section');
+  const src=text.match(/^\s*src\s*=\s*["']([^"']+)["']/m)?.[1]??'src';
+  if (src.startsWith('/')||src.split('/').includes('..')) throw new Error('Unsafe Foundry source root');
+  if (!await directoryExists(path.join(projectRoot,src),fsApi)) throw new Error('Foundry source directory missing: '+src);
+  return {system:'foundry-native',src,config:'foundry.toml'};
+}
+
+function foundryNpmDependencyRoots(projectRoot,toml){
+  const locations=new Map();
+  for(const match of toml.matchAll(/["'](@[A-Za-z0-9_-]+\/[^"']*?)=([^"']+)["']/g)){
+    const prefix=match[1],target=match[2].replaceAll('\\','/');
+    if(!target.includes('/node_modules/'))continue;
+    const packages=FOUNDRY_NPM_SCOPES[prefix]??[];
+    if(!packages.length)continue;
+    const root=path.resolve(projectRoot,target.slice(0,target.indexOf('/node_modules/')));
+    // Only the extracted package's project root and siblings are permitted.
+    const packageParent=path.dirname(path.resolve(projectRoot));
+    if(root!==projectRoot&&root!==packageParent&&!root.startsWith(packageParent+path.sep))
+      throw new Error('Foundry npm dependency root escapes the frozen source package: '+target);
+    for(const name of packages)locations.set(name,root);
+  }
+  return locations;
+}
+
+export async function installNativeFoundryDependencies({projectRoot,runCommand=runProcess,fsApi=fs}){
+  const config=await fsApi.readFile(path.join(projectRoot,'foundry.toml'),'utf8');
+  const roots=foundryNpmDependencyRoots(projectRoot,config);
+  const groups=new Map();
+  for(const [name,root] of roots){
+    if(!groups.has(root))groups.set(root,[]);
+    groups.get(root).push(name);
+  }
+  const installs=[];
+  for(const [root,names] of groups){
+    const absent=[];
+    for(const name of names){
+      if(!await exists(path.join(root,'node_modules',...name.split('/'),'package.json'),fsApi))absent.push(name);
+    }
+    if(!absent.length)continue;
+    // Honor the source lock, when provided, before using explicit bounded
+    // runner pins. Never run dependency lifecycle scripts.
+    const lock=path.join(root,'package-lock.json');
+    const hasLock=await exists(lock,fsApi);
+    const command=hasLock
+      ? ['300s','npm','ci','--ignore-scripts','--no-audit','--no-fund','--prefix',root]
+      : ['300s','npm','install','--ignore-scripts','--no-audit','--no-fund','--no-save','--package-lock=false','--prefix',root,...names.map(name=>name+'@'+FOUNDRY_NPM_PINS[name])];
+    const result=await runCommand({command:'timeout',args:command,cwd:projectRoot});
+    if(result?.exitCode!==0){
+      const error=new Error('Foundry dependency installation failed: '+String(result?.stderr??result?.stdout??'').slice(-2000));
+      error.code='FOUNDRY_DEPENDENCY_INSTALL_FAILED';throw error;
+    }
+    for(const name of absent){
+      const packagePath=path.join(root,'node_modules',...name.split('/'),'package.json');
+      if(!await exists(packagePath,fsApi))throw new Error('Foundry dependency is still missing after installation: '+name);
+      const content=await fsApi.readFile(packagePath);
+      const meta=JSON.parse(content.toString('utf8'));
+      if(meta.name!==name)throw new Error('Foundry dependency name mismatch: '+name);
+      if(!hasLock && meta.version!==FOUNDRY_NPM_PINS[name])
+        throw new Error('Foundry dependency pin mismatch: '+name);
+      installs.push({package:name,version:meta.version,packageManifestSha256:createHash('sha256').update(content).digest('hex'),
+        sourceLockfile:hasLock?path.relative(projectRoot,lock).split(path.sep).join('/'):null,
+        resolution:hasLock?'SOURCE_NPM_LOCK':'RUNNER_EXPLICIT_PIN',isolatedRunnerOnly:true});
+    }
+  }
+  return installs.sort((a,b)=>a.package.localeCompare(b.package));
+}
+
+export async function compileRepoNativeFoundry({projectRoot,runCommand=runProcess,fsApi=fs}){
+  const detected=await detectNativeFoundry(projectRoot,{fsApi});
+  if(detected.system!=='foundry-native')throw new Error('Not an admitted native Foundry project');
+  const dependencyInstall=await installNativeFoundryDependencies({projectRoot,runCommand,fsApi});
+  // Keep script/ and test/ in the frozen source and readiness inventory, but
+  // do not feed executable scripts/cheatcodes to the production-contract build.
+  const result=await runCommand({command:'timeout',args:['1500s','forge','build','--force','--build-info','--skip','script','--skip','test'],cwd:projectRoot});
+  if(result?.exitCode!==0){
+    const error=new Error('Foundry native production compilation failed: '+String(result?.stderr??result?.stdout??'').slice(-4000));
+    error.code='FOUNDRY_NATIVE_COMPILATION_FAILED';throw error;
+  }
+  const paths=await buildInfoFiles(projectRoot,fsApi);
+  if(!paths.length)throw new Error('Foundry native build produced no compiler build-info');
+  const units=[],artifacts=[],sourceAsts={},inventory=new Set(),diagnostics=[];
+  for(const [index,file] of paths.entries()){
+    const data=JSON.parse(await fsApi.readFile(file,'utf8'));
+    if(!data.input?.sources||!data.output?.contracts||!data.output?.sources)
+      throw new Error('Foundry build-info is missing exact compiler input, output, or AST: '+file);
+    const sourceContents={};
+    for(const [name,entry] of Object.entries(data.input.sources)){
+      if(typeof entry?.content!=='string')throw new Error('Foundry compiler source contents absent: '+name);
+      sourceContents[name]=entry.content;inventory.add(name);
+    }
+    const asts=Object.fromEntries(Object.entries(data.output.sources).filter(([,v])=>v?.ast).map(([name,value])=>[name,value.ast]));
+    Object.assign(sourceAsts,asts);
+    const unitId='foundry-build-info-'+(index+1);
+    const these=Object.entries(data.output.contracts).flatMap(([name,contracts])=>
+      Object.entries(contracts??{}).map(([contractName,raw])=>({
+        sourceName:name,contractName,abi:raw.abi??[],metadata:raw.metadata??null,storageLayout:raw.storageLayout??null,
+        devdoc:raw.devdoc??{},userdoc:raw.userdoc??{},methodIdentifiers:raw.evm?.methodIdentifiers??{},
+        gasEstimates:raw.evm?.gasEstimates??null,bytecode:raw.evm?.bytecode?.object?'0x'+raw.evm.bytecode.object:'0x',
+        deployedBytecode:raw.evm?.deployedBytecode?.object?'0x'+raw.evm.deployedBytecode.object:'0x',
+        bytecodeSourceMap:raw.evm?.bytecode?.sourceMap??'',deployedBytecodeSourceMap:raw.evm?.deployedBytecode?.sourceMap??'',
+        linkReferences:raw.evm?.bytecode?.linkReferences??{},deployedLinkReferences:raw.evm?.deployedBytecode?.linkReferences??{},
+        compilationUnitId:unitId
+      }))
+    );
+    artifacts.push(...these);
+    const diagnosticRows=Array.isArray(data.output.errors)?data.output.errors:[];
+    if(diagnosticRows.some(item=>item.severity==='error'))throw new Error('Foundry compiler build-info includes errors');
+    diagnostics.push(...diagnosticRows);
+    const inputText=JSON.stringify(data.input),outputText=JSON.stringify(data.output);
+    units.push({unitId,profile:'foundry-native',compilerVersion:data.solcLongVersion??data.solcVersion,
+      compilerPackage:'foundry-solc',settings:data.input.settings??{},sourceContents,sourceAsts:asts,
+      compilerInputSha256:createHash('sha256').update(inputText).digest('hex'),
+      compilerOutputSha256:createHash('sha256').update(outputText).digest('hex'),artifacts:these});
+  }
+  if(!artifacts.length||!units.every(unit=>unit.compilerVersion))
+    throw new Error('Foundry build lacks usable contract artifacts or exact compiler versions');
+  const qualified=new Set();
+  for(const a of artifacts){
+    const key=a.sourceName+':'+a.contractName;
+    if(qualified.has(key))throw new Error('Ambiguous duplicate Foundry compiler artifact: '+key);
+    qualified.add(key);
+  }
+  const compilerVersions=[...new Set(units.map(unit=>unit.compilerVersion))].sort();
+  return {status:'completed',system:'foundry-native',compilerVersion:compilerVersions.length===1?compilerVersions[0]:'multi-profile',
+    compilerVersions,compilerProfiles:units.map(unit=>({name:unit.unitId,compilerVersion:unit.compilerVersion,settings:unit.settings})),
+    compilerDiagnostics:diagnostics,sourceAsts,sourceInventory:[...inventory].sort(),sourceInventoryFiles:inventory.size,
+    artifacts,compilationUnits:units,foundryDependencyInstall:dependencyInstall,
+    foundryProductionOnly:true,sourceScriptsRetained:true};
 }
