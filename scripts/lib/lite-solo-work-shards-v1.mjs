@@ -524,6 +524,80 @@ export function secureShardWorkFormV13({root,formRel,phase,retireFull=true}){
    recordCount:descriptions.reduce((n,s)=>n+s.recordKeys.length,0)};
 }
 
+
+// Trusted, selective v13 reader. Candidate checkpoints need only the requested
+// record shards: do not materialize the full work form, immutable BASE pages,
+// or unrelated reviewer drafts. The final phase gate still restores everything.
+export function readSelectedWorkShardRecordsV13({root,indexRel,queries=[]}={}){
+ if(!Array.isArray(queries)||!queries.length||queries.length>48)throw new Error('selective shard reader needs 1–48 queries');
+ const working=secureReadV13(root,indexRel);
+ if(working.schemaVersion!=='curveyield-work-shard-index-v13')throw new Error('selective shard reader requires v13');
+ const trustedDir=secureLocationV13(working.formRel,working.phase),workDir=path.posix.dirname(indexRel);
+ const trusted=secureReadV13(root,path.posix.join(trustedDir,'INDEX_v1.json'));
+ if(!secureSameV13(working,trusted))throw new Error('selective shard index is not controller-owned');
+ if(bytes(working)>MAX_INDEX)throw new Error('selective shard root index exceeds bound');
+ const groups=new Map();
+ for(const q of queries){
+   if(!['step-2','step-3','step-5'].includes(q.step)||
+      !['reconciliationRecords','newCandidateRecords','targetDesigns','targetDispositions','candidateProofRecords'].includes(q.field)||
+      !Array.isArray(q.aliases)||!q.aliases.length||q.aliases.some(x=>typeof x!=='string'||!x))
+      throw new Error('invalid selective shard query');
+   groups.set(q.step+'.'+q.field,(groups.get(q.step+'.'+q.field)??[]).concat(q));
+ }
+ const results={};
+ const seen=new Set(),descriptors=[];
+ for(const page of trusted.pages){
+   if(!/^INDEX_PAGE_[0-9]{4}_v1\.json$/.test(page.file)||seen.has(page.file))throw new Error('duplicate/unsafe selective page');
+   seen.add(page.file);
+   const actual=secureReadV13(root,path.posix.join(workDir,page.file));
+   const expected=secureReadV13(root,path.posix.join(trustedDir,page.file));
+   if(!secureSameV13(actual,expected)||secureHashV13(actual)!==page.sha256||bytes(actual)>MAX_INDEX)
+     throw new Error('selective index page mismatch: '+page.file);
+   descriptors.push(...(actual.shards??[]));
+ }
+ const found=new Map();
+ for(const [section,queriesForSection] of groups){
+   const [step,field]=section.split('.');
+   const matching=descriptors.filter(d=>d.kind==='array'&&secureSameV13(d.path,['actions',step,'outputs',field]));
+   for(const d of matching){
+     const rel=path.posix.join(workDir,d.file);
+     if(!/^shard-[0-9]{4}_v1\.json$/.test(d.file))throw new Error('unsafe selective shard filename');
+     // The shard index owns filename, path, and mandatory immutable record IDs.
+     // The actual record is checked again below, preventing substitution of a
+     // different candidate while allowing the reviewer to edit its fields.
+     const item=secureReadV13(root,rel);
+     if(bytes(item)>(d.append?MAX_V13_APPEND_BYTES:MAX_SHARD)||
+        item.schemaVersion!=='curveyield-work-shard-v13'||
+        !secureSameV13(item.path,d.path)||item.kind!==d.kind||
+        item.startIndex!==d.startIndex||!Array.isArray(item.entries)||
+        item.entries.length>(d.append?MAX_V13_APPEND_RECORDS:d.recordKeys.length)||
+        (!d.append&&item.entries.length!==d.recordKeys.length))
+       throw new Error('selected shard shape/size mismatch: '+d.file);
+     const prefix=JSON.stringify(d.path)+':';
+     for(const [i,entry] of item.entries.entries()){
+       const expectedKey=d.append?prefix+'APPEND-'+String(i+1).padStart(4,'0'):prefix+d.recordKeys[i];
+       if(entry.key!==expectedKey||!entry.value||typeof entry.value!=='object'||Array.isArray(entry.value))
+         continue; // Non-record scalar/sentinel is never selected as a candidate.
+       if(!d.append&&recordKey(d.path,entry.value,d.startIndex+i)!==expectedKey)
+         throw new Error('selected immutable shard record identity changed: '+d.file);
+       const actualAliases=[entry.value.subjectKey,entry.value.candidateKey,entry.value.tempKey,
+         entry.value.canonicalId].filter(x=>typeof x==='string');
+       for(const q of queriesForSection){
+         if(!actualAliases.some(x=>q.aliases.includes(x)))continue;
+         const id=q.lookupId;
+         if(found.has(id))throw new Error('selected candidate '+id+' matches more than one shard record');
+         found.set(id,{record:structuredClone(entry.value),shardRel:rel,recordPosition:d.startIndex+i});
+       }
+     }
+   }
+   for(const q of queriesForSection){
+     const row=found.get(q.lookupId);
+     if(row)results[q.lookupId]=row;
+   }
+ }
+ return results;
+}
+
 export function secureRestoreWorkFormV13({root,indexRel}){
  const working=secureReadV13(root,indexRel),phase=working.phase;
  const trustedDir=secureLocationV13(working.formRel,phase),workDir=path.posix.dirname(indexRel);
