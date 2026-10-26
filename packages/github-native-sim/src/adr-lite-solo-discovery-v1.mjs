@@ -44,7 +44,7 @@ const submissionRel=(campaign,unit)=>pathJoin(campaign,unit+'/SUBMISSION_v1.json
 const stateRel=(campaign)=>pathJoin(campaign,'DISCOVERY_STATE_v1.json');
 const stubObligations=(directory,now)=>head(directory,now,'curveyield-baseline-obligations-v1',{obligations:[],testGroups:[]});
 
-export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,state,now,sharedInputs=null}){
+export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,state,now,sharedInputs=null,persist=true}){
  const {inventory,plan,facts,taxonomy}=sharedInputs??getInputs({root,campaignPath,automationRoot}),unit=resolveUnit(plan,unitId);
  if(!unit)throw new Error('unknown discovery unit '+unitId);
  const role=unit.role==='ATTACK'?'ATTACK':'FLOW_REVIEW',primary=arr(unit.primaryContextIds);
@@ -152,7 +152,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
    valueFlows:arr(facts?.payload?.valueFlows).filter(x=>unit.contracts?.includes(x.contract))
   }}:{})
  });
- writeJson(repoFile(root,packetRel(campaignPath,unitId)),packet);
+ if(persist)writeJson(repoFile(root,packetRel(campaignPath,unitId)),packet);
  return packet;
 }
 
@@ -170,9 +170,9 @@ function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,
  const ids=[];
  let packetBytes=0,workItems=0;
  const sharedInputs=getInputs({root,campaignPath,automationRoot});
- for(const id of eligible){
+ for(const id of eligible.slice(0,SOLO_WINDOW_MAX_UNITS*3)){
   if(ids.length>=SOLO_WINDOW_MAX_UNITS)break;
-  const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now,sharedInputs});
+  const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now,sharedInputs,persist:false});
   const size=Buffer.byteLength(JSON.stringify(packet)),p=packet.payload??{};
   // Estimate actual reviewer effort as well as input size. Small units can
   // share a round, while an unusually large unit can always advance alone.
@@ -184,6 +184,7 @@ function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,
   if(ids.length&&(packetBytes+size>SOLO_WINDOW_MAX_PACKET_BYTES||
      workItems+effort>SOLO_WINDOW_MAX_WORK_ITEMS))continue;
   packetBytes+=size;workItems+=effort;
+  writeJson(repoFile(root,packetRel(campaignPath,id)),packet);
   state.payload.units[id].status='ACTIVE';
   state.payload.units[id].openedAt??=now;
   ids.push(id);
@@ -268,7 +269,7 @@ function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
  }
  const indexRel=path.posix.join(dir,'INDEX_v1.json');
  const index={schemaVersion:'curveyield-discovery-unit-index-v1',role,unitCount:ids.length,pages,
-  readingGuide:'Read a window page then its packetIndexPath. Complete and submit each unit individually; other submissions stay drafts. Discovery windows are bounded and the correctness/ATTACK passes remain separate.'};
+  readingGuide:'Read each listed unit packet index in manageable pages. Complete all ready units together using ONE existing boundary request with readyUnitIds (up to 8); do not submit a separate workflow request per unit. Keep unfinished submissions as drafts. Correctness and ATTACK windows remain separate.'};
  if(Buffer.byteLength(JSON.stringify(index))>32*1024)throw new Error('discovery window index exceeds 32 KiB');
  writeJson(repoFile(root,indexRel),index);
  return indexRel;
