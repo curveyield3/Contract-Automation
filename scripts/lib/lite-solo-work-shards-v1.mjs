@@ -292,7 +292,7 @@ export function secureShardWorkFormV13({root,formRel,phase,retireFull=true}){
      let i=0;
      while(i<value.length){
        const start=i,entries=[];
-       while(i<value.length&&entries.length<20){
+       while(i<value.length&&entries.length<48){
          const key=recordKey(tokens,value[i],i);
          const proposed={schemaVersion:'curveyield-work-shard-v13',kind:'array',path:tokens,startIndex:start,
            entries:[...entries,{key,value:value[i]}]};
@@ -361,7 +361,7 @@ export function secureRestoreWorkFormV13({root,indexRel}){
    const rel=path.posix.join(workDir,desc.file);
    const raw=fs.readFileSync(relfile(root,rel),'utf8');
    const maxBytes=desc.append?MAX_V13_APPEND_BYTES:MAX_SHARD;
-   const maxRecords=desc.append?MAX_V13_APPEND_RECORDS:25;
+   const maxRecords=desc.append?MAX_V13_APPEND_RECORDS:48;
    if(Buffer.byteLength(raw)>maxBytes)throw new Error('v13 shard exceeds authorized bound: '+desc.file);
    const item=JSON.parse(raw);
    if(item.schemaVersion!=='curveyield-work-shard-v13'||item.kind!==desc.kind||
