@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {validatePhase5CandidateDispositionV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
+import {readSelectedWorkShardRecordsV13} from './lite-solo-work-shards-v1.mjs';
+import {readCandidateSourceSubsetV1} from './lite-solo-candidate-source-pages-v1.mjs';
 
 // Candidate-batch checkpoints are validation-only. They never replace a phase
 // boundary, authorize tests, or act as security disposition evidence.
@@ -175,4 +177,108 @@ export function writeCandidateIdentityIndexV1({root,campaignPath,directory,phase
   rowCount:rows.length,rows:rows.sort((a,b)=>a.candidateKey.localeCompare(b.candidateKey)),
   readingGuide:'Controller-validated stable canonical IDs. Use candidateKey for Phase 6/8; sourceTempKey is a lookup alias only. Source-anchor coincidence alone never merges candidates.'});
  return rel;
+}
+
+
+// Source/page/shard selective check, separate from the final full-form seal.
+// A checkpoint is deliberately weaker than a phase PASS: it only indicates
+// a source-bound record has been reviewed and remains byte-identical.
+export function acceptSelectedCandidateBatchV1({root,campaignPath,directory,indexRel,
+ phase,readyCandidateKeys,reviewSection='step-2',now}={}){
+ if(![5,6].includes(phase)||!Array.isArray(readyCandidateKeys)||
+    readyCandidateKeys.length<1||readyCandidateKeys.length>LIMIT||
+    new Set(readyCandidateKeys).size!==readyCandidateKeys.length||
+    readyCandidateKeys.some(k=>typeof k!=='string'||!k||!/^[A-Za-z0-9._-]+$/.test(k)))
+  throw new Error('selected candidate batch needs 1–16 unique safe keys');
+ if(!['step-2',...(phase===6?['step-5']:[])].includes(reviewSection))
+  throw new Error('invalid phase/section for selected candidate batch');
+ const sourceSubset=readCandidateSourceSubsetV1({root,campaignPath,phase,keys:readyCandidateKeys});
+ let sources=sourceSubset.records;
+ // Phase-5 newly proposed candidates are still editable; unlike Phase-4
+ // canonical candidates they have no sealed source-page entry until Phase 5.
+ if(phase===5&&sourceSubset.missing.length){
+   const newer=readSelectedWorkShardRecordsV13({root,indexRel,
+     queries:sourceSubset.missing.map(key=>({lookupId:'new:'+key,step:'step-2',
+      field:'newCandidateRecords',aliases:[key]}))});
+   for(const key of sourceSubset.missing){
+     if(newer['new:'+key])sources.push(newer['new:'+key].record);
+   }
+ }
+ const missing=readyCandidateKeys.filter(key=>!sources.some(x=>aliases(x).has(key)));
+ const issues=missing.map(key=>({candidateKey:key,reason:'Candidate absent or ambiguous in sealed predecessor and live new-candidate source shards'}));
+ const queries=[];
+ for(const key of readyCandidateKeys){
+   const source=sources.find(x=>aliases(x).has(key));
+   if(!source)continue;
+   const canonical=keyOf(source),names=[...aliases(source)];
+   const field=phase===5?'reconciliationRecords':
+      reviewSection==='step-5'?'candidateProofRecords':'targetDispositions';
+   queries.push({lookupId:'row:'+canonical,step:reviewSection,field,aliases:names});
+   if(phase===5)queries.push({lookupId:'target:'+canonical,step:'step-3',field:'targetDesigns',aliases:names});
+ }
+ const rows=queries.length?readSelectedWorkShardRecordsV13({root,indexRel,queries}):{};
+ const selected=[];let selectedBudgetBytes=0;
+ const hashShard=rel=>digestFileV1(root,rel);
+ for(const key of readyCandidateKeys){
+   const source=sources.find(x=>aliases(x).has(key));
+   if(!source)continue;
+   const canonical=keyOf(source),found=rows['row:'+canonical],target=rows['target:'+canonical];
+   if(!found){issues.push({candidateKey:key,reason:'Source-bound reviewer record missing from trusted work-shard index'});continue;}
+   try{
+     if(phase===5){
+       const validation=validatePhase5CandidateDispositionV1({
+         phase4CandidateRecords:[source],reconciliationRecords:[found.record],
+         targetDesigns:target?[target.record]:[]
+       });
+       if(validation.failures.length)throw new Error(validation.failures.join('; '));
+     }else{
+       if(!aliases(source).has(String(found.record.candidateKey??'')))
+         throw new Error('candidateKey mismatches the predecessor canonical identity');
+       validatePhase6SemanticRow(found.record,reviewSection);
+     }
+     const bytes=Buffer.byteLength(JSON.stringify({source,row:found.record,target:target?.record??null}));
+     if(selectedBudgetBytes+bytes>MAX_BYTES)throw new Error('selected actual candidate record bytes exceed 256 KiB');
+     selectedBudgetBytes+=bytes;
+     selected.push({key:canonical,section:reviewSection,
+       sourceAnchor:source.sourceAnchor??source.anchors?.[0]??null,
+       sourceDigest:sha(source),recordDigest:sha(found.record),
+       recordShardRel:found.shardRel,recordShardSha256:hashShard(found.shardRel),
+       ...(target?{targetDigest:sha(target.record),
+         targetShardRel:target.shardRel,targetShardSha256:hashShard(target.shardRel)}:{})});
+   }catch(error){issues.push({candidateKey:key,reason:String(error?.message??error)});}
+ }
+ if(issues.length)return {status:'CANDIDATE_BATCH_REWORK',issues,accepted:0,selectedKeys:readyCandidateKeys};
+ const rel=path.posix.join(campaignPath,'controller/candidate-batches/PHASE_'+String(phase).padStart(2,'0')+'_CHECKPOINT_v1.json');
+ let prior=null;try{prior=read(root,rel);}catch{}
+ if(prior&&(prior.schemaVersion!=='curveyield-lite-candidate-batch-checkpoint-v1'||
+    prior.campaignId!==directory.campaignId||prior.sourceSha256!==directory.sourceSha256||
+    prior.phase!==phase))throw new Error('candidate checkpoint identity/source mismatch');
+ const accepted=new Map();
+ for(const item of records(prior?.acceptedRecords)){
+   try{
+     // Any edit to a containing shard invalidates the prior record, even if it
+     // was an unrelated entry. This is intentionally conservative.
+     if(item.recordShardRel&&item.recordShardSha256===hashShard(item.recordShardRel)&&
+        (!item.targetShardRel||item.targetShardSha256===hashShard(item.targetShardRel)))
+       accepted.set(item.section+':'+item.key,item);
+   }catch{}
+ }
+ for(const item of selected)accepted.set(item.section+':'+item.key,{...item,acceptedAt:now});
+ const completed=new Set([...accepted.values()].filter(x=>x.section===reviewSection).map(x=>x.key));
+ const totalKeys=[...new Set([...sourceSubset.keys,...sources.map(keyOf)])];
+ const remaining=totalKeys.filter(x=>!completed.has(x));
+ const checkpoint={schemaVersion:'curveyield-lite-candidate-batch-checkpoint-v1',
+   campaignId:directory.campaignId,sourceSha256:directory.sourceSha256,phase,
+   sourceIndexRel:sourceSubset.indexRel,lastBatchAt:now,
+   acceptedRecords:[...accepted.values()].sort((a,b)=>(a.section+':'+a.key).localeCompare(b.section+':'+b.key)),
+   progress:{section:reviewSection,total:totalKeys.length,accepted:completed.size,
+     remaining:remaining.length,nextCandidateKeys:remaining.slice(0,LIMIT)},
+   reviewGuarantee:'SELECTED_SHARD_SOURCE_DIGEST_REVIEW_ONLY__FULL_PHASE_EVIDENCE_GATES_STILL_REQUIRED'};
+ write(root,rel,checkpoint);
+ return {status:'CANDIDATE_BATCH_ACCEPTED',accepted:selected.length,selectedKeys:readyCandidateKeys,
+   checkpointRel:rel,checkpointTotal:checkpoint.acceptedRecords.length,progress:checkpoint.progress};
+}
+function digestFileV1(root,rel){
+ const abs=path.join(root,...rel.split('/'));
+ return createHash('sha256').update(fs.readFileSync(abs)).digest('hex');
 }
