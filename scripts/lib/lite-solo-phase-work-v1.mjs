@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {shardWorkFormV1,secureShardWorkFormV13,writeDerivedInputPagesV1} from './lite-solo-work-shards-v1.mjs';
+import {shardWorkFormV1,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
 import {applyPhaseBoundaryPrefill} from './lite-solo-phase-prefill-v1.mjs';
 import {resolveFrozenAuthorityFileV1} from '../../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 
@@ -149,12 +149,6 @@ export function buildDerivedOutputs({root,campaignPath,schema,canonicalData,cano
     const rel=fullCampaignPath(campaignPath,spec.path);
     writeJson(repoFile(root,rel),{schemaVersion:'curveyield-lite-derived-phase-data-v1',phase:schema.phase,sourceCanonicalData:canonicalRel,generatedAt:now,data});
     out.push(rel);
-    // Provide the existing Lite-Solo agent bounded reading pages for oversized
-    // derived inputs without removing or changing their authoritative JSON.
-    if(String(canonicalData?.workSchemaPath??'').startsWith('Audit Skill - Lite-Solo Authority/lite-solo/')){
-      const paged=writeDerivedInputPagesV1({root,rel});
-      if(paged)out.push(paged.indexRel);
-    }
   }
   return out;
 }

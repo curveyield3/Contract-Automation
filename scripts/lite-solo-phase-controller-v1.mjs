@@ -14,7 +14,7 @@ import {
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-solo-phase-work-v1.mjs';
 import {
-  executePhase5TargetsV1,selectReusablePhase5TargetsV1,validatePhase5CandidateDispositionV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
+  executePhase5TargetsV1,selectReusablePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
   validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
@@ -30,23 +30,12 @@ import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/a
 import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 import {isReassignedV13AuthorityV1} from './lib/lite-authority-lineup-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
-import {acceptSelectedCandidateBatchV1,writeCandidateIdentityIndexV1,writePhase6ProofScheduleV1,readVerifiedCandidateIdentityIndexV1,verifyPhase6ProofScheduleV1} from './lib/lite-solo-candidate-batch-v1.mjs';
 import {validatePhase6AttackerWorkV1,validatePhase8LinkageV1,validatePhase10CoverageLabelV1,appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
 function phaseNum(n){return String(n).padStart(2,'0');}
-function feedbackText(sequence,defs){
-  // Every original deficiency stays in the phase packet's controllerValidation.
-  // The agent-facing response is bounded; never silently lose an obligation.
-  const shown=defs.slice(0,24);
-  return ['Phase '+sequence+' semantic validation failed.',
-    'Repair only the exact substantive items below and invoke controller validation again.',
-    'Deficiencies: '+defs.length+' total; '+shown.length+' in this summary.',
-    ...shown.map(x=>'- '+x),
-    ...(defs.length>shown.length?['Read packet.controllerValidation.deficiencies and shardRework for all '+defs.length+' exact defects.']:[]),
-    'Do not advance, retire, update receipts, or perform controller bookkeeping.'].join('\n');
-}
+function feedbackText(sequence,defs){return ['Phase '+sequence+' semantic validation failed.','Repair only the exact substantive items below and invoke controller validation again.','',...defs.map(x=>'- '+x),'','Do not advance, retire, update receipts, or perform controller bookkeeping.'].join('\n');}
 function listFilesRecursive(dir){if(!fs.existsSync(dir)) return [];const out=[];for(const ent of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,ent.name);if(ent.isDirectory()) out.push(...listFilesRecursive(p));else if(ent.isFile()) out.push(p);}return out;}
 function hasRemediation(campaignRoot){return listFilesRecursive(path.join(campaignRoot,'remediation')).length>0;}
 function canonicalFamilyForField(name){return ({propertyDesigns:'PROP',attackHypotheses:'HYP',candidateRecords:'CAND',newCandidateRecords:'CAND',validatedFindings:'FIND',remediationDispositions:'REM'})[name]??null;}
@@ -103,21 +92,6 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
   }
   const graphRecords=importedRecords(canonical,schema.bookkeepingMappings?.graphRecordPaths);
   const obligationRecords=importedRecords(canonical,schema.bookkeepingMappings?.obligationRecordPaths);
-  // Existing formal obligation ledger is the single closure authority.
-  // Import every source-reconciled unresolved Phase-5 candidate here, rather
-  // than creating a second candidate-lifecycle tracking system.
-  if(schema.phase===5){
-    const dispositions=phaseOutput(canonical,'step-2','reconciliationRecords')??[];
-    const opened=dispositions.filter(row=>row&&typeof row==='object'&&
-      ['RETAIN_OPEN_OBLIGATION','CONDITIONAL_PENDING_EVIDENCE'].includes(String(row.phase5ExecutionDisposition??'').toUpperCase()));
-    if(opened.length)obligationRecords.push({path:'actions.step-2.outputs.reconciliationRecords.PHASE5_OPEN_OBLIGATIONS',
-      value:opened.map(row=>({
-        obligationId:row.obligationId,requiredPhase:row.requiredPhase,requiredAction:row.requiredAction,
-        completionCondition:row.completionCondition,mandatory:true,
-        originatingEvidenceRefs:row.originatingEvidenceRefs,
-        originFactKeys:[String(row.subjectKey??'')].filter(Boolean)
-      }))});
-  }
   const invalidationRecords=importedRecords(canonical,schema.bookkeepingMappings?.invalidationRecordPaths);
   graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:graphRecords,importedAt:now});
   ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:obligationRecords,importedAt:now});
@@ -161,20 +135,7 @@ function maybeFile(root,rel){const f=repoFile(root,rel);return fs.existsSync(f)&
 function maybeJson(root,rel){const f=maybeFile(root,rel);if(!f)return null;try{return readJson(f);}catch{return null;}}
 function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNum(phase)+'_CANONICAL_DATA_v1.json');}
 function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRelFor(campaignPath,phase));}
-function uniqueExisting(root,rels){
- const result=[],seen=new Set();
- const include=rel=>{if(rel&&!seen.has(rel)&&maybeFile(root,rel)){seen.add(rel);result.push(rel);}};
- for(const rel of rels.filter(Boolean)){
-   include(rel);
-   // Generated Lite-Solo reading indexes are optional views; the original
-   // canonical derived input always remains the authority.
-   if(/_v[0-9]+\.json$/.test(rel)){
-     const indexRel=rel.replace(/_v[0-9]+\.json$/,'_INDEX_v1.json');
-     include(indexRel);
-   }
- }
- return result;
-}
+function uniqueExisting(root,rels){return [...new Set(rels.filter(Boolean))].filter(rel=>Boolean(maybeFile(root,rel)));}
 function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const derived=(phase,name)=>path.posix.join(campaignPath,`derived/phase-${phase}/${name}`);
   const buildIdentity=path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
@@ -182,8 +143,6 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const targets=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
   const remediation=path.posix.join(campaignPath,'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md');
   const finalIndex=path.posix.join(campaignPath,'work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
-  const identityIndex=path.posix.join(campaignPath,'controller/CANDIDATE_IDENTITY_INDEX_v1.json');
-  const proofSchedule=path.posix.join(campaignPath,'work/phase-06/PROOF_SCHEDULE_INDEX_v1.json');
   const p2=derived(2,'PHASE3_INPUT_v1.json');
   const p3=derived(3,'PHASE4_INPUT_v1.json');
   const p4=derived(4,'PHASE5_INPUT_v1.json');
@@ -195,8 +154,8 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const p9Final=derived(9,'PHASE10_REMEDIATION_INPUT_v1.json');
   if(target===4) return uniqueExisting(root,[p2,p3]);
   if(target===5) return uniqueExisting(root,[p2,p3,p4]);
-  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,identityIndex,proofSchedule,buildIdentity,deploy,targets]);
-  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,p7,identityIndex,proofSchedule,buildIdentity,deploy,targets]);
+  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,buildIdentity,deploy,targets]);
+  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,p7,buildIdentity,deploy,targets]);
   if(target===9) return uniqueExisting(root,[p8Remediation,remediation]);
   if(target===10) return uniqueExisting(root,[p8Final,p9Final,finalIndex]);
   return uniqueExisting(root,immediate);
@@ -322,20 +281,14 @@ function importedFormalObligations(ledger){
   return out;
 }
 function finalIndexObligations(ledger){
-  const closed=new Set(['CLOSED','SATISFIED','NOT_APPLICABLE','SUPERSEDED']);
-  const recorded=new Map((ledger?.obligations??[])
-    .map(o=>[String(o?.obligationId??'').trim(),o]).filter(([id])=>id));
-  const unresolved=new Map();
-  for(const [id,obligation] of recorded){
-    if(!closed.has(String(obligation.status??'OPEN').toUpperCase()))unresolved.set(id,obligation);
+  const normalized=(ledger?.obligations??[]).filter(o=>!['CLOSED','SATISFIED','NOT_APPLICABLE','SUPERSEDED'].includes(String(o.status??'OPEN').toUpperCase()));
+  const imported=importedFormalObligations(ledger);
+  const byId=new Map();
+  for(const o of [...normalized,...imported]){
+    const id=String(o.obligationId??'').trim(); if(!id) continue;
+    if(!byId.has(id)||String(byId.get(id)?.status??'').startsWith('OPEN_IMPORTED')) byId.set(id,o);
   }
-  // A previously imported obligation that was later SATISFIED must never be
-  // resurrected as OPEN_IMPORTED during final-evidence indexing.
-  for(const obligation of importedFormalObligations(ledger)){
-    const id=String(obligation.obligationId??'').trim();
-    if(id&&!recorded.has(id)&&!unresolved.has(id))unresolved.set(id,obligation);
-  }
-  return [...unresolved.values()];
+  return [...byId.values()];
 }
 
 function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
@@ -788,12 +741,12 @@ if(a['phase5-reuse-keys-b64']&&!masterAmendmentRefreshSha)
 
 if(masterAmendmentRefreshSha&&reviewKind!=='phase')throw new Error('master-amendment-refresh-sha is internal to phase refresh');
 for(const k of ['controller-root','campaign-id','campaign-path','campaign-directory-path']) if(a[k]===undefined) throw new Error('missing --'+k);
-if(['phase','candidate-batch','sealed-rework','post-completion-followup'].includes(reviewKind)&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
+if(['phase','sealed-rework','post-completion-followup'].includes(reviewKind)&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
 if(reviewKind==='discovery'&&!a['unit-id'])throw new Error('missing --unit-id');
 if(reviewKind==='master-test-result'&&!a['test-result-path'])throw new Error('missing --test-result-path');
 if(reviewKind==='master'&&a['master-outcome']==='REQUEST_TARGETED_TESTS'&&!a['test-plan-path'])throw new Error('missing --test-plan-path');
 if(['sealed-rework','post-completion-followup'].includes(reviewKind)&&!a['rework-request-path']) throw new Error('missing --rework-request-path');
-if(!['phase','discovery','candidate-batch'].includes(reviewKind)) throw new Error('unsupported review-kind');
+if(!['phase','discovery'].includes(reviewKind)) throw new Error('unsupported review-kind');
 const root=path.resolve(a['controller-root']);
 const expectedCampaignId=a['campaign-id'];
 const campaignPath=a['campaign-path']; const campaignRoot=repoFile(root,campaignPath);
@@ -878,7 +831,7 @@ if(reviewKind==='discovery'){
 }
 // Lite-Solo accepts phase/discovery only. No successor-delivery holds or master rework routes.
 const sealedRework=null;
-if(['phase','candidate-batch'].includes(reviewKind)&&!masterAmendmentRefreshSha&&['STOPPED_BY_HUMAN','BLOCKED'].includes(String(directory.campaignStatus??'')))
+if(reviewKind==='phase'&&!masterAmendmentRefreshSha&&['STOPPED_BY_HUMAN','BLOCKED'].includes(String(directory.campaignStatus??'')))
  throw new Error('campaign is held by explicit human status '+directory.campaignStatus);
 const assignment=directory.currentAssignment;
 if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current assignment does not match submitted phase');
@@ -890,32 +843,6 @@ if(authorityRoot!=='Audit Skill - Lite-Solo Authority/lite-solo'||predecessor.au
 if(assignment?.status==='WAITING_FOR_SUCCESSOR_AGENT')throw new Error('lite-solo cannot require reviewer handoff');
 const gatedMasterReview=false; // lite-solo never stages master acceptance
 if(assignment.workSchemaPath!==loaded.rel) throw new Error('assignment workSchemaPath mismatch');
-
-if(reviewKind==='candidate-batch'){
-  // Partial validation never writes phase receipts, canonical phase outputs,
-  // source approvals, or machine execution results. It consumes exactly the
-  // same integrity-checked reviewer work-shard form as the full phase gate.
-  if(![5,6].includes(sequence))throw new Error('candidate-batch only supported in phases 5/6');
-  if(!assignment.workShardIndexPath)
-    throw new Error('candidate-batch requires controller-bound work-shard index');
-  const keys=JSON.parse(Buffer.from(a['ready-candidate-keys-b64']??'','base64').toString('utf8'));
-  const batch=acceptSelectedCandidateBatchV1({root,campaignPath,directory,
-    indexRel:assignment.workShardIndexPath,phase:sequence,
-    readyCandidateKeys:keys,reviewSection:a['review-section']??'step-2',now});
-  // Never recreate/remove the full form during a validation-only request.
-  // The normal final boundary still reconstructs and verifies all shards.
-  const feedback=batch.status==='CANDIDATE_BATCH_ACCEPTED'
-    ?'Validated '+batch.accepted+' candidate records in '+(a['review-section']??'step-2')+
-      '. Phase '+sequence+' remains ACTIVE; remaining work and full security gates still required.'
-    :'Candidate review batch needs corrections: '+(batch.issues??[]).map(i=>i.candidateKey+': '+i.reason).join('; ');
-  process.stdout.write(JSON.stringify({authorityLinkRoot,status:batch.status,
-    campaignId:directory.campaignId,campaignName:directory.campaignName,
-    phaseSequence:sequence,reviewSection:a['review-section']??'step-2',
-    selectedKeys:batch.selectedKeys??keys,checkpointRel:batch.checkpointRel??null,
-    checkpointTotal:batch.checkpointTotal??0,progress:batch.progress??null,
-    issues:batch.issues??[],feedbackText:feedback})+'\n');
-  process.exit(0);
-}
 
 const packetFile=repoFile(root,assignment.packetPath);
 const existingPacket=fs.existsSync(packetFile)?readJson(packetFile):null;
@@ -1007,14 +934,19 @@ function annotateShardReworkV1(packet,errors){
 }
 function materialPhase5Candidates({root,campaignPath,form}){
   const prior=canonicalFor(root,campaignPath,4);
-  if(!prior)throw new Error('Phase-5 candidate ledger cannot find sealed Phase-4 canonical source');
-  const priorRecords=phaseOutput(prior,'step-3','candidateRecords')??[];
-  const newRecords=form?.actions?.['step-2']?.outputs?.newCandidateRecords??[];
-  return validatePhase5CandidateDispositionV1({
-    phase4CandidateRecords:priorRecords,newCandidateRecords:newRecords,
-    reconciliationRecords:form?.actions?.['step-2']?.outputs?.reconciliationRecords??[],
-    targetDesigns:form?.actions?.['step-3']?.outputs?.targetDesigns??[]
-  });
+  const phase4=phaseOutput(prior,'step-3','candidateRecords')??[];
+  const newCandidates=form?.actions?.['step-2']?.outputs?.newCandidateRecords??[];
+  const keys=[],sourceAnchors={};
+  for(const record of [...phase4,...newCandidates]){
+    if(record==='NONE_IDENTIFIED')continue;
+    const key=String(record?.canonicalId??record?.tempKey??'').trim();
+    if(!key)throw new Error('Phase 5 material candidate has no key');
+    const anchor=String(record?.sourceAnchor??'').trim();
+    if(sourceAnchors[key]!==undefined&&sourceAnchors[key]!==anchor)
+      throw new Error('Phase 5 material candidate '+key+' has inconsistent source anchors');
+    keys.push(key);sourceAnchors[key]=anchor;
+  }
+  return {keys:[...new Set(keys)],sourceAnchors};
 }
 if(sequence===5&&form&&deficiencies.length===0){
   const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
@@ -1073,79 +1005,26 @@ if(sequence===5&&form&&deficiencies.length===0){
 
 if(sequence===5&&form&&deficiencies.length===0){
   try{
-    const disposition=materialPhase5Candidates({root,campaignPath,form});
-    deficiencies.push(...disposition.failures);
     deficiencies.push(...validatePhase5TargetCoverageV1({
       targetDesigns:form.actions['step-3'].outputs.targetDesigns,
-      materialCandidateKeys:disposition.candidateKeys,
-      requiredTargetKeys:disposition.requiredTargetKeys,
-      candidateSourceAnchors:disposition.candidateSourceAnchors
+      materialCandidateKeys:materialPhase5Candidates({root,campaignPath,form}).keys,
+      candidateSourceAnchors:materialPhase5Candidates({root,campaignPath,form}).sourceAnchors
     }));
-  }catch(e){deficiencies.push('Phase 5 candidate disposition/coverage validation failed: '+String(e.message||e));}
+  }catch(e){deficiencies.push('Phase 5 coverage validation failed: '+String(e.message||e));}
 }
-// Lite-Solo-v1 has no schema-governed closure step after Phase 6. Validate
-// these decisions as actionable rework, not a late controller-bookkeeping
-// exception after a report or canonical product has been generated.
-if(sequence===6&&form){
-  const rel=path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json');
-  const ledger=maybeJson(root,rel)??{};
-  const due=(ledger.obligations??[]).filter(x=>x?.mandatory!==false&&
-    ['OPEN','IN_PROGRESS','BLOCKED_CARRIED'].includes(String(x.status??'OPEN').toUpperCase())&&
-    Number(x.requiredPhase)<=6);
-  const rows=(form.actions?.['step-3']?.outputs?.obligationDispositions??[]).filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
-  const mapped=new Map();
-  for(const [i,row] of rows.entries()){
-    const key=String(row.obligationId??'');
-    if(mapped.has(key))deficiencies.push('Phase 6 duplicate obligation disposition '+key);
-    else mapped.set(key,row);
-    if(['CARRY_FORWARD','BLOCKED_CARRIED'].includes(String(row.disposition??'').toUpperCase()))
-      deficiencies.push('Phase 6 obligation '+key+' cannot carry to Phase '+String(row.carryForwardPhaseOrNone??'UNKNOWN')+
-        ': the bound Lite-Solo-v1 Phase 8/9/10 schemas provide no subsequent obligation-closure field. Provide source-bound closure evidence or arrange an explicit versioned authority migration.');
-  }
-  for(const item of due){
-    const row=mapped.get(String(item.obligationId??''));
-    if(!row){deficiencies.push('Phase 6 mandatory due obligation '+item.obligationId+' has no disposition row');continue;}
-    if(!['SATISFIED','NOT_APPLICABLE'].includes(String(row.disposition??'').toUpperCase()))
-      deficiencies.push('Phase 6 mandatory due obligation '+item.obligationId+' lacks a completed disposition under bound authority');
-    const refs=Array.isArray(row.evidenceRefs)?row.evidenceRefs:[];
-    const verified=refs.filter(ref=>{
-      if(typeof ref!=='string'||!ref||ref==='NONE_IDENTIFIED'||ref.startsWith('<')||
-        ref.startsWith('/')||ref.includes('\\')||ref.split('/').includes('..'))return false;
-      const resolved=ref.startsWith(campaignPath+'/')?ref:path.posix.join(campaignPath,ref);
-      return fs.existsSync(repoFile(root,resolved));
-    });
-    if(!verified.length)deficiencies.push('Phase 6 obligation '+item.obligationId+
-      ' has no existing independent referenced evidence artifact. Phase-6 narrative alone cannot prove mandatory closure');
-  }
-}
-
 // Downstream gates must independently reconstruct the mandatory candidate set
 // and read actual V7 machine artifacts. A prior phase PASS/receipt is not proof.
 if([6,8].includes(sequence)&&deficiencies.length===0){
   try{
-    const identity=readVerifiedCandidateIdentityIndexV1({root,campaignPath});
-    verifyPhase6ProofScheduleV1({root,campaignPath,canonicalKeys:identity.canonicalKeys});
-    const rows=(form.actions?.['step-2']?.outputs?.[sequence===6?'targetDispositions':'candidateValidations']??[])
-      .filter(row=>row&&typeof row==='object'&&!Array.isArray(row));
-    const keys=rows.map(row=>String(row.candidateKey??''));
-    if(new Set(keys).size!==keys.length)deficiencies.push('Phase '+sequence+' contains duplicate source candidate IDs');
-    for(const key of identity.canonicalKeys)if(!keys.includes(key))
-      deficiencies.push('Phase '+sequence+' lacks canonical predecessor candidate '+key);
-    for(const key of keys)if(identity.aliasMap.has(key)&&identity.aliasMap.get(key)!==key)
-      deficiencies.push('Phase '+sequence+' used a temporary predecessor alias '+key+' instead of '+identity.aliasMap.get(key));
-  }catch(error){deficiencies.push('Phase '+sequence+' controller identity/schedule validation failed: '+String(error.message||error));}
-  try{
     const sealedP5=canonicalFor(root,campaignPath,5);
-    const material=materialPhase5Candidates({root,campaignPath,form:sealedP5});
-    if(material.failures.length)deficiencies.push(...material.failures.map(x=>'Sealed Phase-5 candidate ledger: '+x));
-    const mandatory=material.candidateKeys;
+    const mandatory=materialPhase5Candidates({root,campaignPath,form:sealedP5}).keys;
     const rows=sequence===6?(form.actions?.['step-2']?.outputs?.targetDispositions??[])
       :(form.actions?.['step-2']?.outputs?.candidateValidations??[]);
     const actual=rows.filter(x=>x&&typeof x==='object').map(x=>String(x.candidateKey??'').trim()).filter(Boolean);
     if(actual.length!==new Set(actual).size)deficiencies.push('Phase '+sequence+' contains duplicate candidate dispositions');
     for(const key of mandatory)if(!actual.includes(key))
       deficiencies.push('Phase '+sequence+' skipped mandatory predecessor candidate '+key);
-    if([6,8].includes(sequence)){
+    if(sequence===6){
       if(phase5OwnerDeferral){
         if(sealedP5?.automationOutputs?.phase5MachineExecutionGate?.status!=='DEFERRED_UNVERIFIED'||
            sealedP5.automationOutputs.phase5MachineExecutionGate.ownerDirectivePath!==phase5OwnerDeferral.path)
@@ -1176,26 +1055,13 @@ if(deficiencies.length){
 // Explicit human authorization is mandatory before machine test execution.
 if(sequence===5 && !(directory.machineExecutionAuthorization?.status==='APPROVED' &&
   directory.machineExecutionAuthorization?.sourceSha256===directory.sourceSha256 &&
-  directory.machineExecutionAuthorization?.scope==='PHASE5_TARGET_EXECUTION')){
-  const reason='LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: Phase 5 semantic candidate review passed, but machine execution has no human-approved source-bound authorization. No test was executed and no receipt was issued.';
-  persistReviewerReworkShardsV1();
-  packet.status='REWORK_REQUIRED';
-  packet.controllerValidation={status:'FAIL',machineExecutionGate:'NOT_AUTHORIZED',
-    validatedAt:now,deficiencies:[reason]};
-  directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
-  writeJson(packetFile,packet);writeJson(directoryFile,directory);
-  process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',
-    campaignId:directory.campaignId,campaignName:directory.campaignName,
-    phaseSequence:5,phaseId:'phase-5',reviewer:assignment.reviewer,
-    feedbackText:reason,packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
-  process.exit(0);
-}
+  directory.machineExecutionAuthorization?.scope==='PHASE5_TARGET_EXECUTION'))
+ throw new Error('LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: Phase 5 machine execution has no exact human-approved source-bound authorization.');
 // Execute mandatory Phase-5 candidate tests before any PASS, bookkeeping or seal.
 let phase5MachineResults=null;
-let phase5PendingCandidateKeys=[];
 if(sequence===5){
   const targetDesigns=form.actions['step-3'].outputs.targetDesigns;
-  const {candidateKeys:materialCandidateKeys,candidateSourceAnchors,requiredTargetKeys}=
+  const {keys:materialCandidateKeys,sourceAnchors:candidateSourceAnchors}=
     materialPhase5Candidates({root,campaignPath,form});
   try{
     if(phase5OwnerDeferral){
@@ -1209,28 +1075,22 @@ if(sequence===5){
         rawResult:null
       }]));
     }else{
-      const batch=await executePhase5TargetsV1({
+      phase5MachineResults=await executePhase5TargetsV1({
         controllerRoot:root,campaignPath,targetDesigns,
         expectedCampaignId:directory.campaignId,expectedSourceSha256:directory.sourceSha256,
         reuseCandidateKeys:phase5ReuseCandidateKeys
       });
-      phase5MachineResults=batch.executionResults;
-      phase5PendingCandidateKeys=batch.pendingCandidateKeys;
-      // The next boundary resumes verified evidence; pending is not PASS or
-      // a failed security assertion.
-      if(!phase5PendingCandidateKeys.length)
-        deficiencies.push(...validatePhase5TargetExecutionGateV1({
-          controllerRoot:root,campaignPath,targetDesigns,
-          materialCandidateKeys,requiredTargetKeys,candidateSourceAnchors,
-          executionResults:phase5MachineResults,
-          expectedSourceSha256:directory.sourceSha256,requireTargetBindingManifest:true
-        }));
+      deficiencies.push(...validatePhase5TargetExecutionGateV1({
+        controllerRoot:root,campaignPath,targetDesigns,
+        materialCandidateKeys,candidateSourceAnchors,executionResults:phase5MachineResults,
+        expectedSourceSha256:directory.sourceSha256
+      }));
     }
     // Report the actual runner cause, not merely BLOCKED. The shadow
     // campaign is discarded on failed master refresh, so these diagnostics
     // are essential to distinguish harness defects from RPC or build faults.
     for(const [key,machine] of Object.entries(phase5MachineResults??{})){
-      if(['PASS','NOT_APPLICABLE','DEFERRED_UNVERIFIED','PENDING_EXECUTION'].includes(machine?.status))continue;
+      if(machine?.status==='PASS'||machine?.status==='NOT_APPLICABLE'||machine?.status==='DEFERRED_UNVERIFIED')continue;
       let cli=null;
       try{cli=JSON.parse(String(machine?.stdout??''));}catch{}
       const failed=(machine?.rawResult?.failedSteps??[]).slice(0,3).map(x=>({
@@ -1266,23 +1126,6 @@ if(sequence===5){
   fs.writeFileSync(repoFile(root,matrixRel),renderTargetedTestMatrixV1({
     targetDesigns,executionResults:phase5MachineResults??{},baselineRows
   }));
-  if(phase5PendingCandidateKeys.length&&!deficiencies.length){
-    persistReviewerReworkShardsV1();
-    packet.status='PENDING_EXECUTION';
-    packet.controllerValidation={status:'PENDING_BATCH',machineExecutionGate:'PENDING_BATCH',
-      validatedAt:now,pendingCandidateKeys:phase5PendingCandidateKeys,deficiencies:[]};
-    directory.currentAssignment.status='ACTIVE';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
-    writeJson(packetFile,packet);writeJson(directoryFile,directory);
-    const feedback='Phase 5 bounded execution batch finished. '+phase5PendingCandidateKeys.length+
-      ' candidate(s) remain PENDING_EXECUTION. No receipt, PASS or finding was issued. '+
-      'Invoke the existing Phase-5 boundary again to resume from exact source/request/target/raw-result verified evidence. Pending: '+
-      phase5PendingCandidateKeys.join(', ');
-    process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',machineExecutionGate:'PENDING_BATCH',
-      campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:5,phaseId:'phase-5',
-      reviewer:assignment.reviewer,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),
-      packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
-    process.exit(0);
-  }
   if(deficiencies.length){
     // Evidence and diagnostic matrix may persist; receipt and graph cannot.
     persistReviewerReworkShardsV1();
@@ -1294,8 +1137,7 @@ if(sequence===5){
     writeJson(packetFile,packet);
     const feedback=['Phase 5 execution gate BLOCKED: no receipt, PASS or handoff was issued.',
       'Repair the exact runner, harness or machine-evidence defect, then invoke the same phase controller again.',
-      ...deficiencies.slice(0,24).map(x=>'- '+x),
-      ...(deficiencies.length>24?['Full '+deficiencies.length+' diagnostics are retained in packet.controllerValidation.deficiencies.']:[]),
+      ...deficiencies.map(x=>'- '+x),
       'Machine failure is not a vulnerability finding.'].join('\n')+shardGuidance;
     process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',campaignId:directory.campaignId,
       campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-5',
@@ -1324,7 +1166,6 @@ if(sequence===4) canonical.automationOutputs.phase4Coverage=
     : phase4CoverageFromForm(form);
 if(sequence===5) canonical.automationOutputs.phase5MachineExecutionGate={
   status:phase5OwnerDeferral?'DEFERRED_UNVERIFIED':'PASS',
-  targetBindingManifestPolicy:phase5OwnerDeferral?'DEFERRED_UNVERIFIED':'REQUIRED',
   targetKeys:Object.keys(phase5MachineResults??{}).sort(),
   evidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef).filter(x=>x&&x!=='NO_MACHINE_EVIDENCE'),
   ...(phase5OwnerDeferral?{ownerDirectivePath:phase5OwnerDeferral.path,
@@ -1353,13 +1194,6 @@ if(sequence===10){
   const p6=canonicalFor(root,campaignPath,6);
   const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
   const open=finalIndexObligations(ledger);
-  const mandatoryOpen=open.filter(o=>o.mandatory!==false);
-  canonical.automationOutputs.securityAssurance={
-    processCompletionDoesNotImplySecurityProof:true,
-    status:mandatoryOpen.length?'INCOMPLETE_MANDATORY_OBLIGATIONS_OPEN':'NO_MANDATORY_OBLIGATIONS_OPEN',
-    mandatoryOpenCount:mandatoryOpen.length,
-    mandatoryOpenObligationIds:mandatoryOpen.map(o=>o.obligationId).sort()
-  };
   const carriedLimitations=collectCarriedLimitations({root,campaignPath,maxPhase:9});
   const omissions=phaseOutput(p6,'step-3','fullOnlyOmissions')??[];
   canonical.automationOutputs.residualLimitations=[
@@ -1401,16 +1235,6 @@ if(sealedRework){
 writeJson(repoFile(root,canonicalRel),canonical);
 const derivedRels=buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical,canonicalRel,now});
 const boundaryArtifactRels=[];
-if(sequence===5){
-  const p4=canonicalFor(root,campaignPath,4);
-  boundaryArtifactRels.push(writeCandidateIdentityIndexV1({
-    root,campaignPath,directory,phase4Canonical:p4,phase5Canonical:canonical,now
-  }));
-  boundaryArtifactRels.push(writePhase6ProofScheduleV1({
-    root,campaignPath,directory,phase4Canonical:p4,phase5Canonical:canonical,
-    executionResults:phase5MachineResults??{},now
-  }));
-}
 let successorPrefillContext={};
 if(sequence===5){
   const targetDesigns=phaseOutput(canonical,'step-3','targetDesigns')??[];
@@ -1430,15 +1254,7 @@ if(sequence===5){
       stderr:String(result?.stderr??'').slice(-900)
     }])
   );
-  const p4=canonicalFor(root,campaignPath,4);
-  successorPrefillContext={
-    targetDesigns,phase5ExecutionResults:compactMachineResults,
-    phase5CandidateRecords:[
-      ...(phaseOutput(p4,'step-3','candidateRecords')??[]),
-      ...(phaseOutput(canonical,'step-2','newCandidateRecords')??[])
-    ],
-    phase5CandidateDispositionRecords:phaseOutput(canonical,'step-2','reconciliationRecords')??[]
-  };
+  successorPrefillContext={targetDesigns,phase5ExecutionResults:compactMachineResults};
   boundaryArtifactRels.push(path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md'));
 }
 if(sequence===8&&hasRemediation(campaignRoot)){
@@ -1522,13 +1338,6 @@ if(sequence===5&&phase5OwnerDeferral)receipt.machineExecutionDisclaimer={
   unresolvedCandidateKeys:phase5OwnerDeferral.candidateKeys,
   notAMachinePass:true,finalAuditSecurityAssurance:'INCOMPLETE'
 };
-if(sequence===10){
-  const assurance=canonical.automationOutputs.securityAssurance;
-  receipt.securityAssurance=structuredClone(assurance);
-  // COMPLETE describes process termination, not a security proof or a
-  // waiver of retained obligations. Publish this distinction explicitly.
-  directory.securityAssurance=structuredClone(assurance);
-}
 receipt.sealedAt=now;receipt.updatedAt=now;
 if(masterAmendmentRefreshSha)receipt.masterAmendment=masterAmendmentReceipt(phaseRevision-1);
 if(sealedRework){

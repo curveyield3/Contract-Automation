@@ -4,21 +4,6 @@ on:
     branches: [main]
     paths:
       - 'process/agent-upload/lite-solo-phase-boundary/*.json'
-  workflow_dispatch:
-    inputs:
-      request_path:
-        description: Existing accepted Phase-5 boundary request path
-        type: string
-        required: true
-      request_sha256:
-        description: Exact SHA-256 of the existing request (prevents drift)
-        type: string
-        required: true
-      batch_index:
-        description: Authorized bounded execution continuation attempt
-        type: number
-        required: true
-        default: 1
 permissions:
   contents: write
   actions: write
@@ -46,47 +31,21 @@ jobs:
       - name: Parse strictly isolated lite-solo request
         id: request
         shell: bash
-        env:
-          REPEAT_REQUEST_PATH: ${{ inputs.request_path }}
-          REPEAT_REQUEST_SHA256: ${{ inputs.request_sha256 }}
-          REPEAT_BATCH_INDEX: ${{ inputs.batch_index }}
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            request="$REPEAT_REQUEST_PATH"
-            [[ "$REPEAT_REQUEST_SHA256" =~ ^[a-f0-9]{64}$ ]]
-            [[ "$REPEAT_BATCH_INDEX" =~ ^[0-9]+$ ]]
-            test "$REPEAT_BATCH_INDEX" -ge 1
-            test "$REPEAT_BATCH_INDEX" -le 16
-            test -f "$request"
-            test "$(sha256sum "$request" | cut -d' ' -f1)" = "$REPEAT_REQUEST_SHA256"
-            jq -e '.reviewKind=="phase" and .phaseSequence==5' "$request" >/dev/null
-          else
-            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/agent-upload/lite-solo-phase-boundary/)
-            test "${#changed[@]}" -eq 1
-            request="${changed[0]}"
-          fi
+          mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/agent-upload/lite-solo-phase-boundary/)
+          test "${#changed[@]}" -eq 1
+          request="${changed[0]}"
           [[ "$request" =~ ^process/agent-upload/lite-solo-phase-boundary/[A-Za-z0-9._-]+\.json$ ]]
           test -f "$request"
           jq -e '.schemaVersion=="curveyield-lite-solo-phase-boundary-request-v1" and
-            (.reviewKind=="phase" or .reviewKind=="discovery" or .reviewKind=="candidate-batch") and
+            (.reviewKind=="phase" or .reviewKind=="discovery") and
             (.campaignId|type=="string") and (.campaignId|test("^[a-zA-Z0-9_.-]+-r[0-9]+$")) and
             (.auditControllerRef=="main") and
             (.attempt|type=="number") and (.attempt>=1)' "$request" >/dev/null
           kind="$(jq -r .reviewKind "$request")"
           if [ "$kind" = phase ]; then
             jq -e '.phaseSequence|type=="number" and (.==1 or .==2 or .==3 or .==4 or .==5 or .==6 or .==8 or .==9 or .==10)' "$request" >/dev/null
-          elif [ "$kind" = candidate-batch ]; then
-            jq -e '
-              (.phaseSequence==5 or .phaseSequence==6) and
-              (.readyCandidateKeys|type=="array") and
-              (.readyCandidateKeys|length)>=1 and (.readyCandidateKeys|length)<=16 and
-              ([.readyCandidateKeys[]|select(type!="string" or
-                (test("^[A-Za-z0-9._-]+$")|not))]|length)==0 and
-              ([.readyCandidateKeys[]]|unique|length)==(.readyCandidateKeys|length) and
-              ((.reviewSection//"step-2")=="step-2" or
-                (.phaseSequence==6 and .reviewSection=="step-5"))
-            ' "$request" >/dev/null
           else
             jq -e '.unitId|type=="string" and test("^[FRX]-[0-9]{3}$")' "$request" >/dev/null
             jq -e 'if .readyUnitIds==null then true else
@@ -150,12 +109,10 @@ jobs:
           if [ "$REVIEW_KIND" != phase ] || [ "$(jq -r .phaseSequence "$REQUEST_FILE")" != 5 ]; then exit 0; fi
           directory=".audit-controller/$AUDIT_DIRECTORY"
           source_sha="$(jq -r .sourceSha256 "$directory")"
-          if jq -e --arg sha "$source_sha" '.machineExecutionAuthorization.status=="APPROVED" and .machineExecutionAuthorization.scope=="PHASE5_TARGET_EXECUTION" and .machineExecutionAuthorization.sourceSha256==$sha' "$directory" >/dev/null; then
-            echo 'machine_authorized=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'machine_authorized=false' >> "$GITHUB_OUTPUT"
-            echo '::notice::Phase 5 semantic preflight is validation-only; no test toolchain will be installed without human-approved source-bound authorization'
-          fi
+          jq -e --arg sha "$source_sha" '.machineExecutionAuthorization.status=="APPROVED" and .machineExecutionAuthorization.scope=="PHASE5_TARGET_EXECUTION" and .machineExecutionAuthorization.sourceSha256==$sha' "$directory" >/dev/null || {
+            echo '::error::LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: exact Phase-5 source-bound human approval is missing'
+            exit 1
+          }
           if ! node scripts/lite-phase5-preflight-v1.mjs .audit-controller "$AUDIT_CAMPAIGN_PATH" "$AUDIT_CAMPAIGN" "$source_sha" > /tmp/lite-solo-phase5-preflight.json; then
             jq -e '.status=="REWORK_REQUIRED" and (.failures|type=="array") and (.failures|length)>0' /tmp/lite-solo-phase5-preflight.json >/dev/null
           fi
@@ -163,7 +120,7 @@ jobs:
           cp /tmp/lite-solo-phase5-preflight.json ".audit-controller/$AUDIT_CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
           echo "runnable=$(jq -r .runnable /tmp/lite-solo-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
       - name: Install existing pinned Anvil execution toolchain only for authorized runnable Phase 5
-        if: ${{ steps.phase5.outputs.runnable == 'true' && steps.phase5.outputs.machine_authorized == 'true' }}
+        if: ${{ steps.phase5.outputs.runnable == 'true' }}
         uses: ./.github/actions/setup-v7-toolchain
       - name: Validate, seal and generate exact solo controller response
         id: controller
@@ -185,17 +142,13 @@ jobs:
             if jq -e '.readyUnitIds != null' "$REQUEST_FILE" >/dev/null; then
               args+=(--ready-unit-ids-b64 "$(jq -c .readyUnitIds "$REQUEST_FILE" | base64 -w0)")
             fi
-          elif [ "$REVIEW_KIND" = candidate-batch ]; then
-            args+=(--phase-sequence "$(jq -r .phaseSequence "$REQUEST_FILE")")
-            args+=(--ready-candidate-keys-b64 "$(jq -c .readyCandidateKeys "$REQUEST_FILE" | base64 -w0)")
-            args+=(--review-section "$(jq -r '.reviewSection//"step-2"' "$REQUEST_FILE")")
           else
             args+=(--phase-sequence "$(jq -r .phaseSequence "$REQUEST_FILE")")
           fi
           node scripts/lite-solo-phase-controller-v1.mjs "${args[@]}" > /tmp/lite-solo-envelope.json
           test "$(wc -c </tmp/lite-solo-envelope.json)" -le 8192
           jq -es 'length==1 and .[0].schemaVersion=="curveyield-lite-controller-envelope-v1" and
-            (.[0].status|IN("PASS","NEEDS_REWORK","DISCOVERY_REWORK","DISCOVERY_NEXT","DISCOVERY_PARTIAL","DISCOVERY_COMPLETE","DISCOVERY_STALE_REQUEST","ALREADY_ACCEPTED","CANDIDATE_BATCH_ACCEPTED","CANDIDATE_BATCH_REWORK","CONTROLLER_ERROR")) and
+            (.[0].status|IN("PASS","NEEDS_REWORK","DISCOVERY_REWORK","DISCOVERY_NEXT","DISCOVERY_PARTIAL","DISCOVERY_COMPLETE","DISCOVERY_STALE_REQUEST","ALREADY_ACCEPTED","CONTROLLER_ERROR")) and
             (.[0].detailRef|type=="string") and (.[0].sha256|test("^[a-f0-9]{64}$"))' /tmp/lite-solo-envelope.json >/dev/null
           node --input-type=module -e '
             import fs from "node:fs";
@@ -226,41 +179,6 @@ jobs:
               git pull --rebase origin main
             done
           fi
-      - name: Continue only a source-authorized pending Phase-5 machine batch
-        if: ${{ steps.phase5.outputs.machine_authorized == 'true' && steps.controller.outputs.status == 'NEEDS_REWORK' }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REQUEST_FILE: ${{ steps.request.outputs.request }}
-          AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
-          AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
-          PREVIOUS_BATCH_INDEX: ${{ inputs.batch_index }}
-        run: |
-          set -euo pipefail
-          if [ "$(jq -r '.machineExecutionGate // ""' /tmp/lite-solo-controller-result.json)" != PENDING_BATCH ]; then
-            exit 0
-          fi
-          index="${PREVIOUS_BATCH_INDEX:-0}"
-          [[ "$index" =~ ^[0-9]+$ ]]
-          next=$((index+1))
-          if [ "$next" -gt 16 ]; then
-            echo '::warning::Phase-5 automatic continuation paused after 16 source-bound batches. Retained progress and exact evidence can be resumed by submitting the existing boundary request.' 
-            exit 0
-          fi
-          directory=".audit-controller/$AUDIT_DIRECTORY"
-          source_sha="$(jq -r .sourceSha256 "$directory")"
-          jq -e --arg sha "$source_sha" '
-            .currentAssignment.phaseSequence==5 and
-            .machineExecutionAuthorization.status=="APPROVED" and
-            .machineExecutionAuthorization.scope=="PHASE5_TARGET_EXECUTION" and
-            .machineExecutionAuthorization.sourceSha256==$sha
-          ' "$directory" >/dev/null
-          request_digest="$(sha256sum "$REQUEST_FILE" | cut -d' ' -f1)"
-          gh workflow run lite-solo-phase-controller-v1.yml --ref main \
-            -f request_path="$REQUEST_FILE" \
-            -f request_sha256="$request_digest" \
-            -f batch_index="$next"
-          echo "Authorized Phase-5 continuation batch $next dispatched; no new audit authorization was created." >> "$GITHUB_STEP_SUMMARY"
       - name: Record durable controller result without agent delivery
         shell: bash
         run: |
@@ -277,6 +195,4 @@ jobs:
             echo "- Durable response: $detail"
             echo "- Next action is represented by currentAssignment in the canonical campaign directory"
             echo "- No separate chat, wake, or delivery transport"
-            echo "- Phase 4/5/6 controller operations guide: https://github.com/curveyield3/Contract-Automation/blob/main/docs/lite-solo-phase-4-5-6-bounded-workflow-v1.md"
-            echo "- Phase 5/6 partial candidate batches validate source-bound records only; neither a batch acceptance nor a green Actions run is a sealed security PASS"
           } >> "$GITHUB_STEP_SUMMARY"

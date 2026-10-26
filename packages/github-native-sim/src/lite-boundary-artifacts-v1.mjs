@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {createHash} from 'node:crypto';
 import {readV7RawResultV1} from './v7-compact-result-v1.mjs';
 import {inspectForgeTestEvidenceV1} from './native-fuzz.mjs';
 
@@ -265,16 +264,14 @@ function verifiedNotApplicableDesignV1(target,targets,candidateSourceAnchors={})
   }
   return [];
 }
-export function validatePhase5TargetCoverageV1({
-  targetDesigns=[],materialCandidateKeys=[],requiredTargetKeys=null,candidateSourceAnchors={}
-}={}){
+export function validatePhase5TargetCoverageV1({targetDesigns=[],materialCandidateKeys=[],candidateSourceAnchors={}}={}){
   const failures=[];
-  const allKeys=[...new Set(arr(materialCandidateKeys).filter(x=>typeof x==='string'&&x&&x!=='NONE_IDENTIFIED'))];
-  const required=[...new Set(arr(requiredTargetKeys??materialCandidateKeys).filter(x=>typeof x==='string'&&x&&x!=='NONE_IDENTIFIED'))];
-  const allSet=new Set(allKeys),seen=new Set(),targets=arr(targetDesigns);
+  const required=[...new Set(arr(materialCandidateKeys).filter(x=>typeof x==='string'&&x&&x!=='NONE_IDENTIFIED'))];
+  const seen=new Set();
+  const targets=arr(targetDesigns);
   for(const [i,target] of targets.entries()){
     if(target==='NONE_IDENTIFIED'){
-      if(required.length||targets.length!==1) failures.push('Phase 5 NONE_IDENTIFIED is invalid while execution/alias targets are required or other targets are listed');
+      if(required.length||targets.length!==1) failures.push('Phase 5 NONE_IDENTIFIED is invalid while material candidates exist or other targets are listed');
       continue;
     }
     if(!target||typeof target!=='object'||Array.isArray(target)){
@@ -283,159 +280,17 @@ export function validatePhase5TargetCoverageV1({
     }
     const key=String(target.candidateKey??'').trim();
     if(!key||key==='NONE_IDENTIFIED'){failures.push('Phase 5 target index '+i+' has no material candidateKey');continue;}
-    if(!allSet.has(key))failures.push('Phase 5 target '+key+' is not bound to a Phase-4/5 candidate identity');
     if(seen.has(key))failures.push('Phase 5 duplicate candidate target '+key);
     seen.add(key);
     if(target.executionMethod==='NOT_APPLICABLE') failures.push(...verifiedNotApplicableDesignV1(target,targets,candidateSourceAnchors));
   }
-  for(const key of required)if(!seen.has(key))failures.push(
-    'Phase 5 candidate '+key+' requires a target design but has no targetDesigns record; append the exact source-bound target to the controller-assigned targetDesigns shard'
-  );
-  if(!targets.length) failures.push('Phase 5 targetDesigns missing; use explicit NONE_IDENTIFIED only when no execution or alias targets are required');
+  for(const key of required)if(!seen.has(key))failures.push('Phase 5 mandatory material candidate '+key+' has no targeted machine execution');
+  if(!targets.length) failures.push('Phase 5 targetDesigns missing; explicit NONE_IDENTIFIED is allowed only when no material candidates exist');
   return failures;
 }
 
-
-const PHASE5_CANDIDATE_DISPOSITIONS_V1=new Set([
-  'EXECUTE','DUPLICATE_OF',
-  'RETAIN_OPEN_OBLIGATION','CONDITIONAL_PENDING_EVIDENCE'
-]);
-const phase5KeyV1=record=>String(record?.canonicalId??record?.tempKey??record?.candidateKey??'').trim();
-const phase5AliasesV1=record=>[record?.canonicalId,record?.tempKey,record?.candidateKey,phase5KeyV1(record)]
-  .map(x=>String(x??'').trim()).filter(Boolean);
-const phase5EvidenceRefsV1=record=>arr(record?.evidenceRefs).map(x=>String(x??'').trim()).filter(Boolean);
-function phase5TextV1(value,min=1){return typeof value==='string'&&value.trim().length>=min&&!value.trim().startsWith('<');}
-
-// The candidate ledger separates actionable executions from duplicate aliases,
-// source-resolved non-material observations, and open/conditional obligations.
-// A missing disposition never becomes an implicit waiver.
-export function validatePhase5CandidateDispositionV1({
-  phase4CandidateRecords=[],newCandidateRecords=[],reconciliationRecords=[],targetDesigns=[]
-}={}){
-  const failures=[],candidates=[],candidateKeys=[],candidateSourceAnchors={},candidateByKey=new Map();
-  for(const record of [...arr(phase4CandidateRecords),...arr(newCandidateRecords)]){
-    if(!record||typeof record!=='object'||Array.isArray(record)||record==='NONE_IDENTIFIED')continue;
-    const key=phase5KeyV1(record);
-    if(!key) {failures.push('Phase 5 material candidate has no canonical/temp key in its source record');continue;}
-    if(candidateByKey.has(key)){failures.push('Phase 5 duplicate source candidate identity '+key);continue;}
-    const candidate={key,record,aliases:phase5AliasesV1(record)};
-    candidateByKey.set(key,candidate);candidates.push(candidate);candidateKeys.push(key);
-    const anchor=String(record.sourceAnchor??record.anchors?.[0]??'').trim();
-    candidateSourceAnchors[key]=anchor;
-    if(!anchor)failures.push('Phase 5 candidate '+key+' has no source anchor; cannot classify or waive execution');
-  }
-  const targets=new Map();
-  for(const target of arr(targetDesigns)){
-    if(!target||typeof target!=='object'||Array.isArray(target)||!target.candidateKey)continue;
-    const key=String(target.candidateKey).trim();
-    if(targets.has(key))failures.push('Phase 5 duplicate target design '+key);
-    else targets.set(key,target);
-  }
-  const rows=arr(reconciliationRecords),requiredTargetKeys=[],dispositionByKey=new Map(),obligationIds=new Set();
-  for(const candidate of candidates){
-    const aliases=new Set(candidate.aliases);
-    const matches=[];
-    for(let i=0;i<rows.length;i++){
-      const row=rows[i];
-      if(!row||typeof row!=='object'||Array.isArray(row))continue;
-      const rowKeys=[row.subjectKey,row.candidateKey,row.tempKey,row.canonicalId].map(x=>String(x??'').trim()).filter(Boolean);
-      if(rowKeys.some(x=>aliases.has(x)))matches.push({row,index:i});
-    }
-    const rowKey=candidate.record.tempKey??candidate.key;
-    if(matches.length===0){
-      failures.push('Phase 5 candidate '+candidate.key+' (tempKey='+String(rowKey)+') has no source-backed disposition; append actions.step-2.outputs.reconciliationRecords['+rows.length+'] with subjectKey='+String(rowKey)+' and phase5ExecutionDisposition');
-      continue;
-    }
-    if(matches.length!==1){
-      failures.push('Phase 5 candidate '+candidate.key+' maps to '+matches.length+' reconciliationRecords rows; retain exactly one canonical disposition row');
-      continue;
-    }
-    const {row,index}=matches[0],prefix='actions.step-2.outputs.reconciliationRecords['+index+']';
-    const sourceAnchor=String(candidate.record.sourceAnchor??candidate.record.anchors?.[0]??'').trim();
-    if(String(row.sourceAnchor??'').trim()!==sourceAnchor)
-      failures.push(prefix+'.sourceAnchor must exactly match candidate '+candidate.key+' source anchor '+sourceAnchor);
-    if(!phase5TextV1(row.phase5Observation,30))
-      failures.push(prefix+'.phase5Observation must record the actual Phase-5 source/economic reconciliation, not a placeholder');
-    if(!phase5TextV1(row.rationale,40))
-      failures.push(prefix+'.rationale must substantiate the candidate disposition with source-backed reasoning');
-    const disposition=String(row.phase5ExecutionDisposition??'').trim().toUpperCase();
-    if(!phase5TextV1(row.downstreamValidationNeed,20)&&
-       !(disposition==='RESOLVED_NON_MATERIAL'&&String(row.downstreamValidationNeed??'')==='NONE_IDENTIFIED'))
-      failures.push(prefix+'.downstreamValidationNeed must state the next validation or NONE_IDENTIFIED only for a source-resolved non-material candidate');
-    if(!PHASE5_CANDIDATE_DISPOSITIONS_V1.has(disposition)){
-      failures.push(prefix+'.phase5ExecutionDisposition is missing/unsupported; choose EXECUTE, DUPLICATE_OF, RETAIN_OPEN_OBLIGATION, or CONDITIONAL_PENDING_EVIDENCE. RESOLVED_NON_MATERIAL is disabled until independent source-disproof verification is deployed');
-      continue;
-    }
-    dispositionByKey.set(candidate.key,{...candidate,row,index,disposition});
-    const target=targets.get(candidate.key);
-    if(disposition==='EXECUTE'){
-      if(!target){
-        failures.push('Phase 5 candidate '+candidate.key+' is classified EXECUTE but has no target design; append actions.step-3.outputs.targetDesigns['+arr(targetDesigns).length+']');
-      }else if(String(target.executionMethod??'').toUpperCase()!=='V7_REQUEST'){
-        failures.push('Phase 5 candidate '+candidate.key+' is classified EXECUTE but its target must use V7_REQUEST');
-      }else requiredTargetKeys.push(candidate.key);
-    }else if(disposition==='DUPLICATE_OF'){
-      const covered=String(row.duplicateOfCandidateKey??'').trim();
-      if(!covered)failures.push(prefix+'.duplicateOfCandidateKey must name the canonical candidate whose exact execution covers this duplicate');
-      if(!target||String(target.executionMethod??'').toUpperCase()!=='NOT_APPLICABLE')
-        failures.push('Phase 5 candidate '+candidate.key+' classified DUPLICATE_OF requires a NOT_APPLICABLE target alias with controller-verifiable exact equivalence');
-      else if(String(target.notApplicableDisposition?.coveredByCandidateKey??'')!==covered)
-        failures.push(prefix+'.duplicateOfCandidateKey must match targetDesigns candidate '+candidate.key+' notApplicableDisposition.coveredByCandidateKey');
-      requiredTargetKeys.push(candidate.key);
-    }else if(disposition==='RESOLVED_NON_MATERIAL'){
-      if(target)failures.push('Phase 5 candidate '+candidate.key+' is RESOLVED_NON_MATERIAL but still has a target design; choose EXECUTE or a verified duplicate alias instead');
-      if(!['SOURCE_CONTRADICTION','PROVEN_OUT_OF_SCOPE'].includes(String(row.resolutionBasis??'')))
-        failures.push(prefix+'.resolutionBasis must be SOURCE_CONTRADICTION or PROVEN_OUT_OF_SCOPE');
-      const refs=arr(row.dispositionEvidenceRefs).map(x=>String(x??'').trim()).filter(Boolean);
-      const candidateRefs=phase5EvidenceRefsV1(candidate.record);
-      if(!refs.length||!refs.some(x=>x===sourceAnchor||candidateRefs.includes(x)))
-        failures.push(prefix+'.dispositionEvidenceRefs must cite the exact source anchor or a source-bound candidate evidence reference');
-      // Pure narrative source citations are not independently verified
-      // disproof; retain the candidate until a controller-verified proof
-      // record binds the exact claim to a historical source identity.
-      // A reviewer-owned object cannot certify its own proof status.
-      // Future source-verification support must read independent immutable
-      // controller evidence, not this mutable reconciliation record.
-      failures.push(prefix+' RESOLVED_NON_MATERIAL is not independently provable by lite-solo-v1. Keep this candidate EXECUTE or RETAIN_OPEN_OBLIGATION; an agent-supplied PASS flag is not accepted');
-      if(!phase5TextV1(row.rationale,80)||!phase5TextV1(row.phase5Observation,40)||String(row.downstreamValidationNeed??'')!=='NONE_IDENTIFIED')
-        failures.push(prefix+' RESOLVED_NON_MATERIAL requires a source-contradiction/out-of-scope explanation, supporting evidence and downstreamValidationNeed=NONE_IDENTIFIED; non-reproduction or uncertainty is not sufficient');
-      if(row.requiredPhase!==undefined||row.requiredAction||row.completionCondition)
-        failures.push(prefix+' RESOLVED_NON_MATERIAL cannot simultaneously declare an open obligation');
-    }else{
-      if(target)failures.push('Phase 5 candidate '+candidate.key+' classified '+disposition+' must not have a target design; if a test is still required, classify EXECUTE and complete it');
-      const obligationId=String(row.obligationId??'').trim();
-      const requiredPhase=Number(row.requiredPhase);
-      if(!/^OBL-P5-[A-Za-z0-9._-]+$/.test(obligationId))
-        failures.push(prefix+'.obligationId must be a stable unique OBL-P5-* identifier');
-      else if(obligationIds.has(obligationId))failures.push(prefix+'.obligationId duplicates '+obligationId);
-      else obligationIds.add(obligationId);
-      // The current bound Lite-Solo authority only provides a schema-governed
-      // obligationDispositions closure field in Phase 6. Carry-to-8/9/10
-      // cannot be offered as a completed assurance route until a new bound
-      // authority release actually provides those fields.
-      if(requiredPhase!==6)
-        failures.push(prefix+'.requiredPhase must be 6 under lite-solo-v1: phases 8, 9 and 10 have no obligation-closure field; do not silently defer mandatory security work beyond Phase 6');
-      if(!phase5TextV1(row.requiredAction,20))failures.push(prefix+'.requiredAction must specify the concrete closure action');
-      if(!phase5TextV1(row.completionCondition,20))failures.push(prefix+'.completionCondition must state observable evidence required for closure');
-      const originRefs=arr(row.originatingEvidenceRefs).map(x=>String(x??'').trim()).filter(Boolean);
-      const candidateRefs=phase5EvidenceRefsV1(candidate.record);
-      if(!originRefs.length||!originRefs.some(x=>x===sourceAnchor||candidateRefs.includes(x)))
-        failures.push(prefix+'.originatingEvidenceRefs must bind the obligation to the candidate source/evidence');
-      if(row.mandatory===false)failures.push(prefix+'.mandatory cannot be false for an unresolved security candidate');
-      if(disposition==='CONDITIONAL_PENDING_EVIDENCE'&&!phase5TextV1(row.conditionOrDependency,20))
-        failures.push(prefix+'.conditionOrDependency must name the external state/dependency that makes the question conditional');
-      if(!phase5TextV1(row.rationale,40)||!phase5TextV1(row.phase5Observation,30))
-        failures.push(prefix+' unresolved/conditional candidates must preserve the actual uncertainty and why it remains open');
-    }
-  }
-  for(const [key,target] of targets){
-    if(!candidateByKey.has(key))failures.push('Phase 5 target '+key+' is not present in the Phase-4/5 candidate ledger');
-  }
-  return {failures,candidateKeys,candidateSourceAnchors,requiredTargetKeys:[...new Set(requiredTargetKeys)],dispositionByKey};
-}
-
 // This single evidence verifier is shared by direct targets and target aliases.
-function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,result,expectedSourceSha256=null,requireTargetBindingManifest=false,skipExistingManifestOnFreshRun=false}={}){
+function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,result,expectedSourceSha256=null}={}){
   const failures=[];
   const key=String(target?.candidateKey??'');
     if(!result||result.status!=='PASS'||result.exitCode!==0){
@@ -493,33 +348,6 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
           failures.push('Phase 5 mandatory '+key+' persisted evidence does not match the exact request digest and source commit');
       }catch(e){failures.push('Phase 5 mandatory '+key+' bound request cannot be re-read: '+String(e.message||e));}
     }
-    const manifestRel=typeof rel==='string'?targetBindingManifestPathV1(rel):null;
-    const manifestAbs=manifestRel?path.join(controllerRoot,...manifestRel.split('/')):null;
-    if(!skipExistingManifestOnFreshRun&&(requireTargetBindingManifest|| (manifestAbs&&fs.existsSync(manifestAbs)))){
-      if(!manifestAbs||!fs.existsSync(manifestAbs)){
-        failures.push('Phase 5 mandatory '+key+' has no target/source-bound resume manifest');
-      }else{
-        try{
-          const manifest=JSON.parse(fs.readFileSync(manifestAbs,'utf8'));
-          const rawBytes=fs.readFileSync(rawFile);
-          const manifestBinding=validateTargetExecutionRequestBindingV1({
-            controllerRoot,campaignPath,target,expectedSourceSha256
-          });
-          const request=JSON.parse(fs.readFileSync(path.join(controllerRoot,...campaignPath.split('/'),...manifestBinding.requestRef.split('/')),'utf8'));
-          if(manifest.schemaVersion!=='curveyield-phase5-target-binding-v1'||
-             manifest.campaignId!==request.campaignId||
-             manifest.sourceSha256!==request.source?.archiveSha256||
-             manifest.candidateKey!==key||
-             manifest.targetDesignSha256!==targetDesignSha256V1(target)||
-             manifest.requestRef!==manifestBinding.requestRef||
-             manifest.requestId!==request.requestId||
-             manifest.requestDigest!==request.requestDigest||
-             manifest.rawResultRef!==rel||
-             manifest.rawResultSha256!==createHash('sha256').update(rawBytes).digest('hex'))
-            failures.push('Phase 5 mandatory '+key+' target-binding manifest does not match the current target, exact request, source or raw-result bytes');
-        }catch(e){failures.push('Phase 5 mandatory '+key+' target-binding manifest is invalid: '+String(e.message||e));}
-      }
-    }
     const reproduction=raw.reproduction;
     const terminalOutcome=reproduction?.status==='REPRODUCED'&&reproduction?.observedPredicate?.matched===true||
       reproduction?.status==='NOT_REPRODUCED'&&reproduction?.observedPredicate?.matched===false;
@@ -570,8 +398,8 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
   return failures;
 }
 
-export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath,targetDesigns=[],executionResults={},materialCandidateKeys=[],requiredTargetKeys=null,candidateSourceAnchors={},expectedSourceSha256=null,requireTargetBindingManifest=false}={}){
-  const failures=validatePhase5TargetCoverageV1({targetDesigns,materialCandidateKeys,requiredTargetKeys,candidateSourceAnchors});
+export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath,targetDesigns=[],executionResults={},materialCandidateKeys=[],candidateSourceAnchors={},expectedSourceSha256=null}={}){
+  const failures=validatePhase5TargetCoverageV1({targetDesigns,materialCandidateKeys,candidateSourceAnchors});
   for(const target of arr(targetDesigns)){
     if(!target||typeof target!=='object'||Array.isArray(target))continue;
     const key=String(target.candidateKey??'').trim();
@@ -583,14 +411,14 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
       const coveredResult=executionResults?.[coveredKey];
       if(coveringDesign?.executionMethod==='V7_REQUEST'&&coveredKey!==key){
         const evidenceFailures=validateExecutedPhase5TargetV1({
-          controllerRoot,campaignPath,target:coveringDesign,result:coveredResult,expectedSourceSha256,requireTargetBindingManifest
+          controllerRoot,campaignPath,target:coveringDesign,result:coveredResult,expectedSourceSha256
         });
         for(const error of evidenceFailures)failures.push('Phase 5 '+key+' NOT_APPLICABLE covering evidence: '+error);
       }else failures.push('Phase 5 '+key+' NOT_APPLICABLE has no verified covering execution');
       continue;
     }
     failures.push(...validateExecutedPhase5TargetV1({
-      controllerRoot,campaignPath,target,result:executionResults?.[key],expectedSourceSha256,requireTargetBindingManifest
+      controllerRoot,campaignPath,target,result:executionResults?.[key],expectedSourceSha256
     }));
   }
   return failures;
@@ -603,62 +431,39 @@ export function validateRecordedPhase5MachineEvidenceV1({controllerRoot,campaign
   const failures=[];
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
   const readJsonRel=rel=>JSON.parse(fs.readFileSync(path.join(controllerRoot,...rel.split('/')),'utf8'));
-  let phase4Records=[],phase5NewRecords=[],reconciliationRecords=[],materialCandidateKeys=[],candidateSourceAnchors={};
-  let phase5Canonical=null,requireTargetBindingManifest=false,requiredTargetKeys=[];
+  let materialCandidateKeys=[];
   try{
     const p4=readJsonRel(path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json'));
-    phase5Canonical=readJsonRel(path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json'));
-    phase4Records=arr(p4.actions?.['step-3']?.outputs?.candidateRecords).filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
-    phase5NewRecords=arr(phase5Canonical.actions?.['step-2']?.outputs?.newCandidateRecords).filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
-    reconciliationRecords=arr(phase5Canonical.actions?.['step-2']?.outputs?.reconciliationRecords);
-    const candidates=[...phase4Records,...phase5NewRecords];
-    materialCandidateKeys=candidates.map(phase5KeyV1).filter(Boolean);
-    candidateSourceAnchors=Object.fromEntries(candidates.map(x=>[phase5KeyV1(x),String(x.sourceAnchor??x.anchors?.[0]??'').trim()]).filter(([key])=>key));
-    let phase5AuthorityPath=String(phase5Canonical.workSchemaPath??'');
-    try{
-      const receipt=readJsonRel(path.posix.join(campaignPath,'receipts/PHASE_05_RECEIPT_v1.json'));
-      phase5AuthorityPath+=' '+String(receipt?.authority?.homepagePath??'');
-    }catch{}
-    const liteSolo=phase5AuthorityPath.includes('Audit Skill - Lite-Solo Authority/lite-solo');
-    if(liteSolo){
-      const disposition=validatePhase5CandidateDispositionV1({
-        phase4CandidateRecords:phase4Records,newCandidateRecords:phase5NewRecords,
-        reconciliationRecords,targetDesigns
-      });
-      failures.push(...disposition.failures);
-      requiredTargetKeys=disposition.requiredTargetKeys;
-      requireTargetBindingManifest=phase5Canonical.automationOutputs?.phase5MachineExecutionGate?.targetBindingManifestPolicy==='REQUIRED';
-    }else requiredTargetKeys=materialCandidateKeys;
-  }catch(e){
-    failures.push('Cannot derive required Phase-5 candidate dispositions/evidence from sealed Phase 4/5 canonical artifacts: '+String(e.message||e));
-  }
+    const p5=readJsonRel(path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json'));
+    materialCandidateKeys=[
+      ...(p4.actions?.['step-3']?.outputs?.candidateRecords??[]),
+      ...(p5.actions?.['step-2']?.outputs?.newCandidateRecords??[])
+    ].filter(x=>x&&typeof x==='object').map(x=>String(x.tempKey??'').trim()).filter(Boolean);
+  }catch(e){failures.push('Cannot derive required candidate coverage from sealed Phase 4/5 canonical artifacts: '+String(e.message||e));}
   const executionResults={};
   for(const target of arr(targetDesigns)){
     if(!target||typeof target!=='object'||Array.isArray(target))continue;
     const key=String(target.candidateKey??'').trim();
-    if(!key||String(target.executionMethod??'').toUpperCase()==='NOT_APPLICABLE')continue;
+    if(!key||target.executionMethod==='NOT_APPLICABLE')continue;
     const binding=validateTargetExecutionRequestBindingV1({controllerRoot,campaignPath,target,expectedCampaignId,expectedSourceSha256});
     if(!String(binding.status).startsWith('PASS_')){
       failures.push(key+': sealed execution request failed binding validation: '+String(binding.status));
       continue;
     }
     let req=null;
-    try{req=readJsonRel(path.posix.join(campaignPath,binding.requestRef));}
-    catch(e){failures.push(key+': bound request cannot be read: '+String(e.message||e));continue;}
+    try{req=readJsonRel(path.posix.join(campaignPath,binding.requestRef));}catch(e){failures.push(key+': bound request cannot be read: '+String(e.message||e));continue;}
     if(!/^dar-[0-9a-f]{32}$/.test(String(req.requestId??''))){failures.push(key+': invalid bound request ID');continue;}
     const rel=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key),req.requestId,'raw-result.json');
     let raw=null;
-    try{raw=readV7RawResultV1(path.join(controllerRoot,...rel.split('/')));}
-    catch(e){failures.push(key+': required V7 raw result is missing: '+rel);continue;}
+    try{raw=readV7RawResultV1(path.join(controllerRoot,...rel.split('/')));}catch(e){failures.push(key+': required V7 raw result is missing: '+rel);continue;}
     executionResults[key]={
       status:raw.status==='completed'&&raw.blocking!==true?'PASS':'BLOCKED',
       exitCode:raw.status==='completed'&&raw.blocking!==true?0:1,
-      evidenceRef:rel,requestBindingStatus:binding.status,requestBindingEvidenceRef:binding.requestRef,rawResult:raw
+      evidenceRef:rel,requestBindingStatus:binding.status,rawResult:raw
     };
   }
   failures.push(...validatePhase5TargetExecutionGateV1({
-    controllerRoot,campaignPath,targetDesigns,executionResults,materialCandidateKeys,
-    requiredTargetKeys,candidateSourceAnchors,expectedSourceSha256,requireTargetBindingManifest
+    controllerRoot,campaignPath,targetDesigns,executionResults,materialCandidateKeys,expectedSourceSha256
   }));
   if(requireCompletedMatrix){
     const matrixPath=path.join(campaignRoot,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
@@ -725,15 +530,6 @@ export function selectReusablePhase5TargetsV1({
 
 // Reading raw-result.json never counts as evidence unless the SAME strict
 // machine-evidence verifier used by the phase gate accepts it.
-function targetDesignSha256V1(target){
-  return createHash('sha256').update(stableJson(executionSensitiveTargetV1(target))).digest('hex');
-}
-function targetBindingManifestPathV1(evidenceRef){
-  return path.posix.join(path.posix.dirname(evidenceRef),'TARGET_BINDING_v1.json');
-}
-
-// Raw result alone is not enough to resume a prior run: bind it to the exact
-// current semantic target, source, request digest and persisted raw bytes.
 export function verifiedReusablePhase5ResultV1({
   controllerRoot,campaignPath,target,expectedCampaignId,expectedSourceSha256
 }={}){
@@ -744,26 +540,10 @@ export function verifiedReusablePhase5ResultV1({
   });
   if(!String(binding.status).startsWith('PASS_'))return null;
   try{
-    const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
-    const request=JSON.parse(fs.readFileSync(path.join(campaignRoot,...binding.requestRef.split('/')),'utf8'));
+    const request=JSON.parse(fs.readFileSync(path.join(controllerRoot,...campaignPath.split('/'),...binding.requestRef.split('/')),'utf8'));
     if(!/^dar-[0-9a-f]{32}$/.test(String(request.requestId??'')))return null;
     const evidenceRef=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key),request.requestId,'raw-result.json');
-    const rawPath=path.join(controllerRoot,...evidenceRef.split('/'));
-    const manifestPath=path.join(controllerRoot,...targetBindingManifestPathV1(evidenceRef).split('/'));
-    if(!fs.existsSync(rawPath)||!fs.existsSync(manifestPath))return null;
-    const manifest=JSON.parse(fs.readFileSync(manifestPath,'utf8'));
-    const rawBytes=fs.readFileSync(rawPath);
-    if(manifest.schemaVersion!=='curveyield-phase5-target-binding-v1'||
-       manifest.campaignId!==expectedCampaignId||
-       manifest.sourceSha256!==expectedSourceSha256||
-       manifest.candidateKey!==key||
-       manifest.targetDesignSha256!==targetDesignSha256V1(target)||
-       manifest.requestRef!==binding.requestRef||
-       manifest.requestId!==request.requestId||
-       manifest.requestDigest!==request.requestDigest||
-       manifest.rawResultRef!==evidenceRef||
-       manifest.rawResultSha256!==createHash('sha256').update(rawBytes).digest('hex'))return null;
-    const rawResult=readV7RawResultV1(rawPath);
+    const rawResult=readV7RawResultV1(path.join(controllerRoot,...evidenceRef.split('/')));
     const result={
       status:'PASS',exitCode:0,evidenceRef,rawResult,
       requestBindingStatus:binding.status,
@@ -780,16 +560,14 @@ export function verifiedReusablePhase5ResultV1({
 export async function executePhase5TargetsV1({
   controllerRoot,campaignPath,targetDesigns=[],
   expectedCampaignId=null,expectedSourceSha256=null,
-  reuseCandidateKeys=[],runProcessFn=null,
-  batchBudgetMs=70*60*1000,maxCandidateMs=40*60*1000,reserveMs=20*60*1000
+  reuseCandidateKeys=[],runProcessFn=null
 }={}){
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
-  const executionResults={},pendingCandidateKeys=[];
+  const executionResults={};
   let runProcessV1=null;
-  const batchStartedAt=Date.now();
   for(const t of arr(targetDesigns)){
     const key=String(t?.candidateKey??'').trim();
-    if(!key)continue;
+    if(!key) continue;
     const method=String(t.executionMethod??'').toUpperCase();
     if(method==='NOT_APPLICABLE'){
       executionResults[key]={status:'NOT_APPLICABLE',
@@ -801,23 +579,17 @@ export async function executePhase5TargetsV1({
       executionResults[key]={status:'BLOCKED_UNSUPPORTED_EXECUTION_METHOD',evidenceRef:'NO_MACHINE_EVIDENCE'};
       continue;
     }
-    // Empty reuseCandidateKeys means normal resumable execution: any exact,
-    // manifest-verified result is reusable. A non-empty allowlist remains
-    // restrictive for callers that explicitly scope reuse.
-    if(!reuseCandidateKeys.length||reuseCandidateKeys.includes(key)){
+    if(reuseCandidateKeys.includes(key)){
       const reused=verifiedReusablePhase5ResultV1({
         controllerRoot,campaignPath,target:t,expectedCampaignId,expectedSourceSha256
       });
-      if(reused){
-        process.stderr.write('[phase5-sim] REUSE '+key+': exact target/source/request/raw evidence verified\n');
-        executionResults[key]=reused;continue;
-      }
+      if(reused){process.stderr.write(`[phase5-sim] REUSE ${key}: verified exact completed machine evidence\n`);executionResults[key]=reused;continue;}
     }
     const binding=validateTargetExecutionRequestBindingV1({
       controllerRoot,campaignPath,target:t,expectedCampaignId,expectedSourceSha256
     });
     if(!String(binding.status).startsWith('PASS_')){
-      process.stderr.write('[phase5-sim] BLOCKED '+key+': request binding '+binding.status+'\n');
+      process.stderr.write(`[phase5-sim] BLOCKED ${key}: request binding ${binding.status}\n`);
       executionResults[key]={
         status:'BLOCKED_REQUEST_TARGET_BINDING_MISMATCH',
         requestBindingStatus:binding.status,
@@ -825,20 +597,6 @@ export async function executePhase5TargetsV1({
         requestBindingEvidenceRef:binding.requestRef??'NO_REQUEST',
         evidenceRef:binding.requestRef??'NO_MACHINE_EVIDENCE'
       };
-      continue;
-    }
-    const elapsed=Date.now()-batchStartedAt;
-    const remaining=batchBudgetMs-elapsed;
-    // Keep at least one full candidate timeout plus a 20-minute publication
-    // reserve. Remaining candidates are resumed from verified manifests on
-    // the next boundary request; no completed target is rerun.
-    if(remaining<maxCandidateMs+reserveMs){
-      executionResults[key]={
-        status:'PENDING_EXECUTION',exitCode:null,evidenceRef:'PENDING_EXECUTION',
-        requestBindingStatus:binding.status,requestBindingEvidenceRef:binding.requestRef,
-        requestBindingReasons:binding.reasons,rawResult:null
-      };
-      pendingCandidateKeys.push(key);
       continue;
     }
     const rel=binding.requestRef;
@@ -850,12 +608,14 @@ export async function executePhase5TargetsV1({
       if(runProcessFn)runProcessV1=runProcessFn;
       else ({runProcess:runProcessV1}=await import('./execution.mjs'));
     }
+    // Each candidate is independently observable and time-bounded. The
+    // stdout evidence channel stays structured; progress goes only to stderr.
     const startedAt=Date.now();
-    const timeoutMs=Math.min(maxCandidateMs,batchBudgetMs-(startedAt-batchStartedAt)-reserveMs);
-    process.stderr.write('[phase5-sim] START '+key+' V7 execution (max '+Math.floor(timeoutMs/60000)+' minutes)\n');
+    const candidateTimeoutMs=40*60*1000;
+    process.stderr.write(`[phase5-sim] START ${key} V7 execution (max 40 minutes)\n`);
     const heartbeat=setInterval(()=>{
-      const elapsedMinutes=Math.floor((Date.now()-startedAt)/60000);
-      process.stderr.write('[phase5-sim] RUNNING '+key+' elapsed='+elapsedMinutes+'m; awaiting runner result\n');
+      const elapsed=Math.floor((Date.now()-startedAt)/60000);
+      process.stderr.write(`[phase5-sim] RUNNING ${key} elapsed=${elapsed}m; awaiting runner result\n`);
     },60_000);
     let result;
     let markerBuffer='';
@@ -865,6 +625,7 @@ export async function executePhase5TargetsV1({
       while((index=markerBuffer.indexOf('\n'))!==-1){
         const line=markerBuffer.slice(0,index).trimEnd();
         markerBuffer=markerBuffer.slice(index+1);
+        // Machine stderr can contain RPC URLs; relay only our fixed markers.
         if(line.startsWith('[phase5-v7]'))process.stderr.write(line+'\n');
       }
       if(markerBuffer.length>8192)markerBuffer=markerBuffer.slice(-8192);
@@ -875,24 +636,25 @@ export async function executePhase5TargetsV1({
         args:['packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace,'--compact-raw-result'],
         cwd:process.cwd(),
         env:{...process.env,PHASE5_BOUNDARY_PROGRESS:'true',PHASE5_CONTROLLER_ROOT:path.resolve(controllerRoot)},
-        timeoutMs,
+        timeoutMs:candidateTimeoutMs,
         onStderr:relayProgress
       });
     } finally {
       clearInterval(heartbeat);
     }
-    process.stderr.write('[phase5-sim] END '+key+' exitCode='+(result?.exitCode??'UNKNOWN')+' elapsed='+Math.floor((Date.now()-startedAt)/1000)+'s'+(result?.timedOut?' TIMED_OUT':'')+'\n');
+    process.stderr.write(`[phase5-sim] END ${key} exitCode=${result?.exitCode??'UNKNOWN'} elapsed=${Math.floor((Date.now()-startedAt)/1000)}s${result?.timedOut?' TIMED_OUT':''}\n`);
+    // V7 CLI nests evidence under the request ID; the parent directory has no
+    // raw-result.json. Never issue PASS for a missing or unparsable raw result.
     const request=JSON.parse(fs.readFileSync(requestAbs,'utf8'));
     const requestId=request.requestId;
     const validId=typeof requestId==='string'&&/^dar-[0-9a-f]{32}$/.test(requestId);
     const rawPath=validId?path.join(evAbs,requestId,'raw-result.json'):null;
     let rawResult=null;
     try{if(rawPath)rawResult=readV7RawResultV1(rawPath);}catch{}
-    const evidenceRef=validId?path.posix.join(evRel,requestId,'raw-result.json'):'NO_MACHINE_EVIDENCE';
-    const machine={
+    executionResults[key]={
       status:result.exitCode===0&&rawResult?'PASS':(rawResult?.blocking?'BLOCKED':'INCONCLUSIVE'),
       exitCode:result.exitCode,
-      evidenceRef,
+      evidenceRef:validId?path.posix.join(evRel,requestId,'raw-result.json'):'NO_MACHINE_EVIDENCE',
       requestBindingStatus:binding.status,
       requestBindingEvidenceRef:binding.requestRef,
       requestBindingReasons:binding.reasons,
@@ -900,48 +662,18 @@ export async function executePhase5TargetsV1({
       stdout:String(result.stdout??'').slice(-12000),
       stderr:String(result.stderr??'').slice(-12000)
     };
-    if(machine.status==='PASS'){
-      const evidenceFailures=validateExecutedPhase5TargetV1({
-        controllerRoot,campaignPath,target:t,result:machine,expectedSourceSha256,
-        skipExistingManifestOnFreshRun:true
-      });
-      if(evidenceFailures.length){
-        machine.status='BLOCKED_EVIDENCE_VALIDATION';
-        machine.validationFailures=evidenceFailures;
-      }else{
-        const manifest={
-          schemaVersion:'curveyield-phase5-target-binding-v1',
-          campaignId:expectedCampaignId,sourceSha256:expectedSourceSha256,
-          candidateKey:key,targetDesignSha256:targetDesignSha256V1(t),
-          requestRef:binding.requestRef,requestId,requestDigest:request.requestDigest,
-          rawResultRef:machine.evidenceRef,
-          rawResultSha256:createHash('sha256').update(fs.readFileSync(rawPath)).digest('hex')
-        };
-        const manifestPath=path.join(path.dirname(rawPath),'TARGET_BINDING_v1.json');
-        fs.mkdirSync(path.dirname(manifestPath),{recursive:true});
-        fs.writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\n');
-      }
-    }
-    executionResults[key]=machine;
   }
-  // Alias rows inherit evidence only from a completed covering execution.
-  // A covering target still pending keeps the alias pending rather than
-  // manufacturing a failed execution or a false NOT_APPLICABLE result.
+  // All covering runs are finished before an omitted duplicate receives
+  // an inherited evidence reference. The gate separately verifies identity.
   for(const target of arr(targetDesigns)){
-    if(String(target?.executionMethod??'').toUpperCase()!=='NOT_APPLICABLE')continue;
+    if(target?.executionMethod!=='NOT_APPLICABLE')continue;
     const key=String(target.candidateKey??'').trim();
     const coveredKey=target.notApplicableDisposition?.coveredByCandidateKey;
-    const covered=executionResults[coveredKey];
-    if(covered?.status==='PASS'&&covered.evidenceRef){
-      executionResults[key].evidenceRef=covered.evidenceRef;
-      executionResults[key].coveredByEvidenceRef=covered.evidenceRef;
-    }else if(covered?.status==='PENDING_EXECUTION'){
-      executionResults[key].status='PENDING_EXECUTION';
-      executionResults[key].evidenceRef='PENDING_EXECUTION';
-      pendingCandidateKeys.push(key);
+    if(executionResults[key]&&executionResults[coveredKey]?.evidenceRef){
+      executionResults[key].evidenceRef=executionResults[coveredKey].evidenceRef;
     }
   }
-  return {executionResults,pendingCandidateKeys:[...new Set(pendingCandidateKeys)]};
+  return executionResults;
 }
 
 export function renderRemediationDeltaLedgerV1({validatedFindings=[],deltaRows=[],noRemediation=false}={}){

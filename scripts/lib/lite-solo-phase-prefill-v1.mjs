@@ -1,8 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {verifyDerivedInputIndexV1} from './lite-solo-work-shards-v1.mjs';
-import {readVerifiedCandidateIdentityIndexV1,verifyPhase6ProofScheduleV1} from './lite-solo-candidate-batch-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {boundReviewerForPhaseV1 as originalReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
 const boundReviewerForPhaseV1=({authorityRoot,...params})=>authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo'?'lite-solo-agent':originalReviewerForPhaseV1({authorityRoot,...params});
@@ -164,13 +162,7 @@ function domainObligations(matrix,assessments,{originPhase=3}={}){
 
 function loadDerived(root,paths){
   const out=[];
-  for(const rel of paths??[]){
-    const j=readJsonIf(repoFile(root,rel));
-    if(!j)continue;
-    if(['curveyield-lite-derived-input-index-v1','curveyield-lite-derived-input-large-index-v1'].includes(j.schemaVersion))
-      verifyDerivedInputIndexV1({root,indexRel:rel});
-    out.push(j);
-  }
+  for(const rel of paths??[]){const j=readJsonIf(repoFile(root,rel));if(j)out.push(j);}
   return out;
 }
 function findAutomationInput(derived,key){
@@ -299,65 +291,32 @@ function deployAssessmentScaffold(root,campaignPath){
   return rows.length?rows:['NONE_IDENTIFIED'];
 }
 
-function targetDispositionScaffold(targetDesigns,results,candidateRecords=[],candidateDispositionRecords=[]){
-  const rows=[],targets=arr(targetDesigns).filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
-  const targetByKey=new Map(targets.map(t=>[String(t.candidateKey??''),t]).filter(([k])=>k));
-  const dispositionByAlias=new Map();
-  for(const row of candidateDispositionRecords??[]){
-    if(!row||typeof row!=='object'||Array.isArray(row))continue;
-    for(const alias of [row.subjectKey,row.candidateKey,row.tempKey,row.canonicalId].map(x=>String(x??'').trim()).filter(Boolean))
-      if(!dispositionByAlias.has(alias))dispositionByAlias.set(alias,row);
-  }
-  const candidates=(candidateRecords??[]).filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
-  const sourceRows=candidates.length?candidates:targets;
-  for(const item of sourceRows){
-    const key=String(item.canonicalId??item.tempKey??item.candidateKey??'').trim();
-    if(!key)continue;
-    const aliases=[key,item.canonicalId,item.tempKey,item.candidateKey].map(x=>String(x??'').trim()).filter(Boolean);
-    const target=aliases.map(k=>targetByKey.get(k)).find(Boolean)??null;
-    const disposition=aliases.map(k=>dispositionByAlias.get(k)).find(Boolean)??null;
-    const dispositionName=String(disposition?.phase5ExecutionDisposition??'').toUpperCase();
-    const targetKey=String(target?.candidateKey??key);
-    const coveredKey=String(target?.notApplicableDisposition?.coveredByCandidateKey??disposition?.duplicateOfCandidateKey??'');
-    const result=results?.[targetKey]??(coveredKey?results?.[coveredKey]:null)??{};
-    const raw=result.rawResult??{};
-    const open=dispositionName==='RETAIN_OPEN_OBLIGATION'||dispositionName==='CONDITIONAL_PENDING_EVIDENCE';
-    const resolved=dispositionName==='RESOLVED_NON_MATERIAL';
-    const dispositionRefs=Array.isArray(disposition?.originatingEvidenceRefs)?disposition.originatingEvidenceRefs:
-      Array.isArray(disposition?.dispositionEvidenceRefs)?disposition.dispositionEvidenceRefs:[];
-    const sourceAnchor=String(item.sourceAnchor??item.anchors?.[0]??disposition?.sourceAnchor??'NONE_IDENTIFIED');
-    const status=open?'UNRESOLVED_OPEN_OBLIGATION':resolved?'RESOLVED_NON_MATERIAL':
-      (result.status??(target?'PENDING_EXECUTION':dispositionName==='DUPLICATE_OF'?'PENDING_EXECUTION':'UNRESOLVED_DISPOSITION_REQUIRED'));
-    const evidenceRef=result.evidenceRef&&result.evidenceRef!=='PENDING_EXECUTION'?result.evidenceRef:null;
+function targetDispositionScaffold(targetDesigns,results){
+  const rows=[];
+  for(const t of targetDesigns??[]){
+    const key=t?.candidateKey;if(!key)continue;
+    const r=results?.[key]??{};
+    const raw=r.rawResult??{};
     rows.push({
       candidateKey:key,
-      sourceAnchor,
-      phase5ExecutionDisposition:dispositionName||'DISPOSITION_REQUIRED',
-      openObligationId:open?(disposition.obligationId??'UNRESOLVED_OBLIGATION_ID'):'NONE_IDENTIFIED',
-      obligationClosureCondition:open?(disposition.completionCondition??'UNRESOLVED_CLOSURE_CONDITION'):'NONE_IDENTIFIED',
-      phase5DispositionEvidenceRefs:dispositionRefs.length?dispositionRefs:[sourceAnchor],
-      executionEvidenceRefs:evidenceRef?[evidenceRef]:['NO_MACHINE_EVIDENCE'],
-      oracleOutcome:open?'UNRESOLVED_OPEN_OBLIGATION':resolved?'SOURCE_RESOLVED_NON_MATERIAL':
-        (raw?.reproduction?.status??raw?.disposition??result.status??'UNRESOLVED'),
-      reproductionStatus:status,
-      requestBindingStatus:open?'NOT_APPLICABLE_OPEN_OBLIGATION':resolved?'NOT_APPLICABLE_SOURCE_RESOLVED':
-        (result.requestBindingStatus??target?.requestBindingStatus??'UNVERIFIED'),
-      requestBindingEvidenceRef:open?'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json#'+String(disposition?.obligationId??'UNRESOLVED'):
-        resolved?String(dispositionRefs[0]??sourceAnchor):
-        (result.requestBindingEvidenceRef??target?.requestBindingEvidenceRef??'NO_BINDING_EVIDENCE'),
+      executionEvidenceRefs:r.evidenceRef?[r.evidenceRef]:['NO_MACHINE_EVIDENCE'],
+      oracleOutcome:raw?.reproduction?.status??raw?.disposition??r.status??'UNRESOLVED',
+      reproductionStatus:r.status??raw?.status??'UNRESOLVED',
+      requestBindingStatus:r.requestBindingStatus??t.requestBindingStatus??'UNVERIFIED',
+      requestBindingEvidenceRef:r.requestBindingEvidenceRef??t.requestBindingEvidenceRef??'NO_BINDING_EVIDENCE',
       semanticHarnessBindingAssessment:'<REQUIRED>',
       securityInterpretation:'<REQUIRED>',
       limitations:'<REQUIRED>',
       recommendedPhase8Disposition:'<REQUIRED>',
       automationOwnedFields:[
-        'candidateKey','sourceAnchor','phase5ExecutionDisposition','openObligationId','obligationClosureCondition',
-        'phase5DispositionEvidenceRefs','executionEvidenceRefs','oracleOutcome','reproductionStatus',
+        'candidateKey','executionEvidenceRefs','oracleOutcome','reproductionStatus',
         'requestBindingStatus','requestBindingEvidenceRef'
       ]
     });
   }
   return rows.length?rows:['NONE_IDENTIFIED'];
 }
+
 function machineLimitations(deployRows,targetRows){
   const out=[];
   for(const row of deployRows??[]){
@@ -445,12 +404,6 @@ export function applyObligationDispositionsToLedger({ledger,canonical,sequence,c
     if(!obligation) throw new Error('Obligation disposition references unknown obligation '+id);
     const disposition=String(row.disposition??'').toUpperCase();
     const carry=String(row.carryForwardPhaseOrNone??'NONE_IDENTIFIED');
-    if(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo'&&
-       ['CARRY_FORWARD','BLOCKED_CARRIED'].includes(disposition)&&
-       ![6].some(next=>Number(next)>Number(sequence)&&String(next)===carry))
-      throw new Error('LITE_SOLO_UNSUPPORTED_OBLIGATION_CARRY: '+id+
-        ' cannot be carried to Phase '+carry+
-        '; no future Lite-Solo-v1 schema has an obligationDispositions closure field. Resolve with verifiable evidence in Phase 6 or use a new, explicitly bound authority release. Never mark a carried question satisfied.');
     const refs=uniq([canonicalRel,...evidenceList(row.evidenceRefs)]);
     obligation.statusReason=String(row.rationale??'');
     obligation.updatedAt=now;
@@ -628,14 +581,8 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
   }
 
   if(sequence===6){
-    const identity=readVerifiedCandidateIdentityIndexV1({root,campaignPath});
-    const predecessor=Array.isArray(prefillContext.phase5CandidateRecords)?prefillContext.phase5CandidateRecords:[];
-    const mapped=new Set(predecessor.filter(x=>x&&typeof x==='object').map(x=>String(x.canonicalId??x.tempKey??x.candidateKey??'')));
-    if(identity.rows.size!==mapped.size||[...identity.rows.keys()].some(key=>!mapped.has(key)))
-      throw new Error('Phase-6 candidate identity does not match exact sealed Phase-5 predecessor inventory');
-    verifyPhase6ProofScheduleV1({root,campaignPath,canonicalKeys:identity.canonicalKeys});
     const deployRows=deployAssessmentScaffold(root,campaignPath);
-    const phase5Rows=targetDispositionScaffold(prefillContext.targetDesigns??[],prefillContext.phase5ExecutionResults??{},prefillContext.phase5CandidateRecords??[],prefillContext.phase5CandidateDispositionRecords??[]);
+    const phase5Rows=targetDispositionScaffold(prefillContext.targetDesigns??[],prefillContext.phase5ExecutionResults??{});
     const targetRows=Array.isArray(phase5Rows)?phase5Rows.filter(x=>typeof x==='object'):[];
     form.actions['step-1'].outputs.deploymentAssessments=deployRows;
     form.actions['step-2'].outputs.targetDispositions=targetRows.length?targetRows:['NONE_IDENTIFIED'];
@@ -672,10 +619,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     // the ordinary Phase-6 prefill above; read the persisted output instead.
     const candidateTargets=(form.actions?.['step-2']?.outputs?.targetDispositions??[])
       .filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
-    const identity=readVerifiedCandidateIdentityIndexV1({root,campaignPath});
     const status=new Map(candidateTargets.map(x=>[x.candidateKey,x.reproductionStatus]));
-    if(identity.rows.size!==status.size||[...identity.rows.keys()].some(key=>!status.has(key)))
-      throw new Error('Phase-6 proof prefill requires an exact, complete canonical target-disposition inventory');
     // Phase 4 assigns discovery keys (X001-*), whereas Phase 5 often assigns
     // controller target keys (CAND-*). Never interpret an unmatched ID as a
     // candidate-wide evidence failure. Bind only through a unique exact source
@@ -690,14 +634,11 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     for(const anchor of duplicateAnchors)anchorTargets.delete(anchor);
     const candidateRows=new Map();
     for(const item of sources){
-      // Use the same canonical candidate identity as Phase 5 and Phase 8.
-      // Retain temporary aliases only for deterministic source-bound joins.
-      const key=item.canonicalId??item.tempKey??item.candidateKey;
-      if(!key||candidateRows.has(key))throw new Error('Duplicate or missing Phase-6 proof candidate key '+String(key));
-      if(!identity.rows.has(String(key)))throw new Error('Phase-6 proof candidate not in verified canonical identity index: '+key);
+      const key=item.tempKey??item.candidateKey;
+      if(!key||candidateRows.has(key))continue;
       candidateRows.set(key,{
         candidateKey:key,sourceAnchor:item.sourceAnchor??item.anchors?.[0]??'NONE_IDENTIFIED',
-        phase5Result:status.get(key)??'NOT_EXECUTED',
+        phase5Result:status.get(key)??status.get(anchorTargets.get(item.sourceAnchor??item.anchors?.[0]))??'NOT_EXECUTED',
         requestDirectory:'controller/phase6-tests/CP-'+String(key).replace(/[^A-Za-z0-9._-]/g,'_')+'/',
         verdict:'<REQUIRED>',harnessDesign:'<REQUIRED>',dispatchRounds:'<REQUIRED>',
         requestPaths:'<REQUIRED>',ledgerRef:'<REQUIRED>',

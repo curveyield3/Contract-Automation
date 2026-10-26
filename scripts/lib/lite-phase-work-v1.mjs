@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {shardWorkFormV1,secureShardWorkFormV13} from './lite-work-shards-v1.mjs';
-import {writeDerivedInputPagesV1} from './lite-solo-work-shards-v1.mjs';
 import {applyPhaseBoundaryPrefill} from './lite-phase-prefill-v1.mjs';
 import {resolveFrozenAuthorityFileV1} from '../../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 
@@ -149,20 +148,12 @@ export function buildDerivedOutputs({root,campaignPath,schema,canonicalData,cano
     for(const selector of spec.selectors??[]) setByPath(data,selector,getByPath(canonicalData,selector));
     const rel=fullCampaignPath(campaignPath,spec.path);
     writeJson(repoFile(root,rel),{schemaVersion:'curveyield-lite-derived-phase-data-v1',phase:schema.phase,sourceCanonicalData:canonicalRel,generatedAt:now,data});
-    writeDerivedInputPagesV1({root,rel});
     out.push(rel);
   }
   return out;
 }
 export function preparePhaseWork({root,campaignPath,authorityRoot,sequence,reviewer,predecessorReceiptPath,derivedInputPaths=[],status='ACTIVE',prefillContext={}}){
   const loaded=loadPhaseSchema(root,authorityRoot,sequence);const schema=loaded.schema;const schemaRel=loaded.rel;
-  const derivedInputIndexPaths=[];
-  for(const rel of derivedInputPaths){
-    const source=repoFile(root,rel);
-    if(!fs.existsSync(source)||!fs.statSync(source).isFile())continue;
-    const paged=writeDerivedInputPagesV1({root,rel});
-    if(paged?.indexRel)derivedInputIndexPaths.push(paged.indexRel);
-  }
   const formRel=fullCampaignPath(campaignPath,schema.workForm.campaignPath);
   const formTemplateRel=path.posix.join(authorityRoot,schema.workForm.template);
   let form=readJson(requiredFile(root,formTemplateRel,'work-form template'));
@@ -172,7 +163,7 @@ export function preparePhaseWork({root,campaignPath,authorityRoot,sequence,revie
     ?secureShardWorkFormV13({root,formRel,phase:sequence,retireFull:true})
     :shardWorkFormV1({root,formRel,phase:sequence,retireFull:true});
   const reportRel=schema.finalReport?fullCampaignPath(campaignPath,schema.finalReport.campaignPath):null;
-  return {phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer,status,workSchemaPath:schemaRel,workFormPath:formRel,...(shards?{workShardIndexPath:shards.indexRel}:{}),finalReportPath:reportRel,packetPath:fullCampaignPath(campaignPath,schema.submission.packetPath),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths],derivedInputIndexPaths,controllerPrefillDigestSha256:form?.automationInputs?.controllerPrefillDigestSha256??null};
+  return {phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer,status,workSchemaPath:schemaRel,workFormPath:formRel,...(shards?{workShardIndexPath:shards.indexRel}:{}),finalReportPath:reportRel,packetPath:fullCampaignPath(campaignPath,schema.submission.packetPath),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths],controllerPrefillDigestSha256:form?.automationInputs?.controllerPrefillDigestSha256??null};
 }
 export function ensurePacketShape({packet,directory,assignment}){
   const deficiencies=[];

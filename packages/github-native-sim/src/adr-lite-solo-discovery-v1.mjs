@@ -169,7 +169,7 @@ function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,
  for(const id of eligible){
   if(ids.length>=SOLO_WINDOW_MAX_UNITS)break;
   const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now});
-  const size=Buffer.byteLength(JSON.stringify(packet,null,2)+'\n');
+  const size=Buffer.byteLength(JSON.stringify(packet));
   // An oversized existing unit is still assigned by itself; no obligation is dropped.
   if(ids.length && packetBytes+size>SOLO_WINDOW_MAX_PACKET_BYTES)break;
   packetBytes+=size;
@@ -208,7 +208,7 @@ function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
    const rel=path.posix.join(dir,file);
    const body={schemaVersion:'curveyield-discovery-packet-page-v1',unitId,sourcePacketPath:packetPath,
     section,offset,items:chunk};
-   const bytes=Buffer.byteLength(JSON.stringify(body,null,2)+'\n');
+   const bytes=Buffer.byteLength(JSON.stringify(body));
    writeJson(repoFile(root,rel),body);
    pages.push({path:rel,section,offset,count:chunk.length,bytes,
     ...(bytes>SOLO_PACKET_PAGE_MAX_BYTES?{oversizedSingleItem:true}:{})});
@@ -217,7 +217,7 @@ function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
   for(const item of items){
    const trial={schemaVersion:'curveyield-discovery-packet-page-v1',unitId,sourcePacketPath:packetPath,
     section,offset,items:[...chunk,item]};
-   if(chunk.length&&Buffer.byteLength(JSON.stringify(trial,null,2))+1>SOLO_PACKET_PAGE_MAX_BYTES)emit();
+   if(chunk.length&&Buffer.byteLength(JSON.stringify(trial))>SOLO_PACKET_PAGE_MAX_BYTES)emit();
    chunk.push(item);
   }
   emit();
@@ -251,14 +251,14 @@ function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
     packetPath:packetRel(campaignPath,unitId),
     packetIndexPath:writeUnitPacketIndexV1({root,campaignPath,unitId,role}),
     submissionPath:submissionRel(campaignPath,unitId)}))};
-  if(Buffer.byteLength(JSON.stringify(payload,null,2))+1>32*1024)throw new Error('discovery window page exceeds actual stored-byte bound of 32 KiB');
+  if(Buffer.byteLength(JSON.stringify(payload))>32*1024)throw new Error('discovery window page exceeds 32 KiB');
   writeJson(repoFile(root,rel),payload);
   pages.push({path:rel,unitCount:chunk.length});
  }
  const indexRel=path.posix.join(dir,'INDEX_v1.json');
  const index={schemaVersion:'curveyield-discovery-unit-index-v1',role,unitCount:ids.length,pages,
   readingGuide:'Read a window page then its packetIndexPath. Complete and submit each unit individually; other submissions stay drafts. Discovery windows are bounded and the correctness/ATTACK passes remain separate.'};
- if(Buffer.byteLength(JSON.stringify(index,null,2))+1>32*1024)throw new Error('discovery window index exceeds actual stored-byte bound of 32 KiB');
+ if(Buffer.byteLength(JSON.stringify(index))>32*1024)throw new Error('discovery window index exceeds 32 KiB');
  writeJson(repoFile(root,indexRel),index);
  return indexRel;
 }

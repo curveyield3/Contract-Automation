@@ -21,160 +21,6 @@ const recordKey=(pathTokens,value,i)=>{
 };
 const clone=x=>structuredClone(x);
 
-const DERIVED_PAGE_TARGET_BYTES=24*1024;
-const DERIVED_PAGE_INDEX_MAX_BYTES=32*1024;
-
-// Lossless bounded views for large derived inputs. The original derived JSON
-// remains canonical; the index contains its exact digest and a structural
-// skeleton, while each non-empty array is represented by verified page refs.
-export function writeDerivedInputPagesV1({root,rel,targetBytes=DERIVED_PAGE_TARGET_BYTES,thresholdBytes=64*1024}={}){
- if(!root||typeof rel!=='string'||!rel)throw new Error('derived input paging requires root and campaign-relative path');
- const sourceFile=relfile(root,rel),raw=fs.readFileSync(sourceFile,'utf8'),sourceBytes=Buffer.byteLength(raw);
- const dir=path.posix.dirname(rel);
- const baseName=path.posix.basename(rel).replace(/_v[0-9]+\.json$/,'');
- const indexRel=path.posix.join(dir,baseName+'_INDEX_v1.json');
- const pagePrefix=baseName+'_SECTION_';
- const removeGenerated=keep=>{
-  try{for(const name of fs.readdirSync(relfile(root,dir))){
-   if(name.startsWith(pagePrefix)&&/_PAGE_[0-9]{4}_v1\.json$/.test(name)&&!keep.has(name))
-    fs.rmSync(relfile(root,path.posix.join(dir,name)),{force:true});
-  }}catch{}
- };
- if(sourceBytes<=thresholdBytes){
-  removeGenerated(new Set());
-  fs.rmSync(relfile(root,indexRel),{force:true});
-  return null;
- }
- let parsed;
- try{parsed=JSON.parse(raw);}catch(e){throw new Error('large derived input is not valid JSON: '+rel+' ('+String(e.message||e)+')');}
- const sourceSha256=digest(raw),sections=[],writtenNames=new Set();let nextSectionNumber=0;
- const writeSection=(fieldPath,items)=>{
-  const sectionId=String(++nextSectionNumber).padStart(4,'0');
-  const pages=[];let offset=0,pageNo=0,chunk=[];
-  const emit=()=>{
-   if(!chunk.length)return;
-   const file=pagePrefix+sectionId+'_PAGE_'+String(++pageNo).padStart(4,'0')+'_v1.json';
-   const pageRel=path.posix.join(dir,file);
-   const body={schemaVersion:'curveyield-lite-derived-input-page-v1',sourcePath:rel,sourceSha256,
-    sectionId,fieldPath,offset,items:chunk};
-   const content=pretty(body),pageBytes=Buffer.byteLength(content);
-   if(pageBytes>targetBytes&&chunk.length!==1)
-    throw new Error('multi-record derived input page exceeds actual stored-byte budget ('+pageBytes+' > '+targetBytes+'): '+pageRel);
-   fs.writeFileSync(relfile(root,pageRel),content);
-   pages.push({path:pageRel,offset,count:chunk.length,bytes:pageBytes,sha256:digest(content)});
-   writtenNames.add(file);offset+=chunk.length;chunk=[];
-  };
-  for(let i=0;i<items.length;i++){
-   let item=items[i];
-   const itemBytes=bytes(item);
-   if(itemBytes>targetBytes&&item&&typeof item==='object'&&!Array.isArray(item))
-    item=visit(item,[...fieldPath,i]);
-   const proposed={schemaVersion:'curveyield-lite-derived-input-page-v1',sourcePath:rel,sourceSha256,
-    sectionId,fieldPath,offset,items:[...chunk,item]};
-   if(chunk.length&&bytes(proposed)>targetBytes)emit();
-   const single={schemaVersion:'curveyield-lite-derived-input-page-v1',sourcePath:rel,sourceSha256,
-    sectionId,fieldPath,offset,items:[item]};
-   if(bytes(single)>targetBytes){
-    // Do not discard an indivisible security record or stop a phase merely
-    // because one source-bound item is larger than the preferred reading page.
-    // Its exact bytes and explicit oversized marker remain auditable.
-    if(chunk.length)emit();
-    chunk.push(item);
-    emit();
-    const last=pages.at(-1);
-    last.oversizedSingleItem=true;
-    last.recoveryInstruction='Read this single mandatory item in its entirety; it was not truncated.';
-    continue;
-   }
-   chunk.push(item);
-  }
-  emit();
-  sections.push({sectionId,fieldPath,itemCount:items.length,pageCount:pages.length,pages});
-  return {schemaVersion:'curveyield-lite-derived-array-reference-v1',sectionId,fieldPath,itemCount:items.length,pageCount:pages.length};
- };
- const visit=(node,tokens)=>{
-  if(Array.isArray(node)){
-   if(!node.length)return [];
-   return writeSection(tokens,node);
-  }
-  if(!node||typeof node!=='object')return node;
-  return Object.fromEntries(Object.entries(node).map(([key,value])=>[key,visit(value,[...tokens,key])]));
- };
- let skeleton;
- try{ skeleton=visit(parsed,[]); }
- catch(error){
-  const guide={schemaVersion:'curveyield-lite-derived-input-large-index-v1',
-    sourcePath:rel,sourceSha256,sourceBytes,status:'CANONICAL_SOURCE_REQUIRED',
-    recoveryInstruction:'Optional bounded reading views cannot represent an oversized record; read the unchanged canonical source. No audit record was omitted.',
-    diagnostic:String(error?.message??error).slice(0,500)};
-  fs.mkdirSync(relfile(root,dir),{recursive:true});
-  removeGenerated(new Set());
-  fs.writeFileSync(relfile(root,indexRel),pretty(guide));
-  return {indexRel,sourcePath:rel,sourceSha256,sourceBytes,status:'CANONICAL_SOURCE_REQUIRED',pageCount:0};
- }
- const index={schemaVersion:'curveyield-lite-derived-input-index-v1',sourcePath:rel,sourceSha256,sourceBytes,
-  pageTargetBytes:targetBytes,representation:'LOSSLESS_ARRAY_PAGES_WITH_STRUCTURAL_SKELETON',skeleton,sections,
-  readingGuide:'This is a bounded view of the exact canonical derived JSON identified by sourceSha256. Follow each array reference in skeleton to its section pages; each page preserves its original array offset and items. The original source file remains authoritative. Page and index byte counts are measured from the exact pretty-printed files stored in Git.'};
- const indexText=pretty(index);
- if(Buffer.byteLength(indexText)>DERIVED_PAGE_INDEX_MAX_BYTES){
-  const guide={schemaVersion:'curveyield-lite-derived-input-large-index-v1',
-    sourcePath:rel,sourceSha256,sourceBytes,
-    status:'CANONICAL_SOURCE_REQUIRED',
-    recoveryInstruction:'Reading index would exceed 32 KiB; use the exact canonical source file. The phase remains valid; no underlying candidate or evidence is removed.',
-    sectionCount:sections.length,pageCount:sections.reduce((n,x)=>n+x.pageCount,0)};
-  const guideText=pretty(guide);
-  fs.mkdirSync(relfile(root,dir),{recursive:true});
-  removeGenerated(new Set()); // Never publish incomplete or unreachable pages.
-  fs.writeFileSync(relfile(root,indexRel),guideText);
-  return {indexRel,sourcePath:rel,sourceSha256,sourceBytes,
-    pageCount:0,sectionCount:sections.length,status:'CANONICAL_SOURCE_REQUIRED'};
- }
- fs.mkdirSync(relfile(root,dir),{recursive:true});
- removeGenerated(writtenNames);
- fs.writeFileSync(relfile(root,indexRel),indexText);
- return {indexRel,sourcePath:rel,sourceSha256,sourceBytes,pageCount:sections.reduce((n,x)=>n+x.pageCount,0),sectionCount:sections.length};
-}
-
-
-
-export function verifyDerivedInputIndexV1({root,indexRel}={}){
- const index=JSON.parse(fs.readFileSync(relfile(root,indexRel),'utf8'));
- if(!['curveyield-lite-derived-input-index-v1','curveyield-lite-derived-input-large-index-v1'].includes(index.schemaVersion))
-  throw new Error('unsupported derived reading-index schema');
- if(typeof index.sourcePath!=='string'||!index.sourcePath.startsWith('campaigns/')||
-    index.sourcePath.split('/').includes('..'))throw new Error('unsafe derived reading-index source path');
- if(path.posix.dirname(index.sourcePath)!==path.posix.dirname(indexRel))
-  throw new Error('derived reading-index source is not colocated');
- const sourceBytes=fs.readFileSync(relfile(root,index.sourcePath));
- if(sourceBytes.length!==index.sourceBytes||digest(sourceBytes)!==index.sourceSha256)
-  throw new Error('derived source changed since reading view was generated');
- if(index.schemaVersion==='curveyield-lite-derived-input-large-index-v1')return {status:'CANONICAL_SOURCE_REQUIRED',sourcePath:index.sourcePath};
- if(!Array.isArray(index.sections))throw new Error('derived index missing sections');
- const seen=new Set();
- for(const section of index.sections){
-  let offset=0,count=0;
-  for(const page of section.pages??[]){
-   if(typeof page.path!=='string'||path.posix.dirname(page.path)!==path.posix.dirname(indexRel)||
-      !path.posix.basename(page.path).startsWith(path.posix.basename(index.sourcePath).replace(/_v[0-9]+\.json$/,'')+'_SECTION_'))
-    throw new Error('invalid derived section page path');
-   if(seen.has(page.path))throw new Error('duplicate derived section page');
-   seen.add(page.path);
-   const bytes=fs.readFileSync(relfile(root,page.path));
-   if(bytes.length!==page.bytes||digest(bytes)!==page.sha256)
-    throw new Error('derived reading page hash/byte length mismatch');
-   const body=JSON.parse(bytes.toString('utf8'));
-   if(body.sourceSha256!==index.sourceSha256||body.sourcePath!==index.sourcePath||
-      body.sectionId!==section.sectionId||JSON.stringify(body.fieldPath)!==JSON.stringify(section.fieldPath)||
-      body.offset!==offset||!Array.isArray(body.items)||body.items.length!==page.count)
-    throw new Error('derived reading page lineage/offset mismatch');
-   offset+=body.items.length;count+=body.items.length;
-  }
-  if(count!==section.itemCount||section.pageCount!==(section.pages??[]).length)
-   throw new Error('derived reading section has omitted or repeated items');
- }
- return {status:'VERIFIED',sourcePath:index.sourcePath,sectionCount:index.sections.length,pageCount:seen.size};
-}
-
 // Group large arrays into no more than 25 records and no more than 64 KiB per shard.
 // Small editable arrays and scalar fields remain in the BASE shard.
 export function shardWorkFormV1({root,formRel,phase,retireFull=true,force=false}){
@@ -313,52 +159,25 @@ export function shardFailureIndexV1({root,indexRel,deficiencies=[]}={}){
  const descriptors=index.schemaVersion==='curveyield-work-shard-index-v13'
    ?index.pages.flatMap(p=>secureReadV13(root,path.posix.join(path.posix.dirname(indexRel),p.file)).shards)
    :index.shards;
- const appendFor=(step,field)=>descriptors.find(s=>s.append&&s.path.includes(step)&&s.path.includes(field));
- const byPosition=(step,field,position)=>{
-   const all=descriptors.filter(s=>s.path.includes(step)&&s.path.includes(field));
-   return all.find(s=>!s.append&&position>=s.startIndex&&position<s.startIndex+s.recordKeys.length)
-     ??all.find(s=>s.append&&position>=s.startIndex&&position<s.startIndex+MAX_V13_APPEND_RECORDS);
- };
  for(const description of deficiencies){
-   const message=String(description);
-   const explicit=message.match(/(?:actions\.)?(step-[0-9]+)\.outputs\.([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/);
-   const loose=message.match(/targetDesigns\[([0-9]+)\]/);
-   const candidate=message.match(/(?:Phase 5 (?:candidate|target)\s+|candidateKey=)([A-Za-z0-9._-]+)/);
-   let chosen=null;
-   let marker=null;
-   if(explicit){
-     const indexInArray=Number(explicit[3]);
-     chosen=byPosition(explicit[1],explicit[2],indexInArray);
-     marker='index='+indexInArray;
-   }else if(loose){
-     chosen=byPosition('step-3','targetDesigns',Number(loose[1]));
-     marker='index='+loose[1];
-   }
-   if(!chosen&&candidate){
-     const key=candidate[1];
-     chosen=descriptors.find(s=>s.recordKeys?.some(k=>
-       k==='candidateKey='+key||k==='tempKey='+key||k==='canonicalId='+key));
-     if(chosen)marker='candidate='+key;
-   }
-   if(!chosen&&/Phase 5 candidate .*no source-backed disposition|reconciliationRecords|phase5ExecutionDisposition|duplicateOfCandidateKey|resolutionBasis|dispositionEvidenceRefs|conditionOrDependency/.test(message)){
-     chosen=appendFor('step-2','reconciliationRecords');
-     marker='ADD_SOURCE_BOUND_DISPOSITION';
-   }
-   if(!chosen&&/target design|targetDesigns|target execution|executionRequestRef/.test(message)){
-     chosen=appendFor('step-3','targetDesigns');
-     marker='ADD_TARGET_IF_EXECUTION_REQUIRED';
-   }
-   if(!chosen){unmapped.push(message);continue;}
-   const rel=path.posix.join(path.posix.dirname(indexRel),chosen.file);
-   const item=matches.get(rel)??{path:rel,recordKeys:[],defects:[]};
-   const id=chosen.append
-     ?'CONTROLLER_ASSIGNED_APPEND@'+chosen.startIndex+(marker?':'+marker:'')
-     :marker??chosen.recordKeys?.[0]??'REVIEW_INDEX';
-   if(!item.recordKeys.includes(id))item.recordKeys.push(id);
-   item.defects.push(message);matches.set(rel,item);
+  const message=String(description);
+  const ref=message.match(/(step-[0-9]+)\.outputs\.([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/);
+  const loose=message.match(/targetDesigns\[([0-9]+)\]/);
+  const indexInArray=ref?Number(ref[3]):loose?Number(loose[1]):null;
+  const step=ref?.[1]??'step-3',field=ref?.[2]??'targetDesigns';
+  if(indexInArray===null){unmapped.push(message);continue;}
+  const shard=descriptors.find(s=>s.path.includes(step)&&s.path.includes(field)&&
+    indexInArray>=s.startIndex&&indexInArray<s.startIndex+s.recordKeys.length);
+  if(!shard){unmapped.push(message);continue;}
+  const rel=path.posix.join(path.posix.dirname(indexRel),shard.file);
+  const item=matches.get(rel)??{path:rel,recordKeys:[],defects:[]};
+  const key=shard.recordKeys[indexInArray-shard.startIndex];
+  if(!item.recordKeys.includes(key))item.recordKeys.push(key);
+  item.defects.push(message);matches.set(rel,item);
  }
  return {shards:[...matches.values()].sort((a,b)=>a.path.localeCompare(b.path)),unmapped};
 }
+
 
 // v13 only: editable outputs live in work shards; the controller's expected
 // structure is stored separately from every reviewer-facing index and shard.
@@ -522,116 +341,6 @@ export function secureShardWorkFormV13({root,formRel,phase,retireFull=true}){
  if(retireFull)fs.unlinkSync(relfile(root,formRel));
  return {indexRel:path.posix.join(workDir,'INDEX_v1.json'),shards:descriptions.length,
    recordCount:descriptions.reduce((n,s)=>n+s.recordKeys.length,0)};
-}
-
-
-// Trusted, selective v13 reader. Candidate checkpoints need only the requested
-// record shards: do not materialize the full work form, immutable BASE pages,
-// or unrelated reviewer drafts. The final phase gate still restores everything.
-export function readSelectedWorkShardRecordsV13({root,indexRel,queries=[]}={}){
- if(!Array.isArray(queries)||!queries.length||queries.length>48)throw new Error('selective shard reader needs 1–48 queries');
- const working=secureReadV13(root,indexRel);
- if(working.schemaVersion!=='curveyield-work-shard-index-v13')throw new Error('selective shard reader requires v13');
- const trustedDir=secureLocationV13(working.formRel,working.phase),workDir=path.posix.dirname(indexRel);
- const trusted=secureReadV13(root,path.posix.join(trustedDir,'INDEX_v1.json'));
- if(!secureSameV13(working,trusted))throw new Error('selective shard index is not controller-owned');
- if(bytes(working)>MAX_INDEX)throw new Error('selective shard root index exceeds bound');
- const groups=new Map();
- for(const q of queries){
-   if(!['step-2','step-3','step-5'].includes(q.step)||
-      !['reconciliationRecords','newCandidateRecords','targetDesigns','targetDispositions','candidateProofRecords'].includes(q.field)||
-      !Array.isArray(q.aliases)||!q.aliases.length||q.aliases.some(x=>typeof x!=='string'||!x))
-      throw new Error('invalid selective shard query');
-   groups.set(q.step+'.'+q.field,(groups.get(q.step+'.'+q.field)??[]).concat(q));
- }
- const results={};
- const seen=new Set(),descriptors=[];
- for(const page of trusted.pages){
-   if(!/^INDEX_PAGE_[0-9]{4}_v1\.json$/.test(page.file)||seen.has(page.file))throw new Error('duplicate/unsafe selective page');
-   seen.add(page.file);
-   const actual=secureReadV13(root,path.posix.join(workDir,page.file));
-   const expected=secureReadV13(root,path.posix.join(trustedDir,page.file));
-   if(!secureSameV13(actual,expected)||secureHashV13(actual)!==page.sha256||bytes(actual)>MAX_INDEX)
-     throw new Error('selective index page mismatch: '+page.file);
-   descriptors.push(...(actual.shards??[]));
- }
- const found=new Map();
- for(const [section,queriesForSection] of groups){
-   const [step,field]=section.split('.');
-   const matching=descriptors.filter(d=>d.kind==='array'&&secureSameV13(d.path,['actions',step,'outputs',field]));
-   for(const d of matching){
-     const rel=path.posix.join(workDir,d.file);
-     if(!/^shard-[0-9]{4}_v1\.json$/.test(d.file))throw new Error('unsafe selective shard filename');
-     // The shard index owns filename, path, and mandatory immutable record IDs.
-     // The actual record is checked again below, preventing substitution of a
-     // different candidate while allowing the reviewer to edit its fields.
-     const item=secureReadV13(root,rel);
-     if(bytes(item)>(d.append?MAX_V13_APPEND_BYTES:MAX_SHARD)||
-        item.schemaVersion!=='curveyield-work-shard-v13'||
-        !secureSameV13(item.path,d.path)||item.kind!==d.kind||
-        item.startIndex!==d.startIndex||!Array.isArray(item.entries)||
-        item.entries.length>(d.append?MAX_V13_APPEND_RECORDS:d.recordKeys.length)||
-        (!d.append&&item.entries.length!==d.recordKeys.length))
-       throw new Error('selected shard shape/size mismatch: '+d.file);
-     const prefix=JSON.stringify(d.path)+':';
-     for(const [i,entry] of item.entries.entries()){
-       const expectedKey=d.append?prefix+'APPEND-'+String(i+1).padStart(4,'0'):prefix+d.recordKeys[i];
-       if(entry.key!==expectedKey||!entry.value||typeof entry.value!=='object'||Array.isArray(entry.value))
-         continue; // Non-record scalar/sentinel is never selected as a candidate.
-       if(!d.append&&recordKey(d.path,entry.value,d.startIndex+i)!==expectedKey)
-         throw new Error('selected immutable shard record identity changed: '+d.file);
-       const actualAliases=[entry.value.subjectKey,entry.value.candidateKey,entry.value.tempKey,
-         entry.value.canonicalId].filter(x=>typeof x==='string');
-       for(const q of queriesForSection){
-         if(!actualAliases.some(x=>q.aliases.includes(x)))continue;
-         const id=q.lookupId;
-         if(found.has(id))throw new Error('selected candidate '+id+' matches more than one shard record');
-         found.set(id,{record:structuredClone(entry.value),shardRel:rel,recordPosition:d.startIndex+i});
-       }
-     }
-   }
-   for(const q of queriesForSection){
-     const row=found.get(q.lookupId);
-     if(row)results[q.lookupId]=row;
-   }
- }
- return results;
-}
-
-
-// Enumerate one output's work-record identifiers from controller-owned pages.
-// Immutable keys need no record-body reads; only bounded authorized append
-// shards are opened to discover newly assigned candidate IDs.
-export function listIndexedWorkShardCandidateKeysV13({root,indexRel,step,field}={}){
- const working=secureReadV13(root,indexRel);
- if(working.schemaVersion!=='curveyield-work-shard-index-v13')throw new Error('v13 index required');
- const controller=secureLocationV13(working.formRel,working.phase),workDir=path.posix.dirname(indexRel);
- const trusted=secureReadV13(root,path.posix.join(controller,'INDEX_v1.json'));
- if(!secureSameV13(working,trusted))throw new Error('candidate-key enumeration index mismatch');
- const keys=new Set();
- for(const page of trusted.pages){
-  const expected=secureReadV13(root,path.posix.join(controller,page.file));
-  const actual=secureReadV13(root,path.posix.join(workDir,page.file));
-  if(!secureSameV13(actual,expected)||secureHashV13(actual)!==page.sha256)
-   throw new Error('candidate-key enumeration page mismatch');
-  for(const d of actual.shards??[]){
-   if(!secureSameV13(d.path,['actions',step,'outputs',field])||d.kind!=='array')continue;
-   if(d.append){
-    const item=secureReadV13(root,path.posix.join(workDir,d.file));
-    if(bytes(item)>MAX_V13_APPEND_BYTES||item.entries.length>MAX_V13_APPEND_RECORDS||
-       !secureSameV13(item.path,d.path)||item.startIndex!==d.startIndex)
-      throw new Error('append candidate key shard changed');
-    for(const e of item.entries){
-     const key=e.value?.canonicalId??e.value?.tempKey??e.value?.candidateKey;
-     if(typeof key==='string'&&key&&!key.startsWith('<'))keys.add(key);
-    }
-   }else for(const id of d.recordKeys??[]){
-    const match=String(id).match(/^(?:canonicalId|tempKey|candidateKey)=([A-Za-z0-9._-]+)$/);
-    if(match&&match[1]!=='NONE_IDENTIFIED')keys.add(match[1]);
-   }
-  }
- }
- return [...keys];
 }
 
 export function secureRestoreWorkFormV13({root,indexRel}){
