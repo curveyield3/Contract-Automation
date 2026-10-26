@@ -85,5 +85,5 @@ export function readCandidateSourceSubsetV1({root,campaignPath,phase=5,keys=[]}=
   selected.push(found[0]);
  }
  return {records:selected,missing:keys.filter(key=>!selected.some(x=>aliases(x).includes(key)||srcKey(x)===key)),
-  total:manifest.recordCount,indexRel,sourceDigests};
+  total:manifest.recordCount,keys:manifest.records.map(x=>x.canonicalKey),indexRel,sourceDigests};
 }
