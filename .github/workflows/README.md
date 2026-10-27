@@ -1,6 +1,6 @@
 # Contract Automation Workflow Inventory
 
-**Version:** v1
+**Version:** v2
 
 This README inventories the core Contract Automation workflows currently organized under `.github/workflows`. The workflows are grouped by functional role within the larger automation system.
 
@@ -49,7 +49,6 @@ This README inventories the core Contract Automation workflows currently organiz
 4. [**Lite Phase 0 Simulation Testing v1**](https://github.com/curveyield3/Contract-Automation/blob/main/.github/workflows/lite-phase0-simulation-testing-v1.yml) — `lite-phase0-simulation-testing-v1.yml`  
    Manual smoke test of the production Phase-0 Medusa stage: deploys the campaign on the Anvil fork and runs Medusa with a small call budget (default 1,000), skipping telemetry and publishing nothing. Use it to prove Medusa fixes before a full Phase-0 run.
 
-The repository-wide V7 full qualification workflow and its issue-to-dispatch bridge were retired and preserved without changes at [curveyield3/archive](https://github.com/curveyield3/archive/tree/main/Contract-Automation/.github/workflows). Normal Phase-0 bootstrap no longer depends on running this 688-test suite. Source identity, Anvil deployment, and campaign evidence gates still execute in the Phase-0 workflows and finalizers. The prior V7 qualification status document is retained solely as legacy pinned-runner evidence for existing V7 execution flows; it is not renewed by Phase-0 runs.
 
 ---
 
