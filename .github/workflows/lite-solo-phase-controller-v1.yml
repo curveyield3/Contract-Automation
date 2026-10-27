@@ -317,7 +317,7 @@ jobs:
             for attempt in 1 2 3; do
               if git push origin HEAD:main; then break; fi
               [ "$attempt" -lt 3 ] || exit 1
-              git pull --rebase origin main
+              git -c rebase.autoStash=true pull --rebase origin main
             done
           fi
           {
