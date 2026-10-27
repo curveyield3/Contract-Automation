@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "curveyield-one-time-source-repair-v1",
+  "repository": "curveyield3/Audit-Controller",
+  "archive": "campaigns/cyavKATv25.zip",
+  "replacement": "source-repairs/cyavKATv25/v27/upgrade/script/CyavKatDeployAll_v27.s.sol",
+  "expectedOriginalArchiveBlobSha": "4d0a8a6cccad4121d81d06130956adf68cc5cdb2",
+  "release": "v27",
+  "purpose": "Replace old v26 deployment entrypoint in original ZIP before independent lite-solo campaign admission"
+}
