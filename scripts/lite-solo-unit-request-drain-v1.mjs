@@ -3,6 +3,7 @@
 // Ordinary work is per-unit. Whole-phase validation/sealing occurs only once all accepted.
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1,markFinalizationV1,statusUnitQueueV1,reopenAggregateDefectsV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {repoFile,readJson,writeJson} from './lib/lite-solo-phase-work-v1.mjs';
@@ -32,12 +33,24 @@ if(![4,5,6].includes(phase)&&arg.mode!=='drain')throw Error('not a v4 unit phase
 if(arg.mode!=='finalize'){
  let changed=false;
  const files=fs.existsSync(requestDir)?fs.readdirSync(requestDir).filter(x=>/^[A-Za-z0-9._-]+\.json$/.test(x)).sort():[];
+ const queuePath=directory.unitQueueStatePath;
+ const recorded=queuePath&&fs.existsSync(repoFile(root,queuePath))?
+  readJson(repoFile(root,queuePath)):null;
  for(const filename of files){
   const request=JSON.parse(fs.readFileSync(path.join(requestDir,filename),'utf8'));
   if(request.operation==='FINALIZE')throw Error('untrusted ingress may not request controller-only FINALIZE');
   if(request.campaignId!==campaignId||request.phaseSequence!==phase)continue;
   if(filename!==request.workerId+'-'+request.requestId+'.json')
    throw Error('request file identity mismatch: '+filename);
+  // Historical completed requests remain immutable; skip expensive plan reloads.
+  const prior=recorded?.processedRequests?.[request.requestId];
+  if(prior){
+   const digest=createHash('sha256').update(JSON.stringify(request,null,2)+'\n').digest('hex');
+   if(recorded.processedRequestHashes?.[request.requestId]!==digest)
+    throw Error('processed request ID reused with changed bytes: '+request.requestId);
+   results.push({requestId:request.requestId,status:prior.status});
+   continue;
+  }
   const result=processUnitRequestV1({root,campaignPath,directory,request});
   const resultRel=path.posix.join(campaignPath,'work/phase-'+String(phase).padStart(2,'0'),
    'units','controller','results','REQUEST_'+request.requestId+'_v1.json');
