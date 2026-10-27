@@ -117,6 +117,8 @@ directory={
   "executionModel":"PARALLEL_WORKER_UNITS" if e["SKILL_RELEASE"]=="lite-solo-v4" else None,
   "authorityRelease":e["SKILL_RELEASE"],
   "authorityDigest":e["MANIFEST_SHA"],
+  "publicationPolicyPath":policy_path,
+  "publicationPolicySha256":policy_sha,
   "agent":{"actorId":"lite-solo-agent"},
   "currentReceiptPath":receipt_path,"currentPhaseSequence":0,"currentReviewer":"phase0-automation",
   "status":"ACTIVE","updatedAt":e["CREATED_AT"]
