@@ -35,10 +35,10 @@ scenario('A16',()=>p5Fixture('A16'),(f,d)=>{
  assert.equal(f.state().units[target.unitId].status,'BLOCKED_DEPENDENCY');
  d.plannerDependencies=target.dependencies;d.linkedEconomic=econ.unitId;d.linkedReconciliation=recon.unitId;
  d.linkedEconDependencyPresent=target.dependencies.includes(econ.unitId);
- // This is an explicit coverage gap when economic prerequisites are required by the contract.
- // The real implementation currently links P5-T to P5-R only.
  assert.ok(target.dependencies.includes(recon.unitId),'linked R must be a dependency');
- d.status='PARTIAL: actual linked E prerequisite not enforced by planner';
+ assert.ok(target.dependencies.includes(econ.unitId),
+  'A16: source-linked economic unit for C-ONE must be accepted before target may issue');
+ d.status='LOCAL prerequisite graph passed; final machine evidence still requires qualification';
 });
 scenario('A17',()=>p5Fixture('A17'),(f,d)=>{
  f.plan();
