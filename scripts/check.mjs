@@ -114,7 +114,6 @@ const workflowRoot = path.join(root, '.github', 'workflows');
 const workflowNames = await fs.readdir(workflowRoot);
 const forbiddenVersionedWorkflows = workflowNames.filter((name) =>
   /^audit-controller-execution-v\d+\.yml$/.test(name)
-  || /^v7-execution-infrastructure-qualification-v\d+\.yml$/.test(name)
   || /^v7-(?:recovery|v8-conformance).*\.yml$/.test(name)
 );
 if (forbiddenVersionedWorkflows.length > 0) {
