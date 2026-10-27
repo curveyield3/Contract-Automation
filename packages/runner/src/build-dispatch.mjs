@@ -196,16 +196,39 @@ export async function buildProject({
     ...(runCommand ? { runCommand } : {}),
     ...(fsApi ? { fsApi } : {})
   });
-  const sourceInventory = [...new Set([
-    ...(solidityBuild.sourceInventory ?? []),
-    ...(vyperBuild.sourceInventory ?? [])
-  ])].sort();
-
+  // Treat every exact-source Vyper compilation as an independently identified
+  // compiler unit, not a detached artifact. Phase 0 sealing and Slither consume
+  // these identities to bind all deployed bytecode to the admitted source.
+  const vyperUnits=[];
+  for(const artifact of vyperBuild.artifacts ?? []){
+    const sourceName=artifact.sourceName;
+    const relative=path.posix.normalize(sourceName);
+    if(relative.startsWith('../')||relative.startsWith('/')||!relative.startsWith('contracts/'))
+      throw new Error('Vyper source must remain inside the admitted contracts/ tree: '+sourceName);
+    const source=await fs.readFile(path.join(projectRoot,...relative.split('/')),'utf8');
+    const sourceSha256=scanHash(source);
+    const version=vyperCompiler.version;
+    const unitId='vyper-'+scanHash(relative).slice(0,16);
+    const fullArtifact={...artifact,language:'vyper',compilerVersion:version,
+      compilationUnitId:unitId,profile:'source-vyper-'+version};
+    const settings={language:'vyper',version,evmVersion:request.configuration.evmVersion??null};
+    const compilerInputSha256=scanHash(JSON.stringify({sourceName:relative,sourceSha256,settings}));
+    const compilerOutputSha256=scanHash(JSON.stringify({abi:artifact.abi,bytecode:artifact.bytecode,deployedBytecode:artifact.deployedBytecode}));
+    vyperUnits.push({unitId,profile:'source-vyper-'+version,compilerVersion:version,
+      compilerPackage:'vyper-cli',settings,sourceContents:{[relative]:source},sourceAsts:{},
+      compilerInputSha256,compilerOutputSha256,artifacts:[fullArtifact]});
+  }
+  const vyperArtifacts=vyperUnits.flatMap(unit=>unit.artifacts);
+  const sourceInventory=[...new Set([...(solidityBuild.sourceInventory??[]),...(vyperBuild.sourceInventory??[])])].sort();
+  const compilerVersions=[...new Set([...(solidityBuild.compilerVersions??[solidityBuild.compilerVersion].filter(Boolean)),vyperCompiler.version])].sort();
   return {
     ...solidityBuild,
-    artifacts: mergeArtifacts(solidityBuild.artifacts, vyperBuild.artifacts),
+    compilerVersions,
+    compilerProfiles:[...(solidityBuild.compilerProfiles??[]),...vyperUnits.map(unit=>({name:unit.unitId,compilerVersion:unit.compilerVersion,settings:unit.settings}))],
+    compilationUnits:[...(solidityBuild.compilationUnits??[]),...vyperUnits],
+    artifacts:mergeArtifacts(solidityBuild.artifacts,vyperArtifacts),
     sourceInventory,
-    sourceInventoryFiles: sourceInventory.length,
+    sourceInventoryFiles:sourceInventory.length,
     vyperBuild
   };
 }
