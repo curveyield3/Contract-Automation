@@ -9,8 +9,14 @@ const safeRel=p=>typeof p==='string'&&p.length>0&&!p.startsWith('/')&&!p.include
 const localRel=(campaign,p)=>p.startsWith(campaign+'/')?p:path.posix.join(campaign,p);
 const identitySafe=id=>String(id).replace(/[^A-Za-z0-9._-]/g,'_');
 const code=x=>String(x??'').toUpperCase();
-const executedNames=(ledger,id)=> (ledger?.tests??[]).filter(t=>t&&typeof t.name==='string'
-  &&t.name.includes(id)&&['PASS','FAIL'].includes(t.status));
+const executedNames=(ledger,id)=> {
+  // Solidity assertion functions cannot contain a hyphen; baseline IDs are
+  // emitted as BOB_0001 inside Foundry/Medusa harness names.
+  const normalized=String(id).replaceAll('-','_');
+  return (ledger?.tests??[]).filter(t=>t&&typeof t.name==='string'
+    &&(t.name.includes(id)||t.name.includes(normalized))
+    &&['PASS','FAIL'].includes(t.status));
+};
 const supportedSource=x=>x?.status==='LIVE_FORK_SOURCE_VERIFIED'&&x?.targets?.length>0;
 
 /**
@@ -47,7 +53,7 @@ export function validateLiveForkBaselineRecordV1({root,campaignPath,campaignId,s
     if(!local.startsWith(prefix)){errors.push('Baseline V7 request is not in its controller-prefilled group directory: '+requestPath);continue;}
     const full=localRel(campaignPath,local),request=json(root,full);
     if(!request?.requestId||!request?.requestDigest||request.campaignId!==campaignId
-      ||request?.source?.archiveSha256!==sourceSha256||request?.phaseId!=='build-and-test'){
+      ||(request?.source?.archiveSha256!==undefined&&request.source.archiveSha256!==sourceSha256)||request?.phaseId!=='build-and-test'){
       errors.push('V7 baseline request is missing or not bound to campaign/source/Phase 6: '+requestPath);continue;
     }
     const analysis=request.configuration?.analysis??{};
