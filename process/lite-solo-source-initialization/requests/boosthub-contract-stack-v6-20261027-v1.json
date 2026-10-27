@@ -6,5 +6,5 @@
   "scanUrls": [],
   "authorizePhase0Execution": true,
   "deliveryTransport": "DIRECT",
-  "recoveryReason": "Same campaign Phase 0: Vyper compiler identity corrected in native Slither export a0c1833cbfa9fb0cec7bcbcf4bb95dde81d34cd1"
+  "recoveryReason": "Same campaign Phase 0: native Vyper Slither source-target route f43f572cb37bd3c8aa1a36118ab711cad53e7569"
 }
