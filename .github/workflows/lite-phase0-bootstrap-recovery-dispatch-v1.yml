@@ -10,12 +10,52 @@ permissions:
   contents: read
   actions: write
 
-concurrency:
-  group: lite-phase0-bootstrap-recovery
-  cancel-in-progress: false
-
 jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      requests: ${{ steps.requests.outputs.requests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Find independent Phase-0 recovery requests
+        id: requests
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          root=process/agent-upload/lite-phase0-bootstrap-recovery
+          if [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]]; then
+            mapfile -t changed < <(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" -- "$root/")
+          else
+            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")
+          fi
+          : > /tmp/lite-phase0-recovery-requests.ndjson
+          for request in "${changed[@]}"; do
+            [[ "$request" =~ ^process/agent-upload/lite-phase0-bootstrap-recovery/[A-Za-z0-9._-]+\.json$ ]] || continue
+            test -f "$request" || continue
+            jq -ec --arg file "$request" '
+              select(.schemaVersion=="curveyield-lite-phase0-bootstrap-recovery-v1"
+                and (.campaign_id|type)=="string"
+                and (.campaign_id|test("^[A-Za-z0-9._-]+-r[0-9]+$"))
+                and (.campaign_path|type)=="string"
+                and (.campaign_path|startswith("campaigns/")))
+              | {request_path:$file,campaign_id:.campaign_id}
+            ' "$request" >> /tmp/lite-phase0-recovery-requests.ndjson
+          done
+          echo "requests=$(jq -sc '{include:.}' /tmp/lite-phase0-recovery-requests.ndjson)" >> "$GITHUB_OUTPUT"
   dispatch:
+    needs: discover
+    if: ${{ needs.discover.outputs.requests != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.requests) }}
+    concurrency:
+      group: lite-phase0-bootstrap-recovery-${{ matrix.campaign_id }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -30,14 +70,13 @@ jobs:
         id: request
         env:
           GH_TOKEN: ${{ github.token }}
+          MATRIX_REQUEST: ${{ matrix.request_path }}
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t requests < <(
-            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA"               --jq '.files[]? | select(.status!="removed") | .filename | select(startswith("process/agent-upload/lite-phase0-bootstrap-recovery/") and endswith(".json"))'
-          )
-          [ "${#requests[@]}" -eq 1 ] || { echo "::error::Exactly one Phase-0 recovery request must change per trigger."; exit 1; }
-          req="${requests[0]}"
+          req="$MATRIX_REQUEST"
+          [[ "$req" =~ ^process/agent-upload/lite-phase0-bootstrap-recovery/[A-Za-z0-9._-]+\.json$ ]]
+          test -f "$req"
           jq -e '
             .schemaVersion=="curveyield-lite-phase0-bootstrap-recovery-v1" and
             (.campaign_id|type=="string" and length>0) and
