@@ -111,6 +111,8 @@ jobs:
           new_slug="audit-preview-completion-${slug#audit-preview-}"
           preview_path="$(gh api "repos/curveyield3/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/$slug.json?ref=main" --jq .content | base64 -d | jq -er .workspacePath)"
           [[ "$preview_path" == campaigns/* && "$preview_path" != *..* ]]
+          # Keep selected Audit-Controller token available for lazy sparse/promisor blob fetches.
+          gh auth setup-git
           gh repo clone curveyield3/Audit-Controller .audit-controller -- --branch main --depth 1 --filter=blob:none --sparse
           git -C .audit-controller sparse-checkout set --no-cone \
             '/Audit Skill - Lite-Solo Authority/lite-solo-v4/**' \
