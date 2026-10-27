@@ -6,5 +6,5 @@
   "scanUrls": [],
   "authorizePhase0Execution": true,
   "deliveryTransport": "DIRECT",
-  "recoveryReason": "Resume same campaign with source-pinned Vyper compiler installation 216dfbe48626e79aecec53eee7918094e7a22b88"
+  "recoveryReason": "Same Phase 0 generation: correct source pragma recognition 9df3b533bc5ff752abb43e87eb0daf5732a803ce"
 }
