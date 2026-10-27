@@ -947,9 +947,17 @@ function materialPhase5Candidates({root,campaignPath,form}){
   const phase4=phaseOutput(prior,'step-3','candidateRecords')??[];
   const newCandidates=form?.actions?.['step-2']?.outputs?.newCandidateRecords??[];
   const keys=[],sourceAnchors={};
+  // Phase-4 sealing adds canonicalId without changing the immutable source
+  // candidate key used by already-claimed Phase-5 target designs and their
+  // V7 requests. Resolve the exact accepted alias, not a fabricated target.
+  const targetKeys=new Set((form?.actions?.['step-3']?.outputs?.targetDesigns??[])
+    .filter(x=>x&&typeof x==='object')
+    .map(x=>String(x.candidateKey??'').trim()).filter(Boolean));
   for(const record of [...phase4,...newCandidates]){
     if(record==='NONE_IDENTIFIED')continue;
-    const key=String(record?.canonicalId??record?.tempKey??'').trim();
+    const canonical=String(record?.canonicalId??'').trim();
+    const original=String(record?.tempKey??'').trim();
+    const key=targetKeys.has(canonical)?canonical:targetKeys.has(original)?original:canonical||original;
     if(!key)throw new Error('Phase 5 material candidate has no key');
     const anchor=String(record?.sourceAnchor??'').trim();
     if(sourceAnchors[key]!==undefined&&sourceAnchors[key]!==anchor)
