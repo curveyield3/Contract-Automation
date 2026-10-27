@@ -106,45 +106,42 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          encoded_path="$(jq -rn --arg p "$AUDIT_DIRECTORY" '$p|split("/")|map(@uri)|join("/")')"
-          encoded="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$encoded_path?ref=main" --jq .content)"
-          printf '%s' "$encoded" | base64 -d >/tmp/lite-solo-campaign-directory.json
-          campaign_id="$AUDIT_CAMPAIGN"
-          campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
-          # A newer same-source rN campaign can replace the legacy slug pointer.
-          # Recover the old generation into its own revision-scoped controller
-          # directory without modifying the newer generation's canonical record.
-          if jq -e --arg id "$campaign_id" '.campaignId==$id' /tmp/lite-solo-campaign-directory.json >/dev/null; then
-            campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
-          else
-            snapshot="$(jq -r '.directorySnapshotCommitSha // empty' "$REQUEST_FILE")"
-            alias="Audit Campaign Directory/campaigns/$campaign_id.json"
-            alias_encoded="$(jq -rn --arg p "$alias" '$p|split("/")|map(@uri)|join("/")')"
-            alias_blob="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$alias_encoded?ref=main" --jq .content 2>/dev/null || true)"
-            if [ -n "$alias_blob" ] && [ "$alias_blob" != "null" ]; then
-              printf '%s' "$alias_blob" | base64 -d >/tmp/lite-solo-campaign-directory.json
+          requested_path="$(jq -r '.campaignPath // empty' "$REQUEST_FILE")"
+          pinned_commit="$(jq -r '.directorySnapshotCommitSha // empty' "$REQUEST_FILE")"
+          if [ -n "$requested_path" ]; then
+            # A prior revision may have been superseded at the shared slug pointer.
+            # Use the exact original campaign's immutable receipt and pinned directory
+            # commit; publish only its revision-specific alias, never modify the newer rN.
+            [[ "$requested_path" == campaigns/* && "$requested_path" != *..* ]] || { echo "::error::Unsafe requested campaign path"; exit 1; }
+            campaign_path="$requested_path"
+            bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
+            alias="Audit Campaign Directory/campaigns/$AUDIT_CAMPAIGN.json"
+            if git -C .audit-controller cat-file -e "HEAD:$alias" 2>/dev/null; then
+              git -C .audit-controller show "HEAD:$alias" >/tmp/lite-solo-campaign-directory.json
             else
-              [[ "$snapshot" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::SUPERSEDED_CAMPAIGN_DIRECTORY: exact prior directory commit required"; exit 1; }
-              encoded="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$encoded_path?ref=$snapshot" --jq .content)"
-              printf '%s' "$encoded" | base64 -d >/tmp/lite-solo-campaign-directory.json
+              [[ "$pinned_commit" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::SUPERSEDED_CAMPAIGN_DIRECTORY: sealed directory commit required"; exit 1; }
+              git -C .audit-controller fetch --no-tags --depth=1 --filter=blob:none origin "$pinned_commit"
+              git -C .audit-controller show "$pinned_commit:$AUDIT_DIRECTORY" >/tmp/lite-solo-campaign-directory.json
             fi
-            campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
             AUDIT_DIRECTORY="$alias"
+          else
+            encoded_path="$(jq -rn --arg p "$AUDIT_DIRECTORY" '$p|split("/")|map(@uri)|join("/")')"
+            encoded="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$encoded_path?ref=main" --jq .content)"
+            printf '%s' "$encoded" | base64 -d >/tmp/lite-solo-campaign-directory.json
+            campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
+            bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
           fi
-          jq -e --arg id "$campaign_id" --arg path "$campaign_path" '.schemaVersion=="curveyield-audit-campaign-directory-entry-v2" and
+          receipt=".audit-controller/$campaign_path/receipts/PHASE_00_RECEIPT_v1.json"
+          jq -e --arg id "$AUDIT_CAMPAIGN" --arg path "$campaign_path" --arg sha "$(jq -r .source.sha256 "$receipt")" --arg gen "$(jq -r .campaign.campaignGenerationId "$receipt")" --argjson phase "$(jq -r .phaseSequence "$REQUEST_FILE")" '
+            .schemaVersion=="curveyield-audit-campaign-directory-entry-v2" and
             .campaignId==$id and .workspacePath==$path and .mode=="LITE_SOLO" and
-            (.agentModel=="ONE_PERSISTENT_AGENT" or .agentModel=="PARALLEL_WORKER_UNITS") and
-            .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT" and (.agent.chatUrl==null) and
-            (.masterReview==null) and (.pendingMasterReview==null)' /tmp/lite-solo-campaign-directory.json >/dev/null
+            .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT" and
+            .sourceSha256==$sha and .campaignGenerationId==$gen and
+            .currentAssignment.phaseSequence==$phase and .currentAssignment.status=="ACTIVE"
+          ' /tmp/lite-solo-campaign-directory.json >/dev/null
           if jq -e '.authorityRelease=="lite-solo-v4" and .currentAssignment.phaseSequence>=4 and .currentAssignment.phaseSequence<=6' /tmp/lite-solo-campaign-directory.json >/dev/null; then
             echo '::error::Use the v4 immutable unit ingress for Phases 4–6'; exit 1
           fi
-          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
-          receipt=".audit-controller/$campaign_path/receipts/PHASE_00_RECEIPT_v1.json"
-          jq -e --arg id "$campaign_id" --arg sha "$(jq -r .source.sha256 "$receipt")" --arg gen "$(jq -r .campaign.campaignGenerationId "$receipt")" --argjson phase "$(jq -r .phaseSequence "$REQUEST_FILE")" '
-            .campaignId==$id and .sourceSha256==$sha and .campaignGenerationId==$gen and
-            .currentAssignment.phaseSequence==$phase and .currentAssignment.status=="ACTIVE"
-          ' /tmp/lite-solo-campaign-directory.json >/dev/null
           mkdir -p ".audit-controller/$(dirname "$AUDIT_DIRECTORY")"
           cp /tmp/lite-solo-campaign-directory.json ".audit-controller/$AUDIT_DIRECTORY"
           echo "path=$campaign_path" >> "$GITHUB_OUTPUT"
