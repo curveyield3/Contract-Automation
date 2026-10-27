@@ -10,6 +10,7 @@ import {deriveBaselineObligationsV1} from '../../packages/github-native-sim/src/
 import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite-solo-phase-prefill-v1.mjs';
 import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
+import {planSemanticBatchesV1} from './lite-solo-semantic-batches-v1.mjs';
 
 export const UNIT_POLICY=Object.freeze({issueBatchDefault:4,issueBatchMax:4,approvalBatchMax:5,maxParallelWorkers:null});
 export const REQUEST_SCHEMA='curveyield-lite-solo-unit-batch-request-v1';
@@ -43,7 +44,8 @@ const unitBase=(campaign,phase,id)=>path.posix.join(rootOf(campaign,phase),id);
 const asArray=x=>Array.isArray(x)?x:[];
 const isObject=x=>x&&typeof x==='object'&&!Array.isArray(x);
 const clone=x=>structuredClone(x);
-const depSatisfied=(queue,u)=>asArray(u.dependencies).every(k=>queue.units[k]?.status==='ACCEPTED');
+const depSatisfied=(queue,u)=>asArray(u.dependencies).every(k=>
+ queue.units[k]?.status==='ACCEPTED'||queue.acceptedRecords?.[k]?.status==='ACCEPTED');
 const isPhase=(p)=>[4,5,6].includes(p);
 const RELEASE='lite-solo-v4';
 const AUTHORITY='Audit Skill - Lite-Solo Authority/lite-solo-v4';
@@ -88,7 +90,7 @@ function emptyQueue(plan){
   campaignGenerationId:plan.campaignGenerationId,phaseSequence:plan.phaseSequence,
   phaseEpoch:plan.phaseEpoch,sourceSha256:plan.sourceSha256,authorityDigest:plan.authorityDigest,
   unitSpecRevision:plan.unitSpecRevision,stage:plan.stage,
-  units:{},processedRequests:{},processedRequestHashes:{},revision:0,finalizeStatus:'NOT_STARTED',newlyEligibleUnitIds:[]};
+  units:{},acceptedRecords:{},processedRequests:{},processedRequestHashes:{},revision:0,finalizeStatus:'NOT_STARTED',newlyEligibleUnitIds:[]};
 }
 function addUnit(plan,queue,unit){
  if(queue.units[unit.unitId]||plan.units.some(x=>x.unitId===unit.unitId))throw Error('duplicate unit '+unit.unitId);
@@ -154,18 +156,31 @@ function readPlan(root,campaign,phase){
     if(hex(rawValue)!==u.initialValueSha256)throw Error('unit prefill digest mismatch');
     u.initialValue=readPagedPrefillV1(root,u.initialValueRef,rawValue);
    }
+   if(u.kind==='BATCH'){
+    if(!u.membersRef||u.membersRef!==u.packetPath)throw Error('missing batch assignment manifest');
+    const raw=fs.readFileSync(repoFile(root,u.membersRef));
+    if(hex(raw)!==u.packetSha256)throw Error('batch packet digest mismatch');
+    const payload=readPagedPrefillV1(root,u.membersRef,raw);
+    if(payload.unitId!==u.unitId||payload.phaseSequence!==phase||
+       payload.schemaVersion!=='curveyield-lite-solo-batched-assignment-v1'||
+       !Array.isArray(payload.members)||payload.members.length<2)
+      throw Error('invalid batch assignment payload');
+    u.members=payload.members;
+   }
    units.push(u);
   }
  }
  if(units.length!==index.unitCount)throw Error('missing unit plan pages');
  const ownership={};
  for(const u of units){
-  if(!u.path)continue;
-  const key=u.kind==='APPEND'?dot([...u.path,'APPEND']):
-   Number.isInteger(u.recordIndex)?dot([...u.path,String(u.recordIndex)]):null;
-  if(!key)continue;
-  if(ownership[key])throw Error('duplicate canonical unit owner: '+key);
-  ownership[key]=u.unitId;
+  for(const m of u.kind==='BATCH'?u.members:[u]){
+   if(!m.path)continue;
+   const key=m.kind==='APPEND'?dot([...m.path,'APPEND']):
+    Number.isInteger(m.recordIndex)?dot([...m.path,String(m.recordIndex)]):null;
+   if(!key)continue;
+   if(ownership[key])throw Error('duplicate canonical unit owner: '+key);
+   ownership[key]=u.unitId;
+  }
  }
  return {...index,units,recordOwnership:ownership};
 }
@@ -183,6 +198,10 @@ function publishPlan(root,campaign,phase,plan,queue){
  };
  for(const unit of plan.units){
   const u=clone(unit);
+  if(u.kind==='BATCH'){
+   if(!u.membersRef||!u.packetPath||!u.members?.length)throw Error('invalid batch plan serialization');
+   delete u.members;
+  }
   if(Buffer.byteLength(pretty(u))>12000&&u.initialValue!==undefined){
    const rel=path.posix.join(unitBase(campaign,phase,u.unitId),'UNIT_PREFILL_v1.json');
    const manifest=writePagedPrefillV1(root,rel,u.initialValue);
@@ -231,6 +250,40 @@ export function createUnitPlanV1({root,campaignPath,directory,phase,automationRo
  directory.executionModel='PARALLEL_WORKER_UNITS';
  return queue;
 }
+
+function consolidateNewSemanticUnitsV1({root,campaignPath,phase,plan,queue}){
+ const proposed=planSemanticBatchesV1(plan.units,phase);
+ const selected=proposed.batches.filter(b=>b.members.length>1);
+ if(!selected.length)return;
+ const replacements=new Map(),removed=new Set(),serial={};
+ for(const group of selected){
+  const family=group.members[0].unitId.replace(/-[0-9]+$/,'');
+  const number=(serial[family]??0)+1;serial[family]=number;
+  const id=family+'-B'+String(number).padStart(4,'0');
+  if(queue.units[id])throw Error('batched unit identity collision: '+id);
+  if(group.members.some(m=>!['AVAILABLE','BLOCKED_DEPENDENCY'].includes(queue.units[m.unitId]?.status)))
+   throw Error('cannot rebatch an already claimed, submitted or accepted unit');
+  const payload={schemaVersion:'curveyield-lite-solo-batched-assignment-v1',unitId:id,
+   phaseSequence:phase,field:group.field,groupKeys:group.groupKeys,members:group.members,
+   readingGuide:'Complete each assigned member by its original recordKey. Omit already accepted members during targeted rework.'};
+  const packetPath=path.posix.join(unitBase(campaignPath,phase,id),'ASSIGNMENT_PACKET_v1.json');
+  const manifest=writePagedPrefillV1(root,packetPath,payload);
+  const spec={unitId:id,kind:'BATCH',field:group.field,members:group.members,
+   memberUnitIds:group.memberUnitIds,recordCount:group.members.length,
+   membersRef:packetPath,packetPath,packetSha256:sha(manifest),
+   dependencies:[...new Set(group.members.flatMap(m=>asArray(m.dependencies)))],
+   unitSpecRevision:1};
+  replacements.set(group.members[0].unitId,spec);
+  for(const m of group.members){
+   removed.add(m.unitId);delete queue.units[m.unitId];
+   plan.recordOwnership[dot([...m.path,String(m.recordIndex)])]=id;
+  }
+  addUnit(plan,queue,spec);
+ }
+ const original=plan.units.filter(u=>!removed.has(u.unitId)&&u.kind!=='BATCH');
+ plan.units.splice(0,plan.units.length,...original,...replacements.values());
+}
+
 function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
  const idxRel=directory.currentAssignment?.workShardIndexPath;
  if(!idxRel)throw Error('missing canonical semantic shard index');
@@ -299,11 +352,13 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
     p.initialValue.obligationIds.includes(obligationId)).map(p=>p.unitId);
   }
  }
+ consolidateNewSemanticUnitsV1({root,campaignPath,phase,plan,queue});
  // Only newly issued available semantic units may transition to dependency-blocked.
  // Reconciliation must never reset persisted ACCEPTED discovery units.
  for(const u of plan.units)if(u.dependencies.length&&queue.units[u.unitId]?.status==='AVAILABLE')
   queue.units[u.unitId].status='BLOCKED_DEPENDENCY';
- const missing=new Set(plan.units.flatMap(x=>x.dependencies).filter(id=>!queue.units[id]));
+ const memberIds=new Set(plan.units.flatMap(u=>u.kind==='BATCH'?u.memberUnitIds:[]));
+ const missing=new Set(plan.units.flatMap(x=>x.dependencies).filter(id=>!queue.units[id]&&!memberIds.has(id)));
  if(missing.size)throw Error('unsatisfied planner unit references: '+[...missing].join(', '));
 }
 function validateRequest(request,directory,phase){
