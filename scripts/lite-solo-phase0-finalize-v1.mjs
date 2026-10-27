@@ -229,6 +229,8 @@ write(receiptPath,receipt);
 const directoryPath=path.join(controllerRoot,...String(receipt.campaign.campaignDirectoryEntryPath).split('/'));
 const directory=read(required(directoryPath,'Audit Campaign Directory entry'));
 if(directory.campaignId!==receipt.campaign.campaignId) throw new Error('campaign directory identity mismatch');
+if(directory.auditPreview?.permittedContracts!==receipt.auditPreview.permittedContracts||
+  directory.auditPreview?.terminalPhase!==4)throw new Error('AUDIT_PREVIEW_PERMIT_BINDING_MISMATCH');
 const sealedPhase0Receipt=rel(controllerRoot,receiptPath);
 const authorityRoot=path.posix.dirname(receipt.authority.homepagePath);
 if(authorityRoot!=='Audit Skill - Audit Preview/audit-preview-v1')throw new Error('unexpected Audit Preview authority root');
@@ -253,6 +255,8 @@ const directoryV2={
   campaignName:receipt.campaign.campaignName,
   workspacePath:campaignPath,
   mode:'LITE_SOLO',
+  product:'AUDIT_PREVIEW',
+  auditPreview:{...receipt.auditPreview},
   deliveryTransport:'DIRECT',
   agent:directory.agent,
   agentModel:receipt.authority.liteRelease==='audit-preview-v1'?'PARALLEL_WORKER_UNITS':'ONE_PERSISTENT_AGENT',
