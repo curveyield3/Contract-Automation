@@ -597,6 +597,21 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       });
     }
     if(priorRows.length)form.actions['step-2'].outputs.reconciliationRecords=priorRows;
+    // v4: freeze candidate-specific target record ownership before any worker claim.
+    // Reconciliation retains original candidate key; later new candidates use authorized append slots.
+    if(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v4'){
+      const templates=form.actions?.['step-3']?.outputs?.targetDesigns??[];
+      const model=templates.find(x=>x&&typeof x==='object'&&!Array.isArray(x));
+      const keys=[...new Set(priorCandidates.filter(x=>x&&typeof x==='object'&&!Array.isArray(x))
+       .map(x=>x.tempKey??x.canonicalId??x.candidateKey)
+       .filter(x=>typeof x==='string'&&x.trim()&&!x.startsWith('<')&&!['NONE_IDENTIFIED','NO_CANDIDATE'].includes(x)))];
+      form.actions['step-3'].outputs.targetDesigns=keys.length
+       ?keys.map(candidateKey=>({...structuredClone(model),candidateKey}))
+       :['NONE_IDENTIFIED'];
+      form.automationInputs.expectedPhase5TargetKeys=keys;
+      form.automationInputs.controllerOwnedAutomationInputs=uniq([
+       ...(form.automationInputs.controllerOwnedAutomationInputs??[]),'expectedPhase5TargetKeys']);
+    }
     // Phase 5 designs its own candidate-specific simulations from reviewed source evidence.
     // No Phase-0 randomized simulation, telemetry, or Medusa baseline is required.
     delete form.automationInputs.phase0BaselineSimulation;
