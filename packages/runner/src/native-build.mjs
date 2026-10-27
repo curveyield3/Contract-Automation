@@ -289,6 +289,15 @@ export async function compileRepoNativeHardhat({
   });
   if (!install || install.exitCode !== 0) throw commandFailure('Hardhat locked dependency installation failed', install);
 
+  // A source-authored Hardhat audit wrapper may compile Solidity from upgrade/src
+  // while its Foundry remappings resolve vetted npm packages under
+  // ipor-fusion/node_modules. Install those source-declared dependencies before
+  // loading the Hardhat config; otherwise its vendored-package links fail.
+  const nestedFoundry=path.join(projectRoot,'upgrade');
+  const foundryDependencyInstall=await exists(path.join(nestedFoundry,'foundry.toml'),fsApi)
+    ? await installNativeFoundryDependencies({projectRoot:nestedFoundry,runCommand,fsApi})
+    : [];
+
   const vendorRootAdapter = await materializeVendorAdapter(projectRoot, { fsApi });
 
   const compile = await runCommand({
@@ -332,7 +341,8 @@ export async function compileRepoNativeHardhat({
     sourceAsts,
     sourceInventory: sources,
     sourceInventoryFiles: sources.length,
-    vendorRootAdapter
+    vendorRootAdapter,
+    foundryDependencyInstall
   };
 }
 
