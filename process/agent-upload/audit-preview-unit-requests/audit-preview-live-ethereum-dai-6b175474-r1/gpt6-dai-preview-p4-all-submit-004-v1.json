@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "p4-all-submit-004-v1",
+  "operation": "SUBMIT",
+  "campaignId": "audit-preview-live-ethereum-dai-6b175474-r1",
+  "campaignGenerationId": "audit-preview-live-ethereum-dai-6b175474-r1-g1-20261027T115633Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-dai-preview",
+  "sourceSha256": "1c384141058f50d53b9e58b89c0b83aa60bd1066406f017d177121de332705f2",
+  "authorityDigest": "bbae5bdb544d8c513fe6c48cf6996685bebdafcb85d0736e72e81b4f4ea8bfa8",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "P4-SP-013",
+      "claimEpoch": 1,
+      "claimToken": "a6d429c7-b2b9-43a2-8f43-5f8127abb0e0",
+      "packetSha256": "445a40f8d1ee222efd4a51863c8f5182f820d84c338cff5cb85bf333b19ebf8e",
+      "submissionPath": "campaigns/audit-preview-live-ethereum-Dai-6b175474 r1/work/phase-04/units/P4-SP-013/submissions/gpt6-dai-preview/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "c976eaf3fcb35b1849c5c8e44dc64566df8e65b5dfe52550caf15ddcff1d2c32",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "P4-SP-014",
+      "claimEpoch": 1,
+      "claimToken": "4f95b5d8-3f8e-4b65-b117-6dffb4fd5c75",
+      "packetSha256": "445a40f8d1ee222efd4a51863c8f5182f820d84c338cff5cb85bf333b19ebf8e",
+      "submissionPath": "campaigns/audit-preview-live-ethereum-Dai-6b175474 r1/work/phase-04/units/P4-SP-014/submissions/gpt6-dai-preview/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "0f964df6c054e669a9b1e52447ace715bdd38ce0e0c6d06c070bcd98a37a1561",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "P4-SP-015",
+      "claimEpoch": 1,
+      "claimToken": "dfc8c478-7a19-4de5-924c-cab0f69208ac",
+      "packetSha256": "445a40f8d1ee222efd4a51863c8f5182f820d84c338cff5cb85bf333b19ebf8e",
+      "submissionPath": "campaigns/audit-preview-live-ethereum-Dai-6b175474 r1/work/phase-04/units/P4-SP-015/submissions/gpt6-dai-preview/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "855c8645b39b552850a34b07920229fc59a2cc68621805ea04a1658a177f537c",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "P4-SP-016",
+      "claimEpoch": 1,
+      "claimToken": "0bde8b81-2260-4222-bd1c-ddfd0ebfe327",
+      "packetSha256": "3b51b36d69f9557532b17a0a70ddb28c508b70112ce3a31fdde9924702fc0783",
+      "submissionPath": "campaigns/audit-preview-live-ethereum-Dai-6b175474 r1/work/phase-04/units/P4-SP-016/submissions/gpt6-dai-preview/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "a03caedfdd01d3d0f5bb1e2aa7941d546698a60bbf847852360bdcc7a2a901a5",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "P4-L-001",
+      "claimEpoch": 1,
+      "claimToken": "a40c4d0b-039d-4399-a450-2c6b55e0b1a3",
+      "packetSha256": "33aed4c835988b8e39332c33ab79722fb882ca822fde961e78946d885516f5fc",
+      "submissionPath": "campaigns/audit-preview-live-ethereum-Dai-6b175474 r1/work/phase-04/units/P4-L-001/submissions/gpt6-dai-preview/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "2b29b9dbbcb4b6c7523b8027708e48ce8f7aed3ef9c9fb7f057ee6835fc2eade",
+      "unitSpecRevision": 1
+    }
+  ]
+}
