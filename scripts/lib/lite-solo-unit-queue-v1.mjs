@@ -4,7 +4,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {repoFile,readJson,writeJson,loadPhaseSchema,validateWorkForm,requiredFile} from './lite-solo-phase-work-v1.mjs';
 import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1} from '../../packages/github-native-sim/src/adr-discovery-validators-v1.mjs';
 import {reviewInventoryRelV1} from '../../packages/github-native-sim/src/adr-review-inventory-v1.mjs';
-import {buildUnitPacketV1,writeUnitPacketIndexV1,buildDiscoverySummaryV1} from '../../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
+import {buildUnitPacketV1,writeUnitPacketIndexV1,buildDiscoverySummaryV1,readUnitPacketV1} from '../../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
 import {loadTaxonomyV1} from '../../packages/github-native-sim/src/adr-taxonomy-v1.mjs';
 import {deriveBaselineObligationsV1} from '../../packages/github-native-sim/src/adr-baseline-obligations-v1.mjs';
 import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite-solo-phase-prefill-v1.mjs';
@@ -100,6 +100,45 @@ function assertPlan(queue,plan){
  for(const k of ['campaignId','campaignGenerationId','phaseSequence','phaseEpoch','sourceSha256','authorityDigest','unitSpecRevision'])
   if(queue[k]!==plan[k])throw Error('unit plan/queue identity differs: '+k);
 }
+const PREFILL_PART_BYTES=12*1024;
+const prefillPartRel=(rel,i)=>path.posix.join(path.posix.dirname(rel),'prefill-pages',
+ path.posix.basename(rel,'.json')+'_PART_'+String(i+1).padStart(6,'0')+'_v1.json');
+function writePagedPrefillV1(root,rel,value){
+ const raw=Buffer.from(pretty({value}),'utf8'),count=Math.ceil(raw.length/PREFILL_PART_BYTES);
+ for(let i=0;i<count;i++){
+  const part=raw.subarray(i*PREFILL_PART_BYTES,(i+1)*PREFILL_PART_BYTES);
+  const page={schemaVersion:'curveyield-lite-solo-unit-prefill-page-v1',index:i+1,
+   total:count,offset:i*PREFILL_PART_BYTES,sha256:hex(part),base64:part.toString('base64')};
+  if(Buffer.byteLength(pretty(page))>24*1024)throw Error('prefill page exceeds 24 KiB');
+  put(root,prefillPartRel(rel,i),page);
+ }
+ const manifest={schemaVersion:'curveyield-lite-solo-unit-prefill-manifest-v1',
+  sha256:hex(raw),byteLength:raw.length,partBytes:PREFILL_PART_BYTES,pageCount:count};
+ put(root,rel,manifest);return manifest;
+}
+function readPagedPrefillV1(root,rel,rawManifest){
+ const manifest=JSON.parse(rawManifest.toString('utf8'));
+ if(manifest.schemaVersion!=='curveyield-lite-solo-unit-prefill-manifest-v1')
+  return manifest.value;
+ if(!Number.isSafeInteger(manifest.pageCount)||manifest.pageCount<1||
+    manifest.partBytes!==PREFILL_PART_BYTES||!/^[a-f0-9]{64}$/.test(manifest.sha256))
+  throw Error('invalid bounded prefill manifest');
+ const chunks=[];
+ for(let i=0;i<manifest.pageCount;i++){
+  const page=read(root,prefillPartRel(rel,i));
+  if(page.schemaVersion!=='curveyield-lite-solo-unit-prefill-page-v1'||
+     page.index!==i+1||page.total!==manifest.pageCount||
+     page.offset!==i*PREFILL_PART_BYTES)throw Error('prefill page identity mismatch');
+  const part=Buffer.from(page.base64,'base64');
+  if(part.length>PREFILL_PART_BYTES||hex(part)!==page.sha256)
+   throw Error('prefill page digest mismatch');
+  chunks.push(part);
+ }
+ const full=Buffer.concat(chunks);
+ if(full.length!==manifest.byteLength||hex(full)!==manifest.sha256)
+  throw Error('prefill reconstruction digest mismatch');
+ return JSON.parse(full.toString('utf8')).value;
+}
 function readPlan(root,campaign,phase){
  const index=read(root,planRel(campaign,phase));
  if(index.schemaVersion!=='curveyield-lite-solo-unit-plan-v1'||!Array.isArray(index.pages))
@@ -113,7 +152,7 @@ function readPlan(root,campaign,phase){
    if(u.initialValueRef){
     const rawValue=fs.readFileSync(repoFile(root,u.initialValueRef));
     if(hex(rawValue)!==u.initialValueSha256)throw Error('unit prefill digest mismatch');
-    u.initialValue=JSON.parse(rawValue.toString('utf8')).value;
+    u.initialValue=readPagedPrefillV1(root,u.initialValueRef,rawValue);
    }
    units.push(u);
   }
@@ -140,8 +179,8 @@ function publishPlan(root,campaign,phase,plan,queue){
   const u=clone(unit);
   if(Buffer.byteLength(pretty(u))>12000&&u.initialValue!==undefined){
    const rel=path.posix.join(unitBase(campaign,phase,u.unitId),'UNIT_PREFILL_v1.json');
-   const value={value:u.initialValue};put(root,rel,value);
-   u.initialValueRef=rel;u.initialValueSha256=sha(value);delete u.initialValue;
+   const manifest=writePagedPrefillV1(root,rel,u.initialValue);
+   u.initialValueRef=rel;u.initialValueSha256=sha(manifest);delete u.initialValue;
   }
   const trial={schemaVersion:'curveyield-lite-solo-unit-plan-page-v1',units:[...batch,u]};
   if(batch.length&&Buffer.byteLength(pretty(trial))>30000)flush();
@@ -417,7 +456,8 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
  try{submission=JSON.parse(raw.toString('utf8'));}
  catch(e){submission=null;errors=[{path:'$',message:'Malformed JSON: '+String(e.message??e)}];}
  if(!errors.length&&['FLOW','ATTACK'].includes(u.kind)){
-  const packet=read(root,u.packetPath),inventory=read(root,reviewInventoryRelV1(root,campaign,'REVIEW_INVENTORY_v1.json'));
+  const packet=readUnitPacketV1({root,packetPath:u.packetPath}),
+   inventory=read(root,reviewInventoryRelV1(root,campaign,'REVIEW_INVENTORY_v1.json'));
   const checked=u.kind==='ATTACK'
    ?validateAttackSubmissionV1({packet:packet.payload,submission,inventory})
    :validateFlowReviewSubmissionV1({packet:packet.payload,submission,inventory});
