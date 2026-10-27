@@ -75,6 +75,28 @@ const evidenceRel=ref(dest,'work/phase-04/PHASE_04_ONCHAIN_READONLY_v1.json');
 const stageRel=ref(dest,'controller/AUDIT_PREVIEW_COMPLETION_STAGE_v1.json');
 const derivedRel=ref(dest,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json');
 const derivedInputRel=ref(dest,'derived/phase-3/PHASE4_INPUT_v1.json');
+const compareImportedEvidence=()=>{
+ // The only editable audit material is the separate PRELAUNCH work form.
+ // All original source, machine evidence and accepted review snapshots stay
+ // byte-for-byte bound to the sealed Preview before any continuation starts.
+ const folders=['source','evidence','work/phase-04/units','work/phase-04/discovery',
+   'derived/phase-1','derived/phase-2','derived/phase-3','derived/phase-4'];
+ const inspect=(relative)=>{
+  const orig=inside(ref(oldRoot,relative)),copy=inside(ref(dest,relative));
+  if(!fs.existsSync(orig)||!fs.existsSync(copy))throw Error('APC_IMPORT_MISSING_'+relative);
+  const o=fs.statSync(orig),c=fs.statSync(copy);
+  if(o.isDirectory()!==c.isDirectory())throw Error('APC_IMPORT_TYPE_MISMATCH_'+relative);
+  if(o.isDirectory()){
+   const aa=fs.readdirSync(orig).sort(),bb=fs.readdirSync(copy).sort();
+   if(JSON.stringify(aa)!==JSON.stringify(bb))throw Error('APC_IMPORT_TREE_CHANGED_'+relative);
+   for(const name of aa)inspect(relative+'/'+name);
+  }else if(sha(fs.readFileSync(orig))!==sha(fs.readFileSync(copy)))
+   throw Error('APC_IMPORTED_EVIDENCE_CHANGED_'+relative);
+ };
+ for(const folder of folders)inspect(folder);
+ for(let i=0;i<=3;i++)inspect('receipts/PHASE_'+String(i).padStart(2,'0')+'_RECEIPT_v1.json');
+ inspect('work/phase-04/PHASE_04_WORK_FORM_v1.json');
+};
 const copyCampaign=()=>{
  if(fs.existsSync(inside(dest))||fs.existsSync(inside(entryPath)))throw Error('APC_CONTINUATION_ALREADY_EXISTS');
  fs.cpSync(inside(oldRoot),inside(dest),{recursive:true,errorOnExist:true,force:false});
@@ -172,6 +194,7 @@ const importHistory=(dir)=>{
 };
 const launch=async()=>{
  const dir=read(entryPath);
+ compareImportedEvidence();
  if(dir.campaignId!==newId||dir.campaignStatus!=='STAGED_PRELAUNCH'
   ||dir.sourceSha256!==preview.sourceSha256
   ||dir.previewCompletion?.originalPhase4ReceiptSha256!==fileSha(preview.lastSealedReceiptPath)
