@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "v17r2-phase4-residual-r025-r027-r029-submit01-v1",
+  "operation": "SUBMIT",
+  "campaignId": "curveyield-dex-v17-source-r2",
+  "campaignGenerationId": "curveyield-dex-v17-source-r2-g1-20261027T104546Z",
+  "phaseSequence": 4,
+  "lane": "R",
+  "workerId": "gpt6-v17r2-worker-d",
+  "sourceSha256": "bd0fc0a955c585ea0357feecb3d16caf9f48dd9ca5073a6a18948eab7c0f5e55",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "R-025",
+      "claimEpoch": 1,
+      "claimToken": "9e8d0223-2b6a-4476-845d-f58114c4d6c8",
+      "packetSha256": "5ca5ef50182331da0860e128ae0e9d8b97fbb2a4fc640044d06d18c4c4ac4c86",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/R-025/submissions/gpt6-v17r2-worker-d/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "3ce382294e443e14557f051a65ef04132f90d314f5ec2b190baf32de83c42a71",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "R-027",
+      "claimEpoch": 1,
+      "claimToken": "2cf3e850-be29-4bbe-a20c-9eb7d9a69339",
+      "packetSha256": "61047869099bde4c2fff398316774a72fc20f33025efa8be6e279f2021b9ffa8",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/R-027/submissions/gpt6-v17r2-worker-d/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "5884a9cb2c2863fa737623e9e326c24e475c68a242010fd049d397ca65d80e4f",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "R-029",
+      "claimEpoch": 1,
+      "claimToken": "d00509b7-ec6d-4f64-871a-30363fe023b0",
+      "packetSha256": "70e438766725ba8fb3394c2b1dac2203522d976953e084f1e9cf534ffe2588b3",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/R-029/submissions/gpt6-v17r2-worker-d/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "59b8b1cbe6f637855ea71493f196cd4549d4e175ec1fed358f3c3e9e814a7ea9",
+      "unitSpecRevision": 1
+    }
+  ]
+}
