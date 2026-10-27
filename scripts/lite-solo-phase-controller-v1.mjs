@@ -832,6 +832,8 @@ if(reviewKind==='discovery'){
   process.exit(0);
 }
 // The phase-wide path is the retained aggregate security validator for v4, never a worker ingress.
+const structuralUnitFinalizationV1=directory.authorityRelease==='lite-solo-v4'&&
+ [4,5,6].includes(sequence)&&process.env.LITE_SOLO_V4_FINALIZE==='1';
 if(directory.authorityRelease==='lite-solo-v4'&&[4,5,6].includes(sequence)&&process.env.LITE_SOLO_V4_FINALIZE!=='1')
  throw new Error('v4 Phase 4–6 can only be finalized from accepted immutable units');
 // Lite-Solo accepts phase/discovery only. No successor-delivery holds or master rework routes.
@@ -875,8 +877,8 @@ try{
     }
   }
 
-  deficiencies.push(...validateWorkForm(schema,form));
-  deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+  deficiencies.push(...validateWorkForm(schema,form,{structuralOnly:structuralUnitFinalizationV1}));
+  deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1}));
   if(sequence===5){
     const reportRel=path.posix.join(campaignPath,'controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json');
     const preflight=maybeJson(root,reportRel);
@@ -895,7 +897,9 @@ try{
   }
   if(activeDetectionPolicyV1(predecessor)){
     const fn=({6:validatePhase6AttackerWorkV1,8:validatePhase8LinkageV1,10:validatePhase10CoverageLabelV1})[sequence];
-    if(fn)deficiencies.push(...fn({root,campaignPath,form,requireCoverageMatrix:sequence===10&&/\/lite-solo-v[345]$/.test(authorityRoot)}));
+    if(fn)deficiencies.push(...fn({root,campaignPath,form,
+     structuralOnly:structuralUnitFinalizationV1,
+     requireCoverageMatrix:sequence===10&&/\/lite-solo-v[345]$/.test(authorityRoot)}));
   }
 
   if(sequence===10){
@@ -908,8 +912,8 @@ try{
     if(collectionDeficiencies.length===0){
       assignment.controllerPrefillDigestSha256=form.automationInputs.controllerPrefillDigestSha256;
       writeJson(repoFile(root,assignment.workFormPath),form);
-      deficiencies.push(...validateWorkForm(schema,form));
-      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+      deficiencies.push(...validateWorkForm(schema,form,{structuralOnly:structuralUnitFinalizationV1}));
+      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1}));
     }
   }
 }catch(e){
@@ -1021,7 +1025,7 @@ if(sequence===5&&form&&deficiencies.length===0){
   if(!deficiencies.length){
     assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
     writeJson(repoFile(root,assignment.workFormPath),form);
-    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1}));
   }
 }
 
