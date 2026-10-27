@@ -8,3 +8,5 @@ Rerun with actual bound phase 4 schema supplied to disposable fixtures.
 Rerun with RELEASED counted as claim-eligible, as in production queue.
 
 Rerun for final A01-A03 behavior verification with explicit A03 typed no-work evidence.
+
+Second independent GitHub Actions qualification run with fresh temporary campaign roots and git remotes.
