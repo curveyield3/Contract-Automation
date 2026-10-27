@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "dai-direct-historical-fork-security-dispatch-v1",
+  "campaignId": "audit-preview-completion-live-ethereum-dai-6b175474-r1",
+  "sourceCommit": "b66ee2b336c949c3ecb0621307b9c188f8f81e89",
+  "blockNumber": 26283885,
+  "target": "0x6b175474e89094c44da98b954eedeac495271d0f",
+  "obligationIds": [
+    "BOB-0001",
+    "BOB-0002",
+    "BOB-0003",
+    "BOB-0004",
+    "BOB-0005",
+    "BOB-0007",
+    "BOB-0008"
+  ],
+  "purpose": "Execute actual source-bound test assertions on local mutable Anvil using pinned historical Ethereum DAI storage and bytecode; no V7 qualification",
+  "attempt": 1
+}
