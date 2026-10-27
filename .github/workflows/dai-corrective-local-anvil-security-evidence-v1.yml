@@ -1,0 +1,65 @@
+name: DAI Corrective Source-Bound Local Anvil Permit Security Evidence
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/agent-upload/dai-corrective-evidence/requests/*.json'
+permissions:
+  contents: read
+jobs:
+  execute-dai-corrective-existing-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      DAI_EVIDENCE_ATTEMPT: '4'
+    steps:
+      - name: Checkout current execution source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing Foundry and Anvil binaries
+        shell: bash
+        run: npm ci --force
+      - name: Authenticate immutable private source read
+        shell: bash
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Stage exact immutable DAI source and original harness for corrective campaign
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source_path='campaigns/audit-preview-live-ethereum-Dai-6b175474%20r1/source/live-scan-project/contracts/Dai.sol'
+          source_commit='b66ee2b336c949c3ecb0621307b9c188f8f81e89'
+          source_ref="repos/curveyield3/Audit-Controller/contents/$source_path?ref=$source_commit"
+          test "$(gh api "$source_ref" --jq .sha)" = '64df95d43b61305616f849c09a119d626bf699f2'
+          mkdir -p .dai-phase8-work/contracts .dai-phase8-work/test/phase6
+          gh api "$source_ref" --jq .content | base64 -d > .dai-phase8-work/contracts/Dai.sol
+          bundle='packages/github-native-sim/audit-harnesses/dai-live-mainnet-r1-phase8-v1'
+          cp "$bundle/foundry.toml" .dai-phase8-work/foundry.toml
+          cp "$bundle/test/phase6/DAILiveForkSecurityV1.t.sol" .dai-phase8-work/test/phase6/
+          test -s .dai-phase8-work/contracts/Dai.sol
+          test -s .dai-phase8-work/test/phase6/DAILiveForkSecurityV1.t.sol
+          grep -q '^solc_version = "0.5.12"$' .dai-phase8-work/foundry.toml
+      - name: Execute seven baseline groups and new adversarial permit checks on local historical Anvil DAI
+        shell: bash
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+        run: node scripts/dai-corrective-execute-direct-anvil-v1.mjs
+      - name: Upload raw Anvil transaction and exact assertion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dai-corrective-permit-security-evidence-${{ github.sha }}
+          path: process/dai-corrective-evidence/attempt-4/
+          if-no-files-found: warn
+          retention-days: 90
