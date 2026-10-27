@@ -112,7 +112,7 @@ jobs:
           source_sha="$(jq -r .sourceSha256 "$directory")"
           # Historical v1/v2 campaigns retain their original authorization semantics.
           # New v3 campaigns have no separate human-approval execution gate.
-          if [ "$(jq -r '.skillAuthority.current.release // ""' "$directory")" != "lite-solo-v3" ]; then
+          if ! jq -e '.currentAssignment.workSchemaPath | startswith("Audit Skill - Lite-Solo Authority/lite-solo-v3/")' "$directory" >/dev/null; then
           jq -e --arg sha "$source_sha" '.machineExecutionAuthorization.status=="APPROVED" and .machineExecutionAuthorization.scope=="PHASE5_TARGET_EXECUTION" and .machineExecutionAuthorization.sourceSha256==$sha' "$directory" >/dev/null || {
             echo '::error::LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: exact Phase-5 source-bound human approval is missing'
             exit 1

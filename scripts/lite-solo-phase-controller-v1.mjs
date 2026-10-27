@@ -772,7 +772,7 @@ if(directory.mode!=='LITE_SOLO'||directory.agentModel!=='ONE_PERSISTENT_AGENT'||
  throw new Error('not an admitted lite-solo single-actor campaign');
 if(directory.pendingMasterReview||directory.masterReview||directory.lastAcceptedMasterReview||directory.testExecutor)throw new Error('legacy master/executor state in lite-solo campaign');
 if(directory.skillAuthority?.current?.release && !['lite-solo-v1','lite-solo-v2','lite-solo-v3'].includes(directory.skillAuthority.current.release))throw new Error('lite-solo bound release mismatch');
-const phase5OwnerDeferral=directory.skillAuthority?.current?.release!=='lite-solo-v3' && [5,6,8,10].includes(sequence)
+const phase5OwnerDeferral=!directory.currentAssignment?.workSchemaPath?.startsWith('Audit Skill - Lite-Solo Authority/lite-solo-v3/') && [5,6,8,10].includes(sequence)
   ?inspectPhase5OwnerEvidenceDeferralV1({controllerRoot:root,campaignPath,campaignId:directory.campaignId,sourceSha256:directory.sourceSha256})
   :null;
 const authorityReceiptPath=directory.lastSealedReceiptPath??directory.currentAssignment?.predecessorReceiptPath;
