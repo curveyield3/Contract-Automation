@@ -634,7 +634,7 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
   }
  }
  const result={reopenedUnits:[...new Set(reopened)].sort(),unmappedDeficiencies:unmapped};
- queue.finalizeStatus='REWORK_REQUIRED';queue.finalizeDetails=result;queue.revision++;
+ queue.finalizeStatus=result.reopenedUnits.length?'REWORK_REQUIRED':'BLOCKED';queue.finalizeDetails=result;queue.revision++;
  put(root,queueRel(campaignPath,phase),queue);
  return result;
 }
