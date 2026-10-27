@@ -6,5 +6,6 @@
   "scanUrls": [],
   "deliveryTransport": "DIRECT",
   "authorizePhase0Execution": true,
-  "repairContext": "Minimally fixed compile-only named imports in v9; preserve original v9 r1 source and audit identity."
+  "repairContext": "Minimally fixed compile-only named imports in v9; preserve original v9 r1 source and audit identity.",
+  "recoveryReason": "Retry existing boosthub-contract-stack-v10-r1 Phase 0 after dedicated Vyper compiler artifact deduplication fix; do not fork or create another campaign."
 }
