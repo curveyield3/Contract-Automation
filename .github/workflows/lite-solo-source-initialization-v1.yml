@@ -14,11 +14,6 @@ on:
         description: Stable idempotency identifier (defaults to workflow run ID)
         type: string
         required: false
-      authorize_phase0_execution:
-        description: Explicit authorization for Phase-0 simulations and machine work
-        type: boolean
-        required: true
-        default: false
   push:
     branches: [main]
     paths:
@@ -45,7 +40,6 @@ jobs:
           RAW_SOURCE_URL: ${{ inputs.source_url }}
           RAW_SCAN_URLS: ${{ inputs.scan_urls }}
           RAW_REQUEST_ID: ${{ inputs.request_id }}
-          RAW_AUTHORIZATION: ${{ inputs.authorize_phase0_execution }}
           EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
@@ -56,19 +50,16 @@ jobs:
             test "${#changed[@]}" -eq 1
             request="${changed[0]}"
             [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]]
-            jq -e '.schemaVersion=="curveyield-lite-solo-source-request-v1" and .mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and (.sourceUrl|type=="string" and startswith("https://")) and (.scanUrls|type=="array" and length==0) and (.authorizePhase0Execution|type=="boolean")' "$request" >/dev/null
+            jq -e '.schemaVersion=="curveyield-lite-solo-source-request-v1" and .mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and (.sourceUrl|type=="string" and startswith("https://")) and (.scanUrls|type=="array" and length==0)' "$request" >/dev/null
             source_url="$(jq -r .sourceUrl "$request")"
             scans="$(jq -c .scanUrls "$request")"
             request_id="$(jq -r .requestId "$request")"
-            authorization="$(jq -r .authorizePhase0Execution "$request")"
           else
             source_url="$RAW_SOURCE_URL"
             scans="$(printf '%s' "$RAW_SCAN_URLS" | jq -Rsc 'split("\n")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))')"
             request_id="${RAW_REQUEST_ID:-$GITHUB_RUN_ID}"
-            authorization="${RAW_AUTHORIZATION:-false}"
           fi
           [[ "$request_id" =~ ^[A-Za-z0-9._-]+$ ]]
-          [[ "$authorization" == true || "$authorization" == false ]]
           [[ "$source_url" != *$'\n'* && "$source_url" != *$'\r'* ]]
           if [ -n "$source_url" ]; then [[ "$source_url" =~ ^https:// ]]; fi
           jq -e 'type=="array" and all(.[]; type=="string" and startswith("https://"))' <<<"$scans" >/dev/null
@@ -77,7 +68,6 @@ jobs:
             echo "source_url=$source_url"
             echo "scan_urls_json=$scans"
             echo "request_id=$request_id"
-            echo "authorize_phase0_execution=$authorization"
           } >> "$GITHUB_OUTPUT"
       - name: Select Audit-Controller credential
         env:
@@ -93,7 +83,6 @@ jobs:
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
           SOURCE_URL: ${{ steps.request.outputs.source_url }}
           REQUEST_ID: ${{ steps.request.outputs.request_id }}
-          AUTHORIZE_PHASE0_EXECUTION: ${{ steps.request.outputs.authorize_phase0_execution }}
           SCAN_URLS: ${{ steps.request.outputs.scan_urls_json }}
         shell: bash
         run: |

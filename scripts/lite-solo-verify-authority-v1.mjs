@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 const root=process.argv[2];
 if(!root||!fs.statSync(root,{throwIfNoEntry:false})?.isDirectory())throw Error('authority root missing');
 const manifest=JSON.parse(fs.readFileSync(path.join(root,'MANIFEST.json'),'utf8'));
-if(![['lite-solo-v1','v1'],['lite-solo-v2','v2']].some(([release,rev])=>manifest.release===release&&manifest.packageRevision===rev)||manifest.mode!=='LITE_SOLO')throw Error('unexpected authority release');
+if(![['lite-solo-v1','v1'],['lite-solo-v2','v2'],['lite-solo-v3','v3']].some(([release,rev])=>manifest.release===release&&manifest.packageRevision===rev)||manifest.mode!=='LITE_SOLO')throw Error('unexpected authority release');
 if(manifest.masterReviewPolicy||manifest.reviewerLineup?.masterSegments?.length)throw Error('master review remains bound');
 const seen=new Set();
 for(const entry of manifest.files){
