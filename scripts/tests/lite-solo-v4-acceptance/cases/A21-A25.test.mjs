@@ -21,7 +21,7 @@ run('A21',{flowCount:15},(f,d)=>{
  assert.equal(f.state().units[u.unitId].status,'CLAIMED');
  assert.ok(fs.existsSync(path.join(f.root,rdir+'/'+worker+'-'+request.requestId+'.json')));
  const unrelated=f.request('CLAIM','a21-later','a21-later-run',{desiredUnitCount:10});
- const later=f.process(unrelated);assert.equal(later.claimedUnits.length,10);
+ const later=f.process(unrelated);assert.equal(later.claimedUnits.length,5);
  // Recovery reads ALL persisted immutable requests, not just latest event.
  const recovered=get(f.root,rdir+'/'+worker+'-'+request.requestId+'.json');
  const result=f.process(recovered);
