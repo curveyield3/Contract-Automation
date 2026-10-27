@@ -159,8 +159,14 @@ function readPlan(root,campaign,phase){
  }
  if(units.length!==index.unitCount)throw Error('missing unit plan pages');
  const ownership={};
- for(const u of units)if(u.path&&Number.isInteger(u.recordIndex))
-  ownership[dot([...u.path,String(u.recordIndex)])]=u.unitId;
+ for(const u of units){
+  if(!u.path)continue;
+  const key=u.kind==='APPEND'?dot([...u.path,'APPEND']):
+   Number.isInteger(u.recordIndex)?dot([...u.path,String(u.recordIndex)]):null;
+  if(!key)continue;
+  if(ownership[key])throw Error('duplicate canonical unit owner: '+key);
+  ownership[key]=u.unitId;
+ }
  return {...index,units,recordOwnership:ownership};
 }
 function publishPlan(root,campaign,phase,plan,queue){
@@ -244,7 +250,9 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
   if(phase===6&&['typedExecutionLimitations','fullOnlyOmissions'].includes(field))continue;
   const slab=read(root,path.posix.join(dir,d.file));
   if(d.append){
-   const id=nextId(field);
+   const id=nextId(field),ownership=dot([...d.path,'APPEND']);
+   if(plan.recordOwnership[ownership])throw Error('duplicate canonical append owner: '+ownership);
+   plan.recordOwnership[ownership]=id;
    const unit={unitId:id,kind:'APPEND',field,shardFile:d.file,shardIndex:0,
     shardPath:path.posix.join(dir,d.file),recordKeys:[],path:d.path,dependencies:[],unitSpecRevision:1};
    addUnit(plan,queue,unit);continue;
