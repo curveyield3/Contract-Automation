@@ -9,6 +9,7 @@ import {loadTaxonomyV1} from '../../packages/github-native-sim/src/adr-taxonomy-
 import {deriveBaselineObligationsV1} from '../../packages/github-native-sim/src/adr-baseline-obligations-v1.mjs';
 import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite-solo-phase-prefill-v1.mjs';
 import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
+import {validateLiveForkBaselineRecordV1} from './lite-solo-live-fork-baseline-gate-v1.mjs';
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
 import {planSemanticBatchesV1,SEMANTIC_BATCH_READING_GUIDE_V1} from './lite-solo-semantic-batches-v1.mjs';
 
@@ -562,6 +563,12 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
    for(const [name,allowed] of Object.entries(field.itemFieldAllowedValues??{}))
     if(val[name]!==undefined&&!allowed.includes(String(val[name])))errors.push(name+' invalid enum');
   }else if(typeof val==='string'&&val.startsWith('<REQUIRED'))errors.push('incomplete mandatory field');
+  if(phase===6&&u.field==='baselineTestRecords'&&isObject(val)){
+   errors.push(...validateLiveForkBaselineRecordV1({
+    root,campaignPath:plan.campaignPath,campaignId:plan.campaignId,
+    sourceSha256:plan.sourceSha256,record:val
+   }));
+  }
   if(phase===6&&u.field==='candidateProofRecords'&&isObject(val)){
    if(['CONFIRMED','DISPROVEN'].includes(val.verdict)){
     // At unit acceptance the verdict must match a real parsed machine ledger.
