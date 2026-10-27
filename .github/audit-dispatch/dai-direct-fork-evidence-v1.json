@@ -13,6 +13,6 @@
     "BOB-0007",
     "BOB-0008"
   ],
-  "purpose": "Execute actual source-bound test assertions on local mutable Anvil using pinned historical Ethereum DAI storage and bytecode; no V7 qualification",
-  "attempt": 1
+  "purpose": "Direct Anvil Foundry evidence with verbatim raw output; no V7 qualification",
+  "attempt": 2
 }
