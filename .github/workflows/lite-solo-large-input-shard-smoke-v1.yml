@@ -35,11 +35,14 @@ jobs:
           const original={schemaVersion:'curveyield-lite-phase-work-form-v1',phase:1,
             automationInputs:{controllerOwnedAutomationInputs:['structuralInventory'],
               structuralInventory:{securitySurfaces:[big,{surfaceId:'SURF-0002',note:'second item'}]}},
-            actions:{'step-1':{section:'Discovery',outputs:{sourceReviewRecords:Array.from({length:60},(_,i)=>({recordKey:'AUTO-SRC-'+i,observation:'<REQUIRED>'}))}}}};
+            actions:{'step-1':{section:'Discovery',outputs:{sourceReviewRecords:Array.from({length:2400},(_,i)=>({recordKey:'AUTO-SRC-'+String(i).padStart(4,'0')+'-'.repeat(48),observation:'<REQUIRED>'}))}}}};
           const originalText=JSON.stringify(original,null,2)+'\n';
           fs.writeFileSync(full,originalText);
           const shard=shardWorkFormV1({root,formRel:rel,phase:1});
           assert.ok(shard&&shard.shards>=2);
+          const rootIndex=JSON.parse(fs.readFileSync(path.join(root,shard.indexRel),'utf8'));
+          assert.ok(rootIndex.pages?.length>1,'oversized work index did not paginate');
+          assert.ok(fs.statSync(path.join(root,shard.indexRel)).size<=32*1024);
           assert.ok(!fs.existsSync(full));
           const dir=path.dirname(path.join(root,shard.indexRel));
           const chunkFiles=fs.readdirSync(dir).filter(n=>/^input-[0-9]{4}-[0-9]{4}_v1.json$/.test(n));
@@ -48,6 +51,12 @@ jobs:
             assert.ok(fs.statSync(path.join(dir,f)).size<=64*1024,'oversized shard '+f);
           const restored=restoreWorkShardsV1({root,indexRel:shard.indexRel});
           assert.equal(restored.content,originalText,'exact source work-form content changed');
+          assert.equal(restoreWorkShardsV1({root,indexRel:shard.indexRel,refreshDigests:true}).content,originalText);
+          const indexPart=path.join(dir,rootIndex.pages[0].file);
+          const cleanIndexPart=fs.readFileSync(indexPart,'utf8');
+          fs.writeFileSync(indexPart,cleanIndexPart.replace('curveyield-work-shard-index-page-v1','tampered-index-page'));
+          assert.throws(()=>restoreWorkShardsV1({root,indexRel:shard.indexRel}),/index page integrity mismatch/);
+          fs.writeFileSync(indexPart,cleanIndexPart);
           const part=path.join(dir,chunkFiles[0]);
           const j=JSON.parse(fs.readFileSync(part,'utf8'));j.base64=Buffer.from('tampered').toString('base64');
           fs.writeFileSync(part,JSON.stringify(j,null,2)+'\n');
@@ -55,5 +64,5 @@ jobs:
           const giantEditable={schemaVersion:'curveyield-lite-phase-work-form-v1',phase:1,actions:{step:{outputs:{records:[{content:'A'.repeat(180000)}]}}}};
           fs.writeFileSync(full,JSON.stringify(giantEditable,null,2)+'\n');
           assert.throws(()=>shardWorkFormV1({root,formRel:rel,phase:1}),/oversized editable work-form/);
-          console.log('PASS: 64 KiB bounded sharding, exact reconstruction, tamper rejection, oversized editable fail-closed');
+          console.log('PASS: bounded input chunks, paged 32 KiB indexes, exact reconstruction, tamper rejection, editable fail-closed');
           NODE
