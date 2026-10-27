@@ -577,10 +577,11 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  let queue=maybe(root,queueRel(campaignPath,phase));
  if(!queue)queue=createUnitPlanV1({root,campaignPath,directory,phase,automationRoot});
  const plan=readPlan(root,campaignPath,phase);assertPlan(queue,plan);
- if(queue.processedRequests[request.requestId]){
-  if(queue.processedRequestHashes?.[request.requestId]!==sha(request))throw Error('processed request ID reused with different content');
-  return queue.processedRequests[request.requestId];
- }
+ const requestDigest=sha(request);
+ if(queue.processedRequestHashes?.[request.requestId]&&
+    queue.processedRequestHashes[request.requestId]!==requestDigest)
+  throw Error('request ID reused with different immutable content');
+ if(queue.processedRequests[request.requestId])return queue.processedRequests[request.requestId];
  let result;
  if(request.operation==='CLAIM')result=handleClaim({root,campaign:campaignPath,phase,queue,plan,request});
  else if(request.operation==='SUBMIT')result=handleSubmit({root,campaign:campaignPath,phase,queue,plan,request,directory});
@@ -601,8 +602,8 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
   waitingUnits:result.waitingUnits??[],newlyEligibleUnits:result.newlyEligibleUnits??[],
   nextPhaseStatus,phaseStatus:nextPhaseStatus};
  queue.revision++;
- if(!asArray(result.waitingUnits).length){queue.processedRequests[request.requestId]=result;
-  queue.processedRequestHashes[request.requestId]=sha(request);}
+ queue.processedRequestHashes[request.requestId]=requestDigest;
+ if(!asArray(result.waitingUnits).length)queue.processedRequests[request.requestId]=result;
  publishPlan(root,campaignPath,phase,plan,queue);
  directory.unitQueueIndexPath=planRel(campaignPath,phase);
  directory.unitQueueStatePath=queueRel(campaignPath,phase);
