@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {shardWorkFormV1,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
+import {secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
 import {applyPhaseBoundaryPrefill} from './lite-solo-phase-prefill-v1.mjs';
 import {resolveFrozenAuthorityFileV1} from '../../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 
@@ -159,9 +159,7 @@ export function preparePhaseWork({root,campaignPath,authorityRoot,sequence,revie
   let form=readJson(requiredFile(root,formTemplateRel,'work-form template'));
   form=applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths,predecessorReceiptPath,prefillContext});
   writeJson(repoFile(root,formRel),form);
-  const shards=(String(authorityRoot).includes('Audit_Litemode_v13')||authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo'||authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v2')
-    ?secureShardWorkFormV13({root,formRel,phase:sequence,retireFull:true})
-    :shardWorkFormV1({root,formRel,phase:sequence,retireFull:true});
+  const shards=secureShardWorkFormV13({root,formRel,phase:sequence,retireFull:true});
   const reportRel=schema.finalReport?fullCampaignPath(campaignPath,schema.finalReport.campaignPath):null;
   return {phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer,status,workSchemaPath:schemaRel,workFormPath:formRel,...(shards?{workShardIndexPath:shards.indexRel}:{}),finalReportPath:reportRel,packetPath:fullCampaignPath(campaignPath,schema.submission.packetPath),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths],controllerPrefillDigestSha256:form?.automationInputs?.controllerPrefillDigestSha256??null};
 }

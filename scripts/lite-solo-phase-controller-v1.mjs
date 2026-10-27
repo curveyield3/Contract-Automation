@@ -8,7 +8,7 @@ import {createHash} from 'node:crypto';
 import {readV7RawResultV1} from '../packages/github-native-sim/src/v7-compact-result-v1.mjs';
 import {pathToFileURL} from 'node:url';
 import {storeControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
-import {materializeShardedWorkFormV1,shardWorkFormV1,shardFailureIndexV1} from './lib/lite-solo-work-shards-v1.mjs';
+import {materializeSemanticWorkFormV13,secureShardWorkFormV13,semanticShardFailureIndexV13} from './lib/lite-solo-work-shards-v1.mjs';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,validateBoundAuthorityV1,loadPhaseSchema,
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
@@ -566,7 +566,8 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
         if(generated?.phaseSequence!==phase)throw new Error('master amendment refresh dependency chain did not prepare Phase '+phase);
         predecessorReceiptPath=generated.predecessorReceiptPath;
         derivedInputPaths=generated.derivedInputPaths??[];
-        if(generated.workShardIndexPath)materializeShardedWorkFormV1({root:shadowRoot,formRel:generated.workFormPath,refreshDigests:false});
+        if(!generated.workShardIndexPath)throw new Error('refreshed phase missing semantic work-shard index');
+        materializeSemanticWorkFormV13({root:shadowRoot,formRel:generated.workFormPath});
         const fresh=readJson(requiredFile(shadowRoot,generated.workFormPath,'refreshed Phase '+phase+' scaffold'));
         const trustedPrefill=structuredClone(fresh);
         const amendedDisposition=(amendedForms.get(row.path)?.changedFields??[]).some(x=>x.endsWith('.obligationDispositions'));
@@ -851,10 +852,10 @@ let deficiencies=ensurePacketShape({packet,directory,assignment});
 let form=null;
 let workShardIntegrityFailed=false;
 try{
-  // Agent edits live shards; reconstruct the legacy form for existing validators.
-  // Digest/key checks run before any reviewer work can reach bookkeeping.
-  if(assignment.workShardIndexPath)
-    materializeShardedWorkFormV1({root,formRel:assignment.workFormPath,refreshDigests:true});
+  // Agent edits semantic shards; reconstruct once for full-phase machine validation.
+  // Reject missing or legacy work transport rather than reading an aggregate form.
+  if(!assignment.workShardIndexPath)throw new Error('required semantic work-shard index missing');
+  materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
   form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
 
   // v10.3 stores the authoritative prefill digest outside the reviewer-editable
@@ -904,7 +905,7 @@ try{
     }
   }
 }catch(e){
-  workShardIntegrityFailed=Boolean(assignment.workShardIndexPath);
+  workShardIntegrityFailed=true;
   deficiencies.push(String(e.message||e));
 }
 
@@ -914,12 +915,12 @@ function persistReviewerReworkShardsV1(){
   if(!assignment.workShardIndexPath)return;
   const full=repoFile(root,assignment.workFormPath);
   if(fs.existsSync(full))
-    shardWorkFormV1({root,formRel:assignment.workFormPath,phase:sequence,retireFull:true,force:true});
+    secureShardWorkFormV13({root,formRel:assignment.workFormPath,phase:sequence,retireFull:true});
 }
 function annotateShardReworkV1(packet,errors){
  if(!assignment.workShardIndexPath)return '';
  let map;
- try{map=shardFailureIndexV1({root,indexRel:assignment.workShardIndexPath,deficiencies:errors});}
+ try{map=semanticShardFailureIndexV13({root,indexRel:assignment.workShardIndexPath,deficiencies:errors});}
  catch(error){
    // Never allow reviewer-tampered index pages to crash the boundary controller.
    packet.controllerValidation.shardRework={indexPath:assignment.workShardIndexPath,shards:[],unmappedCount:errors.length};

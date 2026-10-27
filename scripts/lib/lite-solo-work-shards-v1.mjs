@@ -2,12 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 
-const MAX_SHARD=64*1024, MAX_INDEX=32*1024, TARGET_SHARD=58*1024;
-// Large controller-owned machine inputs are split into individually bounded,
-// content-addressed fragments, never truncated or silently omitted.
-const MAX_INPUT_RECORD=32*1024*1024, INPUT_CHUNK_BYTES=28*1024;
-const INPUT_CHUNK_SCHEMA='curveyield-work-input-chunk-v1';
-const INPUT_CHUNK_REF='__workShardInputChunksV1';
+const MAX_SHARD=64*1024, MAX_INDEX=32*1024;
 // The immutable index bounds fixed rows; its agent-owned append slots need capacity
 // for large discovery reconciliation without changing the campaign-bound index.
 const MAX_V13_APPEND_BYTES=1024*1024, MAX_V13_APPEND_RECORDS=1024;
@@ -26,253 +21,23 @@ const recordKey=(pathTokens,value,i)=>{
 };
 const clone=x=>structuredClone(x);
 
-// Group large arrays into no more than 25 records and no more than 64 KiB per shard.
-// Small editable arrays and scalar fields remain in the BASE shard.
-export function shardWorkFormV1({root,formRel,phase,retireFull=true,force=false}){
- const full=relfile(root,formRel);
- const input=fs.readFileSync(full,'utf8');
- if(secureShardIndexExistsV13({root,formRel}))return secureShardWorkFormV13({root,formRel,phase,retireFull});
- if(!force&&Buffer.byteLength(input)<=MAX_SHARD)return null;
- const original=JSON.parse(input),base=clone(original),arrays=[];
- const visit=(node,tokens)=>{
-  if(Array.isArray(node)){
-   if(node.length>25||bytes(node)>TARGET_SHARD){
-    arrays.push({tokens,items:node});
-    return [];
-   }
-   return node.map((v,i)=>visit(v,[...tokens,i]));
-  }
-  if(!node||typeof node!=='object')return node;
-  return Object.fromEntries(Object.entries(node).map(([k,v])=>[k,visit(v,[...tokens,k])]));
- };
- const structure=visit(original,[]);
- const baseRel=path.posix.join(path.posix.dirname(formRel),'shards','BASE_v1.json');
- if(bytes(structure)>MAX_SHARD)throw new Error('work-form base shard exceeds 64 KiB; a large unshardable scalar/object is present');
- const dir=path.dirname(relfile(root,baseRel));
- fs.mkdirSync(dir,{recursive:true});
- const baseText=pretty(structure);
- fs.writeFileSync(relfile(root,baseRel),baseText);
- const shards=[],globalKeys=new Set();
- let chunkSequence=0;
- // Only read-only controller-prefilled automationInputs can have an oversized
- // source record. Editable reviewer records must remain ordinary JSON shards.
- const splitInputRecord=(tokens,value)=>{
-   if(tokens[0]!=='automationInputs')throw new Error('oversized editable work-form record is not safely chunkable: '+JSON.stringify(tokens));
-   const raw=Buffer.from(JSON.stringify(value),'utf8');
-   if(raw.length>MAX_INPUT_RECORD)throw new Error('controller input record exceeds bounded 32 MiB');
-   const id=String(++chunkSequence).padStart(4,'0'),count=Math.ceil(raw.length/INPUT_CHUNK_BYTES);
-   if(!count)throw new Error('empty controller input record cannot be chunked');
-   for(let i=0;i<count;i++){
-     const fragment=raw.subarray(i*INPUT_CHUNK_BYTES,(i+1)*INPUT_CHUNK_BYTES);
-     const body={schemaVersion:INPUT_CHUNK_SCHEMA,id,index:i,count,base64:fragment.toString('base64')};
-     const file='input-'+id+'-'+String(i+1).padStart(4,'0')+'_v1.json';
-     const rel=path.posix.join(path.posix.dirname(baseRel),file);
-     if(bytes(body)>MAX_SHARD)throw new Error('oversized controller input fragment');
-     fs.writeFileSync(relfile(root,rel),pretty(body));
-   }
-   return {[INPUT_CHUNK_REF]:{id,count,bytes:raw.length,sha256:digest(raw)}};
- };
- for(const {tokens,items} of arrays){
-   let next=0;
-   while(next<items.length){
-     const start=next,entries=[];
-     for(;next<items.length&&entries.length<25;next++){
-       const key=recordKey(tokens,items[next],next);
-       if(globalKeys.has(key))throw new Error('duplicate work-form record key '+key);
-       let value=items[next];
-       const proposed={schemaVersion:'curveyield-work-shard-v1',arrayPath:tokens,startIndex:start,entries:[...entries,{key,value}]};
-       if(bytes(proposed)>MAX_SHARD){
-         if(entries.length)break;
-         value=splitInputRecord(tokens,value);
-         if(bytes({...proposed,entries:[{key,value}]})>MAX_SHARD)
-           throw new Error('oversized controller input shard reference: '+key);
-       }
-       entries.push({key,value});globalKeys.add(key);
-     }
-     const shard={schemaVersion:'curveyield-work-shard-v1',arrayPath:tokens,startIndex:start,entries};
-     const file='shard-'+String(shards.length+1).padStart(4,'0')+'_v1.json';
-     const rel=path.posix.join(path.posix.dirname(baseRel),file),content=pretty(shard);
-     if(Buffer.byteLength(content)>MAX_SHARD)throw new Error('oversized work shard');
-     fs.writeFileSync(relfile(root,rel),content);
-     // The array path already occurs once in the descriptor. Repeating it in
-     // every record key made a 323-row form exceed the entire 32-KiB index.
-     // Store only the identity suffix; preserve the full canonical key in the
-     // record shard, with independent content SHA-256 on both sides.
-     const prefix=JSON.stringify(tokens)+':';
-     shards.push({file,path:tokens,startIndex:start,
-       recordKeys:entries.map(x=> {
-         if(!x.key.startsWith(prefix))throw new Error('record key array-path mismatch');
-         return x.key.slice(prefix.length);
-       }),sha256:digest(content),bytes:Buffer.byteLength(content)});
-   }
- }
- const index={schemaVersion:'curveyield-work-shard-index-v1',phase,formRel,
-   baseFile:'BASE_v1.json',baseSha256:digest(baseText),baseBytes:bytes(structure),
-   originalSha256:digest(input),originalBytes:Buffer.byteLength(input),shards};
- const indexRel=path.posix.join(path.posix.dirname(baseRel),'INDEX_v1.json');
- if(bytes(index)>MAX_INDEX){
-   // The root index remains <=32 KiB regardless of source-review row count.
-   // Only descriptors are paged; content-addressed shards remain unchanged.
-   const pages=[];let batch=[];
-   const flush=()=>{
-     if(!batch.length)return;
-     const page={schemaVersion:'curveyield-work-shard-index-page-v1',shards:batch};
-     if(bytes(page)>MAX_INDEX)throw new Error('oversized work shard index page');
-     const file='INDEX_PART_'+String(pages.length+1).padStart(4,'0')+'_v1.json';
-     const text=pretty(page);
-     fs.writeFileSync(relfile(root,path.posix.join(path.posix.dirname(indexRel),file)),text);
-     pages.push({file,sha256:digest(text),bytes:Buffer.byteLength(text),shardCount:batch.length});
-     batch=[];
-   };
-   for(const entry of shards){
-     const next={schemaVersion:'curveyield-work-shard-index-page-v1',shards:[...batch,entry]};
-     if(batch.length&&bytes(next)>24*1024)flush();
-     batch.push(entry);
-     if(bytes({schemaVersion:'curveyield-work-shard-index-page-v1',shards:batch})>MAX_INDEX)
-       throw new Error('one work shard descriptor exceeds 32 KiB');
-   }
-   flush();
-   delete index.shards;
-   index.pages=pages;
- }
- if(bytes(index)>MAX_INDEX)throw new Error('work shard root index exceeds 32 KiB');
- fs.writeFileSync(relfile(root,indexRel),pretty(index));
- if(retireFull)fs.unlinkSync(full);
- return {indexRel,shards:shards.length,recordCount:globalKeys.size};
-}
-
-function readLegacyShardPagesV1({root,indexRel,index}){
- if(Array.isArray(index.shards)&&index.pages===undefined)return {shards:index.shards,pages:[]};
- if(index.shards!==undefined||!Array.isArray(index.pages)||!index.pages.length||index.pages.length>256)
-   throw new Error('invalid paginated work shard index');
- const dir=path.posix.dirname(indexRel),seen=new Set(),shards=[],pages=[];
- for(const [i,spec] of index.pages.entries()){
-   const file='INDEX_PART_'+String(i+1).padStart(4,'0')+'_v1.json';
-   if(spec?.file!==file||seen.has(file)||!Number.isInteger(spec.bytes)||spec.bytes<1||
-     spec.bytes>MAX_INDEX||!/^[a-f0-9]{64}$/.test(spec.sha256)||
-     !Number.isInteger(spec.shardCount)||spec.shardCount<1)
-     throw new Error('invalid paginated work shard descriptor');
-   seen.add(file);
-   const rel=path.posix.join(dir,file),raw=fs.readFileSync(relfile(root,rel),'utf8');
-   if(Buffer.byteLength(raw)!==spec.bytes||digest(raw)!==spec.sha256)
-     throw new Error('work shard index page integrity mismatch: '+file);
-   const data=JSON.parse(raw);
-   if(data?.schemaVersion!=='curveyield-work-shard-index-page-v1'||!Array.isArray(data.shards)||
-     data.shards.length!==spec.shardCount||bytes(data)>MAX_INDEX)
-     throw new Error('work shard index page structure mismatch: '+file);
-   pages.push({spec,data,rel});
-   shards.push(...data.shards);
- }
- return {shards,pages};
-}
-
-export function restoreWorkShardsV1({root,indexRel,refreshDigests=false}){
- if(secureShardIndexExistsV13({root,formRel:path.posix.join(path.posix.dirname(path.posix.dirname(indexRel)),path.posix.basename(JSON.parse(fs.readFileSync(relfile(root,indexRel),'utf8')).formRel))}))return secureRestoreWorkFormV13({root,indexRel});
- const indexFile=relfile(root,indexRel),index=JSON.parse(fs.readFileSync(indexFile,'utf8'));
- if(index.schemaVersion!=='curveyield-work-shard-index-v1')throw new Error('wrong work shard index schema');
- if(bytes(index)>MAX_INDEX)throw new Error('oversized work shard index');
- const parent=path.posix.dirname(indexRel);
- const baseRel=path.posix.join(parent,index.baseFile);
- const baseText=fs.readFileSync(relfile(root,baseRel),'utf8');
- if(Buffer.byteLength(baseText)>MAX_SHARD||digest(baseText)!==index.baseSha256)
-   throw new Error('work shard base integrity mismatch');
- const full=JSON.parse(baseText),keys=new Set(),ranges=new Map();
- const paged=readLegacyShardPagesV1({root,indexRel,index});
- for(const spec of paged.shards){
-  if(!/^shard-[0-9]{4}_v1\.json$/.test(spec.file))throw new Error('unsafe shard filename');
-  const body=fs.readFileSync(relfile(root,path.posix.join(parent,spec.file)),'utf8');
-  if(Buffer.byteLength(body)>MAX_SHARD)throw new Error('work shard exceeds 64 KiB');
-  const hash=digest(body);
-  if(!refreshDigests&&hash!==spec.sha256)throw new Error('work shard digest mismatch: '+spec.file);
-  const shard=JSON.parse(body);
-  if(shard.schemaVersion!=='curveyield-work-shard-v1'||
-    JSON.stringify(shard.arrayPath)!==JSON.stringify(spec.path)||
-    shard.startIndex!==spec.startIndex||!Array.isArray(shard.entries)||
-    shard.entries.length!==spec.recordKeys.length||shard.entries.length>25)
-    throw new Error('work shard structure mismatch: '+spec.file);
-  const arrayId=JSON.stringify(spec.path);
-  let target=full;
-  for(const token of spec.path){if(target===undefined||target===null)throw new Error('missing shard array');target=target[token];}
-  if(!Array.isArray(target))throw new Error('shard target is not an array');
-  const occupied=ranges.get(arrayId)??new Set();
-  for(const [j,item] of shard.entries.entries()){
-   const i=spec.startIndex+j,rawValue=item.value;
-   let value=rawValue;
-   if(rawValue&&typeof rawValue==='object'&&!Array.isArray(rawValue)&&Object.hasOwn(rawValue,INPUT_CHUNK_REF)){
-     if(spec.path[0]!=='automationInputs'||Object.keys(rawValue).length!==1)
-       throw new Error('controller input chunk reference outside immutable automationInputs');
-     const ref=rawValue[INPUT_CHUNK_REF];
-     if(!ref||!(/^[0-9]{4}$/.test(ref.id))||!Number.isInteger(ref.count)||ref.count<1||
-       ref.count>Math.ceil(MAX_INPUT_RECORD/INPUT_CHUNK_BYTES)||!Number.isInteger(ref.bytes)||
-       ref.bytes<=0||ref.bytes>MAX_INPUT_RECORD||!(/^[a-f0-9]{64}$/.test(ref.sha256)))
-       throw new Error('invalid controller input chunk reference');
-     const fragments=[];let length=0;
-     for(let p=0;p<ref.count;p++){
-       const file='input-'+ref.id+'-'+String(p+1).padStart(4,'0')+'_v1.json';
-       const fragmentText=fs.readFileSync(relfile(root,path.posix.join(parent,file)),'utf8');
-       if(Buffer.byteLength(fragmentText)>MAX_SHARD)throw new Error('controller input chunk exceeds 64 KiB: '+file);
-       const chunk=JSON.parse(fragmentText);
-       if(chunk.schemaVersion!==INPUT_CHUNK_SCHEMA||chunk.id!==ref.id||chunk.index!==p||
-         chunk.count!==ref.count||typeof chunk.base64!=='string')throw new Error('controller input chunk identity mismatch: '+file);
-       const part=Buffer.from(chunk.base64,'base64');
-       if(part.toString('base64')!==chunk.base64||!part.length||part.length>INPUT_CHUNK_BYTES)
-         throw new Error('invalid controller input chunk encoding: '+file);
-       length+=part.length;
-       if(length>ref.bytes)throw new Error('controller input chunk exceeds declared length');
-       fragments.push(part);
-     }
-     const assembled=Buffer.concat(fragments);
-     if(length!==ref.bytes||digest(assembled)!==ref.sha256)
-       throw new Error('controller input chunk content digest mismatch');
-     value=JSON.parse(assembled.toString('utf8'));
-   }
-   const key=recordKey(spec.path,value,i);
-   const stored=spec.recordKeys[j],fullIndexKey=stored.startsWith('[')?
-     stored:JSON.stringify(spec.path)+':'+stored;
-   if(key!==item.key||key!==fullIndexKey||keys.has(key)||occupied.has(i))
-     throw new Error('missing, duplicated or changed work record key: '+key);
-   keys.add(key);occupied.add(i);target[i]=value;
-  }
-  ranges.set(arrayId,occupied);
-  if(refreshDigests){spec.sha256=hash;spec.bytes=Buffer.byteLength(body);}
- }
- for(const [p,occupied] of ranges){
-  let target=full;for(const token of JSON.parse(p))target=target[token];
-  if(target.length!==occupied.size||[...target.keys()].some(i=>!occupied.has(i)))
-    throw new Error('shard array missing or has duplicate record index '+p);
- }
- const result=pretty(full);
- if(!refreshDigests&&index.originalSha256!==digest(result))
-   throw new Error('shard round-trip changed original form bytes');
- if(refreshDigests){
-  index.originalSha256=digest(result);index.originalBytes=Buffer.byteLength(result);
-  for(const {spec,data,rel} of paged.pages){
-    const body=pretty(data);
-    if(Buffer.byteLength(body)>MAX_INDEX)throw new Error('updated work shard index page exceeds 32 KiB');
-    fs.writeFileSync(relfile(root,rel),body);
-    spec.sha256=digest(body);spec.bytes=Buffer.byteLength(body);
-  }
-  if(bytes(index)>MAX_INDEX)throw new Error('updated work shard index exceeds 32 KiB');
-  fs.writeFileSync(indexFile,pretty(index));
- }
- return {formRel:index.formRel,content:result,recordCount:keys.size};
-}
-
-export function materializeShardedWorkFormV1({root,formRel,refreshDigests=true}){
+// Reviewer-authored semantic shards are the sole Lite-Solo work transport.
+ // Full-form materialization happens only at the phase controller boundary.
+export function materializeSemanticWorkFormV13({root,formRel}){
  const indexRel=path.posix.join(path.posix.dirname(formRel),'shards','INDEX_v1.json');
- if(!fs.existsSync(relfile(root,indexRel)))return false;
- const {content}=restoreWorkShardsV1({root,indexRel,refreshDigests});
+ if(!fs.existsSync(relfile(root,indexRel)))throw new Error('missing required semantic work-shard index');
+ const {content}=secureRestoreWorkFormV13({root,indexRel});
  fs.writeFileSync(relfile(root,formRel),content);
  return true;
 }
 
-export function shardFailureIndexV1({root,indexRel,deficiencies=[]}={}){
+export function semanticShardFailureIndexV13({root,indexRel,deficiencies=[]}={}){
  if(!indexRel)return {shards:[],unmapped:deficiencies};
  const index=JSON.parse(fs.readFileSync(relfile(root,indexRel),'utf8'));
  const matches=new Map(),unmapped=[];
- const descriptors=index.schemaVersion==='curveyield-work-shard-index-v13'
-   ?index.pages.flatMap(p=>secureReadV13(root,path.posix.join(path.posix.dirname(indexRel),p.file)).shards)
-   :readLegacyShardPagesV1({root,indexRel,index}).shards;
+ if(index.schemaVersion!=='curveyield-work-shard-index-v13')
+   throw new Error('unsupported work-shard index: expected semantic v13');
+ const descriptors=index.pages.flatMap(p=>secureReadV13(root,path.posix.join(path.posix.dirname(indexRel),p.file)).shards);
  for(const description of deficiencies){
   const message=String(description);
   const ref=message.match(/(step-[0-9]+)\.outputs\.([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/);
@@ -295,17 +60,13 @@ export function shardFailureIndexV1({root,indexRel,deficiencies=[]}={}){
 
 // v13 only: editable outputs live in work shards; the controller's expected
 // structure is stored separately from every reviewer-facing index and shard.
-// Frozen v12 paths retain the original sharding and validation contract above.
+// No legacy size-based work-shard mode is generated or accepted.
 const secureLocationV13=(formRel,phase)=>{
  const campaign=formRel.split('/work/phase-')[0];
  return path.posix.join(campaign,'controller/shards/phase-'+String(phase).padStart(2,'0'));
 };
 const securePrettyV13=x=>JSON.stringify(x,null,2)+'\n';
 const secureHashV13=x=>digest(securePrettyV13(x));
-const secureShardIndexExistsV13=({root,formRel})=>{
- const phase=Number(formRel.match(/\/work\/phase-([0-9]+)/)?.[1]??-1);
- return phase>=0&&fs.existsSync(relfile(root,path.posix.join(secureLocationV13(formRel,phase),'INDEX_v1.json')));
-};
 const secureReadV13=(root,rel)=>JSON.parse(fs.readFileSync(relfile(root,rel),'utf8'));
 const secureWriteV13=(root,rel,value)=>{
  const f=relfile(root,rel);fs.mkdirSync(path.dirname(f),{recursive:true});fs.writeFileSync(f,securePrettyV13(value));
@@ -313,7 +74,7 @@ const secureWriteV13=(root,rel,value)=>{
 const secureSameV13=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
 
  // Solo-only immutable BASE pagination. Controller-bound SHA256 digests preserve
- // the original 64-KiB per-file limit, without altering legacy sharding.
+ // the original 64-KiB per-file limit, without altering editable semantic sharding.
  const MAX_SOLO_BASE_BYTES=32*1024*1024;
  const SOLO_BASE_CHUNK_BYTES=40*1024;
  const SOLO_BASE_PAGE_RE=/^BASE_PART_[0-9]{4}_v1\.json$/;
@@ -449,7 +210,7 @@ export function secureShardWorkFormV13({root,formRel,phase,retireFull=true}){
  // Prevent stranded shards after re-sharding. Only indexed filenames remain.
  const allowed=new Set(['INDEX_v1.json','BASE_v1.json',...basePages,...pages.map(p=>p.file),...descriptions.map(s=>s.file)]);
  for(const name of fs.readdirSync(relfile(root,workDir))){
-   if(/^(?:shard-[0-9]+_v1|INDEX_PAGE_[0-9]+_v1|BASE_PART_[0-9]+_v1)\.json$/.test(name)&&!allowed.has(name))
+   if(/^(?:shard-[0-9]+_v1|INDEX_PAGE_[0-9]+_v1|INDEX_PART_[0-9]+_v1|BASE_PART_[0-9]+_v1|input-[0-9]{4}-[0-9]{4}_v1)\.json$/.test(name)&&!allowed.has(name))
      fs.unlinkSync(relfile(root,path.posix.join(workDir,name)));
  }
  if(retireFull)fs.unlinkSync(relfile(root,formRel));
