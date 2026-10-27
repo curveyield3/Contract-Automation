@@ -18,9 +18,9 @@ on:
         type: string
 
       authorization_confirmed:
-        description: Legacy compatibility input; execution uses the existing isolated source-bound route
-        required: true
-        default: false
+        description: Deprecated compatibility flag; Phase-0 execution starts automatically for admitted sources
+        required: false
+        default: true
         type: boolean
       resume_from_deploy:
         description: Resume after Phase 0 intelligence is already published; run only forked deploy/config and finalize

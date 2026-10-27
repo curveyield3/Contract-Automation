@@ -256,7 +256,6 @@ gh workflow run lite-solo-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --
   -f campaign_id="$campaign_id" \
   -f campaign_path="$campaign_root" \
   -f audit_controller_ref=main \
-  -f authorization_confirmed=true \
   -f resume_from_deploy="$resume_from_deploy"
 
 {
