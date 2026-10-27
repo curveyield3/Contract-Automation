@@ -1,4 +1,4 @@
-name: Lite-Solo Fully Automated Phase 0 v1
+name: Audit Preview Fully Automated Phase 0 v1
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ on:
       audit_controller_ref:
         description: Audit-Controller ref containing the campaign
         required: false
-        default: main
+        default: audit-preview-v1
         type: string
 
       authorization_confirmed:
@@ -43,7 +43,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  permit-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Audit Preview fork
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Check frozen live-source contract permit before compilation
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" "$CAMPAIGN_PATH"
+          if ! node scripts/audit-preview-contract-limit-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --stage source; then
+            git -C .audit-controller config user.name "Audit Preview Phase 0"
+            git -C .audit-controller config user.email "audit-preview@users.noreply.github.com"
+            git -C .audit-controller add -- "$CAMPAIGN_PATH" "Audit Campaign Directory/campaigns"
+            git -C .audit-controller commit -m "audit(preview): reject Phase 0 over contract permit"
+            git -C .audit-controller push origin "HEAD:$AUDIT_CONTROLLER_REF"
+            exit 1
+          fi
+
   intelligence:
+    needs: permit-source
     if: ${{ !inputs.resume_from_finalize && !inputs.resume_from_deploy }}
     uses: ./.github/workflows/lite-solo-phase0-intelligence-v1.yml
     with:
@@ -130,6 +165,27 @@ jobs:
             --campaign-path "$CAMPAIGN_PATH" \
             --output .phase0-deploy-output \
             --fork-url "$upstream" | tee /tmp/phase0-deploy-result.json
+
+      - name: Enforce actual deployment creation count before Phase 0 can pass
+        if: always()
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .phase0-deploy-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json || {
+            echo "::error title=AUDIT_PREVIEW_CONTRACT_COUNT_UNVERIFIABLE::No deployment witness available"; exit 1;
+          }
+          if ! node scripts/audit-preview-contract-limit-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --stage deployment --deployment-evidence .phase0-deploy-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json; then
+            git -C .audit-controller config user.name "Audit Preview Phase 0"
+            git -C .audit-controller config user.email "audit-preview@users.noreply.github.com"
+            git -C .audit-controller add -- "$CAMPAIGN_PATH" "Audit Campaign Directory/campaigns"
+            git -C .audit-controller commit -m "audit(preview): reject Phase 0 deployment over contract permit"
+            git -C .audit-controller push origin "HEAD:$AUDIT_CONTROLLER_REF"
+            exit 1
+          fi
 
       - name: Reconcile verified non-execution script exclusions
         shell: bash

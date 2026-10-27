@@ -1,4 +1,4 @@
-name: Lite-Solo Phase 0 Intelligence v1
+name: Audit Preview Phase 0 Intelligence v1
 
 on:
   workflow_call:
@@ -12,7 +12,7 @@ on:
       audit_controller_ref:
         required: false
         type: string
-        default: main
+        default: audit-preview-v1
 
 permissions:
   contents: read
@@ -72,7 +72,7 @@ jobs:
           gh api "repos/curveyield3/Audit-Controller/contents/$receipt_path?ref=$AUDIT_CONTROLLER_REF" --jq '.content' | base64 -d > /tmp/phase0-receipt.json
           test "$(jq -r '.campaign.campaignId' /tmp/phase0-receipt.json)" = "$CAMPAIGN_ID"
           test "$(jq -r '.phase.sequence' /tmp/phase0-receipt.json)" = "0"
-          jq -e '.campaign.mode=="LITE_SOLO" and ((.authority.liteRelease=="lite-solo-v1" and .authority.homepagePath=="Audit Skill - Lite-Solo Authority/lite-solo/SKILL.md") or (.authority.liteRelease=="lite-solo-v2" and .authority.homepagePath=="Audit Skill - Lite-Solo Authority/lite-solo-v2/SKILL.md") or (.authority.liteRelease=="lite-solo-v3" and .authority.homepagePath=="Audit Skill - Lite-Solo Authority/lite-solo-v3/SKILL.md") or (.authority.liteRelease=="lite-solo-v4" and .authority.homepagePath=="Audit Skill - Lite-Solo Authority/lite-solo-v4/SKILL.md") or (.authority.liteRelease=="lite-solo-v5" and .authority.homepagePath=="Audit Skill - Lite-Solo Authority/lite-solo-v5/SKILL.md") or (.authority.liteRelease=="lite-solo-v6" and .authority.homepagePath=="Audit Skill - Lite-Solo Authority/lite-solo-v6/SKILL.md"))' /tmp/phase0-receipt.json >/dev/null
+          jq -e '.campaign.mode=="LITE_SOLO" and .authority.liteRelease=="audit-preview-v1" and .authority.homepagePath=="Audit Skill - Audit Preview/audit-preview-v1/SKILL.md" and .auditPreview.terminalPhase==4 and (.auditPreview.permittedContracts|type=="number" and .>=1 and .==floor)' /tmp/phase0-receipt.json >/dev/null
           jq -n             --arg requestId "phase0-$CAMPAIGN_ID-$GITHUB_RUN_ID"             --arg campaignId "$CAMPAIGN_ID"             --arg campaignGenerationId "$(jq -r '.campaign.campaignGenerationId' /tmp/phase0-receipt.json)"             --arg sourceCommit "$(jq -r '.source.archiveCommit' /tmp/phase0-receipt.json)"             --arg archivePath "$(jq -r '.source.archivePath' /tmp/phase0-receipt.json)"             --arg archiveSha "$(jq -r '.source.sha256' /tmp/phase0-receipt.json)"             --arg destRef "$AUDIT_CONTROLLER_REF"             --arg campaignPath "$CAMPAIGN_PATH"             '{
               schemaVersion:"curveyield-lite-phase0-intelligence-request-v1",
               requestId:$requestId,
@@ -93,7 +93,7 @@ jobs:
           [ "$adr_policy" = "audit-detection-rebuild-v1" ] || adr_policy=""
           echo "ADR_DETECTION_POLICY=$adr_policy" >> "$GITHUB_ENV"
           review_policy=""
-          if [ "$adr_policy" = "audit-detection-rebuild-v1" ] && [[ "$homepage" == "Audit Skill - Lite-Solo Authority/lite-solo/SKILL.md" || "$homepage" == "Audit Skill - Lite-Solo Authority/lite-solo-v2/SKILL.md" || "$homepage" == "Audit Skill - Lite-Solo Authority/lite-solo-v3/SKILL.md" || "$homepage" == "Audit Skill - Lite-Solo Authority/lite-solo-v4/SKILL.md" || "$homepage" == "Audit Skill - Lite-Solo Authority/lite-solo-v5/SKILL.md" || "$homepage" == "Audit Skill - Lite-Solo Authority/lite-solo-v6/SKILL.md" ]]; then
+          if [ "$adr_policy" = "audit-detection-rebuild-v1" ] && [ "$homepage" = "Audit Skill - Audit Preview/audit-preview-v1/SKILL.md" ]; then
             # Owner-authorized v13 live activation: select the v13 review mode
             # whenever the admitted campaign authority is v13. Qualification
             # remains an independent evidence status, not a bootstrap blocker.
@@ -167,7 +167,7 @@ jobs:
           test -f "$receipt"
           skill_home="$(jq -r '.authority.homepagePath // empty' "$receipt")"
           case "$skill_home" in
-            "Audit Skill - Lite-Solo Authority/lite-solo/SKILL.md"|"Audit Skill - Lite-Solo Authority/lite-solo-v2/SKILL.md"|"Audit Skill - Lite-Solo Authority/lite-solo-v3/SKILL.md"|"Audit Skill - Lite-Solo Authority/lite-solo-v4/SKILL.md"|"Audit Skill - Lite-Solo Authority/lite-solo-v5/SKILL.md"|"Audit Skill - Lite-Solo Authority/lite-solo-v6/SKILL.md") ;;
+            "Audit Skill - Audit Preview/audit-preview-v1/SKILL.md") ;;
             *) echo "::error::Unexpected campaign-bound lite-solo skill: $skill_home"; exit 1 ;;
           esac
           test -f "$skill_home"

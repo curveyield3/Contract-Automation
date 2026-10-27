@@ -25,6 +25,15 @@ if(!campaignPath.startsWith('campaigns/')||campaignPath.includes('..')) throw ne
 const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
 const receiptPath=path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json');
 const receipt=read(required(receiptPath,'Phase-0 receipt'));
+if(receipt.authority?.liteRelease!=='audit-preview-v1'||receipt.auditPreview?.terminalPhase!==4||
+  !Number.isSafeInteger(receipt.auditPreview?.permittedContracts)||receipt.auditPreview.permittedContracts<1)
+ throw new Error('AUDIT_PREVIEW_INVALID_PERMIT_OR_AUTHORITY');
+const countFile=required(path.join(campaignRoot,'evidence/phase0/AUDIT_PREVIEW_CONTRACT_COUNT_v1.json'),'Audit Preview Phase-0 contract count');
+const countGate=read(countFile);
+if(countGate.status!=='PASS'||countGate.stage!=='deployment'||countGate.permittedContracts!==receipt.auditPreview.permittedContracts||
+ !Number.isSafeInteger(countGate.count)||countGate.count>receipt.auditPreview.permittedContracts)
+ throw new Error('AUDIT_PREVIEW_ECONTRACT_LIMIT: Number of contracts exceeds permit');
+
 if(receipt.schemaVersion!=='curveyield-lite-phase-receipt-v1'||receipt.campaign?.mode!=='LITE_SOLO'||receipt.phase?.sequence!==0) throw new Error('invalid Phase-0 receipt');
 if(!['ACTIVE','EVIDENCE_READY','VALIDATING'].includes(receipt.phase.status)) throw new Error('Phase-0 receipt is not finalizable');
 if(!/^[0-9a-f]{40}$/.test(a['contract-automation-sha'])||
@@ -176,7 +185,7 @@ try {
 
 // v3 cannot promote an absent or incomplete source-review inventory to a
 // completed discovery: Phase 4 has to be generated from real source contexts.
-if(['lite-solo-v3','lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(receipt.authority?.liteRelease)){
+if(receipt.authority?.liteRelease==='audit-preview-v1'){
   const reviewRoot=path.join(campaignRoot,'evidence/review-inventory');
   const inventory=read(required(path.join(reviewRoot,'REVIEW_INVENTORY_v1.json'),'complete source review inventory'));
   const facts=read(required(path.join(reviewRoot,'SYSTEM_FACTS_v1.json'),'system facts'));
@@ -245,7 +254,7 @@ const directoryV2={
   mode:'LITE_SOLO',
   deliveryTransport:'DIRECT',
   agent:directory.agent,
-  agentModel:receipt.authority.liteRelease==='lite-solo-v4'?'PARALLEL_WORKER_UNITS':'ONE_PERSISTENT_AGENT',
+  agentModel:receipt.authority.liteRelease==='audit-preview-v1'?'PARALLEL_WORKER_UNITS':'ONE_PERSISTENT_AGENT',
   executionModel:receipt.authority.liteRelease==='lite-solo-v4'?'PARALLEL_WORKER_UNITS':null,
   authorityRelease:receipt.authority.liteRelease,
   authorityDigest:receipt.authority.manifestSha256,
