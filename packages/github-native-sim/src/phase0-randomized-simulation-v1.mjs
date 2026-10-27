@@ -2689,6 +2689,38 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     if(sha256(canonical(unsigned))!==manifestDigestSha256)throw new Error('SCAN_MANIFEST_DIGEST_MISMATCH');
   }else if(receipt.source?.inputMode==='LIVE_SCAN')throw new Error('SCAN_MANIFEST_MISSING');
   const detected=await detectDeploymentScripts(staged.projectRoot);
+  // Native Forge can compile Solidity directly. Exact-source Vyper artifacts
+  // from the sealed Phase-0 build must be staged separately for source-only
+  // Foundry deployers because Solidity cannot create Vyper bytecode itself.
+  // Never accept bytecode supplied independently of the accepted build bundle.
+  const acceptedVyper=sharedExecutionInputs.artifacts.filter(a=>a.language==='vyper');
+  if(acceptedVyper.length){
+    const versions=[...new Set(acceptedVyper.map(a=>a.compilerVersion))];
+    if(versions.length!==1||versions[0]!=='0.4.3')throw new Error('PHASE0_VYPER_UNSUPPORTED_VERSION: '+versions.join(','));
+    const install=await runProcess({command:'timeout',args:['240s','python3','-m','pip','install','--disable-pip-version-check','--no-input','vyper==0.4.3'],cwd:staged.projectRoot});
+    if(install.exitCode!==0)throw new Error('PHASE0_VYPER_INSTALL_FAILED: '+String(install.stderr??install.stdout??'').slice(-1000));
+    const probe=await runProcess({command:'vyper',args:['--version'],cwd:staged.projectRoot});
+    if(probe.exitCode!==0||!String(probe.stdout??'').trim().startsWith('0.4.3'))throw new Error('PHASE0_VYPER_VERSION_MISMATCH');
+    const staking=acceptedVyper.find(a=>a.sourceName==='contracts/BoostHubStaking.vy'&&a.contractName==='BoostHubStaking');
+    if(staking){
+      const original=await fs.readFile(path.join(staged.projectRoot,'contracts/BoostHubStaking.vy'));
+      const sourceSha256=sha256(original);
+      if(!/^0x[0-9a-f]+$/i.test(String(staking.bytecode??''))||
+         !/^0x[0-9a-f]+$/i.test(String(staking.deployedBytecode??''))||
+         !staking.compilationUnitId)throw new Error('PHASE0_VYPER_ACCEPTED_ARTIFACT_INVALID');
+      const artifactDir=path.join(staged.projectRoot,'artifacts_v6');
+      await fs.mkdir(artifactDir,{recursive:true});
+      await fs.writeFile(path.join(artifactDir,'staking_v6.json'),JSON.stringify({
+        bytecode:staking.bytecode,deployedBytecode:staking.deployedBytecode,
+        sourceSha256:'0x'+sourceSha256,compilationUnitId:staking.compilationUnitId,
+        compilerVersion:'0.4.3',archiveSha256
+      },null,2)+'\\n');
+      await fs.writeFile(path.join(artifactDir,'build_provenance_v6.json'),JSON.stringify({
+        compiler_settings:{vyper:'0.4.3'},compilationUnitId:staking.compilationUnitId,
+        sourceSha256:'0x'+sourceSha256,archiveSha256
+      },null,2)+'\\n');
+    }
+  }
   // Use the same isolated, source-configured Foundry dependency resolution as
   // Phase-0 compilation before invoking any declared Forge deployment entry.
   const foundryDependencyRoot=deploymentProfile?.mode==='FOUNDRY' && deploymentProfile.foundryRoot!=='.'
