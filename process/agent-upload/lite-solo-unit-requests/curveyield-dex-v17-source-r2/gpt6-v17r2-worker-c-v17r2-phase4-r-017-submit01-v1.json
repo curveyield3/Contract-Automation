@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "v17r2-phase4-r-017-submit01-v1",
+  "operation": "SUBMIT",
+  "campaignId": "curveyield-dex-v17-source-r2",
+  "campaignGenerationId": "curveyield-dex-v17-source-r2-g1-20261027T104546Z",
+  "phaseSequence": 4,
+  "lane": "R",
+  "workerId": "gpt6-v17r2-worker-c",
+  "sourceSha256": "bd0fc0a955c585ea0357feecb3d16caf9f48dd9ca5073a6a18948eab7c0f5e55",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "R-017",
+      "claimEpoch": 1,
+      "claimToken": "cc203390-e4be-4e82-b8fb-532a26a1ae51",
+      "packetSha256": "43c7eedeeae332cd2ae568da02f803eb6506f3808dde6317586f9b0a2ff6a0eb",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/R-017/submissions/gpt6-v17r2-worker-c/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "4c11322fb79c407d22bab168e86c8b60c19f579d1a0f9392cda4b980f5dea9af",
+      "unitSpecRevision": 1
+    }
+  ]
+}
