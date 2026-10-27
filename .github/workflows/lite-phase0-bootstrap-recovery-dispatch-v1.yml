@@ -62,9 +62,9 @@ jobs:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 2
 
       - name: Resolve one recovery request
         id: request
