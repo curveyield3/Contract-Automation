@@ -374,7 +374,8 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
  }
  let submission,errors=[];
  try{submission=JSON.parse(raw.toString('utf8'));}
- catch(e){submission=null;errors=[{path:'&&['FLOW','ATTACK'].includes(u.kind)){
+ catch(e){submission=null;errors=[{path:'$',message:'Malformed JSON: '+String(e.message??e)}];}
+ if(!errors.length&&['FLOW','ATTACK'].includes(u.kind)){
   const packet=read(root,u.packetPath),inventory=read(root,reviewInventoryRelV1(root,campaign,'REVIEW_INVENTORY_v1.json'));
   const checked=u.kind==='ATTACK'
    ?validateAttackSubmissionV1({packet:packet.payload,submission,inventory})
