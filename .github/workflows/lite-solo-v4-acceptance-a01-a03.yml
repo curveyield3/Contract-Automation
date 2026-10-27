@@ -4,7 +4,7 @@ on:
     branches:
       - test/lite-solo-v4-a01-a03
     paths:
-      - 'scripts/tests/lite-solo-v4-acceptance/**'
+      - 'scripts/tests/lite-solo-v4-acceptance/RUN_A01_A03.md'
       - '.github/workflows/lite-solo-v4-acceptance-a01-a03.yml'
   workflow_dispatch:
 permissions:
