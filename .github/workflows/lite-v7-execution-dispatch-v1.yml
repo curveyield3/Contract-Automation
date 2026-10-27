@@ -158,6 +158,15 @@ jobs:
           test "$(jq -r '.schemaVersion' /tmp/directory.json)" = "curveyield-audit-campaign-directory-entry-v2"
           test "$(jq -r '.campaignId' /tmp/directory.json)" = "$CAMPAIGN_ID"
           test "$(jq -r '.currentAssignment.phaseSequence' /tmp/directory.json)" = "$phase_seq"
+          if [ "$phase_seq" = 8 ]; then
+            # Revalidation is allowed only for the *same immutable source archive*
+            # as the active Lite-Solo campaign. Never use a fresh deployment.
+            expected_source="$(jq -r '.sourceSha256 // empty' /tmp/directory.json)"
+            request_source="$(jq -r '.source.archiveSha256 // empty' /tmp/v7-request.json)"
+            test -n "$expected_source" && test "$request_source" = "$expected_source" || {
+              echo "::error::Phase-8 revalidation source archive differs from campaign"; exit 1;
+            }
+          fi
           workspace="$(jq -r '.workspacePath' /tmp/directory.json)"
           if [ "$phase_seq" = 9 ]; then
             case "$REQUEST_PATH" in "$workspace"/controller/phase9-reruns/*/*.json) ;; *) echo "::error::Phase-9 request is outside canonical workspace"; exit 1;; esac
