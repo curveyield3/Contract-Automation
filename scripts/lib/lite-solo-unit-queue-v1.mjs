@@ -642,7 +642,7 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
 }
 
 function structuredFieldErrorV1(unitId,message){
- const match=/^(entries(?:\\[[0-9]+\\])?(?:\\.[A-Za-z][A-Za-z0-9_]*)*|schemaVersion): (.+)$/.exec(message);
+ const match=/^(entries(?:\[[0-9]+\])?(?:\.[A-Za-z][A-Za-z0-9_]*)*|schemaVersion): (.+)$/.exec(message);
  return {path:match?unitId+'.'+match[1]:unitId,
   code:match?match[2]:'STRUCTURAL_VALIDATION_FAILURE',message};
 }
