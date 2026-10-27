@@ -82,13 +82,17 @@ jobs:
             (.campaign_id|type=="string" and length>0) and
             (.campaign_path|type=="string" and startswith("campaigns/")) and
             (.audit_controller_ref|type=="string" and length>0) and
-            ((.resume_from_finalize // false)|type=="boolean")
+            ((.resume_from_finalize // false)|type=="boolean") and
+            ((.bootstrap_workflow // "lite-phase0-bootstrap-v1.yml") as $workflow |
+              $workflow=="lite-phase0-bootstrap-v1.yml" or
+              $workflow=="lite-solo-phase0-bootstrap-v1.yml")
           ' "$req" >/dev/null
           {
             echo "resume_from_finalize=$(jq -r '.resume_from_finalize // false' "$req")"
             echo "campaign_id=$(jq -r '.campaign_id' "$req")"
             echo "campaign_path=$(jq -r '.campaign_path' "$req")"
             echo "audit_controller_ref=$(jq -r '.audit_controller_ref' "$req")"
+            echo "bootstrap_workflow=$(jq -r '.bootstrap_workflow // "lite-phase0-bootstrap-v1.yml"' "$req")"
           } >> "$GITHUB_OUTPUT"
 
       - name: Dispatch the same Phase-0 campaign
@@ -97,7 +101,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh workflow run lite-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+          gh workflow run "${{ steps.request.outputs.bootstrap_workflow }}" --repo "$GITHUB_REPOSITORY" --ref main \
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
             -f campaign_path="${{ steps.request.outputs.campaign_path }}" \
             -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}" \
