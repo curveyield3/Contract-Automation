@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateDeepAssuranceRequestWithV26V1 } from './schema-v26.mjs';
@@ -11,6 +12,25 @@ import { attachExecutionDisposition } from './execution-disposition-v1.mjs';
 import { stripV26RequestExtensionV1, enrichPhase6V26EvidenceV1, enrichPhase7V26EvidenceV1, attachReproductionEvidenceV1 } from './v26-execution-evidence-v1.mjs';
 
 const DEFAULT_RUNNER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+
+async function liveScanForkBindingV1(projectRoot) {
+  let manifest;
+  try { manifest=JSON.parse(await fs.readFile(path.join(projectRoot,'scan-source-manifest.json'),'utf8')); }
+  catch(error){if(error?.code==='ENOENT')return null;throw error;}
+  if(manifest?.inputMode!=='LIVE_SCAN')return null;
+  const pin=manifest.frozenBlock;
+  const targets=manifest.resolvedTargets??[];
+  if(manifest.chainId!==1||!Number.isSafeInteger(pin?.number)
+    ||!/^0x[0-9a-fA-F]{64}$/.test(String(pin?.hash??''))
+    ||!Array.isArray(targets)||targets.length===0
+    ||targets.some(t=>!/^0x[0-9a-fA-F]{40}$/.test(String(t?.address??''))
+      ||!/^[0-9a-fA-F]{64}$/.test(String(t?.runtimeSha256??''))))
+    throw new Error('LIVE_SCAN_FORK_TARGET_IDENTITY_INVALID');
+  return {frozenBlockNumber:pin.number,frozenBlockHash:pin.hash,
+    attestedTargets:targets.map(t=>({address:t.address,runtimeSha256:t.runtimeSha256,
+      qualifiedName:t.qualifiedName??null}))};
+}
+
 
 function preflightFailure(request, preflight) {
   const repairRequired = preflight?.nextState === 'RUNNER_REPAIR_REBIND';
@@ -90,10 +110,19 @@ async function executePhase6V2({
     if(environment.PHASE5_BOUNDARY_PROGRESS==='true')process.stderr.write('[phase5-v7] Source snapshot ready; checking fork preflight\n');
     if (phase6RequiresMutableRpc(request)) {
       const medusaForkPin = request.configuration?.analysis?.medusa;
+      const sourceFork=await liveScanForkBindingV1(phase6Snapshot.projectRoot);
+      if(sourceFork&&medusaForkPin&&medusaForkPin!==false
+        &&(medusaForkPin.frozenBlockNumber!=null||medusaForkPin.frozenBlockHash!=null)
+        &&(medusaForkPin.frozenBlockNumber!==sourceFork.frozenBlockNumber
+          ||String(medusaForkPin.frozenBlockHash).toLowerCase()!==sourceFork.frozenBlockHash.toLowerCase()))
+        throw new Error('LIVE_SCAN_FORK_PIN_CONTRADICTS_FROZEN_SOURCE');
       mutableRpcSession = await createMutableRpcSession({
         environment,
-        frozenBlockNumber: medusaForkPin && medusaForkPin !== false ? medusaForkPin.frozenBlockNumber ?? null : null,
-        frozenBlockHash: medusaForkPin && medusaForkPin !== false ? medusaForkPin.frozenBlockHash ?? null : null,
+        frozenBlockNumber: sourceFork?.frozenBlockNumber
+          ??(medusaForkPin&&medusaForkPin!==false?medusaForkPin.frozenBlockNumber??null:null),
+        frozenBlockHash: sourceFork?.frozenBlockHash
+          ??(medusaForkPin&&medusaForkPin!==false?medusaForkPin.frozenBlockHash??null:null),
+        ...(sourceFork?{attestedTargets:sourceFork.attestedTargets}:{}),
       });
     }
 
