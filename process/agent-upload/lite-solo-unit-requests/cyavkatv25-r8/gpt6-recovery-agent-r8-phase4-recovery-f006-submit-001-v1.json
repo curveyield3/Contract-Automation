@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "r8-phase4-recovery-f006-submit-001-v1",
+  "operation": "SUBMIT",
+  "campaignId": "cyavkatv25-r8",
+  "campaignGenerationId": "cyavkatv25-r8-g1-20261027T104124Z",
+  "phaseSequence": 4,
+  "lane": "F",
+  "workerId": "gpt6-recovery-agent",
+  "sourceSha256": "7a920115d463a2f468c688c65f5fe24ec3364ee57eea4561505fe1e484fcd779",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "F-006",
+      "claimEpoch": 2,
+      "claimToken": "3d746efd-7a49-4586-8056-9fcabd13292c",
+      "packetSha256": "29aad6079a1bf128bf571a10976cfa8e9e81b790a9569e08536158f18305a79f",
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/F-006/submissions/gpt6-recovery-agent/epoch-2/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "d044ad4865735b239c8337b8aa02e925fa0a784a3d95d1d8abd1cb4109c65b23",
+      "unitSpecRevision": 1
+    }
+  ]
+}
