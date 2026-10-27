@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1,markFinalizationV1,statusUnitQueueV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1,markFinalizationV1,statusUnitQueueV1,reopenAggregateDefectsV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {repoFile,readJson,writeJson} from './lib/lite-solo-phase-work-v1.mjs';
 const arg=Object.fromEntries(process.argv.slice(2).reduce((out,s,i,a)=>{
  if(i%2===0){if(!s.startsWith('--')||a[i+1]===undefined)throw Error('invalid CLI parameters');
@@ -53,8 +53,8 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
   // Existing work-form controller, not a second parallel validation implementation.
   // It performs full semantic/security validation, source-bound execution checks,
   // receipt generation, Phase-7 automatic marker and successor assignment.
-  assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase:seq});
   try{
+   assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase:seq});
    const output=execFileSync(process.execPath,['scripts/lite-solo-phase-controller-v1.mjs',
     '--controller-root',root,'--campaign-id',campaignId,
     '--campaign-path',campaignPath,'--campaign-directory-path',directoryRel,
@@ -68,10 +68,16 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
      details:{receiptPath:updated.lastSealedReceiptPath}});
     seal={status:'SEALED',phase:seq,receiptPath:updated.lastSealedReceiptPath};
    }else{
-    seal={status:'NOT_SEALED',phase:seq,envelopeStatus:envelope.status};
+    const current=readJson(directoryFile);
+    const packet=current.currentAssignment?.packetPath?readJson(repoFile(root,current.currentAssignment.packetPath)):null;
+    const deficits=packet?.controllerValidation?.deficiencies??[];
+    const reopened=deficits.length?reopenAggregateDefectsV1({root,campaignPath,phase:seq,deficiencies:deficits}):null;
+    if(!reopened)markFinalizationV1({root,campaignPath,phase:seq,status:'BLOCKED',details:{envelopeStatus:envelope.status}});
+    seal={status:'NOT_SEALED',phase:seq,envelopeStatus:envelope.status,rework:reopened};
    }
   }catch(error){
    // Do not erase accepted siblings or mark a failed security gate as PASS.
+   markFinalizationV1({root,campaignPath,phase:seq,status:'BLOCKED',details:{error:String(error.stderr??error.message??error).slice(0,1800)}});
    seal={status:'BLOCKED',phase:seq,error:String(error.stderr??error.message??error).slice(0,1800)};
   }
  }
