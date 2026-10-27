@@ -23,12 +23,55 @@ permissions:
   contents: read
   actions: write
 
-concurrency:
-  group: lite-controller-delivery-replay-${{ github.event_name == 'workflow_dispatch' && inputs.campaign_id || github.ref_name }}
-  cancel-in-progress: false
-
 jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      requests: ${{ steps.ids.outputs.requests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - id: ids
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          ONE_CAMPAIGN: ${{ inputs.campaign_id }}
+        run: |
+          set -euo pipefail
+          root=process/browser-agent-wake/delivery-replay-requests
+          : >/tmp/lite-replay-requests.ndjson
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            [[ "$ONE_CAMPAIGN" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]]
+            jq -nc --arg id "$ONE_CAMPAIGN" '{request_path:"__MANUAL__",campaign_id:$id}' >>/tmp/lite-replay-requests.ndjson
+          else
+            if [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]]; then
+              mapfile -t changed < <(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" -- "$root/")
+            else
+              mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")
+            fi
+            for request in "${changed[@]}"; do
+              [[ "$request" =~ ^process/browser-agent-wake/delivery-replay-requests/[A-Za-z0-9._-]+\.json$ ]] || continue
+              test -f "$request" || continue
+              jq -ec --arg file "$request" '
+                select(.schemaVersion=="curveyield-lite-controller-delivery-replay-request-v1"
+                  and (.campaignId|type)=="string"
+                  and (.campaignId|test("^[A-Za-z0-9._-]+-r[0-9]+$")))
+                | {request_path:$file,campaign_id:.campaignId}
+              ' "$request" >>/tmp/lite-replay-requests.ndjson
+            done
+          fi
+          echo "requests=$(jq -sc '{include:.}' /tmp/lite-replay-requests.ndjson)" >>"$GITHUB_OUTPUT"
   redeliver:
+    needs: discover
+    if: ${{ needs.discover.outputs.requests != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.requests) }}
+    concurrency:
+      group: lite-controller-delivery-replay-${{ matrix.campaign_id }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -45,12 +88,13 @@ jobs:
           DISPATCH_CAMPAIGN: ${{ inputs.campaign_id }}
           DISPATCH_DETAIL_REF: ${{ inputs.detail_ref }}
           DISPATCH_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          MATRIX_REQUEST: ${{ matrix.request_path }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = 'push' ]; then
-            mapfile -t requests < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- 'process/browser-agent-wake/delivery-replay-requests/*.json')
-            [ "${#requests[@]}" -eq 1 ] || { echo '::error::Exactly one bounded delivery-replay request must change'; exit 1; }
-            request="${requests[0]}"
+            request="$MATRIX_REQUEST"
+            [[ "$request" =~ ^process/browser-agent-wake/delivery-replay-requests/[A-Za-z0-9._-]+\.json$ ]]
+            test -f "$request"
             jq -e '.schemaVersion=="curveyield-lite-controller-delivery-replay-request-v1" and (.campaignId|type=="string") and (.detailRef|type=="string") and (.auditControllerRef=="main")' "$request" >/dev/null
             campaign="$(jq -r '.campaignId' "$request")"
             detail="$(jq -r '.detailRef' "$request")"
