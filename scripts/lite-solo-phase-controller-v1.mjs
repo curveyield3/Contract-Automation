@@ -124,11 +124,12 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
 }
 function receiptRef(root,campaignPath,rel,role){return {role,path:path.posix.relative(campaignPath,rel),sha256:shaFile(repoFile(root,rel))};}
 function assignmentReviewer(sequence,authorityRoot=null,root=null){
- if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot))throw new Error('lite-solo assignment authority mismatch');
+ if(authorityRoot!=='Audit Skill - Audit Preview/audit-preview-v1'||!Number.isInteger(sequence)||sequence<1||sequence>4)
+   throw new Error('AUDIT_PREVIEW_PHASE_OUT_OF_SCOPE');
  return 'lite-solo-agent';
 }
 function isFreshBoundary(next,authorityRoot=null,controllerRoot=null){
- if([ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot))return false;
+ if(authorityRoot==='Audit Skill - Audit Preview/audit-preview-v1')return false;
  if(controllerRoot&&isReassignedV13AuthorityV1({root:controllerRoot,authorityRoot}))return [4,5,8].includes(next);
  return isV13AuthorityV1(authorityRoot)?[2,5,8].includes(next):[2,6,8].includes(next);
 }
@@ -847,7 +848,7 @@ if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current as
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'predecessor sealed receipt'));
 const authorityRoot=authorityRootFromReceipt(predecessor);
 const loaded=loadPhaseSchema(root,authorityRoot,sequence); const schema=loaded.schema;
-if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot)||predecessor.authority?.liteRelease!==(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v6'?'lite-solo-v6':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v5'?'lite-solo-v5':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v4'?'lite-solo-v4':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v3'?'lite-solo-v3':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v2'?'lite-solo-v2':'lite-solo-v1')||assignment.reviewer!=='lite-solo-agent')
+if(authorityRoot!=='Audit Skill - Audit Preview/audit-preview-v1'||predecessor.authority?.liteRelease!=='audit-preview-v1'||assignment.reviewer!=='lite-solo-agent')
  throw new Error('lite-solo predecessor or assignment authority mismatch');
 if(assignment?.status==='WAITING_FOR_SUCCESSOR_AGENT')throw new Error('lite-solo cannot require reviewer handoff');
 const gatedMasterReview=false; // lite-solo never stages master acceptance
