@@ -267,6 +267,6 @@ gh workflow run lite-solo-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --
  echo "## lite-solo Source Initialization"
  echo "- Campaign: $campaign_id"
  echo "- Agent: lite-solo-agent (direct repository/controller work; no chat registration or wake)"
- echo "- Authority: $skill_home"
+ echo "- Authority: ${skill_home:-campaign-bound authority retained on idempotent retry}"
  echo "- Phase-0 machine work dispatched automatically on admitted source"
 } >> "$GITHUB_STEP_SUMMARY"
