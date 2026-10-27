@@ -110,7 +110,7 @@ jobs:
           encoded="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$encoded_path?ref=main" --jq .content)"
           printf '%s' "$encoded" | base64 -d >/tmp/lite-solo-campaign-directory.json
           campaign_id="$AUDIT_CAMPAIGN"
-          campaign_path="campaigns/$(printf '%s' "$campaign_id" | sed -E 's/-r([0-9]+)$/ r\\1/' | sed -E 's/^cyavkatv25 /cyavKATv25 /')"
+          campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
           # A newer same-source rN campaign can replace the legacy slug pointer.
           # Recover the old generation into its own revision-scoped controller
           # directory without modifying the newer generation's canonical record.
@@ -198,7 +198,7 @@ jobs:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
           RPC_KATANA: ${{ secrets.RPC_KATANA }}
           RPC_BASE: ${{ secrets.RPC_BASE }}
-          AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
+          AUDIT_DIRECTORY: ${{ steps.scope.outputs.directory }}
           AUDIT_CAMPAIGN: ${{ steps.request.outputs.id }}
           AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
           REQUEST_FILE: ${{ steps.request.outputs.request }}
