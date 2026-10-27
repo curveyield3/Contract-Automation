@@ -99,7 +99,18 @@ const compareImportedEvidence=()=>{
  inspect('work/phase-04/PHASE_04_WORK_FORM_v1.json');
 };
 const copyCampaign=()=>{
- if(fs.existsSync(inside(dest))||fs.existsSync(inside(entryPath)))throw Error('APC_CONTINUATION_ALREADY_EXISTS');
+ if(fs.existsSync(inside(dest))||fs.existsSync(inside(entryPath))){
+  if(!fs.existsSync(inside(dest))||!fs.existsSync(inside(entryPath)))
+   throw Error('APC_PARTIAL_CONTINUATION_EXISTS');
+  const existing=read(entryPath);
+  if(existing.campaignId!==newId||existing.sourceSha256!==preview.sourceSha256||
+    existing.previewCompletion?.originalCampaignId!==previewId||
+    existing.previewCompletion?.originalPhase4ReceiptSha256!==fileSha(preview.lastSealedReceiptPath))
+   throw Error('APC_REPLAY_CONFLICT');
+  console.log(JSON.stringify({operation:'PREPARE',status:existing.campaignStatus,
+    campaignId:newId,replayed:true,editPath:editRel}));
+  return;
+ }
  fs.cpSync(inside(oldRoot),inside(dest),{recursive:true,errorOnExist:true,force:false});
  // The prior sealed phase-4 receipt must never appear as the new audit's own receipt.
  fs.rmSync(inside(ref(dest,'receipts/PHASE_04_RECEIPT_v1.json')));
@@ -216,6 +227,11 @@ const importHistory=(dir)=>{
 };
 const launch=async()=>{
  const dir=read(entryPath);
+ if(dir.campaignId===newId&&dir.campaignStatus==='ACTIVE'&&dir.previewCompletion?.status==='LAUNCHED'){
+  console.log(JSON.stringify({operation:'LAUNCH',status:'ALREADY_LAUNCHED',campaignId:newId,
+    nextPhaseSequence:dir.currentAssignment?.phaseSequence??null,replayed:true}));
+  return;
+ }
  compareImportedEvidence();
  if(dir.campaignId!==newId||dir.campaignStatus!=='STAGED_PRELAUNCH'
   ||dir.sourceSha256!==preview.sourceSha256
