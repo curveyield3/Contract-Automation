@@ -43,11 +43,13 @@ const sourceWorkflow=fs.readFileSync('.github/workflows/lite-solo-source-initial
 const sourceScript=fs.readFileSync('scripts/lite-solo-source-initialization/run-v1.sh','utf8');
 const phase0Workflow=fs.readFileSync('.github/workflows/lite-solo-phase0-bootstrap-v1.yml','utf8');
 const phaseControllerWorkflow=fs.readFileSync('.github/workflows/lite-solo-phase-controller-v1.yml','utf8');
+const directRequestPush="  push:\n    branches: [main]\n    paths:\n      - 'process/lite-solo-source-initialization/requests/*.json'";
 if(!sourceWorkflow.includes('workflow_dispatch:')||
-   sourceWorkflow.includes('  push:')||
-   sourceWorkflow.includes('process/lite-solo-source-initialization/requests/')||
+   !sourceWorkflow.includes(directRequestPush)||
+   !sourceWorkflow.includes('.deliveryTransport=="DIRECT"')||
+   !sourceWorkflow.includes('test "$GITHUB_REF_NAME" = main')||
    /agent_chat_url|agentChatUrl|wake_message_b64|SOLO_CHAT_URL/.test(sourceWorkflow))
- throw Error('Lite-Solo launch must require only a direct workflow dispatch, never chat or request-file delivery');
+ throw Error('Lite-Solo launch must use direct dispatch or validated main-only source request; never chat delivery');
 if(/SOLO_CHAT_URL|process\/browser-agent-wake\/registrations|lite-work-relay-v1\.yml|WAKE_ACK/.test(sourceScript))
  throw Error('Lite-Solo initialization still attempts a browser registration, chat binding or message delivery');
 if(!discovery.includes('sequentialSingleReviewer:true')||
