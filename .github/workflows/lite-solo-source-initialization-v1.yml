@@ -55,7 +55,7 @@ jobs:
             for request in "${changed[@]}"; do
               [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]] || continue
               test -f "$request" || continue
-              key="${request##*/}"
+              key="$(jq -er '.requestId | select(type=="string" and test("^[A-Za-z0-9._-]+$"))' "$request")"
               jq -nc --arg request "$request" --arg key "$key" '{request_path:$request,request_key:$key}' >> /tmp/lite-solo-source-requests.ndjson
             done
           fi
