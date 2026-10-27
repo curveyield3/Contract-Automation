@@ -482,12 +482,65 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
   }
   // Keep script/ and test/ in the frozen source and readiness inventory, but
   // do not feed executable scripts/cheatcodes to the production-contract build.
-  const result=await runCommand({command:'timeout',args:['1500s','forge','build','--force','--build-info','--skip','script','--skip','test'],cwd:projectRoot});
-  if(result?.exitCode!==0){
-    const error=new Error('Foundry native production compilation failed: '+String(result?.stderr??result?.stdout??'').slice(-4000));
-    error.code='FOUNDRY_NATIVE_COMPILATION_FAILED';throw error;
+  // A source-authored compilation-only anchor can accidentally combine
+  // incompatible major-version dependency symbols in a single Solidity unit.
+  // Compile its original implementation sources in separate exact-source units
+  // instead: never rewrite, replace, or rehash the admitted archive.
+  const anchorName='BoostHubBeefyCompileImports_v9.sol';
+  const anchorPath=path.join(projectRoot,detected.src,anchorName);
+  const anchorText=await fsApi.readFile(anchorPath,'utf8').catch(()=>null);
+  const isBoostHubAnchor=typeof anchorText==='string'
+    && anchorText.includes('Compilation anchor for the native Solo-Lite Phase 0 exact-source build.')
+    && anchorText.includes('import "../beefy/contracts/converter/BoostHubEthereumRewardConverter_v4.sol";')
+    && anchorText.includes('import "../beefy/contracts/beefy/StrategyConvexBoostHubStakingV5.sol";')
+    && anchorText.includes('import "../beefy/contracts/beefy/BeefyVaultV7FixedV2.sol";');
+  let paths;
+  if(isBoostHubAnchor){
+    const originalSources=[];
+    async function collectExactSources(dir){
+      for(const entry of await fsApi.readdir(dir,{withFileTypes:true})){
+        const absolute=path.join(dir,entry.name);
+        if(entry.isDirectory())await collectExactSources(absolute);
+        else if(entry.isFile() && /\\.(sol|vy)$/.test(entry.name) && absolute!==anchorPath)
+          originalSources.push(path.relative(projectRoot,absolute).split(path.sep).join('/'));
+      }
+    }
+    await collectExactSources(path.join(projectRoot,detected.src));
+    const groups=[
+      [...originalSources.sort(),'beefy/contracts/converter/BoostHubEthereumRewardConverter_v4.sol'],
+      ['beefy/contracts/beefy/StrategyConvexBoostHubStakingV5.sol','beefy/contracts/beefy/BeefyVaultV7FixedV2.sol']
+    ];
+    paths=[];
+    for(const [index,sourcePaths] of groups.entries()){
+      for(const sourcePath of sourcePaths){
+        if(!await exists(path.join(projectRoot,...sourcePath.split('/')),fsApi))
+          throw new Error('Exact-source isolated Foundry input missing: '+sourcePath);
+      }
+      const buildInfoDir=path.join(projectRoot,'.phase0-isolated-build-info-v1','unit-'+(index+1));
+      await fsApi.rm(buildInfoDir,{recursive:true,force:true});
+      await fsApi.mkdir(buildInfoDir,{recursive:true});
+      const result=await runCommand({command:'timeout',args:[
+        '1500s','forge','build','--force','--build-info','--build-info-path',buildInfoDir,
+        ...sourcePaths,'--skip','script','--skip','test','--skip',anchorName
+      ],cwd:projectRoot});
+      if(result?.exitCode!==0){
+        const error=new Error('Exact-source isolated Foundry unit '+(index+1)+' failed: '+String(result?.stderr??result?.stdout??'').slice(-4000));
+        error.code='FOUNDRY_NATIVE_COMPILATION_FAILED';throw error;
+      }
+      const files=(await fsApi.readdir(buildInfoDir,{withFileTypes:true}))
+        .filter(entry=>entry.isFile()&&entry.name.endsWith('.json'))
+        .map(entry=>path.join(buildInfoDir,entry.name)).sort();
+      if(!files.length)throw new Error('Exact-source isolated Foundry unit '+(index+1)+' produced no compiler build-info: '+String(result?.stderr??result?.stdout??'').slice(-4000));
+      paths.push(...files);
+    }
+  }else{
+    const result=await runCommand({command:'timeout',args:['1500s','forge','build','--force','--build-info','--skip','script','--skip','test'],cwd:projectRoot});
+    if(result?.exitCode!==0){
+      const error=new Error('Foundry native production compilation failed: '+String(result?.stderr??result?.stdout??'').slice(-4000));
+      error.code='FOUNDRY_NATIVE_COMPILATION_FAILED';throw error;
+    }
+    paths=await buildInfoFiles(projectRoot,fsApi,{includeFoundry:true});
   }
-  const paths=await buildInfoFiles(projectRoot,fsApi,{includeFoundry:true});
   if (!paths.length) {
     const configured = await fsApi.readFile(path.join(projectRoot, 'foundry.toml'), 'utf8');
     const profile = configured.split(/^\s*\[profile\.default\]\s*$/m)[1]?.split(/^\s*\[[^\]]+\]\s*$/m)[0] ?? '';
