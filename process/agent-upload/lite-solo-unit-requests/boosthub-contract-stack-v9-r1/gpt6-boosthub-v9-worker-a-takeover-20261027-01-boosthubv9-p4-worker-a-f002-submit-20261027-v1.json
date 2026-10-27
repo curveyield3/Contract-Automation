@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "boosthubv9-p4-worker-a-f002-submit-20261027-v1",
+  "operation": "SUBMIT",
+  "campaignId": "boosthub-contract-stack-v9-r1",
+  "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-boosthub-v9-worker-a-takeover-20261027-01",
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "F-002",
+      "claimEpoch": 3,
+      "claimToken": "69d4a77d-f2ea-4ba9-bb4f-02b6d67964e5",
+      "unitSpecRevision": 1,
+      "packetSha256": "57db553cc8ac5b20d3429f15d148ac69b2898051c816373c87b1f121ef24dc26",
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/F-002/submissions/gpt6-boosthub-v9-worker-a-takeover-20261027-01/epoch-3/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "18c41b6152c317edca291858931df85ece85e096c02ce4badceaa939ee514b76"
+    }
+  ]
+}
