@@ -1,0 +1,266 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "r8-p4-94unit-release-01-20261027-v1",
+  "operation": "RELEASE",
+  "campaignId": "cyavkatv25-r8",
+  "campaignGenerationId": "cyavkatv25-r8-g1-20261027T104124Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-r8-next50-worker",
+  "sourceSha256": "7a920115d463a2f468c688c65f5fe24ec3364ee57eea4561505fe1e484fcd779",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "P4-RC-460",
+      "claimEpoch": 1,
+      "claimToken": "892418f9-d220-478d-b7fd-ed4235109562"
+    },
+    {
+      "unitId": "P4-RC-461",
+      "claimEpoch": 1,
+      "claimToken": "13f1e4fd-c5cd-4f99-9589-578b1aa78d94"
+    },
+    {
+      "unitId": "P4-RC-462",
+      "claimEpoch": 1,
+      "claimToken": "5c1095c6-357e-4584-aa51-cf763fea0f89"
+    },
+    {
+      "unitId": "P4-RC-463",
+      "claimEpoch": 1,
+      "claimToken": "f7b0ccb8-5387-4241-a9dc-4e23f5cdf4b5"
+    },
+    {
+      "unitId": "P4-RC-464",
+      "claimEpoch": 1,
+      "claimToken": "f7e7d545-3676-4111-9d7e-552dac2dd604"
+    },
+    {
+      "unitId": "P4-RC-465",
+      "claimEpoch": 1,
+      "claimToken": "c97200d0-81e4-4b89-8665-31bdf435700c"
+    },
+    {
+      "unitId": "P4-RC-466",
+      "claimEpoch": 1,
+      "claimToken": "755ab399-5c84-49f4-9c43-3c0620f474d6"
+    },
+    {
+      "unitId": "P4-RC-467",
+      "claimEpoch": 1,
+      "claimToken": "a609957e-f88e-429b-97fd-a539451ae1d6"
+    },
+    {
+      "unitId": "P4-RC-468",
+      "claimEpoch": 1,
+      "claimToken": "fcffc2e0-d677-4c44-9733-29fc53aadc97"
+    },
+    {
+      "unitId": "P4-RC-469",
+      "claimEpoch": 1,
+      "claimToken": "5b28ae63-ff45-4be2-811d-c6bc5aee69ba"
+    },
+    {
+      "unitId": "P4-RC-470",
+      "claimEpoch": 1,
+      "claimToken": "4e27136b-2535-4c54-91fc-3119e83b2611"
+    },
+    {
+      "unitId": "P4-RC-471",
+      "claimEpoch": 1,
+      "claimToken": "d0672892-6385-4199-afd0-41a263c3b8e1"
+    },
+    {
+      "unitId": "P4-RC-472",
+      "claimEpoch": 1,
+      "claimToken": "9e5f50b7-6dfe-4764-8b53-c01a7d2b7158"
+    },
+    {
+      "unitId": "P4-RC-473",
+      "claimEpoch": 1,
+      "claimToken": "00c1c74f-b0eb-4df7-b683-8d9025fcee4a"
+    },
+    {
+      "unitId": "P4-RC-474",
+      "claimEpoch": 1,
+      "claimToken": "0a1bd1e0-97d8-4da4-b422-4290e6a84a72"
+    },
+    {
+      "unitId": "P4-RC-475",
+      "claimEpoch": 1,
+      "claimToken": "9e489c24-0c10-4497-acf8-d0b6125bba37"
+    },
+    {
+      "unitId": "P4-RC-476",
+      "claimEpoch": 1,
+      "claimToken": "7db08381-c95e-4dd7-b4ae-b27583820e8d"
+    },
+    {
+      "unitId": "P4-RC-477",
+      "claimEpoch": 1,
+      "claimToken": "3d4d034e-e271-4d2f-bd64-be3428588872"
+    },
+    {
+      "unitId": "P4-RC-478",
+      "claimEpoch": 1,
+      "claimToken": "9135ffa2-99d3-40ab-91e4-78dd1cf99a26"
+    },
+    {
+      "unitId": "P4-RC-479",
+      "claimEpoch": 1,
+      "claimToken": "23d31e92-9cd3-4869-b5ed-e6a67510aa35"
+    },
+    {
+      "unitId": "P4-RC-480",
+      "claimEpoch": 1,
+      "claimToken": "1378264c-cac3-454d-8d31-15601094f19a"
+    },
+    {
+      "unitId": "P4-RC-481",
+      "claimEpoch": 1,
+      "claimToken": "cb960b6c-4938-471c-b29d-5bde6b23fabd"
+    },
+    {
+      "unitId": "P4-RC-482",
+      "claimEpoch": 1,
+      "claimToken": "9ff24907-01a6-40e5-a2f0-a5d7023ad0ac"
+    },
+    {
+      "unitId": "P4-RC-483",
+      "claimEpoch": 1,
+      "claimToken": "02638de8-4a06-4986-8df5-2fe00c717695"
+    },
+    {
+      "unitId": "P4-RC-484",
+      "claimEpoch": 1,
+      "claimToken": "0e3ad659-e44e-4d0e-beef-8c389c951efb"
+    },
+    {
+      "unitId": "P4-RC-485",
+      "claimEpoch": 1,
+      "claimToken": "56b51bb1-f4c3-4b2f-9f7a-d8ea105cbf5a"
+    },
+    {
+      "unitId": "P4-RC-486",
+      "claimEpoch": 1,
+      "claimToken": "8fe65fe2-815f-46c6-9fbd-95609f5b3d5c"
+    },
+    {
+      "unitId": "P4-RC-487",
+      "claimEpoch": 1,
+      "claimToken": "abea2f0c-621c-4ce2-af5d-3543e03954e0"
+    },
+    {
+      "unitId": "P4-RC-488",
+      "claimEpoch": 1,
+      "claimToken": "4cb8df70-bdd9-4c1f-a837-5be1f1f0ba65"
+    },
+    {
+      "unitId": "P4-RC-489",
+      "claimEpoch": 1,
+      "claimToken": "624b08ef-d2e2-4231-8b22-a31ef5ade224"
+    },
+    {
+      "unitId": "P4-RC-490",
+      "claimEpoch": 1,
+      "claimToken": "0b7ffe87-1c5b-4a1e-8f37-afda76f6af78"
+    },
+    {
+      "unitId": "P4-RC-491",
+      "claimEpoch": 1,
+      "claimToken": "54e9a2b8-568c-4312-81c9-44b708327626"
+    },
+    {
+      "unitId": "P4-RC-492",
+      "claimEpoch": 1,
+      "claimToken": "0590398f-84fc-4541-ab72-29856fafd255"
+    },
+    {
+      "unitId": "P4-RC-493",
+      "claimEpoch": 1,
+      "claimToken": "9e02e4f3-29ce-4334-b325-5d8610d12472"
+    },
+    {
+      "unitId": "P4-RC-494",
+      "claimEpoch": 1,
+      "claimToken": "284d86b5-a853-4d2f-a02c-23aeec2d6726"
+    },
+    {
+      "unitId": "P4-RC-495",
+      "claimEpoch": 1,
+      "claimToken": "fe1563d4-1184-4bcc-8500-2c16d1c27732"
+    },
+    {
+      "unitId": "P4-RC-496",
+      "claimEpoch": 1,
+      "claimToken": "96da729c-c668-4ffb-893d-3f507f40e3c9"
+    },
+    {
+      "unitId": "P4-RC-497",
+      "claimEpoch": 1,
+      "claimToken": "bdc829ce-6dfd-47eb-a42e-ed86337c0084"
+    },
+    {
+      "unitId": "P4-RC-498",
+      "claimEpoch": 1,
+      "claimToken": "ded156c1-36e6-472c-b5e6-491b3149e352"
+    },
+    {
+      "unitId": "P4-RC-499",
+      "claimEpoch": 1,
+      "claimToken": "3c2544e4-30c2-476a-ba68-6eed62853301"
+    },
+    {
+      "unitId": "P4-RC-500",
+      "claimEpoch": 1,
+      "claimToken": "205b7eda-9df4-4412-8f12-317a56016dfc"
+    },
+    {
+      "unitId": "P4-RC-501",
+      "claimEpoch": 1,
+      "claimToken": "d8cf6024-97a0-4bf3-92ea-64ab652efaa3"
+    },
+    {
+      "unitId": "P4-RC-502",
+      "claimEpoch": 1,
+      "claimToken": "c05b2c5d-92bb-4346-b1a8-e968297ed1be"
+    },
+    {
+      "unitId": "P4-RC-503",
+      "claimEpoch": 1,
+      "claimToken": "14457ebe-9347-4e2c-b478-ca970c1cac50"
+    },
+    {
+      "unitId": "P4-RC-504",
+      "claimEpoch": 1,
+      "claimToken": "a6b8fa10-13e9-4da1-95a1-029141f75c6f"
+    },
+    {
+      "unitId": "P4-RC-505",
+      "claimEpoch": 1,
+      "claimToken": "66d885b1-ce80-46da-9485-cc1e15db8b7e"
+    },
+    {
+      "unitId": "P4-RC-506",
+      "claimEpoch": 1,
+      "claimToken": "18c0e0bd-fb32-492b-98c7-4e2780e8f59c"
+    },
+    {
+      "unitId": "P4-RC-507",
+      "claimEpoch": 1,
+      "claimToken": "007b8805-9bc5-4477-a1a4-426ea5afd1eb"
+    },
+    {
+      "unitId": "P4-RC-508",
+      "claimEpoch": 1,
+      "claimToken": "4a7a6575-9134-461f-95ee-1e06ec3da727"
+    },
+    {
+      "unitId": "P4-RC-509",
+      "claimEpoch": 1,
+      "claimToken": "301723e8-3a64-46b4-9451-970c22e3a9a3"
+    }
+  ]
+}
