@@ -869,10 +869,76 @@ export function finalizeReadinessV1({root,campaignPath,directory,phase}){
  }
  return {ready:true,plan,queue};
 }
+// Recover a controller-owned v13 index accidentally re-sharded from a previously
+// assembled unit form. The immutable per-record unit plan, not reviewer data,
+// fixes the original mandatory identities and APPEND boundary. Do not bypass
+// the trusted-index equality checks or manufacture missing substantive records.
+function restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan}){
+ if(phase!==4)return;
+ const workDir=path.posix.dirname(assignment.workShardIndexPath);
+ const trustedDir=path.posix.join(campaignPath,'controller/shards/phase-'+String(phase).padStart(2,'0'));
+ const trustedRel=path.posix.join(trustedDir,'INDEX_v1.json');
+ const working=read(root,assignment.workShardIndexPath),trusted=read(root,trustedRel);
+ if(JSON.stringify(working)!==JSON.stringify(trusted))
+  throw Error('v13 index authority mismatch before unit-plan recovery');
+ const records=plan.units.flatMap(u=>u.kind==='BATCH'?u.members:[u]).filter(u=>['SHARD','APPEND'].includes(u.kind));
+ let changed=false;
+ for(let i=0;i<working.pages.length;i++){
+  const desc=working.pages[i],pageRel=path.posix.join(workDir,desc.file);
+  const trustedPageRel=path.posix.join(trustedDir,desc.file);
+  const page=read(root,pageRel),trustedPage=read(root,trustedPageRel);
+  if(JSON.stringify(page)!==JSON.stringify(trustedPage)||sha(page)!==desc.sha256)
+   throw Error('v13 index page authority mismatch before unit-plan recovery');
+  let pageChanged=false;
+  for(const shard of page.shards??[]){
+   if(shard.kind!=='array')continue;
+   const members=records.filter(u=>u.shardFile===shard.file);
+   if(!members.length)continue;
+   if(shard.append){
+    if(members.length!==1||members[0].kind!=='APPEND'||shard.recordKeys.length)
+     throw Error('unexpected append unit-plan identity: '+shard.file);
+    const expectedStart=records.filter(u=>u.kind==='SHARD'&&
+     JSON.stringify(u.path)===JSON.stringify(shard.path)).length;
+    if(shard.startIndex!==expectedStart){
+     const slabRel=path.posix.join(workDir,shard.file),slab=read(root,slabRel);
+     if(slab.startIndex!==shard.startIndex)throw Error('append shard index mismatch: '+shard.file);
+     shard.startIndex=expectedStart;slab.startIndex=expectedStart;put(root,slabRel,slab);
+     pageChanged=true;
+    }
+   }else{
+    if(members.some(u=>u.kind!=='SHARD'))throw Error('unexpected fixed unit-plan identity: '+shard.file);
+    members.sort((a,b)=>a.shardIndex-b.shardIndex);
+    if(members.some((u,j)=>u.shardIndex!==j))
+     throw Error('noncontiguous immutable fixed unit-plan ownership: '+shard.file);
+    const prefix=JSON.stringify(shard.path)+':';
+    const keys=members.map(u=>{
+     const key=u.recordKeys?.[0];
+     if(typeof key!=='string'||!key.startsWith(prefix))
+      throw Error('invalid immutable unit record key: '+shard.file);
+     return key.slice(prefix.length);
+    });
+    const first=Math.min(...members.map(u=>u.recordIndex));
+    if(shard.startIndex!==first||JSON.stringify(shard.recordKeys)!==JSON.stringify(keys)){
+     shard.startIndex=first;shard.recordKeys=keys;pageChanged=true;
+    }
+   }
+  }
+  if(pageChanged){
+   put(root,pageRel,page);put(root,trustedPageRel,page);
+   working.pages[i].sha256=sha(page);trusted.pages[i].sha256=sha(page);
+   changed=true;
+  }
+ }
+ if(changed){
+  put(root,assignment.workShardIndexPath,working);put(root,trustedRel,trusted);
+ }
+}
 export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}){
  const ready=finalizeReadinessV1({root,campaignPath,directory,phase});
  if(!ready.ready)throw Error('unsafe finalization: '+ready.reason);
  const {plan,queue}=ready,assignment=directory.currentAssignment;
+ // Normalize prior erroneous re-sharding only from the frozen unit plan.
+ restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan});
  const byFile=new Map();
  for(const u of plan.units.filter(u=>['SHARD','APPEND','BATCH'].includes(u.kind))){
   const accepted=read(root,queue.units[u.unitId].acceptedPath);
