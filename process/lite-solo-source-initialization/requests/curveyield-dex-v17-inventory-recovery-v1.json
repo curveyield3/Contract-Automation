@@ -6,5 +6,5 @@
   "scanUrls": [],
   "authorizePhase0Execution": true,
   "deliveryTransport": "DIRECT",
-  "recoveryAttempt": "phase0-evidence-push-contention-20261027-v2"
+  "recoveryAttempt": "phase0-same-source-legacy-policy-recovery-v3"
 }
