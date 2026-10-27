@@ -251,6 +251,15 @@ const launch=async()=>{
   ||(daiPresent&&!proof.wardReads.length))
   throw Error('APC_ONCHAIN_VERIFICATION_REQUIRED');
  const form=read(editRel),prior=read(originalFormRel);
+ const textRows=form.actions?.['step-3']?.outputs?.typedLimitations;
+ if(Array.isArray(textRows)){
+  form.actions['step-3'].outputs.typedLimitations=textRows.map(v=>{
+   if(typeof v!=='string'||!v.includes('must additionally record a fresh, block-pinned wards(address) read'))return v;
+   const witnessed=proof.wardReads.map(row=>row.address+'='+row.wardValue).join(', ');
+   return 'LIMITATION_LIVE_CONFIGURATION: The original Preview verified DAI deployed runtime, source identity and read-only token state. Audit Preview Completion independently reverified those results at frozen Ethereum block '+proof.blockNumber+
+    ' and recorded wards(address) observations ('+witnessed+') in work/phase-04/PHASE_04_ONCHAIN_READONLY_v1.json. This verifies chain-state accessibility but not a complete ward roster: constructor initialization and all historical anonymous LogNote rely/deny events were not exhaustively reconstructed. External signer custody, governance/timelocks, reserves, redemption and integrations remain outside the admitted single-contract source scope. No state-changing transactions or tests were executed.';
+  });
+ }
  const {schema}=loadPhaseSchema(root,authorityRoot,4);
  const problems=[...validateWorkForm(schema,form),...validatePhaseScaffold(4,form)];
  if(problems.length)throw Error('APC_PHASE4_EDIT_INVALID: '+problems.slice(0,12).join('; '));
