@@ -269,8 +269,10 @@ const launch=async()=>{
  dir.previewCompletion.prelaunchFormSha256=fileSha(editRel);
  dir.previewCompletion.onchainVerificationSha256=fileSha(evidenceRel);
  dir.updatedAt=now;
- write(entryPath,dir);
  createUnitPlanV1({root,campaignPath:dest,directory:dir,phase:5,automationRoot:process.cwd()});
+ // The queue planner mutates the directory with worker-readable index pointers;
+ // persist the final state only after the planner returns.
+ write(entryPath,dir);
  write(stageRel,{...read(stageRel),status:'LAUNCHED',launchedAt:now,
    workFormSha256:fileSha(finalFormRel),onchainVerificationSha256:fileSha(evidenceRel),
    phase4ReceiptPath:receiptRel,phase5AssignmentPath:next.packetPath});
