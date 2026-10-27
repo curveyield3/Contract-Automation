@@ -31,11 +31,16 @@ function destinationAllowed(destination) {
   return ALLOWED_ROOT_FILES.has(destination) || ALLOWED_PREFIXES.some((prefix) => destination.startsWith(prefix));
 }
 
-async function destinationMustNotExist(destination) {
+async function destinationMustNotExist(destination, {bytes, allowIdenticalConfig=false} = {}) {
   try {
-    await fs.lstat(destination);
+    const stat=await fs.lstat(destination);
+    // Already-admitted live scan archives carry a source-owned foundry.toml.
+    // If the overlay's exact bytes match, use it *without modifying source*.
+    // Any difference, symlink, directory or non-config collision fails closed.
+    if(allowIdenticalConfig&&stat.isFile()&&Buffer.isBuffer(bytes)
+      &&(await fs.readFile(destination)).equals(bytes)) return true;
   } catch (error) {
-    if (error?.code === 'ENOENT') return;
+    if (error?.code === 'ENOENT') return false;
     throw error;
   }
   throw new Error(`Phase 6 audit overlay refuses to overwrite staged source path: ${destination}`);
@@ -90,16 +95,21 @@ export async function materializePhase6HarnessOverlayV1({ projectRoot, runnerRoo
 
     const from = inside(bundleRoot, sourcePath, `manifest.files[${index}].source`);
     const to = inside(projectRoot, destinationPath, `manifest.files[${index}].destination`);
-    await destinationMustNotExist(to);
     const bytes = await fs.readFile(from);
+    const existingIdentical=await destinationMustNotExist(to, {
+      bytes, allowIdenticalConfig:destinationPath==='foundry.toml'
+    });
     const observedDigest = sha256(bytes);
     if (entry.sha256 && entry.sha256 !== observedDigest) {
       throw new Error(`Phase 6 harness file digest mismatch for ${sourcePath}: expected ${entry.sha256}, observed ${observedDigest}`);
     }
     assertNoUsableRpcLiteral(bytes, sourcePath);
-    await fs.mkdir(path.dirname(to), { recursive: true });
-    await fs.writeFile(to, bytes);
-    materialized.push({ source: sourcePath, destination: destinationPath, sha256: observedDigest, bytes: bytes.length });
+    if(!existingIdentical) {
+      await fs.mkdir(path.dirname(to), { recursive: true });
+      await fs.writeFile(to, bytes);
+    }
+    materialized.push({ source: sourcePath, destination: destinationPath, sha256: observedDigest,
+      bytes: bytes.length, reusedUnchangedSourceConfig:existingIdentical });
   }
 
   for (const required of V7_POLICY.phase6.requiredRuntimeFiles) {
