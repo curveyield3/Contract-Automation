@@ -256,7 +256,20 @@ jobs:
             exit 1
           fi
           git commit -m "audit(phase0): retain only forked package deploy/config evidence ${{ inputs.campaign_id }}"
-          git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+          # Independent campaigns may publish to main concurrently. Keep the exact
+          # campaign evidence commit and rebase only when the remote moved.
+          published=false
+          for attempt in 1 2 3 4 5 6; do
+            if git push origin "HEAD:$AUDIT_CONTROLLER_REF"; then published=true; break; fi
+            echo "::warning::Audit-Controller moved during preview evidence publication (attempt $attempt/6)"
+            git fetch origin "$AUDIT_CONTROLLER_REF"
+            git rebase "origin/$AUDIT_CONTROLLER_REF" || {
+              echo "::error::Preview deployment evidence rebase conflict; manual reconciliation required"
+              git rebase --abort || true
+              exit 1
+            }
+          done
+          [ "$published" = true ] || { echo "::error::Preview deployment evidence publication failed after six attempts"; exit 1; }
 
       - name: Summarize
         shell: bash
