@@ -3,6 +3,11 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 
 const MAX_SHARD=64*1024, MAX_INDEX=32*1024, TARGET_SHARD=58*1024;
+// Large controller-owned machine inputs are split into individually bounded,
+// content-addressed fragments, never truncated or silently omitted.
+const MAX_INPUT_RECORD=32*1024*1024, INPUT_CHUNK_BYTES=28*1024;
+const INPUT_CHUNK_SCHEMA='curveyield-work-input-chunk-v1';
+const INPUT_CHUNK_REF='__workShardInputChunksV1';
 // The immutable index bounds fixed rows; its agent-owned append slots need capacity
 // for large discovery reconciliation without changing the campaign-bound index.
 const MAX_V13_APPEND_BYTES=1024*1024, MAX_V13_APPEND_RECORDS=1024;
@@ -48,6 +53,25 @@ export function shardWorkFormV1({root,formRel,phase,retireFull=true,force=false}
  const baseText=pretty(structure);
  fs.writeFileSync(relfile(root,baseRel),baseText);
  const shards=[],globalKeys=new Set();
+ let chunkSequence=0;
+ // Only read-only controller-prefilled automationInputs can have an oversized
+ // source record. Editable reviewer records must remain ordinary JSON shards.
+ const splitInputRecord=(tokens,value)=>{
+   if(tokens[0]!=='automationInputs')throw new Error('oversized editable work-form record is not safely chunkable: '+JSON.stringify(tokens));
+   const raw=Buffer.from(JSON.stringify(value),'utf8');
+   if(raw.length>MAX_INPUT_RECORD)throw new Error('controller input record exceeds bounded 32 MiB');
+   const id=String(++chunkSequence).padStart(4,'0'),count=Math.ceil(raw.length/INPUT_CHUNK_BYTES);
+   if(!count)throw new Error('empty controller input record cannot be chunked');
+   for(let i=0;i<count;i++){
+     const fragment=raw.subarray(i*INPUT_CHUNK_BYTES,(i+1)*INPUT_CHUNK_BYTES);
+     const body={schemaVersion:INPUT_CHUNK_SCHEMA,id,index:i,count,base64:fragment.toString('base64')};
+     const file='input-'+id+'-'+String(i+1).padStart(4,'0')+'_v1.json';
+     const rel=path.posix.join(path.posix.dirname(baseRel),file);
+     if(bytes(body)>MAX_SHARD)throw new Error('oversized controller input fragment');
+     fs.writeFileSync(relfile(root,rel),pretty(body));
+   }
+   return {[INPUT_CHUNK_REF]:{id,count,bytes:raw.length,sha256:digest(raw)}};
+ };
  for(const {tokens,items} of arrays){
    let next=0;
    while(next<items.length){
@@ -55,12 +79,15 @@ export function shardWorkFormV1({root,formRel,phase,retireFull=true,force=false}
      for(;next<items.length&&entries.length<25;next++){
        const key=recordKey(tokens,items[next],next);
        if(globalKeys.has(key))throw new Error('duplicate work-form record key '+key);
-       const proposed={schemaVersion:'curveyield-work-shard-v1',arrayPath:tokens,startIndex:start,entries:[...entries,{key,value:items[next]}]};
+       let value=items[next];
+       const proposed={schemaVersion:'curveyield-work-shard-v1',arrayPath:tokens,startIndex:start,entries:[...entries,{key,value}]};
        if(bytes(proposed)>MAX_SHARD){
-         if(!entries.length)throw new Error('single work-form record exceeds 64 KiB: '+key);
-         break;
+         if(entries.length)break;
+         value=splitInputRecord(tokens,value);
+         if(bytes({...proposed,entries:[{key,value}]})>MAX_SHARD)
+           throw new Error('oversized controller input shard reference: '+key);
        }
-       entries.push({key,value:items[next]});globalKeys.add(key);
+       entries.push({key,value});globalKeys.add(key);
      }
      const shard={schemaVersion:'curveyield-work-shard-v1',arrayPath:tokens,startIndex:start,entries};
      const file='shard-'+String(shards.length+1).padStart(4,'0')+'_v1.json';
@@ -118,12 +145,42 @@ export function restoreWorkShardsV1({root,indexRel,refreshDigests=false}){
   if(!Array.isArray(target))throw new Error('shard target is not an array');
   const occupied=ranges.get(arrayId)??new Set();
   for(const [j,item] of shard.entries.entries()){
-   const i=spec.startIndex+j,key=recordKey(spec.path,item.value,i);
+   const i=spec.startIndex+j,rawValue=item.value;
+   let value=rawValue;
+   if(rawValue&&typeof rawValue==='object'&&!Array.isArray(rawValue)&&Object.hasOwn(rawValue,INPUT_CHUNK_REF)){
+     if(spec.path[0]!=='automationInputs'||Object.keys(rawValue).length!==1)
+       throw new Error('controller input chunk reference outside immutable automationInputs');
+     const ref=rawValue[INPUT_CHUNK_REF];
+     if(!ref||!(/^[0-9]{4}$/.test(ref.id))||!Number.isInteger(ref.count)||ref.count<1||
+       ref.count>Math.ceil(MAX_INPUT_RECORD/INPUT_CHUNK_BYTES)||!Number.isInteger(ref.bytes)||
+       ref.bytes<=0||ref.bytes>MAX_INPUT_RECORD||!(/^[a-f0-9]{64}$/.test(ref.sha256)))
+       throw new Error('invalid controller input chunk reference');
+     const fragments=[];let length=0;
+     for(let p=0;p<ref.count;p++){
+       const file='input-'+ref.id+'-'+String(p+1).padStart(4,'0')+'_v1.json';
+       const fragmentText=fs.readFileSync(relfile(root,path.posix.join(parent,file)),'utf8');
+       if(Buffer.byteLength(fragmentText)>MAX_SHARD)throw new Error('controller input chunk exceeds 64 KiB: '+file);
+       const chunk=JSON.parse(fragmentText);
+       if(chunk.schemaVersion!==INPUT_CHUNK_SCHEMA||chunk.id!==ref.id||chunk.index!==p||
+         chunk.count!==ref.count||typeof chunk.base64!=='string')throw new Error('controller input chunk identity mismatch: '+file);
+       const part=Buffer.from(chunk.base64,'base64');
+       if(part.toString('base64')!==chunk.base64||!part.length||part.length>INPUT_CHUNK_BYTES)
+         throw new Error('invalid controller input chunk encoding: '+file);
+       length+=part.length;
+       if(length>ref.bytes)throw new Error('controller input chunk exceeds declared length');
+       fragments.push(part);
+     }
+     const assembled=Buffer.concat(fragments);
+     if(length!==ref.bytes||digest(assembled)!==ref.sha256)
+       throw new Error('controller input chunk content digest mismatch');
+     value=JSON.parse(assembled.toString('utf8'));
+   }
+   const key=recordKey(spec.path,value,i);
    const stored=spec.recordKeys[j],fullIndexKey=stored.startsWith('[')?
      stored:JSON.stringify(spec.path)+':'+stored;
    if(key!==item.key||key!==fullIndexKey||keys.has(key)||occupied.has(i))
      throw new Error('missing, duplicated or changed work record key: '+key);
-   keys.add(key);occupied.add(i);target[i]=item.value;
+   keys.add(key);occupied.add(i);target[i]=value;
   }
   ranges.set(arrayId,occupied);
   if(refreshDigests){spec.sha256=hash;spec.bytes=Buffer.byteLength(body);}
