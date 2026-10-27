@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-request-v1",
+  "mode": "LITE_SOLO",
+  "requestId": "boosthub-contract-stack-v6-20261027-v1",
+  "sourceUrl": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/BoostHub_Contract_Stack_v6%282%29.zip",
+  "scanUrls": [],
+  "authorizePhase0Execution": true,
+  "deliveryTransport": "DIRECT"
+}
