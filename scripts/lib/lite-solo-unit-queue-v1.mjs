@@ -10,6 +10,7 @@ import {deriveBaselineObligationsV1} from '../../packages/github-native-sim/src/
 import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite-solo-phase-prefill-v1.mjs';
 import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
+import {planSemanticBatchesV1} from './lite-solo-semantic-batches-v1.mjs';
 
 export const UNIT_POLICY=Object.freeze({issueBatchDefault:4,issueBatchMax:4,approvalBatchMax:5,maxParallelWorkers:null});
 export const REQUEST_SCHEMA='curveyield-lite-solo-unit-batch-request-v1';
@@ -43,7 +44,8 @@ const unitBase=(campaign,phase,id)=>path.posix.join(rootOf(campaign,phase),id);
 const asArray=x=>Array.isArray(x)?x:[];
 const isObject=x=>x&&typeof x==='object'&&!Array.isArray(x);
 const clone=x=>structuredClone(x);
-const depSatisfied=(queue,u)=>asArray(u.dependencies).every(k=>queue.units[k]?.status==='ACCEPTED');
+const depSatisfied=(queue,u)=>asArray(u.dependencies).every(k=>
+ queue.units[k]?.status==='ACCEPTED'||queue.acceptedRecords?.[k]?.status==='ACCEPTED');
 const isPhase=(p)=>[4,5,6].includes(p);
 const RELEASE='lite-solo-v4';
 const AUTHORITY='Audit Skill - Lite-Solo Authority/lite-solo-v4';
@@ -88,7 +90,7 @@ function emptyQueue(plan){
   campaignGenerationId:plan.campaignGenerationId,phaseSequence:plan.phaseSequence,
   phaseEpoch:plan.phaseEpoch,sourceSha256:plan.sourceSha256,authorityDigest:plan.authorityDigest,
   unitSpecRevision:plan.unitSpecRevision,stage:plan.stage,
-  units:{},processedRequests:{},processedRequestHashes:{},revision:0,finalizeStatus:'NOT_STARTED',newlyEligibleUnitIds:[]};
+  units:{},acceptedRecords:{},processedRequests:{},processedRequestHashes:{},revision:0,finalizeStatus:'NOT_STARTED',newlyEligibleUnitIds:[]};
 }
 function addUnit(plan,queue,unit){
  if(queue.units[unit.unitId]||plan.units.some(x=>x.unitId===unit.unitId))throw Error('duplicate unit '+unit.unitId);
@@ -154,18 +156,31 @@ function readPlan(root,campaign,phase){
     if(hex(rawValue)!==u.initialValueSha256)throw Error('unit prefill digest mismatch');
     u.initialValue=readPagedPrefillV1(root,u.initialValueRef,rawValue);
    }
+   if(u.kind==='BATCH'){
+    if(!u.membersRef||u.membersRef!==u.packetPath)throw Error('missing batch assignment manifest');
+    const raw=fs.readFileSync(repoFile(root,u.membersRef));
+    if(hex(raw)!==u.packetSha256)throw Error('batch packet digest mismatch');
+    const payload=readPagedPrefillV1(root,u.membersRef,raw);
+    if(payload.unitId!==u.unitId||payload.phaseSequence!==phase||
+       payload.schemaVersion!=='curveyield-lite-solo-batched-assignment-v1'||
+       !Array.isArray(payload.members)||payload.members.length<2)
+      throw Error('invalid batch assignment payload');
+    u.members=payload.members;
+   }
    units.push(u);
   }
  }
  if(units.length!==index.unitCount)throw Error('missing unit plan pages');
  const ownership={};
  for(const u of units){
-  if(!u.path)continue;
-  const key=u.kind==='APPEND'?dot([...u.path,'APPEND']):
-   Number.isInteger(u.recordIndex)?dot([...u.path,String(u.recordIndex)]):null;
-  if(!key)continue;
-  if(ownership[key])throw Error('duplicate canonical unit owner: '+key);
-  ownership[key]=u.unitId;
+  for(const m of u.kind==='BATCH'?u.members:[u]){
+   if(!m.path)continue;
+   const key=m.kind==='APPEND'?dot([...m.path,'APPEND']):
+    Number.isInteger(m.recordIndex)?dot([...m.path,String(m.recordIndex)]):null;
+   if(!key)continue;
+   if(ownership[key])throw Error('duplicate canonical unit owner: '+key);
+   ownership[key]=u.unitId;
+  }
  }
  return {...index,units,recordOwnership:ownership};
 }
@@ -183,6 +198,10 @@ function publishPlan(root,campaign,phase,plan,queue){
  };
  for(const unit of plan.units){
   const u=clone(unit);
+  if(u.kind==='BATCH'){
+   if(!u.membersRef||!u.packetPath||!u.members?.length)throw Error('invalid batch plan serialization');
+   delete u.members;
+  }
   if(Buffer.byteLength(pretty(u))>12000&&u.initialValue!==undefined){
    const rel=path.posix.join(unitBase(campaign,phase,u.unitId),'UNIT_PREFILL_v1.json');
    const manifest=writePagedPrefillV1(root,rel,u.initialValue);
@@ -231,6 +250,40 @@ export function createUnitPlanV1({root,campaignPath,directory,phase,automationRo
  directory.executionModel='PARALLEL_WORKER_UNITS';
  return queue;
 }
+
+function consolidateNewSemanticUnitsV1({root,campaignPath,phase,plan,queue}){
+ const proposed=planSemanticBatchesV1(plan.units,phase);
+ const selected=proposed.batches.filter(b=>b.members.length>1);
+ if(!selected.length)return;
+ const replacements=new Map(),removed=new Set(),serial={};
+ for(const group of selected){
+  const family=group.members[0].unitId.replace(/-[0-9]+$/,'');
+  const number=(serial[family]??0)+1;serial[family]=number;
+  const id=family+'-B'+String(number).padStart(4,'0');
+  if(queue.units[id])throw Error('batched unit identity collision: '+id);
+  if(group.members.some(m=>!['AVAILABLE','BLOCKED_DEPENDENCY'].includes(queue.units[m.unitId]?.status)))
+   throw Error('cannot rebatch an already claimed, submitted or accepted unit');
+  const payload={schemaVersion:'curveyield-lite-solo-batched-assignment-v1',unitId:id,
+   phaseSequence:phase,field:group.field,groupKeys:group.groupKeys,members:group.members,
+   readingGuide:'Complete each assigned member by its original recordKey. Omit already accepted members during targeted rework.'};
+  const packetPath=path.posix.join(unitBase(campaignPath,phase,id),'ASSIGNMENT_PACKET_v1.json');
+  const manifest=writePagedPrefillV1(root,packetPath,payload);
+  const spec={unitId:id,kind:'BATCH',field:group.field,members:group.members,
+   memberUnitIds:group.memberUnitIds,recordCount:group.members.length,
+   membersRef:packetPath,packetPath,packetSha256:sha(manifest),
+   dependencies:[...new Set(group.members.flatMap(m=>asArray(m.dependencies)))],
+   unitSpecRevision:1};
+  replacements.set(group.members[0].unitId,spec);
+  for(const m of group.members){
+   removed.add(m.unitId);delete queue.units[m.unitId];
+   plan.recordOwnership[dot([...m.path,String(m.recordIndex)])]=id;
+  }
+  addUnit(plan,queue,spec);
+ }
+ const original=plan.units.filter(u=>!removed.has(u.unitId)&&u.kind!=='BATCH');
+ plan.units.splice(0,plan.units.length,...original,...replacements.values());
+}
+
 function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
  const idxRel=directory.currentAssignment?.workShardIndexPath;
  if(!idxRel)throw Error('missing canonical semantic shard index');
@@ -299,11 +352,13 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
     p.initialValue.obligationIds.includes(obligationId)).map(p=>p.unitId);
   }
  }
+ consolidateNewSemanticUnitsV1({root,campaignPath,phase,plan,queue});
  // Only newly issued available semantic units may transition to dependency-blocked.
  // Reconciliation must never reset persisted ACCEPTED discovery units.
  for(const u of plan.units)if(u.dependencies.length&&queue.units[u.unitId]?.status==='AVAILABLE')
   queue.units[u.unitId].status='BLOCKED_DEPENDENCY';
- const missing=new Set(plan.units.flatMap(x=>x.dependencies).filter(id=>!queue.units[id]));
+ const memberIds=new Set(plan.units.flatMap(u=>u.kind==='BATCH'?u.memberUnitIds:[]));
+ const missing=new Set(plan.units.flatMap(x=>x.dependencies).filter(id=>!queue.units[id]&&!memberIds.has(id)));
  if(missing.size)throw Error('unsatisfied planner unit references: '+[...missing].join(', '));
 }
 function validateRequest(request,directory,phase){
@@ -529,6 +584,62 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
  }
  return errors;
 }
+
+function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest}){
+ const errors=[],entries=asArray(submission?.entries),members=new Map(u.members.map(m=>[m.recordKeys[0],m]));
+ if(submission?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.submission||
+    !entries.length||entries.length>u.members.length)
+  return {errors:[{path:u.unitId,message:'batched submission must have 1..'+u.members.length+' original keyed entries'}]};
+ const seen=new Set();
+ queue.acceptedRecords??={};
+ for(const [i,entry] of entries.entries()){
+  const member=members.get(entry?.key);
+  if(!member||seen.has(entry.key)){
+   errors.push({path:u.unitId+'.entries['+i+']',message:'unknown or duplicate batch record identity'});continue;
+  }
+  seen.add(entry.key);
+  const previous=queue.acceptedRecords[member.unitId];
+  if(previous?.status==='ACCEPTED'){
+   const snapshot=read(root,previous.path);
+   if(JSON.stringify(snapshot.entry)!==JSON.stringify(entry))
+    errors.push({path:member.unitId,message:'previously accepted record is immutable; submit only outstanding records'});
+   continue;
+  }
+  const failures=validateShardUnit({root,u:member,data:{schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:[entry]},
+   phase,schema,queue,plan});
+  if(failures.length){
+   errors.push(...failures.map(message=>({path:member.unitId,message})));continue;
+  }
+  const rel=path.posix.join(unitBase(campaign,phase,u.unitId),'records',member.unitId,
+   'ACCEPTED_ATTEMPT_'+String(state.attempts+1).padStart(3,'0')+'_v1.json');
+  if(fs.existsSync(repoFile(root,rel)))throw Error('immutable accepted batch record cannot be overwritten');
+  const snapshot={schemaVersion:'curveyield-lite-solo-accepted-record-v1',unitId:u.unitId,
+   memberUnitId:member.unitId,recordKey:entry.key,campaignGenerationId:plan.campaignGenerationId,
+   sourceSha256:plan.sourceSha256,authorityDigest:plan.authorityDigest,phaseSequence:phase,
+   phaseEpoch:plan.phaseEpoch,claimEpoch:state.claimEpoch,workerId:request.workerId,
+   submissionSha256:digest,entry};
+  put(root,rel,snapshot);
+  queue.acceptedRecords[member.unitId]={status:'ACCEPTED',path:rel,
+   snapshotSha256:sha(snapshot),parentUnitId:u.unitId};
+ }
+ const missing=u.members.filter(m=>queue.acceptedRecords[m.unitId]?.status!=='ACCEPTED');
+ if(missing.length)errors.push({path:u.unitId,
+  message:'outstanding original records: '+missing.map(m=>m.unitId).join(', ')});
+ if(errors.length)return {errors};
+ const assembled=u.members.map(m=>{
+  const memberState=queue.acceptedRecords[m.unitId],snapshot=read(root,memberState.path);
+  if(sha(snapshot)!==memberState.snapshotSha256||
+     snapshot.memberUnitId!==m.unitId||snapshot.recordKey!==m.recordKeys[0]||
+     snapshot.campaignGenerationId!==plan.campaignGenerationId||
+     snapshot.sourceSha256!==plan.sourceSha256||
+     snapshot.authorityDigest!==plan.authorityDigest||
+     snapshot.phaseEpoch!==plan.phaseEpoch)throw Error('immutable batch record binding changed');
+  return snapshot.entry;
+ });
+ return {errors:[],assembledSubmission:{schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:assembled},
+  recordEvidenceRefs:u.members.map(m=>queue.acceptedRecords[m.unitId].path)};
+}
+
 function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,directory}){
  const u=plan.units.find(x=>x.unitId===item.unitId),state=queue.units[item.unitId];
  if(!u||!state)return {unitId:item.unitId,status:'STALE',errors:['unknown unit']};
@@ -544,7 +655,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
   state.status='REWORK_REQUIRED';
   return {unitId:item.unitId,status:'UNCHANGED',errors:state.lastErrors};
  }
- let submission,errors=[];
+ let submission,errors=[],batchOutcome=null;
  try{submission=JSON.parse(raw.toString('utf8'));}
  catch(e){submission=null;errors=[{path:'$',message:'Malformed JSON: '+String(e.message??e)}];}
  if(!errors.length&&['FLOW','ATTACK'].includes(u.kind)){
@@ -554,6 +665,9 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
    ?validateAttackSubmissionV1({packet:packet.payload,submission,inventory})
    :validateFlowReviewSubmissionV1({packet:packet.payload,submission,inventory});
   errors=checked.errors??[];
+ }else if(!errors.length&&u.kind==='BATCH'){
+  batchOutcome=acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest});
+  errors=batchOutcome.errors;
  }else if(!errors.length)errors=validateShardUnit({root,u,data:submission,phase,schema,queue,plan}).map(message=>({path:u.unitId,message}));
  state.lastSubmissionSha256=digest;state.attempts++;
  const resultRel=path.posix.join(unitBase(campaign,phase,u.unitId),'results',
@@ -565,7 +679,9 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
    campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
    authorityDigest:directory.authorityDigest,phaseSequence:phase,phaseEpoch:request.phaseEpoch,
    unitSpecRevision:u.unitSpecRevision,packetSha256:item.packetSha256,
-   workerId:request.workerId,claimEpoch:state.claimEpoch,submissionSha256:digest,submission});
+   workerId:request.workerId,claimEpoch:state.claimEpoch,submissionSha256:digest,
+   submission:batchOutcome?.assembledSubmission??submission,
+   ...(batchOutcome?.recordEvidenceRefs?{recordEvidenceRefs:batchOutcome.recordEvidenceRefs}:{})});
   state.status='ACCEPTED';state.acceptedSha256=digest;state.acceptedPath=acceptedRel;state.lastErrors=[];
   put(root,resultRel,{unitId:u.unitId,status:'ACCEPTED',submissionSha256:digest,acceptedPath:acceptedRel});
   return {unitId:u.unitId,status:'ACCEPTED',resultRef:resultRel};
@@ -705,10 +821,20 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  if(!ready.ready)throw Error('unsafe finalization: '+ready.reason);
  const {plan,queue}=ready,assignment=directory.currentAssignment;
  const byFile=new Map();
- for(const u of plan.units.filter(u=>['SHARD','APPEND'].includes(u.kind))){
+ for(const u of plan.units.filter(u=>['SHARD','APPEND','BATCH'].includes(u.kind))){
   const accepted=read(root,queue.units[u.unitId].acceptedPath);
   if(queue.units[u.unitId].acceptedSha256!==accepted.submissionSha256)throw Error('accepted digest mismatch');
-  const list=byFile.get(u.shardPath)??[];list.push({unit:u,entries:accepted.submission.entries});byFile.set(u.shardPath,list);
+  if(u.kind==='BATCH'){
+   if(accepted.submission.entries.length!==u.members.length)throw Error('batched acceptance record count mismatch');
+   for(const [i,m] of u.members.entries()){
+    const entry=accepted.submission.entries[i];
+    if(entry.key!==m.recordKeys[0])throw Error('batched record order or key changed');
+    const list=byFile.get(m.shardPath)??[];
+    list.push({unit:m,entries:[entry]});byFile.set(m.shardPath,list);
+   }
+  }else {
+   const list=byFile.get(u.shardPath)??[];list.push({unit:u,entries:accepted.submission.entries});byFile.set(u.shardPath,list);
+  }
  }
  // Rebuild every shard deterministically from accepted immutable snapshots.
  // A failed finalize can retry without appending duplicates to mutable shards.
@@ -746,33 +872,64 @@ export function statusUnitQueueV1({root,campaignPath,phase}){
 
 export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[]}){
  const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
- const reopened=[],unmapped=[];
+ const reopened=new Set(),unmapped=[],invalidatedMembers=new Set();
  for(const entry of deficiencies){
-  const message=typeof entry==='string'?entry:JSON.stringify(entry);
-  const found=new Set();
+  const message=typeof entry==='string'?entry:JSON.stringify(entry),found=new Map();
   for(const match of message.matchAll(/(?:actions\.)?(?:step-[0-9]+\.outputs\.)?([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/g)){
    const field=match[1],position=Number(match[2]);
-   for(const u of plan.units)if(u.field===field&&u.recordIndex===position)found.add(u.unitId);
+   for(const u of plan.units){
+    for(const m of u.kind==='BATCH'?u.members:[u])
+     if(m.field===field&&m.recordIndex===position){
+      const members=found.get(u.unitId)??new Set();members.add(m.unitId);found.set(u.unitId,members);
+     }
+   }
   }
-  // Machine-binding diagnostics often name candidate keys instead of array indices.
-  for(const u of plan.units.filter(x=>['targetDesigns','targetDispositions','candidateProofRecords'].includes(x.field))){
-   const state=queue.units[u.unitId];
-   const accepted=state?.acceptedPath?maybe(root,state.acceptedPath):null;
-   const values=accepted?.submission?.entries?.map(x=>x.value)??[];
-   if(values.some(v=>v&&typeof v==='object'&&
-      [v.candidateKey,v.tempKey].some(key=>typeof key==='string'&&key.length>=3&&message.includes(key))))
-      found.add(u.unitId);
+  // Candidate-key diagnostics identify original members rather than discarding
+  // every previously accepted sibling inside a consolidated packet.
+  for(const u of plan.units){
+   const eligible=(u.kind==='BATCH'?u.members:[u]).filter(m=>
+    ['targetDesigns','targetDispositions','candidateProofRecords'].includes(m.field));
+   if(!eligible.length)continue;
+   const state=queue.units[u.unitId],accepted=state?.acceptedPath?maybe(root,state.acceptedPath):null;
+   for(const m of eligible){
+    const value=accepted?.submission?.entries?.find(e=>e.key===m.recordKeys?.[0])?.value;
+    if(value&&typeof value==='object'&&[value.candidateKey,value.tempKey].some(key=>
+       typeof key==='string'&&key.length>=3&&message.includes(key))){
+      const members=found.get(u.unitId)??new Set();members.add(m.unitId);found.set(u.unitId,members);
+    }
+   }
   }
   if(!found.size){unmapped.push(message);continue;}
-  for(const id of found){
+  for(const [id,memberIds] of found){
    const state=queue.units[id];
    if(state.status==='ACCEPTED')state.status='REWORK_REQUIRED';
-   state.lastErrors=[...state.lastErrors,message].slice(-30);
-   reopened.push(id);
+   state.lastErrors=[...state.lastErrors,message].slice(-30);reopened.add(id);
+   for(const memberId of memberIds){
+    if(queue.acceptedRecords?.[memberId]){
+     delete queue.acceptedRecords[memberId];invalidatedMembers.add(memberId);
+    }
+   }
   }
  }
- const result={reopenedUnits:[...new Set(reopened)].sort(),unmappedDeficiencies:unmapped};
- queue.finalizeStatus=result.reopenedUnits.length?'REWORK_REQUIRED':'BLOCKED';queue.finalizeDetails=result;queue.revision++;
+ // Reopened record prerequisites cannot continue to authorize accepted targets.
+ const invalidated=new Set([...invalidatedMembers,...reopened]);
+ let changed=true;
+ while(changed){
+  changed=false;
+  for(const u of plan.units){
+   if(!asArray(u.dependencies).some(dep=>invalidated.has(dep)))continue;
+   const state=queue.units[u.unitId];
+   if(state.status==='ACCEPTED'){
+    state.status='REWORK_REQUIRED';
+    state.lastErrors=[...state.lastErrors,'upstream accepted record invalidated during aggregate rework'].slice(-30);
+    reopened.add(u.unitId);invalidated.add(u.unitId);changed=true;
+   }
+  }
+ }
+ const result={reopenedUnits:[...reopened].sort(),unmappedDeficiencies:unmapped,
+  invalidatedRecordIds:[...invalidatedMembers].sort()};
+ queue.finalizeStatus=result.reopenedUnits.length?'REWORK_REQUIRED':'BLOCKED';
+ queue.finalizeDetails=result;queue.revision++;
  put(root,queueRel(campaignPath,phase),queue);
  return result;
 }
