@@ -313,6 +313,13 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
     const slitherArgs=vyperSources.length===1?[target,'--compile-force-framework','vyper','--json','-','--exclude-dependencies','--fail-none']:[target,'--json','-','--exclude-dependencies','--fail-none'];
     const raw=await runProcess({command:'slither',args:slitherArgs,cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
+    if(parsed?.success!==true && !String(raw.stdout??'').trim() && !String(raw.stderr??'').trim()){
+      // Slither JSON mode may exit silently on an invalid crytic export.
+      // Capture its ordinary CLI diagnostics without weakening the required
+      // static-analysis completion gate or treating the diagnostic as a PASS.
+      const diagnostic=await runProcess({command:'slither',args:[target,'--debug','--exclude-dependencies'],cwd:projectRoot});
+      raw.stderr+='\nSLITHER_SILENT_FAILURE_DIAGNOSTIC_EXIT_'+diagnostic.exitCode+'\n'+String(diagnostic.stderr??'')+'\n'+String(diagnostic.stdout??'');
+    }
     if(vyperSources.length===1&&parsed?.success!==true){
       // Slither may swallow a Python/Vyper compatibility exception in JSON mode.
       // Preserve the diagnostic from the same source in ordinary CLI mode.
