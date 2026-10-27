@@ -310,12 +310,13 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
     totalSourceUnits+=exportInfo.sourceUnitCount??0;
     totalContracts+=exportInfo.contractCount??0;
     const target=vyperSources.length===1?exportInfo.sourcePath:exportInfo.exportPath;
-    const raw=await runProcess({command:'slither',args:[target,'--json','-','--exclude-dependencies','--fail-none'],cwd:projectRoot});
+    const slitherArgs=vyperSources.length===1?[target,'--compile-force-framework','vyper','--json','-','--exclude-dependencies','--fail-none']:[target,'--json','-','--exclude-dependencies','--fail-none'];
+    const raw=await runProcess({command:'slither',args:slitherArgs,cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
     if(vyperSources.length===1&&parsed?.success!==true){
       // Slither may swallow a Python/Vyper compatibility exception in JSON mode.
       // Preserve the diagnostic from the same source in ordinary CLI mode.
-      const diagnostic=await runProcess({command:'slither',args:[target,'--exclude-dependencies'],cwd:projectRoot});
+      const diagnostic=await runProcess({command:'slither',args:[target,'--compile-force-framework','vyper','--exclude-dependencies'],cwd:projectRoot});
       raw.stderr+='\nVYPER_CLI_DIAGNOSTIC_EXIT_'+diagnostic.exitCode+'\n'+String(diagnostic.stderr??'')+'\n'+String(diagnostic.stdout??'');
     }
     unitResults.push({
