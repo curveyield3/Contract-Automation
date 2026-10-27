@@ -45,7 +45,8 @@ function summary(rows) {
 
 export function buildCoverageMatrixV1({inventory, taxonomy, discoveryState = null, phase6Results = null}) {
   const rows = [], byContract = {}, byClass = {};
-  const gaps = new Set((discoveryState?.gaps ?? []).map(x => typeof x === 'string' ? x : x.contextId));
+  const recordedGaps = discoveryState?.gaps ?? [];
+  const gaps = new Set(recordedGaps.flatMap(x => typeof x === 'string' ? [x] : [x?.contextId,...(x?.contextIds??[])].filter(Boolean)));
   const contradictions = new Set((discoveryState?.attackContradictions ?? []).map(x => x.contextId + ':' + x.classId));
   const classes = new Map(taxonomy.classes.map(x => [x.classId, x]));
   const contexts = [...(inventory.payload?.contexts ?? [])].sort((a,b) =>
@@ -59,6 +60,8 @@ export function buildCoverageMatrixV1({inventory, taxonomy, discoveryState = nul
         statusFor(phase6Results, inventory, ctx.contextId, classId);
       let reviewStatus = !discoveryState ? 'PENDING' : gaps.has(ctx.contextId) ? 'GAP' :
         contradictions.has(ctx.contextId + ':' + classId) && testStatus !== 'PASSED' ? 'CONTRADICTED' :
+        assessment === undefined || assessment === null ? 'PENDING' :
+        assessment === 'UNRESOLVED' || assessment?.assessment === 'UNRESOLVED' ? 'GAP' :
         assessment === 'NOT_APPLICABLE' || assessment?.assessment === 'NOT_APPLICABLE' ? 'NOT_APPLICABLE_CLAIMED' : 'ACCEPTED';
       rows.push({contextId:ctx.contextId,contract,classId,reviewStatus,testStatus});
     }
@@ -68,7 +71,12 @@ export function buildCoverageMatrixV1({inventory, taxonomy, discoveryState = nul
     byContract[name] = summary(rows.filter(x => x.contract === name));
   for (const name of [...new Set(rows.map(x => x.classId))].sort())
     byClass[name] = summary(rows.filter(x => x.classId === name));
-  const gapCount = rows.filter(x => OPEN_REVIEWS.has(x.reviewStatus) || OPEN_TESTS.has(x.testStatus)).length;
+  // Missing inventory, zero reviewed classes and non-context review-plan gaps
+  // are real coverage gaps; none may be reported as FULL_COVERAGE.
+  const invalidInventory = inventory?.payload?.complete !== true || contexts.length === 0;
+  const globalGaps = recordedGaps.filter(g => !g?.contextId && !(g?.contextIds?.length)).length;
+  const gapCount = rows.filter(x => OPEN_REVIEWS.has(x.reviewStatus) || OPEN_TESTS.has(x.testStatus)).length +
+    globalGaps + (invalidInventory ? 1 : 0) + (rows.length === 0 ? 1 : 0);
   return {rows, byContract, byClass, gapCount, label:gapCount ? 'PARTIAL_COVERAGE' : 'FULL_COVERAGE'};
 }
 

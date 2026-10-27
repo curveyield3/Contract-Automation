@@ -174,6 +174,21 @@ try {
   console.error('ADR Phase-0 optional flow plan unavailable: '+String(error?.message??error).slice(0,2000));
 }
 
+// v3 cannot promote an absent or incomplete source-review inventory to a
+// completed discovery: Phase 4 has to be generated from real source contexts.
+if(receipt.authority?.liteRelease==='lite-solo-v3'){
+  const reviewRoot=path.join(campaignRoot,'evidence/review-inventory');
+  const inventory=read(required(path.join(reviewRoot,'REVIEW_INVENTORY_v1.json'),'complete v3 review inventory'));
+  const facts=read(required(path.join(reviewRoot,'SYSTEM_FACTS_v1.json'),'v3 system facts'));
+  const plan=read(required(path.join(reviewRoot,'FLOW_PLAN_v1.json'),'v3 flow plan'));
+  if(inventory?.payload?.complete!==true||!Array.isArray(inventory?.payload?.contexts)||!inventory.payload.contexts.length)
+    throw new Error('LITE_SOLO_INCOMPLETE_REVIEW_INVENTORY: no complete reviewable source-context inventory');
+  if(!facts?.payload||!Array.isArray(plan?.payload?.reviewUnits)||!plan.payload.reviewUnits.length||
+     !Array.isArray(plan?.payload?.attackUnits)||!plan.payload.attackUnits.length||
+     (plan?.payload?.gaps??[]).some(g=>['INVENTORY_INCOMPLETE','PLAN_BUILD_ERROR'].includes(g?.code)))
+    throw new Error('LITE_SOLO_INCOMPLETE_FLOW_PLAN: required correctness and attack units must be generated from complete inventory');
+}
+
 const now=new Date().toISOString();
 const refs=Object.entries(evidence).map(([role,file])=>({role:role.startsWith('ADR_REVIEW_INVENTORY:')?'ADR_REVIEW_INVENTORY':role,path:rel(campaignRoot,file),sha256:digestFile(file)}));
 const retired=/PHASE0_RANDOMIZED_SIMULATION|PHASE0_SIMULATION_RUN_INDEX|PHASE5_SIMULATION_BASELINE_INPUT|PHASE6_SIMULATION_BASELINE_INPUT|PHASE0_TELEMETRY_ANALYSIS|MEDUSA/;
