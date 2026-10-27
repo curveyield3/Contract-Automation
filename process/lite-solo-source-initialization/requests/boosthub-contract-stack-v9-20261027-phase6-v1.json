@@ -6,5 +6,5 @@
   "scanUrls": [],
   "deliveryTransport": "DIRECT",
   "authorizePhase0Execution": true,
-  "recoveryReason": "Retry same BoostHub v9 r1 after forcing Crytic Standard Slither import; previous failure was framework autodetection choosing Foundry and seeking absent default build-info despite exact-source exported compilation units."
+  "recoveryReason": "Retry immutable BoostHub v9 r1 Phase 0 after source-bound Vyper 0.4.3 CLI provisioning for Slither on cached native build; preserve required Slither findings and PASS gate."
 }
