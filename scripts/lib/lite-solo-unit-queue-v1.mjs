@@ -12,7 +12,7 @@ import {validateTargetExecutionRequestBindingV1} from '../../packages/github-nat
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
 import {planSemanticBatchesV1,SEMANTIC_BATCH_READING_GUIDE_V1} from './lite-solo-semantic-batches-v1.mjs';
 
-export const UNIT_POLICY=Object.freeze({issueBatchDefault:20,issueBatchMax:20,approvalBatchMax:5,maxParallelWorkers:null});
+export const UNIT_POLICY=Object.freeze({issueBatchDefault:50,issueBatchMax:50,approvalBatchMax:5,maxParallelWorkers:null});
 export const REQUEST_SCHEMA='curveyield-lite-solo-unit-batch-request-v1';
 // Public queue/packet contracts: one authoritative definition, not copied workflow limits.
 export const UNIT_QUEUE_STATUSES=Object.freeze(['BLOCKED_DEPENDENCY','AVAILABLE','CLAIMED',
@@ -400,7 +400,7 @@ function validateRequest(request,directory,phase){
  if(request.operation==='CLAIM'){
   if((!Number.isSafeInteger(request.desiredUnitCount)||
     request.desiredUnitCount<1||request.desiredUnitCount>UNIT_POLICY.issueBatchMax)||request.items!==undefined)
-   throw Error('CLAIM must request 1–20 units and omit items');
+   throw Error('CLAIM must request 1–50 units and omit items');
  }else if(request.operation==='SUBMIT'){
   if(!Array.isArray(request.items)||request.items.length<1||request.items.length>UNIT_POLICY.approvalBatchMax)
    throw Error('SUBMIT must explicitly name 1–5 items');
@@ -492,7 +492,7 @@ function batchIndex(root,campaign,phase,requestId,units){
   pages.push({path:rel,sha256:sha(page)});
  }
  const index={schemaVersion:'curveyield-lite-solo-unit-batch-index-v1',
-  count:units.length,pages,readingGuide:'Read claimed packetPath and verify packetSha256. BATCH packets are paged prefill manifests: reconstruct the value from digest-checked prefill-pages, preserve each member recordKeys[0] as entries[].key, and submit one multi-entry snapshot under the batch claim. Rework only outstanding member records; accepted siblings remain immutable. For other units use the original one-record form. Commit source/authority-bound immutable worker/claim-epoch/attempt submissions and enqueue 1–5-unit SUBMIT requests. Claim at most 20; only persisted accepted original records unlock dependents.'};
+  count:units.length,pages,readingGuide:'Read claimed packetPath and verify packetSha256. BATCH packets are paged prefill manifests: reconstruct the value from digest-checked prefill-pages, preserve each member recordKeys[0] as entries[].key, and submit one multi-entry snapshot under the batch claim. Rework only outstanding member records; accepted siblings remain immutable. For other units use the original one-record form. Commit source/authority-bound immutable worker/claim-epoch/attempt submissions and enqueue 1–5-unit SUBMIT requests. Claim at most 50; only persisted accepted original records unlock dependents.'};
  const rel=path.posix.join(dir,'BATCH_INDEX_v1.json');put(root,rel,index);
  return rel;
 }
