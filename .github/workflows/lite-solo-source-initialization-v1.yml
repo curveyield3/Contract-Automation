@@ -21,11 +21,54 @@ on:
 permissions:
   contents: write
   actions: write
-concurrency:
-  group: lite-solo-source-initialization
-  cancel-in-progress: false
 jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      requests: ${{ steps.requests.outputs.requests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Discover independent Lite-Solo campaign initialization requests
+        id: requests
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: |
+          set -euo pipefail
+          : > /tmp/lite-solo-source-requests.ndjson
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            key="${REQUEST_ID:-$GITHUB_RUN_ID}"
+            [[ "$key" =~ ^[A-Za-z0-9._-]+$ ]]
+            jq -nc --arg key "$key" '{request_path:"__MANUAL__",request_key:$key}' >> /tmp/lite-solo-source-requests.ndjson
+          else
+            root=process/lite-solo-source-initialization/requests
+            if [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]]; then
+              mapfile -t changed < <(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" -- "$root/")
+            else
+              mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")
+            fi
+            for request in "${changed[@]}"; do
+              [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]] || continue
+              test -f "$request" || continue
+              key="${request##*/}"
+              jq -nc --arg request "$request" --arg key "$key" '{request_path:$request,request_key:$key}' >> /tmp/lite-solo-source-requests.ndjson
+            done
+          fi
+          echo "requests=$(jq -sc '{include:.}' /tmp/lite-solo-source-requests.ndjson)" >> "$GITHUB_OUTPUT"
   initialize:
+    needs: discover
+    if: ${{ needs.discover.outputs.requests != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.requests) }}
+    concurrency:
+      group: lite-solo-source-initialization-${{ matrix.request_key }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -41,14 +84,13 @@ jobs:
           RAW_SCAN_URLS: ${{ inputs.scan_urls }}
           RAW_REQUEST_ID: ${{ inputs.request_id }}
           EVENT_NAME: ${{ github.event_name }}
+          MATRIX_REQUEST: ${{ matrix.request_path }}
         shell: bash
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = main
           if [ "$EVENT_NAME" = push ]; then
-            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/lite-solo-source-initialization/requests/)
-            test "${#changed[@]}" -eq 1
-            request="${changed[0]}"
+            request="$MATRIX_REQUEST"
             [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]]
             jq -e '.schemaVersion=="curveyield-lite-solo-source-request-v1" and .mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and (.sourceUrl|type=="string" and startswith("https://")) and (.scanUrls|type=="array" and length==0)' "$request" >/dev/null
             source_url="$(jq -r .sourceUrl "$request")"
