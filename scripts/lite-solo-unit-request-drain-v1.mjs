@@ -69,7 +69,7 @@ if(arg.mode!=='finalize'){
    try{result=processUnitRequestV1({root,campaignPath,directory,request});}
    catch(error){
     const reason=String(error?.message??error);
-    if(request.operation!=='CLAIM'||!reason.startsWith('CLAIM must request 1–4 units'))
+    if(request.operation!=='CLAIM'||!reason.startsWith('CLAIM must request 1–20 units'))
      throw error;
     result={schemaVersion:'curveyield-lite-solo-unit-controller-result-v1',
       requestId:request.requestId,campaignId:directory.campaignId,
