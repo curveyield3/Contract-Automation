@@ -38,6 +38,14 @@ if(arg.mode!=='finalize'){
   readJson(repoFile(root,queuePath)):null;
  // Re-evaluate already-recorded, unmapped aggregate defects after the mapping
  // implementation is repaired. Never reopen unrelated accepted units.
+ // A previous v4 boundary attempt can expose index drift caused by its
+ // former re-sharding behavior. Retry once through the existing assembler,
+ // which verifies and restores identities from the frozen unit plan.
+ if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
+    String(recorded.finalizeDetails?.error??'').startsWith('v13 mandatory work records dropped:')){
+  markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
+  changed=true;
+ }
  if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
     Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
     recorded.finalizeDetails.unmappedDeficiencies.length){
