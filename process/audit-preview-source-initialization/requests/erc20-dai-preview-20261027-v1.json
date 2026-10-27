@@ -8,5 +8,7 @@
   "sourceUrl": "",
   "scanUrls": [
     "https://etherscan.io/address/0x6b175474e89094c44da98b954eedeac495271d0f#code"
-  ]
+  ],
+  "retryOfRunId": 40499920821,
+  "retryReason": "Resume same frozen campaign after approved preview-engine watchdog allowlist correction"
 }
