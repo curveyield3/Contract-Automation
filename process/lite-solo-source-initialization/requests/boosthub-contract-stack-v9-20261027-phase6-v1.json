@@ -6,5 +6,5 @@
   "scanUrls": [],
   "deliveryTransport": "DIRECT",
   "authorizePhase0Execution": true,
-  "recoveryReason": "Retry same immutable BoostHub v9 r1 after verifying isolated native Foundry compilation succeeds; corrected duplicate Vyper compiler-unit handling without source changes."
+  "recoveryReason": "Retry same source-bound BoostHub v9 r1 Phase 0 to capture exact Slither diagnostic after successful immutable mixed-language compilation; do not bypass Slither gate."
 }
