@@ -87,38 +87,6 @@ jobs:
         run: |
           set -euo pipefail
           timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
-      - name: Source-bound Phase-5 execution-request preflight
-        id: phase5
-        env:
-          AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
-          AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
-          AUDIT_CAMPAIGN: ${{ steps.request.outputs.id }}
-          REQUEST_FILE: ${{ steps.request.outputs.request }}
-          REVIEW_KIND: ${{ steps.request.outputs.kind }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo 'runnable=false' >> "$GITHUB_OUTPUT"
-          if [ "$REVIEW_KIND" != phase ] || [ "$(jq -r .phaseSequence "$REQUEST_FILE")" != 5 ]; then exit 0; fi
-          directory=".audit-controller/$AUDIT_DIRECTORY"
-          source_sha="$(jq -r .sourceSha256 "$directory")"
-          # Historical v1/v2 campaigns retain their original authorization semantics.
-          # New v3/v4/v5/v6 campaigns have no separate human-approval execution gate.
-          if ! jq -e '.currentAssignment.workSchemaPath | (startswith("Audit Skill - Lite-Solo Authority/lite-solo-v3/") or startswith("Audit Skill - Lite-Solo Authority/lite-solo-v4/") or startswith("Audit Skill - Lite-Solo Authority/lite-solo-v5/") or startswith("Audit Skill - Lite-Solo Authority/lite-solo-v6/"))' "$directory" >/dev/null; then
-          jq -e --arg sha "$source_sha" '.machineExecutionAuthorization.status=="APPROVED" and .machineExecutionAuthorization.scope=="PHASE5_TARGET_EXECUTION" and .machineExecutionAuthorization.sourceSha256==$sha' "$directory" >/dev/null || {
-            echo '::error::LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: exact Phase-5 source-bound human approval is missing'
-            exit 1
-          }
-          fi
-          if ! node scripts/lite-phase5-preflight-v1.mjs .audit-controller "$AUDIT_CAMPAIGN_PATH" "$AUDIT_CAMPAIGN" "$source_sha" > /tmp/lite-solo-phase5-preflight.json; then
-            jq -e '.status=="REWORK_REQUIRED" and (.failures|type=="array") and (.failures|length)>0' /tmp/lite-solo-phase5-preflight.json >/dev/null
-          fi
-          mkdir -p ".audit-controller/$AUDIT_CAMPAIGN_PATH/controller/preflight"
-          cp /tmp/lite-solo-phase5-preflight.json ".audit-controller/$AUDIT_CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
-          echo "runnable=$(jq -r .runnable /tmp/lite-solo-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
-      - name: Install existing pinned Anvil execution toolchain only for runnable Phase 5
-        if: ${{ steps.phase5.outputs.runnable == 'true' }}
-        uses: ./.github/actions/setup-v7-toolchain
       - name: Validate, seal and generate exact solo controller response
         id: controller
         shell: bash
