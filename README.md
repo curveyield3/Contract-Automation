@@ -1,10 +1,9 @@
 
 ## V7 canonical operations
 
-Audit V7 has one active execution workflow, one active qualification workflow, one generated runner manifest, and one CLI surface:
+Audit V7 has one active execution workflow, one generated runner manifest, and one CLI surface:
 
 - `.github/workflows/audit-controller-execution.yml`
-- `.github/workflows/v7-execution-infrastructure-qualification.yml`
 - `process/RUNNER_MANIFEST.json`
 - `npm run v7 -- help`
 
