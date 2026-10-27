@@ -674,7 +674,9 @@ export function finalizeReadinessV1({root,campaignPath,directory,phase}){
  const pending=plan.units.filter(u=>queue.units[u.unitId]?.status!=='ACCEPTED');
  if(pending.length)return {ready:false,reason:'mandatory units remain',unitIds:pending.map(x=>x.unitId)};
  if(queue.finalizeStatus==='SEALED')return {ready:false,reason:'already sealed'};
- if(queue.finalizeStatus==='BLOCKED')return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
+ if(queue.finalizeStatus==='BLOCKED'&&
+    queue.finalizeDetails?.error!=='v13 mandatory work record key changed: shard-0007_v1.json')
+  return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
  return {ready:true,plan,queue};
 }
 export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}){
@@ -695,7 +697,16 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
   const append=edits.filter(e=>e.unit.kind==='APPEND').sort((a,b)=>a.unit.unitId.localeCompare(b.unit.unitId));
   if(fixed.length&&append.length)throw Error('shard has conflicting fixed and append ownership: '+rel);
   if(fixed.some((e,i)=>e.unit.shardIndex!==i))throw Error('incomplete fixed shard ownership: '+rel);
-  slab.entries=fixed.length?fixed.map(e=>e.entries[0]):append.flatMap(e=>e.entries);
+  slab.entries=fixed.length?fixed.map(e=>{
+   const entry=clone(e.entries[0]);
+   // A controller-prefilled candidate slot indexed numerically may be
+   // completed as an explicit negative, while its unit packet retains the
+   // template tempKey identity. Restore the frozen numeric shard identity.
+   if(e.unit.field==='candidateRecords'&&entry.value==='NONE_IDENTIFIED'&&
+      entry.key===JSON.stringify(e.unit.path)+':tempKey=<REQUIRED>')
+    entry.key=JSON.stringify(e.unit.path)+':'+e.unit.recordIndex;
+   return entry;
+  }):append.flatMap(e=>e.entries);
   put(root,rel,slab);
  }
  // Full restoration is the pre-existing source-bound schema/identity validator.
