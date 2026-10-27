@@ -1,0 +1,99 @@
+name: cyavKATv25 source archive repair v28
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/archive-repairs/cyavkatv25-v28-v1.json'
+permissions:
+  contents: read
+concurrency:
+  group: cyavkatv25-source-repack-v28
+  cancel-in-progress: false
+jobs:
+  repack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout trusted repair workflow
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Safely replace consolidated Foundry entrypoint in original ZIP
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          gh repo clone curveyield3/Audit-Controller /tmp/cyavkat-v28 -- --branch main --depth 1 --filter=blob:none --sparse
+          cd /tmp/cyavkat-v28
+          git sparse-checkout set --no-cone '/campaigns/cyavKATv25.zip' '/source-repairs/cyavKATv25/v28/upgrade/script/CyavKatDeployAll_v28.s.sol'
+          git config user.name 'CurveYield Source Archive Repair'
+          git config user.email 'source-repair@users.noreply.github.com'
+          python3 - <<'PY'
+          import os
+          import zipfile
+          import copy
+          import hashlib
+          from pathlib import Path
+          root=Path('/tmp/cyavkat-v28')
+          archive=root/'campaigns/cyavKATv25.zip'
+          repair=root/'source-repairs/cyavKATv25/v28/upgrade/script/CyavKatDeployAll_v28.s.sol'
+          old='cyavKAT/upgrade/script/CyavKatDeployAll_v27.s.sol'
+          new='cyavKAT/upgrade/script/CyavKatDeployAll_v28.s.sol'
+          readme='cyavKAT/README.md'
+          replacement=repair.read_bytes()
+          assert b'contract CyavKatDeployAll_v28 is Script' in replacement
+          assert b'CyavKatDeployAll_v28.s.sol:' in replacement
+          tmp=archive.with_suffix('.zip.tmp')
+          with zipfile.ZipFile(archive,'r') as source:
+              infos=source.infolist()
+              names=[info.filename for info in infos]
+              assert len(names)==len(set(names)),'duplicate ZIP entry'
+              assert old in names,'original v27 entrypoint is absent'
+              assert new not in names,'repaired entrypoint already present'
+              assert readme in names,'source README absent'
+              old_bytes=source.read(old)
+              assert b'contract CyavKatDeployAll_v27 is Script' in old_bytes,'unexpected original script identity'
+              for name in names:
+                  p=Path(name)
+                  assert not p.is_absolute() and '..' not in p.parts and not name.startswith('\\'),'unsafe ZIP path'
+              with zipfile.ZipFile(tmp,'w') as destination:
+                  destination.comment=source.comment
+                  for info in infos:
+                      data=source.read(info)
+                      meta=copy.copy(info)
+                      if info.filename==old:
+                          meta.filename=new
+                          data=replacement
+                      elif info.filename==readme:
+                          doc=data.decode('utf-8')
+                          assert 'CyavKatDeployAll_v27' in doc
+                          data=doc.replace('CyavKatDeployAll_v27','CyavKatDeployAll_v28').replace('v27 execution behavior','v28 execution behavior').replace('v27 entrypoint','v28 entrypoint').replace('v27 operating instructions','v28 operating instructions').replace('unified deployment — v27','unified deployment — v28').encode('utf-8')
+                      destination.writestr(meta,data)
+          with zipfile.ZipFile(tmp,'r') as validated:
+              bad=validated.testzip()
+              assert bad is None,f'ZIP CRC error {bad}'
+              names=set(validated.namelist())
+              assert old not in names and new in names
+              assert validated.read(new)==replacement
+              assert b'CyavKatDeployAll_v27.s.sol' not in validated.read(readme)
+          os.replace(tmp,archive)
+          print('SOURCE_ZIP_REPAIRED_SHA256='+hashlib.sha256(archive.read_bytes()).hexdigest())
+          print('REPLACEMENT_SHA256='+hashlib.sha256(replacement).hexdigest())
+          print('SOURCE_ZIP_BYTES='+str(archive.stat().st_size))
+          PY
+          git add -- campaigns/cyavKATv25.zip
+          test -n "$(git diff --cached --name-only)"
+          git commit -m 'fix(source): replace v27 deployment script with v28 in cyavKATv25.zip'
+          git push origin HEAD:main
+          echo '### cyavKATv25 source repack v28' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Original source ZIP replaced in place, v27 entry removed, v28 entry admitted' >> "$GITHUB_STEP_SUMMARY"
