@@ -86,7 +86,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::RPC_ETHEREUM missing"; exit 1; }
-          python3 scripts/audit-command-guard-v1.py --label phase0-fork-deploy --wall 2400 --idle 900 --log "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" -- node scripts/run-phase0-fork-deploy-config-v1.mjs \
+          python3 scripts/audit-command-guard-v1.py --label phase0-fork-deploy --wall 2400 --idle 300 --log "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" -- node scripts/run-phase0-fork-deploy-config-v1.mjs \
             --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" \
             --output .phase0-deploy-smoke --fork-url "$ETHEREUM_FORK_RPC_URL" | tee .phase0-deploy-smoke.log
           file=.phase0-deploy-smoke/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
