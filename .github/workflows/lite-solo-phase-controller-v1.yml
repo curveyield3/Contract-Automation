@@ -77,10 +77,13 @@ jobs:
           encoded="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$encoded_path?ref=main" --jq .content)"
           printf '%s' "$encoded" | base64 -d >/tmp/lite-solo-campaign-directory.json
           jq -e --arg id "$AUDIT_CAMPAIGN" '.schemaVersion=="curveyield-audit-campaign-directory-entry-v2" and
-            .campaignId==$id and .mode=="LITE_SOLO" and .agentModel=="ONE_PERSISTENT_AGENT" and
+            .campaignId==$id and .mode=="LITE_SOLO" and (.agentModel=="ONE_PERSISTENT_AGENT" or .agentModel=="PARALLEL_WORKER_UNITS") and
             .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT" and (.agent.chatUrl==null) and
             (.masterReview==null) and (.pendingMasterReview==null) and
             (.workspacePath|startswith("campaigns/"))' /tmp/lite-solo-campaign-directory.json >/dev/null
+          if jq -e '.authorityRelease=="lite-solo-v4" and .currentAssignment.phaseSequence>=4 and .currentAssignment.phaseSequence<=6' /tmp/lite-solo-campaign-directory.json >/dev/null; then
+            echo '::error::Use the v4 immutable unit ingress for Phases 4–6, not the phase-wide boundary controller'; exit 1
+          fi
           campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
           bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
           jq -e --arg id "$AUDIT_CAMPAIGN" '.campaignId==$id and .mode=="LITE_SOLO"' ".audit-controller/$AUDIT_DIRECTORY" >/dev/null
