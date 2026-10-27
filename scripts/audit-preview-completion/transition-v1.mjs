@@ -80,6 +80,15 @@ const copyCampaign=()=>{
  // The prior sealed phase-4 receipt must never appear as the new audit's own receipt.
  fs.rmSync(inside(ref(dest,'receipts/PHASE_04_RECEIPT_v1.json')));
  const form=read(originalFormRel);
+ // Proposed minimal correction remains editable before LAUNCH. It is never
+ // sealed unless a fresh frozen-block read-only witness is recorded.
+ const oldLim=form.actions?.['step-3']?.outputs?.typedLimitations;
+ if(Array.isArray(oldLim)){
+  form.actions['step-3'].outputs.typedLimitations=oldLim.map(v=>
+   typeof v==='string'&&v.startsWith('LIMITATION_LIVE_CONFIGURATION:')
+    ?'LIMITATION_LIVE_CONFIGURATION: The admitted Phase-0 fork established exact deployed runtime/source identity and successful read-only token state checks. Audit Preview Completion must additionally record a fresh, block-pinned wards(address) read for known ward candidates before sealing this correction. The sampled ward addresses do not constitute an exhaustive roster without full authenticated historical LogNote/constructor reconciliation. Key custody, external governance/timelocks, backing, redemptions and third-party integrations remain outside the admitted token-only scope. No live state-changing transactions or executable attack tests were performed.'
+    :v);
+ }
  write(editRel,form);
  const at=new Date().toISOString();
  const dir={
@@ -152,10 +161,16 @@ const launch=async()=>{
   ||dir.previewCompletion?.originalAuthorityDigest!==preview.authorityDigest)
   throw Error('APC_PRELAUNCH_IDENTITY_OR_STATUS_INVALID');
  const proof=read(evidenceRel);
- if(proof.status!=='VERIFIED_READ_ONLY'||proof.chainId!==1||proof.blockNumber!==26283885
-  ||proof.blockHash!=='0xe9a7c98f604a48f1b8885578ec8f54e73ec33e9f34cc5161c049a59640b6eab5'
-  ||proof.address!=='0x6b175474e89094c44da98b954eedeac495271d0f'
-  ||proof.sourceSha256!==preview.sourceSha256||!Array.isArray(proof.wardReads)||!proof.wardReads.length)
+ const scan=read(ref(oldRoot,'source/live-scan-project/scan-source-manifest.json'));
+ const daiPresent=scan.resolvedTargets?.some(x=>String(x.address).toLowerCase()==='0x6b175474e89094c44da98b954eedeac495271d0f');
+ if(proof.status!=='VERIFIED_READ_ONLY'||proof.chainId!==scan.chainId
+  ||proof.blockNumber!==scan.frozenBlock?.number
+  ||String(proof.blockHash).toLowerCase()!==String(scan.frozenBlock?.hash).toLowerCase()
+  ||proof.sourceSha256!==preview.sourceSha256
+  ||!Array.isArray(proof.runtimeChecks)||proof.runtimeChecks.length!==scan.resolvedTargets.length
+  ||proof.runtimeChecks.some(x=>x.exactMatch!==true)
+  ||!Array.isArray(proof.readOnlyChecks)||!Array.isArray(proof.wardReads)
+  ||(daiPresent&&!proof.wardReads.length))
   throw Error('APC_ONCHAIN_VERIFICATION_REQUIRED');
  const form=read(editRel),prior=read(originalFormRel);
  const {schema}=loadPhaseSchema(root,authorityRoot,4);
