@@ -169,8 +169,14 @@ export function assertPhase0ForkIdentity(e){
   if(e?.fork?.engine!=='anvil'||!PHASE0_FORK_CHAIN_IDS.has(chainId)||e?.fork?.identityNormalized!==true)throw new Error('Invalid Anvil fork identity');
   if(chainId!==1){
     const p=e.deploymentProfile;
-    if(!p||p.chainId!==chainId||PHASE0_FORK_CHAINS[p.chain]?.chainId!==chainId||e.fork.chain!==p.chain||e.fork.upstreamChainId!==chainId)
-      throw new Error('Non-Ethereum fork evidence is not bound to a matching audit-deployment.json profile and upstream chain');
+    const inferred=e.foundryChainDetection;
+    const profileMatches=p&&p.chainId===chainId&&PHASE0_FORK_CHAINS[p.chain]?.chainId===chainId&&e.fork.chain===p.chain;
+    const inferredMatches=!p&&inferred?.mode==='SOURCE_FOUNDRY_ENDPOINT_UNIQUE'&&inferred.file==='foundry.toml'&&
+      /^[0-9a-f]{64}$/.test(inferred.configSha256??'')&&inferred.chainId===chainId&&
+      PHASE0_FORK_CHAINS[inferred.chain]?.chainId===chainId&&e.fork.chain===inferred.chain&&
+      /^[0-9a-f]{64}$/.test(e.sourceSha256??'');
+    if((!profileMatches&&!inferredMatches)||e.fork.upstreamChainId!==chainId)
+      throw new Error('Non-Ethereum fork evidence lacks matching source-bound Foundry chain identity and upstream chain');
   }
   return true;
 }
@@ -191,3 +197,29 @@ export function assertPhase0ForkIdentity(e){
      metadataDifference:{format:'SOLC_LEGACY_CBOR_BZZR1_SOLC',compilerBytes:am[2],observedSwarmHash:am[1],compiledSwarmHash:bm[1]},
      executableRuntimeSha256:sha256(Buffer.from(a.slice(2,-104),'hex'))};
  }
+
+// Inferred only when a source-authored Foundry config has a unique supported
+// RPC endpoint. This does not synthesize a deployment profile or waive
+// source-native execution; it selects the fork for a ZIP with no profile.
+export async function inferPhase0FoundryChainV1(projectRoot,profile){
+  if(profile)return null;
+  const file=path.join(projectRoot,'foundry.toml');
+  let bytes;try{bytes=await fs.readFile(file);}catch(e){if(e?.code==='ENOENT')return null;throw e;}
+  let section='',endpoints=[];
+  for(const raw of bytes.toString('utf8').split(/\r?\n/)){
+    const line=raw.replace(/#.*$/,'').trim();
+    const header=line.match(/^\[([^\]]+)\]$/);
+    if(header){section=header[1];continue;}
+    if(section==='rpc_endpoints'){
+      const entry=line.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*=/);
+      if(entry)endpoints.push(entry[1].toLowerCase());
+    }
+  }
+  endpoints=[...new Set(endpoints)];
+  if(!endpoints.length)return null;
+  if(endpoints.length!==1||!PHASE0_FORK_CHAINS[endpoints[0]])
+    throw new Error('Foundry source declares ambiguous or unsupported RPC endpoints; an explicit audit-deployment.json is required');
+  const chain=PHASE0_FORK_CHAINS[endpoints[0]];
+  return {mode:'SOURCE_FOUNDRY_ENDPOINT_UNIQUE',file:'foundry.toml',
+    configSha256:sha256(bytes),chain:chain.chain,chainId:chain.chainId};
+}
