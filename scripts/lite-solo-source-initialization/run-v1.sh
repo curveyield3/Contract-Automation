@@ -254,7 +254,18 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
       break
     fi
   done
-  if [ "$evidence_ready" = true ]; then resume_from_deploy=true; fi
+  # A previous intelligence pass can succeed but produce an incomplete source
+  # inventory. If the Phase-0 finalizer could not publish FLOW_PLAN, regenerate
+  # actual compiled source contexts rather than reusing incomplete evidence.
+  if [ "$evidence_ready" = true ]; then
+    plan_path="$campaign_root/evidence/review-inventory/FLOW_PLAN_v1.json"
+    encoded_plan="$(jq -rn --arg p "$plan_path" '$p|split("/")|map(@uri)|join("/")')"
+    if gh api "repos/curveyield3/Audit-Controller/contents/$encoded_plan?ref=main" --jq '.sha' >/dev/null 2>&1; then
+      resume_from_deploy=true
+    else
+      echo "::notice::Phase-0 flow plan not sealed; regenerate source review inventory from existing immutable source."
+    fi
+  fi
 fi
 export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
 gh workflow run lite-solo-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
