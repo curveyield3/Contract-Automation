@@ -6,5 +6,5 @@
   "scanUrls": [],
   "authorizePhase0Execution": true,
   "deliveryTransport": "DIRECT",
-  "recoveryReason": "Same P0, inspect Vyper Slither static-analysis error with native CLI diagnostics 8e1b7d977dfdf55de14532373c39b4ad0b18560a"
+  "recoveryReason": "Same P0 campaign: source-bound Slither forced to Vyper framework 9fd6b1e5dad8f877f989c61eee80dfc7d9f2bd18"
 }
