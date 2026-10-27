@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "curveyield-lite-solo-phase-boundary-request-v1",
+  "campaignId": "cyavkatv25-r8",
+  "reviewKind": "phase",
+  "phaseSequence": 3,
+  "auditControllerRef": "main",
+  "attempt": 1,
+  "campaignPath": "campaigns/cyavKATv25 r8",
+  "directorySnapshotCommitSha": "ce84ce55fd4010d0777ef3f4630c67d27beef12d"
+}
