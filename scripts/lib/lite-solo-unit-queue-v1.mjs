@@ -1002,8 +1002,8 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  // Full restoration is the pre-existing source-bound schema/identity validator.
  const restored=secureRestoreWorkFormV13({root,indexRel:assignment.workShardIndexPath});
  const form=JSON.parse(restored.content),schema=loadPhaseSchema(root,AUTHORITY,phase).schema;
- const errors=validateWorkForm(schema,form);
- if(errors.length)throw Error('aggregate validation blocked: '+errors.slice(0,15).join('; '));
+ const errors=validateWorkForm(schema,form,{structuralOnly:true});
+ if(errors.length)throw Error('CONTROLLER_INTEGRITY_FAILURE: accepted immutable aggregate malformed: '+errors.slice(0,15).join('; '));
  // Existing phase controller materializes, validates all semantic gates, executes required
  // already-qualified machine lane (Phase 5), generates a single seal and next assignment.
  return {status:'READY_FOR_EXISTING_BOUNDARY_SEAL',workShardIndexPath:assignment.workShardIndexPath};
