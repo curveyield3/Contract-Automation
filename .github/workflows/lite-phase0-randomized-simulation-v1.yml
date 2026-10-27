@@ -82,6 +82,29 @@ jobs:
             esac
           else
             required_secret="RPC_ETHEREUM"
+            # ZIP campaigns may declare a single original Foundry RPC target.
+            # Read only the accepted compilation root; never inspect arbitrary
+            # scripts or infer a target chain from contract addresses.
+            identity=".audit-controller/$CAMPAIGN_PATH/evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json"
+            if [ -f "$identity" ]; then
+              project="$(jq -r '.discovery.projectPath // empty' "$identity")"
+              [[ "$project" != /* && "$project" != *..* ]] || { echo "::error::Unsafe native Foundry root"; exit 1; }
+              toml=".audit-controller/$CAMPAIGN_PATH/source/$project/foundry.toml"
+              if [ -f "$toml" ]; then
+                foundry_target="$(awk '
+                  /^\\[rpc_endpoints\\]/{inside=1;next}
+                  /^\\[/{inside=0}
+                  inside && /^[[:space:]]*[a-zA-Z_][a-zA-Z_0-9-]*[[:space:]]*=/{split($0,p,"=");gsub(/[[:space:]]/,"",p[1]);print p[1]}
+                ' "$toml" | sort -u | paste -sd, -)"
+                if [ "$foundry_target" = katana ]; then
+                  upstream="$KATANA_FORK_RPC_URL"
+                  required_chain="0xb67d2"
+                  required_secret="RPC_KATANA"
+                elif [ -n "$foundry_target" ]; then
+                  echo "::error::Unsupported or ambiguous Foundry endpoint $foundry_target"; exit 1
+                fi
+              fi
+            fi
           fi
           test -n "${upstream:-}" || { echo "::error::$required_secret secret is missing"; exit 1; }
           chain_id="$(curl -fsS --max-time 15 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$upstream" | jq -r '.result // empty')"
