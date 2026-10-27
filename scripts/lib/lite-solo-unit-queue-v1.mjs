@@ -946,6 +946,24 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
    const foundMembers=found.get(u.unitId)??new Map();
    foundMembers.set(m.unitId,m);found.set(u.unitId,foundMembers);
   };
+  // Controller aggregate Phase-4 errors name discovery IDs, not shard array indices.
+  // Reopen the candidate append slot for genuinely missing Step-3 candidate records,
+  // or just the named original reconciliation batch member for deficient controls.
+  if(phase===4){
+   const discoveryId=message.match(/\\bDISC-[0-9]{4}\\b/)?.[0];
+   if(discoveryId&&message.includes('candidate must be present in Step 3')){
+    const append=plan.units.find(u=>u.kind==='APPEND'&&u.field==='candidateRecords');
+    if(append)mark(append,append);
+   }else if(discoveryId&&message.includes('must name the blocking control')){
+    for(const u of plan.units.filter(u=>u.kind==='BATCH'&&u.field==='discoveryReconciliationRecords')){
+     for(const m of u.members){
+      const ref=queue.acceptedRecords?.[m.unitId];
+      const accepted=ref?.path?maybe(root,ref.path):null;
+      if(accepted?.entry?.value?.recordKey===discoveryId)mark(u,m);
+     }
+    }
+   }
+  }
   for(const match of message.matchAll(/(?:actions\.)?(?:step-[0-9]+\.outputs\.)?([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/g)){
    const field=match[1],position=Number(match[2]);
    for(const u of plan.units)for(const m of membersOf(u))
