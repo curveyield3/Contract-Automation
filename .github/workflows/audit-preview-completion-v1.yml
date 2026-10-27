@@ -121,7 +121,8 @@ jobs:
             '/Audit Skill - Lite-Solo Authority/lite-solo-v4/**' \
             '/Audit Campaign Directory/campaigns/**' \
             "/${preview_path}/**" \
-            "/campaigns/${new_slug}-r1/**"
+            "/campaigns/${new_slug}-r1/**" \
+            '/campaigns/audit-preview-completion-live-ethereum-dai-6b175474-r1/receipts/PHASE_10_RECEIPT_v1.json'
           echo "controller_sha=$(git -C .audit-controller rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "request=/tmp/apc-request.json" >> "$GITHUB_OUTPUT"
           echo "new_slug=$new_slug" >> "$GITHUB_OUTPUT"
