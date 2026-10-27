@@ -459,7 +459,7 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
       if(entry.isDirectory())await scanVyperPragmas(absolute);
       else if(entry.isFile()&&entry.name.endsWith('.vy')){
         const source=await fsApi.readFile(absolute,'utf8');
-        const pragma=source.match(/^\\s*#\\s*pragma\\s+version\\s+(\\d+\\.\\d+\\.\\d+)\\s*$/m)?.[1];
+        const pragma=source.match(/^\s*#\s*pragma\s+version\s+(\d+\.\d+\.\d+)\s*$/m)?.[1];
         if(!pragma)throw new Error('Foundry Vyper source lacks an exact version pragma: '+path.relative(projectRoot,absolute));
         vyperPragmas.add(pragma);
       }
