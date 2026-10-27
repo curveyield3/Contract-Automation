@@ -204,6 +204,10 @@ const launch=()=>{
     fs.rmSync(toFile(dest+'/'+top+'/'+n),{recursive:true,force:true});
   }
  }
+ // The original published terminal report and remediation output are historical,
+ // not fresh corrective acceptance. Keep their original copies only in source.
+ fs.rmSync(toFile(dest+'/reports/delivery'),{recursive:true,force:true});
+ if(request.startPhase<=9)fs.rmSync(toFile(dest+'/remediation'),{recursive:true,force:true});
  for(const name of allFiles(dest+'/submissions',()=>true)){
   if(/^PHASE_([0-9]{2})_/.test(name)&&Number(name.slice(6,8))>=request.startPhase)
    fs.rmSync(toFile(dest+'/submissions/'+name),{recursive:true,force:true});
