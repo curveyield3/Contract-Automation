@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "r8-phase4-recover-abandoned-f-001-v1",
+  "operation": "RELEASE",
+  "campaignId": "cyavkatv25-r8",
+  "campaignGenerationId": "cyavkatv25-r8-g1-20261027T104124Z",
+  "phaseSequence": 4,
+  "lane": "F",
+  "workerId": "gpt6-auditor-01",
+  "sourceSha256": "7a920115d463a2f468c688c65f5fe24ec3364ee57eea4561505fe1e484fcd779",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "F-003",
+      "claimEpoch": 1,
+      "claimToken": "99d40d24-4afe-4970-9392-f1fbc83274d5"
+    },
+    {
+      "unitId": "F-004",
+      "claimEpoch": 1,
+      "claimToken": "6383583d-1c40-4dcf-8e2d-5ff8c42830d8"
+    },
+    {
+      "unitId": "F-005",
+      "claimEpoch": 1,
+      "claimToken": "a2cb4f49-1751-412f-9a32-53bf76d0f452"
+    },
+    {
+      "unitId": "F-006",
+      "claimEpoch": 1,
+      "claimToken": "b16de075-85d1-4a26-a3d3-31f0319d8007"
+    },
+    {
+      "unitId": "F-007",
+      "claimEpoch": 1,
+      "claimToken": "6dfd07f9-27cd-47b5-84ff-f05c27f8342b"
+    },
+    {
+      "unitId": "F-010",
+      "claimEpoch": 1,
+      "claimToken": "a3a78f5d-e690-4cc2-bece-8ec0fe133683"
+    }
+  ]
+}
