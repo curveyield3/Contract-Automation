@@ -23,7 +23,7 @@ run('A04',(f,d)=>{
  const ids=f.units.slice(0,10),packetIndex=[];
  let total=0,effort=0,ruleCount=0,sectionPages=0;
  for(const id of ids){
-  const p=f.packet(id).payload,entry=f.campaign+'/index/flow-review/UNIT_'+id+'_INDEX_v1.json';
+  const p=f.packet(id).payload,entry=f.campaign+'/work/phase-04/discovery/index/flow-review/UNIT_'+id+'_INDEX_v1.json';
   const ix=readUnitPacketIndexV1({root:f.root,indexPath:entry});
   assert.deepEqual(ix.primaryContextIds,p.primaryContextIds);
   const expected=new Set((p.documentationItems??[]).map(x=>x.ruleId));
