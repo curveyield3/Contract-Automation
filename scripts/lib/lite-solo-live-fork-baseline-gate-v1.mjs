@@ -24,7 +24,7 @@ const supportedSource=x=>x?.status==='LIVE_FORK_SOURCE_VERIFIED'&&x?.targets?.le
  * Validates real, ingested V7 machine evidence, not a reviewer's claim that
  * the source did not contain deployment scripts. Does not change frozen audits.
  */
-export function validateLiveForkBaselineRecordV1({root,campaignPath,campaignId,sourceSha256,record}={}){
+export function validateLiveForkBaselineRecordV1({root,campaignPath,campaignId,sourceSha256,record,structuralOnly=false}={}){
   const evidence=json(root,path.posix.join(campaignPath,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'));
   const profile=classifyDeploymentExecutionV1({execution:evidence??{}});
   if(profile.mode!=='LIVE_DEPLOYED_FORK')return [];
@@ -88,10 +88,16 @@ export function validateLiveForkBaselineRecordV1({root,campaignPath,campaignId,s
   for(const id of due){
     const outcome=byId.get(id);
     if(!outcome){errors.push('Missing live-fork baseline outcome: '+id);continue;}
+    const assertions=ledgers.flatMap(ledger=>executedNames(ledger,id));
+    if(structuralOnly){
+      if(!assertions.length&&!(failedRuns>0&&code(outcome.outcome)==='NOT_ACHIEVED'&&outcome.reasonCode))
+        errors.push('Unexecuted live-fork obligation lacks named invoked assertion or documented failed execution: '+id);
+      continue;
+    }
     if(code(outcome.reasonCode)==='NO_EXECUTABLE_SETUP'
       ||/NO_EXECUTABLE_SETUP|no executable setup|no admitted deterministic local execution/i.test(String(outcome.note??'')))
       errors.push('Verified live-fork target cannot use NO_EXECUTABLE_SETUP for '+id);
-    const assertions=ledgers.flatMap(ledger=>executedNames(ledger,id));
+
     if(['PASS','PASSED','ACHIEVED','SATISFIED'].includes(code(outcome.outcome))){
       if(!assertions.length||assertions.some(x=>x.status!=='PASS'))
         errors.push('Claimed passing live-fork obligation lacks passing named assertion: '+id);
