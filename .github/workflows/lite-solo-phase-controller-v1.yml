@@ -156,6 +156,36 @@ jobs:
         run: |
           set -euo pipefail
           timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
+      - name: Receive Phase-8 BOB evidence through the existing controller, never auditor writeback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_FILE: ${{ steps.request.outputs.request }}
+          AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! jq -e '.phaseSequence==8 and .phase8EvidenceSubmission.kind=="DAI_PINNED_MUTABLE_ANVIL_BOB_V1"' "$REQUEST_FILE" >/dev/null; then exit 0; fi
+          run_id="$(jq -r '.phase8EvidenceSubmission.runId' "$REQUEST_FILE")"
+          artifact_id="$(jq -r '.phase8EvidenceSubmission.artifactId' "$REQUEST_FILE")"
+          [[ "$run_id" =~ ^[0-9]+$ && "$artifact_id" =~ ^[0-9]+$ ]] || { echo "::error::Noncanonical Phase-8 evidence run reference"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > /tmp/dai-p8-verified-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id" > /tmp/dai-p8-verified-artifact.json
+          jq -e --argjson id "$artifact_id" --arg sha "$(jq -r .phase8EvidenceSubmission.runnerCommit "$REQUEST_FILE")" '
+            .id==$id and .expired==false and .name==("dai-phase8-bob-live-fork-evidence-"+$sha) and (.size_in_bytes>0) and (.size_in_bytes<10000000)
+          ' /tmp/dai-p8-verified-artifact.json >/dev/null
+          jq -e --argjson id "$run_id" --arg sha "$(jq -r .phase8EvidenceSubmission.runnerCommit "$REQUEST_FILE")" '
+            .id==$id and .status=="completed" and .conclusion=="success" and .head_sha==$sha and .event=="push"
+          ' /tmp/dai-p8-verified-run.json >/dev/null
+          mkdir -p /tmp/dai-p8-controller-source-artifact
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > /tmp/dai-p8-controller-artifact.zip
+          unzip -Z1 /tmp/dai-p8-controller-artifact.zip > /tmp/dai-p8-controller-artifact-members.txt
+          [ "$(wc -l < /tmp/dai-p8-controller-artifact-members.txt)" -eq 2 ] || { echo "::error::Unexpected proof artifact member count"; exit 1; }
+          grep -Fxq 'BOB_EXECUTION_EVIDENCE_v1.json' /tmp/dai-p8-controller-artifact-members.txt
+          grep -Fxq 'ANVIL_RAW_RPC_TRANSCRIPT_v1.json' /tmp/dai-p8-controller-artifact-members.txt
+          unzip -qq /tmp/dai-p8-controller-artifact.zip -d /tmp/dai-p8-controller-source-artifact
+          node scripts/lite-solo-phase8-dai-proof-controller-intake-v1.mjs \
+            "$REQUEST_FILE" .audit-controller "$AUDIT_CAMPAIGN_PATH" \
+            /tmp/dai-p8-controller-source-artifact /tmp/dai-p8-verified-run.json
       - name: Source-bound Phase-5 execution-request preflight
         id: phase5
         env:
