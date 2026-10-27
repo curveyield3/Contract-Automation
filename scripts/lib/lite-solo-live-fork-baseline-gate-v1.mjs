@@ -51,7 +51,7 @@ export function validateLiveForkBaselineRecordV1({root,campaignPath,campaignId,s
       errors.push('V7 baseline request is missing or not bound to campaign/source/Phase 6: '+requestPath);continue;
     }
     const analysis=request.configuration?.analysis??{};
-    if(analysis.nativeFuzz?.enabled!==true&&analysis.medusa===false||analysis.nativeFuzz?.enabled!==true&&analysis.medusa===undefined){
+    if(!(analysis.nativeFuzz?.enabled===true||(analysis.medusa!==undefined&&analysis.medusa!==false&&analysis.medusa!==null))){
       errors.push('V7 baseline request does not enable Foundry or Medusa execution: '+requestPath);continue;
     }
     const base=path.posix.join(campaignPath,'controller/automation',identitySafe(request.requestId));
