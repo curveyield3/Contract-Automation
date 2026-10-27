@@ -109,6 +109,11 @@ try{
   const tests=decodeForgeReports(forge.stdout);
   evidence.discoveredTestCount=tests.length;
   evidence.discoveredTests=tests;
+  evidence.forgeOutputBytes={stdout:forge.stdout.length,stderr:forge.stderr.length};
+  if(tests.length===0){
+    console.error('DAI_FORGE_ZERO_RECOGNIZED_TESTS_STDOUT_TAIL='+forge.stdout.slice(-6500));
+    console.error('DAI_FORGE_ZERO_RECOGNIZED_TESTS_STDERR_TAIL='+forge.stderr.slice(-6500));
+  }
   for(const id of obligations){
     const matching=tests.filter(x=>x.name.includes(id.replace('-','_')));
     evidence.obligations[id]=matching.length===1
