@@ -7,7 +7,8 @@ import {reviewInventoryRelV1} from '../../packages/github-native-sim/src/adr-rev
 import {buildUnitPacketV1,writeUnitPacketIndexV1,buildDiscoverySummaryV1} from '../../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
 import {loadTaxonomyV1} from '../../packages/github-native-sim/src/adr-taxonomy-v1.mjs';
 import {deriveBaselineObligationsV1} from '../../packages/github-native-sim/src/adr-baseline-obligations-v1.mjs';
-import {applyPhaseBoundaryPrefill} from './lite-solo-phase-prefill-v1.mjs';
+import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite-solo-phase-prefill-v1.mjs';
+import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
 
 export const UNIT_POLICY=Object.freeze({issueBatchDefault:10,issueBatchMax:10,approvalBatchMax:5,maxParallelWorkers:null});
@@ -66,7 +67,7 @@ function emptyPlan(directory,phase){
  return {schemaVersion:'curveyield-lite-solo-unit-plan-v1',campaignId:directory.campaignId,
   campaignGenerationId:directory.campaignGenerationId,phaseSequence:phase,phaseEpoch:Number(directory.unitPhaseEpoch??1),
   sourceSha256:directory.sourceSha256,authorityDigest:directory.authorityDigest,
-  unitSpecRevision:1,units:[],recordOwnership:{},stage:phase===4?'CORRECTNESS':'SEMANTIC'};
+  unitSpecRevision:1,campaignPath:directory.workspacePath,units:[],recordOwnership:{},stage:phase===4?'CORRECTNESS':'SEMANTIC'};
 }
 function emptyQueue(plan){
  return {schemaVersion:'curveyield-lite-solo-unit-queue-state-v1',campaignId:plan.campaignId,
@@ -278,6 +279,15 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
    for(const [name,allowed] of Object.entries(field.itemFieldAllowedValues??{}))
     if(val[name]!==undefined&&!allowed.includes(String(val[name])))errors.push(name+' invalid enum');
   }else if(typeof val==='string'&&val.startsWith('<REQUIRED'))errors.push('incomplete mandatory field');
+  if(phase===5&&u.field==='targetDesigns'&&isObject(val)&&val.executionMethod==='V7_REQUEST'){
+   const resolved=resolveTargetExecutionRequestRef({root,campaignPath:plan.campaignPath,target:val});
+   if(!resolved)errors.push('target lacks a committed source-bound executable request/harness');
+   else {
+    const bound=validateTargetExecutionRequestBindingV1({controllerRoot:root,campaignPath:plan.campaignPath,
+     target:{...val,executionRequestRef:resolved},expectedCampaignId:plan.campaignId,expectedSourceSha256:plan.sourceSha256});
+    if(!String(bound.status).startsWith('PASS_'))errors.push('target binding: '+bound.status+': '+(bound.reasons??[]).join('; '));
+   }
+  }
  }
  return errors;
 }
@@ -306,12 +316,12 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
  const resultRel=path.posix.join(unitBase(campaign,phase,u.unitId),'results',
   'ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
  if(!errors.length){
-  const acceptedRel=path.posix.join(unitBase(campaign,phase,u.unitId),'ACCEPTED_v1.json');
-  if(fs.existsSync(repoFile(root,acceptedRel)))throw Error('canonical unit accepted snapshot cannot be overwritten');
+  const acceptedRel=path.posix.join(unitBase(campaign,phase,u.unitId),'ACCEPTED_ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
+  if(fs.existsSync(repoFile(root,acceptedRel)))throw Error('immutable accepted attempt cannot be overwritten');
   put(root,acceptedRel,{schemaVersion:'curveyield-lite-solo-accepted-unit-v1',unitId:u.unitId,
    campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
    workerId:request.workerId,claimEpoch:state.claimEpoch,submissionSha256:digest,submission});
-  state.status='ACCEPTED';state.acceptedSha256=digest;state.lastErrors=[];
+  state.status='ACCEPTED';state.acceptedSha256=digest;state.acceptedPath=acceptedRel;state.lastErrors=[];
   put(root,resultRel,{unitId:u.unitId,status:'ACCEPTED',submissionSha256:digest,acceptedPath:acceptedRel});
   return {unitId:u.unitId,status:'ACCEPTED',resultRef:resultRel};
  }
@@ -322,6 +332,9 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
 function handleSubmit({root,campaign,phase,queue,plan,request,directory}){
  const schema=loadPhaseSchema(root,AUTHORITY,phase).schema,items=[];
  for(const item of request.items){
+  const owned=queue.units[item.unitId];
+  if(owned&&['CLAIMED','REWORK_REQUIRED'].includes(owned.status)&&owned.workerId===request.workerId)
+   owned.status='SUBMITTED';
   try{items.push(acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,directory}));}
   catch(e){items.push({unitId:item.unitId,status:'REWORK_REQUIRED',errors:[String(e.message??e)]});}
  }
@@ -350,7 +363,7 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
   campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
   generatedAt:new Date().toISOString(),payload:{reviewPolicy:'correctness-verdict-v13',gaps:asArray(discoveryInput(root,campaign,'FLOW_PLAN_v1.json').payload?.gaps)}};
  const acceptedSubmissions=items.map(u=>({unitId:u.unitId,
-  submission:read(root,path.posix.join(unitBase(campaign,4,u.unitId),'ACCEPTED_v1.json')).submission}));
+  submission:read(root,queue.units[u.unitId].acceptedPath).submission}));
  const inventory=discoveryInput(root,campaign,'REVIEW_INVENTORY_v1.json');
  const summary=buildDiscoverySummaryV1({state,inventory,plan:discoveryInput(root,campaign,'FLOW_PLAN_v1.json'),
   acceptedSubmissions,taxonomy:loadTaxonomyV1(automationRoot),now:new Date().toISOString()});
@@ -388,7 +401,8 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  result={schemaVersion:'curveyield-lite-solo-unit-controller-result-v1',
   requestId:request.requestId,campaignId:directory.campaignId,phaseSequence:phase,
   ...result,phaseStatus:noWork(queue,plan)};
- queue.revision++;queue.processedRequests[request.requestId]=result;
+ queue.revision++;
+ if(!asArray(result.waitingUnits).length)queue.processedRequests[request.requestId]=result;
  publishPlan(root,campaignPath,phase,plan,queue);
  directory.unitQueueIndexPath=planRel(campaignPath,phase);
  return result;
@@ -409,7 +423,7 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  const {plan,queue}=ready,assignment=directory.currentAssignment;
  const byFile=new Map();
  for(const u of plan.units.filter(u=>['SHARD','APPEND'].includes(u.kind))){
-  const accepted=read(root,path.posix.join(unitBase(campaignPath,phase,u.unitId),'ACCEPTED_v1.json'));
+  const accepted=read(root,queue.units[u.unitId].acceptedPath);
   if(queue.units[u.unitId].acceptedSha256!==accepted.submissionSha256)throw Error('accepted digest mismatch');
   const list=byFile.get(u.shardPath)??[];list.push({unit:u,entries:accepted.submission.entries});byFile.set(u.shardPath,list);
  }
