@@ -1,0 +1,34 @@
+name: Lite-Solo v4 Acceptance A01-A03 (isolated)
+on:
+  push:
+    branches:
+      - test/lite-solo-v4-a01-a03
+    paths:
+      - 'scripts/tests/lite-solo-v4-acceptance/**'
+      - '.github/workflows/lite-solo-v4-acceptance-a01-a03.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned dependencies without scripts
+        run: npm ci --force --ignore-scripts --no-audit --no-fund
+      - name: Execute A01-A03 only, each from fresh disposable fixtures
+        shell: bash
+        run: |
+          mkdir -p scripts/tests/lite-solo-v4-acceptance/output
+          node --test --test-concurrency=1 scripts/tests/lite-solo-v4-acceptance/cases/A01.test.mjs scripts/tests/lite-solo-v4-acceptance/cases/A02.test.mjs scripts/tests/lite-solo-v4-acceptance/cases/A03.test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lite-solo-v4-A01-A03-results
+          path: scripts/tests/lite-solo-v4-acceptance/output/
+          if-no-files-found: warn
