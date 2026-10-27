@@ -58,6 +58,14 @@ if(arg.mode!=='finalize'){
   if(JSON.stringify(previous)!==JSON.stringify(result)){writeJson(repoFile(root,resultRel),result);changed=true;}
   results.push({requestId:request.requestId,status:result.status});
  }
+ if(phase===4){
+  const state=readJson(repoFile(root,queuePath));
+  const gaps=state.finalizeStatus==='BLOCKED'?state.finalizeDetails?.unmappedDeficiencies:null;
+  if(Array.isArray(gaps)&&gaps.length){
+   const repair=reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies:gaps});
+   if(repair.reopenedUnits.length)changed=true;
+  }
+ }
  if(changed){directory.updatedAt=new Date().toISOString();writeJson(directoryFile,directory);}
 }
 let ready=false,seal=null;
