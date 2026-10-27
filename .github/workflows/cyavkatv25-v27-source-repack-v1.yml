@@ -17,18 +17,18 @@ jobs:
       - name: Checkout trusted repair workflow
         uses: actions/checkout@v4
         with:
-          ref: \${{ github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
       - name: Select Audit-Controller credential
         env:
-          AUDIT_CONTROLLER_PRIMARY_TOKEN: \${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          PREFLIGHTSIM_FALLBACK_TOKEN: \${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         run: bash scripts/select-audit-controller-token.sh
       - name: Safely replace consolidated Foundry entrypoint in original ZIP
         env:
-          GH_TOKEN: \${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
