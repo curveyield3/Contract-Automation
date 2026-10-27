@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "boosthubv9-p5-rbatch-submit-20261027-01-v1",
+  "operation": "SUBMIT",
+  "campaignId": "boosthub-contract-stack-v9-r1",
+  "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
+  "phaseSequence": 5,
+  "lane": "AUTO",
+  "workerId": "gpt6-boosthub-v9-p5-hourly-20261027",
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "P5-R-B0001",
+      "claimEpoch": 1,
+      "claimToken": "cd327df2-e4ee-496f-b122-893e606fa2b0",
+      "unitSpecRevision": 1,
+      "packetSha256": "a923a17c5a8c6eada2e8971a4d4d873e1021b37fee0e63d8b3152ce0c730397a",
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-05/units/P5-R-B0001/submissions/gpt6-boosthub-v9-p5-hourly-20261027/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "6d3aa714f5889425d19214b767ea70f40161d044c5fa4efbdee18ed0f428da0f"
+    }
+  ]
+}
