@@ -270,8 +270,9 @@ function validateRequest(request,directory,phase){
    throw Error('SUBMIT item identity, revision, path or hash is malformed');
  }else if(request.operation==='RELEASE'){
   if(!Array.isArray(request.items)||!request.items.length||
+    request.items.some(x=>!isObject(x))||
     new Set(request.items.map(x=>x.unitId)).size!==request.items.length||
-    request.items.some(x=>!isObject(x)||Object.keys(x).length!==3||
+    request.items.some(x=>Object.keys(x).length!==3||
       !Object.hasOwn(x,'unitId')||!Object.hasOwn(x,'claimEpoch')||
       !Object.hasOwn(x,'claimToken')||!safe(x.unitId)||
       !Number.isSafeInteger(x.claimEpoch)||x.claimEpoch<1||!safe(x.claimToken)))
@@ -334,8 +335,7 @@ function handleClaim({root,campaign,phase,queue,plan,request}){
 function itemIdentity(item,u,state,request,root){
  if(item.unitId!==u.unitId||state.workerId!==request.workerId||
   item.claimEpoch!==state.claimEpoch||item.claimToken!==state.claimToken||
-  item.unitSpecRevision!==u.unitSpecRevision||
-  item.unitSpecRevision!==Number(request.planUnitSpecRevision??u.unitSpecRevision))
+  item.unitSpecRevision!==u.unitSpecRevision)
   return 'STALE';
  if(state.status==='ACCEPTED')return 'UNCHANGED';
  if(!['CLAIMED','SUBMITTED','REWORK_REQUIRED'].includes(state.status))return 'STALE';
@@ -499,7 +499,10 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
  queue.stage='RECONCILIATION';plan.stage='RECONCILIATION';
  unlock(queue,plan);return true;
 }
-export function processUnitRequestV1({root,campaignPath,directory,request,automationRoot=process.cwd()}){
+export function processUnitRequestV1({root,campaignPath,directory,request,automationRoot=process.cwd(),trustedController=false}){
+ // A worker-origin GitHub request must never become a controller-origin FINALIZE.
+ if(request?.operation==='FINALIZE'&&!trustedController)
+  throw Error('FINALIZE is controller-internal and cannot be queued by a worker');
  const phase=request.phaseSequence;validateRequest(request,directory,phase);
  let queue=maybe(root,queueRel(campaignPath,phase));
  if(!queue)queue=createUnitPlanV1({root,campaignPath,directory,phase,automationRoot});
