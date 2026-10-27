@@ -11,7 +11,7 @@ import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite
 import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
 
-export const UNIT_POLICY=Object.freeze({issueBatchDefault:10,issueBatchMax:10,approvalBatchMax:5,maxParallelWorkers:null});
+export const UNIT_POLICY=Object.freeze({issueBatchDefault:10,issueBatchMax:4,approvalBatchMax:5,maxParallelWorkers:null});
 export const REQUEST_SCHEMA='curveyield-lite-solo-unit-batch-request-v1';
 // Public queue/packet contracts: one authoritative definition, not copied workflow limits.
 export const UNIT_QUEUE_STATUSES=Object.freeze(['BLOCKED_DEPENDENCY','AVAILABLE','CLAIMED',
@@ -384,7 +384,7 @@ function batchIndex(root,campaign,phase,requestId,units){
   pages.push({path:rel,sha256:sha(page)});
  }
  const index={schemaVersion:'curveyield-lite-solo-unit-batch-index-v1',
-  count:units.length,pages,readingGuide:'Read paged indexes and only assigned unit pages. Commit immutable worker/claim-epoch/attempt submissions; enqueue 1–5-unit SUBMIT requests, then immediately continue independent claimed units. NEVER wait for controller approval. Claim ten more when eligible; dependent units require persisted ACCEPTED.'};
+  count:units.length,pages,readingGuide:'Read paged indexes and only assigned unit pages. Commit immutable worker/claim-epoch/attempt submissions; enqueue 1–5-unit SUBMIT requests, then immediately continue independent claimed units. NEVER wait for controller approval. Claim up to four more when eligible; dependent units require persisted ACCEPTED.'};
  const rel=path.posix.join(dir,'BATCH_INDEX_v1.json');put(root,rel,index);
  return rel;
 }
