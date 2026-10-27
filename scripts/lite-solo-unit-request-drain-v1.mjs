@@ -36,6 +36,15 @@ if(arg.mode!=='finalize'){
  const queuePath=directory.unitQueueStatePath;
  const recorded=queuePath&&fs.existsSync(repoFile(root,queuePath))?
   readJson(repoFile(root,queuePath)):null;
+ // Re-evaluate already-recorded, unmapped aggregate defects after the mapping
+ // implementation is repaired. Never reopen unrelated accepted units.
+ if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
+    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
+    recorded.finalizeDetails.unmappedDeficiencies.length){
+  const recovery=reopenAggregateDefectsV1({root,campaignPath,phase,
+    deficiencies:recorded.finalizeDetails.unmappedDeficiencies});
+  if(recovery.reopenedUnits.length)changed=true;
+ }
  for(const filename of files){
   const request=JSON.parse(fs.readFileSync(path.join(requestDir,filename),'utf8'));
   if(request.operation==='FINALIZE')throw Error('untrusted ingress may not request controller-only FINALIZE');
