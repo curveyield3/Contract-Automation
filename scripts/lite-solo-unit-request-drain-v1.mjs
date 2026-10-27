@@ -34,6 +34,7 @@ if(arg.mode!=='finalize'){
  const files=fs.existsSync(requestDir)?fs.readdirSync(requestDir).filter(x=>/^[A-Za-z0-9._-]+\.json$/.test(x)).sort():[];
  for(const filename of files){
   const request=JSON.parse(fs.readFileSync(path.join(requestDir,filename),'utf8'));
+  if(request.operation==='FINALIZE')throw Error('untrusted ingress may not request controller-only FINALIZE');
   if(request.campaignId!==campaignId||request.phaseSequence!==phase)continue;
   if(filename!==request.workerId+'-'+request.requestId+'.json')
    throw Error('request file identity mismatch: '+filename);
