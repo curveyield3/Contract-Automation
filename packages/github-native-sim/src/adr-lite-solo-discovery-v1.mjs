@@ -77,7 +77,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const contractChecks=role==='ATTACK'?[]:[...new Set(primary.map(id=>contextFor(inventory,id)?.qualifiedContainer).filter(Boolean))]
   .filter(name=>ownerUnit.get(name)===unitId).sort()
   .map(contract=>({contract,classId:'UPGRADE_INIT_STORAGE',reviewChecks:arr(upgradeClass?.reviewChecks)}));
- const verdictV13=/(?:Audit_Litemode_v13|lite-solo(?:-v[23])?)(?:\/|$)/.test(authorityRoot);
+ const verdictV13=/(?:Audit_Litemode_v13|lite-solo(?:-v[234])?)(?:\/|$)/.test(authorityRoot);
  const trivialContextIds=role==='ATTACK'?[]:primary.filter(id=>verdictV13?
    isLiteralConstantV13(contextFor(inventory,id)):TRIVIAL_KINDS_V1.has(contextFor(inventory,id)?.kind));
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
@@ -285,14 +285,14 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
  const plan=known(root,asset(root,campaignPath,'FLOW_PLAN_v1.json'));
  const units=unitList(plan),order=units.map(x=>x.unitId);
  const missing=!plan||!units.length;
- if(missing || (authorityRoot.endsWith('/lite-solo-v3') && (plan?.payload?.gaps??[]).some(g=>['INVENTORY_INCOMPLETE','PLAN_BUILD_ERROR'].includes(g?.code))))
+ if(missing || (/\/lite-solo-v[34]$/.test(authorityRoot) && (plan?.payload?.gaps??[]).some(g=>['INVENTORY_INCOMPLETE','PLAN_BUILD_ERROR'].includes(g?.code))))
    throw new Error('LITE_SOLO_DISCOVERY_UNAVAILABLE: empty or incomplete required review plan is not complete coverage');
- if(directory.mode!=='LITE_SOLO'||![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3' ].includes(authorityRoot))throw new Error('lite-solo discovery authority mismatch');
+ if(directory.mode!=='LITE_SOLO'||![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4' ].includes(authorityRoot))throw new Error('lite-solo discovery authority mismatch');
  const state=head(directory,now,'curveyield-discovery-state-v1',{
   status:'RUNNING',order,activeUnitId:order[0],
    sequentialSingleReviewer:true,
-  ...( /(?:Audit_Litemode_v13|lite-solo(?:-v[23])?)(?:\/|$)/.test(authorityRoot)?{reviewPolicy:'correctness-verdict-v13'}:{}),
-  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?(isReassignedV13AuthorityV1({root,authorityRoot})?'lite-solo-agent':/(?:Audit_Litemode_v13|lite-solo(?:-v[23])?)(?:\/|$)/.test(authorityRoot)?'lite-solo-agent':'lite-solo-agent'):'lite-solo-agent',
+  ...( /(?:Audit_Litemode_v13|lite-solo(?:-v[234])?)(?:\/|$)/.test(authorityRoot)?{reviewPolicy:'correctness-verdict-v13'}:{}),
+  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?(isReassignedV13AuthorityV1({root,authorityRoot})?'lite-solo-agent':/(?:Audit_Litemode_v13|lite-solo(?:-v[234])?)(?:\/|$)/.test(authorityRoot)?'lite-solo-agent':'lite-solo-agent'):'lite-solo-agent',
    status:'PENDING',attempts:0,lastValidatedSubmissionSha:null,lastErrors:[],acceptedSubmissionSha:null}])),
   gaps:missing?[{code:'INVENTORY_INCOMPLETE',detail:'No flow plan'}]:structuredClone(arr(plan.payload.gaps))
  });
