@@ -598,7 +598,8 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
      errors.push(fp+': UNRESOLVED_PLACEHOLDER');
    }
    for(const [name,allowed] of Object.entries(field.itemFieldAllowedValues??{}))
-    if(val[name]!==undefined&&!allowed.includes(String(val[name])))
+    if(val[name]!==undefined&&
+     (typeof val[name]!==typeof allowed[0]||!allowed.includes(val[name])))
      errors.push(p+'.value.'+name+': INVALID_ENUM');
   }else if(missing(val))errors.push(p+'.value: REQUIRED_NONBLANK');
   if(phase===6&&u.field==='baselineTestRecords'&&isObject(val))
