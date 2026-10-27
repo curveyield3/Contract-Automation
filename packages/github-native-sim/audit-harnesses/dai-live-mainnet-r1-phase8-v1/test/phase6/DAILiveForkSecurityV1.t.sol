@@ -28,8 +28,8 @@ interface ILiveDai {
 }
 contract DAILiveForkSecurityV1 {
     VmForkDAI constant vm = VmForkDAI(address(uint160(uint256(keccak256("hevm cheat code")))));
-    ILiveDai constant D = ILiveDai(0x6b175474e89094c44da98b954eedeac495271d0f);
-    address constant WARD = 0x9759a6ac90977b93b58547b4a71c78317f391a28;
+    ILiveDai constant D = ILiveDai(0x6B175474E89094C44Da98b954EedeAC495271d0F);
+    address constant WARD = 0x9759A6Ac90977b93B58547b4A71c78317f391A28;
     address constant ALICE = address(0xA11ce);
     address constant BOB = address(0xB0B);
     address constant CAROL = address(0xCA401);
