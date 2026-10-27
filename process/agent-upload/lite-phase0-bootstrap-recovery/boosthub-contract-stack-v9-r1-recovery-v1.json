@@ -7,6 +7,6 @@
   "resume_from_finalize": false,
   "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
   "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
-  "recoveryReason": "Resume exact immutable BoostHub v9-r1 Phase 0 at fork deploy/config after intelligence succeeded in run 40512526523. Native Forge compilation failed on duplicate wildcard import anchor; existing runner now isolates the script compilation closure without changing admitted source (c5ce2ded07ac5893e26c1413c30d810c3030025b). Preserve published source intelligence.",
-  "resume_from_deploy": true
+  "recoveryReason": "Rebuild exact same Phase 0 intelligence for v9-r1 after run 40513147929 proved native fork deploy PASS but finalizer rejected incomplete review inventory. Source-bound Vyper 0.4.3 AST contexts now supported, and declaration-free import-only shim plus deployment script retain explicit source-anchored review units (d59e08943884170ded1e804dbde0fbb18df77dd9). Reuse pinned exact-source build cache, preserve immutable source, repeat only required machine stages and seal if complete.",
+  "resume_from_deploy": false
 }
