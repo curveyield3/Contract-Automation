@@ -694,9 +694,9 @@ async function main(){
   // include staking bytecode; never infer from unrelated archive copies.
   const vyperVersions=new Set();
   for(const rel of await walk(detected.absolute)){
-    if(!/^contracts\\/.+\\.vy$/.test(rel))continue;
+    if(!/^contracts\/.+\.vy$/.test(rel))continue;
     const source=await fs.readFile(path.join(detected.absolute,...rel.split('/')),'utf8');
-    const version=source.match(/^\\s*#\\s*pragma\\s+version\\s+(\\d+\\.\\d+\\.\\d+)\\s*$/m)?.[1];
+    const version=source.match(/^\s*#\s*pragma\s+version\s+(\d+\.\d+\.\d+)\s*$/m)?.[1];
     if(!version)throw new Error('Vyper source lacks an exact compiler version pragma: '+rel);
     vyperVersions.add(version);
   }
