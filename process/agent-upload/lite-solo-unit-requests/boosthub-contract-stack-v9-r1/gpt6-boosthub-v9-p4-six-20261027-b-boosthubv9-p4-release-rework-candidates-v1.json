@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "operation": "RELEASE",
+  "campaignId": "boosthub-contract-stack-v9-r1",
+  "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "workerId": "gpt6-boosthub-v9-p4-six-20261027-b",
+  "requestId": "boosthubv9-p4-release-rework-candidates-v1",
+  "items": [
+    {
+      "unitId": "P4-C-002",
+      "claimEpoch": 1,
+      "claimToken": "365cf581-7771-4a1b-85fb-d6debdb0ce99"
+    }
+  ]
+}
