@@ -411,8 +411,11 @@ function itemIdentity(item,u,state,request,root){
  if(state.status==='ACCEPTED')return 'UNCHANGED';
  if(!['CLAIMED','SUBMITTED','REWORK_REQUIRED'].includes(state.status))return 'STALE';
  const packetRel=u.packetPath??u.shardPath;
- if(item.packetSha256!== (u.packetSha256??hex(fs.readFileSync(repoFile(root,packetRel)))))
-  return 'STALE';
+ const originalPacket=u.packetSha256??hex(fs.readFileSync(repoFile(root,packetRel)));
+ const acceptedBeforeRework=state.status==='REWORK_REQUIRED'&&state.acceptedPath
+  ?maybe(root,state.acceptedPath):null;
+ if(item.packetSha256!==originalPacket&&
+    item.packetSha256!==acceptedBeforeRework?.packetSha256)return 'STALE';
  const allowed=path.posix.join(unitBase(request.campaignWorkspacePath,request.phaseSequence,u.unitId),
     'submissions',request.workerId,'epoch-'+state.claimEpoch);
  if(!item.submissionPath?.startsWith(allowed+'/')||
