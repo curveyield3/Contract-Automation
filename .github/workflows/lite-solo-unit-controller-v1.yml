@@ -1,9 +1,9 @@
-name: Lite-Solo Parallel Unit Controller v1
+name: Audit Preview Phase 4 Parallel Unit Controller v1
 on:
   push:
-    branches: [main]
+    branches: [audit-preview-v1]
     paths:
-      - 'process/agent-upload/lite-solo-unit-requests/**/*.json'
+      - 'process/agent-upload/audit-preview-unit-requests/**/*.json'
   workflow_dispatch:
     inputs:
       campaign_id:
@@ -44,7 +44,7 @@ jobs:
               changes="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")"
             fi
             json="$(printf '%s\n' "$changes" |
-              sed -n -E 's#^process/agent-upload/lite-solo-unit-requests/([A-Za-z0-9._-]+-r[0-9]+)/[^/]+\.json$#\1#p' |
+              sed -n -E 's#^process/agent-upload/audit-preview-unit-requests/([A-Za-z0-9._-]+-r[0-9]+)/[^/]+\.json$#\1#p' |
               sort -u | jq -Rsc 'split("\n") | map(select(length>0))')"
           fi
           echo "campaigns=$json" >> "$GITHUB_OUTPUT"
@@ -63,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: audit-preview-v1
           fetch-depth: 1
           persist-credentials: false
       - name: Select Audit-Controller credential
@@ -85,8 +85,8 @@ jobs:
           set -euo pipefail
           directory="Audit Campaign Directory/campaigns/${CAMPAIGN_ID%-r*}.json"
           encoded="$(jq -rn --arg p "$directory" '$p|split("/")|map(@uri)|join("/")')"
-          campaign_path="$(gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=main" --jq .content | base64 -d | jq -er .workspacePath)"
-          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
+          campaign_path="$(gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=audit-preview-v1" --jq .content | base64 -d | jq -er .workspacePath)"
+          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller audit-preview-v1 "$campaign_path"
           node scripts/lite-solo-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode drain > /tmp/unit-drain.json
           echo "campaign_path=$campaign_path" >> "$GITHUB_OUTPUT"
           echo "directory=$directory" >> "$GITHUB_OUTPUT"
@@ -96,24 +96,6 @@ jobs:
         if: ${{ steps.process.outputs.ready == 'true' }}
         shell: bash
         run: timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
-      - name: Run existing Phase-5 preflight only at seal
-        if: ${{ steps.process.outputs.ready == 'true' && steps.process.outputs.phase == '5' }}
-        id: preflight
-        shell: bash
-        env:
-          CAMPAIGN_ID: ${{ matrix.campaign }}
-          CAMPAIGN_PATH: ${{ steps.process.outputs.campaign_path }}
-          DIRECTORY: ${{ steps.process.outputs.directory }}
-        run: |
-          set -euo pipefail
-          source_sha="$(jq -r .sourceSha256 ".audit-controller/$DIRECTORY")"
-          node scripts/lite-phase5-preflight-v1.mjs .audit-controller "$CAMPAIGN_PATH" "$CAMPAIGN_ID" "$source_sha" > /tmp/unit-phase5-preflight.json || true
-          mkdir -p ".audit-controller/$CAMPAIGN_PATH/controller/preflight"
-          cp /tmp/unit-phase5-preflight.json ".audit-controller/$CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
-          echo "runnable=$(jq -r .runnable /tmp/unit-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
-      - name: Set up existing source-bound Phase-5 execution toolchain only at seal
-        if: ${{ steps.process.outputs.ready == 'true' && steps.process.outputs.phase == '5' && steps.preflight.outputs.runnable == 'true' }}
-        uses: ./.github/actions/setup-v7-toolchain
       - name: Finalize only when all unit and machine evidence requirements pass
         if: ${{ steps.process.outputs.ready == 'true' }}
         shell: bash
@@ -141,19 +123,13 @@ jobs:
             git -C .audit-controller add -- "$CAMPAIGN_PATH" "$DIRECTORY"
             if git -C .audit-controller diff --cached --quiet; then success=true; break; fi
             git -C .audit-controller commit -m "audit(lite-solo): accept parallel units $CAMPAIGN_ID"
-            if git -C .audit-controller push origin HEAD:main; then success=true; break; fi
+            if git -C .audit-controller push origin HEAD:audit-preview-v1; then success=true; break; fi
             # Discard stale decisions, rebuild from current authoritative head.
-            git -C .audit-controller fetch origin main
-            git -C .audit-controller reset --hard origin/main
+            git -C .audit-controller fetch origin audit-preview-v1
+            git -C .audit-controller reset --hard origin/audit-preview-v1
             node scripts/lite-solo-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode drain > /tmp/unit-recompute.json
             if [ "$(jq -r .finalizeReady /tmp/unit-recompute.json)" = true ]; then
               phase="$(jq -r .phase /tmp/unit-recompute.json)"
-              if [ "$phase" = 5 ]; then
-                source_sha="$(jq -r .sourceSha256 ".audit-controller/$DIRECTORY")"
-                node scripts/lite-phase5-preflight-v1.mjs .audit-controller "$CAMPAIGN_PATH" "$CAMPAIGN_ID" "$source_sha" > /tmp/unit-phase5-preflight.json || true
-                mkdir -p ".audit-controller/$CAMPAIGN_PATH/controller/preflight"
-                cp /tmp/unit-phase5-preflight.json ".audit-controller/$CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
-              fi
               node scripts/lite-solo-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode finalize > /tmp/unit-refinalize.json
             fi
           done

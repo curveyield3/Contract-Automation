@@ -49,7 +49,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_NAME" = main
+          test "$GITHUB_REF_NAME" = audit-preview-v1
           if [ "$EVENT_NAME" = push ]; then
             mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/audit-preview-source-initialization/requests/)
             test "${#changed[@]}" -eq 1
