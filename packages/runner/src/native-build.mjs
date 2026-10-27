@@ -501,7 +501,7 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
       for(const entry of await fsApi.readdir(dir,{withFileTypes:true})){
         const absolute=path.join(dir,entry.name);
         if(entry.isDirectory())await collectExactSources(absolute);
-        else if(entry.isFile() && /\\.(sol|vy)$/.test(entry.name) && absolute!==anchorPath)
+        else if(entry.isFile() && /\.(sol|vy)$/.test(entry.name) && absolute!==anchorPath)
           originalSources.push(path.relative(projectRoot,absolute).split(path.sep).join('/'));
       }
     }
