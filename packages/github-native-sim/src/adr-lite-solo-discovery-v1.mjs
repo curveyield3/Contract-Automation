@@ -135,7 +135,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
       'Class checks are prompts only: no per-class response is graded. The correctness verdict cannot be inferred from checklist completion.',
       'Compare implementation with NatSpec, comments, README/docs and named constants. Report every mismatch as a candidate.',
       'Compare sibling functions and paired parameters, documenting asymmetry. Storage initializers and locks never qualify for trivialReviews.',
-      'Finish all assigned units before a single boundary request; do not pause for controller after each unit.'
+      'For v4, commit immutable worker/epoch attempts, submit 1–5 completed units per request and continue immediately with independent assigned work, without approval polling.'
     ]
   }:{}),
   ...(role==='ATTACK'?{}:{trivialContextIds,contractChecks,...(verdictV13?{}:{submissionGuide:[
@@ -228,7 +228,18 @@ export function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
     ...(bytes>SOLO_PACKET_PAGE_MAX_BYTES?{oversizedSingleItem:true}:{})});
    offset+=chunk.length;chunk=[];
   };
-  for(const item of items){
+  for(const [itemIndex,item] of items.entries()){
+   const bytes=Buffer.from(JSON.stringify(item),'utf8');
+   if(bytes.length>SOLO_PACKET_PAGE_MAX_BYTES-1500){
+    emit();
+    const pieces=[];
+    for(let start=0;start<bytes.length;start+=12*1024)pieces.push(bytes.subarray(start,start+12*1024));
+    for(const [n,piece] of pieces.entries()){
+     chunk=[{kind:'JSON_FRAGMENT_BASE64',itemIndex,part:n+1,total:pieces.length,sha256:hex(bytes),base64:piece.toString('base64')}];
+     emit();
+    }
+    continue;
+   }
    const trial={schemaVersion:'curveyield-discovery-packet-page-v1',unitId,sourcePacketPath:packetPath,
     section,offset,items:[...chunk,item]};
    if(chunk.length&&Buffer.byteLength(JSON.stringify(trial))>SOLO_PACKET_PAGE_MAX_BYTES)emit();
@@ -245,7 +256,7 @@ export function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
  const indexRel=path.posix.join(dir,'UNIT_'+unitId+'_INDEX_v1.json');
  const index={schemaVersion:'curveyield-discovery-packet-section-index-v1',unitId,role,
   packetPath,submissionPath:submissionRel(campaignPath,unitId),
-  readingGuide:'Read this unit index and needed section pages. Save your own immutable claim-epoch attempt snapshot, queue a SUBMIT with at most five completed units, then immediately continue independent claimed units. NEVER wait for controller approval. Unaccepted predecessors do not unlock dependent units.',
+  readingGuide:'Read assigned section pages and reconstruct any JSON_FRAGMENT_BASE64 item by joining ordered decoded pieces and verifying the serialized SHA-256. Preserve all original source context and rules. Save immutable worker/claim-epoch attempts, submit 1–5 completed units and immediately continue independent work without approval polling. Dependent units require persisted ACCEPTED.',
   primaryContextIds:arr(payload.primaryContextIds),
   flowIds:arr(payload.flowIds),integrationQuestionIds:arr(payload.integrationQuestionIds),
   trivialContextIds:arr(payload.trivialContextIds),
