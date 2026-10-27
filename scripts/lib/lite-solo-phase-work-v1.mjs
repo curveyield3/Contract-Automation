@@ -87,8 +87,18 @@ function validateScalar(v,pathName,def){
   if(def.type==='REQUIRED_ENUM'&&!def.allowed?.includes(String(v))) return [pathName+' must be one of: '+(def.allowed??[]).join(', ')];
   return [];
 }
-export function validateWorkForm(schema,form){
+export function validateWorkForm(schema,form,{structuralOnly=false}={}){
   const deficiencies=[];
+  const missingRequired=value=>value===undefined||value===null||
+   isPlaceholder(value)||(structuralOnly&&typeof value==='object'&&!Array.isArray(value)&&
+    (Object.keys(value).length===0));
+  const incompleteNested=(value,fieldPath)=>{
+   if(!structuralOnly)return;
+   if(Array.isArray(value)){
+    for(let n=0;n<value.length;n++)
+     if(missingRequired(value[n]))deficiencies.push(fieldPath+'['+n+']: REQUIRED_NONBLANK');
+   }
+  };
   if(form?.schemaVersion!=='curveyield-lite-phase-work-form-v1') deficiencies.push('work form schemaVersion mismatch');
   if(form?.phase!==schema.phase) deficiencies.push('work form phase mismatch');
   for(const [stepKey,action] of Object.entries(schema.actions??{})){
@@ -100,7 +110,10 @@ export function validateWorkForm(schema,form){
       const v=row?.outputs?.[field.name];
       if(field.type==='REQUIRED_LIST'){
         if(!Array.isArray(v)||v.length===0) deficiencies.push(p+' must be a non-empty list');
-        else for(let i=0;i<v.length;i++) if(isPlaceholder(v[i])) deficiencies.push(p+'['+i+'] is missing');
+        else for(let i=0;i<v.length;i++){
+          if(missingRequired(v[i]))deficiencies.push(p+'['+i+']: REQUIRED_NONBLANK');
+          incompleteNested(v[i],p+'['+i+']');
+        }
       }else if(field.type==='REQUIRED_RECORD_LIST'){
         if(!Array.isArray(v)||v.length===0) deficiencies.push(p+' must be a non-empty record list or explicit negative sentinel');
         else if(v.length===1&&typeof v[0]==='string'&&EXPLICIT_NEGATIVES.has(v[0])){}
@@ -114,7 +127,14 @@ export function validateWorkForm(schema,form){
              i===0&&v.length>1&&item==='NONE_IDENTIFIED'&&
              v.slice(1).every(x=>x&&typeof x==='object'&&!Array.isArray(x)))continue;
           if(!item||typeof item!=='object'||Array.isArray(item)){deficiencies.push(p+'['+i+'] must be an object or explicit negative sentinel');continue;}
-          for(const k of field.itemRequiredFields??[]) if(isPlaceholder(item[k])||item[k]===null||item[k]===undefined) deficiencies.push(p+'['+i+'].'+k+' is missing');
+          for(const k of field.itemRequiredFields??[]){
+            const member=item[k],fp=p+'['+i+'].'+k;
+            if(missingRequired(member))deficiencies.push(fp+': REQUIRED_NONBLANK');
+            incompleteNested(member,fp);
+            const min=field.itemFieldMinItems?.[k];
+            if(Number.isInteger(min)&&Array.isArray(member)&&member.length<min)
+              deficiencies.push(fp+': MIN_ITEMS_'+min);
+          }
           for(const [k,allowed] of Object.entries(field.itemFieldAllowedValues??{})){
             if(item[k]!==undefined&&!allowed.includes(String(item[k]))) deficiencies.push(p+'['+i+'].'+k+' must be one of: '+allowed.join(', '));
           }
