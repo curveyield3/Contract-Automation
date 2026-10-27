@@ -135,6 +135,8 @@ jobs:
           jq -e --arg id "$AUDIT_CAMPAIGN" --arg path "$campaign_path" --arg sha "$(jq -r .source.sha256 "$receipt")" --arg gen "$(jq -r .campaign.campaignGenerationId "$receipt")" --argjson phase "$(jq -r .phaseSequence "$REQUEST_FILE")" '
             .schemaVersion=="curveyield-audit-campaign-directory-entry-v2" and
             .campaignId==$id and .workspacePath==$path and .mode=="LITE_SOLO" and
+            (.campaignId|startswith("audit-preview-completion-")) and
+            .previewCompletion.status=="LAUNCHED" and
             .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT" and
             .sourceSha256==$sha and .campaignGenerationId==$gen and
             .currentAssignment.phaseSequence==$phase and (.currentAssignment.status=="ACTIVE" or .currentAssignment.status=="REWORK_REQUIRED")
