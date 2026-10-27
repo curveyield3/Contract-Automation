@@ -79,12 +79,12 @@ test('Phase-0 canonical Ethereum baseline uses the qualified RPC identity proxy 
   assert.match(source,/startRpcIdentityProxy/);
   // The Ethereum lane defaults to chain 1 and normalizes virtualized upstreams; only an
   // audit-deployment.json chain profile requires the real upstream chain to match.
-  assert.match(source,/function startAnvil\(\{forkUrl,projectRoot,evmVersion='cancun',chainId=1,requireUpstreamChainId=false\}\)/);
+  assert.match(source,/function startAnvil\(\{forkUrl,projectRoot,evmVersion='cancun',chainId=1,requireUpstreamChainId=false,forkBlockNumber=null\}\)/);
   assert.match(source,/upstreamUrl:forkUrl,chainId\}/);
   assert.match(source,/--fork-url',identityProxy\.url/);
   assert.doesNotMatch(source,/if\(upstreamChainId!==1\)/);
   assert.match(source,/if\(requireUpstreamChainId&&upstreamChainId!==chainId\)/);
-  assert.match(source,/requireUpstreamChainId:Boolean\(deploymentProfile\)/);
+  assert.match(source,/requireUpstreamChainId:Boolean\(forkSelection\),forkBlockNumber:scanManifest\?\.frozenBlock\.number\?\?null/);
   assert.match(source,/identityNormalized:anvil\.identityNormalized===true/);
 });
 
@@ -318,7 +318,10 @@ test('native deployment budget includes production compilation and broadcasts wi
   const run=s.slice(s.indexOf('async function executeDeploymentScripts'),s.indexOf('async function reportedPackageDeployments'));
   assert.equal((run.match(/900s/g)??[]).length,3);
   assert.doesNotMatch(run,/240s/);
-  assert.match(s,/native script still running; elapsed=/);
+  assert.ok(s.includes('native ${stream} activity; elapsed='),'native output-driven progress must be logged');
+  assert.ok(s.includes("onStdout:(text,child)=>{noteActivity('stdout',text)"));
+  assert.ok(s.includes("onStderr:(text,child)=>{noteActivity('stderr',text)"));
+  assert.ok(s.includes('inactivity limit=300s; progress requires native stdout/stderr'));
   assert.match(s,/clearInterval\(heartbeat\)/);
 });
 

@@ -5,7 +5,7 @@ const workflow=readFileSync(new URL('../../../.github/workflows/lite-phase0-simu
 
 test('Phase-0 smoke invokes bounded forked package deployment only',()=>{
  assert.match(workflow,/timeout-minutes: 50/);
- assert.match(workflow,/audit-command-guard-v1\.py --label phase0-fork-deploy --wall 2400 --idle 900/);
+ assert.match(workflow,/audit-command-guard-v1\.py --label phase0-fork-deploy --wall 2400 --idle 300/);
  assert.match(workflow,/-- node scripts\/run-phase0-fork-deploy-config-v1\.mjs/);
  assert.match(workflow,/Retain full smoke evidence on success or failure/);
  assert.match(workflow,/set -euo pipefail/);
