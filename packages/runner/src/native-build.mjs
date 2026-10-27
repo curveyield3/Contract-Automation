@@ -458,7 +458,19 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
     error.code='FOUNDRY_NATIVE_COMPILATION_FAILED';throw error;
   }
   const paths=await buildInfoFiles(projectRoot,fsApi,{includeFoundry:true});
-  if(!paths.length)throw new Error('Foundry native build produced no compiler build-info');
+  if (!paths.length) {
+    const configured = await fsApi.readFile(path.join(projectRoot, 'foundry.toml'), 'utf8');
+    const profile = configured.split(/^\s*\[profile\.default\]\s*$/m)[1]?.split(/^\s*\[[^\]]+\]\s*$/m)[0] ?? '';
+    const outPath = profile.match(/^\s*out\s*=\s*["']([^"']+)["']/m)?.[1] ?? 'out';
+    const buildInfoParent = path.join(projectRoot, outPath);
+    const visibleEntries = await fsApi.readdir(buildInfoParent).catch(() => []);
+    throw new Error('Foundry native build produced no compiler build-info: ' + JSON.stringify({
+      configuredOut: outPath,
+      artifactEntries: visibleEntries.slice(0, 30),
+      forgeStdout: String(result?.stdout ?? '').slice(-1800),
+      forgeStderr: String(result?.stderr ?? '').slice(-1800)
+    }));
+  }
   const units=[],artifacts=[],sourceAsts={},inventory=new Set(),diagnostics=[];
   for(const [index,file] of paths.entries()){
     const data=JSON.parse(await fsApi.readFile(file,'utf8'));
