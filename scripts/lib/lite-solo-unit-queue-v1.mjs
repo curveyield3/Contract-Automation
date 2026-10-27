@@ -74,7 +74,7 @@ function emptyQueue(plan){
   campaignGenerationId:plan.campaignGenerationId,phaseSequence:plan.phaseSequence,
   phaseEpoch:plan.phaseEpoch,sourceSha256:plan.sourceSha256,authorityDigest:plan.authorityDigest,
   unitSpecRevision:plan.unitSpecRevision,stage:plan.stage,
-  units:{},processedRequests:{},revision:0,finalizeStatus:'NOT_STARTED',newlyEligibleUnitIds:[]};
+  units:{},processedRequests:{},processedRequestHashes:{},revision:0,finalizeStatus:'NOT_STARTED',newlyEligibleUnitIds:[]};
 }
 function addUnit(plan,queue,unit){
  if(queue.units[unit.unitId]||plan.units.some(x=>x.unitId===unit.unitId))throw Error('duplicate unit '+unit.unitId);
@@ -390,7 +390,10 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  let queue=maybe(root,queueRel(campaignPath,phase));
  if(!queue)queue=createUnitPlanV1({root,campaignPath,directory,phase,automationRoot});
  const plan=read(root,planRel(campaignPath,phase));assertPlan(queue,plan);
- if(queue.processedRequests[request.requestId])return queue.processedRequests[request.requestId];
+ if(queue.processedRequests[request.requestId]){
+  if(queue.processedRequestHashes?.[request.requestId]!==sha(request))throw Error('processed request ID reused with different content');
+  return queue.processedRequests[request.requestId];
+ }
  let result;
  if(request.operation==='CLAIM')result=handleClaim({root,campaign:campaignPath,phase,queue,plan,request});
  else if(request.operation==='SUBMIT')result=handleSubmit({root,campaign:campaignPath,phase,queue,plan,request,directory});
@@ -403,7 +406,8 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
   requestId:request.requestId,campaignId:directory.campaignId,phaseSequence:phase,
   ...result,phaseStatus:noWork(queue,plan)};
  queue.revision++;
- if(!asArray(result.waitingUnits).length)queue.processedRequests[request.requestId]=result;
+ if(!asArray(result.waitingUnits).length){queue.processedRequests[request.requestId]=result;
+  queue.processedRequestHashes[request.requestId]=sha(request);}
  publishPlan(root,campaignPath,phase,plan,queue);
  directory.unitQueueIndexPath=planRel(campaignPath,phase);
  return result;
