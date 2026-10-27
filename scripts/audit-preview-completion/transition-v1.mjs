@@ -50,7 +50,24 @@ for(const [i,r] of oldReceipts.entries()){
     throw Error('APC_PREVIEW_RECEIPT_INVALID_PHASE_'+i);
 }
 if(!hex64(preview.sourceSha256))throw Error('APC_SOURCE_DIGEST_INVALID');
-const newSlug='audit-preview-completion-'+previewSlug.slice('audit-preview-'.length);
+const correctiveParent=request.correctionOfCampaignId??null;
+const expectedCorrectiveParent='audit-preview-completion-live-ethereum-dai-6b175474-r1';
+if(correctiveParent!==null&&correctiveParent!==expectedCorrectiveParent)
+ throw Error('APC_CORRECTION_PARENT_NOT_AUTHORIZED');
+if(correctiveParent){
+ const originalComplete=read('Audit Campaign Directory/campaigns/audit-preview-completion-live-ethereum-dai-6b175474.json');
+ if(originalComplete.campaignId!==correctiveParent||
+    originalComplete.campaignStatus!=='COMPLETE'||
+    originalComplete.sourceSha256!==preview.sourceSha256||
+    originalComplete.currentAssignment!==null||
+    originalComplete.previewCompletion?.originalCampaignId!==previewId)
+  throw Error('APC_CORRECTION_ORIGINAL_COMPLETION_INVALID');
+ const parentReceipt=read(originalComplete.lastSealedReceiptPath);
+ if(parentReceipt.phase?.sequence!==10||parentReceipt.phase?.status!=='COMPLETE'||
+    parentReceipt.validation?.status!=='PASS'||parentReceipt.source?.sha256!==preview.sourceSha256)
+  throw Error('APC_CORRECTION_PARENT_TERMINAL_RECEIPT_INVALID');
+}
+const newSlug='audit-preview-completion-'+previewSlug.slice('audit-preview-'.length)+(correctiveParent?'-corrective':'');
 const newId=newSlug+'-r1';
 const dest='campaigns/'+newId;
 const entryPath='Audit Campaign Directory/campaigns/'+newSlug+'.json';
@@ -143,13 +160,14 @@ const copyCampaign=()=>{
  const dir={
   schemaVersion:'curveyield-audit-campaign-directory-entry-v2',
   campaignId:newId,campaignGenerationId:newId+'-g1-'+at.replace(/[-:.]/g,'').replace('Z','Z'),
-  campaignName:'Audit Preview Completion — '+preview.campaignName,
+  campaignName:(correctiveParent?'DAI Corrective Audit — ':'Audit Preview Completion — ')+preview.campaignName,
   workspacePath:dest,mode:'LITE_SOLO',deliveryTransport:'DIRECT',
   agent:{actorId:'lite-solo-agent'},agentModel:'PARALLEL_WORKER_UNITS',executionModel:'PARALLEL_WORKER_UNITS',
   authorityRelease:'lite-solo-v4',authorityDigest:sha(manifestBytes),
   publicationPolicyPath:policyRel,publicationPolicySha256:policyDigest,
   sourceSha256:preview.sourceSha256,campaignStatus:'STAGED_PRELAUNCH',currentAssignment:null,
   lastSealedReceiptPath:null,unitPhaseEpoch:1,transportEpoch:0,updatedAt:at,
+   ...(correctiveParent?{correctionOf:{campaignId:correctiveParent,sourceSha256:preview.sourceSha256,priorTerminalReceiptPath:'campaigns/'+correctiveParent+'/receipts/PHASE_10_RECEIPT_v1.json',reason:'MATERIAL_OBLIGATIONS_AND_UNRECONCILED_EXECUTION_COVERAGE',priorSealsImmutable:true}}:{}),
   previewCompletion:{schemaVersion:'audit-preview-completion-provenance-v1',originalCampaignId:previewId,
    originalGenerationId:preview.campaignGenerationId,originalWorkspacePath:oldRoot,
    originalPhase4ReceiptPath:preview.lastSealedReceiptPath,
