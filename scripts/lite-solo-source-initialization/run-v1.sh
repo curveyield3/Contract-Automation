@@ -26,6 +26,38 @@ fi
 safe_request="$(printf '%s' "$REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
 report_path="process/lite-solo-source-initialization/reports/$safe_request.json"
 
+# Normalize publication consent exactly once, before request recovery or admission.
+# Absent whole object means ten OFF; an explicitly supplied object must be complete.
+PUBLISH_FILES_JSON="$(printf '%s' "${PUBLISH_FILES_JSON:-\"__ABSENT__\"}" | python3 -c '
+import json,sys
+keys = ("report_pdf","audited_source","scope_summary","findings_remediation","methodology_analysis","properties_hypotheses","execution_results","architecture_dependencies","residual_risks","evidence_index")
+try:
+    data=json.load(sys.stdin)
+    if data=="__ABSENT__": data={key:False for key in keys}
+    if type(data) is not dict or set(data)!=set(keys) or any(type(data[k]) is not bool for k in keys):
+        raise ValueError("INVALID_PUBLICATION_POLICY")
+    print(json.dumps(data,sort_keys=True,separators=(",",":"),ensure_ascii=True))
+except (ValueError,TypeError):
+    sys.exit("INVALID_PUBLICATION_POLICY")
+')"
+export PUBLISH_FILES_JSON
+policy_sha_for_ids() {
+    POLICY_CAMPAIGN_ID="$1" POLICY_GENERATION_ID="$2" python3 -c '
+import hashlib,json,os
+p={"schemaVersion":"curveyield-report-publication-policy-v1",
+   "catalogueVersion":"curveyield-report-file-catalogue-v1",
+   "campaignId":os.environ["POLICY_CAMPAIGN_ID"],
+   "campaignGenerationId":os.environ["POLICY_GENERATION_ID"],
+   "selectionSource":"CAMPAIGN_INITIALIZATION",
+   "publicationPolicyRevision":1,
+   "publishFiles":json.loads(os.environ["PUBLISH_FILES_JSON"])}
+print(hashlib.sha256(json.dumps(p,sort_keys=True,separators=(",",":"),ensure_ascii=True).encode("utf-8")).hexdigest())
+'
+}
+publication_any_on() { printf '%s' "$PUBLISH_FILES_JSON" | jq -e 'any(.[]; . == true)' >/dev/null; }
+
+
+
 # Exact workflow retries are idempotent. A new request using the same ZIP is NOT
 # deduplicated; it intentionally creates the next rN campaign revision.
 report_api="repos/$GITHUB_REPOSITORY/contents/$report_path"
@@ -40,6 +72,14 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   generation_id="$(jq -r '.campaign.campaignGenerationId' /tmp/prior-source-init.json)"
   campaign_name="$(jq -r '.campaign.campaignName' /tmp/prior-source-init.json)"
   campaign_root="$(jq -r '.campaign.workspacePath' /tmp/prior-source-init.json)"
+  prior_policy_sha="$(jq -r '.publicationPolicySha256 // empty' /tmp/prior-source-init.json)"
+  expected_policy_sha="$(policy_sha_for_ids "$campaign_id" "$generation_id")"
+  if [ -n "$prior_policy_sha" ] && [ "$prior_policy_sha" != "$expected_policy_sha" ]; then
+    echo "::error::PUBLICATION_POLICY_CONFLICT" >&2; exit 1
+  fi
+  if [ -z "$prior_policy_sha" ] && publication_any_on; then
+    echo "::error::PUBLICATION_POLICY_CONFLICT: historical request has no frozen policy" >&2; exit 1
+  fi
 else
   # New campaigns bind the installed lite-solo-v4 authority and its immutable manifest.
   export GH_TOKEN="$AUDIT_CONTROLLER_TOKEN"
@@ -116,6 +156,14 @@ else
         echo "::error::SOURCE_REQUEST_RECOVERY_ZIP_CONFLICT"; exit 1
       }
     fi
+    recorded_policy_sha="$(jq -r '.automation[]? | select(.role=="REPORT_PUBLICATION_POLICY") | .sha256' "$prior_receipt")"
+    expected_policy_sha="$(policy_sha_for_ids "$campaign_id" "$generation_id")"
+    if [ -n "$recorded_policy_sha" ] && [ "$recorded_policy_sha" != "$expected_policy_sha" ]; then
+      echo "::error::PUBLICATION_POLICY_CONFLICT" >&2; exit 1
+    fi
+    if [ -z "$recorded_policy_sha" ] && publication_any_on; then
+      echo "::error::PUBLICATION_POLICY_CONFLICT: legacy source has no selection" >&2; exit 1
+    fi
     source_sha="$(jq -r '.source.sha256' "$prior_receipt")"
     source_size="$(jq -r '.source.byteLength' "$prior_receipt")"
     source_path="$(jq -r '.source.archivePath' "$prior_receipt")"
@@ -181,7 +229,7 @@ else
     literal_root="$(printf '%s' "$campaign_root" | sed -e 's/[][*?!#\\]/\\&/g')"
     git sparse-checkout add "/$literal_root/"
 
-    mkdir -p "$source_dir" "$receipts_dir" "Audit Campaign Directory/campaigns"
+    mkdir -p "$source_dir" "$receipts_dir" "$campaign_root/reports" "Audit Campaign Directory/campaigns"
     cp "$work/$filename" "$source_path"
     tree_sha="$(safe_extract_audit_zip "$source_path" "$source_dir" "$filename")"
 
@@ -198,13 +246,13 @@ else
     SCAN_MANIFEST_SHA="$(cat "$work/scan-manifest-sha256" 2>/dev/null || true)" \
     SCAN_TARGET_SET_SHA="$(cat "$work/scan-target-set-sha256" 2>/dev/null || true)" \
     CREATED_AT="$created_at" SKILL_RELEASE="$skill_release" SKILL_REVISION="$skill_revision" SKILL_HOME="$skill_home" \
-    DELIVERY_TRANSPORT="$DELIVERY_TRANSPORT" \
+    DELIVERY_TRANSPORT="$DELIVERY_TRANSPORT" PUBLISH_FILES_JSON="$PUBLISH_FILES_JSON" \
     SKILL_SHA="$skill_sha" SKILL_BLOB="$skill_blob" SKILL_REPO_PATH="$skill_repo_path" \
     MANIFEST_SHA="$manifest_sha" MANIFEST_BLOB="$manifest_blob" AUTHORITY_COMMIT="$authority_commit" \
     RECEIPTS_DIR="$receipts_dir" CAMPAIGN_DIRECTORY_PATH="$campaign_directory_path" \
       python3 "$ROOT/scripts/lite-solo-source-initialization/write-phase0-receipt-v1.py"
 
-    git add -- "$receipts_dir" "$campaign_directory_path"
+    git add -- "$receipts_dir" "$campaign_directory_path" "$campaign_root/reports/REPORT_PUBLICATION_POLICY_v1.json"
     git commit -m "audit(receipt): initialize $campaign_id phase 0"
     init_commit="$(git rev-parse HEAD)"
 
@@ -220,8 +268,9 @@ else
   fi
 
   export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
-  jq -n --arg requestId "$REQUEST_ID" --arg inputUrl "$SOURCE_URL" --argjson scanUrls "$SCAN_URLS" --arg campaignId "$campaign_id" --arg generation "$generation_id" --arg campaignName "$campaign_name" --arg workspace "$campaign_root" --arg sha "$source_sha" \
-    '{schemaVersion:"curveyield-lite-solo-source-report-v1",mode:"LITE_SOLO",status:"PASS",requestId:$requestId,actor:{actorId:"lite-solo-agent"},source:{sha256:$sha,inputUrl:$inputUrl,scanUrls:$scanUrls},campaign:{campaignId:$campaignId,campaignGenerationId:$generation,campaignName:$campaignName,workspacePath:$workspace},completedAt:(now|todate)}' > /tmp/source-init-report.json
+  resolved_policy_sha="$(policy_sha_for_ids "$campaign_id" "$generation_id")"
+  jq -n --arg policySha "$resolved_policy_sha" --arg requestId "$REQUEST_ID" --arg inputUrl "$SOURCE_URL" --argjson scanUrls "$SCAN_URLS" --arg campaignId "$campaign_id" --arg generation "$generation_id" --arg campaignName "$campaign_name" --arg workspace "$campaign_root" --arg sha "$source_sha" \
+    '{schemaVersion:"curveyield-lite-solo-source-report-v1",mode:"LITE_SOLO",status:"PASS",requestId:$requestId,publicationPolicySha256:$policySha,actor:{actorId:"lite-solo-agent"},source:{sha256:$sha,inputUrl:$inputUrl,scanUrls:$scanUrls},campaign:{campaignId:$campaignId,campaignGenerationId:$generation,campaignName:$campaignName,workspacePath:$workspace},completedAt:(now|todate)}' > /tmp/source-init-report.json
 
   body="$(base64 -w0 /tmp/source-init-report.json)"
   api="repos/$GITHUB_REPOSITORY/contents/$report_path"
