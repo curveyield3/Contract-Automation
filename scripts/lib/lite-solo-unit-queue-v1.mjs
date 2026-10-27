@@ -872,33 +872,64 @@ export function statusUnitQueueV1({root,campaignPath,phase}){
 
 export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[]}){
  const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
- const reopened=[],unmapped=[];
+ const reopened=new Set(),unmapped=[],invalidatedMembers=new Set();
  for(const entry of deficiencies){
-  const message=typeof entry==='string'?entry:JSON.stringify(entry);
-  const found=new Set();
-  for(const match of message.matchAll(/(?:actions\.)?(?:step-[0-9]+\.outputs\.)?([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/g)){
+  const message=typeof entry==='string'?entry:JSON.stringify(entry),found=new Map();
+  for(const match of message.matchAll(/(?:actions\\.)?(?:step-[0-9]+\\.outputs\\.)?([A-Za-z][A-Za-z0-9_]*)\\[([0-9]+)\\]/g)){
    const field=match[1],position=Number(match[2]);
-   for(const u of plan.units)if(u.field===field&&u.recordIndex===position)found.add(u.unitId);
+   for(const u of plan.units){
+    for(const m of u.kind==='BATCH'?u.members:[u])
+     if(m.field===field&&m.recordIndex===position){
+      const members=found.get(u.unitId)??new Set();members.add(m.unitId);found.set(u.unitId,members);
+     }
+   }
   }
-  // Machine-binding diagnostics often name candidate keys instead of array indices.
-  for(const u of plan.units.filter(x=>['targetDesigns','targetDispositions','candidateProofRecords'].includes(x.field))){
-   const state=queue.units[u.unitId];
-   const accepted=state?.acceptedPath?maybe(root,state.acceptedPath):null;
-   const values=accepted?.submission?.entries?.map(x=>x.value)??[];
-   if(values.some(v=>v&&typeof v==='object'&&
-      [v.candidateKey,v.tempKey].some(key=>typeof key==='string'&&key.length>=3&&message.includes(key))))
-      found.add(u.unitId);
+  // Candidate-key diagnostics identify original members rather than discarding
+  // every previously accepted sibling inside a consolidated packet.
+  for(const u of plan.units){
+   const eligible=(u.kind==='BATCH'?u.members:[u]).filter(m=>
+    ['targetDesigns','targetDispositions','candidateProofRecords'].includes(m.field));
+   if(!eligible.length)continue;
+   const state=queue.units[u.unitId],accepted=state?.acceptedPath?maybe(root,state.acceptedPath):null;
+   for(const m of eligible){
+    const value=accepted?.submission?.entries?.find(e=>e.key===m.recordKeys?.[0])?.value;
+    if(value&&typeof value==='object'&&[value.candidateKey,value.tempKey].some(key=>
+       typeof key==='string'&&key.length>=3&&message.includes(key))){
+      const members=found.get(u.unitId)??new Set();members.add(m.unitId);found.set(u.unitId,members);
+    }
+   }
   }
   if(!found.size){unmapped.push(message);continue;}
-  for(const id of found){
+  for(const [id,memberIds] of found){
    const state=queue.units[id];
    if(state.status==='ACCEPTED')state.status='REWORK_REQUIRED';
-   state.lastErrors=[...state.lastErrors,message].slice(-30);
-   reopened.push(id);
+   state.lastErrors=[...state.lastErrors,message].slice(-30);reopened.add(id);
+   for(const memberId of memberIds){
+    if(queue.acceptedRecords?.[memberId]){
+     delete queue.acceptedRecords[memberId];invalidatedMembers.add(memberId);
+    }
+   }
   }
  }
- const result={reopenedUnits:[...new Set(reopened)].sort(),unmappedDeficiencies:unmapped};
- queue.finalizeStatus=result.reopenedUnits.length?'REWORK_REQUIRED':'BLOCKED';queue.finalizeDetails=result;queue.revision++;
+ // Reopened record prerequisites cannot continue to authorize accepted targets.
+ const invalidated=new Set([...invalidatedMembers,...reopened]);
+ let changed=true;
+ while(changed){
+  changed=false;
+  for(const u of plan.units){
+   if(!asArray(u.dependencies).some(dep=>invalidated.has(dep)))continue;
+   const state=queue.units[u.unitId];
+   if(state.status==='ACCEPTED'){
+    state.status='REWORK_REQUIRED';
+    state.lastErrors=[...state.lastErrors,'upstream accepted record invalidated during aggregate rework'].slice(-30);
+    reopened.add(u.unitId);invalidated.add(u.unitId);changed=true;
+   }
+  }
+ }
+ const result={reopenedUnits:[...reopened].sort(),unmappedDeficiencies:unmapped,
+  invalidatedRecordIds:[...invalidatedMembers].sort()};
+ queue.finalizeStatus=result.reopenedUnits.length?'REWORK_REQUIRED':'BLOCKED';
+ queue.finalizeDetails=result;queue.revision++;
  put(root,queueRel(campaignPath,phase),queue);
  return result;
 }
