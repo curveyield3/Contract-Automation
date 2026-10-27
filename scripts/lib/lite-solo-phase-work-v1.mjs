@@ -136,7 +136,9 @@ export function validateWorkForm(schema,form,{structuralOnly=false}={}){
               deficiencies.push(fp+': MIN_ITEMS_'+min);
           }
           for(const [k,allowed] of Object.entries(field.itemFieldAllowedValues??{})){
-            if(item[k]!==undefined&&!allowed.includes(String(item[k]))) deficiencies.push(p+'['+i+'].'+k+' must be one of: '+allowed.join(', '));
+            if(item[k]!==undefined&&!(structuralOnly?
+             typeof item[k]===typeof allowed[0]&&allowed.includes(item[k]):
+             allowed.includes(String(item[k])))) deficiencies.push(p+'['+i+'].'+k+' must be one of: '+allowed.join(', '));
           }
         }
       }else deficiencies.push(...validateScalar(v,p,field));
