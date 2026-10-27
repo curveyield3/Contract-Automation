@@ -255,7 +255,7 @@ async function writeCryticCompileExport({projectRoot,build,outDir}){
     }
     compilation_units[buildUnit.unitId]={
       compiler:{
-        compiler:'solc',
+        compiler:sourceNames.some(name=>name.endsWith('.vy'))?'vyper':'solc',
         version:slitherCompilerVersion(buildUnit.compilerVersion),
         optimized:buildUnit.settings?.optimizer?.enabled!==false
       },
