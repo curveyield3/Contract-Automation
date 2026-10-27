@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
-import {existsSync} from 'node:fs';
+import {existsSync,readFileSync} from 'node:fs';
+import {createRequire} from 'node:module';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {listAdmittedSourcesV1} from './source-intelligence-technical-v1.mjs';
@@ -84,12 +85,49 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
     for(const [name,ast] of Object.entries(unit.sourceAsts??{}).sort(([a],[b])=>a.localeCompare(b)))
       if(bySource.has(name)&&!asts.has(name))asts.set(name,ast);
 
+  // Some embedded deployment sets omit standalone first-party interfaces from their
+  // deployment compilation units. Recover real Solidity ASTs for these exact admitted
+  // sources without changing deployment artifacts, source bytes, or audit scope.
+  const auxiliaryAstPaths=new Map(), auxiliaryAstFailures=new Map();
+  const missingFirstParty=sources.filter(s=>s.path.endsWith('.sol')&&bySource.get(s.path).tier==='IN_SCOPE'&&!asts.has(s.path));
+  if(missingFirstParty.length){
+    let solc=null;
+    try {solc=createRequire(path.join(projectRoot,'package.json'))('solc');}
+    catch(error){for(const s of missingFirstParty)auxiliaryAstFailures.set(s.path,'Pinned project solc unavailable: '+String(error.message??error));}
+    if(solc){
+      const resolveImport=(importPath)=>{
+        const rel=String(importPath??'').replaceAll('\\','/');
+        const candidates=[path.resolve(projectRoot,rel),path.resolve(projectRoot,'contracts',rel),path.resolve(projectRoot,'node_modules',rel)];
+        for(const candidate of candidates){
+          if(!candidate.startsWith(projectRoot+path.sep)||!existsSync(candidate))continue;
+          try{return{contents:readFileSync(candidate,'utf8')};}catch{}
+        }
+        return{error:'Source import cannot be resolved: '+rel};
+      };
+      for(const source of missingFirstParty){
+        try{
+          const input={language:'Solidity',sources:{[source.path]:{content:bySource.get(source.path).bytes.toString('utf8')}},
+            settings:{outputSelection:{'*':{'':['ast']}}}};
+          const output=JSON.parse(solc.compile(JSON.stringify(input),{import:resolveImport}));
+          const fatal=(output.errors??[]).filter(e=>e.severity==='error');
+          if(fatal.length)throw new Error(fatal.map(e=>e.formattedMessage??e.message).join(' | ').slice(0,1200));
+          const ast=output.sources?.[source.path]?.ast;
+          if(!ast)throw new Error('Solidity compiler returned no source AST');
+          asts.set(source.path,ast);
+          auxiliaryAstPaths.set(source.path,String(solc.version()));
+        }catch(error){auxiliaryAstFailures.set(source.path,String(error.message??error).slice(0,1500));}
+      }
+    }
+  }
+
   const sourceUnits=sources.map(s=>({sourceId:s.sourceId,path:s.path,sha256:s.sha256,scopeTier:bySource.get(s.path).tier,
     lineCount:bySource.get(s.path).bytes.reduce((n,byte)=>n+(byte===10?1:0),1),
-    astStatus:s.path.endsWith('.vy')?'UNSUPPORTED_LANGUAGE':asts.has(s.path)?'AVAILABLE':'MISSING'}));
+    astStatus:s.path.endsWith('.vy')?'UNSUPPORTED_LANGUAGE':auxiliaryAstPaths.has(s.path)?'AVAILABLE_AUXILIARY':asts.has(s.path)?'AVAILABLE':'MISSING'}));
   const limitations=[scope.source===AUDIT_SCOPE_FILE
     ?{code:'SCOPE_FROM_AUDIT_SCOPE_FILE',path:AUDIT_SCOPE_FILE,detail:'In scope: '+scope.inScopePaths.join(', ')+'. Every other compiled source is a dependency, reviewed only where in-scope contracts inherit it.'}
     :{code:'DEPENDENCY_TIER_BY_PATH',path:'*',detail:'Dependency tier assigned by path convention (vendor/, lib/, node_modules/ at any depth); modified vendored code must be moved out of those folders to be reviewed as in-scope.'}];
+  for(const [file,version] of auxiliaryAstPaths)limitations.push({code:'SUPPLEMENTAL_COMPILER_AST',path:file,detail:'Complete in-scope AST obtained from unchanged source with pinned project solc '+version+'; no deployment artifact was changed.'});
+  for(const [file,detail] of auxiliaryAstFailures)limitations.push({code:'SUPPLEMENTAL_COMPILER_AST_FAILED',path:file,detail});
   const declarations=[],contexts=[],triggers={},nodeById=new Map(),contractById=new Map(),metadata=new Map(),contextBySymbol=new Map(),usedIds=new Map();
   for(const [file,ast] of asts) {
     const source=bySource.get(file);
@@ -323,7 +361,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   }
   let complete=true;
   for(const s of sourceUnits) {
-    if(s.astStatus==='AVAILABLE'||s.scopeTier!=='IN_SCOPE'&&s.astStatus!=='UNSUPPORTED_LANGUAGE')continue;
+    if(['AVAILABLE','AVAILABLE_AUXILIARY'].includes(s.astStatus)||s.scopeTier!=='IN_SCOPE'&&s.astStatus!=='UNSUPPORTED_LANGUAGE')continue;
     const scriptWithoutAst=includeScripts&&s.astStatus==='MISSING'&&
       (/(^|\/)(script|scripts|deploy|deployment|deployments|configure|config|handover)\//i.test(s.path)||s.path.endsWith('.s.sol'));
     if(s.astStatus==='MISSING'&&s.scopeTier==='IN_SCOPE'&&!scriptWithoutAst)complete=false;
