@@ -1,0 +1,150 @@
+name: Lite-Solo Audit Correction v1
+on:
+  workflow_dispatch:
+    inputs:
+      request_path:
+        type: string
+        required: true
+        description: Existing validated process/lite-solo-audit-correction/requests/*.json file
+  push:
+    branches: [main]
+    paths:
+      - 'process/lite-solo-audit-correction/requests/*.json'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      requests: ${{ steps.collect.outputs.requests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+      - id: collect
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          MANUAL_FILE: ${{ inputs.request_path }}
+        run: |
+          set -euo pipefail
+          root=process/lite-solo-audit-correction/requests
+          : >/tmp/lsc.ndjson
+          if [[ "$EVENT_NAME" = workflow_dispatch ]]; then
+            files=("$MANUAL_FILE")
+          elif [[ "$BEFORE" =~ ^[0-9a-f]{40}$ && "$BEFORE" != 0000000000000000000000000000000000000000 ]]; then
+            mapfile -t files < <(git diff --name-only "$BEFORE" "$GITHUB_SHA" -- "$root/")
+          else
+            mapfile -t files < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")
+          fi
+          for file in "${files[@]}"; do
+            [[ "$file" =~ ^process/lite-solo-audit-correction/requests/[A-Za-z0-9._-]+\.json$ ]] || exit 1
+            test -f "$file"
+            jq -e '
+              .schemaVersion=="curveyield-lite-solo-audit-correction-request-v1" and
+              (.operation=="PREPARE" or .operation=="LAUNCH") and
+              (.sourceCampaignId|test("^[a-z0-9][a-z0-9.-]*-r[1-9][0-9]*$")) and
+              (.correctionKey|test("^[a-z0-9][a-z0-9.-]*$")) and
+              (.requestId|test("^[a-z0-9][a-z0-9.-]*$")) and
+              (.startPhase==4 or .startPhase==5 or .startPhase==6 or
+               .startPhase==8 or .startPhase==9 or .startPhase==10)
+            ' "$file" >/dev/null
+            jq -nc --arg f "$file" --arg campaign "$(jq -r .sourceCampaignId "$file")" \
+              --arg key "$(jq -r .correctionKey "$file")" \
+              '{request:$f,concurrency:($campaign+"-"+$key)}' >>/tmp/lsc.ndjson
+          done
+          echo "requests=$(jq -sc '{include:.}' /tmp/lsc.ndjson)" >>"$GITHUB_OUTPUT"
+  correct:
+    needs: discover
+    if: ${{ needs.discover.outputs.requests != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.requests) }}
+    concurrency:
+      group: lite-solo-correction-${{ matrix.concurrency }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install existing dependencies without tests or scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Select private controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Fetch immutable source and existing Lite-Solo v4 authority
+        id: scope
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          REQUEST_FILE: ${{ matrix.request }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          id="$(jq -er .sourceCampaignId "$REQUEST_FILE")"
+          key="$(jq -er .correctionKey "$REQUEST_FILE")"
+          slug="${id%-r*}"
+          dest_slug="lite-solo-correction-$slug-$key"
+          source_path="$(gh api "repos/curveyield3/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/$slug.json?ref=main" --jq .content | base64 -d | jq -er .workspacePath)"
+          [[ "$source_path" == campaigns/* && "$source_path" != *..* ]]
+          gh auth setup-git
+          gh repo clone curveyield3/Audit-Controller .audit-controller -- --branch main --depth 1 --filter=blob:none --sparse
+          git -C .audit-controller sparse-checkout set --no-cone \
+            '/Audit Skill - Lite-Solo Authority/lite-solo-v4/**' \
+            '/Audit Campaign Directory/campaigns/**' \
+            "/$source_path/**" \
+            "/campaigns/${dest_slug}-r1/**"
+          echo "request=$REQUEST_FILE" >>"$GITHUB_OUTPUT"
+          echo "dest_slug=$dest_slug" >>"$GITHUB_OUTPUT"
+      - name: Prepare or launch isolated correction; no contract execution
+        env:
+          AUDIT_CONTROLLER_ROOT: .audit-controller
+          REQUEST_FILE: ${{ steps.scope.outputs.request }}
+        run: node scripts/lite-solo-audit-correction/transition-v1.mjs "$REQUEST_FILE"
+      - name: Persist only correction workspace and its directory
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          NEW_SLUG: ${{ steps.scope.outputs.dest_slug }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git config user.name 'CurveYield Lite-Solo Correction'
+          git config user.email 'lite-solo-correction@users.noreply.github.com'
+          git add --sparse -- "campaigns/${NEW_SLUG}-r1" "Audit Campaign Directory/campaigns/${NEW_SLUG}.json"
+          if ! git diff --cached --quiet; then
+            git commit -m "audit(lite-solo-correction): isolated transition $GITHUB_RUN_ID"
+            for attempt in 1 2 3 4; do
+              if git push origin HEAD:main; then break; fi
+              [[ "$attempt" -lt 4 ]] || exit 1
+              git pull --rebase origin main
+            done
+          fi
+      - name: Print durable correction state
+        env:
+          NEW_SLUG: ${{ steps.scope.outputs.dest_slug }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          directory=".audit-controller/Audit Campaign Directory/campaigns/${NEW_SLUG}.json"
+          jq -e '.mode=="LITE_SOLO" and (.campaignStatus=="STAGED_PRELAUNCH" or .campaignStatus=="ACTIVE") and
+           .correctionOf.priorSealsImmutable==true' "$directory" >/dev/null
+          {
+            echo "### Lite-Solo corrective fork"
+            echo "- Campaign: $(jq -r .campaignId "$directory")"
+            echo "- Status: $(jq -r .campaignStatus "$directory")"
+            echo "- Current phase: $(jq -r '.currentAssignment.phaseSequence // "PRELAUNCH"' "$directory")"
+            echo "- Original receipts remain immutable; follow normal Lite-Solo v4 phase/unit controllers"
+            echo "- No tests or transactions were initiated by this workflow"
+          } >>"$GITHUB_STEP_SUMMARY"
