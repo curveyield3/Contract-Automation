@@ -316,35 +316,42 @@ export function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
  const writeSection=(section,items)=>{
   if(!items.length)return;
   let chunk=[],offset=0;
+  const bodyFor=(content,at)=>({schemaVersion:'curveyield-discovery-packet-page-v1',
+   unitId,sourcePacketPath:packetPath,section,offset:at,items:content});
+  // Check the actual on-disk pretty JSON, including its trailing newline.
+  const diskBytes=(content,at)=>Buffer.byteLength(JSON.stringify(bodyFor(content,at),null,2)+'\n');
   const emit=()=>{
    if(!chunk.length)return;
    const file='UNIT_'+unitId+'_PAGE_'+String(++pageNumber).padStart(4,'0')+'_v1.json';
    const rel=path.posix.join(dir,file);
-   const body={schemaVersion:'curveyield-discovery-packet-page-v1',unitId,sourcePacketPath:packetPath,
-    section,offset,items:chunk};
-   const bytes=Buffer.byteLength(JSON.stringify(body));
+   const body=bodyFor(chunk,offset),bytes=diskBytes(chunk,offset);
    if(bytes>SOLO_PACKET_PAGE_MAX_BYTES)
-    throw Error('source packet section page exceeds 24 KiB; planner must split single item');
+    throw Error('source packet section page exceeds 24 KiB; planner must split source item');
    writeJson(repoFile(root,rel),body);
-   pages.push({path:rel,section,offset,count:chunk.length,bytes,
-    ...(bytes>SOLO_PACKET_PAGE_MAX_BYTES?{oversizedSingleItem:true}:{})});
-   offset+=chunk.length;chunk=[];
+   pages.push({path:rel,section,offset,count:chunk.length,bytes});
+   chunk=[];
   };
   for(const [itemIndex,item] of items.entries()){
-   const bytes=Buffer.from(JSON.stringify(item),'utf8');
-   if(bytes.length>SOLO_PACKET_PAGE_MAX_BYTES-1500){
+   // Single oversized semantic items are split into lossless JSON byte fragments
+   // with the original itemIndex and whole-item SHA-256 preserved on every page.
+   if(diskBytes([item],itemIndex)>SOLO_PACKET_PAGE_MAX_BYTES){
     emit();
-    const pieces=[];
-    for(let start=0;start<bytes.length;start+=12*1024)pieces.push(bytes.subarray(start,start+12*1024));
-    for(const [n,piece] of pieces.entries()){
-     chunk=[{kind:'JSON_FRAGMENT_BASE64',itemIndex,part:n+1,total:pieces.length,sha256:hex(bytes),base64:piece.toString('base64')}];
+    const raw=Buffer.from(JSON.stringify(item),'utf8');
+    const parts=[];
+    for(let start=0;start<raw.length;start+=12*1024)
+     parts.push(raw.subarray(start,start+12*1024));
+    for(const [n,part] of parts.entries()){
+     offset=itemIndex;
+     chunk=[{kind:'JSON_FRAGMENT_BASE64',itemIndex,part:n+1,total:parts.length,
+      sha256:hex(raw),base64:part.toString('base64')}];
      emit();
     }
+    offset=itemIndex+1;
     continue;
    }
-   const trial={schemaVersion:'curveyield-discovery-packet-page-v1',unitId,sourcePacketPath:packetPath,
-    section,offset,items:[...chunk,item]};
-   if(chunk.length&&Buffer.byteLength(JSON.stringify(trial))>SOLO_PACKET_PAGE_MAX_BYTES)emit();
+   if(chunk.length&&diskBytes([...chunk,item],offset)>SOLO_PACKET_PAGE_MAX_BYTES)
+    emit();
+   if(!chunk.length)offset=itemIndex;
    chunk.push(item);
   }
   emit();
