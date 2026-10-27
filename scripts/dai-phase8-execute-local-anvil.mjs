@@ -66,11 +66,22 @@ try{
   evidence.runner.harnessSha256=digest(harness);
   if(!/contract\s+Dai\s+is\s+LibNote/.test(source.toString('utf8'))
     ||!harness.toString('utf8').toLowerCase().includes(DAI.toLowerCase()))throw Error('SOURCE_OR_HARNESS_IDENTITY_INVALID');
-  session=await createPhase6MutableRpcSession({
-    environment:process.env,frozenBlockNumber:BLOCK,frozenBlockHash:BLOCK_HASH,
-    attestedTargets:[{address:DAI,qualifiedName:'Dai.sol:Dai',runtimeSha256:RUNTIME_SHA256}]
-  });
-  evidence.fork=session.evidence;
+  evidence.forkAttempts=[];
+  for(let attempt=1;attempt<=5;attempt++){
+    session=await createPhase6MutableRpcSession({
+      environment:process.env,frozenBlockNumber:BLOCK,frozenBlockHash:BLOCK_HASH,
+      attestedTargets:[{address:DAI,qualifiedName:'Dai.sol:Dai',runtimeSha256:RUNTIME_SHA256}]
+    });
+    evidence.forkAttempts.push({attempt,status:session.evidence?.status,
+      failureKind:session.evidence?.failureKind??null,reason:redaction(session.evidence?.reason??null)});
+    if(session.evidence?.status==='PASS')break;
+    const reason=String(session.evidence?.reason??'');
+    if(attempt===5||!/502|503|504|429|temporar|upstream|timeout|Transport|gateway/i.test(reason))break;
+    await session.close().catch(()=>{});
+    session=null;
+    await new Promise(resolve=>setTimeout(resolve,attempt*3500));
+  }
+  evidence.fork=session?.evidence??null;
   if(session.evidence?.status!=='PASS'||session.evidence.deployedTargetAttestation?.status!=='PASS'
     ||session.evidence.deployedTargetAttestation.mutableWriteObserved!==true
     ||session.evidence.deployedTargetAttestation.snapshotReverted!==true
