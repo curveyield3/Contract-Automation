@@ -33,7 +33,8 @@ if(request.schemaVersion!=='curveyield-lite-solo-phase-boundary-request-v1'
   ||sub?.runId!==40586336907||sub?.artifactId!==12770963873
   ||sub?.runnerCommit!==runner||sub?.sourceSha256!==sourceSha)fail('submission identity invalid');
 const workspace=path.join(root,campaignPath);
-const directory=load(path.join(root,'Audit Campaign Directory','campaigns',id+'.json'));
+const directorySlug=id.replace(/-r[0-9]+$/,'');
+const directory=load(path.join(root,'Audit Campaign Directory','campaigns',directorySlug+'.json'));
 if(directory.campaignId!==id||directory.workspacePath!==campaignPath
   ||directory.sourceSha256!==sourceSha||directory.mode!=='LITE_SOLO'
   ||directory.authorityRelease!=='lite-solo-v4'||directory.currentAssignment?.phaseSequence!==8
