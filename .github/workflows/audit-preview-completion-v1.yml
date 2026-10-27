@@ -24,28 +24,28 @@ jobs:
   discover:
     runs-on: ubuntu-latest
     outputs:
-      requests: $\{{ steps.read.outputs.requests }}
+      requests: ${{ steps.read.outputs.requests }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: $\{{ github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 2
       - name: Resolve immutable requests
         id: read
         shell: bash
         env:
-          EVENT_NAME: $\{{ github.event_name }}
-          BEFORE: $\{{ github.event.before }}
-          PREVIEW: $\{{ inputs.preview_campaign_id }}
-          OPERATION: $\{{ inputs.operation }}
-          REQUEST_ID: $\{{ inputs.request_id }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PREVIEW: ${{ inputs.preview_campaign_id }}
+          OPERATION: ${{ inputs.operation }}
+          REQUEST_ID: ${{ inputs.request_id }}
         run: |
           set -euo pipefail
           : >/tmp/apc.ndjson
           if [[ "$EVENT_NAME" = workflow_dispatch ]]; then
             [[ "$PREVIEW" =~ ^audit-preview-[a-z0-9.-]+-r[0-9]+$ ]]
             [[ "$OPERATION" = PREPARE || "$OPERATION" = LAUNCH ]]
-            key="$\{REQUEST_ID:-$GITHUB_RUN_ID}"
+            key="${REQUEST_ID:-$GITHUB_RUN_ID}"
             [[ "$key" =~ ^[A-Za-z0-9._-]+$ ]]
             jq -nc '{request:"__MANUAL__",campaign:"manual"}' >>/tmp/apc.ndjson
           else
@@ -55,7 +55,7 @@ jobs:
             else
               mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$folder/")
             fi
-            for file in "$\{changed[@]}"; do
+            for file in "${changed[@]}"; do
               [[ "$file" =~ ^process/audit-preview-completion/requests/[A-Za-z0-9._-]+\.json$ ]] || continue
               jq -e '.schemaVersion=="curveyield-audit-preview-completion-request-v1" and (.operation=="PREPARE" or .operation=="LAUNCH") and (.previewCampaignId|test("^audit-preview-[a-z0-9.-]+-r[0-9]+$")) and (.requestId|test("^[A-Za-z0-9._-]+$"))' "$file" >/dev/null
               jq -nc --arg file "$file" --arg id "$(jq -r .previewCampaignId "$file")" '{request:$file,campaign:$id}' >>/tmp/apc.ndjson
@@ -64,19 +64,19 @@ jobs:
           echo "requests=$(jq -sc '{include:.}' /tmp/apc.ndjson)" >> "$GITHUB_OUTPUT"
   complete:
     needs: discover
-    if: $\{{ needs.discover.outputs.requests != '{"include":[]}' }}
+    if: ${{ needs.discover.outputs.requests != '{"include":[]}' }}
     strategy:
       fail-fast: false
-      matrix: $\{{ fromJSON(needs.discover.outputs.requests) }}
+      matrix: ${{ fromJSON(needs.discover.outputs.requests) }}
     concurrency:
-      group: audit-preview-completion-$\{{ matrix.campaign }}
+      group: audit-preview-completion-${{ matrix.campaign }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: $\{{ github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -86,37 +86,37 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Select private controller credential
         env:
-          AUDIT_CONTROLLER_PRIMARY_TOKEN: $\{{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         run: bash scripts/select-audit-controller-token.sh
       - name: Load original sealed preview and isolated fork
         id: checkout
         env:
-          GH_TOKEN: $\{{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          REQUEST_FILE: $\{{ matrix.request }}
-          MANUAL_PREVIEW: $\{{ inputs.preview_campaign_id }}
-          MANUAL_OPERATION: $\{{ inputs.operation }}
-          MANUAL_KEY: $\{{ inputs.request_id }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          REQUEST_FILE: ${{ matrix.request }}
+          MANUAL_PREVIEW: ${{ inputs.preview_campaign_id }}
+          MANUAL_OPERATION: ${{ inputs.operation }}
+          MANUAL_KEY: ${{ inputs.request_id }}
         shell: bash
         run: |
           set -euo pipefail
           if [[ "$REQUEST_FILE" = __MANUAL__ ]]; then
-            jq -nc --arg id "$MANUAL_PREVIEW" --arg op "$MANUAL_OPERATION" --arg key "$\{MANUAL_KEY:-$GITHUB_RUN_ID}" \
+            jq -nc --arg id "$MANUAL_PREVIEW" --arg op "$MANUAL_OPERATION" --arg key "${MANUAL_KEY:-$GITHUB_RUN_ID}" \
              '{schemaVersion:"curveyield-audit-preview-completion-request-v1",previewCampaignId:$id,operation:$op,requestId:$key}' > /tmp/apc-request.json
           else
             cp "$REQUEST_FILE" /tmp/apc-request.json
           fi
           id="$(jq -er .previewCampaignId /tmp/apc-request.json)"
-          slug="$\{id%-r*}"
-          new_slug="audit-preview-completion-$\{slug#audit-preview-}"
+          slug="${id%-r*}"
+          new_slug="audit-preview-completion-${slug#audit-preview-}"
           preview_path="$(gh api "repos/curveyield3/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/$slug.json?ref=main" --jq .content | base64 -d | jq -er .workspacePath)"
           [[ "$preview_path" == campaigns/* && "$preview_path" != *..* ]]
           gh repo clone curveyield3/Audit-Controller .audit-controller -- --branch main --depth 1 --filter=blob:none --sparse
           git -C .audit-controller sparse-checkout set --no-cone \
             '/Audit Skill - Lite-Solo Authority/lite-solo-v4/**' \
             '/Audit Campaign Directory/campaigns/**' \
-            "/$\{preview_path}/**" \
-            "/campaigns/$\{new_slug}-r1/**"
+            "/${preview_path}/**" \
+            "/campaigns/${new_slug}-r1/**"
           echo "controller_sha=$(git -C .audit-controller rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "request=/tmp/apc-request.json" >> "$GITHUB_OUTPUT"
           echo "new_slug=$new_slug" >> "$GITHUB_OUTPUT"
@@ -124,9 +124,9 @@ jobs:
         id: transition
         env:
           AUDIT_CONTROLLER_ROOT: .audit-controller
-          AUDIT_CONTROLLER_COMMIT_SHA: $\{{ steps.checkout.outputs.controller_sha }}
-          RPC_ETHEREUM: $\{{ secrets.RPC_ETHEREUM }}
-          REQUEST_FILE: $\{{ steps.checkout.outputs.request }}
+          AUDIT_CONTROLLER_COMMIT_SHA: ${{ steps.checkout.outputs.controller_sha }}
+          RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM }}
+          REQUEST_FILE: ${{ steps.checkout.outputs.request }}
         shell: bash
         run: |
           set -euo pipefail
@@ -140,15 +140,15 @@ jobs:
           echo "result=$result" >> "$GITHUB_OUTPUT"
       - name: Persist only fork files without mutating source Preview
         env:
-          GH_TOKEN: $\{{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          NEW_SLUG: $\{{ steps.checkout.outputs.new_slug }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          NEW_SLUG: ${{ steps.checkout.outputs.new_slug }}
         shell: bash
         run: |
           set -euo pipefail
           cd .audit-controller
           git config user.name 'CurveYield Audit Preview Completion'
           git config user.email 'audit-preview-completion@users.noreply.github.com'
-          git add -- "campaigns/$\{NEW_SLUG}-r1" "Audit Campaign Directory/campaigns/$\{NEW_SLUG}.json"
+          git add -- "campaigns/${NEW_SLUG}-r1" "Audit Campaign Directory/campaigns/${NEW_SLUG}.json"
           if ! git diff --cached --quiet; then
             git commit -m "audit(preview-completion): isolated evidence $GITHUB_RUN_ID"
             for i in 1 2 3 4; do
@@ -158,7 +158,7 @@ jobs:
             done
           fi
       - name: Require accepted transition
-        if: $\{{ steps.transition.outputs.result != '0' }}
+        if: ${{ steps.transition.outputs.result != '0' }}
         run: |
           echo '::error::Fork transition is incomplete; fork-owned evidence has been saved.'
           exit 1
