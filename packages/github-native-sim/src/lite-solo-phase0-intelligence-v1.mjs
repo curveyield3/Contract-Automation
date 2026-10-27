@@ -367,6 +367,26 @@ function parseSlitherJson(text){
   try{const p=JSON.parse(String(text??''));const d=Array.isArray(p?.results?.detectors)?p.results.detectors:[];return{success:p?.success===true,detectors:d};}catch{return null;}
 }
 async function slitherRepair({projectRoot,build,sourceCommit}){
+  // A verified private build-cache HIT skips the native build's Vyper CLI
+  // installation. Slither's Vyper backend still needs that exact binary.
+  // Resolve the version from retained source-bound compilation units, never
+  // from a guessed package default, and preserve the Slither completion gate.
+  const vyperVersions=new Set((build.compilationUnits??[])
+    .filter(unit=>(unit.artifacts??[]).some(a=>a.sourceName?.endsWith('.vy')))
+    .map(unit=>unit.compilerVersion));
+  if(vyperVersions.size>1)throw new Error('Conflicting Vyper compiler versions in accepted build units');
+  if(vyperVersions.size===1){
+    const version=[...vyperVersions][0];
+    if(!/^\\d+\\.\\d+\\.\\d+$/.test(version))throw new Error('Invalid exact Vyper version in compiler evidence');
+    let probe=await runProcess({command:'vyper',args:['--version'],cwd:projectRoot});
+    if(probe.exitCode!==0||!String(probe.stdout??'').trim().startsWith(version)){
+      const install=await runProcess({command:'python3',args:['-m','pip','install','--disable-pip-version-check','--no-input',`vyper==${version}`],cwd:projectRoot});
+      if(install.exitCode!==0)throw new Error('Source-bound Slither Vyper CLI installation failed: '+String(install.stderr??install.stdout??'').slice(-2000));
+      probe=await runProcess({command:'vyper',args:['--version'],cwd:projectRoot});
+      if(probe.exitCode!==0||!String(probe.stdout??'').trim().startsWith(version))
+        throw new Error('Slither Vyper CLI version does not match source-bound compiler '+version);
+    }
+  }
   const attempts=[];
 
   try{
