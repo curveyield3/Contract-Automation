@@ -75,6 +75,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install existing controller dependencies before loading preview unit queue modules
+        shell: bash
+        run: timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
       - name: Checkout bound v4 and process full durable campaign backlog
         id: process
         shell: bash
@@ -92,10 +95,6 @@ jobs:
           echo "directory=$directory" >> "$GITHUB_OUTPUT"
           echo "ready=$(jq -r .finalizeReady /tmp/unit-drain.json)" >> "$GITHUB_OUTPUT"
           echo "phase=$(jq -r .phase /tmp/unit-drain.json)" >> "$GITHUB_OUTPUT"
-      - name: Install existing controller dependencies only for phase sealing
-        if: ${{ steps.process.outputs.ready == 'true' }}
-        shell: bash
-        run: timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
       - name: Finalize only when all unit and machine evidence requirements pass
         if: ${{ steps.process.outputs.ready == 'true' }}
         shell: bash
