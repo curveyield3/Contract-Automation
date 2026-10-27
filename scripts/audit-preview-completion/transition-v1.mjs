@@ -8,6 +8,7 @@ import {createHash} from 'node:crypto';
 import {preparePhaseWork,validateWorkForm,loadPhaseSchema} from '../lib/lite-solo-phase-work-v1.mjs';
 import {renderControllerPhaseReport,validatePhaseScaffold} from '../lib/lite-solo-phase-prefill-v1.mjs';
 import {createUnitPlanV1} from '../lib/lite-solo-unit-queue-v1.mjs';
+import {renderDeployConfigMatrixV1,renderTargetedTestMatrixV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 
 const root=path.resolve(process.env.AUDIT_CONTROLLER_ROOT??'.audit-controller');
 const reqPath=process.argv[2];
@@ -114,6 +115,20 @@ const copyCampaign=()=>{
  }
  write(editRel,form);
  const at=new Date().toISOString();
+ const roles=['report_pdf','audited_source','scope_summary','findings_remediation',
+   'methodology_analysis','properties_hypotheses','execution_results',
+   'architecture_dependencies','residual_risks','evidence_index'];
+ const sorted=x=>Array.isArray(x)?x.map(sorted):x&&typeof x==='object'?
+   Object.fromEntries(Object.keys(x).sort().map(k=>[k,sorted(x[k])])):x;
+ const policy={schemaVersion:'curveyield-report-publication-policy-v1',
+   catalogueVersion:'curveyield-report-file-catalogue-v1',
+   campaignId:newId,campaignGenerationId:newId+'-g1-'+at.replace(/[-:.]/g,'').replace('Z','Z'),
+   selectionSource:'CAMPAIGN_INITIALIZATION',publicationPolicyRevision:1,
+   publishFiles:Object.fromEntries(roles.map(k=>[k,true]))};
+ const policyRel=ref(dest,'reports/REPORT_PUBLICATION_POLICY_v1.json');
+ const canonicalPolicy=JSON.stringify(sorted(policy));
+ text(policyRel,canonicalPolicy);
+ const policyDigest=sha(Buffer.from(canonicalPolicy));
  const dir={
   schemaVersion:'curveyield-audit-campaign-directory-entry-v2',
   campaignId:newId,campaignGenerationId:newId+'-g1-'+at.replace(/[-:.]/g,'').replace('Z','Z'),
@@ -121,6 +136,7 @@ const copyCampaign=()=>{
   workspacePath:dest,mode:'LITE_SOLO',deliveryTransport:'DIRECT',
   agent:{actorId:'lite-solo-agent'},agentModel:'PARALLEL_WORKER_UNITS',executionModel:'PARALLEL_WORKER_UNITS',
   authorityRelease:'lite-solo-v4',authorityDigest:sha(manifestBytes),
+  publicationPolicyPath:policyRel,publicationPolicySha256:policyDigest,
   sourceSha256:preview.sourceSha256,campaignStatus:'STAGED_PRELAUNCH',currentAssignment:null,
   lastSealedReceiptPath:null,unitPhaseEpoch:1,transportEpoch:0,updatedAt:at,
   previewCompletion:{schemaVersion:'audit-preview-completion-provenance-v1',originalCampaignId:previewId,
@@ -173,6 +189,12 @@ const importHistory=(dir)=>{
   r.campaign={...r.campaign,campaignId:newId,campaignGenerationId:dir.campaignGenerationId,
     campaignName:dir.campaignName,workspacePath:dest,campaignDirectoryEntryPath:entryPath,mode:'LITE_SOLO'};
   r.authority=authority;
+  if(phase===0){
+   r.publicationPolicyPath=dir.publicationPolicyPath;
+   r.publicationPolicySha256=dir.publicationPolicySha256;
+   r.automation=[...(r.automation??[]),
+     {role:'REPORT_PUBLICATION_POLICY',path:dir.publicationPolicyPath,sha256:dir.publicationPolicySha256}];
+  }
   r.source={...r.source,
     extractedContentPath:ref(dest,'source'),
     scanManifestPath:r.source?.scanManifestPath?replacement(r.source.scanManifestPath):undefined};
@@ -283,6 +305,17 @@ const launch=async()=>{
  const receiptRel=ref(dest,'receipts/PHASE_04_RECEIPT_v1.json');
  write(receiptRel,receipt);
  dir.lastSealedReceiptPath=receiptRel;
+ // Preview correctly omitted Phase-6-only planning files; materialize reusable
+ // matrices from already accepted Phase-0 machine evidence without executing tests.
+ const deployMatrixRel=ref(dest,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
+ if(!fs.existsSync(inside(deployMatrixRel))){
+  const readiness=read(ref(dest,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'));
+  const execution=read(ref(dest,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'));
+  text(deployMatrixRel,renderDeployConfigMatrixV1({readiness,execution}));
+ }
+ const targetMatrixRel=ref(dest,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
+ if(!fs.existsSync(inside(targetMatrixRel)))
+  text(targetMatrixRel,renderTargetedTestMatrixV1({targetDesigns:[],executionResults:{},baselineRows:[]}));
  const next=preparePhaseWork({root,campaignPath:dest,authorityRoot,sequence:5,reviewer:'lite-solo-agent',
    predecessorReceiptPath:receiptRel,status:'ACTIVE',derivedInputPaths:[
     ref(dest,'derived/phase-2/PHASE3_INPUT_v1.json'),
