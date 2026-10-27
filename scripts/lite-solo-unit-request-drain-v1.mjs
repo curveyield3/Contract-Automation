@@ -8,6 +8,7 @@ import {execFileSync} from 'node:child_process';
 import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1,markFinalizationV1,statusUnitQueueV1,reopenAggregateDefectsV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {repoFile,readJson,writeJson} from './lib/lite-solo-phase-work-v1.mjs';
 import {refreshControllerPrefillDigest} from './lib/lite-solo-phase-prefill-v1.mjs';
+import {secureRestoreWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
 const arg=Object.fromEntries(process.argv.slice(2).reduce((out,s,i,a)=>{
  if(i%2===0){if(!s.startsWith('--')||a[i+1]===undefined)throw Error('invalid CLI parameters');
   out.push([s.slice(2),a[i+1]]);}return out;},[]));
@@ -68,8 +69,10 @@ if(arg.mode!=='finalize'){
     Object.values(recorded.units??{}).every(x=>x.status==='ACCEPTED')){
    // This existing assembler verifies the immutable controller-owned shard
    // index and frozen base before reconstructing accepted semantic records.
-   assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase:5});
-   const form=readJson(repoFile(root,directory.currentAssignment.workFormPath));
+   const restored=secureRestoreWorkFormV13({
+     root,indexRel:directory.currentAssignment.workShardIndexPath
+   });
+   const form=JSON.parse(restored.content);
    const lockedDigest=form?.automationInputs?.controllerPrefillDigestSha256;
    const recomputed=refreshControllerPrefillDigest(structuredClone(form));
    if(!/^[a-f0-9]{64}$/.test(String(lockedDigest??''))||recomputed!==lockedDigest)
