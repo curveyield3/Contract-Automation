@@ -206,9 +206,11 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
  // not a blanket dependency on every economic or reconciliation unit.
  if(phase===5){
   const reconc=plan.units.filter(u=>u.field==='reconciliationRecords');
+  const novel=plan.units.filter(u=>u.field==='newCandidateRecords');
   for(const u of plan.units.filter(u=>u.field==='targetDesigns')){
    const candidate=u.initialValue?.candidateKey;
-   u.dependencies=reconc.filter(r=>candidate&&r.initialValue?.subjectKey===candidate).map(r=>r.unitId);
+   u.dependencies=u.kind==='APPEND'?novel.map(r=>r.unitId):
+    reconc.filter(r=>candidate&&r.initialValue?.subjectKey===candidate).map(r=>r.unitId);
   }
  }
  if(phase===6){
@@ -329,8 +331,10 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
  const orig=u.initialValue;
  for(const [i,entry] of entries.entries()){
   const val=entry?.value;
-  if(u.kind==='APPEND'&&!String(entry?.key??'').endsWith('APPEND-'+String(i+1).padStart(4,'0')))
+  if(u.kind==='APPEND'&&entry?.key!==JSON.stringify(u.path)+':APPEND-'+String(i+1).padStart(4,'0'))
    errors.push('append identity must match indexed capacity');
+  if(phase===5&&u.field==='targetDesigns'&&u.kind!=='APPEND'&&isObject(orig)&&isObject(val)&&orig.candidateKey!==val.candidateKey)
+   errors.push('candidateKey identity from accepted Phase 4 is immutable');
   if(u.kind!=='APPEND'&&isObject(orig)&&isObject(val))
    for(const key of fixed)if(JSON.stringify(orig[key])!==JSON.stringify(val[key]))
     errors.push('controller-prefilled '+key+' is read-only');
