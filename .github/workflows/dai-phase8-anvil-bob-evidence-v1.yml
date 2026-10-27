@@ -4,7 +4,6 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/dai-phase8-anvil-bob-evidence-v1.yml'
-      - 'scripts/dai-phase8-execute-local-anvil.mjs'
 permissions:
   contents: read
 jobs:
@@ -12,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      DAI_EVIDENCE_ATTEMPT: '3'
+      DAI_EVIDENCE_ATTEMPT: '4'
     steps:
       - name: Checkout current execution source
         uses: actions/checkout@v4
@@ -55,13 +54,13 @@ jobs:
         shell: bash
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
-        run: node scripts/dai-phase8-execute-local-anvil.mjs
-      - name: Upload raw Foundry and exact test result evidence
+        run: node scripts/dai-phase8-execute-direct-anvil-v1.mjs
+      - name: Upload raw Anvil transaction and exact assertion evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dai-phase8-bob-live-fork-evidence-${{ github.sha }}
-          path: process/dai-phase8-evidence/attempt-3/
+          path: process/dai-phase8-evidence/attempt-4/
           if-no-files-found: warn
           retention-days: 90
       - name: Persist source-bound attempt in private DAI Phase-8 controller folder
@@ -72,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           folder='campaigns/audit-preview-completion-live-ethereum-dai-6b175474-r1/controller/phase8-revalidation/TG-001'
-          local_dir='process/dai-phase8-evidence/attempt-3'
+          local_dir='process/dai-phase8-evidence/attempt-4'
           if [ ! -s "$local_dir/BOB_EXECUTION_EVIDENCE_v1.json" ]; then
             echo "::error::No executable property evidence generated; refusing to invent a receipt"
             exit 1
@@ -90,9 +89,7 @@ jobs:
                 -f message="$note" -f content="$encoded" -f branch=main >/dev/null
             fi
           }
-          send_proof "$local_dir/BOB_EXECUTION_EVIDENCE_v1.json" "$folder/DAI_FORK_BOB_EXECUTION_ATTEMPT_003_v1.json" \
+          send_proof "$local_dir/BOB_EXECUTION_EVIDENCE_v1.json" "$folder/DAI_FORK_BOB_EXECUTION_ATTEMPT_004_v1.json" \
             'audit(dai): record real historical mutable Anvil execution evidence for BOB-0001..0008'
-          send_proof "$local_dir/FORGE_RAW_STDOUT.txt" "$folder/DAI_FORK_FORGE_RAW_STDOUT_ATTEMPT_003.txt" \
-            'audit(dai): retain original Foundry assertion output for Phase-8 proof validation'
-          send_proof "$local_dir/FORGE_RAW_STDERR.txt" "$folder/DAI_FORK_FORGE_RAW_STDERR_ATTEMPT_003.txt" \
-            'audit(dai): retain original Foundry diagnostics for Phase-8 proof validation'
+          send_proof "$local_dir/ANVIL_RAW_RPC_TRANSCRIPT_v1.json" "$folder/DAI_FORK_RAW_RPC_TRANSCRIPT_ATTEMPT_004_v1.json" \
+            'audit(dai): retain local Anvil calls, transaction receipts, snapshots and reverts for BOB proof validation'
