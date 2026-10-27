@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-one-time-source-repair-v1",
+  "archive": "curveyield3/Audit-Controller:campaigns/cyavKATv25.zip",
+  "from": "v27",
+  "to": "v28",
+  "newScript": "source-repairs/cyavKATv25/v28/upgrade/script/CyavKatDeployAll_v28.s.sol",
+  "reason": "Allow cheatcodes on etched helper contracts to execute original source-bound Foundry deploy sequence"
+}
