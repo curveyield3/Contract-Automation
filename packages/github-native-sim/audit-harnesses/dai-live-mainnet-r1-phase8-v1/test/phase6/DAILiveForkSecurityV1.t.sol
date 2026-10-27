@@ -98,7 +98,8 @@ contract DAILiveForkSecurityV1 {
     }
 
     function test_prop_BOB_0005_identityAndAllowancePartition() public {
-        uint nonceAlice=D.nonces(ALICE),nonceBob=D.nonces(BOB);
+        uint nonceAlice=D.nonces(ALICE);
+        uint nonceBob=D.nonces(BOB);
         require(_invoke(ALICE,abi.encodeWithSignature("approve(address,uint256)",BOB,7)), "APPROVAL_FAILED");
         require(D.allowance(ALICE,BOB)==7,"OWNER_SPENDER_KEY_BAD");
         require(D.allowance(ALICE,CAROL)==0 && D.allowance(BOB,ALICE)==0,"IDENTITY_ALIASING");
