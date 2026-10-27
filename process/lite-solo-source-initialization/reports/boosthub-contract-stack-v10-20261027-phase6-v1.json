@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-report-v1",
+  "mode": "LITE_SOLO",
+  "status": "PASS",
+  "requestId": "boosthub-contract-stack-v10-20261027-phase6-v1",
+  "publicationPolicySha256": "2911c15a17c8317bcf3a92cbb0abdfb080f6b5e6e15d310546eeab3728c285f1",
+  "actor": {
+    "actorId": "lite-solo-agent"
+  },
+  "source": {
+    "sha256": "0cbfcde6eeb11c0827f85faba9df1f87a26834da48fbab9e62ff4db99c358418",
+    "inputUrl": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/BoostHub_Contract_Stack_v10.zip",
+    "scanUrls": []
+  },
+  "campaign": {
+    "campaignId": "boosthub-contract-stack-v10-r1",
+    "campaignGenerationId": "boosthub-contract-stack-v10-r1-g1-20261027T124401Z",
+    "campaignName": "BoostHub_Contract_Stack_v10 r1",
+    "workspacePath": "campaigns/BoostHub_Contract_Stack_v10 r1"
+  },
+  "completedAt": "2026-10-27T12:44:03Z"
+}
