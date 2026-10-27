@@ -417,7 +417,7 @@ export function validateAttackSubmissionV1({packet,submission,inventory,structur
      }
    } else if(['VIABLE','UNCERTAIN'].includes(attack?.result)){
      if(!structuralOnly&&!obj(attack?.candidate))err(errors,'CANDIDATE_REQUIRED',p+'.candidate','Viable/uncertain attack requires a candidate');
-     else validateCandidate(attack.candidate,inventory,errors,p+'.candidate');
+     else if(obj(attack?.candidate))validateCandidate(attack.candidate,inventory,errors,p+'.candidate');
      const idea=attack?.simulationIdea??attack;
      if(!Array.isArray(idea?.transactionSequence)||!idea.transactionSequence.length||
        blank(idea?.oracle))err(errors,'SIMULATION_IDEA_REQUIRED',p+'.simulationIdea','Transaction sequence and oracle required');
