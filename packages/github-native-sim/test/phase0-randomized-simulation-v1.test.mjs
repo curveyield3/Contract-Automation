@@ -84,7 +84,7 @@ test('Phase-0 canonical Ethereum baseline uses the qualified RPC identity proxy 
   assert.match(source,/--fork-url',identityProxy\.url/);
   assert.doesNotMatch(source,/if\(upstreamChainId!==1\)/);
   assert.match(source,/if\(requireUpstreamChainId&&upstreamChainId!==chainId\)/);
-  assert.match(source,/requireUpstreamChainId:Boolean\(deploymentProfile\)/);
+  assert.match(source,/requireUpstreamChainId:Boolean\(forkSelection\),forkBlockNumber:scanManifest\?\.frozenBlock\.number\?\?null/);
   assert.match(source,/identityNormalized:anvil\.identityNormalized===true/);
 });
 
