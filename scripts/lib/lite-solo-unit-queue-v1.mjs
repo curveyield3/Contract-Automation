@@ -225,7 +225,12 @@ function validateRequest(request,directory,phase){
  if(request?.schemaVersion!==REQUEST_SCHEMA||!['CLAIM','SUBMIT','RELEASE','FINALIZE'].includes(request.operation))
   throw Error('unsupported v4 request shape/operation');
  for(const key of ['requestId','workerId'])if(!safe(request[key]))throw Error('unsafe '+key);
- if(request.lane!== 'AUTO'&&!safe(request.lane))throw Error('invalid lane');
+ if(request.lane!=='AUTO'&&!safe(request.lane))throw Error('invalid lane');
+ const common=['schemaVersion','requestId','operation','campaignId','campaignGenerationId','phaseSequence',
+  'lane','workerId','sourceSha256','authorityDigest','phaseEpoch','auditControllerRef'];
+ const allowed=new Set([...common,...(request.operation==='CLAIM'?['desiredUnitCount']:
+  ['items'])]);
+ for(const key of Object.keys(request))if(!allowed.has(key))throw Error('unexpected controller/request field: '+key);
  assertV4(directory,phase,request);
  if(request.operation==='CLAIM'){
   if(request.desiredUnitCount!==UNIT_POLICY.issueBatchDefault||request.items!==undefined)
@@ -234,8 +239,14 @@ function validateRequest(request,directory,phase){
   if(!Array.isArray(request.items)||request.items.length<1||request.items.length>UNIT_POLICY.approvalBatchMax)
    throw Error('SUBMIT must explicitly name 1–5 items');
   if(new Set(request.items.map(x=>x.unitId)).size!==request.items.length)throw Error('duplicate SUBMIT unit');
+  if(request.items.some(x=>!isObject(x)||!safe(x.unitId)||!Number.isInteger(x.claimEpoch)||
+    typeof x.claimToken!=='string'||!x.claimToken.trim()||
+    !/^[0-9a-f]{64}$/.test(String(x.packetSha256??''))||
+    !/^[0-9a-f]{64}$/.test(String(x.submissionSha256??''))))
+   throw Error('SUBMIT item identity or hash is malformed');
  }else if(request.operation==='RELEASE'){
-  if(!Array.isArray(request.items)||!request.items.length)throw Error('RELEASE must list owned units');
+  if(!Array.isArray(request.items)||!request.items.length||request.items.some(x=>!safe(x.unitId)||
+    !Number.isInteger(x.claimEpoch)||!x.claimToken))throw Error('RELEASE must list complete owned tokens');
  }else if(request.operation==='FINALIZE'&&request.workerId!=='lite-solo-controller')
   throw Error('only the controller may finalize');
 }
@@ -352,17 +363,217 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
  const identity=itemIdentity(item,u,state,{...request,campaignWorkspacePath:campaign},root);
  if(identity)return {unitId:item.unitId,status:identity,errors:[]};
  if(!/^[0-9a-f]{64}$/.test(item.submissionSha256??''))return {unitId:item.unitId,status:'STALE',errors:['invalid digest']};
- state.status='SUBMITTED';
  const file=repoFile(root,item.submissionPath);
- if(!fs.existsSync(file))return {unitId:item.unitId,status:'WAITING_SUBMISSION',errors:[]};
+ if(!fs.existsSync(file)){state.status='SUBMITTED';return {unitId:item.unitId,status:'WAITING_SUBMISSION',errors:[]};}
  const raw=fs.readFileSync(file),digest=hex(raw);
  if(digest!==item.submissionSha256)return {unitId:item.unitId,status:'STALE',errors:['immutable snapshot SHA mismatch']};
+ state.status='SUBMITTED';
  if(state.lastSubmissionSha256===digest&&state.lastErrors?.length){
   state.status='REWORK_REQUIRED';
   return {unitId:item.unitId,status:'UNCHANGED',errors:state.lastErrors};
  }
- const submission=JSON.parse(raw.toString('utf8'));
- let errors=[];
+ let submission,errors=[];
+ try{submission=JSON.parse(raw.toString('utf8'));}
+ catch(e){submission=null;errors=[{path:'
+ if(!errors.length&&['FLOW','ATTACK'].includes(u.kind)){
+  const packet=read(root,u.packetPath),inventory=read(root,reviewInventoryRelV1(root,campaign,'REVIEW_INVENTORY_v1.json'));
+  const checked=u.kind==='ATTACK'
+   ?validateAttackSubmissionV1({packet:packet.payload,submission,inventory})
+   :validateFlowReviewSubmissionV1({packet:packet.payload,submission,inventory});
+  errors=checked.errors??[];
+ }else if(!errors.length)errors=validateShardUnit({root,u,data:submission,phase,schema,queue,plan}).map(message=>({path:u.unitId,message}));
+ state.lastSubmissionSha256=digest;state.attempts++;
+ const resultRel=path.posix.join(unitBase(campaign,phase,u.unitId),'results',
+  'ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
+ if(!errors.length){
+  const acceptedRel=path.posix.join(unitBase(campaign,phase,u.unitId),'ACCEPTED_ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
+  if(fs.existsSync(repoFile(root,acceptedRel)))throw Error('immutable accepted attempt cannot be overwritten');
+  put(root,acceptedRel,{schemaVersion:'curveyield-lite-solo-accepted-unit-v1',unitId:u.unitId,
+   campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
+   workerId:request.workerId,claimEpoch:state.claimEpoch,submissionSha256:digest,submission});
+  state.status='ACCEPTED';state.acceptedSha256=digest;state.acceptedPath=acceptedRel;state.lastErrors=[];
+  put(root,resultRel,{unitId:u.unitId,status:'ACCEPTED',submissionSha256:digest,acceptedPath:acceptedRel});
+  return {unitId:u.unitId,status:'ACCEPTED',resultRef:resultRel};
+ }
+ state.status='REWORK_REQUIRED';state.lastErrors=errors;
+ put(root,resultRel,{unitId:u.unitId,status:'REWORK_REQUIRED',submissionSha256:digest,errors});
+ return {unitId:u.unitId,status:'REWORK_REQUIRED',resultRef:resultRel,errors};
+}
+function handleSubmit({root,campaign,phase,queue,plan,request,directory}){
+ const schema=loadPhaseSchema(root,AUTHORITY,phase).schema,items=[];
+ for(const item of request.items){
+  try{items.push(acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,directory}));}
+  catch(e){
+   const state=queue.units[item.unitId],reason=String(e.message??e);
+   if(state&&state.workerId===request.workerId){state.status='REWORK_REQUIRED';state.lastErrors=[reason];}
+   items.push({unitId:item.unitId,status:'REWORK_REQUIRED',errors:[reason]});
+  }
+ }
+ const newlyEligibleUnits=unlock(queue,plan);
+ return {status:'SUBMISSION_RECORDED',acceptedUnits:items.filter(x=>x.status==='ACCEPTED').map(x=>x.unitId),
+  reworkUnits:items.filter(x=>x.status==='REWORK_REQUIRED'),staleUnits:items.filter(x=>x.status==='STALE'),
+  unchangedUnits:items.filter(x=>x.status==='UNCHANGED'),waitingUnits:items.filter(x=>x.status==='WAITING_SUBMISSION'),
+  newlyEligibleUnits};
+}
+function handleRelease({queue,plan,request}){
+ const changed=[];
+ for(const item of request.items){
+  const s=queue.units[item.unitId];
+  if(!s||s.workerId!==request.workerId||s.claimEpoch!==item.claimEpoch||
+   s.claimToken!==item.claimToken||s.status==='ACCEPTED')continue;
+  s.status='AVAILABLE';s.workerId=null;s.claimToken=null;changed.push(item.unitId);
+ }
+ return {status:'RELEASED',releasedUnits:changed,newlyEligibleUnits:unlock(queue,plan)};
+}
+function discoveryInput(root,campaign,name){return read(root,reviewInventoryRelV1(root,campaign,name));}
+function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
+ const items=plan.units.filter(u=>['FLOW','ATTACK'].includes(u.kind));
+ if(!items.every(u=>queue.units[u.unitId]?.status==='ACCEPTED'))return false;
+ if(queue.stage==='RECONCILIATION')return true;
+ const state={schemaVersion:'curveyield-discovery-state-v1',campaignId:directory.campaignId,
+  campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
+  generatedAt:new Date().toISOString(),payload:{reviewPolicy:'correctness-verdict-v13',gaps:asArray(discoveryInput(root,campaign,'FLOW_PLAN_v1.json').payload?.gaps)}};
+ const acceptedSubmissions=items.map(u=>({unitId:u.unitId,
+  submission:read(root,queue.units[u.unitId].acceptedPath).submission}));
+ const inventory=discoveryInput(root,campaign,'REVIEW_INVENTORY_v1.json');
+ const summary=buildDiscoverySummaryV1({state,inventory,plan:discoveryInput(root,campaign,'FLOW_PLAN_v1.json'),
+  acceptedSubmissions,taxonomy:loadTaxonomyV1(automationRoot),now:new Date().toISOString()});
+ put(root,path.posix.join(campaign,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json'),summary);
+ put(root,path.posix.join(campaign,'work/phase-06/BASELINE_OBLIGATIONS_v1.json'),
+  deriveBaselineObligationsV1({inventory,taxonomy:loadTaxonomyV1(automationRoot),summary}));
+ // The original phase prefill is authoritative; refresh once, after complete discovery.
+ const assignment=directory.currentAssignment;
+ const form={...read(root,path.posix.join(AUTHORITY,'phases/phase-4/resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json'))};
+ const updated=applyPhaseBoundaryPrefill({root,campaignPath:campaign,authorityRoot:AUTHORITY,sequence:4,
+  form,derivedInputPaths:[...asArray(assignment.derivedInputPaths),path.posix.join(campaign,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')],
+  predecessorReceiptPath:assignment.predecessorReceiptPath});
+ put(root,assignment.workFormPath,updated);
+ const shards=secureShardWorkFormV13({root,formRel:assignment.workFormPath,phase:4,retireFull:true});
+ assignment.workShardIndexPath=shards.indexRel;
+ assignment.controllerPrefillDigestSha256=updated.automationInputs?.controllerPrefillDigestSha256;
+ addShardUnits({root,campaignPath:campaign,directory,phase:4,plan,queue});
+ queue.stage='RECONCILIATION';plan.stage='RECONCILIATION';
+ unlock(queue,plan);return true;
+}
+export function processUnitRequestV1({root,campaignPath,directory,request,automationRoot=process.cwd()}){
+ const phase=request.phaseSequence;validateRequest(request,directory,phase);
+ let queue=maybe(root,queueRel(campaignPath,phase));
+ if(!queue)queue=createUnitPlanV1({root,campaignPath,directory,phase,automationRoot});
+ const plan=readPlan(root,campaignPath,phase);assertPlan(queue,plan);
+ if(queue.processedRequests[request.requestId]){
+  if(queue.processedRequestHashes?.[request.requestId]!==sha(request))throw Error('processed request ID reused with different content');
+  return queue.processedRequests[request.requestId];
+ }
+ let result;
+ if(request.operation==='CLAIM')result=handleClaim({root,campaign:campaignPath,phase,queue,plan,request});
+ else if(request.operation==='SUBMIT')result=handleSubmit({root,campaign:campaignPath,phase,queue,plan,request,directory});
+ else if(request.operation==='RELEASE')result=handleRelease({queue,plan,request});
+ else result={status:'FINALIZE_REQUESTED'};
+ if(phase===4&&queue.stage!=='RECONCILIATION'&&
+  plan.units.filter(u=>['FLOW','ATTACK'].includes(u.kind)).every(u=>queue.units[u.unitId]?.status==='ACCEPTED'))
+  finishDiscovery({root,campaign:campaignPath,directory,plan,queue,automationRoot});
+ result={schemaVersion:'curveyield-lite-solo-unit-controller-result-v1',
+  requestId:request.requestId,campaignId:directory.campaignId,phaseSequence:phase,
+  ...result,phaseStatus:noWork(queue,plan)};
+ queue.revision++;
+ if(!asArray(result.waitingUnits).length){queue.processedRequests[request.requestId]=result;
+  queue.processedRequestHashes[request.requestId]=sha(request);}
+ publishPlan(root,campaignPath,phase,plan,queue);
+ directory.unitQueueIndexPath=planRel(campaignPath,phase);
+ directory.unitQueueStatePath=queueRel(campaignPath,phase);
+ if(directory.currentAssignment?.phaseSequence===phase){
+  directory.currentAssignment.unitQueueIndexPath=directory.unitQueueIndexPath;
+  directory.currentAssignment.unitQueueStatePath=directory.unitQueueStatePath;
+ }
+ return result;
+}
+export function finalizeReadinessV1({root,campaignPath,directory,phase}){
+ assertV4(directory,phase);
+ const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
+ assertPlan(queue,plan);
+ if(phase===4&&queue.stage!=='RECONCILIATION')return {ready:false,reason:'discovery and reconciliation not complete'};
+ const pending=plan.units.filter(u=>queue.units[u.unitId]?.status!=='ACCEPTED');
+ if(pending.length)return {ready:false,reason:'mandatory units remain',unitIds:pending.map(x=>x.unitId)};
+ if(queue.finalizeStatus==='SEALED')return {ready:false,reason:'already sealed'};
+ return {ready:true,plan,queue};
+}
+export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}){
+ const ready=finalizeReadinessV1({root,campaignPath,directory,phase});
+ if(!ready.ready)throw Error('unsafe finalization: '+ready.reason);
+ const {plan,queue}=ready,assignment=directory.currentAssignment;
+ const byFile=new Map();
+ for(const u of plan.units.filter(u=>['SHARD','APPEND'].includes(u.kind))){
+  const accepted=read(root,queue.units[u.unitId].acceptedPath);
+  if(queue.units[u.unitId].acceptedSha256!==accepted.submissionSha256)throw Error('accepted digest mismatch');
+  const list=byFile.get(u.shardPath)??[];list.push({unit:u,entries:accepted.submission.entries});byFile.set(u.shardPath,list);
+ }
+ // Rebuild every shard deterministically from accepted immutable snapshots.
+ // A failed finalize can retry without appending duplicates to mutable shards.
+ for(const [rel,edits] of byFile){
+  const slab=read(root,rel);
+  const fixed=edits.filter(e=>e.unit.kind==='SHARD').sort((a,b)=>a.unit.shardIndex-b.unit.shardIndex);
+  const append=edits.filter(e=>e.unit.kind==='APPEND').sort((a,b)=>a.unit.unitId.localeCompare(b.unit.unitId));
+  if(fixed.length&&append.length)throw Error('shard has conflicting fixed and append ownership: '+rel);
+  if(fixed.some((e,i)=>e.unit.shardIndex!==i))throw Error('incomplete fixed shard ownership: '+rel);
+  slab.entries=fixed.length?fixed.map(e=>e.entries[0]):append.flatMap(e=>e.entries);
+  put(root,rel,slab);
+ }
+ // Full restoration is the pre-existing source-bound schema/identity validator.
+ const restored=secureRestoreWorkFormV13({root,indexRel:assignment.workShardIndexPath});
+ const form=JSON.parse(restored.content),schema=loadPhaseSchema(root,AUTHORITY,phase).schema;
+ const errors=validateWorkForm(schema,form);
+ if(errors.length)throw Error('aggregate validation blocked: '+errors.slice(0,15).join('; '));
+ // Existing phase controller materializes, validates all semantic gates, executes required
+ // already-qualified machine lane (Phase 5), generates a single seal and next assignment.
+ return {status:'READY_FOR_EXISTING_BOUNDARY_SEAL',workShardIndexPath:assignment.workShardIndexPath};
+}
+export function markFinalizationV1({root,campaignPath,phase,status,details=null}){
+ const queue=read(root,queueRel(campaignPath,phase));
+ queue.finalizeStatus=status;queue.finalizeDetails=details;
+ queue.revision++;put(root,queueRel(campaignPath,phase),queue);
+}
+export function statusUnitQueueV1({root,campaignPath,phase}){
+ const plan=maybe(root,planRel(campaignPath,phase))?readPlan(root,campaignPath,phase):null,queue=maybe(root,queueRel(campaignPath,phase));
+ if(!plan||!queue)return null;
+ const counts={},workers=new Set();
+ for(const [id,s] of Object.entries(queue.units)){counts[s.status]=(counts[s.status]??0)+1;if(s.workerId)workers.add(s.workerId);}
+ return {phase,counts,workers:[...workers].sort(),approvalBacklog:Object.values(queue.units).filter(x=>x.status==='SUBMITTED').length,
+  eligible:available(queue,plan).map(x=>x.unitId),revision:queue.revision,finalizeStatus:queue.finalizeStatus};
+}
+
+export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[]}){
+ const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
+ const reopened=[],unmapped=[];
+ for(const entry of deficiencies){
+  const message=typeof entry==='string'?entry:JSON.stringify(entry);
+  const found=new Set();
+  for(const match of message.matchAll(/(?:actions\.)?(?:step-[0-9]+\.outputs\.)?([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/g)){
+   const field=match[1],position=Number(match[2]);
+   for(const u of plan.units)if(u.field===field&&u.recordIndex===position)found.add(u.unitId);
+  }
+  // Machine-binding diagnostics often name candidate keys instead of array indices.
+  for(const u of plan.units.filter(x=>['targetDesigns','targetDispositions','candidateProofRecords'].includes(x.field))){
+   const state=queue.units[u.unitId];
+   const accepted=state?.acceptedPath?maybe(root,state.acceptedPath):null;
+   const values=accepted?.submission?.entries?.map(x=>x.value)??[];
+   if(values.some(v=>v&&typeof v==='object'&&
+      [v.candidateKey,v.tempKey].some(key=>typeof key==='string'&&key.length>=3&&message.includes(key))))
+      found.add(u.unitId);
+  }
+  if(!found.size){unmapped.push(message);continue;}
+  for(const id of found){
+   const state=queue.units[id];
+   if(state.status==='ACCEPTED')state.status='REWORK_REQUIRED';
+   state.lastErrors=[...state.lastErrors,message].slice(-30);
+   reopened.push(id);
+  }
+ }
+ const result={reopenedUnits:[...new Set(reopened)].sort(),unmappedDeficiencies:unmapped};
+ queue.finalizeStatus='REWORK_REQUIRED';queue.finalizeDetails=result;queue.revision++;
+ put(root,queueRel(campaignPath,phase),queue);
+ return result;
+}
+,message:'Malformed JSON: '+String(e.message??e)}];}
  if(['FLOW','ATTACK'].includes(u.kind)){
   const packet=read(root,u.packetPath),inventory=read(root,reviewInventoryRelV1(root,campaign,'REVIEW_INVENTORY_v1.json'));
   const checked=u.kind==='ATTACK'
