@@ -728,6 +728,14 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
    const field=match[1],position=Number(match[2]);
    for(const u of plan.units)if(u.field===field&&u.recordIndex===position)found.add(u.unitId);
   }
+  // Aggregate discovery failures name recordKey, not an array offset.
+  const matchDiscovery=message.match(/\bDiscovery\s+(DISC-[A-Za-z0-9_-]+)\b/);
+  if(matchDiscovery)for(const u of plan.units.filter(x=>x.field==='discoveryReconciliationRecords')){
+   const state=queue.units[u.unitId];
+   const accepted=state?.acceptedPath?maybe(root,state.acceptedPath):null;
+   if(accepted?.submission?.entries?.some(e=>e.value?.recordKey===matchDiscovery[1]))
+    found.add(u.unitId);
+  }
   // Machine-binding diagnostics often name candidate keys instead of array indices.
   for(const u of plan.units.filter(x=>['targetDesigns','targetDispositions','candidateProofRecords'].includes(x.field))){
    const state=queue.units[u.unitId];
