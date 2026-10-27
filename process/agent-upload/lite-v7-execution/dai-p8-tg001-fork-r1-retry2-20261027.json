@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "curveyield-lite-v7-execution-dispatch-v1",
+  "campaignId": "audit-preview-completion-live-ethereum-dai-6b175474-r1",
+  "phaseSequence": 8,
+  "requestPath": "campaigns/audit-preview-completion-live-ethereum-dai-6b175474-r1/controller/phase8-revalidation/TG-001/DAI_FORK_BASELINE_R1.json",
+  "controllerRef": "8fb66db07765c2f0be5830e1ff968a1fa730859c",
+  "controllerWritebackRef": "main",
+  "attempt": 2
+}
