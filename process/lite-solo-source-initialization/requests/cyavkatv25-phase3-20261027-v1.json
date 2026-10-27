@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-request-v1",
+  "mode": "LITE_SOLO",
+  "requestId": "cyavkatv25-phase3-20261027-v1",
+  "sourceUrl": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/cyavKATv25.zip",
+  "scanUrls": [],
+  "authorizePhase0Execution": true,
+  "deliveryTransport": "DIRECT"
+}
