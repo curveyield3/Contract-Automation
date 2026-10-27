@@ -67,13 +67,6 @@ if(arg.mode!=='finalize'){
   }
  }
 
- if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
-    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
-    recorded.finalizeDetails.unmappedDeficiencies.length){
-  const recovery=reopenAggregateDefectsV1({root,campaignPath,phase,
-    deficiencies:recorded.finalizeDetails.unmappedDeficiencies});
-  if(recovery.reopenedUnits.length)changed=true;
- }
  // Recover the exact immutable v13 Phase-5 controller prefill after a failed
  // boundary persisted transient request-binding annotations to the assignment.
  // A worker never gets to choose this digest: recompute the locked, controller-
@@ -216,21 +209,22 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
     const current=readJson(directoryFile);
     const packet=current.currentAssignment?.packetPath?readJson(repoFile(root,current.currentAssignment.packetPath)):null;
     const deficits=packet?.controllerValidation?.deficiencies??[];
-    const reopened=deficits.length?reopenAggregateDefectsV1({root,campaignPath,phase:seq,deficiencies:deficits}):null;
-    if(!reopened)markFinalizationV1({root,campaignPath,phase:seq,status:'BLOCKED',details:{envelopeStatus:envelope.status}});
-    seal={status:'NOT_SEALED',phase:seq,envelopeStatus:envelope.status,rework:reopened};
+    const structural=deficits.filter(d=>/^actions\.step-[0-9]+\.outputs\.[A-Za-z][A-Za-z0-9_]*\[[0-9]+\](?:\.|:| |$)/.test(String(d)));
+    const reopened=structural.length?reopenAggregateDefectsV1({root,campaignPath,phase:seq,deficiencies:structural}):null;
+    if(!reopened)markFinalizationV1({root,campaignPath,phase:seq,status:'BLOCKED',
+      details:{envelopeStatus:envelope.status,deficiencies:deficits}});
+    seal={status:reopened?.unmappedDeficiencies?.length?'CONTROLLER_INTEGRITY_FAILURE':'NOT_SEALED',
+      phase:seq,envelopeStatus:envelope.status,rework:reopened};
    }
   }catch(error){
    // Reopen only the accountable source unit(s) on an aggregate schema failure.
    // Other execution/integrity failures stay visible as genuine phase blockers.
    const reason=String(error.stderr??error.message??error).slice(0,1800);
-   const prefix='aggregate validation blocked: ';
-   const rework=reason.startsWith(prefix)
-    ?reopenAggregateDefectsV1({root,campaignPath,phase:seq,
-      deficiencies:reason.slice(prefix.length).split('; ').filter(Boolean)})
-    :null;
-   if(!rework)markFinalizationV1({root,campaignPath,phase:seq,status:'BLOCKED',details:{error:reason}});
-   seal={status:rework?.reopenedUnits?.length?'REWORK_REQUIRED':'BLOCKED',phase:seq,error:reason,rework};
+   const integrity=reason.includes('CONTROLLER_INTEGRITY_FAILURE:');
+   markFinalizationV1({root,campaignPath,phase:seq,
+    status:integrity?'CONTROLLER_INTEGRITY_FAILURE':'BLOCKED',
+    details:{error:reason}});
+   seal={status:integrity?'CONTROLLER_INTEGRITY_FAILURE':'BLOCKED',phase:seq,error:reason};
   }
  }
 }
