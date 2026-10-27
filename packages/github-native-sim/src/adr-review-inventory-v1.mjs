@@ -70,7 +70,7 @@ function emptyArtifact(campaign,payload,schemaVersion='curveyield-review-invento
 }
 const blankPayload=()=>({sourceUnits:[],declarations:[],contexts:[],triggers:{},limitations:[],complete:false,counts:{sourceUnits:0,inScopeUnits:0,declarations:0,contexts:0,byKind:{}}});
 
-export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
+export async function buildReviewInventoryV1({projectRoot,build,campaign,slither=null}) {
   if(!projectRoot||!build||!campaign)throw new TypeError('projectRoot, build, campaign required');
   const sources=await listAdmittedSourcesV1(projectRoot), bySource=new Map();
   const scope=await loadAuditScope(projectRoot);
@@ -90,6 +90,32 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   // each alias; do not compile with a drifting solc or invent a second AST.
   // Canonical source retains the review contexts. Every alias gets an explicit
   // identity mapping and is only accepted after a byte-for-byte equality check.
+  // The admitted, pinned Vyper 0.4.3 compiler produced per-function AST
+  // evidence. Bind every analyzer result to the exact ZIP source bytes before
+  // converting it into review contexts. Never treat a text-only Vyper fallback
+  // as a complete source-context inventory.
+  const vyperAstBySource=new Map();
+  for(const row of slither?.analyzerCoverage??[]){
+    const analysis=row.vyperAnalysis;
+    if(!analysis)continue;
+    const file=analysis.sourceName,entry=bySource.get(file);
+    if(!entry||!file.endsWith('.vy'))throw new Error('Unadmitted Vyper AST source: '+file);
+    const digest=createHash('sha256').update(entry.bytes).digest('hex');
+    if(digest!==analysis.sourceSha256)throw new Error('Vyper AST source hash mismatch: '+file);
+    if(analysis.compilerVersion!=='0.4.3'||analysis.slitherCompatible!==false||
+       !Array.isArray(analysis.functions)||analysis.functions.length===0||
+       !/^[0-9a-f]{64}$/.test(String(analysis.astSha256??'')))
+       throw new Error('Incomplete source-bound Vyper 0.4.3 AST evidence: '+file);
+    if(vyperAstBySource.has(file))throw new Error('Duplicate Vyper AST analysis: '+file);
+    vyperAstBySource.set(file,analysis);
+  }
+  const identicalVyperAliases=new Map();
+  for(const entry of sources){
+    if(!entry.path.endsWith('.vy')||vyperAstBySource.has(entry.path)||bySource.get(entry.path).tier!=='IN_SCOPE')continue;
+    const canonical=[...vyperAstBySource.keys()].find(p=>p!==entry.path&&
+      bySource.get(p).bytes.equals(bySource.get(entry.path).bytes));
+    if(canonical)identicalVyperAliases.set(entry.path,canonical);
+  }
   const identicalSourceAliases=new Map();
   const compiledAstSources=[...asts.keys()].filter(p=>p.endsWith('.sol')&&bySource.has(p));
   for(const entry of sources){
@@ -134,11 +160,21 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
 
   const sourceUnits=sources.map(s=>({sourceId:s.sourceId,path:s.path,sha256:s.sha256,scopeTier:bySource.get(s.path).tier,
     lineCount:bySource.get(s.path).bytes.reduce((n,byte)=>n+(byte===10?1:0),1),
-    astStatus:s.path.endsWith('.vy')?'UNSUPPORTED_LANGUAGE':identicalSourceAliases.has(s.path)?'AVAILABLE_IDENTICAL_SOURCE_ALIAS':auxiliaryAstPaths.has(s.path)?'AVAILABLE_AUXILIARY':asts.has(s.path)?'AVAILABLE':'MISSING',
-    ...(identicalSourceAliases.has(s.path)?{canonicalAstSource:identicalSourceAliases.get(s.path)}:{})}));
+    astStatus:s.path.endsWith('.vy')?(vyperAstBySource.has(s.path)?'AVAILABLE_VYPER_AST':identicalVyperAliases.has(s.path)?'AVAILABLE_IDENTICAL_VYPER_AST_ALIAS':'UNSUPPORTED_LANGUAGE'):
+      identicalSourceAliases.has(s.path)?'AVAILABLE_IDENTICAL_SOURCE_ALIAS':auxiliaryAstPaths.has(s.path)?'AVAILABLE_AUXILIARY':asts.has(s.path)?'AVAILABLE':'MISSING',
+    ...(identicalSourceAliases.has(s.path)?{canonicalAstSource:identicalSourceAliases.get(s.path)}:{}),
+    ...(identicalVyperAliases.has(s.path)?{canonicalAstSource:identicalVyperAliases.get(s.path)}:{})}));
   const limitations=[scope.source===AUDIT_SCOPE_FILE
     ?{code:'SCOPE_FROM_AUDIT_SCOPE_FILE',path:AUDIT_SCOPE_FILE,detail:'In scope: '+scope.inScopePaths.join(', ')+'. Every other compiled source is a dependency, reviewed only where in-scope contracts inherit it.'}
     :{code:'DEPENDENCY_TIER_BY_PATH',path:'*',detail:'Dependency tier assigned by path convention (vendor/, lib/, node_modules/ at any depth); modified vendored code must be moved out of those folders to be reviewed as in-scope.'}];
+  for(const [alias,canonical] of identicalVyperAliases)limitations.push({
+    code:'BYTE_IDENTICAL_VYPER_AST_ALIAS',path:alias,
+    detail:'Source bytes exactly equal admitted '+canonical+'; source-bound Vyper 0.4.3 function AST contexts cover both source paths.'
+  });
+  for(const [file] of vyperAstBySource)limitations.push({
+    code:'VYPER_AST_STRUCTURAL_STATIC_ONLY',path:file,
+    detail:'Exact Vyper 0.4.3 compiler AST provides line-anchored function, state-write and external-call contexts; Slither Vyper semantic detectors are unsupported and must be replaced by substantive Phase 4–6 manual/property review.'
+  });
   for(const [alias,canonical] of identicalSourceAliases)limitations.push({
     code:'BYTE_IDENTICAL_SOURCE_AST_ALIAS',path:alias,
     detail:'Source bytes exactly equal compiled admitted '+canonical+'; canonical AST contexts cover both source paths. No deployment bytecode or source was changed.'
@@ -146,6 +182,51 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   for(const [file,version] of auxiliaryAstPaths)limitations.push({code:'SUPPLEMENTAL_COMPILER_AST',path:file,detail:'Complete in-scope AST obtained from unchanged source with pinned project solc '+version+'; no deployment artifact was changed.'});
   for(const [file,detail] of auxiliaryAstFailures)limitations.push({code:'SUPPLEMENTAL_COMPILER_AST_FAILED',path:file,detail});
   const declarations=[],contexts=[],triggers={},nodeById=new Map(),contractById=new Map(),metadata=new Map(),contextBySymbol=new Map(),usedIds=new Map();
+  // Include full per-function Vyper review contexts rather than a single
+  // 939-line FILE_FALLBACK whose gap would prevent Phase 0 sealing.
+  for(const [file,analysis] of [...vyperAstBySource.entries()].sort(([a],[b])=>a.localeCompare(b))){
+    const source=bySource.get(file),sourceLines=source.bytes.toString('utf8').split(/\r?\n/);
+    const qualifiedContainer=file+':'+path.posix.basename(file,'.vy');
+    const matchingArtifact=(build.artifacts??[]).find(a=>a.sourceName===file&&a.contractName===path.posix.basename(file,'.vy'));
+    const abi=matchingArtifact?.abi??[];
+    const defs=[...analysis.functions].sort((a,b)=>a.line-b.line||a.name.localeCompare(b.name));
+    for(let i=0;i<defs.length;i++){
+      const def=defs[i];
+      if(!Number.isInteger(def.line)||def.line<1||def.line>sourceLines.length)
+        throw new Error('Vyper function source line outside admitted file: '+file+':'+def.name);
+      const end=Math.max(def.line,Math.min(sourceLines.length,(defs[i+1]?.line??sourceLines.length+1)-1));
+      const abiMatch=abi.filter(a=>a.type==='function'&&a.name===def.name).sort((a,b)=>(b.inputs??[]).length-(a.inputs??[]).length)[0];
+      const signature=def.name+'('+(abiMatch?.inputs??[]).map(x=>x.type).join(',')+')';
+      const symbolId='SYM-'+digestCanonicalV1({path:file,qualifiedContainer,kind:'FUNCTION',canonicalSignature:signature}).slice(0,16);
+      const contextId=symbolId.replace(/^SYM-/,'CTX-');
+      const calls=(analysis.sensitiveCalls??[]).filter(x=>x.function===def.name);
+      const writes=(analysis.stateWrites??[]).filter(x=>x.function===def.name);
+      const decorators=def.decorators??[];
+      const mutability=decorators.includes('view')?'view':decorators.includes('pure')?'pure':decorators.includes('payable')?'payable':'nonpayable';
+      const visibility=def.external?'external':'internal';
+      const ctx={contextId,symbolId,path:file,qualifiedContainer,kind:'FUNCTION',canonicalSignature:signature,
+        visibility,stateMutability:mutability,lineStart:def.line,lineEnd:end,effectiveIn:[qualifiedContainer],
+        scopeTier:source.tier,dependencySymbolIds:[],stateReads:[],stateWrites:distinct(writes.map(x=>x.target)),
+        internalCalls:[],modifiers:def.nonreentrant?['nonreentrant']:[],
+        externalCalls:calls.map(x=>({memberName:x.call,targetType:'VYPER_COMPILER_AST_SENSITIVE_OPERATION',line:x.line})),
+        natSpec:'',directBases:[],implementedInterfaces:[],contractKind:'contract',contractAbstract:false,
+        senderCheckLines:sourceLines.slice(def.line-1,end).flatMap((line,index)=>line.includes('msg.sender')?[def.line+index]:[]),
+        txOriginLines:sourceLines.slice(def.line-1,end).flatMap((line,index)=>line.includes('tx.origin')?[def.line+index]:[]),
+        analyzer:'VYPER_0_4_3_SOURCE_BOUND_COMPILER_AST'};
+      const signals=[];
+      if(writes.length)signals.push('STATE_WRITE');
+      if(calls.length)signals.push('EXTERNAL_CALL');
+      if(def.external&&writes.length)signals.push('STATE_WRITE_EXTERNAL');
+      if(calls.some(call=>writes.some(write=>call.line<write.line)))
+        signals.push('EXTERNAL_CALL_BEFORE_STATE_WRITE');
+      if(decorators.includes('payable'))signals.push('PAYABLE');
+      contexts.push(ctx);
+      declarations.push({symbolId,path:file,qualifiedContainer,containerKind:'contract',kind:'FUNCTION',
+        name:def.name,canonicalSignature:signature,visibility,stateMutability:mutability,
+        lineStart:def.line,lineEnd:end,hasBody:true});
+      triggers[contextId]=new Set(signals);
+    }
+  }
   for(const [file,ast] of asts) {
     const source=bySource.get(file);
     let current=null;
@@ -378,7 +459,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   }
   let complete=true;
   for(const s of sourceUnits) {
-    if(['AVAILABLE','AVAILABLE_AUXILIARY','AVAILABLE_IDENTICAL_SOURCE_ALIAS'].includes(s.astStatus)||s.scopeTier!=='IN_SCOPE'&&s.astStatus!=='UNSUPPORTED_LANGUAGE')continue;
+    if(['AVAILABLE','AVAILABLE_AUXILIARY','AVAILABLE_IDENTICAL_SOURCE_ALIAS','AVAILABLE_VYPER_AST','AVAILABLE_IDENTICAL_VYPER_AST_ALIAS'].includes(s.astStatus)||s.scopeTier!=='IN_SCOPE'&&s.astStatus!=='UNSUPPORTED_LANGUAGE')continue;
     const scriptWithoutAst=includeScripts&&s.astStatus==='MISSING'&&
       (/(^|\/)(script|scripts|deploy|deployment|deployments|configure|config|handover)\//i.test(s.path)||s.path.endsWith('.s.sol'));
     if(s.astStatus==='MISSING'&&s.scopeTier==='IN_SCOPE'&&!scriptWithoutAst)complete=false;
@@ -459,13 +540,13 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
       declarations:declarations.length,contexts:contexts.length,byKind:Object.fromEntries(Object.entries(byKind).sort(([a],[b])=>a.localeCompare(b))) }});
 }
 
-export async function writeReviewInventoryOutputsV1({outputDir,projectRoot,build,request,policy,reviewPolicy=null}) {
+export async function writeReviewInventoryOutputsV1({outputDir,projectRoot,build,request,policy,reviewPolicy=null,slither=null}) {
   if(policy!==POLICY)return;
   const campaign={campaignId:request?.campaignId,campaignGenerationId:request?.campaignGenerationId,
     sourceSha256:request?.source?.archiveSha256,generatedAt:request?.generatedAt??new Date().toISOString(),
     ...(reviewPolicy==='correctness-verdict-v13'?{detectionReviewPolicy:reviewPolicy}:{})};
   try {
-    const inventory=await buildReviewInventoryV1({projectRoot,build,campaign});
+    const inventory=await buildReviewInventoryV1({projectRoot,build,campaign,slither});
     const facts=buildSystemFactsV1({inventory});
     console.log('[phase0-inventory-summary]',JSON.stringify({complete:inventory.payload.complete,sourceUnits:inventory.payload.sourceUnits.length,contexts:inventory.payload.contexts.length,missing:inventory.payload.sourceUnits.filter(s=>s.scopeTier==='IN_SCOPE'&&s.astStatus==='MISSING').slice(0,12).map(s=>s.path)}));
     await fs.mkdir(outputDir,{recursive:true});
