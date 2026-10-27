@@ -1,6 +1,6 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v11
+Policy version: v12
 
 ## Repository hygiene, anti-spam, and single-flight execution — mandatory
 
@@ -83,7 +83,7 @@ For ChatGPT/web-agent blockchain development, testing, simulation, deployment or
 
 `docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md`
 
-That guide is the browser-agent navigation layer. It does not replace this policy, the canonical V7 CLI, runner manifest, or qualification state.
+That guide is the browser-agent navigation layer. It does not replace this policy, the canonical V7 CLI, or runner manifest.
 
 ## Archive boundary — mandatory
 
@@ -123,7 +123,7 @@ Mandatory rules:
 
 ## Canonical V7 control surface
 
-For Audit V7, this repository has exactly one active execution workflow, one active qualification workflow, one active runner manifest, and one operational CLI:
+For Audit V7, this repository has one canonical execution workflow, one runner manifest, and one operational CLI:
 
 - execution workflow: `.github/workflows/audit-controller-execution.yml`
 - runner manifest: `process/RUNNER_MANIFEST.json`
@@ -222,10 +222,6 @@ The authoritative, stepwise agent launch/recovery policy is `docs/BROWSER_AGENT_
 ## Full simulation backend — historical Anvil only
 
 All authoritative simulation/attacker/deployment/lifecycle evidence requiring live state uses a locally writable Anvil **fork of verified historical chain state**. Standalone local simulation is permitted only for development/unit-test machinery and must be explicitly labeled `SYNTHETIC_NOT_AUDIT_EVIDENCE`; it cannot seal a Lite campaign or satisfy a candidate security claim.
-
-## V7 qualification
-
-The repository-wide full V7 qualification workflow was retired on 2026-10-11 and preserved in curveyield3/archive. Lite execution evidence records the exact runner commit of each run in EXECUTION_EVIDENCE_v1.json; Lite campaigns do not require a qualification rebind. Do not restore the archived suite.
 
 ## Dependency locking status
 
