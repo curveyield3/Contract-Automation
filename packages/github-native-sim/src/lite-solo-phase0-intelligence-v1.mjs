@@ -102,6 +102,19 @@ async function detectProjectRoot(extractRoot){
     const score=(hasFoundry?240:0)+(hasPkg?120:0)+(hasLock?110:0)+(hasContracts?100:0)+(hasHardhat?70:0)+(hasTooling?60:0)+(hasVendor?40:0)+Math.min(sol,80)-depth;
     scored.push({relativePath:rel||'.',score,solidityFiles:sol,hasFoundry,hasPkg,hasLock,hasHardhat,hasContracts,hasTooling,hasVendor});
   }
+  // An explicit deployment profile is a stronger project-root declaration than
+  // nested foundry.toml discovery. Prefer its Hardhat package wrapper, which
+  // can compile upgrade/src and execute upgrade/scripts against the same archive.
+  const profiled=scored.filter(x=>
+    x.hasHardhat&&x.hasPkg&&x.hasLock&&
+    files.includes((x.relativePath==='.'?'':x.relativePath+'/')+'audit-deployment.json')
+  );
+  if(profiled.length>1)throw new Error('ambiguous explicit deployment-profile project roots');
+  if(profiled.length===1){
+    const winner=profiled[0];
+    const absolute=winner.relativePath==='.'?extractRoot:path.join(extractRoot,...winner.relativePath.split('/'));
+    return{absolute,relativePath:winner.relativePath,candidates:scored.sort((a,b)=>b.score-a.score).slice(0,10)};
+  }
   scored.sort((a,b)=>b.score-a.score||b.solidityFiles-a.solidityFiles||a.relativePath.localeCompare(b.relativePath));
   if(!scored.length)throw new Error('unable to detect Solidity project root from archive');
   const winner=scored[0];
