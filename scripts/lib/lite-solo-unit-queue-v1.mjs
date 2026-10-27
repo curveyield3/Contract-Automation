@@ -604,7 +604,7 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
   if(phase===6&&u.field==='baselineTestRecords'&&isObject(val))
    errors.push(...validateLiveForkBaselineRecordV1({
     root,campaignPath:plan.campaignPath,campaignId:plan.campaignId,
-    sourceSha256:plan.sourceSha256,record:val
+    sourceSha256:plan.sourceSha256,record:val,structuralOnly:true
    }).map(message=>p+'.value: MACHINE_INTEGRITY: '+message));
   if(phase===6&&u.field==='candidateProofRecords'&&isObject(val)&&
      ['CONFIRMED','DISPROVEN'].includes(val.verdict)){
@@ -641,6 +641,11 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
  return errors;
 }
 
+function structuredFieldErrorV1(unitId,message){
+ const match=/^(entries(?:\\[[0-9]+\\])?(?:\\.[A-Za-z][A-Za-z0-9_]*)*|schemaVersion): (.+)$/.exec(message);
+ return {path:match?unitId+'.'+match[1]:unitId,
+  code:match?match[2]:'STRUCTURAL_VALIDATION_FAILURE',message};
+}
 function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest}){
  const errors=[],entries=asArray(submission?.entries),members=new Map(u.members.map(m=>[m.recordKeys[0],m]));
  if(submission?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.submission||
@@ -670,7 +675,7 @@ function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schem
   const failures=validateShardUnit({root,u:member,data:{schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:[entry]},
    phase,schema,queue,plan});
   if(failures.length){
-   errors.push(...failures.map(message=>({path:member.unitId,message})));continue;
+   errors.push(...failures.map(message=>structuredFieldErrorV1(member.unitId,message)));continue;
   }
   const rel=path.posix.join(unitBase(campaign,phase,u.unitId),'records',member.unitId,
    'ACCEPTED_ATTEMPT_'+String(state.attempts+1).padStart(3,'0')+'_v1.json');
@@ -734,7 +739,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
  }else if(!errors.length&&u.kind==='BATCH'){
   batchOutcome=acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest});
   errors=batchOutcome.errors;
- }else if(!errors.length)errors=validateShardUnit({root,u,data:submission,phase,schema,queue,plan}).map(message=>({path:u.unitId,message}));
+ }else if(!errors.length)errors=validateShardUnit({root,u,data:submission,phase,schema,queue,plan}).map(message=>structuredFieldErrorV1(u.unitId,message));
  state.lastSubmissionSha256=digest;state.attempts++;
  const resultRel=path.posix.join(unitBase(campaign,phase,u.unitId),'results',
   'ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
