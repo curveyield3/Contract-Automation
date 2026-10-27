@@ -6,5 +6,5 @@
   "scanUrls": [],
   "deliveryTransport": "DIRECT",
   "authorizePhase0Execution": true,
-  "recoveryReason": "Retry same source-bound BoostHub v9 r1 Phase 0 to capture exact Slither diagnostic after successful immutable mixed-language compilation; do not bypass Slither gate."
+  "recoveryReason": "Retry same BoostHub v9 r1 after forcing Crytic Standard Slither import; previous failure was framework autodetection choosing Foundry and seeking absent default build-info despite exact-source exported compilation units."
 }
