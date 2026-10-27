@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "curveyield-audit-preview-completion-request-v1",
+  "previewCampaignId": "audit-preview-live-ethereum-dai-6b175474-r1",
+  "operation": "PREPARE",
+  "requestId": "dai-corrective-r1-prepare-20261027",
+  "correctionOfCampaignId": "audit-preview-completion-live-ethereum-dai-6b175474-r1"
+}
