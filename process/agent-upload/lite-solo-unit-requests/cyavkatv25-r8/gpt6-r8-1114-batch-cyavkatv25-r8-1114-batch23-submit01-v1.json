@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "cyavkatv25-r8-1114-batch23-submit01-v1",
+  "campaignId": "cyavkatv25-r8",
+  "campaignGenerationId": "cyavkatv25-r8-g1-20261027T104124Z",
+  "phaseSequence": 4,
+  "phaseEpoch": 1,
+  "lane": "AUTO",
+  "operation": "SUBMIT",
+  "workerId": "gpt6-r8-1114-batch",
+  "sourceSha256": "7a920115d463a2f468c688c65f5fe24ec3364ee57eea4561505fe1e484fcd779",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "P4-RC-283",
+      "claimEpoch": 1,
+      "claimToken": "5a010ba3-da97-4519-badf-e03acc275be4",
+      "packetSha256": "4c06a7bd6dcddf90111da40a6ac2a895dd6cd8a79082e5ade136aa3757b20edc",
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/P4-RC-283/submissions/gpt6-r8-1114-batch/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "ef443f3a6fcf72d625172dc8c8e73185bed8f479ec6ce05f324ac5f1c774d2c6",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "P4-RC-284",
+      "claimEpoch": 1,
+      "claimToken": "825a1edf-0f40-42b1-9d85-259b20b2bd5a",
+      "packetSha256": "4c06a7bd6dcddf90111da40a6ac2a895dd6cd8a79082e5ade136aa3757b20edc",
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/P4-RC-284/submissions/gpt6-r8-1114-batch/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "81298c2c2fddcf40d581b62e0bd57cfda8fd90bc78b9aee93577b129a9421ba1",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "P4-RC-285",
+      "claimEpoch": 1,
+      "claimToken": "9602f301-962c-42ad-9396-d4b667ba06fa",
+      "packetSha256": "4c06a7bd6dcddf90111da40a6ac2a895dd6cd8a79082e5ade136aa3757b20edc",
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/P4-RC-285/submissions/gpt6-r8-1114-batch/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "5537c639c9a1df4dfc5bf6fc136e20d4303c85475f0c0090681e080dfd6fb498",
+      "unitSpecRevision": 1
+    }
+  ]
+}
