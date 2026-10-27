@@ -50,8 +50,50 @@ function assertions(record,field,allowed,found,errors,prefix,{nonEmpty=true,requ
  if(states.some(s=>!allowed.includes(s)))errors.push(prefix+field+' assertion result mismatch (required '+allowed.join('/')+')');
  if(requireAtLeastOneFail&&!states.includes('FAIL'))errors.push(prefix+field+' needs a failing security assertion');
 }
-export function validatePhase6AttackerWorkV1({root,campaignPath,form}={}){
+export function validatePhase6AttackerWorkV1({root,campaignPath,form,structuralOnly=false}={}){
  const errors=[];
+ if(structuralOnly){
+  // The v4 work-unit controller checks machine provenance, not whether
+  // the auditor's PASS/FAIL interpretation or conclusion is persuasive.
+  try{
+   for(const row of arr(output(form,4,'baselineTestRecords')).filter(obj)){
+    const id=String(row.testGroupId??'UNKNOWN'),prefix=id+': ';
+    roundCheck({root,campaignPath,row,identifier:id,errors});
+    const ids=arr(row.obligationIds),outcomes=arr(row.obligationOutcomes);
+    const seen=outcomes.map(x=>x?.obligationId);
+    if(new Set(seen).size!==seen.length||
+       JSON.stringify([...seen].sort())!==JSON.stringify([...ids].sort()))
+     errors.push(prefix+'obligationOutcomes identity coverage mismatch');
+    for(const outcome of outcomes.filter(obj)){
+     const ref=outcome.ledgerRef;
+     if(ref&&ref!=='NONE_IDENTIFIED'){
+      const found=ledger(root,campaignPath,ref,errors,prefix);
+      if(found&&Array.isArray(outcome.assertionNames)&&
+         outcome.assertionNames.some(n=>!found.tests.some(t=>t?.name===n)))
+       errors.push(prefix+'named machine assertion missing');
+     }
+    }
+   }
+   for(const row of arr(output(form,5,'candidateProofRecords')).filter(obj)){
+    const id=String(row.candidateKey??'UNKNOWN'),prefix=id+': ';
+    roundCheck({root,campaignPath,row,identifier:id,errors});
+    if(['CONFIRMED','DISPROVEN'].includes(row.verdict)){
+     const found=ledger(root,campaignPath,row.ledgerRef,errors,prefix);
+     if(found)for(const field of ['attackAssertionNames','controlAssertionNames']){
+      const names=row[field];
+      if(!Array.isArray(names)||!names.length||names.some(blank))
+       errors.push(prefix+field+' requires named machine assertions');
+      else if(names.some(n=>!found.tests.some(t=>t?.name===n)))
+       errors.push(prefix+field+' references absent machine assertion');
+     }
+    }
+   }
+   for(const row of arr(output(form,5,'newCandidateRecords')).filter(obj))
+    if(row.ledgerRef&&row.ledgerRef!=='NONE_IDENTIFIED')
+     ledger(root,campaignPath,row.ledgerRef,errors,String(row.tempKey??'UNKNOWN'));
+  }catch(e){errors.push('Phase 6 machine-integrity validation error: '+String(e.message??e));}
+  return errors;
+ }
  try{
   if(!form?.actions?.['step-4']||!form?.actions?.['step-5'])return [];
   const groups=output(form,4,'baselineTestRecords');
