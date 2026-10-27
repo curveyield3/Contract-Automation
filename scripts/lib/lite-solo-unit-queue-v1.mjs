@@ -898,7 +898,7 @@ export function finalizeReadinessV1({root,campaignPath,directory,phase}){
 // fixes the original mandatory identities and APPEND boundary. Do not bypass
 // the trusted-index equality checks or manufacture missing substantive records.
 function restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan}){
- if(phase!==4)return;
+ if(![4,5,6].includes(phase))return;
  const workDir=path.posix.dirname(assignment.workShardIndexPath);
  const trustedDir=path.posix.join(campaignPath,'controller/shards/phase-'+String(phase).padStart(2,'0'));
  const trustedRel=path.posix.join(trustedDir,'INDEX_v1.json');
