@@ -1,6 +1,6 @@
 # Browser Agent Blockchain Workstation — START HERE
 
-Version: v1
+Version: v2
 
 This file is the browser-agent entrypoint for blockchain development, testing, simulation, and Audit V7 work in the curveyield3 GitHub organization.
 
@@ -57,9 +57,7 @@ Before changing or running anything:
 1. Read `AGENTS.md` in the repository you are operating in.
 2. For GitHub Actions operation, read:
    `docs/CHATGPT_GITHUB_ACTIONS_VIA_GITHUB_APP.md`
-3. For Audit V7 execution, inspect:
-   `process/V7_QUALIFICATION_STATUS.json`
-4. For Audit V7 CLI operations, use the canonical commands documented in `AGENTS.md`.
+3. For Audit V7 CLI operations, use the canonical commands documented in `AGENTS.md`.
 
 Do not create duplicate workflows, duplicate runners, alternate RPC systems, or replacement V7 entrypoints merely because the existing trigger is not obvious.
 
@@ -119,22 +117,6 @@ Supported private operation types are:
 - `BUILD_SUCCESSOR_HANDOFF`
 
 Generated private audit outputs are not uploaded as public artifacts. The canonical workflow writes them only to the private Audit-Controller branch specified by the private request after exact-head verification.
-
-## Fast readiness check for Audit V7
-
-First inspect:
-
-`process/V7_QUALIFICATION_STATUS.json`
-
-If the current status is `PASS`, use the admitted qualified runner identity recorded there. Do not assume a newer raw `main` commit is qualified.
-
-If a fresh qualification is required, a browser agent can trigger the existing qualification bridge by creating a GitHub issue in `curveyield3/Contract-Automation` with this exact title:
-
-`[agent] run-v7-qualification`
-
-The existing `.github/workflows/v7-agent-qualification-bridge.yml` workflow dispatches and observes the canonical V7 qualification and records the latest attempt.
-
-Do not create a second qualification workflow.
 
 ## Canonical Audit V7 operations
 
@@ -369,7 +351,7 @@ Before creating new infrastructure, check:
 2. whether an existing workflow has a different trigger;
 3. whether the V7 terminal disposition provides recovery instructions;
 4. whether the failure is source-specific, request-specific, RPC-specific, or runner-specific;
-5. whether a runner repair requires qualification/rebind.
+5. whether the repaired runner is the one actually used by the failing execution.
 
 Do not silently change audited source to compensate for runner infrastructure failures.
 
