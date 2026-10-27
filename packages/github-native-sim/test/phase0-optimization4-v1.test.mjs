@@ -32,7 +32,7 @@ for(const [mode,file] of [
     assert.match(source,/NO_RUNNABLE_NODE_DEPLOYMENT_SCRIPTS/);
     assert.match(source,/args:\['240s','npm','ci','--ignore-scripts','--prefer-offline','--audit=false','--fund=false'\]/);
     assert.match(source,/SIMULATION_TESTING_PACKAGE_DEPENDENCY_INSTALL_FAILED/);
-    assert.match(source,/packageDependencyInstall,policy:/);
+    assert.match(source,/packageDependencyInstall,foundryDependencyInstall,policy:/);
     assert.match(source,/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json/);
     assert.match(source,/executeDeploymentScripts/);
   });
