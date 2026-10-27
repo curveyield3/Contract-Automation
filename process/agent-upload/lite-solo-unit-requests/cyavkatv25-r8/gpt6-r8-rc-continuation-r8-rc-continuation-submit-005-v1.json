@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "r8-rc-continuation-submit-005-v1",
+  "operation": "SUBMIT",
+  "campaignId": "cyavkatv25-r8",
+  "campaignGenerationId": "cyavkatv25-r8-g1-20261027T104124Z",
+  "phaseSequence": 4,
+  "lane": "P4-RC",
+  "workerId": "gpt6-r8-rc-continuation",
+  "sourceSha256": "7a920115d463a2f468c688c65f5fe24ec3364ee57eea4561505fe1e484fcd779",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "P4-RC-370",
+      "claimEpoch": 1,
+      "claimToken": "c122ba05-f5f6-470a-bea0-13b6e365ac7c",
+      "packetSha256": "f847eef43c4263ecf8cc74047ae82efeed2386b461b6bb4af5943c62965be1da",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/P4-RC-370/submissions/gpt6-r8-rc-continuation/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "74656738cc01a9066423986a906e755c6ed39d46af19f67be981e8232795d621"
+    },
+    {
+      "unitId": "P4-RC-371",
+      "claimEpoch": 1,
+      "claimToken": "68632835-e2ad-440b-8670-4fb35909d811",
+      "packetSha256": "f847eef43c4263ecf8cc74047ae82efeed2386b461b6bb4af5943c62965be1da",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/P4-RC-371/submissions/gpt6-r8-rc-continuation/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "84199f40057befab3bbfab92ffa1b791b5f2800e884b14aa855986daf276621e"
+    },
+    {
+      "unitId": "P4-RC-372",
+      "claimEpoch": 1,
+      "claimToken": "2a6150a9-c9aa-42a2-a00d-6a3b7649ed6e",
+      "packetSha256": "f847eef43c4263ecf8cc74047ae82efeed2386b461b6bb4af5943c62965be1da",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/P4-RC-372/submissions/gpt6-r8-rc-continuation/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "085036cf8343344a97893ef73ae028621bc5ffec40b6cc1c9a77ae17c2ac39a1"
+    }
+  ]
+}
