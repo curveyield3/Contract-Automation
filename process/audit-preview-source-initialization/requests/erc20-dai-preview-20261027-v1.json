@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "curveyield-audit-preview-source-request-v1",
+  "product": "AUDIT_PREVIEW",
+  "mode": "LITE_SOLO",
+  "permittedContracts": 1,
+  "deliveryTransport": "DIRECT",
+  "requestId": "erc20-dai-preview-20261027-v1",
+  "sourceUrl": "",
+  "scanUrls": [
+    "https://etherscan.io/address/0x6b175474e89094c44da98b954eedeac495271d0f#code"
+  ]
+}
