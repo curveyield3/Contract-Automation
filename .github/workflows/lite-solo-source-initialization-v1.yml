@@ -17,52 +17,52 @@ on:
       report_pdf:
         description: Publish security audit PDF
         type: boolean
-        default: false
+        default: true
         required: false
       audited_source:
         description: Publish audited source ZIP
         type: boolean
-        default: false
+        default: true
         required: false
       scope_summary:
         description: Publish audited scope and exclusions
         type: boolean
-        default: false
+        default: true
         required: false
       findings_remediation:
         description: Publish findings and remediation
         type: boolean
-        default: false
+        default: true
         required: false
       methodology_analysis:
         description: Publish methodology and analysis
         type: boolean
-        default: false
+        default: true
         required: false
       properties_hypotheses:
         description: Publish security properties and hypotheses
         type: boolean
-        default: false
+        default: true
         required: false
       execution_results:
         description: Publish testing and execution results
         type: boolean
-        default: false
+        default: true
         required: false
       architecture_dependencies:
         description: Publish architecture and dependencies
         type: boolean
-        default: false
+        default: true
         required: false
       residual_risks:
         description: Publish residual risks and limitations
         type: boolean
-        default: false
+        default: true
         required: false
       evidence_index:
         description: Publish evidence index
         type: boolean
-        default: false
+        default: true
         required: false
   push:
     branches: [main]
@@ -134,8 +134,6 @@ jobs:
           RAW_SCAN_URLS: ${{ inputs.scan_urls }}
           RAW_REQUEST_ID: ${{ inputs.request_id }}
           EVENT_NAME: ${{ github.event_name }}
-          RAW_SCAN_URLS: ${{ inputs.scan_urls }}
-          RAW_REQUEST_ID: ${{ inputs.request_id }}
           RAW_REPORT_PDF: ${{ inputs.report_pdf }}
           RAW_AUDITED_SOURCE: ${{ inputs.audited_source }}
           RAW_SCOPE_SUMMARY: ${{ inputs.scope_summary }}
@@ -163,7 +161,7 @@ jobs:
             source_url="$RAW_SOURCE_URL"
             scans="$(printf '%s' "$RAW_SCAN_URLS" | jq -Rsc 'split("\n")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))')"
             request_id="${RAW_REQUEST_ID:-$GITHUB_RUN_ID}"
-            publish_files="$(jq -cn --argjson report_pdf "${RAW_REPORT_PDF:-false}" --argjson audited_source "${RAW_AUDITED_SOURCE:-false}" --argjson scope_summary "${RAW_SCOPE_SUMMARY:-false}" --argjson findings_remediation "${RAW_FINDINGS_REMEDIATION:-false}" --argjson methodology_analysis "${RAW_METHODOLOGY_ANALYSIS:-false}" --argjson properties_hypotheses "${RAW_PROPERTIES_HYPOTHESES:-false}" --argjson execution_results "${RAW_EXECUTION_RESULTS:-false}" --argjson architecture_dependencies "${RAW_ARCHITECTURE_DEPENDENCIES:-false}" --argjson residual_risks "${RAW_RESIDUAL_RISKS:-false}" --argjson evidence_index "${RAW_EVIDENCE_INDEX:-false}" '{report_pdf:$report_pdf,audited_source:$audited_source,scope_summary:$scope_summary,findings_remediation:$findings_remediation,methodology_analysis:$methodology_analysis,properties_hypotheses:$properties_hypotheses,execution_results:$execution_results,architecture_dependencies:$architecture_dependencies,residual_risks:$residual_risks,evidence_index:$evidence_index}')"
+            publish_files="$(jq -cn --argjson report_pdf "${RAW_REPORT_PDF:-true}" --argjson audited_source "${RAW_AUDITED_SOURCE:-true}" --argjson scope_summary "${RAW_SCOPE_SUMMARY:-true}" --argjson findings_remediation "${RAW_FINDINGS_REMEDIATION:-true}" --argjson methodology_analysis "${RAW_METHODOLOGY_ANALYSIS:-true}" --argjson properties_hypotheses "${RAW_PROPERTIES_HYPOTHESES:-true}" --argjson execution_results "${RAW_EXECUTION_RESULTS:-true}" --argjson architecture_dependencies "${RAW_ARCHITECTURE_DEPENDENCIES:-true}" --argjson residual_risks "${RAW_RESIDUAL_RISKS:-true}" --argjson evidence_index "${RAW_EVIDENCE_INDEX:-true}" '{report_pdf:$report_pdf,audited_source:$audited_source,scope_summary:$scope_summary,findings_remediation:$findings_remediation,methodology_analysis:$methodology_analysis,properties_hypotheses:$properties_hypotheses,execution_results:$execution_results,architecture_dependencies:$architecture_dependencies,residual_risks:$residual_risks,evidence_index:$evidence_index}')"
           fi
           [[ "$request_id" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$source_url" != *$'\n'* && "$source_url" != *$'\r'* ]]
@@ -179,7 +177,6 @@ jobs:
       - name: Select Audit-Controller credential
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         run: bash scripts/select-audit-controller-token.sh
       - name: Initialize exact source in direct lite-solo mode
