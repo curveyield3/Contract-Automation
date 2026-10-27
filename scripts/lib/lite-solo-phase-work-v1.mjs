@@ -147,7 +147,11 @@ export function validateWorkForm(schema,form,{structuralOnly=false}={}){
              allowed.includes(String(item[k])))) deficiencies.push(p+'['+i+'].'+k+' must be one of: '+allowed.join(', '));
           }
         }
-      }else deficiencies.push(...validateScalar(v,p,field));
+      }else{
+        deficiencies.push(...validateScalar(v,p,field));
+        if(structuralOnly&&field.type==='REQUIRED_ANALYSIS'&&typeof v!=='string')
+          deficiencies.push(p+': STRING_REQUIRED');
+      }
     }
   }
   return deficiencies;
