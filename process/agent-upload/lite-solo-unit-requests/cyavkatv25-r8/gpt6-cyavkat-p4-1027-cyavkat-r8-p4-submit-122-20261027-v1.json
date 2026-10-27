@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "cyavkat-r8-p4-submit-122-20261027-v1",
+  "operation": "SUBMIT",
+  "campaignId": "cyavkatv25-r8",
+  "campaignGenerationId": "cyavkatv25-r8-g1-20261027T104124Z",
+  "phaseSequence": 4,
+  "lane": "P4-RC",
+  "workerId": "gpt6-cyavkat-p4-1027",
+  "sourceSha256": "7a920115d463a2f468c688c65f5fe24ec3364ee57eea4561505fe1e484fcd779",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "P4-RC-122",
+      "claimEpoch": 1,
+      "claimToken": "ba7e8581-7dd7-4ad1-b291-51830bf25391",
+      "packetSha256": "a435d83d05a5a46c5ac08ec1d51893dc5dc2a9ee6f8b661bc7da4b073d801f29",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/P4-RC-122/submissions/gpt6-cyavkat-p4-1027/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "bc768a633e4d006cfb54efdb8b059e9665755a7f9a372dc3cbf5784abed69bd7"
+    }
+  ]
+}
