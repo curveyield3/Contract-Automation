@@ -34,6 +34,12 @@ export function boundReviewerLineupV13({root,authorityRoot}={}){
  return lineup;
 }
 export function boundReviewerForPhaseV1({root,authorityRoot,phase}={}){
+ if(authorityRoot==='Audit Skill - Audit Preview/audit-preview-v1'){
+   if(!Number.isInteger(Number(phase))||Number(phase)<1||Number(phase)>4)
+     throw new Error('AUDIT_PREVIEW_PHASE_OUT_OF_SCOPE');
+   return 'lite-solo-agent';
+ }
+
  if(isV13AuthorityV1(authorityRoot))
    return boundReviewerLineupV13({root,authorityRoot}).phaseReviewers[String(phase)];
  const n=Number(phase);

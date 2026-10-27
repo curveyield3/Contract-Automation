@@ -219,7 +219,7 @@ else
     echo "::warning::Audit-Controller audit-preview-v1 moved; rebuilding the initialization on latest audit-preview-v1 (attempt $attempt/5)."
     sleep $((attempt * 2))
   done
-  [ "$success" = true ] || { echo "::error::Failed to publish Audit Source Initialization to Audit-Controller audit-preview-v1."; exit 1; }
+  [ "$success" = true ] || { echo "::error::Failed to publish Audit Preview Source Initialization to Audit-Controller audit-preview-v1."; exit 1; }
   fi
 
   export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"

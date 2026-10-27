@@ -133,7 +133,7 @@ jobs:
           REVIEW_KIND: ${{ steps.request.outputs.kind }}
         run: |
           set -euo pipefail
-          args=(--controller-root .audit-controller --campaign-id "$AUDIT_CAMPAIGN" --campaign-path "$AUDIT_CAMPAIGN_PATH" --campaign-directory-path "$AUDIT_DIRECTORY" --review-kind "$REVIEW_KIND" --audit-controller-ref main)
+          args=(--controller-root .audit-controller --campaign-id "$AUDIT_CAMPAIGN" --campaign-path "$AUDIT_CAMPAIGN_PATH" --campaign-directory-path "$AUDIT_DIRECTORY" --review-kind "$REVIEW_KIND" --audit-controller-ref audit-preview-v1)
           if [ "$REVIEW_KIND" = discovery ]; then
             args+=(--unit-id "$(jq -r .unitId "$REQUEST_FILE")")
             if jq -e '.readyUnitIds != null' "$REQUEST_FILE" >/dev/null; then

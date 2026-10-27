@@ -37,7 +37,7 @@ else:
 
 authority={
   "repository":"curveyield3/Audit-Controller",
-  "ref":"main",
+  "ref":"audit-preview-v1",
   "authorityFolderPath":"Audit Skill - Audit Preview",
   "homepagePath":e["SKILL_HOME"],
   "liteSkillPath":e["SKILL_REPO_PATH"],

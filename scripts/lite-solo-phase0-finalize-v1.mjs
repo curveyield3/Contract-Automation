@@ -204,6 +204,7 @@ const retired=/PHASE0_RANDOMIZED_SIMULATION|PHASE0_SIMULATION_RUN_INDEX|PHASE5_S
 receipt.evidence=refs.reduce((rows,row)=>upsert(rows,row),(receipt.evidence??[]).filter(row=>!retired.test(String(row.role??'')+' '+String(row.path??''))));
 receipt.outputs=(receipt.outputs??[]).filter(row=>!retired.test(String(row.role??'')+' '+String(row.path??'')));
 receipt.outputs=upsert(receipt.outputs??[],{role:'PHASE0_AUDIT_SURFACE',path:'evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json',sha256:digestFile(evidence.auditSurface)});
+receipt.outputs=upsert(receipt.outputs,{role:'AUDIT_PREVIEW_CONTRACT_COUNT',path:'evidence/phase0/AUDIT_PREVIEW_CONTRACT_COUNT_v1.json',sha256:digestFile(countFile)});
 receipt.outputs=upsert(receipt.outputs,{role:'PRECOMPUTED_DEPLOY_CONFIG_EVIDENCE',path:'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md',sha256:digestFile(evidence.deployConfigMatrix)});
 receipt.outputs=upsert(receipt.outputs,{role:'PHASE0_FORK_DEPLOY_CONFIG',path:'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',sha256:digestFile(evidence.deployConfigExecution)});
 receipt.outputs=upsert(receipt.outputs,{role:'PRECOMPUTED_TARGETED_TEST_EVIDENCE',path:'work/phase-06/LITE_TARGETED_TEST_MATRIX.md',sha256:digestFile(evidence.targetedTestMatrix)});
@@ -230,7 +231,7 @@ const directory=read(required(directoryPath,'Audit Campaign Directory entry'));
 if(directory.campaignId!==receipt.campaign.campaignId) throw new Error('campaign directory identity mismatch');
 const sealedPhase0Receipt=rel(controllerRoot,receiptPath);
 const authorityRoot=path.posix.dirname(receipt.authority.homepagePath);
-if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot)||receipt.authority.liteRelease!==(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v6'?'lite-solo-v6':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v5'?'lite-solo-v5':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v4'?'lite-solo-v4':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v3'?'lite-solo-v3':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v2'?'lite-solo-v2':'lite-solo-v1'))throw new Error('lite-solo authority identity mismatch');
+if(authorityRoot!=='Audit Skill - Audit Preview/audit-preview-v1')throw new Error('unexpected Audit Preview authority root');
 if(directory.mode!=='LITE_SOLO'||directory.agent?.actorId!=='lite-solo-agent'||directory.deliveryTransport!=='DIRECT'||directory.agent?.chatUrl!=null)throw new Error('lite-solo Phase-0 directory identity mismatch');
 const assignment=preparePhaseWork({
   root:controllerRoot,
@@ -255,7 +256,7 @@ const directoryV2={
   deliveryTransport:'DIRECT',
   agent:directory.agent,
   agentModel:receipt.authority.liteRelease==='audit-preview-v1'?'PARALLEL_WORKER_UNITS':'ONE_PERSISTENT_AGENT',
-  executionModel:receipt.authority.liteRelease==='lite-solo-v4'?'PARALLEL_WORKER_UNITS':null,
+  executionModel:receipt.authority.liteRelease==='audit-preview-v1'?'PARALLEL_WORKER_UNITS':null,
   authorityRelease:receipt.authority.liteRelease,
   authorityDigest:receipt.authority.manifestSha256,
   unitPhaseEpoch:1,
