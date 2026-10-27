@@ -587,6 +587,8 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
   if(['REQUIRED_LIST','REQUIRED_ANALYSIS'].includes(field.type)&&
      (missing(val)||Array.isArray(val)&&val.length===0))
    errors.push(p+'.value: REQUIRED_NONBLANK');
+  if(field.type==='REQUIRED_ANALYSIS'&&typeof val!=='string')
+   errors.push(p+'.value: STRING_REQUIRED');
   if(isObject(val)){
    for(const name of field.itemRequiredFields??[]){
     const value=val[name],fp=p+'.value.'+name;
