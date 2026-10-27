@@ -11,7 +11,7 @@ import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite
 import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
 
-export const UNIT_POLICY=Object.freeze({issueBatchDefault:10,issueBatchMax:4,approvalBatchMax:5,maxParallelWorkers:null});
+export const UNIT_POLICY=Object.freeze({issueBatchDefault:4,issueBatchMax:4,approvalBatchMax:5,maxParallelWorkers:null});
 export const REQUEST_SCHEMA='curveyield-lite-solo-unit-batch-request-v1';
 // Public queue/packet contracts: one authoritative definition, not copied workflow limits.
 export const UNIT_QUEUE_STATUSES=Object.freeze(['BLOCKED_DEPENDENCY','AVAILABLE','CLAIMED',
@@ -317,8 +317,8 @@ function validateRequest(request,directory,phase){
  for(const key of Object.keys(request))if(!allowed.has(key))throw Error('unexpected controller/request field: '+key);
  assertV4(directory,phase,request);
  if(request.operation==='CLAIM'){
-  if(request.desiredUnitCount!==UNIT_POLICY.issueBatchDefault||request.items!==undefined)
-   throw Error('normal CLAIM must request exactly ten and omit items');
+  if(![UNIT_POLICY.issueBatchDefault,10].includes(request.desiredUnitCount)||request.items!==undefined)
+   throw Error('CLAIM must request four units (or ten for existing receipt-bound workers) and omit items');
  }else if(request.operation==='SUBMIT'){
   if(!Array.isArray(request.items)||request.items.length<1||request.items.length>UNIT_POLICY.approvalBatchMax)
    throw Error('SUBMIT must explicitly name 1–5 items');
