@@ -485,12 +485,15 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
   if(queue.units[u.unitId].acceptedSha256!==accepted.submissionSha256)throw Error('accepted digest mismatch');
   const list=byFile.get(u.shardPath)??[];list.push({unit:u,entries:accepted.submission.entries});byFile.set(u.shardPath,list);
  }
+ // Rebuild every shard deterministically from accepted immutable snapshots.
+ // A failed finalize can retry without appending duplicates to mutable shards.
  for(const [rel,edits] of byFile){
   const slab=read(root,rel);
-  for(const {unit,entries} of edits){
-   if(unit.kind==='APPEND')slab.entries.push(...entries);
-   else slab.entries[unit.shardIndex]=entries[0];
-  }
+  const fixed=edits.filter(e=>e.unit.kind==='SHARD').sort((a,b)=>a.unit.shardIndex-b.unit.shardIndex);
+  const append=edits.filter(e=>e.unit.kind==='APPEND').sort((a,b)=>a.unit.unitId.localeCompare(b.unit.unitId));
+  if(fixed.length&&append.length)throw Error('shard has conflicting fixed and append ownership: '+rel);
+  if(fixed.some((e,i)=>e.unit.shardIndex!==i))throw Error('incomplete fixed shard ownership: '+rel);
+  slab.entries=fixed.length?fixed.map(e=>e.entries[0]):append.flatMap(e=>e.entries);
   put(root,rel,slab);
  }
  // Full restoration is the pre-existing source-bound schema/identity validator.
