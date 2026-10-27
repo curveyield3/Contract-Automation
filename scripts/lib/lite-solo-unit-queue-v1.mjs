@@ -402,6 +402,12 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
 function handleSubmit({root,campaign,phase,queue,plan,request,directory}){
  const schema=loadPhaseSchema(root,AUTHORITY,phase).schema,items=[];
  for(const item of request.items){
+  // A durably queued request is SUBMITTED, never implicitly ACCEPTED.
+  // Missing cross-repository bytes remain pending and retryable.
+  const owned=queue.units[item.unitId];
+  if(owned?.status==='CLAIMED'&&owned.workerId===request.workerId&&
+     owned.claimEpoch===item.claimEpoch&&owned.claimToken===item.claimToken)
+   owned.status='SUBMITTED';
   try{items.push(acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,directory}));}
   catch(e){
    const state=queue.units[item.unitId],reason=String(e.message??e);
