@@ -389,7 +389,9 @@ function batchIndex(root,campaign,phase,requestId,units){
  return rel;
 }
 function handleClaim({root,campaign,phase,queue,plan,request}){
- const eligible=available(queue,plan,request.lane),selected=eligible.slice(0,UNIT_POLICY.issueBatchMax);
+ const held=Object.values(queue.units).filter(u=>u.workerId===request.workerId&&u.status==='CLAIMED').length;
+ const capacity=Math.max(0,UNIT_POLICY.issueBatchMax-held);
+ const eligible=available(queue,plan,request.lane),selected=eligible.slice(0,capacity);
  const units=selected.map(u=>{
   const state=queue.units[u.unitId];state.status='CLAIMED';state.workerId=request.workerId;
   state.claimEpoch++;state.claimToken=randomUUID();
@@ -399,7 +401,7 @@ function handleClaim({root,campaign,phase,queue,plan,request}){
    unitSpecRevision:u.unitSpecRevision};
  });
  const claimId=units.length?'claim-'+request.requestId:null;
- return {status:units.length?'CLAIMED':noWork(queue,plan),
+ return {status:units.length?'CLAIMED':capacity===0?'WORKER_CLAIM_LIMIT_REACHED':noWork(queue,plan),
   claimId,claimedUnits:units,
   batchIndexPath:units.length?batchIndex(root,campaign,phase,request.requestId,units):null};
 }
