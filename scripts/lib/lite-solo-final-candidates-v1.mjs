@@ -79,10 +79,13 @@ export function unresolvedTerminalAssuranceFailures({root,campaignPath,directory
  }
  if(accepted.length){
   const coverage=readRel('work/phase-10/COVERAGE_MATRIX_v1.json');
-  const rows=coverage?.rows??[];
-  if(!rows.length||!rows.some(x=>['PASS','PASSED','ACHIEVED'].includes(String(x.testStatus).toUpperCase())))
-   failures.push('Controller accepted '+new Set(accepted).size+
-    ' post-seal baseline checks, but final coverage matrix records no achieved tests; reconcile machine evidence into the coverage report before terminal completion.');
+  const post=coverage?.postSealAcceptedEvidence;
+  const expected=[...new Set(accepted)].sort();
+  if(post?.status!=='CONTROLLER_ACCEPTED_BOUNDED_EXECUTION'
+     ||JSON.stringify(post.acceptedObligationIds)!==JSON.stringify(expected)
+     ||!Number.isInteger(post.acceptedAssertionCount)||post.acceptedAssertionCount<expected.length)
+   failures.push('Controller accepted '+expected.length+
+    ' post-seal baseline checks, but their actual bounded machine assertions are missing from the authoritative coverage evidence overlay. Reconcile before Phase-10 terminal completion; do not promote unverified individual contexts to PASSED.');
  }
  return failures;
 }
