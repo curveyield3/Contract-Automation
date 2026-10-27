@@ -320,8 +320,9 @@ function validateRequest(request,directory,phase){
  for(const key of Object.keys(request))if(!allowed.has(key))throw Error('unexpected controller/request field: '+key);
  assertV4(directory,phase,request);
  if(request.operation==='CLAIM'){
-  if(![UNIT_POLICY.issueBatchDefault,10].includes(request.desiredUnitCount)||request.items!==undefined)
-   throw Error('CLAIM must request four units (or ten for existing receipt-bound workers) and omit items');
+  if((request.desiredUnitCount!==10&&(!Number.isSafeInteger(request.desiredUnitCount)||
+    request.desiredUnitCount<1||request.desiredUnitCount>UNIT_POLICY.issueBatchMax))||request.items!==undefined)
+   throw Error('CLAIM must request 1–4 units (legacy ten-unit requests are capped at four) and omit items');
  }else if(request.operation==='SUBMIT'){
   if(!Array.isArray(request.items)||request.items.length<1||request.items.length>UNIT_POLICY.approvalBatchMax)
    throw Error('SUBMIT must explicitly name 1–5 items');
@@ -420,7 +421,7 @@ function batchIndex(root,campaign,phase,requestId,units){
 function handleClaim({root,campaign,phase,queue,plan,request}){
  const held=Object.values(queue.units).filter(u=>u.workerId===request.workerId&&u.status==='CLAIMED').length;
  const capacity=Math.max(0,UNIT_POLICY.issueBatchMax-held);
- const eligible=available(queue,plan,request.lane),selected=eligible.slice(0,capacity);
+ const eligible=available(queue,plan,request.lane),selected=eligible.slice(0,Math.min(capacity,request.desiredUnitCount));
  const units=selected.map(u=>{
   const state=queue.units[u.unitId];state.status='CLAIMED';state.workerId=request.workerId;
   state.claimEpoch++;state.claimToken=randomUUID();
