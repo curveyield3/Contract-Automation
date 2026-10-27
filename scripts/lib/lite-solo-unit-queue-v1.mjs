@@ -950,7 +950,7 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
   // Reopen the candidate append slot for genuinely missing Step-3 candidate records,
   // or just the named original reconciliation batch member for deficient controls.
   if(phase===4){
-   const discoveryId=message.match(/\\bDISC-[0-9]{4}\\b/)?.[0];
+   const discoveryId=message.match(/\bDISC-[0-9]{4}\b/)?.[0];
    if(discoveryId&&message.includes('candidate must be present in Step 3')){
     const append=plan.units.find(u=>u.kind==='APPEND'&&u.field==='candidateRecords');
     if(append)mark(append,append);
