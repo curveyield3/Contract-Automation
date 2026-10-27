@@ -331,6 +331,9 @@ function machineLimitations(deployRows,targetRows){
 }
 function reviewerForRequiredPhase(phase,root=null,authorityRoot=null){
  const n=Number(phase);
+ // Keep later full-audit obligations visible, not executable, in terminal previews.
+ if(authorityRoot==='Audit Skill - Audit Preview/audit-preview-v1'&&n>4)
+   return 'OUT_OF_SCOPE_PREVIEW_TERMINAL';
  if(root&&authorityRoot)return boundReviewerForPhaseV1({root,authorityRoot,phase:n});
  if(n===7)return 'phase7-automation';
  if(n>=1&&n<=10)return 'lite-solo-agent';
