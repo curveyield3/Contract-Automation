@@ -12,7 +12,14 @@ const eligibleFields=Object.freeze({
 });
 const key=x=>String(x??'').trim();
 const sourceFamily=anchor=>key(anchor).replace(/:L[0-9]+(?:-L?[0-9]+)?$/, '');
-const bytes=value=>Buffer.byteLength(JSON.stringify(value),'utf8');
+// Use the bytes actually written to the paged assignment payload, including
+// source identities, record prefills, group keys and JSON serialization overhead.
+const packetBytes=(phase,field,groups)=>Buffer.byteLength(JSON.stringify({value:{
+  schemaVersion:'curveyield-lite-solo-batched-assignment-v1',
+  unitId:'P6-RC-B999999',phaseSequence:phase,field,
+  groupKeys:groups.map(g=>g.groupKey),members:groups.flatMap(g=>g.units),
+  readingGuide:'Complete each assigned member by its original recordKey. Omit already accepted members during targeted rework.'
+}},null,2)+'\n','utf8');
 const primaryContext=u=>Array.isArray(u.initialValue?.contextIds)&&u.initialValue.contextIds.length
   ?u.initialValue.contextIds.map(key).filter(Boolean).sort().join('|'):null;
 function groupingKey(unit,phase){
@@ -31,16 +38,20 @@ function groupingKey(unit,phase){
     return key(v?.candidateKey)||unit.unitId;
   return unit.unitId;
 }
-function splitOversizedGroup(group,limit){
+function splitOversizedGroup(group,phase,maxBytes,independent){
   const out=[];let chunk=[];
+  const flush=()=>{if(chunk.length)out.push({...group,units:chunk});chunk=[];};
   for(const unit of group.units){
-    if(bytes(unit)>limit)throw Error('semantic source record exceeds bounded batch payload: '+unit.unitId);
+    if(packetBytes(phase,group.field,[{...group,units:[unit]}])>maxBytes){
+      // A legitimate large source record is still an independent SHARD, not
+      // a reason to abandon the entire Phase 4/5/6 semantic plan.
+      flush();independent.add(unit.unitId);continue;
+    }
     const next=[...chunk,unit];
-    if(chunk.length&&bytes(next)>limit){out.push({...group,units:chunk});chunk=[];}
+    if(chunk.length&&packetBytes(phase,group.field,[{...group,units:next}])>maxBytes)flush();
     chunk.push(unit);
   }
-  if(chunk.length)out.push({...group,units:chunk});
-  return out;
+  flush();return out;
 }
 // No mutation: returns deterministic batches of ORIGINAL record-bearing unit specs.
 // Append slots, baseline test executions, proof jobs and global conclusions never enter.
@@ -62,9 +73,9 @@ export function planSemanticBatchesV1(units,phase,policy=SEMANTIC_BATCH_POLICY_V
     const gkey=groupingKey(unit,phase),group=fieldMap.get(gkey)??{field:unit.field,groupKey:gkey,units:[]};
     group.units.push(structuredClone(unit));fieldMap.set(gkey,group);byField.set(unit.field,fieldMap);
   }
-  const result=[],owned=new Set();
+  const result=[],owned=new Set(),independent=new Set();
   for(const [field,map] of byField){
-    const groups=[...map.values()].flatMap(g=>splitOversizedGroup(g,maxBytes-4096));
+    const groups=[...map.values()].flatMap(g=>splitOversizedGroup(g,phase,maxBytes,independent));
     let pending=[],groupCount=0;
     const flush=()=>{
       if(!pending.length)return;
@@ -77,16 +88,16 @@ export function planSemanticBatchesV1(units,phase,policy=SEMANTIC_BATCH_POLICY_V
       pending=[];groupCount=0;
     };
     for(const group of groups){
-      const next=[...pending,group],weight=bytes(next);
+      const next=[...pending,group],weight=packetBytes(phase,field,next);
       if(pending.length&&(groupCount>=maxGroups||weight>maxBytes||
          (groupCount>=minGroups&&weight>targetBytes)))flush();
       pending.push(group);groupCount++;
-      if(bytes(pending)>maxBytes)throw Error('semantic group cannot fit bounded packet: '+group.groupKey);
+      if(packetBytes(phase,field,pending)>maxBytes)throw Error('semantic group cannot fit bounded packet: '+group.groupKey);
     }
     flush();
   }
   const eligible=units.filter(u=>u.kind==='SHARD'&&eligibleFields[phase].has(u.field));
-  if(owned.size!==eligible.length||eligible.some(u=>!owned.has(u.unitId)))
+  if(owned.size+independent.size!==eligible.length||eligible.some(u=>!owned.has(u.unitId)&&!independent.has(u.unitId)))
     throw Error('semantic batch coverage mismatch');
   return {batches:result,batchedUnitIds:[...owned],unbatchedUnitIds:units.filter(u=>!owned.has(u.unitId)).map(u=>u.unitId),
     originalRecordCount:eligible.length,batchCount:result.length};
