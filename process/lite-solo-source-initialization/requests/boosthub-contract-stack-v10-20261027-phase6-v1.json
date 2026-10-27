@@ -7,5 +7,5 @@
   "deliveryTransport": "DIRECT",
   "authorizePhase0Execution": true,
   "repairContext": "Minimally fixed compile-only named imports in v9; preserve original v9 r1 source and audit identity.",
-  "recoveryReason": "Retry same BoostHub v10-r1 Phase 0 after source-bound Solidity/Vyper compile succeeded; collect new Slither silent-failure diagnostics and complete mandatory static analysis without bypass."
+  "recoveryReason": "Retry existing v10-r1 Phase 0 with Slither exact-build Crytic Standard framework selection; preserve all source-bound compiler evidence and do not create new campaign."
 }
