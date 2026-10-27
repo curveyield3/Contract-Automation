@@ -1,0 +1,130 @@
+name: cyavKATv25 deployment replacement from cyavKATv25b
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/archive-repairs/cyavkatv25-from-v25b-v1.json'
+permissions:
+  contents: read
+concurrency:
+  group: cyavkatv25-b-deploy-replacement
+  cancel-in-progress: false
+jobs:
+  transplant:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Select GitHub credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Transplant donor deployment support into current source ZIP
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          gh repo clone curveyield3/Audit-Controller /tmp/cyavkat-b-transplant -- --branch main --depth 1 --filter=blob:none --sparse
+          cd /tmp/cyavkat-b-transplant
+          git sparse-checkout set --no-cone '/campaigns/cyavKATv25.zip' '/campaigns/cyavKATv25b.zip'
+          git config user.name 'CurveYield Audit Source Transplant'
+          git config user.email 'audit-source-transplant@users.noreply.github.com'
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile,hashlib,copy,json,os
+          repo=Path('/tmp/cyavkat-b-transplant/campaigns')
+          target=repo/'cyavKATv25.zip'
+          donor=repo/'cyavKATv25b.zip'
+          digest=lambda data:hashlib.sha256(data).hexdigest()
+          donor_sha=digest(donor.read_bytes())
+          previous_sha=digest(target.read_bytes())
+          assert donor_sha=='7c620ff30c79ceff532af3ad0977d184e66d76a4e00b600d61050799f5b9c8be','Donor identity mismatch'
+          def read(z):
+              info=z.infolist()
+              paths=[x.filename for x in info]
+              assert len(paths)==len(set(paths)) and z.testzip() is None
+              for name in paths:
+                  assert name.startswith('cyavKAT/') and not Path(name).is_absolute() and '..' not in Path(name).parts and '\\' not in name
+              return {x.filename:(x,z.read(x)) for x in info if not x.is_dir()}
+          with zipfile.ZipFile(target) as a,zipfile.ZipFile(donor) as b:
+              dest=read(a);src=read(b)
+              prefix='cyavKAT/'
+              internal=prefix+'upgrade/internal/'
+              legacy=prefix+'upgrade/script/'
+              selected=[n for n in src if n.startswith(internal) or n.startswith(prefix+'upgrade/hardhat-src/')]
+              selected.extend(prefix+n for n in [
+                  'upgrade/scripts/deploy-cyavkat-unified-v1.cjs',
+                  'upgrade/scripts/merkl_preflight_v6.py',
+                  'upgrade/hardhat.config.cjs',
+                  'upgrade/package.json',
+                  'upgrade/package-lock.json',
+                  'upgrade/foundry.toml',
+                  'upgrade/UNIFIED_HARDHAT_DEPLOYMENT_v1.md',
+                  'upgrade/run-tests.sh',
+                  'hardhat.config.cjs',
+                  'package.json',
+                  'package-lock.json',
+                  'audit-deployment.json',
+                  'audit-scope.json',
+                  'CHANGELOG_UNIFIED_HARDHAT_v1.md',
+              ])
+              selected=sorted(set(selected))
+              assert all(n in src for n in selected)
+              assert len([n for n in selected if n.startswith(internal)])>=20
+              assert legacy+'CyavKatDeployAll_v29.s.sol' in dest,'Unexpected previous deployment version'
+              protected=lambda n:n.startswith(prefix+'upgrade/src/') or n.startswith(prefix+'ipor-fusion/') or n.startswith(prefix+'deployed/')
+              originals={n:digest(blob) for n,(_,blob) in dest.items() if protected(n)}
+              originals_names=set(dest)
+              for n in list(dest):
+                  if n.startswith(legacy):del dest[n]
+              for n in selected:dest[n]=src[n]
+              readme=prefix+'README.md'
+              assert readme in dest
+              meta,data=dest[readme]
+              data+=b'\n\n## Deployment entrypoint update\nThe previous consolidated Foundry entrypoint has been superseded by the source-identical cyavKATv25b Hardhat orchestrator at upgrade/scripts/deploy-cyavkat-unified-v1.cjs and its required upgrade/internal Solidity phases. See upgrade/UNIFIED_HARDHAT_DEPLOYMENT_v1.md for Katana Anvil-only execution. The production Solidity sources and IPOR vendor dependencies in this archive are preserved exactly.\n'
+              dest[readme]=(meta,data)
+              assert originals=={n:digest(dest[n][1]) for n in originals}
+              manifest={
+                 'schemaVersion':'cyavkat-deployment-transplant-v1',
+                 'donorArchive':'campaigns/cyavKATv25b.zip',
+                 'donorSha256':donor_sha,
+                 'previousArchiveSha256':previous_sha,
+                 'entrypoint':'upgrade/scripts/deploy-cyavkat-unified-v1.cjs',
+                 'removedLegacyScripts':sorted(n for n in originals_names if n.startswith(legacy)),
+                 'copiedDonorFiles':[{'path':n,'sha256':digest(src[n][1])} for n in selected],
+                 'protectedSourceCount':len(originals),
+                 'protectedSourcesUnmodified':True,
+                 'differentProtectedFilesFromDonor':sum(1 for n,h in originals.items() if n in src and h!=digest(src[n][1])),
+              }
+              dest[prefix+'DEPLOYMENT_TRANSPLANT_v1.json']=(None,(json.dumps(manifest,indent=2)+'\n').encode())
+              temp=target.with_suffix('.zip.new')
+              with zipfile.ZipFile(temp,'w') as out:
+                  for n,(i,blob) in dest.items():
+                      meta=copy.copy(i) if i is not None else zipfile.ZipInfo(n)
+                      meta.filename=n
+                      if i is None:meta.compress_type=zipfile.ZIP_DEFLATED
+                      out.writestr(meta,blob)
+          with zipfile.ZipFile(temp) as z:
+              assert z.testzip() is None
+              assert z.read('cyavKAT/upgrade/scripts/deploy-cyavkat-unified-v1.cjs')==src['cyavKAT/upgrade/scripts/deploy-cyavkat-unified-v1.cjs'][1]
+              assert z.read('cyavKAT/audit-deployment.json')==src['cyavKAT/audit-deployment.json'][1]
+              assert not any(n.startswith('cyavKAT/upgrade/script/') for n in z.namelist())
+          os.replace(temp,target)
+          print('NEW_ARCHIVE_SHA256='+digest(target.read_bytes()))
+          print('DONOR_SHA256='+donor_sha)
+          print('PRESERVED_PRODUCTION_AND_VENDOR_FILES='+str(len(originals)))
+          print('COPY_COUNT='+str(len(selected)))
+          print('DIFFERING_PROTECTED_FILES_FROM_DONOR='+str(manifest['differentProtectedFilesFromDonor']))
+          PY
+          git add -- campaigns/cyavKATv25.zip
+          test -n "$(git diff --cached --name-only)"
+          git commit -m 'fix(source): replace v25 deployment with v25b Hardhat subsystem'
+          git push origin HEAD:main
