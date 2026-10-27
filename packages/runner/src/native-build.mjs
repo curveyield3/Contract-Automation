@@ -123,10 +123,21 @@ async function firstPresent(root, names, fsApi) {
 
 async function buildInfoFiles(projectRoot, fsApi = fs, { includeFoundry = false } = {}) {
   const rootEntries = await fsApi.readdir(projectRoot, { withFileTypes: true });
-  const artifactDirs = rootEntries
-    .filter((entry) => entry.isDirectory() && (entry.name.startsWith('artifacts') || (includeFoundry && entry.name === 'out')))
+  let artifactDirs = rootEntries
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith('artifacts'))
     .map((entry) => entry.name)
     .sort();
+  if (includeFoundry) {
+    // Follow the admitted Foundry default profile's out path; a package may
+    // compile into a nested directory instead of Forge's default "out".
+    const config = await fsApi.readFile(path.join(projectRoot, 'foundry.toml'), 'utf8');
+    const defaultProfile = config.split(/^\s*\[profile\.default\]\s*$/m)[1]?.split(/^\s*\[[^\]]+\]\s*$/m)[0] ?? '';
+    const configuredOut = defaultProfile.match(/^\s*out\s*=\s*["']([^"']+)["']/m)?.[1] ?? 'out';
+    const absoluteOut = path.resolve(projectRoot, configuredOut);
+    if (!configuredOut || !absoluteOut.startsWith(path.resolve(projectRoot) + path.sep))
+      throw new Error('Unsafe Foundry output directory');
+    artifactDirs = [configuredOut];
+  }
   const files = [];
   for (const artifactDir of artifactDirs) {
     const buildInfoDir = path.join(projectRoot, artifactDir, 'build-info');
