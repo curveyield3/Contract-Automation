@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "operation": "SUBMIT",
+  "campaignId": "curveyield-dex-v17-source-r2",
+  "campaignGenerationId": "curveyield-dex-v17-source-r2-g1-20261027T104546Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-v17r2-automation-ad-20261027t2217",
+  "sourceSha256": "bd0fc0a955c585ea0357feecb3d16caf9f48dd9ca5073a6a18948eab7c0f5e55",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "requestId": "v17r2-p4-sp343-sp345-submit01-v1",
+  "items": [
+    {
+      "unitId": "P4-SP-343",
+      "claimEpoch": 1,
+      "claimToken": "2e19bd05-2728-434b-b6d0-f4394292e5e0",
+      "packetSha256": "6a3359708c8bcf76bd744f13bab8ea1ad71fd335d742ba2ba07afb6eced23882",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/P4-SP-343/submissions/gpt6-v17r2-automation-ad-20261027t2217/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "9e5f7f068102bedb88d661e234419c880ae242db74f411d784ee514bc0606788",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "P4-SP-344",
+      "claimEpoch": 1,
+      "claimToken": "42ff7c2f-cbb9-4b5d-a048-99b5c3c8d0e6",
+      "packetSha256": "6a3359708c8bcf76bd744f13bab8ea1ad71fd335d742ba2ba07afb6eced23882",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/P4-SP-344/submissions/gpt6-v17r2-automation-ad-20261027t2217/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "994ac6e34c57502012b35ad9c271e848119d48b15d9ec95408735774858e2218",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "P4-SP-345",
+      "claimEpoch": 1,
+      "claimToken": "bae8db9c-2929-496c-bddf-81c5db03b303",
+      "packetSha256": "103dfce484b8ccfa1add07999af3ace5db3b9cccb4b7c4e16dcb7abf0256f875",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/P4-SP-345/submissions/gpt6-v17r2-automation-ad-20261027t2217/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "a03caedfdd01d3d0f5bb1e2aa7941d546698a60bbf847852360bdcc7a2a901a5",
+      "unitSpecRevision": 1
+    }
+  ]
+}
