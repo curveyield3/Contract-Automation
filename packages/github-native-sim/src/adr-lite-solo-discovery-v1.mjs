@@ -14,7 +14,13 @@ import {independentSpecItemsV13} from './adr-lite-solo-independent-spec-v1.mjs';
 
 const pathJoin=(campaign,relative)=>path.posix.join(campaign,'work/phase-04/discovery',relative);
 const asset=(root,campaign,name)=>reviewInventoryRelV1(root,campaign,name);
-const known=(root,rel)=>{const file=repoFile(root,rel);return fs.existsSync(file)?readJson(file):null;};
+const known=(root,rel)=>{
+ const file=repoFile(root,rel);
+ if(!fs.existsSync(file))return null;
+ const stored=readJson(file);
+ return stored?.schemaVersion==='curveyield-discovery-assignment-packet-manifest-v1'
+  ?readUnitPacketV1({root,packetPath:rel}):stored;
+};
 const hex=bytes=>createHash('sha256').update(bytes).digest('hex');
 const arr=x=>Array.isArray(x)?x:[];
 const SOLO_WINDOW_MAX_UNITS=8;
@@ -42,6 +48,62 @@ function normalizeAccepted(state){return state?.payload??state;}
 const packetRel=(campaign,unit)=>pathJoin(campaign,unit+'/ASSIGNMENT_PACKET_v1.json');
 const submissionRel=(campaign,unit)=>pathJoin(campaign,unit+'/SUBMISSION_v1.json');
 const stateRel=(campaign)=>pathJoin(campaign,'DISCOVERY_STATE_v1.json');
+const PACKET_PART_BYTES=12*1024;
+const PACKET_PART_MAX=24*1024;
+function packetPartPath(packetPath,i){
+ return path.posix.join(path.posix.dirname(packetPath),'packet-pages',
+  'CHUNK_'+String(i+1).padStart(6,'0')+'_v1.json');
+}
+// v4 stores a bounded packet manifest and immutable small pages; only trusted
+// validators reconstruct the complete source-bound packet in memory.
+function writePagedPacketV1({root,packetPath,packet}){
+ const raw=Buffer.from(JSON.stringify(packet,null,2)+'\\n','utf8');
+ const count=Math.ceil(raw.length/PACKET_PART_BYTES);
+ for(let i=0;i<count;i++){
+  const part=raw.subarray(i*PACKET_PART_BYTES,(i+1)*PACKET_PART_BYTES);
+  const page={schemaVersion:'curveyield-discovery-packet-chunk-v1',
+   index:i+1,total:count,offset:i*PACKET_PART_BYTES,
+   sha256:hex(part),encoding:'base64',data:part.toString('base64')};
+  if(Buffer.byteLength(JSON.stringify(page,null,2)+'\\n')>PACKET_PART_MAX)
+   throw Error('discovery source packet page exceeds 24 KiB: '+packetPath);
+  writeJson(repoFile(root,packetPartPath(packetPath,i)),page);
+ }
+ const manifest={schemaVersion:'curveyield-discovery-assignment-packet-manifest-v1',
+  unitId:packet.payload.unitId,campaignGenerationId:packet.campaignGenerationId,
+  sourceSha256:packet.sourceSha256,sha256:hex(raw),byteLength:raw.length,
+  partBytes:PACKET_PART_BYTES,pageCount:count,
+  readingGuide:'Read the controller-issued paged unit section index. This manifest binds the exact complete source packet without storing a giant single JSON record.'};
+ writeJson(repoFile(root,packetPath),manifest);
+}
+export function readUnitPacketV1({root,packetPath}){
+ const manifest=readJson(repoFile(root,packetPath));
+ if(manifest.schemaVersion!=='curveyield-discovery-assignment-packet-manifest-v1')
+  return manifest; // Unchanged historical transport remains readable.
+ if(!Number.isSafeInteger(manifest.pageCount)||manifest.pageCount<1||
+    manifest.partBytes!==PACKET_PART_BYTES||!/^[a-f0-9]{64}$/.test(manifest.sha256))
+  throw Error('invalid paged discovery packet manifest');
+ const chunks=[];
+ for(let i=0;i<manifest.pageCount;i++){
+  const part=readJson(repoFile(root,packetPartPath(packetPath,i)));
+  if(part.schemaVersion!=='curveyield-discovery-packet-chunk-v1'||
+     part.index!==i+1||part.total!==manifest.pageCount||
+     part.offset!==i*PACKET_PART_BYTES||part.encoding!=='base64')
+   throw Error('discovery packet fragment index/offset mismatch');
+  const chunk=Buffer.from(part.data,'base64');
+  if(chunk.length>PACKET_PART_BYTES||hex(chunk)!==part.sha256)
+   throw Error('discovery packet fragment sha256 mismatch');
+  chunks.push(chunk);
+ }
+ const raw=Buffer.concat(chunks);
+ if(raw.length!==manifest.byteLength||hex(raw)!==manifest.sha256)
+  throw Error('discovery packet aggregate SHA-256 mismatch');
+ const packet=JSON.parse(raw.toString('utf8'));
+ if(packet.payload?.unitId!==manifest.unitId||
+    packet.campaignGenerationId!==manifest.campaignGenerationId||
+    packet.sourceSha256!==manifest.sourceSha256)
+  throw Error('discovery packet identity mismatch');
+ return packet;
+}
 const stubObligations=(directory,now)=>head(directory,now,'curveyield-baseline-obligations-v1',{obligations:[],testGroups:[]});
 
 export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,state,now,sharedInputs=null,persist=true}){
@@ -152,7 +214,12 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
    valueFlows:arr(facts?.payload?.valueFlows).filter(x=>unit.contracts?.includes(x.contract))
   }}:{})
  });
- if(persist)writeJson(repoFile(root,packetRel(campaignPath,unitId)),packet);
+ if(persist){
+  const rel=packetRel(campaignPath,unitId);
+  if(authorityRoot.endsWith('/lite-solo-v4'))
+   writePagedPacketV1({root,packetPath:rel,packet});
+  else writeJson(repoFile(root,rel),packet);
+ }
  return packet;
 }
 
@@ -223,6 +290,8 @@ export function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
    const body={schemaVersion:'curveyield-discovery-packet-page-v1',unitId,sourcePacketPath:packetPath,
     section,offset,items:chunk};
    const bytes=Buffer.byteLength(JSON.stringify(body));
+   if(bytes>SOLO_PACKET_PAGE_MAX_BYTES)
+    throw Error('source packet section page exceeds 24 KiB; planner must split single item');
    writeJson(repoFile(root,rel),body);
    pages.push({path:rel,section,offset,count:chunk.length,bytes,
     ...(bytes>SOLO_PACKET_PAGE_MAX_BYTES?{oversizedSingleItem:true}:{})});
