@@ -241,7 +241,9 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
  // One monotonic namespace per semantic unit family, including related fields.
  const nextId=field=>{
   const family=rowId(phase,field,0).slice(0,-4);
-  return rowId(phase,field,(serial[family]??0)++);
+  const index=serial[family]??0;
+  serial[family]=index+1;
+  return rowId(phase,field,index);
  };
  for(const d of descriptors){
   const field=d.path?.at(-1);
