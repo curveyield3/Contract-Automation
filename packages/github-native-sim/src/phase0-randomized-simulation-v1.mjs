@@ -409,12 +409,30 @@ async function executeHardhatProfileV1({projectRoot,anvilUrl,profile,chain,local
     stdout:String(r.stdout??'').slice(-24000),stderr:String(r.stderr??'').slice(-12000)};
   return{attempts:[attempt],limitations:[],scriptDispositions:[{...row,disposition:status==='PASS'?'EXECUTED_PASS':'EXECUTED_FAILED',attemptStatus:status}],status:status==='PASS'?'PASS':'COMPLETE_WITH_FAILURES'};
 }
+async function foundryPinnedLibraries(projectRoot){
+  let config;try{config=await fs.readFile(path.join(projectRoot,'foundry.toml'),'utf8');}catch(e){if(e?.code==='ENOENT')return[];throw e;}
+  // Foundry can compile a linked library yet retain placeholders in a script
+  // contract that constructs another contract using that library. Pass the
+  // source-authored linker pins explicitly to forge script.
+  const list=config.match(/^\s*libraries\s*=\s*\[([\s\S]*?)\]/m)?.[1]??'';
+  const pins=[...list.matchAll(/["']([^"']+)["']/g)].map(x=>x[1]);
+  for(const pin of pins){
+    const m=pin.match(/^(.+\.sol):([A-Za-z_]\w*):(0x[a-fA-F0-9]{40})$/);
+    if(!m)throw new Error('Invalid source Foundry library pin: '+pin);
+    const source=path.resolve(projectRoot,m[1]),root=path.dirname(projectRoot);
+    if(!(source.startsWith(root+path.sep))||!await fs.stat(source).then(x=>x.isFile()).catch(()=>false))
+      throw new Error('Source Foundry library pin is not within its accepted archive: '+pin);
+  }
+  return pins;
+}
 export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSigner,detected}){
   const attempts=[],limitations=[];
+  const pinnedLibraries=detected.foundry.length?await foundryPinnedLibraries(projectRoot):[];
   let help='';
   if(detected.foundry.length){const h=await runProcess({command:'forge',args:['script','--help'],cwd:projectRoot,env:scrubbedEnv()});help=`${h.stdout}\n${h.stderr}`;}
   for(const item of detected.foundry){
     const args=['script',item.entry,'--rpc-url',anvilUrl,'--broadcast'];
+    if(pinnedLibraries.length)args.push('--libraries',pinnedLibraries.join(','));
     if(/--unlocked/.test(help))args.push('--unlocked');
     if(/--sender/.test(help))args.push('--sender',account0);
     if(!/--unlocked/.test(help)){
