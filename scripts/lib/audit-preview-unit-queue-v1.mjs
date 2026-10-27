@@ -583,11 +583,22 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
  const items=plan.units.filter(u=>['FLOW','ATTACK'].includes(u.kind));
  if(!items.every(u=>queue.units[u.unitId]?.status==='ACCEPTED'))return false;
  if(queue.stage==='RECONCILIATION')return true;
- const state={schemaVersion:'curveyield-discovery-state-v1',campaignId:directory.campaignId,
-  campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
-  generatedAt:new Date().toISOString(),payload:{reviewPolicy:'correctness-verdict-v13',gaps:asArray(discoveryInput(root,campaign,'FLOW_PLAN_v1.json').payload?.gaps)}};
  const acceptedSubmissions=items.map(u=>({unitId:u.unitId,
   submission:read(root,queue.units[u.unitId].acceptedPath).submission}));
+ // The fork admitted F/R packets using class-check verdicts. Source-backed
+ // per-class reviews cannot be recast as new function-wide verdicts.
+ const correctness=acceptedSubmissions.filter(x=>!x.unitId.startsWith('X-'));
+ const allVerdicts=correctness.every(x=>(x.submission?.rows??[]).every(row=>
+  ['CORRECT','DEFECT','UNRESOLVED'].includes(row?.verdict)));
+ const allClassChecks=correctness.every(x=>(x.submission?.rows??[]).every(row=>
+  Array.isArray(row?.checks)&&typeof row.summary==='string'&&row.summary.trim()));
+ if(!allVerdicts&&!allClassChecks)
+  throw Error('AUDIT_PREVIEW_INCOMPATIBLE_ACCEPTED_DISCOVERY_REVIEW_SHAPE');
+ const state={schemaVersion:'curveyield-discovery-state-v1',campaignId:directory.campaignId,
+  campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
+  generatedAt:new Date().toISOString(),payload:{
+   reviewPolicy:allVerdicts?'correctness-verdict-v13':'source-anchored-class-checks-v1',
+   gaps:asArray(discoveryInput(root,campaign,'FLOW_PLAN_v1.json').payload?.gaps)}};
  const inventory=discoveryInput(root,campaign,'REVIEW_INVENTORY_v1.json');
  const summary=buildDiscoverySummaryV1({state,inventory,plan:discoveryInput(root,campaign,'FLOW_PLAN_v1.json'),
   acceptedSubmissions,taxonomy:loadTaxonomyV1(automationRoot),now:new Date().toISOString()});
