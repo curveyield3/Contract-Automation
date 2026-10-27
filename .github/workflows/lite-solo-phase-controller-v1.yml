@@ -7,11 +7,54 @@ on:
 permissions:
   contents: write
   actions: write
-concurrency:
-  group: lite-solo-phase-boundary-controller
-  cancel-in-progress: false
 jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      requests: ${{ steps.requests.outputs.requests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Collect campaign-scoped boundary requests from the triggering push
+        id: requests
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          root=process/agent-upload/lite-solo-phase-boundary
+          if [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]]; then
+            mapfile -t changed < <(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" -- "$root/")
+          else
+            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")
+          fi
+          : > /tmp/lite-solo-boundary-requests.ndjson
+          for request in "${changed[@]}"; do
+            [[ "$request" =~ ^process/agent-upload/lite-solo-phase-boundary/[A-Za-z0-9._-]+\.json$ ]] || continue
+            test -f "$request" || continue
+            jq -ec --arg file "$request" '
+              select(.schemaVersion=="curveyield-lite-solo-phase-boundary-request-v1" and
+                .reviewKind=="phase" and
+                (.campaignId|type=="string" and test("^[a-zA-Z0-9_.-]+-r[0-9]+$")) and
+                .auditControllerRef=="main" and
+                (.attempt|type=="number" and .>=1) and
+                (.phaseSequence|type=="number" and IN(1,2,3,8,9,10)))
+              | {request_path:$file,campaign_id:.campaignId}
+            ' "$request" >> /tmp/lite-solo-boundary-requests.ndjson
+          done
+          echo "requests=$(jq -sc '{include:.}' /tmp/lite-solo-boundary-requests.ndjson)" >> "$GITHUB_OUTPUT"
   boundary:
+    needs: discover
+    if: ${{ needs.discover.outputs.requests != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.requests) }}
+    concurrency:
+      group: lite-solo-phase-boundary-controller-${{ matrix.campaign_id }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
@@ -30,12 +73,12 @@ jobs:
         run: bash scripts/select-audit-controller-token.sh
       - name: Parse strictly isolated lite-solo request
         id: request
+        env:
+          MATRIX_REQUEST: ${{ matrix.request_path }}
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/agent-upload/lite-solo-phase-boundary/)
-          test "${#changed[@]}" -eq 1
-          request="${changed[0]}"
+          request="$MATRIX_REQUEST"
           [[ "$request" =~ ^process/agent-upload/lite-solo-phase-boundary/[A-Za-z0-9._-]+\.json$ ]]
           test -f "$request"
           jq -e '.schemaVersion=="curveyield-lite-solo-phase-boundary-request-v1" and
