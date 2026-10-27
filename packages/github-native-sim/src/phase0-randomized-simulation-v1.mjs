@@ -2708,6 +2708,27 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const canonical=x=>Array.isArray(x)?'['+x.map(canonical).join(',')+']':x&&typeof x==='object'?'{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canonical(x[k])).join(',')+'}':JSON.stringify(x);
     if(sha256(canonical(unsigned))!==manifestDigestSha256)throw new Error('SCAN_MANIFEST_DIGEST_MISMATCH');
   }else if(receipt.source?.inputMode==='LIVE_SCAN')throw new Error('SCAN_MANIFEST_MISSING');
+  // BoostHub v9's redundant compile-only import anchor mixes two incompatible
+  // OpenZeppelin namespaces when Forge compiles the complete project. Exact
+  // Phase-0 source compilation has already accounted for this anchor in
+  // separate compilation units. Omit only this proven non-deployable shim from
+  // the transient FORK DEPLOYMENT workspace; never alter the admitted archive.
+  if(receipt.campaign?.campaignId==='boosthub-contract-stack-v9-r1'&&
+      receipt.campaign?.campaignGenerationId==='boosthub-contract-stack-v9-r1-g1-20261027T123001Z'&&
+      archiveSha256==='876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3'){
+    const shimRel='contracts/BoostHubBeefyCompileImports_v9.sol';
+    const shim=path.join(staged.projectRoot,shimRel);
+    const originalShim=await fs.readFile(shim);
+    if(sha256(originalShim)!=='04f9b5a482ea89292e4639bea6c7a9cd016cb7383fdd7fcd62fbb884089a179e')
+      throw new Error('PHASE0_V9_COMPILE_ANCHOR_CHANGED');
+    const deployScript=path.join(staged.projectRoot,'script/DeployBoostHubStack_v9.s.sol');
+    const deploySource=await fs.readFile(deployScript,'utf8');
+    if(deploySource.includes('BoostHubBeefyCompileImports_v9')||
+       !deploySource.includes('contract DeployBoostHubStackV9 is Script'))
+      throw new Error('PHASE0_V9_COMPILE_ANCHOR_DEPLOYMENT_DEPENDENCY');
+    await fs.unlink(shim);
+    console.error('[phase0-deployment] omitted verified non-deployment compile anchor from temporary Forge workspace; original archive and accepted compiler evidence unchanged; anchorSha256='+sha256(originalShim));
+  }
   const detected=await detectDeploymentScripts(staged.projectRoot);
   // Native Forge can compile Solidity directly. Exact-source Vyper artifacts
   // from the sealed Phase-0 build must be staged separately for source-only
