@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {createUnitPlanV1,processUnitRequestV1} from '../../../lib/lite-solo-unit-queue-v1.mjs';
-import {fixture,evidence,digest,json,get,put,writeFile,snapshot,correctSubmission} from './context.mjs';
+import {fixture,evidence,digest,json,get,put,writeFile,snapshot,correctSubmission,git} from './context.mjs';
 
-export {fixture,evidence,digest,json,get,put,writeFile,snapshot,correctSubmission};
+export {fixture,evidence,digest,json,get,put,writeFile,snapshot,correctSubmission,git};
 export const req=(f,op,worker,id,extra={})=>f.request(op,worker,id,extra);
 export const claim=(f,worker,id)=>f.process(req(f,'CLAIM',worker,id,{desiredUnitCount:10})).claimedUnits;
 export const snapshotWith=(f,claimed,worker,data=null,attempt=1)=>{
