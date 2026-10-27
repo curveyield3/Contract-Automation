@@ -52,7 +52,7 @@ if(arg.mode!=='finalize'){
  // The size error must be exact and all original units already ACCEPTED; a
  // worker request cannot set FINALIZE or mutate any accepted snapshot.
  if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
-    /^v13 shard exceeds authorized bound: shard-[0-9]{4}_v1\\.json$/.test(
+    /^v13 shard exceeds authorized bound: shard-[0-9]{4}_v1\.json$/.test(
       String(recorded.finalizeDetails?.error??''))&&
     Object.keys(recorded.units??{}).length>0&&
     Object.values(recorded.units).every(unit=>unit.status==='ACCEPTED')){
