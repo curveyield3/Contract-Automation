@@ -256,6 +256,7 @@ function validateRequest(request,directory,phase){
  }else if(request.operation==='SUBMIT'){
   if(!Array.isArray(request.items)||request.items.length<1||request.items.length>UNIT_POLICY.approvalBatchMax)
    throw Error('SUBMIT must explicitly name 1–5 items');
+  if(request.items.some(x=>!isObject(x)))throw Error('SUBMIT items must be objects');
   if(new Set(request.items.map(x=>x.unitId)).size!==request.items.length)throw Error('duplicate SUBMIT unit');
   const required=['unitId','claimEpoch','claimToken','packetSha256','submissionPath',
    'submissionSha256','unitSpecRevision'];
