@@ -132,7 +132,7 @@ const rebind=v=>{
 };
 const allFiles=(folder,rx)=>fs.existsSync(toFile(folder))?
  fs.readdirSync(toFile(folder)).filter(rx):[];
-const restoreControls=(start)=>{
+const restoreControls=(start,scope)=>{
  for(const name of ['CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json','SECURITY_TRACEABILITY_GRAPH_v1.json','EVIDENCE_INVALIDATION_MATRIX_v1.json','DOMAIN_APPLICABILITY_REGISTRY_v1.json']){
   const rel=dest+'/controller/'+name;
   if(!fs.existsSync(toFile(rel)))continue;
@@ -143,19 +143,32 @@ const restoreControls=(start)=>{
   if(Array.isArray(control.phaseCheckpoints))
    control.phaseCheckpoints=control.phaseCheckpoints.filter(x=>Number(String(x.phaseId??'').replace('phase-',''))<start);
   if(name.startsWith('CARRIED_')){
-   control.obligations=(control.obligations??[]).filter(x=>Number(x.originPhase)<start);
+   const requested=new Set(scope.obligationIds);
+   const before=control.obligations??[];
+   const unknown=[...requested].filter(id=>!before.some(o=>String(o.obligationId)===id));
+   if(unknown.length)throw Error('LSC_UNKNOWN_OBLIGATION_IDS_'+unknown.join('_'));
+   control.obligations=before.filter(x=>Number(x.originPhase)<start);
    for(const row of control.obligations){
     const closedIn=(row.closureEvidenceRefs??[]).some(p=>{
      const m=String(p).match(/(?:phase-|PHASE_)(0?[0-9]{1,2})/i);
      return m&&Number(m[1])>=start;
     });
-    if(Number(row.requiredPhase)>=start||closedIn){
+    if(requested.has(String(row.obligationId))||Number(row.requiredPhase)>=start||closedIn){
       row.status='OPEN';row.statusReason=null;row.closureEvidenceRefs=[];row.updatedAt=when;
     }
    }
   }
-  // Prior graph nodes remain as historic context, but imports and new findings
-  // from corrected phases must be independently validated by the controller.
+  if(name.startsWith('SECURITY_TRACEABILITY_')){
+   const old=control.nodes??[];
+   control.nodes=old.filter(n=>n.originPhase==null||Number(n.originPhase)<start);
+   const kept=new Set(control.nodes.map(n=>n.nodeId));
+   control.edges=(control.edges??[]).filter(e=>{
+    const a=e.from??e.source??e.sourceNodeId, b=e.to??e.target??e.targetNodeId;
+    return kept.has(a)&&kept.has(b);
+   });
+  }
+  // Historical accepted predecessor evidence is retained. Downstream nodes,
+  // imports and checkpoints are never treated as already accepted in the fork.
   save(rel,control);
  }
  for(const item of ['results','preflight','phase8-revalidation','phase5-candidate-evidence']){
@@ -215,7 +228,7 @@ const launch=()=>{
    save(rel,rewritten);
   }
  }
- restoreControls(request.startPhase);
+ restoreControls(request.startPhase,scope);
  // Reconcile imported receipt references against the actual fork-local bytes.
  for(let p=0;p<=predecessor;p++){
   const rel=dest+'/receipts/PHASE_'+String(p).padStart(2,'0')+'_RECEIPT_v1.json';
