@@ -121,10 +121,10 @@ export function validatePhase8LinkageV1({root,campaignPath,form}={}){
   return [...expected].sort().filter(k=>!found.has(k)).map(k=>'Phase 8 missing Phase 6 candidate '+k);
  }catch(e){return ['Phase 8 linkage validation error: '+String(e.message??e)];}
 }
-export function validatePhase10CoverageLabelV1({root,campaignPath,form}={}){
+export function validatePhase10CoverageLabelV1({root,campaignPath,form,requireCoverageMatrix=false}={}){
  try{
   const matrix=read(rootFile(root,campaignPath,'work/phase-10/COVERAGE_MATRIX_v1.json'));
-  if(!matrix)return [];
+  if(!matrix)return requireCoverageMatrix?['Phase 10 coverage matrix is missing; required review coverage cannot be claimed complete']:[];
   const reason=output(form,3,'verdictRationale');
   return typeof reason==='string'&&reason.includes(matrix.label)?[]:['Phase 10 verdictRationale must contain '+matrix.label];
  }catch(e){return ['Phase 10 coverage label validation error: '+String(e.message??e)];}

@@ -890,7 +890,7 @@ try{
   }
   if(activeDetectionPolicyV1(predecessor)){
     const fn=({6:validatePhase6AttackerWorkV1,8:validatePhase8LinkageV1,10:validatePhase10CoverageLabelV1})[sequence];
-    if(fn)deficiencies.push(...fn({root,campaignPath,form}));
+    if(fn)deficiencies.push(...fn({root,campaignPath,form,requireCoverageMatrix:sequence===10&&/\/lite-solo-v[345]$/.test(authorityRoot)}));
   }
 
   if(sequence===9&&deficiencies.length===0){
