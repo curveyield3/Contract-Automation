@@ -11,14 +11,18 @@ const rpc=process.env.RPC_ETHEREUM;
 if(!rpc)throw Error('APC_ARCHIVE_RPC_UNAVAILABLE');
 if(!/^audit-preview-[a-z0-9.-]+-r[0-9]+$/.test(request.previewCampaignId??''))throw Error('APC_BAD_PREVIEW_ID');
 const slug=request.previewCampaignId.replace(/-r[0-9]+$/,'');
-const dest='campaigns/audit-preview-completion-'+slug.slice('audit-preview-'.length)+'-r1';
+const corrective=request.correctionOfCampaignId??null;
+if(corrective!==null&&corrective!=='audit-preview-completion-live-ethereum-dai-6b175474-r1')
+ throw Error('APC_CORRECTION_PARENT_NOT_AUTHORIZED');
+const completionSlug='audit-preview-completion-'+slug.slice('audit-preview-'.length)+(corrective?'-corrective':'');
+const dest='campaigns/'+completionSlug+'-r1';
 const read=p=>JSON.parse(fs.readFileSync(path.join(root,p),'utf8'));
-const entry=read('Audit Campaign Directory/campaigns/audit-preview-completion-'+slug.slice('audit-preview-'.length)+'.json');
+const entry=read('Audit Campaign Directory/campaigns/'+completionSlug+'.json');
 if(entry.campaignStatus==='ACTIVE'&&entry.previewCompletion?.status==='LAUNCHED'){
  console.log(JSON.stringify({status:'ALREADY_LAUNCHED',campaignId:entry.campaignId}));
  process.exit(0);
 }
-if(entry.campaignStatus!=='STAGED_PRELAUNCH'||entry.previewCompletion?.originalCampaignId!==request.previewCampaignId)
+if(entry.campaignStatus!=='STAGED_PRELAUNCH'||entry.previewCompletion?.originalCampaignId!==request.previewCampaignId||String(entry.correctionOf?.campaignId??'')!==String(corrective??''))
  throw Error('APC_NOT_STAGED');
 const original=entry.previewCompletion.originalWorkspacePath;
 const source=read(original+'/source/live-scan-project/scan-source-manifest.json');

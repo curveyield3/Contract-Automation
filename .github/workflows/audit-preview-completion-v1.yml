@@ -57,7 +57,7 @@ jobs:
             fi
             for file in "${changed[@]}"; do
               [[ "$file" =~ ^process/audit-preview-completion/requests/[A-Za-z0-9._-]+\.json$ ]] || continue
-              jq -e '.schemaVersion=="curveyield-audit-preview-completion-request-v1" and (.operation=="PREPARE" or .operation=="LAUNCH") and (.previewCampaignId|test("^audit-preview-[a-z0-9.-]+-r[0-9]+$")) and (.requestId|test("^[A-Za-z0-9._-]+$"))' "$file" >/dev/null
+              jq -e '.schemaVersion=="curveyield-audit-preview-completion-request-v1" and (.operation=="PREPARE" or .operation=="LAUNCH") and (.previewCampaignId|test("^audit-preview-[a-z0-9.-]+-r[0-9]+$")) and (.requestId|test("^[A-Za-z0-9._-]+$")) and ((.correctionOfCampaignId==null) or (.correctionOfCampaignId=="audit-preview-completion-live-ethereum-dai-6b175474-r1" and .previewCampaignId=="audit-preview-live-ethereum-dai-6b175474-r1"))' "$file" >/dev/null
               jq -nc --arg file "$file" --arg id "$(jq -r .previewCampaignId "$file")" '{request:$file,campaign:$id}' >>/tmp/apc.ndjson
             done
           fi
@@ -109,6 +109,9 @@ jobs:
           id="$(jq -er .previewCampaignId /tmp/apc-request.json)"
           slug="${id%-r*}"
           new_slug="audit-preview-completion-${slug#audit-preview-}"
+          if [[ "$(jq -r '.correctionOfCampaignId // empty' /tmp/apc-request.json)" = 'audit-preview-completion-live-ethereum-dai-6b175474-r1' ]]; then
+            new_slug="${new_slug}-corrective"
+          fi
           preview_path="$(gh api "repos/curveyield3/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/$slug.json?ref=main" --jq .content | base64 -d | jq -er .workspacePath)"
           [[ "$preview_path" == campaigns/* && "$preview_path" != *..* ]]
           # Keep selected Audit-Controller token available for lazy sparse/promisor blob fetches.
@@ -118,7 +121,8 @@ jobs:
             '/Audit Skill - Lite-Solo Authority/lite-solo-v4/**' \
             '/Audit Campaign Directory/campaigns/**' \
             "/${preview_path}/**" \
-            "/campaigns/${new_slug}-r1/**"
+            "/campaigns/${new_slug}-r1/**" \
+            '/campaigns/audit-preview-completion-live-ethereum-dai-6b175474-r1/receipts/PHASE_10_RECEIPT_v1.json'
           echo "controller_sha=$(git -C .audit-controller rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "request=/tmp/apc-request.json" >> "$GITHUB_OUTPUT"
           echo "new_slug=$new_slug" >> "$GITHUB_OUTPUT"
