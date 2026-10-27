@@ -1,0 +1,68 @@
+name: Audit Preview Completion Phase 5 Machine Authorization v1
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        description: Exact Audit Preview Completion campaign ID at Phase 5
+        type: string
+        required: true
+      decision:
+        description: Human authorization of existing source-bound Phase-5 machine execution
+        type: choice
+        required: true
+        options: ["Approve Phase 5 Execution", "Revoke Phase 5 Execution"]
+      confirm_source_bound_execution:
+        description: I explicitly authorize the existing Phase-5 Anvil/V7 execution for this exact campaign source
+        type: boolean
+        default: false
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: audit-preview-completion-phase5-authorization-${{ inputs.campaign_id }}
+  cancel-in-progress: false
+jobs:
+  record-decision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Select Audit-Controller write credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Save bounded owner authorization only, no machine execution
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          DECISION: ${{ inputs.decision }}
+          HUMAN_APPROVED: ${{ inputs.confirm_source_bound_execution }}
+          REQUEST_ACTOR: ${{ github.actor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CAMPAIGN_ID" = audit-preview-completion-* ]] || { echo '::error::Not an Audit Preview Completion campaign'; exit 1; }
+          if [ "$DECISION" = "Approve Phase 5 Execution" ] && [ "$HUMAN_APPROVED" != true ]; then
+            echo '::error::Explicit human checkbox required for approval'
+            exit 1
+          fi
+          [[ "$CAMPAIGN_ID" =~ ^([a-zA-Z0-9_.-]+)-r[0-9]+$ ]] || exit 1
+          slug="${BASH_REMATCH[1]}"
+          directory="Audit Campaign Directory/campaigns/$slug.json"
+          encoded="$(jq -rn --arg p "$directory" '$p|split("/")|map(@uri)|join("/")')"
+          current="$(gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=main")"
+          printf '%s' "$current" | jq -r .content | base64 -d >/tmp/lite-solo-owner-directory.json
+          jq -e --arg id "$CAMPAIGN_ID" '.campaignId==$id and .mode=="LITE_SOLO" and .agent.actorId=="lite-solo-agent" and .currentAssignment.phaseSequence==5 and .campaignStatus=="ACTIVE" and (.sourceSha256|test("^[0-9a-f]{64}$"))' /tmp/lite-solo-owner-directory.json >/dev/null
+          if [ "$DECISION" = "Approve Phase 5 Execution" ]; then status=APPROVED; else status=REVOKED; fi
+          jq --arg status "$status" --arg actor "$REQUEST_ACTOR" --arg run "$GITHUB_RUN_ID" \
+            '.machineExecutionAuthorization={status:$status,scope:"PHASE5_TARGET_EXECUTION",sourceSha256:.sourceSha256,authorizedBy:$actor,authorizationWorkflowRunId:$run,recordedAt:(now|todate)}' /tmp/lite-solo-owner-directory.json >/tmp/lite-solo-owner-authorized.json
+          gh api --method PUT "repos/curveyield3/Audit-Controller/contents/$encoded" \
+            -f message="audit(lite-solo): Phase 5 execution $status for $CAMPAIGN_ID" \
+            -f content="$(base64 -w0 /tmp/lite-solo-owner-authorized.json)" \
+            -f sha="$(printf '%s' "$current" | jq -r .sha)" \
+            -f branch=main >/dev/null
+          echo "Recorded $status for $CAMPAIGN_ID. No tests were run by this workflow."
