@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "dai-completion-p5-claim-004-v1",
+  "operation": "CLAIM",
+  "campaignId": "audit-preview-completion-live-ethereum-dai-6b175474-r1",
+  "campaignGenerationId": "audit-preview-completion-live-ethereum-dai-6b175474-r1-g1-20261027T144814563Z",
+  "phaseSequence": 5,
+  "lane": "AUTO",
+  "workerId": "gpt6-dai-completion-p5-v1",
+  "sourceSha256": "1c384141058f50d53b9e58b89c0b83aa60bd1066406f017d177121de332705f2",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "desiredUnitCount": 4
+}
