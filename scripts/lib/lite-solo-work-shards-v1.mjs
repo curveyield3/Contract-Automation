@@ -110,10 +110,60 @@ export function shardWorkFormV1({root,formRel,phase,retireFull=true,force=false}
    baseFile:'BASE_v1.json',baseSha256:digest(baseText),baseBytes:bytes(structure),
    originalSha256:digest(input),originalBytes:Buffer.byteLength(input),shards};
  const indexRel=path.posix.join(path.posix.dirname(baseRel),'INDEX_v1.json');
- if(bytes(index)>MAX_INDEX)throw new Error('work shard index exceeds 32 KiB');
+ if(bytes(index)>MAX_INDEX){
+   // The root index remains <=32 KiB regardless of source-review row count.
+   // Only descriptors are paged; content-addressed shards remain unchanged.
+   const pages=[];let batch=[];
+   const flush=()=>{
+     if(!batch.length)return;
+     const page={schemaVersion:'curveyield-work-shard-index-page-v1',shards:batch};
+     if(bytes(page)>MAX_INDEX)throw new Error('oversized work shard index page');
+     const file='INDEX_PART_'+String(pages.length+1).padStart(4,'0')+'_v1.json';
+     const text=pretty(page);
+     fs.writeFileSync(relfile(root,path.posix.join(path.posix.dirname(indexRel),file)),text);
+     pages.push({file,sha256:digest(text),bytes:Buffer.byteLength(text),shardCount:batch.length});
+     batch=[];
+   };
+   for(const entry of shards){
+     const next={schemaVersion:'curveyield-work-shard-index-page-v1',shards:[...batch,entry]};
+     if(batch.length&&bytes(next)>24*1024)flush();
+     batch.push(entry);
+     if(bytes({schemaVersion:'curveyield-work-shard-index-page-v1',shards:batch})>MAX_INDEX)
+       throw new Error('one work shard descriptor exceeds 32 KiB');
+   }
+   flush();
+   delete index.shards;
+   index.pages=pages;
+ }
+ if(bytes(index)>MAX_INDEX)throw new Error('work shard root index exceeds 32 KiB');
  fs.writeFileSync(relfile(root,indexRel),pretty(index));
  if(retireFull)fs.unlinkSync(full);
  return {indexRel,shards:shards.length,recordCount:globalKeys.size};
+}
+
+function readLegacyShardPagesV1({root,indexRel,index}){
+ if(Array.isArray(index.shards)&&index.pages===undefined)return {shards:index.shards,pages:[]};
+ if(index.shards!==undefined||!Array.isArray(index.pages)||!index.pages.length||index.pages.length>256)
+   throw new Error('invalid paginated work shard index');
+ const dir=path.posix.dirname(indexRel),seen=new Set(),shards=[],pages=[];
+ for(const [i,spec] of index.pages.entries()){
+   const file='INDEX_PART_'+String(i+1).padStart(4,'0')+'_v1.json';
+   if(spec?.file!==file||seen.has(file)||!Number.isInteger(spec.bytes)||spec.bytes<1||
+     spec.bytes>MAX_INDEX||!/^[a-f0-9]{64}$/.test(spec.sha256)||
+     !Number.isInteger(spec.shardCount)||spec.shardCount<1)
+     throw new Error('invalid paginated work shard descriptor');
+   seen.add(file);
+   const rel=path.posix.join(dir,file),raw=fs.readFileSync(relfile(root,rel),'utf8');
+   if(Buffer.byteLength(raw)!==spec.bytes||digest(raw)!==spec.sha256)
+     throw new Error('work shard index page integrity mismatch: '+file);
+   const data=JSON.parse(raw);
+   if(data?.schemaVersion!=='curveyield-work-shard-index-page-v1'||!Array.isArray(data.shards)||
+     data.shards.length!==spec.shardCount||bytes(data)>MAX_INDEX)
+     throw new Error('work shard index page structure mismatch: '+file);
+   pages.push({spec,data,rel});
+   shards.push(...data.shards);
+ }
+ return {shards,pages};
 }
 
 export function restoreWorkShardsV1({root,indexRel,refreshDigests=false}){
@@ -127,7 +177,8 @@ export function restoreWorkShardsV1({root,indexRel,refreshDigests=false}){
  if(Buffer.byteLength(baseText)>MAX_SHARD||digest(baseText)!==index.baseSha256)
    throw new Error('work shard base integrity mismatch');
  const full=JSON.parse(baseText),keys=new Set(),ranges=new Map();
- for(const spec of index.shards){
+ const paged=readLegacyShardPagesV1({root,indexRel,index});
+ for(const spec of paged.shards){
   if(!/^shard-[0-9]{4}_v1\.json$/.test(spec.file))throw new Error('unsafe shard filename');
   const body=fs.readFileSync(relfile(root,path.posix.join(parent,spec.file)),'utf8');
   if(Buffer.byteLength(body)>MAX_SHARD)throw new Error('work shard exceeds 64 KiB');
@@ -195,6 +246,12 @@ export function restoreWorkShardsV1({root,indexRel,refreshDigests=false}){
    throw new Error('shard round-trip changed original form bytes');
  if(refreshDigests){
   index.originalSha256=digest(result);index.originalBytes=Buffer.byteLength(result);
+  for(const {spec,data,rel} of paged.pages){
+    const body=pretty(data);
+    if(Buffer.byteLength(body)>MAX_INDEX)throw new Error('updated work shard index page exceeds 32 KiB');
+    fs.writeFileSync(relfile(root,rel),body);
+    spec.sha256=digest(body);spec.bytes=Buffer.byteLength(body);
+  }
   if(bytes(index)>MAX_INDEX)throw new Error('updated work shard index exceeds 32 KiB');
   fs.writeFileSync(indexFile,pretty(index));
  }
@@ -215,7 +272,7 @@ export function shardFailureIndexV1({root,indexRel,deficiencies=[]}={}){
  const matches=new Map(),unmapped=[];
  const descriptors=index.schemaVersion==='curveyield-work-shard-index-v13'
    ?index.pages.flatMap(p=>secureReadV13(root,path.posix.join(path.posix.dirname(indexRel),p.file)).shards)
-   :index.shards;
+   :readLegacyShardPagesV1({root,indexRel,index}).shards;
  for(const description of deficiencies){
   const message=String(description);
   const ref=message.match(/(step-[0-9]+)\.outputs\.([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/);
