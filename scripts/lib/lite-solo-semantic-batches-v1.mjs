@@ -2,6 +2,7 @@
 // This module only constructs proposed assignments. Existing queue/accepted state
 // MUST NOT be rewritten without an explicit claim-safe migration transaction.
 const MAX_BYTES=64*1024;
+export const SEMANTIC_BATCH_READING_GUIDE_V1="BATCH members are original source-bound records, not separate claims. Reconstruct and verify each manifest prefill-page (12 KiB), then complete entries[].key using the exact member recordKeys[0] and substantive entries[].value. Submit one immutable multi-entry snapshot under the claimed batch unit ID. During rework submit only outstanding members; never alter an accepted sibling.";
 export const SEMANTIC_BATCH_POLICY_V1=Object.freeze({
   minGroups:10,maxGroups:20,targetBytes:48*1024,maxBytes:MAX_BYTES
 });
@@ -18,7 +19,7 @@ const packetBytes=(phase,field,groups)=>Buffer.byteLength(JSON.stringify({value:
   schemaVersion:'curveyield-lite-solo-batched-assignment-v1',
   unitId:'P6-RC-B999999',phaseSequence:phase,field,
   groupKeys:groups.map(g=>g.groupKey),members:groups.flatMap(g=>g.units),
-  readingGuide:'Complete each assigned member by its original recordKey. Omit already accepted members during targeted rework.'
+  readingGuide:SEMANTIC_BATCH_READING_GUIDE_V1
 }},null,2)+'\n','utf8');
 const primaryContext=u=>Array.isArray(u.initialValue?.contextIds)&&u.initialValue.contextIds.length
   ?u.initialValue.contextIds.map(key).filter(Boolean).sort().join('|'):null;
