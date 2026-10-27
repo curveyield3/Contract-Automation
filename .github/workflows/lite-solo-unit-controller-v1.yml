@@ -138,7 +138,7 @@ jobs:
           git -C .audit-controller config user.name 'CurveYield Lite-Solo Unit Controller'
           git -C .audit-controller config user.email 'lite-solo-unit-controller@users.noreply.github.com'
           success=false
-          for _attempt in 1 2 3 4 5; do
+          for _attempt in $(seq 1 40); do
             git -C .audit-controller add -- "$CAMPAIGN_PATH" "$DIRECTORY"
             if git -C .audit-controller diff --cached --quiet; then success=true; break; fi
             git -C .audit-controller commit -m "audit(lite-solo): accept parallel units $CAMPAIGN_ID"
