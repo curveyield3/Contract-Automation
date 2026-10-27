@@ -1,0 +1,84 @@
+name: DAI Direct Historical Fork Security Evidence v1
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/audit-dispatch/dai-direct-fork-evidence-v1.json'
+permissions:
+  contents: read
+concurrency:
+  group: dai-direct-fork-security-evidence-v1
+  cancel-in-progress: false
+jobs:
+  execute-dai-security-properties:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout direct-execution scripts and source-bound DAI harness
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install project-pinned Node and Foundry packages
+        run: npm ci --force
+      - name: Enable existing Phase-0 Foundry executables (no V7 qualification)
+        uses: ./.github/actions/setup-phase0-deployment-only-toolchain-v1
+      - name: Select authenticated private Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Fetch exact source archive from immutable private Audit-Controller commit
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_commit=b66ee2b336c949c3ecb0621307b9c188f8f81e89
+          gh auth setup-git
+          git init --quiet .audit-controller
+          git -C .audit-controller remote add origin https://github.com/curveyield3/Audit-Controller.git
+          git -C .audit-controller fetch --no-tags --depth=1 --filter=blob:none origin "$source_commit"
+          git -C .audit-controller sparse-checkout set --no-cone \
+            '/campaigns/audit-preview-live-ethereum-Dai-6b175474 r1/source/live-ethereum-Dai-6b175474.zip'
+          git -C .audit-controller checkout --quiet --detach FETCH_HEAD
+          test "$(git -C .audit-controller rev-parse HEAD)" = "$source_commit"
+          test -s '.audit-controller/campaigns/audit-preview-live-ethereum-Dai-6b175474 r1/source/live-ethereum-Dai-6b175474.zip'
+          echo 'Pinned private DAI source archive fetched and identity verified.'
+      - name: Execute seven DAI baseline assertions against pinned mutable Anvil
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/dai-direct-fork-security-evidence-v1.mjs
+      - name: Preserve exact direct evidence in private campaign (not a V7 qualification)
+        if: always()
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence='.dai-direct-evidence/DAI_DIRECT_FORK_SECURITY_EVIDENCE_v1.json'
+          if [ ! -s "$evidence" ]; then
+            echo 'No machine evidence file was generated; cannot publish.'
+            exit 0
+          fi
+          dest="campaigns/audit-preview-completion-live-ethereum-dai-6b175474-r1/evidence/phase8-revalidation/direct-dai-fork/run-$GITHUB_RUN_ID/DAI_DIRECT_FORK_SECURITY_EVIDENCE_v1.json"
+          data="$(base64 -w0 "$evidence")"
+          gh api --method PUT "repos/curveyield3/Audit-Controller/contents/$dest" \
+            -f message="audit(dai): persist direct historical Anvil execution evidence run $GITHUB_RUN_ID" \
+            -f branch=main -f content="$data" > /dev/null
+          echo "Direct supplemental evidence persisted at $dest" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload raw Foundry output and structured evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dai-direct-historical-fork-evidence-${{ github.run_id }}
+          path: .dai-direct-evidence/
+          if-no-files-found: warn
+          retention-days: 30
