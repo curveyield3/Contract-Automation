@@ -320,7 +320,7 @@ try{
     }
   }
   evidence.status=evidence.obligations.length===TARGETS.length&&evidence.obligations.every(x=>x.status==='PASS')
-    ?'ALL_SEVEN_PASSED':evidence.obligations.some(x=>x.status==='FAIL')?'ASSERTION_FAILURES':'INCOMPLETE_EXECUTION';
+    ?'ALL_TARGETS_PASSED':evidence.obligations.some(x=>x.status==='FAIL')?'ASSERTION_FAILURES':'INCOMPLETE_EXECUTION';
 }catch(error){
   evidence.failures.push(redact(error?.stack||String(error)).slice(0,2000));
   if(evidence.status==='NOT_EXECUTED')evidence.status='INFRASTRUCTURE_BLOCKED';
