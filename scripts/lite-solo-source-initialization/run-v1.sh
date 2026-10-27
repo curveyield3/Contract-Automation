@@ -6,9 +6,6 @@ source "$ROOT/scripts/audit-source-initialization/resolve-source-v1.sh"
 source "$ROOT/scripts/audit-source-initialization/extract-v1.sh"
 
 DELIVERY_TRANSPORT=DIRECT
-: "${PERMITTED_CONTRACTS:?AUDIT_PREVIEW_PERMIT_REQUIRED}"
-[[ "$PERMITTED_CONTRACTS" =~ ^[1-9][0-9]*$ ]] || { echo "::error::AUDIT_PREVIEW_INVALID_PERMIT: permitted_contracts must be a positive integer"; exit 1; }
-jq -n --argjson v "$PERMITTED_CONTRACTS" '$v|type=="number" and .==floor and .>=1 and .<=9007199254740991' | grep -qx true || { echo "::error::AUDIT_PREVIEW_INVALID_PERMIT"; exit 1; }
 SOURCE_URL="${SOURCE_URL:-}"
 SCAN_URLS="${SCAN_URLS:-[]}"
 if [ -n "$SOURCE_URL" ] && [ "$SCAN_URLS" != '[]' ]; then
@@ -27,24 +24,24 @@ fi
 : "${AUDIT_CONTROLLER_TOKEN:?AUDIT_CONTROLLER_TOKEN is required}"
 : "${CONTRACT_AUTOMATION_TOKEN:?CONTRACT_AUTOMATION_TOKEN is required}"
 safe_request="$(printf '%s' "$REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
-report_path="process/audit-preview-source-initialization/reports/$safe_request.json"
+report_path="process/lite-solo-source-initialization/reports/$safe_request.json"
 
 # Exact workflow retries are idempotent. A new request using the same ZIP is NOT
 # deduplicated; it intentionally creates the next rN campaign revision.
 report_api="repos/$GITHUB_REPOSITORY/contents/$report_path"
-report_sha="$(gh api "$report_api?ref=audit-preview-v1" --jq '.sha // empty' 2>/dev/null || true)"
+report_sha="$(gh api "$report_api?ref=main" --jq '.sha // empty' 2>/dev/null || true)"
 if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
-  encoded="$(gh api "$report_api?ref=audit-preview-v1" --jq '.content')"
+  encoded="$(gh api "$report_api?ref=main" --jq '.content')"
   printf '%s' "$encoded" | base64 -d > /tmp/prior-source-init.json
-  jq -e --arg url "$SOURCE_URL" --argjson scans "$SCAN_URLS" --arg permit "$PERMITTED_CONTRACTS" \
-    '.schemaVersion=="curveyield-lite-solo-source-report-v1" and .mode=="LITE_SOLO" and .auditPreview.permittedContracts==($permit|tonumber) and .status=="PASS" and .actor.actorId=="lite-solo-agent" and .source.inputUrl==$url and .source.scanUrls==$scans' \
+  jq -e --arg url "$SOURCE_URL" --argjson scans "$SCAN_URLS" \
+    '.schemaVersion=="curveyield-lite-solo-source-report-v1" and .mode=="LITE_SOLO" and .status=="PASS" and .actor.actorId=="lite-solo-agent" and .source.inputUrl==$url and .source.scanUrls==$scans' \
     /tmp/prior-source-init.json >/dev/null
   campaign_id="$(jq -r '.campaign.campaignId' /tmp/prior-source-init.json)"
   generation_id="$(jq -r '.campaign.campaignGenerationId' /tmp/prior-source-init.json)"
   campaign_name="$(jq -r '.campaign.campaignName' /tmp/prior-source-init.json)"
   campaign_root="$(jq -r '.campaign.workspacePath' /tmp/prior-source-init.json)"
 else
-  # New campaigns bind only the forked Audit Preview authority and its immutable manifest.
+  # New campaigns bind the installed lite-solo-v4 authority and its immutable manifest.
   export GH_TOKEN="$AUDIT_CONTROLLER_TOKEN"
   gh auth setup-git
   work='/tmp/audit-source-initialization'
@@ -69,24 +66,24 @@ else
   # Materialize only what initialization reads or writes: the current authority package, the
   # campaign directory entries, and (added below) the new campaign folder. Everything else in
   # Audit-Controller stays unfetched; revision and collision checks read the Git tree instead.
-  gh repo clone curveyield3/Audit-Controller "$repo" -- --branch audit-preview-v1 --depth 1 --filter=blob:none --sparse
+  gh repo clone curveyield3/Audit-Controller "$repo" -- --branch main --depth 1 --filter=blob:none --sparse
   cd "$repo"
-  git sparse-checkout set --no-cone '/Audit Skill - Audit Preview/**' '/Audit Campaign Directory/campaigns/**'
+  git sparse-checkout set --no-cone '/Audit Skill - Lite-Solo Authority/**' '/Audit Campaign Directory/campaigns/**'
   git config user.name 'CurveYield Lite-Solo Source Initialization'
   git config user.email 'lite-solo@users.noreply.github.com'
-  authority_parent='Audit Skill - Audit Preview'
-  authority_root="$authority_parent/audit-preview-v1"
+  authority_parent='Audit Skill - Lite-Solo Authority'
+  authority_root="$authority_parent/lite-solo-v4"
   test -f "$authority_root/MANIFEST.json" || { echo '::error::Registered Lite-Solo v4 authority package is missing' >&2; exit 1; }
   authority_packages=("$authority_root")
   skill_home="$authority_root/SKILL.md"
-  skill_repo_path='curveyield3/Audit-Controller/Audit Skill - Audit Preview'
+  skill_repo_path='curveyield3/Audit-Controller/Audit Skill - Lite-Solo Authority'
   skill_release="$(jq -r .release "$authority_root/MANIFEST.json")"
   skill_revision="$(jq -r .packageRevision "$authority_root/MANIFEST.json")"
-  [[ "$skill_release" =~ ^audit-preview-v[0-9]+$ && "$skill_revision" = "${skill_release#audit-preview-}" ]] || { echo "::error::Lite-Solo manifest version mismatch" >&2; exit 1; }
+  [[ "$skill_release" =~ ^lite-solo-v[0-9]+$ && "$skill_revision" = "${skill_release#lite-solo-}" ]] || { echo "::error::Lite-Solo manifest version mismatch" >&2; exit 1; }
   test -f "$skill_home" || { echo "::error::Current Lite-Solo SKILL.md missing" >&2; exit 1; }
   skill_sha="$(sha256sum "$skill_home" | awk '{print $1}')"
   skill_blob="$(git rev-parse "HEAD:$skill_home")"
-  jq -e --arg release "$skill_release" --arg rev "$skill_revision" '.release==$release and .packageRevision==$rev and .mode=="LITE_SOLO" and (.reviewerLineup.masterSegments|length)==0 and .product=="AUDIT_PREVIEW" and .terminalPhase==4' "$authority_root/MANIFEST.json" >/dev/null
+  jq -e --arg release "$skill_release" --arg rev "$skill_revision" '.release==$release and .packageRevision==$rev and .mode=="LITE_SOLO" and (.reviewerLineup.masterSegments|length)==0' "$authority_root/MANIFEST.json" >/dev/null
   # A previous attempt can publish the campaign and receipt before the report
   # or browser registration write succeeds. Recover by immutable request ID;
   # never create a new rN for that same request after a 409/interruption.
@@ -102,7 +99,7 @@ else
     fi
   done < <(find 'Audit Campaign Directory/campaigns' -type f -name '*.json' -print 2>/dev/null | LC_ALL=C sort)
   if [ "$recovered" = true ]; then
-    jq -e --arg permit "$PERMITTED_CONTRACTS" '.mode=="LITE_SOLO" and .auditPreview.permittedContracts==($permit|tonumber) and .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT"' "Audit Campaign Directory/campaigns/${campaign_id%-r*}.json" >/dev/null || { echo "::error::SOLO_REQUEST_IDENTITY_MISMATCH"; exit 1; }
+    jq -e '.mode=="LITE_SOLO" and .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT"' "Audit Campaign Directory/campaigns/${campaign_id%-r*}.json" >/dev/null || { echo "::error::SOLO_REQUEST_IDENTITY_MISMATCH"; exit 1; }
     literal_recovery="$(printf '%s' "$campaign_root" | sed -e 's/[][*?!#\\]/\\&/g')"
     git sparse-checkout add "/$literal_recovery/"
     prior_receipt="$campaign_root/receipts/PHASE_00_RECEIPT_v1.json"
@@ -135,8 +132,8 @@ else
   if [ "$recovered" = false ]; then
   success=false
   for attempt in 1 2 3 4 5; do
-    git fetch --depth 1 --filter=blob:none origin audit-preview-v1
-    git reset --hard origin/audit-preview-v1
+    git fetch --depth 1 --filter=blob:none origin main
+    git reset --hard origin/main
     git clean -fdx
 
     # Freeze the complete authority identity from this exact initialization
@@ -197,7 +194,7 @@ else
     CAMPAIGN_ROOT="$campaign_root" SOURCE_PROVIDER="$provider" SOURCE_URL_CANONICAL="$canonical_url" \
     SOURCE_FILENAME="$filename" SOURCE_SHA="$source_sha" SOURCE_SIZE="$source_size" SOURCE_PATH="$source_path" \
     SOURCE_DIR="$source_dir" ADMISSION_COMMIT="$admission_commit" SOURCE_BLOB="$source_blob" TREE_SHA="$tree_sha" \
-    SOURCE_INPUT_MODE="$input_mode" SCAN_TARGETS_JSON="$SCAN_URLS" PERMITTED_CONTRACTS="$PERMITTED_CONTRACTS" \
+    SOURCE_INPUT_MODE="$input_mode" SCAN_TARGETS_JSON="$SCAN_URLS" \
     SCAN_MANIFEST_SHA="$(cat "$work/scan-manifest-sha256" 2>/dev/null || true)" \
     SCAN_TARGET_SET_SHA="$(cat "$work/scan-target-set-sha256" 2>/dev/null || true)" \
     CREATED_AT="$created_at" SKILL_RELEASE="$skill_release" SKILL_REVISION="$skill_revision" SKILL_HOME="$skill_home" \
@@ -205,13 +202,13 @@ else
     SKILL_SHA="$skill_sha" SKILL_BLOB="$skill_blob" SKILL_REPO_PATH="$skill_repo_path" \
     MANIFEST_SHA="$manifest_sha" MANIFEST_BLOB="$manifest_blob" AUTHORITY_COMMIT="$authority_commit" \
     RECEIPTS_DIR="$receipts_dir" CAMPAIGN_DIRECTORY_PATH="$campaign_directory_path" \
-      python3 "$ROOT/scripts/audit-preview-source-initialization/write-phase0-receipt-v1.py"
+      python3 "$ROOT/scripts/lite-solo-source-initialization/write-phase0-receipt-v1.py"
 
     git add -- "$receipts_dir" "$campaign_directory_path"
     git commit -m "audit(receipt): initialize $campaign_id phase 0"
     init_commit="$(git rev-parse HEAD)"
 
-    if git push origin HEAD:audit-preview-v1; then
+    if git push origin HEAD:main; then
       success=true
       break
     fi
@@ -223,18 +220,18 @@ else
   fi
 
   export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
-  jq -n --arg requestId "$REQUEST_ID" --arg inputUrl "$SOURCE_URL" --argjson scanUrls "$SCAN_URLS" --arg campaignId "$campaign_id" --arg generation "$generation_id" --arg campaignName "$campaign_name" --arg workspace "$campaign_root" --arg sha "$source_sha" --arg permit "$PERMITTED_CONTRACTS" \
-    '{schemaVersion:"curveyield-lite-solo-source-report-v1",mode:"LITE_SOLO",status:"PASS",requestId:$requestId,actor:{actorId:"lite-solo-agent"},source:{sha256:$sha,inputUrl:$inputUrl,scanUrls:$scanUrls},auditPreview:{permittedContracts:($permit|tonumber),terminalPhase:4},campaign:{campaignId:$campaignId,campaignGenerationId:$generation,campaignName:$campaignName,workspacePath:$workspace},completedAt:(now|todate)}' > /tmp/source-init-report.json
+  jq -n --arg requestId "$REQUEST_ID" --arg inputUrl "$SOURCE_URL" --argjson scanUrls "$SCAN_URLS" --arg campaignId "$campaign_id" --arg generation "$generation_id" --arg campaignName "$campaign_name" --arg workspace "$campaign_root" --arg sha "$source_sha" \
+    '{schemaVersion:"curveyield-lite-solo-source-report-v1",mode:"LITE_SOLO",status:"PASS",requestId:$requestId,actor:{actorId:"lite-solo-agent"},source:{sha256:$sha,inputUrl:$inputUrl,scanUrls:$scanUrls},campaign:{campaignId:$campaignId,campaignGenerationId:$generation,campaignName:$campaignName,workspacePath:$workspace},completedAt:(now|todate)}' > /tmp/source-init-report.json
 
   body="$(base64 -w0 /tmp/source-init-report.json)"
   api="repos/$GITHUB_REPOSITORY/contents/$report_path"
-  current="$(gh api "$api?ref=audit-preview-v1" --jq '.sha' 2>/dev/null || true)"
+  current="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
   if [[ "$current" =~ ^[0-9a-f]{40}$ ]]; then
     gh api --method PUT "$api" -f message="chore(audit): record source initialization $REQUEST_ID" \
-      -f content="$body" -f sha="$current" -f branch=audit-preview-v1 >/dev/null
+      -f content="$body" -f sha="$current" -f branch=main >/dev/null
   else
     gh api --method PUT "$api" -f message="chore(audit): record source initialization $REQUEST_ID" \
-      -f content="$body" -f branch=audit-preview-v1 >/dev/null
+      -f content="$body" -f branch=main >/dev/null
   fi
 fi
 
@@ -252,7 +249,7 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
     evidence/static-analysis/SLITHER_v1.json \
     evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json; do
     encoded="$(jq -rn --arg p "$campaign_root/$evidence" '$p|split("/")|map(@uri)|join("/")')"
-    if ! gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=audit-preview-v1" --jq '.sha' >/dev/null 2>&1; then
+    if ! gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=main" --jq '.sha' >/dev/null 2>&1; then
       evidence_ready=false
       break
     fi
@@ -263,7 +260,7 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   if [ "$evidence_ready" = true ]; then
     plan_path="$campaign_root/evidence/review-inventory/FLOW_PLAN_v1.json"
     encoded_plan="$(jq -rn --arg p "$plan_path" '$p|split("/")|map(@uri)|join("/")')"
-    if gh api "repos/curveyield3/Audit-Controller/contents/$encoded_plan?ref=audit-preview-v1" --jq '.sha' >/dev/null 2>&1; then
+    if gh api "repos/curveyield3/Audit-Controller/contents/$encoded_plan?ref=main" --jq '.sha' >/dev/null 2>&1; then
       resume_from_deploy=true
     else
       echo "::notice::Phase-0 flow plan not sealed; regenerate source review inventory from existing immutable source."
@@ -271,10 +268,10 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   fi
 fi
 export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
-gh workflow run lite-solo-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref audit-preview-v1 \
+gh workflow run lite-solo-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
   -f campaign_id="$campaign_id" \
   -f campaign_path="$campaign_root" \
-  -f audit_controller_ref=audit-preview-v1 \
+  -f audit_controller_ref=main \
   -f resume_from_deploy="$resume_from_deploy"
 
 {
