@@ -44,8 +44,8 @@ jobs:
               changes="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")"
             fi
             json="$(printf '%s\n' "$changes" |
-              sed -n -E 's#^process/agent-upload/lite-solo-unit-requests/([A-Za-z0-9._-]+-r[0-9]+)/[^/]+\\.json$#\\1#p' |
-              sort -u | jq -Rsc 'split("\\n") | map(select(length>0))')"
+              sed -n -E 's#^process/agent-upload/lite-solo-unit-requests/([A-Za-z0-9._-]+-r[0-9]+)/[^/]+\.json$#\1#p' |
+              sort -u | jq -Rsc 'split("\n") | map(select(length>0))')"
           fi
           echo "campaigns=$json" >> "$GITHUB_OUTPUT"
   drain:
