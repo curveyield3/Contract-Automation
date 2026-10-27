@@ -1,0 +1,161 @@
+name: Audit Preview Completion Parallel Unit Controller v1
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/agent-upload/audit-preview-completion-unit-requests/**/*.json'
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        type: string
+        required: false
+        description: Campaign for explicit backlog recovery
+permissions:
+  contents: read
+  actions: write
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      campaigns: ${{ steps.ids.outputs.campaigns }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - id: ids
+        shell: bash
+        env:
+          ONE_CAMPAIGN: ${{ inputs.campaign_id }}
+        run: |
+          set -euo pipefail
+          root=process/agent-upload/audit-preview-completion-unit-requests
+          mkdir -p "$root"
+          if [ -n "$ONE_CAMPAIGN" ]; then
+            [[ "$ONE_CAMPAIGN" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]]
+            [[ "$ONE_CAMPAIGN" = audit-preview-completion-* ]]
+            test -d "$root/$ONE_CAMPAIGN"
+            json="$(jq -nc --arg c "$ONE_CAMPAIGN" '[$c]')"
+          else
+            # Include every request from multi-commit pushes, not only the tip commit.
+            before="${{ github.event.before }}"
+            if [[ "$before" =~ ^[0-9a-f]{40}$ ]] && [[ "$before" != 0000000000000000000000000000000000000000 ]]; then
+              changes="$(git diff --name-only "$before" "$GITHUB_SHA" -- "$root/")"
+            else
+              changes="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")"
+            fi
+            json="$(printf '%s\n' "$changes" |
+              sed -n -E 's#^process/agent-upload/audit-preview-completion-unit-requests/([A-Za-z0-9._-]+-r[0-9]+)/[^/]+\.json$#\1#p' |
+              sort -u | jq -Rsc 'split("\n") | map(select(length>0))')"
+          fi
+          echo "campaigns=$json" >> "$GITHUB_OUTPUT"
+  drain:
+    needs: discover
+    if: ${{ needs.discover.outputs.campaigns != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        campaign: ${{ fromJSON(needs.discover.outputs.campaigns) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    concurrency:
+      group: audit-preview-completion-unit-${{ matrix.campaign }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing controller dependencies before loading unit queue modules
+        shell: bash
+        run: timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
+      - name: Checkout bound v4 and process full durable campaign backlog
+        id: process
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ matrix.campaign }}
+        run: |
+          set -euo pipefail
+          directory="Audit Campaign Directory/campaigns/${CAMPAIGN_ID%-r*}.json"
+          encoded="$(jq -rn --arg p "$directory" '$p|split("/")|map(@uri)|join("/")')"
+          campaign_path="$(gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=main" --jq .content | base64 -d | jq -er .workspacePath)"
+          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
+          node scripts/audit-preview-completion-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode drain > /tmp/unit-drain.json
+          echo "campaign_path=$campaign_path" >> "$GITHUB_OUTPUT"
+          echo "directory=$directory" >> "$GITHUB_OUTPUT"
+          echo "ready=$(jq -r .finalizeReady /tmp/unit-drain.json)" >> "$GITHUB_OUTPUT"
+          echo "phase=$(jq -r .phase /tmp/unit-drain.json)" >> "$GITHUB_OUTPUT"
+      - name: Run existing Phase-5 preflight only at seal
+        if: ${{ steps.process.outputs.ready == 'true' && steps.process.outputs.phase == '5' }}
+        id: preflight
+        shell: bash
+        env:
+          CAMPAIGN_ID: ${{ matrix.campaign }}
+          CAMPAIGN_PATH: ${{ steps.process.outputs.campaign_path }}
+          DIRECTORY: ${{ steps.process.outputs.directory }}
+        run: |
+          set -euo pipefail
+          source_sha="$(jq -r .sourceSha256 ".audit-controller/$DIRECTORY")"
+          node scripts/lite-phase5-preflight-v1.mjs .audit-controller "$CAMPAIGN_PATH" "$CAMPAIGN_ID" "$source_sha" > /tmp/unit-phase5-preflight.json || true
+          mkdir -p ".audit-controller/$CAMPAIGN_PATH/controller/preflight"
+          cp /tmp/unit-phase5-preflight.json ".audit-controller/$CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
+          echo "runnable=$(jq -r .runnable /tmp/unit-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
+      - name: Set up existing source-bound Phase-5 execution toolchain only at seal
+        if: ${{ steps.process.outputs.ready == 'true' && steps.process.outputs.phase == '5' && steps.preflight.outputs.runnable == 'true' }}
+        uses: ./.github/actions/setup-v7-toolchain
+      - name: Finalize only when all unit and machine evidence requirements pass
+        if: ${{ steps.process.outputs.ready == 'true' }}
+        shell: bash
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+          RPC_KATANA: ${{ secrets.RPC_KATANA }}
+          RPC_BASE: ${{ secrets.RPC_BASE }}
+          CAMPAIGN_ID: ${{ matrix.campaign }}
+        run: |
+          set -euo pipefail
+          node scripts/audit-preview-completion-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode finalize > /tmp/unit-finalize.json
+      - name: Publish recomputed controller state without overwriting concurrent commits
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ matrix.campaign }}
+          CAMPAIGN_PATH: ${{ steps.process.outputs.campaign_path }}
+          DIRECTORY: ${{ steps.process.outputs.directory }}
+        run: |
+          set -euo pipefail
+          git -C .audit-controller config user.name 'CurveYield Lite-Solo Unit Controller'
+          git -C .audit-controller config user.email 'lite-solo-unit-controller@users.noreply.github.com'
+          success=false
+          for attempt in 1 2 3 4 5; do
+            git -C .audit-controller add -- "$CAMPAIGN_PATH" "$DIRECTORY"
+            if git -C .audit-controller diff --cached --quiet; then success=true; break; fi
+            git -C .audit-controller commit -m "audit(lite-solo): accept parallel units $CAMPAIGN_ID"
+            if git -C .audit-controller push origin HEAD:main; then success=true; break; fi
+            # Discard stale decisions, rebuild from current authoritative head.
+            git -C .audit-controller fetch origin main
+            git -C .audit-controller reset --hard origin/main
+            node scripts/audit-preview-completion-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode drain > /tmp/unit-recompute.json
+            if [ "$(jq -r .finalizeReady /tmp/unit-recompute.json)" = true ]; then
+              phase="$(jq -r .phase /tmp/unit-recompute.json)"
+              if [ "$phase" = 5 ]; then
+                source_sha="$(jq -r .sourceSha256 ".audit-controller/$DIRECTORY")"
+                node scripts/lite-phase5-preflight-v1.mjs .audit-controller "$CAMPAIGN_PATH" "$CAMPAIGN_ID" "$source_sha" > /tmp/unit-phase5-preflight.json || true
+                mkdir -p ".audit-controller/$CAMPAIGN_PATH/controller/preflight"
+                cp /tmp/unit-phase5-preflight.json ".audit-controller/$CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
+              fi
+              node scripts/audit-preview-completion-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode finalize > /tmp/unit-refinalize.json
+            fi
+          done
+          [ "$success" = true ] || { echo '::error::Unable to publish recalculated queue after conflicts'; exit 1; }
+          echo "Audit Preview Completion controller drained immutable requests for $CAMPAIGN_ID" >> "$GITHUB_STEP_SUMMARY"
