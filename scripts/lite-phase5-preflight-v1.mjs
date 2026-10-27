@@ -53,9 +53,11 @@ const shardFor=(index,key)=>{
 };
 const index=sharded?JSON.parse(fs.readFileSync(indexFile,'utf8')):null;
 
-if(!Array.isArray(designs)||!designs.length)
+const noExecutableCandidates=Array.isArray(designs)&&designs.length>0&&
+  designs.every(x=>typeof x==='string'&&['NONE_IDENTIFIED','NO_CANDIDATE','NOT_APPLICABLE'].includes(x));
+if(!noExecutableCandidates&&(!Array.isArray(designs)||!designs.length))
   failures.push({path:'actions.step-3.outputs.targetDesigns',reason:'Missing target designs'});
-else for(const [i,target] of designs.entries()){
+else if(!noExecutableCandidates)for(const [i,target] of designs.entries()){
   const prefix='targetDesigns['+i+']';
   const key=String(target?.candidateKey??'').trim();
   const shardPath=shardFor(index,key);
@@ -107,7 +109,7 @@ const deferral=inspectPhase5OwnerEvidenceDeferralV1({
 const report={schemaVersion:'curveyield-phase5-request-preflight-v1',campaignId,sourceSha256,
   status:failures.length?'REWORK_REQUIRED':'PREFLIGHT_PASS',runnable:failures.length===0&&ready.length>0&&!deferral,
   ...(deferral?{evidenceDisposition:'DEFERRED_UNVERIFIED',deferralPath:deferral.path}:{}),
-  designCount:designs?.length??0,readyCount:ready.length,generated,failures,
+  designCount:noExecutableCandidates?0:(designs?.length??0),readyCount:ready.length,generated,failures,
   ...(sharded?{workShardIndexPath:indexRel}:{})};
 process.stdout.write(JSON.stringify(report)+'\n');
 if(failures.length)process.exitCode=2;
