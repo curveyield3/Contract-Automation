@@ -30,6 +30,7 @@ const requestDir=path.resolve(arg['requests-root']??'process/agent-upload/lite-s
 const results=[],phase=directory.currentAssignment?.phaseSequence;
 if(![4,5,6].includes(phase)&&arg.mode!=='drain')throw Error('not a v4 unit phase');
 if(arg.mode!=='finalize'){
+ let changed=false;
  const files=fs.existsSync(requestDir)?fs.readdirSync(requestDir).filter(x=>/^[A-Za-z0-9._-]+\.json$/.test(x)).sort():[];
  for(const filename of files){
   const request=JSON.parse(fs.readFileSync(path.join(requestDir,filename),'utf8'));
@@ -39,10 +40,10 @@ if(arg.mode!=='finalize'){
   const result=processUnitRequestV1({root,campaignPath,directory,request});
   const resultRel=path.posix.join(campaignPath,'work/phase-'+String(phase).padStart(2,'0'),
    'units','controller','results','REQUEST_'+request.requestId+'_v1.json');
-  if(!fs.existsSync(repoFile(root,resultRel)))writeJson(repoFile(root,resultRel),result);
+  if(!fs.existsSync(repoFile(root,resultRel))){writeJson(repoFile(root,resultRel),result);changed=true;}
   results.push({requestId:request.requestId,status:result.status});
  }
- directory.updatedAt=new Date().toISOString();writeJson(directoryFile,directory);
+ if(changed){directory.updatedAt=new Date().toISOString();writeJson(directoryFile,directory);}
 }
 let ready=false,seal=null;
 if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
@@ -62,8 +63,8 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
    {encoding:'utf8',env:{...process.env,LITE_SOLO_V4_FINALIZE:'1'},maxBuffer:1024*1024*2});
    const envelope=JSON.parse(output.trim());
    const updated=readJson(directoryFile);
-   if(updated.lastSealedReceiptPath!==directory.lastSealedReceiptPath&&
-      updated.currentAssignment?.phaseSequence!==seq||updated.campaignStatus==='COMPLETE'){
+   if((updated.lastSealedReceiptPath!==directory.lastSealedReceiptPath&&
+      updated.currentAssignment?.phaseSequence!==seq)||updated.campaignStatus==='COMPLETE'){
     markFinalizationV1({root,campaignPath,phase:seq,status:'SEALED',
      details:{receiptPath:updated.lastSealedReceiptPath}});
     seal={status:'SEALED',phase:seq,receiptPath:updated.lastSealedReceiptPath};
