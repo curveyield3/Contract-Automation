@@ -53,6 +53,18 @@ if(arg.mode!=='finalize'){
     deficiencies:recorded.finalizeDetails.unmappedDeficiencies});
   if(recovery.reopenedUnits.length)changed=true;
  }
+ // Retry a Phase-5 boundary previously blocked only by the canonical/temp-key
+ // alias mismatch. The Phase-5 controller independently revalidates every
+ // source-bound machine result before it can seal; this does not waive it.
+ if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
+    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
+    recorded.finalizeDetails.unmappedDeficiencies.length>0&&
+    recorded.finalizeDetails.unmappedDeficiencies.every(x=>
+     /^Phase 5 mandatory material candidate CAND-[0-9]+ has no targeted machine execution$/.test(String(x)))&&
+    Object.values(recorded.units??{}).every(x=>x.status==='ACCEPTED')){
+  markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
+  changed=true;
+ }
  for(const filename of files){
   const request=JSON.parse(fs.readFileSync(path.join(requestDir,filename),'utf8'));
   if(request.operation==='FINALIZE')throw Error('untrusted ingress may not request controller-only FINALIZE');
