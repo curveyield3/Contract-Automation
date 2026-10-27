@@ -67,18 +67,18 @@ else
   # Audit-Controller stays unfetched; revision and collision checks read the Git tree instead.
   gh repo clone curveyield3/Audit-Controller "$repo" -- --branch main --depth 1 --filter=blob:none --sparse
   cd "$repo"
-  git sparse-checkout set --no-cone '/Audit Skill - Lite-Solo Authority/lite-solo-v4/' '/Audit Campaign Directory/campaigns/'
+  git sparse-checkout set --no-cone '/Audit Skill - Lite-Solo Authority/lite-solo-v5/' '/Audit Campaign Directory/campaigns/'
   git config user.name 'CurveYield Lite-Solo Source Initialization'
   git config user.email 'lite-solo@users.noreply.github.com'
-  authority_root='Audit Skill - Lite-Solo Authority/lite-solo-v4'
+  authority_root='Audit Skill - Lite-Solo Authority/lite-solo-v5'
   authority_packages=("$authority_root")
   skill_home="$authority_root/SKILL.md"
   skill_repo_path='curveyield3/Audit-Controller/Audit Skill - Lite-Solo Authority'
-  skill_release=lite-solo-v4
-  skill_revision=v4
+  skill_release=lite-solo-v5
+  skill_revision=v5
   skill_sha="$(sha256sum "$skill_home" | awk '{print $1}')"
   skill_blob="$(git rev-parse "HEAD:$skill_home")"
-  jq -e '.release=="lite-solo-v4" and .packageRevision=="v4" and .mode=="LITE_SOLO" and (.reviewerLineup.masterSegments|length)==0' "$authority_root/MANIFEST.json" >/dev/null
+  jq -e '.release=="lite-solo-v5" and .packageRevision=="v5" and .mode=="LITE_SOLO" and (.reviewerLineup.masterSegments|length)==0' "$authority_root/MANIFEST.json" >/dev/null
   # A previous attempt can publish the campaign and receipt before the report
   # or browser registration write succeeds. Recover by immutable request ID;
   # never create a new rN for that same request after a 409/interruption.
@@ -262,6 +262,6 @@ gh workflow run lite-solo-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --
  echo "## lite-solo Source Initialization"
  echo "- Campaign: $campaign_id"
  echo "- Agent: lite-solo-agent (direct repository/controller work; no chat registration or wake)"
- echo "- Authority: Audit Skill - Lite-Solo Authority/lite-solo-v4/SKILL.md"
+ echo "- Authority: Audit Skill - Lite-Solo Authority/lite-solo-v5/SKILL.md"
  echo "- Phase-0 machine work dispatched automatically on admitted source"
 } >> "$GITHUB_STEP_SUMMARY"

@@ -3,7 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {detectionPolicyForAuthorityV1} from '../../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {boundReviewerForPhaseV1 as originalReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
-const boundReviewerForPhaseV1=({authorityRoot,...params})=>[ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4' ].includes(authorityRoot)?'lite-solo-agent':originalReviewerForPhaseV1({authorityRoot,...params});
+const boundReviewerForPhaseV1=({authorityRoot,...params})=>[ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5' ].includes(authorityRoot)?'lite-solo-agent':originalReviewerForPhaseV1({authorityRoot,...params});
 
 function repoFile(root,rel){return path.join(root,...String(rel).split('/'));}
 function readJsonIf(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
