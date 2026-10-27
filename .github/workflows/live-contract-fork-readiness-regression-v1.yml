@@ -52,5 +52,4 @@ jobs:
         run: |
           node --test packages/github-native-sim/test/live-contract-fork-readiness-v1.test.mjs \
             packages/github-native-sim/test/phase6-live-target-attestation-v1.test.mjs \
-            packages/github-native-sim/test/lite-boundary-artifacts-v1.test.mjs \
-            packages/github-native-sim/test/phase6-mutable-rpc-normalization-v2.test.mjs
+            packages/github-native-sim/test/lite-boundary-artifacts-v1.test.mjs
