@@ -116,10 +116,12 @@ try{
   }
   for(const id of obligations){
     const matching=tests.filter(x=>x.name.includes(id.replace('-','_')));
-    evidence.obligations[id]=matching.length===1
-      ? {status:matching[0].status==='Success'?'PASS':'FAIL',testName:matching[0].name,
-         reason:matching[0].reason}
-      : {status:'MISSING_OR_DUPLICATE_TEST_EVIDENCE',matches:matching.length};
+    const expectedAssertions=id==='BOB-0007'?6:1;
+    evidence.obligations[id]=matching.length===expectedAssertions
+      ? {status:matching.every(x=>x.status==='Success')?'PASS':'FAIL',
+         expectedAssertions,observedAssertions:matching.length,
+         tests:matching.map(x=>({testName:x.name,status:x.status,reason:x.reason}))}
+      : {status:'MISSING_OR_DUPLICATE_TEST_EVIDENCE',matches:matching.length,expectedAssertions};
   }
   evidence.status=forge.code===0&&obligations.every(x=>evidence.obligations[x].status==='PASS')
     ? 'SEVEN_BASELINE_ASSERTIONS_PASSED':'EXECUTION_INCOMPLETE_OR_ASSERTION_FAILURE';
