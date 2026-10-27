@@ -75,7 +75,7 @@ jobs:
             jq -e '
               .schemaVersion=="curveyield-lite-v7-execution-dispatch-v1" and
               (.campaignId|type=="string" and length>0) and
-              (.phaseSequence==9 or .phaseSequence==6) and
+              (.phaseSequence==9 or .phaseSequence==8 or .phaseSequence==6) and
               (.requestPath|type=="string" and length>0) and
               (.controllerRef|type=="string" and test("^[0-9a-f]{40}$")) and
               (.controllerWritebackRef|type=="string" and test("^[A-Za-z0-9._/-]+$")) and
@@ -94,13 +94,18 @@ jobs:
           [[ "$attempt" =~ ^[1-9][0-9]*$ ]] || { echo "::error::attempt must be integer >=1"; exit 1; }
           if [[ "$request_path" == campaigns/*/controller/phase9-reruns/*/*.json ]]; then
             phase_seq=9
+          elif [[ "$request_path" == campaigns/*/controller/phase8-revalidation/*/*.json ]]; then
+            phase_seq=8
+            request_group="${request_path#*/controller/phase8-revalidation/}"
+            request_group="${request_group%%/*}"
+            [[ "$request_group" =~ ^(TG-[0-9]{3}|CP-[A-Za-z0-9._-]+)$ ]] || { echo "::error::Invalid Phase 8 proof group"; exit 1; }
           elif [[ "$request_path" == campaigns/*/controller/phase6-tests/*/*.json ]]; then
             phase_seq=6
             request_group="${request_path#*/controller/phase6-tests/}"
             request_group="${request_group%%/*}"
             [[ "$request_group" =~ ^(TG-[0-9]{3}|CP-[A-Za-z0-9._-]+)$ ]] || { echo "::error::Invalid Phase 6 group"; exit 1; }
           else
-            echo "::error::request_path must be Phase-6 or Phase-9 campaign-local"; exit 1
+            echo "::error::request_path must be a campaign-local Phase-6, Phase-8 revalidation, or Phase-9 request"; exit 1
           fi
           [[ "$request_path" != *".."* && "$request_path" != *"\"* ]] || { echo "::error::Unsafe request_path"; exit 1; }
 
@@ -137,7 +142,14 @@ jobs:
           printf '%s' "$encoded" | base64 -d > /tmp/v7-request.json
           test "$(jq -r '.campaignId // empty' /tmp/v7-request.json)" = "$CAMPAIGN_ID"
           phase_seq="${{ steps.request.outputs.phase_sequence }}"
-          test "$(jq -r '.phaseId // empty' /tmp/v7-request.json)" = "phase-$phase_seq"
+          # V7 phaseId describes the execution stage, not the audit campaign phase.
+          # Constrain Phase 6 / Phase 8 revalidation to the qualified build-and-test lane.
+          if [ "$phase_seq" = 6 ] || [ "$phase_seq" = 8 ]; then
+            test "$(jq -r '.phaseId // empty' /tmp/v7-request.json)" = "build-and-test"
+            test "$(jq -r '.gateId // empty' /tmp/v7-request.json)" = "exact-build-and-tests-complete"
+          else
+            jq -e '.phaseId == "build-and-test" or .phaseId == "fork-simulation-lifecycle"' /tmp/v7-request.json >/dev/null
+          fi
 
           if [[ "$CAMPAIGN_ID" =~ ^(.+)-r[0-9]+$ ]]; then slug="${BASH_REMATCH[1]}"; else exit 1; fi
           directory_path="Audit Campaign Directory/campaigns/$slug.json"
@@ -150,11 +162,17 @@ jobs:
           if [ "$phase_seq" = 9 ]; then
             case "$REQUEST_PATH" in "$workspace"/controller/phase9-reruns/*/*.json) ;; *) echo "::error::Phase-9 request is outside canonical workspace"; exit 1;; esac
           else
-            case "$REQUEST_PATH" in "$workspace"/controller/phase6-tests/*/*.json) ;; *) echo "::error::Phase-6 request is outside canonical workspace"; exit 1;; esac
+            if [ "$phase_seq" = 8 ]; then
+              case "$REQUEST_PATH" in "$workspace"/controller/phase8-revalidation/*/*.json) ;; *) echo "::error::Phase-8 revalidation request is outside canonical workspace"; exit 1;; esac
+              sealed="$(gh api "repos/curveyield3/Audit-Controller/contents/$workspace/receipts/PHASE_07_RECEIPT_v1.json?ref=$CONTROLLER_REF" --jq '.content' | base64 -d | jq -r '.phase.status')"
+              test "$sealed" = "SEALED" || { echo "::error::Phase-8 revalidation requires sealed predecessor Phase 7"; exit 1; }
+            else
+              case "$REQUEST_PATH" in "$workspace"/controller/phase6-tests/*/*.json) ;; *) echo "::error::Phase-6 request is outside canonical workspace"; exit 1;; esac
+            fi
             request_dir="${REQUEST_PATH%/*}"
             encoded_tree="$(gh api "repos/curveyield3/Audit-Controller/contents/$request_dir?ref=$CONTROLLER_REF" --jq '[.[]|select(.type=="file" and (.name|endswith(".json")))]|length')"
             if [ "$encoded_tree" -gt 3 ]; then
-              echo "::error::ROUND_LIMIT_REACHED for $request_dir: record NOT_ACHIEVED (Step 4) or INCONCLUSIVE (Step 5) in the Phase 6 work form."; exit 1
+              echo "::error::ROUND_LIMIT_REACHED for $request_dir: preserve unresolved disposition without fabricated test evidence."; exit 1
             fi
           fi
 
@@ -173,7 +191,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Lite Phase-6 or Phase-9 V7 execution dispatch"
+            echo "## Lite Phase-6, Phase-8 proof-revalidation or Phase-9 V7 execution dispatch"
             echo "- Campaign: ${{ steps.request.outputs.campaign_id }}"
             echo "- Request: ${{ steps.request.outputs.request_path }}"
             echo "- Controller commit: ${{ steps.request.outputs.controller_ref }}"
