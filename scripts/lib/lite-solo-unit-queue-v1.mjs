@@ -584,6 +584,62 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
  }
  return errors;
 }
+
+function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest}){
+ const errors=[],entries=asArray(submission?.entries),members=new Map(u.members.map(m=>[m.recordKeys[0],m]));
+ if(submission?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.submission||
+    !entries.length||entries.length>u.members.length)
+  return {errors:[{path:u.unitId,message:'batched submission must have 1..'+u.members.length+' original keyed entries'}]};
+ const seen=new Set();
+ queue.acceptedRecords??={};
+ for(const [i,entry] of entries.entries()){
+  const member=members.get(entry?.key);
+  if(!member||seen.has(entry.key)){
+   errors.push({path:u.unitId+'.entries['+i+']',message:'unknown or duplicate batch record identity'});continue;
+  }
+  seen.add(entry.key);
+  const previous=queue.acceptedRecords[member.unitId];
+  if(previous?.status==='ACCEPTED'){
+   const snapshot=read(root,previous.path);
+   if(JSON.stringify(snapshot.entry)!==JSON.stringify(entry))
+    errors.push({path:member.unitId,message:'previously accepted record is immutable; submit only outstanding records'});
+   continue;
+  }
+  const failures=validateShardUnit({root,u:member,data:{schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:[entry]},
+   phase,schema,queue,plan});
+  if(failures.length){
+   errors.push(...failures.map(message=>({path:member.unitId,message})));continue;
+  }
+  const rel=path.posix.join(unitBase(campaign,phase,u.unitId),'records',member.unitId,
+   'ACCEPTED_ATTEMPT_'+String(state.attempts+1).padStart(3,'0')+'_v1.json');
+  if(fs.existsSync(repoFile(root,rel)))throw Error('immutable accepted batch record cannot be overwritten');
+  const snapshot={schemaVersion:'curveyield-lite-solo-accepted-record-v1',unitId:u.unitId,
+   memberUnitId:member.unitId,recordKey:entry.key,campaignGenerationId:plan.campaignGenerationId,
+   sourceSha256:plan.sourceSha256,authorityDigest:plan.authorityDigest,phaseSequence:phase,
+   phaseEpoch:plan.phaseEpoch,claimEpoch:state.claimEpoch,workerId:request.workerId,
+   submissionSha256:digest,entry};
+  put(root,rel,snapshot);
+  queue.acceptedRecords[member.unitId]={status:'ACCEPTED',path:rel,
+   snapshotSha256:sha(snapshot),parentUnitId:u.unitId};
+ }
+ const missing=u.members.filter(m=>queue.acceptedRecords[m.unitId]?.status!=='ACCEPTED');
+ if(missing.length)errors.push({path:u.unitId,
+  message:'outstanding original records: '+missing.map(m=>m.unitId).join(', ')});
+ if(errors.length)return {errors};
+ const assembled=u.members.map(m=>{
+  const memberState=queue.acceptedRecords[m.unitId],snapshot=read(root,memberState.path);
+  if(sha(snapshot)!==memberState.snapshotSha256||
+     snapshot.memberUnitId!==m.unitId||snapshot.recordKey!==m.recordKeys[0]||
+     snapshot.campaignGenerationId!==plan.campaignGenerationId||
+     snapshot.sourceSha256!==plan.sourceSha256||
+     snapshot.authorityDigest!==plan.authorityDigest||
+     snapshot.phaseEpoch!==plan.phaseEpoch)throw Error('immutable batch record binding changed');
+  return snapshot.entry;
+ });
+ return {errors:[],assembledSubmission:{schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:assembled},
+  recordEvidenceRefs:u.members.map(m=>queue.acceptedRecords[m.unitId].path)};
+}
+
 function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,directory}){
  const u=plan.units.find(x=>x.unitId===item.unitId),state=queue.units[item.unitId];
  if(!u||!state)return {unitId:item.unitId,status:'STALE',errors:['unknown unit']};
@@ -599,7 +655,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
   state.status='REWORK_REQUIRED';
   return {unitId:item.unitId,status:'UNCHANGED',errors:state.lastErrors};
  }
- let submission,errors=[];
+ let submission,errors=[],batchOutcome=null;
  try{submission=JSON.parse(raw.toString('utf8'));}
  catch(e){submission=null;errors=[{path:'$',message:'Malformed JSON: '+String(e.message??e)}];}
  if(!errors.length&&['FLOW','ATTACK'].includes(u.kind)){
@@ -609,6 +665,9 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
    ?validateAttackSubmissionV1({packet:packet.payload,submission,inventory})
    :validateFlowReviewSubmissionV1({packet:packet.payload,submission,inventory});
   errors=checked.errors??[];
+ }else if(!errors.length&&u.kind==='BATCH'){
+  batchOutcome=acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest});
+  errors=batchOutcome.errors;
  }else if(!errors.length)errors=validateShardUnit({root,u,data:submission,phase,schema,queue,plan}).map(message=>({path:u.unitId,message}));
  state.lastSubmissionSha256=digest;state.attempts++;
  const resultRel=path.posix.join(unitBase(campaign,phase,u.unitId),'results',
@@ -620,7 +679,9 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
    campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
    authorityDigest:directory.authorityDigest,phaseSequence:phase,phaseEpoch:request.phaseEpoch,
    unitSpecRevision:u.unitSpecRevision,packetSha256:item.packetSha256,
-   workerId:request.workerId,claimEpoch:state.claimEpoch,submissionSha256:digest,submission});
+   workerId:request.workerId,claimEpoch:state.claimEpoch,submissionSha256:digest,
+   submission:batchOutcome?.assembledSubmission??submission,
+   ...(batchOutcome?.recordEvidenceRefs?{recordEvidenceRefs:batchOutcome.recordEvidenceRefs}:{})});
   state.status='ACCEPTED';state.acceptedSha256=digest;state.acceptedPath=acceptedRel;state.lastErrors=[];
   put(root,resultRel,{unitId:u.unitId,status:'ACCEPTED',submissionSha256:digest,acceptedPath:acceptedRel});
   return {unitId:u.unitId,status:'ACCEPTED',resultRef:resultRel};
@@ -760,10 +821,20 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  if(!ready.ready)throw Error('unsafe finalization: '+ready.reason);
  const {plan,queue}=ready,assignment=directory.currentAssignment;
  const byFile=new Map();
- for(const u of plan.units.filter(u=>['SHARD','APPEND'].includes(u.kind))){
+ for(const u of plan.units.filter(u=>['SHARD','APPEND','BATCH'].includes(u.kind))){
   const accepted=read(root,queue.units[u.unitId].acceptedPath);
   if(queue.units[u.unitId].acceptedSha256!==accepted.submissionSha256)throw Error('accepted digest mismatch');
-  const list=byFile.get(u.shardPath)??[];list.push({unit:u,entries:accepted.submission.entries});byFile.set(u.shardPath,list);
+  if(u.kind==='BATCH'){
+   if(accepted.submission.entries.length!==u.members.length)throw Error('batched acceptance record count mismatch');
+   for(const [i,m] of u.members.entries()){
+    const entry=accepted.submission.entries[i];
+    if(entry.key!==m.recordKeys[0])throw Error('batched record order or key changed');
+    const list=byFile.get(m.shardPath)??[];
+    list.push({unit:m,entries:[entry]});byFile.set(m.shardPath,list);
+   }
+  }else {
+   const list=byFile.get(u.shardPath)??[];list.push({unit:u,entries:accepted.submission.entries});byFile.set(u.shardPath,list);
+  }
  }
  // Rebuild every shard deterministically from accepted immutable snapshots.
  // A failed finalize can retry without appending duplicates to mutable shards.
