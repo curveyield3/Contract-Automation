@@ -1003,7 +1003,7 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
         deficiencies.push('Discovery '+row.recordKey+' requires a valid disposition.');
       if(row.disposition==='CANDIDATE_CREATED'&&!candidates.has(row.candidateTempKeyOrNone))
         deficiencies.push('Discovery '+row.recordKey+' candidate must be present in Step 3.');
-      if(row.disposition==='RESOLVED_NO_ISSUE'&&!/\.(sol|vy):L\d+/.test(row.rationale??''))
+      if(row.disposition==='RESOLVED_NO_ISSUE'&&!/\.(sol|vy):L\d+/.test([row.rationale,row.reconciliation].filter(x=>typeof x==='string').join(' ')))
         deficiencies.push('Discovery '+row.recordKey+' resolution requires a source anchor.');
       if(row.disposition==='RESOLVED_NO_ISSUE'&&['ATTACK_FINDING','ATTACK_CONTRADICTS_REVIEW'].includes(row.origin)&&
         !/block|guard|revert|check|restrict|prevent/i.test(row.rationale??''))
