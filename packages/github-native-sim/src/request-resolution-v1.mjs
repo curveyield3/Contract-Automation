@@ -29,7 +29,12 @@ function validateDispatchPath(requestPath) {
   const normalized = String(requestPath ?? '').replaceAll('\\', '/');
   const legacyRequestPath = /^campaigns\/[^/]+\/requests\/[^/]+\.json$/;
   const generatedExecutionPath = /^campaigns\/[^/]+\/controller\/automation\/[^/]+\/EXECUTION_REQUEST_v1\.json$/;
-  if (!legacyRequestPath.test(normalized) && !generatedExecutionPath.test(normalized)) {
+  // Existing controller-operated V7 source-bound test folders, including
+  // Phase-8 revalidation of a sealed Phase-6 security proof gap.
+  const phaseScopedExecutionPath = /^campaigns\/[^/]+\/controller\/(?:phase6-tests|phase8-revalidation|phase9-reruns)\/[^/]+\/[^/]+\.json$/;
+  if (normalized.split('/').some(x=>x==='.'||x==='..'||!x)||
+      (!legacyRequestPath.test(normalized) && !generatedExecutionPath.test(normalized) &&
+       !phaseScopedExecutionPath.test(normalized))) {
     throw new Error(`Invalid controller request path: ${requestPath ?? ''}`);
   }
   return normalized;
