@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 2
+          fetch-depth: 0
       - id: ids
         shell: bash
         env:
@@ -36,9 +36,16 @@ jobs:
             test -d "$root/$ONE_CAMPAIGN"
             json="$(jq -nc --arg c "$ONE_CAMPAIGN" '[$c]')"
           else
-            json="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/" |
-              sed -n -E 's#^process/agent-upload/lite-solo-unit-requests/([A-Za-z0-9._-]+-r[0-9]+)/[^/]+\.json$#\1#p' |
-              sort -u | jq -Rsc 'split("\n") | map(select(length>0))')"
+            # Include every request from multi-commit pushes, not only the tip commit.
+            before="${{ github.event.before }}"
+            if [[ "$before" =~ ^[0-9a-f]{40}$ ]] && [[ "$before" != 0000000000000000000000000000000000000000 ]]; then
+              changes="$(git diff --name-only "$before" "$GITHUB_SHA" -- "$root/")"
+            else
+              changes="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")"
+            fi
+            json="$(printf '%s\n' "$changes" |
+              sed -n -E 's#^process/agent-upload/lite-solo-unit-requests/([A-Za-z0-9._-]+-r[0-9]+)/[^/]+\\.json$#\\1#p' |
+              sort -u | jq -Rsc 'split("\\n") | map(select(length>0))')"
           fi
           echo "campaigns=$json" >> "$GITHUB_OUTPUT"
   drain:
