@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fixture,evidence,digest,json,get,put,writeFile,claim,submit,snapshotWith,
  git,p5Fixture} from '../support/next-context.mjs';
-import {finalizeReadinessV1,markFinalizationV1} from '../../../lib/lite-solo-unit-queue-v1.mjs';
+import {processUnitRequestV1,finalizeReadinessV1,markFinalizationV1} from '../../../lib/lite-solo-unit-queue-v1.mjs';
 const run=(id,opts,fn)=>test(id,()=>{
  const f=fixture(id,opts),d={};
  try{fn(f,d);evidence(id,'LOCAL','PASS',d)}
