@@ -219,14 +219,41 @@ export async function buildProject({
       compilerInputSha256,compilerOutputSha256,artifacts:[fullArtifact]});
   }
   const vyperArtifacts=vyperUnits.flatMap(unit=>unit.artifacts);
+  // Forge 1.7+ can emit a Vyper build-info unit while the source-bound
+  // dedicated Vyper compiler above also emits its exact artifact. This is
+  // duplicate compiler evidence, not two independently deployed contracts.
+  // Retain the dedicated Vyper unit after verifying the native unit's source
+  // and version; never silently discard a Solidity artifact or a mismatch.
+  const nativeVyperUnits=solidityBuild.system==='foundry-native'
+    ? (solidityBuild.compilationUnits??[]).filter(unit=>(unit.artifacts??[]).some(a=>a.sourceName.endsWith('.vy')))
+    : [];
+  for(const unit of nativeVyperUnits){
+    if(unit.compilerVersion!==vyperCompiler.version)
+      throw new Error('Foundry Vyper compiler version mismatch: '+unit.compilerVersion+' expected '+vyperCompiler.version);
+    if((unit.artifacts??[]).some(a=>!a.sourceName.endsWith('.vy')))
+      throw new Error('Foundry compiler unit unexpectedly mixes Solidity and Vyper artifacts: '+unit.unitId);
+    for(const artifact of unit.artifacts){
+      const relative=path.posix.normalize(artifact.sourceName);
+      if(relative.startsWith('../')||relative.startsWith('/')||!relative.startsWith('contracts/'))
+        throw new Error('Foundry Vyper source escapes admitted contracts tree: '+relative);
+      const original=await fs.readFile(path.join(projectRoot,...relative.split('/')),'utf8');
+      if(unit.sourceContents?.[relative]!==original)
+        throw new Error('Foundry Vyper build-info source mismatch: '+relative);
+      if(!vyperArtifacts.some(a=>a.sourceName===artifact.sourceName&&a.contractName===artifact.contractName))
+        throw new Error('Dedicated Vyper compiler did not reproduce Foundry artifact identity: '+relative+':'+artifact.contractName);
+    }
+  }
+  const skippedNativeUnitIds=new Set(nativeVyperUnits.map(unit=>unit.unitId));
+  const retainedNativeUnits=(solidityBuild.compilationUnits??[]).filter(unit=>!skippedNativeUnitIds.has(unit.unitId));
+  const retainedNativeArtifacts=(solidityBuild.artifacts??[]).filter(a=>!a.sourceName.endsWith('.vy'));
   const sourceInventory=[...new Set([...(solidityBuild.sourceInventory??[]),...(vyperBuild.sourceInventory??[])])].sort();
-  const compilerVersions=[...new Set([...(solidityBuild.compilerVersions??[solidityBuild.compilerVersion].filter(Boolean)),vyperCompiler.version])].sort();
+  const compilerVersions=[...new Set([...retainedNativeUnits.map(unit=>unit.compilerVersion),vyperCompiler.version])].sort();
   return {
     ...solidityBuild,
     compilerVersions,
-    compilerProfiles:[...(solidityBuild.compilerProfiles??[]),...vyperUnits.map(unit=>({name:unit.unitId,compilerVersion:unit.compilerVersion,settings:unit.settings}))],
-    compilationUnits:[...(solidityBuild.compilationUnits??[]),...vyperUnits],
-    artifacts:mergeArtifacts(solidityBuild.artifacts,vyperArtifacts),
+    compilerProfiles:[...(solidityBuild.compilerProfiles??[]).filter(profile=>!skippedNativeUnitIds.has(profile.name)),...vyperUnits.map(unit=>({name:unit.unitId,compilerVersion:unit.compilerVersion,settings:unit.settings}))],
+    compilationUnits:[...retainedNativeUnits,...vyperUnits],
+    artifacts:mergeArtifacts(retainedNativeArtifacts,vyperArtifacts),
     sourceInventory,
     sourceInventoryFiles:sourceInventory.length,
     vyperBuild
