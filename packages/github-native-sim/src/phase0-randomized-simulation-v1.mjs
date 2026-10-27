@@ -351,14 +351,26 @@ export function canonicalEthereumExecutionOverrides(source){
 }
 async function runDeploymentScriptV1(options){
   const startedAt=Date.now();
-  console.log('[phase0-deployment] native script started; timeout=900s; heartbeat every 300s');
-  const heartbeat=setInterval(()=>console.log(`[phase0-deployment] native script still running; elapsed=${Math.floor((Date.now()-startedAt)/1000)}s`),300000);
-  heartbeat.unref?.();
-  try{
-    const result=await runProcess(options);
-    console.log(`[phase0-deployment] native script exited; elapsed=${Math.floor((Date.now()-startedAt)/1000)}s; exitCode=${result.exitCode}`);
-    return result;
-  }finally{clearInterval(heartbeat);}
+  let lastNoticeAt=0;
+  // The outer 300-second inactivity guard must observe actual native process output.
+  // A timer-generated heartbeat would continually reset that guard even if Forge hung.
+  // Keep raw output in the existing attempt evidence, and expose only metadata here
+  // to avoid printing deployment output containing secrets.
+  const noteActivity=(stream,text)=>{
+    const now=Date.now();
+    if(now-lastNoticeAt>=1000){
+      lastNoticeAt=now;
+      console.log(`[phase0-deployment] native ${stream} activity; elapsed=${Math.floor((now-startedAt)/1000)}s; bytes=${Buffer.byteLength(text)}`);
+    }
+  };
+  console.log('[phase0-deployment] native script started; inactivity limit=300s; progress requires native stdout/stderr');
+  const result=await runProcess({
+    ...options,
+    onStdout:(text,child)=>{noteActivity('stdout',text);options.onStdout?.(text,child);},
+    onStderr:(text,child)=>{noteActivity('stderr',text);options.onStderr?.(text,child);}
+  });
+  console.log(`[phase0-deployment] native script exited; elapsed=${Math.floor((Date.now()-startedAt)/1000)}s; exitCode=${result.exitCode}`);
+  return result;
 }
 // Runs only what audit-deployment.json declares, against the local fork, as the declared deployer:
 // either its Foundry scripts in order (stopping at the first failure) or its single Hardhat entrypoint.
