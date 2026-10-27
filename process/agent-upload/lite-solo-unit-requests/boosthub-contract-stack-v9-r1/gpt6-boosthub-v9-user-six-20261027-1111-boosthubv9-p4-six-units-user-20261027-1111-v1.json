@@ -11,5 +11,5 @@
   "auditControllerRef": "main",
   "lane": "AUTO",
   "workerId": "gpt6-boosthub-v9-user-six-20261027-1111",
-  "desiredUnitCount": 6
+  "desiredUnitCount": 4
 }
