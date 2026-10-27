@@ -6,6 +6,32 @@ e=os.environ
 workspace=e["CAMPAIGN_ROOT"]
 receipt_path=f"{workspace}/receipts/PHASE_00_RECEIPT_v1.json"
 directory_path=e["CAMPAIGN_DIRECTORY_PATH"]
+# Freeze the canonical policy as immutable source-init provenance, never recreate a ZIP.
+import hashlib
+policy_keys = ("report_pdf","audited_source","scope_summary","findings_remediation","methodology_analysis","properties_hypotheses","execution_results","architecture_dependencies","residual_risks","evidence_index")
+selection = json.loads(e["PUBLISH_FILES_JSON"])
+if type(selection) is not dict or set(selection) != set(policy_keys) or any(type(selection[k]) is not bool for k in policy_keys):
+  raise ValueError("INVALID_PUBLICATION_POLICY")
+for field in ("CAMPAIGN_ID", "GENERATION_ID"):
+  if not e[field].isascii() or not all(c.isalnum() or c in "._-" for c in e[field]):
+    raise ValueError("INVALID_PUBLICATION_POLICY_ID")
+policy={
+  "schemaVersion":"curveyield-report-publication-policy-v1",
+  "catalogueVersion":"curveyield-report-file-catalogue-v1",
+  "campaignId":e["CAMPAIGN_ID"],
+  "campaignGenerationId":e["GENERATION_ID"],
+  "selectionSource":"CAMPAIGN_INITIALIZATION",
+  "publicationPolicyRevision":1,
+  "publishFiles":selection
+}
+policy_bytes=json.dumps(policy,sort_keys=True,separators=(",",":"),ensure_ascii=True).encode("utf-8")
+policy_sha=hashlib.sha256(policy_bytes).hexdigest()
+policy_path=f"{workspace}/reports/REPORT_PUBLICATION_POLICY_v1.json"
+pp=Path(policy_path);pp.parent.mkdir(parents=True,exist_ok=True)
+if pp.exists() and pp.read_bytes()!=policy_bytes:
+  raise ValueError("PUBLICATION_POLICY_CONFLICT")
+if not pp.exists(): pp.write_bytes(policy_bytes)
+
 source={
   "sha256":e["SOURCE_SHA"],
   "kind":"URL_INITIALIZED_EXACT_ARCHIVE",
@@ -54,6 +80,7 @@ receipt={
   "campaign":{
     "campaignId":e["CAMPAIGN_ID"],
     "sourceInitializationRequestId":e["REQUEST_ID"],
+  "publicationPolicyPath":policy_path,"publicationPolicySha256":policy_sha,
     "campaignGenerationId":e["GENERATION_ID"],
     "campaignName":e["CAMPAIGN_NAME"],
     "workspacePath":workspace,
@@ -74,7 +101,7 @@ receipt={
   "globalControls":{"securityTraceabilityGraph":None,"carriedForwardObligationLedger":None,"evidenceInvalidationMatrix":None,"sourceIntelligenceBundle":None},
   "obligations":{"due":[],"created":[],"closed":[],"carriedForward":[]},
   "invalidation":{"status":"NO_MATERIAL_CHANGE","events":[]},
-  "automation":[],
+  "automation":[{"role":"REPORT_PUBLICATION_POLICY","path":policy_path,"sha256":policy_sha}],
   "validation":{"status":"PENDING","validatedAt":None,"failures":[]},
   "handoff":{"required":False,"boundary":None,"incomingReviewer":None,"assignedWork":None,"nextPhaseSequence":1,"sameReviewer":True,"status":"NOT_APPLICABLE"},
   "errors":[]
@@ -90,6 +117,8 @@ directory={
   "executionModel":"PARALLEL_WORKER_UNITS" if e["SKILL_RELEASE"]=="lite-solo-v4" else None,
   "authorityRelease":e["SKILL_RELEASE"],
   "authorityDigest":e["MANIFEST_SHA"],
+  "publicationPolicyPath":policy_path,
+  "publicationPolicySha256":policy_sha,
   "agent":{"actorId":"lite-solo-agent"},
   "currentReceiptPath":receipt_path,"currentPhaseSequence":0,"currentReviewer":"phase0-automation",
   "status":"ACTIVE","updatedAt":e["CREATED_AT"]
