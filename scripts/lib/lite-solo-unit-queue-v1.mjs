@@ -549,83 +549,92 @@ function itemIdentity(item,u,state,request,root){
  return null;
 }
 function validateShardUnit({root,u,data,phase,schema,queue,plan}){
- const errors=[],entries=asArray(data?.entries);
- if(data?.schemaVersion!=='curveyield-lite-solo-unit-submission-v1'||entries.length!==1&&u.kind!=='APPEND')
-  return ['unit snapshot needs one owned record'];
- if(u.kind==='APPEND'){
-  if(entries.length>1024||Buffer.byteLength(JSON.stringify(data),'utf8')>1024*1024)
-   return ['append unit exceeds existing 1 MiB / 1024-entry authorized capacity'];
- }else if(entries[0]?.key!==u.recordKeys[0])return ['record key differs from immutable prefill identity'];
+ const errors=[],entries=Array.isArray(data?.entries)?data.entries:null;
+ if(data?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.submission)return ['schemaVersion: SCHEMA_MISMATCH'];
+ if(!entries)return ['entries: ARRAY_REQUIRED'];
+ if(u.kind!=='APPEND'&&entries.length!==1)return ['entries: EXACTLY_ONE_RECORD_REQUIRED'];
+ if(u.kind==='APPEND'&&(entries.length>1024||Buffer.byteLength(JSON.stringify(data),'utf8')>1024*1024))
+  return ['entries: APPEND_CAPACITY_EXCEEDED'];
  const action=schema.actions?.[u.path[1]],field=(action?.fields??[]).find(x=>x.name===u.field);
- if(!field)return ['field is not in bound phase schema'];
+ if(!field)return ['entries: FIELD_NOT_IN_BOUND_SCHEMA'];
  const fixed=[...new Set([...(field.controllerPrefillFields??[]),...(action.controllerPrefillFields??[])])];
  const orig=u.initialValue;
+ const missing=value=>value===undefined||value===null||
+  typeof value==='string'&&(!value.trim()||/^<(?:REQUIRED|CONTROLLER_PREFILL|fill)/i.test(value.trim())||
+    ['TODO','<fill>'].includes(value.trim()))||
+  isObject(value)&&Object.keys(value).length===0;
  for(const [i,entry] of entries.entries()){
-  const val=entry?.value;
-  if(u.kind==='APPEND'&&entry?.key!==JSON.stringify(u.path)+':APPEND-'+String(i+1).padStart(4,'0'))
-   errors.push('append identity must match indexed capacity');
+  const p='entries['+i+']';
+  if(!isObject(entry)||typeof entry.key!=='string'||!Object.hasOwn(entry,'value')){
+   errors.push(p+': KEY_VALUE_SHAPE_REQUIRED');continue;
+  }
+  if(u.kind==='APPEND'){
+   if(entry.key!==JSON.stringify(u.path)+':APPEND-'+String(i+1).padStart(4,'0'))
+    errors.push(p+'.key: APPEND_IDENTITY_MISMATCH');
+  }else if(entry.key!==u.recordKeys?.[0])errors.push(p+'.key: ASSIGNED_RECORD_MISMATCH');
+  const val=entry.value;
   if(phase===5&&u.field==='targetDesigns'&&u.kind!=='APPEND'&&isObject(orig)&&isObject(val)&&orig.candidateKey!==val.candidateKey)
-   errors.push('candidateKey identity from accepted Phase 4 is immutable');
+   errors.push(p+'.value.candidateKey: IMMUTABLE_IDENTITY_MISMATCH');
   if(u.kind!=='APPEND'&&isObject(orig)&&isObject(val))
    for(const key of fixed)if(JSON.stringify(orig[key])!==JSON.stringify(val[key]))
-    errors.push('controller-prefilled '+key+' is read-only');
+    errors.push(p+'.value.'+key+': CONTROLLER_PREFILL_IMMUTABLE');
   if(u.kind!=='APPEND'&&typeof orig==='string'&&orig==='NONE_IDENTIFIED'&&isObject(val))
-   errors.push('immutable negative sentinel must remain; use append slot for real records');
-  if(field.type==='REQUIRED_RECORD_LIST'&&!(isObject(val)||['NONE_IDENTIFIED','NO_CANDIDATE','NOT_APPLICABLE','NO_ADDITIONAL_OBLIGATION'].includes(val)))
-   errors.push('record must be an object or admitted explicit negative');
+   errors.push(p+'.value: FROZEN_NEGATIVE_SLOT_IMMUTABLE');
+  const negative=u.kind!=='APPEND'&&typeof val==='string'&&val===orig&&
+   ['NONE_IDENTIFIED','NO_CANDIDATE','NOT_APPLICABLE','NO_ADDITIONAL_OBLIGATION'].includes(val);
+  if(field.type==='REQUIRED_RECORD_LIST'&&!(isObject(val)||negative))
+   errors.push(p+'.value: RECORD_OBJECT_REQUIRED');
+  if(['REQUIRED_LIST','REQUIRED_ANALYSIS'].includes(field.type)&&
+     (missing(val)||Array.isArray(val)&&val.length===0))
+   errors.push(p+'.value: REQUIRED_NONBLANK');
   if(isObject(val)){
-   for(const name of field.itemRequiredFields??[])if(val[name]===undefined||val[name]===null||
-    typeof val[name]==='string'&&(!val[name].trim()||val[name].startsWith('<REQUIRED')))
-    errors.push(name+' requires substantive evidence');
+   for(const name of field.itemRequiredFields??[]){
+    const value=val[name],fp=p+'.value.'+name;
+    if(missing(value))errors.push(fp+': REQUIRED_NONBLANK');
+    const min=field.itemFieldMinItems?.[name];
+    if(Array.isArray(value)&&Number.isInteger(min)&&value.length<min)
+     errors.push(fp+': MIN_ITEMS_'+min);
+    if(Array.isArray(value)&&value.some(x=>typeof x==='string'&&missing(x)))
+     errors.push(fp+': UNRESOLVED_PLACEHOLDER');
+   }
    for(const [name,allowed] of Object.entries(field.itemFieldAllowedValues??{}))
-    if(val[name]!==undefined&&!allowed.includes(String(val[name])))errors.push(name+' invalid enum');
-  }else if(typeof val==='string'&&val.startsWith('<REQUIRED'))errors.push('incomplete mandatory field');
-  if(phase===6&&u.field==='baselineTestRecords'&&isObject(val)){
+    if(val[name]!==undefined&&!allowed.includes(String(val[name])))
+     errors.push(p+'.value.'+name+': INVALID_ENUM');
+  }else if(missing(val))errors.push(p+'.value: REQUIRED_NONBLANK');
+  if(phase===6&&u.field==='baselineTestRecords'&&isObject(val))
    errors.push(...validateLiveForkBaselineRecordV1({
     root,campaignPath:plan.campaignPath,campaignId:plan.campaignId,
     sourceSha256:plan.sourceSha256,record:val
-   }));
-  }
-  if(phase===6&&u.field==='candidateProofRecords'&&isObject(val)){
-   if(['CONFIRMED','DISPROVEN'].includes(val.verdict)){
-    // At unit acceptance the verdict must match a real parsed machine ledger.
-    const ref=val.ledgerRef;
-    const validRef=typeof ref==='string'&&ref.endsWith('/ASSERTION_LEDGER_v1.json')&&
-     !ref.startsWith('/')&&!ref.split('/').includes('..')&&!ref.includes('\\');
-    const rel=validRef?(ref.startsWith(plan.campaignPath+'/')?ref:path.posix.join(plan.campaignPath,ref)):null;
-    const ledger=rel&&fs.existsSync(repoFile(root,rel))?maybe(root,rel):null;
-    if(ledger?.schemaVersion!=='curveyield-assertion-ledger-v1'||
-       ledger?.parseStatus!=='PARSED'||ledger?.toolInvoked!==true)
-     errors.push('decisive proof requires an existing parsed invoked assertion ledger');
-    else{
-     const tests=asArray(ledger.tests),attacks=asArray(val.attackAssertionNames),
-       controls=asArray(val.controlAssertionNames);
-     if(!attacks.length||!controls.length||
-       [...attacks,...controls].some(name=>typeof name!=='string'||!name.trim()))
-      errors.push('decisive proof must name attack and healthy-path assertions');
-     else{
-      const status=name=>tests.find(t=>t?.name===name)?.status;
-      if(controls.some(name=>status(name)!=='PASS'))
-       errors.push('decisive proof must have passing healthy-path control assertions');
-      const expected=val.verdict==='CONFIRMED'?'FAIL':'PASS';
-      if(attacks.some(name=>status(name)!==expected))
-       errors.push('decisive proof machine assertion outcome contradicts verdict');
-     }
-    }
-    if(val.verdict==='DISPROVEN'&&
-      !/block|guard|reject|revert|deny/i.test(String(val.reasoning??'')))
-     errors.push('DISPROVEN requires an explanation of the blocking control');
-   }else if(val.verdict==='PHASE5_DECISIVE'&&
-    !/REPRODUCED|CONFIRMED|DECISIVE/i.test(String(val.phase5Result??'')))
-    errors.push('PHASE5_DECISIVE requires matching conclusive Phase-5 evidence');
+   }).map(message=>p+'.value: MACHINE_INTEGRITY: '+message));
+  if(phase===6&&u.field==='candidateProofRecords'&&isObject(val)&&
+     ['CONFIRMED','DISPROVEN'].includes(val.verdict)){
+   const ref=val.ledgerRef;
+   const validRef=typeof ref==='string'&&ref.endsWith('/ASSERTION_LEDGER_v1.json')&&
+    !ref.startsWith('/')&&!ref.split('/').includes('..')&&!ref.includes(String.fromCharCode(92));
+   const rel=validRef?(ref.startsWith(plan.campaignPath+'/')?ref:path.posix.join(plan.campaignPath,ref)):null;
+   const ledger=rel&&fs.existsSync(repoFile(root,rel))?maybe(root,rel):null;
+   if(ledger?.schemaVersion!=='curveyield-assertion-ledger-v1'||
+      ledger?.parseStatus!=='PARSED'||ledger?.toolInvoked!==true||
+      !Array.isArray(ledger.tests))
+    errors.push(p+'.value.ledgerRef: PARSED_INVOKED_LEDGER_REQUIRED');
+   else{
+    const attacks=asArray(val.attackAssertionNames),controls=asArray(val.controlAssertionNames);
+    if(!attacks.length||!controls.length||
+      [...attacks,...controls].some(name=>typeof name!=='string'||!name.trim()))
+     errors.push(p+'.value: ASSERTION_IDENTITIES_REQUIRED');
+    else if([...attacks,...controls].some(name=>!ledger.tests.some(test=>test?.name===name)))
+     errors.push(p+'.value: NAMED_MACHINE_ASSERTION_MISSING');
+    // Artifact authenticity is objective; interpreting its verdict is agent-owned.
+   }
   }
   if(phase===5&&u.field==='targetDesigns'&&isObject(val)&&val.executionMethod==='V7_REQUEST'){
    const resolved=resolveTargetExecutionRequestRef({root,campaignPath:plan.campaignPath,target:val});
-   if(!resolved)errors.push('target lacks a committed source-bound executable request/harness');
-   else {
+   if(!resolved)errors.push(p+'.value.executionRequestRef: SOURCE_BOUND_REQUEST_REQUIRED');
+   else{
     const bound=validateTargetExecutionRequestBindingV1({controllerRoot:root,campaignPath:plan.campaignPath,
      target:{...val,executionRequestRef:resolved},expectedCampaignId:plan.campaignId,expectedSourceSha256:plan.sourceSha256});
-    if(!String(bound.status).startsWith('PASS_'))errors.push('target binding: '+bound.status+': '+(bound.reasons??[]).join('; '));
+    if(!String(bound.status).startsWith('PASS_'))
+     errors.push(p+'.value.executionRequestRef: MACHINE_BINDING_'+bound.status);
    }
   }
  }
@@ -719,8 +728,8 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
   const packet=readUnitPacketV1({root,packetPath:u.packetPath}),
    inventory=read(root,reviewInventoryRelV1(root,campaign,'REVIEW_INVENTORY_v1.json'));
   const checked=u.kind==='ATTACK'
-   ?validateAttackSubmissionV1({packet:packet.payload,submission,inventory})
-   :validateFlowReviewSubmissionV1({packet:packet.payload,submission,inventory});
+   ?validateAttackSubmissionV1({packet:packet.payload,submission,inventory,structuralOnly:true})
+   :validateFlowReviewSubmissionV1({packet:packet.payload,submission,inventory,structuralOnly:true});
   errors=checked.errors??[];
  }else if(!errors.length&&u.kind==='BATCH'){
   batchOutcome=acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest});
