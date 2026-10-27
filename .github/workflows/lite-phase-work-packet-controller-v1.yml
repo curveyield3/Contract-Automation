@@ -68,46 +68,56 @@ permissions:
   actions: write
 
 jobs:
-  # Both push and manual dispatch resolve an exact campaign before locking.
-  # Jobs for distinct campaigns can proceed without waiting for Phase-5 work.
+  # Discover every changed campaign boundary before applying independent locks.
   resolve_campaign_lock:
     runs-on: ubuntu-latest
     outputs:
-      campaign_id: ${{ steps.identity.outputs.campaign_id }}
+      requests: ${{ steps.identity.outputs.requests }}
     steps:
-      - name: Resolve exact campaign lock key
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Resolve campaign-specific boundary requests
         id: identity
         env:
-          GH_TOKEN: ${{ github.token }}
           DISPATCH_CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          BEFORE_SHA: ${{ github.event.before }}
         shell: bash
         run: |
           set -euo pipefail
+          : > /tmp/lite-boundary-requests.ndjson
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            campaign_id="$DISPATCH_CAMPAIGN_ID"
+            [[ "$DISPATCH_CAMPAIGN_ID" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || exit 1
+            jq -nc --arg id "$DISPATCH_CAMPAIGN_ID" '{campaign_id:$id,request_path:"__MANUAL__"}' >> /tmp/lite-boundary-requests.ndjson
           else
-            mapfile -t request_paths < <(
-              timeout -k 10s 60s gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status != "removed") | .filename' |
-                grep -E '^process/agent-upload/lite-phase-boundary/[^/]+\.json$' || true
-            )
-            [ "${#request_paths[@]}" -eq 1 ] || {
-              echo "::error::Expected exactly one Lite boundary request to resolve campaign lock"
-              exit 1
-            }
-            encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/${request_paths[0]}?ref=$GITHUB_SHA" --jq '.content')"
-            campaign_id="$(printf '%s' "$encoded" | base64 -d | jq -r '.campaignId // empty')"
+            root=process/agent-upload/lite-phase-boundary
+            if [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]]; then
+              mapfile -t changed < <(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" -- "$root/")
+            else
+              mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")
+            fi
+            for request in "${changed[@]}"; do
+              [[ "$request" =~ ^process/agent-upload/lite-phase-boundary/[A-Za-z0-9._-]+\.json$ ]] || continue
+              test -f "$request" || continue
+              jq -ec --arg file "$request" '
+                select((.campaignId|type)=="string"
+                  and (.campaignId|test("^[A-Za-z0-9._-]+-r[0-9]+$")))
+                | {campaign_id:.campaignId,request_path:$file}
+              ' "$request" >> /tmp/lite-boundary-requests.ndjson
+            done
           fi
-          [[ "$campaign_id" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || {
-            echo "::error::Cannot lock Lite controller without a valid campaign ID"
-            exit 1
-          }
-          echo "campaign_id=$campaign_id" >> "$GITHUB_OUTPUT"
+          echo "requests=$(jq -sc '{include:.}' /tmp/lite-boundary-requests.ndjson)" >> "$GITHUB_OUTPUT"
 
   validate-bookkeep-advance:
     needs: resolve_campaign_lock
+    if: ${{ needs.resolve_campaign_lock.outputs.requests != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve_campaign_lock.outputs.requests) }}
     # Same-campaign push and manual dispatch share a lock. Keep cancel off.
     concurrency:
-      group: lite-phase-boundary-controller-${{ needs.resolve_campaign_lock.outputs.campaign_id }}
+      group: lite-phase-boundary-controller-${{ matrix.campaign_id }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     # Phase 5 may run multiple 35-minute candidate-specific V7 executions.
@@ -138,6 +148,7 @@ jobs:
           DISPATCH_REWORK_REQUEST_PATH: ${{ inputs.rework_request_path }}
           DISPATCH_HOLD_DELIVERY: ${{ inputs.hold_successor_delivery }}
           DISPATCH_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          MATRIX_REQUEST_PATH: ${{ matrix.request_path }}
         shell: bash
         run: |
           set -euo pipefail
@@ -157,12 +168,8 @@ jobs:
             supplied_campaign_path="$DISPATCH_CAMPAIGN_PATH"
             supplied_directory_path="$DISPATCH_DIRECTORY_PATH"
           else
-            mapfile -t request_paths < <(
-              timeout -k 10s 60s gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status != "removed") | .filename' |
-              grep -E '^process/agent-upload/lite-phase-boundary/[^/]+\.json$' || true
-            )
-            [ "${#request_paths[@]}" -eq 1 ] || { echo "::error::Expected exactly one changed Lite phase-boundary request; found ${#request_paths[@]}."; exit 1; }
-            request_path="${request_paths[0]}"
+            request_path="$MATRIX_REQUEST_PATH"
+            [[ "$request_path" =~ ^process/agent-upload/lite-phase-boundary/[A-Za-z0-9._-]+\.json$ ]] || exit 1
             encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$request_path?ref=$GITHUB_SHA" --jq '.content')"
             printf '%s' "$encoded" | base64 -d > /tmp/lite-phase-boundary-request.json
             jq -e '
