@@ -33,7 +33,7 @@ import json,sys
 keys = ("report_pdf","audited_source","scope_summary","findings_remediation","methodology_analysis","properties_hypotheses","execution_results","architecture_dependencies","residual_risks","evidence_index")
 try:
     data=json.load(sys.stdin)
-    if data=="__ABSENT__": data={key:False for key in keys}
+    if data=="__ABSENT__": data={key:True for key in keys}
     if type(data) is not dict or set(data)!=set(keys) or any(type(data[k]) is not bool for k in keys):
         raise ValueError("INVALID_PUBLICATION_POLICY")
     print(json.dumps(data,sort_keys=True,separators=(",",":"),ensure_ascii=True))
