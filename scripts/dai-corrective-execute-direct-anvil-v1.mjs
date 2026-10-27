@@ -238,7 +238,7 @@ const groups={
     let validHigh=false;
     try{await rpc('eth_call',[{to:DAI,from:CAROL,data:iface.encodeFunctionData('permit',high)},'latest']);validHigh=true;}
     catch(err){if(!/revert|execution reverted/i.test(String(err?.message)))throw err;}
-    check('high-s pair has same signing r',high[7],sig.r);
+    check('high-s pair has same signing r',high[6],sig.r);
     if(validHigh)await tx(CAROL,'permit',high);
     else await tx(CAROL,'permit',old);
     check('one of high/low signatures consumes only one nonce',await read('nonces',[holder]),nonce+1n);
