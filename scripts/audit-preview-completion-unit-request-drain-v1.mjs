@@ -62,12 +62,38 @@ if(arg.mode!=='finalize'){
  }
  if(changed){directory.updatedAt=new Date().toISOString();writeJson(directoryFile,directory);}
 }
+// A sealed, explicit NONE_IDENTIFIED target design requires no machine execution.
+// Inspect only controller-accepted target units; all other cases fail closed to
+// the campaign-specific human authorization gate.
+const noExecutableTargets=(()=>{
+ if(directory.currentAssignment?.phaseSequence!==5)return false;
+ try{
+  const state=readJson(repoFile(root,path.posix.join(campaignPath,'work/phase-05/units/UNIT_QUEUE_STATE_v1.json')));
+  const targets=Object.entries(state.units??{}).filter(([id])=>/^P5-T-/.test(id));
+  if(!targets.length)return false;
+  let sentinelCount=0;
+  const expectedKey=JSON.stringify(['actions','step-3','outputs','targetDesigns'])+':0';
+  for(const [id,unit] of targets){
+   if(unit.status!=='ACCEPTED'||!unit.acceptedPath)return false;
+   const accepted=readJson(repoFile(root,unit.acceptedPath));
+   if(accepted.unitId!==id||accepted.phaseSequence!==5||
+      accepted.sourceSha256!==directory.sourceSha256||
+      accepted.authorityDigest!==directory.authorityDigest||
+      !Array.isArray(accepted.submission?.entries))return false;
+   for(const entry of accepted.submission.entries){
+    if(entry?.key!==expectedKey||entry?.value!=='NONE_IDENTIFIED'||++sentinelCount!==1)return false;
+   }
+  }
+  return sentinelCount===1;
+ }catch{return false;}
+})();
+
 let ready=false,seal=null;
 if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
  const gate=finalizeReadinessV1Safe(root,campaignPath,directory,directory.currentAssignment.phaseSequence);
  ready=gate.ready;
  if(arg.mode==='finalize'&&ready){
-  if(directory.currentAssignment?.phaseSequence===5&&!(
+  if(directory.currentAssignment?.phaseSequence===5&&!noExecutableTargets&&!(
     directory.machineExecutionAuthorization?.status==='APPROVED'&&
     directory.machineExecutionAuthorization?.sourceSha256===directory.sourceSha256&&
     directory.machineExecutionAuthorization?.scope==='PHASE5_TARGET_EXECUTION'
@@ -117,6 +143,6 @@ function finalizeReadinessV1Safe(root,campaignPath,directory,phase){
  catch(e){return {ready:false,reason:String(e.message??e)};}
 }
 const result={schemaVersion:'curveyield-lite-solo-unit-drain-summary-v1',
- campaignId,phase,processed:results,finalizeReady:ready,seal,
+ campaignId,phase,processed:results,finalizeReady:ready,phase5NoExecutableTargets:noExecutableTargets,seal,
  state:phase&&[4,5,6].includes(phase)?statusUnitQueueV1({root,campaignPath,phase}):null};
 process.stdout.write(JSON.stringify(result)+'\n');
