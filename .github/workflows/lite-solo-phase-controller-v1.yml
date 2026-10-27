@@ -102,24 +102,53 @@ jobs:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
           AUDIT_CAMPAIGN: ${{ steps.request.outputs.id }}
+          REQUEST_FILE: ${{ steps.request.outputs.request }}
         shell: bash
         run: |
           set -euo pipefail
           encoded_path="$(jq -rn --arg p "$AUDIT_DIRECTORY" '$p|split("/")|map(@uri)|join("/")')"
           encoded="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$encoded_path?ref=main" --jq .content)"
           printf '%s' "$encoded" | base64 -d >/tmp/lite-solo-campaign-directory.json
-          jq -e --arg id "$AUDIT_CAMPAIGN" '.schemaVersion=="curveyield-audit-campaign-directory-entry-v2" and
-            .campaignId==$id and .mode=="LITE_SOLO" and (.agentModel=="ONE_PERSISTENT_AGENT" or .agentModel=="PARALLEL_WORKER_UNITS") and
-            .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT" and (.agent.chatUrl==null) and
-            (.masterReview==null) and (.pendingMasterReview==null) and
-            (.workspacePath|startswith("campaigns/"))' /tmp/lite-solo-campaign-directory.json >/dev/null
-          if jq -e '.authorityRelease=="lite-solo-v4" and .currentAssignment.phaseSequence>=4 and .currentAssignment.phaseSequence<=6' /tmp/lite-solo-campaign-directory.json >/dev/null; then
-            echo '::error::Use the v4 immutable unit ingress for Phases 4–6, not the phase-wide boundary controller'; exit 1
+          campaign_id="$AUDIT_CAMPAIGN"
+          campaign_path="campaigns/$(printf '%s' "$campaign_id" | sed -E 's/-r([0-9]+)$/ r\\1/' | sed -E 's/^cyavkatv25 /cyavKATv25 /')"
+          # A newer same-source rN campaign can replace the legacy slug pointer.
+          # Recover the old generation into its own revision-scoped controller
+          # directory without modifying the newer generation's canonical record.
+          if jq -e --arg id "$campaign_id" '.campaignId==$id' /tmp/lite-solo-campaign-directory.json >/dev/null; then
+            campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
+          else
+            snapshot="$(jq -r '.directorySnapshotCommitSha // empty' "$REQUEST_FILE")"
+            alias="Audit Campaign Directory/campaigns/$campaign_id.json"
+            alias_encoded="$(jq -rn --arg p "$alias" '$p|split("/")|map(@uri)|join("/")')"
+            alias_blob="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$alias_encoded?ref=main" --jq .content 2>/dev/null || true)"
+            if [ -n "$alias_blob" ]; then
+              printf '%s' "$alias_blob" | base64 -d >/tmp/lite-solo-campaign-directory.json
+            else
+              [[ "$snapshot" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::SUPERSEDED_CAMPAIGN_DIRECTORY: exact prior directory commit required"; exit 1; }
+              encoded="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$encoded_path?ref=$snapshot" --jq .content)"
+              printf '%s' "$encoded" | base64 -d >/tmp/lite-solo-campaign-directory.json
+            fi
+            campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
+            AUDIT_DIRECTORY="$alias"
           fi
-          campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
+          jq -e --arg id "$campaign_id" --arg path "$campaign_path" '.schemaVersion=="curveyield-audit-campaign-directory-entry-v2" and
+            .campaignId==$id and .workspacePath==$path and .mode=="LITE_SOLO" and
+            (.agentModel=="ONE_PERSISTENT_AGENT" or .agentModel=="PARALLEL_WORKER_UNITS") and
+            .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT" and (.agent.chatUrl==null) and
+            (.masterReview==null) and (.pendingMasterReview==null)' /tmp/lite-solo-campaign-directory.json >/dev/null
+          if jq -e '.authorityRelease=="lite-solo-v4" and .currentAssignment.phaseSequence>=4 and .currentAssignment.phaseSequence<=6' /tmp/lite-solo-campaign-directory.json >/dev/null; then
+            echo '::error::Use the v4 immutable unit ingress for Phases 4–6'; exit 1
+          fi
           bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
-          jq -e --arg id "$AUDIT_CAMPAIGN" '.campaignId==$id and .mode=="LITE_SOLO"' ".audit-controller/$AUDIT_DIRECTORY" >/dev/null
+          receipt=".audit-controller/$campaign_path/receipts/PHASE_00_RECEIPT_v1.json"
+          jq -e --arg id "$campaign_id" --arg sha "$(jq -r .source.sha256 "$receipt")" --arg gen "$(jq -r .campaign.campaignGenerationId "$receipt")" --argjson phase "$(jq -r .phaseSequence "$REQUEST_FILE")" '
+            .campaignId==$id and .sourceSha256==$sha and .campaignGenerationId==$gen and
+            .currentAssignment.phaseSequence==$phase and .currentAssignment.status=="ACTIVE"
+          ' /tmp/lite-solo-campaign-directory.json >/dev/null
+          mkdir -p ".audit-controller/$(dirname "$AUDIT_DIRECTORY")"
+          cp /tmp/lite-solo-campaign-directory.json ".audit-controller/$AUDIT_DIRECTORY"
           echo "path=$campaign_path" >> "$GITHUB_OUTPUT"
+          echo "directory=$AUDIT_DIRECTORY" >> "$GITHUB_OUTPUT"
       - name: Set up Node.js for the existing validation engine
         uses: actions/setup-node@v4
         with:
@@ -133,7 +162,7 @@ jobs:
       - name: Source-bound Phase-5 execution-request preflight
         id: phase5
         env:
-          AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
+          AUDIT_DIRECTORY: ${{ steps.scope.outputs.directory }}
           AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
           AUDIT_CAMPAIGN: ${{ steps.request.outputs.id }}
           REQUEST_FILE: ${{ steps.request.outputs.request }}
@@ -202,7 +231,7 @@ jobs:
       - name: Publish only the current lite-solo campaign and directory
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
+          AUDIT_DIRECTORY: ${{ steps.scope.outputs.directory }}
           AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
         shell: bash
         run: |
@@ -210,7 +239,7 @@ jobs:
           cd .audit-controller
           git config user.name 'CurveYield Lite-Solo Phase Controller'
           git config user.email 'lite-solo-controller@users.noreply.github.com'
-          git add -- "$AUDIT_CAMPAIGN_PATH" "$AUDIT_DIRECTORY"
+          git add --sparse -- "$AUDIT_CAMPAIGN_PATH" "$AUDIT_DIRECTORY"
           if ! git diff --cached --quiet; then
             git commit -m "audit(lite-solo): validated boundary $GITHUB_RUN_ID"
             for attempt in 1 2 3; do
@@ -223,7 +252,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          file=".audit-controller/${{ steps.request.outputs.directory }}"
+          file=".audit-controller/${{ steps.scope.outputs.directory }}"
           jq -e '.mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and
             .agent.actorId=="lite-solo-agent" and (.agent.chatUrl==null)' "$file" >/dev/null
           status="$(jq -r .status /tmp/lite-solo-controller-result.json)"
