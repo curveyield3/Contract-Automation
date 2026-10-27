@@ -323,7 +323,8 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
  if(data?.schemaVersion!=='curveyield-lite-solo-unit-submission-v1'||entries.length!==1&&u.kind!=='APPEND')
   return ['unit snapshot needs one owned record'];
  if(u.kind==='APPEND'){
-  if(entries.length>48)return ['append unit exceeds 48 records; paginate within approved unit'];
+  if(entries.length>1024||Buffer.byteLength(JSON.stringify(data),'utf8')>1024*1024)
+   return ['append unit exceeds existing 1 MiB / 1024-entry authorized capacity'];
  }else if(entries[0]?.key!==u.recordKeys[0])return ['record key differs from immutable prefill identity'];
  const action=schema.actions?.[u.path[1]],field=(action?.fields??[]).find(x=>x.name===u.field);
  if(!field)return ['field is not in bound phase schema'];
