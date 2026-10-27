@@ -299,7 +299,10 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
     p.initialValue.obligationIds.includes(obligationId)).map(p=>p.unitId);
   }
  }
- for(const u of plan.units)if(u.dependencies.length)queue.units[u.unitId].status='BLOCKED_DEPENDENCY';
+ // Only newly issued available semantic units may transition to dependency-blocked.
+ // Reconciliation must never reset persisted ACCEPTED discovery units.
+ for(const u of plan.units)if(u.dependencies.length&&queue.units[u.unitId]?.status==='AVAILABLE')
+  queue.units[u.unitId].status='BLOCKED_DEPENDENCY';
  const missing=new Set(plan.units.flatMap(x=>x.dependencies).filter(id=>!queue.units[id]));
  if(missing.size)throw Error('unsatisfied planner unit references: '+[...missing].join(', '));
 }
@@ -361,6 +364,32 @@ function unlock(queue,plan){
   }
  }
  queue.newlyEligibleUnitIds=newIds;return newIds;
+}
+// Recover historical Phase-4 discovery units whose ACCEPTED state was overwritten by
+// reconciliation dependency setup. Restore only the original controller-accepted,
+// source/authority-bound immutable snapshots; never infer acceptance from a worker draft.
+function restoreAcceptedDiscoveryV1({root,queue,plan}){
+ if(queue.stage!=='RECONCILIATION'||plan.phaseSequence!==4)return [];
+ const restored=[];
+ for(const u of plan.units){
+  if(!['FLOW','ATTACK'].includes(u.kind))continue;
+  const state=queue.units[u.unitId];
+  if(!state||state.status==='ACCEPTED'||!['AVAILABLE','BLOCKED_DEPENDENCY'].includes(state.status)||
+     !state.acceptedPath||!state.acceptedSha256)continue;
+  const accepted=read(root,state.acceptedPath);
+  if(accepted.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.accepted||accepted.unitId!==u.unitId||
+     accepted.phaseSequence!==4||accepted.phaseEpoch!==queue.phaseEpoch||
+     accepted.campaignGenerationId!==queue.campaignGenerationId||
+     accepted.sourceSha256!==queue.sourceSha256||accepted.authorityDigest!==queue.authorityDigest||
+     accepted.unitSpecRevision!==u.unitSpecRevision||
+     accepted.packetSha256!==u.packetSha256||
+     accepted.workerId!==state.workerId||accepted.claimEpoch!==state.claimEpoch||
+     accepted.submissionSha256!==state.acceptedSha256||
+     accepted.submission?.unitId!==u.unitId)
+   throw Error('accepted discovery recovery identity mismatch: '+u.unitId);
+  state.status='ACCEPTED';restored.push(u.unitId);
+ }
+ return restored;
 }
 function noWork(queue,plan){
  if(plan.units.every(u=>queue.units[u.unitId].status==='ACCEPTED'))return 'PHASE_COMPLETE';
@@ -618,6 +647,7 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  let queue=maybe(root,queueRel(campaignPath,phase));
  if(!queue)queue=createUnitPlanV1({root,campaignPath,directory,phase,automationRoot});
  const plan=readPlan(root,campaignPath,phase);assertPlan(queue,plan);
+ const recoveredDiscoveryUnits=restoreAcceptedDiscoveryV1({root,queue,plan});
  const requestDigest=sha(request);
  if(queue.processedRequestHashes?.[request.requestId]&&
     queue.processedRequestHashes[request.requestId]!==requestDigest)
@@ -629,6 +659,10 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  else if(request.operation==='RELEASE')result=handleRelease({queue,plan,request});
  else {queue.finalizeStatus='NOT_STARTED';queue.finalizeDetails=null;result={status:'FINALIZE_REQUESTED'};}
  if(result.acceptedUnits?.length) {queue.finalizeStatus='NOT_STARTED';queue.finalizeDetails=null;}
+ if(recoveredDiscoveryUnits.length){
+  queue.newlyEligibleUnitIds=queue.newlyEligibleUnitIds.filter(id=>!recoveredDiscoveryUnits.includes(id));
+  result.recoveredAcceptedDiscoveryUnits=recoveredDiscoveryUnits;
+ }
  if(phase===4&&queue.stage!=='RECONCILIATION'&&
   plan.units.filter(u=>['FLOW','ATTACK'].includes(u.kind)).every(u=>queue.units[u.unitId]?.status==='ACCEPTED'))
   finishDiscovery({root,campaign:campaignPath,directory,plan,queue,automationRoot});
