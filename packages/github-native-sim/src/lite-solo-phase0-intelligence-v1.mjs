@@ -298,14 +298,19 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
       artifacts:Array.isArray(unit.artifacts)?unit.artifacts:[],
       compilerVersion:unit.compilerVersion??build.compilerVersion
     };
-    const exportInfo=await writeCryticCompileExport({
-      projectRoot,
-      build:unitBuild,
-      outDir:path.join(projectRoot,'.audit-slither-export',unitId)
-    });
+    const vyperSources=Object.keys(unit.sourceContents??{}).filter(name=>name.endsWith('.vy')).sort();
+    if(vyperSources.length>1)throw new Error('Multiple Vyper sources require separately attributable Slither static-analysis results');
+    const exportInfo=vyperSources.length===1
+      ? {mode:'EXACT_SOURCE_VYPER',sourcePath:await resolveCompiledSourceFile(projectRoot,vyperSources[0]),sourceUnitCount:1,contractCount:unitBuild.artifacts.length,compilationUnitCount:1}
+      : await writeCryticCompileExport({
+        projectRoot,
+        build:unitBuild,
+        outDir:path.join(projectRoot,'.audit-slither-export',unitId)
+      });
     totalSourceUnits+=exportInfo.sourceUnitCount??0;
     totalContracts+=exportInfo.contractCount??0;
-    const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies','--fail-none'],cwd:projectRoot});
+    const target=vyperSources.length===1?exportInfo.sourcePath:exportInfo.exportPath;
+    const raw=await runProcess({command:'slither',args:[target,'--json','-','--exclude-dependencies','--fail-none'],cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
     unitResults.push({
       unitId,
