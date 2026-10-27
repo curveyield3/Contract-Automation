@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "v17r2-p4-x010-x011-submit01-v1",
+  "operation": "SUBMIT",
+  "campaignId": "curveyield-dex-v17-source-r2",
+  "campaignGenerationId": "curveyield-dex-v17-source-r2-g1-20261027T104546Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-v17r2-worker-f-20261027t1526",
+  "sourceSha256": "bd0fc0a955c585ea0357feecb3d16caf9f48dd9ca5073a6a18948eab7c0f5e55",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "X-010",
+      "claimEpoch": 1,
+      "claimToken": "32dff52d-5930-442a-b283-a0988ec41a56",
+      "packetSha256": "9f09c99fb2867dc4a9f6ebd2f18f6119069f334ddcd141ce2528cb3fb13f163f",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/X-010/submissions/gpt6-v17r2-worker-f-20261027t1526/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "815ab2c67352dbee6c1453b26849671929985b93696983baf66762a91c5d30d6",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "X-011",
+      "claimEpoch": 1,
+      "claimToken": "07bb1122-4d20-4749-96d0-9dc1d9529658",
+      "packetSha256": "27cf1aa7d0bf42548f541f74b286fdcb5756c3e6480a7bb3580a98da2189cd3e",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/X-011/submissions/gpt6-v17r2-worker-f-20261027t1526/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "6d40f785b601264215133cefef922bd1c6ffba0902ead49e25ad5abca4fbd7c4",
+      "unitSpecRevision": 1
+    }
+  ]
+}
