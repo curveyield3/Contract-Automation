@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "boosthubv9-p4-hourly-submit-001",
+  "operation": "SUBMIT",
+  "campaignId": "boosthub-contract-stack-v9-r1",
+  "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-boosthub-v9-hourly-worker",
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "R-017",
+      "claimEpoch": 1,
+      "claimToken": "b3a41950-02c6-450d-8ab9-0e456fe00108",
+      "unitSpecRevision": 1,
+      "packetSha256": "ce05ab79212bd1dcd122b4d3c603d9adfc5f13128b550ea0498ceb7fd0d572a1",
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/R-017/submissions/gpt6-boosthub-v9-hourly-worker/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "f0b48bfa5ebfac3c39f8f1fcf5bd4439b74c7a4395e08e62c2ed853ff6e8281d"
+    },
+    {
+      "unitId": "R-018",
+      "claimEpoch": 1,
+      "claimToken": "997e6a64-0ffa-44b2-84aa-36e80158ac07",
+      "unitSpecRevision": 1,
+      "packetSha256": "311d9cca4b87402feaeb9d25ce413cbf0b9610134cb5a59d18f266468091d549",
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/R-018/submissions/gpt6-boosthub-v9-hourly-worker/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "d59b9a10e38dcd6bbdc241fc978421a6bda0a1abf7843cf5075f19a638555354"
+    },
+    {
+      "unitId": "R-019",
+      "claimEpoch": 1,
+      "claimToken": "f9917eff-e1a4-4c3e-956f-c6cbd226df26",
+      "unitSpecRevision": 1,
+      "packetSha256": "fe8e8a59757d1e504798a700bcac85173d9caab832e4893b7dba2c61e26f0102",
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/R-019/submissions/gpt6-boosthub-v9-hourly-worker/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "51104d06a45972b7d801c22adc5371ff8de006cc3f4150c8aff35684e686c59d"
+    },
+    {
+      "unitId": "R-020",
+      "claimEpoch": 1,
+      "claimToken": "606e73cb-aea1-4e2d-a976-ad8e90106453",
+      "unitSpecRevision": 1,
+      "packetSha256": "cc5bf0180f83633f8b379ec7d0d854e0f6e251273d691d24f81a092d193f5d4b",
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/R-020/submissions/gpt6-boosthub-v9-hourly-worker/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "ca4eec0b25c1f80d02d325ed66d8288ac9764733d151b92bf4607b0f4dfa44ab"
+    }
+  ]
+}
