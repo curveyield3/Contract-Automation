@@ -412,6 +412,7 @@ export async function writeReviewInventoryOutputsV1({outputDir,projectRoot,build
   try {
     const inventory=await buildReviewInventoryV1({projectRoot,build,campaign});
     const facts=buildSystemFactsV1({inventory});
+    console.log('[phase0-inventory-summary]',JSON.stringify({complete:inventory.payload.complete,sourceUnits:inventory.payload.sourceUnits.length,contexts:inventory.payload.contexts.length,missing:inventory.payload.sourceUnits.filter(s=>s.scopeTier==='IN_SCOPE'&&s.astStatus==='MISSING').slice(0,12).map(s=>s.path)}));
     await fs.mkdir(outputDir,{recursive:true});
     await fs.writeFile(path.join(outputDir,'REVIEW_INVENTORY_v1.json'),JSON.stringify(inventory,null,2)+'\n');
     await fs.writeFile(path.join(outputDir,'SYSTEM_FACTS_v1.json'),JSON.stringify(facts,null,2)+'\n');
