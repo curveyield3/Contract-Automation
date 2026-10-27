@@ -14,6 +14,56 @@ on:
         description: Stable idempotency identifier (defaults to workflow run ID)
         type: string
         required: false
+      report_pdf:
+        description: Publish security audit PDF
+        type: boolean
+        default: false
+        required: false
+      audited_source:
+        description: Publish audited source ZIP
+        type: boolean
+        default: false
+        required: false
+      scope_summary:
+        description: Publish audited scope and exclusions
+        type: boolean
+        default: false
+        required: false
+      findings_remediation:
+        description: Publish findings and remediation
+        type: boolean
+        default: false
+        required: false
+      methodology_analysis:
+        description: Publish methodology and analysis
+        type: boolean
+        default: false
+        required: false
+      properties_hypotheses:
+        description: Publish security properties and hypotheses
+        type: boolean
+        default: false
+        required: false
+      execution_results:
+        description: Publish testing and execution results
+        type: boolean
+        default: false
+        required: false
+      architecture_dependencies:
+        description: Publish architecture and dependencies
+        type: boolean
+        default: false
+        required: false
+      residual_risks:
+        description: Publish residual risks and limitations
+        type: boolean
+        default: false
+        required: false
+      evidence_index:
+        description: Publish evidence index
+        type: boolean
+        default: false
+        required: false
   push:
     branches: [main]
     paths:
@@ -84,6 +134,18 @@ jobs:
           RAW_SCAN_URLS: ${{ inputs.scan_urls }}
           RAW_REQUEST_ID: ${{ inputs.request_id }}
           EVENT_NAME: ${{ github.event_name }}
+          RAW_SCAN_URLS: ${{ inputs.scan_urls }}
+          RAW_REQUEST_ID: ${{ inputs.request_id }}
+          RAW_REPORT_PDF: ${{ inputs.report_pdf }}
+          RAW_AUDITED_SOURCE: ${{ inputs.audited_source }}
+          RAW_SCOPE_SUMMARY: ${{ inputs.scope_summary }}
+          RAW_FINDINGS_REMEDIATION: ${{ inputs.findings_remediation }}
+          RAW_METHODOLOGY_ANALYSIS: ${{ inputs.methodology_analysis }}
+          RAW_PROPERTIES_HYPOTHESES: ${{ inputs.properties_hypotheses }}
+          RAW_EXECUTION_RESULTS: ${{ inputs.execution_results }}
+          RAW_ARCHITECTURE_DEPENDENCIES: ${{ inputs.architecture_dependencies }}
+          RAW_RESIDUAL_RISKS: ${{ inputs.residual_risks }}
+          RAW_EVIDENCE_INDEX: ${{ inputs.evidence_index }}
           MATRIX_REQUEST: ${{ matrix.request_path }}
         shell: bash
         run: |
@@ -96,10 +158,12 @@ jobs:
             source_url="$(jq -r .sourceUrl "$request")"
             scans="$(jq -c .scanUrls "$request")"
             request_id="$(jq -r .requestId "$request")"
+            publish_files="$(jq -c 'if has("publishFiles") then .publishFiles else "__ABSENT__" end' "$request")"
           else
             source_url="$RAW_SOURCE_URL"
             scans="$(printf '%s' "$RAW_SCAN_URLS" | jq -Rsc 'split("\n")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))')"
             request_id="${RAW_REQUEST_ID:-$GITHUB_RUN_ID}"
+            publish_files="$(jq -cn --argjson report_pdf "${RAW_REPORT_PDF:-false}" --argjson audited_source "${RAW_AUDITED_SOURCE:-false}" --argjson scope_summary "${RAW_SCOPE_SUMMARY:-false}" --argjson findings_remediation "${RAW_FINDINGS_REMEDIATION:-false}" --argjson methodology_analysis "${RAW_METHODOLOGY_ANALYSIS:-false}" --argjson properties_hypotheses "${RAW_PROPERTIES_HYPOTHESES:-false}" --argjson execution_results "${RAW_EXECUTION_RESULTS:-false}" --argjson architecture_dependencies "${RAW_ARCHITECTURE_DEPENDENCIES:-false}" --argjson residual_risks "${RAW_RESIDUAL_RISKS:-false}" --argjson evidence_index "${RAW_EVIDENCE_INDEX:-false}" '{report_pdf:$report_pdf,audited_source:$audited_source,scope_summary:$scope_summary,findings_remediation:$findings_remediation,methodology_analysis:$methodology_analysis,properties_hypotheses:$properties_hypotheses,execution_results:$execution_results,architecture_dependencies:$architecture_dependencies,residual_risks:$residual_risks,evidence_index:$evidence_index}')"
           fi
           [[ "$request_id" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$source_url" != *$'\n'* && "$source_url" != *$'\r'* ]]
@@ -110,6 +174,7 @@ jobs:
             echo "source_url=$source_url"
             echo "scan_urls_json=$scans"
             echo "request_id=$request_id"
+            echo "publish_files_json=$publish_files"
           } >> "$GITHUB_OUTPUT"
       - name: Select Audit-Controller credential
         env:
@@ -126,6 +191,7 @@ jobs:
           SOURCE_URL: ${{ steps.request.outputs.source_url }}
           REQUEST_ID: ${{ steps.request.outputs.request_id }}
           SCAN_URLS: ${{ steps.request.outputs.scan_urls_json }}
+          PUBLISH_FILES_JSON: ${{ steps.request.outputs.publish_files_json }}
         shell: bash
         run: |
           set -euo pipefail
