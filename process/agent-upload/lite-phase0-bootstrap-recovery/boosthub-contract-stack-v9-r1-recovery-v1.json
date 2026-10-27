@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "curveyield-lite-phase0-bootstrap-recovery-v1",
+  "campaign_id": "boosthub-contract-stack-v9-r1",
+  "campaign_path": "campaigns/BoostHub_Contract_Stack_v9 r1",
+  "audit_controller_ref": "main",
+  "bootstrap_workflow": "lite-solo-phase0-bootstrap-v1.yml",
+  "resume_from_finalize": false,
+  "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "recoveryReason": "Retry same immutable v9-r1 Phase 0 with source-anchored Vyper 0.4.3 AST analyzer introduced at af4585ef0c9fc0fa272b5da60cf07bde810b10ee after Slither Vyper parser failure in Actions run 40507323056"
+}
