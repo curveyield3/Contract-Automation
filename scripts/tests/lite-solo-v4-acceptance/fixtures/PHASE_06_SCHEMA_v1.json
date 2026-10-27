@@ -1,0 +1,308 @@
+{
+  "schemaVersion": "curveyield-lite-phase-work-schema-v1",
+  "phase": 6,
+  "title": "Merged Lite Phases 6-7 - Attacker Testing and Execution Interpretation",
+  "executor": "lite-solo-agent",
+  "automationOnly": false,
+  "conditionalAgentExecution": null,
+  "workForm": {
+    "campaignPath": "work/phase-06/PHASE_06_WORK_FORM_v1.json",
+    "template": "phases/phase-6/resources/PHASE_06_WORK_FORM_TEMPLATE_v1.json"
+  },
+  "finalReport": {
+    "campaignPath": "work/phase-06/PHASE_06_FINAL_REPORT_v1.md",
+    "template": "phases/phase-6/resources/PHASE_06_FINAL_REPORT_TEMPLATE_v1.md",
+    "requiredSections": [
+      "Executive Conclusion",
+      "Material Results",
+      "Limitations",
+      "Unresolved Substantive Questions"
+    ],
+    "controllerGenerated": true
+  },
+  "actions": {
+    "step-1": {
+      "title": "Interpret exact deployment and configuration execution",
+      "formPath": "work/phase-06/PHASE_06_WORK_FORM_v1.json",
+      "section": "Step 1 Input — Interpret exact deployment and configuration execution",
+      "fields": [
+        {
+          "name": "deploymentAssessments",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-8",
+            "phase-10"
+          ],
+          "itemRequiredFields": [
+            "componentOrAction",
+            "executionEvidenceRef",
+            "observedState",
+            "securityInterpretation",
+            "contradictionOrNone",
+            "limitationOrNone"
+          ]
+        }
+      ],
+      "controllerPrefillFields": [
+        "componentOrAction",
+        "executionEvidenceRef",
+        "observedState"
+      ]
+    },
+    "step-2": {
+      "title": "Interpret precomputed deterministic simulation and targeted-fuzz results",
+      "formPath": "work/phase-06/PHASE_06_WORK_FORM_v1.json",
+      "section": "Step 2 Input — Interpret precomputed deterministic simulation and targeted-fuzz results",
+      "fields": [
+        {
+          "name": "targetDispositions",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-8",
+            "phase-10"
+          ],
+          "itemRequiredFields": [
+            "candidateKey",
+            "executionEvidenceRefs",
+            "oracleOutcome",
+            "reproductionStatus",
+            "securityInterpretation",
+            "limitations",
+            "recommendedPhase8Disposition",
+            "requestBindingStatus",
+            "requestBindingEvidenceRef",
+            "semanticHarnessBindingAssessment"
+          ]
+        }
+      ],
+      "controllerPrefillFields": [
+        "candidateKey",
+        "executionEvidenceRefs",
+        "oracleOutcome",
+        "reproductionStatus",
+        "requestBindingStatus",
+        "requestBindingEvidenceRef"
+      ]
+    },
+    "step-3": {
+      "title": "State merged Lite 6-7 conclusions and omissions",
+      "formPath": "work/phase-06/PHASE_06_WORK_FORM_v1.json",
+      "section": "Step 3 Input — State merged Lite 6-7 conclusions and omissions",
+      "fields": [
+        {
+          "name": "mergedExecutionConclusions",
+          "type": "REQUIRED_ANALYSIS",
+          "consumers": [
+            "phase-8",
+            "phase-10"
+          ]
+        },
+        {
+          "name": "typedExecutionLimitations",
+          "type": "REQUIRED_LIST",
+          "consumers": [
+            "phase-8",
+            "phase-10"
+          ],
+          "owner": "CONTROLLER_PREFILLED_READ_ONLY"
+        },
+        {
+          "name": "fullOnlyOmissions",
+          "type": "REQUIRED_LIST",
+          "consumers": [
+            "phase-10"
+          ],
+          "owner": "CONTROLLER_PREFILLED_READ_ONLY"
+        },
+        {
+          "name": "obligationDispositions",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "controller-bookkeeping",
+            "phase-10"
+          ],
+          "itemRequiredFields": [
+            "obligationId",
+            "requiredAction",
+            "completionCondition",
+            "disposition",
+            "rationale",
+            "evidenceRefs",
+            "carryForwardPhaseOrNone"
+          ],
+          "itemFieldAllowedValues": {
+            "disposition": [
+              "SATISFIED",
+              "BLOCKED_CARRIED",
+              "NOT_APPLICABLE"
+            ],
+            "carryForwardPhaseOrNone": [
+              "NONE_IDENTIFIED",
+              "10"
+            ]
+          },
+          "controllerPrefillFields": [
+            "obligationId",
+            "requiredAction",
+            "completionCondition"
+          ]
+        }
+      ],
+      "controllerPrefillFields": [
+        "obligationId",
+        "requiredAction",
+        "completionCondition"
+      ]
+    },
+    "step-4": {
+      "title": "Agent-guided baseline testing",
+      "formPath": "work/phase-06/PHASE_06_WORK_FORM_v1.json",
+      "section": "Step 4 Input — Agent-guided baseline testing",
+      "fields": [
+        {
+          "name": "baselineTestRecords",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-8",
+            "phase-10"
+          ],
+          "itemRequiredFields": [
+            "testGroupId",
+            "contract",
+            "obligationIds",
+            "obligationsDetail",
+            "requestDirectory",
+            "harnessDesign",
+            "dispatchRounds",
+            "requestPaths",
+            "obligationOutcomes",
+            "limitations"
+          ],
+          "controllerPrefillFields": [
+            "testGroupId",
+            "contract",
+            "obligationIds",
+            "obligationsDetail",
+            "requestDirectory"
+          ]
+        }
+      ],
+      "controllerPrefillFields": [
+        "testGroupId",
+        "contract",
+        "obligationIds",
+        "obligationsDetail",
+        "requestDirectory"
+      ]
+    },
+    "step-5": {
+      "title": "Prove or disprove candidates and record new findings",
+      "formPath": "work/phase-06/PHASE_06_WORK_FORM_v1.json",
+      "section": "Step 5 Input — Prove or disprove candidates and record new findings",
+      "fields": [
+        {
+          "name": "candidateProofRecords",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-8",
+            "phase-10"
+          ],
+          "itemRequiredFields": [
+            "candidateKey",
+            "sourceAnchor",
+            "phase5Result",
+            "requestDirectory",
+            "verdict",
+            "harnessDesign",
+            "dispatchRounds",
+            "requestPaths",
+            "ledgerRef",
+            "attackAssertionNames",
+            "controlAssertionNames",
+            "reasoning"
+          ],
+          "itemFieldAllowedValues": {
+            "verdict": [
+              "CONFIRMED",
+              "DISPROVEN",
+              "INCONCLUSIVE",
+              "PHASE5_DECISIVE"
+            ]
+          },
+          "controllerPrefillFields": [
+            "candidateKey",
+            "sourceAnchor",
+            "phase5Result",
+            "requestDirectory"
+          ]
+        },
+        {
+          "name": "newCandidateRecords",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-8"
+          ],
+          "itemRequiredFields": [
+            "tempKey",
+            "title",
+            "classId",
+            "description",
+            "anchors",
+            "ledgerRef"
+          ]
+        }
+      ],
+      "controllerPrefillFields": [
+        "candidateKey",
+        "sourceAnchor",
+        "phase5Result",
+        "requestDirectory"
+      ]
+    }
+  },
+  "derivedOutputs": [
+    {
+      "path": "derived/phase-6/PHASE8_INPUT_v1.json",
+      "selectors": [
+        "actions"
+      ]
+    }
+  ],
+  "bookkeepingMappings": {
+    "graphRecordPaths": [
+      "actions.step-1.outputs.deploymentAssessments",
+      "actions.step-2.outputs.targetDispositions",
+      "actions.step-4.outputs.baselineTestRecords",
+      "actions.step-5.outputs.candidateProofRecords",
+      "actions.step-5.outputs.newCandidateRecords"
+    ],
+    "obligationRecordPaths": [
+      "actions.step-3.outputs.obligationDispositions"
+    ],
+    "invalidationRecordPaths": [
+      "actions.step-1.outputs.deploymentAssessments"
+    ]
+  },
+  "submission": {
+    "packetPath": "submissions/PHASE_06_WORK_PACKET_v1.json",
+    "requiredPacketStatus": "SUBMITTED",
+    "controllerPassToken": "CONTROLLER_PHASE_PASS",
+    "bookkeepingBeforeValidationPass": false,
+    "controllerGeneratesPacket": true
+  },
+  "controllerOwnedDefaults": {
+    "fullOnlyOmissions": [
+      "NONE_IDENTIFIED"
+    ]
+  },
+  "controllerAutomationInputs": [
+    {
+      "name": "expectedDueObligationIds",
+      "type": "CONTROLLER_PREFILLED_READ_ONLY_LIST",
+      "consumers": [
+        "phase-6-controller-validation"
+      ],
+      "source": "canonical carried-forward obligation ledger"
+    }
+  ]
+}

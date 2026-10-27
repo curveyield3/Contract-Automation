@@ -1,0 +1,262 @@
+{
+  "schemaVersion": "curveyield-lite-phase-work-schema-v1",
+  "phase": 4,
+  "title": "Lite Combined Phases 2-5 - Flow Review, Attack Reconciliation and Specialist Review",
+  "executor": "lite-solo-agent",
+  "automationOnly": false,
+  "conditionalAgentExecution": null,
+  "workForm": {
+    "campaignPath": "work/phase-04/PHASE_04_WORK_FORM_v1.json",
+    "template": "phases/phase-4/resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json"
+  },
+  "finalReport": {
+    "campaignPath": "work/phase-04/PHASE_04_FINAL_REPORT_v1.md",
+    "template": "phases/phase-4/resources/PHASE_04_FINAL_REPORT_TEMPLATE_v1.md",
+    "requiredSections": [
+      "Executive Conclusion",
+      "Material Results",
+      "Limitations",
+      "Unresolved Substantive Questions"
+    ],
+    "controllerGenerated": true
+  },
+  "actions": {
+    "step-1": {
+      "title": "Reconcile flow review and attacker results",
+      "formPath": "work/phase-04/PHASE_04_WORK_FORM_v1.json",
+      "section": "Step 1 Input — Reconcile flow review and attacker results",
+      "fields": [
+        {
+          "name": "discoveryReconciliationRecords",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-5",
+            "phase-6",
+            "phase-8"
+          ],
+          "itemRequiredFields": [
+            "recordKey",
+            "contextIds",
+            "sourceAnchor",
+            "origin",
+            "reviewerFinding",
+            "attackerFinding",
+            "reconciliation",
+            "disposition",
+            "candidateTempKeyOrNone",
+            "rationale"
+          ],
+          "itemFieldAllowedValues": {
+            "origin": [
+              "REVIEWER_CANDIDATE",
+              "REVIEWER_UNRESOLVED",
+              "ATTACK_FINDING",
+              "ATTACK_CONTRADICTS_REVIEW",
+              "INTEGRATION_CONCERN",
+              "COVERAGE_GAP"
+            ],
+            "disposition": [
+              "CANDIDATE_CREATED",
+              "RESOLVED_NO_ISSUE",
+              "COVERAGE_GAP_ACCEPTED"
+            ]
+          },
+          "controllerPrefillFields": [
+            "recordKey",
+            "contextIds",
+            "sourceAnchor",
+            "origin",
+            "reviewerFinding",
+            "attackerFinding"
+          ]
+        }
+      ],
+      "controllerPrefillFields": [
+        "recordKey",
+        "contextIds",
+        "sourceAnchor",
+        "origin",
+        "reviewerFinding",
+        "attackerFinding"
+      ]
+    },
+    "step-2": {
+      "title": "Review material privileges and activated specialist domains",
+      "formPath": "work/phase-04/PHASE_04_WORK_FORM_v1.json",
+      "section": "Step 2 Input — Review material privileges and activated specialist domains",
+      "fields": [
+        {
+          "name": "specialistReviewRecords",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-5",
+            "phase-6",
+            "phase-8"
+          ],
+          "itemRequiredFields": [
+            "recordKey",
+            "domainOrPrivilege",
+            "sourceAnchor",
+            "method",
+            "observation",
+            "securityInterpretation",
+            "disposition",
+            "candidateTempKeyOrNone"
+          ]
+        }
+      ],
+      "controllerPrefillFields": [
+        "recordKey",
+        "domainOrPrivilege",
+        "sourceAnchor",
+        "method"
+      ]
+    },
+    "step-3": {
+      "title": "Create material candidate records and substantive limitations",
+      "formPath": "work/phase-04/PHASE_04_WORK_FORM_v1.json",
+      "section": "Step 3 Input — Create material candidate records and substantive limitations",
+      "fields": [
+        {
+          "name": "typedLimitations",
+          "type": "REQUIRED_LIST",
+          "consumers": [
+            "phase-5",
+            "phase-10"
+          ]
+        },
+        {
+          "name": "candidateRecords",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-5",
+            "phase-6",
+            "phase-8"
+          ],
+          "itemRequiredFields": [
+            "tempKey",
+            "sourceAnchor",
+            "description",
+            "securityRationale",
+            "relatedRequirementKeys",
+            "relatedHypothesisKeys",
+            "recommendedValidationMethod",
+            "materialityBasis",
+            "evidenceRefs"
+          ]
+        },
+        {
+          "name": "obligationDispositions",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "controller-bookkeeping",
+            "phase-10"
+          ],
+          "itemRequiredFields": [
+            "obligationId",
+            "requiredAction",
+            "completionCondition",
+            "disposition",
+            "rationale",
+            "evidenceRefs",
+            "carryForwardPhaseOrNone"
+          ],
+          "itemFieldAllowedValues": {
+            "disposition": [
+              "SATISFIED",
+              "CARRY_FORWARD",
+              "BLOCKED_CARRIED",
+              "NOT_APPLICABLE"
+            ],
+            "carryForwardPhaseOrNone": [
+              "NONE_IDENTIFIED",
+              "6"
+            ]
+          },
+          "controllerPrefillFields": [
+            "obligationId",
+            "requiredAction",
+            "completionCondition"
+          ]
+        }
+      ],
+      "controllerPrefillFields": [
+        "obligationId",
+        "requiredAction",
+        "completionCondition"
+      ]
+    }
+  },
+  "derivedOutputs": [
+    {
+      "path": "derived/phase-4/PHASE5_INPUT_v1.json",
+      "selectors": [
+        "actions.step-1.outputs.discoveryReconciliationRecords",
+        "actions.step-2.outputs.specialistReviewRecords",
+        "actions.step-3.outputs.candidateRecords",
+        "actions.step-3.outputs.typedLimitations",
+        "automationOutputs.phase4Coverage"
+      ]
+    }
+  ],
+  "bookkeepingMappings": {
+    "graphRecordPaths": [
+      "actions.step-1.outputs.discoveryReconciliationRecords",
+      "actions.step-2.outputs.specialistReviewRecords",
+      "actions.step-3.outputs.candidateRecords"
+    ],
+    "obligationRecordPaths": [
+      "actions.step-3.outputs.obligationDispositions"
+    ],
+    "invalidationRecordPaths": [
+      "actions.step-3.outputs.typedLimitations"
+    ]
+  },
+  "submission": {
+    "packetPath": "submissions/PHASE_04_WORK_PACKET_v1.json",
+    "requiredPacketStatus": "SUBMITTED",
+    "controllerPassToken": "CONTROLLER_PHASE_PASS",
+    "bookkeepingBeforeValidationPass": false,
+    "controllerGeneratesPacket": true
+  },
+  "controllerAutomationInputs": [
+    {
+      "name": "expectedDiscoveryRecordKeys",
+      "type": "CONTROLLER_PREFILLED_READ_ONLY_LIST",
+      "consumers": [
+        "phase-4-controller-validation"
+      ],
+      "source": "controller discovery summary"
+    },
+    {
+      "name": "expectedSpecialistReviewKeys",
+      "type": "CONTROLLER_PREFILLED_READ_ONLY_LIST",
+      "consumers": [
+        "phase-4-controller-validation"
+      ],
+      "source": "controller specialist-review scaffold"
+    },
+    {
+      "name": "expectedDueObligationIds",
+      "type": "CONTROLLER_PREFILLED_READ_ONLY_LIST",
+      "consumers": [
+        "phase-4-controller-validation"
+      ],
+      "source": "canonical carried-forward obligation ledger"
+    }
+  ],
+  "controllerGeneratedOutputs": [
+    {
+      "path": "automationOutputs.phase4Coverage",
+      "type": "CONTROLLER_GENERATED_OBJECT",
+      "source": "accepted Phase-4 source/specialist review rows",
+      "consumers": [
+        "phase-5"
+      ],
+      "fields": [
+        "coverageSummary",
+        "unreviewedRequiredSurfaces"
+      ]
+    }
+  ]
+}

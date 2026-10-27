@@ -241,7 +241,9 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
  // One monotonic namespace per semantic unit family, including related fields.
  const nextId=field=>{
   const family=rowId(phase,field,0).slice(0,-4);
-  return rowId(phase,field,(serial[family]??0)++);
+  const index=serial[family]??0;
+  serial[family]=index+1;
+  return rowId(phase,field,index);
  };
  for(const d of descriptors){
   const field=d.path?.at(-1);
@@ -273,10 +275,14 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
  if(phase===5){
   const reconc=plan.units.filter(u=>u.field==='reconciliationRecords');
   const novel=plan.units.filter(u=>u.field==='newCandidateRecords');
+  const economic=plan.units.filter(u=>u.field==='economicReviewRecords');
   for(const u of plan.units.filter(u=>u.field==='targetDesigns')){
    const candidate=u.initialValue?.candidateKey;
-   u.dependencies=u.kind==='APPEND'?novel.map(r=>r.unitId):
-    reconc.filter(r=>candidate&&r.initialValue?.subjectKey===candidate).map(r=>r.unitId);
+   const linkedEconomic=economic.filter(row=>candidate&&Array.isArray(row.initialValue?.relatedCandidateKeys)&&
+    row.initialValue.relatedCandidateKeys.includes(candidate)).map(row=>row.unitId);
+   const reconciled=u.kind==='APPEND'?novel.map(row=>row.unitId):
+    reconc.filter(row=>candidate&&row.initialValue?.subjectKey===candidate).map(row=>row.unitId);
+   u.dependencies=[...new Set([...reconciled,...linkedEconomic])];
   }
  }
  if(phase===6){
@@ -446,6 +452,39 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
    for(const [name,allowed] of Object.entries(field.itemFieldAllowedValues??{}))
     if(val[name]!==undefined&&!allowed.includes(String(val[name])))errors.push(name+' invalid enum');
   }else if(typeof val==='string'&&val.startsWith('<REQUIRED'))errors.push('incomplete mandatory field');
+  if(phase===6&&u.field==='candidateProofRecords'&&isObject(val)){
+   if(['CONFIRMED','DISPROVEN'].includes(val.verdict)){
+    // At unit acceptance the verdict must match a real parsed machine ledger.
+    const ref=val.ledgerRef;
+    const validRef=typeof ref==='string'&&ref.endsWith('/ASSERTION_LEDGER_v1.json')&&
+     !ref.startsWith('/')&&!ref.split('/').includes('..')&&!ref.includes('\\');
+    const rel=validRef?(ref.startsWith(plan.campaignPath+'/')?ref:path.posix.join(plan.campaignPath,ref)):null;
+    const ledger=rel&&fs.existsSync(repoFile(root,rel))?maybe(root,rel):null;
+    if(ledger?.schemaVersion!=='curveyield-assertion-ledger-v1'||
+       ledger?.parseStatus!=='PARSED'||ledger?.toolInvoked!==true)
+     errors.push('decisive proof requires an existing parsed invoked assertion ledger');
+    else{
+     const tests=asArray(ledger.tests),attacks=asArray(val.attackAssertionNames),
+       controls=asArray(val.controlAssertionNames);
+     if(!attacks.length||!controls.length||
+       [...attacks,...controls].some(name=>typeof name!=='string'||!name.trim()))
+      errors.push('decisive proof must name attack and healthy-path assertions');
+     else{
+      const status=name=>tests.find(t=>t?.name===name)?.status;
+      if(controls.some(name=>status(name)!=='PASS'))
+       errors.push('decisive proof must have passing healthy-path control assertions');
+      const expected=val.verdict==='CONFIRMED'?'FAIL':'PASS';
+      if(attacks.some(name=>status(name)!==expected))
+       errors.push('decisive proof machine assertion outcome contradicts verdict');
+     }
+    }
+    if(val.verdict==='DISPROVEN'&&
+      !/block|guard|reject|revert|deny/i.test(String(val.reasoning??'')))
+     errors.push('DISPROVEN requires an explanation of the blocking control');
+   }else if(val.verdict==='PHASE5_DECISIVE'&&
+    !/REPRODUCED|CONFIRMED|DECISIVE/i.test(String(val.phase5Result??'')))
+    errors.push('PHASE5_DECISIVE requires matching conclusive Phase-5 evidence');
+  }
   if(phase===5&&u.field==='targetDesigns'&&isObject(val)&&val.executionMethod==='V7_REQUEST'){
    const resolved=resolveTargetExecutionRequestRef({root,campaignPath:plan.campaignPath,target:val});
    if(!resolved)errors.push('target lacks a committed source-bound executable request/harness');

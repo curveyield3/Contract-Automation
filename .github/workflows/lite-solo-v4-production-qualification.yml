@@ -1,0 +1,39 @@
+name: Lite-Solo v4 Production Qualification
+on:
+  push:
+    branches: [fix/lite-solo-v4-production-qualification]
+    paths:
+      - 'scripts/tests/lite-solo-v4-acceptance/RUN_PRODUCTION.md'
+      - '.github/workflows/lite-solo-v4-production-qualification.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qualification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned dependencies
+        run: npm ci --force --ignore-scripts --no-audit --no-fund
+      - name: Parse-check all production entrypoints
+        run: |
+          node --check scripts/lib/lite-solo-unit-queue-v1.mjs
+          node --check scripts/lite-solo-unit-request-drain-v1.mjs
+          bash -n scripts/lite-solo-source-initialization/run-v1.sh
+      - name: Execute all 30 acceptance local fixtures plus decisive-proof regressions
+        run: |
+          set -o pipefail
+          mkdir -p scripts/tests/lite-solo-v4-acceptance/output
+          node --test --test-concurrency=1 scripts/tests/lite-solo-v4-acceptance/cases/*.test.mjs
+      - name: Publish per-scenario evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite-solo-v4-production-qualification
+          path: scripts/tests/lite-solo-v4-acceptance/output/
+          if-no-files-found: warn
