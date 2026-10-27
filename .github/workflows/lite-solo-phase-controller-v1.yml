@@ -176,6 +176,50 @@ jobs:
               git pull --rebase origin main
             done
           fi
+      - name: Dispatch immutable accepted Phase-10 report after controller push
+        if: ${{ steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'ALREADY_ACCEPTED' }}
+        id: audit_report_dispatch
+        continue-on-error: true
+        shell: bash
+        env:
+          AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
+          AUDIT_CAMPAIGN: ${{ steps.request.outputs.id }}
+          REPORT_DISPATCH_TOKEN: ${{ secrets.AUDIT_REPORT_DISPATCH_TOKEN }}
+          FALLBACK_DISPATCH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          directory="$AUDIT_DIRECTORY"
+          jq -e --arg id "$AUDIT_CAMPAIGN" '.mode=="LITE_SOLO" and .campaignId==$id and .campaignStatus=="COMPLETE"' "$directory" >/dev/null || {
+            echo '::notice::No accepted terminal COMPLETE state; no report dispatch'
+            exit 0
+          }
+          receipt="$(jq -r '.lastSealedReceiptPath // empty' "$directory")"
+          [[ "$receipt" =~ ^campaigns/[a-zA-Z0-9._/-]+/receipts/PHASE_10_RECEIPT_v[0-9]+\.json$ ]] || { echo '::error::DISPATCH_IDENTITY_MISMATCH: terminal receipt path'; exit 1; }
+          test -f "$receipt" || { echo '::error::DISPATCH_IDENTITY_MISMATCH: missing sealed terminal receipt'; exit 1; }
+          sha="$(git rev-parse HEAD)"
+          receipt_sha="$(sha256sum "$receipt" | cut -d' ' -f1)"
+          generation="$(jq -r .campaignGenerationId "$directory")"
+          policy_sha="$(jq -r '.publicationPolicySha256 // empty' "$directory")"
+          if [[ ! "$policy_sha" =~ ^[a-f0-9]{64}$ ]]; then
+            echo '::notice::Legacy campaign has no frozen report policy; private-only manual recovery is available'
+            exit 0
+          fi
+          token="${REPORT_DISPATCH_TOKEN:-$FALLBACK_DISPATCH_TOKEN}"
+          if [ -z "$token" ]; then
+            echo '::error::REPORT_DISPATCH_CREDENTIAL_UNAVAILABLE: configure AUDIT_REPORT_DISPATCH_TOKEN scoped to Audit-Controller Actions:write'
+            exit 1
+          fi
+          identity="$(printf '%s' "${sha}:${receipt_sha}:${policy_sha}:report_v1" | sha256sum | cut -d' ' -f1)"
+          jq -n --arg sha "$sha" --arg id "$AUDIT_CAMPAIGN" --arg generation "$generation" \
+            --arg directory "$directory" --arg receipt "$receipt" --arg digest "$receipt_sha" \
+            --arg policy "$policy_sha" --arg key "$identity" \
+            '{ref:"main",inputs:{acceptedControllerSha:$sha,campaignId:$id,campaignGenerationId:$generation,
+             directoryPath:$directory,terminalReceiptPath:$receipt,terminalReceiptSha256:$digest,
+             policySha256:$policy,idempotencyKey:$key}}' |
+            GH_TOKEN="$token" gh api --method POST \
+              repos/curveyield3/Audit-Controller/actions/workflows/audit-report-v1.yml/dispatches --input -
+          echo "Immutable audit-report dispatch accepted for controller commit $sha" >> "$GITHUB_STEP_SUMMARY"
       - name: Record durable controller result without agent delivery
         shell: bash
         run: |
