@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "dai-completion-p6-stalled-claim-release-001-v1",
+  "operation": "RELEASE",
+  "campaignId": "audit-preview-completion-live-ethereum-dai-6b175474-r1",
+  "campaignGenerationId": "audit-preview-completion-live-ethereum-dai-6b175474-r1-g1-20261027T144814563Z",
+  "phaseSequence": 6,
+  "lane": "AUTO",
+  "workerId": "gpt6-dai-completion-p6-v1",
+  "sourceSha256": "1c384141058f50d53b9e58b89c0b83aa60bd1066406f017d177121de332705f2",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "P6-D-001",
+      "claimEpoch": 1,
+      "claimToken": "716f6148-0138-4130-b7e6-4cd746ba82bf"
+    },
+    {
+      "unitId": "P6-D-002",
+      "claimEpoch": 1,
+      "claimToken": "db66152e-676d-47e6-9815-b2d650e2784d"
+    },
+    {
+      "unitId": "P6-T-001",
+      "claimEpoch": 1,
+      "claimToken": "d89cef12-4185-47e2-8255-9643714870c8"
+    },
+    {
+      "unitId": "P6-T-002",
+      "claimEpoch": 1,
+      "claimToken": "7856afcb-611b-493c-aded-9a50d1ebf93d"
+    }
+  ]
+}
