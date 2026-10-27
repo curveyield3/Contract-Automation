@@ -30,6 +30,7 @@ jobs:
           node --check scripts/lite-solo-phase-controller-v1.mjs
           bash -n scripts/lite-solo-source-initialization/run-v1.sh
           python3 -m py_compile scripts/lite-solo-source-initialization/write-phase0-receipt-v1.py
+          node --test scripts/tests/lite-solo-v4-acceptance/cases/semantic-batching-v1.test.mjs
           node scripts/lite-solo-fork-integration-check-v1.mjs
       - name: Check GitHub Actions YAML shapes
         shell: bash
