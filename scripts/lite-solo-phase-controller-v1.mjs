@@ -24,7 +24,7 @@ import {
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-solo-phase-prefill-v1.mjs';
 import {MASTER_REVIEW_SEGMENTS_V1,boundReviewerForPhaseV1,segmentsForAuthorityV1,isV13AuthorityV1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
-import {unresolvedFinalCandidateFailures} from './lib/lite-solo-final-candidates-v1.mjs';
+import {unresolvedFinalCandidateFailures,unresolvedTerminalAssuranceFailures} from './lib/lite-solo-final-candidates-v1.mjs';
 import {admitPostCompletionFollowupV1} from './lib/lite-post-completion-followup-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
@@ -896,6 +896,10 @@ try{
   if(activeDetectionPolicyV1(predecessor)){
     const fn=({6:validatePhase6AttackerWorkV1,8:validatePhase8LinkageV1,10:validatePhase10CoverageLabelV1})[sequence];
     if(fn)deficiencies.push(...fn({root,campaignPath,form,requireCoverageMatrix:sequence===10&&/\/lite-solo-v[345]$/.test(authorityRoot)}));
+  }
+
+  if(sequence===10){
+    deficiencies.push(...unresolvedTerminalAssuranceFailures({root,campaignPath,directory}));
   }
 
   if(sequence===9&&deficiencies.length===0){
