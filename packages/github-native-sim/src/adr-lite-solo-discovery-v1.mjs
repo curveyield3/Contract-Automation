@@ -54,6 +54,39 @@ function packetPartPath(packetPath,i){
  return path.posix.join(path.posix.dirname(packetPath),'packet-pages',
   'CHUNK_'+String(i+1).padStart(6,'0')+'_v1.json');
 }
+function packetIndexPartPath(indexPath,i){
+ return path.posix.join(path.posix.dirname(indexPath),
+  path.posix.basename(indexPath,'.json')+'_PART_'+String(i+1).padStart(6,'0')+'_v1.json');
+}
+export function readUnitPacketIndexV1({root,indexPath}){
+ const index=readJson(repoFile(root,indexPath));
+ if(index.schemaVersion!=='curveyield-discovery-packet-section-index-manifest-v1')
+  return index; // Small existing index or historical authority.
+ if(!Number.isSafeInteger(index.pageCount)||index.pageCount<1||
+    index.partBytes!==PACKET_PART_BYTES||!/^[a-f0-9]{64}$/.test(index.sha256))
+  throw Error('invalid discovery index manifest');
+ const pieces=[];
+ for(let i=0;i<index.pageCount;i++){
+  const part=readJson(repoFile(root,packetIndexPartPath(indexPath,i)));
+  if(part.schemaVersion!=='curveyield-discovery-packet-index-chunk-v1'||
+     part.index!==i+1||part.total!==index.pageCount||
+     part.offset!==i*PACKET_PART_BYTES||part.encoding!=='base64')
+   throw Error('discovery index page identity mismatch');
+  const bytes=Buffer.from(part.data,'base64');
+  if(bytes.length>PACKET_PART_BYTES||hex(bytes)!==part.sha256)
+   throw Error('discovery index page checksum mismatch');
+  pieces.push(bytes);
+ }
+ const joined=Buffer.concat(pieces);
+ if(joined.length!==index.byteLength||hex(joined)!==index.sha256)
+  throw Error('discovery index aggregate checksum mismatch');
+ const full=JSON.parse(joined.toString('utf8'));
+ if(full.schemaVersion!=='curveyield-discovery-packet-section-index-v1'||
+    full.unitId!==index.unitId||full.role!==index.role||
+    full.packetPath!==index.packetPath)
+  throw Error('discovery index content identity mismatch');
+ return full;
+}
 // v4 stores a bounded packet manifest and immutable small pages; only trusted
 // validators reconstruct the complete source-bound packet in memory.
 function writePagedPacketV1({root,packetPath,packet}){
@@ -330,7 +363,30 @@ export function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
   flowIds:arr(payload.flowIds),integrationQuestionIds:arr(payload.integrationQuestionIds),
   trivialContextIds:arr(payload.trivialContextIds),
   sectionPages:pages};
- writeJson(repoFile(root,indexRel),index);
+ // Keep each single unit-index file bounded even when a unit has many pages
+ // or unusually many context/flow identifiers. Never truncate source links.
+ const indexRaw=Buffer.from(JSON.stringify(index,null,2)+'\n','utf8');
+ if(indexRaw.length<=32*1024){
+  writeJson(repoFile(root,indexRel),index);
+ }else{
+  const n=Math.ceil(indexRaw.length/PACKET_PART_BYTES);
+  for(let i=0;i<n;i++){
+   const chunk=indexRaw.subarray(i*PACKET_PART_BYTES,(i+1)*PACKET_PART_BYTES);
+   const page={schemaVersion:'curveyield-discovery-packet-index-chunk-v1',
+    index:i+1,total:n,offset:i*PACKET_PART_BYTES,
+    sha256:hex(chunk),encoding:'base64',data:chunk.toString('base64')};
+   if(Buffer.byteLength(JSON.stringify(page,null,2)+'\n')>32*1024)
+    throw Error('source packet index page exceeds 32 KiB');
+   writeJson(repoFile(root,packetIndexPartPath(indexRel,i)),page);
+  }
+  writeJson(repoFile(root,indexRel),{
+   schemaVersion:'curveyield-discovery-packet-section-index-manifest-v1',
+   unitId,role,packetPath,
+   byteLength:indexRaw.length,sha256:hex(indexRaw),
+   partBytes:PACKET_PART_BYTES,pageCount:n,
+   readingGuide:'The complete unit index is losslessly paged. Read UNIT_<unitId>_INDEX_PART_NNNNNN_v1.json in ascending order; verify each part SHA-256; concatenate its decoded base64 bytes and verify the full sha256 before interpreting sectionPages and source IDs. Work only this unit; never omit a section.',
+  });
+ }
  return indexRel;
 }
 function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
