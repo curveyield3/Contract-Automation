@@ -44,9 +44,9 @@ const asArray=x=>Array.isArray(x)?x:[];
 const isObject=x=>x&&typeof x==='object'&&!Array.isArray(x);
 const clone=x=>structuredClone(x);
 const depSatisfied=(queue,u)=>asArray(u.dependencies).every(k=>queue.units[k]?.status==='ACCEPTED');
-const isPhase=(p)=>[4,5,6].includes(p);
-const RELEASE='lite-solo-v4';
-const AUTHORITY='Audit Skill - Lite-Solo Authority/lite-solo-v4';
+const isPhase=(p)=>p===4;
+const RELEASE='audit-preview-v1';
+const AUTHORITY='Audit Skill - Audit Preview/audit-preview-v1';
 const rowId=(phase,field,index)=>{
  const families={
  '4:discoveryReconciliationRecords':'P4-RC','4:specialistReviewRecords':'P4-SP',
@@ -70,7 +70,7 @@ function assertV4(directory,phase,request=null){
  if(request){
   const expected={campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
    phaseSequence:phase,sourceSha256:directory.sourceSha256,
-   auditControllerRef:'main'};
+   auditControllerRef:'audit-preview-v1'};
   for(const [key,value] of Object.entries(expected))if(request[key]!==value)throw Error('request identity mismatch: '+key);
   if(request.authorityDigest!==directory.authorityDigest)
    throw Error('authority digest differs from bound campaign');

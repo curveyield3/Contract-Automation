@@ -763,6 +763,7 @@ process.stdout.write=(chunk)=>{
   return true;
 };
 const sequence=reviewKind==='discovery'?null:Number(a['phase-sequence']);
+if(reviewKind!=='phase'||![1,2,3,4].includes(sequence)) throw new Error('AUDIT_PREVIEW_PHASE_OUT_OF_SCOPE');
 const directoryRel=a['campaign-directory-path']; const directoryFile=requiredFile(root,directoryRel,'campaign directory entry');
 const directory=readJson(directoryFile);
 const now=new Date().toISOString();
@@ -773,10 +774,13 @@ if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does n
 if(directory.mode!=='LITE_SOLO'||!['PARALLEL_WORKER_UNITS','ONE_PERSISTENT_AGENT'].includes(directory.agentModel)||directory.agent?.actorId!=='lite-solo-agent')
  throw new Error('not an admitted lite-solo single-actor campaign');
 if(directory.pendingMasterReview||directory.masterReview||directory.lastAcceptedMasterReview||directory.testExecutor)throw new Error('legacy master/executor state in lite-solo campaign');
-if(directory.skillAuthority?.current?.release && !['lite-solo-v1','lite-solo-v2','lite-solo-v3','lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(directory.skillAuthority.current.release))throw new Error('lite-solo bound release mismatch');
+if(directory.skillAuthority?.current?.release && directory.skillAuthority.current.release!=='audit-preview-v1')throw new Error('lite-solo bound release mismatch');
 const phase5OwnerDeferral=!['Audit Skill - Lite-Solo Authority/lite-solo-v3/','Audit Skill - Lite-Solo Authority/lite-solo-v4/','Audit Skill - Lite-Solo Authority/lite-solo-v5/','Audit Skill - Lite-Solo Authority/lite-solo-v6/'].some(prefix=>directory.currentAssignment?.workSchemaPath?.startsWith(prefix)) && [5,6,8,10].includes(sequence)
   ?inspectPhase5OwnerEvidenceDeferralV1({controllerRoot:root,campaignPath,campaignId:directory.campaignId,sourceSha256:directory.sourceSha256})
   :null;
+if(directory.authorityRelease!=='audit-preview-v1'||directory.auditPreview?.terminalPhase!==4||
+  !Number.isSafeInteger(directory.auditPreview?.permittedContracts)||directory.auditPreview.permittedContracts<1)
+  throw new Error('AUDIT_PREVIEW_AUTHORITY_OR_PERMIT_MISMATCH');
 const authorityReceiptPath=directory.lastSealedReceiptPath??directory.currentAssignment?.predecessorReceiptPath;
 const effectiveAuthorityRoot=authorityReceiptPath
   ?validateBoundAuthorityV1({root,receipt:readJson(requiredFile(root,authorityReceiptPath,'admitted authority receipt'))})
@@ -806,7 +810,7 @@ if(reviewKind==='discovery'){
     ?JSON.parse(Buffer.from(a['ready-unit-ids-b64'],'base64').toString('utf8')):[a['unit-id']];
   const result=advanceDiscoveryV1({root,campaignPath,directory,
     authorityRoot:authorityRootFromReceipt(sourceReceipt),automationRoot:process.cwd(),
-    unitId:a['unit-id'],readyUnitIds,now,auditControllerRef:a['audit-controller-ref']??'main'});
+    unitId:a['unit-id'],readyUnitIds,now,auditControllerRef:a['audit-controller-ref']??'audit-preview-v1'});
   if(result.status==='DISCOVERY_STALE_REQUEST'){
     process.stdout.write(JSON.stringify({authorityLinkRoot,status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName})+'\n');
     process.exit(0);
@@ -832,7 +836,7 @@ if(reviewKind==='discovery'){
   process.exit(0);
 }
 // The phase-wide path is the retained aggregate security validator for v4, never a worker ingress.
-if(directory.authorityRelease==='lite-solo-v4'&&[4,5,6].includes(sequence)&&process.env.LITE_SOLO_V4_FINALIZE!=='1')
+if(directory.authorityRelease==='audit-preview-v1'&&sequence===4&&process.env.AUDIT_PREVIEW_PHASE4_FINALIZE!=='1')
  throw new Error('v4 Phase 4–6 can only be finalized from accepted immutable units');
 // Lite-Solo accepts phase/discovery only. No successor-delivery holds or master rework routes.
 const sealedRework=null;
@@ -1238,7 +1242,7 @@ if(sealedRework){
   writeJson(repoFile(root,controls.invalidRel),invalid);
 }
 writeJson(repoFile(root,canonicalRel),canonical);
-const derivedRels=buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical,canonicalRel,now});
+const derivedRels=sequence===4?[]:buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical,canonicalRel,now});
 const boundaryArtifactRels=[];
 let successorPrefillContext={};
 if(sequence===5){
@@ -1314,7 +1318,7 @@ if(sequence===5){
   }
 }
 
-let nextSequence=sequence===10?null:sequence+1;
+let nextSequence=sequence===4?null:sequence+1;
 let fresh=false;let nextAssignment=null;let nextDerivedInputs=[];
 let discoveryStarted=false;
 let handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};
@@ -1382,7 +1386,9 @@ if(sequence===8&&nextSequence===10){
   skipped.sealedAt=now;if(masterAmendmentRefreshSha)skipped.masterAmendment=masterAmendmentReceipt(skippedRevision-1);writeJson(repoFile(root,skippedRel),skipped);sealedReceiptRel=skippedRel;
 }
 directory.lastSealedReceiptPath=sealedReceiptRel;
-if(sequence===10){
+if(sequence===4){
+  directory.campaignStatus='PREVIEW_COMPLETE';directory.currentAssignment=null;directory.updatedAt=now;
+}else if(sequence===10){
   directory.campaignStatus=masterAmendmentRefreshSha?'MASTER_AMENDMENT_REFRESH':'COMPLETE';
   directory.currentAssignment=null;directory.updatedAt=now;
 }
@@ -1396,7 +1402,7 @@ else{
   nextAssignment=((sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)||postMasterDiscovery)
  ?null
  :preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
-  if(sequence===3&&authorityRoot!=='Audit Skill - Lite-Solo Authority/lite-solo-v4'&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
+  if(sequence===3&&authorityRoot!=='Audit Skill - Audit Preview/audit-preview-v1'&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
     const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
       now,auditControllerRef:a['audit-controller-ref']??'main'});
     directory.discovery={statePath:started.statePath,status:started.completeImmediately?'COMPLETE':'RUNNING',
@@ -1418,7 +1424,7 @@ else{
   directory.currentAssignment=nextAssignment;directory.campaignStatus=discoveryStarted?(directory.discovery.status==='COMPLETE'?'ACTIVE':'WAITING_FOR_DISCOVERY'):'ACTIVE';directory.updatedAt=now;
   // Enter each v4 parallel phase with a frozen, full deterministic unit plan.
   // No single initial worker or claim bottleneck; Phase 4 first exposes F/R only.
-  if(directory.authorityRelease==='lite-solo-v4'&&nextAssignment&&[4,5,6].includes(nextAssignment.phaseSequence)){
+  if(directory.authorityRelease==='audit-preview-v1'&&nextAssignment&&nextAssignment.phaseSequence===4){
     createUnitPlanV1({root,campaignPath,directory,phase:nextAssignment.phaseSequence,automationRoot:process.cwd()});
   }
 }
