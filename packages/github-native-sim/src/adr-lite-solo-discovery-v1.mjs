@@ -205,7 +205,7 @@ export function openIdleSoloWindowsV1({root,campaignPath,directory,authorityRoot
 }
 // Extend the existing discovery index with bounded, lossless views of large
 // assignment packets. The canonical packet remains unchanged for validation.
-function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
+export function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
  const packetPath=packetRel(campaignPath,unitId);
  const packet=known(root,packetPath);
  if(!packet?.payload)throw new Error('missing issued discovery packet for '+unitId);
@@ -245,7 +245,7 @@ function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
  const indexRel=path.posix.join(dir,'UNIT_'+unitId+'_INDEX_v1.json');
  const index={schemaVersion:'curveyield-discovery-packet-section-index-v1',unitId,role,
   packetPath,submissionPath:submissionRel(campaignPath,unitId),
-  readingGuide:'Read the current window index, then the needed section pages by path and offset without loading the entire assignment. Preserve all required source-backed rules, flows, checks and attacker facts. Complete and save each unit submission as substantive work finishes; one saved unit is not a session boundary. After completing the active window, submit ONE existing boundary request with readyUnitIds naming all completed active units (up to eight). On DISCOVERY_NEXT continue the next window in this same session; on rework correct named submissions and retain accepted work.',
+  readingGuide:'Read this unit index and needed section pages. Save your own immutable claim-epoch attempt snapshot, queue a SUBMIT with at most five completed units, then immediately continue independent claimed units. NEVER wait for controller approval. Unaccepted predecessors do not unlock dependent units.',
   primaryContextIds:arr(payload.primaryContextIds),
   flowIds:arr(payload.flowIds),integrationQuestionIds:arr(payload.integrationQuestionIds),
   trivialContextIds:arr(payload.trivialContextIds),
