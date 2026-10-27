@@ -47,7 +47,7 @@ const rowId=(phase,field,index)=>{
  return prefix+'-'+String(index+1).padStart(3,'0');
 };
 function assertV4(directory,phase,request=null){
- if(!isPhase(phase)||directory.mode!=='LITE_SOLO'||directory.skillAuthority?.current?.release!==RELEASE)
+ if(!isPhase(phase)||directory.mode!=='LITE_SOLO'||directory.authorityRelease!==RELEASE)
   throw Error('v4 controller requires a v4-bound Lite-Solo generation');
  if(directory.executionModel!=='PARALLEL_WORKER_UNITS')
   throw Error('campaign is not admitted to parallel execution');
@@ -57,7 +57,7 @@ function assertV4(directory,phase,request=null){
    phaseSequence:phase,sourceSha256:directory.sourceSha256,
    auditControllerRef:'main'};
   for(const [key,value] of Object.entries(expected))if(request[key]!==value)throw Error('request identity mismatch: '+key);
-  if(request.authorityDigest!==directory.skillAuthority?.current?.manifestSha256)
+  if(request.authorityDigest!==directory.authorityDigest)
    throw Error('authority digest differs from bound campaign');
   if(request.phaseEpoch!==Number(directory.unitPhaseEpoch??1))throw Error('stale phase epoch');
  }
@@ -65,7 +65,7 @@ function assertV4(directory,phase,request=null){
 function emptyPlan(directory,phase){
  return {schemaVersion:'curveyield-lite-solo-unit-plan-v1',campaignId:directory.campaignId,
   campaignGenerationId:directory.campaignGenerationId,phaseSequence:phase,phaseEpoch:Number(directory.unitPhaseEpoch??1),
-  sourceSha256:directory.sourceSha256,authorityDigest:directory.skillAuthority.current.manifestSha256,
+  sourceSha256:directory.sourceSha256,authorityDigest:directory.authorityDigest,
   unitSpecRevision:1,units:[],recordOwnership:{},stage:phase===4?'CORRECTNESS':'SEMANTIC'};
 }
 function emptyQueue(plan){
@@ -258,7 +258,7 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
  }else if(entries[0]?.key!==u.recordKeys[0])return ['record key differs from immutable prefill identity'];
  const action=schema.actions?.[u.path[1]],field=(action?.fields??[]).find(x=>x.name===u.field);
  if(!field)return ['field is not in bound phase schema'];
- const fixed=field.controllerPrefillFields??action.controllerPrefillFields??[];
+ const fixed=[...new Set([...(field.controllerPrefillFields??[]),...(action.controllerPrefillFields??[])])];
  const orig=u.initialValue;
  for(const [i,entry] of entries.entries()){
   const val=entry?.value;
