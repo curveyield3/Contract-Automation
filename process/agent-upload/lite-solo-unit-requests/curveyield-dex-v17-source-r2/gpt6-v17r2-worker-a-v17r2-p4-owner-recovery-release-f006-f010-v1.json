@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "v17r2-p4-owner-recovery-release-f006-f010-v1",
+  "operation": "RELEASE",
+  "campaignId": "curveyield-dex-v17-source-r2",
+  "campaignGenerationId": "curveyield-dex-v17-source-r2-g1-20261027T104546Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-v17r2-worker-a",
+  "sourceSha256": "bd0fc0a955c585ea0357feecb3d16caf9f48dd9ca5073a6a18948eab7c0f5e55",
+  "authorityDigest": "dc3452d8bf4c2a2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "F-006",
+      "claimEpoch": 1,
+      "claimToken": "efb0d418-1429-40ce-8c05-3d8788a5e401"
+    },
+    {
+      "unitId": "F-007",
+      "claimEpoch": 1,
+      "claimToken": "d1d2df03-10f3-4daf-b032-032cbfac119a"
+    },
+    {
+      "unitId": "F-008",
+      "claimEpoch": 1,
+      "claimToken": "af76919a-2ba6-4301-b423-f9784fe20fa8"
+    },
+    {
+      "unitId": "F-009",
+      "claimEpoch": 1,
+      "claimToken": "fa170df6-4717-434a-9000-a3b9c0299da4"
+    },
+    {
+      "unitId": "F-010",
+      "claimEpoch": 1,
+      "claimToken": "4fd27a83-8bcc-4c36-8abc-ef1050c481bd"
+    }
+  ]
+}
