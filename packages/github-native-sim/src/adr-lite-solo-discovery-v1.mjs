@@ -57,14 +57,14 @@ function packetPartPath(packetPath,i){
 // v4 stores a bounded packet manifest and immutable small pages; only trusted
 // validators reconstruct the complete source-bound packet in memory.
 function writePagedPacketV1({root,packetPath,packet}){
- const raw=Buffer.from(JSON.stringify(packet,null,2)+'\\n','utf8');
+ const raw=Buffer.from(JSON.stringify(packet,null,2)+'\n','utf8');
  const count=Math.ceil(raw.length/PACKET_PART_BYTES);
  for(let i=0;i<count;i++){
   const part=raw.subarray(i*PACKET_PART_BYTES,(i+1)*PACKET_PART_BYTES);
   const page={schemaVersion:'curveyield-discovery-packet-chunk-v1',
    index:i+1,total:count,offset:i*PACKET_PART_BYTES,
    sha256:hex(part),encoding:'base64',data:part.toString('base64')};
-  if(Buffer.byteLength(JSON.stringify(page,null,2)+'\\n')>PACKET_PART_MAX)
+  if(Buffer.byteLength(JSON.stringify(page,null,2)+'\n')>PACKET_PART_MAX)
    throw Error('discovery source packet page exceeds 24 KiB: '+packetPath);
   writeJson(repoFile(root,packetPartPath(packetPath,i)),page);
  }
