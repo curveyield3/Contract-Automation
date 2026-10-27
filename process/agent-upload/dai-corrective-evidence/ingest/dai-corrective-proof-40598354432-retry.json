@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "dai-corrective-controller-proof-ingest-v1",
+  "requestId": "dai-corrective-proof-40598354432",
+  "campaignId": "audit-preview-completion-live-ethereum-dai-6b175474-corrective-r1",
+  "campaignGenerationId": "audit-preview-completion-live-ethereum-dai-6b175474-corrective-r1-g1-20261027T223722639Z",
+  "sourceSha256": "1c384141058f50d53b9e58b89c0b83aa60bd1066406f017d177121de332705f2",
+  "runId": 40598354432,
+  "runnerCommit": "ba67305b7d413b3bbfe0fc05d746c3abfc4c357a",
+  "artifactId": 12776328669,
+  "allowedWriteScope": "CONTROLLER_PHASE5_EVIDENCE_ONLY",
+  "qualificationRequired": false
+}
