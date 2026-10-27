@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { digestCanonicalV1 } from './canonical-json-v1.mjs';
 import { generateBuildSbomV1 } from './sbom-v1.mjs';
 
-const SKIP = new Set(['.git','node_modules','artifacts','cache','out','dist','build','.audit-hermetic-build','.deep-assurance-work','.deep-assurance-work-v2']);
+const SKIP = new Set(['.git','node_modules','artifacts','cache','out','dist','build','.audit-hermetic-build','.audit-slither-export','.deep-assurance-work','.deep-assurance-work-v2']);
 const sha256 = (v) => createHash('sha256').update(v).digest('hex');
 const clone = (v) => v === undefined ? undefined : structuredClone(v);
 const pad = (n,w=3) => String(n).padStart(w,'0');
