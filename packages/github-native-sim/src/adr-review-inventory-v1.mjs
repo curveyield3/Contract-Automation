@@ -85,11 +85,23 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
     for(const [name,ast] of Object.entries(unit.sourceAsts??{}).sort(([a],[b])=>a.localeCompare(b)))
       if(bySource.has(name)&&!asts.has(name))asts.set(name,ast);
 
+  // A source ZIP can contain byte-identical copies of the same first-party
+  // contract. Its existing admitted AST already covers the precise bytes of
+  // each alias; do not compile with a drifting solc or invent a second AST.
+  // Canonical source retains the review contexts. Every alias gets an explicit
+  // identity mapping and is only accepted after a byte-for-byte equality check.
+  const identicalSourceAliases=new Map();
+  const compiledAstSources=[...asts.keys()].filter(p=>p.endsWith('.sol')&&bySource.has(p));
+  for(const entry of sources){
+    if(!entry.path.endsWith('.sol')||asts.has(entry.path)||bySource.get(entry.path).tier!=='IN_SCOPE')continue;
+    const same=compiledAstSources.find(p=>p!==entry.path&&bySource.get(p).bytes.equals(bySource.get(entry.path).bytes));
+    if(same)identicalSourceAliases.set(entry.path,same);
+  }
   // Some embedded deployment sets omit standalone first-party interfaces from their
-  // deployment compilation units. Recover real Solidity ASTs for these exact admitted
+  // deployment compilation units. Recover real Solidity ASTs for remaining exact
   // sources without changing deployment artifacts, source bytes, or audit scope.
   const auxiliaryAstPaths=new Map(), auxiliaryAstFailures=new Map();
-  const missingFirstParty=sources.filter(s=>s.path.endsWith('.sol')&&bySource.get(s.path).tier==='IN_SCOPE'&&!asts.has(s.path));
+  const missingFirstParty=sources.filter(s=>s.path.endsWith('.sol')&&bySource.get(s.path).tier==='IN_SCOPE'&&!asts.has(s.path)&&!identicalSourceAliases.has(s.path));
   if(missingFirstParty.length){
     let solc=null;
     try {solc=createRequire(path.join(projectRoot,'package.json'))('solc');}
@@ -122,10 +134,15 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
 
   const sourceUnits=sources.map(s=>({sourceId:s.sourceId,path:s.path,sha256:s.sha256,scopeTier:bySource.get(s.path).tier,
     lineCount:bySource.get(s.path).bytes.reduce((n,byte)=>n+(byte===10?1:0),1),
-    astStatus:s.path.endsWith('.vy')?'UNSUPPORTED_LANGUAGE':auxiliaryAstPaths.has(s.path)?'AVAILABLE_AUXILIARY':asts.has(s.path)?'AVAILABLE':'MISSING'}));
+    astStatus:s.path.endsWith('.vy')?'UNSUPPORTED_LANGUAGE':identicalSourceAliases.has(s.path)?'AVAILABLE_IDENTICAL_SOURCE_ALIAS':auxiliaryAstPaths.has(s.path)?'AVAILABLE_AUXILIARY':asts.has(s.path)?'AVAILABLE':'MISSING',
+    ...(identicalSourceAliases.has(s.path)?{canonicalAstSource:identicalSourceAliases.get(s.path)}:{})}));
   const limitations=[scope.source===AUDIT_SCOPE_FILE
     ?{code:'SCOPE_FROM_AUDIT_SCOPE_FILE',path:AUDIT_SCOPE_FILE,detail:'In scope: '+scope.inScopePaths.join(', ')+'. Every other compiled source is a dependency, reviewed only where in-scope contracts inherit it.'}
     :{code:'DEPENDENCY_TIER_BY_PATH',path:'*',detail:'Dependency tier assigned by path convention (vendor/, lib/, node_modules/ at any depth); modified vendored code must be moved out of those folders to be reviewed as in-scope.'}];
+  for(const [alias,canonical] of identicalSourceAliases)limitations.push({
+    code:'BYTE_IDENTICAL_SOURCE_AST_ALIAS',path:alias,
+    detail:'Source bytes exactly equal compiled admitted '+canonical+'; canonical AST contexts cover both source paths. No deployment bytecode or source was changed.'
+  });
   for(const [file,version] of auxiliaryAstPaths)limitations.push({code:'SUPPLEMENTAL_COMPILER_AST',path:file,detail:'Complete in-scope AST obtained from unchanged source with pinned project solc '+version+'; no deployment artifact was changed.'});
   for(const [file,detail] of auxiliaryAstFailures)limitations.push({code:'SUPPLEMENTAL_COMPILER_AST_FAILED',path:file,detail});
   const declarations=[],contexts=[],triggers={},nodeById=new Map(),contractById=new Map(),metadata=new Map(),contextBySymbol=new Map(),usedIds=new Map();
