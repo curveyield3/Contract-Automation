@@ -276,6 +276,85 @@ async function writeCryticCompileExport({projectRoot,build,outDir}){
   await fs.writeFile(exportPath,JSON.stringify(payload));
   return{exportPath,sourceUnitCount,contractCount,compilationUnitCount:Object.keys(compilation_units).length};
 }
+// Slither 0.11.6/crytic-compile 0.4.x cannot parse Vyper 0.4.3
+// sourceMap (dictionary instead of string), and the 0.4 AST node schema.
+// Analyze the exact admitted Vyper AST with its own compiler instead of
+// misreporting Vyper as Slither-covered. Record limitations for later phases.
+async function runExactVyperAstStaticV1({projectRoot,unit,sourceName}){
+  const source=await resolveCompiledSourceFile(projectRoot,sourceName);
+  const admitted=unit.sourceContents?.[sourceName];
+  if(typeof admitted!=='string')throw new Error('Vyper static analysis requires admitted exact source contents: '+sourceName);
+  const observed=await fs.readFile(source,'utf8');
+  if(observed!==admitted)throw new Error('Vyper AST source differs from admitted build: '+sourceName);
+  const version=String(unit.compilerVersion??'');
+  if(!/^\d+\.\d+\.\d+$/.test(version))throw new Error('Vyper AST lacks exact compiler version');
+  const probe=await runProcess({command:'vyper',args:['--version'],cwd:projectRoot,timeoutMs:30000});
+  if(probe.exitCode!==0||!String(probe.stdout??'').trim().startsWith(version))
+    throw new Error('Vyper AST compiler version mismatch: expected '+version);
+  const compiled=await runProcess({command:'vyper',args:['-f','ast',sourceName],cwd:projectRoot,timeoutMs:120000});
+  if(compiled.exitCode!==0)throw new Error('Vyper AST source analysis compiler failed: '+String(compiled.stderr??'').slice(-1500));
+  let parsed;
+  try{parsed=JSON.parse(compiled.stdout)}catch{throw new Error('Vyper AST output is not valid JSON: '+sourceName)}
+  const root=parsed?.ast;
+  if(!root||root.ast_type!=='Module'||!Array.isArray(root.body))throw new Error('Vyper AST root invalid: '+sourceName);
+  const functions=[],sensitiveCalls=[],externalEntryPoints=[],stateWrites=[];
+  let nodeCount=0;
+  const sensitive=new Set(['raw_call','send','selfdestruct','delegatecall','create_forwarder_to','create_minimal_proxy_to','create_copy_of','create_from_blueprint','unsafe_add','unsafe_sub','unsafe_mul','unsafe_div','convert','staticcall','extcall','raw_log']);
+  const seenObjects=new Set();
+  function callableName(node){
+    if(!node||typeof node!=='object')return '';
+    if(node.ast_type==='Name')return String(node.id??'');
+    if(node.ast_type==='Attribute')return callableName(node.value)+'.'+String(node.attr??'');
+    return '';
+  }
+  function visit(node,context){
+    if(!node||typeof node!=='object')return;
+    if(Array.isArray(node)){for(const n of node)visit(n,context);return}
+    if(seenObjects.has(node))return;seenObjects.add(node);
+    const type=node.ast_type;
+    if(typeof type==='string')nodeCount++;
+    let nextContext=context;
+    if(type==='FunctionDef'){
+      const decorators=Array.isArray(node.decorator_list)?node.decorator_list.map(callableName):[];
+      const item={name:String(node.name??''),line:Number(node.lineno??0),decorators,
+        external:decorators.includes('external'),nonreentrant:decorators.some(x=>x.includes('nonreentrant'))};
+      if(!item.name||item.line<1)throw new Error('Vyper AST function lacks source anchor');
+      functions.push(item);
+      if(item.external)externalEntryPoints.push(item);
+      nextContext=item;
+    }
+    if(type==='Call'){
+      const name=callableName(node.func);
+      if(sensitive.has(name)||name.startsWith('extcall')||name.startsWith('staticcall')){
+        sensitiveCalls.push({function:nextContext?.name??'<module>',call:name,line:Number(node.lineno??nextContext?.line??0)});
+      }
+    }
+    if(['Assign','AugAssign','AnnAssign'].includes(type)){
+      const target=node.target;
+      const name=callableName(target);
+      if(name.startsWith('self.'))stateWrites.push({function:nextContext?.name??'<module>',target:name,line:Number(node.lineno??0)});
+    }
+    for(const [key,value] of Object.entries(node)){
+      if(['node_id','src','node_source_code','folded_value','type','_metadata'].includes(key))continue;
+      if(value&&typeof value==='object')visit(value,nextContext);
+    }
+  }
+  visit(root,null);
+  if(!nodeCount||!functions.length||!externalEntryPoints.length)
+    throw new Error('Vyper AST structural inventory incomplete: '+sourceName);
+  for(const call of sensitiveCalls)if(call.line<1)throw new Error('Unanchored Vyper sensitive call: '+call.call);
+  return{
+    analyzer:'vyper-0.4.3-compiler-ast-inventory-v1',
+    engine:'vyper-cli',
+    slitherCompatible:false,
+    sourceName,compilerVersion:version,
+    sourceSha256:sha256(Buffer.from(admitted,'utf8')),
+    astSha256:sha256(Buffer.from(JSON.stringify(root),'utf8')),
+    nodeCount,functions,externalEntryPoints,sensitiveCalls,stateWrites,
+    reviewRequired:true,
+    limitations:['Slither 0.11.6 Vyper 0.4.3 semantic detectors are unavailable; source-anchored AST structural surfaces are retained for required Phase 4–6 semantic review.']
+  };
+}
 async function runSlitherExport({projectRoot,build,sourceCommit}){
   const compilationUnits=Array.isArray(build?.compilationUnits)?build.compilationUnits.filter(Boolean):[];
   if(compilationUnits.length<=1){
@@ -310,8 +389,15 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
     totalSourceUnits+=exportInfo.sourceUnitCount??0;
     totalContracts+=exportInfo.contractCount??0;
     const target=vyperSources.length===1?exportInfo.sourcePath:exportInfo.exportPath;
-    const slitherArgs=vyperSources.length===1?[target,'--compile-force-framework','vyper','--json','-','--exclude-dependencies','--fail-none']:[target,'--compile-force-framework','standard','--json','-','--exclude-dependencies','--fail-none'];
-    const raw=await runProcess({command:'slither',args:slitherArgs,cwd:projectRoot});
+    // Do not feed Vyper 0.4.3 AST to the unsupported Slither Vyper parser.
+    // A Vyper AST result is source-bound structural evidence, not Slither
+    // semantic detector coverage; preserve that distinction in SLITHER_v1.
+    const vyperAnalysis=vyperSources.length===1
+      ? await runExactVyperAstStaticV1({projectRoot,unit,sourceName:vyperSources[0]}) : null;
+    const slitherArgs=vyperAnalysis?null:[target,'--compile-force-framework','standard','--json','-','--exclude-dependencies','--fail-none'];
+    const raw=vyperAnalysis
+      ? {exitCode:0,signal:null,stdout:JSON.stringify({success:true,results:{detectors:[]}}),stderr:''}
+      : await runProcess({command:'slither',args:slitherArgs,cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
     if(parsed?.success!==true && !String(raw.stdout??'').trim() && !String(raw.stderr??'').trim()){
       // Slither JSON mode may exit silently on an invalid crytic export.
@@ -335,7 +421,9 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
       stdout:cleanText(raw.stdout),
       stderr:cleanText(raw.stderr),
       parsedSuccess:parsed?.success??false,
-      findingCount:parsed?.detectors?.length??0
+      findingCount:parsed?.detectors?.length??0,
+      analyzer:vyperAnalysis?.analyzer??'slither',
+      ...(vyperAnalysis?{vyperAnalysis,staticLimitations:vyperAnalysis.limitations}: {})
     });
     if(parsed?.success!==true){
       return{
@@ -414,7 +502,10 @@ async function slitherRepair({projectRoot,build,sourceCommit}){
         findingCount:exact.parsed.detectors.length,
         detectors:exact.parsed.detectors,
         repairAttempts:attempts,
-        inputMode:'EXACT_BUILD_CRYTIC_COMPILE_EXPORT'
+        inputMode:'EXACT_BUILD_CRYTIC_COMPILE_EXPORT',
+        analyzerCoverage:exact.unitResults?.map(u=>({unitId:u.unitId,analyzer:u.analyzer??'slither',staticLimitations:u.staticLimitations??[],vyperAnalysis:u.vyperAnalysis??null}))??[],
+        limitations:exact.unitResults?.flatMap(u=>u.staticLimitations??[])??[],
+        requiredSemanticReview:exact.unitResults?.some(u=>Boolean(u.vyperAnalysis))??false
       };
     }
   }catch(error){
