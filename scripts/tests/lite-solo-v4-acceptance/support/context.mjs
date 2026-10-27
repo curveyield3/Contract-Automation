@@ -64,6 +64,9 @@ export function fixture(id,{flowCount,attackCount=0,heavy=false}={}){
   currentAssignment:{phaseSequence:4,reviewer:'lite-solo-agent'}};
  const directoryPath='Audit Campaign Directory/campaigns/'+slug+'.json';
  put(root,directoryPath,directory);
+ // Use the literal bound v4 phase schema; do not stub phase validation.
+ const boundSchema=fs.readFileSync(path.resolve('scripts/tests/lite-solo-v4-acceptance/fixtures/PHASE_04_SCHEMA_v1.json'),'utf8');
+ writeFile(root,'Audit Skill - Lite-Solo Authority/lite-solo-v4/phases/phase-4/PHASE_04_SCHEMA_v1.json',boundSchema);
  const inventoryRel=reviewInventoryRelV1(root,campaign,'REVIEW_INVENTORY_v1.json');
  put(root,inventoryRel,{schemaVersion:'test-source-inventory-v1',payload:{contexts,
   sourceUnits:[{path:'Fixture.sol',lineCount:sourceLines.length,scopeTier:'IN_SCOPE'}],triggers:{}}});
