@@ -32,8 +32,8 @@ jobs:
           else
             mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root")
           fi
-          [ "${{#changed[@]}" -eq 1 ] || { echo '::error::Exactly one controller proof request must change'; exit 1; }
-          request="${{changed[0]}"
+          [ "${#changed[@]}" -eq 1 ] || { echo '::error::Exactly one controller proof request must change'; exit 1; }
+          request="${changed[0]}"
           [[ "$request" =~ ^process/agent-upload/dai-corrective-evidence/ingest/[A-Za-z0-9._-]+\.json$ ]]
           jq -e '.schemaVersion=="dai-corrective-controller-proof-ingest-v1" and .runId==40598354432 and .artifactId==12776328669 and .allowedWriteScope=="CONTROLLER_PHASE5_EVIDENCE_ONLY"' "$request" >/dev/null
           echo "path=$request" >> "$GITHUB_OUTPUT"
