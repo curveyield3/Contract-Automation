@@ -1,0 +1,35 @@
+name: Lite-Solo v4 Acceptance A04-A15 (isolated)
+on:
+  push:
+    branches: [test/lite-solo-v4-a04-a15]
+    paths:
+      - 'scripts/tests/lite-solo-v4-acceptance/RUN_A04_A15.md'
+      - '.github/workflows/lite-solo-v4-acceptance-a04-a15.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned dependencies
+        run: npm ci --force --ignore-scripts --no-audit --no-fund
+      - name: Execute A04-A15 in separate temporary campaigns
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p scripts/tests/lite-solo-v4-acceptance/output
+          node --test --test-concurrency=1 scripts/tests/lite-solo-v4-acceptance/cases/A04-A09.test.mjs scripts/tests/lite-solo-v4-acceptance/cases/A10-A15.test.mjs
+      - name: Retain all per-scenario evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lite-solo-v4-A04-A15-evidence
+          path: scripts/tests/lite-solo-v4-acceptance/output/
+          if-no-files-found: warn
