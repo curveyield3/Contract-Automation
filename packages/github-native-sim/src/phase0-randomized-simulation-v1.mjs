@@ -444,6 +444,26 @@ export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,lo
   if(detected.foundry.length){const h=await runProcess({command:'forge',args:['script','--help'],cwd:projectRoot,env:scrubbedEnv()});help=`${h.stdout}\n${h.stderr}`;}
   for(const item of detected.foundry){
     const args=['script',item.entry,'--rpc-url',anvilUrl,'--broadcast'];
+    // A source-authored compile-only wildcard-import anchor can collide with
+    // the same implementations' named imports in the native deployment script.
+    // Narrow only this verified BoostHub v9 entrypoint's compilation roots to
+    // its own script directory; the original source and its transitive imports
+    // remain untouched and Forge still compiles the full deployment closure.
+    if(item.path==='script/DeployBoostHubStack_v9.s.sol'){
+      const anchor=path.join(projectRoot,'contracts/BoostHubBeefyCompileImports_v9.sol');
+      const anchorText=await fs.readFile(anchor,'utf8').catch(()=>null);
+      const scriptText=await fs.readFile(path.join(projectRoot,item.path),'utf8');
+      const required=[
+        'BoostHubEthereumRewardConverter_v4.sol',
+        'StrategyConvexBoostHubStakingV5.sol',
+        'BeefyVaultV7FixedV2.sol'
+      ];
+      if(anchorText?.includes('Compilation anchor for the native Solo-Lite Phase 0 exact-source build.')&&
+         required.every(name=>anchorText.includes(name)&&scriptText.includes(name))&&
+         scriptText.includes('contract DeployBoostHubStackV9 is Script')){
+        args.push('--contracts','script');
+      }
+    }
     if(pinnedLibraries.length)args.push('--libraries',pinnedLibraries.join(','));
     if(/--unlocked/.test(help))args.push('--unlocked');
     if(/--sender/.test(help))args.push('--sender',account0);
