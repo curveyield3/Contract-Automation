@@ -88,7 +88,7 @@ run('A29',()=>p6Fixture('A29',{baseline:115,proof:110}),(f,d)=>{
  assert.ok(maxShard<=65536);
  // Real validator approves five in one batch; never restore a large aggregate per approval.
  const first=batch.slice(0,5).map(x=>f.snap(x,worker));
- const response=f.submit(worker,'a29-five',{items:first});
+ const response=f.submit(worker,'a29-five',first);
  assert.equal(response.acceptedUnits.length,5);
  const accepted=Object.entries(f.state().units).filter(([,v])=>v.status==='ACCEPTED').length;
  assert.equal(accepted,5);
