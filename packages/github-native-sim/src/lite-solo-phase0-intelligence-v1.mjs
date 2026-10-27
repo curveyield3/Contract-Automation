@@ -377,7 +377,7 @@ async function slitherRepair({projectRoot,build,sourceCommit}){
   if(vyperVersions.size>1)throw new Error('Conflicting Vyper compiler versions in accepted build units');
   if(vyperVersions.size===1){
     const version=[...vyperVersions][0];
-    if(!/^\\d+\\.\\d+\\.\\d+$/.test(version))throw new Error('Invalid exact Vyper version in compiler evidence');
+    if(!/^\d+\.\d+\.\d+$/.test(version))throw new Error('Invalid exact Vyper version in compiler evidence');
     let probe=await runProcess({command:'vyper',args:['--version'],cwd:projectRoot});
     if(probe.exitCode!==0||!String(probe.stdout??'').trim().startsWith(version)){
       const install=await runProcess({command:'python3',args:['-m','pip','install','--disable-pip-version-check','--no-input',`vyper==${version}`],cwd:projectRoot});
