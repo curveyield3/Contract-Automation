@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "boosthubv9-p4-owner-recovery-release-20261027-v1",
+  "operation": "RELEASE",
+  "campaignId": "boosthub-contract-stack-v9-r1",
+  "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-boosthub-v9-p4-20261027-01",
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "F-001",
+      "claimEpoch": 1,
+      "claimToken": "3d17809e-78ff-40d6-96af-88602ff308ad"
+    },
+    {
+      "unitId": "F-002",
+      "claimEpoch": 1,
+      "claimToken": "6a6bad6c-d21a-4b39-b654-70c065802b21"
+    },
+    {
+      "unitId": "F-003",
+      "claimEpoch": 1,
+      "claimToken": "c0a38c92-e2fb-4506-b372-cedf52df5f06"
+    },
+    {
+      "unitId": "F-004",
+      "claimEpoch": 1,
+      "claimToken": "86c9dd51-2c2f-481a-bd0b-e57e5a1b4e2a"
+    },
+    {
+      "unitId": "R-001",
+      "claimEpoch": 1,
+      "claimToken": "d440fcdb-e74b-4439-bd82-e89a55c57072"
+    },
+    {
+      "unitId": "R-002",
+      "claimEpoch": 1,
+      "claimToken": "b734b934-0c68-4654-b4ae-036972f7de22"
+    },
+    {
+      "unitId": "R-003",
+      "claimEpoch": 1,
+      "claimToken": "c13d4ad3-ac41-420e-ba9f-1efd3e82dd2b"
+    },
+    {
+      "unitId": "R-004",
+      "claimEpoch": 1,
+      "claimToken": "63285bb6-5fa6-4e14-9b29-becbc3d1ac41"
+    },
+    {
+      "unitId": "R-005",
+      "claimEpoch": 1,
+      "claimToken": "ad6e404b-22d5-44eb-a1bf-b41de08826b5"
+    },
+    {
+      "unitId": "R-006",
+      "claimEpoch": 1,
+      "claimToken": "94293589-c3c6-4157-b62e-2f0395c58f80"
+    }
+  ]
+}
