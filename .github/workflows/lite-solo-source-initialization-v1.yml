@@ -89,16 +89,7 @@ jobs:
           RAW_SCAN_URLS: ${{ inputs.scan_urls }}
           RAW_REQUEST_ID: ${{ inputs.request_id }}
           EVENT_NAME: ${{ github.event_name }}
-          RAW_REPORT_PDF: ${{ inputs.report_pdf }}
-          RAW_AUDITED_SOURCE: ${{ inputs.audited_source }}
-          RAW_SCOPE_SUMMARY: ${{ inputs.scope_summary }}
-          RAW_FINDINGS_REMEDIATION: ${{ inputs.findings_remediation }}
-          RAW_METHODOLOGY_ANALYSIS: ${{ inputs.methodology_analysis }}
-          RAW_PROPERTIES_HYPOTHESES: ${{ inputs.properties_hypotheses }}
-          RAW_EXECUTION_RESULTS: ${{ inputs.execution_results }}
-          RAW_ARCHITECTURE_DEPENDENCIES: ${{ inputs.architecture_dependencies }}
-          RAW_RESIDUAL_RISKS: ${{ inputs.residual_risks }}
-          RAW_EVIDENCE_INDEX: ${{ inputs.evidence_index }}
+          RAW_WITHHOLD_ROLES: ${{ inputs.withhold_roles }}
           MATRIX_REQUEST: ${{ matrix.request_path }}
         shell: bash
         run: |
