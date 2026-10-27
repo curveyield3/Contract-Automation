@@ -283,7 +283,7 @@ function validateRequest(request,directory,phase){
   throw Error('only the controller may finalize the current phase with AUTO lane');
 }
 function available(queue,plan,lane='AUTO'){
- return plan.units.filter(u=>queue.units[u.unitId]?.status==='AVAILABLE'&&depSatisfied(queue,u)
+ return plan.units.filter(u=>['AVAILABLE','RELEASED'].includes(queue.units[u.unitId]?.status)&&depSatisfied(queue,u)
   &&(lane==='AUTO'||u.unitId.startsWith(lane+'-')));
 }
 function unlock(queue,plan){
@@ -299,9 +299,11 @@ function unlock(queue,plan){
 function noWork(queue,plan){
  if(plan.units.every(u=>queue.units[u.unitId].status==='ACCEPTED'))return 'PHASE_COMPLETE';
  if(plan.units.some(u=>queue.units[u.unitId].status==='REWORK_REQUIRED'))return 'REWORK_REQUIRED';
- if(plan.units.some(u=>queue.units[u.unitId].status==='BLOCKED_DEPENDENCY'))return 'BLOCKED_DEPENDENCY';
+ // Pending approval and already-held independent work are actionable distinctions.
+ // Dependencies are reported only when no pending approval or in-flight claim exists.
  if(plan.units.some(u=>queue.units[u.unitId].status==='SUBMITTED'))return 'AWAITING_APPROVAL';
  if(plan.units.some(u=>queue.units[u.unitId].status==='CLAIMED'))return 'ALL_WORK_CLAIMED';
+ if(plan.units.some(u=>queue.units[u.unitId].status==='BLOCKED_DEPENDENCY'))return 'BLOCKED_DEPENDENCY';
  return 'NO_ELIGIBLE_WORK';
 }
 function batchIndex(root,campaign,phase,requestId,units){
@@ -330,7 +332,9 @@ function handleClaim({root,campaign,phase,queue,plan,request}){
    packetSha256:u.packetSha256??hex(fs.readFileSync(repoFile(root,u.shardPath))),
    unitSpecRevision:u.unitSpecRevision};
  });
- return {status:units.length?'CLAIMED':noWork(queue,plan),claimedUnits:units,
+ const claimId=units.length?'claim-'+request.requestId:null;
+ return {status:units.length?'CLAIMED':noWork(queue,plan),
+  claimId,claimedUnits:units,
   batchIndexPath:units.length?batchIndex(root,campaign,phase,request.requestId,units):null};
 }
 function itemIdentity(item,u,state,request,root){
@@ -466,9 +470,13 @@ function handleRelease({queue,plan,request}){
   const s=queue.units[item.unitId];
   if(!s||s.workerId!==request.workerId||s.claimEpoch!==item.claimEpoch||
    s.claimToken!==item.claimToken||s.status==='ACCEPTED')continue;
-  s.status='AVAILABLE';s.workerId=null;s.claimToken=null;changed.push(item.unitId);
+  // Preserve drafts and the previous epoch while making this unit eligible again.
+  // The next claim increments the epoch, invalidating the released owner's token.
+  s.status='RELEASED';s.workerId=null;s.claimToken=null;changed.push(item.unitId);
  }
- return {status:'RELEASED',releasedUnits:changed,newlyEligibleUnits:unlock(queue,plan)};
+ const unblocked=unlock(queue,plan);
+ queue.newlyEligibleUnitIds=[...new Set([...changed,...unblocked])];
+ return {status:'RELEASED',releasedUnits:changed,newlyEligibleUnits:queue.newlyEligibleUnitIds};
 }
 function discoveryInput(root,campaign,name){return read(root,reviewInventoryRelV1(root,campaign,name));}
 function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
