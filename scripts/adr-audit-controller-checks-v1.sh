@@ -57,6 +57,18 @@ cat .ac-target/failed-tests.txt
 new_failures="$(comm -13 .ac-main/failed-tests.txt .ac-target/failed-tests.txt)"
 main_check_code="$(cat .ac-main/check.code)"
 target_check_code="$(cat .ac-target/check.code)"
+# When a retired comparison branch has been replaced by current main,
+# do not silently count a main-vs-main comparison as regression qualification.
+# Require a fully clean controller baseline instead of a tautological diff.
+if [[ "$target_ref" == "main" ]]; then
+  if [[ -s .ac-target/failed-tests.txt || "$target_check_code" != "0" ]]; then
+    echo "::error::Audit-Controller main has failing checks; same-ref comparison cannot excuse them" >&2
+    cat .ac-target/failed-tests.txt >&2
+    tail -n 50 .ac-target/check.txt >&2
+    exit 1
+  fi
+  echo "Audit-Controller current-main check is clean (no cross-branch comparison requested)."
+fi
 if [[ -n "$new_failures" ]]; then
   echo "::error::New failing Audit-Controller tests in $target_ref:"
   printf '%s\n' "$new_failures"
