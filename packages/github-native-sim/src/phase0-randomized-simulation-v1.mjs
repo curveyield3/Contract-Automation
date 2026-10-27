@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { compareLiveRuntimeV1, PHASE0_DEPLOYMENT_PROFILE_FRAMEWORKS, loadDeploymentProfile, phase0ForkChainForProfile, resolvePhase0ForkUrl } from './phase0-deployment-profile-v1.mjs';
+import { compareLiveRuntimeV1, PHASE0_DEPLOYMENT_PROFILE_FRAMEWORKS, loadDeploymentProfile, phase0ForkChainForProfile, resolvePhase0ForkUrl, inferPhase0FoundryChainV1 } from './phase0-deployment-profile-v1.mjs';
 import fss from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -219,11 +219,20 @@ export async function startStateSnapshotAnvilV1({sourceUrl,projectRoot,evmVersio
   finally{await fs.rm(statePath,{force:true}).catch(()=>{});}
 }
 function detectFoundryScripts(files,texts){
+  const consolidated=files.filter(f=>/(^|\/)scripts?\/CyavKatDeployAll_v[0-9]+\.s\.sol$/i.test(f));
+  if(consolidated.length>1)throw new Error('Ambiguous consolidated Foundry deployment scripts');
+  if(consolidated.length===1){
+    const rel=consolidated[0],body=texts.get(rel)??'';
+    const name=rel.match(/CyavKatDeployAll_v[0-9]+(?=\.s\.sol$)/i)?.[0];
+    if(!name||!new RegExp('contract\\s+'+name+'\\s+is\\s+Script\\s*\\{').test(body))
+      throw new Error('Consolidated Foundry deployment does not expose expected Script contract');
+    return [{framework:'FOUNDRY',path:rel,entry:rel+':'+name}];
+  }
   const out=[];
   for(const rel of files.filter(f=>/(^|\/)scripts?\/.*\.s\.sol$/i.test(f)&&DEPLOY_SCRIPT_RE.test(f))){
     const text=texts.get(rel)??'';
-    for(const m of text.matchAll(/contract\s+([A-Za-z_][A-Za-z0-9_]*)\s+is\s+[^\{]*\bScript\b/g)){
-      if(/function\s+run\s*\(/.test(text))out.push({framework:'FOUNDRY',path:rel,entry:`${rel}:${m[1]}`});
+    for(const m of text.matchAll(/(?<!abstract\s)contract\s+([A-Za-z_][A-Za-z0-9_]*)\s+is\s+[^{]*\bScript\b/g)){
+      if(/function\s+run\s*\(/.test(text))out.push({framework:'FOUNDRY',path:rel,entry:rel+':'+m[1]});
     }
   }
   return out.slice(0,4);
@@ -414,7 +423,8 @@ export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,lo
     const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     const r=await runDeploymentScriptV1({command:'timeout',args:['900s','forge',...args],cwd:projectRoot,env:scrubbedEnv({ETH_RPC_URL:anvilUrl})});
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
-    attempts.push({framework:'FOUNDRY',path:item.path,entry:item.entry,command:['forge',...args].join(' '),exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
+    const success=r.exitCode===0&&after>before&&!/(?:^|\n)Error: (?:script failed|target contract has no bytecode|failed to)/i.test(String(r.stderr??''));
+    attempts.push({framework:'FOUNDRY',path:item.path,entry:item.entry,command:['forge',...args].join(' '),exitCode:r.exitCode,status:success?'PASS':'FAILED',blockRange:[before+1,after],stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
   }
   for(const item of detected.unsafeHardhat??[]) limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'HARDHAT',path:item.path,reason:item.reason});
   for(const item of detected.hardhat){
@@ -2619,8 +2629,10 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   const cfg=buildIdentity.configurationDetection,pseudo={requestId:`phase0-sim-${receipt.campaign.campaignId}`,requestDigest:sha256(JSON.stringify(buildIdentity)),campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,assignmentId:'phase0-simulation',phaseId:'phase-0',profileId:'github-native-compile-v2',source:{repository:'curveyield3/Audit-Controller',commit:receipt.source.archiveCommit,projectPath:buildIdentity.discovery.projectPath,archivePath,archiveSha256},configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}};
   const deploymentProfile=await loadDeploymentProfile(staged.projectRoot);
   if(deploymentProfile&&!deploymentOnly)throw new Error('audit-deployment.json is supported only by the Phase-0 deployment-only lane');
-  const forkChain=phase0ForkChainForProfile(deploymentProfile);
-  const effectiveForkUrl=resolvePhase0ForkUrl({profile:deploymentProfile,forkUrl,forkUrls});
+  const foundryChainDetection=await inferPhase0FoundryChainV1(staged.projectRoot,deploymentProfile);
+  const forkSelection=deploymentProfile??foundryChainDetection;
+  const forkChain=phase0ForkChainForProfile(forkSelection);
+  const effectiveForkUrl=resolvePhase0ForkUrl({profile:forkSelection,forkUrl,forkUrls});
   const scanManifestFile=path.join(staged.projectRoot,'scan-source-manifest.json');
   let scanManifest=null;
   try {scanManifest=JSON.parse(await fs.readFile(scanManifestFile,'utf8'));}
@@ -2669,7 +2681,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const artifactByQualified=new Map();
     for(const artifact of build.artifacts??[])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
     const artifacts=[...artifactByQualified.values()];
-    anvil=await startAnvil({forkUrl:effectiveForkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion,chainId:forkChain.chainId,requireUpstreamChainId:Boolean(deploymentProfile),forkBlockNumber:scanManifest?.frozenBlock.number??null});
+    anvil=await startAnvil({forkUrl:effectiveForkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion,chainId:forkChain.chainId,requireUpstreamChainId:Boolean(forkSelection),forkBlockNumber:scanManifest?.frozenBlock.number??null});
     const localRequest=new ethers.FetchRequest(anvil.url);
     localRequest.timeout=20000;
     // Keep a small representative actor set; Medusa's four separate actors are funded below.
@@ -2742,6 +2754,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         executionMode:'ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY',status,
         campaignId:receipt.campaign.campaignId,sourceSha256:archiveSha256,
         fork:{engine:'anvil',source:forkChain.rpcSecret,chain:forkChain.chain,chainId:forkChain.chainId,initialBlock,finalBlock:scriptEnd,upstreamChainId:anvil.upstreamChainId??null,identityNormalized:anvil.identityNormalized===true,pinnedHistoricalBlock:anvil.pinnedBlockNumber,pinnedHistoricalHash:anvil.pinnedBlockHash,verifiedHistoricalFork:anvil.verifiedHistoricalFork===true},
+        foundryChainDetection,
         deploymentProfile:deploymentProfile?{file:deploymentProfile.file,fileSha256:deploymentProfile.fileSha256,mode:deploymentProfile.mode,chain:deploymentProfile.chain,chainId:deploymentProfile.chainId,deployer:deploymentProfile.deployer,...(deploymentProfile.mode==='LIVE'?{contracts:deploymentProfile.contracts}:deploymentProfile.mode==='HARDHAT'?{hardhat:deploymentProfile.hardhat}:{foundryRoot:deploymentProfile.foundryRoot,scripts:deploymentProfile.scripts.map(x=>({entry:x.entry,sha256:x.sha256,env:x.env,timeoutSeconds:x.timeoutSeconds}))})}:null,
         targetEvmChainIds:targetChainIds,
         ...(scanManifest?{scanSourceSnapshot:{schemaVersion:scanManifest.schemaVersion,manifestDigestSha256:scanManifest.manifestDigestSha256,
