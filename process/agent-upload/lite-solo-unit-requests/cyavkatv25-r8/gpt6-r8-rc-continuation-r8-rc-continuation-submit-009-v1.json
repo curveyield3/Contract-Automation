@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "r8-rc-continuation-submit-009-v1",
+  "operation": "SUBMIT",
+  "campaignId": "cyavkatv25-r8",
+  "campaignGenerationId": "cyavkatv25-r8-g1-20261027T104124Z",
+  "phaseSequence": 4,
+  "lane": "P4-RC",
+  "workerId": "gpt6-r8-rc-continuation",
+  "sourceSha256": "7a920115d463a2f468c688c65f5fe24ec3364ee57eea4561505fe1e484fcd779",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "P4-RC-514",
+      "claimEpoch": 1,
+      "claimToken": "47c2bfaf-2297-4d66-bcf0-9c2987f9349c",
+      "packetSha256": "66b505e4944bcb754f703259a31fa5e3a5479d301005da9c7ec6444d2dda69fa",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/P4-RC-514/submissions/gpt6-r8-rc-continuation/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "0b4f91c9e3d3acee60c819448fbd8d1efb29db69f2f888b7aa6fffaddbddab77"
+    },
+    {
+      "unitId": "P4-RC-515",
+      "claimEpoch": 1,
+      "claimToken": "270a442a-2677-493c-a128-23bfb16b24f3",
+      "packetSha256": "66b505e4944bcb754f703259a31fa5e3a5479d301005da9c7ec6444d2dda69fa",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/P4-RC-515/submissions/gpt6-r8-rc-continuation/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "3808ed4283aed86ec3f96c076ab9a22a5950bb341edcb110b68aaa7014872eff"
+    },
+    {
+      "unitId": "P4-RC-516",
+      "claimEpoch": 1,
+      "claimToken": "bd01c034-6379-4a67-95ce-e3f62d3c1907",
+      "packetSha256": "66b505e4944bcb754f703259a31fa5e3a5479d301005da9c7ec6444d2dda69fa",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/P4-RC-516/submissions/gpt6-r8-rc-continuation/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "5677723a2f55e6c041eabcd015188cf5814b940750bc6215054ff60bb571cb88"
+    }
+  ]
+}
