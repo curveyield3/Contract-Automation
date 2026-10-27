@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-request-v1",
+  "mode": "LITE_SOLO",
+  "requestId": "dai-preview-to-solo-20261027-v1",
+  "sourceUrl": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/audit-preview-live-ethereum-Dai-6b175474%20r1/source/live-ethereum-Dai-6b175474.zip",
+  "scanUrls": [],
+  "authorizePhase0Execution": true,
+  "deliveryTransport": "DIRECT"
+}
