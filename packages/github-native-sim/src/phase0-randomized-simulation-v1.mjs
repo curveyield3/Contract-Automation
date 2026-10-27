@@ -2714,11 +2714,11 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         bytecode:staking.bytecode,deployedBytecode:staking.deployedBytecode,
         sourceSha256:'0x'+sourceSha256,compilationUnitId:staking.compilationUnitId,
         compilerVersion:'0.4.3',archiveSha256
-      },null,2)+'\\n');
+      },null,2)+'\n');
       await fs.writeFile(path.join(artifactDir,'build_provenance_v6.json'),JSON.stringify({
         compiler_settings:{vyper:'0.4.3'},compilationUnitId:staking.compilationUnitId,
         sourceSha256:'0x'+sourceSha256,archiveSha256
-      },null,2)+'\\n');
+      },null,2)+'\n');
     }
   }
   // Use the same isolated, source-configured Foundry dependency resolution as
