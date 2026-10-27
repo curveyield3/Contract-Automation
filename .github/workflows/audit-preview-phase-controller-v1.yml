@@ -1,0 +1,163 @@
+name: Audit Preview Phases 1–3 Boundary Controller v1
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/agent-upload/audit-preview-phase-boundary/*.json'
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: audit-preview-phase-boundary-controller
+  cancel-in-progress: false
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Checkout the triggering request commit. A newer main commit otherwise
+          # leaves GITHUB_SHA outside shallow history and the diff-tree returns empty.
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Parse strictly isolated lite-solo request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/agent-upload/audit-preview-phase-boundary/)
+          test "${#changed[@]}" -eq 1
+          request="${changed[0]}"
+          [[ "$request" =~ ^process/agent-upload/audit-preview-phase-boundary/[A-Za-z0-9._-]+\.json$ ]]
+          test -f "$request"
+          jq -e '.schemaVersion=="curveyield-lite-solo-phase-boundary-request-v1" and
+            (.reviewKind=="phase") and
+            (.campaignId|type=="string") and (.campaignId|test("^[a-zA-Z0-9_.-]+-r[0-9]+$")) and
+            (.auditControllerRef=="main") and
+            (.attempt|type=="number") and (.attempt>=1)' "$request" >/dev/null
+          kind="$(jq -r .reviewKind "$request")"
+          jq -e '.phaseSequence|type=="number" and (.==1 or .==2 or .==3)' "$request" >/dev/null
+          campaign_id="$(jq -r .campaignId "$request")"
+          slug="$(printf '%s' "$campaign_id" | sed -E 's/-r[0-9]+$//')"
+          {
+            echo "request=$request"
+            echo "kind=$kind"
+            echo "id=$campaign_id"
+            echo "directory=Audit Campaign Directory/campaigns/$slug.json"
+          } >> "$GITHUB_OUTPUT"
+      - name: Checkout exact campaign and assert lite-solo authority
+        id: scope
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
+          AUDIT_CAMPAIGN: ${{ steps.request.outputs.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          encoded_path="$(jq -rn --arg p "$AUDIT_DIRECTORY" '$p|split("/")|map(@uri)|join("/")')"
+          encoded="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$encoded_path?ref=main" --jq .content)"
+          printf '%s' "$encoded" | base64 -d >/tmp/lite-solo-campaign-directory.json
+          jq -e --arg id "$AUDIT_CAMPAIGN" '.schemaVersion=="curveyield-audit-campaign-directory-entry-v2" and
+            .campaignId==$id and .mode=="LITE_SOLO" and .authorityRelease=="audit-preview-v1" and .auditPreview.terminalPhase==4 and .campaignStatus!="PREVIEW_COMPLETE" and .agentModel=="PARALLEL_WORKER_UNITS" and
+            .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT" and (.agent.chatUrl==null) and
+            (.masterReview==null) and (.pendingMasterReview==null) and
+            (.workspacePath|startswith("campaigns/"))' /tmp/lite-solo-campaign-directory.json >/dev/null
+          if jq -e '.authorityRelease=="audit-preview-v1" and .currentAssignment.phaseSequence>=4' /tmp/lite-solo-campaign-directory.json >/dev/null; then
+            echo '::error::Use the v4 immutable unit ingress for Phases 4–6, not the phase-wide boundary controller'; exit 1
+          fi
+          campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
+          bash scripts/audit-preview-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
+          jq -e --arg id "$AUDIT_CAMPAIGN" '.campaignId==$id and .mode=="LITE_SOLO"' ".audit-controller/$AUDIT_DIRECTORY" >/dev/null
+          echo "path=$campaign_path" >> "$GITHUB_OUTPUT"
+      - name: Set up Node.js for the existing validation engine
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install the locked controller dependencies without running scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
+      - name: Validate, seal and generate exact solo controller response
+        id: controller
+        shell: bash
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+          RPC_KATANA: ${{ secrets.RPC_KATANA }}
+          RPC_BASE: ${{ secrets.RPC_BASE }}
+          AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
+          AUDIT_CAMPAIGN: ${{ steps.request.outputs.id }}
+          AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
+          REQUEST_FILE: ${{ steps.request.outputs.request }}
+          REVIEW_KIND: ${{ steps.request.outputs.kind }}
+        run: |
+          set -euo pipefail
+          args=(--controller-root .audit-controller --campaign-id "$AUDIT_CAMPAIGN" --campaign-path "$AUDIT_CAMPAIGN_PATH" --campaign-directory-path "$AUDIT_DIRECTORY" --review-kind "$REVIEW_KIND" --audit-controller-ref main)
+          if [ "$REVIEW_KIND" = discovery ]; then
+            args+=(--unit-id "$(jq -r .unitId "$REQUEST_FILE")")
+            if jq -e '.readyUnitIds != null' "$REQUEST_FILE" >/dev/null; then
+              args+=(--ready-unit-ids-b64 "$(jq -c .readyUnitIds "$REQUEST_FILE" | base64 -w0)")
+            fi
+          else
+            args+=(--phase-sequence "$(jq -r .phaseSequence "$REQUEST_FILE")")
+          fi
+          node scripts/audit-preview-phase-controller-v1.mjs "${args[@]}" > /tmp/lite-solo-envelope.json
+          test "$(wc -c </tmp/lite-solo-envelope.json)" -le 8192
+          jq -es 'length==1 and .[0].schemaVersion=="curveyield-lite-controller-envelope-v1" and
+            (.[0].status|IN("PASS","NEEDS_REWORK","DISCOVERY_REWORK","DISCOVERY_NEXT","DISCOVERY_PARTIAL","DISCOVERY_COMPLETE","DISCOVERY_STALE_REQUEST","ALREADY_ACCEPTED","CONTROLLER_ERROR")) and
+            (.[0].detailRef|type=="string") and (.[0].sha256|test("^[a-f0-9]{64}$"))' /tmp/lite-solo-envelope.json >/dev/null
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import {restoreControllerResultV1} from "./scripts/lib/lite-boundary-result-v1.mjs";
+            const [root,campaign]=process.argv.slice(1);
+            const envelope=JSON.parse(fs.readFileSync("/tmp/lite-solo-envelope.json","utf8"));
+            const result=restoreControllerResultV1({root,campaignPath:campaign,envelope});
+            fs.writeFileSync("/tmp/lite-solo-controller-result.json",JSON.stringify(result)+"\n");
+          ' .audit-controller "$AUDIT_CAMPAIGN_PATH"
+          echo "status=$(jq -r .status /tmp/lite-solo-controller-result.json)" >> "$GITHUB_OUTPUT"
+      - name: Publish only the current lite-solo campaign and directory
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
+          AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git config user.name 'CurveYield Lite-Solo Phase Controller'
+          git config user.email 'lite-solo-controller@users.noreply.github.com'
+          git add -- "$AUDIT_CAMPAIGN_PATH" "$AUDIT_DIRECTORY"
+          if ! git diff --cached --quiet; then
+            git commit -m "audit(lite-solo): validated boundary $GITHUB_RUN_ID"
+            for attempt in 1 2 3; do
+              if git push origin HEAD:main; then break; fi
+              [ "$attempt" -lt 3 ] || exit 1
+              git pull --rebase origin main
+            done
+          fi
+      - name: Record durable controller result without agent delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=".audit-controller/${{ steps.request.outputs.directory }}"
+          jq -e '.mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and
+            .agent.actorId=="lite-solo-agent" and (.agent.chatUrl==null)' "$file" >/dev/null
+          status="$(jq -r .status /tmp/lite-solo-controller-result.json)"
+          detail="$(jq -r '.detailRef // empty' /tmp/lite-solo-envelope.json)"
+          {
+            echo "### Lite-Solo direct controller result"
+            echo "- Campaign: ${{ steps.request.outputs.id }}"
+            echo "- Status: $status"
+            echo "- Durable response: $detail"
+            echo "- Next action is represented by currentAssignment in the canonical campaign directory"
+            echo "- No separate chat, wake, or delivery transport"
+          } >> "$GITHUB_STEP_SUMMARY"

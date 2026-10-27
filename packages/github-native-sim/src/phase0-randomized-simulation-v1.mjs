@@ -2785,6 +2785,41 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const scriptEnd=Number(await provider.getBlockNumber());
     const discoveredScriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
     const reported=await reportedPackageDeployments({projectRoot:staged.projectRoot,attempts:deployment.attempts,artifacts});
+    // Audit Preview only: count ALL successful CREATE/CREATE2 call frames executed
+    // by submitted deployment scripts, including factory-created contracts.
+    // Trace failure is retained as unverifiable; the Phase-0 permit gate rejects it.
+    let auditPreviewCreationTrace=null;
+    if(receipt.authority?.liteRelease==='audit-preview-v1'&&deploymentProfile?.mode!=='LIVE'){
+      const created=new Set();
+      let tracedBlocks=0;
+      try{
+        function visit(call){
+          if(!call||typeof call!=='object'||call.error)return;
+          const type=String(call.type??'').toUpperCase();
+          if((type==='CREATE'||type==='CREATE2')&&/^0x[0-9a-f]{40}$/i.test(String(call.to??'')))
+            created.add(call.to.toLowerCase());
+          for(const child of (call.calls??[]))visit(child);
+        }
+        for(let blockNumber=initialBlock+1;blockNumber<=scriptEnd;blockNumber++){
+          const traces=await provider.send('debug_traceBlockByNumber',[ethers.toQuantity(blockNumber),{tracer:'callTracer',timeout:'120s'}]);
+          if(!Array.isArray(traces))throw new Error('block trace is not an array: '+blockNumber);
+          for(const row of traces){
+            if(!row||!row.result||typeof row.result!=='object')
+              throw new Error('block trace contains unverified transaction: '+blockNumber);
+            visit(row.result);
+          }
+          tracedBlocks++;
+        }
+        auditPreviewCreationTrace={status:'COMPLETE',chainId:forkChain.chainId,
+          firstBlock:initialBlock+1,lastBlock:scriptEnd,tracedBlocks,
+          createdAddresses:[...created].sort(),count:created.size};
+      }catch(error){
+        auditPreviewCreationTrace={status:'UNVERIFIABLE',chainId:forkChain.chainId,
+          firstBlock:initialBlock+1,lastBlock:scriptEnd,tracedBlocks,
+          error:String(error?.message??error).slice(0,600)};
+      }
+    }
+
     if(deploymentOnly){
       // Only original package deployment/config scripts run on the fork. No fallback
       // deployments, fixture generation, Medusa, or ABI accounting telemetry.
@@ -2808,6 +2843,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         policy:'PACKAGE_NATIVE_SCRIPT_EXECUTION_ONLY_NO_FALLBACK_NO_FUZZ_NO_MEDUSA_NO_ABI_TELEMETRY',
         packageDependencyInstall,foundryDependencyInstall,detectedScripts:detected,scriptDispositions:dispositions,
         attempts:deployment.attempts,
+        ...(auditPreviewCreationTrace?{auditPreviewCreationTrace}:{}),
         deployedContracts:[...new Map([...liveContracts,...discoveredScriptDeployments,...reported.rows].map(row=>[String(row.address).toLowerCase(),row])).values()],
         gaps,limitations:gaps,
         coverage:{detectedScripts:dispositions.length,requiredScripts:dispositions.length,executedScripts:deployment.attempts.length,passedScripts:deployment.attempts.filter(row=>row.status==='PASS').length,failedOrUnsupportedScripts:dispositions.filter(row=>row.disposition!=='EXECUTED_PASS').length,excludedScripts:0}

@@ -1,0 +1,360 @@
+name: Audit Preview Fully Automated Phase 0 v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        description: Exact campaign ID created by Audit Source Initialization
+        required: true
+        type: string
+      campaign_path:
+        description: Exact Audit-Controller campaign workspace path
+        required: true
+        type: string
+      audit_controller_ref:
+        description: Audit-Controller ref containing the campaign
+        required: false
+        default: main
+        type: string
+
+      authorization_confirmed:
+        description: Deprecated compatibility flag; Phase-0 execution starts automatically for admitted sources
+        required: false
+        default: true
+        type: boolean
+      resume_from_deploy:
+        description: Resume after Phase 0 intelligence is already published; run only forked deploy/config and finalize
+        required: false
+        default: false
+        type: boolean
+      resume_from_finalize:
+        description: Finalize already-published Phase 0 build and forked native deployment/configuration evidence
+        required: false
+        default: false
+        type: boolean
+
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: audit-preview-phase0-bootstrap-${{ inputs.campaign_id }}
+  cancel-in-progress: false
+
+jobs:
+  permit-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Audit Preview fork
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Check frozen live-source contract permit before compilation
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/audit-preview-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" "$CAMPAIGN_PATH"
+          if ! node scripts/audit-preview-contract-limit-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --stage source; then
+            git -C .audit-controller config user.name "Audit Preview Phase 0"
+            git -C .audit-controller config user.email "audit-preview@users.noreply.github.com"
+            git -C .audit-controller add -- "$CAMPAIGN_PATH" "Audit Campaign Directory/campaigns"
+            git -C .audit-controller commit -m "audit(preview): reject Phase 0 over contract permit"
+            git -C .audit-controller push origin "HEAD:$AUDIT_CONTROLLER_REF"
+            exit 1
+          fi
+
+  intelligence:
+    needs: permit-source
+    if: ${{ !inputs.resume_from_finalize && !inputs.resume_from_deploy }}
+    uses: ./.github/workflows/audit-preview-phase0-intelligence-v1.yml
+    with:
+      campaign_id: ${{ inputs.campaign_id }}
+      campaign_path: ${{ inputs.campaign_path }}
+      audit_controller_ref: ${{ inputs.audit_controller_ref }}
+    secrets: inherit
+
+  fork-deploy-config:
+    needs: [permit-source, intelligence]
+    if: ${{ always() && needs['permit-source'].result == 'success' && !inputs.resume_from_finalize && (needs.intelligence.result == 'success' || inputs.resume_from_deploy) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Restore pinned Node dependencies
+        uses: ./.github/actions/setup-phase0-node-cache
+
+      - name: Enable Forge for package deployment scripts only
+        uses: ./.github/actions/setup-phase0-deployment-only-toolchain-v1
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Checkout exact campaign source
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/audit-preview-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" "${{ inputs.campaign_path }}"
+
+      - name: Run package deployment and configuration scripts on isolated Anvil fork
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+          # Used only when the source package's audit-deployment.json declares chain "katana";
+          # the runner verifies the upstream reports chain 747474 and never passes it to package scripts.
+          KATANA_FORK_RPC_URL: ${{ secrets.RPC_KATANA }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # LIVE_SCAN Katana submissions are bound to RPC_KATANA; they do not
+          # require a second, unused Ethereum fork secret. Legacy ZIP mode
+          # retains its original Ethereum preflight and runner behavior.
+          upstream="$ETHEREUM_FORK_RPC_URL"
+          required_chain="0x1"
+          receipt=".audit-controller/$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"
+          source_mode="$(jq -r '.source.inputMode // "ZIP"' "$receipt")"
+          if [ "$source_mode" = 'LIVE_SCAN' ]; then
+            manifest_rel="$(jq -r '.source.scanManifestPath' "$receipt")"
+            [[ "$manifest_rel" == "$CAMPAIGN_PATH/source/"* ]] || { echo "::error::Unsafe LIVE_SCAN manifest path"; exit 1; }
+            manifest=".audit-controller/$manifest_rel"
+            test -f "$manifest" || { echo "::error::LIVE_SCAN manifest missing"; exit 1; }
+            requested_chain="$(jq -r '.chainId' "$manifest")"
+            case "$requested_chain" in
+              1) upstream="$ETHEREUM_FORK_RPC_URL"; required_chain="0x1"; required_secret="RPC_ETHEREUM" ;;
+              747474) upstream="$KATANA_FORK_RPC_URL"; required_chain="0xb67d2"; required_secret="RPC_KATANA" ;;
+              *) echo "::error::Unsupported LIVE_SCAN chain"; exit 1 ;;
+            esac
+          else
+            required_secret="RPC_ETHEREUM"
+          fi
+          test -n "${upstream:-}" || { echo "::error::$required_secret secret is missing"; exit 1; }
+          chain_id="$(curl -fsS --max-time 15 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$upstream" | jq -r '.result // empty')"
+          [[ "$chain_id" = "$required_chain" || "$((chain_id))" = "$((required_chain))" ]] || {
+            echo "::error::Fork source reports incorrect chain ID"; exit 1
+          }
+          rm -rf .phase0-deploy-output
+          python3 scripts/audit-command-guard-v1.py --label phase0-fork-deploy --wall 2400 --idle 300 --log "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" -- node scripts/run-phase0-fork-deploy-config-v1.mjs \
+            --controller-root .audit-controller \
+            --campaign-path "$CAMPAIGN_PATH" \
+            --output .phase0-deploy-output \
+            --fork-url "$upstream" | tee /tmp/phase0-deploy-result.json
+
+      - name: Enforce actual deployment creation count before Phase 0 can pass
+        if: always()
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .phase0-deploy-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json || {
+            echo "::error title=AUDIT_PREVIEW_CONTRACT_COUNT_UNVERIFIABLE::No deployment witness available"; exit 1;
+          }
+          if ! node scripts/audit-preview-contract-limit-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --stage deployment --deployment-evidence .phase0-deploy-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json; then
+            git -C .audit-controller config user.name "Audit Preview Phase 0"
+            git -C .audit-controller config user.email "audit-preview@users.noreply.github.com"
+            git -C .audit-controller add -- "$CAMPAIGN_PATH" "Audit Campaign Directory/campaigns"
+            git -C .audit-controller commit -m "audit(preview): reject Phase 0 deployment over contract permit"
+            git -C .audit-controller push origin "HEAD:$AUDIT_CONTROLLER_REF"
+            exit 1
+          fi
+
+      - name: Reconcile verified non-execution script exclusions
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=.phase0-deploy-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
+          # Reconciliation covers reviewed Ethereum-lane exclusions only; profile-declared
+          # (e.g. Katana) deployments fail straight through to the gate with their own evidence.
+          if jq -e '.status=="BLOCKED_SCRIPT_FAILURE" and .fork.chainId==1' "$file" >/dev/null; then
+            node scripts/reconcile-phase0-deploy-evidence-v1.mjs \
+              --input "$file" --output "$file" \
+              --campaign-root ".audit-controller/${{ inputs.campaign_path }}" \
+              --source-run-id "$GITHUB_RUN_ID"
+          fi
+
+      - name: Retain guard log alongside fork-deployment evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -s "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" ]; then
+            mkdir -p .phase0-deploy-output
+            cp "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" .phase0-deploy-output/PHASE0_COMMAND_GUARD_v1.log
+          fi
+
+      - name: Retain deployment/configuration evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase0-deploy-config-${{ inputs.campaign_id }}-${{ github.run_id }}
+          path: .phase0-deploy-output
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: true
+
+      - name: Require source package deployment/configuration completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence=.phase0-deploy-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
+          test -s "$evidence"
+          node --input-type=module -e 'import fs from "node:fs";import {assertDeployGateEvidenceV2} from "./scripts/lib/phase0-deploy-gate-v2.mjs";assertDeployGateEvidenceV2(JSON.parse(fs.readFileSync(process.argv[1],"utf8")))' "$evidence"
+
+      - name: Publish deployment evidence and Phase 6 matrix without fuzz baselines
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/write-phase0-fork-deploy-outputs-v1.mjs \
+            --controller-root .audit-controller \
+            --campaign-path "${{ inputs.campaign_path }}" \
+            --simulation-output .phase0-deploy-output
+
+      - name: Publish to exact Audit-Controller campaign ref
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git config user.name 'CurveYield Phase0 Deployment Automation'
+          git config user.email 'phase0-deployment@users.noreply.github.com'
+          # Stage the exact campaign, including deletions of retired Phase-0 derived baseline files.
+          git add -A -- "$CAMPAIGN_PATH"
+          if git diff --cached --quiet; then
+            echo "::error::Phase-0 deployment evidence produced no durable changes"
+            exit 1
+          fi
+          git commit -m "audit(phase0): retain only forked package deploy/config evidence ${{ inputs.campaign_id }}"
+          git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+
+      - name: Summarize
+        shell: bash
+        run: |
+          {
+            echo "## Phase 0 forked deploy/config only"
+            echo "- Native package deploy/configuration scripts on isolated Anvil fork"
+            echo "- No randomized Medusa calls, ABI telemetry, or required baseline simulation inputs"
+            echo "- Script failures and unsafe adapters remain hard gate failures"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  finalize-and-launch-reviewer1:
+    needs: [permit-source, fork-deploy-config]
+    if: ${{ always() && needs['permit-source'].result == 'success' && (needs.fork-deploy-config.result == 'success' || inputs.resume_from_finalize) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CAMPAIGN_ID: ${{ inputs.campaign_id }}
+      CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+      AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Restore pinned Node dependencies (shared Phase 0 cache)
+        uses: ./.github/actions/setup-phase0-node-cache
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Checkout exact Audit-Controller campaign
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/audit-preview-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" "$CAMPAIGN_PATH"
+
+      - name: Finalize machine Phase 0 receipt
+        id: finalize
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/audit-preview-phase0-finalize-v1.mjs             --controller-root .audit-controller             --campaign-path "$CAMPAIGN_PATH"             --contract-automation-sha "$GITHUB_SHA" --bootstrap-sha "$GITHUB_SHA"             --workflow-run-id "$GITHUB_RUN_ID" | tee /tmp/phase0-finalize.json
+          test "$(jq -r '.status' /tmp/phase0-finalize.json)" = PASS
+          echo "campaign_name=$(jq -r '.campaignName' /tmp/phase0-finalize.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish sealed Phase 0 receipt
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git config user.name 'CurveYield Phase0 Automation'
+          git config user.email 'phase0-automation@users.noreply.github.com'
+          git add -- "$CAMPAIGN_PATH" "Audit Campaign Directory/campaigns"
+          if git diff --cached --quiet; then
+            echo "::error::Phase 0 finalizer produced no durable changes"
+            exit 1
+          fi
+          git commit -m "audit(phase0): seal automated bootstrap $CAMPAIGN_ID"
+          git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+
+      - name: Verify Phase 1 was activated for direct Lite-Solo control
+        shell: bash
+        run: |
+          set -euo pipefail
+          slug="$(printf '%s' "$CAMPAIGN_ID" | sed -E 's/-r[0-9]+$//')"
+          directory="Audit Campaign Directory/campaigns/$slug.json"
+          file=".audit-controller/$directory"
+          jq -e --arg campaign "$CAMPAIGN_ID" '
+            .campaignId==$campaign and .mode=="LITE_SOLO" and
+            .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT" and
+            (.agent.chatUrl==null) and .currentAssignment.reviewer=="lite-solo-agent" and
+            .currentAssignment.phaseSequence==1 and .campaignStatus=="ACTIVE"
+          ' "$file" >/dev/null
+          echo "Phase 1 ready for direct repository/controller audit; no wake or delivery." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize
+        shell: bash
+        run: |
+          {
+            echo "## Fully automated Lite Phase 0"
+            echo
+            echo "- Campaign: $CAMPAIGN_ID"
+            echo "- Source input surface: one ZIP URL through Audit Source Initialization"
+            echo "- Phase 0 agent: none"
+            echo "- Phase-0 receipt: sealed and validated"
+            echo "- Separate completion/validation/handoff receipt files: not created"
+            echo "- Phase 1 assignment is available in the campaign directory; no external chat, wake, or delivery."
+          } >> "$GITHUB_STEP_SUMMARY"
