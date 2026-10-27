@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "boosthubv9-p4-recovery-r006-submit-001",
+  "operation": "SUBMIT",
+  "campaignId": "boosthub-contract-stack-v9-r1",
+  "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-boosthub-v9-recovery-20261027-03",
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "R-006",
+      "claimEpoch": 2,
+      "claimToken": "e4d89837-2583-4092-bbcb-dcfbbe2ccb2b",
+      "unitSpecRevision": 1,
+      "packetSha256": "e085dffd9b8d10f30a3ac5931da2cc475a3228d9235459b35bfe3cfa649ef583",
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/R-006/submissions/gpt6-boosthub-v9-recovery-20261027-03/epoch-2/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "11969c43db78964beb33a933ff0a415a885d27a20345cdd066aa8a999b8faa60"
+    }
+  ]
+}
