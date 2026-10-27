@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-report-v1",
+  "mode": "LITE_SOLO",
+  "status": "PASS",
+  "requestId": "dai-preview-to-solo-20261027-v1",
+  "publicationPolicySha256": "c48170047e4b7536ba4dd661dd91cb1ed7ddb1a3e05ebd5d71683e86e92687d0",
+  "actor": {
+    "actorId": "lite-solo-agent"
+  },
+  "source": {
+    "sha256": "1c384141058f50d53b9e58b89c0b83aa60bd1066406f017d177121de332705f2",
+    "inputUrl": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/audit-preview-live-ethereum-Dai-6b175474%20r1/source/live-ethereum-Dai-6b175474.zip",
+    "scanUrls": []
+  },
+  "campaign": {
+    "campaignId": "live-ethereum-dai-6b175474-r3",
+    "campaignGenerationId": "live-ethereum-dai-6b175474-r3-g1-20261027T134533Z",
+    "campaignName": "live-ethereum-Dai-6b175474 r3",
+    "workspacePath": "campaigns/live-ethereum-Dai-6b175474 r3"
+  },
+  "completedAt": "2026-10-27T13:45:35Z"
+}
