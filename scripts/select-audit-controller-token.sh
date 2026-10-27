@@ -3,7 +3,6 @@ set -euo pipefail
 
 repository="${AUDIT_CONTROLLER_PROBE_REPOSITORY:-curveyield3/Audit-Controller}"
 primary="${AUDIT_CONTROLLER_PRIMARY_TOKEN:-}"
-fallback="${PREFLIGHTSIM_FALLBACK_TOKEN:-}"
 required="${AUDIT_CONTROLLER_TOKEN_REQUIRED:-true}"
 
 probe_token() {
@@ -18,11 +17,8 @@ source="NONE"
 if probe_token "$primary"; then
   selected="$primary"
   source="AUDIT_CONTROLLER_GITHUB_TOKEN"
-elif probe_token "$fallback"; then
-  selected="$fallback"
-  source="PREFLIGHTSIM_GITHUB_TOKEN"
 elif [ "$required" = "true" ]; then
-  echo "::error::No configured Audit-Controller credential successfully authenticated to $repository" >&2
+  echo "::error::AUDIT_CONTROLLER_GITHUB_TOKEN missing or denied for $repository" >&2
   exit 1
 fi
 
