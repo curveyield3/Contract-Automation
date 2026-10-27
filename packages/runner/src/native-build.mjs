@@ -372,6 +372,8 @@ const FOUNDRY_NPM_PINS = Object.freeze({
 });
 const FOUNDRY_NPM_SCOPES = Object.freeze({
   '@openzeppelin/': ['@openzeppelin/contracts', '@openzeppelin/contracts-upgradeable'],
+  '@openzeppelin/contracts/': ['@openzeppelin/contracts'],
+  '@openzeppelin/contracts-upgradeable/': ['@openzeppelin/contracts-upgradeable'],
   '@openzeppelin-4/': ['@openzeppelin-4/contracts'],
   '@morpho-org/morpho-blue/': ['@morpho-org/morpho-blue'],
   '@uniswap/v3-core/': ['@uniswap/v3-core']
