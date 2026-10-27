@@ -341,7 +341,17 @@ jobs:
             exit 1
           fi
           git commit -m "audit(phase0): seal automated bootstrap $CAMPAIGN_ID"
-          git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+          published=false
+          for attempt in 1 2 3 4 5 6; do
+            if git push origin "HEAD:$AUDIT_CONTROLLER_REF"; then published=true; break; fi
+            git fetch origin "$AUDIT_CONTROLLER_REF"
+            git rebase "origin/$AUDIT_CONTROLLER_REF" || {
+              git rebase --abort || true
+              echo "::error::Conflicting Phase-0 finalizer publish; reconcile exact campaign evidence"
+              exit 1
+            }
+          done
+          [ "$published" = true ] || { echo "::error::Phase-0 receipt publish exhausted retries"; exit 1; }
 
       - name: Verify Phase 1 was activated for direct Lite-Solo control
         shell: bash
