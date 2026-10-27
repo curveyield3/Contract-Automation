@@ -5,3 +5,5 @@ Only isolated fixtures. A GitHub staging leg is not performed by this workflow; 
 Rerun A16-A30 with the corrected A21 remaining-eligibility fixture.
 
 Run security-hardening A19 negative proof admission case.
+
+Run strict A16/A19 security prerequisite negative verification against unchanged production logic.
