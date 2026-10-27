@@ -51,7 +51,7 @@ const rowId=(phase,field,index)=>{
  const families={
  '4:discoveryReconciliationRecords':'P4-RC','4:specialistReviewRecords':'P4-SP',
  '4:candidateRecords':'P4-C','4:typedLimitations':'P4-L','4:obligationDispositions':'P4-OB',
- '5:economicReviewRecords':'P5-E','5:reconciliationRecords':'P5-R','5:targetDesigns':'P5-T','5:newCandidateRecords':'P5-C',
+ '5:economicReviewRecords':'P5-E','5:reconciliationRecords':'P5-R','5:targetDesigns':'P5-T','5:newCandidateRecords':'P5-R',
  '6:deploymentAssessments':'P6-D','6:targetDispositions':'P6-T',
  '6:baselineTestRecords':'P6-B','6:candidateProofRecords':'P6-P',
  '6:mergedExecutionConclusions':'P6-C','6:obligationDispositions':'P6-OB',
@@ -232,6 +232,11 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
  if(index.phase!==phase)throw Error('shard phase mismatch');
  const descriptors=asArray(index.pages).flatMap(p=>asArray(read(root,path.posix.join(dir,p.file)).shards));
  const serial={};
+ // One monotonic namespace per semantic unit family, including related fields.
+ const nextId=field=>{
+  const family=rowId(phase,field,0).slice(0,-4);
+  return rowId(phase,field,(serial[family]??0)++);
+ };
  for(const d of descriptors){
   const field=d.path?.at(-1);
   if(!field)throw Error('missing work shard field');
@@ -239,13 +244,13 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
   if(phase===6&&['typedExecutionLimitations','fullOnlyOmissions'].includes(field))continue;
   const slab=read(root,path.posix.join(dir,d.file));
   if(d.append){
-   const id=rowId(phase,field,(serial[field]??0)++);
+   const id=nextId(field);
    const unit={unitId:id,kind:'APPEND',field,shardFile:d.file,shardIndex:0,
     shardPath:path.posix.join(dir,d.file),recordKeys:[],path:d.path,dependencies:[],unitSpecRevision:1};
    addUnit(plan,queue,unit);continue;
   }
   for(let n=0;n<slab.entries.length;n++){
-   const entry=slab.entries[n],id=rowId(phase,field,(serial[field]??0)++);
+   const entry=slab.entries[n],id=nextId(field);
    const ownership=dot([...d.path,String(d.startIndex+n)]);
    if(plan.recordOwnership[ownership])throw Error('duplicate canonical record owner: '+ownership);
    plan.recordOwnership[ownership]=id;
