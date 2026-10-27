@@ -11,5 +11,5 @@
   "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
   "phaseEpoch": 1,
   "auditControllerRef": "main",
-  "desiredUnitCount": 1
+  "desiredUnitCount": 10
 }
