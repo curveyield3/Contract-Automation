@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import {requiredFile,readJson} from './lite-solo-phase-work-v1.mjs';
 
@@ -35,6 +36,53 @@ export function unresolvedFinalCandidateFailures({root,campaignPath,directory}){
   if(c.findingPromotion==='PROMOTE_FINDING')continue;
   if([c.finalDisposition,c.outcome,c.propertyViolation,c.impact].some(v=>/UNCONFIRM|NOT_ESTABLISHED|NOT_DISPROVEN|INCONCLUSIVE|UNRESOLVED|UNKNOWN|UNQUANTIFIED|INSUFFICIENT_EVIDENCE/i.test(String(v??''))))
    failures.push('Candidate '+id+' retains unresolved property, reachability, impact or outcome. Produce decisive authorized evidence or preserve it as an appropriately substantiated finding; lite-solo cannot claim COMPLETE.');
+ }
+ return failures;
+}
+
+
+// Terminal security assurance cannot be marked COMPLETE while mandatory
+// material obligations remain due or when accepted post-seal execution has not
+// been reconciled into the controller's authoritative coverage assessment.
+// No mutation of old receipts or frozen source is performed here.
+export function unresolvedTerminalAssuranceFailures({root,campaignPath,directory}={}){
+ if(directory?.mode!=='LITE_SOLO')throw new Error('terminal assurance requires Lite-Solo campaign');
+ const readRel=(rel)=>readJson(requiredFile(root,path.posix.join(campaignPath,rel),rel));
+ const failures=[];
+ const ledger=readRel('controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json');
+ for(const entry of ledger?.obligations??[]){
+  if(entry?.mandatory!==true)continue;
+  const requiredPhase=Number(entry.requiredPhase);
+  if(!Number.isInteger(requiredPhase)||requiredPhase>10)continue;
+  const status=String(entry.status??'OPEN').toUpperCase();
+  if(!['OPEN','IN_PROGRESS','BLOCKED_CARRIED'].includes(status))continue;
+  const id=String(entry.obligationId??'UNKNOWN_OBLIGATION');
+  failures.push('Mandatory security obligation '+id+' remains '+status+
+   ' at terminal Phase 10; satisfy with decisive source-bound evidence, or use an authorized controller-scoped disposition. A narrative limitation does not satisfy it.');
+ }
+ // Scan only controller-owned ingested proof receipts, not agent-written paths.
+ const base=path.join(root,campaignPath,'controller','phase8-revalidation');
+ const accepted=[];
+ if(fs.existsSync(base)){
+  for(const group of fs.readdirSync(base,{withFileTypes:true})){
+   if(!group.isDirectory()||!/^(?:TG-[0-9]{3}|CP-[A-Za-z0-9._-]+)$/.test(group.name))continue;
+   const dir=path.join(base,group.name);
+   for(const filename of fs.readdirSync(dir)){
+    if(!/^CONTROLLER_[A-Za-z0-9_-]*EVIDENCE_INGEST_RECEIPT_[A-Za-z0-9_-]+\.json$/.test(filename))continue;
+    const record=readJson(path.join(dir,filename));
+    if(record?.campaignId!==directory.campaignId||record?.sourceSha256!==directory.sourceSha256)
+     throw new Error('controller proof receipt has contradictory campaign source identity: '+filename);
+    if(record?.status==='EVIDENCE_ACCEPTED_FOR_PHASE8_VALIDATION'&&Array.isArray(record.acceptedObligations))
+     accepted.push(...record.acceptedObligations);
+   }
+  }
+ }
+ if(accepted.length){
+  const coverage=readRel('work/phase-10/COVERAGE_MATRIX_v1.json');
+  const rows=coverage?.rows??[];
+  if(!rows.length||!rows.some(x=>['PASS','PASSED','ACHIEVED'].includes(String(x.testStatus).toUpperCase())))
+   failures.push('Controller accepted '+new Set(accepted).size+
+    ' post-seal baseline checks, but final coverage matrix records no achieved tests; reconcile machine evidence into the coverage report before terminal completion.');
  }
  return failures;
 }
