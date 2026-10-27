@@ -39,13 +39,13 @@ jobs:
           [[ "$request" =~ ^process/agent-upload/lite-solo-phase-boundary/[A-Za-z0-9._-]+\.json$ ]]
           test -f "$request"
           jq -e '.schemaVersion=="curveyield-lite-solo-phase-boundary-request-v1" and
-            (.reviewKind=="phase" or .reviewKind=="discovery") and
+            (.reviewKind=="phase") and
             (.campaignId|type=="string") and (.campaignId|test("^[a-zA-Z0-9_.-]+-r[0-9]+$")) and
             (.auditControllerRef=="main") and
             (.attempt|type=="number") and (.attempt>=1)' "$request" >/dev/null
           kind="$(jq -r .reviewKind "$request")"
           if [ "$kind" = phase ]; then
-            jq -e '.phaseSequence|type=="number" and (.==1 or .==2 or .==3 or .==4 or .==5 or .==6 or .==8 or .==9 or .==10)' "$request" >/dev/null
+            jq -e '.phaseSequence|type=="number" and (.==1 or .==2 or .==3 or .==8 or .==9 or .==10)' "$request" >/dev/null
           else
             jq -e '.unitId|type=="string" and test("^[FRX]-[0-9]{3}$")' "$request" >/dev/null
             jq -e 'if .readyUnitIds==null then true else
