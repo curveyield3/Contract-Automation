@@ -77,8 +77,10 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   if [ -n "$prior_policy_sha" ] && [ "$prior_policy_sha" != "$expected_policy_sha" ]; then
     echo "::error::PUBLICATION_POLICY_CONFLICT" >&2; exit 1
   fi
-  if [ -z "$prior_policy_sha" ] && publication_any_on; then
-    echo "::error::PUBLICATION_POLICY_CONFLICT: historical request has no frozen policy" >&2; exit 1
+  if [ -z "$prior_policy_sha" ]; then
+    # A previously admitted request without a frozen policy may resume Phase 0.
+    # Do not retroactively bind or change its publication settings on retry.
+    echo "::notice::LEGACY_PUBLICATION_POLICY_UNBOUND: resuming source-bound campaign without changing release selection"
   fi
 else
   # New campaigns bind the installed lite-solo-v4 authority and its immutable manifest.
