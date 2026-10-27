@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "p4-reviewed-012-014-016-v1",
+  "operation": "SUBMIT",
+  "campaignId": "boosthub-contract-stack-v9-r1",
+  "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-boosthub-v9-flow-second",
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "R-012",
+      "claimEpoch": 1,
+      "claimToken": "2b6c8bb0-9456-4059-9a75-dfd952c4ddbd",
+      "unitSpecRevision": 1,
+      "packetSha256": "e30c01acb56a54da96b0e9c8d6cf9ba6ca7183275c18b61c592784854ed7675b",
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/R-012/submissions/gpt6-boosthub-v9-flow-second/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "83cb42a3fc61d722436cb6c338683be861125063f3f6de094650e5de52106a94"
+    },
+    {
+      "unitId": "R-014",
+      "claimEpoch": 1,
+      "claimToken": "2c181440-f269-4f79-bb63-e712b0310e4b",
+      "unitSpecRevision": 1,
+      "packetSha256": "1e7c1d7ff92f3fe265abdec048518e3fac6185dddae6f49faac6402a41801a85",
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/R-014/submissions/gpt6-boosthub-v9-flow-second/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "c7cb75284f28ccc152c9c9efa24914d0d36f512f3277f49bec91f2d2e187132f"
+    },
+    {
+      "unitId": "R-016",
+      "claimEpoch": 1,
+      "claimToken": "88860cf7-bc17-4425-b1da-3af608749ac1",
+      "unitSpecRevision": 1,
+      "packetSha256": "55ebcf48a04f5ec3774549830ade46fed8d5ec8c25d511a819000c1efbf5d872",
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/R-016/submissions/gpt6-boosthub-v9-flow-second/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "3889330db828ba061c1181b66175d298e0461c7a3ae789eb817d0f56f9fca58e"
+    }
+  ]
+}
