@@ -769,7 +769,7 @@ if(directory.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2') thr
 
 if(directory.campaignId!==expectedCampaignId) throw new Error('campaign-id does not match Audit Campaign Directory');
 if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does not match Audit Campaign Directory workspacePath');
-if(directory.mode!=='LITE_SOLO'||directory.agentModel!=='ONE_PERSISTENT_AGENT'||directory.agent?.actorId!=='lite-solo-agent')
+if(directory.mode!=='LITE_SOLO'||!['PARALLEL_WORKER_UNITS','ONE_PERSISTENT_AGENT'].includes(directory.agentModel)||directory.agent?.actorId!=='lite-solo-agent')
  throw new Error('not an admitted lite-solo single-actor campaign');
 if(directory.pendingMasterReview||directory.masterReview||directory.lastAcceptedMasterReview||directory.testExecutor)throw new Error('legacy master/executor state in lite-solo campaign');
 if(directory.skillAuthority?.current?.release && !['lite-solo-v1','lite-solo-v2','lite-solo-v3','lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(directory.skillAuthority.current.release))throw new Error('lite-solo bound release mismatch');
@@ -830,6 +830,9 @@ if(reviewKind==='discovery'){
     activeDiscoveryUnitIds:directory.discovery.activeUnitIds})+'\n');
   process.exit(0);
 }
+// The phase-wide path is the retained aggregate security validator for v4, never a worker ingress.
+if(directory.authorityRelease==='lite-solo-v4'&&[4,5,6].includes(sequence)&&process.env.LITE_SOLO_V4_FINALIZE!=='1')
+ throw new Error('v4 Phase 4–6 can only be finalized from accepted immutable units');
 // Lite-Solo accepts phase/discovery only. No successor-delivery holds or master rework routes.
 const sealedRework=null;
 if(reviewKind==='phase'&&!masterAmendmentRefreshSha&&['STOPPED_BY_HUMAN','BLOCKED'].includes(String(directory.campaignStatus??'')))
@@ -1392,7 +1395,7 @@ else{
   nextAssignment=((sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)||postMasterDiscovery)
  ?null
  :preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
-  if(sequence===3&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
+  if(sequence===3&&authorityRoot!=='Audit Skill - Lite-Solo Authority/lite-solo-v4'&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
     const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
       now,auditControllerRef:a['audit-controller-ref']??'main'});
     directory.discovery={statePath:started.statePath,status:started.completeImmediately?'COMPLETE':'RUNNING',
