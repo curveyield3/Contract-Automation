@@ -1,0 +1,194 @@
+{
+  "schemaVersion": "curveyield-lite-phase-work-schema-v1",
+  "phase": 5,
+  "title": "Lite Phase 5 - Source-bound Targeted Execution Design",
+  "executor": "lite-solo-agent",
+  "automationOnly": false,
+  "conditionalAgentExecution": null,
+  "workForm": {
+    "campaignPath": "work/phase-05/PHASE_05_WORK_FORM_v1.json",
+    "template": "phases/phase-5/resources/PHASE_05_WORK_FORM_TEMPLATE_v1.json"
+  },
+  "finalReport": {
+    "campaignPath": "work/phase-05/PHASE_05_FINAL_REPORT_v1.md",
+    "template": "phases/phase-5/resources/PHASE_05_FINAL_REPORT_TEMPLATE_v1.md",
+    "requiredSections": [
+      "Executive Conclusion",
+      "Material Results",
+      "Limitations",
+      "Unresolved Substantive Questions"
+    ],
+    "controllerGenerated": true
+  },
+  "actions": {
+    "step-1": {
+      "title": "Complete economic and mathematical review",
+      "formPath": "work/phase-05/PHASE_05_WORK_FORM_v1.json",
+      "section": "Step 1 Input — Complete economic and mathematical review",
+      "fields": [
+        {
+          "name": "economicReviewRecords",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-6",
+            "phase-8",
+            "phase-10"
+          ],
+          "itemRequiredFields": [
+            "recordKey",
+            "sourceAnchor",
+            "valueFlowOrFormula",
+            "unitsAndBounds",
+            "boundaryCases",
+            "roundingPrecision",
+            "incentiveExtractionAnalysis",
+            "solvencyOrConservationAnalysis",
+            "conclusion",
+            "relatedCandidateKeys"
+          ]
+        }
+      ],
+      "controllerPrefillFields": [
+        "recordKey",
+        "sourceAnchor",
+        "valueFlowOrFormula"
+      ]
+    },
+    "step-2": {
+      "title": "Perform bounded contradiction and candidate reconciliation",
+      "formPath": "work/phase-05/PHASE_05_WORK_FORM_v1.json",
+      "section": "Step 2 Input — Perform bounded contradiction and candidate reconciliation",
+      "fields": [
+        {
+          "name": "reconciliationRecords",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-6",
+            "phase-8"
+          ],
+          "itemRequiredFields": [
+            "subjectKey",
+            "subjectType",
+            "priorConclusion",
+            "phase5Observation",
+            "disposition",
+            "rationale",
+            "sourceAnchor",
+            "downstreamValidationNeed"
+          ]
+        },
+        {
+          "name": "newCandidateRecords",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-6",
+            "phase-8"
+          ],
+          "itemRequiredFields": [
+            "tempKey",
+            "sourceAnchor",
+            "description",
+            "securityRationale",
+            "recommendedValidationMethod",
+            "materialityBasis"
+          ]
+        }
+      ]
+    },
+    "step-3": {
+      "title": "Design AI-guided targeted fuzzing and attacker/exploit simulations",
+      "formPath": "work/phase-05/PHASE_05_WORK_FORM_v1.json",
+      "section": "Step 3 Input — Design AI-guided targeted fuzzing and attacker/exploit simulations",
+      "fields": [
+        {
+          "name": "targetDesigns",
+          "type": "REQUIRED_RECORD_LIST",
+          "consumers": [
+            "phase-5-boundary-automation",
+            "phase-6",
+            "phase-8"
+          ],
+          "itemRequiredFields": [
+            "candidateKey",
+            "setup",
+            "prerequisites",
+            "transactionSequence",
+            "oracle",
+            "fuzzVariablesAndBounds",
+            "snapshotReuseSafety",
+            "expectedSecurityProperty",
+            "executionMethod",
+            "reproductionType",
+            "expectedMachineObservation"
+          ],
+          "controllerAutoResolveExecutionRequest": true,
+          "fallbackField": "executionRequestRef",
+          "autoResolutionSemantics": "RESOLVE_EXISTING_DETERMINISTIC_REQUEST_ONLY",
+          "controllerCollectedFields": [
+            "executionRequestRef",
+            "automationResolvedExecutionRequest",
+            "requestBindingStatus",
+            "requestBindingEvidenceRef"
+          ],
+          "itemFieldAllowedValues": {
+            "executionMethod": [
+              "V7_REQUEST",
+              "NOT_APPLICABLE"
+            ],
+            "reproductionType": [
+              "FOUNDRY_TEST",
+              "MEDUSA_PROPERTY",
+              "ANVIL_WORKFLOW",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "conditionalExecutionBlueprint": {
+            "when": "executionMethod == V7_REQUEST",
+            "required": [
+              "projectPath",
+              "configuration.compilers",
+              "configuration.analysis.nativeFuzz.fuzzRuns",
+              "configuration.harness.bundleId for Foundry/Medusa, or valid Anvil recipe plus simulation/deploymentGas"
+            ],
+            "minimumNativeFuzzRuns": 100000,
+            "requestEvidence": "controller builds source-bound request and preserves design intent separately; test-executor authors missing exact harness",
+            "missingBehavior": "REWORK_REQUIRED with precise targetDesigns[n].executionBlueprint field; NEVER invent a working test"
+          }
+        }
+      ],
+      "controllerCollectedFields": [
+        "executionRequestRef",
+        "automationResolvedExecutionRequest",
+        "requestBindingStatus",
+        "requestBindingEvidenceRef"
+      ]
+    }
+  },
+  "derivedOutputs": [
+    {
+      "path": "derived/phase-5/PHASE6_INPUT_v1.json",
+      "selectors": [
+        "actions.step-1.outputs.economicReviewRecords",
+        "actions.step-2.outputs.reconciliationRecords",
+        "actions.step-2.outputs.newCandidateRecords"
+      ]
+    }
+  ],
+  "bookkeepingMappings": {
+    "graphRecordPaths": [
+      "actions.step-1.outputs.economicReviewRecords",
+      "actions.step-2.outputs.reconciliationRecords",
+      "actions.step-2.outputs.newCandidateRecords"
+    ],
+    "obligationRecordPaths": [],
+    "invalidationRecordPaths": []
+  },
+  "submission": {
+    "packetPath": "submissions/PHASE_05_WORK_PACKET_v1.json",
+    "requiredPacketStatus": "SUBMITTED",
+    "controllerPassToken": "CONTROLLER_PHASE_PASS",
+    "bookkeepingBeforeValidationPass": false,
+    "controllerGeneratesPacket": true
+  },
+  "controllerAutomationInputs": []
+}
