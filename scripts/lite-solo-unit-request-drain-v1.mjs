@@ -200,7 +200,11 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
     '--controller-root',root,'--campaign-id',campaignId,
     '--campaign-path',campaignPath,'--campaign-directory-path',directoryRel,
     '--phase-sequence',String(seq),'--review-kind','phase','--audit-controller-ref','main'],
-   {encoding:'utf8',env:{...process.env,LITE_SOLO_V4_FINALIZE:'1'},maxBuffer:1024*1024*2});
+   // The existing Phase-5 runner emits bounded source-bound progress to stderr.
+   // Inherit that stream: a long machine execution must not silently buffer
+   // all progress or consume the parent's 2-MiB result buffer.
+   {encoding:'utf8',env:{...process.env,LITE_SOLO_V4_FINALIZE:'1'},
+    stdio:['ignore','pipe','inherit'],maxBuffer:1024*1024*2});
    const envelope=JSON.parse(output.trim());
    const updated=readJson(directoryFile);
    if((updated.lastSealedReceiptPath!==directory.lastSealedReceiptPath&&
