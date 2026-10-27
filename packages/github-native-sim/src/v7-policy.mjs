@@ -13,7 +13,6 @@ export const V7_POLICY = Object.freeze({
   }),
   workflows: Object.freeze({
     execution: '.github/workflows/audit-controller-execution.yml',
-    qualification: '.github/workflows/v7-execution-infrastructure-qualification.yml',
     toolchainSetup: '.github/actions/setup-v7-toolchain/action.yml',
   }),
   mutableRpc: Object.freeze({
