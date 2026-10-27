@@ -19,7 +19,6 @@
   },
   "activeWorkflows": {
     "execution": ".github/workflows/audit-controller-execution.yml",
-    "qualification": ".github/workflows/v7-execution-infrastructure-qualification.yml",
     "toolchainSetup": ".github/actions/setup-v7-toolchain/action.yml"
   },
   "toolchain": {
@@ -50,7 +49,6 @@
   },
   "qualifiedCapabilities": {
     "requestExtension": "configuration.v26-v1",
-    "qualificationWorkflow": ".github/workflows/v7-execution-infrastructure-qualification.yml",
     "components": {
       "v26-result-components-v1": "audit-v7-github-execution-evidence-v2",
       "v26-build-sbom-v1": "audit-v7-build-sbom-v1",
