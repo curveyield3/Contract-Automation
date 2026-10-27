@@ -288,7 +288,7 @@ function consolidateNewSemanticUnitsV1({root,campaignPath,phase,plan,queue}){
    throw Error('cannot rebatch an already claimed, submitted or accepted unit');
   const payload={schemaVersion:'curveyield-lite-solo-batched-assignment-v1',unitId:id,
    phaseSequence:phase,field:group.field,groupKeys:group.groupKeys,members:group.members,
-   readingGuide:'Complete each assigned member by its original recordKey. Omit already accepted members during targeted rework.'};
+   readingGuide:'BATCH members are original source-bound records, not separate claims. Reconstruct and verify each manifest prefill-page (12 KiB), then complete entries[].key using the exact member recordKeys[0] and substantive entries[].value. Submit one immutable multi-entry snapshot under the claimed batch unit ID. During rework submit only outstanding members; never alter an accepted sibling.'};
   const packetPath=path.posix.join(unitBase(campaignPath,phase,id),'ASSIGNMENT_PACKET_v1.json');
   const manifest=writePagedPrefillV1(root,packetPath,payload);
   const spec={unitId:id,kind:'BATCH',field:group.field,members:group.members,
@@ -492,7 +492,7 @@ function batchIndex(root,campaign,phase,requestId,units){
   pages.push({path:rel,sha256:sha(page)});
  }
  const index={schemaVersion:'curveyield-lite-solo-unit-batch-index-v1',
-  count:units.length,pages,readingGuide:'Read paged indexes and only assigned unit pages. Commit immutable worker/claim-epoch/attempt submissions; enqueue 1–5-unit SUBMIT requests, then immediately continue independent claimed units. NEVER wait for controller approval. Claim up to four more when eligible; dependent units require persisted ACCEPTED.'};
+  count:units.length,pages,readingGuide:'Read claimed packetPath and verify packetSha256. BATCH packets are paged prefill manifests: reconstruct the value from digest-checked prefill-pages, preserve each member recordKeys[0] as entries[].key, and submit one multi-entry snapshot under the batch claim. Rework only outstanding member records; accepted siblings remain immutable. For other units use the original one-record form. Commit source/authority-bound immutable worker/claim-epoch/attempt submissions and enqueue 1–5-unit SUBMIT requests. Claim at most four; only persisted accepted original records unlock dependents.'};
  const rel=path.posix.join(dir,'BATCH_INDEX_v1.json');put(root,rel,index);
  return rel;
 }
