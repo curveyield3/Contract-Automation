@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-one-time-source-repair-v1",
+  "archive": "curveyield3/Audit-Controller:campaigns/cyavKATv25.zip",
+  "from": "v28",
+  "to": "v29",
+  "newScript": "source-repairs/cyavKATv25/v29/upgrade/script/CyavKatDeployAll_v29.s.sol",
+  "purpose": "Resolve original source-declared IPOR library link references when staging consolidated Foundry contract runtime"
+}
