@@ -13,6 +13,20 @@ import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-
 
 export const UNIT_POLICY=Object.freeze({issueBatchDefault:10,issueBatchMax:10,approvalBatchMax:5,maxParallelWorkers:null});
 export const REQUEST_SCHEMA='curveyield-lite-solo-unit-batch-request-v1';
+// Public queue/packet contracts: one authoritative definition, not copied workflow limits.
+export const UNIT_QUEUE_STATUSES=Object.freeze(['BLOCKED_DEPENDENCY','AVAILABLE','CLAIMED',
+ 'SUBMITTED','ACCEPTED','REWORK_REQUIRED','RELEASED']);
+export const UNIT_ARTIFACT_SCHEMAS=Object.freeze({
+ queue:'curveyield-lite-solo-unit-queue-state-v1',
+ plan:'curveyield-lite-solo-unit-plan-v1',
+ planPage:'curveyield-lite-solo-unit-plan-page-v1',
+ packetIndex:'curveyield-discovery-packet-section-index-v1',
+ batchIndex:'curveyield-lite-solo-unit-batch-index-v1',
+ batchPage:'curveyield-lite-solo-unit-batch-page-v1',
+ submission:'curveyield-lite-solo-unit-submission-v1',
+ accepted:'curveyield-lite-solo-accepted-unit-v1',
+ result:'curveyield-lite-solo-unit-controller-result-v1'
+});
 const hex=b=>createHash('sha256').update(b).digest('hex');
 const pretty=x=>JSON.stringify(x,null,2)+'\n';
 const sha=x=>hex(Buffer.from(pretty(x)));
@@ -230,8 +244,10 @@ function validateRequest(request,directory,phase){
  if(request.lane!=='AUTO'&&!safe(request.lane))throw Error('invalid lane');
  const common=['schemaVersion','requestId','operation','campaignId','campaignGenerationId','phaseSequence',
   'lane','workerId','sourceSha256','authorityDigest','phaseEpoch','auditControllerRef'];
- const allowed=new Set([...common,...(request.operation==='CLAIM'?['desiredUnitCount']:
-  ['items'])]);
+ const operationFields={
+  CLAIM:['desiredUnitCount'],SUBMIT:['items'],RELEASE:['items'],FINALIZE:[]
+ };
+ const allowed=new Set([...common,...operationFields[request.operation]]);
  for(const key of Object.keys(request))if(!allowed.has(key))throw Error('unexpected controller/request field: '+key);
  assertV4(directory,phase,request);
  if(request.operation==='CLAIM'){
@@ -241,16 +257,28 @@ function validateRequest(request,directory,phase){
   if(!Array.isArray(request.items)||request.items.length<1||request.items.length>UNIT_POLICY.approvalBatchMax)
    throw Error('SUBMIT must explicitly name 1–5 items');
   if(new Set(request.items.map(x=>x.unitId)).size!==request.items.length)throw Error('duplicate SUBMIT unit');
-  if(request.items.some(x=>!isObject(x)||!safe(x.unitId)||!Number.isInteger(x.claimEpoch)||
-    typeof x.claimToken!=='string'||!x.claimToken.trim()||
+  const required=['unitId','claimEpoch','claimToken','packetSha256','submissionPath',
+   'submissionSha256','unitSpecRevision'];
+  if(request.items.some(x=>!isObject(x)||Object.keys(x).length!==required.length||
+    required.some(key=>!Object.hasOwn(x,key))||
+    !safe(x.unitId)||!Number.isSafeInteger(x.claimEpoch)||x.claimEpoch<1||
+    !safe(x.claimToken)||!Number.isSafeInteger(x.unitSpecRevision)||x.unitSpecRevision<1||
     !/^[0-9a-f]{64}$/.test(String(x.packetSha256??''))||
-    !/^[0-9a-f]{64}$/.test(String(x.submissionSha256??''))))
-   throw Error('SUBMIT item identity or hash is malformed');
+    !/^[0-9a-f]{64}$/.test(String(x.submissionSha256??''))||
+    typeof x.submissionPath!=='string'||x.submissionPath.length>1024||
+    x.submissionPath.startsWith('/')||x.submissionPath.split('/').includes('..')))
+   throw Error('SUBMIT item identity, revision, path or hash is malformed');
  }else if(request.operation==='RELEASE'){
-  if(!Array.isArray(request.items)||!request.items.length||request.items.some(x=>!safe(x.unitId)||
-    !Number.isInteger(x.claimEpoch)||!x.claimToken))throw Error('RELEASE must list complete owned tokens');
- }else if(request.operation==='FINALIZE'&&request.workerId!=='lite-solo-controller')
-  throw Error('only the controller may finalize');
+  if(!Array.isArray(request.items)||!request.items.length||
+    new Set(request.items.map(x=>x.unitId)).size!==request.items.length||
+    request.items.some(x=>!isObject(x)||Object.keys(x).length!==3||
+      !Object.hasOwn(x,'unitId')||!Object.hasOwn(x,'claimEpoch')||
+      !Object.hasOwn(x,'claimToken')||!safe(x.unitId)||
+      !Number.isSafeInteger(x.claimEpoch)||x.claimEpoch<1||!safe(x.claimToken)))
+   throw Error('RELEASE must list only complete distinct owned tokens');
+ }else if(request.operation==='FINALIZE'&&
+  (request.workerId!=='lite-solo-controller'||request.lane!=='AUTO'))
+  throw Error('only the controller may finalize the current phase with AUTO lane');
 }
 function available(queue,plan,lane='AUTO'){
  return plan.units.filter(u=>queue.units[u.unitId]?.status==='AVAILABLE'&&depSatisfied(queue,u)
@@ -305,7 +333,10 @@ function handleClaim({root,campaign,phase,queue,plan,request}){
 }
 function itemIdentity(item,u,state,request,root){
  if(item.unitId!==u.unitId||state.workerId!==request.workerId||
-  item.claimEpoch!==state.claimEpoch||item.claimToken!==state.claimToken)return 'STALE';
+  item.claimEpoch!==state.claimEpoch||item.claimToken!==state.claimToken||
+  item.unitSpecRevision!==u.unitSpecRevision||
+  item.unitSpecRevision!==Number(request.planUnitSpecRevision??u.unitSpecRevision))
+  return 'STALE';
  if(state.status==='ACCEPTED')return 'UNCHANGED';
  if(!['CLAIMED','SUBMITTED','REWORK_REQUIRED'].includes(state.status))return 'STALE';
  const packetRel=u.packetPath??u.shardPath;
@@ -395,6 +426,8 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
   if(fs.existsSync(repoFile(root,acceptedRel)))throw Error('immutable accepted attempt cannot be overwritten');
   put(root,acceptedRel,{schemaVersion:'curveyield-lite-solo-accepted-unit-v1',unitId:u.unitId,
    campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
+   authorityDigest:directory.authorityDigest,phaseSequence:phase,phaseEpoch:request.phaseEpoch,
+   unitSpecRevision:u.unitSpecRevision,packetSha256:item.packetSha256,
    workerId:request.workerId,claimEpoch:state.claimEpoch,submissionSha256:digest,submission});
   state.status='ACCEPTED';state.acceptedSha256=digest;state.acceptedPath=acceptedRel;state.lastErrors=[];
   put(root,resultRel,{unitId:u.unitId,status:'ACCEPTED',submissionSha256:digest,acceptedPath:acceptedRel});
@@ -484,9 +517,16 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  if(phase===4&&queue.stage!=='RECONCILIATION'&&
   plan.units.filter(u=>['FLOW','ATTACK'].includes(u.kind)).every(u=>queue.units[u.unitId]?.status==='ACCEPTED'))
   finishDiscovery({root,campaign:campaignPath,directory,plan,queue,automationRoot});
- result={schemaVersion:'curveyield-lite-solo-unit-controller-result-v1',
-  requestId:request.requestId,campaignId:directory.campaignId,phaseSequence:phase,
-  ...result,phaseStatus:noWork(queue,plan)};
+ const nextPhaseStatus=noWork(queue,plan);
+ result={schemaVersion:UNIT_ARTIFACT_SCHEMAS.result,
+  requestId:request.requestId,campaignId:directory.campaignId,
+  campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
+  authorityDigest:directory.authorityDigest,phaseSequence:phase,phaseEpoch:queue.phaseEpoch,
+  ...result,
+  acceptedUnits:result.acceptedUnits??[],reworkUnits:result.reworkUnits??[],
+  staleUnits:result.staleUnits??[],unchangedUnits:result.unchangedUnits??[],
+  waitingUnits:result.waitingUnits??[],newlyEligibleUnits:result.newlyEligibleUnits??[],
+  nextPhaseStatus,phaseStatus:nextPhaseStatus};
  queue.revision++;
  if(!asArray(result.waitingUnits).length){queue.processedRequests[request.requestId]=result;
   queue.processedRequestHashes[request.requestId]=sha(request);}
