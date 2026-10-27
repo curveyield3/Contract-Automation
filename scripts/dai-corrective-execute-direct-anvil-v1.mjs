@@ -246,10 +246,11 @@ const groups={
     await reject(CAROL,'permit',old);
     await reject(CAROL,'permit',high);
     check('high-s / low-s replay does not consume again',await read('nonces',[holder]),nonce+1n);
-    await reject(CAROL,'permit',[...base,0,sig.r,sig.s]);
-    await reject(CAROL,'permit',[...base,29,sig.r,sig.s]);
-    await reject(CAROL,'permit',[...base,sig.v,'0x'+'0'.repeat(64),sig.s]);
-    await reject(CAROL,'permit',[...base,sig.v,sig.r,'0x'+'0'.repeat(64)]);
+    const currentPermit=[holder,spender,nonce+1n,0,true];
+    await reject(CAROL,'permit',[...currentPermit,0,sig.r,sig.s]);
+    await reject(CAROL,'permit',[...currentPermit,29,sig.r,sig.s]);
+    await reject(CAROL,'permit',[...currentPermit,sig.v,'0x'+'0'.repeat(64),sig.s]);
+    await reject(CAROL,'permit',[...currentPermit,sig.v,sig.r,'0x'+'0'.repeat(64)]);
     await reject(CAROL,'permit',[getAddress('0x'+'0'.repeat(40)),spender,nonce+1n,0,true,sig.v,sig.r,sig.s]);
     const wrongContract=await permitSign(HOLDER,holder,spender,nonce+1n,0,true,{...domain,verifyingContract:CAROL});
     await reject(CAROL,'permit',permitArgs(holder,spender,nonce+1n,0,true,wrongContract));
