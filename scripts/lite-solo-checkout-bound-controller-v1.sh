@@ -27,7 +27,8 @@ read_field() { printf '%s' "$receipt" | jq -er "$1"; }
 [ "$(read_field '.campaign.mode')" = LITE_SOLO ] || { echo 'not a Lite-Solo campaign' >&2; exit 1; }
 [ "$(read_field '.campaign.workspacePath')" = "$campaign_path" ] || { echo 'campaign path mismatch' >&2; exit 1; }
 homepage="$(read_field '.authority.homepagePath')"
-{ [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo/SKILL.md' ] || [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo-v2/SKILL.md' ] || [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo-v3/SKILL.md' ] || [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo-v4/SKILL.md' ] || [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo-v5/SKILL.md' ] || [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo-v6/SKILL.md' ]; } || { echo 'unexpected Lite-Solo authority root' >&2; exit 1; }
+{ [ "$homepage" = 'Audit Skill - Audit Preview/audit-preview-v1/SKILL.md' ]; } || { echo 'unexpected Audit Preview authority root' >&2; exit 1; }
+[ "$(read_field '.auditPreview.terminalPhase')" = "4" ] || { echo 'not an Audit Preview campaign' >&2; exit 1; }
 authority_root="${homepage%/SKILL.md}"
 authority_commit="$(read_field '.authority.authorityCommitSha')"
 authority_digest="$(read_field '.authority.liteSkillSha256')"

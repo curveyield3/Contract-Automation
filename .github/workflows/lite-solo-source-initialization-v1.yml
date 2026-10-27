@@ -1,4 +1,4 @@
-name: Lite-Solo Source Initialization v1
+name: Audit Preview Source Initialization v1
 on:
   workflow_dispatch:
     inputs:
@@ -10,14 +10,18 @@ on:
         description: Etherscan/KatanaScan URLs, one per line
         type: string
         required: false
+      permitted_contracts:
+        description: Maximum permitted contracts (positive integer; enforced in Phase 0)
+        type: number
+        required: true
       request_id:
         description: Stable idempotency identifier (defaults to workflow run ID)
         type: string
         required: false
   push:
-    branches: [main]
+    branches: [audit-preview-v1]
     paths:
-      - 'process/lite-solo-source-initialization/requests/*.json'
+      - 'process/audit-preview-source-initialization/requests/*.json'
 permissions:
   contents: write
   actions: write
@@ -40,26 +44,30 @@ jobs:
           RAW_SOURCE_URL: ${{ inputs.source_url }}
           RAW_SCAN_URLS: ${{ inputs.scan_urls }}
           RAW_REQUEST_ID: ${{ inputs.request_id }}
+          RAW_PERMITTED_CONTRACTS: ${{ inputs.permitted_contracts }}
           EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = main
           if [ "$EVENT_NAME" = push ]; then
-            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/lite-solo-source-initialization/requests/)
+            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- process/audit-preview-source-initialization/requests/)
             test "${#changed[@]}" -eq 1
             request="${changed[0]}"
-            [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]]
-            jq -e '.schemaVersion=="curveyield-lite-solo-source-request-v1" and .mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and (.sourceUrl|type=="string" and startswith("https://")) and (.scanUrls|type=="array" and length==0)' "$request" >/dev/null
+            [[ "$request" =~ ^process/audit-preview-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]]
+            jq -e '.schemaVersion=="curveyield-audit-preview-source-request-v1" and .product=="AUDIT_PREVIEW" and .mode=="LITE_SOLO" and (.permittedContracts|type=="number" and .==floor and .>=1) and .deliveryTransport=="DIRECT" and (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and (.sourceUrl|type=="string" and startswith("https://")) and (.scanUrls|type=="array" and length==0)' "$request" >/dev/null
+            permitted_contracts="$(jq -r .permittedContracts "$request")"
             source_url="$(jq -r .sourceUrl "$request")"
             scans="$(jq -c .scanUrls "$request")"
             request_id="$(jq -r .requestId "$request")"
           else
+            permitted_contracts="$RAW_PERMITTED_CONTRACTS"
             source_url="$RAW_SOURCE_URL"
             scans="$(printf '%s' "$RAW_SCAN_URLS" | jq -Rsc 'split("\n")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))')"
             request_id="${RAW_REQUEST_ID:-$GITHUB_RUN_ID}"
           fi
           [[ "$request_id" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$permitted_contracts" =~ ^[1-9][0-9]*$ ]] || { echo "::error::AUDIT_PREVIEW_INVALID_PERMIT"; exit 1; }
           [[ "$source_url" != *$'\n'* && "$source_url" != *$'\r'* ]]
           if [ -n "$source_url" ]; then [[ "$source_url" =~ ^https:// ]]; fi
           jq -e 'type=="array" and all(.[]; type=="string" and startswith("https://"))' <<<"$scans" >/dev/null
@@ -68,6 +76,7 @@ jobs:
             echo "source_url=$source_url"
             echo "scan_urls_json=$scans"
             echo "request_id=$request_id"
+            echo "permitted_contracts=$permitted_contracts"
           } >> "$GITHUB_OUTPUT"
       - name: Select Audit-Controller credential
         env:
@@ -83,8 +92,9 @@ jobs:
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
           SOURCE_URL: ${{ steps.request.outputs.source_url }}
           REQUEST_ID: ${{ steps.request.outputs.request_id }}
+          PERMITTED_CONTRACTS: ${{ steps.request.outputs.permitted_contracts }}
           SCAN_URLS: ${{ steps.request.outputs.scan_urls_json }}
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/lite-solo-source-initialization/run-v1.sh
+          bash scripts/audit-preview-source-initialization/run-v1.sh
