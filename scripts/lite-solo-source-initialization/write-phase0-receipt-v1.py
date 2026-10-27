@@ -86,7 +86,10 @@ directory={
   "sourceInitializationRequestId":e["REQUEST_ID"],
   "deliveryTransport":"DIRECT",
   "transportEpoch":0,
-  "agentModel":"ONE_PERSISTENT_AGENT",
+  "agentModel":"PARALLEL_WORKER_UNITS" if e["SKILL_RELEASE"]=="lite-solo-v4" else "ONE_PERSISTENT_AGENT",
+  "executionModel":"PARALLEL_WORKER_UNITS" if e["SKILL_RELEASE"]=="lite-solo-v4" else None,
+  "authorityRelease":e["SKILL_RELEASE"],
+  "authorityDigest":e["MANIFEST_SHA"],
   "agent":{"actorId":"lite-solo-agent"},
   "currentReceiptPath":receipt_path,"currentPhaseSequence":0,"currentReviewer":"phase0-automation",
   "status":"ACTIVE","updatedAt":e["CREATED_AT"]
