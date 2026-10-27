@@ -7,5 +7,5 @@
   "deliveryTransport": "DIRECT",
   "authorizePhase0Execution": true,
   "repairContext": "Minimally fixed compile-only named imports in v9; preserve original v9 r1 source and audit identity.",
-  "recoveryReason": "Retry same boosthub-contract-stack-v10-r1 after adding exact source-bound Vyper 0.4.3 compiler-AST structural analysis; preserve Slither Solidity findings and explicit unsupported Slither Vyper 0.4.3 coverage limitation; require Phase 4–6 semantic review."
+  "recoveryReason": "Retry same v10-r1 Phase0 after finalizer inventory completeness repair: byte-identical first-party BoostHub and interface aliases reuse source-bound compiler AST of canonical compiled paths. Preserve all accepted intelligence and Anvil deploy evidence; regenerate inventory and flow plan, then seal."
 }
