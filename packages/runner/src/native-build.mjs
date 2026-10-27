@@ -366,11 +366,13 @@ export async function compileRepoNativeHardhat({
 const FOUNDRY_NPM_PINS = Object.freeze({
   '@openzeppelin/contracts': '5.4.0',
   '@openzeppelin/contracts-upgradeable': '5.4.0',
+  '@openzeppelin-4/contracts': '4.9.6',
   '@morpho-org/morpho-blue': '1.0.0',
   '@uniswap/v3-core': '1.0.1'
 });
 const FOUNDRY_NPM_SCOPES = Object.freeze({
   '@openzeppelin/': ['@openzeppelin/contracts', '@openzeppelin/contracts-upgradeable'],
+  '@openzeppelin-4/': ['@openzeppelin-4/contracts'],
   '@morpho-org/morpho-blue/': ['@morpho-org/morpho-blue'],
   '@uniswap/v3-core/': ['@uniswap/v3-core']
 });
@@ -424,7 +426,7 @@ export async function installNativeFoundryDependencies({projectRoot,runCommand=r
     const hasLock=await exists(lock,fsApi);
     const command=hasLock
       ? ['300s','npm','ci','--ignore-scripts','--no-audit','--no-fund','--prefix',root]
-      : ['300s','npm','install','--ignore-scripts','--no-audit','--no-fund','--no-save','--package-lock=false','--prefix',root,...names.map(name=>name+'@'+FOUNDRY_NPM_PINS[name])];
+      : ['300s','npm','install','--ignore-scripts','--no-audit','--no-fund','--no-save','--package-lock=false','--prefix',root,...names.map(name=>name==='@openzeppelin-4/contracts'?name+'@npm:@openzeppelin/contracts@'+FOUNDRY_NPM_PINS[name]:name+'@'+FOUNDRY_NPM_PINS[name])];
     const result=await runCommand({command:'timeout',args:command,cwd:projectRoot});
     if(result?.exitCode!==0){
       const error=new Error('Foundry dependency installation failed: '+String(result?.stderr??result?.stdout??'').slice(-2000));
@@ -435,7 +437,7 @@ export async function installNativeFoundryDependencies({projectRoot,runCommand=r
       if(!await exists(packagePath,fsApi))throw new Error('Foundry dependency is still missing after installation: '+name);
       const content=await fsApi.readFile(packagePath);
       const meta=JSON.parse(content.toString('utf8'));
-      if(meta.name!==name)throw new Error('Foundry dependency name mismatch: '+name);
+      if(meta.name!==(name==='@openzeppelin-4/contracts'?'@openzeppelin/contracts':name))throw new Error('Foundry dependency name mismatch: '+name);
       if(!hasLock && meta.version!==FOUNDRY_NPM_PINS[name])
         throw new Error('Foundry dependency pin mismatch: '+name);
       installs.push({package:name,version:meta.version,packageManifestSha256:createHash('sha256').update(content).digest('hex'),
