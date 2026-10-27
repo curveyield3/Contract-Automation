@@ -450,6 +450,32 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
   const detected=await detectNativeFoundry(projectRoot,{fsApi});
   if(detected.system!=='foundry-native')throw new Error('Not an admitted native Foundry project');
   const dependencyInstall=await installNativeFoundryDependencies({projectRoot,runCommand,fsApi});
+  // Forge compiles .vy alongside Solidity, but requires the corresponding Vyper
+  // binary to be installed. Bind that version to the source's exact pragma.
+  const vyperPragmas=new Set();
+  async function scanVyperPragmas(directory){
+    for(const entry of await fsApi.readdir(directory,{withFileTypes:true})){
+      const absolute=path.join(directory,entry.name);
+      if(entry.isDirectory())await scanVyperPragmas(absolute);
+      else if(entry.isFile()&&entry.name.endsWith('.vy')){
+        const source=await fsApi.readFile(absolute,'utf8');
+        const pragma=source.match(/^\\s*#\\s*pragma\\s+version\\s+(\\d+\\.\\d+\\.\\d+)\\s*$/m)?.[1];
+        if(!pragma)throw new Error('Foundry Vyper source lacks an exact version pragma: '+path.relative(projectRoot,absolute));
+        vyperPragmas.add(pragma);
+      }
+    }
+  }
+  await scanVyperPragmas(path.join(projectRoot,detected.src));
+  if(vyperPragmas.size>1)throw new Error('Conflicting exact Vyper compiler versions in Foundry source tree');
+  if(vyperPragmas.size===1){
+    const version=[...vyperPragmas][0];
+    const install=await runCommand({command:'python3',args:['-m','pip','install','--disable-pip-version-check','--no-input',`vyper==${version}`],cwd:projectRoot});
+    if(install?.exitCode!==0)throw new Error('Exact source-bound Vyper installation failed: '+String(install?.stderr??install?.stdout??'').slice(-2000));
+    const probe=await runCommand({command:'vyper',args:['--version'],cwd:projectRoot});
+    if(probe?.exitCode!==0||!String(probe?.stdout??'').trim().startsWith(version))
+      throw new Error('Installed Vyper version does not match source pragma '+version);
+    dependencyInstall.push({package:'vyper',version,resolution:'SOURCE_PRAGMA',isolatedRunnerOnly:true});
+  }
   // Keep script/ and test/ in the frozen source and readiness inventory, but
   // do not feed executable scripts/cheatcodes to the production-contract build.
   const result=await runCommand({command:'timeout',args:['1500s','forge','build','--force','--build-info','--skip','script','--skip','test'],cwd:projectRoot});
