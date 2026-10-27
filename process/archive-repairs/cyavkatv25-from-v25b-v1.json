@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-archive-deployment-transplant-v1",
+  "target": "curveyield3/Audit-Controller:campaigns/cyavKATv25.zip",
+  "donor": "curveyield3/Audit-Controller:campaigns/cyavKATv25b.zip",
+  "expectedDonorSha256": "7c620ff30c79ceff532af3ad0977d184e66d76a4e00b600d61050799f5b9c8be",
+  "requestedChange": "Replace current v29 Foundry deployment script with donor unified Hardhat runner and required deployment support, preserve existing audited contract sources",
+  "launchFreshCampaignAfterSuccess": true
+}
