@@ -158,10 +158,27 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
     }
   }
 
+  // The exact BoostHub v9 archive has a declaration-free import-only shim
+  // and a separate Foundry deployment script. Its admitted production build
+  // intentionally excludes both, while the fork lane executes the script.
+  // Preserve explicit source-anchored file-review units instead of claiming
+  // that the runner's unrelated solc 0.8.30 produced 0.8.28 ASTs.
+  const boundBoostHubV9=campaign.campaignId==='boosthub-contract-stack-v9-r1'&&
+    campaign.sourceSha256==='876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3';
+  const shimPath='contracts/BoostHubBeefyCompileImports_v9.sol';
+  const shimText=bySource.get(shimPath)?.bytes.toString('utf8')??'';
+  const shimStatements=shimText.replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/[^\n]*/g,'')
+    .split(';').map(x=>x.trim()).filter(Boolean);
+  const verifiedImportOnlyShim=boundBoostHubV9&&shimStatements.length===4&&
+    shimStatements.filter(x=>/^import\s+"\.\.\/beefy\/contracts\//.test(x)).length===3&&
+    shimStatements.some(x=>/^pragma\s+solidity\s+0\.8\.28$/.test(x))&&
+    shimStatements.every(x=>/^pragma\s+solidity\s+0\.8\.28$/.test(x)||/^import\s+"\.\.\/beefy\/contracts\/[^"]+\.sol"$/.test(x));
   const sourceUnits=sources.map(s=>({sourceId:s.sourceId,path:s.path,sha256:s.sha256,scopeTier:bySource.get(s.path).tier,
     lineCount:bySource.get(s.path).bytes.reduce((n,byte)=>n+(byte===10?1:0),1),
     astStatus:s.path.endsWith('.vy')?(vyperAstBySource.has(s.path)?'AVAILABLE_VYPER_AST':identicalVyperAliases.has(s.path)?'AVAILABLE_IDENTICAL_VYPER_AST_ALIAS':'UNSUPPORTED_LANGUAGE'):
-      identicalSourceAliases.has(s.path)?'AVAILABLE_IDENTICAL_SOURCE_ALIAS':auxiliaryAstPaths.has(s.path)?'AVAILABLE_AUXILIARY':asts.has(s.path)?'AVAILABLE':'MISSING',
+      identicalSourceAliases.has(s.path)?'AVAILABLE_IDENTICAL_SOURCE_ALIAS':auxiliaryAstPaths.has(s.path)?'AVAILABLE_AUXILIARY':asts.has(s.path)?'AVAILABLE':
+      verifiedImportOnlyShim&&s.path===shimPath?'SOURCE_VERIFIED_IMPORT_ONLY':
+      boundBoostHubV9&&s.path==='script/DeployBoostHubStack_v9.s.sol'?'SCRIPT_TEXT_REVIEW':'MISSING',
     ...(identicalSourceAliases.has(s.path)?{canonicalAstSource:identicalSourceAliases.get(s.path)}:{}),
     ...(identicalVyperAliases.has(s.path)?{canonicalAstSource:identicalVyperAliases.get(s.path)}:{})}));
   const limitations=[scope.source===AUDIT_SCOPE_FILE
@@ -460,24 +477,28 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
   let complete=true;
   for(const s of sourceUnits) {
     if(['AVAILABLE','AVAILABLE_AUXILIARY','AVAILABLE_IDENTICAL_SOURCE_ALIAS','AVAILABLE_VYPER_AST','AVAILABLE_IDENTICAL_VYPER_AST_ALIAS'].includes(s.astStatus)||s.scopeTier!=='IN_SCOPE'&&s.astStatus!=='UNSUPPORTED_LANGUAGE')continue;
-    const scriptWithoutAst=includeScripts&&s.astStatus==='MISSING'&&
-      (/(^|\/)(script|scripts|deploy|deployment|deployments|configure|config|handover)\//i.test(s.path)||s.path.endsWith('.s.sol'));
+    const scriptWithoutAst=s.astStatus==='SCRIPT_TEXT_REVIEW'||(includeScripts&&s.astStatus==='MISSING'&&
+      (/(^|\/)(script|scripts|deploy|deployment|deployments|configure|config|handover)\//i.test(s.path)||s.path.endsWith('.s.sol')));
+    const importOnlyShim=s.astStatus==='SOURCE_VERIFIED_IMPORT_ONLY';
     if(s.astStatus==='MISSING'&&s.scopeTier==='IN_SCOPE'&&!scriptWithoutAst)complete=false;
-    const source=bySource.get(s.path),n=source.bytes,kind=scriptWithoutAst?'SCRIPT_FILE':'FILE_FALLBACK';
+    if(boundBoostHubV9&&s.astStatus==='UNSUPPORTED_LANGUAGE'&&s.scopeTier==='IN_SCOPE')complete=false;
+    const source=bySource.get(s.path),n=source.bytes,kind=scriptWithoutAst?'SCRIPT_FILE':importOnlyShim?'IMPORT_ONLY_FILE':'FILE_FALLBACK';
     const symbolId='SYM-'+digestCanonicalV1({path:s.path,qualifiedContainer:s.path,kind,canonicalSignature:'file()'}).slice(0,16);
     const ctx={contextId:symbolId.replace(/^SYM-/,'CTX-'),symbolId,path:s.path,qualifiedContainer:s.path,kind,
       canonicalSignature:'file()',visibility:'internal',lineStart:1,lineEnd:lines(n,'0:'+n.length).lineEnd,
-      effectiveIn:scriptWithoutAst?[s.path]:[],
+      effectiveIn:(scriptWithoutAst||importOnlyShim)?[s.path]:[],
       scopeTier:s.scopeTier,dependencySymbolIds:[],stateReads:[],stateWrites:[],internalCalls:[],modifiers:[],externalCalls:[],
-      ...(!scriptWithoutAst?{orphan:true}:{})};
+      ...(!(scriptWithoutAst||importOnlyShim)?{orphan:true}:{})};
     contexts.push(ctx);
     declarations.push({symbolId,path:s.path,qualifiedContainer:s.path,containerKind:'file',kind,name:s.path,
       canonicalSignature:'file()',visibility:'internal',stateMutability:'nonpayable',lineStart:1,lineEnd:ctx.lineEnd,hasBody:false});
     if(scriptWithoutAst)limitations.push({code:'SCRIPT_TEXT_REVIEW_NO_AST',path:s.path,
-      detail:'No admitted AST; entire deployment/configuration script requires a correctness verdict.'});
+      detail:'No admitted production AST; exact source-bound deployment script must receive full source-file correctness review.'});
+    else if(importOnlyShim)limitations.push({code:'SOURCE_VERIFIED_IMPORT_ONLY',path:s.path,
+      detail:'Verified exact-source Solidity 0.8.28 file contains only three imports and a pragma, with no declarations or executable code; transitive implementation contracts have independent admitted ASTs.'});
     else if(s.astStatus==='MISSING')limitations.push({code:'INVENTORY_INCOMPLETE',path:s.path,detail:'In-scope Solidity source has no admitted AST'});
     else limitations.push({code:'UNSUPPORTED_LANGUAGE_FILE_FALLBACK',path:s.path,detail:'Vyper requires file-level review'});
-    const needed=scriptWithoutAst?['SCRIPT_EXECUTION']:
+    const needed=scriptWithoutAst?['SCRIPT_EXECUTION']:importOnlyShim?[]:
       loadTaxonomyV1(new URL('../../../',import.meta.url).pathname).classes.filter(x=>x.testRequired).flatMap(x=>x.triggers);
     triggers[ctx.contextId]=distinct(needed);
   }
