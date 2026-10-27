@@ -103,9 +103,9 @@ permissions:
   id-token: write
 
 concurrency:
-  # WAKE owns the one shared ChatGPT browser state until delivery completes.
-  # WATCHDOG cannot run until WAKE releases this queue.
-  group: chatgpt-shared-browser-session-v1
+  # Serialize wake and watchdog only for the same durable session.
+  # Independent campaign chats have isolated browser processes and may run in parallel.
+  group: chatgpt-browser-session-${{ inputs.wake_id }}
   cancel-in-progress: false
 
 jobs:
