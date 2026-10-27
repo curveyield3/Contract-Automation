@@ -5,7 +5,6 @@ import { V7_POLICY } from './v7-policy.mjs';
 
 export const V26_QUALIFIED_CAPABILITIES_V1 = Object.freeze({
   requestExtension: 'configuration.v26-v1',
-  qualificationWorkflow: V7_POLICY.workflows.qualification,
   components: Object.freeze({
     'v26-result-components-v1': 'audit-v7-github-execution-evidence-v2',
     'v26-build-sbom-v1': 'audit-v7-build-sbom-v1',
@@ -29,7 +28,6 @@ export function buildRunnerManifestV2() {
     runnerRelease: V2_RUNNER_RELEASE,
     activeWorkflows: {
       execution: V7_POLICY.workflows.execution,
-      qualification: V7_POLICY.workflows.qualification,
       toolchainSetup: V7_POLICY.workflows.toolchainSetup,
     },
     toolchain: {
@@ -57,7 +55,6 @@ export function buildRunnerManifestV2() {
     },
     qualifiedCapabilities: {
       requestExtension: V26_QUALIFIED_CAPABILITIES_V1.requestExtension,
-      qualificationWorkflow: V26_QUALIFIED_CAPABILITIES_V1.qualificationWorkflow,
       components: { ...V26_QUALIFIED_CAPABILITIES_V1.components },
       recipes: [...V26_QUALIFIED_CAPABILITIES_V1.recipes],
     },
