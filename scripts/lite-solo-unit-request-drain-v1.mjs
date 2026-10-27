@@ -51,7 +51,17 @@ if(arg.mode!=='finalize'){
    results.push({requestId:request.requestId,status:prior.status});
    continue;
   }
-  const result=processUnitRequestV1({root,campaignPath,directory,request});
+  // Reject a request with the wrong immutable authority binding without blocking
+  // unrelated, correctly bound requests in this durable campaign backlog.
+  const result=request.authorityDigest===directory.authorityDigest
+   ?processUnitRequestV1({root,campaignPath,directory,request})
+   :{schemaVersion:'curveyield-lite-solo-unit-controller-result-v1',
+     requestId:request.requestId,campaignId:directory.campaignId,
+     campaignGenerationId:directory.campaignGenerationId,
+     sourceSha256:directory.sourceSha256,authorityDigest:directory.authorityDigest,
+     phaseSequence:phase,phaseEpoch:directory.unitPhaseEpoch,
+     status:'REJECTED_INVALID_AUTHORITY_BINDING',
+     error:'authority digest differs from bound campaign'};
   const resultRel=path.posix.join(campaignPath,'work/phase-'+String(phase).padStart(2,'0'),
    'units','controller','results','REQUEST_'+request.requestId+'_v1.json');
   const previous=fs.existsSync(repoFile(root,resultRel))?readJson(repoFile(root,resultRel)):null;
