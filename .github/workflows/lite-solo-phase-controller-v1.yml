@@ -137,7 +137,7 @@ jobs:
             .campaignId==$id and .workspacePath==$path and .mode=="LITE_SOLO" and
             .agent.actorId=="lite-solo-agent" and .deliveryTransport=="DIRECT" and
             .sourceSha256==$sha and .campaignGenerationId==$gen and
-            .currentAssignment.phaseSequence==$phase and .currentAssignment.status=="ACTIVE"
+            .currentAssignment.phaseSequence==$phase and (.currentAssignment.status=="ACTIVE" or .currentAssignment.status=="REWORK_REQUIRED")
           ' /tmp/lite-solo-campaign-directory.json >/dev/null
           if jq -e '.authorityRelease=="lite-solo-v4" and .currentAssignment.phaseSequence>=4 and .currentAssignment.phaseSequence<=6' /tmp/lite-solo-campaign-directory.json >/dev/null; then
             echo '::error::Use the v4 immutable unit ingress for Phases 4–6'; exit 1
