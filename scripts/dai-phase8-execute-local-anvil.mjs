@@ -11,7 +11,7 @@ const RUNTIME_SHA256 = '5ce810033426a017721777f241665c27bdd4663ca8a1c27558b4b372
 const SOURCE_COMMIT = 'b66ee2b336c949c3ecb0621307b9c188f8f81e89';
 const SOURCE_ARCHIVE_SHA256 = '1c384141058f50d53b9e58b89c0b83aa60bd1066406f017d177121de332705f2';
 const OBLIGATIONS=['BOB-0001','BOB-0002','BOB-0003','BOB-0004','BOB-0005','BOB-0007','BOB-0008'];
-const OUTPUT=path.resolve('process/dai-phase8-evidence/attempt-1');
+const OUTPUT=path.resolve('process/dai-phase8-evidence/attempt-'+String(process.env.DAI_EVIDENCE_ATTEMPT||'2'));
 const PROJECT=path.resolve('.dai-phase8-work');
 fs.mkdirSync(OUTPUT,{recursive:true});
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -64,8 +64,8 @@ try{
   const source=fs.readFileSync(sourceFile),harness=fs.readFileSync(harnessFile);
   evidence.source.soliditySha256=digest(source);
   evidence.runner.harnessSha256=digest(harness);
-  if(!source.toString('utf8').includes('contract Dai is LibNote')
-    ||!harness.toString('utf8').includes(DAI))throw Error('SOURCE_OR_HARNESS_IDENTITY_INVALID');
+  if(!/contract\s+Dai\s+is\s+LibNote/.test(source.toString('utf8'))
+    ||!harness.toString('utf8').toLowerCase().includes(DAI.toLowerCase()))throw Error('SOURCE_OR_HARNESS_IDENTITY_INVALID');
   session=await createPhase6MutableRpcSession({
     environment:process.env,frozenBlockNumber:BLOCK,frozenBlockHash:BLOCK_HASH,
     attestedTargets:[{address:DAI,qualifiedName:'Dai.sol:Dai',runtimeSha256:RUNTIME_SHA256}]
