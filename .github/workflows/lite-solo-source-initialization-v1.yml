@@ -14,56 +14,11 @@ on:
         description: Stable idempotency identifier (defaults to workflow run ID)
         type: string
         required: false
-      report_pdf:
-        description: Publish security audit PDF
-        type: boolean
-        default: true
+      withhold_roles:
+        description: Optional comma-separated public file roles to withhold
+        type: string
         required: false
-      audited_source:
-        description: Publish audited source ZIP
-        type: boolean
-        default: true
-        required: false
-      scope_summary:
-        description: Publish audited scope and exclusions
-        type: boolean
-        default: true
-        required: false
-      findings_remediation:
-        description: Publish findings and remediation
-        type: boolean
-        default: true
-        required: false
-      methodology_analysis:
-        description: Publish methodology and analysis
-        type: boolean
-        default: true
-        required: false
-      properties_hypotheses:
-        description: Publish security properties and hypotheses
-        type: boolean
-        default: true
-        required: false
-      execution_results:
-        description: Publish testing and execution results
-        type: boolean
-        default: true
-        required: false
-      architecture_dependencies:
-        description: Publish architecture and dependencies
-        type: boolean
-        default: true
-        required: false
-      residual_risks:
-        description: Publish residual risks and limitations
-        type: boolean
-        default: true
-        required: false
-      evidence_index:
-        description: Publish evidence index
-        type: boolean
-        default: true
-        required: false
+        default: ''
   push:
     branches: [main]
     paths:
