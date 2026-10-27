@@ -84,7 +84,7 @@ jobs:
             (.audit_controller_ref|type=="string" and length>0) and
             ((.resume_from_finalize // false)|type=="boolean") and
             ((.resume_from_deploy // false)|type=="boolean") and
-            (not ((.resume_from_finalize // false) and (.resume_from_deploy // false))) and
+            ((((.resume_from_finalize // false) and (.resume_from_deploy // false) | not))) and
             ((.bootstrap_workflow // "lite-phase0-bootstrap-v1.yml") as $workflow |
               $workflow=="lite-phase0-bootstrap-v1.yml" or
               $workflow=="lite-solo-phase0-bootstrap-v1.yml")
