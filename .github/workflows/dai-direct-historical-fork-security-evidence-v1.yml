@@ -80,5 +80,6 @@ jobs:
         with:
           name: dai-direct-historical-fork-evidence-${{ github.run_id }}
           path: .dai-direct-evidence/
-          if-no-files-found: warn
+          if-no-files-found: error
+          include-hidden-files: true
           retention-days: 30
