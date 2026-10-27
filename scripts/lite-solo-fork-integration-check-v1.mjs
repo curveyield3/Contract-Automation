@@ -19,7 +19,7 @@ const required=[
 for(const p of required)if(!fs.statSync(p,{throwIfNoEntry:false})?.isFile())throw Error('missing lite-solo component: '+p);
 const controller=fs.readFileSync(required[0],'utf8');
 const discovery=fs.readFileSync('packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs','utf8');
-const authority='Audit Skill - Lite-Solo Authority/lite-solo';
+const authority='Audit Skill - Lite-Solo Authority/lite-solo-v4';
 if(!controller.includes("const gatedMasterReview=false")||
  controller.includes('stageMasterReview({root,campaignPath')||
  controller.includes("if(reviewKind==='master'){")||
@@ -29,8 +29,14 @@ if(!controller.includes("const gatedMasterReview=false")||
  throw Error('controller master path or deterministic terminal behavior mismatch');
 if(!discovery.includes('sequentialSingleReviewer:')||!discovery.includes('lite-solo-phase-boundary/'))
  throw Error('discovery is not sequenced in a single chat');
-if(!fs.readFileSync('scripts/lib/lite-solo-phase-work-v1.mjs','utf8').includes("authorityRoot==='"+authority+"'"))
- throw Error('solo work forms are not using secure sharding');
+const phaseWork=fs.readFileSync('scripts/lib/lite-solo-phase-work-v1.mjs','utf8');
+const unitQueue=fs.readFileSync('scripts/lib/lite-solo-unit-queue-v1.mjs','utf8');
+if(!phaseWork.includes('validateBoundAuthorityV1')||
+   !phaseWork.includes('secureShardWorkFormV13')||
+   !unitQueue.includes("const AUTHORITY='"+authority+"'")||
+   !unitQueue.includes('secureShardWorkFormV13({root')||
+   !unitQueue.includes('retireFull:true'))
+ throw Error('solo work forms are not using receipt-bound secure sharding');
 if(!fs.readFileSync('scripts/lite-solo-phase0-finalize-v1.mjs','utf8').includes("mode:'LITE_SOLO'"))
  throw Error('solo source finalization does not bind campaign mode');
 const sourceWorkflow=fs.readFileSync('.github/workflows/lite-solo-source-initialization-v1.yml','utf8');
