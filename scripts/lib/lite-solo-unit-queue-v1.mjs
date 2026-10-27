@@ -164,6 +164,11 @@ export function createUnitPlanV1({root,campaignPath,directory,phase,automationRo
  queue.newlyEligibleUnitIds=plan.units.filter(x=>queue.units[x.unitId].status==='AVAILABLE').map(x=>x.unitId);
  publishPlan(root,campaignPath,phase,plan,queue);
  directory.unitQueueIndexPath=planRel(campaignPath,phase);
+ directory.unitQueueStatePath=queueRel(campaignPath,phase);
+ if(directory.currentAssignment?.phaseSequence===phase){
+  directory.currentAssignment.unitQueueIndexPath=directory.unitQueueIndexPath;
+  directory.currentAssignment.unitQueueStatePath=directory.unitQueueStatePath;
+ }
  directory.executionModel='PARALLEL_WORKER_UNITS';
  return queue;
 }
@@ -463,6 +468,11 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
   queue.processedRequestHashes[request.requestId]=sha(request);}
  publishPlan(root,campaignPath,phase,plan,queue);
  directory.unitQueueIndexPath=planRel(campaignPath,phase);
+ directory.unitQueueStatePath=queueRel(campaignPath,phase);
+ if(directory.currentAssignment?.phaseSequence===phase){
+  directory.currentAssignment.unitQueueIndexPath=directory.unitQueueIndexPath;
+  directory.currentAssignment.unitQueueStatePath=directory.unitQueueStatePath;
+ }
  return result;
 }
 export function finalizeReadinessV1({root,campaignPath,directory,phase}){
