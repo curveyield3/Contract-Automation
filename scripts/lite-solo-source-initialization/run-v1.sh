@@ -71,9 +71,8 @@ else
   git config user.name 'CurveYield Lite-Solo Source Initialization'
   git config user.email 'lite-solo@users.noreply.github.com'
   authority_parent='Audit Skill - Lite-Solo Authority'
-  mapfile -t available_authorities < <(find "$authority_parent" -mindepth 1 -maxdepth 1 -type d -name 'lite-solo-v[0-9]*' -print | LC_ALL=C sort -V)
-  test "${#available_authorities[@]}" -eq 1 || { echo "::error::Expected exactly one current Lite-Solo authority package; found ${#available_authorities[@]}" >&2; exit 1; }
-  authority_root="${available_authorities[0]}"
+  authority_root="$authority_parent/lite-solo-v4"
+  test -f "$authority_root/MANIFEST.json" || { echo '::error::Registered Lite-Solo v4 authority package is missing' >&2; exit 1; }
   authority_packages=("$authority_root")
   skill_home="$authority_root/SKILL.md"
   skill_repo_path='curveyield3/Audit-Controller/Audit Skill - Lite-Solo Authority'
