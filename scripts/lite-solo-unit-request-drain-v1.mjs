@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1,markFinalizationV1,statusUnitQueueV1,reopenAggregateDefectsV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {repoFile,readJson,writeJson} from './lib/lite-solo-phase-work-v1.mjs';
+import {refreshControllerPrefillDigest} from './lib/lite-solo-phase-prefill-v1.mjs';
 const arg=Object.fromEntries(process.argv.slice(2).reduce((out,s,i,a)=>{
  if(i%2===0){if(!s.startsWith('--')||a[i+1]===undefined)throw Error('invalid CLI parameters');
   out.push([s.slice(2),a[i+1]]);}return out;},[]));
@@ -52,6 +53,30 @@ if(arg.mode!=='finalize'){
   const recovery=reopenAggregateDefectsV1({root,campaignPath,phase,
     deficiencies:recorded.finalizeDetails.unmappedDeficiencies});
   if(recovery.reopenedUnits.length)changed=true;
+ }
+ // Recover the exact immutable v13 Phase-5 controller prefill after a failed
+ // boundary persisted transient request-binding annotations to the assignment.
+ // A worker never gets to choose this digest: recompute the locked, controller-
+ // indexed work form and require its sealed prefill digest to match its bytes.
+ if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
+    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
+    recorded.finalizeDetails.unmappedDeficiencies.length===2&&
+    recorded.finalizeDetails.unmappedDeficiencies.includes(
+      'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.')&&
+    recorded.finalizeDetails.unmappedDeficiencies.includes(
+      'Controller-prefilled/read-only fields were modified; restore the generated values before validation.')&&
+    Object.values(recorded.units??{}).every(x=>x.status==='ACCEPTED')){
+   // This existing assembler verifies the immutable controller-owned shard
+   // index and frozen base before reconstructing accepted semantic records.
+   assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase:5});
+   const form=readJson(repoFile(root,directory.currentAssignment.workFormPath));
+   const lockedDigest=form?.automationInputs?.controllerPrefillDigestSha256;
+   const recomputed=refreshControllerPrefillDigest(structuredClone(form));
+   if(!/^[a-f0-9]{64}$/.test(String(lockedDigest??''))||recomputed!==lockedDigest)
+     throw Error('Phase-5 locked controller prefill integrity failed; refusing digest recovery');
+   directory.currentAssignment.controllerPrefillDigestSha256=lockedDigest;
+   markFinalizationV1({root,campaignPath,phase:5,status:'NOT_STARTED',details:null});
+   changed=true;
  }
  // Retry a Phase-5 boundary previously blocked only by the canonical/temp-key
  // alias mismatch. The Phase-5 controller independently revalidates every
