@@ -89,7 +89,7 @@ jobs:
 
   fork-deploy-config:
     needs: [permit-source, intelligence]
-    if: ${{ always() && needs.permit-source.result == 'success' && !inputs.resume_from_finalize && (needs.intelligence.result == 'success' || inputs.resume_from_deploy) }}
+    if: ${{ always() && needs['permit-source'].result == 'success' && !inputs.resume_from_finalize && (needs.intelligence.result == 'success' || inputs.resume_from_deploy) }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
@@ -270,7 +270,7 @@ jobs:
 
   finalize-and-launch-reviewer1:
     needs: [permit-source, fork-deploy-config]
-    if: ${{ always() && needs.permit-source.result == 'success' && (needs.fork-deploy-config.result == 'success' || inputs.resume_from_finalize) }}
+    if: ${{ always() && needs['permit-source'].result == 'success' && (needs.fork-deploy-config.result == 'success' || inputs.resume_from_finalize) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
