@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-lite-solo-phase-boundary-request-v1",
+  "campaignId": "curveyield-dex-v17-source-r2",
+  "reviewKind": "phase",
+  "phaseSequence": 3,
+  "auditControllerRef": "main",
+  "attempt": 1
+}
