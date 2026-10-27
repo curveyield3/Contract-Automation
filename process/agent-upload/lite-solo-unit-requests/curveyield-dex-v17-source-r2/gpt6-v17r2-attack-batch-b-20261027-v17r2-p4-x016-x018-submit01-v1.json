@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "v17r2-p4-x016-x018-submit01-v1",
+  "operation": "SUBMIT",
+  "campaignId": "curveyield-dex-v17-source-r2",
+  "campaignGenerationId": "curveyield-dex-v17-source-r2-g1-20261027T104546Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-v17r2-attack-batch-b-20261027",
+  "sourceSha256": "bd0fc0a955c585ea0357feecb3d16caf9f48dd9ca5073a6a18948eab7c0f5e55",
+  "authorityDigest": "dc3452d8bf4c2a2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "X-016",
+      "claimEpoch": 1,
+      "claimToken": "a8d18e96-1e51-4a03-b52b-b4a9eec7b22f",
+      "packetSha256": "2c8bf62a2b6cde696bb479f00c46ce7815f3d3ab3247d97cbbd57e48a8bd6412",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/X-016/submissions/gpt6-v17r2-attack-batch-b-20261027/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "b6d88ec84257a00bc19df79c12abe0c75dac5860e0a2706ea3e92b760aa6cadc"
+    },
+    {
+      "unitId": "X-017",
+      "claimEpoch": 1,
+      "claimToken": "cedc3ff0-4688-4481-b741-b3bb04f80f49",
+      "packetSha256": "c76b53f298c2883fc9fe7516a99caf38ff3c13a2caba36fddab184f39e4dd83d",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/X-017/submissions/gpt6-v17r2-attack-batch-b-20261027/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "5ee1d8e83b7a5803619154411c6c845e2b6592fe0ef08302aa621a8814c815be"
+    },
+    {
+      "unitId": "X-018",
+      "claimEpoch": 1,
+      "claimToken": "c2761a64-5176-4eb0-a6e7-f6ddb064890a",
+      "packetSha256": "7c882935700e44ae95e1e9c63adc44ef7084f81fe008471a4ede1f321668c392",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/X-018/submissions/gpt6-v17r2-attack-batch-b-20261027/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "1a7e004a74ed2ef461d0b1b61be41e40d733388a46343042e9d73454fd71f2e7"
+    }
+  ]
+}
