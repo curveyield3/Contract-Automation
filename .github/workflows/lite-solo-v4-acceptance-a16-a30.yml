@@ -1,0 +1,35 @@
+name: Lite-Solo v4 Acceptance A16-A30 (isolated)
+on:
+  push:
+    branches: [test/lite-solo-v4-a16-a30]
+    paths:
+      - 'scripts/tests/lite-solo-v4-acceptance/RUN_A16_A30.md'
+      - '.github/workflows/lite-solo-v4-acceptance-a16-a30.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned dependencies
+        run: npm ci --force --ignore-scripts --no-audit --no-fund
+      - name: Execute remaining 15 local tests against actual v4 code
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p scripts/tests/lite-solo-v4-acceptance/output
+          node --test --test-concurrency=1 scripts/tests/lite-solo-v4-acceptance/cases/A16-A20.test.mjs scripts/tests/lite-solo-v4-acceptance/cases/A21-A25.test.mjs scripts/tests/lite-solo-v4-acceptance/cases/A26-A30.test.mjs
+      - name: Retain per-scenario results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lite-solo-v4-A16-A30-evidence
+          path: scripts/tests/lite-solo-v4-acceptance/output/
+          if-no-files-found: warn
