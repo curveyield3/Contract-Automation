@@ -669,7 +669,7 @@ async function main(){
   const literal=p=>'/'+p.replace(/[[\]*?!#\\]/g,'\\$&');
   const campaignPath=request.destination.campaignPath.replace(/\/+$/,'');
   const sparsePatterns=request.source.repository===request.destination.repository&&request.source.archivePath.startsWith(campaignPath+'/')
-    ? [literal(campaignPath)+'/','/Audit Skill - Lite-Solo Authority/lite-solo/','/Audit Skill - Lite-Solo Authority/lite-solo-v2/','/Audit Skill - Lite-Solo Authority/lite-solo-v3/','/Audit Skill - Lite-Solo Authority/lite-solo-v4/','/Audit Skill - Lite-Solo Authority/lite-solo-v5/','/Audit Skill - Lite-Solo Authority/lite-solo-v6/']
+    ? [literal(campaignPath)+'/','/Audit Skill - Lite-Solo Authority/lite-solo/','/Audit Skill - Lite-Solo Authority/lite-solo-v2/','/Audit Skill - Lite-Solo Authority/lite-solo-v3/','/Audit Skill - Lite-Solo Authority/lite-solo-v4/','/Audit Skill - Lite-Solo Authority/lite-solo-v5/','/Audit Skill - Audit Preview/audit-preview-v1/']
     : null;
   const checkout=await withProgressStage('exact-source-checkout',()=>checkoutExactSource({repository:request.source.repository,commit:request.source.commit,destination:checkoutRoot,sparsePatterns},{environment:process.env}));
   const archiveAbs=path.join(checkoutRoot,...request.source.archivePath.split('/'));
