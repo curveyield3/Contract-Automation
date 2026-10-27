@@ -236,7 +236,9 @@ export async function createPhase6MutableRpcSession({
   } catch (error) {
     if (engine) await engine.close().catch(() => {});
     return {
-      evidence: failedSessionEvidence('MUTABLE_RPC_PROBE_FAILURE', redactMutableRpcSecret(error?.message ?? String(error), upstreamUrl)),
+      evidence: failedSessionEvidence(
+        /^LIVE_FORK_[A-Z_]+/.exec(String(error?.message??error))?.[0]??'MUTABLE_RPC_PROBE_FAILURE',
+        redactMutableRpcSecret(error?.message??String(error),upstreamUrl)),
       runtime: null,
       async close() {},
     };
