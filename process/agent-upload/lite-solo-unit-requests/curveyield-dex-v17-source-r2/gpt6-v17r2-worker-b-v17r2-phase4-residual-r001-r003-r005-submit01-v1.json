@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "v17r2-phase4-residual-r001-r003-r005-submit01-v1",
+  "operation": "SUBMIT",
+  "campaignId": "curveyield-dex-v17-source-r2",
+  "campaignGenerationId": "curveyield-dex-v17-source-r2-g1-20261027T104546Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-v17r2-worker-b",
+  "sourceSha256": "bd0fc0a955c585ea0357feecb3d16caf9f48dd9ca5073a6a18948eab7c0f5e55",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "R-001",
+      "claimEpoch": 1,
+      "claimToken": "fd449813-2401-439d-bf74-882f14149f74",
+      "unitSpecRevision": 1,
+      "packetSha256": "9a91836425fd5fa933e291524b28754dadfb078000656aec0000ff873199b33f",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/R-001/submissions/gpt6-v17r2-worker-b/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "3bb09e1892bcc0594dfaed48742dffec763b5193c41464b96bffa2e45323b424"
+    },
+    {
+      "unitId": "R-003",
+      "claimEpoch": 1,
+      "claimToken": "d1eeacdf-7f36-46b5-9a51-01be532ba1b6",
+      "unitSpecRevision": 1,
+      "packetSha256": "d9f90a6e7ca1fee3e5c4fd859bbab89a784378058a47ba6f1aed94fb4b3cffff",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/R-003/submissions/gpt6-v17r2-worker-b/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "4c82a311d1088f25208a0dd566e4f77c66fad32483d5a60193322f477b3533a5"
+    },
+    {
+      "unitId": "R-005",
+      "claimEpoch": 1,
+      "claimToken": "591512ba-19eb-4d10-ad6b-ce2e758b3daf",
+      "unitSpecRevision": 1,
+      "packetSha256": "7637937854b938f741b8e4c9af58a23ec5f78ecd8114827f9d5b63739fe6fcf7",
+      "submissionPath": "campaigns/CurveYield DEX v17 Source r2/work/phase-04/units/R-005/submissions/gpt6-v17r2-worker-b/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "748b7a03072dc6bd38534c0e1b77a0c74e8e5380c68f6b3fe235dd7fd7b3d68b"
+    }
+  ]
+}
