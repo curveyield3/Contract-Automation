@@ -1,0 +1,113 @@
+name: DAI Corrective Controller Proof Ingest v1
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/agent-upload/dai-corrective-evidence/ingest/*.json'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: dai-corrective-controller-evidence-40598354432
+  cancel-in-progress: false
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Find exactly one immutable source-bound controller request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='process/agent-upload/dai-corrective-evidence/ingest'
+          before='${{ github.event.before }}'
+          if [[ "$before" =~ ^[0-9a-f]{40}$ && "$before" != 0000000000000000000000000000000000000000 ]]; then
+            mapfile -t changed < <(git diff --name-only "$before" "$GITHUB_SHA" -- "$root")
+          else
+            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root")
+          fi
+          [ "${{#changed[@]}" -eq 1 ] || { echo '::error::Exactly one controller proof request must change'; exit 1; }
+          request="${{changed[0]}"
+          [[ "$request" =~ ^process/agent-upload/dai-corrective-evidence/ingest/[A-Za-z0-9._-]+\.json$ ]]
+          jq -e '.schemaVersion=="dai-corrective-controller-proof-ingest-v1" and .runId==40598354432 and .artifactId==12776328669 and .allowedWriteScope=="CONTROLLER_PHASE5_EVIDENCE_ONLY"' "$request" >/dev/null
+          echo "path=$request" >> "$GITHUB_OUTPUT"
+      - name: Select authenticated private controller credential
+        shell: bash
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Authenticate immutable GitHub run and artifact, not worker assertions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_FILE: ${{ steps.request.outputs.path }}
+        run: |
+          set -euo pipefail
+          id="$(jq -er .runId "$REQUEST_FILE")"
+          artifact="$(jq -er .artifactId "$REQUEST_FILE")"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" > /tmp/dai-corrective-verified-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact" > /tmp/dai-corrective-verified-artifact.json
+          jq -e --argjson id "$id" --arg sha "$(jq -r .runnerCommit "$REQUEST_FILE")" \
+            '.id==$id and .status=="completed" and .conclusion=="success" and .head_sha==$sha and .repository.full_name=="curveyield3/Contract-Automation"' \
+            /tmp/dai-corrective-verified-run.json >/dev/null
+          jq -e --argjson artifact "$artifact" --arg sha "$(jq -r .runnerCommit "$REQUEST_FILE")" \
+            '.id==$artifact and .expired==false and .name==("dai-corrective-permit-security-evidence-"+$sha) and .size_in_bytes>0 and .size_in_bytes<1000000' \
+            /tmp/dai-corrective-verified-artifact.json >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > /tmp/dai-corrective-proof.zip
+          unzip -Z1 /tmp/dai-corrective-proof.zip > /tmp/dai-corrective-proof-names
+          test "$(wc -l < /tmp/dai-corrective-proof-names)" -eq 2
+          grep -Fxq 'BOB_EXECUTION_EVIDENCE_v1.json' /tmp/dai-corrective-proof-names
+          grep -Fxq 'ANVIL_RAW_RPC_TRANSCRIPT_v1.json' /tmp/dai-corrective-proof-names
+          mkdir -p /tmp/dai-corrective-proof
+          unzip -qq /tmp/dai-corrective-proof.zip -d /tmp/dai-corrective-proof
+      - name: Checkout controller-owned corrective campaign, not old audit receipts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          gh repo clone curveyield3/Audit-Controller .audit-controller -- --branch main --depth 1 --filter=blob:none --sparse
+          git -C .audit-controller sparse-checkout set --no-cone \
+            '/Audit Campaign Directory/campaigns/audit-preview-completion-live-ethereum-dai-6b175474-corrective.json' \
+            '/campaigns/audit-preview-completion-live-ethereum-dai-6b175474-corrective-r1/**'
+          test -s '.audit-controller/Audit Campaign Directory/campaigns/audit-preview-completion-live-ethereum-dai-6b175474-corrective.json'
+      - name: Controller independently validate and admit DAI machine evidence
+        shell: bash
+        env:
+          REQUEST_FILE: ${{ steps.request.outputs.path }}
+        run: |
+          set -euo pipefail
+          node scripts/dai-corrective-controller-proof-intake-v1.mjs \
+            .audit-controller "$REQUEST_FILE" \
+            /tmp/dai-corrective-verified-run.json \
+            /tmp/dai-corrective-verified-artifact.json \
+            /tmp/dai-corrective-proof
+      - name: Controller publishes only the corrective Phase-5 evidence folder
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git -C .audit-controller config user.name 'CurveYield Corrective Evidence Controller'
+          git -C .audit-controller config user.email 'curveyield-corrective-controller@users.noreply.github.com'
+          scope='campaigns/audit-preview-completion-live-ethereum-dai-6b175474-corrective-r1/controller/phase5-candidate-evidence/dai-fork-40598354432'
+          git -C .audit-controller add -- "$scope"
+          if git -C .audit-controller diff --cached --quiet; then
+            echo 'Controller evidence already accepted.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git -C .audit-controller commit -m 'audit(controller): accept authenticated corrective DAI eight-group local-fork proof'
+          for attempt in 1 2 3 4; do
+            if git -C .audit-controller push origin HEAD:main; then exit 0; fi
+            git -C .audit-controller fetch origin main
+            git -C .audit-controller rebase origin/main
+          done
+          exit 1
