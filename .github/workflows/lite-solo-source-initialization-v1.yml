@@ -156,7 +156,7 @@ jobs:
             source_url="$(jq -r .sourceUrl "$request")"
             scans="$(jq -c .scanUrls "$request")"
             request_id="$(jq -r .requestId "$request")"
-            publish_files="$(jq -c 'if has("publishFiles") then .publishFiles else "__ABSENT__" end' "$request")"
+            publish_files="$(jq -c 'if has("publishFiles") then .publishFiles else {report_pdf:true,audited_source:true,scope_summary:true,findings_remediation:true,methodology_analysis:true,properties_hypotheses:true,execution_results:true,architecture_dependencies:true,residual_risks:true,evidence_index:true} end' "$request")"
           else
             source_url="$RAW_SOURCE_URL"
             scans="$(printf '%s' "$RAW_SCAN_URLS" | jq -Rsc 'split("\n")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))')"
