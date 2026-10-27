@@ -126,6 +126,12 @@ export function validateWorkForm(schema,form,{structuralOnly=false}={}){
           if(schema.phase===3&&stepKey==='step-2'&&field.name==='customValidationObligations'&&
              i===0&&v.length>1&&item==='NONE_IDENTIFIED'&&
              v.slice(1).every(x=>x&&typeof x==='object'&&!Array.isArray(x)))continue;
+          // Phase 4–6 append units preserve a controller-prefilled negative
+          // original slot, while separate immutable APPEND entries add records.
+          // The unit owner validates the sentinel against its exact frozen slot.
+          if(structuralOnly&&[4,5,6].includes(schema.phase)&&i===0&&v.length>1&&
+             typeof item==='string'&&EXPLICIT_NEGATIVES.has(item)&&
+             v.slice(1).every(x=>x&&typeof x==='object'&&!Array.isArray(x)))continue;
           if(!item||typeof item!=='object'||Array.isArray(item)){deficiencies.push(p+'['+i+'] must be an object or explicit negative sentinel');continue;}
           for(const k of field.itemRequiredFields??[]){
             const member=item[k],fp=p+'['+i+'].'+k;
