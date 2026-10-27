@@ -79,9 +79,16 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
     seal={status:'NOT_SEALED',phase:seq,envelopeStatus:envelope.status,rework:reopened};
    }
   }catch(error){
-   // Do not erase accepted siblings or mark a failed security gate as PASS.
-   markFinalizationV1({root,campaignPath,phase:seq,status:'BLOCKED',details:{error:String(error.stderr??error.message??error).slice(0,1800)}});
-   seal={status:'BLOCKED',phase:seq,error:String(error.stderr??error.message??error).slice(0,1800)};
+   // Reopen only the accountable source unit(s) on an aggregate schema failure.
+   // Other execution/integrity failures stay visible as genuine phase blockers.
+   const reason=String(error.stderr??error.message??error).slice(0,1800);
+   const prefix='aggregate validation blocked: ';
+   const rework=reason.startsWith(prefix)
+    ?reopenAggregateDefectsV1({root,campaignPath,phase:seq,
+      deficiencies:reason.slice(prefix.length).split('; ').filter(Boolean)})
+    :null;
+   if(!rework)markFinalizationV1({root,campaignPath,phase:seq,status:'BLOCKED',details:{error:reason}});
+   seal={status:rework?.reopenedUnits?.length?'REWORK_REQUIRED':'BLOCKED',phase:seq,error:reason,rework};
   }
  }
 }
