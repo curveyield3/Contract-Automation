@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "dai-corrective-historical-anvil-request-v1",
+  "requestId": "dai-corrective-permit-ward-attempt02",
+  "campaignId": "audit-preview-completion-live-ethereum-dai-6b175474-corrective-r1",
+  "sourceSha256": "1c384141058f50d53b9e58b89c0b83aa60bd1066406f017d177121de332705f2",
+  "forkBlockNumber": 26283885,
+  "chainId": 1,
+  "targetIds": [
+    "BOB-0001",
+    "BOB-0002",
+    "BOB-0003",
+    "BOB-0004",
+    "BOB-0005",
+    "BOB-0007",
+    "BOB-0008",
+    "CP-DAI-PERMIT-001"
+  ],
+  "upstreamWritesAllowed": false,
+  "qualificationsRequired": false
+}
