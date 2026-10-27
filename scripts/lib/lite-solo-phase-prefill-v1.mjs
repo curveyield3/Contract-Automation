@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {detectionPolicyForAuthorityV1} from '../../packages/github-native-sim/src/adr-policy-v1.mjs';
+import {classifyDeploymentExecutionV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {boundReviewerForPhaseV1 as originalReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
 const boundReviewerForPhaseV1=({authorityRoot,...params})=>[ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot)?'lite-solo-agent':originalReviewerForPhaseV1({authorityRoot,...params});
 
@@ -265,7 +266,32 @@ function economicScaffold(si,current){
 
 function deployAssessmentScaffold(root,campaignPath){
   const ev=readJsonIf(repoFile(root,path.posix.join(campaignPath,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json')))??{};
+  const classification=classifyDeploymentExecutionV1({execution:ev});
   const rows=[];let n=1;
+  if(classification.mode==='LIVE_DEPLOYED_FORK'){
+    for(const target of classification.targets){
+      rows.push({
+        componentOrAction:'EXISTING_LIVE_FORK_TARGET '+(target.qualifiedName??'contract')+' '+target.address,
+        executionEvidenceRef:classification.evidenceRef,
+        observedState:classification.status+'; historic block '+classification.blockNumber+'; source-bound mutable Anvil execution still required',
+        securityInterpretation:'<REQUIRED>',
+        contradictionOrNone:'<REQUIRED>',
+        limitationOrNone:'<REQUIRED>',
+        automationOwnedFields:['componentOrAction','executionEvidenceRef','observedState']
+      }); n++;
+    }
+    if(!rows.length){
+      rows.push({
+        componentOrAction:'LIVE_FORK_TARGET_ATTESTATION_REQUIRED',
+        executionEvidenceRef:classification.evidenceRef,
+        observedState:classification.status,
+        securityInterpretation:'<REQUIRED>',
+        contradictionOrNone:'<REQUIRED>',
+        limitationOrNone:'<REQUIRED>',
+        automationOwnedFields:['componentOrAction','executionEvidenceRef','observedState']
+      }); n++;
+    }
+  }
   for(const a of ev.attempts??[]){
     rows.push({
       componentOrAction:a.script??a.action??'PHASE0_DEPLOY_CONFIG_ACTION_'+n,
