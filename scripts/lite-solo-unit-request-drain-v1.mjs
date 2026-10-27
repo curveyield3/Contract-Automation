@@ -48,6 +48,25 @@ if(arg.mode!=='finalize'){
   markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
   changed=true;
  }
+ // Controller-only retry after a verified semantic shard limit increase.
+ // The size error must be exact and all original units already ACCEPTED; a
+ // worker request cannot set FINALIZE or mutate any accepted snapshot.
+ if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
+    /^v13 shard exceeds authorized bound: shard-[0-9]{4}_v1\\.json$/.test(
+      String(recorded.finalizeDetails?.error??''))&&
+    Object.keys(recorded.units??{}).length>0&&
+    Object.values(recorded.units).every(unit=>unit.status==='ACCEPTED')){
+  const shardName=recorded.finalizeDetails.error.split(': ').at(-1);
+  const shardPath=path.posix.join(
+    path.posix.dirname(directory.currentAssignment.workShardIndexPath),shardName);
+  // Only a shard that now fits 100 KiB may clear its prior size blocker.
+  // secureRestoreWorkFormV13 still revalidates EVERY shard at finalize.
+  if(fs.statSync(repoFile(root,shardPath)).size<=100*1024){
+   markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
+   changed=true;
+  }
+ }
+
  if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
     Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
     recorded.finalizeDetails.unmappedDeficiencies.length){
