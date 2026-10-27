@@ -176,7 +176,7 @@ try {
 
 // v3 cannot promote an absent or incomplete source-review inventory to a
 // completed discovery: Phase 4 has to be generated from real source contexts.
-if(['lite-solo-v3','lite-solo-v4','lite-solo-v5'].includes(receipt.authority?.liteRelease)){
+if(['lite-solo-v3','lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(receipt.authority?.liteRelease)){
   const reviewRoot=path.join(campaignRoot,'evidence/review-inventory');
   const inventory=read(required(path.join(reviewRoot,'REVIEW_INVENTORY_v1.json'),'complete source review inventory'));
   const facts=read(required(path.join(reviewRoot,'SYSTEM_FACTS_v1.json'),'system facts'));
@@ -221,7 +221,7 @@ const directory=read(required(directoryPath,'Audit Campaign Directory entry'));
 if(directory.campaignId!==receipt.campaign.campaignId) throw new Error('campaign directory identity mismatch');
 const sealedPhase0Receipt=rel(controllerRoot,receiptPath);
 const authorityRoot=path.posix.dirname(receipt.authority.homepagePath);
-if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5' ].includes(authorityRoot)||receipt.authority.liteRelease!==(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v5'?'lite-solo-v5':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v4'?'lite-solo-v4':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v3'?'lite-solo-v3':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v2'?'lite-solo-v2':'lite-solo-v1'))throw new Error('lite-solo authority identity mismatch');
+if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot)||receipt.authority.liteRelease!==(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v6'?'lite-solo-v6':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v5'?'lite-solo-v5':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v4'?'lite-solo-v4':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v3'?'lite-solo-v3':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v2'?'lite-solo-v2':'lite-solo-v1'))throw new Error('lite-solo authority identity mismatch');
 if(directory.mode!=='LITE_SOLO'||directory.agent?.actorId!=='lite-solo-agent'||directory.deliveryTransport!=='DIRECT'||directory.agent?.chatUrl!=null)throw new Error('lite-solo Phase-0 directory identity mismatch');
 const assignment=preparePhaseWork({
   root:controllerRoot,

@@ -123,11 +123,11 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
 }
 function receiptRef(root,campaignPath,rel,role){return {role,path:path.posix.relative(campaignPath,rel),sha256:shaFile(repoFile(root,rel))};}
 function assignmentReviewer(sequence,authorityRoot=null,root=null){
- if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5' ].includes(authorityRoot))throw new Error('lite-solo assignment authority mismatch');
+ if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot))throw new Error('lite-solo assignment authority mismatch');
  return 'lite-solo-agent';
 }
 function isFreshBoundary(next,authorityRoot=null,controllerRoot=null){
- if([ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5' ].includes(authorityRoot))return false;
+ if([ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot))return false;
  if(controllerRoot&&isReassignedV13AuthorityV1({root:controllerRoot,authorityRoot}))return [4,5,8].includes(next);
  return isV13AuthorityV1(authorityRoot)?[2,5,8].includes(next):[2,6,8].includes(next);
 }
@@ -771,8 +771,8 @@ if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does n
 if(directory.mode!=='LITE_SOLO'||directory.agentModel!=='ONE_PERSISTENT_AGENT'||directory.agent?.actorId!=='lite-solo-agent')
  throw new Error('not an admitted lite-solo single-actor campaign');
 if(directory.pendingMasterReview||directory.masterReview||directory.lastAcceptedMasterReview||directory.testExecutor)throw new Error('legacy master/executor state in lite-solo campaign');
-if(directory.skillAuthority?.current?.release && !['lite-solo-v1','lite-solo-v2','lite-solo-v3','lite-solo-v4','lite-solo-v5'].includes(directory.skillAuthority.current.release))throw new Error('lite-solo bound release mismatch');
-const phase5OwnerDeferral=!['Audit Skill - Lite-Solo Authority/lite-solo-v3/','Audit Skill - Lite-Solo Authority/lite-solo-v4/','Audit Skill - Lite-Solo Authority/lite-solo-v5/'].some(prefix=>directory.currentAssignment?.workSchemaPath?.startsWith(prefix)) && [5,6,8,10].includes(sequence)
+if(directory.skillAuthority?.current?.release && !['lite-solo-v1','lite-solo-v2','lite-solo-v3','lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(directory.skillAuthority.current.release))throw new Error('lite-solo bound release mismatch');
+const phase5OwnerDeferral=!['Audit Skill - Lite-Solo Authority/lite-solo-v3/','Audit Skill - Lite-Solo Authority/lite-solo-v4/','Audit Skill - Lite-Solo Authority/lite-solo-v5/','Audit Skill - Lite-Solo Authority/lite-solo-v6/'].some(prefix=>directory.currentAssignment?.workSchemaPath?.startsWith(prefix)) && [5,6,8,10].includes(sequence)
   ?inspectPhase5OwnerEvidenceDeferralV1({controllerRoot:root,campaignPath,campaignId:directory.campaignId,sourceSha256:directory.sourceSha256})
   :null;
 const authorityReceiptPath=directory.lastSealedReceiptPath??directory.currentAssignment?.predecessorReceiptPath;
@@ -838,7 +838,7 @@ if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current as
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'predecessor sealed receipt'));
 const authorityRoot=authorityRootFromReceipt(predecessor);
 const loaded=loadPhaseSchema(root,authorityRoot,sequence); const schema=loaded.schema;
-if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5' ].includes(authorityRoot)||predecessor.authority?.liteRelease!==(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v5'?'lite-solo-v5':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v4'?'lite-solo-v4':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v3'?'lite-solo-v3':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v2'?'lite-solo-v2':'lite-solo-v1')||assignment.reviewer!=='lite-solo-agent')
+if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot)||predecessor.authority?.liteRelease!==(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v6'?'lite-solo-v6':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v5'?'lite-solo-v5':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v4'?'lite-solo-v4':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v3'?'lite-solo-v3':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v2'?'lite-solo-v2':'lite-solo-v1')||assignment.reviewer!=='lite-solo-agent')
  throw new Error('lite-solo predecessor or assignment authority mismatch');
 if(assignment?.status==='WAITING_FOR_SUCCESSOR_AGENT')throw new Error('lite-solo cannot require reviewer handoff');
 const gatedMasterReview=false; // lite-solo never stages master acceptance
@@ -1052,8 +1052,8 @@ if(deficiencies.length){
   process.exit(0);
 }
 
-// Historical v1/v2 campaigns retain their gate; v3/v4 proceed via source-bound execution without a separate approval.
-if(sequence===5 && !['Audit Skill - Lite-Solo Authority/lite-solo-v3','Audit Skill - Lite-Solo Authority/lite-solo-v4','Audit Skill - Lite-Solo Authority/lite-solo-v5'].includes(authorityRoot) && !(directory.machineExecutionAuthorization?.status==='APPROVED' &&
+// Historical v1/v2 campaigns retain their gate; v3–v6 proceed via source-bound execution without a separate approval.
+if(sequence===5 && !['Audit Skill - Lite-Solo Authority/lite-solo-v3','Audit Skill - Lite-Solo Authority/lite-solo-v4','Audit Skill - Lite-Solo Authority/lite-solo-v5','Audit Skill - Lite-Solo Authority/lite-solo-v6'].includes(authorityRoot) && !(directory.machineExecutionAuthorization?.status==='APPROVED' &&
   directory.machineExecutionAuthorization?.sourceSha256===directory.sourceSha256 &&
   directory.machineExecutionAuthorization?.scope==='PHASE5_TARGET_EXECUTION'))
  throw new Error('LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: Phase 5 machine execution has no exact human-approved source-bound authorization.');
