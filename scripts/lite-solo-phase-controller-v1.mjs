@@ -914,6 +914,11 @@ try{
 }
 
 function persistReviewerReworkShardsV1(){
+  // Unit-controller snapshots and the frozen per-unit plan own v4 Phase 4-6
+  // reconciliation. Re-sharding the assembled work form on a failed boundary
+  // would silently promote APPEND rows into mandatory fixed rows, corrupting
+  // the controller-owned v13 index and preventing safe reassembly on retry.
+  if(process.env.LITE_SOLO_V4_FINALIZE==='1'&&[4,5,6].includes(sequence))return;
   // A failed integrity check must never re-seal a stale or corrupt agent shard.
   if(workShardIntegrityFailed)return;
   if(!assignment.workShardIndexPath)return;
