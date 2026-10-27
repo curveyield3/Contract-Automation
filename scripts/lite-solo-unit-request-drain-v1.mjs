@@ -108,6 +108,13 @@ let ready=false,seal=null;
 if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
  const gate=finalizeReadinessV1Safe(root,campaignPath,directory,directory.currentAssignment.phaseSequence);
  ready=gate.ready;
+ // The GitHub workflow runs Phase-5 preflight between drain and finalize.
+ // Assemble all immutable accepted target rows *before* that preflight, so
+ // it never reads stale <REQUIRED> placeholders from reviewer work shards.
+ // This is the existing authenticated unit assembler, not another validator.
+ if(arg.mode==='drain'&&ready&&directory.currentAssignment.phaseSequence===5){
+  assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase:5});
+ }
  if(arg.mode==='finalize'&&ready){
   const seq=directory.currentAssignment.phaseSequence;
   // Existing work-form controller, not a second parallel validation implementation.
