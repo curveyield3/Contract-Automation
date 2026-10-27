@@ -86,8 +86,57 @@ function assertPlan(queue,plan){
  for(const k of ['campaignId','campaignGenerationId','phaseSequence','phaseEpoch','sourceSha256','authorityDigest','unitSpecRevision'])
   if(queue[k]!==plan[k])throw Error('unit plan/queue identity differs: '+k);
 }
+function readPlan(root,campaign,phase){
+ const index=read(root,planRel(campaign,phase));
+ if(index.schemaVersion!=='curveyield-lite-solo-unit-plan-v1'||!Array.isArray(index.pages))
+  throw Error('unrecognized or unpaged v4 unit plan');
+ const units=[];
+ for(const p of index.pages){
+  const raw=fs.readFileSync(repoFile(root,p.path));
+  if(hex(raw)!==p.sha256||raw.length>32768)throw Error('unit plan page digest/size mismatch: '+p.path);
+  const data=JSON.parse(raw.toString('utf8'));
+  for(const u of data.units){
+   if(u.initialValueRef){
+    const rawValue=fs.readFileSync(repoFile(root,u.initialValueRef));
+    if(hex(rawValue)!==u.initialValueSha256)throw Error('unit prefill digest mismatch');
+    u.initialValue=JSON.parse(rawValue.toString('utf8')).value;
+   }
+   units.push(u);
+  }
+ }
+ if(units.length!==index.unitCount)throw Error('missing unit plan pages');
+ const ownership={};
+ for(const u of units)if(u.path&&Number.isInteger(u.recordIndex))
+  ownership[dot([...u.path,String(u.recordIndex)])]=u.unitId;
+ return {...index,units,recordOwnership:ownership};
+}
 function publishPlan(root,campaign,phase,plan,queue){
- assertPlan(queue,plan);put(root,planRel(campaign,phase),plan);put(root,queueRel(campaign,phase),queue);
+ assertPlan(queue,plan);
+ const planDir=path.posix.join(rootOf(campaign,phase),'plan');
+ const pages=[];let batch=[];
+ const flush=()=>{
+  if(!batch.length)return;
+  const rel=path.posix.join(planDir,'UNIT_PLAN_PAGE_'+String(pages.length+1).padStart(4,'0')+'_v1.json');
+  const payload={schemaVersion:'curveyield-lite-solo-unit-plan-page-v1',units:batch};
+  const raw=pretty(payload);
+  if(Buffer.byteLength(raw)>32768)throw Error('unit plan page exceeds 32 KiB');
+  put(root,rel,payload);pages.push({path:rel,sha256:hex(Buffer.from(raw)),count:batch.length});batch=[];
+ };
+ for(const unit of plan.units){
+  const u=clone(unit);
+  if(Buffer.byteLength(pretty(u))>12000&&u.initialValue!==undefined){
+   const rel=path.posix.join(unitBase(campaign,phase,u.unitId),'UNIT_PREFILL_v1.json');
+   const value={value:u.initialValue};put(root,rel,value);
+   u.initialValueRef=rel;u.initialValueSha256=sha(value);delete u.initialValue;
+  }
+  const trial={schemaVersion:'curveyield-lite-solo-unit-plan-page-v1',units:[...batch,u]};
+  if(batch.length&&Buffer.byteLength(pretty(trial))>30000)flush();
+  batch.push(u);
+ }
+ flush();
+ const {units,recordOwnership,...metadata}=plan;
+ put(root,planRel(campaign,phase),{...metadata,unitCount:units.length,pages});
+ put(root,queueRel(campaign,phase),queue);
 }
 export function createUnitPlanV1({root,campaignPath,directory,phase,automationRoot=process.cwd()}){
  assertV4(directory,phase);
@@ -389,7 +438,7 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  const phase=request.phaseSequence;validateRequest(request,directory,phase);
  let queue=maybe(root,queueRel(campaignPath,phase));
  if(!queue)queue=createUnitPlanV1({root,campaignPath,directory,phase,automationRoot});
- const plan=read(root,planRel(campaignPath,phase));assertPlan(queue,plan);
+ const plan=readPlan(root,campaignPath,phase);assertPlan(queue,plan);
  if(queue.processedRequests[request.requestId]){
   if(queue.processedRequestHashes?.[request.requestId]!==sha(request))throw Error('processed request ID reused with different content');
   return queue.processedRequests[request.requestId];
@@ -414,7 +463,7 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
 }
 export function finalizeReadinessV1({root,campaignPath,directory,phase}){
  assertV4(directory,phase);
- const plan=read(root,planRel(campaignPath,phase)),queue=read(root,queueRel(campaignPath,phase));
+ const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
  assertPlan(queue,plan);
  if(phase===4&&queue.stage!=='RECONCILIATION')return {ready:false,reason:'discovery and reconciliation not complete'};
  const pending=plan.units.filter(u=>queue.units[u.unitId]?.status!=='ACCEPTED');
@@ -455,7 +504,7 @@ export function markFinalizationV1({root,campaignPath,phase,status,details=null}
  queue.revision++;put(root,queueRel(campaignPath,phase),queue);
 }
 export function statusUnitQueueV1({root,campaignPath,phase}){
- const plan=maybe(root,planRel(campaignPath,phase)),queue=maybe(root,queueRel(campaignPath,phase));
+ const plan=maybe(root,planRel(campaignPath,phase))?readPlan(root,campaignPath,phase):null,queue=maybe(root,queueRel(campaignPath,phase));
  if(!plan||!queue)return null;
  const counts={},workers=new Set();
  for(const [id,s] of Object.entries(queue.units)){counts[s.status]=(counts[s.status]??0)+1;if(s.workerId)workers.add(s.workerId);}
@@ -464,7 +513,7 @@ export function statusUnitQueueV1({root,campaignPath,phase}){
 }
 
 export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[]}){
- const plan=read(root,planRel(campaignPath,phase)),queue=read(root,queueRel(campaignPath,phase));
+ const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
  const reopened=[],unmapped=[];
  for(const entry of deficiencies){
   const message=typeof entry==='string'?entry:JSON.stringify(entry);
