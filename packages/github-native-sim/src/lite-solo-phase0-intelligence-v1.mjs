@@ -280,7 +280,7 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
   const compilationUnits=Array.isArray(build?.compilationUnits)?build.compilationUnits.filter(Boolean):[];
   if(compilationUnits.length<=1){
     const exportInfo=await writeCryticCompileExport({projectRoot,build,outDir:path.join(projectRoot,'.audit-slither-export')});
-    const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies','--fail-none'],cwd:projectRoot});
+    const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--compile-force-framework','standard','--json','-','--exclude-dependencies','--fail-none'],cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
     return{exportInfo,raw,parsed,success:parsed?.success===true};
   }
@@ -310,7 +310,7 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
     totalSourceUnits+=exportInfo.sourceUnitCount??0;
     totalContracts+=exportInfo.contractCount??0;
     const target=vyperSources.length===1?exportInfo.sourcePath:exportInfo.exportPath;
-    const slitherArgs=vyperSources.length===1?[target,'--compile-force-framework','vyper','--json','-','--exclude-dependencies','--fail-none']:[target,'--json','-','--exclude-dependencies','--fail-none'];
+    const slitherArgs=vyperSources.length===1?[target,'--compile-force-framework','vyper','--json','-','--exclude-dependencies','--fail-none']:[target,'--compile-force-framework','standard','--json','-','--exclude-dependencies','--fail-none'];
     const raw=await runProcess({command:'slither',args:slitherArgs,cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
     if(parsed?.success!==true && !String(raw.stdout??'').trim() && !String(raw.stderr??'').trim()){
