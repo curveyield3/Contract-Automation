@@ -378,7 +378,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   }
   let complete=true;
   for(const s of sourceUnits) {
-    if(['AVAILABLE','AVAILABLE_AUXILIARY'].includes(s.astStatus)||s.scopeTier!=='IN_SCOPE'&&s.astStatus!=='UNSUPPORTED_LANGUAGE')continue;
+    if(['AVAILABLE','AVAILABLE_AUXILIARY','AVAILABLE_IDENTICAL_SOURCE_ALIAS'].includes(s.astStatus)||s.scopeTier!=='IN_SCOPE'&&s.astStatus!=='UNSUPPORTED_LANGUAGE')continue;
     const scriptWithoutAst=includeScripts&&s.astStatus==='MISSING'&&
       (/(^|\/)(script|scripts|deploy|deployment|deployments|configure|config|handover)\//i.test(s.path)||s.path.endsWith('.s.sol'));
     if(s.astStatus==='MISSING'&&s.scopeTier==='IN_SCOPE'&&!scriptWithoutAst)complete=false;
