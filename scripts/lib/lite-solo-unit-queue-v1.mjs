@@ -468,7 +468,8 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  if(request.operation==='CLAIM')result=handleClaim({root,campaign:campaignPath,phase,queue,plan,request});
  else if(request.operation==='SUBMIT')result=handleSubmit({root,campaign:campaignPath,phase,queue,plan,request,directory});
  else if(request.operation==='RELEASE')result=handleRelease({queue,plan,request});
- else result={status:'FINALIZE_REQUESTED'};
+ else {queue.finalizeStatus='NOT_STARTED';queue.finalizeDetails=null;result={status:'FINALIZE_REQUESTED'};}
+ if(result.acceptedUnits?.length) {queue.finalizeStatus='NOT_STARTED';queue.finalizeDetails=null;}
  if(phase===4&&queue.stage!=='RECONCILIATION'&&
   plan.units.filter(u=>['FLOW','ATTACK'].includes(u.kind)).every(u=>queue.units[u.unitId]?.status==='ACCEPTED'))
   finishDiscovery({root,campaign:campaignPath,directory,plan,queue,automationRoot});
@@ -495,6 +496,7 @@ export function finalizeReadinessV1({root,campaignPath,directory,phase}){
  const pending=plan.units.filter(u=>queue.units[u.unitId]?.status!=='ACCEPTED');
  if(pending.length)return {ready:false,reason:'mandatory units remain',unitIds:pending.map(x=>x.unitId)};
  if(queue.finalizeStatus==='SEALED')return {ready:false,reason:'already sealed'};
+ if(queue.finalizeStatus==='BLOCKED')return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
  return {ready:true,plan,queue};
 }
 export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}){
