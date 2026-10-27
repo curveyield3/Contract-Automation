@@ -53,15 +53,32 @@ if(arg.mode!=='finalize'){
   }
   // Reject a request with the wrong immutable authority binding without blocking
   // unrelated, correctly bound requests in this durable campaign backlog.
-  const result=request.authorityDigest===directory.authorityDigest
-   ?processUnitRequestV1({root,campaignPath,directory,request})
-   :{schemaVersion:'curveyield-lite-solo-unit-controller-result-v1',
+  // An invalid oversized CLAIM is also terminally rejected as an ingress error:
+  // it must never prevent other workers' valid claims/submissions from draining.
+  // Never relax the bound queue's claim limit or mask other processing failures.
+  let result;
+  if(request.authorityDigest!==directory.authorityDigest){
+   result={schemaVersion:'curveyield-lite-solo-unit-controller-result-v1',
      requestId:request.requestId,campaignId:directory.campaignId,
      campaignGenerationId:directory.campaignGenerationId,
      sourceSha256:directory.sourceSha256,authorityDigest:directory.authorityDigest,
      phaseSequence:phase,phaseEpoch:directory.unitPhaseEpoch,
      status:'REJECTED_INVALID_AUTHORITY_BINDING',
      error:'authority digest differs from bound campaign'};
+  }else{
+   try{result=processUnitRequestV1({root,campaignPath,directory,request});}
+   catch(error){
+    const reason=String(error?.message??error);
+    if(request.operation!=='CLAIM'||!reason.startsWith('CLAIM must request 1–4 units'))
+     throw error;
+    result={schemaVersion:'curveyield-lite-solo-unit-controller-result-v1',
+      requestId:request.requestId,campaignId:directory.campaignId,
+      campaignGenerationId:directory.campaignGenerationId,
+      sourceSha256:directory.sourceSha256,authorityDigest:directory.authorityDigest,
+      phaseSequence:phase,phaseEpoch:directory.unitPhaseEpoch,
+      status:'REJECTED_INVALID_REQUEST',error:reason};
+   }
+  }
   const resultRel=path.posix.join(campaignPath,'work/phase-'+String(phase).padStart(2,'0'),
    'units','controller','results','REQUEST_'+request.requestId+'_v1.json');
   const previous=fs.existsSync(repoFile(root,resultRel))?readJson(repoFile(root,resultRel)):null;
