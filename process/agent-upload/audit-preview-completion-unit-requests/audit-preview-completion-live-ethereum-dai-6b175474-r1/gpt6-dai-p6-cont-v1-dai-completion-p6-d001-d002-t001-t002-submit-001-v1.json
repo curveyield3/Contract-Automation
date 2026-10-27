@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "dai-completion-p6-d001-d002-t001-t002-submit-001-v1",
+  "operation": "SUBMIT",
+  "campaignId": "audit-preview-completion-live-ethereum-dai-6b175474-r1",
+  "campaignGenerationId": "audit-preview-completion-live-ethereum-dai-6b175474-r1-g1-20261027T144814563Z",
+  "phaseSequence": 6,
+  "lane": "AUTO",
+  "workerId": "gpt6-dai-p6-cont-v1",
+  "sourceSha256": "1c384141058f50d53b9e58b89c0b83aa60bd1066406f017d177121de332705f2",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "P6-D-001",
+      "claimEpoch": 2,
+      "claimToken": "6c549c8d-e49d-4bda-8e06-192e96b6a5e9",
+      "packetSha256": "defae56ed3fe063c6c9b9089d47c8a650e645cc4bb4c0ef8ef7f2bebb8cdcfc5",
+      "submissionPath": "campaigns/audit-preview-completion-live-ethereum-dai-6b175474-r1/work/phase-06/units/P6-D-001/submissions/gpt6-dai-p6-cont-v1/epoch-2/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "d5aee9aec5053d04fe0275cad81978fc71de5c86e6804ec7f1135279c902dd3c",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "P6-D-002",
+      "claimEpoch": 2,
+      "claimToken": "4923a6e1-c907-43cb-a279-890ea2efe4af",
+      "packetSha256": "c27add6fab489a756384316d47b48c071b58caf99f82745ccd360d25ab21a441",
+      "submissionPath": "campaigns/audit-preview-completion-live-ethereum-dai-6b175474-r1/work/phase-06/units/P6-D-002/submissions/gpt6-dai-p6-cont-v1/epoch-2/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "a03caedfdd01d3d0f5bb1e2aa7941d546698a60bbf847852360bdcc7a2a901a5",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "P6-T-001",
+      "claimEpoch": 2,
+      "claimToken": "d5ed698b-9762-4e23-b11f-203d269b2659",
+      "packetSha256": "8ba794e00620257a7b51ebd31a85a318d2f327da075bf363f01036ab7ee7af97",
+      "submissionPath": "campaigns/audit-preview-completion-live-ethereum-dai-6b175474-r1/work/phase-06/units/P6-T-001/submissions/gpt6-dai-p6-cont-v1/epoch-2/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "f3c7064265be4b151a551d06f9edd62ed36005573cd500c3ba9af19ab3cc6b63",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "P6-T-002",
+      "claimEpoch": 2,
+      "claimToken": "b20ed4ab-20d1-4905-bf65-4ceefb27fed8",
+      "packetSha256": "055fc8705d4deecb52d332aadac584744b38dcda2a47dcddc72e5311290500f6",
+      "submissionPath": "campaigns/audit-preview-completion-live-ethereum-dai-6b175474-r1/work/phase-06/units/P6-T-002/submissions/gpt6-dai-p6-cont-v1/epoch-2/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "a03caedfdd01d3d0f5bb1e2aa7941d546698a60bbf847852360bdcc7a2a901a5",
+      "unitSpecRevision": 1
+    }
+  ]
+}
