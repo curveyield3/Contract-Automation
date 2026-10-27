@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "boosthubv9-p4-release-outstanding-recovery-20261027-v1",
+  "operation": "RELEASE",
+  "campaignId": "boosthub-contract-stack-v9-r1",
+  "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
+  "phaseSequence": 4,
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "lane": "AUTO",
+  "workerId": "gpt6-boosthub-v9-recovery-20261027-02",
+  "items": [
+    {
+      "unitId": "R-001",
+      "claimEpoch": 2,
+      "claimToken": "cd26ee44-b6b7-4c14-8682-1a08881fe453"
+    },
+    {
+      "unitId": "R-002",
+      "claimEpoch": 2,
+      "claimToken": "0fcfc14a-6645-4a14-bf39-a1ff7d30f790"
+    },
+    {
+      "unitId": "R-004",
+      "claimEpoch": 2,
+      "claimToken": "8ee4e5f1-b3fb-4e1c-935d-305c91d24d4b"
+    }
+  ]
+}
