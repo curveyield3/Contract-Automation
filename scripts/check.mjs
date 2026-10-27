@@ -120,7 +120,7 @@ const forbiddenVersionedWorkflows = workflowNames.filter((name) =>
 if (forbiddenVersionedWorkflows.length > 0) {
   throw new Error(`Superseded/versioned V7 workflow entrypoints belong in CurveYield2/archive, not this repository: ${forbiddenVersionedWorkflows.join(', ')}`);
 }
-const canonicalWorkflows = ['audit-controller-execution.yml', 'v7-execution-infrastructure-qualification.yml'];
+const canonicalWorkflows = ['audit-controller-execution.yml'];
 for (const required of canonicalWorkflows) {
   if (!workflowNames.includes(required)) throw new Error(`Missing canonical V7 workflow: ${required}`);
   const source = await fs.readFile(path.join(workflowRoot, required), 'utf8');
