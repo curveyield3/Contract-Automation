@@ -1,0 +1,5 @@
+[profile.default]
+solc_version = "0.5.12"
+optimizer = false
+src = "contracts"
+ffi = false
