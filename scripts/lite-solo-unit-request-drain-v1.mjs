@@ -65,6 +65,21 @@ if(arg.mode!=='finalize'){
   markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
   changed=true;
  }
+ // A prior boundary may have promoted APPEND rows into frozen fixed-record
+ // positions before the unit assembler was installed. Recover its exact
+ // immutable unit-plan ownership and recompute protected prefill integrity.
+ // Never discard individual accepted work or waive a machine-evidence gate.
+ if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
+    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
+    recorded.finalizeDetails.unmappedDeficiencies.length>0&&
+    recorded.finalizeDetails.unmappedDeficiencies.every(x=>[
+     'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.',
+     'Controller-prefilled/read-only fields were modified; restore the generated values before validation.'
+    ].includes(String(x)))&&
+    Object.values(recorded.units??{}).every(x=>x.status==='ACCEPTED')){
+  markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
+  changed=true;
+ }
  for(const filename of files){
   const request=JSON.parse(fs.readFileSync(path.join(requestDir,filename),'utf8'));
   if(request.operation==='FINALIZE')throw Error('untrusted ingress may not request controller-only FINALIZE');
