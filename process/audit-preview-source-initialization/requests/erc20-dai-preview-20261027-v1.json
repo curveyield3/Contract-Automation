@@ -9,6 +9,6 @@
   "scanUrls": [
     "https://etherscan.io/address/0x6b175474e89094c44da98b954eedeac495271d0f#code"
   ],
-  "retryOfRunId": 40500214994,
-  "retryReason": "Resume same source-bound DAI preview with concurrency-safe Phase 0 evidence publication"
+  "retryOfRunId": 40500583709,
+  "retryReason": "Resume same frozen DAI preview after repairing core-and-bundle concurrent publication"
 }
