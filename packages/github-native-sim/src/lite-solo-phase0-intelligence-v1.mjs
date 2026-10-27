@@ -689,13 +689,28 @@ async function main(){
   if(observed!==request.source.archiveSha256)throw new Error(`source archive SHA mismatch expected ${request.source.archiveSha256} observed ${observed}`);
   const extractionRoot=path.join(work,'archive'); const extraction=await withProgressStage('extract-verified-archive',()=>extractArchive(archiveAbs,extractionRoot));
   const detected=await withProgressStage('detect-project-root',()=>detectProjectRoot(extractionRoot)); const cfg=await withProgressStage('detect-build-config',()=>detectBuildConfig(detected.absolute));
+  // Foundry's pinned source pragma is authoritative for the Vyper compiler.
+  // Request it explicitly so the mixed-language build and retained artifacts
+  // include staking bytecode; never infer from unrelated archive copies.
+  const vyperVersions=new Set();
+  for(const rel of await walk(detected.absolute)){
+    if(!/^contracts\\/.+\\.vy$/.test(rel))continue;
+    const source=await fs.readFile(path.join(detected.absolute,...rel.split('/')),'utf8');
+    const version=source.match(/^\\s*#\\s*pragma\\s+version\\s+(\\d+\\.\\d+\\.\\d+)\\s*$/m)?.[1];
+    if(!version)throw new Error('Vyper source lacks an exact compiler version pragma: '+rel);
+    vyperVersions.add(version);
+  }
+  if(vyperVersions.size>1)throw new Error('Mixed incompatible Vyper compiler pragmas in contracts/');
+  const vyperVersion=[...vyperVersions][0]??null;
+  const requestedCompilers=[{language:'solidity',version:cfg.compilerVersion},
+    ...(vyperVersion?[{language:'vyper',version:vyperVersion}]:[])];
   const auditScope=await loadAuditScope(detected.absolute);
 
   const pseudo={
     requestId:request.requestId,requestDigest:request.requestDigest??sha256(Buffer.from(JSON.stringify(request))),
     campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,assignmentId:'phase0-intelligence',phaseId:'phase-0',profileId:'github-native-compile-v2',
     source:{repository:request.source.repository,commit:request.source.commit,projectPath:detected.relativePath,archivePath:request.source.archivePath,archiveSha256:request.source.archiveSha256},
-    configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],analysis:{slither:{version:'0.11.6'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
+    configuration:{compilers:requestedCompilers,analysis:{slither:{version:'0.11.6'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
   };
 
   const build=await withProgressStage('compile-exact-build',()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
