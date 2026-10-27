@@ -83,12 +83,15 @@ jobs:
             (.campaign_path|type=="string" and startswith("campaigns/")) and
             (.audit_controller_ref|type=="string" and length>0) and
             ((.resume_from_finalize // false)|type=="boolean") and
+            ((.resume_from_deploy // false)|type=="boolean") and
+            (not ((.resume_from_finalize // false) and (.resume_from_deploy // false))) and
             ((.bootstrap_workflow // "lite-phase0-bootstrap-v1.yml") as $workflow |
               $workflow=="lite-phase0-bootstrap-v1.yml" or
               $workflow=="lite-solo-phase0-bootstrap-v1.yml")
           ' "$req" >/dev/null
           {
             echo "resume_from_finalize=$(jq -r '.resume_from_finalize // false' "$req")"
+            echo "resume_from_deploy=$(jq -r '.resume_from_deploy // false' "$req")"
             echo "campaign_id=$(jq -r '.campaign_id' "$req")"
             echo "campaign_path=$(jq -r '.campaign_path' "$req")"
             echo "audit_controller_ref=$(jq -r '.audit_controller_ref' "$req")"
@@ -105,7 +108,8 @@ jobs:
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
             -f campaign_path="${{ steps.request.outputs.campaign_path }}" \
             -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}" \
-            -f resume_from_finalize="${{ steps.request.outputs.resume_from_finalize }}"
+            -f resume_from_finalize="${{ steps.request.outputs.resume_from_finalize }}" \
+            -f resume_from_deploy="${{ steps.request.outputs.resume_from_deploy }}"
 
       - name: Summarize
         shell: bash
