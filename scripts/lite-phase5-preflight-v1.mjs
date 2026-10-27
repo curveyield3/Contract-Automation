@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
-import {materializeShardedWorkFormV1,shardWorkFormV1} from './lib/lite-solo-work-shards-v1.mjs';
+import {materializeSemanticWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
 import {validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
@@ -17,7 +17,7 @@ const indexRel=path.posix.join(campaignPath,'work/phase-05/shards/INDEX_v1.json'
 const indexFile=path.join(root,...indexRel.split('/'));
 const sharded=fs.existsSync(indexFile);
 if(sharded){
-  try{materializeShardedWorkFormV1({root,formRel:fullRel,refreshDigests:true});}
+  try{materializeSemanticWorkFormV13({root,formRel:fullRel});}
   catch(error){
     process.stdout.write(JSON.stringify({schemaVersion:'curveyield-phase5-request-preflight-v1',campaignId,sourceSha256,
       status:'REWORK_REQUIRED',runnable:false,designCount:0,readyCount:0,generated:[],
@@ -97,7 +97,7 @@ else for(const [i,target] of designs.entries()){
   else ready.push(key);
 }
 
-if(sharded)shardWorkFormV1({root,formRel:fullRel,phase:5,retireFull:true,force:true});
+// The read-only preflight must not regenerate controller-bound v13 shard indexes.
 // When the exact audit owner has directed continuation with unverified
 // candidate evidence, preflight still validates all requests but must NEVER
 // permit toolchain installation or machine execution as an incidental effect.
