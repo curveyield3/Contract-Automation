@@ -121,7 +121,7 @@ jobs:
             alias="Audit Campaign Directory/campaigns/$campaign_id.json"
             alias_encoded="$(jq -rn --arg p "$alias" '$p|split("/")|map(@uri)|join("/")')"
             alias_blob="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$alias_encoded?ref=main" --jq .content 2>/dev/null || true)"
-            if [ -n "$alias_blob" ]; then
+            if [ -n "$alias_blob" ] && [ "$alias_blob" != "null" ]; then
               printf '%s' "$alias_blob" | base64 -d >/tmp/lite-solo-campaign-directory.json
             else
               [[ "$snapshot" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::SUPERSEDED_CAMPAIGN_DIRECTORY: exact prior directory commit required"; exit 1; }
