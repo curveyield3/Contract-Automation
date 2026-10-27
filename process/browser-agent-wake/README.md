@@ -95,19 +95,24 @@ The home exit-node peer must remain reachable by this tagged runner, and the exi
 
 Official documentation: https://tailscale.com/docs/features/workload-identity-federation and https://tailscale.com/docs/features/tags.
 
-## Shared browser ownership
+## Concurrent, isolated browser sessions
 
-All live audit browser owners serialize on:
+Each wake and watchdog for a single durable `wake_id` serialize on the same
+`chatgpt-browser-session-<wake_id>` GitHub Actions concurrency group. Separate
+campaign wake IDs use different groups, and the watchdog matrix allows up to
+eight independent browser sessions to be supervised concurrently.
 
-`chatgpt-shared-browser-session-v1`
+Each GitHub-hosted runner starts a fresh isolated Chrome profile and X11 display.
+The configured ChatGPT storage state is read-only bootstrap material, not a
+shared mutable Chrome profile. Each interaction must still use the registered
+durable chat URL, and no two jobs may write to the same wake session at once.
 
-Only one wake/watchdog browser owner may use the saved ChatGPT state at a time.
+Lifecycle within one wake session:
 
-Lifecycle:
+`WAKE owns session → wake input completes → WATCHDOG owns same session → boundary reached → watchdog retires`
 
-`WAKE owns browser → wake input completes → WATCHDOG owns browser → phase boundary reached → watchdog retires → next WAKE owns browser`
-
-A successor wake must not overlap the predecessor watchdog.
+A successor in another session may run concurrently; stale watchdog targets are
+retired by their existing campaign/chat identity checks.
 
 ## Audit reviewer wake check-in (v1)
 
@@ -192,7 +197,7 @@ Before changing any audit browser automation, verify all of the following:
 - no ChatGPT page observation/read is required;
 - fixed Phase-1 X11 composer point is used;
 - per-character Phase-1 typing cadence is preserved;
-- watchdog and wake remain serialized on the shared browser-state concurrency group;
+- watchdog and wake for the same wake ID remain serialized by a session-specific group;
 - watchdog is retired at the successor boundary before the next wake takes ownership.
 
 If a proposed feature cannot satisfy these requirements, it must fail closed rather than fall back to machine-style ChatGPT interaction.
