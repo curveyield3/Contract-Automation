@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import { startAnvilEngine } from '../../runner/src/anvil-engine.mjs';
 import { V7_POLICY } from './v7-policy.mjs';
 
@@ -23,6 +24,45 @@ async function rpcCall(url, method, params, fetchImpl) {
   if (payload?.error) throw new Error(`mutable Anvil RPC ${method} failed: ${payload.error.message ?? 'unknown error'}`);
   if (payload?.result === undefined || payload?.result === null) throw new Error(`mutable Anvil RPC ${method} returned no result`);
   return payload.result;
+}
+
+async function probeLiveTargetAndMutability(url, targets, fetchImpl) {
+  const attested=[];
+  for(const target of targets){
+    if(!/^0x[0-9a-fA-F]{40}$/.test(String(target.address??''))||
+       !/^[0-9a-fA-F]{64}$/.test(String(target.runtimeSha256??'')))
+      throw new Error('LIVE_FORK_TARGET_BINDING_INVALID');
+    const code=await rpcCall(url,'eth_getCode',[target.address,'latest'],fetchImpl);
+    if(!/^0x(?:[0-9a-fA-F]{2})+$/.test(String(code??'')))throw new Error('LIVE_FORK_DEPLOYED_CODE_MISSING');
+    const hash=createHash('sha256').update(Buffer.from(code.slice(2),'hex')).digest('hex');
+    if(hash.toLowerCase()!==target.runtimeSha256.toLowerCase())
+      throw new Error('LIVE_FORK_DEPLOYED_CODE_MISMATCH: '+target.address);
+    attested.push({address:target.address,qualifiedName:target.qualifiedName??null,runtimeSha256:hash});
+  }
+  // Probe writes on the private local Anvil endpoint only. Revert all mutations.
+  const probe='0x000000000000000000000000000000000000bEEF';
+  const before=await rpcCall(url,'eth_getBalance',[probe,'latest'],fetchImpl);
+  const snapshot=await rpcCall(url,'evm_snapshot',[],fetchImpl);
+  if(typeof snapshot!=='string')throw new Error('LIVE_FORK_SNAPSHOT_UNAVAILABLE');
+  let writeSucceeded=false;
+  let reverted=false;
+  try{
+    const replacement=BigInt(before)==1n?'0x2':'0x1';
+    const payload=await fetchImpl(url,{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'anvil_setBalance',params:[probe,replacement]})});
+    const response=await payload.json();
+    if(!payload.ok||response?.error||!Object.hasOwn(response,'result'))
+      throw new Error('LIVE_FORK_MUTABLE_WRITE_FAILED');
+    const balance=await rpcCall(url,'eth_getBalance',[probe,'latest'],fetchImpl);
+    if(BigInt(balance)!==BigInt(replacement))throw new Error('LIVE_FORK_MUTABLE_WRITE_NOT_OBSERVED');
+    writeSucceeded=true;
+  }finally{
+    reverted=(await rpcCall(url,'evm_revert',[snapshot],fetchImpl))===true;
+  }
+  if(!reverted||!writeSucceeded||
+    BigInt(await rpcCall(url,'eth_getBalance',[probe,'latest'],fetchImpl))!==BigInt(before))
+    throw new Error('LIVE_FORK_MUTABLE_ROLLBACK_FAILED');
+  return {status:'PASS',targets:attested,mutableWriteObserved:true,snapshotReverted:true};
 }
 
 async function probeNormalizedRpc(url, fetchImpl, { frozenBlockNumber = null, frozenBlockHash = null } = {}) {
@@ -80,6 +120,7 @@ export async function createPhase6MutableRpcSession({
   startEngine = startAnvilEngine,
   frozenBlockNumber = null,
   frozenBlockHash = null,
+  attestedTargets = [],
 } = {}) {
   let upstreamUrl;
   try { upstreamUrl = resolvePhase6MutableRpcUrl(environment); }
@@ -154,12 +195,17 @@ export async function createPhase6MutableRpcSession({
       };
     }
 
+    let deployedTargetAttestation=null;
+    if(Array.isArray(attestedTargets)&&attestedTargets.length>0){
+      deployedTargetAttestation=await probeLiveTargetAndMutability(engine.url,attestedTargets,fetchImpl);
+    }
     let closed = false;
     const evidence = {
       status: 'PASS', failureKind: null, profile: PHASE6_MUTABLE_RPC_ENV, chain: PHASE6_MUTABLE_RPC_CHAIN,
       expectedChainId: PHASE6_MUTABLE_RPC_CHAIN_ID, observedChainId: normalized.chainId, chainIdMatchesExpected: true,
       blockNumber: normalized.blockNumber, blockHash: normalized.blockHash,
       requestPinned, pinSource: requestPinned ? 'REQUEST_FROZEN_BLOCK_HASH' : 'AUTHENTICATED_UPSTREAM_HEAD_FROZEN',
+      ...(deployedTargetAttestation?{deployedTargetAttestation}:{}),
       expectedBlockNumber: normalized.expectedBlockNumber,
       expectedBlockHash: normalized.expectedBlockHash,
       blockHashMatchesExpected: normalized.blockHashMatchesExpected,
@@ -190,7 +236,9 @@ export async function createPhase6MutableRpcSession({
   } catch (error) {
     if (engine) await engine.close().catch(() => {});
     return {
-      evidence: failedSessionEvidence('MUTABLE_RPC_PROBE_FAILURE', redactMutableRpcSecret(error?.message ?? String(error), upstreamUrl)),
+      evidence: failedSessionEvidence(
+        /^LIVE_FORK_[A-Z_]+/.exec(String(error?.message??error))?.[0]??'MUTABLE_RPC_PROBE_FAILURE',
+        redactMutableRpcSecret(error?.message??String(error),upstreamUrl)),
       runtime: null,
       async close() {},
     };

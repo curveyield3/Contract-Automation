@@ -147,11 +147,50 @@ function fuzzSummary(r){
   return 'NOT_EXECUTED_OR_NOT_APPLICABLE';
 }
 
+// Phase-0 LIVE_SCAN is a deployed-address audit, not a request to replay deployment scripts.
+// Distinguish a verified pinned fork source from proof that mutable tests have run.
+export function classifyDeploymentExecutionV1({execution={}}={}){
+  const live=execution?.deploymentProfile?.mode==='LIVE'
+    ||execution?.scanSourceSnapshot?.inputMode==='LIVE_SCAN'
+    ||execution?.liveDeployment?.status==='VERIFIED';
+  if(live){
+    const targets=arr(execution?.liveDeployment?.contracts).filter(c=>/^0x[0-9a-fA-F]{40}$/.test(String(c?.address??'')));
+    const declared=arr(execution?.deploymentProfile?.contracts);
+    const verified=execution?.status==='PASS_LIVE_DEPLOYMENT'
+      &&execution?.liveDeployment?.status==='VERIFIED'
+      &&execution?.fork?.engine==='anvil'
+      &&execution?.fork?.verifiedHistoricalFork===true
+      &&execution?.fork?.chainId===1
+      &&Number.isSafeInteger(execution?.fork?.initialBlock)
+      &&/^0x[0-9a-fA-F]{64}$/.test(String(execution?.fork?.pinnedHistoricalHash??''))
+      &&targets.length>0
+      &&targets.length===declared.length
+      &&targets.every(c=>declared.some(d=>d.address?.toLowerCase()===c.address?.toLowerCase()
+        &&d.qualifiedName===c.qualifiedName));
+    return {mode:'LIVE_DEPLOYED_FORK',status:verified?'LIVE_FORK_SOURCE_VERIFIED':'LIVE_FORK_ATTESTATION_REQUIRED',
+      targets,blockNumber:execution?.fork?.initialBlock??null,blockHash:execution?.fork?.pinnedHistoricalHash??null,
+      evidenceRef:'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',
+      mutableTestExecutionProven:false};
+  }
+  const attempts=arr(execution?.attempts);
+  return {mode:'SOURCE_LOCAL_DEPLOY',status:attempts.some(a=>a.status==='PASS'||a.exitCode===0)
+    ?'SOURCE_SETUP_EXECUTED':'SOURCE_SETUP_NOT_EXECUTED',targets:[],
+    evidenceRef:'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',
+    mutableTestExecutionProven:false};
+}
+
 export function renderDeployConfigMatrixV1({readiness={},execution={}}={}){
   const dep=readiness.deploymentAndConfiguration??{};
   const attempts=arr(execution.attempts);
+  const classification=classifyDeploymentExecutionV1({execution});
   const rows=[];
   let order=1;
+  if(classification.mode==='LIVE_DEPLOYED_FORK'){
+    for(const target of classification.targets){
+      rows.push(`| ${order++} | Existing live deployment: ${md(target.qualifiedName??'deployed contract')} | NOT_REDEPLOYED | ${md(target.address)} at Ethereum block ${md(classification.blockNumber)} | Inspect deployed wards and governance on fork | Inspect deployed storage and configuration on fork | Live runtime verified; mutable state tests still required | ${md(classification.evidenceRef)} | ${md(classification.status)} |`);
+    }
+    if(!rows.length) rows.push(`| ${order++} | Live deployment identity unresolved | NOT_REDEPLOYED | SEE_LIVE_DEPLOYMENT | SEE_SOURCE | SEE_SOURCE | Reconcile runtime and historical fork before any testing | ${md(classification.evidenceRef)} | LIVE_FORK_ATTESTATION_REQUIRED |`);
+  }
   for(const a of attempts){
     rows.push(`| ${order++} | ${md(a.script??a.action??'source-known setup')} | ${md(a.constructorOrInitializer??'SOURCE_DEFINED')} | ${md(a.dependenciesOrAddresses??'SEE_SOURCE_SETUP')} | ${md(a.rolesOrGovernance??'SEE_SOURCE_SETUP')} | ${md(a.approvalsOrConfiguration??'SEE_SOURCE_SETUP')} | ${md(a.postStateAssertion??a.resultSummary??'SEE_MACHINE_EVIDENCE')} | ${md(a.evidenceRef)} | ${md(a.status??(a.exitCode===0?'PASS':'BLOCKED'))} |`);
   }
@@ -162,9 +201,11 @@ export function renderDeployConfigMatrixV1({readiness={},execution={}}={}){
   }
   if(!rows.length) rows.push('| 1 | No source-known deployment/configuration action discovered | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | No deployment/configuration surface discovered by Phase-0 automation | evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json | NOT_APPLICABLE |');
 
-  const usability=attempts.length
-    ? attempts.map((a,i)=>`| P0-U-${String(i+1).padStart(3,'0')} | ${md(a.usabilityCheck??a.script??'source-known local setup')} | clean Phase-0 machine environment | ${md(a.script??a.action)} | exit 0 / source-defined assertions pass | ${md(a.resultSummary??`exit ${a.exitCode??'unknown'}`)} | ${md(a.evidenceRef)} | ${md(a.status??(a.exitCode===0?'PASS':'BLOCKED'))} |`).join('\n')
-    :'| P0-U-001 | Source-known local deployment/configuration usability | clean Phase-0 machine environment | No admitted deterministic local command discovered | Machine-executable setup present | No executable setup available | evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json | BLOCKED |';
+  const usability=classification.mode==='LIVE_DEPLOYED_FORK'
+    ? `| P0-U-001 | Attach and mutate existing deployed contract on local Anvil fork | Pinned Ethereum state: block ${md(classification.blockNumber)} | Attach at deployed address without redeploying; run V7 harness with mutable fork | Verified live identity followed by passing mutable-fork preflight and executed assertions | ${md(classification.status)}; mutable-fork tests not yet demonstrated | ${md(classification.evidenceRef)} | ${classification.status==='LIVE_FORK_SOURCE_VERIFIED'?'MUTABLE_FORK_PREFLIGHT_REQUIRED':'LIVE_FORK_ATTESTATION_REQUIRED'} |`
+    : attempts.length
+      ? attempts.map((a,i)=>`| P0-U-${String(i+1).padStart(3,'0')} | ${md(a.usabilityCheck??a.script??'source-known local setup')} | clean Phase-0 machine environment | ${md(a.script??a.action)} | exit 0 / source-defined assertions pass | ${md(a.resultSummary??`exit ${a.exitCode??'unknown'}`)} | ${md(a.evidenceRef)} | ${md(a.status??(a.exitCode===0?'PASS':'BLOCKED'))} |`).join('\n')
+      :'| P0-U-001 | Source-known local deployment/configuration usability | clean Phase-0 machine environment | No admitted deterministic local command discovered | Machine-executable setup present | No executable setup available | evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json | BLOCKED |';
 
   const gaps=[];
   for(const f of arr(execution.gaps)) gaps.push(`| ${md(f.id??`P0-GAP-${gaps.length+1}`)} | ${md(f.value??f.reason)} | ${md(f.recoveryAttempt??'AUTOMATED_DISCOVERY_COMPLETE')} | ${md(f.securityEffect??'REQUIRES_PHASE6_INTERPRETATION')} | ${md(f.candidateOrObligation??'PENDING_PHASE6_INTERPRETATION')} | ${md(f.disposition??'BLOCKED')} |`);
