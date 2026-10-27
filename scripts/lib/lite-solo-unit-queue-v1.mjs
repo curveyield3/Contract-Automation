@@ -347,12 +347,15 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
  const identity=itemIdentity(item,u,state,{...request,campaignWorkspacePath:campaign},root);
  if(identity)return {unitId:item.unitId,status:identity,errors:[]};
  if(!/^[0-9a-f]{64}$/.test(item.submissionSha256??''))return {unitId:item.unitId,status:'STALE',errors:['invalid digest']};
+ state.status='SUBMITTED';
  const file=repoFile(root,item.submissionPath);
  if(!fs.existsSync(file))return {unitId:item.unitId,status:'WAITING_SUBMISSION',errors:[]};
  const raw=fs.readFileSync(file),digest=hex(raw);
  if(digest!==item.submissionSha256)return {unitId:item.unitId,status:'STALE',errors:['immutable snapshot SHA mismatch']};
- if(state.lastSubmissionSha256===digest&&state.status==='REWORK_REQUIRED')
+ if(state.lastSubmissionSha256===digest&&state.lastErrors?.length){
+  state.status='REWORK_REQUIRED';
   return {unitId:item.unitId,status:'UNCHANGED',errors:state.lastErrors};
+ }
  const submission=JSON.parse(raw.toString('utf8'));
  let errors=[];
  if(['FLOW','ATTACK'].includes(u.kind)){
@@ -382,11 +385,12 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
 function handleSubmit({root,campaign,phase,queue,plan,request,directory}){
  const schema=loadPhaseSchema(root,AUTHORITY,phase).schema,items=[];
  for(const item of request.items){
-  const owned=queue.units[item.unitId];
-  if(owned&&['CLAIMED','REWORK_REQUIRED'].includes(owned.status)&&owned.workerId===request.workerId)
-   owned.status='SUBMITTED';
   try{items.push(acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,directory}));}
-  catch(e){items.push({unitId:item.unitId,status:'REWORK_REQUIRED',errors:[String(e.message??e)]});}
+  catch(e){
+   const state=queue.units[item.unitId],reason=String(e.message??e);
+   if(state&&state.workerId===request.workerId){state.status='REWORK_REQUIRED';state.lastErrors=[reason];}
+   items.push({unitId:item.unitId,status:'REWORK_REQUIRED',errors:[reason]});
+  }
  }
  const newlyEligibleUnits=unlock(queue,plan);
  return {status:'SUBMISSION_RECORDED',acceptedUnits:items.filter(x=>x.status==='ACCEPTED').map(x=>x.unitId),
