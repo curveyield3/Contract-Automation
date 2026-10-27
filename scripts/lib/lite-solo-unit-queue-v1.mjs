@@ -10,7 +10,7 @@ import {deriveBaselineObligationsV1} from '../../packages/github-native-sim/src/
 import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite-solo-phase-prefill-v1.mjs';
 import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
-import {planSemanticBatchesV1} from './lite-solo-semantic-batches-v1.mjs';
+import {planSemanticBatchesV1,SEMANTIC_BATCH_READING_GUIDE_V1} from './lite-solo-semantic-batches-v1.mjs';
 
 export const UNIT_POLICY=Object.freeze({issueBatchDefault:4,issueBatchMax:4,approvalBatchMax:5,maxParallelWorkers:null});
 export const REQUEST_SCHEMA='curveyield-lite-solo-unit-batch-request-v1';
@@ -288,7 +288,7 @@ function consolidateNewSemanticUnitsV1({root,campaignPath,phase,plan,queue}){
    throw Error('cannot rebatch an already claimed, submitted or accepted unit');
   const payload={schemaVersion:'curveyield-lite-solo-batched-assignment-v1',unitId:id,
    phaseSequence:phase,field:group.field,groupKeys:group.groupKeys,members:group.members,
-   readingGuide:'BATCH members are original source-bound records, not separate claims. Reconstruct and verify each manifest prefill-page (12 KiB), then complete entries[].key using the exact member recordKeys[0] and substantive entries[].value. Submit one immutable multi-entry snapshot under the claimed batch unit ID. During rework submit only outstanding members; never alter an accepted sibling.'};
+   readingGuide:SEMANTIC_BATCH_READING_GUIDE_V1};
   const packetPath=path.posix.join(unitBase(campaignPath,phase,id),'ASSIGNMENT_PACKET_v1.json');
   const manifest=writePagedPrefillV1(root,packetPath,payload);
   const spec={unitId:id,kind:'BATCH',field:group.field,members:group.members,
