@@ -875,7 +875,7 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
  const reopened=new Set(),unmapped=[],invalidatedMembers=new Set();
  for(const entry of deficiencies){
   const message=typeof entry==='string'?entry:JSON.stringify(entry),found=new Map();
-  for(const match of message.matchAll(/(?:actions\\.)?(?:step-[0-9]+\\.outputs\\.)?([A-Za-z][A-Za-z0-9_]*)\\[([0-9]+)\\]/g)){
+  for(const match of message.matchAll(/(?:actions\.)?(?:step-[0-9]+\.outputs\.)?([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/g)){
    const field=match[1],position=Number(match[2]);
    for(const u of plan.units){
     for(const m of u.kind==='BATCH'?u.members:[u])
