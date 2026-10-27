@@ -10,12 +10,49 @@ permissions:
   contents: read
   actions: write
 
-concurrency:
-  group: lite-browser-orchestrator-request-${{ github.sha }}
-  cancel-in-progress: false
-
 jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      requests: ${{ steps.ids.outputs.requests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - id: ids
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          root=process/browser-agent-wake/orchestrator-requests
+          if [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]]; then
+            mapfile -t changed < <(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" -- "$root/")
+          else
+            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")
+          fi
+          : > /tmp/lite-orchestrator-requests.ndjson
+          for request in "${changed[@]}"; do
+            [[ "$request" =~ ^process/browser-agent-wake/orchestrator-requests/[A-Za-z0-9._-]+\.json$ ]] || continue
+            test -f "$request" || continue
+            jq -ec --arg file "$request" '
+              select(.schemaVersion=="curveyield-lite-browser-orchestrator-request-v1"
+                and (.campaignId|type)=="string"
+                and (.campaignId|test("^[A-Za-z0-9._-]+-r[0-9]+$")))
+              | {request_path:$file,campaign_id:.campaignId}
+            ' "$request" >> /tmp/lite-orchestrator-requests.ndjson
+          done
+          echo "requests=$(jq -sc '{include:.}' /tmp/lite-orchestrator-requests.ndjson)" >> "$GITHUB_OUTPUT"
   dispatch:
+    needs: discover
+    if: ${{ needs.discover.outputs.requests != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.requests) }}
+    concurrency:
+      group: lite-browser-orchestrator-request-${{ matrix.campaign_id }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -26,19 +63,16 @@ jobs:
           persist-credentials: false
           fetch-depth: 2
 
-      - name: Resolve exactly one orchestrator request
+      - name: Resolve campaign orchestrator request
         id: request
+        env:
+          MATRIX_REQUEST: ${{ matrix.request_path }}
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- 'process/browser-agent-wake/orchestrator-requests/*.json')
-          if [ "${#changed[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one orchestrator request file in this commit; found ${#changed[@]}."
-            printf '%s\n' "${changed[@]}"
-            exit 1
-          fi
-
-          request="${changed[0]}"
+          request="$MATRIX_REQUEST"
+          [[ "$request" =~ ^process/browser-agent-wake/orchestrator-requests/[A-Za-z0-9._-]+\.json$ ]]
+          test -f "$request"
           jq -e '
             .schemaVersion == "curveyield-lite-browser-orchestrator-request-v1"
             and (.requestId | type == "string" and length > 0)
