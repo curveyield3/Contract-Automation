@@ -109,7 +109,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  }));
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
   unitId,role,chatKey:role==='ATTACK'?(isReassignedV13AuthorityV1({root,authorityRoot})?'lite-solo-agent':verdictV13?'lite-solo-agent':'lite-solo-agent'):'lite-solo-agent',instructionsPath,
-  submissionPath:authorityRoot.endsWith('/lite-solo-v4')?pathJoin(campaignPath,unitId+'/submissions/<workerId>/epoch-<claimEpoch>/SUBMISSION_ATTEMPT_001_v1.json'):submissionRel(campaignPath,unitId),boundaryRequestPath:authorityRoot.endsWith('/lite-solo-v4')?'process/agent-upload/lite-solo-unit-requests/':'process/agent-upload/lite-solo-phase-boundary/',
+  submissionPath:authorityRoot.endsWith('/lite-solo-v4')?path.posix.join(campaignPath,'work/phase-04/units',unitId,'submissions/<workerId>/epoch-<claimEpoch>/SUBMISSION_ATTEMPT_001_v1.json'):submissionRel(campaignPath,unitId),boundaryRequestPath:authorityRoot.endsWith('/lite-solo-v4')?'process/agent-upload/lite-solo-unit-requests/':'process/agent-upload/lite-solo-phase-boundary/',
   sourceRoot:campaignPath+'/source',sourceInventoryPath:asset(root,campaignPath,'REVIEW_INVENTORY_v1.json'),
   flowPlanPath:asset(root,campaignPath,'FLOW_PLAN_v1.json'),
   systemFactsPath:asset(root,campaignPath,'SYSTEM_FACTS_v1.json'),
