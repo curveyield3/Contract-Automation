@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "r8-phase4-r006-r007-submit-v1",
+  "operation": "SUBMIT",
+  "campaignId": "cyavkatv25-r8",
+  "campaignGenerationId": "cyavkatv25-r8-g1-20261027T104124Z",
+  "phaseSequence": 4,
+  "lane": "R",
+  "workerId": "gpt6-audit-r8",
+  "sourceSha256": "7a920115d463a2f468c688c65f5fe24ec3364ee57eea4561505fe1e484fcd779",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "R-006",
+      "claimEpoch": 1,
+      "claimToken": "d682a174-3de9-4e78-97a9-be1737552561",
+      "packetSha256": "22c756e775bbf3741eeff6ac2e3ed05973589af9542ac8e11a204872474965ed",
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/R-006/submissions/gpt6-audit-r8/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "603988bb7d3513605cca88e985cdc2f38a73580a719798a0395db3072ca4a0bb",
+      "unitSpecRevision": 1
+    },
+    {
+      "unitId": "R-007",
+      "claimEpoch": 1,
+      "claimToken": "6b3eaeaa-ee10-47ff-a5d1-61db81cebb74",
+      "packetSha256": "7f749ee35f20836ecb9720c74905d9e05fe91e4400cd02754f268426deab2881",
+      "submissionPath": "campaigns/cyavKATv25 r8/work/phase-04/units/R-007/submissions/gpt6-audit-r8/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "9ace61f878b35802449a2d4976a154e479f7957575ffa0f387efa8f54f354594",
+      "unitSpecRevision": 1
+    }
+  ]
+}
