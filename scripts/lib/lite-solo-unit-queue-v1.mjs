@@ -10,7 +10,7 @@ import {deriveBaselineObligationsV1} from '../../packages/github-native-sim/src/
 import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite-solo-phase-prefill-v1.mjs';
 import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
-import {planSemanticBatchesV1} from './lite-solo-semantic-batches-v1.mjs';
+import {planSemanticBatchesV1,SEMANTIC_BATCH_READING_GUIDE_V1} from './lite-solo-semantic-batches-v1.mjs';
 
 export const UNIT_POLICY=Object.freeze({issueBatchDefault:4,issueBatchMax:4,approvalBatchMax:5,maxParallelWorkers:null});
 export const REQUEST_SCHEMA='curveyield-lite-solo-unit-batch-request-v1';
@@ -44,8 +44,31 @@ const unitBase=(campaign,phase,id)=>path.posix.join(rootOf(campaign,phase),id);
 const asArray=x=>Array.isArray(x)?x:[];
 const isObject=x=>x&&typeof x==='object'&&!Array.isArray(x);
 const clone=x=>structuredClone(x);
-const depSatisfied=(queue,u)=>asArray(u.dependencies).every(k=>
- queue.units[k]?.status==='ACCEPTED'||queue.acceptedRecords?.[k]?.status==='ACCEPTED');
+// Bind acceptance to the exact original-record evidence, even when a parent
+// batch is undergoing targeted rework and its unrelated siblings remain valid.
+function prerequisiteEvidence(queue,dependencies){
+ const evidence={};
+ for(const id of asArray(dependencies)){
+  const record=queue.acceptedRecords?.[id];
+  if(record?.status==='ACCEPTED'&&record.snapshotSha256){
+   evidence[id]='RECORD:'+record.snapshotSha256;continue;
+  }
+  const unit=queue.units[id];
+  if(unit?.status==='ACCEPTED'&&unit.acceptedPath&&unit.acceptedSha256){
+   evidence[id]='UNIT:'+unit.acceptedPath+':'+unit.acceptedSha256;continue;
+  }
+  return null;
+ }
+ return evidence;
+}
+const depSatisfied=(queue,u)=>prerequisiteEvidence(queue,u.dependencies)!==null;
+const dependenciesFresh=(queue,u,recorded)=>{
+ const current=prerequisiteEvidence(queue,u.dependencies);
+ // Historical accepted snapshots predate the evidence-fingerprint field. Do
+ // not rewrite a frozen campaign; still require all prerequisites to be valid.
+ return current!==null&&(recorded===undefined||
+  JSON.stringify(current)===JSON.stringify(recorded));
+};
 const isPhase=(p)=>[4,5,6].includes(p);
 const RELEASE='lite-solo-v4';
 const AUTHORITY='Audit Skill - Lite-Solo Authority/lite-solo-v4';
@@ -265,7 +288,7 @@ function consolidateNewSemanticUnitsV1({root,campaignPath,phase,plan,queue}){
    throw Error('cannot rebatch an already claimed, submitted or accepted unit');
   const payload={schemaVersion:'curveyield-lite-solo-batched-assignment-v1',unitId:id,
    phaseSequence:phase,field:group.field,groupKeys:group.groupKeys,members:group.members,
-   readingGuide:'Complete each assigned member by its original recordKey. Omit already accepted members during targeted rework.'};
+   readingGuide:SEMANTIC_BATCH_READING_GUIDE_V1};
   const packetPath=path.posix.join(unitBase(campaignPath,phase,id),'ASSIGNMENT_PACKET_v1.json');
   const manifest=writePagedPrefillV1(root,packetPath,payload);
   const spec={unitId:id,kind:'BATCH',field:group.field,members:group.members,
@@ -469,7 +492,7 @@ function batchIndex(root,campaign,phase,requestId,units){
   pages.push({path:rel,sha256:sha(page)});
  }
  const index={schemaVersion:'curveyield-lite-solo-unit-batch-index-v1',
-  count:units.length,pages,readingGuide:'Read paged indexes and only assigned unit pages. Commit immutable worker/claim-epoch/attempt submissions; enqueue 1–5-unit SUBMIT requests, then immediately continue independent claimed units. NEVER wait for controller approval. Claim up to four more when eligible; dependent units require persisted ACCEPTED.'};
+  count:units.length,pages,readingGuide:'Read claimed packetPath and verify packetSha256. BATCH packets are paged prefill manifests: reconstruct the value from digest-checked prefill-pages, preserve each member recordKeys[0] as entries[].key, and submit one multi-entry snapshot under the batch claim. Rework only outstanding member records; accepted siblings remain immutable. For other units use the original one-record form. Commit source/authority-bound immutable worker/claim-epoch/attempt submissions and enqueue 1–5-unit SUBMIT requests. Claim at most four; only persisted accepted original records unlock dependents.'};
  const rel=path.posix.join(dir,'BATCH_INDEX_v1.json');put(root,rel,index);
  return rel;
 }
@@ -601,9 +624,15 @@ function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schem
   const previous=queue.acceptedRecords[member.unitId];
   if(previous?.status==='ACCEPTED'){
    const snapshot=read(root,previous.path);
+   if(sha(snapshot)!==previous.snapshotSha256||
+      !dependenciesFresh(queue,member,snapshot.prerequisiteEvidence))
+    errors.push({path:member.unitId,message:'previously accepted record has stale prerequisite evidence'});
    if(JSON.stringify(snapshot.entry)!==JSON.stringify(entry))
     errors.push({path:member.unitId,message:'previously accepted record is immutable; submit only outstanding records'});
    continue;
+  }
+  if(!depSatisfied(queue,member)){
+   errors.push({path:member.unitId,message:'original-record prerequisites are not currently accepted'});continue;
   }
   const failures=validateShardUnit({root,u:member,data:{schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:[entry]},
    phase,schema,queue,plan});
@@ -617,7 +646,7 @@ function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schem
    memberUnitId:member.unitId,recordKey:entry.key,campaignGenerationId:plan.campaignGenerationId,
    sourceSha256:plan.sourceSha256,authorityDigest:plan.authorityDigest,phaseSequence:phase,
    phaseEpoch:plan.phaseEpoch,claimEpoch:state.claimEpoch,workerId:request.workerId,
-   submissionSha256:digest,entry};
+   submissionSha256:digest,prerequisiteEvidence:prerequisiteEvidence(queue,member.dependencies),entry};
   put(root,rel,snapshot);
   queue.acceptedRecords[member.unitId]={status:'ACCEPTED',path:rel,
    snapshotSha256:sha(snapshot),parentUnitId:u.unitId};
@@ -633,7 +662,9 @@ function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schem
      snapshot.campaignGenerationId!==plan.campaignGenerationId||
      snapshot.sourceSha256!==plan.sourceSha256||
      snapshot.authorityDigest!==plan.authorityDigest||
-     snapshot.phaseEpoch!==plan.phaseEpoch)throw Error('immutable batch record binding changed');
+     snapshot.phaseEpoch!==plan.phaseEpoch||
+     !dependenciesFresh(queue,m,snapshot.prerequisiteEvidence))
+   throw Error('immutable batch record binding or prerequisites changed');
   return snapshot.entry;
  });
  return {errors:[],assembledSubmission:{schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:assembled},
@@ -658,7 +689,9 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
  let submission,errors=[],batchOutcome=null;
  try{submission=JSON.parse(raw.toString('utf8'));}
  catch(e){submission=null;errors=[{path:'$',message:'Malformed JSON: '+String(e.message??e)}];}
- if(!errors.length&&['FLOW','ATTACK'].includes(u.kind)){
+ if(!errors.length&&!depSatisfied(queue,u)){
+  errors=[{path:u.unitId,message:'upstream prerequisite acceptance is missing or invalidated'}];
+ }else if(!errors.length&&['FLOW','ATTACK'].includes(u.kind)){
   const packet=readUnitPacketV1({root,packetPath:u.packetPath}),
    inventory=read(root,reviewInventoryRelV1(root,campaign,'REVIEW_INVENTORY_v1.json'));
   const checked=u.kind==='ATTACK'
@@ -680,6 +713,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
    authorityDigest:directory.authorityDigest,phaseSequence:phase,phaseEpoch:request.phaseEpoch,
    unitSpecRevision:u.unitSpecRevision,packetSha256:item.packetSha256,
    workerId:request.workerId,claimEpoch:state.claimEpoch,submissionSha256:digest,
+   prerequisiteEvidence:prerequisiteEvidence(queue,u.dependencies),
    submission:batchOutcome?.assembledSubmission??submission,
    ...(batchOutcome?.recordEvidenceRefs?{recordEvidenceRefs:batchOutcome.recordEvidenceRefs}:{})});
   state.status='ACCEPTED';state.acceptedSha256=digest;state.acceptedPath=acceptedRel;state.lastErrors=[];
@@ -814,6 +848,25 @@ export function finalizeReadinessV1({root,campaignPath,directory,phase}){
  if(pending.length)return {ready:false,reason:'mandatory units remain',unitIds:pending.map(x=>x.unitId)};
  if(queue.finalizeStatus==='SEALED')return {ready:false,reason:'already sealed'};
  if(queue.finalizeStatus==='BLOCKED')return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
+ for(const u of plan.units){
+  const state=queue.units[u.unitId],accepted=read(root,state.acceptedPath);
+  if(accepted.submissionSha256!==state.acceptedSha256||
+     !dependenciesFresh(queue,u,accepted.prerequisiteEvidence))
+   return {ready:false,reason:'stale parent acceptance or prerequisites',unitIds:[u.unitId]};
+  if(u.kind==='BATCH'){
+   for(const [index,m] of u.members.entries()){
+    const ref=queue.acceptedRecords?.[m.unitId];
+    if(ref?.status!=='ACCEPTED'||ref.parentUnitId!==u.unitId)
+     return {ready:false,reason:'missing original-record acceptance',unitIds:[m.unitId]};
+    const snapshot=read(root,ref.path);
+    if(sha(snapshot)!==ref.snapshotSha256||snapshot.memberUnitId!==m.unitId||
+       snapshot.recordKey!==m.recordKeys[0]||
+       JSON.stringify(snapshot.entry)!==JSON.stringify(accepted.submission?.entries?.[index])||
+       !dependenciesFresh(queue,m,snapshot.prerequisiteEvidence))
+     return {ready:false,reason:'stale original-record acceptance or prerequisites',unitIds:[m.unitId]};
+   }
+  }
+ }
  return {ready:true,plan,queue};
 }
 export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}){
@@ -872,58 +925,63 @@ export function statusUnitQueueV1({root,campaignPath,phase}){
 
 export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[]}){
  const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
- const reopened=new Set(),unmapped=[],invalidatedMembers=new Set();
+ const reopened=new Set(),unmapped=[],invalidatedMembers=new Set(),invalidated=new Set();
+ const membersOf=u=>u.kind==='BATCH'?u.members:[u];
+ const invalidate=(u,m,reason)=>{
+  const state=queue.units[u.unitId];
+  if(u.kind==='BATCH'&&queue.acceptedRecords?.[m.unitId]){
+   delete queue.acceptedRecords[m.unitId];invalidatedMembers.add(m.unitId);
+  }
+  invalidated.add(m.unitId);
+  // Invalidate the parent identity too for any legacy dependents of batch IDs.
+  invalidated.add(u.unitId);
+  if(state.status==='ACCEPTED')state.status='REWORK_REQUIRED';
+  state.lastSubmissionSha256=null;
+  if(!state.lastErrors.includes(reason))state.lastErrors=[...state.lastErrors,reason].slice(-30);
+  reopened.add(u.unitId);
+ };
  for(const entry of deficiencies){
   const message=typeof entry==='string'?entry:JSON.stringify(entry),found=new Map();
+  const mark=(u,m)=>{
+   const foundMembers=found.get(u.unitId)??new Map();
+   foundMembers.set(m.unitId,m);found.set(u.unitId,foundMembers);
+  };
   for(const match of message.matchAll(/(?:actions\.)?(?:step-[0-9]+\.outputs\.)?([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/g)){
    const field=match[1],position=Number(match[2]);
-   for(const u of plan.units){
-    for(const m of u.kind==='BATCH'?u.members:[u])
-     if(m.field===field&&m.recordIndex===position){
-      const members=found.get(u.unitId)??new Set();members.add(m.unitId);found.set(u.unitId,members);
-     }
-   }
+   for(const u of plan.units)for(const m of membersOf(u))
+    if(m.field===field&&m.recordIndex===position)mark(u,m);
   }
-  // Candidate-key diagnostics identify original members rather than discarding
-  // every previously accepted sibling inside a consolidated packet.
+  // Reopen only the named original candidate record, never all batch siblings.
   for(const u of plan.units){
-   const eligible=(u.kind==='BATCH'?u.members:[u]).filter(m=>
+   const eligible=membersOf(u).filter(m=>
     ['targetDesigns','targetDispositions','candidateProofRecords'].includes(m.field));
    if(!eligible.length)continue;
    const state=queue.units[u.unitId],accepted=state?.acceptedPath?maybe(root,state.acceptedPath):null;
    for(const m of eligible){
     const value=accepted?.submission?.entries?.find(e=>e.key===m.recordKeys?.[0])?.value;
     if(value&&typeof value==='object'&&[value.candidateKey,value.tempKey].some(key=>
-       typeof key==='string'&&key.length>=3&&message.includes(key))){
-      const members=found.get(u.unitId)??new Set();members.add(m.unitId);found.set(u.unitId,members);
-    }
+       typeof key==='string'&&key.length>=3&&message.includes(key)))mark(u,m);
    }
   }
   if(!found.size){unmapped.push(message);continue;}
-  for(const [id,memberIds] of found){
-   const state=queue.units[id];
-   if(state.status==='ACCEPTED')state.status='REWORK_REQUIRED';
-   state.lastErrors=[...state.lastErrors,message].slice(-30);reopened.add(id);
-   for(const memberId of memberIds){
-    if(queue.acceptedRecords?.[memberId]){
-     delete queue.acceptedRecords[memberId];invalidatedMembers.add(memberId);
-    }
-   }
+  for(const [unitId,group] of found){
+   const u=plan.units.find(x=>x.unitId===unitId);
+   for(const m of group.values())invalidate(u,m,message);
   }
  }
- // Reopened record prerequisites cannot continue to authorize accepted targets.
- const invalidated=new Set([...invalidatedMembers,...reopened]);
+ // Propagate to original dependent records, including accepted members of a
+ // partly accepted or reopened batch. Do not discard unrelated sibling proofs.
  let changed=true;
  while(changed){
   changed=false;
-  for(const u of plan.units){
-   if(!asArray(u.dependencies).some(dep=>invalidated.has(dep)))continue;
-   const state=queue.units[u.unitId];
-   if(state.status==='ACCEPTED'){
-    state.status='REWORK_REQUIRED';
-    state.lastErrors=[...state.lastErrors,'upstream accepted record invalidated during aggregate rework'].slice(-30);
-    reopened.add(u.unitId);invalidated.add(u.unitId);changed=true;
-   }
+  for(const u of plan.units)for(const m of membersOf(u)){
+   if(invalidated.has(m.unitId)||!asArray(m.dependencies).some(id=>invalidated.has(id)))continue;
+   const accepted=u.kind==='BATCH'
+    ?queue.acceptedRecords?.[m.unitId]?.status==='ACCEPTED'
+    :queue.units[u.unitId]?.status==='ACCEPTED';
+   if(!accepted)continue;
+   invalidate(u,m,'upstream accepted original record invalidated during aggregate rework');
+   changed=true;
   }
  }
  const result={reopenedUnits:[...reopened].sort(),unmappedDeficiencies:unmapped,

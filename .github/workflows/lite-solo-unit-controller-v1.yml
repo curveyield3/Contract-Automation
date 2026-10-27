@@ -91,10 +91,12 @@ jobs:
           campaign_path="$(gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=main" --jq .content | base64 -d | jq -er .workspacePath)"
           bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
           node scripts/lite-solo-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode drain > /tmp/unit-drain.json
-          echo "campaign_path=$campaign_path" >> "$GITHUB_OUTPUT"
-          echo "directory=$directory" >> "$GITHUB_OUTPUT"
-          echo "ready=$(jq -r .finalizeReady /tmp/unit-drain.json)" >> "$GITHUB_OUTPUT"
-          echo "phase=$(jq -r .phase /tmp/unit-drain.json)" >> "$GITHUB_OUTPUT"
+          {
+            echo "campaign_path=$campaign_path"
+            echo "directory=$directory"
+            echo "ready=$(jq -r .finalizeReady /tmp/unit-drain.json)"
+            echo "phase=$(jq -r .phase /tmp/unit-drain.json)"
+          } >> "$GITHUB_OUTPUT"
       - name: Run existing Phase-5 preflight only at seal
         if: ${{ steps.process.outputs.ready == 'true' && steps.process.outputs.phase == '5' }}
         id: preflight
@@ -136,7 +138,7 @@ jobs:
           git -C .audit-controller config user.name 'CurveYield Lite-Solo Unit Controller'
           git -C .audit-controller config user.email 'lite-solo-unit-controller@users.noreply.github.com'
           success=false
-          for attempt in 1 2 3 4 5; do
+          for _attempt in 1 2 3 4 5; do
             git -C .audit-controller add -- "$CAMPAIGN_PATH" "$DIRECTORY"
             if git -C .audit-controller diff --cached --quiet; then success=true; break; fi
             git -C .audit-controller commit -m "audit(lite-solo): accept parallel units $CAMPAIGN_ID"
