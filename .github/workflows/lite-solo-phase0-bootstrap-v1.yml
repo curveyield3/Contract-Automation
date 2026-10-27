@@ -88,8 +88,8 @@ jobs:
     secrets: inherit
 
   fork-deploy-config:
-    needs: intelligence
-    if: ${{ always() && !inputs.resume_from_finalize && (needs.intelligence.result == 'success' || inputs.resume_from_deploy) }}
+    needs: [permit-source, intelligence]
+    if: ${{ always() && needs.permit-source.result == 'success' && !inputs.resume_from_finalize && (needs.intelligence.result == 'success' || inputs.resume_from_deploy) }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
@@ -269,8 +269,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   finalize-and-launch-reviewer1:
-    needs: [fork-deploy-config]
-    if: ${{ always() && (needs.fork-deploy-config.result == 'success' || inputs.resume_from_finalize) }}
+    needs: [permit-source, fork-deploy-config]
+    if: ${{ always() && needs.permit-source.result == 'success' && (needs.fork-deploy-config.result == 'success' || inputs.resume_from_finalize) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
