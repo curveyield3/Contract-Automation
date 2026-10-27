@@ -236,7 +236,7 @@ const groups={
     // EIP-2 transactions reject high-s, but ECRecover in contract code
     // can legitimately recover high-s. A variant cannot consume nonce twice.
     let validHigh=false;
-    try{await read('permit',high,CAROL);validHigh=true;}
+    try{await rpc('eth_call',[{to:DAI,from:CAROL,data:iface.encodeFunctionData('permit',high)},'latest']);validHigh=true;}
     catch(err){if(!/revert|execution reverted/i.test(String(err?.message)))throw err;}
     check('high-s pair has same signing r',high[7],sig.r);
     if(validHigh)await tx(CAROL,'permit',high);
