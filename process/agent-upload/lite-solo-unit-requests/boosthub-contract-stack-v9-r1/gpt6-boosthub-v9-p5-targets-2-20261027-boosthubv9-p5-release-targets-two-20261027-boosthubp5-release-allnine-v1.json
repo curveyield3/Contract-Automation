@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "boosthubv9-p5-release-targets-two-20261027-boosthubp5-release-allnine-v1",
+  "operation": "RELEASE",
+  "campaignId": "boosthub-contract-stack-v9-r1",
+  "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
+  "phaseSequence": 5,
+  "lane": "AUTO",
+  "workerId": "gpt6-boosthub-v9-p5-targets-2-20261027",
+  "items": [
+    {
+      "unitId": "P5-T-005",
+      "claimEpoch": 1,
+      "claimToken": "963ea900-bf04-4a4d-b642-f1247a0385cc"
+    },
+    {
+      "unitId": "P5-T-006",
+      "claimEpoch": 1,
+      "claimToken": "685b8519-3ab1-4d6d-814c-38a31f0184d0"
+    },
+    {
+      "unitId": "P5-T-007",
+      "claimEpoch": 1,
+      "claimToken": "d48c3fbd-44cf-4fba-a635-043691e60dff"
+    },
+    {
+      "unitId": "P5-T-008",
+      "claimEpoch": 1,
+      "claimToken": "c0c9889e-a42d-450a-b3e2-388e4f4bca5b"
+    }
+  ],
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main"
+}
