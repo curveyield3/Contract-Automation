@@ -14,6 +14,10 @@ const slug=request.previewCampaignId.replace(/-r[0-9]+$/,'');
 const dest='campaigns/audit-preview-completion-'+slug.slice('audit-preview-'.length)+'-r1';
 const read=p=>JSON.parse(fs.readFileSync(path.join(root,p),'utf8'));
 const entry=read('Audit Campaign Directory/campaigns/audit-preview-completion-'+slug.slice('audit-preview-'.length)+'.json');
+if(entry.campaignStatus==='ACTIVE'&&entry.previewCompletion?.status==='LAUNCHED'){
+ console.log(JSON.stringify({status:'ALREADY_LAUNCHED',campaignId:entry.campaignId}));
+ process.exit(0);
+}
 if(entry.campaignStatus!=='STAGED_PRELAUNCH'||entry.previewCompletion?.originalCampaignId!==request.previewCampaignId)
  throw Error('APC_NOT_STAGED');
 const original=entry.previewCompletion.originalWorkspacePath;
