@@ -3,6 +3,8 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 
 const MAX_SHARD=64*1024, MAX_INDEX=32*1024;
+// Fixed semantic work shards may grow as source-bound review entries are completed.
+const MAX_V13_SHARD_BYTES=100*1024;
 // The immutable index bounds fixed rows; its agent-owned append slots need capacity
 // for large discovery reconciliation without changing the campaign-bound index.
 const MAX_V13_APPEND_BYTES=1024*1024, MAX_V13_APPEND_RECORDS=1024;
@@ -155,7 +157,7 @@ export function secureShardWorkFormV13({root,formRel,phase,retireFull=true}){
      const add=(kind,startIndex,entries,append=false)=>{
        const file='shard-'+String(++serial).padStart(4,'0')+'_v1.json';
        const body={schemaVersion:'curveyield-work-shard-v13',kind,path:tokens,startIndex,entries};
-       if(bytes(body)>MAX_SHARD)throw new Error('v13 work shard exceeds 64 KiB: '+file);
+       if(bytes(body)>MAX_V13_SHARD_BYTES)throw new Error('v13 work shard exceeds 100 KiB: '+file);
        secureWriteV13(root,path.posix.join(workDir,file),body);
        descriptions.push({file,kind,path:tokens,startIndex,append,
          recordKeys:append?[]:entries.map(x=>x.key.slice(prefix.length))});
@@ -171,8 +173,8 @@ export function secureShardWorkFormV13({root,formRel,phase,retireFull=true}){
          const key=recordKey(tokens,value[i],i);
          const proposed={schemaVersion:'curveyield-work-shard-v13',kind:'array',path:tokens,startIndex:start,
            entries:[...entries,{key,value:value[i]}]};
-         if(bytes(proposed)>MAX_SHARD){
-           if(!entries.length)throw new Error('v13 record larger than 64 KiB: '+key);
+         if(bytes(proposed)>MAX_V13_SHARD_BYTES){
+           if(!entries.length)throw new Error('v13 record larger than 100 KiB: '+key);
            break;
          }
          entries.push({key,value:value[i]});i++;
@@ -235,7 +237,7 @@ export function secureRestoreWorkFormV13({root,indexRel}){
    if(!/^shard-[0-9]{4}_v1\.json$/.test(desc.file))throw new Error('invalid v13 shard filename');
    const rel=path.posix.join(workDir,desc.file);
    const raw=fs.readFileSync(relfile(root,rel),'utf8');
-   const maxBytes=desc.append?MAX_V13_APPEND_BYTES:MAX_SHARD;
+   const maxBytes=desc.append?MAX_V13_APPEND_BYTES:MAX_V13_SHARD_BYTES;
    const maxRecords=desc.append?MAX_V13_APPEND_RECORDS:48;
    if(Buffer.byteLength(raw)>maxBytes)throw new Error('v13 shard exceeds authorized bound: '+desc.file);
    const item=JSON.parse(raw);
