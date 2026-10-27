@@ -522,8 +522,25 @@ function itemIdentity(item,u,state,request,root){
  if(state.status==='ACCEPTED')return 'UNCHANGED';
  if(!['CLAIMED','SUBMITTED','REWORK_REQUIRED'].includes(state.status))return 'STALE';
  const packetRel=u.packetPath??u.shardPath;
- if(item.packetSha256!== (u.packetSha256??hex(fs.readFileSync(repoFile(root,packetRel)))))
-  return 'STALE';
+ // Shard bytes change after the controller assembles accepted work. For a
+ // record reopened *after* aggregate validation, compare the retry against
+ // its previously accepted, source/authority/epoch-bound packet identity
+ // rather than requiring a worker to claim a new digest of mutable output.
+ const livePacketSha256=u.packetSha256??hex(fs.readFileSync(repoFile(root,packetRel)));
+ let packetBound=item.packetSha256===livePacketSha256;
+ if(!packetBound&&state.status==='REWORK_REQUIRED'&&state.acceptedPath&&state.acceptedSha256){
+  const previous=maybe(root,state.acceptedPath);
+  packetBound=previous?.unitId===u.unitId&&
+   previous.campaignGenerationId===request.campaignGenerationId&&
+   previous.sourceSha256===request.sourceSha256&&
+   previous.authorityDigest===request.authorityDigest&&
+   previous.phaseSequence===request.phaseSequence&&
+   previous.phaseEpoch===request.phaseEpoch&&
+   previous.unitSpecRevision===u.unitSpecRevision&&
+   previous.packetSha256===item.packetSha256&&
+   previous.submissionSha256===state.acceptedSha256;
+ }
+ if(!packetBound)return 'STALE';
  const allowed=path.posix.join(unitBase(request.campaignWorkspacePath,request.phaseSequence,u.unitId),
     'submissions',request.workerId,'epoch-'+state.claimEpoch);
  if(!item.submissionPath?.startsWith(allowed+'/')||
