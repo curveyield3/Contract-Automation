@@ -6,5 +6,5 @@
   "scanUrls": [],
   "authorizePhase0Execution": true,
   "deliveryTransport": "DIRECT",
-  "recoveryReason": "Resume existing campaign Phase 0 after native Foundry out-path adapter repair 2a0fed89e0b5e4de4a759a7fb8fe90878ec4366f"
+  "recoveryReason": "Resume the same Phase 0 campaign with detailed Forge native build-info diagnostics in b5975ac6caab1bebd676d5d51057b5065c8a4331"
 }
