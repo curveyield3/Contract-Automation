@@ -54,8 +54,8 @@ const rowId=(phase,field,index)=>{
  '5:economicReviewRecords':'P5-E','5:reconciliationRecords':'P5-R','5:targetDesigns':'P5-T','5:newCandidateRecords':'P5-R',
  '6:deploymentAssessments':'P6-D','6:targetDispositions':'P6-T',
  '6:baselineTestRecords':'P6-B','6:candidateProofRecords':'P6-P',
- '6:mergedExecutionConclusions':'P6-C','6:obligationDispositions':'P6-OB',
- '6:typedExecutionLimitations':'P6-L','6:fullOnlyOmissions':'P6-O','6:newCandidateRecords':'P6-N'
+ '6:mergedExecutionConclusions':'P6-C','6:obligationDispositions':'P6-C',
+ '6:typedExecutionLimitations':'P6-L','6:fullOnlyOmissions':'P6-O','6:newCandidateRecords':'P6-P'
  };
  const prefix=families[phase+':'+field];
  if(!prefix)throw Error('unassigned semantic field '+phase+':'+field);
@@ -272,10 +272,18 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
   }
  }
  if(phase===6){
-  const interpretation=plan.units.filter(u=>['deploymentAssessments','targetDispositions'].includes(u.field)).map(u=>u.unitId);
-  const proofs=plan.units.filter(u=>['baselineTestRecords','candidateProofRecords'].includes(u.field)).map(u=>u.unitId);
-  for(const u of plan.units.filter(u=>u.field==='mergedExecutionConclusions'||u.field==='obligationDispositions'))
-   u.dependencies=[...new Set([...interpretation,...proofs])];
+  const interpretations=plan.units.filter(u=>['deploymentAssessments','targetDispositions'].includes(u.field));
+  const proofs=plan.units.filter(u=>['baselineTestRecords','candidateProofRecords','newCandidateRecords'].includes(u.field));
+  // A merged conclusion is global, but obligation rows depend only on matching baseline groups.
+  const allPrerequisites=[...interpretations,...proofs].map(u=>u.unitId);
+  for(const u of plan.units.filter(u=>u.field==='mergedExecutionConclusions'))
+   u.dependencies=allPrerequisites;
+  for(const u of plan.units.filter(u=>u.field==='obligationDispositions')){
+   const obligationId=u.initialValue?.obligationId;
+   u.dependencies=u.kind==='APPEND'?[]:proofs.filter(p=>
+    p.field==='baselineTestRecords'&&Array.isArray(p.initialValue?.obligationIds)&&
+    p.initialValue.obligationIds.includes(obligationId)).map(p=>p.unitId);
+  }
  }
  for(const u of plan.units)if(u.dependencies.length)queue.units[u.unitId].status='BLOCKED_DEPENDENCY';
  const missing=new Set(plan.units.flatMap(x=>x.dependencies).filter(id=>!queue.units[id]));
