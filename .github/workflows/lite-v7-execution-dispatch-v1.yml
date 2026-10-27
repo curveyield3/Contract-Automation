@@ -107,7 +107,7 @@ jobs:
           else
             echo "::error::request_path must be a campaign-local Phase-6, Phase-8 revalidation, or Phase-9 request"; exit 1
           fi
-          [[ "$request_path" != *".."* && "$request_path" != *"\"* ]] || { echo "::error::Unsafe request_path"; exit 1; }
+          case "$request_path" in *".."*|*'\'*) echo "::error::Unsafe request_path"; exit 1;; esac
 
           {
             echo "campaign_id=$campaign_id"
