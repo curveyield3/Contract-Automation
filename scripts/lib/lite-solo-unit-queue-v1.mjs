@@ -143,7 +143,7 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
    if(plan.recordOwnership[ownership])throw Error('duplicate canonical record owner: '+ownership);
    plan.recordOwnership[ownership]=id;
    addUnit(plan,queue,{unitId:id,kind:'SHARD',field,shardFile:d.file,
-    shardPath:path.posix.join(dir,d.file),shardIndex:n,
+    shardPath:path.posix.join(dir,d.file),shardIndex:n,recordIndex:d.startIndex+n,
     recordKeys:[entry.key],initialValue:entry.value,path:d.path,
     dependencies:[],unitSpecRevision:1});
   }
@@ -201,6 +201,7 @@ function unlock(queue,plan){
 }
 function noWork(queue,plan){
  if(plan.units.every(u=>queue.units[u.unitId].status==='ACCEPTED'))return 'PHASE_COMPLETE';
+ if(plan.units.some(u=>queue.units[u.unitId].status==='REWORK_REQUIRED'))return 'REWORK_REQUIRED';
  if(plan.units.some(u=>queue.units[u.unitId].status==='BLOCKED_DEPENDENCY'))return 'BLOCKED_DEPENDENCY';
  if(plan.units.some(u=>queue.units[u.unitId].status==='SUBMITTED'))return 'AWAITING_APPROVAL';
  if(plan.units.some(u=>queue.units[u.unitId].status==='CLAIMED'))return 'ALL_WORK_CLAIMED';
@@ -456,4 +457,37 @@ export function statusUnitQueueV1({root,campaignPath,phase}){
  for(const [id,s] of Object.entries(queue.units)){counts[s.status]=(counts[s.status]??0)+1;if(s.workerId)workers.add(s.workerId);}
  return {phase,counts,workers:[...workers].sort(),approvalBacklog:Object.values(queue.units).filter(x=>x.status==='SUBMITTED').length,
   eligible:available(queue,plan).map(x=>x.unitId),revision:queue.revision,finalizeStatus:queue.finalizeStatus};
+}
+
+export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[]}){
+ const plan=read(root,planRel(campaignPath,phase)),queue=read(root,queueRel(campaignPath,phase));
+ const reopened=[],unmapped=[];
+ for(const entry of deficiencies){
+  const message=typeof entry==='string'?entry:JSON.stringify(entry);
+  const found=new Set();
+  for(const match of message.matchAll(/(?:actions\.)?(?:step-[0-9]+\.outputs\.)?([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/g)){
+   const field=match[1],position=Number(match[2]);
+   for(const u of plan.units)if(u.field===field&&u.recordIndex===position)found.add(u.unitId);
+  }
+  // Machine-binding diagnostics often name candidate keys instead of array indices.
+  for(const u of plan.units.filter(x=>['targetDesigns','targetDispositions','candidateProofRecords'].includes(x.field))){
+   const state=queue.units[u.unitId];
+   const accepted=state?.acceptedPath?maybe(root,state.acceptedPath):null;
+   const values=accepted?.submission?.entries?.map(x=>x.value)??[];
+   if(values.some(v=>v&&typeof v==='object'&&
+      [v.candidateKey,v.tempKey].some(key=>typeof key==='string'&&key.length>=3&&message.includes(key))))
+      found.add(u.unitId);
+  }
+  if(!found.size){unmapped.push(message);continue;}
+  for(const id of found){
+   const state=queue.units[id];
+   if(state.status==='ACCEPTED')state.status='REWORK_REQUIRED';
+   state.lastErrors=[...state.lastErrors,message].slice(-30);
+   reopened.push(id);
+  }
+ }
+ const result={reopenedUnits:[...new Set(reopened)].sort(),unmappedDeficiencies:unmapped};
+ queue.finalizeStatus='REWORK_REQUIRED';queue.finalizeDetails=result;queue.revision++;
+ put(root,queueRel(campaignPath,phase),queue);
+ return result;
 }
