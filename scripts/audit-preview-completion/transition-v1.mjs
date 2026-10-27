@@ -2,10 +2,11 @@
 // Audit Preview Completion v1. This is an isolated fork bridge, not a mutation
 // of the sealed Preview or the installed Lite-Solo workflows.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {preparePhaseWork,validateWorkForm,loadPhaseSchema} from '../lib/lite-solo-phase-work-v1.mjs';
-import {renderControllerPhaseReport} from '../lib/lite-solo-phase-prefill-v1.mjs';
+import {renderControllerPhaseReport,validatePhaseScaffold} from '../lib/lite-solo-phase-prefill-v1.mjs';
 import {createUnitPlanV1} from '../lib/lite-solo-unit-queue-v1.mjs';
 
 const root=path.resolve(process.env.AUDIT_CONTROLLER_ROOT??'.audit-controller');
@@ -122,6 +123,22 @@ const importHistory=(dir)=>{
  // These prior phases were done under Preview authority. Retain their exact
  // original bytes and identities in importedFrom, never misrepresent their origin.
  const replacement=s=>s.replaceAll(previewId,newId).replaceAll(oldRoot,dest);
+ // Rebind only continuation copies of derived semantic data. Original accepted
+ // Preview data and all raw machine/chain evidence are retained unchanged.
+ for(let phase=1;phase<=3;phase++){
+  const folder=ref(dest,'derived/phase-'+phase);
+  if(!fs.existsSync(inside(folder)))continue;
+  for(const name of fs.readdirSync(inside(folder)).filter(x=>x.endsWith('.json'))){
+   const rel=ref(folder,name),data=read(rel);
+   const originalBytes=fs.readFileSync(inside(rel));
+   const changed=JSON.parse(JSON.stringify(data).replaceAll(oldRoot,dest).replaceAll(previewId,newId));
+   if(changed?.workSchemaPath)changed.workSchemaPath=ref(authorityRoot,
+     'phases/phase-'+phase+'/PHASE_'+String(phase).padStart(2,'0')+'_SCHEMA_v1.json');
+   changed.previewImportProvenance={originalPath:ref(oldRoot,'derived/phase-'+phase+'/'+name),
+     originalSha256:sha(originalBytes),originalProduct:'AUDIT_PREVIEW'};
+   write(rel,changed);
+  }
+ }
  for(let phase=0;phase<=3;phase++){
   const id=String(phase).padStart(2,'0');
   const loc=ref(dest,'receipts/PHASE_'+id+'_RECEIPT_v1.json');
@@ -174,7 +191,7 @@ const launch=async()=>{
   throw Error('APC_ONCHAIN_VERIFICATION_REQUIRED');
  const form=read(editRel),prior=read(originalFormRel);
  const {schema}=loadPhaseSchema(root,authorityRoot,4);
- const problems=validateWorkForm(schema,form);
+ const problems=[...validateWorkForm(schema,form),...validatePhaseScaffold(4,form)];
  if(problems.length)throw Error('APC_PHASE4_EDIT_INVALID: '+problems.slice(0,12).join('; '));
  if(form.phase!==prior.phase||form.schemaVersion!==prior.schemaVersion
   ||JSON.stringify(form.automationInputs)!==JSON.stringify(prior.automationInputs))
@@ -260,4 +277,20 @@ const launch=async()=>{
  console.log(JSON.stringify({operation:'LAUNCH',status:'ACTIVE',campaignId:newId,
   nextPhaseSequence:5,phase4ReceiptPath:receiptRel}));
 };
-if(request.operation==='PREPARE')copyCampaign();else await launch();
+if(request.operation==='PREPARE')copyCampaign();
+else {
+ // Failure must not leave a half-rebound audit, partial Phase-5 queue or a
+ // spuriously LAUNCHED directory. This is a transactional transition.
+ const temp=fs.mkdtempSync(path.join(os.tmpdir(),'audit-preview-completion-'));
+ try{
+  fs.cpSync(inside(dest),path.join(temp,'campaign'),{recursive:true});
+  fs.copyFileSync(inside(entryPath),path.join(temp,'directory.json'));
+  try{await launch();}
+  catch(error){
+   fs.rmSync(inside(dest),{recursive:true,force:true});
+   fs.cpSync(path.join(temp,'campaign'),inside(dest),{recursive:true});
+   fs.copyFileSync(path.join(temp,'directory.json'),inside(entryPath));
+   throw error;
+  }
+ }finally{fs.rmSync(temp,{recursive:true,force:true});}
+}
