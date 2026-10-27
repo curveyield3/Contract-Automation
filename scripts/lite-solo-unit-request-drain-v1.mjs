@@ -40,7 +40,8 @@ if(arg.mode!=='finalize'){
   const result=processUnitRequestV1({root,campaignPath,directory,request});
   const resultRel=path.posix.join(campaignPath,'work/phase-'+String(phase).padStart(2,'0'),
    'units','controller','results','REQUEST_'+request.requestId+'_v1.json');
-  if(!fs.existsSync(repoFile(root,resultRel))){writeJson(repoFile(root,resultRel),result);changed=true;}
+  const previous=fs.existsSync(repoFile(root,resultRel))?readJson(repoFile(root,resultRel)):null;
+  if(JSON.stringify(previous)!==JSON.stringify(result)){writeJson(repoFile(root,resultRel),result);changed=true;}
   results.push({requestId:request.requestId,status:result.status});
  }
  if(changed){directory.updatedAt=new Date().toISOString();writeJson(directoryFile,directory);}
