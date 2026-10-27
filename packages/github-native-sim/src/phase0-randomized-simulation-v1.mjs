@@ -424,6 +424,20 @@ export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,lo
     const r=await runDeploymentScriptV1({command:'timeout',args:['900s','forge',...args],cwd:projectRoot,env:scrubbedEnv({ETH_RPC_URL:anvilUrl})});
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     const success=r.exitCode===0&&after>before&&!/(?:^|\n)Error: (?:script failed|target contract has no bytecode|failed to)/i.test(String(r.stderr??''));
+    if(!success && /vm\.getDeployedCode: no bytecode/i.test(String(r.stderr??''))){
+      const artifactRoot=path.join(projectRoot,'out',path.posix.basename(item.path));
+      for(const name of ['P0_00_DeployGateConfig','K1_QuestSigning','P2_01_Deploy','P2_02_ConfigureVault']){
+        let diagnostic={contract:name,file:path.join(artifactRoot,name+'.json')};
+        try {
+          const raw=JSON.parse(await fs.readFile(diagnostic.file,'utf8'));
+          const deployed=raw.deployedBytecode??{},creation=raw.bytecode??{};
+          diagnostic={contract:name,creationLength:String(creation.object??'').length,deployedLength:String(deployed.object??'').length,
+            creationLinkReferences:creation.linkReferences??{},deployedLinkReferences:deployed.linkReferences??{},artifactPresent:true};
+        } catch(e){diagnostic={contract:name,artifactPresent:false,error:String(e?.code??e).slice(0,100)};}
+        console.error('[phase0-foundry-artifact-diag] '+JSON.stringify(diagnostic));
+      }
+    }
+
     attempts.push({framework:'FOUNDRY',path:item.path,entry:item.entry,command:['forge',...args].join(' '),exitCode:r.exitCode,status:success?'PASS':'FAILED',blockRange:[before+1,after],stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
   }
   for(const item of detected.unsafeHardhat??[]) limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'HARDHAT',path:item.path,reason:item.reason});
