@@ -6,5 +6,5 @@
   "scanUrls": [],
   "authorizePhase0Execution": true,
   "deliveryTransport": "DIRECT",
-  "recoveryReason": "Resume the same Phase 0 campaign with detailed Forge native build-info diagnostics in b5975ac6caab1bebd676d5d51057b5065c8a4331"
+  "recoveryReason": "Resume same campaign with source-pinned Vyper compiler installation 216dfbe48626e79aecec53eee7918094e7a22b88"
 }
