@@ -112,7 +112,7 @@ jobs:
             echo "::error::Fork source reports incorrect chain ID"; exit 1
           }
           rm -rf .phase0-deploy-output
-          python3 scripts/audit-command-guard-v1.py --label phase0-fork-deploy --wall 2400 --idle 900 --log "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" -- node scripts/run-phase0-fork-deploy-config-v1.mjs \
+          python3 scripts/audit-command-guard-v1.py --label phase0-fork-deploy --wall 2400 --idle 300 --log "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" -- node scripts/run-phase0-fork-deploy-config-v1.mjs \
             --controller-root .audit-controller \
             --campaign-path "$CAMPAIGN_PATH" \
             --output .phase0-deploy-output \
