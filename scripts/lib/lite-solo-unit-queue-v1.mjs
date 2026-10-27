@@ -1036,55 +1036,34 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
   invalidated.add(u.unitId);
   if(state.status==='ACCEPTED')state.status='REWORK_REQUIRED';
   state.lastSubmissionSha256=null;
-  if(!state.lastErrors.includes(reason))state.lastErrors=[...state.lastErrors,reason].slice(-30);
+  if(!asArray(state.lastErrors).includes(reason))state.lastErrors=[...asArray(state.lastErrors),reason].slice(-30);
   reopened.add(u.unitId);
  };
  for(const entry of deficiencies){
-  const message=typeof entry==='string'?entry:JSON.stringify(entry),found=new Map();
-  const mark=(u,m)=>{
-   const foundMembers=found.get(u.unitId)??new Map();
-   foundMembers.set(m.unitId,m);found.set(u.unitId,foundMembers);
-  };
-  // Controller aggregate Phase-4 errors name discovery IDs, not shard array indices.
-  // Reopen the candidate append slot for genuinely missing Step-3 candidate records,
-  // or just the named original reconciliation batch member for deficient controls.
-  if(phase===4){
-   const discoveryId=message.match(/\bDISC-[0-9]{4}\b/)?.[0];
-   if(discoveryId&&message.includes('candidate must be present in Step 3')){
-    const append=plan.units.find(u=>u.kind==='APPEND'&&u.field==='candidateRecords');
-    if(append)mark(append,append);
-   }else if(discoveryId&&message.includes('must name the blocking control')){
-    for(const u of plan.units.filter(u=>u.kind==='BATCH'&&u.field==='discoveryReconciliationRecords')){
-     for(const m of u.members){
-      const ref=queue.acceptedRecords?.[m.unitId];
-      const accepted=ref?.path?maybe(root,ref.path):null;
-      if(accepted?.entry?.value?.recordKey===discoveryId)mark(u,m);
-     }
-    }
+  const message=typeof entry==='string'?entry:String(entry?.message??'');
+  // Only schema/required-data failures with a precise frozen form slot
+  // can be charged back to an immutable, originally assigned unit.
+  // Never infer ownership from candidate names, DISC ids, prose or keywords.
+  const parsed=/^actions\.(step-[0-9]+)\.outputs\.([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\](?:\.|:| |$)/.exec(message);
+  if(!parsed){unmapped.push(message);continue;}
+  const [,step,field,rawIndex]=parsed,index=Number(rawIndex);
+  const matches=[];
+  for(const u of plan.units)for(const m of membersOf(u))
+   if(m.kind!=='APPEND'&&m.path?.[1]===step&&m.field===field&&m.recordIndex===index)
+    matches.push({u,m});
+  if(!matches.length){
+   // An APPEND slot owns only records beyond the exact fixed slot range.
+   const fixed=plan.units.flatMap(u=>membersOf(u)).filter(m=>
+    m.kind!=='APPEND'&&m.path?.[1]===step&&m.field===field);
+   const firstAppend=fixed.length?Math.max(...fixed.map(m=>m.recordIndex))+1:0;
+   if(index>=firstAppend){
+    const append=plan.units.filter(u=>u.kind==='APPEND'&&u.path?.[1]===step&&u.field===field);
+    if(append.length===1)matches.push({u:append[0],m:append[0]});
    }
   }
-  for(const match of message.matchAll(/(?:actions\.)?(?:step-[0-9]+\.outputs\.)?([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/g)){
-   const field=match[1],position=Number(match[2]);
-   for(const u of plan.units)for(const m of membersOf(u))
-    if(m.field===field&&m.recordIndex===position)mark(u,m);
-  }
-  // Reopen only the named original candidate record, never all batch siblings.
-  for(const u of plan.units){
-   const eligible=membersOf(u).filter(m=>
-    ['targetDesigns','targetDispositions','candidateProofRecords'].includes(m.field));
-   if(!eligible.length)continue;
-   const state=queue.units[u.unitId],accepted=state?.acceptedPath?maybe(root,state.acceptedPath):null;
-   for(const m of eligible){
-    const value=accepted?.submission?.entries?.find(e=>e.key===m.recordKeys?.[0])?.value;
-    if(value&&typeof value==='object'&&[value.candidateKey,value.tempKey].some(key=>
-       typeof key==='string'&&key.length>=3&&message.includes(key)))mark(u,m);
-   }
-  }
-  if(!found.size){unmapped.push(message);continue;}
-  for(const [unitId,group] of found){
-   const u=plan.units.find(x=>x.unitId===unitId);
-   for(const m of group.values())invalidate(u,m,message);
-  }
+  if(matches.length!==1){unmapped.push(message);continue;}
+  const {u,m}=matches[0];
+  invalidate(u,m,message);
  }
  // Propagate to original dependent records, including accepted members of a
  // partly accepted or reopened batch. Do not discard unrelated sibling proofs.
@@ -1103,7 +1082,8 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
  }
  const result={reopenedUnits:[...reopened].sort(),unmappedDeficiencies:unmapped,
   invalidatedRecordIds:[...invalidatedMembers].sort()};
- queue.finalizeStatus=result.reopenedUnits.length?'REWORK_REQUIRED':'BLOCKED';
+ queue.finalizeStatus=result.unmappedDeficiencies.length?'CONTROLLER_INTEGRITY_FAILURE':
+  result.reopenedUnits.length?'REWORK_REQUIRED':'BLOCKED';
  queue.finalizeDetails=result;queue.revision++;
  put(root,queueRel(campaignPath,phase),queue);
  return result;
