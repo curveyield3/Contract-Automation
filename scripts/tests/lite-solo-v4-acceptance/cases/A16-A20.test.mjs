@@ -89,7 +89,21 @@ scenario('A19',()=>p6Fixture('A19',{baseline:0,proof:1}),(f,d)=>{
  const challenged=f.submit('a19-worker','a19-forged',[forged]);
  assert.equal(challenged.unchangedUnits.length,1,'accepted snapshot immutable even after forged re-submit');
  assert.equal(f.state().units[u.unitId].acceptedSha256,hash);
- d.status='PARTIAL: immutable accepted uncertainty verified; decisive evidence gate not validated on new unaccepted proof';
+ // Independent proof fixture is unaccepted; unauthorized decisive outcome must fail
+ // even when all required string fields are syntactically present.
+ const fresh=p6Fixture('A19-forged',{baseline:0,proof:1});
+ try{
+  fresh.plan();
+  const [freshUnit]=fresh.claim('a19-forger','a19-forger-claim');
+  const fake=fresh.snap(freshUnit,'a19-forger',{verdict:'CONFIRMED',
+    ledgerRef:'UNEXECUTED',attackAssertionNames:[],controlAssertionNames:[]});
+  const proofCheck=fresh.submit('a19-forger','a19-forged-first',[fake]);
+  d.unauthenticatedDecisiveVerdictAccepted=proofCheck.acceptedUnits.includes(freshUnit.unitId);
+  assert.equal(proofCheck.acceptedUnits.length,0,
+    'SECURITY: unauthenticated CONFIRMED with no ledger or decisive observations must be rejected');
+  assert.equal(proofCheck.reworkUnits.length,1);
+ }finally{fresh.cleanup();}
+ d.status='LOCAL: inconclusive retained, forged decisive denied; final seal/machine runner requires separate qualification';
 });
 scenario('A20',()=>fixture('A20',{flowCount:3}),(f,d)=>{
  f.plan();
