@@ -96,8 +96,9 @@ jobs:
           echo "directory=$directory" >> "$GITHUB_OUTPUT"
           echo "ready=$(jq -r .finalizeReady /tmp/unit-drain.json)" >> "$GITHUB_OUTPUT"
           echo "phase=$(jq -r .phase /tmp/unit-drain.json)" >> "$GITHUB_OUTPUT"
+          echo "authorized=$(jq -r '(.machineExecutionAuthorization.status=="APPROVED" and .machineExecutionAuthorization.sourceSha256==.sourceSha256 and .machineExecutionAuthorization.scope=="PHASE5_TARGET_EXECUTION")' ".audit-controller/$directory")" >> "$GITHUB_OUTPUT"
       - name: Run existing Phase-5 preflight only at seal
-        if: ${{ steps.process.outputs.ready == 'true' && steps.process.outputs.phase == '5' }}
+        if: ${{ steps.process.outputs.ready == 'true' && steps.process.outputs.phase == '5' && steps.process.outputs.authorized == 'true' }}
         id: preflight
         shell: bash
         env:
@@ -115,7 +116,7 @@ jobs:
         if: ${{ steps.process.outputs.ready == 'true' && steps.process.outputs.phase == '5' && steps.preflight.outputs.runnable == 'true' }}
         uses: ./.github/actions/setup-v7-toolchain
       - name: Finalize only when all unit and machine evidence requirements pass
-        if: ${{ steps.process.outputs.ready == 'true' }}
+        if: ${{ steps.process.outputs.ready == 'true' && (steps.process.outputs.phase != '5' || steps.process.outputs.authorized == 'true') }}
         shell: bash
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
