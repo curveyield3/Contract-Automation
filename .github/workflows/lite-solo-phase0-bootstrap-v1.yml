@@ -200,7 +200,22 @@ jobs:
             exit 1
           fi
           git commit -m "audit(phase0): retain only forked package deploy/config evidence ${{ inputs.campaign_id }}"
-          git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+          # Reconcile unrelated concurrent campaign commits without force-pushing.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$AUDIT_CONTROLLER_REF"
+            if ! git rebase FETCH_HEAD; then
+              git rebase --abort || true
+              echo "::error::Conflicting Audit-Controller edits require campaign-specific reconciliation"
+              exit 1
+            fi
+            if git push origin "HEAD:$AUDIT_CONTROLLER_REF"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::Audit-Controller push contention persisted after five safe retries"
+              exit 1
+            fi
+          done
 
       - name: Summarize
         shell: bash
@@ -272,7 +287,22 @@ jobs:
             exit 1
           fi
           git commit -m "audit(phase0): seal automated bootstrap $CAMPAIGN_ID"
-          git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+          # Reconcile unrelated concurrent campaign commits without force-pushing.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$AUDIT_CONTROLLER_REF"
+            if ! git rebase FETCH_HEAD; then
+              git rebase --abort || true
+              echo "::error::Conflicting Audit-Controller edits require campaign-specific reconciliation"
+              exit 1
+            fi
+            if git push origin "HEAD:$AUDIT_CONTROLLER_REF"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::Audit-Controller push contention persisted after five safe retries"
+              exit 1
+            fi
+          done
 
       - name: Verify Phase 1 was activated for direct Lite-Solo control
         shell: bash
