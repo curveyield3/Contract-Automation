@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "curveyield-lite-solo-phase-boundary-request-v1",
+  "campaignId": "audit-preview-completion-live-ethereum-dai-6b175474-r1",
+  "reviewKind": "phase",
+  "phaseSequence": 8,
+  "auditControllerRef": "main",
+  "attempt": 1,
+  "phase8EvidenceSubmission": {
+    "kind": "DAI_PINNED_MUTABLE_ANVIL_BOB_V1",
+    "runId": 40586336907,
+    "artifactId": 12770963873,
+    "runnerCommit": "7d66c7490fc3cd9ee5c7a42bd48ef9fbb28634fb",
+    "sourceSha256": "1c384141058f50d53b9e58b89c0b83aa60bd1066406f017d177121de332705f2",
+    "requestedDisposition": "EVIDENCE_ACCEPTED_FOR_PHASE8_VALIDATION_NO_PHASE_SEAL",
+    "keepSealedPhase6Unchanged": true
+  }
+}
