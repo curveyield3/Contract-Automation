@@ -255,7 +255,7 @@ export function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
   if(Array.isArray(items))writeSection('systemFacts.'+field,items);
  const indexRel=path.posix.join(dir,'UNIT_'+unitId+'_INDEX_v1.json');
  const index={schemaVersion:'curveyield-discovery-packet-section-index-v1',unitId,role,
-  packetPath,submissionPath:submissionRel(campaignPath,unitId),
+  packetPath,submissionPath:payload.submissionPath??submissionRel(campaignPath,unitId),
   readingGuide:'Read assigned section pages and reconstruct any JSON_FRAGMENT_BASE64 item by joining ordered decoded pieces and verifying the serialized SHA-256. Preserve all original source context and rules. Save immutable worker/claim-epoch attempts, submit 1–5 completed units and immediately continue independent work without approval polling. Dependent units require persisted ACCEPTED.',
   primaryContextIds:arr(payload.primaryContextIds),
   flowIds:arr(payload.flowIds),integrationQuestionIds:arr(payload.integrationQuestionIds),
