@@ -41,10 +41,13 @@ test('A03: with 9 eligible, claim 9 then 0; unlock exactly 1 via accepted prereq
   const held=f.process(f.request('CLAIM',holder,'A03-hold-ten-1',{desiredUnitCount:10}));
   assert.equal(held.claimedUnits.length,10);
   f.process(f.request('RELEASE',holder,'A03-release-seven-1',{items:releaseItems(held.claimedUnits.slice(0,7))}));
-  const before=f.state();details.initialCounts=Object.fromEntries(['AVAILABLE','ACCEPTED','CLAIMED',
+  const before=f.state();details.initialCounts=Object.fromEntries(['AVAILABLE','RELEASED','ACCEPTED','CLAIMED',
    'BLOCKED_DEPENDENCY'].map(s=>[s,Object.values(before.units).filter(x=>x.status===s).length]));
-  assert.deepEqual(details.initialCounts,{AVAILABLE:9,ACCEPTED:4,CLAIMED:3,BLOCKED_DEPENDENCY:4});
-  const expected=f.units.filter(id=>before.units[id]?.status==='AVAILABLE');
+  assert.equal(details.initialCounts.AVAILABLE+(details.initialCounts.RELEASED??0),9,'AVAILABLE and RELEASED are both eligible');
+  assert.equal(details.initialCounts.ACCEPTED,4);
+  assert.equal(details.initialCounts.CLAIMED,3);
+  assert.equal(details.initialCounts.BLOCKED_DEPENDENCY,4);
+  const expected=f.units.filter(id=>['AVAILABLE','RELEASED'].includes(before.units[id]?.status));
   const r1=f.process(f.request('CLAIM',agent,'A03-nine-1',{desiredUnitCount:10}));
   assert.equal(r1.claimedUnits.length,9);
   assert.deepEqual(r1.claimedUnits.map(x=>x.unitId),expected);
@@ -63,7 +66,7 @@ test('A03: with 9 eligible, claim 9 then 0; unlock exactly 1 via accepted prereq
   assert.deepEqual(r3.claimedUnits.map(x=>x.unitId),['X-001']);
   details.results=[r1.claimedUnits.map(x=>x.unitId),r2.claimedUnits.map(x=>x.unitId),
    r3.claimedUnits.map(x=>x.unitId)];
-  details.finalCounts=Object.fromEntries(['AVAILABLE','ACCEPTED','CLAIMED',
+  details.finalCounts=Object.fromEntries(['AVAILABLE','RELEASED','ACCEPTED','CLAIMED',
    'BLOCKED_DEPENDENCY'].map(s=>[s,Object.values(f.state().units).filter(x=>x.status===s).length]));
   // Plan v5 specifically requires NO_ELIGIBLE_WORK; preserve an informative
   // failure if production deliberately returns a more precise typed status.
