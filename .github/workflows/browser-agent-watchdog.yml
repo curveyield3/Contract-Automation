@@ -100,13 +100,13 @@ jobs:
     if: needs.discover.outputs.has_targets == 'true' && needs.discover.outputs.browser_ready == 'true'
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 8
       matrix:
         wake_id: ${{ fromJSON(needs.discover.outputs.targets) }}
     concurrency:
-      # WATCHDOG owns the same shared browser-state queue between wake events.
-      # Successor WAKE jobs wait until the active sweep exits, and vice versa.
-      group: chatgpt-shared-browser-session-v1
+      # A wake and its own watchdog cannot operate the same session simultaneously.
+      # Independent sessions run on isolated GitHub-hosted runners.
+      group: chatgpt-browser-session-${{ matrix.wake_id }}
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 35
