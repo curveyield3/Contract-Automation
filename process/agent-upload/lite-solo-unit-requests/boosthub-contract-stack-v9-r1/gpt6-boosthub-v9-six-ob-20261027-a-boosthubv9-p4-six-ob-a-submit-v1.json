@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "boosthubv9-p4-six-ob-a-submit-v1",
+  "operation": "SUBMIT",
+  "campaignId": "boosthub-contract-stack-v9-r1",
+  "campaignGenerationId": "boosthub-contract-stack-v9-r1-g1-20261027T123001Z",
+  "phaseSequence": 4,
+  "lane": "P4-OB",
+  "workerId": "gpt6-boosthub-v9-six-ob-20261027-a",
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "authorityDigest": "dc3452d8bf4c2a2f6e720ca2b3d469fb752be2bf27acd676aea1066add0c0786",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "items": [
+    {
+      "unitId": "P4-OB-003",
+      "claimEpoch": 1,
+      "claimToken": "30ba9d23-a8ea-4a53-b8ac-a703da670db5",
+      "packetSha256": "f9482862986867008a2b45d028f7dacbdd7f46f930e100dd83984afc92e16f33",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/P4-OB-003/submissions/gpt6-boosthub-v9-six-ob-20261027-a/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "9398a1be1c348fc58f46d4e6289b7f91c5c358a6b72fffc284c7505701130046"
+    },
+    {
+      "unitId": "P4-OB-004",
+      "claimEpoch": 1,
+      "claimToken": "25f9ff8a-00c8-4b9c-96b5-461014ba9bdf",
+      "packetSha256": "f9482862986867008a2b45d028f7dacbdd7f46f930e100dd83984afc92e16f33",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/P4-OB-004/submissions/gpt6-boosthub-v9-six-ob-20261027-a/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "75ac5cf37e4de806954e37aa033f231d820ee9faf61904129da3ab02bb566314"
+    },
+    {
+      "unitId": "P4-OB-005",
+      "claimEpoch": 1,
+      "claimToken": "b11e756c-5c2e-4471-9b2e-650afa8eb814",
+      "packetSha256": "f9482862986867008a2b45d028f7dacbdd7f46f930e100dd83984afc92e16f33",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/P4-OB-005/submissions/gpt6-boosthub-v9-six-ob-20261027-a/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "45761b8ee25b98f97ac89f5bf16ef5be1dd73f627d0cc1d27e114d14962e5fd2"
+    },
+    {
+      "unitId": "P4-OB-006",
+      "claimEpoch": 1,
+      "claimToken": "e49ac168-a798-4094-8b44-db441140e2c4",
+      "packetSha256": "f9482862986867008a2b45d028f7dacbdd7f46f930e100dd83984afc92e16f33",
+      "unitSpecRevision": 1,
+      "submissionPath": "campaigns/BoostHub_Contract_Stack_v9 r1/work/phase-04/units/P4-OB-006/submissions/gpt6-boosthub-v9-six-ob-20261027-a/epoch-1/SUBMISSION_ATTEMPT_001_v1.json",
+      "submissionSha256": "5692ff09eae40faf98ac20d11dead8bf26cfd9504ff92857615893b3ba3bfe5c"
+    }
+  ]
+}
