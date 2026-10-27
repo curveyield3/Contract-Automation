@@ -13,7 +13,7 @@ gh auth setup-git
 checkout_controller() {
   local directory="$1"
   local ref="$2"
-  gh repo clone CurveYield2/Audit-Controller "$directory" -- --filter=blob:none --no-checkout
+  gh repo clone curveyield3/Audit-Controller "$directory" -- --filter=blob:none --no-checkout
   (
     cd "$directory"
     git sparse-checkout init --no-cone
