@@ -84,7 +84,7 @@ const receipt={schemaVersion:'dai-corrective-controller-phase5-executed-proof-v1
  executedGroups:expected,assertionCount:count,anvilTransactions:15,rollbackSnapshots:8,
  candidateId:'DAI-PERMIT-SIG-001',
  candidateEvidenceStatus:'BOUNDED_SECURITY_TESTS_PASSED_NO_EXHAUSTIVE_DISPROVAL',
- phase5Sealed:false,notV7RawResult:true,notAProvenFinding:false,
+ phase5Sealed:false,notV7RawResult:true,notAProvenFinding:true,
  immutablePriorCampaignUnchanged:true,
  securityLimits:['Passing signature tests do not establish physical key custody or prove every ECDSA shape.','Privileged ward roster and governance custody require independent review.']};
 put('CONTROLLER_ACCEPTANCE_RECEIPT_v1.json',Buffer.from(JSON.stringify(receipt,null,2)+'\n'));
