@@ -106,35 +106,65 @@ contract DAILiveForkSecurityV1 {
         require(D.nonces(ALICE)==nonceAlice && D.nonces(BOB)==nonceBob,"APPROVE_CHANGED_NONCE");
     }
 
-    function test_prop_BOB_0007_permitReplayExpiryAndDomain() public {
+    // Each permit dimension runs from the same pinned fork snapshot, isolated by Foundry.
+    // Separate functions prevent Solidity 0.5.12 stack depth from masking controls.
+    function test_prop_BOB_0007_validAndReplay() public {
         address holder=vm.addr(HOLDER_PK);
-        address spender=BOB;
         uint nonce=D.nonces(holder);
-        bytes32 domain=D.DOMAIN_SEPARATOR();
-        bytes32 valid=_digest(holder,spender,nonce,0,true,domain);
-        (uint8 v,bytes32 r,bytes32 s)=vm.sign(HOLDER_PK,valid);
+        (uint8 v,bytes32 r,bytes32 sigS)=vm.sign(HOLDER_PK,_digest(holder,BOB,nonce,0,true,D.DOMAIN_SEPARATOR()));
         require(_invoke(CAROL,abi.encodeWithSignature("permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)",
-          holder,spender,nonce,0,true,v,r,s)), "VALID_PERMIT_REJECTED");
-        require(D.nonces(holder)==nonce+1 && D.allowance(holder,spender)==uint(-1),"VALID_PERMIT_STATE_WRONG");
+          holder,BOB,nonce,0,true,v,r,sigS)), "VALID_PERMIT_REJECTED");
+        require(D.nonces(holder)==nonce+1 && D.allowance(holder,BOB)==uint(-1),"VALID_PERMIT_STATE_WRONG");
         require(!_invoke(CAROL,abi.encodeWithSignature("permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)",
-          holder,spender,nonce,0,true,v,r,s)), "REPLAY_ACCEPTED");
-        uint8 twinV=v==27?28:27;
-        bytes32 twinS=bytes32(SECP256K1_N-uint256(s));
+          holder,BOB,nonce,0,true,v,r,sigS)), "REPLAY_ACCEPTED");
+    }
+
+    function test_prop_BOB_0007_malleatedReplay() public {
+        address holder=vm.addr(HOLDER_PK);
+        uint nonce=D.nonces(holder);
+        (uint8 v,bytes32 r,bytes32 sigS)=vm.sign(HOLDER_PK,_digest(holder,BOB,nonce,0,true,D.DOMAIN_SEPARATOR()));
+        require(_invoke(CAROL,abi.encodeWithSignature("permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)",
+          holder,BOB,nonce,0,true,v,r,sigS)), "VALID_PERMIT_REJECTED");
         require(!_invoke(CAROL,abi.encodeWithSignature("permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)",
-          holder,spender,nonce,0,true,twinV,r,twinS)), "MALLEATED_REPLAY_ACCEPTED");
-        (v,r,s)=vm.sign(HOLDER_PK,_digest(holder,spender,nonce+1,1,true,domain));
+          holder,BOB,nonce,0,true,v==27?28:27,r,bytes32(SECP256K1_N-uint256(sigS)))),
+          "MALLEATED_REPLAY_ACCEPTED");
+    }
+
+    function test_prop_BOB_0007_expiry() public {
+        address holder=vm.addr(HOLDER_PK);
+        uint nonce=D.nonces(holder);
+        (uint8 v,bytes32 r,bytes32 sigS)=vm.sign(HOLDER_PK,_digest(holder,BOB,nonce,1,true,D.DOMAIN_SEPARATOR()));
         require(!_invoke(CAROL,abi.encodeWithSignature("permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)",
-          holder,spender,nonce+1,1,true,v,r,s)), "EXPIRED_PERMIT_ACCEPTED");
-        (v,r,s)=vm.sign(HOLDER_PK,_digest(holder,spender,nonce+1,0,true,bytes32(uint256(domain)+1)));
+          holder,BOB,nonce,1,true,v,r,sigS)), "EXPIRED_PERMIT_ACCEPTED");
+        require(D.nonces(holder)==nonce,"EXPIRED_PERMIT_CHANGED_NONCE");
+    }
+
+    function test_prop_BOB_0007_wrongDomain() public {
+        address holder=vm.addr(HOLDER_PK);
+        uint nonce=D.nonces(holder);
+        (uint8 v,bytes32 r,bytes32 sigS)=vm.sign(HOLDER_PK,
+          _digest(holder,BOB,nonce,0,true,bytes32(uint256(D.DOMAIN_SEPARATOR())+1)));
         require(!_invoke(CAROL,abi.encodeWithSignature("permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)",
-          holder,spender,nonce+1,0,true,v,r,s)), "WRONG_DOMAIN_ACCEPTED");
-        (v,r,s)=vm.sign(OTHER_PK,_digest(holder,spender,nonce+1,0,true,domain));
+          holder,BOB,nonce,0,true,v,r,sigS)), "WRONG_DOMAIN_ACCEPTED");
+        require(D.nonces(holder)==nonce,"WRONG_DOMAIN_CHANGED_NONCE");
+    }
+
+    function test_prop_BOB_0007_wrongSigner() public {
+        address holder=vm.addr(HOLDER_PK);
+        uint nonce=D.nonces(holder);
+        (uint8 v,bytes32 r,bytes32 sigS)=vm.sign(OTHER_PK,_digest(holder,BOB,nonce,0,true,D.DOMAIN_SEPARATOR()));
         require(!_invoke(CAROL,abi.encodeWithSignature("permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)",
-          holder,spender,nonce+1,0,true,v,r,s)), "OTHER_SIGNER_ACCEPTED");
-        (v,r,s)=vm.sign(HOLDER_PK,_digest(holder,spender,nonce+1,0,true,domain));
+          holder,BOB,nonce,0,true,v,r,sigS)), "OTHER_SIGNER_ACCEPTED");
+        require(D.nonces(holder)==nonce,"WRONG_SIGNER_CHANGED_NONCE");
+    }
+
+    function test_prop_BOB_0007_alteredSpender() public {
+        address holder=vm.addr(HOLDER_PK);
+        uint nonce=D.nonces(holder);
+        (uint8 v,bytes32 r,bytes32 sigS)=vm.sign(HOLDER_PK,_digest(holder,BOB,nonce,0,true,D.DOMAIN_SEPARATOR()));
         require(!_invoke(CAROL,abi.encodeWithSignature("permit(address,address,uint256,uint256,bool,uint8,bytes32,bytes32)",
-          holder,CAROL,nonce+1,0,true,v,r,s)), "SPENDER_MUTATION_ACCEPTED");
-        require(D.nonces(holder)==nonce+1,"NEGATIVE_PERMIT_CHANGED_NONCE");
+          holder,CAROL,nonce,0,true,v,r,sigS)), "SPENDER_MUTATION_ACCEPTED");
+        require(D.nonces(holder)==nonce,"ALTERED_SPENDER_CHANGED_NONCE");
     }
 
     function test_prop_BOB_0008_stateTransitions() public {
