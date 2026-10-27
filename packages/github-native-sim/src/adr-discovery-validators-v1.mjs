@@ -435,6 +435,8 @@ export function validateAttackSubmissionV1({packet,submission,inventory,structur
   if(!questions.has(id))err(errors,'QUESTION_EXTRA',p+'.obligationId','Question not part of unit');
   if(answered.has(id))err(errors,'QUESTION_DUPLICATE',p+'.obligationId','Question answered more than once');
   answered.add(id);
+  if(structuralOnly&&!REVIEW_RESULTS.has(ans?.assessment))
+    err(errors,'ASSESSMENT_UNKNOWN',p+'.assessment','Integration assessment must use a declared enum');
   if(blank(ans?.reasoning)||missingEvidence(ans.reasoning))
     err(errors,'REASONING_EMPTY',p+'.reasoning','Question needs specific reasoning');
   const count=validAnchors(ans?.anchors,inventory,errors,p+'.anchors');
