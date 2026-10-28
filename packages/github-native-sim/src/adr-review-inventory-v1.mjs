@@ -70,6 +70,30 @@ function emptyArtifact(campaign,payload,schemaVersion='curveyield-review-invento
 }
 const blankPayload=()=>({sourceUnits:[],declarations:[],contexts:[],triggers:{},limitations:[],complete:false,counts:{sourceUnits:0,inScopeUnits:0,declarations:0,contexts:0,byKind:{}}});
 
+// An import-only Solidity wrapper has no declarations of its own. Its exact
+// admitted source is covered only if every directive is a pragma or import
+// and every relative import points to an admitted, AST-backed source.
+function sourceVerifiedImportOnlyV1(source,bySource,asts,identicalSourceAliases){
+  const body=source.bytes.toString('utf8').replace(/^\uFEFF/,'')
+    .replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/[^\n]*/g,'').trim();
+  if(!body.endsWith(';'))return false;
+  const statements=body.split(';').map(s=>s.trim()).filter(Boolean);
+  if(!statements.length)return false;
+  let importCount=0;
+  for(const statement of statements){
+    if(/^pragma\s+solidity\s+[0-9.^~<>=\s]+$/.test(statement)||
+       /^pragma\s+abicoder\s+v[12]$/.test(statement))continue;
+    const importMatch=statement.match(/^import\s+(?:(?:\*\s+as\s+[A-Za-z_$][\w$]*|\{\s*[A-Za-z_$][\w$]*(?:\s+as\s+[A-Za-z_$][\w$]*)?(?:\s*,\s*[A-Za-z_$][\w$]*(?:\s+as\s+[A-Za-z_$][\w$]*)?)*\s*\})\s+from\s+)?["']([^"'\r\n]+)["']$/);
+    if(!importMatch)return false;
+    const imported=importMatch[1];
+    if(!imported.startsWith('./')&&!imported.startsWith('../'))return false;
+    const resolved=path.posix.normalize(path.posix.join(path.posix.dirname(source.path),imported));
+    if(!bySource.has(resolved)||(!asts.has(resolved)&&!identicalSourceAliases.has(resolved)))return false;
+    importCount++;
+  }
+  return importCount>0;
+}
+
 export async function buildReviewInventoryV1({projectRoot,build,campaign,slither=null}) {
   if(!projectRoot||!build||!campaign)throw new TypeError('projectRoot, build, campaign required');
   const sources=await listAdmittedSourcesV1(projectRoot), bySource=new Map();
@@ -158,27 +182,16 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
     }
   }
 
-  // The exact BoostHub v9 archive has a declaration-free import-only shim
-  // and a separate Foundry deployment script. Its admitted production build
-  // intentionally excludes both, while the fork lane executes the script.
-  // Preserve explicit source-anchored file-review units instead of claiming
-  // that the runner's unrelated solc 0.8.30 produced 0.8.28 ASTs.
-  const boundBoostHubV9=campaign.campaignId==='boosthub-contract-stack-v9-r1'&&
-    campaign.sourceSha256==='876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3';
-  const shimPath='contracts/BoostHubBeefyCompileImports_v9.sol';
-  const shimText=bySource.get(shimPath)?.bytes.toString('utf8')??'';
-  const shimStatements=shimText.replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/[^\n]*/g,'')
-    .split(';').map(x=>x.trim()).filter(Boolean);
-  const verifiedImportOnlyShim=boundBoostHubV9&&shimStatements.length===4&&
-    shimStatements.filter(x=>/^import\s+"\.\.\/beefy\/contracts\//.test(x)).length===3&&
-    shimStatements.some(x=>/^pragma\s+solidity\s+0\.8\.28$/.test(x))&&
-    shimStatements.every(x=>/^pragma\s+solidity\s+0\.8\.28$/.test(x)||/^import\s+"\.\.\/beefy\/contracts\/[^"]+\.sol"$/.test(x));
+  // Preserve source-anchored review for declaration-free import wrappers
+  // without using a different compiler or depending on a campaign identity.
+  const verifiedImportOnlySources=new Set(missingFirstParty
+    .filter(s=>!asts.has(s.path)&&sourceVerifiedImportOnlyV1(bySource.get(s.path),bySource,asts,identicalSourceAliases))
+    .map(s=>s.path));
   const sourceUnits=sources.map(s=>({sourceId:s.sourceId,path:s.path,sha256:s.sha256,scopeTier:bySource.get(s.path).tier,
     lineCount:bySource.get(s.path).bytes.reduce((n,byte)=>n+(byte===10?1:0),1),
     astStatus:s.path.endsWith('.vy')?(vyperAstBySource.has(s.path)?'AVAILABLE_VYPER_AST':identicalVyperAliases.has(s.path)?'AVAILABLE_IDENTICAL_VYPER_AST_ALIAS':'UNSUPPORTED_LANGUAGE'):
       identicalSourceAliases.has(s.path)?'AVAILABLE_IDENTICAL_SOURCE_ALIAS':auxiliaryAstPaths.has(s.path)?'AVAILABLE_AUXILIARY':asts.has(s.path)?'AVAILABLE':
-      verifiedImportOnlyShim&&s.path===shimPath?'SOURCE_VERIFIED_IMPORT_ONLY':
-      boundBoostHubV9&&s.path==='script/DeployBoostHubStack_v9.s.sol'?'SCRIPT_TEXT_REVIEW':'MISSING',
+      verifiedImportOnlySources.has(s.path)?'SOURCE_VERIFIED_IMPORT_ONLY':'MISSING',
     ...(identicalSourceAliases.has(s.path)?{canonicalAstSource:identicalSourceAliases.get(s.path)}:{}),
     ...(identicalVyperAliases.has(s.path)?{canonicalAstSource:identicalVyperAliases.get(s.path)}:{})}));
   const limitations=[scope.source===AUDIT_SCOPE_FILE
@@ -481,7 +494,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
       (/(^|\/)(script|scripts|deploy|deployment|deployments|configure|config|handover)\//i.test(s.path)||s.path.endsWith('.s.sol')));
     const importOnlyShim=s.astStatus==='SOURCE_VERIFIED_IMPORT_ONLY';
     if(s.astStatus==='MISSING'&&s.scopeTier==='IN_SCOPE'&&!scriptWithoutAst)complete=false;
-    if(boundBoostHubV9&&s.astStatus==='UNSUPPORTED_LANGUAGE'&&s.scopeTier==='IN_SCOPE')complete=false;
+    if(s.astStatus==='UNSUPPORTED_LANGUAGE'&&s.scopeTier==='IN_SCOPE')complete=false;
     const source=bySource.get(s.path),n=source.bytes,kind=scriptWithoutAst?'SCRIPT_FILE':importOnlyShim?'IMPORT_ONLY_FILE':'FILE_FALLBACK';
     const symbolId='SYM-'+digestCanonicalV1({path:s.path,qualifiedContainer:s.path,kind,canonicalSignature:'file()'}).slice(0,16);
     const ctx={contextId:symbolId.replace(/^SYM-/,'CTX-'),symbolId,path:s.path,qualifiedContainer:s.path,kind,
@@ -495,7 +508,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
     if(scriptWithoutAst)limitations.push({code:'SCRIPT_TEXT_REVIEW_NO_AST',path:s.path,
       detail:'No admitted production AST; exact source-bound deployment script must receive full source-file correctness review.'});
     else if(importOnlyShim)limitations.push({code:'SOURCE_VERIFIED_IMPORT_ONLY',path:s.path,
-      detail:'Verified exact-source Solidity 0.8.28 file contains only three imports and a pragma, with no declarations or executable code; transitive implementation contracts have independent admitted ASTs.'});
+      detail:'Verified admitted Solidity source contains only pragma/import directives, with no declarations or executable code; all relative imports have admitted ASTs or exact-byte AST aliases.'});
     else if(s.astStatus==='MISSING')limitations.push({code:'INVENTORY_INCOMPLETE',path:s.path,detail:'In-scope Solidity source has no admitted AST'});
     else limitations.push({code:'UNSUPPORTED_LANGUAGE_FILE_FALLBACK',path:s.path,detail:'Vyper requires file-level review'});
     const needed=scriptWithoutAst?['SCRIPT_EXECUTION']:importOnlyShim?[]:
@@ -607,7 +620,9 @@ export function applyAuditScopeToInventoryV1({inventory,scope,generatedAt,includ
   payload.limitations=[{code:'SCOPE_FROM_AUDIT_SCOPE_FILE',path:AUDIT_SCOPE_FILE,
     detail:'Re-scoped after Phase 0. In scope: '+scope.inScopePaths.join(', ')+'. Every other compiled source is a dependency, reviewed only where in-scope contracts inherit it.'},
     ...(payload.limitations??[]).filter(l=>l.code!=='DEPENDENCY_TIER_BY_PATH'&&!(l.code==='INVENTORY_INCOMPLETE'&&tierOf(l.path)!=='IN_SCOPE'))];
-  payload.complete=!payload.sourceUnits.some(u=>u.scopeTier==='IN_SCOPE'&&u.astStatus==='MISSING'&&!(includeScripts&&payload.contexts.some(c=>c.kind==='SCRIPT_FILE'&&c.path===u.path)));
+  payload.complete=!payload.sourceUnits.some(u=>u.scopeTier==='IN_SCOPE'&&
+    (u.astStatus==='UNSUPPORTED_LANGUAGE'||(u.astStatus==='MISSING'&&
+    !(includeScripts&&payload.contexts.some(c=>c.kind==='SCRIPT_FILE'&&c.path===u.path)))));
   const byKind={};for(const c of contexts)byKind[c.kind]=(byKind[c.kind]??0)+1;
   payload.counts={...(payload.counts??{}),sourceUnits:payload.sourceUnits.length,
     inScopeUnits:payload.sourceUnits.filter(u=>u.scopeTier==='IN_SCOPE').length,contexts:contexts.length,byKind};
