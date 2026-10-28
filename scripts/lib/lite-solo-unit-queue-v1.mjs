@@ -172,8 +172,8 @@ function readPlan(root,campaign,phase){
  // Normalize only a Git-verified alias of this same exact campaign workspace.
  const prior=index.campaignPath;
  if(prior!==campaign){
-  if(typeof prior!=='string'||!/^campaigns\\/[^/]+$/.test(prior)||
-     !/^campaigns\\/[^/]+\\/[^/]+$/.test(campaign))
+  if(typeof prior!=='string'||!/^campaigns\/[^/]+$/.test(prior)||
+     !/^campaigns\/[^/]+\/[^/]+$/.test(campaign))
    throw Error('unit plan campaign path mismatch');
   const alias=repoFile(root,prior),current=repoFile(root,campaign);
   if(!fs.lstatSync(alias).isSymbolicLink()||fs.realpathSync(alias)!==fs.realpathSync(current))
