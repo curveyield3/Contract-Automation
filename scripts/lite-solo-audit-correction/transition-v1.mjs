@@ -131,6 +131,10 @@ const stageCampaign=()=>{
   console.log(JSON.stringify({status:dir.campaignStatus,campaignId:newId,replayed:true}));
   return;
  }
+ scopeCheck({reason:request.reason??'CORRECT_ACCEPTED_SECURITY_ASSURANCE',
+  obligationIds:request.obligationIds??[],candidateIds:request.candidateIds??[]},
+  request.startPhase);
+ try{
  fs.cpSync(toFile(sourcePath),toFile(dest),{recursive:true,errorOnExist:true,force:false});
  const generation=newId+'-g1-'+when.replace(/[-:.]/g,'');
  const dir={schemaVersion:'curveyield-audit-campaign-directory-entry-v2',
@@ -152,6 +156,11 @@ const stageCampaign=()=>{
   obligationIds:request.obligationIds??[],candidateIds:request.candidateIds??[],
   instruction:'Specify only original source-bound obligation/candidate identifiers. Phase work follows bound Lite-Solo v4 and controller validation.'});
  console.log(JSON.stringify({status:'STAGED_PRELAUNCH',campaignId:newId,scopePath:scopeRel,startPhase:request.startPhase}));
+ }catch(error){
+  fs.rmSync(toFile(dest),{recursive:true,force:true});
+  if(fs.existsSync(toFile(entryRel)))fs.rmSync(toFile(entryRel),{force:true});
+  throw error;
+ }
 };
 const rebind=v=>{
  if(typeof v==='string')return v.replaceAll(sourcePath,dest).replaceAll(original.campaignId,newId);
