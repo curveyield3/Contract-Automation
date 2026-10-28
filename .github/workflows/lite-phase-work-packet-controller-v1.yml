@@ -222,7 +222,11 @@ jobs:
           fi
           if [ "$review_kind" = post-completion-followup ]; then
             [ "$phase_sequence" = 5 ] || { echo "::error::post-completion followup must bind technical Phase-5 scope"; exit 1; }
-            [ "$rework_request_path" = 'campaigns/CurveYield DEX v16 Source r4/controller/POST_COMPLETION_FOLLOWUP_REQUEST_v1.json' ] || { echo "::error::Wrong typed followup request path"; exit 1; }
+            case "$rework_request_path" in
+              'campaigns/CurveYield DEX v16 Source/CurveYield DEX v16 Source r4/controller/POST_COMPLETION_FOLLOWUP_REQUEST_v1.json' | \
+              'campaigns/CurveYield DEX v16 Source r4/controller/POST_COMPLETION_FOLLOWUP_REQUEST_v1.json') ;; # canonical or frozen legacy path
+              *) echo "::error::Wrong typed followup request path"; exit 1;;
+            esac
             [ "$hold_delivery" = true ] || { echo "::error::Followup requires no automatic successor delivery"; exit 1; }
             [ "$controller_ref" = main ] || { echo "::error::Followup requires current accepted main campaign"; exit 1; }
           fi
