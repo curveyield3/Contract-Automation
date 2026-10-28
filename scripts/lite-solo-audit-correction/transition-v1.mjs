@@ -45,6 +45,10 @@ if(original.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2'||
  !sourceAnchorRel.startsWith(sourcePath+'/'))
  throw Error('LSC_ADMITTED_LITE_SOLO_V4_SOURCE_REQUIRED');
 const sourceAnchor=load(sourceAnchorRel);
+const sourceAnchorName=sourceAnchorRel.match(/PHASE_(\d{2})_RECEIPT_v([1-9][0-9]*)\.json$/);
+if(!sourceAnchorName||sourceAnchor.phase?.sequence!==Number(sourceAnchorName[1])||
+ sourceAnchor.phase?.revision!==Number(sourceAnchorName[2]))
+ throw Error('LSC_SOURCE_LAST_RECEIPT_PATH_IDENTITY_MISMATCH');
 if(sourceAnchor.campaign?.campaignGenerationId!==original.campaignGenerationId||
  sourceAnchor.source?.sha256!==original.sourceSha256||
  sourceAnchor.authority?.manifestSha256!==original.authorityDigest||
@@ -57,7 +61,11 @@ if(original.campaignStatus==='ACTIVE'&&original.unitQueueStatePath){
  if(Object.values(state.units??{}).some(x=>['CLAIMED','SUBMITTED'].includes(x?.status)))
   throw Error('LSC_SOURCE_HAS_INFLIGHT_UNIT_CLAIMS');
 }
-const source0=load(sourcePath+'/receipts/PHASE_00_RECEIPT_v1.json');
+const source0Names=fs.readdirSync(toFile(sourcePath+'/receipts'))
+ .filter(n=>/^PHASE_00_RECEIPT_v[1-9][0-9]*\.json$/.test(n))
+ .sort((a,b)=>Number(b.match(/v(\d+)\.json$/)[1])-Number(a.match(/v(\d+)\.json$/)[1]));
+if(!source0Names.length)throw Error('LSC_NO_ADMITTED_PHASE0_RECEIPT');
+const source0=load(sourcePath+'/receipts/'+source0Names[0]);
 const authRoot=validateBoundAuthorityV1({root,receipt:source0});
 if(authRoot!=='Audit Skill - Lite-Solo Authority/lite-solo-v4'||
  source0.source?.sha256!==original.sourceSha256||
@@ -111,7 +119,8 @@ const sameSource=(stage)=>{
 };
 const inspectUnchanged=(a,b)=>{
  if(!fs.existsSync(a)||!fs.existsSync(b))throw Error('LSC_MISSING_IMPORTED_EVIDENCE');
- const left=fs.statSync(a),right=fs.statSync(b);
+ const left=fs.lstatSync(a),right=fs.lstatSync(b);
+ if(left.isSymbolicLink()||right.isSymbolicLink())throw Error('LSC_IMPORTED_EVIDENCE_SYMLINK_FORBIDDEN');
  if(left.isDirectory()!==right.isDirectory())throw Error('LSC_IMPORTED_EVIDENCE_TYPE_DRIFT');
  if(left.isDirectory()){
   const aa=fs.readdirSync(a).sort(),bb=fs.readdirSync(b).sort();
