@@ -72,8 +72,11 @@ const dependenciesFresh=(queue,u,recorded)=>{
   JSON.stringify(current)===JSON.stringify(recorded));
 };
 const isPhase=(p)=>[4,5,6].includes(p);
-const RELEASE='lite-solo-v4';
-const AUTHORITY='Audit Skill - Lite-Solo Authority/lite-solo-v4';
+const RELEASES=new Set(['lite-solo-v4','lite-solo-v5']);
+const authorityRootFor=directory=>{
+ if(!RELEASES.has(directory.authorityRelease))throw Error('unsupported Lite-Solo unit authority release');
+ return 'Audit Skill - Lite-Solo Authority/'+directory.authorityRelease;
+};
 const rowId=(phase,field,index)=>{
  const families={
  '4:discoveryReconciliationRecords':'P4-RC','4:specialistReviewRecords':'P4-SP',
@@ -89,7 +92,7 @@ const rowId=(phase,field,index)=>{
  return prefix+'-'+String(index+1).padStart(3,'0');
 };
 function assertV4(directory,phase,request=null){
- if(!isPhase(phase)||directory.mode!=='LITE_SOLO'||directory.authorityRelease!==RELEASE)
+ if(!isPhase(phase)||directory.mode!=='LITE_SOLO'||!RELEASES.has(directory.authorityRelease))
   throw Error('v4 controller requires a v4-bound Lite-Solo generation');
  if(directory.executionModel!=='PARALLEL_WORKER_UNITS')
   throw Error('campaign is not admitted to parallel execution');
@@ -254,7 +257,7 @@ export function createUnitPlanV1({root,campaignPath,directory,phase,automationRo
   const fIds=units.filter(u=>u.unitId.startsWith('F-')||u.unitId.startsWith('R-')).map(u=>u.unitId);
   for(const u of units){
    if(!/^[FRX]-\d{3}$/.test(u.unitId))throw Error('unsupported discovery unit '+u.unitId);
-   const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot:AUTHORITY,
+   const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot:authorityRootFor(directory),
     automationRoot,unitId:u.unitId,state:null,now:new Date().toISOString(),persist:true});
    const packetRel=path.posix.join(campaignPath,'work/phase-04/discovery',u.unitId,'ASSIGNMENT_PACKET_v1.json');
    const idx=writeUnitPacketIndexV1({root,campaignPath,unitId:u.unitId,role:u.unitId.startsWith('X-')?'ATTACK':'FLOW_REVIEW'});
@@ -747,7 +750,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
 function handleSubmit({root,campaign,phase,queue,plan,request,directory}){
  const receipt=read(root,path.posix.join(campaign,'receipts/PHASE_00_RECEIPT_v1.json'));
  const boundRoot=validateBoundAuthorityV1({root,receipt});
- if(boundRoot!==AUTHORITY||receipt.authority?.manifestSha256!==directory.authorityDigest)
+ if(boundRoot!==authorityRootFor(directory)||receipt.authority?.manifestSha256!==directory.authorityDigest)
   throw Error('bound v4 authority package identity mismatch at unit acceptance');
  const {schema,rel:schemaRel}=loadPhaseSchema(root,boundRoot,phase);
  if(directory.currentAssignment?.workSchemaPath!==schemaRel)
@@ -805,8 +808,8 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
   deriveBaselineObligationsV1({inventory,taxonomy:loadTaxonomyV1(automationRoot),summary}));
  // The original phase prefill is authoritative; refresh once, after complete discovery.
  const assignment=directory.currentAssignment;
- const form={...read(root,path.posix.join(AUTHORITY,'phases/phase-4/resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json'))};
- const updated=applyPhaseBoundaryPrefill({root,campaignPath:campaign,authorityRoot:AUTHORITY,sequence:4,
+ const form={...read(root,path.posix.join(authorityRootFor(directory),'phases/phase-4/resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json'))};
+ const updated=applyPhaseBoundaryPrefill({root,campaignPath:campaign,authorityRoot:authorityRootFor(directory),sequence:4,
   form,derivedInputPaths:[...asArray(assignment.derivedInputPaths),path.posix.join(campaign,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')],
   predecessorReceiptPath:assignment.predecessorReceiptPath});
  put(root,assignment.workFormPath,updated);
@@ -1000,7 +1003,7 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  const restored=secureRestoreWorkFormV13({root,indexRel:assignment.workShardIndexPath});
  const receipt=read(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'));
  const boundRoot=validateBoundAuthorityV1({root,receipt});
- if(boundRoot!==AUTHORITY||receipt.authority?.manifestSha256!==directory.authorityDigest)
+ if(boundRoot!==authorityRootFor(directory)||receipt.authority?.manifestSha256!==directory.authorityDigest)
   throw Error('CONTROLLER_INTEGRITY_FAILURE: immutable authority mismatch during assembly');
  const {schema,rel:schemaRel}=loadPhaseSchema(root,boundRoot,phase);
  if(schemaRel!==assignment.workSchemaPath)throw Error('CONTROLLER_INTEGRITY_FAILURE: assembled phase schema identity mismatch');
