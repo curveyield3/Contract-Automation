@@ -203,17 +203,25 @@ const scopeCheck=(scope,start)=>{
  for(const id of scope.candidateIds)
   if(!candidates.has(id))throw Error('LSC_UNKNOWN_ACCEPTED_CANDIDATE_'+id);
  const ledger=load(sourcePath+'/controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json');
- for(const id of scope.obligationIds){
-  const row=(ledger.obligations??[]).find(x=>x.obligationId===id);
-  if(!row)throw Error('LSC_UNKNOWN_ACCEPTED_OBLIGATION_'+id);
-  if(Number(row.requiredPhase)<start)
-   throw Error('LSC_START_AFTER_OBLIGATION_DUE_PHASE_'+id);
- }
+ const unresolved=new Set(['OPEN','IN_PROGRESS','BLOCKED_CARRIED']);
  for(const row of ledger.obligations??[]){
-  if(row.mandatory===true&&['OPEN','IN_PROGRESS','BLOCKED_CARRIED'].includes(row.status)&&
-   Number(row.requiredPhase)<start)
-   throw Error('LSC_PREDECESSOR_HAS_OVERDUE_MANDATORY_OBLIGATION_'+row.obligationId);
+  const id=String(row.obligationId??''),due=Number(row.requiredPhase);
+  if(!Number.isInteger(due)||due<1||due>10)
+   throw Error('LSC_INVALID_ORIGINAL_OBLIGATION_DUE_PHASE_'+id);
+  const selected=scope.obligationIds.includes(id);
+  const mandatoryOpen=row.mandatory===true&&unresolved.has(String(row.status));
+  if(!selected&&!mandatoryOpen)continue;
+  if(due<start)
+   throw Error('LSC_RESTART_MUST_PRECEDE_OBLIGATION_DUE_'+id);
+  // Lite-Solo v4 Phases 8–10 contain no obligation-disposition field.
+  // Re-evaluation of outstanding or selected future-due security obligations
+  // must reach Phase 6, the last evidence/obligation disposition boundary.
+  if(due>6&&start>6)
+   throw Error('LSC_OBLIGATION_REQUIRES_PHASE6_CORRECTION_'+id);
  }
+ for(const id of scope.obligationIds)
+  if(!(ledger.obligations??[]).some(x=>x.obligationId===id))
+   throw Error('LSC_UNKNOWN_ACCEPTED_OBLIGATION_'+id);
  if(start===9){
   const p8=load(sourcePath+'/derived/phase-8/PHASE_08_CANONICAL_DATA_v1.json');
   const findings=p8.actions?.['step-2']?.outputs?.validatedFindings??[];
@@ -248,13 +256,22 @@ const restoreControls=(start,scope,dir)=>{
     Number(String(x.phaseId??'').replace('phase-',''))<start);
   if(name.startsWith('CARRIED_')){
    const requested=new Set(scope.obligationIds);
-   control.obligations=(control.obligations??[]).filter(x=>Number(x.originPhase)<start);
+   const unresolved=new Set(['OPEN','IN_PROGRESS','BLOCKED_CARRIED']);
+   control.obligations=(control.obligations??[]).filter(x=>
+    Number(x.originPhase)<start||requested.has(x.obligationId)||
+    (x.mandatory===true&&unresolved.has(String(x.status))));
    for(const row of control.obligations){
-    const closureAfter=(row.closureEvidenceRefs??[]).some(p=>{
-     const m=String(p).match(/(?:phase-|PHASE_)(0?[0-9]{1,2})/i);
-     return m&&Number(m[1])>=start;
-    });
-    if(requested.has(row.obligationId)||Number(row.requiredPhase)>=start||closureAfter){
+    const reopen=requested.has(row.obligationId)||
+     (row.mandatory===true&&unresolved.has(String(row.status)));
+    if(reopen){
+     // The source's due Phase 8/9/10 is not a legal closure boundary under v4.
+     // Move the CURRENT fork's requirement to actual evidence-owning Phase 6.
+     // Retain the source due phase for provenance rather than editing history.
+     if(Number(row.requiredPhase)>6){
+      row.correctionSourceRequiredPhase=row.requiredPhase;
+      row.requiredPhase='6';
+      row.requiredReviewer='lite-solo-agent';
+     }
      row.status='OPEN';row.statusReason=null;row.closureEvidenceRefs=[];
      row.updatedAt=when;
     }
