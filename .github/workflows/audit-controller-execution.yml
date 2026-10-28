@@ -28,7 +28,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: v7-execution-${{ github.event.pull_request.head.sha || format('{0}-{1}', inputs.controller_ref, inputs.request_path) }}
+  group: v7-execution-${{ github.event.pull_request.number || inputs.request_path || github.ref }}
   cancel-in-progress: true
 
 jobs:

@@ -121,9 +121,15 @@ Mandatory rules:
 - After a normal implementation PR is merged, delete the merged branch unless repository policy explicitly requires it to remain.
 - Periodically audit non-main branches and clean up stale branches.
 
+## Lite-Solo v4 controller transport and audit execution — mandatory
+
+For admitted `mode=LITE_SOLO` / `lite-solo-v4` campaigns, the exact campaign-bound skill overrides generic V7 request-transport or human-approval prose. Use **only the existing Lite-Solo v4 controller lanes**: `process/agent-upload/lite-solo-unit-requests/<campaignId>/<workerId>-<requestId>.json` for Phase 4–6 CLAIM/SUBMIT/RELEASE; `process/agent-upload/lite-solo-phase-boundary/*.json` for Phases 1–3 and 8–10; and `process/agent-upload/lite-v7-execution/*.json` for authorized Phase-6/8/9 qualified test dispatch. These requests are committed to Contract-Automation `main` through the existing validated GitHub-connector process, **not** a V7 temporary request branch, trace-only PR or `v7:submit` request transport. Controller-only FINALIZE and phase receipt sealing are never reviewer submissions. Verify persisted acceptance and source/authority/claim identity.
+
+Lite-Solo v4 Phase-0 execution is automatic on admitted source; all mandatory and source-bound Phase-5/6/8/9 execution required by its bound phase instructions proceeds without another human approval, registration, master gate or delegated test-executor. Only the existing qualified public Contract-Automation/Anvil lane runs tests. Explicit separate authorization remains necessary for tests **outside** the admitted campaign's prescribed execution, and no user authorization is inferred for unrelated testing or infrastructure. The sole logical auditor may have parallel independently owned Phase 4–6 units; shared mutable runner state and identical request identity remain single-flight.
+
 ## Canonical V7 control surface
 
-For Audit V7, this repository has one canonical execution workflow, one runner manifest, and one operational CLI:
+For Audit V7 technical execution (not Lite-Solo v4 controller CLAIM/SUBMIT/phase-boundary transport), this repository has one canonical execution workflow, one runner manifest, and one operational CLI:
 
 - execution workflow: `.github/workflows/audit-controller-execution.yml`
 - runner manifest: `process/RUNNER_MANIFEST.json`
@@ -159,7 +165,7 @@ If the disposition contains a recovery command, use that command before inventin
 
 ## Request submission — automated and byte-safe
 
-Do not manually perform the historical blob/tree/commit/ref playbook during normal audit work.
+For V7 atomic request submissions outside the Lite-Solo v4 controller lanes, do not manually perform the historical blob/tree/commit/ref playbook during normal audit work.
 
 Use:
 
@@ -211,13 +217,13 @@ The authoritative, stepwise agent launch/recovery policy is `docs/BROWSER_AGENT_
 
 - Phase 0: source-initialization/bootstrap uses `lite-phase0-randomized-simulation-v1.yml` (the deployed/config lane) and `scripts/run-phase0-fork-deploy-config-v1.mjs`. It pins historical block/hash for both LIVE_SCAN and ZIP scripts, and LIVE_SCAN additionally proves deployed target runtime code. No fabricated off-fork replacement.
 - Phase 1–4: review/adversarial planning reads previously captured evidence. When an **authorized** master-targeted test requires mutable state, dispatch only the existing trusted V7 execution via Contract-Automation. No old Ganache, source fixture, public RPC, synthetic mock or private local chain counts as historical fork evidence.
-- Phase 5: reviewer writes source-bound `ANVIL_WORKFLOW` target designs, never runs tests. The boundary controller may automatically run candidates; do **not** submit it merely to see whether the runner was repaired without separate audit-owner authorization. For authorized execution, `lite-phase-work-packet-controller-v1.yml` injects the secret to the V7 runner, which verifies pinned archive state and local Anvil; Medusa/Forge receive **only localhost** and only if explicitly selected.
-- Phase 6: reviewer interprets real Phase-0/5 receipts; designs baseline/attacker harnesses; registered test-executor uses the existing `process/agent-upload/lite-v7-execution/` request dispatch and `audit-controller-execution.yml` for specifically authorized executions. Full raw ledgers and bound receipts are required.
+- Phase 5: for legacy multi-reviewer campaigns, follow their frozen role and authorization contract. For Lite-Solo v4, the single logical auditor authors bound runnable target designs and the existing boundary controller automatically runs required qualified evidence without an additional human approval or test-executor handoff. Never submit a phase solely to probe runner health. For authorized execution, `lite-phase-work-packet-controller-v1.yml` injects the secret to the V7 runner, which verifies pinned archive state and local Anvil; Medusa/Forge receive **only localhost** and only if explicitly selected.
+- Phase 6: for Lite-Solo v4, the logical auditor designs and authors required baseline/attacker requests and dispatches via the existing `process/agent-upload/lite-v7-execution/` and `audit-controller-execution.yml` qualified lanes without delegated test-executor or additional human authorization. Other campaign modes retain their frozen role rules. Full raw ledgers and bound receipts are required.
 - Phase 7: automatic milestone/marker, no new simulation. Phases 8–10: source-bound remediation/retest when authorized uses the same runner, historical pin and receipt requirements; no private/public fork alternatives.
 - Never invent `SIM_ARCHIVE_PRIMARY_ETHEREUM_01` or request a replacement mutable RPC credential; this is a deprecated misleading identifier, not the actual GitHub Actions secret. GitHub connector lacking `workflow_dispatch` does not mean Anvil/dRPC are missing. Use the existing documented push-triggered request and verify exact run and jobs.
 - For each required archive action, record: upstream chain, pinned block and hash, Anvil PID/session identity, chain verification, deployed bytecode/address checks, isolated-fork write traces, real ABI/oracle observations, and raw evidence digest. Do not expose the secret/URL, private-key material or browser tokens.
 - Fail closed on missing/unreachable/wrong-chain RPC, missing history/code, unsupported chain, hash mismatch, absent fork, synthetic fixture, stale snapshot or missing test permission. A local chain started without `--fork-url` is **not** archive-backed evidence. No fallback to Ganache, unauthenticated public RPC, latest unpinned chain, copied/static fixture or arbitrary local chain.
-- Approval to **inspect, repair or document** is not permission to run any test. Do not submit a test-triggering request, push a test fixture, rerun a failed workflow or create a new execution workflow without explicit audit-owner test authorization.
+- Approval to **inspect, repair or document** alone is not test authorization. For Lite-Solo v4, **the admitted campaign-bound phase contract already authorizes its mandatory source-bound testing**: do not demand separate human approval or invent a new test gate. Outside those mandatory admitted operations, do not submit test-triggering requests, push test fixtures, rerun test workflows or create execution infrastructure without explicit audit-owner authorization.
 
 ## Full simulation backend — historical Anvil only
 
