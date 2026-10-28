@@ -162,9 +162,13 @@ function correctiveScopeFailuresV1({root,campaignPath,directory,sequence,form}){
   for(const key of selected)if(!validated.has(key))
    failures.push('Correction cannot finalize without controller-accepted Phase-8 candidate '+key);
   const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'));
+  const current=Object.values(form?.actions??{}).flatMap(a=>
+   (a?.outputs?.obligationDispositions??[]).filter(x=>x&&typeof x==='object'));
   for(const id of obligations){
-   const row=(ledger?.obligations??[]).find(x=>x?.obligationId===id);
-   if(!row||!['SATISFIED','NOT_APPLICABLE'].includes(String(row.status)))
+   const historical=(ledger?.obligations??[]).find(x=>x?.obligationId===id);
+   const present=current.find(x=>x.obligationId===id);
+   const resolved=['SATISFIED','NOT_APPLICABLE'];
+   if(!historical||(!resolved.includes(String(historical.status))&&!resolved.includes(String(present?.disposition))))
     failures.push('Correction cannot finalize with unresolved selected obligation '+id);
   }
  }
