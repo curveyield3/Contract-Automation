@@ -877,8 +877,8 @@ try{
     }
   }
 
-  deficiencies.push(...validateWorkForm(schema,form,{structuralOnly:structuralUnitFinalizationV1}));
-  deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1}));
+  deficiencies.push(...validateWorkForm(schema,form,{structuralOnly:structuralUnitFinalizationV1,authorityRelease:directory.authorityRelease}));
+  deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1,authorityRelease:directory.authorityRelease}));
   if(sequence===5){
     const reportRel=path.posix.join(campaignPath,'controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json');
     const preflight=maybeJson(root,reportRel);
@@ -913,8 +913,8 @@ try{
     if(collectionDeficiencies.length===0){
       assignment.controllerPrefillDigestSha256=form.automationInputs.controllerPrefillDigestSha256;
       writeJson(repoFile(root,assignment.workFormPath),form);
-      deficiencies.push(...validateWorkForm(schema,form,{structuralOnly:structuralUnitFinalizationV1}));
-      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1}));
+      deficiencies.push(...validateWorkForm(schema,form,{structuralOnly:structuralUnitFinalizationV1,authorityRelease:directory.authorityRelease}));
+      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1,authorityRelease:directory.authorityRelease}));
     }
   }
 }catch(e){
@@ -1026,7 +1026,7 @@ if(sequence===5&&form&&deficiencies.length===0){
   if(!deficiencies.length){
     assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
     writeJson(repoFile(root,assignment.workFormPath),form);
-    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1}));
+    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1,authorityRelease:directory.authorityRelease}));
   }
 }
 
