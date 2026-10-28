@@ -942,7 +942,7 @@ try{
   deficiencies.push(...correctiveScopeFailuresV1({root,campaignPath,directory,sequence,form}));
 
   if(sequence===10){
-    deficiencies.push(...unresolvedTerminalAssuranceFailures({root,campaignPath,directory}));
+    deficiencies.push(...unresolvedTerminalAssuranceFailures({root,campaignPath,directory,currentForm:form}));
   }
 
   if(sequence===9&&deficiencies.length===0){
@@ -1290,6 +1290,11 @@ packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],contr
   }:{})
 };
 const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now,authorityRoot,replacePhase:Boolean(masterAmendmentRefreshSha)});
+if(sequence===10){
+ const remaining=unresolvedTerminalAssuranceFailures({root,campaignPath,directory});
+ if(remaining.length)throw new Error('TERMINAL_ASSURANCE_POST_SYNC_BLOCKED: '+remaining.join('; '));
+}
+
 if(sealedRework){
   const invalid=readJson(requiredFile(root,controls.invalidRel,'evidence invalidation matrix'));
   const events=invalid.events??(invalid.events=[]);
