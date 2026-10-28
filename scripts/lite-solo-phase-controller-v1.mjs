@@ -832,9 +832,9 @@ if(reviewKind==='discovery'){
   process.exit(0);
 }
 // The phase-wide path is the retained aggregate security validator for v4, never a worker ingress.
-const structuralUnitFinalizationV1=directory.authorityRelease==='lite-solo-v4'&&
+const structuralUnitFinalizationV1=['lite-solo-v4','lite-solo-v5'].includes(directory.authorityRelease)&&
  [4,5,6].includes(sequence)&&process.env.LITE_SOLO_V4_FINALIZE==='1';
-if(directory.authorityRelease==='lite-solo-v4'&&[4,5,6].includes(sequence)&&process.env.LITE_SOLO_V4_FINALIZE!=='1')
+if(['lite-solo-v4','lite-solo-v5'].includes(directory.authorityRelease)&&[4,5,6].includes(sequence)&&process.env.LITE_SOLO_V4_FINALIZE!=='1')
  throw new Error('v4 Phase 4–6 can only be finalized from accepted immutable units');
 // Lite-Solo accepts phase/discovery only. No successor-delivery holds or master rework routes.
 const sealedRework=null;
@@ -1418,7 +1418,7 @@ else{
   nextAssignment=((sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)||postMasterDiscovery)
  ?null
  :preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
-  if(sequence===3&&authorityRoot!=='Audit Skill - Lite-Solo Authority/lite-solo-v4'&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
+  if(sequence===3&&!['Audit Skill - Lite-Solo Authority/lite-solo-v4','Audit Skill - Lite-Solo Authority/lite-solo-v5'].includes(authorityRoot)&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
     const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
       now,auditControllerRef:a['audit-controller-ref']??'main'});
     directory.discovery={statePath:started.statePath,status:started.completeImmediately?'COMPLETE':'RUNNING',
@@ -1440,7 +1440,7 @@ else{
   directory.currentAssignment=nextAssignment;directory.campaignStatus=discoveryStarted?(directory.discovery.status==='COMPLETE'?'ACTIVE':'WAITING_FOR_DISCOVERY'):'ACTIVE';directory.updatedAt=now;
   // Enter each v4 parallel phase with a frozen, full deterministic unit plan.
   // No single initial worker or claim bottleneck; Phase 4 first exposes F/R only.
-  if(directory.authorityRelease==='lite-solo-v4'&&nextAssignment&&[4,5,6].includes(nextAssignment.phaseSequence)){
+  if(['lite-solo-v4','lite-solo-v5'].includes(directory.authorityRelease)&&nextAssignment&&[4,5,6].includes(nextAssignment.phaseSequence)){
     createUnitPlanV1({root,campaignPath,directory,phase:nextAssignment.phaseSequence,automationRoot:process.cwd()});
   }
 }
