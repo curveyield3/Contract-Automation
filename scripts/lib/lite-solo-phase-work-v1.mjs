@@ -128,9 +128,10 @@ function nestedPresentV4(value,p,errors,depth=0){
  if(depth>12){errors.push(p+': NESTING_LIMIT_EXCEEDED');return;}
  if(schemaMissingV4(value)){errors.push(p+': REQUIRED_NONBLANK');return;}
  if(Array.isArray(value)){
+  // Required collection elements must exist, but arbitrary properties of a
+  // provided object are not implicitly required unless the bound schema says
+  // so. Do not infer unknown nested field requirements from its presence.
   for(let i=0;i<value.length;i++)nestedPresentV4(value[i],p+'['+i+']',errors,depth+1);
- }else if(value&&typeof value==='object'){
-  for(const [key,child] of Object.entries(value))nestedPresentV4(child,p+'.'+key,errors,depth+1);
  }
 }
 export function validateSchemaRecordValueV1(field,value,p,{originalValue,allowNegative=false,authorityRelease=null}={}){
