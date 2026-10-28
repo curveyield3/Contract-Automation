@@ -5,6 +5,7 @@ import {repoFile,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 import {buildCoverageMatrixV1,renderCoverageMarkdownV1} from './adr-coverage-matrix-v1.mjs';
 import {loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
+import {classifyDeploymentExecutionV1} from './lite-boundary-artifacts-v1.mjs';
 
 const arr=x=>Array.isArray(x)?x:[];
 const obj=x=>x&&typeof x==='object'&&!Array.isArray(x);
@@ -50,6 +51,10 @@ export function validatePhase6MachineBindingV1({root,campaignPath,campaignId,sou
   if(requireExecuted)errors.push('MACHINE_REQUEST_PATH_REQUIRED');
   return errors;
  }
+ const phase0=read(rootFile(root,campaignPath,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'));
+ const forkProfile=classifyDeploymentExecutionV1({execution:phase0??{}});
+ if(forkProfile.mode==='LIVE_DEPLOYED_FORK'&&forkProfile.status!=='LIVE_FORK_SOURCE_VERIFIED')
+  errors.push('LIVE_FORK_SOURCE_NOT_VERIFIED');
  const seen=new Set(),found=[];
  for(const rel of requestPaths){
   if(typeof rel!=='string'||rel.startsWith('/')||rel.includes(String.fromCharCode(92))||
@@ -76,12 +81,23 @@ export function validatePhase6MachineBindingV1({root,campaignPath,campaignId,sou
      (ingestion.requestDigest&&ingestion.requestDigest!==request.requestDigest)){
    errors.push('MACHINE_EXECUTION_INGESTION_BINDING_INVALID: '+rel);continue;
   }
+  if(forkProfile.mode==='LIVE_DEPLOYED_FORK'){
+   const fork=machine.preflight?.mutableRpc;
+   if(machine.preflight?.status!=='PASS'||fork?.status!=='PASS'||
+      fork.identityNormalization?.status!=='PASS'||
+      fork.blockNumber!==forkProfile.blockNumber||
+      String(fork.blockHash??'').toLowerCase()!==String(forkProfile.blockHash??'').toLowerCase()){
+    errors.push('HISTORICAL_FORK_PRECHECK_MISMATCH: '+rel);continue;
+   }
+  }
+  // A validly ingested failed run is real technical evidence, but not a
+  // successful invoked assertion. Another separately authenticated round may
+  // provide the necessary assertions; never fabricate a PASS for this one.
   if(!parsed||parsed.schemaVersion!=='curveyield-assertion-ledger-v1'||
      parsed.parseStatus!=='PARSED'||parsed.toolInvoked!==true||
      !Array.isArray(parsed.tests)||!parsed.tests.length||
-     machine.blocking===true||!['PASS','FINDINGS'].includes(machine.disposition)){
-   errors.push('MACHINE_EXECUTION_NOT_PROVEN: '+rel);continue;
-  }
+     machine.blocking===true||!['PASS','FINDINGS'].includes(machine.disposition))
+   continue;
   found.push({ref:artifactRef,tests:parsed.tests});
  }
  if(ledgerRef&&ledgerRef!=='NONE_IDENTIFIED'){
