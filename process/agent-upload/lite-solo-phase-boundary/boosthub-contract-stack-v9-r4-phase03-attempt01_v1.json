@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-lite-solo-phase-boundary-request-v1",
+  "campaignId": "boosthub-contract-stack-v9-r4",
+  "reviewKind": "phase",
+  "phaseSequence": 3,
+  "auditControllerRef": "main",
+  "attempt": 1
+}
