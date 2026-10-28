@@ -153,6 +153,7 @@ else
       any(.files[]; .path=="SKILL.md" and .sha256==$sha)
     ' "$skill_manifest" >/dev/null
 
+    master_base="${display_base#audit-preview-}"
     max=0
     while IFS= read -r f; do
       id="$(jq -r '.campaignId // empty' "$f" 2>/dev/null || true)"
@@ -163,15 +164,16 @@ else
     # Campaign folders are not materialized; take existing revisions from the tree's folder names.
     while IFS= read -r folder; do
       suffix="${folder#"campaigns/$display_base r"}"
+      if [ "$suffix" = "$folder" ]; then suffix="${folder#"campaigns/$master_base/$display_base r"}"; fi
       if [ "$suffix" != "$folder" ] && [[ "$suffix" =~ ^[0-9]+$ ]] && [ "$suffix" -gt "$max" ]; then
         max="$suffix"
       fi
-    done < <(git ls-tree -d --name-only HEAD -- campaigns/)
+    done < <( { git ls-tree -d --name-only HEAD -- campaigns/; git ls-tree -d --name-only HEAD -- "campaigns/$master_base/"; } | LC_ALL=C sort -u )
 
     revision=$((max + 1))
     campaign_id="$slug-r$revision"
     campaign_name="$display_base r$revision"
-    campaign_root="campaigns/$campaign_name"
+    campaign_root="campaigns/$master_base/$campaign_name"
     source_dir="$campaign_root/source"
     source_path="$source_dir/$filename"
     receipts_dir="$campaign_root/receipts"

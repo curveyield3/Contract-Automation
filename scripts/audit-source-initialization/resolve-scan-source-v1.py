@@ -274,8 +274,8 @@ def main():
     label = re.sub("[^a-zA-Z0-9_-]+", "-", first_contract_name or "contract").strip("-")[:35]
     if not label:
         label = "live-contract"
-    display = ("live-" + chain + "-" + label + "-" + requested[0]["address"][2:10] +
-               ("-bundle" if len(requested) > 1 else ""))[:100]
+    # First requested contract followed by chain; address retained only in the source manifest.
+    display = (label + " " + chain.title())[:100]
     work = Path(sys.argv[2])
     work.mkdir(parents=True, exist_ok=True)
     name = display + ".zip"
