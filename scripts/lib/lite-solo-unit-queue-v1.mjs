@@ -1044,12 +1044,23 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
    if(discoveryId&&message.includes('candidate must be present in Step 3')){
     const append=plan.units.find(u=>u.kind==='APPEND'&&u.field==='candidateRecords');
     if(append)mark(append,append);
-   }else if(discoveryId&&message.includes('must name the blocking control')){
-    for(const u of plan.units.filter(u=>u.kind==='BATCH'&&u.field==='discoveryReconciliationRecords')){
-     for(const m of u.members){
-      const ref=queue.acceptedRecords?.[m.unitId];
-      const accepted=ref?.path?maybe(root,ref.path):null;
-      if(accepted?.entry?.value?.recordKey===discoveryId)mark(u,m);
+   }else if(discoveryId&&[
+    'must name the blocking control',
+    'resolution requires a source anchor',
+    'cannot accept a non-gap as a coverage gap'
+   ].some(reason=>message.includes(reason))){
+    // The frozen plan is the authoritative discovery-ID-to-unit mapping.
+    // Most v4 campaigns use one SHARD per reconciliation record; legacy
+    // BATCH members retain the same immutable initialValue.recordKey.
+    for(const u of plan.units.filter(u=>u.field==='discoveryReconciliationRecords')){
+     for(const m of membersOf(u)){
+      if(m.initialValue?.recordKey===discoveryId){mark(u,m);continue;}
+      // Historical batch plans may omit a member's initial value.
+      if(u.kind==='BATCH'){
+       const ref=queue.acceptedRecords?.[m.unitId];
+       const accepted=ref?.path?maybe(root,ref.path):null;
+       if(accepted?.entry?.value?.recordKey===discoveryId)mark(u,m);
+      }
      }
     }
    }
