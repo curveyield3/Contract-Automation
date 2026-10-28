@@ -54,7 +54,7 @@ jobs:
             ' "$file" >/dev/null
             jq -nc --arg f "$file" --arg campaign "$(jq -r .sourceCampaignId "$file")" \
               --arg key "$(jq -r .correctionKey "$file")" \
-              '{request:$f,concurrency:($campaign+"-"+$key)}' >>/tmp/lsc.ndjson
+              '{request:$f,concurrency:$campaign}' >>/tmp/lsc.ndjson
           done
           echo "requests=$(jq -sc '{include:.}' /tmp/lsc.ndjson)" >>"$GITHUB_OUTPUT"
   correct:
