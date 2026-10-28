@@ -52,12 +52,12 @@ export function validatePhase6MachineBindingV1({root,campaignPath,campaignId,sou
  }
  const seen=new Set(),found=[];
  for(const rel of requestPaths){
-  if(typeof rel!=='string'||rel.startsWith('/')||rel.includes('\\\\')||
+  if(typeof rel!=='string'||rel.startsWith('/')||rel.includes(String.fromCharCode(92))||
      rel.split('/').includes('..')||!rel.startsWith(String(row.requestDirectory??''))){
    errors.push('UNSAFE_OR_UNASSIGNED_MACHINE_REQUEST: '+String(rel));continue;
   }
   const request=read(rootFile(root,campaignPath,rel));
-  if(!request||typeof request.requestId!=='string'||!request.requestId||
+  if(!request||typeof request.requestId!=='string'||!(/^[A-Za-z0-9][A-Za-z0-9._-]*$/).test(request.requestId)||
      typeof request.requestDigest!=='string'||!request.requestDigest||
      (campaignId&&request.campaignId!==campaignId)||
      (sourceSha256&&request.source?.archiveSha256!==sourceSha256)||
