@@ -382,6 +382,7 @@ const launch=()=>{
  if(request.startPhase===6){
   retain('work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
   retain('work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
+  retain('work/phase-06/BASELINE_OBLIGATIONS_v1.json');
  }
  if(request.startPhase===10){
   retain('work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
@@ -400,6 +401,21 @@ const launch=()=>{
   fs.mkdirSync(path.dirname(toFile(dest+'/'+rel)),{recursive:true});
   fs.writeFileSync(toFile(dest+'/'+rel),bytes);
  }
+ if([5,6].includes(request.startPhase)){
+  const baselineRel=dest+'/work/phase-06/BASELINE_OBLIGATIONS_v1.json';
+  if(!fs.existsSync(toFile(baselineRel)))
+   throw Error('LSC_PHASE6_BASELINE_OBLIGATIONS_MISSING_FROM_ACCEPTED_PHASE4');
+  const raw=fs.readFileSync(toFile(baselineRel));
+  const baseline=rebind(JSON.parse(raw));
+  baseline.correctionImport={
+   sourceCampaignId:original.campaignId,originalSha256:sha(raw),
+   originalArtifactPath:sourcePath+'/work/phase-06/BASELINE_OBLIGATIONS_v1.json',
+   reuse:'SOURCE_BOUND_PREVIOUSLY_ACCEPTED_BASELINE_PLAN_NOT_NEW_TEST_EVIDENCE'};
+  baseline.campaignId=newId;
+  baseline.campaignGenerationId=dir.campaignGenerationId;
+  save(baselineRel,baseline);
+ }
+
  // All former published reports are historical; the new report is produced
  // only after this correction's actual Phase-10 acceptance.
  const policyBytes=fs.readFileSync(toFile(dest+'/reports/REPORT_PUBLICATION_POLICY_v1.json'));
