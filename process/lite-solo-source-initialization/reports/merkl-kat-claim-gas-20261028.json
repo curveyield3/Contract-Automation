@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-report-v1",
+  "mode": "LITE_SOLO",
+  "status": "PASS",
+  "requestId": "merkl-kat-claim-gas-20261028",
+  "publicationPolicySha256": "44f9e679ffa9c3ab88d22d1720a45eca2033c2171067d34da1865ff061b754c7",
+  "actor": {
+    "actorId": "lite-solo-agent"
+  },
+  "source": {
+    "sha256": "f8dc0e0a642f9e32fc048780cbab33fec07591872b7f687c4b02527e3dc924b4",
+    "inputUrl": "https://github.com/curveyield3/Audit-Controller/blob/083342b06f7f2c3b89174a409dd755915b9ad3bb/source-repairs/MerklKatClaimModule/MerklKatClaimModule.zip",
+    "scanUrls": []
+  },
+  "campaign": {
+    "campaignId": "merklkatclaimmodule-r1",
+    "campaignGenerationId": "merklkatclaimmodule-r1-g1-20261028T140854Z",
+    "campaignName": "MerklKatClaimModule r1",
+    "workspacePath": "campaigns/MerklKatClaimModule/MerklKatClaimModule r1"
+  },
+  "completedAt": "2026-10-28T14:08:56Z"
+}
