@@ -45,7 +45,7 @@ export function unresolvedFinalCandidateFailures({root,campaignPath,directory}){
 // material obligations remain due or when accepted post-seal execution has not
 // been reconciled into the controller's authoritative coverage assessment.
 // No mutation of old receipts or frozen source is performed here.
-export function unresolvedTerminalAssuranceFailures({root,campaignPath,directory}={}){
+export function unresolvedTerminalAssuranceFailures({root,campaignPath,directory,currentForm=null}={}){
  if(directory?.mode!=='LITE_SOLO')throw new Error('terminal assurance requires Lite-Solo campaign');
  const readRel=(rel)=>readJson(requiredFile(root,path.posix.join(campaignPath,rel),rel));
  const failures=[];
@@ -57,6 +57,19 @@ export function unresolvedTerminalAssuranceFailures({root,campaignPath,directory
   const status=String(entry.status??'OPEN').toUpperCase();
   if(!['OPEN','IN_PROGRESS','BLOCKED_CARRIED'].includes(status))continue;
   const id=String(entry.obligationId??'UNKNOWN_OBLIGATION');
+  const currentDispositions=Object.values(currentForm?.actions??{}).flatMap(action=>
+   (action?.outputs?.obligationDispositions??[]).filter(row=>row&&typeof row==='object'));
+  const disposition=currentDispositions.find(row=>row.obligationId===id);
+  // At the Phase-10 intake boundary, an obligation may be closed by the
+  // CURRENT validated form. No prior OPEN status can be treated as its
+  // terminal state; the controller rechecks the materialized ledger after sync.
+  const evidence=disposition?.evidenceRefs;
+  const hasEvidence=Array.isArray(evidence)
+   ?evidence.length>0&&evidence.some(x=>typeof x==='string'&&x.trim()&&!x.startsWith('<'))
+   :typeof evidence==='string'&&evidence.trim()&&!evidence.startsWith('<');
+  const rationale=String(disposition?.rationale??'');
+  if(currentForm&&['SATISFIED','NOT_APPLICABLE'].includes(String(disposition?.disposition))&&
+   hasEvidence&&rationale.trim()&&!rationale.startsWith('<'))continue;
   failures.push('Mandatory security obligation '+id+' remains '+status+
    ' at terminal Phase 10; satisfy with decisive source-bound evidence, or use an authorized controller-scoped disposition. A narrative limitation does not satisfy it.');
  }
