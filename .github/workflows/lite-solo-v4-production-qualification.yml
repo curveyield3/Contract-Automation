@@ -1,7 +1,7 @@
 name: Lite-Solo v4 Production Qualification
 on:
   push:
-    branches: [fix/lite-solo-v4-production-qualification]
+    branches: [main]
     paths:
       - 'scripts/tests/lite-solo-v4-acceptance/RUN_PRODUCTION.md'
       - '.github/workflows/lite-solo-v4-production-qualification.yml'
