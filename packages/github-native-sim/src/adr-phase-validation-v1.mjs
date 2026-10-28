@@ -40,6 +40,64 @@ function ledger(root,campaign,ref,errors,identifier){
  }
  return found;
 }
+// Authenticate the concrete execution request behind a Phase-6 assertion ledger.
+// Merely finding a PARSED ledger with similarly named assertions is not proof
+// that this unit's assigned source-bound machine request actually ran.
+export function validatePhase6MachineBindingV1({root,campaignPath,campaignId,sourceSha256,row,ledgerRef,requireExecuted=false}={}){
+ const errors=[];
+ const requestPaths=arr(row?.requestPaths).filter(x=>x!=='NONE_IDENTIFIED');
+ if(!requestPaths.length){
+  if(requireExecuted)errors.push('MACHINE_REQUEST_PATH_REQUIRED');
+  return errors;
+ }
+ const seen=new Set(),found=[];
+ for(const rel of requestPaths){
+  if(typeof rel!=='string'||rel.startsWith('/')||rel.includes('\\\\')||
+     rel.split('/').includes('..')||!rel.startsWith(String(row.requestDirectory??''))){
+   errors.push('UNSAFE_OR_UNASSIGNED_MACHINE_REQUEST: '+String(rel));continue;
+  }
+  const request=read(rootFile(root,campaignPath,rel));
+  if(!request||typeof request.requestId!=='string'||!request.requestId||
+     typeof request.requestDigest!=='string'||!request.requestDigest||
+     (campaignId&&request.campaignId!==campaignId)||
+     (sourceSha256&&request.source?.archiveSha256!==sourceSha256)||
+     !['build-and-test','fork-simulation-lifecycle'].includes(request.phaseId)){
+   errors.push('MACHINE_REQUEST_BINDING_INVALID: '+rel);continue;
+  }
+  if(seen.has(request.requestId)){errors.push('DUPLICATE_MACHINE_REQUEST_ID: '+request.requestId);continue;}
+  seen.add(request.requestId);
+  const base='controller/automation/'+request.requestId;
+  const artifactRef=base+'/ASSERTION_LEDGER_v1.json';
+  const machine=read(rootFile(root,campaignPath,base+'/EXECUTION_EVIDENCE_v1.json'));
+  const ingestion=read(rootFile(root,campaignPath,base+'/ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json'));
+  const parsed=read(rootFile(root,campaignPath,artifactRef));
+  if(!machine||!ingestion||machine.requestId!==request.requestId||
+     machine.requestDigest!==request.requestDigest||ingestion.requestId!==request.requestId||
+     (ingestion.requestDigest&&ingestion.requestDigest!==request.requestDigest)){
+   errors.push('MACHINE_EXECUTION_INGESTION_BINDING_INVALID: '+rel);continue;
+  }
+  if(!parsed||parsed.schemaVersion!=='curveyield-assertion-ledger-v1'||
+     parsed.parseStatus!=='PARSED'||parsed.toolInvoked!==true||
+     !Array.isArray(parsed.tests)||!parsed.tests.length||
+     machine.blocking===true||!['PASS','FINDINGS'].includes(machine.disposition)){
+   errors.push('MACHINE_EXECUTION_NOT_PROVEN: '+rel);continue;
+  }
+  found.push({ref:artifactRef,tests:parsed.tests});
+ }
+ if(ledgerRef&&ledgerRef!=='NONE_IDENTIFIED'){
+  const match=found.find(x=>x.ref===ledgerRef);
+  if(!match)errors.push('LEDGER_NOT_BOUND_TO_ASSIGNED_REQUEST: '+ledgerRef);
+  else{
+   const named=[...arr(row?.attackAssertionNames),...arr(row?.controlAssertionNames)];
+   if(named.some(name=>typeof name!=='string'||!name.trim()||
+      !match.tests.some(test=>test?.name===name)))
+    errors.push('NAMED_ASSERTION_NOT_IN_BOUND_LEDGER');
+  }
+ }else if(requireExecuted)errors.push('AUTHENTICATED_LEDGER_REQUIRED');
+ if(requireExecuted&&!found.length)errors.push('NO_AUTHENTICATED_MACHINE_EXECUTION');
+ return errors;
+}
+
 function assertions(record,field,allowed,found,errors,prefix,{nonEmpty=true,requireAtLeastOneFail=false}={}){
  const names=record?.[field];
  if(!Array.isArray(names)|| (nonEmpty&&!names.length)||names.some(x=>blank(x))){
@@ -50,7 +108,7 @@ function assertions(record,field,allowed,found,errors,prefix,{nonEmpty=true,requ
  if(states.some(s=>!allowed.includes(s)))errors.push(prefix+field+' assertion result mismatch (required '+allowed.join('/')+')');
  if(requireAtLeastOneFail&&!states.includes('FAIL'))errors.push(prefix+field+' needs a failing security assertion');
 }
-export function validatePhase6AttackerWorkV1({root,campaignPath,form,structuralOnly=false}={}){
+export function validatePhase6AttackerWorkV1({root,campaignPath,campaignId=null,sourceSha256=null,form,structuralOnly=false}={}){
  const errors=[];
  if(structuralOnly){
   // The v4 work-unit controller checks machine provenance, not whether
@@ -88,6 +146,18 @@ export function validatePhase6AttackerWorkV1({root,campaignPath,form,structuralO
      }
     }
    }
+   for(const row of arr(output(form,4,'baselineTestRecords')).filter(obj))
+    for(const outcome of arr(row.obligationOutcomes).filter(obj))
+     if(outcome.ledgerRef&&outcome.ledgerRef!=='NONE_IDENTIFIED'){
+      const failures=validatePhase6MachineBindingV1({root,campaignPath,campaignId,sourceSha256,
+       row,ledgerRef:outcome.ledgerRef,requireExecuted:true});
+      errors.push(...failures.map(x=>String(row.testGroupId??'UNKNOWN')+': '+x));
+     }
+   for(const row of arr(output(form,5,'candidateProofRecords')).filter(obj))
+    if(['CONFIRMED','DISPROVEN'].includes(row.verdict))
+     errors.push(...validatePhase6MachineBindingV1({root,campaignPath,campaignId,sourceSha256,
+      row,ledgerRef:row.ledgerRef,requireExecuted:true}).map(x=>
+       String(row.candidateKey??'UNKNOWN')+': '+x));
    for(const row of arr(output(form,5,'newCandidateRecords')).filter(obj))
     if(row.ledgerRef&&row.ledgerRef!=='NONE_IDENTIFIED')
      ledger(root,campaignPath,row.ledgerRef,errors,String(row.tempKey??'UNKNOWN'));
