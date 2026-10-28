@@ -169,6 +169,18 @@ function readPlan(root,campaign,phase){
  const index=read(root,planRel(campaign,phase));
  if(index.schemaVersion!=='curveyield-lite-solo-unit-plan-v1'||!Array.isArray(index.pages))
   throw Error('unrecognized or unpaged v4 unit plan');
+ // Normalize only a Git-verified alias of this same exact campaign workspace.
+ const prior=index.campaignPath;
+ if(prior!==campaign){
+  if(typeof prior!=='string'||!/^campaigns\\/[^/]+$/.test(prior)||
+     !/^campaigns\\/[^/]+\\/[^/]+$/.test(campaign))
+   throw Error('unit plan campaign path mismatch');
+  const alias=repoFile(root,prior),current=repoFile(root,campaign);
+  if(!fs.lstatSync(alias).isSymbolicLink()||fs.realpathSync(alias)!==fs.realpathSync(current))
+   throw Error('unit plan location lacks verified migration alias');
+ }
+ const canonical=s=>typeof s==='string'&&prior!==campaign&&s.startsWith(prior+'/')
+  ?campaign+s.slice(prior.length):s;
  const units=[];
  for(const p of index.pages){
   const raw=fs.readFileSync(repoFile(root,p.path));
@@ -206,7 +218,11 @@ function readPlan(root,campaign,phase){
    ownership[key]=u.unitId;
   }
  }
- return {...index,units,recordOwnership:ownership};
+ for(const u of units){
+  for(const key of ['packetPath','packetIndexPath','shardPath','membersRef','initialValueRef'])
+   if(typeof u[key]==='string')u[key]=canonical(u[key]);
+ }
+ return {...index,campaignPath:campaign,units,recordOwnership:ownership};
 }
 function publishPlan(root,campaign,phase,plan,queue){
  assertPlan(queue,plan);
