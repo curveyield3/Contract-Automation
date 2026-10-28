@@ -134,6 +134,43 @@ function isFreshBoundary(next,authorityRoot=null,controllerRoot=null){
 }
 function maybeFile(root,rel){const f=repoFile(root,rel);return fs.existsSync(f)&&fs.statSync(f).isFile()?f:null;}
 function maybeJson(root,rel){const f=maybeFile(root,rel);if(!f)return null;try{return readJson(f);}catch{return null;}}
+
+function correctiveScopeFailuresV1({root,campaignPath,directory,sequence,form}){
+ if(directory.correctionOf?.entryPoint!=='LITE_SOLO_AUDIT_CORRECTION_V1')return [];
+ const stageRel=path.posix.join(campaignPath,'controller/LITE_SOLO_CORRECTION_STAGE_v1.json');
+ const scopeRel=path.posix.join(campaignPath,'controller/LITE_SOLO_CORRECTION_SCOPE_v1.json');
+ const stage=maybeJson(root,stageRel),scope=maybeJson(root,scopeRel);
+ if(stage?.status!=='LAUNCHED'||stage.campaignId!==directory.campaignId||
+    stage.generationId!==directory.campaignGenerationId||
+    stage.scopeSha256!==shaFile(requiredFile(root,scopeRel,'correction scope'))||
+    scope?.campaignId!==directory.campaignId||scope?.startPhase!==stage.startPhase)
+  return ['Correction fork stage/scope provenance changed or is unsealed'];
+ const failures=[];
+ const selected=scope.candidateIds??[],obligations=scope.obligationIds??[];
+ if(!Array.isArray(selected)||!Array.isArray(obligations))
+  return ['Correction candidate/obligation scope is invalid'];
+ if(sequence===8&&selected.length){
+  const accepted=new Set((form?.actions?.['step-2']?.outputs?.candidateValidations??[])
+   .filter(x=>x&&typeof x==='object').map(x=>String(x.candidateKey??'')));
+  for(const key of selected)if(!accepted.has(key))
+   failures.push('Corrective candidate '+key+' has no Phase-8 validation disposition');
+ }
+ if(sequence===10){
+  const p8=canonicalFor(root,campaignPath,8);
+  const validated=new Set((p8?.actions?.['step-2']?.outputs?.candidateValidations??[])
+   .filter(x=>x&&typeof x==='object').map(x=>String(x.candidateKey??'')));
+  for(const key of selected)if(!validated.has(key))
+   failures.push('Correction cannot finalize without controller-accepted Phase-8 candidate '+key);
+  const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'));
+  for(const id of obligations){
+   const row=(ledger?.obligations??[]).find(x=>x?.obligationId===id);
+   if(!row||!['SATISFIED','NOT_APPLICABLE'].includes(String(row.status)))
+    failures.push('Correction cannot finalize with unresolved selected obligation '+id);
+  }
+ }
+ return failures;
+}
+
 function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNum(phase)+'_CANONICAL_DATA_v1.json');}
 function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRelFor(campaignPath,phase));}
 function uniqueExisting(root,rels){return [...new Set(rels.filter(Boolean))].filter(rel=>Boolean(maybeFile(root,rel)));}
@@ -897,6 +934,8 @@ try{
     const fn=({6:validatePhase6AttackerWorkV1,8:validatePhase8LinkageV1,10:validatePhase10CoverageLabelV1})[sequence];
     if(fn)deficiencies.push(...fn({root,campaignPath,form,requireCoverageMatrix:sequence===10&&/\/lite-solo-v[345]$/.test(authorityRoot)}));
   }
+
+  deficiencies.push(...correctiveScopeFailuresV1({root,campaignPath,directory,sequence,form}));
 
   if(sequence===10){
     deficiencies.push(...unresolvedTerminalAssuranceFailures({root,campaignPath,directory}));
