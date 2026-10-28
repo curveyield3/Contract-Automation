@@ -898,6 +898,7 @@ try{
   if(activeDetectionPolicyV1(predecessor)){
     const fn=({6:validatePhase6AttackerWorkV1,8:validatePhase8LinkageV1,10:validatePhase10CoverageLabelV1})[sequence];
     if(fn)deficiencies.push(...fn({root,campaignPath,form,
+     campaignId:directory.campaignId,sourceSha256:directory.sourceSha256,
      structuralOnly:structuralUnitFinalizationV1,
      requireCoverageMatrix:sequence===10&&/\/lite-solo-v[345]$/.test(authorityRoot)}));
   }
