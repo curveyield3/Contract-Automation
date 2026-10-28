@@ -41,7 +41,8 @@ if(original.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2'||
  (original.campaignStatus==='ACTIVE'&&!original.currentAssignment)||
  typeof sourcePath!=='string'||!sourcePath.startsWith('campaigns/')||
  sourcePath.split('/').includes('..')||
- !/^campaigns\/[a-z0-9A-Z._ -]+\/receipts\/PHASE_[0-9]{2}_RECEIPT_v[1-9][0-9]*\.json$/.test(String(sourceAnchorRel??''))||
+ !sourceAnchorRel.startsWith(sourcePath+'/receipts/')||
+  !/^PHASE_[0-9]{2}_RECEIPT_v[1-9][0-9]*\.json$/.test(path.posix.basename(String(sourceAnchorRel??'')))||
  !sourceAnchorRel.startsWith(sourcePath+'/'))
  throw Error('LSC_ADMITTED_LITE_SOLO_V4_SOURCE_REQUIRED');
 const sourceAnchor=load(sourceAnchorRel);
@@ -100,7 +101,9 @@ for(let phase=0;phase<=predecessor;phase++){
 }
 const newSlug='lite-solo-correction-'+sourceSlug+'-'+request.correctionKey;
 const newId=newSlug+'-r1';
-const dest='campaigns/'+newId;
+const master=path.posix.dirname(sourcePath);
+if(master==='campaigns')throw Error('LSC_MASTER_FOLDER_REQUIRED');
+const dest=path.posix.join(master,path.posix.basename(master)+' Correction '+request.correctionKey+' r1');
 const entryRel='Audit Campaign Directory/campaigns/'+newSlug+'.json';
 const stageRel=dest+'/controller/LITE_SOLO_CORRECTION_STAGE_v1.json';
 const scopeRel=dest+'/controller/LITE_SOLO_CORRECTION_SCOPE_v1.json';

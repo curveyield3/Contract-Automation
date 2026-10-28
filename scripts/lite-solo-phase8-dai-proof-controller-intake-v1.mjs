@@ -28,7 +28,7 @@ const expected=['BOB-0001','BOB-0002','BOB-0003','BOB-0004','BOB-0005','BOB-0007
 if(request.schemaVersion!=='curveyield-lite-solo-phase-boundary-request-v1'
   ||request.reviewKind!=='phase'||request.phaseSequence!==8
   ||request.auditControllerRef!=='main'||request.campaignId!==id
-  ||campaignPath!=='campaigns/'+id
+  ||typeof campaignPath!=='string'||!campaignPath.startsWith('campaigns/')||campaignPath.split('/').includes('..')
   ||sub?.kind!=='DAI_PINNED_MUTABLE_ANVIL_BOB_V1'
   ||sub?.runId!==40586336907||sub?.artifactId!==12770963873
   ||sub?.runnerCommit!==runner||sub?.sourceSha256!==sourceSha)fail('submission identity invalid');

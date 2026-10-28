@@ -97,16 +97,19 @@ jobs:
           slug="${id%-r*}"
           dest_slug="lite-solo-correction-$slug-$key"
           source_path="$(gh api "repos/curveyield3/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/$slug.json?ref=main" --jq .content | base64 -d | jq -er .workspacePath)"
-          [[ "$source_path" == campaigns/* && "$source_path" != *..* ]]
+          [[ "$source_path" == campaigns/*/* && "$source_path" != *..* ]]
+          master="${source_path%/*}"
+          dest_workspace="$master/${master##*/} Correction $key r1"
           gh auth setup-git
           gh repo clone curveyield3/Audit-Controller .audit-controller -- --branch main --depth 1 --filter=blob:none --sparse
           git -C .audit-controller sparse-checkout set --no-cone \
             '/Audit Skill - Lite-Solo Authority/lite-solo-v4/**' \
             '/Audit Campaign Directory/campaigns/**' \
             "/$source_path/**" \
-            "/campaigns/${dest_slug}-r1/**"
+            "/${dest_workspace}/**"
           echo "request=$REQUEST_FILE" >>"$GITHUB_OUTPUT"
           echo "dest_slug=$dest_slug" >>"$GITHUB_OUTPUT"
+          echo "dest_workspace=$dest_workspace" >>"$GITHUB_OUTPUT"
       - name: Prepare or launch isolated correction; no contract execution
         env:
           AUDIT_CONTROLLER_ROOT: .audit-controller
@@ -116,13 +119,14 @@ jobs:
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           NEW_SLUG: ${{ steps.scope.outputs.dest_slug }}
+          NEW_WORKSPACE: ${{ steps.scope.outputs.dest_workspace }}
         shell: bash
         run: |
           set -euo pipefail
           cd .audit-controller
           git config user.name 'CurveYield Lite-Solo Correction'
           git config user.email 'lite-solo-correction@users.noreply.github.com'
-          git add --sparse -- "campaigns/${NEW_SLUG}-r1" "Audit Campaign Directory/campaigns/${NEW_SLUG}.json"
+          git add --sparse -- "$NEW_WORKSPACE" "Audit Campaign Directory/campaigns/${NEW_SLUG}.json"
           if ! git diff --cached --quiet; then
             git commit -m "audit(lite-solo-correction): isolated transition $GITHUB_RUN_ID"
             for attempt in 1 2 3 4; do

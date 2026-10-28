@@ -15,9 +15,11 @@ const corrective=request.correctionOfCampaignId??null;
 if(corrective!==null&&corrective!=='audit-preview-completion-live-ethereum-dai-6b175474-r1')
  throw Error('APC_CORRECTION_PARENT_NOT_AUTHORIZED');
 const completionSlug='audit-preview-completion-'+slug.slice('audit-preview-'.length)+(corrective?'-corrective':'');
-const dest='campaigns/'+completionSlug+'-r1';
+
 const read=p=>JSON.parse(fs.readFileSync(path.join(root,p),'utf8'));
 const entry=read('Audit Campaign Directory/campaigns/'+completionSlug+'.json');
+const dest=entry.workspacePath;
+if(typeof dest!=='string'||!dest.startsWith('campaigns/')||dest.split('/').includes('..'))throw Error('APC_DESTINATION_INVALID');
 if(entry.campaignStatus==='ACTIVE'&&entry.previewCompletion?.status==='LAUNCHED'){
  console.log(JSON.stringify({status:'ALREADY_LAUNCHED',campaignId:entry.campaignId}));
  process.exit(0);
