@@ -29,7 +29,18 @@ async function rpc(url, method, params = []) {
 async function upstream(chainId, port) {
   const child = spawn(process.execPath, [path.join(repoRoot, 'node_modules/@foundry-rs/anvil/bin.mjs'), '--port', String(port), '--chain-id', String(chainId), '--silent'], { stdio: 'ignore' });
   const url = `http://127.0.0.1:${port}`;
-  for (let i = 0; i < 100; i++) { try { if (await rpc(url, 'eth_chainId')) return { url, child }; } catch {} await sleep(100); }
+  for (let i = 0; i < 100; i++) {
+    try {
+      if (await rpc(url, 'eth_chainId')) {
+        // Production requires a positive, hash-pinned historical block. A fresh
+        // fixture Anvil starts at genesis (block 0), so mine one real fixture block.
+        await rpc(url, 'evm_mine');
+        const block = await rpc(url, 'eth_getBlockByNumber', ['latest', false]);
+        if (BigInt(block?.number ?? 0) > 0n && /^0x[0-9a-f]{64}$/i.test(block?.hash ?? '')) return { url, child };
+      }
+    } catch {}
+    await sleep(100);
+  }
   child.kill('SIGKILL'); throw new Error('upstream anvil did not start');
 }
 async function stage(name, profile) {
@@ -56,11 +67,12 @@ function evidence({ deployment, deployed, anvil, chain, profile }) {
 }
 async function runLane({ name, upstreamChainId, port, profile }) {
   const up = await upstream(upstreamChainId, port);
-  const root = await stage(name, profile);
-  const loaded = profile ? await loadDeploymentProfile(root) : null;
-  const chain = phase0ForkChainForProfile(loaded);
-  const anvil = await startAnvil({ forkUrl: up.url, projectRoot: root, evmVersion: 'cancun', chainId: chain.chainId, requireUpstreamChainId: Boolean(loaded) });
+  let anvil;
   try {
+    const root = await stage(name, profile);
+    const loaded = profile ? await loadDeploymentProfile(root) : null;
+    const chain = phase0ForkChainForProfile(loaded);
+    anvil = await startAnvil({ forkUrl: up.url, projectRoot: root, evmVersion: 'cancun', chainId: chain.chainId, requireUpstreamChainId: Boolean(loaded) });
     const provider = new ethers.JsonRpcProvider(anvil.url, chain.chainId, { staticNetwork: true });
     const start = Number(await provider.getBlockNumber());
     const deployment = loaded
@@ -74,7 +86,9 @@ async function runLane({ name, upstreamChainId, port, profile }) {
     assert.equal(await erc20.balanceOf('0x0000000000000000000000000000000000007EA5'), 10n ** 18n, `${name}: configuration transfer missing`);
     provider.destroy();
     return { e: evidence({ deployment, deployed, anvil, chain, profile: loaded }), deployment, token };
-  } finally { await anvil.close(); up.child.kill(); }
+  } finally {
+    try { if (anvil) await anvil.close(); } finally { up.child.kill(); }
+  }
 }
 
 const available = await fs.access(path.join(repoRoot, 'node_modules/@foundry-rs/anvil/bin.mjs')).then(() => true, () => false);
