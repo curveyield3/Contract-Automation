@@ -49,6 +49,13 @@ if [ -n "$campaign_path" ]; then
   literal_pattern() { printf '/%s' "$(printf '%s' "$1" | sed -e 's/[][*?!#\\]/\\&/g')"; }
   receipt="$campaign_path/receipts/PHASE_00_RECEIPT_v1.json"
   receipt_json="$(git -C "$destination" show "FETCH_HEAD:$receipt")" || { echo "campaign Phase-0 receipt missing: $receipt" >&2; exit 1; }
+  bound_path="$(printf '%s' "$receipt_json" | jq -r '.campaign.workspacePath // empty')"
+  if [ -n "$bound_path" ] && [ "$bound_path" != "$campaign_path" ]; then
+    case "$bound_path" in campaigns/*) ;; *) echo 'unsafe immutable campaign path' >&2; exit 1;; esac
+    case "/$bound_path/" in */../*|*/./*|*//*) echo 'unsafe immutable campaign path' >&2; exit 1;; esac
+    [ "$(git -C "$destination" ls-tree "$expected" -- "$bound_path" | awk '{print $1}')" = 120000 ] || { echo 'campaign path migration alias missing' >&2; exit 1; }
+    [ "campaigns/$(git -C "$destination" show "$expected:$bound_path")" = "$campaign_path" ] || { echo 'campaign path migration alias mismatch' >&2; exit 1; }
+  fi
   directory_entry="$(printf '%s' "$receipt_json" | jq -r '.campaign.campaignDirectoryEntryPath // empty')"
   homepage="$(printf '%s' "$receipt_json" | jq -r '.authority.homepagePath // empty')"
   [ -n "$directory_entry" ] || { echo 'receipt lacks campaign.campaignDirectoryEntryPath' >&2; exit 1; }
@@ -81,6 +88,7 @@ if [ -n "$campaign_path" ]; then
   git -C "$destination" config core.sparseCheckoutCone false
   {
     printf '%s/\n' "$(literal_pattern "$campaign_path")"
+    if [ -n "$bound_path" ] && [ "$bound_path" != "$campaign_path" ]; then printf '%s\n' "$(literal_pattern "$bound_path")"; fi
     printf '%s\n' "$(literal_pattern "$directory_entry")"
     printf '%s/\n' "$(literal_pattern "$authority_package")"
     # Phase, master and discovery controller logic imports this library from the

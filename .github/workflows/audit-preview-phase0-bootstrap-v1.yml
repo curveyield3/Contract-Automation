@@ -142,7 +142,8 @@ jobs:
           source_mode="$(jq -r '.source.inputMode // "ZIP"' "$receipt")"
           if [ "$source_mode" = 'LIVE_SCAN' ]; then
             manifest_rel="$(jq -r '.source.scanManifestPath' "$receipt")"
-            [[ "$manifest_rel" == "$CAMPAIGN_PATH/source/"* ]] || { echo "::error::Unsafe LIVE_SCAN manifest path"; exit 1; }
+            bound_path="$(jq -r '.campaign.workspacePath' "$receipt")"
+            [[ "$manifest_rel" == "$CAMPAIGN_PATH/source/"* || "$manifest_rel" == "$bound_path/source/"* ]] || { echo "::error::Unsafe LIVE_SCAN manifest path"; exit 1; }
             manifest=".audit-controller/$manifest_rel"
             test -f "$manifest" || { echo "::error::LIVE_SCAN manifest missing"; exit 1; }
             requested_chain="$(jq -r '.chainId' "$manifest")"
