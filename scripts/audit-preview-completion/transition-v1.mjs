@@ -51,11 +51,12 @@ for(const [i,r] of oldReceipts.entries()){
 }
 if(!hex64(preview.sourceSha256))throw Error('APC_SOURCE_DIGEST_INVALID');
 const correctiveParent=request.correctionOfCampaignId??null;
+let originalComplete=null;
 const expectedCorrectiveParent='audit-preview-completion-live-ethereum-dai-6b175474-r1';
 if(correctiveParent!==null&&correctiveParent!==expectedCorrectiveParent)
  throw Error('APC_CORRECTION_PARENT_NOT_AUTHORIZED');
 if(correctiveParent){
- const originalComplete=read('Audit Campaign Directory/campaigns/audit-preview-completion-live-ethereum-dai-6b175474.json');
+ originalComplete=read('Audit Campaign Directory/campaigns/audit-preview-completion-live-ethereum-dai-6b175474.json');
  if(originalComplete.campaignId!==correctiveParent||
     originalComplete.campaignStatus!=='COMPLETE'||
     originalComplete.sourceSha256!==preview.sourceSha256||
@@ -69,7 +70,10 @@ if(correctiveParent){
 }
 const newSlug='audit-preview-completion-'+previewSlug.slice('audit-preview-'.length)+(correctiveParent?'-corrective':'');
 const newId=newSlug+'-r1';
-const dest='campaigns/'+newId;
+const masterPath=path.posix.dirname(oldRoot);
+if(masterPath==='campaigns')throw Error('APC_MASTER_FOLDER_REQUIRED');
+const masterName=path.posix.basename(masterPath);
+const dest=path.posix.join(masterPath,masterName+(correctiveParent?' Corrective':' Completion')+' r1');
 const entryPath='Audit Campaign Directory/campaigns/'+newSlug+'.json';
 const authorityRoot='Audit Skill - Lite-Solo Authority/lite-solo-v4';
 const manifestRel=authorityRoot+'/MANIFEST.json',skillRel=authorityRoot+'/SKILL.md';
@@ -167,7 +171,7 @@ const copyCampaign=()=>{
   publicationPolicyPath:policyRel,publicationPolicySha256:policyDigest,
   sourceSha256:preview.sourceSha256,campaignStatus:'STAGED_PRELAUNCH',currentAssignment:null,
   lastSealedReceiptPath:null,unitPhaseEpoch:1,transportEpoch:0,updatedAt:at,
-   ...(correctiveParent?{correctionOf:{campaignId:correctiveParent,sourceSha256:preview.sourceSha256,priorTerminalReceiptPath:'campaigns/'+correctiveParent+'/receipts/PHASE_10_RECEIPT_v1.json',reason:'MATERIAL_OBLIGATIONS_AND_UNRECONCILED_EXECUTION_COVERAGE',priorSealsImmutable:true}}:{}),
+   ...(correctiveParent?{correctionOf:{campaignId:correctiveParent,sourceSha256:preview.sourceSha256,priorTerminalReceiptPath:ref(originalComplete.workspacePath,'receipts/PHASE_10_RECEIPT_v1.json'),reason:'MATERIAL_OBLIGATIONS_AND_UNRECONCILED_EXECUTION_COVERAGE',priorSealsImmutable:true}}:{}),
   previewCompletion:{schemaVersion:'audit-preview-completion-provenance-v1',originalCampaignId:previewId,
    originalGenerationId:preview.campaignGenerationId,originalWorkspacePath:oldRoot,
    originalPhase4ReceiptPath:preview.lastSealedReceiptPath,

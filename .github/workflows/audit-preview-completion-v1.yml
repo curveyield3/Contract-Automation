@@ -113,7 +113,13 @@ jobs:
             new_slug="${new_slug}-corrective"
           fi
           preview_path="$(gh api "repos/curveyield3/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/$slug.json?ref=main" --jq .content | base64 -d | jq -er .workspacePath)"
-          [[ "$preview_path" == campaigns/* && "$preview_path" != *..* ]]
+          [[ "$preview_path" == campaigns/*/* && "$preview_path" != *..* ]]
+          master_path="${preview_path%/*}"
+          master_name="${master_path##*/}"
+          suffix=' Completion r1'
+          if [[ "$(jq -r '.correctionOfCampaignId // empty' /tmp/apc-request.json)" != '' ]]; then suffix=' Corrective r1'; fi
+          new_workspace="$master_path/$master_name$suffix"
+          correction_path="$(gh api "repos/curveyield3/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/audit-preview-completion-live-ethereum-dai-6b175474.json?ref=main" --jq .content 2>/dev/null | base64 -d 2>/dev/null | jq -r '.workspacePath // empty' 2>/dev/null || true)"
           # Keep selected Audit-Controller token available for lazy sparse/promisor blob fetches.
           gh auth setup-git
           gh repo clone curveyield3/Audit-Controller .audit-controller -- --branch main --depth 1 --filter=blob:none --sparse
@@ -121,11 +127,12 @@ jobs:
             '/Audit Skill - Lite-Solo Authority/lite-solo-v4/**' \
             '/Audit Campaign Directory/campaigns/**' \
             "/${preview_path}/**" \
-            "/campaigns/${new_slug}-r1/**" \
-            '/campaigns/audit-preview-completion-live-ethereum-dai-6b175474-r1/receipts/PHASE_10_RECEIPT_v1.json'
+            "/${new_workspace}/**" \
+            ${correction_path:+"$correction_path/receipts/PHASE_10_RECEIPT_v1.json"}
           echo "controller_sha=$(git -C .audit-controller rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "request=/tmp/apc-request.json" >> "$GITHUB_OUTPUT"
           echo "new_slug=$new_slug" >> "$GITHUB_OUTPUT"
+          echo "new_workspace=$new_workspace" >> "$GITHUB_OUTPUT"
       - name: Verify frozen on-chain reads and process fork transition
         id: transition
         env:
@@ -148,13 +155,14 @@ jobs:
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           NEW_SLUG: ${{ steps.checkout.outputs.new_slug }}
+          NEW_WORKSPACE: ${{ steps.checkout.outputs.new_workspace }}
         shell: bash
         run: |
           set -euo pipefail
           cd .audit-controller
           git config user.name 'CurveYield Audit Preview Completion'
           git config user.email 'audit-preview-completion@users.noreply.github.com'
-          git add -- "campaigns/${NEW_SLUG}-r1" "Audit Campaign Directory/campaigns/${NEW_SLUG}.json"
+          git add -- "$NEW_WORKSPACE" "Audit Campaign Directory/campaigns/${NEW_SLUG}.json"
           if ! git diff --cached --quiet; then
             git commit -m "audit(preview-completion): isolated evidence $GITHUB_RUN_ID"
             for i in 1 2 3 4; do

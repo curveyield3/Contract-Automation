@@ -25,7 +25,13 @@ receipt_path="$campaign_path/receipts/PHASE_00_RECEIPT_v1.json"
 receipt="$(git -C "$destination" show "$head:$receipt_path")"
 read_field() { printf '%s' "$receipt" | jq -er "$1"; }
 [ "$(read_field '.campaign.mode')" = LITE_SOLO ] || { echo 'not a Lite-Solo campaign' >&2; exit 1; }
-[ "$(read_field '.campaign.workspacePath')" = "$campaign_path" ] || { echo 'campaign path mismatch' >&2; exit 1; }
+bound_path="$(read_field '.campaign.workspacePath')"
+if [ "$bound_path" != "$campaign_path" ]; then
+  # The immutable Phase-0 receipt may identify the original flat folder.
+  # Accept only its exact tracked symlink to this new nested campaign location.
+  [ "$(git -C "$destination" ls-tree "$head" -- "$bound_path" | awk '{print $1}')" = 120000 ] || { echo 'campaign path migration alias missing' >&2; exit 1; }
+  [ "campaigns/$(git -C "$destination" show "$head:$bound_path")" = "$campaign_path" ] || { echo 'campaign path migration alias mismatch' >&2; exit 1; }
+fi
 homepage="$(read_field '.authority.homepagePath')"
 { [ "$homepage" = 'Audit Skill - Audit Preview/audit-preview-v1/SKILL.md' ]; } || { echo 'unexpected Audit Preview authority root' >&2; exit 1; }
 [ "$(read_field '.auditPreview.terminalPhase')" = "4" ] || { echo 'not an Audit Preview campaign' >&2; exit 1; }
@@ -52,6 +58,7 @@ git -C "$destination" config core.sparseCheckout true
 git -C "$destination" config core.sparseCheckoutCone false
 {
   printf '%s/\n' "$(literal_pattern "$campaign_path")"
+  if [ "$bound_path" != "$campaign_path" ]; then printf '%s\n' "$(literal_pattern "$bound_path")"; fi
   printf '%s\n' "$(literal_pattern "$directory_entry")"
   printf '%s/\n' "$(literal_pattern "$authority_root")"
   printf '%s\n' "$(literal_pattern 'packages/controller-core/src/lite-phase-receipt-v1.mjs')"
