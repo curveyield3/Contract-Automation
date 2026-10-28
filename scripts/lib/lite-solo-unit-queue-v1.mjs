@@ -552,7 +552,7 @@ function itemIdentity(item,u,state,request,root){
   return 'STALE';
  return null;
 }
-function validateShardUnit({root,u,data,phase,schema,queue,plan}){
+function validateShardUnit({root,u,data,phase,schema,queue,plan,authorityRelease}){
  const errors=[],entries=Array.isArray(data?.entries)?data.entries:null;
  if(data?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.submission)return ['schemaVersion: SCHEMA_MISMATCH'];
  if(!entries)return ['entries: ARRAY_REQUIRED'];
@@ -592,7 +592,7 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
     {type:'REQUIRED_ANALYSIS'},val,p+'.value');
    errors.push(...errorsForItem);
   }else errors.push(...validateSchemaRecordValueV1(field,val,p+'.value',{
-   originalValue:orig,allowNegative:negative
+   originalValue:orig,allowNegative:negative,authorityRelease
   }));
   if(phase===6&&u.field==='baselineTestRecords'&&isObject(val))
    errors.push(...validateLiveForkBaselineRecordV1({
@@ -631,7 +631,7 @@ function structuredFieldErrorV1(unitId,message){
  return {path:match?unitId+'.'+match[1]:unitId,
   code:match?match[2]:'STRUCTURAL_VALIDATION_FAILURE',message};
 }
-function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest}){
+function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest,authorityRelease}){
  const errors=[],entries=asArray(submission?.entries),members=new Map(u.members.map(m=>[m.recordKeys[0],m]));
  if(submission?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.submission||
     !entries.length||entries.length>u.members.length)
@@ -658,7 +658,7 @@ function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schem
    errors.push({path:member.unitId,message:'original-record prerequisites are not currently accepted'});continue;
   }
   const failures=validateShardUnit({root,u:member,data:{schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:[entry]},
-   phase,schema,queue,plan});
+   phase,schema,queue,plan,authorityRelease});
   if(failures.length){
    errors.push(...failures.map(message=>structuredFieldErrorV1(member.unitId,message)));continue;
   }
@@ -722,9 +722,9 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
    :validateFlowReviewSubmissionV1({packet:packet.payload,submission,inventory,structuralOnly:true});
   errors=checked.errors??[];
  }else if(!errors.length&&u.kind==='BATCH'){
-  batchOutcome=acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest});
+  batchOutcome=acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest,authorityRelease:directory.authorityRelease});
   errors=batchOutcome.errors;
- }else if(!errors.length)errors=validateShardUnit({root,u,data:submission,phase,schema,queue,plan}).map(message=>structuredFieldErrorV1(u.unitId,message));
+ }else if(!errors.length)errors=validateShardUnit({root,u,data:submission,phase,schema,queue,plan,authorityRelease:directory.authorityRelease}).map(message=>structuredFieldErrorV1(u.unitId,message));
  state.lastSubmissionSha256=digest;state.attempts++;
  const resultRel=path.posix.join(unitBase(campaign,phase,u.unitId),'results',
   'ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
@@ -1008,7 +1008,7 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  const {schema,rel:schemaRel}=loadPhaseSchema(root,boundRoot,phase);
  if(schemaRel!==assignment.workSchemaPath)throw Error('CONTROLLER_INTEGRITY_FAILURE: assembled phase schema identity mismatch');
  const form=JSON.parse(restored.content);
- const errors=validateWorkForm(schema,form,{structuralOnly:true});
+ const errors=validateWorkForm(schema,form,{structuralOnly:true,authorityRelease:directory.authorityRelease});
  if(errors.length)throw Error('CONTROLLER_INTEGRITY_FAILURE: accepted immutable aggregate malformed: '+errors.slice(0,15).join('; '));
  // Existing phase controller materializes, validates all semantic gates, executes required
  // already-qualified machine lane (Phase 5), generates a single seal and next assignment.
