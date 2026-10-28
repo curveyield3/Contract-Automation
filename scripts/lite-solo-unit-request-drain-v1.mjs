@@ -67,7 +67,7 @@ if(arg.mode!=='finalize'){
   }
  }
 
- if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
+ if(phase===4&&['BLOCKED','REWORK_REQUIRED'].includes(recorded?.finalizeStatus)&&
     Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
     recorded.finalizeDetails.unmappedDeficiencies.length){
   const recovery=reopenAggregateDefectsV1({root,campaignPath,phase,
