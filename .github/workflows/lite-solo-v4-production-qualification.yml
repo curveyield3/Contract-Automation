@@ -42,6 +42,30 @@ jobs:
           set -o pipefail
           mkdir -p scripts/tests/lite-solo-v4-acceptance/output
           node --test --test-concurrency=1 scripts/tests/lite-solo-v4-acceptance/cases/*.test.mjs
+      - name: Verify pinned runner manifest
+        run: npm run v7:manifest -- --check
+      - name: Enable pinned Forge and Cast
+        uses: ./.github/actions/setup-phase0-deployment-only-toolchain-v1
+      - name: Real Phase-0 Anvil fork and deployment E2E
+        env:
+          PHASE0_E2E: '1'
+        run: timeout -k 10s 600s node --test packages/github-native-sim/test/phase0-erc20-deploy-e2e-v1.test.mjs
+      - name: Select existing private authority read credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Verify complete live v4 authority manifest and exact hashes
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          gh repo clone curveyield3/Audit-Controller .lite-solo-authority-check -- --branch main --depth 1 --filter=blob:none --sparse
+          git -C .lite-solo-authority-check sparse-checkout set --no-cone '/Audit Skill - Lite-Solo Authority/lite-solo-v4/'
+          node scripts/lite-solo-verify-authority-v1.mjs '.lite-solo-authority-check/Audit Skill - Lite-Solo Authority/lite-solo-v4'
       - name: Publish per-scenario evidence
         if: always()
         uses: actions/upload-artifact@v4
