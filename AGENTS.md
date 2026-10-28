@@ -1,6 +1,10 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v12
+Policy version: v13
+
+## Nonstop audit execution and workflow-failure recovery — mandatory
+
+Agents executing Lite-Solo or other authorized audit assignments MUST treat starting a workflow, a successful initialization, and a pending Phase 0 as intermediate work, not a finished assignment. **On a failed/timed-out/cancelled workflow or rejected controller submission: DIAGNOSE the actual failing job/step/logs and bound controller state → REPAIR the established owning mechanism → RESUBMIT the exact interrupted operation via its existing authorized lane and campaign generation → VERIFY the new persisted result → CONTINUE the audit immediately. DO NOT STOP WORKING merely to report a failure or ask the human to reply.** Preserve frozen source, skill, claims, sealed receipts and accepted work; never bypass evidence/validation gates, create an unnecessary campaign, invent approval requirements, or add tests/workflows/infrastructure without authorization. Check active runs before retrying and never repeat an identical uncorrected failure. When the only dependency is an active external workflow, follow the existing run at a reasonable cadence while the session permits instead of ending at “running”; if the session cannot remain active through its outcome, report the exact INCOMPLETE dependency and authorized next action without claiming background execution. An irrecoverable barrier is reportable only after exhausting the existing recovery path.
 
 ## Repository hygiene, anti-spam, and single-flight execution — mandatory
 
