@@ -151,48 +151,171 @@ const rebind=v=>{
 };
 const allFiles=(folder,rx)=>fs.existsSync(toFile(folder))?
  fs.readdirSync(toFile(folder)).filter(rx):[];
-const restoreControls=(start,scope)=>{
- for(const name of ['CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json','SECURITY_TRACEABILITY_GRAPH_v1.json','EVIDENCE_INVALIDATION_MATRIX_v1.json','DOMAIN_APPLICABILITY_REGISTRY_v1.json']){
+
+const validIds=rows=>Array.isArray(rows)&&rows.every(x=>typeof x==='string'&&/^[A-Za-z0-9._-]+$/.test(x))
+ &&new Set(rows).size===rows.length;
+const acceptedCandidateKeys=()=>{
+ const found=new Map();
+ const keys=['candidateRecords','newCandidateRecords','candidateProofRecords','candidateValidations','validatedFindings'];
+ for(const phase of [4,5,6,8]){
+  const rel=sourcePath+'/derived/phase-'+phase+'/PHASE_'+String(phase).padStart(2,'0')+'_CANONICAL_DATA_v1.json';
+  if(!fs.existsSync(toFile(rel)))continue;
+  const canonical=load(rel);
+  for(const action of Object.values(canonical.actions??{})){
+   for(const [name,rows] of Object.entries(action.outputs??{})){
+    if(!keys.includes(name)||!Array.isArray(rows))continue;
+    for(const row of rows){
+     if(!row||typeof row!=='object')continue;
+     for(const id of [row.tempKey,row.candidateKey,row.canonicalId,row.findingTempKey]){
+      if(typeof id==='string'&&id&&!found.has(id))found.set(id,phase);
+     }
+    }
+   }
+  }
+ }
+ return found;
+};
+const scopeCheck=(scope,start)=>{
+ if(!validIds(scope.obligationIds)||!validIds(scope.candidateIds))
+  throw Error('LSC_SCOPE_IDENTITY_LIST_INVALID');
+ if(typeof scope.reason!=='string'||!scope.reason.trim())throw Error('LSC_SCOPE_REASON_REQUIRED');
+ if(scope.candidateIds.length&&start>8)throw Error('LSC_CANDIDATE_REVISION_REQUIRES_PHASE8_OR_EARLIER');
+ const candidates=acceptedCandidateKeys();
+ for(const id of scope.candidateIds)
+  if(!candidates.has(id))throw Error('LSC_UNKNOWN_ACCEPTED_CANDIDATE_'+id);
+ const ledger=load(sourcePath+'/controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json');
+ for(const id of scope.obligationIds){
+  const row=(ledger.obligations??[]).find(x=>x.obligationId===id);
+  if(!row)throw Error('LSC_UNKNOWN_ACCEPTED_OBLIGATION_'+id);
+  if(Number(row.requiredPhase)<start)
+   throw Error('LSC_START_AFTER_OBLIGATION_DUE_PHASE_'+id);
+ }
+ for(const row of ledger.obligations??[]){
+  if(row.mandatory===true&&['OPEN','IN_PROGRESS','BLOCKED_CARRIED'].includes(row.status)&&
+   Number(row.requiredPhase)<start)
+   throw Error('LSC_PREDECESSOR_HAS_OVERDUE_MANDATORY_OBLIGATION_'+row.obligationId);
+ }
+ if(start===9){
+  const p8=load(sourcePath+'/derived/phase-8/PHASE_08_CANONICAL_DATA_v1.json');
+  const findings=p8.actions?.['step-2']?.outputs?.validatedFindings??[];
+  if(!findings.some(x=>x&&typeof x==='object')||
+     !fs.existsSync(toFile(sourcePath+'/remediation'))||
+     !fs.readdirSync(toFile(sourcePath+'/remediation')).length)
+   throw Error('LSC_PHASE9_REQUIRES_ACCEPTED_FINDINGS_AND_REMEDIATION');
+ }
+ if(start===6){
+  const p5=load(sourcePath+'/derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json');
+  const designs=p5.actions?.['step-3']?.outputs?.targetDesigns??[];
+  if(designs.some(x=>x&&typeof x==='object'&&x.executionMethod!=='NOT_APPLICABLE'))
+   throw Error('LSC_PHASE6_EXECUTION_REBIND_UNSUPPORTED_START_AT_PHASE5');
+ }
+ return {candidateCount:candidates.size};
+};
+const restoreControls=(start,scope,dir)=>{
+ const names=['CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json','SECURITY_TRACEABILITY_GRAPH_v1.json',
+  'EVIDENCE_INVALIDATION_MATRIX_v1.json','DOMAIN_APPLICABILITY_REGISTRY_v1.json'];
+ for(const name of names){
   const rel=dest+'/controller/'+name;
   if(!fs.existsSync(toFile(rel)))continue;
   const control=rebind(load(rel));
-  control.campaignBinding=rebind(control.campaignBinding);
+  if(control.campaignBinding){
+   control.campaignBinding.campaignId=newId;
+   control.campaignBinding.campaignGenerationId=dir.campaignGenerationId;
+  }
   if(Array.isArray(control.controllerImports))
    control.controllerImports=control.controllerImports.filter(x=>Number(x.phase)<start);
   if(Array.isArray(control.phaseCheckpoints))
-   control.phaseCheckpoints=control.phaseCheckpoints.filter(x=>Number(String(x.phaseId??'').replace('phase-',''))<start);
+   control.phaseCheckpoints=control.phaseCheckpoints.filter(x=>
+    Number(String(x.phaseId??'').replace('phase-',''))<start);
   if(name.startsWith('CARRIED_')){
    const requested=new Set(scope.obligationIds);
-   const before=control.obligations??[];
-   const unknown=[...requested].filter(id=>!before.some(o=>String(o.obligationId)===id));
-   if(unknown.length)throw Error('LSC_UNKNOWN_OBLIGATION_IDS_'+unknown.join('_'));
-   control.obligations=before.filter(x=>Number(x.originPhase)<start);
+   control.obligations=(control.obligations??[]).filter(x=>Number(x.originPhase)<start);
    for(const row of control.obligations){
-    const closedIn=(row.closureEvidenceRefs??[]).some(p=>{
+    const closureAfter=(row.closureEvidenceRefs??[]).some(p=>{
      const m=String(p).match(/(?:phase-|PHASE_)(0?[0-9]{1,2})/i);
      return m&&Number(m[1])>=start;
     });
-    if(requested.has(String(row.obligationId))||Number(row.requiredPhase)>=start||closedIn){
-      row.status='OPEN';row.statusReason=null;row.closureEvidenceRefs=[];row.updatedAt=when;
+    if(requested.has(row.obligationId)||Number(row.requiredPhase)>=start||closureAfter){
+     row.status='OPEN';row.statusReason=null;row.closureEvidenceRefs=[];
+     row.updatedAt=when;
     }
    }
   }
   if(name.startsWith('SECURITY_TRACEABILITY_')){
-   const old=control.nodes??[];
-   control.nodes=old.filter(n=>n.originPhase==null||Number(n.originPhase)<start);
-   const kept=new Set(control.nodes.map(n=>n.nodeId));
-   control.edges=(control.edges??[]).filter(e=>{
-    const a=e.from??e.source??e.sourceNodeId, b=e.to??e.target??e.targetNodeId;
-    return kept.has(a)&&kept.has(b);
-   });
+   control.nodes=(control.nodes??[]).filter(n=>n.originPhase==null||Number(n.originPhase)<start);
+   const keep=new Set(control.nodes.map(n=>n.nodeId));
+   control.edges=(control.edges??[]).filter(e=>keep.has(e.from??e.source??e.sourceNodeId)
+    &&keep.has(e.to??e.target??e.targetNodeId));
   }
-  // Historical accepted predecessor evidence is retained. Downstream nodes,
-  // imports and checkpoints are never treated as already accepted in the fork.
+  // The accepted source remains immutable; later proof observations must be
+  // ingested afresh into the new campaign, never copied as controller PASS.
   save(rel,control);
  }
- for(const item of ['results','preflight','phase8-revalidation','phase5-candidate-evidence']){
-  fs.rmSync(toFile(dest+'/controller/'+item),{recursive:true,force:true});
+ for(const n of ['phase8-revalidation','phase5-candidate-evidence','phase6-tests','phase9-reruns',
+  'phase5-tests','results','preflight']){
+  fs.rmSync(toFile(dest+'/controller/'+n),{recursive:true,force:true});
  }
+};
+const relatedInputs=(phase)=>{
+ const base=dest+'/derived/';
+ const exact={
+  4:['phase-2/PHASE3_INPUT_v1.json','phase-3/PHASE4_INPUT_v1.json'],
+  5:['phase-2/PHASE3_INPUT_v1.json','phase-3/PHASE4_INPUT_v1.json','phase-4/PHASE5_INPUT_v1.json'],
+  6:['phase-2/PHASE3_INPUT_v1.json','phase-3/PHASE4_INPUT_v1.json','phase-4/PHASE5_INPUT_v1.json','phase-5/PHASE6_INPUT_v1.json'],
+  8:['phase-2/PHASE3_INPUT_v1.json','phase-3/PHASE4_INPUT_v1.json','phase-4/PHASE5_INPUT_v1.json','phase-5/PHASE6_INPUT_v1.json','phase-6/PHASE8_INPUT_v1.json','phase-7/PHASE8_MARKER_INPUT_v1.json'],
+  9:['phase-8/PHASE9_REMEDIATION_INPUT_v1.json'],
+  10:['phase-8/PHASE10_INPUT_v1.json','phase-9/PHASE10_REMEDIATION_INPUT_v1.json']
+ };
+ const other={
+  6:['evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json','work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md','work/phase-06/LITE_TARGETED_TEST_MATRIX.md'],
+  8:['evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json','work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md','work/phase-06/LITE_TARGETED_TEST_MATRIX.md'],
+  9:['work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md'],
+  10:['work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md']
+ };
+ return [...(exact[phase]??[]).map(x=>base+x),...(other[phase]??[]).map(x=>dest+'/'+x)]
+  .filter(x=>fs.existsSync(toFile(x)));
+};
+const phase9DeltaRows=()=>{
+ const canonical=load(dest+'/derived/phase-8/PHASE_08_CANONICAL_DATA_v1.json');
+ const findings=(canonical.actions?.['step-2']?.outputs?.validatedFindings??[])
+  .filter(x=>x&&typeof x==='object');
+ const files=[];
+ const walk=(dir,relative='')=>{
+  if(!fs.existsSync(dir))return;
+  for(const e of fs.readdirSync(dir,{withFileTypes:true})){
+   const name=relative?relative+'/'+e.name:e.name;
+   if(e.isDirectory())walk(path.join(dir,e.name),name);
+   else if(e.isFile())files.push(name);
+  }
+ };
+ walk(toFile(dest+'/remediation'));
+ const changed=new Set(),symbols=new Set();
+ for(const name of files){
+  const ext=path.extname(name).toLowerCase();
+  if(!['.patch','.diff'].includes(ext)){changed.add(name);continue;}
+  for(const line of fs.readFileSync(toFile(dest+'/remediation/'+name),'utf8').split(/\r?\n/)){
+   const match=line.match(/^\+\+\+\s+(?:b\/)?(.+)$/);
+   if(match&&match[1]!=='/dev/null')changed.add(match[1]);
+   if(/^[+-](?![+-])/.test(line)){
+    const symbol=line.match(/\b(?:function|contract|library|interface|struct|modifier|event|error)\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    if(symbol)symbols.add(symbol[1]);
+   }
+  }
+ }
+ return findings.map(f=>({
+  findingId:f.findingTempKey??f.canonicalId??f.candidateKey,
+  oldIdentityRef:'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json',
+  remediationIdentityRef:files.map(f=>'remediation/'+f).join(', ')||'NO_REMEDIATION_ARTIFACT',
+  changedFilesAndSymbols:'files='+([...changed].join(', ')||'UNRESOLVED')+
+   '; symbols='+([...symbols].join(', ')||'NOT_MACHINE_DERIVABLE_FROM_AVAILABLE_REMEDIATION_ARTIFACTS'),
+  rootCauseFix:'PENDING_PHASE9_INTERPRETATION',
+  staleEvidenceInvalidated:'SEE_CONTROLLER_EVIDENCE_INVALIDATION_STATE',
+  decisiveProofRerun:'PENDING_PHASE9',
+  affectedSurfaces:[...changed].join(', ')||'UNRESOLVED',
+  newEvidenceRefs:files.map(f=>'remediation/'+f).join(', ')||'NONE',
+  residualRisk:'PENDING_PHASE9_INTERPRETATION',
+  finalDisposition:'PENDING_PHASE9_INTERPRETATION'
+ }));
 };
 const launch=()=>{
  const stage=load(stageRel),dir=load(entryRel),scope=load(scopeRel);
@@ -204,85 +327,137 @@ const launch=()=>{
  if(dir.campaignStatus!=='STAGED_PRELAUNCH'||stage.status!=='AWAITING_SCOPE_REVIEW_AND_LAUNCH'||
     stage.campaignId!==newId||stage.generationId!==dir.campaignGenerationId||
     stage.startPhase!==request.startPhase||stage.correctionKey!==request.correctionKey||
-    scope.campaignId!==newId||scope.startPhase!==request.startPhase||
-    typeof scope.reason!=='string'||!scope.reason.trim()||
-    !Array.isArray(scope.obligationIds)||!Array.isArray(scope.candidateIds)||
-    [...scope.obligationIds,...scope.candidateIds].some(x=>typeof x!=='string'||!/^[A-Za-z0-9._-]+$/.test(x)))
+    scope.campaignId!==newId||scope.startPhase!==request.startPhase)
   throw Error('LSC_PRELAUNCH_SCOPE_OR_IDENTITY_INVALID');
+ scopeCheck(scope,request.startPhase);
  for(const folder of ['source','evidence'])
   inspectUnchanged(toFile(sourcePath+'/'+folder),toFile(dest+'/'+folder));
- // The correction MUST NOT inherit future phase seals or accepted submission
- // snapshots; all later phases must be rerun through the normal controller.
+ const cached=new Map();
+ const retain=rel=>{if(fs.existsSync(toFile(dest+'/'+rel)))cached.set(rel,fs.readFileSync(toFile(dest+'/'+rel)));};
+ if(request.startPhase===6){
+  retain('work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
+  retain('work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
+ }
+ if(request.startPhase===10){
+  retain('work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
+  retain('work/phase-10/COVERAGE_MATRIX_v1.json');
+ }
+ // Retire only fork-local successor state. Original receipts and artifacts are
+ // unchanged; historical machine data is not automatically re-accepted.
  for(const p of allFiles(dest+'/receipts',n=>/^PHASE_([0-9]{2})_RECEIPT_v[0-9]+\.json$/.test(n))){
   const m=p.match(/^PHASE_(\d{2})_/);
   if(Number(m[1])>=request.startPhase)fs.rmSync(toFile(dest+'/receipts/'+p));
  }
  for(const top of ['work','derived']){
-  for(const n of allFiles(dest+'/'+top,n=>/^phase-0?[0-9]+$/.test(n))){
+  for(const n of allFiles(dest+'/'+top,n=>/^phase-0?[0-9]+$/.test(n)))
    if(Number(n.slice(6))>=request.startPhase)
     fs.rmSync(toFile(dest+'/'+top+'/'+n),{recursive:true,force:true});
-  }
  }
- // The original published terminal report and remediation output are historical,
- // not fresh corrective acceptance. Keep their original copies only in source.
- fs.rmSync(toFile(dest+'/reports/delivery'),{recursive:true,force:true});
- if(request.startPhase<=9)fs.rmSync(toFile(dest+'/remediation'),{recursive:true,force:true});
- for(const name of allFiles(dest+'/submissions',()=>true)){
+ for(const [rel,bytes] of cached){
+  fs.mkdirSync(path.dirname(toFile(dest+'/'+rel)),{recursive:true});
+  fs.writeFileSync(toFile(dest+'/'+rel),bytes);
+ }
+ // All former published reports are historical; the new report is produced
+ // only after this correction's actual Phase-10 acceptance.
+ const policyBytes=fs.readFileSync(toFile(dest+'/reports/REPORT_PUBLICATION_POLICY_v1.json'));
+ fs.rmSync(toFile(dest+'/reports'),{recursive:true,force:true});
+ fs.mkdirSync(toFile(dest+'/reports'),{recursive:true});
+ fs.writeFileSync(toFile(dest+'/reports/REPORT_PUBLICATION_POLICY_v1.json'),policyBytes);
+ if(request.startPhase<=8)fs.rmSync(toFile(dest+'/remediation'),{recursive:true,force:true});
+ if(request.startPhase<=5)fs.rmSync(toFile(dest+'/evidence/phase5-boundary'),{recursive:true,force:true});
+ for(const name of allFiles(dest+'/submissions',()=>true))
   if(/^PHASE_([0-9]{2})_/.test(name)&&Number(name.slice(6,8))>=request.startPhase)
    fs.rmSync(toFile(dest+'/submissions/'+name),{recursive:true,force:true});
- }
- for(let p=0;p<=predecessor;p++){
-  const rel=dest+'/receipts/PHASE_'+String(p).padStart(2,'0')+'_RECEIPT_v1.json';
-  const originalReceipt=load(receiptRel(p)),copy=rebind(originalReceipt);
+ // Rebase accepted, latest-version predecessors into distinct version-1
+ // adoption receipts with immutable original digest and revision provenance.
+ for(const item of accepted){
+  const rel=dest+'/receipts/PHASE_'+String(item.phase).padStart(2,'0')+'_RECEIPT_v1.json';
+  const originalReceipt=load(item.path),copy=rebind(originalReceipt);
   copy.campaign={...copy.campaign,campaignId:newId,campaignGenerationId:dir.campaignGenerationId,
    campaignName:dir.campaignName,workspacePath:dest,campaignDirectoryEntryPath:entryRel,mode:'LITE_SOLO'};
-  copy.importedFrom={kind:'LITE_SOLO_CORRECTION_PREDECESSOR',campaignId:original.campaignId,
-   campaignGenerationId:original.campaignGenerationId,receiptPath:receiptRel(p),receiptSha256:digest(receiptRel(p)),
-   originalAuthority:originalReceipt.authority};
+  copy.phase={...copy.phase,revision:1};
+  copy.importedFrom={kind:'SOURCE_BOUND_CONTROLLER_ACCEPTED_PREDECESSOR',
+   sourceCampaignId:original.campaignId,sourceGenerationId:original.campaignGenerationId,
+   sourceReceiptPath:item.path,sourceReceiptSha256:item.sha256,
+   sourceReceiptRevision:item.revision,sourceValidation:originalReceipt.validation,
+   sourceAuthority:originalReceipt.authority,notNewExecutionEvidence:true};
+  copy.validation={...copy.validation,adoption:'HISTORICAL_CONTROLLER_ACCEPTANCE_ONLY'};
+  // Imported inputs must point to the reissued predecessor, not the older
+  // source revision; the source's literal original record remains in importedFrom.
+  if(item.phase>0&&Array.isArray(copy.inputs)){
+   for(const ref of copy.inputs){
+    if(ref.role==='PREDECESSOR_RECEIPT'){
+     ref.path=dest+'/receipts/PHASE_'+String(item.phase-1).padStart(2,'0')+'_RECEIPT_v1.json';
+     delete ref.sha256;
+    }
+   }
+  }
   save(rel,copy);
  }
- // Rebase copied derived predecessor references, never modify source evidence.
  for(const n of allFiles(dest+'/derived',n=>/^phase-\d+$/.test(n)&&Number(n.slice(6))<request.startPhase)){
   const folder=dest+'/derived/'+n;
   for(const file of allFiles(folder,n=>n.endsWith('.json'))){
    const rel=folder+'/'+file,prior=fs.readFileSync(toFile(rel));
    const rewritten=rebind(JSON.parse(prior));
-   rewritten.correctionImport={sourceCampaignId:original.campaignId,originalSha256:sha(prior)};
+   rewritten.correctionImport={sourceCampaignId:original.campaignId,originalSha256:sha(prior),
+    originalArtifactPath:sourcePath+'/derived/'+n+'/'+file};
    save(rel,rewritten);
   }
  }
- restoreControls(request.startPhase,scope);
- // Reconcile imported receipt references against the actual fork-local bytes.
- for(let p=0;p<=predecessor;p++){
-  const rel=dest+'/receipts/PHASE_'+String(p).padStart(2,'0')+'_RECEIPT_v1.json';
-  const row=load(rel);
+ restoreControls(request.startPhase,scope,dir);
+ // New policy is computed before imported Phase-0 receipts are finalized.
+ const policyRel=dest+'/reports/REPORT_PUBLICATION_POLICY_v1.json';
+ const policy=rebind(load(policyRel));
+ policy.campaignId=newId;policy.campaignGenerationId=dir.campaignGenerationId;
+ const canonical=x=>Array.isArray(x)?x.map(canonical):x&&typeof x==='object'?
+  Object.fromEntries(Object.keys(x).sort().map(k=>[k,canonical(x[k])])):x;
+ const policyData=JSON.stringify(canonical(policy));
+ fs.writeFileSync(toFile(policyRel),policyData);
+ dir.publicationPolicyPath=policyRel;dir.publicationPolicySha256=sha(Buffer.from(policyData));
+ for(const item of accepted){
+  const rel=dest+'/receipts/PHASE_'+String(item.phase).padStart(2,'0')+'_RECEIPT_v1.json';
+  const receipt=load(rel);
+  if(item.phase===0){
+   receipt.publicationPolicyPath=policyRel;
+   receipt.publicationPolicySha256=dir.publicationPolicySha256;
+   for(const ref of receipt.automation??[])
+    if(ref.role==='REPORT_PUBLICATION_POLICY'){
+     ref.path=policyRel;ref.sha256=dir.publicationPolicySha256;
+    }
+  }
   for(const group of ['inputs','evidence','outputs','automation']){
-   for(const ref of row[group]??[]){
-    if(typeof ref?.path!=='string')continue;
-    const loc=ref.path.startsWith(dest+'/')?ref.path:dest+'/'+ref.path;
-    if(fs.existsSync(toFile(loc))&&fs.statSync(toFile(loc)).isFile()&&ref.sha256)
-     ref.sha256=digest(loc);
+   for(const ref of receipt[group]??[]){
+    if(typeof ref?.path!=='string'||!ref.sha256)continue;
+    const candidate=ref.path.startsWith(dest+'/')?ref.path:dest+'/'+ref.path;
+    if(fs.existsSync(toFile(candidate))&&fs.statSync(toFile(candidate)).isFile())
+     ref.sha256=digest(candidate);
    }
   }
-  save(rel,row);
+  save(rel,receipt);
  }
- const policyRel=dest+'/reports/REPORT_PUBLICATION_POLICY_v1.json';
- if(fs.existsSync(toFile(policyRel))){
-  const policy=rebind(load(policyRel));
-  policy.campaignId=newId;policy.campaignGenerationId=dir.campaignGenerationId;
-  const canon=(x)=>Array.isArray(x)?x.map(canon):x&&typeof x==='object'?
-   Object.fromEntries(Object.keys(x).sort().map(k=>[k,canon(x[k])])):x;
-  const bytes=JSON.stringify(canon(policy));
-  fs.writeFileSync(toFile(policyRel),bytes);
-  dir.publicationPolicyPath=policyRel;dir.publicationPolicySha256=sha(Buffer.from(bytes));
- }
- const inputs=allFiles(dest+'/derived',n=>/^phase-\d+$/.test(n)&&Number(n.slice(6))<request.startPhase)
-  .flatMap(n=>allFiles(dest+'/derived/'+n,f=>f.endsWith('.json')&&!f.startsWith('INDEX'))
-  .map(f=>dest+'/derived/'+n+'/'+f));
  const previous=dest+'/receipts/PHASE_'+String(predecessor).padStart(2,'0')+'_RECEIPT_v1.json';
+ // Only adopt Phase-5 source proof if there are no executable candidate
+ // targets; otherwise the corrected campaign must rerun Phase 5 under its own ID.
+ let prefillContext={};
+ if(request.startPhase===6){
+  const p5=load(dest+'/derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json');
+  prefillContext={targetDesigns:p5.actions?.['step-3']?.outputs?.targetDesigns??[],
+   phase5ExecutionResults:{}};
+ }
+ if(request.startPhase===9){
+  const rows=phase9DeltaRows();
+  prefillContext={remediationDeltaRows:rows};
+  const ledgerRel=dest+'/work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md';
+  fs.mkdirSync(path.dirname(toFile(ledgerRel)),{recursive:true});
+  const body=['# Corrective Phase 9 remediation delta','',
+   ...rows.map(r=>'- '+r.findingId+': '+r.changedFilesAndSymbols),'',
+   'Status: PENDING_PHASE9_INTERPRETATION. No remediation is marked verified by this import.',''];
+  fs.writeFileSync(toFile(ledgerRel),body.join('\n'));
+ }
  const assignment=preparePhaseWork({root,campaignPath:dest,authorityRoot:authRoot,
   sequence:request.startPhase,reviewer:'lite-solo-agent',
-  predecessorReceiptPath:previous,derivedInputPaths:inputs,status:'ACTIVE'});
+  predecessorReceiptPath:previous,derivedInputPaths:relatedInputs(request.startPhase),
+  status:'ACTIVE',prefillContext});
  dir.currentAssignment=assignment;dir.lastSealedReceiptPath=previous;
  dir.campaignStatus='ACTIVE';dir.updatedAt=when;dir.unitPhaseEpoch=1;
  if(request.startPhase<=6)createUnitPlanV1({root,campaignPath:dest,
