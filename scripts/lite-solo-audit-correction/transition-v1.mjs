@@ -7,6 +7,7 @@ import os from 'node:os';
 import {createHash} from 'node:crypto';
 import {readJson,writeJson,repoFile,requiredFile,preparePhaseWork,validateBoundAuthorityV1} from '../lib/lite-solo-phase-work-v1.mjs';
 import {createUnitPlanV1} from '../lib/lite-solo-unit-queue-v1.mjs';
+import {renderRemediationDeltaLedgerV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 
 const root=path.resolve(process.env.AUDIT_CONTROLLER_ROOT??'.audit-controller');
 const input=process.argv[2];
@@ -47,7 +48,7 @@ const sourceAnchor=load(sourceAnchorRel);
 if(sourceAnchor.campaign?.campaignGenerationId!==original.campaignGenerationId||
  sourceAnchor.source?.sha256!==original.sourceSha256||
  sourceAnchor.authority?.manifestSha256!==original.authorityDigest||
- sourceAnchor.validation?.status!=='PASS'||
+ (sourceAnchor.validation?.status!=='PASS'&&!(sourceAnchor.phase?.status==='SKIPPED'&&sourceAnchor.validation?.status==='NOT_APPLICABLE'))||
  (original.campaignStatus==='COMPLETE'&&(sourceAnchor.phase?.sequence!==10||sourceAnchor.phase?.status!=='COMPLETE'))||
  (original.campaignStatus==='ACTIVE'&&(sourceAnchor.phase?.status!=='SEALED'&&sourceAnchor.phase?.status!=='SKIPPED')))
  throw Error('LSC_SOURCE_ANCHOR_NOT_ACCEPTED');
@@ -342,12 +343,10 @@ const launch=()=>{
   retain('work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
   retain('work/phase-10/COVERAGE_MATRIX_v1.json');
  }
- // Retire only fork-local successor state. Original receipts and artifacts are
- // unchanged; historical machine data is not automatically re-accepted.
- for(const p of allFiles(dest+'/receipts',n=>/^PHASE_([0-9]{2})_RECEIPT_v[0-9]+\.json$/.test(n))){
-  const m=p.match(/^PHASE_(\d{2})_/);
-  if(Number(m[1])>=request.startPhase)fs.rmSync(toFile(dest+'/receipts/'+p));
- }
+ // Eliminate all original-generation receipts in the fork, including older
+ // revision siblings. Adopt only controller-verified latest predecessors below.
+ fs.rmSync(toFile(dest+'/receipts'),{recursive:true,force:true});
+ fs.mkdirSync(toFile(dest+'/receipts'),{recursive:true});
  for(const top of ['work','derived']){
   for(const n of allFiles(dest+'/'+top,n=>/^phase-0?[0-9]+$/.test(n)))
    if(Number(n.slice(6))>=request.startPhase)
@@ -382,14 +381,15 @@ const launch=()=>{
    sourceReceiptRevision:item.revision,sourceValidation:originalReceipt.validation,
    sourceAuthority:originalReceipt.authority,notNewExecutionEvidence:true};
   copy.validation={...copy.validation,adoption:'HISTORICAL_CONTROLLER_ACCEPTANCE_ONLY'};
-  // Imported inputs must point to the reissued predecessor, not the older
-  // source revision; the source's literal original record remains in importedFrom.
-  if(item.phase>0&&Array.isArray(copy.inputs)){
-   for(const ref of copy.inputs){
-    if(ref.role==='PREDECESSOR_RECEIPT'){
-     ref.path=dest+'/receipts/PHASE_'+String(item.phase-1).padStart(2,'0')+'_RECEIPT_v1.json';
-     delete ref.sha256;
-    }
+  // Repoint fork-local prior receipt references to the new admission
+  // receipts; original revision references remain in importedFrom.
+  for(const group of ['inputs','evidence','outputs','automation']){
+   for(const ref of copy[group]??[]){
+    if(typeof ref?.path!=='string')continue;
+    const found=ref.path.match(/receipts\/PHASE_(\d{2})_RECEIPT_v[1-9][0-9]*\.json$/);
+    if(!found||Number(found[1])>=request.startPhase)continue;
+    ref.path=dest+'/receipts/PHASE_'+found[1]+'_RECEIPT_v1.json';
+    delete ref.sha256;
    }
   }
   save(rel,copy);
@@ -414,6 +414,16 @@ const launch=()=>{
  const policyData=JSON.stringify(canonical(policy));
  fs.writeFileSync(toFile(policyRel),policyData);
  dir.publicationPolicyPath=policyRel;dir.publicationPolicySha256=sha(Buffer.from(policyData));
+ if(request.startPhase===10&&cached.has('work/phase-10/COVERAGE_MATRIX_v1.json')){
+  const matrixRel=dest+'/work/phase-10/COVERAGE_MATRIX_v1.json';
+  const matrix=load(matrixRel);
+  matrix.correctionHistoricalSource={
+   sourceCampaignId:original.campaignId,sourceReceiptPath:sourceAnchorRel,
+   sourceReceiptSha256:digest(sourceAnchorRel),
+   disclaimer:'Earlier post-seal proof is historical. No newly accepted correction-campaign machine proof is implied.'};
+  delete matrix.postSealAcceptedEvidence;
+  save(matrixRel,matrix);
+ }
  for(const item of accepted){
   const rel=dest+'/receipts/PHASE_'+String(item.phase).padStart(2,'0')+'_RECEIPT_v1.json';
   const receipt=load(rel);
@@ -427,7 +437,7 @@ const launch=()=>{
   }
   for(const group of ['inputs','evidence','outputs','automation']){
    for(const ref of receipt[group]??[]){
-    if(typeof ref?.path!=='string'||!ref.sha256)continue;
+    if(typeof ref?.path!=='string')continue;
     const candidate=ref.path.startsWith(dest+'/')?ref.path:dest+'/'+ref.path;
     if(fs.existsSync(toFile(candidate))&&fs.statSync(toFile(candidate)).isFile())
      ref.sha256=digest(candidate);
@@ -449,10 +459,10 @@ const launch=()=>{
   prefillContext={remediationDeltaRows:rows};
   const ledgerRel=dest+'/work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md';
   fs.mkdirSync(path.dirname(toFile(ledgerRel)),{recursive:true});
-  const body=['# Corrective Phase 9 remediation delta','',
-   ...rows.map(r=>'- '+r.findingId+': '+r.changedFilesAndSymbols),'',
-   'Status: PENDING_PHASE9_INTERPRETATION. No remediation is marked verified by this import.',''];
-  fs.writeFileSync(toFile(ledgerRel),body.join('\n'));
+  const p8=load(dest+'/derived/phase-8/PHASE_08_CANONICAL_DATA_v1.json');
+  fs.writeFileSync(toFile(ledgerRel),renderRemediationDeltaLedgerV1({
+   validatedFindings:p8.actions?.['step-2']?.outputs?.validatedFindings??[],
+   deltaRows:rows,noRemediation:false}));
  }
  const assignment=preparePhaseWork({root,campaignPath:dest,authorityRoot:authRoot,
   sequence:request.startPhase,reviewer:'lite-solo-agent',
