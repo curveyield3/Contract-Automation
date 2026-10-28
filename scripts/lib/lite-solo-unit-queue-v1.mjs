@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
-import {repoFile,readJson,writeJson,loadPhaseSchema,validateWorkForm,requiredFile} from './lite-solo-phase-work-v1.mjs';
+import {repoFile,readJson,writeJson,loadPhaseSchema,validateWorkForm,validateSchemaRecordValueV1,validateBoundAuthorityV1,requiredFile} from './lite-solo-phase-work-v1.mjs';
 import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1} from '../../packages/github-native-sim/src/adr-discovery-validators-v1.mjs';
 import {reviewInventoryRelV1} from '../../packages/github-native-sim/src/adr-review-inventory-v1.mjs';
 import {buildUnitPacketV1,writeUnitPacketIndexV1,buildDiscoverySummaryV1,readUnitPacketV1} from '../../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
@@ -582,28 +582,14 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
    errors.push(p+'.value: FROZEN_NEGATIVE_SLOT_IMMUTABLE');
   const negative=u.kind!=='APPEND'&&typeof val==='string'&&val===orig&&
    ['NONE_IDENTIFIED','NO_CANDIDATE','NOT_APPLICABLE','NO_ADDITIONAL_OBLIGATION'].includes(val);
-  if(field.type==='REQUIRED_RECORD_LIST'&&!(isObject(val)||negative))
-   errors.push(p+'.value: RECORD_OBJECT_REQUIRED');
-  if(['REQUIRED_LIST','REQUIRED_ANALYSIS'].includes(field.type)&&
-     (missing(val)||Array.isArray(val)&&val.length===0))
-   errors.push(p+'.value: REQUIRED_NONBLANK');
-  if(field.type==='REQUIRED_ANALYSIS'&&typeof val!=='string')
-   errors.push(p+'.value: STRING_REQUIRED');
-  if(isObject(val)){
-   for(const name of field.itemRequiredFields??[]){
-    const value=val[name],fp=p+'.value.'+name;
-    if(missing(value))errors.push(fp+': REQUIRED_NONBLANK');
-    const min=field.itemFieldMinItems?.[name];
-    if(Array.isArray(value)&&Number.isInteger(min)&&value.length<min)
-     errors.push(fp+': MIN_ITEMS_'+min);
-    if(Array.isArray(value)&&value.some(x=>typeof x==='string'&&missing(x)))
-     errors.push(fp+': UNRESOLVED_PLACEHOLDER');
-   }
-   for(const [name,allowed] of Object.entries(field.itemFieldAllowedValues??{}))
-    if(val[name]!==undefined&&
-     (typeof val[name]!==typeof allowed[0]||!allowed.includes(val[name])))
-     errors.push(p+'.value.'+name+': INVALID_ENUM');
-  }else if(missing(val))errors.push(p+'.value: REQUIRED_NONBLANK');
+  if(field.type==='REQUIRED_LIST'){
+   // A SHARD for a REQUIRED_LIST owns one element, not the enclosing array.
+   const errorsForItem=validateSchemaRecordValueV1(
+    {type:'REQUIRED_ANALYSIS'},val,p+'.value');
+   errors.push(...errorsForItem);
+  }else errors.push(...validateSchemaRecordValueV1(field,val,p+'.value',{
+   originalValue:orig,allowNegative:negative
+  }));
   if(phase===6&&u.field==='baselineTestRecords'&&isObject(val))
    errors.push(...validateLiveForkBaselineRecordV1({
     root,campaignPath:plan.campaignPath,campaignId:plan.campaignId,
@@ -766,7 +752,14 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
  return {unitId:u.unitId,status:'REWORK_REQUIRED',resultRef:resultRel,errors};
 }
 function handleSubmit({root,campaign,phase,queue,plan,request,directory}){
- const schema=loadPhaseSchema(root,AUTHORITY,phase).schema,items=[];
+ const receipt=read(root,path.posix.join(campaign,'receipts/PHASE_00_RECEIPT_v1.json'));
+ const boundRoot=validateBoundAuthorityV1({root,receipt});
+ if(boundRoot!==AUTHORITY||receipt.authority?.manifestSha256!==directory.authorityDigest)
+  throw Error('bound v4 authority package identity mismatch at unit acceptance');
+ const {schema,rel:schemaRel}=loadPhaseSchema(root,boundRoot,phase);
+ if(directory.currentAssignment?.workSchemaPath!==schemaRel)
+  throw Error('assigned work schema differs from receipt-bound authority');
+ const items=[];
  for(const item of request.items){
   // A durably queued request is SUBMITTED, never implicitly ACCEPTED.
   // Missing cross-repository bytes remain pending and retryable.
@@ -1012,7 +1005,13 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  }
  // Full restoration is the pre-existing source-bound schema/identity validator.
  const restored=secureRestoreWorkFormV13({root,indexRel:assignment.workShardIndexPath});
- const form=JSON.parse(restored.content),schema=loadPhaseSchema(root,AUTHORITY,phase).schema;
+ const receipt=read(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'));
+ const boundRoot=validateBoundAuthorityV1({root,receipt});
+ if(boundRoot!==AUTHORITY||receipt.authority?.manifestSha256!==directory.authorityDigest)
+  throw Error('CONTROLLER_INTEGRITY_FAILURE: immutable authority mismatch during assembly');
+ const {schema,rel:schemaRel}=loadPhaseSchema(root,boundRoot,phase);
+ if(schemaRel!==assignment.workSchemaPath)throw Error('CONTROLLER_INTEGRITY_FAILURE: assembled phase schema identity mismatch');
+ const form=JSON.parse(restored.content);
  const errors=validateWorkForm(schema,form,{structuralOnly:true});
  if(errors.length)throw Error('CONTROLLER_INTEGRITY_FAILURE: accepted immutable aggregate malformed: '+errors.slice(0,15).join('; '));
  // Existing phase controller materializes, validates all semantic gates, executes required
