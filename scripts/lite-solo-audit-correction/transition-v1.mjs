@@ -432,6 +432,14 @@ const launch=()=>{
  const policyData=JSON.stringify(canonical(policy));
  fs.writeFileSync(toFile(policyRel),policyData);
  dir.publicationPolicyPath=policyRel;dir.publicationPolicySha256=sha(Buffer.from(policyData));
+ if(request.startPhase===10&&cached.has('work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md')){
+  const indexRel=dest+'/work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md';
+  fs.appendFileSync(toFile(indexRel),'\n## Corrective lineage provenance\n'
+   +'This index summarizes original accepted predecessor work from '+original.campaignId
+   +'. Source-campaign machine evidence remains historical; it is not a new '
+   +'correction-generation execution PASS. All revised security conclusions '
+   +'require current controller acceptance.\n');
+ }
  if(request.startPhase===10&&cached.has('work/phase-10/COVERAGE_MATRIX_v1.json')){
   const matrixRel=dest+'/work/phase-10/COVERAGE_MATRIX_v1.json';
   const matrix=load(matrixRel);
