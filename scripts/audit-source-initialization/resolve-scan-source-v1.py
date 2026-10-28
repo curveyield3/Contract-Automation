@@ -293,7 +293,7 @@ def main():
     for label_file, value in {
         "filename": name, "sha256": SHA(raw_archive), "size": str(len(raw_archive)),
         "provider": "etherscan-v2", "canonical-url": requested[0]["url"],
-        "display-base": display, "slug": display.lower(),
+        "display-base": display, "slug": re.sub(r"[^a-z0-9._-]+", "-", display.lower()).strip("-"),
         "scan-manifest-sha256": SHA(files["live-scan-project/scan-source-manifest.json"]),
         "scan-target-set-sha256": digest,
         "scan-targets-json": json.dumps([x["url"] for x in requested], separators=(",", ":"))
