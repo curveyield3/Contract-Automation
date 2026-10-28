@@ -87,6 +87,87 @@ function validateScalar(v,pathName,def){
   if(def.type==='REQUIRED_ENUM'&&!def.allowed?.includes(String(v))) return [pathName+' must be one of: '+(def.allowed??[]).join(', ')];
   return [];
 }
+
+// Shared deterministic Phase 4-6 work-unit and aggregate field rules.
+// A primitive type is enforced only if the bound schema, immutable assigned
+// prefill, or established typed packet contract actually declares it.
+const V4_ARRAY_MEMBERS=new Set([
+ 'contextIds','evidenceRefs','relatedRequirementKeys','relatedHypothesisKeys',
+ 'obligationIds','obligationsDetail','obligationOutcomes','requestPaths',
+ 'attackAssertionNames','controlAssertionNames','executionEvidenceRefs','anchors'
+]);
+const V4_INTEGER_MEMBERS=new Set(['dispatchRounds']);
+const V4_NEGATIVE_SLOTS=new Set(['NONE_IDENTIFIED','NO_CANDIDATE','NOT_APPLICABLE','NO_ADDITIONAL_OBLIGATION']);
+function schemaMissingV4(value){
+ if(value===undefined||value===null)return true;
+ if(typeof value==='string')return !value.trim()||/^<(?:REQUIRED|CONTROLLER_PREFILL|fill|REQUIRED_OR_)/i.test(value.trim())||
+  value.trim()==='TODO';
+ if(Array.isArray(value))return value.length===0;
+ if(value&&typeof value==='object')return !Object.keys(value).length;
+ return false;
+}
+function nestedPresentV4(value,p,errors,depth=0){
+ if(depth>12){errors.push(p+': NESTING_LIMIT_EXCEEDED');return;}
+ if(schemaMissingV4(value)){errors.push(p+': REQUIRED_NONBLANK');return;}
+ if(Array.isArray(value)){
+  for(let i=0;i<value.length;i++)nestedPresentV4(value[i],p+'['+i+']',errors,depth+1);
+ }else if(value&&typeof value==='object'){
+  for(const [key,child] of Object.entries(value))nestedPresentV4(child,p+'.'+key,errors,depth+1);
+ }
+}
+export function validateSchemaRecordValueV1(field,value,p,{originalValue,allowNegative=false}={}){
+ const errors=[];
+ const negative=typeof value==='string'&&V4_NEGATIVE_SLOTS.has(value);
+ if(field.type==='REQUIRED_ANALYSIS'){
+  if(typeof value!=='string')errors.push(p+': STRING_REQUIRED');
+  else if(schemaMissingV4(value))errors.push(p+': REQUIRED_NONBLANK');
+  return errors;
+ }
+ if(field.type==='REQUIRED_ENUM'){
+  if(typeof value!==typeof field.allowed?.[0]||!field.allowed?.includes(value))
+   errors.push(p+': INVALID_ENUM');
+  return errors;
+ }
+ if(field.type==='REQUIRED_LIST'){
+  if(!Array.isArray(value)||!value.length)errors.push(p+': NONEMPTY_LIST_REQUIRED');
+  else for(let i=0;i<value.length;i++)nestedPresentV4(value[i],p+'['+i+']',errors);
+  return errors;
+ }
+ if(field.type!=='REQUIRED_RECORD_LIST')return errors;
+ if(negative&&allowNegative)return errors;
+ if(!value||typeof value!=='object'||Array.isArray(value)){
+  errors.push(p+': RECORD_OBJECT_REQUIRED');return errors;
+ }
+ for(const name of field.itemRequiredFields??[]){
+  const member=value[name],mp=p+'.'+name;
+  if(schemaMissingV4(member)){errors.push(mp+': REQUIRED_NONBLANK');continue;}
+  const allowed=field.itemFieldAllowedValues?.[name];
+  if(allowed&&(!allowed.length||typeof member!==typeof allowed[0]||!allowed.includes(member)))
+   errors.push(mp+': INVALID_ENUM');
+  const prior=originalValue&&typeof originalValue==='object'&&!Array.isArray(originalValue)?originalValue[name]:undefined;
+  if(prior!==undefined&&!schemaMissingV4(prior)&&
+     (Array.isArray(prior)!==Array.isArray(member)||
+      (Array.isArray(prior)===false&&typeof prior==='object'&&prior!==null&&
+       (!member||typeof member!=='object'||Array.isArray(member)))||
+      (prior!==null&&typeof prior!=='object'&&typeof member!==typeof prior)))
+   errors.push(mp+': PREFILLED_FIELD_TYPE_MISMATCH');
+  if(V4_ARRAY_MEMBERS.has(name)&&!Array.isArray(member))errors.push(mp+': ARRAY_REQUIRED');
+  if(V4_INTEGER_MEMBERS.has(name)&&(!Number.isInteger(member)||member<0))
+   errors.push(mp+': NONNEGATIVE_INTEGER_REQUIRED');
+  const min=field.itemFieldMinItems?.[name];
+  if(Number.isInteger(min)&&(!Array.isArray(member)||member.length<min))
+   errors.push(mp+': MIN_ITEMS_'+min);
+  if(Array.isArray(member)||member&&typeof member==='object')nestedPresentV4(member,mp,errors);
+ }
+ for(const [name,allowed] of Object.entries(field.itemFieldAllowedValues??{}))
+  if(!Object.hasOwn(value,name)&&!field.itemRequiredFields?.includes(name))
+   continue;
+  else if(value[name]!==undefined&&
+   (!allowed.length||typeof value[name]!==typeof allowed[0]||!allowed.includes(value[name])))
+   if(!errors.includes(p+'.'+name+': INVALID_ENUM'))errors.push(p+'.'+name+': INVALID_ENUM');
+ return errors;
+}
+
 export function validateWorkForm(schema,form,{structuralOnly=false}={}){
   const deficiencies=[];
   const missingRequired=value=>value===undefined||value===null||
@@ -108,6 +189,21 @@ export function validateWorkForm(schema,form,{structuralOnly=false}={}){
     for(const field of action.fields??[]){
       const p='actions.'+stepKey+'.outputs.'+field.name;
       const v=row?.outputs?.[field.name];
+      if(structuralOnly){
+        if(field.type==='REQUIRED_RECORD_LIST'){
+          if(!Array.isArray(v)||v.length===0){
+            deficiencies.push(p+': NONEMPTY_RECORD_LIST_REQUIRED');continue;
+          }
+          for(let i=0;i<v.length;i++){
+            const item=v[i];
+            const negative=typeof item==='string'&&V4_NEGATIVE_SLOTS.has(item)&&
+             (v.length===1||i===0&&[4,5,6].includes(schema.phase)&&
+              v.length>1&&v.slice(1).every(x=>x&&typeof x==='object'&&!Array.isArray(x)));
+            deficiencies.push(...validateSchemaRecordValueV1(field,item,p+'['+i+']',{allowNegative:negative}));
+          }
+        }else deficiencies.push(...validateSchemaRecordValueV1(field,v,p));
+        continue;
+      }
       if(field.type==='REQUIRED_LIST'){
         if(!Array.isArray(v)||v.length===0) deficiencies.push(p+' must be a non-empty list');
         else for(let i=0;i<v.length;i++){
