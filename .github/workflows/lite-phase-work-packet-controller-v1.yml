@@ -207,12 +207,12 @@ jobs:
             [[ "$segment_id" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Invalid segment_id"; exit 1; }
             case "$master_outcome" in AMENDED|ACCEPT_WITHOUT_MODIFICATIONS|REQUEST_TARGETED_TESTS|CLOSE_INCOMPLETE) ;; *) echo "::error::Invalid master outcome"; exit 1;; esac
             if [ "$master_outcome" = REQUEST_TARGETED_TESTS ]; then
-              [[ "$test_plan_path" == campaigns/* ]] && [[ "$test_plan_path" =~ ^[A-Za-z0-9._/[:space:]-]+$ ]] || { echo "::error::Invalid campaign-local test plan"; exit 1; }
+              [[ "$test_plan_path" == campaigns/* ]] && [[ "$test_plan_path" =~ ^[A-Za-z0-9._()/[:space:]-]+$ ]] || { echo "::error::Invalid campaign-local test plan"; exit 1; }
             fi
           fi
           if [ "$review_kind" = master-test-result ]; then
             [[ "$segment_id" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Invalid segment_id"; exit 1; }
-            [[ "$test_result_path" == campaigns/* ]] && [[ "$test_result_path" =~ ^[A-Za-z0-9._/[:space:]-]+$ ]] || { echo "::error::Invalid campaign-local test result"; exit 1; }
+            [[ "$test_result_path" == campaigns/* ]] && [[ "$test_result_path" =~ ^[A-Za-z0-9._()/[:space:]-]+$ ]] || { echo "::error::Invalid campaign-local test result"; exit 1; }
           fi
           if [ "$review_kind" = sealed-rework ]; then
             [ "$phase_sequence" = 1 ] || { echo "::error::sealed-rework is restricted to Phase 1"; exit 1; }
