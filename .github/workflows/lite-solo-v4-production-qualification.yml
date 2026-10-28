@@ -7,6 +7,7 @@ on:
       - 'scripts/tests/lite-solo-v4-acceptance/cases/**'
       - 'test/phase0-deploy-gate-v2.test.mjs'
       - 'scripts/lite-solo-fork-integration-check-v1.mjs'
+      - 'packages/github-native-sim/test/phase0-erc20-deploy-e2e-v1.test.mjs'
       - '.github/workflows/lite-solo-v4-production-qualification.yml'
   workflow_dispatch:
 permissions:
