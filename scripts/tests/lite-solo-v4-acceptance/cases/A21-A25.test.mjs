@@ -31,13 +31,19 @@ run('A21',{flowCount:15},(f,d)=>{
  d.recoveredRequest=request.requestId;d.status='LOCAL_PASS; STAGING_NOT_EXECUTED: actual canceled Actions run not observed';
 });
 run('A22',{flowCount:142},(f,d)=>{
- f.plan();const worker='a22';const units=[];
- for(let i=0;i<12;i++)units.push(...claim(f,worker,'a22-claim-'+i));
+ f.plan();const workers=['a22-alpha','a22-beta','a22-gamma'];const units=[];
+ // No worker may hold more than 50 claims; distribute 120 durable submissions
+ // among three independently claimed workers without relaxing backlog coverage.
+ for(let i=0;i<12;i++){
+  const worker=workers[Math.floor(i/4)];
+  units.push(...claim(f,worker,'a22-claim-'+i).map(unit=>({unit,worker})));
+ }
  assert.equal(units.length,120);
  const manifest=[],results=[];
  for(let i=0;i<units.length;i++){
   const reqId='a22-sub-'+String(i+1).padStart(3,'0');
-  const item=snapshotWith(f,units[i],worker),r=f.request('SUBMIT',worker,reqId,{items:[item]});
+  const {unit,worker}=units[i];
+  const item=snapshotWith(f,unit,worker),r=f.request('SUBMIT',worker,reqId,{items:[item]});
   const ingress='process/agent-upload/lite-solo-unit-requests/'+f.directory.campaignId+'/'+worker+'-'+reqId+'.json';
   writeFile(f.root,ingress,json(r));manifest.push({id:reqId,ingress,item});
  }
