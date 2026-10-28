@@ -55,7 +55,7 @@ jobs:
           encoded="$(jq -rn --arg p "$directory" '$p|split("/")|map(@uri)|join("/")')"
           current="$(gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=main")"
           printf '%s' "$current" | jq -r .content | base64 -d >/tmp/lite-solo-owner-directory.json
-          jq -e --arg id "$CAMPAIGN_ID" '.campaignId==$id and .mode=="LITE_SOLO" and .agent.actorId=="lite-solo-agent" and .currentAssignment.phaseSequence==5 and .campaignStatus=="ACTIVE" and (.sourceSha256|test("^[0-9a-f]{64}$"))' /tmp/lite-solo-owner-directory.json >/dev/null
+          jq -e --arg id "$CAMPAIGN_ID" '.campaignId==$id and .mode=="LITE_SOLO" and (.authorityRelease=="lite-solo-v1" or .authorityRelease=="lite-solo-v2") and .agent.actorId=="lite-solo-agent" and .currentAssignment.phaseSequence==5 and .campaignStatus=="ACTIVE" and (.sourceSha256|test("^[0-9a-f]{64}$"))' /tmp/lite-solo-owner-directory.json >/dev/null
           if [ "$DECISION" = "Approve Phase 5 Execution" ]; then status=APPROVED; else status=REVOKED; fi
           jq --arg status "$status" --arg actor "$REQUEST_ACTOR" --arg run "$GITHUB_RUN_ID" \
             '.machineExecutionAuthorization={status:$status,scope:"PHASE5_TARGET_EXECUTION",sourceSha256:.sourceSha256,authorizedBy:$actor,authorizationWorkflowRunId:$run,recordedAt:(now|todate)}' /tmp/lite-solo-owner-directory.json >/tmp/lite-solo-owner-authorized.json
