@@ -43,7 +43,7 @@ if(arg.mode!=='finalize'){
  // A previous v4 boundary attempt can expose index drift caused by its
  // former re-sharding behavior. Retry once through the existing assembler,
  // which verifies and restores identities from the frozen unit plan.
- if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
+ if(phase===4&&['BLOCKED','REWORK_REQUIRED'].includes(recorded?.finalizeStatus)&&
     String(recorded.finalizeDetails?.error??'').startsWith('v13 mandatory work records dropped:')){
   markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
   changed=true;
