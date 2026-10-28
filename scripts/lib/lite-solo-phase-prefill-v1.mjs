@@ -628,7 +628,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     if(priorRows.length)form.actions['step-2'].outputs.reconciliationRecords=priorRows;
     // v4: freeze candidate-specific target record ownership before any worker claim.
     // Reconciliation retains original candidate key; later new candidates use authorized append slots.
-    if(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v4'){
+    if(['Audit Skill - Lite-Solo Authority/lite-solo-v4','Audit Skill - Lite-Solo Authority/lite-solo-v5'].includes(authorityRoot)){
       const templates=form.actions?.['step-3']?.outputs?.targetDesigns??[];
       const model=templates.find(x=>x&&typeof x==='object'&&!Array.isArray(x));
       const keys=[...new Set(priorCandidates.filter(x=>x&&typeof x==='object'&&!Array.isArray(x))
@@ -1007,7 +1007,7 @@ export function buildControllerPacket({directory,assignment,existing,now}){
   };
 }
 
-export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=null){
+export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=null,{structuralOnly=false}={}){
   const deficiencies=[];
   const formDigest=form?.automationInputs?.controllerPrefillDigestSha256??null;
   const expectedDigest=assignmentExpectedDigest??formDigest;
@@ -1023,6 +1023,7 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
     const actual=rows.filter(x=>x&&typeof x==='object').map(x=>x.recordKey);
     if(JSON.stringify([...actual].sort())!==JSON.stringify([...expected].sort())||new Set(actual).size!==actual.length)
       deficiencies.push('Phase 4 discovery reconciliation keys must exactly match controller-prefilled keys.');
+    if(!structuralOnly){
     const candidates=new Set((form?.actions?.['step-3']?.outputs?.candidateRecords??[]).filter(x=>x&&typeof x==='object').map(x=>x.tempKey));
     for(const row of rows.filter(x=>x&&typeof x==='object')){
       if(!['CANDIDATE_CREATED','RESOLVED_NO_ISSUE','COVERAGE_GAP_ACCEPTED'].includes(row.disposition))
@@ -1036,6 +1037,7 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
         deficiencies.push('Discovery '+row.recordKey+' must name the blocking control.');
       if(row.disposition==='COVERAGE_GAP_ACCEPTED'&&row.origin!=='COVERAGE_GAP')
         deficiencies.push('Discovery '+row.recordKey+' cannot accept a non-gap as a coverage gap.');
+    }
     }
   }
   if(sequence===4 && !Object.hasOwn(form?.automationInputs??{},'expectedDiscoveryRecordKeys')){
@@ -1069,6 +1071,7 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
     }
     actual.sort();
     if(JSON.stringify(actual)!==JSON.stringify(expected)) deficiencies.push('Due-obligation disposition rows do not exactly match controller-prefilled obligations. Expected '+expected.join(', ')+'; got '+actual.join(', ')+'.');
+    if(!structuralOnly){
     for(const action of Object.values(form?.actions??{})){
       for(const row of action?.outputs?.obligationDispositions??[]){
         if(!row||typeof row!=='object'||Array.isArray(row))continue;
@@ -1077,6 +1080,7 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
         if(['CARRY_FORWARD','BLOCKED_CARRIED'].includes(d)&&(!carry||carry==='NONE_IDENTIFIED'||Number(carry)<=Number(sequence))) deficiencies.push('Obligation '+String(row.obligationId??'UNRESOLVED')+' requires a later carryForwardPhaseOrNone for disposition '+d+'.');
         if(['SATISFIED','NOT_APPLICABLE'].includes(d)&&carry!=='NONE_IDENTIFIED') deficiencies.push('Obligation '+String(row.obligationId??'UNRESOLVED')+' must use carryForwardPhaseOrNone=NONE_IDENTIFIED for terminal disposition '+d+'.');
       }
+    }
     }
   }
   return deficiencies;

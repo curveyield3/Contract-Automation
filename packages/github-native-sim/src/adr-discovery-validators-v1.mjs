@@ -74,8 +74,8 @@ export function parseAnchorV1(text,inventory) {
 
 // Opt-in for new v13-bound campaigns only. Historical v12 packets continue
 // through the original per-class validator and produce identical decisions.
-function validateVerdictSubmissionV13({packet,submission,inventory}){
- const errors=[];
+function validateVerdictSubmissionV13({packet,submission,inventory,structuralOnly=false}){
+ const errors=[],missingEvidence=structuralOnly?blank:emptyEvidence;
  const primary=packetIds(packet,'primaryContexts').length?
    packetIds(packet,'primaryContexts'):packetIds(packet,'primaryContextIds');
  const trivial=new Set(packetIds(packet,'trivialContextIds').filter(id=>
@@ -97,9 +97,9 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
    seen.add(id);
    if(!['CORRECT','DEFECT','UNRESOLVED'].includes(row?.verdict))
      err(errors,'VERDICT_REQUIRED',p+'.verdict','A correctness verdict (CORRECT/DEFECT) or justified UNRESOLVED is mandatory');
-   if(blank(row?.intent)||emptyEvidence(row?.intent))err(errors,'INTENT_REQUIRED',p+'.intent',
+   if(blank(row?.intent)||missingEvidence(row?.intent))err(errors,'INTENT_REQUIRED',p+'.intent',
      'State what the behavior should do, grounded in source or specification');
-   if(blank(row?.reason)||emptyEvidence(row?.reason))err(errors,'REASON_REQUIRED',p+'.reason',
+   if(blank(row?.reason)||missingEvidence(row?.reason))err(errors,'REASON_REQUIRED',p+'.reason',
      'Explain actual behavior versus intent with source-line evidence');
    const anchors=validAnchors(row?.anchors,inventory,errors,p+'.anchors');
    if(anchors===0)err(errors,'ANCHOR_REQUIRED',p+'.anchors','Verdict requires source anchor');
@@ -109,7 +109,7 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
          'Name a decisive test and exact observation that resolves correctness');
    }
    if(row?.verdict==='DEFECT'){
-     if(!hasCandidate({...row,classId:row?.classId??'OTHER'},candidateRecords(submission,row,row)))
+     if(!structuralOnly&&!hasCandidate({...row,classId:row?.classId??'OTHER'},candidateRecords(submission,row,row)))
        err(errors,'DEFECT_WITHOUT_CANDIDATE',p+'.candidate','DEFECT requires an actionable candidate');
    }
    // A checklist cannot silently replace this specification-vs-code pass.
@@ -120,7 +120,7 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
       blank(inspected.docsAndCommentsChecked)||blank(inspected.namedConstantsChecked))
      err(errors,'SPEC_INSPECTION_REQUIRED',p+'.specInspection',
        'State comparison, checked README/docs/comments and named-constant search for this context');
-   if(inspected?.status==='NO_DOCUMENTED_RULES'&&rules.length)
+   if(!structuralOnly&&inspected?.status==='NO_DOCUMENTED_RULES'&&rules.length)
      err(errors,'SPEC_FALSE_ABSENCE',p+'.specInspection.status','Packet includes documented rules for this context');
    if(!Array.isArray(row?.documentedRules)){
      err(errors,'SPEC_CHECK_REQUIRED',p+'.documentedRules','Document all packet rules, even when the set is empty');
@@ -197,7 +197,7 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
    if(noted.has(id))err(errors,'FLOW_NOTE_DUPLICATE',p+'.flowId','Flow note repeated');
    noted.add(id);
    const count=validAnchors(note?.anchors,inventory,errors,p+'.anchors');
-   if(emptyEvidence(note?.note??note?.summary??note?.description)||count===0)
+   if(missingEvidence(note?.note??note?.summary??note?.description)||count===0)
      err(errors,'FLOW_NOTE_EMPTY',p,'Explain the end-to-end flow with source anchors');
  }
  for(const id of requiredFlows)if(!noted.has(id))
@@ -215,11 +215,11 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
    answered.add(id);
    if(!REVIEW_RESULTS.has(answer?.assessment))
      err(errors,'ASSESSMENT_UNKNOWN',p+'.assessment','Use a recognized integration assessment');
-   if(emptyEvidence(answer?.reasoning))
+   if(missingEvidence(answer?.reasoning))
      err(errors,'REASONING_EMPTY',p+'.reasoning','Source-specific integration reasoning required');
    if(validAnchors(answer?.anchors,inventory,errors,p+'.anchors')===0)
      err(errors,'ANCHOR_REQUIRED',p+'.anchors','Integration answer must cite source');
-   if(answer?.assessment==='CONCERN'&&!obj(answer?.candidate))
+   if(!structuralOnly&&answer?.assessment==='CONCERN'&&!obj(answer?.candidate))
      err(errors,'CONCERN_WITHOUT_CANDIDATE',p+'.candidate','Integration concern needs a candidate');
    if(obj(answer?.candidate))validateCandidate(answer.candidate,inventory,errors,p+'.candidate');
  }
@@ -240,13 +240,13 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
    observedContracts.add(key);
    if(!REVIEW_RESULTS.has(check?.assessment))
      err(errors,'ASSESSMENT_UNKNOWN',p+'.assessment','Use a recognized contract-level assessment');
-   if((check?.assessment==='NOT_APPLICABLE')!==(check?.applicability==='NOT_APPLICABLE'))
+   if(!structuralOnly&&(check?.assessment==='NOT_APPLICABLE')!==(check?.applicability==='NOT_APPLICABLE'))
      err(errors,'NA_MISMATCH',p+'.applicability','Applicability disagrees with assessment');
-   if(emptyEvidence(check?.evidence))
+   if(missingEvidence(check?.evidence))
      err(errors,'EVIDENCE_EMPTY',p+'.evidence','Source-grounded upgrade/storage evidence required');
    if(validAnchors(check?.anchors,inventory,errors,p+'.anchors')===0)
      err(errors,'ANCHOR_REQUIRED',p+'.anchors','Contract check must cite source');
-   if(check?.assessment==='CONCERN'&&!obj(check?.candidate))
+   if(!structuralOnly&&check?.assessment==='CONCERN'&&!obj(check?.candidate))
      err(errors,'CONCERN_WITHOUT_CANDIDATE',p+'.candidate','Concern needs a candidate');
    if(obj(check?.candidate))validateCandidate(check.candidate,inventory,errors,p+'.candidate');
  }
@@ -258,8 +258,8 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
  return finish(errors,submission);
 }
 
-export function validateFlowReviewSubmissionV1({packet,submission,inventory}={}) {
- const errors=[];
+export function validateFlowReviewSubmissionV1({packet,submission,inventory,structuralOnly=false}={}) {
+ const errors=[],missingEvidence=structuralOnly?blank:emptyEvidence;
  if(!checkSchema(submission,FLOW_SCHEMA)||!Array.isArray(submission?.rows)||
     (submission?.flowNotes!==undefined&&!Array.isArray(submission.flowNotes))||
     (submission?.candidates!==undefined&&!Array.isArray(submission.candidates))){
@@ -268,7 +268,7 @@ export function validateFlowReviewSubmissionV1({packet,submission,inventory}={})
  }
  if(!packet||submission.unitId!==packet.unitId)err(errors,'UNIT_MISMATCH','unitId','Submission does not match assigned unit');
  if(packet?.reviewPolicy==='correctness-verdict-v13'){
-   const v13=validateVerdictSubmissionV13({packet,submission,inventory});
+   const v13=validateVerdictSubmissionV13({packet,submission,inventory,structuralOnly});
    v13.errors.unshift(...errors);
    v13.ok=v13.errors.length===0;
    v13.value=v13.ok?submission:null;
@@ -280,12 +280,12 @@ export function validateFlowReviewSubmissionV1({packet,submission,inventory}={})
  const repeats=new Map();
  const ctxOf=id=>arr2(packet?.primaryContexts).find(c=>c?.contextId===id);
  const assessmentErrors=(check,cp,needsClass=true)=>{
-  if(emptyEvidence(check?.evidence))err(errors,'EVIDENCE_EMPTY',cp+'.evidence','Evidence is blank or generic');
+  if(missingEvidence(check?.evidence))err(errors,'EVIDENCE_EMPTY',cp+'.evidence','Evidence is blank or generic');
   if(!REVIEW_RESULTS.has(check?.assessment))err(errors,'SUBMISSION_SCHEMA',cp+'.assessment','Unknown review assessment');
   const count=validAnchors(check?.anchors,inventory,errors,cp+'.anchors');
   if(['SUPPORTED','CONCERN','NOT_APPLICABLE'].includes(check?.assessment)&&count===0)
    err(errors,'ANCHOR_REQUIRED',cp+'.anchors','Source anchor required for the assessment');
-  if(check?.assessment==='CONCERN'&&!hasCandidate(check,candidateRecords(submission,null,check)))
+  if(!structuralOnly&&check?.assessment==='CONCERN'&&!hasCandidate(check,candidateRecords(submission,null,check)))
    err(errors,'CONCERN_WITHOUT_CANDIDATE',cp,'Concern requires a candidate');
   if(obj(check?.candidate))validateCandidate(check.candidate,inventory,errors,cp+'.candidate');
  };
@@ -310,7 +310,7 @@ export function validateFlowReviewSubmissionV1({packet,submission,inventory}={})
   }
   const shared=ids.map(id=>new Set(arr2(ctxOf(id)?.modifiers))).reduce((a,b)=>new Set([...a].filter(x=>b.has(x))));
   if(ids.length>=2&&!shared.size)err(errors,'GROUP_WITHOUT_SHARED_GUARD',gp+'.contextIds','Grouped contexts must share at least one modifier');
-  if((group?.assessment==='NOT_APPLICABLE')!==(group?.applicability==='NOT_APPLICABLE'))
+  if(!structuralOnly&&(group?.assessment==='NOT_APPLICABLE')!==(group?.applicability==='NOT_APPLICABLE'))
    err(errors,'NA_MISMATCH',gp+'.applicability','Applicability disagrees with assessment');
   assessmentErrors(group,gp);
   for(const id of ids){const set=groupCovered.get(id)??new Set();set.add(group?.classId);groupCovered.set(id,set);}
@@ -320,7 +320,7 @@ export function validateFlowReviewSubmissionV1({packet,submission,inventory}={})
   const index=arr2(submission.contractChecks).findIndex(x=>x?.contract===required.contract&&x?.classId===required.classId);
   if(index<0){err(errors,'CONTRACT_CHECK_MISSING','contractChecks','Missing '+required.classId+' for '+required.contract);continue;}
   const check=submission.contractChecks[index];
-  if((check?.assessment==='NOT_APPLICABLE')!==(check?.applicability==='NOT_APPLICABLE'))
+  if(!structuralOnly&&(check?.assessment==='NOT_APPLICABLE')!==(check?.applicability==='NOT_APPLICABLE'))
    err(errors,'NA_MISMATCH','contractChecks['+index+'].applicability','Applicability disagrees with assessment');
   assessmentErrors(check,'contractChecks['+index+']');
  }
@@ -341,15 +341,15 @@ export function validateFlowReviewSubmissionV1({packet,submission,inventory}={})
    else if(!allowed.has(classId)&&!trivialCovered.has(id))err(errors,'CHECK_UNKNOWN_CLASS',cp+'.classId','Class not required for this context');
    if(observed.has(classId))err(errors,'CHECK_DUPLICATE',cp+'.classId','Class checked more than once');
    observed.add(classId);
-   if(emptyEvidence(check?.evidence))err(errors,'EVIDENCE_EMPTY',cp+'.evidence','Evidence is blank or generic');
+   if(missingEvidence(check?.evidence))err(errors,'EVIDENCE_EMPTY',cp+'.evidence','Evidence is blank or generic');
    if(!REVIEW_RESULTS.has(check?.assessment))err(errors,'SUBMISSION_SCHEMA',cp+'.assessment','Unknown review assessment');
    const count=validAnchors(check?.anchors,inventory,errors,cp+'.anchors');
    if(['SUPPORTED','CONCERN','NOT_APPLICABLE'].includes(check?.assessment)&&count===0)
      err(errors,'ANCHOR_REQUIRED',cp+'.anchors','Source anchor required for the assessment');
-   if((check?.assessment==='NOT_APPLICABLE')!==(check?.applicability==='NOT_APPLICABLE'))
+   if(!structuralOnly&&(check?.assessment==='NOT_APPLICABLE')!==(check?.applicability==='NOT_APPLICABLE'))
      err(errors,'NA_MISMATCH',cp+'.applicability','Applicability disagrees with assessment');
    const candidates=candidateRecords(submission,row,check);
-   if(check?.assessment==='CONCERN'&&!hasCandidate(check,candidates))
+   if(!structuralOnly&&check?.assessment==='CONCERN'&&!hasCandidate(check,candidates))
      err(errors,'CONCERN_WITHOUT_CANDIDATE',cp,'Concern requires a candidate');
    if(obj(check?.candidate))validateCandidate(check.candidate,inventory,errors,cp+'.candidate');
    const normalized=comparable(check?.evidence);
@@ -365,7 +365,7 @@ export function validateFlowReviewSubmissionV1({packet,submission,inventory}={})
  for(const id of expected)if(!seen.has(id))err(errors,'MISSING_CONTEXT','rows','Primary context missing: '+id);
  for(let i=0;i<(Array.isArray(submission?.candidates)?submission.candidates:[]).length;i++)
   validateCandidate(submission.candidates[i],inventory,errors,'candidates['+i+']');
- for(const [e,contexts] of repeats)if(contexts.size>3)
+ for(const [e,contexts] of repeats)if(!structuralOnly&&contexts.size>3)
   err(errors,'REPEATED_EVIDENCE','rows','Identical evidence used in '+contexts.size+' different contexts: '+e.slice(0,70));
  const flows=packetIds(packet,'flows').length?packetIds(packet,'flows'):packetIds(packet,'flowIds');
  const notes=Array.isArray(submission?.flowNotes)?submission.flowNotes:[];
@@ -381,8 +381,8 @@ export function validateFlowReviewSubmissionV1({packet,submission,inventory}={})
  }
  return finish(errors,submission);
 }
-export function validateAttackSubmissionV1({packet,submission,inventory}={}) {
- const errors=[];
+export function validateAttackSubmissionV1({packet,submission,inventory,structuralOnly=false}={}) {
+ const errors=[],missingEvidence=structuralOnly?blank:emptyEvidence;
  if(!checkSchema(submission,ATTACK_SCHEMA)||!Array.isArray(submission?.attackPaths)||
    !Array.isArray(submission?.integrationAnswers)){
   err(errors,'SUBMISSION_SCHEMA','$','Unexpected attack schema or missing/non-array attackPaths or integrationAnswers');
@@ -416,8 +416,8 @@ export function validateAttackSubmissionV1({packet,submission,inventory}={}) {
        const value=comparable(attack.blockingControl),set=blocking.get(value)??new Set();set.add(f);blocking.set(value,set);
      }
    } else if(['VIABLE','UNCERTAIN'].includes(attack?.result)){
-     if(!obj(attack?.candidate))err(errors,'CANDIDATE_REQUIRED',p+'.candidate','Viable/uncertain attack requires a candidate');
-     else validateCandidate(attack.candidate,inventory,errors,p+'.candidate');
+     if(!structuralOnly&&!obj(attack?.candidate))err(errors,'CANDIDATE_REQUIRED',p+'.candidate','Viable/uncertain attack requires a candidate');
+     else if(obj(attack?.candidate))validateCandidate(attack.candidate,inventory,errors,p+'.candidate');
      const idea=attack?.simulationIdea??attack;
      if(!Array.isArray(idea?.transactionSequence)||!idea.transactionSequence.length||
        blank(idea?.oracle))err(errors,'SIMULATION_IDEA_REQUIRED',p+'.simulationIdea','Transaction sequence and oracle required');
@@ -425,7 +425,7 @@ export function validateAttackSubmissionV1({packet,submission,inventory}={}) {
      err(errors,'SUBMISSION_SCHEMA',p+'.result','Unrecognized attack result');
  }
  for(const f of expected)if(!covered.has(f))err(errors,'FLOW_NOT_ATTACKED','attackPaths','No attack path covers '+f);
- for(const [value,flows] of blocking)if(flows.size>3)
+ for(const [value,flows] of blocking)if(!structuralOnly&&flows.size>3)
    err(errors,'REPEATED_BLOCKING_CONTROL','attackPaths','Repeated blocking control across '+flows.size+' flows: '+value.slice(0,70));
  const questions=new Set(packetIds(packet,'integrationQuestions').length?
    packetIds(packet,'integrationQuestions'):packetIds(packet,'integrationQuestionIds'));
@@ -435,11 +435,13 @@ export function validateAttackSubmissionV1({packet,submission,inventory}={}) {
   if(!questions.has(id))err(errors,'QUESTION_EXTRA',p+'.obligationId','Question not part of unit');
   if(answered.has(id))err(errors,'QUESTION_DUPLICATE',p+'.obligationId','Question answered more than once');
   answered.add(id);
-  if(blank(ans?.reasoning)||emptyEvidence(ans.reasoning))
+  if(structuralOnly&&!REVIEW_RESULTS.has(ans?.assessment))
+    err(errors,'ASSESSMENT_UNKNOWN',p+'.assessment','Integration assessment must use a declared enum');
+  if(blank(ans?.reasoning)||missingEvidence(ans.reasoning))
     err(errors,'REASONING_EMPTY',p+'.reasoning','Question needs specific reasoning');
   const count=validAnchors(ans?.anchors,inventory,errors,p+'.anchors');
   if(count===0)err(errors,'ANCHOR_REQUIRED',p+'.anchors','Question must cite source');
-  if(ans?.assessment==='CONCERN'&&!obj(ans?.candidate))
+  if(!structuralOnly&&ans?.assessment==='CONCERN'&&!obj(ans?.candidate))
     err(errors,'CONCERN_WITHOUT_CANDIDATE',p,'Concern answer must contain a candidate');
   if(obj(ans?.candidate))validateCandidate(ans.candidate,inventory,errors,p+'.candidate');
  }

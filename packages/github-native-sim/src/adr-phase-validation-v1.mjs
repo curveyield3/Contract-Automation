@@ -5,6 +5,7 @@ import {repoFile,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 import {buildCoverageMatrixV1,renderCoverageMarkdownV1} from './adr-coverage-matrix-v1.mjs';
 import {loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
+import {classifyDeploymentExecutionV1} from './lite-boundary-artifacts-v1.mjs';
 
 const arr=x=>Array.isArray(x)?x:[];
 const obj=x=>x&&typeof x==='object'&&!Array.isArray(x);
@@ -40,6 +41,79 @@ function ledger(root,campaign,ref,errors,identifier){
  }
  return found;
 }
+// Authenticate the concrete execution request behind a Phase-6 assertion ledger.
+// Merely finding a PARSED ledger with similarly named assertions is not proof
+// that this unit's assigned source-bound machine request actually ran.
+export function validatePhase6MachineBindingV1({root,campaignPath,campaignId,sourceSha256,row,ledgerRef,requireExecuted=false}={}){
+ const errors=[];
+ const requestPaths=arr(row?.requestPaths).filter(x=>x!=='NONE_IDENTIFIED');
+ if(!requestPaths.length){
+  if(requireExecuted)errors.push('MACHINE_REQUEST_PATH_REQUIRED');
+  return errors;
+ }
+ const phase0=read(rootFile(root,campaignPath,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'));
+ const forkProfile=classifyDeploymentExecutionV1({execution:phase0??{}});
+ if(forkProfile.mode==='LIVE_DEPLOYED_FORK'&&forkProfile.status!=='LIVE_FORK_SOURCE_VERIFIED')
+  errors.push('LIVE_FORK_SOURCE_NOT_VERIFIED');
+ const seen=new Set(),found=[];
+ for(const rel of requestPaths){
+  if(typeof rel!=='string'||rel.startsWith('/')||rel.includes(String.fromCharCode(92))||
+     rel.split('/').includes('..')||!rel.startsWith(String(row.requestDirectory??''))){
+   errors.push('UNSAFE_OR_UNASSIGNED_MACHINE_REQUEST: '+String(rel));continue;
+  }
+  const request=read(rootFile(root,campaignPath,rel));
+  if(!request||typeof request.requestId!=='string'||!(/^[A-Za-z0-9][A-Za-z0-9._-]*$/).test(request.requestId)||
+     typeof request.requestDigest!=='string'||!request.requestDigest||
+     (campaignId&&request.campaignId!==campaignId)||
+     (sourceSha256&&request.source?.archiveSha256!==sourceSha256)||
+     !['build-and-test','fork-simulation-lifecycle'].includes(request.phaseId)){
+   errors.push('MACHINE_REQUEST_BINDING_INVALID: '+rel);continue;
+  }
+  if(seen.has(request.requestId)){errors.push('DUPLICATE_MACHINE_REQUEST_ID: '+request.requestId);continue;}
+  seen.add(request.requestId);
+  const base='controller/automation/'+request.requestId;
+  const artifactRef=base+'/ASSERTION_LEDGER_v1.json';
+  const machine=read(rootFile(root,campaignPath,base+'/EXECUTION_EVIDENCE_v1.json'));
+  const ingestion=read(rootFile(root,campaignPath,base+'/ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json'));
+  const parsed=read(rootFile(root,campaignPath,artifactRef));
+  if(!machine||!ingestion||machine.requestId!==request.requestId||
+     machine.requestDigest!==request.requestDigest||ingestion.requestId!==request.requestId||
+     (ingestion.requestDigest&&ingestion.requestDigest!==request.requestDigest)){
+   errors.push('MACHINE_EXECUTION_INGESTION_BINDING_INVALID: '+rel);continue;
+  }
+  if(forkProfile.mode==='LIVE_DEPLOYED_FORK'){
+   const fork=machine.preflight?.mutableRpc;
+   if(machine.preflight?.status!=='PASS'||fork?.status!=='PASS'||
+      fork.identityNormalization?.status!=='PASS'||
+      fork.blockNumber!==forkProfile.blockNumber||
+      String(fork.blockHash??'').toLowerCase()!==String(forkProfile.blockHash??'').toLowerCase()){
+    errors.push('HISTORICAL_FORK_PRECHECK_MISMATCH: '+rel);continue;
+   }
+  }
+  // A validly ingested failed run is real technical evidence, but not a
+  // successful invoked assertion. Another separately authenticated round may
+  // provide the necessary assertions; never fabricate a PASS for this one.
+  if(!parsed||parsed.schemaVersion!=='curveyield-assertion-ledger-v1'||
+     parsed.parseStatus!=='PARSED'||parsed.toolInvoked!==true||
+     !Array.isArray(parsed.tests)||!parsed.tests.length||
+     machine.blocking===true||!['PASS','FINDINGS'].includes(machine.disposition))
+   continue;
+  found.push({ref:artifactRef,tests:parsed.tests});
+ }
+ if(ledgerRef&&ledgerRef!=='NONE_IDENTIFIED'){
+  const match=found.find(x=>x.ref===ledgerRef);
+  if(!match)errors.push('LEDGER_NOT_BOUND_TO_ASSIGNED_REQUEST: '+ledgerRef);
+  else{
+   const named=[...arr(row?.attackAssertionNames),...arr(row?.controlAssertionNames)];
+   if(named.some(name=>typeof name!=='string'||!name.trim()||
+      !match.tests.some(test=>test?.name===name)))
+    errors.push('NAMED_ASSERTION_NOT_IN_BOUND_LEDGER');
+  }
+ }else if(requireExecuted)errors.push('AUTHENTICATED_LEDGER_REQUIRED');
+ if(requireExecuted&&!found.length)errors.push('NO_AUTHENTICATED_MACHINE_EXECUTION');
+ return errors;
+}
+
 function assertions(record,field,allowed,found,errors,prefix,{nonEmpty=true,requireAtLeastOneFail=false}={}){
  const names=record?.[field];
  if(!Array.isArray(names)|| (nonEmpty&&!names.length)||names.some(x=>blank(x))){
@@ -50,8 +124,62 @@ function assertions(record,field,allowed,found,errors,prefix,{nonEmpty=true,requ
  if(states.some(s=>!allowed.includes(s)))errors.push(prefix+field+' assertion result mismatch (required '+allowed.join('/')+')');
  if(requireAtLeastOneFail&&!states.includes('FAIL'))errors.push(prefix+field+' needs a failing security assertion');
 }
-export function validatePhase6AttackerWorkV1({root,campaignPath,form}={}){
+export function validatePhase6AttackerWorkV1({root,campaignPath,campaignId=null,sourceSha256=null,form,structuralOnly=false}={}){
  const errors=[];
+ if(structuralOnly){
+  // The v4 work-unit controller checks machine provenance, not whether
+  // the auditor's PASS/FAIL interpretation or conclusion is persuasive.
+  try{
+   for(const row of arr(output(form,4,'baselineTestRecords')).filter(obj)){
+    const id=String(row.testGroupId??'UNKNOWN'),prefix=id+': ';
+    roundCheck({root,campaignPath,row,identifier:id,errors});
+    const ids=arr(row.obligationIds),outcomes=arr(row.obligationOutcomes);
+    const seen=outcomes.map(x=>x?.obligationId);
+    if(new Set(seen).size!==seen.length||
+       JSON.stringify([...seen].sort())!==JSON.stringify([...ids].sort()))
+     errors.push(prefix+'obligationOutcomes identity coverage mismatch');
+    for(const outcome of outcomes.filter(obj)){
+     const ref=outcome.ledgerRef;
+     if(ref&&ref!=='NONE_IDENTIFIED'){
+      const found=ledger(root,campaignPath,ref,errors,prefix);
+      if(found&&Array.isArray(outcome.assertionNames)&&
+         outcome.assertionNames.some(n=>!found.tests.some(t=>t?.name===n)))
+       errors.push(prefix+'named machine assertion missing');
+     }
+    }
+   }
+   for(const row of arr(output(form,5,'candidateProofRecords')).filter(obj)){
+    const id=String(row.candidateKey??'UNKNOWN'),prefix=id+': ';
+    roundCheck({root,campaignPath,row,identifier:id,errors});
+    if(['CONFIRMED','DISPROVEN'].includes(row.verdict)){
+     const found=ledger(root,campaignPath,row.ledgerRef,errors,prefix);
+     if(found)for(const field of ['attackAssertionNames','controlAssertionNames']){
+      const names=row[field];
+      if(!Array.isArray(names)||!names.length||names.some(blank))
+       errors.push(prefix+field+' requires named machine assertions');
+      else if(names.some(n=>!found.tests.some(t=>t?.name===n)))
+       errors.push(prefix+field+' references absent machine assertion');
+     }
+    }
+   }
+   for(const row of arr(output(form,4,'baselineTestRecords')).filter(obj))
+    for(const outcome of arr(row.obligationOutcomes).filter(obj))
+     if(outcome.ledgerRef&&outcome.ledgerRef!=='NONE_IDENTIFIED'){
+      const failures=validatePhase6MachineBindingV1({root,campaignPath,campaignId,sourceSha256,
+       row,ledgerRef:outcome.ledgerRef,requireExecuted:true});
+      errors.push(...failures.map(x=>String(row.testGroupId??'UNKNOWN')+': '+x));
+     }
+   for(const row of arr(output(form,5,'candidateProofRecords')).filter(obj))
+    if(['CONFIRMED','DISPROVEN'].includes(row.verdict))
+     errors.push(...validatePhase6MachineBindingV1({root,campaignPath,campaignId,sourceSha256,
+      row,ledgerRef:row.ledgerRef,requireExecuted:true}).map(x=>
+       String(row.candidateKey??'UNKNOWN')+': '+x));
+   for(const row of arr(output(form,5,'newCandidateRecords')).filter(obj))
+    if(row.ledgerRef&&row.ledgerRef!=='NONE_IDENTIFIED')
+     ledger(root,campaignPath,row.ledgerRef,errors,String(row.tempKey??'UNKNOWN'));
+  }catch(e){errors.push('Phase 6 machine-integrity validation error: '+String(e.message??e));}
+  return errors;
+ }
  try{
   if(!form?.actions?.['step-4']||!form?.actions?.['step-5'])return [];
   const groups=output(form,4,'baselineTestRecords');

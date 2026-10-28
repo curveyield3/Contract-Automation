@@ -20,13 +20,13 @@ if(slug===campaignId)throw Error('campaign generation suffix missing');
 const directoryRel='Audit Campaign Directory/campaigns/'+slug+'.json';
 const directoryFile=repoFile(root,directoryRel);
 const directory=readJson(directoryFile);
-if(directory.campaignId!==campaignId||directory.mode!=='LITE_SOLO'||directory.authorityRelease!=='lite-solo-v4')
+if(directory.campaignId!==campaignId||directory.mode!=='LITE_SOLO'||!['lite-solo-v4','lite-solo-v5'].includes(directory.authorityRelease))
  throw Error('request drainer denies non-v4 campaigns');
 const campaignPath=directory.workspacePath;
 if(typeof campaignPath!=='string'||!campaignPath.startsWith('campaigns/')||campaignPath.split('/').includes('..'))
  throw Error('unsafe campaign workspace');
 const receipt=readJson(repoFile(root,campaignPath+'/receipts/PHASE_00_RECEIPT_v1.json'));
-if(receipt.authority?.liteRelease!=='lite-solo-v4'||receipt.authority?.manifestSha256!==directory.authorityDigest||
+if(receipt.authority?.liteRelease!==directory.authorityRelease||receipt.authority?.manifestSha256!==directory.authorityDigest||
  receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId||
  receipt.source?.sha256!==directory.sourceSha256)throw Error('source/authority generation binding invalid');
 const requestDir=path.resolve(arg['requests-root']??'process/agent-upload/lite-solo-unit-requests',campaignId);
@@ -43,7 +43,7 @@ if(arg.mode!=='finalize'){
  // A previous v4 boundary attempt can expose index drift caused by its
  // former re-sharding behavior. Retry once through the existing assembler,
  // which verifies and restores identities from the frozen unit plan.
- if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
+ if(phase===4&&['BLOCKED','REWORK_REQUIRED'].includes(recorded?.finalizeStatus)&&
     String(recorded.finalizeDetails?.error??'').startsWith('v13 mandatory work records dropped:')){
   markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
   changed=true;
@@ -67,13 +67,6 @@ if(arg.mode!=='finalize'){
   }
  }
 
- if(phase===4&&['BLOCKED','REWORK_REQUIRED'].includes(recorded?.finalizeStatus)&&
-    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
-    recorded.finalizeDetails.unmappedDeficiencies.length){
-  const recovery=reopenAggregateDefectsV1({root,campaignPath,phase,
-    deficiencies:recorded.finalizeDetails.unmappedDeficiencies});
-  if(recovery.reopenedUnits.length)changed=true;
- }
  // Recover the exact immutable v13 Phase-5 controller prefill after a failed
  // boundary persisted transient request-binding annotations to the assignment.
  // A worker never gets to choose this digest: recompute the locked, controller-
@@ -216,21 +209,31 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
     const current=readJson(directoryFile);
     const packet=current.currentAssignment?.packetPath?readJson(repoFile(root,current.currentAssignment.packetPath)):null;
     const deficits=packet?.controllerValidation?.deficiencies??[];
-    const reopened=deficits.length?reopenAggregateDefectsV1({root,campaignPath,phase:seq,deficiencies:deficits}):null;
-    if(!reopened)markFinalizationV1({root,campaignPath,phase:seq,status:'BLOCKED',details:{envelopeStatus:envelope.status}});
-    seal={status:'NOT_SEALED',phase:seq,envelopeStatus:envelope.status,rework:reopened};
+    // Only typed and exactly indexed structural errors may reopen a unit.
+    // Mixed/unknown finalization failures must leave acceptance untouched.
+    const exact=/^actions\.step-[0-9]+\.outputs\.[A-Za-z][A-Za-z0-9_]*\[[0-9]+\](?:\.[A-Za-z][A-Za-z0-9_]*|\[[0-9]+\])*: (?:REQUIRED_NONBLANK|INVALID_ENUM|ARRAY_REQUIRED|STRING_REQUIRED|RECORD_OBJECT_REQUIRED|NONEMPTY_LIST_REQUIRED|MIN_ITEMS_[0-9]+|PREFILLED_FIELD_TYPE_MISMATCH|NONNEGATIVE_INTEGER_REQUIRED|NESTING_LIMIT_EXCEEDED)$/;
+    const structural=deficits.filter(d=>typeof d==='string'&&exact.test(d));
+    const other=deficits.filter(d=>!structural.includes(d));
+    const reopened=structural.length&&!other.length
+      ?reopenAggregateDefectsV1({root,campaignPath,phase:seq,deficiencies:structural})
+      :null;
+    if(!reopened)markFinalizationV1({root,campaignPath,phase:seq,
+      status:structural.length&&other.length?'CONTROLLER_INTEGRITY_FAILURE':'BLOCKED',
+      details:{envelopeStatus:envelope.status,deficiencies:deficits,
+       reason:structural.length&&other.length?'MIXED_AGGREGATE_DEFICIENCIES':'BOUNDARY_GATE_BLOCKED'}});
+    seal={status:reopened?.unmappedDeficiencies?.length||structural.length&&other.length
+      ?'CONTROLLER_INTEGRITY_FAILURE':'NOT_SEALED',
+      phase:seq,envelopeStatus:envelope.status,rework:reopened};
    }
   }catch(error){
    // Reopen only the accountable source unit(s) on an aggregate schema failure.
    // Other execution/integrity failures stay visible as genuine phase blockers.
    const reason=String(error.stderr??error.message??error).slice(0,1800);
-   const prefix='aggregate validation blocked: ';
-   const rework=reason.startsWith(prefix)
-    ?reopenAggregateDefectsV1({root,campaignPath,phase:seq,
-      deficiencies:reason.slice(prefix.length).split('; ').filter(Boolean)})
-    :null;
-   if(!rework)markFinalizationV1({root,campaignPath,phase:seq,status:'BLOCKED',details:{error:reason}});
-   seal={status:rework?.reopenedUnits?.length?'REWORK_REQUIRED':'BLOCKED',phase:seq,error:reason,rework};
+   const integrity=reason.includes('CONTROLLER_INTEGRITY_FAILURE:');
+   markFinalizationV1({root,campaignPath,phase:seq,
+    status:integrity?'CONTROLLER_INTEGRITY_FAILURE':'BLOCKED',
+    details:{error:reason}});
+   seal={status:integrity?'CONTROLLER_INTEGRITY_FAILURE':'BLOCKED',phase:seq,error:reason};
   }
  }
 }

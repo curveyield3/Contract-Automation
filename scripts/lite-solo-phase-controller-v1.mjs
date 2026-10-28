@@ -832,7 +832,9 @@ if(reviewKind==='discovery'){
   process.exit(0);
 }
 // The phase-wide path is the retained aggregate security validator for v4, never a worker ingress.
-if(directory.authorityRelease==='lite-solo-v4'&&[4,5,6].includes(sequence)&&process.env.LITE_SOLO_V4_FINALIZE!=='1')
+const structuralUnitFinalizationV1=['lite-solo-v4','lite-solo-v5'].includes(directory.authorityRelease)&&
+ [4,5,6].includes(sequence)&&process.env.LITE_SOLO_V4_FINALIZE==='1';
+if(['lite-solo-v4','lite-solo-v5'].includes(directory.authorityRelease)&&[4,5,6].includes(sequence)&&process.env.LITE_SOLO_V4_FINALIZE!=='1')
  throw new Error('v4 Phase 4–6 can only be finalized from accepted immutable units');
 // Lite-Solo accepts phase/discovery only. No successor-delivery holds or master rework routes.
 const sealedRework=null;
@@ -875,8 +877,8 @@ try{
     }
   }
 
-  deficiencies.push(...validateWorkForm(schema,form));
-  deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+  deficiencies.push(...validateWorkForm(schema,form,{structuralOnly:structuralUnitFinalizationV1,authorityRelease:directory.authorityRelease}));
+  deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1,authorityRelease:directory.authorityRelease}));
   if(sequence===5){
     const reportRel=path.posix.join(campaignPath,'controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json');
     const preflight=maybeJson(root,reportRel);
@@ -895,7 +897,10 @@ try{
   }
   if(activeDetectionPolicyV1(predecessor)){
     const fn=({6:validatePhase6AttackerWorkV1,8:validatePhase8LinkageV1,10:validatePhase10CoverageLabelV1})[sequence];
-    if(fn)deficiencies.push(...fn({root,campaignPath,form,requireCoverageMatrix:sequence===10&&/\/lite-solo-v[345]$/.test(authorityRoot)}));
+    if(fn)deficiencies.push(...fn({root,campaignPath,form,
+     campaignId:directory.campaignId,sourceSha256:directory.sourceSha256,
+     structuralOnly:structuralUnitFinalizationV1,
+     requireCoverageMatrix:sequence===10&&/\/lite-solo-v[345]$/.test(authorityRoot)}));
   }
 
   if(sequence===10){
@@ -908,8 +913,8 @@ try{
     if(collectionDeficiencies.length===0){
       assignment.controllerPrefillDigestSha256=form.automationInputs.controllerPrefillDigestSha256;
       writeJson(repoFile(root,assignment.workFormPath),form);
-      deficiencies.push(...validateWorkForm(schema,form));
-      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+      deficiencies.push(...validateWorkForm(schema,form,{structuralOnly:structuralUnitFinalizationV1,authorityRelease:directory.authorityRelease}));
+      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1,authorityRelease:directory.authorityRelease}));
     }
   }
 }catch(e){
@@ -1021,7 +1026,7 @@ if(sequence===5&&form&&deficiencies.length===0){
   if(!deficiencies.length){
     assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
     writeJson(repoFile(root,assignment.workFormPath),form);
-    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{structuralOnly:structuralUnitFinalizationV1,authorityRelease:directory.authorityRelease}));
   }
 }
 
@@ -1413,7 +1418,7 @@ else{
   nextAssignment=((sequence===6&&isReassignedV13AuthorityV1({root,authorityRoot})&&masterAmendmentRefreshSha)||postMasterDiscovery)
  ?null
  :preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
-  if(sequence===3&&authorityRoot!=='Audit Skill - Lite-Solo Authority/lite-solo-v4'&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
+  if(sequence===3&&!['Audit Skill - Lite-Solo Authority/lite-solo-v4','Audit Skill - Lite-Solo Authority/lite-solo-v5'].includes(authorityRoot)&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
     const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
       now,auditControllerRef:a['audit-controller-ref']??'main'});
     directory.discovery={statePath:started.statePath,status:started.completeImmediately?'COMPLETE':'RUNNING',
@@ -1435,7 +1440,7 @@ else{
   directory.currentAssignment=nextAssignment;directory.campaignStatus=discoveryStarted?(directory.discovery.status==='COMPLETE'?'ACTIVE':'WAITING_FOR_DISCOVERY'):'ACTIVE';directory.updatedAt=now;
   // Enter each v4 parallel phase with a frozen, full deterministic unit plan.
   // No single initial worker or claim bottleneck; Phase 4 first exposes F/R only.
-  if(directory.authorityRelease==='lite-solo-v4'&&nextAssignment&&[4,5,6].includes(nextAssignment.phaseSequence)){
+  if(['lite-solo-v4','lite-solo-v5'].includes(directory.authorityRelease)&&nextAssignment&&[4,5,6].includes(nextAssignment.phaseSequence)){
     createUnitPlanV1({root,campaignPath,directory,phase:nextAssignment.phaseSequence,automationRoot:process.cwd()});
   }
 }

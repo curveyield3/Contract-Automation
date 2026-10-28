@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
-import {repoFile,readJson,writeJson,loadPhaseSchema,validateWorkForm,requiredFile} from './lite-solo-phase-work-v1.mjs';
+import {repoFile,readJson,writeJson,loadPhaseSchema,validateWorkForm,validateSchemaRecordValueV1,validateBoundAuthorityV1,requiredFile} from './lite-solo-phase-work-v1.mjs';
 import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1} from '../../packages/github-native-sim/src/adr-discovery-validators-v1.mjs';
 import {reviewInventoryRelV1} from '../../packages/github-native-sim/src/adr-review-inventory-v1.mjs';
 import {buildUnitPacketV1,writeUnitPacketIndexV1,buildDiscoverySummaryV1,readUnitPacketV1} from '../../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
@@ -10,6 +10,7 @@ import {deriveBaselineObligationsV1} from '../../packages/github-native-sim/src/
 import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite-solo-phase-prefill-v1.mjs';
 import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {validateLiveForkBaselineRecordV1} from './lite-solo-live-fork-baseline-gate-v1.mjs';
+import {validatePhase6MachineBindingV1} from '../../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
 import {planSemanticBatchesV1,SEMANTIC_BATCH_READING_GUIDE_V1} from './lite-solo-semantic-batches-v1.mjs';
 
@@ -71,8 +72,11 @@ const dependenciesFresh=(queue,u,recorded)=>{
   JSON.stringify(current)===JSON.stringify(recorded));
 };
 const isPhase=(p)=>[4,5,6].includes(p);
-const RELEASE='lite-solo-v4';
-const AUTHORITY='Audit Skill - Lite-Solo Authority/lite-solo-v4';
+const RELEASES=new Set(['lite-solo-v4','lite-solo-v5']);
+const authorityRootFor=directory=>{
+ if(!RELEASES.has(directory.authorityRelease))throw Error('unsupported Lite-Solo unit authority release');
+ return 'Audit Skill - Lite-Solo Authority/'+directory.authorityRelease;
+};
 const rowId=(phase,field,index)=>{
  const families={
  '4:discoveryReconciliationRecords':'P4-RC','4:specialistReviewRecords':'P4-SP',
@@ -88,7 +92,7 @@ const rowId=(phase,field,index)=>{
  return prefix+'-'+String(index+1).padStart(3,'0');
 };
 function assertV4(directory,phase,request=null){
- if(!isPhase(phase)||directory.mode!=='LITE_SOLO'||directory.authorityRelease!==RELEASE)
+ if(!isPhase(phase)||directory.mode!=='LITE_SOLO'||!RELEASES.has(directory.authorityRelease))
   throw Error('v4 controller requires a v4-bound Lite-Solo generation');
  if(directory.executionModel!=='PARALLEL_WORKER_UNITS')
   throw Error('campaign is not admitted to parallel execution');
@@ -253,7 +257,7 @@ export function createUnitPlanV1({root,campaignPath,directory,phase,automationRo
   const fIds=units.filter(u=>u.unitId.startsWith('F-')||u.unitId.startsWith('R-')).map(u=>u.unitId);
   for(const u of units){
    if(!/^[FRX]-\d{3}$/.test(u.unitId))throw Error('unsupported discovery unit '+u.unitId);
-   const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot:AUTHORITY,
+   const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot:authorityRootFor(directory),
     automationRoot,unitId:u.unitId,state:null,now:new Date().toISOString(),persist:true});
    const packetRel=path.posix.join(campaignPath,'work/phase-04/discovery',u.unitId,'ASSIGNMENT_PACKET_v1.json');
    const idx=writeUnitPacketIndexV1({root,campaignPath,unitId:u.unitId,role:u.unitId.startsWith('X-')?'ATTACK':'FLOW_REVIEW'});
@@ -548,91 +552,86 @@ function itemIdentity(item,u,state,request,root){
   return 'STALE';
  return null;
 }
-function validateShardUnit({root,u,data,phase,schema,queue,plan}){
- const errors=[],entries=asArray(data?.entries);
- if(data?.schemaVersion!=='curveyield-lite-solo-unit-submission-v1'||entries.length!==1&&u.kind!=='APPEND')
-  return ['unit snapshot needs one owned record'];
- if(u.kind==='APPEND'){
-  if(entries.length>1024||Buffer.byteLength(JSON.stringify(data),'utf8')>1024*1024)
-   return ['append unit exceeds existing 1 MiB / 1024-entry authorized capacity'];
- }else if(entries[0]?.key!==u.recordKeys[0])return ['record key differs from immutable prefill identity'];
+function validateShardUnit({root,u,data,phase,schema,queue,plan,authorityRelease}){
+ const errors=[],entries=Array.isArray(data?.entries)?data.entries:null;
+ if(data?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.submission)return ['schemaVersion: SCHEMA_MISMATCH'];
+ if(!entries)return ['entries: ARRAY_REQUIRED'];
+ if(u.kind!=='APPEND'&&entries.length!==1)return ['entries: EXACTLY_ONE_RECORD_REQUIRED'];
+ if(u.kind==='APPEND'&&(entries.length>1024||Buffer.byteLength(JSON.stringify(data),'utf8')>1024*1024))
+  return ['entries: APPEND_CAPACITY_EXCEEDED'];
  const action=schema.actions?.[u.path[1]],field=(action?.fields??[]).find(x=>x.name===u.field);
- if(!field)return ['field is not in bound phase schema'];
+ if(!field)return ['entries: FIELD_NOT_IN_BOUND_SCHEMA'];
  const fixed=[...new Set([...(field.controllerPrefillFields??[]),...(action.controllerPrefillFields??[])])];
  const orig=u.initialValue;
+ const missing=value=>value===undefined||value===null||
+  typeof value==='string'&&(!value.trim()||/^<(?:REQUIRED|CONTROLLER_PREFILL|fill)/i.test(value.trim())||
+    ['TODO','<fill>'].includes(value.trim()))||
+  isObject(value)&&Object.keys(value).length===0;
  for(const [i,entry] of entries.entries()){
-  const val=entry?.value;
-  if(u.kind==='APPEND'&&entry?.key!==JSON.stringify(u.path)+':APPEND-'+String(i+1).padStart(4,'0'))
-   errors.push('append identity must match indexed capacity');
+  const p='entries['+i+']';
+  if(!isObject(entry)||typeof entry.key!=='string'||!Object.hasOwn(entry,'value')){
+   errors.push(p+': KEY_VALUE_SHAPE_REQUIRED');continue;
+  }
+  if(u.kind==='APPEND'){
+   if(entry.key!==JSON.stringify(u.path)+':APPEND-'+String(i+1).padStart(4,'0'))
+    errors.push(p+'.key: APPEND_IDENTITY_MISMATCH');
+  }else if(entry.key!==u.recordKeys?.[0])errors.push(p+'.key: ASSIGNED_RECORD_MISMATCH');
+  const val=entry.value;
   if(phase===5&&u.field==='targetDesigns'&&u.kind!=='APPEND'&&isObject(orig)&&isObject(val)&&orig.candidateKey!==val.candidateKey)
-   errors.push('candidateKey identity from accepted Phase 4 is immutable');
+   errors.push(p+'.value.candidateKey: IMMUTABLE_IDENTITY_MISMATCH');
   if(u.kind!=='APPEND'&&isObject(orig)&&isObject(val))
    for(const key of fixed)if(JSON.stringify(orig[key])!==JSON.stringify(val[key]))
-    errors.push('controller-prefilled '+key+' is read-only');
+    errors.push(p+'.value.'+key+': CONTROLLER_PREFILL_IMMUTABLE');
   if(u.kind!=='APPEND'&&typeof orig==='string'&&orig==='NONE_IDENTIFIED'&&isObject(val))
-   errors.push('immutable negative sentinel must remain; use append slot for real records');
-  if(field.type==='REQUIRED_RECORD_LIST'&&!(isObject(val)||['NONE_IDENTIFIED','NO_CANDIDATE','NOT_APPLICABLE','NO_ADDITIONAL_OBLIGATION'].includes(val)))
-   errors.push('record must be an object or admitted explicit negative');
-  if(isObject(val)){
-   for(const name of field.itemRequiredFields??[])if(val[name]===undefined||val[name]===null||
-    typeof val[name]==='string'&&(!val[name].trim()||val[name].startsWith('<REQUIRED')))
-    errors.push(name+' requires substantive evidence');
-   for(const [name,allowed] of Object.entries(field.itemFieldAllowedValues??{}))
-    if(val[name]!==undefined&&!allowed.includes(String(val[name])))errors.push(name+' invalid enum');
-  }else if(typeof val==='string'&&val.startsWith('<REQUIRED'))errors.push('incomplete mandatory field');
-  if(phase===6&&u.field==='baselineTestRecords'&&isObject(val)){
+   errors.push(p+'.value: FROZEN_NEGATIVE_SLOT_IMMUTABLE');
+  const negative=u.kind!=='APPEND'&&typeof val==='string'&&val===orig&&
+   ['NONE_IDENTIFIED','NO_CANDIDATE','NOT_APPLICABLE','NO_ADDITIONAL_OBLIGATION'].includes(val);
+  if(field.type==='REQUIRED_LIST'){
+   // A SHARD for a REQUIRED_LIST owns one element, not the enclosing array.
+   const errorsForItem=validateSchemaRecordValueV1(
+    {type:'REQUIRED_ANALYSIS'},val,p+'.value');
+   errors.push(...errorsForItem);
+  }else errors.push(...validateSchemaRecordValueV1(field,val,p+'.value',{
+   originalValue:orig,allowNegative:negative,authorityRelease
+  }));
+  if(phase===6&&u.field==='baselineTestRecords'&&isObject(val))
    errors.push(...validateLiveForkBaselineRecordV1({
     root,campaignPath:plan.campaignPath,campaignId:plan.campaignId,
-    sourceSha256:plan.sourceSha256,record:val
-   }));
-  }
-  if(phase===6&&u.field==='candidateProofRecords'&&isObject(val)){
-   if(['CONFIRMED','DISPROVEN'].includes(val.verdict)){
-    // At unit acceptance the verdict must match a real parsed machine ledger.
-    const ref=val.ledgerRef;
-    const validRef=typeof ref==='string'&&ref.endsWith('/ASSERTION_LEDGER_v1.json')&&
-     !ref.startsWith('/')&&!ref.split('/').includes('..')&&!ref.includes('\\');
-    const rel=validRef?(ref.startsWith(plan.campaignPath+'/')?ref:path.posix.join(plan.campaignPath,ref)):null;
-    const ledger=rel&&fs.existsSync(repoFile(root,rel))?maybe(root,rel):null;
-    if(ledger?.schemaVersion!=='curveyield-assertion-ledger-v1'||
-       ledger?.parseStatus!=='PARSED'||ledger?.toolInvoked!==true)
-     errors.push('decisive proof requires an existing parsed invoked assertion ledger');
-    else{
-     const tests=asArray(ledger.tests),attacks=asArray(val.attackAssertionNames),
-       controls=asArray(val.controlAssertionNames);
-     if(!attacks.length||!controls.length||
-       [...attacks,...controls].some(name=>typeof name!=='string'||!name.trim()))
-      errors.push('decisive proof must name attack and healthy-path assertions');
-     else{
-      const status=name=>tests.find(t=>t?.name===name)?.status;
-      if(controls.some(name=>status(name)!=='PASS'))
-       errors.push('decisive proof must have passing healthy-path control assertions');
-      const expected=val.verdict==='CONFIRMED'?'FAIL':'PASS';
-      if(attacks.some(name=>status(name)!==expected))
-       errors.push('decisive proof machine assertion outcome contradicts verdict');
-     }
-    }
-    if(val.verdict==='DISPROVEN'&&
-      !/block|guard|reject|revert|deny/i.test(String(val.reasoning??'')))
-     errors.push('DISPROVEN requires an explanation of the blocking control');
-   }else if(val.verdict==='PHASE5_DECISIVE'&&
-    !/REPRODUCED|CONFIRMED|DECISIVE/i.test(String(val.phase5Result??'')))
-    errors.push('PHASE5_DECISIVE requires matching conclusive Phase-5 evidence');
-  }
+    sourceSha256:plan.sourceSha256,record:val,structuralOnly:true
+   }).map(message=>p+'.value: MACHINE_INTEGRITY: '+message));
+  if(phase===6&&u.field==='candidateProofRecords'&&isObject(val)&&
+     ['CONFIRMED','DISPROVEN'].includes(val.verdict))
+   errors.push(...validatePhase6MachineBindingV1({root,campaignPath:plan.campaignPath,
+    campaignId:plan.campaignId,sourceSha256:plan.sourceSha256,row:val,
+    ledgerRef:val.ledgerRef,requireExecuted:true}).map(message=>
+     p+'.value.ledgerRef: MACHINE_INTEGRITY: '+message));
+  if(phase===6&&u.field==='baselineTestRecords'&&isObject(val))
+   for(const outcome of asArray(val.obligationOutcomes).filter(isObject))
+    if(outcome.ledgerRef&&outcome.ledgerRef!=='NONE_IDENTIFIED')
+     errors.push(...validatePhase6MachineBindingV1({root,campaignPath:plan.campaignPath,
+      campaignId:plan.campaignId,sourceSha256:plan.sourceSha256,row:val,
+      ledgerRef:outcome.ledgerRef,requireExecuted:true}).map(message=>
+       p+'.value.obligationOutcomes: MACHINE_INTEGRITY: '+message));
   if(phase===5&&u.field==='targetDesigns'&&isObject(val)&&val.executionMethod==='V7_REQUEST'){
    const resolved=resolveTargetExecutionRequestRef({root,campaignPath:plan.campaignPath,target:val});
-   if(!resolved)errors.push('target lacks a committed source-bound executable request/harness');
-   else {
+   if(!resolved)errors.push(p+'.value.executionRequestRef: SOURCE_BOUND_REQUEST_REQUIRED');
+   else{
     const bound=validateTargetExecutionRequestBindingV1({controllerRoot:root,campaignPath:plan.campaignPath,
      target:{...val,executionRequestRef:resolved},expectedCampaignId:plan.campaignId,expectedSourceSha256:plan.sourceSha256});
-    if(!String(bound.status).startsWith('PASS_'))errors.push('target binding: '+bound.status+': '+(bound.reasons??[]).join('; '));
+    if(!String(bound.status).startsWith('PASS_'))
+     errors.push(p+'.value.executionRequestRef: MACHINE_BINDING_'+bound.status);
    }
   }
  }
  return errors;
 }
 
-function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest}){
+function structuredFieldErrorV1(unitId,message){
+ const match=/^(entries(?:\[[0-9]+\])?(?:(?:\.[A-Za-z][A-Za-z0-9_]*)|(?:\[[0-9]+\]))*|schemaVersion): (.+)$/.exec(message);
+ return {path:match?unitId+'.'+match[1]:unitId,
+  code:match?match[2]:'STRUCTURAL_VALIDATION_FAILURE',message};
+}
+function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest,authorityRelease}){
  const errors=[],entries=asArray(submission?.entries),members=new Map(u.members.map(m=>[m.recordKeys[0],m]));
  if(submission?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.submission||
     !entries.length||entries.length>u.members.length)
@@ -659,9 +658,9 @@ function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schem
    errors.push({path:member.unitId,message:'original-record prerequisites are not currently accepted'});continue;
   }
   const failures=validateShardUnit({root,u:member,data:{schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:[entry]},
-   phase,schema,queue,plan});
+   phase,schema,queue,plan,authorityRelease});
   if(failures.length){
-   errors.push(...failures.map(message=>({path:member.unitId,message})));continue;
+   errors.push(...failures.map(message=>structuredFieldErrorV1(member.unitId,message)));continue;
   }
   const rel=path.posix.join(unitBase(campaign,phase,u.unitId),'records',member.unitId,
    'ACCEPTED_ATTEMPT_'+String(state.attempts+1).padStart(3,'0')+'_v1.json');
@@ -719,13 +718,13 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
   const packet=readUnitPacketV1({root,packetPath:u.packetPath}),
    inventory=read(root,reviewInventoryRelV1(root,campaign,'REVIEW_INVENTORY_v1.json'));
   const checked=u.kind==='ATTACK'
-   ?validateAttackSubmissionV1({packet:packet.payload,submission,inventory})
-   :validateFlowReviewSubmissionV1({packet:packet.payload,submission,inventory});
+   ?validateAttackSubmissionV1({packet:packet.payload,submission,inventory,structuralOnly:true})
+   :validateFlowReviewSubmissionV1({packet:packet.payload,submission,inventory,structuralOnly:true});
   errors=checked.errors??[];
  }else if(!errors.length&&u.kind==='BATCH'){
-  batchOutcome=acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest});
+  batchOutcome=acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest,authorityRelease:directory.authorityRelease});
   errors=batchOutcome.errors;
- }else if(!errors.length)errors=validateShardUnit({root,u,data:submission,phase,schema,queue,plan}).map(message=>({path:u.unitId,message}));
+ }else if(!errors.length)errors=validateShardUnit({root,u,data:submission,phase,schema,queue,plan,authorityRelease:directory.authorityRelease}).map(message=>structuredFieldErrorV1(u.unitId,message));
  state.lastSubmissionSha256=digest;state.attempts++;
  const resultRel=path.posix.join(unitBase(campaign,phase,u.unitId),'results',
   'ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
@@ -749,7 +748,14 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
  return {unitId:u.unitId,status:'REWORK_REQUIRED',resultRef:resultRel,errors};
 }
 function handleSubmit({root,campaign,phase,queue,plan,request,directory}){
- const schema=loadPhaseSchema(root,AUTHORITY,phase).schema,items=[];
+ const receipt=read(root,path.posix.join(campaign,'receipts/PHASE_00_RECEIPT_v1.json'));
+ const boundRoot=validateBoundAuthorityV1({root,receipt});
+ if(boundRoot!==authorityRootFor(directory)||receipt.authority?.manifestSha256!==directory.authorityDigest)
+  throw Error('bound v4 authority package identity mismatch at unit acceptance');
+ const {schema,rel:schemaRel}=loadPhaseSchema(root,boundRoot,phase);
+ if(directory.currentAssignment?.workSchemaPath!==schemaRel)
+  throw Error('assigned work schema differs from receipt-bound authority');
+ const items=[];
  for(const item of request.items){
   // A durably queued request is SUBMITTED, never implicitly ACCEPTED.
   // Missing cross-repository bytes remain pending and retryable.
@@ -802,8 +808,8 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
   deriveBaselineObligationsV1({inventory,taxonomy:loadTaxonomyV1(automationRoot),summary}));
  // The original phase prefill is authoritative; refresh once, after complete discovery.
  const assignment=directory.currentAssignment;
- const form={...read(root,path.posix.join(AUTHORITY,'phases/phase-4/resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json'))};
- const updated=applyPhaseBoundaryPrefill({root,campaignPath:campaign,authorityRoot:AUTHORITY,sequence:4,
+ const form={...read(root,path.posix.join(authorityRootFor(directory),'phases/phase-4/resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json'))};
+ const updated=applyPhaseBoundaryPrefill({root,campaignPath:campaign,authorityRoot:authorityRootFor(directory),sequence:4,
   form,derivedInputPaths:[...asArray(assignment.derivedInputPaths),path.posix.join(campaign,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')],
   predecessorReceiptPath:assignment.predecessorReceiptPath});
  put(root,assignment.workFormPath,updated);
@@ -871,7 +877,10 @@ export function finalizeReadinessV1({root,campaignPath,directory,phase}){
  const pending=plan.units.filter(u=>queue.units[u.unitId]?.status!=='ACCEPTED');
  if(pending.length)return {ready:false,reason:'mandatory units remain',unitIds:pending.map(x=>x.unitId)};
  if(queue.finalizeStatus==='SEALED')return {ready:false,reason:'already sealed'};
- if(queue.finalizeStatus==='BLOCKED')return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
+ if(['BLOCKED','CONTROLLER_INTEGRITY_FAILURE'].includes(queue.finalizeStatus))
+  return {ready:false,reason:queue.finalizeStatus==='CONTROLLER_INTEGRITY_FAILURE'
+   ?'controller integrity failure; investigate accepted aggregate before explicit controller recovery'
+   :'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
  for(const u of plan.units){
   const state=queue.units[u.unitId],accepted=read(root,state.acceptedPath);
   if(accepted.submissionSha256!==state.acceptedSha256||
@@ -992,9 +1001,15 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  }
  // Full restoration is the pre-existing source-bound schema/identity validator.
  const restored=secureRestoreWorkFormV13({root,indexRel:assignment.workShardIndexPath});
- const form=JSON.parse(restored.content),schema=loadPhaseSchema(root,AUTHORITY,phase).schema;
- const errors=validateWorkForm(schema,form);
- if(errors.length)throw Error('aggregate validation blocked: '+errors.slice(0,15).join('; '));
+ const receipt=read(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'));
+ const boundRoot=validateBoundAuthorityV1({root,receipt});
+ if(boundRoot!==authorityRootFor(directory)||receipt.authority?.manifestSha256!==directory.authorityDigest)
+  throw Error('CONTROLLER_INTEGRITY_FAILURE: immutable authority mismatch during assembly');
+ const {schema,rel:schemaRel}=loadPhaseSchema(root,boundRoot,phase);
+ if(schemaRel!==assignment.workSchemaPath)throw Error('CONTROLLER_INTEGRITY_FAILURE: assembled phase schema identity mismatch');
+ const form=JSON.parse(restored.content);
+ const errors=validateWorkForm(schema,form,{structuralOnly:true,authorityRelease:directory.authorityRelease});
+ if(errors.length)throw Error('CONTROLLER_INTEGRITY_FAILURE: accepted immutable aggregate malformed: '+errors.slice(0,15).join('; '));
  // Existing phase controller materializes, validates all semantic gates, executes required
  // already-qualified machine lane (Phase 5), generates a single seal and next assignment.
  return {status:'READY_FOR_EXISTING_BOUNDARY_SEAL',workShardIndexPath:assignment.workShardIndexPath};
@@ -1015,81 +1030,66 @@ export function statusUnitQueueV1({root,campaignPath,phase}){
 
 export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[]}){
  const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
- const reopened=new Set(),unmapped=[],invalidatedMembers=new Set(),invalidated=new Set();
  const membersOf=u=>u.kind==='BATCH'?u.members:[u];
+ // Resolve *all* deficiencies before touching any persisted or in-memory
+ // acceptance record. A partial mapping is a controller-integrity fault.
+ const mapping=[],unmapped=[];
+ const unique=new Map();
+ for(const entry of deficiencies){
+  const message=typeof entry==='string'?entry:String(entry?.message??'');
+  const parsed=/^actions\\.(step-[0-9]+)\\.outputs\\.([A-Za-z][A-Za-z0-9_]*)\\[([0-9]+)\\](?:\\.|:| |$)/.exec(message);
+  if(!parsed){unmapped.push(message);continue;}
+  const [,step,field,rawIndex]=parsed,index=Number(rawIndex);
+  const matches=[];
+  for(const u of plan.units)for(const m of membersOf(u))
+   if(m.kind!=='APPEND'&&m.path?.[1]===step&&m.field===field&&m.recordIndex===index)
+    matches.push({u,m});
+  if(matches.length===0){
+   const all=plan.units.flatMap(u=>membersOf(u));
+   const fixed=all.filter(m=>m.kind!=='APPEND'&&m.path?.[1]===step&&m.field===field);
+   let offset=fixed.length?Math.max(...fixed.map(m=>m.recordIndex))+1:0;
+   const append=plan.units.filter(u=>u.kind==='APPEND'&&u.path?.[1]===step&&u.field===field)
+    .sort((a,b)=>a.unitId.localeCompare(b.unitId));
+   for(const u of append){
+    const state=queue.units[u.unitId];
+    if(state?.status!=='ACCEPTED'||!state.acceptedPath)break;
+    const snapshot=read(root,state.acceptedPath);
+    if(state.acceptedSha256!==snapshot.submissionSha256)
+     throw Error('CONTROLLER_INTEGRITY_FAILURE: accepted APPEND digest mismatch '+u.unitId);
+    const count=asArray(snapshot.submission?.entries).length;
+    if(index>=offset&&index<offset+count)matches.push({u,m:u});
+    offset+=count;
+   }
+  }
+  if(matches.length!==1){unmapped.push(message);continue;}
+  const {u,m}=matches[0];
+  const key=u.unitId+':'+m.unitId;
+  if(!unique.has(key))unique.set(key,{u,m,reasons:[]});
+  unique.get(key).reasons.push(message);
+ }
+ if(unmapped.length){
+  // Do not reopen an accepted record because another error was unmappable.
+  // Publish only an integrity diagnostic; all old accepted units survive.
+  const result={reopenedUnits:[],unmappedDeficiencies:unmapped,invalidatedRecordIds:[]};
+  queue.finalizeStatus='CONTROLLER_INTEGRITY_FAILURE';
+  queue.finalizeDetails=result;queue.revision++;
+  put(root,queueRel(campaignPath,phase),queue);
+  return result;
+ }
+ const reopened=new Set(),invalidatedMembers=new Set(),invalidated=new Set();
  const invalidate=(u,m,reason)=>{
   const state=queue.units[u.unitId];
   if(u.kind==='BATCH'&&queue.acceptedRecords?.[m.unitId]){
    delete queue.acceptedRecords[m.unitId];invalidatedMembers.add(m.unitId);
   }
-  invalidated.add(m.unitId);
-  // Invalidate the parent identity too for any legacy dependents of batch IDs.
-  invalidated.add(u.unitId);
+  invalidated.add(m.unitId);invalidated.add(u.unitId);
   if(state.status==='ACCEPTED')state.status='REWORK_REQUIRED';
   state.lastSubmissionSha256=null;
-  if(!state.lastErrors.includes(reason))state.lastErrors=[...state.lastErrors,reason].slice(-30);
+  if(!asArray(state.lastErrors).includes(reason))
+   state.lastErrors=[...asArray(state.lastErrors),reason].slice(-30);
   reopened.add(u.unitId);
  };
- for(const entry of deficiencies){
-  const message=typeof entry==='string'?entry:JSON.stringify(entry),found=new Map();
-  const mark=(u,m)=>{
-   const foundMembers=found.get(u.unitId)??new Map();
-   foundMembers.set(m.unitId,m);found.set(u.unitId,foundMembers);
-  };
-  // Controller aggregate Phase-4 errors name discovery IDs, not shard array indices.
-  // Reopen the candidate append slot for genuinely missing Step-3 candidate records,
-  // or just the named original reconciliation batch member for deficient controls.
-  if(phase===4){
-   const discoveryId=message.match(/\bDISC-[0-9]{4}\b/)?.[0];
-   if(discoveryId&&message.includes('candidate must be present in Step 3')){
-    const append=plan.units.find(u=>u.kind==='APPEND'&&u.field==='candidateRecords');
-    if(append)mark(append,append);
-   }else if(discoveryId&&[
-    'must name the blocking control',
-    'resolution requires a source anchor',
-    'cannot accept a non-gap as a coverage gap'
-   ].some(reason=>message.includes(reason))){
-    // The frozen plan is the authoritative discovery-ID-to-unit mapping.
-    // Most v4 campaigns use one SHARD per reconciliation record; legacy
-    // BATCH members retain the same immutable initialValue.recordKey.
-    for(const u of plan.units.filter(u=>u.field==='discoveryReconciliationRecords')){
-     for(const m of membersOf(u)){
-      if(m.initialValue?.recordKey===discoveryId){mark(u,m);continue;}
-      // Historical batch plans may omit a member's initial value.
-      if(u.kind==='BATCH'){
-       const ref=queue.acceptedRecords?.[m.unitId];
-       const accepted=ref?.path?maybe(root,ref.path):null;
-       if(accepted?.entry?.value?.recordKey===discoveryId)mark(u,m);
-      }
-     }
-    }
-   }
-  }
-  for(const match of message.matchAll(/(?:actions\.)?(?:step-[0-9]+\.outputs\.)?([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/g)){
-   const field=match[1],position=Number(match[2]);
-   for(const u of plan.units)for(const m of membersOf(u))
-    if(m.field===field&&m.recordIndex===position)mark(u,m);
-  }
-  // Reopen only the named original candidate record, never all batch siblings.
-  for(const u of plan.units){
-   const eligible=membersOf(u).filter(m=>
-    ['targetDesigns','targetDispositions','candidateProofRecords'].includes(m.field));
-   if(!eligible.length)continue;
-   const state=queue.units[u.unitId],accepted=state?.acceptedPath?maybe(root,state.acceptedPath):null;
-   for(const m of eligible){
-    const value=accepted?.submission?.entries?.find(e=>e.key===m.recordKeys?.[0])?.value;
-    if(value&&typeof value==='object'&&[value.candidateKey,value.tempKey].some(key=>
-       typeof key==='string'&&key.length>=3&&message.includes(key)))mark(u,m);
-   }
-  }
-  if(!found.size){unmapped.push(message);continue;}
-  for(const [unitId,group] of found){
-   const u=plan.units.find(x=>x.unitId===unitId);
-   for(const m of group.values())invalidate(u,m,message);
-  }
- }
- // Propagate to original dependent records, including accepted members of a
- // partly accepted or reopened batch. Do not discard unrelated sibling proofs.
+ for(const {u,m,reasons} of unique.values())invalidate(u,m,reasons.join('; ').slice(0,1600));
  let changed=true;
  while(changed){
   changed=false;
@@ -1103,7 +1103,7 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
    changed=true;
   }
  }
- const result={reopenedUnits:[...reopened].sort(),unmappedDeficiencies:unmapped,
+ const result={reopenedUnits:[...reopened].sort(),unmappedDeficiencies:[],
   invalidatedRecordIds:[...invalidatedMembers].sort()};
  queue.finalizeStatus=result.reopenedUnits.length?'REWORK_REQUIRED':'BLOCKED';
  queue.finalizeDetails=result;queue.revision++;
