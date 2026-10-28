@@ -161,14 +161,20 @@ else
         max="${BASH_REMATCH[1]}"
       fi
     done < <(find 'Audit Campaign Directory/campaigns' -type f -name '*.json' -print 2>/dev/null | LC_ALL=C sort)
-    # Campaign folders are not materialized; take existing revisions from the tree's folder names.
+    # Read immediate tree children (not a pathspec that may only report the parent).
+    # Include historical flat entries and all nested revisions in this source master.
     while IFS= read -r folder; do
-      suffix="${folder#"campaigns/$display_base r"}"
-      if [ "$suffix" = "$folder" ]; then suffix="${folder#"campaigns/$master_base/$display_base r"}"; fi
+      prefix="$display_base r"
+      suffix="${folder#"$prefix"}"
       if [ "$suffix" != "$folder" ] && [[ "$suffix" =~ ^[0-9]+$ ]] && [ "$suffix" -gt "$max" ]; then
         max="$suffix"
       fi
-    done < <( { git ls-tree -d --name-only HEAD -- campaigns/; git ls-tree -d --name-only HEAD -- "campaigns/$master_base/"; } | LC_ALL=C sort -u )
+    done < <(
+      git ls-tree --name-only HEAD:campaigns
+      if [ "$(git cat-file -t "HEAD:campaigns/$master_base" 2>/dev/null || true)" = tree ]; then
+        git ls-tree --name-only "HEAD:campaigns/$master_base"
+      fi
+    )
 
     revision=$((max + 1))
     campaign_id="$slug-r$revision"
