@@ -24,9 +24,9 @@ test('gate rejects a skipped native script hidden outside exclusions',()=>{const
 
 test('no-deployment-script waiver requires exact zero-script inventory and source binding',()=>{
   const x=fixture();x.status='NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT';
-  x.sourceSha256='f'.repeat(64);x.detectedScripts=[];x.scriptDispositions=[];x.attempts=[];x.deployedContracts=[];
+  x.sourceSha256='f'.repeat(64);x.detectedScripts={foundry:[],hardhat:[],unsafeHardhat:[],genericPackageScripts:[]};x.scriptDispositions=[];x.attempts=[];x.deployedContracts=[];
   x.coverage={detectedScripts:0,requiredScripts:0,executedScripts:0,failedOrUnsupportedScripts:0};
   assert.equal(assertDeployGateEvidenceV2(x),true);
   x.coverage.detectedScripts=1;assert.throws(()=>assertDeployGateEvidenceV2(x),/zero-script/);
-  x.coverage.detectedScripts=0;x.detectedScripts=[{path:'deploy.mjs'}];assert.throws(()=>assertDeployGateEvidenceV2(x),/zero-script/);
+  x.coverage.detectedScripts=0;x.detectedScripts.foundry=[{path:'deploy.s.sol'}];assert.throws(()=>assertDeployGateEvidenceV2(x),/zero-script/);
 });
