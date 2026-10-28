@@ -10,6 +10,7 @@ import {deriveBaselineObligationsV1} from '../../packages/github-native-sim/src/
 import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite-solo-phase-prefill-v1.mjs';
 import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {validateLiveForkBaselineRecordV1} from './lite-solo-live-fork-baseline-gate-v1.mjs';
+import {validatePhase6MachineBindingV1} from '../../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
 import {planSemanticBatchesV1,SEMANTIC_BATCH_READING_GUIDE_V1} from './lite-solo-semantic-batches-v1.mjs';
 
@@ -596,26 +597,18 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
     sourceSha256:plan.sourceSha256,record:val,structuralOnly:true
    }).map(message=>p+'.value: MACHINE_INTEGRITY: '+message));
   if(phase===6&&u.field==='candidateProofRecords'&&isObject(val)&&
-     ['CONFIRMED','DISPROVEN'].includes(val.verdict)){
-   const ref=val.ledgerRef;
-   const validRef=typeof ref==='string'&&ref.endsWith('/ASSERTION_LEDGER_v1.json')&&
-    !ref.startsWith('/')&&!ref.split('/').includes('..')&&!ref.includes(String.fromCharCode(92));
-   const rel=validRef?(ref.startsWith(plan.campaignPath+'/')?ref:path.posix.join(plan.campaignPath,ref)):null;
-   const ledger=rel&&fs.existsSync(repoFile(root,rel))?maybe(root,rel):null;
-   if(ledger?.schemaVersion!=='curveyield-assertion-ledger-v1'||
-      ledger?.parseStatus!=='PARSED'||ledger?.toolInvoked!==true||
-      !Array.isArray(ledger.tests))
-    errors.push(p+'.value.ledgerRef: PARSED_INVOKED_LEDGER_REQUIRED');
-   else{
-    const attacks=asArray(val.attackAssertionNames),controls=asArray(val.controlAssertionNames);
-    if(!attacks.length||!controls.length||
-      [...attacks,...controls].some(name=>typeof name!=='string'||!name.trim()))
-     errors.push(p+'.value: ASSERTION_IDENTITIES_REQUIRED');
-    else if([...attacks,...controls].some(name=>!ledger.tests.some(test=>test?.name===name)))
-     errors.push(p+'.value: NAMED_MACHINE_ASSERTION_MISSING');
-    // Artifact authenticity is objective; interpreting its verdict is agent-owned.
-   }
-  }
+     ['CONFIRMED','DISPROVEN'].includes(val.verdict))
+   errors.push(...validatePhase6MachineBindingV1({root,campaignPath:plan.campaignPath,
+    campaignId:plan.campaignId,sourceSha256:plan.sourceSha256,row:val,
+    ledgerRef:val.ledgerRef,requireExecuted:true}).map(message=>
+     p+'.value.ledgerRef: MACHINE_INTEGRITY: '+message));
+  if(phase===6&&u.field==='baselineTestRecords'&&isObject(val))
+   for(const outcome of asArray(val.obligationOutcomes).filter(isObject))
+    if(outcome.ledgerRef&&outcome.ledgerRef!=='NONE_IDENTIFIED')
+     errors.push(...validatePhase6MachineBindingV1({root,campaignPath:plan.campaignPath,
+      campaignId:plan.campaignId,sourceSha256:plan.sourceSha256,row:val,
+      ledgerRef:outcome.ledgerRef,requireExecuted:true}).map(message=>
+       p+'.value.obligationOutcomes: MACHINE_INTEGRITY: '+message));
   if(phase===5&&u.field==='targetDesigns'&&isObject(val)&&val.executionMethod==='V7_REQUEST'){
    const resolved=resolveTargetExecutionRequestRef({root,campaignPath:plan.campaignPath,target:val});
    if(!resolved)errors.push(p+'.value.executionRequestRef: SOURCE_BOUND_REQUEST_REQUIRED');
