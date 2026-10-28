@@ -1034,49 +1034,66 @@ export function statusUnitQueueV1({root,campaignPath,phase}){
 
 export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[]}){
  const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
- const reopened=new Set(),unmapped=[],invalidatedMembers=new Set(),invalidated=new Set();
  const membersOf=u=>u.kind==='BATCH'?u.members:[u];
- const invalidate=(u,m,reason)=>{
-  const state=queue.units[u.unitId];
-  if(u.kind==='BATCH'&&queue.acceptedRecords?.[m.unitId]){
-   delete queue.acceptedRecords[m.unitId];invalidatedMembers.add(m.unitId);
-  }
-  invalidated.add(m.unitId);
-  // Invalidate the parent identity too for any legacy dependents of batch IDs.
-  invalidated.add(u.unitId);
-  if(state.status==='ACCEPTED')state.status='REWORK_REQUIRED';
-  state.lastSubmissionSha256=null;
-  if(!asArray(state.lastErrors).includes(reason))state.lastErrors=[...asArray(state.lastErrors),reason].slice(-30);
-  reopened.add(u.unitId);
- };
+ // Resolve *all* deficiencies before touching any persisted or in-memory
+ // acceptance record. A partial mapping is a controller-integrity fault.
+ const mapping=[],unmapped=[];
+ const unique=new Map();
  for(const entry of deficiencies){
   const message=typeof entry==='string'?entry:String(entry?.message??'');
-  // Only schema/required-data failures with a precise frozen form slot
-  // can be charged back to an immutable, originally assigned unit.
-  // Never infer ownership from candidate names, DISC ids, prose or keywords.
-  const parsed=/^actions\.(step-[0-9]+)\.outputs\.([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\](?:\.|:| |$)/.exec(message);
+  const parsed=/^actions\\.(step-[0-9]+)\\.outputs\\.([A-Za-z][A-Za-z0-9_]*)\\[([0-9]+)\\](?:\\.|:| |$)/.exec(message);
   if(!parsed){unmapped.push(message);continue;}
   const [,step,field,rawIndex]=parsed,index=Number(rawIndex);
   const matches=[];
   for(const u of plan.units)for(const m of membersOf(u))
    if(m.kind!=='APPEND'&&m.path?.[1]===step&&m.field===field&&m.recordIndex===index)
     matches.push({u,m});
-  if(!matches.length){
-   // An APPEND slot owns only records beyond the exact fixed slot range.
-   const fixed=plan.units.flatMap(u=>membersOf(u)).filter(m=>
-    m.kind!=='APPEND'&&m.path?.[1]===step&&m.field===field);
-   const firstAppend=fixed.length?Math.max(...fixed.map(m=>m.recordIndex))+1:0;
-   if(index>=firstAppend){
-    const append=plan.units.filter(u=>u.kind==='APPEND'&&u.path?.[1]===step&&u.field===field);
-    if(append.length===1)matches.push({u:append[0],m:append[0]});
+  if(matches.length===0){
+   const all=plan.units.flatMap(u=>membersOf(u));
+   const fixed=all.filter(m=>m.kind!=='APPEND'&&m.path?.[1]===step&&m.field===field);
+   let offset=fixed.length?Math.max(...fixed.map(m=>m.recordIndex))+1:0;
+   const append=plan.units.filter(u=>u.kind==='APPEND'&&u.path?.[1]===step&&u.field===field)
+    .sort((a,b)=>a.unitId.localeCompare(b.unitId));
+   for(const u of append){
+    const state=queue.units[u.unitId];
+    if(state?.status!=='ACCEPTED'||!state.acceptedPath)break;
+    const snapshot=read(root,state.acceptedPath);
+    if(state.acceptedSha256!==snapshot.submissionSha256)
+     throw Error('CONTROLLER_INTEGRITY_FAILURE: accepted APPEND digest mismatch '+u.unitId);
+    const count=asArray(snapshot.submission?.entries).length;
+    if(index>=offset&&index<offset+count)matches.push({u,m:u});
+    offset+=count;
    }
   }
   if(matches.length!==1){unmapped.push(message);continue;}
   const {u,m}=matches[0];
-  invalidate(u,m,message);
+  const key=u.unitId+':'+m.unitId;
+  if(!unique.has(key))unique.set(key,{u,m,reasons:[]});
+  unique.get(key).reasons.push(message);
  }
- // Propagate to original dependent records, including accepted members of a
- // partly accepted or reopened batch. Do not discard unrelated sibling proofs.
+ if(unmapped.length){
+  // Do not reopen an accepted record because another error was unmappable.
+  // Publish only an integrity diagnostic; all old accepted units survive.
+  const result={reopenedUnits:[],unmappedDeficiencies:unmapped,invalidatedRecordIds:[]};
+  queue.finalizeStatus='CONTROLLER_INTEGRITY_FAILURE';
+  queue.finalizeDetails=result;queue.revision++;
+  put(root,queueRel(campaignPath,phase),queue);
+  return result;
+ }
+ const reopened=new Set(),invalidatedMembers=new Set(),invalidated=new Set();
+ const invalidate=(u,m,reason)=>{
+  const state=queue.units[u.unitId];
+  if(u.kind==='BATCH'&&queue.acceptedRecords?.[m.unitId]){
+   delete queue.acceptedRecords[m.unitId];invalidatedMembers.add(m.unitId);
+  }
+  invalidated.add(m.unitId);invalidated.add(u.unitId);
+  if(state.status==='ACCEPTED')state.status='REWORK_REQUIRED';
+  state.lastSubmissionSha256=null;
+  if(!asArray(state.lastErrors).includes(reason))
+   state.lastErrors=[...asArray(state.lastErrors),reason].slice(-30);
+  reopened.add(u.unitId);
+ };
+ for(const {u,m,reasons} of unique.values())invalidate(u,m,reasons.join('; ').slice(0,1600));
  let changed=true;
  while(changed){
   changed=false;
@@ -1090,10 +1107,9 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
    changed=true;
   }
  }
- const result={reopenedUnits:[...reopened].sort(),unmappedDeficiencies:unmapped,
+ const result={reopenedUnits:[...reopened].sort(),unmappedDeficiencies:[],
   invalidatedRecordIds:[...invalidatedMembers].sort()};
- queue.finalizeStatus=result.unmappedDeficiencies.length?'CONTROLLER_INTEGRITY_FAILURE':
-  result.reopenedUnits.length?'REWORK_REQUIRED':'BLOCKED';
+ queue.finalizeStatus=result.reopenedUnits.length?'REWORK_REQUIRED':'BLOCKED';
  queue.finalizeDetails=result;queue.revision++;
  put(root,queueRel(campaignPath,phase),queue);
  return result;
