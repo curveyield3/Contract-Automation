@@ -115,14 +115,20 @@ else
   git config user.email 'lite-solo@users.noreply.github.com'
   authority_parent='Audit Skill - Lite-Solo Authority'
   authority_root="$authority_parent/lite-solo-v4"
+  skill_home="$authority_root/SKILL.md"
+  # One active Solo skill only. Historical campaign bindings use pinned Git commits.
+  shopt -s nullglob
+  active_solo_skills=("$authority_parent"/*/SKILL.md)
+  shopt -u nullglob
+  [ "${#active_solo_skills[@]}" -eq 1 ] && [ "${active_solo_skills[0]}" = "$skill_home" ] || { echo '::error::Expected exactly one active Lite-Solo skill: lite-solo-v4' >&2; exit 1; }
   test -f "$authority_root/MANIFEST.json" || { echo '::error::Registered Lite-Solo v4 authority package is missing' >&2; exit 1; }
   authority_packages=("$authority_root")
-  skill_home="$authority_root/SKILL.md"
   skill_repo_path='curveyield3/Audit-Controller/Audit Skill - Lite-Solo Authority'
   skill_release="$(jq -r .release "$authority_root/MANIFEST.json")"
   skill_revision="$(jq -r .packageRevision "$authority_root/MANIFEST.json")"
-  [[ "$skill_release" =~ ^lite-solo-v[0-9]+$ && "$skill_revision" = "${skill_release#lite-solo-}" ]] || { echo "::error::Lite-Solo manifest version mismatch" >&2; exit 1; }
+  [ "$skill_release" = 'lite-solo-v4' ] && [ "$skill_revision" = 'v4' ] || { echo "::error::Lite-Solo manifest version mismatch" >&2; exit 1; }
   test -f "$skill_home" || { echo "::error::Current Lite-Solo SKILL.md missing" >&2; exit 1; }
+  node "$ROOT/scripts/lite-solo-verify-authority-v1.mjs" "$authority_root"
   skill_sha="$(sha256sum "$skill_home" | awk '{print $1}')"
   skill_blob="$(git rev-parse "HEAD:$skill_home")"
   jq -e --arg release "$skill_release" --arg rev "$skill_revision" '.release==$release and .packageRevision==$rev and .mode=="LITE_SOLO" and (.reviewerLineup.masterSegments|length)==0' "$authority_root/MANIFEST.json" >/dev/null
@@ -190,6 +196,11 @@ else
     # snapshot, not a pre-retry tree that might have moved on main.
     skill_manifest="${authority_packages[0]}/MANIFEST.json"
     test -f "$skill_home" && test -f "$skill_manifest"
+    shopt -s nullglob
+    active_solo_skills=("$authority_parent"/*/SKILL.md)
+    shopt -u nullglob
+    [ "${#active_solo_skills[@]}" -eq 1 ] && [ "${active_solo_skills[0]}" = "$skill_home" ] || { echo '::error::Multiple or missing active Lite-Solo skill packages at admission' >&2; exit 1; }
+    node "$ROOT/scripts/lite-solo-verify-authority-v1.mjs" "$authority_root"
     skill_sha="$(sha256sum "$skill_home" | awk '{print $1}')"
     skill_blob="$(git rev-parse "HEAD:$skill_home")"
     manifest_sha="$(sha256sum "$skill_manifest" | awk '{print $1}')"
