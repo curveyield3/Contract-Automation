@@ -163,7 +163,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
   // intentionally excludes both, while the fork lane executes the script.
   // Preserve explicit source-anchored file-review units instead of claiming
   // that the runner's unrelated solc 0.8.30 produced 0.8.28 ASTs.
-  const boundBoostHubV9=/^boosthub-contract-stack-v9-r[1-9][0-9]*$/.test(String(campaign.campaignId??''))&&
+  const boundBoostHubV9=campaign.campaignId==='boosthub-contract-stack-v9-r1'&&
     campaign.sourceSha256==='876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3';
   const shimPath='contracts/BoostHubBeefyCompileImports_v9.sol';
   const shimText=bySource.get(shimPath)?.bytes.toString('utf8')??'';
