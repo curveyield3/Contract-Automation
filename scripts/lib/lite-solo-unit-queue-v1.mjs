@@ -888,7 +888,10 @@ export function finalizeReadinessV1({root,campaignPath,directory,phase}){
  const pending=plan.units.filter(u=>queue.units[u.unitId]?.status!=='ACCEPTED');
  if(pending.length)return {ready:false,reason:'mandatory units remain',unitIds:pending.map(x=>x.unitId)};
  if(queue.finalizeStatus==='SEALED')return {ready:false,reason:'already sealed'};
- if(queue.finalizeStatus==='BLOCKED')return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
+ if(['BLOCKED','CONTROLLER_INTEGRITY_FAILURE'].includes(queue.finalizeStatus))
+  return {ready:false,reason:queue.finalizeStatus==='CONTROLLER_INTEGRITY_FAILURE'
+   ?'controller integrity failure; investigate accepted aggregate before explicit controller recovery'
+   :'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
  for(const u of plan.units){
   const state=queue.units[u.unitId],accepted=read(root,state.acceptedPath);
   if(accepted.submissionSha256!==state.acceptedSha256||
