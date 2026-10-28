@@ -20,13 +20,13 @@ if(slug===campaignId)throw Error('campaign generation suffix missing');
 const directoryRel='Audit Campaign Directory/campaigns/'+slug+'.json';
 const directoryFile=repoFile(root,directoryRel);
 const directory=readJson(directoryFile);
-if(directory.campaignId!==campaignId||directory.mode!=='LITE_SOLO'||directory.authorityRelease!=='lite-solo-v4')
+if(directory.campaignId!==campaignId||directory.mode!=='LITE_SOLO'||!['lite-solo-v4','lite-solo-v5'].includes(directory.authorityRelease))
  throw Error('request drainer denies non-v4 campaigns');
 const campaignPath=directory.workspacePath;
 if(typeof campaignPath!=='string'||!campaignPath.startsWith('campaigns/')||campaignPath.split('/').includes('..'))
  throw Error('unsafe campaign workspace');
 const receipt=readJson(repoFile(root,campaignPath+'/receipts/PHASE_00_RECEIPT_v1.json'));
-if(receipt.authority?.liteRelease!=='lite-solo-v4'||receipt.authority?.manifestSha256!==directory.authorityDigest||
+if(receipt.authority?.liteRelease!==directory.authorityRelease||receipt.authority?.manifestSha256!==directory.authorityDigest||
  receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId||
  receipt.source?.sha256!==directory.sourceSha256)throw Error('source/authority generation binding invalid');
 const requestDir=path.resolve(arg['requests-root']??'process/agent-upload/lite-solo-unit-requests',campaignId);
