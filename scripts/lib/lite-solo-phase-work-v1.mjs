@@ -97,6 +97,24 @@ const V4_ARRAY_MEMBERS=new Set([
  'attackAssertionNames','controlAssertionNames','executionEvidenceRefs','anchors'
 ]);
 const V4_INTEGER_MEMBERS=new Set(['dispatchRounds']);
+const V4_TEXT_MEMBERS=new Set([
+ 'recordKey','sourceAnchor','origin','reviewerFinding','attackerFinding',
+ 'reconciliation','disposition','candidateTempKeyOrNone','rationale',
+ 'domainOrPrivilege','method','observation','securityInterpretation',
+ 'tempKey','description','securityRationale','recommendedValidationMethod',
+ 'materialityBasis','obligationId','requiredAction','completionCondition',
+ 'carryForwardPhaseOrNone','valueFlowOrFormula','unitsAndBounds',
+ 'boundaryCases','roundingPrecision','incentiveExtractionAnalysis',
+ 'solvencyOrConservationAnalysis','conclusion','subjectKey','subjectType',
+ 'priorConclusion','phase5Observation','downstreamValidationNeed','candidateKey',
+ 'setup','oracle','snapshotReuseSafety','expectedSecurityProperty',
+ 'executionMethod','reproductionType','componentOrAction','executionEvidenceRef',
+ 'observedState','contradictionOrNone','limitationOrNone','oracleOutcome',
+ 'reproductionStatus','recommendedPhase8Disposition','semanticHarnessBindingAssessment',
+ 'harnessDesign','testGroupId','contract','requestDirectory','phase5Result',
+ 'verdict','reasoning','title','classId','requestBindingStatus',
+ 'requestBindingEvidenceRef'
+]);
 const V4_NEGATIVE_SLOTS=new Set(['NONE_IDENTIFIED','NO_CANDIDATE','NOT_APPLICABLE','NO_ADDITIONAL_OBLIGATION']);
 function schemaMissingV4(value){
  if(value===undefined||value===null)return true;
@@ -115,7 +133,7 @@ function nestedPresentV4(value,p,errors,depth=0){
   for(const [key,child] of Object.entries(value))nestedPresentV4(child,p+'.'+key,errors,depth+1);
  }
 }
-export function validateSchemaRecordValueV1(field,value,p,{originalValue,allowNegative=false}={}){
+export function validateSchemaRecordValueV1(field,value,p,{originalValue,allowNegative=false,authorityRelease=null}={}){
  const errors=[];
  const negative=typeof value==='string'&&V4_NEGATIVE_SLOTS.has(value);
  if(field.type==='REQUIRED_ANALYSIS'){
@@ -152,6 +170,7 @@ export function validateSchemaRecordValueV1(field,value,p,{originalValue,allowNe
       (prior!==null&&typeof prior!=='object'&&typeof member!==typeof prior)))
    errors.push(mp+': PREFILLED_FIELD_TYPE_MISMATCH');
   if(V4_ARRAY_MEMBERS.has(name)&&!Array.isArray(member))errors.push(mp+': ARRAY_REQUIRED');
+  if(V4_TEXT_MEMBERS.has(name)&&typeof member!=='string')errors.push(mp+': STRING_REQUIRED');
   if(V4_INTEGER_MEMBERS.has(name)&&(!Number.isInteger(member)||member<0))
    errors.push(mp+': NONNEGATIVE_INTEGER_REQUIRED');
   const min=field.itemFieldMinItems?.[name];
@@ -159,6 +178,12 @@ export function validateSchemaRecordValueV1(field,value,p,{originalValue,allowNe
    errors.push(mp+': MIN_ITEMS_'+min);
   if(Array.isArray(member)||member&&typeof member==='object')nestedPresentV4(member,mp,errors);
  }
+ // v4 Step-1 contract is receipt-bound and expressly restricts this
+ // cross-field disposition. v5 removes that rule through an approved,
+ // separately hashed authority; do not back-port v5 policy into frozen v4.
+ if(authorityRelease==='lite-solo-v4'&&field.name==='discoveryReconciliationRecords'&&
+    value.disposition==='COVERAGE_GAP_ACCEPTED'&&value.origin!=='COVERAGE_GAP')
+  errors.push(p+'.disposition: FROZEN_V4_ORIGIN_RESTRICTION');
  for(const [name,allowed] of Object.entries(field.itemFieldAllowedValues??{}))
   if(!Object.hasOwn(value,name)&&!field.itemRequiredFields?.includes(name))
    continue;
@@ -168,7 +193,7 @@ export function validateSchemaRecordValueV1(field,value,p,{originalValue,allowNe
  return errors;
 }
 
-export function validateWorkForm(schema,form,{structuralOnly=false}={}){
+export function validateWorkForm(schema,form,{structuralOnly=false,authorityRelease=null}={}){
   const deficiencies=[];
   const missingRequired=value=>value===undefined||value===null||
    isPlaceholder(value)||(structuralOnly&&typeof value==='object'&&!Array.isArray(value)&&
@@ -199,7 +224,7 @@ export function validateWorkForm(schema,form,{structuralOnly=false}={}){
             const negative=typeof item==='string'&&V4_NEGATIVE_SLOTS.has(item)&&
              (v.length===1||i===0&&[4,5,6].includes(schema.phase)&&
               v.length>1&&v.slice(1).every(x=>x&&typeof x==='object'&&!Array.isArray(x)));
-            deficiencies.push(...validateSchemaRecordValueV1(field,item,p+'['+i+']',{allowNegative:negative}));
+            deficiencies.push(...validateSchemaRecordValueV1(field,item,p+'['+i+']',{allowNegative:negative,authorityRelease}));
           }
         }else deficiencies.push(...validateSchemaRecordValueV1(field,v,p));
         continue;
