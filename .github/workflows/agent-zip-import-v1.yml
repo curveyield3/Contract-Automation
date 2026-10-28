@@ -182,6 +182,7 @@ jobs:
           EXPECTED_SHA256: ${{ steps.meta.outputs.sha256 }}
           EXPECTED_SIZE: ${{ steps.meta.outputs.size }}
           AUDIT_NAME: ${{ steps.meta.outputs.audit_name }}
+          CAMPAIGN_ID: ${{ steps.meta.outputs.campaign_id }}
         shell: bash
         run: |
           set -euo pipefail
@@ -190,6 +191,14 @@ jobs:
           rm -rf "$work"
           gh repo clone 'curveyield3/Audit-Controller' "$work" -- --depth=1 --branch main
           cd "$work"
+          # Admitted campaigns use their canonical source-master workspace.
+          slug="${CAMPAIGN_ID%-r*}"
+          directory="Audit Campaign Directory/campaigns/$slug.json"
+          if [ -f "$directory" ]; then
+            workspace="$(jq -er --arg id "$CAMPAIGN_ID" 'select(.campaignId==$id) | .workspacePath' "$directory")"
+            [[ "$workspace" == campaigns/*/* && "$workspace" != *..* ]] || { echo "::error::Unsafe campaign workspace"; exit 1; }
+            TARGET_PATH="$workspace/authority/$FILENAME"
+          fi
           mkdir -p "$(dirname "$TARGET_PATH")"
           cp "/tmp/$FILENAME" "$TARGET_PATH"
 
