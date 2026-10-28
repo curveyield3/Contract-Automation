@@ -1,4 +1,4 @@
-name: Lite-Solo Phase 5 Machine Authorization v1
+name: Legacy Lite-Solo v1/v2 Phase 5 Authorization
 on:
   workflow_dispatch:
     inputs:
@@ -7,7 +7,7 @@ on:
         type: string
         required: true
       decision:
-        description: Human authorization of existing source-bound Phase-5 machine execution
+        description: Legacy v1/v2 only; v4 execution is automatic without human approval
         type: choice
         required: true
         options: ["Approve Phase 5 Execution", "Revoke Phase 5 Execution"]
