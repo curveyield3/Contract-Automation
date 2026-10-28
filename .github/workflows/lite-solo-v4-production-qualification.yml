@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/tests/lite-solo-v4-acceptance/RUN_PRODUCTION.md'
+      - 'scripts/tests/lite-solo-v4-acceptance/cases/**'
       - '.github/workflows/lite-solo-v4-production-qualification.yml'
   workflow_dispatch:
 permissions:
@@ -24,6 +25,8 @@ jobs:
         run: |
           node --check scripts/lib/lite-solo-unit-queue-v1.mjs
           node --check scripts/lite-solo-unit-request-drain-v1.mjs
+          node --check scripts/lite-solo-phase-controller-v1.mjs
+          node --check scripts/lite-solo-phase0-finalize-v1.mjs
           bash -n scripts/lite-solo-source-initialization/run-v1.sh
       - name: Execute all 30 acceptance local fixtures plus decisive-proof regressions
         run: |
