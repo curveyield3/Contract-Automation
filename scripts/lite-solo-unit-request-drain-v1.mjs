@@ -209,11 +209,20 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
     const current=readJson(directoryFile);
     const packet=current.currentAssignment?.packetPath?readJson(repoFile(root,current.currentAssignment.packetPath)):null;
     const deficits=packet?.controllerValidation?.deficiencies??[];
-    const structural=deficits.filter(d=>/^actions\.step-[0-9]+\.outputs\.[A-Za-z][A-Za-z0-9_]*\[[0-9]+\](?:\.|:| |$)/.test(String(d)));
-    const reopened=structural.length?reopenAggregateDefectsV1({root,campaignPath,phase:seq,deficiencies:structural}):null;
-    if(!reopened)markFinalizationV1({root,campaignPath,phase:seq,status:'BLOCKED',
-      details:{envelopeStatus:envelope.status,deficiencies:deficits}});
-    seal={status:reopened?.unmappedDeficiencies?.length?'CONTROLLER_INTEGRITY_FAILURE':'NOT_SEALED',
+    // Only typed and exactly indexed structural errors may reopen a unit.
+    // Mixed/unknown finalization failures must leave acceptance untouched.
+    const exact=/^actions\.step-[0-9]+\.outputs\.[A-Za-z][A-Za-z0-9_]*\[[0-9]+\](?:\.[A-Za-z][A-Za-z0-9_]*|\[[0-9]+\])*: (?:REQUIRED_NONBLANK|INVALID_ENUM|ARRAY_REQUIRED|STRING_REQUIRED|RECORD_OBJECT_REQUIRED|NONEMPTY_LIST_REQUIRED|MIN_ITEMS_[0-9]+|PREFILLED_FIELD_TYPE_MISMATCH|NONNEGATIVE_INTEGER_REQUIRED|NESTING_LIMIT_EXCEEDED)$/;
+    const structural=deficits.filter(d=>typeof d==='string'&&exact.test(d));
+    const other=deficits.filter(d=>!structural.includes(d));
+    const reopened=structural.length&&!other.length
+      ?reopenAggregateDefectsV1({root,campaignPath,phase:seq,deficiencies:structural})
+      :null;
+    if(!reopened)markFinalizationV1({root,campaignPath,phase:seq,
+      status:structural.length&&other.length?'CONTROLLER_INTEGRITY_FAILURE':'BLOCKED',
+      details:{envelopeStatus:envelope.status,deficiencies:deficits,
+       reason:structural.length&&other.length?'MIXED_AGGREGATE_DEFICIENCIES':'BOUNDARY_GATE_BLOCKED'}});
+    seal={status:reopened?.unmappedDeficiencies?.length||structural.length&&other.length
+      ?'CONTROLLER_INTEGRITY_FAILURE':'NOT_SEALED',
       phase:seq,envelopeStatus:envelope.status,rework:reopened};
    }
   }catch(error){
