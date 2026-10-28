@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-request-v1",
+  "mode": "LITE_SOLO",
+  "deliveryTransport": "DIRECT",
+  "requestId": "merkl-kat-claim-gas-20261028",
+  "sourceUrl": "https://github.com/curveyield3/Audit-Controller/blob/083342b06f7f2c3b89174a409dd755915b9ad3bb/source-repairs/MerklKatClaimModule/MerklKatClaimModule.zip",
+  "scanUrls": [],
+  "publishFiles": {
+    "report_pdf": false,
+    "audited_source": false,
+    "scope_summary": false,
+    "findings_remediation": false,
+    "methodology_analysis": false,
+    "properties_hypotheses": false,
+    "execution_results": false,
+    "architecture_dependencies": false,
+    "residual_risks": false,
+    "evidence_index": false
+  }
+}
