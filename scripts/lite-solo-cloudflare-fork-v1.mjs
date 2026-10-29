@@ -1,0 +1,212 @@
+#!/usr/bin/env node
+/**
+ * Isolated Cloudflare Lite-Solo fork adapter.
+ * No old workflow dispatch, no legacy agent-upload ingress, no synthetic PASS.
+ * The immutable campaign-bound controller remains the sole phase-sealing authority.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {materializeSemanticWorkFormV13, semanticShardFailureIndexV13} from './lib/lite-solo-work-shards-v1.mjs';
+import {readJson, repoFile, loadPhaseSchema, validateWorkForm, validateBoundAuthorityV1} from './lib/lite-solo-phase-work-v1.mjs';
+import {validatePhaseScaffold} from './lib/lite-solo-phase-prefill-v1.mjs';
+
+const OP = process.env.FORK_OPERATION;
+const payload = JSON.parse(process.env.FORK_PAYLOAD_JSON || '{}');
+const correlationId = process.env.FORK_CORRELATION_ID || '';
+const secret = process.env.FORK_CALLBACK_TOKEN;
+const ROOT = path.resolve('.audit-controller');
+const AUTH = 'Audit Skill - Lite-Solo Authority/lite-solo-v5';
+const CONTROLLER = 'curveyield3/Audit-Controller';
+const allowedOperations = new Set(['PHASE_0_INITIALIZE','PHASE_NEXT_STEP','PHASE_VALIDATE_STEP','PHASE_FINALIZE']);
+const sha = value => createHash('sha256').update(value).digest('hex');
+const bytes = value => Buffer.from(JSON.stringify(value,null,2)+'\n');
+const strict = (condition, message) => {if (!condition) throw Error(message);};
+const safeId = value => {strict(typeof value === 'string' && /^[A-Za-z0-9_.-]{1,150}$/.test(value),'unsafe identity');return value;};
+const safePath = value => {strict(typeof value==='string' && value.length > 0 && !value.startsWith('/') && !value.includes('\\') && !value.split('/').some(x=>!x||x==='..'||x==='.'),'unsafe path');return value;};
+const phaseNo = n => String(n).padStart(2,'0');
+const relative = value => repoFile(ROOT,safePath(value));
+const read = value => readJson(relative(value));
+const cmd = (bin,args,options={}) => execFileSync(bin,args,{encoding:'utf8',maxBuffer:16*1024*1024,stdio:['ignore','pipe','pipe'],...options});
+const need = (key) => {const v=payload[key];strict(v!==undefined && v!==null && v!=='','missing '+key);return v;};
+
+strict(allowedOperations.has(OP),'unsupported fork operation');
+safeId(need('audit_id'));
+strict(/^https:\/\//.test(need('callback_url')),'worker callback must be HTTPS');
+strict(secret && secret.length >= 16,'CLOUDFLARE_FORK_TOKEN secret is missing');
+if(process.env.CLOUDFLARE_WORKER_URL){
+  const expected = new URL(process.env.CLOUDFLARE_WORKER_URL);
+  const supplied = new URL(payload.callback_url);
+  strict(expected.origin===supplied.origin && expected.pathname.replace(/\/$/,'')===supplied.pathname.replace(/\/$/,''),'worker callback origin is not configured origin');
+}
+strict(!new URL(payload.callback_url).username && !new URL(payload.callback_url).password,'callback credentials not allowed');
+if(OP==='PHASE_VALIDATE_STEP'||OP==='PHASE_FINALIZE'){
+  strict(correlationId && correlationId===payload.correlation_id,'workflow correlation mismatch');
+}
+async function callback(route,body){
+  const endpoint = new URL(route,payload.callback_url.replace(/\/?$/,'/'));
+  strict(endpoint.origin===new URL(payload.callback_url).origin,'invalid callback origin');
+  let last;
+  for(let i=0;i<3;i++){
+    try{
+      const response=await fetch(endpoint,{method:'POST',headers:{authorization:'Bearer '+secret,'content-type':'application/json'},body:JSON.stringify({...body,auditId:payload.audit_id,correlationId})});
+      const result=await response.text();
+      if(!response.ok)throw Error('Worker rejected '+route+' HTTP '+response.status+': '+result.slice(0,900));
+      return result;
+    }catch(e){last=e;if(i<2)await new Promise(r=>setTimeout(r,1500*(i+1)));}
+  }
+  throw last;
+}
+function readGitHubJson(apiPath){
+  const raw=cmd('gh',['api','repos/'+CONTROLLER+'/'+apiPath]);
+  return JSON.parse(raw);
+}
+function directoryKey(campaignId){return 'Audit Campaign Directory/campaigns/'+campaignId.replace(/-r[0-9]+$/,'')+'.json';}
+function checkout(){
+  const id=safeId(need('campaign_id'));
+  strict(/-r[0-9]+$/.test(id),'campaign revision missing');
+  const target=directoryKey(id);
+  const encoded=target.split('/').map(encodeURIComponent).join('/');
+  const meta=readGitHubJson('contents/'+encoded+'?ref=main');
+  strict(meta.type==='file'&&meta.encoding==='base64','campaign directory missing');
+  const directory=JSON.parse(Buffer.from(meta.content.replace(/\s/g,''),'base64').toString('utf8'));
+  strict(directory.campaignId===id&&directory.campaignGenerationId===payload.generation_id,'campaign generation mismatch');
+  strict(directory.mode==='LITE_SOLO'&&directory.authorityRelease==='lite-solo-v5','not a v5 Lite-Solo campaign');
+  strict(directory.authorityDigest===payload.authority_digest,'bound authority digest mismatch');
+  safePath(directory.workspacePath);
+  cmd('bash',['scripts/lite-solo-checkout-bound-controller-v1.sh',ROOT,'main',directory.workspacePath]);
+  const local=read(target);
+  strict(local.campaignId===id&&local.campaignGenerationId===payload.generation_id,'checkout selected a different campaign');
+  strict(local.workspacePath===directory.workspacePath,'campaign workspace path changed');
+  const p0=read(local.workspacePath+'/receipts/PHASE_00_RECEIPT_v1.json');
+  strict(p0.phase?.status==='SEALED'&&p0.validation?.status==='PASS','Phase-0 prerequisite is not SEALED PASS');
+  strict(p0.authority?.manifestSha256===local.authorityDigest,'source-bound manifest identity changed');
+  strict(p0.source?.sha256===local.sourceSha256,'admitted source identity changed');
+  const boundRoot=validateBoundAuthorityV1({root:ROOT,receipt:p0});
+  strict(boundRoot===AUTH,'unexpected frozen audit authority');
+  return {directory:local,p0,campaignPath:directory.workspacePath,directoryPath:target};
+}
+function assertAssigned(c,phase){
+  strict(c.directory.currentAssignment?.phaseSequence===phase,'phase is not active in controller');
+  strict(c.directory.currentAssignment?.workSchemaPath?.startsWith(AUTH+'/phases/phase-'+phase+'/'),'bound phase schema changed');
+}
+function indexPages(indexPath){
+  const index=read(indexPath),dir=path.posix.dirname(indexPath),out=[];
+  strict(index.schemaVersion==='curveyield-work-shard-index-v13','wrong semantic shard format');
+  for(const page of index.pages||[]){
+    strict(/^INDEX_PAGE_[0-9]{4}_v1\.json$/.test(page.file),'unexpected index page name');
+    const rel=dir+'/'+page.file,raw=fs.readFileSync(relative(rel));
+    strict(sha(raw)===page.sha256,'immutable index page digest mismatch');
+    const body=JSON.parse(raw.toString('utf8'));
+    strict(body.schemaVersion==='curveyield-work-shard-index-page-v13','invalid index page format');
+    out.push(...body.shards);
+  }
+  return {index,descriptors:out};
+}
+function noUnitNextStep(c){
+  const phase=Number(need('phase')),step=Number(need('step'));
+  assertAssigned(c,phase);
+  const a=c.directory.currentAssignment,indexPath=safePath(a.workShardIndexPath);
+  const {index,descriptors}=indexPages(indexPath);
+  strict(index.phase===phase&&index.formRel===a.workFormPath,'wrong phase index');
+  const unitFiles=descriptors.filter(d=>d.path?.[0]==='actions'&&d.path[1]==='step-'+step&&d.path[2]==='outputs')
+    .map(d=>d.file).sort();
+  strict(unitFiles.length>0,'no canonical semantic shards for current step');
+  if(payload.source_commit)strict(/^[0-9a-f]{40}$/.test(payload.source_commit),'invalid source commit');
+  return callback('/fork/roster',{campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
+    phase,step,sourceCommit:payload.source_commit||null,
+    indexSha256:sha(fs.readFileSync(relative(indexPath))),unitFiles});
+}
+function validateSemanticStep(c){
+  const phase=Number(need('phase')),step=Number(need('step')),a=c.directory.currentAssignment;
+  assertAssigned(c,phase);
+  strict(Number.isSafeInteger(step)&&step>=1&&step<=10,'invalid step');
+  strict(payload.validator==='EXISTING_LITE_SOLO_PHASE_VALIDATORS','unknown step validator');
+  const commit=need('source_commit');
+  strict(/^[0-9a-f]{40}$/.test(commit),'missing immutable submitted commit');
+  const branchHead=cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim();
+  strict(branchHead===commit,'submitted commit differs from checked out canonical controller head');
+  strict(a.workShardIndexPath===payload.work_shard_index_path,'shard path does not match controller assignment');
+  const indexRaw=fs.readFileSync(relative(a.workShardIndexPath));
+  strict(sha(indexRaw)===payload.index_sha256,'step index digest mismatch');
+  const {index,descriptors}=indexPages(a.workShardIndexPath);
+  strict(index.phase===phase&&index.formRel===a.workFormPath,'bound semantic index mismatch');
+  const active=descriptors.filter(d=>d.path?.[1]==='step-'+step).map(d=>d.file);
+  strict(active.length>0,'no assigned current-step shards');
+  const predecessor=read(a.predecessorReceiptPath);
+  strict(validateBoundAuthorityV1({root:ROOT,receipt:predecessor})===AUTH,'frozen authority identity mismatch');
+  const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
+  strict(schema.actions['step-'+step],'step not in bound schema');
+  materializeSemanticWorkFormV13({root:ROOT,formRel:a.workFormPath});
+  const form=read(a.workFormPath);
+  // Invoke the existing validator, filtered only to the authorized current step.
+  // Whole-phase and machine-evidence validation remains mandatory at finalization.
+  const stepKey='step-'+step;
+  const filtered={...schema,actions:{[stepKey]:schema.actions[stepKey]}};
+  const problems=validateWorkForm(filtered,form);
+  const scaffold=validatePhaseScaffold(phase,form,a.controllerPrefillDigestSha256);
+  problems.push(...scaffold.filter(x=>/digest|read-only|prefill|modified/i.test(x)));
+  if(problems.length){
+    const map=semanticShardFailureIndexV13({root:ROOT,indexRel:a.workShardIndexPath,deficiencies:problems});
+    const paths=map.shards.map(x=>path.posix.basename(x.path)).filter(x=>active.includes(x));
+    return callback('/fork/step-verified',{status:'REWORK_REQUIRED',campaignId:c.directory.campaignId,
+      generationId:c.directory.campaignGenerationId,phase,step,sourceCommit:commit,indexSha256:payload.index_sha256,
+      authorityDigest:c.directory.authorityDigest,validator:payload.validator,
+      deficiencies:problems,unitFiles:paths.length?paths:active});
+  }
+  return callback('/fork/step-verified',{status:'PASS',campaignId:c.directory.campaignId,
+    generationId:c.directory.campaignGenerationId,phase,step,sourceCommit:commit,indexSha256:payload.index_sha256,
+    authorityDigest:c.directory.authorityDigest,validator:payload.validator,deficiencies:[]});
+}
+function publishCanonical(c){
+  cmd('git',['-C',ROOT,'config','user.name','CurveYield Cloudflare Fork Controller']);
+  cmd('git',['-C',ROOT,'config','user.email','lite-solo-cloudflare-fork@users.noreply.github.com']);
+  cmd('git',['-C',ROOT,'add','--',c.campaignPath,c.directoryPath]);
+  const changed=cmd('git',['-C',ROOT,'status','--porcelain']);
+  if(changed.trim()){
+    cmd('git',['-C',ROOT,'commit','-m','audit(lite-solo): seal '+c.directory.campaignId+' via isolated Cloudflare fork']);
+    cmd('git',['-C',ROOT,'push','origin','HEAD:main']);
+  }
+}
+function phaseFinalize(c){
+  const phase=Number(need('phase')),a=c.directory.currentAssignment;
+  assertAssigned(c,phase);
+  const commit=need('source_commit');
+  strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===commit,'phase submission commit is not canonical head');
+  if([4,5,6].includes(phase))throw Error('FORK_UNIT_FINALIZATION_NOT_YET_CONNECTED: controller-accepted unit wave is required; no synthetic sealed PASS allowed');
+  const env={...process.env};
+  const args=['scripts/lite-solo-phase-controller-v1.mjs','--controller-root',ROOT,'--campaign-id',c.directory.campaignId,
+    '--campaign-path',c.campaignPath,'--campaign-directory-path',c.directoryPath,'--phase-sequence',String(phase),
+    '--review-kind','phase','--audit-controller-ref','main'];
+  const text=cmd('node',args,{env});
+  const lines=text.trim().split('\n');
+  const result=JSON.parse(lines.at(-1));
+  if(result.status!=='PASS'||result.controllerPassToken!=='CONTROLLER_PHASE_PASS'){
+    const deficiencies=result.deficiencies||[result.feedbackText||result.status||'Controller phase gate failed'];
+    // The controller owns named deficiencies; never replace its FAIL with PASS.
+    return callback('/fork/phase-rework',{status:'REWORK_REQUIRED',campaignId:c.directory.campaignId,
+      generationId:c.directory.campaignGenerationId,phase,step:phase===1?6:Number(payload.completed_step)-1,
+      sourceCommit:commit,deficiencies,unitFiles:result.controllerValidation?.shardRework?.shards?.map(x=>path.posix.basename(x.path))||[]});
+  }
+  publishCanonical(c);
+  return callback('/fork/phase-sealed',{status:'PASS',campaignId:c.directory.campaignId,
+    generationId:c.directory.campaignGenerationId,phase,sourceCommit:commit,canonicalReceipt:result.receiptPath});
+}
+async function main(){
+  if(OP==='PHASE_0_INITIALIZE'){
+    // The existing source-initialization runner unconditionally dispatches the
+    // production Phase-0 workflow. Fail closed until the isolated Phase-0 runner
+    // is split out, rather than violating the no-legacy-workflow requirement.
+    throw Error('FORK_PHASE0_ISOLATION_REQUIRED: source bootstrap and Anvil runners must be connected without invoking production workflows');
+  }
+  const c=checkout();
+  if(OP==='PHASE_NEXT_STEP'){
+    if([4,5,6].includes(Number(payload.phase)))throw Error('FORK_UNIT_ROSTER_NOT_YET_CONNECTED: full canonical unit roster adapter required');
+    await noUnitNextStep(c);
+  }else if(OP==='PHASE_VALIDATE_STEP'){
+    if([4,5,6].includes(Number(payload.phase)))throw Error('FORK_UNIT_WAVE_VALIDATION_NOT_YET_CONNECTED: must invoke real unit controller before PASS');
+    await validateSemanticStep(c);
+  }else if(OP==='PHASE_FINALIZE')await phaseFinalize(c);
+}
+main().catch(e=>{process.stderr.write('Cloudflare fork blocked: '+String(e.stack||e)+'\n');process.exitCode=1;});
