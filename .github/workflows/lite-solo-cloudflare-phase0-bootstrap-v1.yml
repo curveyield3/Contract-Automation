@@ -340,7 +340,6 @@ jobs:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           WORKER_URL: https://lite-solo-api.jamesnexus9999.workers.dev
           WORKER_FORK_TOKEN: ${{ secrets.CLOUDFLARE_FORK_TOKEN }}
-          ACTIONS_DISPATCH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           : "${WORKER_URL:?CLOUDFLARE_WORKER_URL is required}"
@@ -350,7 +349,6 @@ jobs:
             '.campaign.campaignId==$c and .phase.status=="SEALED" and .validation.status=="PASS"' "$receipt" > /dev/null
           audit_id="$(jq -er .campaign.sourceInitializationRequestId "$receipt")"
           generation="$(jq -er .campaign.campaignGenerationId "$receipt")"
-          authority_digest="$(jq -er .authority.manifestSha256 "$receipt")"
           jq -nc --arg a "$audit_id" --arg c "$CAMPAIGN_ID" --arg g "$generation" --arg w "$CAMPAIGN_PATH" \
             '{auditId:$a,campaignId:$c,generationId:$g,workspacePath:$w}' > /tmp/phase0-cloudflare-callback.json
           curl --fail --silent --show-error --max-time 45 --retry 4 \
@@ -358,11 +356,3 @@ jobs:
             -H 'content-type: application/json' \
             --data-binary @/tmp/phase0-cloudflare-callback.json \
             "${WORKER_URL%/}/fork/phase0-ready"
-          jq -nc --arg a "$audit_id" --arg c "$CAMPAIGN_ID" --arg g "$generation" \
-            --arg d "$authority_digest" --arg cb "$WORKER_URL" \
-            '{audit_id:$a,campaign_id:$c,generation_id:$g,authority_digest:$d,phase:1,step:1,callback_url:$cb}' \
-            > /tmp/phase1-roster-fork-payload.json
-          GH_TOKEN="$ACTIONS_DISPATCH_TOKEN" gh workflow run lite-solo-cloudflare-fork-v1.yml \
-            --repo "$GITHUB_REPOSITORY" --ref main \
-            -f operation=PHASE_NEXT_STEP \
-            -f payload_json="$(cat /tmp/phase1-roster-fork-payload.json)"
