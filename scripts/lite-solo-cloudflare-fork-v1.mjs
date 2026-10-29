@@ -193,6 +193,116 @@ function phaseFinalize(c){
   return callback('/fork/phase-sealed',{status:'PASS',campaignId:c.directory.campaignId,
     generationId:c.directory.campaignGenerationId,phase,sourceCommit:commit,canonicalReceipt:result.receiptPath});
 }
+
+function loadPagedPrefill(rel){
+  const manifest=read(rel);
+  if(manifest.schemaVersion!=='curveyield-lite-solo-unit-prefill-manifest-v1')
+    return manifest.value;
+  strict(manifest.pageCount>=1&&manifest.pageCount<=2048&&manifest.partBytes===12288,'invalid paged prefill');
+  const parts=[];
+  for(let i=1;i<=manifest.pageCount;i++){
+    const name=path.posix.basename(rel,'.json')+'_PART_'+String(i).padStart(6,'0')+'_v1.json';
+    const part=read(path.posix.dirname(rel)+'/prefill-pages/'+name);
+    strict(part.schemaVersion==='curveyield-lite-solo-unit-prefill-page-v1'&&part.index===i&&part.total===manifest.pageCount,'incorrect prefill part');
+    const raw=Buffer.from(part.base64,'base64');
+    strict(sha(raw)===part.sha256,'prefill page integrity mismatch');
+    parts.push(raw);
+  }
+  const raw=Buffer.concat(parts);
+  strict(raw.length===manifest.byteLength&&sha(raw)===manifest.sha256,'full prefill integrity mismatch');
+  return JSON.parse(raw.toString('utf8')).value;
+}
+function unitPlan(c){
+  const a=c.directory.currentAssignment,p=Number(a.phaseSequence);
+  strict([4,5,6].includes(p),'wrong unit phase');
+  const planRel=safePath(a.unitQueueIndexPath),queueRel=safePath(a.unitQueueStatePath);
+  const plan=read(planRel),queue=read(queueRel);
+  strict(plan.schemaVersion==='curveyield-lite-solo-unit-plan-v1'&&queue.schemaVersion==='curveyield-lite-solo-unit-queue-state-v1','unknown unit plan/queue format');
+  for(const field of ['campaignId','campaignGenerationId','phaseSequence','phaseEpoch','sourceSha256','authorityDigest'])
+    strict(plan[field]===queue[field],'unit plan/queue mismatch: '+field);
+  strict(plan.campaignId===c.directory.campaignId&&plan.sourceSha256===c.directory.sourceSha256&&plan.authorityDigest===c.directory.authorityDigest,'unit identity mismatch');
+  const units=[];
+  for(const ref of plan.pages){
+    safePath(ref.path);
+    const raw=fs.readFileSync(relative(ref.path));
+    strict(sha(raw)===ref.sha256&&raw.length<=32768,'unit plan page integrity error');
+    const page=JSON.parse(raw.toString('utf8'));
+    strict(page.schemaVersion==='curveyield-lite-solo-unit-plan-page-v1'&&page.units.length===ref.count,'invalid unit page');
+    for(const x of page.units){
+      if(x.initialValueRef){
+        const rawValue=fs.readFileSync(relative(x.initialValueRef));
+        strict(sha(rawValue)===x.initialValueSha256,'unit initial value manifest mismatch');
+        x.initialValue=loadPagedPrefill(x.initialValueRef);
+      }
+      if(x.kind==='BATCH'){
+        const packetRaw=fs.readFileSync(relative(x.packetPath));
+        strict(sha(packetRaw)===x.packetSha256,'batch manifest digest mismatch');
+        const packet=loadPagedPrefill(x.packetPath);
+        strict(packet.schemaVersion==='curveyield-lite-solo-batched-assignment-v1'&&packet.unitId===x.unitId,'unit batch identity error');
+        x.members=packet.members;
+      }
+      units.push(x);
+    }
+  }
+  strict(units.length===plan.unitCount,'unit plan missing records');
+  return {plan,queue,units,planRel,queueRel};
+}
+function unitField(schema,u){
+  const pathTokens=u.path||(u.members?.[0]?.path);
+  const action=schema.actions?.[pathTokens?.[1]];
+  return action?.fields?.find(x=>x.name===pathTokens?.[3]);
+}
+function buildUnitMeta(c,u,schema){
+  const index=u.packetIndexPath?read(safePath(u.packetIndexPath)):null;
+  const initial=u.kind==='FLOW'?{schemaVersion:'curveyield-flow-review-submission-v1',unitId:u.unitId,
+      rows:(index?.primaryContextIds||[]).map(contextId=>({contextId,verdict:'<REQUIRED>',intent:'<REQUIRED>',reason:'<REQUIRED>',anchors:[]})),
+      flowNotes:[],integrationAnswers:[],contractChecks:[],candidates:[]}:
+    u.kind==='ATTACK'?{schemaVersion:'curveyield-attack-submission-v1',unitId:u.unitId,rows:[],findings:[]}:
+    {schemaVersion:'curveyield-lite-solo-unit-submission-v1',
+      entries:u.kind==='APPEND'?[]:(u.kind==='BATCH'?u.members:[u]).map(m=>({key:m.recordKeys?.[0],value:m.initialValue}))};
+  const packetPath=u.packetPath||u.shardPath;
+  strict(packetPath&&safePath(packetPath).startsWith(c.campaignPath+'/'),'unit packet path outside campaign');
+  const packetSha256=u.packetSha256||sha(fs.readFileSync(relative(packetPath)));
+  const inputSchema={type:'object',required:['schemaVersion','unitId','rows']};
+  if(!['FLOW','ATTACK'].includes(u.kind)){inputSchema.required=['schemaVersion','entries'];}
+  return {unitId:u.unitId,kind:u.kind,step:0,stage:'',unitSpecRevision:u.unitSpecRevision,
+    packetPath,packetSha256,packetIndexPath:u.packetIndexPath||null,
+    dependencies:u.dependencies||[],path:u.path,members:u.members,field:u.field,
+    inputTemplate:initial,validationSchema:inputSchema,
+    supportingFileRequirements:[],evidenceRefs:u.packetIndexPath?[u.packetIndexPath]:[]};
+}
+async function unitNextStep(c){
+  const phase=Number(need('phase')),step=Number(need('step'));
+  assertAssigned(c,phase);
+  const {plan,queue,units,planRel,queueRel}=unitPlan(c);
+  strict(phase===plan.phaseSequence&&plan.phaseEpoch===queue.phaseEpoch,'wrong controller phase epoch');
+  const stage=step===0?(String(payload.stage||'').includes('ATTACK')?'ATTACK_REVIEW':'FLOW_REVIEW'):
+    step===1?'STEP_1':step===2?'STEP_2':step===3?'STEP_3':step===4?'STEP_4':'STEP_5';
+  const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
+  const eligible=units.filter(u=>{
+    const family=step===0?(stage==='FLOW_REVIEW'?'FLOW':'ATTACK'):null;
+    const sameStep=step===0?u.kind===family:
+       (u.kind==='BATCH'?schema.actions['step-'+step]?.fields?.some(f=>f.name===u.field):
+         u.path?.[1]==='step-'+step);
+    return sameStep&&['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(queue.units?.[u.unitId]?.status)&&
+      (u.dependencies||[]).every(dep=>queue.units?.[dep]?.status==='ACCEPTED');
+  });
+  strict(eligible.length>0,'no eligible units in current controller stage; do not invent work');
+  const roster=eligible.map(u=>{const x=buildUnitMeta(c,u,schema);x.step=step;x.stage=stage;return x;});
+  const rosterDigest=sha(JSON.stringify(roster));
+  const planSha256=sha(fs.readFileSync(relative(planRel)));
+  const queueSha256=sha(fs.readFileSync(relative(queueRel)));
+  const pageLimit=10,pageCount=Math.ceil(roster.length/pageLimit);
+  strict(pageCount<=1000,'unit roster pagination limit exceeded');
+  for(let i=0;i<pageCount;i++){
+    const slice=roster.slice(i*pageLimit,(i+1)*pageLimit);
+    await callback('/fork/roster-page',{campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
+      phase,step,stage,authorityDigest:c.directory.authorityDigest,sourceSha256:c.directory.sourceSha256,
+      planSha256,queueSha256,phaseEpoch:plan.phaseEpoch,rosterDigest,rosterCount:roster.length,
+      pageCount,pageIndex:i,pageSha256:sha(JSON.stringify(slice)),units:slice});
+  }
+}
+
 async function main(){
   if(OP==='PHASE_0_INITIALIZE'){
     // The existing source-initialization runner unconditionally dispatches the
@@ -202,8 +312,8 @@ async function main(){
   }
   const c=checkout();
   if(OP==='PHASE_NEXT_STEP'){
-    if([4,5,6].includes(Number(payload.phase)))throw Error('FORK_UNIT_ROSTER_NOT_YET_CONNECTED: full canonical unit roster adapter required');
-    await noUnitNextStep(c);
+    if([4,5,6].includes(Number(payload.phase)))await unitNextStep(c);
+    else await noUnitNextStep(c);
   }else if(OP==='PHASE_VALIDATE_STEP'){
     if([4,5,6].includes(Number(payload.phase)))throw Error('FORK_UNIT_WAVE_VALIDATION_NOT_YET_CONNECTED: must invoke real unit controller before PASS');
     await validateSemanticStep(c);
