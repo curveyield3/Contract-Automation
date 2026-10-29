@@ -175,11 +175,19 @@ function publishCanonical(c){
     catch(error){
       cmd('git',['-C',ROOT,'fetch','origin','main']);
       const upstream=cmd('git',['-C',ROOT,'rev-parse','origin/main']).trim();
-      const base=cmd('git',['-C',ROOT,'merge-base','HEAD','origin/main']).trim();
+      let base;
+      try{base=cmd('git',['-C',ROOT,'merge-base','HEAD','origin/main']).trim();}
+      catch{
+        // The canonical Lite-Solo checkout is depth-one, so a concurrent
+        // main update may require the missing ancestry before safe comparison.
+        cmd('git',['-C',ROOT,'fetch','--no-tags','--deepen=64','--filter=blob:none','origin','main']);
+        base=cmd('git',['-C',ROOT,'merge-base','HEAD','origin/main']).trim();
+      }
       if(upstream===base)throw error; // Not a concurrent update: do not blindly retry.
       const touched=cmd('git',['-C',ROOT,'diff','--name-only',base,'origin/main','--',c.campaignPath,c.directoryPath]).trim();
       strict(!touched,'CONTROLLER_CAMPAIGN_CHANGED_REVALIDATION_REQUIRED: '+touched);
-      cmd('git',['-C',ROOT,'rebase','origin/main']);
+      // Historical frozen authority is worktree-only; retain it across rebase.
+      cmd('git',['-C',ROOT,'-c','rebase.autoStash=true','rebase','origin/main']);
     }
   }
   throw Error('CONTROLLER_PUBLICATION_CONTENTION: safe retries exhausted');
