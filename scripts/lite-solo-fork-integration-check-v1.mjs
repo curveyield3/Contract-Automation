@@ -19,7 +19,7 @@ const required=[
 for(const p of required)if(!fs.statSync(p,{throwIfNoEntry:false})?.isFile())throw Error('missing lite-solo component: '+p);
 const controller=fs.readFileSync(required[0],'utf8');
 const discovery=fs.readFileSync('packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs','utf8');
-const authority='Audit Skill - Lite-Solo Authority/lite-solo-v4';
+const authority='Audit Skill - Lite-Solo Authority/lite-solo-v5';
 if(!controller.includes("const gatedMasterReview=false")||
  controller.includes('stageMasterReview({root,campaignPath')||
  controller.includes("if(reviewKind==='master'){")||
@@ -33,7 +33,7 @@ const phaseWork=fs.readFileSync('scripts/lib/lite-solo-phase-work-v1.mjs','utf8'
 const unitQueue=fs.readFileSync('scripts/lib/lite-solo-unit-queue-v1.mjs','utf8');
 if(!phaseWork.includes('validateBoundAuthorityV1')||
    !phaseWork.includes('secureShardWorkFormV13')||
-   !unitQueue.includes("const AUTHORITY='"+authority+"'")||
+   !unitQueue.includes("return 'Audit Skill - Lite-Solo Authority/'+directory.authorityRelease")||
    !unitQueue.includes('secureShardWorkFormV13({root')||
    !unitQueue.includes('retireFull:true'))
  throw Error('solo work forms are not using receipt-bound secure sharding');
@@ -50,6 +50,8 @@ if(!sourceWorkflow.includes('workflow_dispatch:')||
    !sourceWorkflow.includes('test "$GITHUB_REF_NAME" = main')||
    /agent_chat_url|agentChatUrl|wake_message_b64|SOLO_CHAT_URL/.test(sourceWorkflow))
  throw Error('Lite-Solo launch must use direct dispatch or validated main-only source request; never chat delivery');
+if(!sourceScript.includes('authority_root="$authority_parent/lite-solo-v5"'))
+ throw Error('source admission is not bound to the current v5 authority');
 if(/SOLO_CHAT_URL|process\/browser-agent-wake\/registrations|lite-work-relay-v1\.yml|WAKE_ACK/.test(sourceScript))
  throw Error('Lite-Solo initialization still attempts a browser registration, chat binding or message delivery');
 if(!discovery.includes('sequentialSingleReviewer:true')||

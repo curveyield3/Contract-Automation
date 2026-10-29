@@ -159,4 +159,4 @@ jobs:
             fi
           done
           [ "$success" = true ] || { echo '::error::Unable to publish recalculated queue after conflicts'; exit 1; }
-          echo "Lite-Solo v4 controller drained immutable requests for $CAMPAIGN_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "Lite-Solo v4/v5 controller drained immutable requests for $CAMPAIGN_ID" >> "$GITHUB_STEP_SUMMARY"

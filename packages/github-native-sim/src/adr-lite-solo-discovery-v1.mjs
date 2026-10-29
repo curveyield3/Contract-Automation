@@ -204,7 +204,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  }));
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
   unitId,role,chatKey:role==='ATTACK'?(isReassignedV13AuthorityV1({root,authorityRoot})?'lite-solo-agent':verdictV13?'lite-solo-agent':'lite-solo-agent'):'lite-solo-agent',instructionsPath,
-  submissionPath:authorityRoot.endsWith('/lite-solo-v4')?path.posix.join(campaignPath,'work/phase-04/units',unitId,'submissions/<workerId>/epoch-<claimEpoch>/SUBMISSION_ATTEMPT_001_v1.json'):submissionRel(campaignPath,unitId),boundaryRequestPath:authorityRoot.endsWith('/lite-solo-v4')?'process/agent-upload/lite-solo-unit-requests/':'process/agent-upload/lite-solo-phase-boundary/',
+  submissionPath:['/lite-solo-v4','/lite-solo-v5'].some(suffix=>authorityRoot.endsWith(suffix))?path.posix.join(campaignPath,'work/phase-04/units',unitId,'submissions/<workerId>/epoch-<claimEpoch>/SUBMISSION_ATTEMPT_001_v1.json'):submissionRel(campaignPath,unitId),boundaryRequestPath:['/lite-solo-v4','/lite-solo-v5'].some(suffix=>authorityRoot.endsWith(suffix))?'process/agent-upload/lite-solo-unit-requests/':'process/agent-upload/lite-solo-phase-boundary/',
   sourceRoot:campaignPath+'/source',sourceInventoryPath:asset(root,campaignPath,'REVIEW_INVENTORY_v1.json'),
   flowPlanPath:asset(root,campaignPath,'FLOW_PLAN_v1.json'),
   systemFactsPath:asset(root,campaignPath,'SYSTEM_FACTS_v1.json'),
@@ -249,7 +249,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  });
  if(persist){
   const rel=packetRel(campaignPath,unitId);
-  if(authorityRoot.endsWith('/lite-solo-v4'))
+  if(['/lite-solo-v4','/lite-solo-v5'].some(suffix=>authorityRoot.endsWith(suffix)))
    writePagedPacketV1({root,packetPath:rel,packet});
   else writeJson(repoFile(root,rel),packet);
  }

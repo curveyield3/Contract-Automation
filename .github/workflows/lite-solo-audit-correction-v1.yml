@@ -84,7 +84,7 @@ jobs:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         run: bash scripts/select-audit-controller-token.sh
-      - name: Fetch immutable source and existing Lite-Solo v4 authority
+      - name: Fetch immutable source and exact original Lite-Solo authority
         id: scope
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -104,6 +104,7 @@ jobs:
           gh repo clone curveyield3/Audit-Controller .audit-controller -- --branch main --depth 1 --filter=blob:none --sparse
           git -C .audit-controller sparse-checkout set --no-cone \
             '/Audit Skill - Lite-Solo Authority/lite-solo-v4/**' \
+            '/Audit Skill - Lite-Solo Authority/lite-solo-v5/**' \
             '/Audit Campaign Directory/campaigns/**' \
             "/$source_path/**" \
             "/${dest_workspace}/**"
@@ -149,6 +150,6 @@ jobs:
             echo "- Campaign: $(jq -r .campaignId "$directory")"
             echo "- Status: $(jq -r .campaignStatus "$directory")"
             echo "- Current phase: $(jq -r '.currentAssignment.phaseSequence // "PRELAUNCH"' "$directory")"
-            echo "- Original receipts remain immutable; follow normal Lite-Solo v4 phase/unit controllers"
+            echo "- Original receipts remain immutable; follow the original bound Lite-Solo v4/v5 phase/unit controller"
             echo "- No tests or transactions were initiated by this workflow"
           } >>"$GITHUB_STEP_SUMMARY"

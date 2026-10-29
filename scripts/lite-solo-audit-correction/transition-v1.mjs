@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Lite-Solo Audit Correction v1: isolated controller-admitted corrective lineage.
-// Reuses the existing Lite-Solo v4 phase/unit controllers; never executes tests.
+// Reuses the existing Lite-Solo v4/v5 phase/unit controllers; never executes tests.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -35,7 +35,7 @@ const sourcePath=original.workspacePath;
 const sourceAnchorRel=original.lastSealedReceiptPath;
 if(original.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2'||
  original.campaignId!==request.sourceCampaignId||original.mode!=='LITE_SOLO'||
- original.authorityRelease!=='lite-solo-v4'||
+ !['lite-solo-v4','lite-solo-v5'].includes(original.authorityRelease)||
  !['COMPLETE','ACTIVE'].includes(original.campaignStatus)||
  (original.campaignStatus==='COMPLETE'&&original.currentAssignment!==null)||
  (original.campaignStatus==='ACTIVE'&&!original.currentAssignment)||
@@ -44,7 +44,7 @@ if(original.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2'||
  !sourceAnchorRel.startsWith(sourcePath+'/receipts/')||
   !/^PHASE_[0-9]{2}_RECEIPT_v[1-9][0-9]*\.json$/.test(path.posix.basename(String(sourceAnchorRel??'')))||
  !sourceAnchorRel.startsWith(sourcePath+'/'))
- throw Error('LSC_ADMITTED_LITE_SOLO_V4_SOURCE_REQUIRED');
+ throw Error('LSC_ADMITTED_PARALLEL_LITE_SOLO_SOURCE_REQUIRED');
 const sourceAnchor=load(sourceAnchorRel);
 const sourceAnchorName=sourceAnchorRel.match(/PHASE_(\d{2})_RECEIPT_v([1-9][0-9]*)\.json$/);
 if(!sourceAnchorName||sourceAnchor.phase?.sequence!==Number(sourceAnchorName[1])||
@@ -68,7 +68,7 @@ const source0Names=fs.readdirSync(toFile(sourcePath+'/receipts'))
 if(!source0Names.length)throw Error('LSC_NO_ADMITTED_PHASE0_RECEIPT');
 const source0=load(sourcePath+'/receipts/'+source0Names[0]);
 const authRoot=validateBoundAuthorityV1({root,receipt:source0});
-if(authRoot!=='Audit Skill - Lite-Solo Authority/lite-solo-v4'||
+if(authRoot!==('Audit Skill - Lite-Solo Authority/'+original.authorityRelease)||
  source0.source?.sha256!==original.sourceSha256||
  source0.authority?.manifestSha256!==original.authorityDigest||
  sourceAnchor.authority?.manifestSha256!==original.authorityDigest||
@@ -153,7 +153,7 @@ const stageCampaign=()=>{
   campaignId:newId,campaignGenerationId:generation,campaignName:'Lite-Solo Audit Correction — '+original.campaignName,
   workspacePath:dest,mode:'LITE_SOLO',deliveryTransport:'DIRECT',agent:{actorId:'lite-solo-agent'},
   agentModel:'PARALLEL_WORKER_UNITS',executionModel:'PARALLEL_WORKER_UNITS',
-  authorityRelease:'lite-solo-v4',authorityDigest:original.authorityDigest,
+  authorityRelease:original.authorityRelease,authorityDigest:original.authorityDigest,
   sourceSha256:original.sourceSha256,campaignStatus:'STAGED_PRELAUNCH',currentAssignment:null,
   lastSealedReceiptPath:null,unitPhaseEpoch:1,transportEpoch:0,updatedAt:when,
   correctionOf:{...originalBinding,priorSealsImmutable:true,entryPoint:'LITE_SOLO_AUDIT_CORRECTION_V1'}};
@@ -166,7 +166,7 @@ const stageCampaign=()=>{
   campaignId:newId,startPhase:request.startPhase,
   reason:request.reason??'CORRECT_ACCEPTED_SECURITY_ASSURANCE',
   obligationIds:request.obligationIds??[],candidateIds:request.candidateIds??[],
-  instruction:'Specify only original source-bound obligation/candidate identifiers. Phase work follows bound Lite-Solo v4 and controller validation.'});
+  instruction:'Specify only original source-bound obligation/candidate identifiers. Phase work follows the exact original bound Lite-Solo release and controller validation.'});
  console.log(JSON.stringify({status:'STAGED_PRELAUNCH',campaignId:newId,scopePath:scopeRel,startPhase:request.startPhase}));
  }catch(error){
   fs.rmSync(toFile(dest),{recursive:true,force:true});
@@ -225,7 +225,7 @@ const scopeCheck=(scope,start)=>{
   if(!selected&&!mandatoryOpen)continue;
   if(due<start)
    throw Error('LSC_RESTART_MUST_PRECEDE_OBLIGATION_DUE_'+id);
-  // Lite-Solo v4 Phases 8–10 contain no obligation-disposition field.
+  // Lite-Solo v4/v5 Phases 8–10 contain no obligation-disposition field.
   // Re-evaluation of outstanding or selected future-due security obligations
   // must reach Phase 6, the last evidence/obligation disposition boundary.
   if(due>6&&start>6)
