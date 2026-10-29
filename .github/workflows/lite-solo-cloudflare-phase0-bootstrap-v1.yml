@@ -345,7 +345,6 @@ jobs:
           set -euo pipefail
           : "${WORKER_URL:?CLOUDFLARE_WORKER_URL is required}"
           : "${WORKER_FORK_TOKEN:?CLOUDFLARE_FORK_TOKEN is required}"
-          slug="${CAMPAIGN_ID%-r*}"
           receipt=".audit-controller/$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"
           jq -e --arg c "$CAMPAIGN_ID" \
             '.campaign.campaignId==$c and .phase.status=="SEALED" and .validation.status=="PASS"' "$receipt" > /dev/null
