@@ -36,7 +36,8 @@ strict(allowedOperations.has(OP),'unsupported fork operation');
 safeId(need('audit_id'));
 strict(/^https:\/\//.test(need('callback_url')),'worker callback must be HTTPS');
 strict(secret && secret.length >= 16,'CLOUDFLARE_FORK_TOKEN secret is missing');
-if(process.env.CLOUDFLARE_WORKER_URL){
+strict(typeof process.env.CLOUDFLARE_WORKER_URL==='string'&&process.env.CLOUDFLARE_WORKER_URL.startsWith('https://'),'fixed CLOUDFLARE_WORKER_URL is required');
+{
   const expected = new URL(process.env.CLOUDFLARE_WORKER_URL);
   const supplied = new URL(payload.callback_url);
   strict(expected.origin===supplied.origin && expected.pathname.replace(/\/$/,'')===supplied.pathname.replace(/\/$/,''),'worker callback origin is not configured origin');
