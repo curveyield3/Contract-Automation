@@ -11,7 +11,8 @@ import {execFileSync} from 'node:child_process';
 import {materializeSemanticWorkFormV13, semanticShardFailureIndexV13} from './lib/lite-solo-work-shards-v1.mjs';
 import {readJson, writeJson, repoFile, loadPhaseSchema, validateWorkForm, validateBoundAuthorityV1} from './lib/lite-solo-phase-work-v1.mjs';
 import {validatePhaseScaffold} from './lib/lite-solo-phase-prefill-v1.mjs';
-import {processUnitRequestV1,finalizeReadinessV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {restoreControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
 
 const OP = process.env.FORK_OPERATION;
 const payload = JSON.parse(process.env.FORK_PAYLOAD_JSON || '{}');
@@ -165,14 +166,44 @@ function publishCanonical(c){
   cmd('git',['-C',ROOT,'config','user.name','CurveYield Cloudflare Fork Controller']);
   cmd('git',['-C',ROOT,'config','user.email','lite-solo-cloudflare-fork@users.noreply.github.com']);
   cmd('git',['-C',ROOT,'add','--',c.campaignPath,c.directoryPath]);
-  const changed=cmd('git',['-C',ROOT,'status','--porcelain']);
-  if(changed.trim()){
-    cmd('git',['-C',ROOT,'commit','-m','audit(lite-solo): seal '+c.directory.campaignId+' via isolated Cloudflare fork']);
-    cmd('git',['-C',ROOT,'push','origin','HEAD:main']);
+  if(!cmd('git',['-C',ROOT,'diff','--cached','--name-only']).trim())return;
+  cmd('git',['-C',ROOT,'commit','-m','audit(lite-solo): seal '+c.directory.campaignId+' via isolated Cloudflare fork']);
+  // A different campaign may commit concurrently. Rebase only when its changes
+  // do not touch this campaign/directory; never replay stale controller decisions.
+  for(let attempt=0;attempt<4;attempt++){
+    try{cmd('git',['-C',ROOT,'push','origin','HEAD:main']);return;}
+    catch(error){
+      cmd('git',['-C',ROOT,'fetch','origin','main']);
+      const upstream=cmd('git',['-C',ROOT,'rev-parse','origin/main']).trim();
+      const base=cmd('git',['-C',ROOT,'merge-base','HEAD','origin/main']).trim();
+      if(upstream===base)throw error; // Not a concurrent update: do not blindly retry.
+      const touched=cmd('git',['-C',ROOT,'diff','--name-only',base,'origin/main','--',c.campaignPath,c.directoryPath]).trim();
+      strict(!touched,'CONTROLLER_CAMPAIGN_CHANGED_REVALIDATION_REQUIRED: '+touched);
+      cmd('git',['-C',ROOT,'rebase','origin/main']);
+    }
   }
+  throw Error('CONTROLLER_PUBLICATION_CONTENTION: safe retries exhausted');
+}
+function markPhase10Delivery(c,receiptPath){
+  const current=read(c.directoryPath);
+  strict(current.campaignId===c.directory.campaignId&&current.campaignGenerationId===c.directory.campaignGenerationId,
+    'Phase-10 completion identity changed');
+  strict(current.campaignStatus==='COMPLETE'&&current.currentAssignment==null&&
+    current.lastSealedReceiptPath===receiptPath&&
+    receiptPath.startsWith(c.campaignPath+'/receipts/PHASE_10_RECEIPT_v'),
+    'Phase-10 controller has not sealed a terminal receipt');
+  strict(read(receiptPath).validation?.status==='PASS','Phase-10 terminal receipt was not accepted');
+  strict(process.env.GITHUB_OUTPUT,'GitHub delivery output is unavailable');
+  fs.appendFileSync(process.env.GITHUB_OUTPUT,'phase10_sealed=true\\nphase10_receipt='+receiptPath+'\\n');
 }
 function phaseFinalize(c){
   const phase=Number(need('phase')),a=c.directory.currentAssignment;
+  // Delivery-only retry after an already sealed Phase 10: do not re-run the
+  // controller or mutate its immutable receipt to repair publication.
+  if(phase===10&&c.directory.campaignStatus==='COMPLETE'){
+    markPhase10Delivery(c,c.directory.lastSealedReceiptPath);
+    return;
+  }
   assertAssigned(c,phase);
   const commit=need('source_commit');
   if([4,5,6].includes(phase)){
@@ -186,6 +217,9 @@ function phaseFinalize(c){
     const gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
     strict(gate.ready,'canonical unit finalization not ready: '+String(gate.reason||'units incomplete'));
     if(phase===5){
+      // Phase-5 preflight consumes the deterministic assembly of accepted units.
+      // This preserves the fork's Worker packet transport and its reduced checks.
+      assembleAcceptedUnitShardsV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase:5});
       const pre=cmd('node',['scripts/lite-phase5-preflight-v1.mjs',ROOT,c.campaignPath,
         c.directory.campaignId,c.directory.sourceSha256]);
       const result=JSON.parse(pre.trim().split('\n').at(-1));
@@ -229,7 +263,8 @@ function phaseFinalize(c){
     '--review-kind','phase','--audit-controller-ref','main'];
   const text=cmd('node',args,{env});
   const lines=text.trim().split('\n');
-  const result=JSON.parse(lines.at(-1));
+  const envelope=JSON.parse(lines.at(-1));
+  const result=restoreControllerResultV1({root:ROOT,campaignPath:c.campaignPath,envelope});
   if(result.status!=='PASS'||result.controllerPassToken!=='CONTROLLER_PHASE_PASS'){
     const deficiencies=result.deficiencies||[result.feedbackText||result.status||'Controller phase gate failed'];
     // The controller owns named deficiencies; never replace its FAIL with PASS.
@@ -238,6 +273,10 @@ function phaseFinalize(c){
       sourceCommit:commit,deficiencies,unitFiles:result.controllerValidation?.shardRework?.shards?.map(x=>path.posix.basename(x.path))||[]});
   }
   publishCanonical(c);
+  if(phase===10){
+    markPhase10Delivery(c,result.receiptPath);
+    return; // Report delivery and Worker callback occur in the owning workflow.
+  }
   return callback('/fork/phase-sealed',{status:'PASS',campaignId:c.directory.campaignId,
     generationId:c.directory.campaignGenerationId,phase,sourceCommit:commit,canonicalReceipt:result.receiptPath});
 }
