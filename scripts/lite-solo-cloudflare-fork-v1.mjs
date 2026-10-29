@@ -302,21 +302,46 @@ function unitField(schema,u){
 }
 function buildUnitMeta(c,u,schema){
   const index=u.packetIndexPath?read(safePath(u.packetIndexPath)):null;
-  const initial=u.kind==='FLOW'?{schemaVersion:'curveyield-flow-review-submission-v1',unitId:u.unitId,
-      rows:(index?.primaryContextIds||[]).map(contextId=>({contextId,verdict:'<REQUIRED>',intent:'<REQUIRED>',reason:'<REQUIRED>',anchors:[]})),
-      flowNotes:[],integrationAnswers:[],contractChecks:[],candidates:[]}:
-    u.kind==='ATTACK'?{schemaVersion:'curveyield-attack-submission-v1',unitId:u.unitId,rows:[],findings:[]}:
-    {schemaVersion:'curveyield-lite-solo-unit-submission-v1',
+  let initial,inputSchema;
+  if(u.kind==='FLOW'){
+    const ids=index?.primaryContextIds||[];
+    initial={schemaVersion:'curveyield-flow-review-submission-v1',unitId:u.unitId,
+      rows:ids.map(contextId=>({contextId,verdict:'<REQUIRED_CORRECT_DEFECT_OR_UNRESOLVED>',
+        intent:'<REQUIRED>',reason:'<REQUIRED>',anchors:[],
+        specInspection:{status:'<REQUIRED>',docsAndCommentsChecked:'<REQUIRED>',namedConstantsChecked:'<REQUIRED>'},
+        documentedRules:[],siblingComparisons:[]})),
+      flowNotes:(index?.flowIds||[]).map(flowId=>({flowId,note:'<REQUIRED>',anchors:[]})),
+      integrationAnswers:(index?.integrationQuestionIds||[]).map(obligationId=>({obligationId,assessment:'<REQUIRED>',reasoning:'<REQUIRED>',anchors:[]})),
+      contractChecks:[],candidates:[]};
+    inputSchema={type:'object',required:['schemaVersion','unitId','rows'],
+      properties:{schemaVersion:{type:'string',enum:['curveyield-flow-review-submission-v1']},
+        unitId:{type:'string',enum:[u.unitId]},rows:{type:'array',minItems:ids.length},
+        flowNotes:{type:'array'},integrationAnswers:{type:'array'},contractChecks:{type:'array'},candidates:{type:'array'}}};
+  }else if(u.kind==='ATTACK'){
+    initial={schemaVersion:'curveyield-attack-submission-v1',unitId:u.unitId,
+      attackPaths:(index?.flowIds||[]).map((flowId,i)=>({pathId:'PATH-'+String(i+1).padStart(3,'0'),
+        flowIds:[flowId],goal:'<REQUIRED>',role:'<REQUIRED_VALID_ATTACK_ROLE>',
+        steps:['<REQUIRED>'],anchors:[],result:'<REQUIRED_BLOCKED_VIABLE_OR_UNCERTAIN>',
+        blockingControl:'<REQUIRED_IF_BLOCKED>',simulationIdea:{transactionSequence:['<REQUIRED_IF_VIABLE>'],oracle:'<REQUIRED_IF_VIABLE>'}})),
+      integrationAnswers:(index?.integrationQuestionIds||[]).map(obligationId=>({obligationId,assessment:'<REQUIRED>',reasoning:'<REQUIRED>',anchors:[]}))};
+    inputSchema={type:'object',required:['schemaVersion','unitId','attackPaths','integrationAnswers'],
+      properties:{schemaVersion:{type:'string',enum:['curveyield-attack-submission-v1']},
+        unitId:{type:'string',enum:[u.unitId]},attackPaths:{type:'array',minItems:1},integrationAnswers:{type:'array'}}};
+  }else{
+    initial={schemaVersion:'curveyield-lite-solo-unit-submission-v1',
       entries:u.kind==='APPEND'?[]:(u.kind==='BATCH'?u.members:[u]).map(m=>({key:m.recordKeys?.[0],value:m.initialValue}))};
+    inputSchema={type:'object',required:['schemaVersion','entries'],
+      properties:{schemaVersion:{type:'string',enum:['curveyield-lite-solo-unit-submission-v1']},
+        entries:{type:'array',minItems:u.kind==='APPEND'?0:1,maxItems:1024}}};
+  }
   const packetPath=u.packetPath||u.shardPath;
   strict(packetPath&&safePath(packetPath).startsWith(c.campaignPath+'/'),'unit packet path outside campaign');
   const packetSha256=u.packetSha256||sha(fs.readFileSync(relative(packetPath)));
-  const inputSchema={type:'object',required:['schemaVersion','unitId','rows']};
-  if(!['FLOW','ATTACK'].includes(u.kind)){inputSchema.required=['schemaVersion','entries'];}
   return {unitId:u.unitId,kind:u.kind,step:0,stage:'',unitSpecRevision:u.unitSpecRevision,
-    packetPath,packetSha256,packetIndexPath:u.packetIndexPath||null,
+    packetPath,packetSha256,packetIndexPath:u.packetIndexPath||null,recordKeys:u.recordKeys||[],
     dependencies:u.dependencies||[],path:u.path,members:u.members,field:u.field,
     inputTemplate:initial,validationSchema:inputSchema,
+    templateSha256:sha(JSON.stringify(initial)),schemaSha256:sha(JSON.stringify(inputSchema)),
     supportingFileRequirements:[],evidenceRefs:u.packetIndexPath?[u.packetIndexPath]:[]};
 }
 async function unitNextStep(c){
