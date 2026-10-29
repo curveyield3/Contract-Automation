@@ -175,7 +175,47 @@ function phaseFinalize(c){
   assertAssigned(c,phase);
   const commit=need('source_commit');
   strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===commit,'phase submission commit is not canonical head');
-  if([4,5,6].includes(phase))throw Error('FORK_UNIT_FINALIZATION_NOT_YET_CONNECTED: controller-accepted unit wave is required; no synthetic sealed PASS allowed');
+  if([4,5,6].includes(phase)){
+    const gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
+    strict(gate.ready,'canonical unit finalization not ready: '+String(gate.reason||'units incomplete'));
+    if(phase===5){
+      const pre=cmd('node',['scripts/lite-phase5-preflight-v1.mjs',ROOT,c.campaignPath,
+        c.directory.campaignId,c.directory.sourceSha256]);
+      const result=JSON.parse(pre.trim().split('\n').at(-1));
+      const file=c.campaignPath+'/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json';
+      writeJson(relative(file),result);
+      strict(result.runnable===true,'Phase 5 executable preflight not qualified; controller must not seal');
+    }
+    const requestDir=fs.mkdtempSync('/tmp/lite-solo-cloudflare-empty-');
+    try{
+      const output=cmd('node',['scripts/lite-solo-unit-request-drain-v1.mjs',
+        '--root',ROOT,'--campaign-id',c.directory.campaignId,
+        '--requests-root',requestDir,'--mode','finalize'],{maxBuffer:16*1024*1024});
+      const result=JSON.parse(output.trim().split('\n').at(-1));
+      if(result.seal?.status==='SEALED'){
+        publishCanonical(c);
+        return callback('/fork/phase-sealed',{status:'PASS',campaignId:c.directory.campaignId,
+          generationId:c.directory.campaignGenerationId,phase,sourceCommit:commit,
+          canonicalReceipt:result.seal.receiptPath});
+      }
+      if(result.seal?.status==='REWORK_REQUIRED'&&result.seal.rework?.reopenedUnits?.length){
+        const units=new Set(result.seal.rework.reopenedUnits);
+        const plan=unitPlan(c);
+        const member=plan.units.filter(u=>units.has(u.unitId));
+        strict(member.length===units.size,'controller rework cannot be mapped to original unit plan');
+        const first=member[0],num=Number(first.path?.[1]?.replace('step-','')||0);
+        const stage=num===0?(first.kind==='ATTACK'?'ATTACK_REVIEW':'FLOW_REVIEW'):'STEP_'+num;
+        strict(member.every(u=>Number(u.path?.[1]?.replace('step-','')||0)===num),'multi-stage rework requires exact controller mapping');
+        publishCanonical(c);
+        return callback('/fork/phase-rework',{status:'REWORK_REQUIRED',
+          campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
+          phase,step:num,stage,sourceCommit:commit,unitIds:[...units],
+          deficiencies:result.seal.rework.deficiencies||[result.seal.error||'Controller identified unit-specific rework']});
+      }
+      publishCanonical(c);
+      throw Error('CONTROLLER_NOT_SEALED: '+JSON.stringify(result.seal||result.state||{}).slice(0,1800));
+    }finally{fs.rmSync(requestDir,{recursive:true,force:true});}
+  }
   const env={...process.env};
   const args=['scripts/lite-solo-phase-controller-v1.mjs','--controller-root',ROOT,'--campaign-id',c.directory.campaignId,
     '--campaign-path',c.campaignPath,'--campaign-directory-path',c.directoryPath,'--phase-sequence',String(phase),
