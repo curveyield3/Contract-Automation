@@ -628,7 +628,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     if(priorRows.length)form.actions['step-2'].outputs.reconciliationRecords=priorRows;
     // v4: freeze candidate-specific target record ownership before any worker claim.
     // Reconciliation retains original candidate key; later new candidates use authorized append slots.
-    if(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v4'){
+    if(['Audit Skill - Lite-Solo Authority/lite-solo-v4','Audit Skill - Lite-Solo Authority/lite-solo-v5'].includes(authorityRoot)){
       const templates=form.actions?.['step-3']?.outputs?.targetDesigns??[];
       const model=templates.find(x=>x&&typeof x==='object'&&!Array.isArray(x));
       const keys=[...new Set(priorCandidates.filter(x=>x&&typeof x==='object'&&!Array.isArray(x))

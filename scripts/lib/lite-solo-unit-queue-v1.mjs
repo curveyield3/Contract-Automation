@@ -71,8 +71,11 @@ const dependenciesFresh=(queue,u,recorded)=>{
   JSON.stringify(current)===JSON.stringify(recorded));
 };
 const isPhase=(p)=>[4,5,6].includes(p);
-const RELEASE='lite-solo-v4';
-const AUTHORITY='Audit Skill - Lite-Solo Authority/lite-solo-v4';
+const RELEASES=new Set(['lite-solo-v4','lite-solo-v5']);
+const authorityFor=directory=>{
+  if(!RELEASES.has(directory.authorityRelease))throw Error('unsupported parallel Lite-Solo release');
+  return 'Audit Skill - Lite-Solo Authority/'+directory.authorityRelease;
+};
 const rowId=(phase,field,index)=>{
  const families={
  '4:discoveryReconciliationRecords':'P4-RC','4:specialistReviewRecords':'P4-SP',
@@ -87,9 +90,9 @@ const rowId=(phase,field,index)=>{
  if(!prefix)throw Error('unassigned semantic field '+phase+':'+field);
  return prefix+'-'+String(index+1).padStart(3,'0');
 };
-function assertV4(directory,phase,request=null){
- if(!isPhase(phase)||directory.mode!=='LITE_SOLO'||directory.authorityRelease!==RELEASE)
-  throw Error('v4 controller requires a v4-bound Lite-Solo generation');
+function assertParallelSolo(directory,phase,request=null){
+ if(!isPhase(phase)||directory.mode!=='LITE_SOLO'||!RELEASES.has(directory.authorityRelease))
+  throw Error('parallel Lite-Solo controller requires an admitted v4/v5 generation');
  if(directory.executionModel!=='PARALLEL_WORKER_UNITS')
   throw Error('campaign is not admitted to parallel execution');
  if(directory.currentAssignment?.phaseSequence!==phase)throw Error('phase not current/assigned');
@@ -257,7 +260,7 @@ function publishPlan(root,campaign,phase,plan,queue){
  put(root,queueRel(campaign,phase),queue);
 }
 export function createUnitPlanV1({root,campaignPath,directory,phase,automationRoot=process.cwd()}){
- assertV4(directory,phase);
+ assertParallelSolo(directory,phase);
  const existing=maybe(root,queueRel(campaignPath,phase));
  if(existing)return existing;
  const plan=emptyPlan(directory,phase),queue=emptyQueue(plan);
@@ -269,7 +272,7 @@ export function createUnitPlanV1({root,campaignPath,directory,phase,automationRo
   const fIds=units.filter(u=>u.unitId.startsWith('F-')||u.unitId.startsWith('R-')).map(u=>u.unitId);
   for(const u of units){
    if(!/^[FRX]-\d{3}$/.test(u.unitId))throw Error('unsupported discovery unit '+u.unitId);
-   const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot:AUTHORITY,
+   const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot:authorityFor(directory),
     automationRoot,unitId:u.unitId,state:null,now:new Date().toISOString(),persist:true});
    const packetRel=path.posix.join(campaignPath,'work/phase-04/discovery',u.unitId,'ASSIGNMENT_PACKET_v1.json');
    const idx=writeUnitPacketIndexV1({root,campaignPath,unitId:u.unitId,role:u.unitId.startsWith('X-')?'ATTACK':'FLOW_REVIEW'});
@@ -413,7 +416,7 @@ function validateRequest(request,directory,phase){
  };
  const allowed=new Set([...common,...operationFields[request.operation]]);
  for(const key of Object.keys(request))if(!allowed.has(key))throw Error('unexpected controller/request field: '+key);
- assertV4(directory,phase,request);
+ assertParallelSolo(directory,phase,request);
  if(request.operation==='CLAIM'){
   if((!Number.isSafeInteger(request.desiredUnitCount)||
     request.desiredUnitCount<1||request.desiredUnitCount>UNIT_POLICY.issueBatchMax)||request.items!==undefined)
@@ -765,7 +768,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,di
  return {unitId:u.unitId,status:'REWORK_REQUIRED',resultRef:resultRel,errors};
 }
 function handleSubmit({root,campaign,phase,queue,plan,request,directory}){
- const schema=loadPhaseSchema(root,AUTHORITY,phase).schema,items=[];
+ const schema=loadPhaseSchema(root,authorityFor(directory),phase).schema,items=[];
  for(const item of request.items){
   // A durably queued request is SUBMITTED, never implicitly ACCEPTED.
   // Missing cross-repository bytes remain pending and retryable.
@@ -818,8 +821,8 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
   deriveBaselineObligationsV1({inventory,taxonomy:loadTaxonomyV1(automationRoot),summary}));
  // The original phase prefill is authoritative; refresh once, after complete discovery.
  const assignment=directory.currentAssignment;
- const form={...read(root,path.posix.join(AUTHORITY,'phases/phase-4/resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json'))};
- const updated=applyPhaseBoundaryPrefill({root,campaignPath:campaign,authorityRoot:AUTHORITY,sequence:4,
+ const form={...read(root,path.posix.join(authorityFor(directory),'phases/phase-4/resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json'))};
+ const updated=applyPhaseBoundaryPrefill({root,campaignPath:campaign,authorityRoot:authorityFor(directory),sequence:4,
   form,derivedInputPaths:[...asArray(assignment.derivedInputPaths),path.posix.join(campaign,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')],
   predecessorReceiptPath:assignment.predecessorReceiptPath});
  put(root,assignment.workFormPath,updated);
@@ -880,7 +883,7 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  return result;
 }
 export function finalizeReadinessV1({root,campaignPath,directory,phase}){
- assertV4(directory,phase);
+ assertParallelSolo(directory,phase);
  const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
  assertPlan(queue,plan);
  if(phase===4&&queue.stage!=='RECONCILIATION')return {ready:false,reason:'discovery and reconciliation not complete'};
@@ -1008,7 +1011,7 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  }
  // Full restoration is the pre-existing source-bound schema/identity validator.
  const restored=secureRestoreWorkFormV13({root,indexRel:assignment.workShardIndexPath});
- const form=JSON.parse(restored.content),schema=loadPhaseSchema(root,AUTHORITY,phase).schema;
+ const form=JSON.parse(restored.content),schema=loadPhaseSchema(root,authorityFor(directory),phase).schema;
  const errors=validateWorkForm(schema,form);
  if(errors.length)throw Error('aggregate validation blocked: '+errors.slice(0,15).join('; '));
  // Existing phase controller materializes, validates all semantic gates, executes required

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Durable per-campaign Lite-Solo v4 request drainer; invoked by the existing Actions runtime.
+// Durable per-campaign Lite-Solo v4/v5 request drainer; invoked by the existing Actions runtime.
 // Ordinary work is per-unit. Whole-phase validation/sealing occurs only once all accepted.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,18 +20,18 @@ if(slug===campaignId)throw Error('campaign generation suffix missing');
 const directoryRel='Audit Campaign Directory/campaigns/'+slug+'.json';
 const directoryFile=repoFile(root,directoryRel);
 const directory=readJson(directoryFile);
-if(directory.campaignId!==campaignId||directory.mode!=='LITE_SOLO'||directory.authorityRelease!=='lite-solo-v4')
- throw Error('request drainer denies non-v4 campaigns');
+if(directory.campaignId!==campaignId||directory.mode!=='LITE_SOLO'||!['lite-solo-v4','lite-solo-v5'].includes(directory.authorityRelease))
+ throw Error('request drainer denies non-parallel Lite-Solo campaigns');
 const campaignPath=directory.workspacePath;
 if(typeof campaignPath!=='string'||!campaignPath.startsWith('campaigns/')||campaignPath.split('/').includes('..'))
  throw Error('unsafe campaign workspace');
 const receipt=readJson(repoFile(root,campaignPath+'/receipts/PHASE_00_RECEIPT_v1.json'));
-if(receipt.authority?.liteRelease!=='lite-solo-v4'||receipt.authority?.manifestSha256!==directory.authorityDigest||
+if(!['lite-solo-v4','lite-solo-v5'].includes(receipt.authority?.liteRelease)||receipt.authority?.manifestSha256!==directory.authorityDigest||
  receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId||
  receipt.source?.sha256!==directory.sourceSha256)throw Error('source/authority generation binding invalid');
 const requestDir=path.resolve(arg['requests-root']??'process/agent-upload/lite-solo-unit-requests',campaignId);
 const results=[],phase=directory.currentAssignment?.phaseSequence;
-if(![4,5,6].includes(phase)&&arg.mode!=='drain')throw Error('not a v4 unit phase');
+if(![4,5,6].includes(phase)&&arg.mode!=='drain')throw Error('not a parallel Lite-Solo unit phase');
 if(arg.mode!=='finalize'){
  let changed=false;
  const files=fs.existsSync(requestDir)?fs.readdirSync(requestDir).filter(x=>/^[A-Za-z0-9._-]+\.json$/.test(x)).sort():[];
