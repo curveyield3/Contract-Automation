@@ -57,7 +57,7 @@ jobs:
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           FORK_CALLBACK_TOKEN: ${{ secrets.CLOUDFLARE_FORK_TOKEN }}
-          CLOUDFLARE_WORKER_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
+          CLOUDFLARE_WORKER_URL: https://lite-solo-api.jamesnexus9999.workers.dev
           CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
           AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
@@ -160,7 +160,7 @@ jobs:
         if: ${{ inputs.operation == 'PHASE_FINALIZE' && steps.fork-run.outputs.phase10_sealed == 'true' }}
         shell: bash
         env:
-          WORKER_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
+          WORKER_URL: https://lite-solo-api.jamesnexus9999.workers.dev
           WORKER_FORK_TOKEN: ${{ secrets.CLOUDFLARE_FORK_TOKEN }}
           FORK_PAYLOAD_JSON: ${{ inputs.payload_json }}
           FORK_CORRELATION_ID: ${{ inputs.correlation_id }}
