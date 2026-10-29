@@ -48,6 +48,9 @@ jobs:
           node-version: '22'
       - name: Restore existing controller dependencies
         run: npm ci --force --ignore-scripts --no-audit --no-fund
+      - name: Prepare canonical execution toolchain for evidence-bound phases
+        if: ${{ inputs.operation == 'PHASE_FINALIZE' && (fromJSON(inputs.payload_json).phase == 5 || fromJSON(inputs.payload_json).phase == 6 || fromJSON(inputs.payload_json).phase == 9) }}
+        uses: ./.github/actions/setup-v7-toolchain
       - name: Execute isolated request without legacy ingress
         shell: bash
         env:
