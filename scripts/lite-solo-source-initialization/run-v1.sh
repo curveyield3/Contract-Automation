@@ -83,7 +83,7 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
     echo "::notice::LEGACY_PUBLICATION_POLICY_UNBOUND: resuming source-bound campaign without changing release selection"
   fi
 else
-  # New campaigns bind the installed lite-solo-v4 authority and its immutable manifest.
+  # New campaigns bind the installed lite-solo-v5 authority and its immutable manifest; idempotent recovery keeps its original frozen authority.
   export GH_TOKEN="$AUDIT_CONTROLLER_TOKEN"
   gh auth setup-git
   work='/tmp/audit-source-initialization'
@@ -114,8 +114,8 @@ else
   git config user.name 'CurveYield Lite-Solo Source Initialization'
   git config user.email 'lite-solo@users.noreply.github.com'
   authority_parent='Audit Skill - Lite-Solo Authority'
-  authority_root="$authority_parent/lite-solo-v4"
-  test -f "$authority_root/MANIFEST.json" || { echo '::error::Registered Lite-Solo v4 authority package is missing' >&2; exit 1; }
+  authority_root="$authority_parent/lite-solo-v5"
+  test -f "$authority_root/MANIFEST.json" || { echo '::error::Registered Lite-Solo v5 authority package is missing' >&2; exit 1; }
   authority_packages=("$authority_root")
   skill_home="$authority_root/SKILL.md"
   skill_repo_path='curveyield3/Audit-Controller/Audit Skill - Lite-Solo Authority'
