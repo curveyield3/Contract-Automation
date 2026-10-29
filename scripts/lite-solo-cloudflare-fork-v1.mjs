@@ -206,6 +206,7 @@ function markPhase10Delivery(c,receiptPath){
 }
 function phaseFinalize(c){
   const phase=Number(need('phase')),a=c.directory.currentAssignment;
+  strict([4,5,6].includes(phase),'SEMANTIC_FORK_FINALIZER_DISABLED: unchanged original lite-solo-phase-controller-v1.yml handles phases 1–3 and 8–10');
   // Delivery-only retry after an already sealed Phase 10: do not re-run the
   // controller or mutate its immutable receipt to repair publication.
   if(phase===10&&c.directory.campaignStatus==='COMPLETE'){
@@ -565,11 +566,11 @@ async function main(){
   }
   const c=checkout();
   if(OP==='PHASE_NEXT_STEP'){
-    if([4,5,6].includes(Number(payload.phase)))await unitNextStep(c);
-    else await noUnitNextStep(c);
+    strict([4,5,6].includes(Number(payload.phase)),'SEMANTIC_INTERMEDIATE_WORKFLOWS_DISABLED: original phase boundary handles non-unit steps');
+    await unitNextStep(c);
   }else if(OP==='PHASE_VALIDATE_STEP'){
-    if([4,5,6].includes(Number(payload.phase)))await unitValidateWave(c);
-    else await validateSemanticStep(c);
+    strict([4,5,6].includes(Number(payload.phase)),'SEMANTIC_INTERMEDIATE_WORKFLOWS_DISABLED: original phase boundary handles non-unit validation');
+    await unitValidateWave(c);
   }else if(OP==='PHASE_FINALIZE')await phaseFinalize(c);
 }
 main().catch(e=>{process.stderr.write('Cloudflare fork blocked: '+String(e.stack||e)+'\n');process.exitCode=1;});
