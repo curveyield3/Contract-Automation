@@ -21,8 +21,8 @@ on:
         required: false
         type: string
 permissions:
-  contents: read
-  actions: read
+  contents: write
+  actions: write
 concurrency:
   group: lite-solo-cloudflare-${{ fromJSON(inputs.payload_json).audit_id }}
   cancel-in-progress: false
@@ -54,6 +54,10 @@ jobs:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           FORK_CALLBACK_TOKEN: ${{ secrets.CLOUDFLARE_FORK_TOKEN }}
           CLOUDFLARE_WORKER_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
+          FORK_ZIP_HOST_ALLOWLIST: ${{ vars.FORK_ZIP_HOST_ALLOWLIST }}
+          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
           FORK_OPERATION: ${{ inputs.operation }}
           FORK_PAYLOAD_JSON: ${{ inputs.payload_json }}
           FORK_CORRELATION_ID: ${{ inputs.correlation_id }}
