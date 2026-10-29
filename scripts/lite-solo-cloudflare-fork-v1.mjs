@@ -265,6 +265,8 @@ function phaseFinalize(c){
       throw Error('CONTROLLER_NOT_SEALED: '+JSON.stringify(result.seal||result.state||{}).slice(0,1800));
     }finally{fs.rmSync(requestDir,{recursive:true,force:true});}
   }
+  throw Error('SEMANTIC_FORK_FINALIZER_DISABLED: use the unchanged lite-solo-phase-controller-v1.yml triggered by original phase-boundary request');
+  /* Retired semantic finalizer code (unreachable): */
   const env={...process.env};
   const args=['scripts/lite-solo-phase-controller-v1.mjs','--controller-root',ROOT,'--campaign-id',c.directory.campaignId,
     '--campaign-path',c.campaignPath,'--campaign-directory-path',c.directoryPath,'--phase-sequence',String(phase),
@@ -565,11 +567,11 @@ async function main(){
   }
   const c=checkout();
   if(OP==='PHASE_NEXT_STEP'){
-    if([4,5,6].includes(Number(payload.phase)))await unitNextStep(c);
-    else await noUnitNextStep(c);
+    strict([4,5,6].includes(Number(payload.phase)),'SEMANTIC_INTERMEDIATE_WORKFLOWS_DISABLED: original phase boundary is the only controller validation submission');
+    await unitNextStep(c);
   }else if(OP==='PHASE_VALIDATE_STEP'){
-    if([4,5,6].includes(Number(payload.phase)))await unitValidateWave(c);
-    else await validateSemanticStep(c);
+    strict([4,5,6].includes(Number(payload.phase)),'SEMANTIC_INTERMEDIATE_WORKFLOWS_DISABLED: original phase boundary is the only controller validation submission');
+    await unitValidateWave(c);
   }else if(OP==='PHASE_FINALIZE')await phaseFinalize(c);
 }
 main().catch(e=>{process.stderr.write('Cloudflare fork blocked: '+String(e.stack||e)+'\n');process.exitCode=1;});
