@@ -194,7 +194,7 @@ function markPhase10Delivery(c,receiptPath){
     'Phase-10 controller has not sealed a terminal receipt');
   strict(read(receiptPath).validation?.status==='PASS','Phase-10 terminal receipt was not accepted');
   strict(process.env.GITHUB_OUTPUT,'GitHub delivery output is unavailable');
-  fs.appendFileSync(process.env.GITHUB_OUTPUT,'phase10_sealed=true\\nphase10_receipt='+receiptPath+'\\n');
+  fs.appendFileSync(process.env.GITHUB_OUTPUT,'phase10_sealed=true\nphase10_receipt='+receiptPath+'\n');
 }
 function phaseFinalize(c){
   const phase=Number(need('phase')),a=c.directory.currentAssignment;
