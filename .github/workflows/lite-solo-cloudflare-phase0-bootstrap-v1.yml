@@ -338,7 +338,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          WORKER_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
+          WORKER_URL: https://lite-solo-api.jamesnexus9999.workers.dev
           WORKER_FORK_TOKEN: ${{ secrets.CLOUDFLARE_FORK_TOKEN }}
           ACTIONS_DISPATCH_TOKEN: ${{ github.token }}
         run: |
