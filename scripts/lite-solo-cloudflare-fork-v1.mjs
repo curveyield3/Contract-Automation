@@ -78,7 +78,7 @@ function checkout(){
   strict(directory.mode==='LITE_SOLO'&&directory.authorityRelease==='lite-solo-v5','not a v5 Lite-Solo campaign');
   strict(directory.authorityDigest===payload.authority_digest,'bound authority digest mismatch');
   safePath(directory.workspacePath);
-  cmd('bash',['scripts/lite-solo-checkout-bound-controller-v1.sh',ROOT,'main',directory.workspacePath]);
+  cmd('bash',['scripts/lite-solo-checkout-bound-controller-v1.sh','.audit-controller','main',directory.workspacePath]);
   const local=read(target);
   strict(local.campaignId===id&&local.campaignGenerationId===payload.generation_id,'checkout selected a different campaign');
   strict(local.workspacePath===directory.workspacePath,'campaign workspace path changed');
