@@ -53,6 +53,7 @@ jobs:
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           FORK_CALLBACK_TOKEN: ${{ secrets.CLOUDFLARE_FORK_TOKEN }}
+          CLOUDFLARE_WORKER_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
           FORK_OPERATION: ${{ inputs.operation }}
           FORK_PAYLOAD_JSON: ${{ inputs.payload_json }}
           FORK_CORRELATION_ID: ${{ inputs.correlation_id }}
