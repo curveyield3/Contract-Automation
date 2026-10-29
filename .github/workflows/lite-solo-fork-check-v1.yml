@@ -66,4 +66,4 @@ jobs:
           gh auth setup-git
           gh repo clone curveyield3/Audit-Controller .lite-solo-authority-check -- --branch main --depth 1 --filter=blob:none --sparse
           git -C .lite-solo-authority-check sparse-checkout set --no-cone '/Audit Skill - Lite-Solo Authority/lite-solo-v5/'
-          node scripts/lite-solo-verify-authority-v1.mjs '.lite-solo-authority-check/Audit Skill - Lite-Solo Authority/lite-solo-v4'
+          node scripts/lite-solo-verify-authority-v1.mjs '.lite-solo-authority-check/Audit Skill - Lite-Solo Authority/lite-solo-v5'
