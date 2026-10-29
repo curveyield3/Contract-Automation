@@ -97,6 +97,9 @@ else
 
   filename="$(cat "$work/filename")"
   source_sha="$(cat "$work/sha256")"
+  if [ -n "${FORK_EXPECTED_SOURCE_SHA:-}" ]; then
+    [ "$source_sha" = "$FORK_EXPECTED_SOURCE_SHA" ] || { echo "::error::WORKER_SOURCE_SHA_MISMATCH" >&2; exit 1; }
+  fi
   source_size="$(cat "$work/size")"
   provider="$(cat "$work/provider")"
   canonical_url="$(cat "$work/canonical-url")"
