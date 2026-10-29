@@ -108,9 +108,11 @@ jobs:
             '/Audit Campaign Directory/campaigns/**' \
             "/$source_path/**" \
             "/${dest_workspace}/**"
-          echo "request=$REQUEST_FILE" >>"$GITHUB_OUTPUT"
-          echo "dest_slug=$dest_slug" >>"$GITHUB_OUTPUT"
-          echo "dest_workspace=$dest_workspace" >>"$GITHUB_OUTPUT"
+          {
+            echo "request=$REQUEST_FILE"
+            echo "dest_slug=$dest_slug"
+            echo "dest_workspace=$dest_workspace"
+          } >>"$GITHUB_OUTPUT"
       - name: Prepare or launch isolated correction; no contract execution
         env:
           AUDIT_CONTROLLER_ROOT: .audit-controller
