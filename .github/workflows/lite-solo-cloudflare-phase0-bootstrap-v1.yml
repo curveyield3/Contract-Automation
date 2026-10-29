@@ -333,3 +333,38 @@ jobs:
             echo "- Separate completion/validation/handoff receipt files: not created"
             echo "- Phase 1 assignment is available in the campaign directory; no external chat, wake, or delivery."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify Cloudflare after canonical Phase 0 seal
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          WORKER_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
+          WORKER_FORK_TOKEN: ${{ secrets.CLOUDFLARE_FORK_TOKEN }}
+          ACTIONS_DISPATCH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : "${WORKER_URL:?CLOUDFLARE_WORKER_URL is required}"
+          : "${WORKER_FORK_TOKEN:?CLOUDFLARE_FORK_TOKEN is required}"
+          slug="${CAMPAIGN_ID%-r*}"
+          directory=".audit-controller/Audit Campaign Directory/campaigns/$slug.json"
+          receipt=".audit-controller/$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"
+          jq -e --arg c "$CAMPAIGN_ID" \
+            '.campaign.campaignId==$c and .phase.status=="SEALED" and .validation.status=="PASS"' "$receipt" > /dev/null
+          audit_id="$(jq -er .campaign.sourceInitializationRequestId "$receipt")"
+          generation="$(jq -er .campaign.campaignGenerationId "$receipt")"
+          authority_digest="$(jq -er .authority.manifestSha256 "$receipt")"
+          jq -nc --arg a "$audit_id" --arg c "$CAMPAIGN_ID" --arg g "$generation" --arg w "$CAMPAIGN_PATH" \
+            '{auditId:$a,campaignId:$c,generationId:$g,workspacePath:$w}' > /tmp/phase0-cloudflare-callback.json
+          curl --fail --silent --show-error --max-time 45 --retry 4 \
+            --proto '=https' -H "Authorization: Bearer $WORKER_FORK_TOKEN" \
+            -H 'content-type: application/json' \
+            --data-binary @/tmp/phase0-cloudflare-callback.json \
+            "${WORKER_URL%/}/fork/phase0-ready"
+          jq -nc --arg a "$audit_id" --arg c "$CAMPAIGN_ID" --arg g "$generation" \
+            --arg d "$authority_digest" --arg cb "$WORKER_URL" \
+            '{audit_id:$a,campaign_id:$c,generation_id:$g,authority_digest:$d,phase:1,step:1,callback_url:$cb}' \
+            > /tmp/phase1-roster-fork-payload.json
+          GH_TOKEN="$ACTIONS_DISPATCH_TOKEN" gh workflow run lite-solo-cloudflare-fork-v1.yml \
+            --repo "$GITHUB_REPOSITORY" --ref main \
+            -f operation=PHASE_NEXT_STEP \
+            -f payload_json="$(cat /tmp/phase1-roster-fork-payload.json)"
