@@ -81,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           # This is delivery work only, after the accepted controller commit is pushed.
-          AUDIT_DIRECTORY="Audit Campaign Directory/campaigns/${AUDIT_CAMPAIGN%-r*}.json"
+          export AUDIT_DIRECTORY="Audit Campaign Directory/campaigns/${AUDIT_CAMPAIGN%-r*}.json"
           test -n "$GH_TOKEN" || { echo '::error::AUDIT_CONTROLLER_GITHUB_TOKEN unavailable'; exit 1; }
           directory=".audit-controller/$AUDIT_DIRECTORY"
           jq -e --arg id "$AUDIT_CAMPAIGN" '.mode=="LITE_SOLO" and .campaignId==$id and .campaignStatus=="COMPLETE"' "$directory" >/dev/null || {
