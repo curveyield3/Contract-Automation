@@ -117,15 +117,15 @@ PY
         -o "$work/source.download" "$download_url"
     fi
   elif [[ "$source_url" == https://* ]]; then
-    # Only the private Worker source or an explicitly allowlisted ZIP host.
+    # Download public HTTPS ZIP sources; authenticate only the exact private Worker source.
     provider='cloudflare-fork-source'
     filename="cloudflare-audit-$REQUEST_ID.zip"
     canonical_url="$source_url"
     download_url="$source_url"
-    private="$(python3 - "$source_url" "$CLOUDFLARE_WORKER_URL" "$FORK_ZIP_HOST_ALLOWLIST" "$REQUEST_ID" <<'PY'
+    private="$(python3 - "$source_url" "$CLOUDFLARE_WORKER_URL" "$REQUEST_ID" <<'PY'
 from urllib.parse import urlsplit,parse_qs
 import sys,ipaddress
-source,worker,allow,request_id=sys.argv[1:]
+source,worker,request_id=sys.argv[1:]
 s,w=urlsplit(source),urlsplit(worker)
 if s.scheme!='https' or s.username or s.password or s.fragment or s.port:
     raise SystemExit('invalid HTTPS source URL')
@@ -138,9 +138,6 @@ if s.hostname==w.hostname and s.path=='/fork/source':
         raise SystemExit('private ZIP source auditId mismatch')
     print('yes')
 else:
-    hosts={h.strip().lower() for h in allow.split(',') if h.strip()}
-    if s.hostname not in hosts or not s.path.lower().endswith('.zip'):
-        raise SystemExit('source host not in fork ZIP allowlist')
     print('no')
 PY
 )"
