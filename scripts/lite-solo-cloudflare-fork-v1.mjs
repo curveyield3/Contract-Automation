@@ -174,7 +174,13 @@ function phaseFinalize(c){
   const phase=Number(need('phase')),a=c.directory.currentAssignment;
   assertAssigned(c,phase);
   const commit=need('source_commit');
-  strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===commit,'phase submission commit is not canonical head');
+  if([4,5,6].includes(phase)){
+    strict(/^[0-9a-f]{40}$/.test(commit),'phase unit source commit malformed');
+    const compare=readGitHubJson('compare/'+commit+'...main');
+    strict(compare.status==='ahead'||compare.status==='identical','Worker wave commit is not an ancestor of canonical accepted controller state');
+  }else{
+    strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===commit,'phase submission commit is not canonical head');
+  }
   if([4,5,6].includes(phase)){
     const gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
     strict(gate.ready,'canonical unit finalization not ready: '+String(gate.reason||'units incomplete'));
