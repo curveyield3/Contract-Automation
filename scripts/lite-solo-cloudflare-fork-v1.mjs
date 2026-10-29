@@ -305,10 +305,16 @@ async function unitNextStep(c){
 
 async function main(){
   if(OP==='PHASE_0_INITIALIZE'){
-    // The existing source-initialization runner unconditionally dispatches the
-    // production Phase-0 workflow. Fail closed until the isolated Phase-0 runner
-    // is split out, rather than violating the no-legacy-workflow requirement.
-    throw Error('FORK_PHASE0_ISOLATION_REQUIRED: source bootstrap and Anvil runners must be connected without invoking production workflows');
+    strict(payload.authority_release==='lite-solo-v5','source initialization requires admitted v5 authority');
+    strict(payload.request_id===payload.audit_id,'intake request identity differs from audit ID');
+    strict((typeof payload.source_url==='string'&&payload.source_url.length>0)!==Boolean(payload.scan_urls?.length),'exactly one source intake mode required');
+    strict(!payload.scan_urls||Array.isArray(payload.scan_urls)&&payload.scan_urls.length<=20,'malformed explorer scan URL set');
+    strict(process.env.AUDIT_CONTROLLER_TOKEN&&process.env.CONTRACT_AUTOMATION_TOKEN,'repository credentials missing');
+    const initEnv={...process.env,REQUEST_ID:payload.request_id,SOURCE_URL:payload.source_url||'',
+      SCAN_URLS:JSON.stringify(payload.scan_urls||[]),FORK_EXPECTED_SOURCE_SHA:payload.source_sha256||'',
+      DELIVERY_TRANSPORT:'DIRECT'};
+    cmd('bash',['scripts/lite-solo-source-initialization/run-cloudflare-fork-v1.sh'],{env:initEnv,timeout:20*60*1000});
+    return;
   }
   const c=checkout();
   if(OP==='PHASE_NEXT_STEP'){
