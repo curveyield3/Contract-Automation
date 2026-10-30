@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-lite-solo-phase-boundary-request-v1",
+  "campaignId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1",
+  "reviewKind": "phase",
+  "phaseSequence": 3,
+  "auditControllerRef": "main",
+  "attempt": 1
+}
