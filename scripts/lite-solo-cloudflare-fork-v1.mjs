@@ -21,7 +21,7 @@ const secret = process.env.FORK_CALLBACK_TOKEN;
 const ROOT = path.resolve('.audit-controller');
 const AUTH = 'Audit Skill - Lite-Solo Authority/lite-solo-v5';
 const CONTROLLER = 'curveyield3/Audit-Controller';
-const allowedOperations = new Set(['PHASE_0_INITIALIZE','PHASE_NEXT_STEP','PHASE_VALIDATE_STEP','PHASE_FINALIZE']);
+const allowedOperations = new Set(['PHASE_0_INITIALIZE','PHASE_NEXT_STEP','PHASE_VALIDATE_STEP','PHASE_VALIDATE_UNIT','PHASE_FINALIZE']);
 const sha = value => createHash('sha256').update(value).digest('hex');
 const bytes = value => Buffer.from(JSON.stringify(value,null,2)+'\n');
 const strict = (condition, message) => {if (!condition) throw Error(message);};
@@ -44,7 +44,7 @@ strict(typeof process.env.CLOUDFLARE_WORKER_URL==='string'&&process.env.CLOUDFLA
   strict(expected.origin===supplied.origin && expected.pathname.replace(/\/$/,'')===supplied.pathname.replace(/\/$/,''),'worker callback origin is not configured origin');
 }
 strict(!new URL(payload.callback_url).username && !new URL(payload.callback_url).password,'callback credentials not allowed');
-if(OP==='PHASE_VALIDATE_STEP'||OP==='PHASE_FINALIZE'){
+if(OP==='PHASE_VALIDATE_STEP'||OP==='PHASE_VALIDATE_UNIT'||OP==='PHASE_FINALIZE'){
   strict(correlationId && correlationId===payload.correlation_id,'workflow correlation mismatch');
 }
 async function callback(route,body){
@@ -464,7 +464,94 @@ function submittedUnitFile(c,phase,u){
   strict(options.length&&(!options[1]||options[0].attempt!==options[1].attempt),'missing or ambiguous latest submission: '+u.unitId);
   return options[0];
 }
+
+/**
+ * Validate one Worker-published unit against the SAME canonical controller
+ * validator used by the original wave. No other unit is claimed or modified.
+ * Worker leases remain independent, so the agent can claim its next packet.
+ */
+async function unitValidateSingle(c){
+  const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
+  strict([4,5,6].includes(phase),'unit verification outside unit phases');
+  assertAssigned(c,phase);
+  const id=safeId(need('unit_id')),expectedSha=need('submission_sha256');
+  const sourceCommit=need('source_commit');
+  strict(/^[a-f0-9]{40}$/.test(sourceCommit)&&/^[a-f0-9]{64}$/.test(expectedSha),'invalid pinned submission identity');
+  const current=unitPlan(c);
+  strict(current.plan.phaseEpoch===payload.phase_epoch,'stale unit phase epoch');
+  const u=current.units.find(x=>x.unitId===id);
+  strict(u&&unitRelevant(u,phase,step,stage,loadPhaseSchema(ROOT,AUTH,phase).schema),'unit not in assigned step/type');
+  const state=current.queue.units[id];
+  strict(state&&['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(state.status),'unit no longer claimable by canonical controller');
+  strict((u.dependencies||[]).every(dep=>current.queue.units?.[dep]?.status==='ACCEPTED'),'unit dependencies not accepted');
+  const selected=submittedUnitFile(c,phase,u);
+  strict(sha(fs.readFileSync(selected.filename))===expectedSha,'published unit differs from pending Worker submission');
+  strict(Number(payload.attempt)===selected.attempt,'submitted attempt differs from pending Worker attempt');
+  state.status='CLAIMED';state.workerId=selected.workerId;state.claimEpoch=selected.epoch;state.claimToken=randomUUID();
+  writeJson(relative(current.queueRel),current.queue);
+  const request={schemaVersion:'curveyield-lite-solo-unit-batch-request-v1',
+    requestId:'cf-unit-'+randomUUID(),operation:'SUBMIT',campaignId:c.directory.campaignId,
+    campaignGenerationId:c.directory.campaignGenerationId,phaseSequence:phase,lane:'AUTO',
+    workerId:selected.workerId,sourceSha256:c.directory.sourceSha256,authorityDigest:c.directory.authorityDigest,
+    phaseEpoch:current.plan.phaseEpoch,auditControllerRef:'main',
+    items:[{unitId:id,claimEpoch:state.claimEpoch,claimToken:state.claimToken,
+      packetSha256:u.packetSha256||sha(fs.readFileSync(relative(u.packetPath||u.shardPath))),
+      submissionPath:selected.rel,submissionSha256:expectedSha,unitSpecRevision:u.unitSpecRevision}]};
+  const outcome=processUnitRequestV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,request,automationRoot:process.cwd()});
+  writeJson(relative(c.directoryPath),c.directory);
+  const updated=unitPlan(c),unitState=updated.queue.units[id];
+  strict(['ACCEPTED','REWORK_REQUIRED'].includes(unitState?.status),
+    'controller failed to produce an authoritative acceptance/rework disposition for '+id);
+  const accepted=unitState.status==='ACCEPTED'&&unitState.acceptedSha256===expectedSha;
+  const rejected=unitState.status==='REWORK_REQUIRED'&&unitState.lastSubmissionSha256===expectedSha;
+  strict(accepted||rejected,'controller disposition does not bind submitted bytes');
+  const errors=(unitState.lastErrors||[]).map(e=>({unitId:id,reason:String(e.message||e.code||e),
+    code:e.code||null,path:e.path||null}));
+  if(!accepted)strict(errors.length>0,'controller rejected unit without deficiencies');
+  publishCanonical(c);
+  return callback('/fork/unit-verified',{status:accepted?'ACCEPTED':'REWORK_REQUIRED',
+    campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
+    phase,step,stage,unitId:id,attempt:selected.attempt,submissionSha256:expectedSha,
+    sourceCommit,phaseEpoch:current.plan.phaseEpoch,authorityDigest:c.directory.authorityDigest,
+    deficiencies:errors,acceptedPath:accepted?unitState.acceptedPath:null});
+}
+/** Once each unit has its own controller ACCEPTED record, advance the original stage. */
+async function unitAdvanceAcceptedStage(c){
+  const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
+  assertAssigned(c,phase);
+  const current=unitPlan(c);
+  const planDigest=sha(fs.readFileSync(relative(current.planRel)));
+  const queueDigest=sha(fs.readFileSync(relative(current.queueRel)));
+  strict(planDigest===payload.plan_sha256&&queueDigest===payload.queue_sha256,'stage closure queue or plan changed');
+  strict(current.plan.phaseEpoch===payload.phase_epoch,'stage epoch changed');
+  const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
+  const stageUnits=current.units.filter(u=>unitRelevant(u,phase,step,stage,schema));
+  strict(stageUnits.length>0&&stageUnits.every(u=>current.queue.units?.[u.unitId]?.status==='ACCEPTED'),
+    'stage still has unaccepted controller units');
+  strict(stageUnits.every(u=>current.queue.units[u.unitId].acceptedPath&&current.queue.units[u.unitId].acceptedSha256),
+    'stage lacks immutable accepted unit evidence');
+  let nextStep=step,nextStage=stage;
+  if(step===0&&stage==='FLOW_REVIEW'){nextStep=0;nextStage='ATTACK_REVIEW';}
+  else{nextStep=step===0?1:step+1;nextStage='STEP_'+nextStep;}
+  const done=step===({4:3,5:3,6:5}[phase])&&nextStep>step;
+  let nextRosterDigest=null,nextQueueSha256=null;
+  if(!done){
+    const next=eligibleStage(c,current,phase,nextStep,nextStage);
+    strict(next.length>0,'next step lacks eligible controller packets');
+    nextRosterDigest=stageDigest(c,current,phase,nextStep,nextStage);
+    nextQueueSha256=queueDigest;
+  }
+  return callback('/fork/step-verified',{status:'PASS',campaignId:c.directory.campaignId,
+    generationId:c.directory.campaignGenerationId,phase,step,stage,
+    sourceCommit:need('source_commit'),planSha256:planDigest,queueSha256:queueDigest,
+    rosterDigest:need('roster_digest'),phaseEpoch:current.plan.phaseEpoch,
+    authorityDigest:c.directory.authorityDigest,validator:payload.validator,deficiencies:[],
+    stepComplete:nextStep!==step,completePhase:done,nextStep:done?null:nextStep,
+    nextStage:done?null:nextStage,nextRosterDigest,nextQueueSha256});
+}
+
 async function unitValidateWave(c){
+  if(payload.incremental===true)return unitAdvanceAcceptedStage(c);
   const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
   assertAssigned(c,phase);
   strict([4,5,6].includes(phase),'wrong wave phase');
@@ -568,6 +655,8 @@ async function main(){
   if(OP==='PHASE_NEXT_STEP'){
     strict([4,5,6].includes(Number(payload.phase)),'SEMANTIC_INTERMEDIATE_WORKFLOWS_DISABLED: original phase boundary handles non-unit steps');
     await unitNextStep(c);
+  }else if(OP==='PHASE_VALIDATE_UNIT'){
+    await unitValidateSingle(c);
   }else if(OP==='PHASE_VALIDATE_STEP'){
     strict([4,5,6].includes(Number(payload.phase)),'SEMANTIC_INTERMEDIATE_WORKFLOWS_DISABLED: original phase boundary handles non-unit validation');
     await unitValidateWave(c);
