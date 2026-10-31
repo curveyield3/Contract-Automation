@@ -1038,11 +1038,44 @@ export function buildControllerPacket({directory,assignment,existing,now}){
   };
 }
 
-export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=null,{skipControllerPrefillDigest=false}={}){
+// Per-campaign validator exceptions. Add exact admitted campaign IDs and bounded
+// phase/check names here; no wildcard, environment toggle or global disable.
+const CAMPAIGN_VALIDATOR_EXCEPTIONS=Object.freeze({
+  'cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1':Object.freeze({
+    controllerPrefillDigest:Object.freeze({fromPhase:5,throughPhase:10})
+  })
+});
+
+function boundValidatorCampaignId(form){
+  // Phase controller receives --campaign-id; isolated fork runner receives the
+  // already-bound request via FORK_PAYLOAD_JSON. Reject contradictory identities.
+  const args=process.argv??[],index=args.indexOf('--campaign-id');
+  const cli=index>=0?args[index+1]:null;
+  let dispatched=null;
+  if(process.env.FORK_OPERATION&&process.env.FORK_PAYLOAD_JSON){
+    try{dispatched=JSON.parse(process.env.FORK_PAYLOAD_JSON).campaign_id??null;}
+    catch{return null;}
+  }
+  if(cli&&dispatched&&cli!==dispatched)return null;
+  const id=cli||dispatched;
+  if(typeof id!=='string'||! /^[A-Za-z0-9_.-]{1,150}$/.test(id)||!/-r[0-9]+$/.test(id))return null;
+  const slug=id.replace(/-r[0-9]+$/,''),revision=id.match(/-r([0-9]+)$/)[1];
+  const prefix='campaigns/'+slug+'/'+slug+' r'+revision+'/receipts/';
+  const receipt=form?.automationInputs?.predecessorReceiptPath;
+  if(typeof receipt!=='string'||!receipt.startsWith(prefix)||!/^PHASE_[0-9]{2}_RECEIPT_v1\.json$/.test(receipt.slice(prefix.length)))return null;
+  return id;
+}
+function campaignValidatorExceptionApplies(sequence,form,check){
+  const campaignId=boundValidatorCampaignId(form);
+  const rule=CAMPAIGN_VALIDATOR_EXCEPTIONS[campaignId]?.[check];
+  return Boolean(rule&&Number.isInteger(sequence)&&sequence>=rule.fromPhase&&sequence<=rule.throughPhase);
+}
+
+export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=null){
   const deficiencies=[];
-  // Fork-backed campaigns from Phase 5 onward intentionally omit only the
-  // aggregate controller-prefill digest gate. Other scaffold requirements remain.
-  if(!skipControllerPrefillDigest){
+  // Only the registered campaign/phase/check exception may omit this digest
+  // comparison; all other scaffold, source, machine and schema gates remain.
+  if(!campaignValidatorExceptionApplies(sequence,form,'controllerPrefillDigest')){
     const formDigest=form?.automationInputs?.controllerPrefillDigestSha256??null;
     const expectedDigest=assignmentExpectedDigest??formDigest;
     const ownedProjection=controllerOwnedProjection(form);
