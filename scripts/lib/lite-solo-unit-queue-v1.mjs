@@ -901,14 +901,26 @@ export function finalizeReadinessV1({root,campaignPath,directory,phase}){
     missed.every(s=>typeof s==='string'&&
       /^Phase 5 mandatory material candidate P5-CAND-[A-Za-z0-9_-]+ has no targeted machine execution$/.test(s))&&
     plan.units.some(u=>u.kind==='APPEND'&&u.field==='targetDesigns'&&queue.units[u.unitId]?.status==='ACCEPTED');
-  // Retrying an existing forked Phase-5 finalization blocked solely by
-  // the now-removed prefill digest gate is permitted. All accepted-unit and
-  // dependency checks below continue to apply without modification.
-  const priorForkPrefillOnly=directory.executionModel==='PARALLEL_WORKER_UNITS'&&phase>=5&&
-    Array.isArray(missed)&&missed.length===2&&
+  // The previous failed seal may also have persisted a changed assignment
+  // digest after resolving controller-owned machine references. The fork
+  // restores that digest from the SHA-bound original BASE before this gate.
+  // Permit a canonical revalidation only when BOTH immutable base and work
+  // form still match that restored value; all other integrity failures block.
+  let recoveredDigest=false;
+  if(phase===5&&Array.isArray(missed)&&missed.length===2&&
     missed.includes('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.')&&
-    missed.includes('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
-  if(!recoverable&&!priorForkPrefillOnly)return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
+    missed.includes('Controller-prefilled/read-only fields were modified; restore the generated values before validation.')){
+    const a=directory.currentAssignment,ix=read(root,a.workShardIndexPath);
+    const basePath=path.posix.join(path.posix.dirname(a.workShardIndexPath),ix.baseFile);
+    const raw=fs.readFileSync(repoFile(root,basePath));
+    if(sha(raw)===ix.baseSha256){
+      const base=JSON.parse(raw.toString('utf8')),form=read(root,a.workFormPath);
+      const digest=base.automationInputs?.controllerPrefillDigestSha256;
+      recoveredDigest=typeof digest==='string'&&/^[0-9a-f]{64}$/.test(digest)&&
+        a.controllerPrefillDigestSha256===digest&&form.automationInputs?.controllerPrefillDigestSha256===digest;
+    }
+  }
+  if(!recoverable&&!recoveredDigest)return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
  }
  for(const u of plan.units){
   const state=queue.units[u.unitId],accepted=read(root,state.acceptedPath);
