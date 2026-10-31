@@ -29,7 +29,7 @@ const receipt=readJson(repoFile(root,campaignPath+'/receipts/PHASE_00_RECEIPT_v1
 if(!['lite-solo-v4','lite-solo-v5'].includes(receipt.authority?.liteRelease)||receipt.authority?.manifestSha256!==directory.authorityDigest||
  receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId||
  receipt.source?.sha256!==directory.sourceSha256)throw Error('source/authority generation binding invalid');
-const requestDir=path.resolve(arg['requests-root']??'process/agent-upload/lite-solo-unit-requests',campaignId);
+const requestDir=path.resolve(arg['requests-root']??'process/agent-upload/lite-solo-cloudflare-unit-requests',campaignId);
 const results=[],phase=directory.currentAssignment?.phaseSequence;
 if(![4,5,6].includes(phase)&&arg.mode!=='drain')throw Error('not a parallel Lite-Solo unit phase');
 if(arg.mode!=='finalize'){
@@ -196,7 +196,7 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
   // receipt generation, Phase-7 automatic marker and successor assignment.
   try{
    assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase:seq});
-   const output=execFileSync(process.execPath,['scripts/lite-solo-phase-controller-v1.mjs',
+   const output=execFileSync(process.execPath,['scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-phase-controller-v1.mjs',
     '--controller-root',root,'--campaign-id',campaignId,
     '--campaign-path',campaignPath,'--campaign-directory-path',directoryRel,
     '--phase-sequence',String(seq),'--review-kind','phase','--audit-controller-ref','main'],

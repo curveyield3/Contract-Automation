@@ -66,10 +66,10 @@ jobs:
           fetch-depth: 1
 
       - name: Restore pinned Node dependencies
-        uses: ./.github/actions/setup-phase0-node-cache
+        uses: ./scripts/lite-solo-cloudflare-runtime-v1/.github/actions/setup-phase0-node-cache
 
       - name: Enable Forge for package deployment scripts only
-        uses: ./.github/actions/setup-phase0-deployment-only-toolchain-v1
+        uses: ./scripts/lite-solo-cloudflare-runtime-v1/.github/actions/setup-phase0-deployment-only-toolchain-v1
 
       - name: Select Audit-Controller credential
         env:
@@ -77,7 +77,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash scripts/lite-solo-cloudflare-runtime-v1/scripts/select-audit-controller-token.sh
 
       - name: Checkout exact campaign source
         env:
@@ -86,7 +86,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" "${{ inputs.campaign_path }}"
+          bash scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" "${{ inputs.campaign_path }}"
 
       - name: Run package deployment and configuration scripts on isolated Anvil fork
         env:
@@ -126,7 +126,7 @@ jobs:
             echo "::error::Fork source reports incorrect chain ID"; exit 1
           }
           rm -rf .phase0-deploy-output
-          python3 scripts/audit-command-guard-v1.py --label phase0-fork-deploy --wall 2400 --idle 300 --log "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" -- node scripts/run-phase0-fork-deploy-config-v1.mjs \
+          python3 scripts/lite-solo-cloudflare-runtime-v1/scripts/audit-command-guard-v1.py --label phase0-fork-deploy --wall 2400 --idle 300 --log "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" -- node scripts/lite-solo-cloudflare-runtime-v1/scripts/run-phase0-fork-deploy-config-v1.mjs \
             --controller-root .audit-controller \
             --campaign-path "$CAMPAIGN_PATH" \
             --output .phase0-deploy-output \
@@ -140,7 +140,7 @@ jobs:
           # Reconciliation covers reviewed Ethereum-lane exclusions only; profile-declared
           # (e.g. Katana) deployments fail straight through to the gate with their own evidence.
           if jq -e '.status=="BLOCKED_SCRIPT_FAILURE" and .fork.chainId==1' "$file" >/dev/null; then
-            node scripts/reconcile-phase0-deploy-evidence-v1.mjs \
+            node scripts/lite-solo-cloudflare-runtime-v1/scripts/reconcile-phase0-deploy-evidence-v1.mjs \
               --input "$file" --output "$file" \
               --campaign-root ".audit-controller/${{ inputs.campaign_path }}" \
               --source-run-id "$GITHUB_RUN_ID"
@@ -172,13 +172,13 @@ jobs:
           set -euo pipefail
           evidence=.phase0-deploy-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
           test -s "$evidence"
-          node --input-type=module -e 'import fs from "node:fs";import {assertDeployGateEvidenceV2} from "./scripts/lib/phase0-deploy-gate-v2.mjs";assertDeployGateEvidenceV2(JSON.parse(fs.readFileSync(process.argv[1],"utf8")))' "$evidence"
+          node --input-type=module -e 'import fs from "node:fs";import {assertDeployGateEvidenceV2} from "./scripts/lite-solo-cloudflare-runtime-v1/scripts/lib/phase0-deploy-gate-v2.mjs";assertDeployGateEvidenceV2(JSON.parse(fs.readFileSync(process.argv[1],"utf8")))' "$evidence"
 
       - name: Publish deployment evidence and Phase 6 matrix without fuzz baselines
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/write-phase0-fork-deploy-outputs-v1.mjs \
+          node scripts/lite-solo-cloudflare-runtime-v1/scripts/write-phase0-fork-deploy-outputs-v1.mjs \
             --controller-root .audit-controller \
             --campaign-path "${{ inputs.campaign_path }}" \
             --simulation-output .phase0-deploy-output
@@ -246,7 +246,7 @@ jobs:
           fetch-depth: 1
 
       - name: Restore pinned Node dependencies (shared Phase 0 cache)
-        uses: ./.github/actions/setup-phase0-node-cache
+        uses: ./scripts/lite-solo-cloudflare-runtime-v1/.github/actions/setup-phase0-node-cache
 
       - name: Select Audit-Controller credential
         env:
@@ -254,7 +254,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash scripts/lite-solo-cloudflare-runtime-v1/scripts/select-audit-controller-token.sh
 
       - name: Checkout exact Audit-Controller campaign
         env:
@@ -262,14 +262,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" "$CAMPAIGN_PATH"
+          bash scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" "$CAMPAIGN_PATH"
 
       - name: Finalize machine Phase 0 receipt
         id: finalize
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/lite-solo-phase0-finalize-v1.mjs             --controller-root .audit-controller             --campaign-path "$CAMPAIGN_PATH"             --contract-automation-sha "$GITHUB_SHA" --bootstrap-sha "$GITHUB_SHA"             --workflow-run-id "$GITHUB_RUN_ID" | tee /tmp/phase0-finalize.json
+          node scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-phase0-finalize-v1.mjs             --controller-root .audit-controller             --campaign-path "$CAMPAIGN_PATH"             --contract-automation-sha "$GITHUB_SHA" --bootstrap-sha "$GITHUB_SHA"             --workflow-run-id "$GITHUB_RUN_ID" | tee /tmp/phase0-finalize.json
           test "$(jq -r '.status' /tmp/phase0-finalize.json)" = PASS
           echo "campaign_name=$(jq -r '.campaignName' /tmp/phase0-finalize.json)" >> "$GITHUB_OUTPUT"
 

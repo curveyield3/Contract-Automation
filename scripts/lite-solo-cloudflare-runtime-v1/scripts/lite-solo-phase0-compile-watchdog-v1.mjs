@@ -48,8 +48,8 @@ function taskTreeCpu(rootPid,lastTicks){
 }
 export async function runCompileWatchdogV1(args=process.argv.slice(2)){
   const marker=args.indexOf('--'),mode=args[0];
-  const engines=new Set(['packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs',
-    'packages/github-native-sim/src/audit-preview-phase0-intelligence-v1.mjs']);
+  const engines=new Set(['scripts/lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs',
+    'scripts/lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/audit-preview-phase0-intelligence-v1.mjs']);
   if(mode!=='primary' || marker!==1 ||
     args[marker+1]!=='node' || !engines.has(args[marker+2]))throw new Error('invalid canonical Phase 0 intelligence supervisor invocation');
   const child=spawn(process.execPath,args.slice(marker+2),{

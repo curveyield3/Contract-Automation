@@ -8,13 +8,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {materializeSemanticWorkFormV13, semanticShardFailureIndexV13} from './lib/lite-solo-work-shards-v1.mjs';
-import {readJson, writeJson, repoFile, loadPhaseSchema, validateWorkForm, validateBoundAuthorityV1} from './lib/lite-solo-phase-work-v1.mjs';
-import {validatePhaseScaffold} from './lib/lite-solo-phase-prefill-v1.mjs';
-import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1} from './lib/lite-solo-unit-queue-v1.mjs';
-import {restoreControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
-import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
-import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
+import {materializeSemanticWorkFormV13, semanticShardFailureIndexV13} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-solo-work-shards-v1.mjs';
+import {readJson, writeJson, repoFile, loadPhaseSchema, validateWorkForm, validateBoundAuthorityV1} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-solo-phase-work-v1.mjs';
+import {validatePhaseScaffold} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-solo-phase-prefill-v1.mjs';
+import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-solo-unit-queue-v1.mjs';
+import {restoreControllerResultV1} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-boundary-result-v1.mjs';
+import {generateV7ExecutionRequestV1} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-phase5-request-generation-v1.mjs';
+import {verifyPhase0ForkStateV1} from './lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
 const OP = process.env.FORK_OPERATION;
 const payload = JSON.parse(process.env.FORK_PAYLOAD_JSON || '{}');
@@ -80,7 +80,7 @@ function checkout(){
   strict(directory.mode==='LITE_SOLO'&&directory.authorityRelease==='lite-solo-v5','not a v5 Lite-Solo campaign');
   strict(directory.authorityDigest===payload.authority_digest,'bound authority digest mismatch');
   safePath(directory.workspacePath);
-  cmd('bash',['scripts/lite-solo-checkout-bound-controller-v1.sh','.audit-controller','main',directory.workspacePath]);
+  cmd('bash',['scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-checkout-bound-controller-v1.sh','.audit-controller','main',directory.workspacePath]);
   const local=read(target);
   strict(local.campaignId===id&&local.campaignGenerationId===payload.generation_id,'checkout selected a different campaign');
   strict(local.workspacePath===directory.workspacePath,'campaign workspace path changed');
@@ -238,7 +238,7 @@ function phaseFinalize(c){
       // restoration branch. No accepted unit or admitted source is rewritten.
       const empty=fs.mkdtempSync('/tmp/lite-solo-phase5-prefill-recovery-');
       try{
-        cmd('node',['scripts/lite-solo-unit-request-drain-v1.mjs',
+        cmd('node',['scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-unit-request-drain-v1.mjs',
           '--root',ROOT,'--campaign-id',c.directory.campaignId,
           '--requests-root',empty,'--mode','drain']);
       }finally{fs.rmSync(empty,{recursive:true,force:true});}
@@ -283,7 +283,7 @@ function phaseFinalize(c){
       // Phase-5 preflight consumes the deterministic assembly of accepted units.
       // This preserves the fork's Worker packet transport and its reduced checks.
       assembleAcceptedUnitShardsV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase:5});
-      const pre=cmd('node',['scripts/lite-phase5-preflight-v1.mjs',ROOT,c.campaignPath,
+      const pre=cmd('node',['scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-phase5-preflight-v1.mjs',ROOT,c.campaignPath,
         c.directory.campaignId,c.directory.sourceSha256]);
       const result=JSON.parse(pre.trim().split('\n').at(-1));
       const file=c.campaignPath+'/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json';
@@ -298,7 +298,7 @@ function phaseFinalize(c){
     }
     const requestDir=fs.mkdtempSync('/tmp/lite-solo-cloudflare-empty-');
     try{
-      const output=cmd('node',['scripts/lite-solo-unit-request-drain-v1.mjs',
+      const output=cmd('node',['scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-unit-request-drain-v1.mjs',
         '--root',ROOT,'--campaign-id',c.directory.campaignId,
         '--requests-root',requestDir,'--mode','finalize'],{maxBuffer:16*1024*1024});
       const result=JSON.parse(output.trim().split('\n').at(-1));
@@ -327,7 +327,7 @@ function phaseFinalize(c){
     }finally{fs.rmSync(requestDir,{recursive:true,force:true});}
   }
   const env={...process.env};
-  const args=['scripts/lite-solo-phase-controller-v1.mjs','--controller-root',ROOT,'--campaign-id',c.directory.campaignId,
+  const args=['scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-phase-controller-v1.mjs','--controller-root',ROOT,'--campaign-id',c.directory.campaignId,
     '--campaign-path',c.campaignPath,'--campaign-directory-path',c.directoryPath,'--phase-sequence',String(phase),
     '--review-kind','phase','--audit-controller-ref','main'];
   const text=cmd('node',args,{env});

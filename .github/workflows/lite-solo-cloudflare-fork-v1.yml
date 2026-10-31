@@ -42,7 +42,7 @@ jobs:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash scripts/lite-solo-cloudflare-runtime-v1/scripts/select-audit-controller-token.sh
       - name: Node 22
         uses: actions/setup-node@v4
         with:
@@ -51,7 +51,7 @@ jobs:
         run: npm ci --force --ignore-scripts --no-audit --no-fund
       - name: Prepare canonical execution toolchain for evidence-bound phases
         if: ${{ inputs.operation == 'PHASE_FINALIZE' && (fromJSON(inputs.payload_json).phase == 5 || fromJSON(inputs.payload_json).phase == 6 || fromJSON(inputs.payload_json).phase == 9) }}
-        uses: ./.github/actions/setup-v7-toolchain
+        uses: ./scripts/lite-solo-cloudflare-runtime-v1/.github/actions/setup-v7-toolchain
       - name: Execute isolated request without legacy ingress
         id: fork-run
         shell: bash
