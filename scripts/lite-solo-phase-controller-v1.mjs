@@ -916,6 +916,40 @@ try{
     }
   }
 
+  // The parallel Phase-5 unit assembler faithfully restores immutable reviewer
+  // snapshots; those snapshots predate controller-owned execution request binding.
+  // Reconstitute ONLY original controller-prefilled target bindings, then require
+  // byte-for-byte equality with the FROZEN assignment's prefill digest. Newly
+  // appended candidate targets are resolved by the original controller below.
+  // Never refresh the assignment digest here or trust reviewer-supplied binding.
+  if(sequence===5&&process.env.LITE_SOLO_V4_FINALIZE==='1'&&
+     directory.executionModel==='PARALLEL_WORKER_UNITS'){
+    const originalKeys=new Set(form.automationInputs?.expectedPhase5TargetKeys??[]);
+    for(const target of form.actions?.['step-3']?.outputs?.targetDesigns??[]){
+      if(!target||typeof target!=='object'||!originalKeys.has(target.candidateKey))continue;
+      const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
+      if(!resolved)continue;
+      const binding=validateTargetExecutionRequestBindingV1({
+        controllerRoot:root,campaignPath,
+        target:{...target,executionRequestRef:resolved},
+        expectedCampaignId:directory.campaignId,
+        expectedSourceSha256:directory.sourceSha256
+      });
+      if(!String(binding.status).startsWith('PASS_'))continue;
+      target.executionRequestRef=resolved;
+      target.automationResolvedExecutionRequest=true;
+      target.requestBindingStatus=binding.status;
+      target.requestBindingEvidenceRef=binding.requestRef??resolved;
+      target.automationOwnedFields=[
+        'executionRequestRef','automationResolvedExecutionRequest',
+        'requestBindingStatus','requestBindingEvidenceRef'
+      ];
+    }
+    const reconstructedDigest=refreshControllerPrefillDigest(form);
+    if(reconstructedDigest!==assignment.controllerPrefillDigestSha256)
+      deficiencies.push('Phase 5 controller-owned request bindings cannot be reconstructed to match the frozen assignment prefill digest.');
+    else writeJson(repoFile(root,assignment.workFormPath),form);
+  }
   deficiencies.push(...validateWorkForm(schema,form));
   deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
   if(sequence===5){
