@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 // Audit-only; original imported BoostHub and Beefy strategy are unchanged.
 import {BoostHub} from "../../contracts/BoostHub.sol";
+import {BeefyVaultV7FixedV2} from "../../beefy/contracts/beefy/BeefyVaultV7FixedV2.sol";
 import {BaseAllToWantBoostHubV5} from "../../beefy/contracts/beefy/BaseAllToWantBoostHubV5.sol";
 import {StrategyConvexBoostHubStakingV5} from "../../beefy/contracts/beefy/StrategyConvexBoostHubStakingV5.sol";
 import "./BoostHubV9VyperP5Targets_v1.t.sol";
@@ -78,6 +79,39 @@ contract BoostV9StakingCallbackV1 {
             StrategyConvexBoostHubStakingV5(strategy).harvest(address(0xA11CE));
         }
         want.mint(msg.sender,rewardEach);
+    }
+}
+// Phase-5 audit-only dependency: partial positive-return strategy withdrawal.
+// The production vault source below is imported unchanged. An external strategy
+// can withhold some still-recoverable want without reverting, which is the exact
+// conditional mechanism challenged by P5-CAND-VAULT-PARTIAL-REDEMPTION-SHARE-EXTINCTION.
+contract BoostV9PartialRedemptionStrategyP5V2 {
+    BoostV9BehaviorTokenV1 internal immutable asset;
+    address public boundVault;
+    bool public shortPay;
+    bool public rejectWithdrawal;
+    constructor(address want_) {asset=BoostV9BehaviorTokenV1(want_);}
+    function vault() external view returns(address) {
+        // During the vault constructor's initial strategy.vault() check,
+        // the external caller is that still-being-constructed vault.
+        return boundVault==address(0)?msg.sender:boundVault;
+    }
+    function bindVault(address v) external {
+        require(boundVault==address(0) && v!=address(0),"ALREADY_BOUND");
+        boundVault=v;
+    }
+    function want() external view returns(address){return address(asset);}
+    function beforeDeposit() external pure {}
+    function deposit() external pure {}
+    function balanceOf() external view returns(uint256){return asset.balanceOf(address(this));}
+    function configure(bool partial,bool reverting) external {
+        shortPay=partial;rejectWithdrawal=reverting;
+    }
+    function withdraw(uint256 amount) external {
+        require(msg.sender==boundVault,"VAULT_ONLY");
+        require(!rejectWithdrawal,"WITHDRAW_REVERT");
+        uint256 sendAmount=shortPay?amount/5:amount;
+        require(asset.transfer(boundVault,sendAmount),"SHORT_STRATEGY_SEND");
     }
 }
 contract BoostHubV9HubStrategyP5TargetsV1 {
@@ -169,6 +203,68 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         vm.expectRevert();
         vm.prank(OUTSIDER);hub.withdraw(0,1e18);
         require(hub.poolDepositor(0)==address(this),"DEPOSITOR_AUTH_BROKEN");
+    }
+    // This exact-source vault oracle is absent from the original six P4 targets.
+    // It preserves the seventh, newly accepted Phase-5 material candidate.
+    function _partialVaultFixture() internal returns(
+        BeefyVaultV7FixedV2 vault_,
+        BoostV9PartialRedemptionStrategyP5V2 stub,
+        BoostV9BehaviorTokenV1 token
+    ){
+        token=new BoostV9BehaviorTokenV1();
+        stub=new BoostV9PartialRedemptionStrategyP5V2(address(token));
+        vault_=new BeefyVaultV7FixedV2(
+          IStrategyBoostHubV1(address(stub)), "P5 source vault", "p5SV", 0, address(0xA11C0)
+        );
+        stub.bindVault(address(vault_));
+    }
+    function testFuzz_P5T007_ActualVaultPartialRedemptionExtinguishesRecoverableShares(uint96 raw) public {
+        (BeefyVaultV7FixedV2 v,BoostV9PartialRedemptionStrategyP5V2 st,BoostV9BehaviorTokenV1 t)=_partialVaultFixture();
+        uint256 principal=uint256(raw)%1e19+100;
+        t.mint(address(this),principal);
+        t.approve(address(v),principal);
+        v.deposit(principal);
+        require(v.balanceOf(address(this))==principal && v.balance()==principal,"INVALID_SOURCE_DEPOSIT");
+        st.configure(true,false);
+        uint256 userBefore=t.balanceOf(address(this));
+        uint256 sharesBefore=v.totalSupply();
+        v.withdraw(sharesBefore);
+        uint256 paid=t.balanceOf(address(this))-userBefore;
+        require(paid==principal/5,"SHORT_RECEIPT_NOT_MODELED");
+        require(v.totalSupply()==0 && v.balanceOf(address(this))==0,"ALL_SHARES_NOT_BURNED");
+        require(v.balance()==principal-paid && t.balanceOf(address(st))==principal-paid,
+           "RECOVERABLE_PRINCIPAL_NOT_RETAINED");
+        // New depositor receives the orphaned principal on an otherwise ordinary withdrawal.
+        st.configure(false,false);
+        t.mint(OUTSIDER,1);
+        vm.prank(OUTSIDER);t.approve(address(v),1);
+        vm.prank(OUTSIDER);v.deposit(1);
+        require(v.totalSupply()==1,"FIRST_MINT_CONTROL");
+        uint256 outsiderBefore=t.balanceOf(OUTSIDER);
+        vm.prank(OUTSIDER);v.withdraw(1);
+        uint256 outsiderReceived=t.balanceOf(OUTSIDER)-outsiderBefore;
+        require(outsiderReceived==principal-paid+1,"ORPHAN_CLAIM_NOT_TRANSFERRED");
+        require(v.totalSupply()==0 && v.balance()==0,"FINAL_SOLVENCY_NOT_RECONCILED");
+    }
+    function testFuzz_P5T007_ControlFullStrategyPayment(uint96 raw) public {
+        (BeefyVaultV7FixedV2 v,BoostV9PartialRedemptionStrategyP5V2 st,BoostV9BehaviorTokenV1 t)=_partialVaultFixture();
+        uint256 principal=uint256(raw)%1e19+100;
+        t.mint(address(this),principal);t.approve(address(v),principal);v.deposit(principal);
+        st.configure(false,false);
+        v.withdraw(principal);
+        require(t.balanceOf(address(this))==principal,"NORMAL_REDEMPTION_NOT_FULL");
+        require(v.totalSupply()==0&&v.balance()==0,"NORMAL_EXIT_RESIDUAL");
+    }
+    function testFuzz_P5T007_ControlRevertingStrategyRollsBackShareBurn(uint96 raw) public {
+        (BeefyVaultV7FixedV2 v,BoostV9PartialRedemptionStrategyP5V2 st,BoostV9BehaviorTokenV1 t)=_partialVaultFixture();
+        uint256 principal=uint256(raw)%1e19+100;
+        t.mint(address(this),principal);t.approve(address(v),principal);v.deposit(principal);
+        st.configure(true,true);
+        vm.expectRevert();v.withdraw(principal);
+        require(v.balanceOf(address(this))==principal&&v.totalSupply()==principal,
+            "REVERT_BURNED_SHARES");
+        require(v.balance()==principal&&t.balanceOf(address(st))==principal,
+            "REVERT_ERASED_BACKING");
     }
     function _strategyFixture() internal returns(
         StrategyConvexBoostHubStakingV5 strategy,
