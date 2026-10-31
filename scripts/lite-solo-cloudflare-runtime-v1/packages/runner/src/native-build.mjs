@@ -495,6 +495,7 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
     && anchorText.includes('import "../beefy/contracts/beefy/StrategyConvexBoostHubStakingV5.sol";')
     && anchorText.includes('import "../beefy/contracts/beefy/BeefyVaultV7FixedV2.sol";');
   let paths;
+  let forgeBuildResult = null;
   if(isBoostHubAnchor){
     const originalSources=[];
     async function collectExactSources(dir){
@@ -523,6 +524,7 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
         '1500s','forge','build','--force','--build-info','--build-info-path',buildInfoDir,
         ...sourcePaths,'--skip','script','--skip','test','--skip',anchorName
       ],cwd:projectRoot});
+      forgeBuildResult = result;
       if(result?.exitCode!==0){
         const error=new Error('Exact-source isolated Foundry unit '+(index+1)+' failed: '+String(result?.stderr??result?.stdout??'').slice(-4000));
         error.code='FOUNDRY_NATIVE_COMPILATION_FAILED';throw error;
@@ -535,6 +537,7 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
     }
   }else{
     const result=await runCommand({command:'timeout',args:['1500s','forge','build','--force','--build-info','--skip','script','--skip','test'],cwd:projectRoot});
+    forgeBuildResult = result;
     if(result?.exitCode!==0){
       const error=new Error('Foundry native production compilation failed: '+String(result?.stderr??result?.stdout??'').slice(-4000));
       error.code='FOUNDRY_NATIVE_COMPILATION_FAILED';throw error;
@@ -550,8 +553,8 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
     throw new Error('Foundry native build produced no compiler build-info: ' + JSON.stringify({
       configuredOut: outPath,
       artifactEntries: visibleEntries.slice(0, 30),
-      forgeStdout: String(result?.stdout ?? '').slice(-1800),
-      forgeStderr: String(result?.stderr ?? '').slice(-1800)
+      forgeStdout: String(forgeBuildResult?.stdout ?? '').slice(-1800),
+      forgeStderr: String(forgeBuildResult?.stderr ?? '').slice(-1800)
     }));
   }
   const units=[],artifacts=[],sourceAsts={},inventory=new Set(),diagnostics=[];
