@@ -674,7 +674,7 @@ export async function executePhase5TargetsV1({
     try {
       result=await runProcessV1({
         command:process.execPath,
-        args:['packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace,'--compact-raw-result'],
+        args:['scripts/lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace,'--compact-raw-result'],
         cwd:process.cwd(),
         env:{...process.env,PHASE5_BOUNDARY_PROGRESS:'true',PHASE5_CONTROLLER_ROOT:path.resolve(controllerRoot)},
         timeoutMs:candidateTimeoutMs,
