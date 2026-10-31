@@ -1,0 +1,949 @@
+name: Lite-Solo Cloudflare audit controller execution v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_path:
+        description: Repository-relative deep-assurance-github-request-v2 JSON path in Audit-Controller
+        required: true
+        type: string
+      controller_ref:
+        description: Audit-Controller ref containing the request file
+        required: true
+        default: main
+        type: string
+      controller_writeback_ref:
+        description: Exact private Audit-Controller branch to receive automatic Lite execution evidence ingestion
+        required: false
+        default: ''
+        type: string
+      cloudflare_fork_execution:
+        description: Skip stale-main comparison only for source-bound Cloudflare fork execution; always use the existing qualified runner
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: v7-execution-${{ github.event.pull_request.number || inputs.request_path || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  execute-v7-request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Resolve canonical qualified Contract-Automation runner
+        id: qualified_runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_FORK_EXECUTION: ${{ inputs.cloudflare_fork_execution || false }}
+          FORK_CONTROLLER_REF: ${{ inputs.controller_ref }}
+          FORK_CONTROLLER_WRITEBACK_REF: ${{ inputs.controller_writeback_ref }}
+          FORK_REQUEST_PATH: ${{ inputs.request_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          status_json="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d)"
+          test "$(printf '%s' "$status_json" | jq -r '.status // empty')" = 'PASS'
+          qualified_commit="$(printf '%s' "$status_json" | jq -r '.qualifiedCommit // empty')"
+          qualification_run="$(printf '%s' "$status_json" | jq -r '.workflowRunId // empty')"
+          [[ "$qualified_commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$qualification_run" =~ ^[0-9]+$ ]]
+          # An Oct-2026 qualification of older code must not silently authorize
+          # a new fork/Anvil implementation. In particular, an obsolete runner
+          # cannot be trusted to apply today's pinned-block/hash repairs.
+          # Compare security-relevant runner inputs rather than raw HEAD:
+          # status bookkeeping and documentation commits must not make a newly
+          # qualified runner permanently impossible to use.
+          if [ "$CLOUDFLARE_FORK_EXECUTION" = "true" ]; then
+            # Isolate the exception to an explicit Cloudflare-routed, immutable
+            # campaign execution request. Primary PR/manual execution retains
+            # the original stale-main comparison below, byte for byte.
+            test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+            [[ "$FORK_CONTROLLER_REF" =~ ^[0-9a-f]{40}$ ]]
+            test "$FORK_CONTROLLER_WRITEBACK_REF" = "main"
+            case "$FORK_REQUEST_PATH" in
+              campaigns/*/controller/phase6-tests/*/*.json|campaigns/*/controller/phase8-revalidation/*/*.json|campaigns/*/controller/phase9-reruns/*/*.json) ;;
+              *) echo "::error::Cloudflare fork exception requires a campaign-local Phase 6/8/9 V7 request"; exit 1 ;;
+            esac
+            case "$FORK_REQUEST_PATH" in
+              *".."*|*'\'*) echo "::error::Unsafe Cloudflare fork request path"; exit 1 ;;
+            esac
+            echo "::notice::Cloudflare fork route bypasses only stale-main qualification comparison; runner remains pinned to recorded qualified commit $qualified_commit"
+          else
+            diff_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/$qualified_commit...main")" || {
+              echo "::error::V7_QUALIFIED_RUNNER_STALE: unable to compare qualified runner and current source."
+              exit 1
+            }
+            changed_count="$(printf '%s' "$diff_json" | jq -r '.files|length')"
+            if [ "$changed_count" -ge 300 ]; then
+              echo "::error::V7_QUALIFIED_RUNNER_STALE: comparison too large to prove safe; requalification required."
+              exit 1
+            fi
+            if printf '%s' "$diff_json" | jq -r '.files[]?.filename' | grep -Eq '^(scripts/lite-solo-cloudflare-runtime-v1/packages/runner/src/|scripts/lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/|scripts/lite-solo-cloudflare-runtime-v1/scripts/|\.github/workflows/audit-controller-execution\.yml$|\.github/actions/setup-v7-toolchain/)'; then
+              echo "::error::V7_QUALIFIED_RUNNER_STALE: execution code changed since qualified commit. Human-authorized runner requalification and exact evidence rebind required; no stale runner fallback."
+              exit 1
+            fi
+          fi
+          echo "commit=$qualified_commit" >> "$GITHUB_OUTPUT"
+          echo "run_id=$qualification_run" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout trusted Contract-Automation runner
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.qualified_runner.outputs.commit }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Bind checked-out qualified runner identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          observed="$(git rev-parse HEAD)"
+          test "$observed" = "${{ steps.qualified_runner.outputs.commit }}"
+          echo "V7_RUNNER_COMMIT=$observed" >> "$GITHUB_ENV"
+          echo "V7_RUNNER_QUALIFICATION_RUN=${{ steps.qualified_runner.outputs.run_id }}" >> "$GITHUB_ENV"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Checkout atomic request source for PR
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .request-source
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Select working Audit-Controller credential for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/lite-solo-cloudflare-runtime-v1/scripts/select-audit-controller-token.sh
+
+      - name: Checkout private Audit Controller for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CONTROLLER_REF: ${{ inputs.controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          gh api repos/curveyield3/Audit-Controller --silent
+          rm -rf .controller-request
+          gh auth setup-git
+          gh repo clone curveyield3/Audit-Controller .controller-request -- --filter=blob:none --no-checkout
+          cd .controller-request
+          git fetch --depth=1 origin "$CONTROLLER_REF"
+          git checkout --detach FETCH_HEAD
+
+      - name: Resolve and validate PR request
+        if: github.event_name == 'pull_request'
+        run: npm run v7 -- resolve --mode pr --source .request-source --output .v7-request/request.json
+
+      - name: Resolve and validate dispatched request
+        if: github.event_name == 'workflow_dispatch'
+        run: npm run v7 -- resolve --mode dispatch --source .controller-request --request-path "${{ inputs.request_path }}" --output .v7-request/request.json
+
+      - name: Select working Audit-Controller credential for controller operation
+        if: github.event_name == 'pull_request' && env.V7_REQUEST_KIND == 'controller-operation'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/lite-solo-cloudflare-runtime-v1/scripts/select-audit-controller-token.sh
+
+      - name: Select optional Audit-Controller credential for V7 execution
+        if: github.event_name == 'pull_request' && env.V7_REQUEST_KIND == 'v7-execution'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'false'
+        shell: bash
+        run: bash scripts/lite-solo-cloudflare-runtime-v1/scripts/select-audit-controller-token.sh
+
+      - name: Verify Phase-9 remediated source identity before any test
+        if: github.event_name == 'workflow_dispatch' && contains(inputs.request_path, '/controller/phase9-reruns/')
+        shell: bash
+        env:
+          V7_REQUEST_PATH: ${{ inputs.request_path }}
+          V7_CONTROLLER_REF: ${{ inputs.controller_ref }}
+        run: |
+          set -euo pipefail
+          case "$V7_REQUEST_PATH" in
+            campaigns/*/controller/phase9-reruns/*/*.json) ;;
+            *) exit 0 ;;
+          esac
+          request=.v7-request/request.json
+          test -s "$request"
+          archive_path="$(jq -er '.source.archivePath' "$request")"
+          expected_sha="$(jq -er '.source.archiveSha256' "$request")"
+          source_commit="$(jq -er '.source.commit' "$request")"
+          repository="$(jq -er '.source.repository' "$request")"
+          workspace="${V7_REQUEST_PATH%%/controller/phase9-reruns/*}"
+          test "$repository" = "curveyield3/Audit-Controller"
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
+          case "$archive_path" in
+            "$workspace"/remediation/source-snapshots/*.zip) ;;
+            *) echo "::error::Phase-9 test requires the campaign's immutable remediated source ZIP"; exit 1 ;;
+          esac
+          case "$archive_path" in
+            *".."*|*'\'*) echo "::error::Unsafe remediation archive path"; exit 1 ;;
+          esac
+          test -f ".controller-request/$archive_path" || {
+            echo "::error::Required Phase-9 remediated source ZIP does not exist"; exit 1;
+          }
+          observed_sha="$(sha256sum ".controller-request/$archive_path" | cut -d' ' -f1)"
+          test "$observed_sha" = "$expected_sha" || {
+            echo "::error::PHASE9_REMEDIATED_SOURCE_HASH_MISMATCH: tests prohibited"; exit 1;
+          }
+          {
+            echo "PHASE9_SOURCE_VERIFICATION_STATUS=PASS"
+            echo "PHASE9_SOURCE_VERIFICATION_SHA=$observed_sha"
+            echo "PHASE9_SOURCE_VERIFICATION_ARCHIVE=$archive_path"
+            echo "PHASE9_SOURCE_VERIFICATION_COMMIT=$source_commit"
+            echo "PHASE9_SOURCE_VERIFICATION_CONTROLLER_REF=$V7_CONTROLLER_REF"
+          } >> "$GITHUB_ENV"
+
+      # Existing V7 technical execution lane. Controller-operation requests skip this setup.
+      - name: Cache npm download cache
+        if: env.V7_REQUEST_KIND == 'v7-execution'
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: v7-npm-${{ runner.os }}-${{ hashFiles('package-lock.json', 'package.json') }}
+          restore-keys: |
+            v7-npm-${{ runner.os }}-
+
+      - name: Install trusted runner dependencies
+        if: env.V7_REQUEST_KIND == 'v7-execution'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s package-lock.json
+          npm ci --force
+          echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
+
+      - name: Install and verify canonical V7 toolchain
+        if: env.V7_REQUEST_KIND == 'v7-execution'
+        uses: ./scripts/lite-solo-cloudflare-runtime-v1/.github/actions/setup-v7-toolchain
+
+      - name: Verify canonical runner manifest
+        if: env.V7_REQUEST_KIND == 'v7-execution'
+        run: npm run v7:manifest -- --check
+
+      - name: Execute V7 request
+        if: env.V7_REQUEST_KIND == 'v7-execution'
+        env:
+          AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          # Same authenticated dRPC archive upstream already used by Lite Phase 0.
+          # Anvil starts locally; only its upstream fork transport uses this secret.
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+        run: npm run v7:execute -- --request .v7-request/request.json
+
+      - name: Checkout exact private controller for controller operation
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          gh api repos/curveyield3/Audit-Controller --silent
+          rm -rf .controller-operation
+          gh auth setup-git
+          gh repo clone curveyield3/Audit-Controller .controller-operation -- --filter=blob:none --no-checkout
+          cd .controller-operation
+          git fetch --depth=1 origin "$AUDIT_CONTROLLER_REF"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$AUDIT_CONTROLLER_REF"
+
+      - name: Reuse exact controller qualification when available
+        if: env.V7_REQUEST_KIND == 'controller-operation' && env.VERIFY_AUDIT_CONTROLLER == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CONTROLLER_VERIFICATION_REUSED=false" >> "$GITHUB_ENV"
+          status_path='process/V7_QUALIFICATION_STATUS.json'
+          [ -s "$status_path" ] || exit 0
+
+          run_id="$(node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const status=JSON.parse(fs.readFileSync('process/V7_QUALIFICATION_STATUS.json','utf8'));
+          const controller=status.controllerQualification;
+          const exact=process.env.AUDIT_CONTROLLER_REF;
+          const reusable=
+            status.status==='PASS' &&
+            /^[0-9a-f]{40}$/.test(status.qualifiedCommit ?? '') &&
+            /^[0-9]+$/.test(String(status.workflowRunId ?? '')) &&
+            controller?.status==='PASS' &&
+            controller.controllerCommit===exact &&
+            controller.controllerRef===exact &&
+            controller.runnerQualifiedCommit===status.qualifiedCommit &&
+            String(controller.runnerQualificationRunId)===String(status.workflowRunId) &&
+            /^[0-9]+$/.test(String(controller.qualificationRunId ?? ''));
+          if (reusable) process.stdout.write(String(controller.qualificationRunId));
+          NODE
+          )"
+
+          if [ -z "$run_id" ]; then
+            echo "No exact reusable controller qualification; inline verification remains required."
+            exit 0
+          fi
+
+          qualification_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+          node --input-type=module - "$qualification_run" <<'NODE'
+          const run=JSON.parse(process.argv[2]);
+          if(run.status!=='completed' || run.conclusion!=='success') throw new Error('controller qualification run is not successful terminal evidence');
+          if(run.name!=='V7 Execution Infrastructure Qualification') throw new Error('controller qualification run used an unexpected workflow');
+          if(run.event!=='workflow_dispatch') throw new Error('controller qualification run must be an explicit workflow_dispatch proof');
+          NODE
+
+          echo "CONTROLLER_VERIFICATION_REUSED=true" >> "$GITHUB_ENV"
+          echo "Reusing exact controller qualification run $run_id for $AUDIT_CONTROLLER_REF." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify exact controller code when requested
+        if: env.V7_REQUEST_KIND == 'controller-operation' && env.VERIFY_AUDIT_CONTROLLER == 'true' && env.CONTROLLER_VERIFICATION_REUSED != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .controller-operation
+          npm run verify
+
+      - name: Validate private controller operation request
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const pointer = JSON.parse(fs.readFileSync('.v7-request/request.json', 'utf8'));
+          const privatePath = process.env.AUDIT_CONTROLLER_REQUEST_PATH;
+          const fullPath = `.controller-operation/${privatePath}`;
+          const request = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+          if (request.schemaVersion !== 'audit-workload-reduction-request-v1') throw new Error('private operator request schemaVersion mismatch');
+          if (request.requestId !== pointer.requestId) throw new Error('private operator requestId does not match public pointer');
+          const operations = new Set(['PROJECT_CURRENT_STATE','BUILD_EXECUTION_REQUEST','INGEST_EXECUTION_EVIDENCE','BUILD_SUCCESSOR_HANDOFF','BUILD_FINAL_EVIDENCE_INDEX','BUILD_REPORT_SCAFFOLD']);
+          if (!operations.has(request.operation)) throw new Error('unsupported private operator operation');
+          const safePath = /^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.(?:\/|$)).+/;
+          for (const field of [
+            'campaignPath','campaignStatePath','phaseContractPath','phaseStartPath','completionReportPath',
+            'automationCompletionReportPath','executionTemplatePath','semanticInputPath','executionRequestPath',
+            'executionEvidencePath','qualificationPath','handoffInputPath','currentWorkPacketPath','skillPackagePath',
+            'evidenceIndexInputPath','reportScaffoldInputPath','writebackDirectory'
+          ]) {
+            if (request[field] !== undefined && (typeof request[field] !== 'string' || !safePath.test(request[field]))) {
+              throw new Error(`invalid ${field}`);
+            }
+          }
+          if (typeof request.writebackDirectory !== 'string' || !safePath.test(request.writebackDirectory)) throw new Error('writebackDirectory is required');
+          if (typeof request.writebackRef !== 'string' || !/^[A-Za-z0-9._\/-]+$/.test(request.writebackRef)) throw new Error('invalid writebackRef');
+          if (request.expectedSkillSha256 !== undefined && !/^[0-9a-f]{64}$/.test(request.expectedSkillSha256)) throw new Error('invalid expectedSkillSha256');
+          fs.appendFileSync(process.env.GITHUB_ENV, `OPERATOR_OPERATION=${request.operation}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_DIRECTORY=${request.writebackDirectory}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_REF=${request.writebackRef}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `SKILL_PACKAGE_PATH=${request.skillPackagePath ?? ''}\n`);
+          NODE
+
+      - name: Verify claimed Contract-Automation executions
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const request = JSON.parse(fs.readFileSync(`.controller-operation/${process.env.AUDIT_CONTROLLER_REQUEST_PATH}`, 'utf8'));
+          if (!request.automationCompletionReportPath) process.exit(0);
+          const report = JSON.parse(fs.readFileSync(`.controller-operation/${request.automationCompletionReportPath}`, 'utf8'));
+          const api = (endpoint) => JSON.parse(execFileSync('gh', ['api', endpoint], { encoding:'utf8', env:process.env }));
+          for (const execution of report.executions ?? []) {
+            if (execution.repository !== process.env.GITHUB_REPOSITORY) throw new Error(`unsupported execution repository ${execution.repository}`);
+            const run = api(`repos/${execution.repository}/actions/runs/${execution.runId}`);
+            if (run.status !== 'completed' || run.conclusion !== 'success') throw new Error(`run ${execution.runId} is not successful terminal evidence`);
+            if (execution.jobId) {
+              const job = api(`repos/${execution.repository}/actions/jobs/${execution.jobId}`);
+              if (job.run_id !== execution.runId || job.status !== 'completed' || job.conclusion !== 'success') {
+                throw new Error(`job ${execution.jobId} is not successful terminal evidence for run ${execution.runId}`);
+              }
+            }
+            if (execution.artifactId) {
+              const artifact = api(`repos/${execution.repository}/actions/artifacts/${execution.artifactId}`);
+              if (artifact.expired) throw new Error(`artifact ${execution.artifactId} is expired`);
+              if (artifact.workflow_run?.id && artifact.workflow_run.id !== execution.runId) throw new Error(`artifact ${execution.artifactId} run mismatch`);
+              if (execution.artifactDigest && artifact.digest) {
+                const observed = String(artifact.digest).replace(/^sha256:/,'');
+                if (observed !== execution.artifactDigest) throw new Error(`artifact ${execution.artifactId} digest mismatch`);
+              }
+            }
+          }
+          if (report.qualification) {
+            const run = api(`repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${report.qualification.workflowRunId}`);
+            if (run.status !== 'completed' || run.conclusion !== 'success') throw new Error('qualification run is not successful terminal evidence');
+            if (run.head_sha !== report.qualification.qualifiedCommit) throw new Error('qualification commit mismatch');
+          }
+          NODE
+
+      - name: Resolve exact admitted skill for controller operation
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved_skill_path="${SKILL_PACKAGE_PATH:-}"
+          resolved_skill_sha=""
+
+          if [ -z "$resolved_skill_path" ]; then
+            resolution="$(node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          const controllerRoot='.controller-operation';
+          const request=JSON.parse(fs.readFileSync(path.join(controllerRoot, process.env.AUDIT_CONTROLLER_REQUEST_PATH),'utf8'));
+          if(request.operation!=='PROJECT_CURRENT_STATE' || typeof request.campaignPath!=='string' || !request.campaignPath){
+            process.exit(0);
+          }
+          const controllerDir=path.join(controllerRoot,request.campaignPath,'controller');
+          const states=fs.existsSync(controllerDir)
+            ? fs.readdirSync(controllerDir).filter((n)=>/^CAMPAIGN_STATE_.*\.json$/i.test(n))
+            : [];
+          states.sort((a,b)=>Number(a.match(/_v(\d+)/i)?.[1]??-1)-Number(b.match(/_v(\d+)/i)?.[1]??-1)||a.localeCompare(b));
+          const state=states.length?JSON.parse(fs.readFileSync(path.join(controllerDir,states.at(-1)),'utf8')):{};
+          const bound=state?.skillAuthority?.current??null;
+          let skillPath='', expectedSha='';
+          if(bound?.campaignPath){
+            skillPath=bound.campaignPath.startsWith('campaigns/')
+              ? bound.campaignPath
+              : request.campaignPath.replace(/\/+$/,'')+'/'+bound.campaignPath;
+            expectedSha=bound.sha256??'';
+          } else {
+            const pointerPath=path.join(controllerRoot,'audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json');
+            if(fs.existsSync(pointerPath)){
+              const pointer=JSON.parse(fs.readFileSync(pointerPath,'utf8'));
+              if(pointer.schemaVersion==='audit-v7-lite-primary-skill-authority-v1' && pointer.status==='ACTIVE'){
+                skillPath=pointer.packagePath??'';
+                expectedSha=pointer.sha256??'';
+              }
+            }
+          }
+          if(skillPath) process.stdout.write(JSON.stringify({skillPath,expectedSha}));
+          NODE
+            )"
+            if [ -n "$resolution" ]; then
+              resolved_skill_path="$(printf '%s' "$resolution" | jq -r '.skillPath // empty')"
+              resolved_skill_sha="$(printf '%s' "$resolution" | jq -r '.expectedSha // empty')"
+            fi
+          fi
+
+          if [ -z "$resolved_skill_path" ]; then
+            echo "SKILL_ROOT=.controller-operation" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          skill_target=".controller-operation/$resolved_skill_path"
+          test -e "$skill_target"
+          request_expected_sha="$(node -e "const r=require('./.controller-operation/' + process.env.AUDIT_CONTROLLER_REQUEST_PATH); process.stdout.write(r.expectedSkillSha256 || '')")"
+          expected_skill_sha="$request_expected_sha"
+          if [ -z "$expected_skill_sha" ]; then expected_skill_sha="$resolved_skill_sha"; fi
+          echo "SKILL_PACKAGE_PATH=$resolved_skill_path" >> "$GITHUB_ENV"
+
+          if [ -d "$skill_target" ]; then
+            [ -z "$expected_skill_sha" ] || { echo "::error::Stable authority-folder routing must not carry a package SHA expectation."; exit 1; }
+            mapfile -t skill_homes < <(find "$skill_target" -mindepth 2 -maxdepth 2 -type f -name SKILL.md | sort)
+            [ "${#skill_homes[@]}" -eq 1 ] || { echo "::error::Stable authority folder must contain exactly one unpacked package directory with root SKILL.md."; exit 1; }
+            skill_home="${skill_homes[0]}"
+            echo "SKILL_ROOT=$(dirname "$skill_home")" >> "$GITHUB_ENV"
+          else
+            if [ -n "$expected_skill_sha" ]; then
+              [[ "$expected_skill_sha" =~ ^[0-9a-f]{64}$ ]]
+              observed_skill_sha="$(sha256sum "$skill_target" | awk '{print $1}')"
+              test "$observed_skill_sha" = "$expected_skill_sha"
+            fi
+            rm -rf .audit-skill
+            mkdir -p .audit-skill
+            unzip -q "$skill_target" -d .audit-skill
+            skill_home="$(find .audit-skill -type f -name SKILL.md -not -path '*/optional-modes/lite-pathway/SKILL.md' | head -n1)"
+            test -n "$skill_home"
+            echo "SKILL_ROOT=$(dirname "$skill_home")" >> "$GITHUB_ENV"
+          fi
+
+      - name: Execute deterministic controller operation
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .operator-output
+          mkdir -p .operator-output
+          node .controller-operation/packages/controller-core/src/audit-operator-cli-v1.mjs \
+            --request ".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH" \
+            --controller-root ".controller-operation" \
+            --skill-root "$SKILL_ROOT" \
+            --output-dir ".operator-output" \
+            > /tmp/audit-operator-summary.json
+          test -f .operator-output/RESULT_v1.json
+
+      - name: Write controller-operation result back to exact private branch
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          gh auth setup-git
+          cd .controller-operation
+          git fetch origin "$WRITEBACK_REF"
+          remote_head="$(git rev-parse "origin/$WRITEBACK_REF")"
+          if [ "$remote_head" != "$AUDIT_CONTROLLER_REF" ]; then
+            echo "Writeback head changed: expected $AUDIT_CONTROLLER_REF observed $remote_head" >&2
+            exit 1
+          fi
+          git checkout -B "$WRITEBACK_REF" "origin/$WRITEBACK_REF"
+          mkdir -p "$WRITEBACK_DIRECTORY"
+          cp ../.operator-output/* "$WRITEBACK_DIRECTORY"/
+          git add "$WRITEBACK_DIRECTORY"
+          if ! git diff --cached --quiet; then
+            git config user.name 'CurveYield Audit Controller Automation'
+            git config user.email 'audit-controller-automation@users.noreply.github.com'
+            git commit -m "chore(audit): apply deterministic operator result $V7_REQUEST_ID"
+            git push origin "HEAD:$WRITEBACK_REF"
+          fi
+          writeback_commit="$(git rev-parse HEAD)"
+          echo "CONTROLLER_WRITEBACK_COMMIT=$writeback_commit" >> "$GITHUB_ENV"
+
+      - name: Dispatch generated V7 execution request
+        if: env.V7_REQUEST_KIND == 'controller-operation' && env.OPERATOR_OPERATION == 'BUILD_EXECUTION_REQUEST'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CONTROLLER_WRITEBACK_COMMIT:-}"
+          request_path="${WRITEBACK_DIRECTORY%/}/EXECUTION_REQUEST_v1.json"
+          test -f ".controller-operation/$request_path"
+          test "$(jq -r '.schemaVersion // empty' ".controller-operation/$request_path")" = 'deep-assurance-github-request-v2'
+          gh workflow run lite-solo-cloudflare-audit-controller-execution-v1.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f request_path="$request_path" \
+            -f controller_ref="$CONTROLLER_WRITEBACK_COMMIT" \
+            -f controller_writeback_ref="$WRITEBACK_REF"
+          {
+            echo "automatic_execution_dispatch=true"
+            echo "execution_request_path=$request_path"
+            echo "controller_ref=$CONTROLLER_WRITEBACK_COMMIT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record terminal V7 execution observer receipt
+        if: always() && env.V7_REQUEST_KIND == 'v7-execution'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir=".audit-evidence/v7-execution/${V7_REQUEST_ID}"
+          mkdir -p "$evidence_dir"
+          raw_result="$evidence_dir/raw-result.json"
+          job_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | select(.name=="execute-v7-request") | .id' | head -n1)"
+          artifact_name="${V7_ARTIFACT_NAME:-v7-execution-unresolved}"
+
+          if [ -s "$raw_result" ]; then
+            request_digest="$(jq -r '.requestDigest // empty' "$raw_result")"
+            execution_status="$(jq -r '.status // "unknown"' "$raw_result")"
+            disposition="$(jq -r '.disposition // "UNCLASSIFIED"' "$raw_result")"
+            blocking="$(jq -r '.blocking // false' "$raw_result")"
+            owner="$(jq -r '.owner // "UNASSIGNED"' "$raw_result")"
+            next_action="$(jq -r '.nextAction // "REVIEW_TERMINAL_EVIDENCE"' "$raw_result")"
+            retry_from="$(jq -r '.retryFrom // empty' "$raw_result")"
+            recovery_command="$(jq -r '.recoveryCommand // empty' "$raw_result")"
+
+            if [ "$execution_status" = 'completed' ]; then
+              route='EVIDENCE_INGESTION'
+            elif [ "$owner" = 'RUNNER_MAINTAINER' ]; then
+              route='RUNNER_REPAIR_REQUIRED'
+            elif [ "$next_action" = 'CREATE_OR_REPAIR_PHASE6_HARNESS' ]; then
+              route='SEMANTIC_HARNESS_REPAIR_REQUIRED'
+            else
+              route='TYPED_FAILURE_REVIEW_REQUIRED'
+            fi
+          else
+            request_digest="${V7_REQUEST_DIGEST:-}"
+            execution_status='evidence_missing'
+            disposition='EVIDENCE_MISSING'
+            blocking='true'
+            owner='RUNNER_MAINTAINER'
+            next_action='RECOVER_EXECUTION_EVIDENCE'
+            retry_from="${V7_PHASE_ID:-}"
+            recovery_command=''
+            route='EVIDENCE_RECOVERY_REQUIRED'
+          fi
+
+          payload="$(jq -n \
+            --arg request_id "${V7_REQUEST_ID:-}" \
+            --arg request_digest "$request_digest" \
+            --arg phase_id "${V7_PHASE_ID:-}" \
+            --argjson workflow_run_id "$GITHUB_RUN_ID" \
+            --arg job_id "$job_id" \
+            --arg artifact_name "$artifact_name" \
+            --arg execution_status "$execution_status" \
+            --arg disposition "$disposition" \
+            --arg blocking "$blocking" \
+            --arg owner "$owner" \
+            --arg next_action "$next_action" \
+            --arg retry_from "$retry_from" \
+            --arg recovery_command "$recovery_command" \
+            --arg route "$route" \
+            --arg source_status "${PHASE9_SOURCE_VERIFICATION_STATUS:-NOT_REQUIRED}" \
+            --arg source_sha "${PHASE9_SOURCE_VERIFICATION_SHA:-}" \
+            --arg source_archive "${PHASE9_SOURCE_VERIFICATION_ARCHIVE:-}" \
+            --arg source_commit "${PHASE9_SOURCE_VERIFICATION_COMMIT:-}" \
+            --arg source_controller_ref "${PHASE9_SOURCE_VERIFICATION_CONTROLLER_REF:-}" \
+            '{
+              schemaVersion:"curveyield-lite-execution-observer-receipt-v1",
+              requestId:$request_id,
+              requestDigest:$request_digest,
+              phaseId:$phase_id,
+              workflowRunId:$workflow_run_id,
+              jobId:(if $job_id=="" then null else ($job_id|tonumber) end),
+              artifactName:$artifact_name,
+              terminal:{
+                status:$execution_status,
+                disposition:$disposition,
+                blocking:($blocking=="true"),
+                owner:$owner,
+                nextAction:$next_action,
+                retryFrom:(if $retry_from=="" then null else $retry_from end),
+                recoveryCommand:(if $recovery_command=="" then null else $recovery_command end)
+              },
+              route:$route,
+              sourceVerification:(if $source_status=="PASS" then {
+                status:"PASS",preExecution:true,archiveSha256:$source_sha,archivePath:$source_archive,
+                sourceCommit:$source_commit,controllerRef:$source_controller_ref
+              } else null end),
+              semanticReviewerPollingRequired:false
+            }')"
+          receipt_digest="$(printf '%s' "$payload" | jq -S -c . | sha256sum | awk '{print $1}')"
+          printf '%s' "$payload" | jq --arg digest "$receipt_digest" '. + {receiptDigest:$digest}' > "$evidence_dir/EXECUTION_OBSERVER_RECEIPT_v1.json"
+
+          echo "EXECUTION_OBSERVER_ROUTE=$route" >> "$GITHUB_ENV"
+          echo "EXECUTION_OBSERVER_RECEIPT=$evidence_dir/EXECUTION_OBSERVER_RECEIPT_v1.json" >> "$GITHUB_ENV"
+          {
+            echo "execution_observer_route=$route"
+            echo "execution_disposition=$disposition"
+            echo "execution_owner=$owner"
+            echo "execution_next_action=$next_action"
+            echo "semantic_reviewer_polling_required=false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload request-addressable V7 evidence
+        id: execution_evidence
+        if: always() && env.V7_REQUEST_KIND == 'v7-execution'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.V7_ARTIFACT_NAME || 'v7-execution-unresolved' }}
+          path: .audit-evidence/v7-execution
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Prepare automatic Lite evidence ingestion
+        id: auto_ingestion
+        if: always() && env.V7_REQUEST_KIND == 'v7-execution' && env.EXECUTION_OBSERVER_ROUTE == 'EVIDENCE_INGESTION' && inputs.controller_writeback_ref != ''
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CONTROLLER_SOURCE_REF: ${{ inputs.controller_ref }}
+          CONTROLLER_WRITEBACK_REF: ${{ inputs.controller_writeback_ref }}
+          EXECUTION_REQUEST_PATH: ${{ inputs.request_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          test -n "${CONTROLLER_SOURCE_REF:-}"
+          test -n "${CONTROLLER_WRITEBACK_REF:-}"
+          test -n "${EXECUTION_REQUEST_PATH:-}"
+          test -n "${V7_RUNNER_COMMIT:-}"
+          campaign_id="$(jq -r '.campaignId // empty' .v7-request/request.json)"
+          phase_id="$(jq -r '.phaseId // empty' .v7-request/request.json)"
+          test -n "$campaign_id"
+          test -n "$phase_id"
+
+          safe_request="$(printf '%s' "$V7_REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          ingest_id="ingest-$safe_request"
+          case "$EXECUTION_REQUEST_PATH" in
+            campaigns/*/controller/*) ;;
+            *) echo "Execution request path is not inside an admitted campaign workspace: $EXECUTION_REQUEST_PATH" >&2; exit 1 ;;
+          esac
+          campaign_root="${EXECUTION_REQUEST_PATH%%/controller/*}"
+          test -n "$campaign_root"
+          evidence_dir="$campaign_root/controller/automation/$safe_request"
+          evidence_rel="$evidence_dir/EXECUTION_EVIDENCE_v1.json"
+          observer_rel="$evidence_dir/EXECUTION_OBSERVER_RECEIPT_v1.json"
+          qualification_rel="$evidence_dir/V7_QUALIFICATION_STATUS.json"
+          operator_rel=".deep-assurance/operator/requests/$ingest_id.json"
+          pointer_rel="$campaign_root/requests/$ingest_id.json"
+          receipt_dir="$evidence_dir/ingestion"
+          pointer_branch="automation/ingest-pointer-$safe_request"
+
+          test -s ".audit-evidence/v7-execution/$V7_REQUEST_ID/controller-evidence.json"
+          test -s ".audit-evidence/v7-execution/$V7_REQUEST_ID/EXECUTION_OBSERVER_RECEIPT_v1.json"
+
+          gh auth setup-git
+          cd .controller-request
+          git fetch origin "$CONTROLLER_WRITEBACK_REF"
+          remote_head="$(git rev-parse "origin/$CONTROLLER_WRITEBACK_REF")"
+          test "$remote_head" = "$CONTROLLER_SOURCE_REF"
+          git checkout -B "$CONTROLLER_WRITEBACK_REF" "origin/$CONTROLLER_WRITEBACK_REF"
+          test -f "$EXECUTION_REQUEST_PATH"
+          cmp "../.v7-request/request.json" "$EXECUTION_REQUEST_PATH"
+
+          mkdir -p "$evidence_dir" "$(dirname "$operator_rel")"
+          cp "../.audit-evidence/v7-execution/$V7_REQUEST_ID/controller-evidence.json" "$evidence_rel"
+          node "$GITHUB_WORKSPACE/scripts/lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/adr-assertion-ledger-v1.mjs" --evidence "$evidence_rel" --out "$evidence_dir/ASSERTION_LEDGER_v1.json" || true
+          cp "../.audit-evidence/v7-execution/$V7_REQUEST_ID/EXECUTION_OBSERVER_RECEIPT_v1.json" "$observer_rel"
+          gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d > "$qualification_rel"
+          test "$(jq -r '.status // empty' "$qualification_rel")" = 'PASS'
+          test "$(jq -r '.qualifiedCommit // empty' "$qualification_rel")" = "$V7_RUNNER_COMMIT"
+
+          jq -n \
+            --arg request_id "$ingest_id" \
+            --arg campaign_id "$campaign_id" \
+            --arg phase_id "$phase_id" \
+            --arg execution_request "$EXECUTION_REQUEST_PATH" \
+            --arg execution_evidence "$evidence_rel" \
+            --arg qualification "$qualification_rel" \
+            --arg writeback_directory "$receipt_dir" \
+            --arg writeback_ref "$CONTROLLER_WRITEBACK_REF" \
+            '{
+              schemaVersion:"audit-workload-reduction-request-v1",
+              requestId:$request_id,
+              operation:"INGEST_EXECUTION_EVIDENCE",
+              campaignId:$campaign_id,
+              phaseId:$phase_id,
+              assuranceMode:"LITE",
+              executionRequestPath:$execution_request,
+              executionEvidencePath:$execution_evidence,
+              qualificationPath:$qualification,
+              writebackDirectory:$writeback_directory,
+              writebackRef:$writeback_ref
+            }' > "$operator_rel"
+
+          git add "$evidence_rel" "$evidence_dir/ASSERTION_LEDGER_v1.json" "$observer_rel" "$qualification_rel" "$operator_rel"
+          git config user.name 'CurveYield Audit Controller Automation'
+          git config user.email 'audit-controller-automation@users.noreply.github.com'
+          git commit -m "chore(audit): stage execution evidence for ingestion $V7_REQUEST_ID"
+          git push origin "HEAD:$CONTROLLER_WRITEBACK_REF"
+          payload_commit="$(git rev-parse HEAD)"
+
+          git checkout -B "$pointer_branch" "$payload_commit"
+          mkdir -p "$(dirname "$pointer_rel")"
+          jq -n \
+            --arg request_id "$ingest_id" \
+            --arg commit "$payload_commit" \
+            --arg request_path "$operator_rel" \
+            '{
+              schemaVersion:"audit-controller-operation-pointer-v1",
+              processId:"audit-v7-independent-review",
+              requestId:$request_id,
+              controller:{
+                repository:"curveyield3/Audit-Controller",
+                commit:$commit,
+                requestPath:$request_path
+              },
+              verifyController:true
+            }' > "$pointer_rel"
+          git add "$pointer_rel"
+          git commit -m "chore(audit): dispatch evidence ingestion $V7_REQUEST_ID"
+          git push origin "HEAD:$pointer_branch"
+          pointer_commit="$(git rev-parse HEAD)"
+
+          cd ..
+          gh workflow run lite-solo-cloudflare-audit-controller-execution-v1.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f request_path="$pointer_rel" \
+            -f controller_ref="$pointer_commit"
+
+          echo "AUTO_INGESTION_DISPATCHED=true" >> "$GITHUB_ENV"
+          echo "AUTO_INGESTION_POINTER_REF=$pointer_commit" >> "$GITHUB_ENV"
+          {
+            echo "automatic_evidence_ingestion=true"
+            echo "ingestion_pointer_ref=$pointer_commit"
+            echo "ingestion_writeback_ref=$CONTROLLER_WRITEBACK_REF"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch registered browser-agent wake
+        if: always() && (env.V7_REQUEST_KIND == 'v7-execution' || success())
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "${OPERATOR_OPERATION:-}" = 'BUILD_EXECUTION_REQUEST' ]; then
+            echo 'Generated execution request was dispatched automatically; browser wake waits for terminal technical execution.'
+            exit 0
+          fi
+
+          if [ "${V7_REQUEST_KIND:-}" = 'v7-execution' ] && [ "${EXECUTION_OBSERVER_ROUTE:-}" = 'EVIDENCE_INGESTION' ] && [ -n "${{ inputs.controller_writeback_ref }}" ]; then
+            if [ "${AUTO_INGESTION_DISPATCHED:-}" = 'true' ]; then
+              echo 'Terminal evidence ingestion was dispatched automatically; semantic reviewer wake waits for the durable ingestion receipt.'
+              exit 0
+            fi
+          fi
+
+          campaign_path=""
+          campaign_name=""
+          campaign_controller_ref=""
+          campaign_mode=""
+          if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ]; then
+            private_request=".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH"
+            campaign_id="$(jq -r '.campaignId // empty' "$private_request")"
+            request_phase_id="$(jq -r '.phaseId // empty' "$private_request")"
+            campaign_path="$(jq -r '.campaignPath // empty' "$private_request")"
+            handoff_input="$(jq -r '.handoffInputPath // empty' "$private_request")"
+            if [ -z "$campaign_path" ] && [[ "$handoff_input" == campaigns/*/handoffs/* ]]; then
+              campaign_path="${handoff_input%/handoffs/*}"
+            fi
+            if [ -n "$campaign_path" ] && [ -d ".controller-operation/$campaign_path/controller" ]; then
+              state_file="$(find ".controller-operation/$campaign_path/controller" -maxdepth 1 -type f -name 'CAMPAIGN_STATE_v*.json' -printf '%f\n' | sort -V | tail -n1)"
+              if [ -n "$state_file" ]; then
+                state_path=".controller-operation/$campaign_path/controller/$state_file"
+                [ -n "$campaign_id" ] || campaign_id="$(jq -r '.campaignId // empty' "$state_path")"
+                campaign_name="$(jq -r '.auditName // .title // .projectSlug // .campaignId // empty' "$state_path")"
+                campaign_controller_ref="$(jq -r '.controller.branch // empty' "$state_path")"
+                campaign_mode="$(jq -r '.assuranceMode.mode // .mode // empty' "$state_path")"
+              fi
+            fi
+            if [ -z "$campaign_id" ] && [ -n "$handoff_input" ] && [ -f ".controller-operation/$handoff_input" ]; then
+              campaign_id="$(jq -r '.campaign.campaignId // empty' ".controller-operation/$handoff_input")"
+            fi
+          else
+            campaign_id="$(jq -r '.campaignId // empty' .v7-request/request.json)"
+            request_phase_id="$(jq -r '.phaseId // empty' .v7-request/request.json)"
+          fi
+          if [ -z "$campaign_id" ]; then
+            echo 'No campaign identity can be resolved for this request; browser-agent wake is not applicable.'
+            exit 0
+          fi
+
+          safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
+          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          if [ ! -f "$registration" ]; then
+            if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "$campaign_mode" = "LITE" ] && [ -n "$campaign_path" ] && [ -n "$campaign_controller_ref" ]; then
+              echo "Lite campaign $campaign_id has no browser registration; dispatching automatic registration/watchdog repair."
+              gh workflow run lite-solo-cloudflare-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+                -f campaign_id="$campaign_id" \
+                -f campaign_name="$campaign_name" \
+                -f campaign_path="$campaign_path" \
+                -f audit_controller_ref="$campaign_controller_ref"
+              echo "Browser automation registration repair dispatched for $campaign_id."
+              exit 0
+            fi
+            echo "::warning::No browser-agent wake registration for $campaign_id and no admitted Lite self-repair context was available."
+            exit 0
+          fi
+
+          test "$(jq -r '.schemaVersion // empty' "$registration")" = 'curveyield-browser-agent-wake-registration-v1'
+          test "$(jq -r '.campaignId // empty' "$registration")" = "$campaign_id"
+          # Technical callbacks never create reviewers and never send another
+          # tailored instruction packet. Preserve the existing terminal-observer /
+          # evidence-ingestion gates, then poke the bound reviewer with exactly
+          # GET BACK TO WORK.
+          mode="resume_existing"
+          chat_url="$(jq -r '.activeChat.url // .chatUrl // empty' "$registration")"
+          if [[ ! "$chat_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ && ! "$chat_url" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]]; then
+            gate_mode_probe="$(jq -r '.watchdog.gate.mode // empty' "$registration")"
+            bootstrap_status="$(jq -r '.bootstrapMonitor.status // empty' "$registration")"
+            if [ "$gate_mode_probe" = "LITE" ] && { [ "$bootstrap_status" = "ACTIVE" ] || [ "$bootstrap_status" = "NOT_APPLICABLE" ]; }; then
+              echo "Lite campaign monitor is registered without an active chat; its watchdog owns canonical-state transition/successor launch."
+              exit 0
+            fi
+            echo "::warning::No active reviewer chat URL for $campaign_id; technical callback will not create a replacement chat."
+            exit 0
+          fi
+          registered_phase="$(jq -r '.activeAssignment.phaseId // .watchdog.gate.expectedPhaseId // empty' "$registration")"
+          registered_milestone="$(jq -r '.activeAssignment.milestoneId // .watchdog.gate.expectedMilestoneId // empty' "$registration")"
+          semantic_phase_id="$registered_phase"
+          if [[ ! "$semantic_phase_id" =~ ^phase-[0-9]+$ ]]; then
+            semantic_phase_id="$request_phase_id"
+          fi
+          phase_id="$semantic_phase_id"
+
+          if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "${OPERATOR_OPERATION:-}" = 'INGEST_EXECUTION_EVIDENCE' ]; then
+            receipt='.operator-output/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json'
+            test -s "$receipt"
+            security_disposition="$(jq -r '.securityDisposition' "$receipt")"
+            finding_promotion="$(jq -r '.findingPromotion' "$receipt")"
+            ingestion_digest="$(jq -r '.ingestionDigest' "$receipt")"
+            test -n "$security_disposition"
+            test -n "$finding_promotion"
+            test -n "$ingestion_digest"
+            echo "EVIDENCE_INGESTED: durable ingestion receipt verified before reviewer poke."
+          elif [ "${V7_REQUEST_KIND:-}" = 'v7-execution' ]; then
+            observer="${EXECUTION_OBSERVER_RECEIPT:-.audit-evidence/v7-execution/${V7_REQUEST_ID}/EXECUTION_OBSERVER_RECEIPT_v1.json}"
+            test -s "$observer"
+            route="$(jq -r '.route' "$observer")"
+            disposition="$(jq -r '.terminal.disposition' "$observer")"
+            owner="$(jq -r '.terminal.owner' "$observer")"
+            next_action="$(jq -r '.terminal.nextAction' "$observer")"
+            test -n "$route"
+            test -n "$disposition"
+            test -n "$owner"
+            test -n "$next_action"
+            if [ "$route" = 'EVIDENCE_INGESTION' ] && [ -n "${{ inputs.controller_writeback_ref }}" ] && [ "${AUTO_INGESTION_DISPATCHED:-}" != 'true' ]; then
+              echo "::warning::Terminal observer requires evidence ingestion, but automatic ingestion was not dispatched; do not wake semantic reviewer yet."
+              exit 0
+            fi
+            echo "Terminal execution observer verified: route=$route disposition=$disposition next_action=$next_action"
+          fi
+
+          wake_message='GET BACK TO WORK'
+          watchdog_enabled=false
+          watchdog_message='GET BACK TO WORK'
+          gate_mode="$(jq -r '.watchdog.gate.mode // "FULL_V26"' "$registration")"
+          gate_repo="$(jq -r '.watchdog.gate.repository // "curveyield3/Audit-Controller"' "$registration")"
+          gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$registration")"
+          gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' "$registration")"
+          gate_expected_phase="$semantic_phase_id"
+          gate_expected_milestone="$registered_milestone"
+          gate_pointer_path="$(jq -r '.watchdog.gate.activePointerPath // empty' "$registration")"
+          gate_stop_states="$(jq -r '(.watchdog.gate.stopStates // ["WAITING_FOR_HUMAN_RESPONSE","WAITING_FOR_SUCCESSOR_AGENT","CLOSED","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
+          gate_stop_campaign_statuses="$(jq -r '(.watchdog.gate.stopCampaignStatuses // ["COMPLETE","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
+
+          wake_id="$campaign_id-$registered_milestone-technical-callback"
+          wake_b64="$(printf '%s' "$wake_message" | base64 -w0)"
+          watchdog_b64="$(printf '%s' "$watchdog_message" | base64 -w0)"
+
+          gh workflow run lite-solo-cloudflare-browser-agent-wake-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$wake_id" \
+            -f campaign_id="$campaign_id" \
+            -f phase_id="$phase_id" \
+            -f mode="$mode" \
+            -f chat_url="$chat_url" \
+            -f wake_message_b64="$wake_b64" \
+            -f watchdog_enabled="$watchdog_enabled" \
+            -f watchdog_message_b64="$watchdog_b64" \
+            -f gate_mode="$gate_mode" \
+            -f gate_repository="$gate_repo" \
+            -f gate_ref="$gate_ref" \
+            -f gate_state_path="$gate_state_path" \
+            -f gate_expected_phase_id="$gate_expected_phase" \
+            -f gate_expected_milestone_id="$gate_expected_milestone" \
+            -f gate_active_pointer_path="$gate_pointer_path" \
+            -f gate_stop_states_csv="$gate_stop_states" \
+            -f gate_stop_campaign_statuses_csv="$gate_stop_campaign_statuses"

@@ -1,0 +1,228 @@
+name: Lite-Solo Cloudflare lite v7 execution dispatch v1 v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/agent-upload/lite-solo-cloudflare-v7-execution/*.json'
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        required: true
+        type: string
+      request_path:
+        required: true
+        type: string
+      controller_ref:
+        description: Exact 40-hex Audit-Controller commit containing the V7 request
+        required: true
+        type: string
+      controller_writeback_ref:
+        description: Audit-Controller branch that receives durable execution evidence ingestion
+        required: true
+        type: string
+      attempt:
+        required: false
+        default: 1
+        type: number
+      cloudflare_fork_execution:
+        description: Explicit Cloudflare fork dispatch without stale-main qualification comparison
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: lite-v7-execution-${{ inputs.request_path || github.event.head_commit.added[0] || github.event.head_commit.modified[0] || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve execution dispatch request
+        id: request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          DISPATCH_REQUEST_PATH: ${{ inputs.request_path }}
+          DISPATCH_CONTROLLER_REF: ${{ inputs.controller_ref }}
+          DISPATCH_WRITEBACK_REF: ${{ inputs.controller_writeback_ref }}
+          DISPATCH_ATTEMPT: ${{ inputs.attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            campaign_id="$DISPATCH_CAMPAIGN_ID"
+            request_path="$DISPATCH_REQUEST_PATH"
+            controller_ref="$DISPATCH_CONTROLLER_REF"
+            writeback_ref="$DISPATCH_WRITEBACK_REF"
+            attempt="$DISPATCH_ATTEMPT"
+          else
+            mapfile -t changed < <(
+              gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status != "removed") | .filename' |
+              grep -E '^process/agent-upload/lite-solo-cloudflare-v7-execution/[^/]+\.json$' || true
+            )
+            [ "${#changed[@]}" -eq 1 ] || { echo "::error::Expected exactly one changed Lite V7 execution dispatch request; found ${#changed[@]}."; exit 1; }
+            encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/${changed[0]}?ref=$GITHUB_SHA" --jq '.content')"
+            printf '%s' "$encoded" | base64 -d > /tmp/lite-v7-execution-dispatch.json
+            jq -e '
+              .schemaVersion=="curveyield-lite-v7-execution-dispatch-v1" and
+              (.campaignId|type=="string" and length>0) and
+              (.phaseSequence==9 or .phaseSequence==8 or .phaseSequence==6) and
+              (.requestPath|type=="string" and length>0) and
+              (.controllerRef|type=="string" and test("^[0-9a-f]{40}$")) and
+              (.controllerWritebackRef|type=="string" and test("^[A-Za-z0-9._/-]+$")) and
+              (.attempt|type=="number" and floor==. and .>=1)
+            ' /tmp/lite-v7-execution-dispatch.json >/dev/null
+            campaign_id="$(jq -r '.campaignId' /tmp/lite-v7-execution-dispatch.json)"
+            request_path="$(jq -r '.requestPath' /tmp/lite-v7-execution-dispatch.json)"
+            controller_ref="$(jq -r '.controllerRef' /tmp/lite-v7-execution-dispatch.json)"
+            writeback_ref="$(jq -r '.controllerWritebackRef' /tmp/lite-v7-execution-dispatch.json)"
+            attempt="$(jq -r '.attempt' /tmp/lite-v7-execution-dispatch.json)"
+          fi
+
+          [[ "$campaign_id" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || { echo "::error::Invalid campaign_id"; exit 1; }
+          [[ "$controller_ref" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::controller_ref must be exact 40-hex commit"; exit 1; }
+          [[ "$writeback_ref" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::Invalid controller_writeback_ref"; exit 1; }
+          [[ "$attempt" =~ ^[1-9][0-9]*$ ]] || { echo "::error::attempt must be integer >=1"; exit 1; }
+          if [[ "$request_path" == campaigns/*/controller/phase9-reruns/*/*.json ]]; then
+            phase_seq=9
+          elif [[ "$request_path" == campaigns/*/controller/phase8-revalidation/*/*.json ]]; then
+            phase_seq=8
+            request_group="${request_path#*/controller/phase8-revalidation/}"
+            request_group="${request_group%%/*}"
+            [[ "$request_group" =~ ^(TG-[0-9]{3}|CP-[A-Za-z0-9._-]+)$ ]] || { echo "::error::Invalid Phase 8 proof group"; exit 1; }
+          elif [[ "$request_path" == campaigns/*/controller/phase6-tests/*/*.json ]]; then
+            phase_seq=6
+            request_group="${request_path#*/controller/phase6-tests/}"
+            request_group="${request_group%%/*}"
+            [[ "$request_group" =~ ^(TG-[0-9]{3}|CP-[A-Za-z0-9._-]+)$ ]] || { echo "::error::Invalid Phase 6 group"; exit 1; }
+          else
+            echo "::error::request_path must be a campaign-local Phase-6, Phase-8 revalidation, or Phase-9 request"; exit 1
+          fi
+          case "$request_path" in *".."*|*'\'*) echo "::error::Unsafe request_path"; exit 1;; esac
+
+          {
+            echo "campaign_id=$campaign_id"
+            echo "request_path=$request_path"
+            echo "controller_ref=$controller_ref"
+            echo "controller_writeback_ref=$writeback_ref"
+            echo "attempt=$attempt"
+            echo "phase_sequence=$phase_seq"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Select working Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/lite-solo-cloudflare-runtime-v1/scripts/select-audit-controller-token.sh
+
+      - name: Verify exact campaign/request binding
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+          REQUEST_PATH: ${{ steps.request.outputs.request_path }}
+          CONTROLLER_REF: ${{ steps.request.outputs.controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::AUDIT_CONTROLLER_GITHUB_TOKEN is required"; exit 1
+          fi
+          encoded="$(gh api "repos/curveyield3/Audit-Controller/contents/$REQUEST_PATH?ref=$CONTROLLER_REF" --jq '.content')"
+          printf '%s' "$encoded" | base64 -d > /tmp/v7-request.json
+          test "$(jq -r '.campaignId // empty' /tmp/v7-request.json)" = "$CAMPAIGN_ID"
+          phase_seq="${{ steps.request.outputs.phase_sequence }}"
+          # V7 phaseId describes the execution stage, not the audit campaign phase.
+          # Constrain Phase 6 / Phase 8 revalidation to the qualified build-and-test lane.
+          if [ "$phase_seq" = 6 ] || [ "$phase_seq" = 8 ]; then
+            test "$(jq -r '.phaseId // empty' /tmp/v7-request.json)" = "build-and-test"
+            test "$(jq -r '.gateId // empty' /tmp/v7-request.json)" = "exact-build-and-tests-complete"
+          else
+            jq -e '.phaseId == "build-and-test" or .phaseId == "fork-simulation-lifecycle"' /tmp/v7-request.json >/dev/null
+          fi
+
+          if [[ "$CAMPAIGN_ID" =~ ^(.+)-r[0-9]+$ ]]; then slug="${BASH_REMATCH[1]}"; else exit 1; fi
+          directory_path="Audit Campaign Directory/campaigns/$slug.json"
+          encoded_dir="$(gh api "repos/curveyield3/Audit-Controller/contents/$directory_path?ref=$CONTROLLER_REF" --jq '.content')"
+          printf '%s' "$encoded_dir" | base64 -d > /tmp/directory.json
+          test "$(jq -r '.schemaVersion' /tmp/directory.json)" = "curveyield-audit-campaign-directory-entry-v2"
+          test "$(jq -r '.campaignId' /tmp/directory.json)" = "$CAMPAIGN_ID"
+          test "$(jq -r '.currentAssignment.phaseSequence' /tmp/directory.json)" = "$phase_seq"
+          if [ "$phase_seq" = 8 ]; then
+            # Revalidation is allowed only for the *same immutable source archive*
+            # as the active Lite-Solo campaign. Never use a fresh deployment.
+            expected_source="$(jq -r '.sourceSha256 // empty' /tmp/directory.json)"
+            request_source="$(jq -r '.source.archiveSha256 // empty' /tmp/v7-request.json)"
+            test -n "$expected_source" && test "$request_source" = "$expected_source" || {
+              echo "::error::Phase-8 revalidation source archive differs from campaign"; exit 1;
+            }
+          fi
+          workspace="$(jq -r '.workspacePath' /tmp/directory.json)"
+          if [ "$phase_seq" = 9 ]; then
+            case "$REQUEST_PATH" in "$workspace"/controller/phase9-reruns/*/*.json) ;; *) echo "::error::Phase-9 request is outside canonical workspace"; exit 1;; esac
+            # Reject source identity ambiguity before dispatching any runner.
+            source_repo="$(jq -r '.source.repository // empty' /tmp/v7-request.json)"
+            archive_path="$(jq -r '.source.archivePath // empty' /tmp/v7-request.json)"
+            archive_sha="$(jq -r '.source.archiveSha256 // empty' /tmp/v7-request.json)"
+            source_commit="$(jq -r '.source.commit // empty' /tmp/v7-request.json)"
+            test "$source_repo" = "curveyield3/Audit-Controller" || { echo "::error::Phase-9 remediation source must be the canonical controller archive"; exit 1; }
+            [[ "$archive_sha" =~ ^[a-f0-9]{64}$ && "$source_commit" =~ ^[a-f0-9]{40}$ ]] || {
+              echo "::error::Phase-9 remediated source hash/commit malformed"; exit 1;
+            }
+            case "$archive_path" in "$workspace"/remediation/source-snapshots/*.zip) ;; *) echo "::error::Missing exact Phase-9 remediation archive"; exit 1;; esac
+            case "$archive_path" in *".."*|*'\'*) echo "::error::Unsafe remediation archive path"; exit 1;; esac
+          else
+            if [ "$phase_seq" = 8 ]; then
+              case "$REQUEST_PATH" in "$workspace"/controller/phase8-revalidation/*/*.json) ;; *) echo "::error::Phase-8 revalidation request is outside canonical workspace"; exit 1;; esac
+              sealed="$(gh api "repos/curveyield3/Audit-Controller/contents/$workspace/receipts/PHASE_07_RECEIPT_v1.json?ref=$CONTROLLER_REF" --jq '.content' | base64 -d | jq -r '.phase.status')"
+              test "$sealed" = "SEALED" || { echo "::error::Phase-8 revalidation requires sealed predecessor Phase 7"; exit 1; }
+            else
+              case "$REQUEST_PATH" in "$workspace"/controller/phase6-tests/*/*.json) ;; *) echo "::error::Phase-6 request is outside canonical workspace"; exit 1;; esac
+            fi
+            request_dir="${REQUEST_PATH%/*}"
+            encoded_tree="$(gh api "repos/curveyield3/Audit-Controller/contents/$request_dir?ref=$CONTROLLER_REF" --jq '[.[]|select(.type=="file" and (.name|endswith(".json")))]|length')"
+            if [ "$encoded_tree" -gt 3 ]; then
+              echo "::error::ROUND_LIMIT_REACHED for $request_dir: preserve unresolved disposition without fabricated test evidence."; exit 1
+            fi
+          fi
+
+      - name: Dispatch qualified V7 execution and automatic ingestion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_FORK_EXECUTION: ${{ inputs.cloudflare_fork_execution || false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run lite-solo-cloudflare-audit-controller-execution-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f request_path="${{ steps.request.outputs.request_path }}" \
+            -f controller_ref="${{ steps.request.outputs.controller_ref }}" \
+            -f controller_writeback_ref="${{ steps.request.outputs.controller_writeback_ref }}" \
+            -f cloudflare_fork_execution="$CLOUDFLARE_FORK_EXECUTION"
+
+      - name: Summarize
+        shell: bash
+        run: |
+          {
+            echo "## Lite Phase-6, Phase-8 proof-revalidation or Phase-9 V7 execution dispatch"
+            echo "- Campaign: ${{ steps.request.outputs.campaign_id }}"
+            echo "- Request: ${{ steps.request.outputs.request_path }}"
+            echo "- Controller commit: ${{ steps.request.outputs.controller_ref }}"
+            echo "- Writeback ref: ${{ steps.request.outputs.controller_writeback_ref }}"
+            echo "- Attempt: ${{ steps.request.outputs.attempt }}"
+            echo "- Qualified V7 execution workflow dispatched; durable evidence ingestion remains owned by lite-solo-cloudflare-audit-controller-execution-v1.yml."
+          } >> "$GITHUB_STEP_SUMMARY"

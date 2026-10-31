@@ -1,0 +1,340 @@
+name: Lite-Solo Cloudflare browser-agent-reviewer-repair-v1 v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        description: Exact campaign ID
+        required: true
+        type: string
+      repair_mode:
+        description: Resume current durable reviewer state
+        required: false
+        default: auto
+        type: choice
+        options: [auto, resume_preferred, reset_to_handoff]
+      force_reset:
+        description: Legacy-only reset flag
+        required: false
+        default: false
+        type: boolean
+      reason:
+        description: Repair trigger/reason
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: browser-agent-reviewer-repair-${{ inputs.campaign_id }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CAMPAIGN_ID: ${{ inputs.campaign_id }}
+      REPAIR_MODE: ${{ inputs.repair_mode }}
+      REPAIR_REASON: ${{ inputs.reason }}
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/lite-solo-cloudflare-runtime-v1/scripts/select-audit-controller-token.sh
+
+      - name: Resolve current or legacy repair mode
+        id: route
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          test -s "$registration"
+          state_path="$(jq -r '.watchdog.gate.statePath // empty' "$registration")"
+          test -n "$state_path"
+          if [[ "$state_path" == "Audit Campaign Directory/campaigns/"*.json ]]; then
+            echo "mode=receipt" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=legacy" >> "$GITHUB_OUTPUT"
+          fi
+          echo "registration=$registration" >> "$GITHUB_OUTPUT"
+
+      - name: Reject retired legacy repair path
+        if: steps.route.outputs.mode == 'legacy'
+        shell: bash
+        run: |
+          echo "::error::Legacy reviewer repair is retired because it can bypass the Phase-1 fixed X11 audit browser invariant."
+          echo "::error::Migrate the campaign to the current Audit Campaign Directory assignment-v2 registration before automated reviewer repair."
+          exit 1
+
+      - name: Resolve current receipt reviewer
+        if: steps.route.outputs.mode == 'receipt'
+        id: current
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          REGISTRATION: ${{ steps.route.outputs.registration }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$REPAIR_MODE" = "reset_to_handoff" ]; then
+            echo "::error::Current Lite campaigns have no reset-to-handoff control state. Repair resumes from the current assignment/work form and Git history."
+            exit 1
+          fi
+          gate_repo="$(jq -r '.watchdog.gate.repository // "curveyield3/Audit-Controller"' "$REGISTRATION")"
+          gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$REGISTRATION")"
+          directory_path="$(jq -r '.watchdog.gate.statePath' "$REGISTRATION")"
+          milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' "$REGISTRATION")"
+          gh api "repos/$gate_repo/contents/$directory_path?ref=$gate_ref" --jq '.content' | base64 -d > /tmp/campaign-directory.json
+          test "$(jq -r '.campaignId' /tmp/campaign-directory.json)" = "$CAMPAIGN_ID"
+          directory_schema="$(jq -r '.schemaVersion // empty' /tmp/campaign-directory.json)"
+          reason="${REPAIR_REASON:-watchdog detected reviewer failure}"
+          if [ "$directory_schema" = "curveyield-audit-campaign-directory-entry-v2" ]; then
+            campaign_status="$(jq -r '.campaignStatus // empty' /tmp/campaign-directory.json)"
+            case "$campaign_status" in ACTIVE|BLOCKED|WAITING_FOR_DISCOVERY) ;; *) echo "::error::Assignment reviewer repair requires ACTIVE/BLOCKED/WAITING_FOR_DISCOVERY campaign state; observed $campaign_status"; exit 1;; esac
+            discovery_unit="$(jq -r 'if .campaignStatus == "WAITING_FOR_DISCOVERY" then (.discovery.activeUnitId // empty) else empty end' /tmp/campaign-directory.json)"
+            reviewer="$(jq -r '.currentAssignment.reviewer // empty' /tmp/campaign-directory.json)"
+            phase_id="$(jq -r '.currentAssignment.phaseId // empty' /tmp/campaign-directory.json)"
+            workspace="$(jq -r '.workspacePath' /tmp/campaign-directory.json)"
+            campaign_name="$(jq -r '.campaignName' /tmp/campaign-directory.json)"
+            schema_path="$(jq -r '.currentAssignment.workSchemaPath // empty' /tmp/campaign-directory.json)"
+            form_path="$(jq -r '.currentAssignment.workFormPath // empty' /tmp/campaign-directory.json)"
+            report_path="$(jq -r '.currentAssignment.finalReportPath // empty' /tmp/campaign-directory.json)"
+            packet_path="$(jq -r '.currentAssignment.packetPath // empty' /tmp/campaign-directory.json)"
+            receipt_path="$(jq -r '.currentAssignment.predecessorReceiptPath // .lastSealedReceiptPath // empty' /tmp/campaign-directory.json)"
+            derived_inputs="$(jq -r '.currentAssignment.derivedInputPaths // [] | .[]' /tmp/campaign-directory.json)"
+            assignment_status="$(jq -r '.currentAssignment.status // empty' /tmp/campaign-directory.json)"
+            [ -n "$reviewer" ] && [ -n "$phase_id" ] && [ -n "$schema_path" ] && [ -n "$form_path" ] && [ -n "$packet_path" ]
+            feedback=""
+            if [ "$assignment_status" = "REWORK_REQUIRED" ]; then
+              encoded_packet_path="$(printf '%s' "$packet_path" | sed 's/ /%20/g')"
+              packet_encoded="$(gh api "repos/$gate_repo/contents/$encoded_packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+              if [ -n "$packet_encoded" ]; then
+                printf '%s' "$packet_encoded" | base64 -d > /tmp/current-packet.json
+                feedback="$(jq -r '.controllerValidation.deficiencies // [] | map("- "+.) | join("\n")' /tmp/current-packet.json)"
+              fi
+            fi
+            encode_path() { printf '%s' "$1" | sed 's/ /%20/g'; }
+            campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(encode_path "$workspace")"
+            receipt_encoded="$(gh api "repos/$gate_repo/contents/$receipt_path?ref=$gate_ref" --jq '.content')"
+            printf '%s' "$receipt_encoded" | base64 -d > /tmp/predecessor-receipt.json
+            authority_home="$(jq -r '.authority.homepagePath // empty' /tmp/predecessor-receipt.json)"
+            test -n "$authority_home"
+            legacy_root='Audit Skill - Current Authority/Audit_Litemode_v10.3'
+            if [ "$authority_home" = "$legacy_root/SKILL.md" ]; then
+              authority_home='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3/SKILL.md'
+            fi
+            registry_json="$(gh api "repos/$gate_repo/contents/audit-process/v7/frozen-authorities/FROZEN_AUTHORITY_REGISTRY_v1.json?ref=$gate_ref" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
+            if [ -n "$registry_json" ] && ! gh api "repos/$gate_repo/contents/$(encode_path "$authority_home")?ref=$gate_ref" >/dev/null 2>&1; then
+              mapped="$(printf '%s' "$registry_json" | jq -r --arg h "$authority_home" '.entries[] | . as $e | select($h | startswith($e.logicalRoot + "/")) | $e.frozenRoot + ($h | ltrimstr($e.logicalRoot))' | head -n1)"
+              [ -z "$mapped" ] || authority_home="$mapped"
+            fi
+            authority_url="https://github.com/$gate_repo/blob/$gate_ref/$(encode_path "$authority_home")"
+            {
+              printf '%s\n' \
+                "LITE audit: $campaign_name" \
+                "Reviewer: $reviewer" \
+                "Current phase: $phase_id" \
+                "Campaign: $campaign_url" \
+                "Current Audit Skill Authority: $authority_url" \
+                "" \
+                "The Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority." \
+                "" \
+                "Resume $phase_id from the latest durable state. Do not restart completed work or redo sealed earlier phases." \
+                "${discovery_unit:+Your active discovery unit is $discovery_unit: complete it from $workspace/work/phase-04/discovery/$discovery_unit/ASSIGNMENT_PACKET_v1.json and submit it as that packet instructs.}" \
+                "If controller validation reported deficiencies, repair exactly the reported substantive deficiency and resubmit controller validation; do not seal or advance." \
+                "$feedback" \
+                "" \
+                "Repair reason: $reason"
+            } > /tmp/replacement-wake.txt
+          else
+            echo "::error::Legacy receipt-v1 reviewer repair is retired. Migrate the campaign to assignment-v2 before automated browser repair."
+            exit 1
+          fi
+          case "$reviewer" in
+            reviewer-1|reviewer-2|reviewer-3|reviewer-3L|reviewer-4) ;;
+            *) echo "::error::Unsupported reviewer identity for pre-bound chat repair: $reviewer"; exit 1 ;;
+          esac
+          chat_url="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // empty' "$REGISTRATION")"
+          [[ "$chat_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$chat_url" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || {
+            echo "::error::No valid pre-created ChatGPT chat is bound for $reviewer."
+            exit 1
+          }
+
+          jq -cn \
+            --arg chat "$reviewer" \
+            '{routineId:"",projectName:"",projectUrl:"",chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"repair_notice"}' \
+            > /tmp/replacement-browser-context.json
+          {
+            echo "gate_repo=$gate_repo"
+            echo "gate_ref=$gate_ref"
+            echo "directory_path=$directory_path"
+            echo "receipt_path=$receipt_path"
+            echo "reviewer=$reviewer"
+            echo "phase_id=$phase_id"
+            echo "milestone=$milestone"
+            echo "chat_url=$chat_url"
+            echo "wake_b64=$(base64 -w0 /tmp/replacement-wake.txt)"
+            echo "browser_context_b64=$(base64 -w0 /tmp/replacement-browser-context.json)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Retire predecessor reviewer watchdog states
+        if: steps.route.outputs.mode == 'receipt'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MILESTONE: ${{ steps.current.outputs.milestone }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          listing="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active?ref=main" 2>/dev/null || true)"
+          [ -n "$listing" ] || exit 0
+          while IFS=$'\t' read -r path sha; do
+            [ -n "$path" ] || continue
+            encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=main" --jq '.content' 2>/dev/null || true)"
+            [ -n "$encoded" ] || continue
+            printf '%s' "$encoded" | base64 -d > /tmp/watchdog-candidate.json
+            if jq -e --arg c "$CAMPAIGN_ID" --arg m "$MILESTONE" \
+              '.campaignId==$c and (.gate.expectedMilestoneId // "")==$m and (.workerRole // "reviewer")=="reviewer"' \
+              /tmp/watchdog-candidate.json >/dev/null; then
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/contents/$path" \
+                -f message="chore(watchdog): retire replaced reviewer $CAMPAIGN_ID" \
+                -f sha="$sha" -f branch=main >/dev/null
+            fi
+          done < <(printf '%s' "$listing" | jq -r '.[]? | select(.type=="file") | [.path,.sha] | @tsv')
+
+      - name: Restore assigned reviewer chat binding
+        if: steps.route.outputs.mode == 'receipt'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRATION: ${{ steps.route.outputs.registration }}
+          REVIEWER: ${{ steps.current.outputs.reviewer }}
+          CHAT_URL: ${{ steps.current.outputs.chat_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="repos/$GITHUB_REPOSITORY/contents/$REGISTRATION"
+          sha="$(gh api "$api?ref=main" --jq '.sha')"
+          gh api "$api?ref=main" --jq '.content' | base64 -d > /tmp/registration.json
+          jq --arg reviewer "$REVIEWER" --arg chat "$CHAT_URL" \
+            '.mode="resume_existing"
+             | .chatUrl=$chat
+             | .browserRoutine=""
+             | .activeChat={name:$reviewer,url:$chat}
+             | .updatedAt=(now|todate)' \
+            /tmp/registration.json > /tmp/registration-updated.json
+          body="$(base64 -w0 /tmp/registration-updated.json)"
+          gh api --method PUT "$api" \
+            -f message="chore(repair): restore assigned chat for $CAMPAIGN_ID $REVIEWER" \
+            -f content="$body" -f sha="$sha" -f branch=main >/dev/null
+
+      - name: Resume assigned reviewer chat from current receipt
+        if: steps.route.outputs.mode == 'receipt'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
+          wake_id="$CAMPAIGN_ID-${{ steps.current.outputs.phase_id }}-${{ steps.current.outputs.reviewer }}-repair"
+          gh workflow run lite-solo-cloudflare-browser-agent-wake-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$wake_id" \
+            -f campaign_id="$CAMPAIGN_ID" \
+            -f phase_id="${{ steps.current.outputs.phase_id }}" \
+            -f mode=resume_existing \
+            -f chat_url="${{ steps.current.outputs.chat_url }}" \
+            -f wake_message_b64="${{ steps.current.outputs.wake_b64 }}" \
+            -f watchdog_enabled=true \
+            -f worker_role=reviewer \
+            -f watchdog_message_b64="$poke_b64" \
+            -f gate_mode=LITE \
+            -f gate_repository="${{ steps.current.outputs.gate_repo }}" \
+            -f gate_ref="${{ steps.current.outputs.gate_ref }}" \
+            -f gate_state_path="${{ steps.current.outputs.directory_path }}" \
+            -f gate_expected_phase_id="${{ steps.current.outputs.phase_id }}" \
+            -f gate_expected_milestone_id="${{ steps.current.outputs.milestone }}" \
+            -f gate_active_pointer_path="" \
+            -f gate_stop_states_csv=STOPPED_BY_HUMAN \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN \
+            -f browser_context_b64="${{ steps.current.outputs.browser_context_b64 }}"
+
+      - name: Fail over only after a verified reviewer-repair workflow failure
+        if: ${{ failure() && inputs.repair_mode == 'auto' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_READ_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
+          response="$(gh api "$api?ref=main")"
+          printf '%s' "$response" | jq -r '.content' | base64 -d > /tmp/failed-repair-registration.json
+          gate_repo="$(jq -r '.watchdog.gate.repository // "curveyield3/Audit-Controller"' /tmp/failed-repair-registration.json)"
+          gate_ref="$(jq -r '.watchdog.gate.ref // "main"' /tmp/failed-repair-registration.json)"
+          gate_path="$(jq -r '.watchdog.gate.statePath // empty' /tmp/failed-repair-registration.json)"
+          { [ "$gate_repo" = curveyield3/Audit-Controller ] || [ "$gate_repo" = curveyield3/Audit-Controller ]; } && [[ "$gate_path" == "Audit Campaign Directory/campaigns/"*.json ]] || {
+            echo "::warning::No trusted campaign directory binding for standby"
+            exit 0
+          }
+          token="${AUDIT_CONTROLLER_READ_TOKEN:-${AUDIT_CONTROLLER_FALLBACK_TOKEN:-}}"
+          [ -n "$token" ] || { echo "::warning::No available Audit-Controller read credential"; exit 0; }
+          GH_TOKEN="$token" gh api "repos/$gate_repo/contents/$gate_path?ref=$gate_ref" --jq '.content' |
+            base64 -d > /tmp/failed-repair-directory.json
+          failed="$(jq -r '.activeChat.url // empty' /tmp/failed-repair-registration.json)"
+          planned="$(node scripts/lite-solo-cloudflare-runtime-v1/scripts/browser-backup-failover-v1.mjs /tmp/failed-repair-registration.json /tmp/failed-repair-directory.json "$failed")"
+          if [ "$(printf '%s' "$planned" | jq -r '.status')" != ELIGIBLE ]; then
+            echo "::warning::Repair failed, but no eligible one-time standby exists: $(printf '%s' "$planned" | jq -r '.reason')"
+            exit 0
+          fi
+          backup="$(printf '%s' "$planned" | jq -r '.backupChatUrl')"
+          role="$(printf '%s' "$planned" | jq -r '.role')"
+          message="$(printf '%s' "$planned" | jq -r '.message')"
+          payload="$(printf '%s' "$planned" | jq -c '.registration' | base64 -w0)"
+          sha="$(printf '%s' "$response" | jq -r '.sha')"
+          gh api --method PUT "$api" \
+            -f message="repair(watchdog): one-time standby following failed repair run $GITHUB_RUN_ID" \
+            -f content="$payload" -f sha="$sha" -f branch=main >/dev/null
+          phase="$(jq -r '.currentAssignment.phaseSequence' /tmp/failed-repair-directory.json)"
+          milestone="PHASE_${phase}_WORK_PACKET"
+          timeout -k 10s 90s gh workflow run lite-solo-cloudflare-browser-agent-wake-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$CAMPAIGN_ID-$milestone-verified-repair-failure-backup" \
+            -f campaign_id="$CAMPAIGN_ID" -f phase_id="phase-$phase" \
+            -f mode=resume_existing -f chat_url="$backup" \
+            -f wake_message_b64="$(printf '%s' "$message" | base64 -w0)" \
+            -f watchdog_enabled=true -f worker_role="$(if [ "$role" = master-reviewer ]; then echo master_reviewer; else echo "$role"; fi)" -f gate_mode=LITE \
+            -f gate_repository="$gate_repo" -f gate_ref="$gate_ref" \
+            -f gate_state_path="$gate_path" -f gate_expected_phase_id="phase-$phase" \
+            -f gate_expected_milestone_id="$milestone"
+          echo "Standby dispatched after repair workflow failed (run $GITHUB_RUN_ID)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize reviewer repair
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Reviewer repair"
+            echo "- Campaign: $CAMPAIGN_ID"
+            echo "- Routing: ${{ steps.route.outputs.mode }}"
+            if [ "${{ steps.route.outputs.mode }}" = receipt ]; then
+              echo "- Reviewer: ${{ steps.current.outputs.reviewer }}"
+              echo "- Phase: ${{ steps.current.outputs.phase_id }}"
+              echo "- Durable baseline: ${{ steps.current.outputs.receipt_path }}"
+              echo "- Existing reviewer chat: ${{ steps.current.outputs.chat_url }}"
+              echo "- Chat creation: disabled"
+              echo "- Additional repair/reset receipt: none"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

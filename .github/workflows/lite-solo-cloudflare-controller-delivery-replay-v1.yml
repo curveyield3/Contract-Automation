@@ -1,0 +1,242 @@
+name: Lite-Solo Cloudflare lite-controller-delivery-replay-v1 v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        required: true
+        type: string
+      detail_ref:
+        description: 'Published controller result relative path: controller/results/<hash>/INDEX_v1.json'
+        required: true
+        type: string
+      audit_controller_ref:
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      requests: ${{ steps.ids.outputs.requests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - id: ids
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          ONE_CAMPAIGN: ${{ inputs.campaign_id }}
+        run: |
+          set -euo pipefail
+          root=process/browser-agent-wake/delivery-replay-requests
+          : >/tmp/lite-replay-requests.ndjson
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            [[ "$ONE_CAMPAIGN" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]]
+            jq -nc --arg id "$ONE_CAMPAIGN" '{request_path:"__MANUAL__",campaign_id:$id}' >>/tmp/lite-replay-requests.ndjson
+          else
+            if [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]]; then
+              mapfile -t changed < <(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" -- "$root/")
+            else
+              mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")
+            fi
+            for request in "${changed[@]}"; do
+              [[ "$request" =~ ^process/browser-agent-wake/delivery-replay-requests/[A-Za-z0-9._-]+\.json$ ]] || continue
+              test -f "$request" || continue
+              jq -ec --arg file "$request" '
+                select(.schemaVersion=="curveyield-lite-controller-delivery-replay-request-v1"
+                  and (.campaignId|type)=="string"
+                  and (.campaignId|test("^[A-Za-z0-9._-]+-r[0-9]+$")))
+                | {request_path:$file,campaign_id:.campaignId}
+              ' "$request" >>/tmp/lite-replay-requests.ndjson
+            done
+          fi
+          echo "requests=$(jq -sc '{include:.}' /tmp/lite-replay-requests.ndjson)" >>"$GITHUB_OUTPUT"
+  redeliver:
+    needs: discover
+    if: ${{ needs.discover.outputs.requests != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.requests) }}
+    concurrency:
+      group: lite-controller-delivery-replay-${{ matrix.campaign_id }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Resolve exact bounded delivery replay request
+        id: request
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_CAMPAIGN: ${{ inputs.campaign_id }}
+          DISPATCH_DETAIL_REF: ${{ inputs.detail_ref }}
+          DISPATCH_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          MATRIX_REQUEST: ${{ matrix.request_path }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = 'push' ]; then
+            request="$MATRIX_REQUEST"
+            [[ "$request" =~ ^process/browser-agent-wake/delivery-replay-requests/[A-Za-z0-9._-]+\.json$ ]]
+            test -f "$request"
+            jq -e '.schemaVersion=="curveyield-lite-controller-delivery-replay-request-v1" and (.campaignId|type=="string") and (.detailRef|type=="string") and (.auditControllerRef=="main")' "$request" >/dev/null
+            campaign="$(jq -r '.campaignId' "$request")"
+            detail="$(jq -r '.detailRef' "$request")"
+            ref="$(jq -r '.auditControllerRef' "$request")"
+            [ "$request" = "process/browser-agent-wake/delivery-replay-requests/$campaign.json" ] || { echo '::error::Replay request filename mismatches campaign'; exit 1; }
+          else
+            campaign="$DISPATCH_CAMPAIGN"
+            detail="$DISPATCH_DETAIL_REF"
+            ref="${DISPATCH_CONTROLLER_REF:-main}"
+          fi
+          [[ "$campaign" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || exit 1
+          [[ "$detail" =~ ^controller/results/[a-f0-9]{20}/INDEX_v1.json$ ]] || exit 1
+          [ "$ref" = main ] || exit 1
+          { echo "campaign_id=$campaign"; echo "detail_ref=$detail"; echo "audit_controller_ref=$ref"; } >> "$GITHUB_OUTPUT"
+      - name: Select controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/lite-solo-cloudflare-runtime-v1/scripts/select-audit-controller-token.sh
+      - name: Resolve and verify published controller result (read-only)
+        id: replay
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+          DETAIL_REF: ${{ steps.request.outputs.detail_ref }}
+          CONTROLLER_REF: ${{ steps.request.outputs.audit_controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CAMPAIGN_ID" =~ ^([A-Za-z0-9._-]+)-r[0-9]+$ ]] || { echo '::error::Invalid campaign'; exit 1; }
+          slug="${BASH_REMATCH[1]}"
+          [[ "$CONTROLLER_REF" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$CONTROLLER_REF" != *..* ]] || exit 1
+          [[ "$DETAIL_REF" =~ ^controller/results/[a-f0-9]{20}/INDEX_v1.json$ ]] || exit 1
+          repo='curveyield3/Audit-Controller'
+          directory="Audit Campaign Directory/campaigns/$slug.json"
+          api="repos/$repo/contents/Audit%20Campaign%20Directory/campaigns/$slug.json?ref=$CONTROLLER_REF"
+          gh api "$api" --jq '.content' | base64 -d > /tmp/replay-directory.json
+          test "$(jq -r '.campaignId' /tmp/replay-directory.json)" = "$CAMPAIGN_ID"
+          campaign_path="$(jq -r '.workspacePath' /tmp/replay-directory.json)"
+          [[ "$campaign_path" == campaigns/* ]] || exit 1
+          timeout -k 10s 300s bash scripts/lite-solo-cloudflare-runtime-v1/scripts/checkout-audit-controller-once-v1.sh .audit-controller "$CONTROLLER_REF" branch "$campaign_path"
+          node scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-controller-delivery-replay-v1.mjs .audit-controller "$directory" "$DETAIL_REF" > /tmp/replay.json
+          jq -e '.state=="PUBLISHED_AWAITING_DELIVERY" and (.messageB64|type)=="string" and (.kind|IN("REVIEWER","MASTER","ORCHESTRATOR"))' /tmp/replay.json >/dev/null
+          {
+            echo "kind=$(jq -r '.kind' /tmp/replay.json)"
+            echo "phase_id=$(jq -r '.phaseId' /tmp/replay.json)"
+            echo "milestone=$(jq -r '.milestoneId' /tmp/replay.json)"
+            echo "role=$(jq -r '.role' /tmp/replay.json)"
+            echo "wake_id=$(jq -r '.wakeId' /tmp/replay.json)"
+            echo "result_sha256=$(jq -r '.sourceResultSha256' /tmp/replay.json)"
+            echo "managed=$(jq -r '.deliveryManaged' /tmp/replay.json)"
+            echo "wake_b64=$(jq -r '.messageB64' /tmp/replay.json)"
+            echo "campaign_path=$campaign_path"
+            echo "directory=$directory"
+          } >> "$GITHUB_OUTPUT"
+      - name: Atomically claim at most one active replay for this result
+        if: steps.replay.outputs.managed == 'true'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CLAIMED_SHA: ${{ steps.replay.outputs.result_sha256 }}
+          CLAIMED_WAKE: ${{ steps.replay.outputs.wake_id }}
+          CAMPAIGN: ${{ steps.replay.outputs.campaign_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ledger_api="repos/curveyield3/Audit-Controller/contents/${CAMPAIGN// /%20}/controller/delivery/DELIVERY_LEDGER_v1.json"
+          response="$(gh api "$ledger_api?ref=${{ steps.request.outputs.audit_controller_ref }}")"
+          sha="$(printf '%s' "$response" | jq -r '.sha')"
+          printf '%s' "$response" | jq -r '.content' | base64 -d > /tmp/replay-ledger.json
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import {advanceDeliveryStateV1} from "./scripts/lite-solo-cloudflare-runtime-v1/scripts/lib/lite-controller-delivery-state-v1.mjs";
+            const prior=JSON.parse(fs.readFileSync("/tmp/replay-ledger.json","utf8"));
+            const next=advanceDeliveryStateV1({
+              ledger:prior,resultSha256:process.env.CLAIMED_SHA,
+              wakeId:process.env.CLAIMED_WAKE,to:"CLAIM",
+              claimId:process.env.GITHUB_RUN_ID,now:new Date().toISOString()
+            });
+            fs.writeFileSync("/tmp/replay-ledger-next.json",JSON.stringify(next,null,2)+"\n");
+          '
+          encoded="$(base64 -w0 /tmp/replay-ledger-next.json)"
+          gh api --method PUT "$ledger_api" \
+            -f branch="${{ steps.request.outputs.audit_controller_ref }}" \
+            -f message="audit(delivery): claim bounded replay $CAMPAIGN $CLAIMED_SHA" \
+            -f content="$encoded" -f sha="$sha" >/dev/null
+          echo "Atomic one-time replay claim accepted" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve currently authorized chat
+        id: chat
+        if: steps.replay.outputs.kind != 'ORCHESTRATOR'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+          ROLE: ${{ steps.replay.outputs.role }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          reg="process/browser-agent-wake/registrations/$safe.json"
+          gh api "repos/$GITHUB_REPOSITORY/contents/$reg?ref=main" --jq '.content' | base64 -d > /tmp/replay-registration.json
+          if [ "$ROLE" = master-reviewer ]; then
+            chat="$(jq -r '.masterReview.chatUrl // empty' /tmp/replay-directory.json)"
+          else
+            chat="$(jq -r --arg r "$ROLE" '.agentChats[$r] // empty' /tmp/replay-registration.json)"
+          fi
+          [[ "$chat" =~ ^https://chatgpt.com/(c/[A-Za-z0-9_-]+|g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+)/?$ ]] || { echo '::error::No registered authorized reviewer chat'; exit 1; }
+          echo "url=$chat" >> "$GITHUB_OUTPUT"
+      - name: Retry prior reviewer or master delivery without recomputation
+        if: steps.replay.outputs.kind == 'REVIEWER' || steps.replay.outputs.kind == 'MASTER'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+          CONTROLLER_REF: ${{ steps.request.outputs.audit_controller_ref }}
+          CHAT_URL: ${{ steps.chat.outputs.url }}
+          WAKE_ID: ${{ steps.replay.outputs.wake_id }}
+          WAKE_B64: ${{ steps.replay.outputs.wake_b64 }}
+          PHASE_ID: ${{ steps.replay.outputs.phase_id }}
+          MILESTONE: ${{ steps.replay.outputs.milestone }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 10s 90s gh workflow run lite-solo-cloudflare-browser-agent-wake-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$WAKE_ID" -f campaign_id="$CAMPAIGN_ID" -f phase_id="$PHASE_ID" \
+            -f mode=resume_existing -f chat_url="$CHAT_URL" \
+            -f wake_message_b64="$WAKE_B64" -f watchdog_enabled=true -f worker_role=reviewer \
+            -f gate_mode=LITE -f gate_repository=curveyield3/Audit-Controller -f gate_ref="$CONTROLLER_REF" \
+            -f gate_state_path="${{ steps.replay.outputs.directory }}" \
+            -f gate_expected_phase_id="$PHASE_ID" -f gate_expected_milestone_id="$MILESTONE"
+      - name: Retry fresh successor dispatch without recomputation
+        if: steps.replay.outputs.kind == 'ORCHESTRATOR'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+          CONTROLLER_REF: ${{ steps.request.outputs.audit_controller_ref }}
+          CAMPAIGN_PATH: ${{ steps.replay.outputs.campaign_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          campaign_name="$(jq -r '.campaignName' /tmp/replay-directory.json)"
+          timeout -k 10s 90s gh workflow run lite-solo-cloudflare-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f campaign_id="$CAMPAIGN_ID" -f campaign_name="$campaign_name" -f campaign_path="$CAMPAIGN_PATH" \
+            -f audit_controller_ref="$CONTROLLER_REF"
+      - name: Summary
+        if: always()
+        run: |
+          echo '## Controller delivery-only replay' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No audit controller execution, phase bookkeeping, receipt creation, or machine harness runs were performed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Browser first-action wake acknowledgement, not workflow dispatch, confirms delivery.' >> "$GITHUB_STEP_SUMMARY"
