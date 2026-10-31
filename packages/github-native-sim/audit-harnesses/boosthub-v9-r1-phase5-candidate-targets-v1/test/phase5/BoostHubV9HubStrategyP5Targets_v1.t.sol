@@ -4,6 +4,8 @@ pragma solidity ^0.8.28;
 import {BoostHub} from "../../contracts/BoostHub.sol";
 import {BeefyVaultV7FixedV2} from "../../beefy/contracts/beefy/BeefyVaultV7FixedV2.sol";
 import {IStrategyBoostHubV1} from "../../beefy/contracts/beefy/interfaces/IStrategyBoostHubV1.sol";
+import {BeefyVaultV7FixedV2} from "../../beefy/contracts/beefy/BeefyVaultV7FixedV2.sol";
+import {IStrategyBoostHubV1} from "../../beefy/contracts/beefy/interfaces/IStrategyBoostHubV1.sol";
 import {BaseAllToWantBoostHubV5} from "../../beefy/contracts/beefy/BaseAllToWantBoostHubV5.sol";
 import {StrategyConvexBoostHubStakingV5} from "../../beefy/contracts/beefy/StrategyConvexBoostHubStakingV5.sol";
 import "./BoostHubV9VyperP5Targets_v1.t.sol";
@@ -303,5 +305,121 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         uint256 fee=amount*1000/10000;
         require(want.balanceOf(address(this))==fee,"CONTROL_FEE");
         require(staking.balanceOf(address(strategy))+fee==amount,"CONTROL_ASSET");
+    }
+}
+
+
+// P5-T-007: exact admitted BeefyVaultV7FixedV2 source with a controlled,
+// successful-but-incomplete strategy payout. A mock payout does NOT attest that
+// the live deployed gauge can underdeliver; this measures vault accounting.
+contract BoostV9PartialVaultStrategyV1 is IStrategyBoostHubV1 {
+    BoostV9BehaviorTokenV1 public immutable token;
+    address public boundVault;
+    uint16 public payoutBps = 10000;
+    bool public revertOnExit;
+
+    constructor(address asset) {token = BoostV9BehaviorTokenV1(asset);}
+    // The vault checks the expected address during construction. Bind the
+    // constructed vault permanently on its first authorized deposit call.
+    function vault() external view returns(address) {
+        return boundVault == address(0) ? msg.sender : boundVault;
+    }
+    function want() external view returns(address) {return address(token);}
+    function beforeDeposit() external {}
+    function deposit() external {
+        if(boundVault == address(0))boundVault=msg.sender;
+        require(msg.sender==boundVault,"ONLY_VAULT_DEPOSIT");
+    }
+    function setPayout(uint16 bps,bool shouldRevert) external {
+        require(bps<=10000,"BPS");
+        payoutBps=bps;revertOnExit=shouldRevert;
+    }
+    function withdraw(uint256 amount) external {
+        require(msg.sender==boundVault,"ONLY_VAULT_EXIT");
+        if(revertOnExit)revert("MOCK_REVERT_EXIT");
+        uint256 payableAmount=amount*uint256(payoutBps)/10000;
+        require(token.transfer(msg.sender,payableAmount),"MOCK_PAYOUT");
+    }
+    function balanceOf() external view returns(uint256) {
+        return token.balanceOf(address(this));
+    }
+}
+contract BoostHubV9VaultP5T007V1 {
+    VmBoostV9 constant vm=VmBoostV9(address(uint160(uint256(keccak256("hevm cheat code")))));
+    address constant FIRST=address(0xBEE1);
+    address constant SECOND=address(0xBEE2);
+    function _fixture() internal returns(
+        BoostV9BehaviorTokenV1 token,
+        BoostV9PartialVaultStrategyV1 strategy,
+        BeefyVaultV7FixedV2 vault_
+    ){
+        token=new BoostV9BehaviorTokenV1();
+        strategy=new BoostV9PartialVaultStrategyV1(address(token));
+        vault_=new BeefyVaultV7FixedV2(
+            IStrategyBoostHubV1(address(strategy)),
+            "SourceBoundShare","SBV",0,address(this)
+        );
+    }
+    function _deposit(BoostV9BehaviorTokenV1 token,BeefyVaultV7FixedV2 vault_,address user,uint256 n) internal {
+        token.mint(user,n);
+        vm.prank(user);token.approve(address(vault_),n);
+        vm.prank(user);vault_.deposit(n);
+    }
+    function testFuzz_P5T007_ActualVaultTerminalShareExtinction(uint96 raw) public {
+        (BoostV9BehaviorTokenV1 token,BoostV9PartialVaultStrategyV1 strategy,BeefyVaultV7FixedV2 vault_)=_fixture();
+        uint256 n=uint256(raw)%1e21+1e12;
+        _deposit(token,vault_,FIRST,n);
+        require(vault_.totalSupply()==n&&vault_.balance()==n,"START_LEDGER");
+        strategy.setPayout(2000,false);
+        vm.prank(FIRST);vault_.withdrawAll();
+        uint256 received=n*2000/10000,retained=n-received;
+        require(vault_.balanceOf(FIRST)==0&&vault_.totalSupply()==0,"SHARES_NOT_EXTINCT");
+        require(token.balanceOf(FIRST)==received,"ACTUAL_FIRST_PAYOUT");
+        require(token.balanceOf(address(strategy))==retained,"RECOVERABLE_BACKING");
+        require(vault_.balance()==retained,"ZERO_SUPPLY_WITH_BACKING");
+        // If the remaining strategy assets are actually recoverable, the next
+        // depositor can capture them without ever owning the extinguished shares.
+        strategy.setPayout(10000,false);
+        uint256 fresh=1e12;
+        _deposit(token,vault_,SECOND,fresh);
+        require(vault_.balanceOf(SECOND)==fresh&&vault_.balance()==retained+fresh,"REENTRY_SHARES");
+        vm.prank(SECOND);vault_.withdrawAll();
+        require(token.balanceOf(SECOND)==retained+fresh,"RESIDUAL_VALUE_NOT_REALLOCATED");
+        require(vault_.totalSupply()==0&&vault_.balance()==0,"FINAL_CONSERVATION");
+    }
+    function testFuzz_P5T007_ActualVaultTwoHolderClaimShift(uint96 raw) public {
+        (BoostV9BehaviorTokenV1 token,BoostV9PartialVaultStrategyV1 strategy,BeefyVaultV7FixedV2 vault_)=_fixture();
+        uint256 n=uint256(raw)%1e21+1e12;
+        _deposit(token,vault_,FIRST,n);
+        _deposit(token,vault_,SECOND,n);
+        require(vault_.totalSupply()==2*n&&vault_.balance()==2*n,"MULTI_START");
+        strategy.setPayout(2000,false);
+        vm.prank(FIRST);vault_.withdrawAll();
+        uint256 paid=n*2000/10000;
+        require(vault_.balanceOf(FIRST)==0&&token.balanceOf(FIRST)==paid,"FIRST_SHORT_PAYOUT");
+        require(vault_.totalSupply()==n&&vault_.balance()==2*n-paid,"BACKING_TRANSFER");
+        strategy.setPayout(10000,false);
+        vm.prank(SECOND);vault_.withdrawAll();
+        require(token.balanceOf(SECOND)==2*n-paid,"SURVIVOR_WINDFALL");
+        require(token.balanceOf(SECOND)>n,"SURVIVOR_DID_NOT_GAIN");
+    }
+    function testFuzz_P5T007_ControlFullSettlement(uint96 raw) public {
+        (BoostV9BehaviorTokenV1 token,BoostV9PartialVaultStrategyV1 strategy,BeefyVaultV7FixedV2 vault_)=_fixture();
+        uint256 n=uint256(raw)%1e21+1e12;
+        _deposit(token,vault_,FIRST,n);
+        strategy.setPayout(10000,false);
+        vm.prank(FIRST);vault_.withdrawAll();
+        require(vault_.totalSupply()==0&&vault_.balance()==0,"CONTROL_RESIDUE");
+        require(token.balanceOf(FIRST)==n,"CONTROL_UNDERDELIVERY");
+    }
+    function testFuzz_P5T007_ControlRevertingWithdrawalRollback(uint96 raw) public {
+        (BoostV9BehaviorTokenV1 token,BoostV9PartialVaultStrategyV1 strategy,BeefyVaultV7FixedV2 vault_)=_fixture();
+        uint256 n=uint256(raw)%1e21+1e12;
+        _deposit(token,vault_,FIRST,n);
+        strategy.setPayout(10000,true);
+        vm.expectRevert();
+        vm.prank(FIRST);vault_.withdrawAll();
+        require(vault_.balanceOf(FIRST)==n&&vault_.totalSupply()==n,"CONTROL_BURN_NOT_ROLLED_BACK");
+        require(token.balanceOf(address(strategy))==n&&vault_.balance()==n,"CONTROL_ASSET_NOT_PRESERVED");
     }
 }
