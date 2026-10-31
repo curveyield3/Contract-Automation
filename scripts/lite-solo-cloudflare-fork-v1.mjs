@@ -433,6 +433,8 @@ function buildUnitMeta(c,u,schema){
 async function unitNextStep(c){
   const phase=Number(need('phase')),step=Number(need('step'));
   assertAssigned(c,phase);
+  strict(phase===4?(step===0||step>=1&&step<=3):(step>=1&&step<=(phase===5?3:5)),
+    'Phase 5/6 starts at Step 1; Step 0 discovery is Phase 4 only');
   const {plan,queue,units,planRel,queueRel}=unitPlan(c);
   strict(phase===plan.phaseSequence&&plan.phaseEpoch===queue.phaseEpoch,'wrong controller phase epoch');
   const stage=step===0?(String(payload.stage||'').includes('ATTACK')?'ATTACK_REVIEW':'FLOW_REVIEW'):
