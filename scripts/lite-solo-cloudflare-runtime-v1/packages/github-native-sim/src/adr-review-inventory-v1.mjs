@@ -512,7 +512,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
     else if(s.astStatus==='MISSING')limitations.push({code:'INVENTORY_INCOMPLETE',path:s.path,detail:'In-scope Solidity source has no admitted AST'});
     else limitations.push({code:'UNSUPPORTED_LANGUAGE_FILE_FALLBACK',path:s.path,detail:'Vyper requires file-level review'});
     const needed=scriptWithoutAst?['SCRIPT_EXECUTION']:importOnlyShim?[]:
-      loadTaxonomyV1(new URL('../../../',import.meta.url).pathname).classes.filter(x=>x.testRequired).flatMap(x=>x.triggers);
+      loadTaxonomyV1(new URL('../../../../../',import.meta.url).pathname).classes.filter(x=>x.testRequired).flatMap(x=>x.triggers);
     triggers[ctx.contextId]=distinct(needed);
   }
   // Script/config/handover text surfaces are review units in v13 even when
