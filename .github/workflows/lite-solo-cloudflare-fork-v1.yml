@@ -30,7 +30,9 @@ concurrency:
 jobs:
   fork:
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    # Seven Phase-5 machine targets each allow up to 35 minutes, sequentially.
+    # Avoid terminating the job below that cumulative authorized execution budget.
+    timeout-minutes: ${{ inputs.operation == 'PHASE_FINALIZE' && fromJSON(inputs.payload_json).phase == 5 && 360 || 100 }}
     steps:
       - name: Checkout isolated fork implementation
         uses: actions/checkout@v4
