@@ -1055,6 +1055,27 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
    const foundMembers=found.get(u.unitId)??new Map();
    foundMembers.set(m.unitId,m);found.set(u.unitId,foundMembers);
   };
+  // Phase-5 reconciliation can accept a newly discovered candidate after the
+  // immutable base target roster was prefilled from Phase 4. The controller
+  // reserves exactly one original APPEND unit for candidate-specific P5-T
+  // additions; restore that unit on the named aggregate missing-target error.
+  // Never invalidate an unrelated accepted source-target binding.
+  if(phase===5){
+    const match=message.match(/Phase 5 mandatory material candidate (P5-CAND-[A-Za-z0-9_-]+) has no targeted machine execution/);
+    if(match){
+      const append=plan.units.find(u=>u.kind==='APPEND'&&u.field==='targetDesigns');
+      if(append){
+        // This is a missing-output correction only: a preexisting accepted
+        // target with this exact key belongs to its own immutable source unit.
+        const exists=plan.units.some(u=>{
+          if(u===append||u.field!=='targetDesigns')return false;
+          const accepted=queue.units[u.unitId]?.acceptedPath?maybe(root,queue.units[u.unitId].acceptedPath):null;
+          return accepted?.submission?.entries?.some(e=>e.value?.candidateKey===match[1]);
+        });
+        if(!exists)mark(append,append);
+      }
+    }
+  }
   // Controller aggregate Phase-4 errors name discovery IDs, not shard array indices.
   // Reopen the candidate append slot for genuinely missing Step-3 candidate records,
   // or just the named original reconciliation batch member for deficient controls.
