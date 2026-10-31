@@ -592,8 +592,12 @@ async function unitValidateWave(c){
     const arr=byWorker.get(source.workerId)||[];arr.push(item);byWorker.set(source.workerId,arr);
   }
   const errors=[];
-  for(const [workerId,items] of byWorker)for(let i=0;i<items.length;i+=5){
-    const batch=items.slice(i,i+5),request={schemaVersion:'curveyield-lite-solo-unit-batch-request-v1',
+  // Cloudflare-only controller fork: process the complete assigned roster
+  // without the shared primary controller's five-item request constraint.
+  // Preserve its existing validator by issuing distinct source-bound SUBMIT
+  // operations; no global unit-count ceiling is imposed on this fork.
+  for(const [workerId,items] of byWorker)for(const item of items){
+    const batch=[item],request={schemaVersion:'curveyield-lite-solo-unit-batch-request-v1',
       requestId:'cf-wave-'+randomUUID(),operation:'SUBMIT',campaignId:c.directory.campaignId,
       campaignGenerationId:c.directory.campaignGenerationId,phaseSequence:phase,lane:'AUTO',
       workerId,sourceSha256:c.directory.sourceSha256,authorityDigest:c.directory.authorityDigest,
@@ -663,7 +667,7 @@ async function main(){
     await unitNextStep(c);
   }else if(OP==='PHASE_VALIDATE_UNIT'){
     const items=Array.isArray(payload.items)?payload.items:[payload];
-    strict(items.length>=1&&items.length<=5,'each canonical controller request supports 1–5 units; submit further packets in subsequent unrestricted runs');
+    strict(items.length>=1,'controller packet must contain at least one unit');
     strict(new Set(items.map(x=>safeId(x.unit_id))).size===items.length,'duplicate unit in pending controller packet');
     for(const item of items)await unitValidateSingle(c,item);
   }else if(OP==='PHASE_VALIDATE_STEP'){
