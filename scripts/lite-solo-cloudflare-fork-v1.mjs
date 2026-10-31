@@ -150,7 +150,7 @@ function validateSemanticStep(c){
   const stepKey='step-'+step;
   const filtered={...schema,actions:{[stepKey]:schema.actions[stepKey]}};
   const problems=validateWorkForm(filtered,form);
-  const scaffold=validatePhaseScaffold(phase,form,a.controllerPrefillDigestSha256,{skipControllerPrefillDigest:c.directory.executionModel==='PARALLEL_WORKER_UNITS'&&phase>=5});
+  const scaffold=validatePhaseScaffold(phase,form,a.controllerPrefillDigestSha256);
   problems.push(...scaffold.filter(x=>/digest|read-only|prefill|modified/i.test(x)));
   if(problems.length){
     const map=semanticShardFailureIndexV13({root:ROOT,indexRel:a.workShardIndexPath,deficiencies:problems});
