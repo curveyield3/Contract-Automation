@@ -224,6 +224,27 @@ function phaseFinalize(c){
   }else{
     strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===commit,'phase submission commit is not canonical head');
   }
+  if(phase===5){
+    const recorded=unitPlan(c).queue;
+    const prefillErrors=[
+      'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.',
+      'Controller-prefilled/read-only fields were modified; restore the generated values before validation.'
+    ];
+    const errors=recorded.finalizeDetails?.unmappedDeficiencies;
+    if(recorded.finalizeStatus==='BLOCKED'&&Array.isArray(errors)&&
+       errors.length===prefillErrors.length&&
+       prefillErrors.every(message=>errors.includes(message))){
+      // Invoke the existing source/authority-verified, immutable-v13 prefill
+      // restoration branch. No accepted unit or admitted source is rewritten.
+      const empty=fs.mkdtempSync('/tmp/lite-solo-phase5-prefill-recovery-');
+      try{
+        cmd('node',['scripts/lite-solo-unit-request-drain-v1.mjs',
+          '--root',ROOT,'--campaign-id',c.directory.campaignId,
+          '--requests-root',empty,'--mode','drain']);
+      }finally{fs.rmSync(empty,{recursive:true,force:true});}
+      c.directory=read(c.directoryPath);
+    }
+  }
   if([4,5,6].includes(phase)){
     const source=unitPlan(c);
     const reopened=source.units.filter(u=>source.queue.units?.[u.unitId]?.status==='REWORK_REQUIRED');
