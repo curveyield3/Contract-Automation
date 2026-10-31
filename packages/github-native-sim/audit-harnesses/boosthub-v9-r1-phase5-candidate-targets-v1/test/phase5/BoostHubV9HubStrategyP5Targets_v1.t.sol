@@ -104,6 +104,7 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         fees[0]=BoostHub.FeeConfig({platformFeeBps:0,platformFeeRecipient:address(0)});
         bool[] memory active=new bool[](1);active[0]=true;
         hub.setDepositors(ids,depositors,locks,selectors,fees,active);
+        hub.executeTransactions(); // Queue must be applied before reward harvest.
     }
     function _stakeHub(BoostHub hub,BoostV9BehaviorTokenV1 lp,uint256 amount) internal {
         lp.mint(address(this),amount);
