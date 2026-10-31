@@ -225,6 +225,16 @@ function phaseFinalize(c){
     strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===commit,'phase submission commit is not canonical head');
   }
   if([4,5,6].includes(phase)){
+    const source=unitPlan(c);
+    const reopened=source.units.filter(u=>source.queue.units?.[u.unitId]?.status==='REWORK_REQUIRED');
+    if(reopened.length){
+      const step=Number(reopened[0].path[1].slice(5));
+      strict(reopened.every(u=>Number(u.path[1].slice(5))===step),'controller reopened multiple steps');
+      const deficiencies=reopened.flatMap(u=>(source.queue.units[u.unitId].lastErrors||[]).map(error=>({unitId:u.unitId,reason:String(error.message||error),code:error.code||null,path:error.path||null})));
+      strict(deficiencies.length>0,'controller reopened units without named deficiencies');
+      publishCanonical(c);
+      return callback('/fork/phase-rework',{status:'REWORK_REQUIRED',campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,phase,step,stage:'STEP_'+step,sourceCommit:commit,unitIds:reopened.map(u=>u.unitId),deficiencies});
+    }
     const gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
     strict(gate.ready,'canonical unit finalization not ready: '+String(gate.reason||'units incomplete'));
     if(phase===5){
