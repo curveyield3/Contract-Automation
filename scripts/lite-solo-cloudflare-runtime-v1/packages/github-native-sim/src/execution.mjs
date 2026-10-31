@@ -35,14 +35,26 @@ export function safeRepositoryProjectPath(root, relativePath) {
   return resolved;
 }
 
-export function runProcess({ command, args = [], cwd, env = process.env, onStdout = null, onStderr = null, timeoutMs = null }) {
+export function runProcess({
+  command, args = [], cwd, env = process.env, onStdout = null, onStderr = null,
+  timeoutMs = null, maxStdoutBytes = 16 * 1024 * 1024,
+  maxStderrBytes = 2 * 1024 * 1024
+}) {
   return new Promise((resolve) => {
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    let timedOut = false;
+    // Bounded diagnostic tails avoid retaining potentially unbounded Foundry
+    // and RPC process output in the parent node heap.
+    const limit = (value) => Number.isSafeInteger(value) && value > 0 ? Math.min(value, 16 * 1024 * 1024) : 16 * 1024 * 1024;
+    const outLimit = limit(maxStdoutBytes), errLimit = limit(maxStderrBytes);
+    let outTail = Buffer.alloc(0), errTail = Buffer.alloc(0);
+    let stdoutBytes = 0, stderrBytes = 0;
+    const retain = (old, chunk, bound) => {
+      const next = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (next.length >= bound) return Buffer.from(next.subarray(next.length - bound));
+      if (old.length + next.length > bound) old = old.subarray(old.length + next.length - bound);
+      return Buffer.concat([old, next]);
+    };
+    let settled = false, timedOut = false;
     const bounded = Number.isSafeInteger(timeoutMs) && timeoutMs > 0;
-    // A bounded Linux runner must terminate the descendant Anvil/Foundry group too.
     const group = bounded && process.platform !== 'win32';
     const child = spawn(command, args, { cwd, env, shell: false, detached: group });
     let killTimer = null;
@@ -51,7 +63,9 @@ export function runProcess({ command, args = [], cwd, env = process.env, onStdou
     };
     const timeout = bounded ? setTimeout(() => {
       timedOut = true;
-      stderr += `\nV7_EXECUTION_TIMEOUT: subprocess exceeded ${timeoutMs}ms\n`;
+      const marker = Buffer.from(`\nV7_EXECUTION_TIMEOUT: subprocess exceeded ${timeoutMs}ms\n`);
+      errTail = retain(errTail, marker, errLimit);
+      stderrBytes += marker.length;
       terminate('SIGTERM');
       killTimer = setTimeout(() => terminate('SIGKILL'), 5_000);
       killTimer.unref();
@@ -61,11 +75,30 @@ export function runProcess({ command, args = [], cwd, env = process.env, onStdou
       settled = true;
       if (timeout) clearTimeout(timeout);
       if (killTimer) clearTimeout(killTimer);
-      resolve({ exitCode: timedOut ? -1 : Number.isInteger(code) ? code : -1,
-        signal: signal ?? null, timedOut, stdout, stderr: error ? `${stderr}${error.message}` : stderr });
+      if (error) {
+        const msg = Buffer.from(String(error.message || error));
+        errTail = retain(errTail, msg, errLimit);
+        stderrBytes += msg.length;
+      }
+      resolve({
+        exitCode: timedOut ? -1 : Number.isInteger(code) ? code : -1,
+        signal: signal ?? null, timedOut,
+        stdout: outTail.toString('utf8'), stderr: errTail.toString('utf8'),
+        stdoutTruncated: stdoutBytes > outTail.length,
+        stderrTruncated: stderrBytes > errTail.length,
+        stdoutBytes, stderrBytes
+      });
     };
-    child.stdout?.on('data', (chunk) => { const text = chunk.toString(); stdout += text; if (onStdout) onStdout(text, child); });
-    child.stderr?.on('data', (chunk) => { const text = chunk.toString(); stderr += text; if (onStderr) onStderr(text, child); });
+    child.stdout?.on('data', (chunk) => {
+      stdoutBytes += chunk.length;
+      outTail = retain(outTail, chunk, outLimit);
+      if (onStdout) onStdout(chunk.toString(), child);
+    });
+    child.stderr?.on('data', (chunk) => {
+      stderrBytes += chunk.length;
+      errTail = retain(errTail, chunk, errLimit);
+      if (onStderr) onStderr(chunk.toString(), child);
+    });
     child.on('error', (error) => finish(-1, null, error));
     child.on('close', (code, signal) => finish(code, signal));
   });
