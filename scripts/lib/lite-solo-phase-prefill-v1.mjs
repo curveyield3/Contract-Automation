@@ -817,7 +817,13 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
         machine?.source?.commit===source.commit&&
         machine?.source?.archivePath===snapshotPath&&
         machine?.source?.archiveSha256===observedSha;
-      const valid=sourceVerified&&ingestion?.schemaVersion==='audit-execution-evidence-ingestion-receipt-v1'
+      if(!sourceVerified){
+        incompleteRequests++;
+        deficiencies.push('Phase 9 finding '+findingKey+' rerun '+requestId+
+          ' lacks matching source-bound Phase-9 remediation ZIP SHA-256, independently verified pre-execution observer proof, or executed-source identity; do not accept or re-use this test evidence.');
+        continue;
+      }
+      const valid=ingestion?.schemaVersion==='audit-execution-evidence-ingestion-receipt-v1'
         && ingestion.requestId===requestId
         && machine?.requestId===requestId
         && machine?.requestDigest===request.requestDigest
