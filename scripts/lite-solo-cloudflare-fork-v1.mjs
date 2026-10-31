@@ -13,6 +13,8 @@ import {readJson, writeJson, repoFile, loadPhaseSchema, validateWorkForm, valida
 import {validatePhaseScaffold} from './lib/lite-solo-phase-prefill-v1.mjs';
 import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {restoreControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
+import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
+import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
 const OP = process.env.FORK_OPERATION;
 const payload = JSON.parse(process.env.FORK_PAYLOAD_JSON || '{}');
@@ -354,6 +356,36 @@ function unitField(schema,u){
   const action=schema.actions?.[pathTokens?.[1]];
   return action?.fields?.find(x=>x.name===pathTokens?.[3]);
 }
+function assignedExecutionSupport(c,u){
+ const phase=Number(c.directory.currentAssignment?.phaseSequence);
+ if(phase!==5&&phase!==6)return [];
+ const values=(u.kind==='BATCH'?u.members:[u]).map(m=>m?.initialValue).filter(v=>v&&typeof v==='object');
+ const stage=String(u.path?.[1]||u.members?.[0]?.path?.[1]||'');
+ if(phase===5&&stage!=='step-3'||phase===6&&!['step-4','step-5'].includes(stage))return [];
+ const paths=new Set(),workspace=c.campaignPath+'/work/phase-'+phaseNo(phase)+'/';
+ const add=p=>{
+   if(typeof p!=='string'||!p.trim()||p.includes('<')||p==='NONE_IDENTIFIED')return;
+   let resolved=p.startsWith(c.campaignPath+'/')?p:path.posix.join(c.campaignPath,p);
+   if(!resolved.startsWith(workspace)||!/\.(?:json|sol|toml|md)$/.test(resolved))return;
+   safePath(resolved);paths.add(resolved);
+ };
+ for(const v of values){
+   add(v.executionRequestRef);
+   for(const p of Array.isArray(v.requestPaths)?v.requestPaths:[])add(p);
+   // The directory itself is a controller-prefilled bound scope, never an
+   // arbitrary agent-selected workspace. These are optional existing-lane
+   // inputs: machine assertions and acceptance remain controller-owned.
+   const dir=v.requestDirectory;
+   if(phase===6&&typeof dir==='string'&&dir&&!dir.includes('<')){
+     const resolved=dir.startsWith(c.campaignPath+'/')?dir:path.posix.join(c.campaignPath,dir);
+     if(resolved.startsWith(workspace)){safePath(resolved);
+       for(const name of ['request.json','run-1.json','run-2.json','run-3.json','harness.sol','foundry.toml','medusa.json'])add(resolved+'/'+name);
+     }
+   }
+ }
+ strict(paths.size<=24,'controller-prefilled execution support exceeds per-unit manifest');
+ return [...paths].map(path=>({path,maxBytes:1024*1024,required:false}));
+}
 function buildUnitMeta(c,u,schema){
   const index=u.packetIndexPath?read(safePath(u.packetIndexPath)):null;
   let initial,inputSchema;
@@ -396,7 +428,7 @@ function buildUnitMeta(c,u,schema){
     dependencies:u.dependencies||[],path:u.path,members:u.members,field:u.field,
     inputTemplate:initial,validationSchema:inputSchema,
     templateSha256:sha(JSON.stringify(initial)),schemaSha256:sha(JSON.stringify(inputSchema)),
-    supportingFileRequirements:[],evidenceRefs:u.packetIndexPath?[u.packetIndexPath]:[]};
+    supportingFileRequirements:assignedExecutionSupport(c,u),evidenceRefs:u.packetIndexPath?[u.packetIndexPath]:[]};
 }
 async function unitNextStep(c){
   const phase=Number(need('phase')),step=Number(need('step'));
@@ -488,6 +520,37 @@ function submittedUnitFile(c,phase,u){
  * validator used by the original wave. No other unit is claimed or modified.
  * Worker leases remain independent, so the agent can claim its next packet.
  */
+async function materializePhase5Request(c,u,selected){
+ if(Number(c.directory.currentAssignment.phaseSequence)!==5||u.field!=='targetDesigns')return;
+ const submitted=JSON.parse(fs.readFileSync(selected.filename,'utf8'));
+ const candidates=Array.isArray(submitted.entries)?submitted.entries:[];
+ const phase0Source={...read(c.campaignPath+'/receipts/PHASE_00_RECEIPT_v1.json').source};
+ const manifestRel=c.campaignPath+'/evidence/phase0/PHASE0_FORK_STATE_MANIFEST_v1.json';
+ if(fs.existsSync(relative(manifestRel))){
+   try{
+     const manifest=read(manifestRel);
+     const validated=await verifyPhase0ForkStateV1({root:relative(c.campaignPath+'/evidence/phase0'),manifest});
+     if(validated!==false&&manifest.sourceSha256===c.directory.sourceSha256&&manifest.campaignId===c.directory.campaignId)
+       phase0Source.reusableForkState={...manifest,manifestRef:manifestRel};
+   }catch{phase0Source.reusableForkState={status:'INVALID'};}
+ }
+ for(const entry of candidates){
+   const target=entry?.value;
+   if(target?.executionMethod!=='V7_REQUEST')continue;
+   const name=safeId(String(target.candidateKey||'').replace(/[^A-Za-z0-9._-]/g,'_'));
+   const rel=c.campaignPath+'/work/phase-05/execution-requests/'+name+'.json';
+   if(fs.existsSync(relative(rel)))continue; // Existing immutable requests are validator-owned.
+   const generated=generateV7ExecutionRequestV1({campaignId:c.directory.campaignId,
+     sourceSha256:c.directory.sourceSha256,phase0Source,target,automationRoot:process.cwd()});
+   if(generated.status!=='GENERATED')continue; // Controller returns existing named rework.
+   fs.mkdirSync(path.dirname(relative(rel)),{recursive:true});
+   writeJson(relative(rel),generated.request);
+   const evidence=c.campaignPath+'/work/phase-05/execution-requests/'+name+'.design-v1.json';
+   writeJson(relative(evidence),{schemaVersion:'curveyield-phase5-machine-design-v1',
+     campaignId:c.directory.campaignId,sourceSha256:c.directory.sourceSha256,
+     candidateKey:target.candidateKey,requestDigest:generated.request.requestDigest,...generated.designEvidence});
+ }
+}
 async function unitValidateSingle(c,item){
   const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
   strict([4,5,6].includes(phase),'unit verification outside unit phases');
@@ -505,6 +568,7 @@ async function unitValidateSingle(c,item){
   const selected=submittedUnitFile(c,phase,u);
   strict(sha(fs.readFileSync(selected.filename))===expectedSha,'published unit differs from pending Worker submission');
   strict(Number(item.attempt)===selected.attempt,'submitted attempt differs from pending Worker attempt');
+  await materializePhase5Request(c,u,selected);
   state.status='CLAIMED';state.workerId=selected.workerId;state.claimEpoch=selected.epoch;state.claimToken=randomUUID();
   writeJson(relative(current.queueRel),current.queue);
   const request={schemaVersion:'curveyield-lite-solo-unit-batch-request-v1',
