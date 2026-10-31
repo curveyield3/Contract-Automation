@@ -713,6 +713,11 @@ export async function executePhase5TargetsV1({
       stdoutTruncated:Boolean(result.stdoutTruncated),
       stderrTruncated:Boolean(result.stderrTruncated)
     };
+    // V7's candidate workspace is scratch only. Persisted machine evidence
+    // lives under the distinct controller evidence path (evAbs). Removing
+    // scratch before the next candidate prevents seven Foundry/Anvil build
+    // trees from accumulating on the same GitHub-hosted runner.
+    fs.rmSync(workspace,{recursive:true,force:true});
   }
   // All covering runs are finished before an omitted duplicate receives
   // an inherited evidence reference. The gate separately verifies identity.
