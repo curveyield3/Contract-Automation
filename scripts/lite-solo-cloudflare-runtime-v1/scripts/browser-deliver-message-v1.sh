@@ -16,7 +16,7 @@ if [ -z "${STOP_BEFORE_SEND:-}" ]; then
 fi
 export STOP_BEFORE_SEND
 set +e
-timeout -k 10s 360s node scripts/browser-agent-wake.mjs >&2
+timeout -k 10s 360s node scripts/lite-solo-cloudflare-runtime-v1/scripts/browser-agent-wake.mjs >&2
 rc=$?
 set -e
 if [ ! -s "$WAKE_RESULT_PATH" ]; then
