@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {V2_AUTOMATION_RELEASE,V2_RUNNER_RELEASE} from '../../packages/github-native-sim/src/schema.mjs';
 import {validateDeepAssuranceRequestWithV26V1} from '../../packages/github-native-sim/src/schema-v26.mjs';
 
@@ -62,12 +63,28 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
       'require an existing audited harness bundle ID, not a placeholder');
     if(automationRoot&&nonempty(blueprint.configuration?.harness?.bundleId)){
       const id=blueprint.configuration.harness.bundleId;
+      // The isolated Cloudflare V7 CLI resolves overlays relative to its own
+      // module tree, not the repository's original github-native-sim directory.
+      const runnerRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
       const base=/^[a-z0-9][a-z0-9._-]{0,127}$/.test(id)
-        ?path.resolve(automationRoot,'packages/github-native-sim/audit-harnesses',id):null;
-      const ready=base&&fs.existsSync(base)&&fs.statSync(base).isDirectory()&&
-        ['medusa.json','foundry.toml'].every(name=>fs.existsSync(path.join(base,name)));
+        ?path.join(runnerRoot,'packages/github-native-sim/audit-harnesses',id):null;
+      let ready=Boolean(base&&fs.existsSync(base)&&fs.statSync(base).isDirectory());
+      if(ready){
+        try{
+          const manifest=JSON.parse(fs.readFileSync(path.join(base,'manifest.json'),'utf8'));
+          ready=manifest.schemaVersion==='phase6-audit-harness-overlay-v1'&&
+            manifest.bundleId===id&&Array.isArray(manifest.files)&&manifest.files.length>0&&
+            ['medusa.json','foundry.toml'].every(required=>manifest.files.some(entry=>entry.destination===required))&&
+            manifest.files.every(entry=>{
+              const rel=entry?.source;
+              return typeof rel==='string'&&rel.length>0&&!path.isAbsolute(rel)&&
+                !rel.split(/[\\/]/).some(part=>!part||part==='.'||part==='..')&&
+                fs.statSync(path.join(base,rel)).isFile();
+            });
+        }catch{ready=false;}
+      }
       need('executionBlueprint.configuration.harness.bundleId',ready,
-        'bundle must exist in the trusted runner overlay registry with medusa.json and foundry.toml');
+        'bundle and every manifest source must exist in the isolated Cloudflare runner registry');
     }
   }
  }
