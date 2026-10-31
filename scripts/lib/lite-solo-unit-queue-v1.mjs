@@ -890,7 +890,19 @@ export function finalizeReadinessV1({root,campaignPath,directory,phase}){
  const pending=plan.units.filter(u=>queue.units[u.unitId]?.status!=='ACCEPTED');
  if(pending.length)return {ready:false,reason:'mandatory units remain',unitIds:pending.map(x=>x.unitId)};
  if(queue.finalizeStatus==='SEALED')return {ready:false,reason:'already sealed'};
- if(queue.finalizeStatus==='BLOCKED')return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
+ if(queue.finalizeStatus==='BLOCKED'){
+  // A previous canonical seal may have named a new Phase-5 candidate that
+  // the initial Phase-4-derived target roster could not prefill. The frozen
+  // append unit is now supported by reopenAggregateDefectsV1. Permit only
+  // this exact already-published named defect through the same canonical
+  // FINALIZE retry; it will reopen the original unit, not grant a seal.
+  const missed=queue.finalizeDetails?.unmappedDeficiencies;
+  const recoverable=phase===5&&Array.isArray(missed)&&missed.length>0&&
+    missed.every(s=>typeof s==='string'&&
+      /^Phase 5 mandatory material candidate P5-CAND-[A-Za-z0-9_-]+ has no targeted machine execution$/.test(s))&&
+    plan.units.some(u=>u.kind==='APPEND'&&u.field==='targetDesigns'&&queue.units[u.unitId]?.status==='ACCEPTED');
+  if(!recoverable)return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
+ }
  for(const u of plan.units){
   const state=queue.units[u.unitId],accepted=read(root,state.acceptedPath);
   if(accepted.submissionSha256!==state.acceptedSha256||
