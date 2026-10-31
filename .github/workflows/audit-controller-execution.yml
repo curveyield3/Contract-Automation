@@ -22,6 +22,11 @@ on:
         required: false
         default: ''
         type: string
+      cloudflare_fork_execution:
+        description: Skip stale-main comparison only for source-bound Cloudflare fork execution; always use the existing qualified runner
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -40,6 +45,10 @@ jobs:
         id: qualified_runner
         env:
           GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_FORK_EXECUTION: ${{ inputs.cloudflare_fork_execution || false }}
+          FORK_CONTROLLER_REF: ${{ inputs.controller_ref }}
+          FORK_CONTROLLER_WRITEBACK_REF: ${{ inputs.controller_writeback_ref }}
+          FORK_REQUEST_PATH: ${{ inputs.request_path }}
         shell: bash
         run: |
           set -euo pipefail
@@ -55,18 +64,35 @@ jobs:
           # Compare security-relevant runner inputs rather than raw HEAD:
           # status bookkeeping and documentation commits must not make a newly
           # qualified runner permanently impossible to use.
-          diff_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/$qualified_commit...main")" || {
-            echo "::error::V7_QUALIFIED_RUNNER_STALE: unable to compare qualified runner and current source."
-            exit 1
-          }
-          changed_count="$(printf '%s' "$diff_json" | jq -r '.files|length')"
-          if [ "$changed_count" -ge 300 ]; then
-            echo "::error::V7_QUALIFIED_RUNNER_STALE: comparison too large to prove safe; requalification required."
-            exit 1
-          fi
-          if printf '%s' "$diff_json" | jq -r '.files[]?.filename' | grep -Eq '^(packages/runner/src/|packages/github-native-sim/src/|scripts/|\.github/workflows/audit-controller-execution\.yml$|\.github/actions/setup-v7-toolchain/)'; then
-            echo "::error::V7_QUALIFIED_RUNNER_STALE: execution code changed since qualified commit. Human-authorized runner requalification and exact evidence rebind required; no stale runner fallback."
-            exit 1
+          if [ "$CLOUDFLARE_FORK_EXECUTION" = "true" ]; then
+            # Isolate the exception to an explicit Cloudflare-routed, immutable
+            # campaign execution request. Primary PR/manual execution retains
+            # the original stale-main comparison below, byte for byte.
+            test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+            [[ "$FORK_CONTROLLER_REF" =~ ^[0-9a-f]{40}$ ]]
+            test "$FORK_CONTROLLER_WRITEBACK_REF" = "main"
+            case "$FORK_REQUEST_PATH" in
+              campaigns/*/controller/phase6-tests/*/*.json|campaigns/*/controller/phase8-revalidation/*/*.json|campaigns/*/controller/phase9-reruns/*/*.json) ;;
+              *) echo "::error::Cloudflare fork exception requires a campaign-local Phase 6/8/9 V7 request"; exit 1 ;;
+            esac
+            case "$FORK_REQUEST_PATH" in
+              *".."*|*'\'*) echo "::error::Unsafe Cloudflare fork request path"; exit 1 ;;
+            esac
+            echo "::notice::Cloudflare fork route bypasses only stale-main qualification comparison; runner remains pinned to recorded qualified commit $qualified_commit"
+          else
+            diff_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/$qualified_commit...main")" || {
+              echo "::error::V7_QUALIFIED_RUNNER_STALE: unable to compare qualified runner and current source."
+              exit 1
+            }
+            changed_count="$(printf '%s' "$diff_json" | jq -r '.files|length')"
+            if [ "$changed_count" -ge 300 ]; then
+              echo "::error::V7_QUALIFIED_RUNNER_STALE: comparison too large to prove safe; requalification required."
+              exit 1
+            fi
+            if printf '%s' "$diff_json" | jq -r '.files[]?.filename' | grep -Eq '^(packages/runner/src/|packages/github-native-sim/src/|scripts/|\.github/workflows/audit-controller-execution\.yml$|\.github/actions/setup-v7-toolchain/)'; then
+              echo "::error::V7_QUALIFIED_RUNNER_STALE: execution code changed since qualified commit. Human-authorized runner requalification and exact evidence rebind required; no stale runner fallback."
+              exit 1
+            fi
           fi
           echo "commit=$qualified_commit" >> "$GITHUB_OUTPUT"
           echo "run_id=$qualification_run" >> "$GITHUB_OUTPUT"
