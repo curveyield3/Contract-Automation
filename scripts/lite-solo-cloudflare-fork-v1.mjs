@@ -362,7 +362,7 @@ function assignedExecutionSupport(c,u){
  const values=(u.kind==='BATCH'?u.members:[u]).map(m=>m?.initialValue).filter(v=>v&&typeof v==='object');
  const stage=String(u.path?.[1]||u.members?.[0]?.path?.[1]||'');
  if(phase===5&&stage!=='step-3'||phase===6&&!['step-4','step-5'].includes(stage))return [];
- const paths=new Set(),workspace=c.campaignPath+'/work/phase-'+phaseNo(phase)+'/';
+ const paths=new Set(),workspace=phase===6?c.campaignPath+'/controller/phase6-tests/':c.campaignPath+'/work/phase-05/';
  const add=p=>{
    if(typeof p!=='string'||!p.trim()||p.includes('<')||p==='NONE_IDENTIFIED')return;
    let resolved=p.startsWith(c.campaignPath+'/')?p:path.posix.join(c.campaignPath,p);
