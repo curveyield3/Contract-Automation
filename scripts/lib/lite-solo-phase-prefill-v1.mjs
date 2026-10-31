@@ -792,7 +792,32 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
       const observerAbs=repoFile(root,path.posix.join(campaignPath,observerRel));
       const ingestion=readJsonIf(ingestionAbs);
       const machine=readJsonIf(evidenceAbs);
-      const valid=ingestion?.schemaVersion==='audit-execution-evidence-ingestion-receipt-v1'
+      const observer=readJsonIf(observerAbs);
+      const source=request?.source??{};
+      const snapshotRoot=path.posix.join(campaignPath,'remediation/source-snapshots')+'/';
+      const snapshotPath=String(source.archivePath??'');
+      const archiveName=snapshotPath.startsWith(snapshotRoot)?snapshotPath.slice(snapshotRoot.length):'';
+      const sourcePathValid=source.repository==='curveyield3/Audit-Controller'&&
+        /^[0-9a-f]{40}$/.test(String(source.commit??''))&&
+        /^[a-f0-9]{64}$/.test(String(source.archiveSha256??''))&&
+        /^[A-Za-z0-9_.-]+\\.zip$/.test(archiveName)&&!archiveName.includes('/');
+      let observedSha=null;
+      if(sourcePathValid){
+        const archiveAbs=repoFile(root,snapshotPath);
+        if(fs.existsSync(archiveAbs)&&fs.statSync(archiveAbs).isFile())
+          observedSha=createHash('sha256').update(fs.readFileSync(archiveAbs)).digest('hex');
+      }
+      const sourceVerified=sourcePathValid&&observedSha===source.archiveSha256&&
+        observer?.requestId===requestId&&observer?.requestDigest===request.requestDigest&&
+        observer?.sourceVerification?.status==='PASS'&&observer.sourceVerification.preExecution===true&&
+        observer.sourceVerification.archiveSha256===observedSha&&
+        observer.sourceVerification.archivePath===snapshotPath&&
+        observer.sourceVerification.sourceCommit===source.commit&&
+        machine?.source?.repository===source.repository&&
+        machine?.source?.commit===source.commit&&
+        machine?.source?.archivePath===snapshotPath&&
+        machine?.source?.archiveSha256===observedSha;
+      const valid=sourceVerified&&ingestion?.schemaVersion==='audit-execution-evidence-ingestion-receipt-v1'
         && ingestion.requestId===requestId
         && machine?.requestId===requestId
         && machine?.requestDigest===request.requestDigest
