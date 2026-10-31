@@ -29,6 +29,10 @@
     {
       "source": "test/phase5/BoostHubV9HubStrategyP5Targets_v1.t.sol",
       "destination": "test/phase5/BoostHubV9HubStrategyP5Targets_v1.t.sol"
+    },
+    {
+      "source": "test/phase5/BoostHubV9VaultP5Targets_v1.t.sol",
+      "destination": "test/phase5/BoostHubV9VaultP5Targets_v1.t.sol"
     }
   ]
 }
