@@ -287,8 +287,11 @@ export async function stageExactArchiveSource({
     // The archive digest above still gates every byte, and this only removes
     // the archive's own parent prefix, never searches for arbitrary content.
     const archiveDir = path.posix.dirname(archivePath);
-    const relativeProject = projectPath.startsWith(archiveDir + '/')
-      ? projectPath.slice(archiveDir.length + 1) : null;
+    const relativeProject = projectPath === archiveDir
+      ? '.'
+      : projectPath.startsWith(archiveDir + '/')
+        ? projectPath.slice(archiveDir.length + 1)
+        : null;
     if (!relativeProject) {
       throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `archive project root is missing: ${projectPath}`, { cause: error.message });
     }
