@@ -234,7 +234,13 @@ function phaseFinalize(c){
       const result=JSON.parse(pre.trim().split('\n').at(-1));
       const file=c.campaignPath+'/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json';
       writeJson(relative(file),result);
-      strict(result.runnable===true,'Phase 5 executable preflight not qualified; controller must not seal');
+      strict(result.status==='PREFLIGHT_PASS','Phase 5 preflight has outstanding source-bound deficiencies');
+      // Every controller-required unit was accepted by finalizeReadinessV1.
+      // A valid negative candidate set has no execution to schedule.
+      const noExecutableCandidates=result.designCount===0&&result.readyCount===0&&
+        !result.evidenceDisposition&&!result.deferralPath&&!(result.failures||[]).length;
+      strict(result.runnable===true||noExecutableCandidates,
+        'Phase 5 executable preflight is not qualified or lacks permitted negative evidence');
     }
     const requestDir=fs.mkdtempSync('/tmp/lite-solo-cloudflare-empty-');
     try{
@@ -430,6 +436,18 @@ function unitRelevant(u,phase,step,stage,schema){
   if(u.kind==='BATCH')return (schema.actions['step-'+step]?.fields||[]).some(f=>f.name===u.field);
   return u.path?.[1]==='step-'+step;
 }
+// Fork-only issue order: Step 3 synthesizes accepted Step 4 and 5 proof.
+// The canonical controller owns its dependencies; primary workflows remain unchanged.
+function forkUnitOrder(phase){return phase===6?[1,2,4,5,3]:Array.from({length:({4:3,5:3})[phase]},(_,i)=>i+1);}
+function forkNextUnitStep(c,source,phase,step){
+ const order=forkUnitOrder(phase),at=order.indexOf(step);
+ strict(at>=0,'unknown Cloudflare fork stage');
+ if(at===order.length-1)return {done:true,step:null,stage:null};
+ const nextStep=order[at+1],nextStage='STEP_'+nextStep;
+ strict(eligibleStage(c,source,phase,nextStep,nextStage).length>0,
+   'CONTROLLER_DEPENDENCY_BLOCKED: successor '+nextStage+' has no eligible accepted-prerequisite units');
+ return {done:false,step:nextStep,stage:nextStage};
+}
 function eligibleStage(c,source,phase,step,stage){
   const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
   return source.units.filter(u=>unitRelevant(u,phase,step,stage,schema)&&
@@ -537,9 +555,10 @@ async function unitAdvanceAcceptedStage(c){
   let nextStep=step,nextStage=stage;
   if(nextEligible.length===0){
     if(step===0&&stage==='FLOW_REVIEW'){nextStep=0;nextStage='ATTACK_REVIEW';}
+    else if(phase===6){const next=forkNextUnitStep(c,current,phase,step);if(next.done){nextStep=null;nextStage=null;}else{nextStep=next.step;nextStage=next.stage;}}
     else{nextStep=step===0?1:step+1;nextStage='STEP_'+nextStep;}
   }
-  const done=step===({4:3,5:3,6:5}[phase])&&nextStep>step;
+  const done=phase===6?nextStep===null:step===({4:3,5:3}[phase])&&nextStep>step;
   let nextRosterDigest=null,nextQueueSha256=null;
   if(!done){
     const next=eligibleStage(c,current,phase,nextStep,nextStage);
@@ -628,11 +647,11 @@ async function unitValidateWave(c){
     if(!nextRoster.length){
       const pending=updated.units.filter(u=>unitRelevant(u,phase,step,stage,loadPhaseSchema(ROOT,AUTH,phase).schema)&&updated.queue.units[u.unitId]?.status!=='ACCEPTED');
       strict(!pending.length,'CONTROLLER_DEPENDENCY_BLOCKED: incomplete current-step units remain; do not reorder steps or invent acceptance: '+pending.slice(0,20).map(x=>x.unitId).join(','));
-      nextStep=step===0?1:step+1;
-      nextStage='STEP_'+nextStep;
+      if(phase===6){const next=forkNextUnitStep(c,updated,phase,step);if(next.done){nextStep=null;nextStage=null;}else{nextStep=next.step;nextStage=next.stage;}}
+      else{nextStep=step===0?1:step+1;nextStage='STEP_'+nextStep;}
     }
   }
-  const done=step===({4:3,5:3,6:5}[phase])&&nextStep>step;
+  const done=phase===6?nextStep===null:step===({4:3,5:3}[phase])&&nextStep>step;
   let nextRosterDigest=null,nextQueueSha256=null;
   if(!done){
     nextRoster=eligibleStage(c,updated,phase,nextStep,nextStage);
