@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 // Audit-only; original imported BoostHub and Beefy strategy are unchanged.
 import {BoostHub} from "../../contracts/BoostHub.sol";
 import {BeefyVaultV7FixedV2} from "../../beefy/contracts/beefy/BeefyVaultV7FixedV2.sol";
+import {IStrategyBoostHubV1} from "../../beefy/contracts/beefy/interfaces/IStrategyBoostHubV1.sol";
 import {BaseAllToWantBoostHubV5} from "../../beefy/contracts/beefy/BaseAllToWantBoostHubV5.sol";
 import {StrategyConvexBoostHubStakingV5} from "../../beefy/contracts/beefy/StrategyConvexBoostHubStakingV5.sol";
 import "./BoostHubV9VyperP5Targets_v1.t.sol";
