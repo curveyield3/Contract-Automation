@@ -470,12 +470,12 @@ function submittedUnitFile(c,phase,u){
  * validator used by the original wave. No other unit is claimed or modified.
  * Worker leases remain independent, so the agent can claim its next packet.
  */
-async function unitValidateSingle(c){
+async function unitValidateSingle(c,item){
   const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
   strict([4,5,6].includes(phase),'unit verification outside unit phases');
   assertAssigned(c,phase);
-  const id=safeId(need('unit_id')),expectedSha=need('submission_sha256');
-  const sourceCommit=need('source_commit');
+  const id=safeId(item.unit_id),expectedSha=item.submission_sha256;
+  const sourceCommit=item.source_commit||need('source_commit');
   strict(/^[a-f0-9]{40}$/.test(sourceCommit)&&/^[a-f0-9]{64}$/.test(expectedSha),'invalid pinned submission identity');
   const current=unitPlan(c);
   strict(current.plan.phaseEpoch===payload.phase_epoch,'stale unit phase epoch');
@@ -486,7 +486,7 @@ async function unitValidateSingle(c){
   strict((u.dependencies||[]).every(dep=>current.queue.units?.[dep]?.status==='ACCEPTED'),'unit dependencies not accepted');
   const selected=submittedUnitFile(c,phase,u);
   strict(sha(fs.readFileSync(selected.filename))===expectedSha,'published unit differs from pending Worker submission');
-  strict(Number(payload.attempt)===selected.attempt,'submitted attempt differs from pending Worker attempt');
+  strict(Number(item.attempt)===selected.attempt,'submitted attempt differs from pending Worker attempt');
   state.status='CLAIMED';state.workerId=selected.workerId;state.claimEpoch=selected.epoch;state.claimToken=randomUUID();
   writeJson(relative(current.queueRel),current.queue);
   const request={schemaVersion:'curveyield-lite-solo-unit-batch-request-v1',
@@ -662,7 +662,10 @@ async function main(){
     strict([4,5,6].includes(Number(payload.phase)),'SEMANTIC_INTERMEDIATE_WORKFLOWS_DISABLED: original phase boundary handles non-unit steps');
     await unitNextStep(c);
   }else if(OP==='PHASE_VALIDATE_UNIT'){
-    await unitValidateSingle(c);
+    const items=Array.isArray(payload.items)?payload.items:[payload];
+    strict(items.length>=1&&items.length<=5,'each canonical controller request supports 1–5 units; submit further packets in subsequent unrestricted runs');
+    strict(new Set(items.map(x=>safeId(x.unit_id))).size===items.length,'duplicate unit in pending controller packet');
+    for(const item of items)await unitValidateSingle(c,item);
   }else if(OP==='PHASE_VALIDATE_STEP'){
     strict([4,5,6].includes(Number(payload.phase)),'SEMANTIC_INTERMEDIATE_WORKFLOWS_DISABLED: original phase boundary handles non-unit validation');
     await unitValidateWave(c);
