@@ -25,4 +25,4 @@ runs:
         TS_CLIENT_ID: ${{ inputs.client-id }}
         TAILNET_TAG: ${{ inputs.tag }}
         TAILNET_PING: ${{ inputs.ping }}
-      run: bash "$GITHUB_WORKSPACE/scripts/browser-agent-tailnet-oidc.sh"
+      run: bash "$GITHUB_WORKSPACE/scripts/lite-solo-cloudflare-runtime-v1/scripts/browser-agent-tailnet-oidc.sh"
