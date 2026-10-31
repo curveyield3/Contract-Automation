@@ -11,6 +11,7 @@ on:
           - PHASE_0_INITIALIZE
           - PHASE_NEXT_STEP
           - PHASE_VALIDATE_STEP
+          - PHASE_VALIDATE_UNIT
           - PHASE_FINALIZE
       payload_json:
         description: Exact source/campaign/phase/commit-bound JSON payload
