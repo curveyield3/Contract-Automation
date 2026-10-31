@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-report-v1",
+  "mode": "LITE_SOLO",
+  "status": "PASS",
+  "requestId": "cyvbusdc-v14-20261031-01",
+  "publicationPolicySha256": "d29ddfa8a8abd1c17ba511736511c860fc1fb3ccd1b3fdb93c418ed4938fe3db",
+  "actor": {
+    "actorId": "lite-solo-agent"
+  },
+  "source": {
+    "sha256": "f20435ab7fb6c5d6f7d3260d515c7aad0f11c4752b082c9583f6303aefbe8e2d",
+    "inputUrl": "https://lite-solo-api.jamesnexus9999.workers.dev/fork/source?auditId=cyvbusdc-v14-20261031-01",
+    "scanUrls": []
+  },
+  "campaign": {
+    "campaignId": "cloudflare-audit-cyvbusdc-v14-20261031-01-r1",
+    "campaignGenerationId": "cloudflare-audit-cyvbusdc-v14-20261031-01-r1-g1-20261031T200232Z",
+    "campaignName": "cloudflare-audit-cyvbusdc-v14-20261031-01 r1",
+    "workspacePath": "campaigns/cloudflare-audit-cyvbusdc-v14-20261031-01/cloudflare-audit-cyvbusdc-v14-20261031-01 r1"
+  },
+  "completedAt": "2026-10-31T20:02:33Z"
+}
