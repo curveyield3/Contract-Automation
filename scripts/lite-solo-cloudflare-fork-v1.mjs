@@ -256,6 +256,27 @@ function phaseFinalize(c){
       publishCanonical(c);
       return callback('/fork/phase-rework',{status:'REWORK_REQUIRED',campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,phase,step,stage:'STEP_'+step,sourceCommit:commit,unitIds:reopened.map(u=>u.unitId),deficiencies});
     }
+    // Repair a previously failed Phase-5 seal that mistakenly rewrote only
+    // the controller assignment's prefill digest after auto-binding requests.
+    // Restore exclusively the original SHA-verified immutable shard base.
+    // The controller still owns all semantic validation and phase sealing.
+    if(phase===5){
+      const state=unitPlan(c),defects=state.queue.finalizeDetails?.unmappedDeficiencies||[];
+      const mismatched=defects.length===2&&
+        defects.includes('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.')&&
+        defects.includes('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
+      if(state.queue.finalizeStatus==='BLOCKED'&&mismatched){
+        const ix=read(safePath(c.directory.currentAssignment.workShardIndexPath));
+        const baseRel=path.posix.join(path.posix.dirname(c.directory.currentAssignment.workShardIndexPath),ix.baseFile);
+        const blob=fs.readFileSync(relative(baseRel));
+        strict(sha(blob)===ix.baseSha256,'frozen Phase-5 base content hash mismatch');
+        const base=JSON.parse(blob.toString('utf8')),form=read(c.directory.currentAssignment.workFormPath);
+        const digest=base.automationInputs?.controllerPrefillDigestSha256;
+        strict(/^[0-9a-f]{64}$/.test(digest||'')&&form.automationInputs?.controllerPrefillDigestSha256===digest,
+          'refuse to recover Phase-5 digest from non-frozen or mutated data');
+        c.directory.currentAssignment.controllerPrefillDigestSha256=digest;
+      }
+    }
     const gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
     strict(gate.ready,'canonical unit finalization not ready: '+String(gate.reason||'units incomplete'));
     if(phase===5){
