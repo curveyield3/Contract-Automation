@@ -61,10 +61,10 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
     need('executionBlueprint.configuration.harness.bundleId',
       nonempty(blueprint.configuration?.harness?.bundleId),
       'require an existing audited harness bundle ID, not a placeholder');
-    if(automationRoot&&nonempty(blueprint.configuration?.harness?.bundleId)){
+    if(nonempty(blueprint.configuration?.harness?.bundleId)){
       const id=blueprint.configuration.harness.bundleId;
       // The isolated Cloudflare V7 CLI resolves overlays relative to its own
-      // module tree, not the repository's original github-native-sim directory.
+      // module tree at scripts/lite-solo-cloudflare-runtime-v1/, never the original github-native-sim directory.
       const runnerRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
       const base=/^[a-z0-9][a-z0-9._-]{0,127}$/.test(id)
         ?path.join(runnerRoot,'packages/github-native-sim/audit-harnesses',id):null;
