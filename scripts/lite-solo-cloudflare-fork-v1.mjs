@@ -242,7 +242,26 @@ function phaseFinalize(c){
           '--root',ROOT,'--campaign-id',c.directory.campaignId,
           '--requests-root',empty,'--mode','drain']);
       }finally{fs.rmSync(empty,{recursive:true,force:true});}
+      // The existing controller drainer verifies the locked v13 shard base,
+      // reassembles the accepted records, and restores the controller-owned
+      // assignment digest. Commit that controller-owned recovery immediately,
+      // so an unrelated Phase-5 preflight or machine failure cannot discard it.
       c.directory=read(c.directoryPath);
+      const recovered=unitPlan(c).queue;
+      const assignment=c.directory.currentAssignment;
+      const index=read(safePath(assignment.workShardIndexPath));
+      const basePath=path.posix.join(path.posix.dirname(assignment.workShardIndexPath),index.baseFile);
+      const immutable=fs.readFileSync(relative(basePath));
+      strict(sha(immutable)===index.baseSha256,'recovery base no longer matches locked controller digest');
+      const locked=JSON.parse(immutable.toString('utf8'));
+      const form=read(safePath(assignment.workFormPath));
+      strict(recovered.finalizeStatus==='NOT_STARTED'&&
+        Object.values(recovered.units||{}).length>0&&Object.values(recovered.units||{}).every(u=>u.status==='ACCEPTED'),
+        'controller did not restore all accepted units to finalization-ready state');
+      strict(assignment.controllerPrefillDigestSha256===locked.automationInputs?.controllerPrefillDigestSha256&&
+        form.automationInputs?.controllerPrefillDigestSha256===assignment.controllerPrefillDigestSha256,
+        'controller digest recovery did not match the immutable GitHub form');
+      publishCanonical(c);
     }
   }
   if([4,5,6].includes(phase)){
