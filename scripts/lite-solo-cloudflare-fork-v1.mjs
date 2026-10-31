@@ -526,13 +526,19 @@ async function unitAdvanceAcceptedStage(c){
   strict(current.plan.phaseEpoch===payload.phase_epoch,'stage epoch changed');
   const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
   const stageUnits=current.units.filter(u=>unitRelevant(u,phase,step,stage,schema));
-  strict(stageUnits.length>0&&stageUnits.every(u=>current.queue.units?.[u.unitId]?.status==='ACCEPTED'),
-    'stage still has unaccepted controller units');
-  strict(stageUnits.every(u=>current.queue.units[u.unitId].acceptedPath&&current.queue.units[u.unitId].acceptedSha256),
+  strict(stageUnits.length>0,'controller stage has no canonical packets');
+  const nextEligible=eligibleStage(c,current,phase,step,stage);
+  const incomplete=stageUnits.filter(u=>current.queue.units?.[u.unitId]?.status!=='ACCEPTED');
+  strict(nextEligible.length>0||incomplete.length===0,
+    'CONTROLLER_DEPENDENCY_BLOCKED: no eligible packets while stage contains unaccepted dependencies: '+incomplete.slice(0,20).map(u=>u.unitId).join(','));
+  const accepted=stageUnits.filter(u=>current.queue.units?.[u.unitId]?.status==='ACCEPTED');
+  strict(accepted.every(u=>current.queue.units[u.unitId].acceptedPath&&current.queue.units[u.unitId].acceptedSha256),
     'stage lacks immutable accepted unit evidence');
   let nextStep=step,nextStage=stage;
-  if(step===0&&stage==='FLOW_REVIEW'){nextStep=0;nextStage='ATTACK_REVIEW';}
-  else{nextStep=step===0?1:step+1;nextStage='STEP_'+nextStep;}
+  if(nextEligible.length===0){
+    if(step===0&&stage==='FLOW_REVIEW'){nextStep=0;nextStage='ATTACK_REVIEW';}
+    else{nextStep=step===0?1:step+1;nextStage='STEP_'+nextStep;}
+  }
   const done=step===({4:3,5:3,6:5}[phase])&&nextStep>step;
   let nextRosterDigest=null,nextQueueSha256=null;
   if(!done){
