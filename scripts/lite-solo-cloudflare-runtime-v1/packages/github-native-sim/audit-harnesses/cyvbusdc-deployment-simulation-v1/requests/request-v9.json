@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "curveyield-cyvbusdc-literal-forge-deployment-request-v9",
+  "purpose": "Test the literal pinned DeployCyvbUSDC_v3.s.sol with Foundry nightly on a Contract-Automation Katana Anvil fork",
+  "smartContractsRepository": "CurveYield2/Smart-Contracts",
+  "smartContractsCommit": "fd0a01ab0e4a066a4e4ef8d28a6987a194ab5f45",
+  "deploymentScript": "cyvbUSDC/script/DeployCyvbUSDC_v3.s.sol",
+  "simulationHarness": "packages/github-native-sim/audit-harnesses/cyvbusdc-deployment-simulation-v1/run-v2.mjs",
+  "forkChainId": 747474,
+  "forkProvider": "Katana dRPC public RPC",
+  "foundryChannel": "nightly",
+  "productionWritesAllowed": false
+}

@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity >=0.8.13 <0.9.0;
+
+import {Phase6InvariantTargetingV2} from "./Phase6InvariantTargeting_v2.sol";
+import {Phase6StatefulHandlerV2} from "./Phase6StatefulHandler_v2.sol";
+
+/// @notice Audit-only invariant suite skeleton. Apply curveyield-contract-intro before instantiation.
+/// The trusted runner has already selected the existing mutable Anvil RPC and frozen block before
+/// Forge starts. Do not create/select another fork with a requester/public RPC inside this suite.
+abstract contract Phase6InvariantSuiteV2 is Phase6InvariantTargetingV2 {
+    address internal phase6Target;
+    Phase6StatefulHandlerV2 internal phase6Handler;
+    address[] internal phase6Actors;
+
+    function _phase6DeployOrBindFrozenSystem() internal virtual returns (address target);
+    function _phase6BuildActors() internal virtual returns (address[] memory actors);
+    function _phase6SecurityProperty001() internal view virtual returns (bool);
+    function _phase6SecurityProperty002() internal view virtual returns (bool);
+    function _phase6ReferenceModelConsistent() internal view virtual returns (bool);
+
+    function setUp() public virtual {
+        phase6Target = _phase6DeployOrBindFrozenSystem();
+        require(phase6Target != address(0), "PHASE6_TARGET_ZERO");
+        phase6Actors = _phase6BuildActors();
+        require(phase6Actors.length >= 2, "PHASE6_ACTOR_MODEL_TOO_SMALL");
+        phase6Handler = new Phase6StatefulHandlerV2(phase6Target, phase6Actors);
+
+        _phase6TargetContract(address(phase6Handler));
+        bytes4[] memory selectors = new bytes4[](4);
+        selectors[0] = Phase6StatefulHandlerV2.actionA.selector;
+        selectors[1] = Phase6StatefulHandlerV2.actionB.selector;
+        selectors[2] = Phase6StatefulHandlerV2.actionC.selector;
+        selectors[3] = Phase6StatefulHandlerV2.advanceTime.selector;
+        _phase6TargetSelector(address(phase6Handler), selectors);
+
+        for (uint256 i = 0; i < phase6Actors.length; i++) _phase6TargetSender(phase6Actors[i]);
+    }
+
+    function invariant_security_property_001() public view {
+        require(_phase6SecurityProperty001(), "PHASE6_PROPERTY_001_FALSIFIED");
+    }
+
+    function invariant_security_property_002() public view {
+        require(_phase6SecurityProperty002(), "PHASE6_PROPERTY_002_FALSIFIED");
+    }
+
+    function invariant_reference_model_consistency() public view {
+        require(_phase6ReferenceModelConsistent(), "PHASE6_REFERENCE_MODEL_DIVERGENCE");
+    }
+
+    function afterInvariant() public view {
+        (uint256 successes, uint256 reverts, uint256 totalCalls) = phase6Handler.handlerQuality();
+        require(totalCalls > 0, "PHASE6_DEAD_HANDLER");
+        require(successes > 0, "PHASE6_NO_SUCCESSFUL_STATE_TRANSITIONS");
+        successes;
+        reverts;
+    }
+}

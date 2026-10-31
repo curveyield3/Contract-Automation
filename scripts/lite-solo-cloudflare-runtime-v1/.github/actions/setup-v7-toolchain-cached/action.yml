@@ -1,0 +1,95 @@
+name: Setup V7 toolchain (shared cached)
+description: Restore pinned Slither environment and patched Medusa binary shared by both primary and No Telemetry Phase 0
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12.15'
+
+    - name: Restore pinned Slither virtual environment
+      id: slither-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/curveyield-primary/slither-0.11.6-py312
+        key: phase0-primary-slither-env-v1-${{ runner.os }}-${{ runner.arch }}-py312-${{ hashFiles('.github/actions/setup-v7-toolchain/action.yml') }}
+
+    - name: Restore or install pinned Slither
+      shell: bash
+      run: |
+        set -euo pipefail
+        slither_env="$HOME/.cache/curveyield-primary/slither-0.11.6-py312"
+        if [ -x "$slither_env/bin/python" ] && "$slither_env/bin/python" -c "import importlib.metadata as m; assert m.version('slither-analyzer') == '0.11.6'"; then
+          echo 'Slither 0.11.6 cache HIT - skipping pip installation'
+        else
+          echo 'Slither 0.11.6 cache MISS/invalid - building pinned virtual environment'
+          rm -rf "$slither_env"
+          python -m venv "$slither_env"
+          timeout -s TERM -k 15s 240s "$slither_env/bin/python" -m pip install --disable-pip-version-check --no-input --timeout 20 --retries 2 'slither-analyzer==0.11.6'
+        fi
+        "$slither_env/bin/python" -c "import importlib.metadata as m; assert m.version('slither-analyzer') == '0.11.6'"
+        echo "$slither_env/bin" >> "$GITHUB_PATH"
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.6'
+        cache: false
+
+    - name: Cache Medusa Go build inputs
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/pip
+          ~/.cache/go-build
+          ~/go/pkg/mod
+          ~/.cache/curveyield-v7-tools/medusa-1.5.1-corpus-perf
+          ~/.cache/curveyield-v7-tools/medusa-1.5.1-corpus-perf.patch-sha256
+        key: v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-1.5.1-${{ hashFiles('.github/actions/setup-v7-toolchain/medusa-v1.5.1-corpus-perf.patch') }}
+        restore-keys: |
+          v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Install pinned Medusa and normalize Forge CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        install_dir="$RUNNER_TEMP/v7-tools/bin"
+        mkdir -p "$install_dir"
+        # Pinned Medusa 1.5.1 source plus a performance-only corpus patch: memoize corpus sequence hashes and defer
+        # corpus disk writes to shutdown. Without it every coverage-increasing call re-hashes and re-serializes under
+        # a global lock, so deep fuzzing collapses to a few calls per second. Fuzzing semantics are unchanged.
+        medusa_patch="$GITHUB_WORKSPACE/.github/actions/setup-v7-toolchain/medusa-v1.5.1-corpus-perf.patch"
+        medusa_cache="$HOME/.cache/curveyield-v7-tools/medusa-1.5.1-corpus-perf"
+        mkdir -p "$(dirname "$medusa_cache")"
+        if [ -x "$medusa_cache" ] && [ "$(cat "$medusa_cache.patch-sha256" 2>/dev/null)" = "$(sha256sum "$medusa_patch" | cut -d' ' -f1)" ]; then
+          cp "$medusa_cache" "$install_dir/medusa"
+        else
+          medusa_src="$(timeout -s TERM -k 15s 180s go mod download -json github.com/crytic/medusa@v1.5.1 | jq -r .Dir)"
+          build_dir="$RUNNER_TEMP/medusa-1.5.1-src"
+          rm -rf "$build_dir" && cp -r "$medusa_src" "$build_dir" && chmod -R u+w "$build_dir"
+          (cd "$build_dir" && patch -p1 --forward < "$medusa_patch" && timeout -s TERM -k 15s 300s go build -o "$install_dir/medusa" .)
+          cp "$install_dir/medusa" "$medusa_cache"
+          sha256sum "$medusa_patch" | cut -d' ' -f1 > "$medusa_cache.patch-sha256"
+        fi
+
+        forge_entry="$GITHUB_WORKSPACE/node_modules/@foundry-rs/forge/bin.mjs"
+        if [ ! -f "$forge_entry" ]; then
+          echo "Pinned @foundry-rs/forge package is missing bin.mjs" >&2
+          exit 1
+        fi
+        chmod +x "$forge_entry"
+        ln -sfn "$forge_entry" "$install_dir/forge"
+
+        echo "$install_dir" >> "$GITHUB_PATH"
+        echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+
+    - name: Verify exact V7 toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        slither_env="$HOME/.cache/curveyield-primary/slither-0.11.6-py312"
+        export PATH="$slither_env/bin:$RUNNER_TEMP/v7-tools/bin:$GITHUB_WORKSPACE/node_modules/.bin:$PATH"
+        timeout -s TERM -k 15s 90s npm run v7:toolchain:verify
+        echo 'V7 cached toolchain PASS: Slither, Medusa, Forge versions verified'

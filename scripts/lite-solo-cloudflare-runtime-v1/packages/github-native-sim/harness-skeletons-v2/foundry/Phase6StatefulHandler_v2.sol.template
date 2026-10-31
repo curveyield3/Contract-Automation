@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity >=0.8.13 <0.9.0;
+
+/// @notice Audit-only skeleton. Apply curveyield-contract-intro before instantiation.
+/// Replace every PHASE6_* marker with target-specific logic derived from Phases 2-5.
+/// Fork/RPC selection is runner-owned and already bound to the existing mutable Anvil RPC.
+interface VmPhase6V2 {
+    function prank(address) external;
+    function warp(uint256) external;
+    function roll(uint256) external;
+}
+
+interface IPhase6TargetV2 {
+    function PHASE6_ACTION_A(uint256 amount) external;
+    function PHASE6_ACTION_B(uint256 amount) external;
+    function PHASE6_ACTION_C(address account, uint256 amount) external;
+}
+
+contract Phase6StatefulHandlerV2 {
+    VmPhase6V2 internal constant vm = VmPhase6V2(address(uint160(uint256(keccak256("hevm cheat code")))));
+
+    IPhase6TargetV2 public immutable target;
+    address[] public actors;
+    uint256 public successfulTransitions;
+    uint256 public revertedTransitions;
+    uint256 public actionACalls;
+    uint256 public actionBCalls;
+    uint256 public actionCCalls;
+    uint256 public timeTransitions;
+
+    mapping(address => uint256) public ghostActionAByActor;
+    mapping(address => uint256) public ghostActionBByActor;
+    uint256 public ghostAggregateA;
+    uint256 public ghostAggregateB;
+
+    constructor(address target_, address[] memory actors_) {
+        require(target_ != address(0), "PHASE6_TARGET_ZERO");
+        require(actors_.length >= 2, "PHASE6_MULTI_ACTOR_REQUIRED");
+        target = IPhase6TargetV2(target_);
+        actors = actors_;
+    }
+
+    function actorCount() external view returns (uint256) { return actors.length; }
+    function _actor(uint256 actorSeed) internal view returns (address) { return actors[actorSeed % actors.length]; }
+
+    function _bounded(uint256 value, uint256 minValue, uint256 maxValue) internal pure returns (uint256) {
+        require(minValue <= maxValue, "PHASE6_BAD_BOUND");
+        if (minValue == maxValue) return minValue;
+        return minValue + (value % (maxValue - minValue + 1));
+    }
+
+    function actionA(uint256 actorSeed, uint256 rawAmount) external {
+        address actor = _actor(actorSeed);
+        uint256 amount = _bounded(rawAmount, PHASE6_MIN_A, PHASE6_MAX_A);
+        actionACalls++;
+        vm.prank(actor);
+        try target.PHASE6_ACTION_A(amount) {
+            successfulTransitions++;
+            ghostActionAByActor[actor] += amount;
+            ghostAggregateA += amount;
+        } catch { revertedTransitions++; }
+    }
+
+    function actionB(uint256 actorSeed, uint256 rawAmount) external {
+        address actor = _actor(actorSeed);
+        uint256 amount = _bounded(rawAmount, PHASE6_MIN_B, PHASE6_MAX_B);
+        actionBCalls++;
+        vm.prank(actor);
+        try target.PHASE6_ACTION_B(amount) {
+            successfulTransitions++;
+            ghostActionBByActor[actor] += amount;
+            ghostAggregateB += amount;
+        } catch { revertedTransitions++; }
+    }
+
+    function actionC(uint256 actorSeed, uint256 recipientSeed, uint256 rawAmount) external {
+        address actor = _actor(actorSeed);
+        address recipient = _actor(recipientSeed);
+        uint256 amount = _bounded(rawAmount, PHASE6_MIN_C, PHASE6_MAX_C);
+        actionCCalls++;
+        vm.prank(actor);
+        try target.PHASE6_ACTION_C(recipient, amount) {
+            successfulTransitions++;
+            // PHASE6_UPDATE_GHOST_STATE_FOR_ACTION_C
+        } catch { revertedTransitions++; }
+    }
+
+    function advanceTime(uint256 rawSeconds) external {
+        uint256 delta = _bounded(rawSeconds, 1, PHASE6_MAX_TIME_DELTA);
+        vm.warp(block.timestamp + delta);
+        vm.roll(block.number + 1);
+        timeTransitions++;
+    }
+
+    function handlerQuality() external view returns (uint256 successes, uint256 reverts, uint256 totalActionCalls) {
+        successes = successfulTransitions;
+        reverts = revertedTransitions;
+        totalActionCalls = actionACalls + actionBCalls + actionCCalls + timeTransitions;
+    }
+}

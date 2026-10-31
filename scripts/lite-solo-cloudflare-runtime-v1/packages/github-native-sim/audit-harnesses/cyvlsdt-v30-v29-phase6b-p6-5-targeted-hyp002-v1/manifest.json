@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-v29-phase6b-p6-5-targeted-hyp002-v1",
+  "purpose": "P6.5 Process 6 targeted adversarial Medusa campaign for HYP-002/CAND-P2-001 with adjacent zero-supply residual states retained for CAND-P4-001.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "hypothesisDefinition": {
+    "hypothesisId": "HYP-002",
+    "candidateId": "CAND-P2-001",
+    "targetContracts": [
+      "CurveYieldVault"
+    ],
+    "selectors": [
+      "quote estimate mutation",
+      "deposit",
+      "withdraw all",
+      "donation",
+      "share transfer",
+      "explicit value boundaries"
+    ],
+    "actorRoles": [
+      "MEV/market actor",
+      "existing shareholder",
+      "new depositor"
+    ],
+    "requiredStartingState": "Exact V30 vault bound to an audit strategy whose estimatedUnharvestedWant is externally mutable; multiple funded shareholders.",
+    "boundaryClasses": [
+      "0",
+      "1",
+      "WAD neighbors",
+      "operational maxima",
+      "type(uint96).max",
+      "share balance neighbors"
+    ],
+    "sequenceMotifs": [
+      "mutate quote -> equal deposit comparison",
+      "deposit -> quote mutation -> withdraw -> restart",
+      "donation/estimate divergence -> transfer/deposit/withdraw"
+    ],
+    "falsificationOracle": "Equal deposits must not mint quote-dependent unequal shares; zero-supply restart must not inherit residual estimated value.",
+    "engine": "Medusa 1.5.1",
+    "randomnessPreserved": [
+      "quote/deposit values",
+      "actors",
+      "ordering",
+      "repetitions",
+      "block/time delay"
+    ]
+  },
+  "rebasedFrom": {
+    "bundleId": "cyvlsdt-v30-v29-phase6b-p6-4-refinement-rerun-v1",
+    "overlayGitTreeSha1": "8ed1ffdb1fde4c638cc9e42045823a2ba318729a"
+  },
+  "productionSourceModified": false,
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "test/phase6/CyvlSdtVaultPhase6Harness_v3.t.sol",
+      "destination": "test/phase6/CyvlSdtVaultPhase6Harness_v3.t.sol"
+    }
+  ]
+}

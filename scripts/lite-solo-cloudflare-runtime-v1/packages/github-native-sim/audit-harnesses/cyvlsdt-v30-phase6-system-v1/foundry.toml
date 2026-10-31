@@ -1,0 +1,34 @@
+# cyvlSDT v30 Phase 6 supplemental full-system audit-only Foundry configuration v1
+# Frozen production source remains unchanged. The runner supplies the existing mutable
+# Anvil RPC and preflight-frozen block through forge CLI arguments.
+# Vyper targets are compiled/verified separately by the canonical mixed-language runner;
+# this Solidity state machine does not import them.
+
+[profile.default]
+src = "contracts"
+test = "test"
+out = "out-phase6-system-audit"
+libs = ["node_modules"]
+cache_path = "cache-phase6-system-audit"
+solc_version = "0.8.28"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+remappings = ["@openzeppelin/=node_modules/@openzeppelin/"]
+skip = [
+  "contracts/CurveYieldGovernanceStaking.vy",
+  "contracts/external/curve/ChildGauge.vy"
+]
+
+[fuzz]
+runs = 4096
+max_test_rejects = 65536
+failure_persist_file = "cache-phase6-system-audit/fuzz-failures"
+
+[invariant]
+runs = 1024
+depth = 192
+fail_on_revert = false
+show_metrics = true
+failure_persist_dir = "cache-phase6-system-audit/invariant-failures"

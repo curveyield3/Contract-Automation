@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-v29-phase6b-p6-6-exact-vyper-cand-p2-002-v1",
+  "purpose": "Dedicated exact-source dynamic Medusa treatment for CurveYieldGovernanceStaking.vy / HYP-003 / CAND-P2-002 after the P6.1 v29 fallback was exhausted.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a",
+    "vyperSourceSha256": "184e9311d4095131ff408322d17c0f157b996b1f0edeef5c3ddba520d799b1d5",
+    "p60RawResultSha256": "6643709fa813524de7860307cb7aaf6496705787ce934c22829de2c9a591955e"
+  },
+  "productionSourceModified": false,
+  "contentAddresses": {
+    "harnessSha256": "77aed950829eea5b5b70473cc63d988988cfb60affb0c448f37f1e963aee6657",
+    "medusaConfigSha256": "30c96f9ef9ee6645c2b606ae9c7fca9a03c63d06d06782144988b5be96307b47",
+    "foundryConfigSha256": "42620bed005ec8638337a0ef9aec0c03e2683f4c8e7bf092056d17af2b271168",
+    "exactSourceBindingSha256": "4282014f8a8cdf05753ec6550780852ccf5b56ce2ffb06a40a48f5bc46c9d31c",
+    "creationBytecodeUtf8Sha256": "9f9209cb3768d7cd2cb979622c5247b7078dafec64d05794199c68050d9e6f26"
+  },
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "exact-source-binding.json",
+      "destination": "phase6-evidence/p6-6/exact-source-binding.json"
+    },
+    {
+      "source": "test/phase6/CyvlSdtGovernanceStakingExactVyperP66Harness.t.sol",
+      "destination": "test/phase6/CyvlSdtGovernanceStakingExactVyperP66Harness.t.sol"
+    }
+  ]
+}

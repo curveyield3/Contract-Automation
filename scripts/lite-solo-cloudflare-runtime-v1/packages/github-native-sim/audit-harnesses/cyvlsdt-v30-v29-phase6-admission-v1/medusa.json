@@ -1,0 +1,76 @@
+{
+  "fuzzing": {
+    "workers": 1,
+    "testLimit": 1,
+    "shrinkLimit": 1,
+    "callSequenceLength": 1,
+    "coverageEnabled": true,
+    "corpusDirectory": "phase6-corpus/cyvlsdt-v30-v29-admission-v1",
+    "coverageFormats": [
+      "lcov"
+    ],
+    "revertReporterEnabled": true,
+    "targetContracts": [
+      "CyvlSdtPhase6AdmissionV1"
+    ],
+    "senderAddresses": [
+      "0x10000"
+    ],
+    "blockNumberDelayMax": 1,
+    "blockTimestampDelayMax": 1,
+    "testing": {
+      "stopOnFailedTest": true,
+      "stopOnNoTests": true,
+      "testAllContracts": false,
+      "testViewMethods": true,
+      "assertionTesting": {
+        "enabled": false
+      },
+      "propertyTesting": {
+        "enabled": true,
+        "testPrefixes": [
+          "property_"
+        ]
+      },
+      "optimizationTesting": {
+        "enabled": false,
+        "testPrefixes": [
+          "optimize_"
+        ]
+      },
+      "targetFunctionSignatures": [
+        "CyvlSdtPhase6AdmissionV1.actionAdmission(uint8)"
+      ],
+      "excludeFunctionSignatures": []
+    },
+    "chainConfig": {
+      "cheatCodes": {
+        "cheatCodesEnabled": true,
+        "enableFFI": false
+      },
+      "forkConfig": {
+        "forkModeEnabled": true,
+        "rpcUrl": "PHASE6_RUNTIME_INJECTION_REQUIRED",
+        "rpcBlock": 1,
+        "poolSize": 1
+      }
+    }
+  },
+  "compilation": {
+    "platform": "crytic-compile",
+    "platformConfig": {
+      "target": ".",
+      "args": [
+        "--foundry-compile-all"
+      ]
+    }
+  },
+  "slither": {
+    "useSlither": true
+  },
+  "logging": {
+    "level": "info",
+    "logDirectory": "",
+    "noColor": true
+  }
+}

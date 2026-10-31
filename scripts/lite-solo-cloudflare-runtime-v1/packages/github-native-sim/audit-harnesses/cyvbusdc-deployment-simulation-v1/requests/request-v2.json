@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "curveyield-cyvbusdc-deployment-simulation-request-v2",
+  "purpose": "Retry DeployCyvbUSDC_v3.s.sol on the existing Contract-Automation Katana Anvil fork while skipping Forge's duplicate internal fork simulation",
+  "smartContractsRepository": "CurveYield2/Smart-Contracts",
+  "smartContractsCommit": "fd0a01ab0e4a066a4e4ef8d28a6987a194ab5f45",
+  "deploymentScript": "cyvbUSDC/script/DeployCyvbUSDC_v3.s.sol",
+  "forkChainId": 747474,
+  "productionWritesAllowed": false
+}

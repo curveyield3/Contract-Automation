@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-v29-phase6-system-v1",
+  "provenanceBundleId": "cyvlsdt-v30-phase6-system-v3",
+  "provenanceRunnerCommit": "bb8637f31b891b5b995019dbc09db5a4f5107b33",
+  "rebindReason": "CURRENT_CAMPAIGN_SOURCE_REPOSITORY_AND_SEAL_COMMIT_BINDING",
+  "purpose": "Current-campaign source-bound audit-only Medusa and Foundry system harness admission for cyvlSDT v30 Phase 6. Test/config bytes are inherited unchanged from the qualified runner's system-v3 bundle; only the manifest identity and exact current source binding are new.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "productionSourceModified": false,
+  "inheritedFileGitBlobSha1": {
+    "medusa.json": "8bd9a5922822ce371329464c7240ff2561aebaf8",
+    "foundry.toml": "280f0128e7f3e2f91c57a0fddaadf60bc9585d5f",
+    "test/phase6/CyvlSdtSystemPhase6Harness_v2_support.t.sol": "50779603d4977de5c8d8da3a6157ec40586ba895",
+    "test/phase6/CyvlSdtSystemPhase6Harness_v3.t.sol": "7ae3a1153eacc161313c68407840a2036cf8d728"
+  },
+  "limitations": [
+    "StakeDAO fee generation and aggregate-router correctness are simulated by audit-only interface-valid dependencies; only the production Locker-side integration/accounting is claimed.",
+    "CurveYieldGovernanceStaking.vy cannot be imported into this Solidity state machine by the admitted crytic-compile path; its source-derived zero-working-supply property remains mandatory for a dedicated Phase-6 campaign/refinement and later pinned-Anvil lifecycle evidence.",
+    "Harness admission and smoke execution are not Phase-6B campaign conclusions and do not promote any candidate to a finding."
+  ],
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "test/phase6/CyvlSdtSystemPhase6Harness_v2_support.t.sol",
+      "destination": "test/phase6/CyvlSdtSystemPhase6Harness_v2_support.t.sol"
+    },
+    {
+      "source": "test/phase6/CyvlSdtSystemPhase6Harness_v3.t.sol",
+      "destination": "test/phase6/CyvlSdtSystemPhase6Harness_v3.t.sol"
+    }
+  ]
+}

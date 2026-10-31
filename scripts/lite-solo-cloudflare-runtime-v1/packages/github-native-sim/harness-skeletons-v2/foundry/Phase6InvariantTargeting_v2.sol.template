@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity >=0.8.13 <0.9.0;
+
+/// @notice Audit-only skeleton. Before instantiation, apply curveyield-contract-intro
+/// and match the frozen target compiler. Fork/RPC selection is runner-owned; this
+/// harness must not accept or embed arbitrary RPC URLs.
+abstract contract Phase6InvariantTargetingV2 {
+    struct FuzzSelector {
+        address addr;
+        bytes4[] selectors;
+    }
+
+    address[] private _phase6TargetContracts;
+    address[] private _phase6TargetSenders;
+    FuzzSelector[] private _phase6TargetSelectors;
+
+    function _phase6TargetContract(address target) internal { _phase6TargetContracts.push(target); }
+    function _phase6TargetSender(address sender) internal { _phase6TargetSenders.push(sender); }
+    function _phase6TargetSelector(address target, bytes4[] memory selectors) internal { _phase6TargetSelectors.push(FuzzSelector({addr: target, selectors: selectors})); }
+
+    function targetContracts() public view returns (address[] memory) { return _phase6TargetContracts; }
+    function targetSenders() public view returns (address[] memory) { return _phase6TargetSenders; }
+    function targetSelectors() public view returns (FuzzSelector[] memory) { return _phase6TargetSelectors; }
+}

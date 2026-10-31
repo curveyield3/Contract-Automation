@@ -1,0 +1,116 @@
+{
+  "schemaVersion": "audit-v7-phase6-harness-manifest-v2",
+  "campaignId": "PHASE6_CAMPAIGN_ID",
+  "phaseId": "build-and-test",
+  "profileId": "github-native-simulate-v2",
+  "productionSource": {
+    "repository": "OWNER/REPOSITORY",
+    "commit": "PHASE6_40_HEX_SOURCE_COMMIT",
+    "projectPath": "PHASE6_PROJECT_PATH",
+    "archivePath": null,
+    "archiveSha256": null
+  },
+  "productionSourceFence": {
+    "modifiedByHarness": false,
+    "rule": "AUDIT_ONLY_OVERLAY_MUST_NOT_MUTATE_FROZEN_PRODUCTION_SOURCE"
+  },
+  "mutableRpcBinding": {
+    "policy": "EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY",
+    "runtimeSecretProfile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
+    "requesterSuppliedRpcAllowed": false,
+    "alternateMutableRpcAllowed": false,
+    "rpcUrlRecorded": false,
+    "chain": "ethereum",
+    "chainId": 1,
+    "preflightFrozenBlockNumber": "PHASE6_BLOCK_NUMBER",
+    "preflightFrozenBlockHash": "PHASE6_BLOCK_HASH",
+    "medusaForkModeRequired": true,
+    "foundryForkModeRequired": true,
+    "sameForkIdentityRequiredAcrossEngines": true
+  },
+  "authoringPrerequisite": {
+    "skill": "curveyield-contract-intro",
+    "requiredId": "6a642887e1b08191a95b1ed187b171ab",
+    "status": "MUST_RESOLVE_BEFORE_INSTANTIATING_SOLIDITY_HARNESS"
+  },
+  "runtimeMaterialization": {
+    "medusaConfig": "medusa.json",
+    "foundryConfig": "foundry.toml",
+    "auditTestRoot": "test/phase6",
+    "corpusRoot": "phase6-corpus",
+    "rpcInjection": "TRUSTED_RUNNER_ONLY"
+  },
+  "artifacts": [
+    {
+      "path": "test/phase6/PHASE6_FILE_v2.sol",
+      "kind": "AUDIT_ONLY_HARNESS",
+      "sha256": "PHASE6_64_HEX_SHA256",
+      "derivedFromSkeleton": "packages/github-native-sim/harness-skeletons-v2/PHASE6_TEMPLATE_v2",
+      "purpose": "PHASE6_PURPOSE",
+      "sourceBinding": "PHASE6_40_HEX_SOURCE_COMMIT"
+    }
+  ],
+  "campaigns": [
+    {
+      "campaignId": "A-M",
+      "engine": "medusa",
+      "purpose": "BROAD_RANDOMIZED_DISCOVERY",
+      "forkMode": true,
+      "forkBlockNumber": "PHASE6_BLOCK_NUMBER",
+      "forkBlockHash": "PHASE6_BLOCK_HASH",
+      "configSha256": "PHASE6_64_HEX_SHA256",
+      "corpusInSha256": null,
+      "corpusOutSha256": "PHASE6_64_HEX_SHA256",
+      "evidenceRef": "github-actions://PHASE6_EVIDENCE_REF"
+    },
+    {
+      "campaignId": "B-F",
+      "engine": "foundry",
+      "purpose": "PROPERTY_STATE_MACHINE_BOUNDARY",
+      "forkMode": true,
+      "forkBlockNumber": "PHASE6_BLOCK_NUMBER",
+      "forkBlockHash": "PHASE6_BLOCK_HASH",
+      "configSha256": "PHASE6_64_HEX_SHA256",
+      "evidenceRef": "github-actions://PHASE6_EVIDENCE_REF"
+    }
+  ],
+  "actors": [
+    {
+      "name": "ATTACKER",
+      "address": "0x0000000000000000000000000000000000010000",
+      "authority": "PHASE6_AUTHORITY_DESCRIPTION"
+    },
+    {
+      "name": "VICTIM",
+      "address": "0x0000000000000000000000000000000000020000",
+      "authority": "PHASE6_AUTHORITY_DESCRIPTION"
+    }
+  ],
+  "propertyBindings": [
+    {
+      "propertyId": "PHASE6_PROPERTY_ID",
+      "sourcePhase": "PHASE6_2_TO_5_SOURCE_EVIDENCE",
+      "implementation": "PHASE6_PROPERTY_FUNCTION_OR_ORACLE",
+      "campaignIds": ["B-M", "B-F"]
+    }
+  ],
+  "boundaryDictionary": [
+    {
+      "class": "THRESHOLD_NEIGHBORHOOD",
+      "basis": "PHASE6_SOURCE_SPEC_OR_MATH_EVIDENCE",
+      "values": ["threshold-1", "threshold", "threshold+1"]
+    }
+  ],
+  "triggerAssessment": {
+    "process8MultiActor": "COMPLETED_OR_NOT_TRIGGERED_WITH_EVIDENCE",
+    "process9GhostReferenceModel": "COMPLETED_OR_NOT_TRIGGERED_WITH_EVIDENCE",
+    "process10Differential": "COMPLETED_OR_NOT_TRIGGERED_WITH_EVIDENCE",
+    "process11DeepCorpusEscalation": "COMPLETED_OR_NOT_TRIGGERED_WITH_EVIDENCE"
+  },
+  "medusaBeforeFoundry": {
+    "terminalMedusaEvidenceRef": "github-actions://PHASE6_MEDUSA_TERMINAL_EVIDENCE",
+    "firstFoundryEvidenceRef": "github-actions://PHASE6_FOUNDRY_START_EVIDENCE",
+    "proven": true
+  },
+  "limitations": []
+}

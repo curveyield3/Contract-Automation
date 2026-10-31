@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-v29-phase6b-p6-4-refinement-rerun-v1",
+  "purpose": "P6.4 mandatory Medusa coverage/model refinement rerun. Relative to P6.3: adds explicit boundary transfer handler, increases selectors 10 to 11, actors 4 to 6, sequence depth 256 to 384, test limit 100000 to 120000, shrink limit 5000 to 7500, and time/block perturbation to one week/512 blocks.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "refinedFrom": {
+    "bundleId": "cyvlsdt-v30-v29-phase6b-p6-3-stateful-boundary-v2",
+    "overlayGitTreeSha1": "518dcb66efa8dfebd7c0e2700dd0164baa4acb69",
+    "rawResultSha256": "6d749f6607647f4630de11fe3316dd25e1a5687c48b1774946f9b6d3b2e2e1cd"
+  },
+  "boundaryDictionarySha256": "34af09b73ddd1efdb8c68db90a5ea6d66442d7fc3a3f79d5ee1f3cc69e9336e1",
+  "productionSourceModified": false,
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "test/phase6/CyvlSdtVaultPhase6Harness_v3.t.sol",
+      "destination": "test/phase6/CyvlSdtVaultPhase6Harness_v3.t.sol"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "audit-v7-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-phase6-revenue-accounting-v4",
+  "supersedesBundleId": "cyvlsdt-v30-phase6-system-v3",
+  "repairReason": "V3_UNRELATED_DISCOUNTED_SALE_CONSTRUCTOR_BLOCKED_MEDUSA",
+  "productionSourceModified": false,
+  "source": {
+    "repository": "CurveYield2/Solo-Audit-Controller",
+    "commit": "6bde63416a4611e127b8bb3a5958e6b6d874c188",
+    "archivePath": "campaigns/CurveYield-cyvlSDT-Deployment-Package-v30.zip",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "scope": [
+    "CurveYieldVlSDTRevenueStaking",
+    "CurveYieldVlSDTLocker",
+    "CurveYieldVlSDTBoostMerchant",
+    "CurveYieldVlSDTBoostStaking",
+    "CurveYieldVault",
+    "CurveYieldRevenueStrategyV7",
+    "CurveYieldRevenueConverter",
+    "CurveYieldUsdcToSdtConverter"
+  ],
+  "purpose": "Whole-number, multi-depositor, multi-source cyvlSDT revenue accounting campaign using the exact V30 revenue stack with deterministic accounting checkpoints after every successful state transition.",
+  "simulationBoundary": {
+    "fakeStakeDaoFeeGeneration": true,
+    "fakeStakeDaoAggregateRouter": true,
+    "fakePrincipalFundingToken": true,
+    "fakeVlSdtAndVlBoostBalances": true,
+    "fakeBoostMarketplace": true,
+    "fakeSwapAdaptersForDeterministicHarvest": true,
+    "productionRevenueContractsRemainExact": true,
+    "canonicalUsdcToSdtConverterConstructed": true,
+    "externalProtocolCorrectnessClaimed": false
+  },
+  "baseline": {
+    "directStakeA": "1000e18",
+    "directStakeB": "2000e18",
+    "directStakeC": "3000e18",
+    "vaultDeposit": "4000e18",
+    "totalActive": "10000e18",
+    "vlSdtFeeReward": "1000e6",
+    "merchantRevenue": "2000e6"
+  },
+  "requiredChecks": [
+    "active-and-queued-principal-backing",
+    "different-size-depositor-reward-weighting",
+    "fake-vlsdt-fee-source-conservation",
+    "boost-merchant-revenue-source-conservation",
+    "combined-revenue-source-conservation",
+    "direct-reward-claim-accounting",
+    "strategy-reward-claim-convert-compound-accounting",
+    "vault-share-supply-reconciliation",
+    "immediate-withdrawal-accounting",
+    "queued-withdrawal-accounting",
+    "strategy-and-vault-withdrawal-accounting",
+    "transition-call-success-revert-reconciliation"
+  ],
+  "limitations": [
+    "StakeDAO fee generation/router behavior is deliberately simulated; only the V30 Locker-side integration/accounting is under test.",
+    "Audit-only mintable principal/vlSDT/vlBoost/payment tokens provide deterministic balances and do not replace production contract logic under audit.",
+    "Deterministic harvest uses audit swap adapters behind the exact V30 CurveYieldRevenueConverter; the exact CurveYieldUsdcToSdtConverter is constructed and remains separately fork-verifiable.",
+    "No assertion from this overlay attests third-party StakeDAO, Curve or marketplace correctness."
+  ]
+}

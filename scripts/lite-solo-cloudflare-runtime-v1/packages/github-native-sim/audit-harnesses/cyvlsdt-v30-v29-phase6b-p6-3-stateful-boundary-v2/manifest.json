@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-v29-phase6b-p6-3-stateful-boundary-v2",
+  "purpose": "P6.3 repaired Medusa semi-targeted, stateful transaction-sequence and boundary/dictionary campaign for exact V30 CurveYieldVault. Boundary values are embedded in the harness; the separately content-addressed dictionary is evidence metadata and is not staged outside the audit-only allowlist.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "repairedFrom": {
+    "bundleId": "cyvlsdt-v30-v29-phase6b-p6-3-stateful-boundary-v1",
+    "overlayGitTreeSha1": "4b77362d4725ccfe82313cf722856f93e8a8b42f",
+    "failure": "audit-only destination allowlist rejected audit-boundary-dictionary.json"
+  },
+  "boundaryDictionary": {
+    "sha256": "34af09b73ddd1efdb8c68db90a5ea6d66442d7fc3a3f79d5ee1f3cc69e9336e1",
+    "gitBlobSha1": "daffef707ceab8b8c3e8fc212c9bada503a8edd5",
+    "executionBinding": "Values and classes embedded in CyvlSdtVaultPhase6Harness_v2.t.sol"
+  },
+  "productionSourceModified": false,
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "test/phase6/CyvlSdtVaultPhase6Harness_v2.t.sol",
+      "destination": "test/phase6/CyvlSdtVaultPhase6Harness_v2.t.sol"
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-v29-phase6b-p6-1-discovery-v5",
+  "supersedesBundleId": "cyvlsdt-v30-v29-phase6b-p6-1-discovery-v4",
+  "repairEvidence": {
+    "workflowRunId": 32793240561,
+    "artifactId": 9543931823,
+    "artifactSha256": "4ed23f383509ea25a20eb7d02abcfee4ac1654466ad061d30f505e626c6f1471",
+    "terminalDisposition": "FINDINGS",
+    "rootCause": "HISTORICAL_FALLBACK_USED_PRE_V30_REVENUE_STRATEGY_CONSTRUCTOR_ORDER"
+  },
+  "provenanceRunnerCommit": "2fe077dbd8aab1447aab177bad966df4c74e7433",
+  "purpose": "Final P6.1 v29 fallback repair. V5 uses the exact frozen V30 CurveYieldRevenueStrategyV7 constructor order while preserving the revenue-accounting state machine, broad no-selector Medusa policy, and production-source immutability.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "productionSourceModified": false,
+  "campaign": {
+    "phase": "6B",
+    "gate": "P6.1",
+    "process": 1,
+    "kind": "MEDUSA_BROAD_DISCOVERY_V29_FALLBACK_REPAIRED",
+    "selectorPolicy": "NO_TARGET_FUNCTION_ALLOWLIST",
+    "foundrySecurityExecution": false,
+    "attempt": 5
+  },
+  "carriedScope": {
+    "phase6Obligations": 10,
+    "properties": 82,
+    "hypotheses": 12,
+    "nonAuthoritativeCandidates": 6,
+    "triggeredDomains": 7
+  },
+  "limitations": [
+    "Audit-only mintable principal substitutes only for cyvlSDT funding authority; exact V30 revenue contracts remain under execution.",
+    "External StakeDAO, marketplace and swap behavior is simulated and not claimed.",
+    "Non-revenue modules remain mandatory for later processes.",
+    "CurveYieldGovernanceStaking.vy / CAND-P2-002 remains mandatory for dedicated exact-source treatment."
+  ],
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json",
+      "sha256": "6ebb79731dee2f7cd59f23d9f2a4a0a48ed902d36c64afa18e57cab35fc00f43"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml",
+      "sha256": "0e952961d79550c0f755716c11942144905dbbc1193b2c0c970d85d2ca859563"
+    },
+    {
+      "source": "test/phase6/CyvlSdtRevenueAccountingHarness_v5.t.sol",
+      "destination": "test/phase6/CyvlSdtRevenueAccountingHarness_v5.t.sol",
+      "sha256": "93ccc0341d019e56c992adb2913f948ffd003528a898c0d07574247899c7721a"
+    }
+  ]
+}

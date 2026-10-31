@@ -1,0 +1,82 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity >=0.8.13 <0.9.0;
+
+/// @notice Audit-only Medusa skeleton for Campaign B/C.
+/// Before instantiation, apply curveyield-contract-intro and match the exact frozen target compiler.
+/// The trusted Contract-Automation runner supplies the existing mutable Anvil RPC and frozen block.
+/// Never embed or request an RPC URL in this Solidity harness.
+///
+/// IMPORTANT CALLER SEMANTICS:
+/// Medusa senderAddresses call this harness, so msg.sender is the fuzzed actor at the harness boundary.
+/// If production security depends on the production target seeing that same actor as msg.sender,
+/// the target-specific derived harness MUST preserve that semantic.
+abstract contract Phase6MedusaHarnessV2 {
+    address internal phase6Target;
+
+    uint256 public successfulTransitions;
+    uint256 public revertedTransitions;
+    uint256 public actionACalls;
+    uint256 public actionBCalls;
+    uint256 public actionCCalls;
+
+    mapping(address => uint256) public ghostAByActor;
+    mapping(address => uint256) public ghostBByActor;
+    uint256 public ghostAggregateA;
+    uint256 public ghostAggregateB;
+
+    function _phase6SetTarget(address target_) internal {
+        require(phase6Target == address(0), "PHASE6_TARGET_ALREADY_SET");
+        require(target_ != address(0), "PHASE6_TARGET_ZERO");
+        phase6Target = target_;
+    }
+
+    function _phase6ActionA(address actor, uint256 rawAmount) internal virtual returns (bool success, uint256 semanticAmount);
+    function _phase6ActionB(address actor, uint256 rawAmount) internal virtual returns (bool success, uint256 semanticAmount);
+    function _phase6ActionC(address actor, address recipient, uint256 rawAmount) internal virtual returns (bool success, uint256 semanticAmount);
+
+    function _phase6Property001() internal view virtual returns (bool);
+    function _phase6Property002() internal view virtual returns (bool);
+
+    function actionA(uint256 amount) external {
+        actionACalls++;
+        (bool ok, uint256 semanticAmount) = _phase6ActionA(msg.sender, amount);
+        if (ok) {
+            successfulTransitions++;
+            ghostAByActor[msg.sender] += semanticAmount;
+            ghostAggregateA += semanticAmount;
+        } else {
+            revertedTransitions++;
+        }
+    }
+
+    function actionB(uint256 amount) external {
+        actionBCalls++;
+        (bool ok, uint256 semanticAmount) = _phase6ActionB(msg.sender, amount);
+        if (ok) {
+            successfulTransitions++;
+            ghostBByActor[msg.sender] += semanticAmount;
+            ghostAggregateB += semanticAmount;
+        } else {
+            revertedTransitions++;
+        }
+    }
+
+    function actionC(address recipient, uint256 amount) external {
+        actionCCalls++;
+        (bool ok,) = _phase6ActionC(msg.sender, recipient, amount);
+        if (ok) successfulTransitions++;
+        else revertedTransitions++;
+    }
+
+    function property_security_property_001() external view returns (bool) {
+        return phase6Target != address(0) && _phase6Property001();
+    }
+
+    function property_security_property_002() external view returns (bool) {
+        return phase6Target != address(0) && _phase6Property002();
+    }
+
+    function property_harness_accounting_consistent() external view returns (bool) {
+        return successfulTransitions + revertedTransitions == actionACalls + actionBCalls + actionCCalls;
+    }
+}

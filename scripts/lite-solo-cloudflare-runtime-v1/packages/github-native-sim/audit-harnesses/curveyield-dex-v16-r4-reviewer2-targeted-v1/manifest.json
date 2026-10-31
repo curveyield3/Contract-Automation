@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "curveyield-dex-v16-r4-reviewer2-targeted-v1",
+  "purpose": "Target actual DEX v16 keeper/router non-strict fallback and real permanent liquidity lot request authority using source-bound Foundry tests and on-chain mock peripheral dependencies. Phase6 reviewer must validate semantic equivalence and complete broader deployment/fork execution.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "68490f0ec79ff761ed9361af8afe180fd44f612d",
+    "archiveSha256": "201a70f61f14e1919d111a972d090b07cf13e5fc06fee10738785adfb6760f4e"
+  },
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "test/phase6/CurveYieldDexPhase5Boundary_v1.t.sol",
+      "destination": "test/phase6/CurveYieldDexPhase5Boundary_v1.t.sol"
+    }
+  ]
+}

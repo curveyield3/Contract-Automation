@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-v29-phase6b-p6-1-discovery-v4",
+  "supersedesBundleId": "cyvlsdt-v30-v29-phase6b-p6-1-discovery-v3",
+  "fallbackProvenanceBundleId": "cyvlsdt-v30-phase6-revenue-accounting-v4",
+  "fallbackReason": "THREE_SYSTEM_STATE_MACHINE_CONSTRUCTOR_ATTEMPTS_REACHED_TERMINAL_EVIDENCE_WITH_AUDIT_ONLY_AUTHORITY_MODEL_FAILURES",
+  "failedAttempts": [
+    {
+      "runId": 32791609216,
+      "artifactId": 9543378776
+    },
+    {
+      "runId": 32792375079,
+      "artifactId": 9543635193
+    },
+    {
+      "runId": 32792801861,
+      "artifactId": 9543772283
+    }
+  ],
+  "provenanceRunnerCommit": "5b533cf659369fec5a33d5cc04ee7d2e57d7ae09",
+  "purpose": "P6.1 attempt 4 exhausts the admitted v29 revenue-accounting fallback as a broad no-selector Medusa campaign. It executes the exact V30 revenue staking, Locker, boost merchant/staking, Vault, strategy and converter stack with deterministic audit-only external dependencies and principal token. Production source remains unchanged.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "productionSourceModified": false,
+  "campaign": {
+    "phase": "6B",
+    "gate": "P6.1",
+    "process": 1,
+    "kind": "MEDUSA_BROAD_DISCOVERY_V29_FALLBACK",
+    "selectorPolicy": "NO_TARGET_FUNCTION_ALLOWLIST",
+    "foundrySecurityExecution": false,
+    "attempt": 4
+  },
+  "carriedScope": {
+    "phase6Obligations": 10,
+    "properties": 82,
+    "hypotheses": 12,
+    "nonAuthoritativeCandidates": 6,
+    "triggeredDomains": 7
+  },
+  "limitations": [
+    "Audit-only mintable principal substitutes only for cyvlSDT funding authority; the exact V30 revenue contracts remain under execution.",
+    "External StakeDAO, marketplace and swap behavior is simulated and not claimed.",
+    "Non-revenue system modules remain mandatory for later property/targeted campaigns.",
+    "CurveYieldGovernanceStaking.vy / CAND-P2-002 remains mandatory for dedicated exact-source treatment."
+  ],
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json",
+      "sha256": "3000bdbf56bb341fbedb971f1037672602bb259a75b703473a8b268da5e1b52c"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml",
+      "sha256": "0e952961d79550c0f755716c11942144905dbbc1193b2c0c970d85d2ca859563"
+    },
+    {
+      "source": "test/phase6/CyvlSdtRevenueAccountingHarness_v4.t.sol",
+      "destination": "test/phase6/CyvlSdtRevenueAccountingHarness_v4.t.sol",
+      "sha256": "2165f5176c232762a6ddae55b7d41277832d773d87286b6625e5e5005a509924"
+    }
+  ]
+}

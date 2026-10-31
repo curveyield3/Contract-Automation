@@ -1,0 +1,47 @@
+{
+  "fuzzing": {
+    "workers": 10,
+    "testLimit": 130000,
+    "shrinkLimit": 10000,
+    "callSequenceLength": 512,
+    "coverageEnabled": true,
+    "corpusDirectory": "phase6-corpus/cyvlsdt-v30-v29-p6-6-campaign-dm-v1",
+    "coverageFormats": ["lcov", "html"],
+    "revertReporterEnabled": true,
+    "targetContracts": ["CyvlSdtVaultPhase6HarnessV4"],
+    "senderAddresses": ["0x10000","0x20000","0x30000","0x40000","0x50000","0x60000","0x70000","0x80000"],
+    "blockNumberDelayMax": 1024,
+    "blockTimestampDelayMax": 2419200,
+    "testing": {
+      "stopOnFailedTest": false,
+      "stopOnNoTests": true,
+      "testAllContracts": false,
+      "testViewMethods": true,
+      "assertionTesting": {"enabled": false},
+      "propertyTesting": {"enabled": true, "testPrefixes": ["property_","invariant_"]},
+      "optimizationTesting": {"enabled": false, "testPrefixes": ["optimize_"]},
+      "targetFunctionSignatures": [
+        "CyvlSdtVaultPhase6HarnessV4.actionDeposit(uint96)",
+        "CyvlSdtVaultPhase6HarnessV4.actionWithdraw(uint96)",
+        "CyvlSdtVaultPhase6HarnessV4.actionWithdrawAll()",
+        "CyvlSdtVaultPhase6HarnessV4.actionTransferShares(address,uint96)",
+        "CyvlSdtVaultPhase6HarnessV4.actionSetEstimate(uint96)",
+        "CyvlSdtVaultPhase6HarnessV4.actionDonateStrategy(uint96)",
+        "CyvlSdtVaultPhase6HarnessV4.probeP2MutableEstimate(uint96)",
+        "CyvlSdtVaultPhase6HarnessV4.probeIndependentReferenceEqualDeposits(uint96)",
+        "CyvlSdtVaultPhase6HarnessV4.actionBoundaryDeposit(uint8)",
+        "CyvlSdtVaultPhase6HarnessV4.actionBoundaryEstimate(uint8)",
+        "CyvlSdtVaultPhase6HarnessV4.actionBoundaryWithdraw(uint8)",
+        "CyvlSdtVaultPhase6HarnessV4.actionBoundaryTransfer(address,uint8)"
+      ],
+      "excludeFunctionSignatures": []
+    },
+    "chainConfig": {
+      "cheatCodes": {"cheatCodesEnabled": true, "enableFFI": false},
+      "forkConfig": {"forkModeEnabled": true,"rpcUrl":"PHASE6_RUNTIME_INJECTION_REQUIRED","rpcBlock":1,"poolSize":20}
+    }
+  },
+  "compilation": {"platform":"crytic-compile","platformConfig":{"target":".","args":["--foundry-compile-all"]}},
+  "slither":{"useSlither":true},
+  "logging":{"level":"info","logDirectory":"","noColor":true}
+}

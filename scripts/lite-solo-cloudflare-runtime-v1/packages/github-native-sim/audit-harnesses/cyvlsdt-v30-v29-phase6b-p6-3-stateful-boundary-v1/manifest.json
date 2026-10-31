@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-v29-phase6b-p6-3-stateful-boundary-v1",
+  "purpose": "P6.3 Medusa semi-targeted, stateful transaction-sequence and boundary/dictionary campaign for exact V30 CurveYieldVault and candidates CAND-P2-001/CAND-P4-001.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "rebasedFrom": {
+    "bundleId": "cyvlsdt-v30-phase6-vault-v1",
+    "overlayGitTreeSha1": "e9005cc1c34e54e536b01901cca6c18a7ed8325c"
+  },
+  "productionSourceModified": false,
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "boundary-dictionary.json",
+      "destination": "audit-boundary-dictionary.json"
+    },
+    {
+      "source": "test/phase6/CyvlSdtVaultPhase6Harness_v2.t.sol",
+      "destination": "test/phase6/CyvlSdtVaultPhase6Harness_v2.t.sol"
+    }
+  ]
+}

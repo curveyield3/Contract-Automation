@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity >=0.8.13 <0.9.0;
+
+/// @notice Audit-only boundary/dictionary-directed fuzz skeleton.
+/// Apply curveyield-contract-intro before instantiation and replace all PHASE6_* semantics.
+/// Fork/RPC selection is runner-owned; this test executes on the preflight-frozen existing mutable Anvil fork.
+abstract contract Phase6BoundaryFuzzV2 {
+    function _phase6ExerciseBoundary(address actor, uint256 value) internal virtual returns (bool);
+    function _phase6Threshold() internal view virtual returns (uint256);
+    function _phase6OperationalMaximum() internal view virtual returns (uint256);
+    function _phase6SpecialConstant(uint256 index) internal view virtual returns (uint256 value, bool exists);
+
+    function _phase6Check(address actor, uint256 value) internal {
+        require(_phase6ExerciseBoundary(actor, value), "PHASE6_BOUNDARY_PROPERTY_FALSIFIED");
+    }
+
+    function testFuzz_boundaryMatrix_v2(address actor, uint256 randomValue) public {
+        require(actor != address(0), "PHASE6_ACTOR_ZERO");
+        uint256 threshold = _phase6Threshold();
+        uint256 operationalMax = _phase6OperationalMaximum();
+
+        _phase6Check(actor, randomValue);
+        _phase6Check(actor, 0);
+        _phase6Check(actor, 1);
+        _phase6Check(actor, 2);
+        _phase6Check(actor, type(uint256).max);
+        if (operationalMax != type(uint256).max) {
+            _phase6Check(actor, operationalMax);
+            if (operationalMax > 0) _phase6Check(actor, operationalMax - 1);
+            _phase6Check(actor, operationalMax + 1);
+        }
+
+        _phase6Check(actor, threshold);
+        if (threshold > 0) _phase6Check(actor, threshold - 1);
+        if (threshold < type(uint256).max) _phase6Check(actor, threshold + 1);
+
+        for (uint256 i = 0; i < PHASE6_SPECIAL_CONSTANT_COUNT; i++) {
+            (uint256 constantValue, bool exists) = _phase6SpecialConstant(i);
+            if (!exists) continue;
+            _phase6Check(actor, constantValue);
+            if (constantValue > 0) _phase6Check(actor, constantValue - 1);
+            if (constantValue < type(uint256).max) _phase6Check(actor, constantValue + 1);
+        }
+    }
+}

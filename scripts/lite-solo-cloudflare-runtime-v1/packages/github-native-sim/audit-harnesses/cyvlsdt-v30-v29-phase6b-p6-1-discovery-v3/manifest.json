@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-v29-phase6b-p6-1-discovery-v3",
+  "supersedesBundleId": "cyvlsdt-v30-v29-phase6b-p6-1-discovery-v2",
+  "repairEvidence": {
+    "workflowRunId": 32792375079,
+    "requestId": "dar-baadd518cbec90c853fb8b97a2c01905",
+    "artifactId": 9543635193,
+    "artifactSha256": "f4251c8ed4f2992ce6fc329b92b6fda061a17b9e7934952644592aef32807144",
+    "terminalDisposition": "FINDINGS",
+    "failureKind": "EVIDENCE_PARSE_FAILURE",
+    "rootCause": "AUDIT_HARNESS_MINT_CALLED_AFTER_EXACT_TOKEN_LOCKER_BINDING"
+  },
+  "provenanceRunnerCommit": "5cb3ba64c54f894f32141073d2b7ba06cbf81834",
+  "purpose": "P6.1 v3 broad Medusa discovery repair. V5 pre-mints deterministic audit funding before the exact production token transfers mint authority to the exact production Locker, then distributes only by ERC20 transfer. Production source and all remaining system actions/properties are unchanged; selector narrowing remains disabled.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "productionSourceModified": false,
+  "campaign": {
+    "phase": "6B",
+    "gate": "P6.1",
+    "process": 1,
+    "kind": "MEDUSA_BROAD_DISCOVERY",
+    "selectorPolicy": "NO_TARGET_FUNCTION_ALLOWLIST",
+    "foundrySecurityExecution": false,
+    "attempt": 3
+  },
+  "carriedScope": {
+    "phase6Obligations": 10,
+    "properties": 82,
+    "hypotheses": 12,
+    "nonAuthoritativeCandidates": 6,
+    "triggeredDomains": 7
+  },
+  "limitations": [
+    "DiscountedSale activation remains deferred from this broad system harness for targeted treatment.",
+    "StakeDAO fee generation/router behavior remain simulated; no external-protocol correctness is claimed.",
+    "CurveYieldGovernanceStaking.vy / CAND-P2-002 remains mandatory for dedicated exact-source treatment."
+  ],
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json",
+      "sha256": "3ef86e7431e3498470c6c273ea2d61cb283f0b1e95b71e2ed5fc7e9db9f396c9"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml",
+      "sha256": "a7a68fcd9af9a271f28e69ba4fea2b8a4477b7150b8cf8c800f14d5f2fa375ac"
+    },
+    {
+      "source": "test/phase6/CyvlSdtSystemPhase6Harness_v2_support.t.sol",
+      "destination": "test/phase6/CyvlSdtSystemPhase6Harness_v2_support.t.sol",
+      "sha256": "5451dfc119aa5c9525bf14b076058e914630c0e4ecc69789f563abf423b61ca1"
+    },
+    {
+      "source": "test/phase6/CyvlSdtSystemPhase6Harness_v5.t.sol",
+      "destination": "test/phase6/CyvlSdtSystemPhase6Harness_v5.t.sol",
+      "sha256": "0be7f39adb3598516ba3dfabd7f0e80b946fadce8eba7766193f52b68bcebc6d"
+    }
+  ]
+}

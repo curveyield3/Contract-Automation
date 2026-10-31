@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-phase6-system-v1",
+  "purpose": "Supplemental audit-only Medusa/Foundry full-system randomized accounting state machine for cyvlSDT v30. Preserves frozen production source and complements the accepted Vault-focused r8/r9 campaign; Vyper GovernanceStaking remains covered by separate exact-source build and real Anvil lifecycle evidence.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Solo-Audit-Controller",
+    "commit": "6bde63416a4611e127b8bb3a5958e6b6d874c188",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "productionSourceModified": false,
+  "technicalLimitations": [
+    "CurveYieldGovernanceStaking.vy is excluded from the Solidity Medusa/Foundry overlay because the accepted mixed-language runner compiles Vyper separately and crytic-compile source-map handling is not compatible with importing that Vyper target into this Solidity state machine. Its accounting lifecycle is separately exercised on real pinned Anvil in Phase 7."
+  ],
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "test/phase6/CyvlSdtSystemPhase6Harness_v1.t.sol",
+      "destination": "test/phase6/CyvlSdtSystemPhase6Harness_v1.t.sol"
+    }
+  ]
+}

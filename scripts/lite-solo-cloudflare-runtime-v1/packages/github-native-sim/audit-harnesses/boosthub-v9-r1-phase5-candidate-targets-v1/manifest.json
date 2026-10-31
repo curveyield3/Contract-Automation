@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "boosthub-v9-r1-phase5-candidate-targets-v1",
+  "purpose": "Required exact-source Phase5 candidate-specific Foundry execution; original Solidity source imported unchanged and original Vyper 0.4.3 creation bytecode loaded from sealed Phase0 compilation evidence. Does not establish any production-runtime exploit unless deployed-token/gauge/authority identity is separately verified.",
+  "sourceBinding": {
+    "repository": "curveyield3/Audit-Controller",
+    "commit": "7c4f513d8158c393f5e196e9b2640833648dce96",
+    "archiveSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+    "vyperCreationBytecodeDigestSha256": "d36594624b15c892e5b5d639dbcc4cd1a9952519964945dd8d1d02b650d66a35"
+  },
+  "productionSourceModified": false,
+  "files": [
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "assets/BoostHubStaking_v22.creation.hex",
+      "destination": "test/phase5/BoostHubStaking_v22.creation.hex"
+    },
+    {
+      "source": "test/phase5/BoostHubV9VyperP5Targets_v1.t.sol",
+      "destination": "test/phase5/BoostHubV9VyperP5Targets_v1.t.sol"
+    },
+    {
+      "source": "test/phase5/BoostHubV9HubStrategyP5Targets_v1.t.sol",
+      "destination": "test/phase5/BoostHubV9HubStrategyP5Targets_v1.t.sol"
+    },
+    {
+      "source": "test/phase5/BoostHubV9VaultP5Targets_v1.t.sol",
+      "destination": "test/phase5/BoostHubV9VaultP5Targets_v1.t.sol"
+    }
+  ]
+}

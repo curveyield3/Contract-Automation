@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity >=0.8.13 <0.9.0;
+
+/// @notice Audit-only differential fuzz skeleton for Process 10.
+/// Apply curveyield-contract-intro before instantiation.
+/// The trusted runner supplies the same existing mutable Anvil fork to the entire Foundry campaign.
+abstract contract Phase6DifferentialFuzzV2 {
+    address internal phase6Sut;
+    address internal phase6Reference;
+
+    function _phase6DeployOrBindSut() internal virtual returns (address);
+    function _phase6DeployOrBindReference() internal virtual returns (address);
+
+    function _phase6BuildCallData(uint256 a, uint256 b, address actor)
+        internal
+        view
+        virtual
+        returns (bytes memory sutCall, bytes memory referenceCall);
+
+    function _phase6NormalizeResult(bool success, bytes memory returndata)
+        internal
+        view
+        virtual
+        returns (bytes32 normalized);
+
+    function _phase6SutStateDigest() internal view virtual returns (bytes32);
+    function _phase6ReferenceStateDigest() internal view virtual returns (bytes32);
+
+    function setUp() public virtual {
+        phase6Sut = _phase6DeployOrBindSut();
+        phase6Reference = _phase6DeployOrBindReference();
+        require(phase6Sut != address(0) && phase6Reference != address(0), "PHASE6_DIFF_TARGET_ZERO");
+        require(phase6Sut != phase6Reference, "PHASE6_REFERENCE_NOT_INDEPENDENT_INSTANCE");
+        require(_phase6SutStateDigest() == _phase6ReferenceStateDigest(), "PHASE6_INITIAL_STATE_MISMATCH");
+    }
+
+    function testFuzz_differential_equivalence_v2(uint256 a, uint256 b, address actor) public {
+        require(actor != address(0), "PHASE6_ACTOR_ZERO");
+        (bytes memory sutCall, bytes memory referenceCall) = _phase6BuildCallData(a, b, actor);
+        (bool sutSuccess, bytes memory sutRet) = phase6Sut.call(sutCall);
+        (bool refSuccess, bytes memory refRet) = phase6Reference.call(referenceCall);
+        require(sutSuccess == refSuccess, "PHASE6_DIFFERENTIAL_SUCCESS_DIVERGENCE");
+        require(_phase6NormalizeResult(sutSuccess, sutRet) == _phase6NormalizeResult(refSuccess, refRet), "PHASE6_DIFFERENTIAL_OUTPUT_DIVERGENCE");
+        require(_phase6SutStateDigest() == _phase6ReferenceStateDigest(), "PHASE6_DIFFERENTIAL_STATE_DIVERGENCE");
+    }
+}

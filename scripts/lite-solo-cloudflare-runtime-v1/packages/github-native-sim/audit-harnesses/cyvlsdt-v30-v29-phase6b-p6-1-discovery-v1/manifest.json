@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-v29-phase6b-p6-1-discovery-v1",
+  "provenanceBundleId": "cyvlsdt-v30-v29-phase6-system-v1",
+  "provenanceRunnerCommit": "0e3b8245603219629cbdb248a11e53d0af722203",
+  "purpose": "Phase 6B P6.1 broad Medusa discovery over the admitted cyvlSDT v30 system state machine. Exact inherited harness bytes are preserved; selector narrowing is removed for broad callable-surface exploration. Foundry execution is disabled by the request.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "productionSourceModified": false,
+  "campaign": {
+    "phase": "6B",
+    "gate": "P6.1",
+    "process": 1,
+    "kind": "MEDUSA_BROAD_DISCOVERY",
+    "selectorPolicy": "NO_TARGET_FUNCTION_ALLOWLIST",
+    "foundrySecurityExecution": false
+  },
+  "carriedScope": {
+    "phase6Obligations": 10,
+    "properties": 82,
+    "hypotheses": 12,
+    "nonAuthoritativeCandidates": 6,
+    "triggeredDomains": 7
+  },
+  "limitations": [
+    "StakeDAO fee generation and aggregate-router correctness remain simulated by admitted audit-only interface-valid dependencies; no external-protocol correctness is claimed.",
+    "CurveYieldGovernanceStaking.vy is not silently waived: CAND-P2-002 remains scheduled for dedicated exact-source Phase-6B dynamic treatment after the Solidity system campaigns.",
+    "P6.1 discovery evidence cannot promote a candidate to an authoritative finding."
+  ],
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json",
+      "sha256": "77f65cd275bec4b5b6abf205db9cea2a77bc14b5a5c116078ad04d044661c369"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml",
+      "sha256": "a7a68fcd9af9a271f28e69ba4fea2b8a4477b7150b8cf8c800f14d5f2fa375ac"
+    },
+    {
+      "source": "test/phase6/CyvlSdtSystemPhase6Harness_v2_support.t.sol",
+      "destination": "test/phase6/CyvlSdtSystemPhase6Harness_v2_support.t.sol",
+      "sha256": "5451dfc119aa5c9525bf14b076058e914630c0e4ecc69789f563abf423b61ca1"
+    },
+    {
+      "source": "test/phase6/CyvlSdtSystemPhase6Harness_v3.t.sol",
+      "destination": "test/phase6/CyvlSdtSystemPhase6Harness_v3.t.sol",
+      "sha256": "3e22bf36718f2900925f221cf15ced9a8e25e07e94ea7a40633c3b3cecff1955"
+    }
+  ]
+}

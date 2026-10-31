@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-phase6-system-v3",
+  "supersedesBundleId": "cyvlsdt-v30-phase6-system-v2",
+  "repairReason": "V2_LOCKER_REJECTED_NON_INTERFACE_FAKE_FEE_DISTRIBUTORS",
+  "purpose": "Versioned repair of the supplemental audit-only Medusa/Foundry full-system randomized accounting state machine for cyvlSDT v30. V1 and V2 remain immutable failed execution evidence. V3 intentionally uses interface-valid audit-only fee distributors plus a controlled fake StakeDAO router to simulate vlSDT fee generation while exercising the exact production Locker claim/accounting path. Frozen production source remains unchanged.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Solo-Audit-Controller",
+    "commit": "6bde63416a4611e127b8bb3a5958e6b6d874c188",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "productionSourceModified": false,
+  "technicalLimitations": [
+    "StakeDAO fee accrual and aggregate-router correctness are intentionally not claimed by this harness. V3 simulates their resulting reward balance delta with audit-only dependencies that satisfy the production Locker fee-distributor identity contract.",
+    "CurveYieldGovernanceStaking.vy is excluded from the Solidity Medusa/Foundry overlay because the accepted mixed-language runner compiles Vyper separately and crytic-compile source-map handling is not compatible with importing that Vyper target into this Solidity state machine. Its accounting lifecycle is separately exercised on real pinned Anvil in Phase 7.",
+    "This Phase-6 randomized harness is not live Phase-7 mutable-RPC simulation evidence and does not substitute for deployment-first Anvil lifecycle testing of the exact audited contracts."
+  ],
+  "files": [
+    { "source": "medusa.json", "destination": "medusa.json" },
+    { "source": "foundry.toml", "destination": "foundry.toml" },
+    { "source": "test/phase6/CyvlSdtSystemPhase6Harness_v2_support.t.sol", "destination": "test/phase6/CyvlSdtSystemPhase6Harness_v2_support.t.sol" },
+    { "source": "test/phase6/CyvlSdtSystemPhase6Harness_v3.t.sol", "destination": "test/phase6/CyvlSdtSystemPhase6Harness_v3.t.sol" }
+  ]
+}

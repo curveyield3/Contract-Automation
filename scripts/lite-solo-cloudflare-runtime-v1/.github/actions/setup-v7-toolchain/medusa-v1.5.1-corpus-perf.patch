@@ -1,0 +1,71 @@
+diff -ru a/fuzzing/corpus/corpus.go b/fuzzing/corpus/corpus.go
+--- a/fuzzing/corpus/corpus.go
++++ b/fuzzing/corpus/corpus.go
+@@ -319,15 +319,18 @@
+ 
+ 	// Verify no existing corpus item hash this same hash.
+ 	for _, existingSeq := range sequenceFiles.files {
+-		// Calculate the existing sequence hash
+-		existingSeqHash, err := existingSeq.data.Hash()
+-		if err != nil {
+-			c.callSequencesLock.Unlock()
+-			return err
++		// Calculate the existing sequence hash once and memoize it on the corpus file.
++		if existingSeq.cachedHash == nil {
++			existingSeqHash, err := existingSeq.data.Hash()
++			if err != nil {
++				c.callSequencesLock.Unlock()
++				return err
++			}
++			existingSeq.cachedHash = existingSeqHash[:]
+ 		}
+ 
+ 		// Verify it is unique, if it is not, we quit immediately to avoid duplicate sequences being added.
+-		if bytes.Equal(existingSeqHash[:], seqHash[:]) {
++		if bytes.Equal(existingSeq.cachedHash, seqHash[:]) {
+ 			c.callSequencesLock.Unlock()
+ 			return nil
+ 		}
+diff -ru a/fuzzing/corpus/corpus_files.go b/fuzzing/corpus/corpus_files.go
+--- a/fuzzing/corpus/corpus_files.go
++++ b/fuzzing/corpus/corpus_files.go
+@@ -22,6 +22,10 @@
+ 	// writtenToDisk indicates whether the corpus item has been flushed to disk yet. If this is false, it signals that
+ 	// the data should be written or overwritten on disk.
+ 	writtenToDisk bool
++
++	// cachedHash memoizes the call sequence hash used for duplicate detection (CurveYield patch: avoids re-hashing
++	// every corpus item each time a new coverage-increasing sequence is added). Reset whenever data is replaced.
++	cachedHash []byte
+ }
+ 
+ // corpusDirectory is a provider for corpusFile items in a given directory, offering read/write operations to
+@@ -62,6 +66,7 @@
+ 		if lowerFileName == strings.ToLower(cd.files[i].fileName) {
+ 			cd.files[i].data = data
+ 			cd.files[i].writtenToDisk = false
++			cd.files[i].cachedHash = nil
+ 			return nil
+ 		}
+ 	}
+diff -ru a/fuzzing/fuzzer_worker.go b/fuzzing/fuzzer_worker.go
+--- a/fuzzing/fuzzer_worker.go
++++ b/fuzzing/fuzzer_worker.go
+@@ -379,7 +379,7 @@
+ 
+ 		// Check for updates to coverage and corpus.
+ 		// If we detect coverage changes, add this sequence with weight as 1 + sequences tested (to avoid zero weights)
+-		err = fw.fuzzer.corpus.CheckSequenceCoverageAndUpdate(currentlyExecutedSequence, fw.getNewCorpusCallSequenceWeight(), true)
++		err = fw.fuzzer.corpus.CheckSequenceCoverageAndUpdate(currentlyExecutedSequence, fw.getNewCorpusCallSequenceWeight(), false)
+ 		if err != nil {
+ 			return true, err
+ 		}
+@@ -478,7 +478,7 @@
+ 	executionCheckFunc := func(currentlyExecutedSequence calls.CallSequence) (bool, error) {
+ 		// Check for updates to coverage and corpus (using only the section of the sequence we tested so far).
+ 		// If we detect coverage changes, add this sequence.
+-		seqErr := fw.fuzzer.corpus.CheckSequenceCoverageAndUpdate(currentlyExecutedSequence, fw.getNewCorpusCallSequenceWeight(), true)
++		seqErr := fw.fuzzer.corpus.CheckSequenceCoverageAndUpdate(currentlyExecutedSequence, fw.getNewCorpusCallSequenceWeight(), false)
+ 		if seqErr != nil {
+ 			return true, seqErr
+ 		}

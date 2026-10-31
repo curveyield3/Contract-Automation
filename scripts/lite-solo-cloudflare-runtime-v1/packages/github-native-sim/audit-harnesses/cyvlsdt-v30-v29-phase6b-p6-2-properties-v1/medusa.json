@@ -1,0 +1,87 @@
+{
+  "fuzzing": {
+    "workers": 10,
+    "testLimit": 150000,
+    "shrinkLimit": 5000,
+    "callSequenceLength": 128,
+    "coverageEnabled": true,
+    "corpusDirectory": "phase6-corpus/cyvlsdt-v30-v29-p6-2-properties-v1",
+    "coverageFormats": [
+      "lcov",
+      "html"
+    ],
+    "revertReporterEnabled": true,
+    "targetContracts": [
+      "CyvlSdtVaultPhase6HarnessV1"
+    ],
+    "senderAddresses": [
+      "0x10000",
+      "0x20000",
+      "0x30000",
+      "0x40000"
+    ],
+    "blockNumberDelayMax": 64,
+    "blockTimestampDelayMax": 86400,
+    "testing": {
+      "stopOnFailedTest": false,
+      "stopOnNoTests": true,
+      "testAllContracts": false,
+      "testViewMethods": true,
+      "assertionTesting": {
+        "enabled": false
+      },
+      "propertyTesting": {
+        "enabled": true,
+        "testPrefixes": [
+          "property_",
+          "invariant_"
+        ]
+      },
+      "optimizationTesting": {
+        "enabled": false,
+        "testPrefixes": [
+          "optimize_"
+        ]
+      },
+      "targetFunctionSignatures": [
+        "CyvlSdtVaultPhase6HarnessV1.actionDeposit(uint96)",
+        "CyvlSdtVaultPhase6HarnessV1.actionWithdraw(uint96)",
+        "CyvlSdtVaultPhase6HarnessV1.actionWithdrawAll()",
+        "CyvlSdtVaultPhase6HarnessV1.actionTransferShares(address,uint96)",
+        "CyvlSdtVaultPhase6HarnessV1.actionSetEstimate(uint96)",
+        "CyvlSdtVaultPhase6HarnessV1.actionDonateStrategy(uint96)",
+        "CyvlSdtVaultPhase6HarnessV1.probeP2MutableEstimate(uint96)"
+      ],
+      "excludeFunctionSignatures": []
+    },
+    "chainConfig": {
+      "cheatCodes": {
+        "cheatCodesEnabled": true,
+        "enableFFI": false
+      },
+      "forkConfig": {
+        "forkModeEnabled": true,
+        "rpcUrl": "PHASE6_RUNTIME_INJECTION_REQUIRED",
+        "rpcBlock": 1,
+        "poolSize": 20
+      }
+    }
+  },
+  "compilation": {
+    "platform": "crytic-compile",
+    "platformConfig": {
+      "target": ".",
+      "args": [
+        "--foundry-compile-all"
+      ]
+    }
+  },
+  "slither": {
+    "useSlither": true
+  },
+  "logging": {
+    "level": "info",
+    "logDirectory": "",
+    "noColor": true
+  }
+}

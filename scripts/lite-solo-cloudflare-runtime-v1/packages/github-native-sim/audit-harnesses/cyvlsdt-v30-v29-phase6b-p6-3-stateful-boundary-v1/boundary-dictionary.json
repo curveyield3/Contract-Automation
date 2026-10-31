@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "phase6-boundary-dictionary-v1",
+  "campaignId": "cyvlsdt-v30-audit-v29-r1",
+  "gateId": "P6.3",
+  "sources": [
+    "exact V30 CurveYieldVault constants",
+    "Phase-2 PROP-031/PROP-032 and NEG-023/NEG-024",
+    "Phase-5 WAD/share/rounding analysis"
+  ],
+  "classes": [
+    {
+      "id": "BND-ZERO-DUST",
+      "values": [
+        "0",
+        "1"
+      ],
+      "semantics": "zero/dust deposit, withdraw and quote values"
+    },
+    {
+      "id": "BND-WAD",
+      "values": [
+        "1e18-1",
+        "1e18",
+        "1e18+1"
+      ],
+      "semantics": "share-price and decimal scale"
+    },
+    {
+      "id": "BND-DEPOSIT",
+      "values": [
+        "MIN_DEPOSIT-1",
+        "MIN_DEPOSIT",
+        "MIN_DEPOSIT+1",
+        "MAX_DEPOSIT-1",
+        "MAX_DEPOSIT",
+        "MAX_DEPOSIT+1"
+      ],
+      "semantics": "operational deposit bounds"
+    },
+    {
+      "id": "BND-ESTIMATE",
+      "values": [
+        "MAX_ESTIMATE-1",
+        "MAX_ESTIMATE",
+        "type(uint96).max"
+      ],
+      "semantics": "estimated reward value bounds and hostile maximum"
+    },
+    {
+      "id": "BND-SHARES",
+      "values": [
+        "0",
+        "1",
+        "balance-1",
+        "balance",
+        "balance+1",
+        "type(uint96).max"
+      ],
+      "semantics": "withdrawal/share ownership boundaries"
+    },
+    {
+      "id": "BND-ACTOR",
+      "values": [
+        "0x10000",
+        "0x20000",
+        "0x30000",
+        "0x40000"
+      ],
+      "semantics": "distinct randomized shareholder identities"
+    },
+    {
+      "id": "BND-TIME",
+      "values": [
+        "block delay 0..128",
+        "timestamp delay 0..172800"
+      ],
+      "semantics": "two-day sequence timing perturbation"
+    }
+  ],
+  "exerciseHandlers": [
+    "actionBoundaryDeposit(uint8)",
+    "actionBoundaryEstimate(uint8)",
+    "actionBoundaryWithdraw(uint8)"
+  ],
+  "status": "EXECUTABLE_IN_P6_3_MEDUSA"
+}

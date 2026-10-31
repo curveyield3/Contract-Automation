@@ -1,0 +1,36 @@
+# Runtime materialization name: foundry.toml
+# Audit-only template. Match the frozen target compiler/remappings/source layout before use.
+# DO NOT add rpc_endpoints or a literal eth_rpc_url here.
+# Contract-Automation launches Forge with the existing mutable Anvil RPC secret and the
+# preflight-frozen block: --fork-url <runtime secret> --fork-block-number <frozen block>.
+
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = ["lib"]
+cache_path = "cache"
+# solc_version = "PHASE6_MATCH_FROZEN_TARGET"
+# evm_version = "PHASE6_MATCH_FROZEN_TARGET"
+# optimizer = true
+# optimizer_runs = PHASE6_MATCH_FROZEN_TARGET
+# via_ir = PHASE6_MATCH_FROZEN_TARGET
+
+[fuzz]
+runs = 4096
+max_test_rejects = 65536
+failure_persist_file = "cache/phase6-fuzz-failures"
+
+[invariant]
+runs = 1024
+depth = 128
+fail_on_revert = false
+show_metrics = true
+failure_persist_dir = "cache/phase6-invariant-failures"
+
+# Campaign B/C refinement guidance:
+# - increase runs/depth when material state remains unexplored;
+# - use handler metrics to repair high-revert/dead handlers;
+# - preserve a hostile/unbounded suite when fail_on_revert=false is security-relevant;
+# - use a separate bounded suite with fail_on_revert=true when every modeled action is designed valid;
+# - never call vm.createFork/vm.createSelectFork with a requester/public RPC URL; the runner already binds the fork.

@@ -1,0 +1,95 @@
+{
+  "fuzzing": {
+    "workers": 10,
+    "testLimit": 100000,
+    "shrinkLimit": 5000,
+    "callSequenceLength": 150,
+    "coverageEnabled": true,
+    "corpusDirectory": "phase6-corpus/cyvlsdt-v30-system-discovery-v1",
+    "coverageFormats": [
+      "lcov",
+      "html"
+    ],
+    "revertReporterEnabled": true,
+    "targetContracts": [
+      "CyvlSdtSystemPhase6HarnessV1"
+    ],
+    "senderAddresses": [
+      "0x10000",
+      "0x20000",
+      "0x30000",
+      "0x40000"
+    ],
+    "blockNumberDelayMax": 128,
+    "blockTimestampDelayMax": 172800,
+    "testing": {
+      "stopOnFailedTest": false,
+      "stopOnNoTests": true,
+      "testAllContracts": false,
+      "testViewMethods": true,
+      "assertionTesting": {
+        "enabled": false
+      },
+      "propertyTesting": {
+        "enabled": true,
+        "testPrefixes": [
+          "property_",
+          "invariant_"
+        ]
+      },
+      "optimizationTesting": {
+        "enabled": false,
+        "testPrefixes": [
+          "optimize_"
+        ]
+      },
+      "targetFunctionSignatures": [
+        "CyvlSdtSystemPhase6HarnessV1.actionRevenueStake(uint96)",
+        "CyvlSdtSystemPhase6HarnessV1.actionRevenueWithdraw(uint96)",
+        "CyvlSdtSystemPhase6HarnessV1.actionBoostDeposit(uint96)",
+        "CyvlSdtSystemPhase6HarnessV1.actionBoostWithdraw(uint96)",
+        "CyvlSdtSystemPhase6HarnessV1.actionVaultDeposit(uint96)",
+        "CyvlSdtSystemPhase6HarnessV1.actionVaultWithdraw(uint96)",
+        "CyvlSdtSystemPhase6HarnessV1.actionYieldStake(uint96)",
+        "CyvlSdtSystemPhase6HarnessV1.actionYieldWithdraw(uint96)",
+        "CyvlSdtSystemPhase6HarnessV1.actionNotifyReward(uint96)",
+        "CyvlSdtSystemPhase6HarnessV1.actionGovernanceReservation(uint96)",
+        "CyvlSdtSystemPhase6HarnessV1.actionConverterRoute(uint16)",
+        "CyvlSdtSystemPhase6HarnessV1.actionLockerAccounting(uint16)",
+        "CyvlSdtSystemPhase6HarnessV1.actionMerchantConfig(uint16)",
+        "CyvlSdtSystemPhase6HarnessV1.actionFraxFeeConfig(uint16)",
+        "CyvlSdtSystemPhase6HarnessV1.actionDiscountRate(uint16)"
+      ],
+      "excludeFunctionSignatures": []
+    },
+    "chainConfig": {
+      "cheatCodes": {
+        "cheatCodesEnabled": true,
+        "enableFFI": false
+      },
+      "forkConfig": {
+        "forkModeEnabled": true,
+        "rpcUrl": "PHASE6_RUNTIME_INJECTION_REQUIRED",
+        "rpcBlock": 1,
+        "poolSize": 20
+      }
+    }
+  },
+  "compilation": {
+    "platform": "crytic-compile",
+    "platformConfig": {
+      "target": ".",
+      "args": [
+        "--foundry-compile-all"
+      ]
+    }
+  },
+  "slither": {
+    "useSlither": true
+  },
+  "logging": {
+    "level": "info",
+    "logDirectory": "",
+    "noColor": true
+  }
+}

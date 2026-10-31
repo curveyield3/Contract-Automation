@@ -1,0 +1,90 @@
+{
+  "fuzzing": {
+    "workers": 10,
+    "testLimit": 100000,
+    "shrinkLimit": 5000,
+    "callSequenceLength": 256,
+    "coverageEnabled": true,
+    "corpusDirectory": "phase6-corpus/cyvlsdt-v30-v29-p6-3-stateful-boundary-v1",
+    "coverageFormats": [
+      "lcov",
+      "html"
+    ],
+    "revertReporterEnabled": true,
+    "targetContracts": [
+      "CyvlSdtVaultPhase6HarnessV2"
+    ],
+    "senderAddresses": [
+      "0x10000",
+      "0x20000",
+      "0x30000",
+      "0x40000"
+    ],
+    "blockNumberDelayMax": 128,
+    "blockTimestampDelayMax": 172800,
+    "testing": {
+      "stopOnFailedTest": false,
+      "stopOnNoTests": true,
+      "testAllContracts": false,
+      "testViewMethods": true,
+      "assertionTesting": {
+        "enabled": false
+      },
+      "propertyTesting": {
+        "enabled": true,
+        "testPrefixes": [
+          "property_",
+          "invariant_"
+        ]
+      },
+      "optimizationTesting": {
+        "enabled": false,
+        "testPrefixes": [
+          "optimize_"
+        ]
+      },
+      "targetFunctionSignatures": [
+        "CyvlSdtVaultPhase6HarnessV2.actionDeposit(uint96)",
+        "CyvlSdtVaultPhase6HarnessV2.actionWithdraw(uint96)",
+        "CyvlSdtVaultPhase6HarnessV2.actionWithdrawAll()",
+        "CyvlSdtVaultPhase6HarnessV2.actionTransferShares(address,uint96)",
+        "CyvlSdtVaultPhase6HarnessV2.actionSetEstimate(uint96)",
+        "CyvlSdtVaultPhase6HarnessV2.actionDonateStrategy(uint96)",
+        "CyvlSdtVaultPhase6HarnessV2.probeP2MutableEstimate(uint96)",
+        "CyvlSdtVaultPhase6HarnessV2.actionBoundaryDeposit(uint8)",
+        "CyvlSdtVaultPhase6HarnessV2.actionBoundaryEstimate(uint8)",
+        "CyvlSdtVaultPhase6HarnessV2.actionBoundaryWithdraw(uint8)"
+      ],
+      "excludeFunctionSignatures": []
+    },
+    "chainConfig": {
+      "cheatCodes": {
+        "cheatCodesEnabled": true,
+        "enableFFI": false
+      },
+      "forkConfig": {
+        "forkModeEnabled": true,
+        "rpcUrl": "PHASE6_RUNTIME_INJECTION_REQUIRED",
+        "rpcBlock": 1,
+        "poolSize": 20
+      }
+    }
+  },
+  "compilation": {
+    "platform": "crytic-compile",
+    "platformConfig": {
+      "target": ".",
+      "args": [
+        "--foundry-compile-all"
+      ]
+    }
+  },
+  "slither": {
+    "useSlither": true
+  },
+  "logging": {
+    "level": "info",
+    "logDirectory": "",
+    "noColor": true
+  }
+}

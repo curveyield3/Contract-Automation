@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity >=0.8.13 <0.9.0;
+
+/// @notice Audit-only independent expected-state model skeleton.
+/// Apply curveyield-contract-intro before instantiation.
+/// The model runs inside the runner-bound mutable-fork campaign and must not embed RPC logic.
+/// Independence rule: update from specification/semantics, not the production implementation being checked.
+contract Phase6GhostModelV2 {
+    mapping(address => uint256) public expectedAssetBalance;
+    mapping(address => uint256) public expectedShares;
+    mapping(address => uint256) public expectedDebt;
+    mapping(address => uint256) public expectedRewards;
+
+    uint256 public expectedTotalAssets;
+    uint256 public expectedTotalShares;
+    uint256 public expectedTotalDebt;
+    uint256 public expectedTotalRewards;
+    uint256 public expectedFees;
+
+    function recordDeposit(address actor, uint256 assets, uint256 shares) external {
+        expectedAssetBalance[actor] += assets;
+        expectedShares[actor] += shares;
+        expectedTotalAssets += assets;
+        expectedTotalShares += shares;
+    }
+
+    function recordWithdraw(address actor, uint256 assets, uint256 shares) external {
+        require(expectedAssetBalance[actor] >= assets, "PHASE6_MODEL_ASSET_UNDERFLOW");
+        require(expectedShares[actor] >= shares, "PHASE6_MODEL_SHARE_UNDERFLOW");
+        expectedAssetBalance[actor] -= assets;
+        expectedShares[actor] -= shares;
+        expectedTotalAssets -= assets;
+        expectedTotalShares -= shares;
+    }
+
+    function recordBorrow(address actor, uint256 debtIncrease) external {
+        expectedDebt[actor] += debtIncrease;
+        expectedTotalDebt += debtIncrease;
+    }
+
+    function recordRepay(address actor, uint256 debtDecrease) external {
+        require(expectedDebt[actor] >= debtDecrease, "PHASE6_MODEL_DEBT_UNDERFLOW");
+        expectedDebt[actor] -= debtDecrease;
+        expectedTotalDebt -= debtDecrease;
+    }
+
+    function recordRewardAccrual(address actor, uint256 rewardIncrease) external {
+        expectedRewards[actor] += rewardIncrease;
+        expectedTotalRewards += rewardIncrease;
+    }
+
+    function recordRewardClaim(address actor, uint256 rewardClaimed) external {
+        require(expectedRewards[actor] >= rewardClaimed, "PHASE6_MODEL_REWARD_UNDERFLOW");
+        expectedRewards[actor] -= rewardClaimed;
+        expectedTotalRewards -= rewardClaimed;
+    }
+
+    function recordFee(uint256 fee) external { expectedFees += fee; }
+}

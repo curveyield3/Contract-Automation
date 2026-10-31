@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvlsdt-v30-v29-phase6-admission-v1",
+  "purpose": "P6.0-only audit-overlay admission smoke. It proves exact-source staging, mixed-language build acceptance, Medusa/Foundry discovery, one normalized mutable-RPC session and execution-copy integrity. It is not a Phase-6B or Phase-6C security campaign.",
+  "sourceBinding": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "productionSourceModified": false,
+  "campaignBoundary": "P6_0_ADMISSION_ONLY",
+  "securityConclusionAllowed": false,
+  "files": [
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "test/phase6/CyvlSdtPhase6Admission_v1.t.sol",
+      "destination": "test/phase6/CyvlSdtPhase6Admission_v1.t.sol"
+    }
+  ]
+}
