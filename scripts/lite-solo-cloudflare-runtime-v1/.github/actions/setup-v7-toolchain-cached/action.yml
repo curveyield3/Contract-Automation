@@ -14,7 +14,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/curveyield-primary/slither-0.11.6-py312
-        key: phase0-primary-slither-env-v1-${{ runner.os }}-${{ runner.arch }}-py312-${{ hashFiles('.github/actions/setup-v7-toolchain/action.yml') }}
+        key: phase0-primary-slither-env-v1-${{ runner.os }}-${{ runner.arch }}-py312-${{ hashFiles('scripts/lite-solo-cloudflare-runtime-v1/.github/actions/setup-v7-toolchain/action.yml') }}
 
     - name: Restore or install pinned Slither
       shell: bash
@@ -47,7 +47,7 @@ runs:
           ~/go/pkg/mod
           ~/.cache/curveyield-v7-tools/medusa-1.5.1-corpus-perf
           ~/.cache/curveyield-v7-tools/medusa-1.5.1-corpus-perf.patch-sha256
-        key: v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-1.5.1-${{ hashFiles('.github/actions/setup-v7-toolchain/medusa-v1.5.1-corpus-perf.patch') }}
+        key: v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-1.5.1-${{ hashFiles('scripts/lite-solo-cloudflare-runtime-v1/.github/actions/setup-v7-toolchain/medusa-v1.5.1-corpus-perf.patch') }}
         restore-keys: |
           v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-
 
@@ -60,7 +60,7 @@ runs:
         # Pinned Medusa 1.5.1 source plus a performance-only corpus patch: memoize corpus sequence hashes and defer
         # corpus disk writes to shutdown. Without it every coverage-increasing call re-hashes and re-serializes under
         # a global lock, so deep fuzzing collapses to a few calls per second. Fuzzing semantics are unchanged.
-        medusa_patch="$GITHUB_WORKSPACE/.github/actions/setup-v7-toolchain/medusa-v1.5.1-corpus-perf.patch"
+        medusa_patch="$GITHUB_WORKSPACE/scripts/lite-solo-cloudflare-runtime-v1/.github/actions/setup-v7-toolchain/medusa-v1.5.1-corpus-perf.patch"
         medusa_cache="$HOME/.cache/curveyield-v7-tools/medusa-1.5.1-corpus-perf"
         mkdir -p "$(dirname "$medusa_cache")"
         if [ -x "$medusa_cache" ] && [ "$(cat "$medusa_cache.patch-sha256" 2>/dev/null)" = "$(sha256sum "$medusa_patch" | cut -d' ' -f1)" ]; then
@@ -91,5 +91,5 @@ runs:
         set -euo pipefail
         slither_env="$HOME/.cache/curveyield-primary/slither-0.11.6-py312"
         export PATH="$slither_env/bin:$RUNNER_TEMP/v7-tools/bin:$GITHUB_WORKSPACE/node_modules/.bin:$PATH"
-        timeout -s TERM -k 15s 90s npm run v7:toolchain:verify
+        timeout -s TERM -k 15s 90s node scripts/lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/v7-cli.mjs toolchain:verify
         echo 'V7 cached toolchain PASS: Slither, Medusa, Forge versions verified'
