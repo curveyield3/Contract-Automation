@@ -1,0 +1,28 @@
+# Source-bound BoostHub v9 Phase5 audit-only runner overlay
+[profile.default]
+src = "contracts"
+test = "test"
+out = "build-p5-candidate-audit"
+libs = ["node_modules", "dependencies_v1"]
+cache_path = "cache-p5-candidate-audit"
+solc_version = "0.8.28"
+evm_version = "prague"
+optimizer = true
+optimizer_runs = 200
+via_ir = true
+skip = ["contracts/BoostHubStaking.vy"]
+remappings = [
+  "@openzeppelin/contracts/=./node_modules/@openzeppelin/contracts/",
+  "@openzeppelin-4/=./node_modules/@openzeppelin-4/",
+  "solmate/src/=dependencies_v1/solmate/src/"
+]
+fs_permissions = [{access="read",path="./test/phase5"}]
+
+[fuzz]
+runs = 100000
+max_test_rejects = 65536
+
+[invariant]
+runs = 512
+depth = 64
+fail_on_revert = false
