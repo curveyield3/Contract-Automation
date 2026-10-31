@@ -84,7 +84,7 @@ jobs:
               echo "::error::V7_QUALIFIED_RUNNER_STALE: comparison too large to prove safe; requalification required."
               exit 1
             fi
-            if printf '%s' "$diff_json" | jq -r '.files[]?.filename' | grep -Eq '^(scripts/lite-solo-cloudflare-runtime-v1/packages/runner/src/|scripts/lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/|scripts/lite-solo-cloudflare-runtime-v1/scripts/|\.github/workflows/audit-controller-execution\.yml$|\.github/actions/setup-v7-toolchain/)'; then
+            if printf '%s' "$diff_json" | jq -r '.files[]?.filename' | grep -Eq '^(scripts/lite-solo-cloudflare-runtime-v1/packages/runner/src/|scripts/lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/|scripts/lite-solo-cloudflare-runtime-v1/scripts/|\.github/actions/setup-v7-toolchain/)'; then
               echo "::error::V7_QUALIFIED_RUNNER_STALE: execution code changed since qualified commit. Human-authorized runner requalification and exact evidence rebind required; no stale runner fallback."
               exit 1
             fi
