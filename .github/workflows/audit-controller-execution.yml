@@ -181,7 +181,7 @@ jobs:
         run: bash scripts/select-audit-controller-token.sh
 
       - name: Verify Phase-9 remediated source identity before any test
-        if: github.event_name == 'workflow_dispatch' && inputs.cloudflare_fork_execution == true
+        if: github.event_name == 'workflow_dispatch' && contains(inputs.request_path, '/controller/phase9-reruns/')
         shell: bash
         env:
           V7_REQUEST_PATH: ${{ inputs.request_path }}
