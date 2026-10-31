@@ -606,11 +606,24 @@ async function unitAdvanceAcceptedStage(c){
   const current=unitPlan(c);
   const planDigest=sha(fs.readFileSync(relative(current.planRel)));
   const queueDigest=sha(fs.readFileSync(relative(current.queueRel)));
-  strict(planDigest===payload.plan_sha256&&queueDigest===payload.queue_sha256,'stage closure queue or plan changed');
+  // The last ATTACK unit is accepted by the canonical controller before this
+  // closure callback. Its accepted-unit bookkeeping may atomically expand the
+  // plan/queue to RECONCILIATION, so the original Worker-bound roster digests
+  // no longer describe HEAD. Do not reject that one proven handoff as stale.
+  const reconciledAttackHandoff=phase===4&&step===0&&stage==='ATTACK_REVIEW'&&
+    current.plan.stage==='RECONCILIATION'&&current.queue.stage==='RECONCILIATION'&&
+    planDigest!==payload.plan_sha256&&queueDigest!==payload.queue_sha256;
+  strict((planDigest===payload.plan_sha256&&queueDigest===payload.queue_sha256)||
+    reconciledAttackHandoff,'stage closure queue or plan changed unexpectedly');
+  strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===need('source_commit'),
+    'stage closure is not bound to the dispatched canonical source commit');
   strict(current.plan.phaseEpoch===payload.phase_epoch,'stage epoch changed');
   const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
   const stageUnits=current.units.filter(u=>unitRelevant(u,phase,step,stage,schema));
   strict(stageUnits.length>0,'controller stage has no canonical packets');
+  if(reconciledAttackHandoff)
+    strict(stageUnits.length===payload.unit_count,
+      'reconciliation changed the accepted attack roster');
   const nextEligible=eligibleStage(c,current,phase,step,stage);
   const incomplete=stageUnits.filter(u=>current.queue.units?.[u.unitId]?.status!=='ACCEPTED');
   strict(nextEligible.length>0||incomplete.length===0,
@@ -618,6 +631,9 @@ async function unitAdvanceAcceptedStage(c){
   const accepted=stageUnits.filter(u=>current.queue.units?.[u.unitId]?.status==='ACCEPTED');
   strict(accepted.every(u=>current.queue.units[u.unitId].acceptedPath&&current.queue.units[u.unitId].acceptedSha256),
     'stage lacks immutable accepted unit evidence');
+  if(reconciledAttackHandoff)
+    strict(nextEligible.length===0&&incomplete.length===0&&accepted.length===payload.unit_count,
+      'reconciliation cannot bypass unaccepted attack units');
   let nextStep=step,nextStage=stage;
   if(nextEligible.length===0){
     if(step===0&&stage==='FLOW_REVIEW'){nextStep=0;nextStage='ATTACK_REVIEW';}
@@ -634,7 +650,11 @@ async function unitAdvanceAcceptedStage(c){
   }
   return callback('/fork/step-verified',{status:'PASS',campaignId:c.directory.campaignId,
     generationId:c.directory.campaignGenerationId,phase,step,stage,
-    sourceCommit:need('source_commit'),planSha256:planDigest,queueSha256:queueDigest,
+    // Echo the original controller-issued stage snapshot identities. The new
+    // queue digest is separately reported for the successor roster.
+    sourceCommit:need('source_commit'),
+    planSha256:reconciledAttackHandoff?payload.plan_sha256:planDigest,
+    queueSha256:reconciledAttackHandoff?payload.queue_sha256:queueDigest,
     rosterDigest:need('roster_digest'),phaseEpoch:current.plan.phaseEpoch,
     authorityDigest:c.directory.authorityDigest,validator:payload.validator,deficiencies:[],
     stepComplete:nextStep!==step,completePhase:done,nextStep:done?null:nextStep,
