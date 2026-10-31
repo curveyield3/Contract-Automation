@@ -266,7 +266,7 @@ function phaseFinalize(c){
           generationId:c.directory.campaignGenerationId,phase,sourceCommit:commit,
           canonicalReceipt:result.seal.receiptPath});
       }
-      if(result.seal?.status==='REWORK_REQUIRED'&&result.seal.rework?.reopenedUnits?.length){
+      if((result.seal?.status==='REWORK_REQUIRED'||result.seal?.envelopeStatus==='NEEDS_REWORK')&&result.seal?.rework?.reopenedUnits?.length){
         const units=new Set(result.seal.rework.reopenedUnits);
         const plan=unitPlan(c);
         const member=plan.units.filter(u=>units.has(u.unitId));
@@ -278,7 +278,7 @@ function phaseFinalize(c){
         return callback('/fork/phase-rework',{status:'REWORK_REQUIRED',
           campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
           phase,step:num,stage,sourceCommit:commit,unitIds:[...units],
-          deficiencies:result.seal.rework.deficiencies||[result.seal.error||'Controller identified unit-specific rework']});
+          deficiencies:member.flatMap(u=>(plan.queue.units[u.unitId]?.lastErrors||[]).map(error=>({unitId:u.unitId,reason:String(error.message||error),code:error.code||null,path:error.path||null})))});
       }
       publishCanonical(c);
       throw Error('CONTROLLER_NOT_SEALED: '+JSON.stringify(result.seal||result.state||{}).slice(0,1800));
