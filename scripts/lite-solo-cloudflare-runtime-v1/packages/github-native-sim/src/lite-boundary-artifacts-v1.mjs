@@ -678,12 +678,16 @@ export async function executePhase5TargetsV1({
         cwd:process.cwd(),
         env:{...process.env,PHASE5_BOUNDARY_PROGRESS:'true',PHASE5_CONTROLLER_ROOT:path.resolve(controllerRoot)},
         timeoutMs:candidateTimeoutMs,
+        // Phase-5 retains the canonical raw-result.json as evidence. The
+        // child stdout/stderr are diagnostics only; cap both at 128 KiB.
+        maxStdoutBytes:128*1024,
+        maxStderrBytes:128*1024,
         onStderr:relayProgress
       });
     } finally {
       clearInterval(heartbeat);
     }
-    process.stderr.write(`[phase5-sim] END ${key} exitCode=${result?.exitCode??'UNKNOWN'} elapsed=${Math.floor((Date.now()-startedAt)/1000)}s${result?.timedOut?' TIMED_OUT':''}\n`);
+    process.stderr.write(`[phase5-sim] END ${key} exitCode=${result?.exitCode??'UNKNOWN'} signal=${result?.signal??'NONE'} elapsed=${Math.floor((Date.now()-startedAt)/1000)}s${result?.timedOut?' TIMED_OUT':''} stdoutBytes=${result?.stdoutBytes??'UNKNOWN'} stderrBytes=${result?.stderrBytes??'UNKNOWN'} stdoutTruncated=${Boolean(result?.stdoutTruncated)} stderrTruncated=${Boolean(result?.stderrTruncated)}\n`);
     // V7 CLI nests evidence under the request ID; the parent directory has no
     // raw-result.json. Never issue PASS for a missing or unparsable raw result.
     const request=JSON.parse(fs.readFileSync(requestAbs,'utf8'));
@@ -701,7 +705,13 @@ export async function executePhase5TargetsV1({
       requestBindingReasons:binding.reasons,
       rawResult,
       stdout:String(result.stdout??'').slice(-12000),
-      stderr:String(result.stderr??'').slice(-12000)
+      stderr:String(result.stderr??'').slice(-12000),
+      signal:result.signal??null,
+      timedOut:Boolean(result.timedOut),
+      stdoutBytes:result.stdoutBytes??null,
+      stderrBytes:result.stderrBytes??null,
+      stdoutTruncated:Boolean(result.stdoutTruncated),
+      stderrTruncated:Boolean(result.stderrTruncated)
     };
   }
   // All covering runs are finished before an omitted duplicate receives
