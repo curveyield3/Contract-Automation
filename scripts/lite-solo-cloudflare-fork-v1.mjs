@@ -379,7 +379,7 @@ function assignedExecutionSupport(c,u){
    if(phase===6&&typeof dir==='string'&&dir&&!dir.includes('<')){
      const resolved=dir.startsWith(c.campaignPath+'/')?dir:path.posix.join(c.campaignPath,dir);
      if(resolved.startsWith(workspace)){safePath(resolved);
-       for(const name of ['request.json','run-1.json','run-2.json','run-3.json','harness.sol','foundry.toml','medusa.json'])add(resolved+'/'+name);
+       for(const name of ['request.json','run-2.json','run-3.json','harness.sol','foundry.toml','medusa.json'])add(resolved+'/'+name);
      }
    }
  }
