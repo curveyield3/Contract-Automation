@@ -25,6 +25,11 @@ on:
         required: false
         default: 1
         type: number
+      cloudflare_fork_execution:
+        description: Explicit Cloudflare fork dispatch without stale-main qualification comparison
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -188,13 +193,15 @@ jobs:
       - name: Dispatch qualified V7 execution and automatic ingestion
         env:
           GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_FORK_EXECUTION: ${{ inputs.cloudflare_fork_execution || false }}
         shell: bash
         run: |
           set -euo pipefail
           gh workflow run audit-controller-execution.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f request_path="${{ steps.request.outputs.request_path }}" \
             -f controller_ref="${{ steps.request.outputs.controller_ref }}" \
-            -f controller_writeback_ref="${{ steps.request.outputs.controller_writeback_ref }}"
+            -f controller_writeback_ref="${{ steps.request.outputs.controller_writeback_ref }}" \
+            -f cloudflare_fork_execution="$CLOUDFLARE_FORK_EXECUTION"
 
       - name: Summarize
         shell: bash
