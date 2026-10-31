@@ -180,6 +180,50 @@ jobs:
         shell: bash
         run: bash scripts/select-audit-controller-token.sh
 
+      - name: Verify Phase-9 remediated source identity before any test
+        if: github.event_name == 'workflow_dispatch' && inputs.cloudflare_fork_execution == true
+        shell: bash
+        env:
+          V7_REQUEST_PATH: ${{ inputs.request_path }}
+          V7_CONTROLLER_REF: ${{ inputs.controller_ref }}
+        run: |
+          set -euo pipefail
+          case "$V7_REQUEST_PATH" in
+            campaigns/*/controller/phase9-reruns/*/*.json) ;;
+            *) exit 0 ;;
+          esac
+          request=.v7-request/request.json
+          test -s "$request"
+          archive_path="$(jq -er '.source.archivePath' "$request")"
+          expected_sha="$(jq -er '.source.archiveSha256' "$request")"
+          source_commit="$(jq -er '.source.commit' "$request")"
+          repository="$(jq -er '.source.repository' "$request")"
+          workspace="${V7_REQUEST_PATH%%/controller/phase9-reruns/*}"
+          test "$repository" = "curveyield3/Audit-Controller"
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
+          case "$archive_path" in
+            "$workspace"/remediation/source-snapshots/*.zip) ;;
+            *) echo "::error::Phase-9 test requires the campaign's immutable remediated source ZIP"; exit 1 ;;
+          esac
+          case "$archive_path" in
+            *".."*|*'\'*) echo "::error::Unsafe remediation archive path"; exit 1 ;;
+          esac
+          test -f ".controller-request/$archive_path" || {
+            echo "::error::Required Phase-9 remediated source ZIP does not exist"; exit 1;
+          }
+          observed_sha="$(sha256sum ".controller-request/$archive_path" | cut -d' ' -f1)"
+          test "$observed_sha" = "$expected_sha" || {
+            echo "::error::PHASE9_REMEDIATED_SOURCE_HASH_MISMATCH: tests prohibited"; exit 1;
+          }
+          {
+            echo "PHASE9_SOURCE_VERIFICATION_STATUS=PASS"
+            echo "PHASE9_SOURCE_VERIFICATION_SHA=$observed_sha"
+            echo "PHASE9_SOURCE_VERIFICATION_ARCHIVE=$archive_path"
+            echo "PHASE9_SOURCE_VERIFICATION_COMMIT=$source_commit"
+            echo "PHASE9_SOURCE_VERIFICATION_CONTROLLER_REF=$V7_CONTROLLER_REF"
+          } >> "$GITHUB_ENV"
+
       # Existing V7 technical execution lane. Controller-operation requests skip this setup.
       - name: Cache npm download cache
         if: env.V7_REQUEST_KIND == 'v7-execution'
@@ -571,6 +615,11 @@ jobs:
             --arg retry_from "$retry_from" \
             --arg recovery_command "$recovery_command" \
             --arg route "$route" \
+            --arg source_status "${PHASE9_SOURCE_VERIFICATION_STATUS:-NOT_REQUIRED}" \
+            --arg source_sha "${PHASE9_SOURCE_VERIFICATION_SHA:-}" \
+            --arg source_archive "${PHASE9_SOURCE_VERIFICATION_ARCHIVE:-}" \
+            --arg source_commit "${PHASE9_SOURCE_VERIFICATION_COMMIT:-}" \
+            --arg source_controller_ref "${PHASE9_SOURCE_VERIFICATION_CONTROLLER_REF:-}" \
             '{
               schemaVersion:"curveyield-lite-execution-observer-receipt-v1",
               requestId:$request_id,
@@ -589,6 +638,10 @@ jobs:
                 recoveryCommand:(if $recovery_command=="" then null else $recovery_command end)
               },
               route:$route,
+              sourceVerification:(if $source_status=="PASS" then {
+                status:"PASS",preExecution:true,archiveSha256:$source_sha,archivePath:$source_archive,
+                sourceCommit:$source_commit,controllerRef:$source_controller_ref
+              } else null end),
               semanticReviewerPollingRequired:false
             }')"
           receipt_digest="$(printf '%s' "$payload" | jq -S -c . | sha256sum | awk '{print $1}')"
