@@ -800,7 +800,7 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
       const sourcePathValid=source.repository==='curveyield3/Audit-Controller'&&
         /^[0-9a-f]{40}$/.test(String(source.commit??''))&&
         /^[a-f0-9]{64}$/.test(String(source.archiveSha256??''))&&
-        /^[A-Za-z0-9_.-]+\\.zip$/.test(archiveName)&&!archiveName.includes('/');
+        /^[A-Za-z0-9_.-]+\.zip$/.test(archiveName)&&!archiveName.includes('/');
       let observedSha=null;
       if(sourcePathValid){
         const archiveAbs=repoFile(root,snapshotPath);
