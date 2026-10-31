@@ -8,13 +8,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {materializeSemanticWorkFormV13, semanticShardFailureIndexV13} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-solo-work-shards-v1.mjs';
-import {readJson, writeJson, repoFile, loadPhaseSchema, validateWorkForm, validateBoundAuthorityV1} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-solo-phase-work-v1.mjs';
-import {validatePhaseScaffold} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-solo-phase-prefill-v1.mjs';
-import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-solo-unit-queue-v1.mjs';
-import {restoreControllerResultV1} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-boundary-result-v1.mjs';
-import {generateV7ExecutionRequestV1} from './lite-solo-cloudflare-runtime-v1/scripts/lib/lite-phase5-request-generation-v1.mjs';
-import {verifyPhase0ForkStateV1} from './lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
+import {materializeSemanticWorkFormV13, semanticShardFailureIndexV13} from './lib/lite-solo-work-shards-v1.mjs';
+import {readJson, writeJson, repoFile, loadPhaseSchema, validateWorkForm, validateBoundAuthorityV1} from './lib/lite-solo-phase-work-v1.mjs';
+import {validatePhaseScaffold} from './lib/lite-solo-phase-prefill-v1.mjs';
+import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {restoreControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
+import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
+import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
 const OP = process.env.FORK_OPERATION;
 const payload = JSON.parse(process.env.FORK_PAYLOAD_JSON || '{}');
@@ -80,7 +80,7 @@ function checkout(){
   strict(directory.mode==='LITE_SOLO'&&directory.authorityRelease==='lite-solo-v5','not a v5 Lite-Solo campaign');
   strict(directory.authorityDigest===payload.authority_digest,'bound authority digest mismatch');
   safePath(directory.workspacePath);
-  cmd('bash',['scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-checkout-bound-controller-v1.sh','.audit-controller','main',directory.workspacePath]);
+  cmd('bash',['scripts/lite-solo-checkout-bound-controller-v1.sh','.audit-controller','main',directory.workspacePath]);
   const local=read(target);
   strict(local.campaignId===id&&local.campaignGenerationId===payload.generation_id,'checkout selected a different campaign');
   strict(local.workspacePath===directory.workspacePath,'campaign workspace path changed');
@@ -224,85 +224,14 @@ function phaseFinalize(c){
   }else{
     strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===commit,'phase submission commit is not canonical head');
   }
-  if(phase===5){
-    const recorded=unitPlan(c).queue;
-    const prefillErrors=[
-      'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.',
-      'Controller-prefilled/read-only fields were modified; restore the generated values before validation.'
-    ];
-    const errors=recorded.finalizeDetails?.unmappedDeficiencies;
-    if(recorded.finalizeStatus==='BLOCKED'&&Array.isArray(errors)&&
-       errors.length===prefillErrors.length&&
-       prefillErrors.every(message=>errors.includes(message))){
-      // Invoke the existing source/authority-verified, immutable-v13 prefill
-      // restoration branch. No accepted unit or admitted source is rewritten.
-      const empty=fs.mkdtempSync('/tmp/lite-solo-phase5-prefill-recovery-');
-      try{
-        cmd('node',['scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-unit-request-drain-v1.mjs',
-          '--root',ROOT,'--campaign-id',c.directory.campaignId,
-          '--requests-root',empty,'--mode','drain']);
-      }finally{fs.rmSync(empty,{recursive:true,force:true});}
-      // The existing controller drainer verifies the locked v13 shard base,
-      // reassembles the accepted records, and restores the controller-owned
-      // assignment digest. Commit that controller-owned recovery immediately,
-      // so an unrelated Phase-5 preflight or machine failure cannot discard it.
-      c.directory=read(c.directoryPath);
-      const recovered=unitPlan(c).queue;
-      const assignment=c.directory.currentAssignment;
-      const index=read(safePath(assignment.workShardIndexPath));
-      const basePath=path.posix.join(path.posix.dirname(assignment.workShardIndexPath),index.baseFile);
-      const immutable=fs.readFileSync(relative(basePath));
-      strict(sha(immutable)===index.baseSha256,'recovery base no longer matches locked controller digest');
-      const locked=JSON.parse(immutable.toString('utf8'));
-      const form=read(safePath(assignment.workFormPath));
-      strict(recovered.finalizeStatus==='NOT_STARTED'&&
-        Object.values(recovered.units||{}).length>0&&Object.values(recovered.units||{}).every(u=>u.status==='ACCEPTED'),
-        'controller did not restore all accepted units to finalization-ready state');
-      strict(assignment.controllerPrefillDigestSha256===locked.automationInputs?.controllerPrefillDigestSha256&&
-        form.automationInputs?.controllerPrefillDigestSha256===assignment.controllerPrefillDigestSha256,
-        'controller digest recovery did not match the immutable GitHub form');
-      publishCanonical(c);
-    }
-  }
   if([4,5,6].includes(phase)){
-    const source=unitPlan(c);
-    const reopened=source.units.filter(u=>source.queue.units?.[u.unitId]?.status==='REWORK_REQUIRED');
-    if(reopened.length){
-      const step=Number(reopened[0].path[1].slice(5));
-      strict(reopened.every(u=>Number(u.path[1].slice(5))===step),'controller reopened multiple steps');
-      const deficiencies=reopened.flatMap(u=>(source.queue.units[u.unitId].lastErrors||[]).map(error=>({unitId:u.unitId,reason:String(error.message||error),code:error.code||null,path:error.path||null})));
-      strict(deficiencies.length>0,'controller reopened units without named deficiencies');
-      publishCanonical(c);
-      return callback('/fork/phase-rework',{status:'REWORK_REQUIRED',campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,phase,step,stage:'STEP_'+step,sourceCommit:commit,unitIds:reopened.map(u=>u.unitId),deficiencies});
-    }
-    // Repair a previously failed Phase-5 seal that mistakenly rewrote only
-    // the controller assignment's prefill digest after auto-binding requests.
-    // Restore exclusively the original SHA-verified immutable shard base.
-    // The controller still owns all semantic validation and phase sealing.
-    if(phase===5){
-      const state=unitPlan(c),defects=state.queue.finalizeDetails?.unmappedDeficiencies||[];
-      const mismatched=defects.length===2&&
-        defects.includes('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.')&&
-        defects.includes('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
-      if(state.queue.finalizeStatus==='BLOCKED'&&mismatched){
-        const ix=read(safePath(c.directory.currentAssignment.workShardIndexPath));
-        const baseRel=path.posix.join(path.posix.dirname(c.directory.currentAssignment.workShardIndexPath),ix.baseFile);
-        const blob=fs.readFileSync(relative(baseRel));
-        strict(sha(blob)===ix.baseSha256,'frozen Phase-5 base content hash mismatch');
-        const base=JSON.parse(blob.toString('utf8')),form=read(c.directory.currentAssignment.workFormPath);
-        const digest=base.automationInputs?.controllerPrefillDigestSha256;
-        strict(/^[0-9a-f]{64}$/.test(digest||'')&&form.automationInputs?.controllerPrefillDigestSha256===digest,
-          'refuse to recover Phase-5 digest from non-frozen or mutated data');
-        c.directory.currentAssignment.controllerPrefillDigestSha256=digest;
-      }
-    }
     const gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
     strict(gate.ready,'canonical unit finalization not ready: '+String(gate.reason||'units incomplete'));
     if(phase===5){
       // Phase-5 preflight consumes the deterministic assembly of accepted units.
       // This preserves the fork's Worker packet transport and its reduced checks.
       assembleAcceptedUnitShardsV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase:5});
-      const pre=cmd('node',['scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-phase5-preflight-v1.mjs',ROOT,c.campaignPath,
+      const pre=cmd('node',['scripts/lite-phase5-preflight-v1.mjs',ROOT,c.campaignPath,
         c.directory.campaignId,c.directory.sourceSha256]);
       const result=JSON.parse(pre.trim().split('\n').at(-1));
       const file=c.campaignPath+'/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json';
@@ -317,7 +246,7 @@ function phaseFinalize(c){
     }
     const requestDir=fs.mkdtempSync('/tmp/lite-solo-cloudflare-empty-');
     try{
-      const output=cmd('node',['scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-unit-request-drain-v1.mjs',
+      const output=cmd('node',['scripts/lite-solo-unit-request-drain-v1.mjs',
         '--root',ROOT,'--campaign-id',c.directory.campaignId,
         '--requests-root',requestDir,'--mode','finalize'],{maxBuffer:16*1024*1024});
       const result=JSON.parse(output.trim().split('\n').at(-1));
@@ -327,7 +256,7 @@ function phaseFinalize(c){
           generationId:c.directory.campaignGenerationId,phase,sourceCommit:commit,
           canonicalReceipt:result.seal.receiptPath});
       }
-      if((result.seal?.status==='REWORK_REQUIRED'||result.seal?.envelopeStatus==='NEEDS_REWORK')&&result.seal?.rework?.reopenedUnits?.length){
+      if(result.seal?.status==='REWORK_REQUIRED'&&result.seal.rework?.reopenedUnits?.length){
         const units=new Set(result.seal.rework.reopenedUnits);
         const plan=unitPlan(c);
         const member=plan.units.filter(u=>units.has(u.unitId));
@@ -339,14 +268,14 @@ function phaseFinalize(c){
         return callback('/fork/phase-rework',{status:'REWORK_REQUIRED',
           campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
           phase,step:num,stage,sourceCommit:commit,unitIds:[...units],
-          deficiencies:member.flatMap(u=>(plan.queue.units[u.unitId]?.lastErrors||[]).map(error=>({unitId:u.unitId,reason:String(error.message||error),code:error.code||null,path:error.path||null})))});
+          deficiencies:result.seal.rework.deficiencies||[result.seal.error||'Controller identified unit-specific rework']});
       }
       publishCanonical(c);
       throw Error('CONTROLLER_NOT_SEALED: '+JSON.stringify(result.seal||result.state||{}).slice(0,1800));
     }finally{fs.rmSync(requestDir,{recursive:true,force:true});}
   }
   const env={...process.env};
-  const args=['scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-phase-controller-v1.mjs','--controller-root',ROOT,'--campaign-id',c.directory.campaignId,
+  const args=['scripts/lite-solo-phase-controller-v1.mjs','--controller-root',ROOT,'--campaign-id',c.directory.campaignId,
     '--campaign-path',c.campaignPath,'--campaign-directory-path',c.directoryPath,'--phase-sequence',String(phase),
     '--review-kind','phase','--audit-controller-ref','main'];
   const text=cmd('node',args,{env});
@@ -504,8 +433,6 @@ function buildUnitMeta(c,u,schema){
 async function unitNextStep(c){
   const phase=Number(need('phase')),step=Number(need('step'));
   assertAssigned(c,phase);
-  strict(phase===4?(step===0||step>=1&&step<=3):(step>=1&&step<=(phase===5?3:5)),
-    'Phase 5/6 starts at Step 1; Step 0 discovery is Phase 4 only');
   const {plan,queue,units,planRel,queueRel}=unitPlan(c);
   strict(phase===plan.phaseSequence&&plan.phaseEpoch===queue.phaseEpoch,'wrong controller phase epoch');
   const stage=step===0?(String(payload.stage||'').includes('ATTACK')?'ATTACK_REVIEW':'FLOW_REVIEW'):
@@ -517,7 +444,7 @@ async function unitNextStep(c){
        (u.kind==='BATCH'?schema.actions['step-'+step]?.fields?.some(f=>f.name===u.field):
          u.path?.[1]==='step-'+step);
     return sameStep&&['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(queue.units?.[u.unitId]?.status)&&
-      (u.dependencies||[]).every(dep=>dependencyAccepted(queue,dep));
+      (u.dependencies||[]).every(dep=>queue.units?.[dep]?.status==='ACCEPTED');
   });
   strict(eligible.length>0,'no eligible units in current controller stage; do not invent work');
   const roster=eligible.map(u=>{const x=buildUnitMeta(c,u,schema);x.step=step;x.stage=stage;return x;});
@@ -553,17 +480,11 @@ function forkNextUnitStep(c,source,phase,step){
    'CONTROLLER_DEPENDENCY_BLOCKED: successor '+nextStage+' has no eligible accepted-prerequisite units');
  return {done:false,step:nextStep,stage:nextStage};
 }
-function dependencyAccepted(queue,id){
-  const record=queue.acceptedRecords?.[id];
-  if(record?.status==='ACCEPTED'&&record.snapshotSha256)return true;
-  const unit=queue.units?.[id];
-  return unit?.status==='ACCEPTED'&&!!unit.acceptedPath&&!!unit.acceptedSha256;
-}
 function eligibleStage(c,source,phase,step,stage){
   const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
   return source.units.filter(u=>unitRelevant(u,phase,step,stage,schema)&&
     ['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(source.queue.units?.[u.unitId]?.status)&&
-    (u.dependencies||[]).every(dep=>dependencyAccepted(source.queue,dep)));
+    (u.dependencies||[]).every(dep=>source.queue.units?.[dep]?.status==='ACCEPTED'));
 }
 function stageDigest(c,source,phase,step,stage){
   return sha(JSON.stringify(eligibleStage(c,source,phase,step,stage).map(u=>{
@@ -643,7 +564,7 @@ async function unitValidateSingle(c,item){
   strict(u&&unitRelevant(u,phase,step,stage,loadPhaseSchema(ROOT,AUTH,phase).schema),'unit not in assigned step/type');
   const state=current.queue.units[id];
   strict(state&&['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(state.status),'unit no longer claimable by canonical controller');
-  strict((u.dependencies||[]).every(dep=>dependencyAccepted(current.queue,dep)),'unit dependencies not accepted');
+  strict((u.dependencies||[]).every(dep=>current.queue.units?.[dep]?.status==='ACCEPTED'),'unit dependencies not accepted');
   const selected=submittedUnitFile(c,phase,u);
   strict(sha(fs.readFileSync(selected.filename))===expectedSha,'published unit differs from pending Worker submission');
   strict(Number(item.attempt)===selected.attempt,'submitted attempt differs from pending Worker attempt');
@@ -683,24 +604,11 @@ async function unitAdvanceAcceptedStage(c){
   const current=unitPlan(c);
   const planDigest=sha(fs.readFileSync(relative(current.planRel)));
   const queueDigest=sha(fs.readFileSync(relative(current.queueRel)));
-  // The last ATTACK unit is accepted by the canonical controller before this
-  // closure callback. Its accepted-unit bookkeeping may atomically expand the
-  // plan/queue to RECONCILIATION, so the original Worker-bound roster digests
-  // no longer describe HEAD. Do not reject that one proven handoff as stale.
-  const reconciledAttackHandoff=phase===4&&step===0&&stage==='ATTACK_REVIEW'&&
-    current.plan.stage==='RECONCILIATION'&&current.queue.stage==='RECONCILIATION'&&
-    (planDigest!==payload.plan_sha256||queueDigest!==payload.queue_sha256);
-  strict((planDigest===payload.plan_sha256&&queueDigest===payload.queue_sha256)||
-    reconciledAttackHandoff,'stage closure queue or plan changed unexpectedly');
-  strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===need('source_commit'),
-    'stage closure is not bound to the dispatched canonical source commit');
+  strict(planDigest===payload.plan_sha256&&queueDigest===payload.queue_sha256,'stage closure queue or plan changed');
   strict(current.plan.phaseEpoch===payload.phase_epoch,'stage epoch changed');
   const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
   const stageUnits=current.units.filter(u=>unitRelevant(u,phase,step,stage,schema));
   strict(stageUnits.length>0,'controller stage has no canonical packets');
-  if(reconciledAttackHandoff)
-    strict(stageUnits.length===payload.unit_count,
-      'reconciliation changed the accepted attack roster');
   const nextEligible=eligibleStage(c,current,phase,step,stage);
   const incomplete=stageUnits.filter(u=>current.queue.units?.[u.unitId]?.status!=='ACCEPTED');
   strict(nextEligible.length>0||incomplete.length===0,
@@ -708,9 +616,6 @@ async function unitAdvanceAcceptedStage(c){
   const accepted=stageUnits.filter(u=>current.queue.units?.[u.unitId]?.status==='ACCEPTED');
   strict(accepted.every(u=>current.queue.units[u.unitId].acceptedPath&&current.queue.units[u.unitId].acceptedSha256),
     'stage lacks immutable accepted unit evidence');
-  if(reconciledAttackHandoff)
-    strict(nextEligible.length===0&&incomplete.length===0&&accepted.length===payload.unit_count,
-      'reconciliation cannot bypass unaccepted attack units');
   let nextStep=step,nextStage=stage;
   if(nextEligible.length===0){
     if(step===0&&stage==='FLOW_REVIEW'){nextStep=0;nextStage='ATTACK_REVIEW';}
@@ -727,11 +632,7 @@ async function unitAdvanceAcceptedStage(c){
   }
   return callback('/fork/step-verified',{status:'PASS',campaignId:c.directory.campaignId,
     generationId:c.directory.campaignGenerationId,phase,step,stage,
-    // Echo the original controller-issued stage snapshot identities. The new
-    // queue digest is separately reported for the successor roster.
-    sourceCommit:need('source_commit'),
-    planSha256:reconciledAttackHandoff?payload.plan_sha256:planDigest,
-    queueSha256:reconciledAttackHandoff?payload.queue_sha256:queueDigest,
+    sourceCommit:need('source_commit'),planSha256:planDigest,queueSha256:queueDigest,
     rosterDigest:need('roster_digest'),phaseEpoch:current.plan.phaseEpoch,
     authorityDigest:c.directory.authorityDigest,validator:payload.validator,deficiencies:[],
     stepComplete:nextStep!==step,completePhase:done,nextStep:done?null:nextStep,

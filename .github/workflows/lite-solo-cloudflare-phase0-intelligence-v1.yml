@@ -44,10 +44,10 @@ jobs:
           fetch-depth: 1
 
       - name: Restore pinned Node dependencies (shared Phase 0 cache)
-        uses: ./scripts/lite-solo-cloudflare-runtime-v1/.github/actions/setup-phase0-node-cache
+        uses: ./.github/actions/setup-phase0-node-cache
 
       - name: Install and verify retained audit toolchain
-        uses: ./scripts/lite-solo-cloudflare-runtime-v1/.github/actions/setup-v7-toolchain-cached
+        uses: ./.github/actions/setup-v7-toolchain-cached
 
       - name: Select cross-repository credential
         env:
@@ -55,7 +55,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/lite-solo-cloudflare-runtime-v1/scripts/select-audit-controller-token.sh
+        run: bash scripts/select-audit-controller-token.sh
 
       - name: Materialize workflow-call Phase-0 request
         if: inputs.campaign_id != ''
@@ -123,7 +123,7 @@ jobs:
           set -euo pipefail
           rm -rf .phase0-intelligence-output
           # External wall-clock guard: synchronous solc can block Node watchdog timers.
-          timeout -s TERM -k 30s 3000s node scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-phase0-compile-watchdog-v1.mjs primary -- node scripts/lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs \
+          timeout -s TERM -k 30s 3000s node scripts/lite-solo-phase0-compile-watchdog-v1.mjs primary -- node packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs \
             --request "${{ steps.request.outputs.path }}" \
             --output .phase0-intelligence-output
 
@@ -204,7 +204,7 @@ jobs:
           # Project machine evidence into the exact canonical output paths already
           # required by the Lite Phase-0 skill. The automation adapts to the skill;
           # the skill contract is not weakened or renamed to match runner internals.
-          node ../scripts/lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
+          node ../packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
             --campaign-root "$campaign_path" \
             --skill-root "$skill_root" \
             --stage core
@@ -219,7 +219,7 @@ jobs:
           # Bundle acceptedCommitSha values must refer to the immutable core/overlay
           # commit, so create the bundle index only after that commit exists.
           accepted_commit="$(git rev-parse HEAD)"
-          node ../scripts/lite-solo-cloudflare-runtime-v1/packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
+          node ../packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
             --campaign-root "$campaign_path" \
             --skill-root "$skill_root" \
             --stage bundle \

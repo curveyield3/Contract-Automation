@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT/scripts/lite-solo-cloudflare-runtime-v1/scripts/audit-source-initialization/resolve-cloudflare-fork-v1.sh"
-source "$ROOT/scripts/lite-solo-cloudflare-runtime-v1/scripts/audit-source-initialization/extract-v1.sh"
+source "$ROOT/scripts/audit-source-initialization/resolve-cloudflare-fork-v1.sh"
+source "$ROOT/scripts/audit-source-initialization/extract-v1.sh"
 
 DELIVERY_TRANSPORT=DIRECT
 SOURCE_URL="${SOURCE_URL:-}"
@@ -90,7 +90,7 @@ else
   if [ "$input_mode" = 'LIVE_SCAN' ]; then
     rm -rf "$work"
     mkdir -p "$work"
-    python3 "$ROOT/scripts/lite-solo-cloudflare-runtime-v1/scripts/audit-source-initialization/resolve-scan-source-v1.py" "$SCAN_URLS" "$work"
+    python3 "$ROOT/scripts/audit-source-initialization/resolve-scan-source-v1.py" "$SCAN_URLS" "$work"
   else
     resolve_audit_source_zip "$SOURCE_URL" "$work" "$AUDIT_CONTROLLER_TOKEN"
   fi
@@ -263,7 +263,7 @@ else
     SKILL_SHA="$skill_sha" SKILL_BLOB="$skill_blob" SKILL_REPO_PATH="$skill_repo_path" \
     MANIFEST_SHA="$manifest_sha" MANIFEST_BLOB="$manifest_blob" AUTHORITY_COMMIT="$authority_commit" \
     RECEIPTS_DIR="$receipts_dir" CAMPAIGN_DIRECTORY_PATH="$campaign_directory_path" \
-      python3 "$ROOT/scripts/lite-solo-cloudflare-runtime-v1/scripts/lite-solo-source-initialization/write-phase0-receipt-v1.py"
+      python3 "$ROOT/scripts/lite-solo-source-initialization/write-phase0-receipt-v1.py"
 
     git add -- "$receipts_dir" "$campaign_directory_path" "$campaign_root/reports/REPORT_PUBLICATION_POLICY_v1.json"
     git commit -m "audit(receipt): initialize $campaign_id phase 0"
