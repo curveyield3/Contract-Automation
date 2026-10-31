@@ -890,38 +890,7 @@ export function finalizeReadinessV1({root,campaignPath,directory,phase}){
  const pending=plan.units.filter(u=>queue.units[u.unitId]?.status!=='ACCEPTED');
  if(pending.length)return {ready:false,reason:'mandatory units remain',unitIds:pending.map(x=>x.unitId)};
  if(queue.finalizeStatus==='SEALED')return {ready:false,reason:'already sealed'};
- if(queue.finalizeStatus==='BLOCKED'){
-  // A previous canonical seal may have named a new Phase-5 candidate that
-  // the initial Phase-4-derived target roster could not prefill. The frozen
-  // append unit is now supported by reopenAggregateDefectsV1. Permit only
-  // this exact already-published named defect through the same canonical
-  // FINALIZE retry; it will reopen the original unit, not grant a seal.
-  const missed=queue.finalizeDetails?.unmappedDeficiencies;
-  const recoverable=phase===5&&Array.isArray(missed)&&missed.length>0&&
-    missed.every(s=>typeof s==='string'&&
-      /^Phase 5 mandatory material candidate P5-CAND-[A-Za-z0-9_-]+ has no targeted machine execution$/.test(s))&&
-    plan.units.some(u=>u.kind==='APPEND'&&u.field==='targetDesigns'&&queue.units[u.unitId]?.status==='ACCEPTED');
-  // The previous failed seal may also have persisted a changed assignment
-  // digest after resolving controller-owned machine references. The fork
-  // restores that digest from the SHA-bound original BASE before this gate.
-  // Permit a canonical revalidation only when BOTH immutable base and work
-  // form still match that restored value; all other integrity failures block.
-  let recoveredDigest=false;
-  if(phase===5&&Array.isArray(missed)&&missed.length===2&&
-    missed.includes('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.')&&
-    missed.includes('Controller-prefilled/read-only fields were modified; restore the generated values before validation.')){
-    const a=directory.currentAssignment,ix=read(root,a.workShardIndexPath);
-    const basePath=path.posix.join(path.posix.dirname(a.workShardIndexPath),ix.baseFile);
-    const raw=fs.readFileSync(repoFile(root,basePath));
-    if(sha(raw)===ix.baseSha256){
-      const base=JSON.parse(raw.toString('utf8')),form=read(root,a.workFormPath);
-      const digest=base.automationInputs?.controllerPrefillDigestSha256;
-      recoveredDigest=typeof digest==='string'&&/^[0-9a-f]{64}$/.test(digest)&&
-        a.controllerPrefillDigestSha256===digest&&form.automationInputs?.controllerPrefillDigestSha256===digest;
-    }
-  }
-  if(!recoverable&&!recoveredDigest)return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
- }
+ if(queue.finalizeStatus==='BLOCKED')return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
  for(const u of plan.units){
   const state=queue.units[u.unitId],accepted=read(root,state.acceptedPath);
   if(accepted.submissionSha256!==state.acceptedSha256||
@@ -1086,27 +1055,6 @@ export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[
    const foundMembers=found.get(u.unitId)??new Map();
    foundMembers.set(m.unitId,m);found.set(u.unitId,foundMembers);
   };
-  // Phase-5 reconciliation can accept a newly discovered candidate after the
-  // immutable base target roster was prefilled from Phase 4. The controller
-  // reserves exactly one original APPEND unit for candidate-specific P5-T
-  // additions; restore that unit on the named aggregate missing-target error.
-  // Never invalidate an unrelated accepted source-target binding.
-  if(phase===5){
-    const match=message.match(/Phase 5 mandatory material candidate (P5-CAND-[A-Za-z0-9_-]+) has no targeted machine execution/);
-    if(match){
-      const append=plan.units.find(u=>u.kind==='APPEND'&&u.field==='targetDesigns');
-      if(append){
-        // This is a missing-output correction only: a preexisting accepted
-        // target with this exact key belongs to its own immutable source unit.
-        const exists=plan.units.some(u=>{
-          if(u===append||u.field!=='targetDesigns')return false;
-          const accepted=queue.units[u.unitId]?.acceptedPath?maybe(root,queue.units[u.unitId].acceptedPath):null;
-          return accepted?.submission?.entries?.some(e=>e.value?.candidateKey===match[1]);
-        });
-        if(!exists)mark(append,append);
-      }
-    }
-  }
   // Controller aggregate Phase-4 errors name discovery IDs, not shard array indices.
   // Reopen the candidate append slot for genuinely missing Step-3 candidate records,
   // or just the named original reconciliation batch member for deficient controls.

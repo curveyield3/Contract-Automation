@@ -25,11 +25,6 @@ on:
         required: false
         default: 1
         type: number
-      cloudflare_fork_execution:
-        description: Explicit Cloudflare fork dispatch without stale-main qualification comparison
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -175,17 +170,6 @@ jobs:
           workspace="$(jq -r '.workspacePath' /tmp/directory.json)"
           if [ "$phase_seq" = 9 ]; then
             case "$REQUEST_PATH" in "$workspace"/controller/phase9-reruns/*/*.json) ;; *) echo "::error::Phase-9 request is outside canonical workspace"; exit 1;; esac
-            # Reject source identity ambiguity before dispatching any runner.
-            source_repo="$(jq -r '.source.repository // empty' /tmp/v7-request.json)"
-            archive_path="$(jq -r '.source.archivePath // empty' /tmp/v7-request.json)"
-            archive_sha="$(jq -r '.source.archiveSha256 // empty' /tmp/v7-request.json)"
-            source_commit="$(jq -r '.source.commit // empty' /tmp/v7-request.json)"
-            test "$source_repo" = "curveyield3/Audit-Controller" || { echo "::error::Phase-9 remediation source must be the canonical controller archive"; exit 1; }
-            [[ "$archive_sha" =~ ^[a-f0-9]{64}$ && "$source_commit" =~ ^[a-f0-9]{40}$ ]] || {
-              echo "::error::Phase-9 remediated source hash/commit malformed"; exit 1;
-            }
-            case "$archive_path" in "$workspace"/remediation/source-snapshots/*.zip) ;; *) echo "::error::Missing exact Phase-9 remediation archive"; exit 1;; esac
-            case "$archive_path" in *".."*|*'\'*) echo "::error::Unsafe remediation archive path"; exit 1;; esac
           else
             if [ "$phase_seq" = 8 ]; then
               case "$REQUEST_PATH" in "$workspace"/controller/phase8-revalidation/*/*.json) ;; *) echo "::error::Phase-8 revalidation request is outside canonical workspace"; exit 1;; esac
@@ -204,15 +188,13 @@ jobs:
       - name: Dispatch qualified V7 execution and automatic ingestion
         env:
           GH_TOKEN: ${{ github.token }}
-          CLOUDFLARE_FORK_EXECUTION: ${{ inputs.cloudflare_fork_execution || false }}
         shell: bash
         run: |
           set -euo pipefail
           gh workflow run audit-controller-execution.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f request_path="${{ steps.request.outputs.request_path }}" \
             -f controller_ref="${{ steps.request.outputs.controller_ref }}" \
-            -f controller_writeback_ref="${{ steps.request.outputs.controller_writeback_ref }}" \
-            -f cloudflare_fork_execution="$CLOUDFLARE_FORK_EXECUTION"
+            -f controller_writeback_ref="${{ steps.request.outputs.controller_writeback_ref }}"
 
       - name: Summarize
         shell: bash

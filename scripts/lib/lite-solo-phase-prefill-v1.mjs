@@ -792,37 +792,6 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
       const observerAbs=repoFile(root,path.posix.join(campaignPath,observerRel));
       const ingestion=readJsonIf(ingestionAbs);
       const machine=readJsonIf(evidenceAbs);
-      const observer=readJsonIf(observerAbs);
-      const source=request?.source??{};
-      const snapshotRoot=path.posix.join(campaignPath,'remediation/source-snapshots')+'/';
-      const snapshotPath=String(source.archivePath??'');
-      const archiveName=snapshotPath.startsWith(snapshotRoot)?snapshotPath.slice(snapshotRoot.length):'';
-      const sourcePathValid=source.repository==='curveyield3/Audit-Controller'&&
-        /^[0-9a-f]{40}$/.test(String(source.commit??''))&&
-        /^[a-f0-9]{64}$/.test(String(source.archiveSha256??''))&&
-        /^[A-Za-z0-9_.-]+\.zip$/.test(archiveName)&&!archiveName.includes('/');
-      let observedSha=null;
-      if(sourcePathValid){
-        const archiveAbs=repoFile(root,snapshotPath);
-        if(fs.existsSync(archiveAbs)&&fs.statSync(archiveAbs).isFile())
-          observedSha=createHash('sha256').update(fs.readFileSync(archiveAbs)).digest('hex');
-      }
-      const sourceVerified=sourcePathValid&&observedSha===source.archiveSha256&&
-        observer?.requestId===requestId&&observer?.requestDigest===request.requestDigest&&
-        observer?.sourceVerification?.status==='PASS'&&observer.sourceVerification.preExecution===true&&
-        observer.sourceVerification.archiveSha256===observedSha&&
-        observer.sourceVerification.archivePath===snapshotPath&&
-        observer.sourceVerification.sourceCommit===source.commit&&
-        machine?.source?.repository===source.repository&&
-        machine?.source?.commit===source.commit&&
-        machine?.source?.archivePath===snapshotPath&&
-        machine?.source?.archiveSha256===observedSha;
-      if(!sourceVerified){
-        incompleteRequests++;
-        deficiencies.push('Phase 9 finding '+findingKey+' rerun '+requestId+
-          ' lacks matching source-bound Phase-9 remediation ZIP SHA-256, independently verified pre-execution observer proof, or executed-source identity; do not accept or re-use this test evidence.');
-        continue;
-      }
       const valid=ingestion?.schemaVersion==='audit-execution-evidence-ingestion-receipt-v1'
         && ingestion.requestId===requestId
         && machine?.requestId===requestId
@@ -1038,52 +1007,15 @@ export function buildControllerPacket({directory,assignment,existing,now}){
   };
 }
 
-// Per-campaign validator exceptions. Add exact admitted campaign IDs and bounded
-// phase/check names here; no wildcard, environment toggle or global disable.
-const CAMPAIGN_VALIDATOR_EXCEPTIONS=Object.freeze({
-  'cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1':Object.freeze({
-    controllerPrefillDigest:Object.freeze({fromPhase:5,throughPhase:10})
-  })
-});
-
-function boundValidatorCampaignId(form){
-  // Phase controller receives --campaign-id; isolated fork runner receives the
-  // already-bound request via FORK_PAYLOAD_JSON. Reject contradictory identities.
-  const args=process.argv??[],index=args.indexOf('--campaign-id');
-  const cli=index>=0?args[index+1]:null;
-  let dispatched=null;
-  if(process.env.FORK_OPERATION&&process.env.FORK_PAYLOAD_JSON){
-    try{dispatched=JSON.parse(process.env.FORK_PAYLOAD_JSON).campaign_id??null;}
-    catch{return null;}
-  }
-  if(cli&&dispatched&&cli!==dispatched)return null;
-  const id=cli||dispatched;
-  if(typeof id!=='string'||! /^[A-Za-z0-9_.-]{1,150}$/.test(id)||!/-r[0-9]+$/.test(id))return null;
-  const slug=id.replace(/-r[0-9]+$/,''),revision=id.match(/-r([0-9]+)$/)[1];
-  const prefix='campaigns/'+slug+'/'+slug+' r'+revision+'/receipts/';
-  const receipt=form?.automationInputs?.predecessorReceiptPath;
-  if(typeof receipt!=='string'||!receipt.startsWith(prefix)||!/^PHASE_[0-9]{2}_RECEIPT_v1\.json$/.test(receipt.slice(prefix.length)))return null;
-  return id;
-}
-function campaignValidatorExceptionApplies(sequence,form,check){
-  const campaignId=boundValidatorCampaignId(form);
-  const rule=CAMPAIGN_VALIDATOR_EXCEPTIONS[campaignId]?.[check];
-  return Boolean(rule&&Number.isInteger(sequence)&&sequence>=rule.fromPhase&&sequence<=rule.throughPhase);
-}
-
 export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=null){
   const deficiencies=[];
-  // Only the registered campaign/phase/check exception may omit this digest
-  // comparison; all other scaffold, source, machine and schema gates remain.
-  if(!campaignValidatorExceptionApplies(sequence,form,'controllerPrefillDigest')){
-    const formDigest=form?.automationInputs?.controllerPrefillDigestSha256??null;
-    const expectedDigest=assignmentExpectedDigest??formDigest;
-    const ownedProjection=controllerOwnedProjection(form);
-    if(form?.automationInputs&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
-    else if(ownedProjection.length&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
-    if(assignmentExpectedDigest&&formDigest!==assignmentExpectedDigest) deficiencies.push('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.');
-    if(expectedDigest&&controllerOwnedDigest(form)!==expectedDigest) deficiencies.push('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
-  }
+  const formDigest=form?.automationInputs?.controllerPrefillDigestSha256??null;
+  const expectedDigest=assignmentExpectedDigest??formDigest;
+  const ownedProjection=controllerOwnedProjection(form);
+  if(form?.automationInputs&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
+  else if(ownedProjection.length&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
+  if(assignmentExpectedDigest&&formDigest!==assignmentExpectedDigest) deficiencies.push('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.');
+  if(expectedDigest&&controllerOwnedDigest(form)!==expectedDigest) deficiencies.push('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
   if(sequence===4 && Object.hasOwn(form?.automationInputs??{},'expectedDiscoveryRecordKeys')){
     const expected=form.automationInputs.expectedDiscoveryRecordKeys??[];
     const rows=form?.actions?.['step-1']?.outputs?.discoveryReconciliationRecords??[];

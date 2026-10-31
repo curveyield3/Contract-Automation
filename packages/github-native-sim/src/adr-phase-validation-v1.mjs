@@ -186,22 +186,14 @@ function controllerAcceptedPostSealTestsV1({root,campaignPath}){
    scope:'SCENARIO_BOUNDED_NO_AUTOMATIC_CONTEXT_LEVEL_PASS'};
 }
 
-// A missing or unreadable mandatory coverage input is a named source-bound
-// generation failure, never an implicit omitted coverage section.
-function readRequiredCoverageJson(root,rel){
- const file=repoFile(root,rel);
- let raw;
- try{raw=fs.readFileSync(file,'utf8');}
- catch(e){throw new Error('ADR_COVERAGE_INPUT_READ_FAILED: '+rel+': '+String(e?.message??e));}
- try{return JSON.parse(raw);}
- catch(e){throw new Error('ADR_COVERAGE_INPUT_INVALID_JSON: '+rel+': '+String(e?.message??e));}
-}
 export function appendAdrCoverageSectionV1({root,campaignPath,automationRoot,text}={}){
  try{
-  const discovery=readRequiredCoverageJson(root,path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json'));
-  const inventory=readRequiredCoverageJson(root,reviewInventoryRelV1(root,campaignPath,'REVIEW_INVENTORY_v1.json'));
-  const p6=readRequiredCoverageJson(root,path.posix.join(campaignPath,'derived/phase-6/PHASE_06_CANONICAL_DATA_v1.json'));
-  const baseline=readRequiredCoverageJson(root,path.posix.join(campaignPath,'work/phase-06/BASELINE_OBLIGATIONS_v1.json'));
+  const discovery=read(rootFile(root,campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json'));
+  if(!discovery)return text;
+  const inventory=read(repoFile(root,reviewInventoryRelV1(root,campaignPath,'REVIEW_INVENTORY_v1.json')));
+  if(!inventory)return text;
+  const p6=read(rootFile(root,campaignPath,'derived/phase-6/PHASE_06_CANONICAL_DATA_v1.json'));
+  const baseline=read(rootFile(root,campaignPath,'work/phase-06/BASELINE_OBLIGATIONS_v1.json'));
   const phase6Results={baselineObligations:baseline?.payload?.obligations??[]};
   for(const row of arr(output(p6,4,'baselineTestRecords')).filter(obj))
    for(const outcome of arr(row.obligationOutcomes))if(outcome?.obligationId)phase6Results[outcome.obligationId]=outcome.outcome;
@@ -220,5 +212,5 @@ export function appendAdrCoverageSectionV1({root,campaignPath,automationRoot,tex
       +'- These scenario observations do not automatically establish context-level property PASS or external trust safety.\n'
     : '';
   return text+'\n## Coverage matrix\n'+renderCoverageMarkdownV1(matrix)+supplement+'\nDetection qualification status: '+status+'\n';
- }catch(e){throw new Error('ADR_COVERAGE_GENERATION_FAILED: campaign '+String(campaignPath)+': '+String(e?.message??e),{cause:e});}
+ }catch{return text;}
 }

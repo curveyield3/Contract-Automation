@@ -14,7 +14,7 @@ import {
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-solo-phase-work-v1.mjs';
 import {
-  executePhase5TargetsV1,selectReusablePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderDeployConfigMatrixV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
+  executePhase5TargetsV1,selectReusablePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
   validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
@@ -1191,22 +1191,6 @@ if(sequence===5){
   fs.writeFileSync(repoFile(root,matrixRel),renderTargetedTestMatrixV1({
     targetDesigns,executionResults:phase5MachineResults??{},baselineRows
   }));
-  // Reuse the existing Phase-0 source-bound deployment renderer. The
-  // mandatory Phase-6 Step-1 matrix must exist before the Phase-5 seal and
-  // successor assignment; do not invent missing machine observations.
-  const deployMatrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
-  try{
-    const readinessRel=path.posix.join(campaignPath,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json');
-    const executionRel=path.posix.join(campaignPath,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json');
-    const readiness=readJson(requiredFile(root,readinessRel,'Phase-0 source-bound project readiness'));
-    const execution=readJson(requiredFile(root,executionRel,'Phase-0 source-bound deployment execution'));
-    if(!readiness||typeof readiness!=='object'||Array.isArray(readiness)||
-       !execution||typeof execution!=='object'||Array.isArray(execution))
-      throw new Error('Phase-0 deployment/readiness evidence must be JSON objects');
-    fs.writeFileSync(repoFile(root,deployMatrixRel),renderDeployConfigMatrixV1({readiness,execution}));
-  }catch(e){
-    deficiencies.push('Phase 5 to Phase 6 deployment matrix source-bound generation failed: '+String(e?.message??e));
-  }
   if(deficiencies.length){
     // Evidence and diagnostic matrix may persist; receipt and graph cannot.
     persistReviewerReworkShardsV1();
@@ -1337,7 +1321,6 @@ if(sequence===5){
     }])
   );
   successorPrefillContext={targetDesigns,phase5ExecutionResults:compactMachineResults};
-  boundaryArtifactRels.push(path.posix.join(campaignPath,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md'));
   boundaryArtifactRels.push(path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md'));
 }
 if(sequence===8&&hasRemediation(campaignRoot)){

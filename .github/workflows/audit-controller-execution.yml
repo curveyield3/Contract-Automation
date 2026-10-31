@@ -22,11 +22,6 @@ on:
         required: false
         default: ''
         type: string
-      cloudflare_fork_execution:
-        description: Skip stale-main comparison only for source-bound Cloudflare fork execution; always use the existing qualified runner
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -45,10 +40,6 @@ jobs:
         id: qualified_runner
         env:
           GH_TOKEN: ${{ github.token }}
-          CLOUDFLARE_FORK_EXECUTION: ${{ inputs.cloudflare_fork_execution || false }}
-          FORK_CONTROLLER_REF: ${{ inputs.controller_ref }}
-          FORK_CONTROLLER_WRITEBACK_REF: ${{ inputs.controller_writeback_ref }}
-          FORK_REQUEST_PATH: ${{ inputs.request_path }}
         shell: bash
         run: |
           set -euo pipefail
@@ -64,35 +55,18 @@ jobs:
           # Compare security-relevant runner inputs rather than raw HEAD:
           # status bookkeeping and documentation commits must not make a newly
           # qualified runner permanently impossible to use.
-          if [ "$CLOUDFLARE_FORK_EXECUTION" = "true" ]; then
-            # Isolate the exception to an explicit Cloudflare-routed, immutable
-            # campaign execution request. Primary PR/manual execution retains
-            # the original stale-main comparison below, byte for byte.
-            test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
-            [[ "$FORK_CONTROLLER_REF" =~ ^[0-9a-f]{40}$ ]]
-            test "$FORK_CONTROLLER_WRITEBACK_REF" = "main"
-            case "$FORK_REQUEST_PATH" in
-              campaigns/*/controller/phase6-tests/*/*.json|campaigns/*/controller/phase8-revalidation/*/*.json|campaigns/*/controller/phase9-reruns/*/*.json) ;;
-              *) echo "::error::Cloudflare fork exception requires a campaign-local Phase 6/8/9 V7 request"; exit 1 ;;
-            esac
-            case "$FORK_REQUEST_PATH" in
-              *".."*|*'\'*) echo "::error::Unsafe Cloudflare fork request path"; exit 1 ;;
-            esac
-            echo "::notice::Cloudflare fork route bypasses only stale-main qualification comparison; runner remains pinned to recorded qualified commit $qualified_commit"
-          else
-            diff_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/$qualified_commit...main")" || {
-              echo "::error::V7_QUALIFIED_RUNNER_STALE: unable to compare qualified runner and current source."
-              exit 1
-            }
-            changed_count="$(printf '%s' "$diff_json" | jq -r '.files|length')"
-            if [ "$changed_count" -ge 300 ]; then
-              echo "::error::V7_QUALIFIED_RUNNER_STALE: comparison too large to prove safe; requalification required."
-              exit 1
-            fi
-            if printf '%s' "$diff_json" | jq -r '.files[]?.filename' | grep -Eq '^(packages/runner/src/|packages/github-native-sim/src/|scripts/|\.github/workflows/audit-controller-execution\.yml$|\.github/actions/setup-v7-toolchain/)'; then
-              echo "::error::V7_QUALIFIED_RUNNER_STALE: execution code changed since qualified commit. Human-authorized runner requalification and exact evidence rebind required; no stale runner fallback."
-              exit 1
-            fi
+          diff_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/$qualified_commit...main")" || {
+            echo "::error::V7_QUALIFIED_RUNNER_STALE: unable to compare qualified runner and current source."
+            exit 1
+          }
+          changed_count="$(printf '%s' "$diff_json" | jq -r '.files|length')"
+          if [ "$changed_count" -ge 300 ]; then
+            echo "::error::V7_QUALIFIED_RUNNER_STALE: comparison too large to prove safe; requalification required."
+            exit 1
+          fi
+          if printf '%s' "$diff_json" | jq -r '.files[]?.filename' | grep -Eq '^(packages/runner/src/|packages/github-native-sim/src/|scripts/|\.github/workflows/audit-controller-execution\.yml$|\.github/actions/setup-v7-toolchain/)'; then
+            echo "::error::V7_QUALIFIED_RUNNER_STALE: execution code changed since qualified commit. Human-authorized runner requalification and exact evidence rebind required; no stale runner fallback."
+            exit 1
           fi
           echo "commit=$qualified_commit" >> "$GITHUB_OUTPUT"
           echo "run_id=$qualification_run" >> "$GITHUB_OUTPUT"
@@ -179,50 +153,6 @@ jobs:
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'false'
         shell: bash
         run: bash scripts/select-audit-controller-token.sh
-
-      - name: Verify Phase-9 remediated source identity before any test
-        if: github.event_name == 'workflow_dispatch' && contains(inputs.request_path, '/controller/phase9-reruns/')
-        shell: bash
-        env:
-          V7_REQUEST_PATH: ${{ inputs.request_path }}
-          V7_CONTROLLER_REF: ${{ inputs.controller_ref }}
-        run: |
-          set -euo pipefail
-          case "$V7_REQUEST_PATH" in
-            campaigns/*/controller/phase9-reruns/*/*.json) ;;
-            *) exit 0 ;;
-          esac
-          request=.v7-request/request.json
-          test -s "$request"
-          archive_path="$(jq -er '.source.archivePath' "$request")"
-          expected_sha="$(jq -er '.source.archiveSha256' "$request")"
-          source_commit="$(jq -er '.source.commit' "$request")"
-          repository="$(jq -er '.source.repository' "$request")"
-          workspace="${V7_REQUEST_PATH%%/controller/phase9-reruns/*}"
-          test "$repository" = "curveyield3/Audit-Controller"
-          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
-          case "$archive_path" in
-            "$workspace"/remediation/source-snapshots/*.zip) ;;
-            *) echo "::error::Phase-9 test requires the campaign's immutable remediated source ZIP"; exit 1 ;;
-          esac
-          case "$archive_path" in
-            *".."*|*'\'*) echo "::error::Unsafe remediation archive path"; exit 1 ;;
-          esac
-          test -f ".controller-request/$archive_path" || {
-            echo "::error::Required Phase-9 remediated source ZIP does not exist"; exit 1;
-          }
-          observed_sha="$(sha256sum ".controller-request/$archive_path" | cut -d' ' -f1)"
-          test "$observed_sha" = "$expected_sha" || {
-            echo "::error::PHASE9_REMEDIATED_SOURCE_HASH_MISMATCH: tests prohibited"; exit 1;
-          }
-          {
-            echo "PHASE9_SOURCE_VERIFICATION_STATUS=PASS"
-            echo "PHASE9_SOURCE_VERIFICATION_SHA=$observed_sha"
-            echo "PHASE9_SOURCE_VERIFICATION_ARCHIVE=$archive_path"
-            echo "PHASE9_SOURCE_VERIFICATION_COMMIT=$source_commit"
-            echo "PHASE9_SOURCE_VERIFICATION_CONTROLLER_REF=$V7_CONTROLLER_REF"
-          } >> "$GITHUB_ENV"
 
       # Existing V7 technical execution lane. Controller-operation requests skip this setup.
       - name: Cache npm download cache
@@ -615,11 +545,6 @@ jobs:
             --arg retry_from "$retry_from" \
             --arg recovery_command "$recovery_command" \
             --arg route "$route" \
-            --arg source_status "${PHASE9_SOURCE_VERIFICATION_STATUS:-NOT_REQUIRED}" \
-            --arg source_sha "${PHASE9_SOURCE_VERIFICATION_SHA:-}" \
-            --arg source_archive "${PHASE9_SOURCE_VERIFICATION_ARCHIVE:-}" \
-            --arg source_commit "${PHASE9_SOURCE_VERIFICATION_COMMIT:-}" \
-            --arg source_controller_ref "${PHASE9_SOURCE_VERIFICATION_CONTROLLER_REF:-}" \
             '{
               schemaVersion:"curveyield-lite-execution-observer-receipt-v1",
               requestId:$request_id,
@@ -638,10 +563,6 @@ jobs:
                 recoveryCommand:(if $recovery_command=="" then null else $recovery_command end)
               },
               route:$route,
-              sourceVerification:(if $source_status=="PASS" then {
-                status:"PASS",preExecution:true,archiveSha256:$source_sha,archivePath:$source_archive,
-                sourceCommit:$source_commit,controllerRef:$source_controller_ref
-              } else null end),
               semanticReviewerPollingRequired:false
             }')"
           receipt_digest="$(printf '%s' "$payload" | jq -S -c . | sha256sum | awk '{print $1}')"
