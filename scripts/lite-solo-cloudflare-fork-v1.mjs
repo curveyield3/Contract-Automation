@@ -456,7 +456,7 @@ async function unitNextStep(c){
        (u.kind==='BATCH'?schema.actions['step-'+step]?.fields?.some(f=>f.name===u.field):
          u.path?.[1]==='step-'+step);
     return sameStep&&['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(queue.units?.[u.unitId]?.status)&&
-      (u.dependencies||[]).every(dep=>queue.units?.[dep]?.status==='ACCEPTED');
+      (u.dependencies||[]).every(dep=>dependencyAccepted(queue,dep));
   });
   strict(eligible.length>0,'no eligible units in current controller stage; do not invent work');
   const roster=eligible.map(u=>{const x=buildUnitMeta(c,u,schema);x.step=step;x.stage=stage;return x;});
@@ -492,11 +492,17 @@ function forkNextUnitStep(c,source,phase,step){
    'CONTROLLER_DEPENDENCY_BLOCKED: successor '+nextStage+' has no eligible accepted-prerequisite units');
  return {done:false,step:nextStep,stage:nextStage};
 }
+function dependencyAccepted(queue,id){
+  const record=queue.acceptedRecords?.[id];
+  if(record?.status==='ACCEPTED'&&record.snapshotSha256)return true;
+  const unit=queue.units?.[id];
+  return unit?.status==='ACCEPTED'&&!!unit.acceptedPath&&!!unit.acceptedSha256;
+}
 function eligibleStage(c,source,phase,step,stage){
   const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
   return source.units.filter(u=>unitRelevant(u,phase,step,stage,schema)&&
     ['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(source.queue.units?.[u.unitId]?.status)&&
-    (u.dependencies||[]).every(dep=>source.queue.units?.[dep]?.status==='ACCEPTED'));
+    (u.dependencies||[]).every(dep=>dependencyAccepted(source.queue,dep)));
 }
 function stageDigest(c,source,phase,step,stage){
   return sha(JSON.stringify(eligibleStage(c,source,phase,step,stage).map(u=>{
@@ -576,7 +582,7 @@ async function unitValidateSingle(c,item){
   strict(u&&unitRelevant(u,phase,step,stage,loadPhaseSchema(ROOT,AUTH,phase).schema),'unit not in assigned step/type');
   const state=current.queue.units[id];
   strict(state&&['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(state.status),'unit no longer claimable by canonical controller');
-  strict((u.dependencies||[]).every(dep=>current.queue.units?.[dep]?.status==='ACCEPTED'),'unit dependencies not accepted');
+  strict((u.dependencies||[]).every(dep=>dependencyAccepted(current.queue,dep)),'unit dependencies not accepted');
   const selected=submittedUnitFile(c,phase,u);
   strict(sha(fs.readFileSync(selected.filename))===expectedSha,'published unit differs from pending Worker submission');
   strict(Number(item.attempt)===selected.attempt,'submitted attempt differs from pending Worker attempt');
