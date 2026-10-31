@@ -880,6 +880,7 @@ const sealedRework=null;
 if(reviewKind==='phase'&&!masterAmendmentRefreshSha&&['STOPPED_BY_HUMAN','BLOCKED'].includes(String(directory.campaignStatus??'')))
  throw new Error('campaign is held by explicit human status '+directory.campaignStatus);
 const assignment=directory.currentAssignment;
+const skipControllerPrefillDigest=directory.executionModel==='PARALLEL_WORKER_UNITS'&&sequence>=5;
 if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current assignment does not match submitted phase');
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'predecessor sealed receipt'));
 const authorityRoot=authorityRootFromReceipt(predecessor);
@@ -906,7 +907,7 @@ try{
   // v10.3 stores the authoritative prefill digest outside the reviewer-editable
   // form. Older active assignments are migrated once from the pre-existing form
   // digest so in-flight v10.2 campaigns remain resumable.
-  if(!assignment.controllerPrefillDigestSha256){
+  if(!skipControllerPrefillDigest&&!assignment.controllerPrefillDigestSha256){
     const legacyDigest=form?.automationInputs?.controllerPrefillDigestSha256;
     if(typeof legacyDigest!=='string'||!/^[0-9a-f]{64}$/.test(legacyDigest)){
       deficiencies.push('Controller-owned assignment prefill digest is missing and no valid legacy form digest is available for one-time migration.');
@@ -917,7 +918,7 @@ try{
   }
 
   deficiencies.push(...validateWorkForm(schema,form));
-  deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+  deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{skipControllerPrefillDigest}));
   if(sequence===5){
     const reportRel=path.posix.join(campaignPath,'controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json');
     const preflight=maybeJson(root,reportRel);
@@ -952,7 +953,7 @@ try{
       assignment.controllerPrefillDigestSha256=form.automationInputs.controllerPrefillDigestSha256;
       writeJson(repoFile(root,assignment.workFormPath),form);
       deficiencies.push(...validateWorkForm(schema,form));
-      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{skipControllerPrefillDigest}));
     }
   }
 }catch(e){
@@ -1064,7 +1065,7 @@ if(sequence===5&&form&&deficiencies.length===0){
   if(!deficiencies.length){
     assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
     writeJson(repoFile(root,assignment.workFormPath),form);
-    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256,{skipControllerPrefillDigest}));
   }
 }
 
