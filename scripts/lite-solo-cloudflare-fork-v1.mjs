@@ -612,7 +612,7 @@ async function unitAdvanceAcceptedStage(c){
   // no longer describe HEAD. Do not reject that one proven handoff as stale.
   const reconciledAttackHandoff=phase===4&&step===0&&stage==='ATTACK_REVIEW'&&
     current.plan.stage==='RECONCILIATION'&&current.queue.stage==='RECONCILIATION'&&
-    planDigest!==payload.plan_sha256&&queueDigest!==payload.queue_sha256;
+    (planDigest!==payload.plan_sha256||queueDigest!==payload.queue_sha256);
   strict((planDigest===payload.plan_sha256&&queueDigest===payload.queue_sha256)||
     reconciledAttackHandoff,'stage closure queue or plan changed unexpectedly');
   strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===need('source_commit'),
