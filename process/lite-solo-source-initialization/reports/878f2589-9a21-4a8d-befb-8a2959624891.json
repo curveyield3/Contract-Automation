@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-report-v1",
+  "mode": "LITE_SOLO",
+  "status": "PASS",
+  "requestId": "878f2589-9a21-4a8d-befb-8a2959624891",
+  "publicationPolicySha256": "41dd1db55a512acc71215b85f1bcf4f3c4b7031876c793b04ad8348ad2f674aa",
+  "actor": {
+    "actorId": "lite-solo-agent"
+  },
+  "source": {
+    "sha256": "7278290969c3286370c0aad79b06fdc99a0c8c5f988510940da8d3ba4e923543",
+    "inputUrl": "https://lite-solo-api.jamesnexus9999.workers.dev/fork/source?auditId=878f2589-9a21-4a8d-befb-8a2959624891",
+    "scanUrls": []
+  },
+  "campaign": {
+    "campaignId": "cloudflare-audit-878f2589-9a21-4a8d-befb-8a2959624891-r1",
+    "campaignGenerationId": "cloudflare-audit-878f2589-9a21-4a8d-befb-8a2959624891-r1-g1-20261101T012736Z",
+    "campaignName": "cloudflare-audit-878f2589-9a21-4a8d-befb-8a2959624891 r1",
+    "workspacePath": "campaigns/cloudflare-audit-878f2589-9a21-4a8d-befb-8a2959624891/cloudflare-audit-878f2589-9a21-4a8d-befb-8a2959624891 r1"
+  },
+  "completedAt": "2026-11-01T01:27:38Z"
+}
