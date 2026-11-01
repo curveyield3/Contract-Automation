@@ -45,7 +45,7 @@ jobs:
             test -f "$file"
             jq -e '
               .schemaVersion=="curveyield-lite-solo-audit-correction-request-v1" and
-              (.operation=="PREPARE" or .operation=="LAUNCH") and
+              (.operation=="PREPARE" or .operation=="LAUNCH" or .operation=="REPAIR") and
               (.sourceCampaignId|test("^[a-z0-9][a-z0-9.-]*-r[1-9][0-9]*$")) and
               (.correctionKey|test("^[a-z0-9][a-z0-9.-]*$")) and
               (.requestId|test("^[a-z0-9][a-z0-9.-]*$")) and
@@ -118,7 +118,19 @@ jobs:
         env:
           AUDIT_CONTROLLER_ROOT: .audit-controller
           REQUEST_FILE: ${{ steps.scope.outputs.request }}
-        run: node scripts/lite-solo-audit-correction/transition-v1.mjs "$REQUEST_FILE"
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(jq -r .operation "$REQUEST_FILE")" == "REPAIR" ]]; then
+            prepare="$RUNNER_TEMP/lite-solo-correction-prepare.json"
+            launch="$RUNNER_TEMP/lite-solo-correction-launch.json"
+            jq '.operation="PREPARE"' "$REQUEST_FILE" > "$prepare"
+            node scripts/lite-solo-audit-correction/transition-v1.mjs "$prepare"
+            jq '.operation="LAUNCH" | .requestId += "-launch"' "$REQUEST_FILE" > "$launch"
+            node scripts/lite-solo-audit-correction/transition-v1.mjs "$launch"
+          else
+            node scripts/lite-solo-audit-correction/transition-v1.mjs "$REQUEST_FILE"
+          fi
       - name: Persist only correction workspace and its directory
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
