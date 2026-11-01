@@ -378,7 +378,7 @@ jobs:
           cp "$RUNNER_TEMP/cyvbusdc_yearn_v3_1_0_strategy_stack_v17.zip" "$destination"
           git config user.name "CurveYield Package Builder"
           git config user.email "package-builder@users.noreply.github.com"
-          git add -- "$destination"
+          git add --sparse -- "$destination"
           git commit -m "package(cyvbusdc): add v17 Foundry artifact-read fix"
           git push origin HEAD:main
           git fetch origin main
