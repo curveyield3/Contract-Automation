@@ -14,11 +14,11 @@ The original campaign remains sealed and unchanged. The correction receives its 
 - Existing unit ingress: `process/agent-upload/lite-solo-unit-requests/<correctionCampaignId>/<workerId>-<requestId>.json`
 - Existing phase ingress: `process/agent-upload/lite-solo-phase-boundary/<requestId>.json`
 
-Only PREPARE and LAUNCH belong to the new workflow; all subsequent audit execution uses the existing v4 controller.
+PREPARE and LAUNCH remain separate supported operations. REPAIR is the one-request automation mode: the existing workflow runs PREPARE, validates the staged scope, then LAUNCH in the same GitHub Actions execution, without bypassing either transition's checks or executing audit tests. All subsequent audit execution uses the existing campaign-bound Lite-Solo controller.
 
 ## Request contract
 
-Submit an **immutable, uniquely named** JSON file to the request ingress on `main`, or invoke the workflow manually with a path to such a file already on `main`:
+Submit an **immutable, uniquely named** JSON file to the request ingress on `main`, or invoke the workflow manually with a path to such a file already on `main`. The API-facing `REPAIR` operation follows the same schema (replace `PREPARE` with `REPAIR`) and automatically performs both PREPARE and LAUNCH in one workflow run:
 
 ```json
 {
