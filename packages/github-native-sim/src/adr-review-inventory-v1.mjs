@@ -39,7 +39,7 @@ export function sourceTierV1(p,scope=null,{includeScripts=false}={}) {
   if(includeScripts&&scriptPath)return !sourceExplicitlyExcludedV1(p,scope)?'IN_SCOPE':'SCRIPT';
   // Config/deploy Solidity sources remain normal executable code under v12.
   if(p.endsWith('.s.sol')||/(^|\/)(script|scripts)\//.test(p))return 'SCRIPT';
-  if(scope?.source===AUDIT_SCOPE_FILE)return sourceIsInScope(p,scope)?'IN_SCOPE':'DEPENDENCY';
+  if(scope?.source===AUDIT_SCOPE_FILE||scope?.source==='foundry.toml')return sourceIsInScope(p,scope)?'IN_SCOPE':'DEPENDENCY';
   if(/(^|\/)(vendor|lib|node_modules)\//.test(p)||p.startsWith('@'))return 'DEPENDENCY';
   return 'IN_SCOPE';
 }
