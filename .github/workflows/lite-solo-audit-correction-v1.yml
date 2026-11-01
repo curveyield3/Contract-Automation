@@ -49,7 +49,8 @@ jobs:
               (.sourceCampaignId|test("^[a-z0-9][a-z0-9.-]*-r[1-9][0-9]*$")) and
               (.correctionKey|test("^[a-z0-9][a-z0-9.-]*$")) and
               (.requestId|test("^[a-z0-9][a-z0-9.-]*$")) and
-              (.startPhase==4 or .startPhase==5 or .startPhase==6 or
+              (.startPhase==1 or .startPhase==2 or .startPhase==3 or
+               .startPhase==4 or .startPhase==5 or .startPhase==6 or
                .startPhase==8 or .startPhase==9 or .startPhase==10)
             ' "$file" >/dev/null
             jq -nc --arg f "$file" --arg campaign "$(jq -r .sourceCampaignId "$file")" \
