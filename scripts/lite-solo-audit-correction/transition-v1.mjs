@@ -24,7 +24,7 @@ const suffix=id=>/^(.*)-r([1-9][0-9]*)$/.exec(id??'');
 if(request.schemaVersion!=='curveyield-lite-solo-audit-correction-request-v1'||
  !['PREPARE','LAUNCH'].includes(request.operation)||!valid(request.requestId)||
  !valid(request.sourceCampaignId)||!valid(request.correctionKey)||
- ![4,5,6,8,9,10].includes(request.startPhase))
+ ![1,2,3,4,5,6,8,9,10].includes(request.startPhase))
  throw Error('LSC_INVALID_REQUEST');
 const sourceParts=suffix(request.sourceCampaignId);
 if(!sourceParts)throw Error('LSC_SOURCE_CAMPAIGN_ID_INVALID');
@@ -307,6 +307,8 @@ const restoreControls=(start,scope,dir)=>{
 const relatedInputs=(phase)=>{
  const base=dest+'/derived/';
  const exact={
+  2:['phase-1/PHASE2_INPUT_v1.json'],
+  3:['phase-2/PHASE3_INPUT_v1.json'],
   4:['phase-2/PHASE3_INPUT_v1.json','phase-3/PHASE4_INPUT_v1.json'],
   5:['phase-2/PHASE3_INPUT_v1.json','phase-3/PHASE4_INPUT_v1.json','phase-4/PHASE5_INPUT_v1.json'],
   6:['phase-2/PHASE3_INPUT_v1.json','phase-3/PHASE4_INPUT_v1.json','phase-4/PHASE5_INPUT_v1.json','phase-5/PHASE6_INPUT_v1.json'],
@@ -315,6 +317,7 @@ const relatedInputs=(phase)=>{
   10:['phase-8/PHASE10_INPUT_v1.json','phase-9/PHASE10_REMEDIATION_INPUT_v1.json']
  };
  const other={
+  1:['evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json','evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json'],
   6:['evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json','work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md','work/phase-06/LITE_TARGETED_TEST_MATRIX.md'],
   8:['evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json','work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md','work/phase-06/LITE_TARGETED_TEST_MATRIX.md'],
   9:['work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md'],
@@ -541,7 +544,7 @@ const launch=()=>{
   status:'ACTIVE',prefillContext});
  dir.currentAssignment=assignment;dir.lastSealedReceiptPath=previous;
  dir.campaignStatus='ACTIVE';dir.updatedAt=when;dir.unitPhaseEpoch=1;
- if(request.startPhase<=6)createUnitPlanV1({root,campaignPath:dest,
+ if([4,5,6].includes(request.startPhase))createUnitPlanV1({root,campaignPath:dest,
   directory:dir,phase:request.startPhase,automationRoot:process.cwd()});
  stage.status='LAUNCHED';stage.launchedAt=when;stage.scopeSha256=digest(scopeRel);
  stage.firstAssignmentPhase=request.startPhase;
