@@ -143,12 +143,13 @@ jobs:
           if restriction_count != 1 and 'version = "=0.7.6"' not in toml:
               raise SystemExit("Foundry router compiler restriction must be pinned exactly to =0.7.6")
           if "additional_compiler_profiles" not in toml:
-              marker_profile = 'fs_permissions = [{ access = "read", path = "./out" }]'
+              marker_profile = "ffi = false"
               if marker_profile not in toml:
-                  raise SystemExit("Cannot locate Foundry artifact permission for compiler profile insertion")
+                  raise SystemExit("Cannot locate ffi=false for router compiler profile insertion")
               toml = toml.replace(
                   marker_profile,
-                  marker_profile + '\nadditional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul" } ]',
+                  marker_profile + '\nfs_permissions = [{ access = "read", path = "./out" }]'
+                  + '\nadditional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul" } ]',
                   1
               )
           if 'additional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul" } ]' not in toml:
