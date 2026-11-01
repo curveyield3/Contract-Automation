@@ -137,7 +137,7 @@ jobs:
           toml = (root / "foundry.toml").read_text()
           toml, restriction_count = re.subn(
               r'(paths\s*=\s*"contracts/CurveYieldSushiV3FeeRouter\.sol",\s*version\s*=\s*)"0\.7\.6"',
-              r'\1"=0.7.6", profile = "router-istanbul"',
+              r'\1"=0.7.6"',
               toml
           )
           if restriction_count != 1 and 'version = "=0.7.6"' not in toml:
@@ -149,13 +149,11 @@ jobs:
               toml = toml.replace(
                   marker_profile,
                   marker_profile + '\nfs_permissions = [{ access = "read", path = "./out" }]'
-                  + '\nadditional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul" } ]',
+                  + '\nadditional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul", optimizer = true, optimizer_runs = 200 } ]',
                   1
               )
-          if 'additional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul" } ]' not in toml:
+          if 'additional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul", optimizer = true, optimizer_runs = 200 } ]' not in toml:
               raise SystemExit("Missing router-istanbul compiler profile")
-          if 'profile = "router-istanbul"' not in toml:
-              raise SystemExit("Router compilation restriction does not select router-istanbul")
           if "fs_permissions" not in toml:
               marker = "ffi = false"
               if marker not in toml:
@@ -164,6 +162,16 @@ jobs:
           if 'fs_permissions = [{ access = "read", path = "./out" }]' not in toml:
               raise SystemExit("Foundry output read permission was not set exactly")
           (root / "foundry.toml").write_text(toml)
+          path_library = root / "dependencies_v7/uniswap-v3-periphery/contracts/libraries/Path.sol"
+          path_source = path_library.read_text()
+          helper = "function getFirstPool(bytes memory p) internal pure returns(bytes memory){return p.slice(0,POP_OFFSET);}"
+          if "function getFirstPool" not in path_source:
+              if "function skipToken" not in path_source:
+                  raise SystemExit("Unexpected vendored Uniswap Path.sol shape")
+              path_source = path_source.replace("function skipToken", helper + " function skipToken", 1)
+              path_library.write_text(path_source)
+          if "function getFirstPool" not in path_library.read_text():
+              raise SystemExit("Missing Path.getFirstPool helper after dependency repair")
           old_script = root / "script/DeployCurveYieldVbUSDCYearn_v16.s.sol"
           new_script = root / "script/DeployCurveYieldVbUSDCYearn_v17.s.sol"
           if not old_script.is_file() or new_script.exists():
@@ -208,6 +216,11 @@ jobs:
           manifest["singleDeploymentScript"] = "script/DeployCurveYieldVbUSDCYearn_v17.s.sol:DeployCurveYieldVbUSDCYearn_v17"
           manifest.setdefault("compilerConfiguration", {})["artifactAccess"] = "Foundry vm.getCode requires read-only fs_permissions for ./out"
           manifest["compilerConfiguration"]["routerProfile"] = "router-istanbul"
+          manifest["dependencyCorrections"] = {
+              "path": "dependencies_v7/uniswap-v3-periphery/contracts/libraries/Path.sol",
+              "change": "Restored the upstream getFirstPool(bytes) helper required by the unchanged router source",
+              "implementation": "return path.slice(0, POP_OFFSET)"
+          }
           manifest.setdefault("verification", {})["compilationRun"] = False
           manifest["verification"]["testsRun"] = False
           manifest["verification"]["broadcast"] = False
