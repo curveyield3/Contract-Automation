@@ -136,8 +136,8 @@ jobs:
           # requires explicit read permission for that file-cheatcode access.
           toml = (root / "foundry.toml").read_text()
           toml, restriction_count = re.subn(
-              r'(paths\\s*=\\s*"contracts/CurveYieldSushiV3FeeRouter\\.sol",\\s*version\\s*=\\s*)"0\\.7\\.6"',
-              r'\\1"=0.7.6"',
+              r'(paths\s*=\s*"contracts/CurveYieldSushiV3FeeRouter\.sol",\s*version\s*=\s*)"0\.7\.6"',
+              r'\1"=0.7.6"',
               toml
           )
           if restriction_count != 1 and 'version = "=0.7.6"' not in toml:
