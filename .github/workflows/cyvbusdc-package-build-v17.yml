@@ -65,7 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib, json, os, pathlib, shutil, zipfile
+          import hashlib, json, os, pathlib, re, shutil, zipfile
           work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "cyvbusdc-v17"
           archive = work / "v16.zip"
           extracted = work / "extracted"
@@ -135,6 +135,13 @@ jobs:
           # Foundry vm.getCode reads the router artifact from ./out. Foundry
           # requires explicit read permission for that file-cheatcode access.
           toml = (root / "foundry.toml").read_text()
+          toml, restriction_count = re.subn(
+              r'(paths\\s*=\\s*"contracts/CurveYieldSushiV3FeeRouter\\.sol",\\s*version\\s*=\\s*)"0\\.7\\.6"',
+              r'\\1"=0.7.6"',
+              toml
+          )
+          if restriction_count != 1 and 'version = "=0.7.6"' not in toml:
+              raise SystemExit("Foundry router compiler restriction must be pinned exactly to =0.7.6")
           if "fs_permissions" not in toml:
               marker = "ffi = false"
               if marker not in toml:
