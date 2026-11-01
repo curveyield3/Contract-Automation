@@ -495,6 +495,7 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
     && anchorText.includes('import "../beefy/contracts/beefy/StrategyConvexBoostHubStakingV5.sol";')
     && anchorText.includes('import "../beefy/contracts/beefy/BeefyVaultV7FixedV2.sol";');
   let paths;
+  let result = null;
   if(isBoostHubAnchor){
     const originalSources=[];
     async function collectExactSources(dir){
@@ -534,7 +535,7 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
       paths.push(...files);
     }
   }else{
-    const result=await runCommand({command:'timeout',args:['1500s','forge','build','--force','--build-info','--skip','script','--skip','test'],cwd:projectRoot});
+    result=await runCommand({command:'timeout',args:['1500s','forge','build','--force','--build-info','--skip','script','--skip','test'],cwd:projectRoot});
     if(result?.exitCode!==0){
       const error=new Error('Foundry native production compilation failed: '+String(result?.stderr??result?.stdout??'').slice(-4000));
       error.code='FOUNDRY_NATIVE_COMPILATION_FAILED';throw error;
