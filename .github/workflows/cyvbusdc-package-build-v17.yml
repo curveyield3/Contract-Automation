@@ -137,11 +137,24 @@ jobs:
           toml = (root / "foundry.toml").read_text()
           toml, restriction_count = re.subn(
               r'(paths\s*=\s*"contracts/CurveYieldSushiV3FeeRouter\.sol",\s*version\s*=\s*)"0\.7\.6"',
-              r'\1"=0.7.6"',
+              r'\1"=0.7.6", profile = "router-istanbul"',
               toml
           )
           if restriction_count != 1 and 'version = "=0.7.6"' not in toml:
               raise SystemExit("Foundry router compiler restriction must be pinned exactly to =0.7.6")
+          if "additional_compiler_profiles" not in toml:
+              marker_profile = 'fs_permissions = [{ access = "read", path = "./out" }]'
+              if marker_profile not in toml:
+                  raise SystemExit("Cannot locate Foundry artifact permission for compiler profile insertion")
+              toml = toml.replace(
+                  marker_profile,
+                  marker_profile + '\\nadditional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul" } ]',
+                  1
+              )
+          if 'additional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul" } ]' not in toml:
+              raise SystemExit("Missing router-istanbul compiler profile")
+          if 'profile = "router-istanbul"' not in toml:
+              raise SystemExit("Router compilation restriction does not select router-istanbul")
           if "fs_permissions" not in toml:
               marker = "ffi = false"
               if marker not in toml:
@@ -168,7 +181,7 @@ jobs:
           instructions = instructions.replace("DeployCurveYieldVbUSDCYearn_v16", "DeployCurveYieldVbUSDCYearn_v17")
           section = (
               "## Foundry artifact access\n\n"
-              "The deployment script loads the router's separately compiled 0.7.6 creation bytecode with "
+              "The deployment script loads the router's separately compiled 0.7.6 creation bytecode (router-istanbul compiler profile) with "
               "`vm.getCode`. Foundry file cheatcodes deny this read unless the output directory is explicitly "
               "permitted. This package grants read-only access to `./out` in `foundry.toml`; do not remove "
               "this permission or widen it to the project root.\n\n"
@@ -193,6 +206,7 @@ jobs:
           manifest["package"] = package
           manifest["singleDeploymentScript"] = "script/DeployCurveYieldVbUSDCYearn_v17.s.sol:DeployCurveYieldVbUSDCYearn_v17"
           manifest.setdefault("compilerConfiguration", {})["artifactAccess"] = "Foundry vm.getCode requires read-only fs_permissions for ./out"
+          manifest["compilerConfiguration"]["routerProfile"] = "router-istanbul"
           manifest.setdefault("verification", {})["compilationRun"] = False
           manifest["verification"]["testsRun"] = False
           manifest["verification"]["broadcast"] = False
