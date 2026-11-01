@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-report-v1",
+  "mode": "LITE_SOLO",
+  "status": "PASS",
+  "requestId": "cyvbusdc-yearn-v17",
+  "publicationPolicySha256": "ec4eeac2c1efcb70212a41073db7023c915f3bbafe75124391ff333d1575b26c",
+  "actor": {
+    "actorId": "lite-solo-agent"
+  },
+  "source": {
+    "sha256": "2e99ba8c61514a39c3afab191515e407bb8fae76b1a799ec1868ff922ec3585e",
+    "inputUrl": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/cyvbusdc_yearn_v3_1_0_strategy_stack_v17.zip",
+    "scanUrls": []
+  },
+  "campaign": {
+    "campaignId": "cyvbusdc-yearn-v3-1-0-strategy-stack-v17-r1",
+    "campaignGenerationId": "cyvbusdc-yearn-v3-1-0-strategy-stack-v17-r1-g1-20261101T005033Z",
+    "campaignName": "cyvbusdc_yearn_v3_1_0_strategy_stack_v17 r1",
+    "workspacePath": "campaigns/cyvbusdc_yearn_v3_1_0_strategy_stack_v17/cyvbusdc_yearn_v3_1_0_strategy_stack_v17 r1"
+  },
+  "completedAt": "2026-11-01T00:50:35Z"
+}
