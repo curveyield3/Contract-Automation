@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-lite-solo-phase-boundary-request-v1",
+  "campaignId": "cyvbusdcv28-r1",
+  "reviewKind": "phase",
+  "phaseSequence": 3,
+  "auditControllerRef": "main",
+  "attempt": 1
+}
