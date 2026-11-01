@@ -148,7 +148,7 @@ jobs:
                   raise SystemExit("Cannot locate Foundry artifact permission for compiler profile insertion")
               toml = toml.replace(
                   marker_profile,
-                  marker_profile + '\\nadditional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul" } ]',
+                  marker_profile + '\nadditional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul" } ]',
                   1
               )
           if 'additional_compiler_profiles = [ { name = "router-istanbul", evm_version = "istanbul" } ]' not in toml:
