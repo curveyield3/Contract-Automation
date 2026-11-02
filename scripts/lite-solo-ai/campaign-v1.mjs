@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v10. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v11. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import http from 'node:http';
@@ -12,6 +12,8 @@ const campaignId=process.env.AUDIT_AI_CAMPAIGN_ID||'';
 const expectedPhase=Number(process.env.AUDIT_AI_EXPECTED_PHASE);
 const expectedStep=Number(process.env.AUDIT_AI_EXPECTED_STEP);
 const maxChunks=Number(process.env.AUDIT_AI_MAX_CHUNKS||12);
+const maxControllerUnitsPerRunner=16; // Explicit per-run controller-unit cap, not a phase cap.
+const inferenceTimeoutMs=120*60*1000; // Two hours for one CPU inference call.
 const autonomous=process.env.AUDIT_AI_MODE==='autonomous';
 const startedAtMs=Number(process.env.AUDIT_AI_STARTED_AT_MS||Date.now());
 const rolloverAtMs=startedAtMs+345*60*1000; // 5h45 from GitHub job startup, not from model load.
@@ -66,6 +68,9 @@ async function infer(messages,outputTokens=1800){
   const tokens=attempt?Math.min(5000,Math.max(3200,outputTokens*2)):Math.max(outputTokens,2200);
   // Unlike fetch/Undici, Node's HTTP client does not impose a second
   // five-minute header deadline before llama.cpp finishes CPU inference.
+  const inferenceStartedAt=Date.now();
+  console.log(JSON.stringify({status:'MIMO_INFERENCE_STARTED',attempt:attempt+1,
+   maxTokens:tokens,timeoutMinutes:120,controllerAccepted:false}));
   const payload=JSON.stringify({model:'lite-solo-mimo-v1',messages:dialogue,
    temperature:attempt?0:0.1,max_tokens:tokens,stream:false,
    response_format:{type:'json_object'}});
@@ -73,7 +78,7 @@ async function infer(messages,outputTokens=1800){
    const req=http.request('http://127.0.0.1:8080/v1/chat/completions',{
     method:'POST',headers:{'content-type':'application/json',
      'content-length':Buffer.byteLength(payload)},
-    signal:AbortSignal.timeout(1800000)},res=>{
+    signal:AbortSignal.timeout(inferenceTimeoutMs)},res=>{
      const chunks=[];let length=0;
      res.on('data',part=>{
       length+=part.length;
@@ -91,6 +96,13 @@ async function infer(messages,outputTokens=1800){
    req.end(payload);
   });
   const raw=data.choices?.[0]?.message?.content;
+  console.log(JSON.stringify({status:'MIMO_INFERENCE_RESPONSE',attempt:attempt+1,
+   elapsedSeconds:Math.round((Date.now()-inferenceStartedAt)/1000),
+   finishReason:String(data.choices?.[0]?.finish_reason||'UNKNOWN').slice(0,40),
+   promptTokens:Number(data.usage?.prompt_tokens||0),
+   completionTokens:Number(data.usage?.completion_tokens||0),
+   finalContentCharacters:typeof raw==='string'?raw.length:0,
+   controllerAccepted:false}));
   if(typeof raw!=='string'||!raw.trim()){
    // Reasoning-only output is not controller evidence. Permit one changed,
    // larger output attempt rather than accepting an empty final answer.
@@ -150,7 +162,7 @@ async function readBoundInstructions(raw){
   notes.push(previous[i].note);
  }
  for(let i=previous.length;i<chunks.length;i++){
-  if(nearRollover(45*60*1000)){
+  if(nearRollover(130*60*1000)){
    await handoffAtSafeBoundary('5h45_deadline_instruction_checkpoint');
    return null;
   }
@@ -332,7 +344,7 @@ if(autonomous){
 }
 let thisRunner=0;
 for(let i=summaries.length;i<chunks.length;i++){
- if(thisRunner>=maxChunks||nearRollover(45*60*1000)){
+ if(thisRunner>=maxChunks||nearRollover(130*60*1000)){
   await handoffAtSafeBoundary(thisRunner>=maxChunks?'per_run_source_chunk_quota':'5h45_deadline_source_checkpoint');
   return;
  }
@@ -350,7 +362,7 @@ for(let i=summaries.length;i<chunks.length;i++){
  summaries.push({path:chunk.file,sha256:chunk.sha256,startLine:chunk.startLine,endLine:chunk.endLine,analysis});
  thisRunner++;
 }
-if(nearRollover(180*60*1000)){
+if(nearRollover(240*60*1000)){
  await handoffAtSafeBoundary('5h45_deadline_before_controller_lease');
  return;
 }
@@ -359,8 +371,10 @@ if(nearRollover(180*60*1000)){
 // remaining time is insufficient for claim, review, repair and submission.
 let completedUnitsThisRunner=0;
 while(true){
- if(autonomous&&nearRollover(180*60*1000)){
-  await handoffAtSafeBoundary('controller_batch_boundary_budget');
+ if(autonomous&&(completedUnitsThisRunner>=maxControllerUnitsPerRunner||
+    nearRollover(240*60*1000))){
+  await handoffAtSafeBoundary(completedUnitsThisRunner>=maxControllerUnitsPerRunner?
+   'bounded_controller_units_per_runner':'controller_batch_boundary_budget');
   return;
  }
  // Claim through the SAME Worker that owns all leases.
@@ -552,8 +566,9 @@ if(!submit){
  const nowStep=Number(refreshed.currentStep??refreshed.step);
  if(refreshed.status==='ACTIVE'&&refreshed.phase===expectedPhase&&nowStep===expectedStep&&
     refreshed.availableProcessActions?.includes('claim')){
-  if(nearRollover(180*60*1000)){
-   await handoffAtSafeBoundary('controller_submitted_batch_budget');
+  if(completedUnitsThisRunner>=maxControllerUnitsPerRunner||nearRollover(240*60*1000)){
+   await handoffAtSafeBoundary(completedUnitsThisRunner>=maxControllerUnitsPerRunner?
+    'bounded_controller_units_per_runner':'controller_submitted_batch_budget');
    return;
   }
   console.log(JSON.stringify({status:'CONTINUE_NEXT_CONTROLLER_BATCH_SAME_RUNNER',
