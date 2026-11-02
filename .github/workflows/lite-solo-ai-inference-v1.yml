@@ -92,7 +92,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   dispatch-once:
-    if: github.event_name == 'push' && github.event.head_commit.message == 'chore(lite-solo-ai): one-shot resume cyvbusdcv28-r3 on telemetry-enabled runner'
+    if: github.event_name == 'push' && github.event.head_commit.message == 'telemetry-handoff-cyvbusdcv28-r3-v14'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -438,7 +438,7 @@ jobs:
           fi
 
   train:
-    if: (github.event_name == 'push' && github.event.head_commit.message != 'chore(lite-solo-ai): one-shot resume cyvbusdcv28-r3 on telemetry-enabled runner') || inputs.mode == 'train'
+    if: (github.event_name == 'push' && github.event.head_commit.message != 'telemetry-handoff-cyvbusdcv28-r3-v14') || inputs.mode == 'train'
     name: MiMo CPU training stage ${{ matrix.rank }} / 7
     runs-on: ubuntu-latest
     timeout-minutes: 100
@@ -611,7 +611,7 @@ jobs:
           echo 'Training does not change controller receipts, v5 approvals or v6 audit authority.' >> "$GITHUB_STEP_SUMMARY"
 
   training-package:
-    if: (github.event_name == 'push' && github.event.head_commit.message != 'chore(lite-solo-ai): one-shot resume cyvbusdcv28-r3 on telemetry-enabled runner') || inputs.mode == 'train'
+    if: (github.event_name == 'push' && github.event.head_commit.message != 'telemetry-handoff-cyvbusdcv28-r3-v14') || inputs.mode == 'train'
     name: Consolidate eight MiMo CPU LoRA stage checkpoints
     needs: train
     runs-on: ubuntu-latest
