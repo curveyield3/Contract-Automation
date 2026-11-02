@@ -1,0 +1,25 @@
+[profile.default]
+src = "contracts"
+test = "test"
+libs = ["dependencies_v6", "dependencies_v7"]
+optimizer = true
+optimizer_runs = 200
+auto_detect_solc = true
+evm_version = "cancun"
+ffi = false
+remappings = [
+ "forge-std/=dependencies_v6/forge-std/src/",
+ "@openzeppelin/contracts/=dependencies_v6/openzeppelin-contracts/contracts/",
+ "@tokenized-strategy/=dependencies_v6/tokenized-strategy/src/",
+ "@morpho-blue/=dependencies_v6/morpho-blue/src/",
+ "@uniswap/v3-core/=dependencies_v7/uniswap-v3-core/",
+ "@uniswap/v3-periphery/=dependencies_v7/uniswap-v3-periphery/"
+]
+additional_compiler_profiles = [{ name = "router-istanbul", evm_version = "istanbul", optimizer = true, optimizer_runs = 200 }]
+compilation_restrictions = [
+ { paths = "contracts/CurveYieldSushiV3FeeRouter.sol", version = "=0.7.6", evm_version = "istanbul" }
+]
+
+[fuzz]
+runs = 100000
+max_test_rejects = 65536
