@@ -567,7 +567,8 @@ async function unitValidateSingle(c,item){
   strict(u&&unitRelevant(u,phase,step,stage,loadPhaseSchema(ROOT,AUTH,phase).schema),'unit not in assigned step/type');
   const state=current.queue.units[id];
   strict(state&&['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(state.status),'unit no longer claimable by canonical controller');
-  strict((u.dependencies||[]).every(dep=>current.queue.units?.[dep]?.status==='ACCEPTED'),'unit dependencies not accepted');
+  strict((u.dependencies||[]).every(dep=>(current.queue.acceptedRecords?.[dep]?.status==='ACCEPTED'&&!!current.queue.acceptedRecords[dep].snapshotSha256)||
+     (current.queue.units?.[dep]?.status==='ACCEPTED'&&!!current.queue.units[dep].acceptedPath&&!!current.queue.units[dep].acceptedSha256)),'unit dependencies not accepted');
   const selected=submittedUnitFile(c,phase,u);
   strict(sha(fs.readFileSync(selected.filename))===expectedSha,'published unit differs from pending Worker submission');
   strict(Number(item.attempt)===selected.attempt,'submitted attempt differs from pending Worker attempt');
