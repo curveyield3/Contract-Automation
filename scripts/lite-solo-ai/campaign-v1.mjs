@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v9. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v10. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import http from 'node:http';
@@ -63,7 +63,7 @@ function checkStep(x){
 async function infer(messages,outputTokens=1800){
  let dialogue=messages;
  for(let attempt=0;attempt<2;attempt++){
-  const tokens=attempt?Math.min(4200,Math.max(2200,outputTokens*2)):outputTokens;
+  const tokens=attempt?Math.min(5000,Math.max(3200,outputTokens*2)):Math.max(outputTokens,2200);
   // Unlike fetch/Undici, Node's HTTP client does not impose a second
   // five-minute header deadline before llama.cpp finishes CPU inference.
   const payload=JSON.stringify({model:'lite-solo-mimo-v1',messages:dialogue,
@@ -91,7 +91,14 @@ async function infer(messages,outputTokens=1800){
    req.end(payload);
   });
   const raw=data.choices?.[0]?.message?.content;
-  if(typeof raw!=='string'||!raw.trim())throw Error('Local MiMo returned no structured final answer');
+  if(typeof raw!=='string'||!raw.trim()){
+   // Reasoning-only output is not controller evidence. Permit one changed,
+   // larger output attempt rather than accepting an empty final answer.
+   if(attempt)throw Error('MiMo generated no final answer after bounded retry');
+   dialogue=[...messages,{role:'user',content:
+    'Return a complete final JSON object for the source-bound task now. No preliminary reasoning, no partial JSON, no Markdown. The prior attempt produced no final content.'}];
+   continue;
+  }
   const clean=raw.replace(/<think>[\s\S]*?<\/think>/g,'').trim();
   const candidates=[clean,clean.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'')];
   const open=clean.indexOf('{'),close=clean.lastIndexOf('}');
@@ -166,6 +173,24 @@ async function readBoundInstructions(raw){
 
 // Clean handoff uses the existing controller-owned campaign state and the
 // existing workflow-dispatch path. Never invent a PASS or leave a future claim.
+async function dispatchSuccessor(phase,step,reason){
+ const hop=Number(process.env.AUDIT_AI_HOP||0);
+ if(!Number.isSafeInteger(hop)||hop<0||hop>=4096)
+  throw Error('Finite autonomous continuation cap reached');
+ if(![1,2,3,4,5,6,8,9,10].includes(phase)||!Number.isInteger(step)||step<1||step>10)
+  throw Error('Next controller step is not eligible for this AI lane');
+ const token=process.env.GITHUB_ACTIONS_DISPATCH_TOKEN;
+ if(!token)throw Error('GitHub continuation permission unavailable');
+ execFileSync('gh',['workflow','run','lite-solo-ai-inference-v1.yml','--repo',
+  'curveyield3/Contract-Automation','--ref','main','-f','mode=autonomous',
+  '-f','campaign_id='+campaignId,'-f','expected_phase='+phase,
+  '-f','expected_step='+step,'-f','submission_mode=submit',
+  '-f','max_chunks='+maxChunks,'-f','ai_hop='+(hop+1)],{
+   env:{...process.env,GH_TOKEN:token},stdio:['ignore','pipe','pipe'],
+   timeout:60000,maxBuffer:1024*1024});
+ console.log(JSON.stringify({status:'SUCCESSOR_DISPATCH_SUBMITTED',campaignId,
+  phase,step,hop:hop+1,reason,controllerAccepted:false}));
+}
 async function handoffAtSafeBoundary(reason){
  if(!autonomous)throw Error('Automatic rollover is AI-v6 only');
  const latest=await worker('/api/step/current',{});
@@ -179,19 +204,7 @@ async function handoffAtSafeBoundary(reason){
  if(!((latest.engagement?.stage==='INSTRUCTIONS')||
     (latest.engagement?.stage==='WORK'&&latest.availableProcessActions?.includes('claim'))))
   throw Error('Cannot schedule continuation without controller-eligible unleased work');
- const hop=Number(process.env.AUDIT_AI_HOP||0);
- if(!Number.isSafeInteger(hop)||hop<0||hop>=120)throw Error('Finite AI-v6 continuation cap reached');
- const token=process.env.GITHUB_ACTIONS_DISPATCH_TOKEN;
- if(!token)throw Error('GitHub continuation permission unavailable');
- execFileSync('gh',['workflow','run','lite-solo-ai-inference-v1.yml','--repo',
-  'curveyield3/Contract-Automation','--ref','main','-f','mode=autonomous',
-  '-f','campaign_id='+campaignId,'-f','expected_phase='+expectedPhase,
-  '-f','expected_step='+expectedStep,'-f','submission_mode=submit',
-  '-f','max_chunks='+maxChunks,'-f','ai_hop='+(hop+1)],{
-   env:{...process.env,GH_TOKEN:token},stdio:['ignore','pipe','pipe'],
-   timeout:60000,maxBuffer:1024*1024});
- console.log(JSON.stringify({status:'SUCCESSOR_DISPATCH_SUBMITTED',campaignId,
-  phase:expectedPhase,step:expectedStep,hop:hop+1,reason,controllerAccepted:false}));
+ await dispatchSuccessor(expectedPhase,expectedStep,reason);
 }
 function nearRollover(reserveMs){
  return autonomous&&Date.now()+reserveMs>=rolloverAtMs;
@@ -337,12 +350,27 @@ for(let i=summaries.length;i<chunks.length;i++){
  summaries.push({path:chunk.file,sha256:chunk.sha256,startLine:chunk.startLine,endLine:chunk.endLine,analysis});
  thisRunner++;
 }
-if(nearRollover(120*60*1000)){
+if(nearRollover(180*60*1000)){
  await handoffAtSafeBoundary('5h45_deadline_before_controller_lease');
  return;
 }
-// Claim through the SAME Worker that owns all leases. Do not create independent assignments.
-const claim=await worker('/api/step/process',{action:'claim'});
+// Each persisted controller unit is a timing checkpoint, not an entire
+// inference or step. Continue processing units on the same runner until the
+// remaining time is insufficient for claim, review, repair and submission.
+let completedUnitsThisRunner=0;
+while(true){
+ if(autonomous&&nearRollover(180*60*1000)){
+  await handoffAtSafeBoundary('controller_batch_boundary_budget');
+  return;
+ }
+ // Claim through the SAME Worker that owns all leases.
+ const claim=await worker('/api/step/process',{action:'claim'});
+ if(['NO_AVAILABLE_SHARD','NO_AVAILABLE_PACKET','NO_AVAILABLE_UNITS'].includes(claim.status)){
+  console.log(JSON.stringify({status:'NO_MORE_CONTROLLER_UNITS_AVAILABLE',
+   campaignId,phase:expectedPhase,step:expectedStep,completedUnitsThisRunner,
+   controllerAccepted:false}));
+  return;
+ }
 if(!['LEASED_SHARD','LEASED_PACKET'].includes(claim.status))throw Error('No eligible claimable work');
 const units=claim.status==='LEASED_SHARD'?[{unitId:claim.unitId,lease:claim.lease,
  inputFileTemplate:claim.inputFileTemplate,descriptor:claim.descriptor}]:claim.items;
@@ -507,6 +535,7 @@ if(!submit){
  await worker('/api/step/process',{action:'release',unitId:u.unitId,lease:u.lease});
  console.log(JSON.stringify({status:'DRAFT_ONLY_NOT_SUBMITTED',campaignId,phase:expectedPhase,step:expectedStep,
   sourceFiles:sourceFiles.length,sourceChunks:chunks.length,unitsReleased:true}));
+ return;
 }else{
  const first=await worker('/api/step/process',{action:'submit',unitId:u.unitId,lease:u.lease,shard:output});
  const state=await finishEngagementSubmission(first,u,output);
@@ -515,36 +544,40 @@ if(!submit){
   throw Error('Final assigned work has not been accepted by the Worker: '+String(state.status||'UNKNOWN'));
  console.log(JSON.stringify({status:state.status,unitId:u.unitId,campaignId,phase:expectedPhase,
   step:expectedStep,controllerAccepted:false,...(autonomous?{continuation:'CONTROLLER_ELIGIBILITY_REQUIRED'}:{})}));
- if(autonomous){
-  // Dispatch a bounded successor only where the unchanged Worker still has
-  // controller-eligible work. Never infer a PASS from a successful GitHub run.
-  const refreshed=await worker('/api/step/current',{});
-  const nowStep=Number(refreshed.currentStep??refreshed.step);
-  if(refreshed.status==='ACTIVE'&&refreshed.phase===expectedPhase&&nowStep===expectedStep&&
-     refreshed.availableProcessActions?.includes('claim')){
-   const next=await worker('/api/step/process',{action:'claim'});
-   if(['LEASED_SHARD','LEASED_PACKET'].includes(next.status)){
-    const owned=next.status==='LEASED_SHARD'?[{unitId:next.unitId,lease:next.lease}]:next.items||[];
-    const hop=Number(process.env.AUDIT_AI_HOP||0);
-    try{
-     if(!Number.isSafeInteger(hop)||hop<0||hop>=120)throw Error('Finite AI beta continuation cap reached');
-     const token=process.env.GITHUB_ACTIONS_DISPATCH_TOKEN;
-     if(!token)throw Error('GitHub continuation permission not available');
-     execFileSync('gh',['workflow','run','lite-solo-ai-inference-v1.yml','--repo',
-      'curveyield3/Contract-Automation','--ref','main','-f','mode=autonomous',
-      '-f','campaign_id='+campaignId,'-f','expected_phase='+expectedPhase,
-      '-f','expected_step='+expectedStep,'-f','submission_mode=submit',
-      '-f','max_chunks='+maxChunks,'-f','ai_hop='+(hop+1)],{
-       env:{...process.env,GH_TOKEN:token},stdio:['ignore','pipe','pipe'],maxBuffer:1024*1024});
-     console.log(JSON.stringify({status:'SUCCESSOR_DISPATCH_SUBMITTED',campaignId,
-      phase:expectedPhase,step:expectedStep,hop:hop+1,controllerAccepted:false}));
-    }catch(err){
-     for(const unit of owned)await worker('/api/step/process',{action:'release',unitId:unit.unitId,lease:unit.lease});
-     throw err;
-    }
-   }
+ if(!autonomous)return;
+ completedUnitsThisRunner++;
+ // Only after the full Worker submission/review/repair path returns can
+ // another batch be started or a new GitHub runner receive the baton.
+ const refreshed=await worker('/api/step/current',{});
+ const nowStep=Number(refreshed.currentStep??refreshed.step);
+ if(refreshed.status==='ACTIVE'&&refreshed.phase===expectedPhase&&nowStep===expectedStep&&
+    refreshed.availableProcessActions?.includes('claim')){
+  if(nearRollover(180*60*1000)){
+   await handoffAtSafeBoundary('controller_submitted_batch_budget');
+   return;
+  }
+  console.log(JSON.stringify({status:'CONTINUE_NEXT_CONTROLLER_BATCH_SAME_RUNNER',
+   campaignId,phase:expectedPhase,step:expectedStep,completedUnitsThisRunner}));
+  continue;
+ }
+ if(refreshed.status==='ACTIVE'&&(refreshed.phase!==expectedPhase||nowStep!==expectedStep)){
+  if(refreshed.campaignId!==campaignId||
+     refreshed.generationId!==current.generationId||
+     refreshed.sourceSha256!==current.sourceSha256||
+     refreshed.authorityDigest!==current.authorityDigest)
+   throw Error('Controller progressed with unexpected frozen campaign identity');
+  const eligible=refreshed.engagement?.stage==='INSTRUCTIONS'||
+   (refreshed.engagement?.stage==='WORK'&&refreshed.availableProcessActions?.includes('claim'));
+  if(eligible){
+   await dispatchSuccessor(refreshed.phase,nowStep,'controller_advanced_to_next_step');
+   return;
   }
  }
+ console.log(JSON.stringify({status:'WAITING_FOR_CONTROLLER_ELIGIBLE_STATE',
+  campaignId,phase:refreshed.phase,step:nowStep,workerStatus:refreshed.status,
+  completedUnitsThisRunner,controllerAccepted:false}));
+
+}
 }
 
 } // End of one source/authority-bound run; no local timer may seal controller work.
