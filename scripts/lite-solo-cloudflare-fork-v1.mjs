@@ -445,7 +445,8 @@ async function unitNextStep(c){
        (u.kind==='BATCH'?schema.actions['step-'+step]?.fields?.some(f=>f.name===u.field):
          u.path?.[1]==='step-'+step);
     return sameStep&&['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(queue.units?.[u.unitId]?.status)&&
-      (u.dependencies||[]).every(dep=>queue.units?.[dep]?.status==='ACCEPTED');
+      (u.dependencies||[]).every(dep=>(queue.acceptedRecords?.[dep]?.status==='ACCEPTED'&&!!queue.acceptedRecords[dep].snapshotSha256)||
+        (queue.units?.[dep]?.status==='ACCEPTED'&&!!queue.units[dep].acceptedPath&&!!queue.units[dep].acceptedSha256));
   });
   strict(eligible.length>0,'no eligible units in current controller stage; do not invent work');
   const roster=eligible.map(u=>{const x=buildUnitMeta(c,u,schema);x.step=step;x.stage=stage;return x;});
@@ -485,7 +486,8 @@ function eligibleStage(c,source,phase,step,stage){
   const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
   return source.units.filter(u=>unitRelevant(u,phase,step,stage,schema)&&
     ['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(source.queue.units?.[u.unitId]?.status)&&
-    (u.dependencies||[]).every(dep=>source.queue.units?.[dep]?.status==='ACCEPTED'));
+    (u.dependencies||[]).every(dep=>(source.queue.acceptedRecords?.[dep]?.status==='ACCEPTED'&&!!source.queue.acceptedRecords[dep].snapshotSha256)||
+      (source.queue.units?.[dep]?.status==='ACCEPTED'&&!!source.queue.units[dep].acceptedPath&&!!source.queue.units[dep].acceptedSha256)));
 }
 function stageDigest(c,source,phase,step,stage){
   return sha(JSON.stringify(eligibleStage(c,source,phase,step,stage).map(u=>{
