@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v4. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v5. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -224,7 +224,7 @@ if(p0.source?.sha256!==current.sourceSha256||p0.authority?.manifestSha256!==curr
  p0.phase?.status!=='SEALED'||p0.validation?.status!=='PASS')
  throw Error('Sealed Phase0 source/authority validation failed');
 // Collect all raw source files from the exact admitted campaign snapshot; never use unrelated repo code.
-const allowed=['.sol','.vy'],sourceFiles=[];
+const allowed=['.sol','.vy'],sourceFiles=[],excludedTestHarnessFiles=[];
 function walk(dir){
  for(const name of fs.readdirSync(dir).sort()){
   if(name.startsWith('.')||name==='node_modules'||name==='out'||name==='build')continue;
@@ -232,7 +232,14 @@ function walk(dir){
   if(st.isSymbolicLink())continue;
   if(st.isDirectory())walk(p);
   else if(st.isFile()&&allowed.includes(path.extname(p))){
-   if(st.size>262144)throw Error('Source file exceeds bounded inference scope');
+   // forge-std is a build-time test/cheatcode harness, not deployable protocol logic.
+   // Preserve it in the immutable controller source; do not consume the CPU audit
+   // budget or apply its 400 KiB console stubs as runtime contract attack surface.
+   if(p.split(path.sep).join('/').includes('/dependencies_v6/forge-std/')){
+    excludedTestHarnessFiles.push(p);
+    continue;
+   }
+   if(st.size>262144)throw Error('Runtime source file exceeds bounded inference scope');
    sourceFiles.push(p);
    if(sourceFiles.length>256)throw Error('Source scope too large for this bounded run');
   }
@@ -250,32 +257,46 @@ for(const f of sourceFiles){
    text:lines.slice(i,i+100).map((v,j)=>String(i+j+1).padStart(5)+': '+v).join('\n')});
  }
 }
-if(chunks.length>maxChunks)throw Error('Full source coverage exceeds max_chunks: no claim made; increase budget or use a more capable runner');
+if(chunks.length>4096)throw Error('Source analysis exceeds the Worker 4096-anchored-chunk capacity; no claim');
+if(autonomous)console.log(JSON.stringify({status:'SOURCE_SCOPE_SELECTED',auditFiles:sourceFiles.length,
+ testHarnessDependenciesExcluded:excludedTestHarnessFiles.length,totalChunks:chunks.length,
+ chunksPerRunner:maxChunks}));
 const summaries=[];
-for(let i=0;i<(checkpointRecord?.summaries.length||0);i++){
- const found=checkpointRecord.summaries[i],source=chunks[i];
- if(!source||found.path!==source.file||found.sha256!==source.sha256||
-    found.startLine!==source.startLine||found.endLine!==source.endLine)
-  throw Error('Saved source chunk differs from receipt-bound current campaign source');
- summaries.push(found);
+if(autonomous){
+ for(let i=0;i<chunks.length;i++){
+  const persisted=await worker('/api/ai/checkpoint',{action:'read_chunk',index:i});
+  if(persisted.status==='AI_SOURCE_CHUNK_EMPTY')break;
+  if(persisted.status!=='AI_SOURCE_CHUNK_FOUND'||!persisted.chunk)
+   throw Error('Worker returned an invalid source chunk checkpoint');
+  const v=persisted.chunk,source=chunks[i];
+  if(v.path!==source.file||v.sha256!==source.sha256||
+     v.startLine!==source.startLine||v.endLine!==source.endLine||
+     v.campaignId!==campaignId||v.generationId!==current.generationId)
+   throw Error('Checkpoint chunk source anchor disagrees with frozen controller source');
+  summaries.push({path:v.path,sha256:v.sha256,startLine:v.startLine,endLine:v.endLine,analysis:v.analysis});
+ }
+ if(summaries.length)console.log(JSON.stringify({status:'AI_SOURCE_CHUNKS_RESTORED',
+  campaignId,phase:expectedPhase,step:expectedStep,reviewed:summaries.length,total:chunks.length}));
 }
-if(autonomous&&summaries.length)
- console.log(JSON.stringify({status:'AI_CHECKPOINT_RESTORED',campaignId,
-  phase:expectedPhase,step:expectedStep,reviewed:summaries.length,total:chunks.length}));
+let thisRunner=0;
 for(let i=summaries.length;i<chunks.length;i++){
- if(nearRollover(45*60*1000)){
-  await handoffAtSafeBoundary('5h45_deadline_source_checkpoint');
+ if(thisRunner>=maxChunks||nearRollover(45*60*1000)){
+  await handoffAtSafeBoundary(thisRunner>=maxChunks?'per_run_source_chunk_quota':'5h45_deadline_source_checkpoint');
   return;
  }
  const chunk=chunks[i];
  const sourcePrompt='Inspect exact source and trace function state transitions, privileges, external calls, invariants and vulnerabilities. Output JSON with keys reasoning, plausibleFindings, verifiedSourceAnchors, uncertainties. No simulated proof. File '+chunk.file+' SHA '+chunk.sha256+' lines '+chunk.startLine+'-'+chunk.endLine+'\n'+chunk.text;
  if(sourcePrompt.length>18000)throw Error('Required raw source chunk exceeds model input context; no lease');
  const analysis=await infer([{role:'system',content:system},{role:'user',content:sourcePrompt}],1450);
- summaries.push({path:chunk.file,sha256:chunk.sha256,startLine:chunk.startLine,endLine:chunk.endLine,analysis});
+ const entry={...checkpointIdentity,index:i,path:chunk.file,sha256:chunk.sha256,
+  startLine:chunk.startLine,endLine:chunk.endLine,analysis};
  if(autonomous){
-  checkpointRecord.summaries=summaries;
-  await persistCheckpoint();
+  const persisted=await worker('/api/ai/checkpoint',{action:'save_chunk',index:i,chunk:entry});
+  if(persisted.status!=='AI_SOURCE_CHUNK_SAVED'||persisted.index!==i)
+   throw Error('Source chunk analysis not committed to private Worker checkpoint');
  }
+ summaries.push({path:chunk.file,sha256:chunk.sha256,startLine:chunk.startLine,endLine:chunk.endLine,analysis});
+ thisRunner++;
 }
 if(nearRollover(120*60*1000)){
  await handoffAtSafeBoundary('5h45_deadline_before_controller_lease');
