@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v17. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v18. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import http from 'node:http';
@@ -617,6 +617,8 @@ if(prompt.length>18000){
 }
 activeUnit={unitId:u.unitId,lease:u.lease};
  activeOperation='claimed_unit';
+ activeUnit={unitId:u.unitId,lease:u.lease};
+ activeOperation='owned_controller_unit';
  // Restore exact immutable first-round JSON, if another runner already recorded it.
 const previous=await worker('/api/step/interaction',
  {action:'review',unitId:u.unitId,lease:u.lease},{allowMissingFirstRound:true});
@@ -632,7 +634,7 @@ if(previous){
   campaignId,unitId:u.unitId,reviewStage:previous.status,
   baselineSha256:previous.baseline.sha256,controllerAccepted:false}));
 }
-const output=previous?previous.firstRoundWork:
+let output=previous?previous.firstRoundWork:
  await inferValidated([{role:'system',content:system},{role:'user',content:prompt}],1800,
   'assigned_work_form',x=>workOutputIssues(x,u.inputFileTemplate));
 if(!output||typeof output!=='object'||Array.isArray(output))throw Error('No complete unit JSON');
@@ -765,8 +767,39 @@ if(!submit){
   sourceFiles:sourceFiles.length,sourceChunks:chunks.length,unitsReleased:true}));
  return;
 }else{
- const first=previous||await worker('/api/step/process',{action:'submit',unitId:u.unitId,lease:u.lease,shard:output});
- const state=await finishEngagementSubmission(first,u,output);
+ let first=previous;
+  if(!first){
+   for(let round=1;round<=4;round++){
+    activeOperation='first_round_submission_round_'+round;
+    first=await worker('/api/step/process',{action:'submit',unitId:u.unitId,lease:u.lease,shard:output});
+    if(['REVIEW_QUESTIONS_REQUIRED','REPAIR_CHECKBOX_REQUIRED'].includes(first.status)){
+     const restored=await worker('/api/step/interaction',{action:'review',unitId:u.unitId,lease:u.lease});
+     if(!restored?.firstRoundWork||!restored?.baseline?.sha256||
+       sha(JSON.stringify(restored.firstRoundWork,null,2)+'\n')!==restored.baseline.sha256)
+      throw Error('Cannot recover exact immutable first round after concurrent submission');
+     first=restored;output=restored.firstRoundWork;
+     console.log(JSON.stringify({status:'RECOVERED_PREEXISTING_CONTROLLER_FIRST_ROUND',
+      unitId:u.unitId,reviewStage:first.status,controllerAccepted:false}));
+     break;
+    }
+    if(first.status!=='REWORK_REQUIRED')break;
+    console.log(JSON.stringify({status:'CONTROLLER_FORM_REWORK_REQUESTED',
+     unitId:u.unitId,round,fieldErrors:first.fieldErrors||[],controllerAccepted:false}));
+    if(round===4)break;
+    const correctionPrompt=prompt+'\nRejected first-round JSON:\n'+JSON.stringify(output)+
+      '\nWorker exact validation errors:\n'+JSON.stringify(first.fieldErrors||[])+
+      '\nRegenerate the entire assigned controller form with every correction and factual source evidence. Do not change immutable fields.';
+    output=await inferValidated([{role:'system',content:system},{role:'user',content:correctionPrompt}],
+     1800,'first_round_controller_rework',x=>workOutputIssues(x,u.inputFileTemplate));
+   }
+  }
+  if(first?.status==='REWORK_REQUIRED'){
+   const error=new Error('Controller form still requires correction after four rounds');
+   error.code='CONTROLLER_REWORK_EXHAUSTED';error.fieldErrors=first.fieldErrors||[];
+   throw error;
+  }
+ activeOperation='five_question_review_and_corrective_submission';
+  const state=await finishEngagementSubmission(first,u,output);
  if(autonomous&&!['UNIT_ACCEPTED_LOCALLY','ACTIVE','SUBMITTED','UNIT_SUBMISSION_QUEUED','CONTROLLER_VALIDATION_QUEUED',
       'STEP_VALIDATION_PENDING','FILING_PHASE','WAITING_PHASE_SEAL'].includes(state.status||''))
   throw Error('Final assigned work has not been accepted by the Worker: '+String(state.status||'UNKNOWN'));
@@ -774,6 +807,8 @@ if(!submit){
   step:expectedStep,controllerAccepted:false,...(autonomous?{continuation:'CONTROLLER_ELIGIBILITY_REQUIRED'}:{})}));
  if(!autonomous)return;
  completedUnitsThisRunner++;
+  activeUnit=null;
+  if(checkpointRecord?.failureRecovery){delete checkpointRecord.failureRecovery;await persistCheckpoint();}
  // Only after the full Worker submission/review/repair path returns can
  // another batch be started or a new GitHub runner receive the baton.
  const refreshed=await worker('/api/step/current',{});
@@ -810,4 +845,76 @@ if(!submit){
 }
 
 } // End of one source/authority-bound run; no local timer may seal controller work.
-await run();
+// One interrupted run is not a lost campaign. Recover only against the original
+// Worker-bound phase/step and immutable controller state; never invent acceptance.
+async function recoverRun(error){
+ const reason=String(error?.message||error).slice(0,480);
+ const details=error?.diagnostics||error?.issues||error?.fieldErrors||[];
+ console.log(JSON.stringify({status:'MIMO_INTERRUPTED_WORK_RECOVERY',campaignId,
+  phase:expectedPhase,step:expectedStep,unitId:activeUnit?.unitId||null,
+  operation:activeOperation,reason,details:details.slice?.(0,15)||[],
+  controllerAccepted:false}));
+ if(!autonomous){
+  console.log(JSON.stringify({status:'MANUAL_MODE_RECOVERY_BLOCKED',
+   reason:'Only the operator can authorize another manual campaign run',controllerAccepted:false}));
+  return;
+ }
+ let current;
+ try{current=await worker('/api/step/current',{});}
+ catch(e){
+  console.log(JSON.stringify({status:'RECOVERY_BLOCKED_WORKER_UNAVAILABLE',
+   error:String(e.message||e).slice(0,300),controllerAccepted:false}));
+  return;
+ }
+ if(current.status!=='ACTIVE'){
+  console.log(JSON.stringify({status:'CAMPAIGN_NONACTIVE_WAIT_FOR_CONTROLLER',
+   workerStatus:current.status,nextAction:current.nextAction||null,
+   controllerAccepted:false}));
+  return;
+ }
+ if(current.campaignId!==campaignId||current.phase!==expectedPhase||
+    Number(current.currentStep??current.step)!==expectedStep||
+    current.authorityRelease!=='lite-solo-v6'||
+    !/^[a-f0-9]{64}$/.test(current.sourceSha256||'')||
+    !/^[a-f0-9]{64}$/.test(current.authorityDigest||'')){
+  console.log(JSON.stringify({status:'RECOVERY_BLOCKED_SOURCE_OR_STEP_IDENTITY_CHANGED',
+   phase:current.phase,step:current.currentStep??current.step,controllerAccepted:false}));
+  return;
+ }
+ if(!current.engagement||!['WORK','INSTRUCTIONS'].includes(current.engagement.stage)){
+  console.log(JSON.stringify({status:'RECOVERY_WAITING_FOR_WORKER_STAGE',
+   stage:current.engagement?.stage||null,controllerAccepted:false}));
+  return;
+ }
+ const fingerprint=sha([campaignId,current.generationId,expectedPhase,expectedStep,
+  activeUnit?.unitId||'instruction_stage',
+  String(error?.code||'STAGE_FAILURE'),reason.replace(/\d+/g,'#')].join('|'));
+ const old=checkpointRecord?.failureRecovery;
+ const attempts=old?.fingerprint===fingerprint?(old.attempts||0)+1:1;
+ if(checkpointRecord){
+  checkpointRecord.failureRecovery={fingerprint,attempts,operation:activeOperation,
+   unitId:activeUnit?.unitId||null,reason};
+  try{await persistCheckpoint();}
+  catch(e){
+   console.log(JSON.stringify({status:'RECOVERY_BLOCKED_CHECKPOINT_WRITE',
+    error:String(e.message||e).slice(0,300),controllerAccepted:false}));
+   return;
+  }
+ }
+ if(attempts>3){
+  console.log(JSON.stringify({status:'RECOVERY_BLOCKED_REPEATED_SUBSTANTIVE_FAILURE',
+   attempts,unitId:activeUnit?.unitId||null,reason,controllerAccepted:false}));
+  return;
+ }
+ try{
+  await dispatchSuccessor(expectedPhase,expectedStep,'recover_verified_worker_stage_'+attempts);
+  console.log(JSON.stringify({status:'RECOVERY_SUCCESSOR_STARTED',attempts,
+   controllerAccepted:false}));
+ }catch(e){
+  console.log(JSON.stringify({status:'RECOVERY_DISPATCH_BLOCKED',
+   reason:String(e.message||e).slice(0,300),controllerAccepted:false}));
+ }
+}
+try{await run();}
+catch(error){await recoverRun(error);}
+
