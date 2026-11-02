@@ -6,8 +6,8 @@ set -euo pipefail
 : "${RUNNER_TEMP:?RUNNER_TEMP required}"
 : "${TS_CLIENT_ID:?TS_OAUTH_CLIENT_ID is not configured}"
 : "${TAILNET_TAG:?Tailscale federated device tag required}"
-if [[ ! "$TAILNET_TAG" =~ ^tag:[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-  echo "::error::Expected a valid authorized Tailscale tag: tag:name" >&2
+if [[ ! "$TAILNET_TAG" =~ ^tag:[A-Za-z0-9][A-Za-z0-9._-]*(,tag:[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]]; then
+  echo "::error::Expected comma-separated authorized Tailscale tags: tag:one,tag:two" >&2
   exit 1
 fi
 : "${ACTIONS_ID_TOKEN_REQUEST_URL:?GitHub OIDC token URL unavailable; grant id-token: write}"
