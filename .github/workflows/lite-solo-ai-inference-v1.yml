@@ -281,9 +281,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$AUDIT_AI_OUTPUT")"
+          if [ "$AI_INFERENCE_RUNNERS" = 1 ]; then
+            set -- --n-gpu-layers 0
+          else
+            test -n "$MIMO_RPC_CSV" || { echo "::error::Missing exact-run RPC peer list"; exit 1; }
+            set -- --rpc "$MIMO_RPC_CSV" --n-gpu-layers 99
+          fi
           "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/models/$MODEL_FILE" \
             --alias lite-solo-mimo-v1 --host 127.0.0.1 --port 8080 \
-            --ctx-size 24576 --threads 4 --parallel 1 --n-gpu-layers 0 \
+            --ctx-size 24576 --threads 4 --parallel 1 "$@" \
             > "$RUNNER_TEMP/mimo-server.log" 2>&1 &
           pid=$!
           # Passive resource telemetry; uses only Linux /proc and existing Python 3.
