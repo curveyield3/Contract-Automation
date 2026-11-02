@@ -2,9 +2,38 @@ name: Lite-Solo AI Public Source Inference v1
 on:
   workflow_dispatch:
     inputs:
-      source_path:
-        description: Checked-in PUBLIC Solidity or Vyper file or directory
+      mode:
+        description: Public read-only draft, or private controller-bound Lite-Solo step
         required: true
+        default: public
+        type: choice
+        options: [public, campaign]
+      campaign_id:
+        description: Exact private campaign ID, including -rN (campaign mode)
+        required: false
+        type: string
+      expected_phase:
+        description: Exact authorized phase number (campaign mode)
+        required: false
+        type: string
+      expected_step:
+        description: Exact authorized numbered step (campaign mode)
+        required: false
+        type: string
+      operator_authorized_step:
+        description: Human operator authorizes this exact agent-authored step
+        required: false
+        default: false
+        type: boolean
+      submission_mode:
+        description: Whether to submit generated work to the existing Worker after independent review
+        required: true
+        default: draft
+        type: choice
+        options: [draft, submit]
+      source_path:
+        description: Checked-in PUBLIC Solidity or Vyper file or directory (public mode only)
+        required: false
         type: string
       max_chunks:
         description: Source chunks to analyze, 1-32
@@ -13,15 +42,22 @@ on:
         type: string
 permissions:
   contents: read
+  id-token: write
 concurrency:
-  group: lite-solo-ai-public-${{ github.repository }}-${{ inputs.source_path }}
+  group: lite-solo-ai-${{ inputs.mode }}-${{ inputs.mode == 'campaign' && inputs.campaign_id || inputs.source_path }}
   cancel-in-progress: false
 jobs:
   infer:
     runs-on: ubuntu-latest
     timeout-minutes: 100
     env:
+      AUDIT_AI_MODE: ${{ inputs.mode }}
       AUDIT_AI_SOURCE_PATH: ${{ inputs.source_path }}
+      AUDIT_AI_CAMPAIGN_ID: ${{ inputs.campaign_id }}
+      AUDIT_AI_EXPECTED_PHASE: ${{ inputs.expected_phase }}
+      AUDIT_AI_EXPECTED_STEP: ${{ inputs.expected_step }}
+      AUDIT_AI_STEP_AUTHORIZED: ${{ inputs.operator_authorized_step }}
+      AUDIT_AI_SUBMISSION_MODE: ${{ inputs.submission_mode }}
       AUDIT_AI_MAX_CHUNKS: ${{ inputs.max_chunks }}
       MODEL_FILE: MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf
       MODEL_REVISION: 4371da10c84fb26da3592d4cf312d24aa82b7b65
@@ -40,9 +76,30 @@ jobs:
           [[ "$AUDIT_AI_MAX_CHUNKS" =~ ^[0-9]+$ ]]
           test "$AUDIT_AI_MAX_CHUNKS" -ge 1
           test "$AUDIT_AI_MAX_CHUNKS" -le 32
-          test -n "$AUDIT_AI_SOURCE_PATH"
+          case "$AUDIT_AI_MODE" in
+            public)
+              test -n "$AUDIT_AI_SOURCE_PATH"
+              test "$AUDIT_AI_SUBMISSION_MODE" = draft
+              ;;
+            campaign)
+              test "$AUDIT_AI_STEP_AUTHORIZED" = true
+              test -n "$AUDIT_AI_CAMPAIGN_ID"
+              [[ "$AUDIT_AI_EXPECTED_PHASE" =~ ^[0-9]+$ ]]
+              [[ "$AUDIT_AI_EXPECTED_STEP" =~ ^[0-9]+$ ]]
+              ;;
+            *) exit 1;;
+          esac
           df -h "$RUNNER_TEMP"
           free -h
+      - name: Resolve existing authorized private controller credential
+        if: inputs.mode == 'campaign'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
       - name: Build pinned CPU llama.cpp
         shell: bash
         run: |
@@ -84,21 +141,29 @@ jobs:
             sleep 2
           done
           test "$ready" = true || { echo "Model load timeout"; exit 1; }
+          if [ "$AUDIT_AI_MODE" = campaign ]; then
+            export AUDIT_CONTROLLER_GITHUB_TOKEN="${AUDIT_CONTROLLER_GITHUB_TOKEN:-}"
+            test -n "$AUDIT_CONTROLLER_GITHUB_TOKEN"
+          fi
           node scripts/lite-solo-ai/review-v1.mjs
       - name: Retain public-source draft artifact
-        if: always()
+        if: always() && inputs.mode == 'public'
         uses: actions/upload-artifact@v4
         with:
           name: lite-solo-ai-draft-${{ github.run_id }}
           path: ${{ runner.temp }}/lite-solo-ai/analysis.json
           if-no-files-found: ignore
           retention-days: 7
-      - name: Summarize draft-only disposition
+      - name: Summarize disposition without private evidence
         if: always()
         shell: bash
         run: |
           file="$RUNNER_TEMP/lite-solo-ai/analysis.json"
-          echo 'Read-only AI draft; NOT a controller submission or completed audit.' >> "$GITHUB_STEP_SUMMARY"
+          if [ "$AUDIT_AI_MODE" = campaign ]; then
+            echo 'Private campaign mode: inspect the Worker for actual persisted acceptance. This job cannot seal a step.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo 'Public read-only AI draft; NOT a controller submission or completed audit.' >> "$GITHUB_STEP_SUMMARY"
           if [ -f "$file" ]; then
             jq -r '"Status: \(.status); reviewed \(.reviewed|length)/\(.totalChunks) chunks"' "$file" >> "$GITHUB_STEP_SUMMARY"
           fi
