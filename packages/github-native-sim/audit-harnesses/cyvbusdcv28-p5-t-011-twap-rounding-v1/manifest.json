@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvbusdcv28-p5-t-011-twap-rounding-v1",
+  "purpose": "Phase5 P5-T-011 source-specific Katana fork exact-input multi-hop TWAP rounding proof; no live writes; no new execution lane",
+  "sourceBinding": {
+    "repository": "curveyield3/Audit-Controller",
+    "commit": "ab394d11e32aa0e0fb1231b3ef1f5e0cb28bedbf",
+    "archiveSha256": "299fda8224b658a17bf0068690a321f295c1d7ee655eaf72470023ec33a0eb71"
+  },
+  "campaign": {
+    "phase": "5",
+    "step": 3,
+    "unit": "P5-T-011",
+    "candidate": "P4-TWAP-MULTIHOP-PRICE-ROUNDING"
+  },
+  "files": [
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "test/phase5/Phase5TwapMultihopRounding_v1.t.sol",
+      "destination": "test/phase5/Phase5TwapMultihopRounding_v1.t.sol"
+    }
+  ]
+}
