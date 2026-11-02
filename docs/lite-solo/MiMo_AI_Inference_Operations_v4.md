@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v7)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v8)
 
-**Revision:** v7 (canonical v4 file path retained for existing references)  
+**Revision:** v8 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -42,7 +42,7 @@ The actual inference/review loop uses the existing `scripts/lite-solo-ai/campaig
 
 ## Bounded 5h45 continuation and durable checkpoints (v6)
 
-The existing AI workflow is unchanged in identity/path but its autonomous GitHub-hosted job timeout is now 355 minutes (GitHub's hosted runner hard ceiling is six hours). The job records startup time before checkout. The MiMo adapter counts 345 minutes from that startup; it reserves 25 minutes around raw source inference (each CPU inference has a 20-minute timeout) and 90 minutes before claiming a new controller unit so a continuation can be dispatched before the hard stop. The run may therefore hand off before 5h45 if a new long operation is not safe to begin. The controller remains the only accepted/sealed audit authority.
+The existing AI workflow is unchanged in identity/path but its autonomous GitHub-hosted job timeout is now 355 minutes (GitHub's hosted runner hard ceiling is six hours). The job records startup time before checkout. The MiMo adapter counts 345 minutes from that startup; it reserves 45 minutes around each instruction/source inference (each CPU request has a 30-minute timeout) and 120 minutes before claiming a new controller unit so a continuation can be dispatched before the hard stop. The run may therefore hand off before 5h45 if a new long operation is not safe to begin. The controller remains the only accepted/sealed audit authority.
 
 After each completed source-analysis chunk, the adapter persists a bounded JSON checkpoint in the existing Cloudflare SOURCE_ZIPS R2 bucket through the new authenticated `/api/ai/checkpoint` API. Only signed GitHub AI identities for an autonomous campaign can read/save it. The Worker verifies the exact campaign generation, active phase/step, frozen source SHA-256 and authority digest. Every source-file SHA and line interval must match the new runner's fresh receipt-bound checkout before the saved summaries can be reused. Checkpoint writes may append findings but never silently alter earlier source analyses.
 
@@ -51,6 +51,14 @@ When the current source review approaches its time budget **before any unit leas
 This is a **cooperative safe-boundary** rollover, not a promise to suspend a model mid-token, transfer an active controller lease, or bypass review/repair acknowledgments. If GitHub unexpectedly terminates a job after a claim but before controller processing finishes, its already-persisted controller/engagement state remains authoritative; any open lease or incomplete interaction must be recovered through the existing authorized Worker process. The source chunk checkpoint does not itself imply controller acceptance and never overrides an actual lease.
 
 New changes apply to new runs checking out updated `main`; already executing GitHub jobs retain their original startup SHA, timeouts, and code. The pre-upgrade `cyvbusdcv28-r3` runner #41473538131 stopped before its first instruction acknowledgement because the old four-minute local model request timed out. Version v3 of the canonical adapter increases the request limit to 20 minutes; that failed old-SHA run does not recover automatically merely from deploying these updates.
+
+## Instruction-stage checkpoint and long-running CPU inference (v8)
+
+The existing private R2 checkpoint now records finished authoritative instruction-reading segments as well as source-analysis chunks. Each instruction segment is bound to its original source digest, and the next GitHub runner must independently verify that its original instructions have not changed before reusing any saved notes. This works before Q1–Q3 are acknowledged and does not acknowledge, claim, submit, or seal any controller work by itself.
+
+An autonomous runner now permits up to 30 minutes for each local MiMo inference request instead of the old four- or 20-minute limit. It checks the handoff budget before each costly instruction/source inference, with 45 minutes of reserve, and reserves two hours before claiming controller work. It can end and dispatch the exact same campaign/step early when needed; it does not stop a controller submission mid-lease. The existing six-hour GitHub limit remains a **per-run** cap; the campaign's total lifetime is not capped by one run.
+
+No new test suites or alternative controller workflow were added. The actual end-to-end checkpoint/rollover has not yet been verified on a live runner; the controller's persisted state remains authoritative.
 
 ## Current free-beta limitations
 
