@@ -229,6 +229,49 @@ jobs:
             "https://huggingface.co/bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF/resolve/$MODEL_REVISION/$MODEL_FILE"
           printf '%s  %s\n' "$MODEL_SHA256" "$RUNNER_TEMP/models/$MODEL_FILE" | sha256sum --check
           df -h "$RUNNER_TEMP"
+      - name: Join private inference tailnet and start local RPC device
+        if: inputs.inference_runners == '2' || inputs.inference_runners == '4'
+        shell: bash
+        env:
+          TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TAILNET_TAG: tag:ai-training
+        run: |
+          set -euo pipefail
+          test -n "$TS_CLIENT_ID" || { echo "::error::Missing existing TS_OAUTH_CLIENT_ID"; exit 1; }
+          bash scripts/browser-agent-tailnet-oidc.sh
+          test -x "$RUNNER_TEMP/llama-build/bin/ggml-rpc-server"
+          nohup "$RUNNER_TEMP/llama-build/bin/ggml-rpc-server" \
+            --host 127.0.0.1 --port 50052 \
+            > "$RUNNER_TEMP/mimo-local-rpc.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/mimo-local-rpc.pid"
+          sleep 3
+          kill -0 "$(cat "$RUNNER_TEMP/mimo-local-rpc.pid")" || {
+            tail -n 50 "$RUNNER_TEMP/mimo-local-rpc.log"; exit 1;
+          }
+      - name: Resolve exact-run private RPC inference peers
+        if: inputs.inference_runners == '2' || inputs.inference_runners == '4'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/lite-solo-ai/rpc-rendezvous-v1.py collect \
+            --run-id "$GITHUB_RUN_ID" --mode "$AI_INFERENCE_RUNNERS" \
+            --model-sha256 "$MODEL_SHA256" --llama-commit "$LLAMA_SHA" \
+            --destination "$RUNNER_TEMP/mimo-rpc-peers" \
+            --output "$RUNNER_TEMP/mimo-rpc-addresses.txt"
+          rpc="$(cat "$RUNNER_TEMP/mimo-rpc-addresses.txt")"
+          test "$(printf '%s' "$rpc" | awk -F, '{print NF}')" -eq "$AI_INFERENCE_RUNNERS"
+          for endpoint in $(printf '%s' "$rpc" | tr ',' ' '); do
+            host="$(printf '%s' "$endpoint" | cut -d: -f1)"
+            if [ "$host" != 127.0.0.1 ]; then
+              timeout 15 tailscale ping --c=1 --timeout=10s "$host" >/dev/null || {
+                echo "::error::Private MiMo RPC peer unreachable"; exit 1;
+              }
+            fi
+          done
+          echo "MIMO_RPC_CSV=$rpc" >> "$GITHUB_ENV"
+          echo "Selected $AI_INFERENCE_RUNNERS exact-run MiMo RPC devices" >> "$GITHUB_STEP_SUMMARY"
       - name: Run model inference in authorized mode
         if: inputs.mode != 'autonomous_start'
         shell: bash
