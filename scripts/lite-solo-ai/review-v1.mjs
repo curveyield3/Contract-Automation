@@ -3,6 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+if(process.env.AUDIT_AI_MODE==='campaign'){
+  await import('./campaign-v1.mjs');
+}else{
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const root=fs.realpathSync(process.cwd()), temp=fs.realpathSync(process.env.RUNNER_TEMP||'/tmp');
 const rel=process.env.AUDIT_AI_SOURCE_PATH||'', out=process.env.AUDIT_AI_OUTPUT||'';
@@ -61,4 +64,5 @@ try{
  report.status='INCOMPLETE_EXECUTION_ERROR';report.error=String(err.message||err).slice(0,350);
  report.unreviewed=chunks.slice(report.reviewed.length).map(c=>({path:c.file,startLine:c.start,endLine:c.end}));
  save();console.error(report.error);process.exitCode=1;
+}
 }
