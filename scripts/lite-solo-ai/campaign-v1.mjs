@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v7. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v8. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -63,13 +64,32 @@ async function infer(messages,outputTokens=1800){
  let dialogue=messages;
  for(let attempt=0;attempt<2;attempt++){
   const tokens=attempt?Math.min(4200,Math.max(2200,outputTokens*2)):outputTokens;
-  const res=await fetch('http://127.0.0.1:8080/v1/chat/completions',{
-   method:'POST',headers:{'content-type':'application/json'},signal:AbortSignal.timeout(1800000),
-   body:JSON.stringify({model:'lite-solo-mimo-v1',messages:dialogue,
-    temperature:attempt?0:0.1,max_tokens:tokens,stream:false,
-    response_format:{type:'json_object'}})});
-  if(!res.ok)throw Error('Local MiMo inference failure HTTP '+res.status);
-  const data=await res.json();
+  // Unlike fetch/Undici, Node's HTTP client does not impose a second
+  // five-minute header deadline before llama.cpp finishes CPU inference.
+  const payload=JSON.stringify({model:'lite-solo-mimo-v1',messages:dialogue,
+   temperature:attempt?0:0.1,max_tokens:tokens,stream:false,
+   response_format:{type:'json_object'}});
+  const data=await new Promise((resolve,reject)=>{
+   const req=http.request('http://127.0.0.1:8080/v1/chat/completions',{
+    method:'POST',headers:{'content-type':'application/json',
+     'content-length':Buffer.byteLength(payload)},
+    signal:AbortSignal.timeout(1800000)},res=>{
+     const chunks=[];let length=0;
+     res.on('data',part=>{
+      length+=part.length;
+      if(length>8*1024*1024){req.destroy(Error('MiMo output exceeds 8 MiB'));return;}
+      chunks.push(part);
+     });
+     res.on('error',reject);
+     res.on('end',()=>{
+      if(res.statusCode!==200)return reject(Error('Local MiMo inference failure HTTP '+res.statusCode));
+      try{resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));}
+      catch{reject(Error('Local MiMo HTTP response is not valid JSON'));}
+     });
+    });
+   req.on('error',reject);
+   req.end(payload);
+  });
   const raw=data.choices?.[0]?.message?.content;
   if(typeof raw!=='string'||!raw.trim())throw Error('Local MiMo returned no structured final answer');
   const clean=raw.replace(/<think>[\s\S]*?<\/think>/g,'').trim();
