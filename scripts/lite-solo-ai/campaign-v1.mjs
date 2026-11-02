@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v2. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v3. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -61,7 +61,7 @@ function checkStep(x){
 }
 async function infer(messages,outputTokens=1800){
  const res=await fetch('http://127.0.0.1:8080/v1/chat/completions',{
-  method:'POST',headers:{'content-type':'application/json'},signal:AbortSignal.timeout(240000),
+  method:'POST',headers:{'content-type':'application/json'},signal:AbortSignal.timeout(1200000),
   body:JSON.stringify({model:'lite-solo-mimo-v1',messages,temperature:0.1,max_tokens:outputTokens,stream:false,
    response_format:{type:'json_object'}})});
  if(!res.ok)throw Error('Local MiMo inference failure HTTP '+res.status);
@@ -232,7 +232,7 @@ if(saved?.status==='AI_CHECKPOINT_FOUND'){
 }else if(saved&&saved.status!=='AI_CHECKPOINT_EMPTY')
  throw Error('Worker failed to return a valid source-bound AI checkpoint');
 for(let i=summaries.length;i<chunks.length;i++){
- if(nearRollover(5*60*1000)){
+ if(nearRollover(25*60*1000)){
   await handoffAtSafeBoundary('5h45_deadline_source_checkpoint');
   return;
  }
@@ -248,7 +248,7 @@ for(let i=summaries.length;i<chunks.length;i++){
    throw Error('AI checkpoint did not persist; no unit claim attempted');
  }
 }
-if(nearRollover(25*60*1000)){
+if(nearRollover(90*60*1000)){
  await handoffAtSafeBoundary('5h45_deadline_before_controller_lease');
  return;
 }
