@@ -12,6 +12,8 @@ const campaignId=process.env.AUDIT_AI_CAMPAIGN_ID||'';
 const expectedPhase=Number(process.env.AUDIT_AI_EXPECTED_PHASE);
 const expectedStep=Number(process.env.AUDIT_AI_EXPECTED_STEP);
 const maxChunks=Number(process.env.AUDIT_AI_MAX_CHUNKS||12);
+const inferenceRunners=String(process.env.AI_INFERENCE_RUNNERS||'1');
+if(!['1','2','4'].includes(inferenceRunners))throw Error('Invalid authorized MiMo inference cluster size');
 const maxControllerUnitsPerRunner=16; // Explicit per-run controller-unit cap, not a phase cap.
 const inferenceTimeoutMs=120*60*1000; // Two hours for one CPU inference call.
 const autonomous=process.env.AUDIT_AI_MODE==='autonomous';
@@ -200,11 +202,12 @@ async function dispatchSuccessor(phase,step,reason){
   'curveyield3/Contract-Automation','--ref','main','-f','mode=autonomous',
   '-f','campaign_id='+campaignId,'-f','expected_phase='+phase,
   '-f','expected_step='+step,'-f','submission_mode=submit',
-  '-f','max_chunks='+maxChunks,'-f','ai_hop='+(hop+1)],{
+  '-f','max_chunks='+maxChunks,'-f','ai_hop='+(hop+1),
+  '-f','inference_runners='+inferenceRunners],{
    env:{...process.env,GH_TOKEN:token},stdio:['ignore','pipe','pipe'],
    timeout:60000,maxBuffer:1024*1024});
  console.log(JSON.stringify({status:'SUCCESSOR_DISPATCH_SUBMITTED',campaignId,
-  phase,step,hop:hop+1,reason,controllerAccepted:false}));
+  phase,step,hop:hop+1,reason,inferenceRunners,controllerAccepted:false}));
 }
 async function handoffAtSafeBoundary(reason){
  if(!autonomous)throw Error('Automatic rollover is AI-v6 only');
