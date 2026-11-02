@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "cyvb28-p4-recon-claim-first3-20261102-v1",
+  "operation": "CLAIM",
+  "campaignId": "lite-solo-correction-cyvbusdcv28-repair-227de21e6c514cf6-r1",
+  "campaignGenerationId": "lite-solo-correction-cyvbusdcv28-repair-227de21e6c514cf6-r1-g1-20261101T222146961Z",
+  "phaseSequence": 4,
+  "lane": "AUTO",
+  "workerId": "gpt6-cyvb28-correction-flow",
+  "sourceSha256": "299fda8224b658a17bf0068690a321f295c1d7ee655eaf72470023ec33a0eb71",
+  "authorityDigest": "2e7c28dd09a89b4e5ce5a2dae284911bc404cee62be99ed79214a036737e3494",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main",
+  "desiredUnitCount": 3
+}
