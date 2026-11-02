@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v15)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v16)
 
-**Revision:** v15 (canonical v4 file path retained for existing references)  
+**Revision:** v16 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -103,6 +103,14 @@ The source analyses and instruction digests remain private, source-bound R2 chec
 Version v10 of the canonical MiMo adapter is now the active implementation for newly launched jobs. The original controller's own unit submission is the checkpoint boundary. The runner may work through multiple units from a large (300–900-unit) audit step, with controller review and remediation retained for each. The 30-minute inference deadline still applies only to a single model call, never to a batch or whole step. The runner reserves 180 minutes before beginning another full unit and dispatches the existing workflow for the next controller-eligible step or same-step batch as needed. An empty final response is not accepted and may be regenerated once with a larger bounded output budget.
 
 The full campaign has not yet demonstrated a complete multi-run handoff, and a failed external workflow requires an evidence-based diagnosis rather than an unconditional retry. The authority, frozen source, and accepted controller records remain unchanged.
+
+## Two-hour per-request limit and bounded runner batches (v16)
+
+Canonical MiMo adapter **v11** allows up to **120 minutes per individual localhost CPU inference request**. This does not limit a controller batch, step or campaign to two hours. Each autonomous runner processes no more than **16 completed controller work units**, but may hand off earlier at the existing 5h45 target. The source/instruction pre-inference reserve is 130 minutes; a new controller unit is not claimed inside a 240-minute reserve to the handoff target. The 355-minute GitHub job cap still applies to the full runner, so multi-inference controller units can still require recovery if they run past the remaining runner budget. **Do not treat these guards as proven mid-lease resumability.**
+
+Each request now logs only a start/response summary: elapsed wall time, output budget, sanitized completion reason, token usage when available, and final-content length. These diagnostics identify an empty output or output-budget stop separately from a slow model response; they cannot prove active GPU/CPU work while the HTTP request is still pending. Original model prompts, source text, Q1–Q5 answers, raw reasoning and controller credentials are not logged by this change.
+
+The currently running job at the time of this update was pinned to a previous commit and therefore retained its old timeout. Only a new workflow job at main or a subsequently dispatched successor will use v11. No test suite was added or run.
 
 ## Current free-beta limitations
 
