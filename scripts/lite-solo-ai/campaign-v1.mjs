@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v19. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v20. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import http from 'node:http';
@@ -45,10 +45,28 @@ async function freshJobIdentity(){
  return value;
 }
 const endpoint='https://lite-solo-api.jamesnexus9999.workers.dev';
-async function worker(route,body,{allowMissingFirstRound=false}={}){
- const res=await fetch(endpoint+route,{
-  method:'POST',headers:{authorization:'Bearer '+(await freshJobIdentity()),'content-type':'application/json'},
-  body:JSON.stringify({campaignId,...body}),signal:AbortSignal.timeout(150000)});
+async function worker(route,body,{allowMissingFirstRound=false,readRetry=0}={}){
+ const safeRead=(route==='/api/step/current'||
+  (route==='/api/ai/checkpoint'&&['read','read_chunk'].includes(body?.action))||
+  (route==='/api/step/interaction'&&body?.action==='review'));
+ let res;
+ try{
+  res=await fetch(endpoint+route,{
+   method:'POST',headers:{authorization:'Bearer '+(await freshJobIdentity()),'content-type':'application/json'},
+   body:JSON.stringify({campaignId,...body}),signal:AbortSignal.timeout(150000)});
+ }catch(error){
+  if(!safeRead||readRetry>=3)throw error;
+  console.log(JSON.stringify({status:'WORKER_TRANSIENT_READ_RETRY',
+   route,attempt:readRetry+1,cause:String(error?.name||'transport'),controllerAccepted:false}));
+  await new Promise(resolve=>setTimeout(resolve,1500*2**readRetry));
+  return worker(route,body,{allowMissingFirstRound,readRetry:readRetry+1});
+ }
+ if(safeRead&&[408,429,500,502,503,504].includes(res.status)&&readRetry<3){
+  console.log(JSON.stringify({status:'WORKER_TRANSIENT_READ_RETRY',
+   route,attempt:readRetry+1,httpStatus:res.status,controllerAccepted:false}));
+  await new Promise(resolve=>setTimeout(resolve,1500*2**readRetry));
+  return worker(route,body,{allowMissingFirstRound,readRetry:readRetry+1});
+ }
  let data;try{data=await res.json();}catch{throw Error('Worker returned invalid JSON');}
  if(!res.ok){
   if(allowMissingFirstRound&&route==='/api/step/interaction'&&body.action==='review'&&
@@ -907,6 +925,15 @@ if(!submit){
 async function recoverRun(error){
  const reason=String(error?.message||error).slice(0,480);
  const details=error?.diagnostics||error?.issues||error?.fieldErrors||[];
+ if(process.env.GITHUB_STEP_SUMMARY){
+  try{fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+   '\n### MiMo campaign recovery (not controller acceptance)\n'+
+   '- Campaign: '+campaignId+'; phase '+expectedPhase+'; step '+expectedStep+'\n'+
+   '- Interrupted operation: '+activeOperation+'\n'+
+   '- Diagnostic: '+reason.replace(/[\r\n]/g,' ').slice(0,350)+'\n'+
+   '- The Worker/controller still owns all leases, evidence and final acceptance.\n');}
+  catch{}
+ }
  console.log(JSON.stringify({status:'MIMO_INTERRUPTED_WORK_RECOVERY',campaignId,
   phase:expectedPhase,step:expectedStep,unitId:activeUnit?.unitId||null,
   operation:activeOperation,reason,details:details.slice?.(0,15)||[],
