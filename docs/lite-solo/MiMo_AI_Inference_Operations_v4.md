@@ -76,3 +76,67 @@ No new test suites or alternative controller workflow were added. The actual end
 - AI authority: https://github.com/curveyield3/Audit-Controller/tree/main/Audit%20Skill%20-%20Lite-Solo%20Authority/lite-solo-v6
 - Current campaign Controller directory and Phase0/phase receipts: use the private original controller, not workflow-success status.
 - The previous public-only and v5-manual modes remain available through the same existing workflow.
+
+## Eight-runner distributed CPU training (v1, opt-in; not enabled for audits)
+
+The existing `.github/workflows/lite-solo-ai-inference-v1.yml` now exposes manual `mode=train`.
+It starts eight independent public-repository Ubuntu CPU jobs with `matrix.rank=0..7`,
+each loading four contiguous Qwen3.5 decoder layers of the **original**
+`XiaomiMiMo/MiMo-V2.6-Distill-Qwen-9B` safetensors checkpoint. It does not
+use the original inference-only Q4 GGUF for gradient calculation. The source
+checkpoint is pinned to a full immutable Hugging Face commit per run, and the
+existing source-bound model inference setup is not modified.
+
+### Runtime prerequisites and how to start
+
+1. Obtain the required Tailscale OIDC configuration for **tag:ai-training**:
+   the repository's existing `TS_OAUTH_CLIENT_ID` secret must authorize this
+   dedicated tag, and tailnet ACLs must permit **only** same-tag training peers
+   to reach the coordinator's TCP port 29631. The existing
+   `scripts/browser-agent-tailnet-oidc.sh` is reused; do not grant training
+   peers browser-session access as an alternative.
+2. Use a **public**, rights-cleared, source-grounded dataset checked into the
+   Contract-Automation repository with `.jsonl` extension. Every nonempty line
+   is a JSON object with nonempty `prompt` and `completion` strings.
+   Do not place private campaigns, secret credentials, internal controller
+   evidence, or unpublished Audit-Controller source into this public dataset.
+   No dataset was invented or uploaded as part of the workflow implementation.
+3. Open the existing workflow and select **Run workflow** / **train**.
+   Supply `train_dataset_path` (repo-relative JSONL file).
+   `train_model_revision` may be empty to resolve and pin the current
+   official original-checkpoint SHA at rank zero. The default
+   `train_steps=1`, `train_sequence_length=128`,
+   `train_minutes=65`; adjust only after observed performance.
+   `train_resume_run` is optional and must reference a run with all
+   eight unexpired rank checkpoint artifacts.
+4. All ranks rendezvous inside the private Tailscale network. Model source
+   and dataset digests and any resumed checkpoint steps must match across
+   all ranks. Each rank runs sequential cross-host forward/backward
+   activation and gradient exchange, owning its four model layers plus
+   boundary embedding or output projection as appropriate.
+   The base is frozen and projection LoRA rank=8, alpha=16 is trained.
+   This is conservative synchronous pipeline training; it prioritizes
+   correct memory partitioning over high GPU-like throughput.
+5. Successful training uploads eight rank-specific checkpoints.
+   A final job verifies identical training identities and steps, validates
+   rank ownership, and uploads the combined
+   `mimo-cpu-training-package-v1` containing
+   `mimo_cpu_lora_stages.safetensors` and `manifest.json`.
+   Artifacts have finite retention and do not constitute durable model registry.
+
+### Strict separation from existing audits
+
+- `train` **never** uses the Cloudflare Lite-Solo controller, changes source
+  authority, claims packets, executes an audit test, or dispatches successors.
+- Existing `public`, `campaign`, `autonomous_start`, `autonomous` modes
+  and the legacy v5 human gates are unmodified.
+- Training completion **is not** adapter deployment. Conversion of raw stage
+  LoRA tensor names to a compatible PEFT / GGUF adapter, inference
+  compatibility validation and effectiveness evaluation remain separate
+  authorized operations. The installed Q4 inference model remains active.
+- A training input without approved/public training data or a tailnet policy
+  allowing `tag:ai-training` stops before model training.
+- GitHub Actions is subject to disproportionate usage restrictions even for
+  public projects. Training jobs should not be repeatedly dispatched or
+  used as an ongoing free compute service without confirmed acceptable use.
+- No new training tests were created or executed as part of this deployment.
