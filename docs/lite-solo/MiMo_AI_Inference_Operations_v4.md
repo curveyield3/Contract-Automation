@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v10)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v11)
 
-**Revision:** v10 (canonical v4 file path retained for existing references)  
+**Revision:** v11 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -73,6 +73,10 @@ Version v9 does not change the existing 355-minute autonomous job cap, the 345-m
 The first completed retry run returned a non-JSON response during its initial instruction-reading segment, after the original four-minute inference cap had already been repaired. Adapter v7 therefore now accepts only fully parseable JSON objects but can extract such an object from an otherwise extraneous reasoning block or Markdown fence. If the model truly returned malformed or truncated output, it makes one bounded additional attempt with a changed JSON-only prompt and more output tokens; it never treats an incomplete answer as valid or invents missing properties. Instruction segment calls now allow 2200 output tokens before the bounded correction attempt.
 
 The controller was still ACTIVE at Phase 1 Step 1 with all 11 units unleased and unaccepted after this failure. Resumption stays on campaign `cyvbusdcv28-r3` and retains the originally frozen source/authority. A workflow success still does not indicate controller acceptance.
+
+## Workflow compatibility when shared with MiMo training (v11)
+
+The existing workflow now also carries a separately authorized `train` job. Its presence must not overwrite the autonomous security-audit job condition. The canonical `infer` job runs only on `workflow_dispatch` when `mode != train`; the training and audit paths retain distinct responsibilities and both use their existing job logic. A duplicate YAML `if:` field was identified and repaired without removing the concurrent training work. This release retries only the already-admitted `cyvbusdcv28-r3` audit from Phase 1, Step 1, without creating another campaign.
 
 ## Current free-beta limitations
 
