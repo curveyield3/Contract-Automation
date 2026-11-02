@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "phase6-audit-harness-overlay-v1",
+  "bundleId": "cyvbusdcv28-p5-t-020-morpho-allowance-v1",
+  "purpose": "P5-T-020 exact source constructor-approved Morpho custody boundary: canonical unauthorized outsider, wrong-market rejection and malicious deployer-selected Morpho draining real balances",
+  "sourceBinding": {
+    "repository": "curveyield3/Audit-Controller",
+    "commit": "ab394d11e32aa0e0fb1231b3ef1f5e0cb28bedbf",
+    "archiveSha256": "299fda8224b658a17bf0068690a321f295c1d7ee655eaf72470023ec33a0eb71"
+  },
+  "campaign": {
+    "phase": "5",
+    "step": 3,
+    "unit": "P5-T-020",
+    "candidate": "P4-MORPHO-UNBOUNDED-ALLOWANCE"
+  },
+  "files": [
+    {
+      "source": "foundry.toml",
+      "destination": "foundry.toml"
+    },
+    {
+      "source": "medusa.json",
+      "destination": "medusa.json"
+    },
+    {
+      "source": "test/phase5/Phase5MorphoAllowance_v1.t.sol",
+      "destination": "test/phase5/Phase5MorphoAllowance_v1.t.sol"
+    }
+  ]
+}
