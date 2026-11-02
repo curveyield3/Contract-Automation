@@ -25,16 +25,19 @@ const oidcBearer=process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
 if(!oidcUrl||!oidcBearer||process.env.GITHUB_REPOSITORY!=='curveyield3/Contract-Automation'||
  process.env.GITHUB_REF!=='refs/heads/main'||process.env.GITHUB_EVENT_NAME!=='workflow_dispatch')
  throw Error('Approved GitHub workflow identity is missing');
-const oidcResponse=await fetch(oidcUrl+(oidcUrl.includes('?')?'&':'?')+
- 'audience='+encodeURIComponent('urn:curveyield:lite-solo:github-actions-ai:v1'),{
- headers:{authorization:'bearer '+oidcBearer},signal:AbortSignal.timeout(20000)});
-if(!oidcResponse.ok)throw Error('GitHub OIDC issuance failed');
-const token=(await oidcResponse.json()).value;
-if(typeof token!=='string'||token.split('.').length!==3)throw Error('Invalid GitHub job identity');
+async function freshJobIdentity(){
+ const res=await fetch(oidcUrl+(oidcUrl.includes('?')?'&':'?')+
+  'audience='+encodeURIComponent('urn:curveyield:lite-solo:github-actions-ai:v1'),{
+  headers:{authorization:'bearer '+oidcBearer},signal:AbortSignal.timeout(20000)});
+ if(!res.ok)throw Error('GitHub OIDC issuance failed');
+ const value=(await res.json()).value;
+ if(typeof value!=='string'||value.split('.').length!==3)throw Error('Invalid GitHub job identity');
+ return value;
+}
 const endpoint='https://lite-solo-api.jamesnexus9999.workers.dev';
 async function worker(route,body){
  const res=await fetch(endpoint+route,{
-  method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},
+  method:'POST',headers:{authorization:'Bearer '+(await freshJobIdentity()),'content-type':'application/json'},
   body:JSON.stringify({campaignId,...body}),signal:AbortSignal.timeout(150000)});
  let data;try{data=await res.json();}catch{throw Error('Worker returned invalid JSON');}
  if(!res.ok){
@@ -204,7 +207,7 @@ if(!submit){
  }else{
   console.log(JSON.stringify({status:first.status||'SUBMISSION_PROCESSED',campaignId,
     phase:expectedPhase,step:expectedStep,unitId:u.unitId,
-    controllerAccepted:first.status==='ACCEPTED'}));
+    controllerAccepted:false}));
  }
 }
 // Never issue a next numbered-step claim: the current v5 skill requires human authorization.
