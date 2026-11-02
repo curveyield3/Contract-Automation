@@ -7,7 +7,7 @@ on:
         required: true
         default: public
         type: choice
-        options: [public, campaign, autonomous_start, autonomous]
+        options: [public, campaign, autonomous_start, autonomous, train]
       source_url:
         description: HTTPS source ZIP URL for one-time new autonomous AI-v6 beta start
         required: false
@@ -40,6 +40,35 @@ on:
         default: draft
         type: choice
         options: [draft, submit]
+      train_dataset_path:
+        description: Checked-in PUBLIC supervised JSONL input for train mode
+        type: string
+        required: false
+      train_model_revision:
+        description: Immutable original MiMo checkpoint SHA; auto-pin when blank
+        type: string
+        default: ''
+        required: false
+      train_steps:
+        description: Target optimizer steps, up to 100
+        type: string
+        default: '1'
+        required: false
+      train_sequence_length:
+        description: Max tokens per sample (32-256)
+        type: string
+        default: '128'
+        required: false
+      train_minutes:
+        description: Per-rank execution budget (1-70 minutes)
+        type: string
+        default: '65'
+        required: false
+      train_resume_run:
+        description: Optional previous eight-rank checkpoint workflow run ID
+        type: string
+        default: ''
+        required: false
       source_path:
         description: Checked-in PUBLIC Solidity or Vyper file or directory (public mode only)
         required: false
@@ -58,6 +87,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   infer:
+    if: inputs.mode != 'train'
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.mode == 'autonomous' && 355 || 100 }}
     env:
@@ -228,3 +258,152 @@ jobs:
           if [ -f "$file" ]; then
             jq -r '"Status: \(.status); reviewed \(.reviewed|length)/\(.totalChunks) chunks"' "$file" >> "$GITHUB_STEP_SUMMARY"
           fi
+
+  train:
+    if: inputs.mode == 'train'
+    name: MiMo CPU training stage ${{ matrix.rank }} / 7
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    strategy:
+      fail-fast: true
+      matrix:
+        rank: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      OMP_NUM_THREADS: '4'
+      MKL_NUM_THREADS: '4'
+      GLOO_SOCKET_IFNAME: tailscale0
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      PYTHONUNBUFFERED: '1'
+      DATASET: ${{ inputs.train_dataset_path }}
+      STEPS: ${{ inputs.train_steps }}
+      LENGTH: ${{ inputs.train_sequence_length }}
+      MINUTES: ${{ inputs.train_minutes }}
+      REVISION: ${{ inputs.train_model_revision }}
+      RESUME_RUN: ${{ inputs.train_resume_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Validate bounded, checked-in public training input
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DATASET" =~ ^[A-Za-z0-9._/-]+\.jsonl$ ]]
+          [[ "$DATASET" != /* && "$DATASET" != *..* ]]
+          test -s "$DATASET"
+          test "$(stat -c%s "$DATASET")" -le 2097152
+          [[ "$STEPS" =~ ^[0-9]+$ ]] && test "$STEPS" -ge 1 && test "$STEPS" -le 100
+          [[ "$LENGTH" =~ ^[0-9]+$ ]] && test "$LENGTH" -ge 32 && test "$LENGTH" -le 256
+          [[ "$MINUTES" =~ ^[0-9]+$ ]] && test "$MINUTES" -ge 1 && test "$MINUTES" -le 70
+          [[ -z "$REVISION" || "$REVISION" =~ ^[a-f0-9]{40}$ ]]
+          [[ -z "$RESUME_RUN" || "$RESUME_RUN" =~ ^[0-9]+$ ]]
+      - name: Join private training network using existing GitHub OIDC helper
+        shell: bash
+        env:
+          TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TAILNET_TAG: tag:ai-training
+        run: |
+          set -euo pipefail
+          test -n "$TS_CLIENT_ID" || { echo "::error::Missing existing TS_OAUTH_CLIENT_ID"; exit 1; }
+          bash scripts/browser-agent-tailnet-oidc.sh
+          tailscale ip -4 | grep -E '^100\.[0-9]+\.[0-9]+\.[0-9]+$'
+      - name: Install CPU training dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --no-input "torch==2.9.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --no-input "transformers==5.12.1" "huggingface_hub==1.4.0" "safetensors==0.7.0" "tokenizers==0.22.2"
+      - name: Pin original MiMo revision and rendezvous address
+        if: matrix.rank == 0
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mimo-rendezvous"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from huggingface_hub import HfApi
+          sha=HfApi().model_info("XiaomiMiMo/MiMo-V2.6-Distill-Qwen-9B",revision=os.environ["REVISION"] or "main").sha
+          if len(sha)!=40: raise RuntimeError("Expected immutable 40-character MiMo commit")
+          (Path(os.environ["RUNNER_TEMP"])/"mimo-rendezvous"/"model_sha").write_text(sha)
+          PY
+          tailscale ip -4 | head -n 1 > "$RUNNER_TEMP/mimo-rendezvous/master_addr"
+      - name: Publish private rank-0 rendezvous artifact
+        if: matrix.rank == 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: mimo-rendezvous-${{ github.run_id }}
+          path: ${{ runner.temp }}/mimo-rendezvous/
+          if-no-files-found: error
+          retention-days: 2
+      - name: Resolve pinned eight-rank rendezvous
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mimo-rendezvous"
+          if [ "${{ matrix.rank }}" != 0 ]; then
+            acquired=false
+            for attempt in $(seq 1 80); do
+              if gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" \
+                -n "mimo-rendezvous-$GITHUB_RUN_ID" -D "$RUNNER_TEMP/mimo-rendezvous" >/dev/null 2>&1; then
+                acquired=true; break
+              fi
+              sleep 15
+            done
+            test "$acquired" = true || { echo "::error::Rank-zero rendezvous timed out"; exit 1; }
+          fi
+          grep -Eq '^100\.[0-9]+\.[0-9]+\.[0-9]+$' "$RUNNER_TEMP/mimo-rendezvous/master_addr"
+          grep -Eq '^[0-9a-f]{40}$' "$RUNNER_TEMP/mimo-rendezvous/model_sha"
+      - name: Restore complete previous eight-rank generation
+        if: inputs.train_resume_run != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          listing="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RESUME_RUN/artifacts?per_page=100")"
+          for rank in $(seq 0 7); do
+            printf '%s' "$listing" | jq -e --arg n "mimo-cpu-checkpoint-rank-$rank" \
+              '[.artifacts[] | select(.name==$n and .expired==false)] | length == 1' >/dev/null || {
+                echo "::error::Previous training run lacks a complete eight-rank checkpoint"; exit 1;
+              }
+          done
+          mkdir -p "$RUNNER_TEMP/mimo-resume"
+          gh run download "$RESUME_RUN" -R "$GITHUB_REPOSITORY" \
+            -n "mimo-cpu-checkpoint-rank-${{ matrix.rank }}" -D "$RUNNER_TEMP/mimo-resume"
+          test -s "$RUNNER_TEMP/mimo-resume/checkpoint-rank-${{ matrix.rank }}.pt"
+      - name: Train four owned Qwen3.5 layers and checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mimo-output"
+          extras=()
+          if [ -n "$RESUME_RUN" ]; then
+            extras=(--resume "$RUNNER_TEMP/mimo-resume/checkpoint-rank-${{ matrix.rank }}.pt")
+          fi
+          python -u scripts/lite-solo-ai/train_cpu_v1.py \
+            --dataset "$DATASET" \
+            --model-revision "$(cat "$RUNNER_TEMP/mimo-rendezvous/model_sha")" \
+            --rank "${{ matrix.rank }}" --world-size 8 \
+            --master-addr "$(cat "$RUNNER_TEMP/mimo-rendezvous/master_addr")" \
+            --master-port 29631 --steps "$STEPS" --sequence-length "$LENGTH" \
+            --minutes "$MINUTES" \
+            --output "$RUNNER_TEMP/mimo-output/checkpoint-rank-${{ matrix.rank }}.pt" \
+            "${extras[@]}"
+      - name: Preserve this rank's checkpoint
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mimo-cpu-checkpoint-rank-${{ matrix.rank }}
+          path: ${{ runner.temp }}/mimo-output/checkpoint-rank-${{ matrix.rank }}.pt
+          retention-days: 7
+          if-no-files-found: error
+      - name: Distinguish stage checkpoint from deployed adapter
+        if: always()
+        run: |
+          echo 'Eight rank checkpoints are NOT yet a merged LoRA adapter or Lite-Solo deployment.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Training does not change controller receipts, v5 approvals or v6 audit authority.' >> "$GITHUB_STEP_SUMMARY"
