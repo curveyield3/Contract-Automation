@@ -1,8 +1,5 @@
 name: Lite-Solo AI Source Inference and Autonomous Beta v1
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/lite-solo-ai-inference-v1.yml']
   workflow_dispatch:
     inputs:
       mode:
@@ -60,24 +57,7 @@ concurrency:
   group: lite-solo-ai-${{ inputs.mode }}-${{ (inputs.mode == 'campaign' || inputs.mode == 'autonomous') && inputs.campaign_id || inputs.mode == 'autonomous_start' && inputs.source_url || inputs.source_path }}
   cancel-in-progress: false
 jobs:
-  dispatch-once:
-    if: ${{ github.event_name == 'push' && github.event.head_commit.message == 'launch-ai-cyvbusdcv28-oidc-v10-64-v1' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Dispatch existing signed MiMo autonomous startup
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh workflow run lite-solo-ai-inference-v1.yml \
-            --repo "$GITHUB_REPOSITORY" --ref main \
-            -f mode=autonomous_start \
-            -f source_url='https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/cyvbUSDCv28.zip' \
-            -f ai_hop=0
   infer:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 100
     env:
@@ -156,14 +136,7 @@ jobs:
             method:'POST',headers:{authorization:'Bearer '+credential,'content-type':'application/json'},
             body:JSON.stringify(body),signal:AbortSignal.timeout(90000)});
           const payload=await response.json();
-          if(!response.ok){
-            const claims=JSON.parse(Buffer.from(credential.split('.')[1],'base64url').toString('utf8'));
-            const selected={};
-            for(const k of ['iss','aud','repository','repository_id','repository_owner_id','ref','ref_type','workflow_ref','event_name','runner_environment','sub','run_id','iat','exp','nbf'])selected[k]=claims[k]??null;
-            console.error('OIDC claim identity diagnostic '+JSON.stringify(selected));
-            console.error('Cloudflare rejection '+JSON.stringify({http:response.status,status:payload.status,error:payload.error,message:payload.message}));
-            throw Error('AI beta campaign admission rejected HTTP '+response.status);
-          }
+          if(!response.ok)throw Error('AI beta campaign admission rejected HTTP '+response.status);
           const result={status:payload.status,requestId:payload.requestId,controllerAccepted:false};
           console.log(JSON.stringify(result));
           NODE
@@ -251,4 +224,3 @@ jobs:
           if [ -f "$file" ]; then
             jq -r '"Status: \(.status); reviewed \(.reviewed|length)/\(.totalChunks) chunks"' "$file" >> "$GITHUB_STEP_SUMMARY"
           fi
-# v3 launch marker: cyvbUSDCv28 OIDC recovery after deployed Worker v10.64
