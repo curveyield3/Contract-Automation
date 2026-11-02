@@ -268,7 +268,22 @@ export function secureRestoreWorkFormV13({root,indexRel}){
      // Placeholder-keyed optional record slots may be completed with a
      // schema-approved negative sentinel rather than a fabricated finding.
      const completedTemplateNegative=templateIdentity&&['NONE_IDENTIFIED','NO_CANDIDATE'].includes(entry.value);
-     if(entry.key!==expected||(!desc.append&&!completedTemplateIdentity&&!completedTemplateNegative&&recordKey(desc.path,entry.value,pos)!==expected))
+     // Phase-3 Step-2 has one controller-issued NONE_IDENTIFIED starter at
+     // index zero, keyed "0". When genuinely custom obligations exist, its
+     // value becomes a complete named record while the shard key stays fixed.
+     // Never relax identity for other prefilled or controller-owned records.
+     const completedCustomObligationStarter=!desc.append&&phase===3&&
+       desc.path.join('.')==='actions.step-2.outputs.customValidationObligations'&&
+       pos===0&&desc.recordKeys[j]==='0'&&
+       entry.value&&typeof entry.value==='object'&&!Array.isArray(entry.value)&&
+       typeof entry.value.tempKey==='string'&&entry.value.tempKey.trim().length>0&&
+       Array.isArray(entry.value.originFactKeys)&&entry.value.originFactKeys.length>0&&
+       entry.value.originFactKeys.every(x=>typeof x==='string'&&x.trim().length>0)&&
+       ['4','6'].includes(entry.value.requiredPhase)&&
+       typeof entry.value.requiredAction==='string'&&entry.value.requiredAction.trim().length>0&&
+       typeof entry.value.completionCondition==='string'&&entry.value.completionCondition.trim().length>0&&
+       typeof entry.value.priority==='string'&&entry.value.priority.trim().length>0;
+     if(entry.key!==expected||(!desc.append&&!completedTemplateIdentity&&!completedTemplateNegative&&!completedCustomObligationStarter&&recordKey(desc.path,entry.value,pos)!==expected))
        throw new Error('v13 mandatory work record key changed: '+desc.file);
      if(positions.has(pos))throw new Error('v13 duplicate work record: '+desc.file);
      const identity=recordKey(desc.path,entry.value,pos);
