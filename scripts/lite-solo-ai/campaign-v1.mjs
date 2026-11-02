@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v11. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v12. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import http from 'node:http';
@@ -310,8 +310,40 @@ function walk(dir){
  }
 }
 const checkoutDir=path.join(root,'.audit-controller',directory.workspacePath);
-walk(checkoutDir);
-if(!sourceFiles.length)throw Error('No raw source found in receipt-bound campaign checkout; do not infer from summaries');
+// Phase-1 Step-1 authority forbids repeating Phase-0 mechanical discovery.
+// Read the source-bound, accepted evidence instead of 108 model source scans.
+const phaseOneEvidenceMode=expectedPhase===1&&expectedStep===1;
+let phaseOneEvidence=null;
+if(phaseOneEvidenceMode){
+ const read=rel=>{
+  if(!/^evidence\/[A-Za-z0-9._/-]+\.json$/.test(rel)||rel.includes('..'))
+   throw Error('Unexpected accepted evidence reference');
+  return fs.readFileSync(path.join(checkoutDir,rel));
+ };
+ const surfaceBytes=read('evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json');
+ const surface=JSON.parse(surfaceBytes);
+ const index=JSON.parse(read('evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json'));
+ const core=index.core;
+ if(core?.status!=='ACCEPTED'||core?.invalidationStatus!=='CURRENT'||
+    !/^evidence\/source-intelligence\/SOURCE_INTELLIGENCE_v[0-9]+\.json$/.test(core.latestAcceptedRevision||''))
+  throw Error('No accepted current Phase-0 Source Intelligence revision');
+ const coreBytes=read(core.latestAcceptedRevision);
+ const si=JSON.parse(coreBytes);
+ if(sha(coreBytes)!==core.acceptedSha256||surface.status!=='PASS'||
+    surface.campaignId!==campaignId||surface.campaignGenerationId!==current.generationId||
+    surface.sourceIdentity?.sourceDigestSha256!==current.sourceSha256||
+    si.identity?.campaignId!==campaignId||si.identity?.campaignGenerationId!==current.generationId||
+    si.identity?.sourceDigestSha256!==current.sourceSha256||
+    index.identity?.sourceDigestSha256!==current.sourceSha256)
+  throw Error('Phase-0 evidence is not bound to the sealed campaign source/generation');
+ phaseOneEvidence={si,surface,core};
+ console.log(JSON.stringify({status:'ACCEPTED_PHASE0_EVIDENCE_BOUND',campaignId,
+  acceptedSourceIntelligenceSha256:core.acceptedSha256,surfaceSha256:sha(surfaceBytes),
+  redundantRawSourceInferenceCallsSkipped:true,controllerAccepted:false}));
+}else{
+ walk(checkoutDir);
+ if(!sourceFiles.length)throw Error('No admitted source files in campaign checkout');
+}
 const chunks=[];
 for(const f of sourceFiles){
  const bytes=fs.readFileSync(f),lines=bytes.toString('utf8').split(/\r?\n/);
@@ -397,11 +429,68 @@ const u=units[0];
 if(!u?.unitId||!u?.lease||!u.inputFileTemplate)throw Error('Incomplete claim identity');
 const instructions=boundInstructions;
 if(instructions.length<100)throw Error('Current step instructions missing');
+// Return a budgeted catalog of verified Phase-0 facts relevant to the
+// assigned semantic shard. Do not turn mechanical candidates into findings.
+function phaseOneEvidenceIndex(u,limit){
+ const {si,surface,core}=phaseOneEvidence;
+ const ref=core.latestAcceptedRevision;
+ const focus=JSON.stringify({descriptor:u.descriptor,template:u.inputFileTemplate}).toLowerCase();
+ const sections=[
+  ['limitations',si.limitations,160,ref],
+  ['securitySurfaces',si.securitySurfaces,125,ref],
+  ['privilegeCandidates',si.privilegeCandidates,100,ref],
+  ['valueFlowCandidates',si.valueFlowCandidates,100,ref],
+  ['externalInterfaces',si.externalInterfaces,75,ref],
+  ['contracts',si.contracts,55,ref],
+  ['dependencyEdges',surface.structuralSurfaces?.dependencyEdges,80,
+   'evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json']
+ ];
+ const catalog={},rows=[];
+ for(const [kind,list,score,file] of sections){
+  if(!Array.isArray(list))continue;
+  catalog[kind]=list.length;
+  for(let i=0;i<list.length;i++){
+   const data=list[i];if(!data||typeof data!=='object')continue;
+   const keep=['limitationId','category','reason','downstreamRequiredAction','obligationId',
+    'surfaceId','surfaceClass','phase1Ownership','candidateId','contractId','functionId',
+    'modifierOrGuard','authorityExpression','sourceLocation','flowId','sourceContractId',
+    'sourceFunctionId','mechanism','direction','interfaceId','dependencyOrInterface',
+    'interactionKind','qualifiedName','deployability','language','edgeId',
+    'fromContractId','toContractId','relationship'];
+   const row={ref:file+'#'+kind+'['+i+']'};
+   for(const k of keep)if(data[k]!==undefined)row[k]=data[k];
+   const terms=JSON.stringify(row).toLowerCase().match(/[a-z][a-z0-9_]{4,}/g)||[];
+   const relevance=new Set(terms.filter(x=>focus.includes(x)&&!['source','phase','contract','candidate','status'].includes(x))).size;
+   rows.push({kind,index:i,score:score+Math.min(relevance,8)*15,row});
+  }
+ }
+ rows.sort((a,b)=>b.score-a.score||a.index-b.index);
+ const header={evidence:'SEALED_PHASE0_MECHANICAL_FACTS_NOT_PROVEN_FINDINGS',
+  acceptedSourceIntelligence:{path:ref,sha256:core.acceptedSha256},
+  acceptedAuditSurface:'evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json',
+  sourceSha256:current.sourceSha256,catalogCounts:catalog,
+  limitation:'These are selective accepted facts. Omitted records are not cleared; use specific source anchors and preserve uncertainty. Do not repeat Phase-0 discovery.'};
+ const chosen=[],included=new Set(),seen=new Set();
+ let used=JSON.stringify(header).length+180;
+ for(let pass=0;pass<2;pass++){
+  for(let i=0;i<rows.length;i++){
+   const v=rows[i];if(seen.has(i)||(pass===0&&included.has(v.kind)))continue;
+   const len=JSON.stringify(v.row).length+2;
+   if(used+len>limit)continue;
+   chosen.push(v.row);used+=len;included.add(v.kind);seen.add(i);
+  }
+ }
+ const result=JSON.stringify({...header,selected:chosen,
+  includedRecords:chosen.length,omittedRecords:rows.length-chosen.length});
+ if(chosen.length===0||result.length>limit)throw Error('Accepted Phase-0 facts do not fit assigned context');
+ return result;
+}
 // Every source chunk is independently retained by source hash in private R2.
  // For 8K MiMo, derive a truthful, relevance-ranked evidence index for this
  // exact assigned unit. Never claim that material omitted from context was
  // independently verified by this unit's inference.
  function evidenceIndex(maxCharacters){
+  if(phaseOneEvidence)return phaseOneEvidenceIndex(u,maxCharacters);
   const domain=JSON.stringify({descriptor:u.descriptor,template:u.inputFileTemplate}).toLowerCase();
   const rows=summaries.map((z,index)=>{
    const a=z.analysis||{},p=z.path,findings=a.plausibleFindings??[];
