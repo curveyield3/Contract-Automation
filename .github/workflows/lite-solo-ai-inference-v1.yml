@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'process/agent-upload/lite-solo-ai-training-request-v1.json'
+      - '.github/workflows/lite-solo-ai-inference-v1.yml'
   workflow_dispatch:
     inputs:
       inference_runners:
@@ -100,6 +101,22 @@ env:
   LLAMA_SHA: 8642541b255bfb5dc39cd351a178be09013a55d6
   GGML_RPC_NO_RDMA: '1'
 jobs:
+  dispatch-once:
+    if: github.event_name == 'push' && github.event.head_commit.message == 'mimo-v20-dual-relaunch-authorized-tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Resume AI with two inference runners on authorized Tailscale tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref main \
+            -f mode=autonomous -f inference_runners=2 -f campaign_id=cyvbusdcv28-r3 \
+            -f expected_phase=1 -f expected_step=1 \
+            -f submission_mode=submit -f max_chunks=32 -f ai_hop=4
+          echo '{"status":"AI_TWO_RUNNER_DISPATCH_SUBMITTED","campaignId":"cyvbusdcv28-r3","inferenceRunners":2}'
   infer:
     if: github.event_name == 'workflow_dispatch' && inputs.mode != 'train'
     runs-on: ubuntu-latest
@@ -562,7 +579,7 @@ jobs:
           kill "$(cat "$RUNNER_TEMP/mimo-rpc-server.pid")" 2>/dev/null || true
 
   train:
-    if: github.event_name == 'push' || inputs.mode == 'train'
+    if: (github.event_name == 'push' && github.event.head_commit.message != 'mimo-v20-dual-relaunch-authorized-tag') || inputs.mode == 'train'
     name: MiMo CPU training stage ${{ matrix.rank }} / 7
     runs-on: ubuntu-latest
     timeout-minutes: 100
@@ -735,7 +752,7 @@ jobs:
           echo 'Training does not change controller receipts, v5 approvals or v6 audit authority.' >> "$GITHUB_STEP_SUMMARY"
 
   training-package:
-    if: github.event_name == 'push' || inputs.mode == 'train'
+    if: (github.event_name == 'push' && github.event.head_commit.message != 'mimo-v20-dual-relaunch-authorized-tag') || inputs.mode == 'train'
     name: Consolidate eight MiMo CPU LoRA stage checkpoints
     needs: train
     runs-on: ubuntu-latest
