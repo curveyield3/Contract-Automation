@@ -73,9 +73,11 @@ checkStep(current);
 if(current.engagement?.stage==='INSTRUCTIONS'){
  const form=current.engagement.instructionForm;
  if(typeof form!=='string'||form.length<300)throw Error('Missing current instruction form');
+ const mandatory=String(current.authoritativeStepInstructions||'');
+ if(mandatory.length+form.length>18000)throw Error('Instruction form exceeds safe context; no acknowledgment or claim');
  const answers=await infer([{role:'system',content:system},{role:'user',content:
    'Read these exact current instruction-verification questions and authoritative step obligations. Answer Q1, Q2, Q3 in your own substantive words, each at least 100 characters and 15 words. Do not claim any audit action has been done. Output JSON object keys Q1,Q2,Q3.\n'+
-   String(current.authoritativeStepInstructions||'').slice(0,10000)+'\n\n'+form.slice(0,11000)}],1100);
+   mandatory+'\n\n'+form}],1100);
  for(const k of ['Q1','Q2','Q3'])if(typeof answers[k]!=='string'||answers[k].length<100||
    answers[k].trim().split(/\s+/).length<15)throw Error('Incomplete instruction acknowledgement '+k);
  const ack=await worker('/api/step/interaction',{action:'acknowledge',readAndUnderstand:true,
@@ -86,6 +88,8 @@ if(current.engagement?.stage==='INSTRUCTIONS'){
 }
 if(current.engagement&&current.engagement.stage!=='WORK')throw Error('Worker instruction stage is not ready');
 if(!current.availableProcessActions?.includes('claim'))throw Error('Current step is not claimable');
+if(String(current.authoritativeStepInstructions||'').length>18000)
+ throw Error('Required phase instructions exceed safe model context; no lease or submission');
 // Retrieve only current campaign + receipt-bound authority using existing private checkout.
 if(!process.env.AUDIT_CONTROLLER_GITHUB_TOKEN)throw Error('Existing controller GitHub credential absent');
 const slug=campaignId.replace(/-r[0-9]+$/,'');
@@ -139,8 +143,9 @@ for(const f of sourceFiles){
 if(chunks.length>maxChunks)throw Error('Full source coverage exceeds max_chunks: no claim made; increase budget or use a more capable runner');
 const summaries=[];
 for(const chunk of chunks){
- const analysis=await infer([{role:'system',content:system},{role:'user',content:
-  'Inspect exact source and trace function state transitions, privileges, external calls, invariants and vulnerabilities. Output JSON with keys reasoning, plausibleFindings, verifiedSourceAnchors, uncertainties. No simulated proof. File '+chunk.file+' SHA '+chunk.sha256+' lines '+chunk.startLine+'-'+chunk.endLine+'\n'+chunk.text}],1450);
+ const sourcePrompt='Inspect exact source and trace function state transitions, privileges, external calls, invariants and vulnerabilities. Output JSON with keys reasoning, plausibleFindings, verifiedSourceAnchors, uncertainties. No simulated proof. File '+chunk.file+' SHA '+chunk.sha256+' lines '+chunk.startLine+'-'+chunk.endLine+'\n'+chunk.text;
+ if(sourcePrompt.length>18000)throw Error('Required raw source chunk exceeds model input context; no lease');
+ const analysis=await infer([{role:'system',content:system},{role:'user',content:sourcePrompt}],1450);
  summaries.push({path:chunk.file,startLine:chunk.startLine,endLine:chunk.endLine,analysis});
 }
 // Claim through the SAME Worker that owns all leases. Do not create independent assignments.
@@ -158,15 +163,15 @@ if(!u?.unitId||!u?.lease||!u.inputFileTemplate)throw Error('Incomplete claim ide
 const instructions=String(current.authoritativeStepInstructions||'');
 if(instructions.length<100)throw Error('Current step instructions missing');
 const prompt='Complete only the current controller-assigned input form. Keep every fixed identity, key and controller prefill exactly. Every substantive conclusion must have real source anchors and follow the exact source-bound step authority. The output must be a JSON object matching the template, not a report or explanation.'+
- '\nCurrent authority:\n'+instructions.slice(0,13000)+
- '\nExact controller generated input JSON:\n'+JSON.stringify(u.inputFileTemplate).slice(0,14000)+
- '\nCurrent input validation schema:\n'+JSON.stringify(u.validationSchema||current.stepSchema||{}).slice(0,4500)+
- '\nSource-grounded investigation summaries:\n'+JSON.stringify(summaries).slice(0,14000);
-if(prompt.length>40000){
+ '\nCurrent authority:\n'+instructions+
+ '\nExact controller generated input JSON:\n'+JSON.stringify(u.inputFileTemplate)+
+ '\nCurrent input validation schema:\n'+JSON.stringify(u.validationSchema||current.stepSchema||{})+
+ '\nSource-grounded investigation summaries:\n'+JSON.stringify(summaries);
+if(prompt.length>18000){
  await worker('/api/step/process',{action:'release',unitId:u.unitId,lease:u.lease});
  throw Error('Exact required context exceeds bounded model input; claim released');
 }
-const output=await infer([{role:'system',content:system},{role:'user',content:prompt}],3000);
+const output=await infer([{role:'system',content:system},{role:'user',content:prompt}],1800);
 if(!output||typeof output!=='object'||Array.isArray(output))throw Error('No complete unit JSON');
 const fixed=u.inputFileTemplate;
 if(fixed.schemaVersion!==output.schemaVersion)throw Error('Model changed bound schema version');
@@ -187,10 +192,12 @@ if(!submit){
  if(first.status==='FIRST_ROUND_RECORDED_REVIEW_REQUIRED'){
   const qs=first.questions;
   if(!Array.isArray(qs)||qs.length!==5)throw Error('Actual five-question review form not returned');
+  const reviewInput='Independently evaluate source-bound first-round work and answer all five questions. Exact source: '+JSON.stringify(summaries)+' exact work: '+JSON.stringify(output)+' exact questions: '+JSON.stringify(qs)+' complete review form: '+String(first.reviewQuestionsForm||'');
+  if(reviewInput.length>18000)throw Error('Independent review exceeds model context; first round preserved, not completed');
   const review=await infer([{role:'system',content:system},{role:'user',content:
    'Independently evaluate this submitted security work. Answer EACH of the five exact questions in grounded substantive detail. Record every material deficiency in repairChecklist; do not falsely report no repairs. Return JSON keys answers (Q1..Q5), repairChecklist (array of objects issue,location,requiredAction,verificationEvidence,origin). Source-grounded notes:\n'+
-   JSON.stringify(summaries).slice(0,10500)+'\nFirst-round proposed work:\n'+JSON.stringify(output).slice(0,11000)+
-   '\nIssued questions:\n'+JSON.stringify(qs).slice(0,5000)+'\nExact form:\n'+String(first.reviewQuestionsForm||'').slice(0,12000)}],2400);
+   JSON.stringify(summaries)+'\nFirst-round proposed work:\n'+JSON.stringify(output)+
+   '\nIssued questions:\n'+JSON.stringify(qs)+'\nExact form:\n'+String(first.reviewQuestionsForm||'')}],2400);
   if(!review.answers||['Q1','Q2','Q3','Q4','Q5'].some(k=>typeof review.answers[k]!=='string'||
    review.answers[k].trim().length<80)||!Array.isArray(review.repairChecklist))
    throw Error('Model could not satisfy independent five-question review');
