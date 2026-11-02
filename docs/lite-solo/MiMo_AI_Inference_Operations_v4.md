@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v8)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v9)
 
-**Revision:** v8 (canonical v4 file path retained for existing references)  
+**Revision:** v9 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -60,11 +60,19 @@ An autonomous runner now permits up to 30 minutes for each local MiMo inference 
 
 No new test suites or alternative controller workflow were added. The actual end-to-end checkpoint/rollover has not yet been verified on a live runner; the controller's persisted state remains authoritative.
 
+## Per-run source scope and chunk checkpoints (v9)
+
+The source ZIP in `cyvbusdcv28-r3` expands to 52 Solidity/Vyper files, including nondeployable forge-std test harnesses. The prior adapter incorrectly treated `max_chunks=32` as a whole-package ceiling. The canonical adapter v6 now treats it as a **per-run** limit and persists completed raw runtime-source analyses separately as immutable, source-bound R2 chunk objects. Each successor runner reads these exact objects, verifies the original file hash and line anchors, and resumes at the next unfinished source chunk. The existing 4096-chunk protective maximum and per-file limits are separate resource safety bounds, not a controller PASS.
+
+The original complete ZIP remains frozen in the controller. Vendored `dependencies_v6/forge-std/` testing and cheatcode files are excluded only from the model's runtime-code analysis; primary Solidity/Vyper contracts, the Yearn vault, routers, deployment scripts and runtime libraries remain candidates. Every included source chunk analysis is saved privately. Since MiMo has an 8K context window, a later controller unit receives an explicitly incomplete, source-cited contextual evidence index, not a misleading claim that the model has all earlier raw analyses in its current context. The Worker and controller must still reject inadequate evidence.
+
+Version v9 does not change the existing 355-minute autonomous job cap, the 345-minute handoff target, the 30-minute per-request inference timeout, or the original controller approval and verification rules. Existing in-flight jobs keep their starting commit; only newer runs use the updated source-stage behavior.
+
 ## Current free-beta limitations
 
 - This is **not fine-tuned MiMo**; it has not demonstrated senior-auditor quality.
 - 16 GB CPU, no GPU; 355-minute autonomous job limit (100-minute public/v5 limit), Q4 MiMo 9B, 8K context. Cooperative checkpointing preserves completed source chunks but does not snapshot MiMo's in-flight token generation or controller leases. Loading and generating dozens of investigations may exceed the time budget.
-- Full raw source coverage is capped at 32 line-overlapping chunks, 256 Solidity/Vyper files and 256 KiB per source file; if coverage cannot fit, the adapter stops **before claiming** instead of inventing a full audit.
+- Each autonomous run analyzes at most 32 new source chunks and resumes from immutable per-chunk R2 evidence; the whole campaign can exceed 32 chunks. Build-only forge-std test utilities are not treated as deployed audit targets. Runtime file size (256 KiB) and full source index (4096 chunks) remain resource bounds.
 - Each invocation currently generates at most one complete controller unit; an eligible successor is dispatched as a separate GitHub job. This is a beta mechanism, not guaranteed full-campaign throughput.
 - If there is missing machine-execution evidence, unresolved structural rework, no approved source snapshot, timeout, or the model cannot satisfy the exact current form and instructions, the agent must report the real blocked state and **must not** claim phase completion.
 - AI-v6 Phase 0 has been observed sealed for `cyvbusdcv28-r3`; the complete MiMo audit and its new time-bound handoff path are not yet end-to-end verified. Do not assume that workflow dispatch or an R2 checkpoint equals controller acceptance.
