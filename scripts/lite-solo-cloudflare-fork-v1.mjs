@@ -743,7 +743,8 @@ async function main(){
     strict(process.env.AUDIT_CONTROLLER_TOKEN&&process.env.CONTRACT_AUTOMATION_TOKEN,'repository credentials missing');
     const initEnv={...process.env,REQUEST_ID:payload.request_id,SOURCE_URL:payload.source_url||'',
       SCAN_URLS:JSON.stringify(payload.scan_urls||[]),FORK_EXPECTED_SOURCE_SHA:payload.source_sha256||'',
-      DELIVERY_TRANSPORT:'DIRECT',LITE_SOLO_AI_AUTONOMOUS:payload.authority_release==='lite-solo-v6'?'1':'0'};
+      DELIVERY_TRANSPORT:'DIRECT',LITE_SOLO_AI_AUTONOMOUS:payload.authority_release==='lite-solo-v6'?'1':'0',
+      ...(payload.authority_release==='lite-solo-v6'?{PUBLISH_FILES_JSON:JSON.stringify(Object.fromEntries(['report_pdf','audited_source','scope_summary','findings_remediation','methodology_analysis','properties_hypotheses','execution_results','architecture_dependencies','residual_risks','evidence_index'].map(k=>[k,false])))}:{})};
     cmd('bash',['scripts/lite-solo-source-initialization/run-cloudflare-fork-v1.sh'],{env:initEnv,timeout:20*60*1000});
     return;
   }
