@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v8. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v9. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import http from 'node:http';
@@ -252,7 +252,7 @@ try{
 if(directory.campaignId!==campaignId||directory.campaignGenerationId!==current.generationId||
  directory.sourceSha256!==current.sourceSha256||directory.authorityDigest!==current.authorityDigest||
  directory.currentAssignment?.phaseSequence!==expectedPhase||
- !/^campaigns\/[A-Za-z0-9._/-]+$/.test(directory.workspacePath)||directory.workspacePath.includes('..'))
+ !/^campaigns\/[A-Za-z0-9._/ -]+$/.test(directory.workspacePath)||directory.workspacePath.includes('..'))
  throw Error('Campaign Directory does not match Worker source/authority/phase');
 try{execFileSync('bash',['scripts/lite-solo-checkout-bound-controller-v1.sh','.audit-controller','main',directory.workspacePath],
  {env:ghEnv,stdio:['ignore','pipe','pipe'],maxBuffer:1024*1024});}
