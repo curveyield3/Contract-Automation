@@ -67,6 +67,7 @@ def main():
     )
 
     torch.set_num_threads(4)
+    torch.manual_seed(4300 + a.rank)  # Reproducible fresh LoRA initialization per stage.
     model_id = "XiaomiMiMo/MiMo-V2.6-Distill-Qwen-9B"
     sha = HfApi().model_info(model_id, revision=a.model_revision).sha
     if sha != a.model_revision:
@@ -136,9 +137,9 @@ def main():
             layer = int(match.group(1))
             if first <= layer < last:
                 weights[original] = (filename, f"layers.{layer}.{match.group(2)}")
-        elif a.rank == 0 and original.endswith("embed_tokens.weight"):
+        elif a.rank == 0 and original in ("model.language_model.embed_tokens.weight", "model.embed_tokens.weight"):
             weights[original] = (filename, "embed_tokens.weight")
-        elif a.rank == 7 and original.endswith("norm.weight") and ".layers." not in original:
+        elif a.rank == 7 and original in ("model.language_model.norm.weight", "model.norm.weight"):
             weights[original] = (filename, "norm.weight")
         elif a.rank == 7 and original == "lm_head.weight":
             weights[original] = (filename, "lm_head.weight")
@@ -208,6 +209,9 @@ def main():
         state = torch.load(a.resume, map_location="cpu", weights_only=True)
         if state.get("identity") != identity or state.get("rank") != a.rank:
             raise RuntimeError("Checkpoint identity or rank mismatch")
+        expected = {k for k in stage.state_dict() if k.endswith((".a", ".b"))}
+        if set(state["adapter"]) != expected:
+            raise RuntimeError("Incomplete or incorrectly keyed resumed LoRA adapter")
         stage.load_state_dict(state["adapter"], strict=False)
         opt.load_state_dict(state["optimizer"])
         start_step = int(state["step"])
@@ -267,7 +271,7 @@ def main():
         dist.barrier()
         training = {
             "identity": identity, "rank": a.rank, "step": step + 1,
-            "adapter": {k: v.cpu() for k, v in stage.state_dict().items() if ".a" in k or ".b" in k},
+            "adapter": {k: v.cpu() for k, v in stage.state_dict().items() if k.endswith((".a", ".b"))},
             "optimizer": opt.state_dict(),
         }
         tmp = out.with_suffix(".tmp")
