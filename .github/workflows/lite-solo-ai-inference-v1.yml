@@ -1,4 +1,4 @@
-name: Lite-Solo AI Source Inference and Autonomous Beta v1
+name: Lite-Solo AI Source Inference and Autonomous Beta v2
 on:
   workflow_dispatch:
     inputs:
@@ -59,7 +59,7 @@ concurrency:
 jobs:
   infer:
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    timeout-minutes: ${{ inputs.mode == 'autonomous' && 355 || 100 }}
     env:
       AUDIT_AI_MODE: ${{ inputs.mode }}
       AUDIT_AI_SOURCE_URL: ${{ inputs.source_url }}
@@ -76,6 +76,10 @@ jobs:
       MODEL_SHA256: 4bca6f18c73f72270c7a20c2ea2bea581de8246e318714277120369d34048c81
       LLAMA_SHA: 8642541b255bfb5dc39cd351a178be09013a55d6
     steps:
+      - name: Record autonomous runner start for bounded 5h45 handoff
+        if: inputs.mode == 'autonomous'
+        shell: bash
+        run: echo "AUDIT_AI_STARTED_AT_MS=$(($(date +%s)*1000))" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
