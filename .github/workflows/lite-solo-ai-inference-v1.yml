@@ -1,4 +1,4 @@
-name: Lite-Solo AI Source Inference and Autonomous Beta v2
+name: Lite-Solo AI Source Inference and Autonomous Beta v3
 on:
   push:
     branches: [main]
@@ -214,7 +214,7 @@ jobs:
           rpc_opts=()
           targets=(llama-server)
           if [ "$AI_INFERENCE_RUNNERS" != 1 ]; then
-            rpc_opts=(-DGGML_RPC=ON -DGGML_CUDA=OFF -DGGML_VULKAN=OFF)
+            rpc_opts=(-DGGML_RPC=ON -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DLLAMA_BUILD_TESTS=OFF)
             targets+=(ggml-rpc-server)
           fi
           cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF "${rpc_opts[@]}"
@@ -241,7 +241,7 @@ jobs:
           bash scripts/browser-agent-tailnet-oidc.sh
           test -x "$RUNNER_TEMP/llama-build/bin/ggml-rpc-server"
           nohup "$RUNNER_TEMP/llama-build/bin/ggml-rpc-server" \
-            --host 127.0.0.1 --port 50052 \
+            --host 127.0.0.1 --port 50052 --threads 4 \
             > "$RUNNER_TEMP/mimo-local-rpc.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/mimo-local-rpc.pid"
           sleep 3
@@ -488,7 +488,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && (inputs.inference_runners == '2' || inputs.inference_runners == '4') && inputs.mode != 'train' && inputs.mode != 'autonomous_start'
     name: MiMo RPC node ${{ matrix.rank }}
     runs-on: ubuntu-latest
-    timeout-minutes: 355
+    timeout-minutes: 360
     strategy:
       fail-fast: true
       matrix:
@@ -523,7 +523,7 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/llama.cpp" rev-parse HEAD)" = "$LLAMA_SHA"
           cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" \
             -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_RPC=ON \
-            -DGGML_CUDA=OFF -DGGML_VULKAN=OFF
+            -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DLLAMA_BUILD_TESTS=OFF
           cmake --build "$RUNNER_TEMP/llama-build" --target ggml-rpc-server -j 4
       - name: Start Tailscale-only RPC server and announce same-run identity
         shell: bash
@@ -532,7 +532,7 @@ jobs:
           ip="$(tailscale ip -4 | head -n 1)"
           [[ "$ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
           nohup "$RUNNER_TEMP/llama-build/bin/ggml-rpc-server" \
-            --host "$ip" --port 50052 \
+            --host "$ip" --port 50052 --threads 4 \
             > "$RUNNER_TEMP/mimo-rpc-server.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/mimo-rpc-server.pid"
           sleep 3
