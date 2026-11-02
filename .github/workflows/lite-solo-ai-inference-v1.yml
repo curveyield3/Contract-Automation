@@ -407,3 +407,100 @@ jobs:
         run: |
           echo 'Eight rank checkpoints are NOT yet a merged LoRA adapter or Lite-Solo deployment.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Training does not change controller receipts, v5 approvals or v6 audit authority.' >> "$GITHUB_STEP_SUMMARY"
+
+  training-package:
+    if: inputs.mode == 'train'
+    name: Consolidate eight MiMo CPU LoRA stage checkpoints
+    needs: train
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download all eight successful rank artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mimo-cpu-checkpoint-rank-*
+          path: ${{ runner.temp }}/mimo-rank-checkpoints
+          merge-multiple: false
+      - name: Install CPU-only aggregation dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --no-input "torch==2.9.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --no-input "safetensors==0.7.0"
+      - name: Package exact matching model-stage adapters and provenance
+        shell: bash
+        env:
+          RANK_ROOT: ${{ runner.temp }}/mimo-rank-checkpoints
+          PACKAGE_DIR: ${{ runner.temp }}/mimo-training-package
+        run: |
+          set -euo pipefail
+          mkdir -p "$PACKAGE_DIR"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import torch
+          from safetensors.torch import save_file
+          root=Path(os.environ["RANK_ROOT"])
+          out=Path(os.environ["PACKAGE_DIR"])
+          states=[]
+          artifact_digests={}
+          for rank in range(8):
+              p=root/f"mimo-cpu-checkpoint-rank-{rank}"/f"checkpoint-rank-{rank}.pt"
+              if not p.is_file():
+                  raise RuntimeError(f"Missing rank {rank} checkpoint")
+              artifact_digests[str(rank)]=hashlib.sha256(p.read_bytes()).hexdigest()
+              ck=torch.load(p,map_location="cpu",weights_only=True)
+              if ck["rank"] != rank:
+                  raise RuntimeError("Checkpoint owner rank mismatch")
+              states.append(ck)
+          identity=states[0]["identity"]
+          step=states[0]["step"]
+          if any(s["identity"]!=identity or s["step"]!=step for s in states):
+              raise RuntimeError("Incomplete or inconsistent rank checkpoint generation")
+          layers={}
+          for rank,ck in enumerate(states):
+              for name,tensor in ck["adapter"].items():
+                  if name in layers or not name.startswith("layers."):
+                      raise RuntimeError("Unexpected or duplicated model-stage adapter tensor")
+                  if not name.endswith((".a",".b")):
+                      raise RuntimeError("Unrecognized adapter tensor")
+                  layer=int(name.split(".")[1])
+                  if layer not in range(rank*4,rank*4+4):
+                      raise RuntimeError("Adapter tensor assigned to the wrong four-layer stage")
+                  layers[name]=tensor.contiguous()
+          if not layers:
+              raise RuntimeError("Empty adapter bundle")
+          save_file(layers,str(out/"mimo_cpu_lora_stages.safetensors"))
+          report={
+              "schemaVersion":"mimo-cpu-training-package-v1",
+              "status":"TRAINED_STAGE_ADAPTERS_NOT_DEPLOYED",
+              "baseModel":"XiaomiMiMo/MiMo-V2.6-Distill-Qwen-9B",
+              "sourceAndDatasetIdentity":identity,
+              "trainedOptimizerSteps":step,
+              "pipelineRanks":8,
+              "loraRank":8,
+              "loraAlpha":16,
+              "adapterTensorCount":len(layers),
+              "checkpointSha256ByRank":artifact_digests,
+              "adapterSha256":hashlib.sha256((out/"mimo_cpu_lora_stages.safetensors").read_bytes()).hexdigest(),
+              "limitations":[
+                  "Raw rank-merged LoRA tensors are not yet converted to a validated PEFT or GGUF adapter.",
+                  "No audit evaluation or model promotion has been authorized.",
+                  "Original Q4 llama.cpp inference and all audit authorities remain unchanged."
+              ],
+          }
+          (out/"manifest.json").write_text(json.dumps(report,indent=2)+"\n")
+          print(json.dumps({"status":report["status"],"steps":step,"tensors":len(layers)}))
+          PY
+      - name: Upload consolidated training package
+        uses: actions/upload-artifact@v4
+        with:
+          name: mimo-cpu-training-package-v1
+          path: ${{ runner.temp }}/mimo-training-package/
+          if-no-files-found: error
+          retention-days: 7
