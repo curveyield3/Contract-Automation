@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v17)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v18)
 
-**Revision:** v17 (canonical v4 file path retained for existing references)  
+**Revision:** v18 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -117,6 +117,14 @@ The currently running job at the time of this update was pinned to a previous co
 The live `cyvbusdcv28-r3` audit run had started at an earlier pinned commit with a 30-minute local model timeout. This release uses a single bounded file-triggered dispatch to cancel that already-running job if still active and restart the same admitted campaign, Phase 1 Step 1, with canonical adapter v11. All recorded source- and authority-bound checkpoints in Cloudflare R2 remain durable; an incomplete model request from the cancelled job may need to be recomputed. No source, controller receipt, or seal was changed.
 
 The replacement job uses a 120-minute *per-inference* deadline, at most 16 controller units per runner, and the same 345-minute handoff target. Start/completion metrics help distinguish slow responses, empty final content, token-budget exhaustion, and failures after a completed request. They do not prove that a pending CPU request is healthy, nor do they guarantee recovery from an unexpected interruption mid-lease.
+
+## Phase 1 accepted-evidence optimization and expanded model budget (v18)
+
+The **current frozen Phase 1 Step 1 authority** explicitly requires semantic interpretation of the accepted Phase-0 Audit Surface and accepted Source Intelligence core. It prohibits repeating mechanical inventory. Earlier adapter code performed 108 blanket raw-source model requests **before claiming its first controller unit**; that was unnecessary for this step. Canonical campaign adapter **v13** now verifies the bound Phase-0 receipt, Source Intelligence index `ACCEPTED`/`CURRENT` status, accepted core SHA-256, source SHA-256 and generation, then selects provenance-bearing accepted evidence for each controller-assigned semantic unit. Source limitations and unselected records remain unresolved, not cleared; later steps must still perform the raw-source investigation required by their own authority. The three previously stored raw-source checkpoint chunks remain in R2 and are not deleted.
+
+The model's first output ceiling is now **4,096 tokens** and the bounded changed-prompt retry can use **6,144 tokens**. The existing pinned llama.cpp server uses a **12,288-token context** instead of 8,192. These are output/context allowances, not assurances of reasoning quality or speed. Each individual CPU inference retains the 120-minute deadline, and completed units still require the original five-question review, real remediation, and controller validation. Accepted work is never inferred from inference progress or GitHub success.
+
+**Outstanding verification:** No live proof yet that the new Phase-0 evidence path is accepted by the Worker, nor that full Phase 1 completion or the six-hour handoff succeeds. Do not report those milestones until actual controller receipts exist.
 
 ## Current free-beta limitations
 
