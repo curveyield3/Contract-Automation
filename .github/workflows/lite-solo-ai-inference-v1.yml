@@ -484,6 +484,83 @@ jobs:
             jq -r '"Status: \(.status); reviewed \(.reviewed|length)/\(.totalChunks) chunks"' "$file" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  inference-rpc:
+    if: github.event_name == 'workflow_dispatch' && (inputs.inference_runners == '2' || inputs.inference_runners == '4') && inputs.mode != 'train' && inputs.mode != 'autonomous_start'
+    name: MiMo RPC node ${{ matrix.rank }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: true
+      matrix:
+        rank: ${{ fromJSON(inputs.inference_runners == '4' && '[1,2,3]' || '[1]') }}
+    env:
+      AI_INFERENCE_RUNNERS: ${{ inputs.inference_runners }}
+      OMP_NUM_THREADS: '4'
+      MKL_NUM_THREADS: '4'
+    steps:
+      - name: Checkout same pinned audit workflow revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Connect ephemeral inference-only tailnet node
+        env:
+          TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TAILNET_TAG: tag:ai-training
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TS_CLIENT_ID" || { echo "::error::Missing TS_OAUTH_CLIENT_ID"; exit 1; }
+          bash scripts/browser-agent-tailnet-oidc.sh
+      - name: Build identical pinned CPU GGML RPC backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$RUNNER_TEMP/llama.cpp"
+          git -C "$RUNNER_TEMP/llama.cpp" fetch --quiet --depth=1 origin "$LLAMA_SHA"
+          git -C "$RUNNER_TEMP/llama.cpp" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/llama.cpp" rev-parse HEAD)" = "$LLAMA_SHA"
+          cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" \
+            -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_RPC=ON \
+            -DGGML_CUDA=OFF -DGGML_VULKAN=OFF
+          cmake --build "$RUNNER_TEMP/llama-build" --target ggml-rpc-server -j 4
+      - name: Start Tailscale-only RPC server and announce same-run identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ip="$(tailscale ip -4 | head -n 1)"
+          [[ "$ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          nohup "$RUNNER_TEMP/llama-build/bin/ggml-rpc-server" \
+            --host "$ip" --port 50052 \
+            > "$RUNNER_TEMP/mimo-rpc-server.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/mimo-rpc-server.pid"
+          sleep 3
+          kill -0 "$(cat "$RUNNER_TEMP/mimo-rpc-server.pid")" || {
+            tail -n 60 "$RUNNER_TEMP/mimo-rpc-server.log"; exit 1;
+          }
+          python3 scripts/lite-solo-ai/rpc-rendezvous-v1.py announce \
+            --run-id "$GITHUB_RUN_ID" --mode "$AI_INFERENCE_RUNNERS" \
+            --rank "${{ matrix.rank }}" --address "$ip" \
+            --model-sha256 "$MODEL_SHA256" --llama-commit "$LLAMA_SHA" \
+            --output "$RUNNER_TEMP/mimo-rpc-peer/rendezvous.json"
+      - name: Publish peer identity without campaign source or credentials
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite-solo-ai-rpc-v1-${{ github.run_id }}-rank-${{ matrix.rank }}
+          path: ${{ runner.temp }}/mimo-rpc-peer/rendezvous.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Maintain RPC service until authoritative infer job completes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/lite-solo-ai/rpc-rendezvous-v1.py monitor \
+            --run-id "$GITHUB_RUN_ID" --mode "$AI_INFERENCE_RUNNERS"
+          kill "$(cat "$RUNNER_TEMP/mimo-rpc-server.pid")" 2>/dev/null || true
+
   train:
     if: github.event_name == 'push' || inputs.mode == 'train'
     name: MiMo CPU training stage ${{ matrix.rank }} / 7
