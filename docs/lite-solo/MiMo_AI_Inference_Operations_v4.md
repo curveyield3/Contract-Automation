@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v16)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v17)
 
-**Revision:** v16 (canonical v4 file path retained for existing references)  
+**Revision:** v17 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -111,6 +111,12 @@ Canonical MiMo adapter **v11** allows up to **120 minutes per individual localho
 Each request now logs only a start/response summary: elapsed wall time, output budget, sanitized completion reason, token usage when available, and final-content length. These diagnostics identify an empty output or output-budget stop separately from a slow model response; they cannot prove active GPU/CPU work while the HTTP request is still pending. Original model prompts, source text, Q1–Q5 answers, raw reasoning and controller credentials are not logged by this change.
 
 The currently running job at the time of this update was pinned to a previous commit and therefore retained its old timeout. Only a new workflow job at main or a subsequently dispatched successor will use v11. No test suite was added or run.
+
+## One-shot 120-minute inference adoption (v17)
+
+The live `cyvbusdcv28-r3` audit run had started at an earlier pinned commit with a 30-minute local model timeout. This release uses a single bounded file-triggered dispatch to cancel that already-running job if still active and restart the same admitted campaign, Phase 1 Step 1, with canonical adapter v11. All recorded source- and authority-bound checkpoints in Cloudflare R2 remain durable; an incomplete model request from the cancelled job may need to be recomputed. No source, controller receipt, or seal was changed.
+
+The replacement job uses a 120-minute *per-inference* deadline, at most 16 controller units per runner, and the same 345-minute handoff target. Start/completion metrics help distinguish slow responses, empty final content, token-budget exhaustion, and failures after a completed request. They do not prove that a pending CPU request is healthy, nor do they guarantee recovery from an unexpected interruption mid-lease.
 
 ## Current free-beta limitations
 
