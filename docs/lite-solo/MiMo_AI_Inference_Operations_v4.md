@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v19)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v20)
 
-**Revision:** v19 (canonical v4 file path retained for existing references)  
+**Revision:** v20 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -214,3 +214,83 @@ existing source-bound model inference setup is not modified.
   public projects. Training jobs should not be repeatedly dispatched or
   used as an ongoing free compute service without confirmed acceptable use.
 - No new training tests were created or executed as part of this deployment.
+
+## Selectable 1/2/4 inference runners — v20 (2026-11-02)
+
+The existing `.github/workflows/lite-solo-ai-inference-v1.yml` (workflow display
+version v3; file path retained) now supports a manual `inference_runners` choice
+of `1`, `2`, or `4` for `public`, `campaign`, and `autonomous` inference.
+`1` is the backwards-compatible default and retains exactly the original
+single-host Q4 MiMo inference path. `2` and `4` are **opt-in experimental**
+distributed CPU inference modes, not changes to the eight-rank CPU LoRA trainer.
+
+The mechanism reuses the Anime Story Director's architecture rather than
+copying its repo-specific workflow literally: rank zero is the original
+Lite-Solo `infer` job, the only caller of the Cloudflare controller. It
+launches a loopback-only `ggml-rpc-server` on its own host and
+`llama-server --rpc ... --n-gpu-layers 99` with the same pinned Q4 GGUF model
+and immutable llama.cpp revision. The existing `inference-rpc` job dynamically
+spawns rank 1 for dual mode or ranks 1–3 for quad mode, using identical
+`ggml-rpc-server` CPU backends on the private Tailscale network. The
+coordinator retrieves only the matching run/rank/model/revision advertisements
+using bounded GitHub artifact polling; workers remain alive until the
+authoritative `infer` job finishes. Remote jobs never fetch private campaign
+source, start audit tests, submit to the controller, or touch v5 human gates.
+
+| Setting | GitHub-hosted CPUs (theoretical) | Independent RAM (theoretical) |
+| --- | --- | --- |
+| `1` | 4 cores | 16 GB |
+| `2` | 8 cores | 32 GB, distributed |
+| `4` | 16 cores | 64 GB, distributed |
+
+**Those are totals, not shared address-space sizes or measured model
+throughput.** RPC tensor sharding can be slower for the 9B Q4 model because
+forward passes cross network boundaries. The Anime Story Director's quad
+implementation is also unverified by live performance measurements; no
+runtime success or speedup is claimed here. Extra memory only becomes usable
+through the GGML RPC devices.
+
+### Using the modes
+
+- To make a source-bound public audit draft, dispatch `mode=public`, choose
+  `inference_runners=2` or `4`, and provide the original approved
+  checked-in `source_path`.
+- For a legacy v5 campaign, retain exact manual step approval and select
+  the desired count in the existing `campaign` dispatch.
+- For an eligible, already-admitted AI-v6 controller step, choose
+  `mode=autonomous`, supply the exact authorized campaign/phase/step, and
+  choose `inference_runners=2` or `4`. The existing
+  `scripts/lite-solo-ai/campaign-v1.mjs` handoff now carries that count
+  into every self-dispatched successor.
+- `autonomous_start` is **single-runner only**: the initial admission is
+  dispatched onward by the Cloudflare Worker, which does not yet propagate
+  an inference runner count. Controller-generated successors that omit
+  `inference_runners` continue using the safe default `1`.
+  Do not claim an end-to-end quad autonomous start without adding explicit
+  authority-preserving worker-side propagation.
+
+### Networking and security requirement
+
+- Each runner uses the existing OIDC Tailscale helper and the existing
+  repository `TS_OAUTH_CLIENT_ID` with `tag:ai-training`.
+  Coordinator/local RPC is bound only to `127.0.0.1:50052`; remote RPC
+  services bind to their temporary Tailscale `100.64.0.0/10` address on
+  TCP port `50052`. No home computer or external port forwarding is needed.
+- **The upstream GGML RPC server is experimental and provides no application-
+  level authentication.** Before using dual/quad modes for **private**
+  campaign data, the tailnet ACL must restrict access to these endpoints to
+  explicitly authorized training/inference peers. An existing
+  allow-everything rule would leave RPC accessible to every tailnet member,
+  regardless of the additional grant. Do not assume Tailscale encryption
+  alone makes that configuration safe. No ACL change was made in this release.
+- Remote RPC can exchange activations and model tensors. Treat it as a
+  privileged ephemeral service, and never advertise it on `0.0.0.0`.
+  Same-run peer artifacts include only private addresses, source/model
+  digests and ranks—not private audit content or credentials.
+- All controller and worker acceptance semantics remain unchanged. A GitHub
+  run succeeding, a model loading, or all RPC peers connecting **does not**
+  mean the campaign step passed the controller.
+- No tests were created or executed, and no multi-host inference run was
+  dispatched in this release. A live opt-in run remains necessary to prove
+  software compatibility and performance. Do not silently auto-promote
+  this experimental mode as a default for production audits.
