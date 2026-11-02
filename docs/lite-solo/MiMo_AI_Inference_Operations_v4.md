@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v9)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v10)
 
-**Revision:** v9 (canonical v4 file path retained for existing references)  
+**Revision:** v10 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -67,6 +67,12 @@ The source ZIP in `cyvbusdcv28-r3` expands to 52 Solidity/Vyper files, including
 The original complete ZIP remains frozen in the controller. Vendored `dependencies_v6/forge-std/` testing and cheatcode files are excluded only from the model's runtime-code analysis; primary Solidity/Vyper contracts, the Yearn vault, routers, deployment scripts and runtime libraries remain candidates. Every included source chunk analysis is saved privately. Since MiMo has an 8K context window, a later controller unit receives an explicitly incomplete, source-cited contextual evidence index, not a misleading claim that the model has all earlier raw analyses in its current context. The Worker and controller must still reject inadequate evidence.
 
 Version v9 does not change the existing 355-minute autonomous job cap, the 345-minute handoff target, the 30-minute per-request inference timeout, or the original controller approval and verification rules. Existing in-flight jobs keep their starting commit; only newer runs use the updated source-stage behavior.
+
+## MiMo structured JSON recovery (v10)
+
+The first completed retry run returned a non-JSON response during its initial instruction-reading segment, after the original four-minute inference cap had already been repaired. Adapter v7 therefore now accepts only fully parseable JSON objects but can extract such an object from an otherwise extraneous reasoning block or Markdown fence. If the model truly returned malformed or truncated output, it makes one bounded additional attempt with a changed JSON-only prompt and more output tokens; it never treats an incomplete answer as valid or invents missing properties. Instruction segment calls now allow 2200 output tokens before the bounded correction attempt.
+
+The controller was still ACTIVE at Phase 1 Step 1 with all 11 units unleased and unaccepted after this failure. Resumption stays on campaign `cyvbusdcv28-r3` and retains the originally frozen source/authority. A workflow success still does not indicate controller acceptance.
 
 ## Current free-beta limitations
 
