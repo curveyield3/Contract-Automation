@@ -106,8 +106,7 @@ jobs:
             -f expected_phase=1 -f expected_step=1 \
             -f submission_mode=submit -f max_chunks=32 -f ai_hop=0
   infer:
-    if: github.event_name == 'workflow_dispatch'
-    if: inputs.mode != 'train'
+    if: github.event_name == 'workflow_dispatch' && inputs.mode != 'train'
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.mode == 'autonomous' && 355 || 100 }}
     env:
