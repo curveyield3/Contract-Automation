@@ -99,8 +99,8 @@ async function readBoundInstructions(raw){
 
 let current=await worker('/api/step/current',{});
 checkStep(current);
-// Honor Worker instruction-verification protocol. Model-generated acknowledgement records
-// the agent's actual analysis of the exact form; it does not bypass the human step gate.
+// Honor the existing Worker instruction-verification protocol for both modes.
+// The manual v5 human authorization gate remains separate; AI-v6 has no human wait.
 if(current.engagement?.stage==='INSTRUCTIONS'){
  const form=current.engagement.instructionForm;
  if(typeof form!=='string'||form.length<300)throw Error('Missing current instruction form');
@@ -238,6 +238,8 @@ async function finishEngagementSubmission(first,u,original){
     typeof answered.repairCheckboxForm!=='string')
    throw Error('Worker did not record the immutable review answers and actual repair form');
  const checklist=answered.repairChecklist;
+ if(!autonomous&&checklist.length)
+  throw Error('Material review repairs found: do not acknowledge completeness or submit uncorrected baseline');
  let revised=structuredClone(original),manifest=null;
  let changes=[],reported=[];
  if(checklist.length){
@@ -307,11 +309,11 @@ if(!submit){
 }else{
  const first=await worker('/api/step/process',{action:'submit',unitId:u.unitId,lease:u.lease,shard:output});
  const state=await finishEngagementSubmission(first,u,output);
- if(!['UNIT_ACCEPTED_LOCALLY','ACTIVE','SUBMITTED','UNIT_SUBMISSION_QUEUED','CONTROLLER_VALIDATION_QUEUED',
+ if(autonomous&&!['UNIT_ACCEPTED_LOCALLY','ACTIVE','SUBMITTED','UNIT_SUBMISSION_QUEUED','CONTROLLER_VALIDATION_QUEUED',
       'STEP_VALIDATION_PENDING','FILING_PHASE','WAITING_PHASE_SEAL'].includes(state.status||''))
   throw Error('Final assigned work has not been accepted by the Worker: '+String(state.status||'UNKNOWN'));
  console.log(JSON.stringify({status:state.status,unitId:u.unitId,campaignId,phase:expectedPhase,
-  step:expectedStep,controllerAccepted:false,continuation:'CONTROLLER_ELIGIBILITY_REQUIRED'}));
+  step:expectedStep,controllerAccepted:false,...(autonomous?{continuation:'CONTROLLER_ELIGIBILITY_REQUIRED'}:{})}));
  if(autonomous){
   // Dispatch a bounded successor only where the unchanged Worker still has
   // controller-eligible work. Never infer a PASS from a successful GitHub run.
