@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v4)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v5)
 
-**Revision:** v4  
+**Revision:** v5 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -19,11 +19,15 @@
 
 **Do not run `autonomous` manually for a v5 campaign:** GitHub OIDC and the Worker reject a v5 identity in that mode. Existing v5 `campaign` mode retains its previous step-level human gate.
 
-## AI v6 gates removed
+## AI-v6 approval waits removed; educational review preserved
 
-The AI-v6 `SKILL.md` and all numbered-step `START_HERE.md` guides were cloned from the full v5 authority and updated to remove human step-end stop/continue instructions while preserving substantive analysis. No human instruction-verification questions, first-round review question form or per-packet repair-checkbox gates are imposed on an AI-v6 session.
+The AI-v6 `SKILL.md` and numbered-step `START_HERE.md` guides are separately bound to autonomous AI-only campaigns. Human stop/continue authorization is removed for that mode only. Legacy v5 operator approvals remain intact.
 
-The AI **still** self-reviews for maximum source-grounded depth, records full substantive results in existing campaign artifacts, and resolves actual controller-required rework.
+Worker v10.63 enables the established three-part engagement for GitHub OIDC AI sessions. For each eligible numbered step, the AI reads the complete source-bound instructions and answers the three exact instruction-verification questions before claiming work. Its initial work submission is retained as immutable first-round evidence, **not** controller acceptance. The Worker issues five original review questions, collects source-grounded answers and every material repair obligation, returns the canonical checkbox form, and requires each repair to be assessed with evidence-supported disposition before final revised work is submitted through the unchanged controller mechanism.
+
+Revised JSON must preserve controller-assigned identities and include an edit/repair-coverage manifest when bytes change. Controller receipts remain the only source of accepted/sealed status. The MiMo 8K context and 100-minute job budget can prevent completion of large steps; an unfinished review or model output is never a PASS.
+
+The actual inference/review loop uses the existing `scripts/lite-solo-ai/campaign-v1.mjs` adapter and `.github/workflows/lite-solo-ai-inference-v1.yml` workflow; no duplicate GitHub process is required.
 
 ## Safety and authoritative boundaries preserved
 
