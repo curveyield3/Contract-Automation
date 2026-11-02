@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v13)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v14)
 
-**Revision:** v13 (canonical v4 file path retained for existing references)  
+**Revision:** v14 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -87,6 +87,16 @@ This update resumes the already admitted `cyvbusdcv28-r3` at Phase 1 Step 1 with
 ## Phase-1 campaign path correction (v13)
 
 The existing admitted campaign `cyvbusdcv28-r3` uses the immutable controller workspace path `campaigns/cyvbUSDCv28/cyvbUSDCv28 r3`. Adapter v8 incorrectly rejected its whitespace before sparse checkout, despite the Campaign Directory and sealed Phase-0 receipt agreeing on source SHA-256, authority digest, generation and active phase. Canonical adapter v9 permits spaces inside a bounded `campaigns/` path while retaining explicit traversal rejection and receipt-bound identity checks. No controller path or accepted receipt is modified.
+
+## Controller-batch-aware CPU budgeting (v14)
+
+Canonical MiMo campaign adapter v10 performs **multiple controller-issued work units in one GitHub run**. Each unit still requires all original first-round submission, five-question review, actual repairs, repair acknowledgments and final controller validation as applicable. A successful CPU inference is only one internal request and is not a batch completion.
+
+After the entire Worker submission interaction for a unit finishes, MiMo checks the active controller stage. If another unit in the same step is claimable and at least 180 minutes remain before the job's 345-minute handoff target, it works on the next unit inside the same loaded runner. When insufficient time remains for the next complete review/repair/submission, it dispatches the same existing inference workflow at the controller's checkpoint boundary. On a controller-authorized step change, it can dispatch the next eligible step under the same immutable campaign source, generation and authority. The per-request local model timeout remains 30 minutes; no 30-minute cap applies to the whole step or batch. A finite 4096-successor cap protects against runaway recursion and is not a target batch count.
+
+The source analyses and instruction digests remain private, source-bound R2 checkpoints. Accepted controller work is not overwritten, and no work is represented as accepted solely because GitHub dispatched another runner. A detected reasoning-only MiMo response may be regenerated once with more output capacity; it is never accepted as completed work.
+
+**Verification limit:** This change is committed but has not demonstrated successful complete multi-unit processing or a 5h45 rollover in a live audit. Unexpected failures still require diagnosis and repair through the existing controller recovery procedure rather than blind retries.
 
 ## Current free-beta limitations
 
