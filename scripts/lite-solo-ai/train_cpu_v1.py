@@ -63,7 +63,7 @@ def main():
     from safetensors import safe_open
     from transformers import AutoTokenizer, Qwen3_5TextConfig
     from transformers.models.qwen3_5.modeling_qwen3_5 import (
-        Qwen3_5DecoderLayer, Qwen3_5RotaryEmbedding, Qwen3_5RMSNorm
+        Qwen3_5DecoderLayer, Qwen3_5TextRotaryEmbedding, Qwen3_5RMSNorm
     )
 
     torch.set_num_threads(4)
@@ -103,7 +103,7 @@ def main():
             super().__init__()
             self.embed_tokens = nn.Embedding(c.vocab_size, c.hidden_size) if a.rank == 0 else None
             self.layers = nn.ModuleDict({str(i): Qwen3_5DecoderLayer(c, i) for i in range(first, last)})
-            self.rotary = Qwen3_5RotaryEmbedding(c)
+            self.rotary = Qwen3_5TextRotaryEmbedding(c)
             self.norm = Qwen3_5RMSNorm(c.hidden_size, eps=c.rms_norm_eps) if a.rank == 7 else None
             self.lm_head = nn.Linear(c.hidden_size, c.vocab_size, bias=False) if a.rank == 7 else None
 
@@ -118,8 +118,8 @@ def main():
             causal = torch.full((seq, seq), torch.finfo(x.dtype).min, dtype=x.dtype).triu_(diagonal=1)
             causal = causal.unsqueeze(0).unsqueeze(0)
             for layer in self.layers.values():
-                mask = causal if layer.block_type == "full_attention" else None
-                x = layer(x, position_embeddings=rope, attention_mask=mask, position_ids=pos3, use_cache=False)
+                mask = causal if layer.layer_type == "full_attention" else None
+                x = layer(x, position_embeddings=rope, attention_mask=mask, position_ids=pos, use_cache=False)
             if self.norm is not None:
                 x = self.norm(x)
                 x = self.lm_head(x)
