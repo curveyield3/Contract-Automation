@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v12. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v13. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import http from 'node:http';
@@ -65,7 +65,7 @@ function checkStep(x){
 async function infer(messages,outputTokens=1800){
  let dialogue=messages;
  for(let attempt=0;attempt<2;attempt++){
-  const tokens=attempt?Math.min(5000,Math.max(3200,outputTokens*2)):Math.max(outputTokens,2200);
+  const tokens=attempt?Math.min(6144,Math.max(5120,outputTokens*2)):Math.max(outputTokens,4096);
   // Unlike fetch/Undici, Node's HTTP client does not impose a second
   // five-minute header deadline before llama.cpp finishes CPU inference.
   const inferenceStartedAt=Date.now();
