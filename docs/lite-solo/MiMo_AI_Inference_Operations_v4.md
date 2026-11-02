@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v14)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v15)
 
-**Revision:** v14 (canonical v4 file path retained for existing references)  
+**Revision:** v15 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -97,6 +97,12 @@ After the entire Worker submission interaction for a unit finishes, MiMo checks 
 The source analyses and instruction digests remain private, source-bound R2 checkpoints. Accepted controller work is not overwritten, and no work is represented as accepted solely because GitHub dispatched another runner. A detected reasoning-only MiMo response may be regenerated once with more output capacity; it is never accepted as completed work.
 
 **Verification limit:** This change is committed but has not demonstrated successful complete multi-unit processing or a 5h45 rollover in a live audit. Unexpected failures still require diagnosis and repair through the existing controller recovery procedure rather than blind retries.
+
+## Batch-aware continuation release (v15)
+
+Version v10 of the canonical MiMo adapter is now the active implementation for newly launched jobs. The original controller's own unit submission is the checkpoint boundary. The runner may work through multiple units from a large (300–900-unit) audit step, with controller review and remediation retained for each. The 30-minute inference deadline still applies only to a single model call, never to a batch or whole step. The runner reserves 180 minutes before beginning another full unit and dispatches the existing workflow for the next controller-eligible step or same-step batch as needed. An empty final response is not accepted and may be regenerated once with a larger bounded output budget.
+
+The full campaign has not yet demonstrated a complete multi-run handoff, and a failed external workflow requires an evidence-based diagnosis rather than an unconditional retry. The authority, frozen source, and accepted controller records remain unchanged.
 
 ## Current free-beta limitations
 
