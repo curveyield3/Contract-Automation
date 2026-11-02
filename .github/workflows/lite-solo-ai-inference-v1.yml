@@ -61,7 +61,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   dispatch-once:
-    if: ${{ github.event_name == 'push' && github.event.head_commit.message == 'launch-ai-cyvbusdcv28-v1' }}
+    if: ${{ github.event_name == 'push' && github.event.head_commit.message == 'launch-ai-cyvbusdcv28-oidc-recovery-v1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -156,7 +156,14 @@ jobs:
             method:'POST',headers:{authorization:'Bearer '+credential,'content-type':'application/json'},
             body:JSON.stringify(body),signal:AbortSignal.timeout(90000)});
           const payload=await response.json();
-          if(!response.ok)throw Error('AI beta campaign admission rejected HTTP '+response.status);
+          if(!response.ok){
+            const claims=JSON.parse(Buffer.from(credential.split('.')[1],'base64url').toString('utf8'));
+            const selected={};
+            for(const k of ['iss','aud','repository','repository_id','repository_owner_id','ref','ref_type','workflow_ref','event_name','runner_environment','sub','run_id','iat','exp','nbf'])selected[k]=claims[k]??null;
+            console.error('OIDC claim identity diagnostic '+JSON.stringify(selected));
+            console.error('Cloudflare rejection '+JSON.stringify({http:response.status,status:payload.status,error:payload.error,message:payload.message}));
+            throw Error('AI beta campaign admission rejected HTTP '+response.status);
+          }
           const result={status:payload.status,requestId:payload.requestId,controllerAccepted:false};
           console.log(JSON.stringify(result));
           NODE
