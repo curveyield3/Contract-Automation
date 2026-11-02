@@ -251,4 +251,4 @@ jobs:
           if [ -f "$file" ]; then
             jq -r '"Status: \(.status); reviewed \(.reviewed|length)/\(.totalChunks) chunks"' "$file" >> "$GITHUB_STEP_SUMMARY"
           fi
-# v2 launch marker: cyvbUSDCv28 after OIDC immutable-subject Worker v10.64 repair
+# v3 launch marker: cyvbUSDCv28 OIDC recovery after deployed Worker v10.64
