@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v18)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v19)
 
-**Revision:** v18 (canonical v4 file path retained for existing references)  
+**Revision:** v19 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -125,6 +125,14 @@ The **current frozen Phase 1 Step 1 authority** explicitly requires semantic int
 The model's first output ceiling is now **4,096 tokens** and the bounded changed-prompt retry can use **6,144 tokens**. The existing pinned llama.cpp server uses a **12,288-token context** instead of 8,192. These are output/context allowances, not assurances of reasoning quality or speed. Each individual CPU inference retains the 120-minute deadline, and completed units still require the original five-question review, real remediation, and controller validation. Accepted work is never inferred from inference progress or GitHub success.
 
 **Outstanding verification:** No live proof yet that the new Phase-0 evidence path is accepted by the Worker, nor that full Phase 1 completion or the six-hour handoff succeeds. Do not report those milestones until actual controller receipts exist.
+
+## Successful Phase 1 evidence-mode launch target (v19)
+
+Canonical adapter v13 supersedes the speculative full-package 108-source-chunk pre-analysis for Phase 1 Step 1 only. It uses the accepted Phase-0 Source Intelligence core and Audit Surface, checks the accepted hash and generation against the sealed Phase-0 source and Worker authority, and selects genuine Phase-0 records for each controller-issued Phase-1 semantic work unit. The instruction authority explicitly prohibits redundant mechanical discovery in this step. Omitted records are recorded as unverified rather than declared safe; later phases retain their original required source analysis. Existing R2 checkpoints are preserved.
+
+The CPU request output budget is 4,096 tokens on attempt 1 and up to 6,144 on its bounded changed-prompt retry; llama.cpp context is 12,288 tokens. The two-hour per-request timer and controller unit review/repair/validation gates are unchanged.
+
+This document update is the one permitted file-triggered replacement of the earlier pinned source-scan runner. The old runner can be cancelled; no accepted controller work, immutable evidence or campaign generation may be reset. **Success must be confirmed in the live run and Worker; neither dispatch nor model analysis constitutes acceptance.**
 
 ## Current free-beta limitations
 
