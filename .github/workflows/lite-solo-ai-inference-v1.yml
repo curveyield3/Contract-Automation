@@ -1,0 +1,104 @@
+name: Lite-Solo AI Public Source Inference v1
+on:
+  workflow_dispatch:
+    inputs:
+      source_path:
+        description: Checked-in PUBLIC Solidity or Vyper file or directory
+        required: true
+        type: string
+      max_chunks:
+        description: Source chunks to analyze, 1-32
+        required: false
+        default: '12'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: lite-solo-ai-public-${{ github.repository }}-${{ inputs.source_path }}
+  cancel-in-progress: false
+jobs:
+  infer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      AUDIT_AI_SOURCE_PATH: ${{ inputs.source_path }}
+      AUDIT_AI_MAX_CHUNKS: ${{ inputs.max_chunks }}
+      MODEL_FILE: MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf
+      MODEL_REVISION: 4371da10c84fb26da3592d4cf312d24aa82b7b65
+      MODEL_SHA256: 4bca6f18c73f72270c7a20c2ea2bea581de8246e318714277120369d34048c81
+      LLAMA_SHA: 8642541b255bfb5dc39cd351a178be09013a55d6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Check resource budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$AUDIT_AI_MAX_CHUNKS" =~ ^[0-9]+$ ]]
+          test "$AUDIT_AI_MAX_CHUNKS" -ge 1
+          test "$AUDIT_AI_MAX_CHUNKS" -le 32
+          test -n "$AUDIT_AI_SOURCE_PATH"
+          df -h "$RUNNER_TEMP"
+          free -h
+      - name: Build pinned CPU llama.cpp
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$RUNNER_TEMP/llama.cpp"
+          git -C "$RUNNER_TEMP/llama.cpp" fetch --quiet --depth=1 origin "$LLAMA_SHA"
+          git -C "$RUNNER_TEMP/llama.cpp" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/llama.cpp" rev-parse HEAD)" = "$LLAMA_SHA"
+          cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF
+          cmake --build "$RUNNER_TEMP/llama-build" --target llama-server -j 4
+      - name: Fetch and verify pinned MiMo weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/models"
+          curl -fL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/models/$MODEL_FILE" \
+            "https://huggingface.co/bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF/resolve/$MODEL_REVISION/$MODEL_FILE"
+          printf '%s  %s\n' "$MODEL_SHA256" "$RUNNER_TEMP/models/$MODEL_FILE" | sha256sum --check
+          df -h "$RUNNER_TEMP"
+      - name: Run read-only model inference
+        shell: bash
+        env:
+          AUDIT_AI_OUTPUT: ${{ runner.temp }}/lite-solo-ai/analysis.json
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$AUDIT_AI_OUTPUT")"
+          "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/models/$MODEL_FILE" \
+            --alias lite-solo-mimo-v1 --host 127.0.0.1 --port 8080 \
+            --ctx-size 4096 --threads 4 --parallel 1 --n-gpu-layers 0 \
+            > "$RUNNER_TEMP/mimo-server.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          ready=false
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:8080/health | jq -e '.status == "ok"' >/dev/null 2>&1; then ready=true; break; fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              tail -n 30 "$RUNNER_TEMP/mimo-server.log"; exit 1
+            fi
+            sleep 2
+          done
+          test "$ready" = true || { echo "Model load timeout"; exit 1; }
+          node scripts/lite-solo-ai/review-v1.mjs
+      - name: Retain public-source draft artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite-solo-ai-draft-${{ github.run_id }}
+          path: ${{ runner.temp }}/lite-solo-ai/analysis.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Summarize draft-only disposition
+        if: always()
+        shell: bash
+        run: |
+          file="$RUNNER_TEMP/lite-solo-ai/analysis.json"
+          echo 'Read-only AI draft; NOT a controller submission or completed audit.' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$file" ]; then
+            jq -r '"Status: \(.status); reviewed \(.reviewed|length)/\(.totalChunks) chunks"' "$file" >> "$GITHUB_STEP_SUMMARY"
+          fi
