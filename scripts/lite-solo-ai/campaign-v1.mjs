@@ -187,7 +187,7 @@ if(Array.isArray(fixed.entries)){
 // preserve exact controller schema, leases, evidence checks and actual disposition.
 if(autonomous){
  const state=await worker('/api/step/process',{action:'submit',unitId:u.unitId,lease:u.lease,shard:output});
- if(!['UNIT_ACCEPTED_LOCALLY','ACTIVE','SUBMITTED','UNIT_SUBMISSION_QUEUED','STEP_VALIDATION_PENDING','FILING_PHASE','WAITING_PHASE_SEAL'].includes(state.status||'')){
+ if(!['UNIT_ACCEPTED_LOCALLY','ACTIVE','SUBMITTED','UNIT_SUBMISSION_QUEUED','CONTROLLER_VALIDATION_QUEUED','STEP_VALIDATION_PENDING','FILING_PHASE','WAITING_PHASE_SEAL'].includes(state.status||'')){
    throw Error('Autonomous submission not accepted by existing Worker; status '+String(state.status||'UNKNOWN').slice(0,80));
  }
  console.log(JSON.stringify({status:state.status,unitId:u.unitId,campaignId,phase:expectedPhase,
