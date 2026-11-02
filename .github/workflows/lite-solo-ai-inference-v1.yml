@@ -128,7 +128,7 @@ jobs:
           mkdir -p "$(dirname "$AUDIT_AI_OUTPUT")"
           "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/models/$MODEL_FILE" \
             --alias lite-solo-mimo-v1 --host 127.0.0.1 --port 8080 \
-            --ctx-size 4096 --threads 4 --parallel 1 --n-gpu-layers 0 \
+            --ctx-size 8192 --threads 4 --parallel 1 --n-gpu-layers 0 \
             > "$RUNNER_TEMP/mimo-server.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
