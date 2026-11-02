@@ -132,7 +132,7 @@ def main():
     params = dict(stage.named_parameters())
     weights = {}
     for original, filename in index.items():
-        match = re.search(r"\.layers\.(\d+)\.(.+)$", original)
+        match = re.fullmatch(r"(?:model\.language_model|model)\.layers\.(\d+)\.(.+)", original)
         if match:
             layer = int(match.group(1))
             if first <= layer < last:
@@ -141,7 +141,7 @@ def main():
             weights[original] = (filename, "embed_tokens.weight")
         elif a.rank == 7 and original in ("model.language_model.norm.weight", "model.norm.weight"):
             weights[original] = (filename, "norm.weight")
-        elif a.rank == 7 and original == "lm_head.weight":
+        elif a.rank == 7 and original in ("lm_head.weight", "model.language_model.lm_head.weight"):
             weights[original] = (filename, "lm_head.weight")
     required = set(params)
     assigned = {local for _, local in weights.values()}
