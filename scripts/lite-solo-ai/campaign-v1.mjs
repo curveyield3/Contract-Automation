@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo v1 campaign adapter. Existing Worker owns leases, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v2. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,6 +12,10 @@ const expectedPhase=Number(process.env.AUDIT_AI_EXPECTED_PHASE);
 const expectedStep=Number(process.env.AUDIT_AI_EXPECTED_STEP);
 const maxChunks=Number(process.env.AUDIT_AI_MAX_CHUNKS||12);
 const autonomous=process.env.AUDIT_AI_MODE==='autonomous';
+const startedAtMs=Number(process.env.AUDIT_AI_STARTED_AT_MS||Date.now());
+const rolloverAtMs=startedAtMs+345*60*1000; // 5h45 from GitHub job startup, not from model load.
+if(autonomous&&(!Number.isSafeInteger(startedAtMs)||startedAtMs>Date.now()+30000))
+ throw Error('Missing trustworthy autonomous runner startup timestamp');
 const submit=autonomous||process.env.AUDIT_AI_SUBMISSION_MODE==='submit';
 const authorized=process.env.AUDIT_AI_STEP_AUTHORIZED==='true';
 const tmp=fs.realpathSync(process.env.RUNNER_TEMP||'/tmp');
@@ -97,6 +101,39 @@ async function readBoundInstructions(raw){
  return digest;
 }
 
+// Clean handoff uses the existing controller-owned campaign state and the
+// existing workflow-dispatch path. Never invent a PASS or leave a future claim.
+async function handoffAtSafeBoundary(reason){
+ if(!autonomous)throw Error('Automatic rollover is AI-v6 only');
+ const latest=await worker('/api/step/current',{});
+ if(latest.status!=='ACTIVE'||latest.phase!==expectedPhase||
+    Number(latest.currentStep??latest.step)!==expectedStep){
+  console.log(JSON.stringify({status:'CONTROLLER_STEP_CHANGED_NO_DUPLICATE_HANDOFF',
+   campaignId,phase:expectedPhase,step:expectedStep,reason,controllerAccepted:false}));
+  return;
+ }
+ checkStep(latest);
+ if(latest.engagement?.stage!=='WORK'||!latest.availableProcessActions?.includes('claim'))
+  throw Error('Cannot schedule continuation without controller-eligible unleased work');
+ const hop=Number(process.env.AUDIT_AI_HOP||0);
+ if(!Number.isSafeInteger(hop)||hop<0||hop>=120)throw Error('Finite AI-v6 continuation cap reached');
+ const token=process.env.GITHUB_ACTIONS_DISPATCH_TOKEN;
+ if(!token)throw Error('GitHub continuation permission unavailable');
+ execFileSync('gh',['workflow','run','lite-solo-ai-inference-v1.yml','--repo',
+  'curveyield3/Contract-Automation','--ref','main','-f','mode=autonomous',
+  '-f','campaign_id='+campaignId,'-f','expected_phase='+expectedPhase,
+  '-f','expected_step='+expectedStep,'-f','submission_mode=submit',
+  '-f','max_chunks='+maxChunks,'-f','ai_hop='+(hop+1)],{
+   env:{...process.env,GH_TOKEN:token},stdio:['ignore','pipe','pipe'],
+   timeout:60000,maxBuffer:1024*1024});
+ console.log(JSON.stringify({status:'SUCCESSOR_DISPATCH_SUBMITTED',campaignId,
+  phase:expectedPhase,step:expectedStep,hop:hop+1,reason,controllerAccepted:false}));
+}
+function nearRollover(reserveMs){
+ return autonomous&&Date.now()+reserveMs>=rolloverAtMs;
+}
+
+async function run(){
 let current=await worker('/api/step/current',{});
 checkStep(current);
 // Honor the existing Worker instruction-verification protocol for both modes.
@@ -173,12 +210,47 @@ for(const f of sourceFiles){
  }
 }
 if(chunks.length>maxChunks)throw Error('Full source coverage exceeds max_chunks: no claim made; increase budget or use a more capable runner');
+const checkpointIdentity={schemaVersion:'lite-solo-ai-checkpoint-v1',
+ campaignId,generationId:current.generationId,phase:expectedPhase,step:expectedStep,
+ sourceSha256:current.sourceSha256,authorityDigest:current.authorityDigest,maxChunks};
+const saved=autonomous?await worker('/api/ai/checkpoint',{action:'read'}):null;
 const summaries=[];
-for(const chunk of chunks){
+if(saved?.status==='AI_CHECKPOINT_FOUND'){
+ const cp=saved.checkpoint;
+ if(!cp||Object.entries(checkpointIdentity).some(([key,value])=>
+    key!=='maxChunks'&&cp[key]!==value)||!Array.isArray(cp.summaries)||
+    cp.summaries.length>chunks.length)throw Error('Checkpoint is not bound to exact controller source/step');
+ for(let i=0;i<cp.summaries.length;i++){
+  const found=cp.summaries[i],source=chunks[i];
+  if(found.path!==source.file||found.sha256!==source.sha256||
+     found.startLine!==source.startLine||found.endLine!==source.endLine)
+   throw Error('Checkpoint source chunk differs from current immutable source snapshot');
+  summaries.push(found);
+ }
+ console.log(JSON.stringify({status:'AI_CHECKPOINT_RESTORED',campaignId,
+  phase:expectedPhase,step:expectedStep,reviewed:summaries.length,total:chunks.length}));
+}else if(saved&&saved.status!=='AI_CHECKPOINT_EMPTY')
+ throw Error('Worker failed to return a valid source-bound AI checkpoint');
+for(let i=summaries.length;i<chunks.length;i++){
+ if(nearRollover(5*60*1000)){
+  await handoffAtSafeBoundary('5h45_deadline_source_checkpoint');
+  return;
+ }
+ const chunk=chunks[i];
  const sourcePrompt='Inspect exact source and trace function state transitions, privileges, external calls, invariants and vulnerabilities. Output JSON with keys reasoning, plausibleFindings, verifiedSourceAnchors, uncertainties. No simulated proof. File '+chunk.file+' SHA '+chunk.sha256+' lines '+chunk.startLine+'-'+chunk.endLine+'\n'+chunk.text;
  if(sourcePrompt.length>18000)throw Error('Required raw source chunk exceeds model input context; no lease');
  const analysis=await infer([{role:'system',content:system},{role:'user',content:sourcePrompt}],1450);
- summaries.push({path:chunk.file,startLine:chunk.startLine,endLine:chunk.endLine,analysis});
+ summaries.push({path:chunk.file,sha256:chunk.sha256,startLine:chunk.startLine,endLine:chunk.endLine,analysis});
+ if(autonomous){
+  const persisted=await worker('/api/ai/checkpoint',{
+   action:'save',checkpoint:{...checkpointIdentity,summaries}});
+  if(persisted.status!=='AI_CHECKPOINT_SAVED'||persisted.reviewed!==summaries.length)
+   throw Error('AI checkpoint did not persist; no unit claim attempted');
+ }
+}
+if(nearRollover(25*60*1000)){
+ await handoffAtSafeBoundary('5h45_deadline_before_controller_lease');
+ return;
 }
 // Claim through the SAME Worker that owns all leases. Do not create independent assignments.
 const claim=await worker('/api/step/process',{action:'claim'});
@@ -345,3 +417,6 @@ if(!submit){
   }
  }
 }
+
+} // End of one source/authority-bound run; no local timer may seal controller work.
+await run();
