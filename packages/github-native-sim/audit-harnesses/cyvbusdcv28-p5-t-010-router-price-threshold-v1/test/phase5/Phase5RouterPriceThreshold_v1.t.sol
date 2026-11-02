@@ -26,7 +26,7 @@ contract Phase5RouterPriceThresholdV1 is Test {
     bytes32 constant ROUTER_HASH=0xf0034d07ee5a12b9ee09736b473875342b0d38b7a96aec9b85b23d71b3b98cf4;
     uint256 constant PIN_BLOCK=46766226;
     uint256 constant KEEPER_AMOUNT=1e18;
-    IRouterP5Price constant router=IRouterP5Price(ROUTER);
+    IRouterP5Price router=IRouterP5Price(ROUTER);
     function setUp() public {
         vm.createSelectFork(vm.envString("RPC_KATANA"),PIN_BLOCK);
         assertEq(block.chainid,747474,"wrong chain");
