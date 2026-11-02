@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v12)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v13)
 
-**Revision:** v12 (canonical v4 file path retained for existing references)  
+**Revision:** v13 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -83,6 +83,10 @@ The existing workflow now also carries a separately authorized `train` job. Its 
 The canonical MiMo campaign adapter v8 uses Node's built-in `node:http` client only for local `llama.cpp` inference requests, retaining `AbortSignal.timeout(1800000)` for a hard 30-minute end-to-end request bound. This replaces the Node global `fetch` implementation, whose unrelated Undici response-header timeout could terminate valid long CPU inference at approximately five minutes. The existing Cloudflare Worker, GitHub OIDC, source-bound R2 checkpoints, authority/question/repair gates, and original controller receipts remain unchanged.
 
 This update resumes the already admitted `cyvbusdcv28-r3` at Phase 1 Step 1 with no change to the campaign generation or accepted audit evidence. The separate model-training push workflow is not involved in the audit restart.
+
+## Phase-1 campaign path correction (v13)
+
+The existing admitted campaign `cyvbusdcv28-r3` uses the immutable controller workspace path `campaigns/cyvbUSDCv28/cyvbUSDCv28 r3`. Adapter v8 incorrectly rejected its whitespace before sparse checkout, despite the Campaign Directory and sealed Phase-0 receipt agreeing on source SHA-256, authority digest, generation and active phase. Canonical adapter v9 permits spaces inside a bounded `campaigns/` path while retaining explicit traversal rejection and receipt-bound identity checks. No controller path or accepted receipt is modified.
 
 ## Current free-beta limitations
 
