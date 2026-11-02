@@ -61,7 +61,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   dispatch-once:
-    if: ${{ github.event_name == 'push' && github.event.head_commit.message == 'chore(audit-ai): launch cyvbUSDCv28 v1 via file edit' }}
+    if: ${{ github.event_name == 'push' && github.event.head_commit.message == 'launch-ai-cyvbusdcv28-v1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
