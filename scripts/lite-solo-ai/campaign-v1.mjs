@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v14. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v15. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import http from 'node:http';
@@ -43,12 +43,14 @@ async function freshJobIdentity(){
  return value;
 }
 const endpoint='https://lite-solo-api.jamesnexus9999.workers.dev';
-async function worker(route,body){
+async function worker(route,body,{allowMissingFirstRound=false}={}){
  const res=await fetch(endpoint+route,{
   method:'POST',headers:{authorization:'Bearer '+(await freshJobIdentity()),'content-type':'application/json'},
   body:JSON.stringify({campaignId,...body}),signal:AbortSignal.timeout(150000)});
  let data;try{data=await res.json();}catch{throw Error('Worker returned invalid JSON');}
  if(!res.ok){
+  if(allowMissingFirstRound&&route==='/api/step/interaction'&&body.action==='review'&&
+     res.status===409&&data?.error==='first-round submission missing for claimed unit')return null;
   const kind=String(data?.status||data?.code||'WORKER_REJECTED').slice(0,70).replace(/[^A-Z0-9_-]/gi,'_');
   throw Error('Worker '+route+' rejected HTTP '+res.status+' ('+kind+')');
  }
@@ -536,7 +538,23 @@ if(prompt.length>18000){
  await worker('/api/step/process',{action:'release',unitId:u.unitId,lease:u.lease});
  throw Error('Exact required context exceeds bounded model input; claim released');
 }
-const output=await infer([{role:'system',content:system},{role:'user',content:prompt}],1800);
+// Restore exact immutable first-round JSON, if another runner already recorded it.
+const previous=await worker('/api/step/interaction',
+ {action:'review',unitId:u.unitId,lease:u.lease},{allowMissingFirstRound:true});
+if(previous&&!['REVIEW_QUESTIONS_ISSUED','REPAIR_CHECKLIST_READY','REPAIR_ACKNOWLEDGED'].includes(previous.status))
+ throw Error('Unexpected immutable review recovery stage: '+String(previous.status));
+if(previous){
+ const recovered=previous.firstRoundWork;
+ if(!recovered||typeof recovered!=='object'||Array.isArray(recovered)||
+    !/^[a-f0-9]{64}$/.test(previous.baseline?.sha256||'')||
+    sha(JSON.stringify(recovered,null,2)+'\n')!==previous.baseline.sha256)
+  throw Error('Recovered first-round JSON does not match immutable R2 SHA256');
+ console.log(JSON.stringify({status:'MIMO_IMMUTABLE_FIRST_ROUND_RESTORED',
+  campaignId,unitId:u.unitId,reviewStage:previous.status,
+  baselineSha256:previous.baseline.sha256,controllerAccepted:false}));
+}
+const output=previous?previous.firstRoundWork:
+ await infer([{role:'system',content:system},{role:'user',content:prompt}],1800);
 if(!output||typeof output!=='object'||Array.isArray(output))throw Error('No complete unit JSON');
 const fixed=u.inputFileTemplate;
 if(fixed.schemaVersion!==output.schemaVersion)throw Error('Model changed bound schema version');
@@ -549,11 +567,11 @@ if(Array.isArray(fixed.entries)){
  // Existing v5 manual mode may remain draft-only; autonomous AI-v6 always submits
  // through the same engagement protocol and actual controller-owned validation.
 async function finishEngagementSubmission(first,u,original){
- if(first.status!=='FIRST_ROUND_RECORDED_REVIEW_REQUIRED'){
-  if(['REVIEW_QUESTIONS_REQUIRED','REPAIR_CHECKBOX_REQUIRED'].includes(first.status))
-   throw Error('An immutable review already exists; resume the existing issued questions and do not overwrite them');
-  return first;
- }
+ const issued=['FIRST_ROUND_RECORDED_REVIEW_REQUIRED','REVIEW_QUESTIONS_ISSUED'].includes(first.status);
+ const answeredBefore=['REPAIR_CHECKLIST_READY','REPAIR_ACKNOWLEDGED'].includes(first.status);
+ if(!issued&&!answeredBefore)return first;
+ let answered;
+ if(issued){
  const questions=first.questions;
  if(!Array.isArray(questions)||questions.length!==5||
     typeof first.reviewQuestionsForm!=='string')throw Error('Missing exact five issued questions/review form');
@@ -565,9 +583,14 @@ async function finishEngagementSubmission(first,u,original){
  if(!review?.answers||['Q1','Q2','Q3','Q4','Q5'].some(k=>typeof review.answers[k]!=='string'||
    review.answers[k].trim().length<80)||!Array.isArray(review.repairChecklist))
    throw Error('MiMo did not substantively answer the exact five review questions');
- const answered=await worker('/api/step/interaction',{action:'review_answers',unitId:u.unitId,lease:u.lease,
+ answered=await worker('/api/step/interaction',{action:'review_answers',unitId:u.unitId,lease:u.lease,
    answers:review.answers,repairChecklist:review.repairChecklist});
- if(answered.status!=='REPAIR_CHECKLIST_READY'||!Array.isArray(answered.repairChecklist)||
+ }else{
+  // Do not regenerate or overwrite the recorded immutable Q1-Q5 answers.
+  answered=first;
+ }
+ if(!['REPAIR_CHECKLIST_READY','REPAIR_ACKNOWLEDGED'].includes(answered.status)||
+    !Array.isArray(answered.repairChecklist)||
     typeof answered.repairCheckboxForm!=='string')
    throw Error('Worker did not record the immutable review answers and actual repair form');
  const checklist=answered.repairChecklist;
@@ -626,11 +649,13 @@ async function finishEngagementSubmission(first,u,original){
    verificationEvidence:changes.filter(y=>y.repairIds.includes(x.repairId)).map(y=>y.verificationEvidence)
   }))};
  }
- const acknowledge=await worker('/api/step/interaction',{action:'repair_ack',unitId:u.unitId,lease:u.lease,
-   checks:{reviewed:true,itemsAssessed:true,changesAccounted:true,completeSubmission:true},
-   repairOutcomes:reported});
- if(acknowledge.status!=='REPAIR_CHECKBOX_ACKNOWLEDGED')
-  throw Error('Real repair acknowledgement not persisted');
+ if(answered.status!=='REPAIR_ACKNOWLEDGED'){
+  const acknowledge=await worker('/api/step/interaction',{action:'repair_ack',unitId:u.unitId,lease:u.lease,
+    checks:{reviewed:true,itemsAssessed:true,changesAccounted:true,completeSubmission:true},
+    repairOutcomes:reported});
+  if(acknowledge.status!=='REPAIR_CHECKBOX_ACKNOWLEDGED')
+   throw Error('Real repair acknowledgement not persisted');
+ }
  const payload={action:'submit',unitId:u.unitId,lease:u.lease,shard:revised};
  if(manifest)payload.verificationManifest=manifest;
  return worker('/api/step/process',payload);
@@ -641,7 +666,7 @@ if(!submit){
   sourceFiles:sourceFiles.length,sourceChunks:chunks.length,unitsReleased:true}));
  return;
 }else{
- const first=await worker('/api/step/process',{action:'submit',unitId:u.unitId,lease:u.lease,shard:output});
+ const first=previous||await worker('/api/step/process',{action:'submit',unitId:u.unitId,lease:u.lease,shard:output});
  const state=await finishEngagementSubmission(first,u,output);
  if(autonomous&&!['UNIT_ACCEPTED_LOCALLY','ACTIVE','SUBMITTED','UNIT_SUBMISSION_QUEUED','CONTROLLER_VALIDATION_QUEUED',
       'STEP_VALIDATION_PENDING','FILING_PHASE','WAITING_PHASE_SEAL'].includes(state.status||''))
