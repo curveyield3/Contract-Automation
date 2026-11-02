@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v16. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v17. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import http from 'node:http';
@@ -243,11 +243,12 @@ async function readBoundInstructions(raw){
    await handoffAtSafeBoundary('5h45_deadline_instruction_checkpoint');
    return null;
   }
-  const result=await infer([{role:'system',content:system},{role:'user',content:
-   'Read the following exact, unmodified segment of controller-bound audit authority. Extract EVERY mandatory obligation, prohibited shortcut, dependency, input/evidence requirement, and disposition. Return JSON {obligations:[short specific sentences]}; do not claim work performed. Segment '+(i+1)+'/'+chunks.length+'\n'+chunks[i]}],2200);
-  if(!Array.isArray(result.obligations)||!result.obligations.length)
-   throw Error('Model did not read all required authority segment obligations');
-  notes.push('Source-bound instructions segment '+(i+1)+': '+result.obligations.map(x=>String(x)).join(' | '));
+  const result=await inferValidated([{role:'system',content:system},{role:'user',content:
+    'Read the following exact, unmodified segment of controller-bound audit authority. Extract EVERY mandatory obligation, prohibited shortcut, dependency, input/evidence requirement, and disposition. Return JSON {obligations:[short specific sentences]}; do not claim work performed. Segment '+(i+1)+'/'+chunks.length+'\n'+chunks[i]}],2200,'authority_segment',x=>
+     Array.isArray(x?.obligations)&&x.obligations.length>0&&
+     x.obligations.every(v=>typeof v==='string'&&v.trim().length>=10)
+       ?[]:['Must return complete obligations array of source-bound statements']);
+   notes.push('Source-bound instructions segment '+(i+1)+': '+result.obligations.map(x=>String(x)).join(' | '));
   if(autonomous){
    checkpointRecord.instructionProgress={sha256:sha(raw),segments:notes.map((note,j)=>({
     sha256:sha(chunks[j]),note}))};
@@ -325,12 +326,12 @@ if(current.engagement?.stage==='INSTRUCTIONS'){
  const mandatory=await readBoundInstructions(String(current.authoritativeStepInstructions||''));
  if(mandatory===null)return;
  if(mandatory.length+form.length>18000)throw Error('Instruction form and complete source-bound digest exceed model context; no acknowledgment or claim');
- const answers=await infer([{role:'system',content:system},{role:'user',content:
-   'Read these exact current instruction-verification questions and authoritative step obligations. Answer Q1, Q2, Q3 in your own substantive words, each at least 100 characters and 15 words. Do not claim any audit action has been done. Output JSON object keys Q1,Q2,Q3.\n'+
-   mandatory+'\n\n'+form}],1100);
- for(const k of ['Q1','Q2','Q3'])if(typeof answers[k]!=='string'||answers[k].length<100||
-   answers[k].trim().split(/\s+/).length<15)throw Error('Incomplete instruction acknowledgement '+k);
- const ack=await worker('/api/step/interaction',{action:'acknowledge',readAndUnderstand:true,
+ const answers=await inferValidated([{role:'system',content:system},{role:'user',content:
+    'Read these exact current instruction-verification questions and authoritative step obligations. Answer Q1, Q2, Q3 in your own substantive words, each at least 100 characters and 15 words. Do not claim any audit action has been done. Output JSON object keys Q1,Q2,Q3.\n'+
+    mandatory+'\n\n'+form}],1100,'instruction_acknowledgement',x=>
+     ['Q1','Q2','Q3'].filter(k=>typeof x?.[k]!=='string'||x[k].trim().length<100||
+      x[k].trim().split(/\s+/).length<15).map(k=>'Incomplete substantive instruction answer '+k));
+  const ack=await worker('/api/step/interaction',{action:'acknowledge',readAndUnderstand:true,
    formSha256:current.engagement.instructionFormSha256,answers});
  if(ack.status!=='INSTRUCTIONS_ACKNOWLEDGED')throw Error('Instruction acknowledgement not recorded');
  current=await worker('/api/step/current',{});
@@ -461,7 +462,8 @@ for(let i=summaries.length;i<chunks.length;i++){
  const chunk=chunks[i];
  const sourcePrompt='Inspect exact source and trace function state transitions, privileges, external calls, invariants and vulnerabilities. Output JSON with keys reasoning, plausibleFindings, verifiedSourceAnchors, uncertainties. No simulated proof. File '+chunk.file+' SHA '+chunk.sha256+' lines '+chunk.startLine+'-'+chunk.endLine+'\n'+chunk.text;
  if(sourcePrompt.length>18000)throw Error('Required raw source chunk exceeds model input context; no lease');
- const analysis=await infer([{role:'system',content:system},{role:'user',content:sourcePrompt}],1450);
+ const analysis=await inferValidated([{role:'system',content:system},{role:'user',content:sourcePrompt}],1450,
+  'source_analysis',x=>['reasoning','plausibleFindings','verifiedSourceAnchors','uncertainties'].filter(k=>!(k in (x||{}))).map(k=>'Required source analysis field missing: '+k));
  const entry={...checkpointIdentity,index:i,path:chunk.file,sha256:chunk.sha256,
   startLine:chunk.startLine,endLine:chunk.endLine,analysis};
  if(autonomous){
@@ -689,7 +691,18 @@ async function finishEngagementSubmission(first,u,original){
     'Source evidence:\n'+sourceEvidence+'\nImmutable original JSON:\n'+JSON.stringify(original)+
     '\nActual repair checklist:\n'+JSON.stringify(checklist)+'\nComplete repair checkbox form:\n'+answered.repairCheckboxForm;
   if(repairPrompt.length>18000)throw Error('Exact repairs exceed safe context; immutable answers retained and no completion falsely acknowledged');
-  const proposed=await infer([{role:'system',content:system},{role:'user',content:repairPrompt}],2600);
+  const proposed=await inferValidated([{role:'system',content:system},{role:'user',content:repairPrompt}],2600,
+   'repair_edits_and_outcomes',x=>{
+    const issues=[];
+    if(!Array.isArray(x?.edits))issues.push('edits must be an array');
+    if(!Array.isArray(x?.outcomes))issues.push('outcomes must be an array');
+    for(const r of checklist)
+     if(!x?.outcomes?.some(o=>o.repairId===r.repairId&&
+      ['READY_FOR_VALIDATION','BLOCKED','NOT_COMPLETE'].includes(o.status)&&
+      typeof o.notes==='string'&&o.notes.trim().length>=12))
+       issues.push('Required substantive outcome missing for '+r.repairId);
+    return issues;
+   });
   if(!Array.isArray(proposed?.edits)||!Array.isArray(proposed?.outcomes))
    throw Error('Incomplete source-grounded remediation plan; no false repair acknowledgement');
   const repairIds=new Set(checklist.map(x=>x.repairId));
