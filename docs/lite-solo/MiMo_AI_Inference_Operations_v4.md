@@ -1,6 +1,6 @@
-# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v11)
+# Lite-Solo MiMo AI Auditor — Autonomous Beta Operations (v12)
 
-**Revision:** v11 (canonical v4 file path retained for existing references)  
+**Revision:** v12 (canonical v4 file path retained for existing references)  
 **Installed November 2, 2026**  
 **Repository:** curveyield3/Contract-Automation  
 **AI-only frozen authority:** curveyield3/Audit-Controller, `Audit Skill - Lite-Solo Authority/lite-solo-v6/`  
@@ -77,6 +77,12 @@ The controller was still ACTIVE at Phase 1 Step 1 with all 11 units unleased and
 ## Workflow compatibility when shared with MiMo training (v11)
 
 The existing workflow now also carries a separately authorized `train` job. Its presence must not overwrite the autonomous security-audit job condition. The canonical `infer` job runs only on `workflow_dispatch` when `mode != train`; the training and audit paths retain distinct responsibilities and both use their existing job logic. A duplicate YAML `if:` field was identified and repaired without removing the concurrent training work. This release retries only the already-admitted `cyvbusdcv28-r3` audit from Phase 1, Step 1, without creating another campaign.
+
+## Local CPU inference header deadline repair (v12)
+
+The canonical MiMo campaign adapter v8 uses Node's built-in `node:http` client only for local `llama.cpp` inference requests, retaining `AbortSignal.timeout(1800000)` for a hard 30-minute end-to-end request bound. This replaces the Node global `fetch` implementation, whose unrelated Undici response-header timeout could terminate valid long CPU inference at approximately five minutes. The existing Cloudflare Worker, GitHub OIDC, source-bound R2 checkpoints, authority/question/repair gates, and original controller receipts remain unchanged.
+
+This update resumes the already admitted `cyvbusdcv28-r3` at Phase 1 Step 1 with no change to the campaign generation or accepted audit evidence. The separate model-training push workflow is not involved in the audit restart.
 
 ## Current free-beta limitations
 
