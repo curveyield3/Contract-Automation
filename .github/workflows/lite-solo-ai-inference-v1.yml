@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'process/agent-upload/lite-solo-ai-training-request-v1.json'
+      - '.github/workflows/lite-solo-ai-inference-v1.yml'
   workflow_dispatch:
     inputs:
       inference_runners:
@@ -100,6 +101,24 @@ env:
   LLAMA_SHA: 8642541b255bfb5dc39cd351a178be09013a55d6
   GGML_RPC_NO_RDMA: '1'
 jobs:
+  stop-failed-rpc-run:
+    if: github.event_name == 'push' && github.event.head_commit.message == 'stop-impossible-dual-inference-run-41548335959'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Stop run with unusable Tailscale RPC peer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          status="$(gh api repos/curveyield3/Contract-Automation/actions/runs/41548335959 --jq .status)"
+          if [ "$status" = in_progress ] || [ "$status" = queued ]; then
+            gh run cancel 41548335959 --repo curveyield3/Contract-Automation
+            echo '{"status":"CANCEL_REQUESTED","runId":41548335959,"reason":"REMOTE_RPC_OIDC_TAG_REJECTED"}'
+          else
+            echo '{"status":"RUN_ALREADY_TERMINAL","runId":41548335959}'
+          fi
   infer:
     if: github.event_name == 'workflow_dispatch' && inputs.mode != 'train'
     runs-on: ubuntu-latest
@@ -562,7 +581,7 @@ jobs:
           kill "$(cat "$RUNNER_TEMP/mimo-rpc-server.pid")" 2>/dev/null || true
 
   train:
-    if: github.event_name == 'push' || inputs.mode == 'train'
+    if: (github.event_name == 'push' && github.event.head_commit.message != 'stop-impossible-dual-inference-run-41548335959') || inputs.mode == 'train'
     name: MiMo CPU training stage ${{ matrix.rank }} / 7
     runs-on: ubuntu-latest
     timeout-minutes: 100
@@ -735,7 +754,7 @@ jobs:
           echo 'Training does not change controller receipts, v5 approvals or v6 audit authority.' >> "$GITHUB_STEP_SUMMARY"
 
   training-package:
-    if: github.event_name == 'push' || inputs.mode == 'train'
+    if: (github.event_name == 'push' && github.event.head_commit.message != 'stop-impossible-dual-inference-run-41548335959') || inputs.mode == 'train'
     name: Consolidate eight MiMo CPU LoRA stage checkpoints
     needs: train
     runs-on: ubuntu-latest
