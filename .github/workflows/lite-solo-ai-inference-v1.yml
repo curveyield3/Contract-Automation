@@ -4,7 +4,6 @@ on:
     branches: [main]
     paths:
       - 'process/agent-upload/lite-solo-ai-training-request-v1.json'
-      - '.github/workflows/lite-solo-ai-inference-v1.yml'
   workflow_dispatch:
     inputs:
       mode:
@@ -91,28 +90,6 @@ concurrency:
   group: lite-solo-ai-${{ inputs.mode }}-${{ (inputs.mode == 'campaign' || inputs.mode == 'autonomous') && inputs.campaign_id || inputs.mode == 'autonomous_start' && inputs.source_url || inputs.source_path }}
   cancel-in-progress: false
 jobs:
-  dispatch-once:
-    if: github.event_name == 'push' && github.event.head_commit.message == 'telemetry-handoff-cyvbusdcv28-r3-v14'
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - name: Dispatch updated model inference and release previous runner
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref main \
-            -f mode=autonomous -f campaign_id=cyvbusdcv28-r3 \
-            -f expected_phase=1 -f expected_step=1 \
-            -f submission_mode=submit -f max_chunks=32 -f ai_hop=1
-          echo '{"status":"UPDATED_AUTONOMOUS_RUN_DISPATCHED","campaignId":"cyvbusdcv28-r3","expectedPhase":1,"expectedStep":1}'
-          old=41527454998
-          status="$(gh api repos/curveyield3/Contract-Automation/actions/runs/$old --jq .status)"
-          if [ "$status" = in_progress ] || [ "$status" = queued ]; then
-            gh run cancel "$old" --repo curveyield3/Contract-Automation
-            echo '{"status":"PREVIOUS_RUN_CANCEL_REQUESTED","runId":41527454998}'
-          fi
   infer:
     if: github.event_name == 'workflow_dispatch' && inputs.mode != 'train'
     runs-on: ubuntu-latest
@@ -438,7 +415,7 @@ jobs:
           fi
 
   train:
-    if: (github.event_name == 'push' && github.event.head_commit.message != 'telemetry-handoff-cyvbusdcv28-r3-v14') || inputs.mode == 'train'
+    if: github.event_name == 'push' || inputs.mode == 'train'
     name: MiMo CPU training stage ${{ matrix.rank }} / 7
     runs-on: ubuntu-latest
     timeout-minutes: 100
@@ -611,7 +588,7 @@ jobs:
           echo 'Training does not change controller receipts, v5 approvals or v6 audit authority.' >> "$GITHUB_STEP_SUMMARY"
 
   training-package:
-    if: (github.event_name == 'push' && github.event.head_commit.message != 'telemetry-handoff-cyvbusdcv28-r3-v14') || inputs.mode == 'train'
+    if: github.event_name == 'push' || inputs.mode == 'train'
     name: Consolidate eight MiMo CPU LoRA stage checkpoints
     needs: train
     runs-on: ubuntu-latest
