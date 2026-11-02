@@ -1,9 +1,5 @@
 name: Lite-Solo AI Source Inference and Autonomous Beta v2
 on:
-  push:
-    branches: [main]
-    paths:
-      - docs/lite-solo/MiMo_AI_Inference_Operations_v4.md
   workflow_dispatch:
     inputs:
       mode:
@@ -61,27 +57,7 @@ concurrency:
   group: lite-solo-ai-${{ inputs.mode }}-${{ (inputs.mode == 'campaign' || inputs.mode == 'autonomous') && inputs.campaign_id || inputs.mode == 'autonomous_start' && inputs.source_url || inputs.source_path }}
   cancel-in-progress: false
 jobs:
-  dispatch-once:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - name: Resume controller-accepted MiMo campaign cyvbusdcv28-r3
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref main \
-            -f mode=autonomous \
-            -f campaign_id=cyvbusdcv28-r3 \
-            -f expected_phase=1 \
-            -f expected_step=1 \
-            -f submission_mode=submit \
-            -f max_chunks=32 \
-            -f ai_hop=0
   infer:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.mode == 'autonomous' && 355 || 100 }}
     env:
