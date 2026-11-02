@@ -1,5 +1,9 @@
 name: Lite-Solo AI Source Inference and Autonomous Beta v2
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/agent-upload/lite-solo-ai-training-request-v1.json'
   workflow_dispatch:
     inputs:
       mode:
@@ -260,7 +264,7 @@ jobs:
           fi
 
   train:
-    if: inputs.mode == 'train'
+    if: github.event_name == 'push' || inputs.mode == 'train'
     name: MiMo CPU training stage ${{ matrix.rank }} / 7
     runs-on: ubuntu-latest
     timeout-minutes: 100
@@ -286,6 +290,26 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
+      - name: Resolve owner-approved file-trigger request
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='process/agent-upload/lite-solo-ai-training-request-v1.json'
+          test -s "$request"
+          jq -e '.schemaVersion=="mimo-eight-rank-training-request-v1" and .mode=="train"
+            and (.train_dataset_path | type=="string")
+            and (.train_steps | type=="number")
+            and (.train_sequence_length | type=="number")
+            and (.train_minutes | type=="number")' "$request" >/dev/null
+          {
+            echo "DATASET=$(jq -r '.train_dataset_path' "$request")"
+            echo "STEPS=$(jq -r '.train_steps' "$request")"
+            echo "LENGTH=$(jq -r '.train_sequence_length' "$request")"
+            echo "MINUTES=$(jq -r '.train_minutes' "$request")"
+            echo "REVISION=$(jq -r '.train_model_revision // ""' "$request")"
+            echo "RESUME_RUN=$(jq -r '.train_resume_run // ""' "$request")"
+          } >> "$GITHUB_ENV"
       - name: Validate bounded, checked-in public training input
         shell: bash
         run: |
@@ -359,12 +383,16 @@ jobs:
           grep -Eq '^100\.[0-9]+\.[0-9]+\.[0-9]+$' "$RUNNER_TEMP/mimo-rendezvous/master_addr"
           grep -Eq '^[0-9a-f]{40}$' "$RUNNER_TEMP/mimo-rendezvous/model_sha"
       - name: Restore complete previous eight-rank generation
-        if: inputs.train_resume_run != ''
+        if: github.event_name == 'push' || inputs.train_resume_run != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ -z "$RESUME_RUN" ]; then
+            echo 'No previous training checkpoint requested'
+            exit 0
+          fi
           listing="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RESUME_RUN/artifacts?per_page=100")"
           for rank in $(seq 0 7); do
             printf '%s' "$listing" | jq -e --arg n "mimo-cpu-checkpoint-rank-$rank" \
@@ -409,7 +437,7 @@ jobs:
           echo 'Training does not change controller receipts, v5 approvals or v6 audit authority.' >> "$GITHUB_STEP_SUMMARY"
 
   training-package:
-    if: inputs.mode == 'train'
+    if: github.event_name == 'push' || inputs.mode == 'train'
     name: Consolidate eight MiMo CPU LoRA stage checkpoints
     needs: train
     runs-on: ubuntu-latest
