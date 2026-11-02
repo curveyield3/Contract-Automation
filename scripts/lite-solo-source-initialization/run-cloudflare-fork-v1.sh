@@ -117,8 +117,14 @@ else
   git config user.name 'CurveYield Lite-Solo Source Initialization'
   git config user.email 'lite-solo@users.noreply.github.com'
   authority_parent='Audit Skill - Lite-Solo Authority'
-  authority_root="$authority_parent/lite-solo-v5"
-  test -f "$authority_root/MANIFEST.json" || { echo '::error::Registered Lite-Solo v5 authority package is missing' >&2; exit 1; }
+  # AI-only release is selected solely by the authenticated Worker intake; ordinary campaigns remain v5.
+  case "${LITE_SOLO_AI_AUTONOMOUS:-0}" in
+    0) authority_release="lite-solo-v5" ;;
+    1) authority_release="lite-solo-v6" ;;
+    *) echo "::error::INVALID_AI_RELEASE_SELECTOR" >&2; exit 1 ;;
+  esac
+  authority_root="$authority_parent/$authority_release"
+  test -f "$authority_root/MANIFEST.json" || { echo '::error::Selected Lite-Solo authority package is missing' >&2; exit 1; }
   authority_packages=("$authority_root")
   skill_home="$authority_root/SKILL.md"
   skill_repo_path='curveyield3/Audit-Controller/Audit Skill - Lite-Solo Authority'
