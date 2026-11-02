@@ -6,6 +6,12 @@ on:
       - 'process/agent-upload/lite-solo-ai-training-request-v1.json'
   workflow_dispatch:
     inputs:
+      inference_runners:
+        description: One local MiMo CPU, or 2/4 distributed CPU inference hosts via private RPC
+        type: choice
+        required: false
+        default: '1'
+        options: ['1', '2', '4']
       mode:
         description: Public source draft, legacy v5 step, new AI v6 start, or v6 autonomous continuation
         required: true
@@ -89,6 +95,10 @@ permissions:
 concurrency:
   group: lite-solo-ai-${{ inputs.mode }}-${{ (inputs.mode == 'campaign' || inputs.mode == 'autonomous') && inputs.campaign_id || inputs.mode == 'autonomous_start' && inputs.source_url || inputs.source_path }}
   cancel-in-progress: false
+env:
+  MODEL_SHA256: 4bca6f18c73f72270c7a20c2ea2bea581de8246e318714277120369d34048c81
+  LLAMA_SHA: 8642541b255bfb5dc39cd351a178be09013a55d6
+  GGML_RPC_NO_RDMA: '1'
 jobs:
   infer:
     if: github.event_name == 'workflow_dispatch' && inputs.mode != 'train'
@@ -96,6 +106,7 @@ jobs:
     timeout-minutes: ${{ inputs.mode == 'autonomous' && 355 || 100 }}
     env:
       AUDIT_AI_MODE: ${{ inputs.mode }}
+      AI_INFERENCE_RUNNERS: ${{ inputs.inference_runners || '1' }}
       AUDIT_AI_SOURCE_URL: ${{ inputs.source_url }}
       AUDIT_AI_HOP: ${{ inputs.ai_hop }}
       AUDIT_AI_SOURCE_PATH: ${{ inputs.source_path }}
@@ -107,8 +118,6 @@ jobs:
       AUDIT_AI_MAX_CHUNKS: ${{ inputs.max_chunks }}
       MODEL_FILE: MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf
       MODEL_REVISION: 4371da10c84fb26da3592d4cf312d24aa82b7b65
-      MODEL_SHA256: 4bca6f18c73f72270c7a20c2ea2bea581de8246e318714277120369d34048c81
-      LLAMA_SHA: 8642541b255bfb5dc39cd351a178be09013a55d6
     steps:
       - name: Record autonomous runner start for bounded 5h45 handoff
         if: inputs.mode == 'autonomous'
@@ -123,6 +132,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$AI_INFERENCE_RUNNERS" == 1 || "$AI_INFERENCE_RUNNERS" == 2 || "$AI_INFERENCE_RUNNERS" == 4 ]] || {
+            echo "::error::Unsupported MiMo inference runner count"; exit 1;
+          }
+          if [ "$AUDIT_AI_MODE" = autonomous_start ] && [ "$AI_INFERENCE_RUNNERS" != 1 ]; then
+            echo "::error::AI-only campaign start is controller-managed; use an authorized continuation to select multi-runner inference"; exit 1;
+          fi
           [[ "$AUDIT_AI_MAX_CHUNKS" =~ ^[0-9]+$ ]]
           test "$AUDIT_AI_MAX_CHUNKS" -ge 1
           test "$AUDIT_AI_MAX_CHUNKS" -le 32
@@ -196,8 +211,14 @@ jobs:
           git -C "$RUNNER_TEMP/llama.cpp" fetch --quiet --depth=1 origin "$LLAMA_SHA"
           git -C "$RUNNER_TEMP/llama.cpp" checkout --quiet --detach FETCH_HEAD
           test "$(git -C "$RUNNER_TEMP/llama.cpp" rev-parse HEAD)" = "$LLAMA_SHA"
-          cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF
-          cmake --build "$RUNNER_TEMP/llama-build" --target llama-server -j 4
+          rpc_opts=()
+          targets=(llama-server)
+          if [ "$AI_INFERENCE_RUNNERS" != 1 ]; then
+            rpc_opts=(-DGGML_RPC=ON -DGGML_CUDA=OFF -DGGML_VULKAN=OFF)
+            targets+=(ggml-rpc-server)
+          fi
+          cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF "${rpc_opts[@]}"
+          cmake --build "$RUNNER_TEMP/llama-build" --target "${targets[@]}" -j 4
       - name: Fetch and verify pinned MiMo weights
         if: inputs.mode != 'autonomous_start'
         shell: bash
