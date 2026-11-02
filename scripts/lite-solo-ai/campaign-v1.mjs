@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v18. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v19. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import http from 'node:http';
@@ -759,7 +759,64 @@ async function finishEngagementSubmission(first,u,original){
  }
  const payload={action:'submit',unitId:u.unitId,lease:u.lease,shard:revised};
  if(manifest)payload.verificationManifest=manifest;
- return worker('/api/step/process',payload);
+ // Revised work remains subject to exact Worker structural validation.
+ // Retain immutable first-round evidence, review answers and repair receipts.
+ for(let round=1;round<=4;round++){
+  activeOperation='revised_work_validation_round_'+round;
+  const result=await worker('/api/step/process',payload);
+  if(!['REWORK_REQUIRED','VERIFICATION_MANIFEST_REQUIRED'].includes(result.status))return result;
+  const errors=result.fieldErrors||[result.reason||'Corrected full work and evidence manifest required'];
+  console.log(JSON.stringify({status:'REVISED_WORK_REWORK_REQUIRED',
+   unitId:u.unitId,round,workerStatus:result.status,fieldErrors:errors,controllerAccepted:false}));
+  if(round===4)break;
+  const correction=await inferValidated([{role:'system',content:system},{role:'user',content:
+   'Correct these exact Worker validation failures using real source evidence. Return JSON {edits:[{path:[existing keys/indexes],value:newValue,repairIds:[actual repair IDs],verificationEvidence:source evidence anchor}]}. '+
+   'Never change controller-prefilled fields or invent evidence. Every edit must modify an existing mutable field.'+
+   '\nWorker field errors:\n'+JSON.stringify(errors)+
+   '\nCurrent full revised work:\n'+JSON.stringify(payload.shard)+
+   '\nOriginal immutable first round:\n'+JSON.stringify(original)+
+   '\nBounded source evidence:\n'+sourceEvidence}],2200,'revised_work_repair',x=>{
+    const issues=[];
+    if(!Array.isArray(x?.edits)||x.edits.length===0)issues.push('Nonempty edits array required');
+    for(const edit of x?.edits||[]){
+     if(!Array.isArray(edit?.path)||!edit.path.length||
+        typeof edit.verificationEvidence!=='string'||edit.verificationEvidence.trim().length<12||
+        !Array.isArray(edit.repairIds)||!edit.repairIds.every(id=>checklist.some(r=>r.repairId===id)))
+      issues.push('Every edit needs existing target path, actual repairIds and source evidence');
+    }
+    return issues;
+   });
+  const additions=[];
+  for(const edit of correction.edits){
+   let target=payload.shard;
+   for(const key of edit.path.slice(0,-1)){
+    if(!target||typeof target!=='object'||!(key in target))throw Error('Repair attempted a nonassigned path');
+    target=target[key];
+   }
+   const last=edit.path.at(-1);
+   if(!target||typeof target!=='object'||!(last in target))throw Error('Repair attempted a nonassigned field');
+   const old=structuredClone(target[last]);
+   if(JSON.stringify(old)===JSON.stringify(edit.value))continue;
+   target[last]=edit.value;
+   additions.push({path:edit.path,repairIds:edit.repairIds,
+    verificationEvidence:edit.verificationEvidence,
+    previousSha256:sha(JSON.stringify(old)),revisedSha256:sha(JSON.stringify(edit.value))});
+  }
+  if(!additions.length||workOutputIssues(payload.shard,fixed).length)
+   throw Error('Corrective model response did not make a valid source-grounded change');
+  manifest??={edits:[],repair_coverage:reported.map(o=>({repairId:o.repairId,
+   status:o.status,changedPaths:[],verificationEvidence:[]}))};
+  manifest.edits.push(...additions);
+  for(const item of manifest.repair_coverage){
+   const matching=additions.filter(x=>x.repairIds.includes(item.repairId));
+   item.changedPaths.push(...matching.map(x=>x.path));
+   item.verificationEvidence.push(...matching.map(x=>x.verificationEvidence));
+  }
+  payload.verificationManifest=manifest;
+ }
+ const failure=new Error('Revised submission still requires controller rework after four correction attempts');
+ failure.code='REVISED_WORK_REWORK_EXHAUSTED';
+ throw failure;
 }
 if(!submit){
  await worker('/api/step/process',{action:'release',unitId:u.unitId,lease:u.lease});
