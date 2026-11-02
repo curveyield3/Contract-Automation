@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v5. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v6. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -316,11 +316,51 @@ const u=units[0];
 if(!u?.unitId||!u?.lease||!u.inputFileTemplate)throw Error('Incomplete claim identity');
 const instructions=boundInstructions;
 if(instructions.length<100)throw Error('Current step instructions missing');
-const prompt='Complete only the current controller-assigned input form. Keep every fixed identity, key and controller prefill exactly. Every substantive conclusion must have real source anchors and follow the exact source-bound step authority. The output must be a JSON object matching the template, not a report or explanation.'+
- '\nCurrent authority:\n'+instructions+
- '\nExact controller generated input JSON:\n'+JSON.stringify(u.inputFileTemplate)+
- '\nCurrent input validation schema:\n'+JSON.stringify(u.validationSchema||current.stepSchema||{})+
- '\nSource-grounded investigation summaries:\n'+JSON.stringify(summaries);
+// Every source chunk is independently retained by source hash in private R2.
+ // For 8K MiMo, derive a truthful, relevance-ranked evidence index for this
+ // exact assigned unit. Never claim that material omitted from context was
+ // independently verified by this unit's inference.
+ function evidenceIndex(maxCharacters){
+  const domain=JSON.stringify({descriptor:u.descriptor,template:u.inputFileTemplate}).toLowerCase();
+  const rows=summaries.map((z,index)=>{
+   const a=z.analysis||{},p=z.path,findings=a.plausibleFindings??[];
+   const findingsText=JSON.stringify(findings).slice(0,230);
+   const anchors=JSON.stringify(a.verifiedSourceAnchors??[]).slice(0,115);
+   const uncertainty=JSON.stringify(a.uncertainties??[]).slice(0,105);
+   const basename=path.basename(p).toLowerCase();
+   const meaningful=findingsText!=='[]'&&findingsText!=='null'&&findingsText!=='""';
+   const score=(meaningful?100:0)+(domain.includes(basename)?60:0)+
+    (p.includes('/contracts/')?25:0)+(p.includes('/yearn/')?20:0);
+   return {index,score,anchor:p+':'+z.startLine+'-'+z.endLine,
+    findings:findingsText,verifiedSourceAnchors:anchors,uncertainties:uncertainty};
+  });
+  rows.sort((a,b)=>b.score-a.score||a.index-b.index);
+  const selected=[];const original=rows.length;
+  let remaining=maxCharacters-250;
+  for(const row of rows){
+   const obj={anchor:row.anchor,findings:row.findings,
+    verifiedSourceAnchors:row.verifiedSourceAnchors,uncertainties:row.uncertainties};
+   const candidate=JSON.stringify(obj);
+   if(candidate.length+3<=remaining){selected.push(obj);remaining-=candidate.length+3;}
+  }
+  const result=JSON.stringify({sourceAnalysis:'PRIVATE_IMMUTABLE_CHECKPOINTS',
+   totalSourceChunksReviewed:original,includedEvidenceChunks:selected.length,
+   omittedFromCurrentModelContext:original-selected.length,
+   instruction:'Use only cited evidence listed here. Omitted checkpoint records are not proof of no vulnerabilities. Do not claim complete contextual verification.',selected});
+  if(result.length>maxCharacters)throw Error('Bounded source evidence index exceeded context capacity');
+  return result;
+ }
+ const basePrompt='Complete only the current controller-assigned input form. Keep every fixed identity, key and controller prefill exactly. Every substantive conclusion must have real source anchors and follow the exact source-bound step authority. The output must be a JSON object matching the template, not a report or explanation.'+
+  '\nCurrent authority:\n'+instructions+
+  '\nExact controller generated input JSON:\n'+JSON.stringify(u.inputFileTemplate)+
+  '\nCurrent input validation schema:\n'+JSON.stringify(u.validationSchema||current.stepSchema||{});
+ const evidenceBudget=Math.min(5700,17400-basePrompt.length);
+ if(evidenceBudget<1200){
+  await worker('/api/step/process',{action:'release',unitId:u.unitId,lease:u.lease});
+  throw Error('Exact authority and controller form leave insufficient MiMo context for source evidence');
+ }
+ const sourceEvidence=evidenceIndex(evidenceBudget);
+ const prompt=basePrompt+'\nBounded source-backed evidence index:\n'+sourceEvidence;
 if(prompt.length>18000){
  await worker('/api/step/process',{action:'release',unitId:u.unitId,lease:u.lease});
  throw Error('Exact required context exceeds bounded model input; claim released');
@@ -347,7 +387,7 @@ async function finishEngagementSubmission(first,u,original){
  if(!Array.isArray(questions)||questions.length!==5||
     typeof first.reviewQuestionsForm!=='string')throw Error('Missing exact five issued questions/review form');
  const reviewPrompt='Independently review the immutable first-round security work. Answer the FIVE exact issued questions from real source evidence, identify every distinct material repair, and never report imaginary verification. Return JSON {answers:{Q1,Q2,Q3,Q4,Q5},repairChecklist:[{issue,location,requiredAction,verificationEvidence,origin:[Q1..Q5]}]}.\n'+
-   'Investigated source evidence:\n'+JSON.stringify(summaries)+'\nOriginal full work:\n'+JSON.stringify(original)+
+   'Investigated source evidence:\n'+sourceEvidence+'\nOriginal full work:\n'+JSON.stringify(original)+
    '\nExact issued questions:\n'+JSON.stringify(questions)+'\nComplete review form:\n'+first.reviewQuestionsForm;
  if(reviewPrompt.length>18000)throw Error('Complete independent review exceeds bounded model context; first-round evidence preserved');
  const review=await infer([{role:'system',content:system},{role:'user',content:reviewPrompt}],2400);
@@ -366,7 +406,7 @@ async function finishEngagementSubmission(first,u,original){
  let changes=[],reported=[];
  if(checklist.length){
   const repairPrompt='Assess and actually repair every supported material deficiency in the original JSON, using the exact controller-bound analysis and real evidence. Return JSON {edits:[{path:[JSON object keys or array indexes],value:newValue,repairIds:[actual REPAIR-NNN],verificationEvidence:real source anchor or actual checked evidence}],outcomes:[{repairId:actual ID,status:READY_FOR_VALIDATION or BLOCKED or NOT_COMPLETE,notes:substantive verified basis}]}. Edits must target EXISTING mutable work fields. Preserve schema, fixed record identity, controller-owned fields, and full original submission. Never invent tests or evidence. READY_FOR_VALIDATION requires an actual edit with supporting evidence, not a promise.\n'+
-    'Source evidence:\n'+JSON.stringify(summaries)+'\nImmutable original JSON:\n'+JSON.stringify(original)+
+    'Source evidence:\n'+sourceEvidence+'\nImmutable original JSON:\n'+JSON.stringify(original)+
     '\nActual repair checklist:\n'+JSON.stringify(checklist)+'\nComplete repair checkbox form:\n'+answered.repairCheckboxForm;
   if(repairPrompt.length>18000)throw Error('Exact repairs exceed safe context; immutable answers retained and no completion falsely acknowledged');
   const proposed=await infer([{role:'system',content:system},{role:'user',content:repairPrompt}],2600);
