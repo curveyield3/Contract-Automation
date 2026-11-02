@@ -234,7 +234,7 @@ jobs:
         shell: bash
         env:
           TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          TAILNET_TAG: tag:ai-training
+          TAILNET_TAG: tag:audit-browser
         run: |
           set -euo pipefail
           test -n "$TS_CLIENT_ID" || { echo "::error::Missing existing TS_OAUTH_CLIENT_ID"; exit 1; }
@@ -507,7 +507,7 @@ jobs:
       - name: Connect ephemeral inference-only tailnet node
         env:
           TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          TAILNET_TAG: tag:ai-training
+          TAILNET_TAG: tag:audit-browser
         shell: bash
         run: |
           set -euo pipefail
