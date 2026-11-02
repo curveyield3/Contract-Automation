@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-if(process.env.AUDIT_AI_MODE==='campaign'){
+if(['campaign','autonomous'].includes(process.env.AUDIT_AI_MODE)){
   await import('./campaign-v1.mjs');
 }else{
 const hash=x=>createHash('sha256').update(x).digest('hex');
