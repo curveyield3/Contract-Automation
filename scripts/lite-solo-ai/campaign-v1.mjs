@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v3. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v4. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -61,7 +61,7 @@ function checkStep(x){
 }
 async function infer(messages,outputTokens=1800){
  const res=await fetch('http://127.0.0.1:8080/v1/chat/completions',{
-  method:'POST',headers:{'content-type':'application/json'},signal:AbortSignal.timeout(1200000),
+  method:'POST',headers:{'content-type':'application/json'},signal:AbortSignal.timeout(1800000),
   body:JSON.stringify({model:'lite-solo-mimo-v1',messages,temperature:0.1,max_tokens:outputTokens,stream:false,
    response_format:{type:'json_object'}})});
  if(!res.ok)throw Error('Local MiMo inference failure HTTP '+res.status);
@@ -75,6 +75,13 @@ const system='You are the current receipt-bound Lite-Solo security auditor execu
 // Read every part of oversized authoritative instructions before summarizing them for
 // a bounded 8K context. Never silently truncate authority or pretend the digest is the skill.
 const instructionDigestCache=new Map();
+let checkpointRecord=null,checkpointIdentity=null;
+async function persistCheckpoint(){
+ if(!autonomous||!checkpointRecord)return;
+ const status=await worker('/api/ai/checkpoint',{action:'save',checkpoint:checkpointRecord});
+ if(status.status!=='AI_CHECKPOINT_SAVED'||status.reviewed!==checkpointRecord.summaries.length)
+  throw Error('Instruction/source checkpoint was not persisted by Worker');
+}
 async function readBoundInstructions(raw){
  if(raw.length<100||raw.length>900000)throw Error('Missing or oversized bound instructions');
  if(instructionDigestCache.has(raw))return instructionDigestCache.get(raw);
@@ -86,17 +93,34 @@ async function readBoundInstructions(raw){
   part+=line+'\n';
  }
  if(part)chunks.push(part);
- if(chunks.length>18)throw Error('Current phase authority cannot fit the finite 8K-model instruction budget; no claim');
+ if(chunks.length>18)throw Error('Current authority cannot fit finite 8K-model instruction budget; no claim');
+ const progress=checkpointRecord?.instructionProgress;
+ if(progress&&progress.sha256!==sha(raw))throw Error('Saved instruction hash differs from exact authority');
+ const previous=progress?.segments||[];
+ if(previous.length>chunks.length)throw Error('Saved instruction progress exceeds current authority');
  const notes=[];
- for(let i=0;i<chunks.length;i++){
+ for(let i=0;i<previous.length;i++){
+  if(previous[i].sha256!==sha(chunks[i]))throw Error('Instruction checkpoint segment hash differs from exact authority');
+  notes.push(previous[i].note);
+ }
+ for(let i=previous.length;i<chunks.length;i++){
+  if(nearRollover(45*60*1000)){
+   await handoffAtSafeBoundary('5h45_deadline_instruction_checkpoint');
+   return null;
+  }
   const result=await infer([{role:'system',content:system},{role:'user',content:
-   'Read the following exact, unmodified segment of controller-bound audit authority. Extract EVERY mandatory obligation, prohibited shortcut, dependency, input/evidence requirement, and disposition. Return JSON {obligations:[short specific sentences]}; do not claim any work performed. Segment '+(i+1)+'/'+chunks.length+'\n'+chunks[i]}],700);
+   'Read the following exact, unmodified segment of controller-bound audit authority. Extract EVERY mandatory obligation, prohibited shortcut, dependency, input/evidence requirement, and disposition. Return JSON {obligations:[short specific sentences]}; do not claim work performed. Segment '+(i+1)+'/'+chunks.length+'\n'+chunks[i]}],700);
   if(!Array.isArray(result.obligations)||!result.obligations.length)
    throw Error('Model did not read all required authority segment obligations');
   notes.push('Source-bound instructions segment '+(i+1)+': '+result.obligations.map(x=>String(x)).join(' | '));
+  if(autonomous){
+   checkpointRecord.instructionProgress={sha256:sha(raw),segments:notes.map((note,j)=>({
+    sha256:sha(chunks[j]),note}))};
+   await persistCheckpoint();
+  }
  }
  const digest=notes.join('\n');
- if(digest.length>10000)throw Error('Required complete instruction digest exceeds context; no claim');
+ if(digest.length>10000)throw Error('Required instruction digest exceeds context; no claim');
  instructionDigestCache.set(raw,digest);
  return digest;
 }
@@ -113,7 +137,8 @@ async function handoffAtSafeBoundary(reason){
   return;
  }
  checkStep(latest);
- if(latest.engagement?.stage!=='WORK'||!latest.availableProcessActions?.includes('claim'))
+ if(!((latest.engagement?.stage==='INSTRUCTIONS')||
+    (latest.engagement?.stage==='WORK'&&latest.availableProcessActions?.includes('claim'))))
   throw Error('Cannot schedule continuation without controller-eligible unleased work');
  const hop=Number(process.env.AUDIT_AI_HOP||0);
  if(!Number.isSafeInteger(hop)||hop<0||hop>=120)throw Error('Finite AI-v6 continuation cap reached');
@@ -136,12 +161,27 @@ function nearRollover(reserveMs){
 async function run(){
 let current=await worker('/api/step/current',{});
 checkStep(current);
+if(autonomous){
+ checkpointIdentity={schemaVersion:'lite-solo-ai-checkpoint-v1',campaignId,
+  generationId:current.generationId,phase:expectedPhase,step:expectedStep,
+  sourceSha256:current.sourceSha256,authorityDigest:current.authorityDigest,maxChunks};
+ const saved=await worker('/api/ai/checkpoint',{action:'read'});
+ if(saved.status==='AI_CHECKPOINT_FOUND'){
+  checkpointRecord=saved.checkpoint;
+  if(!checkpointRecord||Object.entries(checkpointIdentity).some(([k,v])=>
+    k!=='maxChunks'&&checkpointRecord[k]!==v)||
+    !Array.isArray(checkpointRecord.summaries)||checkpointRecord.summaries.length>maxChunks)
+   throw Error('Private checkpoint does not match current campaign authority');
+ }else if(saved.status==='AI_CHECKPOINT_EMPTY')checkpointRecord={...checkpointIdentity,summaries:[]};
+ else throw Error('Worker failed to read exact AI checkpoint');
+}
 // Honor the existing Worker instruction-verification protocol for both modes.
 // The manual v5 human authorization gate remains separate; AI-v6 has no human wait.
 if(current.engagement?.stage==='INSTRUCTIONS'){
  const form=current.engagement.instructionForm;
  if(typeof form!=='string'||form.length<300)throw Error('Missing current instruction form');
  const mandatory=await readBoundInstructions(String(current.authoritativeStepInstructions||''));
+ if(mandatory===null)return;
  if(mandatory.length+form.length>18000)throw Error('Instruction form and complete source-bound digest exceed model context; no acknowledgment or claim');
  const answers=await infer([{role:'system',content:system},{role:'user',content:
    'Read these exact current instruction-verification questions and authoritative step obligations. Answer Q1, Q2, Q3 in your own substantive words, each at least 100 characters and 15 words. Do not claim any audit action has been done. Output JSON object keys Q1,Q2,Q3.\n'+
@@ -157,6 +197,7 @@ if(current.engagement?.stage==='INSTRUCTIONS'){
 if(current.engagement&&current.engagement.stage!=='WORK')throw Error('Worker instruction stage is not ready');
 if(!current.availableProcessActions?.includes('claim'))throw Error('Current step is not claimable');
 const boundInstructions=await readBoundInstructions(String(current.authoritativeStepInstructions||''));
+if(boundInstructions===null)return;
 if(boundInstructions.length>18000)
  throw Error('Bound source instructions exceed safe model context; no lease or submission');
 // Retrieve only current campaign + receipt-bound authority using existing private checkout.
@@ -210,29 +251,19 @@ for(const f of sourceFiles){
  }
 }
 if(chunks.length>maxChunks)throw Error('Full source coverage exceeds max_chunks: no claim made; increase budget or use a more capable runner');
-const checkpointIdentity={schemaVersion:'lite-solo-ai-checkpoint-v1',
- campaignId,generationId:current.generationId,phase:expectedPhase,step:expectedStep,
- sourceSha256:current.sourceSha256,authorityDigest:current.authorityDigest,maxChunks};
-const saved=autonomous?await worker('/api/ai/checkpoint',{action:'read'}):null;
 const summaries=[];
-if(saved?.status==='AI_CHECKPOINT_FOUND'){
- const cp=saved.checkpoint;
- if(!cp||Object.entries(checkpointIdentity).some(([key,value])=>
-    key!=='maxChunks'&&cp[key]!==value)||!Array.isArray(cp.summaries)||
-    cp.summaries.length>chunks.length)throw Error('Checkpoint is not bound to exact controller source/step');
- for(let i=0;i<cp.summaries.length;i++){
-  const found=cp.summaries[i],source=chunks[i];
-  if(found.path!==source.file||found.sha256!==source.sha256||
-     found.startLine!==source.startLine||found.endLine!==source.endLine)
-   throw Error('Checkpoint source chunk differs from current immutable source snapshot');
-  summaries.push(found);
- }
+for(let i=0;i<(checkpointRecord?.summaries.length||0);i++){
+ const found=checkpointRecord.summaries[i],source=chunks[i];
+ if(!source||found.path!==source.file||found.sha256!==source.sha256||
+    found.startLine!==source.startLine||found.endLine!==source.endLine)
+  throw Error('Saved source chunk differs from receipt-bound current campaign source');
+ summaries.push(found);
+}
+if(autonomous&&summaries.length)
  console.log(JSON.stringify({status:'AI_CHECKPOINT_RESTORED',campaignId,
   phase:expectedPhase,step:expectedStep,reviewed:summaries.length,total:chunks.length}));
-}else if(saved&&saved.status!=='AI_CHECKPOINT_EMPTY')
- throw Error('Worker failed to return a valid source-bound AI checkpoint');
 for(let i=summaries.length;i<chunks.length;i++){
- if(nearRollover(25*60*1000)){
+ if(nearRollover(45*60*1000)){
   await handoffAtSafeBoundary('5h45_deadline_source_checkpoint');
   return;
  }
@@ -242,13 +273,11 @@ for(let i=summaries.length;i<chunks.length;i++){
  const analysis=await infer([{role:'system',content:system},{role:'user',content:sourcePrompt}],1450);
  summaries.push({path:chunk.file,sha256:chunk.sha256,startLine:chunk.startLine,endLine:chunk.endLine,analysis});
  if(autonomous){
-  const persisted=await worker('/api/ai/checkpoint',{
-   action:'save',checkpoint:{...checkpointIdentity,summaries}});
-  if(persisted.status!=='AI_CHECKPOINT_SAVED'||persisted.reviewed!==summaries.length)
-   throw Error('AI checkpoint did not persist; no unit claim attempted');
+  checkpointRecord.summaries=summaries;
+  await persistCheckpoint();
  }
 }
-if(nearRollover(90*60*1000)){
+if(nearRollover(120*60*1000)){
  await handoffAtSafeBoundary('5h45_deadline_before_controller_lease');
  return;
 }
