@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v32.
+// Lite-Solo MiMo / Worker transport bridge v33.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -32,7 +32,40 @@ async function identity(){
  return token;
 }
 
+
+// Every MiMo prompt/reply and Worker request/response is archived through the
+// existing OIDC-authenticated Worker into PRIVATE R2, never public Actions logs.
+// One sequence is scoped to the GitHub run ID from the verified OIDC claim.
+let transcriptEvent=0;
+async function recordPrivateCommunication(direction,content){
+ if(typeof content!=='string')throw Error('MiMo transcript content must be text');
+ const eventId=String(++transcriptEvent).padStart(8,'0'),parts=[];
+ for(let i=0;i<content.length;){
+  let end=Math.min(i+110000,content.length);
+  if(end<content.length&&/[\uD800-\uDBFF]/.test(content[end-1]))end--;
+  if(end<=i)throw Error('MiMo transcript part must preserve Unicode');
+  parts.push(content.slice(i,end));i=end;
+ }
+ if(!parts.length)parts.push('');
+ for(let index=0;index<parts.length;index++){
+  const res=await fetch(endpoint,{
+   method:'POST',headers:{authorization:'Bearer '+await identity(),'content-type':'application/json'},
+   body:JSON.stringify({campaignId,operation:'record',eventId,direction,part:index,
+    totalParts:parts.length,content:parts[index]}),
+   signal:AbortSignal.timeout(150000)
+  });
+  const receipt=await res.json().catch(()=>null);
+  if(!res.ok||receipt?.status!=='MIMO_COMMUNICATION_RECORDED')
+   throw Error('MiMo private transcript '+eventId+' part '+(index+1)+' not recorded: HTTP '+res.status);
+ }
+ console.log(JSON.stringify({status:'MIMO_PRIVATE_COMMUNICATION_RECORDED',
+  time:new Date().toISOString(),workflowRunId:process.env.GITHUB_RUN_ID||null,
+  direction,eventId,parts:parts.length,bytes:Buffer.byteLength(content),
+  sha256:sha(content),visibility:'PRIVATE_CLOUDFLARE_R2'}));
+}
+
 async function workerCall(payload){
+ await recordPrivateCommunication('worker_request',JSON.stringify({campaignId,...payload}));
  const res=await fetch(endpoint,{
   method:'POST',
   headers:{authorization:'Bearer '+await identity(),'content-type':'application/json'},
@@ -61,6 +94,7 @@ async function workerCall(payload){
   privateOutputKey:envelope?.rawR2Key||null,
   privateOutputSha256:envelope?.rawSha256||null,
   responseSha256:sha(raw),responseBytes:Buffer.byteLength(raw)}));
+ await recordPrivateCommunication('worker_response',raw);
  return raw;
 }
 
@@ -132,6 +166,7 @@ async function modelCall(messages){
   response_format:{type:'json_object'}
  });
  const start=Date.now();
+ await recordPrivateCommunication('mimo_input',request);
  console.log(JSON.stringify({status:'AI_BRIDGE_MODEL_REQUEST',
   conversationMessages:messages.length,promptBytes:Buffer.byteLength(request)}));
  const reply=await new Promise((resolve,reject)=>{
@@ -219,6 +254,7 @@ async function modelCall(messages){
  });
  const raw=reply.choices?.[0]?.message?.content;
  if(typeof raw!=='string')throw Error('MiMo did not return a text message; no fabricated Worker action');
+ await recordPrivateCommunication('mimo_output',raw);
  // Observe the submitted action without editing or filtering the actual text.
  // This repository is PUBLIC: full source-bound findings belong in Worker R2,
  // not public Actions logs. All metadata comes from the unmodified reply.
