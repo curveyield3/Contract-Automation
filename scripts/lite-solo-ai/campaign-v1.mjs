@@ -249,6 +249,32 @@ let workerResponse=await workerCall({operation:'start'});
 const dialogue=[];
 let lastOwner=null,waitingSince=0,lastWaitReport=0;
 while(true){
+ // Acquire the exact controller-issued work form before model analysis whenever
+ // engagement has reached WORK. This does not synthesize model-authored work.
+ let envelope=null;
+ try{envelope=JSON.parse(workerResponse);}catch{}
+ const current=envelope?.workerResponse||{};
+ if(envelope?.status==='AI_BRIDGE_WORKER_RESPONSE'&&
+    current.status==='ACTIVE'&&current.engagement?.stage==='WORK'&&
+    current.availableProcessActions?.includes('claim')&&
+    (current.unitCounts?.available>0||current.unitCounts?.leased>0)){
+   const readiness=current.leaseReadiness;
+   if(current.unitCounts.available===0&&readiness?.foreignLeased>0&&
+      readiness.ownLeased===0)
+     throw Error('MIMO_FOREIGN_LEASE_BLOCKED: '+readiness.foreignUnitIds.join(', ')+
+       ' is leased by another caller. Existing admin step_release required.');
+   const issued=await workerCall({operation:'claim'});
+   let data=null;
+   try{data=JSON.parse(issued)?.workerResponse;}catch{}
+   if(!['LEASED_SHARD','LEASED_PACKET'].includes(data?.status))
+     throw Error('MIMO_CLAIM_RECOVERY_REQUIRED: '+String(data?.status||'UNPARSEABLE')+
+       '; diagnose exact Worker's ownership/acceptance, no fabricated submission');
+   console.log(JSON.stringify({status:'MIMO_CONTROLLER_CLAIM_ACQUIRED',
+     unitId:data.unitId??null,packetItems:data.items?.length??null,
+     phase:data.phase,step:data.step,preservedNativeForm:true,
+     modelAuthoredAction:false}));
+   workerResponse=issued;
+ }
  const ownership=ownerOfWorkerReply(workerResponse);
  if(ownership.owner!==lastOwner){
   console.log(JSON.stringify({status:'MIMO_EXECUTION_OWNER',
