@@ -125,6 +125,29 @@ jobs:
             exit 0
           fi
           test -s "$request"
+          # New campaign initiation reuses the EXISTING autonomous_start mode.
+          # Do not duplicate campaign creation, Worker's admission logic, or phase orchestration.
+          if [ "$(jq -r '.mode // empty' "$request")" = autonomous_start ]; then
+            jq -e '
+              .schemaVersion == "lite-solo-ai-audit-request-v1"
+              and .mode == "autonomous_start"
+              and (.source_url | type == "string")
+              and (.source_url | test("^https://github\\.com/curveyield3/Audit-Controller/blob/main/campaigns/[A-Za-z0-9._-]+\\.zip$"))
+              and (.inference_runners == "1" or .inference_runners == "2" or .inference_runners == "4")
+              and .submission_mode == "submit"
+              and (.max_chunks | type == "string" and test("^([1-9]|[12][0-9]|3[012])$"))
+              and .ai_hop == "0"
+            ' "$request" >/dev/null
+            gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref main \
+              -f "mode=autonomous_start" \
+              -f "source_url=$(jq -r .source_url "$request")" \
+              -f "inference_runners=$(jq -r .inference_runners "$request")" \
+              -f "submission_mode=$(jq -r .submission_mode "$request")" \
+              -f "max_chunks=$(jq -r .max_chunks "$request")" \
+              -f "ai_hop=0"
+            echo "MiMo new autonomous source dispatch submitted; new campaign identity and controller acceptance remain pending."
+            exit 0
+          fi
           jq -e '
             .schemaVersion == "lite-solo-ai-audit-request-v1"
             and .mode == "autonomous"
