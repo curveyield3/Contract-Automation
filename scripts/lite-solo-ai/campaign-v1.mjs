@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v24.
+// Lite-Solo MiMo / Worker transport bridge v25.
 // No local audit policy, prompt rewriting, evidence filtering, form filling,
 // semantic validation, corrective inference or controller state mutation.
 // The Worker is the sole source of instructions, tool calls and acceptance.
@@ -83,6 +83,43 @@ async function readInferenceCounters(){
     !Number.isSafeInteger(decoded)||decoded<0)
   throw Error('llama.cpp active slot lacks verifiable token counters');
  return {taskId:active.id_task??null,processed,decoded};
+}
+
+
+// A controller/Worker handoff is not an inference stall. These statuses are
+// issued by the authoritative Worker when no model-authored work is eligible.
+// Poll only the existing read-only AI bridge start/current route; never invent
+// a model response, submit a form, bypass a receipt, or alter a lease.
+const EXTERNAL_WAIT_STATUSES=new Set([
+ 'WAITING_ORIGINAL_CONTROLLER',
+ 'WAITING_PHASE_SEAL',
+ 'WAITING_PHASE7_SEAL',
+ 'STEP_VALIDATION_PENDING',
+ 'VERIFYING_CONTROLLER_ACCEPTANCE',
+ 'REWORK_PREPARING',
+ 'WAITING_ROSTER',
+ 'FILING_PHASE',
+ 'FILING_STEP'
+]);
+function ownerOfWorkerReply(raw){
+ let envelope;
+ try{envelope=JSON.parse(raw);}
+ catch{return {owner:'MIMO',status:'UNPARSEABLE_WORKER_REPLY'};}
+ const answer=envelope?.workerResponse||{};
+ const state=answer.status||envelope?.status||'UNKNOWN';
+ if(envelope?.status==='AI_BRIDGE_MODEL_REQUESTED_FINISH')
+  return {owner:'COMPLETE',status:state,phase:answer.phase??null,step:answer.step??null};
+ // Never silently poll a failed Worker request, unknown status, or a recovery
+ // blocker. MiMo sees the exact original reply for diagnosis.
+ const healthy=envelope?.status==='AI_BRIDGE_WORKER_RESPONSE'&&
+   (envelope.workerHttpStatus===undefined||
+    envelope.workerHttpStatus>=200&&envelope.workerHttpStatus<300);
+ const owned=healthy&&(
+   answer.phase===0&&answer.phase0AutomationOwned===true||
+   EXTERNAL_WAIT_STATUSES.has(state));
+ return {owner:owned?'WORKER_CONTROLLER':'MIMO',status:state,
+  phase:answer.phase??null,step:answer.currentStep??answer.step??null,
+  stage:answer.stage??null};
 }
 
 async function modelCall(messages){
@@ -206,21 +243,46 @@ async function modelCall(messages){
  return raw;
 }
 
-const initial=await workerCall({operation:'start'});
-// Full, unmodified Worker response and full, unmodified MiMo replies.
-// The adapter adds no prompt instructions, condensations or synthetic evidence.
-const dialogue=[{role:'user',content:initial}];
+let workerResponse=await workerCall({operation:'start'});
+// Keep every MiMo-produced command and every Worker response presented to MiMo
+// unchanged. Poll-only controller wait states do not become model prompts.
+const dialogue=[];
+let lastOwner=null,waitingSince=0,lastWaitReport=0;
 while(true){
- const raw=await modelCall(dialogue);
- const workerResponse=await workerCall({operation:'reply',modelOutput:raw});
- dialogue.push({role:'assistant',content:raw},{role:'user',content:workerResponse});
- let status;
- try{status=JSON.parse(workerResponse)?.status;}
- catch{throw Error('Worker reply was not valid JSON; no response discarded');}
- if(status==='AI_BRIDGE_MODEL_REQUESTED_FINISH'){
+ const ownership=ownerOfWorkerReply(workerResponse);
+ if(ownership.owner!==lastOwner){
+  console.log(JSON.stringify({status:'MIMO_EXECUTION_OWNER',
+   owner:ownership.owner,workerStatus:ownership.status,
+   phase:ownership.phase,step:ownership.step,stage:ownership.stage,
+   tokenWatchdogActive:ownership.owner==='MIMO'}));
+  lastOwner=ownership.owner;
+ }
+ if(ownership.owner==='COMPLETE'){
   console.log(JSON.stringify({status:'AI_BRIDGE_MODEL_FINISHED',
    campaignId,controllerAccepted:false,
    instruction:'Verify controller acceptance independently; model completion alone is not a seal.'}));
   break;
  }
+ if(ownership.owner==='WORKER_CONTROLLER'){
+  if(!waitingSince)waitingSince=Date.now();
+  if(!lastWaitReport||Date.now()-lastWaitReport>=5*60*1000){
+   console.log(JSON.stringify({status:'MIMO_EXTERNAL_WORK_WAIT',
+    workerStatus:ownership.status,phase:ownership.phase,step:ownership.step,
+    waitSeconds:Math.round((Date.now()-waitingSince)/1000),
+    tokenWatchdogActive:false,
+    nextAction:'Read exact Worker controller state; no model inference while awaiting accepted dependency'}));
+   lastWaitReport=Date.now();
+  }
+  // Hour-long controller executions are valid. The inference inactivity
+  // threshold is not running during these authoritative external waits.
+  await new Promise(resolve=>setTimeout(resolve,60000));
+  workerResponse=await workerCall({operation:'start'});
+  continue;
+ }
+ waitingSince=0;lastWaitReport=0;
+ // The existing Worker response is passed verbatim only when MiMo can act.
+ dialogue.push({role:'user',content:workerResponse});
+ const raw=await modelCall(dialogue);
+ dialogue.push({role:'assistant',content:raw});
+ workerResponse=await workerCall({operation:'reply',modelOutput:raw});
 }
