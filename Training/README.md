@@ -1,15 +1,13 @@
-# MiMo Smart Contract Auditor — Training corpus (v4)
+# MiMo Smart Contract Auditor — Training corpus (v5)
 
-**Staging corpus, NOT training-ready.** Focus: only smart-contract and on-chain audit skills, especially EVM/DeFi. General software and network cybersecurity data is excluded.
+**Staging corpus, not training-ready.** Exclusively EVM/DeFi and other on-chain smart-contract auditing; general cybersecurity is excluded.
 
-## Directory structure and actual records
+- `sources/registry.json`: catalogued source collections, separately identifying evaluation-only material.
+- `sources/provenance.json`: source paths, pinned commits and hashes.
+- `sources/licenses/`: upstream license notices (not a relicensing of audited contracts or third-party reports).
+- `datasets/forge-curated/findings/`: **23 original JSON audit documents**, **430 extracted findings**, and a code-linked `finding-index.jsonl`.
+- `datasets/smartbugs-curated/`: **143 Solidity annotation records** with original code pointers.
+- `datasets/defihacklabs/`: **9 pinned exploit-reproduction references**, without potentially unlicensed replay code.
+- `curation/`: scope, verification policy and independent benchmark reserves.
 
-- `sources/registry.json`: source catalogue (including evaluation-only repositories).
-- `sources/provenance.json`: pinned upstream commits, exact source paths and blob hashes.
-- `datasets/forge-curated/findings/`: **15 original JSON audit documents**, **220 extracted findings**, and normalized `finding-index.jsonl` including project revision, contract locations and report source.
-- `datasets/smartbugs-curated/`: **143 annotated vulnerable Solidity contracts** indexed with original source URLs, no contract-code copies.
-- `datasets/defihacklabs/`: **7 pinned exploit reproduction references**; file-level SPDX may prevent republication of raw replay code.
-- `sources/licenses/`: exact upstream dataset license notices; individual audited contracts/reports may carry different rights.
-- `curation/`: scope and evaluation holdout restrictions.
-
-Raw upstream labels are staged, not independently confirmed, and `training_eligible:false` is intentional. Original audit reports and Solidity source code may retain third-party licensing. Before training, verify rights, duplicate finding families, restore necessary code context, independently adjudicate security impact, and reserve unseen projects. No tests, workflows, production logic or model checkpoints have been changed.
+Raw upstream extraction is not verified ground truth; some findings cover non-exploitable quality issues. No tests, workflows or model training jobs were created or run. All records require source/rights checks, adjudication, deduplication and holdout splits before training.

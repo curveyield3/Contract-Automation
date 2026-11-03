@@ -1,20 +1,20 @@
 {
-  "version": "v4",
+  "version": "v5",
   "status": "staged_not_training_ready",
   "date": "2026-11-03",
   "scope": "smart-contract-auditing-only",
   "counts": {
-    "forge_audit_documents": 15,
-    "forge_findings": 220,
+    "forge_audit_documents": 23,
+    "forge_findings": 430,
     "forge_severities": {
-      "High": 53,
-      "Informational": 39,
-      "Low": 48,
-      "Medium": 77,
-      "Critical": 3
+      "High": 75,
+      "Informational": 112,
+      "Low": 123,
+      "Medium": 114,
+      "Critical": 6
     },
     "smartbugs_annotated_contracts": 143,
-    "defihacklabs_exploit_case_links": 7
+    "defihacklabs_exploit_case_links": 9
   },
   "workflows_modified": false,
   "tests_created_or_run": false,

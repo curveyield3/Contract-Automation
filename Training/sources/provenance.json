@@ -1,5 +1,5 @@
 {
-  "version": "v2",
+  "version": "v5",
   "forge": {
     "commit": "c2829d451d37581dae71aba610506ba3b161e371",
     "documents": [
@@ -122,6 +122,70 @@
         "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
         "source_blob_sha": "b0d32712a9d2c22ba9f1d3e2d5f70a626221ca49",
         "findings": 31
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/chainsecurity-liquity-bold-audit.json",
+        "upstream_path": "dataset-curated/findings/ChainSecurity_Liquity_Bold_Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "19564486ba0d9535d86b56970dd91642a42f2a4c",
+        "findings": 56
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/chainsecurity-gearbox-permissionless-audit.json",
+        "upstream_path": "dataset-curated/findings/ChainSecurity_Gearbox_Permissionless_Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "e47120154450414c71611dcb956de79784619a12",
+        "findings": 27
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/chainsecurity-mellowfinance-multivault-audit.json",
+        "upstream_path": "dataset-curated/findings/ChainSecurity_MellowFinance_Multivault_Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "691291d11e83789eb3a86526b0d19bda50c8d648",
+        "findings": 38
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/chainsecurity-steakhouse-box-audit.json",
+        "upstream_path": "dataset-curated/findings/ChainSecurity_Steakhouse_Box_Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "624efc9d699f1ca51fa5eb11c57a2ae2a82cc3cf",
+        "findings": 23
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/chainsecurity-k3capital-sbold-audit.json",
+        "upstream_path": "dataset-curated/findings/ChainSecurity_K3Capital_SBOLD_Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "8b7eb8022309883f62a59348229dddec276f0ba0",
+        "findings": 29
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-euler-pr111-oct2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_euler_pr111_oct2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "6696e0cb7c75f51aa77cd09264534d18b1bdc89c",
+        "findings": 9
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-euler-swap-april2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_euler_swap_april2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "ce64d163705df5bc53747e00f4cf338df387ba0f",
+        "findings": 15
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-clearpool-aug2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_clearpool_aug2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "118c3e0282f6fb3bdef2f9e0598729bbec732b7f",
+        "findings": 13
       }
     ]
   },
@@ -173,6 +237,18 @@
         "incident": "BalancerV1BPool",
         "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-08/BalancerV1BPool_exp.sol",
         "source_blob_sha": "97f1c6661cd9b5c7edd41274643de561239ae7c7",
+        "spdx": "UNLICENSED"
+      },
+      {
+        "incident": "TermFinance",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-08/TermFinance_exp.sol",
+        "source_blob_sha": "f99a841f6f8a7a746eb9e40dda899079cb3eb6d1",
+        "spdx": "UNLICENSED"
+      },
+      {
+        "incident": "ReflexerGEB",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-08/ReflexerGEB_exp.sol",
+        "source_blob_sha": "5e77e459cca3f79a4b997601c7e683b5c8b94423",
         "spdx": "UNLICENSED"
       }
     ]
