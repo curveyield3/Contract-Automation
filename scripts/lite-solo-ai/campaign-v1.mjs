@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v27.
+// Lite-Solo MiMo / Worker transport bridge v28.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -247,6 +247,7 @@ async function modelCall(messages){
 // response and in governingDocuments. Only MiMo's display copy is compacted;
 // the original transport is retained intact for Worker state and source binding.
 // Never invent a claim, gate answer, accepted result, or reconstructed file.
+const alreadyProvidedStepInstructions=new Set();
 function modelFacingResponse(original){
  let envelope;
  try{envelope=JSON.parse(original);}catch{return original;}
@@ -306,6 +307,19 @@ function modelFacingResponse(original){
   },
   operativeGlobalRules
  };
+ const instructionIdentity=[campaignId,phase,step,
+  sha(docs.repositoryAgentPolicy.content),sha(scoped),sha(operativeGlobalRules)].join(':');
+ const previouslyProvided=alreadyProvidedStepInstructions.has(instructionIdentity);
+ if(previouslyProvided){
+  // MiMo receives its earlier exact policy text through the accumulated
+  // dialogue. Avoid feeding another full copy into the model's context.
+  envelope.governingDocuments={
+   authorityPreviouslyProvided:true,
+   instructionIdentitySha256:sha(instructionIdentity),
+   repositoryAgentPolicyPath:docs.repositoryAgentPolicy.path,
+   currentStepStartHerePath:envelope.governingDocuments.currentStepStartHere.path
+  };
+ }else alreadyProvidedStepInstructions.add(instructionIdentity);
  envelope.workerResponse=slim;
  // Keep any instruction verification form, live controller status and the
  // *entire* original editable unit file on the SAME model call.
@@ -315,6 +329,7 @@ function modelFacingResponse(original){
   phase,step,assignedWorkFiles:work,includesExactControllerTemplate:work>0,
   includesInstructionGate:!!native.engagement?.instructionForm,
   originalTransportBytes:Buffer.byteLength(original),
+  repeatStepInstructionsSkipped:previouslyProvided,
   modelFacingBytes:Buffer.byteLength(JSON.stringify(envelope)),
   frozenAgentPolicySha256:sha(docs.repositoryAgentPolicy.content),
   originalStepSha256:sha(scoped),globalRulesSha256:sha(operativeGlobalRules),
