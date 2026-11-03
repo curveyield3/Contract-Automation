@@ -314,7 +314,10 @@ function modelFacingResponse(original){
   originalPolicySha256:docs.repositoryAgentPolicy.sha256||sha(docs.repositoryAgentPolicy.content),
   originalGuideSha256:docs.currentPhaseStartHere.sha256||null,
   sourceText:'PRIVATE_MODEL_INPUT_ONLY'}));
- return JSON.stringify(envelope);
+ // Model caching requires the immutable step instructions to be the first
+ // (stable) prefix, before the changing Worker lease/work packets and receipts.
+ // Reorder the transport envelope without changing any controller data.
+ return JSON.stringify({governingDocuments:envelope.governingDocuments,...envelope});
 }
 function assignmentScope(response){
  let outer;
