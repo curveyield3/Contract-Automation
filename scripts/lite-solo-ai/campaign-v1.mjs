@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v28.
+// Lite-Solo MiMo / Worker transport bridge v29.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -320,44 +320,88 @@ function modelFacingResponse(original){
  return JSON.stringify({governingDocuments:envelope.governingDocuments,...envelope});
 }
 
-function adapterRecovery(reason,raw,claim,reissue){
- let envelope;
- try{envelope=JSON.parse(raw);}catch{envelope={};}
- const state=envelope.workerResponse||{},unit=claim?.workerResponse||{},
-  work=unit.status==='LEASED_SHARD'?[unit]:unit.status==='LEASED_PACKET'?unit.items||[]:[],
-  stage=state.engagement?.stage||unit.engagement?.stage||'';
- let cmd,goal;
- if(stage==='INSTRUCTIONS'||state.status==='INSTRUCTION_ACKNOWLEDGMENT_REQUIRED'){
-  cmd={route:'/api/step/interaction',request:{action:'acknowledge'}};
-  goal='Read the exact instruction form and answer Q1-Q3 with original formSha256 and readAndUnderstand=true before claiming work.';
- }else if(['FIRST_ROUND_RECORDED_REVIEW_REQUIRED','REVIEW_QUESTIONS_REQUIRED'].includes(state.status)){
-  cmd={route:'/api/step/interaction',request:{action:'review_answers'}};
-  goal='Answer the five exact issued Q1-Q5 with evidence and a truthful repairChecklist before the repair stage.';
- }else if(['REPAIR_CHECKBOX_REQUIRED','REPAIR_CHECKLIST_READY'].includes(state.status)){
-  cmd={route:'/api/step/interaction',request:{action:'repair_ack'}};
-  goal='Perform source-backed repairs, assess every repairId and supply the original required checks and outcomes; then submit the revised complete work form.';
- }else if(work.length){
-  cmd={route:'/api/step/process',request:{action:'submit',unitId:work[0].unitId,lease:work[0].lease}};
-  goal='Complete EVERY editable semantic field of the original issued work form using gathered source evidence. Preserve every immutable field. Add the FULL completed inputFileTemplate as request.shard, not a patch or placeholder. For multi-unit packets submit each unit separately.';
+// Generic recovery for EVERY phase, numbered step and interaction substep.
+// Reissue the most recently provided original instructions and exact source-bound
+// forms; never maintain hand-written per-phase instructions in this adapter.
+function adapterRecovery(reason,rejectedRaw,lastStepRaw,lastAuthorityRaw,lastClaimRaw){
+ const parse=raw=>{try{return JSON.parse(raw);}catch{return {};}};
+ const rejected=parse(rejectedRaw),prior=parse(lastStepRaw),claim=parse(lastClaimRaw);
+ const state=prior.workerResponse||{},error=rejected.workerResponse||{},issued=claim.workerResponse||{};
+ const units=issued.status==='LEASED_SHARD'?[issued]:
+  issued.status==='LEASED_PACKET'?(issued.items||[]):[];
+ const unit=units[0]||null;
+ const status=error.status||state.status||'UNKNOWN';
+ const stage=state.engagement?.stage||issued.engagement?.stage||null;
+ const review=new Set(['FIRST_ROUND_RECORDED_REVIEW_REQUIRED',
+  'REVIEW_QUESTIONS_REQUIRED','REVIEW_QUESTIONS_ISSUED']);
+ const repair=new Set(['REPAIR_CHECKBOX_REQUIRED','REPAIR_CHECKLIST_READY']);
+ let route='/api/step/current',request={};
+ if(status==='INSTRUCTION_ACKNOWLEDGMENT_REQUIRED'||
+    stage==='INSTRUCTIONS'&&status!=='INSTRUCTIONS_ACKNOWLEDGED'){
+  route='/api/step/interaction';
+  request={action:'acknowledge',...(state.engagement?.instructionFormSha256?
+    {formSha256:state.engagement.instructionFormSha256}:{})};
+ }else if(review.has(status)||review.has(state.status)&&!repair.has(status)){
+  route='/api/step/interaction';
+  request={action:'review_answers',...(unit?{unitId:unit.unitId,lease:unit.lease}:{})};
+ }else if(repair.has(status)||repair.has(state.status)&&!review.has(status)){
+  route='/api/step/interaction';
+  request={action:'repair_ack',...(unit?{unitId:unit.unitId,lease:unit.lease}:{})};
+ }else if(unit){
+  route='/api/step/process';
+  request={action:'submit',unitId:unit.unitId,lease:unit.lease,
+   ...(unit.inputFileTemplate?{shard:unit.inputFileTemplate}:{})};
  }else if(stage==='WORK'){
-  cmd={route:'/api/step/process',request:{action:'claim'}};
-  goal='Acquire the actual original controller work form, perform the step objectives and submit all required semantic fields.';
- }else{
-  cmd={route:'/api/step/current',request:{}};
-  goal='Read the exact live controller step, its engagement stage and nextAction before choosing an action.';
+  route='/api/step/process';request={action:'claim'};
  }
- const correction={type:'MIMO_ADAPTER_ACTION_RECOVERY',reason,
-  campaignId,phase:envelope.governingDocuments?.phase??unit.phase??null,
-  step:envelope.governingDocuments?.step??unit.step??null,
-  status:state.status||null,workerNextAction:state.nextAction||null,
-  actionableObjective:goal,requiredNextCommand:cmd,
-  issuedForms:work.map(u=>({unitId:u.unitId,canonicalPath:u.canonicalPath||u.descriptor?.path||null,
-   lease:u.lease,formField:'request.shard'})),
-  instruction:'Your next response must be a single JSON route/request command. Use the exact command and real identifiers above, adding the required real form or independent answers. Do not repeat a rejected command. All form semantic content must be your genuine source-grounded work.'};
- if(reissue&&work.length)
-  correction.issuedOriginalForms=work.map(u=>({unitId:u.unitId,inputFileTemplate:u.inputFileTemplate,
-   validationSchema:u.validationSchema||null}));
- return correction;
+ const stageForms={
+  ...(state.engagement?.instructionForm?
+   {instructionForm:state.engagement.instructionForm,
+    instructionFormSha256:state.engagement.instructionFormSha256}:{}),
+  ...((error.reviewQuestionsForm||state.reviewQuestionsForm)?
+   {reviewQuestionsForm:error.reviewQuestionsForm||state.reviewQuestionsForm,
+    questions:error.questions||state.questions||null}:{}),
+  ...((error.repairCheckboxForm||state.repairCheckboxForm)?
+   {repairCheckboxForm:error.repairCheckboxForm||state.repairCheckboxForm,
+    repairChecklist:error.repairChecklist||state.repairChecklist||null,
+    checkboxFormSha256:error.checkboxFormSha256||state.checkboxFormSha256||null}:{})
+ };
+ return {
+  type:'MIMO_ADAPTER_ACTION_RECOVERY',reason,campaignId,
+  phase:state.phase??issued.phase??prior.governingDocuments?.phase??null,
+  step:state.currentStep??state.step??issued.step??prior.governingDocuments?.step??null,
+  stage,rejectedWorkerStatus:status,
+  workerNextAction:error.nextAction||state.nextAction||state.engagement?.nextAction||null,
+  requiredNextCommand:{route,request},
+  lastControllerInstructions:lastAuthorityRaw||lastStepRaw,
+  lastIssuedStepResponse:lastStepRaw,
+  originalRequiredForms:{...stageForms,
+   issuedWorkForms:units.map(u=>({unitId:u.unitId,lease:u.lease,
+    canonicalPath:u.canonicalPath||u.descriptor?.path||null,
+    inputFileTemplate:u.inputFileTemplate||null,
+    validationSchema:u.validationSchema||null}))},
+  originalWorkerRejection:rejected,
+  instruction:'Call the exact route and action shown with real controller-issued identifiers. '+
+   'Review the replayed ORIGINAL step instructions and issued forms, for this '+
+   'substep. For acknowledge: complete actual instruction Q1-Q3 and readAndUnderstand=true. '+
+   'For review_answers: complete all issued Q1-Q5 and genuine repairChecklist. '+
+   'For repair_ack: acknowledge every real repairId with truthful checks and outcomes. '+
+   'For submit: use the FULL original inputFileTemplate in request.shard, filling '+
+   'EVERY editable semantic field from work already performed, keeping immutable '+
+   'fields, adding genuine revisions and required verification manifest. '+
+   'Do not send an unchanged blank template or fake evidence. '+
+   'Return ONLY one JSON object with route and request.'
+ };
+}
+function incompatibleWorkerReply(raw){
+ let e;try{e=JSON.parse(raw);}catch{return true;}
+ if(['AI_BRIDGE_MODEL_FORMAT_REJECTED','AI_BRIDGE_MODEL_ACTION_REJECTED'].includes(e?.status))
+  return true;
+ if(['MODEL_RESPONSE_NOT_JSON','INVALID_WORKER_ACTION','INVALID_SOURCE_ACTION',
+     'FINISH_REJECTED_ACTIVE_CONTROLLER_ASSIGNMENT'].includes(e?.workerResponse?.status))
+  return true;
+ return e?.status==='AI_BRIDGE_WORKER_RESPONSE'&&
+  Number(e.workerHttpStatus)>=400;
 }
 
 function assignmentScope(response){
@@ -380,6 +424,8 @@ let workerResponse=await workerCall({operation:'start'});
 const dialogue=[];
 let lastOwner=null,waitingSince=0,lastWaitReport=0;
 let lastStepScope=null,lastUnitScope=null;
+let lastAuthorityRaw=null,lastClaimRaw=null,pendingRecovery=null;
+let consecutiveRejections=0,lastRejectedFingerprint=null;
 while(true){
  // Acquire the exact controller-issued work form before model analysis whenever
  // engagement has reached WORK. This does not synthesize model-authored work.
@@ -446,10 +492,50 @@ while(true){
     scope.unit!==null&&scope.unit!==lastUnitScope)){
   dialogue.length=0;
   alreadyProvidedStepInstructions.clear();
+  lastAuthorityRaw=null;lastClaimRaw=null;pendingRecovery=null;
+  consecutiveRejections=0;lastRejectedFingerprint=null;
  }
  if(scope){lastStepScope=scope.step;if(scope.unit!==null)lastUnitScope=scope.unit;}
- dialogue.push({role:'user',content:modelFacingResponse(workerResponse)});
+ if(pendingRecovery){
+  // The Worker rejected the prior reply: replay original issued instructions,
+  // form and the exact next action rather than send another generic status.
+  dialogue.push({role:'user',content:JSON.stringify(pendingRecovery)});
+  pendingRecovery=null;
+ }else{
+  const modelInstructions=modelFacingResponse(workerResponse);
+  dialogue.push({role:'user',content:modelInstructions});
+  let issued=null;
+  try{issued=JSON.parse(workerResponse);}catch{}
+  const native=issued?.workerResponse||{};
+  if(issued?.governingDocuments?.repositoryAgentPolicy?.content&&
+     issued?.governingDocuments?.currentPhaseStartHere?.content)
+   lastAuthorityRaw=modelInstructions;
+  if(['LEASED_SHARD','LEASED_PACKET'].includes(native.status))
+   lastClaimRaw=workerResponse;
+ }
  const raw=await modelCall(dialogue);
  dialogue.push({role:'assistant',content:raw});
+ const previouslyIssued=workerResponse;
  workerResponse=await workerCall({operation:'reply',modelOutput:raw});
+ if(incompatibleWorkerReply(workerResponse)){
+  const fingerprint=sha(raw);
+  consecutiveRejections++;
+  if(lastRejectedFingerprint===fingerprint||consecutiveRejections>4)
+   throw Error('MIMO_REPEATED_INCOMPATIBLE_ACTION: exact Worker rejection '+
+    'persists after correction; preserve controller records and diagnose '+
+    'before retrying. Last model output SHA256 '+fingerprint);
+  lastRejectedFingerprint=fingerprint;
+  pendingRecovery=adapterRecovery('Worker rejected incompatible model reply',
+   workerResponse,previouslyIssued,lastAuthorityRaw,lastClaimRaw);
+  console.log(JSON.stringify({status:'MIMO_INCOMPATIBLE_REPLY_RECOVERY_ISSUED',
+   campaignId,phase:pendingRecovery.phase,step:pendingRecovery.step,
+   stage:pendingRecovery.stage,
+   nextRoute:pendingRecovery.requiredNextCommand.route,
+   nextAction:pendingRecovery.requiredNextCommand.request.action||null,
+   originalInstructionsReplayed:true,
+   issuedOriginalForms:pendingRecovery.originalRequiredForms.issuedWorkForms.length,
+   rejectionCount:consecutiveRejections,privateContent:'MODEL_ONLY'}));
+ }else{
+  consecutiveRejections=0;lastRejectedFingerprint=null;
+ }
 }
