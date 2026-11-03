@@ -1,5 +1,5 @@
-# Code4rena adjudicated final audit findings (v2)
+# Code4rena final reports — H/M judged issue metadata (v3)
 
-**157 source-linked final-report High/Medium findings** across **10 independent Code4rena smart-contract contests**. Each JSONL record stores the original judged report and issue URL, severity and title, plus the exact Git revision and blob. Not independently reproduced; full third-party report bodies and contract code are not copied.
+Indexed **208** final-report judged High/Medium issue pointers across **15** smart-contract audit contests (50 High; 158 Medium). Metadata is tied to exact report commit and Git blob and original issue URL. These are human-judged final-report items, **not independently replayed proofs**, and full third-party audit reports and Solidity contracts are linked rather than republished.
 
-This is a candidate audit training index, not a validated training split. Exclude overlapping FORGE records and reserve unseen protocol/commit groups before training; confirm right-to-use original reports and affected contracts.
+Do not train until report/source rights, audited code revision, duplicates and blind holdout are reviewed. Code4rena findings may overlap FORGE data.

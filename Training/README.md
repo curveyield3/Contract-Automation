@@ -1,11 +1,11 @@
-# MiMo Smart Contract Auditor — Training corpus (v12)
+# MiMo Smart Contract Auditor — Training corpus (v13)
 
-**Source aggregation staged; not training-ready.** Exclusive coverage: DeFi and other on-chain smart contracts (EVM, Solidity, cross-contract economic security). General software and network cybersecurity are excluded.
+**Source-linked staging corpus, not yet training-ready.** Exclusively smart-contract auditing, especially Solidity/EVM and DeFi economic mechanisms; no unrelated software/network security data.
 
-- `datasets/forge-curated/findings/`: **47 structured audit finding documents**, **1030 extracted findings**; associated code and audit-commit references in `finding-index.jsonl`.
-- `datasets/code4rena/`: **157 final-report adjudicated H/M findings** from 10 audits, metadata and original URLs only.
-- `datasets/smartbugs-curated/`: **143 annotated vulnerable Solidity contracts** (annotations and pinned source URLs only).
-- `datasets/defihacklabs/`: **204 historical DeFi exploit-reproduction source pointers**; replay code not mirrored.
-- `sources/`: source catalogue, commit and hash provenance, license notices. `curation/`: inclusion policy and independent evaluation reserves.
+- `datasets/forge-curated/findings/`: **47 audit documents / 1030 findings** — upstream extracted JSON plus exact code/revision references.
+- `datasets/code4rena/`: **208 adjudicated H/M findings across 15 final contest reports**, with original issues and pinned reports.
+- `datasets/smartbugs-curated/`: **143 annotated Solidity contracts**, metadata and code links.
+- `datasets/defihacklabs/`: **204 incident replay source references**, pinned hashes without source mirroring.
+- `sources/`: provider registry, provenance and license notices; `curation/`: inclusion and reserved independent evaluation.
 
-Source-extracted audit labels are not proof of exploitability and include some quality/informational findings. Nothing here has been independently replayed or audited. Do not train until rights, audited code context, source-grounded labels, deduplication and protocol-family holdouts are resolved. No tests, workflows or production logic have changed.
+Source-extracted labels, judged verdicts and exploit pointers remain distinct. No record is automatically certified exploitable or licensed for training. Complete code/rights verification, deduplication and protocol-family holdouts are required. No workflows, tests or production code changed.
