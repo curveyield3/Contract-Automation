@@ -267,9 +267,11 @@ function modelFacingResponse(original){
  // repeated inlined schema/template/phase contract, which still have native
  // schema and work-form fields below.
  const scoped=full.slice(a,b);
+ const operativeGlobalRules=full.slice(0,a).trim();
  const step=Number(current.currentStep??native.step??native.currentStep);
  const phase=Number(current.phase??native.phase);
- if(!Number.isInteger(step)||!Number.isInteger(phase)||!scoped.includes('Step '+step))
+ if(!Number.isInteger(step)||!Number.isInteger(phase)||
+    (step!==0&&!scoped.includes('Step '+step)))
   throw Error('Current-step instruction/assignment identity mismatch');
  const slim={...native};
  const redundant=[
@@ -294,11 +296,15 @@ function modelFacingResponse(original){
  envelope.governingDocuments={
   repositoryAgentPolicy:docs.repositoryAgentPolicy,
   currentStepStartHere:{
-   path:docs.campaignBoundSkill?.path?.replace(/\/SKILL\.md$/,'')+
-    '/phases/phase-'+phase+'/START_HERE.md',
+   path:step===0&&phase===4?
+    docs.campaignBoundSkill?.path?.replace(/\/SKILL\.md$/,'')+
+     '/discovery/'+(/ATTACK/.test(current.stage||'')?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md'):
+    docs.campaignBoundSkill?.path?.replace(/\/SKILL\.md$/,'')+
+     '/phases/phase-'+phase+'/START_HERE.md',
    authorityCommit:current.authorityCommit,
    phase,step,content:scoped
-  }
+  },
+  operativeGlobalRules
  };
  envelope.workerResponse=slim;
  // Keep any instruction verification form, live controller status and the
@@ -311,7 +317,8 @@ function modelFacingResponse(original){
   originalTransportBytes:Buffer.byteLength(original),
   modelFacingBytes:Buffer.byteLength(JSON.stringify(envelope)),
   frozenAgentPolicySha256:sha(docs.repositoryAgentPolicy.content),
-  originalStepSha256:sha(scoped),sourceText:'PRIVATE_MODEL_INPUT_ONLY'}));
+  originalStepSha256:sha(scoped),globalRulesSha256:sha(operativeGlobalRules),
+  sourceText:'PRIVATE_MODEL_INPUT_ONLY'}));
  return JSON.stringify(envelope);
 }
 
