@@ -378,7 +378,7 @@ jobs:
           printf '%s  %s\n' "$MODEL_SHA256" "$RUNNER_TEMP/models/$MODEL_FILE" | sha256sum --check
           df -h "$RUNNER_TEMP"
       - name: Join private inference tailnet and start local RPC device
-        if: inputs.inference_runners == '2' || inputs.inference_runners == '4'
+        if: inputs.mode != 'autonomous_start' && (inputs.inference_runners == '2' || inputs.inference_runners == '4')
         shell: bash
         env:
           TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
@@ -397,7 +397,7 @@ jobs:
             tail -n 50 "$RUNNER_TEMP/mimo-local-rpc.log"; exit 1;
           }
       - name: Resolve exact-run private RPC inference peers
-        if: inputs.inference_runners == '2' || inputs.inference_runners == '4'
+        if: inputs.mode != 'autonomous_start' && (inputs.inference_runners == '2' || inputs.inference_runners == '4')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
