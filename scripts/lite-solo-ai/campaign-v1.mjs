@@ -248,93 +248,86 @@ async function modelCall(messages){
 // the original transport is retained intact for Worker state and source binding.
 // Never invent a claim, gate answer, accepted result, or reconstructed file.
 const alreadyProvidedStepInstructions=new Set();
+// Keep the original bridge response for state/lease validation. Only the
+// model-facing view is narrowed to the actual current step and work packet.
 function modelFacingResponse(original){
  let envelope;
  try{envelope=JSON.parse(original);}catch{return original;}
  if(envelope?.status!=='AI_BRIDGE_WORKER_RESPONSE')return original;
  const native=envelope.workerResponse;
- if(!native||typeof native!=='object'||Array.isArray(native))return original;
  const docs=envelope.governingDocuments;
- if(!docs?.repositoryAgentPolicy?.content)return original;
- const current=native.instructions&&typeof native.instructions==='object'?
-  native.instructions:native;
- const full=current.authoritativeStepInstructions;
- if(typeof full!=='string'||!full.includes('# CURRENT ASSIGNMENT'))
-  throw Error('Frozen current-step instructions missing; refuse to shorten model prompt');
- const a=full.indexOf('# CURRENT ASSIGNMENT');
- const b=full.indexOf('\n\n---\n## Required referenced file:',a);
- if(a<0||b<a)throw Error('Cannot isolate frozen current-step START_HERE instructions');
- // Preserve the controller-supplied current-step text VERBATIM, without the
- // repeated inlined schema/template/phase contract, which still have native
- // schema and work-form fields below.
- const scoped=full.slice(a,b);
- const operativeGlobalRules=full.slice(0,a).trim();
- const step=Number(current.currentStep??native.step??native.currentStep);
- const phase=Number(current.phase??native.phase);
- if(!Number.isInteger(step)||!Number.isInteger(phase)||
-    (step!==0&&!scoped.includes('Step '+step)))
-  throw Error('Current-step instruction/assignment identity mismatch');
- const slim={...native};
- const redundant=[
-  'authoritativeStepInstructions','referencedInstructionFiles',
-  'openingInstruction','completionInstruction','workerApiStepInstructions',
-  'phaseContractStep','phaseContractAuthorization','canonicalInputFormSource',
-  'canonicalShardInputFiles','templateFile','controllerPrefillDigest',
-  'predecessorReceiptPath','derivedInputPaths','workerApiPolicy'
- ];
- for(const k of redundant)delete slim[k];
- if(native.instructions){
-  const nested={...native.instructions};
-  for(const k of redundant)delete nested[k];
-  // The real inputFileTemplate, full validation schema and all issued
-  // lease/descriptor metadata remain UNMODIFIED in the work packet.
-  slim.instructions=nested;
- }
- // The frozen AGENTS.md is provided as its original complete document.
- // The current START_HERE step is provided as the original verbatim excerpt.
- // The separate full root SKILL.md copy is not sent again: its applicable
- // global rules are already in the controller-issued step instructions.
- envelope.governingDocuments={
-  repositoryAgentPolicy:docs.repositoryAgentPolicy,
-  currentStepStartHere:{
-   path:step===0&&phase===4?
-    docs.campaignBoundSkill?.path?.replace(/\/SKILL\.md$/,'')+
-     '/discovery/'+(/ATTACK/.test(current.stage||'')?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md'):
-    docs.campaignBoundSkill?.path?.replace(/\/SKILL\.md$/,'')+
-     '/phases/phase-'+phase+'/START_HERE.md',
-   authorityCommit:current.authorityCommit,
-   phase,step,content:scoped
-  },
-  operativeGlobalRules
+ if(!native||typeof native!=='object'||Array.isArray(native))return original;
+ if(!docs?.repositoryAgentPolicy?.content||
+    !docs.currentPhaseStartHere?.content)return original;
+ const phase=Number(docs.phase??native.phase),step=Number(docs.step??native.step);
+ if(!Number.isInteger(phase)||!Number.isInteger(step))
+  throw Error('Current controller phase and step missing from original source-bound instructions');
+ const currentFile=(f)=>{
+  if(!f||typeof f.content!=='string'||!Number.isInteger(step)||step<1)return f;
+  const p=f.path||'';
+  const schema=/\/PHASE_[0-9]+_SCHEMA_v[0-9]+\.json$/i.test(p);
+  const form=/\/PHASE_[0-9]+_WORK_FORM_TEMPLATE_v[0-9]+\.json$/i.test(p);
+  const contract=/\/PHASE_CONTRACT\.json$/i.test(p);
+  if(!schema&&!form&&!contract)return f; // retain other mandatory resources verbatim
+  let doc;
+  try{doc=JSON.parse(f.content);}catch{throw Error('Bound reference JSON cannot be read: '+p);}
+  const key='step-'+step;
+  if((schema||form)&&doc.actions&&Object.hasOwn(doc.actions,key)){
+   const {actions,...rest}=doc;
+   return {...f,scope:'original global fields and selected current action',
+    content:JSON.stringify({...rest,actions:{[key]:actions[key]}})};
+  }
+  if(contract&&Array.isArray(doc.steps)&&doc.steps.some(x=>x.step===step)){
+   const {steps,...rest}=doc;
+   return {...f,scope:'original global fields and selected current step',
+    content:JSON.stringify({...rest,steps:steps.filter(x=>x.step===step)})};
+  }
+  return f; // preserve required original if schema has a different stage shape
  };
- const instructionIdentity=[campaignId,phase,step,
-  sha(docs.repositoryAgentPolicy.content),sha(scoped),sha(operativeGlobalRules)].join(':');
- const previouslyProvided=alreadyProvidedStepInstructions.has(instructionIdentity);
- if(previouslyProvided){
-  // MiMo receives its earlier exact policy text through the accumulated
-  // dialogue. Avoid feeding another full copy into the model's context.
+ const baseKey=[campaignId,docs.authorityCommit,phase,step,
+  native.stage||'',sha(docs.repositoryAgentPolicy.content),
+  sha(docs.currentPhaseStartHere.content)].join(':');
+ const prior=alreadyProvidedStepInstructions.has(baseKey);
+ if(prior){
+  // Same step, same model conversation: retain new packet and any newly
+  // necessary predecessor evidence, but not repeated AGENTS/guide/schema.
   envelope.governingDocuments={
    authorityPreviouslyProvided:true,
-   instructionIdentitySha256:sha(instructionIdentity),
-   repositoryAgentPolicyPath:docs.repositoryAgentPolicy.path,
-   currentStepStartHerePath:envelope.governingDocuments.currentStepStartHere.path
+   instructionIdentitySha256:sha(baseKey),
+   prerequisiteEvidenceFiles:docs.prerequisiteEvidenceFiles||[]
   };
- }else alreadyProvidedStepInstructions.add(instructionIdentity);
- envelope.workerResponse=slim;
- // Keep any instruction verification form, live controller status and the
- // *entire* original editable unit file on the SAME model call.
+ }else{
+  envelope.governingDocuments={
+   ...docs,
+   requiredControllerFiles:(docs.requiredControllerFiles||[]).map(currentFile)
+  };
+  alreadyProvidedStepInstructions.add(baseKey);
+ }
  const work=native.inputFileTemplate?1:
   Array.isArray(native.items)?native.items.length:0;
  console.log(JSON.stringify({status:'MIMO_SOURCE_BOUND_PROMPT_PREPARED',
-  phase,step,assignedWorkFiles:work,includesExactControllerTemplate:work>0,
-  includesInstructionGate:!!native.engagement?.instructionForm,
+  phase,step,stage:native.stage||null,assignedWorkFiles:work,
+  includesExactControllerTemplate:work>0,
   originalTransportBytes:Buffer.byteLength(original),
-  repeatStepInstructionsSkipped:previouslyProvided,
+  repeatStepInstructionsSkipped:prior,
   modelFacingBytes:Buffer.byteLength(JSON.stringify(envelope)),
-  frozenAgentPolicySha256:sha(docs.repositoryAgentPolicy.content),
-  originalStepSha256:sha(scoped),globalRulesSha256:sha(operativeGlobalRules),
+  originalPolicySha256:docs.repositoryAgentPolicy.sha256||sha(docs.repositoryAgentPolicy.content),
+  originalGuideSha256:docs.currentPhaseStartHere.sha256||null,
   sourceText:'PRIVATE_MODEL_INPUT_ONLY'}));
  return JSON.stringify(envelope);
+}
+function assignmentScope(response){
+ let outer;
+ try{outer=JSON.parse(response);}catch{return null;}
+ const w=outer?.workerResponse;
+ if(!w||typeof w!=='object')return null;
+ const p=Number(w.phase??outer.governingDocuments?.phase);
+ const s=Number(w.currentStep??w.step??outer.governingDocuments?.step);
+ if(!Number.isInteger(p)||!Number.isInteger(s))return null;
+ const unit=w.status==='LEASED_SHARD'?
+  w.unitId+':'+w.lease:w.status==='LEASED_PACKET'?
+  (w.items||[]).map(x=>x.unitId+':'+x.lease).join(','):null;
+ return {step:[p,s,w.stage||''].join(':'),unit};
 }
 
 let workerResponse=await workerCall({operation:'start'});
@@ -342,6 +335,7 @@ let workerResponse=await workerCall({operation:'start'});
 // unchanged. Poll-only controller wait states do not become model prompts.
 const dialogue=[];
 let lastOwner=null,waitingSince=0,lastWaitReport=0;
+let lastStepScope=null,lastUnitScope=null;
 while(true){
  // Acquire the exact controller-issued work form before model analysis whenever
  // engagement has reached WORK. This does not synthesize model-authored work.
@@ -400,8 +394,16 @@ while(true){
   continue;
  }
  waitingSince=0;lastWaitReport=0;
- // The original Worker reply is kept for claim/state logic; MiMo receives
- // its exact assigned file together with the current step and AGENTS.md.
+ // Scope MiMo's active conversation to the live controller step and
+ // currently issued original packet. Old packets/replies remain immutable
+ // in Worker storage, not repeatedly reprocessed in every later prompt.
+ const scope=assignmentScope(workerResponse);
+ if(scope&&(scope.step!==lastStepScope||
+    scope.unit!==null&&scope.unit!==lastUnitScope)){
+  dialogue.length=0;
+  alreadyProvidedStepInstructions.clear();
+ }
+ if(scope){lastStepScope=scope.step;if(scope.unit!==null)lastUnitScope=scope.unit;}
  dialogue.push({role:'user',content:modelFacingResponse(workerResponse)});
  const raw=await modelCall(dialogue);
  dialogue.push({role:'assistant',content:raw});
