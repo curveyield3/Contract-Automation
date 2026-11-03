@@ -1,5 +1,5 @@
 {
-  "version": "v17",
+  "version": "v18",
   "forge": {
     "commit": "c2829d451d37581dae71aba610506ba3b161e371",
     "documents": [
@@ -378,6 +378,70 @@
         "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
         "source_blob_sha": "1bfc3ff2be2583a88d656fa6940a967ab865154f",
         "findings": 9
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/sponsored-periphery-audit.json",
+        "upstream_path": "dataset-curated/findings/Sponsored Periphery Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "ac42adb0ab7f1000269d89afa6f5769c692c776f",
+        "findings": 33
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/oxorio-samm-module-audit.json",
+        "upstream_path": "dataset-curated/findings/Oxorio SAMM Module Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "6c64da7389f5f0e500bb20acfda676924f37982b",
+        "findings": 30
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/chainsecurity-polymarket-umasportsoracle-audit.json",
+        "upstream_path": "dataset-curated/findings/ChainSecurity_Polymarket_UMASportsOracle_Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "9b037ced398cc1ae88ec4d12fcd8582cd3f22710",
+        "findings": 9
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/polygon-staking-zellic-audit-report.json",
+        "upstream_path": "dataset-curated/findings/Polygon Staking - Zellic Audit Report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "35673fb834ac84efd9e640cb11439f251b761ae8",
+        "findings": 13
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/ackee-blockchain-vfat-sickle-report.json",
+        "upstream_path": "dataset-curated/findings/ackee-blockchain-vfat-sickle-report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "600c0e91781d7eeb4f672eb043ed20643c7ecd1e",
+        "findings": 31
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-uniswap-nov2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_uniswap_nov2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "4d34c6e8ff91fcf526f2e1356f84d74f24fc0504",
+        "findings": 9
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-revert-sept2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_revert_sept2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "ba2e06cc7888c0d5197692993a06de67adf3555e",
+        "findings": 10
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-centrifuge-may2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_centrifuge_may2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "fa4ad5f7613c0a0ca85b9d406239e127104595f5",
+        "findings": 12
       }
     ]
   },

@@ -1,11 +1,11 @@
-# MiMo Smart Contract Auditor — Training corpus (v17)
+# MiMo Smart Contract Auditor — Training corpus (v18)
 
-**Source aggregation staged; not training-ready.** Smart-contract and DeFi security only. No generic application, OS or network security dataset.
+**Data staging only; not yet fit for training.** Smart contracts, EVM, Solidity, on-chain economic security and DeFi exclusively; general cybersecurity excluded.
 
-- `datasets/forge-curated/findings/`: 47 original report-derived audit JSON documents; 1030 extracted code-linked findings.
-- `datasets/code4rena/`: 208 adjudicated High/Medium issue references from 15 public audit reports.
-- `datasets/smartbugs-curated/`: 143 annotated Solidity vulnerability examples with original source URLs.
-- `datasets/defihacklabs/`: 698 historical DeFi exploit reproduction file pointers, pinned Git commits/blobs, without copying code.
-- `sources/`: original source registry, hashes and licenses; `curation/`: source-inclusion and independent evaluation policies.
+- `datasets/forge-curated/findings/`: **55 full audit-finding JSON documents**, **1177 extracted findings**, with exact original code/report revisions in the finding index.
+- `datasets/code4rena/`: **208 judged H/M finding references** from 15 public smart-contract audits.
+- `datasets/smartbugs-curated/`: **143 annotated Solidity contracts**, original code pointers rather than redistributed sources.
+- `datasets/defihacklabs/`: **698 historical exploit replay references**, pinned Git source paths and hashes.
+- `sources/`: registry, source/hash provenance and license notices; `curation/`: strict inclusion and evaluation-only benchmark reserve.
 
-Source-reported findings, Code4rena judgments and exploit replay pointers are distinct. None was independently reproduced here or automatically approved as training labels. Review source-code licensing, provenance, duplicate protocol families and exploit preconditions before training. No tests, new workflows, production changes or training jobs.
+All findings and PoC links are original-source claims, not independently replayed or automatically accepted as validated exploits. Requires legal/contract-code review, duplicated-issue detection, human/source-grounded validation and protocol-family holdout before training. No tests, workflows or production models changed.

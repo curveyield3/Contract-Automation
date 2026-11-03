@@ -1,17 +1,17 @@
 {
-  "version": "v17",
+  "version": "v18",
   "status": "staged_not_training_ready",
   "date": "2026-11-03",
   "scope": "smart-contract-auditing-only",
   "counts": {
-    "forge_audit_documents": 47,
-    "forge_findings": 1030,
+    "forge_audit_documents": 55,
+    "forge_findings": 1177,
     "forge_severities": {
-      "High": 106,
-      "Informational": 346,
-      "Low": 318,
-      "Medium": 195,
-      "Critical": 20,
+      "High": 119,
+      "Informational": 428,
+      "Low": 349,
+      "Medium": 215,
+      "Critical": 21,
       "Unknown": 45
     },
     "smartbugs_annotated_contracts": 143,
