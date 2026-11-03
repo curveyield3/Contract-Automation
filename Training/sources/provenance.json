@@ -1,5 +1,5 @@
 {
-  "version": "v1",
+  "version": "v2",
   "forge": {
     "commit": "c2829d451d37581dae71aba610506ba3b161e371",
     "documents": [
@@ -66,6 +66,62 @@
         "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
         "source_blob_sha": "32cddb76f2773d802f3468178978841e8110013e",
         "findings": 16
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2025-01-beethovenx-sonicstaking-securityreview.json",
+        "upstream_path": "dataset-curated/findings/2025-01-beethovenx-sonicstaking-securityreview.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "a50284cd05a5881f26a140f20cee3b91634556b9",
+        "findings": 3
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2025-04-reserve-folio-solidity-securityreview.json",
+        "upstream_path": "dataset-curated/findings/2025-04-reserve-folio-solidity-securityreview.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "73465c2f458ad8c863ce9e1eb44927b6bfff5833",
+        "findings": 9
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2024-12-21-final-idle-finance-credit-vaults-audit-report.json",
+        "upstream_path": "dataset-curated/findings/2024.12.21 - Final - Idle Finance Credit Vaults Audit Report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "be0bbeb51dde06e65fd07c8fa8de346aa0c76893",
+        "findings": 5
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2025-03-10-final-symmio-staking-and-vesting-audit-report.json",
+        "upstream_path": "dataset-curated/findings/2025.03.10 - Final - Symmio, Staking and Vesting Audit Report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "fcf6046382b3792c0431618beb5b8843b75d80a9",
+        "findings": 6
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2025-06-reserveprotocol-solidity400-securityreview.json",
+        "upstream_path": "dataset-curated/findings/2025-06-reserveprotocol-solidity400-securityreview.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "c05b19766d51c1120ca0570b7032d0fab287759f",
+        "findings": 7
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/1inch-cross-chain-swap-v1-1-0-audit.json",
+        "upstream_path": "dataset-curated/findings/1inch Cross-Chain Swap V1.1.0 Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "14d1d40ebbacca1a15b72c55d4aa8344ab9058b8",
+        "findings": 1
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/across-protocol-oft-integration-differential-audit.json",
+        "upstream_path": "dataset-curated/findings/Across Protocol OFT Integration Differential Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "b0d32712a9d2c22ba9f1d3e2d5f70a626221ca49",
+        "findings": 31
       }
     ]
   },
@@ -100,6 +156,24 @@
         "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-08/USM_exp.sol",
         "source_blob_sha": "1651dc3c1d134d994b694d1a518e0f75ea79f057",
         "spdx": "MIT"
+      },
+      {
+        "incident": "TermFinance",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-08/TermFinance_exp.sol",
+        "source_blob_sha": "f99a841f6f8a7a746eb9e40dda899079cb3eb6d1",
+        "spdx": "UNLICENSED"
+      },
+      {
+        "incident": "ReflexerGEB",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-08/ReflexerGEB_exp.sol",
+        "source_blob_sha": "5e77e459cca3f79a4b997601c7e683b5c8b94423",
+        "spdx": "UNLICENSED"
+      },
+      {
+        "incident": "BalancerV1BPool",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-08/BalancerV1BPool_exp.sol",
+        "source_blob_sha": "97f1c6661cd9b5c7edd41274643de561239ae7c7",
+        "spdx": "UNLICENSED"
       }
     ]
   }
