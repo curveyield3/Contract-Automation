@@ -140,8 +140,10 @@ def monitor(a):
         if len(infer) == 1 and infer[0].get("status") == "completed":
             status = infer[0].get("conclusion")
             print("MiMo coordinator finished: " + str(status), flush=True)
-            if status != "success":
-                raise RuntimeError("MiMo coordinator did not complete successfully")
+            # Remote service cleanup follows the authoritative coordinator
+            # termination even if it failed; never claim controller acceptance.
+            print("Remote RPC peer stopping on coordinator completion; "
+                  "no controller-acceptance claim", flush=True)
             return
         time.sleep(15)
     raise RuntimeError("MiMo coordinator did not finish in bounded shard lifetime")

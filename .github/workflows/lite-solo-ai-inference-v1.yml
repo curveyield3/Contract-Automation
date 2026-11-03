@@ -263,11 +263,26 @@ jobs:
           rpc="$(cat "$RUNNER_TEMP/mimo-rpc-addresses.txt")"
           test "$(printf '%s' "$rpc" | awk -F, '{print NF}')" -eq "$AI_INFERENCE_RUNNERS"
           for endpoint in $(printf '%s' "$rpc" | tr ',' ' '); do
-            host="$(printf '%s' "$endpoint" | cut -d: -f1)"
+            host="${endpoint%:*}"
+            port="${endpoint##*:}"
             if [ "$host" != 127.0.0.1 ]; then
-              timeout 15 tailscale ping --c=1 --timeout=10s "$host" >/dev/null || {
-                echo "::error::Private MiMo RPC peer unreachable"; exit 1;
-              }
+              # Direct and DERP-relayed Tailscale paths are both encrypted.
+              # The previous default ping required a direct path and falsely failed on DERP.
+              timeout 30 tailscale ping --until-direct=false --c=2 --timeout=10s "$host" ||
+                echo "::warning::Tailscale ping inconclusive; probing private RPC TCP endpoint"
+              connected=false
+              for attempt in $(seq 1 6); do
+                if timeout 12 bash -c 'exec 3<>/dev/tcp/"$1"/"$2"' _ "$host" "$port" 2>/dev/null; then
+                  connected=true
+                  echo "MiMo private RPC TCP listener reachable (attempt $attempt)"
+                  break
+                fi
+                sleep 5
+              done
+              if [ "$connected" != true ]; then
+                echo "::error::Private MiMo RPC TCP port unavailable after six attempts"
+                exit 1
+              fi
             fi
           done
           echo "MIMO_RPC_CSV=$rpc" >> "$GITHUB_ENV"
