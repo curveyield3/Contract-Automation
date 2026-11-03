@@ -212,6 +212,54 @@ jobs:
           esac
           df -h "$RUNNER_TEMP"
           free -h
+      - name: Reclaim own audit shard or diagnose foreign lease before CPU inference
+        if: inputs.mode == 'autonomous'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module - <<'NODE'
+          const campaignId=process.env.AUDIT_AI_CAMPAIGN_ID;
+          const expectedPhase=Number(process.env.AUDIT_AI_EXPECTED_PHASE);
+          const expectedStep=Number(process.env.AUDIT_AI_EXPECTED_STEP);
+          const identityUrl=process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+          const grant=process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+          if(!identityUrl||!grant)throw Error('Signed OIDC required for Worker lease recovery');
+          const grantResponse=await fetch(identityUrl+(identityUrl.includes('?')?'&':'?')+
+            'audience='+encodeURIComponent('urn:curveyield:lite-solo:github-actions-ai:v1'),{
+              headers:{authorization:'bearer '+grant},signal:AbortSignal.timeout(20000)});
+          if(!grantResponse.ok)throw Error('OIDC identity HTTP '+grantResponse.status);
+          const token=(await grantResponse.json()).value;
+          if(typeof token!=='string')throw Error('Signed OIDC identity missing');
+          async function worker(route,body){
+            const response=await fetch('https://lite-solo-api.jamesnexus9999.workers.dev'+route,{
+              method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},
+              body:JSON.stringify({campaignId,...body}),signal:AbortSignal.timeout(90000)});
+            const data=await response.json();
+            if(!response.ok)throw Error('Worker '+route+' HTTP '+response.status+': '+
+              String(data.error||data.reason||data.status).slice(0,160));
+            return data;
+          }
+          const current=await worker('/api/step/current',{});
+          if(current.phase!==expectedPhase||current.currentStep!==expectedStep)
+            throw Error('Assigned campaign changed: expected '+expectedPhase+'/'+expectedStep+
+              ', Worker reports '+current.phase+'/'+current.currentStep);
+          if(current.status!=='ACTIVE'||current.engagement?.stage!=='WORK'||
+             ![1,2,3,8,9,10].includes(current.phase)){
+            console.log(JSON.stringify({status:'MIMO_LEASE_PREFLIGHT_DEFERRED',
+              workerStatus:current.status,engagementStage:current.engagement?.stage||null}));
+          }else{
+            const claim=await worker('/api/step/process',{action:'claim'});
+            if(claim.status==='NO_AVAILABLE_SHARD')
+              throw Error('MIMO_FOREIGN_LEASE_BLOCKED: '+(claim.counts?.leased||0)+
+                ' unit(s) leased by another caller. Use the existing admin step_release '+
+                'action on the exact unfinished unit before relaunching; accepted work is retained.');
+            if(claim.status!=='LEASED_SHARD'||!claim.unitId||!claim.lease)
+              throw Error('Unexpected Worker claim result: '+String(claim.status));
+            console.log(JSON.stringify({status:'MIMO_LEASE_READY',
+              unitId:claim.unitId,phase:claim.phase,step:claim.step,
+              recovery:'Existing GitHub AI identity reclaims same lease on next claim'}));
+          }
+          NODE
       - name: Launch standalone AI-v6 beta using signed job identity
         if: inputs.mode == 'autonomous_start'
         shell: bash
