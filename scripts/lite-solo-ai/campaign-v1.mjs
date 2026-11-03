@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v32.
+// Lite-Solo MiMo / Worker transport bridge v35.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -32,7 +32,52 @@ async function identity(){
  return token;
 }
 
+
+// Every MiMo prompt/reply and Worker request/response is archived through the
+// existing OIDC-authenticated Worker into PRIVATE R2 before archiving to Audit-Controller Markdown when the workflow finishes, never public Actions logs.
+// One sequence is scoped to the GitHub run ID from the verified OIDC claim.
+let transcriptEvent=0;
+let firstTranscriptScope=null,lastTranscriptScope=null;
+function updateTranscriptScope(reply,envelope){
+ const phase=Number(reply?.phase??envelope?.governingDocuments?.phase);
+ const step=Number(reply?.currentStep??reply?.step??envelope?.governingDocuments?.step);
+ if(Number.isInteger(phase)&&phase>=0&&phase<=99&&
+    Number.isInteger(step)&&step>=0&&step<=99){
+  if(!firstTranscriptScope)firstTranscriptScope={phase,step};
+  lastTranscriptScope={phase,step};
+ }
+}
+async function recordPrivateCommunication(direction,content){
+ if(typeof content!=='string')throw Error('MiMo transcript content must be text');
+ const eventId=String(++transcriptEvent).padStart(8,'0'),parts=[];
+ for(let i=0;i<content.length;){
+  let end=Math.min(i+110000,content.length);
+  if(end<content.length&&/[\uD800-\uDBFF]/.test(content[end-1]))end--;
+  if(end<=i)throw Error('MiMo transcript part must preserve Unicode');
+  parts.push(content.slice(i,end));i=end;
+ }
+ if(!parts.length)parts.push('');
+ for(let index=0;index<parts.length;index++){
+  const res=await fetch(endpoint,{
+   method:'POST',headers:{authorization:'Bearer '+await identity(),'content-type':'application/json'},
+   body:JSON.stringify({campaignId,operation:'record',eventId,direction,part:index,
+    totalParts:parts.length,content:parts[index],
+    startPhase:firstTranscriptScope?.phase??null,startStep:firstTranscriptScope?.step??null,
+    endPhase:lastTranscriptScope?.phase??null,endStep:lastTranscriptScope?.step??null}),
+   signal:AbortSignal.timeout(150000)
+  });
+  const receipt=await res.json().catch(()=>null);
+  if(!res.ok||receipt?.status!=='MIMO_COMMUNICATION_RECORDED')
+   throw Error('MiMo private transcript '+eventId+' part '+(index+1)+' not recorded: HTTP '+res.status);
+ }
+ console.log(JSON.stringify({status:'MIMO_PRIVATE_COMMUNICATION_RECORDED',
+  time:new Date().toISOString(),workflowRunId:process.env.GITHUB_RUN_ID||null,
+  direction,eventId,parts:parts.length,bytes:Buffer.byteLength(content),
+  sha256:sha(content),visibility:'PRIVATE_CLOUDFLARE_R2'}));
+}
+
 async function workerCall(payload){
+ await recordPrivateCommunication('worker_request',JSON.stringify({campaignId,...payload}));
  const res=await fetch(endpoint,{
   method:'POST',
   headers:{authorization:'Bearer '+await identity(),'content-type':'application/json'},
@@ -45,6 +90,7 @@ async function workerCall(payload){
  let envelope=null;
  try{envelope=JSON.parse(raw);}catch{}
  const result=envelope?.workerResponse||{};
+ updateTranscriptScope(result,envelope);
  const issueCount=Array.isArray(result.fieldErrors)?result.fieldErrors.length:0;
  console.log(JSON.stringify({status:'MIMO_WORKER_DISPOSITION',
   time:new Date().toISOString(),httpStatus:res.status,
@@ -61,6 +107,7 @@ async function workerCall(payload){
   privateOutputKey:envelope?.rawR2Key||null,
   privateOutputSha256:envelope?.rawSha256||null,
   responseSha256:sha(raw),responseBytes:Buffer.byteLength(raw)}));
+ await recordPrivateCommunication('worker_response',raw);
  return raw;
 }
 
@@ -99,7 +146,9 @@ const EXTERNAL_WAIT_STATUSES=new Set([
  'REWORK_PREPARING',
  'WAITING_ROSTER',
  'FILING_PHASE',
- 'FILING_STEP'
+ 'FILING_STEP',
+ 'SUBSTEP_WORK_SUBMISSION_QUEUED',
+ 'SUBSTEP_SUBMISSION_PENDING'
 ]);
 function ownerOfWorkerReply(raw){
  let envelope;
@@ -132,6 +181,7 @@ async function modelCall(messages){
   response_format:{type:'json_object'}
  });
  const start=Date.now();
+ await recordPrivateCommunication('mimo_input',request);
  console.log(JSON.stringify({status:'AI_BRIDGE_MODEL_REQUEST',
   conversationMessages:messages.length,promptBytes:Buffer.byteLength(request)}));
  const reply=await new Promise((resolve,reject)=>{
@@ -219,6 +269,7 @@ async function modelCall(messages){
  });
  const raw=reply.choices?.[0]?.message?.content;
  if(typeof raw!=='string')throw Error('MiMo did not return a text message; no fabricated Worker action');
+ await recordPrivateCommunication('mimo_output',raw);
  // Observe the submitted action without editing or filtering the actual text.
  // This repository is PUBLIC: full source-bound findings belong in Worker R2,
  // not public Actions logs. All metadata comes from the unmodified reply.
@@ -259,6 +310,8 @@ function modelFacingResponse(original){
  if(!native||typeof native!=='object'||Array.isArray(native))return original;
  if(!docs?.repositoryAgentPolicy?.content||
     !docs.currentPhaseStartHere?.content)return original;
+ const instructionOnly=native.engagement?.stage==='INSTRUCTIONS';
+ const withheldWorkFile=f=>/PHASE_[0-9]+_SCHEMA_v[0-9]+\.json$|WORK_FORM_TEMPLATE|WORK_FORM_v[0-9]+\.json|\/work\/phase-[0-9]+\/(?:shards|units)\//i.test(f?.path||'');
  const phase=Number(docs.phase??native.phase),step=Number(docs.step??native.step);
  if(!Number.isInteger(phase)||!Number.isInteger(step))
   throw Error('Current controller phase and step missing from original source-bound instructions');
@@ -299,7 +352,7 @@ function modelFacingResponse(original){
  }else{
   envelope.governingDocuments={
    ...docs,
-   requiredControllerFiles:(docs.requiredControllerFiles||[]).map(currentFile)
+   requiredControllerFiles:(docs.requiredControllerFiles||[]).filter(f=>!instructionOnly||!withheldWorkFile(f)).map(currentFile)
   };
   alreadyProvidedStepInstructions.add(baseKey);
  }
@@ -324,80 +377,55 @@ function modelFacingResponse(original){
 // Reissue the most recently provided original instructions and exact source-bound
 // forms; never maintain hand-written per-phase instructions in this adapter.
 function adapterRecovery(reason,rejectedRaw,lastStepRaw,lastAuthorityRaw,lastClaimRaw){
- const parse=raw=>{try{const value=JSON.parse(raw);return value&&typeof value==='object'&&!Array.isArray(value)?value:{};}catch{return {};}};
- const rejected=parse(rejectedRaw),prior=parse(lastStepRaw),claim=parse(lastClaimRaw);
- const state=prior.workerResponse||{},error=rejected.workerResponse||{},issued=claim.workerResponse||{};
- const units=issued.status==='LEASED_SHARD'?[issued]:
-  issued.status==='LEASED_PACKET'?(issued.items||[]):[];
+ const parse=raw=>{try{const v=JSON.parse(raw);return v&&typeof v==='object'&&!Array.isArray(v)?v:{};}catch{return {};}};
+ const prior=parse(lastStepRaw),rejected=parse(rejectedRaw),claim=parse(lastClaimRaw);
+ const state=prior.workerResponse||{},err=rejected.workerResponse||{},issued=claim.workerResponse||{};
+ const generic=!err.status||new Set(['MODEL_RESPONSE_NOT_JSON','INVALID_WORKER_ACTION',
+  'INVALID_SOURCE_ACTION','WORKER_RESPONSE_NOT_JSON','ERROR']).has(err.status);
+ const status=generic?(state.status||err.status||'UNKNOWN'):err.status;
+ const engagement=err.engagement||state.engagement||issued.engagement||{};
+ const stage=engagement.stage||null;
+ const instruction=err.instructionCompletionForm||engagement.instructionCompletionForm||state.instructionCompletionForm||null;
+ const review=err.reviewForm||engagement.reviewForm||state.reviewForm||null;
+ const remediation=err.remediationForm||engagement.remediationForm||state.remediationForm||null;
+ const units=issued.status==='LEASED_SHARD'?[issued]:issued.status==='LEASED_PACKET'?(issued.items||[]):[];
  const unit=units[0]||null;
- // An explicit Worker stage/validation disposition outranks the previously
- // issued stage. Only generic malformed-command errors inherit prior stage.
- const genericRejection=!error.status||new Set([
-  'MODEL_RESPONSE_NOT_JSON','INVALID_WORKER_ACTION','INVALID_SOURCE_ACTION',
-  'WORKER_RESPONSE_NOT_JSON','ERROR'
- ]).has(error.status);
- const status=genericRejection?(state.status||error.status||'UNKNOWN'):error.status;
- const stage=state.engagement?.stage||issued.engagement?.stage||null;
- const review=new Set(['FIRST_ROUND_RECORDED_REVIEW_REQUIRED',
-  'REVIEW_QUESTIONS_REQUIRED','REVIEW_QUESTIONS_ISSUED']);
- const repair=new Set(['REPAIR_CHECKBOX_REQUIRED','REPAIR_CHECKLIST_READY']);
- let route='/api/step/current',request={};
- if(status==='INSTRUCTION_ACKNOWLEDGMENT_REQUIRED'||
-    stage==='INSTRUCTIONS'&&genericRejection&&status!=='INSTRUCTIONS_ACKNOWLEDGED'){
-  route='/api/step/interaction';
-  request={action:'acknowledge',...(state.engagement?.instructionFormSha256?
-    {formSha256:state.engagement.instructionFormSha256}:{})};
- }else if(review.has(status)){
-  route='/api/step/interaction';
-  request={action:'review_answers',...(unit?{unitId:unit.unitId,lease:unit.lease}:{})};
- }else if(repair.has(status)){
-  route='/api/step/interaction';
-  request={action:'repair_ack',...(unit?{unitId:unit.unitId,lease:unit.lease}:{})};
+ const route='/api/process';let request={campaignId},guidance='Call Process for the next source-bound action.';
+ if(status==='INSTRUCTION_SUBSTEP_FORM_REQUIRED'||stage==='INSTRUCTIONS'){
+  if(instruction){
+   request={campaignId,form:instruction};
+   guidance='Study and understand all instruction documents FIRST. Then replace the three ANSWER placeholders with substantive answers to the exact issued QUESTION A/B/C. Keep the STOP warning, prefilled questions and four identity fields unchanged. Return the COMPLETE Instruction Sub-Step Completion Form using Process. No work files may be requested before completion.';
+  }else guidance='Call Process with campaignId only to recover the original Instruction Sub-Step Completion Form; do not invent questions.';
+ }else if(status==='REVIEW_SUBSTEP_READY'||status==='REVIEW_SUBSTEP_REQUIRED'||stage==='REVIEW'){
+  if(review){
+   request={campaignId,form:review};
+   guidance='Complete all five original review question answers and AT LEAST THREE distinct issues requiring repairs or deeper analysis in CHECKLIST BUILDING. Keep the issued questions and identity fields unchanged. Return the single completed Review Sub-Step Completion Form using Process.';
+  }else guidance='Call Process with campaignId only to recover the original Review Sub-Step Completion Form.';
+ }else if(status==='REMEDIATION_SUBSTEP_READY'||status==='REMEDIATION_SUBSTEP_FORM_REQUIRED'||stage==='REMEDIATION'){
+  if(remediation){
+   request={campaignId,form:remediation};
+   guidance='Perform actual source-bound repairs or deeper analysis, submit genuinely revised work, describe the correction and reference the exact changed or added work for EVERY repair item. Fill all closing question answers, then submit the single complete Remediation Sub-Step Completion Form through Process. Never fabricate work or references.';
+  }else guidance='Call Process with campaignId only to recover the original Remediation Sub-Step Completion Form.';
  }else if(unit){
-  route='/api/step/process';
-  request={action:'submit',unitId:unit.unitId,lease:unit.lease,
+  request={campaignId,action:'submit',unitId:unit.unitId,lease:unit.lease,
    ...(unit.inputFileTemplate?{shard:unit.inputFileTemplate}:{})};
+  guidance='Fill the original source-bound work file with genuine analysis and preserve all protected identifiers. Submit the entire completed file through Process, not a blank template.';
  }else if(stage==='WORK'){
-  route='/api/step/process';request={action:'claim'};
+  request={campaignId,action:'claim'};
+  guidance='Use Process to invoke the existing authorized claim action; do not invent lease or unit identifiers.';
  }
- const stageForms={
-  ...(state.engagement?.instructionForm?
-   {instructionForm:state.engagement.instructionForm,
-    instructionFormSha256:state.engagement.instructionFormSha256}:{}),
-  ...((error.reviewQuestionsForm||state.reviewQuestionsForm)?
-   {reviewQuestionsForm:error.reviewQuestionsForm||state.reviewQuestionsForm,
-    questions:error.questions||state.questions||null}:{}),
-  ...((error.repairCheckboxForm||state.repairCheckboxForm)?
-   {repairCheckboxForm:error.repairCheckboxForm||state.repairCheckboxForm,
-    repairChecklist:error.repairChecklist||state.repairChecklist||null,
-    checkboxFormSha256:error.checkboxFormSha256||state.checkboxFormSha256||null}:{})
- };
- return {
-  type:'MIMO_ADAPTER_ACTION_RECOVERY',reason,campaignId,
+ return {type:'MIMO_ADAPTER_ACTION_RECOVERY',reason,campaignId,
   phase:state.phase??issued.phase??prior.governingDocuments?.phase??null,
   step:state.currentStep??state.step??issued.step??prior.governingDocuments?.step??null,
-  stage,rejectedWorkerStatus:status,
-  workerNextAction:error.nextAction||state.nextAction||state.engagement?.nextAction||null,
-  requiredNextCommand:{route,request},
+  stage,rejectedWorkerStatus:status,requiredNextCommand:{route,request},
   lastControllerInstructions:lastAuthorityRaw||lastStepRaw,
   lastIssuedStepResponse:lastStepRaw,
-  originalRequiredForms:{...stageForms,
+  originalRequiredForms:{instructionCompletionForm:instruction,reviewForm:review,remediationForm:remediation,
    issuedWorkForms:units.map(u=>({unitId:u.unitId,lease:u.lease,
     canonicalPath:u.canonicalPath||u.descriptor?.path||null,
-    inputFileTemplate:u.inputFileTemplate||null,
-    validationSchema:u.validationSchema||null}))},
+    inputFileTemplate:u.inputFileTemplate||null,validationSchema:u.validationSchema||null}))},
   originalWorkerRejection:rejected,
-  instruction:'Call the exact route and action shown with real controller-issued identifiers. '+
-   'Review the replayed ORIGINAL step instructions and issued forms, for this '+
-   'substep. For acknowledge: complete actual instruction Q1-Q3 and readAndUnderstand=true. '+
-   'For review_answers: complete all issued Q1-Q5 and genuine repairChecklist. '+
-   'For repair_ack: acknowledge every real repairId with truthful checks and outcomes. '+
-   'For submit: use the FULL original inputFileTemplate in request.shard, filling '+
-   'EVERY editable semantic field from work already performed, keeping immutable '+
-   'fields, adding genuine revisions and required verification manifest. '+
-   'Do not send an unchanged blank template or fake evidence. '+
-   'Return ONLY one JSON object with route and request.'
- };
+  instruction:guidance+' Preserve original controller evidence and acceptance requirements. Return ONLY one complete JSON object with route and request.'};
 }
 function incompatibleWorkerReply(raw){
  let e;try{e=JSON.parse(raw);}catch{return true;}

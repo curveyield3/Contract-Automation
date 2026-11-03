@@ -628,6 +628,55 @@ jobs:
             jq -r '"Status: \(.status); reviewed \(.reviewed|length)/\(.totalChunks) chunks"' "$file" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Archive finished MiMo communications from private R2 to Audit-Controller MiMo
+        if: always() && (inputs.mode == 'campaign' || inputs.mode == 'autonomous')
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const campaignId=process.env.AUDIT_AI_CAMPAIGN_ID,runId=String(process.env.GITHUB_RUN_ID||'');
+          if(!/^[A-Za-z0-9_.-]+-r[0-9]+$/.test(campaignId||'')||!/^[0-9]+$/.test(runId))
+            throw Error('Cannot archive MiMo workflow without original campaign and GitHub run identity');
+          const identityEndpoint=process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+          const identityBearer=process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+          if(!identityEndpoint||!identityBearer)throw Error('Signed GitHub Actions OIDC identity unavailable');
+          const audience='urn:curveyield:lite-solo:github-actions-ai:v1';
+          async function token(){
+            const url=identityEndpoint+(identityEndpoint.includes('?')?'&':'?')+
+              'audience='+encodeURIComponent(audience);
+            const res=await fetch(url,{headers:{authorization:'bearer '+identityBearer},
+              signal:AbortSignal.timeout(20000)});
+            if(!res.ok)throw Error('OIDC issuance failed HTTP '+res.status);
+            const credential=(await res.json()).value;
+            if(typeof credential!=='string')throw Error('OIDC identity response missing token');
+            return credential;
+          }
+          let cursor=null,pages=0,events=0,files=0,complete=false;
+          for(;pages<10000;pages++){
+            const response=await fetch('https://lite-solo-api.jamesnexus9999.workers.dev/api/ai/bridge',{
+              method:'POST',
+              headers:{authorization:'Bearer '+await token(),'content-type':'application/json'},
+              body:JSON.stringify({campaignId,operation:'archive',...(cursor?{cursor}:{})}),
+              signal:AbortSignal.timeout(150000)});
+            const data=await response.json().catch(()=>null);
+            if(!response.ok||data?.status!=='MIMO_ARCHIVE_PAGE_RECORDED')
+              throw Error('MiMo completed-run archive not accepted HTTP '+response.status+': '+
+                JSON.stringify(data).slice(0,700));
+            events+=data.archivedParts||0;files+=data.newFiles||0;complete=data.complete===true;
+            console.log(JSON.stringify({status:'MIMO_ARCHIVE_PROGRESS',runId,campaignId,page:pages+1,
+              archivedParts:events,newMarkdownFiles:files,completed:complete,
+              folder:data.folder,commit:data.commit||null,privateContent:'AUDIT_CONTROLLER_ONLY'}));
+            if(complete)break;
+            if(typeof data.nextCursor!=='string'||!data.nextCursor)
+              throw Error('Incomplete MiMo archive lacks authoritative R2 pagination cursor');
+            cursor=data.nextCursor;
+          }
+          if(!complete)throw Error('MiMo archive bounded iteration limit exhausted');
+          console.log(JSON.stringify({status:'MIMO_ARCHIVE_COMPLETED',runId,campaignId,
+            archivedParts:events,newMarkdownFiles:files,
+            source:'PRIVATE_R2',destination:'PRIVATE_AUDIT_CONTROLLER_MIMO'}));
+          NODE
   inference-rpc:
     if: github.event_name == 'workflow_dispatch' && (inputs.inference_runners == '2' || inputs.inference_runners == '4') && inputs.mode != 'train' && inputs.mode != 'autonomous_start'
     name: MiMo RPC node ${{ matrix.rank }}
