@@ -1,18 +1,6 @@
 name: Audit Detection Rebuild Verify v1
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'scripts/**'
-      - 'packages/github-native-sim/**'
-      - 'protocol/**'
-      - 'process/adr-verify/**'
-      - '.github/workflows/audit-detection-rebuild-verify-v1.yml'
-      - '.github/workflows/lite-phase-work-packet-controller-v1.yml'
-      - '.github/workflows/lite-v7-execution-dispatch-v1.yml'
-      - '.github/workflows/audit-source-initialization-v1.yml'
-      - '.github/workflows/audit-controller-execution.yml'
   workflow_dispatch:
 
 permissions:

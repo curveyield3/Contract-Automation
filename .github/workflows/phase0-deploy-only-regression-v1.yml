@@ -1,9 +1,7 @@
 name: Phase 0 Deployment Only Regression v1
 
-# Mandatory merge gate for main (required status check: "verify-deploy-only").
-# Runs on every pull request, with no path filter, so it is always reported.
+# Manually invoked only; automatic pull-request trigger disabled.
 on:
-  pull_request:
   workflow_dispatch:
 
 permissions:

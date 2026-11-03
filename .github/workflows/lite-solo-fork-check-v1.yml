@@ -1,12 +1,6 @@
 name: Lite-Solo Fork Integration Checks v1
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/lite-solo-*.yml'
-      - 'scripts/lite-solo-*'
-      - 'scripts/lib/lite-solo-*'
-      - 'packages/github-native-sim/src/*lite-solo*'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -16,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
