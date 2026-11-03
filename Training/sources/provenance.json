@@ -1,5 +1,5 @@
 {
-  "version": "v11",
+  "version": "v12",
   "forge": {
     "commit": "c2829d451d37581dae71aba610506ba3b161e371",
     "documents": [
@@ -314,6 +314,70 @@
         "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
         "source_blob_sha": "b4319c6eaf6b5ef0c35a04cf6f81e5f796a6f6e1",
         "findings": 6
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/chainsecurity-m0-mextensions-audit.json",
+        "upstream_path": "dataset-curated/findings/ChainSecurity_M0_MExtensions_Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "228ca44aa8818063330dff5a5e6a411bd2828979",
+        "findings": 21
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/managed-optimistic-oracle-audit.json",
+        "upstream_path": "dataset-curated/findings/Managed Optimistic Oracle Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "563f9596dc4a73d2937e2b8e0cdee7d7973588e3",
+        "findings": 15
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-panoptic-sep2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_panoptic_sep2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "795b02d3de4f1ef0b8364da5dccf583c2195789f",
+        "findings": 5
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-charm-june2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_charm_june2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "f844530a943b4302d8b7374bdf9643d48e207394",
+        "findings": 15
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/ackee-blockchain-lido-csm-v2-report.json",
+        "upstream_path": "dataset-curated/findings/ackee-blockchain-lido-csm-v2-report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "cf786801764b4532385d9c2302e5e9d01bfb0e27",
+        "findings": 20
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/ackee-blockchain-lido-vault-wrapper-report.json",
+        "upstream_path": "dataset-curated/findings/ackee-blockchain-lido-vault-wrapper-report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "a23fa0df32cede8d353291251b5dab9198276def",
+        "findings": 14
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/ackee-blockchain-lido-triggerable-withdrawals-report.json",
+        "upstream_path": "dataset-curated/findings/ackee-blockchain-lido-triggerable-withdrawals-report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "1e9ad1d876bef48b0830fcd911db4c57a885c01f",
+        "findings": 11
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/ackee-blockchain-fluidkey-earn-module-report.json",
+        "upstream_path": "dataset-curated/findings/ackee-blockchain-fluidkey-earn-module-report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "1bfc3ff2be2583a88d656fa6940a967ab865154f",
+        "findings": 9
       }
     ]
   },
