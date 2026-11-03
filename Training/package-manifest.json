@@ -1,5 +1,5 @@
 {
-  "version": "v16",
+  "version": "v17",
   "status": "staged_not_training_ready",
   "date": "2026-11-03",
   "scope": "smart-contract-auditing-only",
@@ -15,7 +15,7 @@
       "Unknown": 45
     },
     "smartbugs_annotated_contracts": 143,
-    "defihacklabs_exploit_case_links": 585,
+    "defihacklabs_exploit_case_links": 698,
     "code4rena_judged_high_medium_findings": 208,
     "code4rena_final_reports": 15,
     "code4rena_high": 50,
