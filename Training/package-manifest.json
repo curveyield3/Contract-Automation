@@ -1,5 +1,5 @@
 {
-  "version": "v2",
+  "version": "v3",
   "status": "staged_not_training_ready",
   "date": "2026-11-03",
   "scope": "smart-contract-auditing-only",
@@ -17,5 +17,6 @@
     "defihacklabs_exploit_case_links": 7
   },
   "workflows_modified": false,
-  "tests_created_or_run": false
+  "tests_created_or_run": false,
+  "license_notices_added": true
 }
