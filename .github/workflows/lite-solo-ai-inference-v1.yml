@@ -102,7 +102,7 @@ env:
   GGML_RPC_NO_RDMA: '1'
 jobs:
   audit-file-trigger:
-    if: github.event_name == 'push' && (contains(github.event.head_commit.added, 'process/agent-upload/lite-solo-ai-audit-request-v1.json') || contains(github.event.head_commit.modified, 'process/agent-upload/lite-solo-ai-audit-request-v1.json'))
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -119,6 +119,11 @@ jobs:
         run: |
           set -euo pipefail
           request='process/agent-upload/lite-solo-ai-audit-request-v1.json'
+          changed_files="$(gh api "repos/curveyield3/Contract-Automation/commits/$GITHUB_SHA" --jq '.files[].filename')"
+          if ! grep -Fqx "$request" <<< "$changed_files"; then
+            echo 'This push did not change the audit request; no inference dispatch.'
+            exit 0
+          fi
           test -s "$request"
           jq -e '
             .schemaVersion == "lite-solo-ai-audit-request-v1"
