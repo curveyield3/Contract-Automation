@@ -1359,7 +1359,7 @@ const phaseRevision=Number(assignment.phaseRevision??1);
 if(!Number.isInteger(phaseRevision)||phaseRevision<1) throw new Error('assignment.phaseRevision must be an integer >= 1 when present');
 // Filing-only addition: preserve already-authored Worker SUB-STEP CHECKS artifacts.
 // The controller does not parse, score, or validate their titles or contents.
-const substepFolderRel=path.posix.join(campaignPath,'SUB-STEPS CHECKS');
+const substepFolderRel=path.posix.join(campaignPath,'Sub-Steps Checks');
 fs.mkdirSync(repoFile(root,substepFolderRel),{recursive:true});
 const substepCheckPaths=fs.readdirSync(repoFile(root,substepFolderRel))
  .filter(name=>name.endsWith('.json')&&fs.statSync(repoFile(root,path.posix.join(substepFolderRel,name))).isFile())

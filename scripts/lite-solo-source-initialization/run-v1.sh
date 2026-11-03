@@ -240,6 +240,9 @@ else
     git sparse-checkout add "/$literal_root/"
 
     mkdir -p "$source_dir" "$receipts_dir" "$campaign_root/reports" "Audit Campaign Directory/campaigns"
+    # Git cannot store an empty directory: retain the new campaign sub-step folder from initialization.
+    mkdir -p "$campaign_root/Sub-Steps Checks"
+    : > "$campaign_root/Sub-Steps Checks/.gitkeep"
     cp "$work/$filename" "$source_path"
     tree_sha="$(safe_extract_audit_zip "$source_path" "$source_dir" "$filename")"
 
@@ -262,7 +265,7 @@ else
     RECEIPTS_DIR="$receipts_dir" CAMPAIGN_DIRECTORY_PATH="$campaign_directory_path" \
       python3 "$ROOT/scripts/lite-solo-source-initialization/write-phase0-receipt-v1.py"
 
-    git add -- "$receipts_dir" "$campaign_directory_path" "$campaign_root/reports/REPORT_PUBLICATION_POLICY_v1.json"
+    git add -- "$receipts_dir" "$campaign_directory_path" "$campaign_root/reports/REPORT_PUBLICATION_POLICY_v1.json" "$campaign_root/Sub-Steps Checks/.gitkeep"
     git commit -m "audit(receipt): initialize $campaign_id phase 0"
     init_commit="$(git rev-parse HEAD)"
 
