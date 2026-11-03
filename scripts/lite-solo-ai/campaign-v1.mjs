@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v29.
+// Lite-Solo MiMo / Worker transport bridge v30.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -424,7 +424,7 @@ let workerResponse=await workerCall({operation:'start'});
 const dialogue=[];
 let lastOwner=null,waitingSince=0,lastWaitReport=0;
 let lastStepScope=null,lastUnitScope=null;
-let lastAuthorityRaw=null,lastClaimRaw=null,pendingRecovery=null;
+let lastAuthorityRaw=null,lastClaimRaw=null,lastIssuedResponseRaw=null,pendingRecovery=null;
 let consecutiveRejections=0,lastRejectedFingerprint=null;
 while(true){
  // Acquire the exact controller-issued work form before model analysis whenever
@@ -492,7 +492,7 @@ while(true){
     scope.unit!==null&&scope.unit!==lastUnitScope)){
   dialogue.length=0;
   alreadyProvidedStepInstructions.clear();
-  lastAuthorityRaw=null;lastClaimRaw=null;pendingRecovery=null;
+  lastAuthorityRaw=null;lastClaimRaw=null;lastIssuedResponseRaw=null;pendingRecovery=null;
   consecutiveRejections=0;lastRejectedFingerprint=null;
  }
  if(scope){lastStepScope=scope.step;if(scope.unit!==null)lastUnitScope=scope.unit;}
@@ -503,6 +503,9 @@ while(true){
   pendingRecovery=null;
  }else{
   const modelInstructions=modelFacingResponse(workerResponse);
+  // Keep the last real Worker-issued step response even after any number of
+  // incompatible model turns. A rejected model action is NOT a new instruction.
+  lastIssuedResponseRaw=workerResponse;
   dialogue.push({role:'user',content:modelInstructions});
   let issued=null;
   try{issued=JSON.parse(workerResponse);}catch{}
@@ -525,8 +528,14 @@ while(true){
     'persists after correction; preserve controller records and diagnose '+
     'before retrying. Last model output SHA256 '+fingerprint);
   lastRejectedFingerprint=fingerprint;
+  // A 4xx rejection can still issue a real review/repair form. Preserve that
+  // authoritative stage form for subsequent corrective turns.
+  let errorState=null;
+  try{errorState=JSON.parse(workerResponse)?.workerResponse;}catch{}
+  if(errorState&&(errorState.reviewQuestionsForm||errorState.repairCheckboxForm))
+   lastIssuedResponseRaw=workerResponse;
   pendingRecovery=adapterRecovery('Worker rejected incompatible model reply',
-   workerResponse,previouslyIssued,lastAuthorityRaw,lastClaimRaw);
+   workerResponse,lastIssuedResponseRaw||previouslyIssued,lastAuthorityRaw,lastClaimRaw);
   console.log(JSON.stringify({status:'MIMO_INCOMPATIBLE_REPLY_RECOVERY_ISSUED',
    campaignId,phase:pendingRecovery.phase,step:pendingRecovery.step,
    stage:pendingRecovery.stage,
