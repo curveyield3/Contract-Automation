@@ -488,7 +488,7 @@ while(true){
  // currently issued original packet. Old packets/replies remain immutable
  // in Worker storage, not repeatedly reprocessed in every later prompt.
  const scope=assignmentScope(workerResponse);
- if(scope&&(scope.step!==lastStepScope||
+ if(!pendingRecovery&&scope&&(scope.step!==lastStepScope||
     scope.unit!==null&&scope.unit!==lastUnitScope)){
   dialogue.length=0;
   alreadyProvidedStepInstructions.clear();
