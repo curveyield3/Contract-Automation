@@ -131,7 +131,8 @@ jobs:
             jq -e '
               .schemaVersion == "lite-solo-ai-audit-request-v1"
               and .mode == "autonomous_start"
-              and (.source_url | type == "string" and test("^https://github\\.com/curveyield3/Audit-Controller/blob/main/campaigns/[A-Za-z0-9._-]+\\.zip$"))
+              and (.source_url | type == "string")
+              and (.source_url | test("^https://github\\.com/curveyield3/Audit-Controller/blob/main/campaigns/[A-Za-z0-9._-]+\\.zip$"))
               and (.inference_runners == "1" or .inference_runners == "2" or .inference_runners == "4")
               and .submission_mode == "submit"
               and (.max_chunks | type == "string" and test("^([1-9]|[12][0-9]|3[012])$"))
