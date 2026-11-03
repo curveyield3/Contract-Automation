@@ -136,6 +136,28 @@ jobs:
             and (.max_chunks | type == "string" and test("^([1-9]|[12][0-9]|3[012])$"))
             and (.ai_hop | type == "string" and test("^[0-9]+$"))
           ' "$request" >/dev/null
+          old_run="$(jq -r '.supersedes_run_id // empty' "$request")"
+          if [ -n "$old_run" ]; then
+            [[ "$old_run" =~ ^[0-9]+$ ]] || { echo "::error::Invalid superseded run ID"; exit 1; }
+            old_sha="$(jq -r '.supersedes_run_sha // empty' "$request")"
+            [[ "$old_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Expected exact superseded commit SHA"; exit 1; }
+            old_metadata="$(gh api "repos/curveyield3/Contract-Automation/actions/runs/$old_run")"
+            printf '%s' "$old_metadata" | jq -e --arg sha "$old_sha" '
+              .head_sha==$sha and .event=="workflow_dispatch" and .head_branch=="main"
+              and .path==".github/workflows/lite-solo-ai-inference-v1.yml"
+            ' >/dev/null || { echo "::error::Superseded workflow identity mismatch"; exit 1; }
+            old_status="$(printf '%s' "$old_metadata" | jq -r '.status')"
+            if [ "$old_status" != completed ]; then
+              gh run cancel "$old_run" --repo curveyield3/Contract-Automation
+              for attempt in $(seq 1 30); do
+                old_status="$(gh api "repos/curveyield3/Contract-Automation/actions/runs/$old_run" --jq '.status')"
+                [ "$old_status" = completed ] && break
+                sleep 5
+              done
+              [ "$old_status" = completed ] || { echo "::error::Old audit run not terminal, refusing parallel launch"; exit 1; }
+            fi
+            echo "Old exact audit run $old_run terminated; controller-accepted work stays immutable."
+          fi
           gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref main \
             -f "mode=$(jq -r .mode "$request")" \
             -f "inference_runners=$(jq -r .inference_runners "$request")" \
