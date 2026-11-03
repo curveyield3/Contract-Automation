@@ -268,7 +268,7 @@ while(true){
    try{data=JSON.parse(issued)?.workerResponse;}catch{}
    if(!['LEASED_SHARD','LEASED_PACKET'].includes(data?.status))
      throw Error('MIMO_CLAIM_RECOVERY_REQUIRED: '+String(data?.status||'UNPARSEABLE')+
-       '; diagnose exact Worker's ownership/acceptance, no fabricated submission');
+       '; diagnose exact Worker ownership and acceptance; no fabricated submission');
    console.log(JSON.stringify({status:'MIMO_CONTROLLER_CLAIM_ACQUIRED',
      unitId:data.unitId??null,packetItems:data.items?.length??null,
      phase:data.phase,step:data.step,preservedNativeForm:true,
