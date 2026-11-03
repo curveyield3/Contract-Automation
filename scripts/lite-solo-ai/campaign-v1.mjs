@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v25.
+// Lite-Solo MiMo / Worker transport bridge v26.
 // No local audit policy, prompt rewriting, evidence filtering, form filling,
 // semantic validation, corrective inference or controller state mutation.
 // The Worker is the sole source of instructions, tool calls and acceptance.
