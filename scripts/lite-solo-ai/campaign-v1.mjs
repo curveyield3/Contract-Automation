@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v30.
+// Lite-Solo MiMo / Worker transport bridge v31.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -330,21 +330,27 @@ function adapterRecovery(reason,rejectedRaw,lastStepRaw,lastAuthorityRaw,lastCla
  const units=issued.status==='LEASED_SHARD'?[issued]:
   issued.status==='LEASED_PACKET'?(issued.items||[]):[];
  const unit=units[0]||null;
- const status=error.status||state.status||'UNKNOWN';
+ // An explicit Worker stage/validation disposition outranks the previously
+ // issued stage. Only generic malformed-command errors inherit prior stage.
+ const genericRejection=!error.status||new Set([
+  'MODEL_RESPONSE_NOT_JSON','INVALID_WORKER_ACTION','INVALID_SOURCE_ACTION',
+  'WORKER_RESPONSE_NOT_JSON','ERROR'
+ ]).has(error.status);
+ const status=genericRejection?(state.status||error.status||'UNKNOWN'):error.status;
  const stage=state.engagement?.stage||issued.engagement?.stage||null;
  const review=new Set(['FIRST_ROUND_RECORDED_REVIEW_REQUIRED',
   'REVIEW_QUESTIONS_REQUIRED','REVIEW_QUESTIONS_ISSUED']);
  const repair=new Set(['REPAIR_CHECKBOX_REQUIRED','REPAIR_CHECKLIST_READY']);
  let route='/api/step/current',request={};
  if(status==='INSTRUCTION_ACKNOWLEDGMENT_REQUIRED'||
-    stage==='INSTRUCTIONS'&&status!=='INSTRUCTIONS_ACKNOWLEDGED'){
+    stage==='INSTRUCTIONS'&&genericRejection&&status!=='INSTRUCTIONS_ACKNOWLEDGED'){
   route='/api/step/interaction';
   request={action:'acknowledge',...(state.engagement?.instructionFormSha256?
     {formSha256:state.engagement.instructionFormSha256}:{})};
- }else if(review.has(status)||review.has(state.status)&&!repair.has(status)){
+ }else if(review.has(status)){
   route='/api/step/interaction';
   request={action:'review_answers',...(unit?{unitId:unit.unitId,lease:unit.lease}:{})};
- }else if(repair.has(status)||repair.has(state.status)&&!review.has(status)){
+ }else if(repair.has(status)){
   route='/api/step/interaction';
   request={action:'repair_ack',...(unit?{unitId:unit.unitId,lease:unit.lease}:{})};
  }else if(unit){
