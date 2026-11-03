@@ -1,5 +1,5 @@
 {
-  "version": "v2",
+  "version": "v3",
   "scope": "smart_contract_only",
   "sources": [
     {
@@ -55,7 +55,7 @@
     {
       "name": "Certora",
       "url": "https://github.com/Certora/SecurityReports",
-      "status": "catalogued"
+      "status": "evm_portfolio_metadata_ingested"
     },
     {
       "name": "EVMbench",
