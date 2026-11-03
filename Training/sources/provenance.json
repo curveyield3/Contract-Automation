@@ -1,5 +1,5 @@
 {
-  "version": "v7",
+  "version": "v8",
   "forge": {
     "commit": "c2829d451d37581dae71aba610506ba3b161e371",
     "documents": [
@@ -186,6 +186,70 @@
         "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
         "source_blob_sha": "118c3e0282f6fb3bdef2f9e0598729bbec732b7f",
         "findings": 13
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-rocketpool-jun2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_rocketpool_jun2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "5a2725083390ea8dd68ede69e4206c757b1139ec",
+        "findings": 62
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-stryke-aug2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_stryke_aug2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "270d62596596e1682366b190d574b23c0416dde1",
+        "findings": 28
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-centrifuge-aug2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_centrifuge_aug2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "13c301c8fbc43dd6391fde31c1dd79c74edfb8ae",
+        "findings": 20
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-seamless-sep2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_seamless_sep2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "bd65dc06e305a9e291edc0b240a2c967716f13aa",
+        "findings": 9
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-kpk-oct2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_kpk_oct2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "448b62f71add58a82a9d3a0102a14cc557961a3e",
+        "findings": 56
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-liminal-oct2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_liminal_oct2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "2940bab1408b5005f0618f4d5d364d40e6da09b1",
+        "findings": 37
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-steakhouse-nov2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_steakhouse_nov2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "14d7a94c1cd37f1a2e5f2058dc69de9a393ac585",
+        "findings": 35
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-uniswap-april2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_uniswap_april2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "f2a8c73227e8391e4d0bc7ecc1cc1bd9e689b662",
+        "findings": 14
       }
     ]
   },
