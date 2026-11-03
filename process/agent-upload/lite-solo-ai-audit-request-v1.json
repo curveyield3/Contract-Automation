@@ -8,5 +8,5 @@
   "submission_mode": "submit",
   "max_chunks": "32",
   "ai_hop": "0",
-  "dispatchRevision": "v2"
+  "dispatchRevision": "v3"
 }
