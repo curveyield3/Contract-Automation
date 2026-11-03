@@ -1357,8 +1357,17 @@ const receiptLibUrl=pathToFileURL(repoFile(root,'packages/controller-core/src/li
 const receiptLib=await import(receiptLibUrl);
 const phaseRevision=Number(assignment.phaseRevision??1);
 if(!Number.isInteger(phaseRevision)||phaseRevision<1) throw new Error('assignment.phaseRevision must be an integer >= 1 when present');
+// Filing-only addition: preserve already-authored Worker SUB-STEP CHECKS artifacts.
+// The controller does not parse, score, or validate their titles or contents.
+const substepFolderRel=path.posix.join(campaignPath,'SUB-STEPS CHECKS');
+fs.mkdirSync(repoFile(root,substepFolderRel),{recursive:true});
+const substepCheckPaths=fs.readdirSync(repoFile(root,substepFolderRel))
+ .filter(name=>name.endsWith('.json')&&fs.statSync(repoFile(root,path.posix.join(substepFolderRel,name))).isFile())
+ .map(name=>path.posix.join(substepFolderRel,name));
 const receiptRel=receiptLib.phaseReceiptPath(campaignPath,sequence,phaseRevision);
 const evidence=[receiptRef(root,campaignPath,assignment.workFormPath,'PHASE_WORK_FORM')];
+for(const rel of substepCheckPaths)evidence.push(receiptRef(root,campaignPath,rel,'SUB_STEP_CHECKS'));
+
 if(sealedRework){
   evidence.push(receiptRef(root,campaignPath,sealedRework.request.priorReceipt.path,'PRIOR_PHASE_REVISION'));
   evidence.push(receiptRef(root,campaignPath,sealedRework.request.qualityReview.path,'HUMAN_QUALITY_REVIEW'));
