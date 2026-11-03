@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v32.
+// Lite-Solo MiMo / Worker transport bridge v33.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -284,8 +284,13 @@ function modelFacingResponse(original){
   }
   return f; // preserve required original if schema has a different stage shape
  };
+ const issuedStage=native.engagement?.stage||
+  (['LEASED_SHARD','LEASED_PACKET'].includes(native.status)?'WORK':
+   native.reviewForm?'REVIEW':native.remediationForm?'REMEDIATION':native.stage||'');
+ // The Worker withholds work schema and templates until instruction completion.
+ // The late WORK package must therefore not be removed as a duplicate.
  const baseKey=[campaignId,docs.authorityCommit,phase,step,
-  native.stage||'',sha(docs.repositoryAgentPolicy.content),
+  issuedStage,sha(docs.repositoryAgentPolicy.content),
   sha(docs.currentPhaseStartHere.content)].join(':');
  const prior=alreadyProvidedStepInstructions.has(baseKey);
  if(prior){
@@ -361,6 +366,12 @@ function adapterRecovery(reason,rejectedRaw,lastStepRaw,lastAuthorityRaw,lastCla
   route='/api/step/process';request={action:'claim'};
  }
  const stageForms={
+  ...(state.engagement?.instructionCompletionForm?
+   {instructionCompletionForm:state.engagement.instructionCompletionForm}:{}),
+  ...((error.reviewForm||state.engagement?.reviewForm||state.reviewForm)?
+   {reviewForm:error.reviewForm||state.engagement?.reviewForm||state.reviewForm}:{}),
+  ...((error.remediationForm||state.engagement?.remediationForm||state.remediationForm)?
+   {remediationForm:error.remediationForm||state.engagement?.remediationForm||state.remediationForm}:{}),
   ...(state.engagement?.instructionForm?
    {instructionForm:state.engagement.instructionForm,
     instructionFormSha256:state.engagement.instructionFormSha256}:{}),
@@ -372,6 +383,16 @@ function adapterRecovery(reason,rejectedRaw,lastStepRaw,lastAuthorityRaw,lastCla
     repairChecklist:error.repairChecklist||state.repairChecklist||null,
     checkboxFormSha256:error.checkboxFormSha256||state.checkboxFormSha256||null}:{})
  };
+ const chosenForm=stage==='INSTRUCTIONS'?stageForms.instructionCompletionForm:
+  stage==='REVIEW'||['REVIEW_SUBSTEP_READY','REVIEW_SUBSTEP_REQUIRED'].includes(status)?stageForms.reviewForm:
+  stage==='REMEDIATION'||['REMEDIATION_SUBSTEP_READY','REMEDIATION_SUBSTEP_FORM_REQUIRED'].includes(status)?stageForms.remediationForm:null;
+ if(chosenForm){route='/api/process';request={campaignId,form:chosenForm};}
+ else if(stage==='WORK'||unit){
+  route='/api/process';
+  request={campaignId,...(unit?{action:'submit',unitId:unit.unitId,lease:unit.lease,
+   ...(unit.inputFileTemplate?{shard:unit.inputFileTemplate}:{})}:{action:'claim'})};
+ }
+ else if(status==='INSTRUCTION_SUBSTEP_FORM_REQUIRED'){route='/api/process';request={campaignId};}
  return {
   type:'MIMO_ADAPTER_ACTION_RECOVERY',reason,campaignId,
   phase:state.phase??issued.phase??prior.governingDocuments?.phase??null,
@@ -387,16 +408,14 @@ function adapterRecovery(reason,rejectedRaw,lastStepRaw,lastAuthorityRaw,lastCla
     inputFileTemplate:u.inputFileTemplate||null,
     validationSchema:u.validationSchema||null}))},
   originalWorkerRejection:rejected,
-  instruction:'Call the exact route and action shown with real controller-issued identifiers. '+
-   'Review the replayed ORIGINAL step instructions and issued forms, for this '+
-   'substep. For acknowledge: complete actual instruction Q1-Q3 and readAndUnderstand=true. '+
-   'For review_answers: complete all issued Q1-Q5 and genuine repairChecklist. '+
-   'For repair_ack: acknowledge every real repairId with truthful checks and outcomes. '+
-   'For submit: use the FULL original inputFileTemplate in request.shard, filling '+
-   'EVERY editable semantic field from work already performed, keeping immutable '+
-   'fields, adding genuine revisions and required verification manifest. '+
-   'Do not send an unchanged blank template or fake evidence. '+
-   'Return ONLY one JSON object with route and request.'
+  instruction:'Use /api/process with the original Worker-issued form and four unchanged identity fields. '+
+   'Study every original instruction document before submitting the instruction-completion form LAST. '+
+   'Write substantive nonblank answers into its exact answer fields; do not change prefixed questions. '+
+   'When WORK is released use the full controller-issued unit inputFileTemplate with immutable keys preserved. '+
+   'Complete every first-round work unit before ONE five-question review form; list at least three genuine repairs or deeper-analysis issues. '+
+   'Actually perform remediation in changed or new work, provide exact references, then submit ONE remediation form for the entire numbered audit step. '+
+   'No per-unit review forms, no fabricated evidence, no invented leases or acceptance. '+
+   'Return only the complete JSON route/request command.'
  };
 }
 function incompatibleWorkerReply(raw){
