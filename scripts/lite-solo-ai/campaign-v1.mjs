@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo campaign adapter v20. Worker owns leases, checkpoints, review, validation, and seals.
+// Lite-Solo MiMo campaign adapter v21. Worker owns leases, checkpoints, review, validation, and seals.
 // Runs only on a manually dispatched, OIDC-authenticated GitHub-hosted job; no public artifacts.
 import fs from 'node:fs';
 import http from 'node:http';
@@ -710,19 +710,92 @@ async function finishEngagementSubmission(first,u,original){
   const repairPrompt='Assess and actually repair every supported material deficiency in the original JSON, using the exact controller-bound analysis and real evidence. Return JSON {edits:[{path:[JSON object keys or array indexes],value:newValue,repairIds:[actual REPAIR-NNN],verificationEvidence:real source anchor or actual checked evidence}],outcomes:[{repairId:actual ID,status:READY_FOR_VALIDATION or BLOCKED or NOT_COMPLETE,notes:substantive verified basis}]}. Edits must target EXISTING mutable work fields. Preserve schema, fixed record identity, controller-owned fields, and full original submission. Never invent tests or evidence. READY_FOR_VALIDATION requires an actual edit with supporting evidence, not a promise.\n'+
     'Source evidence:\n'+sourceEvidence+'\nImmutable original JSON:\n'+JSON.stringify(original)+
     '\nActual repair checklist:\n'+JSON.stringify(checklist)+'\nComplete repair checkbox form:\n'+answered.repairCheckboxForm;
-  if(repairPrompt.length>18000)throw Error('Exact repairs exceed safe context; immutable answers retained and no completion falsely acknowledged');
-  const proposed=await inferValidated([{role:'system',content:system},{role:'user',content:repairPrompt}],2600,
-   'repair_edits_and_outcomes',x=>{
-    const issues=[];
-    if(!Array.isArray(x?.edits))issues.push('edits must be an array');
-    if(!Array.isArray(x?.outcomes))issues.push('outcomes must be an array');
-    for(const r of checklist)
-     if(!x?.outcomes?.some(o=>o.repairId===r.repairId&&
-      ['READY_FOR_VALIDATION','BLOCKED','NOT_COMPLETE'].includes(o.status)&&
-      typeof o.notes==='string'&&o.notes.trim().length>=12))
+  let proposed;
+  if(repairPrompt.length<=18000){
+   proposed=await inferValidated([{role:'system',content:system},{role:'user',content:repairPrompt}],2600,
+    'repair_edits_and_outcomes',x=>{
+     const issues=[];
+     if(!Array.isArray(x?.edits))issues.push('edits must be an array');
+     if(!Array.isArray(x?.outcomes))issues.push('outcomes must be an array');
+     for(const r of checklist)
+      if(!x?.outcomes?.some(o=>o.repairId===r.repairId&&
+       ['READY_FOR_VALIDATION','BLOCKED','NOT_COMPLETE'].includes(o.status)&&
+       typeof o.notes==='string'&&o.notes.trim().length>=12))
        issues.push('Required substantive outcome missing for '+r.repairId);
-    return issues;
-   });
+     return issues;
+    });
+  }else{
+   // A large immutable checklist requires independent source-bound repair passes,
+   // not repeated identical workflow restarts on an impossible single prompt.
+   const digest=sha(JSON.stringify({unitId:u.unitId,lease:u.lease,
+    firstRoundSha256:first.baseline?.sha256||first.firstRound?.sha256,
+    checklist,checkboxFormSha256:sha(answered.repairCheckboxForm)}));
+   const prior=checkpointRecord?.repairProgress;
+   const saved=prior?.digest===digest&&prior.unitId===u.unitId&&Array.isArray(prior.items)?
+    prior.items:[];
+   const plans=[];
+   for(const [index,item] of checklist.entries()){
+    const stored=saved[index];
+    if(stored&&stored.repairId===item.repairId&&
+       Array.isArray(stored.edits)&&Array.isArray(stored.outcomes)&&
+       stored.outcomes.some(o=>o.repairId===item.repairId&&
+        ['READY_FOR_VALIDATION','BLOCKED','NOT_COMPLETE'].includes(o.status)&&
+        typeof o.notes==='string'&&o.notes.trim().length>=12)){
+     plans.push({edits:stored.edits,outcomes:stored.outcomes});
+     console.log(JSON.stringify({status:'MIMO_REPAIR_ITEM_CHECKPOINT_RESTORED',
+      unitId:u.unitId,repairId:item.repairId,index,controllerAccepted:false}));
+     continue;
+    }
+    const core='Analyze ONLY the following current controller repair item, preserving exact immutable fields and source anchors. '+
+     'Return JSON {edits:[{path:[existing keys or indexes],value:newValue,repairIds:[current repair ID],verificationEvidence:real source anchor}],'+
+     'outcomes:[{repairId:current repair ID,status:READY_FOR_VALIDATION or BLOCKED or NOT_COMPLETE,notes:substantive verified basis}]}. '+
+     'An edit must change a mutable assigned field; never fabricate findings, tests, or verification. If unsupported, report BLOCKED or NOT_COMPLETE.'+
+     '\nFull original immutable assigned work:\n'+JSON.stringify(original)+
+     '\nCurrent controller-issued repair item '+(index+1)+'/'+checklist.length+':\n'+JSON.stringify(item)+
+     '\nComplete exact controller repair checkbox form:\n'+answered.repairCheckboxForm;
+    const budget=17750-core.length;
+    if(budget<1400){
+     const err=new Error('Single exact repair item exceeds model context including immutable work and complete controller form');
+     err.code='REPAIR_CONTEXT_UNSATISFIABLE';throw err;
+    }
+    const evidence=evidenceIndex(Math.min(4600,budget));
+    const prompt=core+'\nSelective accepted source facts, not independently verified findings:\n'+evidence;
+    if(prompt.length>18000){
+     const err=new Error('Per-item source-bound repair prompt exceeded input context');
+     err.code='REPAIR_CONTEXT_UNSATISFIABLE';throw err;
+    }
+    const plan=await inferValidated([{role:'system',content:system},{role:'user',content:prompt}],
+     2200,'repair_item_'+(index+1),x=>{
+      const issues=[];
+      if(!Array.isArray(x?.edits))issues.push('edits must be an array');
+      if(!Array.isArray(x?.outcomes))issues.push('outcomes must be an array');
+      if(!x?.outcomes?.some(o=>o.repairId===item.repairId&&
+         ['READY_FOR_VALIDATION','BLOCKED','NOT_COMPLETE'].includes(o.status)&&
+         typeof o.notes==='string'&&o.notes.trim().length>=12))
+       issues.push('Substantive outcome required for '+item.repairId);
+      for(const edit of x?.edits||[])
+       if(!Array.isArray(edit?.path)||!edit.path.length||
+         !Array.isArray(edit.repairIds)||!edit.repairIds.includes(item.repairId)||
+         typeof edit.verificationEvidence!=='string'||edit.verificationEvidence.trim().length<12)
+        issues.push('Every claimed edit needs a valid path, repair ID and evidence');
+      return issues;
+     });
+    plans.push(plan);
+    if(autonomous){
+     checkpointRecord.repairProgress={digest,unitId:u.unitId,
+      items:plans.map((p,i)=>({repairId:checklist[i].repairId,edits:p.edits,outcomes:p.outcomes}))};
+     await persistCheckpoint();
+    }
+    console.log(JSON.stringify({status:'MIMO_REPAIR_ITEM_ASSESSED',unitId:u.unitId,
+     repairId:item.repairId,index:index+1,total:checklist.length,
+     proposedEdits:plan.edits.length,controllerAccepted:false}));
+    if(nearRollover(90*60*1000)&&index+1<checklist.length){
+     await dispatchSuccessor(expectedPhase,expectedStep,'checkpointed_repair_item_continuation');
+     return {status:'AI_REPAIR_PROGRESS_HANDOFF'};
+    }
+   }
+   proposed={edits:plans.flatMap(p=>p.edits),outcomes:plans.flatMap(p=>p.outcomes)};
+  }
   if(!Array.isArray(proposed?.edits)||!Array.isArray(proposed?.outcomes))
    throw Error('Incomplete source-grounded remediation plan; no false repair acknowledgement');
   const repairIds=new Set(checklist.map(x=>x.repairId));
@@ -875,6 +948,7 @@ if(!submit){
   }
  activeOperation='five_question_review_and_corrective_submission';
   const state=await finishEngagementSubmission(first,u,output);
+  if(state?.status==='AI_REPAIR_PROGRESS_HANDOFF')return;
  if(autonomous&&!['UNIT_ACCEPTED_LOCALLY','ACTIVE','SUBMITTED','UNIT_SUBMISSION_QUEUED','CONTROLLER_VALIDATION_QUEUED',
       'STEP_VALIDATION_PENDING','FILING_PHASE','WAITING_PHASE_SEAL'].includes(state.status||''))
   throw Error('Final assigned work has not been accepted by the Worker: '+String(state.status||'UNKNOWN'));
@@ -984,6 +1058,11 @@ async function recoverRun(error){
     error:String(e.message||e).slice(0,300),controllerAccepted:false}));
    return;
   }
+ }
+ if(error?.code==='REPAIR_CONTEXT_UNSATISFIABLE'){
+  console.log(JSON.stringify({status:'RECOVERY_BLOCKED_DETERMINISTIC_CONTEXT_LIMIT',
+   unitId:activeUnit?.unitId||null,reason,controllerAccepted:false}));
+  return;
  }
  if(attempts>3){
   console.log(JSON.stringify({status:'RECOVERY_BLOCKED_REPEATED_SUBSTANTIVE_FAILURE',
