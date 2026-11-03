@@ -106,6 +106,7 @@ jobs:
           git -C .audit-controller sparse-checkout set --no-cone \
             '/Audit Skill - Lite-Solo Authority/lite-solo-v4/**' \
             '/Audit Skill - Lite-Solo Authority/lite-solo-v5/**' \
+            '/Audit Skill - Lite-Solo Authority/lite-solo-v6/**' \
             '/Audit Campaign Directory/campaigns/**' \
             "/$source_path/**" \
             "/${dest_workspace}/**"
@@ -165,6 +166,6 @@ jobs:
             echo "- Campaign: $(jq -r .campaignId "$directory")"
             echo "- Status: $(jq -r .campaignStatus "$directory")"
             echo "- Current phase: $(jq -r '.currentAssignment.phaseSequence // "PRELAUNCH"' "$directory")"
-            echo "- Original receipts remain immutable; follow the original bound Lite-Solo v4/v5 phase/unit controller"
+            echo "- Original receipts remain immutable; follow the exact original bound Lite-Solo phase/unit controller"
             echo "- No tests or transactions were initiated by this workflow"
           } >>"$GITHUB_STEP_SUMMARY"
