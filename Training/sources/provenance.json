@@ -1,5 +1,5 @@
 {
-  "version": "v10",
+  "version": "v11",
   "forge": {
     "commit": "c2829d451d37581dae71aba610506ba3b161e371",
     "documents": [
@@ -1428,6 +1428,321 @@
         "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2025-08/unverified_d132_exp.sol",
         "source_blob_sha": "5c990d245d099ebdaa69ca4aae4cf094bf3dcacd",
         "spdx": "not_read"
+      },
+      {
+        "incident": "Kame",
+        "source_path": "src/test/2025-09/Kame_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2025-09/Kame_exp.sol",
+        "source_blob_sha": "bd2aadf85e06f62429a134c1a5d1b113dde38bf7",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "NGP",
+        "source_path": "src/test/2025-09/NGP_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2025-09/NGP_exp.sol",
+        "source_blob_sha": "ea894f5d97764c6cbddd91fc5fcb9f2f34515e3c",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "MIMSpell3",
+        "source_path": "src/test/2025-10/MIMSpell3_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2025-10/MIMSpell3_exp.sol",
+        "source_blob_sha": "93d7a671831b1e590db123b240187480c65e6989",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "SharwaFinance",
+        "source_path": "src/test/2025-10/SharwaFinance_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2025-10/SharwaFinance_exp.sol",
+        "source_blob_sha": "2613911a8e66a0cc5641ce5226e8934730ed5693",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "TokenHolder",
+        "source_path": "src/test/2025-10/TokenHolder_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2025-10/TokenHolder_exp.sol",
+        "source_blob_sha": "99ed5729f826130fed3616da7f5cf9dd8d123a98",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "DRLVaultV3",
+        "source_path": "src/test/2025-11/DRLVaultV3_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2025-11/DRLVaultV3_exp.sol",
+        "source_blob_sha": "7c97d3e253ef9591e0b2f946125b4f72204ed527",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "yETH",
+        "source_path": "src/test/2025-12/yETH_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2025-12/yETH_exp.sol",
+        "source_blob_sha": "d94a3956afd6477c7ddb40a810d3d2d2e734ca74",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "MTToken",
+        "source_path": "src/test/2026-01/MTToken_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-01/MTToken_exp.sol",
+        "source_blob_sha": "5a29d464dd09083ed9699c8e01d2b8ec9a49ebe7",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "PRXVT",
+        "source_path": "src/test/2026-01/PRXVT_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-01/PRXVT_exp.sol",
+        "source_blob_sha": "536f262e2fb9b2389f9a9024b7b1989c6a7498f8",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "SynapLogic",
+        "source_path": "src/test/2026-01/SynapLogic_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-01/SynapLogic_exp.sol",
+        "source_blob_sha": "ef9ae8fe25d229faa04144edaacfd6b926f261f2",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "Truebit",
+        "source_path": "src/test/2026-01/Truebit_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-01/Truebit_exp.sol",
+        "source_blob_sha": "049eafa5584c7f38a5fe40638d010283dbb714e9",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "futureswap",
+        "source_path": "src/test/2026-01/futureswap_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-01/futureswap_exp.sol",
+        "source_blob_sha": "3a72cbe1e15edb09e3d2d9a347264d7b9fa1eef2",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "makina",
+        "source_path": "src/test/2026-01/makina_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-01/makina_exp.sol",
+        "source_blob_sha": "88cf1ae44566bb72bf068288333e69dc7384050b",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "LAXO_Token",
+        "source_path": "src/test/2026-02/LAXO_Token_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-02/LAXO_Token_exp.sol",
+        "source_blob_sha": "e151db9cc01a874a3713d3328f1824370e7c58e6",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "Moonwell",
+        "source_path": "src/test/2026-02/Moonwell_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-02/Moonwell_exp.sol",
+        "source_blob_sha": "035b892188d53620ee04b8e7332b8be185a04fe4",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "XDKRecycle",
+        "source_path": "src/test/2026-02/XDKRecycle_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-02/XDKRecycle_exp.sol",
+        "source_blob_sha": "9e9191f69dcb4c12de392fda683d5287f03f6d53",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "ATMBlindBox",
+        "source_path": "src/test/2026-03/ATMBlindBox_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/ATMBlindBox_exp.sol",
+        "source_blob_sha": "f292bc626764d591de4056644a3741cf4737d326",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "AlkemiEarn",
+        "source_path": "src/test/2026-03/AlkemiEarn_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/AlkemiEarn_exp.sol",
+        "source_blob_sha": "581bfada90f9630d51c5cb83be8e27152e580b52",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "Curve_LlamaLend",
+        "source_path": "src/test/2026-03/Curve_LlamaLend_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/Curve_LlamaLend_exp.sol",
+        "source_blob_sha": "b929d3f3d773612a4cc707f522403bc7324a14e5",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "EST",
+        "source_path": "src/test/2026-03/EST_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/EST_exp.sol",
+        "source_blob_sha": "a91a350bd626c88bc20ea47f5d54aaa89ed9f5ee",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "Revamp",
+        "source_path": "src/test/2026-03/Revamp_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/Revamp_exp.sol",
+        "source_blob_sha": "8c8e5f8fa8b4d0b3a80dbfff40a448c689583f64",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "Univ3CollateralToken",
+        "source_path": "src/test/2026-03/Univ3CollateralToken_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/Univ3CollateralToken_exp.sol",
+        "source_blob_sha": "2df306c7610a8cf8cd1802f2ae43cba7d0ab9c22",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "VTSwapHook",
+        "source_path": "src/test/2026-03/VTSwapHook_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/VTSwapHook_exp.sol",
+        "source_blob_sha": "dd7d50235f33c9c5e5ad431779170606a11d6f82",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "Venus_THE",
+        "source_path": "src/test/2026-03/Venus_THE_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/Venus_THE_exp.sol",
+        "source_blob_sha": "4db1cf19ecbc1794a1e32fdf92f38314789469dc",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "WhalebitOracleManipulation",
+        "source_path": "src/test/2026-03/WhalebitOracleManipulation_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/WhalebitOracleManipulation_exp.sol",
+        "source_blob_sha": "8c67fc14c36dbb504ce4528beda65e11a94b997c",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "XocolatlLiquidator",
+        "source_path": "src/test/2026-03/XocolatlLiquidator_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/XocolatlLiquidator_exp.sol",
+        "source_blob_sha": "64a7797a9ae775c537c0976c9706d77dc4048da3",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "bce",
+        "source_path": "src/test/2026-03/bce_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/bce_exp.sol",
+        "source_blob_sha": "c83c4163e2e51807356ad52fff2b523b491ae4d0",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "dTRINITYdLEND",
+        "source_path": "src/test/2026-03/dTRINITYdLEND_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/dTRINITYdLEND_exp.sol",
+        "source_blob_sha": "09cbf57fb65c2d778b271c3c031bcd12f39eb62b",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "unverified_1304",
+        "source_path": "src/test/2026-03/unverified_1304_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/unverified_1304_exp.sol",
+        "source_blob_sha": "8579ae678038fdba49c8337a84de4eca6e6fc2b9",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "unverified_237d",
+        "source_path": "src/test/2026-03/unverified_237d_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-03/unverified_237d_exp.sol",
+        "source_blob_sha": "0884fb16db2c08afdd8e549ab688e6ef37258f2c",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "AaveRebalancerCreditDelegation",
+        "source_path": "src/test/2026-04/AaveRebalancerCreditDelegation_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/AaveRebalancerCreditDelegation_exp.sol",
+        "source_blob_sha": "63dce5d91dada8a184bb73f896a0a2eac75f0730",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "JUDAO",
+        "source_path": "src/test/2026-04/JUDAO_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/JUDAO_exp.sol",
+        "source_blob_sha": "95bb1cb65ab54913dabc5b42d7fae23be2a3c3ef",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "JuiceboxREVLoans",
+        "source_path": "src/test/2026-04/JuiceboxREVLoans_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/JuiceboxREVLoans_exp.sol",
+        "source_blob_sha": "db361aadeea144cd563f56ba1110e7abee20599d",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "KipseliPropAMM",
+        "source_path": "src/test/2026-04/KipseliPropAMM_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/KipseliPropAMM_exp.sol",
+        "source_blob_sha": "e073cf440eefabe99658edf6674bf26b696f50b6",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "MONA_LisaVault",
+        "source_path": "src/test/2026-04/MONA_LisaVault_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/MONA_LisaVault_exp.sol",
+        "source_blob_sha": "2acb8ef130fa7fe351fd53654eff2560cb5df0fb",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "PerpPair",
+        "source_path": "src/test/2026-04/PerpPair_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/PerpPair_exp.sol",
+        "source_blob_sha": "54f95e7d351db324adab2ce9f82b0a23ea73928e",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "RWAVault",
+        "source_path": "src/test/2026-04/RWAVault_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/RWAVault_exp.sol",
+        "source_blob_sha": "e15cc499ab5c7bc7cdcbdb784132f1d5cf8ebe76",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "SaturnProtocol",
+        "source_path": "src/test/2026-04/SaturnProtocol_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/SaturnProtocol_exp.sol",
+        "source_blob_sha": "56ea2467bb8de6c7a4e75c97b04a37bec22be055",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "SingularityDynaVault",
+        "source_path": "src/test/2026-04/SingularityDynaVault_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/SingularityDynaVault_exp.sol",
+        "source_blob_sha": "63ad57b4c24b888d2d277f2238f58e3298b530d4",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "SquidMulticallAllowanceDrain",
+        "source_path": "src/test/2026-04/SquidMulticallAllowanceDrain_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/SquidMulticallAllowanceDrain_exp.sol",
+        "source_blob_sha": "83b71e60ce3a3805a70ba699636a103d33f1b74d",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "SubQuerySettings",
+        "source_path": "src/test/2026-04/SubQuerySettings_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/SubQuerySettings_exp.sol",
+        "source_blob_sha": "9eda1565c4167b09e711175bd6cfc878581daa4c",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "ThetanutsVaultShareRounding",
+        "source_path": "src/test/2026-04/ThetanutsVaultShareRounding_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/ThetanutsVaultShareRounding_exp.sol",
+        "source_blob_sha": "026eab2c0434fcc383f70bb796147e13ce94d1aa",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "XLootStaking",
+        "source_path": "src/test/2026-04/XLootStaking_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/XLootStaking_exp.sol",
+        "source_blob_sha": "7ae2bc8ed933f9204458655ab8f7dc8b74e6fd27",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "giddyvaultv3_compound_auth",
+        "source_path": "src/test/2026-04/giddyvaultv3_compound_auth_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/giddyvaultv3_compound_auth_exp.sol",
+        "source_blob_sha": "75008345fa4c4aa7e738a1621546c5226be16fc5",
+        "spdx": "not_read"
+      },
+      {
+        "incident": "unverified_a152",
+        "source_path": "src/test/2026-04/unverified_a152_exp.sol",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-04/unverified_a152_exp.sol",
+        "source_blob_sha": "afb6552eeda7a3befcd6a5f182b5f1dd5cb28d56",
+        "spdx": "not_read"
       }
     ],
     "expanded_months": {
@@ -1438,7 +1753,15 @@
       "2025-05": 16,
       "2025-06": 24,
       "2025-07": 22,
-      "2025-08": 26
+      "2025-08": 26,
+      "2025-09": 2,
+      "2025-10": 3,
+      "2025-11": 1,
+      "2025-12": 1,
+      "2026-01": 6,
+      "2026-02": 3,
+      "2026-03": 14,
+      "2026-04": 15
     }
   },
   "code4rena": {

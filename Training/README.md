@@ -1,11 +1,11 @@
-# MiMo Smart Contract Auditor — Training corpus (v10)
+# MiMo Smart Contract Auditor — Training corpus (v11)
 
-**Source aggregation staged, not training-ready.** Exclusive scope: on-chain smart contract and EVM/DeFi auditing; excludes general software/network cybersecurity.
+**Smart-contract-only source aggregation; not yet training-ready.** General application/network/OS cybersecurity is excluded.
 
-- `datasets/forge-curated/findings/`: 39 full audit extraction JSON documents, containing 920 source-derived findings.
-- `datasets/code4rena/`: 157 platform-judged High/Medium issue references across 10 distinct final reports.
-- `datasets/smartbugs-curated/`: 143 annotated Solidity contract records, referencing code URLs.
-- `datasets/defihacklabs/`: 159 pinned historical DeFi exploit reproduction references.
-- `sources/`: source registry, pinned origins/commits, licenses; `curation/`: inclusion rules and holdout benchmarks.
+- `datasets/forge-curated/findings/`: 39 full original structured audit JSON documents, 920 extracted findings with pinned code/report references.
+- `datasets/code4rena/`: 157 final-report judged H/M finding references from 10 competitive DeFi audits.
+- `datasets/smartbugs-curated/`: 143 Solidity vulnerability annotations linked to original source contracts.
+- `datasets/defihacklabs/`: 204 exact-commit historical DeFi exploit reproduction pointers, no replay source mirrored.
+- `sources/`: registry, pinned commits/blob provenance, license notices; `curation/`: inclusion policy and evaluation-only benchmark reserves.
 
-Code4rena final-report judgment differs from automatically extracted FORGE findings; neither has been independently validated here. Records require original-code rights, protocol/commit deduplication, exploitability review and blind holdouts before training. No tests, audit workflows, model weights or production code changed.
+Raw FORGE extracted findings include informational labels. None of the source links or reported exploit losses is independently reproduced by this import. All records remain `training_eligible:false` until rights clearance, code context, deduplication, validation and protocol-family holdout. No audit workflows, tests or training jobs changed.
