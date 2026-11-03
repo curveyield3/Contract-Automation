@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "lite-solo-ai-audit-request-v1",
+  "mode": "autonomous",
+  "inference_runners": "2",
+  "campaign_id": "cyvbusdcv28-r3",
+  "expected_phase": "1",
+  "expected_step": "2",
+  "submission_mode": "submit",
+  "max_chunks": "32",
+  "ai_hop": "0"
+}
