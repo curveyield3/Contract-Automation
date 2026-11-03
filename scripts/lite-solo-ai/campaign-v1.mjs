@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v34.
+// Lite-Solo MiMo / Worker transport bridge v35.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -34,9 +34,19 @@ async function identity(){
 
 
 // Every MiMo prompt/reply and Worker request/response is archived through the
-// existing OIDC-authenticated Worker into PRIVATE R2, never public Actions logs.
+// existing OIDC-authenticated Worker into PRIVATE R2 before archiving to Audit-Controller Markdown when the workflow finishes, never public Actions logs.
 // One sequence is scoped to the GitHub run ID from the verified OIDC claim.
 let transcriptEvent=0;
+let firstTranscriptScope=null,lastTranscriptScope=null;
+function updateTranscriptScope(reply,envelope){
+ const phase=Number(reply?.phase??envelope?.governingDocuments?.phase);
+ const step=Number(reply?.currentStep??reply?.step??envelope?.governingDocuments?.step);
+ if(Number.isInteger(phase)&&phase>=0&&phase<=99&&
+    Number.isInteger(step)&&step>=0&&step<=99){
+  if(!firstTranscriptScope)firstTranscriptScope={phase,step};
+  lastTranscriptScope={phase,step};
+ }
+}
 async function recordPrivateCommunication(direction,content){
  if(typeof content!=='string')throw Error('MiMo transcript content must be text');
  const eventId=String(++transcriptEvent).padStart(8,'0'),parts=[];
@@ -51,7 +61,9 @@ async function recordPrivateCommunication(direction,content){
   const res=await fetch(endpoint,{
    method:'POST',headers:{authorization:'Bearer '+await identity(),'content-type':'application/json'},
    body:JSON.stringify({campaignId,operation:'record',eventId,direction,part:index,
-    totalParts:parts.length,content:parts[index]}),
+    totalParts:parts.length,content:parts[index],
+    startPhase:firstTranscriptScope?.phase??null,startStep:firstTranscriptScope?.step??null,
+    endPhase:lastTranscriptScope?.phase??null,endStep:lastTranscriptScope?.step??null}),
    signal:AbortSignal.timeout(150000)
   });
   const receipt=await res.json().catch(()=>null);
@@ -78,6 +90,7 @@ async function workerCall(payload){
  let envelope=null;
  try{envelope=JSON.parse(raw);}catch{}
  const result=envelope?.workerResponse||{};
+ updateTranscriptScope(result,envelope);
  const issueCount=Array.isArray(result.fieldErrors)?result.fieldErrors.length:0;
  console.log(JSON.stringify({status:'MIMO_WORKER_DISPOSITION',
   time:new Date().toISOString(),httpStatus:res.status,
