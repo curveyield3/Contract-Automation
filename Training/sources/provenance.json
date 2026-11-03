@@ -1,0 +1,106 @@
+{
+  "version": "v1",
+  "forge": {
+    "commit": "c2829d451d37581dae71aba610506ba3b161e371",
+    "documents": [
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2024-12-balancer-v3-securityreview.json",
+        "upstream_path": "dataset-curated/findings/2024-12-balancer-v3-securityreview.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "aa4a75f07da88acfdba36f2f74ea72183772efed",
+        "findings": 21
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2025-01-bacon-labs-bunniv2-securityreview.json",
+        "upstream_path": "dataset-curated/findings/2025-01-bacon-labs-bunniv2-securityreview.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "f0ef090fa0f1fbe7990f8389bf33821f49251895",
+        "findings": 25
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2025-05-caplabs-coveredagentprotocol-securityreview.json",
+        "upstream_path": "dataset-curated/findings/2025-05-caplabs-coveredagentprotocol-securityreview.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "dcb2a9c0de9624169f42d4274d710b9af8a09bdf",
+        "findings": 29
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2025-01-31-final-perennial-v2-update-4-audit-report.json",
+        "upstream_path": "dataset-curated/findings/2025.01.31 - Final - Perennial V2 Update 4 Audit Report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "9981940526063692b9a63cd59c8c74a08836faab",
+        "findings": 7
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2025-05-03-final-aegis-im-yusd-audit-report.json",
+        "upstream_path": "dataset-curated/findings/2025.05.03 - Final - Aegis.im YUSD Audit Report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "03ae1d8eaec65aad97be8321ac383fc47938a7d5",
+        "findings": 3
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2025-07-18-final-notional-exponent-audit-report.json",
+        "upstream_path": "dataset-curated/findings/2025.07.18 - Final - Notional Exponent Audit Report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "3d6503f2e925081f97c65712505383c324c17718",
+        "findings": 40
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/2025-08-14-final-malda-audit-report.json",
+        "upstream_path": "dataset-curated/findings/2025.08.14 - Final - Malda Audit Report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "c8818c33fc9d2ca75cd78befc11ffe8d7154b3a5",
+        "findings": 17
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/across-audit.json",
+        "upstream_path": "dataset-curated/findings/Across Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "32cddb76f2773d802f3468178978841e8110013e",
+        "findings": 16
+      }
+    ]
+  },
+  "smartbugs": {
+    "commit": "230e649123477eff332742a59a1c7cc6dc286cab",
+    "annotations": 143,
+    "source_blob_sha": "4771a256d0111997451dd323e6306b480da78794"
+  },
+  "defihacklabs": {
+    "commit": "d4bd931e758a375ed7fcecf52322dfeab54f8c0d",
+    "cases": [
+      {
+        "incident": "Moonwell",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2025-11/Moonwell_exp.sol",
+        "source_blob_sha": "51e34c0eb9ce2119ae82f61c85f03e0bf0134698",
+        "spdx": "UNLICENSED"
+      },
+      {
+        "incident": "BalancerV2",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2025-11/BalancerV2_exp.sol",
+        "source_blob_sha": "5cf89c2c29a929d09f92f99e7491be271332766f",
+        "spdx": null
+      },
+      {
+        "incident": "AjnaFinance",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-08/AjnaFinance_exp.sol",
+        "source_blob_sha": "d78692d97b43ef41f685a49631c76646e6a55d9f",
+        "spdx": "UNLICENSED"
+      },
+      {
+        "incident": "USM",
+        "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-08/USM_exp.sol",
+        "source_blob_sha": "1651dc3c1d134d994b694d1a518e0f75ea79f057",
+        "spdx": "MIT"
+      }
+    ]
+  }
+}

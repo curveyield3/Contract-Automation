@@ -1,0 +1,76 @@
+{
+  "version": "v1",
+  "scope": "smart_contract_only",
+  "sources": [
+    {
+      "name": "FORGE Curated",
+      "url": "https://github.com/shenyimings/FORGE-Curated",
+      "status": "staged"
+    },
+    {
+      "name": "SmartBugs Curated",
+      "url": "https://github.com/smartbugs/smartbugs-curated",
+      "status": "staged"
+    },
+    {
+      "name": "DeFiHackLabs",
+      "url": "https://github.com/SunWeb3Sec/DeFiHackLabs",
+      "status": "source_links_staged"
+    },
+    {
+      "name": "FORGE Large",
+      "url": "https://github.com/shenyimings/FORGE-Artifacts",
+      "status": "catalogued"
+    },
+    {
+      "name": "Code4rena",
+      "url": "https://code4rena.com/reports",
+      "status": "catalogued"
+    },
+    {
+      "name": "Sherlock",
+      "url": "https://github.com/sherlock-audit",
+      "status": "catalogued"
+    },
+    {
+      "name": "Solodit",
+      "url": "https://solodit.cyfrin.io/",
+      "status": "catalogued"
+    },
+    {
+      "name": "DAppSCAN",
+      "url": "https://github.com/InPlusLab/DAppSCAN",
+      "status": "catalogued"
+    },
+    {
+      "name": "SmartBugs CGT",
+      "url": "https://github.com/smartbugs/smartbugs/blob/master/doc/datasets.md",
+      "status": "catalogued"
+    },
+    {
+      "name": "SCAR Pairs Clean",
+      "url": "https://huggingface.co/datasets/Farseen0/scar-pairs-clean",
+      "status": "catalogued"
+    },
+    {
+      "name": "Certora",
+      "url": "https://github.com/Certora/SecurityReports",
+      "status": "catalogued"
+    },
+    {
+      "name": "EVMbench",
+      "url": "https://openai.com/index/introducing-evmbench/",
+      "status": "evaluation_only"
+    },
+    {
+      "name": "ScaBench",
+      "url": "https://github.com/scabench-org/scabench",
+      "status": "evaluation_only"
+    },
+    {
+      "name": "SCONE-bench",
+      "url": "https://github.com/anthropics/scone-bench",
+      "status": "evaluation_only"
+    }
+  ]
+}
