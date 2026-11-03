@@ -135,9 +135,6 @@ jobs:
           [[ "$AI_INFERENCE_RUNNERS" == 1 || "$AI_INFERENCE_RUNNERS" == 2 || "$AI_INFERENCE_RUNNERS" == 4 ]] || {
             echo "::error::Unsupported MiMo inference runner count"; exit 1;
           }
-          if [ "$AUDIT_AI_MODE" = autonomous_start ] && [ "$AI_INFERENCE_RUNNERS" != 1 ]; then
-            echo "::error::AI-only campaign start is controller-managed; use an authorized continuation to select multi-runner inference"; exit 1;
-          fi
           [[ "$AUDIT_AI_MAX_CHUNKS" =~ ^[0-9]+$ ]]
           test "$AUDIT_AI_MAX_CHUNKS" -ge 1
           test "$AUDIT_AI_MAX_CHUNKS" -le 32
@@ -184,13 +181,17 @@ jobs:
             {headers:{authorization:'bearer '+grant},signal:AbortSignal.timeout(20000)});
           if(!tokenResponse.ok)throw Error('OIDC issuance failed');
           const credential=(await tokenResponse.json()).value;
-          const body={requestId:'ai-'+process.env.GITHUB_RUN_ID,sourceUrl,aiAutonomous:true};
+          const configuredRunners=String(process.env.AI_INFERENCE_RUNNERS||'1');
+          if(!['1','2','4'].includes(configuredRunners))throw Error('Invalid requested autonomous inference runner count');
+          const body={requestId:'ai-'+process.env.GITHUB_RUN_ID,sourceUrl,aiAutonomous:true,
+            inferenceRunners:configuredRunners};
           const response=await fetch('https://lite-solo-api.jamesnexus9999.workers.dev/api/campaign/start',{
             method:'POST',headers:{authorization:'Bearer '+credential,'content-type':'application/json'},
             body:JSON.stringify(body),signal:AbortSignal.timeout(90000)});
           const payload=await response.json();
           if(!response.ok)throw Error('AI beta campaign admission rejected HTTP '+response.status);
-          const result={status:payload.status,requestId:payload.requestId,controllerAccepted:false};
+          const result={status:payload.status,requestId:payload.requestId,
+            inferenceRunners:configuredRunners,controllerAccepted:false};
           console.log(JSON.stringify(result));
           NODE
       - name: Resolve existing authorized private controller credential
