@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v26.
-// No local audit policy, prompt rewriting, evidence filtering, form filling,
-// semantic validation, corrective inference or controller state mutation.
-// The Worker is the sole source of instructions, tool calls and acceptance.
+// Lite-Solo MiMo / Worker transport bridge v27.
+// Model-facing duplicate transport fields are removed; frozen instructions,
+// original controller-issued files, evidence gates and responses remain unchanged.
+// The Worker remains the sole owner of instructions, claims and acceptance.
 import http from 'node:http';
 import {createHash} from 'node:crypto';
 
@@ -243,6 +243,78 @@ async function modelCall(messages){
  return raw;
 }
 
+// The Worker includes complete policy copies both in the original current/claim
+// response and in governingDocuments. Only MiMo's display copy is compacted;
+// the original transport is retained intact for Worker state and source binding.
+// Never invent a claim, gate answer, accepted result, or reconstructed file.
+function modelFacingResponse(original){
+ let envelope;
+ try{envelope=JSON.parse(original);}catch{return original;}
+ if(envelope?.status!=='AI_BRIDGE_WORKER_RESPONSE')return original;
+ const native=envelope.workerResponse;
+ if(!native||typeof native!=='object'||Array.isArray(native))return original;
+ const docs=envelope.governingDocuments;
+ if(!docs?.repositoryAgentPolicy?.content)return original;
+ const current=native.instructions&&typeof native.instructions==='object'?
+  native.instructions:native;
+ const full=current.authoritativeStepInstructions;
+ if(typeof full!=='string'||!full.includes('# CURRENT ASSIGNMENT'))
+  throw Error('Frozen current-step instructions missing; refuse to shorten model prompt');
+ const a=full.indexOf('# CURRENT ASSIGNMENT');
+ const b=full.indexOf('\n\n---\n## Required referenced file:',a);
+ if(a<0||b<a)throw Error('Cannot isolate frozen current-step START_HERE instructions');
+ // Preserve the controller-supplied current-step text VERBATIM, without the
+ // repeated inlined schema/template/phase contract, which still have native
+ // schema and work-form fields below.
+ const scoped=full.slice(a,b);
+ const step=Number(current.currentStep??native.step??native.currentStep);
+ const phase=Number(current.phase??native.phase);
+ if(!Number.isInteger(step)||!Number.isInteger(phase)||!scoped.includes('Step '+step))
+  throw Error('Current-step instruction/assignment identity mismatch');
+ const slim={...native};
+ const redundant=[
+  'authoritativeStepInstructions','referencedInstructionFiles',
+  'openingInstruction','completionInstruction','workerApiStepInstructions',
+  'phaseContractStep','phaseContractAuthorization','canonicalInputFormSource',
+  'canonicalShardInputFiles','templateFile','controllerPrefillDigest',
+  'predecessorReceiptPath','derivedInputPaths','workerApiPolicy'
+ ];
+ for(const k of redundant)delete slim[k];
+ if(native.instructions){
+  const nested={...native.instructions};
+  for(const k of redundant)delete nested[k];
+  // The real inputFileTemplate, full validation schema and all issued
+  // lease/descriptor metadata remain UNMODIFIED in the work packet.
+  slim.instructions=nested;
+ }
+ // The frozen AGENTS.md is provided as its original complete document.
+ // The current START_HERE step is provided as the original verbatim excerpt.
+ // The separate full root SKILL.md copy is not sent again: its applicable
+ // global rules are already in the controller-issued step instructions.
+ envelope.governingDocuments={
+  repositoryAgentPolicy:docs.repositoryAgentPolicy,
+  currentStepStartHere:{
+   path:docs.campaignBoundSkill?.path?.replace(/\/SKILL\.md$/,'')+
+    '/phases/phase-'+phase+'/START_HERE.md',
+   authorityCommit:current.authorityCommit,
+   phase,step,content:scoped
+  }
+ };
+ envelope.workerResponse=slim;
+ // Keep any instruction verification form, live controller status and the
+ // *entire* original editable unit file on the SAME model call.
+ const work=native.inputFileTemplate?1:
+  Array.isArray(native.items)?native.items.length:0;
+ console.log(JSON.stringify({status:'MIMO_SOURCE_BOUND_PROMPT_PREPARED',
+  phase,step,assignedWorkFiles:work,includesExactControllerTemplate:work>0,
+  includesInstructionGate:!!native.engagement?.instructionForm,
+  originalTransportBytes:Buffer.byteLength(original),
+  modelFacingBytes:Buffer.byteLength(JSON.stringify(envelope)),
+  frozenAgentPolicySha256:sha(docs.repositoryAgentPolicy.content),
+  originalStepSha256:sha(scoped),sourceText:'PRIVATE_MODEL_INPUT_ONLY'}));
+ return JSON.stringify(envelope);
+}
+
 let workerResponse=await workerCall({operation:'start'});
 // Keep every MiMo-produced command and every Worker response presented to MiMo
 // unchanged. Poll-only controller wait states do not become model prompts.
@@ -306,8 +378,9 @@ while(true){
   continue;
  }
  waitingSince=0;lastWaitReport=0;
- // The existing Worker response is passed verbatim only when MiMo can act.
- dialogue.push({role:'user',content:workerResponse});
+ // The original Worker reply is kept for claim/state logic; MiMo receives
+ // its exact assigned file together with the current step and AGENTS.md.
+ dialogue.push({role:'user',content:modelFacingResponse(workerResponse)});
  const raw=await modelCall(dialogue);
  dialogue.push({role:'assistant',content:raw});
  workerResponse=await workerCall({operation:'reply',modelOutput:raw});
