@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v31.
+// Lite-Solo MiMo / Worker transport bridge v32.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -324,7 +324,7 @@ function modelFacingResponse(original){
 // Reissue the most recently provided original instructions and exact source-bound
 // forms; never maintain hand-written per-phase instructions in this adapter.
 function adapterRecovery(reason,rejectedRaw,lastStepRaw,lastAuthorityRaw,lastClaimRaw){
- const parse=raw=>{try{return JSON.parse(raw);}catch{return {};}};
+ const parse=raw=>{try{const value=JSON.parse(raw);return value&&typeof value==='object'&&!Array.isArray(value)?value:{};}catch{return {};}};
  const rejected=parse(rejectedRaw),prior=parse(lastStepRaw),claim=parse(lastClaimRaw);
  const state=prior.workerResponse||{},error=rejected.workerResponse||{},issued=claim.workerResponse||{};
  const units=issued.status==='LEASED_SHARD'?[issued]:
