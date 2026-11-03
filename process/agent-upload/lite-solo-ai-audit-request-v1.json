@@ -8,5 +8,7 @@
   "submission_mode": "submit",
   "max_chunks": "32",
   "ai_hop": "0",
-  "dispatchRevision": "v3"
+  "dispatchRevision": "v4",
+  "supersedes_run_id": "41597310596",
+  "supersedes_run_sha": "8349410487b8492a3770812afd391852c727608c"
 }
