@@ -35,7 +35,7 @@ const sourcePath=original.workspacePath;
 const sourceAnchorRel=original.lastSealedReceiptPath;
 if(original.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2'||
  original.campaignId!==request.sourceCampaignId||original.mode!=='LITE_SOLO'||
- !['lite-solo-v4','lite-solo-v5'].includes(original.authorityRelease)||
+ !['lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(original.authorityRelease)||
  !['COMPLETE','ACTIVE'].includes(original.campaignStatus)||
  (original.campaignStatus==='COMPLETE'&&original.currentAssignment!==null)||
  (original.campaignStatus==='ACTIVE'&&!original.currentAssignment)||
