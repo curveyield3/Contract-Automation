@@ -1,12 +1,11 @@
-# MiMo Smart Contract Auditor — Training corpus (v8)
+# MiMo Smart Contract Auditor — Training corpus (v9)
 
-**Source aggregation staged; not training-ready.** Only smart-contract and EVM/DeFi security data; general-purpose cybersecurity is excluded.
+**Source aggregation staged; not training-ready.** Strictly smart-contract/on-chain auditing with EVM/DeFi priority. No ordinary software, network or OS cybersecurity data.
 
-- `datasets/forge-curated/findings/`: 33 full structured audit-findings JSON documents and 691 extracted finding records, with audited code/revision pointers in `finding-index.jsonl`.
-- `datasets/code4rena/`: 94 platform-judged H/M finding references from 5 final audit reports.
-- `datasets/smartbugs-curated/`: 143 Solidity vulnerability annotations and original code links.
-- `datasets/defihacklabs/`: 159 pinned DeFi exploit reproduction source references.
-- `sources/`: catalogue, pinned provenance, original upstream dataset license notices.
-- `curation/`: security-only inclusion and reserved independent evaluation sources.
+- `datasets/forge-curated/findings/`: **39 original audit finding JSON documents**, **920 source-extracted finding records**, plus `finding-index.jsonl` with audited code/commit links.
+- `datasets/code4rena/`: **94 adjudicated High/Medium issue references** from 5 final public audit reports; no third-party report bodies copied.
+- `datasets/smartbugs-curated/`: **143 Solidity vulnerability annotation records** with upstream source links.
+- `datasets/defihacklabs/`: **159 pinned exploit-reproduction source pointers**, without redistributed Solidity code.
+- `sources/`: registry, provenance, licenses; `curation/`: scope and evaluation-only holdouts.
 
-All material is source-linked but not newly replayed or independently adjudicated. Extracted findings may include informational issues. Train only on separately rights-cleared and verified examples after deduplication and protocol-family holdout. No workflows, tests, or training jobs changed.
+FORGE findings include non-exploitable quality suggestions. Neither source-extracted labels nor published final reports have been independently verified by this import. All records remain restricted from training pending original-code scope, rights and correctness review, deduplication and family-level holdouts. No new workflows, tests, production changes or training jobs.

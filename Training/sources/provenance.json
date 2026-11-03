@@ -1,5 +1,5 @@
 {
-  "version": "v8",
+  "version": "v9",
   "forge": {
     "commit": "c2829d451d37581dae71aba610506ba3b161e371",
     "documents": [
@@ -250,6 +250,70 @@
         "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
         "source_blob_sha": "f2a8c73227e8391e4d0bc7ecc1cc1bd9e689b662",
         "findings": 14
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/f-x-v2-audit.json",
+        "upstream_path": "dataset-curated/findings/f(x) v2 Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "5ac47c3740048a127c140370b526355c28258fce",
+        "findings": 48
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/likwid-zenith-audit-report.json",
+        "upstream_path": "dataset-curated/findings/Likwid - Zenith Audit Report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "8fa300bad55a996b916c70e45a57d0ef4bd08c99",
+        "findings": 65
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/lido-v3-consensys-diligence.json",
+        "upstream_path": "dataset-curated/findings/Lido V3 _ Consensys Diligence.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "b25fc30b637956683fece290afe583cbc863084f",
+        "findings": 44
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/ozean-finance-security-audit-report.json",
+        "upstream_path": "dataset-curated/findings/Ozean Finance Security Audit Report.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "8a33be5933e25d0ff2fe56950d3946ccea3baf95",
+        "findings": 17
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/very-liquid-vaults-audit.json",
+        "upstream_path": "dataset-curated/findings/Very Liquid Vaults Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "8a14dd3075b26eda263c7bbfbf39ccf8676cee2c",
+        "findings": 10
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/uniswap-hooks-library-milestone-1-audit.json",
+        "upstream_path": "dataset-curated/findings/Uniswap Hooks Library Milestone 1 Audit.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "6cc2b20f7fa1dab5d8a60aace68812a3e3ed2c98",
+        "findings": 22
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/zenith-audit-report-stream-protocol.json",
+        "upstream_path": "dataset-curated/findings/Zenith Audit Report - Stream Protocol.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "30f4f95e2740f478155a1c4e8f4b9fbaa6c89a68",
+        "findings": 17
+      },
+      {
+        "local_path": "Training/datasets/forge-curated/findings/cantina-euler-rescue-strategy-nov2025.json",
+        "upstream_path": "dataset-curated/findings/cantina_euler_rescue_strategy_nov2025.json",
+        "source_repo": "shenyimings/FORGE-Curated",
+        "source_commit": "c2829d451d37581dae71aba610506ba3b161e371",
+        "source_blob_sha": "b4319c6eaf6b5ef0c35a04cf6f81e5f796a6f6e1",
+        "findings": 6
       }
     ]
   },
