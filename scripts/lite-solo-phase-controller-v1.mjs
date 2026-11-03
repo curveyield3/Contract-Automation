@@ -1357,8 +1357,15 @@ const receiptLibUrl=pathToFileURL(repoFile(root,'packages/controller-core/src/li
 const receiptLib=await import(receiptLibUrl);
 const phaseRevision=Number(assignment.phaseRevision??1);
 if(!Number.isInteger(phaseRevision)||phaseRevision<1) throw new Error('assignment.phaseRevision must be an integer >= 1 when present');
+const substepCheckPaths=directory.authorityRelease==='lite-solo-v6'?
+ receiptLib.requireSubstepChecksV1({
+  root,campaignPath,campaignId:directory.campaignId,phase:sequence,
+  steps:Object.keys(schema.actions||{}).filter(k=>/^step-[1-9][0-9]*$/.test(k)).map(k=>Number(k.slice(5)))
+ }):[];
 const receiptRel=receiptLib.phaseReceiptPath(campaignPath,sequence,phaseRevision);
 const evidence=[receiptRef(root,campaignPath,assignment.workFormPath,'PHASE_WORK_FORM')];
+for(const rel of substepCheckPaths)evidence.push(receiptRef(root,campaignPath,rel,'SUB_STEP_CHECKS'));
+
 if(sealedRework){
   evidence.push(receiptRef(root,campaignPath,sealedRework.request.priorReceipt.path,'PRIOR_PHASE_REVISION'));
   evidence.push(receiptRef(root,campaignPath,sealedRework.request.qualityReview.path,'HUMAN_QUALITY_REVIEW'));
