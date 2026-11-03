@@ -62,18 +62,38 @@ if [ "$ready" != true ]; then
   exit 1
 fi
 
-# Supported natively by Tailscale >= 1.94.0. The Tailscale daemon discovers
-# the GitHub Actions OIDC JWT and requests a short-lived tagged node authorization.
-# -E preserves GitHub's ACTIONS_ID_TOKEN_REQUEST_* environment for discovery.
-echo "Connecting via native Tailscale OIDC as an authorized tagged ephemeral runner."
-if ! timeout -k 5s 120s sudo -E /usr/local/bin/tailscale up \
-  --client-id="$TS_CLIENT_ID" \
-  --audience="api.tailscale.com/$TS_CLIENT_ID" \
-  --advertise-tags="$TAILNET_TAG" \
-  --accept-dns=false; then
-  echo "::error::Native Tailscale OIDC registration failed; inspect the runner step and tailnet trust policy." >&2
+# GitHub-hosted runners can intermittently fail Tailscale's automatic OIDC
+# discovery. Request the job's actual signed JWT from GitHub and pass the short-
+# lived token explicitly; no long-lived auth keys or extra credentials required.
+[[ "$TS_CLIENT_ID" =~ ^[A-Za-z0-9_-]+$ ]] || {
+  echo "::error::Invalid Tailscale workload-identity client identifier" >&2
+  exit 1
+}
+audience="api.tailscale.com/$TS_CLIENT_ID"
+oidc_url="$ACTIONS_ID_TOKEN_REQUEST_URL"
+if [[ "$oidc_url" == *\?* ]]; then oidc_url+="&"; else oidc_url+="?"; fi
+oidc_url+="audience=api.tailscale.com%2F$TS_CLIENT_ID"
+umask 077
+oidc_file="$(mktemp "$RUNNER_TEMP/tailscale-id-token.XXXXXXXX")"
+trap 'rm -f "$oidc_file"' EXIT
+if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+    --retry 2 --retry-all-errors --max-time 30 \
+    -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$oidc_url" |
+   jq -er '.value | select(type=="string" and (split(".")|length==3))' > "$oidc_file"; then
+  echo "::error::GitHub OIDC JWT issuance failed for Tailscale workload identity" >&2
   exit 1
 fi
+test -s "$oidc_file" || { echo "::error::GitHub returned no valid OIDC token" >&2; exit 1; }
+echo "Connecting via explicit, short-lived GitHub OIDC JWT (no credential logging)."
+if ! timeout -k 5s 120s sudo /usr/local/bin/tailscale up \
+  --client-id="$TS_CLIENT_ID" \
+  --id-token="file:$oidc_file" \
+  --advertise-tags="$TAILNET_TAG" \
+  --accept-dns=false; then
+  echo "::error::Tailscale workload-identity authentication failed; inspect issuer, subject, audience and tag permissions." >&2
+  exit 1
+fi
+rm -f "$oidc_file"
 
 sudo /usr/local/bin/tailscale status --json | jq -e '.BackendState == "Running"' >/dev/null || {
   echo "::error::Tailscale connected without entering Running state" >&2
