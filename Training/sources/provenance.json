@@ -1,5 +1,5 @@
 {
-  "version": "v5",
+  "version": "v6",
   "forge": {
     "commit": "c2829d451d37581dae71aba610506ba3b161e371",
     "documents": [
@@ -250,6 +250,48 @@
         "source_url": "https://github.com/SunWeb3Sec/DeFiHackLabs/blob/d4bd931e758a375ed7fcecf52322dfeab54f8c0d/src/test/2026-08/ReflexerGEB_exp.sol",
         "source_blob_sha": "5e77e459cca3f79a4b997601c7e683b5c8b94423",
         "spdx": "UNLICENSED"
+      }
+    ]
+  },
+  "code4rena": {
+    "source": "code-423n4",
+    "report_count": 5,
+    "findings": 94,
+    "reports": [
+      {
+        "repo": "2024-04-panoptic-findings",
+        "git_commit": "d9124b2677670e586c8c9142a33088d98f34eff5",
+        "report_blob_sha": "db5db8c20b58b9967a08e88edad2c472c0b43a25",
+        "high": 2,
+        "medium": 9
+      },
+      {
+        "repo": "2024-02-wise-lending-findings",
+        "git_commit": "eb30b162e6bee0a878f7e3a14c5d062144215ac1",
+        "report_blob_sha": "5e46fddfbd6c0bcfce494cb51971454db9a09409",
+        "high": 5,
+        "medium": 17
+      },
+      {
+        "repo": "2024-03-revert-lend-findings",
+        "git_commit": "5fd5466a646d1870367733b8c2bf352af5f9298d",
+        "report_blob_sha": "7496262e2f038726e07150f24f48ed2cf66c9e0d",
+        "high": 6,
+        "medium": 28
+      },
+      {
+        "repo": "2024-07-reserve-findings",
+        "git_commit": "59b95d602bd74c79ee49c820d154ca87d4885ac5",
+        "report_blob_sha": "b2102e19901068818cfed8f6518734df312e2d81",
+        "high": 0,
+        "medium": 7
+      },
+      {
+        "repo": "2024-03-abracadabra-money-findings",
+        "git_commit": "061ab30b503cdf79300725fd822fbafe2a147d4f",
+        "report_blob_sha": "0b521ba9d985dafa30af4713470499cea10d8d05",
+        "high": 4,
+        "medium": 16
       }
     ]
   }

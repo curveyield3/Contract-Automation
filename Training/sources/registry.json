@@ -1,5 +1,5 @@
 {
-  "version": "v1",
+  "version": "v2",
   "scope": "smart_contract_only",
   "sources": [
     {
@@ -25,7 +25,7 @@
     {
       "name": "Code4rena",
       "url": "https://code4rena.com/reports",
-      "status": "catalogued"
+      "status": "judged_final_report_metadata_ingested"
     },
     {
       "name": "Sherlock",

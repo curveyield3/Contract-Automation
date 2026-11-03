@@ -1,13 +1,12 @@
-# MiMo Smart Contract Auditor — Training corpus (v5)
+# MiMo Smart Contract Auditor — Training corpus (v6)
 
-**Staging corpus, not training-ready.** Exclusively EVM/DeFi and other on-chain smart-contract auditing; general cybersecurity is excluded.
+**Staging corpus; not training-ready.** Scope: smart-contract auditing, on-chain protocols, EVM and DeFi only. General software or network security is excluded.
 
-- `sources/registry.json`: catalogued source collections, separately identifying evaluation-only material.
-- `sources/provenance.json`: source paths, pinned commits and hashes.
-- `sources/licenses/`: upstream license notices (not a relicensing of audited contracts or third-party reports).
-- `datasets/forge-curated/findings/`: **23 original JSON audit documents**, **430 extracted findings**, and a code-linked `finding-index.jsonl`.
-- `datasets/smartbugs-curated/`: **143 Solidity annotation records** with original code pointers.
-- `datasets/defihacklabs/`: **9 pinned exploit-reproduction references**, without potentially unlicensed replay code.
-- `curation/`: scope, verification policy and independent benchmark reserves.
+- `datasets/forge-curated/findings/`: 23 real audit-derived JSON documents, 430 extracted findings with code and audited-commit references.
+- `datasets/code4rena/`: **94 published, final-report judged High/Medium findings from 5 Solidity/DeFi audits**, with issue URLs, final report and revision. Metadata only; no full report copied.
+- `datasets/smartbugs-curated/`: 143 original Solidity annotation records with code references.
+- `datasets/defihacklabs/`: 9 pinned exploit-reproduction references, no redistributed replay code.
+- `sources/`: providers, pinned revisions, provenance and original upstream dataset licenses.
+- `curation/`: smart-contract-only scope and reserved independent evaluation sources.
 
-Raw upstream extraction is not verified ground truth; some findings cover non-exploitable quality issues. No tests, workflows or model training jobs were created or run. All records require source/rights checks, adjudication, deduplication and holdout splits before training.
+Upstream judgments and extracted findings are distinct and are **not independently reverified**. All training records remain `training_eligible:false` until licenses, audited code, protocol overlap, validity and holdout split are addressed. No workflows/tests/training jobs changed.
