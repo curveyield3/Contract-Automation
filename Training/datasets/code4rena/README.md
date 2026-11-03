@@ -1,5 +1,5 @@
-# Code4rena adjudicated final audit finding index — v1
+# Code4rena adjudicated final audit findings (v2)
 
-This index contains 94 judged High/Medium findings from 5 public final Code4rena reports covering DeFi smart contracts. Each source is pinned to an upstream GitHub commit and original report blob, with links to the underlying reported issue. This package contains metadata and URLs **not copied third-party final report bodies or audited Solidity**. The source labels are reported final adjudications, not independently reproduced exploit evidence.
+**157 source-linked final-report High/Medium findings** across **10 independent Code4rena smart-contract contests**. Each JSONL record stores the original judged report and issue URL, severity and title, plus the exact Git revision and blob. Not independently reproduced; full third-party report bodies and contract code are not copied.
 
-The index is separate from FORGE's extracted source labels. It is **not yet a training split**; check third-party report permissions, overlap with FORGE, audited contract commit scope and case validity before training.
+This is a candidate audit training index, not a validated training split. Exclude overlapping FORGE records and reserve unseen protocol/commit groups before training; confirm right-to-use original reports and affected contracts.

@@ -1,5 +1,5 @@
 {
-  "version": "v9",
+  "version": "v10",
   "forge": {
     "commit": "c2829d451d37581dae71aba610506ba3b161e371",
     "documents": [
@@ -1443,8 +1443,8 @@
   },
   "code4rena": {
     "source": "code-423n4",
-    "report_count": 5,
-    "findings": 94,
+    "report_count": 10,
+    "findings": 157,
     "reports": [
       {
         "repo": "2024-04-panoptic-findings",
@@ -1480,6 +1480,41 @@
         "report_blob_sha": "0b521ba9d985dafa30af4713470499cea10d8d05",
         "high": 4,
         "medium": 16
+      },
+      {
+        "repo": "2024-07-benddao-findings",
+        "git_commit": "892e7d324d338e9ff1a5485b50e0dd259440f6b0",
+        "report_blob_sha": "7701e694aa77964ef0e0814c969b7e61a193fe8c",
+        "high": 8,
+        "medium": 20
+      },
+      {
+        "repo": "2024-06-badger-findings",
+        "git_commit": "9eed74b338cfea574b29b0abd768ca6712664fcc",
+        "report_blob_sha": "f86958f9efb79a8b63172ced141e219d81687f8d",
+        "high": 0,
+        "medium": 2
+      },
+      {
+        "repo": "2024-05-bakerfi-findings",
+        "git_commit": "30e7003f6fc084da282f699e9fd3599199435339",
+        "report_blob_sha": "a8e93a0ca3e81b6247c893bd2c61bb55ce3b2b80",
+        "high": 4,
+        "medium": 8
+      },
+      {
+        "repo": "2024-05-predy-findings",
+        "git_commit": "766659221c5d4b5f5477106adc79cabc78d999b4",
+        "report_blob_sha": "c20c2b435062c89270951e05b350fbd70da53443",
+        "high": 4,
+        "medium": 8
+      },
+      {
+        "repo": "2024-08-wildcat-findings",
+        "git_commit": "dc0352696795b2cb37e1712199b4a809e1b92646",
+        "report_blob_sha": "90c4ac1ad78be75a5190ebbe838b5d4f7ba08465",
+        "high": 1,
+        "medium": 8
       }
     ]
   }
