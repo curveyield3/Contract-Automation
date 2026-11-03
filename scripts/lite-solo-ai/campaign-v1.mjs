@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v22.
+// Lite-Solo MiMo / Worker transport bridge v23.
 // No local audit policy, prompt rewriting, evidence filtering, form filling,
 // semantic validation, corrective inference or controller state mutation.
 // The Worker is the sole source of instructions, tool calls and acceptance.
@@ -42,7 +42,24 @@ async function workerCall(payload){
  // Preserve the exact Worker response body including rejected API requests.
  const raw=await res.text();
  if(!raw)throw Error('Worker bridge returned an empty response HTTP '+res.status);
- console.log(JSON.stringify({status:'AI_BRIDGE_WORKER_RESULT',httpStatus:res.status,
+ let envelope=null;
+ try{envelope=JSON.parse(raw);}catch{}
+ const result=envelope?.workerResponse||{};
+ const issueCount=Array.isArray(result.fieldErrors)?result.fieldErrors.length:0;
+ console.log(JSON.stringify({status:'MIMO_WORKER_DISPOSITION',
+  time:new Date().toISOString(),httpStatus:res.status,
+  bridgeStatus:envelope?.status||'UNPARSEABLE_WORKER_REPLY',
+  workerStatus:result.status||null,workerHttpStatus:envelope?.workerHttpStatus??null,
+  phase:result.phase??null,step:result.currentStep??result.step??null,
+  unitId:result.unitId??null,canonicalPath:result.canonicalPath??null,
+  claimedUnits:Array.isArray(result.items)?result.items.length:null,
+  issuedReviewQuestions:Array.isArray(result.questions)?result.questions.length:null,
+  repairItems:Array.isArray(result.repairChecklist)?result.repairChecklist.length:null,
+  fieldErrorCount:issueCount,
+  unitCounts:result.unitCounts||result.counts||null,
+  workerReportedControllerAccepted:result.controllerAccepted===true,
+  privateOutputKey:envelope?.rawR2Key||null,
+  privateOutputSha256:envelope?.rawSha256||null,
   responseSha256:sha(raw),responseBytes:Buffer.byteLength(raw)}));
  return raw;
 }
@@ -89,12 +106,27 @@ async function modelCall(messages){
  });
  const raw=reply.choices?.[0]?.message?.content;
  if(typeof raw!=='string')throw Error('MiMo did not return a text message; no fabricated Worker action');
- console.log(JSON.stringify({status:'AI_BRIDGE_RAW_MODEL_OUTPUT',
+ // Observe the submitted action without editing or filtering the actual text.
+ // This repository is PUBLIC: full source-bound findings belong in Worker R2,
+ // not public Actions logs. All metadata comes from the unmodified reply.
+ let action=null;
+ try{action=JSON.parse(raw);}catch{}
+ const input=action?.request||{};
+ const file=input.shard??input.submission??null;
+ console.log(JSON.stringify({status:'MIMO_ACTUAL_OUTPUT_SUBMITTED',
+  time:new Date().toISOString(),route:action?.route||null,
+  action:input.action||null,unitId:input.unitId||null,
+  submittedFileKind:file?.kind??null,
+  submittedEntries:Array.isArray(file?.entries)?file.entries.length:null,
+  submittedFileBytes:file?Buffer.byteLength(JSON.stringify(file)):null,
+  fields:Array.isArray(file?.entries)?
+   file.entries.map(e=>e?.key).filter(x=>typeof x==='string').slice(0,30):null,
   responseSha256:sha(raw),responseBytes:Buffer.byteLength(raw),
   finishReason:reply.choices?.[0]?.finish_reason||null,
   promptTokens:reply.usage?.prompt_tokens||null,
   completionTokens:reply.usage?.completion_tokens||null,
-  elapsedSeconds:Math.round((Date.now()-start)/1000)}));
+  elapsedSeconds:Math.round((Date.now()-start)/1000),
+  substantiveText:'PRIVATE_WORKER_R2_ONLY'}));
  return raw;
 }
 
