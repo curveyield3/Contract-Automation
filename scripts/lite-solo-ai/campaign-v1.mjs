@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v23.
+// Lite-Solo MiMo / Worker transport bridge v24.
 // No local audit policy, prompt rewriting, evidence filtering, form filling,
 // semantic validation, corrective inference or controller state mutation.
 // The Worker is the sole source of instructions, tool calls and acceptance.
@@ -64,6 +64,27 @@ async function workerCall(payload){
  return raw;
 }
 
+// Observe llama.cpp's live per-slot token counters without reading or logging
+// prompt/generated text. The output, Worker protocol, and controller gates are
+// unchanged. A genuine model token of either kind resets inactivity.
+async function readInferenceCounters(){
+ const res=await fetch('http://127.0.0.1:8080/slots',{
+  signal:AbortSignal.timeout(8000)
+ });
+ if(!res.ok)throw Error('llama.cpp slot counter HTTP '+res.status);
+ const slots=await res.json();
+ if(!Array.isArray(slots))throw Error('llama.cpp slots response is not an array');
+ const active=slots.find(x=>x?.is_processing===true);
+ if(!active)return null;
+ const processed=active.n_prompt_tokens_processed;
+ const next=Array.isArray(active.next_token)?active.next_token[0]:active.next_token;
+ const decoded=next?.n_decoded;
+ if(!Number.isSafeInteger(processed)||processed<0||
+    !Number.isSafeInteger(decoded)||decoded<0)
+  throw Error('llama.cpp active slot lacks verifiable token counters');
+ return {taskId:active.id_task??null,processed,decoded};
+}
+
 async function modelCall(messages){
  const request=JSON.stringify({
   model:'lite-solo-mimo-v1',
@@ -77,6 +98,11 @@ async function modelCall(messages){
  console.log(JSON.stringify({status:'AI_BRIDGE_MODEL_REQUEST',
   conversationMessages:messages.length,promptBytes:Buffer.byteLength(request)}));
  const reply=await new Promise((resolve,reject)=>{
+  const started=Date.now();
+  let lastProgress=started,lastSample=null,observedTokens=false;
+  let finished=false,polling=false,monitorErrors=0,lastReport=started;
+  let watchdog;
+  const stopMonitoring=()=>{finished=true;clearInterval(watchdog);};
   const req=http.request('http://127.0.0.1:8080/v1/chat/completions',{
    method:'POST',
    headers:{'content-type':'application/json','content-length':Buffer.byteLength(request)},
@@ -91,8 +117,9 @@ async function modelCall(messages){
     }
     chunks.push(part);
    });
-   res.on('error',reject);
+   res.on('error',err=>{stopMonitoring();reject(err);});
    res.on('end',()=>{
+    stopMonitoring();
     if(res.statusCode!==200){
      reject(Error('MiMo HTTP '+res.statusCode+': '+Buffer.concat(chunks).toString('utf8').slice(0,600)));
      return;
@@ -101,7 +128,56 @@ async function modelCall(messages){
     catch{reject(Error('MiMo HTTP envelope was not JSON'));}
    });
   });
-  req.on('error',reject);
+  req.on('error',err=>{stopMonitoring();reject(err);});
+  // Five minutes without prompt or generation token progress means recovery.
+  // Before the first measurable token, allow ten minutes for tokenization,
+  // model scheduling and large-prompt startup. Preserve the 120-minute hard cap.
+  watchdog=setInterval(async()=>{
+   if(finished||polling)return;
+   polling=true;
+   try{
+    const sample=await readInferenceCounters();
+    if(finished)return;
+    const now=Date.now();
+    if(sample){
+     monitorErrors=0;
+     const changedTask=lastSample&&sample.taskId!==lastSample.taskId;
+     const advanced=!lastSample?
+       sample.processed>0||sample.decoded>0:
+       sample.processed>lastSample.processed||sample.decoded>lastSample.decoded;
+     if(changedTask||advanced){
+      observedTokens=true;lastProgress=now;
+     }
+     lastSample=sample;
+     if(now-lastReport>=120000){
+      console.log(JSON.stringify({status:'MIMO_INFERENCE_PROGRESS',
+       promptTokensProcessed:sample.processed,generatedTokens:sample.decoded,
+       secondsSinceProgress:Math.round((now-lastProgress)/1000)}));
+      lastReport=now;
+     }
+     const idleMs=now-lastProgress;
+     const limitMs=observedTokens?5*60*1000:10*60*1000;
+     if(idleMs>=limitMs){
+      console.error(JSON.stringify({status:'MIMO_INFERENCE_STALLED',
+       promptTokensProcessed:sample.processed,generatedTokens:sample.decoded,
+       secondsSinceProgress:Math.round(idleMs/1000),graceSeconds:limitMs/1000,
+       action:'FAIL_CURRENT_RUN_AND_PRESERVE_ACCEPTED_WORK'}));
+      req.destroy(Error('MiMo token progress stalled for '+Math.round(idleMs/1000)+' seconds'));
+     }
+    }else if(now-started>=10*60*1000&&!observedTokens){
+     console.error(JSON.stringify({status:'MIMO_INFERENCE_STALLED',
+      reason:'No active inference slot or measurable token progress after startup grace',
+      secondsSinceStart:Math.round((now-started)/1000)}));
+     req.destroy(Error('MiMo inference produced no measurable token activity after 10 minutes'));
+    }
+   }catch(err){
+    monitorErrors++;
+    if(monitorErrors===3)
+     console.warn(JSON.stringify({status:'MIMO_PROGRESS_MONITOR_UNAVAILABLE',
+      reason:String(err.message||err).slice(0,160),
+      action:'Preserve existing 120-minute request timeout; do not infer stalled tokens'}));
+   }finally{polling=false;}
+  },30000);
   req.end(request);
  });
  const raw=reply.choices?.[0]?.message?.content;
