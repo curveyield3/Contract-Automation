@@ -1,4 +1,4 @@
-name: Lite-Solo AI Source Inference and Autonomous Beta v3
+name: Lite-Solo AI Source Inference and Autonomous Beta v6
 on:
   push:
     branches: [main]
@@ -366,7 +366,10 @@ jobs:
           
           def emit(value):
               line = json.dumps(value, separators=(",", ":"), sort_keys=True)
-              print(line, flush=True)
+              # Keep 30-second CPU samples in the existing local JSONL file,
+              # not in the human-readable audit progress stream.
+              if value.get('status') in ('MIMO_RESOURCE_MONITOR_WARNING', 'MIMO_RESOURCE_SUMMARY'):
+                  print(line, flush=True)
               try:
                   with report.open("a", encoding="utf-8") as f:
                       f.write(line + "\n")
@@ -450,7 +453,7 @@ jobs:
                       f.write(f"- CPU effective capacity: {capacity} cores\n")
                       f.write(f"- Average / peak CPU use (one core = 100%): {summary['averageCpuPercentOneCore']}% / {summary['peakCpuPercentOneCore']}%\n")
                       f.write(f"- Peak model RSS / cgroup RAM: {summary['peakProcessRssMiB']} MiB / {summary['peakCgroupMemoryMiB']} MiB\n")
-                      f.write("- Per-sample CPU, per-thread CPU, RAM, cgroup usage and throttling are in MIMO_RESOURCE_SAMPLE log records.\n")
+                      f.write("- CPU samples remain in the local mimo-resource-metrics.jsonl file; the live log is reserved for MiMo actions and Worker dispositions.\n")
               except OSError:
                   pass
           PY
