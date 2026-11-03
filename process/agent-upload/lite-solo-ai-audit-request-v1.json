@@ -1,14 +1,12 @@
 {
   "schemaVersion": "lite-solo-ai-audit-request-v1",
-  "mode": "autonomous",
+  "mode": "autonomous_start",
+  "source_url": "https://github.com/curveyield3/Audit-Controller/blob/main/campaigns/cyvbUSDCv28.zip",
   "inference_runners": "2",
-  "campaign_id": "cyvbusdcv28-r3",
-  "expected_phase": "1",
-  "expected_step": "2",
   "submission_mode": "submit",
   "max_chunks": "32",
   "ai_hop": "0",
-  "dispatchRevision": "v10",
-  "supersedes_run_id": "41641744161",
-  "supersedes_run_sha": "21ce8931144df81d33cfb2bb302c4c146a012f65"
+  "dispatchRevision": "v11",
+  "priorCampaign": "cyvbusdcv28-r3",
+  "sourceExpectedSha256": "299fda8224b658a17bf0068690a321f295c1d7ee655eaf72470023ec33a0eb71"
 }
