@@ -319,6 +319,47 @@ function modelFacingResponse(original){
  // Reorder the transport envelope without changing any controller data.
  return JSON.stringify({governingDocuments:envelope.governingDocuments,...envelope});
 }
+
+function adapterRecovery(reason,raw,claim,reissue){
+ let envelope;
+ try{envelope=JSON.parse(raw);}catch{envelope={};}
+ const state=envelope.workerResponse||{},unit=claim?.workerResponse||{},
+  work=unit.status==='LEASED_SHARD'?[unit]:unit.status==='LEASED_PACKET'?unit.items||[]:[],
+  stage=state.engagement?.stage||unit.engagement?.stage||'';
+ let cmd,goal;
+ if(stage==='INSTRUCTIONS'||state.status==='INSTRUCTION_ACKNOWLEDGMENT_REQUIRED'){
+  cmd={route:'/api/step/interaction',request:{action:'acknowledge'}};
+  goal='Read the exact instruction form and answer Q1-Q3 with original formSha256 and readAndUnderstand=true before claiming work.';
+ }else if(['FIRST_ROUND_RECORDED_REVIEW_REQUIRED','REVIEW_QUESTIONS_REQUIRED'].includes(state.status)){
+  cmd={route:'/api/step/interaction',request:{action:'review_answers'}};
+  goal='Answer the five exact issued Q1-Q5 with evidence and a truthful repairChecklist before the repair stage.';
+ }else if(['REPAIR_CHECKBOX_REQUIRED','REPAIR_CHECKLIST_READY'].includes(state.status)){
+  cmd={route:'/api/step/interaction',request:{action:'repair_ack'}};
+  goal='Perform source-backed repairs, assess every repairId and supply the original required checks and outcomes; then submit the revised complete work form.';
+ }else if(work.length){
+  cmd={route:'/api/step/process',request:{action:'submit',unitId:work[0].unitId,lease:work[0].lease}};
+  goal='Complete EVERY editable semantic field of the original issued work form using gathered source evidence. Preserve every immutable field. Add the FULL completed inputFileTemplate as request.shard, not a patch or placeholder. For multi-unit packets submit each unit separately.';
+ }else if(stage==='WORK'){
+  cmd={route:'/api/step/process',request:{action:'claim'}};
+  goal='Acquire the actual original controller work form, perform the step objectives and submit all required semantic fields.';
+ }else{
+  cmd={route:'/api/step/current',request:{}};
+  goal='Read the exact live controller step, its engagement stage and nextAction before choosing an action.';
+ }
+ const correction={type:'MIMO_ADAPTER_ACTION_RECOVERY',reason,
+  campaignId,phase:envelope.governingDocuments?.phase??unit.phase??null,
+  step:envelope.governingDocuments?.step??unit.step??null,
+  status:state.status||null,workerNextAction:state.nextAction||null,
+  actionableObjective:goal,requiredNextCommand:cmd,
+  issuedForms:work.map(u=>({unitId:u.unitId,canonicalPath:u.canonicalPath||u.descriptor?.path||null,
+   lease:u.lease,formField:'request.shard'})),
+  instruction:'Your next response must be a single JSON route/request command. Use the exact command and real identifiers above, adding the required real form or independent answers. Do not repeat a rejected command. All form semantic content must be your genuine source-grounded work.'};
+ if(reissue&&work.length)
+  correction.issuedOriginalForms=work.map(u=>({unitId:u.unitId,inputFileTemplate:u.inputFileTemplate,
+   validationSchema:u.validationSchema||null}));
+ return correction;
+}
+
 function assignmentScope(response){
  let outer;
  try{outer=JSON.parse(response);}catch{return null;}
