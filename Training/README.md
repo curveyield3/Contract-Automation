@@ -1,11 +1,11 @@
-# MiMo Smart Contract Auditor — Training corpus (v15)
+# MiMo Smart Contract Auditor — Training corpus (v16)
 
-**Training staging area, not yet training-ready.** Specialization limited to Solidity/EVM and DeFi smart-contract security, not ordinary cybersecurity.
+**Source aggregation only; not yet training-ready.** Exclusive scope: smart-contract security, Solidity/EVM and DeFi. General software/network cybersecurity excluded.
 
-- `datasets/forge-curated/findings/`: 47 original JSON audit documents, 1030 extracted code-linked findings.
-- `datasets/code4rena/`: 208 final judged H/M issue references from 15 smart-contract audits.
-- `datasets/smartbugs-curated/`: 143 annotated Solidity contracts and original source pointers.
-- `datasets/defihacklabs/`: **454 historical DeFi exploit Foundry reproduction pointers**, pinned to original Git commits and blob hashes; replay code linked, not mirrored.
-- `sources/`: catalogue, source versions, legal notices; `curation/`: source qualification policy and evaluation holdouts.
+- `datasets/forge-curated/findings/`: 47 original audit JSON documents, 1030 extracted issue records with affected code/revision pointers.
+- `datasets/code4rena/`: 208 judged final-report H/M issue references from 15 smart-contract contests.
+- `datasets/smartbugs-curated/`: 143 Solidity annotation records with source URLs.
+- `datasets/defihacklabs/`: 585 pinned source pointers for historical real-world exploit reproductions, without copying replay code.
+- `sources/`: source registry, exact upstream commits/blobs and license notices; `curation/`: strict inclusion and evaluation holdout policies.
 
-These are original-source indexes, not independently replayed/verified exploit claims. Findings must be rights-cleared, checked for correct audited code, deduplicated across sources and split by unseen protocol families before becoming training records. No workflows, tests, production source or model weights changed.
+Source classifications are not independent validation. Some upstream source files declare restrictive SPDX. Records need source/rights review, reproduction where permitted, deduplication, and blind protocol-family splits prior to use as MiMo supervision. No tests, workflows, training jobs or production logic modified.
