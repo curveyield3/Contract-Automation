@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'process/agent-upload/lite-solo-ai-training-request-v1.json'
+      - 'process/agent-upload/lite-solo-ai-audit-request-v1.json'
   workflow_dispatch:
     inputs:
       inference_runners:
@@ -100,6 +101,46 @@ env:
   LLAMA_SHA: 8642541b255bfb5dc39cd351a178be09013a55d6
   GGML_RPC_NO_RDMA: '1'
 jobs:
+  audit-file-trigger:
+    if: github.event_name == 'push' && (contains(github.event.head_commit.added, 'process/agent-upload/lite-solo-ai-audit-request-v1.json') || contains(github.event.head_commit.modified, 'process/agent-upload/lite-solo-ai-audit-request-v1.json'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout file-trigger request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Dispatch existing MiMo autonomous inference workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          request='process/agent-upload/lite-solo-ai-audit-request-v1.json'
+          test -s "$request"
+          jq -e '
+            .schemaVersion == "lite-solo-ai-audit-request-v1"
+            and .mode == "autonomous"
+            and (.inference_runners == "1" or .inference_runners == "2" or .inference_runners == "4")
+            and (.campaign_id | type == "string" and test("^[A-Za-z0-9_.-]+$"))
+            and (.expected_phase | type == "string" and test("^[0-9]+$"))
+            and (.expected_step | type == "string" and test("^[0-9]+$"))
+            and .submission_mode == "submit"
+            and (.max_chunks | type == "string" and test("^([1-9]|[12][0-9]|3[012])$"))
+            and (.ai_hop | type == "string" and test("^[0-9]+$"))
+          ' "$request" >/dev/null
+          gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref main \
+            -f "mode=$(jq -r .mode "$request")" \
+            -f "inference_runners=$(jq -r .inference_runners "$request")" \
+            -f "campaign_id=$(jq -r .campaign_id "$request")" \
+            -f "expected_phase=$(jq -r .expected_phase "$request")" \
+            -f "expected_step=$(jq -r .expected_step "$request")" \
+            -f "submission_mode=$(jq -r .submission_mode "$request")" \
+            -f "max_chunks=$(jq -r .max_chunks "$request")" \
+            -f "ai_hop=$(jq -r .ai_hop "$request")"
+          echo "MiMo autonomous inference dispatch submitted; controller acceptance not yet established."
   infer:
     if: github.event_name == 'workflow_dispatch' && inputs.mode != 'train'
     runs-on: ubuntu-latest
@@ -582,7 +623,7 @@ jobs:
           kill "$(cat "$RUNNER_TEMP/mimo-rpc-server.pid")" 2>/dev/null || true
 
   train:
-    if: github.event_name == 'push' || inputs.mode == 'train'
+    if: (github.event_name == 'push' && (contains(github.event.head_commit.added, 'process/agent-upload/lite-solo-ai-training-request-v1.json') || contains(github.event.head_commit.modified, 'process/agent-upload/lite-solo-ai-training-request-v1.json'))) || (github.event_name == 'workflow_dispatch' && inputs.mode == 'train')
     name: MiMo CPU training stage ${{ matrix.rank }} / 7
     runs-on: ubuntu-latest
     timeout-minutes: 100
@@ -755,7 +796,7 @@ jobs:
           echo 'Training does not change controller receipts, v5 approvals or v6 audit authority.' >> "$GITHUB_STEP_SUMMARY"
 
   training-package:
-    if: github.event_name == 'push' || inputs.mode == 'train'
+    if: (github.event_name == 'push' && (contains(github.event.head_commit.added, 'process/agent-upload/lite-solo-ai-training-request-v1.json') || contains(github.event.head_commit.modified, 'process/agent-upload/lite-solo-ai-training-request-v1.json'))) || (github.event_name == 'workflow_dispatch' && inputs.mode == 'train')
     name: Consolidate eight MiMo CPU LoRA stage checkpoints
     needs: train
     runs-on: ubuntu-latest
