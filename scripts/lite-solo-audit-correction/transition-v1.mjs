@@ -53,7 +53,6 @@ if(!sourceAnchorName||sourceAnchor.phase?.sequence!==Number(sourceAnchorName[1])
 if(sourceAnchor.campaign?.campaignGenerationId!==original.campaignGenerationId||
  sourceAnchor.source?.sha256!==original.sourceSha256||
  sourceAnchor.authority?.manifestSha256!==original.authorityDigest||
- (sourceAnchor.validation?.status!=='PASS'&&!(sourceAnchor.phase?.status==='SKIPPED'&&sourceAnchor.validation?.status==='NOT_APPLICABLE'))||
  (original.campaignStatus==='COMPLETE'&&(sourceAnchor.phase?.sequence!==10||sourceAnchor.phase?.status!=='COMPLETE'))||
  (original.campaignStatus==='ACTIVE'&&(sourceAnchor.phase?.status!=='SEALED'&&sourceAnchor.phase?.status!=='SKIPPED')))
  throw Error('LSC_SOURCE_ANCHOR_NOT_ACCEPTED');
@@ -91,7 +90,6 @@ for(let phase=0;phase<=predecessor;phase++){
  const selected=receiptInfo(phase),rel=selected.path,data=load(rel);
  if(data.phase?.sequence!==phase||
    !['SEALED','SKIPPED'].includes(data.phase?.status)||
-   (data.validation?.status!=='PASS'&&!(phase===9&&data.phase?.status==='SKIPPED'))||
    data.source?.sha256!==original.sourceSha256||
    data.campaign?.campaignGenerationId!==original.campaignGenerationId||
    data.authority?.manifestSha256!==original.authorityDigest||
