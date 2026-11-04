@@ -1,7 +1,7 @@
 name: Lite-Solo AI Source Inference and Autonomous Beta v6
 on:
   push:
-    branches: [main]
+    branches: [machine-intelligence-audit-controller-v1]
     paths:
       - 'process/agent-upload/lite-solo-ai-training-request-v1.json'
       - 'process/agent-upload/lite-solo-ai-audit-request-v1.json'
@@ -132,13 +132,13 @@ jobs:
               .schemaVersion == "lite-solo-ai-audit-request-v1"
               and .mode == "autonomous_start"
               and (.source_url | type == "string")
-              and (.source_url | test("^https://github\\.com/curveyield3/Audit-Controller/blob/main/campaigns/[A-Za-z0-9._-]+\\.zip$"))
+              and (.source_url | test("^https://github\\.com/curveyield3/Audit-Controller/blob/machine-intelligence-audit-controller-v1/campaigns/[A-Za-z0-9._-]+\\.zip$"))
               and (.inference_runners == "1" or .inference_runners == "2" or .inference_runners == "4")
               and .submission_mode == "submit"
               and (.max_chunks | type == "string" and test("^([1-9]|[12][0-9]|3[012])$"))
               and .ai_hop == "0"
             ' "$request" >/dev/null
-            gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref main \
+            gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref machine-intelligence-audit-controller-v1 \
               -f "mode=autonomous_start" \
               -f "source_url=$(jq -r .source_url "$request")" \
               -f "inference_runners=$(jq -r .inference_runners "$request")" \
@@ -166,7 +166,7 @@ jobs:
             [[ "$old_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Expected exact superseded commit SHA"; exit 1; }
             old_metadata="$(gh api "repos/curveyield3/Contract-Automation/actions/runs/$old_run")"
             printf '%s' "$old_metadata" | jq -e --arg sha "$old_sha" '
-              .head_sha==$sha and .event=="workflow_dispatch" and .head_branch=="main"
+              .head_sha==$sha and .event=="workflow_dispatch" and .head_branch=="machine-intelligence-audit-controller-v1"
               and .path==".github/workflows/lite-solo-ai-inference-v1.yml"
             ' >/dev/null || { echo "::error::Superseded workflow identity mismatch"; exit 1; }
             old_status="$(printf '%s' "$old_metadata" | jq -r '.status')"
@@ -181,7 +181,7 @@ jobs:
             fi
             echo "Old exact audit run $old_run terminated; controller-accepted work stays immutable."
           fi
-          gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref main \
+          gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref machine-intelligence-audit-controller-v1 \
             -f "mode=$(jq -r .mode "$request")" \
             -f "inference_runners=$(jq -r .inference_runners "$request")" \
             -f "campaign_id=$(jq -r .campaign_id "$request")" \
