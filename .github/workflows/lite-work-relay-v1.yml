@@ -43,6 +43,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   relay:
+    # Fork isolation: retired lane references original main; keep it inactive.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -198,7 +200,9 @@ jobs:
           echo 'The receiving agent places its exact COMPLETE code as FIRST LINE of DELIVERY_COMMAND_v1.md.' >> "$GITHUB_STEP_SUMMARY"
   rearm:
     needs: relay
-    if: always() && (github.event_name == 'schedule' || inputs.operation == 'sweep')
+    # Fork isolation: retired lane references original main; keep it inactive.
+    # Original gate: always() && (github.event_name == 'schedule' || inputs.operation == 'sweep')
+    if: ${{ false }}
     concurrency:
       group: agent-delivery-watchdog-rearm-v1
       cancel-in-progress: false
