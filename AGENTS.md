@@ -1,5 +1,10 @@
 # Contract-Automation Agent Execution Policy
 
+## Machine Intelligence source-fork isolation (branch-specific)
+
+For the paired `machine-intelligence-audit-controller-v1` branches ONLY: never read, write, checkout, dispatch, wake, publish to, or otherwise use either original `main` branch. All eligible source/authority reads and controller/automation publication must target the matching fork refs. The copied Lite-Solo v6 SKILL contains a historical unit-request instruction mentioning Contract-Automation `main`; that transport destination is **not authorized for Machine Intelligence**. Use only the existing authenticated Machine Intelligence Worker and fork-bound GitHub paths; if the isolated runtime is not configured, do not fall back to production. Preserve the original source-bound authority bytes and accepted receipts, and do not confuse transport isolation with evidence/security validation. Lite-Solo v6 is an AI-only release and does not require human authorization between steps. This is a source-development fork, not permission to execute campaigns or run tests.
+
+
 Policy version: v13
 
 ## Nonstop audit execution and workflow-failure recovery — mandatory
