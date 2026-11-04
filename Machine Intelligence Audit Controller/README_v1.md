@@ -32,12 +32,17 @@ Fork-only changes to active paths:
 
 Workflow/action deep-sweep findings (fork source only):
 - Both `.github/actions/setup-phase0-node-cache/action.yml` and `.github/actions/setup-no-telemetry-node-cache/action.yml` retain required pinned Forge/Anvil checks, but secondary `npm ls` dependency-tree diagnostics no longer abort the audit.
-- Both Lite-Solo Phase-0 intelligence workflows treat analyzer toolchain and generator failures as non-terminal steps; any genuine artifacts are still source-bound and must physically exist before publication.
+- Both Lite-Solo Phase-0 intelligence workflows use the pinned Forge executable plus pinned Slither, **not** the obsolete V7/Medusa setup action. Analyzer installation/generation failures are retained for Worker assessment; only genuine source-bound artifacts can be published.
 - Both Lite-Solo Phase-0 bootstrap workflows now allow failed native deployment attempts to reach evidence retention/Worker review, while retaining missing-file, source SHA, RPC chain, and authenticated publication guards.
 - Dormant `lite-phase-*`, `audit-preview-*`, and V7 legacy workflows contain numerous additional GitHub validation and `main` routing checks; most use `main`-only triggers or explicit manual dispatch and are NOT part of the active MiMo fork pipeline. Do not route new fork execution into them unchanged.
-- **Verified latent V7 blocker:** Worker source snapshot in Audit-Controller references a nonexistent `lite-solo-cloudflare-v7-execution-dispatch-v1.yml` twice. The existing `lite-v7-execution-dispatch-v1.yml` instead dispatches `audit-controller-execution.yml` on `main` and enforces an older V7 runner qualification gate. Neither is a safe drop-in substitution. This separate execution handoff needs an isolated adaptation of existing V7 workflows before running the fork.
+- **Legacy V7 is deliberately out of scope.** The copied Worker source still references a nonexistent V7-dispatch workflow, and partial historical V7 fork edits do not establish a safe, operational execution lane. Do not invoke those routes or treat V7 as a Machine Intelligence prerequisite. No further V7 modernization is planned in this sweep.
 - MiMo autonomous inference now asks the Worker to claim work directly rather than aborting from an independently sampled GitHub foreign-lease count; authoritative Worker lease responses still apply.
 - The existing V7 qualification record is bound to runner commit `03bf8379525d3a94729347aa3224fe48bddc8921` (October 11, 2026). Comparing that legacy runner against this fork exceeds the GitHub compare endpoint's 300-file listing; a clean fork-specific V7 qualification cannot be assumed, and routing through its existing production dispatcher is unsafe.
+- The unused Phase-5 preflight workflow steps and retry-time reruns were removed from both active phase/unit workflows; actual accepted unit files and receipts still govern physical packaging.
+- The legacy GitHub human-checkbox check in MiMo `campaign` mode was removed; Worker authorization and source/phase/step binding remain mandatory.
+- Source-initialization file triggers now admit either a ZIP or verified explorer scans, matching existing initializer support; never both.
+- The Cloudflare fork adapter uses structural Phase-0/Phase-10 receipts rather than GitHub content-quality `PASS` as a sealing prerequisite, and the Phase-0 finalizer can recover a prior `BLOCKED` receipt when real evidence exists.
+- The shared Lite-Solo checkout helper and phase-controller CLI reject controller refs other than `machine-intelligence-audit-controller-v1`.
 - No new workflows, actions, or tests were created or executed.
 
 Remaining execution hold:
