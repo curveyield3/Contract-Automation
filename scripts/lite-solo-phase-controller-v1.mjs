@@ -1006,7 +1006,7 @@ if(sequence===5&&form&&deficiencies.length===0){
     }
     }catch(error){deficiencies.push('Phase 5 target data assessment deferred to Worker: '+String(error?.message??error));}
   }
-  if(!deficiencies.length){
+  if(form){
     try{
       assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
       writeJson(repoFile(root,assignment.workFormPath),form);
