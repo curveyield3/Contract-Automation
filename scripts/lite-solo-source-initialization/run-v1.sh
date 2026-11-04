@@ -61,9 +61,9 @@ publication_any_on() { printf '%s' "$PUBLISH_FILES_JSON" | jq -e 'any(.[]; . == 
 # Exact workflow retries are idempotent. A new request using the same ZIP is NOT
 # deduplicated; it intentionally creates the next rN campaign revision.
 report_api="repos/$GITHUB_REPOSITORY/contents/$report_path"
-report_sha="$(gh api "$report_api?ref=main" --jq '.sha // empty' 2>/dev/null || true)"
+report_sha="$(gh api "$report_api?ref=machine-intelligence-audit-controller-v1" --jq '.sha // empty' 2>/dev/null || true)"
 if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
-  encoded="$(gh api "$report_api?ref=main" --jq '.content')"
+  encoded="$(gh api "$report_api?ref=machine-intelligence-audit-controller-v1" --jq '.content')"
   printf '%s' "$encoded" | base64 -d > /tmp/prior-source-init.json
   jq -e --arg url "$SOURCE_URL" --argjson scans "$SCAN_URLS" \
     '.schemaVersion=="curveyield-lite-solo-source-report-v1" and .mode=="LITE_SOLO" and .status=="PASS" and .actor.actorId=="lite-solo-agent" and .source.inputUrl==$url and .source.scanUrls==$scans' \
@@ -108,7 +108,7 @@ else
   # Materialize only what initialization reads or writes: the current authority package, the
   # campaign directory entries, and (added below) the new campaign folder. Everything else in
   # Audit-Controller stays unfetched; revision and collision checks read the Git tree instead.
-  gh repo clone curveyield3/Audit-Controller "$repo" -- --branch main --depth 1 --filter=blob:none --sparse
+  gh repo clone curveyield3/Audit-Controller "$repo" -- --branch machine-intelligence-audit-controller-v1 --depth 1 --filter=blob:none --sparse
   cd "$repo"
   git sparse-checkout set --no-cone '/Audit Skill - Lite-Solo Authority/**' '/Audit Campaign Directory/campaigns/**'
   git config user.name 'CurveYield Lite-Solo Source Initialization'
@@ -182,8 +182,8 @@ else
   if [ "$recovered" = false ]; then
   success=false
   for attempt in 1 2 3 4 5; do
-    git fetch --depth 1 --filter=blob:none origin main
-    git reset --hard origin/main
+    git fetch --depth 1 --filter=blob:none origin machine-intelligence-audit-controller-v1
+    git reset --hard origin/machine-intelligence-audit-controller-v1
     git clean -fdx
 
     # Freeze the complete authority identity from this exact initialization
@@ -269,7 +269,7 @@ else
     git commit -m "audit(receipt): initialize $campaign_id phase 0"
     init_commit="$(git rev-parse HEAD)"
 
-    if git push origin HEAD:main; then
+    if git push origin HEAD:machine-intelligence-audit-controller-v1; then
       success=true
       break
     fi
@@ -287,13 +287,13 @@ else
 
   body="$(base64 -w0 /tmp/source-init-report.json)"
   api="repos/$GITHUB_REPOSITORY/contents/$report_path"
-  current="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
+  current="$(gh api "$api?ref=machine-intelligence-audit-controller-v1" --jq '.sha' 2>/dev/null || true)"
   if [[ "$current" =~ ^[0-9a-f]{40}$ ]]; then
     gh api --method PUT "$api" -f message="chore(audit): record source initialization $REQUEST_ID" \
-      -f content="$body" -f sha="$current" -f branch=main >/dev/null
+      -f content="$body" -f sha="$current" -f branch=machine-intelligence-audit-controller-v1 >/dev/null
   else
     gh api --method PUT "$api" -f message="chore(audit): record source initialization $REQUEST_ID" \
-      -f content="$body" -f branch=main >/dev/null
+      -f content="$body" -f branch=machine-intelligence-audit-controller-v1 >/dev/null
   fi
 fi
 
@@ -311,7 +311,7 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
     evidence/static-analysis/SLITHER_v1.json \
     evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json; do
     encoded="$(jq -rn --arg p "$campaign_root/$evidence" '$p|split("/")|map(@uri)|join("/")')"
-    if ! gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=main" --jq '.sha' >/dev/null 2>&1; then
+    if ! gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=machine-intelligence-audit-controller-v1" --jq '.sha' >/dev/null 2>&1; then
       evidence_ready=false
       break
     fi
@@ -322,7 +322,7 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   if [ "$evidence_ready" = true ]; then
     plan_path="$campaign_root/evidence/review-inventory/FLOW_PLAN_v1.json"
     encoded_plan="$(jq -rn --arg p "$plan_path" '$p|split("/")|map(@uri)|join("/")')"
-    if gh api "repos/curveyield3/Audit-Controller/contents/$encoded_plan?ref=main" --jq '.sha' >/dev/null 2>&1; then
+    if gh api "repos/curveyield3/Audit-Controller/contents/$encoded_plan?ref=machine-intelligence-audit-controller-v1" --jq '.sha' >/dev/null 2>&1; then
       resume_from_deploy=true
     else
       echo "::notice::Phase-0 flow plan not sealed; regenerate source review inventory from existing immutable source."
@@ -330,10 +330,10 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   fi
 fi
 export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
-gh workflow run lite-solo-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+gh workflow run lite-solo-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref machine-intelligence-audit-controller-v1 \
   -f campaign_id="$campaign_id" \
   -f campaign_path="$campaign_root" \
-  -f audit_controller_ref=main \
+  -f audit_controller_ref=machine-intelligence-audit-controller-v1 \
   -f resume_from_deploy="$resume_from_deploy"
 
 {
