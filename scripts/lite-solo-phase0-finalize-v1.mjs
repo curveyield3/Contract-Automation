@@ -77,37 +77,39 @@ if(receipt.source?.inputMode==='LIVE_SCAN'){
     githubPhase0Diagnostics.push('SCAN_TARGET_SET_IDENTITY_MISMATCH');
   const requested=manifest.requestedTargets??[],targets=manifest.resolvedTargets??[],units=manifest.compilerUnits??[];
   if(!requested.length||!targets.length||targets.length>64||!units.length)githubPhase0Diagnostics.push('SCAN_SOURCE_TARGETS_INCOMPLETE');
-  if(requested.length!==receipt.source.originUrls.length)githubPhase0Diagnostics.push('SCAN_SOURCE_REQUEST_COUNT_MISMATCH');
+  if(requested.length!==(receipt.source.originUrls?.length??0))githubPhase0Diagnostics.push('SCAN_SOURCE_REQUEST_COUNT_MISMATCH');
   for(let i=0;i<requested.length;i++){
-    const u=new URL(receipt.source.originUrls[i]);
-    if(requested[i].toLowerCase()!==u.pathname.split('/').pop()?.toLowerCase())githubPhase0Diagnostics.push('SCAN_REQUEST_URL_ADDRESS_MISMATCH');
+    const u=new URL(receipt.source.originUrls?.[i]??'https://invalid.example/');
+    if(String(requested[i]??'').toLowerCase()!==u.pathname.split('/').pop()?.toLowerCase())githubPhase0Diagnostics.push('SCAN_REQUEST_URL_ADDRESS_MISMATCH');
   }
   if(deploy.status!=='PASS_LIVE_DEPLOYMENT'||deploy.deploymentProfile?.mode!=='LIVE'||
-     deploy.fork?.chainId!==manifest.chainId||deploy.fork?.initialBlock!==manifest.frozenBlock.number||
-     deploy.liveDeployment?.blockNumber!==manifest.frozenBlock.number||
-     deploy.liveDeployment?.blockHash?.toLowerCase()!==manifest.frozenBlock.hash.toLowerCase()||
+     deploy.fork?.chainId!==manifest.chainId||deploy.fork?.initialBlock!==manifest.frozenBlock?.number||
+     deploy.liveDeployment?.blockNumber!==manifest.frozenBlock?.number||
+     deploy.liveDeployment?.blockHash?.toLowerCase()!==manifest.frozenBlock?.hash?.toLowerCase()||
      deploy.scanSourceSnapshot?.manifestDigestSha256!==manifestDigestSha256)
     githubPhase0Diagnostics.push('SCAN_FROZEN_LIVE_EVIDENCE_MISMATCH');
-  const declared=deploy.deploymentProfile.contracts??[],observed=deploy.liveDeployment.contracts??[];
+  const declared=deploy.deploymentProfile?.contracts??[],observed=deploy.liveDeployment?.contracts??[];
   if(declared.length!==targets.length||observed.length!==targets.length)githubPhase0Diagnostics.push('SCAN_LIVE_TARGET_COVERAGE_INCOMPLETE');
   const compiled=artifacts.artifacts??[];
   for(let i=0;i<targets.length;i++){
     const t=targets[i],d=declared[i],live=observed[i];
-    if(d.address.toLowerCase()!==t.address||live.address.toLowerCase()!==t.address||
-       d.qualifiedName!==t.qualifiedName||live.compilationUnitId!==t.compilationUnitId||
-       live.runtimeSha256!==t.runtimeSha256)
+    try{
+    if(d?.address?.toLowerCase()!==t?.address||live?.address?.toLowerCase()!==t?.address||
+       d?.qualifiedName!==t?.qualifiedName||live?.compilationUnitId!==t?.compilationUnitId||
+       live?.runtimeSha256!==t?.runtimeSha256)
       githubPhase0Diagnostics.push('SCAN_TARGET_CODE_BINDING_MISMATCH: '+t.address);
     const artifact=compiled.find(a=>a.compilationUnitId===t.compilationUnitId&&a.qualifiedName===t.qualifiedName);
     if(!artifact)githubPhase0Diagnostics.push('SCAN_TARGET_ARTIFACT_BINDING_MISSING: '+t.address);
-    if(live.sourceBinding==='EXECUTABLE_RUNTIME_MATCH_METADATA_HASH_ONLY'){
+    if(live?.sourceBinding==='EXECUTABLE_RUNTIME_MATCH_METADATA_HASH_ONLY'){
       if(!artifact||live.runtimeComparison?.compiled?.toLowerCase()!==artifact.deployedBytecode?.toLowerCase()||
          compareLiveRuntimeV1(live.runtimeComparison?.observed,artifact.deployedBytecode,{allowScanMetadata:true}).sourceBinding!==live.sourceBinding)
         githubPhase0Diagnostics.push('SCAN_TARGET_COMPILED_RUNTIME_BINDING_MISMATCH: '+t.address);
-    }else if(live.sourceBinding!=='EXACT_COMPILED_RUNTIME')githubPhase0Diagnostics.push('SCAN_TARGET_CODE_BINDING_MISMATCH: '+t.address);
+    }else if(live?.sourceBinding!=='EXACT_COMPILED_RUNTIME')githubPhase0Diagnostics.push('SCAN_TARGET_CODE_BINDING_MISMATCH: '+t.address);
     if(!units.some(u=>u.unitId===t.compilationUnitId&&(u.targetBindings??[{address:u.address,qualifiedName:u.qualifiedName}]).some(binding=>binding.qualifiedName===t.qualifiedName&&binding.address===t.address)))
       githubPhase0Diagnostics.push('SCAN_TARGET_COMPILER_INPUT_BINDING_MISSING: '+t.address);
     if(t.proxyImplementation&&!targets.some(candidate=>candidate.address===t.proxyImplementation&&candidate.role==='IMPLEMENTATION'))
       githubPhase0Diagnostics.push('SCAN_PROXY_IMPLEMENTATION_COVERAGE_MISSING: '+t.address);
+    }catch(error){githubPhase0Diagnostics.push('SCAN_TARGET_ASSESSMENT_ERROR: '+String(error?.message??error));}
   }
   for(const address of requested)if(!targets.some(t=>t.address===address&&t.role==='REQUESTED'))
     githubPhase0Diagnostics.push('SCAN_REQUESTED_TARGET_NOT_VERIFIED: '+address);
