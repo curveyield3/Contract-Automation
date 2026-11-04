@@ -838,7 +838,7 @@ function activeDetectionPolicyV1(receipt) {
     readJsonIfExists:(rel)=>fs.existsSync(repoFile(root,rel))?readJson(repoFile(root,rel)):null});
 }
 if(reviewKind==='discovery'){
-  if(['STOPPED_BY_HUMAN','BLOCKED'].includes(directory.campaignStatus))
+  if(directory.campaignStatus==='STOPPED_BY_HUMAN')
     throw new Error('campaign is held by explicit human status');
   if(!directory.discovery?.statePath)throw new Error('campaign has no discovery state');
   const sourceReceipt=readJson(requiredFile(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'),'Phase 0 authority receipt'));
@@ -877,7 +877,7 @@ if(['lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(directory.authorityRe
  throw new Error('v4 Phase 4–6 can only be finalized from accepted immutable units');
 // Lite-Solo accepts phase/discovery only. No successor-delivery holds or master rework routes.
 const sealedRework=null;
-if(reviewKind==='phase'&&!masterAmendmentRefreshSha&&['STOPPED_BY_HUMAN','BLOCKED'].includes(String(directory.campaignStatus??'')))
+if(reviewKind==='phase'&&!masterAmendmentRefreshSha&&directory.campaignStatus==='STOPPED_BY_HUMAN')
  throw new Error('campaign is held by explicit human status '+directory.campaignStatus);
 const assignment=directory.currentAssignment;
 if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current assignment does not match submitted phase');
