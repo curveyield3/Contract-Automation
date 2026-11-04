@@ -283,7 +283,7 @@ else
       break
     fi
 
-    echo "::warning::Audit-Controller main moved; rebuilding the initialization on latest Machine Intelligence fork (attempt $attempt/5)."
+    echo "::warning::Audit-Controller Machine Intelligence branch moved; rebuilding the initialization on latest Machine Intelligence fork (attempt $attempt/5)."
     sleep $((attempt * 2))
   done
   [ "$success" = true ] || { echo "::error::Failed to publish Audit Source Initialization to the isolated Audit-Controller Machine Intelligence branch."; exit 1; }
