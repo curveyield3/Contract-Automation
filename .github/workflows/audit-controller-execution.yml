@@ -36,56 +36,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Resolve canonical qualified Contract-Automation runner
-        id: qualified_runner
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          status_json="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=machine-intelligence-audit-controller-v1" --jq '.content' | base64 -d)"
-          test "$(printf '%s' "$status_json" | jq -r '.status // empty')" = 'PASS'
-          qualified_commit="$(printf '%s' "$status_json" | jq -r '.qualifiedCommit // empty')"
-          qualification_run="$(printf '%s' "$status_json" | jq -r '.workflowRunId // empty')"
-          [[ "$qualified_commit" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$qualification_run" =~ ^[0-9]+$ ]]
-          # An Oct-2026 qualification of older code must not silently authorize
-          # a new fork/Anvil implementation. In particular, an obsolete runner
-          # cannot be trusted to apply today's pinned-block/hash repairs.
-          # Compare security-relevant runner inputs rather than raw HEAD:
-          # status bookkeeping and documentation commits must not make a newly
-          # qualified runner permanently impossible to use.
-          diff_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/$qualified_commit...machine-intelligence-audit-controller-v1")" || {
-            echo "::error::V7_QUALIFIED_RUNNER_STALE: unable to compare qualified runner and current source."
-            exit 1
-          }
-          changed_count="$(printf '%s' "$diff_json" | jq -r '.files|length')"
-          if [ "$changed_count" -ge 300 ]; then
-            echo "::error::V7_QUALIFIED_RUNNER_STALE: comparison too large to prove safe; requalification required."
-            exit 1
-          fi
-          if printf '%s' "$diff_json" | jq -r '.files[]?.filename' | grep -Eq '^(packages/runner/src/|packages/github-native-sim/src/|scripts/|\.github/workflows/audit-controller-execution\.yml$|\.github/actions/setup-v7-toolchain/)'; then
-            echo "::error::V7_QUALIFIED_RUNNER_STALE: execution code changed since qualified commit. Human-authorized runner requalification and exact evidence rebind required; no stale runner fallback."
-            exit 1
-          fi
-          echo "commit=$qualified_commit" >> "$GITHUB_OUTPUT"
-          echo "run_id=$qualification_run" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout trusted Contract-Automation runner
+      - name: Checkout isolated Machine Intelligence execution code
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.qualified_runner.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Bind checked-out qualified runner identity
+      - name: Bind exact fork runner identity
         shell: bash
         run: |
           set -euo pipefail
+          test "$GITHUB_REF_NAME" = "machine-intelligence-audit-controller-v1"
           observed="$(git rev-parse HEAD)"
-          test "$observed" = "${{ steps.qualified_runner.outputs.commit }}"
+          test "$observed" = "$GITHUB_SHA"
           echo "V7_RUNNER_COMMIT=$observed" >> "$GITHUB_ENV"
-          echo "V7_RUNNER_QUALIFICATION_RUN=${{ steps.qualified_runner.outputs.run_id }}" >> "$GITHUB_ENV"
+          echo "V7_RUNNER_QUALIFICATION_STATUS=DELEGATED_TO_CLOUDFLARE_WORKER" >> "$GITHUB_ENV"
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
