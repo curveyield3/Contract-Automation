@@ -70,6 +70,8 @@ permissions:
 jobs:
   # Discover every changed campaign boundary before applying independent locks.
   resolve_campaign_lock:
+    # Inactive on isolated fork: legacy workflow may read/write original main.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     outputs:
       requests: ${{ steps.identity.outputs.requests }}
@@ -111,7 +113,9 @@ jobs:
 
   validate-bookkeep-advance:
     needs: resolve_campaign_lock
-    if: ${{ needs.resolve_campaign_lock.outputs.requests != '{"include":[]}' }}
+    # Inactive on isolated fork: legacy workflow may read/write original main.
+    # Former gate: ${{ needs.resolve_campaign_lock.outputs.requests != '{"include":[]}' }}
+    if: ${{ false }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve_campaign_lock.outputs.requests) }}
