@@ -53,9 +53,9 @@ const evidence={
 const sourceSha=receipt.source?.sha256;
 if(typeof sourceSha!=='string'||!/^[0-9a-f]{64}$/.test(sourceSha))throw new Error('canonical source digest missing');
 const build=read(evidence.build);
-if(build.source?.archiveSha256Observed!==sourceSha&&build.source?.archiveSha256!==sourceSha)githubPhase0Diagnostics.push('build identity differs from canonical archive');
+if(build.source?.archiveSha256Observed!==sourceSha&&build.source?.archiveSha256!==sourceSha)throw new Error('build identity differs from canonical archive');
 const bundle=read(evidence.bundle);
-if(bundle.identity?.sourceDigestSha256!==sourceSha)githubPhase0Diagnostics.push('Source Intelligence source digest mismatch');
+if(bundle.identity?.sourceDigestSha256!==sourceSha)throw new Error('Source Intelligence source digest mismatch');
 const artifacts=read(evidence.executionBuildArtifacts);
 if(artifacts.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2'||artifacts.source?.archiveSha256!==sourceSha||artifacts.reuseContract?.secondBuildRequired!==false)githubPhase0Diagnostics.push('reusable build artifact contract is missing');
 const deploy=read(evidence.deployConfigExecution);
@@ -67,7 +67,7 @@ if(receipt.source?.inputMode==='LIVE_SCAN'){
   const manifestPath=path.resolve(controllerRoot,...String(receipt.source.scanManifestPath??'').split('/'));
   if(!manifestPath.startsWith(campaignRoot+path.sep))throw new Error('SCAN_MANIFEST_PATH_ESCAPES_CAMPAIGN');
   required(manifestPath,'frozen LIVE_SCAN source manifest');
-  if(digestFile(manifestPath)!==receipt.source.scanManifestSha256)githubPhase0Diagnostics.push('SCAN_MANIFEST_FILE_DIGEST_MISMATCH');
+  if(digestFile(manifestPath)!==receipt.source.scanManifestSha256)throw new Error('SCAN_MANIFEST_FILE_DIGEST_MISMATCH');
   const manifest=read(manifestPath);
   const {manifestDigestSha256,...unsigned}=manifest;
   const canonical=x=>Array.isArray(x)?'['+x.map(canonical).join(',')+']':x&&typeof x==='object'?'{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canonical(x[k])).join(',')+'}':JSON.stringify(x);
@@ -118,7 +118,7 @@ if(receipt.source?.inputMode==='LIVE_SCAN'){
 
 if(deploy.reconciliation){
   const rawFile=required(path.join(campaignRoot,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json'),'immutable original fork deploy evidence');
-  if(digestV2(fs.readFileSync(rawFile))!==deploy.reconciliation.originalEvidenceSha256)githubPhase0Diagnostics.push('Phase-0 original deployment evidence is not byte-identical');
+  if(digestV2(fs.readFileSync(rawFile))!==deploy.reconciliation.originalEvidenceSha256)throw new Error('Phase-0 original deployment evidence is not byte-identical');
   evidence.deployConfigExecutionRaw=rawFile;
 }
 
