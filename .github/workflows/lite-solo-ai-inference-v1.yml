@@ -41,7 +41,7 @@ on:
         required: false
         type: string
       operator_authorized_step:
-        description: Human operator authorizes this exact agent-authored step
+        description: Deprecated compatibility flag; the independent Worker owns step authorization
         required: false
         default: false
         type: boolean
@@ -205,7 +205,6 @@ jobs:
       AUDIT_AI_CAMPAIGN_ID: ${{ inputs.campaign_id }}
       AUDIT_AI_EXPECTED_PHASE: ${{ inputs.expected_phase }}
       AUDIT_AI_EXPECTED_STEP: ${{ inputs.expected_step }}
-      AUDIT_AI_STEP_AUTHORIZED: ${{ inputs.operator_authorized_step }}
       AUDIT_AI_SUBMISSION_MODE: ${{ inputs.submission_mode }}
       AUDIT_AI_MAX_CHUNKS: ${{ inputs.max_chunks }}
       MODEL_FILE: MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf
@@ -249,7 +248,6 @@ jobs:
               test "$AUDIT_AI_SUBMISSION_MODE" = submit
               ;;
             campaign)
-              test "$AUDIT_AI_STEP_AUTHORIZED" = true
               test -n "$AUDIT_AI_CAMPAIGN_ID"
               [[ "$AUDIT_AI_EXPECTED_PHASE" =~ ^[0-9]+$ ]]
               [[ "$AUDIT_AI_EXPECTED_STEP" =~ ^[0-9]+$ ]]
