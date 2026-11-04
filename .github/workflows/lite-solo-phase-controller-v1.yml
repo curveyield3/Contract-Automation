@@ -157,6 +157,7 @@ jobs:
           set -euo pipefail
           timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
       - name: Receive Phase-8 BOB evidence through the existing controller, never auditor writeback
+        continue-on-error: true # Advisory evidence intake; Worker evaluates proof quality
         env:
           GH_TOKEN: ${{ github.token }}
           REQUEST_FILE: ${{ steps.request.outputs.request }}
