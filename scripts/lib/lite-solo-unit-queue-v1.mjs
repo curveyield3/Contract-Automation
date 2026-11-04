@@ -94,7 +94,7 @@ function assertParallelSolo(directory,phase,request=null){
  if(request){
   const expected={campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
    phaseSequence:phase,sourceSha256:directory.sourceSha256,
-   auditControllerRef:'main'};
+   auditControllerRef:'machine-intelligence-audit-controller-v1'};
   for(const [key,value] of Object.entries(expected))if(request[key]!==value)throw Error('request identity mismatch: '+key);
   if(request.authorityDigest!==directory.authorityDigest)
    throw Error('authority digest differs from bound campaign');
