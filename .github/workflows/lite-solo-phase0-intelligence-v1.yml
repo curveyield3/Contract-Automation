@@ -116,6 +116,7 @@ jobs:
           fi
 
       - name: Generate useful Phase-0 machine intelligence
+        continue-on-error: true # Publish only genuine generated artifacts; Worker owns analyzer quality
         env:
           AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PHASE0_PRIVATE_BUILD_CACHE_ENABLED: ${{ github.event_name != 'pull_request' }}
