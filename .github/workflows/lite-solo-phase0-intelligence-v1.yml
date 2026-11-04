@@ -164,6 +164,7 @@ jobs:
           gh auth setup-git
           destination_repo="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.repository)")"
           destination_ref="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.ref)")"
+          [ "$destination_repo" = "curveyield3/Audit-Controller" ] || { echo "::error::MACHINE_INTELLIGENCE_CONTROLLER_REPOSITORY_REQUIRED"; exit 1; }
           [ "$destination_ref" = "machine-intelligence-audit-controller-v1" ] || { echo "::error::FORK_DESTINATION_REF_REQUIRED"; exit 1; }
           campaign_path="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.campaignPath)")"
           request_id="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.requestId)")"
