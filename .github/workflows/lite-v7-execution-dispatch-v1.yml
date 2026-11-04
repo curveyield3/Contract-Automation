@@ -42,7 +42,7 @@ jobs:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
 
@@ -91,6 +91,7 @@ jobs:
           [[ "$campaign_id" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || { echo "::error::Invalid campaign_id"; exit 1; }
           [[ "$controller_ref" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::controller_ref must be exact 40-hex commit"; exit 1; }
           [[ "$writeback_ref" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::Invalid controller_writeback_ref"; exit 1; }
+          [ "$writeback_ref" = "machine-intelligence-audit-controller-v1" ] || { echo '::error::Machine Intelligence fork writeback branch required'; exit 1; }
           [[ "$attempt" =~ ^[1-9][0-9]*$ ]] || { echo "::error::attempt must be integer >=1"; exit 1; }
           if [[ "$request_path" == campaigns/*/controller/phase9-reruns/*/*.json ]]; then
             phase_seq=9
@@ -191,7 +192,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh workflow run audit-controller-execution.yml --repo "$GITHUB_REPOSITORY" --ref main \
+          gh workflow run audit-controller-execution.yml --repo "$GITHUB_REPOSITORY" --ref machine-intelligence-audit-controller-v1 \
             -f request_path="${{ steps.request.outputs.request_path }}" \
             -f controller_ref="${{ steps.request.outputs.controller_ref }}" \
             -f controller_writeback_ref="${{ steps.request.outputs.controller_writeback_ref }}"
