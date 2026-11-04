@@ -7,7 +7,7 @@ on:
         required: true
         description: Existing validated process/lite-solo-audit-correction/requests/*.json file
   push:
-    branches: [main]
+    branches: [machine-intelligence-audit-controller-v1]
     paths:
       - 'process/lite-solo-audit-correction/requests/*.json'
 permissions:
@@ -97,12 +97,12 @@ jobs:
           key="$(jq -er .correctionKey "$REQUEST_FILE")"
           slug="${id%-r*}"
           dest_slug="lite-solo-correction-$slug-$key"
-          source_path="$(gh api "repos/curveyield3/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/$slug.json?ref=main" --jq .content | base64 -d | jq -er .workspacePath)"
+          source_path="$(gh api "repos/curveyield3/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/$slug.json?ref=machine-intelligence-audit-controller-v1" --jq .content | base64 -d | jq -er .workspacePath)"
           [[ "$source_path" == campaigns/*/* && "$source_path" != *..* ]]
           master="${source_path%/*}"
           dest_workspace="$master/${master##*/} Correction $key r1"
           gh auth setup-git
-          gh repo clone curveyield3/Audit-Controller .audit-controller -- --branch main --depth 1 --filter=blob:none --sparse
+          gh repo clone curveyield3/Audit-Controller .audit-controller -- --branch machine-intelligence-audit-controller-v1 --depth 1 --filter=blob:none --sparse
           git -C .audit-controller sparse-checkout set --no-cone \
             '/Audit Skill - Lite-Solo Authority/lite-solo-v4/**' \
             '/Audit Skill - Lite-Solo Authority/lite-solo-v5/**' \
@@ -147,9 +147,9 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit -m "audit(lite-solo-correction): isolated transition $GITHUB_RUN_ID"
             for attempt in 1 2 3 4; do
-              if git push origin HEAD:main; then break; fi
+              if git push origin HEAD:machine-intelligence-audit-controller-v1; then break; fi
               [[ "$attempt" -lt 4 ]] || exit 1
-              git pull --rebase origin main
+              git pull --rebase origin machine-intelligence-audit-controller-v1
             done
           fi
       - name: Print durable correction state
