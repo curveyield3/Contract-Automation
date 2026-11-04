@@ -73,7 +73,9 @@ concurrency:
 
 jobs:
   start:
-    if: (github.event_name == 'workflow_dispatch' && inputs.operation == 'start') || github.event_name == 'push'
+    # Inactive in Machine Intelligence fork: unrelated legacy workflow may access original main.
+    # Former gate: (github.event_name == 'workflow_dispatch' && inputs.operation == 'start') || github.event_name == 'push'
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -451,7 +453,9 @@ jobs:
           [ -f /tmp/xvfb-development-agent.pid ] && kill "$(cat /tmp/xvfb-development-agent.pid)" 2>/dev/null
 
   discover:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'sweep')
+    # Inactive in Machine Intelligence fork: unrelated legacy workflow may access original main.
+    # Former gate: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'sweep')
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -489,7 +493,9 @@ jobs:
 
   supervise:
     needs: discover
-    if: needs.discover.outputs.has_targets == 'true'
+    # Inactive in Machine Intelligence fork: unrelated legacy workflow may access original main.
+    # Former gate: needs.discover.outputs.has_targets == 'true'
+    if: ${{ false }}
     strategy:
       fail-fast: false
       max-parallel: 4
