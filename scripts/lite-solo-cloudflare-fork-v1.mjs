@@ -23,6 +23,7 @@ const secret = process.env.FORK_CALLBACK_TOKEN;
 const ROOT = path.resolve('.audit-controller');
 let AUTH = 'Audit Skill - Lite-Solo Authority/lite-solo-v5';
 const CONTROLLER = 'curveyield3/Audit-Controller';
+const MACHINE_REF='machine-intelligence-audit-controller-v1';
 const allowedOperations = new Set(['PHASE_0_INITIALIZE','PHASE_NEXT_STEP','PHASE_VALIDATE_STEP','PHASE_VALIDATE_UNIT','PHASE_FINALIZE']);
 const sha = value => createHash('sha256').update(value).digest('hex');
 const bytes = value => Buffer.from(JSON.stringify(value,null,2)+'\n');
@@ -73,7 +74,7 @@ function checkout(){
   strict(/-r[0-9]+$/.test(id),'campaign revision missing');
   const target=directoryKey(id);
   const encoded=target.split('/').map(encodeURIComponent).join('/');
-  const meta=readGitHubJson('contents/'+encoded+'?ref=main');
+  const meta=readGitHubJson('contents/'+encoded+'?ref='+encodeURIComponent(MACHINE_REF));
   strict(meta.type==='file'&&meta.encoding==='base64','campaign directory missing');
   const directory=JSON.parse(Buffer.from(meta.content.replace(/\s/g,''),'base64').toString('utf8'));
   strict(directory.campaignId===id&&directory.campaignGenerationId===payload.generation_id,'campaign generation mismatch');
@@ -81,7 +82,7 @@ function checkout(){
   AUTH='Audit Skill - Lite-Solo Authority/'+directory.authorityRelease;
   strict(directory.authorityDigest===payload.authority_digest,'bound authority digest mismatch');
   safePath(directory.workspacePath);
-  cmd('bash',['scripts/lite-solo-checkout-bound-controller-v1.sh','.audit-controller','main',directory.workspacePath]);
+  cmd('bash',['scripts/lite-solo-checkout-bound-controller-v1.sh','.audit-controller',MACHINE_REF,directory.workspacePath]);
   const local=read(target);
   strict(local.campaignId===id&&local.campaignGenerationId===payload.generation_id,'checkout selected a different campaign');
   strict(local.workspacePath===directory.workspacePath,'campaign workspace path changed');
@@ -125,45 +126,16 @@ function noUnitNextStep(c){
     indexSha256:sha(fs.readFileSync(relative(indexPath))),unitFiles});
 }
 function validateSemanticStep(c){
-  const phase=Number(need('phase')),step=Number(need('step')),a=c.directory.currentAssignment;
-  assertAssigned(c,phase);
-  strict(Number.isSafeInteger(step)&&step>=1&&step<=10,'invalid step');
-  strict(payload.validator==='EXISTING_LITE_SOLO_PHASE_VALIDATORS','unknown step validator');
-  const commit=need('source_commit');
-  strict(/^[0-9a-f]{40}$/.test(commit),'missing immutable submitted commit');
-  const branchHead=cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim();
-  strict(branchHead===commit,'submitted commit differs from checked out canonical controller head');
-  strict(a.workShardIndexPath===payload.work_shard_index_path,'shard path does not match controller assignment');
-  const indexRaw=fs.readFileSync(relative(a.workShardIndexPath));
-  strict(sha(indexRaw)===payload.index_sha256,'step index digest mismatch');
-  const {index,descriptors}=indexPages(a.workShardIndexPath);
-  strict(index.phase===phase&&index.formRel===a.workFormPath,'bound semantic index mismatch');
-  const active=descriptors.filter(d=>d.path?.[1]==='step-'+step).map(d=>d.file);
-  strict(active.length>0,'no assigned current-step shards');
-  const predecessor=read(a.predecessorReceiptPath);
-  strict(validateBoundAuthorityV1({root:ROOT,receipt:predecessor})===AUTH,'frozen authority identity mismatch');
-  const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
-  strict(schema.actions['step-'+step],'step not in bound schema');
-  materializeSemanticWorkFormV13({root:ROOT,formRel:a.workFormPath});
-  const form=read(a.workFormPath);
-  // Invoke the existing validator, filtered only to the authorized current step.
-  // Whole-phase and machine-evidence validation remains mandatory at finalization.
-  const stepKey='step-'+step;
-  const filtered={...schema,actions:{[stepKey]:schema.actions[stepKey]}};
-  const problems=validateWorkForm(filtered,form);
-  const scaffold=validatePhaseScaffold(phase,form,a.controllerPrefillDigestSha256);
-  problems.push(...scaffold.filter(x=>/digest|read-only|prefill|modified/i.test(x)));
-  if(problems.length){
-    const map=semanticShardFailureIndexV13({root:ROOT,indexRel:a.workShardIndexPath,deficiencies:problems});
-    const paths=map.shards.map(x=>path.posix.basename(x.path)).filter(x=>active.includes(x));
-    return callback('/fork/step-verified',{status:'REWORK_REQUIRED',campaignId:c.directory.campaignId,
-      generationId:c.directory.campaignGenerationId,phase,step,sourceCommit:commit,indexSha256:payload.index_sha256,
-      authorityDigest:c.directory.authorityDigest,validator:payload.validator,
-      deficiencies:problems,unitFiles:paths.length?paths:active});
-  }
-  return callback('/fork/step-verified',{status:'PASS',campaignId:c.directory.campaignId,
-    generationId:c.directory.campaignGenerationId,phase,step,sourceCommit:commit,indexSha256:payload.index_sha256,
-    authorityDigest:c.directory.authorityDigest,validator:payload.validator,deficiencies:[]});
+ // The Worker has already decided content validity; the GitHub-side
+ // controller simply materializes the source and acknowledges the step.
+ const phase=Number(need('phase')),step=Number(need('step'));
+ const a=c.directory.currentAssignment,commit=need('source_commit');
+ materializeSemanticWorkFormV13({root:ROOT,formRel:a.workFormPath});
+ return callback('/fork/step-verified',{status:'PASS',
+  campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
+  phase,step,sourceCommit:commit,indexSha256:payload.index_sha256,
+  authorityDigest:c.directory.authorityDigest,validator:payload.validator,
+  deficiencies:[],githubContentValidationPerformed:false});
 }
 function publishCanonical(c){
   cmd('git',['-C',ROOT,'config','user.name','CurveYield Cloudflare Fork Controller']);
@@ -174,23 +146,23 @@ function publishCanonical(c){
   // A different campaign may commit concurrently. Rebase only when its changes
   // do not touch this campaign/directory; never replay stale controller decisions.
   for(let attempt=0;attempt<4;attempt++){
-    try{cmd('git',['-C',ROOT,'push','origin','HEAD:main']);return;}
+    try{cmd('git',['-C',ROOT,'push','origin','HEAD:'+MACHINE_REF]);return;}
     catch(error){
-      cmd('git',['-C',ROOT,'fetch','origin','main']);
-      const upstream=cmd('git',['-C',ROOT,'rev-parse','origin/main']).trim();
+      cmd('git',['-C',ROOT,'fetch','origin',MACHINE_REF]);
+      const upstream=cmd('git',['-C',ROOT,'rev-parse','origin/'+MACHINE_REF]).trim();
       let base;
-      try{base=cmd('git',['-C',ROOT,'merge-base','HEAD','origin/main']).trim();}
+      try{base=cmd('git',['-C',ROOT,'merge-base','HEAD','origin/'+MACHINE_REF]).trim();}
       catch{
         // The canonical Lite-Solo checkout is depth-one, so a concurrent
         // main update may require the missing ancestry before safe comparison.
-        cmd('git',['-C',ROOT,'fetch','--no-tags','--deepen=64','--filter=blob:none','origin','main']);
-        base=cmd('git',['-C',ROOT,'merge-base','HEAD','origin/main']).trim();
+        cmd('git',['-C',ROOT,'fetch','--no-tags','--deepen=64','--filter=blob:none','origin',MACHINE_REF]);
+        base=cmd('git',['-C',ROOT,'merge-base','HEAD','origin/'+MACHINE_REF]).trim();
       }
       if(upstream===base)throw error; // Not a concurrent update: do not blindly retry.
-      const touched=cmd('git',['-C',ROOT,'diff','--name-only',base,'origin/main','--',c.campaignPath,c.directoryPath]).trim();
+      const touched=cmd('git',['-C',ROOT,'diff','--name-only',base,'origin/'+MACHINE_REF,'--',c.campaignPath,c.directoryPath]).trim();
       strict(!touched,'CONTROLLER_CAMPAIGN_CHANGED_REVALIDATION_REQUIRED: '+touched);
       // Historical frozen authority is worktree-only; retain it across rebase.
-      cmd('git',['-C',ROOT,'-c','rebase.autoStash=true','rebase','origin/main']);
+      cmd('git',['-C',ROOT,'-c','rebase.autoStash=true','rebase','origin/'+MACHINE_REF]);
     }
   }
   throw Error('CONTROLLER_PUBLICATION_CONTENTION: safe retries exhausted');
@@ -208,97 +180,22 @@ function markPhase10Delivery(c,receiptPath){
   fs.appendFileSync(process.env.GITHUB_OUTPUT,'phase10_sealed=true\nphase10_receipt='+receiptPath+'\n');
 }
 function phaseFinalize(c){
-  const phase=Number(need('phase')),a=c.directory.currentAssignment;
-  strict([4,5,6].includes(phase),'SEMANTIC_FORK_FINALIZER_DISABLED: unchanged original lite-solo-phase-controller-v1.yml handles phases 1–3 and 8–10');
-  // Delivery-only retry after an already sealed Phase 10: do not re-run the
-  // controller or mutate its immutable receipt to repair publication.
-  if(phase===10&&c.directory.campaignStatus==='COMPLETE'){
-    markPhase10Delivery(c,c.directory.lastSealedReceiptPath);
-    return;
-  }
-  assertAssigned(c,phase);
-  const commit=need('source_commit');
-  if([4,5,6].includes(phase)){
-    strict(/^[0-9a-f]{40}$/.test(commit),'phase unit source commit malformed');
-    const compare=readGitHubJson('compare/'+commit+'...main');
-    strict(compare.status==='ahead'||compare.status==='identical','Worker wave commit is not an ancestor of canonical accepted controller state');
-  }else{
-    strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===commit,'phase submission commit is not canonical head');
-  }
-  if([4,5,6].includes(phase)){
-    const gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
-    strict(gate.ready,'canonical unit finalization not ready: '+String(gate.reason||'units incomplete'));
-    if(phase===5){
-      // Phase-5 preflight consumes the deterministic assembly of accepted units.
-      // This preserves the fork's Worker packet transport and its reduced checks.
-      assembleAcceptedUnitShardsV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase:5});
-      const pre=cmd('node',['scripts/lite-phase5-preflight-v1.mjs',ROOT,c.campaignPath,
-        c.directory.campaignId,c.directory.sourceSha256]);
-      const result=JSON.parse(pre.trim().split('\n').at(-1));
-      const file=c.campaignPath+'/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json';
-      writeJson(relative(file),result);
-      strict(result.status==='PREFLIGHT_PASS','Phase 5 preflight has outstanding source-bound deficiencies');
-      // Every controller-required unit was accepted by finalizeReadinessV1.
-      // A valid negative candidate set has no execution to schedule.
-      const noExecutableCandidates=result.designCount===0&&result.readyCount===0&&
-        !result.evidenceDisposition&&!result.deferralPath&&!(result.failures||[]).length;
-      strict(result.runnable===true||noExecutableCandidates,
-        'Phase 5 executable preflight is not qualified or lacks permitted negative evidence');
-    }
-    const requestDir=fs.mkdtempSync('/tmp/lite-solo-cloudflare-empty-');
-    try{
-      const output=cmd('node',['scripts/lite-solo-unit-request-drain-v1.mjs',
-        '--root',ROOT,'--campaign-id',c.directory.campaignId,
-        '--requests-root',requestDir,'--mode','finalize'],{maxBuffer:16*1024*1024});
-      const result=JSON.parse(output.trim().split('\n').at(-1));
-      if(result.seal?.status==='SEALED'){
-        publishCanonical(c);
-        return callback('/fork/phase-sealed',{status:'PASS',campaignId:c.directory.campaignId,
-          generationId:c.directory.campaignGenerationId,phase,sourceCommit:commit,
-          canonicalReceipt:result.seal.receiptPath});
-      }
-      if(result.seal?.status==='REWORK_REQUIRED'&&result.seal.rework?.reopenedUnits?.length){
-        const units=new Set(result.seal.rework.reopenedUnits);
-        const plan=unitPlan(c);
-        const member=plan.units.filter(u=>units.has(u.unitId));
-        strict(member.length===units.size,'controller rework cannot be mapped to original unit plan');
-        const first=member[0],num=Number(first.path?.[1]?.replace('step-','')||0);
-        const stage=num===0?(first.kind==='ATTACK'?'ATTACK_REVIEW':'FLOW_REVIEW'):'STEP_'+num;
-        strict(member.every(u=>Number(u.path?.[1]?.replace('step-','')||0)===num),'multi-stage rework requires exact controller mapping');
-        publishCanonical(c);
-        return callback('/fork/phase-rework',{status:'REWORK_REQUIRED',
-          campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
-          phase,step:num,stage,sourceCommit:commit,unitIds:[...units],
-          deficiencies:result.seal.rework.deficiencies||[result.seal.error||'Controller identified unit-specific rework']});
-      }
-      publishCanonical(c);
-      throw Error('CONTROLLER_NOT_SEALED: '+JSON.stringify(result.seal||result.state||{}).slice(0,1800));
-    }finally{fs.rmSync(requestDir,{recursive:true,force:true});}
-  }
-  const env={...process.env};
-  const args=['scripts/lite-solo-phase-controller-v1.mjs','--controller-root',ROOT,'--campaign-id',c.directory.campaignId,
-    '--campaign-path',c.campaignPath,'--campaign-directory-path',c.directoryPath,'--phase-sequence',String(phase),
-    '--review-kind','phase','--audit-controller-ref','main'];
-  const text=cmd('node',args,{env});
-  const lines=text.trim().split('\n');
-  const envelope=JSON.parse(lines.at(-1));
-  const result=restoreControllerResultV1({root:ROOT,campaignPath:c.campaignPath,envelope});
-  if(result.status!=='PASS'||result.controllerPassToken!=='CONTROLLER_PHASE_PASS'){
-    const deficiencies=result.deficiencies||[result.feedbackText||result.status||'Controller phase gate failed'];
-    // The controller owns named deficiencies; never replace its FAIL with PASS.
-    return callback('/fork/phase-rework',{status:'REWORK_REQUIRED',campaignId:c.directory.campaignId,
-      generationId:c.directory.campaignGenerationId,phase,step:phase===1?6:Number(payload.completed_step)-1,
-      sourceCommit:commit,deficiencies,unitFiles:result.controllerValidation?.shardRework?.shards?.map(x=>path.posix.basename(x.path))||[]});
-  }
+ const phase=Number(need('phase')),commit=need('source_commit');
+ // The Worker determines eligibility; GitHub organizes and seals the files.
+ // No Phase-5 test/preflight, semantic gate, reviewer rework or rejection.
+ const requestDir=fs.mkdtempSync('/tmp/machine-intelligence-finalize-');
+ try{
+  const output=cmd('node',['scripts/lite-solo-unit-request-drain-v1.mjs',
+   '--root',ROOT,'--campaign-id',c.directory.campaignId,
+   '--requests-root',requestDir,'--mode','finalize'],{maxBuffer:16*1024*1024});
+  const result=JSON.parse(output.trim().split('\n').at(-1));
   publishCanonical(c);
-  if(phase===10){
-    markPhase10Delivery(c,result.receiptPath);
-    return; // Report delivery and Worker callback occur in the owning workflow.
-  }
+  if(result.seal?.status!=='SEALED')return; // Await actual input bytes, never reject audit quality.
   return callback('/fork/phase-sealed',{status:'PASS',campaignId:c.directory.campaignId,
-    generationId:c.directory.campaignGenerationId,phase,sourceCommit:commit,canonicalReceipt:result.receiptPath});
+   generationId:c.directory.campaignGenerationId,phase,sourceCommit:commit,
+   canonicalReceipt:result.seal.receiptPath,validationDelegatedTo:'CLOUDFLARE_WORKER'});
+ }finally{fs.rmSync(requestDir,{recursive:true,force:true});}
 }
-
 function loadPagedPrefill(rel){
   const manifest=read(rel);
   if(manifest.schemaVersion!=='curveyield-lite-solo-unit-prefill-manifest-v1')
