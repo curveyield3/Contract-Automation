@@ -472,17 +472,25 @@ while(true){
     current.status==='ACTIVE'&&current.engagement?.stage==='WORK'&&
     current.availableProcessActions?.includes('claim')&&
     (current.unitCounts?.available>0||current.unitCounts?.leased>0)){
-   const readiness=current.leaseReadiness;
-   if(current.unitCounts.available===0&&readiness?.foreignLeased>0&&
-      readiness.ownLeased===0)
-     throw Error('MIMO_FOREIGN_LEASE_BLOCKED: '+readiness.foreignUnitIds.join(', ')+
-       ' is leased by another caller. Existing admin step_release required.');
+   // Authoritative Worker owns abandoned-lease recovery; sampled GitHub-side
+   // ownership counts must not prevent an attempted authenticated claim.
    const issued=await workerCall({operation:'claim'});
    let data=null;
    try{data=JSON.parse(issued)?.workerResponse;}catch{}
-   if(!['LEASED_SHARD','LEASED_PACKET'].includes(data?.status))
+   if(!['LEASED_SHARD','LEASED_PACKET'].includes(data?.status)){
+     if(['AI_LEASE_RECOVERY_BLOCKED','AI_LEASE_HELD_BY_ACTIVE_RUN',
+         'NO_AVAILABLE_SHARD','NO_UNREVISED_WORK_UNITS'].includes(data?.status)){
+       console.log(JSON.stringify({status:'MIMO_WORKER_LEASE_WAIT',
+         workerStatus:data.status,phase:data.phase??null,step:data.step??null,
+         reason:data.reason??data.nextAction??'Awaiting authoritative Worker lease availability',
+         noGithubSideLeaseVeto:true}));
+       await new Promise(resolve=>setTimeout(resolve,60000));
+       workerResponse=await workerCall({operation:'start'});
+       continue;
+     }
      throw Error('MIMO_CLAIM_RECOVERY_REQUIRED: '+String(data?.status||'UNPARSEABLE')+
-       '; diagnose exact Worker ownership and acceptance; no fabricated submission');
+       '; inspect exact Worker response; no fabricated submission');
+   }
    console.log(JSON.stringify({status:'MIMO_CONTROLLER_CLAIM_ACQUIRED',
      unitId:data.unitId??null,packetItems:data.items?.length??null,
      phase:data.phase,step:data.step,preservedNativeForm:true,
