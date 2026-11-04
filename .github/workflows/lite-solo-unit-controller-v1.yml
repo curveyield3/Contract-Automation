@@ -115,9 +115,6 @@ jobs:
           mkdir -p ".audit-controller/$CAMPAIGN_PATH/controller/preflight"
           cp /tmp/unit-phase5-preflight.json ".audit-controller/$CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
           echo "runnable=$(jq -r .runnable /tmp/unit-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
-      - name: Set up existing source-bound Phase-5 execution toolchain only at seal
-        if: ${{ steps.process.outputs.ready == 'true' && steps.process.outputs.phase == '5' && steps.preflight.outputs.runnable == 'true' }}
-        uses: ./.github/actions/setup-v7-toolchain
       - name: Finalize only when all unit and machine evidence requirements pass
         if: ${{ steps.process.outputs.ready == 'true' }}
         shell: bash
