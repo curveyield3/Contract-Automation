@@ -77,22 +77,27 @@ if(receipt.source?.inputMode==='LIVE_SCAN'){
      sha(canonical(unsigned))!==manifestDigestSha256||
      manifestDigestSha256!==receipt.source.scanTargetSetSha256)
     githubPhase0Diagnostics.push('SCAN_TARGET_SET_IDENTITY_MISMATCH');
-  const requested=manifest.requestedTargets??[],targets=manifest.resolvedTargets??[],units=manifest.compilerUnits??[];
+  const requested=Array.isArray(manifest.requestedTargets)?manifest.requestedTargets:[],
+      targets=Array.isArray(manifest.resolvedTargets)?manifest.resolvedTargets:[],
+      units=Array.isArray(manifest.compilerUnits)?manifest.compilerUnits:[];
   if(!requested.length||!targets.length||targets.length>64||!units.length)githubPhase0Diagnostics.push('SCAN_SOURCE_TARGETS_INCOMPLETE');
   if(requested.length!==(receipt.source.originUrls?.length??0))githubPhase0Diagnostics.push('SCAN_SOURCE_REQUEST_COUNT_MISMATCH');
   for(let i=0;i<requested.length;i++){
-    const u=new URL(receipt.source.originUrls?.[i]??'https://invalid.example/');
-    if(String(requested[i]??'').toLowerCase()!==u.pathname.split('/').pop()?.toLowerCase())githubPhase0Diagnostics.push('SCAN_REQUEST_URL_ADDRESS_MISMATCH');
+    try{
+      const u=new URL(receipt.source.originUrls?.[i]??'https://invalid.example/');
+      if(String(requested[i]??'').toLowerCase()!==u.pathname.split('/').pop()?.toLowerCase())githubPhase0Diagnostics.push('SCAN_REQUEST_URL_ADDRESS_MISMATCH');
+    }catch(error){githubPhase0Diagnostics.push('SCAN_REQUEST_URL_ASSESSMENT_ERROR: '+String(error?.message??error));}
   }
   if(deploy.status!=='PASS_LIVE_DEPLOYMENT'||deploy.deploymentProfile?.mode!=='LIVE'||
      deploy.fork?.chainId!==manifest.chainId||deploy.fork?.initialBlock!==manifest.frozenBlock?.number||
      deploy.liveDeployment?.blockNumber!==manifest.frozenBlock?.number||
-     deploy.liveDeployment?.blockHash?.toLowerCase()!==manifest.frozenBlock?.hash?.toLowerCase()||
+     String(deploy.liveDeployment?.blockHash??'').toLowerCase()!==String(manifest.frozenBlock?.hash??'').toLowerCase()||
      deploy.scanSourceSnapshot?.manifestDigestSha256!==manifestDigestSha256)
     githubPhase0Diagnostics.push('SCAN_FROZEN_LIVE_EVIDENCE_MISMATCH');
-  const declared=deploy.deploymentProfile?.contracts??[],observed=deploy.liveDeployment?.contracts??[];
+  const declared=Array.isArray(deploy.deploymentProfile?.contracts)?deploy.deploymentProfile.contracts:[],
+        observed=Array.isArray(deploy.liveDeployment?.contracts)?deploy.liveDeployment.contracts:[];
   if(declared.length!==targets.length||observed.length!==targets.length)githubPhase0Diagnostics.push('SCAN_LIVE_TARGET_COVERAGE_INCOMPLETE');
-  const compiled=artifacts.artifacts??[];
+  const compiled=Array.isArray(artifacts.artifacts)?artifacts.artifacts:[];
   for(let i=0;i<targets.length;i++){
     const t=targets[i],d=declared[i],live=observed[i];
     try{
