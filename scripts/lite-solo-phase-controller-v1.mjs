@@ -108,7 +108,12 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
 
   const domainRegistryPath=canonical?.automationInputs?.domainRegistryPath;
   if(domainRegistryPath){
+    if(typeof domainRegistryPath!=='string'||path.posix.isAbsolute(domainRegistryPath)||
+       domainRegistryPath.split('/').includes('..'))
+      throw new Error('unsafe campaign-relative domain registry path');
     const domainRel=path.posix.join(campaignPath,domainRegistryPath);
+    if(!domainRel.startsWith(campaignPath+'/'))
+      throw new Error('domain registry path escapes campaign');
     const registry=maybeJson(root,domainRel);
     if(registry){
       graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry',value:{path:domainRegistryPath,decisions:registry.decisions??[]}}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
