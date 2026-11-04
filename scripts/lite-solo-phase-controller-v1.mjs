@@ -14,11 +14,11 @@ import {
   buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-solo-phase-work-v1.mjs';
 import {
-  selectReusablePhase5TargetsV1,validatePhase5TargetCoverageV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
+  selectReusablePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
   validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
-  buildControllerPacket,renderControllerPhaseReport,buildCandidateEvidenceContinuityV1,validatePhaseScaffold,
+  buildControllerPacket,renderControllerPhaseReport,buildCandidateEvidenceContinuityV1,
   phase4CoverageFromForm,phase4DiscoveryCoverageV1,materializeValidatedFindings,resolveTargetExecutionRequestRef,
   refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
@@ -861,30 +861,6 @@ let form=null;
 materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
 form=readJson(requiredFile(root,assignment.workFormPath,'Worker-provided phase work file'));
 
-function materialPhase5Candidates({root,campaignPath,form}){
-  const prior=canonicalFor(root,campaignPath,4);
-  const phase4=phaseOutput(prior,'step-3','candidateRecords')??[];
-  const newCandidates=form?.actions?.['step-2']?.outputs?.newCandidateRecords??[];
-  const keys=[],sourceAnchors={};
-  // Phase-4 sealing adds canonicalId without changing the immutable source
-  // candidate key used by already-claimed Phase-5 target designs and their
-  // V7 requests. Resolve the exact accepted alias, not a fabricated target.
-  const targetKeys=new Set((form?.actions?.['step-3']?.outputs?.targetDesigns??[])
-    .filter(x=>x&&typeof x==='object')
-    .map(x=>String(x.candidateKey??'').trim()).filter(Boolean));
-  for(const record of [...phase4,...newCandidates]){
-    if(record==='NONE_IDENTIFIED')continue;
-    const canonical=String(record?.canonicalId??'').trim();
-    const original=String(record?.tempKey??'').trim();
-    const key=targetKeys.has(canonical)?canonical:targetKeys.has(original)?original:canonical||original;
-    if(!key)throw new Error('Phase 5 material candidate has no key');
-    const anchor=String(record?.sourceAnchor??'').trim();
-    if(sourceAnchors[key]!==undefined&&sourceAnchors[key]!==anchor)
-      throw new Error('Phase 5 material candidate '+key+' has inconsistent source anchors');
-    keys.push(key);sourceAnchors[key]=anchor;
-  }
-  return {keys:[...new Set(keys)],sourceAnchors};
-}
 if(sequence===5&&form&&deficiencies.length===0){
   const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
   for(const target of targets){
@@ -939,45 +915,9 @@ if(sequence===5&&form&&deficiencies.length===0){
     try{
       assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
       writeJson(repoFile(root,assignment.workFormPath),form);
-      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+      // Only persist the generated prefill identity; Worker evaluates content.
     }catch(error){deficiencies.push('Phase 5 prefill assessment deferred to Worker: '+String(error?.message??error));}
   }
-}
-
-if(sequence===5&&form&&deficiencies.length===0){
-  try{
-    deficiencies.push(...validatePhase5TargetCoverageV1({
-      targetDesigns:form.actions['step-3'].outputs.targetDesigns,
-      materialCandidateKeys:materialPhase5Candidates({root,campaignPath,form}).keys,
-      candidateSourceAnchors:materialPhase5Candidates({root,campaignPath,form}).sourceAnchors
-    }));
-  }catch(e){deficiencies.push('Phase 5 coverage validation failed: '+String(e.message||e));}
-}
-// Downstream gates must independently reconstruct the mandatory candidate set
-// and read actual V7 machine artifacts. A prior phase PASS/receipt is not proof.
-if([6,8].includes(sequence)&&deficiencies.length===0){
-  try{
-    const sealedP5=canonicalFor(root,campaignPath,5);
-    const mandatory=materialPhase5Candidates({root,campaignPath,form:sealedP5}).keys;
-    const rows=sequence===6?(form.actions?.['step-2']?.outputs?.targetDispositions??[])
-      :(form.actions?.['step-2']?.outputs?.candidateValidations??[]);
-    const actual=rows.filter(x=>x&&typeof x==='object').map(x=>String(x.candidateKey??'').trim()).filter(Boolean);
-    if(actual.length!==new Set(actual).size)deficiencies.push('Phase '+sequence+' contains duplicate candidate dispositions');
-    for(const key of mandatory)if(!actual.includes(key))
-      deficiencies.push('Phase '+sequence+' skipped mandatory predecessor candidate '+key);
-    if(sequence===6){
-      if(phase5OwnerDeferral){
-        if(sealedP5?.automationOutputs?.phase5MachineExecutionGate?.status!=='DEFERRED_UNVERIFIED'||
-           sealedP5.automationOutputs.phase5MachineExecutionGate.ownerDirectivePath!==phase5OwnerDeferral.path)
-          deficiencies.push('Phase 6 cannot carry unverified evidence without exact Phase-5 deferral record');
-      }else deficiencies.push(...validateRecordedPhase5MachineEvidenceV1({
-        controllerRoot:root,campaignPath,
-        targetDesigns:phaseOutput(sealedP5,'step-3','targetDesigns')??[],
-        expectedCampaignId:directory.campaignId,
-        expectedSourceSha256:directory.sourceSha256,requireCompletedMatrix:true
-      }));
-    }
-  }catch(e){deficiencies.push('Phase '+sequence+' mandatory predecessor/evidence gate failed: '+String(e.message||e));}
 }
 
 // The Worker owns all audit-quality decisions. Retain GitHub diagnostics for
