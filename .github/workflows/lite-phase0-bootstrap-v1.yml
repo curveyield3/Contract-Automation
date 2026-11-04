@@ -34,7 +34,9 @@ concurrency:
 
 jobs:
   intelligence:
-    if: ${{ !inputs.resume_from_finalize }}
+    # Inactive on isolated fork: legacy workflow may read/write original main.
+    # Former gate: ${{ !inputs.resume_from_finalize }}
+    if: ${{ false }}
     uses: ./.github/workflows/lite-phase0-intelligence-v1.yml
     with:
       campaign_id: ${{ inputs.campaign_id }}
@@ -44,7 +46,9 @@ jobs:
 
   fork-deploy-config:
     needs: intelligence
-    if: ${{ !inputs.resume_from_finalize && needs.intelligence.result == 'success' }}
+    # Inactive on isolated fork: legacy workflow may read/write original main.
+    # Former gate: ${{ !inputs.resume_from_finalize && needs.intelligence.result == 'success' }}
+    if: ${{ false }}
     uses: ./.github/workflows/lite-phase0-randomized-simulation-v1.yml
     with:
       campaign_id: ${{ inputs.campaign_id }}
@@ -54,7 +58,9 @@ jobs:
 
   finalize-and-launch-reviewer1:
     needs: [fork-deploy-config]
-    if: ${{ always() && (needs.fork-deploy-config.result == 'success' || inputs.resume_from_finalize) }}
+    # Inactive on isolated fork: legacy workflow may read/write original main.
+    # Former gate: ${{ always() && (needs.fork-deploy-config.result == 'success' || inputs.resume_from_finalize) }}
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
