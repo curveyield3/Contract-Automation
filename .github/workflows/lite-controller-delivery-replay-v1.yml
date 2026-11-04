@@ -25,6 +25,8 @@ permissions:
 
 jobs:
   discover:
+    # Fork isolation: retired lane references original main; keep it inactive.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     outputs:
       requests: ${{ steps.ids.outputs.requests }}
@@ -65,7 +67,9 @@ jobs:
           echo "requests=$(jq -sc '{include:.}' /tmp/lite-replay-requests.ndjson)" >>"$GITHUB_OUTPUT"
   redeliver:
     needs: discover
-    if: ${{ needs.discover.outputs.requests != '{"include":[]}' }}
+    # Fork isolation: retired lane references original main; keep it inactive.
+    # Original gate: ${{ needs.discover.outputs.requests != '{"include":[]}' }}
+    if: ${{ false }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.requests) }}
