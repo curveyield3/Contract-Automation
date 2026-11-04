@@ -847,7 +847,7 @@ if(reviewKind==='discovery'){
     ?JSON.parse(Buffer.from(a['ready-unit-ids-b64'],'base64').toString('utf8')):[a['unit-id']];
   const result=advanceDiscoveryV1({root,campaignPath,directory,
     authorityRoot:authorityRootFromReceipt(sourceReceipt),automationRoot:process.cwd(),
-    unitId:a['unit-id'],readyUnitIds,now,auditControllerRef:a['audit-controller-ref']??'main'});
+    unitId:a['unit-id'],readyUnitIds,now,auditControllerRef:a['audit-controller-ref']??'machine-intelligence-audit-controller-v1'});
   if(result.status==='DISCOVERY_STALE_REQUEST'){
     process.stdout.write(JSON.stringify({authorityLinkRoot,status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName})+'\n');
     process.exit(0);
@@ -1319,7 +1319,7 @@ else{
  :preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
   if(sequence===3&&!['Audit Skill - Lite-Solo Authority/lite-solo-v4','Audit Skill - Lite-Solo Authority/lite-solo-v5','Audit Skill - Lite-Solo Authority/lite-solo-v6'].includes(authorityRoot)&&!isReassignedV13AuthorityV1({root,authorityRoot})&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
     const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
-      now,auditControllerRef:a['audit-controller-ref']??'main'});
+      now,auditControllerRef:a['audit-controller-ref']??'machine-intelligence-audit-controller-v1'});
     directory.discovery={statePath:started.statePath,status:started.completeImmediately?'COMPLETE':'RUNNING',
       activeUnitId:started.state.payload.activeUnitId,
       activeUnitIds:started.state.payload.order.filter(id=>started.state.payload.units[id]?.status==='ACTIVE')};
