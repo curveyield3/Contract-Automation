@@ -44,6 +44,8 @@ concurrency:
 
 jobs:
   permit-source:
+    # Inactive in isolated Machine Intelligence source fork: legacy main-bound path.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -79,7 +81,9 @@ jobs:
 
   intelligence:
     needs: permit-source
-    if: ${{ !inputs.resume_from_finalize && !inputs.resume_from_deploy }}
+    # Inactive in isolated Machine Intelligence source fork: legacy main-bound path.
+    # Former gate: ${{ !inputs.resume_from_finalize && !inputs.resume_from_deploy }}
+    if: ${{ false }}
     uses: ./.github/workflows/audit-preview-phase0-intelligence-v1.yml
     with:
       campaign_id: ${{ inputs.campaign_id }}
@@ -89,7 +93,9 @@ jobs:
 
   fork-deploy-config:
     needs: [permit-source, intelligence]
-    if: ${{ always() && needs['permit-source'].result == 'success' && !inputs.resume_from_finalize && (needs.intelligence.result == 'success' || inputs.resume_from_deploy) }}
+    # Inactive in isolated Machine Intelligence source fork: legacy main-bound path.
+    # Former gate: ${{ always() && needs['permit-source'].result == 'success' && !inputs.resume_from_finalize && (needs.intelligence.result == 'success' || inputs.resume_from_deploy) }}
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
@@ -284,7 +290,9 @@ jobs:
 
   finalize-and-launch-reviewer1:
     needs: [permit-source, fork-deploy-config]
-    if: ${{ always() && needs['permit-source'].result == 'success' && (needs.fork-deploy-config.result == 'success' || inputs.resume_from_finalize) }}
+    # Inactive in isolated Machine Intelligence source fork: legacy main-bound path.
+    # Former gate: ${{ always() && needs['permit-source'].result == 'success' && (needs.fork-deploy-config.result == 'success' || inputs.resume_from_finalize) }}
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
