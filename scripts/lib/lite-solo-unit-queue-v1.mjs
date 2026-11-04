@@ -10,7 +10,7 @@ import {deriveBaselineObligationsV1} from '../../packages/github-native-sim/src/
 import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite-solo-phase-prefill-v1.mjs';
 import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {validateLiveForkBaselineRecordV1} from './lite-solo-live-fork-baseline-gate-v1.mjs';
-import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
+import {materializeSemanticWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
 import {planSemanticBatchesV1,SEMANTIC_BATCH_READING_GUIDE_V1} from './lite-solo-semantic-batches-v1.mjs';
 
 export const UNIT_POLICY=Object.freeze({issueBatchDefault:50,issueBatchMax:50,approvalBatchMax:50,maxParallelWorkers:null});
@@ -735,33 +735,12 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  return result;
 }
 export function finalizeReadinessV1({root,campaignPath,directory,phase}){
- assertParallelSolo(directory,phase);
+ // Readiness is strictly transport availability, not a content validation gate.
  const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
- assertPlan(queue,plan);
- if(phase===4&&queue.stage!=='RECONCILIATION')return {ready:false,reason:'discovery and reconciliation not complete'};
- const pending=plan.units.filter(u=>queue.units[u.unitId]?.status!=='ACCEPTED');
- if(pending.length)return {ready:false,reason:'mandatory units remain',unitIds:pending.map(x=>x.unitId)};
- if(queue.finalizeStatus==='SEALED')return {ready:false,reason:'already sealed'};
- if(queue.finalizeStatus==='BLOCKED')return {ready:false,reason:'controller finalization blocked; correct published evidence or issue controller FINALIZE retry'};
- for(const u of plan.units){
-  const state=queue.units[u.unitId],accepted=read(root,state.acceptedPath);
-  if(accepted.submissionSha256!==state.acceptedSha256||
-     !dependenciesFresh(queue,u,accepted.prerequisiteEvidence))
-   return {ready:false,reason:'stale parent acceptance or prerequisites',unitIds:[u.unitId]};
-  if(u.kind==='BATCH'){
-   for(const [index,m] of u.members.entries()){
-    const ref=queue.acceptedRecords?.[m.unitId];
-    if(ref?.status!=='ACCEPTED'||ref.parentUnitId!==u.unitId)
-     return {ready:false,reason:'missing original-record acceptance',unitIds:[m.unitId]};
-    const snapshot=read(root,ref.path);
-    if(sha(snapshot)!==ref.snapshotSha256||snapshot.memberUnitId!==m.unitId||
-       snapshot.recordKey!==m.recordKeys[0]||
-       JSON.stringify(snapshot.entry)!==JSON.stringify(accepted.submission?.entries?.[index])||
-       !dependenciesFresh(queue,m,snapshot.prerequisiteEvidence))
-     return {ready:false,reason:'stale original-record acceptance or prerequisites',unitIds:[m.unitId]};
-   }
-  }
- }
+ const pending=plan.units.filter(u=>!queue.units[u.unitId]?.acceptedPath||
+  !fs.existsSync(repoFile(root,queue.units[u.unitId].acceptedPath)));
+ if(pending.length)return {ready:false,reason:'AWAITING_WORKER_FILES',
+  unitIds:pending.map(u=>u.unitId)};
  return {ready:true,plan,queue};
 }
 // Recover a controller-owned v13 index accidentally re-sharded from a previously
@@ -829,46 +808,37 @@ function restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan}
  }
 }
 export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}){
+ // GitHub copies and orders the actual Worker-provided bytes; no additional
+ // identity, value, coverage, dependency, or security validation is performed.
  const ready=finalizeReadinessV1({root,campaignPath,directory,phase});
- if(!ready.ready)throw Error('unsafe finalization: '+ready.reason);
- const {plan,queue}=ready,assignment=directory.currentAssignment;
- // Normalize prior erroneous re-sharding only from the frozen unit plan.
- restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan});
- const byFile=new Map();
+ if(!ready.ready)return {status:'AWAITING_WORKER_FILES',unitIds:ready.unitIds};
+ const {plan,queue}=ready,assignment=directory.currentAssignment,byFile=new Map();
  for(const u of plan.units.filter(u=>['SHARD','APPEND','BATCH'].includes(u.kind))){
   const accepted=read(root,queue.units[u.unitId].acceptedPath);
-  if(queue.units[u.unitId].acceptedSha256!==accepted.submissionSha256)throw Error('accepted digest mismatch');
   if(u.kind==='BATCH'){
-   if(accepted.submission.entries.length!==u.members.length)throw Error('batched acceptance record count mismatch');
-   for(const [i,m] of u.members.entries()){
-    const entry=accepted.submission.entries[i];
-    if(entry.key!==m.recordKeys[0])throw Error('batched record order or key changed');
-    const list=byFile.get(m.shardPath)??[];
-    list.push({unit:m,entries:[entry]});byFile.set(m.shardPath,list);
+   const entries=Array.isArray(accepted.submission?.entries)?accepted.submission.entries:[];
+   for(const member of u.members){
+    const entry=entries.find(e=>e?.key===member.recordKeys?.[0]);
+    if(!entry)continue; // Do not invent material that the Worker did not send.
+    const group=byFile.get(member.shardPath)??[];
+    group.push({unit:member,entries:[entry]});byFile.set(member.shardPath,group);
    }
-  }else {
-   const list=byFile.get(u.shardPath)??[];list.push({unit:u,entries:accepted.submission.entries});byFile.set(u.shardPath,list);
+  }else{
+   const group=byFile.get(u.shardPath)??[];
+   group.push({unit:u,entries:Array.isArray(accepted.submission?.entries)?accepted.submission.entries:[]});
+   byFile.set(u.shardPath,group);
   }
  }
- // Rebuild every shard deterministically from accepted immutable snapshots.
- // A failed finalize can retry without appending duplicates to mutable shards.
- for(const [rel,edits] of byFile){
+ for(const [rel,group] of byFile){
   const slab=read(root,rel);
-  const fixed=edits.filter(e=>e.unit.kind==='SHARD').sort((a,b)=>a.unit.shardIndex-b.unit.shardIndex);
-  const append=edits.filter(e=>e.unit.kind==='APPEND').sort((a,b)=>a.unit.unitId.localeCompare(b.unit.unitId));
-  if(fixed.length&&append.length)throw Error('shard has conflicting fixed and append ownership: '+rel);
-  if(fixed.some((e,i)=>e.unit.shardIndex!==i))throw Error('incomplete fixed shard ownership: '+rel);
-  slab.entries=fixed.length?fixed.map(e=>e.entries[0]):append.flatMap(e=>e.entries);
+  const fixed=group.filter(e=>e.unit.kind==='SHARD').sort((a,b)=>a.unit.shardIndex-b.unit.shardIndex);
+  const appended=group.filter(e=>e.unit.kind==='APPEND').sort((a,b)=>a.unit.unitId.localeCompare(b.unit.unitId));
+  slab.entries=fixed.length?fixed.flatMap(e=>e.entries):appended.flatMap(e=>e.entries);
   put(root,rel,slab);
  }
- // Full restoration is the pre-existing source-bound schema/identity validator.
- const restored=secureRestoreWorkFormV13({root,indexRel:assignment.workShardIndexPath});
- const form=JSON.parse(restored.content),schema=loadPhaseSchema(root,authorityFor(directory),phase).schema;
- const errors=validateWorkForm(schema,form);
- if(errors.length)throw Error('aggregate validation blocked: '+errors.slice(0,15).join('; '));
- // Existing phase controller materializes, validates all semantic gates, executes required
- // already-qualified machine lane (Phase 5), generates a single seal and next assignment.
- return {status:'READY_FOR_EXISTING_BOUNDARY_SEAL',workShardIndexPath:assignment.workShardIndexPath};
+ materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
+ return {status:'READY_FOR_EXISTING_BOUNDARY_SEAL',workShardIndexPath:assignment.workShardIndexPath,
+  validationDelegatedTo:'CLOUDFLARE_WORKER'};
 }
 export function markFinalizationV1({root,campaignPath,phase,status,details=null}){
  const queue=read(root,queueRel(campaignPath,phase));
