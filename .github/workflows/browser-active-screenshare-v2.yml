@@ -35,6 +35,8 @@ concurrency:
 
 jobs:
   screenshare:
+    # Inactive in Machine Intelligence fork: unrelated legacy workflow may access original main.
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
