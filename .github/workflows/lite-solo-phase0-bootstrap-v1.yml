@@ -14,7 +14,7 @@ on:
       audit_controller_ref:
         description: Audit-Controller ref containing the campaign
         required: false
-        default: main
+        default: machine-intelligence-audit-controller-v1
         type: string
 
       authorization_confirmed:
