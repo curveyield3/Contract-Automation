@@ -1,4 +1,6 @@
 name: Lite-Solo AI Source Inference and Autonomous Beta v6
+env:
+  MACHINE_INTELLIGENCE_WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL }}
 on:
   push:
     branches: [machine-intelligence-audit-controller-v1]
@@ -276,7 +278,7 @@ jobs:
           const token=(await grantResponse.json()).value;
           if(typeof token!=='string')throw Error('Signed OIDC identity missing');
           async function worker(route,body){
-            const response=await fetch('https://lite-solo-api.jamesnexus9999.workers.dev'+route,{
+            const response=await fetch(process.env.MACHINE_INTELLIGENCE_WORKER_URL+route,{
               method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},
               body:JSON.stringify({campaignId,...body}),signal:AbortSignal.timeout(90000)});
             const data=await response.json();
@@ -332,7 +334,7 @@ jobs:
           if(!['1','2','4'].includes(configuredRunners))throw Error('Invalid requested autonomous inference runner count');
           const body={requestId:'ai-'+process.env.GITHUB_RUN_ID,sourceUrl,aiAutonomous:true,
             inferenceRunners:configuredRunners};
-          const response=await fetch('https://lite-solo-api.jamesnexus9999.workers.dev/api/campaign/start',{
+          const response=await fetch(process.env.MACHINE_INTELLIGENCE_WORKER_URL+'/api/campaign/start',{
             method:'POST',headers:{authorization:'Bearer '+credential,'content-type':'application/json'},
             body:JSON.stringify(body),signal:AbortSignal.timeout(90000)});
           const payload=await response.json();
@@ -677,7 +679,7 @@ jobs:
           }
           let cursor=null,pages=0,events=0,files=0,complete=false;
           for(;pages<10000;pages++){
-            const response=await fetch('https://lite-solo-api.jamesnexus9999.workers.dev/api/ai/bridge',{
+            const response=await fetch(process.env.MACHINE_INTELLIGENCE_WORKER_URL+'/api/ai/bridge',{
               method:'POST',
               headers:{authorization:'Bearer '+await token(),'content-type':'application/json'},
               body:JSON.stringify({campaignId,operation:'archive',...(cursor?{cursor}:{})}),
