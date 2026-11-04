@@ -199,7 +199,7 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
    const output=execFileSync(process.execPath,['scripts/lite-solo-phase-controller-v1.mjs',
     '--controller-root',root,'--campaign-id',campaignId,
     '--campaign-path',campaignPath,'--campaign-directory-path',directoryRel,
-    '--phase-sequence',String(seq),'--review-kind','phase','--audit-controller-ref','main'],
+    '--phase-sequence',String(seq),'--review-kind','phase','--audit-controller-ref','machine-intelligence-audit-controller-v1'],
    // The existing Phase-5 runner emits bounded source-bound progress to stderr.
    // Inherit that stream: a long machine execution must not silently buffer
    // all progress or consume the parent's 2-MiB result buffer.
