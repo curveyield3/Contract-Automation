@@ -8,11 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {materializeSemanticWorkFormV13, semanticShardFailureIndexV13} from './lib/lite-solo-work-shards-v1.mjs';
-import {readJson, writeJson, repoFile, loadPhaseSchema, validateWorkForm, validateBoundAuthorityV1} from './lib/lite-solo-phase-work-v1.mjs';
-import {validatePhaseScaffold} from './lib/lite-solo-phase-prefill-v1.mjs';
-import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1} from './lib/lite-solo-unit-queue-v1.mjs';
-import {restoreControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
+import {readJson, writeJson, repoFile, loadPhaseSchema, validateBoundAuthorityV1} from './lib/lite-solo-phase-work-v1.mjs';
+import {processUnitRequestV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
 import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
@@ -97,45 +94,6 @@ function checkout(){
 function assertAssigned(c,phase){
   strict(c.directory.currentAssignment?.phaseSequence===phase,'phase is not active in controller');
   strict(c.directory.currentAssignment?.workSchemaPath?.startsWith(AUTH+'/phases/phase-'+phase+'/'),'bound phase schema changed');
-}
-function indexPages(indexPath){
-  const index=read(indexPath),dir=path.posix.dirname(indexPath),out=[];
-  strict(index.schemaVersion==='curveyield-work-shard-index-v13','wrong semantic shard format');
-  for(const page of index.pages||[]){
-    strict(/^INDEX_PAGE_[0-9]{4}_v1\.json$/.test(page.file),'unexpected index page name');
-    const rel=dir+'/'+page.file,raw=fs.readFileSync(relative(rel));
-    strict(sha(raw)===page.sha256,'immutable index page digest mismatch');
-    const body=JSON.parse(raw.toString('utf8'));
-    strict(body.schemaVersion==='curveyield-work-shard-index-page-v13','invalid index page format');
-    out.push(...body.shards);
-  }
-  return {index,descriptors:out};
-}
-function noUnitNextStep(c){
-  const phase=Number(need('phase')),step=Number(need('step'));
-  assertAssigned(c,phase);
-  const a=c.directory.currentAssignment,indexPath=safePath(a.workShardIndexPath);
-  const {index,descriptors}=indexPages(indexPath);
-  strict(index.phase===phase&&index.formRel===a.workFormPath,'wrong phase index');
-  const unitFiles=descriptors.filter(d=>d.path?.[0]==='actions'&&d.path[1]==='step-'+step&&d.path[2]==='outputs')
-    .map(d=>d.file).sort();
-  strict(unitFiles.length>0,'no canonical semantic shards for current step');
-  if(payload.source_commit)strict(/^[0-9a-f]{40}$/.test(payload.source_commit),'invalid source commit');
-  return callback('/fork/roster',{campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
-    phase,step,sourceCommit:payload.source_commit||null,
-    indexSha256:sha(fs.readFileSync(relative(indexPath))),unitFiles});
-}
-function validateSemanticStep(c){
- // The Worker has already decided content validity; the GitHub-side
- // controller simply materializes the source and acknowledges the step.
- const phase=Number(need('phase')),step=Number(need('step'));
- const a=c.directory.currentAssignment,commit=need('source_commit');
- materializeSemanticWorkFormV13({root:ROOT,formRel:a.workFormPath});
- return callback('/fork/step-verified',{status:'PASS',
-  campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
-  phase,step,sourceCommit:commit,indexSha256:payload.index_sha256,
-  authorityDigest:c.directory.authorityDigest,validator:payload.validator,
-  deficiencies:[],githubContentValidationPerformed:false});
 }
 function publishCanonical(c){
   cmd('git',['-C',ROOT,'config','user.name','CurveYield Cloudflare Fork Controller']);
