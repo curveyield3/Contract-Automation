@@ -71,3 +71,17 @@ The originals are unchanged on their `main` branches.
 - No tests have been added or executed.
 
 **Status: SOURCE FORK ONLY (v1); no production behavior changed.**
+
+## Final fork-isolation and post-sweep repair — 2026-11-04
+
+This source-only Machine Intelligence fork was inspected and repaired without accessing, changing, dispatching, or deploying either repository's original `main` branch. Neither tests nor audit workflows were initiated in this repair round.
+
+- Removed the unreachable duplicate Phase-10 PDF/callback block from the Cloudflare fork workflow; canonical Phase-10 publication remains with the semantic phase-boundary workflow.
+- Allowed the MiMo inference runner to attempt the Worker's abandoned-lease recovery instead of halting on a sampled foreign-lease count. Active foreign claims still cannot be forcibly overwritten.
+- Changed the fork-check source checkout to the matching Audit-Controller fork.
+- Disabled the inherited browser/agent delivery, audit-preview, legacy receipt/phase controller, V7, original-branch authority sync, and other main-bound workflow job entrypoints in this fork. These are not the active Lite-Solo Machine Intelligence controller lanes.
+- Added explicit fork-only transport guidance to each root `AGENTS.md`. The original v6 authority bytes and hash-bound receipts are deliberately unchanged; obsolete original-main routing text in frozen v6 SKILL is not authorized for this fork.
+- Updated the Worker source to read the branch-current fork isolation policy while retaining the pinned source-bound skill and phase guide.
+- Retired two references to a nonexistent V7 proof-execution workflow. Proof requests remain published and explicitly marked `MACHINE_EXECUTION_NOT_CONFIGURED`, not PASS; no fictitious execution rounds are consumed.
+
+**Verification limit:** All repairs were source- and branch-scoped. The independently configured Machine Intelligence Worker and a fork-native machine-evidence executor have not been deployed or runtime-tested here, so fork runtime acceptance and production-readiness are **not certified**. Missing machine evidence must remain unresolved until a separately authorized fork-native execution facility exists. Retired V7 functionality was not modernized or restarted.
