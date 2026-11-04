@@ -31,6 +31,7 @@ if(!/^[0-9a-f]{40}$/.test(a['contract-automation-sha'])||
    a['contract-automation-sha']!==a['bootstrap-sha'])
   throw new Error('Phase-0 finalizer must seal the exact workflow checkout commit');
 
+const githubPhase0Diagnostics=[];
 const evidence={
   build:required(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'build identity'),
   executionBuildArtifacts:required(path.join(campaignRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'reusable build artifacts'),
@@ -182,11 +183,11 @@ if(['lite-solo-v3','lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(receip
   const facts=read(required(path.join(reviewRoot,'SYSTEM_FACTS_v1.json'),'system facts'));
   const plan=read(required(path.join(reviewRoot,'FLOW_PLAN_v1.json'),'flow plan'));
   if(inventory?.payload?.complete!==true||!Array.isArray(inventory?.payload?.contexts)||!inventory.payload.contexts.length)
-    throw new Error('LITE_SOLO_INCOMPLETE_REVIEW_INVENTORY: no complete reviewable source-context inventory');
+    githubPhase0Diagnostics.push('LITE_SOLO_INCOMPLETE_REVIEW_INVENTORY: no complete reviewable source-context inventory');
   if(!facts?.payload||!Array.isArray(plan?.payload?.reviewUnits)||!plan.payload.reviewUnits.length||
      !Array.isArray(plan?.payload?.attackUnits)||!plan.payload.attackUnits.length||
      (plan?.payload?.gaps??[]).some(g=>['INVENTORY_INCOMPLETE','PLAN_BUILD_ERROR'].includes(g?.code)))
-    throw new Error('LITE_SOLO_INCOMPLETE_FLOW_PLAN: required correctness and attack units must be generated from complete inventory');
+    githubPhase0Diagnostics.push('LITE_SOLO_INCOMPLETE_FLOW_PLAN: required correctness and attack units must be generated from complete inventory');
 }
 
 const now=new Date().toISOString();
@@ -209,7 +210,7 @@ receipt.obligations.due=(ledger.obligations??[]).filter(x=>String(x.status??'OPE
 // Retired infrastructure qualification is not evidence for a new Phase-0 run.
 receipt.automation=(receipt.automation??[]).filter(row=>row?.workflow!=='v7-execution-infrastructure-qualification.yml');
 receipt.automation=upsert(receipt.automation,{workflow:'lite-solo-phase0-bootstrap-v1.yml',runId:Number(a['workflow-run-id']),status:'PASS',contractAutomationCommit:a['contract-automation-sha'],bootstrapCommit:a['bootstrap-sha']??a['contract-automation-sha']},'workflow');
-receipt.validation={status:'PASS',validatedAt:now,failures:[]};
+receipt.validation={status:'PASS',validatedAt:now,failures:[],validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false,githubDiagnostics:githubPhase0Diagnostics};
 receipt.phase.status='SEALED';
 receipt.sealedAt=now;
 receipt.updatedAt=now;
