@@ -933,8 +933,10 @@ if(sequence===8){
   canonical.automationOutputs.validatedFindingsMaterialized=true;
 }
 if(sequence===10){
-  const unresolved=unresolvedFinalCandidateFailures({root,campaignPath,directory});
-  // Preserve unresolved candidates as report data; never prevent packaging or sealing.
+  let unresolved=[];
+  try{unresolved=unresolvedFinalCandidateFailures({root,campaignPath,directory});}
+  catch(error){unresolved=['CANDIDATE_ASSESSMENT_UNAVAILABLE: '+String(error?.message??error)];}
+  // Preserve unresolved or unavailable candidates as report data; never prevent packaging or sealing.
   canonical.automationOutputs.workerReviewPendingCandidates=unresolved;
   const p6=canonicalFor(root,campaignPath,6);
   const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
