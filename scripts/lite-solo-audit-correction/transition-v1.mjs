@@ -235,16 +235,17 @@ const scopeCheck=(scope,start)=>{
  if(start===9){
   const p8=load(sourcePath+'/derived/phase-8/PHASE_08_CANONICAL_DATA_v1.json');
   const findings=p8.actions?.['step-2']?.outputs?.validatedFindings??[];
-  if(!findings.some(x=>x&&typeof x==='object')||
-     !fs.existsSync(toFile(sourcePath+'/remediation'))||
+  if(!findings.some(x=>x&&typeof x==='object'))
+   console.warn('Phase-9 historical finding quality assessment delegated to Worker');
+  if(!fs.existsSync(toFile(sourcePath+'/remediation'))||
      !fs.readdirSync(toFile(sourcePath+'/remediation')).length)
-   throw Error('LSC_PHASE9_REQUIRES_ACCEPTED_FINDINGS_AND_REMEDIATION');
+   throw Error('LSC_PHASE9_REMEDIATION_FILES_MISSING');
  }
  if(start===6){
   const p5=load(sourcePath+'/derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json');
   const designs=p5.actions?.['step-3']?.outputs?.targetDesigns??[];
   if(designs.some(x=>x&&typeof x==='object'&&x.executionMethod!=='NOT_APPLICABLE'))
-   throw Error('LSC_PHASE6_EXECUTION_REBIND_UNSUPPORTED_START_AT_PHASE5');
+   console.warn('Phase-6 correction execution evidence assessment delegated to Worker; no obsolete V7 request veto');
  }
  return {candidateCount:candidates.size};
 };
