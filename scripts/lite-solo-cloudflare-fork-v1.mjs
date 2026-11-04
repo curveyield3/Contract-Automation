@@ -504,7 +504,7 @@ async function unitAdvanceAcceptedStage(c){
  return callback('/fork/step-verified',{status:'PASS',
   campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
   phase,step,stage,sourceCommit:need('source_commit'),planSha256,
-  queueSha256,rosterDigest:payload.roster_digest||'',
+  queueSha256:payload.queue_sha256||queueSha256,rosterDigest:payload.roster_digest||'',
   phaseEpoch:current.plan.phaseEpoch,authorityDigest:c.directory.authorityDigest,
   validator:payload.validator,deficiencies:[],stepComplete:nextStep!==step,
   completePhase:done,nextStep:done?null:nextStep,nextStage:done?null:nextStage,
