@@ -262,8 +262,11 @@ export function createUnitPlanV1({root,campaignPath,directory,phase,automationRo
  if(phase===4){
   const rel=reviewInventoryRelV1(root,campaignPath,'FLOW_PLAN_v1.json'),flow=read(root,rel);
   const units=[...asArray(flow.payload?.reviewUnits),...asArray(flow.payload?.attackUnits)];
-  if(!units.length||asArray(flow.payload?.gaps).some(g=>['INVENTORY_INCOMPLETE','PLAN_BUILD_ERROR'].includes(g?.code)))
-   throw Error('cannot issue Phase-4 units from missing/incomplete review inventory');
+  // Worker owns inventory quality assessment; preserve actual gaps as diagnostics.
+  if(asArray(flow.payload?.gaps).some(g=>['INVENTORY_INCOMPLETE','PLAN_BUILD_ERROR'].includes(g?.code)))
+   plan.githubDiagnostics=[...(plan.githubDiagnostics??[]),'PHASE4_REVIEW_INVENTORY_INCOMPLETE'];
+  // With no worker-issued units there are no submissions to package.
+  if(!units.length)throw Error('AWAITING_WORKER_ISSUED_PHASE4_UNITS');
   const fIds=units.filter(u=>u.unitId.startsWith('F-')||u.unitId.startsWith('R-')).map(u=>u.unitId);
   for(const u of units){
    if(!/^[FRX]-\d{3}$/.test(u.unitId))throw Error('unsupported discovery unit '+u.unitId);
