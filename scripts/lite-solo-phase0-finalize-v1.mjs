@@ -26,7 +26,7 @@ const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
 const receiptPath=path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json');
 const receipt=read(required(receiptPath,'Phase-0 receipt'));
 if(receipt.schemaVersion!=='curveyield-lite-phase-receipt-v1'||receipt.campaign?.mode!=='LITE_SOLO'||receipt.phase?.sequence!==0) throw new Error('invalid Phase-0 receipt');
-if(!['ACTIVE','EVIDENCE_READY','VALIDATING'].includes(receipt.phase.status)) throw new Error('Phase-0 receipt is not finalizable');
+if(!['ACTIVE','EVIDENCE_READY','VALIDATING','BLOCKED'].includes(receipt.phase.status)) throw new Error('Phase-0 receipt has no eligible unfinished state'); // Worker decides whether previous BLOCKED is eligible.
 if(!/^[0-9a-f]{40}$/.test(a['contract-automation-sha'])||
    a['contract-automation-sha']!==a['bootstrap-sha'])
   throw new Error('Phase-0 finalizer must seal the exact workflow checkout commit');
