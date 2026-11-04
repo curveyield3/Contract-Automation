@@ -25,6 +25,10 @@ Fork-only changes to active paths:
 - Preserved actual deployment and Slither failures as diagnostics and limitations; incomplete evidence is **not** synthesized into a successful machine execution.
 - Rebound Cloudflare fork callbacks and MiMo bridge to `MACHINE_INTELLIGENCE_WORKER_URL`, and fork callbacks to `MACHINE_INTELLIGENCE_FORK_TOKEN`. Production Worker routes must not be used.
 - Restored Phase-5 request resolution and downstream metadata after an incorrect early edit, then separated optional quality diagnostics from the essential packaging path.
+- Removed remaining Phase-5 human-approval vetoes from the fork phase-boundary workflow; Phase-5 request materialization and prefill metadata remain intact.
+- Retired legacy aggregate-unit rework mutations, dead shard/coverage/evidence validation routines, and unnecessary GitHub test-toolchain setup steps; quality findings remain the Worker's responsibility.
+- Allowed Phase-4 unit plans with actual source-bound units to proceed even when the inventory contains quality-gap indicators; the Worker still needs to supply real units where none exist.
+- Preserved exact source/archive and original-evidence SHA-256 binding checks as physical provenance protections, rather than allowing mismatched bytes to be sealed.
 
 Remaining execution hold:
 - An independent, configured, deployed Machine Intelligence Worker (and GitHub credentials, Durable Object, R2 isolation) **does not yet exist in this fork**. Its source snapshot is in the companion Audit-Controller branch.
