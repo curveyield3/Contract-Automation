@@ -98,9 +98,18 @@ jobs:
           if [ "$EVENT_NAME" = push ]; then
             request="$MATRIX_REQUEST"
             [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]]
-            jq -e '.schemaVersion=="curveyield-lite-solo-source-request-v1" and .mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and (.sourceUrl|type=="string" and startswith("https://")) and (.scanUrls|type=="array" and length==0)' "$request" >/dev/null
-            source_url="$(jq -r .sourceUrl "$request")"
-            scans="$(jq -c .scanUrls "$request")"
+            jq -e '
+              (.sourceUrl // "") as $url |
+              (.scanUrls // []) as $scans |
+              .schemaVersion=="curveyield-lite-solo-source-request-v1" and
+              .mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and
+              (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and
+              ($url|type=="string") and ($scans|type=="array") and
+              all($scans[]; type=="string" and startswith("https://")) and
+              (($url|startswith("https://")) != ($scans|length>0))
+            ' "$request" >/dev/null
+            source_url="$(jq -r '.sourceUrl // ""' "$request")"
+            scans="$(jq -c '.scanUrls // []' "$request")"
             request_id="$(jq -r .requestId "$request")"
             publish_files="$(jq -c 'if has("publishFiles") then .publishFiles else {report_pdf:true,audited_source:true,scope_summary:true,findings_remediation:true,methodology_analysis:true,properties_hypotheses:true,execution_results:true,architecture_dependencies:true,residual_risks:true,evidence_index:true} end' "$request")"
           else
