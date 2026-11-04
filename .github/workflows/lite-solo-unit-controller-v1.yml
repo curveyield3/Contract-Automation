@@ -97,7 +97,7 @@ jobs:
             echo "ready=$(jq -r .finalizeReady /tmp/unit-drain.json)"
             echo "phase=$(jq -r .phase /tmp/unit-drain.json)"
           } >> "$GITHUB_OUTPUT"
-      - name: Finalize only when all unit and machine evidence requirements pass
+      - name: Finalize when accepted source-bound unit files are present
         if: ${{ steps.process.outputs.ready == 'true' }}
         shell: bash
         env:
