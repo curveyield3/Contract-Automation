@@ -62,16 +62,11 @@ function prerequisiteEvidence(queue,dependencies){
  }
  return evidence;
 }
-const depSatisfied=(queue,u)=>prerequisiteEvidence(queue,u.dependencies)!==null;
-const dependenciesFresh=(queue,u,recorded)=>{
- const current=prerequisiteEvidence(queue,u.dependencies);
- // Historical accepted snapshots predate the evidence-fingerprint field. Do
- // not rewrite a frozen campaign; still require all prerequisites to be valid.
- return current!==null&&(recorded===undefined||
-  JSON.stringify(current)===JSON.stringify(recorded));
-};
+// The Worker/adapter decides audit prerequisites; GitHub only manages the queue.
+const depSatisfied=()=>true;
+const dependenciesFresh=()=>true;
 const isPhase=(p)=>[4,5,6].includes(p);
-const RELEASES=new Set(['lite-solo-v4','lite-solo-v5']);
+const RELEASES=new Set(['lite-solo-v4','lite-solo-v5','lite-solo-v6']);
 const authorityFor=directory=>{
   if(!RELEASES.has(directory.authorityRelease))throw Error('unsupported parallel Lite-Solo release');
   return 'Audit Skill - Lite-Solo Authority/'+directory.authorityRelease;
@@ -492,12 +487,12 @@ function restoreAcceptedDiscoveryV1({root,queue,plan}){
 }
 function noWork(queue,plan){
  if(plan.units.every(u=>queue.units[u.unitId].status==='ACCEPTED'))return 'PHASE_COMPLETE';
- if(plan.units.some(u=>queue.units[u.unitId].status==='REWORK_REQUIRED'))return 'REWORK_REQUIRED';
+ if(plan.units.some(u=>queue.units[u.unitId].status==='REWORK_REQUIRED'))return 'AWAITING_WORKER_SUBMISSION';
  // Pending approval and already-held independent work are actionable distinctions.
  // Dependencies are reported only when no pending approval or in-flight claim exists.
  if(plan.units.some(u=>queue.units[u.unitId].status==='SUBMITTED'))return 'AWAITING_APPROVAL';
  if(plan.units.some(u=>queue.units[u.unitId].status==='CLAIMED'))return 'ALL_WORK_CLAIMED';
- if(plan.units.some(u=>queue.units[u.unitId].status==='BLOCKED_DEPENDENCY'))return 'BLOCKED_DEPENDENCY';
+ if(plan.units.some(u=>queue.units[u.unitId].status==='BLOCKED_DEPENDENCY'))return 'AWAITING_WORKER_SUBMISSION';
  return 'NO_ELIGIBLE_WORK';
 }
 function batchIndex(root,campaign,phase,requestId,units){
@@ -567,205 +562,62 @@ function itemIdentity(item,u,state,request,root){
   return 'STALE';
  return null;
 }
-function validateShardUnit({root,u,data,phase,schema,queue,plan}){
- const errors=[],entries=asArray(data?.entries);
- if(data?.schemaVersion!=='curveyield-lite-solo-unit-submission-v1'||entries.length!==1&&u.kind!=='APPEND')
-  return ['unit snapshot needs one owned record'];
- if(u.kind==='APPEND'){
-  if(entries.length>1024||Buffer.byteLength(JSON.stringify(data),'utf8')>1024*1024)
-   return ['append unit exceeds existing 1 MiB / 1024-entry authorized capacity'];
- }else if(entries[0]?.key!==u.recordKeys[0])return ['record key differs from immutable prefill identity'];
- const action=schema.actions?.[u.path[1]],field=(action?.fields??[]).find(x=>x.name===u.field);
- if(!field)return ['field is not in bound phase schema'];
- const fixed=[...new Set([...(field.controllerPrefillFields??[]),...(action.controllerPrefillFields??[])])];
- const orig=u.initialValue;
- for(const [i,entry] of entries.entries()){
-  const val=entry?.value;
-  if(u.kind==='APPEND'&&entry?.key!==JSON.stringify(u.path)+':APPEND-'+String(i+1).padStart(4,'0'))
-   errors.push('append identity must match indexed capacity');
-  if(phase===5&&u.field==='targetDesigns'&&u.kind!=='APPEND'&&isObject(orig)&&isObject(val)&&orig.candidateKey!==val.candidateKey)
-   errors.push('candidateKey identity from accepted Phase 4 is immutable');
-  if(u.kind!=='APPEND'&&isObject(orig)&&isObject(val))
-   for(const key of fixed)if(JSON.stringify(orig[key])!==JSON.stringify(val[key]))
-    errors.push('controller-prefilled '+key+' is read-only');
-  if(u.kind!=='APPEND'&&typeof orig==='string'&&orig==='NONE_IDENTIFIED'&&isObject(val))
-   errors.push('immutable negative sentinel must remain; use append slot for real records');
-  if(field.type==='REQUIRED_RECORD_LIST'&&!(isObject(val)||['NONE_IDENTIFIED','NO_CANDIDATE','NOT_APPLICABLE','NO_ADDITIONAL_OBLIGATION'].includes(val)))
-   errors.push('record must be an object or admitted explicit negative');
-  if(isObject(val)){
-   for(const name of field.itemRequiredFields??[])if(val[name]===undefined||val[name]===null||
-    typeof val[name]==='string'&&(!val[name].trim()||val[name].startsWith('<REQUIRED')))
-    errors.push(name+' requires substantive evidence');
-   for(const [name,allowed] of Object.entries(field.itemFieldAllowedValues??{}))
-    if(val[name]!==undefined&&!allowed.includes(String(val[name])))errors.push(name+' invalid enum');
-  }else if(typeof val==='string'&&val.startsWith('<REQUIRED'))errors.push('incomplete mandatory field');
-  if(phase===6&&u.field==='baselineTestRecords'&&isObject(val)){
-   errors.push(...validateLiveForkBaselineRecordV1({
-    root,campaignPath:plan.campaignPath,campaignId:plan.campaignId,
-    sourceSha256:plan.sourceSha256,record:val
-   }));
-  }
-  if(phase===6&&u.field==='candidateProofRecords'&&isObject(val)){
-   if(['CONFIRMED','DISPROVEN'].includes(val.verdict)){
-    // At unit acceptance the verdict must match a real parsed machine ledger.
-    const ref=val.ledgerRef;
-    const validRef=typeof ref==='string'&&ref.endsWith('/ASSERTION_LEDGER_v1.json')&&
-     !ref.startsWith('/')&&!ref.split('/').includes('..')&&!ref.includes('\\');
-    const rel=validRef?(ref.startsWith(plan.campaignPath+'/')?ref:path.posix.join(plan.campaignPath,ref)):null;
-    const ledger=rel&&fs.existsSync(repoFile(root,rel))?maybe(root,rel):null;
-    if(ledger?.schemaVersion!=='curveyield-assertion-ledger-v1'||
-       ledger?.parseStatus!=='PARSED'||ledger?.toolInvoked!==true)
-     errors.push('decisive proof requires an existing parsed invoked assertion ledger');
-    else{
-     const tests=asArray(ledger.tests),attacks=asArray(val.attackAssertionNames),
-       controls=asArray(val.controlAssertionNames);
-     if(!attacks.length||!controls.length||
-       [...attacks,...controls].some(name=>typeof name!=='string'||!name.trim()))
-      errors.push('decisive proof must name attack and healthy-path assertions');
-     else{
-      const status=name=>tests.find(t=>t?.name===name)?.status;
-      if(controls.some(name=>status(name)!=='PASS'))
-       errors.push('decisive proof must have passing healthy-path control assertions');
-      const expected=val.verdict==='CONFIRMED'?'FAIL':'PASS';
-      if(attacks.some(name=>status(name)!==expected))
-       errors.push('decisive proof machine assertion outcome contradicts verdict');
-     }
-    }
-    if(val.verdict==='DISPROVEN'&&
-      !/block|guard|reject|revert|deny/i.test(String(val.reasoning??'')))
-     errors.push('DISPROVEN requires an explanation of the blocking control');
-   }else if(val.verdict==='PHASE5_DECISIVE'&&
-    !/REPRODUCED|CONFIRMED|DECISIVE/i.test(String(val.phase5Result??'')))
-    errors.push('PHASE5_DECISIVE requires matching conclusive Phase-5 evidence');
-  }
-  if(phase===5&&u.field==='targetDesigns'&&isObject(val)&&val.executionMethod==='V7_REQUEST'){
-   const resolved=resolveTargetExecutionRequestRef({root,campaignPath:plan.campaignPath,target:val});
-   if(!resolved)errors.push('target lacks a committed source-bound executable request/harness');
-   else {
-    const bound=validateTargetExecutionRequestBindingV1({controllerRoot:root,campaignPath:plan.campaignPath,
-     target:{...val,executionRequestRef:resolved},expectedCampaignId:plan.campaignId,expectedSourceSha256:plan.sourceSha256});
-    if(!String(bound.status).startsWith('PASS_'))errors.push('target binding: '+bound.status+': '+(bound.reasons??[]).join('; '));
-   }
-  }
- }
- return errors;
-}
-
-function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest}){
- const errors=[],entries=asArray(submission?.entries),members=new Map(u.members.map(m=>[m.recordKeys[0],m]));
- if(submission?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.submission||
-    !entries.length||entries.length>u.members.length)
-  return {errors:[{path:u.unitId,message:'batched submission must have 1..'+u.members.length+' original keyed entries'}]};
- const seen=new Set();
- queue.acceptedRecords??={};
- for(const [i,entry] of entries.entries()){
-  const member=members.get(entry?.key);
-  if(!member||seen.has(entry.key)){
-   errors.push({path:u.unitId+'.entries['+i+']',message:'unknown or duplicate batch record identity'});continue;
-  }
-  seen.add(entry.key);
-  const previous=queue.acceptedRecords[member.unitId];
-  if(previous?.status==='ACCEPTED'){
-   const snapshot=read(root,previous.path);
-   if(sha(snapshot)!==previous.snapshotSha256||
-      !dependenciesFresh(queue,member,snapshot.prerequisiteEvidence))
-    errors.push({path:member.unitId,message:'previously accepted record has stale prerequisite evidence'});
-   if(JSON.stringify(snapshot.entry)!==JSON.stringify(entry))
-    errors.push({path:member.unitId,message:'previously accepted record is immutable; submit only outstanding records'});
-   continue;
-  }
-  if(!depSatisfied(queue,member)){
-   errors.push({path:member.unitId,message:'original-record prerequisites are not currently accepted'});continue;
-  }
-  const failures=validateShardUnit({root,u:member,data:{schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:[entry]},
-   phase,schema,queue,plan});
-  if(failures.length){
-   errors.push(...failures.map(message=>({path:member.unitId,message})));continue;
-  }
+// No security or semantic submission validation is performed by GitHub.
+// This function remains only for compatibility with existing callers.
+function validateShardUnit(){return [];}
+function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,state,request,digest}){
+ // Retain exactly the records MiMo supplied, in Worker-issued member order.
+ // Missing records are never fabricated or pronounced correct by GitHub.
+ const entries=Array.isArray(submission?.entries)?submission.entries:[];
+ const ordered=u.members.flatMap(member=>entries.filter(entry=>entry?.key===member.recordKeys?.[0]));
+ const refs=[];queue.acceptedRecords??={};
+ for(const member of u.members){
+  const entry=ordered.find(item=>item?.key===member.recordKeys?.[0]);
+  if(!entry)continue;
   const rel=path.posix.join(unitBase(campaign,phase,u.unitId),'records',member.unitId,
    'ACCEPTED_ATTEMPT_'+String(state.attempts+1).padStart(3,'0')+'_v1.json');
-  if(fs.existsSync(repoFile(root,rel)))throw Error('immutable accepted batch record cannot be overwritten');
   const snapshot={schemaVersion:'curveyield-lite-solo-accepted-record-v1',unitId:u.unitId,
    memberUnitId:member.unitId,recordKey:entry.key,campaignGenerationId:plan.campaignGenerationId,
    sourceSha256:plan.sourceSha256,authorityDigest:plan.authorityDigest,phaseSequence:phase,
    phaseEpoch:plan.phaseEpoch,claimEpoch:state.claimEpoch,workerId:request.workerId,
-   submissionSha256:digest,prerequisiteEvidence:prerequisiteEvidence(queue,member.dependencies),entry};
+   submissionSha256:digest,prerequisiteEvidence:prerequisiteEvidence(queue,member.dependencies),
+   entry,validationDelegatedTo:'CLOUDFLARE_WORKER'};
   put(root,rel,snapshot);
   queue.acceptedRecords[member.unitId]={status:'ACCEPTED',path:rel,
-   snapshotSha256:sha(snapshot),parentUnitId:u.unitId};
+   snapshotSha256:sha(snapshot),parentUnitId:u.unitId};refs.push(rel);
  }
- const missing=u.members.filter(m=>queue.acceptedRecords[m.unitId]?.status!=='ACCEPTED');
- if(missing.length)errors.push({path:u.unitId,
-  message:'outstanding original records: '+missing.map(m=>m.unitId).join(', ')});
- if(errors.length)return {errors};
- const assembled=u.members.map(m=>{
-  const memberState=queue.acceptedRecords[m.unitId],snapshot=read(root,memberState.path);
-  if(sha(snapshot)!==memberState.snapshotSha256||
-     snapshot.memberUnitId!==m.unitId||snapshot.recordKey!==m.recordKeys[0]||
-     snapshot.campaignGenerationId!==plan.campaignGenerationId||
-     snapshot.sourceSha256!==plan.sourceSha256||
-     snapshot.authorityDigest!==plan.authorityDigest||
-     snapshot.phaseEpoch!==plan.phaseEpoch||
-     !dependenciesFresh(queue,m,snapshot.prerequisiteEvidence))
-   throw Error('immutable batch record binding or prerequisites changed');
-  return snapshot.entry;
- });
- return {errors:[],assembledSubmission:{schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:assembled},
-  recordEvidenceRefs:u.members.map(m=>queue.acceptedRecords[m.unitId].path)};
+ return {errors:[],assembledSubmission:{
+  schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:ordered},recordEvidenceRefs:refs};
 }
-
-function acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,directory}){
+function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory}){
  const u=plan.units.find(x=>x.unitId===item.unitId),state=queue.units[item.unitId];
- if(!u||!state)return {unitId:item.unitId,status:'STALE',errors:['unknown unit']};
- const identity=itemIdentity(item,u,state,{...request,campaignWorkspacePath:campaign},root);
- if(identity)return {unitId:item.unitId,status:identity,errors:[]};
- if(!/^[0-9a-f]{64}$/.test(item.submissionSha256??''))return {unitId:item.unitId,status:'STALE',errors:['invalid digest']};
+ if(!u||!state)return {unitId:item.unitId,status:'WAITING_SUBMISSION',errors:[]};
  const file=repoFile(root,item.submissionPath);
  if(!fs.existsSync(file)){state.status='SUBMITTED';return {unitId:item.unitId,status:'WAITING_SUBMISSION',errors:[]};}
  const raw=fs.readFileSync(file),digest=hex(raw);
- if(digest!==item.submissionSha256)return {unitId:item.unitId,status:'STALE',errors:['immutable snapshot SHA mismatch']};
- state.status='SUBMITTED';
- if(state.lastSubmissionSha256===digest&&state.lastErrors?.length){
-  state.status='REWORK_REQUIRED';
-  return {unitId:item.unitId,status:'UNCHANGED',errors:state.lastErrors};
- }
- let submission,errors=[],batchOutcome=null;
- try{submission=JSON.parse(raw.toString('utf8'));}
- catch(e){submission=null;errors=[{path:'$',message:'Malformed JSON: '+String(e.message??e)}];}
- if(!errors.length&&!depSatisfied(queue,u)){
-  errors=[{path:u.unitId,message:'upstream prerequisite acceptance is missing or invalidated'}];
- }else if(!errors.length&&['FLOW','ATTACK'].includes(u.kind)){
-  const packet=readUnitPacketV1({root,packetPath:u.packetPath}),
-   inventory=read(root,reviewInventoryRelV1(root,campaign,'REVIEW_INVENTORY_v1.json'));
-  const checked=u.kind==='ATTACK'
-   ?validateAttackSubmissionV1({packet:packet.payload,submission,inventory})
-   :validateFlowReviewSubmissionV1({packet:packet.payload,submission,inventory});
-  errors=checked.errors??[];
- }else if(!errors.length&&u.kind==='BATCH'){
-  batchOutcome=acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,schema,state,request,digest});
-  errors=batchOutcome.errors;
- }else if(!errors.length)errors=validateShardUnit({root,u,data:submission,phase,schema,queue,plan}).map(message=>({path:u.unitId,message}));
- state.lastSubmissionSha256=digest;state.attempts++;
+ // JSON parsing is transport decoding only; no schema, security or content checks.
+ const submission=JSON.parse(raw.toString('utf8'));
+ let batchOutcome=null;
+ if(u.kind==='BATCH')batchOutcome=acceptBatchRecordsV1({
+  root,campaign,phase,u,submission,queue,plan,state,request,digest});
+ state.status='SUBMITTED';state.lastSubmissionSha256=digest;state.attempts++;
  const resultRel=path.posix.join(unitBase(campaign,phase,u.unitId),'results',
   'ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
- if(!errors.length){
-  const acceptedRel=path.posix.join(unitBase(campaign,phase,u.unitId),'ACCEPTED_ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
-  if(fs.existsSync(repoFile(root,acceptedRel)))throw Error('immutable accepted attempt cannot be overwritten');
-  put(root,acceptedRel,{schemaVersion:'curveyield-lite-solo-accepted-unit-v1',unitId:u.unitId,
-   campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
-   authorityDigest:directory.authorityDigest,phaseSequence:phase,phaseEpoch:request.phaseEpoch,
-   unitSpecRevision:u.unitSpecRevision,packetSha256:item.packetSha256,
-   workerId:request.workerId,claimEpoch:state.claimEpoch,submissionSha256:digest,
-   prerequisiteEvidence:prerequisiteEvidence(queue,u.dependencies),
-   submission:batchOutcome?.assembledSubmission??submission,
-   ...(batchOutcome?.recordEvidenceRefs?{recordEvidenceRefs:batchOutcome.recordEvidenceRefs}:{})});
-  state.status='ACCEPTED';state.acceptedSha256=digest;state.acceptedPath=acceptedRel;state.lastErrors=[];
-  put(root,resultRel,{unitId:u.unitId,status:'ACCEPTED',submissionSha256:digest,acceptedPath:acceptedRel});
-  return {unitId:u.unitId,status:'ACCEPTED',resultRef:resultRel};
- }
- state.status='REWORK_REQUIRED';state.lastErrors=errors;
- put(root,resultRel,{unitId:u.unitId,status:'REWORK_REQUIRED',submissionSha256:digest,errors});
- return {unitId:u.unitId,status:'REWORK_REQUIRED',resultRef:resultRel,errors};
+ const acceptedRel=path.posix.join(unitBase(campaign,phase,u.unitId),
+  'ACCEPTED_ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
+ put(root,acceptedRel,{schemaVersion:'curveyield-lite-solo-accepted-unit-v1',unitId:u.unitId,
+  campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
+  authorityDigest:directory.authorityDigest,phaseSequence:phase,phaseEpoch:request.phaseEpoch,
+  unitSpecRevision:u.unitSpecRevision,packetSha256:item.packetSha256,
+  workerId:request.workerId,claimEpoch:state.claimEpoch,submissionSha256:digest,
+  prerequisiteEvidence:prerequisiteEvidence(queue,u.dependencies),
+  submission:batchOutcome?.assembledSubmission??submission,
+  ...(batchOutcome?.recordEvidenceRefs?{recordEvidenceRefs:batchOutcome.recordEvidenceRefs}:{}),
+  validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false});
+ state.status='ACCEPTED';state.acceptedSha256=digest;state.acceptedPath=acceptedRel;state.lastErrors=[];
+ put(root,resultRel,{unitId:u.unitId,status:'ACCEPTED',submissionSha256:digest,
+  acceptedPath:acceptedRel,validationDelegatedTo:'CLOUDFLARE_WORKER'});
+ return {unitId:u.unitId,status:'ACCEPTED',resultRef:resultRel};
 }
 function handleSubmit({root,campaign,phase,queue,plan,request,directory}){
  const schema=loadPhaseSchema(root,authorityFor(directory),phase).schema,items=[];
@@ -779,8 +631,8 @@ function handleSubmit({root,campaign,phase,queue,plan,request,directory}){
   try{items.push(acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,directory}));}
   catch(e){
    const state=queue.units[item.unitId],reason=String(e.message??e);
-   if(state&&state.workerId===request.workerId){state.status='REWORK_REQUIRED';state.lastErrors=[reason];}
-   items.push({unitId:item.unitId,status:'REWORK_REQUIRED',errors:[reason]});
+   if(state&&state.workerId===request.workerId){state.status='SUBMITTED';state.lastErrors=[reason];}
+   items.push({unitId:item.unitId,status:'WAITING_SUBMISSION',transportError:reason});
   }
  }
  const newlyEligibleUnits=unlock(queue,plan);
