@@ -30,6 +30,14 @@ Fork-only changes to active paths:
 - Allowed Phase-4 unit plans with actual source-bound units to proceed even when the inventory contains quality-gap indicators; the Worker still needs to supply real units where none exist.
 - Preserved exact source/archive and original-evidence SHA-256 binding checks as physical provenance protections, rather than allowing mismatched bytes to be sealed.
 
+Workflow/action deep-sweep findings (fork source only):
+- Both `.github/actions/setup-phase0-node-cache/action.yml` and `.github/actions/setup-no-telemetry-node-cache/action.yml` retain required pinned Forge/Anvil checks, but secondary `npm ls` dependency-tree diagnostics no longer abort the audit.
+- Both Lite-Solo Phase-0 intelligence workflows treat analyzer toolchain and generator failures as non-terminal steps; any genuine artifacts are still source-bound and must physically exist before publication.
+- Both Lite-Solo Phase-0 bootstrap workflows now allow failed native deployment attempts to reach evidence retention/Worker review, while retaining missing-file, source SHA, RPC chain, and authenticated publication guards.
+- Dormant `lite-phase-*`, `audit-preview-*`, and V7 legacy workflows contain numerous additional GitHub validation and `main` routing checks; most use `main`-only triggers or explicit manual dispatch and are NOT part of the active MiMo fork pipeline. Do not route new fork execution into them unchanged.
+- **Verified latent V7 blocker:** Worker source snapshot in Audit-Controller references a nonexistent `lite-solo-cloudflare-v7-execution-dispatch-v1.yml` twice. The existing `lite-v7-execution-dispatch-v1.yml` instead dispatches `audit-controller-execution.yml` on `main` and enforces an older V7 runner qualification gate. Neither is a safe drop-in substitution. This separate execution handoff needs an isolated adaptation of existing V7 workflows before running the fork.
+- No new workflows, actions, or tests were created or executed.
+
 Remaining execution hold:
 - An independent, configured, deployed Machine Intelligence Worker (and GitHub credentials, Durable Object, R2 isolation) **does not yet exist in this fork**. Its source snapshot is in the companion Audit-Controller branch.
 - Legacy fallback/controller-core paths and non-active general-purpose workflows have not been proven universally nonblocking. Physical missing-file, source identity, lease/claim, and safe-publication failures remain deliberately enforceable.
