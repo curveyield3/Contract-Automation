@@ -12,7 +12,7 @@ on:
       audit_controller_ref:
         required: false
         type: string
-        default: main
+        default: machine-intelligence-audit-controller-v1
 
 permissions:
   contents: read
