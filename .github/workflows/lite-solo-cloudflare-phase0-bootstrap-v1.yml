@@ -49,7 +49,7 @@ jobs:
     with:
       campaign_id: ${{ inputs.campaign_id }}
       campaign_path: ${{ inputs.campaign_path }}
-      audit_controller_ref: ${{ inputs.audit_controller_ref }}
+      audit_controller_ref: machine-intelligence-audit-controller-v1
     secrets: inherit
 
   fork-deploy-config:
@@ -82,7 +82,7 @@ jobs:
       - name: Checkout exact campaign source
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          AUDIT_CONTROLLER_REF: machine-intelligence-audit-controller-v1
         shell: bash
         run: |
           set -euo pipefail
@@ -188,7 +188,7 @@ jobs:
       - name: Publish to exact Audit-Controller campaign ref
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          AUDIT_CONTROLLER_REF: machine-intelligence-audit-controller-v1
           CAMPAIGN_PATH: ${{ inputs.campaign_path }}
         shell: bash
         run: |
@@ -238,7 +238,7 @@ jobs:
     env:
       CAMPAIGN_ID: ${{ inputs.campaign_id }}
       CAMPAIGN_PATH: ${{ inputs.campaign_path }}
-      AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+      AUDIT_CONTROLLER_REF: machine-intelligence-audit-controller-v1
     steps:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
