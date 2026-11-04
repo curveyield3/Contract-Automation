@@ -960,6 +960,7 @@ if(sequence===5&&form&&deficiencies.length===0){
   const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
   for(const target of targets){
     if(!target||typeof target!=='object') continue;
+    try{
     const method=String(target.executionMethod??'').toUpperCase();
     if(method==='NOT_APPLICABLE'){
       target.executionRequestRef='NOT_APPLICABLE';
@@ -1003,11 +1004,14 @@ if(sequence===5&&form&&deficiencies.length===0){
         String(binding.status)+' — '+(binding.reasons??[]).join('; ')
       );
     }
+    }catch(error){deficiencies.push('Phase 5 target data assessment deferred to Worker: '+String(error?.message??error));}
   }
   if(!deficiencies.length){
-    assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
-    writeJson(repoFile(root,assignment.workFormPath),form);
-    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+    try{
+      assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
+      writeJson(repoFile(root,assignment.workFormPath),form);
+      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+    }catch(error){deficiencies.push('Phase 5 prefill assessment deferred to Worker: '+String(error?.message??error));}
   }
 }
 
