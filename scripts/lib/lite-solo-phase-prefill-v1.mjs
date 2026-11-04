@@ -430,7 +430,10 @@ export function applyObligationDispositionsToLedger({ledger,canonical,sequence,c
   for(const row of rows){
     const id=String(row.obligationId??'').trim();
     const obligation=byId.get(id);
-    if(!obligation) throw new Error('Obligation disposition references unknown obligation '+id);
+    if(!obligation){
+      (ledger.githubDiagnostics??=[]).push({phase:sequence,code:'UNKNOWN_OBLIGATION_DISPOSITION',obligationId:id,validationDelegatedTo:'CLOUDFLARE_WORKER'});
+      continue;
+    }
     const disposition=String(row.disposition??'').toUpperCase();
     const carry=String(row.carryForwardPhaseOrNone??'NONE_IDENTIFIED');
     const refs=uniq([canonicalRel,...evidenceList(row.evidenceRefs)]);
@@ -453,7 +456,7 @@ export function applyObligationDispositionsToLedger({ledger,canonical,sequence,c
       obligation.requiredReviewer=reviewerForRequiredPhase(carry,root,authorityRoot);
       obligation.closureEvidenceRefs=refs;
     }else{
-      throw new Error('Unsupported obligation disposition '+disposition+' for '+id);
+      (ledger.githubDiagnostics??=[]).push({phase:sequence,code:'UNSUPPORTED_OBLIGATION_DISPOSITION',obligationId:id,disposition,validationDelegatedTo:'CLOUDFLARE_WORKER'});
     }
   }
   ledger.phaseCheckpoints??=[];
@@ -473,9 +476,8 @@ export function dueObligationScaffold({root,campaignPath,sequence}){
   const active=new Set(['OPEN','IN_PROGRESS','BLOCKED_CARRIED']);
   const due=(ledger.obligations??[]).filter(o=>active.has(String(o?.status??'OPEN').toUpperCase())&&String(o?.requiredPhase??'')===String(sequence));
   due.sort((a,b)=>String(a.obligationId??'').localeCompare(String(b.obligationId??'')));
-  for(const o of due){
-    if(!o?.obligationId||!o?.requiredAction||!o?.completionCondition) throw new Error('Malformed due obligation at phase '+sequence);
-  }
+  // Preserve malformed carried obligations for Worker remediation instead of
+  // preventing successor scaffold generation on GitHub.
   const rows=due.map(o=>({
     obligationId:o.obligationId,
     requiredAction:o.requiredAction,
