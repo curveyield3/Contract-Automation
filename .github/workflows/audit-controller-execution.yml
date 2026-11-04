@@ -28,6 +28,8 @@ concurrency:
 
 jobs:
   execute-v7-request:
+    # Legacy lane inactive in Machine Intelligence fork; never reach original main.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
