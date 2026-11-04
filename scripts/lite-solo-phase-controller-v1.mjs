@@ -904,10 +904,21 @@ const canonical={
   automationOutputs:{},
   generatedAt:now
 };
-if(sequence===4) canonical.automationOutputs.phase4Coverage=
-  Object.hasOwn(form?.automationInputs??{},'expectedDiscoveryRecordKeys')
-    ? phase4DiscoveryCoverageV1({summary:(()=>{const rel=path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');return fs.existsSync(repoFile(root,rel))?readJson(repoFile(root,rel)):null;})()})
-    : phase4CoverageFromForm(form);
+if(sequence===4){
+  try{
+    canonical.automationOutputs.phase4Coverage=
+      Object.hasOwn(form?.automationInputs??{},'expectedDiscoveryRecordKeys')
+        ? phase4DiscoveryCoverageV1({summary:(()=>{const rel=path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');return fs.existsSync(repoFile(root,rel))?readJson(repoFile(root,rel)):null;})()})
+        : phase4CoverageFromForm(form);
+  }catch(error){
+    canonical.automationOutputs.phase4Coverage={
+      coverageSummary:'UNRESOLVED_WORKER_REVIEW',
+      unreviewedRequiredSurfaces:['PHASE4_COVERAGE_METADATA_UNAVAILABLE'],
+      qualityEvaluationDelegatedTo:'CLOUDFLARE_WORKER'
+    };
+    githubDiagnostics.push('Phase 4 coverage projection unavailable: '+String(error?.message??error));
+  }
+}
 if(sequence===5) canonical.automationOutputs.phase5MachineExecutionGate={
   status:'DELEGATED_TO_WORKER',
   targetKeys:Object.keys(phase5MachineResults??{}).sort(),
