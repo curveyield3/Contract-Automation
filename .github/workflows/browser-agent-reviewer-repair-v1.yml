@@ -34,6 +34,8 @@ concurrency:
 
 jobs:
   repair:
+    # Inactive in isolated Machine Intelligence fork: main-bound browser legacy lane.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
