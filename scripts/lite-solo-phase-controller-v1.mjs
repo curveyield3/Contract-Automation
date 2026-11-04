@@ -732,6 +732,8 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
 
 
 const a=parse(process.argv);
+if(a['audit-controller-ref']!==undefined&&a['audit-controller-ref']!=='machine-intelligence-audit-controller-v1')
+  throw new Error('Machine Intelligence controller refuses a non-fork Audit-Controller ref');
 const reviewKind=a['review-kind']??'phase';
 const masterAmendmentRefreshSha=a['master-amendment-refresh-sha']??null;
 const phase5ReuseCandidateKeys=masterAmendmentRefreshSha&&a['phase5-reuse-keys-b64']
