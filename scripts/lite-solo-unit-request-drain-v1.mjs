@@ -38,6 +38,13 @@ if(arg.mode!=='finalize'){
  const queuePath=directory.unitQueueStatePath;
  const recorded=queuePath&&fs.existsSync(repoFile(root,queuePath))?
   readJson(repoFile(root,queuePath)):null;
+ // Preserve accepted snapshots; stale GitHub quality vetoes are nonblocking.
+ if(recorded&&['BLOCKED','REWORK_REQUIRED'].includes(recorded.finalizeStatus)){
+  markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
+  recorded.finalizeStatus='NOT_STARTED';
+  recorded.finalizeDetails=null;
+  changed=true;
+ }
  // Re-evaluate already-recorded, unmapped aggregate defects after the mapping
  // implementation is repaired. Never reopen unrelated accepted units.
  // A previous v4 boundary attempt can expose index drift caused by its
