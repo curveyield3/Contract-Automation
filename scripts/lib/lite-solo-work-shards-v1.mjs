@@ -26,10 +26,39 @@ const clone=x=>structuredClone(x);
 // Reviewer-authored semantic shards are the sole Lite-Solo work transport.
  // Full-form materialization happens only at the phase controller boundary.
 export function materializeSemanticWorkFormV13({root,formRel}){
+ // Machine Intelligence controller is a deterministic JSON packager.
+ // All structural/semantic/coverage/prefill validation is the Worker's job.
+ // Only the existence and JSON readability of transport files are assumed.
  const indexRel=path.posix.join(path.posix.dirname(formRel),'shards','INDEX_v1.json');
- if(!fs.existsSync(relfile(root,indexRel)))throw new Error('missing required semantic work-shard index');
- const {content}=secureRestoreWorkFormV13({root,indexRel});
- fs.writeFileSync(relfile(root,formRel),content);
+ const index=secureReadV13(root,indexRel);
+ const workDir=path.posix.dirname(indexRel);
+ const baseText=fs.readFileSync(relfile(root,path.posix.join(workDir,index.baseFile)),'utf8');
+ const full=readSoloLockedBaseV1({root,workDir,baseText}).full;
+ for(const pageRef of index.pages||[]){
+  const page=secureReadV13(root,path.posix.join(workDir,pageRef.file));
+  for(const desc of page.shards||[]){
+   const shard=secureReadV13(root,path.posix.join(workDir,desc.file));
+   const tokens=Array.isArray(desc.path)?desc.path:[];
+   if(!tokens.length)continue;
+   let target=full;
+   for(const token of tokens.slice(0,-1)){
+    if(target[token]===undefined||target[token]===null||typeof target[token]!=='object')
+      target[token]={};
+    target=target[token];
+   }
+   const field=tokens.at(-1),entries=Array.isArray(shard.entries)?shard.entries:[];
+   if(desc.kind==='scalar'){
+    if(entries.length)target[field]=entries[0].value;
+   }else{
+    const output=Array.isArray(target[field])?target[field]:[];
+    entries.forEach((entry,j)=>{output[(Number(desc.startIndex)||0)+j]=entry.value;});
+    target[field]=output;
+   }
+  }
+ }
+ const output=relfile(root,formRel);
+ fs.mkdirSync(path.dirname(output),{recursive:true});
+ fs.writeFileSync(output,securePrettyV13(full));
  return true;
 }
 
