@@ -7,7 +7,9 @@ import http from 'node:http';
 import {createHash} from 'node:crypto';
 
 const campaignId=process.env.AUDIT_AI_CAMPAIGN_ID;
-const endpoint='https://lite-solo-api.jamesnexus9999.workers.dev/api/ai/bridge';
+const workerBase=process.env.MACHINE_INTELLIGENCE_WORKER_URL;
+if(typeof workerBase!=='string'||!workerBase.startsWith('https://'))throw Error('Machine Intelligence Worker URL is not configured');
+const endpoint=workerBase.replace(/\/$/,'')+'/api/ai/bridge';
 const audience='urn:curveyield:lite-solo:github-actions-ai:v1';
 const identityEndpoint=process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
 const identityBearer=process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
