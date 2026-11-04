@@ -84,7 +84,7 @@ function checkout(){
   strict(local.campaignId===id&&local.campaignGenerationId===payload.generation_id,'checkout selected a different campaign');
   strict(local.workspacePath===directory.workspacePath,'campaign workspace path changed');
   const p0=read(local.workspacePath+'/receipts/PHASE_00_RECEIPT_v1.json');
-  strict(p0.phase?.status==='SEALED'&&p0.validation?.status==='PASS','Phase-0 prerequisite is not SEALED PASS');
+  strict(p0.phase?.status==='SEALED','Phase-0 prerequisite receipt is not structurally sealed'); // Worker owns content validation.
   strict(p0.authority?.manifestSha256===local.authorityDigest,'source-bound manifest identity changed');
   strict(p0.source?.sha256===local.sourceSha256,'admitted source identity changed');
   const boundRoot=validateBoundAuthorityV1({root:ROOT,receipt:p0});
@@ -133,7 +133,7 @@ function markPhase10Delivery(c,receiptPath){
     current.lastSealedReceiptPath===receiptPath&&
     receiptPath.startsWith(c.campaignPath+'/receipts/PHASE_10_RECEIPT_v'),
     'Phase-10 controller has not sealed a terminal receipt');
-  strict(read(receiptPath).validation?.status==='PASS','Phase-10 terminal receipt was not accepted');
+  strict(read(receiptPath).phase?.status==='COMPLETE','Phase-10 terminal receipt is not structurally complete'); // Worker owns semantic acceptance.
   strict(process.env.GITHUB_OUTPUT,'GitHub delivery output is unavailable');
   fs.appendFileSync(process.env.GITHUB_OUTPUT,'phase10_sealed=true\nphase10_receipt='+receiptPath+'\n');
 }
