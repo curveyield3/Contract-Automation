@@ -57,10 +57,12 @@ if(build.source?.archiveSha256Observed!==sourceSha&&build.source?.archiveSha256!
 const bundle=read(evidence.bundle);
 if(bundle.identity?.sourceDigestSha256!==sourceSha)throw new Error('Source Intelligence source digest mismatch');
 const artifacts=read(evidence.executionBuildArtifacts);
-if(artifacts.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2'||artifacts.source?.archiveSha256!==sourceSha||artifacts.reuseContract?.secondBuildRequired!==false)githubPhase0Diagnostics.push('reusable build artifact contract is missing');
+if(artifacts.source?.archiveSha256!==sourceSha)throw new Error('reusable build artifacts differ from canonical archive');
+if(artifacts.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2'||artifacts.reuseContract?.secondBuildRequired!==false)githubPhase0Diagnostics.push('reusable build artifact contract is missing');
 const deploy=read(evidence.deployConfigExecution);
 if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||deploy.executionMode!=='ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY')githubPhase0Diagnostics.push('Phase-0 requires only source package forked deployment evidence');
-if(deploy.campaignId!==receipt.campaign.campaignId||deploy.sourceSha256!==sourceSha||deploy.fork?.engine!=='anvil')githubPhase0Diagnostics.push('Phase-0 fork deployment identity mismatch');
+if(deploy.campaignId!==receipt.campaign.campaignId||deploy.sourceSha256!==sourceSha)throw new Error('Phase-0 deployment evidence campaign/source identity mismatch');
+if(deploy.fork?.engine!=='anvil')githubPhase0Diagnostics.push('Phase-0 fork deployment engine requires Worker review');
 try{assertDeployGateEvidenceV2(deploy);}catch(error){githubPhase0Diagnostics.push('Phase-0 deploy-evidence assessment: '+String(error?.message??error));}
 if(receipt.source?.inputMode==='LIVE_SCAN'){
   if(receipt.source.kind!=='EXPLORER_INITIALIZED_VERIFIED_LIVE_SNAPSHOT'||!Array.isArray(receipt.source.originUrls))githubPhase0Diagnostics.push('SCAN_RECEIPT_PROVENANCE_MISSING');
