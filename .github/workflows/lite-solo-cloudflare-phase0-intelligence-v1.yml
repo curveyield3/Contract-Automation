@@ -63,7 +63,7 @@ jobs:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           CAMPAIGN_ID: ${{ inputs.campaign_id }}
           CAMPAIGN_PATH: ${{ inputs.campaign_path }}
-          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          AUDIT_CONTROLLER_REF: machine-intelligence-audit-controller-v1
         shell: bash
         run: |
           set -euo pipefail
@@ -137,6 +137,7 @@ jobs:
           gh auth setup-git
           destination_repo="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.repository)")"
           destination_ref="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.ref)")"
+          [ "$destination_ref" = "machine-intelligence-audit-controller-v1" ] || { echo "::error::FORK_DESTINATION_REF_REQUIRED"; exit 1; }
           campaign_path="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.campaignPath)")"
           request_id="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.requestId)")"
 
