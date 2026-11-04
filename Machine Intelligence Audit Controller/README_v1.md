@@ -15,19 +15,24 @@ This branch is the **full, isolated Git-tree source fork** of `curveyield3/Contr
 
 Key live counterparts retained in the fork for development: `.github/workflows/lite-solo-ai-inference-v1.yml`, `scripts/lite-solo-ai/campaign-v1.mjs`, `.github/workflows/lite-solo-cloudflare-fork-v1.yml`, `.github/workflows/lite-solo-phase-controller-v1.yml`, `scripts/lite-solo-phase-controller-v1.mjs`, `.github/workflows/lite-solo-audit-correction-v1.yml`, `scripts/lite-solo-audit-correction/`, and `.github/actions/`.
 
-## Development status and execution hold — v1
+## Development status and execution hold — implementation update
 
-**NOT RUNNABLE / NOT READY TO DEPLOY.** This development branch contains partial delegation changes in the semantic phase controller, unit packager, shard assembler, and Cloudflare fork orchestration. The old validation system has **not** been completely removed from every GitHub process/workflow. Some original GitHub workflow dispatches, checkouts, and push destinations still explicitly reference `main`. Therefore **do not execute any GitHub workflow or attempt a fork-Worker deployment from this branch** until those remaining references are rebound and the end-to-end data assembly and sealing paths have been reviewed.
+**NOT RUNNABLE / NOT READY TO DEPLOY.** This source-only fork retains all original phase packaging, report generation, source acquisition, and receipt creation. Selected GitHub-side semantic/coverage/deployment assessments now emit diagnostics rather than freeze campaign progress; physical source, record transport, and branch identity requirements remain. This is a development implementation, **not evidence that the independent Worker has validated an audit**.
 
-Remaining known source surfaces:
-- `scripts/lite-solo-unit-request-drain-v1.mjs`: retains blocked/rework states and aggregate-recovery logic
-- `scripts/lite-solo-phase0-finalize-v1.mjs`: retains source/evidence/readiness blocking checks
-- `.github/workflows/lite-solo-phase-controller-v1.yml`: push trigger is restricted to this branch, but several internal controller checkout and publication targets still point to `main`
-- `.github/workflows/lite-solo-unit-controller-v1.yml` and `.github/workflows/lite-solo-cloudflare-fork-v1.yml`: controller-target `main` references and Phase-5 preflight remain
-- Phase-0 bootstraps, authority-derived prefill and controller-core helpers may also retain quality gates
-- Worker source is still a private undeployed v1 snapshot; a separately scoped Worker and data bindings have not been created
+Fork-only changes to active paths:
+- Isolated the Phase-boundary, parallel-unit, source-initialization, Cloudflare Phase-0, and MiMo inference entrypoints from `main` so they read/write/dispatch the matching `machine-intelligence-audit-controller-v1` branches.
+- Stopped aggregate semantic deficiencies from setting GitHub `NEEDS_REWORK` and stopped unit-finalization from persisting GitHub `BLOCKED`; accepted Worker-supplied unit evidence is retained for retry.
+- Preserved actual deployment and Slither failures as diagnostics and limitations; incomplete evidence is **not** synthesized into a successful machine execution.
+- Rebound Cloudflare fork callbacks and MiMo bridge to `MACHINE_INTELLIGENCE_WORKER_URL`, and fork callbacks to `MACHINE_INTELLIGENCE_FORK_TOKEN`. Production Worker routes must not be used.
+- Restored Phase-5 request resolution and downstream metadata after an incorrect early edit, then separated optional quality diagnostics from the essential packaging path.
 
-The original `main` branch is unchanged. No tests were created or run. These remaining blockers are **explicitly unresolved**, not reported as successful delegation or controller acceptance.
+Remaining execution hold:
+- An independent, configured, deployed Machine Intelligence Worker (and GitHub credentials, Durable Object, R2 isolation) **does not yet exist in this fork**. Its source snapshot is in the companion Audit-Controller branch.
+- Legacy fallback/controller-core paths and non-active general-purpose workflows have not been proven universally nonblocking. Physical missing-file, source identity, lease/claim, and safe-publication failures remain deliberately enforceable.
+- No tests or audit campaigns were run as part of this work. No end-to-end functional acceptance or Worker receipt was obtained.
+- Do not execute this fork or attach production credentials until the independent Worker path and actual evidence/report preservation are verified.
+
+The originals are unchanged on their `main` branches.
 
 ## Isolation
 
