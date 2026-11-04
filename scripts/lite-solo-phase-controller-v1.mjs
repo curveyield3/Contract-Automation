@@ -929,9 +929,15 @@ if(sequence===5) canonical.automationOutputs.phase5MachineExecutionGate={
 // Explicit evidence continuity: previously supported conditional behaviors
 // survive an owner-deferred Phase-5/6 execution without becoming machine PASS.
 if(sequence===6){
-  const sealedPhase5=canonicalFor(root,campaignPath,5);
-  canonical.automationOutputs.candidateEvidenceContinuity=
-    buildCandidateEvidenceContinuityV1({phase5:sealedPhase5,phase6:canonical});
+  try{
+    const sealedPhase5=canonicalFor(root,campaignPath,5);
+    canonical.automationOutputs.candidateEvidenceContinuity=
+      buildCandidateEvidenceContinuityV1({phase5:sealedPhase5,phase6:canonical});
+  }catch(error){
+    canonical.automationOutputs.candidateEvidenceContinuity=[];
+    canonical.automationOutputs.candidateEvidenceContinuityStatus='UNRESOLVED_WORKER_REVIEW';
+    githubDiagnostics.push('Phase 6 evidence-continuity projection unavailable: '+String(error?.message??error));
+  }
 }
 if(sequence===8||sequence===10){
   const sealedPhase6=canonicalFor(root,campaignPath,6);
@@ -940,8 +946,14 @@ if(sequence===8||sequence===10){
     canonical.automationOutputs.candidateEvidenceContinuity=structuredClone(lineage);
 }
 if(sequence===8){
-  canonical.actions['step-2'].outputs.validatedFindings=materializeValidatedFindings(canonical.actions?.['step-2']?.outputs?.candidateValidations??[]);
-  canonical.automationOutputs.validatedFindingsMaterialized=true;
+  try{
+    canonical.actions['step-2'].outputs.validatedFindings=materializeValidatedFindings(canonical.actions?.['step-2']?.outputs?.candidateValidations??[]);
+    canonical.automationOutputs.validatedFindingsMaterialized=true;
+  }catch(error){
+    canonical.automationOutputs.validatedFindingsMaterialized=false;
+    githubDiagnostics.push('Phase 8 finding projection unavailable, Worker review required: '+String(error?.message??error));
+  }
+  canonical.automationOutputs.findingAcceptance='DELEGATED_TO_CLOUDFLARE_WORKER';
 }
 if(sequence===10){
   let unresolved=[];
