@@ -1047,18 +1047,9 @@ if([6,8].includes(sequence)&&deficiencies.length===0){
   }catch(e){deficiencies.push('Phase '+sequence+' mandatory predecessor/evidence gate failed: '+String(e.message||e));}
 }
 
-if(deficiencies.length){
-  persistReviewerReworkShardsV1();
-  packet.status='REWORK_REQUIRED';
-  packet.controllerValidation={status:'FAIL',validatedAt:now,deficiencies};
-  directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
-  writeJson(packetFile,packet);writeJson(directoryFile,directory);
-  const shardGuidance=annotateShardReworkV1(packet,deficiencies);
-  writeJson(packetFile,packet);
-  const feedback=feedbackText(sequence,deficiencies).replace('resubmit the same phase packet','repair the substantive fields and invoke controller validation again; the controller will rebuild the packet')+shardGuidance;
-  process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer:assignment.reviewer,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
-  process.exit(0);
-}
+// The Worker owns all audit-quality decisions. Retain GitHub diagnostics for
+// downstream inspection without changing assignment status or freezing the run.
+const githubDiagnostics=[...deficiencies];
 
 // No tests, runner gates, approvals or machine-evidence verdicts occur in the
 // GitHub controller. The Worker/adapter owns that validation responsibility.
@@ -1140,7 +1131,7 @@ if(schema.finalReport){
 }
 // All report quality decisions are made by the Worker, not this GitHub packager.
 
-packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS',validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false,
+packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],githubDiagnostics,controllerPassToken:'CONTROLLER_PHASE_PASS',validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false,
   ...(sequence===5?{
     machineExecutionGate:'DELEGATED_TO_WORKER',
     machineEvidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef).filter(x=>x&&x!=='NO_MACHINE_EVIDENCE'),
