@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: machine-intelligence-audit-controller-v1
           persist-credentials: false
       - name: Select Audit-Controller write credential
         env:
@@ -53,7 +53,7 @@ jobs:
           slug="${BASH_REMATCH[1]}"
           directory="Audit Campaign Directory/campaigns/$slug.json"
           encoded="$(jq -rn --arg p "$directory" '$p|split("/")|map(@uri)|join("/")')"
-          current="$(gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=main")"
+          current="$(gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=machine-intelligence-audit-controller-v1")"
           printf '%s' "$current" | jq -r .content | base64 -d >/tmp/lite-solo-owner-directory.json
           jq -e --arg id "$CAMPAIGN_ID" '.campaignId==$id and .mode=="LITE_SOLO" and (.authorityRelease=="lite-solo-v1" or .authorityRelease=="lite-solo-v2") and .agent.actorId=="lite-solo-agent" and .currentAssignment.phaseSequence==5 and .campaignStatus=="ACTIVE" and (.sourceSha256|test("^[0-9a-f]{64}$"))' /tmp/lite-solo-owner-directory.json >/dev/null
           if [ "$DECISION" = "Approve Phase 5 Execution" ]; then status=APPROVED; else status=REVOKED; fi
@@ -63,5 +63,5 @@ jobs:
             -f message="audit(lite-solo): Phase 5 execution $status for $CAMPAIGN_ID" \
             -f content="$(base64 -w0 /tmp/lite-solo-owner-authorized.json)" \
             -f sha="$(printf '%s' "$current" | jq -r .sha)" \
-            -f branch=main >/dev/null
+            -f branch=machine-intelligence-audit-controller-v1 >/dev/null
           echo "Recorded $status for $CAMPAIGN_ID. No tests were run by this workflow."
