@@ -8,30 +8,29 @@ import {createHash} from 'node:crypto';
 import {readV7RawResultV1} from '../packages/github-native-sim/src/v7-compact-result-v1.mjs';
 import {pathToFileURL} from 'node:url';
 import {storeControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
-import {materializeSemanticWorkFormV13,secureShardWorkFormV13,semanticShardFailureIndexV13} from './lib/lite-solo-work-shards-v1.mjs';
+import {materializeSemanticWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,validateBoundAuthorityV1,loadPhaseSchema,
-  validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
+  buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-solo-phase-work-v1.mjs';
 import {
-  executePhase5TargetsV1,selectReusablePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
+  selectReusablePhase5TargetsV1,validatePhase5TargetCoverageV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
   validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
   buildControllerPacket,renderControllerPhaseReport,buildCandidateEvidenceContinuityV1,validatePhaseScaffold,
   phase4CoverageFromForm,phase4DiscoveryCoverageV1,materializeValidatedFindings,resolveTargetExecutionRequestRef,
-  populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
+  refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-solo-phase-prefill-v1.mjs';
 import {MASTER_REVIEW_SEGMENTS_V1,boundReviewerForPhaseV1,segmentsForAuthorityV1,isV13AuthorityV1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
-import {unresolvedFinalCandidateFailures,unresolvedTerminalAssuranceFailures} from './lib/lite-solo-final-candidates-v1.mjs';
-import {admitPostCompletionFollowupV1} from './lib/lite-post-completion-followup-v1.mjs';
+import {unresolvedFinalCandidateFailures} from './lib/lite-solo-final-candidates-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 import {isReassignedV13AuthorityV1} from './lib/lite-authority-lineup-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
 import {createUnitPlanV1} from './lib/lite-solo-unit-queue-v1.mjs';
-import {validatePhase6AttackerWorkV1,validatePhase8LinkageV1,validatePhase10CoverageLabelV1,appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
+import {appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
@@ -134,46 +133,6 @@ function isFreshBoundary(next,authorityRoot=null,controllerRoot=null){
 }
 function maybeFile(root,rel){const f=repoFile(root,rel);return fs.existsSync(f)&&fs.statSync(f).isFile()?f:null;}
 function maybeJson(root,rel){const f=maybeFile(root,rel);if(!f)return null;try{return readJson(f);}catch{return null;}}
-
-function correctiveScopeFailuresV1({root,campaignPath,directory,sequence,form}){
- if(directory.correctionOf?.entryPoint!=='LITE_SOLO_AUDIT_CORRECTION_V1')return [];
- const stageRel=path.posix.join(campaignPath,'controller/LITE_SOLO_CORRECTION_STAGE_v1.json');
- const scopeRel=path.posix.join(campaignPath,'controller/LITE_SOLO_CORRECTION_SCOPE_v1.json');
- const stage=maybeJson(root,stageRel),scope=maybeJson(root,scopeRel);
- if(stage?.status!=='LAUNCHED'||stage.campaignId!==directory.campaignId||
-    stage.generationId!==directory.campaignGenerationId||
-    stage.scopeSha256!==shaFile(requiredFile(root,scopeRel,'correction scope'))||
-    scope?.campaignId!==directory.campaignId||scope?.startPhase!==stage.startPhase)
-  return ['Correction fork stage/scope provenance changed or is unsealed'];
- const failures=[];
- const selected=scope.candidateIds??[],obligations=scope.obligationIds??[];
- if(!Array.isArray(selected)||!Array.isArray(obligations))
-  return ['Correction candidate/obligation scope is invalid'];
- if(sequence===8&&selected.length){
-  const accepted=new Set((form?.actions?.['step-2']?.outputs?.candidateValidations??[])
-   .filter(x=>x&&typeof x==='object').map(x=>String(x.candidateKey??'')));
-  for(const key of selected)if(!accepted.has(key))
-   failures.push('Corrective candidate '+key+' has no Phase-8 validation disposition');
- }
- if(sequence===10){
-  const p8=canonicalFor(root,campaignPath,8);
-  const validated=new Set((p8?.actions?.['step-2']?.outputs?.candidateValidations??[])
-   .filter(x=>x&&typeof x==='object').map(x=>String(x.candidateKey??'')));
-  for(const key of selected)if(!validated.has(key))
-   failures.push('Correction cannot finalize without controller-accepted Phase-8 candidate '+key);
-  const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'));
-  const current=Object.values(form?.actions??{}).flatMap(a=>
-   (a?.outputs?.obligationDispositions??[]).filter(x=>x&&typeof x==='object'));
-  for(const id of obligations){
-   const historical=(ledger?.obligations??[]).find(x=>x?.obligationId===id);
-   const present=current.find(x=>x.obligationId===id);
-   const resolved=['SATISFIED','NOT_APPLICABLE'];
-   if(!historical||(!resolved.includes(String(historical.status))&&!resolved.includes(String(present?.disposition))))
-    failures.push('Correction cannot finalize with unresolved selected obligation '+id);
-  }
- }
- return failures;
-}
 
 function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNum(phase)+'_CANONICAL_DATA_v1.json');}
 function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRelFor(campaignPath,phase));}
@@ -899,39 +858,9 @@ const packet=buildControllerPacket({directory,assignment,existing:existingPacket
 // their contents. No controller-side rejection or rework decision is issued.
 let deficiencies=[];
 let form=null;
-let workShardIntegrityFailed=false;
 materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
 form=readJson(requiredFile(root,assignment.workFormPath,'Worker-provided phase work file'));
 
-function persistReviewerReworkShardsV1(){
-  // Unit-controller snapshots and the frozen per-unit plan own v4 Phase 4-6
-  // reconciliation. Re-sharding the assembled work form on a failed boundary
-  // would silently promote APPEND rows into mandatory fixed rows, corrupting
-  // the controller-owned v13 index and preventing safe reassembly on retry.
-  if(process.env.LITE_SOLO_V4_FINALIZE==='1'&&[4,5,6].includes(sequence))return;
-  // A failed integrity check must never re-seal a stale or corrupt agent shard.
-  if(workShardIntegrityFailed)return;
-  if(!assignment.workShardIndexPath)return;
-  const full=repoFile(root,assignment.workFormPath);
-  if(fs.existsSync(full))
-    secureShardWorkFormV13({root,formRel:assignment.workFormPath,phase:sequence,retireFull:true});
-}
-function annotateShardReworkV1(packet,errors){
- if(!assignment.workShardIndexPath)return '';
- let map;
- try{map=semanticShardFailureIndexV13({root,indexRel:assignment.workShardIndexPath,deficiencies:errors});}
- catch(error){
-   // Never allow reviewer-tampered index pages to crash the boundary controller.
-   packet.controllerValidation.shardRework={indexPath:assignment.workShardIndexPath,shards:[],unmappedCount:errors.length};
-   return '\\nSHARD_REWORK: restore the controller-owned index and listed shard records. '+String(error?.message??error);
- }
- packet.controllerValidation.shardRework={indexPath:assignment.workShardIndexPath,
-   shards:map.shards.map(s=>({path:s.path,recordKeys:s.recordKeys,defectCount:s.defects.length})),
-   unmappedCount:map.unmapped.length};
- if(!map.shards.length)return '';
- return '\nSHARD_REWORK: edit the listed shard records only; original full diagnostics are in controller result pages.\n'+
-  map.shards.map(s=>s.path+' : '+s.recordKeys.join(', ')).join('\n');
-}
 function materialPhase5Candidates({root,campaignPath,form}){
   const prior=canonicalFor(root,campaignPath,4);
   const phase4=phaseOutput(prior,'step-3','candidateRecords')??[];
