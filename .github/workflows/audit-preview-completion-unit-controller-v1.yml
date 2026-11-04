@@ -15,6 +15,8 @@ permissions:
   actions: write
 jobs:
   discover:
+    # Inactive on isolated fork: legacy workflow may read/write original main.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     outputs:
       campaigns: ${{ steps.ids.outputs.campaigns }}
@@ -51,7 +53,9 @@ jobs:
           echo "campaigns=$json" >> "$GITHUB_OUTPUT"
   drain:
     needs: discover
-    if: ${{ needs.discover.outputs.campaigns != '[]' }}
+    # Inactive on isolated fork: legacy workflow may read/write original main.
+    # Former gate: ${{ needs.discover.outputs.campaigns != '[]' }}
+    if: ${{ false }}
     strategy:
       fail-fast: false
       matrix:
