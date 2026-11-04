@@ -187,29 +187,6 @@ jobs:
           node scripts/lite-solo-phase8-dai-proof-controller-intake-v1.mjs \
             "$REQUEST_FILE" .audit-controller "$AUDIT_CAMPAIGN_PATH" \
             /tmp/dai-p8-controller-source-artifact /tmp/dai-p8-verified-run.json
-      - name: Source-bound Phase-5 execution-request preflight
-        id: phase5
-        env:
-          AUDIT_DIRECTORY: ${{ steps.scope.outputs.directory }}
-          AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
-          AUDIT_CAMPAIGN: ${{ steps.request.outputs.id }}
-          REQUEST_FILE: ${{ steps.request.outputs.request }}
-          REVIEW_KIND: ${{ steps.request.outputs.kind }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo 'runnable=false' >> "$GITHUB_OUTPUT"
-          if [ "$REVIEW_KIND" != phase ] || [ "$(jq -r .phaseSequence "$REQUEST_FILE")" != 5 ]; then exit 0; fi
-          directory=".audit-controller/$AUDIT_DIRECTORY"
-          source_sha="$(jq -r .sourceSha256 "$directory")"
-          # Machine Intelligence Worker owns all phase execution authorizations.
-          node scripts/lite-phase5-preflight-v1.mjs .audit-controller "$AUDIT_CAMPAIGN_PATH" "$AUDIT_CAMPAIGN" "$source_sha" > /tmp/lite-solo-phase5-preflight.json || true
-          if ! jq -e '.schemaVersion=="curveyield-phase5-request-preflight-v1"' /tmp/lite-solo-phase5-preflight.json >/dev/null 2>&1; then
-            jq -nc --arg id "$AUDIT_CAMPAIGN" --arg sha "$source_sha" '{schemaVersion:"curveyield-phase5-request-preflight-v1",campaignId:$id,sourceSha256:$sha,status:"DELEGATED_TO_WORKER",runnable:false,designCount:0,readyCount:0,generated:[],failures:[]}' > /tmp/lite-solo-phase5-preflight.json
-          fi
-          mkdir -p ".audit-controller/$AUDIT_CAMPAIGN_PATH/controller/preflight"
-          cp /tmp/lite-solo-phase5-preflight.json ".audit-controller/$AUDIT_CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
-          echo "runnable=$(jq -r .runnable /tmp/lite-solo-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
       - name: Validate, seal and generate exact solo controller response
         id: controller
         shell: bash
