@@ -18,6 +18,8 @@ permissions:
 
 jobs:
   discover:
+    # Inactive in isolated Machine Intelligence fork: main-bound browser legacy lane.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -75,7 +77,9 @@ jobs:
   # target stays active the watchdog re-dispatches itself every 15 minutes; one pending re-arm at a time.
   rearm:
     needs: [discover, supervise]
-    if: always() && needs.discover.outputs.has_targets == 'true' && needs.discover.outputs.browser_ready == 'true'
+    # Inactive in isolated Machine Intelligence fork: main-bound browser legacy lane.
+    # Former gate: always() && needs.discover.outputs.has_targets == 'true' && needs.discover.outputs.browser_ready == 'true'
+    if: ${{ false }}
     concurrency:
       group: browser-agent-watchdog-rearm
       cancel-in-progress: true
@@ -97,7 +101,9 @@ jobs:
 
   supervise:
     needs: discover
-    if: needs.discover.outputs.has_targets == 'true' && needs.discover.outputs.browser_ready == 'true'
+    # Inactive in isolated Machine Intelligence fork: main-bound browser legacy lane.
+    # Former gate: needs.discover.outputs.has_targets == 'true' && needs.discover.outputs.browser_ready == 'true'
+    if: ${{ false }}
     strategy:
       fail-fast: false
       max-parallel: 8
