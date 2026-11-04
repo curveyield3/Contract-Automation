@@ -39,7 +39,7 @@ jobs:
               select(.schemaVersion=="curveyield-lite-solo-phase-boundary-request-v1" and
                 .reviewKind=="phase" and
                 (.campaignId|type=="string" and test("^[a-zA-Z0-9_.-]+-r[0-9]+$")) and
-                .auditControllerRef=="main" and
+                .auditControllerRef=="machine-intelligence-audit-controller-v1" and
                 (.attempt|type=="number" and .>=1) and
                 (.phaseSequence|type=="number" and IN(1,2,3,8,9,10)))
               | {request_path:$file,campaign_id:.campaignId}
@@ -84,7 +84,7 @@ jobs:
           jq -e '.schemaVersion=="curveyield-lite-solo-phase-boundary-request-v1" and
             (.reviewKind=="phase") and
             (.campaignId|type=="string") and (.campaignId|test("^[a-zA-Z0-9_.-]+-r[0-9]+$")) and
-            (.auditControllerRef=="main") and
+            (.auditControllerRef=="machine-intelligence-audit-controller-v1") and
             (.attempt|type=="number") and (.attempt>=1)' "$request" >/dev/null
           kind="$(jq -r .reviewKind "$request")"
           jq -e '.phaseSequence|type=="number" and (.==1 or .==2 or .==3 or .==8 or .==9 or .==10)' "$request" >/dev/null
@@ -114,7 +114,7 @@ jobs:
             # commit; publish only its revision-specific alias, never modify the newer rN.
             [[ "$requested_path" == campaigns/* && "$requested_path" != *..* ]] || { echo "::error::Unsafe requested campaign path"; exit 1; }
             campaign_path="$requested_path"
-            bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
+            bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller machine-intelligence-audit-controller-v1 "$campaign_path"
             alias="Audit Campaign Directory/campaigns/$AUDIT_CAMPAIGN.json"
             if git -C .audit-controller cat-file -e "HEAD:$alias" 2>/dev/null; then
               git -C .audit-controller show "HEAD:$alias" >/tmp/lite-solo-campaign-directory.json
@@ -126,10 +126,10 @@ jobs:
             AUDIT_DIRECTORY="$alias"
           else
             encoded_path="$(jq -rn --arg p "$AUDIT_DIRECTORY" '$p|split("/")|map(@uri)|join("/")')"
-            encoded="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$encoded_path?ref=main" --jq .content)"
+            encoded="$(GH_TOKEN="$GH_TOKEN" gh api "repos/curveyield3/Audit-Controller/contents/$encoded_path?ref=machine-intelligence-audit-controller-v1" --jq .content)"
             printf '%s' "$encoded" | base64 -d >/tmp/lite-solo-campaign-directory.json
             campaign_path="$(jq -r .workspacePath /tmp/lite-solo-campaign-directory.json)"
-            bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
+            bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller machine-intelligence-audit-controller-v1 "$campaign_path"
           fi
           receipt=".audit-controller/$campaign_path/receipts/PHASE_00_RECEIPT_v1.json"
           jq -e --arg id "$AUDIT_CAMPAIGN" --arg path "$campaign_path" --arg sha "$(jq -r .source.sha256 "$receipt")" --arg gen "$(jq -r .campaign.campaignGenerationId "$receipt")" --argjson phase "$(jq -r .phaseSequence "$REQUEST_FILE")" '
@@ -270,9 +270,9 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit -m "audit(lite-solo): validated boundary $GITHUB_RUN_ID"
             for attempt in 1 2 3; do
-              if git push origin HEAD:main; then break; fi
+              if git push origin HEAD:machine-intelligence-audit-controller-v1; then break; fi
               [ "$attempt" -lt 3 ] || exit 1
-              git pull --rebase origin main
+              git pull --rebase origin machine-intelligence-audit-controller-v1
             done
           fi
       - name: Generate immutable Phase-10 PDF and publish selected evidence
@@ -345,9 +345,9 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit -m "audit(report): persist private PDF $AUDIT_CAMPAIGN $release_id"
             for attempt in 1 2 3; do
-              if git push origin HEAD:main; then break; fi
+              if git push origin HEAD:machine-intelligence-audit-controller-v1; then break; fi
               [ "$attempt" -lt 3 ] || exit 1
-              git -c rebase.autoStash=true pull --rebase origin main
+              git -c rebase.autoStash=true pull --rebase origin machine-intelligence-audit-controller-v1
             done
           fi
           {
