@@ -15,11 +15,11 @@ import {
 } from './lib/lite-solo-phase-work-v1.mjs';
 import {
   selectReusablePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
-  validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1
+  inspectPhase5OwnerEvidenceDeferralV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
   buildControllerPacket,renderControllerPhaseReport,buildCandidateEvidenceContinuityV1,
-  phase4CoverageFromForm,phase4DiscoveryCoverageV1,materializeValidatedFindings,resolveTargetExecutionRequestRef,
+  phase4CoverageFromForm,phase4DiscoveryCoverageV1,materializeValidatedFindings,
   refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-solo-phase-prefill-v1.mjs';
@@ -864,62 +864,14 @@ let form=null;
 materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
 form=readJson(requiredFile(root,assignment.workFormPath,'Worker-provided phase work file'));
 
-if(sequence===5&&form&&deficiencies.length===0){
-  const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
-  for(const target of targets){
-    if(!target||typeof target!=='object') continue;
-    try{
-    const method=String(target.executionMethod??'').toUpperCase();
-    if(method==='NOT_APPLICABLE'){
-      target.executionRequestRef='NOT_APPLICABLE';
-      target.automationResolvedExecutionRequest=false;
-      target.requestBindingStatus='NOT_APPLICABLE';
-      target.requestBindingEvidenceRef='NOT_APPLICABLE';
-      target.automationOwnedFields=[...new Set([
-        ...(target.automationOwnedFields??[]),
-        'executionRequestRef','automationResolvedExecutionRequest','requestBindingStatus','requestBindingEvidenceRef'
-      ])];
-      continue;
-    }
-    const explicitBeforeResolve=typeof target.executionRequestRef==='string'
-      && !target.executionRequestRef.startsWith('<')
-      && target.executionRequestRef!=='NOT_APPLICABLE';
-    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
-    if(!resolved){
-      deficiencies.push('Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+' has no deterministically resolvable execution request. Materialize the exact trusted V7 request at a conventional campaign request path or provide a campaign-relative executionRequestRef only for this target.');
-      continue;
-    }
-    target.executionRequestRef=resolved;
-    target.automationResolvedExecutionRequest=!explicitBeforeResolve;
-
-    const binding=validateTargetExecutionRequestBindingV1({
-      controllerRoot:root,
-      campaignPath,
-      target,
-      expectedCampaignId:directory.campaignId,
-      expectedSourceSha256:directory.sourceSha256
-    });
-    target.requestBindingStatus=binding.status;
-    target.requestBindingEvidenceRef=binding.requestRef??resolved;
-    target.automationOwnedFields=[...new Set([
-      ...(target.automationOwnedFields??[]),
-      'executionRequestRef','automationResolvedExecutionRequest','requestBindingStatus','requestBindingEvidenceRef'
-    ])];
-    if(!String(binding.status).startsWith('PASS_')){
-      deficiencies.push(
-        'Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+
-        ' execution request is not structurally bound to the accepted target/source: '+
-        String(binding.status)+' — '+(binding.reasons??[]).join('; ')
-      );
-    }
-    }catch(error){deficiencies.push('Phase 5 target data assessment deferred to Worker: '+String(error?.message??error));}
-  }
-  if(form){
-    try{
-      assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
-      writeJson(repoFile(root,assignment.workFormPath),form);
-      // Only persist the generated prefill identity; Worker evaluates content.
-    }catch(error){deficiencies.push('Phase 5 prefill assessment deferred to Worker: '+String(error?.message??error));}
+if(sequence===5&&form){
+  // Preserve the exact Worker-submitted target descriptions; obsolete V7
+  // request resolution/approval is not a prerequisite for evidence packaging.
+  try{
+    assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
+    writeJson(repoFile(root,assignment.workFormPath),form);
+  }catch(error){
+    deficiencies.push('Phase 5 prefill digest could not be refreshed: '+String(error?.message??error));
   }
 }
 
