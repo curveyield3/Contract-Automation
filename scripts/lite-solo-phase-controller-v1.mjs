@@ -979,7 +979,19 @@ if(sequence===10){
 
 let reportText='';
 if(schema.finalReport){
-  reportText=renderControllerPhaseReport({schema,form,canonical});
+  try{
+    reportText=renderControllerPhaseReport({schema,form,canonical});
+  }catch(error){
+    const reason=String(error?.message??error);
+    githubDiagnostics.push('Phase '+sequence+' report formatting unavailable: '+reason);
+    reportText='# Phase '+sequence+' Submitted Work — Worker Review Pending\n\n'+
+      'The submitted work form and canonical evidence remain in the campaign.\n'+
+      'GitHub could not generate its presentation view from the supplied metadata.\n'+
+      'This is not a security or completeness verdict.\n\n'+
+      '- Work form: '+assignment.workFormPath+'\n'+
+      '- Canonical data: '+canonicalRel+'\n'+
+      '- Rendering diagnostic: '+reason+'\n';
+  }
   writeText(repoFile(root,assignment.finalReportPath),reportText);
 }
 // All report quality decisions are made by the Worker, not this GitHub packager.
