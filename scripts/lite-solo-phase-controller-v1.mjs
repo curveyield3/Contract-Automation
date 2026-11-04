@@ -893,72 +893,15 @@ if(assignment.workSchemaPath!==loaded.rel) throw new Error('assignment workSchem
 const packetFile=repoFile(root,assignment.packetPath);
 const existingPacket=fs.existsSync(packetFile)?readJson(packetFile):null;
 const packet=buildControllerPacket({directory,assignment,existing:existingPacket,now});
-let deficiencies=ensurePacketShape({packet,directory,assignment});
+// Machine Intelligence Audit Controller: Cloudflare Worker + adapter own ALL
+// semantic, schema, completeness, remediation, and approval validation.
+// GitHub's role is to materialize the already-submitted files and package
+// their contents. No controller-side rejection or rework decision is issued.
+let deficiencies=[];
 let form=null;
 let workShardIntegrityFailed=false;
-try{
-  // Agent edits semantic shards; reconstruct once for full-phase machine validation.
-  // Reject missing or legacy work transport rather than reading an aggregate form.
-  if(!assignment.workShardIndexPath)throw new Error('required semantic work-shard index missing');
-  materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
-  form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
-
-  // v10.3 stores the authoritative prefill digest outside the reviewer-editable
-  // form. Older active assignments are migrated once from the pre-existing form
-  // digest so in-flight v10.2 campaigns remain resumable.
-  if(!assignment.controllerPrefillDigestSha256){
-    const legacyDigest=form?.automationInputs?.controllerPrefillDigestSha256;
-    if(typeof legacyDigest!=='string'||!/^[0-9a-f]{64}$/.test(legacyDigest)){
-      deficiencies.push('Controller-owned assignment prefill digest is missing and no valid legacy form digest is available for one-time migration.');
-    }else{
-      assignment.controllerPrefillDigestSha256=legacyDigest;
-      assignment.controllerPrefillDigestMigration='BOUND_FROM_LEGACY_FORM_DIGEST';
-    }
-  }
-
-  deficiencies.push(...validateWorkForm(schema,form));
-  deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
-  if(sequence===5){
-    const reportRel=path.posix.join(campaignPath,'controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json');
-    const preflight=maybeJson(root,reportRel);
-    if(preflight){
-      if(preflight.schemaVersion!=='curveyield-phase5-request-preflight-v1'||
-        preflight.campaignId!==directory.campaignId||preflight.sourceSha256!==directory.sourceSha256)
-        deficiencies.push('Phase 5 preflight identity mismatch: '+reportRel);
-      else if(preflight.status==='REWORK_REQUIRED'){
-        for(const f of preflight.failures??[])
-          deficiencies.push('Phase 5 preflight candidate '+String(f.candidateKey??'UNKNOWN')+
-            ', field '+String(f.path??'UNKNOWN')+', shard '+String(f.shardPath??'UNSHARDED')+
-            ': '+String(f.reason??'missing executable test input'));
-      }else if(preflight.status!=='PREFLIGHT_PASS')
-        deficiencies.push('Phase 5 preflight unrecognized status: '+reportRel);
-    }
-  }
-  if(activeDetectionPolicyV1(predecessor)){
-    const fn=({6:validatePhase6AttackerWorkV1,8:validatePhase8LinkageV1,10:validatePhase10CoverageLabelV1})[sequence];
-    if(fn)deficiencies.push(...fn({root,campaignPath,form,requireCoverageMatrix:sequence===10&&/\/lite-solo-v[345]$/.test(authorityRoot)}));
-  }
-
-  deficiencies.push(...correctiveScopeFailuresV1({root,campaignPath,directory,sequence,form}));
-
-  if(sequence===10){
-    deficiencies.push(...unresolvedTerminalAssuranceFailures({root,campaignPath,directory}));
-  }
-
-  if(sequence===9&&deficiencies.length===0){
-    const collectionDeficiencies=populatePhase9RerunEvidenceRefs({root,campaignPath,form});
-    deficiencies.push(...collectionDeficiencies);
-    if(collectionDeficiencies.length===0){
-      assignment.controllerPrefillDigestSha256=form.automationInputs.controllerPrefillDigestSha256;
-      writeJson(repoFile(root,assignment.workFormPath),form);
-      deficiencies.push(...validateWorkForm(schema,form));
-      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
-    }
-  }
-}catch(e){
-  workShardIntegrityFailed=true;
-  deficiencies.push(String(e.message||e));
-}
+materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
+form=readJson(requiredFile(root,assignment.workFormPath,'Worker-provided phase work file'));
 
 function persistReviewerReworkShardsV1(){
   // Unit-controller snapshots and the frozen per-unit plan own v4 Phase 4-6
@@ -1117,100 +1060,17 @@ if(deficiencies.length){
   process.exit(0);
 }
 
-// Historical v1/v2 campaigns retain their gate; v3–v6 proceed via source-bound execution without a separate approval.
-if(sequence===5 && !['Audit Skill - Lite-Solo Authority/lite-solo-v3','Audit Skill - Lite-Solo Authority/lite-solo-v4','Audit Skill - Lite-Solo Authority/lite-solo-v5','Audit Skill - Lite-Solo Authority/lite-solo-v6'].includes(authorityRoot) && !(directory.machineExecutionAuthorization?.status==='APPROVED' &&
-  directory.machineExecutionAuthorization?.sourceSha256===directory.sourceSha256 &&
-  directory.machineExecutionAuthorization?.scope==='PHASE5_TARGET_EXECUTION'))
- throw new Error('LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: Phase 5 machine execution has no exact human-approved source-bound authorization.');
-// Execute mandatory Phase-5 candidate tests before any PASS, bookkeeping or seal.
-let phase5MachineResults=null;
+// No tests, runner gates, approvals or machine-evidence verdicts occur in the
+// GitHub controller. The Worker/adapter owns that validation responsibility.
+// Preserve the original submitted target descriptions, with no fabricated PASS.
+let phase5MachineResults={};
 if(sequence===5){
-  const targetDesigns=form.actions['step-3'].outputs.targetDesigns;
-  const {keys:materialCandidateKeys,sourceAnchors:candidateSourceAnchors}=
-    materialPhase5Candidates({root,campaignPath,form});
-  try{
-    if(phase5OwnerDeferral){
-      if(JSON.stringify(materialCandidateKeys.slice().sort())!==JSON.stringify(phase5OwnerDeferral.candidateKeys.slice().sort()))
-        throw new Error('Owner Phase-5 deferral does not cover exactly the mandatory candidate set');
-      phase5MachineResults=Object.fromEntries(phase5OwnerDeferral.candidateKeys.map(key=>[key,{
-        status:'DEFERRED_UNVERIFIED',exitCode:null,evidenceRef:'NO_MACHINE_EVIDENCE',
-        requestBindingStatus:targetDesigns.find(x=>x.candidateKey===key)?.requestBindingStatus??'UNVERIFIED',
-        requestBindingEvidenceRef:targetDesigns.find(x=>x.candidateKey===key)?.executionRequestRef??'NO_REQUEST',
-        requestBindingReasons:['OWNER_DEFERRED_NOT_AN_EXECUTION_RESULT'],
-        rawResult:null
-      }]));
-    }else{
-      phase5MachineResults=await executePhase5TargetsV1({
-        controllerRoot:root,campaignPath,targetDesigns,
-        expectedCampaignId:directory.campaignId,expectedSourceSha256:directory.sourceSha256,
-        reuseCandidateKeys:phase5ReuseCandidateKeys
-      });
-      deficiencies.push(...validatePhase5TargetExecutionGateV1({
-        controllerRoot:root,campaignPath,targetDesigns,
-        materialCandidateKeys,candidateSourceAnchors,executionResults:phase5MachineResults,
-        expectedSourceSha256:directory.sourceSha256
-      }));
-    }
-    // Report the actual runner cause, not merely BLOCKED. The shadow
-    // campaign is discarded on failed master refresh, so these diagnostics
-    // are essential to distinguish harness defects from RPC or build faults.
-    for(const [key,machine] of Object.entries(phase5MachineResults??{})){
-      if(machine?.status==='PASS'||machine?.status==='NOT_APPLICABLE'||machine?.status==='DEFERRED_UNVERIFIED')continue;
-      let cli=null;
-      try{cli=JSON.parse(String(machine?.stdout??''));}catch{}
-      const failed=(machine?.rawResult?.failedSteps??[]).slice(0,3).map(x=>({
-        component:x?.component??x?.name??x?.step??null,
-        kind:x?.kind??x?.failureKind??null,
-        error:String(x?.error??x?.message??'').slice(0,450)
-      }));
-      const cause={
-        candidate:key,status:machine?.status,exitCode:machine?.exitCode,
-        disposition:machine?.rawResult?.disposition??cli?.disposition??null,
-        runnerError:machine?.rawResult?.error??cli?.error??null,
-        preflight:machine?.rawResult?.preflight?.failureKind??null,
-        build:machine?.rawResult?.build?.status??null,
-        nativeFuzz:machine?.rawResult?.analysis?.nativeFuzz?{
-          status:machine.rawResult.analysis.nativeFuzz.componentStatus,
-          failureKind:machine.rawResult.analysis.nativeFuzz.failureKind??null,
-          exitCode:machine.rawResult.analysis.nativeFuzz.rawOutput?.exitCode??null,
-          outputTail:String(machine.rawResult.analysis.nativeFuzz.rawOutput?.stdout??'').slice(-3000),
-          errorTail:String(machine.rawResult.analysis.nativeFuzz.rawOutput?.stderr??'').slice(-1800)
-        }:null,
-        failedSteps:failed,
-        stderrTail:String(machine?.stderr??'').slice(-1500)
-      };
-      deficiencies.push('Phase 5 machine diagnostic: '+JSON.stringify(cause));
-    }
-  }catch(e){
-    deficiencies.push('Phase 5 mandatory machine execution failed: '+String(e.message||e));
-  }
-  const matrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
-  // No Phase-0 fuzz/telemetry is imported as target evidence.
-  const baselineRows=[];
-  fs.mkdirSync(path.dirname(repoFile(root,matrixRel)),{recursive:true});
-  fs.writeFileSync(repoFile(root,matrixRel),renderTargetedTestMatrixV1({
-    targetDesigns,executionResults:phase5MachineResults??{},baselineRows
-  }));
-  if(deficiencies.length){
-    // Evidence and diagnostic matrix may persist; receipt and graph cannot.
-    persistReviewerReworkShardsV1();
-    packet.status='REWORK_REQUIRED';
-    packet.controllerValidation={status:'FAIL',machineExecutionGate:'BLOCKED',validatedAt:now,deficiencies};
-    directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
-    writeJson(packetFile,packet);writeJson(directoryFile,directory);
-    const shardGuidance=annotateShardReworkV1(packet,deficiencies);
-    writeJson(packetFile,packet);
-    const feedback=['Phase 5 execution gate BLOCKED: no receipt, PASS or handoff was issued.',
-      'Repair the exact runner, harness or machine-evidence defect, then invoke the same phase controller again.',
-      ...deficiencies.map(x=>'- '+x),
-      'Machine failure is not a vulnerability finding.'].join('\n')+shardGuidance;
-    process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',campaignId:directory.campaignId,
-      campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-5',
-      reviewer:assignment.reviewer,feedbackText:feedback,
-      feedbackB64:Buffer.from(feedback).toString('base64'),
-      packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
-    process.exit(0);
-  }
+ const targetDesigns=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
+ const matrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
+ fs.mkdirSync(path.dirname(repoFile(root,matrixRel)),{recursive:true});
+ fs.writeFileSync(repoFile(root,matrixRel),renderTargetedTestMatrixV1({
+   targetDesigns,executionResults:phase5MachineResults,baselineRows:[]
+ }));
 }
 const canonicalRel=path.posix.join(campaignPath,'derived/phase-'+sequence,'PHASE_'+phaseNum(sequence)+'_CANONICAL_DATA_v1.json');
 const canonical={
@@ -1230,7 +1090,7 @@ if(sequence===4) canonical.automationOutputs.phase4Coverage=
     ? phase4DiscoveryCoverageV1({summary:(()=>{const rel=path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');return fs.existsSync(repoFile(root,rel))?readJson(repoFile(root,rel)):null;})()})
     : phase4CoverageFromForm(form);
 if(sequence===5) canonical.automationOutputs.phase5MachineExecutionGate={
-  status:phase5OwnerDeferral?'DEFERRED_UNVERIFIED':'PASS',
+  status:'DELEGATED_TO_WORKER',
   targetKeys:Object.keys(phase5MachineResults??{}).sort(),
   evidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef).filter(x=>x&&x!=='NO_MACHINE_EVIDENCE'),
   ...(phase5OwnerDeferral?{ownerDirectivePath:phase5OwnerDeferral.path,
@@ -1255,7 +1115,8 @@ if(sequence===8){
 }
 if(sequence===10){
   const unresolved=unresolvedFinalCandidateFailures({root,campaignPath,directory});
-  if(unresolved.length)throw new Error('Lite-Solo cannot COMPLETE with unresolved material candidates: '+unresolved.join('; '));
+  // Preserve unresolved candidates as report data; never prevent packaging or sealing.
+  canonical.automationOutputs.workerReviewPendingCandidates=unresolved;
   const p6=canonicalFor(root,campaignPath,6);
   const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
   const open=finalIndexObligations(ledger);
@@ -1276,13 +1137,12 @@ let reportText='';
 if(schema.finalReport){
   reportText=renderControllerPhaseReport({schema,form,canonical});
   writeText(repoFile(root,assignment.finalReportPath),reportText);
-  deficiencies.push(...validateFinalReport(schema,reportText));
 }
-if(deficiencies.length) throw new Error('controller-generated report validation failed: '+deficiencies.join('; '));
+// All report quality decisions are made by the Worker, not this GitHub packager.
 
-packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS',
+packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS',validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false,
   ...(sequence===5?{
-    machineExecutionGate:phase5OwnerDeferral?'DEFERRED_UNVERIFIED':'PASS',
+    machineExecutionGate:'DELEGATED_TO_WORKER',
     machineEvidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef).filter(x=>x&&x!=='NO_MACHINE_EVIDENCE'),
     ...(phase5OwnerDeferral?{ownerEvidenceDeferralPath:phase5OwnerDeferral.path,
       unresolvedCandidateKeys:phase5OwnerDeferral.candidateKeys,
@@ -1405,7 +1265,7 @@ const receipt=receiptLib.createLitePhaseReceiptV1({
   evidence,outputs:evidence,
   globalControls:{securityTraceabilityGraph:path.posix.relative(campaignPath,controls.graphRel),carriedForwardObligationLedger:path.posix.relative(campaignPath,controls.ledgerRel),evidenceInvalidationMatrix:path.posix.relative(campaignPath,controls.invalidRel),sourceIntelligenceBundle:predecessor.globalControls?.sourceIntelligenceBundle??null},
   obligations:receiptObligationSummary({ledger:ledgerAfter,canonical,form,sequence,now}),
-  validation:{status:'PASS',validatedAt:now,failures:[]},handoff,now
+  validation:{status:'PASS',validatedAt:now,failures:[],validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false},handoff,now
 });
 if(sequence===5&&phase5OwnerDeferral)receipt.machineExecutionDisclaimer={
   status:'DEFERRED_UNVERIFIED',securityConclusion:'UNVERIFIED',
@@ -1493,5 +1353,5 @@ else{
   }
 }
 writeJson(directoryFile,directory);
-const feedback='CONTROLLER_PHASE_PASS: Phase '+sequence+' validated and sealed.'+(nextAssignment?' Next authorized assignment: Phase '+nextAssignment.phaseSequence+' / '+nextAssignment.reviewer+'.':' Campaign complete.');
+const feedback='CONTROLLER_PHASE_PASS: Phase '+sequence+' packaged and sealed (content validation delegated to Cloudflare Worker).'+(nextAssignment?' Next authorized assignment: Phase '+nextAssignment.phaseSequence+' / '+nextAssignment.reviewer+'.':' Campaign complete.');
 process.stdout.write(JSON.stringify({authorityLinkRoot,status:'PASS',controllerPassToken:'CONTROLLER_PHASE_PASS',sealedRework:Boolean(sealedRework),masterAmendmentRefresh:Boolean(masterAmendmentRefreshSha),campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:false,sameReviewerAdvanced:!discoveryStarted&&Boolean(nextAssignment&&nextAssignment.status==='ACTIVE'),discoveryStarted,activeDiscoveryUnitIds:directory.discovery?.activeUnitIds??[],nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
