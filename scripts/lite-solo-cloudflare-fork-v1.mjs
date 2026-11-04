@@ -380,11 +380,10 @@ function forkNextUnitStep(c,source,phase,step){
  return {done:false,step:nextStep,stage:nextStage};
 }
 function eligibleStage(c,source,phase,step,stage){
-  const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
-  return source.units.filter(u=>unitRelevant(u,phase,step,stage,schema)&&
-    ['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(source.queue.units?.[u.unitId]?.status)&&
-    (u.dependencies||[]).every(dep=>(source.queue.acceptedRecords?.[dep]?.status==='ACCEPTED'&&!!source.queue.acceptedRecords[dep].snapshotSha256)||
-      (source.queue.units?.[dep]?.status==='ACCEPTED'&&!!source.queue.units[dep].acceptedPath&&!!source.queue.units[dep].acceptedSha256)));
+ // The adapter decides prerequisites; GitHub only sorts unfiled units by stage.
+ const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
+ return source.units.filter(u=>unitRelevant(u,phase,step,stage,schema)&&
+  ['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(source.queue.units?.[u.unitId]?.status));
 }
 function stageDigest(c,source,phase,step,stage){
   return sha(JSON.stringify(eligibleStage(c,source,phase,step,stage).map(u=>{
@@ -452,186 +451,96 @@ async function materializePhase5Request(c,u,selected){
  }
 }
 async function unitValidateSingle(c,item){
-  const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
-  strict([4,5,6].includes(phase),'unit verification outside unit phases');
-  assertAssigned(c,phase);
-  const id=safeId(item.unit_id),expectedSha=item.submission_sha256;
-  const sourceCommit=item.source_commit||need('source_commit');
-  strict(/^[a-f0-9]{40}$/.test(sourceCommit)&&/^[a-f0-9]{64}$/.test(expectedSha),'invalid pinned submission identity');
-  const current=unitPlan(c);
-  strict(current.plan.phaseEpoch===payload.phase_epoch,'stale unit phase epoch');
-  const u=current.units.find(x=>x.unitId===id);
-  strict(u&&unitRelevant(u,phase,step,stage,loadPhaseSchema(ROOT,AUTH,phase).schema),'unit not in assigned step/type');
-  const state=current.queue.units[id];
-  strict(state&&['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(state.status),'unit no longer claimable by canonical controller');
-  strict((u.dependencies||[]).every(dep=>(current.queue.acceptedRecords?.[dep]?.status==='ACCEPTED'&&!!current.queue.acceptedRecords[dep].snapshotSha256)||
-     (current.queue.units?.[dep]?.status==='ACCEPTED'&&!!current.queue.units[dep].acceptedPath&&!!current.queue.units[dep].acceptedSha256)),'unit dependencies not accepted');
-  const selected=submittedUnitFile(c,phase,u);
-  strict(sha(fs.readFileSync(selected.filename))===expectedSha,'published unit differs from pending Worker submission');
-  strict(Number(item.attempt)===selected.attempt,'submitted attempt differs from pending Worker attempt');
-  await materializePhase5Request(c,u,selected);
-  state.status='CLAIMED';state.workerId=selected.workerId;state.claimEpoch=selected.epoch;state.claimToken=randomUUID();
-  writeJson(relative(current.queueRel),current.queue);
-  const request={schemaVersion:'curveyield-lite-solo-unit-batch-request-v1',
-    requestId:'cf-unit-'+randomUUID(),operation:'SUBMIT',campaignId:c.directory.campaignId,
-    campaignGenerationId:c.directory.campaignGenerationId,phaseSequence:phase,lane:'AUTO',
-    workerId:selected.workerId,sourceSha256:c.directory.sourceSha256,authorityDigest:c.directory.authorityDigest,
-    phaseEpoch:current.plan.phaseEpoch,auditControllerRef:'main',
-    items:[{unitId:id,claimEpoch:state.claimEpoch,claimToken:state.claimToken,
-      packetSha256:u.packetSha256||sha(fs.readFileSync(relative(u.packetPath||u.shardPath))),
-      submissionPath:selected.rel,submissionSha256:expectedSha,unitSpecRevision:u.unitSpecRevision}]};
-  const outcome=processUnitRequestV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,request,automationRoot:process.cwd()});
-  writeJson(relative(c.directoryPath),c.directory);
-  const updated=unitPlan(c),unitState=updated.queue.units[id];
-  strict(['ACCEPTED','REWORK_REQUIRED'].includes(unitState?.status),
-    'controller failed to produce an authoritative acceptance/rework disposition for '+id);
-  const accepted=unitState.status==='ACCEPTED'&&unitState.acceptedSha256===expectedSha;
-  const rejected=unitState.status==='REWORK_REQUIRED'&&unitState.lastSubmissionSha256===expectedSha;
-  strict(accepted||rejected,'controller disposition does not bind submitted bytes');
-  const errors=(unitState.lastErrors||[]).map(e=>({unitId:id,reason:String(e.message||e.code||e),
-    code:e.code||null,path:e.path||null}));
-  if(!accepted)strict(errors.length>0,'controller rejected unit without deficiencies');
-  publishCanonical(c);
-  return callback('/fork/unit-verified',{status:accepted?'ACCEPTED':'REWORK_REQUIRED',
-    campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
-    phase,step,stage,unitId:id,attempt:selected.attempt,submissionSha256:expectedSha,
-    sourceCommit,phaseEpoch:current.plan.phaseEpoch,authorityDigest:c.directory.authorityDigest,
-    deficiencies:errors,acceptedPath:accepted?unitState.acceptedPath:null});
+ const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
+ const id=safeId(item.unit_id),sourceCommit=item.source_commit||need('source_commit');
+ const current=unitPlan(c),u=current.units.find(x=>x.unitId===id);
+ if(!u)return; // No fabricated unit or GitHub-side rejection.
+ const selected=submittedUnitFile(c,phase,u),actualSha=sha(fs.readFileSync(selected.filename));
+ const state=current.queue.units[id];
+ state.status='CLAIMED';state.workerId=selected.workerId;
+ state.claimEpoch=selected.epoch;state.claimToken=randomUUID();
+ writeJson(relative(current.queueRel),current.queue);
+ const request={schemaVersion:'curveyield-lite-solo-unit-batch-request-v1',
+  requestId:'mi-unit-'+randomUUID(),operation:'SUBMIT',campaignId:c.directory.campaignId,
+  campaignGenerationId:c.directory.campaignGenerationId,phaseSequence:phase,lane:'AUTO',
+  workerId:selected.workerId,sourceSha256:c.directory.sourceSha256,
+  authorityDigest:c.directory.authorityDigest,phaseEpoch:current.plan.phaseEpoch,
+  auditControllerRef:MACHINE_REF,items:[{unitId:id,claimEpoch:state.claimEpoch,
+   claimToken:state.claimToken,packetSha256:u.packetSha256||
+    sha(fs.readFileSync(relative(u.packetPath||u.shardPath))),
+   submissionPath:selected.rel,submissionSha256:actualSha,
+   unitSpecRevision:u.unitSpecRevision}]};
+ processUnitRequestV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,
+  request,automationRoot:process.cwd()});
+ writeJson(relative(c.directoryPath),c.directory);
+ const updated=unitPlan(c),record=updated.queue.units[id];
+ publishCanonical(c);
+ if(record?.status!=='ACCEPTED')return; // Await file transport; never reject findings.
+ return callback('/fork/unit-verified',{status:'ACCEPTED',
+  campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
+  phase,step,stage,unitId:id,attempt:selected.attempt,submissionSha256:actualSha,
+  sourceCommit,phaseEpoch:current.plan.phaseEpoch,
+  authorityDigest:c.directory.authorityDigest,deficiencies:[],
+  acceptedPath:record.acceptedPath,validationDelegatedTo:'CLOUDFLARE_WORKER'});
 }
 /** Once each unit has its own controller ACCEPTED record, advance the original stage. */
 async function unitAdvanceAcceptedStage(c){
-  const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
-  assertAssigned(c,phase);
-  const current=unitPlan(c);
-  const planDigest=sha(fs.readFileSync(relative(current.planRel)));
-  const queueDigest=sha(fs.readFileSync(relative(current.queueRel)));
-  strict(planDigest===payload.plan_sha256&&queueDigest===payload.queue_sha256,'stage closure queue or plan changed');
-  strict(current.plan.phaseEpoch===payload.phase_epoch,'stage epoch changed');
-  const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
-  const stageUnits=current.units.filter(u=>unitRelevant(u,phase,step,stage,schema));
-  strict(stageUnits.length>0,'controller stage has no canonical packets');
-  const nextEligible=eligibleStage(c,current,phase,step,stage);
-  const incomplete=stageUnits.filter(u=>current.queue.units?.[u.unitId]?.status!=='ACCEPTED');
-  strict(nextEligible.length>0||incomplete.length===0,
-    'CONTROLLER_DEPENDENCY_BLOCKED: no eligible packets while stage contains unaccepted dependencies: '+incomplete.slice(0,20).map(u=>u.unitId).join(','));
-  const accepted=stageUnits.filter(u=>current.queue.units?.[u.unitId]?.status==='ACCEPTED');
-  strict(accepted.every(u=>current.queue.units[u.unitId].acceptedPath&&current.queue.units[u.unitId].acceptedSha256),
-    'stage lacks immutable accepted unit evidence');
-  let nextStep=step,nextStage=stage;
-  if(nextEligible.length===0){
-    if(step===0&&stage==='FLOW_REVIEW'){nextStep=0;nextStage='ATTACK_REVIEW';}
-    else if(phase===6){const next=forkNextUnitStep(c,current,phase,step);if(next.done){nextStep=null;nextStage=null;}else{nextStep=next.step;nextStage=next.stage;}}
-    else{nextStep=step===0?1:step+1;nextStage='STEP_'+nextStep;}
-  }
-  const done=phase===6?nextStep===null:step===({4:3,5:3}[phase])&&nextStep>step;
-  let nextRosterDigest=null,nextQueueSha256=null;
-  if(!done){
-    const next=eligibleStage(c,current,phase,nextStep,nextStage);
-    strict(next.length>0,'next step lacks eligible controller packets');
-    nextRosterDigest=stageDigest(c,current,phase,nextStep,nextStage);
-    nextQueueSha256=queueDigest;
-  }
-  return callback('/fork/step-verified',{status:'PASS',campaignId:c.directory.campaignId,
-    generationId:c.directory.campaignGenerationId,phase,step,stage,
-    sourceCommit:need('source_commit'),planSha256:planDigest,queueSha256:queueDigest,
-    rosterDigest:need('roster_digest'),phaseEpoch:current.plan.phaseEpoch,
-    authorityDigest:c.directory.authorityDigest,validator:payload.validator,deficiencies:[],
-    stepComplete:nextStep!==step,completePhase:done,nextStep:done?null:nextStep,
-    nextStage:done?null:nextStage,nextRosterDigest,nextQueueSha256});
-}
-
-async function unitValidateWave(c){
-  if(payload.incremental===true)return unitAdvanceAcceptedStage(c);
-  const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
-  assertAssigned(c,phase);
-  strict([4,5,6].includes(phase),'wrong wave phase');
-  strict(/^STEP_[1-5]$|^FLOW_REVIEW$|^ATTACK_REVIEW$/.test(stage),'invalid wave stage');
-  const sourceCommit=need('source_commit');
-  strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===sourceCommit,'Worker wave commit is not the canonical controller head');
-  strict(payload.validator==='EXISTING_LITE_SOLO_PHASE_VALIDATORS','invalid existing-controller validation identity');
-  const current=unitPlan(c);
-  const planDigest=sha(fs.readFileSync(relative(current.planRel))),queueDigest=sha(fs.readFileSync(relative(current.queueRel)));
-  strict(planDigest===payload.plan_sha256&&queueDigest===payload.queue_sha256,'canonical unit plan or pre-wave queue changed');
-  strict(current.plan.phaseEpoch===payload.phase_epoch,'unit phase epoch mismatch');
-  const eligible=eligibleStage(c,current,phase,step,stage);
-  const digest=stageDigest(c,current,phase,step,stage);
-  strict(eligible.length===payload.unit_count&&digest===payload.roster_digest,'submitted wave is not the entire eligible roster');
-  const originals=new Map(eligible.map(u=>[u.unitId,u]));
-  const uploads=eligible.map(u=>({u,source:submittedUnitFile(c,phase,u)}));
-  // The Worker alone authenticates agents. The pre-existing in-process unit
-  // controller receives a transient, fork-owned same-wave lease for validation.
-  // No CLAIM or SUBMIT files are written to the legacy GitHub ingress.
-  for(const {u,source} of uploads){
-    const state=current.queue.units[u.unitId];
-    strict(state&&['AVAILABLE','RELEASED','REWORK_REQUIRED'].includes(state.status),'unit became ineligible '+u.unitId);
-    state.status='CLAIMED';state.workerId=source.workerId;state.claimEpoch=source.epoch;state.claimToken=randomUUID();
-  }
-  writeJson(relative(current.queueRel),current.queue);
-  const byWorker=new Map();
-  for(const {u,source} of uploads){
-    const state=current.queue.units[u.unitId],raw=fs.readFileSync(source.filename);
-    const item={unitId:u.unitId,claimEpoch:state.claimEpoch,claimToken:state.claimToken,
-      packetSha256:u.packetSha256||sha(fs.readFileSync(relative(u.packetPath||u.shardPath))),
-      submissionPath:source.rel,submissionSha256:sha(raw),unitSpecRevision:u.unitSpecRevision};
-    const arr=byWorker.get(source.workerId)||[];arr.push(item);byWorker.set(source.workerId,arr);
-  }
-  const errors=[];
-  // Cloudflare-only controller fork: process the complete assigned roster
-  // without the shared primary controller's five-item request constraint.
-  // Preserve its existing validator by issuing distinct source-bound SUBMIT
-  // operations; no global unit-count ceiling is imposed on this fork.
-  for(const [workerId,items] of byWorker)for(const item of items){
-    const batch=[item],request={schemaVersion:'curveyield-lite-solo-unit-batch-request-v1',
-      requestId:'cf-wave-'+randomUUID(),operation:'SUBMIT',campaignId:c.directory.campaignId,
-      campaignGenerationId:c.directory.campaignGenerationId,phaseSequence:phase,lane:'AUTO',
-      workerId,sourceSha256:c.directory.sourceSha256,authorityDigest:c.directory.authorityDigest,
-      phaseEpoch:current.plan.phaseEpoch,auditControllerRef:'main',items:batch};
-    const result=processUnitRequestV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,request,automationRoot:process.cwd()});
-    errors.push(...(result.reworkUnits||[]));
-    errors.push(...(result.staleUnits||[]).map(x=>({...x,errors:['stale controller unit identity']})));
-    errors.push(...(result.waitingUnits||[]).map(x=>({...x,errors:['submission missing from canonical commit']})));
-  }
-  writeJson(relative(c.directoryPath),c.directory);
-  const after=unitPlan(c);
-  if(errors.length){
-    publishCanonical(c);
-    const unitIds=[...new Set(errors.map(x=>x.unitId))],deficiencies=errors.flatMap(x=>(x.errors||[]).map(e=>({unitId:x.unitId,reason:typeof e==='string'?e:e.message||JSON.stringify(e)})));
-    return callback('/fork/step-verified',{status:'REWORK_REQUIRED',campaignId:c.directory.campaignId,
-      generationId:c.directory.campaignGenerationId,phase,step,stage,sourceCommit,planSha256:planDigest,
-      queueSha256:queueDigest,rosterDigest:digest,phaseEpoch:current.plan.phaseEpoch,
-      authorityDigest:c.directory.authorityDigest,validator:payload.validator,unitIds,deficiencies});
-  }
-  // Fail closed if any submitted unit is not durably controller accepted.
-  for(const u of eligible)strict(after.queue.units[u.unitId]?.status==='ACCEPTED','missing canonical acceptance for '+u.unitId);
-  publishCanonical(c);
-  const updated=unitPlan(c);
-  let nextStep=step,nextStage=stage,nextRoster=[];
+ const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
+ const current=unitPlan(c),schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
+ const active=eligibleStage(c,current,phase,step,stage);
+ let nextStep=step,nextStage=stage;
+ if(!active.length){
   if(step===0&&stage==='FLOW_REVIEW'){nextStep=0;nextStage='ATTACK_REVIEW';}
-  else{
-    nextRoster=eligibleStage(c,updated,phase,step,stage);
-    if(!nextRoster.length){
-      const pending=updated.units.filter(u=>unitRelevant(u,phase,step,stage,loadPhaseSchema(ROOT,AUTH,phase).schema)&&updated.queue.units[u.unitId]?.status!=='ACCEPTED');
-      strict(!pending.length,'CONTROLLER_DEPENDENCY_BLOCKED: incomplete current-step units remain; do not reorder steps or invent acceptance: '+pending.slice(0,20).map(x=>x.unitId).join(','));
-      if(phase===6){const next=forkNextUnitStep(c,updated,phase,step);if(next.done){nextStep=null;nextStage=null;}else{nextStep=next.step;nextStage=next.stage;}}
-      else{nextStep=step===0?1:step+1;nextStage='STEP_'+nextStep;}
-    }
-  }
-  const done=phase===6?nextStep===null:step===({4:3,5:3}[phase])&&nextStep>step;
-  let nextRosterDigest=null,nextQueueSha256=null;
-  if(!done){
-    nextRoster=eligibleStage(c,updated,phase,nextStep,nextStage);
-    strict(nextRoster.length>0,'no next eligible unit roster; controller must report an exact blocker');
-    nextRosterDigest=stageDigest(c,updated,phase,nextStep,nextStage);
-    nextQueueSha256=sha(fs.readFileSync(relative(updated.queueRel)));
-  }
-  return callback('/fork/step-verified',{status:'PASS',campaignId:c.directory.campaignId,
-    generationId:c.directory.campaignGenerationId,phase,step,stage,sourceCommit,planSha256:planDigest,
-    queueSha256:queueDigest,rosterDigest:digest,phaseEpoch:current.plan.phaseEpoch,
-    authorityDigest:c.directory.authorityDigest,validator:payload.validator,deficiencies:[],
-    stepComplete:nextStep!==step,completePhase:done,nextStep:done?null:nextStep,
-    nextStage:done?null:nextStage,nextRosterDigest,nextQueueSha256});
+  else if(phase===6){
+   const next=forkNextUnitStep(c,current,phase,step);
+   if(next.done){nextStep=null;nextStage=null;}
+   else{nextStep=next.step;nextStage=next.stage;}
+  }else{nextStep=step===0?1:step+1;nextStage='STEP_'+nextStep;}
+ }
+ const done=phase===6?nextStep===null:step===({4:3,5:3}[phase])&&nextStep>step;
+ const planSha256=sha(fs.readFileSync(relative(current.planRel)));
+ const queueSha256=sha(fs.readFileSync(relative(current.queueRel)));
+ const nextRosterDigest=done?null:stageDigest(c,current,phase,nextStep,nextStage);
+ return callback('/fork/step-verified',{status:'PASS',
+  campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
+  phase,step,stage,sourceCommit:need('source_commit'),planSha256,
+  queueSha256,rosterDigest:payload.roster_digest||'',
+  phaseEpoch:current.plan.phaseEpoch,authorityDigest:c.directory.authorityDigest,
+  validator:payload.validator,deficiencies:[],stepComplete:nextStep!==step,
+  completePhase:done,nextStep:done?null:nextStep,nextStage:done?null:nextStage,
+  nextRosterDigest,nextQueueSha256:done?null:queueSha256,
+  githubContentValidationPerformed:false});
 }
-
+async function unitValidateWave(c){
+ if(payload.incremental===true)return unitAdvanceAcceptedStage(c);
+ const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
+ const sourceCommit=need('source_commit'),current=unitPlan(c);
+ const units=eligibleStage(c,current,phase,step,stage);
+ const planSha256=sha(fs.readFileSync(relative(current.planRel)));
+ const queueSha256=sha(fs.readFileSync(relative(current.queueRel)));
+ const rosterDigest=stageDigest(c,current,phase,step,stage);
+ for(const u of units){
+  const selected=submittedUnitFile(c,phase,u),raw=fs.readFileSync(selected.filename);
+  const state=current.queue.units[u.unitId];
+  state.status='CLAIMED';state.workerId=selected.workerId;
+  state.claimEpoch=selected.epoch;state.claimToken=randomUUID();
+  writeJson(relative(current.queueRel),current.queue);
+  const request={schemaVersion:'curveyield-lite-solo-unit-batch-request-v1',
+   requestId:'mi-wave-'+randomUUID(),operation:'SUBMIT',
+   campaignId:c.directory.campaignId,campaignGenerationId:c.directory.campaignGenerationId,
+   phaseSequence:phase,lane:'AUTO',workerId:selected.workerId,
+   sourceSha256:c.directory.sourceSha256,authorityDigest:c.directory.authorityDigest,
+   phaseEpoch:current.plan.phaseEpoch,auditControllerRef:MACHINE_REF,
+   items:[{unitId:u.unitId,claimEpoch:state.claimEpoch,claimToken:state.claimToken,
+    packetSha256:u.packetSha256||sha(fs.readFileSync(relative(u.packetPath||u.shardPath))),
+    submissionPath:selected.rel,submissionSha256:sha(raw),unitSpecRevision:u.unitSpecRevision}]};
+  processUnitRequestV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,
+   request,automationRoot:process.cwd()});
+ }
+ writeJson(relative(c.directoryPath),c.directory);
+ publishCanonical(c);
+ return unitAdvanceAcceptedStage(c);
+}
 async function main(){
   if(OP==='PHASE_0_INITIALIZE'){
     strict(['lite-solo-v5','lite-solo-v6'].includes(payload.authority_release),'unsupported source initialization authority');
