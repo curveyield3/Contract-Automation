@@ -84,7 +84,7 @@ jobs:
           gh api repos/curveyield3/Audit-Controller --silent
           rm -rf .controller-request
           gh auth setup-git
-          gh repo clone curveyield3/Audit-Controller .controller-request -- --filter=blob:none --no-checkout
+          gh repo clone curveyield3/Audit-Controller .controller-request -- --branch machine-intelligence-audit-controller-v1 --single-branch --filter=blob:none --no-checkout
           cd .controller-request
           git fetch --depth=1 origin "$CONTROLLER_REF"
           git checkout --detach FETCH_HEAD
@@ -162,7 +162,7 @@ jobs:
           gh api repos/curveyield3/Audit-Controller --silent
           rm -rf .controller-operation
           gh auth setup-git
-          gh repo clone curveyield3/Audit-Controller .controller-operation -- --filter=blob:none --no-checkout
+          gh repo clone curveyield3/Audit-Controller .controller-operation -- --branch machine-intelligence-audit-controller-v1 --single-branch --filter=blob:none --no-checkout
           cd .controller-operation
           git fetch --depth=1 origin "$AUDIT_CONTROLLER_REF"
           git checkout --detach FETCH_HEAD
