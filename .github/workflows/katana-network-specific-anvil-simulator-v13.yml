@@ -2,6 +2,7 @@ name: Katana Network Specific Anvil Simulator v13
 
 on:
   push:
+    branches: [main] # Legacy simulator excluded from the Machine Intelligence fork
     paths:
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/requests/*.json'
       - '.github/workflows/katana-network-specific-anvil-simulator-v13.yml'
