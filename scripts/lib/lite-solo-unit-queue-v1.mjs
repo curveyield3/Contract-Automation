@@ -857,100 +857,10 @@ export function statusUnitQueueV1({root,campaignPath,phase}){
   eligible:available(queue,plan).map(x=>x.unitId),revision:queue.revision,finalizeStatus:queue.finalizeStatus};
 }
 
-export function reopenAggregateDefectsV1({root,campaignPath,phase,deficiencies=[]}){
- const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
- const reopened=new Set(),unmapped=[],invalidatedMembers=new Set(),invalidated=new Set();
- const membersOf=u=>u.kind==='BATCH'?u.members:[u];
- const invalidate=(u,m,reason)=>{
-  const state=queue.units[u.unitId];
-  if(u.kind==='BATCH'&&queue.acceptedRecords?.[m.unitId]){
-   delete queue.acceptedRecords[m.unitId];invalidatedMembers.add(m.unitId);
-  }
-  invalidated.add(m.unitId);
-  // Invalidate the parent identity too for any legacy dependents of batch IDs.
-  invalidated.add(u.unitId);
-  if(state.status==='ACCEPTED')state.status='REWORK_REQUIRED';
-  state.lastSubmissionSha256=null;
-  if(!state.lastErrors.includes(reason))state.lastErrors=[...state.lastErrors,reason].slice(-30);
-  reopened.add(u.unitId);
- };
- for(const entry of deficiencies){
-  const message=typeof entry==='string'?entry:JSON.stringify(entry),found=new Map();
-  const mark=(u,m)=>{
-   const foundMembers=found.get(u.unitId)??new Map();
-   foundMembers.set(m.unitId,m);found.set(u.unitId,foundMembers);
-  };
-  // Controller aggregate Phase-4 errors name discovery IDs, not shard array indices.
-  // Reopen the candidate append slot for genuinely missing Step-3 candidate records,
-  // or just the named original reconciliation batch member for deficient controls.
-  if(phase===4){
-   const discoveryId=message.match(/\bDISC-[0-9]{4}\b/)?.[0];
-   if(discoveryId&&message.includes('candidate must be present in Step 3')){
-    const append=plan.units.find(u=>u.kind==='APPEND'&&u.field==='candidateRecords');
-    if(append)mark(append,append);
-   }else if(discoveryId&&[
-    'must name the blocking control',
-    'resolution requires a source anchor',
-    'cannot accept a non-gap as a coverage gap'
-   ].some(reason=>message.includes(reason))){
-    // The frozen plan is the authoritative discovery-ID-to-unit mapping.
-    // Most v4 campaigns use one SHARD per reconciliation record; legacy
-    // BATCH members retain the same immutable initialValue.recordKey.
-    for(const u of plan.units.filter(u=>u.field==='discoveryReconciliationRecords')){
-     for(const m of membersOf(u)){
-      if(m.initialValue?.recordKey===discoveryId){mark(u,m);continue;}
-      // Historical batch plans may omit a member's initial value.
-      if(u.kind==='BATCH'){
-       const ref=queue.acceptedRecords?.[m.unitId];
-       const accepted=ref?.path?maybe(root,ref.path):null;
-       if(accepted?.entry?.value?.recordKey===discoveryId)mark(u,m);
-      }
-     }
-    }
-   }
-  }
-  for(const match of message.matchAll(/(?:actions\.)?(?:step-[0-9]+\.outputs\.)?([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/g)){
-   const field=match[1],position=Number(match[2]);
-   for(const u of plan.units)for(const m of membersOf(u))
-    if(m.field===field&&m.recordIndex===position)mark(u,m);
-  }
-  // Reopen only the named original candidate record, never all batch siblings.
-  for(const u of plan.units){
-   const eligible=membersOf(u).filter(m=>
-    ['targetDesigns','targetDispositions','candidateProofRecords'].includes(m.field));
-   if(!eligible.length)continue;
-   const state=queue.units[u.unitId],accepted=state?.acceptedPath?maybe(root,state.acceptedPath):null;
-   for(const m of eligible){
-    const value=accepted?.submission?.entries?.find(e=>e.key===m.recordKeys?.[0])?.value;
-    if(value&&typeof value==='object'&&[value.candidateKey,value.tempKey].some(key=>
-       typeof key==='string'&&key.length>=3&&message.includes(key)))mark(u,m);
-   }
-  }
-  if(!found.size){unmapped.push(message);continue;}
-  for(const [unitId,group] of found){
-   const u=plan.units.find(x=>x.unitId===unitId);
-   for(const m of group.values())invalidate(u,m,message);
-  }
- }
- // Propagate to original dependent records, including accepted members of a
- // partly accepted or reopened batch. Do not discard unrelated sibling proofs.
- let changed=true;
- while(changed){
-  changed=false;
-  for(const u of plan.units)for(const m of membersOf(u)){
-   if(invalidated.has(m.unitId)||!asArray(m.dependencies).some(id=>invalidated.has(id)))continue;
-   const accepted=u.kind==='BATCH'
-    ?queue.acceptedRecords?.[m.unitId]?.status==='ACCEPTED'
-    :queue.units[u.unitId]?.status==='ACCEPTED';
-   if(!accepted)continue;
-   invalidate(u,m,'upstream accepted original record invalidated during aggregate rework');
-   changed=true;
-  }
- }
- const result={reopenedUnits:[...reopened].sort(),unmappedDeficiencies:unmapped,
-  invalidatedRecordIds:[...invalidatedMembers].sort()};
- queue.finalizeStatus=result.reopenedUnits.length?'REWORK_REQUIRED':'BLOCKED';
- queue.finalizeDetails=result;queue.revision++;
- put(root,queueRel(campaignPath,phase),queue);
- return result;
+// Compatibility surface only. Aggregate audit-quality outcomes are Worker-owned.
+// Never invalidate an accepted record, reset a claim, or freeze a GitHub queue.
+export function reopenAggregateDefectsV1({deficiencies=[]}={}){
+  return {reopenedUnits:[],unmappedDeficiencies:Array.isArray(deficiencies)
+    ?deficiencies.map(item=>typeof item==='string'?item:JSON.stringify(item))
+    :[],invalidatedRecordIds:[],validationDelegatedTo:'CLOUDFLARE_WORKER'};
 }
