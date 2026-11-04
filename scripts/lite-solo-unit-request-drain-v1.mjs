@@ -5,10 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1,markFinalizationV1,statusUnitQueueV1,reopenAggregateDefectsV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1,markFinalizationV1,statusUnitQueueV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {repoFile,readJson,writeJson} from './lib/lite-solo-phase-work-v1.mjs';
-import {refreshControllerPrefillDigest} from './lib/lite-solo-phase-prefill-v1.mjs';
-import {secureRestoreWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
 const arg=Object.fromEntries(process.argv.slice(2).reduce((out,s,i,a)=>{
  if(i%2===0){if(!s.startsWith('--')||a[i+1]===undefined)throw Error('invalid CLI parameters');
   out.push([s.slice(2),a[i+1]]);}return out;},[]));
@@ -45,95 +43,8 @@ if(arg.mode!=='finalize'){
   recorded.finalizeDetails=null;
   changed=true;
  }
- // Re-evaluate already-recorded, unmapped aggregate defects after the mapping
- // implementation is repaired. Never reopen unrelated accepted units.
- // A previous v4 boundary attempt can expose index drift caused by its
- // former re-sharding behavior. Retry once through the existing assembler,
- // which verifies and restores identities from the frozen unit plan.
- if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
-    String(recorded.finalizeDetails?.error??'').startsWith('v13 mandatory work records dropped:')){
-  markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
-  changed=true;
- }
- // Controller-only retry after a verified semantic shard limit increase.
- // The size error must be exact and all original units already ACCEPTED; a
- // worker request cannot set FINALIZE or mutate any accepted snapshot.
- if(phase===4&&recorded?.finalizeStatus==='BLOCKED'&&
-    /^v13 shard exceeds authorized bound: shard-[0-9]{4}_v1\.json$/.test(
-      String(recorded.finalizeDetails?.error??''))&&
-    Object.keys(recorded.units??{}).length>0&&
-    Object.values(recorded.units).every(unit=>unit.status==='ACCEPTED')){
-  const shardName=recorded.finalizeDetails.error.split(': ').at(-1);
-  const shardPath=path.posix.join(
-    path.posix.dirname(directory.currentAssignment.workShardIndexPath),shardName);
-  // Only a shard that now fits 100 KiB may clear its prior size blocker.
-  // secureRestoreWorkFormV13 still revalidates EVERY shard at finalize.
-  if(fs.statSync(repoFile(root,shardPath)).size<=100*1024){
-   markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
-   changed=true;
-  }
- }
-
- if(phase===4&&['BLOCKED','REWORK_REQUIRED'].includes(recorded?.finalizeStatus)&&
-    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
-    recorded.finalizeDetails.unmappedDeficiencies.length){
-  const recovery=reopenAggregateDefectsV1({root,campaignPath,phase,
-    deficiencies:recorded.finalizeDetails.unmappedDeficiencies});
-  if(recovery.reopenedUnits.length)changed=true;
- }
- // Recover the exact immutable v13 Phase-5 controller prefill after a failed
- // boundary persisted transient request-binding annotations to the assignment.
- // A worker never gets to choose this digest: recompute the locked, controller-
- // indexed work form and require its sealed prefill digest to match its bytes.
- if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
-    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
-    recorded.finalizeDetails.unmappedDeficiencies.length===2&&
-    recorded.finalizeDetails.unmappedDeficiencies.includes(
-      'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.')&&
-    recorded.finalizeDetails.unmappedDeficiencies.includes(
-      'Controller-prefilled/read-only fields were modified; restore the generated values before validation.')&&
-    Object.values(recorded.units??{}).every(x=>x.status==='ACCEPTED')){
-   // This existing assembler verifies the immutable controller-owned shard
-   // index and frozen base before reconstructing accepted semantic records.
-   const restored=secureRestoreWorkFormV13({
-     root,indexRel:directory.currentAssignment.workShardIndexPath
-   });
-   const form=JSON.parse(restored.content);
-   const lockedDigest=form?.automationInputs?.controllerPrefillDigestSha256;
-   const recomputed=refreshControllerPrefillDigest(structuredClone(form));
-   if(!/^[a-f0-9]{64}$/.test(String(lockedDigest??''))||recomputed!==lockedDigest)
-     throw Error('Phase-5 locked controller prefill integrity failed; refusing digest recovery');
-   directory.currentAssignment.controllerPrefillDigestSha256=lockedDigest;
-   markFinalizationV1({root,campaignPath,phase:5,status:'NOT_STARTED',details:null});
-   changed=true;
- }
- // Retry a Phase-5 boundary previously blocked only by the canonical/temp-key
- // alias mismatch. The Phase-5 controller independently revalidates every
- // source-bound machine result before it can seal; this does not waive it.
- if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
-    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
-    recorded.finalizeDetails.unmappedDeficiencies.length>0&&
-    recorded.finalizeDetails.unmappedDeficiencies.every(x=>
-     /^Phase 5 mandatory material candidate CAND-[0-9]+ has no targeted machine execution$/.test(String(x)))&&
-    Object.values(recorded.units??{}).every(x=>x.status==='ACCEPTED')){
-  markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
-  changed=true;
- }
- // A prior boundary may have promoted APPEND rows into frozen fixed-record
- // positions before the unit assembler was installed. Recover its exact
- // immutable unit-plan ownership and recompute protected prefill integrity.
- // Never discard individual accepted work or waive a machine-evidence gate.
- if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
-    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
-    recorded.finalizeDetails.unmappedDeficiencies.length>0&&
-    recorded.finalizeDetails.unmappedDeficiencies.every(x=>[
-     'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.',
-     'Controller-prefilled/read-only fields were modified; restore the generated values before validation.'
-    ].includes(String(x)))&&
-    Object.values(recorded.units??{}).every(x=>x.status==='ACCEPTED')){
-  markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
-  changed=true;
- }
+ // Historical GitHub quality-rework recovery is retired for this fork.
+ // Accepted units and Worker-supplied bytes are preserved without reopening.
  for(const filename of files){
   const request=JSON.parse(fs.readFileSync(path.join(requestDir,filename),'utf8'));
   if(request.operation==='FINALIZE')throw Error('untrusted ingress may not request controller-only FINALIZE');
