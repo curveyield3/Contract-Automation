@@ -46,9 +46,34 @@ jobs:
       - name: Restore pinned Node dependencies (shared Phase 0 cache)
         uses: ./.github/actions/setup-phase0-node-cache
 
-      - name: Install and verify retained audit toolchain
-        continue-on-error: true # Worker reviews actual machine outcome; downstream still requires genuine artifacts
-        uses: ./.github/actions/setup-v7-toolchain-cached
+      - name: Enable pinned Forge for Phase-0 source compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          forge_entry="$GITHUB_WORKSPACE/node_modules/@foundry-rs/forge/bin.mjs"
+          test -f "$forge_entry"
+          chmod +x "$forge_entry"
+          mkdir -p "$RUNNER_TEMP/phase0-intelligence/bin"
+          ln -sfn "$forge_entry" "$RUNNER_TEMP/phase0-intelligence/bin/forge"
+          echo "$RUNNER_TEMP/phase0-intelligence/bin" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Set up Python for pinned Phase-0 Slither
+        continue-on-error: true
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.15'
+
+      - name: Install pinned Phase-0 Slither without V7 or Medusa
+        continue-on-error: true # Preserve actual missing-analyzer limitations for Worker review
+        shell: bash
+        run: |
+          set -euo pipefail
+          slither_env="$RUNNER_TEMP/phase0-slither-0.11.6"
+          python3 -m venv "$slither_env"
+          timeout -s TERM -k 15s 240s "$slither_env/bin/python" -m pip install --disable-pip-version-check --no-input --timeout 20 --retries 2 'slither-analyzer==0.11.6'
+          "$slither_env/bin/python" -c "import importlib.metadata as m; assert m.version('slither-analyzer') == '0.11.6'"
+          echo "$slither_env/bin" >> "$GITHUB_PATH"
 
       - name: Select cross-repository credential
         env:
