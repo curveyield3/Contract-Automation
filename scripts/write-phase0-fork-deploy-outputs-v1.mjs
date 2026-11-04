@@ -14,7 +14,7 @@ try{assertDeployGateEvidenceV2(deploy);}catch(error){console.warn('Phase-0 deplo
 const rawPath=path.join(src,'PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json');
 if(deploy.reconciliation){
   const original=await fs.readFile(rawPath);
-  if(digestV2(original)!==deploy.reconciliation.originalEvidenceSha256)console.warn('Worker assessment: original deployment evidence digest mismatch');
+  if(digestV2(original)!==deploy.reconciliation.originalEvidenceSha256)throw new Error('Original deployment evidence digest mismatch');
 }
 if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||!['PASS','PASS_LIVE_DEPLOYMENT','NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'].includes(deploy.status))console.warn('Worker assessment: deployment evidence is not in original GitHub PASS set');
 const destination=path.join(campaignRoot,'evidence/phase0');
