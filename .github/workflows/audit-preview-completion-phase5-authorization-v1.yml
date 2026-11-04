@@ -23,6 +23,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   record-decision:
+    # Legacy lane inactive in Machine Intelligence fork; never reach original main.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
