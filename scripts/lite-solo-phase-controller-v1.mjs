@@ -995,7 +995,7 @@ if(schema.finalReport){
       'This is not a security or completeness verdict.\n\n'+
       '- Work form: '+assignment.workFormPath+'\n'+
       '- Canonical data: '+canonicalRel+'\n'+
-      '- Rendering diagnostic: '+reason+'\n';
+      '- Rendering diagnostic: REPORT_FORMAT_UNAVAILABLE\n';
   }
   writeText(repoFile(root,assignment.finalReportPath),reportText);
 }
