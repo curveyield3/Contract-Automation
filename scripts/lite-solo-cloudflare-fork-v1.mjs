@@ -504,7 +504,7 @@ async function main(){
     strict(['lite-solo-v5','lite-solo-v6'].includes(payload.authority_release),'unsupported source initialization authority');
     strict(payload.request_id===payload.audit_id,'intake request identity differs from audit ID');
     strict((typeof payload.source_url==='string'&&payload.source_url.length>0)!==Boolean(payload.scan_urls?.length),'exactly one source intake mode required');
-    strict(!payload.scan_urls||Array.isArray(payload.scan_urls)&&payload.scan_urls.length<=20,'malformed explorer scan URL set');
+    strict(!payload.scan_urls||Array.isArray(payload.scan_urls),'malformed explorer scan URL array'); // Worker owns scan count and host policy.
     strict(process.env.AUDIT_CONTROLLER_TOKEN&&process.env.CONTRACT_AUTOMATION_TOKEN,'repository credentials missing');
     const initEnv={...process.env,REQUEST_ID:payload.request_id,SOURCE_URL:payload.source_url||'',
       SCAN_URLS:JSON.stringify(payload.scan_urls||[]),FORK_EXPECTED_SOURCE_SHA:payload.source_sha256||'',
