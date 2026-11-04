@@ -30,6 +30,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   initialize:
+    # Inactive in isolated Machine Intelligence source fork: legacy main-bound path.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
