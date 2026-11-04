@@ -15,7 +15,7 @@ on:
       controller_ref:
         description: Audit-Controller ref containing the request file
         required: true
-        default: main
+        default: machine-intelligence-audit-controller-v1
         type: string
       controller_writeback_ref:
         description: Exact private Audit-Controller branch to receive automatic Lite execution evidence ingestion
@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          status_json="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d)"
+          status_json="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=machine-intelligence-audit-controller-v1" --jq '.content' | base64 -d)"
           test "$(printf '%s' "$status_json" | jq -r '.status // empty')" = 'PASS'
           qualified_commit="$(printf '%s' "$status_json" | jq -r '.qualifiedCommit // empty')"
           qualification_run="$(printf '%s' "$status_json" | jq -r '.workflowRunId // empty')"
@@ -55,7 +55,7 @@ jobs:
           # Compare security-relevant runner inputs rather than raw HEAD:
           # status bookkeeping and documentation commits must not make a newly
           # qualified runner permanently impossible to use.
-          diff_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/$qualified_commit...main")" || {
+          diff_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/$qualified_commit...machine-intelligence-audit-controller-v1")" || {
             echo "::error::V7_QUALIFIED_RUNNER_STALE: unable to compare qualified runner and current source."
             exit 1
           }
@@ -476,7 +476,7 @@ jobs:
           test "$(jq -r '.schemaVersion // empty' ".controller-operation/$request_path")" = 'deep-assurance-github-request-v2'
           gh workflow run audit-controller-execution.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref main \
+            --ref machine-intelligence-audit-controller-v1 \
             -f request_path="$request_path" \
             -f controller_ref="$CONTROLLER_WRITEBACK_COMMIT" \
             -f controller_writeback_ref="$WRITEBACK_REF"
@@ -642,7 +642,7 @@ jobs:
           cp "../.audit-evidence/v7-execution/$V7_REQUEST_ID/controller-evidence.json" "$evidence_rel"
           node "$GITHUB_WORKSPACE/packages/github-native-sim/src/adr-assertion-ledger-v1.mjs" --evidence "$evidence_rel" --out "$evidence_dir/ASSERTION_LEDGER_v1.json" || true
           cp "../.audit-evidence/v7-execution/$V7_REQUEST_ID/EXECUTION_OBSERVER_RECEIPT_v1.json" "$observer_rel"
-          gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d > "$qualification_rel"
+          gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=machine-intelligence-audit-controller-v1" --jq '.content' | base64 -d > "$qualification_rel"
           test "$(jq -r '.status // empty' "$qualification_rel")" = 'PASS'
           test "$(jq -r '.qualifiedCommit // empty' "$qualification_rel")" = "$V7_RUNNER_COMMIT"
 
@@ -701,7 +701,7 @@ jobs:
           cd ..
           gh workflow run audit-controller-execution.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref main \
+            --ref machine-intelligence-audit-controller-v1 \
             -f request_path="$pointer_rel" \
             -f controller_ref="$pointer_commit"
 
@@ -772,7 +772,7 @@ jobs:
           if [ ! -f "$registration" ]; then
             if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "$campaign_mode" = "LITE" ] && [ -n "$campaign_path" ] && [ -n "$campaign_controller_ref" ]; then
               echo "Lite campaign $campaign_id has no browser registration; dispatching automatic registration/watchdog repair."
-              gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref machine-intelligence-audit-controller-v1 \
                 -f campaign_id="$campaign_id" \
                 -f campaign_name="$campaign_name" \
                 -f campaign_path="$campaign_path" \
@@ -843,7 +843,7 @@ jobs:
           watchdog_message='GET BACK TO WORK'
           gate_mode="$(jq -r '.watchdog.gate.mode // "FULL_V26"' "$registration")"
           gate_repo="$(jq -r '.watchdog.gate.repository // "curveyield3/Audit-Controller"' "$registration")"
-          gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$registration")"
+          gate_ref="$(jq -r '.watchdog.gate.ref // "machine-intelligence-audit-controller-v1"' "$registration")"
           gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' "$registration")"
           gate_expected_phase="$semantic_phase_id"
           gate_expected_milestone="$registered_milestone"
@@ -855,7 +855,7 @@ jobs:
           wake_b64="$(printf '%s' "$wake_message" | base64 -w0)"
           watchdog_b64="$(printf '%s' "$watchdog_message" | base64 -w0)"
 
-          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref machine-intelligence-audit-controller-v1 \
             -f wake_id="$wake_id" \
             -f campaign_id="$campaign_id" \
             -f phase_id="$phase_id" \
