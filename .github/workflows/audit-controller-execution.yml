@@ -1,11 +1,6 @@
 name: V7 Audit Controller Execution
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
-    paths:
-      - 'github-native-sim/requests/**/request.json'
   workflow_dispatch:
     inputs:
       request_path:
