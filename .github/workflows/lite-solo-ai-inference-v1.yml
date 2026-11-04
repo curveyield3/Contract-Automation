@@ -289,14 +289,8 @@ jobs:
           if(current.phase!==expectedPhase||current.currentStep!==expectedStep)
             throw Error('Assigned campaign changed: expected '+expectedPhase+'/'+expectedStep+
               ', Worker reports '+current.phase+'/'+current.currentStep);
-          const readiness=current.leaseReadiness;
-          if(current.status==='ACTIVE'&&readiness?.foreignLeased>0&&
-             readiness.ownLeased===0&&current.unitCounts?.available===0)
-            throw Error('MIMO_FOREIGN_LEASE_BLOCKED before inference: '+
-              readiness.foreignUnitIds.join(', ')+
-              ' is held by another caller. An administrator must release unfinished '+
-              'foreign-owned work using the existing step_release action; '+
-              'accepted work and controller receipts stay intact.');
+          // The Worker is the sole lease authority. Do not abort from a stale
+          // GitHub-side readiness snapshot; the subsequent Worker claim decides.
           if(current.status!=='ACTIVE'||current.engagement?.stage!=='WORK'||
              ![1,2,3,8,9,10].includes(current.phase)){
             console.log(JSON.stringify({status:'MIMO_LEASE_PREFLIGHT_DEFERRED',
