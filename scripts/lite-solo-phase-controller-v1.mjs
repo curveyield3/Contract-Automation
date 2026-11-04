@@ -932,9 +932,134 @@ function annotateShardReworkV1(packet,errors){
  return '\nSHARD_REWORK: edit the listed shard records only; original full diagnostics are in controller result pages.\n'+
   map.shards.map(s=>s.path+' : '+s.recordKeys.join(', ')).join('\n');
 }
-// Machine Intelligence fork: content, candidate coverage, V7 execution-request
-// quality, and previous-phase evidence verdicts belong exclusively to Cloudflare.
-// Preserve all submitted bytes for sealing; no GitHub-side NEEDS_REWORK exit.
+function materialPhase5Candidates({root,campaignPath,form}){
+  const prior=canonicalFor(root,campaignPath,4);
+  const phase4=phaseOutput(prior,'step-3','candidateRecords')??[];
+  const newCandidates=form?.actions?.['step-2']?.outputs?.newCandidateRecords??[];
+  const keys=[],sourceAnchors={};
+  // Phase-4 sealing adds canonicalId without changing the immutable source
+  // candidate key used by already-claimed Phase-5 target designs and their
+  // V7 requests. Resolve the exact accepted alias, not a fabricated target.
+  const targetKeys=new Set((form?.actions?.['step-3']?.outputs?.targetDesigns??[])
+    .filter(x=>x&&typeof x==='object')
+    .map(x=>String(x.candidateKey??'').trim()).filter(Boolean));
+  for(const record of [...phase4,...newCandidates]){
+    if(record==='NONE_IDENTIFIED')continue;
+    const canonical=String(record?.canonicalId??'').trim();
+    const original=String(record?.tempKey??'').trim();
+    const key=targetKeys.has(canonical)?canonical:targetKeys.has(original)?original:canonical||original;
+    if(!key)throw new Error('Phase 5 material candidate has no key');
+    const anchor=String(record?.sourceAnchor??'').trim();
+    if(sourceAnchors[key]!==undefined&&sourceAnchors[key]!==anchor)
+      throw new Error('Phase 5 material candidate '+key+' has inconsistent source anchors');
+    keys.push(key);sourceAnchors[key]=anchor;
+  }
+  return {keys:[...new Set(keys)],sourceAnchors};
+}
+if(sequence===5&&form&&deficiencies.length===0){
+  const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
+  for(const target of targets){
+    if(!target||typeof target!=='object') continue;
+    const method=String(target.executionMethod??'').toUpperCase();
+    if(method==='NOT_APPLICABLE'){
+      target.executionRequestRef='NOT_APPLICABLE';
+      target.automationResolvedExecutionRequest=false;
+      target.requestBindingStatus='NOT_APPLICABLE';
+      target.requestBindingEvidenceRef='NOT_APPLICABLE';
+      target.automationOwnedFields=[...new Set([
+        ...(target.automationOwnedFields??[]),
+        'executionRequestRef','automationResolvedExecutionRequest','requestBindingStatus','requestBindingEvidenceRef'
+      ])];
+      continue;
+    }
+    const explicitBeforeResolve=typeof target.executionRequestRef==='string'
+      && !target.executionRequestRef.startsWith('<')
+      && target.executionRequestRef!=='NOT_APPLICABLE';
+    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
+    if(!resolved){
+      deficiencies.push('Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+' has no deterministically resolvable execution request. Materialize the exact trusted V7 request at a conventional campaign request path or provide a campaign-relative executionRequestRef only for this target.');
+      continue;
+    }
+    target.executionRequestRef=resolved;
+    target.automationResolvedExecutionRequest=!explicitBeforeResolve;
+
+    const binding=validateTargetExecutionRequestBindingV1({
+      controllerRoot:root,
+      campaignPath,
+      target,
+      expectedCampaignId:directory.campaignId,
+      expectedSourceSha256:directory.sourceSha256
+    });
+    target.requestBindingStatus=binding.status;
+    target.requestBindingEvidenceRef=binding.requestRef??resolved;
+    target.automationOwnedFields=[...new Set([
+      ...(target.automationOwnedFields??[]),
+      'executionRequestRef','automationResolvedExecutionRequest','requestBindingStatus','requestBindingEvidenceRef'
+    ])];
+    if(!String(binding.status).startsWith('PASS_')){
+      deficiencies.push(
+        'Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+
+        ' execution request is not structurally bound to the accepted target/source: '+
+        String(binding.status)+' — '+(binding.reasons??[]).join('; ')
+      );
+    }
+  }
+  if(!deficiencies.length){
+    assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
+    writeJson(repoFile(root,assignment.workFormPath),form);
+    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+  }
+}
+
+if(sequence===5&&form&&deficiencies.length===0){
+  try{
+    deficiencies.push(...validatePhase5TargetCoverageV1({
+      targetDesigns:form.actions['step-3'].outputs.targetDesigns,
+      materialCandidateKeys:materialPhase5Candidates({root,campaignPath,form}).keys,
+      candidateSourceAnchors:materialPhase5Candidates({root,campaignPath,form}).sourceAnchors
+    }));
+  }catch(e){deficiencies.push('Phase 5 coverage validation failed: '+String(e.message||e));}
+}
+// Downstream gates must independently reconstruct the mandatory candidate set
+// and read actual V7 machine artifacts. A prior phase PASS/receipt is not proof.
+if([6,8].includes(sequence)&&deficiencies.length===0){
+  try{
+    const sealedP5=canonicalFor(root,campaignPath,5);
+    const mandatory=materialPhase5Candidates({root,campaignPath,form:sealedP5}).keys;
+    const rows=sequence===6?(form.actions?.['step-2']?.outputs?.targetDispositions??[])
+      :(form.actions?.['step-2']?.outputs?.candidateValidations??[]);
+    const actual=rows.filter(x=>x&&typeof x==='object').map(x=>String(x.candidateKey??'').trim()).filter(Boolean);
+    if(actual.length!==new Set(actual).size)deficiencies.push('Phase '+sequence+' contains duplicate candidate dispositions');
+    for(const key of mandatory)if(!actual.includes(key))
+      deficiencies.push('Phase '+sequence+' skipped mandatory predecessor candidate '+key);
+    if(sequence===6){
+      if(phase5OwnerDeferral){
+        if(sealedP5?.automationOutputs?.phase5MachineExecutionGate?.status!=='DEFERRED_UNVERIFIED'||
+           sealedP5.automationOutputs.phase5MachineExecutionGate.ownerDirectivePath!==phase5OwnerDeferral.path)
+          deficiencies.push('Phase 6 cannot carry unverified evidence without exact Phase-5 deferral record');
+      }else deficiencies.push(...validateRecordedPhase5MachineEvidenceV1({
+        controllerRoot:root,campaignPath,
+        targetDesigns:phaseOutput(sealedP5,'step-3','targetDesigns')??[],
+        expectedCampaignId:directory.campaignId,
+        expectedSourceSha256:directory.sourceSha256,requireCompletedMatrix:true
+      }));
+    }
+  }catch(e){deficiencies.push('Phase '+sequence+' mandatory predecessor/evidence gate failed: '+String(e.message||e));}
+}
+
+if(deficiencies.length){
+  persistReviewerReworkShardsV1();
+  packet.status='REWORK_REQUIRED';
+  packet.controllerValidation={status:'FAIL',validatedAt:now,deficiencies};
+  directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
+  writeJson(packetFile,packet);writeJson(directoryFile,directory);
+  const shardGuidance=annotateShardReworkV1(packet,deficiencies);
+  writeJson(packetFile,packet);
+  const feedback=feedbackText(sequence,deficiencies).replace('resubmit the same phase packet','repair the substantive fields and invoke controller validation again; the controller will rebuild the packet')+shardGuidance;
+  process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer:assignment.reviewer,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
+  process.exit(0);
+}
+
 // No tests, runner gates, approvals or machine-evidence verdicts occur in the
 // GitHub controller. The Worker/adapter owns that validation responsibility.
 // Preserve the original submitted target descriptions, with no fabricated PASS.
