@@ -159,10 +159,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: machine-intelligence-phase0-${{ inputs.campaign_id }}-${{ github.run_id }}
-          path: .phase0-intelligence-output
+          path: .phase0-intelligence-output/*.json
           if-no-files-found: warn
           retention-days: 14
-          include-hidden-files: true
+          include-hidden-files: false
 
       - name: Write only useful outputs to Audit-Controller campaign
         env:
