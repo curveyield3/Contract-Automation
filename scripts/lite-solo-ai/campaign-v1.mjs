@@ -14,7 +14,7 @@ const identityBearer=process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
 if(!/^[A-Za-z0-9_.-]+-r[0-9]+$/.test(campaignId||'')||
    !identityEndpoint||!identityBearer||
    process.env.GITHUB_REPOSITORY!=='curveyield3/Contract-Automation'||
-   process.env.GITHUB_REF!=='refs/heads/main'||
+   process.env.GITHUB_REF!=='refs/heads/machine-intelligence-audit-controller-v1'||
    process.env.GITHUB_EVENT_NAME!=='workflow_dispatch')
  throw Error('Missing exact authorized campaign or signed GitHub Actions identity');
 
