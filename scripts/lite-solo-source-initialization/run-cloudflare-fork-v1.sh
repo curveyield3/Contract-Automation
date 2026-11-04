@@ -286,7 +286,7 @@ else
     echo "::warning::Audit-Controller main moved; rebuilding the initialization on latest main (attempt $attempt/5)."
     sleep $((attempt * 2))
   done
-  [ "$success" = true ] || { echo "::error::Failed to publish Audit Source Initialization to Audit-Controller main."; exit 1; }
+  [ "$success" = true ] || { echo "::error::Failed to publish Audit Source Initialization to the isolated Audit-Controller Machine Intelligence branch."; exit 1; }
   fi
 
   export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
