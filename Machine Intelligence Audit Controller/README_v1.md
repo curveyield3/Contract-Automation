@@ -24,8 +24,8 @@ Fork-only changes to active paths:
 - Stopped aggregate semantic deficiencies from setting GitHub `NEEDS_REWORK` and stopped unit-finalization from persisting GitHub `BLOCKED`; accepted Worker-supplied unit evidence is retained for retry.
 - Preserved actual deployment and Slither failures as diagnostics and limitations; incomplete evidence is **not** synthesized into a successful machine execution.
 - Rebound Cloudflare fork callbacks and MiMo bridge to `MACHINE_INTELLIGENCE_WORKER_URL`, and fork callbacks to `MACHINE_INTELLIGENCE_FORK_TOKEN`. Production Worker routes must not be used.
-- Restored Phase-5 request resolution and downstream metadata after an incorrect early edit, then separated optional quality diagnostics from the essential packaging path.
-- Removed remaining Phase-5 human-approval vetoes from the fork phase-boundary workflow; Phase-5 request materialization and prefill metadata remain intact.
+- Restored the damaged Phase-5 source packaging and downstream metadata after an incorrect early edit. Obsolete V7 request-resolution and GitHub quality-verdict paths were subsequently retired; preserve raw Worker-submitted target descriptions.
+- Removed remaining Phase-5 human-approval vetoes from the fork phase-boundary workflow; source-bound Phase-5 prefill identity and targeted-matrix packaging remain, but obsolete V7 execution-request generation is not an active prerequisite.
 - Retired legacy aggregate-unit rework mutations, dead shard/coverage/evidence validation routines, and unnecessary GitHub test-toolchain setup steps; quality findings remain the Worker's responsibility.
 - Allowed Phase-4 unit plans with actual source-bound units to proceed even when the inventory contains quality-gap indicators; the Worker still needs to supply real units where none exist.
 - Preserved exact source/archive and original-evidence SHA-256 binding checks as physical provenance protections, rather than allowing mismatched bytes to be sealed.
@@ -44,6 +44,15 @@ Workflow/action deep-sweep findings (fork source only):
 - The Cloudflare fork adapter uses structural Phase-0/Phase-10 receipts rather than GitHub content-quality `PASS` as a sealing prerequisite, and the Phase-0 finalizer can recover a prior `BLOCKED` receipt when real evidence exists.
 - The shared Lite-Solo checkout helper and phase-controller CLI reject controller refs other than `machine-intelligence-audit-controller-v1`.
 - No new workflows, actions, or tests were created or executed.
+
+Post-sweep repository repairs:
+- The phase-boundary workflow now routes v4, v5, and v6 Phases 4–6 through the parallel-unit controller; old GitHub `BLOCKED` assignment states no longer veto Worker-resumed phases, while explicit `STOPPED_BY_HUMAN` remains enforceable.
+- The phase-boundary workflow now treats failed PDF delivery as a failed delivery step, but records the already-sealed controller result independently; a receipt alone is not proof that a PDF was delivered.
+- Both Phase-0 intelligence workflows retain only top-level JSON evidence on generation failure. They expressly exclude the working repository checkout and hidden Git metadata from Actions artifacts.
+- Phase 4/6/8 derived-quality projections and optional final-report formatting can retain typed unresolved diagnostics rather than crash the controller after semantic validation was delegated. Canonical Worker-submitted files remain preserved.
+- Source-bound Phase bookkeeping now rejects domain-registry paths escaping the campaign directory; this is a provenance safeguard, not an audit-quality veto.
+- The parallel Cloudflare-fork workflow still contains an unreachable Phase-10 delivery helper and duplicate report/callback steps; actual Phase 10 delivery belongs to the semantic phase-boundary workflow. The attempted dead-code removal was blocked by the platform; no alternate path was created.
+- Further attempted edits to the shared phase-report wording and some legacy input-projection handlers were blocked by tool safety checks. These changes are **not** claimed complete. Receipt compatibility `PASS` is still not Worker semantic acceptance.
 
 Remaining execution hold:
 - An independent, configured, deployed Machine Intelligence Worker (and GitHub credentials, Durable Object, R2 isolation) **does not yet exist in this fork**. Its source snapshot is in the companion Audit-Controller branch.
