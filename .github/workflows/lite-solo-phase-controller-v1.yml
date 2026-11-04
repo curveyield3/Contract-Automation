@@ -1,7 +1,7 @@
 name: Lite-Solo Non-Unit Phase Boundary Controller v1
 on:
   push:
-    branches: [main]
+    branches: [machine-intelligence-audit-controller-v1]
     paths:
       - 'process/agent-upload/lite-solo-phase-boundary/*.json'
 permissions:
