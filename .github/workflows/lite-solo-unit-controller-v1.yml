@@ -1,7 +1,7 @@
 name: Lite-Solo Parallel Unit Controller v1
 on:
   push:
-    branches: [main]
+    branches: [machine-intelligence-audit-controller-v1]
     paths:
       - 'process/agent-upload/lite-solo-unit-requests/**/*.json'
   workflow_dispatch:
@@ -63,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: machine-intelligence-audit-controller-v1
           fetch-depth: 1
           persist-credentials: false
       - name: Select Audit-Controller credential
@@ -88,8 +88,8 @@ jobs:
           set -euo pipefail
           directory="Audit Campaign Directory/campaigns/${CAMPAIGN_ID%-r*}.json"
           encoded="$(jq -rn --arg p "$directory" '$p|split("/")|map(@uri)|join("/")')"
-          campaign_path="$(gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=main" --jq .content | base64 -d | jq -er .workspacePath)"
-          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
+          campaign_path="$(gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=machine-intelligence-audit-controller-v1" --jq .content | base64 -d | jq -er .workspacePath)"
+          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller machine-intelligence-audit-controller-v1 "$campaign_path"
           node scripts/lite-solo-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode drain > /tmp/unit-drain.json
           {
             echo "campaign_path=$campaign_path"
@@ -142,10 +142,10 @@ jobs:
             git -C .audit-controller add -- "$CAMPAIGN_PATH" "$DIRECTORY"
             if git -C .audit-controller diff --cached --quiet; then success=true; break; fi
             git -C .audit-controller commit -m "audit(lite-solo): accept parallel units $CAMPAIGN_ID"
-            if git -C .audit-controller push origin HEAD:main; then success=true; break; fi
+            if git -C .audit-controller push origin HEAD:machine-intelligence-audit-controller-v1; then success=true; break; fi
             # Discard stale decisions, rebuild from current authoritative head.
-            git -C .audit-controller fetch origin main
-            git -C .audit-controller reset --hard origin/main
+            git -C .audit-controller fetch origin machine-intelligence-audit-controller-v1
+            git -C .audit-controller reset --hard origin/machine-intelligence-audit-controller-v1
             node scripts/lite-solo-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode drain > /tmp/unit-recompute.json
             if [ "$(jq -r .finalizeReady /tmp/unit-recompute.json)" = true ]; then
               phase="$(jq -r .phase /tmp/unit-recompute.json)"
