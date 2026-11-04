@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lite-Solo-only sparse checkout. Materialize the exact receipt-bound authority
-# from its immutable commit while keeping campaign writes on the live branch.
+# from its immutable commit while keeping campaign writes on the isolated fork branch.
 # The shared multi-reviewer checkout is deliberately unchanged.
 set -euo pipefail
 if [ "$#" -ne 3 ]; then
@@ -14,6 +14,7 @@ case "$destination" in .audit-controller) ;; *) echo 'unsupported checkout desti
 case "$campaign_path" in campaigns/*) ;; *) echo 'unsafe campaign path' >&2; exit 2;; esac
 case "/$campaign_path/" in */../*|*/./*|*//*) echo 'unsafe campaign path' >&2; exit 2;; esac
 git check-ref-format --branch "$ref" >/dev/null || { echo 'invalid checkout branch' >&2; exit 2; }
+[ "$ref" = 'machine-intelligence-audit-controller-v1' ] || { echo 'Machine Intelligence checkout must use the isolated controller branch' >&2; exit 2; }
 [ -n "${GH_TOKEN:-}" ] || { echo 'Audit-Controller credential required' >&2; exit 1; }
 gh auth setup-git
 rm -rf -- "$destination"
@@ -63,7 +64,7 @@ git -C "$destination" config core.sparseCheckoutCone false
   printf '%s\n' "$(literal_pattern 'packages/controller-core/src/lite-phase-receipt-v1.mjs')"
 } > "$destination/.git/info/sparse-checkout"
 git -C "$destination" checkout --quiet -B "$ref" "$head"
-# Worktree-only restoration: retain live main as commit parent, never publish
+# Worktree-only restoration: retain live fork as commit parent, never publish
 # the older authority or alter the original multi-agent authority package.
 git -C "$destination" restore --source="$authority_commit" --worktree -- "$authority_root"
 [ "$(sha256sum "$destination/$homepage" | cut -d' ' -f1)" = "$authority_digest" ] || { echo 'materialized SKILL digest mismatch' >&2; exit 1; }
