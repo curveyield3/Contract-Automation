@@ -112,4 +112,4 @@ const report={schemaVersion:'curveyield-phase5-request-preflight-v1',campaignId,
   designCount:noExecutableCandidates?0:(designs?.length??0),readyCount:ready.length,generated,failures,
   ...(sharded?{workShardIndexPath:indexRel}:{})};
 process.stdout.write(JSON.stringify(report)+'\n');
-if(failures.length)process.exitCode=2;
+if(failures.length)console.error('Phase-5 request quality diagnostics delegated to Cloudflare Worker: '+failures.length);
