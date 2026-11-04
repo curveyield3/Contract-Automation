@@ -140,10 +140,12 @@ jobs:
           # Reconciliation covers reviewed Ethereum-lane exclusions only; profile-declared
           # (e.g. Katana) deployments fail straight through to the gate with their own evidence.
           if jq -e '.status=="BLOCKED_SCRIPT_FAILURE" and .fork.chainId==1' "$file" >/dev/null; then
-            node scripts/reconcile-phase0-deploy-evidence-v1.mjs \
+            if ! node scripts/reconcile-phase0-deploy-evidence-v1.mjs \
               --input "$file" --output "$file" \
               --campaign-root ".audit-controller/${{ inputs.campaign_path }}" \
-              --source-run-id "$GITHUB_RUN_ID"
+              --source-run-id "$GITHUB_RUN_ID"; then
+              echo "::warning::Native deployment reconciliation remains unresolved; evidence retained for Cloudflare Worker review"
+            fi
           fi
 
       - name: Retain guard log alongside fork-deployment evidence
