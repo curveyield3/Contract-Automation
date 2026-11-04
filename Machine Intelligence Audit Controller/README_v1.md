@@ -15,6 +15,20 @@ This branch is the **full, isolated Git-tree source fork** of `curveyield3/Contr
 
 Key live counterparts retained in the fork for development: `.github/workflows/lite-solo-ai-inference-v1.yml`, `scripts/lite-solo-ai/campaign-v1.mjs`, `.github/workflows/lite-solo-cloudflare-fork-v1.yml`, `.github/workflows/lite-solo-phase-controller-v1.yml`, `scripts/lite-solo-phase-controller-v1.mjs`, `.github/workflows/lite-solo-audit-correction-v1.yml`, `scripts/lite-solo-audit-correction/`, and `.github/actions/`.
 
+## Development status and execution hold — v1
+
+**NOT RUNNABLE / NOT READY TO DEPLOY.** This development branch contains partial delegation changes in the semantic phase controller, unit packager, shard assembler, and Cloudflare fork orchestration. The old validation system has **not** been completely removed from every GitHub process/workflow. Some original GitHub workflow dispatches, checkouts, and push destinations still explicitly reference `main`. Therefore **do not execute any GitHub workflow or attempt a fork-Worker deployment from this branch** until those remaining references are rebound and the end-to-end data assembly and sealing paths have been reviewed.
+
+Remaining known source surfaces:
+- `scripts/lite-solo-unit-request-drain-v1.mjs`: retains blocked/rework states and aggregate-recovery logic
+- `scripts/lite-solo-phase0-finalize-v1.mjs`: retains source/evidence/readiness blocking checks
+- `.github/workflows/lite-solo-phase-controller-v1.yml`: push trigger is restricted to this branch, but several internal controller checkout and publication targets still point to `main`
+- `.github/workflows/lite-solo-unit-controller-v1.yml` and `.github/workflows/lite-solo-cloudflare-fork-v1.yml`: controller-target `main` references and Phase-5 preflight remain
+- Phase-0 bootstraps, authority-derived prefill and controller-core helpers may also retain quality gates
+- Worker source is still a private undeployed v1 snapshot; a separately scoped Worker and data bindings have not been created
+
+The original `main` branch is unchanged. No tests were created or run. These remaining blockers are **explicitly unresolved**, not reported as successful delegation or controller acceptance.
+
 ## Isolation
 
 - This fork is **not** the production automation branch. Original `main` workflows remain intact and continue to own active campaigns.
