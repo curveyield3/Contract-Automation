@@ -20,7 +20,7 @@ on:
         required: false
         default: ''
   push:
-    branches: [main]
+    branches: [machine-intelligence-audit-controller-v1]
     paths:
       - 'process/lite-solo-source-initialization/requests/*.json'
 permissions:
@@ -94,7 +94,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_NAME" = main
+          test "$GITHUB_REF_NAME" = machine-intelligence-audit-controller-v1
           if [ "$EVENT_NAME" = push ]; then
             request="$MATRIX_REQUEST"
             [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]]
