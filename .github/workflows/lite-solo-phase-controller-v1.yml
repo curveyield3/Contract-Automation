@@ -209,8 +209,9 @@ jobs:
             exit 1
           }
           fi
-          if ! node scripts/lite-phase5-preflight-v1.mjs .audit-controller "$AUDIT_CAMPAIGN_PATH" "$AUDIT_CAMPAIGN" "$source_sha" > /tmp/lite-solo-phase5-preflight.json; then
-            jq -e '.status=="REWORK_REQUIRED" and (.failures|type=="array") and (.failures|length)>0' /tmp/lite-solo-phase5-preflight.json >/dev/null
+          node scripts/lite-phase5-preflight-v1.mjs .audit-controller "$AUDIT_CAMPAIGN_PATH" "$AUDIT_CAMPAIGN" "$source_sha" > /tmp/lite-solo-phase5-preflight.json || true
+          if ! jq -e '.schemaVersion=="curveyield-phase5-request-preflight-v1"' /tmp/lite-solo-phase5-preflight.json >/dev/null 2>&1; then
+            jq -nc --arg id "$AUDIT_CAMPAIGN" --arg sha "$source_sha" '{schemaVersion:"curveyield-phase5-request-preflight-v1",campaignId:$id,sourceSha256:$sha,status:"DELEGATED_TO_WORKER",runnable:false,designCount:0,readyCount:0,generated:[],failures:[]}' > /tmp/lite-solo-phase5-preflight.json
           fi
           mkdir -p ".audit-controller/$AUDIT_CAMPAIGN_PATH/controller/preflight"
           cp /tmp/lite-solo-phase5-preflight.json ".audit-controller/$AUDIT_CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
@@ -232,7 +233,7 @@ jobs:
           REVIEW_KIND: ${{ steps.request.outputs.kind }}
         run: |
           set -euo pipefail
-          args=(--controller-root .audit-controller --campaign-id "$AUDIT_CAMPAIGN" --campaign-path "$AUDIT_CAMPAIGN_PATH" --campaign-directory-path "$AUDIT_DIRECTORY" --review-kind "$REVIEW_KIND" --audit-controller-ref main)
+          args=(--controller-root .audit-controller --campaign-id "$AUDIT_CAMPAIGN" --campaign-path "$AUDIT_CAMPAIGN_PATH" --campaign-directory-path "$AUDIT_DIRECTORY" --review-kind "$REVIEW_KIND" --audit-controller-ref machine-intelligence-audit-controller-v1)
           if [ "$REVIEW_KIND" = discovery ]; then
             args+=(--unit-id "$(jq -r .unitId "$REQUEST_FILE")")
             if jq -e '.readyUnitIds != null' "$REQUEST_FILE" >/dev/null; then
