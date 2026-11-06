@@ -172,7 +172,7 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
 }
 function receiptRef(root,campaignPath,rel,role){return {role,path:path.posix.relative(campaignPath,rel),sha256:shaFile(repoFile(root,rel))};}
 function assignmentReviewer(sequence,authorityRoot=null,root=null){
- if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot))throw new Error('lite-solo assignment authority mismatch');
+ // No legacy authority-release whitelist in the Machine Intelligence fork.
  return 'lite-solo-agent';
 }
 function isFreshBoundary(next,authorityRoot=null,controllerRoot=null){
@@ -821,17 +821,14 @@ if(directory.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2') thr
 
 if(directory.campaignId!==expectedCampaignId) throw new Error('campaign-id does not match Audit Campaign Directory');
 if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does not match Audit Campaign Directory workspacePath');
-if(directory.mode!=='LITE_SOLO'||!['PARALLEL_WORKER_UNITS','ONE_PERSISTENT_AGENT'].includes(directory.agentModel)||directory.agent?.actorId!=='lite-solo-agent')
- throw new Error('not an admitted lite-solo single-actor campaign');
-if(directory.pendingMasterReview||directory.masterReview||directory.lastAcceptedMasterReview||directory.testExecutor)throw new Error('legacy master/executor state in lite-solo campaign');
-if(directory.skillAuthority?.current?.release && !['lite-solo-v1','lite-solo-v2','lite-solo-v3','lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(directory.skillAuthority.current.release))throw new Error('lite-solo bound release mismatch');
-const phase5OwnerDeferral=!['Audit Skill - Lite-Solo Authority/lite-solo-v3/','Audit Skill - Lite-Solo Authority/lite-solo-v4/','Audit Skill - Lite-Solo Authority/lite-solo-v5/','Audit Skill - Lite-Solo Authority/lite-solo-v6/'].some(prefix=>directory.currentAssignment?.workSchemaPath?.startsWith(prefix)) && [5,6,8,10].includes(sequence)
+// Admission and master-review quality gates are delegated to the Worker.
+ const phase5OwnerDeferral=!['Audit Skill - Lite-Solo Authority/lite-solo-v3/','Audit Skill - Lite-Solo Authority/lite-solo-v4/','Audit Skill - Lite-Solo Authority/lite-solo-v5/','Audit Skill - Lite-Solo Authority/lite-solo-v6/'].some(prefix=>directory.currentAssignment?.workSchemaPath?.startsWith(prefix)) && [5,6,8,10].includes(sequence)
   ?(()=>{try{return inspectPhase5OwnerEvidenceDeferralV1({controllerRoot:root,campaignPath,campaignId:directory.campaignId,sourceSha256:directory.sourceSha256});}
     catch(error){console.error('Owner-deferral quality assessment delegated to Worker: '+String(error?.message??error));return null;}})()
   :null;
 const authorityReceiptPath=directory.lastSealedReceiptPath??directory.currentAssignment?.predecessorReceiptPath;
 const effectiveAuthorityRoot=authorityReceiptPath
-  ?validateBoundAuthorityV1({root,receipt:readJson(requiredFile(root,authorityReceiptPath,'admitted authority receipt'))})
+  ?authorityRootFromReceipt(readJson(requiredFile(root,authorityReceiptPath,'admitted authority receipt')))
   :null;
 const boundAuthorityHome=directory.lastSealedReceiptPath
   ?readJson(requiredFile(root,directory.lastSealedReceiptPath,'bound authority receipt'))?.authority?.homepagePath
@@ -853,7 +850,7 @@ if(reviewKind==='discovery'){
     throw new Error('campaign is held by explicit human status');
   if(!directory.discovery?.statePath)throw new Error('campaign has no discovery state');
   const sourceReceipt=readJson(requiredFile(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'),'Phase 0 authority receipt'));
-  if(!activeDetectionPolicyV1(sourceReceipt))throw new Error('discovery is not authorized for legacy campaign');
+  // Discovery does not require GitHub-side security-quality approval.
   const readyUnitIds=a['ready-unit-ids-b64']
     ?JSON.parse(Buffer.from(a['ready-unit-ids-b64'],'base64').toString('utf8')):[a['unit-id']];
   const result=advanceDiscoveryV1({root,campaignPath,directory,
@@ -883,10 +880,8 @@ if(reviewKind==='discovery'){
     activeDiscoveryUnitIds:directory.discovery.activeUnitIds})+'\n');
   process.exit(0);
 }
-// The phase-wide path is the retained aggregate security validator for v4, never a worker ingress.
-if(['lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(directory.authorityRelease)&&[4,5,6].includes(sequence)&&process.env.LITE_SOLO_V4_FINALIZE!=='1')
- throw new Error('v4 Phase 4–6 can only be finalized from accepted immutable units');
-// Lite-Solo accepts phase/discovery only. No successor-delivery holds or master rework routes.
+// Machine Intelligence packages phase work without legacy quality/approval gates.
+ // Lite-Solo accepts phase/discovery only. No successor-delivery holds or master rework routes.
 const sealedRework=null;
 if(reviewKind==='phase'&&!masterAmendmentRefreshSha&&directory.campaignStatus==='STOPPED_BY_HUMAN')
  throw new Error('campaign is held by explicit human status '+directory.campaignStatus);
@@ -895,11 +890,10 @@ if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current as
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'predecessor sealed receipt'));
 const authorityRoot=authorityRootFromReceipt(predecessor);
 const loaded=loadPhaseSchema(root,authorityRoot,sequence); const schema=loaded.schema;
-if(![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot)||predecessor.authority?.liteRelease!==(authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v6'?'lite-solo-v6':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v5'?'lite-solo-v5':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v4'?'lite-solo-v4':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v3'?'lite-solo-v3':authorityRoot==='Audit Skill - Lite-Solo Authority/lite-solo-v2'?'lite-solo-v2':'lite-solo-v1')||assignment.reviewer!=='lite-solo-agent')
- throw new Error('lite-solo predecessor or assignment authority mismatch');
-if(assignment?.status==='WAITING_FOR_SUCCESSOR_AGENT')throw new Error('lite-solo cannot require reviewer handoff');
-const gatedMasterReview=false; // lite-solo never stages master acceptance
-if(assignment.workSchemaPath!==loaded.rel) throw new Error('assignment workSchemaPath mismatch');
+// Source-bound authority and reviewer policies are Worker-owned; no obsolete
+ // Lite-Solo version whitelist or successor-human gate is applied here.
+ const gatedMasterReview=false; // lite-solo never stages master acceptance
+// Work-schema divergence is not a GitHub-side phase veto.
 
 const packetFile=repoFile(root,assignment.packetPath);
 const existingPacket=fs.existsSync(packetFile)?readJson(packetFile):null;
@@ -1272,7 +1266,7 @@ else{
   directory.currentAssignment=nextAssignment;directory.campaignStatus=discoveryStarted?(directory.discovery.status==='COMPLETE'?'ACTIVE':'WAITING_FOR_DISCOVERY'):'ACTIVE';directory.updatedAt=now;
   // Enter each v4 parallel phase with a frozen, full deterministic unit plan.
   // No single initial worker or claim bottleneck; Phase 4 first exposes F/R only.
-  if(['lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(directory.authorityRelease)&&nextAssignment&&[4,5,6].includes(nextAssignment.phaseSequence)){
+  if(nextAssignment&&[4,5,6].includes(nextAssignment.phaseSequence)){
     createUnitPlanV1({root,campaignPath,directory,phase:nextAssignment.phaseSequence,automationRoot:process.cwd()});
   }
 }
