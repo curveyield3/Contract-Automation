@@ -31,6 +31,34 @@ function destinationAllowed(destination) {
   return ALLOWED_ROOT_FILES.has(destination) || ALLOWED_PREFIXES.some((prefix) => destination.startsWith(prefix));
 }
 
+async function sourceFoundryProfile(projectRoot) {
+  const configPath = path.join(projectRoot, 'foundry.toml');
+  let bytes;
+  try {
+    const stat = await fs.lstat(configPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Source-owned foundry.toml is not a regular file');
+    bytes = await fs.readFile(configPath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { bytes: null, testDirectory: 'test' };
+    throw error;
+  }
+
+  let inDefaultProfile = false;
+  let testDirectory = 'test';
+  for (const original of bytes.toString('utf8').split(/\r?\n/)) {
+    const line = original.trim();
+    if (/^\[.*\]$/.test(line)) {
+      inDefaultProfile = /^\[profile\.default\]$/.test(line);
+      continue;
+    }
+    if (!inDefaultProfile || !/^test\s*=/.test(line)) continue;
+    const match = /^test\s*=\s*(?:"([^"]+)"|'([^']+)')\s*(?:#.*)?$/.exec(line);
+    if (!match) throw new Error('Cannot safely resolve source-owned Foundry test directory');
+    testDirectory = safeRelative(match[1] ?? match[2], 'source foundry.toml test directory');
+  }
+  return { bytes, testDirectory };
+}
+
 async function destinationMustNotExist(destination, {bytes, allowIdenticalConfig=false} = {}) {
   try {
     const stat=await fs.lstat(destination);
@@ -83,6 +111,8 @@ export async function materializePhase6HarnessOverlayV1({ projectRoot, runnerRoo
   validateSourceBinding(manifest, source);
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) throw new Error(`Phase 6 harness manifest ${bundleId} has no files`);
 
+  // Source-owned compiler settings, remappings and test layout always win.
+  const sourceFoundry = await sourceFoundryProfile(projectRoot);
   const materialized = [];
   const destinations = new Set();
   for (const [index, entry] of manifest.files.entries()) {
@@ -90,26 +120,39 @@ export async function materializePhase6HarnessOverlayV1({ projectRoot, runnerRoo
     const sourcePath = safeRelative(entry.source, `manifest.files[${index}].source`);
     const destinationPath = safeRelative(entry.destination, `manifest.files[${index}].destination`);
     if (!destinationAllowed(destinationPath)) throw new Error(`Phase 6 harness destination is outside the audit-only allowlist: ${destinationPath}`);
-    if (destinations.has(destinationPath)) throw new Error(`Phase 6 harness manifest has duplicate destination: ${destinationPath}`);
-    destinations.add(destinationPath);
+    // An existing project can use verification_v6 or another Foundry test root.
+    // Move only audit-owned test files, never the source compiler configuration.
+    const effectiveDestination = destinationPath.startsWith('test/phase6/')
+      ? sourceFoundry.testDirectory + destinationPath.slice('test'.length)
+      : destinationPath.startsWith('test/phase5/')
+        ? sourceFoundry.testDirectory + destinationPath.slice('test'.length)
+        : destinationPath;
+    safeRelative(effectiveDestination, 'effective audit file destination');
+    if (destinations.has(effectiveDestination)) throw new Error(`Phase 6 harness manifest has duplicate destination: ${effectiveDestination}`);
+    destinations.add(effectiveDestination);
 
     const from = inside(bundleRoot, sourcePath, `manifest.files[${index}].source`);
-    const to = inside(projectRoot, destinationPath, `manifest.files[${index}].destination`);
+    const to = inside(projectRoot, effectiveDestination, `manifest.files[${index}].destination`);
     const bytes = await fs.readFile(from);
-    const existingIdentical=await destinationMustNotExist(to, {
-      bytes, allowIdenticalConfig:destinationPath==='foundry.toml'
-    });
     const observedDigest = sha256(bytes);
     if (entry.sha256 && entry.sha256 !== observedDigest) {
       throw new Error(`Phase 6 harness file digest mismatch for ${sourcePath}: expected ${entry.sha256}, observed ${observedDigest}`);
     }
     assertNoUsableRpcLiteral(bytes, sourcePath);
-    if(!existingIdentical) {
+    const preservedSourceConfig = destinationPath === 'foundry.toml' && sourceFoundry.bytes !== null;
+    const existingIdentical = preservedSourceConfig
+      ? sourceFoundry.bytes.equals(bytes)
+      : await destinationMustNotExist(to, { bytes, allowIdenticalConfig: destinationPath === 'foundry.toml' });
+    if (!preservedSourceConfig && !existingIdentical) {
       await fs.mkdir(path.dirname(to), { recursive: true });
       await fs.writeFile(to, bytes);
     }
-    materialized.push({ source: sourcePath, destination: destinationPath, sha256: observedDigest,
-      bytes: bytes.length, reusedUnchangedSourceConfig:existingIdentical });
+    materialized.push({ source: sourcePath, destination: effectiveDestination, sha256: observedDigest,
+      bytes: bytes.length, reusedUnchangedSourceConfig: existingIdentical,
+      preservedSourceConfig, ...(preservedSourceConfig ? {
+        sourceConfigSha256: sha256(sourceFoundry.bytes),
+        testDirectory: sourceFoundry.testDirectory,
+      } : {}) });
   }
 
   for (const required of V7_POLICY.phase6.requiredRuntimeFiles) {
