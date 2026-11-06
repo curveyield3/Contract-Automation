@@ -97,7 +97,10 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
      'Literal constant substitution requires an admitted source anchor');
    // An empty or unanchored claim may be reported, but cannot discharge the
    // source-context row. This is evidence bookkeeping, not a new audit verdict.
-   if(grounded&&anchored)for(const c of contexts)covered.add(c.contextId);
+   // Only an AI-authored SUPPORTED verdict may replace an assigned correctness
+   // row. CONCERN, UNRESOLVED, and NOT_APPLICABLE still need their own row.
+   if(grounded&&anchored&&review?.assessment==='SUPPORTED')
+    for(const c of contexts)covered.add(c.contextId);
  }
  for(const [i,row] of arr2(submission?.rows).entries()){
    const p='rows['+i+']',id=row?.contextId;

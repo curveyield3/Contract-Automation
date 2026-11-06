@@ -1091,6 +1091,7 @@ function assembleBoundAnswersV1(c,u,submitted){
    // adequacy of that review; the assembler only avoids duplicate rows.
    result.rows=result.rows.filter(row=>!chosen.has(row.contextId)||
     !(result.trivialReviews??[]).some(x=>x.contract===owners.get(row.contextId)&&
+      x.assessment==='SUPPORTED'&&
       typeof x.evidence==='string'&&x.evidence.trim()&&
       Array.isArray(x.anchors)&&x.anchors.length>0));
   }
