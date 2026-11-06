@@ -1,9 +1,10 @@
 name: Katana cyavKAT v25 Complete Deployment
 on:
   push:
-    branches: [main]
+    branches: [main, avkat-v7-fork-sim-20261105]
     paths:
       - '.github/workflows/katana-cyavkat-v25-end-to-end-v1.yml'
+      - 'process/avkat-fork-simulation-v1/**'
   workflow_dispatch:
     inputs:
       source_url:
@@ -16,6 +17,7 @@ permissions:
 
 jobs:
   fork-deployment:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -251,3 +253,78 @@ jobs:
             cyavKAT/upgrade/deployments/katana-phase2.json
           if-no-files-found: warn
           retention-days: 30
+
+  avkat-v7-fork-simulation:
+    if: github.ref == 'refs/heads/avkat-v7-fork-sim-20261105'
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Execute isolated real-state Katana fork tests and write per-function results
+        shell: bash
+        working-directory: process/avkat-fork-simulation-v1
+        env:
+          PRIVATE_RPC_KATANA: ${{ secrets.RPC_KATANA }}
+        run: |
+          set -uo pipefail
+          RPC="${PRIVATE_RPC_KATANA:-https://katana.drpc.org/}"
+          echo "::add-mask::$RPC"
+          mkdir -p "$RUNNER_TEMP/avkat-fork-v1"
+          echo 'fork-only, no broadcast, no main-branch writes' > "$RUNNER_TEMP/avkat-fork-v1/simulation-mode.txt"
+          cast chain-id --rpc-url "$RPC" > "$RUNNER_TEMP/avkat-fork-v1/chain-id.txt"
+          cast block-number --rpc-url "$RPC" > "$RUNNER_TEMP/avkat-fork-v1/fork-block.txt"
+          echo "chain=$(cat "$RUNNER_TEMP/avkat-fork-v1/chain-id.txt") block=$(cat "$RUNNER_TEMP/avkat-fork-v1/fork-block.txt")"
+          set +e
+          forge test --use 0.8.30 --via-ir --optimize --optimizer-runs 200 --fork-url "$RPC" -vvv 2>&1 | tee "$RUNNER_TEMP/avkat-fork-v1/forge-test.log"
+          result="${PIPESTATUS[0]}"
+          set -e
+          export SIMULATION_EXIT="$result"
+          python3 - <<'PY'
+          import os,re,csv,json,pathlib
+          root=pathlib.Path(os.environ["RUNNER_TEMP"])/"avkat-fork-v1"
+          src=pathlib.Path("test/AVKATForkSimulationV1.t.sol").read_text()
+          log=(root/"forge-test.log").read_text(errors="replace")
+          cases=list(dict.fromkeys(re.findall(r"\bfunction\s+(test_[A-Za-z0-9_]+)\s*\(",src)))
+          matched=re.findall(r"\[(PASS|FAIL)(?::[^\]\r\n]*)?\]\s+(test_[A-Za-z0-9_]+)\(",log)
+          results={name:status for status,name in matched}
+          reasons={}
+          for m in re.finditer(r"\[FAIL(?::([^\]\r\n]*))?\]\s+(test_[A-Za-z0-9_]+)\(",log):
+              reasons[m.group(2)]=m.group(1) or "failed"
+          rows=[dict(function_case=n,status=results.get(n,"NOT_RUN"),
+                     reason=reasons.get(n,"") if results.get(n)=="FAIL" else
+                            ("suite/compilation/setup aborted" if n not in results else ""))
+                for n in cases]
+          with (root/"function-matrix-v1.csv").open("w",newline="") as f:
+              writer=csv.DictWriter(f,fieldnames=["function_case","status","reason"])
+              writer.writeheader();writer.writerows(rows)
+          stats={status:sum(x["status"]==status for x in rows) for status in ("PASS","FAIL","NOT_RUN")}
+          payload={"suite":"AVKAT v7 fork simulation v1","scope":"real Katana chain state on isolated fork",
+                   "fork_block":(root/"fork-block.txt").read_text().strip(),
+                   "chain_id":(root/"chain-id.txt").read_text().strip(),
+                   "forge_exit":int(os.environ["SIMULATION_EXIT"]),
+                   "counts":stats,"cases":rows}
+          (root/"function-matrix-v1.json").write_text(json.dumps(payload,indent=2)+"\n")
+          md=["# AVKAT v7 - GitHub Katana fork simulation v1","",
+              f"Fork block: {payload['fork_block']}; chain ID: {payload['chain_id']}",
+              f"PASS: {stats['PASS']}, FAIL: {stats['FAIL']}, NOT_RUN: {stats['NOT_RUN']}","",
+              "| Contract function / scenario | Status | Failure reason |","|---|---|---|"]
+          md += [f"| {x['function_case']} | {x['status']} | {x['reason'][:230].replace('|','/')} |" for x in rows]
+          (root/"function-matrix-v1.md").write_text("\n".join(md)+"\n")
+          print("\n".join(md))
+          PY
+          exit "$result"
+      - name: Upload compilation, simulation diagnostics, and PASS/FAIL matrix
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avkat-v7-fork-simulation-v1
+          path: |
+            ${{ runner.temp }}/avkat-fork-v1/
+            process/avkat-fork-simulation-v1/out/
+          if-no-files-found: warn
+          retention-days: 14
