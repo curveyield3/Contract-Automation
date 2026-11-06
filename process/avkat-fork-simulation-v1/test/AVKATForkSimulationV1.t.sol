@@ -15,19 +15,19 @@ interface IRouteOwner {
 }
 contract AVKATForkSimulationV1 {
     VmFork internal constant vm=VmFork(address(uint160(uint256(keccak256("hevm cheat code")))));
-    address internal constant SAFE=0xf39087af2107eadbf81f10a64051740a76b6291d;
-    address internal constant MORPHO=0xd50f2dfffd62f94ee4aed9ca05c61d0753268abc;
-    address internal constant KAT=0x7f1f4b4b29f5058fa32cc7a97141b8d7e5abdc2d;
-    address internal constant AVKAT=0x7231dbacdfc968e07656d12389ab20de82fbfceb;
+    address internal constant SAFE=0xF39087af2107EaDBf81f10a64051740A76B6291D;
+    address internal constant MORPHO=0xD50F2DffFd62f94Ee4AEd9ca05C61d0753268aBc;
+    address internal constant KAT=0x7F1f4b4b29f5058fA32CC7a97141b8D7e5ABDC2d;
+    address internal constant AVKAT=0x7231dbaCdFc968E07656D12389AB20De82FbfCeB;
     bytes32 internal constant MARKET=0x80e60fe453223b0f84a567724f88190bef708420d24397157067d424429783e9;
-    address internal constant ROUTER=0x01f9894f92ea9224fecc8c35482e20a05de13582;
-    address internal constant ROUTER_OWNER=0x47623c62f281807d615eeb4a2ceee9d97f9d3c49;
-    address internal constant NPM=0x2659c6085d26144117d904c46b48b6d180393d27;
-    address internal constant STAKER=0xbe12e1b5c4859a3d141412748279b67458f729e9;
-    address internal constant CHARM=0xbc2ae38ce7127854b08ec5956f8a31547f6390ff;
-    address internal constant U=0x203a662b0bd271a6ed5a60edfbd04bfce608fd36; // vbUSDC
-    address internal constant T=0x2dca96907fde857dd3d816880a0df407eeb2d2f2; // vbUSDT
-    address internal constant W=0x0913da6da4b42f538b445599b46bb4622342cf52; // vbWBTC
+    address internal constant ROUTER=0x01F9894f92ea9224fECc8C35482E20a05De13582;
+    address internal constant ROUTER_OWNER=0x47623C62f281807D615eeb4A2CEee9d97F9D3C49;
+    address internal constant NPM=0x2659C6085D26144117D904C46B48B6d180393d27;
+    address internal constant STAKER=0xbe12e1b5C4859a3d141412748279B67458F729E9;
+    address internal constant CHARM=0xBC2AE38CE7127854b08eC5956F8A31547f6390ff;
+    address internal constant U=0x203A662b0BD271A6ed5a60EdFbd04bFce608FD36; // vbUSDC
+    address internal constant T=0x2DCa96907fde857dd3D816880A0df407eeB2D2F2; // vbUSDT
+    address internal constant W=0x0913DA6Da4b42f538B445599b46Bb4622342Cf52; // vbWBTC
     address internal constant BOT=address(0xB071);
     uint256 internal constant NFT_STABLE=492499; // vbUSDC/vbUSDT 0.01%, staked for SAFE
     uint256 internal constant NFT_KAT=493397; // vbUSDC/KAT 0.05%, staked for SAFE
