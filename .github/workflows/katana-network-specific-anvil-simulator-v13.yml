@@ -6,7 +6,7 @@ on:
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/requests/*.json'
       - '.github/workflows/katana-network-specific-anvil-simulator-v13.yml'
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/run-v13.mjs'
-      - 'test/katana/cyavkat-morpho-exit-fork-v2.mjs'
+      - 'test/katana/cyavkat-morpho-partial-fork-v3.mjs'
   workflow_dispatch:
 
 permissions:
@@ -95,7 +95,7 @@ jobs:
             exit 1
           fi
 
-  cyavkat-morpho-full-exit:
+  cyavkat-morpho-partial-exit:
     if: ${{ contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -136,16 +136,16 @@ jobs:
           test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = 747474
           test "$(cast block "$PIN" --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')" = "$HASH"
           echo "Pinned Katana fork block $PIN, hash $HASH. All writes LOCAL to Anvil." >> "$GITHUB_STEP_SUMMARY"
-      - name: Simulate full collateral withdrawal and debt extinguishment
-        run: node test/katana/cyavkat-morpho-exit-fork-v2.mjs
+      - name: Simulate 40 percent collateral withdrawal targeting 76.6 percent LTV
+        run: node test/katana/cyavkat-morpho-partial-fork-v3.mjs
       - name: Display evidence and fork receipts
         if: always()
         shell: bash
         run: |
-          if [ -f cyavkat-morpho-exit-fork-v2.json ]; then
-            cat cyavkat-morpho-exit-fork-v2.json
+          if [ -f cyavkat-morpho-partial-fork-v3.json ]; then
+            cat cyavkat-morpho-partial-fork-v3.json
             echo '### avKAT Morpho unwind simulation' >> "$GITHUB_STEP_SUMMARY"
-            jq -r '"Status: " + .status, "Pinned block: " + (.forkBlock|tostring), "Estimated gas: " + (.gas.estimated // "unavailable")' cyavkat-morpho-exit-fork-v2.json >> "$GITHUB_STEP_SUMMARY"
+            jq -r '"Status: " + .status, "Pinned block: " + (.forkBlock|tostring), "Estimated gas: " + (.gas.estimated // "unavailable")' cyavkat-morpho-partial-fork-v3.json >> "$GITHUB_STEP_SUMMARY"
           else
             echo '::error::Simulation evidence missing'
             tail -100 "$RUNNER_TEMP/avkat-anvil.log" || true
@@ -154,7 +154,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cyavkat-morpho-exit-fork-v2-${{ github.run_id }}
-          path: cyavkat-morpho-exit-fork-v2.json
+          name: cyavkat-morpho-partial-fork-v3-${{ github.run_id }}
+          path: cyavkat-morpho-partial-fork-v3.json
           if-no-files-found: warn
           retention-days: 30
