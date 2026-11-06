@@ -712,6 +712,19 @@ function buildUnitMeta(c,u,schema,queueState=null){
     templateSha256:sha(JSON.stringify(initial)),schemaSha256:sha(JSON.stringify(inputSchema)),
     supportingFileRequirements:assignedExecutionSupport(c,u),evidenceRefs:u.packetIndexPath?[u.packetIndexPath]:[]};
 }
+// Freeze issued answers in the existing campaign paged-prefill format.
+// A Contract-Automation code revision must not rewrite an active unit's schema.
+function freezeStageUnitMetaV1(c,phase,step,stage,units){
+ const current=unitPlan(c),schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
+ const issued=units.filter(u=>!u.issuedMetaRef).map(u=>{
+  const meta=buildUnitMeta(c,u,schema,current.queue.units?.[u.unitId]);
+  meta.step=step;meta.stage=stage;
+  return {unitId:u.unitId,meta};
+ });
+ if(issued.length&&freezeIssuedUnitMetaV1({root:ROOT,campaignPath:c.campaignPath,
+    phase,issued}))publishCanonical(c);
+ return unitPlan(c);
+}
 async function unitNextStep(c){
   const phase=Number(need('phase')),step=Number(need('step'));
   assertAssigned(c,phase);
@@ -730,10 +743,15 @@ async function unitNextStep(c){
         (queue.units?.[dep]?.status==='ACCEPTED'&&!!queue.units[dep].acceptedPath&&!!queue.units[dep].acceptedSha256));
   });
   strict(eligible.length>0,'no eligible units in current controller stage; do not invent work');
-  const roster=eligible.map(u=>{const x=buildUnitMeta(c,u,schema,queue.units[u.unitId]);x.step=step;x.stage=stage;return x;});
+  const committed=freezeStageUnitMetaV1(c,phase,step,stage,eligible);
+  const ids=new Set(eligible.map(u=>u.unitId));
+  const roster=committed.units.filter(u=>ids.has(u.unitId)).map(u=>{
+   const x=buildUnitMeta(c,u,schema,committed.queue.units[u.unitId]);
+   x.step=step;x.stage=stage;return x;
+  });
   const rosterDigest=sha(JSON.stringify(roster));
-  const planSha256=sha(fs.readFileSync(relative(planRel)));
-  const queueSha256=sha(fs.readFileSync(relative(queueRel)));
+  const planSha256=sha(fs.readFileSync(relative(committed.planRel)));
+  const queueSha256=sha(fs.readFileSync(relative(committed.queueRel)));
   const pageLimit=10,pageCount=Math.ceil(roster.length/pageLimit);
   strict(pageCount<=1000,'unit roster pagination limit exceeded');
   for(let i=0;i<pageCount;i++){
