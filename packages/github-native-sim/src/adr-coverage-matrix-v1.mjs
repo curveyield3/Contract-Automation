@@ -54,6 +54,7 @@ export function buildCoverageMatrixV1({inventory, taxonomy, discoveryState = nul
   const v13 = discoveryState?.reviewPolicy === 'correctness-verdict-v13';
   const functionReviews = {};
   const verdictRows = v13 ? discoveryState?.functionVerdicts ?? {} : {};
+  const scopedClassAssessments = v13 ? discoveryState?.scopedClassAssessments ?? [] : [];
   const trivialRefs = new Map();
   if (v13) for (const review of discoveryState?.trivialReviewSubstitutions ?? []) {
     if (review?.acceptedSubstitution !== true) continue;
@@ -139,7 +140,8 @@ export function buildCoverageMatrixV1({inventory, taxonomy, discoveryState = nul
   return {rows, byContract, byClass, gapCount, label:gapCount ? 'PARTIAL_COVERAGE' : 'FULL_COVERAGE',
     // FULL_COVERAGE describes evidence bookkeeping, never universal safety.
     coverageMeaning:'EVIDENCE_COVERAGE_NOT_SECURITY_ASSURANCE',
-    ...(v13 ? {functionReviews,functionReviewSummary,classEvidenceSummary} : {})
+    ...(v13 ? {functionReviews,functionReviewSummary,classEvidenceSummary,
+      scopedClassAssessments} : {})
   };
 }
 
@@ -149,6 +151,7 @@ export function renderCoverageMarkdownV1(matrix) {
     const lines=[
       'Function review and class-level evidence are reported independently.',
       'Function verdicts and literal substitutions do not establish every triggered security class.',
+      'Group and contract assessments retain their original scope; they are not multiplied into function-level verdicts.',
       '',
       'Function reviews: '+f.verdictRecorded+' explicit verdicts; '+
         f.trivialSubstitutions+' qualified literal substitutions; '+
@@ -167,6 +170,21 @@ export function renderCoverageMarkdownV1(matrix) {
         lines.push('| '+[contract,classId,stats.contexts,stats.classSupported,
           stats.classConcerns,stats.classUnresolved,stats.classUnestablished,
           stats.testsPassed,stats.propertyFailures,stats.notAchieved].join(' | ')+' |');
+      }
+    }
+    if (matrix.scopedClassAssessments?.length) {
+      lines.push('', '### Explicit group and contract assessments (original scope)',
+        '| Scope | Authored target | Class | AI assessment | Accepted source |',
+        '|---|---|---|---|---|');
+      const safe = value => String(value??'NOT_RECORDED').replace(/\|/g,'\\|');
+      for (const item of matrix.scopedClassAssessments) {
+        const target=item.scope==='CONTRACT'?item.contract:
+          (Array.isArray(item.contextIds)?item.contextIds.join(', '):null);
+        const ref=item.sourceReference??{};
+        const source=ref.availability==='AVAILABLE'
+          ? (ref.acceptedPath??'')+' # '+(ref.sourceSelector??'')
+          : 'SOURCE_UNAVAILABLE';
+        lines.push('| '+[item.scope,target,item.classId,item.assessment,source].map(safe).join(' | ')+' |');
       }
     }
     lines.push('', '**Evidence coverage: '+matrix.label+'**',
