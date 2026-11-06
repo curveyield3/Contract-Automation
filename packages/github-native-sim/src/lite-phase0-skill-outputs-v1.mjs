@@ -132,6 +132,7 @@ async function buildCore({campaignRoot,skillRoot}){
     targetFunctionOrSelector:e.targetFunctionOrSelector??e.targetFunctionId??e.memberOrName??'UNRESOLVED_FUNCTION',
     valueMayBeSent:['call','send','transfer','transferFrom','safeTransfer','safeTransferFrom'].includes(e.memberOrName)?'POSSIBLE':'NOT_ESTABLISHED',
     sourceLocation:e.sourceLocation??'UNSUPPORTED_SOURCE_LOCATION',
+    ...(e.sourceCallsite?{sourceCallsite:e.sourceCallsite}:{}),
     status:e.status??'CURRENT',
     confidenceClass:e.confidenceClass??'STRUCTURAL_CANDIDATE',
     basis:e.basis??'AUTOMATED_SOURCE_INTELLIGENCE'
@@ -159,6 +160,7 @@ async function buildCore({campaignRoot,skillRoot}){
     mechanism:v.mechanism??v.flowKind??'VALUE_FLOW_CANDIDATE',
     counterpartyExpression:v.counterpartyExpression??v.targetContractId??v.interfaceOrType??'UNRESOLVED_COUNTERPARTY',
     sourceLocation:v.sourceLocation??'UNSUPPORTED_SOURCE_LOCATION',
+    ...(v.sourceCallsite?{sourceCallsite:v.sourceCallsite}:{}),
     status:v.status??'CANDIDATE',
     confidenceClass:v.confidenceClass??'STRUCTURAL_CANDIDATE',
     basis:v.basis??'AUTOMATED_SOURCE_INTELLIGENCE',
