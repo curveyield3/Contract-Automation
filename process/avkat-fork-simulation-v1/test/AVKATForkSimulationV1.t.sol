@@ -78,8 +78,8 @@ contract AVKATForkSimulationV1 {
         uint256 shares=_bal(CHARM);
         require(shares>1,"CHARM_SHARES_MISSING");
         p.ranges=new AVKATConsolidatedSafeModule.RangeExit[](2);
-        p.ranges[0]=AVKATConsolidatedSafeModule.RangeExit(1,full?type(uint128).max:a/2,0,0,false);
-        p.ranges[1]=AVKATConsolidatedSafeModule.RangeExit(2,full?type(uint128).max:b/2,0,0,false);
+        p.ranges[0]=AVKATConsolidatedSafeModule.RangeExit(1,full?type(uint128).max:a/2,0,0,full);
+        p.ranges[1]=AVKATConsolidatedSafeModule.RangeExit(2,full?type(uint128).max:b/2,0,0,full);
         p.vaults=new AVKATConsolidatedSafeModule.VaultExit[](1);
         p.vaults[0]=AVKATConsolidatedSafeModule.VaultExit(CHARM,full?shares:shares/2,0,0);
         p.toKat=new AVKATConsolidatedSafeModule.Swap[](3);
@@ -220,13 +220,15 @@ contract AVKATForkSimulationV1 {
     }
     function test_withdrawRange_NFT492499_Full() public {
         require(_liq(NFT_STABLE)>0,"NFT_STABLE_EMPTY");
-        vm.prank(BOT);mod.withdrawRange(1,type(uint128).max,0,0,false);
-        require(_liq(NFT_STABLE)==0,"NFT_STABLE_FULL_WRONG");
+        vm.prank(BOT);mod.withdrawRange(1,type(uint128).max,0,0,true);
+        (bool found,)=NPM.staticcall(abi.encodeWithSignature("ownerOf(uint256)",NFT_STABLE));
+        require(!found,"NFT_STABLE_FULL_NOT_BURNED");
     }
     function test_withdrawRange_NFT493397_Full() public {
         require(_liq(NFT_KAT)>0,"NFT_KAT_EMPTY");
-        vm.prank(BOT);mod.withdrawRange(2,type(uint128).max,0,0,false);
-        require(_liq(NFT_KAT)==0,"NFT_KAT_FULL_WRONG");
+        vm.prank(BOT);mod.withdrawRange(2,type(uint128).max,0,0,true);
+        (bool found,)=NPM.staticcall(abi.encodeWithSignature("ownerOf(uint256)",NFT_KAT));
+        require(!found,"NFT_KAT_FULL_NOT_BURNED");
     }
     function test_addRangeLiquidity_NFT492499() public {
         uint128 before=_liq(NFT_STABLE);require(before>1,"NFT_STABLE_EMPTY");
@@ -265,7 +267,7 @@ contract AVKATForkSimulationV1 {
         AVKATConsolidatedSafeModule.Deloop memory p=
             AVKATConsolidatedSafeModule.Deloop({
                 maxFlash:200 ether,
-                avkatToSell:uint256(collateral)*95/100,
+                avkatToSell:uint256(collateral)/5,
                 maxSafeKatContribution:10 ether,
                 keepKat:0,
                 minSaleKat:1 ether,
@@ -279,7 +281,9 @@ contract AVKATForkSimulationV1 {
         uint128 a=_liq(NFT_STABLE); uint128 b=_liq(NFT_KAT);
         uint256 shares=_bal(CHARM);require(a>1&&b>1&&shares>1,"MISSING_HALF_LIQUIDITY");
         _reportState("HALF_BEFORE");
-        vm.prank(BOT);mod.atomicLoopUp(_bothWithCharm(false),_loopRequest());
+        AVKATConsolidatedSafeModule.PreSteps memory steps=_bothWithCharm(false);
+        AVKATConsolidatedSafeModule.LoopUp memory req=_loopRequest();
+        vm.prank(BOT);mod.atomicLoopUp(steps,req);
         require(_liq(NFT_STABLE)==a-a/2,"HALF_STABLE_NFT_NOT_WITHDRAWN");
         require(_liq(NFT_KAT)==b-b/2,"HALF_KAT_NFT_NOT_WITHDRAWN");
         require(_bal(CHARM)==shares-shares/2,"HALF_CHARM_NOT_WITHDRAWN");
@@ -290,8 +294,12 @@ contract AVKATForkSimulationV1 {
         uint128 a=_liq(NFT_STABLE); uint128 b=_liq(NFT_KAT);
         uint256 shares=_bal(CHARM);require(a>0&&b>0&&shares>0,"MISSING_FULL_LIQUIDITY");
         _reportState("FULL_BEFORE");
-        vm.prank(BOT);mod.atomicLoopUp(_bothWithCharm(true),_loopRequest());
-        require(_liq(NFT_STABLE)==0&&_liq(NFT_KAT)==0,"FULL_NFT_NOT_WITHDRAWN");
+        AVKATConsolidatedSafeModule.PreSteps memory steps=_bothWithCharm(true);
+        AVKATConsolidatedSafeModule.LoopUp memory req=_loopRequest();
+        vm.prank(BOT);mod.atomicLoopUp(steps,req);
+        (bool existsA,)=NPM.staticcall(abi.encodeWithSignature("ownerOf(uint256)",NFT_STABLE));
+        (bool existsB,)=NPM.staticcall(abi.encodeWithSignature("ownerOf(uint256)",NFT_KAT));
+        require(!existsA&&!existsB,"FULL_NFT_NOT_BURNED");
         require(_bal(CHARM)==0,"FULL_CHARM_NOT_WITHDRAWN");
         require(mod.ltvOf()<=mod.targetLtv(),"FULL_LOOP_LTV_TOO_HIGH");
         _reportState("FULL_AFTER");
