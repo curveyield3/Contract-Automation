@@ -614,22 +614,30 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
       'structuralInventory'
     ]);
-    const deps=new Map();
-    for(const e of si.externalInterfaces??[]){
-      const key=e.dependencyOrInterface??e.interfaceId;
-      if(!key||deps.has(key))continue;
-      deps.set(key,{
-        dependencyKey:e.interfaceId??key,
-        identity:key,
+    // One assessment subject per original Source Intelligence callsite, not per dependency name.
+    // Preserve the original interface ID when unique; for legacy missing/ambiguous IDs,
+    // use the exact immutable Source Intelligence array selector as the source-bound key.
+    const interfaces=Array.isArray(si.externalInterfaces)?si.externalInterfaces:[];
+    const sourceRef=path.relative(repoFile(root,campaignPath),siEntry.file).split(path.sep).join('/');
+    const idCounts=new Map();
+    for(const e of interfaces){
+      const id=typeof e?.interfaceId==='string'?e.interfaceId.trim():'';
+      if(id)idCounts.set(id,(idCounts.get(id)??0)+1);
+    }
+    const deps=interfaces.map((e,index)=>{
+      const id=typeof e?.interfaceId==='string'?e.interfaceId.trim():'';
+      return {
+        dependencyKey:id&&idCounts.get(id)===1?id:`SOURCE_INTELLIGENCE:${sourceRef}#externalInterfaces[${index}]`,
+        identity:e?.dependencyOrInterface??e?.interfaceOrType??e?.targetContractId??'UNRESOLVED_INTERFACE',
         trustAssumptions:'<REQUIRED>',
         failureModes:'<REQUIRED>',
         authorityImplications:'<REQUIRED>',
         securitySignificance:'<REQUIRED>',
         laterEvidenceNeeds:'<REQUIRED>',
         automationOwnedFields:['dependencyKey','identity']
-      });
-    }
-    if(deps.size)form.actions['step-3'].outputs.dependencyAssessments=[...deps.values()];
+      };
+    });
+    if(deps.length)form.actions['step-3'].outputs.dependencyAssessments=deps;
   }
 
   if(sequence===2){
