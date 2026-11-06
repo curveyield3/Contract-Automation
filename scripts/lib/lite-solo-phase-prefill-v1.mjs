@@ -530,7 +530,23 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     ])
   };
   if(sequence>4){
-    const inherited=inheritedQuestionHistoryRefsV1({root,campaignPath,sequence});
+    // Phase 10 receives fresh controller-collected rosters when available;
+    // all other successor stages inherit their sealed canonical references.
+    // This is mechanical provenance copying, never security disposition.
+    const source=sequence===10&&Array.isArray(prefillContext.questionHistoryRosters)
+      ?prefillContext.questionHistoryRosters:null;
+    const inherited=source
+      ?{refs:source.flatMap(r=>r?.histories??[]).filter(r=>
+          r?.availability==='AVAILABLE'||r?.previousCommittedIndex),
+        unavailable:source.flatMap(r=>
+          (r?.histories??[]).filter(x=>
+            x?.availability!=='AVAILABLE'&&!x?.previousCommittedIndex)
+          .map(x=>({phaseSequence:r.phaseSequence,unitId:x.unitId,
+            indexPath:x.indexPath??null,availability:x.availability??'UNREADABLE'}))
+        ).concat(source.filter(r=>r?.availability!=='COLLECTED_NONBLOCKING')
+          .map(r=>({phaseSequence:r.phaseSequence,unitId:'UNAVAILABLE',
+            indexPath:null,availability:r.availability??'UNREADABLE'})))}
+      :inheritedQuestionHistoryRefsV1({root,campaignPath,sequence});
     if(inherited.refs.length||inherited.unavailable.length){
       form.automationInputs.questionHistoryRefs=inherited.refs;
       form.automationInputs.questionHistoryUnavailable=inherited.unavailable;
