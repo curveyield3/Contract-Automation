@@ -1,0 +1,17 @@
+{
+  "factory": "0x4e59b44847b379578588920ca78fbf26c0b4956c",
+  "salt": "0x2e493dc67ffd78f90fb9c524bacf0090e19b26fde46f8a3f33844f3cf28dbc84",
+  "predictedModuleAddress": "0xb0832afff2387edb89d799b967b49f910efc343d",
+  "initcodeHash": "0x6b3cf75fe5d8bcdb6a4d32e84b73a6fb0ef541c83cab40d5a6ebe1b5607b8bb9",
+  "creationBytes": 23571,
+  "constructorArgsBytes": 160,
+  "runtimeBytes": 22284,
+  "callDataBytes": 23763,
+  "sourceSha256": "ecd0142a4c2fb6e1cc4d608f4d4d66d3348606c3467a6dc78a26dc62b1b6125e",
+  "safe": "0xf39087af2107eadbf81f10a64051740a76b6291d",
+  "morpho": "0xd50f2dfffd62f94ee4aed9ca05c61d0753268abc",
+  "KAT": "0x7f1f4b4b29f5058fa32cc7a97141b8d7e5abdc2d",
+  "avKAT": "0x7231dbacdfc968e07656d12389ab20de82fbfceb",
+  "marketId": "0x80e60fe453223b0f84a567724f88190bef708420d24397157067d424429783e9",
+  "forkTestsPassed": true
+}
