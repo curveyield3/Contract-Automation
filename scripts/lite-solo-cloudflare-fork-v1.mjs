@@ -794,6 +794,8 @@ function submittedUnitFile(c,phase,u,item={}){
  const options=[];
  for(const worker of fs.readdirSync(unitRoot)){
   strict(/^cfw-[A-Za-z0-9_.-]{1,135}$/.test(worker),'unrecognized Worker submission owner');
+  if(typeof (item.worker_id??item.workerId)==='string'&&
+     (item.worker_id??item.workerId)!==worker)continue;
   const epochs=path.join(unitRoot,worker);
   if(!fs.statSync(epochs).isDirectory())continue;
   for(const entry of fs.readdirSync(epochs)){
@@ -1340,6 +1342,8 @@ async function unitValidateSingle(c,item,{publish=true,notify=true}={}){
   if(!stageAcceptedV1(current,u,c.campaignPath))return;
   if(Number.isSafeInteger(item.attempt)&&Number.isSafeInteger(state.sourceAttempt)&&
      item.attempt!==state.sourceAttempt)return;
+  if(typeof (item.worker_id??item.workerId)==='string'&&state.sourceWorkerId&&
+     (item.worker_id??item.workerId)!==state.sourceWorkerId)return;
   if(!notify)return {status:'ACCEPTED',acceptedPath:state.acceptedPath};
   return callback('/fork/unit-verified',{status:'ACCEPTED',
    campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
@@ -1348,9 +1352,10 @@ async function unitValidateSingle(c,item,{publish=true,notify=true}={}){
    phaseEpoch:current.plan.phaseEpoch,authorityDigest:c.directory.authorityDigest,
    deficiencies:[],acceptedPath:state.acceptedPath,validationDelegatedTo:'CLOUDFLARE_WORKER'});
  }
- const selected=await materializeBoundSubmissionV1(c,u,submittedUnitFile(c,phase,u,item));
- strict(selected.epoch>=Number(state?.claimEpoch??0),
+ const workerAttempt=submittedUnitFile(c,phase,u,item);
+ strict(workerAttempt.epoch>=Number(state?.claimEpoch??0),
   'stale Worker claim epoch does not match active unit');
+ const selected=await materializeBoundSubmissionV1(c,u,workerAttempt);
  const actualSha=sha(fs.readFileSync(selected.filename));
  state.status='CLAIMED';state.workerId=selected.workerId;
  state.claimEpoch=selected.epoch;state.claimToken=randomUUID();
