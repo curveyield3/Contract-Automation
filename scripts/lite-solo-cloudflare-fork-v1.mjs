@@ -855,15 +855,24 @@ function checkMachineAnswerLiteralV1(spec,value){
    typeof row.comparison==='string'&&row.comparison.trim()),
    'siblingComparisons require exact identity, signature and comparison');
  if(spec.field==='candidate'||spec.field==='candidates'){
+  const [collection]=JSON.parse(spec.bindingId);
   const candidates=Array.isArray(value)?value:[value];
-  for(const candidate of candidates)
+  const requireClassification=collection==='rows'||spec.field==='candidates';
+  for(const candidate of candidates){
    strict(candidate&&typeof candidate==='object'&&!Array.isArray(candidate)&&
     typeof candidate.title==='string'&&candidate.title.trim()&&
     typeof candidate.description==='string'&&candidate.description.trim()&&
-    typeof candidate.classId==='string'&&candidate.classId.trim()&&
-    ['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(candidate.severity)&&
-    Array.isArray(candidate.anchors)&&candidate.anchors.every(x=>typeof x==='string'&&x.trim()),
-    'candidate must have typed class, severity, description and source anchors');
+    Array.isArray(candidate.anchors)&&candidate.anchors.length>0&&
+    candidate.anchors.every(x=>typeof x==='string'&&x.trim()),
+    'candidate must have title, description and actual source anchors');
+   if(requireClassification)
+    strict(typeof candidate.classId==='string'&&candidate.classId.trim()&&
+     ['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(candidate.severity),
+     'function-wide V13 discovery candidates need exact class and severity');
+   else if(candidate.severity!==undefined)
+    strict(['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(candidate.severity),
+     'optional candidate severity must be an issued literal token');
+  }
  }
 }
 
