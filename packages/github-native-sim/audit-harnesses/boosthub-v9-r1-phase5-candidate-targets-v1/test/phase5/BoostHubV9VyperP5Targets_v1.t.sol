@@ -98,7 +98,7 @@ contract BoostHubV9VyperP5TargetsV1 {
     VmBoostV9 constant vm=VmBoostV9(address(uint160(uint256(keccak256("hevm cheat code")))));
     address constant USER=address(0xBEE1);
     // This relative location is installed by the existing audit-harness manifest.
-    string constant VYPER_BYTECODE="test/phase5/BoostHubStaking_v22.creation.hex";
+    string constant VYPER_BYTECODE="artifacts_v6/phase5/BoostHubStaking_v22.creation.hex";
     function _staking(BoostV9BehaviorTokenV1 lp,BoostV9VyperHubStubV1 hub,address[8] memory configured)
         internal returns(IBoostVyperV22 staking) {
         bytes memory sourceCode=vm.parseBytes(vm.readFile(VYPER_BYTECODE));
