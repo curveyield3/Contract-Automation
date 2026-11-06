@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
-import {repoFile,readJson,writeJson,loadPhaseSchema,validateWorkForm,requiredFile} from './lite-solo-phase-work-v1.mjs';
+import {repoFile,readJson,writeJson,loadPhaseSchema,validateWorkForm,requiredFile,attachOriginalCanonicalEvidenceRefsV1} from './lite-solo-phase-work-v1.mjs';
 import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1} from '../../packages/github-native-sim/src/adr-discovery-validators-v1.mjs';
 import {reviewInventoryRelV1} from '../../packages/github-native-sim/src/adr-review-inventory-v1.mjs';
 import {buildUnitPacketV1,writeUnitPacketIndexV1,buildDiscoverySummaryV1,readUnitPacketV1} from '../../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
@@ -1035,6 +1035,10 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
  const updated=applyPhaseBoundaryPrefill({root,campaignPath:campaign,authorityRoot:authorityFor(directory),sequence:4,
   form,derivedInputPaths:[...asArray(assignment.derivedInputPaths),path.posix.join(campaign,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')],
   predecessorReceiptPath:assignment.predecessorReceiptPath});
+ // Discovery reconstructs the Phase-4 work form; preserve the original
+ // receipt-bound references from every earlier accepted substantive phase.
+ attachOriginalCanonicalEvidenceRefsV1({
+   root,campaignPath:campaign,directory,sequence:4,form:updated});
  // FLOW and ATTACK histories are available to the reconciliation packets of
  // THIS SAME PHASE, before there is any sealed phase-4 canonical output.
  // Original accepted snapshots and original checkpoint files stay untouched.
