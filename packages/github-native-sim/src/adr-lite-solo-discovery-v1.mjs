@@ -11,7 +11,7 @@ import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-solo-phase-
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
 import {independentSpecItemsV13} from './adr-lite-solo-independent-spec-v1.mjs';
 // V13 qualification status is assessed independently after real blinded audit runs.
-const MACHINE_AUTHORITY_V1='Machine Intelligence Audit Controller/Audit Skill v1';
+const MACHINE_AUTHORITY_V7='Machine Intelligence Audit Controller/Audit Skill v7';
 
 const pathJoin=(campaign,relative)=>path.posix.join(campaign,'work/phase-04/discovery',relative);
 const asset=(root,campaign,name)=>reviewInventoryRelV1(root,campaign,name);
@@ -173,7 +173,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const contractChecks=role==='ATTACK'?[]:[...new Set(primary.map(id=>contextFor(inventory,id)?.qualifiedContainer).filter(Boolean))]
   .filter(name=>ownerUnit.get(name)===unitId).sort()
   .map(contract=>({contract,classId:'UPGRADE_INIT_STORAGE',reviewChecks:arr(upgradeClass?.reviewChecks)}));
- const verdictV13=authorityRoot===MACHINE_AUTHORITY_V1;
+ const verdictV13=authorityRoot===MACHINE_AUTHORITY_V7;
  const trivialContextIds=role==='ATTACK'?[]:primary.filter(id=>verdictV13?
    isLiteralConstantV13(contextFor(inventory,id)):TRIVIAL_KINDS_V1.has(contextFor(inventory,id)?.kind));
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
@@ -431,7 +431,7 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
  const missing=!plan||!units.length;
  if(missing || (/\/lite-solo-v[3456]$/.test(authorityRoot) && (plan?.payload?.gaps??[]).some(g=>['INVENTORY_INCOMPLETE','PLAN_BUILD_ERROR'].includes(g?.code))))
    throw new Error('LITE_SOLO_DISCOVERY_UNAVAILABLE: empty or incomplete required review plan is not complete coverage');
- if(directory.mode!=='LITE_SOLO'||authorityRoot!==MACHINE_AUTHORITY_V1)throw new Error('Machine Intelligence discovery authority mismatch');
+ if(directory.mode!=='LITE_SOLO'||authorityRoot!==MACHINE_AUTHORITY_V7)throw new Error('Machine Intelligence discovery authority mismatch');
  const state=head(directory,now,'curveyield-discovery-state-v1',{
   status:'RUNNING',order,activeUnitId:order[0],
    sequentialSingleReviewer:true,
