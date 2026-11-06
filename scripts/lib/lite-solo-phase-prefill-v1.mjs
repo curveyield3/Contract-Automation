@@ -367,7 +367,13 @@ function specialistDiscoveryRoutesV1({registry,phase}){
     machineSignalStatus:d.machineClassification?.status??'UNAVAILABLE',
     aiApplicabilityStatus:d.aiApplicabilityStatus??'NOT_AUTHORED',
     originalMethodologySelector:'#/decisions/'+index+'/originalDomainMethodology',
-    exactMachineEvidenceSelector:'#/decisions/'+index+'/machineClassification'
+    exactMachineEvidenceSelector:'#/decisions/'+index+'/machineClassification',
+    originalDomainMethodology:structuredClone(d.originalDomainMethodology??null),
+    exactMachineTriggerFacts:structuredClone(d.triggerFacts??[]),
+    machineEvidenceReference:{
+      matrixPath:registry?.matrixPath??null,
+      registrySourceSelector:'#/decisions/'+index+'/machineClassification'
+    }
   }));
   return {
     artifactType:'MIMO_SPECIALIST_AI_AUTHORING_ROUTES',
