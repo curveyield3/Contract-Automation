@@ -837,6 +837,54 @@ function machineAnswerDirectoryV1(u,template,routing){
   immutableControllerFields:true,neverInferFromProse:true,noActionsPerQuestion:true};
 }
 
+// Only exact keys present in controller-bound predecessor data or ACCEPTED
+// same-phase records qualify as references to existing audit subjects.
+function controllerAcceptedSubjectIdsV1(c){
+ const out=new Set(),paths=new Set(),phase=Number(c.directory.currentAssignment.phaseSequence);
+ for(let n=1;n<phase;n++){
+  const nn=String(n).padStart(2,'0');
+  paths.add(path.posix.join(c.campaignPath,'derived/phase-'+n,'PHASE_'+nn+'_CANONICAL_DATA_v1.json'));
+ }
+ if(phase>=4)
+  paths.add(path.posix.join(c.campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json'));
+ for(const rel of (c.directory.currentAssignment.derivedInputPaths??[]))
+  if(typeof rel==='string'&&rel.startsWith(c.campaignPath+'/'))paths.add(rel);
+ if([4,5,6].includes(phase)){
+  const current=unitPlan(c);
+  for(const record of Object.values(current.queue.units??{}))
+   if(record?.status==='ACCEPTED'&&typeof record.acceptedPath==='string'&&
+      record.acceptedPath.startsWith(c.campaignPath+'/'))paths.add(record.acceptedPath);
+ }
+ const keyNames=new Set(['tempKey','candidateKey','canonicalId','findingKey',
+  'obligationId','subjectKey','recordKey','groupKey','requirementKey','id',
+  'nodeId','candidateTempKeyOrNone']);
+ let visited=0;
+ for(const rel of paths){
+  let data;
+  try{if(!fs.existsSync(relative(rel)))continue;data=read(rel);}
+  catch{continue;}
+  const pending=[data];
+  while(pending.length&&visited++<150000){
+   const item=pending.pop();
+   if(!item||typeof item!=='object')continue;
+   if(Array.isArray(item)){for(const v of item)if(v&&typeof v==='object')pending.push(v);continue;}
+   for(const [k,v] of Object.entries(item)){
+    if(keyNames.has(k)&&typeof v==='string'&&v.trim()&&
+       !v.startsWith('<')&&!EXPLICIT_NEGATIVES.has(v)&&!/^NO_/.test(v))
+     out.add(v);
+    else if(v&&typeof v==='object')pending.push(v);
+   }
+  }
+ }
+ return out;
+}
+function bindExistingSubjectV1(ids,field,value){
+ if(value===undefined||value===null||isPendingAnswerValue(value))return false;
+ strict(typeof value==='string'&&ids.has(value),
+  'new '+field+' must resolve to exact accepted controller subject identity');
+ return true;
+}
+
 function assembleBoundAnswersV1(c,u,submitted){
  strict(submitted?.schemaVersion===MACHINE_BOUND_ANSWERS_V1&&submitted.unitId===u.unitId,
   'bound answer packet does not match the issued unit');
@@ -858,6 +906,7 @@ function assembleBoundAnswersV1(c,u,submitted){
   return answers.has(id)?{found:true,value:answers.get(id)}:{found:false};
  };
  const result=structuredClone(meta.inputTemplate);
+ const knownSubjectIds=controllerAcceptedSubjectIdsV1(c);
  let candidateOrdinal=0;
  const candidateWithId=value=>{
   if(!value||typeof value!=='object'||Array.isArray(value))return value;
@@ -910,6 +959,13 @@ function assembleBoundAnswersV1(c,u,submitted){
    }
    strict(input&&typeof input==='object'&&!Array.isArray(input),'append record is not a typed object');
    const value=structuredClone(input);
+   for(const ref of ['subjectKey','candidateKey','obligationId','findingKey']){
+    if(Object.hasOwn(value,ref)){
+     const policy=route.recordFieldTemplate.find(x=>x.field===ref);
+     if(policy?.source==='BIND_EXISTING_CONTROLLER_SUBJECT')
+      bindExistingSubjectV1(knownSubjectIds,ref,value[ref]);
+    }
+   }
    for(const spec of route.recordFieldTemplate){
     if(spec.source==='AI_EXACT_ENUM'&&Object.hasOwn(value,spec.field))
      strict(typeof value[spec.field]==='string'&&
@@ -917,6 +973,9 @@ function assembleBoundAnswersV1(c,u,submitted){
        'APPEND enum must be an exact AI-authored permitted token: '+spec.field);
     if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW')
      value[spec.field]=allocatedRecordId(phase,u.unitId,spec.field,i+1);
+    if(spec.source==='BIND_EXISTING_CONTROLLER_SUBJECT')
+     strict(bindExistingSubjectV1(knownSubjectIds,spec.field,value[spec.field]),
+      'APPEND field requires accepted subject identity: '+spec.field);
     if(['CONTROLLER_COLLECT_AFTER_EXECUTION','CONTROLLER_VERIFIED_EXECUTION'].includes(spec.source)){
      if(spec.verifiedEvidence&&Object.hasOwn(spec.verifiedEvidence,'value'))
       value[spec.field]=structuredClone(spec.verifiedEvidence.value);
