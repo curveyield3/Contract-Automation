@@ -388,11 +388,27 @@ function unresolvedMachineFieldV1(field,old){
 }
 
 function controllerAnswerFieldBindingV1({c,fieldName,sourceRow,definition,itemField,
- actionPrefillFields=[],actionCollectedFields=[]}){
+ actionPrefillFields=[],actionCollectedFields=[],appendNew=false}){
  const value=sourceRow?.[itemField],allowed=definition?.itemFieldAllowedValues?.[itemField]??null;
  const collected=[...(definition?.controllerCollectedFields??[]),...actionCollectedFields].includes(itemField);
  const owned=[...(definition?.controllerPrefillFields??[]),...actionPrefillFields].includes(itemField)||
    (Array.isArray(sourceRow?.automationOwnedFields)&&sourceRow.automationOwnedFields.includes(itemField));
+ if(appendNew&&owned&&(value===undefined||isPendingAnswerValue(value))){
+  // No prefilled value exists for an APPEND; never copy or erase a new row.
+  if(MECHANICAL_ID_FIELDS.has(itemField))
+   return {field:itemField,source:'ALLOCATE_MECHANICALLY_IF_NEW',
+    deterministicRule:'MI_PHASE_ISSUED_UNIT_FIELD_RECORD_ORDINAL',
+    issuer:'GITHUB_CONTROLLER',selector:'phaseSequence/unitId/field/itemOrdinal',
+    collisionPolicy:'DO_NOT_OVERWRITE_PREVIOUS_IDS'};
+  if(allowed?.length)return {field:itemField,source:'AI_EXACT_ENUM',
+   allowedValues:[...allowed],conversion:'LITERAL_TOKEN_ONLY'};
+  if(['subjectKey','candidateKey','obligationId','findingKey'].includes(itemField))
+   return {field:itemField,source:'BIND_EXISTING_CONTROLLER_SUBJECT',
+    authoritativeSelector:'ISSUED_ROW_OR_ACCEPTED_PREDECESSOR_EXACT_KEY',
+    unmatchedIdentityPolicy:'UNRESOLVED_DO_NOT_INVENT_EXISTING_SUBJECT'};
+  return {field:itemField,source:'AI_SECURITY_ANSWER',
+   answerMode:'VERBATIM_UNLESS_SCHEMA_REQUIRES_ARRAY_OR_OBJECT'};
+ }
  if(collected)return {field:itemField,source:'CONTROLLER_COLLECT_AFTER_EXECUTION',
   evidenceKind:MACHINE_EXECUTION_FIELDS.get(itemField)??'CONTROLLER_BOUND_EXECUTION_RESULT',
   exactControllerInput:value??null,requiresAuthenticatedIngestion:true,
@@ -495,7 +511,7 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
       ...actionPrefillFields.filter(f=>MECHANICAL_ID_FIELDS.has(f))])]
      .map(itemField=>controllerAnswerFieldBindingV1({
       c,fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField,
-      actionPrefillFields,actionCollectedFields})) :[],
+      actionPrefillFields,actionCollectedFields,appendNew:u.kind==='APPEND'})) :[],
   entries
  };
 }
@@ -925,7 +941,8 @@ function machineAnswerDirectoryV1(u,template,routing){
       :(routing.scalarAnswer?.requiredArray?'array':'ISSUED_FIELD_TYPE'),
      routing.scalarAnswer?.allowedValues??null);
    else for(const b of entry.bindings){
-    if(['AI_SECURITY_ANSWER','AI_EXACT_ENUM','AI_EXACT_SOURCE_BOUND_REFERENCES'].includes(b.source))
+    if(['AI_SECURITY_ANSWER','AI_EXACT_ENUM','AI_EXACT_SOURCE_BOUND_REFERENCES',
+      'BIND_EXISTING_CONTROLLER_SUBJECT'].includes(b.source))
      push('entries',entry.entryKey,b.field,b.allowedValues?.length?'string':
       machineAnswerExpectedTypeV1(b.field,entry.valueKind,b.answerMode),b.allowedValues??null);
    }
@@ -1049,15 +1066,21 @@ function assembleBoundAnswersV1(c,u,submitted){
    if(entry.valueKind==='OBJECT'){
     for(const spec of entry.bindings){
      const field=spec.field;
-     if(spec.source==='CONTROLLER_VERIFIED_EXECUTION'||
-        spec.source==='CONTROLLER_COLLECT_AFTER_EXECUTION'){
-      target.value=target.value??{};
-      target.value[field]=spec.verifiedEvidence&&Object.hasOwn(spec.verifiedEvidence,'value')?
-       structuredClone(spec.verifiedEvidence.value):
-       unresolvedMachineFieldV1(field,target.value[field]);
+     if(['CONTROLLER_VERIFIED_EXECUTION','CONTROLLER_COLLECT_AFTER_EXECUTION'].includes(spec.source))
+      continue;
+     if(spec.source==='PRESERVE_ISSUED_VALUE')continue;
+     if(spec.source==='BIND_EXISTING_CONTROLLER_SUBJECT'){
+      const a=get('entries',entry.entryKey,field);
+      if(a.found){
+       if(target.value?.[field]!==undefined&&!isPendingAnswerValue(target.value[field]))
+        strict(target.value[field]===a.value,'issued subject identity is immutable');
+       else{
+        bindExistingSubjectV1(knownSubjectIds,field,a.value);
+        target.value=target.value??{};target.value[field]=a.value;
+       }
+      }
       continue;
      }
-     if(['PRESERVE_ISSUED_VALUE','BIND_EXISTING_CONTROLLER_SUBJECT'].includes(spec.source))continue;
      if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW'){
       if(isPendingAnswerValue(target.value[field])||target.value[field]===undefined)
        target.value[field]=allocatedRecordId(phase,u.unitId,field,i+1);
@@ -1065,6 +1088,13 @@ function assembleBoundAnswersV1(c,u,submitted){
       const a=get('entries',entry.entryKey,field);
       if(a.found)target.value[field]=structuredClone(a.value);
      }
+    }
+    // Resolve proof fields only after AI-authored subject bindings have been applied.
+    for(const spec of entry.bindings){
+     if(!['CONTROLLER_VERIFIED_EXECUTION','CONTROLLER_COLLECT_AFTER_EXECUTION'].includes(spec.source))continue;
+     const field=spec.field,verified=machineVerifiedValueV1(c,target.value,field);
+     target.value[field]=verified&&Object.hasOwn(verified,'value')?
+      structuredClone(verified.value):unresolvedMachineFieldV1(field,target.value[field]);
     }
    }else{
     const a=get('entries',entry.entryKey,'$value');
@@ -1123,10 +1153,17 @@ function assembleBoundAnswersV1(c,u,submitted){
      strict(bindExistingSubjectV1(knownSubjectIds,spec.field,value[spec.field]),
       'APPEND field requires accepted subject identity: '+spec.field);
     if(['CONTROLLER_COLLECT_AFTER_EXECUTION','CONTROLLER_VERIFIED_EXECUTION'].includes(spec.source)){
-     value[spec.field]=spec.verifiedEvidence&&Object.hasOwn(spec.verifiedEvidence,'value')?
-      structuredClone(spec.verifiedEvidence.value):
-      unresolvedMachineFieldV1(spec.field,undefined);
+     const verified=machineVerifiedValueV1(c,value,spec.field);
+     value[spec.field]=verified&&Object.hasOwn(verified,'value')?
+      structuredClone(verified.value):unresolvedMachineFieldV1(spec.field,undefined);
     }
+   }
+   // Mandatory field presence is a transport/schema property, not a security verdict.
+   for(const field of (fieldDef?.itemRequiredFields??[])){
+    const item=value[field];
+    strict(Object.hasOwn(value,field)&&item!==null&&item!==undefined&&
+      !(typeof item==='string'&&isPendingAnswerValue(item)),
+      'APPEND required field absent: '+route.field+'.'+field);
    }
    return {key,value};
   });
