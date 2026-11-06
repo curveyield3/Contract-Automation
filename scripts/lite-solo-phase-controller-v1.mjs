@@ -143,7 +143,9 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
   invalid.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:invalidationRecords,importedAt:now});
 
   for(const record of obligationRecords){
-    normalizeFormalObligationsIntoLedger({ledger,items:record.value,originPhase:schema.phase,canonicalRel,now,root,authorityRoot});
+    normalizeFormalObligationsIntoLedger({ledger,items:record.value,originPhase:schema.phase,
+      canonicalRel,now,root,authorityRoot,
+      sourceCollectionPath:record.path,sourceKind:'AI_AUTHORED_PHASE_OUTPUT'});
   }
 
   const identityComparison=canonical?.automationInputs?.identityComparison;
@@ -163,7 +165,9 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
     if(registry){
       graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry',value:{path:domainRegistryPath,decisions:registry.decisions??[]}}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
       ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry.generatedObligations',value:registry.generatedObligations??[]}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
-      normalizeFormalObligationsIntoLedger({ledger,items:registry.generatedObligations??[],originPhase:schema.phase,canonicalRel,now,root,authorityRoot});
+      normalizeFormalObligationsIntoLedger({ledger,items:registry.generatedObligations??[],
+        originPhase:schema.phase,canonicalRel,now,root,authorityRoot,
+        sourceCollectionPath:'generatedObligations',sourceKind:'CONTROLLER_MACHINE_ROUTING'});
     }
   }
 
@@ -369,12 +373,20 @@ function importedFormalObligations(ledger){
   return out;
 }
 function finalIndexObligations(ledger){
-  const normalized=(ledger?.obligations??[]).filter(o=>!['CLOSED','SATISFIED','NOT_APPLICABLE','SUPERSEDED'].includes(String(o.status??'OPEN').toUpperCase()));
-  const imported=importedFormalObligations(ledger);
+  const recorded=new Map((ledger?.obligations??[])
+    .filter(o=>typeof o?.obligationId==='string'&&o.obligationId.trim())
+    .map(o=>[o.obligationId,o]));
+  // The ledger's actual accepted disposition and required reviewer win.
+  // Raw imports cannot resurrect an already SATISFIED/NOT_APPLICABLE item.
+  const normalized=[...recorded.values()].filter(o=>
+    !['CLOSED','SATISFIED','NOT_APPLICABLE','SUPERSEDED']
+      .includes(String(o.status??'OPEN').toUpperCase()));
+  const missing=importedFormalObligations(ledger).filter(o=>
+    !recorded.has(String(o.obligationId??'')));
   const byId=new Map();
-  for(const o of [...normalized,...imported]){
-    const id=String(o.obligationId??'').trim(); if(!id) continue;
-    if(!byId.has(id)||String(byId.get(id)?.status??'').startsWith('OPEN_IMPORTED')) byId.set(id,o);
+  for(const o of [...normalized,...missing]){
+    const id=String(o.obligationId??'').trim();if(!id)continue;
+    if(!byId.has(id))byId.set(id,o);
   }
   return [...byId.values()];
 }
@@ -589,14 +601,17 @@ function restoreLedgerBeforeMasterPhase({root,campaignPath,authorityRoot,earlies
     const schema=loadPhaseSchema(root,authorityRoot,phase).schema;
     const canonicalRel=canonicalRelFor(campaignPath,phase);
     for(const dot of schema.bookkeepingMappings?.obligationRecordPaths??[]){
-      normalizeFormalObligationsIntoLedger({ledger,items:getByPath(canonical,dot),originPhase:phase,canonicalRel,now,root,authorityRoot});
+      normalizeFormalObligationsIntoLedger({ledger,items:getByPath(canonical,dot),
+        originPhase:phase,canonicalRel,now,root,authorityRoot,
+        sourceCollectionPath:dot,sourceKind:'AI_AUTHORED_PHASE_OUTPUT'});
     }
     const domain=canonical.automationInputs?.domainRegistryPath;
     if(domain){
       const registry=maybeJson(root,path.posix.join(campaignPath,domain));
       if(!registry)throw new Error('historical domain registry missing at Phase '+phase);
       normalizeFormalObligationsIntoLedger({
-        ledger,items:registry.generatedObligations??[],originPhase:phase,canonicalRel,now,root,authorityRoot
+        ledger,items:registry.generatedObligations??[],originPhase:phase,canonicalRel,now,root,authorityRoot,
+        sourceCollectionPath:'generatedObligations',sourceKind:'CONTROLLER_MACHINE_ROUTING'
       });
     }
     applyObligationDispositionsToLedger({ledger,canonical,sequence:phase,canonicalRel,now,root,authorityRoot});
