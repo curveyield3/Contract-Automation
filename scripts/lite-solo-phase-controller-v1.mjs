@@ -194,6 +194,7 @@ function resolveInputsForTarget({root,campaignPath,directory,target,immediate=[]
   const targets=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
   const remediation=path.posix.join(campaignPath,'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md');
   const finalIndex=path.posix.join(campaignPath,'work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
+  const coverageMatrix=path.posix.join(campaignPath,'work/phase-10/COVERAGE_MATRIX_v1.json');
   const discoverySummary=path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');
   const p2=derived(2,'PHASE3_INPUT_v1.json');
   const p3=derived(3,'PHASE4_INPUT_v1.json');
@@ -220,7 +221,8 @@ function resolveInputsForTarget({root,campaignPath,directory,target,immediate=[]
   if(target===8)special=[p2,p3,p4,p5,p6,p7,discoverySummary,buildIdentity,deploy,targets];
   if(target===9)special=[p8Remediation,remediation,p7,discoverySummary];
   if(target===10)special=[
-    p8Final,p9Final,finalIndex,discoverySummary,p7,buildIdentity,deploy,targets,remediation
+    p8Final,p9Final,finalIndex,coverageMatrix,discoverySummary,
+    p7,buildIdentity,deploy,targets,remediation
   ];
   // Keep the original predecessor routing order stable for existing consumers.
   // Accepted prior revisions may reside under superseded/ with the original
@@ -1050,6 +1052,16 @@ if(sequence===4){
     };
     githubDiagnostics.push('Phase 4 coverage projection unavailable: '+String(error?.message??error));
   }
+}
+// Phase 4 transports an evidence summary, not an AI security conclusion.
+// Preserve original-source provenance without altering accepted reviewer forms.
+if(sequence===4&&form?.automationInputs?.discoveryEvidenceContinuity){
+  const ref=form.automationInputs.discoveryEvidenceContinuity;
+  canonical.automationOutputs.phase4Coverage.discoverySourceReference={
+    summaryPath:ref.summaryPath??null,summarySha256:ref.summarySha256??null,
+    availability:ref.availability??'SOURCE_UNAVAILABLE',
+    semantics:'FUNCTION_REVIEW_CLASS_ASSESSMENT_MACHINE_EVIDENCE_ARE_DISTINCT'
+  };
 }
 if(sequence===5) canonical.automationOutputs.phase5MachineExecutionGate={
   status:'DELEGATED_TO_WORKER',
