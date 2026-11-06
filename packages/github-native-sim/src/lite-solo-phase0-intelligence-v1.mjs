@@ -799,7 +799,7 @@ async function main(){
   const literal=p=>'/'+p.replace(/[[\]*?!#\\]/g,'\\$&');
   const campaignPath=request.destination.campaignPath.replace(/\/+$/,'');
   const sparsePatterns=request.source.repository===request.destination.repository&&request.source.archivePath.startsWith(campaignPath+'/')
-    ? [literal(campaignPath)+'/','/Machine Intelligence Audit Controller/Audit Skill v1/']
+    ? [literal(campaignPath)+'/','/Machine Intelligence Audit Controller/Audit Skill v7/']
     : null;
   const checkout=await withProgressStage('exact-source-checkout',()=>checkoutExactSource({repository:request.source.repository,commit:request.source.commit,destination:checkoutRoot,sparsePatterns},{environment:process.env}));
   const archiveAbs=path.join(checkoutRoot,...request.source.archivePath.split('/'));
