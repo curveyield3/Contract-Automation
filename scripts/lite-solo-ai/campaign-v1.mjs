@@ -453,7 +453,14 @@ async function historyGithubFileV1(rel){
   if(payload.encoding!=='base64'||typeof payload.content!=='string')return null;
   bytes=Buffer.from(payload.content.replace(/\s/g,''),'base64');
  }
- const file={path:rel,sha256:sha(bytes),text:bytes.toString('utf8')};
+ // Verify the returned bytes against Git's committed blob identity as well
+ // as the SHA-256 used by original canonical and question receipts.
+ const gitBlobSha=createHash('sha1').update(Buffer.concat([
+  Buffer.from('blob '+bytes.length+'\\0'),bytes])).digest('hex');
+ if(gitBlobSha!==data.sha)
+  throw Error('Pinned controller Git blob digest mismatch: '+rel);
+ const file={path:rel,sha256:sha(bytes),gitBlobSha,text:bytes.toString('utf8'),
+  snapshotCommit:historySnapshotCommit};
  historyFileCache.set(cacheKey,file);
  return file;
 }
