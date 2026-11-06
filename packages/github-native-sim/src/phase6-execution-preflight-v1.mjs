@@ -84,15 +84,11 @@ export async function runPhase6ExecutionPreflightV1({
 
   const medusaRequested = requested(request.configuration?.analysis?.medusa);
   const nativeFuzzRequested = request.configuration?.analysis?.nativeFuzz?.enabled === true;
-  const mutableRpcRequired = medusaRequested || nativeFuzzRequested;
-  const mutableRpc = mutableRpcRequired
-    ? (mutableRpcEvidence ?? await probePhase6MutableRpc({ environment, fetchImpl }))
-    : { status: 'NOT_REQUIRED', profile: null, backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY' };
 
   const medusaHarnessPresent = medusaConfigs.length > 0 || propertySources.length > 0;
   const nativeFuzzHarnessPresent = foundryConfigs.length > 0 && solidityTests.length > 0;
-  // No automatic fuzz or invariant campaigns: require a specific authored
-  // property/test with a matching restricted harness configuration.
+  // Never schedule blanket fuzz/invariant runs. Optional agent-selected targets
+  // must match a restricted harness before launch; otherwise skip them.
   const selectedProperty = request.configuration?.analysis?.medusa?.targetProperty;
   let medusaTargetGuided = false;
   if (/^(?:property_|invariant_|echidna_)[A-Za-z0-9_]+$/.test(selectedProperty ?? '')) {
@@ -115,6 +111,14 @@ export async function runPhase6ExecutionPreflightV1({
       }
     }
   }
+  // Unselected or mismatched fuzz/invariant configurations are not mandatory audit work.
+  // Only a complete, source-matching agent selection may launch a fuzzing backend.
+  const mutableRpcRequired = (medusaRequested && medusaTargetGuided)
+    || (nativeFuzzRequested && nativeTestGuided);
+  const mutableRpc = mutableRpcRequired
+    ? (mutableRpcEvidence ?? await probePhase6MutableRpc({ environment, fetchImpl }))
+    : { status: 'NOT_REQUIRED', profile: null, backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY' };
+
   const medusaTechnicallyApplicable = medusaRequested && soliditySources.length > 0;
   const nativeFuzzTechnicallyApplicable = nativeFuzzRequested && (soliditySources.length > 0 || vyperSources.length > 0);
 
@@ -124,12 +128,13 @@ export async function runPhase6ExecutionPreflightV1({
   let medusa;
   if (!medusaRequested) {
     medusa = { status: 'NOT_REQUESTED', technicallyApplicable: null, harnessPresent: null, toolInvoked: false };
+  } else if (!medusaTargetGuided) {
+    medusa = { status: 'SKIPPED_UNGUIDED', technicallyApplicable: null, harnessPresent: medusaHarnessPresent,
+      toolInvoked: false, reason: 'NO_MATCHING_AGENT_GUIDED_MEDUSA_PROPERTY_CONFIGURATION' };
   } else if (!medusaTechnicallyApplicable) {
     medusa = { status: 'NOT_APPLICABLE', technicallyApplicable: false, harnessPresent: false, toolInvoked: false, reason: 'NO_SOLIDITY_TARGET_FOR_MEDUSA' };
   } else if (!medusaHarnessPresent) {
-    medusa = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: false, toolInvoked: false, reason: 'AUDITOR_MUST_AUTHOR_MEDUSA_HARNESS' };
-  } else if (!medusaTargetGuided) {
-    medusa = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: true, toolInvoked: false, reason: 'AGENT_GUIDED_MEDUSA_PROPERTY_AND_EXCLUSIVE_PREFIX_REQUIRED' };
+    medusa = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: false, toolInvoked: false, reason: 'SELECTED_MEDUSA_HARNESS_MISSING' };
   } else {
     medusa = { status: 'PENDING_TOOL_CHECK', technicallyApplicable: true, harnessPresent: true, toolInvoked: true, tool: await toolVersion('medusa', { cwd: projectRoot, runCommand }) };
     medusa.status = medusa.tool.available && medusa.tool.exactVersion ? 'READY' : 'BLOCKED_INFRASTRUCTURE';
@@ -138,12 +143,13 @@ export async function runPhase6ExecutionPreflightV1({
   let nativeFuzz;
   if (!nativeFuzzRequested) {
     nativeFuzz = { status: 'NOT_REQUESTED', technicallyApplicable: null, harnessPresent: null, toolInvoked: false };
+  } else if (!nativeTestGuided) {
+    nativeFuzz = { status: 'SKIPPED_UNGUIDED', technicallyApplicable: null, harnessPresent: nativeFuzzHarnessPresent,
+      toolInvoked: false, reason: 'NO_MATCHING_AGENT_GUIDED_FOUNDRY_TEST_CONFIGURATION' };
   } else if (!nativeFuzzTechnicallyApplicable) {
     nativeFuzz = { status: 'NOT_APPLICABLE', technicallyApplicable: false, harnessPresent: false, toolInvoked: false, reason: 'NO_SUPPORTED_TARGET_FOR_NATIVE_FUZZ' };
   } else if (!nativeFuzzHarnessPresent) {
-    nativeFuzz = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: false, toolInvoked: false, reason: 'AUDITOR_MUST_AUTHOR_FOUNDRY_HARNESS' };
-  } else if (!nativeTestGuided) {
-    nativeFuzz = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: true, toolInvoked: false, reason: 'AGENT_GUIDED_FOUNDRY_NAMED_TEST_REQUIRED' };
+    nativeFuzz = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: false, toolInvoked: false, reason: 'SELECTED_FOUNDRY_HARNESS_MISSING' };
   } else {
     nativeFuzz = { status: 'PENDING_TOOL_CHECK', technicallyApplicable: true, harnessPresent: true, toolInvoked: true, tool: await toolVersion('forge', { cwd: projectRoot, runCommand }) };
     nativeFuzz.status = nativeFuzz.tool.available && nativeFuzz.tool.exactVersion ? 'READY' : 'BLOCKED_INFRASTRUCTURE';
@@ -192,8 +198,9 @@ export async function runPhase6ExecutionPreflightV1({
     },
     mutableRpc,
     harnessPolicy: {
-      rule: 'AUDITOR_AUTHORS_REQUIRED_HARNESSES_WITHOUT_MODIFYING_FROZEN_PRODUCTION_SOURCE',
+      rule: 'ONLY_OPTIONAL_AGENT_SELECTED_HARNESSES_MAY_EXECUTE_WITHOUT_MODIFYING_FROZEN_PRODUCTION_SOURCE',
       missingHarnessIsNotNotApplicable: true,
+      unselectedOrUnmatchedHarnessesSkipWithoutBlocking: true,
       notApplicableRequiresTechnicalInapplicability: true,
       modelBasedTestingMaySupplementButNeverReplaceRequiredExecutableHarnesses: true,
       phaseCannotPassWhileHarnessRequired: true,
