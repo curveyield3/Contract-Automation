@@ -11,7 +11,7 @@ import {storeControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
 import {materializeSemanticWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,validateBoundAuthorityV1,loadPhaseSchema,
-  buildDerivedOutputs,preparePhaseWork,getByPath
+  buildDerivedOutputs,preparePhaseWork,getByPath,buildOriginalCanonicalEvidenceRosterV1
 } from './lib/lite-solo-phase-work-v1.mjs';
 import {
   selectReusablePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
@@ -1228,6 +1228,11 @@ if(sequence===5&&phase5OwnerDeferral)receipt.machineExecutionDisclaimer={
   notAMachinePass:true,finalAuditSecurityAssurance:'INCOMPLETE'
 };
 receipt.sealedAt=now;receipt.updatedAt=now;
+// Preserve an exhaustive, source-hashed inventory in this new accepted receipt.
+// The receipt already authenticates the original canonical artifact bytes.
+// No model-derived significance or resolution judgment is made here.
+receipt.originalCanonicalEvidenceRoster=buildOriginalCanonicalEvidenceRosterV1({
+  root,campaignPath,directory,phase:sequence,receipt,receiptRel});
 if(masterAmendmentRefreshSha)receipt.masterAmendment=masterAmendmentReceipt(phaseRevision-1);
 if(sealedRework){
   receipt.rework={schemaVersion:'curveyield-lite-sealed-phase-rework-v1',fromRevision:2,toRevision:3,scopeId:sealedRework.request.humanAuthorization.scopeId,requestPath:a['rework-request-path'],qualityReviewPath:sealedRework.request.qualityReview.path,evidenceInvalidationEvent:'INV-P1-REWORK-002',evidenceInvalidationRule:'EIM-013',successorDeliveryHeld:true};
