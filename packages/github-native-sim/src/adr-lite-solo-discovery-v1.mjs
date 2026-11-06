@@ -529,77 +529,139 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
 export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmissions,taxonomy,now}){
  const rows=arr(acceptedSubmissions),checks=new Map(),candidates=[],paths=[],answers=[],na=[],contractLevel=[];
  const discoverySourceRefs=discoveryObservationSourceRefsV1(rows);
+ // Source selectors and array indices are taken from the original accepted
+ // records. Never associate observations by similar prose or inferred IDs.
+ const sourceIndexBySelector=new Map(discoverySourceRefs.map((ref,index)=>
+  [JSON.stringify([ref.unitId,ref.sourceSelector]),index]));
+ const sourcePrefixes=new Map(rows.map(({unitId,sourceReference})=>[unitId,
+  sourceReference?.sourceSelectorPrefix===''?'':(sourceReference?.sourceSelectorPrefix??'submission')+'.']));
+ const sourceIndex=(unitId,selector)=>sourceIndexBySelector.get(
+  JSON.stringify([unitId,(sourcePrefixes.get(unitId)??'submission.')+selector]))??null;
+ const uniqueIndexes=indexes=>[...new Set(indexes.filter(Number.isInteger))];
+ const candidateEvidence=[],pathEvidence=[],answerEvidence=[],checkEvidence=new Map();
+ const recordCandidate=(candidate,indexes)=>{
+  candidates.push(candidate);candidateEvidence.push(uniqueIndexes(indexes));
+ };
+ const recordCheck=(contextId,classId,index)=>checkEvidence.set(
+  JSON.stringify([contextId,classId]),index);
+ const checkSource=(contextId,classId)=>checkEvidence.get(
+  JSON.stringify([contextId,classId]))??null;
  for(const {unitId,submission} of rows){
   const isAttacker=unitId.startsWith('X-');
-  if(isAttacker){paths.push(...arr(submission?.attackPaths));answers.push(...arr(submission?.integrationAnswers));continue;}
-  candidates.push(...arr(submission?.candidates));
-  for(const row of arr(submission?.rows)){
+  if(isAttacker){
+   arr(submission?.attackPaths).forEach((attack,i)=>{
+    paths.push(attack);pathEvidence.push(sourceIndex(unitId,'attackPaths['+i+']'));
+   });
+   // FLOW integration answers are introduced in Step 3, not this change.
+   arr(submission?.integrationAnswers).forEach((answer,i)=>{
+    answers.push(answer);answerEvidence.push(sourceIndex(unitId,'integrationAnswers['+i+']'));
+   });
+   continue;
+  }
+  arr(submission?.candidates).forEach((candidate,i)=>
+   recordCandidate(candidate,[sourceIndex(unitId,'candidates['+i+']')]));
+  for(const [rowIndex,row] of arr(submission?.rows).entries()){
+   const rowSource=sourceIndex(unitId,'rows['+rowIndex+']');
    const classMap=checks.get(row.contextId)??{};
    if(state?.payload?.reviewPolicy==='correctness-verdict-v13'){
      // The v13 security review is function-wide, not individual checklist rows.
      // Every triggered class is tracked under the explicit source-anchored verdict.
      const assessment={CORRECT:'SUPPORTED',DEFECT:'CONCERN',UNRESOLVED:'UNRESOLVED'}[row.verdict];
      if(!assessment)throw new Error('accepted v13 discovery row has no correctness verdict');
-     for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[row.contextId]??[]))
+     for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[row.contextId]??[])){
        classMap[classId]=assessment;
-     for(const c of arr(row.candidates))
-       candidates.push({...c,contextIds:[...new Set([...(c.contextIds??[]),row.contextId])]});
+       recordCheck(row.contextId,classId,rowSource);
+     }
+     arr(row.candidates).forEach((c,i)=>recordCandidate(
+      {...c,contextIds:[...new Set([...(c.contextIds??[]),row.contextId])]},
+      [sourceIndex(unitId,'rows['+rowIndex+'].candidates['+i+']'),rowSource]));
      if(row.candidate&&typeof row.candidate==='object')
-       candidates.push({...row.candidate,contextIds:[...new Set([...(row.candidate.contextIds??[]),row.contextId])]});
+       recordCandidate({...row.candidate,contextIds:[...new Set([...(row.candidate.contextIds??[]),row.contextId])]},
+        [sourceIndex(unitId,'rows['+rowIndex+'].candidate'),rowSource]);
    }
    // V13 correctness verdicts are authoritative for function coverage.
    // Legacy per-class checklists remain prompts, never verdict overrides.
    if(state?.payload?.reviewPolicy!=='correctness-verdict-v13')
-    for(const check of arr(row?.checks)){
+    for(const [checkIndex,check] of arr(row?.checks).entries()){
+     const checkRef=sourceIndex(unitId,'rows['+rowIndex+'].checks['+checkIndex+']');
      classMap[check.classId]=check.assessment;
+     recordCheck(row.contextId,check.classId,checkRef);
      if(check.assessment==='NOT_APPLICABLE')na.push({contextId:row.contextId,classId:check.classId,evidence:check.evidence,anchors:check.anchors});
-     if(check.candidate)candidates.push({...check.candidate,contextIds:[row.contextId],classId:check.classId});
+     if(check.candidate)recordCandidate(
+      {...check.candidate,contextIds:[row.contextId],classId:check.classId},
+      [sourceIndex(unitId,'rows['+rowIndex+'].checks['+checkIndex+'].candidate'),checkRef,rowSource]);
     }
    checks.set(row.contextId,classMap);
   }
   // Compact forms expand to the same per-context, per-class records the coverage matrix reads.
-  const set=(id,classId,check)=>{
+  const set=(id,classId,check,sourceRef,sourceParent,sourceCandidate)=>{
    const classMap=checks.get(id)??{};classMap[classId]=check.assessment;checks.set(id,classMap);
+   recordCheck(id,classId,sourceRef);
    if(check.assessment==='NOT_APPLICABLE')na.push({contextId:id,classId,evidence:check.evidence,anchors:check.anchors});
-   if(check.candidate)candidates.push({...check.candidate,contextIds:[id],classId});
+   if(check.candidate)recordCandidate({...check.candidate,contextIds:[id],classId},
+    [sourceCandidate,sourceRef,sourceParent]);
   };
   // Shared-modifier group checks cannot overwrite a V13 function-wide verdict.
   if(state?.payload?.reviewPolicy!=='correctness-verdict-v13')
-   for(const group of arr(submission?.groupChecks))for(const id of arr(group?.contextIds))set(id,group.classId,group);
+   arr(submission?.groupChecks).forEach((group,index)=>{
+    const selector='groupChecks['+index+']';
+    for(const id of arr(group?.contextIds))set(id,group.classId,group,
+     sourceIndex(unitId,selector),null,sourceIndex(unitId,selector+'.candidate'));
+   });
   const unit=resolveUnit(plan,unitId);
-  for(const review of arr(submission?.trivialReviews))
+  arr(submission?.trivialReviews).forEach((review,index)=>{
+   const selector='trivialReviews['+index+']';
    for(const id of arr(unit?.primaryContextIds)){
     const c=contextFor(inventory,id);
     if(!qualifiesLiteralTrivialReviewV13({review,context:c,inventory}))continue;
     for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[id]??[]))
-      set(id,classId,review);
+     set(id,classId,review,sourceIndex(unitId,selector),null,sourceIndex(unitId,selector+'.candidate'));
     if(!checks.has(id))checks.set(id,{});
    }
-  contractLevel.push(...arr(submission?.contractChecks));
+  });
+  arr(submission?.contractChecks).forEach((check,index)=>contractLevel.push({
+   check,sourceRef:sourceIndex(unitId,'contractChecks['+index+']')}));
+
  }
- for(const check of contractLevel)
+ for(const {check,sourceRef} of contractLevel)
   for(const c of arr(inventory?.payload?.contexts).filter(x=>x.qualifiedContainer===check?.contract)){
    if(!classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[c.contextId]??[]).includes(check.classId))continue;
    if(checks.get(c.contextId)?.[check.classId]===undefined){
     const classMap=checks.get(c.contextId)??{};classMap[check.classId]=check.assessment;checks.set(c.contextId,classMap);
+    recordCheck(c.contextId,check.classId,sourceRef);
    }
   }
- const items=[],contradictions=[];
- const add=(origin,contextIds,anchor,reviewerFinding,attackerFinding)=>{
+ const items=[],contradictions=[],reconciliationEvidenceRefs={};
+ // Existing 600-character finding fields and first sourceAnchor remain
+ // backward-compatible PREVIEWS. Complete evidence is the indexed original.
+ const add=(origin,contextIds,anchor,reviewerFinding,attackerFinding,sourceIndexes=[],controllerSourceSelector=null)=>{
   const first=contextFor(inventory,contextIds?.[0]);
-  items.push({recordKey:'DISC-'+String(items.length+1).padStart(4,'0'),origin,contextIds:[...new Set(contextIds??[])].sort(),
+  const recordKey='DISC-'+String(items.length+1).padStart(4,'0');
+  items.push({recordKey,origin,contextIds:[...new Set(contextIds??[])].sort(),
    sourceAnchor:anchor??contextAnchor(first),
    reviewerFinding:String(reviewerFinding??'NO_SUBMISSION').slice(0,600),
    attackerFinding:String(attackerFinding??'NO_SUBMISSION').slice(0,600)});
+  const refIndexes=uniqueIndexes(sourceIndexes);
+  reconciliationEvidenceRefs[recordKey]={
+   referenceCollection:'discoverySourceRefs',sourceRefIndexes:refIndexes,
+   availability:refIndexes.length===0?'SOURCE_UNAVAILABLE':
+    refIndexes.every(i=>discoverySourceRefs[i]?.availability==='AVAILABLE')?'AVAILABLE':'SOURCE_UNAVAILABLE',
+   ...(controllerSourceSelector?{controllerSourceSelector}:{}),
+  };
  };
- for(const candidate of candidates)add('REVIEWER_CANDIDATE',arr(candidate?.contextIds),candidate?.anchors?.[0]??candidate?.sourceAnchor,
-  candidate?.description??candidate?.title,'NO_SUBMISSION');
+ candidates.forEach((candidate,index)=>add('REVIEWER_CANDIDATE',arr(candidate?.contextIds),
+  candidate?.anchors?.[0]??candidate?.sourceAnchor,
+  candidate?.description??candidate?.title,'NO_SUBMISSION',candidateEvidence[index]));
  for(const [id,found] of [...checks.entries()].sort(([a],[b])=>sort(a,b)))
   for(const [classId,status] of Object.entries(found).sort(([a],[b])=>sort(a,b)))if(status==='UNRESOLVED')
-   add('REVIEWER_UNRESOLVED',[id],null,'Unresolved '+classId,'NO_SUBMISSION');
- const relevant=paths.filter(p=>['VIABLE','UNCERTAIN'].includes(p?.result));
- for(const attack of relevant)add('ATTACK_FINDING',arr(attack.contextIds),attack?.anchors?.[0],'NO_SUBMISSION',attack?.candidate?.description??attack?.goal);
- for(const attack of relevant){
+   add('REVIEWER_UNRESOLVED',[id],null,'Unresolved '+classId,'NO_SUBMISSION',
+    [checkSource(id,classId)]);
+ const relevant=paths.map((attack,index)=>({attack,sourceRef:pathEvidence[index]}))
+  .filter(({attack})=>['VIABLE','UNCERTAIN'].includes(attack?.result));
+ for(const {attack,sourceRef} of relevant)add('ATTACK_FINDING',
+  arr(attack.contextIds),attack?.anchors?.[0],'NO_SUBMISSION',
+  attack?.candidate?.description??attack?.goal,[sourceRef]);
+ for(const {attack,sourceRef} of relevant){
   const classId=attack?.candidate?.classId??attack?.classId;
   for(const anchor of arr(attack?.anchors)){
    const where=arr(inventory?.payload?.contexts).filter(c=>{
@@ -608,18 +670,29 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    });
    for(const c of where)if(checks.get(c.contextId)?.[classId]==='SUPPORTED'){
     contradictions.push({contextId:c.contextId,classId});
-    add('ATTACK_CONTRADICTS_REVIEW',[c.contextId],anchor,'SUPPORTED '+classId,attack?.candidate?.description??attack?.goal);
+    add('ATTACK_CONTRADICTS_REVIEW',[c.contextId],anchor,'SUPPORTED '+classId,
+     attack?.candidate?.description??attack?.goal,[sourceRef,checkSource(c.contextId,classId)]);
    }
   }
  }
- for(const answer of answers.filter(a=>['CONCERN','UNRESOLVED'].includes(a?.assessment)))
-  add('INTEGRATION_CONCERN',arr(answer.contextIds),answer?.anchors?.[0],'NO_SUBMISSION',answer?.reasoning);
+ answers.forEach((answer,index)=>{
+  if(['CONCERN','UNRESOLVED'].includes(answer?.assessment))
+   add('INTEGRATION_CONCERN',arr(answer.contextIds),answer?.anchors?.[0],
+    'NO_SUBMISSION',answer?.reasoning,[answerEvidence[index]]);
+ });
  const gaps=structuredClone(arr(normalizeAccepted(state)?.gaps));
- for(const gap of gaps)add('COVERAGE_GAP',gap.contextId?[gap.contextId]:arr(gap.contextIds),null,'Gap '+gap.code,'NO_SUBMISSION');
+ gaps.forEach((gap,index)=>add('COVERAGE_GAP',
+  gap.contextId?[gap.contextId]:arr(gap.contextIds),null,
+  'Gap '+gap.code,'NO_SUBMISSION',[],'state.payload.gaps['+index+']'));
  const discoveryState={reviewChecks:Object.fromEntries([...checks.entries()]),gaps,attackContradictions:contradictions};
  const coverage=buildCoverageMatrixV1({inventory,taxonomy,discoveryState});
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{
-  discoverySourceRefs,reconciliationItems:items,notApplicableClaims:na.sort((a,b)=>sort(a.contextId,b.contextId)||sort(a.classId,b.classId)),
+  discoverySourceRefs,reconciliationEvidenceRefs,
+  // All candidate origins, including nested ATTACK/integration/check
+  // candidates, remain accessible by exact accepted-source selector.
+  candidateSourceRefIndexes:discoverySourceRefs.flatMap((ref,index)=>
+   ref.sourceCategory==='REVIEWER_CANDIDATE'||ref.sourceCategory.endsWith('_CANDIDATE')?[index]:[]),
+  reconciliationItems:items,notApplicableClaims:na.sort((a,b)=>sort(a.contextId,b.contextId)||sort(a.classId,b.classId)),
   attackPaths:paths,perContext:Object.fromEntries([...checks.entries()].sort(([a],[b])=>sort(a,b))),
   gaps,coverage,discoveryState});
 }
