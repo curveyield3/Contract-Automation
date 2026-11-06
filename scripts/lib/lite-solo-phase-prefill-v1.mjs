@@ -1318,17 +1318,17 @@ export function renderControllerPhaseReport({schema,form,canonical}){
   const discoveryDims=discoveryRef?.evidenceDimensions??{};
   // Phase 10 reports three independent evidence categories without editing
   // the accepted AI findings or inferring a class or machine verdict.
-  const evidenceSection=Number(phase)===10?'\\n## Evidence Categories and Original Source\\n\\n'+
+  const evidenceSection=Number(phase)===10?'\n## Evidence Categories and Original Source\n\n'+
     '- Function review: '+(discoveryDims.functionReview?compact(discoveryDims.functionReview):
-      'SOURCE_UNAVAILABLE_OR_HISTORICAL_PROVENANCE_UNVERIFIED')+'\\n'+
+      'SOURCE_UNAVAILABLE_OR_HISTORICAL_PROVENANCE_UNVERIFIED')+'\n'+
     '- Explicit security-class assessments: '+(discoveryDims.classAssessment?
-      compact(discoveryDims.classAssessment):'NOT_INDEPENDENTLY_ESTABLISHED_BY_THIS_REPORT')+'\\n'+
+      compact(discoveryDims.classAssessment):'NOT_INDEPENDENTLY_ESTABLISHED_BY_THIS_REPORT')+'\n'+
     '- Executed properties: consult the separate context/class coverage matrix and '+
-      'actual qualified machine assertions; bounded PASS never establishes universal safety.\\n'+
+      'actual qualified machine assertions; bounded PASS never establishes universal safety.\n'+
     '- Original accepted discovery summary: '+String(discoveryRef?.summaryPath??'SOURCE_UNAVAILABLE')+
-      '; SHA-256: '+String(discoveryRef?.summarySha256??'NOT_AVAILABLE')+'\\n'+
+      '; SHA-256: '+String(discoveryRef?.summarySha256??'NOT_AVAILABLE')+'\n'+
     '- Overall CORRECT/DEFECT/UNRESOLVED verdicts are not class-specific assertions; '+
-      'coverage labels are evidence bookkeeping, not security assurance.\\n':'';
+      'coverage labels are evidence bookkeeping, not security assurance.\n':'';
   return `# Phase ${phase} Final Report
 
 > **CONTROLLER-GENERATED:** Deterministically rendered from the accepted schema-governed work form and controller-owned outputs. No hashes, handoff bookkeeping, or predecessor restatement is authored by the reviewer.
