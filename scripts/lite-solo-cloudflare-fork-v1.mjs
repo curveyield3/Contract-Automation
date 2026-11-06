@@ -226,7 +226,32 @@ function phaseFinalize(c){
     strict(cmd('git',['-C',ROOT,'rev-parse','HEAD']).trim()===commit,'phase submission commit is not canonical head');
   }
   if([4,5,6].includes(phase)){
-    const gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
+    let gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
+    // Recover a legacy Phase-5 prefill block BEFORE the readiness gate. The
+    // existing unit drainer alone verifies the immutable indexed BASE, the
+    // accepted unit set and the exact two controller-recorded defects. It
+    // restores only the frozen controller prefill and resets that known blocker.
+    // Do not alter trusted digests here or bypass the normal phase validator.
+    if(phase===5&&!gate.ready&&gate.reason==='controller finalization blocked'){
+      const requestDir=fs.mkdtempSync('/tmp/lite-solo-phase5-recovery-empty-');
+      try{
+        const output=cmd('node',['scripts/lite-solo-unit-request-drain-v1.mjs',
+          '--root',ROOT,'--campaign-id',c.directory.campaignId,
+          '--requests-root',requestDir,'--mode','drain'],{maxBuffer:16*1024*1024});
+        const recovered=JSON.parse(output.trim().split('\n').at(-1));
+        strict(recovered.finalizeReady===true,'controller frozen-BASE recovery not ready: '+
+          String(recovered.state?.finalizeStatus??'UNKNOWN'));
+      }finally{fs.rmSync(requestDir,{recursive:true,force:true});}
+      const before=c.directory;
+      c.directory=read(c.directoryPath);
+      strict(c.directory.campaignId===before.campaignId&&
+        c.directory.campaignGenerationId===before.campaignGenerationId&&
+        c.directory.sourceSha256===before.sourceSha256&&
+        c.directory.authorityDigest===before.authorityDigest,
+        'legacy prefill recovery changed frozen campaign/source/authority identity');
+      assertAssigned(c,phase);
+      gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
+    }
     strict(gate.ready,'canonical unit finalization not ready: '+String(gate.reason||'units incomplete'));
     if(phase===5){
       // Phase-5 preflight consumes the deterministic assembly of accepted units.
