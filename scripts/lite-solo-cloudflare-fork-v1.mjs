@@ -232,7 +232,7 @@ function phaseFinalize(c){
     // accepted unit set and the exact two controller-recorded defects. It
     // restores only the frozen controller prefill and resets that known blocker.
     // Do not alter trusted digests here or bypass the normal phase validator.
-    if(phase===5&&!gate.ready&&gate.reason==='controller finalization blocked'){
+    if(phase===5&&!gate.ready&&String(gate.reason||'').startsWith('controller finalization blocked')){
       const requestDir=fs.mkdtempSync('/tmp/lite-solo-phase5-recovery-empty-');
       try{
         const output=cmd('node',['scripts/lite-solo-unit-request-drain-v1.mjs',
