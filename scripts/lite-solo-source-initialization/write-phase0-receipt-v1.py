@@ -63,8 +63,8 @@ else:
 
 authority={
   "repository":"curveyield3/Audit-Controller",
-  "ref":"main",
-  "authorityFolderPath":"Audit Skill - Lite-Solo Authority",
+  "ref":"machine-intelligence-audit-controller-v1",
+  "authorityFolderPath":"Machine Intelligence Audit Controller/Audit Skill v1",
   "homepagePath":e["SKILL_HOME"],
   "liteSkillPath":e["SKILL_REPO_PATH"],
   "liteSkillBlobSha":e["SKILL_BLOB"],
@@ -113,8 +113,8 @@ directory={
   "sourceInitializationRequestId":e["REQUEST_ID"],
   "deliveryTransport":"DIRECT",
   "transportEpoch":0,
-  "agentModel":"PARALLEL_WORKER_UNITS" if e["SKILL_RELEASE"] in ("lite-solo-v4","lite-solo-v5","lite-solo-v6") else "ONE_PERSISTENT_AGENT",
-  "executionModel":"PARALLEL_WORKER_UNITS" if e["SKILL_RELEASE"] in ("lite-solo-v4","lite-solo-v5","lite-solo-v6") else None,
+  "agentModel":"PARALLEL_WORKER_UNITS" if e["SKILL_RELEASE"] == "machine-intelligence-v1" else "ONE_PERSISTENT_AGENT",
+  "executionModel":"PARALLEL_WORKER_UNITS" if e["SKILL_RELEASE"] == "machine-intelligence-v1" else None,
   "authorityRelease":e["SKILL_RELEASE"],
   "authorityDigest":e["MANIFEST_SHA"],
   "publicationPolicyPath":policy_path,
