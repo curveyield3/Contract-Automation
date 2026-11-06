@@ -325,7 +325,7 @@ function verifiedMachineSourcesV1(c,row){
    ingestionReceiptRef:receiptPath,evidenceSha256:sha(fs.readFileSync(relative(evidencePath))),
    requestSha256:sha(fs.readFileSync(relative(requestPath))),
    machineFields:Object.fromEntries(['dispatchRounds','requestPaths','ledgerRef',
-    'requestBindingStatus','requestBindingEvidenceRef'].filter(key=>machine[key]!==undefined)
+    'requestBindingStatus','requestBindingEvidenceRef','automationResolvedExecutionRequest'].filter(key=>machine[key]!==undefined)
     .map(key=>[key,machine[key]]))});
  }
  return verified;
@@ -336,6 +336,8 @@ function machineVerifiedValueV1(c,row,key){
  const chosen=sources.filter(s=>s.machineFields[key]!==undefined);
  if(key==='requestPaths')return {value:sources.map(s=>s.requestPath),sources};
  if(key==='executionEvidenceRefs')return {value:sources.map(s=>s.executionEvidenceRef),sources};
+ if(key==='executionRequestRef'&&sources.length===1)
+  return {value:sources[0].requestPath,sources};
  if(key==='executionEvidenceRef'&&sources.length===1)return {value:sources[0].executionEvidenceRef,sources};
  if(chosen.length!==1)return {sources,reason:'NO_UNIQUE_AUTHENTICATED_EXACT_FIELD_VALUE'};
  return {value:chosen[0].machineFields[key],sources};
@@ -399,7 +401,8 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
    policy:'PRESERVE_ISSUED_NEGATIVE_IN_FIXED_UNIT_USE_APPEND_FOR_NEW_RECORDS'}:{}),
   bindings:definition.type==='REQUIRED_RECORD_LIST'&&member.initialValue&&
    typeof member.initialValue==='object'&&!Array.isArray(member.initialValue)
-   ?(definition.itemRequiredFields??[]).map(itemField=>controllerAnswerFieldBindingV1({
+   ?[...new Set([...(definition.itemRequiredFields??[]),
+      ...(definition.controllerCollectedFields??[])])].map(itemField=>controllerAnswerFieldBindingV1({
      c,fieldName,sourceRow:member.initialValue,definition,itemField}))
    :[]
  }));
