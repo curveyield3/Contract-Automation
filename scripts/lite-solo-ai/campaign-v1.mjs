@@ -383,6 +383,7 @@ function modelFacingResponse(original){
 const historyBranch='machine-intelligence-audit-controller-v1';
 const historyRepo='curveyield3/Audit-Controller';
 const historyFileCache=new Map();
+let historyCacheScope=null;
 async function historyGithubFileV1(rel){
  if(typeof rel!=='string'||!rel.startsWith('campaigns/')||
     rel.includes('\\')||rel.split('/').some(s=>!s||s==='.'||s==='..'))
@@ -397,7 +398,10 @@ async function historyGithubFileV1(rel){
   authorization:'Bearer '+token,accept:'application/vnd.github+json',
   'x-github-api-version':'2022-11-28'
  },signal:AbortSignal.timeout(30000)});
- if(res.status===404)return null;
+ if(res.status===404){
+  historyFileCache.set(rel,null);
+  return null;
+ }
  if(!res.ok)throw Error('Private controller history read HTTP '+res.status);
  const data=await res.json();
  if(data?.type!=='file'||typeof data.sha!=='string')return null;
@@ -429,10 +433,14 @@ async function sourceBoundQuestionHistoryV1(raw){
  try{envelope=JSON.parse(raw);}catch{return null;}
  const live=envelope?.workerResponse??{};
  if(!['LEASED_PACKET','LEASED_SHARD'].includes(live.status))return null;
- // Index paths and checkpoint revisions can advance AFTER an earlier unit
- // was accepted. Never use the last claim's cached GitHub file bytes.
- historyFileCache.clear();
+ // Keep immutable records and negative probes within one issued step, but
+ // refresh at each stage transition. Exact newly referenced dependencies are
+ // refreshed separately, so late checkpoints are not hidden by an older 404.
  const phase=Number(live.phase);
+ const scope=[phase,live.step??live.currentStep??'',live.stage??''].join(':');
+ if(scope!==historyCacheScope){
+  historyCacheScope=scope;historyFileCache.clear();
+ }
  if(!Number.isInteger(phase)||phase<4)return null;
  const directoryRel='Audit Campaign Directory/campaigns/'+
   campaignId.replace(/-r[0-9]+$/,'')+'.json';
@@ -460,6 +468,13 @@ async function sourceBoundQuestionHistoryV1(raw){
   return {schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
    campaignId,histories:[],unavailable:[{status:'CONTROLLER_DIRECTORY_UNAVAILABLE'}]};
  const workspace=directory.workspacePath,selected=new Map(),unavailable=[];
+ const dependencies=new Set((live.status==='LEASED_PACKET'?
+  (live.items??[]).flatMap(unit=>unit.canonicalPacket?.dependencies??[]):
+  live.canonicalPacket?.dependencies??[]).filter(id=>
+  typeof id==='string'&&/^[A-Za-z0-9._-]+$/.test(id)));
+ for(const unitId of dependencies)
+  historyFileCache.delete(workspace+'/work/phase-'+String(phase).padStart(2,'0')+
+   '/units/'+unitId+'/questions/QUESTION_INDEX_v1.json');
  for(const p of [4,5,6]){
   if(p>phase)continue;
   const name=String(p).padStart(2,'0'),base=workspace+'/work/phase-'+name+'/units';
