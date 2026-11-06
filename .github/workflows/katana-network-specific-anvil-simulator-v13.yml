@@ -144,6 +144,9 @@ jobs:
         run: |
           if [ -f cyavkat-morpho-fulfill-safe-batch-v6-report.json ]; then
             cat cyavkat-morpho-fulfill-safe-batch-v6-report.json
+            if [ -f cyavkat-morpho-fulfill-safe-batch-v6.json ]; then
+              echo "SAFE_BATCH_JSON_V6=$(jq -c . cyavkat-morpho-fulfill-safe-batch-v6.json)"
+            fi
             echo '### avKAT Morpho unwind simulation' >> "$GITHUB_STEP_SUMMARY"
             jq -r '"Status: " + .status, "Pinned block: " + (.forkBlock|tostring), "Estimated gas: " + (.gas.estimated // "unavailable")' cyavkat-morpho-fulfill-safe-batch-v6-report.json >> "$GITHUB_STEP_SUMMARY"
           else
