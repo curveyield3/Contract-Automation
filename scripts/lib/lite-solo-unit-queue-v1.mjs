@@ -112,20 +112,27 @@ export function recoverAcceptedQuestionLedgerReferenceV1({
   directory,phaseEpoch:accepted.phaseEpoch,packetSha256:accepted.packetSha256});
  if(live.availability==='AVAILABLE')
   return {...live,referenceOrigin:'CURRENT_COMMITTED_INDEX'};
- // Preserve a separately identified historical reference if the current
- // index is temporarily unavailable; NEVER claim that it was re-read.
+ // Historical accepted units may predate the explicit availability field.
+ // Their original questionLedger was already checked against the source-bound
+ // question index at acceptance. Keep its immutable hash discoverable even
+ // when the CURRENT branch no longer exposes that index, but do not treat it
+ // as newly retrieved content or rewrite the original accepted snapshot.
  const earlier=accepted.questionLedger;
- if(earlier?.availability==='AVAILABLE'&&
-    earlier.indexPath===indexPath&&
+ const legacy=earlier&&earlier.availability===undefined;
+ const current=earlier?.availability==='AVAILABLE'&&
     earlier.campaignId===directory.campaignId&&
     earlier.campaignGenerationId===directory.campaignGenerationId&&
     earlier.sourceSha256===directory.sourceSha256&&
     earlier.authorityDigest===directory.authorityDigest&&
     earlier.phaseSequence===phase&&earlier.phaseEpoch===accepted.phaseEpoch&&
-    earlier.unitId===unitId&&earlier.packetSha256===accepted.packetSha256&&
+    earlier.unitId===unitId&&earlier.packetSha256===accepted.packetSha256;
+ if((legacy||current)&&earlier.indexPath===indexPath&&
     /^[a-f0-9]{64}$/.test(String(earlier.indexSha256??'')))
   return {...live,previousCommittedIndex:{indexPath,
-   indexSha256:earlier.indexSha256,revision:earlier.revision}};
+   indexSha256:earlier.indexSha256,revision:earlier.revision,
+   questionCount:earlier.questionCount,answeredCount:earlier.answeredCount,
+   ledgerStatus:earlier.ledgerStatus??earlier.status??null,
+   referenceOrigin:'IMMUTABLE_ACCEPTED_SNAPSHOT'}};
  return live;
 }
 const asArray=x=>Array.isArray(x)?x:[];
