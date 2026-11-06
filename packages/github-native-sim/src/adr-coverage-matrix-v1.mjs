@@ -98,7 +98,8 @@ export function buildCoverageMatrixV1({inventory, taxonomy, discoveryState = nul
         statusFor(phase6Results, inventory, ctx.contextId, classId);
       let reviewStatus = !discoveryState ? 'PENDING' : gaps.has(ctx.contextId) ? 'GAP' :
         contradictions.has(ctx.contextId + ':' + classId) && testStatus !== 'PASSED' ? 'CONTRADICTED' :
-        assessment === undefined || assessment === null ? (v13 ? 'NOT_ESTABLISHED' : 'PENDING') :
+        v13 && classAssessmentOrigin === 'NOT_ESTABLISHED' ? 'NOT_ESTABLISHED' :
+        assessment === undefined || assessment === null ? 'PENDING' :
         assessment === 'UNRESOLVED' || assessment?.assessment === 'UNRESOLVED' ? 'GAP' :
         assessment === 'NOT_APPLICABLE' || assessment?.assessment === 'NOT_APPLICABLE' ? 'NOT_APPLICABLE_CLAIMED' : 'ACCEPTED';
       rows.push({contextId:ctx.contextId,contract,classId,reviewStatus,testStatus,
