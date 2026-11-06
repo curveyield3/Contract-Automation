@@ -54,12 +54,22 @@ function terminalNotApplicable(backend, preflightComponent) {
 }
 
 function phase6RequiresMutableRpc(request) {
-  const medusaRequested = request.configuration?.analysis?.medusa !== false
-    && request.configuration?.analysis?.medusa !== undefined;
-  const nativeFuzzRequested = request.configuration?.analysis?.nativeFuzz?.enabled === true;
+  const analysis = request.configuration?.analysis ?? {};
+  // An untargeted analysis flag does not authorize blanket fuzz or invariant runs.
+  const medusaGuided = analysis.medusa !== false && analysis.medusa != null
+    && /^(?:property_|invariant_|echidna_)[A-Za-z0-9_]+$/.test(analysis.medusa.targetProperty ?? '');
+  const nativeFuzzGuided = analysis.nativeFuzz?.enabled === true
+    && /^[A-Za-z_][A-Za-z0-9_]*$/.test(analysis.nativeFuzz.matchTest ?? '');
   const v26 = request.configuration?.v26;
   const coverageRequested = (v26?.foundryCoverageObligations?.length ?? 0) > 0 || v26?.foundryRefinementRequired === true;
-  return medusaRequested || nativeFuzzRequested || coverageRequested;
+  return medusaGuided || nativeFuzzGuided || coverageRequested;
+}
+
+function terminalSkippedUnguided(backend, preflightComponent) {
+  return { backend, status: 'skipped', terminal: true, componentStatus: 'SKIPPED_UNGUIDED',
+    continuationDisposition: 'COMPLETE_EVIDENCE', failureKind: null,
+    reason: preflightComponent?.reason ?? 'NO_AGENT_GUIDED_CONFIGURATION',
+    preflightDetermined: true, toolInvoked: false };
 }
 
 function phase6DelegateOptions(delegateOptions, preflight, mutableRpcSession) {
@@ -69,6 +79,8 @@ function phase6DelegateOptions(delegateOptions, preflight, mutableRpcSession) {
   }
   if (preflight?.medusa?.status === 'NOT_APPLICABLE') options.runMedusa = async () => terminalNotApplicable('medusa', preflight.medusa);
   if (preflight?.nativeFuzz?.status === 'NOT_APPLICABLE') options.runNativeFuzz = async () => terminalNotApplicable('native-fuzz', preflight.nativeFuzz);
+  if (preflight?.medusa?.status === 'SKIPPED_UNGUIDED') options.runMedusa = async () => terminalSkippedUnguided('medusa', preflight.medusa);
+  if (preflight?.nativeFuzz?.status === 'SKIPPED_UNGUIDED') options.runNativeFuzz = async () => terminalSkippedUnguided('native-fuzz', preflight.nativeFuzz);
   return options;
 }
 
@@ -76,7 +88,7 @@ function normalizePhase6TerminalSemantics(result) {
   if (!result || result.status !== 'completed') return result;
   const components = Object.values(result.analysis ?? {}).filter(Boolean);
   const failureCount = components.filter((component) => ['FAILED', 'UNAVAILABLE'].includes(component.componentStatus)).length;
-  const limitationCount = components.filter((component) => component.componentStatus === 'NOT_APPLICABLE').length;
+  const limitationCount = components.filter((component) => ['NOT_APPLICABLE', 'SKIPPED_UNGUIDED'].includes(component.componentStatus)).length;
   return {
     ...result,
     analysisComponentFailureCount: failureCount,
@@ -262,8 +274,7 @@ export async function runGitHubNativeJobV2(input, {
   // the upstream state source and must never be handed to mutation tools.
   const analysis = request.configuration?.analysis ?? {};
   const forkAnalysisRequested = v26Request.phaseId === 'fork-simulation-lifecycle'
-    && (analysis.nativeFuzz?.enabled === true
-      || (analysis.medusa !== false && analysis.medusa !== undefined));
+    && phase6RequiresMutableRpc({ configuration: { analysis } });
   let forkAnalysisSession = null;
   try {
     if (forkAnalysisRequested) {
