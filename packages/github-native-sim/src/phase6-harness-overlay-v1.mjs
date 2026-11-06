@@ -124,9 +124,7 @@ export async function materializePhase6HarnessOverlayV1({ projectRoot, runnerRoo
     // Move only audit-owned test files, never the source compiler configuration.
     const effectiveDestination = destinationPath.startsWith('test/phase6/')
       ? sourceFoundry.testDirectory + destinationPath.slice('test'.length)
-      : destinationPath.startsWith('test/phase5/')
-        ? sourceFoundry.testDirectory + destinationPath.slice('test'.length)
-        : destinationPath;
+      : destinationPath;
     safeRelative(effectiveDestination, 'effective audit file destination');
     if (destinations.has(effectiveDestination)) throw new Error(`Phase 6 harness manifest has duplicate destination: ${effectiveDestination}`);
     destinations.add(effectiveDestination);
