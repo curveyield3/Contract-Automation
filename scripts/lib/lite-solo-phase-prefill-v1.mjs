@@ -494,6 +494,30 @@ export function dueObligationScaffold({root,campaignPath,sequence}){
   return {rows:rows.length?rows:['NONE_IDENTIFIED'],expectedIds:due.map(o=>o.obligationId)};
 }
 
+// Preserve phase-4/5/6 histories across EVERY successor boundary, even when
+// the immediate derived-input selector omits an older phase. Read the original
+// sealed canonical rosters; NEVER summarize or infer their security meaning.
+function inheritedQuestionHistoryRefsV1({root,campaignPath,sequence}){
+ const refs=[],unavailable=[],seen=new Set();
+ for(const phase of [4,5,6]){
+  if(phase>=sequence)continue;
+  const canonical=readJsonIf(repoFile(root,path.posix.join(campaignPath,
+   'derived/phase-'+phase+'/PHASE_'+String(phase).padStart(2,'0')+'_CANONICAL_DATA_v1.json')));
+  const roster=canonical?.automationOutputs?.questionHistoryRoster;
+  if(!Array.isArray(roster?.histories))continue;
+  for(const ref of roster.histories){
+   if(!ref||typeof ref.unitId!=='string')continue;
+   const identity=phase+':'+ref.unitId;
+   if(seen.has(identity))continue;
+   seen.add(identity);
+   if(ref.availability==='AVAILABLE'||ref.previousCommittedIndex)
+    refs.push(structuredClone(ref));
+   else unavailable.push({phaseSequence:phase,unitId:ref.unitId,
+    availability:ref.availability??'UNREADABLE',indexPath:ref.indexPath??null});
+  }
+ }
+ return {refs,unavailable};
+}
 export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths=[],predecessorReceiptPath,prefillContext={}}){
   form.automationInputs={
     ...(form.automationInputs??{}),
@@ -505,6 +529,17 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       'derivedInputPaths'
     ])
   };
+  if(sequence>4){
+    const inherited=inheritedQuestionHistoryRefsV1({root,campaignPath,sequence});
+    if(inherited.refs.length||inherited.unavailable.length){
+      form.automationInputs.questionHistoryRefs=inherited.refs;
+      form.automationInputs.questionHistoryUnavailable=inherited.unavailable;
+      form.automationInputs.controllerOwnedAutomationInputs=uniq([
+        ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+        'questionHistoryRefs','questionHistoryUnavailable'
+      ]);
+    }
+  }
   const siEntry=findSourceIntelligence(root,campaignPath);
   const si=siEntry?.j??null;
   const derived=loadDerived(root,derivedInputPaths);
