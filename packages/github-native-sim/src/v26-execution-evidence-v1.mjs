@@ -65,12 +65,26 @@ export async function enrichPhase6V26EvidenceV1({request,result,projectRoot,muta
   }
   const coverageRequested=(v26.foundryCoverageObligations?.length??0)>0||v26.foundryRefinementRequired===true;
   if(coverageRequested){
-    if(!mutableRpcRuntime?.url) throw new Error('v26 Foundry coverage requires the existing passing Phase 6 mutable RPC runtime');
-    const coverage=await runFoundryCoverageV1({projectRoot,sourceCommit:request.source.commit,rpcUrl:mutableRpcRuntime.url,blockNumber:mutableRpcRuntime.blockNumber,blockHash:mutableRpcRuntime.blockHash,rpcProfile:mutableRpcRuntime.profile,environment,rawArtifactRef:`github-actions://${process.env.GITHUB_REPOSITORY??'curveyield3/Contract-Automation'}/runs/${process.env.GITHUB_RUN_ID??'recovery'}/artifacts/v7-execution/foundry-coverage/raw.txt`,...(runCommand?{runCommand}:{})});
-    const obligations=evaluateFoundryCoverageObligationsV1(coverage,v26.foundryCoverageObligations??[]);
-    const runType=v26.foundryRunType??'baseline';
-    const receipt=buildFoundryCampaignReceiptV1({runId:`${request.requestId}:foundry:${runType}`,runType,refinementOf:v26.foundryRefinementOf??null,basisEvidenceIds:v26.foundryBasisEvidenceIds??[],harnessBundleDigest:v26.phase6CampaignPlan?.harnessBundleDigest??digestCanonicalV1(request.configuration?.harness??{}),configurationDigest:v26.phase6CampaignPlan?.configurationDigest??digestCanonicalV1({analysis:request.configuration?.analysis??{},coverage:v26.foundryCoverageObligations??[]}),testResult:result?.analysis?.nativeFuzz??{status:'NOT_EXECUTED'},coverageResult:coverage},{refinementRequired:v26.foundryRefinementRequired===true});
-    enriched.foundryCoverage={...coverage,obligationEvaluation:obligations,campaignReceipt:receipt};
+    // Coverage runs tests. Execute only when the agent explicitly selected a
+    // Foundry test; missing selections are skipped, never a blanket forge run.
+    const native=request.configuration?.analysis?.nativeFuzz;
+    const matchTest=native?.enabled===true?native.matchTest:null;
+    const guided=/^[A-Za-z_][A-Za-z0-9_]*$/.test(matchTest??'');
+    if(guided&&!mutableRpcRuntime?.url) throw new Error('Agent-guided Foundry coverage requires a passing Phase 6 mutable RPC runtime');
+    const coverage=await runFoundryCoverageV1({projectRoot,sourceCommit:request.source.commit,
+      rpcUrl:mutableRpcRuntime?.url??null,blockNumber:mutableRpcRuntime?.blockNumber??null,
+      blockHash:mutableRpcRuntime?.blockHash??null,rpcProfile:mutableRpcRuntime?.profile??null,
+      matchTest,matchContract:native?.matchContract??null,
+      environment,rawArtifactRef:`github-actions://${process.env.GITHUB_REPOSITORY??'curveyield3/Contract-Automation'}/runs/${process.env.GITHUB_RUN_ID??'recovery'}/artifacts/v7-execution/foundry-coverage/raw.txt`,...(runCommand?{runCommand}:{})});
+    if(coverage.status==='SKIPPED_UNGUIDED'){
+      enriched.foundryCoverage={...coverage,obligationEvaluation:{status:'NOT_EVALUATED',
+        reason:'NO_AGENT_GUIDED_FOUNDRY_TEST',notCertified:true},campaignReceipt:null};
+    }else{
+      const obligations=evaluateFoundryCoverageObligationsV1(coverage,v26.foundryCoverageObligations??[]);
+      const runType=v26.foundryRunType??'baseline';
+      const receipt=buildFoundryCampaignReceiptV1({runId:`${request.requestId}:foundry:${runType}`,runType,refinementOf:v26.foundryRefinementOf??null,basisEvidenceIds:v26.foundryBasisEvidenceIds??[],harnessBundleDigest:v26.phase6CampaignPlan?.harnessBundleDigest??digestCanonicalV1(request.configuration?.harness??{}),configurationDigest:v26.phase6CampaignPlan?.configurationDigest??digestCanonicalV1({analysis:request.configuration?.analysis??{},coverage:v26.foundryCoverageObligations??[]}),testResult:result?.analysis?.nativeFuzz??{status:'NOT_EXECUTED'},coverageResult:coverage},{refinementRequired:v26.foundryRefinementRequired===true});
+      enriched.foundryCoverage={...coverage,obligationEvaluation:obligations,campaignReceipt:receipt};
+    }
     enriched.foundryCoverage.coverageDigest=digestCanonicalV1(enriched.foundryCoverage);
   }
   enriched=attachReproductionEvidenceV1(request,enriched);
