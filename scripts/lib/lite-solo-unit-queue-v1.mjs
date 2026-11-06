@@ -86,10 +86,10 @@ function prerequisiteEvidence(queue,dependencies){
 const depSatisfied=()=>true;
 const dependenciesFresh=()=>true;
 const isPhase=(p)=>[4,5,6].includes(p);
-const RELEASES=new Set(['machine-intelligence-v1']);
+const RELEASES=new Set(['machine-intelligence-v7']);
 const authorityFor=directory=>{
   if(!RELEASES.has(directory.authorityRelease))throw Error('unsupported Machine Intelligence release');
-  return 'Machine Intelligence Audit Controller/Audit Skill v1';
+  return 'Machine Intelligence Audit Controller/Audit Skill v7';
 };
 const rowId=(phase,field,index)=>{
  const families={
