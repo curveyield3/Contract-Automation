@@ -467,7 +467,8 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
   bindings:definition.type==='REQUIRED_RECORD_LIST'&&member.initialValue&&
    typeof member.initialValue==='object'&&!Array.isArray(member.initialValue)
    ?[...new Set([...(definition.itemRequiredFields??[]),
-      ...(definition.controllerCollectedFields??[]),...actionCollectedFields])].map(itemField=>controllerAnswerFieldBindingV1({
+      ...(definition.controllerCollectedFields??[]),...actionCollectedFields,
+      ...(definition.conditionalExecutionBlueprint?['executionBlueprint']:[])])].map(itemField=>controllerAnswerFieldBindingV1({
      c,fieldName,sourceRow:member.initialValue,definition,itemField,
      actionPrefillFields,actionCollectedFields}))
    :[]
@@ -508,6 +509,7 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
       ...(definition.controllerCollectedFields??[]),...actionCollectedFields,
       ...Object.keys(definition.itemFieldAllowedValues??{}),
       ...(definition.controllerPrefillFields??[]).filter(f=>MECHANICAL_ID_FIELDS.has(f)),
+      ...(definition.conditionalExecutionBlueprint?['executionBlueprint']:[]),
       ...actionPrefillFields.filter(f=>MECHANICAL_ID_FIELDS.has(f))])]
      .map(itemField=>controllerAnswerFieldBindingV1({
       c,fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField,
@@ -832,13 +834,17 @@ function preserveDiscoveryKeys(original,response,field){
 // Purely mechanical input-type checking. Security conclusions and exact enum
 // choices are written by the AI; the controller never chooses a verdict.
 function machineAnswerExpectedTypeV1(field,initialKind,sourceType){
- if(['anchors','steps','documentedRules','siblingComparisons','candidates',
-   'evidenceRefs','executionEvidenceRefs','relatedCandidateKeys','relatedRequirementKeys',
-   'relatedHypothesisKeys','attackAssertionNames','controlAssertionNames',
-   'obligationIds','contextIds'].includes(field))return 'array';
- if(['specInspection','candidate','decidingTest','simulationIdea'].includes(field))return 'object';
+ const arrays=new Set(['anchors','steps','documentedRules','siblingComparisons','candidates',
+  'evidenceRefs','executionEvidenceRefs','relatedCandidateKeys','relatedRequirementKeys',
+  'relatedHypothesisKeys','attackAssertionNames','controlAssertionNames','obligationIds',
+  'contextIds','flowIds','prerequisites','transactionSequence','fuzzVariablesAndBounds',
+  'requestPaths','obligationOutcomes','limitations','obligationsDetail']);
+ if(arrays.has(field))return 'array';
+ if(['specInspection','candidate','decidingTest','simulationIdea','executionBlueprint'].includes(field))
+  return 'object';
+ // The enclosing record is an OBJECT; that does NOT make its text fields
+ // objects. Types unknown to the issuer remain schema-declared, not guessed.
  if(initialKind==='ARRAY')return 'array';
- if(initialKind==='OBJECT')return 'object';
  if(sourceType==='LITERAL_TOKEN_ONLY')return 'string';
  return 'SCHEMA_DECLARED';
 }
