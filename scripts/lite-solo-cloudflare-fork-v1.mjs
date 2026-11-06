@@ -1062,14 +1062,24 @@ function assembleBoundAnswersV1(c,u,submitted){
     }
    }else result[field]=additional.map(row=>structuredClone(row));
   }
-  if(u.kind==='FLOW'&&Array.isArray(submitted.trivialContextIds)){
+  if(u.kind==='FLOW'){
    const eligible=new Set(route.optionalRecords.find(x=>x.field==='trivialReviews')?.eligibleContextIds??[]);
-   const chosen=new Set(submitted.trivialContextIds.filter(id=>eligible.has(id)));
+   strict(submitted.trivialContextIds===undefined||Array.isArray(submitted.trivialContextIds),
+    'trivialContextIds must be an explicit typed list when supplied');
+   const chosen=submitted.trivialContextIds===undefined?eligible:
+    new Set(submitted.trivialContextIds);
+   strict([...chosen].every(id=>eligible.has(id)),
+    'trivial row substitution can name only controller-eligible literal contexts');
    const packet=readUnitPacketV1({root:ROOT,packetPath:safePath(u.packetPath)});
    const owners=new Map((packet.payload?.primaryContexts??[])
     .map(x=>[x.contextId,x.qualifiedContainer]));
+   // A source-approved literal row can be replaced only by an actual
+   // source-anchored contract review. The existing V13 validator decides the
+   // adequacy of that review; the assembler only avoids duplicate rows.
    result.rows=result.rows.filter(row=>!chosen.has(row.contextId)||
-    !(result.trivialReviews??[]).some(x=>x.contract===owners.get(row.contextId)));
+    !(result.trivialReviews??[]).some(x=>x.contract===owners.get(row.contextId)&&
+      typeof x.evidence==='string'&&x.evidence.trim()&&
+      Array.isArray(x.anchors)&&x.anchors.length>0));
   }
  }else throw Error('unsupported issued unit kind');
  return result;
