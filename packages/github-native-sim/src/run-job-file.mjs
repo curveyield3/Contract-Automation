@@ -210,7 +210,6 @@ async function executeMedusa({ request, checkout, build, phase6MutableRpc, runMe
 }
 
 async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, environment, runNativeFuzz, runCommand }) {
-  if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const native = request.configuration.analysis?.nativeFuzz ?? {};
   // No unselected "forge test": that would run every fuzz and invariant test.
   const matchTest = native.matchTest;
@@ -218,6 +217,7 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
     throw Object.assign(new Error('Agent-selected nativeFuzz.matchTest is required; automatic fuzz and invariant runs are disabled'), { kind:'AGENT_GUIDED_FOUNDRY_TEST_SELECTION_REQUIRED' });
   }
   const matchContract = native.matchContract;
+  if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const rpcUrl = phase6MutableRpc?.url;
   const blockNumber = phase6MutableRpc?.blockNumber;
   const forkEvidence = {
