@@ -1,0 +1,150 @@
+name: Lite-Solo Source Initialization v1
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: Direct ZIP URL (mutually exclusive with scan URLs)
+        type: string
+        required: false
+      scan_urls:
+        description: Etherscan/KatanaScan URLs, one per line
+        type: string
+        required: false
+      request_id:
+        description: Stable idempotency identifier (defaults to workflow run ID)
+        type: string
+        required: false
+      withhold_roles:
+        description: Optional comma-separated public file roles to withhold
+        type: string
+        required: false
+        default: ''
+  push:
+    branches: [machine-intelligence-audit-controller-v1]
+    paths:
+      - 'process/lite-solo-source-initialization/requests/*.json'
+permissions:
+  contents: write
+  actions: write
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      requests: ${{ steps.requests.outputs.requests }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Discover independent Lite-Solo campaign initialization requests
+        id: requests
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: |
+          set -euo pipefail
+          : > /tmp/lite-solo-source-requests.ndjson
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            key="${REQUEST_ID:-$GITHUB_RUN_ID}"
+            [[ "$key" =~ ^[A-Za-z0-9._-]+$ ]]
+            jq -nc --arg key "$key" '{request_path:"__MANUAL__",request_key:$key}' >> /tmp/lite-solo-source-requests.ndjson
+          else
+            root=process/lite-solo-source-initialization/requests
+            if [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ "$BEFORE_SHA" != 0000000000000000000000000000000000000000 ]]; then
+              mapfile -t changed < <(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" -- "$root/")
+            else
+              mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- "$root/")
+            fi
+            for request in "${changed[@]}"; do
+              [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]] || continue
+              test -f "$request" || continue
+              key="$(jq -er '.requestId | select(type=="string" and test("^[A-Za-z0-9._-]+$"))' "$request")"
+              jq -nc --arg request "$request" --arg key "$key" '{request_path:$request,request_key:$key}' >> /tmp/lite-solo-source-requests.ndjson
+            done
+          fi
+          echo "requests=$(jq -sc '{include:.}' /tmp/lite-solo-source-requests.ndjson)" >> "$GITHUB_OUTPUT"
+  initialize:
+    needs: discover
+    if: ${{ needs.discover.outputs.requests != '{"include":[]}' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.requests) }}
+    concurrency:
+      group: lite-solo-source-initialization-${{ matrix.request_key }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Resolve direct lite-solo source request (no chat)
+        id: request
+        env:
+          RAW_SOURCE_URL: ${{ inputs.source_url }}
+          RAW_SCAN_URLS: ${{ inputs.scan_urls }}
+          RAW_REQUEST_ID: ${{ inputs.request_id }}
+          EVENT_NAME: ${{ github.event_name }}
+          RAW_WITHHOLD_ROLES: ${{ inputs.withhold_roles }}
+          MATRIX_REQUEST: ${{ matrix.request_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = machine-intelligence-audit-controller-v1
+          if [ "$EVENT_NAME" = push ]; then
+            request="$MATRIX_REQUEST"
+            [[ "$request" =~ ^process/lite-solo-source-initialization/requests/[A-Za-z0-9._-]+\.json$ ]]
+            jq -e '
+              (.sourceUrl // "") as $url |
+              (.scanUrls // []) as $scans |
+              .schemaVersion=="curveyield-lite-solo-source-request-v1" and
+              .mode=="LITE_SOLO" and .deliveryTransport=="DIRECT" and
+              (.requestId|type=="string" and test("^[A-Za-z0-9._-]+$")) and
+              ($url|type=="string") and ($scans|type=="array") and
+              all($scans[]; type=="string" and startswith("https://")) and
+              (($url|startswith("https://")) != ($scans|length>0))
+            ' "$request" >/dev/null
+            source_url="$(jq -r '.sourceUrl // ""' "$request")"
+            scans="$(jq -c '.scanUrls // []' "$request")"
+            request_id="$(jq -r .requestId "$request")"
+            publish_files="$(jq -c 'if has("publishFiles") then .publishFiles else {report_pdf:true,audited_source:true,scope_summary:true,findings_remediation:true,methodology_analysis:true,properties_hypotheses:true,execution_results:true,architecture_dependencies:true,residual_risks:true,evidence_index:true} end' "$request")"
+          else
+            source_url="$RAW_SOURCE_URL"
+            scans="$(printf '%s' "$RAW_SCAN_URLS" | jq -Rsc 'split("\n")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))')"
+            request_id="${RAW_REQUEST_ID:-$GITHUB_RUN_ID}"
+            publish_files="$(jq -cn --arg withheld "${RAW_WITHHOLD_ROLES:-}" '["report_pdf","audited_source","scope_summary","findings_remediation","methodology_analysis","properties_hypotheses","execution_results","architecture_dependencies","residual_risks","evidence_index"] as $roles | ($withheld|split(",")|map(gsub("^\\s+|\\s+$";""))|map(select(length>0))) as $off | if (($off|unique|length)!=($off|length)) or (($off - $roles|length)>0) then error("INVALID_PUBLICATION_SELECTION") else reduce $roles[] as $role ({}; .[$role]=($off|index($role)|not)) end')"
+          fi
+          [[ "$request_id" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$source_url" != *$'\n'* && "$source_url" != *$'\r'* ]]
+          if [ -n "$source_url" ]; then [[ "$source_url" =~ ^https:// ]]; fi
+          jq -e 'type=="array" and all(.[]; type=="string" and startswith("https://"))' <<<"$scans" >/dev/null
+          if [ -n "$source_url" ]; then test "$scans" = '[]'; else test "$scans" != '[]'; fi
+          {
+            echo "source_url=$source_url"
+            echo "scan_urls_json=$scans"
+            echo "request_id=$request_id"
+            echo "publish_files_json=$publish_files"
+          } >> "$GITHUB_OUTPUT"
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Initialize exact source in direct lite-solo mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          SOURCE_URL: ${{ steps.request.outputs.source_url }}
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
+          SCAN_URLS: ${{ steps.request.outputs.scan_urls_json }}
+          PUBLISH_FILES_JSON: ${{ steps.request.outputs.publish_files_json }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/lite-solo-source-initialization/run-v1.sh
