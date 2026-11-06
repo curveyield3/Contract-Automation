@@ -7,8 +7,6 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1,markFinalizationV1,statusUnitQueueV1,reopenAggregateDefectsV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {repoFile,readJson,writeJson} from './lib/lite-solo-phase-work-v1.mjs';
-import {refreshControllerPrefillDigest} from './lib/lite-solo-phase-prefill-v1.mjs';
-import {secureRestoreWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
 const arg=Object.fromEntries(process.argv.slice(2).reduce((out,s,i,a)=>{
  if(i%2===0){if(!s.startsWith('--')||a[i+1]===undefined)throw Error('invalid CLI parameters');
   out.push([s.slice(2),a[i+1]]);}return out;},[]));
@@ -74,92 +72,22 @@ if(arg.mode!=='finalize'){
     deficiencies:recorded.finalizeDetails.unmappedDeficiencies});
   if(recovery.reopenedUnits.length)changed=true;
  }
- // Recover the exact immutable v13 Phase-5 controller prefill after a failed
- // boundary persisted transient request-binding annotations to the assignment.
- // A worker never gets to choose this digest: recompute the locked, controller-
- // indexed work form and require its sealed prefill digest to match its bytes.
+ // Legacy Phase-5 prefill-digest failures predate Worker-owned form validation.
+ // Once every original unit is accepted, clear only those stale finalization
+ // markers so the existing assembler and phase boundary can resume. Do not
+ // compare, recalculate, or repair a controller prefill digest, and never
+ // modify accepted unit snapshots.
  if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
     Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
-    recorded.finalizeDetails.unmappedDeficiencies.length>=1&&
-    recorded.finalizeDetails.unmappedDeficiencies.includes(
-      'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.')&&
+    recorded.finalizeDetails.unmappedDeficiencies.length>0&&
     recorded.finalizeDetails.unmappedDeficiencies.every(x=>[
       'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.',
       'Controller-prefilled/read-only fields were modified; restore the generated values before validation.'
-    ].includes(x))&&
-    Object.values(recorded.units??{}).every(x=>x.status==='ACCEPTED')){
-   // This existing assembler verifies the immutable controller-owned shard
-   // index and frozen base before reconstructing accepted semantic records.
-   const restored=secureRestoreWorkFormV13({
-     root,indexRel:directory.currentAssignment.workShardIndexPath
-   });
-   const form=JSON.parse(restored.content);
-   const lockedDigest=form?.automationInputs?.controllerPrefillDigestSha256;
-   const recomputed=refreshControllerPrefillDigest(structuredClone(form));
-   if(!/^[a-f0-9]{64}$/.test(String(lockedDigest??''))||recomputed!==lockedDigest)
-     throw Error('Phase-5 locked controller prefill integrity failed; refusing digest recovery');
-   directory.currentAssignment.controllerPrefillDigestSha256=lockedDigest;
-   markFinalizationV1({root,campaignPath,phase:5,status:'NOT_STARTED',details:null});
-   changed=true;
- }
- // An accepted Phase-5 work shard reconstruction can omit the transient
- // request-binding annotations written by an earlier, failed finalizer.
- // Authenticate every immutable accepted unit before reconciling the
- // assignment's transient protected-field digest. Never edit unit snapshots.
- if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
-    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
-    recorded.finalizeDetails.unmappedDeficiencies.length===1&&
-    Object.values(recorded.units??{}).length>0&&
+    ].includes(String(x))||String(x).startsWith(
+      'Phase 5 source-bound controller prefill restoration rejected:'))&&
+    Object.keys(recorded.units??{}).length>0&&
     Object.values(recorded.units).every(x=>x.status==='ACCEPTED')){
-  const diagnosis=String(recorded.finalizeDetails.unmappedDeficiencies[0]);
-  const match=diagnosis.match(/^Phase 5 source-bound controller prefill restoration rejected: stored assignment digest ([a-f0-9]{64}) differs from reconstructed ([a-f0-9]{64})$/);
-  if(match){
-   if(directory.currentAssignment.controllerPrefillDigestSha256!==match[1])
-    throw Error('Phase-5 recovery stored digest is not the recorded controller assignment');
-   // This temporarily re-enables ONLY the existing strict immutable-unit
-   // assembler. Any failure aborts without publishing the scratch checkout.
-   markFinalizationV1({root,campaignPath,phase:5,status:'NOT_STARTED',details:null});
-   assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase:5});
-   const restored=secureRestoreWorkFormV13({
-    root,indexRel:directory.currentAssignment.workShardIndexPath
-   });
-   const rebuilt=JSON.parse(restored.content);
-   const frozenBaseDigest=rebuilt.automationInputs?.controllerPrefillDigestSha256;
-   const actual=refreshControllerPrefillDigest(structuredClone(rebuilt));
-   // The error's reconstructed digest may include transient request-binding
-   // annotations. The immutable v13 BASE, SHA-checked above by the existing
-   // restorer, is the authoritative protected-field baseline for accepted units.
-   if(!/^[a-f0-9]{64}$/.test(String(frozenBaseDigest??''))||actual!==frozenBaseDigest)
-    throw Error('Phase-5 accepted-unit projection differs from SHA-verified frozen BASE');
-   directory.currentAssignment.controllerPrefillDigestSha256=actual;
-   changed=true;
-  }
- }
- // Retry a Phase-5 boundary previously blocked only by the canonical/temp-key
- // alias mismatch. The Phase-5 controller independently revalidates every
- // source-bound machine result before it can seal; this does not waive it.
- if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
-    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
-    recorded.finalizeDetails.unmappedDeficiencies.length>0&&
-    recorded.finalizeDetails.unmappedDeficiencies.every(x=>
-     /^Phase 5 mandatory material candidate CAND-[0-9]+ has no targeted machine execution$/.test(String(x)))&&
-    Object.values(recorded.units??{}).every(x=>x.status==='ACCEPTED')){
-  markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
-  changed=true;
- }
- // A prior boundary may have promoted APPEND rows into frozen fixed-record
- // positions before the unit assembler was installed. Recover its exact
- // immutable unit-plan ownership and recompute protected prefill integrity.
- // Never discard individual accepted work or waive a machine-evidence gate.
- if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
-    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
-    recorded.finalizeDetails.unmappedDeficiencies.length>0&&
-    recorded.finalizeDetails.unmappedDeficiencies.every(x=>[
-     'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.',
-     'Controller-prefilled/read-only fields were modified; restore the generated values before validation.'
-    ].includes(String(x)))&&
-    Object.values(recorded.units??{}).every(x=>x.status==='ACCEPTED')){
-  markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
+  markFinalizationV1({root,campaignPath,phase:5,status:'NOT_STARTED',details:null});
   changed=true;
  }
  for(const filename of files){
