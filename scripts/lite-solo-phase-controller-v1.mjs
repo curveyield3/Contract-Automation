@@ -213,7 +213,9 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   // Phase 2 did not promote its D4/D6/D7 leads to requirements or properties.
   // Preserve Phase 2's derived input and any other immediate inputs as well.
   if(target===3) return uniqueExisting(root,[p1Canonical,p2,...immediate]);
-  if(target===4) return uniqueExisting(root,[p2,p3,discoverySummary]);
+  // Preserve the original Phase 1 evidence for both discovery and later
+  // reconciliation/specialist units, independently of Phase 2/3 promotion.
+  if(target===4) return uniqueExisting(root,[p1Canonical,p2,p3,discoverySummary]);
   if(target===5) return uniqueExisting(root,[p2,p3,p4,discoverySummary]);
   if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,discoverySummary,buildIdentity,deploy,targets]);
   if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,p7,discoverySummary,buildIdentity,deploy,targets]);
