@@ -41,7 +41,8 @@ function walk(value, visit, ctx={}) {
     next = {...ctx};
     if (value.nodeType === 'ContractDefinition') next.contract = value;
     if (value.nodeType === 'FunctionDefinition' || value.nodeType === 'ModifierDefinition' ||
-        (value.nodeType === 'VariableDeclaration' && value.stateVariable===true && value.value))
+        (value.nodeType === 'VariableDeclaration' && value.stateVariable===true &&
+         value.value && containsAstCallExpression(value.value)))
       next.fn = value;
     visit(value,next);
   }
@@ -49,6 +50,14 @@ function walk(value, visit, ctx={}) {
     if (['scope','referencedDeclaration','linearizedBaseContracts'].includes(key)) continue;
     if (child && typeof child === 'object') walk(child,visit,next);
   }
+}
+// Treat a deployment-time state initializer as a caller only when its AST
+// actually contains a call/creation expression. Literal initializers are not
+// fabricated function-like security subjects.
+function containsAstCallExpression(value){
+  let found=false;
+  walk(value,node=>{if(node.nodeType==='FunctionCall'||node.nodeType==='NewExpression')found=true;});
+  return found;
 }
 async function sources(projectRoot) {
   const out=[];
@@ -84,7 +93,8 @@ function astIndex(sourceAsts, byPath, compilationUnits=[]) {
           if(unit.unitId==='default')contracts.set(qualifiedName,{node,sourceName,source,unitId:unit.unitId,qualifiedName});
         }
         if ((node.nodeType==='FunctionDefinition'||node.nodeType==='ModifierDefinition'||
-             (node.nodeType==='VariableDeclaration'&&node.stateVariable===true&&node.value)) && ctx.contract) {
+             (node.nodeType==='VariableDeclaration'&&node.stateVariable===true&&
+              node.value&&containsAstCallExpression(node.value))) && ctx.contract) {
           const qualifiedName=`${sourceName}:${ctx.contract.name}`;
           const key=`${unit.unitId}|${qualifiedName}`;
           const list=functions.get(key)??[]; list.push({node,sourceName,source,unitId:unit.unitId}); functions.set(key,list);
@@ -390,7 +400,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
     sourceIdentity,buildIdentity:{...buildCore,digestSha256:digestCanonicalV1(buildCore)},sourceFiles,compilerArtifacts,contracts,functions,storageLayout,inheritanceGraph,
     callGraph,privilegeCandidates,externalInterfaces,valueFlowCandidates,eventsAndErrors,sourceAnchors,
     securitySurfaces:[
-      {surfaceId:'SURFACE-CALLABLE',surfaceClass:'CALLABLE_SURFACE',sourceIds:sourceFiles.map(x=>x.sourceId),contractIds:contracts.map(x=>x.contractId),functionIds:functions.map(x=>x.functionId),
+      {surfaceId:'SURFACE-CALLABLE',surfaceClass:'CALLABLE_SURFACE',sourceIds:sourceFiles.map(x=>x.sourceId),contractIds:contracts.map(x=>x.contractId),functionIds:functions.filter(x=>x.visibility!=='STATE_INITIALIZER').map(x=>x.functionId),
         storageIds:storageLayout.map(x=>x.storageId),externalInterfaceIds:externalInterfaces.map(x=>x.externalInterfaceId),privilegeCandidateIds:privilegeCandidates.map(x=>x.candidateId),valueFlowCandidateIds:valueFlowCandidates.map(x=>x.valueFlowCandidateId),sourceAnchorIds:sourceAnchors.map(x=>x.anchorId),
         phase1Ownership:'STRUCTURAL_INVENTORY',laterPhaseTreatment:'REUSE_VERIFY_EXTEND_SEMANTICALLY',status:'CURRENT',basis:'ADMITTED_COMPILER_AND_AST_FACTS'},
       {surfaceId:'SURFACE-PRIVILEGE',surfaceClass:'PRIVILEGE_AND_ACCESS_CANDIDATES',sourceIds:sourceFiles.map(x=>x.sourceId),contractIds:[...new Set(privilegeCandidates.map(x=>x.contractId))],functionIds:[...new Set(privilegeCandidates.map(x=>x.functionId).filter(Boolean))],
