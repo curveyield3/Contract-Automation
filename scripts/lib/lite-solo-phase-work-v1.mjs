@@ -206,8 +206,14 @@ export function buildOriginalCanonicalEvidenceRosterV1({root,campaignPath,direct
  let foundOtherHash=false;
  for(const candidate of candidates){
    const file=repoFile(root,candidate);
-   if(!fs.existsSync(file)||!fs.statSync(file).isFile())continue;
-   const bytes=fs.readFileSync(file);
+   let bytes;
+   try{
+     if(!fs.existsSync(file)||!fs.statSync(file).isFile())continue;
+     bytes=fs.readFileSync(file);
+   }catch(error){
+     roster.diagnostics.push('Canonical bytes unreadable at '+candidate+': '+String(error?.message??error));
+     continue;
+   }
    const sha=createHash('sha256').update(bytes).digest('hex');
    if(candidate===canonicalRel)roster.actualCanonicalSha256=sha;
    if(sha!==expectedSha){foundOtherHash=true;continue;}
@@ -264,7 +270,8 @@ export function buildOriginalCanonicalEvidenceRosterV1({root,campaignPath,direct
    }
    return roster;
  }
- roster.availability=foundOtherHash?'CANONICAL_HASH_MISMATCH':'CANONICAL_MISSING';
+ roster.availability=foundOtherHash?'CANONICAL_HASH_MISMATCH':
+   roster.diagnostics.length?'CANONICAL_READ_UNAVAILABLE':'CANONICAL_MISSING';
  roster.diagnostics.push(foundOtherHash
    ?'No current or archived canonical bytes match the accepted receipt SHA-256'
    :'Accepted canonical artifact not found at its original or existing superseded paths');
