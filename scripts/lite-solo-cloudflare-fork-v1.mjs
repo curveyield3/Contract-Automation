@@ -11,7 +11,7 @@ import {execFileSync} from 'node:child_process';
 import {readJson, writeJson, repoFile, loadPhaseSchema, validateBoundAuthorityV1, EXPLICIT_NEGATIVES} from './lib/lite-solo-phase-work-v1.mjs';
 import {readUnitPacketIndexV1, readUnitPacketV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
 import {qualifiesLiteralTrivialReviewV13} from '../packages/github-native-sim/src/adr-discovery-validators-v1.mjs';
-import {processUnitRequestV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {processUnitRequestV1,freezeIssuedUnitMetaV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
 import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
@@ -196,6 +196,12 @@ function unitPlan(c){
         const rawValue=fs.readFileSync(relative(x.initialValueRef));
         strict(sha(rawValue)===x.initialValueSha256,'unit initial value manifest mismatch');
         x.initialValue=loadPagedPrefill(x.initialValueRef);
+      }
+      if(x.issuedMetaRef){
+        const rawMeta=fs.readFileSync(relative(x.issuedMetaRef));
+        strict(sha(rawMeta)===x.issuedMetaSha256,
+          'original issued metadata was changed in campaign storage');
+        x.issuedMeta=loadPagedPrefill(x.issuedMetaRef);
       }
       if(x.kind==='BATCH'){
         const packetRaw=fs.readFileSync(relative(x.packetPath));
@@ -642,6 +648,7 @@ function issuedPacketDigestV1(c,u,state=null){
  return sha(fs.readFileSync(relative(u.packetPath||u.shardPath)));
 }
 function buildUnitMeta(c,u,schema,queueState=null){
+  if(u.issuedMeta)return structuredClone(u.issuedMeta);
   const index=u.packetIndexPath?readUnitPacketIndexV1({root:ROOT,indexPath:safePath(u.packetIndexPath)}):null;
   const discoveryPacket=['FLOW','ATTACK'].includes(u.kind)?readUnitPacketV1({root:ROOT,packetPath:safePath(u.packetPath)}):null;
   if(discoveryPacket)strict(discoveryPacket.payload?.unitId===u.unitId,'discovery packet identity mismatch');
