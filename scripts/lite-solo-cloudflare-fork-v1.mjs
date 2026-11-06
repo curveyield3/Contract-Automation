@@ -542,10 +542,11 @@ function buildUnitMeta(c,u,schema){
          .map(rule=>({ruleId:rule.ruleId,rule:rule.rule,comparison:'<REQUIRED>',reason:'<REQUIRED>'})),
         siblingComparisons:(discoveryPacket?.payload?.siblingChecks??[])
          .filter(group=>(group.members??[]).some(m=>m.contextId===contextId&&m.function===group.signature))
-         .map(group=>{
+         .flatMap(group=>{
           const others=(group.members??[]).filter(m=>m.contextId!==contextId);
-          const counterpart=(others.length?others:group.members)[0];
-          return {siblingContextId:counterpart.contextId,signature:group.signature,comparison:'<REQUIRED>'};
+          return (others.length?others:group.members).map(counterpart=>({
+           siblingContextId:counterpart.contextId,signature:group.signature,
+           comparison:'<REQUIRED>'}));
          })})),
       flowNotes:(index?.flowIds||[]).map(flowId=>({flowId,note:'<REQUIRED>',anchors:[]})),
       integrationAnswers:(index?.integrationQuestionIds||[]).map(obligationId=>({obligationId,assessment:'<REQUIRED>',reasoning:'<REQUIRED>',anchors:[]})),
@@ -567,7 +568,7 @@ function buildUnitMeta(c,u,schema){
       integrationAnswers:(index?.integrationQuestionIds||[]).map(obligationId=>({obligationId,assessment:'<REQUIRED>',reasoning:'<REQUIRED>',anchors:[]}))};
     inputSchema={type:'object',required:['schemaVersion','unitId','attackPaths','integrationAnswers'],
       properties:{schemaVersion:{type:'string',enum:['curveyield-attack-submission-v1']},
-        unitId:{type:'string',enum:[u.unitId]},attackPaths:{type:'array',minItems:1},integrationAnswers:{type:'array'}}};
+        unitId:{type:'string',enum:[u.unitId]},attackPaths:{type:'array',minItems:(index?.flowIds?.length??0)>0?1:0},integrationAnswers:{type:'array'}}};
   }else{
     initial={schemaVersion:'curveyield-lite-solo-unit-submission-v1',
       entries:u.kind==='APPEND'?[]:(u.kind==='BATCH'?u.members:[u]).map(m=>({key:m.recordKeys?.[0],value:m.initialValue}))};
