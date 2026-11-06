@@ -73,7 +73,7 @@ contract AVKATForkSimulationV1 {
         p.toKat=_none();
     }
     function _bothWithCharm(bool full) internal view returns(AVKATConsolidatedSafeModule.PreSteps memory p) {
-        uint128 a=_liq(NFT_STABLE),b=_liq(NFT_KAT);
+        uint128 a=_liq(NFT_STABLE); uint128 b=_liq(NFT_KAT);
         require(a>0&&b>0,"ACTIVE_NFT_LIQUIDITY_MISSING");
         uint256 shares=_bal(CHARM);
         require(shares>1,"CHARM_SHARES_MISSING");
@@ -191,7 +191,7 @@ contract AVKATForkSimulationV1 {
     function test_depositVault_CharmProportional() public {
         uint256 s=_bal(CHARM);require(s>1,"CHARM_BALANCE_ZERO");
         vm.prank(BOT);mod.withdrawVault(CHARM,s/2,0,0);
-        uint256 before=_bal(CHARM),w=_bal(W),u=_bal(U);
+        uint256 before=_bal(CHARM); uint256 w=_bal(W); uint256 u=_bal(U);
         require(w>0&&u>0,"CHARM_TOKENS_NOT_RECEIVED");
         vm.prank(BOT);mod.depositVault(CHARM,w,u,0,0,1,_none());
         require(_bal(CHARM)>before,"CHARM_SHARES_NOT_MINTED");
@@ -232,7 +232,7 @@ contract AVKATForkSimulationV1 {
         uint128 before=_liq(NFT_STABLE);require(before>1,"NFT_STABLE_EMPTY");
         vm.prank(BOT);mod.withdrawRange(1,before/2,0,0,false);
         uint128 afterExit=_liq(NFT_STABLE);
-        uint256 u=_bal(U),t=_bal(T);require(u>0&&t>0,"NO_STABLE_ASSETS_FOR_ADD");
+        uint256 u=_bal(U); uint256 t=_bal(T);require(u>0&&t>0,"NO_STABLE_ASSETS_FOR_ADD");
         vm.prank(BOT);mod.addRangeLiquidity(1,u,t,0,0,block.timestamp+3600,_none());
         require(_liq(NFT_STABLE)>afterExit,"NFT_ADD_NOT_MINTED");
     }
@@ -276,7 +276,7 @@ contract AVKATForkSimulationV1 {
         require(mod.ltvOf()<=mod.targetLtv(),"DELOOP_LTV_EXCEEDED");
     }
     function test_atomicLoopUp_HalfCharmAndBothActiveNFTs() public {
-        uint128 a=_liq(NFT_STABLE),b=_liq(NFT_KAT);
+        uint128 a=_liq(NFT_STABLE); uint128 b=_liq(NFT_KAT);
         uint256 shares=_bal(CHARM);require(a>1&&b>1&&shares>1,"MISSING_HALF_LIQUIDITY");
         _reportState("HALF_BEFORE");
         vm.prank(BOT);mod.atomicLoopUp(_bothWithCharm(false),_loopRequest());
@@ -287,7 +287,7 @@ contract AVKATForkSimulationV1 {
         _reportState("HALF_AFTER");
     }
     function test_atomicLoopUp_FullCharmAndBothActiveNFTs() public {
-        uint128 a=_liq(NFT_STABLE),b=_liq(NFT_KAT);
+        uint128 a=_liq(NFT_STABLE); uint128 b=_liq(NFT_KAT);
         uint256 shares=_bal(CHARM);require(a>0&&b>0&&shares>0,"MISSING_FULL_LIQUIDITY");
         _reportState("FULL_BEFORE");
         vm.prank(BOT);mod.atomicLoopUp(_bothWithCharm(true),_loopRequest());
