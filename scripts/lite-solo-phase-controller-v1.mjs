@@ -38,6 +38,44 @@ function phaseNum(n){return String(n).padStart(2,'0');}
 function feedbackText(sequence,defs){return ['Phase '+sequence+' semantic validation failed.','Repair only the exact substantive items below and invoke controller validation again.','',...defs.map(x=>'- '+x),'','Do not advance, retire, update receipts, or perform controller bookkeeping.'].join('\n');}
 function listFilesRecursive(dir){if(!fs.existsSync(dir)) return [];const out=[];for(const ent of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,ent.name);if(ent.isDirectory()) out.push(...listFilesRecursive(p));else if(ent.isFile()) out.push(p);}return out;}
 function hasRemediation(campaignRoot){return listFilesRecursive(path.join(campaignRoot,'remediation')).length>0;}
+// Direct phase work forms (1–3, 8–10) do not use Phase 4–6 APPEND
+// units. Give every genuinely new AI-authored record its deterministic
+// controller ID before canonical packaging. This is clerical identity
+// allocation, NOT a GitHub-side security or content quality gate.
+function completeDirectPhaseRecordIdsV1({form,sequence,campaignId}){
+ const identityFields={
+  1:{'step-2':{protectedAssets:'assetKey',authorityActors:'actorKey',
+    trustBoundaries:'boundaryKey',stateTransitions:'transitionKey',
+    semanticRequirements:'requirementKey'},
+   'step-3':{dependencyAssessments:'dependencyKey'},
+   'step-4':{standardsAssessments:'standardKey'},
+   'step-5':{riskDrivers:'driverKey'}},
+  2:{'step-2':{requirements:'tempKey'},'step-3':{propertyDesigns:'tempKey'}},
+  3:{'step-1':{attackHypotheses:'tempKey'},
+    'step-2':{customValidationObligations:'tempKey'}},
+  8:{'step-1':{candidateGroups:'groupKey'}}
+ };
+ const assigned=identityFields[sequence]??{},camp=String(campaignId??'');
+ const campaignToken=createHash('sha256').update(camp).digest('hex').slice(0,12);
+ let issued=0;
+ for(const [step,fields]of Object.entries(assigned)){
+  for(const [collection,key]of Object.entries(fields)){
+   const rows=form?.actions?.[step]?.outputs?.[collection];
+   if(!Array.isArray(rows))continue;
+   for(const [i,row]of rows.entries()){
+    if(!row||typeof row!=='object'||Array.isArray(row))continue;
+    const value=row[key];
+    if(typeof value==='string'&&value.trim()&&!value.startsWith('<REQUIRED')&&
+      value!=='TODO')continue; // Controller-issued or accepted key wins.
+    row[key]=['MI',String(sequence).padStart(2,'0'),campaignToken,step,
+      collection,String(i+1).padStart(4,'0')].join('-');
+    issued++;
+   }
+  }
+ }
+ return issued;
+}
+
 function canonicalFamilyForField(name){return ({propertyDesigns:'PROP',attackHypotheses:'HYP',candidateRecords:'CAND',newCandidateRecords:'CAND',validatedFindings:'FIND',remediationDispositions:'REM'})[name]??null;}
 function nextId(graph,family){let max=0;for(const n of graph.nodes??[]){const m=String(n.nodeId??'').match(new RegExp('^'+family+'-(\\d+)$'));if(m) max=Math.max(max,Number(m[1]));}return family+'-'+String(max+1).padStart(3,'0');}
 function assignCanonicalIds(canonical,graph,phase){
@@ -868,6 +906,12 @@ let deficiencies=[];
 let form=null;
 materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
 form=readJson(requiredFile(root,assignment.workFormPath,'Worker-provided phase work file'));
+
+// Record identity allocation does not analyze vulnerabilities or reject AI work.
+if(completeDirectPhaseRecordIdsV1({form,sequence,campaignId:directory.campaignId})>0){
+  refreshControllerPrefillDigest(form);
+  writeJson(repoFile(root,assignment.workFormPath),form);
+}
 
 // Existing controller evidence collector: bind only authenticated Phase-9 rerun
 // files to their precise accepted finding keys. Missing proof stays unresolved;
