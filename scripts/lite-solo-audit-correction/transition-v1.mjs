@@ -385,10 +385,13 @@ const launch=()=>{
   inspectUnchanged(toFile(sourcePath+'/'+folder),toFile(dest+'/'+folder));
  const cached=new Map();
  const retain=rel=>{if(fs.existsSync(toFile(dest+'/'+rel)))cached.set(rel,fs.readFileSync(toFile(dest+'/'+rel)));};
+ // Preserve the baseline inherited from the sealed predecessor even when
+ // the correction restarts at Phase 5 and resets all subsequent work.
+ if([5,6].includes(request.startPhase))
+  retain('work/phase-06/BASELINE_OBLIGATIONS_v1.json');
  if(request.startPhase===6){
   retain('work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
   retain('work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
-  retain('work/phase-06/BASELINE_OBLIGATIONS_v1.json');
  }
  if(request.startPhase===10){
   retain('work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
