@@ -1178,6 +1178,7 @@ let lastOwner=null,waitingSince=0,lastWaitReport=0;
 let lastStepScope=null,lastUnitScope=null;
 let lastAuthorityRaw=null,lastClaimRaw=null,lastIssuedResponseRaw=null,pendingRecovery=null;
 let activePhase1Evidence=null;
+let activeCanonicalHistory=null;
 let consecutiveRejections=0,lastRejectedFingerprint=null;
 while(true){
  // Acquire the exact controller-issued work form before model analysis whenever
@@ -1255,6 +1256,7 @@ while(true){
   alreadyProvidedStepInstructions.clear();
   lastAuthorityRaw=null;lastClaimRaw=null;lastIssuedResponseRaw=null;pendingRecovery=null;
   activePhase1Evidence=null;
+  activeCanonicalHistory=null;
   consecutiveRejections=0;lastRejectedFingerprint=null;
  }
  if(scope){lastStepScope=scope.step;if(scope.unit!==null)lastUnitScope=scope.unit;}
@@ -1284,6 +1286,30 @@ while(true){
     checkpoints:priorEvidence.histories?.reduce((n,h)=>n+h.checkpoints.length,0)??0,
     unavailable:priorEvidence.unavailable?.length??0,
     originalTextPreserved:true,privateContent:'MODEL_INPUT_ONLY'}));
+  }
+  // Independently retrieve ORIGINAL accepted canonical records at the same
+  // committed snapshot as the checkpoint family. Step 4 will reconstruct
+  // model-facing delivery; these verified records stay private to this bridge.
+  activeCanonicalHistory=await sourceBoundCanonicalHistoryV1(workerResponse)
+   .catch(error=>({manifest:{
+    schemaVersion:'curveyield-mi-original-canonical-history-v1',
+    campaignId,snapshotCommit:historySnapshotCommit,
+    availability:'GITHUB_ORIGINAL_CANONICAL_READ_UNAVAILABLE',
+    rosters:[],unavailable:[{availability:'GITHUB_ORIGINAL_CANONICAL_READ_UNAVAILABLE',
+     detail:String(error?.message??error)}]},sources:new Map()}));
+  if(activeCanonicalHistory){
+   console.log(JSON.stringify({status:'MIMO_ACCEPTED_CANONICAL_HISTORY_RETRIEVED',
+    activePhase:activeCanonicalHistory.manifest.activePhase??null,
+    pinnedCommit:activeCanonicalHistory.manifest.snapshotCommit??null,
+    sourceIdentity:activeCanonicalHistory.manifest.auditedSourceSha256??null,
+    availability:activeCanonicalHistory.manifest.availability,
+    originalRevisions:activeCanonicalHistory.manifest.rosters?.length??0,
+    originalValues:[...(activeCanonicalHistory.sources?.values()??[])]
+     .reduce((n,x)=>n+x.originalSelectors.length,0),
+    unavailable:activeCanonicalHistory.manifest.unavailable?.length??0,
+    noGithubSecurityDisposition:true,
+    modelFacingDelivery:'DEFERRED_TO_STEP_4',
+    privateContent:'LOCAL_GITHUB_HISTORY_ONLY'}));
   }
   // A mere canonical filename in derivedInputPaths is not model access.
   // Fetch the accepted original source privately at the pinned controller commit.
