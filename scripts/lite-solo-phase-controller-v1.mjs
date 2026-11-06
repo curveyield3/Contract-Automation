@@ -1311,7 +1311,7 @@ if(sequence===6&&!isReassignedV13AuthorityV1({root,authorityRoot})){
   const markerEvidence=[receiptRef(root,campaignPath,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,campaignPath,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,campaignPath,x,'DERIVED_DOWNSTREAM_DATA'))];
   const markerHandoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:8,sameReviewer:true,status:'NOT_APPLICABLE'};
   const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',revision:markerRevision,authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],evidence:markerEvidence,outputs:markerEvidence,globalControls:receipt.globalControls,validation:{status:'PASS',validatedAt:now,failures:[]},handoff:markerHandoff,now});
-  marker.sealedAt=now;writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=false;nextSequence=8;nextDerivedInputs=resolveInputsForTarget({root,campaignPath,directory,target:8,immediate:[...derivedRels,...derived7,...boundaryArtifactRels]});
+  marker.sealedAt=now;writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=false;nextSequence=8;
 }
 if(sequence===8&&nextSequence===10){
   const skippedRevision=masterAmendmentRefreshSha?phaseRevision:1;
