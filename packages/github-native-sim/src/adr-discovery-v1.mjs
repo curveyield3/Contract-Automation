@@ -238,7 +238,7 @@ export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campa
  if(role==='ATTACK'&&!singleReviewer)lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any unit folder under work/phase-04/discovery/ other than the ones listed above.");
  return lines.join('\n\n');
 }
-function wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef='main',feedbackText=null}){
+function wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef='machine-intelligence-audit-controller-v1',feedbackText=null}){
  const role=state.payload.units[ids[0]].role==='ATTACK'?'ATTACK':'FLOW_REVIEW';
  const round=state.payload.wakeRound=(state.payload.wakeRound??0)+1;
  const attempt=Math.max(...ids.map(id=>state.payload.units[id]?.attempts??0))+1;
@@ -250,7 +250,7 @@ function wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditContr
   wakeId:directory.campaignId+'-discovery-'+ids[0]+'-r'+round,
   phaseId:'phase-4',milestoneId:'DISCOVERY_'+ids[0],messageB64:Buffer.from(message).toString('base64')};
 }
-export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,now,auditControllerRef='main'}){
+export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,now,auditControllerRef='machine-intelligence-audit-controller-v1'}){
  const plan=known(root,asset(root,campaignPath,'FLOW_PLAN_v1.json'));
  const units=unitList(plan),order=units.map(x=>x.unitId);
  const missing=!plan||!units.length;
@@ -381,7 +381,7 @@ export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,a
   wakeId:directory.campaignId+'-discovery-complete',phaseId:'phase-4',
   milestoneId:'PHASE_4_WORK_PACKET',messageB64:Buffer.from(message).toString('base64')},summary};
 }
-export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,now,auditControllerRef='main'}){
+export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,now,auditControllerRef='machine-intelligence-audit-controller-v1'}){
  const state=known(root,stateRel(campaignPath));
  if(!state)throw new Error('discovery state missing');
  const chatKey=state.payload.units[unitId]?.chatKey;
