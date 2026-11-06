@@ -6,6 +6,7 @@ on:
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/requests/*.json'
       - '.github/workflows/katana-network-specific-anvil-simulator-v13.yml'
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/run-v13.mjs'
+      - 'test/katana/cyavkat-morpho-exit-fork-v1.mjs'
   workflow_dispatch:
 
 permissions:
@@ -13,6 +14,7 @@ permissions:
 
 jobs:
   cyvbwbtc-lifecycle:
+    if: ${{ !contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -92,3 +94,67 @@ jobs:
             done
             exit 1
           fi
+
+  cyavkat-morpho-full-exit:
+    if: ${{ contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned JS dependencies and Anvil
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Start pinned Katana Anvil fork (no public-chain writes)
+        shell: bash
+        env:
+          KATANA_UPSTREAM: ${{ secrets.RPC_KATANA }}
+        run: |
+          set -euo pipefail
+          upstream="${KATANA_UPSTREAM:-https://katana.drpc.org/}"
+          echo "::add-mask::$upstream"
+          test "$(cast chain-id --rpc-url "$upstream")" = 747474
+          PIN="$(cast block-number --rpc-url "$upstream")"
+          [[ "$PIN" =~ ^[0-9]+$ ]] && [ "$PIN" -gt 0 ]
+          HASH="$(cast block "$PIN" --field hash --rpc-url "$upstream" | tr -d '\r\n')"
+          (timeout 28m anvil --fork-url "$upstream" --fork-block-number "$PIN" --chain-id 747474 --port 8545 --host 127.0.0.1 > "$RUNNER_TEMP/avkat-anvil.log" 2>&1 &)
+          ready=0
+          for i in $(seq 1 90); do
+            if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" = 1 || { tail -100 "$RUNNER_TEMP/avkat-anvil.log"; exit 1; }
+          test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = 747474
+          test "$(cast block "$PIN" --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')" = "$HASH"
+          echo "Pinned Katana fork block $PIN, hash $HASH. All writes LOCAL to Anvil." >> "$GITHUB_STEP_SUMMARY"
+      - name: Simulate full collateral withdrawal and debt extinguishment
+        run: node test/katana/cyavkat-morpho-exit-fork-v1.mjs
+      - name: Display evidence and fork receipts
+        if: always()
+        shell: bash
+        run: |
+          if [ -f cyavkat-morpho-exit-fork-v1.json ]; then
+            cat cyavkat-morpho-exit-fork-v1.json
+            echo '### avKAT Morpho unwind simulation' >> "$GITHUB_STEP_SUMMARY"
+            jq -r '"Status: " + .status, "Pinned block: " + (.forkBlock|tostring), "Estimated gas: " + (.gas.estimated // "unavailable")' cyavkat-morpho-exit-fork-v1.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '::error::Simulation evidence missing'
+            tail -100 "$RUNNER_TEMP/avkat-anvil.log" || true
+          fi
+      - name: Upload immutable simulation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyavkat-morpho-exit-fork-v1-${{ github.run_id }}
+          path: cyavkat-morpho-exit-fork-v1.json
+          if-no-files-found: warn
+          retention-days: 30
