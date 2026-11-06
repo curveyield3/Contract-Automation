@@ -153,7 +153,9 @@ export function collectAcceptedQuestionHistoryRefsV1({
   sourceSha256:directory.sourceSha256,authorityDigest:directory.authorityDigest,
   phaseSequence:phase,histories:[],unavailable:{}};
  if(![4,5,6].includes(phase))return roster;
- const queue=maybe(root,queueRel(campaignPath,phase));
+ let queue;
+ try{queue=maybe(root,queueRel(campaignPath,phase));}
+ catch{return {...roster,availability:'QUEUE_UNREADABLE'};}
  if(!queue)return {...roster,availability:'QUEUE_NOT_PUBLISHED'};
  let plan;
  try{plan=readPlan(root,campaignPath,phase);}
@@ -164,8 +166,8 @@ export function collectAcceptedQuestionHistoryRefsV1({
     queue.authorityDigest!==directory.authorityDigest||
     queue.phaseSequence!==phase||queue.phaseEpoch!==plan.phaseEpoch)
   return {...roster,availability:'IDENTITY_MISMATCH'};
- const accepted=plan.units.map(u=>u.unitId)
-  .filter(id=>queue.units[id]?.status==='ACCEPTED').sort();
+ const accepted=(Array.isArray(plan.units)?plan.units:[]).map(u=>u.unitId)
+  .filter(id=>queue.units?.[id]?.status==='ACCEPTED').sort();
  for(const unitId of accepted){
   const ref=recoverAcceptedQuestionLedgerReferenceV1({
    root,campaignPath,phase,unitId,directory,queue,plan});
