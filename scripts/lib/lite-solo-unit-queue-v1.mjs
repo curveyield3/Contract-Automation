@@ -539,6 +539,27 @@ function batchIndex(root,campaign,phase,requestId,units){
  const rel=path.posix.join(dir,'BATCH_INDEX_v1.json');put(root,rel,index);
  return rel;
 }
+// Reclaimed units must refer to the original issued bytes, not a shard that
+// has been updated by a prior assembly. New units retain the frozen plan SHA.
+function issuedPacketDigestForClaimV1({root,campaign,phase,queue,plan,u,state}){
+ if(typeof u.packetSha256==='string')return u.packetSha256;
+ const prefix=unitBase(campaign,phase,u.unitId)+'/';
+ if(typeof state?.acceptedPath==='string'&&state.acceptedPath.startsWith(prefix)){
+  try{
+   const prior=read(root,state.acceptedPath);
+   if(prior.unitId===u.unitId&&
+      prior.campaignGenerationId===plan.campaignGenerationId&&
+      prior.sourceSha256===plan.sourceSha256&&
+      prior.authorityDigest===plan.authorityDigest&&
+      prior.phaseSequence===phase&&prior.phaseEpoch===queue.phaseEpoch&&
+      prior.unitSpecRevision===u.unitSpecRevision&&
+      prior.submissionSha256===state.acceptedSha256&&
+      /^[a-f0-9]{64}$/.test(String(prior.packetSha256??'')))
+    return prior.packetSha256;
+  }catch{/* The original packet is not available for this claim. */}
+ }
+ return hex(fs.readFileSync(repoFile(root,u.packetPath??u.shardPath)));
+}
 function handleClaim({root,campaign,phase,queue,plan,request}){
  const held=Object.values(queue.units).filter(u=>u.workerId===request.workerId&&u.status==='CLAIMED').length;
  const capacity=Math.max(0,UNIT_POLICY.issueBatchMax-held);
@@ -548,7 +569,7 @@ function handleClaim({root,campaign,phase,queue,plan,request}){
   state.claimEpoch++;state.claimToken=randomUUID();
   return {unitId:u.unitId,claimEpoch:state.claimEpoch,claimToken:state.claimToken,
    packetPath:u.packetPath??u.shardPath,packetIndexPath:u.packetIndexPath??null,
-   packetSha256:u.packetSha256??hex(fs.readFileSync(repoFile(root,u.shardPath))),
+   packetSha256:issuedPacketDigestForClaimV1({root,campaign,phase,queue,plan,u,state}),
    unitSpecRevision:u.unitSpecRevision};
  });
  const claimId=units.length?'claim-'+request.requestId:null;
