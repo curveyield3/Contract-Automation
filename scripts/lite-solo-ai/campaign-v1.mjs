@@ -1526,6 +1526,7 @@ let lastStepScope=null,lastUnitScope=null;
 let lastAuthorityRaw=null,lastClaimRaw=null,lastIssuedResponseRaw=null,pendingRecovery=null;
 let activePhase1Evidence=null;
 let activeCanonicalHistory=null;
+let activeQuestionHistory=null;
 let consecutiveRejections=0,lastRejectedFingerprint=null;
 while(true){
  // Acquire the exact controller-issued work form before model analysis whenever
@@ -1604,6 +1605,7 @@ while(true){
   lastAuthorityRaw=null;lastClaimRaw=null;lastIssuedResponseRaw=null;pendingRecovery=null;
   activePhase1Evidence=null;
   activeCanonicalHistory=null;
+  activeQuestionHistory=null;
   consecutiveRejections=0;lastRejectedFingerprint=null;
  }
  if(scope){lastStepScope=scope.step;if(scope.unit!==null)lastUnitScope=scope.unit;}
@@ -1618,15 +1620,20 @@ while(true){
   // incompatible model turns. A rejected model action is NOT a new instruction.
   lastIssuedResponseRaw=workerResponse;
   dialogue.push({role:'user',content:modelInstructions});
-  // Load the original immutable question checkpoints ONLY for a newly issued
-  // claim, not on every follow-up response. This does not modify the Worker
-  // response or the controller-issued submission form.
-  const priorEvidence=await sourceBoundQuestionHistoryV1(workerResponse)
+  // Keep source readers for all follow-up review/remediation responses in
+  // this scoped assignment; non-leased Worker responses cannot erase them.
+  let claimStatus=null;
+  try{claimStatus=JSON.parse(workerResponse)?.workerResponse?.status;}catch{}
+  const originalEvidenceLease=['LEASED_SHARD','LEASED_PACKET'].includes(claimStatus);
+  // Read source-bound history only on a newly issued lease.
+  const priorEvidence=originalEvidenceLease?await sourceBoundQuestionHistoryV1(workerResponse)
    .catch(error=>({schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
     campaignId,histories:[],unavailable:[{status:'GITHUB_READ_UNAVAILABLE',
-     detail:String(error?.message??error).slice(0,160)}]}));
+     detail:String(error?.message??error).slice(0,160)}]})):null;
   if(priorEvidence){
-   dialogue.push({role:'user',content:JSON.stringify(priorEvidence)});
+   activeQuestionHistory=priorEvidence;
+   const questionContext=questionHistoryModelContextV1(priorEvidence);
+   dialogue.push({role:'user',content:JSON.stringify(questionContext)});
    console.log(JSON.stringify({status:'MIMO_SOURCE_QUESTION_HISTORY_DELIVERED',
     phase:priorEvidence.histories?.at(-1)?.phaseSequence??null,
     histories:priorEvidence.histories?.length??0,
@@ -1637,14 +1644,14 @@ while(true){
   // Independently retrieve ORIGINAL accepted canonical records at the same
   // committed snapshot as the checkpoint family, then send source-bound
   // navigation and original content into the actual model dialogue.
-  activeCanonicalHistory=await sourceBoundCanonicalHistoryV1(workerResponse)
+  if(originalEvidenceLease)activeCanonicalHistory=await sourceBoundCanonicalHistoryV1(workerResponse)
    .catch(error=>({manifest:{
     schemaVersion:'curveyield-mi-original-canonical-history-v1',
     campaignId,snapshotCommit:historySnapshotCommit,
     availability:'GITHUB_ORIGINAL_CANONICAL_READ_UNAVAILABLE',
     rosters:[],unavailable:[{availability:'GITHUB_ORIGINAL_CANONICAL_READ_UNAVAILABLE',
      detail:String(error?.message??error)}]},sources:new Map()}));
-  if(activeCanonicalHistory){
+  if(originalEvidenceLease&&activeCanonicalHistory){
    // This is the actual model-facing history delivery after the scoped
    // conversation has been reset. A controller filename alone is not access.
    const canonicalContext=canonicalHistoryModelContextV1(activeCanonicalHistory);
@@ -1666,11 +1673,11 @@ while(true){
   }
   // A mere canonical filename in derivedInputPaths is not model access.
   // Fetch the accepted original source privately at the pinned controller commit.
-  activePhase1Evidence=await sourceBoundPhase1EvidenceV1(workerResponse)
+  if(originalEvidenceLease)activePhase1Evidence=await sourceBoundPhase1EvidenceV1(workerResponse)
    .catch(error=>({manifest:{schemaVersion:'curveyield-mi-phase1-model-evidence-v1',
     campaignId,availability:'GITHUB_EVIDENCE_READ_UNAVAILABLE',
     detail:String(error?.message??error).slice(0,160)},source:null}));
-  if(activePhase1Evidence){
+  if(originalEvidenceLease&&activePhase1Evidence){
    dialogue.push({role:'user',content:JSON.stringify(activePhase1Evidence.manifest)});
    console.log(JSON.stringify({status:'MIMO_PHASE1_EVIDENCE_MODEL_CONTEXT',
     phase:Number(JSON.parse(workerResponse)?.workerResponse?.phase),
@@ -1698,10 +1705,10 @@ while(true){
  // remain available by pinned selector and page, without imposing a read cap.
  const evidenceReadPairs=[];
  for(let read=modelLocalEvidenceReadV1(
-      raw,activeCanonicalHistory,activePhase1Evidence);
+      raw,activeCanonicalHistory,activePhase1Evidence,activeQuestionHistory);
      read;
      read=modelLocalEvidenceReadV1(
-      raw,activeCanonicalHistory,activePhase1Evidence)){
+      raw,activeCanonicalHistory,activePhase1Evidence,activeQuestionHistory)){
   if(evidenceReadPairs.length===2){
    const at=evidenceReadPairs.shift();
    dialogue.splice(at,2);
