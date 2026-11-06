@@ -370,7 +370,9 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
    if(plan.recordOwnership[ownership])throw Error('duplicate canonical append owner: '+ownership);
    plan.recordOwnership[ownership]=id;
    const unit={unitId:id,kind:'APPEND',field,shardFile:d.file,shardIndex:0,
-    shardPath:path.posix.join(dir,d.file),recordKeys:[],path:d.path,dependencies:[],unitSpecRevision:1};
+    shardPath:path.posix.join(dir,d.file),
+    packetSha256:hex(fs.readFileSync(repoFile(root,path.posix.join(dir,d.file)))),
+    recordKeys:[],path:d.path,dependencies:[],unitSpecRevision:1};
    addUnit(plan,queue,unit);continue;
   }
   for(let n=0;n<slab.entries.length;n++){
@@ -379,7 +381,9 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
    if(plan.recordOwnership[ownership])throw Error('duplicate canonical record owner: '+ownership);
    plan.recordOwnership[ownership]=id;
    addUnit(plan,queue,{unitId:id,kind:'SHARD',field,shardFile:d.file,
-    shardPath:path.posix.join(dir,d.file),shardIndex:n,recordIndex:d.startIndex+n,
+    shardPath:path.posix.join(dir,d.file),
+    packetSha256:hex(fs.readFileSync(repoFile(root,path.posix.join(dir,d.file)))),
+    shardIndex:n,recordIndex:d.startIndex+n,
     recordKeys:[entry.key],initialValue:entry.value,path:d.path,
     dependencies:[],unitSpecRevision:1});
   }
