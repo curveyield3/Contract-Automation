@@ -271,76 +271,105 @@ const isPendingAnswerValue=v=>typeof v==='string'&&(
 const negativeSentinel=v=>typeof v==='string'&&EXPLICIT_NEGATIVES.has(v);
 // Exact admitted execution-request file + authenticated ingestion tuple.
 // No guessing of request paths, round counts, proof outcomes, or semantic results.
-function verifiedMachineSourcesV1(c,row){
- const relativeDir=typeof row?.requestDirectory==='string'?row.requestDirectory.replace(/\/+$/,''):'';
- const directoryAllowed=relativeDir.startsWith('controller/phase6-tests/')||
-   relativeDir.startsWith('controller/phase9-reruns/');
- const verified=[];
- const paths=[];
- if(directoryAllowed){
-  const directoryPath=path.posix.join(c.campaignPath,relativeDir);
-  try{
-   const absolute=relative(directoryPath);
-   if(fs.existsSync(absolute)&&fs.statSync(absolute).isDirectory())
-    for(const n of fs.readdirSync(absolute))
-     if(/^[A-Za-z0-9_.-]+\.json$/.test(n))paths.push(path.posix.join(directoryPath,n));
-  }catch{/* An optional missing evidence directory cannot halt GitHub packaging. */}
- }
- // Phase 5 has candidate-key-scoped immutable requests rather than Phase 6's
- // directory. Resolve the exact existing request name, not a guessed run.
- if(typeof row?.candidateKey==='string'&&/^[A-Za-z0-9_.-]{1,150}$/.test(row.candidateKey)){
-  const name=row.candidateKey.replace(/[^A-Za-z0-9._-]/g,'_');
-  paths.push(path.posix.join(c.campaignPath,'work/phase-05/execution-requests',name+'.json'));
- }
+// A GitHub-created request is a real binding BEFORE any machine execution.
+// Do not require a PASS result merely to locate its immutable request path.
+function boundMachineRequestsV1(c,row){
+ const paths=[],root=c.campaignPath,cd=c.directory;
+ const add=rel=>{if(typeof rel==='string'&&rel.startsWith(root+'/'))paths.push(rel);};
+ const key=typeof row?.candidateKey==='string'?row.candidateKey:null;
+ if(key&&/^[A-Za-z0-9_.-]{1,150}$/.test(key))
+  add(path.posix.join(root,'work/phase-05/execution-requests',key+'.json'));
  if(typeof row?.executionRequestRef==='string'&&
-    row.executionRequestRef.startsWith('work/phase-05/execution-requests/'))
-  paths.push(path.posix.join(c.campaignPath,row.executionRequestRef));
- for(const requestPath of new Set(paths)){
+   row.executionRequestRef.startsWith('work/phase-05/execution-requests/'))
+  add(path.posix.join(root,row.executionRequestRef));
+ if(typeof row?.requestDirectory==='string'&&
+   /^(?:controller\/phase6-tests|controller\/phase9-reruns)\//.test(row.requestDirectory)){
+  const dir=path.posix.join(root,row.requestDirectory);
+  try{
+   const abs=relative(dir);
+   if(fs.existsSync(abs)&&fs.statSync(abs).isDirectory())
+    for(const name of fs.readdirSync(abs))
+     if(/^[A-Za-z0-9_.-]+\.json$/.test(name))add(path.posix.join(dir,name));
+  }catch{ /* No executed or issued requests yet; leave as unresolved. */ }
+ }
+ const found=[];
+ for(const rel of new Set(paths)){
   let request;
   try{
-   if(!fs.existsSync(relative(requestPath)))continue;
-   request=read(requestPath);
+   if(!fs.existsSync(relative(rel)))continue;
+   request=read(rel);
   }catch{continue;}
-  if(typeof request?.requestId!=='string'||typeof request.requestDigest!=='string')continue;
-  if(request.sourceSha256&&request.sourceSha256!==c.directory.sourceSha256)continue;
-  if(!/^[A-Za-z0-9_.-]{1,150}$/.test(request.requestId))continue;
-  const evidenceDir=path.posix.join(c.campaignPath,'controller/automation',request.requestId);
-  const evidencePath=path.posix.join(evidenceDir,'EXECUTION_EVIDENCE_v1.json');
-  const receiptPath=path.posix.join(evidenceDir,'ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json');
-  if(!fs.existsSync(relative(evidencePath))||!fs.existsSync(relative(receiptPath)))continue;
+  if(typeof request?.requestId!=='string'||!/^[A-Za-z0-9_.-]{1,150}$/.test(request.requestId)||
+     typeof request.requestDigest!=='string'||!/^[a-f0-9]{64}$/.test(request.requestDigest)||
+     request.campaignId!==cd.campaignId)continue;
+  const sourceHash=request.sourceSha256??request.source?.archiveSha256??request.source?.sha256;
+  if(sourceHash!==cd.sourceSha256)continue;
+  if(key&&String(request.assignmentId??'').startsWith('phase5-target-')&&
+     request.assignmentId!=='phase5-target-'+key)continue;
+  found.push({request,requestId:request.requestId,requestDigest:request.requestDigest,
+   requestPath:rel,requestSha256:sha(fs.readFileSync(relative(rel)))});
+ }
+ return found;
+}
+// Ingested evidence of a failed run is still authentic evidence of failure;
+// it must never be discarded or presented as a PASS proof.
+function verifiedMachineSourcesV1(c,row){
+ const verified=[];
+ for(const source of boundMachineRequestsV1(c,row)){
+  const parent=path.posix.join(c.campaignPath,'controller/automation',source.requestId);
+  const evidencePath=path.posix.join(parent,'EXECUTION_EVIDENCE_v1.json');
+  const receiptPath=path.posix.join(parent,
+   'ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json');
   let machine,receipt;
-  try{machine=read(evidencePath);receipt=read(receiptPath);}catch{continue;}
-  if(receipt.schemaVersion!=='audit-execution-evidence-ingestion-receipt-v1'||
-     receipt.requestId!==request.requestId||
-     machine?.requestId!==request.requestId||
-     machine?.requestDigest!==request.requestDigest||
-     machine?.blocking!==false||
-     !['PASS','FINDINGS'].includes(machine.disposition)||
-     (machine.failedStepCount??0)!==0||
-     (machine.analysisComponentFailureCount??0)!==0||
-     (machine.failedSteps?.length??0)!==0||
-     (machine.preflight&&machine.preflight.status!=='PASS'))continue;
-  verified.push({requestId:request.requestId,requestPath,
-   requestDigest:request.requestDigest,executionEvidenceRef:evidencePath,
+  try{
+   if(!fs.existsSync(relative(evidencePath))||!fs.existsSync(relative(receiptPath)))continue;
+   machine=read(evidencePath);receipt=read(receiptPath);
+  }catch{continue;}
+  if(receipt?.schemaVersion!=='audit-execution-evidence-ingestion-receipt-v1'||
+     receipt.requestId!==source.requestId||
+     machine?.requestId!==source.requestId||
+     machine?.requestDigest!==source.requestDigest)continue;
+  const cleanExecution=machine.blocking===false&&
+   ['PASS','FINDINGS'].includes(machine.disposition)&&
+   (machine.failedStepCount??0)===0&&
+   (machine.analysisComponentFailureCount??0)===0&&
+   (machine.failedSteps?.length??0)===0&&
+   (!machine.preflight||machine.preflight.status==='PASS');
+  verified.push({...source,executionEvidenceRef:evidencePath,
    ingestionReceiptRef:receiptPath,evidenceSha256:sha(fs.readFileSync(relative(evidencePath))),
-   requestSha256:sha(fs.readFileSync(relative(requestPath))),
+   qualifiedExecution:cleanExecution,
    machineFields:Object.fromEntries(['dispatchRounds','requestPaths','ledgerRef',
-    'requestBindingStatus','requestBindingEvidenceRef','automationResolvedExecutionRequest'].filter(key=>machine[key]!==undefined)
-    .map(key=>[key,machine[key]]))});
+    'requestBindingStatus','requestBindingEvidenceRef','automationResolvedExecutionRequest']
+    .filter(k=>machine[k]!==undefined).map(k=>[k,machine[k]]))});
  }
  return verified;
 }
 function machineVerifiedValueV1(c,row,key){
- const sources=verifiedMachineSourcesV1(c,row);
+ const requests=boundMachineRequestsV1(c,row),sources=verifiedMachineSourcesV1(c,row);
+ if(key==='executionRequestRef'&&requests.length===1)
+  return {value:path.posix.relative(c.campaignPath,requests[0].requestPath),
+   requestBound:true,sources:requests};
+ if(key==='requestPaths'&&requests.length)
+  return {value:requests.map(r=>r.requestPath),requestBound:true,sources:requests};
+ if(key==='executionEvidenceRefs'&&sources.length)
+  return {value:sources.map(r=>r.executionEvidenceRef),sources,
+   qualifiedAsProof:sources.every(r=>r.qualifiedExecution)};
+ if(key==='executionEvidenceRef'&&sources.length===1)
+  return {value:sources[0].executionEvidenceRef,sources,
+   qualifiedAsProof:sources[0].qualifiedExecution};
  if(!sources.length)return null;
- const chosen=sources.filter(s=>s.machineFields[key]!==undefined);
- if(key==='requestPaths')return {value:sources.map(s=>s.requestPath),sources};
- if(key==='executionEvidenceRefs')return {value:sources.map(s=>s.executionEvidenceRef),sources};
- if(key==='executionRequestRef'&&sources.length===1)
-  return {value:sources[0].requestPath,sources};
- if(key==='executionEvidenceRef'&&sources.length===1)return {value:sources[0].executionEvidenceRef,sources};
- if(chosen.length!==1)return {sources,reason:'NO_UNIQUE_AUTHENTICATED_EXACT_FIELD_VALUE'};
- return {value:chosen[0].machineFields[key],sources};
+ const exact=sources.filter(x=>Object.hasOwn(x.machineFields,key));
+ if(exact.length!==1)return null; // Never choose between conflicting observations.
+ return {value:exact[0].machineFields[key],sources:exact,
+  qualifiedAsProof:exact[0].qualifiedExecution};
+}
+function unresolvedMachineFieldV1(field,old){
+ if(old!==undefined&&old!==null&&!isPendingAnswerValue(old))return old;
+ if(field==='executionEvidenceRefs')return ['NO_MACHINE_EVIDENCE'];
+ if(field==='requestPaths')return [];
+ if(field==='requestBindingStatus')return 'UNVERIFIED';
+ if(field==='requestBindingEvidenceRef')return 'NO_BINDING_EVIDENCE';
+ return 'UNRESOLVED';
 }
 
 function controllerAnswerFieldBindingV1({c,fieldName,sourceRow,definition,itemField}){
@@ -923,8 +952,10 @@ function assembleBoundAnswersV1(c,u,submitted){
      const field=spec.field;
      if(spec.source==='CONTROLLER_VERIFIED_EXECUTION'||
         spec.source==='CONTROLLER_COLLECT_AFTER_EXECUTION'){
-      if(spec.verifiedEvidence&&Object.hasOwn(spec.verifiedEvidence,'value'))
-       target.value[field]=structuredClone(spec.verifiedEvidence.value);
+      target.value=target.value??{};
+      target.value[field]=spec.verifiedEvidence&&Object.hasOwn(spec.verifiedEvidence,'value')?
+       structuredClone(spec.verifiedEvidence.value):
+       unresolvedMachineFieldV1(field,target.value[field]);
       continue;
      }
      if(['PRESERVE_ISSUED_VALUE','BIND_EXISTING_CONTROLLER_SUBJECT'].includes(spec.source))continue;
@@ -977,9 +1008,9 @@ function assembleBoundAnswersV1(c,u,submitted){
      strict(bindExistingSubjectV1(knownSubjectIds,spec.field,value[spec.field]),
       'APPEND field requires accepted subject identity: '+spec.field);
     if(['CONTROLLER_COLLECT_AFTER_EXECUTION','CONTROLLER_VERIFIED_EXECUTION'].includes(spec.source)){
-     if(spec.verifiedEvidence&&Object.hasOwn(spec.verifiedEvidence,'value'))
-      value[spec.field]=structuredClone(spec.verifiedEvidence.value);
-     else delete value[spec.field];
+     value[spec.field]=spec.verifiedEvidence&&Object.hasOwn(spec.verifiedEvidence,'value')?
+      structuredClone(spec.verifiedEvidence.value):
+      unresolvedMachineFieldV1(spec.field,value[spec.field]);
     }
    }
    return {key,value};
