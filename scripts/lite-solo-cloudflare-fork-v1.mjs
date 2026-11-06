@@ -924,13 +924,20 @@ function materializeBoundSubmissionV1(c,u,selected){
  const raw=read(selected.rel);
  if(raw?.schemaVersion!==MACHINE_BOUND_ANSWERS_V1)return selected;
  const completed=assembleBoundAnswersV1(c,u,raw);
- const attempt=selected.attempt+1;
- strict(attempt<=999999,'mechanical attempt number exceeds existing format');
+ // Keep the Worker-owned attempt namespace untouched. The controller's
+ // compiled artifact lives in a nested directory accepted by the existing
+ // unit ownership/path rule, but invisible to Worker-attempt discovery.
  const relativePath=path.posix.join(path.posix.dirname(selected.rel),
-  'SUBMISSION_ATTEMPT_'+String(attempt).padStart(3,'0')+'_v1.json');
- strict(!fs.existsSync(relative(relativePath)),'generated submission already exists');
- writeJson(relative(relativePath),completed);
- return {...selected,attempt,rel:relativePath,filename:relative(relativePath)};
+  'controller-compiled',path.posix.basename(selected.rel));
+ const compiledPath=relative(relativePath),content=bytes(completed);
+ if(fs.existsSync(compiledPath)){
+  strict(sha(fs.readFileSync(compiledPath))===sha(content),
+    'compiled artifact differs from immutable source-bound attempt');
+ }else{
+  fs.mkdirSync(path.dirname(compiledPath),{recursive:true});
+  fs.writeFileSync(compiledPath,content);
+ }
+ return {...selected,rel:relativePath,filename:compiledPath};
 }
 
 async function unitValidateSingle(c,item){
@@ -1004,7 +1011,8 @@ async function unitValidateWave(c){
  const queueSha256=sha(fs.readFileSync(relative(current.queueRel)));
  const rosterDigest=stageDigest(c,current,phase,step,stage);
  for(const u of units){
-  const selected=submittedUnitFile(c,phase,u),raw=fs.readFileSync(selected.filename);
+  const selected=materializeBoundSubmissionV1(c,u,submittedUnitFile(c,phase,u));
+  const raw=fs.readFileSync(selected.filename);
   const state=current.queue.units[u.unitId];
   state.status='CLAIMED';state.workerId=selected.workerId;
   state.claimEpoch=selected.epoch;state.claimToken=randomUUID();

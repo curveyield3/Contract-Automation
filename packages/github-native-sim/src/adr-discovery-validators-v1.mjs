@@ -87,8 +87,17 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
      trivial.has(x.contextId));
    if(!contexts.length)err(errors,'TRIVIAL_CONTRACT_UNKNOWN','trivialReviews['+i+']',
      'V13 trivialReviews apply only to literal CONSTANT definitions with source anchors; getters and immutables require verdict rows');
-   if(blank(review?.reason??review?.evidence))err(errors,'EVIDENCE_EMPTY','trivialReviews['+i+'].reason','Explain exact literal/getter correctness');
-   for(const c of contexts)covered.add(c.contextId);
+   const claimedEvidence=review?.evidence??review?.reason;
+   const grounded=!emptyEvidence(claimedEvidence);
+   if(!grounded)err(errors,'EVIDENCE_EMPTY','trivialReviews['+i+'].evidence',
+     'Literal constant substitution requires a source-specific explanation');
+   const anchored=validAnchors(review?.anchors,inventory,errors,
+     'trivialReviews['+i+'].anchors')>0;
+   if(!anchored)err(errors,'ANCHOR_REQUIRED','trivialReviews['+i+'].anchors',
+     'Literal constant substitution requires an admitted source anchor');
+   // An empty or unanchored claim may be reported, but cannot discharge the
+   // source-context row. This is evidence bookkeeping, not a new audit verdict.
+   if(grounded&&anchored)for(const c of contexts)covered.add(c.contextId);
  }
  for(const [i,row] of arr2(submission?.rows).entries()){
    const p='rows['+i+']',id=row?.contextId;
