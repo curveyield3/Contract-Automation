@@ -647,13 +647,17 @@ function issuedPacketDigestV1(c,u,state=null){
  }
  return sha(fs.readFileSync(relative(u.packetPath||u.shardPath)));
 }
-// Re-resolve the original ACCEPTED unit's question index at the time a NEW
-// assignment is frozen. Repeated deliveries of an issued assignment use its
-// frozen metadata unchanged, so later checkpoint commits cannot change a
-// previously advertised roster digest.
+// Re-resolve accepted predecessor histories only when a NEW assignment is
+// frozen. Cache within one loaded queue snapshot to avoid repeatedly reading
+// the same immutable history for high-fanout FLOW -> ATTACK prerequisites.
+// Issued assignments keep their original metadata and digest unchanged.
+const acceptedQuestionHistoryCacheV1=new WeakMap();
 function prerequisiteQuestionHistoryRefsV1(c,u,source){
- if(!source||!Array.isArray(u.dependencies)||!u.dependencies.length)return [];
- const owners=new Set();
+ if(!source||!Array.isArray(u.dependencies)||!u.dependencies.length)
+  return {available:[],unavailable:{}};
+ let cache=acceptedQuestionHistoryCacheV1.get(source.queue);
+ if(!cache){cache=new Map();acceptedQuestionHistoryCacheV1.set(source.queue,cache);}
+ const owners=new Set(),available=[],unavailable={};
  for(const dependency of u.dependencies){
   const member=source.queue.acceptedRecords?.[dependency];
   const owner=member?.status==='ACCEPTED'&&member.parentUnitId?
@@ -661,10 +665,26 @@ function prerequisiteQuestionHistoryRefsV1(c,u,source){
   if(source.queue.units?.[owner]?.status==='ACCEPTED')owners.add(owner);
  }
  const plan={...source.plan,units:source.units};
- return [...owners].map(unitId=>recoverAcceptedQuestionLedgerReferenceV1({
-  root:ROOT,campaignPath:c.campaignPath,phase:source.plan.phaseSequence,
-  unitId,directory:c.directory,queue:source.queue,plan
- }));
+ for(const unitId of owners){
+  let ref=cache.get(unitId);
+  if(!ref){
+   ref=recoverAcceptedQuestionLedgerReferenceV1({
+    root:ROOT,campaignPath:c.campaignPath,phase:source.plan.phaseSequence,
+    unitId,directory:c.directory,queue:source.queue,plan
+   });
+   cache.set(unitId,ref);
+  }
+  if(ref.availability==='AVAILABLE'||ref.previousCommittedIndex){
+   available.push(ref);
+  }else{
+   // Every owner remains identifiable from the issued dependencies. Group
+   // statuses mechanically rather than duplicating long source-bound fields
+   // across hundreds of ATTACK assignments. No missing ledger blocks work.
+   const status=ref.availability||'UNREADABLE';
+   (unavailable[status]??=[]).push(unitId);
+  }
+ }
+ return {available,unavailable};
 }
 function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
   if(u.issuedMeta)return structuredClone(u.issuedMeta);
@@ -724,14 +744,16 @@ function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
    ?discoveryAnswerBindingV1({u,packet:discoveryPacket,initial})
    :semanticAnswerBindingV1({c,u,schema,initial});
   const answerTransport=machineAnswerDirectoryV1(u,initial,answerRouting);
-  const prerequisiteQuestionHistoryRefs=prerequisiteQuestionHistoryRefsV1(c,u,questionSource);
+  const questionHistory=prerequisiteQuestionHistoryRefsV1(c,u,questionSource);
   return {unitId:u.unitId,kind:u.kind,step:0,stage:'',unitSpecRevision:u.unitSpecRevision,
     packetPath,packetSha256,packetIndexPath:u.packetIndexPath||null,recordKeys:u.recordKeys||[],
     dependencies:u.dependencies||[],path:u.path,members:u.members,field:u.field,
     inputTemplate:initial,validationSchema:inputSchema,answerRouting,answerTransport,
     templateSha256:sha(JSON.stringify(initial)),schemaSha256:sha(JSON.stringify(inputSchema)),
     supportingFileRequirements:assignedExecutionSupport(c,u),evidenceRefs:u.packetIndexPath?[u.packetIndexPath]:[],
-    ...(prerequisiteQuestionHistoryRefs.length?{prerequisiteQuestionHistoryRefs}:{})};
+    ...(questionHistory.available.length?{prerequisiteQuestionHistoryRefs:questionHistory.available}:{}),
+    ...(Object.keys(questionHistory.unavailable).length?
+     {prerequisiteQuestionHistoryUnavailable:questionHistory.unavailable}:{})};
 }
 // Freeze issued answers in the existing campaign paged-prefill format.
 // A Contract-Automation code revision must not rewrite an active unit's schema.
