@@ -49,6 +49,18 @@ jobs:
           node-version: '22'
       - name: Restore existing controller dependencies
         run: npm ci --force --ignore-scripts --no-audit --no-fund
+      - name: Reclaim unused runner SDK storage before evidence-bound execution
+        if: ${{ inputs.operation == 'PHASE_FINALIZE' && (fromJSON(inputs.payload_json).phase == 5 || fromJSON(inputs.payload_json).phase == 6 || fromJSON(inputs.payload_json).phase == 9) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Runner disk before SDK reclamation:"
+          df -h /
+          # The audited V7 toolchain uses Node, Python, Go, and Forge, not these
+          # preinstalled heavyweight SDKs. Leave required toolchains untouched.
+          sudo rm -rf -- /usr/local/lib/android /usr/share/dotnet /usr/local/share/powershell /opt/hostedtoolcache/CodeQL
+          echo "Runner disk after SDK reclamation:"
+          df -h /
       - name: Prepare canonical execution toolchain for evidence-bound phases
         if: ${{ inputs.operation == 'PHASE_FINALIZE' && (fromJSON(inputs.payload_json).phase == 5 || fromJSON(inputs.payload_json).phase == 6 || fromJSON(inputs.payload_json).phase == 9) }}
         uses: ./.github/actions/setup-v7-toolchain
