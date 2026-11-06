@@ -877,7 +877,22 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    trivialReviewSubstitutions:trivialReviewSubstitutions.map(review=>({
     unitId:review.unitId,qualifiedContextIds:review.qualifiedContextIds,
     acceptedSubstitution:review.acceptedSubstitution,sourceReference:review.sourceReference
-   }))
+   })),
+   // Keep explicitly scoped group/contract claims visible as source-bound
+   // observations, never as automatically established function-class claims.
+   scopedClassAssessments:discoverySourceRefs.flatMap((ref,index)=>
+    ref.role==='FLOW'&&['GROUP_CHECK','CONTRACT_CHECK'].includes(ref.sourceCategory)
+     ?[{
+      scope:ref.sourceCategory==='GROUP_CHECK'?'GROUP':'CONTRACT',
+      contextIds:arr(ref.recordIdentity?.contextIds),
+      contract:ref.recordIdentity?.contract??null,
+      classId:ref.recordIdentity?.classId??null,
+      assessment:ref.recordIdentity?.assessment??null,
+      applicability:ref.recordIdentity?.applicability??null,
+      sourceReference:{collection:'discoverySourceRefs',index,availability:ref.availability,
+       sourceSelector:ref.sourceSelector,acceptedPath:ref.acceptedPath,
+       acceptedSha256:ref.acceptedSha256}
+     }]:[])
   }:{})};
  const coverage=buildCoverageMatrixV1({inventory,taxonomy,discoveryState});
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{
