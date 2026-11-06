@@ -1410,7 +1410,10 @@ async function unitAdvanceAcceptedStage(c){
  // Skip genuinely empty stages, but never treat blocked/claimed units as done.
  let next=null;
  for(const candidate of stages.slice(index+1)){
-  if(stageUnitsV1(c,current,phase,candidate.step,candidate.stage).length){
+  const candidateUnits=stageUnitsV1(c,current,phase,candidate.step,candidate.stage);
+  // Recovered phases may have durable ACCEPTED records for later stages.
+  // Do not issue an empty roster for an already completed stage.
+  if(candidateUnits.some(u=>!stageAcceptedV1(current,u,c.campaignPath))){
    next=candidate;break;
   }
  }
