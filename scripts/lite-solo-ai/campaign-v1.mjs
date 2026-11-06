@@ -457,7 +457,8 @@ async function sourceBoundQuestionHistoryV1(raw){
  if(!directory||directory.campaignId!==campaignId||
     !/^campaigns\/[A-Za-z0-9._/-]+$/.test(directory.workspacePath??'')||
     (directory.workspacePath??'').split('/').some(s=>!s||s==='.'||s==='..'))
-  return null;
+  return {schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
+   campaignId,histories:[],unavailable:[{status:'CONTROLLER_DIRECTORY_UNAVAILABLE'}]};
  const workspace=directory.workspacePath,selected=new Map(),unavailable=[];
  for(const p of [4,5,6]){
   if(p>phase)continue;
@@ -513,11 +514,17 @@ async function sourceBoundQuestionHistoryV1(raw){
    }
    const cp=await historyJsonV1(ref.path).catch(()=>null);
    if(!cp||cp.file.sha256!==ref.sha256||
+      cp.data.campaignId!==campaignId||
       cp.data.campaignGenerationId!==directory.campaignGenerationId||
       cp.data.sourceSha256!==directory.sourceSha256||
       cp.data.authorityDigest!==directory.authorityDigest||
       cp.data.phaseSequence!==item.phaseSequence||
-      cp.data.unitId!==item.unitId){
+      cp.data.unitId!==item.unitId||
+      cp.data.phaseEpoch!==index.phaseEpoch||
+      cp.data.packetSha256!==index.packetSha256||
+      (ref.revision!==undefined&&cp.data.revision!==ref.revision)||
+      (ref.requestId!==undefined&&cp.data.requestId!==ref.requestId)||
+      (ref.requestDigest!==undefined&&cp.data.requestDigest!==ref.requestDigest)){
     unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
      indexPath,checkpointPath:ref.path,status:'CHECKPOINT_NOT_AVAILABLE'});
     continue;
