@@ -551,18 +551,16 @@ function handleClaim({root,campaign,phase,queue,plan,request}){
   claimId,claimedUnits:units,
   batchIndexPath:units.length?batchIndex(root,campaign,phase,request.requestId,units):null};
 }
-function itemIdentity(item,u,state,request,root){
- if(item.unitId!==u.unitId||state.workerId!==request.workerId||
-  item.claimEpoch!==state.claimEpoch||item.claimToken!==state.claimToken||
-  item.unitSpecRevision!==u.unitSpecRevision)
-  return 'STALE';
- if(state.status==='ACCEPTED')return 'UNCHANGED';
- if(!['CLAIMED','SUBMITTED','REWORK_REQUIRED'].includes(state.status))return 'STALE';
+function itemIdentity(item,u,state,request,root,campaign,phase){
+ if(!u||!state)return 'WAITING_SUBMISSION';
+ // An accepted snapshot is immutable even when a later attempt arrives.
+ if(state.status==='ACCEPTED')
+  return state.acceptedSha256===item.submissionSha256?'UNCHANGED':'STALE';
+ if(state.workerId!==request.workerId||
+    item.claimEpoch!==state.claimEpoch||item.claimToken!==state.claimToken||
+    item.unitSpecRevision!==u.unitSpecRevision||
+    !['CLAIMED','SUBMITTED','REWORK_REQUIRED'].includes(state.status))return 'STALE';
  const packetRel=u.packetPath??u.shardPath;
- // Shard bytes change after the controller assembles accepted work. For a
- // record reopened *after* aggregate validation, compare the retry against
- // its previously accepted, source/authority/epoch-bound packet identity
- // rather than requiring a worker to claim a new digest of mutable output.
  const livePacketSha256=u.packetSha256??hex(fs.readFileSync(repoFile(root,packetRel)));
  let packetBound=item.packetSha256===livePacketSha256;
  if(!packetBound&&state.status==='REWORK_REQUIRED'&&state.acceptedPath&&state.acceptedSha256){
@@ -578,12 +576,15 @@ function itemIdentity(item,u,state,request,root){
    previous.submissionSha256===state.acceptedSha256;
  }
  if(!packetBound)return 'STALE';
- const allowed=path.posix.join(unitBase(request.campaignWorkspacePath,request.phaseSequence,u.unitId),
-    'submissions',request.workerId,'epoch-'+state.claimEpoch);
- if(!item.submissionPath?.startsWith(allowed+'/')||
-    !/^SUBMISSION_ATTEMPT_[0-9]{3,6}_v1\.json$/.test(path.posix.basename(item.submissionPath)))
+ const allowed=path.posix.join(unitBase(campaign,phase,u.unitId),
+   'submissions',request.workerId,'epoch-'+state.claimEpoch);
+ const name=typeof item.submissionPath==='string'&&item.submissionPath.startsWith(allowed+'/')
+   ?item.submissionPath.slice(allowed.length+1):'';
+ if(!/^(?:controller-compiled\/)?SUBMISSION_ATTEMPT_[0-9]{3,6}_v1\.json$/.test(name))
   return 'STALE';
- return null;
+ const file=repoFile(root,item.submissionPath);
+ if(!fs.existsSync(file))return 'WAITING_SUBMISSION';
+ return hex(fs.readFileSync(file))===item.submissionSha256?null:'STALE';
 }
 // No security or semantic submission validation is performed by GitHub.
 // This function remains only for compatibility with existing callers.
@@ -618,6 +619,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
  const file=repoFile(root,item.submissionPath);
  if(!fs.existsSync(file)){state.status='SUBMITTED';return {unitId:item.unitId,status:'WAITING_SUBMISSION',errors:[]};}
  const raw=fs.readFileSync(file),digest=hex(raw);
+ if(digest!==item.submissionSha256)return {unitId:item.unitId,status:'STALE'};
  // JSON parsing is transport decoding only; no schema, security or content checks.
  const submission=JSON.parse(raw.toString('utf8'));
  let batchOutcome=null;
@@ -645,26 +647,34 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
  return {unitId:u.unitId,status:'ACCEPTED',resultRef:resultRel};
 }
 function handleSubmit({root,campaign,phase,queue,plan,request,directory}){
- const schema=loadPhaseSchema(root,authorityFor(directory),phase).schema,items=[];
+ const items=[];
  for(const item of request.items){
-  // A durably queued request is SUBMITTED, never implicitly ACCEPTED.
-  // Missing cross-repository bytes remain pending and retryable.
-  const owned=queue.units[item.unitId];
-  if(owned?.status==='CLAIMED'&&owned.workerId===request.workerId&&
-     owned.claimEpoch===item.claimEpoch&&owned.claimToken===item.claimToken)
-   owned.status='SUBMITTED';
-  try{items.push(acceptSubmission({root,campaign,phase,request,item,queue,plan,schema,directory}));}
-  catch(e){
-   const state=queue.units[item.unitId],reason=String(e.message??e);
-   if(state&&state.workerId===request.workerId){state.status='SUBMITTED';state.lastErrors=[reason];}
+  const state=queue.units[item.unitId],u=plan.units.find(x=>x.unitId===item.unitId);
+  try{
+   const identity=itemIdentity(item,u,state,request,root,campaign,phase);
+   if(identity){
+    if(identity==='WAITING_SUBMISSION'&&state?.workerId===request.workerId)
+     state.status='SUBMITTED';
+    items.push({unitId:item.unitId,status:identity});
+    continue;
+   }
+   if(state.status==='CLAIMED')state.status='SUBMITTED';
+   items.push(acceptSubmission({root,campaign,phase,request,item,queue,plan,directory}));
+  }catch(e){
+   const reason=String(e.message??e);
+   // A transport failure must retain the original claim, not produce acceptance.
+   if(state&&state.workerId===request.workerId&&
+      state.claimEpoch===item.claimEpoch&&state.claimToken===item.claimToken){
+    state.status='SUBMITTED';state.lastErrors=[reason];
+   }
    items.push({unitId:item.unitId,status:'WAITING_SUBMISSION',transportError:reason});
   }
  }
  const newlyEligibleUnits=unlock(queue,plan);
  return {status:'SUBMISSION_RECORDED',acceptedUnits:items.filter(x=>x.status==='ACCEPTED').map(x=>x.unitId),
-  reworkUnits:items.filter(x=>x.status==='REWORK_REQUIRED'),staleUnits:items.filter(x=>x.status==='STALE'),
-  unchangedUnits:items.filter(x=>x.status==='UNCHANGED'),waitingUnits:items.filter(x=>x.status==='WAITING_SUBMISSION'),
-  newlyEligibleUnits};
+  reworkUnits:items.filter(x=>x.status==='REWORK_REQUIRED'),
+  staleUnits:items.filter(x=>x.status==='STALE'),unchangedUnits:items.filter(x=>x.status==='UNCHANGED'),
+  waitingUnits:items.filter(x=>x.status==='WAITING_SUBMISSION'),newlyEligibleUnits};
 }
 function handleRelease({queue,plan,request}){
  const changed=[];
