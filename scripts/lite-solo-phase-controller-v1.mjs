@@ -246,7 +246,6 @@ function resolveInputsForTarget({root,campaignPath,directory,target,immediate=[]
   return uniqueExisting(root,[
     ...legacyLead,...special,...immediate,...historicalPaths,...originals]);
 }
-}
 function phaseOutput(canonical,step,field){return canonical?.actions?.[step]?.outputs?.[field];}
 function remediationDeltaRows(campaignRoot,validatedFindings){
   const remediationRoot=path.join(campaignRoot,'remediation');
