@@ -2,11 +2,11 @@
 pragma solidity 0.8.30;
 
 /**
- * @title AVKATConsolidatedSafeModule v2 - STANDALONE, UNCOMPILED REFERENCE IMPLEMENTATION
+ * @title AVKATConsolidatedSafeModule v3 - STANDALONE, SOURCE-ONLY REFERENCE IMPLEMENTATION
  * @notice Katana/Gnosis Safe module. All Safe assets remain Safe-owned except transient
  *         Morpho flash loan balances and temporary sale proceeds inside the module.
- * @dev Read deployment and security notes before use. This source has deliberately NOT
- *      been compiled, tested, or deployed at the owner's instruction.
+ * @dev Read deployment and security notes before use. This v3 source has NOT
+ *      been compiled, tested, audited, or deployed.
  *      Does not call or depend on ANY earlier AVKAT Safe module or PositionRegistry.
  *      Every swap, including flash callbacks, range preparation, and vault preparation,
  *      is executed ONLY by the independently deployed, Safe-selected external swapper.
@@ -51,12 +51,8 @@ interface IAvkatRate {
     function convertToShares(uint256 assets) external view returns (uint256);
 }
 interface IAvkatOracle { function price() external view returns (uint256); }
-interface IAvkatSwapRouter {
-    function protectedQuoteFor(address caller, address tokenIn, address tokenOut, uint256 amountIn)
-        external view returns (uint256 quoted, uint256 protectedMinimum);
-    function swapExactInput(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut,
-                            address recipient, uint256 deadline) external returns (uint256 amountOut);
-}
+// External swappers have owner-configurable ABI selectors and statically encoded inputs.
+// All swap routing and price quotation remain inside whichever external router the Safe selects.
 interface IAvkatPositionManager {
     struct MintParams {
         address token0; address token1; uint24 fee; int24 tickLower; int24 tickUpper;
@@ -120,7 +116,25 @@ contract AVKATConsolidatedSafeModule {
     address public immutable AVKAT;
     bytes32 public immutable LOOP_MARKET;
 
-    IAvkatSwapRouter public SWAPPER;
+    address public constant DEFAULT_ROUTER = 0x01F9894f92ea9224fECc8C35482E20a05De13582;
+    // Router ABI field kinds. The Safe controls both the selector and ordered argument layout.
+    uint8 public constant FIELD_FIXED_WORD = 0;
+    uint8 public constant FIELD_TOKEN_IN = 1;
+    uint8 public constant FIELD_TOKEN_OUT = 2;
+    uint8 public constant FIELD_AMOUNT_IN = 3;
+    uint8 public constant FIELD_POLICY_MIN_OUT = 4;
+    uint8 public constant FIELD_SAFE_RECIPIENT = 5;
+    uint8 public constant FIELD_DEADLINE = 6;
+    uint8 public constant FIELD_CALLER = 7;
+    struct RouterField { uint8 kind; bytes32 fixedWord; }
+
+    address public SWAPPER;
+    bytes4 public swapSelector = 0xe20c448d;
+    bytes4 public quoteSelector = bytes4(keccak256("twapMinimumOut(address,address,uint256)"));
+    uint8 public quoteResultWord;
+    uint32 public routerDeadlineSeconds = 300; // Katana observed 1 second/block: ~300 blocks
+    RouterField[] public swapInputFields;
+    RouterField[] public quoteInputFields;
     uint256 public targetLtv = 765_000_000_000_000_000;
     uint256 public maxFlashKat = 500e18;
     uint256 public minPremiumBps = 0; // Safe-set policy: premium over intrinsic avKAT rate
@@ -218,6 +232,8 @@ contract AVKATConsolidatedSafeModule {
 
     event ExecutorSet(address indexed executor, bool enabled);
     event SwapRouterSet(address indexed newRouter);
+    event RouterInterfaceConfigured(address indexed router, bytes4 swapMethod, bytes4 quoteMethod,
+                                    uint8 quoteResultWord, uint32 deadlineSeconds);
     event PolicySet(uint256 targetLtv, uint256 maxFlashKat, uint256 minPremiumBps, uint256 quoteSafetyBufferBps);
     event RangeConfigured(uint256 indexed id, address npm, uint256 tokenId, bool enabled);
     event VaultConfigured(address indexed vault, uint8 kind, bool enabled);
@@ -237,16 +253,27 @@ contract AVKATConsolidatedSafeModule {
     }
 
     constructor(
-        address safe_, address morpho_, address kat_, address avkat_, bytes32 marketId_, address swapper_
+        address safe_, address morpho_, address kat_, address avkat_, bytes32 marketId_
     ) {
         if (safe_.code.length == 0 || morpho_.code.length == 0 || kat_.code.length == 0 ||
-            avkat_.code.length == 0 || swapper_.code.length == 0) revert BadConfiguration();
+            avkat_.code.length == 0 || DEFAULT_ROUTER.code.length == 0) revert BadConfiguration();
         SAFE = IAvkatSafe(safe_);
         MORPHO = IAvkatMorpho(morpho_);
         KAT = kat_;
         AVKAT = avkat_;
         LOOP_MARKET = marketId_;
-        SWAPPER = IAvkatSwapRouter(swapper_);
+        SWAPPER = DEFAULT_ROUTER;
+        // swapExactInput(tokenIn, tokenOut, amountIn, 0, SAFE, block.timestamp + 300)
+        swapInputFields.push(RouterField(FIELD_TOKEN_IN, bytes32(0)));
+        swapInputFields.push(RouterField(FIELD_TOKEN_OUT, bytes32(0)));
+        swapInputFields.push(RouterField(FIELD_AMOUNT_IN, bytes32(0)));
+        swapInputFields.push(RouterField(FIELD_FIXED_WORD, bytes32(0)));
+        swapInputFields.push(RouterField(FIELD_SAFE_RECIPIENT, bytes32(0)));
+        swapInputFields.push(RouterField(FIELD_DEADLINE, bytes32(0)));
+        // twapMinimumOut(tokenIn, tokenOut, amountIn) returns one uint256.
+        quoteInputFields.push(RouterField(FIELD_TOKEN_IN, bytes32(0)));
+        quoteInputFields.push(RouterField(FIELD_TOKEN_OUT, bytes32(0)));
+        quoteInputFields.push(RouterField(FIELD_AMOUNT_IN, bytes32(0)));
         AvkatMarketParams memory mp = _params();
         if (mp.loanToken != kat_ || mp.collateralToken != avkat_ || mp.lltv <= MAX_LTV) {
             revert BadConfiguration();
@@ -259,11 +286,44 @@ contract AVKATConsolidatedSafeModule {
         isExecutor[executor] = enabled;
         emit ExecutorSet(executor, enabled);
     }
-    function setSwapper(address swapper) external onlySafe {
-        if (swapper.code.length == 0 || swapper == address(this) || swapper == address(SAFE)) revert BadConfiguration();
-        SWAPPER = IAvkatSwapRouter(swapper);
-        emit SwapRouterSet(swapper);
+    /// @notice Safely replace the external swapper AND its method/argument ABI in one Safe action.
+    /// @dev RouterField supports arbitrary static 32-byte ABI arguments and their order; dynamic
+    ///      bytes, arrays, and tuples need a separate external ABI adapter rather than a guessed encoding.
+    ///      FIELD_FIXED_WORD permits any Safe-approved constant. All output must reach the Safe.
+    function setSwapper(
+        address router,
+        bytes4 swapMethod,
+        RouterField[] calldata swapArguments,
+        bytes4 quoteMethod,
+        RouterField[] calldata quoteArguments,
+        uint8 resultWord,
+        uint32 deadlineSeconds
+    ) external onlySafe {
+        if (router.code.length == 0 || router == address(this) || router == address(SAFE) ||
+            swapMethod == bytes4(0) || quoteMethod == bytes4(0) ||
+            swapArguments.length == 0 || swapArguments.length > 12 ||
+            quoteArguments.length == 0 || quoteArguments.length > 12 ||
+            resultWord > 3 || deadlineSeconds > 86_400) revert BadConfiguration();
+        delete swapInputFields;
+        delete quoteInputFields;
+        for (uint256 i; i < swapArguments.length; ++i) {
+            if (swapArguments[i].kind > FIELD_CALLER) revert BadConfiguration();
+            swapInputFields.push(swapArguments[i]);
+        }
+        for (uint256 i; i < quoteArguments.length; ++i) {
+            if (quoteArguments[i].kind > FIELD_CALLER) revert BadConfiguration();
+            quoteInputFields.push(quoteArguments[i]);
+        }
+        SWAPPER = router;
+        swapSelector = swapMethod;
+        quoteSelector = quoteMethod;
+        quoteResultWord = resultWord;
+        routerDeadlineSeconds = deadlineSeconds;
+        emit SwapRouterSet(router);
+        emit RouterInterfaceConfigured(router, swapMethod, quoteMethod, resultWord, deadlineSeconds);
     }
+    function routerSwapFieldCount() external view returns (uint256) { return swapInputFields.length; }
+    function routerQuoteFieldCount() external view returns (uint256) { return quoteInputFields.length; }
     function setPolicy(uint256 target_, uint256 maxFlash_, uint256 minPremium_, uint256 bufferBps_) external onlySafe {
         if (target_ == 0 || target_ > MAX_LTV || maxFlash_ == 0 ||
             minPremium_ > BPS || bufferBps_ > MAX_SAFETY_BUFFER_BPS) revert BadConfiguration();
@@ -389,7 +449,7 @@ contract AVKATConsolidatedSafeModule {
             uint256 minOut = _conservativeQuote(address(this), KAT, AVKAT, totalInput);
             if (minOut == 0 || !_hasRequiredPremium(totalInput, minOut)) revert SlippageTooHigh();
             uint256 beforeAv = _balance(AVKAT, address(SAFE));
-            _externalSwapFromSelf(KAT, AVKAT, totalInput, minOut, address(SAFE), deadline);
+            _externalSwapFromSelf(KAT, AVKAT, totalInput, minOut);
             uint256 totalAv = _balance(AVKAT, address(SAFE));
             if (totalAv <= beforeAv) revert SlippageTooHigh();
             _safeApprove(AVKAT, address(MORPHO), totalAv);
@@ -408,16 +468,20 @@ contract AVKATConsolidatedSafeModule {
             (uint256 repaid,) = MORPHO.repay(mp, assets, 0, address(SAFE), "");
             if (repaid > assets) revert UnexpectedDebt(repaid, assets);
             _approveSelf(KAT, address(MORPHO), 0);
+            uint256 saleKat;
             if (avToSell != 0) {
                 _safe(address(MORPHO), abi.encodeCall(IAvkatMorpho.withdrawCollateral,
                     (mp, avToSell, address(SAFE), address(this))));
-                _externalSwapFromSelf(AVKAT, KAT, avToSell, minSaleKat, address(this), deadline);
+                // Swaps ALWAYS deliver proceeds to SAFE, including flash deleverage.
+                saleKat = _externalSwapFromSelf(AVKAT, KAT, avToSell, minSaleKat);
             }
             uint256 alreadyKat = _balance(KAT, address(this));
             uint256 contribution;
             if (alreadyKat < assets) {
                 contribution = assets - alreadyKat;
-                if (contribution > held) revert SlippageTooHigh();
+                // Sale proceeds may fund flash settlement in addition to the capped
+                // contribution from previously held Safe KAT.
+                if (contribution > held + saleKat) revert SlippageTooHigh();
                 _safeTransfer(KAT, address(this), contribution);
             }
             if (_balance(KAT, address(this)) < assets) revert SlippageTooHigh();
@@ -625,34 +689,64 @@ contract AVKATConsolidatedSafeModule {
         if (routerFloor == 0) revert SlippageTooHigh();
         uint256 minimum = request.minOut > routerFloor ? request.minOut : routerFloor;
         uint256 beforeOut = _balance(to, address(SAFE));
-        _safeApprove(from, address(SWAPPER), input);
-        _safe(address(SWAPPER), abi.encodeCall(IAvkatSwapRouter.swapExactInput,
-            (from, to, input, minimum, address(SAFE), block.timestamp)));
-        _safeApprove(from, address(SWAPPER), 0);
+        _safeApprove(from, SWAPPER, input);
+        _safe(SWAPPER, _routerCalldata(swapSelector, swapInputFields, address(SAFE),
+            from, to, input, minimum));
+        _safeApprove(from, SWAPPER, 0);
         received = _balance(to, address(SAFE)) - beforeOut;
         if (received < minimum) revert SlippageTooHigh();
     }
-    /// @dev When the flash callback holds its own assets, delegate the entire trade
-    /// to the SAME external swapper; verify actual ERC20 proceeds, not only return data.
-    function _externalSwapFromSelf(address from, address to, uint256 input, uint256 minOut,
-                                   address recipient, uint256 deadline) internal returns (uint256 received) {
-        if (input == 0 || (recipient != address(this) && recipient != address(SAFE))) revert BadConfiguration();
-        uint256 beforeOut = _balance(to, recipient);
-        _approveSelf(from, address(SWAPPER), input);
-        SWAPPER.swapExactInput(from, to, input, minOut, recipient, deadline);
-        _approveSelf(from, address(SWAPPER), 0);
-        received = _balance(to, recipient) - beforeOut;
+    /// @dev The module may temporarily hold flash assets; all swap output nevertheless
+    /// goes to the Safe. Repayment proceeds are transferred back via the Safe only as needed.
+    function _externalSwapFromSelf(address from, address to, uint256 input, uint256 minOut)
+        internal returns (uint256 received) {
+        if (input == 0) revert BadConfiguration();
+        uint256 beforeOut = _balance(to, address(SAFE));
+        _approveSelf(from, SWAPPER, input);
+        (bool ok, bytes memory ret) = SWAPPER.call(_routerCalldata(
+            swapSelector, swapInputFields, address(this), from, to, input, minOut));
+        if (!ok) {
+            assembly { revert(add(ret, 32), mload(ret)) }
+        }
+        _approveSelf(from, SWAPPER, 0);
+        received = _balance(to, address(SAFE)) - beforeOut;
         if (received < minOut) revert SlippageTooHigh();
     }
-    /// @notice The quote, price-protection minimum and route selection belong entirely
-    /// to the external swapper. This module applies only a risk-policy safety haircut.
+    /// @dev Only ABI encoding is performed here. No route selection, liquidity, DEX
+    /// math, pricing or swap execution lives inside this Safe module.
+    function _routerCalldata(
+        bytes4 selector, RouterField[] storage fields, address caller,
+        address from, address to, uint256 amount, uint256 minimum
+    ) internal view returns (bytes memory payload) {
+        payload = abi.encodePacked(selector);
+        for (uint256 i; i < fields.length; ++i) {
+            RouterField storage f = fields[i];
+            bytes32 w;
+            if (f.kind == FIELD_FIXED_WORD) w = f.fixedWord;
+            else if (f.kind == FIELD_TOKEN_IN) w = bytes32(uint256(uint160(from)));
+            else if (f.kind == FIELD_TOKEN_OUT) w = bytes32(uint256(uint160(to)));
+            else if (f.kind == FIELD_AMOUNT_IN) w = bytes32(amount);
+            else if (f.kind == FIELD_POLICY_MIN_OUT) w = bytes32(minimum);
+            else if (f.kind == FIELD_SAFE_RECIPIENT) w = bytes32(uint256(uint160(address(SAFE))));
+            else if (f.kind == FIELD_DEADLINE) w = bytes32(block.timestamp + routerDeadlineSeconds);
+            else if (f.kind == FIELD_CALLER) w = bytes32(uint256(uint160(caller)));
+            else revert BadConfiguration();
+            payload = bytes.concat(payload, abi.encodePacked(w));
+        }
+    }
+    /// @notice Pricing and route protection are delegated to the selected router.
+    /// @dev Default quote is CurveYieldSushiV3FeeRouter.twapMinimumOut(...).
+    ///      Alternate routers may supply 1-to-4 static return words; choose the
+    ///      protected minimum's return word when configuring the router.
     function _conservativeQuote(address caller, address from, address to, uint256 amount)
-        internal view returns (uint256)
-    {
-        try SWAPPER.protectedQuoteFor(caller, from, to, amount)
-            returns (uint256, uint256 protectedMinimum) {
-            return _mulDiv(protectedMinimum, BPS - quoteSafetyBufferBps, BPS);
-        } catch { return 0; }
+        internal view returns (uint256) {
+        (bool ok, bytes memory ret) = SWAPPER.staticcall(_routerCalldata(
+            quoteSelector, quoteInputFields, caller, from, to, amount, 0));
+        if (!ok || ret.length < 32 * (uint256(quoteResultWord) + 1)) return 0;
+        uint256 minimum;
+        uint256 index = uint256(quoteResultWord);
+        assembly { minimum := mload(add(add(ret, 32), mul(index, 32))) }
+        return _mulDiv(minimum, BPS - quoteSafetyBufferBps, BPS);
     }
     /// @dev AVKAT intrinsic share price is a risk policy, not internal swap pricing.
     function _hasRequiredPremium(uint256 katAmount, uint256 avOut) internal view returns (bool) {
