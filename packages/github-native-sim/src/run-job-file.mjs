@@ -177,6 +177,24 @@ async function executeSlither({ request, checkout, build, runSlither, runCommand
 }
 
 async function executeMedusa({ request, checkout, build, phase6MutableRpc, runMedusa, runCommand }) {
+  // Do not start a blanket Medusa fuzz campaign. The auditor must bind one
+  // named property and explicitly configure the Medusa harness to select it.
+  const selected = request.configuration.analysis?.medusa?.targetProperty;
+  if (!/^(?:property_|invariant_|echidna_)[A-Za-z0-9_]+$/.test(selected ?? '')) {
+    throw Object.assign(new Error('Agent-selected Medusa targetProperty is required; automatic property fuzzing is disabled'), { kind:'AGENT_GUIDED_MEDUSA_PROPERTY_REQUIRED' });
+  }
+  let medusaConfig;
+  try {
+    medusaConfig = JSON.parse(await fs.readFile(path.join(checkout.projectRoot, 'medusa.json'), 'utf8'));
+  } catch (error) {
+    throw Object.assign(new Error('Agent-selected medusa.json is missing or invalid: ' + error.message), { kind:'AGENT_GUIDED_MEDUSA_CONFIGURATION_REQUIRED' });
+  }
+  const testing = medusaConfig?.fuzzing?.testing;
+  if (JSON.stringify(testing?.propertyTesting?.testPrefixes) !== JSON.stringify([selected])
+    || testing?.assertionTesting?.enabled !== false
+    || testing?.optimizationTesting?.enabled !== false) {
+    throw Object.assign(new Error('Medusa requires exactly the selected property prefix with automatic assertion and optimization testing disabled'), { kind:'AGENT_GUIDED_MEDUSA_CONFIGURATION_REQUIRED' });
+  }
   if (runMedusa) return runMedusa({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const medusaVersion = request.configuration.analysis?.medusa?.version ?? V7_POLICY.tools.medusa;
   return runMedusaAnalysis({
@@ -194,7 +212,12 @@ async function executeMedusa({ request, checkout, build, phase6MutableRpc, runMe
 async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, environment, runNativeFuzz, runCommand }) {
   if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const native = request.configuration.analysis?.nativeFuzz ?? {};
-  const fuzzRuns = native.fuzzRuns ?? 256;
+  // No unselected "forge test": that would run every fuzz and invariant test.
+  const matchTest = native.matchTest;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(matchTest ?? '')) {
+    throw Object.assign(new Error('Agent-selected nativeFuzz.matchTest is required; automatic fuzz and invariant runs are disabled'), { kind:'AGENT_GUIDED_FOUNDRY_TEST_SELECTION_REQUIRED' });
+  }
+  const matchContract = native.matchContract;
   const rpcUrl = phase6MutableRpc?.url;
   const blockNumber = phase6MutableRpc?.blockNumber;
   const forkEvidence = {
@@ -210,7 +233,330 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
     sourceCommit: request.source.commit,
     rawArtifactRef: rawArtifactRef('native-fuzz/raw.txt'),
     command: 'forge',
-    args: ['test', '--fuzz-runs', String(fuzzRuns), '--fork-url', rpcUrl, '--fork-block-number', String(blockNumber)],
+    args: ['test', '--match-test', '^' + matchTest + '
+    env: { ...environment, ETH_RPC_URL: rpcUrl },
+    redactValues: [rpcUrl],
+    forkEvidence,
+    recoverableExitCodes: native.recoverableExitCodes ?? []
+  }, { ...(runCommand ? { runCommand } : {}) });
+}
+
+export async function runGitHubNativeJob(input, {
+  workspaceRoot = path.resolve('.deep-assurance-work'),
+  checkoutSource = defaultCheckoutSource,
+  buildProject = defaultBuildProject,
+  runSlither,
+  runMedusa,
+  runNativeFuzz,
+  generateSourceIntelligence = generateSourceIntelligenceTechnicalBundleV1,
+  runCommand,
+  environment = process.env,
+  phase6MutableRpc = null,
+  verifiedPhase0ForkState = null,
+  startSimulationEngine = startCompatibleForkEngine,
+  executeSimulationWorkflow = executeWorkflow,
+  now = () => new Date()
+} = {}) {
+  const request = validateDeepAssuranceRequestV2(input);
+  const startedAt = nowIso(now);
+  const analysis = {};
+  let build;
+  let checkout;
+  let deploymentGasEvidence = null;
+  let simulation = null;
+  let liteRetainedExecution = null;
+  let sourceIntelligenceTechnicalBundle = null;
+
+  try {
+    checkout = await checkoutSource(request.source, { workspaceRoot, runCommand, environment });
+    if (!checkout || checkout.commit !== request.source.commit) throw new Error(`Exact source checkout mismatch: expected ${request.source.commit}, got ${checkout?.commit ?? 'missing'}`);
+    build = await buildProject({ projectRoot: checkout.projectRoot, request, ...(runCommand ? { runCommand } : {}) });
+    deploymentGasEvidence = buildDeploymentGasEvidence(request, build);
+    if (isCurveYieldLiteP67Request(request)) {
+      liteRetainedExecution = await runCurveYieldLiteP67({ request, projectRoot: checkout.projectRoot, environment, ...(runCommand ? { runCommand } : {}) });
+    }
+  } catch (error) {
+    return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, liteRetainedExecution }, now);
+  }
+
+  if (liteRetainedExecution) {
+    if (liteRetainedExecution.status !== 'completed') {
+      const error = new Error('CurveYield Lite P6-7 retained execution failed');
+      error.kind = 'LITE_RETAINED_EXECUTION_FAILURE';
+      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, liteRetainedExecution, continuityDisposition: 'CONTINUE_WITH_LIMITATION' }, now);
+    }
+    return {
+      schemaVersion: 'deep-assurance-github-native-execution-v2',
+      requestId: request.requestId,
+      requestDigest: request.requestDigest,
+      profileId: request.profileId,
+      source: structuredClone(request.source),
+      status: 'completed',
+      build,
+      sbom: build?.sbom ?? null,
+      deploymentGasEvidence,
+      analysis,
+      simulation,
+      liteRetainedExecution,
+      analysisComponentFailureCount: 0,
+      failedStepCount: 0,
+      failedSteps: [],
+      continuityDisposition: 'COMPLETE_EVIDENCE',
+      startedAt,
+      finishedAt: nowIso(now)
+    };
+  }
+
+  if (request.profileId === V7_POLICY.profiles.compile) {
+    try {
+      analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
+    } catch (error) {
+      analysis.slither = { backend: 'slither', status: 'failed', terminal: true, componentStatus: 'FAILED', continuationDisposition: 'CONTINUE_WITH_LIMITATION', failureKind: error?.kind ?? 'ANALYSIS_COMPONENT_FAILURE', error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) } };
+    }
+    try {
+      sourceIntelligenceTechnicalBundle = await generateSourceIntelligence({
+        projectRoot: checkout.projectRoot,
+        request,
+        build,
+        analysis,
+      });
+    } catch (error) {
+      if (!error.code) error.code = 'source_intelligence_generation_failed';
+      return failureResult(request, startedAt, error, {
+        build,
+        deploymentGasEvidence,
+        analysis,
+        simulation,
+        sourceIntelligenceTechnicalBundle,
+        continuityDisposition: 'PREFLIGHT_BLOCKED',
+      }, now);
+    }
+  } else {
+    const requestedAnalysis = request.configuration.analysis ?? {};
+    const stage2aConfig = { slither: requestedAnalysis.slither !== false, medusa: requestedAnalysis.medusa !== false && requestedAnalysis.medusa !== undefined, nativeFuzz: requestedAnalysis.nativeFuzz?.enabled === true };
+    try {
+      await runStage2aAnalysis(stage2aConfig, {
+        runSlither: async () => {
+          analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
+          return analysis.slither;
+        },
+        runMedusa: async () => {
+          analysis.medusa = await executeMedusa({ request, checkout, build, phase6MutableRpc, runMedusa, runCommand });
+          return analysis.medusa;
+        },
+        runNativeFuzz: async () => {
+          analysis.nativeFuzz = await executeNativeFuzz({ request, checkout, build, phase6MutableRpc, environment, runNativeFuzz, runCommand });
+          return analysis.nativeFuzz;
+        }
+      });
+    } catch (error) {
+      const componentFailures = analysisFailureCount(analysis);
+      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, continuityDisposition: componentFailures > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE' }, now);
+    }
+  }
+
+  const componentFailures = analysisFailureCount(analysis);
+  const hardStop = hasHardStop(analysis);
+  if (hardStop) {
+    return failureResult(request, startedAt, new Error('Analysis component requires execution stop'), { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, continuityDisposition: 'STOP_EXECUTION' }, now);
+  }
+
+  if (request.phaseId === 'fork-simulation-lifecycle') {
+    try {
+      simulation = await executePhase7Simulation({ request, build, environment, verifiedPhase0ForkState, startSimulationEngine, executeSimulationWorkflow });
+    } catch (error) {
+      simulation = error.simulationEvidence ?? simulation;
+      const failedSteps = simulation?.steps?.filter((step) => step.status === 'failed') ?? [];
+      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, failedStepCount: failedSteps.length, failedSteps, continuityDisposition: 'CONTINUE_WITH_LIMITATION' }, now);
+    }
+  }
+
+  const failedSteps = simulation?.steps?.filter((step) => step.status === 'failed') ?? [];
+  return {
+    schemaVersion: 'deep-assurance-github-native-execution-v2',
+    requestId: request.requestId,
+    requestDigest: request.requestDigest,
+    profileId: request.profileId,
+    source: structuredClone(request.source),
+    status: 'completed',
+    build,
+    sbom: build?.sbom ?? null,
+    deploymentGasEvidence,
+    analysis,
+    simulation,
+    sourceIntelligenceTechnicalBundle,
+    analysisComponentFailureCount: componentFailures,
+    failedStepCount: failedSteps.length,
+    failedSteps,
+    continuityDisposition: componentFailures > 0 || failedSteps.length > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE',
+    startedAt,
+    finishedAt: nowIso(now)
+  };
+}
+,
+      ...(matchContract ? ['--match-contract', '^' + matchContract + '
+    env: { ...environment, ETH_RPC_URL: rpcUrl },
+    redactValues: [rpcUrl],
+    forkEvidence,
+    recoverableExitCodes: native.recoverableExitCodes ?? []
+  }, { ...(runCommand ? { runCommand } : {}) });
+}
+
+export async function runGitHubNativeJob(input, {
+  workspaceRoot = path.resolve('.deep-assurance-work'),
+  checkoutSource = defaultCheckoutSource,
+  buildProject = defaultBuildProject,
+  runSlither,
+  runMedusa,
+  runNativeFuzz,
+  generateSourceIntelligence = generateSourceIntelligenceTechnicalBundleV1,
+  runCommand,
+  environment = process.env,
+  phase6MutableRpc = null,
+  verifiedPhase0ForkState = null,
+  startSimulationEngine = startCompatibleForkEngine,
+  executeSimulationWorkflow = executeWorkflow,
+  now = () => new Date()
+} = {}) {
+  const request = validateDeepAssuranceRequestV2(input);
+  const startedAt = nowIso(now);
+  const analysis = {};
+  let build;
+  let checkout;
+  let deploymentGasEvidence = null;
+  let simulation = null;
+  let liteRetainedExecution = null;
+  let sourceIntelligenceTechnicalBundle = null;
+
+  try {
+    checkout = await checkoutSource(request.source, { workspaceRoot, runCommand, environment });
+    if (!checkout || checkout.commit !== request.source.commit) throw new Error(`Exact source checkout mismatch: expected ${request.source.commit}, got ${checkout?.commit ?? 'missing'}`);
+    build = await buildProject({ projectRoot: checkout.projectRoot, request, ...(runCommand ? { runCommand } : {}) });
+    deploymentGasEvidence = buildDeploymentGasEvidence(request, build);
+    if (isCurveYieldLiteP67Request(request)) {
+      liteRetainedExecution = await runCurveYieldLiteP67({ request, projectRoot: checkout.projectRoot, environment, ...(runCommand ? { runCommand } : {}) });
+    }
+  } catch (error) {
+    return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, liteRetainedExecution }, now);
+  }
+
+  if (liteRetainedExecution) {
+    if (liteRetainedExecution.status !== 'completed') {
+      const error = new Error('CurveYield Lite P6-7 retained execution failed');
+      error.kind = 'LITE_RETAINED_EXECUTION_FAILURE';
+      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, liteRetainedExecution, continuityDisposition: 'CONTINUE_WITH_LIMITATION' }, now);
+    }
+    return {
+      schemaVersion: 'deep-assurance-github-native-execution-v2',
+      requestId: request.requestId,
+      requestDigest: request.requestDigest,
+      profileId: request.profileId,
+      source: structuredClone(request.source),
+      status: 'completed',
+      build,
+      sbom: build?.sbom ?? null,
+      deploymentGasEvidence,
+      analysis,
+      simulation,
+      liteRetainedExecution,
+      analysisComponentFailureCount: 0,
+      failedStepCount: 0,
+      failedSteps: [],
+      continuityDisposition: 'COMPLETE_EVIDENCE',
+      startedAt,
+      finishedAt: nowIso(now)
+    };
+  }
+
+  if (request.profileId === V7_POLICY.profiles.compile) {
+    try {
+      analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
+    } catch (error) {
+      analysis.slither = { backend: 'slither', status: 'failed', terminal: true, componentStatus: 'FAILED', continuationDisposition: 'CONTINUE_WITH_LIMITATION', failureKind: error?.kind ?? 'ANALYSIS_COMPONENT_FAILURE', error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) } };
+    }
+    try {
+      sourceIntelligenceTechnicalBundle = await generateSourceIntelligence({
+        projectRoot: checkout.projectRoot,
+        request,
+        build,
+        analysis,
+      });
+    } catch (error) {
+      if (!error.code) error.code = 'source_intelligence_generation_failed';
+      return failureResult(request, startedAt, error, {
+        build,
+        deploymentGasEvidence,
+        analysis,
+        simulation,
+        sourceIntelligenceTechnicalBundle,
+        continuityDisposition: 'PREFLIGHT_BLOCKED',
+      }, now);
+    }
+  } else {
+    const requestedAnalysis = request.configuration.analysis ?? {};
+    const stage2aConfig = { slither: requestedAnalysis.slither !== false, medusa: requestedAnalysis.medusa !== false && requestedAnalysis.medusa !== undefined, nativeFuzz: requestedAnalysis.nativeFuzz?.enabled === true };
+    try {
+      await runStage2aAnalysis(stage2aConfig, {
+        runSlither: async () => {
+          analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
+          return analysis.slither;
+        },
+        runMedusa: async () => {
+          analysis.medusa = await executeMedusa({ request, checkout, build, phase6MutableRpc, runMedusa, runCommand });
+          return analysis.medusa;
+        },
+        runNativeFuzz: async () => {
+          analysis.nativeFuzz = await executeNativeFuzz({ request, checkout, build, phase6MutableRpc, environment, runNativeFuzz, runCommand });
+          return analysis.nativeFuzz;
+        }
+      });
+    } catch (error) {
+      const componentFailures = analysisFailureCount(analysis);
+      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, continuityDisposition: componentFailures > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE' }, now);
+    }
+  }
+
+  const componentFailures = analysisFailureCount(analysis);
+  const hardStop = hasHardStop(analysis);
+  if (hardStop) {
+    return failureResult(request, startedAt, new Error('Analysis component requires execution stop'), { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, continuityDisposition: 'STOP_EXECUTION' }, now);
+  }
+
+  if (request.phaseId === 'fork-simulation-lifecycle') {
+    try {
+      simulation = await executePhase7Simulation({ request, build, environment, verifiedPhase0ForkState, startSimulationEngine, executeSimulationWorkflow });
+    } catch (error) {
+      simulation = error.simulationEvidence ?? simulation;
+      const failedSteps = simulation?.steps?.filter((step) => step.status === 'failed') ?? [];
+      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, failedStepCount: failedSteps.length, failedSteps, continuityDisposition: 'CONTINUE_WITH_LIMITATION' }, now);
+    }
+  }
+
+  const failedSteps = simulation?.steps?.filter((step) => step.status === 'failed') ?? [];
+  return {
+    schemaVersion: 'deep-assurance-github-native-execution-v2',
+    requestId: request.requestId,
+    requestDigest: request.requestDigest,
+    profileId: request.profileId,
+    source: structuredClone(request.source),
+    status: 'completed',
+    build,
+    sbom: build?.sbom ?? null,
+    deploymentGasEvidence,
+    analysis,
+    simulation,
+    sourceIntelligenceTechnicalBundle,
+    analysisComponentFailureCount: componentFailures,
+    failedStepCount: failedSteps.length,
+    failedSteps,
+    continuityDisposition: componentFailures > 0 || failedSteps.length > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE',
+    startedAt,
+    finishedAt: nowIso(now)
+  };
+}
+] : []),
+      ...(native.fuzzRuns !== undefined ? ['--fuzz-runs', String(native.fuzzRuns)] : []),
+      '--fork-url', rpcUrl, '--fork-block-number', String(blockNumber)],
     env: { ...environment, ETH_RPC_URL: rpcUrl },
     redactValues: [rpcUrl],
     forkEvidence,
