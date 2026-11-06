@@ -745,12 +745,22 @@ function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
    :semanticAnswerBindingV1({c,u,schema,initial});
   const answerTransport=machineAnswerDirectoryV1(u,initial,answerRouting);
   const questionHistory=prerequisiteQuestionHistoryRefsV1(c,u,questionSource);
+  // Existing Worker claim transport forwards evidenceRefs as
+  // sourceAndExecutionEvidenceRefs. One queue reference exposes ALL accepted
+  // same-phase histories to the GitHub inference adapter without multiplying
+  // the roster by the number of FLOW/ATTACK prerequisite relationships.
+  const questionQueuePath=path.posix.join(c.campaignPath,
+   'work/phase-'+phaseNo(c.directory.currentAssignment.phaseSequence),
+   'units/UNIT_QUEUE_STATE_v1.json');
   return {unitId:u.unitId,kind:u.kind,step:0,stage:'',unitSpecRevision:u.unitSpecRevision,
     packetPath,packetSha256,packetIndexPath:u.packetIndexPath||null,recordKeys:u.recordKeys||[],
     dependencies:u.dependencies||[],path:u.path,members:u.members,field:u.field,
     inputTemplate:initial,validationSchema:inputSchema,answerRouting,answerTransport,
     templateSha256:sha(JSON.stringify(initial)),schemaSha256:sha(JSON.stringify(inputSchema)),
-    supportingFileRequirements:assignedExecutionSupport(c,u),evidenceRefs:u.packetIndexPath?[u.packetIndexPath]:[],
+    supportingFileRequirements:assignedExecutionSupport(c,u),
+    evidenceRefs:[...(u.packetIndexPath?[u.packetIndexPath]:[]),questionQueuePath],
+    questionHistoryRosterRef:{phaseSequence:c.directory.currentAssignment.phaseSequence,
+     queuePath:questionQueuePath,readOnly:true,qualityValidation:false},
     ...(questionHistory.available.length?{prerequisiteQuestionHistoryRefs:questionHistory.available}:{}),
     ...(Object.keys(questionHistory.unavailable).length?
      {prerequisiteQuestionHistoryUnavailable:questionHistory.unavailable}:{})};
