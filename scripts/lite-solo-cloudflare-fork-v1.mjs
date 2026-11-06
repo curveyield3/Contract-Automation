@@ -11,7 +11,7 @@ import {execFileSync} from 'node:child_process';
 import {readJson, writeJson, repoFile, loadPhaseSchema, validateBoundAuthorityV1, EXPLICIT_NEGATIVES} from './lib/lite-solo-phase-work-v1.mjs';
 import {readUnitPacketIndexV1, readUnitPacketV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
 import {qualifiesLiteralTrivialReviewV13} from '../packages/github-native-sim/src/adr-discovery-validators-v1.mjs';
-import {processUnitRequestV1,freezeIssuedUnitMetaV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {processUnitRequestV1,freezeIssuedUnitMetaV1,recoverAcceptedQuestionLedgerReferenceV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
 import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
@@ -647,7 +647,26 @@ function issuedPacketDigestV1(c,u,state=null){
  }
  return sha(fs.readFileSync(relative(u.packetPath||u.shardPath)));
 }
-function buildUnitMeta(c,u,schema,queueState=null){
+// Re-resolve the original ACCEPTED unit's question index at the time a NEW
+// assignment is frozen. Repeated deliveries of an issued assignment use its
+// frozen metadata unchanged, so later checkpoint commits cannot change a
+// previously advertised roster digest.
+function prerequisiteQuestionHistoryRefsV1(c,u,source){
+ if(!source||!Array.isArray(u.dependencies)||!u.dependencies.length)return [];
+ const owners=new Set();
+ for(const dependency of u.dependencies){
+  const member=source.queue.acceptedRecords?.[dependency];
+  const owner=member?.status==='ACCEPTED'&&member.parentUnitId?
+   member.parentUnitId:dependency;
+  if(source.queue.units?.[owner]?.status==='ACCEPTED')owners.add(owner);
+ }
+ const plan={...source.plan,units:source.units};
+ return [...owners].map(unitId=>recoverAcceptedQuestionLedgerReferenceV1({
+  root:ROOT,campaignPath:c.campaignPath,phase:source.plan.phaseSequence,
+  unitId,directory:c.directory,queue:source.queue,plan
+ }));
+}
+function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
   if(u.issuedMeta)return structuredClone(u.issuedMeta);
   const index=u.packetIndexPath?readUnitPacketIndexV1({root:ROOT,indexPath:safePath(u.packetIndexPath)}):null;
   const discoveryPacket=['FLOW','ATTACK'].includes(u.kind)?readUnitPacketV1({root:ROOT,packetPath:safePath(u.packetPath)}):null;
@@ -705,19 +724,21 @@ function buildUnitMeta(c,u,schema,queueState=null){
    ?discoveryAnswerBindingV1({u,packet:discoveryPacket,initial})
    :semanticAnswerBindingV1({c,u,schema,initial});
   const answerTransport=machineAnswerDirectoryV1(u,initial,answerRouting);
+  const prerequisiteQuestionHistoryRefs=prerequisiteQuestionHistoryRefsV1(c,u,questionSource);
   return {unitId:u.unitId,kind:u.kind,step:0,stage:'',unitSpecRevision:u.unitSpecRevision,
     packetPath,packetSha256,packetIndexPath:u.packetIndexPath||null,recordKeys:u.recordKeys||[],
     dependencies:u.dependencies||[],path:u.path,members:u.members,field:u.field,
     inputTemplate:initial,validationSchema:inputSchema,answerRouting,answerTransport,
     templateSha256:sha(JSON.stringify(initial)),schemaSha256:sha(JSON.stringify(inputSchema)),
-    supportingFileRequirements:assignedExecutionSupport(c,u),evidenceRefs:u.packetIndexPath?[u.packetIndexPath]:[]};
+    supportingFileRequirements:assignedExecutionSupport(c,u),evidenceRefs:u.packetIndexPath?[u.packetIndexPath]:[],
+    ...(prerequisiteQuestionHistoryRefs.length?{prerequisiteQuestionHistoryRefs}:{})};
 }
 // Freeze issued answers in the existing campaign paged-prefill format.
 // A Contract-Automation code revision must not rewrite an active unit's schema.
 function freezeStageUnitMetaV1(c,phase,step,stage,units){
  const current=unitPlan(c),schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
  const issued=units.filter(u=>!u.issuedMetaRef).map(u=>{
-  const meta=buildUnitMeta(c,u,schema,current.queue.units?.[u.unitId]);
+  const meta=buildUnitMeta(c,u,schema,current.queue.units?.[u.unitId],current);
   meta.step=step;meta.stage=stage;
   return {unitId:u.unitId,meta};
  });
@@ -748,7 +769,7 @@ async function unitNextStep(c){
   const committed=freezeStageUnitMetaV1(c,phase,step,stage,eligible);
   const ids=new Set(eligible.map(u=>u.unitId));
   const roster=committed.units.filter(u=>ids.has(u.unitId)).map(u=>{
-   const x=buildUnitMeta(c,u,schema,committed.queue.units[u.unitId]);
+   const x=buildUnitMeta(c,u,schema,committed.queue.units[u.unitId],committed);
    x.step=step;x.stage=stage;return x;
   });
   const rosterDigest=sha(JSON.stringify(roster));
@@ -811,7 +832,7 @@ function eligibleStage(c,source,phase,step,stage){
 function stageDigest(c,source,phase,step,stage){
   return sha(JSON.stringify(eligibleStage(c,source,phase,step,stage).map(u=>{
     const x=buildUnitMeta(c,u,loadPhaseSchema(ROOT,AUTH,phase).schema,
-     source.queue.units?.[u.unitId]);
+     source.queue.units?.[u.unitId],source);
     x.step=step;x.stage=stage;return x;
   })));
 }
