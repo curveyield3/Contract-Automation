@@ -1231,26 +1231,9 @@ function assembleBoundAnswersV1(c,u,submitted){
     }
    }else result[field]=additional.map(row=>structuredClone(row));
   }
-  if(u.kind==='FLOW'){
-   const eligible=new Set(route.optionalRecords.find(x=>x.field==='trivialReviews')?.eligibleContextIds??[]);
-   strict(submitted.trivialContextIds===undefined||Array.isArray(submitted.trivialContextIds),
-    'trivialContextIds must be an explicit typed list when supplied');
-   const chosen=submitted.trivialContextIds===undefined?eligible:
-    new Set(submitted.trivialContextIds);
-   strict([...chosen].every(id=>eligible.has(id)),
-    'trivial row substitution can name only controller-eligible literal contexts');
-   const packet=readUnitPacketV1({root:ROOT,packetPath:safePath(u.packetPath)});
-   const inventory=read(safePath(packet.payload.sourceInventoryPath));
-   const contexts=new Map((inventory.payload?.contexts??[])
-    .map(x=>[x.contextId,x]));
-   // Use the identical source-bound V13 qualifier as the validator and
-   // summary, so a missing or unanchored claim never silently omits a row.
-   result.rows=result.rows.filter(row=>!chosen.has(row.contextId)||
-    !(result.trivialReviews??[]).some(review=>
-      qualifiesLiteralTrivialReviewV13({
-       review,context:contexts.get(row.contextId),inventory
-      })));
-  }
+  // Keep all source-review rows in the stored submission. The Worker owns
+  // triviality decisions; GitHub must not erase coverage through qualification.
+
  }else throw Error('unsupported issued unit kind');
  return result;
 }
