@@ -928,25 +928,20 @@ function machineAnswerExpectedTypeV1(field,initialKind,sourceType){
  return 'SCHEMA_DECLARED';
 }
 function checkMachineAnswerLiteralV1(spec,value){
- strict(spec&&spec.source==='AI_TYPED_LITERAL','field must be issued by the controller');
- // The Worker owns exact enum/value selection. GitHub checks only the
- // serialized literal's transport type, not a security-content decision.
- if(Array.isArray(spec.allowedValues)&&spec.allowedValues.length)
-  strict(typeof value==='string','expected a typed string for '+spec.field);
+ // Typed transport keeps the campaign JSON processable. All vulnerability,
+ // classification, verdict and completeness judgments belong to the Worker.
+ strict(spec&&spec.source==='AI_TYPED_LITERAL','field must match its issued binding');
  if(value===null)return;
  if(spec.expectedJsonType==='array'||spec.expectedJsonType==='string-array')
-  strict(Array.isArray(value),'AI answer must supply typed array for '+spec.field);
+  strict(Array.isArray(value),'issued field requires a JSON array: '+spec.field);
  if(spec.expectedJsonType==='string-array')
   strict(value.every(item=>typeof item==='string'),
-   'list records must contain literal string elements, never nested arrays');
- if(spec.expectedJsonType==='object')strict(value!==null&&typeof value==='object'&&
-  !Array.isArray(value),'AI answer must supply typed object for '+spec.field);
- if(spec.expectedJsonType==='string')strict(typeof value==='string',
-  'AI answer must supply one exact literal string for '+spec.field);
- // The Worker reviews findings, source anchors, security classifications,
- // and documented-rule quality. GitHub accepts the typed literal so an
- // executable-code upgrade cannot impose a new content-approval checklist.
-
+   'issued string-list field must preserve its JSON representation');
+ if(spec.expectedJsonType==='object')
+  strict(typeof value==='object'&&!Array.isArray(value),
+   'issued field requires a JSON object: '+spec.field);
+ if(spec.expectedJsonType==='string')
+  strict(typeof value==='string','issued field requires a JSON string: '+spec.field);
 }
 
 function checkExtraDiscoveryRecordsV1(field,records,route){
