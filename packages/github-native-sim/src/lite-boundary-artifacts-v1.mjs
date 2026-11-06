@@ -749,7 +749,7 @@ ${rows.join('\n')}
 `;
 }
 
-export function renderFinalEvidenceIndexV1({identity={},milestones=[],findings=[],obligations=[],limitations=[],omissions=[],questionHistories=[]}={}){
+export function renderFinalEvidenceIndexV1({identity={},milestones=[],findings=[],obligations=[],limitations=[],omissions=[],questionHistories=[],originalCanonicalEvidenceHistory=null}={}){
   const milestoneRows=arr(milestones).map(m=>`| ${md(m.milestone)} | ${md(m.requiredEvidence)} | ${md(m.reference)} | ${md(m.sourceIdentity)} | ${md(m.status)} | ${md(m.limitation)} |`);
   const findingRows=[
     ...arr(findings).map(f=>`| ${md(f.id)} | ${md(f.disposition)} | ${md(f.severityOrStatus)} | ${md(f.evidence)} | ${md(f.remediationStatus)} | ${md(f.residualLimitation)} |`),
@@ -763,6 +763,51 @@ export function renderFinalEvidenceIndexV1({identity={},milestones=[],findings=[
     `| ${md(ref.phaseSequence)} | ${md(ref.unitId)} | ${md(ref.indexPath)} | ${md(ref.availability)} | ${md(ref.indexSha256??ref.previousCommittedIndex?.indexSha256??'NOT_AVAILABLE')} | ${md(ref.revision??ref.previousCommittedIndex?.revision??'NOT_AVAILABLE')} | ${md(ref.questionCount??ref.previousCommittedIndex?.questionCount??'NOT_AVAILABLE')} | ${md(ref.answeredCount??ref.previousCommittedIndex?.answeredCount??'NOT_AVAILABLE')} |`);
   if(!questionHistoryRows.length)
     questionHistoryRows.push('| NONE | NONE | NONE | NOT_PUBLISHED_OR_NO_ACCEPTED_UNIT | NONE | NONE | NONE | NONE |');
+
+  // The original accepted evidence roster is navigation, never a security
+  // finding or a substitute for the committed original canonical JSON.
+  // Every original pointer is rendered; none is keyword-selected or truncated.
+  const originalRosters=arr(originalCanonicalEvidenceHistory?.rosters);
+  const originalSummaryRows=originalRosters.map(r=>
+    '| '+[r.phase,r.acceptedRevision??'NOT_RECORDED',r.acceptedEpoch??'NOT_RECORDED',
+      r.canonicalArtifactPath??'UNAVAILABLE',r.actualArtifactPath??'UNAVAILABLE',
+      r.receiptPath??'UNAVAILABLE',r.auditedSourceSha256??'UNAVAILABLE',
+      r.expectedCanonicalSha256??'UNAVAILABLE',
+      r.actualCanonicalSha256??'UNAVAILABLE',r.availability??'UNVERIFIED',
+      arr(r.records).length].map(md).join(' | ')+' |');
+  const originalSelectors=originalRosters.map(r=>{
+    const title='### Phase '+md(r.phase)+' / accepted revision '+md(r.acceptedRevision??'NOT_RECORDED');
+    const selectorRows=arr(r.records).map(item=>
+      '| '+[item.selector,item.kind,item.originalArrayPosition??'—',
+        item.originalIdentityFields??'—'].map(md).join(' | ')+' |');
+    const diagnostics=arr(r.diagnostics).map(d=>'- '+md(d)).join('\n');
+    return [title,
+      '- Original canonical: '+md(r.canonicalArtifactPath),
+      '- Resolved accepted artifact: '+md(r.actualArtifactPath??'UNAVAILABLE'),
+      '- Receipt: '+md(r.receiptPath??'UNAVAILABLE'),
+      '- SHA-256: '+md(r.actualCanonicalSha256??r.expectedCanonicalSha256??'UNAVAILABLE'),
+      '- Availability: '+md(r.availability??'UNVERIFIED'),
+      ...(diagnostics?[diagnostics]:[]),
+      '| Exact JSON pointer (RFC 6901) | Value kind | Original array position | Original identity fields |',
+      '|---|---|---|---|',
+      ...selectorRows,
+      ...(selectorRows.length?[]:['| UNAVAILABLE | UNAVAILABLE | — | — |'])
+    ].join('\n');
+  });
+  const currentPending=originalCanonicalEvidenceHistory?.currentPhasePendingReceipt;
+  const originalEvidenceSection=[
+    '## Original accepted canonical evidence — complete source-bound roster',
+    'This section is mechanical navigation, not an independent security or resolution verdict. Every listed JSON pointer addresses original source content in the accepted SHA-256-bound canonical artifact. A missing, skipped, or revised record is not evidence of safety.',
+    '| Phase | Revision | Accepted epoch | Original canonical path | Actual source path | Receipt | Audited source SHA-256 | Expected canonical SHA-256 | Actual canonical SHA-256 | Availability | Source pointers |',
+    '|---|---|---|---|---|---|---|---|---|---|---|',
+    ...(originalSummaryRows.length?originalSummaryRows:
+      ['| UNAVAILABLE | — | — | — | — | — | — | — | — | ROSTER_UNAVAILABLE | 0 |']),
+    ...(currentPending?[
+      'Phase '+md(currentPending.phase)+' is being packaged when this index is rendered; its original accepted roster must be retrieved from the subsequently sealed receipt and Phase-10 assignment, not assumed accepted here.'
+    ]:[]),
+    ...arr(originalCanonicalEvidenceHistory?.diagnostics).map(d=>'- '+md(d)),
+    ...originalSelectors
+  ].join('\n\n');
 
   return `# Lite Final Evidence Index
 
@@ -796,6 +841,8 @@ Each row identifies an original accepted-unit question index. Read its exact Git
 | Phase | Accepted unit | Original question index | Index availability | Index SHA-256 | Revision | Questions planned | Answers recorded |
 |---|---|---|---|---|---|---|---|
 ${questionHistoryRows.join('\n')}
+
+${originalEvidenceSection}
 
 ## Carried limitations and unresolved questions
 
