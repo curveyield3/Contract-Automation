@@ -302,15 +302,30 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    if(check.assessment==='NOT_APPLICABLE')na.push({contextId:id,classId,evidence:check.evidence,anchors:check.anchors});
    if(check.candidate)candidates.push({...check.candidate,contextIds:[id],classId});
   };
-  for(const group of arr(submission?.groupChecks))for(const id of arr(group?.contextIds))set(id,group.classId,group);
+  const v13=state?.payload?.reviewPolicy==='correctness-verdict-v13';
+  for(const group of arr(submission?.groupChecks)){
+   if(v13){
+    // An optional checklist is never allowed to override a function-wide
+    // correctness verdict. Retain its distinct candidate as an observation.
+    if(group?.candidate)candidates.push({...group.candidate,
+      contextIds:[...new Set(arr(group.contextIds))],classId:group.classId});
+   }else for(const id of arr(group?.contextIds))set(id,group.classId,group);
+  }
   const unit=resolveUnit(plan,unitId);
   for(const review of arr(submission?.trivialReviews))
    for(const id of arr(unit?.primaryContextIds)){
     const c=contextFor(inventory,id);
-    if(c?.qualifiedContainer!==review?.contract||!TRIVIAL_KINDS_V1.has(c.kind))continue;
-    for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[id]??[]))
-      set(id,classId,state?.payload?.reviewPolicy==='correctness-verdict-v13'
-        ?{...review,assessment:'SUPPORTED'}:review);
+    if(c?.qualifiedContainer!==review?.contract)continue;
+    if(v13){
+     // Source-anchored literal CONSTANT only: immutables and getters must
+     // retain explicit verdict rows even when an optional review exists.
+     if(!qualifiesLiteralTrivialReviewV13({review,context:c,inventory}))continue;
+    }else if(!TRIVIAL_KINDS_V1.has(c.kind))continue;
+    for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[id]??[])){
+     // Never erase a previously recorded function-wide V13 verdict.
+     if(v13&&checks.get(id)?.[classId]!==undefined)continue;
+     set(id,classId,v13?{...review,assessment:'SUPPORTED'}:review);
+    }
     if(!checks.has(id))checks.set(id,{});
    }
   contractLevel.push(...arr(submission?.contractChecks));
