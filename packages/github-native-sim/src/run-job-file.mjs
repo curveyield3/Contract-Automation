@@ -71,8 +71,25 @@ function failureResult(request, startedAt, error, partial = {}, now) {
   };
 }
 
+function skippedUnguided(backend, reason) {
+  return { backend, status: 'skipped', terminal: true, componentStatus: 'SKIPPED_UNGUIDED',
+    continuationDisposition: 'COMPLETE_EVIDENCE', failureKind: null,
+    reason, preflightDetermined: false, toolInvoked: false };
+}
+
+function guidedAnalysisConfig(analysis = {}) {
+  const medusa = analysis.medusa;
+  const native = analysis.nativeFuzz;
+  return {
+    slither: analysis.slither !== false,
+    medusa: medusa !== false && medusa != null
+      && /^(?:property_|invariant_|echidna_)[A-Za-z0-9_]+$/.test(medusa.targetProperty ?? ''),
+    nativeFuzz: native?.enabled === true && /^[A-Za-z_][A-Za-z0-9_]*$/.test(native.matchTest ?? ''),
+  };
+}
+
 function analysisFailureCount(analysis) {
-  return Object.values(analysis).filter((component) => component && component.componentStatus && component.componentStatus !== 'COMPLETED').length;
+  return Object.values(analysis).filter((component) => component && component.componentStatus && !['COMPLETED', 'SKIPPED_UNGUIDED'].includes(component.componentStatus)).length;
 }
 
 function hasHardStop(analysis) {
@@ -177,24 +194,21 @@ async function executeSlither({ request, checkout, build, runSlither, runCommand
 }
 
 async function executeMedusa({ request, checkout, build, phase6MutableRpc, runMedusa, runCommand }) {
-  // Do not start a blanket Medusa fuzz campaign. The auditor must bind one
-  // named property and explicitly configure the Medusa harness to select it.
+  // Unguided fuzz/property campaigns are optional and must never start.
   const selected = request.configuration.analysis?.medusa?.targetProperty;
-  if (!/^(?:property_|invariant_|echidna_)[A-Za-z0-9_]+$/.test(selected ?? '')) {
-    throw Object.assign(new Error('Agent-selected Medusa targetProperty is required; automatic property fuzzing is disabled'), { kind:'AGENT_GUIDED_MEDUSA_PROPERTY_REQUIRED' });
-  }
+  if (!/^(?:property_|invariant_|echidna_)[A-Za-z0-9_]+$/.test(selected ?? ''))
+    return skippedUnguided('medusa', 'NO_AGENT_SELECTED_PROPERTY');
   let medusaConfig;
   try {
     medusaConfig = JSON.parse(await fs.readFile(path.join(checkout.projectRoot, 'medusa.json'), 'utf8'));
-  } catch (error) {
-    throw Object.assign(new Error('Agent-selected medusa.json is missing or invalid: ' + error.message), { kind:'AGENT_GUIDED_MEDUSA_CONFIGURATION_REQUIRED' });
+  } catch {
+    return skippedUnguided('medusa', 'AGENT_SELECTED_PROPERTY_HAS_NO_MATCHING_MEDUSA_CONFIG');
   }
   const testing = medusaConfig?.fuzzing?.testing;
   if (JSON.stringify(testing?.propertyTesting?.testPrefixes) !== JSON.stringify([selected])
     || testing?.assertionTesting?.enabled !== false
-    || testing?.optimizationTesting?.enabled !== false) {
-    throw Object.assign(new Error('Medusa requires exactly the selected property prefix with automatic assertion and optimization testing disabled'), { kind:'AGENT_GUIDED_MEDUSA_CONFIGURATION_REQUIRED' });
-  }
+    || testing?.optimizationTesting?.enabled !== false)
+    return skippedUnguided('medusa', 'MEDUSA_CONFIGURATION_NOT_RESTRICTED_TO_AGENT_PROPERTY');
   if (runMedusa) return runMedusa({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const medusaVersion = request.configuration.analysis?.medusa?.version ?? V7_POLICY.tools.medusa;
   return runMedusaAnalysis({
@@ -211,11 +225,9 @@ async function executeMedusa({ request, checkout, build, phase6MutableRpc, runMe
 
 async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, environment, runNativeFuzz, runCommand }) {
   const native = request.configuration.analysis?.nativeFuzz ?? {};
-  // No unselected "forge test": that would run every fuzz and invariant test.
   const matchTest = native.matchTest;
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(matchTest ?? '')) {
-    throw Object.assign(new Error('Agent-selected nativeFuzz.matchTest is required; automatic fuzz and invariant runs are disabled'), { kind:'AGENT_GUIDED_FOUNDRY_TEST_SELECTION_REQUIRED' });
-  }
+  if (native.enabled !== true || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(matchTest ?? ''))
+    return skippedUnguided('native-fuzz', 'NO_AGENT_SELECTED_FOUNDRY_TEST');
   const matchContract = native.matchContract;
   if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const rpcUrl = phase6MutableRpc?.url;
@@ -233,15 +245,7 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
     sourceCommit: request.source.commit,
     rawArtifactRef: rawArtifactRef('native-fuzz/raw.txt'),
     command: 'forge',
-    args: ['test', '--match-test', '^' + matchTest + '
-    env: { ...environment, ETH_RPC_URL: rpcUrl },
-    redactValues: [rpcUrl],
-    forkEvidence,
-    recoverableExitCodes: native.recoverableExitCodes ?? []
-  }, { ...(runCommand ? { runCommand } : {}) });
-}
-
-export async function runGitHubNativeJob(input, {
+    args: ['test', '--match-test', '^' + matchTest + '(input, {
   workspaceRoot = path.resolve('.deep-assurance-work'),
   checkoutSource = defaultCheckoutSource,
   buildProject = defaultBuildProject,
@@ -333,7 +337,7 @@ export async function runGitHubNativeJob(input, {
     }
   } else {
     const requestedAnalysis = request.configuration.analysis ?? {};
-    const stage2aConfig = { slither: requestedAnalysis.slither !== false, medusa: requestedAnalysis.medusa !== false && requestedAnalysis.medusa !== undefined, nativeFuzz: requestedAnalysis.nativeFuzz?.enabled === true };
+    const stage2aConfig = guidedAnalysisConfig(requestedAnalysis);
     try {
       await runStage2aAnalysis(stage2aConfig, {
         runSlither: async () => {
@@ -394,15 +398,7 @@ export async function runGitHubNativeJob(input, {
   };
 }
 ,
-      ...(matchContract ? ['--match-contract', '^' + matchContract + '
-    env: { ...environment, ETH_RPC_URL: rpcUrl },
-    redactValues: [rpcUrl],
-    forkEvidence,
-    recoverableExitCodes: native.recoverableExitCodes ?? []
-  }, { ...(runCommand ? { runCommand } : {}) });
-}
-
-export async function runGitHubNativeJob(input, {
+      ...(matchContract ? ['--match-contract', '^' + matchContract + '(input, {
   workspaceRoot = path.resolve('.deep-assurance-work'),
   checkoutSource = defaultCheckoutSource,
   buildProject = defaultBuildProject,
@@ -494,7 +490,7 @@ export async function runGitHubNativeJob(input, {
     }
   } else {
     const requestedAnalysis = request.configuration.analysis ?? {};
-    const stage2aConfig = { slither: requestedAnalysis.slither !== false, medusa: requestedAnalysis.medusa !== false && requestedAnalysis.medusa !== undefined, nativeFuzz: requestedAnalysis.nativeFuzz?.enabled === true };
+    const stage2aConfig = guidedAnalysisConfig(requestedAnalysis);
     try {
       await runStage2aAnalysis(stage2aConfig, {
         runSlither: async () => {
@@ -555,7 +551,7 @@ export async function runGitHubNativeJob(input, {
   };
 }
 ] : []),
-      ...(native.fuzzRuns !== undefined ? ['--fuzz-runs', String(native.fuzzRuns)] : []),
+      '--fuzz-runs', String(native.fuzzRuns ?? 256),
       '--fork-url', rpcUrl, '--fork-block-number', String(blockNumber)],
     env: { ...environment, ETH_RPC_URL: rpcUrl },
     redactValues: [rpcUrl],
@@ -656,7 +652,7 @@ export async function runGitHubNativeJob(input, {
     }
   } else {
     const requestedAnalysis = request.configuration.analysis ?? {};
-    const stage2aConfig = { slither: requestedAnalysis.slither !== false, medusa: requestedAnalysis.medusa !== false && requestedAnalysis.medusa !== undefined, nativeFuzz: requestedAnalysis.nativeFuzz?.enabled === true };
+    const stage2aConfig = guidedAnalysisConfig(requestedAnalysis);
     try {
       await runStage2aAnalysis(stage2aConfig, {
         runSlither: async () => {
