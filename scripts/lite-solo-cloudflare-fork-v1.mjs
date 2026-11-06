@@ -946,45 +946,10 @@ function checkMachineAnswerLiteralV1(spec,value){
   !Array.isArray(value),'AI answer must supply typed object for '+spec.field);
  if(spec.expectedJsonType==='string')strict(typeof value==='string',
   'AI answer must supply one exact literal string for '+spec.field);
- if(spec.field==='specInspection')
-  strict(value&&typeof value==='object'&&!Array.isArray(value)&&
-   ['MATCH','MISMATCH','UNRESOLVED','NO_DOCUMENTED_RULES'].includes(value.status)&&
-   typeof value.docsAndCommentsChecked==='string'&&value.docsAndCommentsChecked.trim()&&
-   typeof value.namedConstantsChecked==='string'&&value.namedConstantsChecked.trim(),
-   'specInspection requires status, documented checks and named-constant review');
- if(spec.field==='documentedRules')
-  strict(Array.isArray(value)&&value.every(rule=>rule&&typeof rule==='object'&&
-   !Array.isArray(rule)&&typeof rule.ruleId==='string'&&rule.ruleId.trim()&&
-   typeof rule.rule==='string'&&rule.rule.trim()&&
-   ['MATCH','MISMATCH','UNRESOLVED'].includes(rule.comparison)&&
-   typeof rule.reason==='string'&&rule.reason.trim()),
-   'documentedRules require exact source rule, allowed comparison and reason');
- if(spec.field==='siblingComparisons')
-  strict(Array.isArray(value)&&value.every(row=>row&&typeof row==='object'&&
-   !Array.isArray(row)&&typeof row.siblingContextId==='string'&&row.siblingContextId.trim()&&
-   typeof row.signature==='string'&&row.signature.trim()&&
-   typeof row.comparison==='string'&&row.comparison.trim()),
-   'siblingComparisons require exact identity, signature and comparison');
- if(spec.field==='candidate'||spec.field==='candidates'){
-  const [collection]=JSON.parse(spec.bindingId);
-  const candidates=Array.isArray(value)?value:[value];
-  const requireClassification=collection==='rows'||spec.field==='candidates';
-  for(const candidate of candidates){
-   strict(candidate&&typeof candidate==='object'&&!Array.isArray(candidate)&&
-    typeof candidate.title==='string'&&candidate.title.trim()&&
-    typeof candidate.description==='string'&&candidate.description.trim()&&
-    Array.isArray(candidate.anchors)&&candidate.anchors.length>0&&
-    candidate.anchors.every(x=>typeof x==='string'&&x.trim()),
-    'candidate must have title, description and actual source anchors');
-   if(requireClassification)
-    strict(typeof candidate.classId==='string'&&candidate.classId.trim()&&
-     ['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(candidate.severity),
-     'function-wide V13 discovery candidates need exact class and severity');
-   else if(candidate.severity!==undefined)
-    strict(['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(candidate.severity),
-     'optional candidate severity must be an issued literal token');
-  }
- }
+ // The Worker reviews findings, source anchors, security classifications,
+ // and documented-rule quality. GitHub accepts the typed literal so an
+ // executable-code upgrade cannot impose a new content-approval checklist.
+
 }
 
 function checkExtraDiscoveryRecordsV1(field,records,route){
