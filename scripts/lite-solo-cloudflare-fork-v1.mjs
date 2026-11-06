@@ -758,7 +758,15 @@ function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
     inputTemplate:initial,validationSchema:inputSchema,answerRouting,answerTransport,
     templateSha256:sha(JSON.stringify(initial)),schemaSha256:sha(JSON.stringify(inputSchema)),
     supportingFileRequirements:assignedExecutionSupport(c,u),
-    evidenceRefs:[...(u.packetIndexPath?[u.packetIndexPath]:[]),questionQueuePath],
+    // Existing same-unit evidence channel makes the original immutable Worker
+     // file available to the reconciliation agent along with its work row.
+     evidenceRefs:[...(u.packetIndexPath?[u.packetIndexPath]:[]),questionQueuePath,
+      ...(u.members??(u.kind==='SHARD'?[u]:[]))
+       .map(member=>member?.initialValue?.unmappedAttackEvidenceRef)
+       .filter(ref=>ref?.originalWorkerAttempt?.availability==='AVAILABLE'&&
+        typeof ref.originalWorkerAttempt.path==='string')
+       .map(ref=>ref.originalWorkerAttempt.path)
+     ].filter((value,index,list)=>list.indexOf(value)===index),
     questionHistoryRosterRef:{phaseSequence:c.directory.currentAssignment.phaseSequence,
      queuePath:questionQueuePath,readOnly:true,qualityValidation:false},
     ...(questionHistory.available.length?{prerequisiteQuestionHistoryRefs:questionHistory.available}:{}),

@@ -756,6 +756,23 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  gaps.forEach((gap,index)=>add('COVERAGE_GAP',
   gap.contextId?[gap.contextId]:arr(gap.contextIds),null,
   'Gap '+gap.code,'NO_SUBMISSION',[],'state.payload.gaps['+index+']'));
+ // Supply every unmapped ATTACK extra record as an independent Phase 4
+ // reconciliation subject. Identity and source are exact; disposition belongs
+ // to the AI, and existing reconciliation records retain their old keys.
+ unmappedAttackPathRefs.forEach((ref,index)=>{
+  const identity=ref.originalPathId??ref.sourceSelector??'UNMAPPED_ATTACK_PATH';
+  add('ATTACK_UNMAPPED_FLOW',[],null,'NO_SUBMISSION',
+   'ATTACK extra path '+String(identity)+
+   '; inspect its complete original Worker-authored evidence.',
+   []);
+  const recordKey=items[items.length-1].recordKey;
+  reconciliationEvidenceRefs[recordKey]={
+   referenceCollection:'unmappedAttackPathRefs',sourceRefIndexes:[index],
+   availability:ref.originalWorkerAttempt?.availability==='AVAILABLE'?
+    'AVAILABLE':'SOURCE_UNAVAILABLE',
+   originalRecordSelector:ref.sourceSelector??null
+  };
+ });
  const discoveryState={reviewChecks:Object.fromEntries([...checks.entries()]),gaps,attackContradictions:contradictions};
  const coverage=buildCoverageMatrixV1({inventory,taxonomy,discoveryState});
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{

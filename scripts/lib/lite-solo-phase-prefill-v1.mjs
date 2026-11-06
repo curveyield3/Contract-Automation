@@ -631,15 +631,48 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       const summary=readJsonIf(repoFile(root,path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')));
       const items=summary?.payload?.reconciliationItems??null;
       const controllerFields=['recordKey','contextIds','sourceAnchor','origin','reviewerFinding','attackerFinding'];
-      const records=items===null?['<PENDING_DISCOVERY>']:items.length?items.map(item=>({
-        ...Object.fromEntries(controllerFields.map(k=>[k,item[k]])),
-        reconciliation:'<REQUIRED>',disposition:'<REQUIRED>',candidateTempKeyOrNone:'<REQUIRED>',rationale:'<REQUIRED>',
-        automationOwnedFields:controllerFields
-      })):['NONE_IDENTIFIED'];
+      // Copy exact source identities; controller makes no security judgments.
+      const unmappedSourceRef=item=>{
+        if(item?.origin!=='ATTACK_UNMAPPED_FLOW')return null;
+        const link=summary?.payload?.reconciliationEvidenceRefs?.[item.recordKey];
+        if(link?.referenceCollection!=='unmappedAttackPathRefs')return null;
+        const index=link.sourceRefIndexes?.[0];
+        const ref=Number.isInteger(index)?summary?.payload?.unmappedAttackPathRefs?.[index]:null;
+        return ref?{
+          availability:link.availability??'SOURCE_UNAVAILABLE',
+          phaseSequence:4,unitId:ref.unitId??null,
+          originalWorkerAttempt:structuredClone(ref.originalWorkerAttempt??{availability:'NOT_RECORDED'}),
+          sourceSelector:ref.sourceSelector??null,
+          originalAnchorsSelector:ref.originalAnchorsSelector??null,
+          originalCandidateSelector:ref.originalCandidateSelector??null,
+          originalFlowIds:structuredClone(ref.originalFlowIds??null),
+          originalPathId:ref.originalPathId??null,mappingStatus:ref.mappingStatus??null,
+          acceptedPath:ref.acceptedPath??null,acceptedSha256:ref.acceptedSha256??null
+        }:null;
+      };
+      const records=items===null?['<PENDING_DISCOVERY>']:items.length?items.map(item=>{
+        const evidenceRef=unmappedSourceRef(item);
+        return {
+          ...Object.fromEntries(controllerFields.map(k=>[k,item[k]])),
+          ...(item.origin==='ATTACK_UNMAPPED_FLOW'?{
+            unmappedAttackEvidenceRef:evidenceRef??{availability:'SOURCE_UNAVAILABLE'},
+            unmappedAttackReviewInstruction:
+              'Read the complete original Worker ATTACK record at unmappedAttackEvidenceRef.originalWorkerAttempt.path '+
+              'using unmappedAttackEvidenceRef.sourceSelector. Examine every step, anchor, optional candidate, and unknown '+
+              'flow identity. Do not discard an observation merely because its flow ID is unissued.'
+          }:{}),
+          reconciliation:'<REQUIRED>',disposition:'<REQUIRED>',candidateTempKeyOrNone:'<REQUIRED>',rationale:'<REQUIRED>',
+          automationOwnedFields:item.origin==='ATTACK_UNMAPPED_FLOW'?
+            [...controllerFields,'unmappedAttackEvidenceRef','unmappedAttackReviewInstruction']:controllerFields
+        };
+      }):['NONE_IDENTIFIED'];
       form.actions['step-1'].outputs.discoveryReconciliationRecords=records;
       form.automationInputs.expectedDiscoveryRecordKeys=items?.map(x=>x.recordKey)??[];
+      form.automationInputs.unmappedAttackPathSources=
+        structuredClone(summary?.payload?.unmappedAttackPathSources??[]);
       form.automationInputs.controllerOwnedAutomationInputs=uniq([
-       ...form.automationInputs.controllerOwnedAutomationInputs,'expectedDiscoveryRecordKeys']);
+       ...form.automationInputs.controllerOwnedAutomationInputs,
+       'expectedDiscoveryRecordKeys','unmappedAttackPathSources']);
     }
   }
   if(sequence===4){
