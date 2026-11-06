@@ -604,7 +604,7 @@ function validateRequest(request,directory,phase){
   if(new Set(request.items.map(x=>x.unitId)).size!==request.items.length)throw Error('duplicate SUBMIT unit');
   const required=['unitId','claimEpoch','claimToken','packetSha256','submissionPath',
    'submissionSha256','unitSpecRevision'];
-  if(request.items.some(x=>!isObject(x)||Object.keys(x).length!==required.length||
+  if(request.items.some(x=>!isObject(x)||Object.keys(x).some(key=>!required.includes(key)&&key!=='workerAttemptPath')||
     required.some(key=>!Object.hasOwn(x,key))||
     !safe(x.unitId)||!Number.isSafeInteger(x.claimEpoch)||x.claimEpoch<1||
     !safe(x.claimToken)||!Number.isSafeInteger(x.unitSpecRevision)||x.unitSpecRevision<1||
@@ -828,6 +828,28 @@ function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,state
  return {errors:[],assembledSubmission:{
   schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:ordered},recordEvidenceRefs:refs};
 }
+// Source provenance is optional evidence metadata and never an acceptance gate.
+// The original Worker path comes from the GitHub adapter, not from an inferred
+// controller-compiled filename.
+function originalWorkerAttemptReferenceV1({root,campaign,phase,unitId,request,item,state,digest}){
+ const sourcePath=typeof item.workerAttemptPath==='string'?item.workerAttemptPath:
+  item.submissionPath.includes('/controller-compiled/')?null:item.submissionPath;
+ const prefix=path.posix.join(unitBase(campaign,phase,unitId),
+  'submissions',request.workerId,'epoch-'+state.claimEpoch)+'/';
+ if(!sourcePath||!sourcePath.startsWith(prefix)||
+    !/^SUBMISSION_ATTEMPT_[0-9]{3,6}_v1\.json$/.test(sourcePath.slice(prefix.length)))
+  return {availability:'NOT_RECORDED'};
+ if(sourcePath===item.submissionPath)
+  return {availability:'AVAILABLE',path:sourcePath,sha256:digest,
+   relation:'DIRECT_WORKER_SUBMISSION'};
+ try{
+  const originalBytes=fs.readFileSync(repoFile(root,sourcePath));
+  return {availability:'AVAILABLE',path:sourcePath,sha256:hex(originalBytes),
+   relation:'EXPLICIT_GITHUB_ADAPTER_SOURCE'};
+ }catch{
+  return {availability:'SOURCE_UNAVAILABLE',path:sourcePath,sha256:null};
+ }
+}
 function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory}){
  const u=plan.units.find(x=>x.unitId===item.unitId),state=queue.units[item.unitId];
  if(!u||!state)return {unitId:item.unitId,status:'WAITING_SUBMISSION',errors:[]};
@@ -848,6 +870,15 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
   'ACCEPTED_ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
  const questionLedger=questionLedgerReferenceV1({root,campaign,phase,unitId:u.unitId,
   directory,phaseEpoch:request.phaseEpoch,packetSha256:item.packetSha256});
+ const isDiscovery=u.kind==='FLOW'||u.kind==='ATTACK';
+ const sourceProvenance=isDiscovery?{
+  schemaVersion:'curveyield-discovery-source-provenance-v1',
+  submittedPath:item.submissionPath,submittedSha256:digest,
+  submittedRepresentation:item.submissionPath.includes('/controller-compiled/')
+   ?'CONTROLLER_COMPILED':'DIRECT_WORKER_SUBMISSION',
+  originalWorkerAttempt:originalWorkerAttemptReferenceV1({
+   root,campaign,phase,unitId:u.unitId,request,item,state,digest})
+ }:null;
  put(root,acceptedRel,{schemaVersion:'curveyield-lite-solo-accepted-unit-v1',unitId:u.unitId,
   campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
   authorityDigest:directory.authorityDigest,phaseSequence:phase,phaseEpoch:request.phaseEpoch,
@@ -856,9 +887,11 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
   prerequisiteEvidence:prerequisiteEvidence(queue,u.dependencies),
   submission:batchOutcome?.assembledSubmission??submission,
   ...(batchOutcome?.recordEvidenceRefs?{recordEvidenceRefs:batchOutcome.recordEvidenceRefs}:{}),
+  ...(sourceProvenance?{sourceProvenance}:{}),
   questionLedger,
   validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false});
  state.status='ACCEPTED';state.acceptedSha256=digest;state.acceptedPath=acceptedRel;state.lastErrors=[];
+ if(isDiscovery)state.acceptedArtifactSha256=hex(fs.readFileSync(repoFile(root,acceptedRel)));
  put(root,resultRel,{unitId:u.unitId,status:'ACCEPTED',submissionSha256:digest,
   acceptedPath:acceptedRel,validationDelegatedTo:'CLOUDFLARE_WORKER'});
  return {unitId:u.unitId,status:'ACCEPTED',resultRef:resultRel};
@@ -915,8 +948,21 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
  const state={schemaVersion:'curveyield-discovery-state-v1',campaignId:directory.campaignId,
   campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
   generatedAt:new Date().toISOString(),payload:{reviewPolicy:'correctness-verdict-v13',gaps:asArray(discoveryInput(root,campaign,'FLOW_PLAN_v1.json').payload?.gaps)}};
- const acceptedSubmissions=items.map(u=>({unitId:u.unitId,
-  submission:read(root,queue.units[u.unitId].acceptedPath).submission}));
+ const acceptedSubmissions=items.map(u=>{
+  const acceptedPath=queue.units[u.unitId].acceptedPath;
+  const acceptedBytes=fs.readFileSync(repoFile(root,acceptedPath));
+  const accepted=JSON.parse(acceptedBytes.toString('utf8'));
+  return {unitId:u.unitId,submission:accepted.submission,
+   sourceReference:{phaseSequence:4,unitId:u.unitId,acceptedPath,
+    acceptedSha256:hex(acceptedBytes),sourceSelectorPrefix:'submission',
+    submittedPath:accepted.sourceProvenance?.submittedPath??null,
+    submittedSha256:accepted.sourceProvenance?.submittedSha256??
+     accepted.submissionSha256??null,
+    submittedRepresentation:accepted.sourceProvenance?.submittedRepresentation??
+     'HISTORICAL_ACCEPTED_SUBMISSION',
+    originalWorkerAttempt:accepted.sourceProvenance?.originalWorkerAttempt??
+     {availability:'NOT_RECORDED'}}};
+ });
  const inventory=discoveryInput(root,campaign,'REVIEW_INVENTORY_v1.json');
  const summary=buildDiscoverySummaryV1({state,inventory,plan:discoveryInput(root,campaign,'FLOW_PLAN_v1.json'),
   acceptedSubmissions,taxonomy:loadTaxonomyV1(automationRoot),now:new Date().toISOString()});
