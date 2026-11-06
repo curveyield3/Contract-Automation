@@ -867,11 +867,13 @@ function checkMachineAnswerLiteralV1(spec,value){
  }
 }
 
-function checkExtraDiscoveryRecordsV1(field,records){
+function checkExtraDiscoveryRecordsV1(field,records,route){
  strict(Array.isArray(records),field+' must be an array of typed records');
  const obj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
  const nonempty=v=>typeof v==='string'&&Boolean(v.trim());
- const anchors=v=>Array.isArray(v)&&v.every(nonempty);
+ const anchors=v=>Array.isArray(v)&&v.length>0&&v.every(nonempty);
+ const roles=new Set(route?.fixedRecordKeys?.find(x=>x.field==='attackPaths')
+  ?.records?.flatMap(x=>x.allowedRole??[])??[]);
  for(const row of records){
   strict(obj(row),'discovery '+field+' must contain objects, not literals');
   if(field==='trivialReviews')
@@ -894,7 +896,7 @@ function checkExtraDiscoveryRecordsV1(field,records){
   else if(field==='attackPaths')
    strict(Array.isArray(row.flowIds)&&row.flowIds.every(nonempty)&&
     ['BLOCKED','VIABLE','UNCERTAIN'].includes(row.result)&&
-    nonempty(row.role),
+    roles.has(row.role),
     'additional attackPaths need flow IDs, result and actor role');
  }
 }
@@ -1147,7 +1149,7 @@ function assembleBoundAnswersV1(c,u,submitted){
   for(const field of (u.kind==='FLOW'?['trivialReviews','groupChecks','candidates']:
    ['attackPaths'])){
    const additional=extras[field]===undefined?[]:extras[field];
-   checkExtraDiscoveryRecordsV1(field,additional);
+   checkExtraDiscoveryRecordsV1(field,additional,route);
    if(field==='attackPaths'){
     const allowed=new Set(route.fixedRecordKeys[0].records.flatMap(x=>x.key));
     for(const row of additional){
