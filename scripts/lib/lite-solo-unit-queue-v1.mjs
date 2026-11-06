@@ -589,6 +589,41 @@ function itemIdentity(item,u,state,request,root,campaign,phase){
 // No security or semantic submission validation is performed by GitHub.
 // This function remains only for compatibility with existing callers.
 function validateShardUnit(){return [];}
+// Exact issued record identities are part of the controller's packaging
+// contract. These checks do not judge any security finding or AI conclusion.
+function assertSubmissionEnvelopeV1(u,submission){
+ if(!submission||typeof submission!=='object'||Array.isArray(submission))
+  throw Error('submission is not a JSON object');
+ if(u.kind==='FLOW'||u.kind==='ATTACK'){
+  const schema=u.kind==='FLOW'?'curveyield-flow-review-submission-v1':
+   'curveyield-attack-submission-v1';
+  if(submission.schemaVersion!==schema||submission.unitId!==u.unitId)
+   throw Error('discovery submission does not match the issued unit');
+  return;
+ }
+ if(submission.schemaVersion!=='curveyield-lite-solo-unit-submission-v1'||
+    !Array.isArray(submission.entries))
+  throw Error('semantic submission envelope does not match the issued schema');
+ const entries=submission.entries;
+ if(entries.some(x=>!x||typeof x!=='object'||typeof x.key!=='string'||
+    !Object.hasOwn(x,'value'))||
+    new Set(entries.map(x=>x.key)).size!==entries.length)
+  throw Error('duplicate or malformed issued record identities');
+ if(u.kind==='SHARD'){
+  if(entries.length!==1||entries[0].key!==u.recordKeys?.[0])
+   throw Error('fixed record identity or count differs from issued shard');
+ }else if(u.kind==='BATCH'){
+  const expected=u.members.map(x=>x.recordKeys?.[0]);
+  if(entries.length!==expected.length||entries.some((x,i)=>x.key!==expected[i]))
+   throw Error('batch record identity/order/count differs from issued members');
+ }else if(u.kind==='APPEND'){
+  if(entries.length>1024)throw Error('APPEND exceeds controller file capacity');
+  const root=JSON.stringify(u.path)+':APPEND-';
+  for(let i=0;i<entries.length;i++)
+   if(entries[i].key!==root+String(i+1).padStart(4,'0'))
+    throw Error('APPEND changed its controller-assigned record identity');
+ }
+}
 function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,state,request,digest}){
  // Retain exactly the records MiMo supplied, in Worker-issued member order.
  // Missing records are never fabricated or pronounced correct by GitHub.
@@ -622,6 +657,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
  if(digest!==item.submissionSha256)return {unitId:item.unitId,status:'STALE'};
  // JSON parsing is transport decoding only; no schema, security or content checks.
  const submission=JSON.parse(raw.toString('utf8'));
+ assertSubmissionEnvelopeV1(u,submission);
  let batchOutcome=null;
  if(u.kind==='BATCH')batchOutcome=acceptBatchRecordsV1({
   root,campaign,phase,u,submission,queue,plan,state,request,digest});
