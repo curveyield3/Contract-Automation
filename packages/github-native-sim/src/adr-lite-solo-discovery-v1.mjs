@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 import {classesForTriggersV1,loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
 import {buildCoverageMatrixV1} from './adr-coverage-matrix-v1.mjs';
 import {deriveBaselineObligationsV1} from './adr-baseline-obligations-v1.mjs';
-import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1,TRIVIAL_KINDS_V1,isLiteralConstantV13} from './adr-discovery-validators-v1.mjs';
+import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1,TRIVIAL_KINDS_V1,isLiteralConstantV13,qualifiesLiteralTrivialReviewV13} from './adr-discovery-validators-v1.mjs';
 import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-solo-phase-work-v1.mjs';
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
 import {independentSpecItemsV13} from './adr-lite-solo-independent-spec-v1.mjs';
@@ -483,10 +483,9 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   for(const review of arr(submission?.trivialReviews))
    for(const id of arr(unit?.primaryContextIds)){
     const c=contextFor(inventory,id);
-    if(c?.qualifiedContainer!==review?.contract||!TRIVIAL_KINDS_V1.has(c.kind))continue;
+    if(!qualifiesLiteralTrivialReviewV13({review,context:c,inventory}))continue;
     for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[id]??[]))
-      set(id,classId,state?.payload?.reviewPolicy==='correctness-verdict-v13'
-        ?{...review,assessment:'SUPPORTED'}:review);
+      set(id,classId,review);
     if(!checks.has(id))checks.set(id,{});
    }
   contractLevel.push(...arr(submission?.contractChecks));
