@@ -30,7 +30,7 @@ function statusFor(phase6Results, inventory, contextId, classId) {
 
 function summary(rows) {
   const stats = {contexts: new Set(), accepted:0, contradicted:0, notApplicableClaims:0, gaps:0, testsPassed:0, propertyFailures:0, notAchieved:0,
-    classSupported:0, classConcerns:0, classUnresolved:0, classUnestablished:0};
+    classSupported:0, classConcerns:0, classUnresolved:0, classNotApplicable:0, classUnestablished:0};
   for (const row of rows) {
     stats.contexts.add(row.contextId);
     if (row.reviewStatus === 'ACCEPTED') stats.accepted++;
@@ -44,6 +44,7 @@ function summary(rows) {
       if (row.classAssessment === 'SUPPORTED') stats.classSupported++;
       if (row.classAssessment === 'CONCERN') stats.classConcerns++;
       if (row.classAssessment === 'UNRESOLVED') stats.classUnresolved++;
+      if (row.classAssessment === 'NOT_APPLICABLE') stats.classNotApplicable++;
     } else if (row.classAssessmentOrigin === 'NOT_ESTABLISHED') stats.classUnestablished++;
   }
   return {...stats, contexts:stats.contexts.size};
@@ -161,14 +162,14 @@ export function renderCoverageMarkdownV1(matrix) {
         ' NOT_APPLICABLE; '+c.notEstablished+' not established; '+
         c.requiredContextClassPairs+' triggered context/class pairs.',
       '',
-      '| Contract | Class | Contexts | Explicit supported | Explicit concerns | Explicit unresolved | Class unestablished | Tests passed | Property failures | Not achieved |',
-      '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|'
+      '| Contract | Class | Contexts | Explicit supported | Explicit concerns | Explicit unresolved | Explicit N/A | Class unestablished | Tests passed | Property failures | Not achieved |',
+      '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|'
     ];
     for (const contract of Object.keys(matrix.byContract).sort()) {
       for (const classId of [...new Set(matrix.rows.filter(x=>x.contract === contract).map(x=>x.classId))].sort()) {
         const stats=summary(matrix.rows.filter(x=>x.contract===contract&&x.classId===classId));
         lines.push('| '+[contract,classId,stats.contexts,stats.classSupported,
-          stats.classConcerns,stats.classUnresolved,stats.classUnestablished,
+          stats.classConcerns,stats.classUnresolved,stats.classNotApplicable,stats.classUnestablished,
           stats.testsPassed,stats.propertyFailures,stats.notAchieved].join(' | ')+' |');
       }
     }
@@ -201,6 +202,7 @@ export function renderCoverageMarkdownV1(matrix) {
       lines.push('| ' + [contract,classId,s.contexts,s.accepted,s.contradicted,s.notApplicableClaims,s.gaps,s.testsPassed,s.propertyFailures,s.notAchieved].join(' | ') + ' |');
     }
   }
-  lines.push('', '**Assurance: ' + matrix.label + '**');
+  lines.push('', '**Historical evidence coverage: ' + matrix.label + '**',
+    'Historical class-review statuses may include synthesized mappings. They are not independent AI-authored class proof without accepted-source provenance.');
   return lines.join('\n') + '\n';
 }
