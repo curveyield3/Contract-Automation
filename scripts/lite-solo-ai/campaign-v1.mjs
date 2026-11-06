@@ -1507,7 +1507,11 @@ while(true){
     rosters:[],unavailable:[{availability:'GITHUB_ORIGINAL_CANONICAL_READ_UNAVAILABLE',
      detail:String(error?.message??error)}]},sources:new Map()}));
   if(activeCanonicalHistory){
-   console.log(JSON.stringify({status:'MIMO_ACCEPTED_CANONICAL_HISTORY_RETRIEVED',
+   // This is the actual model-facing history delivery after the scoped
+   // conversation has been reset. A controller filename alone is not access.
+   const canonicalContext=canonicalHistoryModelContextV1(activeCanonicalHistory);
+   dialogue.push({role:'user',content:JSON.stringify(canonicalContext)});
+   console.log(JSON.stringify({status:'MIMO_ACCEPTED_CANONICAL_HISTORY_DELIVERED',
     activePhase:activeCanonicalHistory.manifest.activePhase??null,
     pinnedCommit:activeCanonicalHistory.manifest.snapshotCommit??null,
     sourceIdentity:activeCanonicalHistory.manifest.auditedSourceSha256??null,
@@ -1515,10 +1519,12 @@ while(true){
     originalRevisions:activeCanonicalHistory.manifest.rosters?.length??0,
     originalValues:[...(activeCanonicalHistory.sources?.values()??[])]
      .reduce((n,x)=>n+x.originalSelectors.length,0),
+    originalPagesInline:canonicalContext.inlinePageCount,
+    initialPagesAreExhaustive:canonicalContext.initialPagesAreExhaustive,
+    modelFacingBytes:Buffer.byteLength(JSON.stringify(canonicalContext)),
     unavailable:activeCanonicalHistory.manifest.unavailable?.length??0,
-    noGithubSecurityDisposition:true,
-    modelFacingDelivery:'DEFERRED_TO_STEP_4',
-    privateContent:'LOCAL_GITHUB_HISTORY_ONLY'}));
+    interpretationOwner:'MIMO',
+    noWorkerSubmission:true,privateContent:'MODEL_INPUT_ONLY'}));
   }
   // A mere canonical filename in derivedInputPaths is not model access.
   // Fetch the accepted original source privately at the pinned controller commit.
@@ -1547,13 +1553,17 @@ while(true){
    lastClaimRaw=workerResponse;
  }
  let raw=await modelCall(dialogue);
- // Evidence read requests are local to MiMo's private GitHub inference bridge.
- // Only the eventual original route/request answer is sent to the Worker.
- // Retain two recent exact reads in the bounded model context. Older reads stay
- // intact in the private transcript and can be re-requested by exact selector.
+ // Both evidence families use the SAME private local read loop. The source
+ // records, original JSON pages and question checkpoints never become Worker
+ // process/submit requests. Only the final MiMo route/request goes to Worker.
+ // Keep two recent exact read exchanges in model context; older source bytes
+ // remain available by pinned selector and page, without imposing a read cap.
  const evidenceReadPairs=[];
- for(let read=sourceEvidenceRequestV1(raw,activePhase1Evidence);read;
-     read=sourceEvidenceRequestV1(raw,activePhase1Evidence)){
+ for(let read=modelLocalEvidenceReadV1(
+      raw,activeCanonicalHistory,activePhase1Evidence);
+     read;
+     read=modelLocalEvidenceReadV1(
+      raw,activeCanonicalHistory,activePhase1Evidence)){
   if(evidenceReadPairs.length===2){
    const at=evidenceReadPairs.shift();
    dialogue.splice(at,2);
@@ -1562,10 +1572,16 @@ while(true){
   evidenceReadPairs.push(dialogue.length);
   dialogue.push({role:'assistant',content:raw});
   dialogue.push({role:'user',content:JSON.stringify(read)});
-  console.log(JSON.stringify({status:'MIMO_PHASE1_EVIDENCE_PAGE_DELIVERED',
-   kind:read.kind??null,availability:read.availability,
-   sourceSha256:read.canonicalSha256??null,
-   selector:read.selector??null,page:read.page??null,
+  console.log(JSON.stringify({status:'MIMO_LOCAL_SOURCE_EVIDENCE_DELIVERED',
+   family:read.schemaVersion??'UNIDENTIFIED',
+   kind:read.kind??null,availability:read.availability??null,
+   sourceSha256:read.originalCanonicalSha256??read.canonicalSha256??null,
+   snapshotCommit:read.snapshotCommit??historySnapshotCommit,
+   referenceKey:read.referenceKey??null,
+   selector:read.selector??null,
+   page:read.page??null,
+   nextStart:read.nextStart??null,
+   nextOffset:read.nextOffset??null,
    noWorkerSubmission:true,privateContent:'MODEL_INPUT_ONLY'}));
   raw=await modelCall(dialogue);
  }
