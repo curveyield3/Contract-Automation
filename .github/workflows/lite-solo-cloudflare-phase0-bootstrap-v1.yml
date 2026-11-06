@@ -200,8 +200,10 @@ jobs:
           # Stage the exact campaign, including deletions of retired Phase-0 derived baseline files.
           git add -A -- "$CAMPAIGN_PATH"
           if git diff --cached --quiet; then
-            echo "::error::Phase-0 deployment evidence produced no durable changes"
-            exit 1
+            # An idempotent resume may have published the same evidence already.
+            # No new bytes is not a security-quality failure or campaign blocker.
+            echo "::notice::Phase-0 deploy evidence already published; no changes needed"
+            exit 0
           fi
           git commit -m "audit(phase0): retain only forked package deploy/config evidence ${{ inputs.campaign_id }}"
           # Reconcile unrelated concurrent campaign commits without force-pushing.
