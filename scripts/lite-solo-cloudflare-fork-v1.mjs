@@ -268,7 +268,8 @@ const isPendingAnswerValue=v=>typeof v==='string'&&(
  !v.trim()||v.startsWith('<REQUIRED')||v.startsWith('<CONTROLLER_')||
  v==='<fill>'||v==='TODO'
 );
-const negativeSentinel=v=>typeof v==='string'&&EXPLICIT_NEGATIVES.has(v);
+const negativeSentinel=v=>(typeof v==='string'&&EXPLICIT_NEGATIVES.has(v))||
+ (Array.isArray(v)&&v.length===1&&typeof v[0]==='string'&&EXPLICIT_NEGATIVES.has(v[0]));
 // Exact admitted execution-request file + authenticated ingestion tuple.
 // No guessing of request paths, round counts, proof outcomes, or semantic results.
 // A GitHub-created request is a real binding BEFORE any machine execution.
@@ -431,6 +432,8 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
    Array.isArray(member.initialValue)?'ARRAY':member.initialValue&&typeof member.initialValue==='object'?'OBJECT':'SCALAR',
   ...(negativeSentinel(member.initialValue)?{issuedNegativeSentinel:member.initialValue,
    policy:'PRESERVE_ISSUED_NEGATIVE_IN_FIXED_UNIT_USE_APPEND_FOR_NEW_RECORDS'}:{}),
+  ...(Array.isArray(member.initialValue)&&member.initialValue.length===0?
+   {issuedEmptyArray:true}:{}),
   bindings:definition.type==='REQUIRED_RECORD_LIST'&&member.initialValue&&
    typeof member.initialValue==='object'&&!Array.isArray(member.initialValue)
    ?[...new Set([...(definition.itemRequiredFields??[]),
@@ -976,7 +979,8 @@ function assembleBoundAnswersV1(c,u,submitted){
     }
    }else{
     const a=get('entries',entry.entryKey,'$value');
-    if(a.found&&!route.controllerOwnedOutput&&entry.issuedNegativeSentinel===undefined)
+    if(a.found&&!route.controllerOwnedOutput&&entry.issuedNegativeSentinel===undefined&&
+       entry.issuedEmptyArray!==true)
      target.value=structuredClone(a.value);
    }
   }
@@ -997,6 +1001,15 @@ function assembleBoundAnswersV1(c,u,submitted){
    }
    strict(input&&typeof input==='object'&&!Array.isArray(input),'append record is not a typed object');
    const value=structuredClone(input);
+   // Optional semantic fields may be preserved, but unissued administrative
+   // identities can never be smuggled in as optional AI-generated metadata.
+   const declared=new Set(fieldDef?.itemRequiredFields??[]);
+   for(const identity of ['canonicalId','assetKey','actorKey','boundaryKey',
+    'transitionKey','requirementKey','dependencyKey','standardKey','driverKey',
+    'recordKey','groupKey','findingKey','obligationId','subjectKey','candidateKey']){
+    if(Object.hasOwn(value,identity)&&!declared.has(identity))
+     delete value[identity];
+   }
    for(const ref of ['subjectKey','candidateKey','obligationId','findingKey']){
     if(Object.hasOwn(value,ref)){
      const policy=route.recordFieldTemplate.find(x=>x.field===ref);
