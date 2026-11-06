@@ -58,13 +58,22 @@ function completeDirectPhaseRecordIdsV1({form,sequence,campaignId}){
  };
  const assigned=identityFields[sequence]??{},camp=String(campaignId??'');
  const campaignToken=createHash('sha256').update(camp).digest('hex').slice(0,12);
+ // Reserve valid identities from every mapped direct-phase collection before
+ // assigning any missing key. Separate APPEND chunks cannot reuse an issued ID.
+ const used=new Set();
+ for(const [step,fields] of Object.entries(assigned)){
+  for(const [collection,key] of Object.entries(fields)){
+   for(const row of form?.actions?.[step]?.outputs?.[collection]??[]){
+    const value=row&&typeof row==='object'&&!Array.isArray(row)?row[key]:null;
+    if(typeof value==='string'&&value.trim()&&!value.startsWith('<REQUIRED')&&value!=='TODO')used.add(value);
+   }
+  }
+ }
  let issued=0;
  for(const [step,fields]of Object.entries(assigned)){
   for(const [collection,key]of Object.entries(fields)){
    const rows=form?.actions?.[step]?.outputs?.[collection];
    if(!Array.isArray(rows))continue;
-   const used=new Set(rows.filter(r=>r&&typeof r==='object'&&!Array.isArray(r))
-    .map(r=>r[key]).filter(k=>typeof k==='string'&&k.trim()&&!k.startsWith('<REQUIRED')));
    let ordinal=1;
    for(const row of rows){
     if(!row||typeof row!=='object'||Array.isArray(row))continue;
@@ -84,23 +93,40 @@ function completeDirectPhaseRecordIdsV1({form,sequence,campaignId}){
 }
 
 function canonicalFamilyForField(name){return ({propertyDesigns:'PROP',attackHypotheses:'HYP',candidateRecords:'CAND',newCandidateRecords:'CAND',validatedFindings:'FIND',remediationDispositions:'REM'})[name]??null;}
-function nextId(graph,family){let max=0;for(const n of graph.nodes??[]){const m=String(n.nodeId??'').match(new RegExp('^'+family+'-(\\d+)$'));if(m) max=Math.max(max,Number(m[1]));}return family+'-'+String(max+1).padStart(3,'0');}
+function nextId(graph,family,reserved){
+ let max=0;
+ for(const id of reserved){const m=String(id).match(new RegExp('^'+family+'-(\\d+)$'));if(m)max=Math.max(max,Number(m[1]));}
+ for(const n of graph.nodes??[]){const m=String(n.nodeId??'').match(new RegExp('^'+family+'-(\\d+)$'));if(m)max=Math.max(max,Number(m[1]));}
+ return family+'-'+String(max+1).padStart(3,'0');
+}
 function assignCanonicalIds(canonical,graph,phase){
-  graph.nodes??=[];
-  for(const [stepKey,row] of Object.entries(canonical.actions??{})){
-    for(const [fieldName,value] of Object.entries(row.outputs??{})){
-      const family=canonicalFamilyForField(fieldName);
-      if(!family||!Array.isArray(value)) continue;
-      for(let i=0;i<value.length;i++){
-        const item=value[i];if(!item||typeof item!=='object'||Array.isArray(item)) continue;
-        const sourceRecordPath='actions.'+stepKey+'.outputs.'+fieldName+'['+i+']';
-        const prior=(graph.nodes??[]).find(n=>n.originPhase===phase&&n.sourceRecordPath===sourceRecordPath&&n.nodeType===family);
-        if(!item.canonicalId&&prior)item.canonicalId=prior.nodeId;
-        if(!item.canonicalId) item.canonicalId=nextId(graph,family);
-        if(!(graph.nodes??[]).some(n=>n.nodeId===item.canonicalId)) graph.nodes.push({nodeId:item.canonicalId,nodeType:family,originPhase:phase,sourceRecordPath});
-      }
-    }
+ graph.nodes??=[];
+ // Include all already-authored IDs, including those appearing after a row
+ // that still needs its own mechanical ID. Otherwise early allocations can
+ // collide with later stable IDs in an expanded collection.
+ const reserved=new Set(graph.nodes.map(n=>n.nodeId).filter(Boolean));
+ for(const action of Object.values(canonical.actions??{})){
+  for(const value of Object.values(action.outputs??{})){
+   if(!Array.isArray(value))continue;
+   for(const item of value)if(item&&typeof item==='object'&&!Array.isArray(item)&&
+       typeof item.canonicalId==='string'&&item.canonicalId.trim())reserved.add(item.canonicalId);
   }
+ }
+ for(const [stepKey,row] of Object.entries(canonical.actions??{})){
+  for(const [fieldName,value] of Object.entries(row.outputs??{})){
+   const family=canonicalFamilyForField(fieldName);
+   if(!family||!Array.isArray(value))continue;
+   for(let i=0;i<value.length;i++){
+    const item=value[i];if(!item||typeof item!=='object'||Array.isArray(item))continue;
+    const sourceRecordPath='actions.'+stepKey+'.outputs.'+fieldName+'['+i+']';
+    const prior=(graph.nodes??[]).find(n=>n.originPhase===phase&&n.sourceRecordPath===sourceRecordPath&&n.nodeType===family);
+    if(!item.canonicalId&&prior)item.canonicalId=prior.nodeId;
+    if(!item.canonicalId)item.canonicalId=nextId(graph,family,reserved);
+    reserved.add(item.canonicalId);
+    if(!(graph.nodes??[]).some(n=>n.nodeId===item.canonicalId))graph.nodes.push({nodeId:item.canonicalId,nodeType:family,originPhase:phase,sourceRecordPath});
+   }
+  }
+ }
 }
 function importedRecords(canonical,paths){return (paths??[]).map(p=>({path:p,value:getByPath(canonical,p)}));}
 function receiptObligationSummary({ledger,canonical,form,sequence,now}){
