@@ -968,6 +968,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
         'discoverySourceRefs','reconciliationEvidenceRefs',
         'candidateSourceRefIndexes','integrationAnswerRefs','flowNotes',
         'unmappedAttackPathRefs','unmappedAttackPathSources',
+        'extraAttackPathRefs','functionVerdictObservations',
         'functionVerdicts','trivialReviewSubstitutions','contractLevelFindings',
         'discoveryState.scopedClassAssessments',
         'coverage.functionReviewSummary','coverage.classEvidenceSummary'
@@ -979,6 +980,8 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
         integrationAnswerRefs:Array.isArray(details.integrationAnswerRefs)?details.integrationAnswerRefs.length:null,
         flowNotes:Array.isArray(details.flowNotes)?details.flowNotes.length:null,
         unmappedAttackPathRefs:Array.isArray(details.unmappedAttackPathRefs)?details.unmappedAttackPathRefs.length:null,
+        extraAttackPathRefs:Array.isArray(details.extraAttackPathRefs)?details.extraAttackPathRefs.length:null,
+        functionVerdictObservations:Array.isArray(details.functionVerdictObservations)?details.functionVerdictObservations.length:null,
         functionVerdicts:details.functionVerdicts&&typeof details.functionVerdicts==='object'?
           Object.keys(details.functionVerdicts).length:null,
         trivialReviewSubstitutions:Array.isArray(details.trivialReviewSubstitutions)?
