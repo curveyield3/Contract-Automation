@@ -929,14 +929,11 @@ function machineAnswerExpectedTypeV1(field,initialKind,sourceType){
 }
 function checkMachineAnswerLiteralV1(spec,value){
  strict(spec&&spec.source==='AI_TYPED_LITERAL','field must be issued by the controller');
+ // The Worker owns exact enum/value selection. GitHub checks only the
+ // serialized literal's transport type, not a security-content decision.
  if(Array.isArray(spec.allowedValues)&&spec.allowedValues.length)
-  strict(typeof value==='string'&&spec.allowedValues.includes(value),
-   'AI typed answer must be one exact issued enumeration for '+spec.field);
- if(value===null){
-  strict(['candidate','decidingTest','simulationIdea','candidates'].includes(spec.field),
-   'null only permitted for a genuinely absent optional security result: '+spec.field);
-  return;
- }
+  strict(typeof value==='string','expected a typed string for '+spec.field);
+ if(value===null)return;
  if(spec.expectedJsonType==='array'||spec.expectedJsonType==='string-array')
   strict(Array.isArray(value),'AI answer must supply typed array for '+spec.field);
  if(spec.expectedJsonType==='string-array')
