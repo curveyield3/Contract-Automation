@@ -707,17 +707,20 @@ function unitRelevant(u,phase,step,stage,schema){
   if(u.kind==='BATCH')return (schema.actions['step-'+step]?.fields||[]).some(f=>f.name===u.field);
   return u.path?.[1]==='step-'+step;
 }
-// Fork-only issue order: Step 3 synthesizes accepted Step 4 and 5 proof.
-// The canonical controller owns its dependencies; primary workflows remain unchanged.
-function forkUnitOrder(phase){return phase===6?[1,2,4,5,3]:Array.from({length:({4:3,5:3})[phase]},(_,i)=>i+1);}
-function forkNextUnitStep(c,source,phase,step){
- const order=forkUnitOrder(phase),at=order.indexOf(step);
- strict(at>=0,'unknown Cloudflare fork stage');
- if(at===order.length-1)return {done:true,step:null,stage:null};
- const nextStep=order[at+1],nextStage='STEP_'+nextStep;
- strict(eligibleStage(c,source,phase,nextStep,nextStage).length>0,
-   'CONTROLLER_DEPENDENCY_BLOCKED: successor '+nextStage+' has no eligible accepted-prerequisite units');
- return {done:false,step:nextStep,stage:nextStage};
+// Preserve the Phase-6 proof prerequisite ordering without blocking empty stages.
+function orderedMachineStagesV1(phase){
+ const steps=phase===6?[1,2,4,5,3]:[1,2,3];
+ return [...(phase===4?[{step:0,stage:'FLOW_REVIEW'},{step:0,stage:'ATTACK_REVIEW'}]:[]),
+  ...steps.map(step=>({step,stage:'STEP_'+step}))];
+}
+function stageUnitsV1(c,source,phase,step,stage){
+ const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
+ return source.units.filter(u=>unitRelevant(u,phase,step,stage,schema));
+}
+function stageAcceptedV1(source,u){
+ const state=source.queue.units?.[u.unitId];
+ return state?.status==='ACCEPTED'&&typeof state.acceptedPath==='string'&&
+   /^[a-f0-9]{64}$/.test(String(state.acceptedSha256??''));
 }
 function eligibleStage(c,source,phase,step,stage){
  // The adapter decides prerequisites; GitHub only sorts unfiled units by stage.
@@ -731,27 +734,35 @@ function stageDigest(c,source,phase,step,stage){
     x.step=step;x.stage=stage;return x;
   })));
 }
-function submittedUnitFile(c,phase,u){
-  const unitRoot=relative(c.campaignPath+'/work/phase-'+phaseNo(phase)+'/units/'+u.unitId+'/submissions');
-  strict(fs.existsSync(unitRoot),'missing Worker-filed submission for '+u.unitId);
-  const options=[];
-  for(const worker of fs.readdirSync(unitRoot)){
-    strict(/^cfw-[A-Za-z0-9_.-]{1,135}$/.test(worker),'unrecognized Worker submission owner');
-    const epochs=path.join(unitRoot,worker);
-    for(const entry of fs.readdirSync(epochs)){
-      if(!/^epoch-1$/.test(entry))continue;
-      const dir=path.join(epochs,entry);
-      for(const filename of fs.readdirSync(dir)){
-        if(!/^SUBMISSION_ATTEMPT_[0-9]{3,6}_v1\.json$/.test(filename))continue;
-        const full=path.join(dir,filename);
-        const attempt=Number(filename.match(/[0-9]{3,6}/)[0]);
-        options.push({workerId:worker,epoch:1,attempt,filename:full,rel:path.posix.relative(ROOT,full)});
-      }
-    }
+function submittedUnitFile(c,phase,u,item={}){
+ const unitRoot=relative(c.campaignPath+'/work/phase-'+phaseNo(phase)+'/units/'+u.unitId+'/submissions');
+ strict(fs.existsSync(unitRoot),'missing Worker-filed submission for '+u.unitId);
+ const options=[];
+ for(const worker of fs.readdirSync(unitRoot)){
+  strict(/^cfw-[A-Za-z0-9_.-]{1,135}$/.test(worker),'unrecognized Worker submission owner');
+  const epochs=path.join(unitRoot,worker);
+  if(!fs.statSync(epochs).isDirectory())continue;
+  for(const entry of fs.readdirSync(epochs)){
+   if(!/^epoch-[1-9][0-9]*$/.test(entry))continue;
+   const epoch=Number(entry.slice(6));
+   if(!Number.isSafeInteger(epoch))continue;
+   const dir=path.join(epochs,entry);
+   if(!fs.statSync(dir).isDirectory())continue;
+   for(const filename of fs.readdirSync(dir)){
+    if(!/^SUBMISSION_ATTEMPT_[0-9]{3,6}_v1\.json$/.test(filename))continue;
+    const attempt=Number(filename.match(/[0-9]{3,6}/)[0]);
+    if(Number.isSafeInteger(item.attempt)&&item.attempt!==attempt)continue;
+    if(Number.isSafeInteger(item.claim_epoch)&&item.claim_epoch!==epoch)continue;
+    const full=path.join(dir,filename);
+    options.push({workerId:worker,epoch,attempt,filename:full,rel:path.posix.relative(ROOT,full)});
+   }
   }
-  options.sort((a,b)=>b.attempt-a.attempt);
-  strict(options.length&&(!options[1]||options[0].attempt!==options[1].attempt),'missing or ambiguous latest submission: '+u.unitId);
-  return options[0];
+ }
+ options.sort((a,b)=>b.epoch-a.epoch||b.attempt-a.attempt);
+ strict(options.length&&(!options[1]||
+   options[0].epoch!==options[1].epoch||options[0].attempt!==options[1].attempt),
+   'missing or ambiguous requested Worker submission: '+u.unitId);
+ return options[0];
 }
 
 /**
@@ -759,10 +770,9 @@ function submittedUnitFile(c,phase,u){
  * validator used by the original wave. No other unit is claimed or modified.
  * Worker leases remain independent, so the agent can claim its next packet.
  */
-async function materializePhase5Request(c,u,selected){
+async function materializePhase5Request(c,u,submitted){
  if(Number(c.directory.currentAssignment.phaseSequence)!==5||u.field!=='targetDesigns')return;
- const submitted=JSON.parse(fs.readFileSync(selected.filename,'utf8'));
- const candidates=Array.isArray(submitted.entries)?submitted.entries:[];
+ const candidates=Array.isArray(submitted?.entries)?submitted.entries:[];
  const phase0Source={...read(c.campaignPath+'/receipts/PHASE_00_RECEIPT_v1.json').source};
  const manifestRel=c.campaignPath+'/evidence/phase0/PHASE0_FORK_STATE_MANIFEST_v1.json';
  if(fs.existsSync(relative(manifestRel))){
@@ -1234,26 +1244,26 @@ function assembleBoundAnswersV1(c,u,submitted){
  }else throw Error('unsupported issued unit kind');
  return result;
 }
-function materializeBoundSubmissionV1(c,u,selected){
+async function materializeBoundSubmissionV1(c,u,selected){
  const raw=read(selected.rel);
+ let completed=raw?.schemaVersion===MACHINE_BOUND_ANSWERS_V1?
+  assembleBoundAnswersV1(c,u,raw):raw;
+ // Create genuine Phase-5 requests before resolving their controller bindings.
+ await materializePhase5Request(c,u,completed);
  if(raw?.schemaVersion!==MACHINE_BOUND_ANSWERS_V1)return selected;
- const completed=assembleBoundAnswersV1(c,u,raw);
- // Keep the Worker-owned attempt namespace untouched. The controller's
- // compiled artifact lives in a nested directory accepted by the existing
- // unit ownership/path rule, but invisible to Worker-attempt discovery.
+ completed=assembleBoundAnswersV1(c,u,raw);
  const relativePath=path.posix.join(path.posix.dirname(selected.rel),
   'controller-compiled',path.posix.basename(selected.rel));
  const compiledPath=relative(relativePath),content=bytes(completed);
  if(fs.existsSync(compiledPath)){
   strict(sha(fs.readFileSync(compiledPath))===sha(content),
-    'compiled artifact differs from immutable source-bound attempt');
+   'compiled artifact differs from immutable source-bound attempt');
  }else{
   fs.mkdirSync(path.dirname(compiledPath),{recursive:true});
   fs.writeFileSync(compiledPath,content);
  }
  return {...selected,rel:relativePath,filename:compiledPath};
 }
-
 async function unitValidateSingle(c,item){
  const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
  const id=safeId(item.unit_id),sourceCommit=item.source_commit||need('source_commit');
