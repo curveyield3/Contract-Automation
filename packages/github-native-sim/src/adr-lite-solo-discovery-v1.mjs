@@ -11,6 +11,7 @@ import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-solo-phase-
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
 import {independentSpecItemsV13} from './adr-lite-solo-independent-spec-v1.mjs';
 // V13 qualification status is assessed independently after real blinded audit runs.
+const MACHINE_AUTHORITY_V1='Machine Intelligence Audit Controller/Audit Skill v1';
 
 const pathJoin=(campaign,relative)=>path.posix.join(campaign,'work/phase-04/discovery',relative);
 const asset=(root,campaign,name)=>reviewInventoryRelV1(root,campaign,name);
@@ -172,7 +173,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const contractChecks=role==='ATTACK'?[]:[...new Set(primary.map(id=>contextFor(inventory,id)?.qualifiedContainer).filter(Boolean))]
   .filter(name=>ownerUnit.get(name)===unitId).sort()
   .map(contract=>({contract,classId:'UPGRADE_INIT_STORAGE',reviewChecks:arr(upgradeClass?.reviewChecks)}));
- const verdictV13=/(?:Audit_Litemode_v13|lite-solo(?:-v[23456])?)(?:\/|$)/.test(authorityRoot);
+ const verdictV13=authorityRoot===MACHINE_AUTHORITY_V1;
  const trivialContextIds=role==='ATTACK'?[]:primary.filter(id=>verdictV13?
    isLiteralConstantV13(contextFor(inventory,id)):TRIVIAL_KINDS_V1.has(contextFor(inventory,id)?.kind));
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
@@ -204,7 +205,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  }));
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
   unitId,role,chatKey:role==='ATTACK'?(isReassignedV13AuthorityV1({root,authorityRoot})?'lite-solo-agent':verdictV13?'lite-solo-agent':'lite-solo-agent'):'lite-solo-agent',instructionsPath,
-  submissionPath:['/lite-solo-v4','/lite-solo-v5'].some(suffix=>authorityRoot.endsWith(suffix))?path.posix.join(campaignPath,'work/phase-04/units',unitId,'submissions/<workerId>/epoch-<claimEpoch>/SUBMISSION_ATTEMPT_001_v1.json'):submissionRel(campaignPath,unitId),boundaryRequestPath:['/lite-solo-v4','/lite-solo-v5'].some(suffix=>authorityRoot.endsWith(suffix))?'process/agent-upload/lite-solo-unit-requests/':'process/agent-upload/lite-solo-phase-boundary/',
+  submissionPath:path.posix.join(campaignPath,'work/phase-04/units',unitId,'submissions/<workerId>/epoch-<claimEpoch>/SUBMISSION_ATTEMPT_001_v1.json'),boundaryRequestPath:'process/agent-upload/lite-solo-unit-requests/',
   sourceRoot:campaignPath+'/source',sourceInventoryPath:asset(root,campaignPath,'REVIEW_INVENTORY_v1.json'),
   flowPlanPath:asset(root,campaignPath,'FLOW_PLAN_v1.json'),
   systemFactsPath:asset(root,campaignPath,'SYSTEM_FACTS_v1.json'),
@@ -424,18 +425,18 @@ function recordWindowV1({root,ids,state,campaignPath,authorityRoot}){
  const indexPath=writeDiscoveryWindowIndexV1({root,campaignPath,ids,role});
  return {role,unitIds:ids,indexPath};
 }
-export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,now,auditControllerRef='main'}){
+export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,now,auditControllerRef='machine-intelligence-audit-controller-v1'}){
  const plan=known(root,asset(root,campaignPath,'FLOW_PLAN_v1.json'));
  const units=unitList(plan),order=units.map(x=>x.unitId);
  const missing=!plan||!units.length;
  if(missing || (/\/lite-solo-v[3456]$/.test(authorityRoot) && (plan?.payload?.gaps??[]).some(g=>['INVENTORY_INCOMPLETE','PLAN_BUILD_ERROR'].includes(g?.code))))
    throw new Error('LITE_SOLO_DISCOVERY_UNAVAILABLE: empty or incomplete required review plan is not complete coverage');
- if(directory.mode!=='LITE_SOLO'||![ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot))throw new Error('lite-solo discovery authority mismatch');
+ if(directory.mode!=='LITE_SOLO'||authorityRoot!==MACHINE_AUTHORITY_V1)throw new Error('Machine Intelligence discovery authority mismatch');
  const state=head(directory,now,'curveyield-discovery-state-v1',{
   status:'RUNNING',order,activeUnitId:order[0],
    sequentialSingleReviewer:true,
-  ...( /(?:Audit_Litemode_v13|lite-solo(?:-v[23456])?)(?:\/|$)/.test(authorityRoot)?{reviewPolicy:'correctness-verdict-v13'}:{}),
-  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?(isReassignedV13AuthorityV1({root,authorityRoot})?'lite-solo-agent':/(?:Audit_Litemode_v13|lite-solo(?:-v[23456])?)(?:\/|$)/.test(authorityRoot)?'lite-solo-agent':'lite-solo-agent'):'lite-solo-agent',
+  reviewPolicy:'correctness-verdict-v13',
+  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?('lite-solo-agent'):'lite-solo-agent',
    status:'PENDING',attempts:0,lastValidatedSubmissionSha:null,lastErrors:[],acceptedSubmissionSha:null}])),
   gaps:missing?[{code:'INVENTORY_INCOMPLETE',detail:'No flow plan'}]:structuredClone(arr(plan.payload.gaps))
  });
