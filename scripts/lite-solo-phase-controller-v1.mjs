@@ -11,7 +11,8 @@ import {storeControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
 import {materializeSemanticWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,validateBoundAuthorityV1,loadPhaseSchema,
-  buildDerivedOutputs,preparePhaseWork,getByPath,buildOriginalCanonicalEvidenceRosterV1
+  buildDerivedOutputs,preparePhaseWork,getByPath,buildOriginalCanonicalEvidenceRosterV1,
+  collectAcceptedOriginalCanonicalEvidenceV1
 } from './lib/lite-solo-phase-work-v1.mjs';
 import {
   selectReusablePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
@@ -187,12 +188,13 @@ function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath
 function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRelFor(campaignPath,phase));}
 function uniqueExisting(root,rels){return [...new Set(rels.filter(Boolean))].filter(rel=>Boolean(maybeFile(root,rel)));}
 function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
-  const derived=(phase,name)=>path.posix.join(campaignPath,`derived/phase-${phase}/${name}`);
+  const derived=(phase,name)=>path.posix.join(campaignPath,'derived/phase-'+phase,name);
   const buildIdentity=path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
   const deploy=path.posix.join(campaignPath,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
   const targets=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
   const remediation=path.posix.join(campaignPath,'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md');
   const finalIndex=path.posix.join(campaignPath,'work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
+  const discoverySummary=path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');
   const p2=derived(2,'PHASE3_INPUT_v1.json');
   const p3=derived(3,'PHASE4_INPUT_v1.json');
   const p4=derived(4,'PHASE5_INPUT_v1.json');
@@ -201,33 +203,27 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const p7=derived(7,'PHASE8_MARKER_INPUT_v1.json');
   const p8Remediation=derived(8,'PHASE9_REMEDIATION_INPUT_v1.json');
   const p8Final=derived(8,'PHASE10_INPUT_v1.json');
-  // Exact original source-bound canonical history, not only condensed summaries.
-  const p1Canonical=canonicalRelFor(campaignPath,1);
-  const p4Canonical=canonicalRelFor(campaignPath,4);
-  const p5Canonical=canonicalRelFor(campaignPath,5);
-  const p6Canonical=canonicalRelFor(campaignPath,6);
   const p9Final=derived(9,'PHASE10_REMEDIATION_INPUT_v1.json');
-   const discoverySummary=path.posix.join(campaignPath,
-     'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');
-  // Phase 3 receives the complete original Phase 1 canonical evidence, even when
-  // Phase 2 did not promote its D4/D6/D7 leads to requirements or properties.
-  // Preserve Phase 2's derived input and any other immediate inputs as well.
-  if(target===3) return uniqueExisting(root,[p1Canonical,p2,...immediate]);
-  // Preserve the original Phase 1 evidence for both discovery and later
-  // reconciliation/specialist units, independently of Phase 2/3 promotion.
-  if(target===4) return uniqueExisting(root,[p1Canonical,p2,p3,discoverySummary]);
-  // Keep every original Phase 1 discovery lead available to quantitative review,
-  // including D4/D6/D7 observations not promoted by intermediate phases.
-  if(target===5) return uniqueExisting(root,[p1Canonical,p2,p3,p4,discoverySummary]);
-  // Proof analysis receives those same original leads independently of which
-  // Phase 5 candidates or executed properties were subsequently promoted.
-  if(target===6) return uniqueExisting(root,[p1Canonical,p2,p3,p4,p5,discoverySummary,buildIdentity,deploy,targets]);
-  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,p7,discoverySummary,buildIdentity,deploy,targets]);
-  if(target===9) return uniqueExisting(root,[p8Remediation,remediation]);
-  if(target===10) return uniqueExisting(root,[
-    p4Canonical,p5Canonical,p6Canonical,p8Final,p9Final,finalIndex,discoverySummary
-  ]);
-  return uniqueExisting(root,immediate);
+  // The original accepted canonical evidence supplements existing derived
+  // outputs. Selection is by predecessor phase identity only, never contents.
+  // Missing paths retain explicit diagnostics in the successor form roster.
+  const originals=[];
+  for(let phase=1;phase<target;phase++){
+    if(phase===7)continue; // Mechanical marker, not substantive AI evidence.
+    originals.push(canonicalRelFor(campaignPath,phase));
+  }
+  let special=[];
+  if(target===3)special=[p2];
+  if(target===4)special=[p2,p3,discoverySummary];
+  if(target===5)special=[p2,p3,p4,discoverySummary];
+  if(target===6)special=[p2,p3,p4,p5,discoverySummary,buildIdentity,deploy,targets];
+  if(target===8)special=[p2,p3,p4,p5,p6,p7,discoverySummary,buildIdentity,deploy,targets];
+  if(target===9)special=[p8Remediation,remediation,p7,discoverySummary];
+  if(target===10)special=[
+    p8Final,p9Final,finalIndex,discoverySummary,p7,buildIdentity,deploy,targets,remediation
+  ];
+  // Retain predecessor receipts and every existing immediate derived output.
+  return uniqueExisting(root,[...originals,...special,...immediate]);
 }
 function phaseOutput(canonical,step,field){return canonical?.actions?.[step]?.outputs?.[field];}
 function remediationDeltaRows(campaignRoot,validatedFindings){
@@ -406,6 +402,23 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
       ?[{phaseSequence:roster.phaseSequence,unitId:'UNAVAILABLE',
          indexPath:'NOT_PUBLISHED',availability:roster.availability}]
       :[]);
+  // This final index is built before the CURRENT receipt is sealed. Never
+  // call current-phase source bytes accepted until its receipt is published.
+  const generatingPhase=Number(directory.currentAssignment?.phaseSequence??9);
+  let originalCanonicalEvidenceHistory;
+  try{
+    originalCanonicalEvidenceHistory=collectAcceptedOriginalCanonicalEvidenceV1({
+      root,campaignPath,directory,
+      maxPhase:Math.max(0,Math.min(9,generatingPhase-1))});
+  }catch(error){
+    originalCanonicalEvidenceHistory={availability:'ROSTER_COLLECTION_UNAVAILABLE',
+      diagnostics:[String(error?.message??error)],rosters:[]};
+  }
+  originalCanonicalEvidenceHistory.currentPhasePendingReceipt={
+    phase:generatingPhase,
+    canonicalArtifactPath:canonicalRelFor(campaignPath,generatingPhase),
+    availability:'CURRENT_PHASE_RECEIPT_NOT_YET_SEALED'
+  };
 
   return {
     identity:{
@@ -422,7 +435,7 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
       {milestone:'Merged Lite Phase 6–7',requiredEvidence:'deploy/config, deterministic candidate simulation, targeted fuzz, interpretation',reference:'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md + work/phase-06/LITE_TARGETED_TEST_MATRIX.md + accepted Phase-6 canonical data',sourceIdentity:directory.sourceSha256,status:'COMPLETE',limitation:(phaseOutput(p6,'step-3','typedExecutionLimitations')??phaseOutput(p6,'step-4','typedExecutionLimitations')??[]).join('; ')||'NONE_IDENTIFIED'},
       {milestone:'Combined Phase 8–10',requiredEvidence:'validation, remediation/skip, final reconciliation',reference:p9?'accepted Phase-8 and Phase-9 canonical data':'accepted Phase-8 canonical data + Phase-9 skip receipt',sourceIdentity:directory.sourceSha256,status:'READY_FOR_PHASE10',limitation:'SEE_FINDINGS_AND_OBLIGATIONS'}
     ],
-    findings,obligations,limitations,omissions,questionHistories
+    findings,obligations,limitations,omissions,questionHistories,originalCanonicalEvidenceHistory
   };
 }
 
@@ -1059,6 +1072,18 @@ if(sequence===10){
   catch(error){unresolved=['CANDIDATE_ASSESSMENT_UNAVAILABLE: '+String(error?.message??error)];}
   // Preserve unresolved or unavailable candidates as report data; never prevent packaging or sealing.
   canonical.automationOutputs.workerReviewPendingCandidates=unresolved;
+  // Retain all accepted original canonical selectors alongside existing final
+  // summary fields. Neither an absent obligation nor a completed checkpoint
+  // establishes resolution of any original concern.
+  try{
+    canonical.automationOutputs.originalAcceptedCanonicalEvidenceHistory=
+      collectAcceptedOriginalCanonicalEvidenceV1({
+        root,campaignPath,directory,maxPhase:9});
+  }catch(error){
+    canonical.automationOutputs.originalAcceptedCanonicalEvidenceHistory={
+      availability:'ROSTER_COLLECTION_UNAVAILABLE',
+      diagnostics:[String(error?.message??error)],rosters:[]};
+  }
   const p6=canonicalFor(root,campaignPath,6);
   const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
   const open=finalIndexObligations(ledger);
@@ -1208,7 +1233,8 @@ if(sequence===9)nextSequence=10;
 handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,
   nextPhaseSequence:nextSequence,sameReviewer:nextSequence!==null,status:'NOT_APPLICABLE'};
 
-if(nextSequence!==null) nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:nextSequence,immediate:[...derivedRels,...boundaryArtifactRels]});
+// Route after the canonical and any optional marker receipts are materialized;
+// the following prefill will bind the current source to its accepted SHA-256.
 
 const ledgerAfter=maybeJson(root,controls.ledgerRel)??{};
 const receipt=receiptLib.createLitePhaseReceiptV1({
@@ -1271,6 +1297,9 @@ if(sequence===8&&nextSequence===10){
   skipped.sealedAt=now;if(masterAmendmentRefreshSha)skipped.masterAmendment=masterAmendmentReceipt(skippedRevision-1);writeJson(repoFile(root,skippedRel),skipped);sealedReceiptRel=skippedRel;
 }
 directory.lastSealedReceiptPath=sealedReceiptRel;
+if(nextSequence!==null)
+  nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:nextSequence,
+    immediate:[...derivedRels,...boundaryArtifactRels]});
 if(sequence===10){
   directory.campaignStatus=masterAmendmentRefreshSha?'MASTER_AMENDMENT_REFRESH':'COMPLETE';
   directory.currentAssignment=null;directory.updatedAt=now;
