@@ -383,7 +383,38 @@ function modelFacingResponse(original){
 const historyBranch='machine-intelligence-audit-controller-v1';
 const historyRepo='curveyield3/Audit-Controller';
 const historyFileCache=new Map();
-let historyCacheScope=null;
+let historySnapshotCommit=null;
+async function historyGitMetadataV1(endpoint){
+ const token=process.env.AUDIT_CONTROLLER_GITHUB_TOKEN;
+ if(!token)return null;
+ const res=await fetch('https://api.github.com/repos/'+historyRepo+'/'+endpoint,{
+  headers:{authorization:'Bearer '+token,
+   accept:'application/vnd.github+json','x-github-api-version':'2022-11-28'},
+  signal:AbortSignal.timeout(30000)});
+ if(!res.ok)throw Error('Private controller Git tree read HTTP '+res.status);
+ return res.json();
+}
+// Discover exact existing QUESTION_INDEX paths from a pinned commit tree.
+// Unlike probing every issued unit, this lookup remains efficient even when
+// most accepted units have not published question checkpoints.
+async function historyIndexPathsForPhaseV1(workspace,phase){
+ const commit=await historyGitMetadataV1('git/commits/'+historySnapshotCommit);
+ let treeSha=commit?.tree?.sha;
+ if(!/^[0-9a-f]{40}$/.test(String(treeSha??'')))return null;
+ const prefix=workspace+'/work/phase-'+String(phase).padStart(2,'0')+'/units';
+ for(const segment of prefix.split('/')){
+  const tree=await historyGitMetadataV1('git/trees/'+treeSha);
+  const child=tree?.tree?.find(x=>x.path===segment&&x.type==='tree');
+  if(!child)return new Set();
+  treeSha=child.sha;
+ }
+ const listing=await historyGitMetadataV1('git/trees/'+treeSha+'?recursive=1');
+ // Never treat a truncated Git tree as a complete absence of indexes.
+ if(!Array.isArray(listing?.tree)||listing.truncated)return null;
+ return new Set(listing.tree.filter(x=>x.type==='blob'&&
+  /^[A-Za-z0-9._-]+\/questions\/QUESTION_INDEX_v1\.json$/.test(x.path))
+  .map(x=>prefix+'/'+x.path));
+}
 async function historyGithubFileV1(rel){
  if(typeof rel!=='string'||!rel.startsWith('campaigns/')||
     rel.includes('\\')||rel.split('/').some(s=>!s||s==='.'||s==='..'))
@@ -393,7 +424,7 @@ async function historyGithubFileV1(rel){
  if(!token)return null;
  const suffix=rel.split('/').map(encodeURIComponent).join('/');
  const url='https://api.github.com/repos/'+historyRepo+'/contents/'+suffix+
-  '?ref='+encodeURIComponent(historyBranch);
+  '?ref='+encodeURIComponent(historySnapshotCommit||historyBranch);
  const res=await fetch(url,{headers:{
   authorization:'Bearer '+token,accept:'application/vnd.github+json',
   'x-github-api-version':'2022-11-28'
@@ -433,14 +464,18 @@ async function sourceBoundQuestionHistoryV1(raw){
  try{envelope=JSON.parse(raw);}catch{return null;}
  const live=envelope?.workerResponse??{};
  if(!['LEASED_PACKET','LEASED_SHARD'].includes(live.status))return null;
- // Keep immutable records and negative probes within one issued step, but
- // refresh at each stage transition. Exact newly referenced dependencies are
- // refreshed separately, so late checkpoints are not hidden by an older 404.
+ // Pin every question-index and checkpoint read to one immutable GitHub tree.
+ // The next claim gets a fresh HEAD and thus sees late-published records.
+ historyFileCache.clear();
  const phase=Number(live.phase);
- const scope=[phase,live.step??live.currentStep??'',live.stage??''].join(':');
- if(scope!==historyCacheScope){
-  historyCacheScope=scope;historyFileCache.clear();
+ try{
+  const head=await historyGitMetadataV1('git/ref/heads/'+historyBranch);
+  historySnapshotCommit=head?.object?.sha??null;
+ }catch{
+  return {schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
+   campaignId,histories:[],unavailable:[{status:'GITHUB_BRANCH_UNAVAILABLE'}]};
  }
+ if(!/^[0-9a-f]{40}$/.test(String(historySnapshotCommit??'')))return null;
  if(!Number.isInteger(phase)||phase<4)return null;
  const directoryRel='Audit Campaign Directory/campaigns/'+
   campaignId.replace(/-r[0-9]+$/,'')+'.json';
@@ -451,7 +486,7 @@ async function sourceBoundQuestionHistoryV1(raw){
   if(!token)return null;
   const url='https://api.github.com/repos/'+historyRepo+'/contents/'+
    directoryRel.split('/').map(encodeURIComponent).join('/')+
-   '?ref='+encodeURIComponent(historyBranch);
+   '?ref='+encodeURIComponent(historySnapshotCommit||historyBranch);
   const result=await fetch(url,{headers:{
    authorization:'Bearer '+token,accept:'application/vnd.github+json',
    'x-github-api-version':'2022-11-28'
@@ -468,16 +503,11 @@ async function sourceBoundQuestionHistoryV1(raw){
   return {schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
    campaignId,histories:[],unavailable:[{status:'CONTROLLER_DIRECTORY_UNAVAILABLE'}]};
  const workspace=directory.workspacePath,selected=new Map(),unavailable=[];
- const dependencies=new Set((live.status==='LEASED_PACKET'?
-  (live.items??[]).flatMap(unit=>unit.canonicalPacket?.dependencies??[]):
-  live.canonicalPacket?.dependencies??[]).filter(id=>
-  typeof id==='string'&&/^[A-Za-z0-9._-]+$/.test(id)));
- for(const unitId of dependencies)
-  historyFileCache.delete(workspace+'/work/phase-'+String(phase).padStart(2,'0')+
-   '/units/'+unitId+'/questions/QUESTION_INDEX_v1.json');
+ const indexedPaths=new Map();
  for(const p of [4,5,6]){
   if(p>phase)continue;
   const name=String(p).padStart(2,'0'),base=workspace+'/work/phase-'+name+'/units';
+  indexedPaths.set(p,await historyIndexPathsForPhaseV1(workspace,p).catch(()=>null));
   const canon=workspace+'/derived/phase-'+p+'/PHASE_'+name+'_CANONICAL_DATA_v1.json';
   const canonical=await historyJsonV1(canon).catch(()=>null);
   for(const ref of canonical?.data?.automationOutputs?.questionHistoryRoster?.histories??[]){
@@ -501,6 +531,11 @@ async function sourceBoundQuestionHistoryV1(raw){
   const prefix=workspace+'/work/phase-'+String(item.phaseSequence).padStart(2,'0')+
    '/units/'+item.unitId+'/questions';
   const indexPath=prefix+'/QUESTION_INDEX_v1.json';
+  const existingIndexes=indexedPaths.get(item.phaseSequence);
+  if(existingIndexes&&!existingIndexes.has(indexPath)){
+   unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
+    indexPath,status:'NOT_PUBLISHED'});continue;
+  }
   const ix=await historyJsonV1(indexPath).catch(()=>null);
   if(!ix){
    unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
