@@ -20,7 +20,7 @@ const payload = JSON.parse(process.env.FORK_PAYLOAD_JSON || '{}');
 const correlationId = process.env.FORK_CORRELATION_ID || '';
 const secret = process.env.FORK_CALLBACK_TOKEN;
 const ROOT = path.resolve('.audit-controller');
-const MACHINE_AUTH='Machine Intelligence Audit Controller/Audit Skill v1';
+const MACHINE_AUTH='Machine Intelligence Audit Controller/Audit Skill v7';
 let AUTH=MACHINE_AUTH;
 const CONTROLLER = 'curveyield3/Audit-Controller';
 const MACHINE_REF='machine-intelligence-audit-controller-v1';
@@ -78,7 +78,7 @@ function checkout(){
   strict(meta.type==='file'&&meta.encoding==='base64','campaign directory missing');
   const directory=JSON.parse(Buffer.from(meta.content.replace(/\s/g,''),'base64').toString('utf8'));
   strict(directory.campaignId===id&&directory.campaignGenerationId===payload.generation_id,'campaign generation mismatch');
-  strict(directory.mode==='LITE_SOLO'&&directory.authorityRelease==='machine-intelligence-v1','not a Machine Intelligence campaign');
+  strict(directory.mode==='LITE_SOLO'&&directory.authorityRelease==='machine-intelligence-v7','not a Machine Intelligence campaign');
   AUTH=MACHINE_AUTH;
   strict(directory.authorityDigest===payload.authority_digest,'bound authority digest mismatch');
   safePath(directory.workspacePath);
