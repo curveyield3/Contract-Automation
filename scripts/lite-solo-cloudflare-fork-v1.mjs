@@ -837,7 +837,8 @@ function assembleBoundAnswersV1(c,u,submitted){
     }
    }else{
     const a=get('entries',entry.entryKey,'$value');
-    if(a.found&&!route.controllerOwnedOutput)target.value=structuredClone(a.value);
+    if(a.found&&!route.controllerOwnedOutput&&entry.issuedNegativeSentinel===undefined)
+     target.value=structuredClone(a.value);
    }
   }
  }else if(u.kind==='APPEND'){
