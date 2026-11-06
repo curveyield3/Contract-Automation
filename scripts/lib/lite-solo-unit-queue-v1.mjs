@@ -872,18 +872,22 @@ function unmappedAttackPathProvenanceV1({root,campaign,u,originalWorkerAttempt,s
   const extras=original?.extraRecords?.attackPaths;
   if(extras===undefined)return missing('NO_EXTRA_ATTACK_PATHS');
   if(!Array.isArray(extras))return missing('EXTRA_ATTACK_PATHS_UNREADABLE');
-  let issuedFlows=null;
+  let issuedFlows=null,fixedCount=0;
   try{
    const packet=readUnitPacketV1({root,packetPath:u.packetPath});
-   if(packet?.payload?.unitId===u.unitId&&Array.isArray(packet.payload.flowIds))
+   if(packet?.payload?.unitId===u.unitId&&Array.isArray(packet.payload.flowIds)){
     issuedFlows=new Set(packet.payload.flowIds);
+    // Fixed attack-path entries are one per originally issued flow position,
+    // even if two issued positions contain the same flow ID.
+    fixedCount=packet.payload.flowIds.length;
+   }
   }catch{/* Missing packet does not block acceptance. */}
-  const fixedCount=issuedFlows?.size??0;
   const refs=[],allRefs=[];let mappedCount=0;
   extras.forEach((record,index)=>{
    const ids=record?.flowIds;
    const mappingStatus=!issuedFlows?'ISSUED_FLOWS_UNAVAILABLE':
     !Array.isArray(ids)?'MISSING_FLOW_IDS_ARRAY':
+    !ids.length?'NO_EXPLICIT_FLOW_IDS':
     ids.some(id=>!issuedFlows.has(id))?'UNISSUED_FLOW_IDS':
     isDirect?'DIRECT_EXTRA_NOT_IN_CANONICAL_PATHS':null;
    // Only the bound-answer compiler places issued-flow extras in the ordinary
