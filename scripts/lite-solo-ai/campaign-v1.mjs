@@ -419,18 +419,21 @@ async function historyGithubFileV1(rel){
  if(typeof rel!=='string'||!rel.startsWith('campaigns/')||
     rel.includes('\\')||rel.split('/').some(s=>!s||s==='.'||s==='..'))
   return null;
- if(historyFileCache.has(rel))return historyFileCache.get(rel);
+ // Never fall back to a moving branch or reuse cache entries across snapshots.
+ if(!/^[0-9a-f]{40}$/.test(String(historySnapshotCommit??'')))return null;
+ const cacheKey=historySnapshotCommit+':'+rel;
+ if(historyFileCache.has(cacheKey))return historyFileCache.get(cacheKey);
  const token=process.env.AUDIT_CONTROLLER_GITHUB_TOKEN;
  if(!token)return null;
  const suffix=rel.split('/').map(encodeURIComponent).join('/');
  const url='https://api.github.com/repos/'+historyRepo+'/contents/'+suffix+
-  '?ref='+encodeURIComponent(historySnapshotCommit||historyBranch);
+  '?ref='+encodeURIComponent(historySnapshotCommit);
  const res=await fetch(url,{headers:{
   authorization:'Bearer '+token,accept:'application/vnd.github+json',
   'x-github-api-version':'2022-11-28'
  },signal:AbortSignal.timeout(30000)});
  if(res.status===404){
-  historyFileCache.set(rel,null);
+  historyFileCache.set(cacheKey,null);
   return null;
  }
  if(!res.ok)throw Error('Private controller history read HTTP '+res.status);
@@ -451,7 +454,7 @@ async function historyGithubFileV1(rel){
   bytes=Buffer.from(payload.content.replace(/\s/g,''),'base64');
  }
  const file={path:rel,sha256:sha(bytes),text:bytes.toString('utf8')};
- historyFileCache.set(rel,file);
+ historyFileCache.set(cacheKey,file);
  return file;
 }
 async function historyJsonV1(rel){
@@ -603,7 +606,11 @@ async function historyDirectoryV1(){
  if(file.encoding!=='base64'||typeof file.content!=='string')return null;
  return JSON.parse(Buffer.from(file.content.replace(/\s/g,''),'base64').toString('utf8'));
 }
-async function historyPhase1ReceiptPathsV1(workspace){
+// One receipt-tree inventory serves all accepted substantive phases.
+// Read at exactly the Git commit already pinned for this new assignment.
+async function historyPhaseReceiptPathsV1(workspace){
+ if(!validHistoryWorkspacePathV1(workspace)||
+    !/^[0-9a-f]{40}$/.test(String(historySnapshotCommit??'')))return null;
  const commit=await historyGitMetadataV1('git/commits/'+historySnapshotCommit);
  let treeSha=commit?.tree?.sha;
  if(!/^[0-9a-f]{40}$/.test(String(treeSha??'')))return null;
@@ -616,9 +623,20 @@ async function historyPhase1ReceiptPathsV1(workspace){
  }
  const listing=await historyGitMetadataV1('git/trees/'+treeSha);
  if(!Array.isArray(listing?.tree)||listing.truncated)return null;
- return listing.tree.filter(x=>x.type==='blob'&&/^PHASE_01_RECEIPT_v\d+\.json$/.test(x.path))
+ return listing.tree.filter(x=>x.type==='blob'&&
+    /^PHASE_(?:0[1-9]|10)_RECEIPT_v[0-9]+\.json$/.test(x.path))
   .map(x=>workspace+'/receipts/'+x.path)
-  .sort((a,b)=>Number(b.match(/_v(\d+)\.json$/)[1])-Number(a.match(/_v(\d+)\.json$/)[1]));
+  .sort((a,b)=>{
+   const ax=a.match(/PHASE_([0-9]+)_RECEIPT_v([0-9]+)\.json$/);
+   const bx=b.match(/PHASE_([0-9]+)_RECEIPT_v([0-9]+)\.json$/);
+   return Number(ax[1])-Number(bx[1])||Number(ax[2])-Number(bx[2]);
+  });
+}
+async function historyPhase1ReceiptPathsV1(workspace){
+ const paths=await historyPhaseReceiptPathsV1(workspace);
+ return paths?.filter(p=>/\/PHASE_01_RECEIPT_v[0-9]+\.json$/.test(p))
+   .sort((a,b)=>Number(b.match(/_v([0-9]+)\.json$/)[1])-
+     Number(a.match(/_v([0-9]+)\.json$/)[1]))??null;
 }
 
 // Source records are never summarized or selected for security significance here.
