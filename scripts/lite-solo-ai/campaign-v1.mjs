@@ -481,8 +481,7 @@ async function sourceBoundQuestionHistoryV1(raw){
  // The same pinned, authenticated directory is used for canonical evidence.
  const directory=await historyDirectoryV1();
  if(!directory||directory.campaignId!==campaignId||
-    !/^campaigns\/[A-Za-z0-9._/-]+$/.test(directory.workspacePath??'')||
-    (directory.workspacePath??'').split('/').some(s=>!s||s==='.'||s==='..'))
+    !validHistoryWorkspacePathV1(directory.workspacePath))
   return {schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
    campaignId,histories:[],unavailable:[{status:'CONTROLLER_DIRECTORY_UNAVAILABLE'}]};
  const workspace=directory.workspacePath,selected=new Map(),unavailable=[];
@@ -578,6 +577,13 @@ async function sourceBoundQuestionHistoryV1(raw){
   histories:records,unavailable
  }:null;
 }
+// Existing campaign folders may contain spaces; GitHub contents calls encode
+// each segment. Reject unsafe navigation, not legitimate source-owned names.
+function validHistoryWorkspacePathV1(workspace){
+ return typeof workspace==='string'&&workspace.startsWith('campaigns/')&&
+  !workspace.includes('\\')&&workspace.split('/').every(s=>
+   s!==''&&s!=='.'&&s!=='..'&&!/[\u0000-\u001f]/.test(s));
+}
 // Read from the same immutable private controller commit as question history.
 async function historyDirectoryV1(){
  if(!historySnapshotCommit)return null;
@@ -638,8 +644,7 @@ async function sourceBoundPhase1EvidenceV1(raw){
   return {manifest:{...base,availability:'PINNED_CONTROLLER_COMMIT_UNAVAILABLE'},source:null};
  const directory=await historyDirectoryV1();
  if(directory?.campaignId!==campaignId||
-    !/^campaigns\/[A-Za-z0-9._/-]+$/.test(directory.workspacePath??'')||
-    directory.workspacePath.split('/').some(v=>!v||v==='.'||v==='..'))
+    !validHistoryWorkspacePathV1(directory.workspacePath))
   return {manifest:{...base,availability:'CONTROLLER_DIRECTORY_UNAVAILABLE'},source:null};
  if(directory.authorityRelease!=='machine-intelligence-v8'||
     Number(directory.currentAssignment?.phaseSequence)!==phase)
