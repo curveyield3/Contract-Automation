@@ -24,7 +24,7 @@ contract AVKATForkSimulationV1 {
     address internal constant ROUTER_OWNER=0x47623c62f281807d615eeb4a2ceee9d97f9d3c49;
     address internal constant NPM=0x2659C6085D26144117D904C46B48B6d180393d27;
     address internal constant STAKER=0xbe12e1b5C4859a3d141412748279B67458F729E9;
-    address internal constant CHARM=0xbC2AE38cE7127854B08eC5956f8a31547f6390Ff;
+    address internal constant CHARM=0xbc2ae38ce7127854b08ec5956f8a31547f6390ff;
     address internal constant U=0x203A662B0BD271A6Ed5a60EdFbD04bFcE608Fd36; // vbUSDC
     address internal constant T=0x2Dca96907Fde857DD3d816880A0Df407EEb2D2f2; // vbUSDT
     address internal constant W=0x0913Da6dA4B42f538B445599b46Bb4622342Cf52; // vbWBTC
