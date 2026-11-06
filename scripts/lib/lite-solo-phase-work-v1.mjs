@@ -285,10 +285,13 @@ export function collectAcceptedOriginalCanonicalEvidenceV1({root,campaignPath,di
    if(!matched.length){
      const canonical=path.posix.join(campaignPath,'derived/phase-'+phase,
        'PHASE_'+String(phase).padStart(2,'0')+'_CANONICAL_DATA_v1.json');
-     if(fs.existsSync(repoFile(root,canonical)))rosters.push({
-       phase,canonicalArtifactPath:canonical,availability:'ACCEPTANCE_RECEIPT_MISSING',
+     rosters.push({
+       phase,canonicalArtifactPath:canonical,
+       availability:fs.existsSync(repoFile(root,canonical))
+         ?'ACCEPTANCE_RECEIPT_MISSING':'NO_ACCEPTED_CANONICAL_PUBLISHED',
        campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
-       auditedSourceSha256:directory.sourceSha256,records:[]});
+       auditedSourceSha256:directory.sourceSha256,
+       expectedCanonicalSha256:null,actualCanonicalSha256:null,records:[]});
      continue;
    }
    for(const name of matched){
@@ -300,7 +303,17 @@ export function collectAcceptedOriginalCanonicalEvidenceV1({root,campaignPath,di
          diagnostics:[String(error?.message??error)],records:[]});
        continue;
      }
-     if(receipt?.phase?.status==='SKIPPED')continue;
+     if(receipt?.phase?.status==='SKIPPED'){
+       rosters.push({
+         phase,receiptPath:rel,acceptedRevision:receipt?.phase?.revision??null,
+         campaignId:receipt?.campaign?.campaignId??null,
+         campaignGenerationId:receipt?.campaign?.campaignGenerationId??null,
+         auditedSourceSha256:receipt?.source?.sha256??null,
+         availability:'PHASE_SKIPPED_NO_CANONICAL',
+         diagnostics:['Receipt marks this optional phase SKIPPED; no accepted AI canonical exists'],
+         records:[]});
+       continue;
+     }
      rosters.push(buildOriginalCanonicalEvidenceRosterV1({
        root,campaignPath,directory,phase,receipt,receiptRel:rel}));
    }
