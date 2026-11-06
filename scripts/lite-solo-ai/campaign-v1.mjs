@@ -603,7 +603,7 @@ async function historyPhase1ReceiptPathsV1(workspace){
  if(!/^[0-9a-f]{40}$/.test(String(treeSha??'')))return null;
  for(const segment of (workspace+'/receipts').split('/')){
   const tree=await historyGitMetadataV1('git/trees/'+treeSha);
-  if(!Array.isArray(tree?.tree))return null;
+  if(!Array.isArray(tree?.tree)||tree.truncated)return null;
   const child=tree.tree.find(x=>x.path===segment&&x.type==='tree');
   if(!child)return [];
   treeSha=child.sha;
@@ -709,7 +709,8 @@ async function sourceBoundPhase1EvidenceV1(raw){
   allOutputSelectors,leadCollections:collections,
   leadIndex:{recordCount:records.length,initialRefs:records.slice(0,16),
    initialRefsAreComplete:records.length<=16,
-   retrieveAll:'{"sourceEvidenceRequest":{"kind":"INDEX","start":16}}'},
+   nextIndexStart:records.length>16?16:null,
+   retrieveAll:'{"sourceEvidenceRequest":{"kind":"INDEX","start":0}}'},
   canonicalPages:{count:pageOffsets.length,firstPageRefs:pageOffsets.slice(0,16),
    firstPageRefsAreComplete:pageOffsets.length<=16,
    nextPageIndexStart:pageOffsets.length>16?16:null,
@@ -765,6 +766,10 @@ function sourceEvidenceRequestV1(raw,evidence){
   if(value===undefined)return {...base,availability:'SELECTOR_NOT_FOUND',selector:req.selector};
   const complete=JSON.stringify(value),start=Number.isSafeInteger(req.offset)&&req.offset>=0?req.offset:0;
   if(start>complete.length)return {...base,availability:'OFFSET_OUT_OF_RANGE',selector:req.selector};
+  if(start>0&&start<complete.length&&
+     complete.charCodeAt(start)>=0xDC00&&complete.charCodeAt(start)<=0xDFFF)
+   return {...base,availability:'OFFSET_SPLITS_UNICODE_CHARACTER',
+    selector:req.selector,nearestValidOffset:start-1};
   const fragment=phase1EvidencePageV1(complete,start);
   return {...base,kind:'RECORD',selector:req.selector,recordJsonSha256:sha(complete),
    start:fragment.start,end:fragment.end,totalCharacters:complete.length,
