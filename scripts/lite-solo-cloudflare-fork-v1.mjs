@@ -752,6 +752,15 @@ function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
   const questionQueuePath=path.posix.join(c.campaignPath,
    'work/phase-'+phaseNo(c.directory.currentAssignment.phaseSequence),
    'units/UNIT_QUEUE_STATE_v1.json');
+  // Original Phase 1 evidence is independently reachable by every newly
+  // issued v8 Phase 4 FLOW/ATTACK, reconciliation, specialist, SHARD or BATCH
+  // unit. Only paths travel in issued metadata; the existing source paging
+  // resolves actual records without duplicating full canonical actions.
+  const phase1CanonicalPath=path.posix.join(c.campaignPath,
+   'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json');
+  const phase1EvidenceRefs=AUTH==='Machine Intelligence Audit Controller/Audit Skill v8'&&
+   Number(c.directory.currentAssignment.phaseSequence)===4&&
+   fs.existsSync(relative(phase1CanonicalPath))?[phase1CanonicalPath]:[];
   return {unitId:u.unitId,kind:u.kind,step:0,stage:'',unitSpecRevision:u.unitSpecRevision,
     packetPath,packetSha256,packetIndexPath:u.packetIndexPath||null,recordKeys:u.recordKeys||[],
     dependencies:u.dependencies||[],path:u.path,members:u.members,field:u.field,
@@ -761,6 +770,7 @@ function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
     // Existing same-unit evidence channel makes the original immutable Worker
      // file available to the reconciliation agent along with its work row.
      evidenceRefs:[...(u.packetIndexPath?[u.packetIndexPath]:[]),questionQueuePath,
+      ...phase1EvidenceRefs,
       // One full summary reference for each unit, not thousands of repeated
       // source records. The agent follows exact selectors when relevant.
       ...([4,5,6,8,10].includes(Number(c.directory.currentAssignment.phaseSequence))?
