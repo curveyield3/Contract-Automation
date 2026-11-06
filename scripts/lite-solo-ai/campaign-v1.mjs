@@ -467,6 +467,7 @@ async function sourceBoundQuestionHistoryV1(raw){
  // Pin every question-index and checkpoint read to one immutable GitHub tree.
  // The next claim gets a fresh HEAD and thus sees late-published records.
  historyFileCache.clear();
+ historySnapshotCommit=null;
  const phase=Number(live.phase);
  try{
   const head=await historyGitMetadataV1('git/ref/heads/'+historyBranch);
@@ -640,6 +641,9 @@ async function sourceBoundPhase1EvidenceV1(raw){
     !/^campaigns\/[A-Za-z0-9._/-]+$/.test(directory.workspacePath??'')||
     directory.workspacePath.split('/').some(v=>!v||v==='.'||v==='..'))
   return {manifest:{...base,availability:'CONTROLLER_DIRECTORY_UNAVAILABLE'},source:null};
+ if(directory.authorityRelease!=='machine-intelligence-v8'||
+    Number(directory.currentAssignment?.phaseSequence)!==phase)
+  return {manifest:{...base,availability:'BOUND_V8_ASSIGNMENT_UNAVAILABLE'},source:null};
  const canonicalPath=directory.workspacePath+'/derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json';
  const canonical=await historyJsonV1(canonicalPath).catch(()=>null);
  if(!canonical||canonical.data?.campaignId!==campaignId||
@@ -706,11 +710,14 @@ async function sourceBoundPhase1EvidenceV1(raw){
   leadIndex:{recordCount:records.length,initialRefs:records.slice(0,16),
    initialRefsAreComplete:records.length<=16,
    retrieveAll:'{"sourceEvidenceRequest":{"kind":"INDEX","start":16}}'},
-  canonicalPages:{count:pageOffsets.length,pageIndex:pageOffsets,
+  canonicalPages:{count:pageOffsets.length,firstPageRefs:pageOffsets.slice(0,16),
+   firstPageRefsAreComplete:pageOffsets.length<=16,
+   nextPageIndexStart:pageOffsets.length>16?16:null,
    exactOriginalBytes:true},
   ...(pageOffsets.length===1?{completeCanonicalText:originalText}:{}),
   retrievalInstructions:{
    index:'{"sourceEvidenceRequest":{"kind":"INDEX","start":0}}',
+   originalPageIndex:'{"sourceEvidenceRequest":{"kind":"PAGE_INDEX","start":0}}',
    record:'{"sourceEvidenceRequest":{"kind":"RECORD","selector":"actions.step-5.outputs.riskDrivers[0]","offset":0}}',
    originalPage:'{"sourceEvidenceRequest":{"kind":"CANONICAL_PAGE","page":1}}',
    note:'These are local evidence reads, not Worker submissions. Fetch all original records needed for this investigation. Return the normal Worker-required route/request JSON after reading. No source excerpt is an audit conclusion.'
@@ -734,6 +741,12 @@ function sourceEvidenceRequestV1(raw,evidence){
   const refs=source.records.slice(start,start+25);
   return {...base,kind:'INDEX',start,total:source.records.length,
    originalRefs:refs,nextStart:start+refs.length<source.records.length?start+refs.length:null};
+ }
+ if(req.kind==='PAGE_INDEX'){
+  const start=Number.isSafeInteger(req.start)&&req.start>=0?req.start:0;
+  const pages=source.pageOffsets.slice(start,start+25);
+  return {...base,kind:'PAGE_INDEX',start,total:source.pageOffsets.length,
+   originalPageRefs:pages,nextStart:start+pages.length<source.pageOffsets.length?start+pages.length:null};
  }
  if(req.kind==='CANONICAL_PAGE'){
   const page=Number(req.page),spec=source.pageOffsets[page-1];
@@ -759,7 +772,7 @@ function sourceEvidenceRequestV1(raw,evidence){
    exactRecordJsonFragment:fragment.text};
  }
  return {...base,availability:'UNRECOGNIZED_SOURCE_READ',
-  supportedKinds:['INDEX','RECORD','CANONICAL_PAGE']};
+  supportedKinds:['INDEX','PAGE_INDEX','RECORD','CANONICAL_PAGE']};
 }
 // Generic recovery for EVERY phase, numbered step and interaction substep.
 // Reissue the most recently provided original instructions and exact source-bound
