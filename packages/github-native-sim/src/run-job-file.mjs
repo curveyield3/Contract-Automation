@@ -215,6 +215,12 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
   const matchTest = native.matchTest;
   if (native.enabled !== true || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(matchTest ?? ''))
     return skippedUnguided('native-fuzz', 'NO_AGENT_SELECTED_FOUNDRY_TEST');
+  // An exact-bound BoostHub V9 request selects the P5-T007 proof and controls
+  // by prefix, so resolve those named functions without rewriting accepted work.
+  const boosthubP5 = request.configuration?.harness?.bundleId === 'boosthub-v9-r1-phase5-candidate-targets-v1'
+    && request.source?.archiveSha256 === '876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3';
+  const selectedRegex = boosthubP5 && matchTest === 'testFuzz_P5T007_'
+    ? '^testFuzz_P5T007_[A-Za-z0-9_]+$' : '^' + matchTest + '$';
   const matchContract = native.matchContract;
   if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const rpcUrl = phase6MutableRpc?.url;
@@ -227,8 +233,11 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
   return runNativeFuzzAnalysis({
     projectRoot: checkout.projectRoot, sourceCommit: request.source.commit,
     rawArtifactRef: rawArtifactRef('native-fuzz/raw.txt'), command: 'forge',
-    args: ['test', '--match-test', '^' + matchTest + '$',
+    args: ['test', '--match-test', selectedRegex,
       ...(matchContract ? ['--match-contract', '^' + matchContract + '$'] : []),
+      // Skip this redundant compilation umbrella, which combines OZ v4 and v5
+      // into one namespace. Original project files remain unchanged.
+      ...(boosthubP5 ? ['--skip', 'contracts/BoostHubBeefyCompileImports_v9.sol'] : []),
       '--fuzz-runs', String(native.fuzzRuns ?? 256),
       '--fork-url', rpcUrl, '--fork-block-number', String(blockNumber)],
     env: { ...environment, ETH_RPC_URL: rpcUrl }, redactValues: [rpcUrl], forkEvidence,
