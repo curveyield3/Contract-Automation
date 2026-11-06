@@ -145,6 +145,7 @@ async function buildCore({campaignRoot,skillRoot}){
     selectorOrSignature:e.selectorOrSignature??e.memberOrName??'UNRESOLVED_MEMBER',
     interactionKind:e.interactionKind??'EXTERNAL_INTERACTION_CANDIDATE',
     sourceLocation:e.sourceLocation??'UNSUPPORTED_SOURCE_LOCATION',
+    ...(e.sourceCallsite?{sourceCallsite:e.sourceCallsite}:{}),
     status:e.status??'CANDIDATE',
     confidenceClass:e.confidenceClass??'STRUCTURAL_CANDIDATE',
     basis:e.basis??'AUTOMATED_SOURCE_INTELLIGENCE'
