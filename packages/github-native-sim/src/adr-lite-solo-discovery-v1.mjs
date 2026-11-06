@@ -635,8 +635,8 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
     // flows in its ordinary attackPaths[] array, not only in extraRecords.
     // Preserve the exact original path as an unmapped reconciliation subject.
     const ids=attack?.flowIds;
-    const outside=issuedAttackFlows&&(!Array.isArray(ids)||!ids.length||
-     ids.some(id=>!issuedAttackFlows.has(id)));
+    const outside=!issuedAttackFlows||!Array.isArray(ids)||!ids.length||
+     ids.some(id=>!issuedAttackFlows.has(id));
     if(outside){
      unmappedPrimaryPathIndexes.add(paths.length-1);
      const acceptedRef=Number.isInteger(pathRef)?discoverySourceRefs[pathRef]:null;
@@ -646,7 +646,8 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
       /^[a-f0-9]{64}$/.test(String(workerAttempt.sha256??''));
      unmappedAttackPathRefs.push({
       unitId,originalIndex:i,
-      mappingStatus:!Array.isArray(ids)?'MISSING_FLOW_IDS_ARRAY':
+      mappingStatus:!issuedAttackFlows?'ISSUED_FLOWS_UNAVAILABLE':
+       !Array.isArray(ids)?'MISSING_FLOW_IDS_ARRAY':
        !ids.length?'NO_EXPLICIT_FLOW_IDS':'UNISSUED_FLOW_IDS',
       sourceSelector:originalAvailable?'attackPaths['+i+']':
        acceptedRef?.sourceSelector??null,
