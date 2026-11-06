@@ -8,7 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {readJson, writeJson, repoFile, loadPhaseSchema, validateBoundAuthorityV1} from './lib/lite-solo-phase-work-v1.mjs';
+import {readJson, writeJson, repoFile, loadPhaseSchema, validateBoundAuthorityV1, EXPLICIT_NEGATIVES} from './lib/lite-solo-phase-work-v1.mjs';
+import {readUnitPacketIndexV1, readUnitPacketV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
 import {processUnitRequestV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
 import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
@@ -242,8 +243,205 @@ function assignedExecutionSupport(c,u){
  strict(paths.size<=24,'controller-prefilled execution support exceeds per-unit manifest');
  return [...paths].map(path=>({path,maxBytes:1024*1024,required:false}));
 }
+// GitHub controller/adapter issues exact answer destinations as assignment metadata.
+// No new schema inference, independent AI judgment, Worker source mutation, or
+// Actions-per-question orchestration. The original controller's required record
+// ownership and accepted-work assembly remain authoritative.
+const ANSWER_BINDING_VERSION='curveyield-machine-answer-binding-v1';
+const MECHANICAL_ID_FIELDS=new Set([
+ 'assetKey','actorKey','boundaryKey','transitionKey','requirementKey','dependencyKey',
+ 'standardKey','driverKey','tempKey','findingTempKey','recordKey','groupKey'
+]);
+const MACHINE_EXECUTION_FIELDS=new Map([
+ ['executionEvidenceRef','AUTHENTICATED_EXECUTION_EVIDENCE_REF'],
+ ['requestBindingStatus','AUTHENTICATED_REQUEST_BINDING_STATUS'],
+ ['requestBindingEvidenceRef','AUTHENTICATED_REQUEST_BINDING_EVIDENCE_REF'],
+ ['dispatchRounds','AUTHENTICATED_DISPATCH_ROUNDS'],
+ ['requestPaths','AUTHENTICATED_REQUEST_PATHS'],
+ ['rerunEvidenceRefs','AUTHENTICATED_RERUN_EVIDENCE_REFS'],
+ ['ledgerRef','AUTHENTICATED_PROOF_LEDGER_REF']
+]);
+const isPendingAnswerValue=v=>typeof v==='string'&&(
+ !v.trim()||v.startsWith('<REQUIRED')||v.startsWith('<CONTROLLER_')||
+ v==='<fill>'||v==='TODO'
+);
+const negativeSentinel=v=>typeof v==='string'&&EXPLICIT_NEGATIVES.has(v);
+function controllerAnswerFieldBindingV1({fieldName,sourceRow,definition,itemField}){
+ const value=sourceRow?.[itemField],allowed=definition?.itemFieldAllowedValues?.[itemField]??null;
+ const collected=(definition?.controllerCollectedFields??[]).includes(itemField);
+ const owned=(definition?.controllerPrefillFields??[]).includes(itemField)||
+   (Array.isArray(sourceRow?.automationOwnedFields)&&sourceRow.automationOwnedFields.includes(itemField));
+ if(collected)return {field:itemField,source:'CONTROLLER_COLLECT_AFTER_EXECUTION',
+  evidenceKind:MACHINE_EXECUTION_FIELDS.get(itemField)??'CONTROLLER_BOUND_EXECUTION_RESULT',
+  requiredField:!isPendingAnswerValue(value),noEvidencePolicy:'UNRESOLVED_NOT_PROVEN'};
+ if(owned||value!==undefined&&value!==null&&!isPendingAnswerValue(value)){
+  return {field:itemField,source:'PRESERVE_ISSUED_VALUE',value,
+   immutable:owned||MECHANICAL_ID_FIELDS.has(itemField)};
+ }
+ if(MACHINE_EXECUTION_FIELDS.has(itemField))return {field:itemField,source:'CONTROLLER_VERIFIED_EXECUTION',
+  evidenceKind:MACHINE_EXECUTION_FIELDS.get(itemField),
+  authorizedRequestDirectory:sourceRow?.requestDirectory??null,
+  evidenceRequiredBeforeConclusiveVerdict:true,noEvidencePolicy:'UNRESOLVED_NOT_PROVEN'};
+ if(allowed?.length)return {field:itemField,source:'AI_EXACT_ENUM',
+  allowedValues:[...allowed],conversion:'LITERAL_TOKEN_ONLY'};
+ if(MECHANICAL_ID_FIELDS.has(itemField))return {field:itemField,
+  source:'ALLOCATE_MECHANICALLY_IF_NEW',
+  deterministicRule:'USE_EXISTING_BOUND_IDENTIFIER_ELSE_FIELDNAME_PLUS_UNITID_PLUS_RECORD_ORDINAL',
+  collisionPolicy:'DO_NOT_OVERWRITE_PREVIOUS_IDS'};
+ if(itemField==='subjectKey'||itemField==='candidateKey'||itemField==='obligationId'||
+    itemField==='findingKey')return {field:itemField,source:'BIND_EXISTING_CONTROLLER_SUBJECT_OR_AI_NEW_CANDIDATE',
+      unmatchedIdentityPolicy:'UNRESOLVED_DO_NOT_INVENT_EXISTING_SUBJECT'};
+ if(/(?:EvidenceRefs|Anchors)$/.test(itemField)||itemField==='evidenceRefs')
+  return {field:itemField,source:'AI_EXACT_SOURCE_BOUND_REFERENCES',
+   evidencePolicy:'PRESERVE_ACTUAL_SOURCE_OR_MACHINE_IDENTITY_NO_INFERENCE'};
+ return {field:itemField,source:'AI_SECURITY_ANSWER',
+  answerMode:'VERBATIM_UNLESS_SCHEMA_REQUIRES_ARRAY_OR_OBJECT'};
+}
+function semanticAnswerBindingV1({c,u,schema,initial}){
+ const memberUnits=u.kind==='BATCH'?u.members:(u.kind==='APPEND'?[]:[u]);
+ const anchor=u.path??memberUnits[0]?.path;
+ const step=anchor?.[1],fieldName=anchor?.[3]??u.field;
+ const definition=schema.actions?.[step]?.fields?.find(f=>f.name===fieldName);
+ strict(definition,'controller unit has no declared phase output definition');
+ const countPolicy=u.kind==='APPEND'?'AI_CHOSEN_APPEND_ONLY':'EXACT_ISSUED_RECORD_COUNT';
+ const fieldPath=anchor.join('.');
+ const entries=memberUnits.map((member,i)=>({
+  memberUnitId:member.unitId,entryIndex:i,
+  entryKey:member.recordKeys?.[0]??null,
+  submissionValuePath:'entries['+i+'].value',
+  canonicalFieldPath:member.path?.join('.')??fieldPath,
+  canonicalRecordIndex:member.recordIndex??null,
+  valueKind:typeof member.initialValue==='string'?'SCALAR_OR_SENTINEL':
+   Array.isArray(member.initialValue)?'ARRAY':member.initialValue&&typeof member.initialValue==='object'?'OBJECT':'SCALAR',
+  ...(negativeSentinel(member.initialValue)?{issuedNegativeSentinel:member.initialValue,
+   policy:'PRESERVE_ISSUED_NEGATIVE_IN_FIXED_UNIT_USE_APPEND_FOR_NEW_RECORDS'}:{}),
+  bindings:definition.type==='REQUIRED_RECORD_LIST'&&member.initialValue&&
+   typeof member.initialValue==='object'&&!Array.isArray(member.initialValue)
+   ?(definition.itemRequiredFields??[]).map(itemField=>controllerAnswerFieldBindingV1({
+     fieldName,sourceRow:member.initialValue,definition,itemField}))
+   :[]
+ }));
+ const ownedOutput=definition.owner==='CONTROLLER'||(schema.controllerOwnedOutputPaths??[])
+  .includes(fieldPath)||Boolean(schema.controllerOwnedDefaults?.[fieldName]);
+ return {
+  schemaVersion:ANSWER_BINDING_VERSION,phaseSequence:schema.phase,unitKind:u.kind,
+  unitId:u.unitId,submissionSchemaVersion:initial.schemaVersion,
+  exactEnvelope:{schemaVersion:initial.schemaVersion,entries:'ARRAY_OF_EXACT_ISSUED_KEYS_AND_VALUES'},
+  field:fieldName,step,canonicalFieldPath:fieldPath,recordCountPolicy:countPolicy,
+  issuedRecordCount:entries.length,appendMaximumRecords:1024,
+  appendEntryKeyRule:u.kind==='APPEND'?
+   'JSON_STRINGIFY_CANONICAL_PATH_PLUS_COLON_PLUS_APPEND_DASH_FOUR_DIGIT_ORDINAL':null,
+  appendSubjectCountSource:u.kind==='APPEND'?'AI_EXPLICIT_SUBJECT_COUNT':null,
+  fixedEntryKeysImmutable:true,existingPrefillsImmutable:true,
+  controllerOwnedOutput:ownedOutput,
+  allowedNegativeSentinels:[...EXPLICIT_NEGATIVES].sort(),
+  emptyHandling:{
+   fixed:'PRESERVE_EACH_CONTROLLER_ISSUED_RECORD_OR_EXACT_NEGATIVE_SENTINEL',
+   append:'ZERO_ITEMS_MEANS_EMPTY_APPEND_SUBMISSION_NOT_AN_ADDED_SENTINEL',
+   sourceSpecifiedEmptyArray:'PRESERVE_LITERAL_EMPTY_ARRAY_WITHOUT_AI_FILLER',
+   noEvidence:'DO_NOT_FABRICATE_EXECUTION_RESULTS'
+  },
+  scalarAnswer:definition.type==='REQUIRED_ENUM'?
+   {source:'AI_EXACT_ENUM',allowedValues:definition.allowed??[]}:
+   definition.type==='REQUIRED_LIST'?{source:'AI_LIST_OR_ISSUED_SENTINEL',
+    requiredArray:true,parse:'EXPLICIT_LIST_ITEMS_ONLY'}:
+   {source:ownedOutput?'PRESERVE_CONTROLLER_OWNED':'AI_VERBATIM',
+    requiredSchemaType:definition.type},
+  recordFieldTemplate:definition.type==='REQUIRED_RECORD_LIST'
+    ?(definition.itemRequiredFields??[]).map(itemField=>controllerAnswerFieldBindingV1({
+      fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField})) :[],
+  entries
+ };
+}
+function discoveryAnswerBindingV1({u,packet,initial}){
+ const data=packet.payload,flow=u.kind==='FLOW';
+ const requiredContexts=Array.isArray(data.primaryContextIds)?data.primaryContextIds:[];
+ const requiredFlows=Array.isArray(data.flowIds)?data.flowIds:[];
+ const requiredQuestions=Array.isArray(data.integrationQuestionIds)?data.integrationQuestionIds:[];
+ const checks=Array.isArray(data.contractChecks)?data.contractChecks:[];
+ const docs=Array.isArray(data.documentationItems)?data.documentationItems:[];
+ const siblings=Array.isArray(data.siblingChecks)?data.siblingChecks:[];
+ const rowRecords=flow?requiredContexts.map((id,i)=>{
+   const found=(initial.rows??[]).find(x=>x.contextId===id);
+   const rules=docs.filter(x=>x.contextId===id);
+   const paired=siblings.filter(g=>(g.members??[]).some(m=>m.contextId===id&&m.function===g.signature));
+   return {recordIndex:i,destination:'rows['+i+']',keyField:'contextId',key:id,
+    sourceSelector:'packet.payload.primaryContextIds['+i+']',countPolicy:'EXACT_ISSUED_CONTEXT',
+    nested:{
+      specInspection:{destination:'rows['+i+'].specInspection',countPolicy:'SINGLE_OBJECT',
+        allowedStatus:['MATCH','MISMATCH','UNRESOLVED','NO_DOCUMENTED_RULES']},
+      documentedRules:{destination:'rows['+i+'].documentedRules',
+        countPolicy:'EXACT_PACKET_RULE_IDS',rules:rules.map(r=>({ruleId:r.ruleId,
+          rule:r.rule,sourceSelector:'packet.payload.documentationItems'})),
+        allowedComparison:['MATCH','MISMATCH','UNRESOLVED']},
+      siblingComparisons:{destination:'rows['+i+'].siblingComparisons',
+        countPolicy:'REQUIRED_PACKET_SIBLING_GROUPS',groups:paired.map(g=>({
+          signature:g.signature,memberContextIds:(g.members??[]).map(m=>m.contextId)}))}
+    },
+    allowedVerdict:['CORRECT','DEFECT','UNRESOLVED'],
+    controllerPrefill:found?.contextId});
+ }):[];
+ const attack=flow?[]:requiredFlows.map((id,i)=>({
+  recordIndex:i,destination:'attackPaths['+i+']',
+  keyField:'flowIds',key:[id],sourceSelector:'packet.payload.flowIds['+i+']',
+  countPolicy:'AT_LEAST_ONE_ATTACK_PATH_PER_ISSUED_FLOW',
+  allowedResult:['BLOCKED','VIABLE','UNCERTAIN'],
+  allowedRole:['UNPRIVILEGED','UNPRIVILEGED_CALLER','OTHER_ROLE','DIFFERENT_ROLE',
+   'MALICIOUS_TOKEN','MALICIOUS_ADAPTER','MALICIOUS_TOKEN_OR_ADAPTER',
+   'MALICIOUS_CALLBACK','MEV','MEV_SEARCHER','CARELESS_ADMIN','ADMIN',
+   'PRIVILEGED','PRIVILEGED_ROLE'],
+  conditionals:{viableOrUncertain:'REQUIRES_AI_AUTHORED_CANDIDATE_AND_SIMULATION_IDEA',
+   blocked:'REQUIRES_SOURCE_ANCHORED_BLOCKING_CONTROL'}
+ }));
+ return {schemaVersion:ANSWER_BINDING_VERSION,phaseSequence:4,step:0,unitKind:u.kind,
+  unitId:u.unitId,submissionSchemaVersion:initial.schemaVersion,
+  outputRoot:'DIRECT_DISCOVERY_SUBMISSION_NOT_ACTIONS_STEP_ZERO',
+  actualInputFormat:u.kind==='FLOW'?'curveyield-flow-review-submission-v1':
+   'curveyield-attack-submission-v1',
+  fixedRecordKeys:[
+   {field:flow?'rows':'attackPaths',countPolicy:flow?'EXACT_ISSUED_CONTEXTS':
+     'ISSUED_FLOW_COVERAGE_PLUS_AI_DISCOVERED_PATHS',
+    sourceSelector:flow?'packet.payload.primaryContextIds':'packet.payload.flowIds',
+    records:flow?rowRecords:attack},
+   {field:'integrationAnswers',countPolicy:'EXACT_ISSUED_OBLIGATIONS',
+    sourceSelector:'packet.payload.integrationQuestionIds',
+    records:requiredQuestions.map((key,i)=>({recordIndex:i,
+     destination:'integrationAnswers['+i+']',keyField:'obligationId',key,
+     allowedAssessment:['SUPPORTED','CONCERN','UNRESOLVED','NOT_APPLICABLE']}))},
+   ...(flow?[
+    {field:'flowNotes',countPolicy:'EXACT_ISSUED_FLOWS',
+     sourceSelector:'packet.payload.flowIds',records:requiredFlows.map((key,i)=>({
+       recordIndex:i,destination:'flowNotes['+i+']',keyField:'flowId',key}))},
+    {field:'contractChecks',countPolicy:'EXACT_ISSUED_CONTRACT_CLASSES',
+     sourceSelector:'packet.payload.contractChecks',
+     records:checks.map((row,i)=>({recordIndex:i,
+      destination:'contractChecks['+i+']',keyFields:['contract','classId'],
+      key:{contract:row.contract,classId:row.classId},
+      allowedAssessment:['SUPPORTED','CONCERN','UNRESOLVED','NOT_APPLICABLE'],
+      prefilledApplicability:'AI_EXACT_CHOICE_FROM_PACKET_EVIDENCE'}))}
+   ]:[])
+  ],
+  optionalRecords:flow?[
+   {field:'candidates',countPolicy:'AI_CHOSEN_DISTINCT_CANDIDATES',
+    requiredTypedFields:['title','description','anchors','classId','severity'],
+    severityChoices:['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL']},
+   {field:'trivialReviews',countPolicy:'ONLY_IF_SOURCE_VERIFIED_LITERAL_CONSTANT'},
+   {field:'groupChecks',countPolicy:'ONLY_IF_SOURCE_VERIFIED_SHARED_MODIFIER'}
+  ]:[
+   {field:'attackPaths',countPolicy:'AI_APPEND_DISTINCT_PATHS',
+    preserveBaselineFlowCoverage:true},
+   {field:'integrationAnswers[*].candidate',countPolicy:'AI_CHOSEN_IF_CONCERN',
+    requiredTypedFields:['title','description','anchors']}
+  ],
+  emptyHandling:'PRESERVE_EMPTY_OPTIONAL_ARRAYS_IF_NO_REAL_SUBJECT',
+  sourceEvidenceRequired:true,selectionByAIOnly:true
+ };
+}
+
 function buildUnitMeta(c,u,schema){
-  const index=u.packetIndexPath?read(safePath(u.packetIndexPath)):null;
+  const index=u.packetIndexPath?readUnitPacketIndexV1({root:ROOT,indexPath:safePath(u.packetIndexPath)}):null;
+  const discoveryPacket=['FLOW','ATTACK'].includes(u.kind)?readUnitPacketV1({root:ROOT,packetPath:safePath(u.packetPath)}):null;
+  if(discoveryPacket)strict(discoveryPacket.payload?.unitId===u.unitId,'discovery packet identity mismatch');
   let initial,inputSchema;
   if(u.kind==='FLOW'){
     const ids=index?.primaryContextIds||[];
@@ -251,10 +449,22 @@ function buildUnitMeta(c,u,schema){
       rows:ids.map(contextId=>({contextId,verdict:'<REQUIRED_CORRECT_DEFECT_OR_UNRESOLVED>',
         intent:'<REQUIRED>',reason:'<REQUIRED>',anchors:[],
         specInspection:{status:'<REQUIRED>',docsAndCommentsChecked:'<REQUIRED>',namedConstantsChecked:'<REQUIRED>'},
-        documentedRules:[],siblingComparisons:[]})),
+        documentedRules:(discoveryPacket?.payload?.documentationItems??[])
+         .filter(rule=>rule.contextId===contextId)
+         .map(rule=>({ruleId:rule.ruleId,rule:rule.rule,comparison:'<REQUIRED>',reason:'<REQUIRED>'})),
+        siblingComparisons:(discoveryPacket?.payload?.siblingChecks??[])
+         .filter(group=>(group.members??[]).some(m=>m.contextId===contextId&&m.function===group.signature))
+         .map(group=>{
+          const others=(group.members??[]).filter(m=>m.contextId!==contextId);
+          const counterpart=(others.length?others:group.members)[0];
+          return {siblingContextId:counterpart.contextId,signature:group.signature,comparison:'<REQUIRED>'};
+         })})),
       flowNotes:(index?.flowIds||[]).map(flowId=>({flowId,note:'<REQUIRED>',anchors:[]})),
       integrationAnswers:(index?.integrationQuestionIds||[]).map(obligationId=>({obligationId,assessment:'<REQUIRED>',reasoning:'<REQUIRED>',anchors:[]})),
-      contractChecks:[],candidates:[]};
+      contractChecks:(discoveryPacket?.payload?.contractChecks??[]).map(row=>({
+       contract:row.contract,classId:row.classId,assessment:'<REQUIRED>',
+       applicability:'<REQUIRED>',evidence:'<REQUIRED>',anchors:[]})),
+      trivialReviews:[],groupChecks:[],candidates:[]};
     inputSchema={type:'object',required:['schemaVersion','unitId','rows'],
       properties:{schemaVersion:{type:'string',enum:['curveyield-flow-review-submission-v1']},
         unitId:{type:'string',enum:[u.unitId]},rows:{type:'array',minItems:ids.length},
@@ -279,10 +489,13 @@ function buildUnitMeta(c,u,schema){
   const packetPath=u.packetPath||u.shardPath;
   strict(packetPath&&safePath(packetPath).startsWith(c.campaignPath+'/'),'unit packet path outside campaign');
   const packetSha256=u.packetSha256||sha(fs.readFileSync(relative(packetPath)));
+  const answerRouting=discoveryPacket
+   ?discoveryAnswerBindingV1({u,packet:discoveryPacket,initial})
+   :semanticAnswerBindingV1({c,u,schema,initial});
   return {unitId:u.unitId,kind:u.kind,step:0,stage:'',unitSpecRevision:u.unitSpecRevision,
     packetPath,packetSha256,packetIndexPath:u.packetIndexPath||null,recordKeys:u.recordKeys||[],
     dependencies:u.dependencies||[],path:u.path,members:u.members,field:u.field,
-    inputTemplate:initial,validationSchema:inputSchema,
+    inputTemplate:initial,validationSchema:inputSchema,answerRouting,
     templateSha256:sha(JSON.stringify(initial)),schemaSha256:sha(JSON.stringify(inputSchema)),
     supportingFileRequirements:assignedExecutionSupport(c,u),evidenceRefs:u.packetIndexPath?[u.packetIndexPath]:[]};
 }
