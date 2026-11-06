@@ -274,7 +274,8 @@ function controllerAnswerFieldBindingV1({fieldName,sourceRow,definition,itemFiel
  if(collected)return {field:itemField,source:'CONTROLLER_COLLECT_AFTER_EXECUTION',
   evidenceKind:MACHINE_EXECUTION_FIELDS.get(itemField)??'CONTROLLER_BOUND_EXECUTION_RESULT',
   requiredField:!isPendingAnswerValue(value),noEvidencePolicy:'UNRESOLVED_NOT_PROVEN'};
- if(owned||value!==undefined&&value!==null&&!isPendingAnswerValue(value)){
+ if(owned||(MECHANICAL_ID_FIELDS.has(itemField)&&typeof value==='string'&&
+    value.trim()&&!isPendingAnswerValue(value)&&!negativeSentinel(value))){
   return {field:itemField,source:'PRESERVE_ISSUED_VALUE',value,
    immutable:owned||MECHANICAL_ID_FIELDS.has(itemField)};
  }
@@ -321,7 +322,7 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
      fieldName,sourceRow:member.initialValue,definition,itemField}))
    :[]
  }));
- const ownedOutput=definition.owner==='CONTROLLER'||(schema.controllerOwnedOutputPaths??[])
+ const ownedOutput=String(definition.owner??'').startsWith('CONTROLLER_')||(schema.controllerOwnedOutputPaths??[])
   .includes(fieldPath)||Boolean(schema.controllerOwnedDefaults?.[fieldName]);
  return {
   schemaVersion:ANSWER_BINDING_VERSION,phaseSequence:schema.phase,unitKind:u.kind,
