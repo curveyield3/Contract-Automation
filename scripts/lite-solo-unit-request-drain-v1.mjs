@@ -80,11 +80,13 @@ if(arg.mode!=='finalize'){
  // indexed work form and require its sealed prefill digest to match its bytes.
  if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
     Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
-    recorded.finalizeDetails.unmappedDeficiencies.length===2&&
+    recorded.finalizeDetails.unmappedDeficiencies.length>=1&&
     recorded.finalizeDetails.unmappedDeficiencies.includes(
       'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.')&&
-    recorded.finalizeDetails.unmappedDeficiencies.includes(
-      'Controller-prefilled/read-only fields were modified; restore the generated values before validation.')&&
+    recorded.finalizeDetails.unmappedDeficiencies.every(x=>[
+      'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.',
+      'Controller-prefilled/read-only fields were modified; restore the generated values before validation.'
+    ].includes(x))&&
     Object.values(recorded.units??{}).every(x=>x.status==='ACCEPTED')){
    // This existing assembler verifies the immutable controller-owned shard
    // index and frozen base before reconstructing accepted semantic records.
