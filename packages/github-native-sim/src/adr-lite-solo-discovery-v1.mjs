@@ -675,6 +675,9 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   arr(submission?.candidates).forEach((candidate,i)=>
    recordCandidate(candidate,[sourceIndex(unitId,'candidates['+i+']')]));
   for(const [rowIndex,row] of arr(submission?.rows).entries()){
+   // An unreadable/malformed authored value is still addressable in the
+   // original accepted source roster. It must not abort summary packaging.
+   if(!row||typeof row!=='object'||Array.isArray(row))continue;
    const rowSource=sourceIndex(unitId,'rows['+rowIndex+']');
    if(state?.payload?.reviewPolicy==='correctness-verdict-v13'){
      // Preserve the complete AI-authored function verdict independently from
