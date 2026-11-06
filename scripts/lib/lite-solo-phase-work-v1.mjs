@@ -311,13 +311,21 @@ export function collectAcceptedOriginalCanonicalEvidenceV1({root,campaignPath,di
        continue;
      }
      if(receipt?.phase?.status==='SKIPPED'){
+       const skipIdentityBound=receipt.schemaVersion==='curveyield-lite-phase-receipt-v1'&&
+         receipt.campaign?.campaignId===directory.campaignId&&
+         receipt.campaign?.campaignGenerationId===directory.campaignGenerationId&&
+         receipt.campaign?.workspacePath===campaignPath&&
+         receipt.phase?.sequence===phase&&
+         receipt.source?.sha256===directory.sourceSha256;
        rosters.push({
          phase,receiptPath:rel,acceptedRevision:receipt?.phase?.revision??null,
          campaignId:receipt?.campaign?.campaignId??null,
          campaignGenerationId:receipt?.campaign?.campaignGenerationId??null,
          auditedSourceSha256:receipt?.source?.sha256??null,
-         availability:'PHASE_SKIPPED_NO_CANONICAL',
-         diagnostics:['Receipt marks this optional phase SKIPPED; no accepted AI canonical exists'],
+         availability:skipIdentityBound?'PHASE_SKIPPED_NO_CANONICAL':'SKIP_RECEIPT_IDENTITY_UNVERIFIED',
+         diagnostics:[skipIdentityBound
+           ?'Receipt marks optional phase SKIPPED; no accepted AI canonical exists'
+           :'Skip receipt campaign/generation/phase/source binding does not match'],
          records:[]});
        continue;
      }
