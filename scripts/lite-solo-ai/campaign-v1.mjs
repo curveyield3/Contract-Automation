@@ -375,6 +375,163 @@ function modelFacingResponse(original){
  return JSON.stringify({governingDocuments:envelope.governingDocuments,...envelope});
 }
 
+// Private GitHub-side evidence delivery for the current frozen Machine
+// Intelligence campaign. The Worker response, controller form, lease and
+// submission protocol are NEVER changed. The already authorized private
+// Audit-Controller credential reads committed source-bound checkpoints.
+// No new Cloudflare endpoint, Durable Object write or Actions workflow.
+const historyBranch='machine-intelligence-audit-controller-v1';
+const historyRepo='curveyield3/Audit-Controller';
+const historyFileCache=new Map();
+async function historyGithubFileV1(rel){
+ if(typeof rel!=='string'||!rel.startsWith('campaigns/')||
+    rel.includes('\\')||rel.split('/').some(s=>!s||s==='.'||s==='..'))
+  return null;
+ if(historyFileCache.has(rel))return historyFileCache.get(rel);
+ const token=process.env.AUDIT_CONTROLLER_GITHUB_TOKEN;
+ if(!token)return null;
+ const suffix=rel.split('/').map(encodeURIComponent).join('/');
+ const url='https://api.github.com/repos/'+historyRepo+'/contents/'+suffix+
+  '?ref='+encodeURIComponent(historyBranch);
+ const res=await fetch(url,{headers:{
+  authorization:'Bearer '+token,accept:'application/vnd.github+json',
+  'x-github-api-version':'2022-11-28'
+ },signal:AbortSignal.timeout(30000)});
+ if(res.status===404)return null;
+ if(!res.ok)throw Error('Private controller history read HTTP '+res.status);
+ const data=await res.json();
+ if(data?.type!=='file'||typeof data.sha!=='string')return null;
+ let bytes;
+ if(data.encoding==='base64'&&typeof data.content==='string')
+  bytes=Buffer.from(data.content.replace(/\s/g,''),'base64');
+ else{
+  const blob=await fetch('https://api.github.com/repos/'+historyRepo+
+   '/git/blobs/'+encodeURIComponent(data.sha),{headers:{
+    authorization:'Bearer '+token,accept:'application/vnd.github+json',
+    'x-github-api-version':'2022-11-28'
+   },signal:AbortSignal.timeout(30000)});
+  if(!blob.ok)throw Error('Private controller history blob HTTP '+blob.status);
+  const payload=await blob.json();
+  if(payload.encoding!=='base64'||typeof payload.content!=='string')return null;
+  bytes=Buffer.from(payload.content.replace(/\s/g,''),'base64');
+ }
+ const file={path:rel,sha256:sha(bytes),text:bytes.toString('utf8')};
+ historyFileCache.set(rel,file);
+ return file;
+}
+async function historyJsonV1(rel){
+ const file=await historyGithubFileV1(rel);
+ if(!file)return null;
+ return {file,data:JSON.parse(file.text)};
+}
+async function sourceBoundQuestionHistoryV1(raw){
+ let envelope;
+ try{envelope=JSON.parse(raw);}catch{return null;}
+ const live=envelope?.workerResponse??{};
+ if(!['LEASED_PACKET','LEASED_SHARD'].includes(live.status))return null;
+ const phase=Number(live.phase);
+ if(!Number.isInteger(phase)||phase<4)return null;
+ const directoryRel='Audit Campaign Directory/campaigns/'+
+  campaignId.replace(/-r[0-9]+$/,'')+'.json';
+ // The directory is outside campaigns/: only this exact source-owned name
+ // is permitted, without making its bytes accessible to public logs.
+ const getDirectory=async()=>{
+  const token=process.env.AUDIT_CONTROLLER_GITHUB_TOKEN;
+  if(!token)return null;
+  const url='https://api.github.com/repos/'+historyRepo+'/contents/'+
+   directoryRel.split('/').map(encodeURIComponent).join('/')+
+   '?ref='+encodeURIComponent(historyBranch);
+  const result=await fetch(url,{headers:{
+   authorization:'Bearer '+token,accept:'application/vnd.github+json',
+   'x-github-api-version':'2022-11-28'
+  },signal:AbortSignal.timeout(30000)});
+  if(!result.ok)return null;
+  const body=await result.json();
+  if(body.encoding!=='base64'||typeof body.content!=='string')return null;
+  return JSON.parse(Buffer.from(body.content.replace(/\s/g,''),'base64').toString('utf8'));
+ };
+ const directory=await getDirectory();
+ if(!directory||directory.campaignId!==campaignId||
+    !/^campaigns\/[A-Za-z0-9._/-]+$/.test(directory.workspacePath??'')||
+    (directory.workspacePath??'').split('/').some(s=>!s||s==='.'||s==='..'))
+  return null;
+ const workspace=directory.workspacePath,selected=new Map(),unavailable=[];
+ for(const p of [4,5,6]){
+  if(p>phase)continue;
+  const name=String(p).padStart(2,'0'),base=workspace+'/work/phase-'+name+'/units';
+  const canon=workspace+'/derived/phase-'+p+'/PHASE_'+name+'_CANONICAL_DATA_v1.json';
+  const canonical=await historyJsonV1(canon).catch(()=>null);
+  for(const ref of canonical?.data?.automationOutputs?.questionHistoryRoster?.histories??[]){
+   if(ref?.unitId&&typeof ref.unitId==='string')
+    selected.set(p+':'+ref.unitId,{phaseSequence:p,unitId:ref.unitId,ref});
+  }
+  const queue=await historyJsonV1(base+'/UNIT_QUEUE_STATE_v1.json').catch(()=>null);
+  if(queue?.data?.campaignId!==campaignId||
+     queue?.data?.campaignGenerationId!==directory.campaignGenerationId||
+     queue?.data?.sourceSha256!==directory.sourceSha256||
+     queue?.data?.authorityDigest!==directory.authorityDigest)continue;
+  for(const [unitId,state] of Object.entries(queue.data.units??{}))
+   if(state?.status==='ACCEPTED'&&/^[A-Za-z0-9._-]+$/.test(unitId))
+    selected.set(p+':'+unitId,{phaseSequence:p,unitId,
+     ref:selected.get(p+':'+unitId)?.ref??null});
+ }
+ const records=[];
+ for(const item of [...selected.values()].sort((a,b)=>
+    a.phaseSequence-b.phaseSequence||a.unitId.localeCompare(b.unitId))){
+  const prefix=workspace+'/work/phase-'+String(item.phaseSequence).padStart(2,'0')+
+   '/units/'+item.unitId+'/questions';
+  const indexPath=prefix+'/QUESTION_INDEX_v1.json';
+  const ix=await historyJsonV1(indexPath).catch(()=>null);
+  if(!ix){
+   unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
+    indexPath,status:'NOT_PUBLISHED_OR_UNREADABLE'});continue;
+  }
+  const index=ix.data;
+  if(index.schemaVersion!=='curveyield-ai-question-index-v1'||
+     index.campaignId!==campaignId||
+     index.campaignGenerationId!==directory.campaignGenerationId||
+     index.sourceSha256!==directory.sourceSha256||
+     index.authorityDigest!==directory.authorityDigest||
+     index.phaseSequence!==item.phaseSequence||
+     index.unitId!==item.unitId||
+     !Array.isArray(index.checkpoints)){
+   unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
+    indexPath,status:'IDENTITY_MISMATCH'});continue;
+  }
+  const checkpoints=[];
+  for(const ref of index.checkpoints){
+   if(typeof ref?.path!=='string'||!ref.path.startsWith(prefix+'/checkpoints/')||
+      !/^[a-f0-9]{64}$/.test(String(ref.sha256??''))){
+    unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
+     indexPath,status:'INVALID_CHECKPOINT_REFERENCE'});continue;
+   }
+   const cp=await historyJsonV1(ref.path).catch(()=>null);
+   if(!cp||cp.file.sha256!==ref.sha256||
+      cp.data.campaignGenerationId!==directory.campaignGenerationId||
+      cp.data.sourceSha256!==directory.sourceSha256||
+      cp.data.authorityDigest!==directory.authorityDigest||
+      cp.data.phaseSequence!==item.phaseSequence||
+      cp.data.unitId!==item.unitId){
+    unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
+     indexPath,checkpointPath:ref.path,status:'CHECKPOINT_NOT_AVAILABLE'});
+    continue;
+   }
+   // Deliver each exact immutable checkpoint, including PLAN, ANSWERS,
+   // EXPAND and REVISE history; never summarize or overwrite prior revisions.
+   checkpoints.push({path:ref.path,sha256:cp.file.sha256,checkpoint:cp.data});
+  }
+  records.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
+   indexPath,indexSha256:ix.file.sha256,indexRevision:index.revision,
+   questionRoster:index.questions,checkpoints});
+ }
+ return records.length||unavailable.length?{
+  schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
+  campaignId,sourceSha256:directory.sourceSha256,
+  sourceRepo:historyRepo,sourceBranch:historyBranch,
+  description:'Exact committed source-bound investigative question and answer records; not inferred formal audit conclusions.',
+  histories:records,unavailable
+ }:null;
+}
 // Generic recovery for EVERY phase, numbered step and interaction substep.
 // Reissue the most recently provided original instructions and exact source-bound
 // forms; never maintain hand-written per-phase instructions in this adapter.
@@ -551,6 +708,22 @@ while(true){
   // incompatible model turns. A rejected model action is NOT a new instruction.
   lastIssuedResponseRaw=workerResponse;
   dialogue.push({role:'user',content:modelInstructions});
+  // Load the original immutable question checkpoints ONLY for a newly issued
+  // claim, not on every follow-up response. This does not modify the Worker
+  // response or the controller-issued submission form.
+  const priorEvidence=await sourceBoundQuestionHistoryV1(workerResponse)
+   .catch(error=>({schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
+    campaignId,histories:[],unavailable:[{status:'GITHUB_READ_UNAVAILABLE',
+     detail:String(error?.message??error).slice(0,160)}]}));
+  if(priorEvidence){
+   dialogue.push({role:'user',content:JSON.stringify(priorEvidence)});
+   console.log(JSON.stringify({status:'MIMO_SOURCE_QUESTION_HISTORY_DELIVERED',
+    phase:priorEvidence.histories?.at(-1)?.phaseSequence??null,
+    histories:priorEvidence.histories?.length??0,
+    checkpoints:priorEvidence.histories?.reduce((n,h)=>n+h.checkpoints.length,0)??0,
+    unavailable:priorEvidence.unavailable?.length??0,
+    originalTextPreserved:true,privateContent:'MODEL_INPUT_ONLY'}));
+  }
   let issued=null;
   try{issued=JSON.parse(workerResponse);}catch{}
   const native=issued?.workerResponse||{};
