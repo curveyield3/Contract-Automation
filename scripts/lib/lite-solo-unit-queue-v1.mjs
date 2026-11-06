@@ -853,8 +853,8 @@ function originalWorkerAttemptReferenceV1({root,campaign,phase,unitId,request,it
 // Original ATTACK extra records are source evidence even if their flow IDs
 // cannot be placed in the issued-flow canonical attackPaths collection.
 // Never classify, repair, or drop the Worker-authored records here.
-function unmappedAttackPathProvenanceV1({root,campaign,u,originalWorkerAttempt}){
- const missing=status=>({status,refs:[]});
+function unmappedAttackPathProvenanceV1({root,campaign,u,originalWorkerAttempt,submission=null}){
+ const missing=status=>({status,refs:[],allRefs:[]});
  if(originalWorkerAttempt?.availability!=='AVAILABLE')
   return missing(originalWorkerAttempt?.availability??'ORIGINAL_ATTEMPT_UNAVAILABLE');
  const sourcePath=originalWorkerAttempt.path,sourceSha=originalWorkerAttempt.sha256;
@@ -863,11 +863,12 @@ function unmappedAttackPathProvenanceV1({root,campaign,u,originalWorkerAttempt})
     !/^[a-f0-9]{64}$/.test(String(sourceSha??'')))
   return missing('ORIGINAL_ATTEMPT_IDENTITY_UNAVAILABLE');
  try{
-  const bytes=fs.readFileSync(repoFile(root,sourcePath));
-  if(hex(bytes)!==sourceSha)return missing('ORIGINAL_ATTEMPT_HASH_MISMATCH');
-  const original=JSON.parse(bytes.toString('utf8'));
-  if(original?.schemaVersion!=='curveyield-machine-bound-answers-v1')
-   return missing('NOT_BOUND_EXTRA_RECORDS');
+  const sourceBytes=fs.readFileSync(repoFile(root,sourcePath));
+  if(hex(sourceBytes)!==sourceSha)return missing('ORIGINAL_ATTEMPT_HASH_MISMATCH');
+  const original=JSON.parse(sourceBytes.toString('utf8'));
+  const isBound=original?.schemaVersion==='curveyield-machine-bound-answers-v1';
+  const isDirect=original?.schemaVersion==='curveyield-attack-submission-v1';
+  if(!isBound&&!isDirect)return missing('UNSUPPORTED_ORIGINAL_ATTACK_REPRESENTATION');
   const extras=original?.extraRecords?.attackPaths;
   if(extras===undefined)return missing('NO_EXTRA_ATTACK_PATHS');
   if(!Array.isArray(extras))return missing('EXTRA_ATTACK_PATHS_UNREADABLE');
@@ -877,23 +878,38 @@ function unmappedAttackPathProvenanceV1({root,campaign,u,originalWorkerAttempt})
    if(packet?.payload?.unitId===u.unitId&&Array.isArray(packet.payload.flowIds))
     issuedFlows=new Set(packet.payload.flowIds);
   }catch{/* Missing packet does not block acceptance. */}
-  const refs=[];
+  const fixedCount=issuedFlows?.size??0;
+  const refs=[],allRefs=[];let mappedCount=0;
   extras.forEach((record,index)=>{
    const ids=record?.flowIds;
    const mappingStatus=!issuedFlows?'ISSUED_FLOWS_UNAVAILABLE':
     !Array.isArray(ids)?'MISSING_FLOW_IDS_ARRAY':
-    ids.some(id=>!issuedFlows.has(id))?'UNISSUED_FLOW_IDS':null;
-   if(!mappingStatus)return; // Canonical compiler already carries this path.
+    ids.some(id=>!issuedFlows.has(id))?'UNISSUED_FLOW_IDS':
+    isDirect?'DIRECT_EXTRA_NOT_IN_CANONICAL_PATHS':null;
+   // Only the bound-answer compiler places issued-flow extras in the ordinary
+   // attackPaths collection. Raw direct extraRecords stay source evidence.
+   const canonicalIndex=!mappingStatus?fixedCount+mappedCount++:null;
+   const acceptedSelector=canonicalIndex!==null&&
+    Array.isArray(submission?.attackPaths)&&canonicalIndex<submission.attackPaths.length
+     ?'submission.attackPaths['+canonicalIndex+']':null;
+   const status=mappingStatus??(acceptedSelector?'MAPPED_ISSUED_FLOW':
+    'COMPILED_EXTRA_SOURCE_UNAVAILABLE');
    const selector='extraRecords.attackPaths['+index+']';
    const fields=record&&typeof record==='object'&&!Array.isArray(record)?record:{};
-   refs.push({originalIndex:index,mappingStatus,sourceSelector:selector,
+   const ref={
+    originalIndex:index,mappingStatus:status,sourceSelector:selector,
+    acceptedSelector,
     originalFlowIds:ids===undefined?null:structuredClone(ids),
     originalPathId:fields.pathId??null,
     originalAnchorsSelector:Object.hasOwn(fields,'anchors')?selector+'.anchors':null,
     originalCandidateSelector:Object.hasOwn(fields,'candidate')?selector+'.candidate':null,
-    originalWorkerAttempt:{availability:'AVAILABLE',path:sourcePath,sha256:sourceSha}});
+    originalWorkerAttempt:{availability:'AVAILABLE',path:sourcePath,sha256:sourceSha}
+   };
+   allRefs.push(ref);
+   if(!acceptedSelector)refs.push(ref);
   });
-  return {status:issuedFlows?'COLLECTED_NONBLOCKING':'ISSUED_FLOWS_UNAVAILABLE',refs};
+  return {status:issuedFlows?'COLLECTED_NONBLOCKING':'ISSUED_FLOWS_UNAVAILABLE',
+   refs,allRefs};
  }catch{return missing('ORIGINAL_ATTEMPT_UNREADABLE');}
 }
 function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory}){
@@ -927,7 +943,8 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
  }:null;
  if(u.kind==='ATTACK'){
   const extra=unmappedAttackPathProvenanceV1({
-   root,campaign,u,originalWorkerAttempt:sourceProvenance.originalWorkerAttempt});
+   root,campaign,u,originalWorkerAttempt:sourceProvenance.originalWorkerAttempt,submission});
+  sourceProvenance.extraAttackPathRefs=extra.allRefs;
   sourceProvenance.unmappedAttackPathRefs=extra.refs;
   sourceProvenance.unmappedAttackPathExtractionStatus=extra.status;
  }
@@ -1004,12 +1021,17 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
   const acceptedPath=queue.units[u.unitId].acceptedPath;
   const acceptedBytes=fs.readFileSync(repoFile(root,acceptedPath));
   const accepted=JSON.parse(acceptedBytes.toString('utf8'));
-  const extra=u.kind==='ATTACK'?
-   (Array.isArray(accepted.sourceProvenance?.unmappedAttackPathRefs)?
-    {refs:accepted.sourceProvenance.unmappedAttackPathRefs,
-     status:accepted.sourceProvenance.unmappedAttackPathExtractionStatus??'COLLECTED_NONBLOCKING'}:
-    unmappedAttackPathProvenanceV1({root,campaign,u,
-     originalWorkerAttempt:accepted.sourceProvenance?.originalWorkerAttempt})):null;
+  const reconstructed=u.kind==='ATTACK'?unmappedAttackPathProvenanceV1({
+   root,campaign,u,originalWorkerAttempt:accepted.sourceProvenance?.originalWorkerAttempt,
+   submission:accepted.submission}):null;
+  const extra=u.kind==='ATTACK'?{
+   refs:Array.isArray(accepted.sourceProvenance?.unmappedAttackPathRefs)
+    ?accepted.sourceProvenance.unmappedAttackPathRefs:reconstructed.refs,
+   allRefs:Array.isArray(accepted.sourceProvenance?.extraAttackPathRefs)
+    ?accepted.sourceProvenance.extraAttackPathRefs:reconstructed.allRefs,
+   status:accepted.sourceProvenance?.unmappedAttackPathExtractionStatus??
+    reconstructed.status
+  }:null;
   return {unitId:u.unitId,submission:accepted.submission,
    sourceReference:{phaseSequence:4,unitId:u.unitId,acceptedPath,
     acceptedSha256:hex(acceptedBytes),sourceSelectorPrefix:'submission',
@@ -1021,6 +1043,7 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
     originalWorkerAttempt:accepted.sourceProvenance?.originalWorkerAttempt??
      {availability:'NOT_RECORDED'},
     ...(extra?{unmappedAttackPathRefs:extra.refs,
+     extraAttackPathRefs:extra.allRefs,
      unmappedAttackPathExtractionStatus:extra.status}:{})}};
  });
  const inventory=discoveryInput(root,campaign,'REVIEW_INVENTORY_v1.json');
