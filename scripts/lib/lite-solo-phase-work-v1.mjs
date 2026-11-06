@@ -152,6 +152,187 @@ export function buildDerivedOutputs({root,campaignPath,schema,canonicalData,cano
   }
   return out;
 }
+
+// Source-bound inventory of original accepted canonical data. This is reference
+// metadata, not a security classification, summary, or replacement for the
+// original canonical JSON. No fields, array members, or repeated observations
+// are filtered, abbreviated, merged, or renumbered.
+export function buildOriginalCanonicalEvidenceRosterV1({root,campaignPath,directory,phase,receipt,receiptRel}){
+ const phaseNumber=String(phase).padStart(2,'0');
+ const canonicalRel=path.posix.join(campaignPath,'derived/phase-'+phase,
+   'PHASE_'+phaseNumber+'_CANONICAL_DATA_v1.json');
+ const originalSelector=path.posix.relative(campaignPath,canonicalRel);
+ const revision=receipt?.phase?.revision??null;
+ const expectedSha=receipt?.evidence?.find(item=>
+   item?.path===originalSelector&&item?.role==='PHASE_CANONICAL_DATA')?.sha256??null;
+ const roster={
+   schemaVersion:'curveyield-original-canonical-evidence-roster-v1',
+   phase,canonicalArtifactPath:canonicalRel,actualArtifactPath:null,
+   receiptPath:receiptRel??null,acceptedRevision:revision,
+   acceptedEpoch:receipt?.sealedAt??receipt?.updatedAt??null,
+   campaignId:directory.campaignId,
+   campaignGenerationId:directory.campaignGenerationId,
+   auditedSourceSha256:receipt?.source?.sha256??directory.sourceSha256??null,
+   expectedCanonicalSha256:expectedSha,actualCanonicalSha256:null,
+   availability:'UNVERIFIED',diagnostics:[],
+   referenceScheme:'RFC6901_JSON_POINTER',
+   sourceSelectors:['/actions','/automationInputs','/automationOutputs'],
+   records:[]
+ };
+ const identityBound=receipt?.schemaVersion==='curveyield-lite-phase-receipt-v1'&&
+   receipt?.campaign?.campaignId===directory.campaignId&&
+   receipt?.campaign?.campaignGenerationId===directory.campaignGenerationId&&
+   receipt?.campaign?.workspacePath===campaignPath&&
+   receipt?.phase?.sequence===phase&&
+   Number.isInteger(revision)&&
+   ['SEALED','COMPLETE'].includes(receipt?.phase?.status)&&
+   receipt?.source?.sha256===directory.sourceSha256;
+ if(!identityBound){
+   roster.availability='RECEIPT_IDENTITY_UNVERIFIED';
+   roster.diagnostics.push('Accepted receipt campaign/generation/phase/source identity unavailable or mismatched');
+   return roster;
+ }
+ if(!/^[a-f0-9]{64}$/.test(String(expectedSha??''))){
+   roster.availability='CANONICAL_RECEIPT_REFERENCE_UNAVAILABLE';
+   roster.diagnostics.push('Receipt has no exact PHASE_CANONICAL_DATA SHA-256 reference');
+   return roster;
+ }
+ // Master amendments may preserve original accepted bytes under the existing
+ // superseded/ archive. Never present a newer canonical as an older revision.
+ const originalInCampaign=originalSelector;
+ const candidates=[canonicalRel,
+   path.posix.join(campaignPath,'superseded',originalInCampaign),
+   path.posix.join(campaignPath,'superseded/reviewer-4-followup-v1',originalInCampaign)];
+ let foundOtherHash=false;
+ for(const candidate of candidates){
+   const file=repoFile(root,candidate);
+   if(!fs.existsSync(file)||!fs.statSync(file).isFile())continue;
+   const bytes=fs.readFileSync(file);
+   const sha=createHash('sha256').update(bytes).digest('hex');
+   if(candidate===canonicalRel)roster.actualCanonicalSha256=sha;
+   if(sha!==expectedSha){foundOtherHash=true;continue;}
+   roster.actualArtifactPath=candidate;
+   roster.actualCanonicalSha256=sha;
+   let canonical;
+   try{canonical=JSON.parse(bytes.toString('utf8'));}
+   catch{
+     roster.availability='CANONICAL_UNREADABLE';
+     roster.diagnostics.push('Exact-hash artifact cannot be parsed as canonical JSON');
+     return roster;
+   }
+   if(canonical?.schemaVersion!=='curveyield-lite-phase-canonical-data-v1'||
+      canonical.phase!==phase||canonical.campaignId!==directory.campaignId){
+     roster.availability='CANONICAL_IDENTITY_MISMATCH';
+     roster.diagnostics.push('Canonical payload does not match accepted phase/campaign');
+     return roster;
+   }
+   roster.availability='AVAILABLE';
+   // Every JSON value under the three original evidence families receives an
+   // exact pointer. This includes empty collections, nulls, negative evidence,
+   // original nested objects, arbitrary field names, and every array position.
+   // Use an explicit traversal stack so even deep evidence trees stay lossless.
+   const escapePointer=k=>String(k).replace(/~/g,'~0').replace(/\//g,'~1');
+   for(const family of ['actions','automationInputs','automationOutputs']){
+     if(!Object.hasOwn(canonical,family)){
+       roster.diagnostics.push('Original canonical root absent: '+family);
+       continue;
+     }
+     const stack=[{value:canonical[family],pointer:'/'+family,arrayPosition:null}];
+     while(stack.length){
+       const node=stack.pop();
+       const value=node.value;
+       const kind=value===null?'null':Array.isArray(value)?'array':typeof value;
+       const row={selector:node.pointer,kind};
+       if(node.arrayPosition!==null)row.originalArrayPosition=node.arrayPosition;
+       // Original authored IDs are metadata only; the canonical JSON, with all
+       // original identity fields unchanged, remains the authoritative value.
+       if(value&&typeof value==='object'&&!Array.isArray(value)){
+         const ids=Object.entries(value).filter(([key,v])=>
+           /(?:id|key)$/i.test(key)&&(typeof v==='string'||typeof v==='number'));
+         if(ids.length)row.originalIdentityFields=Object.fromEntries(ids);
+       }
+       roster.records.push(row);
+       if(Array.isArray(value)){
+         for(let i=value.length-1;i>=0;i--)stack.push({
+           value:value[i],pointer:node.pointer+'/'+i,arrayPosition:i});
+       }else if(value&&typeof value==='object'){
+         const keys=Object.keys(value);
+         for(let i=keys.length-1;i>=0;i--)stack.push({
+           value:value[keys[i]],pointer:node.pointer+'/'+escapePointer(keys[i]),arrayPosition:null});
+       }
+     }
+   }
+   return roster;
+ }
+ roster.availability=foundOtherHash?'CANONICAL_HASH_MISMATCH':'CANONICAL_MISSING';
+ roster.diagnostics.push(foundOtherHash
+   ?'No current or archived canonical bytes match the accepted receipt SHA-256'
+   :'Accepted canonical artifact not found at its original or existing superseded paths');
+ return roster;
+}
+
+// Read historical accepted receipts on demand. Existing receipts/canonical
+// files are never rewritten; distinct accepted revisions remain distinct.
+export function collectAcceptedOriginalCanonicalEvidenceV1({root,campaignPath,directory,maxPhase=10}){
+ const receiptDir=repoFile(root,path.posix.join(campaignPath,'receipts'));
+ const rosters=[];
+ if(!fs.existsSync(receiptDir))return {rosters,availability:'RECEIPTS_UNAVAILABLE'};
+ const names=fs.readdirSync(receiptDir).sort();
+ for(const phase of [1,2,3,4,5,6,8,9,10]){
+   if(phase>maxPhase)continue;
+   const re=new RegExp('^PHASE_'+String(phase).padStart(2,'0')+'_RECEIPT_v([0-9]+)\\.json
+  const loaded=loadPhaseSchema(root,authorityRoot,sequence);const schema=loaded.schema;const schemaRel=loaded.rel;
+  const formRel=fullCampaignPath(campaignPath,schema.workForm.campaignPath);
+  const formTemplateRel=path.posix.join(authorityRoot,schema.workForm.template);
+  let form=readJson(requiredFile(root,formTemplateRel,'work-form template'));
+  form=applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths,predecessorReceiptPath,prefillContext});
+  writeJson(repoFile(root,formRel),form);
+  const shards=secureShardWorkFormV13({root,formRel,phase:sequence,retireFull:true});
+  const reportRel=schema.finalReport?fullCampaignPath(campaignPath,schema.finalReport.campaignPath):null;
+  return {phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer,status,workSchemaPath:schemaRel,workFormPath:formRel,...(shards?{workShardIndexPath:shards.indexRel}:{}),finalReportPath:reportRel,packetPath:fullCampaignPath(campaignPath,schema.submission.packetPath),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths],controllerPrefillDigestSha256:form?.automationInputs?.controllerPrefillDigestSha256??null};
+}
+export function ensurePacketShape({packet,directory,assignment}){
+  const deficiencies=[];
+  if(packet?.schemaVersion!=='curveyield-lite-phase-work-packet-v1') deficiencies.push('packet.schemaVersion must be curveyield-lite-phase-work-packet-v1');
+  if(packet?.campaignId!==directory.campaignId) deficiencies.push('packet.campaignId mismatch');
+  if(packet?.phaseSequence!==assignment.phaseSequence) deficiencies.push('packet.phaseSequence mismatch');
+  if(packet?.status!=='SUBMITTED') deficiencies.push('packet.status must be SUBMITTED');
+  if(packet?.workFormPath!==assignment.workFormPath) deficiencies.push('packet.workFormPath mismatch');
+  if(packet?.finalReportPath!==(assignment.finalReportPath??null)) deficiencies.push('packet.finalReportPath mismatch');
+  if(!Number.isInteger(packet?.submissionAttempt)||packet.submissionAttempt<1) deficiencies.push('packet.submissionAttempt must be integer >=1');
+  if(typeof packet?.submittedAt!=='string'||!packet.submittedAt) deficiencies.push('packet.submittedAt required');
+  return deficiencies;
+}
+);
+   const matched=names.filter(name=>re.test(name));
+   if(!matched.length){
+     const canonical=path.posix.join(campaignPath,'derived/phase-'+phase,
+       'PHASE_'+String(phase).padStart(2,'0')+'_CANONICAL_DATA_v1.json');
+     if(fs.existsSync(repoFile(root,canonical)))rosters.push({
+       phase,canonicalArtifactPath:canonical,availability:'ACCEPTANCE_RECEIPT_MISSING',
+       campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
+       auditedSourceSha256:directory.sourceSha256,records:[]});
+     continue;
+   }
+   for(const name of matched){
+     const rel=path.posix.join(campaignPath,'receipts',name);
+     let receipt;
+     try{receipt=readJson(repoFile(root,rel));}
+     catch(error){
+       rosters.push({phase,receiptPath:rel,availability:'RECEIPT_UNREADABLE',
+         diagnostics:[String(error?.message??error)],records:[]});
+       continue;
+     }
+     if(receipt?.phase?.status==='SKIPPED')continue;
+     rosters.push(buildOriginalCanonicalEvidenceRosterV1({
+       root,campaignPath,directory,phase,receipt,receiptRel:rel}));
+   }
+ }
+ return {schemaVersion:'curveyield-original-canonical-evidence-history-v1',
+   campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
+   auditedSourceSha256:directory.sourceSha256,rosters};
+}
+
 export function preparePhaseWork({root,campaignPath,authorityRoot,sequence,reviewer,predecessorReceiptPath,derivedInputPaths=[],status='ACTIVE',prefillContext={}}){
   const loaded=loadPhaseSchema(root,authorityRoot,sequence);const schema=loaded.schema;const schemaRel=loaded.rel;
   const formRel=fullCampaignPath(campaignPath,schema.workForm.campaignPath);
