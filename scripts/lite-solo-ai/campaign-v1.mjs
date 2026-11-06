@@ -477,26 +477,8 @@ async function sourceBoundQuestionHistoryV1(raw){
  }
  if(!/^[0-9a-f]{40}$/.test(String(historySnapshotCommit??'')))return null;
  if(!Number.isInteger(phase)||phase<4)return null;
- const directoryRel='Audit Campaign Directory/campaigns/'+
-  campaignId.replace(/-r[0-9]+$/,'')+'.json';
- // The directory is outside campaigns/: only this exact source-owned name
- // is permitted, without making its bytes accessible to public logs.
- const getDirectory=async()=>{
-  const token=process.env.AUDIT_CONTROLLER_GITHUB_TOKEN;
-  if(!token)return null;
-  const url='https://api.github.com/repos/'+historyRepo+'/contents/'+
-   directoryRel.split('/').map(encodeURIComponent).join('/')+
-   '?ref='+encodeURIComponent(historySnapshotCommit||historyBranch);
-  const result=await fetch(url,{headers:{
-   authorization:'Bearer '+token,accept:'application/vnd.github+json',
-   'x-github-api-version':'2022-11-28'
-  },signal:AbortSignal.timeout(30000)});
-  if(!result.ok)return null;
-  const body=await result.json();
-  if(body.encoding!=='base64'||typeof body.content!=='string')return null;
-  return JSON.parse(Buffer.from(body.content.replace(/\s/g,''),'base64').toString('utf8'));
- };
- const directory=await getDirectory();
+ // The same pinned, authenticated directory is used for canonical evidence.
+ const directory=await historyDirectoryV1();
  if(!directory||directory.campaignId!==campaignId||
     !/^campaigns\/[A-Za-z0-9._/-]+$/.test(directory.workspacePath??'')||
     (directory.workspacePath??'').split('/').some(s=>!s||s==='.'||s==='..'))
@@ -595,6 +577,190 @@ async function sourceBoundQuestionHistoryV1(raw){
   histories:records,unavailable
  }:null;
 }
+// Read from the same immutable private controller commit as question history.
+async function historyDirectoryV1(){
+ if(!historySnapshotCommit)return null;
+ const rel='Audit Campaign Directory/campaigns/'+
+  campaignId.replace(/-r[0-9]+$/,'')+'.json';
+ const token=process.env.AUDIT_CONTROLLER_GITHUB_TOKEN;
+ if(!token)return null;
+ const url='https://api.github.com/repos/'+historyRepo+'/contents/'+
+  rel.split('/').map(encodeURIComponent).join('/')+
+  '?ref='+encodeURIComponent(historySnapshotCommit);
+ const res=await fetch(url,{headers:{
+  authorization:'Bearer '+token,accept:'application/vnd.github+json',
+  'x-github-api-version':'2022-11-28'
+ },signal:AbortSignal.timeout(30000)});
+ if(!res.ok)return null;
+ const file=await res.json();
+ if(file.encoding!=='base64'||typeof file.content!=='string')return null;
+ return JSON.parse(Buffer.from(file.content.replace(/\s/g,''),'base64').toString('utf8'));
+}
+async function historyPhase1ReceiptPathsV1(workspace){
+ const commit=await historyGitMetadataV1('git/commits/'+historySnapshotCommit);
+ let treeSha=commit?.tree?.sha;
+ if(!/^[0-9a-f]{40}$/.test(String(treeSha??'')))return null;
+ for(const segment of (workspace+'/receipts').split('/')){
+  const tree=await historyGitMetadataV1('git/trees/'+treeSha);
+  if(!Array.isArray(tree?.tree))return null;
+  const child=tree.tree.find(x=>x.path===segment&&x.type==='tree');
+  if(!child)return [];
+  treeSha=child.sha;
+ }
+ const listing=await historyGitMetadataV1('git/trees/'+treeSha);
+ if(!Array.isArray(listing?.tree)||listing.truncated)return null;
+ return listing.tree.filter(x=>x.type==='blob'&&/^PHASE_01_RECEIPT_v\d+\.json$/.test(x.path))
+  .map(x=>workspace+'/receipts/'+x.path)
+  .sort((a,b)=>Number(b.match(/_v(\d+)\.json$/)[1])-Number(a.match(/_v(\d+)\.json$/)[1]));
+}
+
+// Source records are never summarized or selected for security significance here.
+// Small canonical JSON is delivered complete. Large JSON is available through
+// exact source pages and selector-based record fragments in the SAME local
+// inference dialogue; neither request is submitted to the Worker.
+function phase1EvidencePageV1(text,start,width=6000){
+ const end=Math.min(text.length,start+width);
+ const safeEnd=end<text.length&&end>start&&
+  text.charCodeAt(end-1)>=0xD800&&text.charCodeAt(end-1)<=0xDBFF?end-1:end;
+ return {start,end:safeEnd,text:text.slice(start,safeEnd)};
+}
+async function sourceBoundPhase1EvidenceV1(raw){
+ let envelope;
+ try{envelope=JSON.parse(raw);}catch{return null;}
+ const live=envelope?.workerResponse??{};
+ const phase=Number(live.phase),leased=['LEASED_PACKET','LEASED_SHARD'].includes(live.status);
+ if(!leased||!Number.isInteger(phase)||phase<2||phase>6)return null;
+ const base={schemaVersion:'curveyield-mi-phase1-model-evidence-v1',
+  campaignId,phase,sourceRepo:historyRepo,sourceBranch:historyBranch,
+  snapshotCommit:historySnapshotCommit,securityInterpretationOwner:'MIMO'};
+ if(!/^[0-9a-f]{40}$/.test(String(historySnapshotCommit??'')))
+  return {manifest:{...base,availability:'PINNED_CONTROLLER_COMMIT_UNAVAILABLE'},source:null};
+ const directory=await historyDirectoryV1();
+ if(directory?.campaignId!==campaignId||
+    !/^campaigns\/[A-Za-z0-9._/-]+$/.test(directory.workspacePath??'')||
+    directory.workspacePath.split('/').some(v=>!v||v==='.'||v==='..'))
+  return {manifest:{...base,availability:'CONTROLLER_DIRECTORY_UNAVAILABLE'},source:null};
+ const canonicalPath=directory.workspacePath+'/derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json';
+ const canonical=await historyJsonV1(canonicalPath).catch(()=>null);
+ if(!canonical||canonical.data?.campaignId!==campaignId||
+    canonical.data?.phase!==1||!canonical.data?.actions||
+    typeof canonical.data.actions!=='object')
+  return {manifest:{...base,canonicalPath,availability:'ORIGINAL_CANONICAL_UNAVAILABLE'},source:null};
+ const receipts=await historyPhase1ReceiptPathsV1(directory.workspacePath).catch(()=>null);
+ if(!receipts)
+  return {manifest:{...base,canonicalPath,canonicalSha256:canonical.file.sha256,
+   availability:'PHASE1_RECEIPT_INDEX_UNAVAILABLE'},source:null};
+ let acceptedReceiptPath=null;
+ for(const path of receipts){
+  const receipt=await historyJsonV1(path).catch(()=>null);
+  const data=receipt?.data;
+  if(data?.campaign?.campaignId!==campaignId||
+     data?.campaign?.campaignGenerationId!==directory.campaignGenerationId||
+     data?.phase?.sequence!==1||
+     data?.source?.sha256!==directory.sourceSha256)continue;
+  if([...(data.evidence??[]),...(data.outputs??[])].some(ref=>
+      ref?.role==='PHASE_CANONICAL_DATA'&&
+      ref.path==='derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json'&&
+      ref.sha256===canonical.file.sha256)){
+   acceptedReceiptPath=path;break;
+  }
+ }
+ if(!acceptedReceiptPath)
+  return {manifest:{...base,canonicalPath,canonicalSha256:canonical.file.sha256,
+   availability:'CANONICAL_NOT_BOUND_TO_ACCEPTED_PHASE1_RECEIPT'},source:null};
+ const definitions=[
+  {discoveryPass:'D4',step:'step-4',field:'standardsAssessments',key:'standardKey'},
+  {discoveryPass:'D6',step:'step-5',field:'riskDrivers',key:'driverKey'},
+  {discoveryPass:'D7',step:'step-6',field:'phase1Limitations',key:null}
+ ];
+ const records=[],collections=[];
+ for(const def of definitions){
+  const values=canonical.data.actions?.[def.step]?.outputs?.[def.field];
+  collections.push({discoveryPass:def.discoveryPass,
+   sourceSelector:'actions.'+def.step+'.outputs.'+def.field,
+   recordCount:Array.isArray(values)?values.length:null,
+   availability:Array.isArray(values)?'AVAILABLE':'SOURCE_COLLECTION_UNAVAILABLE'});
+  if(!Array.isArray(values))continue;
+  values.forEach((value,index)=>{
+   const selector='actions.'+def.step+'.outputs.'+def.field+'['+index+']';
+   const key=def.key&&value&&typeof value==='object'&&!Array.isArray(value)?
+    value[def.key]??null:null;
+   records.push({discoveryPass:def.discoveryPass,selector,sourceIndex:index,
+    recordKey:key,recordJsonSha256:sha(JSON.stringify(value))});
+  });
+ }
+ const allOutputSelectors=Object.entries(canonical.data.actions).flatMap(([step,action])=>
+  Object.keys(action?.outputs??{}).map(field=>'actions.'+step+'.outputs.'+field));
+ const originalText=canonical.file.text;
+ const pageOffsets=[];
+ for(let start=0;start<originalText.length;){
+  const fragment=phase1EvidencePageV1(originalText,start);
+  pageOffsets.push({page:pageOffsets.length+1,start,end:fragment.end,
+   sha256:sha(fragment.text)});
+  start=fragment.end;
+ }
+ const manifest={...base,availability:'AVAILABLE',canonicalPath,
+  canonicalSha256:canonical.file.sha256,sourceSha256:directory.sourceSha256,
+  acceptedReceiptPath,canonicalBytes:Buffer.byteLength(originalText),
+  allOutputSelectors,leadCollections:collections,
+  leadIndex:{recordCount:records.length,initialRefs:records.slice(0,16),
+   initialRefsAreComplete:records.length<=16,
+   retrieveAll:'{"sourceEvidenceRequest":{"kind":"INDEX","start":16}}'},
+  canonicalPages:{count:pageOffsets.length,pageIndex:pageOffsets,
+   exactOriginalBytes:true},
+  ...(pageOffsets.length===1?{completeCanonicalText:originalText}:{}),
+  retrievalInstructions:{
+   index:'{"sourceEvidenceRequest":{"kind":"INDEX","start":0}}',
+   record:'{"sourceEvidenceRequest":{"kind":"RECORD","selector":"actions.step-5.outputs.riskDrivers[0]","offset":0}}',
+   originalPage:'{"sourceEvidenceRequest":{"kind":"CANONICAL_PAGE","page":1}}',
+   note:'These are local evidence reads, not Worker submissions. Fetch all original records needed for this investigation. Return the normal Worker-required route/request JSON after reading. No source excerpt is an audit conclusion.'
+  }};
+ return {manifest,source:{canonical:canonical.data,originalText,pageOffsets,records,canonicalPath,
+  canonicalSha256:canonical.file.sha256}};
+}
+function sourceEvidenceRequestV1(raw,evidence){
+ let answer;
+ try{answer=JSON.parse(raw);}catch{return null;}
+ if(!answer||typeof answer!=='object'||Array.isArray(answer)||
+    answer.route!==undefined||!answer.sourceEvidenceRequest)return null;
+ const req=answer.sourceEvidenceRequest,source=evidence?.source;
+ const base={schemaVersion:'curveyield-mi-phase1-evidence-read-v1',
+  availability:source?'AVAILABLE':'SOURCE_UNAVAILABLE',
+  canonicalPath:evidence?.manifest?.canonicalPath??null,
+  canonicalSha256:evidence?.manifest?.canonicalSha256??null};
+ if(!source)return {...base,reason:evidence?.manifest?.availability??'NOT_ISSUED'};
+ if(req.kind==='INDEX'){
+  const start=Number.isSafeInteger(req.start)&&req.start>=0?req.start:0;
+  const refs=source.records.slice(start,start+25);
+  return {...base,kind:'INDEX',start,total:source.records.length,
+   originalRefs:refs,nextStart:start+refs.length<source.records.length?start+refs.length:null};
+ }
+ if(req.kind==='CANONICAL_PAGE'){
+  const page=Number(req.page),spec=source.pageOffsets[page-1];
+  if(!Number.isInteger(page)||!spec)return {...base,availability:'PAGE_NOT_FOUND',page};
+  const fragment=source.originalText.slice(spec.start,spec.end);
+  return {...base,kind:'CANONICAL_PAGE',page,pageCount:source.pageOffsets.length,
+   start:spec.start,end:spec.end,contentSha256:spec.sha256,originalJsonFragment:fragment};
+ }
+ if(req.kind==='RECORD'){
+  const match=typeof req.selector==='string'?
+   req.selector.match(/^actions\.(step-[1-9]\d*)\.outputs\.([A-Za-z_][A-Za-z0-9_]*)(?:\[(\d+)\])?$/):null;
+  if(!match)return {...base,availability:'SELECTOR_NOT_FOUND'};
+  const selected=source.canonical.actions?.[match[1]]?.outputs?.[match[2]];
+  const value=match[3]!==undefined&&Array.isArray(selected)?
+   selected[Number(match[3])]:match[3]===undefined?selected:undefined;
+  if(value===undefined)return {...base,availability:'SELECTOR_NOT_FOUND',selector:req.selector};
+  const complete=JSON.stringify(value),start=Number.isSafeInteger(req.offset)&&req.offset>=0?req.offset:0;
+  if(start>complete.length)return {...base,availability:'OFFSET_OUT_OF_RANGE',selector:req.selector};
+  const fragment=phase1EvidencePageV1(complete,start);
+  return {...base,kind:'RECORD',selector:req.selector,recordJsonSha256:sha(complete),
+   start:fragment.start,end:fragment.end,totalCharacters:complete.length,
+   hasMore:fragment.end<complete.length,nextOffset:fragment.end<complete.length?fragment.end:null,
+   exactRecordJsonFragment:fragment.text};
+ }
+ return {...base,availability:'UNRECOGNIZED_SOURCE_READ',
+  supportedKinds:['INDEX','RECORD','CANONICAL_PAGE']};
+}
 // Generic recovery for EVERY phase, numbered step and interaction substep.
 // Reissue the most recently provided original instructions and exact source-bound
 // forms; never maintain hand-written per-phase instructions in this adapter.
@@ -681,6 +847,7 @@ const dialogue=[];
 let lastOwner=null,waitingSince=0,lastWaitReport=0;
 let lastStepScope=null,lastUnitScope=null;
 let lastAuthorityRaw=null,lastClaimRaw=null,lastIssuedResponseRaw=null,pendingRecovery=null;
+let activePhase1Evidence=null;
 let consecutiveRejections=0,lastRejectedFingerprint=null;
 while(true){
  // Acquire the exact controller-issued work form before model analysis whenever
@@ -757,6 +924,7 @@ while(true){
   dialogue.length=0;
   alreadyProvidedStepInstructions.clear();
   lastAuthorityRaw=null;lastClaimRaw=null;lastIssuedResponseRaw=null;pendingRecovery=null;
+  activePhase1Evidence=null;
   consecutiveRejections=0;lastRejectedFingerprint=null;
  }
  if(scope){lastStepScope=scope.step;if(scope.unit!==null)lastUnitScope=scope.unit;}
@@ -787,6 +955,23 @@ while(true){
     unavailable:priorEvidence.unavailable?.length??0,
     originalTextPreserved:true,privateContent:'MODEL_INPUT_ONLY'}));
   }
+  // A mere canonical filename in derivedInputPaths is not model access.
+  // Fetch the accepted original source privately at the pinned controller commit.
+  activePhase1Evidence=await sourceBoundPhase1EvidenceV1(workerResponse)
+   .catch(error=>({manifest:{schemaVersion:'curveyield-mi-phase1-model-evidence-v1',
+    campaignId,availability:'GITHUB_EVIDENCE_READ_UNAVAILABLE',
+    detail:String(error?.message??error).slice(0,160)},source:null}));
+  if(activePhase1Evidence){
+   dialogue.push({role:'user',content:JSON.stringify(activePhase1Evidence.manifest)});
+   console.log(JSON.stringify({status:'MIMO_PHASE1_EVIDENCE_MODEL_CONTEXT',
+    phase:Number(JSON.parse(workerResponse)?.workerResponse?.phase),
+    availability:activePhase1Evidence.manifest.availability,
+    canonicalSha256:activePhase1Evidence.manifest.canonicalSha256??null,
+    sourcePages:activePhase1Evidence.source?.pageOffsets.length??0,
+    leadRefs:activePhase1Evidence.source?.records.length??0,
+    modelFacingOriginalText:typeof activePhase1Evidence.manifest.completeCanonicalText==='string',
+    privateContent:'MODEL_INPUT_ONLY'}));
+  }
   let issued=null;
   try{issued=JSON.parse(workerResponse);}catch{}
   const native=issued?.workerResponse||{};
@@ -796,7 +981,20 @@ while(true){
   if(['LEASED_SHARD','LEASED_PACKET'].includes(native.status))
    lastClaimRaw=workerResponse;
  }
- const raw=await modelCall(dialogue);
+ let raw=await modelCall(dialogue);
+ // Evidence read requests are local to MiMo's private GitHub inference bridge.
+ // Only the eventual original route/request answer is sent to the Worker.
+ for(let read=sourceEvidenceRequestV1(raw,activePhase1Evidence);read;
+     read=sourceEvidenceRequestV1(raw,activePhase1Evidence)){
+  dialogue.push({role:'assistant',content:raw});
+  dialogue.push({role:'user',content:JSON.stringify(read)});
+  console.log(JSON.stringify({status:'MIMO_PHASE1_EVIDENCE_PAGE_DELIVERED',
+   kind:read.kind??null,availability:read.availability,
+   sourceSha256:read.canonicalSha256??null,
+   selector:read.selector??null,page:read.page??null,
+   noWorkerSubmission:true,privateContent:'MODEL_INPUT_ONLY'}));
+  raw=await modelCall(dialogue);
+ }
  dialogue.push({role:'assistant',content:raw});
  const previouslyIssued=workerResponse;
  workerResponse=await workerCall({operation:'reply',modelOutput:raw});
