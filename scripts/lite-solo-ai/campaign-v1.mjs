@@ -661,6 +661,7 @@ async function sourceBoundPhase1EvidenceV1(raw){
   if(data?.campaign?.campaignId!==campaignId||
      data?.campaign?.campaignGenerationId!==directory.campaignGenerationId||
      data?.phase?.sequence!==1||
+     !['SEALED','COMPLETE'].includes(data?.phase?.status)||
      data?.source?.sha256!==directory.sourceSha256)continue;
   if([...(data.evidence??[]),...(data.outputs??[])].some(ref=>
       ref?.role==='PHASE_CANONICAL_DATA'&&
