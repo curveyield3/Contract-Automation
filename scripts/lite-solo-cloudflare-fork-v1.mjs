@@ -621,7 +621,27 @@ function discoveryAnswerBindingV1({u,packet,initial}){
  };
 }
 
-function buildUnitMeta(c,u,schema){
+function issuedPacketDigestV1(c,u,state=null){
+ if(typeof u.packetSha256==='string')return u.packetSha256;
+ // Previously issued units may predate frozen shard digests. Their accepted
+ // snapshot retains the original packet identity, even after shard assembly.
+ const rel=state?.acceptedPath;
+ const prefix=c.campaignPath+'/work/phase-'+
+  phaseNo(c.directory.currentAssignment.phaseSequence)+'/units/'+u.unitId+'/';
+ if(typeof rel==='string'&&rel.startsWith(prefix)){
+  try{
+   const prev=read(rel);
+   if(prev?.unitId===u.unitId&&
+      prev.campaignGenerationId===c.directory.campaignGenerationId&&
+      prev.sourceSha256===c.directory.sourceSha256&&
+      prev.authorityDigest===c.directory.authorityDigest&&
+      /^[a-f0-9]{64}$/.test(String(prev.packetSha256??'')))
+    return prev.packetSha256;
+  }catch{/* No previous immutable accepted packet. */}
+ }
+ return sha(fs.readFileSync(relative(u.packetPath||u.shardPath)));
+}
+function buildUnitMeta(c,u,schema,queueState=null){
   const index=u.packetIndexPath?readUnitPacketIndexV1({root:ROOT,indexPath:safePath(u.packetIndexPath)}):null;
   const discoveryPacket=['FLOW','ATTACK'].includes(u.kind)?readUnitPacketV1({root:ROOT,packetPath:safePath(u.packetPath)}):null;
   if(discoveryPacket)strict(discoveryPacket.payload?.unitId===u.unitId,'discovery packet identity mismatch');
@@ -673,7 +693,7 @@ function buildUnitMeta(c,u,schema){
   }
   const packetPath=u.packetPath||u.shardPath;
   strict(packetPath&&safePath(packetPath).startsWith(c.campaignPath+'/'),'unit packet path outside campaign');
-  const packetSha256=u.packetSha256||sha(fs.readFileSync(relative(packetPath)));
+  const packetSha256=issuedPacketDigestV1(c,u,queueState);
   const answerRouting=discoveryPacket
    ?discoveryAnswerBindingV1({u,packet:discoveryPacket,initial})
    :semanticAnswerBindingV1({c,u,schema,initial});
@@ -703,7 +723,7 @@ async function unitNextStep(c){
         (queue.units?.[dep]?.status==='ACCEPTED'&&!!queue.units[dep].acceptedPath&&!!queue.units[dep].acceptedSha256));
   });
   strict(eligible.length>0,'no eligible units in current controller stage; do not invent work');
-  const roster=eligible.map(u=>{const x=buildUnitMeta(c,u,schema);x.step=step;x.stage=stage;return x;});
+  const roster=eligible.map(u=>{const x=buildUnitMeta(c,u,schema,queue.units[u.unitId]);x.step=step;x.stage=stage;return x;});
   const rosterDigest=sha(JSON.stringify(roster));
   const planSha256=sha(fs.readFileSync(relative(planRel)));
   const queueSha256=sha(fs.readFileSync(relative(queueRel)));
@@ -760,7 +780,8 @@ function eligibleStage(c,source,phase,step,stage){
 }
 function stageDigest(c,source,phase,step,stage){
   return sha(JSON.stringify(eligibleStage(c,source,phase,step,stage).map(u=>{
-    const x=buildUnitMeta(c,u,loadPhaseSchema(ROOT,AUTH,phase).schema);
+    const x=buildUnitMeta(c,u,loadPhaseSchema(ROOT,AUTH,phase).schema,
+     source.queue.units?.[u.unitId]);
     x.step=step;x.stage=stage;return x;
   })));
 }
@@ -1079,7 +1100,8 @@ function assembleBoundAnswersV1(c,u,submitted){
   'bound answer packet does not match the issued unit');
  const phase=Number(c.directory.currentAssignment.phaseSequence);
  const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
- const meta=buildUnitMeta(c,u,schema),route=meta.answerRouting;
+ const meta=buildUnitMeta(c,u,schema,unitPlan(c).queue.units?.[u.unitId]),
+   route=meta.answerRouting;
  const answers=new Map(),issued=new Map(meta.answerTransport.fields.map(f=>[f.bindingId,f]));
  strict(submitted.answers===undefined||Array.isArray(submitted.answers),
   'bound answers must be an array of exact issued field values');
@@ -1330,8 +1352,7 @@ async function unitValidateSingle(c,item,{publish=true,notify=true}={}){
   workerId:selected.workerId,sourceSha256:c.directory.sourceSha256,
   authorityDigest:c.directory.authorityDigest,phaseEpoch:current.plan.phaseEpoch,
   auditControllerRef:MACHINE_REF,items:[{unitId:id,claimEpoch:state.claimEpoch,
-   claimToken:state.claimToken,packetSha256:u.packetSha256||
-    sha(fs.readFileSync(relative(u.packetPath||u.shardPath))),
+   claimToken:state.claimToken,packetSha256:issuedPacketDigestV1(c,u,state),
    submissionPath:selected.rel,submissionSha256:actualSha,
    unitSpecRevision:u.unitSpecRevision}]};
  const result=processUnitRequestV1({root:ROOT,campaignPath:c.campaignPath,
