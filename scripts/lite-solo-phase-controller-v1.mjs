@@ -167,7 +167,8 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
       ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry.generatedObligations',value:registry.generatedObligations??[]}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
       normalizeFormalObligationsIntoLedger({ledger,items:registry.generatedObligations??[],
         originPhase:schema.phase,canonicalRel,now,root,authorityRoot,
-        sourceCollectionPath:'generatedObligations',sourceKind:'CONTROLLER_MACHINE_ROUTING'});
+        sourceCollectionPath:'generatedObligations',sourceKind:'CONTROLLER_MACHINE_ROUTING',
+        sourceDocumentPath:domainRel});
     }
   }
 
@@ -611,7 +612,8 @@ function restoreLedgerBeforeMasterPhase({root,campaignPath,authorityRoot,earlies
       if(!registry)throw new Error('historical domain registry missing at Phase '+phase);
       normalizeFormalObligationsIntoLedger({
         ledger,items:registry.generatedObligations??[],originPhase:phase,canonicalRel,now,root,authorityRoot,
-        sourceCollectionPath:'generatedObligations',sourceKind:'CONTROLLER_MACHINE_ROUTING'
+        sourceCollectionPath:'generatedObligations',sourceKind:'CONTROLLER_MACHINE_ROUTING',
+        sourceDocumentPath:path.posix.join(campaignPath,domain)
       });
     }
     applyObligationDispositionsToLedger({ledger,canonical,sequence:phase,canonicalRel,now,root,authorityRoot});
