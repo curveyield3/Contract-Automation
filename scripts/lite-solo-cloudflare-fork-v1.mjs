@@ -371,6 +371,10 @@ function machineVerifiedValueV1(c,row,key){
  if(!sources.length)return null;
  const exact=sources.filter(x=>Object.hasOwn(x.machineFields,key));
  if(exact.length!==1)return null; // Never choose between conflicting observations.
+ // A failed machine attempt may document a failure, but cannot populate
+ // proof-bearing ledger/binding references without a qualified execution.
+ if(['ledgerRef','requestBindingEvidenceRef','rerunEvidenceRefs'].includes(key)&&
+    !exact[0].qualifiedExecution)return null;
  return {value:exact[0].machineFields[key],sources:exact,
   qualifiedAsProof:exact[0].qualifiedExecution};
 }
@@ -486,6 +490,7 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
   recordFieldTemplate:definition.type==='REQUIRED_RECORD_LIST'
     ?[...new Set([...(definition.itemRequiredFields??[]),
       ...(definition.controllerCollectedFields??[]),...actionCollectedFields,
+      ...Object.keys(definition.itemFieldAllowedValues??{}),
       ...(definition.controllerPrefillFields??[]).filter(f=>MECHANICAL_ID_FIELDS.has(f)),
       ...actionPrefillFields.filter(f=>MECHANICAL_ID_FIELDS.has(f))])]
      .map(itemField=>controllerAnswerFieldBindingV1({
@@ -851,9 +856,14 @@ function checkMachineAnswerLiteralV1(spec,value){
    'siblingComparisons require exact identity, signature and comparison');
  if(spec.field==='candidate'||spec.field==='candidates'){
   const candidates=Array.isArray(value)?value:[value];
-  for(const candidate of candidates)if(candidate?.severity!==undefined)
-   strict(['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(candidate.severity),
-    'candidate severity must be an AI-authored exact token');
+  for(const candidate of candidates)
+   strict(candidate&&typeof candidate==='object'&&!Array.isArray(candidate)&&
+    typeof candidate.title==='string'&&candidate.title.trim()&&
+    typeof candidate.description==='string'&&candidate.description.trim()&&
+    typeof candidate.classId==='string'&&candidate.classId.trim()&&
+    ['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(candidate.severity)&&
+    Array.isArray(candidate.anchors)&&candidate.anchors.every(x=>typeof x==='string'&&x.trim()),
+    'candidate must have typed class, severity, description and source anchors');
  }
 }
 
