@@ -1333,7 +1333,8 @@ function assembleBoundAnswersV1(c,u,submitted){
    if(field==='attackPaths'){
     const allowed=new Set(route.fixedRecordKeys[0].records.flatMap(x=>x.key));
     for(const row of additional){
-     if(!row||!Array.isArray(row.flowIds)||row.flowIds.some(id=>!allowed.has(id)))continue;
+     if(!row||!Array.isArray(row.flowIds)||!row.flowIds.length||
+        row.flowIds.some(id=>!allowed.has(id)))continue;
      const pathId='PATH-'+String(result.attackPaths.length+1).padStart(3,'0');
      result.attackPaths.push({...withNestedCandidateIds(row),
       ...(typeof row.pathId==='string'&&row.pathId.trim()&&row.pathId!==pathId
