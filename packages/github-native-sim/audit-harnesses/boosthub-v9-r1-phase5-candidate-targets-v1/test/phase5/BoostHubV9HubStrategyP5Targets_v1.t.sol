@@ -203,7 +203,7 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         _stakeHub(hub,lp,1e18);
         vm.expectRevert();
         vm.prank(OUTSIDER);hub.withdraw(0,1e18);
-        require(hub.poolDepositor(0)==address(this),"DEPOSITOR_AUTH_BROKEN");
+        require(hub.poolInfo(0).depositor==address(this),"DEPOSITOR_AUTH_BROKEN");
     }
     // This exact-source vault oracle is absent from the original six P4 targets.
     // It preserves the seventh, newly accepted Phase-5 material candidate.
