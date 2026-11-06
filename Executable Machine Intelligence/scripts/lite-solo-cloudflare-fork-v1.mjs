@@ -78,8 +78,8 @@ function checkout(){
   strict(meta.type==='file'&&meta.encoding==='base64','campaign directory missing');
   const directory=JSON.parse(Buffer.from(meta.content.replace(/\s/g,''),'base64').toString('utf8'));
   strict(directory.campaignId===id&&directory.campaignGenerationId===payload.generation_id,'campaign generation mismatch');
-  strict(directory.mode==='LITE_SOLO'&&directory.authorityRelease==='machine-intelligence-v7','not a Machine Intelligence campaign');
-  AUTH=MACHINE_AUTH;
+  strict(directory.mode==='LITE_SOLO'&&['machine-intelligence-v7','machine-intelligence-v8'].includes(directory.authorityRelease),'not a Machine Intelligence campaign');
+  AUTH=directory.authorityRelease==='machine-intelligence-v8'?'Machine Intelligence Audit Controller/Audit Skill v8':MACHINE_AUTH;
   strict(directory.authorityDigest===payload.authority_digest,'bound authority digest mismatch');
   safePath(directory.workspacePath);
   cmd('bash',['scripts/lite-solo-checkout-bound-controller-v1.sh','.audit-controller',MACHINE_REF,directory.workspacePath]);

@@ -86,10 +86,10 @@ function prerequisiteEvidence(queue,dependencies){
 const depSatisfied=()=>true;
 const dependenciesFresh=()=>true;
 const isPhase=(p)=>[4,5,6].includes(p);
-const RELEASES=new Set(['machine-intelligence-v7']);
+const RELEASES=new Set(['machine-intelligence-v7','machine-intelligence-v8']);
 const authorityFor=directory=>{
   if(!RELEASES.has(directory.authorityRelease))throw Error('unsupported Machine Intelligence release');
-  return 'Machine Intelligence Audit Controller/Audit Skill v7';
+  return directory.authorityRelease==='machine-intelligence-v8'?'Machine Intelligence Audit Controller/Audit Skill v8':'Machine Intelligence Audit Controller/Audit Skill v7';
 };
 const rowId=(phase,field,index)=>{
  const families={
@@ -1009,3 +1009,4 @@ export function reopenAggregateDefectsV1({deficiencies=[]}={}){
     ?deficiencies.map(item=>typeof item==='string'?item:JSON.stringify(item))
     :[],invalidatedRecordIds:[],validationDelegatedTo:'CLOUDFLARE_WORKER'};
 }
+

@@ -173,7 +173,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const contractChecks=role==='ATTACK'?[]:[...new Set(primary.map(id=>contextFor(inventory,id)?.qualifiedContainer).filter(Boolean))]
   .filter(name=>ownerUnit.get(name)===unitId).sort()
   .map(contract=>({contract,classId:'UPGRADE_INIT_STORAGE',reviewChecks:arr(upgradeClass?.reviewChecks)}));
- const verdictV13=authorityRoot===MACHINE_AUTHORITY_V7;
+ const verdictV13=authorityRoot===MACHINE_AUTHORITY_V7||authorityRoot==='Machine Intelligence Audit Controller/Audit Skill v8';
  const trivialContextIds=role==='ATTACK'?[]:primary.filter(id=>verdictV13?
    isLiteralConstantV13(contextFor(inventory,id)):TRIVIAL_KINDS_V1.has(contextFor(inventory,id)?.kind));
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
@@ -203,7 +203,11 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
   contextId,referenceConstants,checkedDocCount,sourceCommentsChecked,missingSource,
   requirement:'Code initializers and getters are observations, not independent specifications'
  }));
+ // Preserve exact inherited concerns; the auditor, not transport, selects relevance.
+ const phase1Path=path.posix.join(campaignPath,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json');
+ const phase1=known(root,phase1Path);
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
+  ...(authorityRoot==='Machine Intelligence Audit Controller/Audit Skill v8'?{phase1DiscoveryContext:{sourcePath:phase1Path,status:phase1?'AVAILABLE':'UNAVAILABLE',actions:phase1?.actions??null}}:{}),
   unitId,role,chatKey:role==='ATTACK'?(isReassignedV13AuthorityV1({root,authorityRoot})?'lite-solo-agent':verdictV13?'lite-solo-agent':'lite-solo-agent'):'lite-solo-agent',instructionsPath,
   submissionPath:path.posix.join(campaignPath,'work/phase-04/units',unitId,'submissions/<workerId>/epoch-<claimEpoch>/SUBMISSION_ATTEMPT_001_v1.json'),boundaryRequestPath:'process/agent-upload/lite-solo-unit-requests/',
   sourceRoot:campaignPath+'/source',sourceInventoryPath:asset(root,campaignPath,'REVIEW_INVENTORY_v1.json'),
@@ -359,6 +363,7 @@ export function writeUnitPacketIndexV1({root,campaignPath,unitId,role}){
  };
  for(const field of ['primaryContexts','documentationItems','siblingChecks','flows','integrationQuestions',
   'contractChecks','specContext'])writeSection(field,arr(payload[field]));
+ if(payload.phase1DiscoveryContext)writeSection('phase1DiscoveryContext',[payload.phase1DiscoveryContext]);
  if(payload.requiredClasses&&typeof payload.requiredClasses==='object')
   writeSection('requiredClasses',Object.entries(payload.requiredClasses).map(([contextId,classes])=>({contextId,classes})));
  for(const [field,items] of Object.entries(payload.systemFacts??{}))
