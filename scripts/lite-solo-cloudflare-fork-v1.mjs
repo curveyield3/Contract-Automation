@@ -273,15 +273,34 @@ const negativeSentinel=v=>typeof v==='string'&&EXPLICIT_NEGATIVES.has(v);
 // No guessing of request paths, round counts, proof outcomes, or semantic results.
 function verifiedMachineSourcesV1(c,row){
  const relativeDir=typeof row?.requestDirectory==='string'?row.requestDirectory.replace(/\/+$/,''):'';
- if(!relativeDir.startsWith('controller/phase6-tests/')&&
-    !relativeDir.startsWith('controller/phase9-reruns/'))return [];
- const directoryPath=path.posix.join(c.campaignPath,relativeDir);
- const absolute=relative(directoryPath);
- if(!fs.existsSync(absolute)||!fs.statSync(absolute).isDirectory())return [];
- const files=fs.readdirSync(absolute).filter(n=>/^[A-Za-z0-9_.-]+\.json$/.test(n));
+ const directoryAllowed=relativeDir.startsWith('controller/phase6-tests/')||
+   relativeDir.startsWith('controller/phase9-reruns/');
  const verified=[];
- for(const name of files){
-  const requestPath=path.posix.join(directoryPath,name),request=read(requestPath);
+ const paths=[];
+ if(directoryAllowed){
+  const directoryPath=path.posix.join(c.campaignPath,relativeDir);
+  try{
+   const absolute=relative(directoryPath);
+   if(fs.existsSync(absolute)&&fs.statSync(absolute).isDirectory())
+    for(const n of fs.readdirSync(absolute))
+     if(/^[A-Za-z0-9_.-]+\.json$/.test(n))paths.push(path.posix.join(directoryPath,n));
+  }catch{/* An optional missing evidence directory cannot halt GitHub packaging. */}
+ }
+ // Phase 5 has candidate-key-scoped immutable requests rather than Phase 6's
+ // directory. Resolve the exact existing request name, not a guessed run.
+ if(typeof row?.candidateKey==='string'&&/^[A-Za-z0-9_.-]{1,150}$/.test(row.candidateKey)){
+  const name=row.candidateKey.replace(/[^A-Za-z0-9._-]/g,'_');
+  paths.push(path.posix.join(c.campaignPath,'work/phase-05/execution-requests',name+'.json'));
+ }
+ if(typeof row?.executionRequestRef==='string'&&
+    row.executionRequestRef.startsWith('work/phase-05/execution-requests/'))
+  paths.push(path.posix.join(c.campaignPath,row.executionRequestRef));
+ for(const requestPath of new Set(paths)){
+  let request;
+  try{
+   if(!fs.existsSync(relative(requestPath)))continue;
+   request=read(requestPath);
+  }catch{continue;}
   if(typeof request?.requestId!=='string'||typeof request.requestDigest!=='string')continue;
   if(request.sourceSha256&&request.sourceSha256!==c.directory.sourceSha256)continue;
   if(!/^[A-Za-z0-9_.-]{1,150}$/.test(request.requestId))continue;
@@ -289,7 +308,8 @@ function verifiedMachineSourcesV1(c,row){
   const evidencePath=path.posix.join(evidenceDir,'EXECUTION_EVIDENCE_v1.json');
   const receiptPath=path.posix.join(evidenceDir,'ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json');
   if(!fs.existsSync(relative(evidencePath))||!fs.existsSync(relative(receiptPath)))continue;
-  const machine=read(evidencePath),receipt=read(receiptPath);
+  let machine,receipt;
+  try{machine=read(evidencePath);receipt=read(receiptPath);}catch{continue;}
   if(receipt.schemaVersion!=='audit-execution-evidence-ingestion-receipt-v1'||
      receipt.requestId!==request.requestId||
      machine?.requestId!==request.requestId||
