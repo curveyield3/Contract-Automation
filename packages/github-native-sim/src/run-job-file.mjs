@@ -240,7 +240,15 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
       ...(boosthubP5 ? ['--skip', 'contracts/BoostHubBeefyCompileImports_v9.sol'] : []),
       '--fuzz-runs', String(native.fuzzRuns ?? 256),
       '--fork-url', rpcUrl, '--fork-block-number', String(blockNumber)],
-    env: { ...environment, ETH_RPC_URL: rpcUrl }, redactValues: [rpcUrl], forkEvidence,
+    // This frozen BoostHub archive has a mixed-OZ compilation anchor under
+    // contracts/, although its source-bound tests only need the imported
+    // implementations. Select the audit's existing test root in the isolated
+    // Forge subprocess. Do not rewrite foundry.toml or any audited source.
+    env: { ...environment, ETH_RPC_URL: rpcUrl,
+      ...(boosthubP5 ? {
+        FOUNDRY_SRC: 'verification_v6/phase5',
+        FOUNDRY_TEST: 'verification_v6/phase5'
+      } : {}) }, redactValues: [rpcUrl], forkEvidence,
     recoverableExitCodes: native.recoverableExitCodes ?? [],
   }, { ...(runCommand ? { runCommand } : {}) });
 }
