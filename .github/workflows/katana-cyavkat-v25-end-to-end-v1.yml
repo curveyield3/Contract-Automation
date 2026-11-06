@@ -1,7 +1,7 @@
 name: Katana cyavKAT v25 Complete Deployment
 on:
   push:
-    branches: [main, avkat-v7-fork-sim-20261105]
+    branches: [main, avkat-v9-revalidation-20261105]
     paths:
       - '.github/workflows/katana-cyavkat-v25-end-to-end-v1.yml'
       - 'process/avkat-fork-simulation-v1/**'
@@ -254,8 +254,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  avkat-v7-fork-simulation:
-    if: github.ref == 'refs/heads/avkat-v7-fork-sim-20261105'
+  avkat-v9-fork-simulation:
+    if: github.ref == 'refs/heads/avkat-v9-revalidation-20261105'
     runs-on: ubuntu-latest
     timeout-minutes: 80
     permissions:
@@ -283,6 +283,8 @@ jobs:
           mkdir -p "$project/src" "$project/test"
           cp src/*.sol "$project/src/"
           cp test/*.sol "$project/test/"
+          python3 merkl_fetch.py "$project/test/MerklProofFixture.sol" "$RUNNER_TEMP/avkat-fork-v1/merkl-live-claim.json"
+
           cd "$project"
           echo "Isolated Foundry files: $(find src test -type f | wc -l)"
           set +e
@@ -309,13 +311,13 @@ jobs:
               writer=csv.DictWriter(f,fieldnames=["function_case","status","reason"])
               writer.writeheader();writer.writerows(rows)
           stats={status:sum(x["status"]==status for x in rows) for status in ("PASS","FAIL","NOT_RUN")}
-          payload={"suite":"AVKAT v7 fork simulation v1","scope":"real Katana chain state on isolated fork",
+          payload={"suite":"AVKAT v9 fork simulation v1","scope":"real Katana chain state on isolated fork",
                    "fork_block":(root/"fork-block.txt").read_text().strip(),
                    "chain_id":(root/"chain-id.txt").read_text().strip(),
                    "forge_exit":int(os.environ["SIMULATION_EXIT"]),
                    "counts":stats,"cases":rows}
           (root/"function-matrix-v1.json").write_text(json.dumps(payload,indent=2)+"\n")
-          md=["# AVKAT v7 - GitHub Katana fork simulation v1","",
+          md=["# AVKAT v9 - GitHub Katana fork simulation v1","",
               f"Fork block: {payload['fork_block']}; chain ID: {payload['chain_id']}",
               f"PASS: {stats['PASS']}, FAIL: {stats['FAIL']}, NOT_RUN: {stats['NOT_RUN']}","",
               "| Contract function / scenario | Status | Failure reason |","|---|---|---|"]
@@ -331,7 +333,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: avkat-v7-fork-simulation-v1
+          name: avkat-v9-fork-simulation-v1
           path: |
             ${{ runner.temp }}/avkat-fork-v1/
             process/avkat-fork-simulation-v1/out/
