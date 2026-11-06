@@ -309,6 +309,16 @@ function boundMachineRequestsV1(c,row){
   if(sourceHash!==cd.sourceSha256)continue;
   if(key&&String(request.assignmentId??'').startsWith('phase5-target-')&&
      request.assignmentId!=='phase5-target-'+key)continue;
+   // A V7 generated request must bind its digest to its actual runnable
+   // source and configuration. A matching claimed digest alone is insufficient.
+   if(String(request.assignmentId??'').startsWith('phase5-target-')){
+    const candidateKey=request.assignmentId.slice('phase5-target-'.length);
+    const basis={campaignId:request.campaignId,candidateKey,
+      source:request.source,configuration:request.configuration,phaseId:request.phaseId};
+    const expectedDigest=sha(JSON.stringify(basis));
+    if(request.requestDigest!==expectedDigest||
+       request.requestId!=='dar-'+expectedDigest.slice(0,32))continue;
+   }
   found.push({request,requestId:request.requestId,requestDigest:request.requestDigest,
    requestPath:rel,requestSha256:sha(fs.readFileSync(relative(rel)))});
  }
@@ -335,6 +345,11 @@ function verifiedMachineSourcesV1(c,row){
      receipt.requestId!==source.requestId||
      receipt.requestDigest!==source.requestDigest||
      receipt.artifactDigest!==evidenceSha256||
+     receipt.phaseId!==source.request.phaseId||
+     receipt.profileId!==source.request.profileId||
+     receipt.securityDisposition!=='REVIEWER_REQUIRED'||
+     receipt.findingPromotion!=='FORBIDDEN_BY_INGESTOR'||
+     !/^[a-f0-9]{64}$/.test(String(receipt.ingestionDigest??''))||
      machine?.requestId!==source.requestId||
      machine?.requestDigest!==source.requestDigest)continue;
   const cleanExecution=machine.blocking===false&&
@@ -801,7 +816,7 @@ async function materializePhase5Request(c,u,submitted){
  for(const entry of candidates){
    const target=entry?.value;
    if(target?.executionMethod!=='V7_REQUEST')continue;
-   const name=safeId(String(target.candidateKey||'').replace(/[^A-Za-z0-9._-]/g,'_'));
+   const name=safeId(target.candidateKey); // Exact identity; never alias distinct candidates.
    const rel=c.campaignPath+'/work/phase-05/execution-requests/'+name+'.json';
    if(fs.existsSync(relative(rel)))continue; // Existing immutable requests are validator-owned.
    const generated=generateV7ExecutionRequestV1({campaignId:c.directory.campaignId,
