@@ -54,7 +54,8 @@ function questionLedgerReferenceV1({root,campaign,phase,unitId,directory,phaseEp
   sourceSha256:directory.sourceSha256,authorityDigest:directory.authorityDigest,
   phaseSequence:phase,phaseEpoch,unitId,packetSha256};
  const reference={availability:'NOT_PUBLISHED',indexPath,indexSha256:null,
-  revision:null,questionCount:null,answeredCount:null,ledgerStatus:null,...bound};
+  revision:null,questionCount:null,answeredCount:null,ledgerStatus:null,
+  status:null,checkpointCount:null,...bound};
  if(!Number.isSafeInteger(phaseEpoch)||phaseEpoch<1||
     !/^[a-f0-9]{64}$/.test(String(packetSha256??'')))
   return {...reference,availability:'IDENTITY_UNAVAILABLE'};
@@ -69,11 +70,17 @@ function questionLedgerReferenceV1({root,campaign,phase,unitId,directory,phaseEp
      !Number.isSafeInteger(index.questionCount)||index.questionCount<0||
      !Number.isSafeInteger(index.answeredCount)||index.answeredCount<0||
      !['ACTIVE','COMPLETE'].includes(index.status)||!Array.isArray(index.questions)||
-     !Array.isArray(index.checkpoints))
+     !Array.isArray(index.checkpoints)||
+     index.questionCount!==index.questions.length||
+     index.answeredCount>index.questionCount||
+     index.checkpoints.some(ref=>!ref||typeof ref.path!=='string'||
+      !ref.path.startsWith(path.posix.dirname(indexPath)+'/checkpoints/')||
+      !/^[a-f0-9]{64}$/.test(String(ref.sha256??''))))
    return {...reference,availability:'UNREADABLE'};
   return {...reference,availability:'AVAILABLE',indexSha256:hex(raw),
    revision:index.revision,questionCount:index.questionCount,
-   answeredCount:index.answeredCount,ledgerStatus:index.status};
+   answeredCount:index.answeredCount,ledgerStatus:index.status,
+   status:index.status,checkpointCount:index.checkpoints.length};
  }catch{return {...reference,availability:'UNREADABLE'};}
 }
 
