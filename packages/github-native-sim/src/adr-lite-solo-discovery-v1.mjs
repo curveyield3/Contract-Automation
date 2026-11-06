@@ -64,14 +64,16 @@ export function discoveryObservationSourceRefsV1(acceptedSubmissions){
   const prefix=sourceReference?.sourceSelectorPrefix===''
    ?'':(sourceReference?.sourceSelectorPrefix??'submission')+'.';
   const add=(record,category,selector,preferred)=>{
-   if(!record||typeof record!=='object'||Array.isArray(record))return;
+   if(record===null||record===undefined)return;
+   const isRecord=typeof record==='object'&&!Array.isArray(record);
    const identity={};
    for(const name of ['contextId','flowId','flowIds','pathId','obligationId',
     'candidateId','classId','contract','ruleId','signature','siblingContextId'])
-    if(Object.hasOwn(record,name))identity[name]=structuredClone(record[name]);
-   const sourceField=preferred.find(name=>Object.hasOwn(record,name))??null;
-   const anchorField=['anchors','sourceAnchors','sourceAnchor']
-    .find(name=>Object.hasOwn(record,name));
+    if(isRecord&&Object.hasOwn(record,name))identity[name]=structuredClone(record[name]);
+   const sourceField=isRecord?
+    preferred.find(name=>Object.hasOwn(record,name))??null:null;
+   const anchorField=isRecord?
+    ['anchors','sourceAnchors','sourceAnchor'].find(name=>Object.hasOwn(record,name)):null;
    refs.push({sourceCategory:category,
     ...discoverySourceReferenceV1({source:sourceReference,unitId,role,
      sourceSelector:prefix+selector,sourceField,
