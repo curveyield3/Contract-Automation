@@ -112,8 +112,7 @@ export function recoverAcceptedQuestionLedgerReferenceV1({
     accepted.phaseSequence!==phase||
     accepted.phaseEpoch!==plan.phaseEpoch||
     accepted.unitSpecRevision!==unit.unitSpecRevision||
-    accepted.submissionSha256!==state.acceptedSha256||
-    (unit.packetSha256&&unit.packetSha256!==accepted.packetSha256))
+    accepted.submissionSha256!==state.acceptedSha256)
   return unavailable;
  const live=questionLedgerReferenceV1({root,campaign:campaignPath,phase,unitId,
   directory,phaseEpoch:accepted.phaseEpoch,packetSha256:accepted.packetSha256});
