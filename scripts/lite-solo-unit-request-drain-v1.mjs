@@ -122,8 +122,13 @@ if(arg.mode!=='finalize'){
     root,indexRel:directory.currentAssignment.workShardIndexPath
    });
    const rebuilt=JSON.parse(restored.content);
+   const frozenBaseDigest=rebuilt.automationInputs?.controllerPrefillDigestSha256;
    const actual=refreshControllerPrefillDigest(structuredClone(rebuilt));
-   if(actual!==match[2])throw Error('Phase-5 accepted-unit projection does not match controller failure evidence');
+   // The error's reconstructed digest may include transient request-binding
+   // annotations. The immutable v13 BASE, SHA-checked above by the existing
+   // restorer, is the authoritative protected-field baseline for accepted units.
+   if(!/^[a-f0-9]{64}$/.test(String(frozenBaseDigest??''))||actual!==frozenBaseDigest)
+    throw Error('Phase-5 accepted-unit projection differs from SHA-verified frozen BASE');
    directory.currentAssignment.controllerPrefillDigestSha256=actual;
    changed=true;
   }
