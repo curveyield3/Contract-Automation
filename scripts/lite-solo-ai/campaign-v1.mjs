@@ -496,6 +496,9 @@ async function sourceBoundQuestionHistoryV1(raw){
   return {schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
    campaignId,histories:[],unavailable:[{status:'CONTROLLER_DIRECTORY_UNAVAILABLE'}]};
  const workspace=directory.workspacePath,selected=new Map(),unavailable=[];
+ // A phase canonical contributes original question-roster identities only when
+ // an accepted receipt authenticates its exact committed SHA-256.
+ const acceptedPhaseReceipts=await historyPhaseReceiptPathsV1(workspace).catch(()=>null);
  const indexedPaths=new Map();
  for(const p of [4,5,6]){
   if(p>phase)continue;
@@ -503,9 +506,36 @@ async function sourceBoundQuestionHistoryV1(raw){
   indexedPaths.set(p,await historyIndexPathsForPhaseV1(workspace,p).catch(()=>null));
   const canon=workspace+'/derived/phase-'+p+'/PHASE_'+name+'_CANONICAL_DATA_v1.json';
   const canonical=await historyJsonV1(canon).catch(()=>null);
-  for(const ref of canonical?.data?.automationOutputs?.questionHistoryRoster?.histories??[]){
-   if(ref?.unitId&&typeof ref.unitId==='string')
-    selected.set(p+':'+ref.unitId,{phaseSequence:p,unitId:ref.unitId,ref});
+  let canonicalAccepted=false;
+  if(canonical?.data?.schemaVersion==='curveyield-lite-phase-canonical-data-v1'&&
+     canonical.data.campaignId===campaignId&&canonical.data.phase===p){
+   const original='derived/phase-'+p+'/PHASE_'+name+'_CANONICAL_DATA_v1.json';
+   const receipts=(acceptedPhaseReceipts??[]).filter(path=>
+    path.startsWith(workspace+'/receipts/PHASE_'+name+'_RECEIPT_v'));
+   for(const receiptPath of receipts){
+    const receipt=await historyJsonV1(receiptPath).catch(()=>null);
+    const record=receipt?.data;
+    if(record?.campaign?.campaignId!==campaignId||
+       record?.campaign?.campaignGenerationId!==directory.campaignGenerationId||
+       record?.campaign?.workspacePath!==workspace||
+       record?.phase?.sequence!==p||
+       !['SEALED','COMPLETE'].includes(record?.phase?.status)||
+       record?.source?.sha256!==directory.sourceSha256)continue;
+    if((record.evidence??[]).some(ref=>ref?.role==='PHASE_CANONICAL_DATA'&&
+       ref.path===original&&ref.sha256===canonical.file.sha256)){
+     canonicalAccepted=true;break;
+    }
+   }
+  }
+  if(canonicalAccepted){
+   for(const ref of canonical?.data?.automationOutputs?.questionHistoryRoster?.histories??[]){
+    if(ref?.unitId&&typeof ref.unitId==='string')
+     selected.set(p+':'+ref.unitId,{phaseSequence:p,unitId:ref.unitId,ref});
+   }
+  }else if(canonical?.data?.automationOutputs?.questionHistoryRoster?.histories?.length){
+   unavailable.push({phaseSequence:p,canonicalPath:canon,
+    originalCanonicalSha256:canonical.file.sha256,
+    status:'QUESTION_ROSTER_CANONICAL_ACCEPTANCE_UNVERIFIED'});
   }
   const queue=await historyJsonV1(base+'/UNIT_QUEUE_STATE_v1.json').catch(()=>null);
   if(queue?.data?.campaignId!==campaignId||
