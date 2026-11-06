@@ -907,6 +907,8 @@ function unmappedAttackPathProvenanceV1({root,campaign,u,originalWorkerAttempt,s
     originalPathId:fields.pathId??null,
     originalAnchorsSelector:Object.hasOwn(fields,'anchors')?selector+'.anchors':null,
     originalCandidateSelector:Object.hasOwn(fields,'candidate')?selector+'.candidate':null,
+    originalCandidatesSelector:Object.hasOwn(fields,'candidates')?selector+'.candidates':null,
+    originalReasoningSelector:Object.hasOwn(fields,'reasoning')?selector+'.reasoning':null,
     originalWorkerAttempt:{availability:'AVAILABLE',path:sourcePath,sha256:sourceSha}
    };
    allRefs.push(ref);
