@@ -538,7 +538,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const sourceIndex=(unitId,selector)=>sourceIndexBySelector.get(
   JSON.stringify([unitId,(sourcePrefixes.get(unitId)??'submission.')+selector]))??null;
  const uniqueIndexes=indexes=>[...new Set(indexes.filter(Number.isInteger))];
- const candidateEvidence=[],pathEvidence=[],answerEvidence=[],checkEvidence=new Map();
+ const candidateEvidence=[],pathEvidence=[],answerEvidence=[],integrationAnswerRefs=[],checkEvidence=new Map();
  const recordCandidate=(candidate,indexes)=>{
   candidates.push(candidate);candidateEvidence.push(uniqueIndexes(indexes));
  };
@@ -548,13 +548,36 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   JSON.stringify([contextId,classId]))??null;
  for(const {unitId,submission} of rows){
   const isAttacker=unitId.startsWith('X-');
+  // FLOW and ATTACK answers are independent, even when their obligationIds
+  // overlap or their assessments conflict. Never merge or classify them here.
+  arr(submission?.integrationAnswers).forEach((answer,i)=>{
+   const selector='integrationAnswers['+i+']';
+   const sourceRefIndex=sourceIndex(unitId,selector);
+   const sourceRef=Number.isInteger(sourceRefIndex)?
+    discoverySourceRefs[sourceRefIndex]:null;
+   const originalSelector=sourceRef?.sourceSelector??null;
+   const candidateRefIndex=answer?.candidate?
+    sourceIndex(unitId,selector+'.candidate'):null;
+   answers.push(answer);answerEvidence.push(sourceRefIndex);
+   integrationAnswerRefs.push({
+    unitId,role:isAttacker?'ATTACK':'FLOW',originalIndex:i,
+    obligationId:answer?.obligationId??null,assessment:answer?.assessment??null,
+    // The accepted snapshot at discoverySourceRefs[sourceRefIndex] retains
+    // verbatim reasoning, every anchor and the complete optional candidate.
+    // Selectors avoid duplicating substantive evidence into another summary.
+    sourceReference:{collection:'discoverySourceRefs',
+     index:sourceRefIndex,availability:sourceRef?.availability??'SOURCE_UNAVAILABLE'},
+    reasoningSelector:originalSelector&&Object.hasOwn(answer??{},'reasoning')?
+     originalSelector+'.reasoning':null,
+    anchorsSelector:sourceRef?.originalAnchorsSelector??null,
+    candidateSelector:originalSelector&&Object.hasOwn(answer??{},'candidate')?
+     originalSelector+'.candidate':null,
+    candidateSourceRefIndex: candidateRefIndex,
+   });
+  });
   if(isAttacker){
    arr(submission?.attackPaths).forEach((attack,i)=>{
     paths.push(attack);pathEvidence.push(sourceIndex(unitId,'attackPaths['+i+']'));
-   });
-   // FLOW integration answers are introduced in Step 3, not this change.
-   arr(submission?.integrationAnswers).forEach((answer,i)=>{
-    answers.push(answer);answerEvidence.push(sourceIndex(unitId,'integrationAnswers['+i+']'));
    });
    continue;
   }
@@ -687,7 +710,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const discoveryState={reviewChecks:Object.fromEntries([...checks.entries()]),gaps,attackContradictions:contradictions};
  const coverage=buildCoverageMatrixV1({inventory,taxonomy,discoveryState});
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{
-  discoverySourceRefs,reconciliationEvidenceRefs,
+  discoverySourceRefs,reconciliationEvidenceRefs,integrationAnswerRefs,
   // All candidate origins, including nested ATTACK/integration/check
   // candidates, remain accessible by exact accepted-source selector.
   candidateSourceRefIndexes:discoverySourceRefs.flatMap((ref,index)=>
