@@ -274,7 +274,6 @@ try {
   ok(threshold===1n,"Safe approval threshold changed; refusing prevalidated v=1 signer simulation");
   ok(owners.some(o=>o.toLowerCase()===A.owner.toLowerCase()),
     "selected EOA is not an owner of requested Safe");
-  const execSelector=vault.interface.getFunction("execute").selector;
   const callbackSelector=vault.interface.getFunction("updateCallbackHandler").selector;
   const [execRole,callbackRole,roleAdmin100,roleAdmin200,roleAdmin300,
     role1,role100,role200,role300]=await Promise.all([
