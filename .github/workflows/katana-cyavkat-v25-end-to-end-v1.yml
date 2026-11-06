@@ -259,7 +259,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 80
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: foundry-rs/foundry-toolchain@v1
@@ -339,3 +339,53 @@ jobs:
             process/avkat-fork-simulation-v1/out/
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Export v9 CREATE2 proposal data to this isolated branch if and only if simulation passed
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd process/avkat-fork-simulation-v1
+          forge build --use 0.8.30 --via-ir --optimize --optimizer-runs 200 --skip test > /dev/null
+          python3 - <<'PY'
+          import pathlib,json,subprocess,hashlib
+          root=pathlib.Path.cwd()
+          artifacts=list((root/"out").glob("**/AVKATConsolidatedSafeModule.json"))
+          if len(artifacts)!=1:raise RuntimeError(f"Expected one contract artifact, found {len(artifacts)}")
+          j=json.loads(artifacts[0].read_text())
+          runtime=j["deployedBytecode"]["object"].removeprefix("0x")
+          creation=bytes.fromhex(j["bytecode"]["object"].removeprefix("0x"))
+          addrs=["f39087af2107eadbf81f10a64051740a76b6291d",
+                 "d50f2dfffd62f94ee4aed9ca05c61d0753268abc",
+                 "7f1f4b4b29f5058fa32cc7a97141b8d7e5abdc2d",
+                 "7231dbacdfc968e07656d12389ab20de82fbfceb"]
+          market="80e60fe453223b0f84a567724f88190bef708420d24397157067d424429783e9"
+          args=bytes.fromhex("".join(v.zfill(64) for v in addrs)+market)
+          assert len(args)==160
+          init=creation+args
+          def keccak(data):
+              x="0x"+data.hex()
+              return subprocess.check_output(["cast","keccak",x],text=True).strip().lower()
+          salt=keccak(b"AVKAT_Consolidated_Safe_Module_v9_Katana_Safe_2026-11-06")
+          factory="0x4e59b44847b379578588920ca78fbf26c0b4956c"
+          init_hash=keccak(init)
+          predicted=keccak(bytes.fromhex("ff"+factory[2:]+salt[2:]+init_hash[2:]))[-40:]
+          assert predicted=="b0832afff2387edb89d799b967b49f910efc343d",predicted
+          call_data="0x"+salt[2:]+init.hex()
+          out=root/"deployment-create2-call-v1.txt"
+          out.write_text(call_data)
+          meta={"factory":factory,"salt":salt,"predictedModuleAddress":"0x"+predicted,
+                "initcodeHash":init_hash,"creationBytes":len(creation),"constructorArgsBytes":len(args),
+                "runtimeBytes":len(runtime)//2,"callDataBytes":(len(call_data)-2)//2,
+                "sourceSha256":hashlib.sha256((root/"src"/"AVKAT_Consolidated_Safe_Module_v9.sol").read_bytes()).hexdigest(),
+                "safe":"0x"+addrs[0],"morpho":"0x"+addrs[1],"KAT":"0x"+addrs[2],
+                "avKAT":"0x"+addrs[3],"marketId":"0x"+market,
+                "forkTestsPassed":True}
+          (root/"deployment-create2-manifest-v1.json").write_text(json.dumps(meta,indent=2)+"\n")
+          print("CREATE2_SAFETX_MANIFEST",json.dumps(meta))
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deployment-create2-call-v1.txt deployment-create2-manifest-v1.json
+          git commit -m "ci(avkat): stage verified v9 Safe CREATE2 deployment calldata on isolated branch"
+          git push origin HEAD:avkat-v9-revalidation-20261105
