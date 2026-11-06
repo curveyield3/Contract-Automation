@@ -199,8 +199,18 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
     if(callDedup.has(key))return; callDedup.add(key); callGraph.push({...edge,callEdgeId:`CALL-${pad(callGraph.length+1,4)}`});
   }
   function pushExternal(item){
-    const key=[item.callerFunctionId,item.interfaceOrType??'',item.memberOrName??''].join('|');
-    if(externalDedup.has(key))return; externalDedup.add(key); externalInterfaces.push({...item,externalInterfaceId:`EXT-${pad(externalInterfaces.length+1,4)}`});
+    // Repeat visits to the same AST call collapse; distinct spans must survive.
+    const origin=item.sourceCallsite;
+    const span=typeof origin?.astSourceSpan==='string'&&/^\d+:\d+:\d+$/.test(origin.astSourceSpan)?origin.astSourceSpan:null;
+    const key=span!==null
+      ? JSON.stringify(['AST_SPAN',origin.compilationUnitId,origin.sourcePath,span])
+      : Number.isInteger(origin?.astNodeId)
+        ? JSON.stringify(['AST_NODE_FALLBACK',origin?.compilationUnitId,origin?.sourcePath,origin.astNodeId])
+        : null;
+    // If no AST origin is available, preserve the observation instead of guessing identity.
+    if(key&&externalDedup.has(key))return;
+    if(key)externalDedup.add(key);
+    externalInterfaces.push({...item,externalInterfaceId:`EXT-${pad(externalInterfaces.length+1,4)}`});
   }
   function pushValue(item){
     const key=[item.callerFunctionId,item.flowKind,item.memberOrName??'',item.sourceLocation??''].join('|');
@@ -226,6 +236,14 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
           const target=Number.isInteger(ref)?(functionByAstId.get(`${unit.unitId}:${ref}`)??null):null;
           const member=expressionMember(node.expression);
           const interfaceType=expressionType(node.expression);
+          // Compiler provenance supplements (never replaces) the existing EXT record ID.
+          const sourceCallsite={
+            compilationUnitId:unit.unitId,
+            sourcePath:sourceName,
+            sourceDigestSha256:source?.sha256??null,
+            astSourceSpan:typeof node.src==='string'?node.src:null,
+            astNodeId:Number.isInteger(node.id)?node.id:null
+          };
           const isMember=expr?.nodeType==='MemberAccess';
           const sameContract=target?.contractId===callerContractId;
           const callClass=target ? (sameContract?'INTERNAL_OR_SELF':'CROSS_CONTRACT_OR_INHERITED') : (isMember?'UNRESOLVED_MEMBER_CALL':'UNRESOLVED_CALL');
@@ -237,7 +255,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
           if(isMember && (!target || !sameContract)){
             pushExternal({callerContractId,callerFunctionId:caller.functionId,targetContractId:target?.contractId??null,targetFunctionId:target?.functionId??null,
               interfaceOrType:interfaceType,memberOrName:member,sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',
-              basis:'MEMBER_ACCESS_FUNCTION_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+              basis:'MEMBER_ACCESS_FUNCTION_CALL',securityInterpretation:'DEFER_TO_REVIEWER',sourceCallsite});
           }
           if(['transfer','transferFrom','safeTransfer','safeTransferFrom','send'].includes(member)){
             pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'TOKEN_OR_NATIVE_TRANSFER_CALL',memberOrName:member,interfaceOrType:interfaceType,
@@ -249,7 +267,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
           }
           if(member==='call'||member==='delegatecall'||member==='staticcall'){
             pushExternal({callerContractId,callerFunctionId:caller.functionId,targetContractId:null,targetFunctionId:null,interfaceOrType:interfaceType,
-              memberOrName:member,sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'LOW_LEVEL_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+              memberOrName:member,sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'LOW_LEVEL_CALL',securityInterpretation:'DEFER_TO_REVIEWER',sourceCallsite});
             if(member==='call'){
               pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'LOW_LEVEL_CALL_POTENTIAL_VALUE_TRANSFER',memberOrName:member,interfaceOrType:interfaceType,
                 sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'LOW_LEVEL_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
