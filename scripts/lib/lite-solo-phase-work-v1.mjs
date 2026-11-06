@@ -373,6 +373,28 @@ export function attachOriginalCanonicalEvidenceRefsV1({root,campaignPath,directo
        '/actions','/automationInputs','/automationOutputs']
    }))
  };
+ if(sequence>=8){
+   // Phase 7 is a mechanical marker, not substantive reviewer canonical data.
+   // Its absence can be legitimate on reassigned/fork paths, but must be
+   // visible, never inferred as a security conclusion.
+   const markerPath=path.posix.join(campaignPath,
+     'derived/phase-7/PHASE8_MARKER_INPUT_v1.json');
+   const markerFile=repoFile(root,markerPath);
+   let markerSha256=null;
+   let markerAvailability='NOT_PUBLISHED_OR_NOT_APPLICABLE';
+   try{
+     if(fs.existsSync(markerFile)&&fs.statSync(markerFile).isFile()){
+       markerSha256=createHash('sha256').update(fs.readFileSync(markerFile)).digest('hex');
+       markerAvailability='AVAILABLE';
+     }
+   }catch(error){
+     markerAvailability='UNREADABLE';
+     form.automationInputs.originalCanonicalEvidenceRefs.diagnostics.push(
+       'Phase 7 marker unavailable: '+String(error?.message??error));
+   }
+   form.automationInputs.originalCanonicalEvidenceRefs.phase7Marker={
+     path:markerPath,sha256:markerSha256,availability:markerAvailability};
+ }
  form.automationInputs.controllerOwnedAutomationInputs=[
    ...new Set([...(form.automationInputs.controllerOwnedAutomationInputs??[]),
      'originalCanonicalEvidenceRefs'])];
