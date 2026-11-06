@@ -477,6 +477,7 @@ async function sourceBoundQuestionHistoryV1(raw){
  // Pin every question-index and checkpoint read to one immutable GitHub tree.
  // The next claim gets a fresh HEAD and thus sees late-published records.
  historyFileCache.clear();
+ historyArchivedTreeCacheV1.clear();
  historySnapshotCommit=null;
  const phase=Number(live.phase);
  try{
@@ -583,6 +584,7 @@ async function sourceBoundQuestionHistoryV1(raw){
   schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
   campaignId,sourceSha256:directory.sourceSha256,
   sourceRepo:historyRepo,sourceBranch:historyBranch,
+  snapshotCommit:historySnapshotCommit,
   description:'Exact committed source-bound investigative question and answer records; not inferred formal audit conclusions.',
   histories:records,unavailable
  }:null;
