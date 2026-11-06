@@ -20,7 +20,7 @@
     },
     {
       "source": "assets/BoostHubStaking_v22.creation.hex",
-      "destination": "test/phase5/BoostHubStaking_v22.creation.hex"
+      "destination": "artifacts_v6/phase5/BoostHubStaking_v22.creation.hex"
     },
     {
       "source": "test/phase5/BoostHubV9VyperP5Targets_v1.t.sol",
