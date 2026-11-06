@@ -1,0 +1,1041 @@
+name: Lite-Solo AI Source Inference and Autonomous Beta v6
+on:
+  push:
+    branches: [machine-intelligence-audit-controller-v1]
+    paths:
+      - 'process/agent-upload/lite-solo-ai-training-request-v1.json'
+      - 'process/agent-upload/lite-solo-ai-audit-request-v1.json'
+  workflow_dispatch:
+    inputs:
+      inference_runners:
+        description: One local MiMo CPU, or 2/4 distributed CPU inference hosts via private RPC
+        type: choice
+        required: false
+        default: '1'
+        options: ['1', '2', '4']
+      mode:
+        description: Public source draft, legacy v5 step, new AI v6 start, or v6 autonomous continuation
+        required: true
+        default: public
+        type: choice
+        options: [public, campaign, autonomous_start, autonomous, train]
+      source_url:
+        description: HTTPS source ZIP URL for one-time new autonomous AI-v6 beta start
+        required: false
+        type: string
+      ai_hop:
+        description: Internal finite continuation counter; leave 0 when manually starting
+        required: false
+        default: '0'
+        type: string
+      campaign_id:
+        description: Exact private campaign ID, including -rN (campaign mode)
+        required: false
+        type: string
+      expected_phase:
+        description: Exact authorized phase number (campaign mode)
+        required: false
+        type: string
+      expected_step:
+        description: Exact authorized numbered step (campaign mode)
+        required: false
+        type: string
+      operator_authorized_step:
+        description: Deprecated compatibility flag; the independent Worker owns step authorization
+        required: false
+        default: false
+        type: boolean
+      submission_mode:
+        description: Whether to submit generated work to the existing Worker after independent review
+        required: true
+        default: draft
+        type: choice
+        options: [draft, submit]
+      train_dataset_path:
+        description: Checked-in PUBLIC supervised JSONL input for train mode
+        type: string
+        required: false
+      train_model_revision:
+        description: Immutable original MiMo checkpoint SHA; auto-pin when blank
+        type: string
+        default: ''
+        required: false
+      train_steps:
+        description: Target optimizer steps, up to 100
+        type: string
+        default: '1'
+        required: false
+      train_sequence_length:
+        description: Max tokens per sample (32-256)
+        type: string
+        default: '128'
+        required: false
+      train_minutes:
+        description: Per-rank execution budget (1-70 minutes)
+        type: string
+        default: '65'
+        required: false
+      train_resume_run:
+        description: Optional previous eight-rank checkpoint workflow run ID
+        type: string
+        default: ''
+        required: false
+      source_path:
+        description: Checked-in PUBLIC Solidity or Vyper file or directory (public mode only)
+        required: false
+        type: string
+      max_chunks:
+        description: Source chunks to analyze, 1-32
+        required: false
+        default: '12'
+        type: string
+permissions:
+  contents: read
+  id-token: write
+  actions: write
+concurrency:
+  group: lite-solo-ai-${{ inputs.mode }}-${{ (inputs.mode == 'campaign' || inputs.mode == 'autonomous') && inputs.campaign_id || inputs.mode == 'autonomous_start' && inputs.source_url || inputs.source_path }}
+  cancel-in-progress: false
+env:
+  MACHINE_INTELLIGENCE_WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL }}
+  MODEL_SHA256: 4bca6f18c73f72270c7a20c2ea2bea581de8246e318714277120369d34048c81
+  LLAMA_SHA: 8642541b255bfb5dc39cd351a178be09013a55d6
+  GGML_RPC_NO_RDMA: '1'
+jobs:
+  audit-file-trigger:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout file-trigger request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Dispatch existing MiMo autonomous inference workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          request='process/agent-upload/lite-solo-ai-audit-request-v1.json'
+          changed_files="$(gh api "repos/curveyield3/Contract-Automation/commits/$GITHUB_SHA" --jq '.files[].filename')"
+          if ! grep -Fqx "$request" <<< "$changed_files"; then
+            echo 'This push did not change the audit request; no inference dispatch.'
+            exit 0
+          fi
+          test -s "$request"
+          # New campaign initiation reuses the EXISTING autonomous_start mode.
+          # Do not duplicate campaign creation, Worker's admission logic, or phase orchestration.
+          if [ "$(jq -r '.mode // empty' "$request")" = autonomous_start ]; then
+            jq -e '
+              .schemaVersion == "lite-solo-ai-audit-request-v1"
+              and .mode == "autonomous_start"
+              and (.source_url | type == "string")
+              and (.source_url | test("^https://github\\.com/curveyield3/Audit-Controller/blob/machine-intelligence-audit-controller-v1/campaigns/[A-Za-z0-9._-]+\\.zip$"))
+              and (.inference_runners == "1" or .inference_runners == "2" or .inference_runners == "4")
+              and .submission_mode == "submit"
+              and (.max_chunks | type == "string" and test("^([1-9]|[12][0-9]|3[012])$"))
+              and .ai_hop == "0"
+            ' "$request" >/dev/null
+            gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref machine-intelligence-audit-controller-v1 \
+              -f "mode=autonomous_start" \
+              -f "source_url=$(jq -r .source_url "$request")" \
+              -f "inference_runners=$(jq -r .inference_runners "$request")" \
+              -f "submission_mode=$(jq -r .submission_mode "$request")" \
+              -f "max_chunks=$(jq -r .max_chunks "$request")" \
+              -f "ai_hop=0"
+            echo "MiMo new autonomous source dispatch submitted; new campaign identity and controller acceptance remain pending."
+            exit 0
+          fi
+          jq -e '
+            .schemaVersion == "lite-solo-ai-audit-request-v1"
+            and .mode == "autonomous"
+            and (.inference_runners == "1" or .inference_runners == "2" or .inference_runners == "4")
+            and (.campaign_id | type == "string" and test("^[A-Za-z0-9_.-]+$"))
+            and (.expected_phase | type == "string" and test("^[0-9]+$"))
+            and (.expected_step | type == "string" and test("^[0-9]+$"))
+            and .submission_mode == "submit"
+            and (.max_chunks | type == "string" and test("^([1-9]|[12][0-9]|3[012])$"))
+            and (.ai_hop | type == "string" and test("^[0-9]+$"))
+          ' "$request" >/dev/null
+          old_run="$(jq -r '.supersedes_run_id // empty' "$request")"
+          if [ -n "$old_run" ]; then
+            [[ "$old_run" =~ ^[0-9]+$ ]] || { echo "::error::Invalid superseded run ID"; exit 1; }
+            old_sha="$(jq -r '.supersedes_run_sha // empty' "$request")"
+            [[ "$old_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Expected exact superseded commit SHA"; exit 1; }
+            old_metadata="$(gh api "repos/curveyield3/Contract-Automation/actions/runs/$old_run")"
+            printf '%s' "$old_metadata" | jq -e --arg sha "$old_sha" '
+              .head_sha==$sha and .event=="workflow_dispatch" and .head_branch=="machine-intelligence-audit-controller-v1"
+              and .path==".github/workflows/lite-solo-ai-inference-v1.yml"
+            ' >/dev/null || { echo "::error::Superseded workflow identity mismatch"; exit 1; }
+            old_status="$(printf '%s' "$old_metadata" | jq -r '.status')"
+            if [ "$old_status" != completed ]; then
+              gh run cancel "$old_run" --repo curveyield3/Contract-Automation
+              for attempt in $(seq 1 30); do
+                old_status="$(gh api "repos/curveyield3/Contract-Automation/actions/runs/$old_run" --jq '.status')"
+                [ "$old_status" = completed ] && break
+                sleep 5
+              done
+              [ "$old_status" = completed ] || { echo "::error::Old audit run not terminal, refusing parallel launch"; exit 1; }
+            fi
+            echo "Old exact audit run $old_run terminated; controller-accepted work stays immutable."
+          fi
+          gh workflow run lite-solo-ai-inference-v1.yml --repo curveyield3/Contract-Automation --ref machine-intelligence-audit-controller-v1 \
+            -f "mode=$(jq -r .mode "$request")" \
+            -f "inference_runners=$(jq -r .inference_runners "$request")" \
+            -f "campaign_id=$(jq -r .campaign_id "$request")" \
+            -f "expected_phase=$(jq -r .expected_phase "$request")" \
+            -f "expected_step=$(jq -r .expected_step "$request")" \
+            -f "submission_mode=$(jq -r .submission_mode "$request")" \
+            -f "max_chunks=$(jq -r .max_chunks "$request")" \
+            -f "ai_hop=$(jq -r .ai_hop "$request")"
+          echo "MiMo autonomous inference dispatch submitted; controller acceptance not yet established."
+  infer:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode != 'train'
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.mode == 'autonomous' && 355 || 100 }}
+    env:
+      AUDIT_AI_MODE: ${{ inputs.mode }}
+      AI_INFERENCE_RUNNERS: ${{ inputs.inference_runners || '1' }}
+      AUDIT_AI_SOURCE_URL: ${{ inputs.source_url }}
+      AUDIT_AI_HOP: ${{ inputs.ai_hop }}
+      AUDIT_AI_SOURCE_PATH: ${{ inputs.source_path }}
+      AUDIT_AI_CAMPAIGN_ID: ${{ inputs.campaign_id }}
+      AUDIT_AI_EXPECTED_PHASE: ${{ inputs.expected_phase }}
+      AUDIT_AI_EXPECTED_STEP: ${{ inputs.expected_step }}
+      AUDIT_AI_SUBMISSION_MODE: ${{ inputs.submission_mode }}
+      AUDIT_AI_MAX_CHUNKS: ${{ inputs.max_chunks }}
+      MODEL_FILE: MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf
+      MODEL_REVISION: 4371da10c84fb26da3592d4cf312d24aa82b7b65
+    steps:
+      - name: Record autonomous runner start for bounded 5h45 handoff
+        if: inputs.mode == 'autonomous'
+        shell: bash
+        run: echo "AUDIT_AI_STARTED_AT_MS=$(($(date +%s)*1000))" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Check resource budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$AI_INFERENCE_RUNNERS" == 1 || "$AI_INFERENCE_RUNNERS" == 2 || "$AI_INFERENCE_RUNNERS" == 4 ]] || {
+            echo "::error::Unsupported MiMo inference runner count"; exit 1;
+          }
+          [[ "$AUDIT_AI_MAX_CHUNKS" =~ ^[0-9]+$ ]]
+          test "$AUDIT_AI_MAX_CHUNKS" -ge 1
+          test "$AUDIT_AI_MAX_CHUNKS" -le 32
+          case "$AUDIT_AI_MODE" in
+            public)
+              test -n "$AUDIT_AI_SOURCE_PATH"
+              test "$AUDIT_AI_SUBMISSION_MODE" = draft
+              ;;
+            autonomous_start)
+              [[ "$AUDIT_AI_SOURCE_URL" =~ ^https:// ]]
+              [[ "$AUDIT_AI_HOP" =~ ^[0-9]+$ ]]
+              test "$AUDIT_AI_HOP" -eq 0
+              ;;
+            autonomous)
+              test -n "$AUDIT_AI_CAMPAIGN_ID"
+              [[ "$AUDIT_AI_EXPECTED_PHASE" =~ ^[0-9]+$ ]]
+              [[ "$AUDIT_AI_EXPECTED_STEP" =~ ^[0-9]+$ ]]
+              [[ "$AUDIT_AI_HOP" =~ ^[0-9]+$ ]]
+              test "$AUDIT_AI_HOP" -le 120
+              test "$AUDIT_AI_SUBMISSION_MODE" = submit
+              ;;
+            campaign)
+              test -n "$AUDIT_AI_CAMPAIGN_ID"
+              [[ "$AUDIT_AI_EXPECTED_PHASE" =~ ^[0-9]+$ ]]
+              [[ "$AUDIT_AI_EXPECTED_STEP" =~ ^[0-9]+$ ]]
+              ;;
+            *) exit 1;;
+          esac
+          df -h "$RUNNER_TEMP"
+          free -h
+      - name: Reclaim own audit shard or diagnose foreign lease before CPU inference
+        if: inputs.mode == 'autonomous'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module - <<'NODE'
+          const campaignId=process.env.AUDIT_AI_CAMPAIGN_ID;
+          const expectedPhase=Number(process.env.AUDIT_AI_EXPECTED_PHASE);
+          const expectedStep=Number(process.env.AUDIT_AI_EXPECTED_STEP);
+          const identityUrl=process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+          const grant=process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+          if(!identityUrl||!grant)throw Error('Signed OIDC required for Worker lease recovery');
+          const grantResponse=await fetch(identityUrl+(identityUrl.includes('?')?'&':'?')+
+            'audience='+encodeURIComponent('urn:curveyield:lite-solo:github-actions-ai:v1'),{
+              headers:{authorization:'bearer '+grant},signal:AbortSignal.timeout(20000)});
+          if(!grantResponse.ok)throw Error('OIDC identity HTTP '+grantResponse.status);
+          const token=(await grantResponse.json()).value;
+          if(typeof token!=='string')throw Error('Signed OIDC identity missing');
+          async function worker(route,body){
+            const response=await fetch(process.env.MACHINE_INTELLIGENCE_WORKER_URL+route,{
+              method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},
+              body:JSON.stringify({campaignId,...body}),signal:AbortSignal.timeout(90000)});
+            const data=await response.json();
+            if(!response.ok)throw Error('Worker '+route+' HTTP '+response.status+': '+
+              String(data.error||data.reason||data.status).slice(0,160));
+            return data;
+          }
+          const current=await worker('/api/step/current',{});
+          if(current.phase!==expectedPhase||current.currentStep!==expectedStep)
+            throw Error('Assigned campaign changed: expected '+expectedPhase+'/'+expectedStep+
+              ', Worker reports '+current.phase+'/'+current.currentStep);
+          // The Worker is the sole lease authority. Do not abort from a stale
+          // GitHub-side readiness snapshot; the subsequent Worker claim decides.
+          if(current.status!=='ACTIVE'||current.engagement?.stage!=='WORK'||
+             ![1,2,3,8,9,10].includes(current.phase)){
+            console.log(JSON.stringify({status:'MIMO_LEASE_PREFLIGHT_DEFERRED',
+              workerStatus:current.status,engagementStage:current.engagement?.stage||null}));
+          }else{
+            const claim=await worker('/api/step/process',{action:'claim'});
+            if(claim.status==='NO_AVAILABLE_SHARD')
+              throw Error('MIMO_FOREIGN_LEASE_BLOCKED: '+(claim.counts?.leased||0)+
+                ' unit(s) leased by another caller. Use the existing admin step_release '+
+                'action on the exact unfinished unit before relaunching; accepted work is retained.');
+            if(claim.status!=='LEASED_SHARD'||!claim.unitId||!claim.lease)
+              throw Error('Unexpected Worker claim result: '+String(claim.status));
+            console.log(JSON.stringify({status:'MIMO_LEASE_READY',
+              unitId:claim.unitId,phase:claim.phase,step:claim.step,
+              recovery:'Existing GitHub AI identity reclaims same lease on next claim'}));
+          }
+          NODE
+      - name: Launch standalone AI-v6 beta using signed job identity
+        if: inputs.mode == 'autonomous_start'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module - <<'NODE'
+          const sourceUrl=process.env.AUDIT_AI_SOURCE_URL;
+          if(!/^https:\/\//.test(sourceUrl))throw Error('Source ZIP HTTPS URL required');
+          const endpoint=process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+          const grant=process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+          if(!endpoint||!grant)throw Error('GitHub OIDC identity unavailable');
+          const tokenResponse=await fetch(endpoint+(endpoint.includes('?')?'&':'?')+'audience='+encodeURIComponent('urn:curveyield:lite-solo:github-actions-ai:v1'),
+            {headers:{authorization:'bearer '+grant},signal:AbortSignal.timeout(20000)});
+          if(!tokenResponse.ok)throw Error('OIDC issuance failed');
+          const credential=(await tokenResponse.json()).value;
+          const configuredRunners=String(process.env.AI_INFERENCE_RUNNERS||'1');
+          if(!['1','2','4'].includes(configuredRunners))throw Error('Invalid requested autonomous inference runner count');
+          const body={requestId:'ai-'+process.env.GITHUB_RUN_ID,sourceUrl,aiAutonomous:true,
+            inferenceRunners:configuredRunners};
+          const response=await fetch(process.env.MACHINE_INTELLIGENCE_WORKER_URL+'/api/campaign/start',{
+            method:'POST',headers:{authorization:'Bearer '+credential,'content-type':'application/json'},
+            body:JSON.stringify(body),signal:AbortSignal.timeout(90000)});
+          const payload=await response.json();
+          if(!response.ok)throw Error('AI beta campaign admission rejected HTTP '+response.status);
+          const result={status:payload.status,requestId:payload.requestId,
+            inferenceRunners:configuredRunners,controllerAccepted:false};
+          console.log(JSON.stringify(result));
+          NODE
+      - name: Resolve existing authorized private controller credential
+        if: inputs.mode == 'campaign' || inputs.mode == 'autonomous'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Build pinned CPU llama.cpp
+        if: inputs.mode != 'autonomous_start'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$RUNNER_TEMP/llama.cpp"
+          git -C "$RUNNER_TEMP/llama.cpp" fetch --quiet --depth=1 origin "$LLAMA_SHA"
+          git -C "$RUNNER_TEMP/llama.cpp" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/llama.cpp" rev-parse HEAD)" = "$LLAMA_SHA"
+          rpc_opts=()
+          targets=(llama-server)
+          if [ "$AI_INFERENCE_RUNNERS" != 1 ]; then
+            rpc_opts=(-DGGML_RPC=ON -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DLLAMA_BUILD_TESTS=OFF)
+            targets+=(ggml-rpc-server)
+          fi
+          cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF "${rpc_opts[@]}"
+          cmake --build "$RUNNER_TEMP/llama-build" --target "${targets[@]}" -j 4
+      - name: Fetch and verify pinned MiMo weights
+        if: inputs.mode != 'autonomous_start'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/models"
+          curl -fL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/models/$MODEL_FILE" \
+            "https://huggingface.co/bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF/resolve/$MODEL_REVISION/$MODEL_FILE"
+          printf '%s  %s\n' "$MODEL_SHA256" "$RUNNER_TEMP/models/$MODEL_FILE" | sha256sum --check
+          df -h "$RUNNER_TEMP"
+      - name: Join private inference tailnet and start local RPC device
+        if: inputs.mode != 'autonomous_start' && (inputs.inference_runners == '2' || inputs.inference_runners == '4')
+        shell: bash
+        env:
+          TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TAILNET_TAG: tag:audit-browser,tag:ai-training
+        run: |
+          set -euo pipefail
+          test -n "$TS_CLIENT_ID" || { echo "::error::Missing existing TS_OAUTH_CLIENT_ID"; exit 1; }
+          bash scripts/browser-agent-tailnet-oidc.sh
+          test -x "$RUNNER_TEMP/llama-build/bin/ggml-rpc-server"
+          nohup "$RUNNER_TEMP/llama-build/bin/ggml-rpc-server" \
+            --host 127.0.0.1 --port 50052 --threads 4 \
+            > "$RUNNER_TEMP/mimo-local-rpc.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/mimo-local-rpc.pid"
+          sleep 3
+          kill -0 "$(cat "$RUNNER_TEMP/mimo-local-rpc.pid")" || {
+            tail -n 50 "$RUNNER_TEMP/mimo-local-rpc.log"; exit 1;
+          }
+      - name: Resolve exact-run private RPC inference peers
+        if: inputs.mode != 'autonomous_start' && (inputs.inference_runners == '2' || inputs.inference_runners == '4')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/lite-solo-ai/rpc-rendezvous-v1.py collect \
+            --run-id "$GITHUB_RUN_ID" --mode "$AI_INFERENCE_RUNNERS" \
+            --model-sha256 "$MODEL_SHA256" --llama-commit "$LLAMA_SHA" \
+            --destination "$RUNNER_TEMP/mimo-rpc-peers" \
+            --output "$RUNNER_TEMP/mimo-rpc-addresses.txt"
+          rpc="$(cat "$RUNNER_TEMP/mimo-rpc-addresses.txt")"
+          test "$(printf '%s' "$rpc" | awk -F, '{print NF}')" -eq "$AI_INFERENCE_RUNNERS"
+          for endpoint in $(printf '%s' "$rpc" | tr ',' ' '); do
+            host="${endpoint%:*}"
+            port="${endpoint##*:}"
+            if [ "$host" != 127.0.0.1 ]; then
+              # Direct and DERP-relayed Tailscale paths are both encrypted.
+              # The previous default ping required a direct path and falsely failed on DERP.
+              timeout 30 tailscale ping --until-direct=false --c=2 --timeout=10s "$host" ||
+                echo "::warning::Tailscale ping inconclusive; probing private RPC TCP endpoint"
+              connected=false
+              for attempt in $(seq 1 6); do
+                if timeout 12 bash -c 'exec 3<>/dev/tcp/"$1"/"$2"' _ "$host" "$port" 2>/dev/null; then
+                  connected=true
+                  echo "MiMo private RPC TCP listener reachable (attempt $attempt)"
+                  break
+                fi
+                sleep 5
+              done
+              if [ "$connected" != true ]; then
+                echo "::error::Private MiMo RPC TCP port unavailable after six attempts"
+                exit 1
+              fi
+            fi
+          done
+          echo "MIMO_RPC_CSV=$rpc" >> "$GITHUB_ENV"
+          echo "Selected $AI_INFERENCE_RUNNERS exact-run MiMo RPC devices" >> "$GITHUB_STEP_SUMMARY"
+      - name: Run model inference in authorized mode
+        if: inputs.mode != 'autonomous_start'
+        shell: bash
+        env:
+          GITHUB_ACTIONS_DISPATCH_TOKEN: ${{ github.token }}
+          AUDIT_AI_OUTPUT: ${{ runner.temp }}/lite-solo-ai/analysis.json
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$AUDIT_AI_OUTPUT")"
+          if [ "$AI_INFERENCE_RUNNERS" = 1 ]; then
+            set -- --n-gpu-layers 0
+          else
+            test -n "$MIMO_RPC_CSV" || { echo "::error::Missing exact-run RPC peer list"; exit 1; }
+            set -- --rpc "$MIMO_RPC_CSV" --n-gpu-layers 99
+          fi
+          "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/models/$MODEL_FILE" \
+            --alias lite-solo-mimo-v1 --host 127.0.0.1 --port 8080 \
+            --ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on \
+            --threads 4 --parallel 1 "$@" \
+            > "$RUNNER_TEMP/mimo-server.log" 2>&1 &
+          pid=$!
+          # Passive resource telemetry; uses only Linux /proc and existing Python 3.
+          python3 -u - "$pid" "$RUNNER_TEMP/mimo-resource-metrics.jsonl" <<'PY' &
+          import json, os, pathlib, signal, sys, threading, time
+          
+          pid = int(sys.argv[1])
+          report = pathlib.Path(sys.argv[2])
+          stop = threading.Event()
+          signal.signal(signal.SIGTERM, lambda *_: stop.set())
+          hz = os.sysconf("SC_CLK_TCK")
+          proc = pathlib.Path("/proc") / str(pid)
+          cgroup = pathlib.Path("/sys/fs/cgroup")
+          samples = 0
+          max_cpu = 0.0
+          sum_cpu = 0.0
+          max_rss = 0.0
+          max_group_ram = 0.0
+          
+          def read_int(path):
+              try:
+                  raw = pathlib.Path(path).read_text().strip()
+                  return int(raw) if raw != "max" else None
+              except (OSError, ValueError):
+                  return None
+          
+          def cpu_ticks(stat):
+              raw = pathlib.Path(stat).read_text()
+              fields = raw[raw.rfind(")") + 2:].split()
+              return int(fields[11]) + int(fields[12])
+          
+          def read_threads():
+              values = {}
+              for stat in (proc / "task").glob("*/stat"):
+                  try:
+                      values[int(stat.parent.name)] = cpu_ticks(stat)
+                  except (OSError, ValueError, IndexError):
+                      continue
+              return values
+          
+          def fields_file(path):
+              result = {}
+              try:
+                  for line in pathlib.Path(path).read_text().splitlines():
+                      parts = line.replace(":", "").split()
+                      if len(parts) >= 2 and parts[1].isdigit():
+                          result[parts[0]] = int(parts[1])
+              except OSError:
+                  pass
+              return result
+          
+          def mib(kib):
+              return round(kib / 1024, 1) if kib is not None else None
+          
+          def bytes_mib(value):
+              return round(value / 1048576, 1) if value is not None else None
+          
+          def emit(value):
+              line = json.dumps(value, separators=(",", ":"), sort_keys=True)
+              # Keep 30-second CPU samples in the existing local JSONL file,
+              # not in the human-readable audit progress stream.
+              if value.get('status') in ('MIMO_RESOURCE_MONITOR_WARNING', 'MIMO_RESOURCE_SUMMARY'):
+                  print(line, flush=True)
+              try:
+                  with report.open("a", encoding="utf-8") as f:
+                      f.write(line + "\n")
+              except OSError:
+                  pass
+          
+          try:
+              cpu_quota = (cgroup / "cpu.max").read_text().split()
+              quota_cores = round(int(cpu_quota[0]) / int(cpu_quota[1]), 3) if cpu_quota[0] != "max" else None
+          except (OSError, ValueError, ZeroDivisionError, IndexError):
+              quota_cores = None
+          try:
+              affinity_cores = len(os.sched_getaffinity(pid))
+          except OSError:
+              affinity_cores = os.cpu_count()
+          capacity = min(affinity_cores, quota_cores) if quota_cores else affinity_cores
+          emit({"status": "MIMO_RESOURCE_MONITOR_STARTED", "intervalSeconds": 30,
+                "cpuAffinityCores": affinity_cores, "cpuQuotaCores": quota_cores,
+                "cpuEffectiveCapacityCores": capacity})
+          previous_time = time.monotonic()
+          try:
+              previous_ticks = cpu_ticks(proc / "stat")
+              previous_threads = read_threads()
+          except (OSError, ValueError, IndexError):
+              previous_ticks = None
+              previous_threads = {}
+          previous_cpu_stat = fields_file(cgroup / "cpu.stat")
+          while previous_ticks is not None and not stop.wait(30):
+              try:
+                  now = time.monotonic()
+                  ticks = cpu_ticks(proc / "stat")
+                  elapsed = max(0.001, now - previous_time)
+                  cpu = max(0.0, (ticks - previous_ticks) / hz / elapsed * 100)
+                  thread_ticks = read_threads()
+                  top_threads = sorted(
+                      ({"tid": tid, "cpuPercentOneCore": round(max(0, count - previous_threads.get(tid, count)) / hz / elapsed * 100, 1)}
+                       for tid, count in thread_ticks.items()),
+                      key=lambda x: -x["cpuPercentOneCore"])[:8]
+                  proc_status = fields_file(proc / "status")
+                  mem = fields_file("/proc/meminfo")
+                  cpu_stat = fields_file(cgroup / "cpu.stat")
+                  cgroup_ram = bytes_mib(read_int(cgroup / "memory.current"))
+                  rss = mib(proc_status.get("VmRSS"))
+                  throttle_prev = previous_cpu_stat.get("throttled_usec")
+                  throttle_now = cpu_stat.get("throttled_usec")
+                  throttled_ms = round(max(0, throttle_now - throttle_prev) / 1000, 1) if throttle_prev is not None and throttle_now is not None else None
+                  sample = {"status": "MIMO_RESOURCE_SAMPLE", "elapsedSeconds": round(elapsed, 1),
+                            "cpuPercentOneCore": round(cpu, 1),
+                            "cpuEffectiveCapacityPercent": round(cpu / capacity, 1) if capacity else None,
+                            "activeThreads": proc_status.get("Threads"), "threadCpuTop": top_threads,
+                            "processRssMiB": rss, "processPeakRssMiB": mib(proc_status.get("VmHWM")),
+                            "processVirtualMiB": mib(proc_status.get("VmSize")),
+                            "ramTotalMiB": mib(mem.get("MemTotal")), "ramAvailableMiB": mib(mem.get("MemAvailable")),
+                            "cgroupMemoryCurrentMiB": cgroup_ram, "cgroupMemoryPeakMiB": bytes_mib(read_int(cgroup / "memory.peak")),
+                            "cgroupMemoryLimitMiB": bytes_mib(read_int(cgroup / "memory.max")),
+                            "cgroupCpuThrottledMs": throttled_ms,
+                            "cgroupThrottleEvents": max(0, cpu_stat.get("nr_throttled", 0) - previous_cpu_stat.get("nr_throttled", 0))}
+                  emit(sample)
+                  samples += 1
+                  max_cpu = max(max_cpu, cpu)
+                  sum_cpu += cpu
+                  max_rss = max(max_rss, rss or 0)
+                  max_group_ram = max(max_group_ram, cgroup_ram or 0)
+                  previous_time, previous_ticks, previous_threads, previous_cpu_stat = now, ticks, thread_ticks, cpu_stat
+              except (OSError, ValueError, IndexError) as exc:
+                  emit({"status": "MIMO_RESOURCE_MONITOR_WARNING", "reason": type(exc).__name__})
+                  break
+          summary = {"status": "MIMO_RESOURCE_SUMMARY", "samples": samples,
+                     "averageCpuPercentOneCore": round(sum_cpu / samples, 1) if samples else None,
+                     "peakCpuPercentOneCore": round(max_cpu, 1) if samples else None,
+                     "peakProcessRssMiB": round(max_rss, 1) if samples else None,
+                     "peakCgroupMemoryMiB": round(max_group_ram, 1) if samples else None,
+                     "cpuEffectiveCapacityCores": capacity}
+          emit(summary)
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              try:
+                  with open(summary_path, "a", encoding="utf-8") as f:
+                      f.write("\n### MiMo CPU and RAM telemetry\n")
+                      f.write(f"- Sample interval: 30 s; samples: {samples}\n")
+                      f.write(f"- CPU effective capacity: {capacity} cores\n")
+                      f.write(f"- Average / peak CPU use (one core = 100%): {summary['averageCpuPercentOneCore']}% / {summary['peakCpuPercentOneCore']}%\n")
+                      f.write(f"- Peak model RSS / cgroup RAM: {summary['peakProcessRssMiB']} MiB / {summary['peakCgroupMemoryMiB']} MiB\n")
+                      f.write("- CPU samples remain in the local mimo-resource-metrics.jsonl file; the live log is reserved for MiMo actions and Worker dispositions.\n")
+              except OSError:
+                  pass
+          PY
+          monitor_pid=$!
+          cleanup_mimo() {
+            kill "$monitor_pid" 2>/dev/null || true
+            wait "$monitor_pid" 2>/dev/null || true
+            kill "$pid" 2>/dev/null || true
+          }
+          trap cleanup_mimo EXIT
+          ready=false
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:8080/health | jq -e '.status == "ok"' >/dev/null 2>&1; then ready=true; break; fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              tail -n 30 "$RUNNER_TEMP/mimo-server.log"; exit 1
+            fi
+            sleep 2
+          done
+          test "$ready" = true || { echo "Model load timeout"; exit 1; }
+          if [ "$AUDIT_AI_MODE" = campaign ] || [ "$AUDIT_AI_MODE" = autonomous ]; then
+            export AUDIT_CONTROLLER_GITHUB_TOKEN="${AUDIT_CONTROLLER_GITHUB_TOKEN:-}"
+            test -n "$AUDIT_CONTROLLER_GITHUB_TOKEN"
+          fi
+          node scripts/lite-solo-ai/review-v1.mjs
+      - name: Retain public-source draft artifact
+        if: always() && inputs.mode == 'public'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite-solo-ai-draft-${{ github.run_id }}
+          path: ${{ runner.temp }}/lite-solo-ai/analysis.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Summarize disposition without private evidence
+        if: always()
+        shell: bash
+        run: |
+          file="$RUNNER_TEMP/lite-solo-ai/analysis.json"
+          if [ "$AUDIT_AI_MODE" = campaign ] || [ "$AUDIT_AI_MODE" = autonomous ]; then
+            echo 'Private campaign mode: inspect the Worker for actual persisted acceptance. This job cannot seal a step.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$AUDIT_AI_MODE" = autonomous_start ]; then
+            echo 'AI autonomous campaign initialization submitted; controller Phase0 acceptance and later execution must be checked separately.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo 'Public read-only AI draft; NOT a controller submission or completed audit.' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$file" ]; then
+            jq -r '"Status: \(.status); reviewed \(.reviewed|length)/\(.totalChunks) chunks"' "$file" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Archive finished MiMo communications from private R2 to Audit-Controller MiMo
+        if: always() && (inputs.mode == 'campaign' || inputs.mode == 'autonomous')
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const campaignId=process.env.AUDIT_AI_CAMPAIGN_ID,runId=String(process.env.GITHUB_RUN_ID||'');
+          if(!/^[A-Za-z0-9_.-]+-r[0-9]+$/.test(campaignId||'')||!/^[0-9]+$/.test(runId))
+            throw Error('Cannot archive MiMo workflow without original campaign and GitHub run identity');
+          const identityEndpoint=process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+          const identityBearer=process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+          if(!identityEndpoint||!identityBearer)throw Error('Signed GitHub Actions OIDC identity unavailable');
+          const audience='urn:curveyield:lite-solo:github-actions-ai:v1';
+          async function token(){
+            const url=identityEndpoint+(identityEndpoint.includes('?')?'&':'?')+
+              'audience='+encodeURIComponent(audience);
+            const res=await fetch(url,{headers:{authorization:'bearer '+identityBearer},
+              signal:AbortSignal.timeout(20000)});
+            if(!res.ok)throw Error('OIDC issuance failed HTTP '+res.status);
+            const credential=(await res.json()).value;
+            if(typeof credential!=='string')throw Error('OIDC identity response missing token');
+            return credential;
+          }
+          let cursor=null,pages=0,events=0,files=0,complete=false;
+          for(;pages<10000;pages++){
+            const response=await fetch(process.env.MACHINE_INTELLIGENCE_WORKER_URL+'/api/ai/bridge',{
+              method:'POST',
+              headers:{authorization:'Bearer '+await token(),'content-type':'application/json'},
+              body:JSON.stringify({campaignId,operation:'archive',...(cursor?{cursor}:{})}),
+              signal:AbortSignal.timeout(150000)});
+            const data=await response.json().catch(()=>null);
+            if(!response.ok||data?.status!=='MIMO_ARCHIVE_PAGE_RECORDED')
+              throw Error('MiMo completed-run archive not accepted HTTP '+response.status+': '+
+                JSON.stringify(data).slice(0,700));
+            events+=data.archivedParts||0;files+=data.newFiles||0;complete=data.complete===true;
+            console.log(JSON.stringify({status:'MIMO_ARCHIVE_PROGRESS',runId,campaignId,page:pages+1,
+              archivedParts:events,newMarkdownFiles:files,completed:complete,
+              folder:data.folder,commit:data.commit||null,privateContent:'AUDIT_CONTROLLER_ONLY'}));
+            if(complete)break;
+            if(typeof data.nextCursor!=='string'||!data.nextCursor)
+              throw Error('Incomplete MiMo archive lacks authoritative R2 pagination cursor');
+            cursor=data.nextCursor;
+          }
+          if(!complete)throw Error('MiMo archive bounded iteration limit exhausted');
+          console.log(JSON.stringify({status:'MIMO_ARCHIVE_COMPLETED',runId,campaignId,
+            archivedParts:events,newMarkdownFiles:files,
+            source:'PRIVATE_R2',destination:'PRIVATE_AUDIT_CONTROLLER_MIMO'}));
+          NODE
+  inference-rpc:
+    if: github.event_name == 'workflow_dispatch' && (inputs.inference_runners == '2' || inputs.inference_runners == '4') && inputs.mode != 'train' && inputs.mode != 'autonomous_start'
+    name: MiMo RPC node ${{ matrix.rank }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: true
+      matrix:
+        rank: ${{ fromJSON(inputs.inference_runners == '4' && '[1,2,3]' || '[1]') }}
+    env:
+      AI_INFERENCE_RUNNERS: ${{ inputs.inference_runners }}
+      OMP_NUM_THREADS: '4'
+      MKL_NUM_THREADS: '4'
+    steps:
+      - name: Checkout same pinned audit workflow revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Connect ephemeral inference-only tailnet node
+        env:
+          TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TAILNET_TAG: tag:audit-browser,tag:ai-training
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TS_CLIENT_ID" || { echo "::error::Missing TS_OAUTH_CLIENT_ID"; exit 1; }
+          bash scripts/browser-agent-tailnet-oidc.sh
+      - name: Build identical pinned CPU GGML RPC backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$RUNNER_TEMP/llama.cpp"
+          git -C "$RUNNER_TEMP/llama.cpp" fetch --quiet --depth=1 origin "$LLAMA_SHA"
+          git -C "$RUNNER_TEMP/llama.cpp" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/llama.cpp" rev-parse HEAD)" = "$LLAMA_SHA"
+          cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" \
+            -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_RPC=ON \
+            -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DLLAMA_BUILD_TESTS=OFF
+          cmake --build "$RUNNER_TEMP/llama-build" --target ggml-rpc-server -j 4
+      - name: Start Tailscale-only RPC server and announce same-run identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ip="$(tailscale ip -4 | head -n 1)"
+          [[ "$ip" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          nohup "$RUNNER_TEMP/llama-build/bin/ggml-rpc-server" \
+            --host "$ip" --port 50052 --threads 4 \
+            > "$RUNNER_TEMP/mimo-rpc-server.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/mimo-rpc-server.pid"
+          sleep 3
+          kill -0 "$(cat "$RUNNER_TEMP/mimo-rpc-server.pid")" || {
+            tail -n 60 "$RUNNER_TEMP/mimo-rpc-server.log"; exit 1;
+          }
+          python3 scripts/lite-solo-ai/rpc-rendezvous-v1.py announce \
+            --run-id "$GITHUB_RUN_ID" --mode "$AI_INFERENCE_RUNNERS" \
+            --rank "${{ matrix.rank }}" --address "$ip" \
+            --model-sha256 "$MODEL_SHA256" --llama-commit "$LLAMA_SHA" \
+            --output "$RUNNER_TEMP/mimo-rpc-peer/rendezvous.json"
+      - name: Publish peer identity without campaign source or credentials
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite-solo-ai-rpc-v1-${{ github.run_id }}-rank-${{ matrix.rank }}
+          path: ${{ runner.temp }}/mimo-rpc-peer/rendezvous.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Maintain RPC service until authoritative infer job completes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/lite-solo-ai/rpc-rendezvous-v1.py monitor \
+            --run-id "$GITHUB_RUN_ID" --mode "$AI_INFERENCE_RUNNERS"
+          kill "$(cat "$RUNNER_TEMP/mimo-rpc-server.pid")" 2>/dev/null || true
+
+  train:
+    if: (github.event_name == 'push' && (contains(github.event.head_commit.added, 'process/agent-upload/lite-solo-ai-training-request-v1.json') || contains(github.event.head_commit.modified, 'process/agent-upload/lite-solo-ai-training-request-v1.json'))) || (github.event_name == 'workflow_dispatch' && inputs.mode == 'train')
+    name: MiMo CPU training stage ${{ matrix.rank }} / 7
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    strategy:
+      fail-fast: true
+      matrix:
+        rank: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      OMP_NUM_THREADS: '4'
+      MKL_NUM_THREADS: '4'
+      GLOO_SOCKET_IFNAME: tailscale0
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      PYTHONUNBUFFERED: '1'
+      DATASET: ${{ inputs.train_dataset_path }}
+      STEPS: ${{ inputs.train_steps }}
+      LENGTH: ${{ inputs.train_sequence_length }}
+      MINUTES: ${{ inputs.train_minutes }}
+      REVISION: ${{ inputs.train_model_revision }}
+      RESUME_RUN: ${{ inputs.train_resume_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Resolve owner-approved file-trigger request
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='process/agent-upload/lite-solo-ai-training-request-v1.json'
+          test -s "$request"
+          jq -e '.schemaVersion=="mimo-eight-rank-training-request-v1" and .mode=="train"
+            and (.train_dataset_path | type=="string")
+            and (.train_steps | type=="number")
+            and (.train_sequence_length | type=="number")
+            and (.train_minutes | type=="number")' "$request" >/dev/null
+          {
+            echo "DATASET=$(jq -r '.train_dataset_path' "$request")"
+            echo "STEPS=$(jq -r '.train_steps' "$request")"
+            echo "LENGTH=$(jq -r '.train_sequence_length' "$request")"
+            echo "MINUTES=$(jq -r '.train_minutes' "$request")"
+            echo "REVISION=$(jq -r '.train_model_revision // ""' "$request")"
+            echo "RESUME_RUN=$(jq -r '.train_resume_run // ""' "$request")"
+          } >> "$GITHUB_ENV"
+      - name: Validate bounded, checked-in public training input
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DATASET" =~ ^[A-Za-z0-9._/-]+\.jsonl$ ]]
+          [[ "$DATASET" != /* && "$DATASET" != *..* ]]
+          test -s "$DATASET"
+          test "$(stat -c%s "$DATASET")" -le 2097152
+          [[ "$STEPS" =~ ^[0-9]+$ ]] && test "$STEPS" -ge 1 && test "$STEPS" -le 100
+          [[ "$LENGTH" =~ ^[0-9]+$ ]] && test "$LENGTH" -ge 32 && test "$LENGTH" -le 256
+          [[ "$MINUTES" =~ ^[0-9]+$ ]] && test "$MINUTES" -ge 1 && test "$MINUTES" -le 70
+          [[ -z "$REVISION" || "$REVISION" =~ ^[a-f0-9]{40}$ ]]
+          [[ -z "$RESUME_RUN" || "$RESUME_RUN" =~ ^[0-9]+$ ]]
+      - name: Join private training network using existing GitHub OIDC helper
+        shell: bash
+        env:
+          TS_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TAILNET_TAG: tag:ai-training
+        run: |
+          set -euo pipefail
+          test -n "$TS_CLIENT_ID" || { echo "::error::Missing existing TS_OAUTH_CLIENT_ID"; exit 1; }
+          bash scripts/browser-agent-tailnet-oidc.sh
+          tailscale ip -4 | grep -E '^100\.[0-9]+\.[0-9]+\.[0-9]+$'
+      - name: Install CPU training dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --no-input "torch==2.9.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --no-input "transformers==5.12.1" "huggingface_hub==1.4.0" "safetensors==0.7.0" "tokenizers==0.22.2"
+      - name: Pin original MiMo revision and rendezvous address
+        if: matrix.rank == 0
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mimo-rendezvous"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from huggingface_hub import HfApi
+          sha=HfApi().model_info("XiaomiMiMo/MiMo-V2.6-Distill-Qwen-9B",revision=os.environ["REVISION"] or "main").sha
+          if len(sha)!=40: raise RuntimeError("Expected immutable 40-character MiMo commit")
+          (Path(os.environ["RUNNER_TEMP"])/"mimo-rendezvous"/"model_sha").write_text(sha)
+          PY
+          tailscale ip -4 | head -n 1 > "$RUNNER_TEMP/mimo-rendezvous/master_addr"
+      - name: Publish private rank-0 rendezvous artifact
+        if: matrix.rank == 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: mimo-rendezvous-${{ github.run_id }}
+          path: ${{ runner.temp }}/mimo-rendezvous/
+          if-no-files-found: error
+          retention-days: 2
+      - name: Resolve pinned eight-rank rendezvous
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mimo-rendezvous"
+          if [ "${{ matrix.rank }}" != 0 ]; then
+            acquired=false
+            for attempt in $(seq 1 80); do
+              if gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" \
+                -n "mimo-rendezvous-$GITHUB_RUN_ID" -D "$RUNNER_TEMP/mimo-rendezvous" >/dev/null 2>&1; then
+                acquired=true; break
+              fi
+              sleep 15
+            done
+            test "$acquired" = true || { echo "::error::Rank-zero rendezvous timed out"; exit 1; }
+          fi
+          grep -Eq '^100\.[0-9]+\.[0-9]+\.[0-9]+$' "$RUNNER_TEMP/mimo-rendezvous/master_addr"
+          grep -Eq '^[0-9a-f]{40}$' "$RUNNER_TEMP/mimo-rendezvous/model_sha"
+      - name: Restore complete previous eight-rank generation
+        if: github.event_name == 'push' || inputs.train_resume_run != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RESUME_RUN" ]; then
+            echo 'No previous training checkpoint requested'
+            exit 0
+          fi
+          listing="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RESUME_RUN/artifacts?per_page=100")"
+          for rank in $(seq 0 7); do
+            printf '%s' "$listing" | jq -e --arg n "mimo-cpu-checkpoint-rank-$rank" \
+              '[.artifacts[] | select(.name==$n and .expired==false)] | length == 1' >/dev/null || {
+                echo "::error::Previous training run lacks a complete eight-rank checkpoint"; exit 1;
+              }
+          done
+          mkdir -p "$RUNNER_TEMP/mimo-resume"
+          gh run download "$RESUME_RUN" -R "$GITHUB_REPOSITORY" \
+            -n "mimo-cpu-checkpoint-rank-${{ matrix.rank }}" -D "$RUNNER_TEMP/mimo-resume"
+          test -s "$RUNNER_TEMP/mimo-resume/checkpoint-rank-${{ matrix.rank }}.pt"
+      - name: Train four owned Qwen3.5 layers and checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mimo-output"
+          extras=()
+          if [ -n "$RESUME_RUN" ]; then
+            extras=(--resume "$RUNNER_TEMP/mimo-resume/checkpoint-rank-${{ matrix.rank }}.pt")
+          fi
+          python -u scripts/lite-solo-ai/train_cpu_v1.py \
+            --dataset "$DATASET" \
+            --model-revision "$(cat "$RUNNER_TEMP/mimo-rendezvous/model_sha")" \
+            --rank "${{ matrix.rank }}" --world-size 8 \
+            --master-addr "$(cat "$RUNNER_TEMP/mimo-rendezvous/master_addr")" \
+            --master-port 29631 --steps "$STEPS" --sequence-length "$LENGTH" \
+            --minutes "$MINUTES" \
+            --output "$RUNNER_TEMP/mimo-output/checkpoint-rank-${{ matrix.rank }}.pt" \
+            "${extras[@]}"
+      - name: Preserve this rank's checkpoint
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mimo-cpu-checkpoint-rank-${{ matrix.rank }}
+          path: ${{ runner.temp }}/mimo-output/checkpoint-rank-${{ matrix.rank }}.pt
+          retention-days: 7
+          if-no-files-found: error
+      - name: Distinguish stage checkpoint from deployed adapter
+        if: always()
+        run: |
+          echo 'Eight rank checkpoints are NOT yet a merged LoRA adapter or Lite-Solo deployment.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Training does not change controller receipts, v5 approvals or v6 audit authority.' >> "$GITHUB_STEP_SUMMARY"
+
+  training-package:
+    if: (github.event_name == 'push' && (contains(github.event.head_commit.added, 'process/agent-upload/lite-solo-ai-training-request-v1.json') || contains(github.event.head_commit.modified, 'process/agent-upload/lite-solo-ai-training-request-v1.json'))) || (github.event_name == 'workflow_dispatch' && inputs.mode == 'train')
+    name: Consolidate eight MiMo CPU LoRA stage checkpoints
+    needs: train
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download all eight successful rank artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mimo-cpu-checkpoint-rank-*
+          path: ${{ runner.temp }}/mimo-rank-checkpoints
+          merge-multiple: false
+      - name: Install CPU-only aggregation dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --no-input "torch==2.9.0" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --no-input "safetensors==0.7.0"
+      - name: Package exact matching model-stage adapters and provenance
+        shell: bash
+        env:
+          RANK_ROOT: ${{ runner.temp }}/mimo-rank-checkpoints
+          PACKAGE_DIR: ${{ runner.temp }}/mimo-training-package
+        run: |
+          set -euo pipefail
+          mkdir -p "$PACKAGE_DIR"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import torch
+          from safetensors.torch import save_file
+          root=Path(os.environ["RANK_ROOT"])
+          out=Path(os.environ["PACKAGE_DIR"])
+          states=[]
+          artifact_digests={}
+          for rank in range(8):
+              p=root/f"mimo-cpu-checkpoint-rank-{rank}"/f"checkpoint-rank-{rank}.pt"
+              if not p.is_file():
+                  raise RuntimeError(f"Missing rank {rank} checkpoint")
+              artifact_digests[str(rank)]=hashlib.sha256(p.read_bytes()).hexdigest()
+              ck=torch.load(p,map_location="cpu",weights_only=True)
+              if ck["rank"] != rank:
+                  raise RuntimeError("Checkpoint owner rank mismatch")
+              states.append(ck)
+          identity=states[0]["identity"]
+          step=states[0]["step"]
+          if any(s["identity"]!=identity or s["step"]!=step for s in states):
+              raise RuntimeError("Incomplete or inconsistent rank checkpoint generation")
+          layers={}
+          for rank,ck in enumerate(states):
+              for name,tensor in ck["adapter"].items():
+                  if name in layers or not name.startswith("layers."):
+                      raise RuntimeError("Unexpected or duplicated model-stage adapter tensor")
+                  if not name.endswith((".a",".b")):
+                      raise RuntimeError("Unrecognized adapter tensor")
+                  layer=int(name.split(".")[1])
+                  if layer not in range(rank*4,rank*4+4):
+                      raise RuntimeError("Adapter tensor assigned to the wrong four-layer stage")
+                  layers[name]=tensor.contiguous()
+          if not layers:
+              raise RuntimeError("Empty adapter bundle")
+          save_file(layers,str(out/"mimo_cpu_lora_stages.safetensors"))
+          report={
+              "schemaVersion":"mimo-cpu-training-package-v1",
+              "status":"TRAINED_STAGE_ADAPTERS_NOT_DEPLOYED",
+              "baseModel":"XiaomiMiMo/MiMo-V2.6-Distill-Qwen-9B",
+              "sourceAndDatasetIdentity":identity,
+              "trainedOptimizerSteps":step,
+              "pipelineRanks":8,
+              "loraRank":8,
+              "loraAlpha":16,
+              "adapterTensorCount":len(layers),
+              "checkpointSha256ByRank":artifact_digests,
+              "adapterSha256":hashlib.sha256((out/"mimo_cpu_lora_stages.safetensors").read_bytes()).hexdigest(),
+              "limitations":[
+                  "Raw rank-merged LoRA tensors are not yet converted to a validated PEFT or GGUF adapter.",
+                  "No audit evaluation or model promotion has been authorized.",
+                  "Original Q4 llama.cpp inference and all audit authorities remain unchanged."
+              ],
+          }
+          (out/"manifest.json").write_text(json.dumps(report,indent=2)+"\n")
+          print(json.dumps({"status":report["status"],"steps":step,"tensors":len(layers)}))
+          PY
+      - name: Upload consolidated training package
+        uses: actions/upload-artifact@v4
+        with:
+          name: mimo-cpu-training-package-v1
+          path: ${{ runner.temp }}/mimo-training-package/
+          if-no-files-found: error
+          retention-days: 7

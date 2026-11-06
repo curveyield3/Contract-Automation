@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "mimo-eight-rank-training-request-v1",
+  "mode": "train",
+  "model": "XiaomiMiMo/MiMo-V2.6-Distill-Qwen-9B",
+  "train_dataset_path": "scripts/lite-solo-ai/audit_training_public_v1.jsonl",
+  "train_model_revision": "",
+  "train_steps": 1,
+  "train_sequence_length": 128,
+  "train_minutes": 65,
+  "train_resume_run": "",
+  "purpose": "One bounded CPU-only eight-rank LoRA training generation on source-grounded public Lite-Solo rules",
+  "scope": "No audit execution, no tests, no promotion of unverified model weights"
+}
