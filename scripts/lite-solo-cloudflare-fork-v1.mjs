@@ -326,8 +326,13 @@ function verifiedMachineSourcesV1(c,row){
    if(!fs.existsSync(relative(evidencePath))||!fs.existsSync(relative(receiptPath)))continue;
    machine=read(evidencePath);receipt=read(receiptPath);
   }catch{continue;}
+  // The ingestion receipt must bind the exact machine-evidence file bytes.
+  // Request ID alone, or the execution file's own digest claim, is insufficient.
+  const evidenceSha256=sha(fs.readFileSync(relative(evidencePath)));
   if(receipt?.schemaVersion!=='audit-execution-evidence-ingestion-receipt-v1'||
      receipt.requestId!==source.requestId||
+     receipt.requestDigest!==source.requestDigest||
+     receipt.artifactDigest!==evidenceSha256||
      machine?.requestId!==source.requestId||
      machine?.requestDigest!==source.requestDigest)continue;
   const cleanExecution=machine.blocking===false&&
@@ -337,7 +342,7 @@ function verifiedMachineSourcesV1(c,row){
    (machine.failedSteps?.length??0)===0&&
    (!machine.preflight||machine.preflight.status==='PASS');
   verified.push({...source,executionEvidenceRef:evidencePath,
-   ingestionReceiptRef:receiptPath,evidenceSha256:sha(fs.readFileSync(relative(evidencePath))),
+   ingestionReceiptRef:receiptPath,evidenceSha256,
    qualifiedExecution:cleanExecution,
    machineFields:Object.fromEntries(['dispatchRounds','requestPaths','ledgerRef',
     'requestBindingStatus','requestBindingEvidenceRef','automationResolvedExecutionRequest']
@@ -352,12 +357,15 @@ function machineVerifiedValueV1(c,row,key){
    requestBound:true,sources:requests};
  if(key==='requestPaths'&&requests.length)
   return {value:requests.map(r=>r.requestPath),requestBound:true,sources:requests};
- if(key==='executionEvidenceRefs'&&sources.length)
-  return {value:sources.map(r=>r.executionEvidenceRef),sources,
-   qualifiedAsProof:sources.every(r=>r.qualifiedExecution)};
- if(key==='executionEvidenceRef'&&sources.length===1)
-  return {value:sources[0].executionEvidenceRef,sources,
-   qualifiedAsProof:sources[0].qualifiedExecution};
+ // A failed attempt remains in its immutable evidence file for diagnosis,
+ // but it must not fill a field consumed as successful execution proof.
+ const qualified=sources.filter(r=>r.qualifiedExecution);
+ if(key==='executionEvidenceRefs'&&qualified.length)
+  return {value:qualified.map(r=>r.executionEvidenceRef),sources:qualified,
+   qualifiedAsProof:true};
+ if(key==='executionEvidenceRef'&&qualified.length===1)
+  return {value:qualified[0].executionEvidenceRef,sources:qualified,
+   qualifiedAsProof:true};
  if(!sources.length)return null;
  const exact=sources.filter(x=>Object.hasOwn(x.machineFields,key));
  if(exact.length!==1)return null; // Never choose between conflicting observations.
