@@ -118,11 +118,15 @@ function validateCompilers(compilers) {
 function validateNativeFuzz(nativeFuzz) {
   if (nativeFuzz === false || nativeFuzz === undefined) return;
   object(nativeFuzz, 'configuration.analysis.nativeFuzz');
-  const allowed = new Set(['enabled', 'fuzzRuns', 'recoverableExitCodes']);
+  const allowed = new Set(['enabled', 'fuzzRuns', 'recoverableExitCodes', 'matchTest', 'matchContract']);
   for (const key of Object.keys(nativeFuzz)) if (!allowed.has(key)) fail(`configuration.analysis.nativeFuzz.${key}`, 'is not allowed');
   if ('enabled' in nativeFuzz && typeof nativeFuzz.enabled !== 'boolean') fail('configuration.analysis.nativeFuzz.enabled', 'must be boolean');
   if ('fuzzRuns' in nativeFuzz && (!Number.isInteger(nativeFuzz.fuzzRuns) || nativeFuzz.fuzzRuns < 1 || nativeFuzz.fuzzRuns > 1000000)) fail('configuration.analysis.nativeFuzz.fuzzRuns', 'must be an integer from 1 to 1,000,000');
   if ('recoverableExitCodes' in nativeFuzz && (!Array.isArray(nativeFuzz.recoverableExitCodes) || nativeFuzz.recoverableExitCodes.some((value) => !Number.isInteger(value)))) fail('configuration.analysis.nativeFuzz.recoverableExitCodes', 'must contain only integers');
+  // A named agent-selected target is mandatory at execution, not retroactively
+  // at request parse time (historical requests must be able to report rework).
+  if ('matchTest' in nativeFuzz) string(nativeFuzz.matchTest, 'configuration.analysis.nativeFuzz.matchTest', { max: 160, pattern: /^[A-Za-z_][A-Za-z0-9_]*$/ });
+  if ('matchContract' in nativeFuzz) string(nativeFuzz.matchContract, 'configuration.analysis.nativeFuzz.matchContract', { max: 160, pattern: /^[A-Za-z_][A-Za-z0-9_]*$/ });
 }
 
 function validateAnalysis(analysis) {
@@ -136,11 +140,12 @@ function validateAnalysis(analysis) {
   }
   if (analysis.medusa !== undefined && analysis.medusa !== false) {
     object(analysis.medusa, 'configuration.analysis.medusa');
-    const allowed = new Set(['version', 'frozenBlockNumber', 'frozenBlockHash']);
+    const allowed = new Set(['version', 'frozenBlockNumber', 'frozenBlockHash', 'targetProperty']);
     for (const key of Object.keys(analysis.medusa)) if (!allowed.has(key)) fail(`configuration.analysis.medusa.${key}`, 'is not allowed');
     const hasFrozenNumber = Object.prototype.hasOwnProperty.call(analysis.medusa, 'frozenBlockNumber');
     const hasFrozenHash = Object.prototype.hasOwnProperty.call(analysis.medusa, 'frozenBlockHash');
     if (hasFrozenNumber !== hasFrozenHash) fail('configuration.analysis.medusa', 'frozenBlockNumber and frozenBlockHash must be provided together');
+    if ('targetProperty' in analysis.medusa) string(analysis.medusa.targetProperty, 'configuration.analysis.medusa.targetProperty', { max: 160, pattern: /^(?:property_|invariant_|echidna_)[A-Za-z0-9_]+$/ });
     if (hasFrozenNumber) {
       if (!Number.isSafeInteger(analysis.medusa.frozenBlockNumber) || analysis.medusa.frozenBlockNumber < 0) fail('configuration.analysis.medusa.frozenBlockNumber', 'must be a non-negative safe integer');
       string(analysis.medusa.frozenBlockHash, 'configuration.analysis.medusa.frozenBlockHash', { min: 66, max: 66, pattern: /^0x[0-9a-fA-F]{64}$/ });
