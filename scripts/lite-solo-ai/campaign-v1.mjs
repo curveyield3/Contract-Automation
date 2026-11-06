@@ -997,8 +997,17 @@ while(true){
  let raw=await modelCall(dialogue);
  // Evidence read requests are local to MiMo's private GitHub inference bridge.
  // Only the eventual original route/request answer is sent to the Worker.
+ // Retain two recent exact reads in the bounded model context. Older reads stay
+ // intact in the private transcript and can be re-requested by exact selector.
+ const evidenceReadPairs=[];
  for(let read=sourceEvidenceRequestV1(raw,activePhase1Evidence);read;
      read=sourceEvidenceRequestV1(raw,activePhase1Evidence)){
+  if(evidenceReadPairs.length===2){
+   const at=evidenceReadPairs.shift();
+   dialogue.splice(at,2);
+   for(let i=0;i<evidenceReadPairs.length;i++)evidenceReadPairs[i]-=2;
+  }
+  evidenceReadPairs.push(dialogue.length);
   dialogue.push({role:'assistant',content:raw});
   dialogue.push({role:'user',content:JSON.stringify(read)});
   console.log(JSON.stringify({status:'MIMO_PHASE1_EVIDENCE_PAGE_DELIVERED',
