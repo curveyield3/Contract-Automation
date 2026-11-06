@@ -979,18 +979,27 @@ const allocatedRecordId=(phase,unit,field,number)=>
  String(field).replace(/[^A-Za-z0-9_-]/g,'_')+'-'+String(number).padStart(4,'0');
 function preserveDiscoveryKeys(original,response,field){
  if(!Array.isArray(original)||!Array.isArray(response))return original;
- if(field==='documentedRules'){
-  const byId=new Map(response.filter(x=>x&&typeof x.ruleId==='string').map(x=>[x.ruleId,x]));
-  return original.map(x=>{const y=byId.get(x.ruleId);return y?{...x,
-   comparison:y.comparison??x.comparison,reason:y.reason??x.reason}:x;});
- }
- if(field==='siblingComparisons'){
-  const byId=new Map(response.filter(x=>x&&x.signature&&x.siblingContextId)
-   .map(x=>[JSON.stringify([x.signature,x.siblingContextId]),x]));
-  return original.map(x=>{const y=byId.get(JSON.stringify([x.signature,x.siblingContextId]));
-   return y?{...x,comparison:y.comparison??x.comparison}:x;});
- }
- return original;
+ // Merge the entire typed AI answer into the originally issued row, without
+ // replacing its controller-bound rule or sibling identity. Prior code kept
+ // only comparison/reason and silently lost additional substantive fields.
+ const keyOf=row=>field==='documentedRules'?row?.ruleId:
+   field==='siblingComparisons'&&row?.signature&&row?.siblingContextId?
+    JSON.stringify([row.signature,row.siblingContextId]):null;
+ const byKey=new Map(response.filter(x=>x&&typeof x==='object'&&!Array.isArray(x))
+  .map(x=>[keyOf(x),x]).filter(([k])=>k!==null&&k!==undefined));
+ return original.map(issued=>{
+  const answer=byKey.get(keyOf(issued));
+  if(!answer)return issued;
+  const merged={...issued,...structuredClone(answer)};
+  if(field==='documentedRules'){
+   merged.ruleId=issued.ruleId;
+   merged.rule=issued.rule;
+  }else{
+   merged.signature=issued.signature;
+   merged.siblingContextId=issued.siblingContextId;
+  }
+  return merged;
+ });
 }
 // Exact binding IDs are issued with the existing GitHub-side work packet;
 // neither the AI nor Cloudflare chooses a destination or a record identity.
@@ -1068,7 +1077,8 @@ function machineAnswerDirectoryV1(u,template,routing){
     const subject=subjectOf(collection,row);
     if(!subject)continue;
     for(const field of new Set([...Object.keys(row),...(conditional[collection]??[])])){
-     if(['contextId','flowId','obligationId','contract','classId','pathId'].includes(field))continue;
+     if(['contextId','flowId','obligationId','contract','classId','pathId'].includes(field)||
+       (collection==='attackPaths'&&field==='flowIds'))continue;
      const choices=field==='verdict'?['CORRECT','DEFECT','UNRESOLVED']:
       field==='result'?['BLOCKED','VIABLE','UNCERTAIN']:
       field==='assessment'?['SUPPORTED','CONCERN','UNRESOLVED','NOT_APPLICABLE']:
@@ -1164,12 +1174,33 @@ function assembleBoundAnswersV1(c,u,submitted){
  };
  const result=structuredClone(meta.inputTemplate);
  const knownSubjectIds=controllerAcceptedSubjectIdsV1(c);
+ const usedCandidateKeys=new Set(knownSubjectIds);
  let candidateOrdinal=0;
  const candidateWithId=value=>{
   if(!value||typeof value!=='object'||Array.isArray(value))return value;
   const candidate=structuredClone(value);
-  candidate.tempKey=allocatedRecordId(phase,u.unitId,'candidate',++candidateOrdinal);
+  const authored=typeof candidate.tempKey==='string'?candidate.tempKey.trim():'';
+  // An already distinct AI-authored stable identity must not be regenerated.
+  if(authored&&!authored.startsWith('<')&&authored!=='TODO'&&
+     !EXPLICIT_NEGATIVES.has(authored)&&!usedCandidateKeys.has(authored)){
+   usedCandidateKeys.add(authored);
+   return candidate;
+  }
+  let mechanical;
+  do{mechanical=allocatedRecordId(phase,u.unitId,'candidate',++candidateOrdinal);}
+  while(usedCandidateKeys.has(mechanical));
+  if(authored&&!authored.startsWith('<')&&authored!=='TODO'&&
+     !EXPLICIT_NEGATIVES.has(authored)&&authored!==mechanical)
+   candidate.sourceAuthoredTempKey=authored;
+  candidate.tempKey=mechanical;
+  usedCandidateKeys.add(mechanical);
   return candidate;
+ };
+ const withNestedCandidateIds=record=>{
+  const value=structuredClone(record);
+  if(value.candidate)value.candidate=candidateWithId(value.candidate);
+  if(Array.isArray(value.candidates))value.candidates=value.candidates.map(candidateWithId);
+  return value;
  };
  if(u.kind==='SHARD'||u.kind==='BATCH'){
   for(const [i,entry] of route.entries.entries()){
@@ -1279,11 +1310,12 @@ function assembleBoundAnswersV1(c,u,submitted){
    const extraFields=field==='rows'?['candidate','candidates','decidingTest']:
     ['integrationAnswers','contractChecks','attackPaths'].includes(field)?['candidate']:[];
    for(const key of new Set([...Object.keys(row),...extraFields])){
-    if(['contextId','flowId','obligationId','contract','classId','pathId'].includes(key))continue;
+    if(['contextId','flowId','obligationId','contract','classId','pathId'].includes(key)||
+       (field==='attackPaths'&&key==='flowIds'))continue;
     const a=get(field,id,key);
     if(!a.found)continue;
     row[key]=field==='rows'&&['documentedRules','siblingComparisons'].includes(key)
-     ?preserveDiscoveryKeys(original[key],a.value,key):
+     ?preserveDiscoveryKeys(original[key],a.value,key).map(withNestedCandidateIds):
       key==='candidate'?candidateWithId(a.value):
       key==='candidates'&&Array.isArray(a.value)?a.value.map(candidateWithId):
       structuredClone(a.value);
@@ -1302,16 +1334,17 @@ function assembleBoundAnswersV1(c,u,submitted){
     const allowed=new Set(route.fixedRecordKeys[0].records.flatMap(x=>x.key));
     for(const row of additional){
      if(!row||!Array.isArray(row.flowIds)||row.flowIds.some(id=>!allowed.has(id)))continue;
-     result.attackPaths.push({...structuredClone(row),
-      ...(row.candidate?{candidate:candidateWithId(row.candidate)}:{}),
-      pathId:'PATH-'+String(result.attackPaths.length+1).padStart(3,'0')});
+     const pathId='PATH-'+String(result.attackPaths.length+1).padStart(3,'0');
+     result.attackPaths.push({...withNestedCandidateIds(row),
+      ...(typeof row.pathId==='string'&&row.pathId.trim()&&row.pathId!==pathId
+       ?{sourceAuthoredPathId:row.pathId}:{}),pathId});
     }
    }else if(field==='candidates'){
     for(const row of additional){
      if(!row||typeof row!=='object'||Array.isArray(row))continue;
      result.candidates.push(candidateWithId(row));
     }
-   }else result[field]=additional.map(row=>structuredClone(row));
+   }else result[field]=additional.map(withNestedCandidateIds);
   }
   // Keep all source-review rows in the stored submission. The Worker owns
   // triviality decisions; GitHub must not erase coverage through qualification.
