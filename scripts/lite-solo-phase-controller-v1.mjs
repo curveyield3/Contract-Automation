@@ -201,13 +201,19 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const p7=derived(7,'PHASE8_MARKER_INPUT_v1.json');
   const p8Remediation=derived(8,'PHASE9_REMEDIATION_INPUT_v1.json');
   const p8Final=derived(8,'PHASE10_INPUT_v1.json');
+  // Exact original source-bound canonical history, not only condensed summaries.
+  const p4Canonical=canonicalRelFor(campaignPath,4);
+  const p5Canonical=canonicalRelFor(campaignPath,5);
+  const p6Canonical=canonicalRelFor(campaignPath,6);
   const p9Final=derived(9,'PHASE10_REMEDIATION_INPUT_v1.json');
   if(target===4) return uniqueExisting(root,[p2,p3]);
   if(target===5) return uniqueExisting(root,[p2,p3,p4]);
   if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,buildIdentity,deploy,targets]);
   if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,p7,buildIdentity,deploy,targets]);
   if(target===9) return uniqueExisting(root,[p8Remediation,remediation]);
-  if(target===10) return uniqueExisting(root,[p8Final,p9Final,finalIndex]);
+  if(target===10) return uniqueExisting(root,[
+    p4Canonical,p5Canonical,p6Canonical,p8Final,p9Final,finalIndex
+  ]);
   return uniqueExisting(root,immediate);
 }
 function phaseOutput(canonical,step,field){return canonical?.actions?.[step]?.outputs?.[field];}
@@ -377,6 +383,17 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
   }));
   const limitations=collectCarriedLimitations({root,campaignPath,maxPhase:9});
   const omissions=phaseOutput(p6,'step-3','fullOnlyOmissions')??phaseOutput(p6,'step-4','fullOnlyOmissions')??[];
+  // Full question-history roster is purely an index of original committed
+  // evidence. Do not decide here whether any answer is substantively resolved.
+  const questionHistoryRosters=[4,5,6].map(phase=>
+    collectAcceptedQuestionHistoryRefsV1({root,campaignPath,directory,phase}));
+  const questionHistories=questionHistoryRosters.flatMap(roster=>
+    roster.histories?.length?roster.histories:
+      roster.availability!=='COLLECTED_NONBLOCKING'
+      ?[{phaseSequence:roster.phaseSequence,unitId:'UNAVAILABLE',
+         indexPath:'NOT_PUBLISHED',availability:roster.availability}]
+      :[]);
+
   return {
     identity:{
       campaignGeneration:directory.campaignId+'/'+directory.campaignGenerationId,
@@ -392,7 +409,7 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
       {milestone:'Merged Lite Phase 6–7',requiredEvidence:'deploy/config, deterministic candidate simulation, targeted fuzz, interpretation',reference:'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md + work/phase-06/LITE_TARGETED_TEST_MATRIX.md + accepted Phase-6 canonical data',sourceIdentity:directory.sourceSha256,status:'COMPLETE',limitation:(phaseOutput(p6,'step-3','typedExecutionLimitations')??phaseOutput(p6,'step-4','typedExecutionLimitations')??[]).join('; ')||'NONE_IDENTIFIED'},
       {milestone:'Combined Phase 8–10',requiredEvidence:'validation, remediation/skip, final reconciliation',reference:p9?'accepted Phase-8 and Phase-9 canonical data':'accepted Phase-8 canonical data + Phase-9 skip receipt',sourceIdentity:directory.sourceSha256,status:'READY_FOR_PHASE10',limitation:'SEE_FINDINGS_AND_OBLIGATIONS'}
     ],
-    findings,obligations,limitations,omissions
+    findings,obligations,limitations,omissions,questionHistories
   };
 }
 
@@ -1241,6 +1258,13 @@ if(sequence===10){
   directory.currentAssignment=null;directory.updatedAt=now;
 }
 else{
+  // Final reviewer receives the CURRENT committed question-index identities,
+  // even when an accepted unit's historical snapshot was written before its
+  // index became visible. Existing accepted snapshots are never modified.
+  if(nextSequence===10)
+    successorPrefillContext={...successorPrefillContext,
+      questionHistoryRosters:[4,5,6].map(phase=>
+        collectAcceptedQuestionHistoryRefsV1({root,campaignPath,directory,phase}))};
   const nextReviewer=assignmentReviewer(nextSequence,authorityRoot,root);
   const nextStatus='ACTIVE';
   // Master-amended Phase 3 must not pre-create Phase-4 work before the
