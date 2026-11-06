@@ -731,6 +731,13 @@ function assembleBoundAnswersV1(c,u,submitted){
   return answers.has(id)?{found:true,value:answers.get(id)}:{found:false};
  };
  const result=structuredClone(meta.inputTemplate);
+ let candidateOrdinal=0;
+ const candidateWithId=value=>{
+  if(!value||typeof value!=='object'||Array.isArray(value))return value;
+  const candidate=structuredClone(value);
+  candidate.tempKey=allocatedRecordId(phase,u.unitId,'candidate',++candidateOrdinal);
+  return candidate;
+ };
  if(u.kind==='SHARD'||u.kind==='BATCH'){
   for(const [i,entry] of route.entries.entries()){
    const target=result.entries[i];
@@ -778,12 +785,17 @@ function assembleBoundAnswersV1(c,u,submitted){
    const id=subjectOf(field,row);
    if(!id)continue;
    const original=structuredClone(row);
-   for(const key of Object.keys(row)){
+   const extraFields=field==='rows'?['candidate','candidates','decidingTest']:
+    ['integrationAnswers','contractChecks','attackPaths'].includes(field)?['candidate']:[];
+   for(const key of new Set([...Object.keys(row),...extraFields])){
     if(['contextId','flowId','obligationId','contract','classId','pathId'].includes(key))continue;
     const a=get(field,id,key);
     if(!a.found)continue;
     row[key]=field==='rows'&&['documentedRules','siblingComparisons'].includes(key)
-     ?preserveDiscoveryKeys(original[key],a.value,key):structuredClone(a.value);
+     ?preserveDiscoveryKeys(original[key],a.value,key):
+      key==='candidate'?candidateWithId(a.value):
+      key==='candidates'&&Array.isArray(a.value)?a.value.map(candidateWithId):
+      structuredClone(a.value);
    }
   }
   const extras=submitted.extraRecords&&typeof submitted.extraRecords==='object'?
@@ -796,13 +808,13 @@ function assembleBoundAnswersV1(c,u,submitted){
     for(const row of additional){
      if(!row||!Array.isArray(row.flowIds)||row.flowIds.some(id=>!allowed.has(id)))continue;
      result.attackPaths.push({...structuredClone(row),
+      ...(row.candidate?{candidate:candidateWithId(row.candidate)}:{}),
       pathId:'PATH-'+String(result.attackPaths.length+1).padStart(3,'0')});
     }
    }else if(field==='candidates'){
     for(const row of additional){
      if(!row||typeof row!=='object'||Array.isArray(row))continue;
-     result.candidates.push({...structuredClone(row),
-      tempKey:allocatedRecordId(phase,u.unitId,'candidate',result.candidates.length+1)});
+     result.candidates.push(candidateWithId(row));
     }
    }else result[field]=additional.map(row=>structuredClone(row));
   }
