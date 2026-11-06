@@ -141,6 +141,42 @@ export function recoverAcceptedQuestionLedgerReferenceV1({
    referenceOrigin:'IMMUTABLE_ACCEPTED_SNAPSHOT'}};
  return live;
 }
+// Publish a provenance-only roster from the ORIGINAL accepted-unit snapshots.
+// The same function serves canonical phase packaging and later assignment
+// recovery. No text is classified, merged or interpreted and missing histories
+// never affect unit acceptance or phase eligibility.
+export function collectAcceptedQuestionHistoryRefsV1({
+ root,campaignPath,directory,phase
+}){
+ const roster={schemaVersion:'curveyield-ai-question-history-roster-v1',
+  campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
+  sourceSha256:directory.sourceSha256,authorityDigest:directory.authorityDigest,
+  phaseSequence:phase,histories:[],unavailable:{}};
+ if(![4,5,6].includes(phase))return roster;
+ const queue=maybe(root,queueRel(campaignPath,phase));
+ if(!queue)return {...roster,availability:'QUEUE_NOT_PUBLISHED'};
+ let plan;
+ try{plan=readPlan(root,campaignPath,phase);}
+ catch{return {...roster,availability:'PLAN_NOT_READABLE'};}
+ if(queue.campaignId!==directory.campaignId||
+    queue.campaignGenerationId!==directory.campaignGenerationId||
+    queue.sourceSha256!==directory.sourceSha256||
+    queue.authorityDigest!==directory.authorityDigest||
+    queue.phaseSequence!==phase||queue.phaseEpoch!==plan.phaseEpoch)
+  return {...roster,availability:'IDENTITY_MISMATCH'};
+ const accepted=plan.units.map(u=>u.unitId)
+  .filter(id=>queue.units[id]?.status==='ACCEPTED').sort();
+ for(const unitId of accepted){
+  const ref=recoverAcceptedQuestionLedgerReferenceV1({
+   root,campaignPath,phase,unitId,directory,queue,plan});
+  roster.histories.push(ref);
+  if(ref.availability!=='AVAILABLE')
+   (roster.unavailable[ref.availability]??=[]).push(unitId);
+ }
+ roster.acceptedUnitCount=accepted.length;
+ roster.availability='COLLECTED_NONBLOCKING';
+ return roster;
+}
 const asArray=x=>Array.isArray(x)?x:[];
 const isObject=x=>x&&typeof x==='object'&&!Array.isArray(x);
 const clone=x=>structuredClone(x);
