@@ -553,7 +553,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   JSON.stringify([unitId,(sourcePrefixes.get(unitId)??'submission.')+selector]))??null;
  const uniqueIndexes=indexes=>[...new Set(indexes.filter(Number.isInteger))];
  const candidateEvidence=[],pathEvidence=[],answerEvidence=[],integrationAnswerRefs=[],flowNotes=[],checkEvidence=new Map();
- const functionVerdicts=new Map(),trivialReviewSubstitutions=[];
+ const functionVerdicts=new Map(),trivialReviewSubstitutions=[],contractLevelFindings=[];
  const issuedFlows=arr(plan?.payload?.flows);
  const recordCandidate=(candidate,indexes)=>{
   candidates.push(candidate);candidateEvidence.push(uniqueIndexes(indexes));
@@ -759,14 +759,36 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   });
   arr(submission?.contractChecks).forEach((check,index)=>{
    const selector='contractChecks['+index+']';
-   contractLevel.push({check,sourceRef:sourceIndex(unitId,selector)});
-   // A contract-specific candidate has a source-bound class and contract.
-   // Do not manufacture context IDs for every function of that contract.
+   const sourceRefIndex=sourceIndex(unitId,selector);
+   const acceptedSource=Number.isInteger(sourceRefIndex)?
+    discoverySourceRefs[sourceRefIndex]:null;
+   contractLevel.push({check,sourceRef:sourceRefIndex});
+   if(state?.payload?.reviewPolicy==='correctness-verdict-v13'){
+    // Retain the accepted contract-wide assertion at its original scope.
+    // A contract check is not a separate assessment of every function.
+    contractLevelFindings.push({
+     unitId,contract:check?.contract??null,classId:check?.classId??null,
+     assessment:check?.assessment??null,
+     originalCheck:structuredClone(check),
+     sourceReference:{
+      collection:'discoverySourceRefs',index:sourceRefIndex,
+      availability:acceptedSource?.availability??'SOURCE_UNAVAILABLE',
+      sourceSelector:acceptedSource?.sourceSelector??null,
+      originalAnchorsSelector:acceptedSource?.originalAnchorsSelector??null,
+      acceptedPath:acceptedSource?.acceptedPath??null,
+      acceptedSha256:acceptedSource?.acceptedSha256??null
+     }
+    });
+   }
+   // Keep the candidate's authored class without assigning context IDs.
    recordCheckCandidates(check,unitId,selector,{classId:check?.classId});
   });
 
  }
- for(const {check,sourceRef} of contractLevel)
+ // Historical summaries retain their earlier representation. For V13,
+ // contract-wide assertions never populate function-class coverage.
+ if(state?.payload?.reviewPolicy!=='correctness-verdict-v13')
+  for(const {check,sourceRef} of contractLevel)
   for(const c of arr(inventory?.payload?.contexts).filter(x=>x.qualifiedContainer===check?.contract)){
    if(!classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[c.contextId]??[]).includes(check.classId))continue;
    if(checks.get(c.contextId)?.[check.classId]===undefined){
@@ -850,7 +872,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   discoverySourceRefs,reconciliationEvidenceRefs,integrationAnswerRefs,flowNotes,
   functionVerdicts:Object.fromEntries([...functionVerdicts.entries()].sort(([a],[b])=>sort(a,b))),
   ...(state?.payload?.reviewPolicy==='correctness-verdict-v13'
-   ?{trivialReviewSubstitutions}:{}),
+   ?{trivialReviewSubstitutions,contractLevelFindings}:{}),
   unmappedAttackPathRefs,unmappedAttackPathSources,
   // All candidate origins, including nested ATTACK/integration/check
   // candidates, remain accessible by exact accepted-source selector.
