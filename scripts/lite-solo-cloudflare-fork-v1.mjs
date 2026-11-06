@@ -253,6 +253,9 @@ const MECHANICAL_ID_FIELDS=new Set([
  'standardKey','driverKey','tempKey','findingTempKey','recordKey','groupKey'
 ]);
 const MACHINE_EXECUTION_FIELDS=new Map([
+ ['executionEvidenceRefs','AUTHENTICATED_EXECUTION_EVIDENCE_REFS'],
+ ['executionRequestRef','AUTHENTICATED_EXECUTION_REQUEST_REF'],
+ ['automationResolvedExecutionRequest','AUTHENTICATED_EXECUTION_REQUEST_BINDING'],
  ['executionEvidenceRef','AUTHENTICATED_EXECUTION_EVIDENCE_REF'],
  ['requestBindingStatus','AUTHENTICATED_REQUEST_BINDING_STATUS'],
  ['requestBindingEvidenceRef','AUTHENTICATED_REQUEST_BINDING_EVIDENCE_REF'],
@@ -273,7 +276,8 @@ function controllerAnswerFieldBindingV1({fieldName,sourceRow,definition,itemFiel
    (Array.isArray(sourceRow?.automationOwnedFields)&&sourceRow.automationOwnedFields.includes(itemField));
  if(collected)return {field:itemField,source:'CONTROLLER_COLLECT_AFTER_EXECUTION',
   evidenceKind:MACHINE_EXECUTION_FIELDS.get(itemField)??'CONTROLLER_BOUND_EXECUTION_RESULT',
-  requiredField:!isPendingAnswerValue(value),noEvidencePolicy:'UNRESOLVED_NOT_PROVEN'};
+  exactControllerInput:value??null,requiresAuthenticatedIngestion:true,
+  fieldOwner:'CONTROLLER',noEvidencePolicy:'UNRESOLVED_NOT_PROVEN'};
  if(owned||(MECHANICAL_ID_FIELDS.has(itemField)&&typeof value==='string'&&
     value.trim()&&!isPendingAnswerValue(value)&&!negativeSentinel(value))){
   return {field:itemField,source:'PRESERVE_ISSUED_VALUE',value,
@@ -287,10 +291,13 @@ function controllerAnswerFieldBindingV1({fieldName,sourceRow,definition,itemFiel
   allowedValues:[...allowed],conversion:'LITERAL_TOKEN_ONLY'};
  if(MECHANICAL_ID_FIELDS.has(itemField))return {field:itemField,
   source:'ALLOCATE_MECHANICALLY_IF_NEW',
-  deterministicRule:'USE_EXISTING_BOUND_IDENTIFIER_ELSE_FIELDNAME_PLUS_UNITID_PLUS_RECORD_ORDINAL',
+  deterministicRule:'MI_PHASE_ISSUED_UNIT_FIELD_RECORD_ORDINAL',
+  issuer:'GITHUB_CONTROLLER',
+  selector:'phaseSequence/unitId/field/itemOrdinal',
   collisionPolicy:'DO_NOT_OVERWRITE_PREVIOUS_IDS'};
  if(itemField==='subjectKey'||itemField==='candidateKey'||itemField==='obligationId'||
-    itemField==='findingKey')return {field:itemField,source:'BIND_EXISTING_CONTROLLER_SUBJECT_OR_AI_NEW_CANDIDATE',
+    itemField==='findingKey')return {field:itemField,source:'BIND_EXISTING_CONTROLLER_SUBJECT',
+      authoritativeSelector:'ISSUED_ROW_OR_ACCEPTED_PREDECESSOR_EXACT_KEY',
       unmatchedIdentityPolicy:'UNRESOLVED_DO_NOT_INVENT_EXISTING_SUBJECT'};
  if(/(?:EvidenceRefs|Anchors)$/.test(itemField)||itemField==='evidenceRefs')
   return {field:itemField,source:'AI_EXACT_SOURCE_BOUND_REFERENCES',
@@ -348,6 +355,8 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
     requiredArray:true,parse:'EXPLICIT_LIST_ITEMS_ONLY'}:
    {source:ownedOutput?'PRESERVE_CONTROLLER_OWNED':'AI_VERBATIM',
     requiredSchemaType:definition.type},
+  controllerCollectedBindings:(definition.controllerCollectedFields??[]).map(itemField=>
+    controllerAnswerFieldBindingV1({fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField})),
   recordFieldTemplate:definition.type==='REQUIRED_RECORD_LIST'
     ?(definition.itemRequiredFields??[]).map(itemField=>controllerAnswerFieldBindingV1({
       fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField})) :[],
@@ -362,12 +371,14 @@ function discoveryAnswerBindingV1({u,packet,initial}){
  const checks=Array.isArray(data.contractChecks)?data.contractChecks:[];
  const docs=Array.isArray(data.documentationItems)?data.documentationItems:[];
  const siblings=Array.isArray(data.siblingChecks)?data.siblingChecks:[];
+ const eligibleLiteralTrivial=new Set(Array.isArray(data.trivialContextIds)?data.trivialContextIds:[]);
  const rowRecords=flow?requiredContexts.map((id,i)=>{
    const found=(initial.rows??[]).find(x=>x.contextId===id);
    const rules=docs.filter(x=>x.contextId===id);
    const paired=siblings.filter(g=>(g.members??[]).some(m=>m.contextId===id&&m.function===g.signature));
-   return {recordIndex:i,destination:'rows['+i+']',keyField:'contextId',key:id,
-    sourceSelector:'packet.payload.primaryContextIds['+i+']',countPolicy:'EXACT_ISSUED_CONTEXT',
+   return {issuedContextOrdinal:i,destination:'rows[byContextId='+id+']',keyField:'contextId',key:id,
+    sourceSelector:'packet.payload.primaryContextIds['+i+']',
+    countPolicy:eligibleLiteralTrivial.has(id)?'ROW_OR_VERIFIED_TRIVIAL_REVIEW':'REQUIRED_CONTEXT_ROW',
     nested:{
       specInspection:{destination:'rows['+i+'].specInspection',countPolicy:'SINGLE_OBJECT',
         allowedStatus:['MATCH','MISMATCH','UNRESOLVED','NO_DOCUMENTED_RULES']},
@@ -400,7 +411,7 @@ function discoveryAnswerBindingV1({u,packet,initial}){
   actualInputFormat:u.kind==='FLOW'?'curveyield-flow-review-submission-v1':
    'curveyield-attack-submission-v1',
   fixedRecordKeys:[
-   {field:flow?'rows':'attackPaths',countPolicy:flow?'EXACT_ISSUED_CONTEXTS':
+   {field:flow?'rows':'attackPaths',countPolicy:flow?'EACH_CONTEXT_ROW_OR_ELIGIBLE_TRIVIAL_REVIEW':
      'ISSUED_FLOW_COVERAGE_PLUS_AI_DISCOVERED_PATHS',
     sourceSelector:flow?'packet.payload.primaryContextIds':'packet.payload.flowIds',
     records:flow?rowRecords:attack},
@@ -423,10 +434,12 @@ function discoveryAnswerBindingV1({u,packet,initial}){
    ]:[])
   ],
   optionalRecords:flow?[
+   {field:'trivialReviews',countPolicy:'ONLY_IF_PACKET_ELIGIBLE_LITERAL_CONSTANT',
+    eligibleContextIds:[...eligibleLiteralTrivial],
+    substitution:'MAY_REMOVE_MATCHING_ROW_ONLY_WHEN_SOURCE_VALIDATOR_ACCEPTS_TRIVIAL_REVIEW'},
    {field:'candidates',countPolicy:'AI_CHOSEN_DISTINCT_CANDIDATES',
     requiredTypedFields:['title','description','anchors','classId','severity'],
     severityChoices:['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL']},
-   {field:'trivialReviews',countPolicy:'ONLY_IF_SOURCE_VERIFIED_LITERAL_CONSTANT'},
    {field:'groupChecks',countPolicy:'ONLY_IF_SOURCE_VERIFIED_SHARED_MODIFIER'}
   ]:[
    {field:'attackPaths',countPolicy:'AI_APPEND_DISTINCT_PATHS',
@@ -468,7 +481,8 @@ function buildUnitMeta(c,u,schema){
       trivialReviews:[],groupChecks:[],candidates:[]};
     inputSchema={type:'object',required:['schemaVersion','unitId','rows'],
       properties:{schemaVersion:{type:'string',enum:['curveyield-flow-review-submission-v1']},
-        unitId:{type:'string',enum:[u.unitId]},rows:{type:'array',minItems:ids.length},
+        unitId:{type:'string',enum:[u.unitId]},rows:{type:'array',minItems:0,maxItems:ids.length},
+        trivialReviews:{type:'array'},groupChecks:{type:'array'},
         flowNotes:{type:'array'},integrationAnswers:{type:'array'},contractChecks:{type:'array'},candidates:{type:'array'}}};
   }else if(u.kind==='ATTACK'){
     initial={schemaVersion:'curveyield-attack-submission-v1',unitId:u.unitId,
