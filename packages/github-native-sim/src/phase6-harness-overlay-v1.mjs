@@ -5,7 +5,7 @@ import { V7_POLICY } from './v7-policy.mjs';
 
 const BUNDLE_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const ALLOWED_ROOT_FILES = new Set(['medusa.json', 'foundry.toml']);
-const ALLOWED_PREFIXES = ['test/phase6/', 'audit/phase6/', 'script/phase6/'];
+const ALLOWED_PREFIXES = ['test/phase6/', 'audit/phase6/', 'script/phase6/', 'test/phase5/', 'artifacts_v6/phase5/'];
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -122,9 +122,10 @@ export async function materializePhase6HarnessOverlayV1({ projectRoot, runnerRoo
     if (!destinationAllowed(destinationPath)) throw new Error(`Phase 6 harness destination is outside the audit-only allowlist: ${destinationPath}`);
     // An existing project can use verification_v6 or another Foundry test root.
     // Move only audit-owned test files, never the source compiler configuration.
-    const effectiveDestination = destinationPath.startsWith('test/phase6/')
-      ? sourceFoundry.testDirectory + destinationPath.slice('test'.length)
-      : destinationPath;
+    const effectiveDestination = (
+      destinationPath.startsWith('test/phase6/')
+      || (destinationPath.startsWith('test/phase5/') && destinationPath.endsWith('.t.sol'))
+    ) ? sourceFoundry.testDirectory + destinationPath.slice('test'.length) : destinationPath;
     safeRelative(effectiveDestination, 'effective audit file destination');
     if (destinations.has(effectiveDestination)) throw new Error(`Phase 6 harness manifest has duplicate destination: ${effectiveDestination}`);
     destinations.add(effectiveDestination);
