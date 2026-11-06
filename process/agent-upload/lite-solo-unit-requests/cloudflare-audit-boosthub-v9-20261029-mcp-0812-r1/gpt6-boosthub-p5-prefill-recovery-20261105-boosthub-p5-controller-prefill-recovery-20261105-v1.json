@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
+  "requestId": "boosthub-p5-controller-prefill-recovery-20261105-v1",
+  "operation": "CLAIM",
+  "campaignId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1",
+  "campaignGenerationId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z",
+  "phaseSequence": 5,
+  "lane": "AUTO",
+  "workerId": "gpt6-boosthub-p5-prefill-recovery-20261105",
+  "desiredUnitCount": 1,
+  "sourceSha256": "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3",
+  "authorityDigest": "2e7c28dd09a89b4e5ce5a2dae284911bc404cee62be99ed79214a036737e3494",
+  "phaseEpoch": 1,
+  "auditControllerRef": "main"
+}
