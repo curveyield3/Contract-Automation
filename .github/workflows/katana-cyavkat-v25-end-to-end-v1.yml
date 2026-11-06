@@ -279,8 +279,14 @@ jobs:
           cast chain-id --rpc-url "$RPC" > "$RUNNER_TEMP/avkat-fork-v1/chain-id.txt"
           cast block-number --rpc-url "$RPC" > "$RUNNER_TEMP/avkat-fork-v1/fork-block.txt"
           echo "chain=$(cat "$RUNNER_TEMP/avkat-fork-v1/chain-id.txt") block=$(cat "$RUNNER_TEMP/avkat-fork-v1/fork-block.txt")"
+          project="$RUNNER_TEMP/avkat-fork-v1/project"
+          mkdir -p "$project/src" "$project/test"
+          cp src/*.sol "$project/src/"
+          cp test/*.sol "$project/test/"
+          cd "$project"
+          echo "Isolated Foundry files: $(find src test -type f | wc -l)"
           set +e
-          forge test --use 0.8.30 --via-ir --optimize --optimizer-runs 200 --fork-url "$RPC" -vvv 2>&1 | tee "$RUNNER_TEMP/avkat-fork-v1/forge-test.log"
+          forge test --root "$project" --use 0.8.30 --via-ir --optimize --optimizer-runs 200 --fork-url "$RPC" -vvv 2>&1 | tee "$RUNNER_TEMP/avkat-fork-v1/forge-test.log"
           result="${PIPESTATUS[0]}"
           set -e
           export SIMULATION_EXIT="$result"
@@ -316,6 +322,9 @@ jobs:
           md += [f"| {x['function_case']} | {x['status']} | {x['reason'][:230].replace('|','/')} |" for x in rows]
           (root/"function-matrix-v1.md").write_text("\n".join(md)+"\n")
           print("\n".join(md))
+          if not results or stats["NOT_RUN"]:
+              print("ERROR: missing test executions; report is not a passing result")
+              raise SystemExit(6)
           PY
           exit "$result"
       - name: Upload compilation, simulation diagnostics, and PASS/FAIL matrix
