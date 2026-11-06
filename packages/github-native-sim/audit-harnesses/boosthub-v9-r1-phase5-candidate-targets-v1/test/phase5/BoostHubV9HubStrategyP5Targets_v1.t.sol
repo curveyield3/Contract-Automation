@@ -105,8 +105,8 @@ contract BoostV9PartialRedemptionStrategyP5V2 {
     function beforeDeposit() external pure {}
     function deposit() external pure {}
     function balanceOf() external view returns(uint256){return asset.balanceOf(address(this));}
-    function configure(bool partial,bool reverting) external {
-        shortPay=partial;rejectWithdrawal=reverting;
+    function configure(bool partialWithdrawal,bool reverting) external {
+        shortPay=partialWithdrawal;rejectWithdrawal=reverting;
     }
     function withdraw(uint256 amount) external {
         require(msg.sender==boundVault,"VAULT_ONLY");
