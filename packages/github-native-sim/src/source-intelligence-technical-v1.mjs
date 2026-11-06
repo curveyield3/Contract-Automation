@@ -40,7 +40,7 @@ function walk(value, visit, ctx={}) {
   if (value.nodeType) {
     next = {...ctx};
     if (value.nodeType === 'ContractDefinition') next.contract = value;
-    if (value.nodeType === 'FunctionDefinition') next.fn = value;
+    if (value.nodeType === 'FunctionDefinition' || value.nodeType === 'ModifierDefinition') next.fn = value;
     visit(value,next);
   }
   for (const [key,child] of Object.entries(value)) {
@@ -81,7 +81,7 @@ function astIndex(sourceAsts, byPath, compilationUnits=[]) {
           contracts.set(`${unit.unitId}|${qualifiedName}`,{node,sourceName,source,unitId:unit.unitId,qualifiedName});
           if(unit.unitId==='default')contracts.set(qualifiedName,{node,sourceName,source,unitId:unit.unitId,qualifiedName});
         }
-        if (node.nodeType==='FunctionDefinition' && ctx.contract) {
+        if ((node.nodeType==='FunctionDefinition'||node.nodeType==='ModifierDefinition') && ctx.contract) {
           const qualifiedName=`${sourceName}:${ctx.contract.name}`;
           const key=`${unit.unitId}|${qualifiedName}`;
           const list=functions.get(key)??[]; list.push({node,sourceName,source,unitId:unit.unitId}); functions.set(key,list);
@@ -158,6 +158,52 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
       const node=Number.isInteger(item.astId)?ast.nodes.get(`${unitId}:${item.astId}`):null, sLoc=loc(byPath.get(node?.sourceName??a.sourceName),node?.node?.src);
       storageLayout.push({storageId:`STORE-${pad(storageLayout.length+1,4)}`,contractId,label:item.label??null,slot:String(item.slot??''),offset:String(item.offset??''),
         type:a.storageLayout?.types?.[item.type]?.label??item.type??null,sourceLocation:sLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',status:'CURRENT',confidenceClass:'COMPILER_FACT',basis:'COMPILER_STORAGE_LAYOUT'});
+    }
+  }
+
+  // ABI method identifiers cover only externally exposed functions. Scan all
+  // remaining AST-declared function/modifier bodies too: otherwise the walk
+  // drops every external call nested inside internal/private functions or
+  // modifier implementations before callsite deduplication can see it.
+  // Append after every ABI method so existing ABI function IDs remain stable.
+  for(const a of artifacts){
+    const unitId=a.compilationUnitId??'default';
+    const qualifiedName=`${a.sourceName}:${a.contractName}`;
+    const contractId=contractByQualifiedUnit.get(`${unitId}|${qualifiedName}`)??contractByQualified.get(qualifiedName);
+    if(!contractId)continue;
+    const declarations=ast.functions.get(`${unitId}|${qualifiedName}`)??ast.functions.get(qualifiedName)??[];
+    for(const declaration of declarations){
+      const node=declaration.node;
+      if(!Number.isInteger(node?.id)||functionByAstId.has(`${unitId}:${node.id}`))continue;
+      const modifier=node.nodeType==='ModifierDefinition';
+      const name=modifier?'modifier '+(node.name??'UNNAMED_MODIFIER'):(node.name||node.kind||'UNNAMED_FUNCTION');
+      const parameters=(node.parameters?.parameters??[]).map(param=>
+        param?.typeDescriptions?.typeString??param?.typeName?.name??'UNRESOLVED_TYPE');
+      const sig=name+'('+parameters.join(',')+')';
+      const id=`FUNC-${pad(functions.length+1,4)}`;
+      const source=byPath.get(declaration.sourceName);
+      const fLoc=loc(source,node.src);
+      const guards=(node.modifiers??[]).map(modifierName);
+      functions.push({
+        functionId:id,contractId,signature:sig,selector:null,
+        visibility:modifier?'MODIFIER':node.visibility??'SOURCE_DECLARED',
+        stateMutability:node.stateMutability??null,payable:node.stateMutability==='payable',
+        modifiers:guards,sourceLocation:fLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',
+        confidenceClass:'SOURCE_SYNTAX_FACT',basis:modifier?'SOLIDITY_AST_MODIFIER_DEFINITION':'SOLIDITY_AST_FUNCTION_DEFINITION'
+      });
+      functionMetaById.set(id,{functionId:id,contractId,signature:sig,qualifiedContract:qualifiedName,
+        sourceName:a.sourceName,contractName:a.contractName});
+      functionByAstId.set(`${unitId}:${node.id}`,{functionId:id,contractId,signature:sig,
+        qualifiedContract:qualifiedName,sourceName:a.sourceName,contractName:a.contractName,unitId});
+      if(fLoc)sourceAnchors.push({anchorId:`ANCHOR-${pad(sourceAnchors.length+1,4)}`,sourceId:source?.sourceId??null,
+        symbolId:id,startLine:fLoc.startLine,endLine:fLoc.endLine,sourceDigestSha256:source.sha256,basis:'SOLIDITY_AST_SRC'});
+      for(const guard of node.modifiers??[])privilegeCandidates.push({
+        candidateId:`PRIV-${pad(privilegeCandidates.length+1,4)}`,contractId,functionId:id,candidateKind:'MODIFIER_INVOCATION',
+        modifierOrGuard:modifierName(guard),authorityExpression:modifierName(guard),
+        sourceLocation:loc(source,guard.src)?.label??fLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',
+        status:'CANDIDATE',confidenceClass:'SOURCE_SYNTAX_FACT',basis:'SOLIDITY_AST_MODIFIER_INVOCATION',
+        securityInterpretation:'DEFER_TO_PHASE_3_AND_4'
+      });
     }
   }
 
