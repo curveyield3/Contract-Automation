@@ -749,7 +749,7 @@ ${rows.join('\n')}
 `;
 }
 
-export function renderFinalEvidenceIndexV1({identity={},milestones=[],findings=[],obligations=[],limitations=[],omissions=[]}={}){
+export function renderFinalEvidenceIndexV1({identity={},milestones=[],findings=[],obligations=[],limitations=[],omissions=[],questionHistories=[]}={}){
   const milestoneRows=arr(milestones).map(m=>`| ${md(m.milestone)} | ${md(m.requiredEvidence)} | ${md(m.reference)} | ${md(m.sourceIdentity)} | ${md(m.status)} | ${md(m.limitation)} |`);
   const findingRows=[
     ...arr(findings).map(f=>`| ${md(f.id)} | ${md(f.disposition)} | ${md(f.severityOrStatus)} | ${md(f.evidence)} | ${md(f.remediationStatus)} | ${md(f.residualLimitation)} |`),
@@ -759,6 +759,10 @@ export function renderFinalEvidenceIndexV1({identity={},milestones=[],findings=[
   if(!findingRows.length) findingRows.push('| NONE | NONE_IDENTIFIED | NONE_IDENTIFIED | NONE_IDENTIFIED | NOT_APPLICABLE | NONE_IDENTIFIED |');
   const limitationText=arr(limitations).length?arr(limitations).map(x=>`- ${md(x)}`).join('\n'):'- NONE_IDENTIFIED';
   const omissionText=arr(omissions).length?arr(omissions).map(x=>`- ${md(x)}`).join('\n'):'- NONE_IDENTIFIED';
+  const questionHistoryRows=arr(questionHistories).map(ref=>
+    `| ${md(ref.phaseSequence)} | ${md(ref.unitId)} | ${md(ref.indexPath)} | ${md(ref.availability)} | ${md(ref.indexSha256??ref.previousCommittedIndex?.indexSha256??'NOT_AVAILABLE')} | ${md(ref.revision??ref.previousCommittedIndex?.revision??'NOT_AVAILABLE')} | ${md(ref.questionCount??ref.previousCommittedIndex?.questionCount??'NOT_AVAILABLE')} | ${md(ref.answeredCount??ref.previousCommittedIndex?.answeredCount??'NOT_AVAILABLE')} |`);
+  if(!questionHistoryRows.length)
+    questionHistoryRows.push('| NONE | NONE | NONE | NOT_PUBLISHED_OR_NO_ACCEPTED_UNIT | NONE | NONE | NONE | NONE |');
 
   return `# Lite Final Evidence Index
 
@@ -784,6 +788,14 @@ ${milestoneRows.join('\n')}
 | ID | Final disposition | Severity/status | Decisive evidence | Remediation status | Residual limitation |
 |---|---|---|---|---|---|
 ${findingRows.join('\n')}
+
+## Original AI investigation histories (Phase 4–6)
+
+Each row identifies an original accepted-unit question index. Read its exact GitHub checkpoint references, including earlier ANSWERS and REVISE records, before deciding whether the original concern remains material. An ANSWERED question or COMPLETE question ledger means the inquiry was recorded, **not** that a security concern was disproven or closed. Missing records are unavailable transport evidence, not a favorable conclusion.
+
+| Phase | Accepted unit | Original question index | Index availability | Index SHA-256 | Revision | Questions planned | Answers recorded |
+|---|---|---|---|---|---|---|---|
+${questionHistoryRows.join('\n')}
 
 ## Carried limitations and unresolved questions
 
