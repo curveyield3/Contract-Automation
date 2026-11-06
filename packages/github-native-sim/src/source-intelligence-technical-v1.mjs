@@ -40,7 +40,9 @@ function walk(value, visit, ctx={}) {
   if (value.nodeType) {
     next = {...ctx};
     if (value.nodeType === 'ContractDefinition') next.contract = value;
-    if (value.nodeType === 'FunctionDefinition' || value.nodeType === 'ModifierDefinition') next.fn = value;
+    if (value.nodeType === 'FunctionDefinition' || value.nodeType === 'ModifierDefinition' ||
+        (value.nodeType === 'VariableDeclaration' && value.stateVariable===true && value.value))
+      next.fn = value;
     visit(value,next);
   }
   for (const [key,child] of Object.entries(value)) {
@@ -81,7 +83,8 @@ function astIndex(sourceAsts, byPath, compilationUnits=[]) {
           contracts.set(`${unit.unitId}|${qualifiedName}`,{node,sourceName,source,unitId:unit.unitId,qualifiedName});
           if(unit.unitId==='default')contracts.set(qualifiedName,{node,sourceName,source,unitId:unit.unitId,qualifiedName});
         }
-        if ((node.nodeType==='FunctionDefinition'||node.nodeType==='ModifierDefinition') && ctx.contract) {
+        if ((node.nodeType==='FunctionDefinition'||node.nodeType==='ModifierDefinition'||
+             (node.nodeType==='VariableDeclaration'&&node.stateVariable===true&&node.value)) && ctx.contract) {
           const qualifiedName=`${sourceName}:${ctx.contract.name}`;
           const key=`${unit.unitId}|${qualifiedName}`;
           const list=functions.get(key)??[]; list.push({node,sourceName,source,unitId:unit.unitId}); functions.set(key,list);
@@ -176,7 +179,9 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
       const node=declaration.node;
       if(!Number.isInteger(node?.id)||functionByAstId.has(`${unitId}:${node.id}`))continue;
       const modifier=node.nodeType==='ModifierDefinition';
-      const name=modifier?'modifier '+(node.name??'UNNAMED_MODIFIER'):(node.name||node.kind||'UNNAMED_FUNCTION');
+      const initializer=node.nodeType==='VariableDeclaration'&&node.stateVariable===true;
+      const name=initializer?'state initializer '+(node.name??'UNNAMED_VARIABLE'):
+        modifier?'modifier '+(node.name??'UNNAMED_MODIFIER'):(node.name||node.kind||'UNNAMED_FUNCTION');
       const parameters=(node.parameters?.parameters??[]).map(param=>
         param?.typeDescriptions?.typeString??param?.typeName?.name??'UNRESOLVED_TYPE');
       const sig=name+'('+parameters.join(',')+')';
@@ -186,10 +191,11 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
       const guards=(node.modifiers??[]).map(modifierName);
       functions.push({
         functionId:id,contractId,signature:sig,selector:null,
-        visibility:modifier?'MODIFIER':node.visibility??'SOURCE_DECLARED',
+        visibility:initializer?'STATE_INITIALIZER':modifier?'MODIFIER':node.visibility??'SOURCE_DECLARED',
         stateMutability:node.stateMutability??null,payable:node.stateMutability==='payable',
         modifiers:guards,sourceLocation:fLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',
-        confidenceClass:'SOURCE_SYNTAX_FACT',basis:modifier?'SOLIDITY_AST_MODIFIER_DEFINITION':'SOLIDITY_AST_FUNCTION_DEFINITION'
+        confidenceClass:'SOURCE_SYNTAX_FACT',basis:initializer?'SOLIDITY_AST_STATE_INITIALIZER':
+          modifier?'SOLIDITY_AST_MODIFIER_DEFINITION':'SOLIDITY_AST_FUNCTION_DEFINITION'
       });
       functionMetaById.set(id,{functionId:id,contractId,signature:sig,qualifiedContract:qualifiedName,
         sourceName:a.sourceName,contractName:a.contractName});
