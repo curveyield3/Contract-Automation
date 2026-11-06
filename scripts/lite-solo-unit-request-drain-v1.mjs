@@ -18,13 +18,13 @@ if(slug===campaignId)throw Error('campaign generation suffix missing');
 const directoryRel='Audit Campaign Directory/campaigns/'+slug+'.json';
 const directoryFile=repoFile(root,directoryRel);
 const directory=readJson(directoryFile);
-if(directory.campaignId!==campaignId||directory.mode!=='LITE_SOLO'||!['machine-intelligence-v1'].includes(directory.authorityRelease))
+if(directory.campaignId!==campaignId||directory.mode!=='LITE_SOLO'||!['machine-intelligence-v7'].includes(directory.authorityRelease))
  throw Error('request drainer requires Machine Intelligence campaign');
 const campaignPath=directory.workspacePath;
 if(typeof campaignPath!=='string'||!campaignPath.startsWith('campaigns/')||campaignPath.split('/').includes('..'))
  throw Error('unsafe campaign workspace');
 const receipt=readJson(repoFile(root,campaignPath+'/receipts/PHASE_00_RECEIPT_v1.json'));
-if(!['machine-intelligence-v1'].includes(receipt.authority?.liteRelease)||receipt.authority?.manifestSha256!==directory.authorityDigest||
+if(!['machine-intelligence-v7'].includes(receipt.authority?.liteRelease)||receipt.authority?.manifestSha256!==directory.authorityDigest||
  receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId||
  receipt.source?.sha256!==directory.sourceSha256)throw Error('source/authority generation binding invalid');
 const requestDir=path.resolve(arg['requests-root']??'process/agent-upload/lite-solo-unit-requests',campaignId);
