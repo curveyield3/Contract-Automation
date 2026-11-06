@@ -947,14 +947,13 @@ function checkMachineAnswerLiteralV1(spec,value){
 }
 
 function checkExtraDiscoveryRecordsV1(field,records,route){
- // Mechanical transport shape only. Worker reviews the security-class,
- // role, applicability, evidence and anchor content of these records.
- strict(Array.isArray(records),field+' must be a typed record array');
+ // Check only the JSON container shape needed to preserve campaign files.
+ // Source anchors, roles, dispositions, and candidate quality are Worker-owned.
+ strict(Array.isArray(records),'additional discovery records must be a JSON array');
  for(const row of records)
   strict(row!==null&&typeof row==='object'&&!Array.isArray(row),
-   'extra discovery entries must be objects');
+   'additional discovery record must be a JSON object');
 }
-
 function machineAnswerDirectoryV1(u,template,routing){
  const fields=[],id=(a,b,c)=>JSON.stringify([a,b,c]);
  const push=(collection,subject,field,type,choices)=>{
