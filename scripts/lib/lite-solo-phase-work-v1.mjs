@@ -280,30 +280,7 @@ export function collectAcceptedOriginalCanonicalEvidenceV1({root,campaignPath,di
  const names=fs.readdirSync(receiptDir).sort();
  for(const phase of [1,2,3,4,5,6,8,9,10]){
    if(phase>maxPhase)continue;
-   const re=new RegExp('^PHASE_'+String(phase).padStart(2,'0')+'_RECEIPT_v([0-9]+)\\.json
-  const loaded=loadPhaseSchema(root,authorityRoot,sequence);const schema=loaded.schema;const schemaRel=loaded.rel;
-  const formRel=fullCampaignPath(campaignPath,schema.workForm.campaignPath);
-  const formTemplateRel=path.posix.join(authorityRoot,schema.workForm.template);
-  let form=readJson(requiredFile(root,formTemplateRel,'work-form template'));
-  form=applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths,predecessorReceiptPath,prefillContext});
-  writeJson(repoFile(root,formRel),form);
-  const shards=secureShardWorkFormV13({root,formRel,phase:sequence,retireFull:true});
-  const reportRel=schema.finalReport?fullCampaignPath(campaignPath,schema.finalReport.campaignPath):null;
-  return {phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer,status,workSchemaPath:schemaRel,workFormPath:formRel,...(shards?{workShardIndexPath:shards.indexRel}:{}),finalReportPath:reportRel,packetPath:fullCampaignPath(campaignPath,schema.submission.packetPath),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths],controllerPrefillDigestSha256:form?.automationInputs?.controllerPrefillDigestSha256??null};
-}
-export function ensurePacketShape({packet,directory,assignment}){
-  const deficiencies=[];
-  if(packet?.schemaVersion!=='curveyield-lite-phase-work-packet-v1') deficiencies.push('packet.schemaVersion must be curveyield-lite-phase-work-packet-v1');
-  if(packet?.campaignId!==directory.campaignId) deficiencies.push('packet.campaignId mismatch');
-  if(packet?.phaseSequence!==assignment.phaseSequence) deficiencies.push('packet.phaseSequence mismatch');
-  if(packet?.status!=='SUBMITTED') deficiencies.push('packet.status must be SUBMITTED');
-  if(packet?.workFormPath!==assignment.workFormPath) deficiencies.push('packet.workFormPath mismatch');
-  if(packet?.finalReportPath!==(assignment.finalReportPath??null)) deficiencies.push('packet.finalReportPath mismatch');
-  if(!Number.isInteger(packet?.submissionAttempt)||packet.submissionAttempt<1) deficiencies.push('packet.submissionAttempt must be integer >=1');
-  if(typeof packet?.submittedAt!=='string'||!packet.submittedAt) deficiencies.push('packet.submittedAt required');
-  return deficiencies;
-}
-);
+   const re=new RegExp('^PHASE_'+String(phase).padStart(2,'0')+'_RECEIPT_v([0-9]+)\\.json$');
    const matched=names.filter(name=>re.test(name));
    if(!matched.length){
      const canonical=path.posix.join(campaignPath,'derived/phase-'+phase,
