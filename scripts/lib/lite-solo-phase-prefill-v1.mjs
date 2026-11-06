@@ -539,10 +539,15 @@ function originalPhase1DiscoveryRosterV1({root,campaignPath}){
   const receiptsDir=repoFile(root,receiptsRel);
   let acceptedReceiptPath=null,acceptedSourceSha256=null;
   let receiptBinding='RECEIPT_UNAVAILABLE';
+  let names=[];
   if(canonicalSha256&&fs.existsSync(receiptsDir)){
-    const names=fs.readdirSync(receiptsDir).filter(name=>/^PHASE_01_RECEIPT_v\d+\.json$/.test(name))
-      .sort((a,b)=>Number(b.match(/_v(\d+)\.json$/)[1])-Number(a.match(/_v(\d+)\.json$/)[1]));
-    if(names.length)receiptBinding='CANONICAL_DIGEST_NOT_IN_PHASE1_RECEIPTS';
+    try{
+      names=fs.readdirSync(receiptsDir).filter(name=>/^PHASE_01_RECEIPT_v\d+\.json$/.test(name))
+        .sort((a,b)=>Number(b.match(/_v(\d+)\.json$/)[1])-Number(a.match(/_v(\d+)\.json$/)[1]));
+    }catch{receiptBinding='RECEIPT_DIRECTORY_UNREADABLE';}
+  }
+  if(names.length){
+    receiptBinding='CANONICAL_DIGEST_NOT_IN_PHASE1_RECEIPTS';
     for(const name of names){
       const rel=path.posix.join(receiptsRel,name);
       const receipt=readJsonIf(repoFile(root,rel));
