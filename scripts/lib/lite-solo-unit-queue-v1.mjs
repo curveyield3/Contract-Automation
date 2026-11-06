@@ -850,6 +850,52 @@ function originalWorkerAttemptReferenceV1({root,campaign,phase,unitId,request,it
   return {availability:'SOURCE_UNAVAILABLE',path:sourcePath,sha256:null};
  }
 }
+// Original ATTACK extra records are source evidence even if their flow IDs
+// cannot be placed in the issued-flow canonical attackPaths collection.
+// Never classify, repair, or drop the Worker-authored records here.
+function unmappedAttackPathProvenanceV1({root,campaign,u,originalWorkerAttempt}){
+ const missing=status=>({status,refs:[]});
+ if(originalWorkerAttempt?.availability!=='AVAILABLE')
+  return missing(originalWorkerAttempt?.availability??'ORIGINAL_ATTEMPT_UNAVAILABLE');
+ const sourcePath=originalWorkerAttempt.path,sourceSha=originalWorkerAttempt.sha256;
+ if(typeof sourcePath!=='string'||
+    !sourcePath.startsWith(unitBase(campaign,4,u.unitId)+'/submissions/')||
+    !/^[a-f0-9]{64}$/.test(String(sourceSha??'')))
+  return missing('ORIGINAL_ATTEMPT_IDENTITY_UNAVAILABLE');
+ try{
+  const bytes=fs.readFileSync(repoFile(root,sourcePath));
+  if(hex(bytes)!==sourceSha)return missing('ORIGINAL_ATTEMPT_HASH_MISMATCH');
+  const original=JSON.parse(bytes.toString('utf8'));
+  if(original?.schemaVersion!=='curveyield-machine-bound-answers-v1')
+   return missing('NOT_BOUND_EXTRA_RECORDS');
+  const extras=original?.extraRecords?.attackPaths;
+  if(extras===undefined)return missing('NO_EXTRA_ATTACK_PATHS');
+  if(!Array.isArray(extras))return missing('EXTRA_ATTACK_PATHS_UNREADABLE');
+  let issuedFlows=null;
+  try{
+   const packet=readUnitPacketV1({root,packetPath:u.packetPath});
+   if(packet?.payload?.unitId===u.unitId&&Array.isArray(packet.payload.flowIds))
+    issuedFlows=new Set(packet.payload.flowIds);
+  }catch{/* Missing packet does not block acceptance. */}
+  const refs=[];
+  extras.forEach((record,index)=>{
+   const ids=record?.flowIds;
+   const mappingStatus=!issuedFlows?'ISSUED_FLOWS_UNAVAILABLE':
+    !Array.isArray(ids)?'MISSING_FLOW_IDS_ARRAY':
+    ids.some(id=>!issuedFlows.has(id))?'UNISSUED_FLOW_IDS':null;
+   if(!mappingStatus)return; // Canonical compiler already carries this path.
+   const selector='extraRecords.attackPaths['+index+']';
+   const fields=record&&typeof record==='object'&&!Array.isArray(record)?record:{};
+   refs.push({originalIndex:index,mappingStatus,sourceSelector:selector,
+    originalFlowIds:ids===undefined?null:structuredClone(ids),
+    originalPathId:fields.pathId??null,
+    originalAnchorsSelector:Object.hasOwn(fields,'anchors')?selector+'.anchors':null,
+    originalCandidateSelector:Object.hasOwn(fields,'candidate')?selector+'.candidate':null,
+    originalWorkerAttempt:{availability:'AVAILABLE',path:sourcePath,sha256:sourceSha}});
+  });
+  return {status:issuedFlows?'COLLECTED_NONBLOCKING':'ISSUED_FLOWS_UNAVAILABLE',refs};
+ }catch{return missing('ORIGINAL_ATTEMPT_UNREADABLE');}
+}
 function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory}){
  const u=plan.units.find(x=>x.unitId===item.unitId),state=queue.units[item.unitId];
  if(!u||!state)return {unitId:item.unitId,status:'WAITING_SUBMISSION',errors:[]};
@@ -879,6 +925,12 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
   originalWorkerAttempt:originalWorkerAttemptReferenceV1({
    root,campaign,phase,unitId:u.unitId,request,item,state,digest})
  }:null;
+ if(u.kind==='ATTACK'){
+  const extra=unmappedAttackPathProvenanceV1({
+   root,campaign,u,originalWorkerAttempt:sourceProvenance.originalWorkerAttempt});
+  sourceProvenance.unmappedAttackPathRefs=extra.refs;
+  sourceProvenance.unmappedAttackPathExtractionStatus=extra.status;
+ }
  put(root,acceptedRel,{schemaVersion:'curveyield-lite-solo-accepted-unit-v1',unitId:u.unitId,
   campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
   authorityDigest:directory.authorityDigest,phaseSequence:phase,phaseEpoch:request.phaseEpoch,
@@ -952,6 +1004,12 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
   const acceptedPath=queue.units[u.unitId].acceptedPath;
   const acceptedBytes=fs.readFileSync(repoFile(root,acceptedPath));
   const accepted=JSON.parse(acceptedBytes.toString('utf8'));
+  const extra=u.kind==='ATTACK'?
+   (Array.isArray(accepted.sourceProvenance?.unmappedAttackPathRefs)?
+    {refs:accepted.sourceProvenance.unmappedAttackPathRefs,
+     status:accepted.sourceProvenance.unmappedAttackPathExtractionStatus??'COLLECTED_NONBLOCKING'}:
+    unmappedAttackPathProvenanceV1({root,campaign,u,
+     originalWorkerAttempt:accepted.sourceProvenance?.originalWorkerAttempt})):null;
   return {unitId:u.unitId,submission:accepted.submission,
    sourceReference:{phaseSequence:4,unitId:u.unitId,acceptedPath,
     acceptedSha256:hex(acceptedBytes),sourceSelectorPrefix:'submission',
@@ -961,7 +1019,9 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
     submittedRepresentation:accepted.sourceProvenance?.submittedRepresentation??
      'HISTORICAL_ACCEPTED_SUBMISSION',
     originalWorkerAttempt:accepted.sourceProvenance?.originalWorkerAttempt??
-     {availability:'NOT_RECORDED'}}};
+     {availability:'NOT_RECORDED'},
+    ...(extra?{unmappedAttackPathRefs:extra.refs,
+     unmappedAttackPathExtractionStatus:extra.status}:{})}};
  });
  const inventory=discoveryInput(root,campaign,'REVIEW_INVENTORY_v1.json');
  const summary=buildDiscoverySummaryV1({state,inventory,plan:discoveryInput(root,campaign,'FLOW_PLAN_v1.json'),

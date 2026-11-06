@@ -529,6 +529,19 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
 export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmissions,taxonomy,now}){
  const rows=arr(acceptedSubmissions),checks=new Map(),candidates=[],paths=[],answers=[],na=[],contractLevel=[];
  const discoverySourceRefs=discoveryObservationSourceRefsV1(rows);
+ // Non-canonical ATTACK extras remain in their original immutable Worker
+ // attempt, with exact selector and hash. They are not promoted into findings.
+ const unmappedAttackPathRefs=[],unmappedAttackPathSources=[];
+ for(const {unitId,sourceReference} of rows){
+  if(!unitId?.startsWith('X-'))continue;
+  unmappedAttackPathSources.push({unitId,
+   availability:sourceReference?.unmappedAttackPathExtractionStatus??
+    'ORIGINAL_ATTEMPT_UNAVAILABLE'});
+  for(const ref of arr(sourceReference?.unmappedAttackPathRefs))
+   unmappedAttackPathRefs.push({...structuredClone(ref),unitId,
+    acceptedPath:sourceReference?.acceptedPath??null,
+    acceptedSha256:sourceReference?.acceptedSha256??null});
+ }
  // Source selectors and array indices are taken from the original accepted
  // records. Never associate observations by similar prose or inferred IDs.
  const sourceIndexBySelector=new Map(discoverySourceRefs.map((ref,index)=>
@@ -747,6 +760,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const coverage=buildCoverageMatrixV1({inventory,taxonomy,discoveryState});
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{
   discoverySourceRefs,reconciliationEvidenceRefs,integrationAnswerRefs,flowNotes,
+  unmappedAttackPathRefs,unmappedAttackPathSources,
   // All candidate origins, including nested ATTACK/integration/check
   // candidates, remain accessible by exact accepted-source selector.
   candidateSourceRefIndexes:discoverySourceRefs.flatMap((ref,index)=>
