@@ -754,11 +754,11 @@ function stageUnitsV1(c,source,phase,step,stage){
  const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
  return source.units.filter(u=>unitRelevant(u,phase,step,stage,schema));
 }
-function stageAcceptedV1(source,u){
+function stageAcceptedV1(source,u,campaignPath){
  const state=source.queue.units?.[u.unitId];
  if(state?.status!=='ACCEPTED'||typeof state.acceptedPath!=='string'||
     !/^[a-f0-9]{64}$/.test(String(state.acceptedSha256??'')))return false;
- const expectedRoot=source.plan.campaignPath+'/work/phase-'+
+ const expectedRoot=campaignPath+'/work/phase-'+
   phaseNo(source.plan.phaseSequence)+'/units/'+u.unitId+'/';
  if(!state.acceptedPath.startsWith(expectedRoot))return false;
  try{
@@ -1337,7 +1337,7 @@ async function unitValidateSingle(c,item,{publish=true,notify=true}={}){
  if(!u)return;
  const state=current.queue.units[id];
  if(state?.status==='ACCEPTED'){
-  if(!stageAcceptedV1(current,u))return;
+  if(!stageAcceptedV1(current,u,c.campaignPath))return;
   if(Number.isSafeInteger(item.attempt)&&Number.isSafeInteger(state.sourceAttempt)&&
      item.attempt!==state.sourceAttempt)return;
   if(!notify)return {status:'ACCEPTED',acceptedPath:state.acceptedPath};
@@ -1374,7 +1374,7 @@ async function unitValidateSingle(c,item,{publish=true,notify=true}={}){
   writeJson(relative(updated.queueRel),updated.queue);
  }
  if(publish)publishCanonical(c);
- if(!stageAcceptedV1(unitPlan(c),u))return {status:'PENDING',result};
+ if(!stageAcceptedV1(unitPlan(c),u,c.campaignPath))return {status:'PENDING',result};
  if(!notify)return {status:'ACCEPTED',acceptedPath:record.acceptedPath};
  return callback('/fork/unit-verified',{status:'ACCEPTED',
   campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
@@ -1390,7 +1390,7 @@ async function unitAdvanceAcceptedStage(c){
  const index=stages.findIndex(x=>x.step===step&&x.stage===stage);
  strict(index>=0,'unknown Machine Intelligence stage');
  const pending=stageUnitsV1(c,current,phase,step,stage)
-  .filter(u=>!stageAcceptedV1(current,u));
+  .filter(u=>!stageAcceptedV1(current,u,c.campaignPath));
  strict(!pending.length,
   'STAGE_NOT_DURABLY_ACCEPTED: '+pending.map(u=>u.unitId).join(','));
  // Skip genuinely empty stages, but never treat blocked/claimed units as done.
@@ -1420,7 +1420,7 @@ async function unitValidateWave(c){
  const sourceCommit=need('source_commit'),current=unitPlan(c);
  // Reuse the single-unit ownership/identity path, reloading queue each time.
  const units=stageUnitsV1(c,current,phase,step,stage)
-  .filter(u=>!stageAcceptedV1(current,u))
+  .filter(u=>!stageAcceptedV1(current,u,c.campaignPath))
   .filter(u=>fs.existsSync(relative(c.campaignPath+'/work/phase-'+
    phaseNo(phase)+'/units/'+u.unitId+'/submissions')));
  for(const u of units)
