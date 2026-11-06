@@ -941,17 +941,36 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
 
   if(sequence===3){
     const matrixRel=path.posix.join(authorityRoot,'shared/controller/DOMAIN_APPLICABILITY_MATRIX.json');
-    const matrix=readJsonIf(repoFile(root,matrixRel))??{};
-    const domains=classifyDomains(si??{},matrix);
+    const matrixFile=repoFile(root,matrixRel);
+    const matrix=readJsonIf(matrixFile)??{};
+    const sourceIntelligencePath=siEntry?
+      path.relative(repoFile(root,campaignPath),siEntry.file).split(path.sep).join('/'):
+      'UNRESOLVED';
+    const sourceIntelligenceSha256=siEntry?
+      createHash('sha256').update(fs.readFileSync(siEntry.file)).digest('hex'):null;
+    const matrixSha256=fs.existsSync(matrixFile)?
+      createHash('sha256').update(fs.readFileSync(matrixFile)).digest('hex'):null;
+    const domains=classifyDomains(si??{},matrix,{
+      sourceIntelligencePath,sourceIntelligenceSha256,
+      matrixPath:matrixRel,matrixSha256
+    });
+    // The legacy decision and obligation fields are deterministic routing
+    // compatibility data. AI-specific applicability requires a separate
+    // model-authored conclusion supported by the original negative standards.
     const obligations=domainObligations(matrix,domains);
     const registryRel=path.posix.join(campaignPath,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json');
     writeJson(repoFile(root,registryRel),{
       schemaVersion:'audit-v7-domain-applicability-registry-v1',
       artifactId:'DOMAIN_APPLICABILITY_REGISTRY',
-      sourceIntelligencePath:siEntry?path.relative(repoFile(root,campaignPath),siEntry.file).split(path.sep).join('/'):'UNRESOLVED',
-      matrixPath:matrixRel,
+      sourceIntelligencePath,
+      sourceIntelligenceSha256,
+      matrixPath:matrixRel,matrixSha256,
       sourceIdentity:si?.identity?.sourceIdentity??si?.identity?.sourceDigestSha256??'UNRESOLVED',
       decisions:domains,
+      decisionsScope:'LEGACY_DETERMINISTIC_MACHINE_ROUTING_ONLY',
+      aiApplicabilityVerdict:null,
+      aiApplicabilityStatus:'NOT_AUTHORED',
+      machineNegativeInterpretation:'NOT_TRIGGERED means NO_POSITIVE_MACHINE_SIGNAL_DETECTED, not an AI-authored or source-negative specialist exclusion.',
       generatedObligations:obligations,
       owner:'CONTROLLER_AUTOMATION_AT_PHASE_2_BOUNDARY'
     });
