@@ -254,12 +254,16 @@ export async function stageExactArchiveSource({
     // The archive digest above still gates every byte, and this only removes
     // the archive's own parent prefix, never searches for arbitrary content.
     const archiveDir = path.posix.dirname(archivePath);
-    const relativeProject = projectPath.startsWith(archiveDir + '/')
-      ? projectPath.slice(archiveDir.length + 1) : null;
-    if (!relativeProject) {
+    // An exact source ZIP may store its verified project at the archive root,
+    // rather than under the original GitHub directory prefix. This is the
+    // normal layout for the frozen BoostHub source archive.
+    const relativeProject = projectPath === archiveDir ? ''
+      : projectPath.startsWith(archiveDir + '/')
+        ? projectPath.slice(archiveDir.length + 1) : null;
+    if (relativeProject === null) {
       throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `archive project root is missing: ${projectPath}`, { cause: error.message });
     }
-    projectRoot = safeRepositoryProjectPath(extractionRoot, relativeProject);
+    projectRoot = relativeProject === '' ? extractionRoot : safeRepositoryProjectPath(extractionRoot, relativeProject);
     try {
       projectStats = await fsApi.stat(projectRoot);
     } catch (relativeError) {
