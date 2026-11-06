@@ -568,7 +568,7 @@ function itemIdentity(item,u,state,request,root,campaign,phase){
  const packetRel=u.packetPath??u.shardPath;
  const livePacketSha256=u.packetSha256??hex(fs.readFileSync(repoFile(root,packetRel)));
  let packetBound=item.packetSha256===livePacketSha256;
- if(!packetBound&&state.status==='REWORK_REQUIRED'&&state.acceptedPath&&state.acceptedSha256){
+ if(!packetBound&&state.acceptedPath&&state.acceptedSha256){
   const previous=maybe(root,state.acceptedPath);
   packetBound=previous?.unitId===u.unitId&&
    previous.campaignGenerationId===request.campaignGenerationId&&
