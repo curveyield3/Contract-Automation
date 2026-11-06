@@ -903,6 +903,57 @@ try{
   materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
   form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
 
+  // Legacy Phase-5 immutable shards contain the reviewer-authored target designs.
+  // Earlier controller-side request resolution was written to the materialized
+  // full work form only, and not to the original reviewer shards. Reconstruct
+  // those exact controller-owned bindings from existing source-bound requests.
+  // The stored assignment SHA-256 MUST agree with the reconstructed projection;
+  // no existing digest or accepted unit is rewritten to fit a mismatched form.
+  if(sequence===5 && process.env.LITE_SOLO_V4_FINALIZE==='1' &&
+      ['lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(directory.authorityRelease) &&
+      assignment.controllerPrefillDigestSha256 &&
+      form?.automationInputs?.controllerPrefillDigestSha256!==assignment.controllerPrefillDigestSha256){
+    for(const target of form?.actions?.['step-3']?.outputs?.targetDesigns??[]){
+      if(!target||typeof target!=='object'||Array.isArray(target))continue;
+      if(String(target.executionMethod??'').toUpperCase()==='NOT_APPLICABLE'){
+        target.executionRequestRef='NOT_APPLICABLE';
+        target.automationResolvedExecutionRequest=false;
+        target.requestBindingStatus='NOT_APPLICABLE';
+        target.requestBindingEvidenceRef='NOT_APPLICABLE';
+      }else{
+        const explicit=typeof target.executionRequestRef==='string' &&
+          !target.executionRequestRef.startsWith('<') &&
+          target.executionRequestRef!=='NOT_APPLICABLE';
+        const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
+        if(!resolved)throw new Error('Phase 5 trusted execution request missing for '+
+          String(target.candidateKey??'UNKNOWN'));
+        target.executionRequestRef=resolved;
+        target.automationResolvedExecutionRequest=!explicit;
+        const binding=validateTargetExecutionRequestBindingV1({
+          controllerRoot:root,campaignPath,target,
+          expectedCampaignId:directory.campaignId,
+          expectedSourceSha256:directory.sourceSha256
+        });
+        if(!String(binding.status).startsWith('PASS_'))
+          throw new Error('Phase 5 execution request binding invalid for '+
+            String(target.candidateKey??'UNKNOWN')+': '+String(binding.status)+
+            ' — '+(binding.reasons??[]).join('; '));
+        target.requestBindingStatus=binding.status;
+        target.requestBindingEvidenceRef=binding.requestRef??resolved;
+      }
+      target.automationOwnedFields=[...new Set([
+        ...(target.automationOwnedFields??[]),
+        'executionRequestRef','automationResolvedExecutionRequest',
+        'requestBindingStatus','requestBindingEvidenceRef'
+      ])];
+    }
+    const restoredDigest=refreshControllerPrefillDigest(form);
+    if(restoredDigest!==assignment.controllerPrefillDigestSha256)
+      throw new Error('Phase 5 source-bound controller prefill restoration rejected: stored assignment digest '+
+        assignment.controllerPrefillDigestSha256+' differs from reconstructed '+restoredDigest);
+    writeJson(repoFile(root,assignment.workFormPath),form);
+  }
+
   // v10.3 stores the authoritative prefill digest outside the reviewer-editable
   // form. Older active assignments are migrated once from the pre-existing form
   // digest so in-flight v10.2 campaigns remain resumable.
