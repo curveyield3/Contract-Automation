@@ -44,6 +44,8 @@ const provider = new JsonRpcProvider("http://127.0.0.1:8545",747474,{staticNetwo
 const vaultAbi = ["function execute((address fuse,bytes data)[] calls_)",
   "function isFuseSupported(address) view returns(bool)","function asset() view returns(address)",
   "function authority() view returns(address)","function totalAssets() view returns(uint256)",
+  "function convertToAssets(uint256) view returns(uint256)",
+  "function previewRedeem(uint256) view returns(uint256)",
   "function updateCallbackHandler(address,address,bytes4)"];
 const positionAbi = ["function position(bytes32,address) view returns(uint256 supplyShares,uint128 borrowShares,uint128 collateral)",
   "function idToMarketParams(bytes32) view returns(address loanToken,address collateralToken,address oracle,address irm,uint256 lltv)"];
