@@ -559,7 +559,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   JSON.stringify([unitId,(sourcePrefixes.get(unitId)??'submission.')+selector]))??null;
  const uniqueIndexes=indexes=>[...new Set(indexes.filter(Number.isInteger))];
  const candidateEvidence=[],candidateOrigins=[],pathEvidence=[],answerEvidence=[],integrationAnswerRefs=[],flowNotes=[],checkEvidence=new Map();
- const functionVerdictObservations=[];
+ const functionVerdictObservations=[],unmappedPrimaryPathIndexes=new Set();
  const functionVerdicts=new Map(),trivialReviewSubstitutions=[],contractLevelFindings=[];
  const issuedFlows=arr(plan?.payload?.flows);
  const recordCandidate=(candidate,indexes,origin='REVIEWER_CANDIDATE')=>{
@@ -638,6 +638,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
     const outside=issuedAttackFlows&&(!Array.isArray(ids)||!ids.length||
      ids.some(id=>!issuedAttackFlows.has(id)));
     if(outside){
+     unmappedPrimaryPathIndexes.add(paths.length-1);
      const acceptedRef=Number.isInteger(pathRef)?discoverySourceRefs[pathRef]:null;
      const workerAttempt=sourceReference?.originalWorkerAttempt;
      const originalAvailable=workerAttempt?.availability==='AVAILABLE'&&
@@ -911,8 +912,11 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    ref.role==='FLOW'&&['GROUP_CHECK','CONTRACT_CHECK'].includes(ref.sourceCategory)&&
    ref.recordIdentity?.assessment==='SUPPORTED'?[{ref,index}]:[])
   :[];
- const relevant=paths.map((attack,index)=>({attack,sourceRef:pathEvidence[index]}))
-  .filter(({attack})=>['VIABLE','UNCERTAIN'].includes(attack?.result));
+ const relevant=paths.map((attack,index)=>({attack,sourceRef:pathEvidence[index],index}))
+  // Unissued direct paths already have a separate original-source-bound
+  // reconciliation row. Do not manufacture a second issued-flow association.
+  .filter(({attack,index})=>!unmappedPrimaryPathIndexes.has(index)&&
+   ['VIABLE','UNCERTAIN'].includes(attack?.result));
  for(const {attack,sourceRef} of relevant)add('ATTACK_FINDING',
   arr(attack.contextIds),attack?.anchors?.[0],'NO_SUBMISSION',
   attack?.candidate?.description??attack?.goal,[sourceRef]);
