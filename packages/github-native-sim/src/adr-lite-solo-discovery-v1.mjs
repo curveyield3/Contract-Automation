@@ -532,7 +532,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const discoverySourceRefs=discoveryObservationSourceRefsV1(rows);
  // Non-canonical ATTACK extras remain in their original immutable Worker
  // attempt, with exact selector and hash. They are not promoted into findings.
- const unmappedAttackPathRefs=[],unmappedAttackPathSources=[];
+ const unmappedAttackPathRefs=[],unmappedAttackPathSources=[],extraAttackPathRefs=[];
  for(const {unitId,sourceReference} of rows){
   if(!unitId?.startsWith('X-'))continue;
   unmappedAttackPathSources.push({unitId,
@@ -540,6 +540,12 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
     'ORIGINAL_ATTEMPT_UNAVAILABLE'});
   for(const ref of arr(sourceReference?.unmappedAttackPathRefs))
    unmappedAttackPathRefs.push({...structuredClone(ref),unitId,
+    acceptedPath:sourceReference?.acceptedPath??null,
+    acceptedSha256:sourceReference?.acceptedSha256??null});
+  // Every extra ATTACK path, including those successfully placed into the
+  // issued-flow attackPaths array, keeps its ORIGINAL Worker selector and hash.
+  for(const ref of arr(sourceReference?.extraAttackPathRefs))
+   extraAttackPathRefs.push({...structuredClone(ref),unitId,
     acceptedPath:sourceReference?.acceptedPath??null,
     acceptedSha256:sourceReference?.acceptedSha256??null});
  }
@@ -552,11 +558,15 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const sourceIndex=(unitId,selector)=>sourceIndexBySelector.get(
   JSON.stringify([unitId,(sourcePrefixes.get(unitId)??'submission.')+selector]))??null;
  const uniqueIndexes=indexes=>[...new Set(indexes.filter(Number.isInteger))];
- const candidateEvidence=[],pathEvidence=[],answerEvidence=[],integrationAnswerRefs=[],flowNotes=[],checkEvidence=new Map();
+ const candidateEvidence=[],candidateOrigins=[],pathEvidence=[],answerEvidence=[],integrationAnswerRefs=[],flowNotes=[],checkEvidence=new Map();
+ const functionVerdictObservations=[];
  const functionVerdicts=new Map(),trivialReviewSubstitutions=[],contractLevelFindings=[];
  const issuedFlows=arr(plan?.payload?.flows);
- const recordCandidate=(candidate,indexes)=>{
-  candidates.push(candidate);candidateEvidence.push(uniqueIndexes(indexes));
+ const recordCandidate=(candidate,indexes,origin='REVIEWER_CANDIDATE')=>{
+  if(!candidate||typeof candidate!=='object'||Array.isArray(candidate))return;
+  candidates.push(candidate);
+  candidateEvidence.push(uniqueIndexes(indexes));
+  candidateOrigins.push(origin);
  };
  // Preserve accepted class-scoped candidates using the existing reconciliation
  // stream even when no group or contract verdict is projected onto functions.
@@ -593,6 +603,11 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    const candidateRefIndex=answer?.candidate?
     sourceIndex(unitId,selector+'.candidate'):null;
    answers.push(answer);answerEvidence.push(sourceRefIndex);
+   // An explicitly supplied nested candidate deserves its own reconciliation
+   // subject even if the integration answer is not classified CONCERN.
+   if(answer?.candidate)recordCandidate(answer.candidate,
+    [candidateRefIndex,sourceRefIndex],isAttacker?'ATTACK_INTEGRATION_CANDIDATE':
+    'FLOW_INTEGRATION_CANDIDATE');
    integrationAnswerRefs.push({
     unitId,role:isAttacker?'ATTACK':'FLOW',originalIndex:i,
     obligationId:answer?.obligationId??null,assessment:answer?.assessment??null,
@@ -611,7 +626,14 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   });
   if(isAttacker){
    arr(submission?.attackPaths).forEach((attack,i)=>{
-    paths.push(attack);pathEvidence.push(sourceIndex(unitId,'attackPaths['+i+']'));
+    const pathRef=sourceIndex(unitId,'attackPaths['+i+']');
+    paths.push(attack);pathEvidence.push(pathRef);
+    if(attack?.candidate)recordCandidate(attack.candidate,
+     [sourceIndex(unitId,'attackPaths['+i+'].candidate'),pathRef],
+     'ATTACK_CANDIDATE');
+    arr(attack?.candidates).forEach((candidate,j)=>recordCandidate(candidate,
+     [sourceIndex(unitId,'attackPaths['+i+'].candidates['+j+']'),pathRef],
+     'ATTACK_CANDIDATE'));
    });
    continue;
   }
@@ -657,9 +679,17 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    if(state?.payload?.reviewPolicy==='correctness-verdict-v13'){
      // Preserve the complete AI-authored function verdict independently from
      // class assessments. The verdict does not prove every triggered class.
-     if(!['CORRECT','DEFECT','UNRESOLVED'].includes(row.verdict))
-       throw new Error('accepted v13 discovery row has no correctness verdict');
+     // The Worker owns completeness and verdict validity. GitHub packages
+     // missing or contradictory answers without a semantic rejection.
      const acceptedRowSource=Number.isInteger(rowSource)?discoverySourceRefs[rowSource]:null;
+     const verdictObservation={
+       unitId,originalIndex:rowIndex,contextId:row?.contextId??null,
+       originalRow:structuredClone(row),
+       originalSourceRefIndex:rowSource
+     };
+     functionVerdictObservations.push(verdictObservation);
+     // Keep the conventional per-context view for existing consumers. The
+     // observation roster above retains distinct repeated/conflicting rows.
      functionVerdicts.set(row.contextId,{
        // Clone all original answer fields, including intent, reason, anchors,
        // candidate(s), decidingTest and any schema-specific review details.
@@ -679,6 +709,10 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
      if(row.candidate&&typeof row.candidate==='object')
        recordCandidate({...row.candidate,contextIds:[...new Set([...(row.candidate.contextIds??[]),row.contextId])]},
         [sourceIndex(unitId,'rows['+rowIndex+'].candidate'),rowSource]);
+     // Nested row.checks can contain independently authored candidates even
+     // when checks are informational prompts rather than class verdicts.
+     arr(row?.checks).forEach((check,j)=>recordCheckCandidates(check,unitId,
+      'rows['+rowIndex+'].checks['+j+']',{}));
    }
    // V13 row.checks are prompts, not accepted class assessments.
    // Preserve the independently authored per-class responses for legacy rows.
@@ -814,7 +848,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    ...(controllerSourceSelector?{controllerSourceSelector}:{}),
   };
  };
- candidates.forEach((candidate,index)=>add('REVIEWER_CANDIDATE',arr(candidate?.contextIds),
+ candidates.forEach((candidate,index)=>add(candidateOrigins[index],arr(candidate?.contextIds),
   candidate?.anchors?.[0]??candidate?.sourceAnchor,
   candidate?.description??candidate?.title,'NO_SUBMISSION',candidateEvidence[index]));
  for(const [id,found] of [...checks.entries()].sort(([a],[b])=>sort(a,b)))
@@ -959,10 +993,10 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const coverage=buildCoverageMatrixV1({inventory,taxonomy,discoveryState});
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{
   discoverySourceRefs,reconciliationEvidenceRefs,integrationAnswerRefs,flowNotes,
-  functionVerdicts:verdictRecords,
+  functionVerdicts:verdictRecords,functionVerdictObservations,
   ...(state?.payload?.reviewPolicy==='correctness-verdict-v13'
    ?{trivialReviewSubstitutions,contractLevelFindings}:{}),
-  unmappedAttackPathRefs,unmappedAttackPathSources,
+  unmappedAttackPathRefs,unmappedAttackPathSources,extraAttackPathRefs,
   // All candidate origins, including nested ATTACK/integration/check
   // candidates, remain accessible by exact accepted-source selector.
   candidateSourceRefIndexes:discoverySourceRefs.flatMap((ref,index)=>
