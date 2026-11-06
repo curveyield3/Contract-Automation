@@ -827,16 +827,47 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   arr(attack.contextIds),attack?.anchors?.[0],'NO_SUBMISSION',
   attack?.candidate?.description??attack?.goal,[sourceRef]);
  for(const {attack,sourceRef} of relevant){
-  const classId=attack?.candidate?.classId??attack?.classId;
+  // Read the claimed class only from the accepted attacker observation.
+  // Source-triggered classes and overall function verdicts are not claims.
+  const classId=attack?.candidate?.classId??attack?.classId??null;
+  const visitedContexts=new Set();
   for(const anchor of arr(attack?.anchors)){
-   const where=arr(inventory?.payload?.contexts).filter(c=>{
-    const parsed=parseAnchorV1(anchor,inventory);
-    return parsed&&c.path===parsed.path&&parsed.lineStart<=c.lineEnd&&parsed.lineEnd>=c.lineStart;
-   });
-   for(const c of where)if(checks.get(c.contextId)?.[classId]==='SUPPORTED'){
-    contradictions.push({contextId:c.contextId,classId});
-    add('ATTACK_CONTRADICTS_REVIEW',[c.contextId],anchor,'SUPPORTED '+classId,
-     attack?.candidate?.description??attack?.goal,[sourceRef,checkSource(c.contextId,classId)]);
+   const parsed=parseAnchorV1(anchor,inventory);
+   if(!parsed)continue;
+   const where=arr(inventory?.payload?.contexts).filter(c=>
+    c.path===parsed.path&&parsed.lineStart<=c.lineEnd&&parsed.lineEnd>=c.lineStart);
+   for(const c of where){
+    // Preserve all original anchors in the accepted attack path, but route
+    // each attacker/context pair only once for reconciliation.
+    if(visitedContexts.has(c.contextId))continue;
+    visitedContexts.add(c.contextId);
+    const functionReview=functionVerdicts.get(c.contextId);
+    const functionRef=functionReview?.sourceReference?.index??null;
+    const classAssessment=typeof classId==='string'&&classId.length?
+     checks.get(c.contextId)?.[classId]:null;
+    if(classAssessment==='SUPPORTED'){
+     // This is an actual class-specific reviewer assertion. Record the
+     // conflicting AI observations; the controller does not adjudicate them.
+     contradictions.push({contextId:c.contextId,classId});
+     add('ATTACK_CONTRADICTS_REVIEW',[c.contextId],anchor,'SUPPORTED '+classId,
+      attack?.candidate?.description??attack?.goal,
+      [sourceRef,checkSource(c.contextId,classId),functionRef]);
+    }else if(state?.payload?.reviewPolicy==='correctness-verdict-v13'&&
+     functionReview?.verdict==='CORRECT'){
+     // Overlap with CORRECT is not a class-level contradiction. Send both
+     // original source-bound AI observations to Phase 4 for reconciliation.
+     add('ATTACK_FUNCTION_REVIEW_OVERLAP',[c.contextId],anchor,
+      'Function verdict CORRECT (not class-level SUPPORTED): '+
+       String(functionReview.reason??''),
+      String(attack?.result??'')+' attack path: '+
+       String(attack?.candidate?.description??attack?.goal??''),
+      [sourceRef,functionRef]);
+     const link=reconciliationEvidenceRefs[items[items.length-1].recordKey];
+     // An available attacker source alone must never imply the reviewer
+     // source was available too (and vice versa).
+     if(!Number.isInteger(sourceRef)||!Number.isInteger(functionRef))
+      link.availability='SOURCE_UNAVAILABLE';
+    }
    }
   }
  }
