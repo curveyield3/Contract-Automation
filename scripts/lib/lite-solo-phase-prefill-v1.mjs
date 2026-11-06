@@ -98,66 +98,186 @@ function structuralInputs(si){
   return {privilegeCandidates:privileges,authorityTransitions:privileges,upgradePaths,callbackSurfaces};
 }
 
+// Machine matches are discovery signals, not AI-authored exclusion verdicts.
+// Keep all original Source Intelligence family inputs and their exact selectors;
+// never infer that an absent substring establishes a source-specific negative.
 function domainClassificationCorpus(si,matrix){
-  const sources=matrix?.machineClassification?.corpusSources??[];
-  return sources.map(source=>JSON.stringify(getByPath(si,source)??null)).join('\n').toLowerCase();
+  const paths=matrix?.machineClassification?.corpusSources??[];
+  const inputs=paths.map(source=>{
+    const value=getByPath(si,source);
+    const serialized=JSON.stringify(value??null);
+    return {
+      path:source,
+      sourceSelector:'#/'+String(source).split('.')
+        .map(part=>part.replace(/~/g,'~0').replace(/\//g,'~1')).join('/'),
+      availability:value===undefined?'SOURCE_FIELD_UNAVAILABLE':'SOURCE_FIELD_PRESENT',
+      inputKind:Array.isArray(value)?'array':value===null?'null':typeof value,
+      serializedSha256:createHash('sha256').update(serialized).digest('hex'),
+      serializedCharacters:serialized.length,
+      serialized
+    };
+  });
+  return {
+    text:inputs.map(input=>input.serialized).join('\n').toLowerCase(),
+    inputs,
+    sourceRefs:inputs.map(({serialized,...ref})=>ref)
+  };
 }
 function evaluateDomainMatcher(si,corpus,matcher){
-  if(!matcher||typeof matcher!=='object') return {supported:false,matched:false,facts:[]};
+  if(!matcher||typeof matcher!=='object'||Array.isArray(matcher))
+    return {supported:false,matched:false,facts:[],exactMatches:[],
+      inputRefs:[],unsupportedReason:'MATCHER_DEFINITION_UNAVAILABLE'};
   if(matcher.kind==='arrayNonEmpty'){
-    const value=getByPath(si,matcher.path);
+    const pathValid=typeof matcher.path==='string'&&matcher.path.length>0;
+    const value=pathValid?getByPath(si,matcher.path):undefined;
+    const items=Array.isArray(value)?value:[];
+    const selector=pathValid?'#/'+matcher.path.split('.')
+      .map(part=>part.replace(/~/g,'~0').replace(/\//g,'~1')).join('/'):null;
     return {
-      supported:typeof matcher.path==='string'&&matcher.path.length>0,
-      matched:Array.isArray(value)&&value.length>0,
-      facts:Array.isArray(value)&&value.length>0?['arrayNonEmpty:'+matcher.path]:[]
+      supported:pathValid,matched:items.length>0,
+      facts:items.length?['arrayNonEmpty:'+matcher.path]:[],
+      inputRefs:pathValid?[{
+        sourcePath:matcher.path,sourceSelector:selector,
+        sourceAvailability:value===undefined?'SOURCE_FIELD_UNAVAILABLE':
+          Array.isArray(value)?'ARRAY_PRESENT':'SOURCE_VALUE_NOT_ARRAY',
+        observedArrayLength:Array.isArray(value)?value.length:null
+      }]:[],
+      exactMatches:items.map((item,index)=>({
+        kind:'arrayNonEmpty',matcherPath:matcher.path,
+        sourceSelector:selector+'/'+index,sourceIndex:index,
+        observedValueSha256:createHash('sha256').update(JSON.stringify(item)).digest('hex'),
+        exactObservedValue:item
+      })),
+      unsupportedReason:pathValid?null:'ARRAY_MATCHER_PATH_MISSING'
     };
   }
   if(matcher.kind==='textContainsAny'){
-    const terms=Array.isArray(matcher.terms)?matcher.terms.filter(x=>typeof x==='string'&&x.trim()):[];
-    const matched=terms.filter(term=>corpus.includes(term.toLowerCase()));
+    const terms=Array.isArray(matcher.terms)?
+      matcher.terms.filter(term=>typeof term==='string'&&term.trim()):[];
+    // Preserve the original combined-corpus detection semantics, including
+    // every matching term even when no individual positive position is cached.
+    const positiveTerms=terms.filter(term=>corpus.text.includes(term.toLowerCase()));
+    const exactMatches=[];
+    for(const term of positiveTerms){
+      const needle=term.toLowerCase();
+      for(const input of corpus.inputs){
+        const lowered=input.serialized.toLowerCase();
+        for(let at=lowered.indexOf(needle);at!==-1;at=lowered.indexOf(needle,at+1)){
+          exactMatches.push({
+            kind:'textContainsAny',term,exactObservedSubstring:
+              input.serialized.slice(at,at+needle.length),
+            sourceSelector:input.sourceSelector,
+            serializedOffset:at,
+            serializedInputSha256:input.serializedSha256
+          });
+        }
+      }
+    }
     return {
-      supported:terms.length>0,
-      matched:matched.length>0,
-      facts:matched.map(term=>'textContains:'+term)
+      supported:terms.length>0,matched:positiveTerms.length>0,
+      facts:positiveTerms.map(term=>'textContains:'+term),
+      inputRefs:corpus.sourceRefs,
+      exactMatches,unsupportedReason:terms.length?null:'TEXT_MATCHER_TERMS_MISSING',
+      originalMatcherTerms:terms
     };
   }
-  return {supported:false,matched:false,facts:[]};
+  return {
+    supported:false,matched:false,facts:[],exactMatches:[],inputRefs:[],
+    unsupportedReason:'UNSUPPORTED_MATCHER_KIND:'+String(matcher.kind??'UNSPECIFIED')
+  };
 }
 
-function classifyDomains(si,matrix){
+function classifyDomains(si,matrix,{
+  sourceIntelligencePath='UNRESOLVED',sourceIntelligenceSha256=null,
+  matrixPath='UNRESOLVED',matrixSha256=null
+}={}){
   const corpus=domainClassificationCorpus(si,matrix);
-  const complete=si?.completion?.status==='PASS'||si?.completion?.status==='COMPLETE'||si?.completion?.noFillSentinelsRemaining===true;
-  const limitations=(si?.limitations??[]).filter(x=>x&&x.reason&&!matchesAny(x.reason,['none','not applicable']));
+  // Keep the existing deterministic machine-routing behavior exactly. No
+  // unmatched domain is auto-promoted to UNCERTAIN_INCLUDE solely to manufacture
+  // an AI verdict; later AI review is distinct from this machine signal.
+  const complete=si?.completion?.status==='PASS'||si?.completion?.status==='COMPLETE'||
+    si?.completion?.noFillSentinelsRemaining===true;
+  const allLimitations=Array.isArray(si?.limitations)?si.limitations:[];
+  const effectiveLimitations=allLimitations.filter(x=>x&&x.reason&&
+    !matchesAny(x.reason,['none','not applicable']));
   return (matrix?.domains??[]).map(d=>{
     const matchers=Array.isArray(d.machineMatchers)?d.machineMatchers:[];
     const results=matchers.map(m=>evaluateDomainMatcher(si,corpus,m));
-    const triggered=results.some(r=>r.matched);
-    const matcherCoverageComplete=matchers.length>0&&results.every(r=>r.supported);
-    const uncertain=!complete||limitations.length>0||!matcherCoverageComplete;
+    const triggered=results.some(result=>result.matched);
+    const matcherCoverageComplete=matchers.length>0&&results.every(result=>result.supported);
+    const uncertain=!complete||effectiveLimitations.length>0||!matcherCoverageComplete;
+    // Legacy classification controls only existing automated routing and
+    // generated obligations. NOT_TRIGGERED cannot attest AI inapplicability.
     const classification=triggered?'TRIGGERED':(uncertain?'UNCERTAIN_INCLUDE':'NOT_TRIGGERED');
-    const matchedFacts=results.flatMap(r=>r.facts);
-    const triggerFacts=triggered
-      ? matchedFacts
-      : classification==='UNCERTAIN_INCLUDE'
-        ? [
-            ...(!complete?['SOURCE_INTELLIGENCE_INCOMPLETE']:[]),
-            ...(limitations.length?['SOURCE_INTELLIGENCE_LIMITATIONS_PRESENT']:[]),
-            ...(!matcherCoverageComplete?['MACHINE_MATCHER_COVERAGE_INCOMPLETE']:[])
-          ]
-        : ['COMPLETE_SOURCE_INTELLIGENCE_AND_MATRIX_MATCHERS_FOUND_NO_POSITIVE_TRIGGER'];
+    const matchedFacts=results.flatMap(result=>result.facts);
+    const triggerFacts=triggered?matchedFacts:
+      classification==='UNCERTAIN_INCLUDE'?
+        [
+          ...(!complete?['SOURCE_INTELLIGENCE_INCOMPLETE']:[]),
+          ...(effectiveLimitations.length?['SOURCE_INTELLIGENCE_LIMITATIONS_PRESENT']:[]),
+          ...(!matcherCoverageComplete?['MACHINE_MATCHER_COVERAGE_INCOMPLETE']:[])
+        ]:['COMPLETE_SOURCE_INTELLIGENCE_AND_MATRIX_MATCHERS_FOUND_NO_POSITIVE_TRIGGER'];
+    const sourceInput={path:sourceIntelligencePath,sha256:sourceIntelligenceSha256,
+      observedCompletion:si?.completion??null,
+      originalLimitations:allLimitations.map((limitation,index)=>({
+        sourceSelector:'#/limitations/'+index,exactSourceValue:limitation
+      }))};
+    const matcherEvaluations=results.map((result,index)=>({
+      matcherIndex:index,originalMatcherDefinition:matchers[index],
+      supported:result.supported,positiveMachineSignal:result.matched,
+      exactPositiveFacts:result.facts,
+      exactPositiveMatches:result.exactMatches,
+      sourceInputReferences:result.inputRefs,
+      unsupportedReason:result.unsupportedReason
+    }));
     return {
       domainId:d.domainId,
       triggerFacts,
       classification,
-      rationale:triggered
-        ? 'Deterministic machine matcher(s) from DOMAIN_APPLICABILITY_MATRIX matched accepted Source Intelligence.'
-        : classification==='UNCERTAIN_INCLUDE'
-          ? 'No positive matrix matcher matched, but exact negative exclusion is not machine-complete; fail-closed specialist coverage remains active.'
-          : 'Complete accepted Source Intelligence and complete matrix machine matchers found no positive trigger.',
-      requiredPhase4Method:(d.methodResources??[])[0]??'DOMAIN_METHOD_RESOURCE'
+      rationale:triggered?
+        'Positive deterministic machine signal from accepted Source Intelligence; MiMo applicability has not been decided.':
+        classification==='UNCERTAIN_INCLUDE'?
+          'Machine signal coverage is incomplete or Source Intelligence has limitations; conservatively retain legacy specialist routing without asserting an AI verdict.':
+          'No positive deterministic machine signal detected in the examined inputs; this does not establish source-specific negative evidence or AI inapplicability.',
+      requiredPhase4Method:(d.methodResources??[])[0]??'DOMAIN_METHOD_RESOURCE',
+      // Preserve the original methodology and source-specific standards
+      // verbatim, independent of any current machine match.
+      originalDomainMethodology:{
+        ledger:d.ledger??null,
+        methodResources:d.methodResources??[],
+        positiveTriggers:d.positiveTriggers??[],
+        negativeEvidenceRequired:d.negativeEvidenceRequired??[],
+        requiredExecutionPhases:d.requiredExecutionPhases??[]
+      },
+      machineClassification:{
+        status:triggered?'POSITIVE_MACHINE_SIGNAL':
+          uncertain?'NO_POSITIVE_MACHINE_SIGNAL_INCOMPLETE_INPUT':
+            'NO_POSITIVE_MACHINE_SIGNAL_DETECTED',
+        scope:'DETERMINISTIC_DISCOVERY_AND_LEGACY_ROUTING_ONLY',
+        legacyRoutingClassification:classification,
+        legacyRoutingStatusMeansAIVerdict:false,
+        inputProvenance:{
+          sourceIntelligence:sourceInput,
+          domainMatrix:{path:matrixPath,sha256:matrixSha256},
+          corpusSources:corpus.sourceRefs
+        },
+        sourceIntelligenceMachineCompleteness:complete,
+        machineMatcherCoverageComplete:matcherCoverageComplete,
+        unsupportedMatcherCount:results.filter(result=>!result.supported).length,
+        exactMatcherEvaluations:matcherEvaluations,
+        exactPositiveMachineMatches:matcherEvaluations.flatMap(row=>row.exactPositiveMatches),
+        sourceIntelligenceLimitations:sourceInput.observedCompletion===null?
+          {availability:'COMPLETION_METADATA_UNAVAILABLE',records:allLimitations}:
+          {availability:'SOURCE_LIMITATIONS_RECORDED',records:allLimitations},
+        negativeEvidenceStandardSatisfiedByMachine:false
+      },
+      aiApplicabilityVerdict:null,
+      aiApplicabilityStatus:'NOT_AUTHORED',
+      aiApplicabilityEvidencePath:null
     };
   });
 }
+
 function domainObligations(matrix,assessments,{originPhase=3}={}){
   const byId=new Map((matrix?.domains??[]).map(d=>[d.domainId,d]));
   const out=[];
