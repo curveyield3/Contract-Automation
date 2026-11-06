@@ -67,8 +67,9 @@ export function discoveryObservationSourceRefsV1(acceptedSubmissions){
    if(record===null||record===undefined)return;
    const isRecord=typeof record==='object'&&!Array.isArray(record);
    const identity={};
-   for(const name of ['contextId','flowId','flowIds','pathId','obligationId',
-    'candidateId','classId','contract','ruleId','signature','siblingContextId'])
+   for(const name of ['contextId','contextIds','flowId','flowIds','pathId','obligationId',
+    'candidateId','tempKey','classId','contract','assessment','applicability',
+    'ruleId','signature','siblingContextId'])
     if(isRecord&&Object.hasOwn(record,name))identity[name]=structuredClone(record[name]);
    const sourceField=isRecord?
     preferred.find(name=>Object.hasOwn(record,name))??null:null;
@@ -557,6 +558,24 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const recordCandidate=(candidate,indexes)=>{
   candidates.push(candidate);candidateEvidence.push(uniqueIndexes(indexes));
  };
+ // Preserve accepted class-scoped candidates using the existing reconciliation
+ // stream even when no group or contract verdict is projected onto functions.
+ // The parent supplies only the identifiers explicitly written by the AI.
+ const recordCheckCandidates=(check,unitId,selector,scope={})=>{
+  const parentSource=sourceIndex(unitId,selector);
+  const include=(candidate,candidateSelector)=>{
+   if(!candidate||typeof candidate!=='object'||Array.isArray(candidate))return;
+   const scoped=structuredClone(candidate);
+   if(scoped.classId===undefined&&scope.classId!==undefined)
+    scoped.classId=scope.classId;
+   if(scoped.contextIds===undefined&&scope.contextIds!==undefined)
+    scoped.contextIds=structuredClone(scope.contextIds);
+   recordCandidate(scoped,[sourceIndex(unitId,candidateSelector),parentSource]);
+  };
+  include(check?.candidate,selector+'.candidate');
+  arr(check?.candidates).forEach((candidate,index)=>
+   include(candidate,selector+'.candidates['+index+']'));
+ };
  const recordCheck=(contextId,classId,index)=>checkEvidence.set(
   JSON.stringify([contextId,classId]),index);
  const checkSource=(contextId,classId)=>checkEvidence.get(
@@ -685,13 +704,19 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    if(check.candidate)recordCandidate({...check.candidate,contextIds:[id],classId},
     [sourceCandidate,sourceRef,sourceParent]);
   };
-  // Shared-modifier group checks cannot overwrite a V13 function-wide verdict.
-  if(state?.payload?.reviewPolicy!=='correctness-verdict-v13')
-   arr(submission?.groupChecks).forEach((group,index)=>{
-    const selector='groupChecks['+index+']';
-    for(const id of arr(group?.contextIds))set(id,group.classId,group,
+  // Shared-modifier group claims remain scoped to the AI's named contexts.
+  // In V13 only accepted candidates enter reconciliation, not a synthetic
+  // SUPPORTED/CONCERN assessment for every grouped function.
+  arr(submission?.groupChecks).forEach((group,index)=>{
+   const selector='groupChecks['+index+']';
+   if(state?.payload?.reviewPolicy==='correctness-verdict-v13')
+    recordCheckCandidates(group,unitId,selector,{
+     classId:group?.classId,contextIds:arr(group?.contextIds)
+    });
+   else for(const id of arr(group?.contextIds))
+    set(id,group.classId,group,
      sourceIndex(unitId,selector),null,sourceIndex(unitId,selector+'.candidate'));
-   });
+  });
   const unit=resolveUnit(plan,unitId);
   arr(submission?.trivialReviews).forEach((review,index)=>{
    const selector='trivialReviews['+index+']';
@@ -703,8 +728,13 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
     if(!checks.has(id))checks.set(id,{});
    }
   });
-  arr(submission?.contractChecks).forEach((check,index)=>contractLevel.push({
-   check,sourceRef:sourceIndex(unitId,'contractChecks['+index+']')}));
+  arr(submission?.contractChecks).forEach((check,index)=>{
+   const selector='contractChecks['+index+']';
+   contractLevel.push({check,sourceRef:sourceIndex(unitId,selector)});
+   // A contract-specific candidate has a source-bound class and contract.
+   // Do not manufacture context IDs for every function of that contract.
+   recordCheckCandidates(check,unitId,selector,{classId:check?.classId});
+  });
 
  }
  for(const {check,sourceRef} of contractLevel)
