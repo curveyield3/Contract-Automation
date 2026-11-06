@@ -372,10 +372,11 @@ function unresolvedMachineFieldV1(field,old){
  return 'UNRESOLVED';
 }
 
-function controllerAnswerFieldBindingV1({c,fieldName,sourceRow,definition,itemField}){
+function controllerAnswerFieldBindingV1({c,fieldName,sourceRow,definition,itemField,
+ actionPrefillFields=[],actionCollectedFields=[]}){
  const value=sourceRow?.[itemField],allowed=definition?.itemFieldAllowedValues?.[itemField]??null;
- const collected=(definition?.controllerCollectedFields??[]).includes(itemField);
- const owned=(definition?.controllerPrefillFields??[]).includes(itemField)||
+ const collected=[...(definition?.controllerCollectedFields??[]),...actionCollectedFields].includes(itemField);
+ const owned=[...(definition?.controllerPrefillFields??[]),...actionPrefillFields].includes(itemField)||
    (Array.isArray(sourceRow?.automationOwnedFields)&&sourceRow.automationOwnedFields.includes(itemField));
  if(collected)return {field:itemField,source:'CONTROLLER_COLLECT_AFTER_EXECUTION',
   evidenceKind:MACHINE_EXECUTION_FIELDS.get(itemField)??'CONTROLLER_BOUND_EXECUTION_RESULT',
@@ -414,8 +415,10 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
  const memberUnits=u.kind==='BATCH'?u.members:(u.kind==='APPEND'?[]:[u]);
  const anchor=u.path??memberUnits[0]?.path;
  const step=anchor?.[1],fieldName=anchor?.[3]??u.field;
- const definition=schema.actions?.[step]?.fields?.find(f=>f.name===fieldName);
+ const action=schema.actions?.[step],definition=action?.fields?.find(f=>f.name===fieldName);
  strict(definition,'controller unit has no declared phase output definition');
+ const actionPrefillFields=action?.controllerPrefillFields??[];
+ const actionCollectedFields=action?.controllerCollectedFields??[];
  const countPolicy=u.kind==='APPEND'?'AI_CHOSEN_APPEND_ONLY':'EXACT_ISSUED_RECORD_COUNT';
  const fieldPath=anchor.join('.');
  const entries=memberUnits.map((member,i)=>({
@@ -431,8 +434,9 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
   bindings:definition.type==='REQUIRED_RECORD_LIST'&&member.initialValue&&
    typeof member.initialValue==='object'&&!Array.isArray(member.initialValue)
    ?[...new Set([...(definition.itemRequiredFields??[]),
-      ...(definition.controllerCollectedFields??[])])].map(itemField=>controllerAnswerFieldBindingV1({
-     c,fieldName,sourceRow:member.initialValue,definition,itemField}))
+      ...(definition.controllerCollectedFields??[]),...actionCollectedFields])].map(itemField=>controllerAnswerFieldBindingV1({
+     c,fieldName,sourceRow:member.initialValue,definition,itemField,
+     actionPrefillFields,actionCollectedFields}))
    :[]
  }));
  const ownedOutput=String(definition.owner??'').startsWith('CONTROLLER_')||(schema.controllerOwnedOutputPaths??[])
@@ -461,11 +465,14 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
     requiredArray:true,parse:'EXPLICIT_LIST_ITEMS_ONLY'}:
    {source:ownedOutput?'PRESERVE_CONTROLLER_OWNED':'AI_VERBATIM',
     requiredSchemaType:definition.type},
-  controllerCollectedBindings:(definition.controllerCollectedFields??[]).map(itemField=>
-    controllerAnswerFieldBindingV1({c,fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField})),
+  controllerCollectedBindings:[...new Set([...(definition.controllerCollectedFields??[]),
+     ...actionCollectedFields])].map(itemField=>
+    controllerAnswerFieldBindingV1({c,fieldName,sourceRow:memberUnits[0]?.initialValue??{},
+     definition,itemField,actionPrefillFields,actionCollectedFields})),
   recordFieldTemplate:definition.type==='REQUIRED_RECORD_LIST'
     ?(definition.itemRequiredFields??[]).map(itemField=>controllerAnswerFieldBindingV1({
-      c,fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField})) :[],
+      c,fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField,
+      actionPrefillFields,actionCollectedFields})) :[],
   entries
  };
 }
