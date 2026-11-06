@@ -1264,14 +1264,27 @@ async function materializeBoundSubmissionV1(c,u,selected){
  }
  return {...selected,rel:relativePath,filename:compiledPath};
 }
-async function unitValidateSingle(c,item){
+async function unitValidateSingle(c,item,{publish=true,notify=true}={}){
  const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
  const id=safeId(item.unit_id),sourceCommit=item.source_commit||need('source_commit');
+ // Refresh queue on every iteration rather than restoring a prior wave snapshot.
  const current=unitPlan(c),u=current.units.find(x=>x.unitId===id);
- if(!u)return; // No fabricated unit or GitHub-side rejection.
- const selected=materializeBoundSubmissionV1(c,u,submittedUnitFile(c,phase,u));
- const actualSha=sha(fs.readFileSync(selected.filename));
+ if(!u)return;
  const state=current.queue.units[id];
+ if(state?.status==='ACCEPTED'){
+  if(!state.acceptedPath||!fs.existsSync(relative(state.acceptedPath)))return;
+  if(!notify)return {status:'ACCEPTED',acceptedPath:state.acceptedPath};
+  return callback('/fork/unit-verified',{status:'ACCEPTED',
+   campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
+   phase,step,stage,unitId:id,attempt:state.attempts,
+   submissionSha256:state.acceptedSha256,sourceCommit,
+   phaseEpoch:current.plan.phaseEpoch,authorityDigest:c.directory.authorityDigest,
+   deficiencies:[],acceptedPath:state.acceptedPath,validationDelegatedTo:'CLOUDFLARE_WORKER'});
+ }
+ const selected=await materializeBoundSubmissionV1(c,u,submittedUnitFile(c,phase,u,item));
+ strict(selected.epoch>=Number(state?.claimEpoch??0),
+  'stale Worker claim epoch does not match active unit');
+ const actualSha=sha(fs.readFileSync(selected.filename));
  state.status='CLAIMED';state.workerId=selected.workerId;
  state.claimEpoch=selected.epoch;state.claimToken=randomUUID();
  writeJson(relative(current.queueRel),current.queue);
@@ -1285,12 +1298,13 @@ async function unitValidateSingle(c,item){
     sha(fs.readFileSync(relative(u.packetPath||u.shardPath))),
    submissionPath:selected.rel,submissionSha256:actualSha,
    unitSpecRevision:u.unitSpecRevision}]};
- processUnitRequestV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,
-  request,automationRoot:process.cwd()});
+ const result=processUnitRequestV1({root:ROOT,campaignPath:c.campaignPath,
+  directory:c.directory,request,automationRoot:process.cwd()});
  writeJson(relative(c.directoryPath),c.directory);
+ if(publish)publishCanonical(c);
  const updated=unitPlan(c),record=updated.queue.units[id];
- publishCanonical(c);
- if(record?.status!=='ACCEPTED')return; // Await file transport; never reject findings.
+ if(record?.status!=='ACCEPTED')return {status:'PENDING',result};
+ if(!notify)return {status:'ACCEPTED',acceptedPath:record.acceptedPath};
  return callback('/fork/unit-verified',{status:'ACCEPTED',
   campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
   phase,step,stage,unitId:id,attempt:selected.attempt,submissionSha256:actualSha,
@@ -1298,21 +1312,25 @@ async function unitValidateSingle(c,item){
   authorityDigest:c.directory.authorityDigest,deficiencies:[],
   acceptedPath:record.acceptedPath,validationDelegatedTo:'CLOUDFLARE_WORKER'});
 }
-/** Once each unit has its own controller ACCEPTED record, advance the original stage. */
+/** Only durable accepted snapshots can finish a GitHub stage. */
 async function unitAdvanceAcceptedStage(c){
  const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
- const current=unitPlan(c),schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
- const active=eligibleStage(c,current,phase,step,stage);
- let nextStep=step,nextStage=stage;
- if(!active.length){
-  if(step===0&&stage==='FLOW_REVIEW'){nextStep=0;nextStage='ATTACK_REVIEW';}
-  else if(phase===6){
-   const next=forkNextUnitStep(c,current,phase,step);
-   if(next.done){nextStep=null;nextStage=null;}
-   else{nextStep=next.step;nextStage=next.stage;}
-  }else{nextStep=step===0?1:step+1;nextStage='STEP_'+nextStep;}
+ const current=unitPlan(c),stages=orderedMachineStagesV1(phase);
+ const index=stages.findIndex(x=>x.step===step&&x.stage===stage);
+ strict(index>=0,'unknown Machine Intelligence stage');
+ const pending=stageUnitsV1(c,current,phase,step,stage)
+  .filter(u=>!stageAcceptedV1(current,u));
+ strict(!pending.length,
+  'STAGE_NOT_DURABLY_ACCEPTED: '+pending.map(u=>u.unitId).join(','));
+ // Skip genuinely empty stages, but never treat blocked/claimed units as done.
+ let next=null;
+ for(const candidate of stages.slice(index+1)){
+  if(stageUnitsV1(c,current,phase,candidate.step,candidate.stage).length){
+   next=candidate;break;
+  }
  }
- const done=phase===6?nextStep===null:step===({4:3,5:3}[phase])&&nextStep>step;
+ const done=next===null;
+ const nextStep=next?.step??null,nextStage=next?.stage??null;
  const planSha256=sha(fs.readFileSync(relative(current.planRel)));
  const queueSha256=sha(fs.readFileSync(relative(current.queueRel)));
  const nextRosterDigest=done?null:stageDigest(c,current,phase,nextStep,nextStage);
@@ -1321,38 +1339,20 @@ async function unitAdvanceAcceptedStage(c){
   phase,step,stage,sourceCommit:need('source_commit'),planSha256,
   queueSha256:payload.queue_sha256||queueSha256,rosterDigest:payload.roster_digest||'',
   phaseEpoch:current.plan.phaseEpoch,authorityDigest:c.directory.authorityDigest,
-  validator:payload.validator,deficiencies:[],stepComplete:nextStep!==step,
-  completePhase:done,nextStep:done?null:nextStep,nextStage:done?null:nextStage,
-  nextRosterDigest,nextQueueSha256:done?null:queueSha256,
-  githubContentValidationPerformed:false});
+  validator:payload.validator,deficiencies:[],stepComplete:done||nextStep!==step,
+  completePhase:done,nextStep,nextStage,nextRosterDigest,
+  nextQueueSha256:done?null:queueSha256,githubContentValidationPerformed:false});
 }
 async function unitValidateWave(c){
  if(payload.incremental===true)return unitAdvanceAcceptedStage(c);
  const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
  const sourceCommit=need('source_commit'),current=unitPlan(c);
- const units=eligibleStage(c,current,phase,step,stage);
- const planSha256=sha(fs.readFileSync(relative(current.planRel)));
- const queueSha256=sha(fs.readFileSync(relative(current.queueRel)));
- const rosterDigest=stageDigest(c,current,phase,step,stage);
- for(const u of units){
-  const selected=materializeBoundSubmissionV1(c,u,submittedUnitFile(c,phase,u));
-  const raw=fs.readFileSync(selected.filename);
-  const state=current.queue.units[u.unitId];
-  state.status='CLAIMED';state.workerId=selected.workerId;
-  state.claimEpoch=selected.epoch;state.claimToken=randomUUID();
-  writeJson(relative(current.queueRel),current.queue);
-  const request={schemaVersion:'curveyield-lite-solo-unit-batch-request-v1',
-   requestId:'mi-wave-'+randomUUID(),operation:'SUBMIT',
-   campaignId:c.directory.campaignId,campaignGenerationId:c.directory.campaignGenerationId,
-   phaseSequence:phase,lane:'AUTO',workerId:selected.workerId,
-   sourceSha256:c.directory.sourceSha256,authorityDigest:c.directory.authorityDigest,
-   phaseEpoch:current.plan.phaseEpoch,auditControllerRef:MACHINE_REF,
-   items:[{unitId:u.unitId,claimEpoch:state.claimEpoch,claimToken:state.claimToken,
-    packetSha256:u.packetSha256||sha(fs.readFileSync(relative(u.packetPath||u.shardPath))),
-    submissionPath:selected.rel,submissionSha256:sha(raw),unitSpecRevision:u.unitSpecRevision}]};
-  processUnitRequestV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,
-   request,automationRoot:process.cwd()});
- }
+ // Reuse the single-unit ownership/identity path, reloading queue each time.
+ const units=stageUnitsV1(c,current,phase,step,stage)
+  .filter(u=>!stageAcceptedV1(current,u));
+ for(const u of units)
+  await unitValidateSingle(c,{unit_id:u.unitId,source_commit:sourceCommit},
+   {publish:false,notify:false});
  writeJson(relative(c.directoryPath),c.directory);
  publishCanonical(c);
  return unitAdvanceAcceptedStage(c);
