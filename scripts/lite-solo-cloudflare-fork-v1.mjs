@@ -1362,6 +1362,7 @@ async function unitValidateSingle(c,item,{publish=true,notify=true}={}){
   auditControllerRef:MACHINE_REF,items:[{unitId:id,claimEpoch:state.claimEpoch,
    claimToken:state.claimToken,packetSha256:issuedPacketDigestV1(c,u,state),
    submissionPath:selected.rel,submissionSha256:actualSha,
+   workerAttemptPath:workerAttempt.rel,
    unitSpecRevision:u.unitSpecRevision}]};
  const result=processUnitRequestV1({root:ROOT,campaignPath:c.campaignPath,
   directory:c.directory,request,automationRoot:process.cwd()});
