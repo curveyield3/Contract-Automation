@@ -577,7 +577,7 @@ function obligationIdFor(item,originPhase,index){
 // property. Neither normalization nor deduplication is a security judgment.
 export function normalizeFormalObligationsIntoLedger({
   ledger,items=[],originPhase,canonicalRel,now,root=null,authorityRoot=null,
-  sourceCollectionPath=null,sourceKind=null
+  sourceCollectionPath=null,sourceKind=null,sourceDocumentPath=null
 }){
   ledger.obligations??=[];
   const byId=new Map(ledger.obligations.map((o,i)=>[
@@ -592,6 +592,7 @@ export function normalizeFormalObligationsIntoLedger({
       ?'#/'+sourceCollectionPath.split('.').map(k=>k.replace(/~/g,'~0')
         .replace(/\//g,'~1')).join('/')+'/'+index:null;
     const submittedSourceRef={canonicalPath:canonicalRel,
+      originalDocumentPath:sourceDocumentPath??canonicalRel,
       originalSourceSelector:sourceSelector,
       sourceKind:sourceKind??(item.automationGenerated===true?
         'CONTROLLER_MACHINE_ROUTING':'AI_AUTHORED_PHASE_OUTPUT')};
@@ -603,7 +604,7 @@ export function normalizeFormalObligationsIntoLedger({
       originFactKeys:structuredClone(item.originFactKeys??null)
     };
     const normalizedRefs=uniq([
-      canonicalRel,...evidenceList(item.originatingEvidenceRefs),
+      canonicalRel,sourceDocumentPath,...evidenceList(item.originatingEvidenceRefs),
       ...evidenceList(item.evidenceRefs),...evidenceList(item.sourceRefs)
     ]);
     const requiredPhase=String(item.requiredPhase)==='7'?'6':String(item.requiredPhase);
