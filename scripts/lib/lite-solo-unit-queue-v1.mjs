@@ -169,8 +169,14 @@ export function collectAcceptedQuestionHistoryRefsV1({
  const accepted=(Array.isArray(plan.units)?plan.units:[]).map(u=>u?.unitId)
   .filter(id=>typeof id==='string'&&queue.units?.[id]?.status==='ACCEPTED').sort();
  for(const unitId of accepted){
-  const ref=recoverAcceptedQuestionLedgerReferenceV1({
-   root,campaignPath,phase,unitId,directory,queue,plan});
+  // Optional provenance extraction must never veto otherwise accepted work.
+  // Distinguish unreadable history from a negative security finding.
+  let ref;
+  try{ref=recoverAcceptedQuestionLedgerReferenceV1({
+    root,campaignPath,phase,unitId,directory,queue,plan});}
+  catch{ref={availability:'UNREADABLE',phaseSequence:phase,unitId,
+    indexPath:path.posix.join(campaignPath,'work/phase-'+String(phase).padStart(2,'0'),
+      'units',unitId,'questions/QUESTION_INDEX_v1.json')};}
   roster.histories.push(ref);
   if(ref.availability!=='AVAILABLE')
    (roster.unavailable[ref.availability]??=[]).push(unitId);
