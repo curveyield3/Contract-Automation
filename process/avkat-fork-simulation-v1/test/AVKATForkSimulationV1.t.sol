@@ -15,10 +15,10 @@ interface IRouteOwner {
 }
 contract AVKATForkSimulationV1 {
     VmFork internal constant vm=VmFork(address(uint160(uint256(keccak256("hevm cheat code")))));
-    address internal constant SAFE=0xF39087af2107EaDBf81f10a64051740A76B6291D;
-    address internal constant MORPHO=0xD50f2dFFFd62f94eE4aED9Ca05C61D0753268ABC;
-    address internal constant KAT=0x7F1f4b4b29f5058fA32CC7a97141b8D7e5ABDC2d;
-    address internal constant AVKAT=0x7231dbaCdFc968E07656D12389AB20De82FbfCeB;
+    address internal constant SAFE=0xf39087af2107eadbf81f10a64051740a76b6291d;
+    address internal constant MORPHO=0xd50f2dfffd62f94ee4aed9ca05c61d0753268abc;
+    address internal constant KAT=0x7f1f4b4b29f5058fa32cc7a97141b8d7e5abdc2d;
+    address internal constant AVKAT=0x7231dbacdfc968e07656d12389ab20de82fbfceb;
     bytes32 internal constant MARKET=0x80e60fe453223b0f84a567724f88190bef708420d24397157067d424429783e9;
     address internal constant ROUTER=0x01F9894f92ea9224fECc8C35482E20a05De13582;
     address internal constant ROUTER_OWNER=0x47623c62f281807d615eeb4a2ceee9d97f9d3c49;
