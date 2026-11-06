@@ -552,6 +552,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   JSON.stringify([unitId,(sourcePrefixes.get(unitId)??'submission.')+selector]))??null;
  const uniqueIndexes=indexes=>[...new Set(indexes.filter(Number.isInteger))];
  const candidateEvidence=[],pathEvidence=[],answerEvidence=[],integrationAnswerRefs=[],flowNotes=[],checkEvidence=new Map();
+ const functionVerdicts=new Map();
  const issuedFlows=arr(plan?.payload?.flows);
  const recordCandidate=(candidate,indexes)=>{
   candidates.push(candidate);candidateEvidence.push(uniqueIndexes(indexes));
@@ -636,14 +637,24 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    const rowSource=sourceIndex(unitId,'rows['+rowIndex+']');
    const classMap=checks.get(row.contextId)??{};
    if(state?.payload?.reviewPolicy==='correctness-verdict-v13'){
-     // The v13 security review is function-wide, not individual checklist rows.
-     // Every triggered class is tracked under the explicit source-anchored verdict.
-     const assessment={CORRECT:'SUPPORTED',DEFECT:'CONCERN',UNRESOLVED:'UNRESOLVED'}[row.verdict];
-     if(!assessment)throw new Error('accepted v13 discovery row has no correctness verdict');
-     for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[row.contextId]??[])){
-       classMap[classId]=assessment;
-       recordCheck(row.contextId,classId,rowSource);
-     }
+     // Preserve the complete AI-authored function verdict independently from
+     // class assessments. The verdict does not prove every triggered class.
+     if(!['CORRECT','DEFECT','UNRESOLVED'].includes(row.verdict))
+       throw new Error('accepted v13 discovery row has no correctness verdict');
+     const acceptedRowSource=Number.isInteger(rowSource)?discoverySourceRefs[rowSource]:null;
+     functionVerdicts.set(row.contextId,{
+       // Clone all original answer fields, including intent, reason, anchors,
+       // candidate(s), decidingTest and any schema-specific review details.
+       ...structuredClone(row),
+       sourceReference:{
+         collection:'discoverySourceRefs',index:rowSource,unitId,
+         availability:acceptedRowSource?.availability??'SOURCE_UNAVAILABLE',
+         sourceSelector:acceptedRowSource?.sourceSelector??null,
+         originalAnchorsSelector:acceptedRowSource?.originalAnchorsSelector??null,
+         acceptedPath:acceptedRowSource?.acceptedPath??null,
+         acceptedSha256:acceptedRowSource?.acceptedSha256??null
+       }
+     });
      arr(row.candidates).forEach((c,i)=>recordCandidate(
       {...c,contextIds:[...new Set([...(c.contextIds??[]),row.contextId])]},
       [sourceIndex(unitId,'rows['+rowIndex+'].candidates['+i+']'),rowSource]));
@@ -777,6 +788,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const coverage=buildCoverageMatrixV1({inventory,taxonomy,discoveryState});
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{
   discoverySourceRefs,reconciliationEvidenceRefs,integrationAnswerRefs,flowNotes,
+  functionVerdicts:Object.fromEntries([...functionVerdicts.entries()].sort(([a],[b])=>sort(a,b))),
   unmappedAttackPathRefs,unmappedAttackPathSources,
   // All candidate origins, including nested ATTACK/integration/check
   // candidates, remain accessible by exact accepted-source selector.
