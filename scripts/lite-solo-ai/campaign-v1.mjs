@@ -656,6 +656,287 @@ function phase1EvidencePageV1(text,start,width=6000){
   text.charCodeAt(end-1)>=0xD800&&text.charCodeAt(end-1)<=0xDBFF?end-1:end;
  return {start,end:safeEnd,text:text.slice(start,safeEnd)};
 }
+// Find original canonical files archived by existing master amendment replay.
+// No new ledger or storage is created. The archive is read at the same pinned
+// commit as its accepted receipt and is indexed only when a direct path fails.
+const historyArchivedTreeCacheV1=new Map();
+async function historyArchivedCanonicalPathsV1(workspace,originalRelativePath){
+ const key=historySnapshotCommit+':'+workspace;
+ let index=historyArchivedTreeCacheV1.get(key);
+ if(!index){
+  const commit=await historyGitMetadataV1('git/commits/'+historySnapshotCommit);
+  let treeSha=commit?.tree?.sha,missing=false,unavailable=false;
+  if(!/^[0-9a-f]{40}$/.test(String(treeSha??'')))unavailable=true;
+  if(!unavailable){
+   for(const segment of (workspace+'/superseded').split('/')){
+    const tree=await historyGitMetadataV1('git/trees/'+treeSha);
+    if(!Array.isArray(tree?.tree)||tree.truncated){unavailable=true;break;}
+    const child=tree.tree.find(t=>t.path===segment&&t.type==='tree');
+    if(!child){missing=true;break;}
+    treeSha=child.sha;
+   }
+  }
+  if(unavailable)index={availability:'ARCHIVE_TREE_UNAVAILABLE',paths:[]};
+  else if(missing)index={availability:'NO_EXISTING_SUPERSEDED_ARCHIVE',paths:[]};
+  else{
+   const listing=await historyGitMetadataV1('git/trees/'+treeSha+'?recursive=1');
+   index=!Array.isArray(listing?.tree)||listing.truncated
+    ?{availability:'ARCHIVE_TREE_TRUNCATED_OR_UNAVAILABLE',paths:[]}
+    :{availability:'AVAILABLE',
+      paths:listing.tree.filter(t=>t.type==='blob')
+       .map(t=>workspace+'/superseded/'+t.path)};
+  }
+  historyArchivedTreeCacheV1.set(key,index);
+ }
+ return {availability:index.availability,
+  paths:index.paths.filter(p=>p.endsWith('/'+originalRelativePath))};
+}
+
+// The original canonical file, NOT any promoted-finding index, defines which
+// source values exist. Every value and original array position is indexed.
+function historyCanonicalSelectorsV1(canonical){
+ const records=[],missingRoots=[];
+ const escaped=k=>String(k).replace(/~/g,'~0').replace(/\//g,'~1');
+ for(const family of ['actions','automationInputs','automationOutputs']){
+  if(!Object.hasOwn(canonical,family)){missingRoots.push('/'+family);continue;}
+  const stack=[{value:canonical[family],selector:'/'+family,position:null}];
+  while(stack.length){
+   const node=stack.pop(),value=node.value;
+   const kind=value===null?'null':Array.isArray(value)?'array':typeof value;
+   const row={selector:node.selector,kind};
+   if(node.position!==null)row.originalArrayPosition=node.position;
+   if(value&&typeof value==='object'&&!Array.isArray(value)){
+    const identities=Object.entries(value).filter(([k,v])=>
+     /(?:id|key)$/i.test(k)&&(typeof v==='string'||typeof v==='number'));
+    if(identities.length)row.originalIdentityFields=Object.fromEntries(identities);
+   }
+   records.push(row);
+   if(Array.isArray(value)){
+    for(let i=value.length-1;i>=0;i--)stack.push({
+     value:value[i],selector:node.selector+'/'+i,position:i});
+   }else if(value&&typeof value==='object'){
+    const keys=Object.keys(value);
+    for(let i=keys.length-1;i>=0;i--)stack.push({
+     value:value[keys[i]],selector:node.selector+'/'+escaped(keys[i]),position:null});
+   }
+  }
+ }
+ return {records,missingRoots};
+}
+function historyCanonicalTextPagesV1(text){
+ const pages=[];
+ for(let start=0;start<text.length;){
+  const fragment=phase1EvidencePageV1(text,start);
+  if(fragment.end<=start)throw Error('Canonical original paging made no progress');
+  pages.push({page:pages.length+1,start,end:fragment.end,sha256:sha(fragment.text)});
+  start=fragment.end;
+ }
+ return pages;
+}
+
+// Canonical history is its own evidence family. It is never substituted by
+// the Phase-4/5/6 question-index checkpoints. All original accepted phase
+// revisions and selector positions stay distinct even when conclusions differ.
+async function sourceBoundCanonicalHistoryV1(raw){
+ let envelope;
+ try{envelope=JSON.parse(raw);}catch{return null;}
+ const live=envelope?.workerResponse??{};
+ if(!['LEASED_PACKET','LEASED_SHARD'].includes(live.status))return null;
+ const activePhase=Number(live.phase);
+ if(!Number.isInteger(activePhase)||activePhase<2||activePhase>10)return null;
+ const base={
+  schemaVersion:'curveyield-mi-original-canonical-history-v1',
+  campaignId,activePhase,sourceRepo:historyRepo,sourceBranch:historyBranch,
+  snapshotCommit:historySnapshotCommit,
+  referenceScheme:'RFC6901_JSON_POINTER',
+  provenance:'ORIGINAL_ACCEPTED_CANONICAL_JSON',
+  interpretationOwner:'MIMO',
+  separateQuestionCheckpointFamily:true
+ };
+ const unavailable=[],rosters=[],sources=new Map();
+ const failed=(availability,details={})=>({
+  manifest:{...base,availability,rosters,unavailable:[...unavailable,details]},
+  sources
+ });
+ if(!/^[0-9a-f]{40}$/.test(String(historySnapshotCommit??'')))
+  return failed('PINNED_CONTROLLER_COMMIT_UNAVAILABLE',{
+   availability:'PINNED_CONTROLLER_COMMIT_UNAVAILABLE'});
+ const directory=await historyDirectoryV1();
+ if(!directory||directory.campaignId!==campaignId||
+    !/^[a-f0-9]{64}$/.test(String(directory.sourceSha256??''))||
+    typeof directory.campaignGenerationId!=='string'||
+    !directory.campaignGenerationId||
+    !validHistoryWorkspacePathV1(directory.workspacePath))
+  return failed('CAMPAIGN_DIRECTORY_IDENTITY_UNAVAILABLE',{
+   availability:'CAMPAIGN_DIRECTORY_IDENTITY_UNAVAILABLE'});
+ if(live.campaignGenerationId&&
+    live.campaignGenerationId!==directory.campaignGenerationId)
+  return failed('WORKER_GENERATION_MISMATCH',{
+   availability:'WORKER_GENERATION_MISMATCH'});
+ if(live.sourceSha256&&live.sourceSha256!==directory.sourceSha256)
+  return failed('WORKER_AUDITED_SOURCE_MISMATCH',{
+   availability:'WORKER_AUDITED_SOURCE_MISMATCH'});
+ base.campaignGenerationId=directory.campaignGenerationId;
+ base.auditedSourceSha256=directory.sourceSha256;
+ base.workspacePath=directory.workspacePath;
+ base.currentAssignmentPhaseAtSnapshot=
+  Number(directory.currentAssignment?.phaseSequence)||null;
+ const receiptPaths=await historyPhaseReceiptPathsV1(directory.workspacePath)
+  .catch(error=>{
+   unavailable.push({availability:'RECEIPT_TREE_UNREADABLE',
+    expectedPath:directory.workspacePath+'/receipts',
+    detail:String(error?.message??error)});
+   return null;
+  });
+ if(receiptPaths===null)return failed('RECEIPT_TREE_UNAVAILABLE',{
+  availability:'RECEIPT_TREE_UNAVAILABLE',
+  expectedPath:directory.workspacePath+'/receipts'});
+ const phases=[1,2,3,4,5,6,8,9].filter(p=>p<activePhase);
+ for(const phase of phases){
+  const tag=String(phase).padStart(2,'0');
+  const originalRelativePath='derived/phase-'+phase+
+   '/PHASE_'+tag+'_CANONICAL_DATA_v1.json';
+  const originalCanonicalPath=directory.workspacePath+'/'+originalRelativePath;
+  const acceptedReceipts=receiptPaths.filter(p=>
+   p.startsWith(directory.workspacePath+'/receipts/PHASE_'+tag+'_RECEIPT_v'));
+  if(!acceptedReceipts.length){
+   unavailable.push({phaseSequence:phase,originalCanonicalPath,
+    expectedReceiptDirectory:directory.workspacePath+'/receipts',
+    availability:phase===9?'OPTIONAL_PHASE9_RECEIPT_NOT_PUBLISHED':
+     'ACCEPTED_PHASE_RECEIPT_NOT_PUBLISHED'});
+   continue;
+  }
+  for(const receiptPath of acceptedReceipts){
+   const revisionName=receiptPath.match(/_v([0-9]+)\.json$/);
+   const receiptRevision=revisionName?Number(revisionName[1]):null;
+   const basis={phaseSequence:phase,acceptedRevision:receiptRevision,
+    originalCanonicalPath,receiptPath,
+    campaignId, campaignGenerationId:directory.campaignGenerationId,
+    auditedSourceSha256:directory.sourceSha256,
+    snapshotCommit:historySnapshotCommit};
+   let receipt;
+   try{receipt=await historyJsonV1(receiptPath);}
+   catch(error){
+    unavailable.push({...basis,availability:'RECEIPT_UNREADABLE',
+     detail:String(error?.message??error)});continue;
+   }
+   const rd=receipt?.data;
+   if(!rd){unavailable.push({...basis,availability:'RECEIPT_UNAVAILABLE'});continue;}
+   const identityBound=rd.schemaVersion==='curveyield-lite-phase-receipt-v1'&&
+    rd.campaign?.campaignId===campaignId&&
+    rd.campaign?.campaignGenerationId===directory.campaignGenerationId&&
+    rd.campaign?.workspacePath===directory.workspacePath&&
+    rd.phase?.sequence===phase&&rd.phase?.revision===receiptRevision&&
+    rd.source?.sha256===directory.sourceSha256;
+   if(!identityBound){
+    unavailable.push({...basis,receiptSha256:receipt.file.sha256,
+     availability:'RECEIPT_CAMPAIGN_GENERATION_SOURCE_OR_REVISION_MISMATCH'});
+    continue;
+   }
+   if(rd.phase.status==='SKIPPED'&&phase===9){
+    unavailable.push({...basis,receiptSha256:receipt.file.sha256,
+     availability:'PHASE9_SKIPPED_NO_ACCEPTED_CANONICAL'});
+    continue;
+   }
+   if(!['SEALED','COMPLETE'].includes(rd.phase.status)){
+    unavailable.push({...basis,receiptSha256:receipt.file.sha256,
+     availability:'RECEIPT_NOT_ACCEPTED',receiptStatus:rd.phase.status});
+    continue;
+   }
+   const refs=[...(rd.evidence??[]),...(rd.outputs??[])]
+    .filter(ref=>ref?.role==='PHASE_CANONICAL_DATA'&&
+     ref?.path===originalRelativePath&&
+     /^[a-f0-9]{64}$/.test(String(ref.sha256??'')));
+   const expectedShas=[...new Set(refs.map(ref=>ref.sha256))];
+   if(expectedShas.length!==1){
+    unavailable.push({...basis,receiptSha256:receipt.file.sha256,
+     availability:expectedShas.length?'CONFLICTING_ACCEPTED_CANONICAL_HASHES':
+      'ACCEPTED_CANONICAL_REFERENCE_MISSING',
+     expectedOriginalReference:originalRelativePath});
+    continue;
+   }
+   const expectedSha=expectedShas[0],attempts=[],candidates=[
+    originalCanonicalPath,
+    directory.workspacePath+'/superseded/'+originalRelativePath,
+    directory.workspacePath+'/superseded/reviewer-4-followup-v1/'+originalRelativePath
+   ];
+   let selected=null,archiveAvailability='NOT_NEEDED';
+   const findCommitted=async paths=>{
+    for(const candidate of paths){
+     if(attempts.some(a=>a.path===candidate))continue;
+     try{
+      const file=await historyGithubFileV1(candidate);
+      if(!file){attempts.push({path:candidate,availability:'NOT_PUBLISHED'});continue;}
+      attempts.push({path:candidate,sha256:file.sha256,
+       availability:file.sha256===expectedSha?'HASH_MATCH':'SHA256_MISMATCH'});
+      if(file.sha256===expectedSha){selected=file;return;}
+     }catch(error){
+      attempts.push({path:candidate,availability:'READ_UNAVAILABLE',
+       detail:String(error?.message??error)});
+     }
+    }
+   };
+   await findCommitted(candidates);
+   if(!selected){
+    try{
+     const archive=await historyArchivedCanonicalPathsV1(
+      directory.workspacePath,originalRelativePath);
+     archiveAvailability=archive.availability;
+     await findCommitted(archive.paths);
+    }catch(error){
+     archiveAvailability='ARCHIVE_INDEX_UNAVAILABLE';
+     attempts.push({path:directory.workspacePath+'/superseded',
+      availability:archiveAvailability,detail:String(error?.message??error)});
+    }
+   }
+   if(!selected){
+    unavailable.push({...basis,receiptSha256:receipt.file.sha256,
+     expectedCanonicalSha256:expectedSha,
+     availability:attempts.some(a=>a.sha256&&a.sha256!==expectedSha)
+      ?'ACCEPTED_CANONICAL_SHA256_MISMATCH':'ACCEPTED_CANONICAL_NOT_RETRIEVABLE',
+     archiveAvailability,attempts});
+    continue;
+   }
+   let canonical;
+   try{canonical=JSON.parse(selected.text);}
+   catch(error){
+    unavailable.push({...basis,receiptSha256:receipt.file.sha256,
+     expectedCanonicalSha256:expectedSha,committedPath:selected.path,
+     availability:'CANONICAL_JSON_UNREADABLE',detail:String(error?.message??error)});
+    continue;
+   }
+   if(canonical?.schemaVersion!=='curveyield-lite-phase-canonical-data-v1'||
+      canonical.phase!==phase||canonical.campaignId!==campaignId){
+    unavailable.push({...basis,receiptSha256:receipt.file.sha256,
+     expectedCanonicalSha256:expectedSha,committedPath:selected.path,
+     availability:'CANONICAL_PHASE_OR_CAMPAIGN_IDENTITY_MISMATCH'});
+    continue;
+   }
+   const source=historyCanonicalSelectorsV1(canonical);
+   const pages=historyCanonicalTextPagesV1(selected.text);
+   const key=phase+':'+receiptRevision+':'+expectedSha;
+   const entry={...basis,receiptSha256:receipt.file.sha256,
+    acceptedEpoch:rd.sealedAt??rd.updatedAt??null,
+    originalCanonicalRelativePath:originalRelativePath,
+    committedCanonicalPath:selected.path,
+    expectedCanonicalSha256:expectedSha,
+    actualCanonicalSha256:selected.sha256,
+    committedGitBlobSha:selected.gitBlobSha,
+    availability:'AVAILABLE',referenceKey:key,
+    selectorCount:source.records.length,
+    missingOriginalFamilies:source.missingRoots,
+    pageCount:pages.length,
+    originalCanonicalBytes:Buffer.byteLength(selected.text)};
+   rosters.push(entry);
+   sources.set(key,{...entry,canonical,originalText:selected.text,
+    originalSelectors:source.records,pages});
+  }
+ }
+ return {manifest:{...base,availability:'COLLECTED_NONBLOCKING',
+  acceptedCanonicalCount:rosters.length,
+  rosters,unavailable},sources};
+}
+
 async function sourceBoundPhase1EvidenceV1(raw){
  let envelope;
  try{envelope=JSON.parse(raw);}catch{return null;}
