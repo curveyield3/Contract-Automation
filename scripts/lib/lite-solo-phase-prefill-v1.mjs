@@ -356,6 +356,58 @@ function sourceReviewScaffold(si){
   return rows.length?rows:['NONE_IDENTIFIED'];
 }
 
+// These are route descriptions, not new specialist work items or an
+// automated applicability decision. Existing AI fields and Phase-4 APPEND
+// slots remain available even when the classifier saw no matching keyword.
+function specialistDiscoveryRoutesV1({registry,phase}){
+  const index=(registry?.decisions??[]).map((d,index)=>({
+    domainId:d.domainId,
+    decisionSourceSelector:'#/decisions/'+index,
+    legacyRoutingClassification:d.classification??'UNAVAILABLE',
+    machineSignalStatus:d.machineClassification?.status??'UNAVAILABLE',
+    aiApplicabilityStatus:d.aiApplicabilityStatus??'NOT_AUTHORED',
+    originalMethodologySelector:'#/decisions/'+index+'/originalDomainMethodology',
+    exactMachineEvidenceSelector:'#/decisions/'+index+'/machineClassification'
+  }));
+  return {
+    artifactType:'MIMO_SPECIALIST_AI_AUTHORING_ROUTES',
+    activePhase:phase,
+    registrySource:{
+      path:'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json',
+      availability:index.length?'SOURCE_BOUND_DECISIONS_PRESENT':'SOURCE_UNAVAILABLE',
+      sourceIntelligencePath:registry?.sourceIntelligencePath??null,
+      sourceIntelligenceSha256:registry?.sourceIntelligenceSha256??null,
+      domainMatrixPath:registry?.matrixPath??null,
+      domainMatrixSha256:registry?.matrixSha256??null
+    },
+    domainSignalIndex:index,
+    machineNegativeIsNotApplicabilityVerdict:true,
+    noAutomaticSpecialistWorkForUnmatchedDomains:true,
+    preserveMachinePositivePrefills:true,
+    authoringContracts:{
+      phase3:{
+        architectureReasoning:'actions.step-1.outputs.architectureTrustModel',
+        independentHypotheses:'actions.step-1.outputs.attackHypotheses',
+        formalValidationObligations:'actions.step-2.outputs.customValidationObligations',
+        method:'Direct original form fields: use source-bound reasoning and fully typed AI-authored records. Preserve each exact source anchor, verification method, requiredPhase and property in the authored record.'
+      },
+      phase4:{
+        specialistReview:'actions.step-2.outputs.specialistReviewRecords',
+        sourceBoundCandidates:'actions.step-3.outputs.candidateRecords',
+        unresolvedLimitations:'actions.step-3.outputs.typedLimitations',
+        method:'Existing semantic APPEND unit in each array accepts new typed AI-authored records even without a controller-prefilled specialist row. Preserve original sourceAnchor, method and observation; controller allocates mechanical recordKey. A free-text mention does not create a record.'
+      }
+    },
+    downstreamSourceRecords:{
+      phase5:'actions.step-2.outputs.reconciliationRecords / newCandidateRecords',
+      phase6:'actions.step-5.outputs.candidateProofRecords / newCandidateRecords; actions.step-3.outputs.obligationDispositions',
+      phase8:'actions.step-2.outputs.candidateValidations / validatedFindings',
+      phase10:'actions.step-1.outputs.findingDispositionSynthesis / residualRiskAssessment'
+    },
+    interpretationRule:'MiMo evaluates source-specific applicability, source uncertainty and independent specialist mechanisms. Never treat a machine-negative matcher as an AI exclusion, invent a finding from text, or promote an unexecuted hypothesis into machine proof.'
+  };
+}
+
 function specialistScaffold(si,domainAssessments){
   const rows=[];let n=1;
   for(const d of domainAssessments??[]){
@@ -977,6 +1029,19 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     form.automationInputs.sourceIntelligencePath=siEntry?path.relative(repoFile(root,campaignPath),siEntry.file).split(path.sep).join('/'):'UNRESOLVED';
     form.automationInputs.domainRegistryPath=path.posix.relative(campaignPath,registryRel);
     form.automationInputs.controllerOwnedAutomationInputs=[...(form.automationInputs.controllerOwnedAutomationInputs??[]),'sourceIntelligencePath','domainRegistryPath'];
+  }
+  if([3,4,5,6,8,10].includes(sequence)){
+    const registryRel=path.posix.join(campaignPath,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json');
+    const registry=readJsonIf(repoFile(root,registryRel));
+    // If no accepted/issued registry exists, expose the absence; never
+    // manufacture an AI verdict or auto-add unmatched specialist obligations.
+    form.automationInputs.specialistDiscoveryRoutes=specialistDiscoveryRoutesV1({
+      registry,phase:sequence
+    });
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+      'specialistDiscoveryRoutes'
+    ]);
   }
 
   if(sequence===4 && Object.hasOwn(form?.actions?.['step-1']?.outputs??{},'discoveryReconciliationRecords')){
