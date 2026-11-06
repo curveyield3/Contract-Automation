@@ -715,7 +715,10 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       sourceCollections:[
         'discoverySourceRefs','reconciliationEvidenceRefs',
         'candidateSourceRefIndexes','integrationAnswerRefs','flowNotes',
-        'unmappedAttackPathRefs','unmappedAttackPathSources'
+        'unmappedAttackPathRefs','unmappedAttackPathSources',
+        'functionVerdicts','trivialReviewSubstitutions','contractLevelFindings',
+        'discoveryState.scopedClassAssessments',
+        'coverage.functionReviewSummary','coverage.classEvidenceSummary'
       ],
       counts:{
         reconciliationItems:Array.isArray(details.reconciliationItems)?details.reconciliationItems.length:null,
@@ -723,9 +726,20 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
         candidateSourceRefIndexes:Array.isArray(details.candidateSourceRefIndexes)?details.candidateSourceRefIndexes.length:null,
         integrationAnswerRefs:Array.isArray(details.integrationAnswerRefs)?details.integrationAnswerRefs.length:null,
         flowNotes:Array.isArray(details.flowNotes)?details.flowNotes.length:null,
-        unmappedAttackPathRefs:Array.isArray(details.unmappedAttackPathRefs)?details.unmappedAttackPathRefs.length:null
+        unmappedAttackPathRefs:Array.isArray(details.unmappedAttackPathRefs)?details.unmappedAttackPathRefs.length:null,
+        functionVerdicts:details.functionVerdicts&&typeof details.functionVerdicts==='object'?
+          Object.keys(details.functionVerdicts).length:null,
+        trivialReviewSubstitutions:Array.isArray(details.trivialReviewSubstitutions)?
+          details.trivialReviewSubstitutions.length:null,
+        contractLevelFindings:Array.isArray(details.contractLevelFindings)?
+          details.contractLevelFindings.length:null
       },
-      reviewInstruction:'Retrieve the complete accepted source by selector and SHA-256 rather than treating reviewerFinding, attackerFinding or sourceAnchor as the entire evidence. Inspect every FLOW and ATTACK integration answer separately, FLOW note, candidate provenance record, and unmapped ATTACK path. Only the AI reviewer decides relevance and disposition.',
+      evidenceDimensions:{
+        functionReview:details.coverage?.functionReviewSummary??null,
+        classAssessment:details.coverage?.classEvidenceSummary??null,
+        executedProperty:'SEPARATE_QUALIFIED_MACHINE_EVIDENCE_ONLY'
+      },
+      reviewInstruction:'Follow the original accepted source selector and SHA-256, never a 600-character preview. An overall CORRECT function verdict does not establish all security classes as SUPPORTED. Keep function review, explicit class assessments and executed property proof separate. Inspect FLOW/ATTACK integration answers, notes, candidates, scoped checks and unmapped paths. The AI decides security significance.',
       securityDispositionOwner:'AI_REVIEWER',
       evidenceStatusPolicy:'SOURCE_UNAVAILABLE_IS_VISIBLE_NONBLOCKING'
     };
@@ -1159,7 +1173,28 @@ export function phase4DiscoveryCoverageV1({summary}){
   const na=(records.notApplicableClaims??[]).length;
   const gaps=(records.gaps??[]).length;
   const gapIds=[...new Set((records.gaps??[]).flatMap(x=>[x.contextId,...(x.contextIds??[])].filter(Boolean)))].sort();
-  return {coverageSummary:'Required contexts: '+contexts.size+'; accepted: '+accepted+
+  if(coverage.functionReviewSummary&&coverage.classEvidenceSummary){
+    const f=coverage.functionReviewSummary,c=coverage.classEvidenceSummary;
+    return {
+      coverageSummary:'Function reviews: '+f.verdictRecorded+' recorded verdicts; '+
+        f.trivialSubstitutions+' qualified literal substitutions; '+f.notRecorded+
+        ' not recorded of '+f.requiredContexts+' source contexts. '+
+        'Explicit security-class assessments: '+c.supported+' SUPPORTED, '+
+        c.concerns+' CONCERN, '+c.unresolved+' UNRESOLVED, '+
+        c.notApplicable+' NOT_APPLICABLE, '+c.notEstablished+
+        ' NOT_ESTABLISHED of '+c.requiredContextClassPairs+' triggered pairs. '+
+        'Executed properties: NOT_REPORTED_BY_PHASE4_SOURCE_REVIEW. '+
+        'Class-specific contradictions: '+contradicted+'; N/A claims: '+na+
+        '; gaps: '+gaps+'; evidence coverage: '+(coverage.label??'PARTIAL_COVERAGE')+
+        ' (not a security-assurance verdict).',
+      functionReviewSummary:structuredClone(f),
+      classEvidenceSummary:structuredClone(c),
+      executedPropertyStatus:'NOT_REPORTED_BY_PHASE4_SOURCE_REVIEW',
+      unreviewedRequiredSurfaces:gapIds.length?gapIds:['NONE_IDENTIFIED']
+    };
+  }
+  return {coverageSummary:'HISTORICAL_CLASS_PROVENANCE_UNVERIFIED; Required contexts: '+
+    contexts.size+'; accepted class statuses (may be synthesized): '+accepted+
    '; contradicted by attacker: '+contradicted+'; not-applicable claims: '+na+
    '; gaps: '+gaps+'; label: '+(coverage.label??'PARTIAL_COVERAGE')+'.',
     unreviewedRequiredSurfaces:gapIds.length?gapIds:['NONE_IDENTIFIED']};
