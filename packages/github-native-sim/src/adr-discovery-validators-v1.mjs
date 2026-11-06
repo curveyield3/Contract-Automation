@@ -71,6 +71,20 @@ export function parseAnchorV1(text,inventory) {
  if(!file||!Number.isInteger(file.lineCount)||lineEnd>file.lineCount)return null;
  return {path,lineStart,lineEnd};
 }
+// Shared qualification for every consumer of V13 literal-constant coverage.
+// Controller summaries must never upgrade an unqualified claim to SUPPORTED.
+export function qualifiesLiteralTrivialReviewV13({review,context,inventory}){
+ if(review?.assessment!=='SUPPORTED'||!context||
+   review?.contract!==context.qualifiedContainer||!isLiteralConstantV13(context))
+   return false;
+ if(emptyEvidence(review?.evidence??review?.reason)||!Array.isArray(review?.anchors))
+   return false;
+ return review.anchors.some(anchor=>{
+   const admitted=parseAnchorV1(anchor,inventory);
+   return admitted&&admitted.path===context.path&&
+     admitted.lineStart<=context.lineEnd&&admitted.lineEnd>=context.lineStart;
+ });
+}
 
 // Opt-in for new v13-bound campaigns only. Historical v12 packets continue
 // through the original per-class validator and produce identical decisions.
@@ -100,7 +114,9 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
    // Only an AI-authored SUPPORTED verdict may replace an assigned correctness
    // row. CONCERN, UNRESOLVED, and NOT_APPLICABLE still need their own row.
    if(grounded&&anchored&&review?.assessment==='SUPPORTED')
-    for(const c of contexts)covered.add(c.contextId);
+    for(const c of contexts)
+     if(qualifiesLiteralTrivialReviewV13({review,context:c,inventory}))
+      covered.add(c.contextId);
  }
  for(const [i,row] of arr2(submission?.rows).entries()){
    const p='rows['+i+']',id=row?.contextId;
