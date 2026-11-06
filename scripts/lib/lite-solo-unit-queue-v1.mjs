@@ -42,25 +42,91 @@ const rootOf=(campaign,phase)=>path.posix.join(campaign,'work/phase-'+String(pha
 const queueRel=(campaign,phase)=>path.posix.join(rootOf(campaign,phase),'UNIT_QUEUE_STATE_v1.json');
 const planRel=(campaign,phase)=>path.posix.join(rootOf(campaign,phase),'UNIT_PLAN_INDEX_v1.json');
 const unitBase=(campaign,phase,id)=>path.posix.join(rootOf(campaign,phase),id);
-// Question histories are written directly to the isolated Audit-Controller branch by
-// the authenticated fork Worker in bounded GitHub checkpoints, never by per-question
-// Actions runs. This optional reference is packaging metadata, NOT a quality gate.
-function questionLedgerReferenceV1({root,campaign,phase,unitId,directory}){
- const rel=path.posix.join(unitBase(campaign,phase,unitId),'questions/QUESTION_INDEX_v1.json');
+// Question checkpoints are immutable Audit-Controller GitHub records. The
+// index is optional evidence metadata, NEVER a unit/phase acceptance gate.
+// Always retain its deterministic path and source-bound lookup identity, even
+// before the Worker publishes the first checkpoint.
+function questionLedgerReferenceV1({root,campaign,phase,unitId,directory,phaseEpoch,packetSha256}){
+ const indexPath=path.posix.join(unitBase(campaign,phase,unitId),
+  'questions/QUESTION_INDEX_v1.json');
+ const bound={campaignId:directory.campaignId,
+  campaignGenerationId:directory.campaignGenerationId,
+  sourceSha256:directory.sourceSha256,authorityDigest:directory.authorityDigest,
+  phaseSequence:phase,phaseEpoch,unitId,packetSha256};
+ const reference={availability:'NOT_PUBLISHED',indexPath,indexSha256:null,
+  revision:null,questionCount:null,answeredCount:null,ledgerStatus:null,...bound};
+ if(!Number.isSafeInteger(phaseEpoch)||phaseEpoch<1||
+    !/^[a-f0-9]{64}$/.test(String(packetSha256??'')))
+  return {...reference,availability:'IDENTITY_UNAVAILABLE'};
  try{
-  const file=repoFile(root,rel);
-  if(!fs.existsSync(file))return null;
+  const file=repoFile(root,indexPath);
+  if(!fs.existsSync(file))return reference;
   const raw=fs.readFileSync(file),index=JSON.parse(raw.toString('utf8'));
-  if(index.schemaVersion!=='curveyield-ai-question-index-v1'||
-    index.campaignId!==directory.campaignId||
-    index.campaignGenerationId!==directory.campaignGenerationId||
-    index.sourceSha256!==directory.sourceSha256||
-    index.authorityDigest!==directory.authorityDigest||
-    index.phaseSequence!==phase||index.unitId!==unitId)return null;
-  return {indexPath:rel,indexSha256:hex(raw),revision:index.revision,
-   questionCount:index.questions?.length??0,answeredCount:index.answeredCount??0,
-   status:index.status??'UNKNOWN'};
- }catch{return null;} // Never turn an optional history into a GitHub-side process stop.
+  if(!index||index.schemaVersion!=='curveyield-ai-question-index-v1'||
+     Object.entries(bound).some(([k,value])=>index[k]!==value))
+   return {...reference,availability:'IDENTITY_MISMATCH'};
+  if(!Number.isSafeInteger(index.revision)||index.revision<1||
+     !Number.isSafeInteger(index.questionCount)||index.questionCount<0||
+     !Number.isSafeInteger(index.answeredCount)||index.answeredCount<0||
+     !['ACTIVE','COMPLETE'].includes(index.status)||!Array.isArray(index.questions)||
+     !Array.isArray(index.checkpoints))
+   return {...reference,availability:'UNREADABLE'};
+  return {...reference,availability:'AVAILABLE',indexSha256:hex(raw),
+   revision:index.revision,questionCount:index.questionCount,
+   answeredCount:index.answeredCount,ledgerStatus:index.status};
+ }catch{return {...reference,availability:'UNREADABLE'};}
+}
+
+// Recover the current committed index independently of the historical accepted
+// snapshot's optional reference. The snapshot and queue are READ ONLY here.
+// This is used when issuing a LATER assignment; it never rewrites ACCEPTED work.
+export function recoverAcceptedQuestionLedgerReferenceV1({
+ root,campaignPath,phase,unitId,directory,queue,plan
+}){
+ const indexPath=path.posix.join(unitBase(campaignPath,phase,unitId),
+  'questions/QUESTION_INDEX_v1.json');
+ const unavailable={availability:'ACCEPTED_REFERENCE_UNAVAILABLE',indexPath,
+  unitId,phaseSequence:phase};
+ const unit=plan?.units?.find(row=>row.unitId===unitId);
+ const state=queue?.units?.[unitId];
+ const expectedPrefix=unitBase(campaignPath,phase,unitId)+'/';
+ if(!unit||state?.status!=='ACCEPTED'||typeof state.acceptedPath!=='string'||
+    !state.acceptedPath.startsWith(expectedPrefix))
+  return unavailable;
+ let accepted;
+ try{accepted=read(root,state.acceptedPath);}
+ catch{return {...unavailable,availability:'ACCEPTED_SNAPSHOT_UNAVAILABLE'};}
+ // Original packet hash and phase epoch MUST come from the accepted snapshot,
+ // never from a subsequently reassembled shard or an unbound prose reference.
+ if(accepted?.unitId!==unitId||
+    accepted.campaignGenerationId!==directory.campaignGenerationId||
+    accepted.sourceSha256!==directory.sourceSha256||
+    accepted.authorityDigest!==directory.authorityDigest||
+    accepted.phaseSequence!==phase||
+    accepted.phaseEpoch!==plan.phaseEpoch||
+    accepted.unitSpecRevision!==unit.unitSpecRevision||
+    accepted.submissionSha256!==state.acceptedSha256||
+    (unit.packetSha256&&unit.packetSha256!==accepted.packetSha256))
+  return unavailable;
+ const live=questionLedgerReferenceV1({root,campaign:campaignPath,phase,unitId,
+  directory,phaseEpoch:accepted.phaseEpoch,packetSha256:accepted.packetSha256});
+ if(live.availability==='AVAILABLE')
+  return {...live,referenceOrigin:'CURRENT_COMMITTED_INDEX'};
+ // Preserve a separately identified historical reference if the current
+ // index is temporarily unavailable; NEVER claim that it was re-read.
+ const earlier=accepted.questionLedger;
+ if(earlier?.availability==='AVAILABLE'&&
+    earlier.indexPath===indexPath&&
+    earlier.campaignId===directory.campaignId&&
+    earlier.campaignGenerationId===directory.campaignGenerationId&&
+    earlier.sourceSha256===directory.sourceSha256&&
+    earlier.authorityDigest===directory.authorityDigest&&
+    earlier.phaseSequence===phase&&earlier.phaseEpoch===accepted.phaseEpoch&&
+    earlier.unitId===unitId&&earlier.packetSha256===accepted.packetSha256&&
+    /^[a-f0-9]{64}$/.test(String(earlier.indexSha256??'')))
+  return {...live,previousCommittedIndex:{indexPath,
+   indexSha256:earlier.indexSha256,revision:earlier.revision}};
+ return live;
 }
 const asArray=x=>Array.isArray(x)?x:[];
 const isObject=x=>x&&typeof x==='object'&&!Array.isArray(x);
@@ -723,7 +789,8 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
   'ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
  const acceptedRel=path.posix.join(unitBase(campaign,phase,u.unitId),
   'ACCEPTED_ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
- const questionLedger=questionLedgerReferenceV1({root,campaign,phase,unitId:u.unitId,directory});
+ const questionLedger=questionLedgerReferenceV1({root,campaign,phase,unitId:u.unitId,
+  directory,phaseEpoch:request.phaseEpoch,packetSha256:item.packetSha256});
  put(root,acceptedRel,{schemaVersion:'curveyield-lite-solo-accepted-unit-v1',unitId:u.unitId,
   campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
   authorityDigest:directory.authorityDigest,phaseSequence:phase,phaseEpoch:request.phaseEpoch,
@@ -732,7 +799,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
   prerequisiteEvidence:prerequisiteEvidence(queue,u.dependencies),
   submission:batchOutcome?.assembledSubmission??submission,
   ...(batchOutcome?.recordEvidenceRefs?{recordEvidenceRefs:batchOutcome.recordEvidenceRefs}:{}),
-  ...(questionLedger?{questionLedger}:{}),
+  questionLedger,
   validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false});
  state.status='ACCEPTED';state.acceptedSha256=digest;state.acceptedPath=acceptedRel;state.lastErrors=[];
  put(root,resultRel,{unitId:u.unitId,status:'ACCEPTED',submissionSha256:digest,
