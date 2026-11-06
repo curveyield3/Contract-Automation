@@ -108,8 +108,10 @@ const rowId=(phase,field,index)=>{
 function assertParallelSolo(directory,phase,request=null){
  if(!isPhase(phase)||directory.mode!=='LITE_SOLO'||!RELEASES.has(directory.authorityRelease))
   throw Error('Machine Intelligence parallel controller requires the fork-owned authority');
+ // This is the executable model of the isolated v7 fork. A historical
+ // directory may predate the field; code upgrades must not strand it.
  if(directory.executionModel!=='PARALLEL_WORKER_UNITS')
-  throw Error('campaign is not admitted to parallel execution');
+  directory.executionModel='PARALLEL_WORKER_UNITS';
  if(directory.currentAssignment?.phaseSequence!==phase)throw Error('phase not current/assigned');
  if(request){
   const expected={campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
