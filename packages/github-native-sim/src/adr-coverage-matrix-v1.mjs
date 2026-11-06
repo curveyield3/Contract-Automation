@@ -121,8 +121,12 @@ export function buildCoverageMatrixV1({inventory, taxonomy, discoveryState = nul
   // are real coverage gaps; none may be reported as FULL_COVERAGE.
   const invalidInventory = inventory?.payload?.complete !== true || contexts.length === 0;
   const globalGaps = recordedGaps.filter(g => !g?.contextId && !(g?.contextIds?.length)).length;
+  const unrecordedFunctions = v13 ?
+    Object.values(functionReviews).filter(x=>x.status==='NOT_RECORDED').length : 0;
+  // This is a reporting count only; no new acceptance or execution gate.
+  // Count missing function evidence even for contexts with zero class triggers.
   const gapCount = rows.filter(x => OPEN_REVIEWS.has(x.reviewStatus) || OPEN_TESTS.has(x.testStatus)).length +
-    globalGaps + (invalidInventory ? 1 : 0) + (rows.length === 0 ? 1 : 0);
+    globalGaps + (invalidInventory ? 1 : 0) + (rows.length === 0 ? 1 : 0) + unrecordedFunctions;
   const recordedFunctions = Object.values(functionReviews);
   const functionReviewSummary = v13 ? {
     requiredContexts:recordedFunctions.length,
