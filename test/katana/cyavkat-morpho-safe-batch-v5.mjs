@@ -218,7 +218,6 @@ try {
   ok(threshold===1n,"Safe approval threshold changed, refuse v=1 prevalidated simulation");
   ok(owners.some(o=>o.toLowerCase()===A.owner.toLowerCase()),
     "EOA authorized in prior simulations is not a Safe owner");
-  const execSelector=vault.interface.getFunction("execute").selector;
   const callbackSelector=vault.interface.getFunction("updateCallbackHandler").selector;
   const [execRole,callbackRole]=await Promise.all([
     access.getTargetFunctionRole(A.vault,execSelector),
@@ -284,8 +283,6 @@ try {
   report.tx.receiptStatus=receipt.status;
   ok(receipt.status===1,"combined Safe batch transaction reverted on fork");
   const execEvents=receipt.logs.filter(l=>l.address.toLowerCase()===A.safe.toLowerCase());
-  const executionSuccessEvent=execEvents.some(l=>l.topics[0]?.toLowerCase()===
-    "0x442e715d2a56f6b96e7cae781e9eb2b9d936db5b43b84439dbbaaf0b3e2c148");
   report.tx.safeLogCount=execEvents.length;
   // State checks below are decisive independently of the event logs.
   report.tx.safeNonceAfter=as(await safe.nonce());
