@@ -166,8 +166,8 @@ export function collectAcceptedQuestionHistoryRefsV1({
     queue.authorityDigest!==directory.authorityDigest||
     queue.phaseSequence!==phase||queue.phaseEpoch!==plan.phaseEpoch)
   return {...roster,availability:'IDENTITY_MISMATCH'};
- const accepted=(Array.isArray(plan.units)?plan.units:[]).map(u=>u.unitId)
-  .filter(id=>queue.units?.[id]?.status==='ACCEPTED').sort();
+ const accepted=(Array.isArray(plan.units)?plan.units:[]).map(u=>u?.unitId)
+  .filter(id=>typeof id==='string'&&queue.units?.[id]?.status==='ACCEPTED').sort();
  for(const unitId of accepted){
   const ref=recoverAcceptedQuestionLedgerReferenceV1({
    root,campaignPath,phase,unitId,directory,queue,plan});
