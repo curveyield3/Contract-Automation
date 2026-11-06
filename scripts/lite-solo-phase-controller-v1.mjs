@@ -1267,6 +1267,7 @@ else{
   // Enter each v4 parallel phase with a frozen, full deterministic unit plan.
   // No single initial worker or claim bottleneck; Phase 4 first exposes F/R only.
   if(nextAssignment&&[4,5,6].includes(nextAssignment.phaseSequence)){
+    directory.executionModel='PARALLEL_WORKER_UNITS';
     createUnitPlanV1({root,campaignPath,directory,phase:nextAssignment.phaseSequence,automationRoot:process.cwd()});
   }
 }
