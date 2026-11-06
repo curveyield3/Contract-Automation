@@ -60,9 +60,10 @@ function phase6RequiresMutableRpc(request) {
     && /^(?:property_|invariant_|echidna_)[A-Za-z0-9_]+$/.test(analysis.medusa.targetProperty ?? '');
   const nativeFuzzGuided = analysis.nativeFuzz?.enabled === true
     && /^[A-Za-z_][A-Za-z0-9_]*$/.test(analysis.nativeFuzz.matchTest ?? '');
-  const v26 = request.configuration?.v26;
-  const coverageRequested = (v26?.foundryCoverageObligations?.length ?? 0) > 0 || v26?.foundryRefinementRequired === true;
-  return medusaGuided || nativeFuzzGuided || coverageRequested;
+  // V26 coverage also executes tests. It can use the same fork only when
+  // a named, agent-selected Foundry test is present; obligations alone do not
+  // authorize an untargeted coverage/test run.
+  return medusaGuided || nativeFuzzGuided;
 }
 
 function terminalSkippedUnguided(backend, preflightComponent) {
