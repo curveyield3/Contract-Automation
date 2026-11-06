@@ -187,15 +187,24 @@ function controllerAcceptedPostSealTestsV1({root,campaignPath}){
 }
 
 export function appendAdrCoverageSectionV1({root,campaignPath,automationRoot,text}={}){
+ // A missing source must be visible in the final index, not misread as an
+ // empty finding list or a positive coverage verdict. Nonblocking only.
+ const missing=reason=>text+'\n## Evidence coverage availability\n'+
+  '- Function-review evidence: SOURCE_UNAVAILABLE\n'+
+  '- Explicit security-class evidence: SOURCE_UNAVAILABLE\n'+
+  '- Executed-property evidence: MUST_BE_EVALUATED_SEPARATELY\n'+
+  '- Discovery summary: '+path.posix.join(campaignPath,
+    'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')+'\n'+
+  '- Coverage matrix unavailable: '+reason+'; no security-assurance inference is permitted.\n';
  try{
   const summaryRel='work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json';
   const summaryFile=rootFile(root,campaignPath,summaryRel);
   const discovery=read(summaryFile);
-  if(!discovery)return text;
+  if(!discovery)return missing('DISCOVERY_SUMMARY_UNAVAILABLE');
   // Cite the immutable accepted source; no original review data is rewritten.
   const summarySha256=createHash('sha256').update(fs.readFileSync(summaryFile)).digest('hex');
   const inventory=read(repoFile(root,reviewInventoryRelV1(root,campaignPath,'REVIEW_INVENTORY_v1.json')));
-  if(!inventory)return text;
+  if(!inventory)return missing('REVIEW_INVENTORY_UNAVAILABLE');
   const p6=read(rootFile(root,campaignPath,'derived/phase-6/PHASE_06_CANONICAL_DATA_v1.json'));
   const baseline=read(rootFile(root,campaignPath,'work/phase-06/BASELINE_OBLIGATIONS_v1.json'));
   const phase6Results={baselineObligations:baseline?.payload?.obligations??[]};
@@ -231,5 +240,5 @@ export function appendAdrCoverageSectionV1({root,campaignPath,automationRoot,tex
   return text+'\n## Evidence coverage matrix\n'+renderCoverageMarkdownV1(matrix)+
     provenance+execution+supplement+'\nDetection qualification status: '+status+
     ' (administrative qualification, not security proof)\n';
- }catch{return text;}
+ }catch{return missing('COVERAGE_MATERIALIZATION_UNAVAILABLE');}
 }
