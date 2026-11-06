@@ -1,1 +1,0 @@
-Expected RED: qualification fails because packages/github-native-sim/audit-harnesses/cyvlsdt-v30-phase6-revenue-accounting-v4/ does not yet exist. The test specification is intentionally committed before V4 implementation.

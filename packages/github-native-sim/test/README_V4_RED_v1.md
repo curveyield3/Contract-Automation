@@ -1,1 +1,0 @@
-V4 RED contract: the regression requires a whole-number, multi-depositor, multi-source revenue accounting harness exercising the real V30 Locker, RevenueStaking, BoostMerchant, RevenueVault, RevenueStrategy, RevenueConverter and USDC converter. The implementation is intentionally absent at this commit.

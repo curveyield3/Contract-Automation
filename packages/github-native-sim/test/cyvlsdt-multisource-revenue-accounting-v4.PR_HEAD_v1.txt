@@ -1,1 +1,0 @@
-RED PR head for cyvlSDT V30 multi-source revenue accounting V4. Implementation intentionally absent.
