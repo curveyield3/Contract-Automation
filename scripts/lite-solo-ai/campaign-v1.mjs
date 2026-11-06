@@ -937,6 +937,104 @@ async function sourceBoundCanonicalHistoryV1(raw){
   rosters,unavailable},sources};
 }
 
+// Lossless read interface for original canonical evidence. This uses the
+// existing Phase-1 character-safe paging convention and exact RFC 6901
+// selectors. Every bounded response has an explicit continuation cursor;
+// arbitrary field names, zero/negative findings and historical revisions are
+// never filtered or deduplicated.
+function canonicalHistoryEvidenceReadV1(history,request){
+ const manifest=history?.manifest??{};
+ const req=request&&typeof request==='object'&&!Array.isArray(request)?request:{};
+ const base={schemaVersion:'curveyield-mi-original-canonical-read-v1',
+  campaignId:manifest.campaignId??campaignId,
+  campaignGenerationId:manifest.campaignGenerationId??null,
+  auditedSourceSha256:manifest.auditedSourceSha256??null,
+  snapshotCommit:manifest.snapshotCommit??null,
+  referenceScheme:'RFC6901_JSON_POINTER'};
+ if(!history?.sources)
+  return {...base,availability:manifest.availability??'ORIGINAL_HISTORY_NOT_RETRIEVED',
+   unavailable:manifest.unavailable??[]};
+ const offsetFor=(n)=>Number.isSafeInteger(n)&&n>=0?n:0;
+ const sliceList=(list,start)=>{
+  const rows=list.slice(start,start+25);
+  return {start,total:list.length,entries:rows,
+   nextStart:start+rows.length<list.length?start+rows.length:null};
+ };
+ if(req.kind==='ROSTER_INDEX'){
+  const result=sliceList(manifest.rosters??[],offsetFor(req.start));
+  return {...base,availability:'AVAILABLE',kind:req.kind,...result};
+ }
+ if(req.kind==='UNAVAILABLE_INDEX'){
+  const result=sliceList(manifest.unavailable??[],offsetFor(req.start));
+  return {...base,availability:'AVAILABLE',kind:req.kind,...result};
+ }
+ const ref=typeof req.referenceKey==='string'?req.referenceKey:null;
+ const source=history.sources.get(ref);
+ if(!source)return {...base,availability:'SOURCE_REFERENCE_NOT_AVAILABLE',
+  referenceKey:ref,availableReferenceCount:history.sources.size,
+  sourceAvailability:manifest.availability??'UNKNOWN'};
+ const identity={referenceKey:source.referenceKey,
+  phaseSequence:source.phaseSequence,acceptedRevision:source.acceptedRevision,
+  receiptPath:source.receiptPath,receiptSha256:source.receiptSha256,
+  originalCanonicalPath:source.originalCanonicalPath,
+  committedCanonicalPath:source.committedCanonicalPath,
+  originalCanonicalSha256:source.actualCanonicalSha256};
+ if(req.kind==='SELECTOR_INDEX'){
+  const result=sliceList(source.originalSelectors,offsetFor(req.start));
+  return {...base,...identity,availability:'AVAILABLE',kind:req.kind,...result};
+ }
+ if(req.kind==='PAGE_INDEX'){
+  const result=sliceList(source.pages,offsetFor(req.start));
+  return {...base,...identity,availability:'AVAILABLE',kind:req.kind,...result};
+ }
+ if(req.kind==='CANONICAL_PAGE'){
+  const page=Number(req.page),spec=source.pages[page-1];
+  if(!Number.isSafeInteger(page)||!spec)
+   return {...base,...identity,availability:'CANONICAL_PAGE_NOT_FOUND',page:req.page};
+  const fragment=source.originalText.slice(spec.start,spec.end);
+  return {...base,...identity,availability:'AVAILABLE',kind:req.kind,
+   page,pageCount:source.pages.length,start:spec.start,end:spec.end,
+   contentSha256:spec.sha256,originalJsonFragment:fragment};
+ }
+ if(req.kind==='RECORD'){
+  // Membership in the full, unfiltered original selector roster prevents
+  // reinterpretation of a selector as a different object or historical record.
+  const pointer=typeof req.selector==='string'?req.selector:null;
+  const located=source.originalSelectors.find(r=>r.selector===pointer);
+  if(!located)return {...base,...identity,availability:'SOURCE_SELECTOR_NOT_FOUND',
+   selector:pointer};
+  let value=source.canonical;
+  for(const component of pointer.slice(1).split('/')){
+   const token=component.replace(/~1/g,'/').replace(/~0/g,'~');
+   if(value===null||typeof value!=='object'||!Object.hasOwn(value,token))
+    return {...base,...identity,availability:'SOURCE_SELECTOR_UNREADABLE',
+     selector:pointer};
+   value=value[token];
+  }
+  const originalJson=JSON.stringify(value),offset=offsetFor(req.offset);
+  if(offset>originalJson.length)return {...base,...identity,
+   availability:'RECORD_OFFSET_OUT_OF_RANGE',selector:pointer,offset};
+  if(offset>0&&offset<originalJson.length&&
+     originalJson.charCodeAt(offset)>=0xDC00&&
+     originalJson.charCodeAt(offset)<=0xDFFF)
+   return {...base,...identity,
+    availability:'RECORD_OFFSET_SPLITS_UNICODE_CHARACTER',
+    selector:pointer,nearestValidOffset:offset-1};
+  const fragment=phase1EvidencePageV1(originalJson,offset);
+  return {...base,...identity,availability:'AVAILABLE',kind:req.kind,
+   selector:pointer,originalArrayPosition:located.originalArrayPosition??null,
+   originalIdentityFields:located.originalIdentityFields??null,
+   originalRecordJsonSha256:sha(originalJson),
+   start:fragment.start,end:fragment.end,totalCharacters:originalJson.length,
+   hasMore:fragment.end<originalJson.length,
+   nextOffset:fragment.end<originalJson.length?fragment.end:null,
+   exactOriginalRecordJsonFragment:fragment.text};
+ }
+ return {...base,...identity,availability:'UNRECOGNIZED_CANONICAL_SOURCE_READ',
+  supportedKinds:['ROSTER_INDEX','UNAVAILABLE_INDEX','SELECTOR_INDEX',
+   'PAGE_INDEX','CANONICAL_PAGE','RECORD']};
+}
+
 async function sourceBoundPhase1EvidenceV1(raw){
  let envelope;
  try{envelope=JSON.parse(raw);}catch{return null;}
