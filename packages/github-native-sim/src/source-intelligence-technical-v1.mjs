@@ -313,10 +313,17 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
             astNodeId:Number.isInteger(node.id)?node.id:null
           };
           const isMember=expr?.nodeType==='MemberAccess';
+          const receiver=expr?.expression;
+          const explicitThis=isMember&&receiver?.nodeType==='Identifier'&&receiver.name==='this';
+          const inheritedSuper=isMember&&receiver?.nodeType==='Identifier'&&receiver.name==='super';
           const sameContract=target?.contractId===callerContractId;
           const lowLevelMember=['call','delegatecall','staticcall'].includes(member);
-          const externalMemberCall=isMember&&(!target||!sameContract);
-          const callClass=target ? (sameContract?'INTERNAL_OR_SELF':'CROSS_CONTRACT_OR_INHERITED') : (isMember?'UNRESOLVED_MEMBER_CALL':'UNRESOLVED_CALL');
+          // Solidity this.f() crosses the external ABI even when the resolved
+          // function belongs to this contract; super.f() is inherited dispatch.
+          const externalMemberCall=isMember&&!inheritedSuper&&(!target||!sameContract||explicitThis);
+          const callClass=explicitThis?'EXTERNAL_SELF_ABI_CALL':inheritedSuper?'INHERITED_INTERNAL_DISPATCH':
+            target?(sameContract?'INTERNAL_OR_SELF':'CROSS_CONTRACT_OR_INHERITED'):
+            (isMember?'UNRESOLVED_MEMBER_CALL':'UNRESOLVED_CALL');
           pushCall({
             callerContractId,callerFunctionId:caller.functionId,targetContractId:target?.contractId??null,targetFunctionId:target?.functionId??null,
             memberOrName:member,callClass,interfaceOrType:interfaceType,sourceLocation:callLoc,confidenceClass:target?'SOLIDITY_AST_REFERENCED_DECLARATION':'SOLIDITY_AST_CALL_SYNTAX',
