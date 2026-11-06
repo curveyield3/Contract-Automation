@@ -10,15 +10,10 @@ const CAMPAIGN_CONFIG = Object.freeze({
   targeted: 'medusa/medusa-targeted-template_v2.json',
 });
 
+// Starter bundles carry configuration only. Agents add and select specific
+// properties/tests themselves; no default fuzz or invariant suite is generated.
 const COMMON_SKELETONS = Object.freeze([
   ['foundry/foundry-template_v2.toml', 'foundry.toml'],
-  ['medusa/Phase6MedusaHarness_v2.sol.template', 'test/phase6/Phase6MedusaHarness_v2.sol'],
-  ['foundry/Phase6InvariantTargeting_v2.sol.template', 'test/phase6/Phase6InvariantTargeting_v2.sol'],
-  ['foundry/Phase6StatefulHandler_v2.sol.template', 'test/phase6/Phase6StatefulHandler_v2.sol'],
-  ['foundry/Phase6InvariantSuite_v2.t.sol.template', 'test/phase6/Phase6InvariantSuite_v2.t.sol'],
-  ['foundry/Phase6BoundaryFuzz_v2.t.sol.template', 'test/phase6/Phase6BoundaryFuzz_v2.t.sol'],
-  ['foundry/Phase6DifferentialFuzz_v2.t.sol.template', 'test/phase6/Phase6DifferentialFuzz_v2.t.sol'],
-  ['models/Phase6GhostModel_v2.sol.template', 'test/phase6/Phase6GhostModel_v2.sol'],
 ]);
 
 const TARGET_PLACEHOLDERS = Object.freeze([
