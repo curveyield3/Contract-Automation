@@ -62,14 +62,20 @@ function completeDirectPhaseRecordIdsV1({form,sequence,campaignId}){
   for(const [collection,key]of Object.entries(fields)){
    const rows=form?.actions?.[step]?.outputs?.[collection];
    if(!Array.isArray(rows))continue;
-   for(const [i,row]of rows.entries()){
+   const used=new Set(rows.filter(r=>r&&typeof r==='object'&&!Array.isArray(r))
+    .map(r=>r[key]).filter(k=>typeof k==='string'&&k.trim()&&!k.startsWith('<REQUIRED')));
+   let ordinal=1;
+   for(const row of rows){
     if(!row||typeof row!=='object'||Array.isArray(row))continue;
     const value=row[key];
     if(typeof value==='string'&&value.trim()&&!value.startsWith('<REQUIRED')&&
       value!=='TODO')continue; // Controller-issued or accepted key wins.
-    row[key]=['MI',String(sequence).padStart(2,'0'),campaignToken,step,
-      collection,String(i+1).padStart(4,'0')].join('-');
-    issued++;
+    let candidate;
+    do{
+     candidate=['MI',String(sequence).padStart(2,'0'),campaignToken,step,
+       collection,String(ordinal++).padStart(4,'0')].join('-');
+    }while(used.has(candidate));
+    row[key]=candidate;used.add(candidate);issued++;
    }
   }
  }
