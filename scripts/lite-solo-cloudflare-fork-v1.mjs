@@ -269,7 +269,59 @@ const isPendingAnswerValue=v=>typeof v==='string'&&(
  v==='<fill>'||v==='TODO'
 );
 const negativeSentinel=v=>typeof v==='string'&&EXPLICIT_NEGATIVES.has(v);
-function controllerAnswerFieldBindingV1({fieldName,sourceRow,definition,itemField}){
+// Exact admitted execution-request file + authenticated ingestion tuple.
+// No guessing of request paths, round counts, proof outcomes, or semantic results.
+function verifiedMachineSourcesV1(c,row){
+ const relativeDir=typeof row?.requestDirectory==='string'?row.requestDirectory.replace(/\/+$/,''):'';
+ if(!relativeDir.startsWith('controller/phase6-tests/')&&
+    !relativeDir.startsWith('controller/phase9-reruns/'))return [];
+ const directoryPath=path.posix.join(c.campaignPath,relativeDir);
+ const absolute=relative(directoryPath);
+ if(!fs.existsSync(absolute)||!fs.statSync(absolute).isDirectory())return [];
+ const files=fs.readdirSync(absolute).filter(n=>/^[A-Za-z0-9_.-]+\.json$/.test(n));
+ const verified=[];
+ for(const name of files){
+  const requestPath=path.posix.join(directoryPath,name),request=read(requestPath);
+  if(typeof request?.requestId!=='string'||typeof request.requestDigest!=='string')continue;
+  if(request.sourceSha256&&request.sourceSha256!==c.directory.sourceSha256)continue;
+  if(!/^[A-Za-z0-9_.-]{1,150}$/.test(request.requestId))continue;
+  const evidenceDir=path.posix.join(c.campaignPath,'controller/automation',request.requestId);
+  const evidencePath=path.posix.join(evidenceDir,'EXECUTION_EVIDENCE_v1.json');
+  const receiptPath=path.posix.join(evidenceDir,'ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json');
+  if(!fs.existsSync(relative(evidencePath))||!fs.existsSync(relative(receiptPath)))continue;
+  const machine=read(evidencePath),receipt=read(receiptPath);
+  if(receipt.schemaVersion!=='audit-execution-evidence-ingestion-receipt-v1'||
+     receipt.requestId!==request.requestId||
+     machine?.requestId!==request.requestId||
+     machine?.requestDigest!==request.requestDigest||
+     machine?.blocking!==false||
+     !['PASS','FINDINGS'].includes(machine.disposition)||
+     (machine.failedStepCount??0)!==0||
+     (machine.analysisComponentFailureCount??0)!==0||
+     (machine.failedSteps?.length??0)!==0||
+     (machine.preflight&&machine.preflight.status!=='PASS'))continue;
+  verified.push({requestId:request.requestId,requestPath,
+   requestDigest:request.requestDigest,executionEvidenceRef:evidencePath,
+   ingestionReceiptRef:receiptPath,evidenceSha256:sha(fs.readFileSync(relative(evidencePath))),
+   requestSha256:sha(fs.readFileSync(relative(requestPath))),
+   machineFields:Object.fromEntries(['dispatchRounds','requestPaths','ledgerRef',
+    'requestBindingStatus','requestBindingEvidenceRef'].filter(key=>machine[key]!==undefined)
+    .map(key=>[key,machine[key]]))});
+ }
+ return verified;
+}
+function machineVerifiedValueV1(c,row,key){
+ const sources=verifiedMachineSourcesV1(c,row);
+ if(!sources.length)return null;
+ const chosen=sources.filter(s=>s.machineFields[key]!==undefined);
+ if(key==='requestPaths')return {value:sources.map(s=>s.requestPath),sources};
+ if(key==='executionEvidenceRefs')return {value:sources.map(s=>s.executionEvidenceRef),sources};
+ if(key==='executionEvidenceRef'&&sources.length===1)return {value:sources[0].executionEvidenceRef,sources};
+ if(chosen.length!==1)return {sources,reason:'NO_UNIQUE_AUTHENTICATED_EXACT_FIELD_VALUE'};
+ return {value:chosen[0].machineFields[key],sources};
+}
+
+function controllerAnswerFieldBindingV1({c,fieldName,sourceRow,definition,itemField}){
  const value=sourceRow?.[itemField],allowed=definition?.itemFieldAllowedValues?.[itemField]??null;
  const collected=(definition?.controllerCollectedFields??[]).includes(itemField);
  const owned=(definition?.controllerPrefillFields??[]).includes(itemField)||
@@ -277,6 +329,7 @@ function controllerAnswerFieldBindingV1({fieldName,sourceRow,definition,itemFiel
  if(collected)return {field:itemField,source:'CONTROLLER_COLLECT_AFTER_EXECUTION',
   evidenceKind:MACHINE_EXECUTION_FIELDS.get(itemField)??'CONTROLLER_BOUND_EXECUTION_RESULT',
   exactControllerInput:value??null,requiresAuthenticatedIngestion:true,
+  verifiedEvidence:c?machineVerifiedValueV1(c,sourceRow,itemField):null,
   fieldOwner:'CONTROLLER',noEvidencePolicy:'UNRESOLVED_NOT_PROVEN'};
  if(owned||(MECHANICAL_ID_FIELDS.has(itemField)&&typeof value==='string'&&
     value.trim()&&!isPendingAnswerValue(value)&&!negativeSentinel(value))){
@@ -284,6 +337,7 @@ function controllerAnswerFieldBindingV1({fieldName,sourceRow,definition,itemFiel
    immutable:owned||MECHANICAL_ID_FIELDS.has(itemField)};
  }
  if(MACHINE_EXECUTION_FIELDS.has(itemField))return {field:itemField,source:'CONTROLLER_VERIFIED_EXECUTION',
+  verifiedEvidence:c?machineVerifiedValueV1(c,sourceRow,itemField):null,
   evidenceKind:MACHINE_EXECUTION_FIELDS.get(itemField),
   authorizedRequestDirectory:sourceRow?.requestDirectory??null,
   evidenceRequiredBeforeConclusiveVerdict:true,noEvidencePolicy:'UNRESOLVED_NOT_PROVEN'};
@@ -326,7 +380,7 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
   bindings:definition.type==='REQUIRED_RECORD_LIST'&&member.initialValue&&
    typeof member.initialValue==='object'&&!Array.isArray(member.initialValue)
    ?(definition.itemRequiredFields??[]).map(itemField=>controllerAnswerFieldBindingV1({
-     fieldName,sourceRow:member.initialValue,definition,itemField}))
+     c,fieldName,sourceRow:member.initialValue,definition,itemField}))
    :[]
  }));
  const ownedOutput=String(definition.owner??'').startsWith('CONTROLLER_')||(schema.controllerOwnedOutputPaths??[])
@@ -356,10 +410,10 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
    {source:ownedOutput?'PRESERVE_CONTROLLER_OWNED':'AI_VERBATIM',
     requiredSchemaType:definition.type},
   controllerCollectedBindings:(definition.controllerCollectedFields??[]).map(itemField=>
-    controllerAnswerFieldBindingV1({fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField})),
+    controllerAnswerFieldBindingV1({c,fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField})),
   recordFieldTemplate:definition.type==='REQUIRED_RECORD_LIST'
     ?(definition.itemRequiredFields??[]).map(itemField=>controllerAnswerFieldBindingV1({
-      fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField})) :[],
+      c,fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField})) :[],
   entries
  };
 }
@@ -745,8 +799,13 @@ function assembleBoundAnswersV1(c,u,submitted){
    if(entry.valueKind==='OBJECT'){
     for(const spec of entry.bindings){
      const field=spec.field;
-     if(['PRESERVE_ISSUED_VALUE','CONTROLLER_COLLECT_AFTER_EXECUTION',
-      'CONTROLLER_VERIFIED_EXECUTION','BIND_EXISTING_CONTROLLER_SUBJECT'].includes(spec.source))continue;
+     if(spec.source==='CONTROLLER_VERIFIED_EXECUTION'||
+        spec.source==='CONTROLLER_COLLECT_AFTER_EXECUTION'){
+      if(spec.verifiedEvidence&&Object.hasOwn(spec.verifiedEvidence,'value'))
+       target.value[field]=structuredClone(spec.verifiedEvidence.value);
+      continue;
+     }
+     if(['PRESERVE_ISSUED_VALUE','BIND_EXISTING_CONTROLLER_SUBJECT'].includes(spec.source))continue;
      if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW'){
       if(isPendingAnswerValue(target.value[field])||target.value[field]===undefined)
        target.value[field]=allocatedRecordId(phase,u.unitId,field,i+1);
@@ -773,8 +832,11 @@ function assembleBoundAnswersV1(c,u,submitted){
    for(const spec of route.recordFieldTemplate){
     if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW')
      value[spec.field]=allocatedRecordId(phase,u.unitId,spec.field,i+1);
-    if(['CONTROLLER_COLLECT_AFTER_EXECUTION','CONTROLLER_VERIFIED_EXECUTION'].includes(spec.source))
-     delete value[spec.field];
+    if(['CONTROLLER_COLLECT_AFTER_EXECUTION','CONTROLLER_VERIFIED_EXECUTION'].includes(spec.source)){
+     if(spec.verifiedEvidence&&Object.hasOwn(spec.verifiedEvidence,'value'))
+      value[spec.field]=structuredClone(spec.verifiedEvidence.value);
+     else delete value[spec.field];
+    }
    }
    return {key:keyRoot+String(i+1).padStart(4,'0'),value};
   });
