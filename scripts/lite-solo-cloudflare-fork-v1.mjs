@@ -507,10 +507,11 @@ function buildUnitMeta(c,u,schema){
   const answerRouting=discoveryPacket
    ?discoveryAnswerBindingV1({u,packet:discoveryPacket,initial})
    :semanticAnswerBindingV1({c,u,schema,initial});
+  const answerTransport=machineAnswerDirectoryV1(u,initial,answerRouting);
   return {unitId:u.unitId,kind:u.kind,step:0,stage:'',unitSpecRevision:u.unitSpecRevision,
     packetPath,packetSha256,packetIndexPath:u.packetIndexPath||null,recordKeys:u.recordKeys||[],
     dependencies:u.dependencies||[],path:u.path,members:u.members,field:u.field,
-    inputTemplate:initial,validationSchema:inputSchema,answerRouting,
+    inputTemplate:initial,validationSchema:inputSchema,answerRouting,answerTransport,
     templateSha256:sha(JSON.stringify(initial)),schemaSha256:sha(JSON.stringify(inputSchema)),
     supportingFileRequirements:assignedExecutionSupport(c,u),evidenceRefs:u.packetIndexPath?[u.packetIndexPath]:[]};
 }
@@ -663,6 +664,56 @@ function preserveDiscoveryKeys(original,response,field){
  }
  return original;
 }
+// Exact binding IDs are issued with the existing GitHub-side work packet;
+// neither the AI nor Cloudflare chooses a destination or a record identity.
+function machineAnswerDirectoryV1(u,template,routing){
+ const fields=[],id=(a,b,c)=>JSON.stringify([a,b,c]);
+ const push=(collection,subject,field,type,choices)=>{
+  fields.push({bindingId:id(collection,subject,field),field,source:'AI_TYPED_LITERAL',
+    expectedJsonType:type,controllerBoundIdentity:subject,
+    ...(choices?{allowedValues:choices}:{})});
+ };
+ if(['SHARD','BATCH'].includes(u.kind)){
+  for(const entry of routing.entries){
+   if(entry.valueKind!=='OBJECT')
+    push('entries',entry.entryKey,'$value','ISSUED_FIELD_TYPE');
+   else for(const b of entry.bindings){
+    if(['AI_SECURITY_ANSWER','AI_EXACT_ENUM','AI_EXACT_SOURCE_BOUND_REFERENCES'].includes(b.source))
+     push('entries',entry.entryKey,b.field,b.answerMode??'SCHEMA_DECLARED',b.allowedValues??null);
+   }
+  }
+ }else if(['FLOW','ATTACK'].includes(u.kind)){
+  const conditional={rows:['candidate','candidates','decidingTest'],
+   integrationAnswers:['candidate'],contractChecks:['candidate'],attackPaths:['candidate']};
+  for(const [collection,records] of Object.entries(template)){
+   if(!['rows','flowNotes','integrationAnswers','contractChecks','attackPaths'].includes(collection)||
+      !Array.isArray(records))continue;
+   for(const row of records){
+    const subject=subjectOf(collection,row);
+    if(!subject)continue;
+    for(const field of new Set([...Object.keys(row),...(conditional[collection]??[])])){
+     if(['contextId','flowId','obligationId','contract','classId','pathId'].includes(field))continue;
+     const choices=field==='verdict'?['CORRECT','DEFECT','UNRESOLVED']:
+      field==='result'?['BLOCKED','VIABLE','UNCERTAIN']:
+      field==='assessment'?['SUPPORTED','CONCERN','UNRESOLVED','NOT_APPLICABLE']:
+      field==='role'?['UNPRIVILEGED','UNPRIVILEGED_CALLER','OTHER_ROLE','DIFFERENT_ROLE',
+       'MALICIOUS_TOKEN','MALICIOUS_ADAPTER','MALICIOUS_TOKEN_OR_ADAPTER',
+       'MALICIOUS_CALLBACK','MEV','MEV_SEARCHER','CARELESS_ADMIN','ADMIN',
+       'PRIVILEGED','PRIVILEGED_ROLE']:null;
+     push(collection,subject,field,Array.isArray(row[field])?'array':
+       row[field]&&typeof row[field]==='object'?'object':'SCHEMA_DECLARED',choices);
+    }
+   }
+  }
+ }
+ return {schemaVersion:'curveyield-machine-bound-answer-transport-v1',
+  responseSchemaVersion:MACHINE_BOUND_ANSWERS_V1,unitId:u.unitId,fields,
+  appendFormat:u.kind==='APPEND'?'appendRecords: EXACT_TYPED_OBJECT_ARRAY':null,
+  extraCollections:u.kind==='FLOW'?['trivialReviews','groupChecks','candidates']:
+   u.kind==='ATTACK'?['attackPaths']:[],
+  immutableControllerFields:true,neverInferFromProse:true,noActionsPerQuestion:true};
+}
+
 function assembleBoundAnswersV1(c,u,submitted){
  strict(submitted?.schemaVersion===MACHINE_BOUND_ANSWERS_V1&&submitted.unitId===u.unitId,
   'bound answer packet does not match the issued unit');
