@@ -216,8 +216,12 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   // Preserve the original Phase 1 evidence for both discovery and later
   // reconciliation/specialist units, independently of Phase 2/3 promotion.
   if(target===4) return uniqueExisting(root,[p1Canonical,p2,p3,discoverySummary]);
-  if(target===5) return uniqueExisting(root,[p2,p3,p4,discoverySummary]);
-  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,discoverySummary,buildIdentity,deploy,targets]);
+  // Keep every original Phase 1 discovery lead available to quantitative review,
+  // including D4/D6/D7 observations not promoted by intermediate phases.
+  if(target===5) return uniqueExisting(root,[p1Canonical,p2,p3,p4,discoverySummary]);
+  // Proof analysis receives those same original leads independently of which
+  // Phase 5 candidates or executed properties were subsequently promoted.
+  if(target===6) return uniqueExisting(root,[p1Canonical,p2,p3,p4,p5,discoverySummary,buildIdentity,deploy,targets]);
   if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,p7,discoverySummary,buildIdentity,deploy,targets]);
   if(target===9) return uniqueExisting(root,[p8Remediation,remediation]);
   if(target===10) return uniqueExisting(root,[
