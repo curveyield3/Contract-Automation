@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
-import {applyPhaseBoundaryPrefill} from './lite-solo-phase-prefill-v1.mjs';
+import {applyPhaseBoundaryPrefill,refreshControllerPrefillDigest} from './lite-solo-phase-prefill-v1.mjs';
 import {resolveFrozenAuthorityFileV1} from '../../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 
 export const EXPLICIT_NEGATIVES=new Set(['NONE_IDENTIFIED','NOT_APPLICABLE','NOT_TRIGGERED','NO_CANDIDATE','NO_REMEDIATION','INSUFFICIENT_EVIDENCE','UNRESOLVED','NO_ADDITIONAL_OBLIGATION','NO_CONTRADICTION']);
@@ -330,12 +330,61 @@ export function collectAcceptedOriginalCanonicalEvidenceV1({root,campaignPath,di
    auditedSourceSha256:directory.sourceSha256,rosters};
 }
 
+// Canonical evidence is retained in original receipts and artifacts. New work
+// forms receive a compact, controller-digested reference for EVERY predecessor
+// phase/revision. No security semantics or record-content filtering is applied.
+export function attachOriginalCanonicalEvidenceRefsV1({root,campaignPath,directory,sequence,form}){
+ if(sequence<=1)return form;
+ let history;
+ try{
+   if(!directory?.campaignId||!directory?.campaignGenerationId||!directory?.sourceSha256)
+     throw new Error('Accepted predecessor campaign/generation/source identity unavailable');
+   history=collectAcceptedOriginalCanonicalEvidenceV1({
+     root,campaignPath,directory,maxPhase:sequence-1});
+ }catch(error){
+   history={schemaVersion:'curveyield-original-canonical-evidence-history-v1',
+     campaignId:directory?.campaignId??null,
+     campaignGenerationId:directory?.campaignGenerationId??null,
+     auditedSourceSha256:directory?.sourceSha256??null,
+     availability:'ROSTER_COLLECTION_UNAVAILABLE',
+     diagnostics:[String(error?.message??error)],rosters:[]};
+ }
+ form.automationInputs??={};
+ form.automationInputs.originalCanonicalEvidenceRefs={
+   schemaVersion:'curveyield-assignment-canonical-evidence-references-v1',
+   campaignId:history.campaignId,
+   campaignGenerationId:history.campaignGenerationId,
+   auditedSourceSha256:history.auditedSourceSha256,
+   availability:history.availability??'COLLECTED_WITH_PER_SOURCE_AVAILABILITY',
+   diagnostics:history.diagnostics??[],
+   referenceScheme:'RFC6901_JSON_POINTER',
+   rosters:(history.rosters??[]).map(({records,...identity})=>({
+     ...identity,
+     originalRecordCount:Array.isArray(records)?records.length:0,
+     selectorRoots:identity.sourceSelectors??[
+       '/actions','/automationInputs','/automationOutputs']
+   }))
+ };
+ form.automationInputs.controllerOwnedAutomationInputs=[
+   ...new Set([...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+     'originalCanonicalEvidenceRefs'])];
+ refreshControllerPrefillDigest(form);
+ return form;
+}
+
 export function preparePhaseWork({root,campaignPath,authorityRoot,sequence,reviewer,predecessorReceiptPath,derivedInputPaths=[],status='ACTIVE',prefillContext={}}){
   const loaded=loadPhaseSchema(root,authorityRoot,sequence);const schema=loaded.schema;const schemaRel=loaded.rel;
   const formRel=fullCampaignPath(campaignPath,schema.workForm.campaignPath);
   const formTemplateRel=path.posix.join(authorityRoot,schema.workForm.template);
   let form=readJson(requiredFile(root,formTemplateRel,'work-form template'));
   form=applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths,predecessorReceiptPath,prefillContext});
+  if(sequence>1){
+    const prior=readJson(requiredFile(root,predecessorReceiptPath,'accepted predecessor receipt'));
+    attachOriginalCanonicalEvidenceRefsV1({root,campaignPath,
+      directory:{campaignId:prior?.campaign?.campaignId,
+        campaignGenerationId:prior?.campaign?.campaignGenerationId,
+        sourceSha256:prior?.source?.sha256},sequence,form});
+  }
   writeJson(repoFile(root,formRel),form);
   const shards=secureShardWorkFormV13({root,formRel,phase:sequence,retireFull:true});
   const reportRel=schema.finalReport?fullCampaignPath(campaignPath,schema.finalReport.campaignPath):null;
