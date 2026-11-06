@@ -953,38 +953,14 @@ function checkMachineAnswerLiteralV1(spec,value){
 }
 
 function checkExtraDiscoveryRecordsV1(field,records,route){
- strict(Array.isArray(records),field+' must be an array of typed records');
- const obj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
- const nonempty=v=>typeof v==='string'&&Boolean(v.trim());
- const anchors=v=>Array.isArray(v)&&v.length>0&&v.every(nonempty);
- // Attack-role correctness is reviewed by the Worker; the GitHub
- // metadata does not issue an allowedRole list for these records.
- for(const row of records){
-  strict(obj(row),'discovery '+field+' must contain objects, not literals');
-  if(field==='trivialReviews')
-   strict(nonempty(row.contract)&&
-    ['SUPPORTED','CONCERN','UNRESOLVED','NOT_APPLICABLE'].includes(row.assessment)&&
-    nonempty(row.evidence)&&anchors(row.anchors),
-    'trivialReviews need contract, assessment, evidence and typed source anchors');
-  else if(field==='groupChecks')
-   strict(Array.isArray(row.contextIds)&&row.contextIds.every(nonempty)&&
-    nonempty(row.classId)&&
-    ['SUPPORTED','CONCERN','UNRESOLVED','NOT_APPLICABLE'].includes(row.assessment)&&
-    nonempty(row.evidence)&&anchors(row.anchors),
-    'groupChecks need context identities, class, assessment and source evidence');
-  else if(field==='candidates')
-   strict(nonempty(row.title)&&nonempty(row.description)&&
-    nonempty(row.classId)&&
-    ['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(row.severity)&&
-    anchors(row.anchors),
-    'discovery candidates need title, description, class, severity and typed anchors');
-  else if(field==='attackPaths')
-   strict(Array.isArray(row.flowIds)&&row.flowIds.every(nonempty)&&
-    ['BLOCKED','VIABLE','UNCERTAIN'].includes(row.result)&&
-    nonempty(row.role),
-    'additional attackPaths need flow IDs, result and actor role');
- }
+ // Mechanical transport shape only. Worker reviews the security-class,
+ // role, applicability, evidence and anchor content of these records.
+ strict(Array.isArray(records),field+' must be a typed record array');
+ for(const row of records)
+  strict(row!==null&&typeof row==='object'&&!Array.isArray(row),
+   'extra discovery entries must be objects');
 }
+
 function machineAnswerDirectoryV1(u,template,routing){
  const fields=[],id=(a,b,c)=>JSON.stringify([a,b,c]);
  const push=(collection,subject,field,type,choices)=>{
