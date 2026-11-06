@@ -538,7 +538,8 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const sourceIndex=(unitId,selector)=>sourceIndexBySelector.get(
   JSON.stringify([unitId,(sourcePrefixes.get(unitId)??'submission.')+selector]))??null;
  const uniqueIndexes=indexes=>[...new Set(indexes.filter(Number.isInteger))];
- const candidateEvidence=[],pathEvidence=[],answerEvidence=[],integrationAnswerRefs=[],checkEvidence=new Map();
+ const candidateEvidence=[],pathEvidence=[],answerEvidence=[],integrationAnswerRefs=[],flowNotes=[],checkEvidence=new Map();
+ const issuedFlows=arr(plan?.payload?.flows);
  const recordCandidate=(candidate,indexes)=>{
   candidates.push(candidate);candidateEvidence.push(uniqueIndexes(indexes));
  };
@@ -581,6 +582,41 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    });
    continue;
   }
+  // Preserve every FLOW note as original evidence, not as a candidate or a
+  // reconciliation deficiency. The accepted record and its SHA-256 supply
+  // immutable provenance; the issued plan supplies existing flow/context links.
+  const issuedUnit=resolveUnit(plan,unitId);
+  arr(submission?.flowNotes).forEach((note,index)=>{
+   const sourceRefIndex=sourceIndex(unitId,'flowNotes['+index+']');
+   const sourceRef=Number.isInteger(sourceRefIndex)?
+    discoverySourceRefs[sourceRefIndex]:null;
+   const flowId=note?.flowId??null;
+   const planFlowIndex=issuedFlows.findIndex(flow=>flow?.flowId===flowId);
+   const issuedFlow=planFlowIndex<0?null:issuedFlows[planFlowIndex];
+   flowNotes.push({
+    unitId,flowId,originalIndex:index,
+    // This single snapshot preserves the exact AI-authored note and all
+    // anchors, including any extra fields present in older issued schemas.
+    originalNote:structuredClone(note),
+    acceptedPath:sourceRef?.acceptedPath??null,
+    acceptedSha256:sourceRef?.acceptedSha256??null,
+    sourceReference:{collection:'discoverySourceRefs',index:sourceRefIndex,
+     availability:sourceRef?.availability??'SOURCE_UNAVAILABLE',
+     sourceSelector:sourceRef?.sourceSelector??null,
+     originalAnchorsSelector:sourceRef?.originalAnchorsSelector??null},
+    issuedFlowRelationship:{
+     availability:issuedFlow?'ISSUED_FLOW':'NOT_IN_ISSUED_PLAN',
+     flowPlanSelector:issuedFlow?'payload.flows['+planFlowIndex+']':null,
+     entryContextId:issuedFlow?.entryContextId??null,
+     contextIds:arr(issuedFlow?.contexts),
+     contracts:arr(issuedFlow?.contracts),
+     unitClusterId:issuedUnit?.clusterId??null,
+     unitFlowIds:arr(issuedUnit?.flowIds),
+     unitPrimaryContextIds:arr(issuedUnit?.primaryContextIds),
+     unitReadContextIds:arr(issuedUnit?.readContextIds)
+    }
+   });
+  });
   arr(submission?.candidates).forEach((candidate,i)=>
    recordCandidate(candidate,[sourceIndex(unitId,'candidates['+i+']')]));
   for(const [rowIndex,row] of arr(submission?.rows).entries()){
@@ -710,7 +746,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const discoveryState={reviewChecks:Object.fromEntries([...checks.entries()]),gaps,attackContradictions:contradictions};
  const coverage=buildCoverageMatrixV1({inventory,taxonomy,discoveryState});
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{
-  discoverySourceRefs,reconciliationEvidenceRefs,integrationAnswerRefs,
+  discoverySourceRefs,reconciliationEvidenceRefs,integrationAnswerRefs,flowNotes,
   // All candidate origins, including nested ATTACK/integration/check
   // candidates, remain accessible by exact accepted-source selector.
   candidateSourceRefIndexes:discoverySourceRefs.flatMap((ref,index)=>
