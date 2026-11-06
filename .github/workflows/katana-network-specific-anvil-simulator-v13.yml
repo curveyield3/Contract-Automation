@@ -6,7 +6,7 @@ on:
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/requests/*.json'
       - '.github/workflows/katana-network-specific-anvil-simulator-v13.yml'
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/run-v13.mjs'
-      - 'test/katana/cyavkat-morpho-target-6700-fork-v4.mjs'
+      - 'test/katana/cyavkat-morpho-safe-batch-v5.mjs'
   workflow_dispatch:
 
 permissions:
@@ -136,16 +136,16 @@ jobs:
           test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = 747474
           test "$(cast block "$PIN" --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')" = "$HASH"
           echo "Pinned Katana fork block $PIN, hash $HASH. All writes LOCAL to Anvil." >> "$GITHUB_STEP_SUMMARY"
-      - name: Simulate additional 6700 avKAT idle recovery targeting 76.6 percent LTV
-        run: node test/katana/cyavkat-morpho-target-6700-fork-v4.mjs
+      - name: Simulate Safe MultiSend handler registration then 6700 avKAT unwind at 76.6 percent LTV
+        run: node test/katana/cyavkat-morpho-safe-batch-v5.mjs
       - name: Display evidence and fork receipts
         if: always()
         shell: bash
         run: |
-          if [ -f cyavkat-morpho-target-6700-fork-v4.json ]; then
-            cat cyavkat-morpho-target-6700-fork-v4.json
+          if [ -f cyavkat-morpho-safe-batch-v5-report.json ]; then
+            cat cyavkat-morpho-safe-batch-v5-report.json
             echo '### avKAT Morpho unwind simulation' >> "$GITHUB_STEP_SUMMARY"
-            jq -r '"Status: " + .status, "Pinned block: " + (.forkBlock|tostring), "Estimated gas: " + (.gas.estimated // "unavailable")' cyavkat-morpho-target-6700-fork-v4.json >> "$GITHUB_STEP_SUMMARY"
+            jq -r '"Status: " + .status, "Pinned block: " + (.forkBlock|tostring), "Estimated gas: " + (.gas.estimated // "unavailable")' cyavkat-morpho-safe-batch-v5-report.json >> "$GITHUB_STEP_SUMMARY"
           else
             echo '::error::Simulation evidence missing'
             tail -100 "$RUNNER_TEMP/avkat-anvil.log" || true
@@ -154,7 +154,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cyavkat-morpho-target-6700-fork-v4-${{ github.run_id }}
-          path: cyavkat-morpho-target-6700-fork-v4.json
+          name: cyavkat-morpho-safe-batch-v5-${{ github.run_id }}
+          path: |\n            cyavkat-morpho-safe-batch-v5-report.json\n            cyavkat-morpho-safe-batch-v5.json
           if-no-files-found: warn
           retention-days: 30
