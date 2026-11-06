@@ -7,7 +7,7 @@ import {reviewInventoryRelV1} from '../../packages/github-native-sim/src/adr-rev
 import {buildUnitPacketV1,writeUnitPacketIndexV1,buildDiscoverySummaryV1,readUnitPacketV1} from '../../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
 import {loadTaxonomyV1} from '../../packages/github-native-sim/src/adr-taxonomy-v1.mjs';
 import {deriveBaselineObligationsV1} from '../../packages/github-native-sim/src/adr-baseline-obligations-v1.mjs';
-import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef} from './lite-solo-phase-prefill-v1.mjs';
+import {applyPhaseBoundaryPrefill,resolveTargetExecutionRequestRef,refreshControllerPrefillDigest} from './lite-solo-phase-prefill-v1.mjs';
 import {validateTargetExecutionRequestBindingV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {validateLiveForkBaselineRecordV1} from './lite-solo-live-fork-baseline-gate-v1.mjs';
 import {materializeSemanticWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
@@ -921,6 +921,17 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
  const updated=applyPhaseBoundaryPrefill({root,campaignPath:campaign,authorityRoot:authorityFor(directory),sequence:4,
   form,derivedInputPaths:[...asArray(assignment.derivedInputPaths),path.posix.join(campaign,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')],
   predecessorReceiptPath:assignment.predecessorReceiptPath});
+ // FLOW and ATTACK histories are available to the reconciliation packets of
+ // THIS SAME PHASE, before there is any sealed phase-4 canonical output.
+ // Original accepted snapshots and original checkpoint files stay untouched.
+ const phaseQuestionHistory=items.map(unit=>recoverAcceptedQuestionLedgerReferenceV1({
+  root,campaignPath:campaign,phase:4,unitId:unit.unitId,
+  directory,queue,plan}));
+ updated.automationInputs.questionHistoryRefs=phaseQuestionHistory;
+ updated.automationInputs.controllerOwnedAutomationInputs=[...new Set([
+  ...(updated.automationInputs.controllerOwnedAutomationInputs??[]),
+  'questionHistoryRefs'])];
+ refreshControllerPrefillDigest(updated);
  put(root,assignment.workFormPath,updated);
  const shards=secureShardWorkFormV13({root,formRel:assignment.workFormPath,phase:4,retireFull:true});
  assignment.workShardIndexPath=shards.indexRel;
