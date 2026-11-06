@@ -34,7 +34,7 @@ if [ "$bound_path" != "$campaign_path" ]; then
   [ "campaigns/$(git -C "$destination" show "$head:$bound_path")" = "$campaign_path" ] || { echo 'campaign path migration alias mismatch' >&2; exit 1; }
 fi
 homepage="$(read_field '.authority.homepagePath')"
-{ [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo/SKILL.md' ] || [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo-v2/SKILL.md' ] || [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo-v3/SKILL.md' ] || [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo-v4/SKILL.md' ] || [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo-v5/SKILL.md' ] || [ "$homepage" = 'Audit Skill - Lite-Solo Authority/lite-solo-v6/SKILL.md' ]; } || { echo 'unexpected Lite-Solo authority root' >&2; exit 1; }
+[ "$homepage" = 'Machine Intelligence Audit Controller/Audit Skill v1/SKILL.md' ] || { echo 'unexpected Machine Intelligence authority root' >&2; exit 1; }
 authority_root="${homepage%/SKILL.md}"
 authority_commit="$(read_field '.authority.authorityCommitSha')"
 authority_digest="$(read_field '.authority.liteSkillSha256')"
