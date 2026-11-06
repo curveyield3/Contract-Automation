@@ -348,7 +348,7 @@ jobs:
           repo="$GITHUB_WORKSPACE"
           root="$RUNNER_TEMP/avkat-v9-verified-deployment"
           mkdir -p "$root/src"
-          cp process/avkat-fork-simulation-v1/src/AVKAT_Consolidated_Safe_Module_v9.sol "$root/src/AVKAT_Consolidated_Safe_Module_v9.sol"
+          cp process/avkat-fork-simulation-v1/src/AVKAT_Consolidated_Safe_Module_v9.sol "$root/src/Module.sol"
           cd "$root"
           forge build --root "$root" --use 0.8.30 --via-ir --optimize --optimizer-runs 200 --skip test --sizes
           export VERIFIED_DEPLOY_REPO="$repo"
@@ -383,7 +383,7 @@ jobs:
           meta={"factory":factory,"salt":salt,"predictedModuleAddress":"0x"+predicted,
                 "initcodeHash":init_hash,"creationBytes":len(creation),"constructorArgsBytes":len(args),
                 "runtimeBytes":len(runtime)//2,"callDataBytes":(len(call_data)-2)//2,
-                "sourceSha256":hashlib.sha256((root/"src"/"AVKAT_Consolidated_Safe_Module_v9.sol").read_bytes()).hexdigest(),
+                "sourceSha256":hashlib.sha256((root/"src"/"Module.sol").read_bytes()).hexdigest(),
                 "safe":"0x"+addrs[0],"morpho":"0x"+addrs[1],"KAT":"0x"+addrs[2],
                 "avKAT":"0x"+addrs[3],"marketId":"0x"+market,
                 "forkTestsPassed":True}
