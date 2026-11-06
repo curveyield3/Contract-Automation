@@ -345,11 +345,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd process/avkat-fork-simulation-v1
-          forge build --use 0.8.30 --via-ir --optimize --optimizer-runs 200 --skip test > /dev/null
+          repo="$GITHUB_WORKSPACE"
+          root="$RUNNER_TEMP/avkat-v9-verified-deployment"
+          mkdir -p "$root/src"
+          cp process/avkat-fork-simulation-v1/src/AVKAT_Consolidated_Safe_Module_v9.sol "$root/src/AVKAT_Consolidated_Safe_Module_v9.sol"
+          cd "$root"
+          forge build --root "$root" --use 0.8.30 --via-ir --optimize --optimizer-runs 200 --skip test --sizes
+          export VERIFIED_DEPLOY_REPO="$repo"
           python3 - <<'PY'
-          import pathlib,json,subprocess,hashlib
+          import pathlib,json,subprocess,hashlib,os
           root=pathlib.Path.cwd()
+          dest=pathlib.Path(os.environ["VERIFIED_DEPLOY_REPO"])/"process"/"avkat-fork-simulation-v1"
           artifacts=list((root/"out").glob("**/AVKATConsolidatedSafeModule.json"))
           if len(artifacts)!=1:raise RuntimeError(f"Expected one contract artifact, found {len(artifacts)}")
           j=json.loads(artifacts[0].read_text())
@@ -372,7 +378,7 @@ jobs:
           predicted=keccak(bytes.fromhex("ff"+factory[2:]+salt[2:]+init_hash[2:]))[-40:]
           assert predicted=="b0832afff2387edb89d799b967b49f910efc343d",predicted
           call_data="0x"+salt[2:]+init.hex()
-          out=root/"deployment-create2-call-v1.txt"
+          out=dest/"deployment-create2-call-v1.txt"
           out.write_text(call_data)
           meta={"factory":factory,"salt":salt,"predictedModuleAddress":"0x"+predicted,
                 "initcodeHash":init_hash,"creationBytes":len(creation),"constructorArgsBytes":len(args),
@@ -381,11 +387,12 @@ jobs:
                 "safe":"0x"+addrs[0],"morpho":"0x"+addrs[1],"KAT":"0x"+addrs[2],
                 "avKAT":"0x"+addrs[3],"marketId":"0x"+market,
                 "forkTestsPassed":True}
-          (root/"deployment-create2-manifest-v1.json").write_text(json.dumps(meta,indent=2)+"\n")
+          (dest/"deployment-create2-manifest-v1.json").write_text(json.dumps(meta,indent=2)+"\n")
           print("CREATE2_SAFETX_MANIFEST",json.dumps(meta))
           PY
+          cd "$repo"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add deployment-create2-call-v1.txt deployment-create2-manifest-v1.json
+          git add process/avkat-fork-simulation-v1/deployment-create2-call-v1.txt process/avkat-fork-simulation-v1/deployment-create2-manifest-v1.json
           git commit -m "ci(avkat): stage verified v9 Safe CREATE2 deployment calldata on isolated branch"
           git push origin HEAD:avkat-v9-revalidation-20261105
