@@ -769,7 +769,10 @@ function stageAcceptedV1(source,u){
    record.authorityDigest===source.plan.authorityDigest&&
    record.phaseSequence===source.plan.phaseSequence&&
    record.phaseEpoch===source.plan.phaseEpoch&&
-   record.submissionSha256===state.acceptedSha256;
+   record.claimEpoch===state.claimEpoch&&
+   record.unitSpecRevision===u.unitSpecRevision&&
+   record.submissionSha256===state.acceptedSha256&&
+   (!u.packetSha256||record.packetSha256===u.packetSha256);
  }catch{return false;}
 }
 function eligibleStage(c,source,phase,step,stage){
