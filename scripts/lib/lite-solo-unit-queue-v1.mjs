@@ -826,6 +826,7 @@ function durablyAcceptedUnitV1({root,plan,queue,u}){
    snapshot.authorityDigest===plan.authorityDigest&&
    snapshot.phaseSequence===plan.phaseSequence&&
    snapshot.phaseEpoch===plan.phaseEpoch&&
+   snapshot.claimEpoch===state.claimEpoch&&
    snapshot.unitSpecRevision===u.unitSpecRevision&&
    snapshot.submissionSha256===state.acceptedSha256&&
    (!u.packetSha256||snapshot.packetSha256===u.packetSha256);
