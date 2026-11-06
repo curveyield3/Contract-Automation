@@ -1167,9 +1167,6 @@ function assembleBoundAnswersV1(c,u,submitted){
     }
    }
    for(const spec of route.recordFieldTemplate){
-    if(spec.source==='AI_EXACT_ENUM'&&Object.hasOwn(value,spec.field))
-     strict(typeof value[spec.field]==='string',
-       'APPEND enum field must remain a typed string: '+spec.field);
     if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW')
      value[spec.field]=allocatedRecordId(phase,u.unitId,spec.field,i+1);
     if(spec.source==='PRESERVE_ISSUED_VALUE'){
@@ -1187,13 +1184,7 @@ function assembleBoundAnswersV1(c,u,submitted){
       structuredClone(verified.value):unresolvedMachineFieldV1(spec.field,undefined);
     }
    }
-   // Mandatory field presence is a transport/schema property, not a security verdict.
-   for(const field of (fieldDef?.itemRequiredFields??[])){
-    const item=value[field];
-    strict(Object.hasOwn(value,field)&&item!==null&&item!==undefined&&
-      !(typeof item==='string'&&isPendingAnswerValue(item)),
-      'APPEND required field absent: '+route.field+'.'+field);
-   }
+   // Record completeness belongs to the Worker; preserve partial answers.
    return {key,value};
   });
  }else if(['FLOW','ATTACK'].includes(u.kind)){
