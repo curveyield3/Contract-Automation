@@ -590,7 +590,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   JSON.stringify([contextId,classId]),index);
  const checkSource=(contextId,classId)=>checkEvidence.get(
   JSON.stringify([contextId,classId]))??null;
- for(const {unitId,submission} of rows){
+ for(const {unitId,submission,sourceReference} of rows){
   const isAttacker=unitId.startsWith('X-');
   // FLOW and ATTACK answers are independent, even when their obligationIds
   // overlap or their assessments conflict. Never merge or classify them here.
@@ -625,9 +625,46 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    });
   });
   if(isAttacker){
+   const issuedUnit=resolveUnit(plan,unitId);
+   const issuedAttackFlows=Array.isArray(issuedUnit?.flowIds)?
+    new Set(issuedUnit.flowIds):null;
    arr(submission?.attackPaths).forEach((attack,i)=>{
     const pathRef=sourceIndex(unitId,'attackPaths['+i+']');
     paths.push(attack);pathEvidence.push(pathRef);
+    // A direct, already-accepted ATTACK submission can include unissued
+    // flows in its ordinary attackPaths[] array, not only in extraRecords.
+    // Preserve the exact original path as an unmapped reconciliation subject.
+    const ids=attack?.flowIds;
+    const outside=issuedAttackFlows&&(!Array.isArray(ids)||!ids.length||
+     ids.some(id=>!issuedAttackFlows.has(id)));
+    if(outside){
+     const acceptedRef=Number.isInteger(pathRef)?discoverySourceRefs[pathRef]:null;
+     const workerAttempt=sourceReference?.originalWorkerAttempt;
+     const originalAvailable=workerAttempt?.availability==='AVAILABLE'&&
+      typeof workerAttempt.path==='string'&&
+      /^[a-f0-9]{64}$/.test(String(workerAttempt.sha256??''));
+     unmappedAttackPathRefs.push({
+      unitId,originalIndex:i,
+      mappingStatus:!Array.isArray(ids)?'MISSING_FLOW_IDS_ARRAY':
+       !ids.length?'NO_EXPLICIT_FLOW_IDS':'UNISSUED_FLOW_IDS',
+      sourceSelector:originalAvailable?'attackPaths['+i+']':
+       acceptedRef?.sourceSelector??null,
+      originalFlowIds:ids===undefined?null:structuredClone(ids),
+      originalPathId:attack?.pathId??null,
+      originalAnchorsSelector:originalAvailable&&Object.hasOwn(attack??{},'anchors')?
+       'attackPaths['+i+'].anchors':acceptedRef?.originalAnchorsSelector??null,
+      originalCandidateSelector:originalAvailable&&Object.hasOwn(attack??{},'candidate')?
+       'attackPaths['+i+'].candidate':
+       acceptedRef?.sourceSelector&&Object.hasOwn(attack??{},'candidate')?
+        acceptedRef.sourceSelector+'.candidate':null,
+      originalWorkerAttempt:originalAvailable?structuredClone(workerAttempt):
+       {availability:acceptedRef?.availability??'SOURCE_UNAVAILABLE',
+        path:acceptedRef?.acceptedPath??null,
+        sha256:acceptedRef?.acceptedSha256??null},
+      acceptedPath:acceptedRef?.acceptedPath??null,
+      acceptedSha256:acceptedRef?.acceptedSha256??null
+     });
+    }
     if(attack?.candidate)recordCandidate(attack.candidate,
      [sourceIndex(unitId,'attackPaths['+i+'].candidate'),pathRef],
      'ATTACK_CANDIDATE');
