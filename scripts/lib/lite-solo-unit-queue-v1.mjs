@@ -614,8 +614,9 @@ function assertSubmissionEnvelopeV1(u,submission){
    throw Error('fixed record identity or count differs from issued shard');
  }else if(u.kind==='BATCH'){
   const expected=u.members.map(x=>x.recordKeys?.[0]);
-  if(entries.length!==expected.length||entries.some((x,i)=>x.key!==expected[i]))
-   throw Error('batch record identity/order/count differs from issued members');
+  if(entries.length!==expected.length||
+     entries.some(x=>!expected.includes(x.key)))
+   throw Error('batch record identity/count differs from issued members');
  }else if(u.kind==='APPEND'){
   if(entries.length>1024)throw Error('APPEND exceeds controller file capacity');
   const root=JSON.stringify(u.path)+':APPEND-';
