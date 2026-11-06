@@ -604,11 +604,12 @@ async function sourceBoundQuestionHistoryV1(raw){
    }
    // Deliver each exact immutable checkpoint, including PLAN, ANSWERS,
    // EXPAND and REVISE history; never summarize or overwrite prior revisions.
-   checkpoints.push({path:ref.path,sha256:cp.file.sha256,checkpoint:cp.data});
+   checkpoints.push({path:ref.path,sha256:cp.file.sha256,
+    checkpoint:cp.data,originalCheckpointText:cp.file.text});
   }
   records.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
    indexPath,indexSha256:ix.file.sha256,indexRevision:index.revision,
-   questionRoster:index.questions,checkpoints});
+   questionRoster:index.questions,originalIndexText:ix.file.text,checkpoints});
  }
  return records.length||unavailable.length?{
   schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
