@@ -706,11 +706,14 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
          acceptedSha256:acceptedRowSource?.acceptedSha256??null
        }
      });
-     arr(row.candidates).forEach((c,i)=>recordCandidate(
-      {...c,contextIds:[...new Set([...(c.contextIds??[]),row.contextId])]},
-      [sourceIndex(unitId,'rows['+rowIndex+'].candidates['+i+']'),rowSource]));
-     if(row.candidate&&typeof row.candidate==='object')
-       recordCandidate({...row.candidate,contextIds:[...new Set([...(row.candidate.contextIds??[]),row.contextId])]},
+     arr(row.candidates).forEach((c,i)=>{
+      if(!c||typeof c!=='object'||Array.isArray(c))return;
+      recordCandidate({...structuredClone(c),contextIds:[...new Set([...arr(c.contextIds),row.contextId])]},
+       [sourceIndex(unitId,'rows['+rowIndex+'].candidates['+i+']'),rowSource]);
+     });
+     if(row.candidate&&typeof row.candidate==='object'&&!Array.isArray(row.candidate))
+       recordCandidate({...structuredClone(row.candidate),
+        contextIds:[...new Set([...arr(row.candidate.contextIds),row.contextId])]},
         [sourceIndex(unitId,'rows['+rowIndex+'].candidate'),rowSource]);
      // Nested row.checks can contain independently authored candidates even
      // when checks are informational prompts rather than class verdicts.
