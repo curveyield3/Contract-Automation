@@ -1315,8 +1315,14 @@ async function materializeBoundSubmissionV1(c,u,selected){
   'controller-compiled',path.posix.basename(selected.rel));
  const compiledPath=relative(relativePath),content=bytes(completed);
  if(fs.existsSync(compiledPath)){
-  strict(sha(fs.readFileSync(compiledPath))===sha(content),
-   'compiled artifact differs from immutable source-bound attempt');
+  if(sha(fs.readFileSync(compiledPath))!==sha(content)){
+   // The immutable Worker attempt has not changed. A controller-generated
+   // artifact may be refreshed BEFORE acceptance when authenticated evidence
+   // or a newly materialized request arrives between retry invocations.
+   const existing=unitPlan(c).queue.units[u.unitId];
+   strict(existing?.status!=='ACCEPTED','cannot replace an accepted compiled artifact');
+   fs.writeFileSync(compiledPath,content);
+  }
  }else{
   fs.mkdirSync(path.dirname(compiledPath),{recursive:true});
   fs.writeFileSync(compiledPath,content);
