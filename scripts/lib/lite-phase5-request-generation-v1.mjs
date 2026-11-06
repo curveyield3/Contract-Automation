@@ -45,12 +45,22 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
   // No arbitrary native-fuzz budget is required for source-bound Anvil
   // reproductions. Require a concrete analysis adapter only when the reviewer
   // explicitly selects that method; V7 schema validates opt-in fuzz budgets.
-  if(type==='FOUNDRY_TEST')need('executionBlueprint.configuration.analysis.nativeFuzz.enabled',
-    blueprint.configuration?.analysis?.nativeFuzz?.enabled===true,
-    'FOUNDRY_TEST must explicitly enable the Foundry execution adapter');
-  if(type==='MEDUSA_PROPERTY')need('executionBlueprint.configuration.analysis.medusa',
-    blueprint.configuration?.analysis?.medusa!==undefined&&blueprint.configuration?.analysis?.medusa!==false,
-    'MEDUSA_PROPERTY must explicitly enable the Medusa execution adapter');
+  if(type==='FOUNDRY_TEST'){
+    need('executionBlueprint.configuration.analysis.nativeFuzz.enabled',
+      blueprint.configuration?.analysis?.nativeFuzz?.enabled===true,
+      'FOUNDRY_TEST must explicitly enable the Foundry execution adapter');
+    need('executionBlueprint.configuration.analysis.nativeFuzz.matchTest',
+      /^[A-Za-z_][A-Za-z0-9_]*$/.test(blueprint.configuration?.analysis?.nativeFuzz?.matchTest??''),
+      'an agent-selected named test is required; automatic fuzz/invariant runs are disabled');
+  }
+  if(type==='MEDUSA_PROPERTY'){
+    need('executionBlueprint.configuration.analysis.medusa',
+      blueprint.configuration?.analysis?.medusa!==undefined&&blueprint.configuration?.analysis?.medusa!==false,
+      'MEDUSA_PROPERTY must explicitly enable the Medusa execution adapter');
+    need('executionBlueprint.configuration.analysis.medusa.targetProperty',
+      /^(?:property_|invariant_|echidna_)[A-Za-z0-9_]+$/.test(blueprint.configuration?.analysis?.medusa?.targetProperty??''),
+      'an agent-selected property and exclusive Medusa test prefix are required');
+  }
   if(type==='ANVIL_WORKFLOW'){
     need('executionBlueprint.configuration.simulation',!!blueprint.configuration?.simulation);
     need('executionBlueprint.configuration.deploymentGas',!!blueprint.configuration?.deploymentGas);
