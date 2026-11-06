@@ -465,7 +465,8 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
   scalarAnswer:definition.type==='REQUIRED_ENUM'?
    {source:'AI_EXACT_ENUM',allowedValues:definition.allowed??[]}:
    definition.type==='REQUIRED_LIST'?{source:'AI_LIST_OR_ISSUED_SENTINEL',
-    requiredArray:true,parse:'EXPLICIT_LIST_ITEMS_ONLY'}:
+    requiredArray:entries.some(e=>e.valueKind==='ARRAY'),
+    elementJsonType:'string',parse:'EXPLICIT_LIST_ITEMS_ONLY'}:
    {source:ownedOutput?'PRESERVE_CONTROLLER_OWNED':'AI_VERBATIM',
     requiredSchemaType:definition.type},
   controllerCollectedBindings:[...new Set([...(definition.controllerCollectedFields??[]),
@@ -473,7 +474,11 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
     controllerAnswerFieldBindingV1({c,fieldName,sourceRow:memberUnits[0]?.initialValue??{},
      definition,itemField,actionPrefillFields,actionCollectedFields})),
   recordFieldTemplate:definition.type==='REQUIRED_RECORD_LIST'
-    ?(definition.itemRequiredFields??[]).map(itemField=>controllerAnswerFieldBindingV1({
+    ?[...new Set([...(definition.itemRequiredFields??[]),
+      ...(definition.controllerCollectedFields??[]),...actionCollectedFields,
+      ...(definition.controllerPrefillFields??[]).filter(f=>MECHANICAL_ID_FIELDS.has(f)),
+      ...actionPrefillFields.filter(f=>MECHANICAL_ID_FIELDS.has(f))])]
+     .map(itemField=>controllerAnswerFieldBindingV1({
       c,fieldName,sourceRow:memberUnits[0]?.initialValue??{},definition,itemField,
       actionPrefillFields,actionCollectedFields})) :[],
   entries
@@ -806,15 +811,34 @@ function checkMachineAnswerLiteralV1(spec,value){
    'null only permitted for a genuinely absent optional security result: '+spec.field);
   return;
  }
- if(spec.expectedJsonType==='array')strict(Array.isArray(value),
-  'AI answer must supply typed array for '+spec.field);
+ if(spec.expectedJsonType==='array'||spec.expectedJsonType==='string-array')
+  strict(Array.isArray(value),'AI answer must supply typed array for '+spec.field);
+ if(spec.expectedJsonType==='string-array')
+  strict(value.every(item=>typeof item==='string'),
+   'list records must contain literal string elements, never nested arrays');
  if(spec.expectedJsonType==='object')strict(value!==null&&typeof value==='object'&&
   !Array.isArray(value),'AI answer must supply typed object for '+spec.field);
  if(spec.expectedJsonType==='string')strict(typeof value==='string',
   'AI answer must supply one exact literal string for '+spec.field);
- if(spec.field==='specInspection'&&value?.status!==undefined)
-  strict(['MATCH','MISMATCH','UNRESOLVED','NO_DOCUMENTED_RULES'].includes(value.status),
-   'specification status must match issued literal choices');
+ if(spec.field==='specInspection')
+  strict(value&&typeof value==='object'&&!Array.isArray(value)&&
+   ['MATCH','MISMATCH','UNRESOLVED','NO_DOCUMENTED_RULES'].includes(value.status)&&
+   typeof value.docsAndCommentsChecked==='string'&&value.docsAndCommentsChecked.trim()&&
+   typeof value.namedConstantsChecked==='string'&&value.namedConstantsChecked.trim(),
+   'specInspection requires status, documented checks and named-constant review');
+ if(spec.field==='documentedRules')
+  strict(Array.isArray(value)&&value.every(rule=>rule&&typeof rule==='object'&&
+   !Array.isArray(rule)&&typeof rule.ruleId==='string'&&rule.ruleId.trim()&&
+   typeof rule.rule==='string'&&rule.rule.trim()&&
+   ['MATCH','MISMATCH','UNRESOLVED'].includes(rule.comparison)&&
+   typeof rule.reason==='string'&&rule.reason.trim()),
+   'documentedRules require exact source rule, allowed comparison and reason');
+ if(spec.field==='siblingComparisons')
+  strict(Array.isArray(value)&&value.every(row=>row&&typeof row==='object'&&
+   !Array.isArray(row)&&typeof row.siblingContextId==='string'&&row.siblingContextId.trim()&&
+   typeof row.signature==='string'&&row.signature.trim()&&
+   typeof row.comparison==='string'&&row.comparison.trim()),
+   'siblingComparisons require exact identity, signature and comparison');
  if(spec.field==='candidate'||spec.field==='candidates'){
   const candidates=Array.isArray(value)?value:[value];
   for(const candidate of candidates)if(candidate?.severity!==undefined)
@@ -833,7 +857,10 @@ function machineAnswerDirectoryV1(u,template,routing){
  if(['SHARD','BATCH'].includes(u.kind)){
   for(const entry of routing.entries){
    if(entry.valueKind!=='OBJECT')
-    push('entries',entry.entryKey,'$value',routing.scalarAnswer?.requiredArray?'array':'ISSUED_FIELD_TYPE',
+    push('entries',entry.entryKey,'$value',
+     routing.scalarAnswer?.elementJsonType==='string'
+      ?(entry.valueKind==='ARRAY'?'string-array':'string')
+      :(routing.scalarAnswer?.requiredArray?'array':'ISSUED_FIELD_TYPE'),
      routing.scalarAnswer?.allowedValues??null);
    else for(const b of entry.bindings){
     if(['AI_SECURITY_ANSWER','AI_EXACT_ENUM','AI_EXACT_SOURCE_BOUND_REFERENCES'].includes(b.source))
@@ -1001,15 +1028,15 @@ function assembleBoundAnswersV1(c,u,submitted){
    }
    strict(input&&typeof input==='object'&&!Array.isArray(input),'append record is not a typed object');
    const value=structuredClone(input);
-   // Optional semantic fields may be preserved, but unissued administrative
-   // identities can never be smuggled in as optional AI-generated metadata.
-   const declared=new Set(fieldDef?.itemRequiredFields??[]);
-   for(const identity of ['canonicalId','assetKey','actorKey','boundaryKey',
-    'transitionKey','requirementKey','dependencyKey','standardKey','driverKey',
-    'recordKey','groupKey','findingKey','obligationId','subjectKey','candidateKey']){
-    if(Object.hasOwn(value,identity)&&!declared.has(identity))
-     delete value[identity];
-   }
+   // APPEND applies the same field ownership policy as fixed issued records.
+   // Unissued controller/machine fields cannot be smuggled in as optional data.
+   const policies=new Map(route.recordFieldTemplate.map(spec=>[spec.field,spec]));
+   const reserved=new Set([...MECHANICAL_ID_FIELDS,...MACHINE_EXECUTION_FIELDS.keys(),
+    ...route.controllerCollectedBindings.map(spec=>spec.field),
+    ...(fieldDef?.controllerCollectedFields??[]),
+    ...(schema.actions[route.step]?.controllerCollectedFields??[])]);
+   for(const field of Object.keys(value))
+    if(reserved.has(field)&&!policies.has(field))delete value[field];
    for(const ref of ['subjectKey','candidateKey','obligationId','findingKey']){
     if(Object.hasOwn(value,ref)){
      const policy=route.recordFieldTemplate.find(x=>x.field===ref);
@@ -1024,13 +1051,19 @@ function assembleBoundAnswersV1(c,u,submitted){
        'APPEND enum must be an exact AI-authored permitted token: '+spec.field);
     if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW')
      value[spec.field]=allocatedRecordId(phase,u.unitId,spec.field,i+1);
+    if(spec.source==='PRESERVE_ISSUED_VALUE'){
+     if(spec.value!==undefined)value[spec.field]=structuredClone(spec.value);
+     else if(MECHANICAL_ID_FIELDS.has(spec.field))
+      value[spec.field]=allocatedRecordId(phase,u.unitId,spec.field,i+1);
+     else delete value[spec.field];
+    }
     if(spec.source==='BIND_EXISTING_CONTROLLER_SUBJECT')
      strict(bindExistingSubjectV1(knownSubjectIds,spec.field,value[spec.field]),
       'APPEND field requires accepted subject identity: '+spec.field);
     if(['CONTROLLER_COLLECT_AFTER_EXECUTION','CONTROLLER_VERIFIED_EXECUTION'].includes(spec.source)){
      value[spec.field]=spec.verifiedEvidence&&Object.hasOwn(spec.verifiedEvidence,'value')?
       structuredClone(spec.verifiedEvidence.value):
-      unresolvedMachineFieldV1(spec.field,value[spec.field]);
+      unresolvedMachineFieldV1(spec.field,undefined);
     }
    }
    return {key,value};
