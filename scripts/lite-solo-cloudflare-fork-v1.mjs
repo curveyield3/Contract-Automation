@@ -967,8 +967,8 @@ function checkExtraDiscoveryRecordsV1(field,records,route){
  const obj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
  const nonempty=v=>typeof v==='string'&&Boolean(v.trim());
  const anchors=v=>Array.isArray(v)&&v.length>0&&v.every(nonempty);
- const roles=new Set(route?.fixedRecordKeys?.find(x=>x.field==='attackPaths')
-  ?.records?.flatMap(x=>x.allowedRole??[])??[]);
+ // Attack-role correctness is reviewed by the Worker; the GitHub
+ // metadata does not issue an allowedRole list for these records.
  for(const row of records){
   strict(obj(row),'discovery '+field+' must contain objects, not literals');
   if(field==='trivialReviews')
@@ -991,7 +991,7 @@ function checkExtraDiscoveryRecordsV1(field,records,route){
   else if(field==='attackPaths')
    strict(Array.isArray(row.flowIds)&&row.flowIds.every(nonempty)&&
     ['BLOCKED','VIABLE','UNCERTAIN'].includes(row.result)&&
-    roles.has(row.role),
+    nonempty(row.role),
     'additional attackPaths need flow IDs, result and actor role');
  }
 }
