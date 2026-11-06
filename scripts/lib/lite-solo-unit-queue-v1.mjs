@@ -811,12 +811,31 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  }
  return result;
 }
+function durablyAcceptedUnitV1({root,plan,queue,u}){
+ const state=queue.units?.[u.unitId];
+ if(state?.status!=='ACCEPTED'||!state.acceptedPath||
+    !/^[a-f0-9]{64}$/.test(String(state.acceptedSha256??'')))return false;
+ const prefix=path.posix.join(plan.campaignPath,'work/phase-'+
+  String(plan.phaseSequence).padStart(2,'0'),'units',u.unitId)+'/';
+ if(!state.acceptedPath.startsWith(prefix))return false;
+ try{
+  const snapshot=read(root,state.acceptedPath);
+  return snapshot.unitId===u.unitId&&
+   snapshot.campaignGenerationId===plan.campaignGenerationId&&
+   snapshot.sourceSha256===plan.sourceSha256&&
+   snapshot.authorityDigest===plan.authorityDigest&&
+   snapshot.phaseSequence===plan.phaseSequence&&
+   snapshot.phaseEpoch===plan.phaseEpoch&&
+   snapshot.unitSpecRevision===u.unitSpecRevision&&
+   snapshot.submissionSha256===state.acceptedSha256&&
+   (!u.packetSha256||snapshot.packetSha256===u.packetSha256);
+ }catch{return false;}
+}
 export function finalizeReadinessV1({root,campaignPath,directory,phase}){
- // Readiness is strictly transport availability, not a content validation gate.
+ // A prior accepted file is insufficient after a unit is reopened for rework.
  const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
- const pending=plan.units.filter(u=>!queue.units[u.unitId]?.acceptedPath||
-  !fs.existsSync(repoFile(root,queue.units[u.unitId].acceptedPath)));
- if(pending.length)return {ready:false,reason:'AWAITING_WORKER_FILES',
+ const pending=plan.units.filter(u=>!durablyAcceptedUnitV1({root,plan,queue,u}));
+ if(pending.length)return {ready:false,reason:'AWAITING_DURABLY_ACCEPTED_WORKER_FILES',
   unitIds:pending.map(u=>u.unitId)};
  return {ready:true,plan,queue};
 }
