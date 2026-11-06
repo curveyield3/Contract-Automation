@@ -636,12 +636,157 @@ async function materializePhase5Request(c,u,selected){
      candidateKey:target.candidateKey,requestDigest:generated.request.requestDigest,...generated.designEvidence});
  }
 }
+// GitHub-side literal answer assembler. This is optional: existing full JSON
+// submissions are unchanged. No Worker change or Actions-per-question trigger.
+const MACHINE_BOUND_ANSWERS_V1='curveyield-machine-bound-answers-v1';
+const answerBindingId=(collection,subject,field)=>JSON.stringify([collection,subject,field]);
+const subjectOf=(field,row)=>field==='rows'?row.contextId:
+ field==='flowNotes'?row.flowId:
+ field==='integrationAnswers'?row.obligationId:
+ field==='contractChecks'?JSON.stringify([row.contract,row.classId]):
+ field==='attackPaths'?row.pathId:null;
+const allocatedRecordId=(phase,unit,field,number)=>
+ 'MI-'+String(phase).padStart(2,'0')+'-'+unit+'-'+
+ String(field).replace(/[^A-Za-z0-9_-]/g,'_')+'-'+String(number).padStart(4,'0');
+function preserveDiscoveryKeys(original,response,field){
+ if(!Array.isArray(original)||!Array.isArray(response))return original;
+ if(field==='documentedRules'){
+  const byId=new Map(response.filter(x=>x&&typeof x.ruleId==='string').map(x=>[x.ruleId,x]));
+  return original.map(x=>{const y=byId.get(x.ruleId);return y?{...x,
+   comparison:y.comparison??x.comparison,reason:y.reason??x.reason}:x;});
+ }
+ if(field==='siblingComparisons'){
+  const byId=new Map(response.filter(x=>x&&x.signature&&x.siblingContextId)
+   .map(x=>[JSON.stringify([x.signature,x.siblingContextId]),x]));
+  return original.map(x=>{const y=byId.get(JSON.stringify([x.signature,x.siblingContextId]));
+   return y?{...x,comparison:y.comparison??x.comparison}:x;});
+ }
+ return original;
+}
+function assembleBoundAnswersV1(c,u,submitted){
+ strict(submitted?.schemaVersion===MACHINE_BOUND_ANSWERS_V1&&submitted.unitId===u.unitId,
+  'bound answer packet does not match the issued unit');
+ const phase=Number(c.directory.currentAssignment.phaseSequence);
+ const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
+ const meta=buildUnitMeta(c,u,schema),route=meta.answerRouting;
+ const answers=new Map();
+ for(const a of (submitted.answers??[])){
+  strict(a&&typeof a.bindingId==='string'&&Object.hasOwn(a,'value')&&
+   !answers.has(a.bindingId),'malformed or duplicate field answer');
+  answers.set(a.bindingId,a.value);
+ }
+ const get=(collection,subject,field)=>{
+  const id=answerBindingId(collection,subject,field);
+  return answers.has(id)?{found:true,value:answers.get(id)}:{found:false};
+ };
+ const result=structuredClone(meta.inputTemplate);
+ if(u.kind==='SHARD'||u.kind==='BATCH'){
+  for(const [i,entry] of route.entries.entries()){
+   const target=result.entries[i];
+   strict(target?.key===entry.entryKey,'original controller record key changed');
+   if(entry.valueKind==='OBJECT'){
+    for(const spec of entry.bindings){
+     const field=spec.field;
+     if(['PRESERVE_ISSUED_VALUE','CONTROLLER_COLLECT_AFTER_EXECUTION',
+      'CONTROLLER_VERIFIED_EXECUTION','BIND_EXISTING_CONTROLLER_SUBJECT'].includes(spec.source))continue;
+     if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW'){
+      if(isPendingAnswerValue(target.value[field])||target.value[field]===undefined)
+       target.value[field]=allocatedRecordId(phase,u.unitId,field,i+1);
+     }else{
+      const a=get('entries',entry.entryKey,field);
+      if(a.found)target.value[field]=structuredClone(a.value);
+     }
+    }
+   }else{
+    const a=get('entries',entry.entryKey,'$value');
+    if(a.found&&!route.controllerOwnedOutput)target.value=structuredClone(a.value);
+   }
+  }
+ }else if(u.kind==='APPEND'){
+  const rows=Array.isArray(submitted.appendRecords)?submitted.appendRecords:[];
+  strict(rows.length<=route.appendMaximumRecords,'append exceeds existing controller capacity');
+  const fieldDef=schema.actions[route.step]?.fields?.find(x=>x.name===route.field);
+  const permitted=new Set(fieldDef?.itemRequiredFields??[]);
+  const keyRoot=JSON.stringify(u.path)+':APPEND-';
+  result.entries=rows.map((input,i)=>{
+   strict(input&&typeof input==='object'&&!Array.isArray(input),'append record is not a typed object');
+   const value={};
+   for(const key of permitted)if(Object.hasOwn(input,key))value[key]=structuredClone(input[key]);
+   for(const spec of route.recordFieldTemplate){
+    if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW')
+     value[spec.field]=allocatedRecordId(phase,u.unitId,spec.field,i+1);
+    if(['CONTROLLER_COLLECT_AFTER_EXECUTION','CONTROLLER_VERIFIED_EXECUTION'].includes(spec.source))
+     delete value[spec.field];
+   }
+   return {key:keyRoot+String(i+1).padStart(4,'0'),value};
+  });
+ }else if(['FLOW','ATTACK'].includes(u.kind)){
+  const lists=u.kind==='FLOW'?['rows','flowNotes','integrationAnswers','contractChecks']:
+   ['attackPaths','integrationAnswers'];
+  for(const field of lists)for(const row of (result[field]??[])){
+   const id=subjectOf(field,row);
+   if(!id)continue;
+   const original=structuredClone(row);
+   for(const key of Object.keys(row)){
+    if(['contextId','flowId','obligationId','contract','classId','pathId'].includes(key))continue;
+    const a=get(field,id,key);
+    if(!a.found)continue;
+    row[key]=field==='rows'&&['documentedRules','siblingComparisons'].includes(key)
+     ?preserveDiscoveryKeys(original[key],a.value,key):structuredClone(a.value);
+   }
+  }
+  const extras=submitted.extraRecords&&typeof submitted.extraRecords==='object'?
+   submitted.extraRecords:{};
+  for(const field of (u.kind==='FLOW'?['trivialReviews','groupChecks','candidates']:
+   ['attackPaths'])){
+   const additional=Array.isArray(extras[field])?extras[field]:[];
+   if(field==='attackPaths'){
+    const allowed=new Set(route.fixedRecordKeys[0].records.flatMap(x=>x.key));
+    for(const row of additional){
+     if(!row||!Array.isArray(row.flowIds)||row.flowIds.some(id=>!allowed.has(id)))continue;
+     result.attackPaths.push({...structuredClone(row),
+      pathId:'PATH-'+String(result.attackPaths.length+1).padStart(3,'0')});
+    }
+   }else if(field==='candidates'){
+    for(const row of additional){
+     if(!row||typeof row!=='object'||Array.isArray(row))continue;
+     result.candidates.push({...structuredClone(row),
+      tempKey:allocatedRecordId(phase,u.unitId,'candidate',result.candidates.length+1)});
+    }
+   }else result[field]=additional.map(row=>structuredClone(row));
+  }
+  if(u.kind==='FLOW'&&Array.isArray(submitted.trivialContextIds)){
+   const eligible=new Set(route.optionalRecords.find(x=>x.field==='trivialReviews')?.eligibleContextIds??[]);
+   const chosen=new Set(submitted.trivialContextIds.filter(id=>eligible.has(id)));
+   const packet=readUnitPacketV1({root:ROOT,packetPath:safePath(u.packetPath)});
+   const owners=new Map((packet.payload?.primaryContexts??[])
+    .map(x=>[x.contextId,x.qualifiedContainer]));
+   result.rows=result.rows.filter(row=>!chosen.has(row.contextId)||
+    !(result.trivialReviews??[]).some(x=>x.contract===owners.get(row.contextId)));
+  }
+ }else throw Error('unsupported issued unit kind');
+ return result;
+}
+function materializeBoundSubmissionV1(c,u,selected){
+ const raw=read(selected.rel);
+ if(raw?.schemaVersion!==MACHINE_BOUND_ANSWERS_V1)return selected;
+ const completed=assembleBoundAnswersV1(c,u,raw);
+ const attempt=selected.attempt+1;
+ strict(attempt<=999999,'mechanical attempt number exceeds existing format');
+ const relativePath=path.posix.join(path.posix.dirname(selected.rel),
+  'SUBMISSION_ATTEMPT_'+String(attempt).padStart(3,'0')+'_v1.json');
+ strict(!fs.existsSync(relative(relativePath)),'generated submission already exists');
+ writeJson(relative(relativePath),completed);
+ return {...selected,attempt,rel:relativePath,filename:relative(relativePath)};
+}
+
 async function unitValidateSingle(c,item){
  const phase=Number(need('phase')),step=Number(need('step')),stage=String(need('stage'));
  const id=safeId(item.unit_id),sourceCommit=item.source_commit||need('source_commit');
  const current=unitPlan(c),u=current.units.find(x=>x.unitId===id);
  if(!u)return; // No fabricated unit or GitHub-side rejection.
- const selected=submittedUnitFile(c,phase,u),actualSha=sha(fs.readFileSync(selected.filename));
+ const selected=materializeBoundSubmissionV1(c,u,submittedUnitFile(c,phase,u));
+ const actualSha=sha(fs.readFileSync(selected.filename));
  const state=current.queue.units[id];
  state.status='CLAIMED';state.workerId=selected.workerId;
  state.claimEpoch=selected.epoch;state.claimToken=randomUUID();
