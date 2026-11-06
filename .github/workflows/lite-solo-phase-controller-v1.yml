@@ -245,6 +245,9 @@ jobs:
             done
           fi
       - name: Generate immutable Phase-10 PDF and publish selected evidence
+        # Delivery failures are recorded for retry; the already-sealed campaign
+        # must not fail solely because an optional renderer/publication changed.
+        continue-on-error: true
         if: ${{ steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'ALREADY_ACCEPTED' }}
         env:
           GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
