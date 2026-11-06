@@ -744,6 +744,46 @@ function preserveDiscoveryKeys(original,response,field){
 }
 // Exact binding IDs are issued with the existing GitHub-side work packet;
 // neither the AI nor Cloudflare chooses a destination or a record identity.
+// Purely mechanical input-type checking. Security conclusions and exact enum
+// choices are written by the AI; the controller never chooses a verdict.
+function machineAnswerExpectedTypeV1(field,initialKind,sourceType){
+ if(['anchors','steps','documentedRules','siblingComparisons','candidates',
+   'evidenceRefs','executionEvidenceRefs','relatedCandidateKeys','relatedRequirementKeys',
+   'relatedHypothesisKeys','attackAssertionNames','controlAssertionNames',
+   'obligationIds','contextIds'].includes(field))return 'array';
+ if(['specInspection','candidate','decidingTest','simulationIdea'].includes(field))return 'object';
+ if(initialKind==='ARRAY')return 'array';
+ if(initialKind==='OBJECT')return 'object';
+ if(sourceType==='LITERAL_TOKEN_ONLY')return 'string';
+ return 'SCHEMA_DECLARED';
+}
+function checkMachineAnswerLiteralV1(spec,value){
+ strict(spec&&spec.source==='AI_TYPED_LITERAL','field must be issued by the controller');
+ if(Array.isArray(spec.allowedValues)&&spec.allowedValues.length)
+  strict(typeof value==='string'&&spec.allowedValues.includes(value),
+   'AI typed answer must be one exact issued enumeration for '+spec.field);
+ if(value===null){
+  strict(['candidate','decidingTest','simulationIdea','candidates'].includes(spec.field),
+   'null only permitted for a genuinely absent optional security result: '+spec.field);
+  return;
+ }
+ if(spec.expectedJsonType==='array')strict(Array.isArray(value),
+  'AI answer must supply typed array for '+spec.field);
+ if(spec.expectedJsonType==='object')strict(value!==null&&typeof value==='object'&&
+  !Array.isArray(value),'AI answer must supply typed object for '+spec.field);
+ if(spec.expectedJsonType==='string')strict(typeof value==='string',
+  'AI answer must supply one exact literal string for '+spec.field);
+ if(spec.field==='specInspection'&&value?.status!==undefined)
+  strict(['MATCH','MISMATCH','UNRESOLVED','NO_DOCUMENTED_RULES'].includes(value.status),
+   'specification status must match issued literal choices');
+ if(spec.field==='candidate'||spec.field==='candidates'){
+  const candidates=Array.isArray(value)?value:[value];
+  for(const candidate of candidates)if(candidate?.severity!==undefined)
+   strict(['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(candidate.severity),
+    'candidate severity must be an AI-authored exact token');
+ }
+}
+
 function machineAnswerDirectoryV1(u,template,routing){
  const fields=[],id=(a,b,c)=>JSON.stringify([a,b,c]);
  const push=(collection,subject,field,type,choices)=>{
@@ -754,10 +794,12 @@ function machineAnswerDirectoryV1(u,template,routing){
  if(['SHARD','BATCH'].includes(u.kind)){
   for(const entry of routing.entries){
    if(entry.valueKind!=='OBJECT')
-    push('entries',entry.entryKey,'$value','ISSUED_FIELD_TYPE');
+    push('entries',entry.entryKey,'$value',routing.scalarAnswer?.requiredArray?'array':'ISSUED_FIELD_TYPE',
+     routing.scalarAnswer?.allowedValues??null);
    else for(const b of entry.bindings){
     if(['AI_SECURITY_ANSWER','AI_EXACT_ENUM','AI_EXACT_SOURCE_BOUND_REFERENCES'].includes(b.source))
-     push('entries',entry.entryKey,b.field,b.answerMode??'SCHEMA_DECLARED',b.allowedValues??null);
+     push('entries',entry.entryKey,b.field,b.allowedValues?.length?'string':
+      machineAnswerExpectedTypeV1(b.field,entry.valueKind,b.answerMode),b.allowedValues??null);
    }
   }
  }else if(['FLOW','ATTACK'].includes(u.kind)){
@@ -774,12 +816,15 @@ function machineAnswerDirectoryV1(u,template,routing){
      const choices=field==='verdict'?['CORRECT','DEFECT','UNRESOLVED']:
       field==='result'?['BLOCKED','VIABLE','UNCERTAIN']:
       field==='assessment'?['SUPPORTED','CONCERN','UNRESOLVED','NOT_APPLICABLE']:
+      field==='applicability'?['APPLICABLE','NOT_APPLICABLE']:
       field==='role'?['UNPRIVILEGED','UNPRIVILEGED_CALLER','OTHER_ROLE','DIFFERENT_ROLE',
        'MALICIOUS_TOKEN','MALICIOUS_ADAPTER','MALICIOUS_TOKEN_OR_ADAPTER',
        'MALICIOUS_CALLBACK','MEV','MEV_SEARCHER','CARELESS_ADMIN','ADMIN',
        'PRIVILEGED','PRIVILEGED_ROLE']:null;
-     push(collection,subject,field,Array.isArray(row[field])?'array':
-       row[field]&&typeof row[field]==='object'?'object':'SCHEMA_DECLARED',choices);
+     push(collection,subject,field,choices?'string':
+       machineAnswerExpectedTypeV1(field,Array.isArray(row[field])?'ARRAY':
+        row[field]&&typeof row[field]==='object'?'OBJECT':'SCALAR',
+        'SCHEMA_DECLARED'),choices);
     }
    }
   }
@@ -798,10 +843,14 @@ function assembleBoundAnswersV1(c,u,submitted){
  const phase=Number(c.directory.currentAssignment.phaseSequence);
  const schema=loadPhaseSchema(ROOT,AUTH,phase).schema;
  const meta=buildUnitMeta(c,u,schema),route=meta.answerRouting;
- const answers=new Map();
+ const answers=new Map(),issued=new Map(meta.answerTransport.fields.map(f=>[f.bindingId,f]));
+ strict(submitted.answers===undefined||Array.isArray(submitted.answers),
+  'bound answers must be an array of exact issued field values');
  for(const a of (submitted.answers??[])){
   strict(a&&typeof a.bindingId==='string'&&Object.hasOwn(a,'value')&&
    !answers.has(a.bindingId),'malformed or duplicate field answer');
+  const spec=issued.get(a.bindingId);
+  checkMachineAnswerLiteralV1(spec,a.value);
   answers.set(a.bindingId,a.value);
  }
  const get=(collection,subject,field)=>{
@@ -845,7 +894,9 @@ function assembleBoundAnswersV1(c,u,submitted){
    }
   }
  }else if(u.kind==='APPEND'){
-  const rows=Array.isArray(submitted.appendRecords)?submitted.appendRecords:[];
+  strict(Object.hasOwn(submitted,'appendRecords')&&Array.isArray(submitted.appendRecords),
+   'APPEND must explicitly supply typed appendRecords, including [] when no records exist');
+  const rows=submitted.appendRecords;
   strict(rows.length<=route.appendMaximumRecords,'append exceeds existing controller capacity');
   const fieldDef=schema.actions[route.step]?.fields?.find(x=>x.name===route.field);
   const keyRoot=JSON.stringify(u.path)+':APPEND-';
@@ -853,11 +904,17 @@ function assembleBoundAnswersV1(c,u,submitted){
    const key=keyRoot+String(i+1).padStart(4,'0');
    // Original REQUIRED_LIST append slots contain literal scalars; record-list
    // append slots contain fully typed objects, including optional audit fields.
-   if(fieldDef?.type==='REQUIRED_LIST')
-    return {key,value:structuredClone(input)};
+   if(fieldDef?.type==='REQUIRED_LIST'){
+    strict(typeof input==='string','REQUIRED_LIST APPEND item must be a literal string');
+    return {key,value:input};
+   }
    strict(input&&typeof input==='object'&&!Array.isArray(input),'append record is not a typed object');
    const value=structuredClone(input);
    for(const spec of route.recordFieldTemplate){
+    if(spec.source==='AI_EXACT_ENUM'&&Object.hasOwn(value,spec.field))
+     strict(typeof value[spec.field]==='string'&&
+       spec.allowedValues.includes(value[spec.field]),
+       'APPEND enum must be an exact AI-authored permitted token: '+spec.field);
     if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW')
      value[spec.field]=allocatedRecordId(phase,u.unitId,spec.field,i+1);
     if(['CONTROLLER_COLLECT_AFTER_EXECUTION','CONTROLLER_VERIFIED_EXECUTION'].includes(spec.source)){
