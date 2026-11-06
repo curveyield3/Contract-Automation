@@ -9,6 +9,7 @@ import {readV7RawResultV1} from '../packages/github-native-sim/src/v7-compact-re
 import {pathToFileURL} from 'node:url';
 import {storeControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
 import {materializeShardedWorkFormV1,shardWorkFormV1,shardFailureIndexV1} from './lib/lite-work-shards-v1.mjs';
+import {finalizeReadinessV1,assembleAcceptedUnitShardsV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,validateBoundAuthorityV1,loadPhaseSchema,
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
@@ -1230,6 +1231,21 @@ try{
   if(assignment.workShardIndexPath)
     materializeShardedWorkFormV1({root,formRel:assignment.workFormPath,refreshDigests:true});
   form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
+
+  // Phase-5 parallel units are controller-accepted before phase sealing.
+  // Rebuild the exact protected fields from those immutable snapshots, not
+  // from transient request-binding annotations left by a previous finalizer.
+  // This never authorizes an unaccepted unit or alters frozen unit records.
+  if(sequence===5&&directory.mode==='LITE_SOLO'&&assignment.workShardIndexPath){
+    const gate=finalizeReadinessV1({root,campaignPath,directory,phase:5});
+    if(gate.ready){
+      assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase:5});
+      materializeShardedWorkFormV1({root,formRel:assignment.workFormPath,refreshDigests:false});
+      form=readJson(requiredFile(root,assignment.workFormPath,'authenticated Phase-5 work form'));
+      assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
+      writeJson(repoFile(root,assignment.workFormPath),form);
+    }
+  }
 
   // v10.3 stores the authoritative prefill digest outside the reviewer-editable
   // form. Older active assignments are migrated once from the pre-existing form
