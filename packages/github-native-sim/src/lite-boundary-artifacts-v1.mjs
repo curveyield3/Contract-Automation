@@ -645,6 +645,18 @@ export async function executePhase5TargetsV1({
     const evRel=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key));
     const evAbs=path.join(controllerRoot,...evRel.split('/'));
     const workspace=path.join(process.cwd(),'.audit-work','phase5-boundary',safePart(key));
+    // Source-bound machine evidence is stored under evAbs; workspace is only
+    // disposable staging. Avoid cumulative Foundry build/cache growth across
+    // the seven sequential candidate executions on a finite GitHub runner.
+    const freeDiskGiB=()=>{
+      const stat=fs.statfsSync(process.cwd());
+      return Number(stat.bavail)*Number(stat.bsize)/(1024**3);
+    };
+    const diskFree=freeDiskGiB();
+    process.stderr.write(`[phase5-sim] DISK_FREE_BEFORE ${key} ${diskFree.toFixed(2)} GiB\n`);
+    if(diskFree<2){
+      throw new Error(`PHASE5_RUNNER_DISK_EXHAUSTION: insufficient free space before ${key} (${diskFree.toFixed(2)} GiB); preserve accepted units and recover runner storage`);
+    }
     if(!runProcessV1){
       if(runProcessFn)runProcessV1=runProcessFn;
       else ({runProcess:runProcessV1}=await import('./execution.mjs'));
@@ -703,6 +715,10 @@ export async function executePhase5TargetsV1({
       stdout:String(result.stdout??'').slice(-12000),
       stderr:String(result.stderr??'').slice(-12000)
     };
+    // Do not remove evAbs or GitHub-persisted evidence. Only remove the
+    // per-candidate execution staging tree once its result has been captured.
+    fs.rmSync(workspace,{recursive:true,force:true});
+    process.stderr.write(`[phase5-sim] SCRATCH_CLEANED ${key} diskFree=${freeDiskGiB().toFixed(2)} GiB\n`);
   }
   // All covering runs are finished before an omitted duplicate receives
   // an inherited evidence reference. The gate separately verifies identity.
