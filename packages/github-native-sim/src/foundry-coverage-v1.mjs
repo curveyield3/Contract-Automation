@@ -26,10 +26,18 @@ export function evaluateFoundryCoverageObligationsV1(metrics,obligations=[]){
   return {status:failures.length?'FAIL':'PASS',failures};
 }
 
-export async function runFoundryCoverageV1({projectRoot,sourceCommit,rpcUrl,blockNumber,blockHash=null,rpcProfile='SIM_ARCHIVE_PRIMARY_ETHEREUM_01',environment={},rawArtifactRef,runCommand=runProcess}){
+export async function runFoundryCoverageV1({projectRoot,sourceCommit,rpcUrl,blockNumber,blockHash=null,rpcProfile='SIM_ARCHIVE_PRIMARY_ETHEREUM_01',environment={},rawArtifactRef,matchTest=null,matchContract=null,runCommand=runProcess}){
+  // Forge coverage executes tests; never let an unselected request run the entire suite.
+  // An absent agent-selected test produces explicit non-execution evidence, not PASS.
+  if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(matchTest??''))
+    return {schemaVersion:'audit-v7-foundry-coverage-v1',status:'SKIPPED_UNGUIDED',sourceCommit,
+      toolInvoked:false,reason:'NO_AGENT_SELECTED_FOUNDRY_TEST',totals:{},files:[],rawArtifactRef};
   if(typeof runCommand!=='function') throw new Error('runCommand is required');
   if(typeof rpcUrl!=='string'||!rpcUrl) throw new Error('rpcUrl is required');
-  const result=await runCommand({command:'forge',args:['coverage','--report','summary','--fork-url',rpcUrl,'--fork-block-number',String(blockNumber)],cwd:projectRoot,env:environment});
+  const args=['coverage','--report','summary','--match-test','^'+matchTest+'$',
+    ...(matchContract?['--match-contract','^'+matchContract+'$']:[]),
+    '--fork-url',rpcUrl,'--fork-block-number',String(blockNumber)];
+  const result=await runCommand({command:'forge',args,cwd:projectRoot,env:environment});
   const fork={blockNumber,blockHash,profile:rpcProfile,rpcUrlExposed:false};
   if(!result||result.exitCode!==0) return {schemaVersion:'audit-v7-foundry-coverage-v1',status:'COVERAGE_EXECUTION_FAILURE',sourceCommit,fork,totals:{},files:[],rawArtifactRef,rawOutput:{exitCode:result?.exitCode??-1,stdout:String(result?.stdout??'').replaceAll(rpcUrl,'<redacted-rpc>'),stderr:String(result?.stderr??'').replaceAll(rpcUrl,'<redacted-rpc>')}};
   try { const parsed=parseFoundryCoverageSummaryV1(result.stdout); return {schemaVersion:'audit-v7-foundry-coverage-v1',status:'PASS',sourceCommit,fork,...parsed,rawArtifactRef}; }
