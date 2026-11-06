@@ -520,7 +520,7 @@ function inheritedQuestionHistoryRefsV1({root,campaignPath,sequence}){
 }
 // Mechanical references into the original accepted Phase 1 canonical source.
 // This roster is an index, not a promotion, summarization, or security finding.
-function originalPhase1DiscoveryRosterV1({root,campaignPath,predecessorReceiptPath}){
+function originalPhase1DiscoveryRosterV1({root,campaignPath}){
   const canonicalPath=path.posix.join(campaignPath,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json');
   const sourceFile=repoFile(root,canonicalPath);
   const exists=fs.existsSync(sourceFile);
@@ -533,7 +533,30 @@ function originalPhase1DiscoveryRosterV1({root,campaignPath,predecessorReceiptPa
       if(value&&typeof value==='object'&&!Array.isArray(value))canonical=value;
     }catch{/* Preserve an explicit availability diagnostic, not a fabricated empty finding. */}
   }
-  const predecessor=predecessorReceiptPath?readJsonIf(repoFile(root,predecessorReceiptPath)):null;
+  // Bind provenance to the Phase 1 receipt that actually recorded this canonical
+  // artifact's SHA-256, not to an unrelated later-phase predecessor receipt.
+  const receiptsRel=path.posix.join(campaignPath,'receipts');
+  const receiptsDir=repoFile(root,receiptsRel);
+  let acceptedReceiptPath=null,acceptedSourceSha256=null;
+  let receiptBinding='RECEIPT_UNAVAILABLE';
+  if(canonicalSha256&&fs.existsSync(receiptsDir)){
+    const names=fs.readdirSync(receiptsDir).filter(name=>/^PHASE_01_RECEIPT_v\d+\.json$/.test(name))
+      .sort((a,b)=>Number(b.match(/_v(\d+)\.json$/)[1])-Number(a.match(/_v(\d+)\.json$/)[1]));
+    if(names.length)receiptBinding='CANONICAL_DIGEST_NOT_IN_PHASE1_RECEIPTS';
+    for(const name of names){
+      const rel=path.posix.join(receiptsRel,name);
+      const receipt=readJsonIf(repoFile(root,rel));
+      const evidence=[...(receipt?.evidence??[]),...(receipt?.outputs??[])];
+      const matching=evidence.some(ref=>ref?.role==='PHASE_CANONICAL_DATA'&&
+        ref.path==='derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json'&&
+        ref.sha256===canonicalSha256);
+      if(!matching)continue;
+      acceptedReceiptPath=rel;
+      acceptedSourceSha256=receipt?.source?.sha256??null;
+      receiptBinding='MATCHED_PHASE1_RECEIPT';
+      break;
+    }
+  }
   const definitions=[
     {discoveryPass:'D4',step:'step-4',field:'standardsAssessments',recordKeyField:'standardKey'},
     {discoveryPass:'D6',step:'step-5',field:'riskDrivers',recordKeyField:'driverKey'},
@@ -577,8 +600,10 @@ function originalPhase1DiscoveryRosterV1({root,campaignPath,predecessorReceiptPa
     canonicalSha256,
     sourceIdentity:{
       campaignId:canonical?.campaignId??null,
-      acceptedSourceSha256:predecessor?.sourceSha256??null,
-      originalCanonicalSha256:canonicalSha256
+      acceptedSourceSha256,
+      originalCanonicalSha256:canonicalSha256,
+      acceptedReceiptPath,
+      receiptBinding
     },
     availability:canonical?'AVAILABLE':exists?'SOURCE_UNREADABLE':'SOURCE_UNAVAILABLE',
     allPhase1SourceSelector:'actions',
@@ -604,7 +629,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
   // Machine Intelligence successor assignment; never rewrite an accepted phase.
   if(sequence>=2&&authorityRoot==='Machine Intelligence Audit Controller/Audit Skill v8'){
     form.automationInputs.phase1DiscoverySourceRoster=originalPhase1DiscoveryRosterV1({
-      root,campaignPath,predecessorReceiptPath
+      root,campaignPath
     });
     form.automationInputs.controllerOwnedAutomationInputs=uniq([
       ...form.automationInputs.controllerOwnedAutomationInputs,
