@@ -83,7 +83,7 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
     echo "::notice::LEGACY_PUBLICATION_POLICY_UNBOUND: resuming source-bound campaign without changing release selection"
   fi
 else
-  # New campaigns bind the installed lite-solo-v5 authority and its immutable manifest; idempotent recovery keeps its original frozen authority.
+  # New Machine Intelligence campaigns bind the fork-owned authority package and immutable manifest.
   export GH_TOKEN="$AUDIT_CONTROLLER_TOKEN"
   gh auth setup-git
   work='/tmp/audit-source-initialization'
@@ -113,25 +113,20 @@ else
   # Audit-Controller stays unfetched; revision and collision checks read the Git tree instead.
   gh repo clone curveyield3/Audit-Controller "$repo" -- --branch machine-intelligence-audit-controller-v1 --depth 1 --filter=blob:none --sparse
   cd "$repo"
-  git sparse-checkout set --no-cone '/Audit Skill - Lite-Solo Authority/**' '/Audit Campaign Directory/campaigns/**'
+  git sparse-checkout set --no-cone '/Machine Intelligence Audit Controller/**' '/Audit Campaign Directory/campaigns/**'
   git config user.name 'CurveYield Lite-Solo Source Initialization'
   git config user.email 'lite-solo@users.noreply.github.com'
-  authority_parent='Audit Skill - Lite-Solo Authority'
-  # AI-only release is selected solely by the authenticated Worker intake; ordinary campaigns remain v5.
-  case "${LITE_SOLO_AI_AUTONOMOUS:-0}" in
-    0) authority_release="lite-solo-v5" ;;
-    1) authority_release="lite-solo-v6" ;;
-    *) echo "::error::INVALID_AI_RELEASE_SELECTOR" >&2; exit 1 ;;
-  esac
-  authority_root="$authority_parent/$authority_release"
-  test -f "$authority_root/MANIFEST.json" || { echo '::error::Selected Lite-Solo authority package is missing' >&2; exit 1; }
+  authority_parent='Machine Intelligence Audit Controller'
+  authority_release='machine-intelligence-v1'
+  authority_root="$authority_parent/Audit Skill v1"
+  test -f "$authority_root/MANIFEST.json" || { echo '::error::Machine Intelligence authority package is missing' >&2; exit 1; }
   authority_packages=("$authority_root")
   skill_home="$authority_root/SKILL.md"
-  skill_repo_path='curveyield3/Audit-Controller/Audit Skill - Lite-Solo Authority'
+  skill_repo_path='curveyield3/Audit-Controller/Machine Intelligence Audit Controller/Audit Skill v1'
   skill_release="$(jq -r .release "$authority_root/MANIFEST.json")"
   skill_revision="$(jq -r .packageRevision "$authority_root/MANIFEST.json")"
-  [[ "$skill_release" =~ ^lite-solo-v[0-9]+$ && "$skill_revision" = "${skill_release#lite-solo-}" ]] || { echo "::error::Lite-Solo manifest version mismatch" >&2; exit 1; }
-  test -f "$skill_home" || { echo "::error::Current Lite-Solo SKILL.md missing" >&2; exit 1; }
+  [ "$skill_release" = "$authority_release" ] && [ "$skill_revision" = 'v1' ] || { echo "::error::Machine Intelligence manifest version mismatch" >&2; exit 1; }
+  test -f "$skill_home" || { echo "::error::Machine Intelligence SKILL.md missing" >&2; exit 1; }
   skill_sha="$(sha256sum "$skill_home" | awk '{print $1}')"
   skill_blob="$(git rev-parse "HEAD:$skill_home")"
   jq -e --arg release "$skill_release" --arg rev "$skill_revision" '.release==$release and .packageRevision==$rev and .mode=="LITE_SOLO" and (.reviewerLineup.masterSegments|length)==0' "$authority_root/MANIFEST.json" >/dev/null
