@@ -196,14 +196,22 @@ contract AVKATForkSimulationV1 {
         vm.prank(BOT);mod.depositVault(CHARM,w,u,0,0,1,_none());
         require(_bal(CHARM)>before,"CHARM_SHARES_NOT_MINTED");
     }
+    function _fundSafeForLargeAvkatDeposit() internal {
+        // FORK-ONLY seeded case: real Safe has <230 KAT and avKAT's downstream escrow minDeposit is 230 KAT.
+        // Source tokens from Morpho's existing balance on this isolated snapshot; no live transfer.
+        vm.prank(MORPHO);
+        require(IAvkatERC20(KAT).transfer(SAFE,250 ether),"FORK_SEED_KAT_FAILED");
+    }
     function test_depositVault_ERC4626Avkat() public {
         require(_bal(KAT)>1 ether,"SAFE_KAT_BALANCE_LOW");
+        _fundSafeForLargeAvkatDeposit();
         uint256 before=_bal(AVKAT);
-        vm.prank(BOT);mod.depositVault(AVKAT,1 ether,0,0,0,1,_none());
+        vm.prank(BOT);mod.depositVault(AVKAT,240 ether,0,0,0,1,_none());
         require(_bal(AVKAT)>before,"AVKAT_SHARES_NOT_MINTED");
     }
     function test_withdrawVault_ERC4626Avkat() public {
-        vm.prank(BOT);mod.depositVault(AVKAT,1 ether,0,0,0,1,_none());
+        _fundSafeForLargeAvkatDeposit();
+        vm.prank(BOT);mod.depositVault(AVKAT,240 ether,0,0,0,1,_none());
         uint256 s=_bal(AVKAT);require(s>0,"AVKAT_DEPOSIT_ZERO");
         vm.prank(BOT);mod.withdrawVault(AVKAT,s/2,0,0);
         require(_bal(AVKAT)==s-s/2,"AVKAT_REDEEM_SHARES_WRONG");
