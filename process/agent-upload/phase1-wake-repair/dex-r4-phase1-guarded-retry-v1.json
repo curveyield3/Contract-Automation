@@ -1,9 +1,0 @@
-{
-  "schemaVersion": "curveyield-phase1-wake-repair-request-v1",
-  "campaignId": "curveyield-dex-v16-source-r4",
-  "reviewer": "reviewer-1",
-  "phaseId": "phase-1",
-  "milestoneId": "PHASE_1_WORK_PACKET",
-  "diagnosticOnly": false,
-  "reason": "Guarded Phase1 wake after Chrome geometry/session repairs: verify visible browser address bar and refuse login redirect before typing; never claim delivery without proof."
-}

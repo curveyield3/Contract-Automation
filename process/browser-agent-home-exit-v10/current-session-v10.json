@@ -1,9 +1,0 @@
-{
-  "version": 10,
-  "run_id": "37169939299",
-  "run_url": "https://github.com/CurveYield2/Contract-Automation/actions/runs/37169939299",
-  "browser_view_url": "http://100.127.25.13:6080/vnc.html?autoconnect=1&resize=scale",
-  "status": "AUTOMATION_RESUMED",
-  "updated_at": "2026-10-04T02:05:55.152Z",
-  "stage": "browser_ready"
-}

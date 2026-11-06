@@ -1,9 +1,0 @@
-{
-  "schemaVersion": "curveyield-lite-phase-boundary-request-v1",
-  "campaignId": "cyavkatv25b-r4",
-  "reviewKind": "master-test-result",
-  "segmentId": "reviewer-1-phase-01",
-  "testResultPath": "campaigns/cyavKATv25b r4/work/master-review/reviewer-1-phase-01/targeted-tests/9f283a35597d2032b3fb3159979405079eb7a6c6d3fe187ad33ec47f795853e9/RESULT_v1.json",
-  "auditControllerRef": "main",
-  "attempt": 1
-}

@@ -1,9 +1,0 @@
-{
-  "schemaVersion": "curveyield-phase1-wake-repair-request-v1",
-  "campaignId": "curveyield-dex-v16-source-r4",
-  "reviewer": "reviewer-1",
-  "phaseId": "phase-1",
-  "milestoneId": "PHASE_1_WORK_PACKET",
-  "diagnosticOnly": true,
-  "reason": "Visual persistence verification only: previous live run 38170808158 showed Phase 1 wake submitted and model generating. Reopen chat and inspect screenshots; never resend."
-}

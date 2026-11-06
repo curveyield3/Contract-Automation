@@ -1,8 +1,0 @@
-{
-  "schemaVersion": "curveyield-lite-solo-phase-boundary-request-v1",
-  "campaignId": "cyavkatv25-r7",
-  "reviewKind": "phase",
-  "phaseSequence": 2,
-  "auditControllerRef": "main",
-  "attempt": 1
-}

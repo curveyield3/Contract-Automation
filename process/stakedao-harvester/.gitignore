@@ -1,9 +1,0 @@
-node_modules/
-.local-state/
-monitor/state/
-contracts/out/
-contracts/cache/
-contracts/broadcast/
-worker/.wrangler/
-worker/.dev.vars
-.env

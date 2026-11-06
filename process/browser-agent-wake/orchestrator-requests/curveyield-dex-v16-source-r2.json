@@ -1,8 +1,0 @@
-{
-  "schemaVersion": "curveyield-lite-browser-orchestrator-request-v1",
-  "requestId": "curveyield-dex-v16-source-r2-phase1-launch-v1",
-  "campaignId": "curveyield-dex-v16-source-r2",
-  "campaignName": "CurveYield DEX v16 Source r2",
-  "campaignPath": "campaigns/CurveYield DEX v16 Source r2",
-  "auditControllerRef": "main"
-}

@@ -1,8 +1,0 @@
-{
-  "schemaVersion": "curveyield-lite-phase0-bootstrap-recovery-v1",
-  "campaign_id": "curveyield-dex-v16-source-r4",
-  "campaign_path": "campaigns/CurveYield DEX v16 Source r4",
-  "audit_controller_ref": "main",
-  "completed_stages_manifest": "",
-  "retry_revision": 4
-}

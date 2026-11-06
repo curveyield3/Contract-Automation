@@ -1,9 +1,0 @@
-{
-  "schemaVersion": "curveyield-phase1-wake-repair-request-v1",
-  "campaignId": "curveyield-dex-v16-source-r4",
-  "reviewer": "reviewer-1",
-  "phaseId": "phase-1",
-  "milestoneId": "PHASE_1_WORK_PACKET",
-  "diagnosticOnly": true,
-  "reason": "Test full saved Playwright browser storageState (cookies plus origin state) in normal visible Chrome/X11, capture login/chat screenshots."
-}

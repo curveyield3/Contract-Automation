@@ -1,8 +1,0 @@
-{
-  "schemaVersion": "curveyield-lite-browser-orchestrator-request-v1",
-  "requestId": "curveyield-dex-v16-source-r3-phase1-existing-chat-repair-v3",
-  "campaignId": "curveyield-dex-v16-source-r3",
-  "campaignName": "CurveYield DEX v16 Source r3",
-  "campaignPath": "campaigns/CurveYield DEX v16 Source r3",
-  "auditControllerRef": "main"
-}

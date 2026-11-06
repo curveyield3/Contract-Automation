@@ -1,7 +1,0 @@
-{
-  "version": 1,
-  "hold_minutes": 20,
-  "home_exit_node": "100.112.238.56",
-  "use_home_exit": true,
-  "requested_at": "2026-10-03T19:40:00-07:00"
-}
