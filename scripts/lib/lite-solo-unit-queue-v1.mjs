@@ -210,6 +210,12 @@ function readPlan(root,campaign,phase){
     if(hex(rawValue)!==u.initialValueSha256)throw Error('unit prefill digest mismatch');
     u.initialValue=readPagedPrefillV1(root,u.initialValueRef,rawValue);
    }
+   if(u.issuedMetaRef){
+    const raw=fs.readFileSync(repoFile(root,u.issuedMetaRef));
+    if(hex(raw)!==u.issuedMetaSha256)
+     throw Error('issued roster metadata changed after delivery: '+u.unitId);
+    u.issuedMeta=readPagedPrefillV1(root,u.issuedMetaRef,raw);
+   }
    if(u.kind==='BATCH'){
     if(!u.membersRef||u.membersRef!==u.packetPath)throw Error('missing batch assignment manifest');
     const raw=fs.readFileSync(repoFile(root,u.membersRef));
@@ -256,6 +262,8 @@ function publishPlan(root,campaign,phase,plan,queue){
  };
  for(const unit of plan.units){
   const u=clone(unit);
+  // The original metadata remains in the paged-prefill format.
+  delete u.issuedMeta;
   if(u.kind==='BATCH'){
    if(!u.membersRef||!u.packetPath||!u.members?.length)throw Error('invalid batch plan serialization');
    delete u.members;
@@ -273,6 +281,26 @@ function publishPlan(root,campaign,phase,plan,queue){
  const {units,recordOwnership,...metadata}=plan;
  put(root,planRel(campaign,phase),{...metadata,unitCount:units.length,pages});
  put(root,queueRel(campaign,phase),queue);
+}
+// Issued answer bindings are campaign data: preserve their original bytes
+// when the executable Contract-Automation branch is upgraded.
+export function freezeIssuedUnitMetaV1({root,campaignPath,phase,issued=[]}){
+ if(!issued.length)return false;
+ const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
+ assertPlan(queue,plan);
+ const lookup=new Map(plan.units.map(u=>[u.unitId,u]));
+ let changed=false;
+ for(const {unitId,meta} of issued){
+  const u=lookup.get(unitId);
+  if(!u)throw Error('issued metadata references unknown unit '+unitId);
+  if(u.issuedMetaRef)continue;
+  const rel=path.posix.join(unitBase(campaignPath,phase,unitId),'ISSUED_META_v1.json');
+  const manifest=writePagedPrefillV1(root,rel,meta);
+  u.issuedMetaRef=rel;u.issuedMetaSha256=sha(manifest);
+  changed=true;
+ }
+ if(changed)publishPlan(root,campaignPath,phase,plan,queue);
+ return changed;
 }
 export function createUnitPlanV1({root,campaignPath,directory,phase,automationRoot=process.cwd()}){
  assertParallelSolo(directory,phase);
