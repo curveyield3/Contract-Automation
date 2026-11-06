@@ -687,8 +687,13 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
      const acceptedRowSource=Number.isInteger(rowSource)?discoverySourceRefs[rowSource]:null;
      const verdictObservation={
        unitId,originalIndex:rowIndex,contextId:row?.contextId??null,
-       originalRow:structuredClone(row),
-       originalSourceRefIndex:rowSource
+       verdict:row?.verdict??null,
+       originalSourceRefIndex:rowSource,
+       // Original content is in the accepted artifact, not another potentially
+       // multi-megabyte summary copy. This retains every repeated observation.
+       sourceSelector:acceptedRowSource?.sourceSelector??null,
+       acceptedPath:acceptedRowSource?.acceptedPath??null,
+       acceptedSha256:acceptedRowSource?.acceptedSha256??null
      };
      functionVerdictObservations.push(verdictObservation);
      // Keep the conventional per-context view for existing consumers. The
