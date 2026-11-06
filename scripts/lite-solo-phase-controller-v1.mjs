@@ -187,7 +187,7 @@ function maybeJson(root,rel){const f=maybeFile(root,rel);if(!f)return null;try{r
 function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNum(phase)+'_CANONICAL_DATA_v1.json');}
 function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRelFor(campaignPath,phase));}
 function uniqueExisting(root,rels){return [...new Set(rels.filter(Boolean))].filter(rel=>Boolean(maybeFile(root,rel)));}
-function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
+function resolveInputsForTarget({root,campaignPath,directory,target,immediate=[]}){
   const derived=(phase,name)=>path.posix.join(campaignPath,'derived/phase-'+phase,name);
   const buildIdentity=path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
   const deploy=path.posix.join(campaignPath,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
@@ -222,8 +222,30 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   if(target===10)special=[
     p8Final,p9Final,finalIndex,discoverySummary,p7,buildIdentity,deploy,targets,remediation
   ];
-  // Retain predecessor receipts and every existing immediate derived output.
-  return uniqueExisting(root,[...originals,...special,...immediate]);
+  // Keep the original predecessor routing order stable for existing consumers.
+  // Accepted prior revisions may reside under superseded/ with the original
+  // source SHA still bound to their own historical receipt.
+  const historicalPaths=[];
+  if(directory){
+    try{
+      const historical=collectAcceptedOriginalCanonicalEvidenceV1({
+        root,campaignPath,directory,maxPhase:target-1});
+      historicalPaths.push(...(historical.rosters??[])
+        .filter(r=>r.availability==='AVAILABLE'&&r.actualArtifactPath)
+        .map(r=>r.actualArtifactPath));
+    }catch(error){
+      // The successor work form carries a controller-digested availability
+      // diagnostic. Missing historical data does not stop packaging.
+      process.stderr.write('[lite-original-evidence] historical source routing unavailable: '+
+        String(error?.message??error)+'\\n');
+    }
+  }
+  const legacyLead=[3,4,5,6].includes(target)
+    ?[canonicalRelFor(campaignPath,1)]
+    :target===10?[4,5,6].map(phase=>canonicalRelFor(campaignPath,phase)):[];
+  return uniqueExisting(root,[
+    ...legacyLead,...special,...immediate,...historicalPaths,...originals]);
+}
 }
 function phaseOutput(canonical,step,field){return canonical?.actions?.[step]?.outputs?.[field];}
 function remediationDeltaRows(campaignRoot,validatedFindings){
@@ -1290,7 +1312,7 @@ if(sequence===6&&!isReassignedV13AuthorityV1({root,authorityRoot})){
   const markerEvidence=[receiptRef(root,campaignPath,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,campaignPath,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,campaignPath,x,'DERIVED_DOWNSTREAM_DATA'))];
   const markerHandoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:8,sameReviewer:true,status:'NOT_APPLICABLE'};
   const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',revision:markerRevision,authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],evidence:markerEvidence,outputs:markerEvidence,globalControls:receipt.globalControls,validation:{status:'PASS',validatedAt:now,failures:[]},handoff:markerHandoff,now});
-  marker.sealedAt=now;writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=false;nextSequence=8;nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:8,immediate:[...derivedRels,...derived7,...boundaryArtifactRels]});
+  marker.sealedAt=now;writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=false;nextSequence=8;nextDerivedInputs=resolveInputsForTarget({root,campaignPath,directory,target:8,immediate:[...derivedRels,...derived7,...boundaryArtifactRels]});
 }
 if(sequence===8&&nextSequence===10){
   const skippedRevision=masterAmendmentRefreshSha?phaseRevision:1;
@@ -1300,7 +1322,7 @@ if(sequence===8&&nextSequence===10){
 }
 directory.lastSealedReceiptPath=sealedReceiptRel;
 if(nextSequence!==null)
-  nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:nextSequence,
+  nextDerivedInputs=resolveInputsForTarget({root,campaignPath,directory,target:nextSequence,
     immediate:[...derivedRels,...automaticPhase7DerivedRels,...boundaryArtifactRels]});
 if(sequence===10){
   directory.campaignStatus=masterAmendmentRefreshSha?'MASTER_AMENDMENT_REFRESH':'COMPLETE';
