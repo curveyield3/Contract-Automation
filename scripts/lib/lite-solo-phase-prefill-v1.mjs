@@ -17,15 +17,30 @@ function matchesAny(value,patterns){const s=String(value??'').toLowerCase();retu
 function safeSegment(value,fallback='item'){const s=String(value??'').replace(/[^A-Za-z0-9._-]+/g,'_').replace(/^_+|_+$/g,'');return s||fallback;}
 
 function findSourceIntelligence(root,campaignPath){
-  const dir=repoFile(root,path.posix.join(campaignPath,'evidence/source-intelligence'));
-  const candidates=walk(dir).filter(f=>f.endsWith('.json'));
-  const parsed=[];
-  for(const file of candidates){
-    const j=readJsonIf(file);
-    if(j?.artifactType==='CANONICAL_SOURCE_INTELLIGENCE') parsed.push({file,j});
+  const evidenceRel='evidence/source-intelligence';
+  const index=readJsonIf(repoFile(root,path.posix.join(campaignPath,
+    evidenceRel,'SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json')));
+  const accepted=index?.core;
+  // When a bundle index exists, ONLY its accepted revision is admissible.
+  // An arbitrary lexicographically last JSON may be an unaccepted/stale source.
+  if(index){
+    const rel=accepted?.latestAcceptedRevision;
+    if(accepted?.status!=='ACCEPTED'||
+       typeof rel!=='string'||!/^evidence\/source-intelligence\/SOURCE_INTELLIGENCE_v\d+\.json$/.test(rel)||
+       !/^[a-f0-9]{64}$/.test(String(accepted.acceptedSha256??'')))return null;
+    const file=repoFile(root,path.posix.join(campaignPath,rel));
+    try{
+      const bytes=fs.readFileSync(file);
+      if(createHash('sha256').update(bytes).digest('hex')!==accepted.acceptedSha256)return null;
+      const j=JSON.parse(bytes.toString('utf8'));
+      return j?.artifactType==='CANONICAL_SOURCE_INTELLIGENCE'?{file,j}:null;
+    }catch{return null;}
   }
-  parsed.sort((a,b)=>a.file.localeCompare(b.file));
-  return parsed.at(-1)??null;
+  // Historical campaigns without a published bundle retain their original
+  // v1 path. Do not silently select another unverified revision.
+  const file=repoFile(root,path.posix.join(campaignPath,evidenceRel,'SOURCE_INTELLIGENCE_v1.json'));
+  const j=readJsonIf(file);
+  return j?.artifactType==='CANONICAL_SOURCE_INTELLIGENCE'?{file,j}:null;
 }
 
 
@@ -552,9 +567,12 @@ function originalPhase1DiscoveryRosterV1({root,campaignPath}){
       const rel=path.posix.join(receiptsRel,name);
       const receipt=readJsonIf(repoFile(root,rel));
       const evidence=[...(receipt?.evidence??[]),...(receipt?.outputs??[])];
-      const matching=evidence.some(ref=>ref?.role==='PHASE_CANONICAL_DATA'&&
-        ref.path==='derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json'&&
-        ref.sha256===canonicalSha256);
+      const matching=receipt?.phase?.sequence===1&&
+        ['SEALED','COMPLETE'].includes(receipt?.phase?.status)&&
+        receipt?.campaign?.campaignId===canonical?.campaignId&&
+        evidence.some(ref=>ref?.role==='PHASE_CANONICAL_DATA'&&
+          ref.path==='derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json'&&
+          ref.sha256===canonicalSha256);
       if(!matching)continue;
       acceptedReceiptPath=rel;
       acceptedSourceSha256=receipt?.source?.sha256??null;
@@ -610,7 +628,8 @@ function originalPhase1DiscoveryRosterV1({root,campaignPath}){
       acceptedReceiptPath,
       receiptBinding
     },
-    availability:canonical?'AVAILABLE':exists?'SOURCE_UNREADABLE':'SOURCE_UNAVAILABLE',
+    availability:canonical?(acceptedReceiptPath?'AVAILABLE':'ACCEPTANCE_UNVERIFIED'):
+      exists?'SOURCE_UNREADABLE':'SOURCE_UNAVAILABLE',
     allPhase1SourceSelector:'actions',
     allPhase1OutputSelectors,
     leadCollections,
