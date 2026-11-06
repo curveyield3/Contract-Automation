@@ -466,11 +466,14 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
      if(row.candidate&&typeof row.candidate==='object')
        candidates.push({...row.candidate,contextIds:[...new Set([...(row.candidate.contextIds??[]),row.contextId])]});
    }
-   for(const check of arr(row?.checks)){
-    classMap[check.classId]=check.assessment;
-    if(check.assessment==='NOT_APPLICABLE')na.push({contextId:row.contextId,classId:check.classId,evidence:check.evidence,anchors:check.anchors});
-    if(check.candidate)candidates.push({...check.candidate,contextIds:[row.contextId],classId:check.classId});
-   }
+   // V13 correctness verdicts are authoritative for function coverage.
+   // Legacy per-class checklists remain prompts, never verdict overrides.
+   if(state?.payload?.reviewPolicy!=='correctness-verdict-v13')
+    for(const check of arr(row?.checks)){
+     classMap[check.classId]=check.assessment;
+     if(check.assessment==='NOT_APPLICABLE')na.push({contextId:row.contextId,classId:check.classId,evidence:check.evidence,anchors:check.anchors});
+     if(check.candidate)candidates.push({...check.candidate,contextIds:[row.contextId],classId:check.classId});
+    }
    checks.set(row.contextId,classMap);
   }
   // Compact forms expand to the same per-context, per-class records the coverage matrix reads.
@@ -479,7 +482,9 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    if(check.assessment==='NOT_APPLICABLE')na.push({contextId:id,classId,evidence:check.evidence,anchors:check.anchors});
    if(check.candidate)candidates.push({...check.candidate,contextIds:[id],classId});
   };
-  for(const group of arr(submission?.groupChecks))for(const id of arr(group?.contextIds))set(id,group.classId,group);
+  // Shared-modifier group checks cannot overwrite a V13 function-wide verdict.
+  if(state?.payload?.reviewPolicy!=='correctness-verdict-v13')
+   for(const group of arr(submission?.groupChecks))for(const id of arr(group?.contextIds))set(id,group.classId,group);
   const unit=resolveUnit(plan,unitId);
   for(const review of arr(submission?.trivialReviews))
    for(const id of arr(unit?.primaryContextIds)){
