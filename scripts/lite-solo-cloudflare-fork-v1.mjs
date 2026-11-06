@@ -1353,12 +1353,21 @@ async function unitValidateSingle(c,item,{publish=true,notify=true}={}){
    deficiencies:[],acceptedPath:state.acceptedPath,validationDelegatedTo:'CLOUDFLARE_WORKER'});
  }
  const workerAttempt=submittedUnitFile(c,phase,u,item);
- strict(workerAttempt.epoch>=Number(state?.claimEpoch??0),
-  'stale Worker claim epoch does not match active unit');
+ const held=['CLAIMED','SUBMITTED'].includes(state?.status);
+ const sameClaim=state?.workerId===workerAttempt.workerId&&
+   Number(state?.claimEpoch)===workerAttempt.epoch&&
+   typeof state?.claimToken==='string'&&state.claimToken.length>0;
+ // Existing in-flight ownership is immutable. A later epoch file alone
+ // does not transfer a claim from a different Worker.
+ strict(!held||sameClaim,
+  'ACTIVE_WORKER_CLAIM_MISMATCH: release or complete the existing claim first');
+ strict(sameClaim||workerAttempt.epoch>Number(state?.claimEpoch??0),
+  'STALE_WORKER_CLAIM_EPOCH: only a new owner claim may advance the epoch');
  const selected=await materializeBoundSubmissionV1(c,u,workerAttempt);
  const actualSha=sha(fs.readFileSync(selected.filename));
  state.status='CLAIMED';state.workerId=selected.workerId;
- state.claimEpoch=selected.epoch;state.claimToken=randomUUID();
+ state.claimEpoch=selected.epoch;
+ if(!sameClaim)state.claimToken=randomUUID();
  writeJson(relative(current.queueRel),current.queue);
  const request={schemaVersion:'curveyield-lite-solo-unit-batch-request-v1',
   requestId:'mi-unit-'+randomUUID(),operation:'SUBMIT',campaignId:c.directory.campaignId,
