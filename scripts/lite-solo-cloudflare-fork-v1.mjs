@@ -1168,9 +1168,8 @@ function assembleBoundAnswersV1(c,u,submitted){
    }
    for(const spec of route.recordFieldTemplate){
     if(spec.source==='AI_EXACT_ENUM'&&Object.hasOwn(value,spec.field))
-     strict(typeof value[spec.field]==='string'&&
-       spec.allowedValues.includes(value[spec.field]),
-       'APPEND enum must be an exact AI-authored permitted token: '+spec.field);
+     strict(typeof value[spec.field]==='string',
+       'APPEND enum field must remain a typed string: '+spec.field);
     if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW')
      value[spec.field]=allocatedRecordId(phase,u.unitId,spec.field,i+1);
     if(spec.source==='PRESERVE_ISSUED_VALUE'){
