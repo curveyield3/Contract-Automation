@@ -280,8 +280,8 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    if(state?.payload?.reviewPolicy==='correctness-verdict-v13'){
      // The v13 security review is function-wide, not individual checklist rows.
      // Every triggered class is tracked under the explicit source-anchored verdict.
-     const assessment={CORRECT:'SUPPORTED',DEFECT:'CONCERN',UNRESOLVED:'UNRESOLVED'}[row.verdict];
-     if(!assessment)throw new Error('accepted v13 discovery row has no correctness verdict');
+     const assessment={CORRECT:'SUPPORTED',DEFECT:'CONCERN',UNRESOLVED:'UNRESOLVED'}[row.verdict]??'UNRESOLVED';
+     // Preserve incomplete accepted work; Worker owns correctness verdicts.
      for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[row.contextId]??[]))
        classMap[classId]=assessment;
      for(const c of arr(row.candidates))
@@ -317,9 +317,9 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
     const c=contextFor(inventory,id);
     if(c?.qualifiedContainer!==review?.contract)continue;
     if(v13){
-     // Source-anchored literal CONSTANT only: immutables and getters must
-     // retain explicit verdict rows even when an optional review exists.
-     if(!qualifiesLiteralTrivialReviewV13({review,context:c,inventory}))continue;
+     // Triviality is a Worker-side assessment; never infer a new
+     // supported security verdict from these optional records.
+     continue;
     }else if(!TRIVIAL_KINDS_V1.has(c.kind))continue;
     for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[id]??[])){
      // Never erase a previously recorded function-wide V13 verdict.
