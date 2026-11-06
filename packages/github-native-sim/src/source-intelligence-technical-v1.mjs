@@ -241,7 +241,10 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
     return cur?.expression?.typeDescriptions?.typeString??cur?.typeDescriptions?.typeString??null;
   }
   function pushCall(edge){
-    const key=[edge.callerFunctionId,edge.targetFunctionId??'',edge.memberOrName??'',edge.sourceLocation??''].join('|');
+    const origin=edge.sourceCallsite;
+    const key=typeof origin?.astSourceSpan==='string'&&/^\d+:\d+:\d+$/.test(origin.astSourceSpan)
+      ? JSON.stringify(['AST_CALL',origin.compilationUnitId,origin.sourcePath,origin.astSourceSpan])
+      : [edge.callerFunctionId,edge.targetFunctionId??'',edge.memberOrName??'',edge.sourceLocation??''].join('|');
     if(callDedup.has(key))return; callDedup.add(key); callGraph.push({...edge,callEdgeId:`CALL-${pad(callGraph.length+1,4)}`});
   }
   function pushExternal(item){
@@ -259,7 +262,10 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
     externalInterfaces.push({...item,externalInterfaceId:`EXT-${pad(externalInterfaces.length+1,4)}`});
   }
   function pushValue(item){
-    const key=[item.callerFunctionId,item.flowKind,item.memberOrName??'',item.sourceLocation??''].join('|');
+    const origin=item.sourceCallsite;
+    const key=typeof origin?.astSourceSpan==='string'&&/^\d+:\d+:\d+$/.test(origin.astSourceSpan)
+      ? JSON.stringify(['AST_VALUE',origin.compilationUnitId,origin.sourcePath,origin.astSourceSpan,item.flowKind])
+      : [item.callerFunctionId,item.flowKind,item.memberOrName??'',item.sourceLocation??''].join('|');
     if(valueDedup.has(key))return; valueDedup.add(key); valueFlowCandidates.push({...item,valueFlowCandidateId:`VALUE-${pad(valueFlowCandidates.length+1,4)}`});
   }
 
@@ -298,7 +304,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
           pushCall({
             callerContractId,callerFunctionId:caller.functionId,targetContractId:target?.contractId??null,targetFunctionId:target?.functionId??null,
             memberOrName:member,callClass,interfaceOrType:interfaceType,sourceLocation:callLoc,confidenceClass:target?'SOLIDITY_AST_REFERENCED_DECLARATION':'SOLIDITY_AST_CALL_SYNTAX',
-            basis:target?'FUNCTION_CALL_REFERENCED_DECLARATION':'FUNCTION_CALL_EXPRESSION'
+            basis:target?'FUNCTION_CALL_REFERENCED_DECLARATION':'FUNCTION_CALL_EXPRESSION',sourceCallsite
           });
           if(externalMemberCall){
             pushExternal({callerContractId,callerFunctionId:caller.functionId,targetContractId:target?.contractId??null,targetFunctionId:target?.functionId??null,
@@ -307,11 +313,11 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
           }
           if(['transfer','transferFrom','safeTransfer','safeTransferFrom','send'].includes(member)){
             pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'TOKEN_OR_NATIVE_TRANSFER_CALL',memberOrName:member,interfaceOrType:interfaceType,
-              sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'TRANSFER_LIKE_MEMBER_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+              sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'TRANSFER_LIKE_MEMBER_CALL',securityInterpretation:'DEFER_TO_REVIEWER',sourceCallsite});
           }
           if(member==='approve'||member==='safeApprove'||member==='forceApprove'){
             pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'TOKEN_APPROVAL_CALL',memberOrName:member,interfaceOrType:interfaceType,
-              sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'APPROVAL_LIKE_MEMBER_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+              sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'APPROVAL_LIKE_MEMBER_CALL',securityInterpretation:'DEFER_TO_REVIEWER',sourceCallsite});
           }
           if(lowLevelMember){
             // When this is already an external member call, it is the same AST expression.
@@ -322,14 +328,16 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
             }
             if(member==='call'){
               pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'LOW_LEVEL_CALL_POTENTIAL_VALUE_TRANSFER',memberOrName:member,interfaceOrType:interfaceType,
-                sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'LOW_LEVEL_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+                sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'LOW_LEVEL_CALL',securityInterpretation:'DEFER_TO_REVIEWER',sourceCallsite});
             }
           }
         } else if(node.nodeType==='NewExpression'){
           const ref=Number.isInteger(node?.typeName?.referencedDeclaration)?node.typeName.referencedDeclaration:null;
           const targetContractId=Number.isInteger(ref)?(contractByAstId.get(`${unit.unitId}:${ref}`)??null):null;
           pushCall({callerContractId,callerFunctionId:caller.functionId,targetContractId,targetFunctionId:null,memberOrName:'new',
-            callClass:'CONTRACT_CREATION',interfaceOrType:node?.typeDescriptions?.typeString??null,sourceLocation:callLoc,confidenceClass:'SOLIDITY_AST_CREATION_SYNTAX',basis:'NEW_EXPRESSION'});
+            callClass:'CONTRACT_CREATION',interfaceOrType:node?.typeDescriptions?.typeString??null,sourceLocation:callLoc,confidenceClass:'SOLIDITY_AST_CREATION_SYNTAX',basis:'NEW_EXPRESSION',
+            sourceCallsite:{compilationUnitId:unit.unitId,sourcePath:sourceName,sourceDigestSha256:source?.sha256??null,
+              astSourceSpan:typeof node.src==='string'?node.src:null,astNodeId:Number.isInteger(node.id)?node.id:null}});
         }
       });
     }
