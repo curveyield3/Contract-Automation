@@ -100,6 +100,34 @@ if(arg.mode!=='finalize'){
    markFinalizationV1({root,campaignPath,phase:5,status:'NOT_STARTED',details:null});
    changed=true;
  }
+ // An accepted Phase-5 work shard reconstruction can omit the transient
+ // request-binding annotations written by an earlier, failed finalizer.
+ // Authenticate every immutable accepted unit before reconciling the
+ // assignment's transient protected-field digest. Never edit unit snapshots.
+ if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
+    Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
+    recorded.finalizeDetails.unmappedDeficiencies.length===1&&
+    Object.values(recorded.units??{}).length>0&&
+    Object.values(recorded.units).every(x=>x.status==='ACCEPTED')){
+  const diagnosis=String(recorded.finalizeDetails.unmappedDeficiencies[0]);
+  const match=diagnosis.match(/^Phase 5 source-bound controller prefill restoration rejected: stored assignment digest ([a-f0-9]{64}) differs from reconstructed ([a-f0-9]{64})$/);
+  if(match){
+   if(directory.currentAssignment.controllerPrefillDigestSha256!==match[1])
+    throw Error('Phase-5 recovery stored digest is not the recorded controller assignment');
+   // This temporarily re-enables ONLY the existing strict immutable-unit
+   // assembler. Any failure aborts without publishing the scratch checkout.
+   markFinalizationV1({root,campaignPath,phase:5,status:'NOT_STARTED',details:null});
+   assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase:5});
+   const restored=secureRestoreWorkFormV13({
+    root,indexRel:directory.currentAssignment.workShardIndexPath
+   });
+   const rebuilt=JSON.parse(restored.content);
+   const actual=refreshControllerPrefillDigest(structuredClone(rebuilt));
+   if(actual!==match[2])throw Error('Phase-5 accepted-unit projection does not match controller failure evidence');
+   directory.currentAssignment.controllerPrefillDigestSha256=actual;
+   changed=true;
+  }
+ }
  // Retry a Phase-5 boundary previously blocked only by the canonical/temp-key
  // alias mismatch. The Phase-5 controller independently revalidates every
  // source-bound machine result before it can seal; this does not waive it.
