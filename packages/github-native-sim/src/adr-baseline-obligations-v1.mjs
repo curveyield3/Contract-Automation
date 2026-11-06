@@ -31,11 +31,16 @@ const explicitV13PriorityEvidence=summary=>{
   const childIdentity=ref.recordIdentity??{},parentIdentity=parent?.recordIdentity??{};
   const classId=childIdentity.classId??parentIdentity.classId;
   const explicitContextIds=arr(childIdentity.contextIds);
+  // A candidate's own context ID takes precedence over broader parent scope.
+  // Parent group context IDs apply only when the child has no authored IDs.
+  const childContextId=typeof childIdentity.contextId==='string'?
+   childIdentity.contextId:null;
   const parentContextIds=arr(parentIdentity.contextIds);
-  const contextIds=explicitContextIds.length?explicitContextIds:parentContextIds;
-  const contextId=childIdentity.contextId??(contextIds.length?null:parentIdentity.contextId);
+  const contextIds=explicitContextIds.length?explicitContextIds:
+   childContextId?[childContextId]:parentContextIds.length?parentContextIds:
+   typeof parentIdentity.contextId==='string'?[parentIdentity.contextId]:[];
   const contract=childIdentity.contract??parentIdentity.contract??null;
-  add(classId,{contextIds,contextId,contract});
+  add(classId,{contextIds,contract});
  }
  for(const record of arr(field(summary,'discoveryState')?.scopedClassAssessments)){
   if(!['CONCERN','UNRESOLVED'].includes(record?.assessment))continue;
