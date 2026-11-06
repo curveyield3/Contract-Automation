@@ -188,8 +188,12 @@ function controllerAcceptedPostSealTestsV1({root,campaignPath}){
 
 export function appendAdrCoverageSectionV1({root,campaignPath,automationRoot,text}={}){
  try{
-  const discovery=read(rootFile(root,campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json'));
+  const summaryRel='work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json';
+  const summaryFile=rootFile(root,campaignPath,summaryRel);
+  const discovery=read(summaryFile);
   if(!discovery)return text;
+  // Cite the immutable accepted source; no original review data is rewritten.
+  const summarySha256=createHash('sha256').update(fs.readFileSync(summaryFile)).digest('hex');
   const inventory=read(repoFile(root,reviewInventoryRelV1(root,campaignPath,'REVIEW_INVENTORY_v1.json')));
   if(!inventory)return text;
   const p6=read(rootFile(root,campaignPath,'derived/phase-6/PHASE_06_CANONICAL_DATA_v1.json'));
@@ -211,6 +215,21 @@ export function appendAdrCoverageSectionV1({root,campaignPath,automationRoot,tex
       +'- Controller receipt references: '+postSeal.receiptPaths.join(', ')+'\n'
       +'- These scenario observations do not automatically establish context-level property PASS or external trust safety.\n'
     : '';
-  return text+'\n## Coverage matrix\n'+renderCoverageMarkdownV1(matrix)+supplement+'\nDetection qualification status: '+status+'\n';
+  const v13=discovery.payload?.discoveryState?.reviewPolicy==='correctness-verdict-v13';
+  const provenance='\n### Original accepted discovery evidence\n'+
+    '- Source: '+path.posix.join(campaignPath,summaryRel)+'\n'+
+    '- SHA-256: '+summarySha256+'\n'+
+    '- Function review: exact AI-authored verdicts in payload.functionVerdicts, including original source selectors.\n'+
+    '- Class assessment: only explicit per-context and separately scoped group/contract records; absent class evidence is not established.\n'+
+    '- Executed properties: distinct qualifying Phase 6 or bounded post-seal machine results, never inferred from function verdicts.\n'+
+    '- Historical class-assessment provenance: '+(v13?'V13_EXPLICIT_ONLY':'NOT_INDEPENDENTLY_VERIFIED')+'\n'+
+    '- CORRECT/DEFECT/UNRESOLVED never implies blanket class support/concern/uncertainty.\n';
+  const execution='\n### Machine evidence limitations\n'+
+    '- Each result applies only to its executed context/class obligation and actual assertion boundaries.\n'+
+    '- Accepted bounded post-seal scenarios do not overwrite individual Phase 6 outcomes.\n'+
+    '- Missing class evidence is a reporting state, not a process blocker or proof of safety.\n';
+  return text+'\n## Evidence coverage matrix\n'+renderCoverageMarkdownV1(matrix)+
+    provenance+execution+supplement+'\nDetection qualification status: '+status+
+    ' (administrative qualification, not security proof)\n';
  }catch{return text;}
 }
