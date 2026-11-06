@@ -202,12 +202,17 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const p8Remediation=derived(8,'PHASE9_REMEDIATION_INPUT_v1.json');
   const p8Final=derived(8,'PHASE10_INPUT_v1.json');
   // Exact original source-bound canonical history, not only condensed summaries.
+  const p1Canonical=canonicalRelFor(campaignPath,1);
   const p4Canonical=canonicalRelFor(campaignPath,4);
   const p5Canonical=canonicalRelFor(campaignPath,5);
   const p6Canonical=canonicalRelFor(campaignPath,6);
   const p9Final=derived(9,'PHASE10_REMEDIATION_INPUT_v1.json');
    const discoverySummary=path.posix.join(campaignPath,
      'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');
+  // Phase 3 receives the complete original Phase 1 canonical evidence, even when
+  // Phase 2 did not promote its D4/D6/D7 leads to requirements or properties.
+  // Preserve Phase 2's derived input and any other immediate inputs as well.
+  if(target===3) return uniqueExisting(root,[p1Canonical,p2,...immediate]);
   if(target===4) return uniqueExisting(root,[p2,p3,discoverySummary]);
   if(target===5) return uniqueExisting(root,[p2,p3,p4,discoverySummary]);
   if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,discoverySummary,buildIdentity,deploy,targets]);
