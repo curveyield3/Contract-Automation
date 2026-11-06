@@ -1225,6 +1225,7 @@ if(sequence===5){
 
 let nextSequence=sequence===10?null:sequence+1;
 let fresh=false;let nextAssignment=null;let nextDerivedInputs=[];
+let automaticPhase7DerivedRels=[];
 let discoveryStarted=false;
 let handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};
 if(sequence===6)nextSequence=8;
@@ -1283,6 +1284,7 @@ if(sequence===6&&!isReassignedV13AuthorityV1({root,authorityRoot})){
   const canonical7={schemaVersion:'curveyield-lite-phase-canonical-data-v1',phase:7,campaignId:directory.campaignId,workSchemaPath:loaded7.rel,workFormPath:form7Rel,finalReportPath:null,actions:form7.actions,generatedAt:now};
   writeJson(repoFile(root,canonical7Rel),canonical7);
   const derived7=buildDerivedOutputs({root,campaignPath,schema:schema7,canonicalData:canonical7,canonicalRel:canonical7Rel,now});
+  automaticPhase7DerivedRels=derived7;
   const markerRevision=masterAmendmentRefreshSha?phaseRevision:1;
   const markerRel=receiptLib.phaseReceiptPath(campaignPath,7,markerRevision);
   const markerEvidence=[receiptRef(root,campaignPath,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,campaignPath,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,campaignPath,x,'DERIVED_DOWNSTREAM_DATA'))];
@@ -1299,7 +1301,7 @@ if(sequence===8&&nextSequence===10){
 directory.lastSealedReceiptPath=sealedReceiptRel;
 if(nextSequence!==null)
   nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:nextSequence,
-    immediate:[...derivedRels,...boundaryArtifactRels]});
+    immediate:[...derivedRels,...automaticPhase7DerivedRels,...boundaryArtifactRels]});
 if(sequence===10){
   directory.campaignStatus=masterAmendmentRefreshSha?'MASTER_AMENDMENT_REFRESH':'COMPLETE';
   directory.currentAssignment=null;directory.updatedAt=now;
