@@ -24,6 +24,13 @@ function findSourceIntelligence(root,campaignPath){
   // When a bundle index exists, ONLY its accepted revision is admissible.
   // An arbitrary lexicographically last JSON may be an unaccepted/stale source.
   if(index){
+    // The bundle must refer to this same admitted Phase-0 source, not merely
+    // to a self-consistent file hash from an unrelated campaign/revision.
+    const phase0=readJsonIf(repoFile(root,path.posix.join(campaignPath,
+      'receipts/PHASE_00_RECEIPT_v1.json')));
+    if(index?.identity?.campaignId!==phase0?.campaign?.campaignId||
+       index?.identity?.campaignGenerationId!==phase0?.campaign?.campaignGenerationId||
+       index?.identity?.sourceDigestSha256!==phase0?.source?.sha256)return null;
     const rel=accepted?.latestAcceptedRevision;
     if(accepted?.status!=='ACCEPTED'||
        typeof rel!=='string'||!/^evidence\/source-intelligence\/SOURCE_INTELLIGENCE_v\d+\.json$/.test(rel)||
@@ -733,6 +740,20 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
   const si=siEntry?.j??null;
   const derived=loadDerived(root,derivedInputPaths);
 
+  if(sequence===1&&!si){
+    // Missing or unverified Source Intelligence cannot silently become an empty
+    // discovered dependency inventory. This is a diagnostic, never a blocker.
+    const indexRel='evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json';
+    const hasIndex=fs.existsSync(repoFile(root,path.posix.join(campaignPath,indexRel)));
+    form.automationInputs.sourceIntelligenceAvailability={
+      status:hasIndex?'ACCEPTED_SOURCE_INTELLIGENCE_NOT_VERIFIABLE':'SOURCE_INTELLIGENCE_v1_UNAVAILABLE',
+      bundleIndexPath:hasIndex?indexRel:null,
+      sourceIdentityVerification:'NOT_ESTABLISHED',
+      implication:'Exact callsite coverage cannot be inferred from missing Source Intelligence.'
+    };
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...form.automationInputs.controllerOwnedAutomationInputs,'sourceIntelligenceAvailability']);
+  }
   if(sequence===1&&si){
     form.automationInputs.structuralInventory={
       securitySurfaces:si.securitySurfaces??[],
