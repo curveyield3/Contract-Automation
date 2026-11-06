@@ -845,12 +845,15 @@ function assembleBoundAnswersV1(c,u,submitted){
   const rows=Array.isArray(submitted.appendRecords)?submitted.appendRecords:[];
   strict(rows.length<=route.appendMaximumRecords,'append exceeds existing controller capacity');
   const fieldDef=schema.actions[route.step]?.fields?.find(x=>x.name===route.field);
-  const permitted=new Set(fieldDef?.itemRequiredFields??[]);
   const keyRoot=JSON.stringify(u.path)+':APPEND-';
   result.entries=rows.map((input,i)=>{
+   const key=keyRoot+String(i+1).padStart(4,'0');
+   // Original REQUIRED_LIST append slots contain literal scalars; record-list
+   // append slots contain fully typed objects, including optional audit fields.
+   if(fieldDef?.type==='REQUIRED_LIST')
+    return {key,value:structuredClone(input)};
    strict(input&&typeof input==='object'&&!Array.isArray(input),'append record is not a typed object');
-   const value={};
-   for(const key of permitted)if(Object.hasOwn(input,key))value[key]=structuredClone(input[key]);
+   const value=structuredClone(input);
    for(const spec of route.recordFieldTemplate){
     if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW')
      value[spec.field]=allocatedRecordId(phase,u.unitId,spec.field,i+1);
@@ -860,7 +863,7 @@ function assembleBoundAnswersV1(c,u,submitted){
      else delete value[spec.field];
     }
    }
-   return {key:keyRoot+String(i+1).padStart(4,'0'),value};
+   return {key,value};
   });
  }else if(['FLOW','ATTACK'].includes(u.kind)){
   const lists=u.kind==='FLOW'?['rows','flowNotes','integrationAnswers','contractChecks']:
