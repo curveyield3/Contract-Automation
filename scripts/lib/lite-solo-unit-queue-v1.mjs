@@ -86,10 +86,10 @@ function prerequisiteEvidence(queue,dependencies){
 const depSatisfied=()=>true;
 const dependenciesFresh=()=>true;
 const isPhase=(p)=>[4,5,6].includes(p);
-const RELEASES=new Set(['lite-solo-v4','lite-solo-v5','lite-solo-v6']);
+const RELEASES=new Set(['machine-intelligence-v1']);
 const authorityFor=directory=>{
-  if(!RELEASES.has(directory.authorityRelease))throw Error('unsupported parallel Lite-Solo release');
-  return 'Audit Skill - Lite-Solo Authority/'+directory.authorityRelease;
+  if(!RELEASES.has(directory.authorityRelease))throw Error('unsupported Machine Intelligence release');
+  return 'Machine Intelligence Audit Controller/Audit Skill v1';
 };
 const rowId=(phase,field,index)=>{
  const families={
@@ -107,7 +107,7 @@ const rowId=(phase,field,index)=>{
 };
 function assertParallelSolo(directory,phase,request=null){
  if(!isPhase(phase)||directory.mode!=='LITE_SOLO'||!RELEASES.has(directory.authorityRelease))
-  throw Error('parallel Lite-Solo controller requires an admitted v4/v5 generation');
+  throw Error('Machine Intelligence parallel controller requires the fork-owned authority');
  if(directory.executionModel!=='PARALLEL_WORKER_UNITS')
   throw Error('campaign is not admitted to parallel execution');
  if(directory.currentAssignment?.phaseSequence!==phase)throw Error('phase not current/assigned');
