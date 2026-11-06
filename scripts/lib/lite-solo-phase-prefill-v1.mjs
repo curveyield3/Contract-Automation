@@ -572,33 +572,95 @@ function obligationIdFor(item,originPhase,index){
   if(raw.startsWith('OBL-')) return raw;
   return 'OBL-P'+String(originPhase)+'-'+safeSegment(raw,'AUTO-'+String(index+1).padStart(3,'0'));
 }
-export function normalizeFormalObligationsIntoLedger({ledger,items=[],originPhase,canonicalRel,now,root=null,authorityRoot=null}){
+// Bind every imported obligation to its EXACT original submitted object,
+// including optional AI source references, proposed validation method and
+// property. Neither normalization nor deduplication is a security judgment.
+export function normalizeFormalObligationsIntoLedger({
+  ledger,items=[],originPhase,canonicalRel,now,root=null,authorityRoot=null,
+  sourceCollectionPath=null,sourceKind=null
+}){
   ledger.obligations??=[];
-  const byId=new Map(ledger.obligations.map((o,i)=>[String(o?.obligationId??''),i]).filter(([id])=>id));
+  const byId=new Map(ledger.obligations.map((o,i)=>[
+    String(o?.obligationId??''),i]).filter(([id])=>id));
   let created=0;
   (Array.isArray(items)?items:[items]).forEach((item,index)=>{
     if(!item||typeof item!=='object'||Array.isArray(item))return;
     if(item.requiredPhase===undefined||!item.requiredAction||!item.completionCondition)return;
-    let requiredPhase=String(item.requiredPhase);
-    if(requiredPhase==='7') requiredPhase='6';
+    const originalRequiredPhase=structuredClone(item.requiredPhase);
+    const originalSubmission=structuredClone(item);
+    const sourceSelector=typeof sourceCollectionPath==='string'&&sourceCollectionPath
+      ?'#/'+sourceCollectionPath.split('.').map(k=>k.replace(/~/g,'~0')
+        .replace(/\//g,'~1')).join('/')+'/'+index:null;
+    const submittedSourceRef={canonicalPath:canonicalRel,
+      originalSourceSelector:sourceSelector,
+      sourceKind:sourceKind??(item.automationGenerated===true?
+        'CONTROLLER_MACHINE_ROUTING':'AI_AUTHORED_PHASE_OUTPUT')};
+    const submittedSourceRefs={
+      originatingEvidenceRefs:structuredClone(item.originatingEvidenceRefs??null),
+      evidenceRefs:structuredClone(item.evidenceRefs??null),
+      sourceRefs:structuredClone(item.sourceRefs??null),
+      sourceAnchor:structuredClone(item.sourceAnchor??null),
+      originFactKeys:structuredClone(item.originFactKeys??null)
+    };
+    const normalizedRefs=uniq([
+      canonicalRel,...evidenceList(item.originatingEvidenceRefs),
+      ...evidenceList(item.evidenceRefs),...evidenceList(item.sourceRefs)
+    ]);
+    const requiredPhase=String(item.requiredPhase)==='7'?'6':String(item.requiredPhase);
     const obligationId=obligationIdFor(item,originPhase,index);
     const existingIndex=byId.get(obligationId);
     if(existingIndex!==undefined){
       const existing=ledger.obligations[existingIndex];
-      existing.originatingFactIds=uniq([...(existing.originatingFactIds??[]),...(item.originFactKeys??item.originatingFactIds??[])]);
-      existing.originatingEvidenceRefs=uniq([...(existing.originatingEvidenceRefs??[]),canonicalRel,...(item.originatingEvidenceRefs??[])]);
+      // Accepted identifiers, original required phase, assigned reviewer,
+      // disposition, closure and author-owned descriptions are not changed by
+      // any later machine routing result or a duplicate import.
+      existing.originatingFactIds=uniq([
+        ...(existing.originatingFactIds??[]),
+        ...(Array.isArray(item.originFactKeys)?item.originFactKeys:
+          Array.isArray(item.originatingFactIds)?item.originatingFactIds:[])
+      ]);
+      existing.originatingEvidenceRefs=uniq([
+        ...(existing.originatingEvidenceRefs??[]),...normalizedRefs
+      ]);
       existing.requiredPhase=existing.requiredPhase??requiredPhase;
-      existing.requiredReviewer=existing.requiredReviewer??reviewerForRequiredPhase(existing.requiredPhase,root,authorityRoot);
+      existing.requiredReviewer=existing.requiredReviewer??
+        reviewerForRequiredPhase(existing.requiredPhase,root,authorityRoot);
       existing.requiredAction=existing.requiredAction??item.requiredAction;
       existing.completionCondition=existing.completionCondition??item.completionCondition;
+      // Add provenance only if historical ledger did not already preserve it.
+      // If an identity is reused for different content, leave the accepted
+      // record intact and expose the exact conflict as data, not as a veto.
+      if(existing.originalSubmittedRecord===undefined){
+        existing.originalSubmittedRecord=originalSubmission;
+        existing.originalSubmittedSourceRef=submittedSourceRef;
+        existing.authorSubmittedSourceRefs=submittedSourceRefs;
+        existing.authorSubmittedRequiredPhase=originalRequiredPhase;
+        existing.authorSubmittedValidationMethod=structuredClone(
+          item.validationMethod??item.recommendedValidationMethod??null);
+        existing.authorSubmittedProperty=structuredClone(
+          item.property??item.propertyOrInvariant??item.propertyStatement??null);
+      }else if(JSON.stringify(existing.originalSubmittedRecord)!==
+                JSON.stringify(originalSubmission)){
+        const collisions=existing.additionalSubmissionConflicts??(
+          existing.additionalSubmissionConflicts=[]);
+        if(!collisions.some(x=>x.sourceRef?.canonicalPath===canonicalRel&&
+            x.sourceRef?.originalSourceSelector===sourceSelector&&
+            JSON.stringify(x.submittedRecord)===JSON.stringify(originalSubmission)))
+          collisions.push({sourceRef:submittedSourceRef,submittedRecord:originalSubmission,
+            status:'DUPLICATE_ID_DIFFERENT_SOURCE_RECORD',
+            dispositionOwner:'CLOUDFLARE_WORKER_OR_MIMO'});
+      }
       existing.updatedAt=now;
       return;
     }
     ledger.obligations.push({
       obligationId,
       originPhase:String(originPhase),
-      originatingFactIds:uniq([...(item.originFactKeys??item.originatingFactIds??[])]),
-      originatingEvidenceRefs:uniq([canonicalRel,...(item.originatingEvidenceRefs??[])]),
+      originatingFactIds:uniq([
+        ...(Array.isArray(item.originFactKeys)?item.originFactKeys:
+          Array.isArray(item.originatingFactIds)?item.originatingFactIds:[])
+      ]),
+      originatingEvidenceRefs:normalizedRefs,
       requiredPhase,
       requiredReviewer:reviewerForRequiredPhase(requiredPhase,root,authorityRoot),
       requiredAction:item.requiredAction,
@@ -608,6 +670,16 @@ export function normalizeFormalObligationsIntoLedger({ledger,items=[],originPhas
       statusReason:null,
       closureEvidenceRefs:[],
       supersedesOrReplaces:[],
+      // Original user/AI-authored source is preserved losslessly even when
+      // the ledger's standard mechanics use normalized IDs/phase strings.
+      originalSubmittedRecord:originalSubmission,
+      originalSubmittedSourceRef:submittedSourceRef,
+      authorSubmittedSourceRefs:submittedSourceRefs,
+      authorSubmittedRequiredPhase:originalRequiredPhase,
+      authorSubmittedValidationMethod:structuredClone(
+        item.validationMethod??item.recommendedValidationMethod??null),
+      authorSubmittedProperty:structuredClone(
+        item.property??item.propertyOrInvariant??item.propertyStatement??null),
       createdAt:now,
       updatedAt:now
     });
@@ -616,6 +688,7 @@ export function normalizeFormalObligationsIntoLedger({ledger,items=[],originPhas
   });
   return created;
 }
+
 export function applyObligationDispositionsToLedger({ledger,canonical,sequence,canonicalRel,now,root=null,authorityRoot=null}){
   ledger.obligations??=[];
   const byId=new Map(ledger.obligations.map(o=>[String(o?.obligationId??''),o]).filter(([id])=>id));
