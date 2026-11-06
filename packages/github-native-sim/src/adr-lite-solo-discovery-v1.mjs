@@ -821,6 +821,14 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   for(const [classId,status] of Object.entries(found).sort(([a],[b])=>sort(a,b)))if(status==='UNRESOLVED')
    add('REVIEWER_UNRESOLVED',[id],null,'Unresolved '+classId,'NO_SUBMISSION',
     [checkSource(id,classId)]);
+ // Explicit SUPPORTED group/contract assessments remain at their authored
+ // scope. Their source identities can be paired with an attacker claim, but
+ // cannot be promoted into independent per-function class conclusions.
+ const scopedSupportedRefs=state?.payload?.reviewPolicy==='correctness-verdict-v13'
+  ?discoverySourceRefs.flatMap((ref,index)=>
+   ref.role==='FLOW'&&['GROUP_CHECK','CONTRACT_CHECK'].includes(ref.sourceCategory)&&
+   ref.recordIdentity?.assessment==='SUPPORTED'?[{ref,index}]:[])
+  :[];
  const relevant=paths.map((attack,index)=>({attack,sourceRef:pathEvidence[index]}))
   .filter(({attack})=>['VIABLE','UNCERTAIN'].includes(attack?.result));
  for(const {attack,sourceRef} of relevant)add('ATTACK_FINDING',
@@ -845,6 +853,12 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
     const functionRef=functionReview?.sourceReference?.index??null;
     const classAssessment=typeof classId==='string'&&classId.length?
      checks.get(c.contextId)?.[classId]:null;
+    const scopedMatches=typeof classId==='string'&&classId.length?
+     scopedSupportedRefs.filter(({ref})=>
+      ref.recordIdentity?.classId===classId&&
+      (ref.sourceCategory==='GROUP_CHECK'
+       ?arr(ref.recordIdentity?.contextIds).includes(c.contextId)
+       :ref.recordIdentity?.contract===c.qualifiedContainer)):[];
     if(classAssessment==='SUPPORTED'){
      // This is an actual class-specific reviewer assertion. Record the
      // conflicting AI observations; the controller does not adjudicate them.
@@ -852,6 +866,23 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
      add('ATTACK_CONTRADICTS_REVIEW',[c.contextId],anchor,'SUPPORTED '+classId,
       attack?.candidate?.description??attack?.goal,
       [sourceRef,checkSource(c.contextId,classId),functionRef]);
+    }else if(scopedMatches.length){
+     // A same-class SUPPORTED claim exists, but only at the accepted GROUP
+     // or CONTRACT scope. Route competing claims as source evidence instead
+     // of fabricating a function-specific ATTACK_CONTRADICTS_REVIEW verdict.
+     const originalScopes=scopedMatches.map(({ref})=>
+      ref.sourceCategory==='GROUP_CHECK'
+       ?'GROUP '+arr(ref.recordIdentity?.contextIds).join(',')
+       :'CONTRACT '+String(ref.recordIdentity?.contract??''));
+     add('ATTACK_SCOPED_CLASS_REVIEW_OVERLAP',[c.contextId],anchor,
+      'Explicit '+classId+' SUPPORTED at original scope: '+originalScopes.join('; ')+
+       '; this does not establish the class for each function',
+      String(attack?.result??'')+' attack path: '+
+       String(attack?.candidate?.description??attack?.goal??''),
+      [sourceRef,...scopedMatches.map(x=>x.index),functionRef]);
+     if(!Number.isInteger(sourceRef)||
+      (functionReview?.verdict==='CORRECT'&&!Number.isInteger(functionRef)))
+      reconciliationEvidenceRefs[items[items.length-1].recordKey].availability='SOURCE_UNAVAILABLE';
     }else if(state?.payload?.reviewPolicy==='correctness-verdict-v13'&&
      functionReview?.verdict==='CORRECT'){
      // Overlap with CORRECT is not a class-level contradiction. Send both
