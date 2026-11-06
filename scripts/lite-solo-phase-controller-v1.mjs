@@ -20,7 +20,7 @@ import {
 import {
   buildControllerPacket,renderControllerPhaseReport,buildCandidateEvidenceContinuityV1,
   phase4CoverageFromForm,phase4DiscoveryCoverageV1,materializeValidatedFindings,
-  refreshControllerPrefillDigest,
+  refreshControllerPrefillDigest,populatePhase9RerunEvidenceRefs,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-solo-phase-prefill-v1.mjs';
 import {MASTER_REVIEW_SEGMENTS_V1,boundReviewerForPhaseV1,segmentsForAuthorityV1,isV13AuthorityV1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
@@ -868,6 +868,19 @@ let deficiencies=[];
 let form=null;
 materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
 form=readJson(requiredFile(root,assignment.workFormPath,'Worker-provided phase work file'));
+
+// Existing controller evidence collector: bind only authenticated Phase-9 rerun
+// files to their precise accepted finding keys. Missing proof stays unresolved;
+// collection issues are diagnostics, never GitHub-side quality vetoes.
+if(sequence===9&&form){
+  try{
+    const gaps=populatePhase9RerunEvidenceRefs({root,campaignPath,form});
+    if(gaps.length)deficiencies.push(...gaps.map(x=>'Phase 9 execution evidence unresolved: '+x));
+    writeJson(repoFile(root,assignment.workFormPath),form);
+  }catch(error){
+    deficiencies.push('Phase 9 authenticated rerun evidence collection unavailable: '+String(error?.message??error));
+  }
+}
 
 if(sequence===5&&form){
   // Preserve the exact Worker-submitted target descriptions; obsolete V7
