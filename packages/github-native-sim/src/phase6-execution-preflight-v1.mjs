@@ -91,6 +91,30 @@ export async function runPhase6ExecutionPreflightV1({
 
   const medusaHarnessPresent = medusaConfigs.length > 0 || propertySources.length > 0;
   const nativeFuzzHarnessPresent = foundryConfigs.length > 0 && solidityTests.length > 0;
+  // No automatic fuzz or invariant campaigns: require a specific authored
+  // property/test with a matching restricted harness configuration.
+  const selectedProperty = request.configuration?.analysis?.medusa?.targetProperty;
+  let medusaTargetGuided = false;
+  if (/^(?:property_|invariant_|echidna_)[A-Za-z0-9_]+$/.test(selectedProperty ?? '')) {
+    try {
+      const config = JSON.parse(await fs.readFile(path.join(projectRoot, 'medusa.json'), 'utf8'));
+      const testing = config?.fuzzing?.testing;
+      medusaTargetGuided = JSON.stringify(testing?.propertyTesting?.testPrefixes) === JSON.stringify([selectedProperty])
+        && testing?.assertionTesting?.enabled === false
+        && testing?.optimizationTesting?.enabled === false;
+    } catch { medusaTargetGuided = false; }
+  }
+  const selectedTest = request.configuration?.analysis?.nativeFuzz?.matchTest;
+  let nativeTestGuided = false;
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(selectedTest ?? '')) {
+    const declaration = new RegExp('\\bfunction\\s+' + selectedTest + '\\s*\\(');
+    for (const file of solidityTests) {
+      if (declaration.test(await fs.readFile(path.join(projectRoot, file), 'utf8'))) {
+        nativeTestGuided = true;
+        break;
+      }
+    }
+  }
   const medusaTechnicallyApplicable = medusaRequested && soliditySources.length > 0;
   const nativeFuzzTechnicallyApplicable = nativeFuzzRequested && (soliditySources.length > 0 || vyperSources.length > 0);
 
@@ -104,6 +128,8 @@ export async function runPhase6ExecutionPreflightV1({
     medusa = { status: 'NOT_APPLICABLE', technicallyApplicable: false, harnessPresent: false, toolInvoked: false, reason: 'NO_SOLIDITY_TARGET_FOR_MEDUSA' };
   } else if (!medusaHarnessPresent) {
     medusa = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: false, toolInvoked: false, reason: 'AUDITOR_MUST_AUTHOR_MEDUSA_HARNESS' };
+  } else if (!medusaTargetGuided) {
+    medusa = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: true, toolInvoked: false, reason: 'AGENT_GUIDED_MEDUSA_PROPERTY_AND_EXCLUSIVE_PREFIX_REQUIRED' };
   } else {
     medusa = { status: 'PENDING_TOOL_CHECK', technicallyApplicable: true, harnessPresent: true, toolInvoked: true, tool: await toolVersion('medusa', { cwd: projectRoot, runCommand }) };
     medusa.status = medusa.tool.available && medusa.tool.exactVersion ? 'READY' : 'BLOCKED_INFRASTRUCTURE';
@@ -116,6 +142,8 @@ export async function runPhase6ExecutionPreflightV1({
     nativeFuzz = { status: 'NOT_APPLICABLE', technicallyApplicable: false, harnessPresent: false, toolInvoked: false, reason: 'NO_SUPPORTED_TARGET_FOR_NATIVE_FUZZ' };
   } else if (!nativeFuzzHarnessPresent) {
     nativeFuzz = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: false, toolInvoked: false, reason: 'AUDITOR_MUST_AUTHOR_FOUNDRY_HARNESS' };
+  } else if (!nativeTestGuided) {
+    nativeFuzz = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: true, toolInvoked: false, reason: 'AGENT_GUIDED_FOUNDRY_NAMED_TEST_REQUIRED' };
   } else {
     nativeFuzz = { status: 'PENDING_TOOL_CHECK', technicallyApplicable: true, harnessPresent: true, toolInvoked: true, tool: await toolVersion('forge', { cwd: projectRoot, runCommand }) };
     nativeFuzz.status = nativeFuzz.tool.available && nativeFuzz.tool.exactVersion ? 'READY' : 'BLOCKED_INFRASTRUCTURE';
