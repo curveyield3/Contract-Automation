@@ -16,8 +16,26 @@ const relfile=(root,rel)=> {
    throw new Error('unsafe shard path');
  return path.join(root,...rel.split('/'));
 };
+// Direct-phase AI-owned arrays may expand; issued-subject arrays remain fixed.
+// Queued Phase 4-6 APPEND ownership is handled by the unit queue.
+const DIRECT_OPEN_ARRAYS_V13={
+  1:{'step-1':['relevantStructuralSurfaces','phase0LimitationsRelevantToPhase1','unresolvedStructuralUncertainties','targetedVerificationNeeds'],
+    'step-2':['protectedAssets','authorityActors','trustBoundaries','stateTransitions','prohibitedOutcomes','semanticRequirements','ambiguities'],
+    'step-3':['dependencyAssessments'],'step-4':['standardsAssessments'],
+    'step-5':['riskDrivers','credibleLossPaths','riskAssumptions'],'step-6':['promotionTriggers','phase1Limitations']},
+  2:{'step-1':['relevantInheritedFacts','inheritedAssumptions','unresolvedPropertyQuestions'],
+    'step-2':['requirements'],'step-3':['propertyDesigns']},
+  3:{'step-1':['attackHypotheses'],'step-2':['customValidationObligations']},
+  8:{'step-1':['candidateGroups']},9:{},10:{'step-2':['assuranceClaims']}
+};
+const mayAppendDirectArrayV13=(phase,step,field)=>
+  [4,5,6].includes(Number(phase)) ||
+  Boolean(DIRECT_OPEN_ARRAYS_V13[phase]?.[step]?.includes(field));
 const recordKey=(pathTokens,value,i)=>{
- const field=['contextId','candidateKey','tempKey','canonicalId','obligationId','findingTempKey','id','key']
+ const field=['contextId','candidateKey','tempKey','canonicalId','obligationId',
+    'findingTempKey','assetKey','actorKey','boundaryKey','transitionKey',
+    'requirementKey','dependencyKey','standardKey','driverKey','groupKey',
+    'findingKey','subjectKey','id','key']
    .find(k=>value&&typeof value==='object'&&!Array.isArray(value)&&typeof value[k]==='string'&&value[k].trim());
  return JSON.stringify(pathTokens)+':'+(field?field+'='+value[field]:String(i));
 };
@@ -26,24 +44,24 @@ const clone=x=>structuredClone(x);
 // Reviewer-authored semantic shards are the sole Lite-Solo work transport.
  // Full-form materialization happens only at the phase controller boundary.
 export function materializeSemanticWorkFormV13({root,formRel}){
- // Machine Intelligence controller is a deterministic JSON packager.
- // All structural/semantic/coverage/prefill validation is the Worker's job.
- // Only the existence and JSON readability of transport files are assumed.
+ // Reconstruct from issued controller descriptors, never mutable index pages.
+ // This is deterministic transport assembly, not a security quality gate.
  const indexRel=path.posix.join(path.posix.dirname(formRel),'shards','INDEX_v1.json');
- const index=secureReadV13(root,indexRel);
+ const working=secureReadV13(root,indexRel);
+ const controllerDir=secureLocationV13(formRel,working.phase);
+ const index=secureReadV13(root,path.posix.join(controllerDir,'INDEX_v1.json'));
  const workDir=path.posix.dirname(indexRel);
  const baseText=fs.readFileSync(relfile(root,path.posix.join(workDir,index.baseFile)),'utf8');
  const full=readSoloLockedBaseV1({root,workDir,baseText}).full;
  for(const pageRef of index.pages||[]){
-  const page=secureReadV13(root,path.posix.join(workDir,pageRef.file));
+  const page=secureReadV13(root,path.posix.join(controllerDir,pageRef.file));
   for(const desc of page.shards||[]){
    const shard=secureReadV13(root,path.posix.join(workDir,desc.file));
    const tokens=Array.isArray(desc.path)?desc.path:[];
    if(!tokens.length)continue;
    let target=full;
    for(const token of tokens.slice(0,-1)){
-    if(target[token]===undefined||target[token]===null||typeof target[token]!=='object')
-      target[token]={};
+    if(target[token]===undefined||target[token]===null||typeof target[token]!=='object')target[token]={};
     target=target[token];
    }
    const field=tokens.at(-1),entries=Array.isArray(shard.entries)?shard.entries:[];
@@ -51,7 +69,20 @@ export function materializeSemanticWorkFormV13({root,formRel}){
     if(entries.length)target[field]=entries[0].value;
    }else{
     const output=Array.isArray(target[field])?target[field]:[];
-    entries.forEach((entry,j)=>{output[(Number(desc.startIndex)||0)+j]=entry.value;});
+    // Fixed shards fill only issued slots; they cannot shift originals or
+    // overwrite entries of separately allocated APPEND shards.
+    const count=desc.append?entries.length:Math.min(entries.length,desc.recordKeys?.length??0);
+    for(let j=0;j<count;j++){
+     let value=entries[j].value;
+     if(!desc.append&&value&&typeof value==='object'&&!Array.isArray(value)){
+      const identity=String(desc.recordKeys[j]??'').match(/^([A-Za-z][A-Za-z0-9_]*)=(.*)$/);
+      if(identity&&identity[2]&&!identity[2].startsWith('<')&&identity[2]!=='TODO'){
+       // Preserve issued subject identity, not a rewrite of its stable key.
+       value={...value,[identity[1]]:identity[2]};
+      }
+     }
+     output[(Number(desc.startIndex)||0)+j]=value;
+    }
     target[field]=output;
    }
   }
@@ -211,7 +242,7 @@ export function secureShardWorkFormV13({root,formRel,phase,retireFull=true}){
        add('array',start,entries);
      }
      // Controller-assigned append positions, never agent-created shard names.
-     add('array',value.length,[],true);
+     if(mayAppendDirectArrayV13(phase,stepName,field))add('array',value.length,[],true);
    }
  }
  const basePages=writeSoloLockedBaseV1({root,workDir,base});
@@ -292,7 +323,7 @@ export function secureRestoreWorkFormV13({root,indexRel}){
    for(const [j,entry] of item.entries.entries()){
      const pos=desc.startIndex+j;
      const expected=desc.append?prefix+'APPEND-'+String(j+1).padStart(4,'0'):prefix+desc.recordKeys[j];
-     const templateIdentity=!desc.append&&/^(tempKey|findingTempKey|candidateKey)=<REQUIRED(?:_OR_EXPLICIT_NEGATIVE)?>$/.test(desc.recordKeys[j]);
+     const templateIdentity=!desc.append&&/^(tempKey|findingTempKey|candidateKey|assetKey|actorKey|boundaryKey|transitionKey|requirementKey|dependencyKey|standardKey|driverKey|groupKey)=<REQUIRED(?:_OR_EXPLICIT_NEGATIVE)?>$/.test(desc.recordKeys[j]);
      const completedTemplateIdentity=templateIdentity&&recordKey(desc.path,entry.value,pos).startsWith(prefix+desc.recordKeys[j].split('=')[0]+'=');
      // Placeholder-keyed optional record slots may be completed with a
      // schema-approved negative sentinel rather than a fabricated finding.
@@ -301,6 +332,7 @@ export function secureRestoreWorkFormV13({root,indexRel}){
      // index zero, keyed "0". When genuinely custom obligations exist, its
      // value becomes a complete named record while the shard key stays fixed.
      // Never relax identity for other prefilled or controller-owned records.
+     const legacyPositionalIdentity=!desc.append&&desc.recordKeys[j]===String(pos);
      const completedCustomObligationStarter=!desc.append&&phase===3&&
        desc.path.join('.')==='actions.step-2.outputs.customValidationObligations'&&
        pos===0&&desc.recordKeys[j]==='0'&&
@@ -312,7 +344,7 @@ export function secureRestoreWorkFormV13({root,indexRel}){
        typeof entry.value.requiredAction==='string'&&entry.value.requiredAction.trim().length>0&&
        typeof entry.value.completionCondition==='string'&&entry.value.completionCondition.trim().length>0&&
        typeof entry.value.priority==='string'&&entry.value.priority.trim().length>0;
-     if(entry.key!==expected||(!desc.append&&!completedTemplateIdentity&&!completedTemplateNegative&&!completedCustomObligationStarter&&recordKey(desc.path,entry.value,pos)!==expected))
+     if(entry.key!==expected||(!desc.append&&!legacyPositionalIdentity&&!completedTemplateIdentity&&!completedTemplateNegative&&!completedCustomObligationStarter&&recordKey(desc.path,entry.value,pos)!==expected))
        throw new Error('v13 mandatory work record key changed: '+desc.file);
      if(positions.has(pos))throw new Error('v13 duplicate work record: '+desc.file);
      const identity=recordKey(desc.path,entry.value,pos);
