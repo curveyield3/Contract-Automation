@@ -564,7 +564,7 @@ export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,a
  const message='CONTROLLER: Phase 4 discovery is complete. Phase 4 is now ACTIVE for lite-solo-agent. Follow currentAssignment.workShardIndexPath and process the indexed editable shards; reconcile every prefilled discovery row using original source evidence when needed. The full DISCOVERY_SUMMARY is a controller input, not a required context dump. Finish Steps 1–3 in one session before one phase boundary request.';
  return {status:'DISCOVERY_COMPLETE',feedbackText:message,summary};
 }
-export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,readyUnitIds=[unitId],now,auditControllerRef='main'}){
+export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,readyUnitIds=[unitId],now,auditControllerRef='machine-intelligence-audit-controller-v1'}){
  const state=known(root,stateRel(campaignPath));
  if(!state)throw new Error('discovery state missing');
  const unitState=state.payload.units[unitId];
