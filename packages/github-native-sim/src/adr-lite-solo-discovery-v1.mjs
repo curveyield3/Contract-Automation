@@ -635,7 +635,6 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    recordCandidate(candidate,[sourceIndex(unitId,'candidates['+i+']')]));
   for(const [rowIndex,row] of arr(submission?.rows).entries()){
    const rowSource=sourceIndex(unitId,'rows['+rowIndex+']');
-   const classMap=checks.get(row.contextId)??{};
    if(state?.payload?.reviewPolicy==='correctness-verdict-v13'){
      // Preserve the complete AI-authored function verdict independently from
      // class assessments. The verdict does not prove every triggered class.
@@ -662,9 +661,10 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
        recordCandidate({...row.candidate,contextIds:[...new Set([...(row.candidate.contextIds??[]),row.contextId])]},
         [sourceIndex(unitId,'rows['+rowIndex+'].candidate'),rowSource]);
    }
-   // V13 correctness verdicts are authoritative for function coverage.
-   // Legacy per-class checklists remain prompts, never verdict overrides.
-   if(state?.payload?.reviewPolicy!=='correctness-verdict-v13')
+   // V13 row.checks are prompts, not accepted class assessments.
+   // Preserve the independently authored per-class responses for legacy rows.
+   if(state?.payload?.reviewPolicy!=='correctness-verdict-v13'){
+    const classMap=checks.get(row.contextId)??{};
     for(const [checkIndex,check] of arr(row?.checks).entries()){
      const checkRef=sourceIndex(unitId,'rows['+rowIndex+'].checks['+checkIndex+']');
      classMap[check.classId]=check.assessment;
@@ -674,7 +674,8 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
       {...check.candidate,contextIds:[row.contextId],classId:check.classId},
       [sourceIndex(unitId,'rows['+rowIndex+'].checks['+checkIndex+'].candidate'),checkRef,rowSource]);
     }
-   checks.set(row.contextId,classMap);
+    checks.set(row.contextId,classMap);
+   }
   }
   // Compact forms expand to the same per-context, per-class records the coverage matrix reads.
   const set=(id,classId,check,sourceRef,sourceParent,sourceCandidate)=>{
