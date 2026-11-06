@@ -429,6 +429,9 @@ async function sourceBoundQuestionHistoryV1(raw){
  try{envelope=JSON.parse(raw);}catch{return null;}
  const live=envelope?.workerResponse??{};
  if(!['LEASED_PACKET','LEASED_SHARD'].includes(live.status))return null;
+ // Index paths and checkpoint revisions can advance AFTER an earlier unit
+ // was accepted. Never use the last claim's cached GitHub file bytes.
+ historyFileCache.clear();
  const phase=Number(live.phase);
  if(!Number.isInteger(phase)||phase<4)return null;
  const directoryRel='Audit Campaign Directory/campaigns/'+
@@ -469,7 +472,8 @@ async function sourceBoundQuestionHistoryV1(raw){
   if(queue?.data?.campaignId!==campaignId||
      queue?.data?.campaignGenerationId!==directory.campaignGenerationId||
      queue?.data?.sourceSha256!==directory.sourceSha256||
-     queue?.data?.authorityDigest!==directory.authorityDigest)continue;
+     queue?.data?.authorityDigest!==directory.authorityDigest||
+     queue?.data?.phaseSequence!==p)continue;
   for(const [unitId,state] of Object.entries(queue.data.units??{}))
    if(state?.status==='ACCEPTED'&&/^[A-Za-z0-9._-]+$/.test(unitId))
     selected.set(p+':'+unitId,{phaseSequence:p,unitId,
@@ -494,6 +498,8 @@ async function sourceBoundQuestionHistoryV1(raw){
      index.authorityDigest!==directory.authorityDigest||
      index.phaseSequence!==item.phaseSequence||
      index.unitId!==item.unitId||
+     (item.ref?.packetSha256&&index.packetSha256!==item.ref.packetSha256)||
+     (item.ref?.phaseEpoch&&index.phaseEpoch!==item.ref.phaseEpoch)||
      !Array.isArray(index.checkpoints)){
    unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
     indexPath,status:'IDENTITY_MISMATCH'});continue;
