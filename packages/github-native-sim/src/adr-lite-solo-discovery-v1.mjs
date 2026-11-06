@@ -553,7 +553,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   JSON.stringify([unitId,(sourcePrefixes.get(unitId)??'submission.')+selector]))??null;
  const uniqueIndexes=indexes=>[...new Set(indexes.filter(Number.isInteger))];
  const candidateEvidence=[],pathEvidence=[],answerEvidence=[],integrationAnswerRefs=[],flowNotes=[],checkEvidence=new Map();
- const functionVerdicts=new Map();
+ const functionVerdicts=new Map(),trivialReviewSubstitutions=[];
  const issuedFlows=arr(plan?.payload?.flows);
  const recordCandidate=(candidate,indexes)=>{
   candidates.push(candidate);candidateEvidence.push(uniqueIndexes(indexes));
@@ -720,6 +720,35 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   const unit=resolveUnit(plan,unitId);
   arr(submission?.trivialReviews).forEach((review,index)=>{
    const selector='trivialReviews['+index+']';
+   if(state?.payload?.reviewPolicy==='correctness-verdict-v13'){
+    // An eligible literal-constant review substitutes for its context row.
+    // It is not a separate assessment of every triggered security class.
+    const qualifiedContextIds=arr(unit?.primaryContextIds).filter(id=>
+     qualifiesLiteralTrivialReviewV13({
+      review,context:contextFor(inventory,id),inventory
+     }));
+    const refIndex=sourceIndex(unitId,selector);
+    const sourceRef=Number.isInteger(refIndex)?discoverySourceRefs[refIndex]:null;
+    trivialReviewSubstitutions.push({
+     unitId,contract:review?.contract??null,
+     qualifiedContextIds,acceptedSubstitution:qualifiedContextIds.length>0,
+     assessment:review?.assessment??null,
+     originalReview:structuredClone(review),
+     sourceReference:{
+      collection:'discoverySourceRefs',index:refIndex,
+      availability:sourceRef?.availability??'SOURCE_UNAVAILABLE',
+      sourceSelector:sourceRef?.sourceSelector??null,
+      originalAnchorsSelector:sourceRef?.originalAnchorsSelector??null,
+      acceptedPath:sourceRef?.acceptedPath??null,
+      acceptedSha256:sourceRef?.acceptedSha256??null
+     }
+    });
+    // Retain any AI-authored nested candidate without inventing class
+    // identity or treating its review as contract-wide proof.
+    recordCheckCandidates(review,unitId,selector);
+    return;
+   }
+   // Preserve historical legacy class-check representation.
    for(const id of arr(unit?.primaryContextIds)){
     const c=contextFor(inventory,id);
     if(!qualifiesLiteralTrivialReviewV13({review,context:c,inventory}))continue;
@@ -820,6 +849,8 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{
   discoverySourceRefs,reconciliationEvidenceRefs,integrationAnswerRefs,flowNotes,
   functionVerdicts:Object.fromEntries([...functionVerdicts.entries()].sort(([a],[b])=>sort(a,b))),
+  ...(state?.payload?.reviewPolicy==='correctness-verdict-v13'
+   ?{trivialReviewSubstitutions}:{}),
   unmappedAttackPathRefs,unmappedAttackPathSources,
   // All candidate origins, including nested ATTACK/integration/check
   // candidates, remain accessible by exact accepted-source selector.
