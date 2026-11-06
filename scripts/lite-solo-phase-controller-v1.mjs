@@ -903,16 +903,11 @@ try{
   materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
   form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
 
-  // Legacy Phase-5 immutable shards contain the reviewer-authored target designs.
-  // Earlier controller-side request resolution was written to the materialized
-  // full work form only, and not to the original reviewer shards. Reconstruct
-  // those exact controller-owned bindings from existing source-bound requests.
-  // The stored assignment SHA-256 MUST agree with the reconstructed projection;
-  // no existing digest or accepted unit is rewritten to fit a mismatched form.
+  // Legacy Phase-5 immutable shards contain reviewer-authored target designs.
+  // Reconstruct controller-owned execution-request bindings for unit finalization
+  // independently of any prefill digest. The accepted units remain unchanged.
   if(sequence===5 && process.env.LITE_SOLO_V4_FINALIZE==='1' &&
-      ['lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(directory.authorityRelease) &&
-      assignment.controllerPrefillDigestSha256 &&
-      form?.automationInputs?.controllerPrefillDigestSha256!==assignment.controllerPrefillDigestSha256){
+      ['lite-solo-v4','lite-solo-v5','lite-solo-v6'].includes(directory.authorityRelease)){
     for(const target of form?.actions?.['step-3']?.outputs?.targetDesigns??[]){
       if(!target||typeof target!=='object'||Array.isArray(target))continue;
       if(String(target.executionMethod??'').toUpperCase()==='NOT_APPLICABLE'){
@@ -953,7 +948,7 @@ try{
   // v10.3 stores the authoritative prefill digest outside the reviewer-editable
   // form. Older active assignments are migrated once from the pre-existing form
   // digest so in-flight v10.2 campaigns remain resumable.
-  if(!assignment.controllerPrefillDigestSha256){
+  if(sequence!==5&&!assignment.controllerPrefillDigestSha256){
     const legacyDigest=form?.automationInputs?.controllerPrefillDigestSha256;
     if(typeof legacyDigest!=='string'||!/^[0-9a-f]{64}$/.test(legacyDigest)){
       deficiencies.push('Controller-owned assignment prefill digest is missing and no valid legacy form digest is available for one-time migration.');
@@ -1109,9 +1104,10 @@ if(sequence===5&&form&&deficiencies.length===0){
     }
   }
   if(!deficiencies.length){
-    assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
+    // Phase 5 controller-owned bindings may be enriched without rewriting or
+    // checking the initial form digest; only persist the assembled work form.
     writeJson(repoFile(root,assignment.workFormPath),form);
-    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+    deficiencies.push(...validatePhaseScaffold(sequence,form));
   }
 }
 

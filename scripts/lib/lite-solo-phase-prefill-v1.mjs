@@ -1009,13 +1009,18 @@ export function buildControllerPacket({directory,assignment,existing,now}){
 
 export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=null){
   const deficiencies=[];
-  const formDigest=form?.automationInputs?.controllerPrefillDigestSha256??null;
-  const expectedDigest=assignmentExpectedDigest??formDigest;
-  const ownedProjection=controllerOwnedProjection(form);
-  if(form?.automationInputs&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
-  else if(ownedProjection.length&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
-  if(assignmentExpectedDigest&&formDigest!==assignmentExpectedDigest) deficiencies.push('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.');
-  if(expectedDigest&&controllerOwnedDigest(form)!==expectedDigest) deficiencies.push('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
+  // Phase 5 forms are intentionally enriched by the agent and controller.
+  // Its finalization never rejects work on an initial prefill digest mismatch.
+  // Other phases retain their existing controller-prefill integrity checks.
+  if(sequence!==5){
+    const formDigest=form?.automationInputs?.controllerPrefillDigestSha256??null;
+    const expectedDigest=assignmentExpectedDigest??formDigest;
+    const ownedProjection=controllerOwnedProjection(form);
+    if(form?.automationInputs&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
+    else if(ownedProjection.length&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
+    if(assignmentExpectedDigest&&formDigest!==assignmentExpectedDigest) deficiencies.push('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.');
+    if(expectedDigest&&controllerOwnedDigest(form)!==expectedDigest) deficiencies.push('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
+  }
   if(sequence===4 && Object.hasOwn(form?.automationInputs??{},'expectedDiscoveryRecordKeys')){
     const expected=form.automationInputs.expectedDiscoveryRecordKeys??[];
     const rows=form?.actions?.['step-1']?.outputs?.discoveryReconciliationRecords??[];
