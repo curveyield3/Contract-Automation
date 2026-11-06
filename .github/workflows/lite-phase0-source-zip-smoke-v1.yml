@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - '.github/smoke-trigger/lite-phase0-source-zip-smoke-v1.json'
+      - 'packages/github-native-sim/inputs/AVKAT_Consolidated_Safe_Module_v2.sol'
   workflow_dispatch:
 
 permissions:
@@ -18,6 +19,7 @@ concurrency:
 
 jobs:
   source-zip-smoke:
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'compile(avkat):')
     name: ${{ matrix.label }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -162,3 +164,71 @@ jobs:
           path: .source-zip-smoke/
           if-no-files-found: warn
           include-hidden-files: true
+
+
+  avkat-source-compile:
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'compile(avkat):')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing pinned Solidity compiler
+        run: npm ci --ignore-scripts
+      - name: Compile standalone AVKAT v2 and calculate creation/runtime limits
+        shell: bash
+        run: |
+          mkdir -p avkat-compile-output
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import solc from 'solc';
+          import crypto from 'node:crypto';
+          const path='packages/github-native-sim/inputs/AVKAT_Consolidated_Safe_Module_v2.sol';
+          const source=fs.readFileSync(path,'utf8');
+          const input={language:'Solidity',sources:{'AVKAT_Consolidated_Safe_Module_v2.sol':{content:source}},
+            settings:{optimizer:{enabled:true,runs:200},viaIR:true,evmVersion:'cancun',
+            outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object']}}}};
+          const output=JSON.parse(solc.compile(JSON.stringify(input)));
+          const diagnostics=(output.errors||[]).map(x=>({severity:x.severity,formattedMessage:x.formattedMessage}));
+          for(const d of diagnostics) console.log(d.formattedMessage);
+          const contracts=output.contracts?.['AVKAT_Consolidated_Safe_Module_v2.sol']||{};
+          const artifacts={};
+          for(const [name,artifact] of Object.entries(contracts)){
+            const creation=artifact.evm?.bytecode?.object||'';
+            const runtime=artifact.evm?.deployedBytecode?.object||'';
+            artifacts[name]={abi:artifact.abi,bytecode:'0x'+creation,deployedBytecode:'0x'+runtime,
+              creationBytes:creation.length/2,runtimeBytes:runtime.length/2,
+              creationLimitBytes:49152,runtimeLimitBytes:24576,
+              creationHeadroomBytes:49152-creation.length/2,runtimeHeadroomBytes:24576-runtime.length/2};
+            console.log('COMPILED_SIZE',JSON.stringify({contract:name,creationBytes:creation.length/2,
+              runtimeBytes:runtime.length/2,creationLimit:49152,runtimeLimit:24576,
+              runtimeHeadroom:24576-runtime.length/2}));
+          }
+          const report={compilerVersion:solc.version(),sha256:crypto.createHash('sha256').update(source).digest('hex'),
+            configuration:input.settings,success:!diagnostics.some(d=>d.severity==='error'),
+            diagnostics,artifacts};
+          fs.writeFileSync('avkat-compile-output/compile-v2.json',JSON.stringify(report,null,2));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            '### AVKAT standalone v2 compile\n\n'+
+            '- Compiler: '+report.compilerVersion+'\n- SHA-256: '+report.sha256+
+            '\n- Success: '+report.success+'\n\n'+
+            Object.entries(artifacts).map(([n,a])=>'- '+n+': creation '+a.creationBytes+
+              '/49152 bytes; runtime '+a.runtimeBytes+'/24576 bytes; runtime headroom '+a.runtimeHeadroomBytes).join('\n')+
+            '\n\n');
+          if(!report.success||!Object.keys(artifacts).length)process.exitCode=1;
+          NODE
+      - name: Archive compilation report and bytecode
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: avkat-consolidated-v2-compilation-${{ github.run_id }}
+          path: avkat-compile-output/compile-v2.json
+          if-no-files-found: warn
+          retention-days: 14
