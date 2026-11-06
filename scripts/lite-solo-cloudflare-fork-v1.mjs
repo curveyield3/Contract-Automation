@@ -721,8 +721,21 @@ function stageUnitsV1(c,source,phase,step,stage){
 }
 function stageAcceptedV1(source,u){
  const state=source.queue.units?.[u.unitId];
- return state?.status==='ACCEPTED'&&typeof state.acceptedPath==='string'&&
-   /^[a-f0-9]{64}$/.test(String(state.acceptedSha256??''));
+ if(state?.status!=='ACCEPTED'||typeof state.acceptedPath!=='string'||
+    !/^[a-f0-9]{64}$/.test(String(state.acceptedSha256??'')))return false;
+ const expectedRoot=source.plan.campaignPath+'/work/phase-'+
+  phaseNo(source.plan.phaseSequence)+'/units/'+u.unitId+'/';
+ if(!state.acceptedPath.startsWith(expectedRoot))return false;
+ try{
+  const record=read(state.acceptedPath);
+  return record?.unitId===u.unitId&&
+   record.campaignGenerationId===source.plan.campaignGenerationId&&
+   record.sourceSha256===source.plan.sourceSha256&&
+   record.authorityDigest===source.plan.authorityDigest&&
+   record.phaseSequence===source.plan.phaseSequence&&
+   record.phaseEpoch===source.plan.phaseEpoch&&
+   record.submissionSha256===state.acceptedSha256;
+ }catch{return false;}
 }
 function eligibleStage(c,source,phase,step,stage){
  // The adapter decides prerequisites; GitHub only sorts unfiled units by stage.
@@ -1278,11 +1291,13 @@ async function unitValidateSingle(c,item,{publish=true,notify=true}={}){
  if(!u)return;
  const state=current.queue.units[id];
  if(state?.status==='ACCEPTED'){
-  if(!state.acceptedPath||!fs.existsSync(relative(state.acceptedPath)))return;
+  if(!stageAcceptedV1(current,u))return;
+  if(Number.isSafeInteger(item.attempt)&&Number.isSafeInteger(state.sourceAttempt)&&
+     item.attempt!==state.sourceAttempt)return;
   if(!notify)return {status:'ACCEPTED',acceptedPath:state.acceptedPath};
   return callback('/fork/unit-verified',{status:'ACCEPTED',
    campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
-   phase,step,stage,unitId:id,attempt:state.attempts,
+   phase,step,stage,unitId:id,attempt:state.sourceAttempt??item.attempt??state.attempts,
    submissionSha256:state.acceptedSha256,sourceCommit,
    phaseEpoch:current.plan.phaseEpoch,authorityDigest:c.directory.authorityDigest,
    deficiencies:[],acceptedPath:state.acceptedPath,validationDelegatedTo:'CLOUDFLARE_WORKER'});
@@ -1307,9 +1322,14 @@ async function unitValidateSingle(c,item,{publish=true,notify=true}={}){
  const result=processUnitRequestV1({root:ROOT,campaignPath:c.campaignPath,
   directory:c.directory,request,automationRoot:process.cwd()});
  writeJson(relative(c.directoryPath),c.directory);
- if(publish)publishCanonical(c);
  const updated=unitPlan(c),record=updated.queue.units[id];
- if(record?.status!=='ACCEPTED')return {status:'PENDING',result};
+ if(record?.status==='ACCEPTED'){
+  record.sourceAttempt=selected.attempt;
+  record.sourceWorkerId=selected.workerId;
+  writeJson(relative(updated.queueRel),updated.queue);
+ }
+ if(publish)publishCanonical(c);
+ if(!stageAcceptedV1(unitPlan(c),u))return {status:'PENDING',result};
  if(!notify)return {status:'ACCEPTED',acceptedPath:record.acceptedPath};
  return callback('/fork/unit-verified',{status:'ACCEPTED',
   campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
@@ -1343,7 +1363,7 @@ async function unitAdvanceAcceptedStage(c){
  return callback('/fork/step-verified',{status:'PASS',
   campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
   phase,step,stage,sourceCommit:need('source_commit'),planSha256,
-  queueSha256:payload.queue_sha256||queueSha256,rosterDigest:payload.roster_digest||'',
+  queueSha256,rosterDigest:payload.roster_digest||'',
   phaseEpoch:current.plan.phaseEpoch,authorityDigest:c.directory.authorityDigest,
   validator:payload.validator,deficiencies:[],stepComplete:done||nextStep!==step,
   completePhase:done,nextStep,nextStage,nextRosterDigest,
@@ -1355,7 +1375,9 @@ async function unitValidateWave(c){
  const sourceCommit=need('source_commit'),current=unitPlan(c);
  // Reuse the single-unit ownership/identity path, reloading queue each time.
  const units=stageUnitsV1(c,current,phase,step,stage)
-  .filter(u=>!stageAcceptedV1(current,u));
+  .filter(u=>!stageAcceptedV1(current,u))
+  .filter(u=>fs.existsSync(relative(c.campaignPath+'/work/phase-'+
+   phaseNo(phase)+'/units/'+u.unitId+'/submissions')));
  for(const u of units)
   await unitValidateSingle(c,{unit_id:u.unitId,source_commit:sourceCommit},
    {publish:false,notify:false});
