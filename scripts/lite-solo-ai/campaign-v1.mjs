@@ -456,7 +456,7 @@ async function historyGithubFileV1(rel){
  // Verify the returned bytes against Git's committed blob identity as well
  // as the SHA-256 used by original canonical and question receipts.
  const gitBlobSha=createHash('sha1').update(Buffer.concat([
-  Buffer.from('blob '+bytes.length+'\\0'),bytes])).digest('hex');
+  Buffer.from('blob '+bytes.length),Buffer.from([0]),bytes])).digest('hex');
  if(gitBlobSha!==data.sha)
   throw Error('Pinned controller Git blob digest mismatch: '+rel);
  const file={path:rel,sha256:sha(bytes),gitBlobSha,text:bytes.toString('utf8'),
