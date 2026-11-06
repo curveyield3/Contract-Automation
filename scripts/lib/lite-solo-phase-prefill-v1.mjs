@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {detectionPolicyForAuthorityV1} from '../../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {classifyDeploymentExecutionV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {boundReviewerForPhaseV1 as originalReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
-const boundReviewerForPhaseV1=({authorityRoot,...params})=>[ 'Audit Skill - Lite-Solo Authority/lite-solo', 'Audit Skill - Lite-Solo Authority/lite-solo-v2', 'Audit Skill - Lite-Solo Authority/lite-solo-v3', 'Audit Skill - Lite-Solo Authority/lite-solo-v4', 'Audit Skill - Lite-Solo Authority/lite-solo-v5', 'Audit Skill - Lite-Solo Authority/lite-solo-v6' ].includes(authorityRoot)?'lite-solo-agent':originalReviewerForPhaseV1({authorityRoot,...params});
+const boundReviewerForPhaseV1=({authorityRoot,...params})=>authorityRoot==='Machine Intelligence Audit Controller/Audit Skill v1'?'lite-solo-agent':originalReviewerForPhaseV1({authorityRoot,...params});
 
 function repoFile(root,rel){return path.join(root,...String(rel).split('/'));}
 function readJsonIf(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
@@ -633,7 +633,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     if(priorRows.length)form.actions['step-2'].outputs.reconciliationRecords=priorRows;
     // v4: freeze candidate-specific target record ownership before any worker claim.
     // Reconciliation retains original candidate key; later new candidates use authorized append slots.
-    if(['Audit Skill - Lite-Solo Authority/lite-solo-v4','Audit Skill - Lite-Solo Authority/lite-solo-v5'].includes(authorityRoot)){
+    if(authorityRoot==='Machine Intelligence Audit Controller/Audit Skill v1'){
       const templates=form.actions?.['step-3']?.outputs?.targetDesigns??[];
       const model=templates.find(x=>x&&typeof x==='object'&&!Array.isArray(x));
       const keys=[...new Set(priorCandidates.filter(x=>x&&typeof x==='object'&&!Array.isArray(x))
