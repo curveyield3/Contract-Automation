@@ -1111,11 +1111,19 @@ function canonicalHistoryModelContextV1(history){
   historyAvailability:manifest.availability??'UNAVAILABLE',
   originalSourceCount:(manifest.rosters??[]).length,
   inlinePageCount:initialOriginalPages.length,
-  initialPagesAreExhaustive:initialOriginalPages.length===(manifest.rosters??[]).length&&
+  initialPagesAreExhaustive:manifest.availability==='COLLECTED_NONBLOCKING'&&
+   !(manifest.unavailable??[]).length&&
+   initialOriginalPages.length===(manifest.rosters??[]).length&&
    [...(history?.sources?.values()??[])].every(s=>s.pages.length===1),
   initialOriginalPages,
   retrievalInterface:{
    responseFormat:'Return a JSON object containing ONLY originalCanonicalEvidenceRequest for a local history read. Do not include route, request, or Worker commands in the same object.',
+   exampleFirstRead:{originalCanonicalEvidenceRequest:{kind:'ROSTER_INDEX',start:0}},
+   exampleOriginalSourcePage:{originalCanonicalEvidenceRequest:{
+    kind:'CANONICAL_PAGE',referenceKey:'<exact referenceKey from rosters>',page:1}},
+   exampleOriginalRecord:{originalCanonicalEvidenceRequest:{
+    kind:'RECORD',referenceKey:'<exact referenceKey from rosters>',
+    selector:'/actions/step-1/outputs/<original field>/0',offset:0}},
    originalSourceRoster:{kind:'ROSTER_INDEX',start:0},
    unavailableHistory:{kind:'UNAVAILABLE_INDEX',start:0},
    sourcePointers:{kind:'SELECTOR_INDEX',referenceKey:'<referenceKey from rosters>',start:0},
@@ -1131,11 +1139,17 @@ function canonicalHistoryModelContextV1(history){
 function modelLocalEvidenceReadV1(raw,canonicalHistory,phase1Evidence){
  let answer;
  try{answer=JSON.parse(raw);}catch{return null;}
- if(!answer||typeof answer!=='object'||Array.isArray(answer)||
-    Object.hasOwn(answer,'route')||Object.hasOwn(answer,'request'))return null;
+ if(!answer||typeof answer!=='object'||Array.isArray(answer))return null;
  const hasHistory=Object.hasOwn(answer,'originalCanonicalEvidenceRequest');
  const hasPhase1=Object.hasOwn(answer,'sourceEvidenceRequest');
  if(!hasHistory&&!hasPhase1)return null;
+ // Even a malformed mixed command must stay in the local evidence dialogue
+ // and may NEVER be forwarded as a Worker process/submit attempt.
+ if(Object.hasOwn(answer,'route')||Object.hasOwn(answer,'request'))return {
+  schemaVersion:'curveyield-mi-local-evidence-read-v1',
+  availability:'LOCAL_EVIDENCE_REQUEST_MIXED_WITH_WORKER_ACTION',
+  instruction:'Send ONLY one evidence-read JSON object, then send a separate Worker route/request after source retrieval.'
+ };
  if(hasHistory&&hasPhase1)return {
   schemaVersion:'curveyield-mi-local-evidence-read-v1',
   availability:'MULTIPLE_EVIDENCE_FAMILIES_REQUESTED',
@@ -1497,8 +1511,8 @@ while(true){
     originalTextPreserved:true,privateContent:'MODEL_INPUT_ONLY'}));
   }
   // Independently retrieve ORIGINAL accepted canonical records at the same
-  // committed snapshot as the checkpoint family. Step 4 will reconstruct
-  // model-facing delivery; these verified records stay private to this bridge.
+  // committed snapshot as the checkpoint family, then send source-bound
+  // navigation and original content into the actual model dialogue.
   activeCanonicalHistory=await sourceBoundCanonicalHistoryV1(workerResponse)
    .catch(error=>({manifest:{
     schemaVersion:'curveyield-mi-original-canonical-history-v1',
