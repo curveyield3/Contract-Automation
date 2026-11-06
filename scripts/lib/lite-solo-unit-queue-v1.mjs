@@ -42,6 +42,26 @@ const rootOf=(campaign,phase)=>path.posix.join(campaign,'work/phase-'+String(pha
 const queueRel=(campaign,phase)=>path.posix.join(rootOf(campaign,phase),'UNIT_QUEUE_STATE_v1.json');
 const planRel=(campaign,phase)=>path.posix.join(rootOf(campaign,phase),'UNIT_PLAN_INDEX_v1.json');
 const unitBase=(campaign,phase,id)=>path.posix.join(rootOf(campaign,phase),id);
+// Question histories are written directly to the isolated Audit-Controller branch by
+// the authenticated fork Worker in bounded GitHub checkpoints, never by per-question
+// Actions runs. This optional reference is packaging metadata, NOT a quality gate.
+function questionLedgerReferenceV1({root,campaign,phase,unitId,directory}){
+ const rel=path.posix.join(unitBase(campaign,phase,unitId),'questions/QUESTION_INDEX_v1.json');
+ try{
+  const file=repoFile(root,rel);
+  if(!fs.existsSync(file))return null;
+  const raw=fs.readFileSync(file),index=JSON.parse(raw.toString('utf8'));
+  if(index.schemaVersion!=='curveyield-ai-question-index-v1'||
+    index.campaignId!==directory.campaignId||
+    index.campaignGenerationId!==directory.campaignGenerationId||
+    index.sourceSha256!==directory.sourceSha256||
+    index.authorityDigest!==directory.authorityDigest||
+    index.phaseSequence!==phase||index.unitId!==unitId)return null;
+  return {indexPath:rel,indexSha256:hex(raw),revision:index.revision,
+   questionCount:index.questions?.length??0,answeredCount:index.answeredCount??0,
+   status:index.status??'UNKNOWN'};
+ }catch{return null;} // Never turn an optional history into a GitHub-side process stop.
+}
 const asArray=x=>Array.isArray(x)?x:[];
 const isObject=x=>x&&typeof x==='object'&&!Array.isArray(x);
 const clone=x=>structuredClone(x);
@@ -608,6 +628,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
   'ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
  const acceptedRel=path.posix.join(unitBase(campaign,phase,u.unitId),
   'ACCEPTED_ATTEMPT_'+String(state.attempts).padStart(3,'0')+'_v1.json');
+ const questionLedger=questionLedgerReferenceV1({root,campaign,phase,unitId:u.unitId,directory});
  put(root,acceptedRel,{schemaVersion:'curveyield-lite-solo-accepted-unit-v1',unitId:u.unitId,
   campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
   authorityDigest:directory.authorityDigest,phaseSequence:phase,phaseEpoch:request.phaseEpoch,
@@ -616,6 +637,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
   prerequisiteEvidence:prerequisiteEvidence(queue,u.dependencies),
   submission:batchOutcome?.assembledSubmission??submission,
   ...(batchOutcome?.recordEvidenceRefs?{recordEvidenceRefs:batchOutcome.recordEvidenceRefs}:{}),
+  ...(questionLedger?{questionLedger}:{}),
   validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false});
  state.status='ACCEPTED';state.acceptedSha256=digest;state.acceptedPath=acceptedRel;state.lastErrors=[];
  put(root,resultRel,{unitId:u.unitId,status:'ACCEPTED',submissionSha256:digest,
