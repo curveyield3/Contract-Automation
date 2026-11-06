@@ -5,7 +5,6 @@ on:
     paths:
       - '.github/workflows/katana-cyavkat-v25-end-to-end-v1.yml'
       - 'process/avkat-fork-simulation-v1/**'
-      - 'process/avkat-fork-simulation-v1/**'
   workflow_dispatch:
     inputs:
       source_url:
@@ -18,7 +17,6 @@ permissions:
 
 jobs:
   fork-deployment:
-    if: github.ref == 'refs/heads/main'
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -339,60 +337,3 @@ jobs:
             process/avkat-fork-simulation-v1/out/
           if-no-files-found: warn
           retention-days: 14
-
-  avkat-v7-fork-simulation:
-    if: github.ref == 'refs/heads/avkat-v7-fork-sim-20261105'
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    permissions:
-      contents: read
-    env:
-      KATANA_RPC_URL: ${{ secrets.RPC_KATANA }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: stable
-      - name: Run isolated Katana fork simulation and preserve individual function results
-        shell: bash
-        working-directory: process/avkat-fork-simulation-v1
-        run: |
-          set -uo pipefail
-          rpc="${KATANA_RPC_URL:-https://katana.drpc.org/}"
-          mkdir -p reports
-          echo "::add-mask::$rpc"
-          forge test --fork-url "$rpc" --use 0.8.30 --via-ir --optimize --optimizer-runs 200 -vvv --json > reports/test-results.json 2> reports/stderr.log
-          rc=$?
-          python3 - <<'PY'
-          import json,pathlib
-          folder=pathlib.Path('reports')
-          raw=(folder/'test-results.json').read_text()
-          try: data=json.loads(raw)
-          except Exception:
-              (folder/'status.md').write_text('# AVKAT v7 fork simulation\n\nCompiler or runner failure; no per-test verdicts.\n\n'+(folder/'stderr.log').read_text()[-12000:]+'\n')
-              print((folder/'status.md').read_text())
-              raise SystemExit(2)
-          results=[]
-          for suite,entry in data.items():
-              if not isinstance(entry,dict):continue
-              for func,v in (entry.get('test_results') or {}).items():
-                  results.append(dict(suite=suite,function=func,status=v.get('status','unknown'),reason=v.get('reason',''),gas=v.get('gas_used')))
-          totals={k:sum(1 for z in results if z['status']==k) for k in sorted(set(z['status'] for z in results))}
-          out=['# AVKAT v7 Katana fork simulation','',f"Results: {len(results)}",f"Status counts: {totals}",'','| Function scenario | Status | Reason |','|---|---|---|']
-          for z in sorted(results,key=lambda x:x['function']):
-              reason=str(z['reason'] or '').replace('|','/')[:170]
-              out.append(f"| `{z['function']}` | {z['status']} | {reason} |")
-          (folder/'status.md').write_text('\n'.join(out)+'\n')
-          (folder/'status.json').write_text(json.dumps({'results':results,'totals':totals},indent=2))
-          print((folder/'status.md').read_text())
-          PY
-          exit "$rc"
-      - name: Archive fork-only pass/fail matrix and diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: avkat-v7-katana-fork-sim-report
-          path: |
-            process/avkat-fork-simulation-v1/reports/
-          if-no-files-found: warn
-          retention-days: 7
