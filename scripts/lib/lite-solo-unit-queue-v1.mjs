@@ -365,13 +365,14 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
   // Controller-owned machine-derived limitation/omission fields are not worker-editable.
   if(phase===6&&['typedExecutionLimitations','fullOnlyOmissions'].includes(field))continue;
   const slab=read(root,path.posix.join(dir,d.file));
+  const slabPacketSha256=hex(fs.readFileSync(repoFile(root,path.posix.join(dir,d.file))));
   if(d.append){
    const id=nextId(field),ownership=dot([...d.path,'APPEND']);
    if(plan.recordOwnership[ownership])throw Error('duplicate canonical append owner: '+ownership);
    plan.recordOwnership[ownership]=id;
    const unit={unitId:id,kind:'APPEND',field,shardFile:d.file,shardIndex:0,
     shardPath:path.posix.join(dir,d.file),
-    packetSha256:hex(fs.readFileSync(repoFile(root,path.posix.join(dir,d.file)))),
+    packetSha256:slabPacketSha256,
     recordKeys:[],path:d.path,dependencies:[],unitSpecRevision:1};
    addUnit(plan,queue,unit);continue;
   }
@@ -382,7 +383,7 @@ function addShardUnits({root,campaignPath,directory,phase,plan,queue}){
    plan.recordOwnership[ownership]=id;
    addUnit(plan,queue,{unitId:id,kind:'SHARD',field,shardFile:d.file,
     shardPath:path.posix.join(dir,d.file),
-    packetSha256:hex(fs.readFileSync(repoFile(root,path.posix.join(dir,d.file)))),
+    packetSha256:slabPacketSha256,
     shardIndex:n,recordIndex:d.startIndex+n,
     recordKeys:[entry.key],initialValue:entry.value,path:d.path,
     dependencies:[],unitSpecRevision:1});
