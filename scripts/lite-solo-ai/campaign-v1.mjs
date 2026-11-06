@@ -1256,27 +1256,31 @@ function canonicalHistoryModelContextV1(history){
   }
  };
 }
-function modelLocalEvidenceReadV1(raw,canonicalHistory,phase1Evidence){
+function modelLocalEvidenceReadV1(raw,canonicalHistory,phase1Evidence,questionHistory){
  let answer;
  try{answer=JSON.parse(raw);}catch{return null;}
  if(!answer||typeof answer!=='object'||Array.isArray(answer))return null;
  const hasHistory=Object.hasOwn(answer,'originalCanonicalEvidenceRequest');
  const hasPhase1=Object.hasOwn(answer,'sourceEvidenceRequest');
- if(!hasHistory&&!hasPhase1)return null;
- // Even a malformed mixed command must stay in the local evidence dialogue
- // and may NEVER be forwarded as a Worker process/submit attempt.
+ const hasQuestion=Object.hasOwn(answer,'questionHistoryEvidenceRequest');
+ const familyCount=Number(hasHistory)+Number(hasPhase1)+Number(hasQuestion);
+ if(!familyCount)return null;
+ // Even a malformed command containing a read and a Worker action remains
+ // local and can never be mistaken for an authorized work submission.
  if(Object.hasOwn(answer,'route')||Object.hasOwn(answer,'request'))return {
   schemaVersion:'curveyield-mi-local-evidence-read-v1',
   availability:'LOCAL_EVIDENCE_REQUEST_MIXED_WITH_WORKER_ACTION',
-  instruction:'Send ONLY one evidence-read JSON object, then send a separate Worker route/request after source retrieval.'
+  instruction:'Send ONLY one local evidence-read JSON object; send the separate original Worker route/request after source retrieval.'
  };
- if(hasHistory&&hasPhase1)return {
+ if(familyCount!==1)return {
   schemaVersion:'curveyield-mi-local-evidence-read-v1',
   availability:'MULTIPLE_EVIDENCE_FAMILIES_REQUESTED',
-  instruction:'Submit one local source-read family per JSON object.'
+  instruction:'Submit one local original source-read family per JSON object.'
  };
  if(hasHistory)return canonicalHistoryEvidenceReadV1(
   canonicalHistory,answer.originalCanonicalEvidenceRequest);
+ if(hasQuestion)return questionHistoryEvidenceReadV1(
+  questionHistory,answer.questionHistoryEvidenceRequest);
  return sourceEvidenceRequestV1(raw,phase1Evidence);
 }
 
