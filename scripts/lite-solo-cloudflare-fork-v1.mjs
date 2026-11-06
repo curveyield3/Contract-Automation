@@ -10,6 +10,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {readJson, writeJson, repoFile, loadPhaseSchema, validateBoundAuthorityV1, EXPLICIT_NEGATIVES} from './lib/lite-solo-phase-work-v1.mjs';
 import {readUnitPacketIndexV1, readUnitPacketV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
+import {qualifiesLiteralTrivialReviewV13} from '../packages/github-native-sim/src/adr-discovery-validators-v1.mjs';
 import {processUnitRequestV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
 import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
@@ -856,6 +857,37 @@ function checkMachineAnswerLiteralV1(spec,value){
  }
 }
 
+function checkExtraDiscoveryRecordsV1(field,records){
+ strict(Array.isArray(records),field+' must be an array of typed records');
+ const obj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
+ const nonempty=v=>typeof v==='string'&&Boolean(v.trim());
+ const anchors=v=>Array.isArray(v)&&v.every(nonempty);
+ for(const row of records){
+  strict(obj(row),'discovery '+field+' must contain objects, not literals');
+  if(field==='trivialReviews')
+   strict(nonempty(row.contract)&&
+    ['SUPPORTED','CONCERN','UNRESOLVED','NOT_APPLICABLE'].includes(row.assessment)&&
+    nonempty(row.evidence)&&anchors(row.anchors),
+    'trivialReviews need contract, assessment, evidence and typed source anchors');
+  else if(field==='groupChecks')
+   strict(Array.isArray(row.contextIds)&&row.contextIds.every(nonempty)&&
+    nonempty(row.classId)&&
+    ['SUPPORTED','CONCERN','UNRESOLVED','NOT_APPLICABLE'].includes(row.assessment)&&
+    nonempty(row.evidence)&&anchors(row.anchors),
+    'groupChecks need context identities, class, assessment and source evidence');
+  else if(field==='candidates')
+   strict(nonempty(row.title)&&nonempty(row.description)&&
+    nonempty(row.classId)&&
+    ['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(row.severity)&&
+    anchors(row.anchors),
+    'discovery candidates need title, description, class, severity and typed anchors');
+  else if(field==='attackPaths')
+   strict(Array.isArray(row.flowIds)&&row.flowIds.every(nonempty)&&
+    ['BLOCKED','VIABLE','UNCERTAIN'].includes(row.result)&&
+    nonempty(row.role),
+    'additional attackPaths need flow IDs, result and actor role');
+ }
+}
 function machineAnswerDirectoryV1(u,template,routing){
  const fields=[],id=(a,b,c)=>JSON.stringify([a,b,c]);
  const push=(collection,subject,field,type,choices)=>{
@@ -1097,11 +1129,15 @@ function assembleBoundAnswersV1(c,u,submitted){
       structuredClone(a.value);
    }
   }
-  const extras=submitted.extraRecords&&typeof submitted.extraRecords==='object'?
-   submitted.extraRecords:{};
+  strict(submitted.extraRecords===undefined||
+   (submitted.extraRecords!==null&&typeof submitted.extraRecords==='object'&&
+    !Array.isArray(submitted.extraRecords)),
+   'extraRecords must be a typed object');
+  const extras=submitted.extraRecords??{};
   for(const field of (u.kind==='FLOW'?['trivialReviews','groupChecks','candidates']:
    ['attackPaths'])){
-   const additional=Array.isArray(extras[field])?extras[field]:[];
+   const additional=extras[field]===undefined?[]:extras[field];
+   checkExtraDiscoveryRecordsV1(field,additional);
    if(field==='attackPaths'){
     const allowed=new Set(route.fixedRecordKeys[0].records.flatMap(x=>x.key));
     for(const row of additional){
@@ -1126,16 +1162,16 @@ function assembleBoundAnswersV1(c,u,submitted){
    strict([...chosen].every(id=>eligible.has(id)),
     'trivial row substitution can name only controller-eligible literal contexts');
    const packet=readUnitPacketV1({root:ROOT,packetPath:safePath(u.packetPath)});
-   const owners=new Map((packet.payload?.primaryContexts??[])
-    .map(x=>[x.contextId,x.qualifiedContainer]));
-   // A source-approved literal row can be replaced only by an actual
-   // source-anchored contract review. The existing V13 validator decides the
-   // adequacy of that review; the assembler only avoids duplicate rows.
+   const inventory=read(safePath(packet.payload.sourceInventoryPath));
+   const contexts=new Map((inventory.payload?.contexts??[])
+    .map(x=>[x.contextId,x]));
+   // Use the identical source-bound V13 qualifier as the validator and
+   // summary, so a missing or unanchored claim never silently omits a row.
    result.rows=result.rows.filter(row=>!chosen.has(row.contextId)||
-    !(result.trivialReviews??[]).some(x=>x.contract===owners.get(row.contextId)&&
-      x.assessment==='SUPPORTED'&&
-      typeof x.evidence==='string'&&x.evidence.trim()&&
-      Array.isArray(x.anchors)&&x.anchors.length>0));
+    !(result.trivialReviews??[]).some(review=>
+      qualifiesLiteralTrivialReviewV13({
+       review,context:contexts.get(row.contextId),inventory
+      })));
   }
  }else throw Error('unsupported issued unit kind');
  return result;
