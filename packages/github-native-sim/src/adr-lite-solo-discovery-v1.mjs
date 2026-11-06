@@ -866,11 +866,23 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    originalRecordSelector:ref.sourceSelector??null
   };
  });
- const discoveryState={reviewChecks:Object.fromEntries([...checks.entries()]),gaps,attackContradictions:contradictions};
+ const verdictRecords=Object.fromEntries([...functionVerdicts.entries()].sort(([a],[b])=>sort(a,b)));
+ const discoveryState={reviewChecks:Object.fromEntries([...checks.entries()]),gaps,attackContradictions:contradictions,
+  ...(state?.payload?.reviewPolicy==='correctness-verdict-v13'?{
+   reviewPolicy:'correctness-verdict-v13',
+   // Carry only source-bound function review identity into the coverage ledger.
+   // Complete AI evidence remains available as functionVerdicts in the summary.
+   functionVerdicts:Object.fromEntries(Object.entries(verdictRecords).map(([id,record])=>
+    [id,{verdict:record.verdict,sourceReference:record.sourceReference}])),
+   trivialReviewSubstitutions:trivialReviewSubstitutions.map(review=>({
+    unitId:review.unitId,qualifiedContextIds:review.qualifiedContextIds,
+    acceptedSubstitution:review.acceptedSubstitution,sourceReference:review.sourceReference
+   }))
+  }:{})};
  const coverage=buildCoverageMatrixV1({inventory,taxonomy,discoveryState});
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{
   discoverySourceRefs,reconciliationEvidenceRefs,integrationAnswerRefs,flowNotes,
-  functionVerdicts:Object.fromEntries([...functionVerdicts.entries()].sort(([a],[b])=>sort(a,b))),
+  functionVerdicts:verdictRecords,
   ...(state?.payload?.reviewPolicy==='correctness-verdict-v13'
    ?{trivialReviewSubstitutions,contractLevelFindings}:{}),
   unmappedAttackPathRefs,unmappedAttackPathSources,
