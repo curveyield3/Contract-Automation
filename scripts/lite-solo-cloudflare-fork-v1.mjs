@@ -761,11 +761,22 @@ function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
     // Existing same-unit evidence channel makes the original immutable Worker
      // file available to the reconciliation agent along with its work row.
      evidenceRefs:[...(u.packetIndexPath?[u.packetIndexPath]:[]),questionQueuePath,
-      ...(u.members??(u.kind==='SHARD'?[u]:[]))
-       .map(member=>member?.initialValue?.unmappedAttackEvidenceRef)
-       .filter(ref=>ref?.originalWorkerAttempt?.availability==='AVAILABLE'&&
-        typeof ref.originalWorkerAttempt.path==='string')
-       .map(ref=>ref.originalWorkerAttempt.path)
+      // One full summary reference for each unit, not thousands of repeated
+      // source records. The agent follows exact selectors when relevant.
+      ...([4,5,6,8,10].includes(Number(c.directory.currentAssignment.phaseSequence))?
+       [path.posix.join(c.campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')]
+        .filter(rel=>fs.existsSync(relative(rel))):[]),
+      ...(u.members??(u.kind==='SHARD'?[u]:[])).flatMap(member=>{
+        const value=member?.initialValue??{};
+        const refs=[...(Array.isArray(value.discoveryEvidenceRefs)?value.discoveryEvidenceRefs:[]),
+          value.unmappedAttackEvidenceRef].filter(Boolean);
+        return refs.flatMap(ref=>[
+          ref.availability==='AVAILABLE'?ref.acceptedPath:null,
+          ref.originalWorkerAttempt?.availability==='AVAILABLE'?
+           ref.originalWorkerAttempt.path:null
+        ]).filter(rel=>typeof rel==='string'&&
+          rel.startsWith(c.campaignPath+'/')&&fs.existsSync(relative(rel)));
+      })
      ].filter((value,index,list)=>list.indexOf(value)===index),
     questionHistoryRosterRef:{phaseSequence:c.directory.currentAssignment.phaseSequence,
      queuePath:questionQueuePath,readOnly:true,qualityValidation:false},

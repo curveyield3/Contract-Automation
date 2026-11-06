@@ -206,13 +206,15 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const p5Canonical=canonicalRelFor(campaignPath,5);
   const p6Canonical=canonicalRelFor(campaignPath,6);
   const p9Final=derived(9,'PHASE10_REMEDIATION_INPUT_v1.json');
-  if(target===4) return uniqueExisting(root,[p2,p3]);
-  if(target===5) return uniqueExisting(root,[p2,p3,p4]);
-  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,buildIdentity,deploy,targets]);
-  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,p7,buildIdentity,deploy,targets]);
+   const discoverySummary=path.posix.join(campaignPath,
+     'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');
+  if(target===4) return uniqueExisting(root,[p2,p3,discoverySummary]);
+  if(target===5) return uniqueExisting(root,[p2,p3,p4,discoverySummary]);
+  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,discoverySummary,buildIdentity,deploy,targets]);
+  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,p7,discoverySummary,buildIdentity,deploy,targets]);
   if(target===9) return uniqueExisting(root,[p8Remediation,remediation]);
   if(target===10) return uniqueExisting(root,[
-    p4Canonical,p5Canonical,p6Canonical,p8Final,p9Final,finalIndex
+    p4Canonical,p5Canonical,p6Canonical,p8Final,p9Final,finalIndex,discoverySummary
   ]);
   return uniqueExisting(root,immediate);
 }

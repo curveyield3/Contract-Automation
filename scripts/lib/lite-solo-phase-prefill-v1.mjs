@@ -556,6 +556,48 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       ]);
     }
   }
+  // Continue exact accepted discovery evidence across the audit phases.
+  // A missing summary remains a nonblocking availability diagnostic.
+  if([4,5,6,8,10].includes(sequence)){
+    const summaryRel=path.posix.join(campaignPath,
+      'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');
+    const summaryFile=repoFile(root,summaryRel),summary=readJsonIf(summaryFile);
+    let summarySha256=null;
+    try{if(fs.existsSync(summaryFile))
+      summarySha256=createHash('sha256').update(fs.readFileSync(summaryFile)).digest('hex');}
+    catch{/* Report missing source; never reject other accepted work. */}
+    const details=summary?.payload??{};
+    form.automationInputs.discoveryEvidenceContinuity={
+      schemaVersion:'curveyield-discovery-evidence-continuity-v1',
+      sourcePhaseSequence:4,summaryPath:summaryRel,summarySha256,
+      availability:summary?
+       (summarySha256?'AVAILABLE':'SOURCE_HASH_UNAVAILABLE'):
+       (summarySha256?'SUMMARY_UNREADABLE':
+        sequence===4?'PENDING_DISCOVERY':'SOURCE_UNAVAILABLE'),
+      sourceCollections:[
+        'discoverySourceRefs','reconciliationEvidenceRefs',
+        'candidateSourceRefIndexes','integrationAnswerRefs','flowNotes',
+        'unmappedAttackPathRefs','unmappedAttackPathSources'
+      ],
+      counts:{
+        reconciliationItems:Array.isArray(details.reconciliationItems)?details.reconciliationItems.length:null,
+        discoverySourceRefs:Array.isArray(details.discoverySourceRefs)?details.discoverySourceRefs.length:null,
+        candidateSourceRefIndexes:Array.isArray(details.candidateSourceRefIndexes)?details.candidateSourceRefIndexes.length:null,
+        integrationAnswerRefs:Array.isArray(details.integrationAnswerRefs)?details.integrationAnswerRefs.length:null,
+        flowNotes:Array.isArray(details.flowNotes)?details.flowNotes.length:null,
+        unmappedAttackPathRefs:Array.isArray(details.unmappedAttackPathRefs)?details.unmappedAttackPathRefs.length:null
+      },
+      reviewInstruction:'Retrieve the complete accepted source by selector and SHA-256 rather than treating reviewerFinding, attackerFinding or sourceAnchor as the entire evidence. Inspect every FLOW and ATTACK integration answer separately, FLOW note, candidate provenance record, and unmapped ATTACK path. Only the AI reviewer decides relevance and disposition.',
+      securityDispositionOwner:'AI_REVIEWER',
+      evidenceStatusPolicy:'SOURCE_UNAVAILABLE_IS_VISIBLE_NONBLOCKING'
+    };
+    if(summarySha256)
+      form.automationInputs.derivedInputPaths=uniq([
+        ...form.automationInputs.derivedInputPaths,summaryRel]);
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...form.automationInputs.controllerOwnedAutomationInputs,
+      'discoveryEvidenceContinuity']);
+  }
   const siEntry=findSourceIntelligence(root,campaignPath);
   const si=siEntry?.j??null;
   const derived=loadDerived(root,derivedInputPaths);
@@ -652,8 +694,23 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       };
       const records=items===null?['<PENDING_DISCOVERY>']:items.length?items.map(item=>{
         const evidenceRef=unmappedSourceRef(item);
+        const link=summary?.payload?.reconciliationEvidenceRefs?.[item.recordKey]??{};
+        const sourceIndexes=Array.isArray(link.sourceRefIndexes)?link.sourceRefIndexes:[];
+        const discoveryEvidenceRefs=link.referenceCollection==='discoverySourceRefs'
+          ?sourceIndexes.map(index=>Number.isInteger(index)?
+             summary?.payload?.discoverySourceRefs?.[index]:null).filter(Boolean)
+             .map(ref=>structuredClone(ref)):[];
+        const discoveryEvidenceLookup={
+          summaryPath:form.automationInputs.discoveryEvidenceContinuity?.summaryPath??null,
+          recordKey:item.recordKey,
+          referenceCollection:link.referenceCollection??null,
+          sourceRefIndexes:structuredClone(sourceIndexes),
+          availability:link.availability??'SOURCE_UNAVAILABLE',
+          controllerSourceSelector:link.controllerSourceSelector??null
+        };
         return {
           ...Object.fromEntries(controllerFields.map(k=>[k,item[k]])),
+          discoveryEvidenceLookup,discoveryEvidenceRefs,
           ...(item.origin==='ATTACK_UNMAPPED_FLOW'?{
             unmappedAttackEvidenceRef:evidenceRef??{availability:'SOURCE_UNAVAILABLE'},
             unmappedAttackReviewInstruction:
@@ -663,7 +720,9 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
           }:{}),
           reconciliation:'<REQUIRED>',disposition:'<REQUIRED>',candidateTempKeyOrNone:'<REQUIRED>',rationale:'<REQUIRED>',
           automationOwnedFields:item.origin==='ATTACK_UNMAPPED_FLOW'?
-            [...controllerFields,'unmappedAttackEvidenceRef','unmappedAttackReviewInstruction']:controllerFields
+            [...controllerFields,'discoveryEvidenceLookup','discoveryEvidenceRefs',
+             'unmappedAttackEvidenceRef','unmappedAttackReviewInstruction']:
+            [...controllerFields,'discoveryEvidenceLookup','discoveryEvidenceRefs']
         };
       }):['NONE_IDENTIFIED'];
       form.actions['step-1'].outputs.discoveryReconciliationRecords=records;
