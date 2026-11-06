@@ -1444,9 +1444,16 @@ async function unitAdvanceAcceptedStage(c){
  }
  const done=next===null;
  const nextStep=next?.step??null,nextStage=next?.stage??null;
- const planSha256=sha(fs.readFileSync(relative(current.planRel)));
- const queueSha256=sha(fs.readFileSync(relative(current.queueRel)));
- const nextRosterDigest=done?null:stageDigest(c,current,phase,nextStep,nextStage);
+ // Bind the next stage roster before announcing its digest. A later code
+ // upgrade must not redefine this already-issued schema.
+ if(!done){
+  const nextEligible=eligibleStage(c,current,phase,nextStep,nextStage);
+  freezeStageUnitMetaV1(c,phase,nextStep,nextStage,nextEligible);
+ }
+ const updated=unitPlan(c);
+ const planSha256=sha(fs.readFileSync(relative(updated.planRel)));
+ const queueSha256=sha(fs.readFileSync(relative(updated.queueRel)));
+ const nextRosterDigest=done?null:stageDigest(c,updated,phase,nextStep,nextStage);
  return callback('/fork/step-verified',{status:'PASS',
   campaignId:c.directory.campaignId,generationId:c.directory.campaignGenerationId,
   phase,step,stage,sourceCommit:need('source_commit'),planSha256,
