@@ -742,7 +742,9 @@ async function unitNextStep(c){
       (u.dependencies||[]).every(dep=>(queue.acceptedRecords?.[dep]?.status==='ACCEPTED'&&!!queue.acceptedRecords[dep].snapshotSha256)||
         (queue.units?.[dep]?.status==='ACCEPTED'&&!!queue.units[dep].acceptedPath&&!!queue.units[dep].acceptedSha256));
   });
-  strict(eligible.length>0,'no eligible units in current controller stage; do not invent work');
+  // An empty roster is a truthful progress state (all accepted, held or
+   // dependency-pending), not a reason for GitHub to fail the workflow.
+   // The Worker decides when or whether to request the next stage.
   const committed=freezeStageUnitMetaV1(c,phase,step,stage,eligible);
   const ids=new Set(eligible.map(u=>u.unitId));
   const roster=committed.units.filter(u=>ids.has(u.unitId)).map(u=>{
@@ -752,7 +754,7 @@ async function unitNextStep(c){
   const rosterDigest=sha(JSON.stringify(roster));
   const planSha256=sha(fs.readFileSync(relative(committed.planRel)));
   const queueSha256=sha(fs.readFileSync(relative(committed.queueRel)));
-  const pageLimit=10,pageCount=Math.ceil(roster.length/pageLimit);
+  const pageLimit=10,pageCount=Math.max(1,Math.ceil(roster.length/pageLimit));
   strict(pageCount<=1000,'unit roster pagination limit exceeded');
   for(let i=0;i<pageCount;i++){
     const slice=roster.slice(i*pageLimit,(i+1)*pageLimit);
