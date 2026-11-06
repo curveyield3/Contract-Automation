@@ -24,6 +24,79 @@ const known=(root,rel)=>{
 };
 const hex=bytes=>createHash('sha256').update(bytes).digest('hex');
 const arr=x=>Array.isArray(x)?x:[];
+
+// A source reference is an address into the persisted accepted artifact.
+// acceptedSha256 is its exact file-byte digest; the queue's acceptedSha256
+// separately identifies the submission/compiled attempt bytes.
+export function discoverySourceReferenceV1({source,unitId,role,sourceSelector,
+ sourceField=null,originalAnchorsSelector=null,recordIdentity={}}){
+ const available=typeof source?.acceptedPath==='string'&&
+  /^[a-f0-9]{64}$/.test(String(source?.acceptedSha256??''));
+ return {availability:available?'AVAILABLE':'SOURCE_UNAVAILABLE',
+  phaseSequence:source?.phaseSequence??4,unitId,role,
+  acceptedPath:available?source.acceptedPath:null,
+  acceptedSha256:available?source.acceptedSha256:null,
+  submittedPath:source?.submittedPath??null,
+  submittedSha256:source?.submittedSha256??null,
+  submittedRepresentation:source?.submittedRepresentation??null,
+  originalWorkerAttempt:source?.originalWorkerAttempt??{availability:'NOT_RECORDED'},
+  sourceSelector:available?sourceSelector:null,
+  sourceField,originalAnchorsSelector:available?originalAnchorsSelector:null,
+  recordIdentity};
+}
+
+// Provenance-only address book: no vulnerability classification, merging,
+// promotion or alteration to the issued reconciliation record fields.
+export function discoveryObservationSourceRefsV1(acceptedSubmissions){
+ const refs=[];
+ const collections=[
+  ['rows','FLOW_ROW',['reason','intent']],
+  ['candidates','REVIEWER_CANDIDATE',['description','title']],
+  ['groupChecks','GROUP_CHECK',['evidence','reason']],
+  ['trivialReviews','TRIVIAL_REVIEW',['evidence','reason']],
+  ['contractChecks','CONTRACT_CHECK',['evidence','reason']],
+  ['attackPaths','ATTACK_PATH',['goal','description']],
+  ['integrationAnswers','INTEGRATION_ANSWER',['reasoning','reason']],
+  ['flowNotes','FLOW_NOTE',['note','text','reason']]
+ ];
+ for(const {unitId,submission,sourceReference} of arr(acceptedSubmissions)){
+  const role=unitId?.startsWith('X-')?'ATTACK':'FLOW';
+  const prefix=sourceReference?.sourceSelectorPrefix===''
+   ?'':(sourceReference?.sourceSelectorPrefix??'submission')+'.';
+  const add=(record,category,selector,preferred)=>{
+   if(!record||typeof record!=='object'||Array.isArray(record))return;
+   const identity={};
+   for(const name of ['contextId','flowId','flowIds','pathId','obligationId',
+    'candidateId','classId','contract','ruleId','signature','siblingContextId'])
+    if(Object.hasOwn(record,name))identity[name]=structuredClone(record[name]);
+   const sourceField=preferred.find(name=>Object.hasOwn(record,name))??null;
+   const anchorField=['anchors','sourceAnchors','sourceAnchor']
+    .find(name=>Object.hasOwn(record,name));
+   refs.push({sourceCategory:category,
+    ...discoverySourceReferenceV1({source:sourceReference,unitId,role,
+     sourceSelector:prefix+selector,sourceField,
+     originalAnchorsSelector:anchorField?prefix+selector+'.'+anchorField:null,
+     recordIdentity:identity})});
+  };
+  for(const [field,category,preferred] of collections)
+   arr(submission?.[field]).forEach((record,index)=>{
+    const selector=field+'['+index+']';
+    add(record,category,selector,preferred);
+    if(record?.candidate)add(record.candidate,category+'_CANDIDATE',
+     selector+'.candidate',['description','title']);
+    arr(record?.candidates).forEach((candidate,i)=>
+     add(candidate,category+'_CANDIDATE',selector+'.candidates['+i+']',
+      ['description','title']));
+    if(field==='rows')arr(record?.checks).forEach((check,i)=>{
+     const checkSelector=selector+'.checks['+i+']';
+     add(check,'FLOW_CLASS_CHECK',checkSelector,['evidence','reason']);
+     if(check?.candidate)add(check.candidate,'FLOW_CLASS_CHECK_CANDIDATE',
+      checkSelector+'.candidate',['description','title']);
+    });
+   });
+ }
+ return refs;
+}
 const SOLO_WINDOW_MAX_UNITS=8;
 // A round is bounded by the harder of source-context bytes and substantive
 // analysis effort, not an arbitrary tiny unit count.
@@ -453,6 +526,7 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
 }
 export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmissions,taxonomy,now}){
  const rows=arr(acceptedSubmissions),checks=new Map(),candidates=[],paths=[],answers=[],na=[],contractLevel=[];
+ const discoverySourceRefs=discoveryObservationSourceRefsV1(rows);
  for(const {unitId,submission} of rows){
   const isAttacker=unitId.startsWith('X-');
   if(isAttacker){paths.push(...arr(submission?.attackPaths));answers.push(...arr(submission?.integrationAnswers));continue;}
@@ -543,7 +617,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const discoveryState={reviewChecks:Object.fromEntries([...checks.entries()]),gaps,attackContradictions:contradictions};
  const coverage=buildCoverageMatrixV1({inventory,taxonomy,discoveryState});
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{
-  reconciliationItems:items,notApplicableClaims:na.sort((a,b)=>sort(a.contextId,b.contextId)||sort(a.classId,b.classId)),
+  discoverySourceRefs,reconciliationItems:items,notApplicableClaims:na.sort((a,b)=>sort(a.contextId,b.contextId)||sort(a.classId,b.classId)),
   attackPaths:paths,perContext:Object.fromEntries([...checks.entries()].sort(([a],[b])=>sort(a,b))),
   gaps,coverage,discoveryState});
 }
@@ -559,8 +633,14 @@ export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,a
  const inventory=inputs.inventory??head(directory,now,'curveyield-review-inventory-v1',{contexts:[],triggers:{},limitations:[],complete:false});
  const acceptedSubmissions=[];
  for(const id of state.payload.order){
-  const row=known(root,pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json'));
-  if(row)acceptedSubmissions.push({unitId:id,submission:row});
+  const acceptedPath=pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json');
+  const row=known(root,acceptedPath);
+  if(row)acceptedSubmissions.push({unitId:id,submission:row,
+   sourceReference:{phaseSequence:4,unitId:id,acceptedPath,
+    acceptedSha256:hex(fs.readFileSync(repoFile(root,acceptedPath))),
+    sourceSelectorPrefix:'',submittedPath:null,submittedSha256:null,
+    submittedRepresentation:'LEGACY_DIRECT_ACCEPTED_SUBMISSION',
+    originalWorkerAttempt:{availability:'NOT_RECORDED'}}});
  }
  const summary=buildDiscoverySummaryV1({state,inventory,plan:inputs.plan,acceptedSubmissions,taxonomy:inputs.taxonomy,now});
  writeJson(repoFile(root,pathJoin(campaignPath,'DISCOVERY_SUMMARY_v1.json')),summary);
