@@ -19,7 +19,8 @@ const payload = JSON.parse(process.env.FORK_PAYLOAD_JSON || '{}');
 const correlationId = process.env.FORK_CORRELATION_ID || '';
 const secret = process.env.FORK_CALLBACK_TOKEN;
 const ROOT = path.resolve('.audit-controller');
-let AUTH = 'Audit Skill - Lite-Solo Authority/lite-solo-v5';
+const MACHINE_AUTH='Machine Intelligence Audit Controller/Audit Skill v1';
+let AUTH=MACHINE_AUTH;
 const CONTROLLER = 'curveyield3/Audit-Controller';
 const MACHINE_REF='machine-intelligence-audit-controller-v1';
 const allowedOperations = new Set(['PHASE_0_INITIALIZE','PHASE_NEXT_STEP','PHASE_VALIDATE_STEP','PHASE_VALIDATE_UNIT','PHASE_FINALIZE']);
@@ -76,8 +77,8 @@ function checkout(){
   strict(meta.type==='file'&&meta.encoding==='base64','campaign directory missing');
   const directory=JSON.parse(Buffer.from(meta.content.replace(/\s/g,''),'base64').toString('utf8'));
   strict(directory.campaignId===id&&directory.campaignGenerationId===payload.generation_id,'campaign generation mismatch');
-  strict(directory.mode==='LITE_SOLO'&&['lite-solo-v5','lite-solo-v6'].includes(directory.authorityRelease),'not a supported Lite-Solo campaign');
-  AUTH='Audit Skill - Lite-Solo Authority/'+directory.authorityRelease;
+  strict(directory.mode==='LITE_SOLO'&&directory.authorityRelease==='machine-intelligence-v1','not a Machine Intelligence campaign');
+  AUTH=MACHINE_AUTH;
   strict(directory.authorityDigest===payload.authority_digest,'bound authority digest mismatch');
   safePath(directory.workspacePath);
   cmd('bash',['scripts/lite-solo-checkout-bound-controller-v1.sh','.audit-controller',MACHINE_REF,directory.workspacePath]);
@@ -1254,15 +1255,15 @@ async function unitValidateWave(c){
 }
 async function main(){
   if(OP==='PHASE_0_INITIALIZE'){
-    strict(['lite-solo-v5','lite-solo-v6'].includes(payload.authority_release),'unsupported source initialization authority');
+    strict(typeof payload.authority_release==='string','intake authority label missing');
     strict(payload.request_id===payload.audit_id,'intake request identity differs from audit ID');
     strict((typeof payload.source_url==='string'&&payload.source_url.length>0)!==Boolean(payload.scan_urls?.length),'exactly one source intake mode required');
     strict(!payload.scan_urls||Array.isArray(payload.scan_urls),'malformed explorer scan URL array'); // Worker owns scan count and host policy.
     strict(process.env.AUDIT_CONTROLLER_TOKEN&&process.env.CONTRACT_AUTOMATION_TOKEN,'repository credentials missing');
     const initEnv={...process.env,REQUEST_ID:payload.request_id,SOURCE_URL:payload.source_url||'',
       SCAN_URLS:JSON.stringify(payload.scan_urls||[]),FORK_EXPECTED_SOURCE_SHA:payload.source_sha256||'',
-      DELIVERY_TRANSPORT:'DIRECT',LITE_SOLO_AI_AUTONOMOUS:payload.authority_release==='lite-solo-v6'?'1':'0',
-      ...(payload.authority_release==='lite-solo-v6'?{PUBLISH_FILES_JSON:JSON.stringify(Object.fromEntries(['report_pdf','audited_source','scope_summary','findings_remediation','methodology_analysis','properties_hypotheses','execution_results','architecture_dependencies','residual_risks','evidence_index'].map(k=>[k,false])))}:{})};
+      DELIVERY_TRANSPORT:'DIRECT',LITE_SOLO_AI_AUTONOMOUS:'1',
+      PUBLISH_FILES_JSON:JSON.stringify(Object.fromEntries(['report_pdf','audited_source','scope_summary','findings_remediation','methodology_analysis','properties_hypotheses','execution_results','architecture_dependencies','residual_risks','evidence_index'].map(k=>[k,false])))};
     cmd('bash',['scripts/lite-solo-source-initialization/run-cloudflare-fork-v1.sh'],{env:initEnv,timeout:20*60*1000});
     return;
   }
