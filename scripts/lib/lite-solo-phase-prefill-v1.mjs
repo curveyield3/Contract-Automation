@@ -518,6 +518,77 @@ function inheritedQuestionHistoryRefsV1({root,campaignPath,sequence}){
  }
  return {refs,unavailable};
 }
+// Mechanical references into the original accepted Phase 1 canonical source.
+// This roster is an index, not a promotion, summarization, or security finding.
+function originalPhase1DiscoveryRosterV1({root,campaignPath,predecessorReceiptPath}){
+  const canonicalPath=path.posix.join(campaignPath,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json');
+  const sourceFile=repoFile(root,canonicalPath);
+  const exists=fs.existsSync(sourceFile);
+  let canonical=null,canonicalSha256=null;
+  if(exists){
+    try{
+      const bytes=fs.readFileSync(sourceFile);
+      canonicalSha256=createHash('sha256').update(bytes).digest('hex');
+      const value=JSON.parse(bytes.toString('utf8'));
+      if(value&&typeof value==='object'&&!Array.isArray(value))canonical=value;
+    }catch{/* Preserve an explicit availability diagnostic, not a fabricated empty finding. */}
+  }
+  const predecessor=predecessorReceiptPath?readJsonIf(repoFile(root,predecessorReceiptPath)):null;
+  const definitions=[
+    {discoveryPass:'D4',step:'step-4',field:'standardsAssessments',recordKeyField:'standardKey'},
+    {discoveryPass:'D6',step:'step-5',field:'riskDrivers',recordKeyField:'driverKey'},
+    {discoveryPass:'D7',step:'step-6',field:'phase1Limitations',recordKeyField:null}
+  ];
+  const actions=canonical?.actions??{};
+  const leadCollections=definitions.map(({discoveryPass,step,field,recordKeyField})=>{
+    const records=actions?.[step]?.outputs?.[field];
+    return {
+      discoveryPass,
+      sourceSelector:`actions.${step}.outputs.${field}`,
+      recordKeyField,
+      recordCount:Array.isArray(records)?records.length:null,
+      availability:Array.isArray(records)?'AVAILABLE':'SOURCE_COLLECTION_UNAVAILABLE'
+    };
+  });
+  const leadRefs=[];
+  if(canonical){
+    for(const {discoveryPass,step,field,recordKeyField} of definitions){
+      const records=actions?.[step]?.outputs?.[field];
+      if(!Array.isArray(records))continue;
+      records.forEach((record,index)=>{
+        const recordKey=recordKeyField&&record&&typeof record==='object'&&!Array.isArray(record)
+          ?record[recordKeyField]??null:null;
+        leadRefs.push({
+          discoveryPass,
+          sourceSelector:`actions.${step}.outputs.${field}[${index}]`,
+          sourceIndex:index,
+          recordKey,
+          recordJsonSha256:createHash('sha256').update(JSON.stringify(record)).digest('hex')
+        });
+      });
+    }
+  }
+  const allPhase1OutputSelectors=Object.entries(actions).flatMap(([step,action])=>
+    Object.keys(action?.outputs??{}).map(field=>`actions.${step}.outputs.${field}`));
+  return {
+    schemaVersion:'curveyield-phase1-discovery-source-roster-v1',
+    sourcePhaseSequence:1,
+    canonicalPath,
+    canonicalSha256,
+    sourceIdentity:{
+      campaignId:canonical?.campaignId??null,
+      acceptedSourceSha256:predecessor?.sourceSha256??null,
+      originalCanonicalSha256:canonicalSha256
+    },
+    availability:canonical?'AVAILABLE':exists?'SOURCE_UNREADABLE':'SOURCE_UNAVAILABLE',
+    allPhase1SourceSelector:'actions',
+    allPhase1OutputSelectors,
+    leadCollections,
+    leadRefs,
+    securityDispositionOwner:'AI_REVIEWER'
+  };
+}
+
 export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths=[],predecessorReceiptPath,prefillContext={}}){
   form.automationInputs={
     ...(form.automationInputs??{}),
@@ -529,6 +600,17 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       'derivedInputPaths'
     ])
   };
+  // Re-index the immutable original Phase 1 canonical on each newly issued
+  // Machine Intelligence successor assignment; never rewrite an accepted phase.
+  if(sequence>=2&&authorityRoot==='Machine Intelligence Audit Controller/Audit Skill v8'){
+    form.automationInputs.phase1DiscoverySourceRoster=originalPhase1DiscoveryRosterV1({
+      root,campaignPath,predecessorReceiptPath
+    });
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...form.automationInputs.controllerOwnedAutomationInputs,
+      'phase1DiscoverySourceRoster'
+    ]);
+  }
   if(sequence>4){
     // Phase 10 receives fresh controller-collected rosters when available;
     // all other successor stages inherit their sealed canonical references.
