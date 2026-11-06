@@ -47,12 +47,19 @@ export function materializeSemanticWorkFormV13({root,formRel}){
  // Reconstruct from issued controller descriptors, never mutable index pages.
  // This is deterministic transport assembly, not a security quality gate.
  const indexRel=path.posix.join(path.posix.dirname(formRel),'shards','INDEX_v1.json');
- const working=secureReadV13(root,indexRel);
- const controllerDir=secureLocationV13(formRel,working.phase);
+ // Derive the issued phase from the controller-assigned form path, not from
+ // mutable reviewer index metadata.
+ const issuedPhase=Number(formRel.match(/(?:^|\/)work\/phase-(\d+)\//)?.[1]);
+ if(!Number.isInteger(issuedPhase)||issuedPhase<1)throw new Error('invalid issued direct-phase work path');
+ const controllerDir=secureLocationV13(formRel,issuedPhase);
  const index=secureReadV13(root,path.posix.join(controllerDir,'INDEX_v1.json'));
  const workDir=path.posix.dirname(indexRel);
- const baseText=fs.readFileSync(relfile(root,path.posix.join(workDir,index.baseFile)),'utf8');
- const full=readSoloLockedBaseV1({root,workDir,baseText}).full;
+ // New issuance retains a controller-owned base for immutable prefill fields.
+ // Older issued campaigns retain their original transport representation.
+ const issuedBase=path.posix.join(controllerDir,index.baseFile);
+ const sourceDir=fs.existsSync(relfile(root,issuedBase))?controllerDir:workDir;
+ const baseText=fs.readFileSync(relfile(root,path.posix.join(sourceDir,index.baseFile)),'utf8');
+ const full=readSoloLockedBaseV1({root,workDir:sourceDir,baseText}).full;
  for(const pageRef of index.pages||[]){
   const page=secureReadV13(root,path.posix.join(controllerDir,pageRef.file));
   for(const desc of page.shards||[]){
@@ -246,6 +253,10 @@ export function secureShardWorkFormV13({root,formRel,phase,retireFull=true}){
    }
  }
  const basePages=writeSoloLockedBaseV1({root,workDir,base});
+ // Keep the exact original issued automation inputs, unchanged scalar output
+ // containers, and base page hashes in the existing controller-owned shard
+ // directory. Editable work base bytes cannot silently rewrite prefill.
+ writeSoloLockedBaseV1({root,workDir:controllerDir,base});
  const pages=[];
  let batch=[],count=0;
  const flush=()=>{
