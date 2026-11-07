@@ -101,32 +101,107 @@ function nextId(graph,family,reserved){
 }
 function assignCanonicalIds(canonical,graph,phase){
  graph.nodes??=[];
- // Include all already-authored IDs, including those appearing after a row
- // that still needs its own mechanical ID. Otherwise early allocations can
- // collide with later stable IDs in an expanded collection.
+ // A source identity is the actual accepted unit or direct shard record, not
+ // an array index, textual similarity, candidate class or source anchor.
+ // Canonical positions are retained separately for human and machine lookup.
+ const sources=[
+  ...(canonical.automationOutputs?.acceptedUnitRecordOrigins?.records??[]),
+  ...(canonical.automationOutputs?.directPhaseRecordOrigins?.records??[])
+ ];
+ const bySelector=new Map();
+ for(const source of sources){
+  const selector=source?.canonicalRecordSelector;
+  if(typeof selector!=='string')continue;
+  (bySelector.get(selector)??(bySelector.set(selector,[]),bySelector.get(selector)))
+   .push(source);
+ }
  const reserved=new Set(graph.nodes.map(n=>n.nodeId).filter(Boolean));
  for(const action of Object.values(canonical.actions??{})){
   for(const value of Object.values(action.outputs??{})){
    if(!Array.isArray(value))continue;
    for(const item of value)if(item&&typeof item==='object'&&!Array.isArray(item)&&
-       typeof item.canonicalId==='string'&&item.canonicalId.trim())reserved.add(item.canonicalId);
+       typeof item.canonicalId==='string'&&item.canonicalId.trim())
+    reserved.add(item.canonicalId);
   }
  }
+ const occupied=new Set(),links=[];
  for(const [stepKey,row] of Object.entries(canonical.actions??{})){
   for(const [fieldName,value] of Object.entries(row.outputs??{})){
    const family=canonicalFamilyForField(fieldName);
    if(!family||!Array.isArray(value))continue;
    for(let i=0;i<value.length;i++){
-    const item=value[i];if(!item||typeof item!=='object'||Array.isArray(item))continue;
+    const item=value[i];
+    if(!item||typeof item!=='object'||Array.isArray(item))continue;
     const sourceRecordPath='actions.'+stepKey+'.outputs.'+fieldName+'['+i+']';
-    const prior=(graph.nodes??[]).find(n=>n.originPhase===phase&&n.sourceRecordPath===sourceRecordPath&&n.nodeType===family);
-    if(!item.canonicalId&&prior)item.canonicalId=prior.nodeId;
-    if(!item.canonicalId)item.canonicalId=nextId(graph,family,reserved);
-    reserved.add(item.canonicalId);
-    if(!(graph.nodes??[]).some(n=>n.nodeId===item.canonicalId))graph.nodes.push({nodeId:item.canonicalId,nodeType:family,originPhase:phase,sourceRecordPath});
+    const candidates=bySelector.get(sourceRecordPath)??[];
+    const source=candidates.length===1?candidates[0]:null;
+    const sourceRecordIdentity=source?
+     JSON.stringify({
+      phase,collection:source.collection??null,
+      recordKey:source.recordKey??null,
+      unitId:source.unitId??null,
+      memberUnitId:source.memberUnitId??null,
+      shardPath:source.sourceShardPath??null
+     }):null;
+    const previous=graph.nodes.find(n=>n.nodeType===family&&
+     Number(n.originPhase)===Number(phase)&&
+     (sourceRecordIdentity?n.sourceRecordIdentity===sourceRecordIdentity:
+       n.sourceRecordIdentity===undefined&&
+       n.sourceRecordPath===sourceRecordPath));
+    const supplied=typeof item.canonicalId==='string'&&item.canonicalId.trim()?
+     item.canonicalId:null;
+    const priorOwner=supplied?graph.nodes.find(n=>n.nodeId===supplied):null;
+    const suppliedBelongsToSource=!priorOwner||
+     (priorOwner.nodeType===family&&
+      Number(priorOwner.originPhase)===Number(phase)&&
+      (sourceRecordIdentity?
+       priorOwner.sourceRecordIdentity===sourceRecordIdentity:
+       priorOwner.sourceRecordPath===sourceRecordPath));
+    let canonicalId=previous&&!occupied.has(previous.nodeId)?
+     previous.nodeId:
+     supplied&&!occupied.has(supplied)&&suppliedBelongsToSource?
+      supplied:nextId(graph,family,reserved);
+    while(occupied.has(canonicalId)||
+      graph.nodes.some(n=>n.nodeId===canonicalId&&
+       !(n.nodeType===family&&Number(n.originPhase)===Number(phase)&&
+        (sourceRecordIdentity?n.sourceRecordIdentity===sourceRecordIdentity:
+         n.sourceRecordPath===sourceRecordPath))))
+     canonicalId=nextId(graph,family,reserved);
+    item.canonicalId=canonicalId;
+    reserved.add(canonicalId);occupied.add(canonicalId);
+    const originalSubjectReferences=Object.fromEntries(
+     Object.entries(item).filter(([key,v])=>
+      /(?:Key|Id|Ids|Keys)$/.test(key)&&key!=='canonicalId'&&
+      (typeof v==='string'||typeof v==='number'||
+       Array.isArray(v)&&v.every(x=>typeof x==='string'||typeof x==='number')))
+     .map(([key,v])=>[key,structuredClone(v)]));
+    const sourceLink={
+     canonicalId,originPhase:phase,sourceRecordPath,
+     sourceRecordIdentity,
+     ...(source?{originalAcceptedRecordSource:structuredClone(source)}:
+      {sourceAvailability:candidates.length>1?
+        'DUPLICATE_SOURCE_SELECTOR':'SOURCE_RECORD_ORIGIN_UNAVAILABLE'}),
+     ...(Object.keys(originalSubjectReferences).length?
+      {originalSubjectReferences}:{}),
+     ...(supplied&&supplied!==canonicalId?
+      {sourceAuthoredCanonicalId:supplied}: {})
+    };
+    links.push(sourceLink);
+    if(!graph.nodes.some(n=>n.nodeId===canonicalId))
+     graph.nodes.push({nodeId:canonicalId,nodeType:family,originPhase:phase,
+      sourceRecordPath,
+      ...(sourceRecordIdentity?{sourceRecordIdentity}:{}),
+      ...(source?{originalAcceptedRecordSource:structuredClone(source)}:{})});
    }
   }
  }
+ // One index per actual canonical row, including duplicate prose and anchors.
+ // No AI conclusion or substantive source object is deduplicated.
+ canonical.automationOutputs??={};
+ canonical.automationOutputs.canonicalGraphSourceRefs={
+  schemaVersion:'curveyield-canonical-graph-source-refs-v1',
+  phaseSequence:phase,records:links
+ };
 }
 function importedRecords(canonical,paths){return (paths??[]).map(p=>({path:p,value:getByPath(canonical,p)}));}
 function receiptObligationSummary({ledger,canonical,form,sequence,now}){
