@@ -1818,7 +1818,7 @@ function typedQuestionReferenceV1(value,{phase,unitId}){
   if(QUESTION_ID_V1.test(ref)&&unitId)
    return {phaseSequence:phase,unitId,questionId:ref,
     sourceReferenceKind:'LOCAL_ISSUED_UNIT_REFERENCE'};
-  const composite=ref.match(/^(?:phase[-_ ]?)?(\\d+)\\/([A-Za-z0-9._-]+)\\/(Q-[0-9]{6,})(?:@(?:rev(?:ision)?[-_ ]?)?(\\d+))?$/i);
+  const composite=ref.match(/^(?:phase[-_ ]?)?(\d+)\/([A-Za-z0-9._-]+)\/(Q-[0-9]{6,})(?:@(?:rev(?:ision)?[-_ ]?)?(\d+))?$/i);
   if(composite)return {phaseSequence:Number(composite[1]),
    unitId:composite[2],questionId:composite[3],
    ...(composite[4]?{checkpointRevision:Number(composite[4])}:{}),
