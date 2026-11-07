@@ -2619,12 +2619,20 @@ async function runControllerIssuedFieldAnswersV1(ready){
    submission.extraRecords=extras;
   }
   if(transport.optionalQuestionRecordLinks){
+   // Each authoring question starts from a fresh model context. Give MiMo
+   // its exact previously authored outputs so it need not reconstruct
+   // relationships from the issued blank template or invent record identity.
    const links=await ask({task:'AUTHOR_EXPLICIT_OUTPUT_QUESTION_EVIDENCE_ASSOCIATIONS',
     sourceBoundCompositeIdentity:'phaseSequence/unitId/questionId/checkpointRevision',
     originalContract:transport.optionalQuestionRecordLinks,
     originalQuestionLedger:miQuestionLedgerContextV1(issued),
+    exactPreviousMiMoAuthoredFieldAnswers:submission.answers,
+    ...(submission.appendRecords!==undefined?
+     {exactPreviousMiMoAuthoredAppendRecords:submission.appendRecords}:{}),
+    ...(submission.extraRecords!==undefined?
+     {exactPreviousMiMoAuthoredDiscoveryExtras:submission.extraRecords}:{}),
     responseShape:{questionRecordLinks:[]},
-    instructions:'Use [] unless you explicitly identify a specific original output selector and supporting question identity. Do not infer automatic promotion from exploratory answers.'},
+    instructions:'Relate actual newly authored output records to exact original questions using your immediately prior typed answers and additional-record values. Preserve all expressly relied-on question identities and any material checkpoint revision; support many-to-many relationships. Return [] where you did not expressly establish an association. Do not infer a formal candidate or conclusion from exploratory prose.'},
     'questionRecordLinks');
    if(!Array.isArray(links))throw Error('AI-authored question links must be an array');
    if(links.length)submission.questionRecordLinks=links;
