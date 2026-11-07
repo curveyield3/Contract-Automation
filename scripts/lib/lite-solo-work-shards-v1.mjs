@@ -153,6 +153,7 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
  const sourceDir=fs.existsSync(relfile(root,issuedBase))?controllerDir:workDir;
  const baseText=fs.readFileSync(relfile(root,path.posix.join(sourceDir,index.baseFile)),'utf8');
  const full=readSoloLockedBaseV1({root,workDir:sourceDir,baseText}).full;
+ const occupied=new Map(),consumedContinuationUnits=new Set();
  for(const pageRef of index.pages||[]){
   const page=secureReadV13(root,path.posix.join(controllerDir,pageRef.file));
   for(const desc of page.shards||[]){
@@ -171,7 +172,11 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
     const output=Array.isArray(target[field])?target[field]:[];
     // Fixed shards fill only issued slots; they cannot shift originals or
     // overwrite entries of separately allocated APPEND shards.
-    const count=desc.append?entries.length:Math.min(entries.length,desc.recordKeys?.length??0);
+    if(!desc.append&&entries.length!==(desc.recordKeys?.length??0))
+     throw new Error('FIXED_ISSUED_SHARD_RECORDS_UNAVAILABLE: '+desc.file);
+    if(!Number.isSafeInteger(desc.startIndex)||desc.startIndex<0)
+     throw new Error('INVALID_ISSUED_SHARD_START_INDEX: '+desc.file);
+    const count=entries.length;
     // Do not collapse continuation pages into an oversized APPEND shard.
     // Each page stays separately bounded and retains its own original key.
     const additional=desc.append?
@@ -180,8 +185,27 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
        [1,2,3,8,9,10].includes(issuedPhase)?
         directAppendPagesV13({root,workDir,desc,primary:shard}):[]):[];
     const records=[...entries.slice(0,count),...additional.flatMap(page=>page.entries)];
+    for(const page of additional)if(page.unitId)consumedContinuationUnits.add(page.unitId);
+    const pathKey=JSON.stringify(desc.path);
+    const positions=occupied.get(pathKey)??new Set();
     for(let j=0;j<records.length;j++){
-     let value=records[j].value;
+     const position=desc.startIndex+j;
+     if(positions.has(position))
+      throw new Error('SHARD_POSITION_COLLISION: '+pathKey+'['+position+']');
+     const entry=records[j];
+     if(!entry||typeof entry.key!=='string')
+      throw new Error('SHARD_RECORD_IDENTITY_MISSING: '+desc.file+'['+j+']');
+     if(desc.append){
+      const chunk=additional.find(page=>j>=page.startIndex-desc.startIndex&&
+       j<page.startIndex-desc.startIndex+page.entries.length);
+      const key=chunk?appendChunkKeyV13(desc.path,chunk.chunkNumber,
+       j-(chunk.startIndex-desc.startIndex)):
+       pathKey+':APPEND-'+String(j+1).padStart(4,'0');
+      if(entry.key!==key)
+       throw new Error('APPEND_CHUNK_RECORD_IDENTITY_MISMATCH: '+entry.key);
+     }else if(entry.key!==pathKey+':'+desc.recordKeys[j])
+      throw new Error('FIXED_ISSUED_RECORD_KEY_CHANGED: '+entry.key);
+     let value=entry.value;
      if(!desc.append&&value&&typeof value==='object'&&!Array.isArray(value)){
       const identity=String(desc.recordKeys[j]??'').match(/^([A-Za-z][A-Za-z0-9_]*)=(.*)$/);
       if(identity&&identity[2]&&!identity[2].startsWith('<')&&identity[2]!=='TODO'){
@@ -189,11 +213,24 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
        value={...value,[identity[1]]:identity[2]};
       }
      }
-     output[(Number(desc.startIndex)||0)+j]=value;
+     output[position]=value;
+     positions.add(position);
     }
+    occupied.set(pathKey,positions);
     target[field]=output;
    }
   }
+ }
+ for(const page of acceptedContinuations)if(!consumedContinuationUnits.has(page.unitId))
+  throw new Error('ACCEPTED_CONTINUATION_HAS_NO_AUTHORIZED_DESTINATION: '+page.unitId);
+ // Contiguity is based on original immutable start indices; missing pages
+ // must not shift later accepted evidence into a fabricated earlier slot.
+ for(const [source,positions] of occupied){
+  let target=full;
+  for(const token of JSON.parse(source))target=target?.[token];
+  if(!Array.isArray(target)||positions.size!==target.length||
+     Array.from({length:target.length},(_,i)=>i).some(i=>!positions.has(i)))
+   throw new Error('CANONICAL_SHARD_COLLECTION_HAS_MISSING_POSITION: '+source);
  }
  const output=relfile(root,formRel);
  fs.mkdirSync(path.dirname(output),{recursive:true});
