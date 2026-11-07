@@ -1413,12 +1413,15 @@ function assembleBoundAnswersV1(c,u,submitted){
  // accepted transport envelope. Do not insert links into fixed issued fields,
  // rewrite AI answer text or decide whether a reference proves anything.
  if(submitted.questionRecordLinks!==undefined){
-  strict(Array.isArray(submitted.questionRecordLinks),
-   'questionRecordLinks must be a typed array when supplied');
-  result.questionRecordLinks=submitted.questionRecordLinks.map((link,i)=>{
-   strict(link&&typeof link==='object'&&!Array.isArray(link)&&
-    Array.isArray(link.questionRefs),
-    'questionRecordLinks['+i+'] must retain its literal questionRefs array');
+  // Optional relationship metadata is NEVER a condition of unit acceptance.
+  // Preserve malformed or unresolved originals for MiMo instead of blocking
+  // otherwise valid work or inventing a replacement association.
+  if(!Array.isArray(submitted.questionRecordLinks))
+   result.unmappedQuestionRecordLinks=structuredClone(submitted.questionRecordLinks);
+  else result.questionRecordLinks=submitted.questionRecordLinks.map(link=>{
+   if(!link||typeof link!=='object'||Array.isArray(link))
+    return {unmappedExplicitQuestionLink:structuredClone(link),
+     associationAvailability:'MALFORMED_SOURCE_ASSOCIATION'};
    const source=typeof link.outputSelector==='string'?link.outputSelector:
     typeof link.acceptedOutputSelector==='string'?link.acceptedOutputSelector:null;
    let acceptedOutputSelector=source;
