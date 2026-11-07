@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v38, verified original v8 evidence delivery.
+// Lite-Solo MiMo / Worker transport bridge v39, original intra-phase evidence propagation.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2010,6 +2010,7 @@ async function runTechnicalQuestionTransportV1(){
    priorAcceptedOriginalCanonicals:canonicalContext,
    priorQuestionAndAnswerHistory:questionContext,
    originalPhase1DiscoveryEvidence:phase1Context,
+   samePhaseAcceptedOriginals:issued.samePhaseAcceptedEvidence??[],
    assignedUnit:{unitId:issued.scope.unitId,phase:issued.scope.phase,step:issued.scope.step,
     assignedOutputOrPacketDescriptor:issued.packetEvidenceReferences?.descriptor??null,
     controllerPacketReference:issued.packetEvidenceReferences?.canonicalPacket??null},
