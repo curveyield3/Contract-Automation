@@ -50,9 +50,81 @@ const recordKey=(pathTokens,value,i)=>{
 };
 const clone=x=>structuredClone(x);
 
+const CONTINUATION_FILE_V13=/^shard-[0-9]{4}_CONT_([0-9]{4})_v1\\.json$/;
+const appendContinuationFileV13=(base,chunk)=>
+ base.replace(/_v1\\.json$/,'_CONT_'+String(chunk).padStart(4,'0')+'_v1.json');
+const appendChunkKeyV13=(tokens,chunk,ordinal)=>
+ JSON.stringify(tokens)+':APPEND-C'+String(chunk).padStart(4,'0')+'-'+
+ String(ordinal+1).padStart(4,'0');
+
+// Mechanically reconstruct adjacent bounded direct-form continuation pages.
+// The original trusted index authorizes the parent APPEND collection; each
+// continuation is a new agent-authored page, never a rewrite of that index.
+// appendContinuation:true explicitly promises the next page, so an incomplete
+// delivery cannot be silently mistaken for a completed collection.
+function directAppendPagesV13({root,workDir,desc,primary}){
+ if(!desc.append)return [];
+ const names=fs.readdirSync(relfile(root,workDir));
+ const prefix=desc.file.replace(/_v1\\.json$/,'_CONT_');
+ const suffix='_v1.json';
+ const found=names.filter(name=>name.startsWith(prefix)&&name.endsWith(suffix));
+ const numbered=found.map(file=>{
+  const index=Number(file.slice(prefix.length,-suffix.length));
+  if(!Number.isSafeInteger(index)||index<2||
+     file!==appendContinuationFileV13(desc.file,index))
+   throw new Error('APPEND_CONTINUATION_INVALID_FILENAME: '+file);
+  return {file,index};
+ }).sort((a,b)=>a.index-b.index);
+ const out=[];
+ let preceding=primary,ordinalStart=desc.startIndex+primary.entries.length;
+ for(let i=0;i<numbered.length;i++){
+  const {file,index}=numbered[i];
+  if(index!==i+2)throw new Error('APPEND_CONTINUATION_MISSING_CHUNK: '+desc.file);
+  if(preceding.appendContinuation!==true)
+   throw new Error('APPEND_CONTINUATION_NOT_REQUESTED: '+file);
+  const rel=path.posix.join(workDir,file);
+  const raw=fs.readFileSync(relfile(root,rel));
+  if(raw.length>MAX_V13_APPEND_BYTES)
+   throw new Error('APPEND_CONTINUATION_TRANSPORT_LIMIT: '+file);
+  const page=JSON.parse(raw.toString('utf8'));
+  if(page.schemaVersion!=='curveyield-work-shard-v13'||
+     page.kind!=='array'||!secureSameV13(page.path,desc.path)||
+     page.startIndex!==ordinalStart||!Array.isArray(page.entries)||
+     page.entries.length>MAX_V13_APPEND_RECORDS||
+     page.entries.some((entry,j)=>entry?.key!==
+      appendChunkKeyV13(desc.path,index,j)))
+   throw new Error('APPEND_CONTINUATION_IDENTITY_MISMATCH: '+file);
+  out.push({file,chunkNumber:index,...page});
+  preceding=page;ordinalStart+=page.entries.length;
+ }
+ if(preceding.appendContinuation===true)
+  throw new Error('APPEND_CONTINUATION_AWAITING_NEXT_CHUNK: '+desc.file);
+ return out;
+}
+// Queue-owned continuation arrays are only supplied from the accepted unit
+// roster, never inferred from editable shard files. Source-bound ordering is
+// controlled by the issued continuation ordinal and not by commit order.
+function queuedAppendPagesV13({desc,provided,primaryCount}){
+ const selected=provided.filter(page=>secureSameV13(page.path,desc.path));
+ const sorted=[...selected].sort((a,b)=>a.chunkNumber-b.chunkNumber);
+ let expectedIndex=desc.startIndex+primaryCount;
+ for(const [i,page] of sorted.entries()){
+  if(page.chunkNumber!==i+2||page.startIndex!==expectedIndex||
+     !Array.isArray(page.entries)||page.entries.length>MAX_V13_APPEND_RECORDS||
+     page.entries.some((entry,j)=>entry?.key!==appendChunkKeyV13(desc.path,page.chunkNumber,j)))
+   throw new Error('QUEUED_APPEND_CONTINUATION_IDENTITY_MISMATCH: '+desc.file);
+  const slab={schemaVersion:'curveyield-work-shard-v13',kind:'array',
+   path:desc.path,startIndex:page.startIndex,entries:page.entries};
+  if(bytes(slab)>MAX_V13_APPEND_BYTES)
+   throw new Error('QUEUED_APPEND_CONTINUATION_TRANSPORT_LIMIT: '+desc.file);
+  expectedIndex+=page.entries.length;
+ }
+ return sorted;
+}
+
 // Reviewer-authored semantic shards are the sole Lite-Solo work transport.
  // Full-form materialization happens only at the phase controller boundary.
-export function materializeSemanticWorkFormV13({root,formRel}){
+export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuations=[]}){
  // Reconstruct from issued controller descriptors, never mutable index pages.
  // This is deterministic transport assembly, not a security quality gate.
  const indexRel=path.posix.join(path.posix.dirname(formRel),'shards','INDEX_v1.json');
@@ -88,8 +160,16 @@ export function materializeSemanticWorkFormV13({root,formRel}){
     // Fixed shards fill only issued slots; they cannot shift originals or
     // overwrite entries of separately allocated APPEND shards.
     const count=desc.append?entries.length:Math.min(entries.length,desc.recordKeys?.length??0);
-    for(let j=0;j<count;j++){
-     let value=entries[j].value;
+    // Do not collapse continuation pages into an oversized APPEND shard.
+    // Each page stays separately bounded and retains its own original key.
+    const additional=desc.append?
+     (acceptedContinuations.length?
+       queuedAppendPagesV13({desc,provided:acceptedContinuations,primaryCount:entries.length}):
+       [1,2,3,8,9,10].includes(issuedPhase)?
+        directAppendPagesV13({root,workDir,desc,primary:shard}):[]):[];
+    const records=[...entries.slice(0,count),...additional.flatMap(page=>page.entries)];
+    for(let j=0;j<records.length;j++){
+     let value=records[j].value;
      if(!desc.append&&value&&typeof value==='object'&&!Array.isArray(value)){
       const identity=String(desc.recordKeys[j]??'').match(/^([A-Za-z][A-Za-z0-9_]*)=(.*)$/);
       if(identity&&identity[2]&&!identity[2].startsWith('<')&&identity[2]!=='TODO'){
