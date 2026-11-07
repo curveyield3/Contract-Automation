@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v41, autonomous v8 question and expansion rounds.
+// Lite-Solo MiMo / Worker transport bridge v42, retained wave methodology across question turns.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2077,7 +2077,8 @@ async function runTechnicalQuestionTransportV1(){
  let packetEvidence=null,questionIterations=0;
  while(true){
   const issuedText=await workerCall({operation:'next_question',
-   ...(selectedUnit?{unitId:selectedUnit.unitId,lease:selectedUnit.lease}:{})});
+   ...(selectedUnit?{unitId:selectedUnit.unitId,lease:selectedUnit.lease,
+    methodologyAlreadyDelivered:dialogue!==null}: {})});
   let issued;try{issued=JSON.parse(issuedText);}catch{throw Error('Worker technical question is not JSON');}
   if(issued.status==='AI_TECHNICAL_PACKET_QUESTIONS_COMPLETE'){
    console.log(JSON.stringify({status:'MIMO_PACKET_QUESTION_INVESTIGATION_COMPLETE',
@@ -2100,7 +2101,8 @@ async function runTechnicalQuestionTransportV1(){
      issued.schemaVersion!=='machine-intelligence-technical-question-transport-v1'||
      typeof issued.question?.questionText!=='string'||!issued.question.questionText||
      !issued.scopeSha256||!issued.scope?.questionSha256||
-     !issued.admittedSource?.sourceArchiveCommit||!issued.evidenceLease||!issued.technicalMethodology)
+     !issued.admittedSource?.sourceArchiveCommit||!issued.evidenceLease||
+     (!dialogue&&!issued.technicalMethodology))
    throw Error('Worker did not issue a frozen v8 technical question and exact admitted source');
   if(selectedUnit&&(issued.scope.unitId!==selectedUnit.unitId||
      issued.scope.lease!==selectedUnit.lease))
