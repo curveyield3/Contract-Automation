@@ -1156,6 +1156,59 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
  queue.stage='RECONCILIATION';plan.stage='RECONCILIATION';
  unlock(queue,plan);return true;
 }
+// A source-authored appendContinuation:true on an ACCEPTED bounded unit
+// explicitly requests another unit in that same issued APPEND family.
+// This only issues work; it does not synthesize an accepted submission.
+function issueAcceptedAppendContinuationsV1({root,campaign,phase,plan,queue}){
+ const created=[];
+ for(const previous of [...plan.units]){
+  if(previous.kind!=='APPEND'||queue.units?.[previous.unitId]?.status!=='ACCEPTED')
+   continue;
+  const accepted=read(root,queue.units[previous.unitId].acceptedPath);
+  if(accepted?.submission?.appendContinuation!==true)continue;
+  if(!Array.isArray(accepted.submission.entries))continue;
+  const chunk=(previous.appendChunkNumber??1)+1;
+  if(chunk>9999)throw Error('APPEND_CONTINUATION_CHUNK_NAMESPACE_EXHAUSTED: '+previous.unitId);
+  const seriesId=previous.appendSeriesUnitId??previous.unitId;
+  const unitId=seriesId+'-C'+String(chunk).padStart(4,'0');
+  const existing=plan.units.find(unit=>unit.unitId===unitId);
+  if(existing){
+   if(existing.kind!=='APPEND'||existing.continuationAfterUnitId!==previous.unitId||
+      existing.appendChunkNumber!==chunk||existing.appendSeriesUnitId!==seriesId)
+    throw Error('APPEND_CONTINUATION_ISSUED_IDENTITY_CONFLICT: '+unitId);
+   continue; // Replay is idempotent; never issue a duplicate.
+  }
+  const primaryStart=Number.isInteger(previous.appendOrdinalStart)?
+   previous.appendOrdinalStart:read(root,previous.shardPath).startIndex;
+  if(!Number.isSafeInteger(primaryStart)||primaryStart<0)
+   throw Error('APPEND_CONTINUATION_ISSUED_START_UNAVAILABLE: '+unitId);
+  const nextStart=primaryStart+accepted.submission.entries.length;
+  const packetPath=path.posix.join(unitBase(campaign,phase,unitId),
+   'ASSIGNMENT_PACKET_v1.json');
+  const packet={schemaVersion:'curveyield-work-shard-v13',kind:'array',
+   path:previous.path,startIndex:nextStart,entries:[],
+   appendChunkNumber:chunk,appendSeriesUnitId:seriesId,
+   continuationAfterUnitId:previous.unitId,
+   continuationInstructions:'Supply at most 1024 typed APPEND records and at most 1 MiB of serialized shard data. Set appendContinuation:true ONLY when another independent bounded unit is required. Original entries and issued metadata remain immutable.'};
+  put(root,packetPath,packet);
+  const idKey=dot([...previous.path,'APPEND-C'+String(chunk).padStart(4,'0')]);
+  if(plan.recordOwnership[idKey])throw Error('continuation ownership already issued: '+idKey);
+  const next={unitId,kind:'APPEND',field:previous.field,
+   shardFile:previous.shardFile,shardPath:previous.shardPath,
+   packetPath,packetSha256:hex(fs.readFileSync(repoFile(root,packetPath))),
+   appendChunkNumber:chunk,appendSeriesUnitId:seriesId,
+   continuationAfterUnitId:previous.unitId,
+   appendOrdinalStart:nextStart,
+   shardIndex:0,recordKeys:[],path:clone(previous.path),
+   dependencies:[previous.unitId],unitSpecRevision:1};
+  plan.recordOwnership[idKey]=unitId;
+  addUnit(plan,queue,next);
+  created.push(unitId);
+ }
+ if(created.length)unlock(queue,plan);
+ return created;
+}
+
 export function processUnitRequestV1({root,campaignPath,directory,request,automationRoot=process.cwd(),trustedController=false}){
  // A worker-origin GitHub request must never become a controller-origin FINALIZE.
  if(request?.operation==='FINALIZE'&&!trustedController)
@@ -1183,7 +1236,20 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  if(phase===4&&queue.stage!=='RECONCILIATION'&&
   plan.units.filter(u=>['FLOW','ATTACK'].includes(u.kind)).every(u=>queue.units[u.unitId]?.status==='ACCEPTED'))
   finishDiscovery({root,campaign:campaignPath,directory,plan,queue,automationRoot});
- const nextPhaseStatus=noWork(queue,plan);
+ let continuationIssueError=null,issuedContinuationUnitIds=[];
+ try{
+  issuedContinuationUnitIds=issueAcceptedAppendContinuationsV1({
+   root,campaign:campaignPath,phase,plan,queue});
+ }catch(error){
+  // Previously accepted snapshots remain accepted. Diagnose the issuance
+  // obstacle without misreporting the phase or deleting earlier work.
+  continuationIssueError=String(error?.message??error);
+ }
+ if(issuedContinuationUnitIds.length){
+  queue.finalizeStatus='NOT_STARTED';queue.finalizeDetails=null;
+ }
+ const nextPhaseStatus=continuationIssueError?
+  'AWAITING_APPEND_CONTINUATION_ISSUANCE':noWork(queue,plan);
  result={schemaVersion:UNIT_ARTIFACT_SCHEMAS.result,
   requestId:request.requestId,campaignId:directory.campaignId,
   campaignGenerationId:directory.campaignGenerationId,sourceSha256:directory.sourceSha256,
@@ -1192,7 +1258,11 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
   acceptedUnits:result.acceptedUnits??[],reworkUnits:result.reworkUnits??[],
   staleUnits:result.staleUnits??[],unchangedUnits:result.unchangedUnits??[],
   waitingUnits:result.waitingUnits??[],newlyEligibleUnits:result.newlyEligibleUnits??[],
-  nextPhaseStatus,phaseStatus:nextPhaseStatus};
+  nextPhaseStatus,phaseStatus:nextPhaseStatus,
+  ...(issuedContinuationUnitIds.length?{issuedContinuationUnitIds}:{}),
+  ...(continuationIssueError?{continuationIssueError}:{}),
+  newlyEligibleUnits:[...new Set([...(result.newlyEligibleUnits??[]),
+    ...issuedContinuationUnitIds])]};
  queue.revision++;
  queue.processedRequestHashes[request.requestId]=requestDigest;
  if(!asArray(result.waitingUnits).length)queue.processedRequests[request.requestId]=result;
