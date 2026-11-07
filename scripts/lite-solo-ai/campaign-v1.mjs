@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v56, Step 10 original governing document continuation.
+// Lite-Solo MiMo / Worker transport bridge v57, Step 10 same-step wave provenance replay.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2835,13 +2835,22 @@ async function miStep8Ask(state,task){
 // Reconcile an ambiguous response with the ACTUAL original Worker substep
 // journal before issuing a second request. A different original is not replaced.
 async function miStep8SubmitForm(state,command,expectedForm,substep){
+ const roster=state.machineIntelligenceBinding?.currentControllerAssignment?.controllerRosterDigest??null;
+ const initial=JSON.parse(await workerCall({operation:'stage_evidence',kind:'SUBSTEP'}));
+ if(initial.status!=='MI_STAGE_EVIDENCE'||initial.phase!==state.phase||
+    initial.step!==(state.currentStep??state.step))
+  throw Error('Original controller stage changed before original substep submission');
+ if((initial.controllerRosterDigest??null)!==roster)
+  return {status:'MI_STEP8_SOURCE_WAVE_SUPERSEDED',controllerAccepted:false,
+   originalRosterDigest:roster,currentRosterDigest:initial.controllerRosterDigest??null};
  try{return await miStep8Native('/api/step/interaction',command);}
  catch(error){
   const originalError=String(error?.message||error);
   const current=await miStep8Native('/api/step/current');
   const previousStep=state.currentStep??state.step,
    nowStep=current.currentStep??current.step;
-  if(current.phase!==state.phase||nowStep!==previousStep)
+  if(current.phase!==state.phase||nowStep!==previousStep||
+     (current.machineIntelligenceBinding?.currentControllerAssignment?.controllerRosterDigest??null)!==roster)
    return {status:'MI_STEP8_CONTROLLER_ALREADY_ADVANCED',
     originalOperationOutcome:'NOT_INFERRED',
     currentControllerPhase:current.phase,currentControllerStep:nowStep,
@@ -2850,6 +2859,9 @@ async function miStep8SubmitForm(state,command,expectedForm,substep){
   if(recorded.status!=='MI_STAGE_EVIDENCE'||recorded.phase!==state.phase||
      recorded.step!==previousStep||recorded.kind!=='SUBSTEP')
    throw Error('Cannot reconcile original substep after ambiguous response: '+originalError);
+  if((recorded.controllerRosterDigest??null)!==roster)
+   return {status:'MI_STEP8_SOURCE_WAVE_SUPERSEDED',controllerAccepted:false,
+    originalRosterDigest:roster,currentRosterDigest:recorded.controllerRosterDigest??null};
   const name=substep==='INSTRUCTIONS'?'completedInstructions':
    substep==='REVIEW'?'completedReview':'completedRemediation';
   const original=recorded[name];
@@ -2902,7 +2914,8 @@ async function miStep8Instructions(state){
   phase:state.phase,step:state.currentStep??state.step,
   workerStatus:result.status,controllerAccepted:false}));
  if(result.engagement?.stage!=='WORK'&&
-    result.status!=='MI_STEP8_CONTROLLER_ALREADY_ADVANCED')
+    result.status!=='MI_STEP8_CONTROLLER_ALREADY_ADVANCED'&&
+    result.status!=='MI_STEP8_SOURCE_WAVE_SUPERSEDED')
   throw Error('Original Worker did not advance instruction substep to WORK: '+String(result.status));
 }
 async function miStep8Review(state){
@@ -2928,7 +2941,8 @@ async function miStep8Review(state){
   phase:state.phase,step:state.currentStep??state.step,workerStatus:result.status,
   authoredChecklistCount:authored.repairChecklist?.length??null,controllerAccepted:false}));
  if(result.status!=='REMEDIATION_SUBSTEP_READY'&&
-    result.status!=='MI_STEP8_CONTROLLER_ALREADY_ADVANCED')
+    result.status!=='MI_STEP8_CONTROLLER_ALREADY_ADVANCED'&&
+    result.status!=='MI_STEP8_SOURCE_WAVE_SUPERSEDED')
   throw Error('Review substep not durably recorded by Worker: '+String(result.status));
 }
 async function miStep8Remediation(state){
@@ -2961,7 +2975,8 @@ async function miStep8Remediation(state){
   originalRepairItems:issues.length,controllerAccepted:false}));
  if(result.status!=='SUBSTEP_WORK_SUBMISSION_QUEUED'&&
     result.status!=='SUBSTEP_SUBMISSION_PENDING'&&
-    result.status!=='MI_STEP8_CONTROLLER_ALREADY_ADVANCED')
+    result.status!=='MI_STEP8_CONTROLLER_ALREADY_ADVANCED'&&
+    result.status!=='MI_STEP8_SOURCE_WAVE_SUPERSEDED')
   throw Error('Remediation form not recorded by original Worker: '+String(result.status));
 }
 async function miStep8RunLifecycle(){
