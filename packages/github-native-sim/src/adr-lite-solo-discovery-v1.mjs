@@ -95,6 +95,11 @@ export function discoveryObservationSourceRefsV1(acceptedSubmissions){
      add(check,'FLOW_CLASS_CHECK',checkSelector,['evidence','reason']);
      if(check?.candidate)add(check.candidate,'FLOW_CLASS_CHECK_CANDIDATE',
       checkSelector+'.candidate',['description','title']);
+     // The accepted FLOW check may expressly author SEVERAL independent
+     // candidates. Every candidate needs its own immutable source selector.
+     arr(check?.candidates).forEach((candidate,index)=>
+      add(candidate,'FLOW_CLASS_CHECK_CANDIDATE',
+       checkSelector+'.candidates['+index+']',['description','title']));
     });
    });
  }
@@ -776,6 +781,15 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
      if(check.candidate)recordCandidate(
       {...check.candidate,contextIds:[row.contextId],classId:check.classId},
       [sourceIndex(unitId,'rows['+rowIndex+'].checks['+checkIndex+'].candidate'),checkRef,rowSource]);
+     // Retain plural independently authored check candidates on legacy
+     // accepted rows as well, instead of only recording the first one.
+     arr(check.candidates).forEach((candidate,j)=>{
+      if(!candidate||typeof candidate!=='object'||Array.isArray(candidate))return;
+      recordCandidate({...candidate,contextIds:[row.contextId],
+       classId:check.classId},
+       [sourceIndex(unitId,'rows['+rowIndex+'].checks['+checkIndex+'].candidates['+j+']'),
+        checkRef,rowSource]);
+     });
     }
     checks.set(row.contextId,classMap);
    }
