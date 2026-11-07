@@ -601,7 +601,7 @@ export function secureRestoreWorkFormV13({root,indexRel}){
  }
  const allowed=new Set(['BASE_v1.json','INDEX_v1.json',...basePages,...pageNames,...seenFiles]);
  for(const name of fs.readdirSync(relfile(root,workDir)))
-   if(/^(?:shard-[0-9]+(?:_CONT_[0-9]{4})?_v1|INDEX_PAGE_[0-9]+_v1|BASE_PART_[0-9]+_v1)\.json$/.test(name)&&!allowed.has(name))
+   if(/^(?:shard-[0-9]+(?:_CONT_[0-9]{4,})?_v1|INDEX_PAGE_[0-9]+_v1|BASE_PART_[0-9]+_v1)\.json$/.test(name)&&!allowed.has(name))
      throw new Error('v13 unknown agent shard or index page: '+name);
  return {formRel:working.formRel,content:securePrettyV13(full),
    recordCount:[...arrays.values()].reduce((n,s)=>n+s.size,0)};
