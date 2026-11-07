@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v53, Step 8 current-controller lifecycle integration.
+// Lite-Solo MiMo / Worker transport bridge v54, Step 8 rollover-safe original lifecycle.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2707,8 +2707,11 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
 // The original Worker/DO owns the current stage and the existing GitHub
 // controller owns final acceptance; this adapter only supplies MiMo's answers.
 const MI_STEP8_START=Number(process.env.AUDIT_AI_STARTED_AT_MS)||Date.now();
-// Handoff before a new 120-minute inference could exceed the 5h45 budget.
-const MI_STEP8_HANDOFF_AT=MI_STEP8_START+225*60*1000;
+// Leave a complete 120-minute inference window, the existing 20-minute
+// private transcript archive, and five minutes of end-of-job margin under
+// the original 355-minute GitHub Actions limit. Do not interrupt a model
+// response or silently lose an in-flight source-bound original answer.
+const MI_STEP8_HANDOFF_AT=MI_STEP8_START+210*60*1000;
 let miStep8Active=false;
 function miStep8HandoffDue(){return miStep8Active&&Date.now()>=MI_STEP8_HANDOFF_AT;}
 async function miStep8Native(route,command={}){
