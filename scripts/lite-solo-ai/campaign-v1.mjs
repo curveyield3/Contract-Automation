@@ -766,6 +766,129 @@ async function questionHistoryEvidenceReadV1(history,request){
    'QUESTION_INDEX_PAGE','CHECKPOINT_PAGE']};
 }
 
+// Accepted historical PHASE_CANONICAL_DATA revisions may describe distinct
+// question-index epochs for the SAME phase/unit ID. Never silently collapse
+// those references into the latest unit queue or assume a newer index contains
+// the older PLAN/ANSWER/REVISE checkpoints. Their old Git objects are read only
+// if the exact index SHA-256 survives at this pinned commit.
+function mergeAcceptedCanonicalQuestionRostersV1(questionHistory,canonicalHistory){
+ const originals=[...(canonicalHistory?.sources?.values()??[])]
+  .filter(s=>[4,5,6].includes(s.phaseSequence));
+ const refs=originals.flatMap(source=>(source.canonical?.automationOutputs
+   ?.questionHistoryRoster?.histories??[]).map(ref=>({source,ref})));
+ if(!refs.length)return questionHistory;
+ const manifest=canonicalHistory.manifest;
+ const result=questionHistory??{
+  schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
+  campaignId:manifest.campaignId,
+  campaignGenerationId:manifest.campaignGenerationId,
+  sourceSha256:manifest.auditedSourceSha256,
+  sourceRepo:manifest.sourceRepo,sourceBranch:manifest.sourceBranch,
+  snapshotCommit:manifest.snapshotCommit,histories:[],unavailable:[]
+ };
+ result.histories??=[];result.unavailable??=[];
+ const known=new Map(result.histories.map(row=>[
+  row.historyReferenceKey??[
+   row.phaseSequence,row.unitId,row.indexSha256,row.phaseEpoch].join(':'),row]));
+ for(const {source,ref} of refs){
+  if(!ref||typeof ref.unitId!=='string'||!ref.unitId.trim()){
+   result.unavailable.push({availability:'HISTORICAL_UNIT_REFERENCE_MISSING',
+    canonicalReferenceKey:source.referenceKey,originalReference:structuredClone(ref)});
+   continue;
+  }
+  const indexSha=ref.indexSha256??ref.previousCommittedIndex?.indexSha256??null;
+  if(!/^[a-f0-9]{64}$/.test(String(indexSha??''))){
+   result.unavailable.push({availability:'HISTORICAL_INDEX_HASH_UNAVAILABLE',
+    canonicalReferenceKey:source.referenceKey,
+    phaseSequence:source.phaseSequence,unitId:ref.unitId,
+    originalReference:structuredClone(ref)});
+   continue;
+  }
+  const phaseEpoch=ref.phaseEpoch??null;
+  const key=[source.phaseSequence,ref.unitId,indexSha,phaseEpoch].join(':');
+  const sourceLink={canonicalReferenceKey:source.referenceKey,
+   acceptedPhaseRevision:source.acceptedRevision,
+   sourceSelector:'/automationOutputs/questionHistoryRoster/histories',
+   committedCanonicalPath:source.committedCanonicalPath,
+   expectedCanonicalSha256:source.actualCanonicalSha256};
+  const existing=known.get(key);
+  if(existing){
+   existing.acceptedCanonicalRefs??=[];
+   if(!existing.acceptedCanonicalRefs.some(x=>
+      x.canonicalReferenceKey===source.referenceKey))
+    existing.acceptedCanonicalRefs.push(sourceLink);
+   continue;
+  }
+  const record={historyReferenceKey:key,
+   phaseSequence:source.phaseSequence,unitId:ref.unitId,
+   indexPath:ref.indexPath??null,indexSha256:indexSha,
+   indexRevision:ref.revision??ref.previousCommittedIndex?.revision??null,
+   phaseEpoch,packetSha256:ref.packetSha256??null,
+   referenceOrigin:'HISTORICAL_ACCEPTED_CANONICAL_REVISION',
+   acceptedCanonicalRefs:[sourceLink],
+   expectedHistoricalReference:structuredClone(ref),
+   availability:'HISTORICAL_INDEX_NOT_YET_VERIFIED',
+   questionRoster:null,originalIndexText:null,checkpoints:[]};
+  result.histories.push(record);known.set(key,record);
+ }
+ result.histories.sort((a,b)=>a.phaseSequence-b.phaseSequence||
+  a.unitId.localeCompare(b.unitId)||
+  String(a.historyReferenceKey).localeCompare(String(b.historyReferenceKey)));
+ return result;
+}
+
+// For a prior accepted phase revision, load the original question index only
+// when it is addressed. A moving-current index with a different SHA-256 must
+// be reported as unavailable; it cannot impersonate an older accepted epoch.
+async function sourceBoundHistoricalQuestionIndexV1(history,source){
+ if(typeof source?.originalIndexText==='string')return null;
+ if(source.referenceOrigin!=='HISTORICAL_ACCEPTED_CANONICAL_REVISION')
+  return 'ORIGINAL_QUESTION_INDEX_NOT_RETAINED';
+ if(!/^[a-f0-9]{40}$/.test(String(history?.snapshotCommit??''))||
+    history.snapshotCommit!==historySnapshotCommit)
+  return 'HISTORICAL_PINNED_COMMIT_CHANGED';
+ if(typeof source.indexPath!=='string'||!source.indexPath.startsWith('campaigns/'))
+  return 'HISTORICAL_INDEX_PATH_UNAVAILABLE';
+ const loaded=await historyJsonV1(source.indexPath).catch(()=>null);
+ const index=loaded?.data;
+ const original=source.expectedHistoricalReference??{};
+ if(!loaded||loaded.file.sha256!==source.indexSha256||
+    index?.schemaVersion!=='curveyield-ai-question-index-v1'||
+    index.campaignId!==history.campaignId||
+    (history.campaignGenerationId&&index.campaignGenerationId!==history.campaignGenerationId)||
+    index.sourceSha256!==history.sourceSha256||
+    (original.authorityDigest&&index.authorityDigest!==original.authorityDigest)||
+    index.phaseSequence!==source.phaseSequence||
+    index.unitId!==source.unitId||
+    (source.phaseEpoch!==null&&source.phaseEpoch!==undefined&&
+      index.phaseEpoch!==source.phaseEpoch)||
+    (source.packetSha256&&index.packetSha256!==source.packetSha256)||
+    !Array.isArray(index.questions)||!Array.isArray(index.checkpoints))
+  return 'HISTORICAL_INDEX_NOT_RETRIEVABLE_AT_ACCEPTED_SHA';
+ source.originalIndexText=loaded.file.text;
+ source.questionRoster=index.questions;
+ source.indexRevision=index.revision;
+ source.phaseEpoch=index.phaseEpoch;
+ source.packetSha256=index.packetSha256;
+ source.checkpoints=[];
+ const prefix=source.indexPath.slice(0,-'QUESTION_INDEX_v1.json'.length);
+ for(const ref of index.checkpoints){
+  if(typeof ref?.path!=='string'||!ref.path.startsWith(prefix+'checkpoints/')||
+     !/^[a-f0-9]{64}$/.test(String(ref.sha256??''))){
+   (history.unavailable??=[]).push({
+    availability:'INVALID_HISTORICAL_CHECKPOINT_REFERENCE',
+    historyReferenceKey:source.historyReferenceKey,originalReference:structuredClone(ref)});
+   continue;
+  }
+  source.checkpoints.push({path:ref.path,sha256:ref.sha256,
+   checkpoint:null,originalCheckpointText:null,
+   expectedReference:structuredClone(ref),
+   verification:'HISTORICAL_PINNED_REFERENCE_NOT_YET_READ'});
+ }
+ source.availability='HISTORICAL_INDEX_PINNED_SHA256_VERIFIED';
+ return null;
+}
+
 // Existing campaign folders may contain spaces; GitHub contents calls encode
 // each segment. Reject unsafe navigation, not legitimate source-owned names.
 function validHistoryWorkspacePathV1(workspace){
