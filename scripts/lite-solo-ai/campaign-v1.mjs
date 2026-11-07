@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v58, Step 10 original checkpoint generation and packet binding.
+// Lite-Solo MiMo / Worker transport bridge v59, Step 10 exact accepted prerequisite document page binding.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2763,6 +2763,8 @@ async function miStep8Ask(state,task){
     kind:'DOCUMENT',family:'campaignBoundSkill',path:
      governing.documents?.find(x=>x.family==='campaignBoundSkill')?.path,offset:0}},
    moreGoverningDocuments:{governingDocumentRequest:{kind:'INDEX',start:25}},
+   acceptedPrerequisite:{governingDocumentRequest:{kind:'DOCUMENT',
+    family:'prerequisiteEvidenceFiles',unitId:'<exact accepted unitId>',offset:0}},
    moreStagedUnits:{stageWorkEvidenceRequest:{kind:'INDEX',start:0}},
    originalStagedUnit:{stageWorkEvidenceRequest:{kind:'UNIT',unitId:'<exact issued unitId>',offset:0}},
    firstRoundBeforeRevision:{stageWorkEvidenceRequest:{kind:'UNIT',unitId:'<exact issued unitId>',variant:'FIRST_ROUND',offset:0}}},
@@ -2804,6 +2806,7 @@ async function miStep8Ask(state,task){
     ...(q.start!==undefined?{start:q.start}:{}),
     ...(q.family!==undefined?{family:q.family}:{}),
     ...(q.path!==undefined?{path:q.path}:{}),
+    ...(q.unitId!==undefined?{unitId:q.unitId}:{}),
     ...(q.offset!==undefined?{offset:q.offset}:{})}));
    if(page.status!=='ORIGINAL_GOVERNING_DOCUMENT_EVIDENCE'||
       page.authorityCommit!==governing.authorityCommit||
