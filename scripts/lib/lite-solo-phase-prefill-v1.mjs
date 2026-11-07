@@ -1686,8 +1686,15 @@ export function buildCandidateEvidenceContinuityV1({phase5,phase6}){
   ...(phase5?.automationOutputs?.acceptedUnitRecordOrigins?.records??[]),
   ...(phase6?.automationOutputs?.acceptedUnitRecordOrigins?.records??[])
  ];
+ const provenanceIndex=new Map();
+ for(const source of provenanceRows){
+  if(!source?.canonicalRecordSelector)continue;
+  const key=source.canonicalRecordSelector;
+  const refs=provenanceIndex.get(key)??[];
+  refs.push(source);provenanceIndex.set(key,refs);
+ }
  const sourceFor=selector=>{
-  const originals=provenanceRows.filter(ref=>ref?.canonicalRecordSelector===selector);
+  const originals=provenanceIndex.get(selector)??[];
   return {selector,
    ...(originals.length===1?{originalAcceptedRecordSource:structuredClone(originals[0])}:
     {sourceAvailability:originals.length>1?
@@ -1698,23 +1705,37 @@ export function buildCandidateEvidenceContinuityV1({phase5,phase6}){
  })):[],proofRecords=Array.isArray(proofs)?proofs.map((row,index)=>({
   row,source:sourceFor('actions.step-5.outputs.candidateProofRecords['+index+']')
  })):[];
- const anchorCounts=new Map(),proofAnchorCounts=new Map();
+ const anchorCounts=new Map(),proofAnchorCounts=new Map(),
+  runsByKey=new Map(),proofsByKey=new Map(),proofsByAnchor=new Map();
  for(const x of prior)if(x&&typeof x==='object'&&x.sourceAnchor)
   anchorCounts.set(x.sourceAnchor,(anchorCounts.get(x.sourceAnchor)??0)+1);
- for(const {row} of proofRecords)if(row&&typeof row==='object'&&row.sourceAnchor)
-  proofAnchorCounts.set(row.sourceAnchor,(proofAnchorCounts.get(row.sourceAnchor)??0)+1);
+ const add=(map,key,entry)=>{
+  const list=map.get(key)??[];
+  list.push(entry);map.set(key,list);
+ };
+ for(const entry of runRecords){
+  if(entry.row&&typeof entry.row==='object'&&entry.row.candidateKey)
+   add(runsByKey,String(entry.row.candidateKey),entry);
+ }
+ for(const entry of proofRecords){
+  const row=entry.row;
+  if(!row||typeof row!=='object')continue;
+  if(row.candidateKey)add(proofsByKey,String(row.candidateKey),entry);
+  if(row.sourceAnchor){
+   add(proofsByAnchor,row.sourceAnchor,entry);
+   proofAnchorCounts.set(row.sourceAnchor,
+    (proofAnchorCounts.get(row.sourceAnchor)??0)+1);
+  }
+ }
  return (Array.isArray(prior)?prior:[]).flatMap((x,index)=>{
   if(!x||typeof x!=='object'||Array.isArray(x)||!x.subjectKey)return [];
   const candidateKey=String(x.subjectKey);
-  const matches=runRecords.filter(({row})=>row&&typeof row==='object'&&
-   String(row.candidateKey??'')===candidateKey);
-  const exactProofs=proofRecords.filter(({row})=>row&&typeof row==='object'&&
-   String(row.candidateKey??'')===candidateKey);
-  const anchored=exactProofs.length?[]:proofRecords.filter(({row})=>
-   row&&typeof row==='object'&&x.sourceAnchor&&
-   row.sourceAnchor===x.sourceAnchor&&
-   anchorCounts.get(x.sourceAnchor)===1&&
-   proofAnchorCounts.get(x.sourceAnchor)===1);
+  const matches=runsByKey.get(candidateKey)??[];
+  const exactProofs=proofsByKey.get(candidateKey)??[];
+  const anchored=exactProofs.length?[]:
+   x.sourceAnchor&&anchorCounts.get(x.sourceAnchor)===1&&
+   proofAnchorCounts.get(x.sourceAnchor)===1?
+    proofsByAnchor.get(x.sourceAnchor)??[]:[];
   const applicableProofs=exactProofs.length?exactProofs:anchored;
   // Never pick an arbitrary first/last proof among repeated accepted rows.
   // Preserve all records and make the concise presentation ambiguous.
