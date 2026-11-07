@@ -1598,14 +1598,24 @@ while(true){
  // currently issued original packet. Old packets/replies remain immutable
  // in Worker storage, not repeatedly reprocessed in every later prompt.
  const scope=assignmentScope(workerResponse);
+ let reconstructSameStepEvidence=false;
  if(!pendingRecovery&&scope&&(scope.step!==lastStepScope||
     scope.unit!==null&&scope.unit!==lastUnitScope)){
+  // An instruction/review/remediation stage change within one phase/step
+  // starts a fresh governing dialogue but must NOT discard the pinned source
+  // history from that step's accepted lease. A new lease/phase/step cannot
+  // inherit evidence from the prior assignment.
+  const phaseStep=x=>String(x??'').split(':').slice(0,2).join(':');
+  reconstructSameStepEvidence=scope.unit===null&&lastStepScope!==null&&
+    phaseStep(scope.step)===phaseStep(lastStepScope);
   dialogue.length=0;
   alreadyProvidedStepInstructions.clear();
   lastAuthorityRaw=null;lastClaimRaw=null;lastIssuedResponseRaw=null;pendingRecovery=null;
-  activePhase1Evidence=null;
-  activeCanonicalHistory=null;
-  activeQuestionHistory=null;
+  if(!reconstructSameStepEvidence){
+   activePhase1Evidence=null;
+   activeCanonicalHistory=null;
+   activeQuestionHistory=null;
+  }
   consecutiveRejections=0;lastRejectedFingerprint=null;
  }
  if(scope){lastStepScope=scope.step;if(scope.unit!==null)lastUnitScope=scope.unit;}
@@ -1620,6 +1630,22 @@ while(true){
   // incompatible model turns. A rejected model action is NOT a new instruction.
   lastIssuedResponseRaw=workerResponse;
   dialogue.push({role:'user',content:modelInstructions});
+  if(reconstructSameStepEvidence){
+   // The new/current Worker instruction comes first. Reissue only navigation
+   // contexts for the same pinned original evidence, never stale Worker text.
+   if(activeQuestionHistory)dialogue.push({role:'user',
+    content:JSON.stringify(questionHistoryModelContextV1(activeQuestionHistory))});
+   if(activeCanonicalHistory)dialogue.push({role:'user',
+    content:JSON.stringify(canonicalHistoryModelContextV1(activeCanonicalHistory))});
+   if(activePhase1Evidence)dialogue.push({role:'user',
+    content:JSON.stringify(activePhase1Evidence.manifest)});
+   console.log(JSON.stringify({status:'MIMO_SAME_STEP_SOURCE_CONTEXT_RECONSTRUCTED',
+    pinnedCommit:activeCanonicalHistory?.manifest?.snapshotCommit??
+     activeQuestionHistory?.snapshotCommit??historySnapshotCommit,
+    originalCanonicals:activeCanonicalHistory?.manifest?.rosters?.length??0,
+    questionHistories:activeQuestionHistory?.histories?.length??0,
+    currentWorkerAuthorityFirst:true}));
+  }
   // Keep source readers for all follow-up review/remediation responses in
   // this scoped assignment; non-leased Worker responses cannot erase them.
   let claimStatus=null;
