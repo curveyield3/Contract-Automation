@@ -2485,7 +2485,23 @@ async function runControllerIssuedFieldAnswersV1(ready){
   await miAdmittedSourceInventoryV1(contract.admittedSource).catch(e=>({
    availability:'PINNED_ADMITTED_SOURCE_UNAVAILABLE',files:[],originalFileCount:null,
    reason:String(e.message||e)})):null;
- const packet=typed?await miCurrentPacketEvidenceV1(issued).catch(e=>({
+ // The GitHub-issued answer transport for a continuation records the exact
+ // immutable accepted predecessor chunk paths and SHA-256. Reuse the existing
+ // pinned packet evidence pager; never infer old records from a compact roster
+ // or let a new work unit overwrite a predecessor's accepted contents.
+ const originalAppendPredecessors=Array.isArray(
+  contract.answerTransport?.appendAcceptedPredecessorSourceRefs)?
+  contract.answerTransport.appendAcceptedPredecessorSourceRefs:[];
+ const originalPacketEvidenceReferences={
+  ...(issued.packetEvidenceReferences??{}),
+  sourceAndExecutionEvidenceRefs:[
+   ...(issued.packetEvidenceReferences?.sourceAndExecutionEvidenceRefs??[]),
+   ...originalAppendPredecessors.filter(row=>row?.availability==='AVAILABLE')
+    .map(row=>({path:row.path,sha256:row.sha256}))
+  ]
+ };
+ const packet=typed?await miCurrentPacketEvidenceV1({
+  ...issued,packetEvidenceReferences:originalPacketEvidenceReferences}).catch(e=>({
   availability:'PINNED_PACKET_EVIDENCE_UNAVAILABLE',sources:new Map(),
   initial:[],unavailable:[{reason:String(e.message||e)}]})):null;
  const {files:sourceIndex=[],...sourceContext}=source??{};
@@ -2498,6 +2514,7 @@ async function runControllerIssuedFieldAnswersV1(ready){
   originalTechnicalMethodology:methodology,
   admittedSourceInventory:sourceContext,
   assignedPacketSourceEvidence:packetContext,
+  originalAcceptedAppendPredecessorSources:originalAppendPredecessors,
   originalCompletedQuestionLedger:typed?miQuestionLedgerContextV1(issued):null,
   recentOriginalAnswers:typed?await miRecentOriginalAnswersV1(issued):[],
   originalDirectQuestion:contract.originalTechnicalQuestion??null,
@@ -2579,7 +2596,7 @@ async function runControllerIssuedFieldAnswersV1(ready){
     originalMaximumSerializedBytes:transport.maxChunkBytes,
     appendSubjectOwner:'MIMO',
     responseShape:{appendRecords:'<array of typed records; [] if none>'},
-    instructions:'Supply one independently bounded prefix of your original distinct AI-authored records, at most 1,024 records and 1 MiB of serialized issued work-shard bytes. If additional distinct source-grounded records remain, do not drop, merge or summarize them; reserve them for the separately issued continuation unit and explicitly request a continuation in the next original decision. These limits apply per chunk, not to the logical count of security discoveries.'},'appendRecords');
+    instructions:'Supply one independently bounded prefix of your original distinct AI-authored records, at most 1,024 records and 1 MiB of serialized issued work-shard bytes. If this is a continuation, inspect the exact original accepted predecessor chunks from originalAcceptedAppendPredecessorSources using packetEvidenceRequest FILE paging through every previous chunk before authoring records; do not repeat, merge, overwrite or omit already accepted records. If a referenced prior source is unavailable, explicitly preserve the uncertainty rather than assume it was empty. If additional distinct source-grounded records remain, do not drop, merge or summarize them; reserve them for the separately issued continuation unit and explicitly request a continuation in the next original decision. These limits apply per chunk, not to the logical count of security discoveries.'},'appendRecords');
    if(!Array.isArray(records))throw Error('AI APPEND records are not a JSON array');
    submission.appendRecords=records;
    // Each ask() starts with a fresh model conversation. Supply the exact
