@@ -583,7 +583,8 @@ function obligationIdFor(item,originPhase,index){
 // property. Neither normalization nor deduplication is a security judgment.
 export function normalizeFormalObligationsIntoLedger({
   ledger,items=[],originPhase,canonicalRel,now,root=null,authorityRoot=null,
-  sourceCollectionPath=null,sourceKind=null,sourceDocumentPath=null
+  sourceCollectionPath=null,sourceKind=null,sourceDocumentPath=null,
+  originalRecordOrigins=[]
 }){
   ledger.obligations??=[];
   const byId=new Map(ledger.obligations.map((o,i)=>[
@@ -597,11 +598,22 @@ export function normalizeFormalObligationsIntoLedger({
     const sourceSelector=typeof sourceCollectionPath==='string'&&sourceCollectionPath
       ?'#/'+sourceCollectionPath.split('.').map(k=>k.replace(/~/g,'~0')
         .replace(/\//g,'~1')).join('/')+'/'+index:null;
+    const originalCanonicalRecordPath=
+      typeof sourceCollectionPath==='string'?
+       sourceCollectionPath+'['+index+']':null;
+    const matchingSources=Array.isArray(originalRecordOrigins)?
+      originalRecordOrigins.filter(ref=>ref?.canonicalRecordSelector===
+       originalCanonicalRecordPath):[];
     const submittedSourceRef={canonicalPath:canonicalRel,
       originalDocumentPath:sourceDocumentPath??canonicalRel,
       originalSourceSelector:sourceSelector,
       sourceKind:sourceKind??(item.automationGenerated===true?
-        'CONTROLLER_MACHINE_ROUTING':'AI_AUTHORED_PHASE_OUTPUT')};
+        'CONTROLLER_MACHINE_ROUTING':'AI_AUTHORED_PHASE_OUTPUT'),
+      ...(matchingSources.length===1?
+       {originalAcceptedRecordSource:structuredClone(matchingSources[0])}:
+       matchingSources.length>1?
+        {originalSourceAvailability:'MULTIPLE_SOURCE_RECORDS_FOR_CANONICAL_POSITION'}:{})
+    };
     const submittedSourceRefs={
       originatingEvidenceRefs:structuredClone(item.originatingEvidenceRefs??null),
       evidenceRefs:structuredClone(item.evidenceRefs??null),
@@ -657,6 +669,20 @@ export function normalizeFormalObligationsIntoLedger({
             status:'DUPLICATE_ID_DIFFERENT_SOURCE_RECORD',
             dispositionOwner:'CLOUDFLARE_WORKER_OR_MIMO'});
       }
+      // Different accepted records may legitimately repeat the same formal
+      // obligation ID or even identical prose. The normalized ledger state
+      // has one key, but the full original source history must not collapse.
+      existing.additionalSubmittedSourceRecords??=[];
+      const sourceUnique=JSON.stringify(submittedSourceRef);
+      if(JSON.stringify(existing.originalSubmittedSourceRef)!==sourceUnique&&
+         !existing.additionalSubmittedSourceRecords.some(entry=>
+          JSON.stringify(entry.sourceRef)===sourceUnique))
+       existing.additionalSubmittedSourceRecords.push({
+        sourceRef:submittedSourceRef,
+        submittedRecord:originalSubmission,
+        authorSubmittedSourceRefs:submittedSourceRefs,
+        authorSubmittedRequiredPhase:originalRequiredPhase
+       });
       existing.updatedAt=now;
       return;
     }
@@ -681,6 +707,7 @@ export function normalizeFormalObligationsIntoLedger({
       // the ledger's standard mechanics use normalized IDs/phase strings.
       originalSubmittedRecord:originalSubmission,
       originalSubmittedSourceRef:submittedSourceRef,
+      additionalSubmittedSourceRecords:[],
       authorSubmittedSourceRefs:submittedSourceRefs,
       authorSubmittedRequiredPhase:originalRequiredPhase,
       authorSubmittedValidationMethod:structuredClone(
