@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v43, committed question recovery and bounded dialogue.
+// Lite-Solo MiMo / Worker transport bridge v44, automatic exact pending answer replay.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2108,6 +2108,49 @@ async function runTechnicalQuestionTransportV1(){
      issued.scope.lease!==selectedUnit.lease))
    throw Error('Original controller packet ownership changed during technical investigation');
   selectedUnit={unitId:issued.scope.unitId,lease:issued.scope.lease};
+  // Exact private transport-staged original recovery is tried before model
+  // inference. The Worker rechecks this current signed lease and publishes via
+  // its existing GitHub question checkpoint writer; R2 is not acceptance.
+  if(issued.question.mode==='PLANNED_PER_PACKET'){
+   const recoveryRaw=await workerCall({operation:'recover_question',
+    unitId:issued.scope.unitId,lease:issued.scope.lease,
+    scopeSha256:issued.scopeSha256,questionId:issued.scope.questionId,
+    questionSha256:issued.scope.questionSha256});
+   let recovered;try{recovered=JSON.parse(recoveryRaw);}catch{
+    throw Error('Original staged-answer recovery returned invalid Worker JSON');
+   }
+   if(recovered.status==='AI_TECHNICAL_QUESTION_RECORDED'&&
+      recovered.originalCommittedToGitHub===true&&
+      recovered.recoveredFromPrivateStagedOriginal===true){
+    console.log(JSON.stringify({status:'MIMO_STAGED_ORIGINAL_RESUMED_FROM_GITHUB',
+     campaignId,unitId:issued.scope.unitId,questionId:issued.scope.questionId,
+     checkpointPath:recovered.checkpointPath,indexRevision:recovered.indexRevision,
+     originalAnswerSha256:recovered.answerSha256,
+     githubQuestionCheckpointPublished:true,controllerAccepted:false,
+     modelInferenceSkipped:true}));
+    questionIterations++;
+    // Return to the controller's exact newly committed roster. No guesswork
+    // about the next field, packet, question count or completion.
+    continue;
+   }
+   if(recovered.status==='AI_TECHNICAL_CHECKPOINT_CAPACITY_UNPUBLISHED')
+    throw Error('STAGED_ANSWER_CAPACITY: Original answer retained at '+
+     String(recovered.originalAnswerR2Key||'private source')+
+     ' but not committed to GitHub; existing question index contract requires paging.');
+   if(recovered.status==='AI_TECHNICAL_MULTIPLE_STAGED_ORIGINALS')
+    throw Error('AMBIGUOUS_UNCOMMITTED_AI_ANSWERS: multiple originals exist for the same question; preserve all without choosing one.');
+   if(recovered.status==='AI_TECHNICAL_CHECKPOINT_REQUIRES_RECOVERY')
+    throw Error('UNRESOLVED_STAGED_ANSWER_CHECKPOINT: original answer remains privately staged; do not regenerate or claim GitHub acceptance.');
+   if(recovered.status==='AI_TECHNICAL_PACKET_QUESTIONS_COMPLETE'||
+      recovered.status==='AI_TECHNICAL_QUESTION_ISSUED'&&
+       recovered.scopeSha256!==issued.scopeSha256){
+    // An independent authorized run moved the committed ledger. Re-read it
+    // rather than treating this previous question as newly answered.
+    continue;
+   }
+   if(!['AI_TECHNICAL_NO_STAGED_ORIGINAL','AI_TECHNICAL_FORMAT_CLARIFICATION'].includes(recovered.status))
+    throw Error('Unexpected source-bound staged answer recovery status: '+String(recovered.status));
+  }
   const packetKey=[campaignId,issued.scope.phase,issued.scope.step,
    issued.scope.phaseEpoch,selectedUnit.unitId,selectedUnit.lease].join(':');
   if(packetKey!==activePacketKey){
