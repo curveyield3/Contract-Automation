@@ -691,6 +691,63 @@ function prerequisiteQuestionHistoryRefsV1(c,u,source){
  }
  return {available,unavailable};
 }
+// For a newly issued APPEND continuation, point MiMo to EVERY previously
+// accepted chunk in this exact issued chain. The Worker forwards the frozen
+// answerTransport unchanged; the existing pinned GitHub source paging in the
+// runner retrieves the original record bytes. Never flatten, interpret, or
+// duplicate the predecessor's security records into the new work form.
+function appendAcceptedPredecessorSourcesV1(c,u,source){
+ if(u.kind!=='APPEND'||!u.continuationAfterUnitId)return [];
+ const issued=source??unitPlan(c),byId=new Map(issued.units.map(x=>[x.unitId,x]));
+ const seen=new Set(),sources=[];
+ let priorId=u.continuationAfterUnitId;
+ while(priorId){
+  if(seen.has(priorId)){
+   sources.push({unitId:priorId,availability:'CONTINUATION_CHAIN_CYCLE'});
+   break;
+  }
+  seen.add(priorId);
+  const prior=byId.get(priorId),state=issued.queue.units?.[priorId];
+  if(!prior||prior.kind!=='APPEND'||
+     JSON.stringify(prior.path)!==JSON.stringify(u.path)){
+   sources.push({unitId:priorId,availability:'ISSUED_PREDECESSOR_IDENTITY_UNAVAILABLE'});
+   break;
+  }
+  if(state?.status!=='ACCEPTED'||!state.acceptedPath){
+   sources.push({unitId:priorId,availability:'PREDECESSOR_NOT_ACCEPTED'});
+   priorId=prior.continuationAfterUnitId??null;
+   continue;
+  }
+  try{
+   const acceptedPath=safePath(state.acceptedPath);
+   strict(acceptedPath.startsWith(c.campaignPath+'/work/phase-'+
+    phaseNo(c.directory.currentAssignment.phaseSequence)+'/units/'+priorId+'/'),
+    'accepted predecessor path not in issued unit');
+   const raw=fs.readFileSync(relative(acceptedPath));
+   const accepted=JSON.parse(raw.toString('utf8'));
+   if(accepted?.unitId!==priorId||
+      accepted.campaignGenerationId!==c.directory.campaignGenerationId||
+      accepted.sourceSha256!==c.directory.sourceSha256||
+      accepted.authorityDigest!==c.directory.authorityDigest||
+      accepted.submissionSha256!==state.acceptedSha256||
+      !Array.isArray(accepted.submission?.entries))
+    throw Error('accepted predecessor snapshot not source-bound');
+   sources.push({availability:'AVAILABLE',
+    unitId:priorId,chunkNumber:prior.appendChunkNumber??1,
+    appendOrdinalStart:prior.appendOrdinalStart??null,
+    path:acceptedPath,sha256:sha(raw),
+    acceptedSubmissionSha256:accepted.submissionSha256,
+    originalRecordSelector:'submission.entries',
+    originalRecordCount:accepted.submission.entries.length});
+  }catch(error){
+   sources.push({unitId:priorId,availability:'PREDECESSOR_SOURCE_UNAVAILABLE',
+    expectedPath:state.acceptedPath,
+    diagnostic:String(error?.message??error)});
+  }
+  priorId=prior.continuationAfterUnitId??null;
+ }
+ return sources.reverse();
+}
 function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
   if(u.issuedMeta)return structuredClone(u.issuedMeta);
   const index=u.packetIndexPath?readUnitPacketIndexV1({root:ROOT,indexPath:safePath(u.packetIndexPath)}):null;
@@ -749,6 +806,9 @@ function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
    ?discoveryAnswerBindingV1({u,packet:discoveryPacket,initial})
    :semanticAnswerBindingV1({c,u,schema,initial});
   const answerTransport=machineAnswerDirectoryV1(u,initial,answerRouting);
+  if(u.kind==='APPEND'&&u.continuationAfterUnitId)
+   answerTransport.appendAcceptedPredecessorSourceRefs=
+    appendAcceptedPredecessorSourcesV1(c,u,questionSource);
   const questionHistory=prerequisiteQuestionHistoryRefsV1(c,u,questionSource);
   // Existing Worker claim transport forwards evidenceRefs as
   // sourceAndExecutionEvidenceRefs. One queue reference exposes ALL accepted
