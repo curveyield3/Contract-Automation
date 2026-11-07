@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v48, Step 7 bounded original answer transport.
+// Lite-Solo MiMo / Worker transport bridge v49, Step 7 exact overflow disposition.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2649,6 +2649,16 @@ async function runControllerIssuedFieldAnswersV1(ready){
  if(result.submissionSha256!==originalSubmissionSha256)
   throw Error('Original Worker submission byte digest differs from signed field transport');
  const disposition=result.originalWorkerDisposition||{};
+ if(result.originalWorkerStatus==='APPEND_ORIGINAL_OVER_BOUND_PRESERVED')
+  throw Error('APPEND_ORIGINAL_OVER_BOUND_NOT_SUBMITTED: original retained at '+
+   String(disposition.privateR2Key||'private source')+', SHA256='+
+   String(disposition.originalSha256||'unknown')+
+   '; original unit remains leased; MiMo must author a bounded chunk before controller-issued continuation');
+ if(result.originalWorkerStatus!=='CONTROLLER_VALIDATION_QUEUED'&&
+    result.originalWorkerStatus!=='REWORK_REQUIRED')
+  throw Error('ORIGINAL_FIELD_SUBMISSION_NOT_QUEUED: '+
+   String(result.originalWorkerStatus||'UNKNOWN')+
+   ', original submission SHA256='+originalSubmissionSha256);
  if(result.originalWorkerStatus==='REWORK_REQUIRED'||
     Array.isArray(disposition.fieldErrors)&&disposition.fieldErrors.length)
   throw Error('ORIGINAL_CONTROLLER_FIELD_REWORK_REQUIRED: '+
