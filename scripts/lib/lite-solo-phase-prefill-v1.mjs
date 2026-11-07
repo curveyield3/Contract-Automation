@@ -848,6 +848,45 @@ function inheritedQuestionHistoryRefsV1({root,campaignPath,sequence}){
 }
 // Mechanical references into the original accepted Phase 1 canonical source.
 // This roster is an index, not a promotion, summarization, or security finding.
+// Compact source-bound navigation to ALL earlier canonical arrays and
+// accepted original record rosters. This is not a selected candidate list;
+// neither repeated observations nor unpromoted evidence are hidden by a
+// downstream fixed-subject scaffold.
+function inheritedAcceptedRecordSourceRefsV1({root,campaignPath,sequence}){
+ const references=[];
+ for(const phase of [1,2,3,4,5,6,8,9]){
+  if(phase>=sequence)continue;
+  const canonicalPath=path.posix.join(campaignPath,'derived/phase-'+phase,
+    'PHASE_'+String(phase).padStart(2,'0')+'_CANONICAL_DATA_v1.json');
+  let canonical=null,sha256=null,availability='SOURCE_UNAVAILABLE';
+  try{
+   const original=fs.readFileSync(repoFile(root,canonicalPath));
+   sha256=createHash('sha256').update(original).digest('hex');
+   canonical=JSON.parse(original.toString('utf8'));
+   availability=canonical?.phase===phase?'AVAILABLE':'PHASE_IDENTITY_UNVERIFIED';
+  }catch(error){
+   if(sha256)availability='CANONICAL_UNREADABLE';
+  }
+  const queued=canonical?.automationOutputs?.acceptedUnitRecordOrigins;
+  const direct=canonical?.automationOutputs?.directPhaseRecordOrigins;
+  references.push({
+   phaseSequence:phase,canonicalArtifactPath:canonicalPath,
+   canonicalSha256:sha256,availability,
+   completeActionsSelector:'actions',
+   recordOriginRosterSelector:queued?
+    'automationOutputs.acceptedUnitRecordOrigins':direct?
+    'automationOutputs.directPhaseRecordOrigins':null,
+   canonicalGraphSourceSelector:
+    canonical?.automationOutputs?.canonicalGraphSourceRefs?
+     'automationOutputs.canonicalGraphSourceRefs':null,
+   recordOriginAvailability:queued?.availability??direct?.availability??
+    'NOT_RECORDED_IN_HISTORICAL_CANONICAL',
+   acceptedOriginalRecordCount:
+    queued?.records?.length??direct?.records?.length??null
+  });
+ }
+ return references;
+}
 function originalPhase1DiscoveryRosterV1({root,campaignPath}){
   const canonicalPath=path.posix.join(campaignPath,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json');
   const sourceFile=repoFile(root,canonicalPath);
@@ -999,6 +1038,14 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
         'questionHistoryRefs','questionHistoryUnavailable'
       ]);
     }
+  }
+  if(sequence>=2){
+    form.automationInputs.acceptedRecordSourceHistory=
+      inheritedAcceptedRecordSourceRefsV1({root,campaignPath,sequence});
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+      'acceptedRecordSourceHistory'
+    ]);
   }
   // Continue exact accepted discovery evidence across the audit phases.
   // A missing summary remains a nonblocking availability diagnostic.
