@@ -435,7 +435,22 @@ function publishPlan(root,campaign,phase,plan,queue){
   const payload={schemaVersion:'curveyield-lite-solo-unit-plan-page-v1',units:batch};
   const raw=pretty(payload);
   if(Buffer.byteLength(raw)>32768)throw Error('unit plan page exceeds 32 KiB');
-  put(root,rel,payload);pages.push({path:rel,sha256:hex(Buffer.from(raw)),count:batch.length});batch=[];
+  const filePath=repoFile(root,rel);
+  if(!fs.existsSync(filePath)||
+     fs.readFileSync(filePath,'utf8')!==raw){
+   if(fs.existsSync(filePath)){
+    const prior=read(root,rel);
+    for(const priorUnit of asArray(prior.units)){
+     if(queue.units[priorUnit.unitId]?.status==='ACCEPTED'){
+      const current=payload.units.find(u=>u.unitId===priorUnit.unitId);
+      if(!current||JSON.stringify(current)!==JSON.stringify(priorUnit))
+       throw Error('FROZEN_ACCEPTED_UNIT_METADATA_CHANGED: '+priorUnit.unitId);
+     }
+    }
+   }
+   put(root,rel,payload);
+  }
+  pages.push({path:rel,sha256:hex(Buffer.from(raw)),count:batch.length});batch=[];
  };
  for(const unit of plan.units){
   const u=clone(unit);
