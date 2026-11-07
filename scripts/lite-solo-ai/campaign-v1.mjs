@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v37, source-bound v8 evidence delivery.
+// Lite-Solo MiMo / Worker transport bridge v38, verified original v8 evidence delivery.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -1849,10 +1849,14 @@ async function miAdmittedSourceReadV1(source,request){
 }
 async function miCurrentPacketEvidenceV1(issued){
  const refs=issued.packetEvidenceReferences||{};
- const original=[refs.canonicalPacket,...(refs.sourceAndExecutionEvidenceRefs||[])]
-  .filter(v=>v&&typeof v.path==='string'&&/^[a-f0-9]{64}$/.test(v.sha256||''));
+ const candidates=[refs.canonicalPacket,...(refs.sourceAndExecutionEvidenceRefs||[])].filter(Boolean);
  const snapshotCommit=historySnapshotCommit;
- const sources=new Map(),unavailable=[];
+ const sources=new Map(),unavailable=[],original=[];
+ for(const ref of candidates){
+  if(typeof ref.path!=='string'||!/^[a-f0-9]{64}$/.test(ref.sha256||''))
+   unavailable.push({originalReference:ref,availability:'UNMAPPED_SOURCE_OR_MISSING_SHA256'});
+  else original.push(ref);
+ }
  for(const ref of original){
   if(!ref.path.startsWith('campaigns/')){unavailable.push({path:ref.path,status:'NOT_IN_CAMPAIGN_WORKSPACE'});continue;}
   try{
@@ -1897,6 +1901,12 @@ async function miMethodologyV1(issued){
  if(bundle?.authorityCommit!==issued.scope.authorityCommit||
     !bundle.skill?.content||!bundle.phaseGuide?.content)
   throw Error('Frozen v8 technical methodology missing from signed Worker question');
+ const [originalSkill,originalGuide]=await Promise.all([
+  miPinnedGithubFileV1(bundle.skill.path,bundle.authorityCommit,bundle.skill.gitBlobSha),
+  miPinnedGithubFileV1(bundle.phaseGuide.path,bundle.authorityCommit,bundle.phaseGuide.gitBlobSha)]);
+ if(originalSkill.sha256!==bundle.skill.sha256||originalGuide.sha256!==bundle.phaseGuide.sha256||
+    originalSkill.text!==bundle.skill.content||originalGuide.text!==bundle.phaseGuide.content)
+  throw Error('Model-facing original v8 instruction or guide differs from frozen source');
  const refs=bundle.technicalMethodologyReferences||[];
  const methods=[],unavailable=[];
  for(const ref of refs){
@@ -2000,6 +2010,9 @@ async function runTechnicalQuestionTransportV1(){
    priorAcceptedOriginalCanonicals:canonicalContext,
    priorQuestionAndAnswerHistory:questionContext,
    originalPhase1DiscoveryEvidence:phase1Context,
+   assignedUnit:{unitId:issued.scope.unitId,phase:issued.scope.phase,step:issued.scope.step,
+    assignedOutputOrPacketDescriptor:issued.packetEvidenceReferences?.descriptor??null,
+    controllerPacketReference:issued.packetEvidenceReferences?.canonicalPacket??null},
    sourceReadExample:{admittedSourceEvidenceRequest:{kind:'INDEX',start:0}},
    sourceFileExample:source.exactReadExamples?.file??null,
    packetReadExample:packet.readSyntax??null,
