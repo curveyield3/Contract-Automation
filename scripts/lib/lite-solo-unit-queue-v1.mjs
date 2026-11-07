@@ -1584,6 +1584,11 @@ export function collectAcceptedUnitRecordOriginsV1({root,campaignPath,directory,
    roster.records.push({
     unitId:u.unitId,memberUnitId:member.unitId,
     unitKind:u.kind,field:member.field,collection,
+    ...(u.kind==='APPEND'?{
+     appendChunkNumber:u.appendChunkNumber??1,
+     continuationAfterUnitId:u.continuationAfterUnitId??null,
+     appendSeriesUnitId:u.appendSeriesUnitId??u.unitId
+    }:{}),
     originalRecordOrdinal:recordOrdinal,canonicalRecordIndex:canonicalIndex,
     canonicalRecordSelector:collection!==null&&Number.isInteger(canonicalIndex)?
      collection+'['+canonicalIndex+']':null,
