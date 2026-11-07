@@ -239,14 +239,30 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
   const graphRecords=importedRecords(canonical,schema.bookkeepingMappings?.graphRecordPaths);
   const obligationRecords=importedRecords(canonical,schema.bookkeepingMappings?.obligationRecordPaths);
   const invalidationRecords=importedRecords(canonical,schema.bookkeepingMappings?.invalidationRecordPaths);
-  graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:graphRecords,importedAt:now});
-  ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:obligationRecords,importedAt:now});
-  invalid.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:invalidationRecords,importedAt:now});
+  const originalSourceDirectory={
+    canonicalArtifactPath:canonicalRel,
+    originalRecordSourceSelectors:[
+      'automationOutputs.acceptedUnitRecordOrigins',
+      'automationOutputs.directPhaseRecordOrigins'],
+    canonicalGraphSourceSelector:'automationOutputs.canonicalGraphSourceRefs',
+    completeAcceptedActionSelector:'actions'
+  };
+  graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,
+    records:graphRecords,importedAt:now,originalSourceDirectory});
+  ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,
+    records:obligationRecords,importedAt:now,originalSourceDirectory});
+  invalid.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,
+    records:invalidationRecords,importedAt:now,originalSourceDirectory});
 
+  const originalRecordOrigins=[
+    ...(canonical.automationOutputs?.acceptedUnitRecordOrigins?.records??[]),
+    ...(canonical.automationOutputs?.directPhaseRecordOrigins?.records??[])
+  ];
   for(const record of obligationRecords){
     normalizeFormalObligationsIntoLedger({ledger,items:record.value,originPhase:schema.phase,
       canonicalRel,now,root,authorityRoot,
-      sourceCollectionPath:record.path,sourceKind:'AI_AUTHORED_PHASE_OUTPUT'});
+      sourceCollectionPath:record.path,sourceKind:'AI_AUTHORED_PHASE_OUTPUT',
+      originalRecordOrigins});
   }
 
   const identityComparison=canonical?.automationInputs?.identityComparison;
