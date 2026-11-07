@@ -798,9 +798,22 @@ async function questionHistoryEvidenceReadV1(history,request){
 function mergeAcceptedCanonicalQuestionRostersV1(questionHistory,canonicalHistory){
  const originals=[...(canonicalHistory?.sources?.values()??[])]
   .filter(s=>[4,5,6].includes(s.phaseSequence));
- const refs=originals.flatMap(source=>(source.canonical?.automationOutputs
-   ?.questionHistoryRoster?.histories??[]).map((ref,index)=>({source,ref,index})));
- if(!refs.length)return questionHistory;
+ const historicalRosters=originals.map(source=>({
+  source,rows:source.canonical?.automationOutputs?.questionHistoryRoster?.histories
+ }));
+ const refs=historicalRosters.flatMap(({source,rows})=>
+  Array.isArray(rows)?rows.map((ref,index)=>({source,ref,index})):[]);
+ const shapeUnavailable=historicalRosters.filter(({rows})=>
+  rows!==undefined&&!Array.isArray(rows)).map(({source,rows})=>({
+   availability:'HISTORICAL_QUESTION_ROSTER_SHAPE_UNRECOGNIZED',
+   canonicalReferenceKey:source.referenceKey,
+   originalSourceSelector:'/automationOutputs/questionHistoryRoster/histories',
+   originalValueKind:rows===null?'null':typeof rows,
+   originalValueSha256:sha(JSON.stringify(rows)),
+   interpretationOwner:'MIMO',
+   noProcessGate:true
+  }));
+ if(!refs.length&&!shapeUnavailable.length)return questionHistory;
  const manifest=canonicalHistory.manifest;
  const result=questionHistory??{
   schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
@@ -810,7 +823,9 @@ function mergeAcceptedCanonicalQuestionRostersV1(questionHistory,canonicalHistor
   sourceRepo:manifest.sourceRepo,sourceBranch:manifest.sourceBranch,
   snapshotCommit:manifest.snapshotCommit,histories:[],unavailable:[]
  };
- result.histories??=[];result.unavailable??=[];
+ if(!Array.isArray(result.histories))result.histories=[];
+ if(!Array.isArray(result.unavailable))result.unavailable=[];
+ result.unavailable.push(...shapeUnavailable);
  const known=new Map(result.histories.map(row=>[
   row.historyReferenceKey??[
    row.phaseSequence,row.unitId,row.indexSha256,row.phaseEpoch].join(':'),row]));
