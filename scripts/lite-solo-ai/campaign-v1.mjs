@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v40, source-bound question checkpoint history.
+// Lite-Solo MiMo / Worker transport bridge v41, autonomous v8 question and expansion rounds.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2070,134 +2070,227 @@ async function miRecentOriginalAnswersV1(issued){
 // Step 2 technical-answer transport. MiMo never writes route/request JSON in v8.
 // Existing source, model, OIDC, transcript and CPU watchdog infrastructure is reused.
 async function runTechnicalQuestionTransportV1(){
- const issuedText=await workerCall({operation:'next_question'});
- let issued;try{issued=JSON.parse(issuedText);}catch{throw Error('Worker technical question is not JSON');}
- if(['AI_TECHNICAL_AWAITING_CONTROLLER','AI_TECHNICAL_AWAITING_OWNED_UNIT','AI_TECHNICAL_CURRENT_UNAVAILABLE'].includes(issued.status)){
-  console.log(JSON.stringify({status:'MIMO_QUESTION_WAITING_ON_WORKER',
-   campaignId,phase:issued.phase??null,step:issued.step??null,
-   controllerStatus:issued.controllerStatus??null,substep:issued.engagementStage??null,
-   nextOwner:issued.nextOwner||null,controllerAccepted:false}));return;
- }
- if(issued.status!=='AI_TECHNICAL_QUESTION_ISSUED'||
-    issued.schemaVersion!=='machine-intelligence-technical-question-transport-v1'||
-    !issued.question?.questionText||!issued.scopeSha256||!issued.scope?.questionSha256||
-    !issued.admittedSource?.sourceArchiveCommit||!issued.evidenceLease||!issued.technicalMethodology)
-  throw Error('Worker did not issue frozen v8 methodology and admitted source for exact technical question');
- const methodology=await miMethodologyV1(issued);
- const source=await miAdmittedSourceInventoryV1(issued.admittedSource)
-  .catch(e=>({schemaVersion:'machine-intelligence-source-file-inventory-v1',
-   availability:'PINNED_ADMITTED_SOURCE_UNAVAILABLE',
-   sourceArchiveCommit:issued.admittedSource.sourceArchiveCommit,
-   admittedSourceSha256:issued.admittedSource.admittedSourceSha256,
-   originalFileCount:null,files:[],reason:String(e.message||e)}));
- const lease=JSON.stringify({workerResponse:issued.evidenceLease});
- const missing=(family,e)=>({schemaVersion:family,
-  unavailable:[{availability:'ORIGINAL_EVIDENCE_READ_UNAVAILABLE',reason:String(e.message||e)}]});
- let questions=await sourceBoundQuestionHistoryV1(lease)
-  .catch(e=>missing('curveyield-ai-question-evidence-delivery-v1',e));
- const canonicals=await sourceBoundCanonicalHistoryV1(lease)
-  .catch(e=>({manifest:{schemaVersion:'curveyield-mi-original-canonical-history-v1',
-   availability:'ORIGINAL_CANONICAL_READ_UNAVAILABLE',
-   unavailable:[{reason:String(e.message||e)}]},sources:new Map()}));
- questions=mergeAcceptedCanonicalQuestionRostersV1(questions,canonicals);
- const phase1=await sourceBoundPhase1EvidenceV1(lease)
-  .catch(e=>({manifest:{schemaVersion:'curveyield-mi-phase1-model-evidence-v1',
-   availability:'ORIGINAL_PHASE1_READ_UNAVAILABLE',reason:String(e.message||e)},source:null}));
- const packet=await miCurrentPacketEvidenceV1(issued)
-  .catch(e=>({schemaVersion:'machine-intelligence-packet-original-evidence-v1',
-   snapshotCommit:historySnapshotCommit,availability:'PACKET_READ_UNAVAILABLE',
-   originalSourceCount:0,initial:[],sources:new Map(),
-   unavailable:[{reason:String(e.message||e)}]}));
- const {files:privateSourceIndex,...sourceContext}=source;
- const {sources:privatePacketFiles,...packetContext}=packet;
- const canonicalContext=canonicals?canonicalHistoryModelContextV1(canonicals):null;
- const questionContext=questions?questionHistoryModelContextV1(questions):null;
- const phase1Context=phase1?structuredClone(phase1.manifest):null;
- // The existing historical readers' OLD return-route instructions are NOT v8
- // instructions. Preserve source records and retrieval keys; change only this
- // adapter-created prompt guidance, never original evidence bytes.
- if(canonicalContext?.retrievalInterface)canonicalContext.retrievalInterface.afterReading=
-  'After local original-evidence reads, answer only the exact v8 technical question as original plain text.';
- if(questionContext?.retrievalInterface)questionContext.retrievalInterface.afterReading=
-  'Prior investigative answers are evidence, not proof. No Worker route/request JSON.';
- if(phase1Context?.retrievalInstructions)phase1Context.retrievalInstructions.note=
-  'Read original Phase 1 evidence locally and answer the v8 technical question as plain text.';
- const messages=[
-  {role:'system',content:
-   'You are MiMo, the independent smart-contract security auditor. Apply the COMPLETE original frozen methodology, study real admitted source and all relevant original evidence. Answer only the Worker-issued technical question. You may retrieve exact evidence using ONE local read request JSON with admittedSourceEvidenceRequest, packetEvidenceRequest, originalCanonicalEvidenceRequest, questionHistoryEvidenceRequest, or sourceEvidenceRequest. The adapter executes these local reads; they are NOT Worker or GitHub commands. After reading, return your exact technical answer as plain text. Never invent missing evidence, security proofs, API paths, leases, forms, or controller acceptance.'},
-  {role:'user',content:JSON.stringify({
-   protocol:'machine-intelligence-technical-question-transport-v1',
-   question:issued.question.questionText,questionId:issued.question.questionId,
-   questionMode:issued.question.mode,technicalCriteria:issued.question.technicalCriteria,
-   literalQuestionCatalogReference:issued.source,
-   sourceSha256:issued.scope.sourceSha256,sourceArchiveCommit:issued.admittedSource.sourceArchiveCommit,
-   authorityCommit:issued.scope.authorityCommit,
-   controllerEvidenceSnapshotCommit:historySnapshotCommit,
-   completeApplicableFrozenTechnicalMethodology:methodology,
-   admittedSourceInventory:sourceContext,currentPacketOriginals:packetContext,
-   priorAcceptedOriginalCanonicals:canonicalContext,
-   priorQuestionAndAnswerHistory:questionContext,
-   originalPhase1DiscoveryEvidence:phase1Context,
-   samePhaseAcceptedOriginals:issued.samePhaseAcceptedEvidence??[],
-   assignedUnit:{unitId:issued.scope.unitId,phase:issued.scope.phase,step:issued.scope.step,
-    assignedOutputOrPacketDescriptor:issued.packetEvidenceReferences?.descriptor??null,
-    controllerPacketReference:issued.packetEvidenceReferences?.canonicalPacket??null},
-   sourceReadExample:{admittedSourceEvidenceRequest:{kind:'INDEX',start:0}},
-   sourceFileExample:source.exactReadExamples?.file??null,
-   packetReadExample:packet.readSyntax??null,
-   originalContinuationRule:'An initial page or reference is never the full original when nextOffset or nextStart is present. Request subsequent pages. Nothing is treated as complete by omission.',
-   requiredFinalResponse:'Original plain-text security answer only, no API route/request or controller form.'
-  })}
- ];
- console.log(JSON.stringify({status:'MIMO_V8_TECHNICAL_EVIDENCE_DELIVERED',
-  campaignId,phase:issued.scope.phase,step:issued.scope.step,
-  admittedFiles:source.originalFileCount,sourceAvailability:source.availability,
-  packetOriginalFiles:packet.originalSourceCount,packetUnavailable:packet.unavailable?.length??0,
-  previousCanonicalRevisions:canonicals?.manifest?.rosters?.length??0,
-  priorQuestionHistories:questions?.histories?.length??0,
-  phase1OriginalAvailability:phase1?.manifest?.availability??null,
-  sourceCommit:issued.admittedSource.sourceArchiveCommit,
-  authorityCommit:issued.scope.authorityCommit,
-  controllerEvidenceCommit:historySnapshotCommit,
-  modelControlsWorkerRoutes:false,originalSourceTextPrivate:true}));
- let answer=await modelCall(messages,{technicalAnswer:true});
- const lastReads=[];
+ // One existing controller unit/lease is the packet identity; question count,
+ // ordered text and continuation rounds belong solely to MiMo and its
+ // committed controller question index. A checkpoint is not work acceptance.
+ let selectedUnit=null,activePacketKey=null,dialogue=null;
+ let packetEvidence=null,questionIterations=0;
  while(true){
-  const read=miLocalEvidenceReadRequestV1(answer);
-  if(!read)break;
-  let result;
-  if(read.error)result=read.error;
-  else if(read.family==='admittedSourceEvidenceRequest')
-   result=await miAdmittedSourceReadV1(source,read.request);
-  else if(read.family==='packetEvidenceRequest')
-   result=miPacketEvidenceReadV1(packet,read.request);
-  else result=await modelLocalEvidenceReadV1(answer,canonicals,phase1,questions);
-  if(lastReads.length===2){
-   const old=lastReads.shift();messages.splice(old,2);
-   for(let i=0;i<lastReads.length;i++)lastReads[i]-=2;
+  const issuedText=await workerCall({operation:'next_question',
+   ...(selectedUnit?{unitId:selectedUnit.unitId,lease:selectedUnit.lease}:{})});
+  let issued;try{issued=JSON.parse(issuedText);}catch{throw Error('Worker technical question is not JSON');}
+  if(issued.status==='AI_TECHNICAL_PACKET_QUESTIONS_COMPLETE'){
+   console.log(JSON.stringify({status:'MIMO_PACKET_QUESTION_INVESTIGATION_COMPLETE',
+    campaignId,phase:issued.phase,step:issued.step,unitId:issued.unitId,
+    rounds:issued.round,questionCount:issued.questionCount,
+    answeredCount:issued.answeredCount,
+    questionLedgerComplete:true,controllerAccepted:false,
+    nextOwner:'EXISTING_CONTROLLER_UNIT_COMPILATION_AND_SUBMISSION'}));
+   return;
   }
-  lastReads.push(messages.length);
-  messages.push({role:'assistant',content:answer});
-  messages.push({role:'user',content:JSON.stringify(result)});
-  console.log(JSON.stringify({status:'MIMO_ORIGINAL_SOURCE_CONTINUATION_READ',
-   family:read.family??null,kind:read.request?.kind??null,path:read.request?.path??null,
-   availability:result.availability??'PINNED',sha256:result.sha256??null,
-   nextOffset:result.nextOffset??null,controllerAccepted:false}));
-  answer=await modelCall(messages,{technicalAnswer:true});
+  if(['AI_TECHNICAL_AWAITING_CONTROLLER','AI_TECHNICAL_AWAITING_OWNED_UNIT',
+      'AI_TECHNICAL_CURRENT_UNAVAILABLE','AI_TECHNICAL_PREVIOUS_PACKET_NOT_IN_CURRENT_LEASE'].includes(issued.status)){
+   console.log(JSON.stringify({status:'MIMO_QUESTION_WAITING_ON_WORKER',
+    campaignId,phase:issued.phase??null,step:issued.step??null,
+    controllerStatus:issued.controllerStatus??null,substep:issued.engagementStage??null,
+    nextOwner:issued.nextOwner||null,controllerAccepted:false}));
+   return;
+  }
+  if(issued.status!=='AI_TECHNICAL_QUESTION_ISSUED'||
+     issued.schemaVersion!=='machine-intelligence-technical-question-transport-v1'||
+     typeof issued.question?.questionText!=='string'||!issued.question.questionText||
+     !issued.scopeSha256||!issued.scope?.questionSha256||
+     !issued.admittedSource?.sourceArchiveCommit||!issued.evidenceLease||!issued.technicalMethodology)
+   throw Error('Worker did not issue a frozen v8 technical question and exact admitted source');
+  if(selectedUnit&&(issued.scope.unitId!==selectedUnit.unitId||
+     issued.scope.lease!==selectedUnit.lease))
+   throw Error('Original controller packet ownership changed during technical investigation');
+  selectedUnit={unitId:issued.scope.unitId,lease:issued.scope.lease};
+  const packetKey=[campaignId,issued.scope.phase,issued.scope.step,
+   issued.scope.phaseEpoch,selectedUnit.unitId,selectedUnit.lease].join(':');
+  if(packetKey!==activePacketKey){
+   activePacketKey=packetKey;dialogue=null;packetEvidence=null;
+  }
+  if(!dialogue){
+   const methodology=await miMethodologyV1(issued);
+   const source=await miAdmittedSourceInventoryV1(issued.admittedSource)
+    .catch(e=>({schemaVersion:'machine-intelligence-source-file-inventory-v1',
+     availability:'PINNED_ADMITTED_SOURCE_UNAVAILABLE',
+     sourceArchiveCommit:issued.admittedSource.sourceArchiveCommit,
+     admittedSourceSha256:issued.admittedSource.admittedSourceSha256,
+     originalFileCount:null,files:[],reason:String(e.message||e)}));
+   const lease=JSON.stringify({workerResponse:issued.evidenceLease});
+   const missing=(family,e)=>({schemaVersion:family,
+    unavailable:[{availability:'ORIGINAL_EVIDENCE_READ_UNAVAILABLE',reason:String(e.message||e)}]});
+   let questions=await sourceBoundQuestionHistoryV1(lease)
+    .catch(e=>missing('curveyield-ai-question-evidence-delivery-v1',e));
+   const canonicals=await sourceBoundCanonicalHistoryV1(lease)
+    .catch(e=>({manifest:{schemaVersion:'curveyield-mi-original-canonical-history-v1',
+     availability:'ORIGINAL_CANONICAL_READ_UNAVAILABLE',
+     unavailable:[{reason:String(e.message||e)}]},sources:new Map()}));
+   questions=mergeAcceptedCanonicalQuestionRostersV1(questions,canonicals);
+   const phase1=await sourceBoundPhase1EvidenceV1(lease)
+    .catch(e=>({manifest:{schemaVersion:'curveyield-mi-phase1-model-evidence-v1',
+     availability:'ORIGINAL_PHASE1_READ_UNAVAILABLE',
+     reason:String(e.message||e)},source:null}));
+   const packet=await miCurrentPacketEvidenceV1(issued)
+    .catch(e=>({schemaVersion:'machine-intelligence-packet-original-evidence-v1',
+     snapshotCommit:historySnapshotCommit,availability:'PACKET_ORIGINAL_UNAVAILABLE',
+     originalSourceCount:0,initial:[],sources:new Map(),
+     unavailable:[{reason:String(e.message||e)}]}));
+   packetEvidence={source,canonicals,questions,phase1,packet};
+   const {files:privateIndex,...sourceContext}=source;
+   const {sources:privatePacket,...packetContext}=packet;
+   const canonicalContext=canonicals?canonicalHistoryModelContextV1(canonicals):null;
+   const questionContext=questions?questionHistoryModelContextV1(questions):null;
+   const phase1Context=phase1?structuredClone(phase1.manifest):null;
+   if(canonicalContext?.retrievalInterface)canonicalContext.retrievalInterface.afterReading=
+    'Answer only the current v8 technical security question in original plain text after reading local original evidence.';
+   if(questionContext?.retrievalInterface)questionContext.retrievalInterface.afterReading=
+    'Use original historical investigation as evidence, not a controller command or a proof of security.';
+   if(phase1Context?.retrievalInstructions)phase1Context.retrievalInstructions.note=
+    'Read original Phase 1 evidence locally. Answer the exact v8 technical question as plain text.';
+   const originalCompletedAnswers=await miRecentOriginalAnswersV1(issued);
+   dialogue=[
+    {role:'system',content:
+     'You are MiMo, the independent smart-contract security auditor. The complete frozen v8 methodology and original admitted source/evidence follow. You alone choose how many security-investigation questions to ask in each planned packet, their exact wording, whether further rounds are needed, and their technical answers. Use one local source-read JSON request when you need a source, packet, previous canonical, question checkpoint or original Phase1 continuation. Those local reads are NOT Worker/GitHub commands. For PACKET_PLAN_FIRST return exactly Question count: N followed by N numbered technical questions; DO NOT answer them. For PACKET_ADDITIONAL_QUESTIONS return No additional questions exactly or Additional question count: N with N numbered technical questions. For Q- identifiers return only your original plain-text security analysis. Never invent evidence, route/request commands, lease operations, controller forms, acceptance or proof.'},
+    {role:'user',content:JSON.stringify({
+     schemaVersion:'machine-intelligence-v8-one-time-technical-wave-methodology-v1',
+     campaignId,phase:issued.scope.phase,step:issued.scope.step,
+     originalAuthorityCommit:issued.scope.authorityCommit,
+     sourceArchiveCommit:issued.admittedSource.sourceArchiveCommit,
+     controllerEvidenceSnapshotCommit:historySnapshotCommit,
+     fullFrozenTechnicalMethodology:methodology,
+     admittedOriginalSourceInventory:sourceContext,
+     assignedOriginalPacketAndExecutionEvidence:packetContext,
+     priorOriginalAcceptedCanonicalEvidence:canonicalContext,
+     priorInvestigativeQuestionHistories:questionContext,
+     acceptedPhase1DiscoveryEvidence:phase1Context,
+     samePhaseAcceptedOriginalEvidence:issued.samePhaseAcceptedEvidence??[],
+     resumedPacketPriorAnswerPages:originalCompletedAnswers,
+     packetLedger:miQuestionLedgerContextV1(issued),
+     originalReadFormats:{
+      source:{admittedSourceEvidenceRequest:{kind:'INDEX',start:0}},
+      packet:{packetEvidenceRequest:{kind:'FILE',
+       path:packet.initial?.[0]?.path??'<exact packet path>',offset:0}},
+      currentQuestionHistory:{packetQuestionEvidenceRequest:{kind:'CHECKPOINT_INDEX',start:0}}},
+     originalEvidenceAvailability:'All sources and checkpoints remain available by pinned index/file/offset reads. A preview is not complete if nextOffset/nextStart is present.',
+     sourceBoundInterpretationOwner:'MIMO',modelMayNeverDecideControllerAcceptance:true})}
+   ];
+   console.log(JSON.stringify({status:'MIMO_V8_WAVE_METHODOLOGY_DELIVERED_ONCE',
+    campaignId,phase:issued.scope.phase,step:issued.scope.step,
+    unitId:issued.scope.unitId,authorityCommit:issued.scope.authorityCommit,
+    sourceCommit:issued.admittedSource.sourceArchiveCommit,
+    controllerSnapshot:historySnapshotCommit,
+    admittedSourceFiles:source.originalFileCount,
+    priorCanonicalRevisions:canonicals?.manifest?.rosters?.length??0,
+    priorQuestionHistories:questions?.histories?.length??0,
+    missingPacketEvidence:packet.unavailable?.length??0,
+    noWorkerReasoning:true,completeMethodologySent:true}));
+  }
+  // MiMo sees the exact original current question, its current committed
+  // roster revision, and prior actual answers when a workflow has resumed.
+  dialogue.push({role:'user',content:JSON.stringify({
+   schemaVersion:'machine-intelligence-issued-one-technical-question-v1',
+   questionId:issued.question.questionId,originalText:issued.question.questionText,
+   originalTechnicalCriteria:issued.question.technicalCriteria,
+   questionMode:issued.question.mode,round:issued.question.round??null,
+   committedQuestionLedger:miQuestionLedgerContextV1(issued),
+   originalAnswerPages:questionIterations===0?[]:
+    issued.question.questionId==='PACKET_ADDITIONAL_QUESTIONS'?
+     await miRecentOriginalAnswersV1(issued):[],
+   completeOnlyIfMiMoExplicitlyDecides:'No additional questions',
+   responseProtocol:'Original verbatim question plan, expansion decision or plain-text answer only. No Worker route/request.'})});
+  let original=await modelCall(dialogue,{technicalAnswer:true});
+  const localReads=[];
+  while(true){
+   const read=miLocalEvidenceReadRequestV1(original);
+   if(!read)break;
+   let result;
+   if(read.error)result=read.error;
+   else if(read.family==='admittedSourceEvidenceRequest')
+    result=await miAdmittedSourceReadV1(packetEvidence.source,read.request);
+   else if(read.family==='packetEvidenceRequest')
+    result=miPacketEvidenceReadV1(packetEvidence.packet,read.request);
+   else if(read.family==='packetQuestionEvidenceRequest')
+    result=await miQuestionLedgerReadV1(issued,read.request);
+   else result=await modelLocalEvidenceReadV1(original,
+     packetEvidence.canonicals,packetEvidence.phase1,packetEvidence.questions);
+   if(localReads.length===2){
+    const at=localReads.shift();dialogue.splice(at,2);
+    for(let i=0;i<localReads.length;i++)localReads[i]-=2;
+   }
+   localReads.push(dialogue.length);
+   dialogue.push({role:'assistant',content:original});
+   dialogue.push({role:'user',content:JSON.stringify(result)});
+   console.log(JSON.stringify({status:'MIMO_EXACT_SOURCE_CONTINUATION_READ',
+    family:read.family??null,kind:read.request?.kind??null,
+    path:read.request?.path??null,availability:result.availability??'PINNED',
+    sha256:result.sha256??result.sourceCheckpointSha256??null,
+    nextOffset:result.nextOffset??null,originalTextPrivate:true}));
+   original=await modelCall(dialogue,{technicalAnswer:true});
+  }
+  // Preserve the precise text until the source-bound checkpoint confirms it.
+  // Formatting corrections are authored by MiMo; only syntax is evaluated.
+  let receipt,attempt=0;
+  for(;;){
+   const body={operation:'answer_question',unitId:issued.scope.unitId,
+    lease:issued.scope.lease,scopeSha256:issued.scopeSha256,
+    questionId:issued.scope.questionId,questionSha256:issued.scope.questionSha256,
+    answerText:original};
+   const textResponse=await workerCall(body);
+   try{receipt=JSON.parse(textResponse);}catch{throw Error('Original answer receipt is not JSON');}
+   if(receipt.status==='AI_TECHNICAL_FORMAT_CLARIFICATION'){
+    dialogue.push({role:'assistant',content:original});
+    dialogue.push({role:'user',content:JSON.stringify({
+     originalWorkerQuestionUnchanged:receipt.questionText,
+     mandatoryVerbatimFormat:receipt.exactFrozenFormattingInstructions,
+     syntaxProblem:'The list did not match the original numbered question-count grammar.',
+     exactRequiredHeader:receipt.requiredHeader,
+     instruction:'Reissue your own ORIGINAL planned questions with exactly the required count and ordered 1. ... N. entries. Do not answer them, change their security meaning for controller convenience, or emit any API command.'})});
+    original=await modelCall(dialogue,{technicalAnswer:true});
+    continue;
+   }
+   if(receipt.status==='AI_TECHNICAL_CHECKPOINT_REQUIRES_RECOVERY'){
+    // A publish race can already have committed this exact answer. Preserve
+    // its private R2 copy and ask the controller for the next ACTUAL status.
+    const probeRaw=await workerCall({operation:'next_question',
+     unitId:issued.scope.unitId,lease:issued.scope.lease});
+    let probe;try{probe=JSON.parse(probeRaw);}catch{throw Error('Cannot inspect controller checkpoint after recovery');}
+    if(probe.status==='AI_TECHNICAL_QUESTION_ISSUED'&&
+       probe.scopeSha256===issued.scopeSha256&&attempt<3){
+     attempt++;continue; // exact original answer, no duplicate model inference
+    }
+    if(probe.status==='AI_TECHNICAL_PACKET_QUESTIONS_COMPLETE'||
+       probe.status==='AI_TECHNICAL_QUESTION_ISSUED'&&probe.scope.questionId!==issued.scope.questionId){
+     console.log(JSON.stringify({status:'MIMO_CHECKPOINT_RECONCILED',
+      campaignId,unitId:issued.scope.unitId,oldQuestion:issued.scope.questionId,
+      nextQuestion:probe.scope?.questionId??null,controllerAccepted:false}));
+     break;
+    }
+    throw Error('Original controller checkpoint could not be reconciled for '+issued.scope.questionId+
+     ': '+String(receipt.controllerStatus||receipt.status));
+   }
+   const supported=receipt.status=== 'AI_TECHNICAL_QUESTION_RECORDED' ||
+    receipt.status==='AI_TECHNICAL_ANSWER_STAGED';
+   if(!supported||receipt.scopeSha256!==issued.scopeSha256||
+      receipt.answerSha256!==sha(original))
+    throw Error('Original answer not preserved with exact controller question identity: '+receipt.status);
+   console.log(JSON.stringify({status:'MIMO_ORIGINAL_TECHNICAL_QUESTION_RECORDED',
+    campaignId,phase:issued.scope.phase,step:issued.scope.step,
+    unitId:issued.scope.unitId,questionId:issued.scope.questionId,
+    questionRound:issued.question.round??null,checkpointMode:receipt.checkpointMode??null,
+    indexRevision:receipt.indexRevision??null,answerSha256:receipt.answerSha256,
+    answerBytes:receipt.answerBytes,controllerAccepted:false,
+    nextQuestionSelectedOnlyByController:true}));
+   break;
+  }
+  dialogue.push({role:'assistant',content:original});
+  questionIterations++;
+  if(issued.question.mode!=='PLANNED_PER_PACKET')return;
+  // Next loop obtains the ACTUAL committed roster, never infers the next
+  // question from this answer or a locally guessed coverage threshold.
  }
- const receiptText=await workerCall({operation:'answer_question',
-  scopeSha256:issued.scopeSha256,questionId:issued.scope.questionId,
-  questionSha256:issued.scope.questionSha256,answerText:answer});
- let receipt;try{receipt=JSON.parse(receiptText);}catch{throw Error('Invalid Worker answer receipt');}
- if(receipt.status!=='AI_TECHNICAL_ANSWER_STAGED'||
-    receipt.scopeSha256!==issued.scopeSha256||receipt.answerSha256!==sha(answer))
-  throw Error('Original technical answer not preserved byte-for-byte');
- console.log(JSON.stringify({status:'MIMO_TECHNICAL_ANSWER_TRANSPORT_VERIFIED',
-  campaignId,phase:issued.scope.phase,step:issued.scope.step,unitId:issued.scope.unitId,
-  questionId:issued.scope.questionId,answerSha256:receipt.answerSha256,
-  answerBytes:receipt.answerBytes,controllerAccepted:false,nextDependency:receipt.awaiting}));
- // Question expansion, immutable GitHub checkpoints, typed submissions and
- // administrative substeps remain independently owned by Steps 4-8.
 }
 const negotiatedText=await workerCall({operation:'protocol'});
 let negotiated;try{negotiated=JSON.parse(negotiatedText);}catch{throw Error('Invalid Worker protocol negotiation');}
