@@ -50,9 +50,9 @@ const recordKey=(pathTokens,value,i)=>{
 };
 const clone=x=>structuredClone(x);
 
-const CONTINUATION_FILE_V13=/^shard-[0-9]{4}_CONT_([0-9]{4})_v1\\.json$/;
+const CONTINUATION_FILE_V13=/^shard-[0-9]{4}_CONT_([0-9]{4})_v1\.json$/;
 const appendContinuationFileV13=(base,chunk)=>
- base.replace(/_v1\\.json$/,'_CONT_'+String(chunk).padStart(4,'0')+'_v1.json');
+ base.replace(/_v1\.json$/,'_CONT_'+String(chunk).padStart(4,'0')+'_v1.json');
 const appendChunkKeyV13=(tokens,chunk,ordinal)=>
  JSON.stringify(tokens)+':APPEND-C'+String(chunk).padStart(4,'0')+'-'+
  String(ordinal+1).padStart(4,'0');
@@ -65,7 +65,7 @@ const appendChunkKeyV13=(tokens,chunk,ordinal)=>
 function directAppendPagesV13({root,workDir,desc,primary}){
  if(!desc.append)return [];
  const names=fs.readdirSync(relfile(root,workDir));
- const prefix=desc.file.replace(/_v1\\.json$/,'_CONT_');
+ const prefix=desc.file.replace(/_v1\.json$/,'_CONT_');
  const suffix='_v1.json';
  const found=names.filter(name=>name.startsWith(prefix)&&name.endsWith(suffix));
  const numbered=found.map(file=>{
