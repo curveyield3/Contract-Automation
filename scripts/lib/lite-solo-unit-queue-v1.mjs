@@ -1931,11 +1931,28 @@ function typedQuestionReferenceV1(value,{phase,unitId}){
   return {checkpointPath,checkpointRecordSelector:'records['+ordinal+']',
    sourceReferenceKind:'EXACT_CHECKPOINT_RECORD_POINTER'};
  };
+ const indexPointer=(indexPath,selector)=>{
+  if(typeof indexPath!=='string'||
+     !indexPath.endsWith('/questions/QUESTION_INDEX_v1.json')||
+     typeof selector!=='string')return null;
+  let ordinal=null;
+  if(selector.startsWith('questions[')&&selector.endsWith(']')){
+   const value=selector.slice(10,-1);
+   if(/^[0-9]+$/.test(value))ordinal=Number(value);
+  }else if(selector.startsWith('/questions/')){
+   const value=selector.slice(11);
+   if(/^[0-9]+$/.test(value))ordinal=Number(value);
+  }
+  if(!Number.isSafeInteger(ordinal)||ordinal<0)return null;
+  return {questionIndexPath:indexPath,questionIndexSelector:'questions['+
+   ordinal+']',sourceReferenceKind:'EXACT_QUESTION_INDEX_POINTER'};
+ };
  if(typeof value==='string'){
   const ref=value.trim();
   const hash=ref.indexOf('#');
   if(hash>0){
-   const source=checkpointPointer(ref.slice(0,hash),ref.slice(hash+1));
+   const source=checkpointPointer(ref.slice(0,hash),ref.slice(hash+1))??
+    indexPointer(ref.slice(0,hash),ref.slice(hash+1));
    if(source)return source;
   }
   if(QUESTION_ID_V1.test(ref)&&unitId)
@@ -1950,6 +1967,10 @@ function typedQuestionReferenceV1(value,{phase,unitId}){
  }
  if(isObject(value)&&value.checkpointPath&&value.checkpointRecordSelector){
   const source=checkpointPointer(value.checkpointPath,value.checkpointRecordSelector);
+  if(source)return source;
+ }
+ if(isObject(value)&&value.questionIndexPath&&value.questionIndexSelector){
+  const source=indexPointer(value.questionIndexPath,value.questionIndexSelector);
   if(source)return source;
  }
  if(!isObject(value)||!QUESTION_ID_V1.test(String(value.questionId??'')))
@@ -1992,6 +2013,7 @@ function explicitQuestionRefsInRecordV1(value,{phase,unitId,selector}){
        /^Q-[0-9]+$/.test(ref.trim())||
        /\/Q-[0-9]+/.test(ref)||
        ref.includes('/questions/checkpoints/')||
+       ref.includes('/questions/QUESTION_INDEX_v1.json')||
        key.toLowerCase().includes('question'))||
        isObject(ref)&&Object.hasOwn(ref,'questionId'))
       refs.push({authored:null,sourceSelector,
@@ -2021,8 +2043,13 @@ export function collectExplicitQuestionOutputLinksV1({
   sourceMeaning:'NO_SECURITY_INFERENCE'};
  const questionByIdentity=new Map(histories.questions.map((q,i)=>[
   JSON.stringify([q.phaseSequence,q.unitId,q.questionId]),{q,index:i}]));
- const questionByCheckpoint=new Map();
+ const questionByCheckpoint=new Map(),questionByIndex=new Map();
  for(const [i,question] of histories.questions.entries()){
+  const indexKey=JSON.stringify([question.questionIndexPath,
+   question.questionTextSource?.selector?.replace(/\\.questionText$/,'')]);
+  const indexEntries=questionByIndex.get(indexKey)??[];
+  indexEntries.push({q:question,index:i});
+  questionByIndex.set(indexKey,indexEntries);
   for(const version of question.checkpointEvents??[]){
    const key=JSON.stringify([version.checkpointPath,
     version.checkpointRecordSelector]);
@@ -2044,6 +2071,15 @@ export function collectExplicitQuestionOutputLinksV1({
      questionId:match.q.questionId,
      checkpointRevision:match.version.checkpointRevision,
      sourceReferenceKind:'EXACT_CHECKPOINT_RECORD_POINTER'};
+   }else question=null;
+  }else if(question?.sourceReferenceKind==='EXACT_QUESTION_INDEX_POINTER'){
+   const candidates=questionByIndex.get(JSON.stringify([
+    question.questionIndexPath,question.questionIndexSelector]))??[];
+   if(candidates.length===1){
+    const match=candidates[0];
+    question={phaseSequence:match.q.phaseSequence,unitId:match.q.unitId,
+     questionId:match.q.questionId,
+     sourceReferenceKind:'EXACT_QUESTION_INDEX_POINTER'};
    }else question=null;
   }
   if(!question){
