@@ -931,6 +931,18 @@ function inheritedAcceptedRecordSourceRefsV1({root,campaignPath,sequence}){
    canonicalGraphSourceSelector:
     canonical?.automationOutputs?.canonicalGraphSourceRefs?
      'automationOutputs.canonicalGraphSourceRefs':null,
+   questionAnswerSourceSelector:
+    canonical?.automationOutputs?.questionAnswerSources?
+     'automationOutputs.questionAnswerSources':null,
+   explicitQuestionOutputLinkSelector:
+    canonical?.automationOutputs?.explicitQuestionOutputLinks?
+     'automationOutputs.explicitQuestionOutputLinks':null,
+   questionAnswerCheckpointSourceScheme:
+    canonical?.automationOutputs?.questionAnswerSources?
+     'questions[].answerVersions[].checkpointPath + checkpointSha256 + checkpointRecordSelector':null,
+   questionSourceAvailability:
+    canonical?.automationOutputs?.questionAnswerSources?.availability??
+     'NOT_RECORDED_IN_HISTORICAL_CANONICAL',
    recordOriginAvailability:queued?.availability??direct?.availability??
     'NOT_RECORDED_IN_HISTORICAL_CANONICAL',
    acceptedOriginalRecordCount:
@@ -1098,6 +1110,36 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
       'acceptedRecordSourceHistory'
     ]);
+  }
+  if(sequence>4){
+    // A later AI gets the complete earlier source, not merely promoted
+    // candidates. The exact question text lives at the question-index
+    // selector; every original/revised answer lives in its hashed checkpoint.
+    // A missing historical projection is identified explicitly, not treated
+    // as evidence that there were zero questions or no vulnerabilities.
+    const history=form.automationInputs.acceptedRecordSourceHistory??[];
+    form.automationInputs.questionOutputAssociationHistory=history
+     .filter(ref=>[4,5,6,8,9].includes(ref.phaseSequence))
+     .map(ref=>({
+      sourcePhaseSequence:ref.phaseSequence,
+      canonicalArtifactPath:ref.canonicalArtifactPath,
+      canonicalSha256:ref.canonicalSha256,
+      acceptedReceiptPath:ref.acceptedReceiptPath,
+      sourceAcceptance:ref.availability,
+      questionAnswerSourceSelector:ref.questionAnswerSourceSelector,
+      explicitQuestionOutputLinkSelector:ref.explicitQuestionOutputLinkSelector,
+      originalUnpromotedAnswersSelector:ref.questionAnswerSourceSelector?
+       ref.questionAnswerSourceSelector+'.questions':null,
+      originalAnsweredVersionLocator:
+       ref.questionAnswerCheckpointSourceScheme,
+      associationAvailability:ref.explicitQuestionOutputLinkSelector?
+       'SOURCE_LINK_ROSTER_PRESENT':'NO_HISTORICAL_LINK_ROSTER_RECORDED',
+      questionSourceAvailability:ref.questionSourceAvailability,
+      authorizationOwner:'AI_SECURITY_REVIEW'
+     }));
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+     ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+     'questionOutputAssociationHistory']);
   }
   // Continue exact accepted discovery evidence across the audit phases.
   // A missing summary remains a nonblocking availability diagnostic.
