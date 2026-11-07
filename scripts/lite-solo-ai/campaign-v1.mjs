@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v52, Step 7 exact overflow disposition.
+// Lite-Solo MiMo / Worker transport bridge v53, Step 8 current-controller lifecycle integration.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2748,7 +2748,8 @@ async function miStep8Ask(state,task){
   evidenceRequests:{
    moreInstructions:{instructionEvidenceRequest:{offset:head.end}},
    moreStagedUnits:{stageWorkEvidenceRequest:{kind:'INDEX',start:0}},
-   originalStagedUnit:{stageWorkEvidenceRequest:{kind:'UNIT',unitId:'<exact issued unitId>',offset:0}}},
+   originalStagedUnit:{stageWorkEvidenceRequest:{kind:'UNIT',unitId:'<exact issued unitId>',offset:0}},
+   firstRoundBeforeRevision:{stageWorkEvidenceRequest:{kind:'UNIT',unitId:'<exact issued unitId>',variant:'FIRST_ROUND',offset:0}}},
   evidenceCompleteness:'Read subsequent original pages whenever nextOffset or nextStart is present. No preview or missing data implies a negative finding.',
   exactTask:task};
  const messages=[{role:'system',content:
@@ -2784,7 +2785,8 @@ async function miStep8Ask(state,task){
    page=JSON.parse(await workerCall({operation:'stage_evidence',kind:q.kind??'INDEX',
     ...(q.start!==undefined?{start:q.start}:{}),
     ...(q.unitId!==undefined?{unitId:q.unitId}:{}),
-    ...(q.offset!==undefined?{offset:q.offset}:{})}));
+    ...(q.offset!==undefined?{offset:q.offset}:{}),
+    ...(q.variant!==undefined?{variant:q.variant}:{})}));
   }
   if(prior.length===2){
    const at=prior.shift();messages.splice(at,2);
