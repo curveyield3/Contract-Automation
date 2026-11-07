@@ -1964,7 +1964,7 @@ export function collectExplicitQuestionOutputLinksV1({
   const refs=sourceBySelector.get(key)??[];
   refs.push(source);sourceBySelector.set(key,refs);
  }
- const saved=new Map(),originalLinkRows=new Map();
+ const saved=new Map(),originalLinkRows=new Map(),consumedLinkRows=new Set();
  // Optional explicitly AI-supplied metadata remains on the accepted unit
  // snapshot. It is not rewritten into fixed issued output objects.
  if([4,5,6].includes(Number(phase))){
@@ -2001,12 +2001,15 @@ export function collectExplicitQuestionOutputLinksV1({
     for(const [i,row] of rows.entries()){
      const selector='submission.'+collection+'['+i+']';
      const extra=(originalLinkRows.get(u.unitId)??[])
-      .filter(link=>link?.acceptedOutputSelector===
-       collection+'['+i+']'||link?.outputSelector===collection+'['+i+']')
-      .flatMap((link,k)=>(Array.isArray(link.questionRefs)?link.questionRefs:[])
-       .map((ref,j)=>({authored:typedQuestionReferenceV1(ref,{
-        phase,unitId:u.unitId}),originalExplicitReference:structuredClone(ref),
-        sourceSelector:'submission.questionRecordLinks['+k+'].questionRefs['+j+']'})));
+      .flatMap((link,k)=>{
+       if(link?.acceptedOutputSelector!==collection+'['+i+']'&&
+          link?.outputSelector!==collection+'['+i+']')return [];
+       consumedLinkRows.add(JSON.stringify([u.unitId,k]));
+       return (Array.isArray(link.questionRefs)?link.questionRefs:[])
+        .map((ref,j)=>({authored:typedQuestionReferenceV1(ref,{
+         phase,unitId:u.unitId}),originalExplicitReference:structuredClone(ref),
+         sourceSelector:'submission.questionRecordLinks['+k+'].questionRefs['+j+']'}));
+      });
      register({value:row,selector,ownerUnit:u.unitId,
       origin:{acceptedPath:state.acceptedPath,
        acceptedSubmissionSha256:accepted.submissionSha256,
@@ -2025,13 +2028,13 @@ export function collectExplicitQuestionOutputLinksV1({
     const original=sources.length===1?sources[0]:null;
     const ownerUnit=original?.unitId??null;
     const additional=[];
-    const accepted=ownerUnit?saved.get(ownerUnit)?.accepted:null;
     const links=originalLinkRows.get(ownerUnit)??[];
     for(const [k,link] of links.entries()){
      const matches=link?.acceptedOutputSelector===original?.acceptedSourceSelector?.replace(/^submission\./,'')||
       link?.recordKey===original?.recordKey||
       link?.outputSelector===original?.acceptedSourceSelector?.replace(/^submission\./,'');
      if(!matches)continue;
+     consumedLinkRows.add(JSON.stringify([ownerUnit,k]));
      for(const [j,ref] of (Array.isArray(link.questionRefs)?link.questionRefs:[]).entries())
       additional.push({authored:typedQuestionReferenceV1(ref,{phase,unitId:ownerUnit}),
        originalExplicitReference:structuredClone(ref),
@@ -2044,6 +2047,18 @@ export function collectExplicitQuestionOutputLinksV1({
    }
   }
  }
+ for(const [unitId,links] of originalLinkRows){
+  for(const [i,link] of links.entries()){
+   if(consumedLinkRows.has(JSON.stringify([unitId,i])))continue;
+   output.unresolvedReferences.push({
+    unitId,originalQuestionReferenceSelector:
+     'submission.questionRecordLinks['+i+']',
+    originalOutputSource:saved.get(unitId)?.path??null,
+    originalExplicitReference:structuredClone(link),
+    status:'AI_EXPLICIT_OUTPUT_SELECTOR_NOT_FOUND'
+   });
+  }
+ }
  for(const [i,q] of histories.questions.entries()){
   const identity=JSON.stringify([q.phaseSequence,q.unitId,q.questionId]);
   if(linked.has(identity))continue;
@@ -2053,7 +2068,7 @@ export function collectExplicitQuestionOutputLinksV1({
    questionTextSource:q.questionTextSource,
    answerVersionCount:q.answerVersions.length,
    statusFromCurrentIndex:q.statusFromCurrentIndex,
-   disposition:'NO_EXPLICIT_OUTPUT_LINK_RECORDED'
+   disposition:'NO_EXPLICIT_OUTPUT_LINK_RECORDED_IN_CURRENT_CANONICAL'
   });
  }
  output.associationCount=output.associations.length;
