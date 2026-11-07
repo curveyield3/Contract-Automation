@@ -1933,41 +1933,129 @@ function miLocalEvidenceReadRequestV1(raw){
 // Existing source, model, OIDC, transcript and CPU watchdog infrastructure is reused.
 async function runTechnicalQuestionTransportV1(){
  const issuedText=await workerCall({operation:'next_question'});
- let issued;try{issued=JSON.parse(issuedText);}catch{throw Error('Invalid Worker question JSON');}
+ let issued;try{issued=JSON.parse(issuedText);}catch{throw Error('Worker technical question is not JSON');}
  if(['AI_TECHNICAL_AWAITING_CONTROLLER','AI_TECHNICAL_AWAITING_OWNED_UNIT','AI_TECHNICAL_CURRENT_UNAVAILABLE'].includes(issued.status)){
   console.log(JSON.stringify({status:'MIMO_QUESTION_WAITING_ON_WORKER',
    campaignId,phase:issued.phase??null,step:issued.step??null,
    controllerStatus:issued.controllerStatus??null,substep:issued.engagementStage??null,
-   nextOwner:issued.nextOwner||null,controllerAccepted:false}));
-  return;
+   nextOwner:issued.nextOwner||null,controllerAccepted:false}));return;
  }
  if(issued.status!=='AI_TECHNICAL_QUESTION_ISSUED'||
     issued.schemaVersion!=='machine-intelligence-technical-question-transport-v1'||
-    typeof issued.question?.questionText!=='string'||!issued.question.questionText||
-    !issued.scopeSha256||!issued.scope?.questionSha256)
-  throw Error('Worker did not issue an authorized technical question: '+issued.status);
- const context={question:issued.question.questionText,questionId:issued.question.questionId,
-  technicalCriteria:issued.question.technicalCriteria,
-  questionSource:issued.source,assignedEvidenceReferences:issued.packetEvidenceReferences,
-  evidenceDeliveryStatus:issued.evidenceDeliveryStatus,
-  sourceSha256:issued.scope.sourceSha256,authorityCommit:issued.scope.authorityCommit,
-  limitation:'Technical evidence pages and durable checkpoints are provided by the subsequent integration steps. Do not invent missing evidence.'};
- const answer=await modelCall([
-  {role:'system',content:'You are the independent MiMo smart-contract security auditor. Answer only the exact technical question, in original plain text. Cite real evidence and identify missing source or proof. Never generate API routing commands, controller forms or claims of acceptance.'},
-  {role:'user',content:JSON.stringify(context)}
- ],{technicalAnswer:true});
- const receiptText=await workerCall({operation:'answer_question',scopeSha256:issued.scopeSha256,
-  questionId:issued.scope.questionId,questionSha256:issued.scope.questionSha256,answerText:answer});
- let receipt;try{receipt=JSON.parse(receiptText);}catch{throw Error('Invalid Worker answer receipt JSON');}
+    !issued.question?.questionText||!issued.scopeSha256||!issued.scope?.questionSha256||
+    !issued.admittedSource?.sourceArchiveCommit||!issued.evidenceLease||!issued.technicalMethodology)
+  throw Error('Worker did not issue frozen v8 methodology and admitted source for exact technical question');
+ const methodology=await miMethodologyV1(issued);
+ const source=await miAdmittedSourceInventoryV1(issued.admittedSource)
+  .catch(e=>({schemaVersion:'machine-intelligence-source-file-inventory-v1',
+   availability:'PINNED_ADMITTED_SOURCE_UNAVAILABLE',
+   sourceArchiveCommit:issued.admittedSource.sourceArchiveCommit,
+   admittedSourceSha256:issued.admittedSource.admittedSourceSha256,
+   originalFileCount:null,files:[],reason:String(e.message||e)}));
+ const lease=JSON.stringify({workerResponse:issued.evidenceLease});
+ const missing=(family,e)=>({schemaVersion:family,
+  unavailable:[{availability:'ORIGINAL_EVIDENCE_READ_UNAVAILABLE',reason:String(e.message||e)}]});
+ let questions=await sourceBoundQuestionHistoryV1(lease)
+  .catch(e=>missing('curveyield-ai-question-evidence-delivery-v1',e));
+ const canonicals=await sourceBoundCanonicalHistoryV1(lease)
+  .catch(e=>({manifest:{schemaVersion:'curveyield-mi-original-canonical-history-v1',
+   availability:'ORIGINAL_CANONICAL_READ_UNAVAILABLE',
+   unavailable:[{reason:String(e.message||e)}]},sources:new Map()}));
+ questions=mergeAcceptedCanonicalQuestionRostersV1(questions,canonicals);
+ const phase1=await sourceBoundPhase1EvidenceV1(lease)
+  .catch(e=>({manifest:{schemaVersion:'curveyield-mi-phase1-model-evidence-v1',
+   availability:'ORIGINAL_PHASE1_READ_UNAVAILABLE',reason:String(e.message||e)},source:null}));
+ const packet=await miCurrentPacketEvidenceV1(issued)
+  .catch(e=>({schemaVersion:'machine-intelligence-packet-original-evidence-v1',
+   snapshotCommit:historySnapshotCommit,availability:'PACKET_READ_UNAVAILABLE',
+   originalSourceCount:0,initial:[],sources:new Map(),
+   unavailable:[{reason:String(e.message||e)}]}));
+ const {files:privateSourceIndex,...sourceContext}=source;
+ const {sources:privatePacketFiles,...packetContext}=packet;
+ const canonicalContext=canonicals?canonicalHistoryModelContextV1(canonicals):null;
+ const questionContext=questions?questionHistoryModelContextV1(questions):null;
+ const phase1Context=phase1?structuredClone(phase1.manifest):null;
+ // The existing historical readers' OLD return-route instructions are NOT v8
+ // instructions. Preserve source records and retrieval keys; change only this
+ // adapter-created prompt guidance, never original evidence bytes.
+ if(canonicalContext?.retrievalInterface)canonicalContext.retrievalInterface.afterReading=
+  'After local original-evidence reads, answer only the exact v8 technical question as original plain text.';
+ if(questionContext?.retrievalInterface)questionContext.retrievalInterface.afterReading=
+  'Prior investigative answers are evidence, not proof. No Worker route/request JSON.';
+ if(phase1Context?.retrievalInstructions)phase1Context.retrievalInstructions.note=
+  'Read original Phase 1 evidence locally and answer the v8 technical question as plain text.';
+ const messages=[
+  {role:'system',content:
+   'You are MiMo, the independent smart-contract security auditor. Apply the COMPLETE original frozen methodology, study real admitted source and all relevant original evidence. Answer only the Worker-issued technical question. You may retrieve exact evidence using ONE local read request JSON with admittedSourceEvidenceRequest, packetEvidenceRequest, originalCanonicalEvidenceRequest, questionHistoryEvidenceRequest, or sourceEvidenceRequest. The adapter executes these local reads; they are NOT Worker or GitHub commands. After reading, return your exact technical answer as plain text. Never invent missing evidence, security proofs, API paths, leases, forms, or controller acceptance.'},
+  {role:'user',content:JSON.stringify({
+   protocol:'machine-intelligence-technical-question-transport-v1',
+   question:issued.question.questionText,questionId:issued.question.questionId,
+   questionMode:issued.question.mode,technicalCriteria:issued.question.technicalCriteria,
+   literalQuestionCatalogReference:issued.source,
+   sourceSha256:issued.scope.sourceSha256,sourceArchiveCommit:issued.admittedSource.sourceArchiveCommit,
+   authorityCommit:issued.scope.authorityCommit,
+   controllerEvidenceSnapshotCommit:historySnapshotCommit,
+   completeApplicableFrozenTechnicalMethodology:methodology,
+   admittedSourceInventory:sourceContext,currentPacketOriginals:packetContext,
+   priorAcceptedOriginalCanonicals:canonicalContext,
+   priorQuestionAndAnswerHistory:questionContext,
+   originalPhase1DiscoveryEvidence:phase1Context,
+   sourceReadExample:{admittedSourceEvidenceRequest:{kind:'INDEX',start:0}},
+   sourceFileExample:source.exactReadExamples?.file??null,
+   packetReadExample:packet.readSyntax??null,
+   originalContinuationRule:'An initial page or reference is never the full original when nextOffset or nextStart is present. Request subsequent pages. Nothing is treated as complete by omission.',
+   requiredFinalResponse:'Original plain-text security answer only, no API route/request or controller form.'
+  })}
+ ];
+ console.log(JSON.stringify({status:'MIMO_V8_TECHNICAL_EVIDENCE_DELIVERED',
+  campaignId,phase:issued.scope.phase,step:issued.scope.step,
+  admittedFiles:source.originalFileCount,sourceAvailability:source.availability,
+  packetOriginalFiles:packet.originalSourceCount,packetUnavailable:packet.unavailable?.length??0,
+  previousCanonicalRevisions:canonicals?.manifest?.rosters?.length??0,
+  priorQuestionHistories:questions?.histories?.length??0,
+  phase1OriginalAvailability:phase1?.manifest?.availability??null,
+  sourceCommit:issued.admittedSource.sourceArchiveCommit,
+  authorityCommit:issued.scope.authorityCommit,
+  controllerEvidenceCommit:historySnapshotCommit,
+  modelControlsWorkerRoutes:false,originalSourceTextPrivate:true}));
+ let answer=await modelCall(messages,{technicalAnswer:true});
+ const lastReads=[];
+ while(true){
+  const read=miLocalEvidenceReadRequestV1(answer);
+  if(!read)break;
+  let result;
+  if(read.error)result=read.error;
+  else if(read.family==='admittedSourceEvidenceRequest')
+   result=await miAdmittedSourceReadV1(source,read.request);
+  else if(read.family==='packetEvidenceRequest')
+   result=miPacketEvidenceReadV1(packet,read.request);
+  else result=await modelLocalEvidenceReadV1(answer,canonicals,phase1,questions);
+  if(lastReads.length===2){
+   const old=lastReads.shift();messages.splice(old,2);
+   for(let i=0;i<lastReads.length;i++)lastReads[i]-=2;
+  }
+  lastReads.push(messages.length);
+  messages.push({role:'assistant',content:answer});
+  messages.push({role:'user',content:JSON.stringify(result)});
+  console.log(JSON.stringify({status:'MIMO_ORIGINAL_SOURCE_CONTINUATION_READ',
+   family:read.family??null,kind:read.request?.kind??null,path:read.request?.path??null,
+   availability:result.availability??'PINNED',sha256:result.sha256??null,
+   nextOffset:result.nextOffset??null,controllerAccepted:false}));
+  answer=await modelCall(messages,{technicalAnswer:true});
+ }
+ const receiptText=await workerCall({operation:'answer_question',
+  scopeSha256:issued.scopeSha256,questionId:issued.scope.questionId,
+  questionSha256:issued.scope.questionSha256,answerText:answer});
+ let receipt;try{receipt=JSON.parse(receiptText);}catch{throw Error('Invalid Worker answer receipt');}
  if(receipt.status!=='AI_TECHNICAL_ANSWER_STAGED'||
     receipt.scopeSha256!==issued.scopeSha256||receipt.answerSha256!==sha(answer))
-  throw Error('Worker did not preserve the exact technical answer');
+  throw Error('Original technical answer not preserved byte-for-byte');
  console.log(JSON.stringify({status:'MIMO_TECHNICAL_ANSWER_TRANSPORT_VERIFIED',
   campaignId,phase:issued.scope.phase,step:issued.scope.step,unitId:issued.scope.unitId,
   questionId:issued.scope.questionId,answerSha256:receipt.answerSha256,
   answerBytes:receipt.answerBytes,controllerAccepted:false,nextDependency:receipt.awaiting}));
- // Do not replay this question as completed until the Step-5 committed index
- // becomes authoritative. R2 transport staging is not controller acceptance.
+ // Question expansion, immutable GitHub checkpoints, typed submissions and
+ // administrative substeps remain independently owned by Steps 4-8.
 }
 const negotiatedText=await workerCall({operation:'protocol'});
 let negotiated;try{negotiated=JSON.parse(negotiatedText);}catch{throw Error('Invalid Worker protocol negotiation');}
