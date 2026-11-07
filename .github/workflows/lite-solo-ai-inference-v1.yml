@@ -284,9 +284,13 @@ jobs:
             return data;
           }
           const current=await worker('/api/step/current',{});
+          if(current.campaignId!==campaignId)
+            throw Error('Signed MiMo campaign differs from the current Worker campaign');
           if(current.phase!==expectedPhase||current.currentStep!==expectedStep)
-            throw Error('Assigned campaign changed: expected '+expectedPhase+'/'+expectedStep+
-              ', Worker reports '+current.phase+'/'+current.currentStep);
+            console.log(JSON.stringify({status:'MIMO_QUEUED_RUN_REBOUND_TO_CONTROLLER',
+              requestedPhase:expectedPhase,requestedStep:expectedStep,
+              actualPhase:current.phase,actualStep:current.currentStep,
+              controllerOwnsCurrentStep:true,originalCampaignIdentityPreserved:true}));
           // The Worker is the sole lease authority. Do not abort from a stale
           // GitHub-side readiness snapshot; the subsequent Worker claim decides.
           if(current.status!=='ACTIVE'||current.engagement?.stage!=='WORK'||
@@ -295,15 +299,16 @@ jobs:
               workerStatus:current.status,engagementStage:current.engagement?.stage||null}));
           }else{
             const claim=await worker('/api/step/process',{action:'claim'});
-            if(claim.status==='NO_AVAILABLE_SHARD')
-              throw Error('MIMO_FOREIGN_LEASE_BLOCKED: '+(claim.counts?.leased||0)+
-                ' unit(s) leased by another caller. Use the existing admin step_release '+
-                'action on the exact unfinished unit before relaunching; accepted work is retained.');
-            if(claim.status!=='LEASED_SHARD'||!claim.unitId||!claim.lease)
-              throw Error('Unexpected Worker claim result: '+String(claim.status));
-            console.log(JSON.stringify({status:'MIMO_LEASE_READY',
-              unitId:claim.unitId,phase:claim.phase,step:claim.step,
-              recovery:'Existing GitHub AI identity reclaims same lease on next claim'}));
+            if(claim.status==='LEASED_SHARD'&&claim.unitId&&claim.lease)
+              console.log(JSON.stringify({status:'MIMO_LEASE_READY',
+                unitId:claim.unitId,phase:claim.phase,step:claim.step,
+                recovery:'Existing Worker preserves exact lease after verified prior-run completion'}));
+            else if(['NO_AVAILABLE_SHARD','AI_LEASE_HELD_BY_ACTIVE_RUN',
+                       'AI_LEASE_RECOVERY_BLOCKED','NO_UNREVISED_WORK_UNITS'].includes(claim.status))
+              console.log(JSON.stringify({status:'MIMO_LEASE_PREFLIGHT_DEFERRED',
+                workerStatus:claim.status,
+                nextOwner:'EXISTING_WORKER_OR_CONTROLLER'}));
+            else throw Error('Original Worker claim result requires diagnosis: '+String(claim.status));
           }
           NODE
       - name: Launch standalone AI-v6 beta using signed job identity
