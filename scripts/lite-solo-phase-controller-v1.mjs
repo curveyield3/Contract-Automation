@@ -30,7 +30,7 @@ import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/a
 import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 import {isReassignedV13AuthorityV1} from './lib/lite-authority-lineup-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
-import {createUnitPlanV1,collectAcceptedQuestionHistoryRefsV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {createUnitPlanV1,collectAcceptedQuestionHistoryRefsV1,collectAcceptedUnitRecordOriginsV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -1078,9 +1078,22 @@ const canonical={
 // Preserve every accepted Phase 4/5/6 question-ledger reference in the
 // original canonical phase handoff. This only inventories committed evidence;
 // absence or unreadability never changes the controller's phase decision.
-if([4,5,6].includes(sequence))
+if([4,5,6].includes(sequence)){
  canonical.automationOutputs.questionHistoryRoster=collectAcceptedQuestionHistoryRefsV1({
   root,campaignPath,directory,phase:sequence});
+ // Bind each accepted fixed/APPEND output to its unit, issued ordinal,
+ // accepted source digest and original AI attempt without altering payloads.
+ try{
+  canonical.automationOutputs.acceptedUnitRecordOrigins=
+   collectAcceptedUnitRecordOriginsV1({root,campaignPath,directory,phase:sequence});
+ }catch(error){
+  canonical.automationOutputs.acceptedUnitRecordOrigins={
+   availability:'ORIGIN_COLLECTION_UNAVAILABLE',
+   diagnostics:[String(error?.message??error)],records:[]};
+  githubDiagnostics.push('Accepted unit source origins unavailable: '+
+   String(error?.message??error));
+ }
+}
 if(sequence===4){
   try{
     canonical.automationOutputs.phase4Coverage=
