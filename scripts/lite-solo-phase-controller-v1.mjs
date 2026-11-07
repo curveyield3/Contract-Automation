@@ -270,7 +270,7 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
   for(const link of canonical.automationOutputs?.explicitQuestionOutputLinks?.associations??[]){
     const source=link?.outputRecord?.selector;
     if(typeof source!=='string')continue;
-    const match=source.match(/^actions\\.([^.]+)\\.outputs\\.([^.]+)\\[([0-9]+)\\]$/);
+    const match=source.match(/^actions\.([^.]+)\.outputs\.([^.]+)\[([0-9]+)\]$/);
     if(!match)continue;
     const row=canonical.actions?.[match[1]]?.outputs?.[match[2]]?.[Number(match[3])];
     if(row&&typeof row==='object'&&!Array.isArray(row)&&
