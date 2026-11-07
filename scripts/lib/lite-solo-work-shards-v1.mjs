@@ -507,7 +507,10 @@ export function secureRestoreWorkFormV13({root,indexRel}){
  if(Buffer.byteLength(baseText)>MAX_SHARD||digest(baseText)!==trusted.baseSha256)
    throw new Error('v13 immutable work base changed');
  const restored=readSoloLockedBaseV1({root,workDir,baseText});
- const full=restored.full,basePages=restored.pages,seenFiles=new Set(),arrays=new Map(),identities=new Map();
+ // Physical issued record keys and original numeric shard positions are
+ // authoritative. An AI-authored subject reference is not a unique record
+ // identity: separate observations can legitimately concern the same source.
+ const full=restored.full,basePages=restored.pages,seenFiles=new Set(),arrays=new Map();
  const load=(desc)=>{
    if(seenFiles.has(desc.file))throw new Error('duplicate v13 shard filename: '+desc.file);
    seenFiles.add(desc.file);
@@ -574,10 +577,9 @@ export function secureRestoreWorkFormV13({root,indexRel}){
      if(entry.key!==expected||(!desc.append&&!legacyPositionalIdentity&&!completedTemplateIdentity&&!completedTemplateNegative&&!completedCustomObligationStarter&&recordKey(desc.path,entry.value,pos)!==expected))
        throw new Error('v13 mandatory work record key changed: '+desc.file);
      if(positions.has(pos))throw new Error('v13 duplicate work record: '+desc.file);
-     const identity=recordKey(desc.path,entry.value,pos);
-     const knownIdentities=identities.get(id)??new Set();
-     if(knownIdentities.has(identity))throw new Error('v13 duplicate candidate or work record identity: '+desc.file);
-     knownIdentities.add(identity);identities.set(id,knownIdentities);
+     // A repeated subject key or identical authored prose does not make two
+     // distinct accepted row positions duplicates. Only the exact issued
+     // shard key and physical numeric position identify a transport record.
      positions.add(pos);cursor[field][pos]=entry.value;
    }
    arrays.set(id,positions);
