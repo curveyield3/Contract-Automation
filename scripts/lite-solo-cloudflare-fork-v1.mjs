@@ -1112,6 +1112,16 @@ function machineAnswerDirectoryV1(u,template,routing){
    maxChunkRecords:1024,maxChunkBytes:1024*1024}:{}),
   extraCollections:u.kind==='FLOW'?['trivialReviews','groupChecks','candidates']:
    u.kind==='ATTACK'?['attackPaths']:[],
+  // Backward-compatible optional source-bound relationship channel. The AI
+  // supplies references explicitly; the adapter cannot infer them from prose.
+  optionalQuestionRecordLinks:{
+   field:'questionRecordLinks',
+   format:'[{outputSelector: <exact accepted row selector>, questionRefs: [{phaseSequence,unitId,questionId,checkpointRevision?}]}]',
+   appendSourceSelectorExample:'appendRecords[0]',
+   acceptedAppendSelectorExample:'entries[0].value',
+   referenceIdentity:'phaseSequence / unitId / questionId',
+   questionAnswerStatusDoesNotImplySecurityConclusion:true
+  },
   immutableControllerFields:true,neverInferFromProse:true,noActionsPerQuestion:true};
 }
 
@@ -1389,7 +1399,33 @@ function assembleBoundAnswersV1(c,u,submitted){
   }
   strict(bytes(envelope).length<=1024*1024,
    'APPEND_CHUNK_TRANSPORT_LIMIT: issue a smaller independently bounded chunk');
- }else if(['FLOW','ATTACK'].includes(u.kind)){
+ }
+ // Preserve optional MiMo-authored output-to-question relationships on the
+ // accepted transport envelope. Do not insert links into fixed issued fields,
+ // rewrite AI answer text or decide whether a reference proves anything.
+ if(submitted.questionRecordLinks!==undefined){
+  strict(Array.isArray(submitted.questionRecordLinks),
+   'questionRecordLinks must be a typed array when supplied');
+  result.questionRecordLinks=submitted.questionRecordLinks.map((link,i)=>{
+   strict(link&&typeof link==='object'&&!Array.isArray(link)&&
+    Array.isArray(link.questionRefs),
+    'questionRecordLinks['+i+'] must retain its literal questionRefs array');
+   const source=typeof link.outputSelector==='string'?link.outputSelector:
+    typeof link.acceptedOutputSelector==='string'?link.acceptedOutputSelector:null;
+   let acceptedOutputSelector=source;
+   if(u.kind==='APPEND'&&typeof source==='string'){
+    const match=source.match(/^appendRecords\\[([0-9]+)\\](.*)$/);
+    if(match)acceptedOutputSelector='entries['+Number(match[1])+'].value'+match[2];
+   }
+   if(u.kind==='APPEND'&&!acceptedOutputSelector&&
+      Number.isSafeInteger(link.appendRecordOrdinal)&&link.appendRecordOrdinal>=0)
+    acceptedOutputSelector='entries['+link.appendRecordOrdinal+'].value';
+   return {...structuredClone(link),
+    ...(source?{sourceAuthoredOutputSelector:source}:{}),
+    ...(acceptedOutputSelector?{acceptedOutputSelector}:{})};
+  });
+ }
+ if(u.kind==='FLOW'||u.kind==='ATTACK'){
   const lists=u.kind==='FLOW'?['rows','flowNotes','integrationAnswers','contractChecks']:
    ['attackPaths','integrationAnswers'];
   for(const field of lists)for(const row of (result[field]??[])){
