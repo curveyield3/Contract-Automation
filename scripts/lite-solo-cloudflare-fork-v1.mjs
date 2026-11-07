@@ -1102,7 +1102,14 @@ function machineAnswerDirectoryV1(u,template,routing){
  }
  return {schemaVersion:'curveyield-machine-bound-answer-transport-v1',
   responseSchemaVersion:MACHINE_BOUND_ANSWERS_V1,unitId:u.unitId,fields,
-  appendFormat:u.kind==='APPEND'?'appendRecords: EXACT_TYPED_OBJECT_ARRAY':null,
+  appendFormat:u.kind==='APPEND'?'appendRecords: BOUNDED_TYPED_OBJECT_ARRAY':null,
+  ...(u.kind==='APPEND'?{
+   appendContinuationField:'appendContinuation: BOOLEAN_EXPLICIT_REQUEST_NEXT_UNIT',
+   appendChunkNumber:u.appendChunkNumber??1,
+   appendOrdinalStart:u.appendOrdinalStart??null,
+   continuationAfterUnitId:u.continuationAfterUnitId??null,
+   continuationRequiresNewAcceptedUnit:true,
+   maxChunkRecords:1024,maxChunkBytes:1024*1024}:{}),
   extraCollections:u.kind==='FLOW'?['trivialReviews','groupChecks','candidates']:
    u.kind==='ATTACK'?['attackPaths']:[],
   immutableControllerFields:true,neverInferFromProse:true,noActionsPerQuestion:true};
@@ -1262,6 +1269,7 @@ function assembleBoundAnswersV1(c,u,submitted){
   strict(rows.length<=route.appendMaximumRecords,'append exceeds existing controller capacity');
   const fieldDef=schema.actions[route.step]?.fields?.find(x=>x.name===route.field);
   const keyRoot=JSON.stringify(u.path)+':APPEND-';
+  const chunkNumber=u.appendChunkNumber??1;
   const policies=new Map(route.recordFieldTemplate.map(spec=>[spec.field,spec]));
   const reservedIdentities=new Set(knownSubjectIds);
   // Also reserve already ISSUED identities that have not yet been accepted.
@@ -1311,7 +1319,10 @@ function assembleBoundAnswersV1(c,u,submitted){
    return id;
   };
   result.entries=rows.map((input,i)=>{
-   const key=keyRoot+String(i+1).padStart(4,'0');
+   const key=chunkNumber>1?
+    JSON.stringify(u.path)+':APPEND-C'+String(chunkNumber).padStart(4,'0')+'-'+
+     String(i+1).padStart(4,'0'):
+    keyRoot+String(i+1).padStart(4,'0');
    // Original REQUIRED_LIST append slots contain literal scalars; record-list
    // append slots contain fully typed objects, including optional audit fields.
    if(fieldDef?.type==='REQUIRED_LIST'){
@@ -1363,6 +1374,15 @@ function assembleBoundAnswersV1(c,u,submitted){
     ...(Object.keys(authoredOrigins).length?{sourceAuthoredIdentities:authoredOrigins}:{}),
     ...(Object.keys(subjectBindings).length?{controllerSubjectBindings:subjectBindings}:{})};
   });
+  if(submitted.appendContinuation!==undefined){
+   strict(typeof submitted.appendContinuation==='boolean',
+    'appendContinuation must be an explicit boolean');
+   result.appendContinuation=submitted.appendContinuation;
+  }
+  const envelope={schemaVersion:'curveyield-work-shard-v13',kind:'array',
+   path:u.path,startIndex:u.appendOrdinalStart??0,entries:result.entries};
+  strict(Buffer.byteLength(bytes(envelope))<=1024*1024,
+   'APPEND_CHUNK_TRANSPORT_LIMIT: issue a smaller independently bounded chunk');
  }else if(['FLOW','ATTACK'].includes(u.kind)){
   const lists=u.kind==='FLOW'?['rows','flowNotes','integrationAnswers','contractChecks']:
    ['attackPaths','integrationAnswers'];
