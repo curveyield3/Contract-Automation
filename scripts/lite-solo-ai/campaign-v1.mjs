@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v35.
+// Lite-Solo MiMo / Worker transport bridge v36, v8 questions plus legacy support.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -173,14 +173,14 @@ function ownerOfWorkerReply(raw){
   stage:answer.stage??null};
 }
 
-async function modelCall(messages){
+async function modelCall(messages,{technicalAnswer=false}={}){
  const request=JSON.stringify({
   model:'lite-solo-mimo-v1',
   messages,
   temperature:0.1,
   stream:false,
   max_tokens:32768,
-  response_format:{type:'json_object'}
+  ...(technicalAnswer?{}:{response_format:{type:'json_object'}})
  });
  const start=Date.now();
  await recordPrivateCommunication('mimo_input',request);
@@ -277,10 +277,10 @@ async function modelCall(messages){
  // not public Actions logs. All metadata comes from the unmodified reply.
  let action=null;
  try{action=JSON.parse(raw);}catch{}
- const input=action?.request||{};
+ const input=technicalAnswer?{}:(action?.request||{});
  const file=input.shard??input.submission??null;
  console.log(JSON.stringify({status:'MIMO_ACTUAL_OUTPUT_SUBMITTED',
-  time:new Date().toISOString(),route:action?.route||null,
+  time:new Date().toISOString(),technicalAnswer,route:technicalAnswer?null:action?.route||null,
   action:input.action||null,unitId:input.unitId||null,
   submittedFileKind:file?.kind??null,
   submittedEntries:Array.isArray(file?.entries)?file.entries.length:null,
@@ -1719,6 +1719,55 @@ function assignmentScope(response){
  return {step:[p,s,w.stage||''].join(':'),unit};
 }
 
+// Step 2 technical-answer transport. MiMo never writes route/request JSON in v8.
+// Existing source, model, OIDC, transcript and CPU watchdog infrastructure is reused.
+async function runTechnicalQuestionTransportV1(){
+ const issuedText=await workerCall({operation:'next_question'});
+ let issued;try{issued=JSON.parse(issuedText);}catch{throw Error('Invalid Worker question JSON');}
+ if(['AI_TECHNICAL_AWAITING_CONTROLLER','AI_TECHNICAL_AWAITING_OWNED_UNIT','AI_TECHNICAL_CURRENT_UNAVAILABLE'].includes(issued.status)){
+  console.log(JSON.stringify({status:'MIMO_QUESTION_WAITING_ON_WORKER',
+   campaignId,phase:issued.phase??null,step:issued.step??null,
+   controllerStatus:issued.controllerStatus??null,substep:issued.engagementStage??null,
+   nextOwner:issued.nextOwner||null,controllerAccepted:false}));
+  return;
+ }
+ if(issued.status!=='AI_TECHNICAL_QUESTION_ISSUED'||
+    issued.schemaVersion!=='machine-intelligence-technical-question-transport-v1'||
+    typeof issued.question?.questionText!=='string'||!issued.question.questionText||
+    !issued.scopeSha256||!issued.scope?.questionSha256)
+  throw Error('Worker did not issue an authorized technical question: '+issued.status);
+ const context={question:issued.question.questionText,questionId:issued.question.questionId,
+  technicalCriteria:issued.question.technicalCriteria,
+  questionSource:issued.source,assignedEvidenceReferences:issued.packetEvidenceReferences,
+  evidenceDeliveryStatus:issued.evidenceDeliveryStatus,
+  sourceSha256:issued.scope.sourceSha256,authorityCommit:issued.scope.authorityCommit,
+  limitation:'Technical evidence pages and durable checkpoints are provided by the subsequent integration steps. Do not invent missing evidence.'};
+ const answer=await modelCall([
+  {role:'system',content:'You are the independent MiMo smart-contract security auditor. Answer only the exact technical question, in original plain text. Cite real evidence and identify missing source or proof. Never generate API routing commands, controller forms or claims of acceptance.'},
+  {role:'user',content:JSON.stringify(context)}
+ ],{technicalAnswer:true});
+ const receiptText=await workerCall({operation:'answer_question',scopeSha256:issued.scopeSha256,
+  questionId:issued.scope.questionId,questionSha256:issued.scope.questionSha256,answerText:answer});
+ let receipt;try{receipt=JSON.parse(receiptText);}catch{throw Error('Invalid Worker answer receipt JSON');}
+ if(receipt.status!=='AI_TECHNICAL_ANSWER_STAGED'||
+    receipt.scopeSha256!==issued.scopeSha256||receipt.answerSha256!==sha(answer))
+  throw Error('Worker did not preserve the exact technical answer');
+ console.log(JSON.stringify({status:'MIMO_TECHNICAL_ANSWER_TRANSPORT_VERIFIED',
+  campaignId,phase:issued.scope.phase,step:issued.scope.step,unitId:issued.scope.unitId,
+  questionId:issued.scope.questionId,answerSha256:receipt.answerSha256,
+  answerBytes:receipt.answerBytes,controllerAccepted:false,nextDependency:receipt.awaiting}));
+ // Do not replay this question as completed until the Step-5 committed index
+ // becomes authoritative. R2 transport staging is not controller acceptance.
+}
+const negotiatedText=await workerCall({operation:'protocol'});
+let negotiated;try{negotiated=JSON.parse(negotiatedText);}catch{throw Error('Invalid Worker protocol negotiation');}
+if(negotiated?.status!=='AI_BRIDGE_PROTOCOL_NEGOTIATED')throw Error('Worker protocol negotiation failed');
+if(negotiated.machineIntelligence===true){
+ if(negotiated.authorityRelease!=='machine-intelligence-v8'||
+    negotiated.protocol!=='machine-intelligence-technical-question-transport-v1')
+  throw Error('Machine Intelligence frozen release and inference protocol disagree');
+ await runTechnicalQuestionTransportV1();
+}else{
 let workerResponse=await workerCall({operation:'start'});
 // Keep every MiMo-produced command and every Worker response presented to MiMo
 // unchanged. Poll-only controller wait states do not become model prompts.
@@ -1998,4 +2047,5 @@ while(true){
  }else{
   consecutiveRejections=0;lastRejectedFingerprint=null;
  }
+}
 }
