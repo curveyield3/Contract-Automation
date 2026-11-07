@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v59, Step 10 exact accepted prerequisite document page binding.
+// Lite-Solo MiMo / Worker transport bridge v60, Step 10 generation/packet provenance for typed answers.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2473,6 +2473,9 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
     contract.unitId!==ready.unitId||contract.lease!==ready.lease)
   throw Error('No exact original GitHub field contract for leased unit: '+contract.status);
  const typed=[4,5,6].includes(contract.phase);
+ if(typed&&(!/^[a-f0-9]{64}$/.test(contract.packetSha256||'')||
+    !contract.generationId||contract.campaignId!==campaignId))
+  throw Error('Original field contract lacks controller generation/packet identity');
  if(typed&&(contract.answerTransport?.schemaVersion!=='curveyield-machine-bound-answer-transport-v1'||
     contract.answerTransport.unitId!==ready.unitId||
     contract.answerTransport.responseSchemaVersion!=='curveyield-machine-bound-answers-v1'||
@@ -2480,6 +2483,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
   throw Error('GitHub-issued answerTransport identity unavailable');
  const issued={scope:{campaignId,phase:contract.phase,step:contract.step,
   unitId:contract.unitId,authorityCommit:contract.authorityCommit,
+  generationId:contract.generationId,packetSha256:contract.packetSha256,
   sourceSha256:contract.sourceSha256,authorityDigest:contract.authorityDigest,
   phaseEpoch:contract.phaseEpoch},questionLedger:contract.questionLedger,
   admittedSource:contract.admittedSource,packetEvidenceReferences:contract.packetEvidenceReferences};
