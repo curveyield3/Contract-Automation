@@ -1369,6 +1369,36 @@ function restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan}
   put(root,assignment.workShardIndexPath,working);put(root,trustedRel,trusted);
  }
 }
+// Collect accepted continuation page content without creating another
+// transport. It is read from the existing immutable accepted unit snapshots.
+export function collectAcceptedAppendContinuationsV1({root,campaignPath,phase}){
+ if(![4,5,6].includes(Number(phase)))return [];
+ const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
+ const pages=[];
+ for(const u of plan.units){
+  if(u.kind!=='APPEND'||!(u.appendChunkNumber>1))continue;
+  const state=queue.units?.[u.unitId];
+  if(state?.status!=='ACCEPTED'||!state.acceptedPath)
+   throw Error('APPEND_CONTINUATION_AWAITING_ACCEPTED_UNIT: '+u.unitId);
+  const snapshot=read(root,state.acceptedPath);
+  if(snapshot.unitId!==u.unitId||snapshot.phaseSequence!==phase||
+     snapshot.campaignGenerationId!==plan.campaignGenerationId||
+     snapshot.sourceSha256!==plan.sourceSha256||
+     snapshot.authorityDigest!==plan.authorityDigest||
+     snapshot.phaseEpoch!==plan.phaseEpoch||
+     snapshot.submissionSha256!==state.acceptedSha256||
+     !Array.isArray(snapshot.submission?.entries))
+   throw Error('APPEND_CONTINUATION_ACCEPTED_SOURCE_MISMATCH: '+u.unitId);
+  pages.push({unitId:u.unitId,path:u.path,
+   chunkNumber:u.appendChunkNumber,startIndex:u.appendOrdinalStart,
+   continuationAfterUnitId:u.continuationAfterUnitId,
+   entries:snapshot.submission.entries});
+ }
+ return pages.sort((a,b)=>
+  JSON.stringify(a.path).localeCompare(JSON.stringify(b.path))||
+  a.chunkNumber-b.chunkNumber);
+}
+
 export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}){
  // GitHub copies and orders the actual Worker-provided bytes; no additional
  // identity, value, coverage, dependency, or security validation is performed.
@@ -1404,6 +1434,9 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
   return {...entry,value:next};
  };
  for(const u of plan.units.filter(u=>['SHARD','APPEND','BATCH'].includes(u.kind))){
+  // Only original issued shards are written back to their indexed working
+  // files. Later APPEND chunks are independent accepted source pages.
+  if(u.kind==='APPEND'&&u.appendChunkNumber>1)continue;
   const accepted=read(root,queue.units[u.unitId].acceptedPath);
   if(u.kind==='BATCH'){
    const entries=Array.isArray(accepted.submission?.entries)?accepted.submission.entries:[];
@@ -1428,7 +1461,9 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
   slab.entries=fixed.length?fixed.flatMap(e=>e.entries):appended.flatMap(e=>e.entries);
   put(root,rel,slab);
  }
- materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
+ const acceptedContinuations=collectAcceptedAppendContinuationsV1({root,campaignPath,phase});
+ materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath,
+  acceptedContinuations});
  return {status:'READY_FOR_EXISTING_BOUNDARY_SEAL',workShardIndexPath:assignment.workShardIndexPath,
   validationDelegatedTo:'CLOUDFLARE_WORKER'};
 }
@@ -1562,9 +1597,10 @@ export function collectAcceptedUnitRecordOriginsV1({root,campaignPath,directory,
    acceptedReference(u,entries[index],index,u.shardIndex,u.recordIndex);
   }else{
    const desc=issuedDescriptors.get(u.shardFile);
-   const start=desc?.append===true&&
-    Number.isSafeInteger(desc.startIndex)&&desc.startIndex>=0?
-     desc.startIndex:null;
+   const start=u.appendChunkNumber>1?
+    (Number.isSafeInteger(u.appendOrdinalStart)?u.appendOrdinalStart:null):
+    desc?.append===true&&Number.isSafeInteger(desc.startIndex)&&
+     desc.startIndex>=0?desc.startIndex:null;
    for(const [index,entry] of entries.entries()){
     acceptedReference(u,entry,index,index,
      start===null?null:start+index);
