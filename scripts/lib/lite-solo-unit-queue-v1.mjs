@@ -1390,14 +1390,19 @@ export function collectAcceptedUnitRecordOriginsV1({root,campaignPath,directory,
     acceptedSubmissionSha256:snapshot.submissionSha256,
     acceptedSourceSelector:sourceSelector,
     originalWorkerAttempt:{availability:sourceAvailability,
-     path:sourceAvailability==='AVAILABLE'?originalRef?.path??null:null,
-     sha256:sourceAvailability==='AVAILABLE'?originalRef?.sha256??null:null,
+     // Retain recorded expected locations/digests even when content has gone
+     // missing; availability is separate from original source identity.
+     path:originalRef?.path??null,sha256:originalRef?.sha256??null,
      sourceSelector:originalSelector,
      ...(isBound&&u.kind!=='APPEND'?
       {answerSelectors:originalAnswerSelectors(entry.key)}:{})},
-    ...(entry.sourceAuthoredIdentities?
+    // Controller-owned binding metadata is authoritative only when compiled
+    // by this adapter; a raw submitted entry may contain arbitrary extra keys.
+    ...(snapshot.sourceProvenance?.submittedRepresentation==='CONTROLLER_COMPILED'&&
+       entry.sourceAuthoredIdentities?
      {sourceAuthoredIdentities:structuredClone(entry.sourceAuthoredIdentities)}:{}),
-    ...(entry.controllerSubjectBindings?
+    ...(snapshot.sourceProvenance?.submittedRepresentation==='CONTROLLER_COMPILED'&&
+       entry.controllerSubjectBindings?
      {controllerSubjectBindings:structuredClone(entry.controllerSubjectBindings)}:{})
    });
   };
