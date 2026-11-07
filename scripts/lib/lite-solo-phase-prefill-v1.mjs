@@ -726,18 +726,45 @@ export function normalizeFormalObligationsIntoLedger({
 export function applyObligationDispositionsToLedger({ledger,canonical,sequence,canonicalRel,now,root=null,authorityRoot=null}){
   ledger.obligations??=[];
   const byId=new Map(ledger.obligations.map(o=>[String(o?.obligationId??''),o]).filter(([id])=>id));
-  const rows=[];
-  for(const action of Object.values(canonical?.actions??{})){
+  const rows=[],sourceRows=[
+    ...(canonical.automationOutputs?.acceptedUnitRecordOrigins?.records??[]),
+    ...(canonical.automationOutputs?.directPhaseRecordOrigins?.records??[])
+  ];
+  for(const [step,action] of Object.entries(canonical?.actions??{})){
     const value=action?.outputs?.obligationDispositions;
-    if(Array.isArray(value)) rows.push(...value.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)));
+    if(!Array.isArray(value))continue;
+    for(const [index,row] of value.entries()){
+      if(!row||typeof row!=='object'||Array.isArray(row))continue;
+      const selector='actions.'+step+'.outputs.obligationDispositions['+index+']';
+      const matches=sourceRows.filter(x=>x?.canonicalRecordSelector===selector);
+      rows.push({row,selector,
+        originalAcceptedRecordSource:matches.length===1?matches[0]:null,
+        sourceAvailability:matches.length===1?'SOURCE_BOUND':
+         matches.length>1?'AMBIGUOUS_ORIGINAL_SOURCE':'ORIGINAL_SOURCE_UNAVAILABLE'});
+    }
   }
-  for(const row of rows){
+  for(const {row,selector,originalAcceptedRecordSource,sourceAvailability} of rows){
     const id=String(row.obligationId??'').trim();
     const obligation=byId.get(id);
     if(!obligation){
-      (ledger.githubDiagnostics??=[]).push({phase:sequence,code:'UNKNOWN_OBLIGATION_DISPOSITION',obligationId:id,validationDelegatedTo:'CLOUDFLARE_WORKER'});
+      (ledger.githubDiagnostics??=[]).push({phase:sequence,
+        code:'UNKNOWN_OBLIGATION_DISPOSITION',obligationId:id,
+        originalSourceSelector:selector,
+        originalAcceptedRecordSource:originalAcceptedRecordSource??
+          {availability:sourceAvailability},
+        originalSubmittedRecord:structuredClone(row),
+        validationDelegatedTo:'CLOUDFLARE_WORKER'});
       continue;
     }
+    obligation.acceptedDispositionSources??=[];
+    const sourceId=canonicalRel+'#'+selector;
+    if(!obligation.acceptedDispositionSources.some(x=>x.sourceId===sourceId))
+      obligation.acceptedDispositionSources.push({sourceId,
+        canonicalArtifactPath:canonicalRel,originalSourceSelector:selector,
+        sourceAvailability,
+        originalAcceptedRecordSource:originalAcceptedRecordSource?
+          structuredClone(originalAcceptedRecordSource):null,
+        submittedRecord:structuredClone(row)});
     const disposition=String(row.disposition??'').toUpperCase();
     const carry=String(row.carryForwardPhaseOrNone??'NONE_IDENTIFIED');
     const refs=uniq([canonicalRel,...evidenceList(row.evidenceRefs)]);
