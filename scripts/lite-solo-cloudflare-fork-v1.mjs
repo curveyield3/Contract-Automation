@@ -1568,7 +1568,7 @@ async function unitValidateWave(c){
 }
 async function main(){
   if(OP==='PHASE_0_INITIALIZE'){
-    strict(typeof payload.authority_release==='string','intake authority label missing');
+    strict(['machine-intelligence-v7','machine-intelligence-v8'].includes(payload.authority_release),'intake authority release must be a recognized Machine Intelligence manifest release');
     strict(payload.request_id===payload.audit_id,'intake request identity differs from audit ID');
     strict((typeof payload.source_url==='string'&&payload.source_url.length>0)!==Boolean(payload.scan_urls?.length),'exactly one source intake mode required');
     strict(!payload.scan_urls||Array.isArray(payload.scan_urls),'malformed explorer scan URL array'); // Worker owns scan count and host policy.
@@ -1576,6 +1576,7 @@ async function main(){
     const initEnv={...process.env,REQUEST_ID:payload.request_id,SOURCE_URL:payload.source_url||'',
       SCAN_URLS:JSON.stringify(payload.scan_urls||[]),FORK_EXPECTED_SOURCE_SHA:payload.source_sha256||'',
       DELIVERY_TRANSPORT:'DIRECT',LITE_SOLO_AI_AUTONOMOUS:'1',
+      FORK_EXPECTED_AUTHORITY_RELEASE:payload.authority_release,
       PUBLISH_FILES_JSON:JSON.stringify(Object.fromEntries(['report_pdf','audited_source','scope_summary','findings_remediation','methodology_analysis','properties_hypotheses','execution_results','architecture_dependencies','residual_risks','evidence_index'].map(k=>[k,false])))};
     cmd('bash',['scripts/lite-solo-source-initialization/run-cloudflare-fork-v1.sh'],{env:initEnv,timeout:20*60*1000});
     return;
