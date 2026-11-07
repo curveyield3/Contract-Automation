@@ -63,11 +63,12 @@ const appendChunkKeyV13=(tokens,chunk,ordinal)=>
 // delivery cannot be silently mistaken for a completed collection.
 function directAppendPagesV13({root,workDir,desc,primary}){
  if(!desc.append)return [];
- const primarySlab={schemaVersion:'curveyield-work-shard-v13',kind:'array',
-  path:desc.path,startIndex:desc.startIndex,entries:primary.entries};
- if(!Array.isArray(primary.entries)||
+ if(primary.schemaVersion!=='curveyield-work-shard-v13'||
+    primary.kind!=='array'||!secureSameV13(primary.path,desc.path)||
+    primary.startIndex!==desc.startIndex||
+    !Array.isArray(primary.entries)||
     primary.entries.length>MAX_V13_APPEND_RECORDS||
-    bytes(primarySlab)>MAX_V13_APPEND_BYTES)
+    bytes(primary)>MAX_V13_APPEND_BYTES)
   throw new Error('APPEND_PRIMARY_CHUNK_TRANSPORT_LIMIT: '+desc.file);
  const names=fs.readdirSync(relfile(root,workDir));
  const prefix=desc.file.replace(/_v1\.json$/,'_CONT_');
