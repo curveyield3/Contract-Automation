@@ -125,12 +125,25 @@ function assignCanonicalIds(canonical,graph,phase){
    .push(source);
  }
  const reserved=new Set(graph.nodes.map(n=>n.nodeId).filter(Boolean));
- const canonicalIdCounters=new Map();
+ const canonicalIdCounters=new Map(),nodeById=new Map(),
+  nodeBySource=new Map(),legacyByPath=new Map();
+ const sourceIndex=(family,identity)=>JSON.stringify([family,phase,identity]);
+ for(const node of graph.nodes){
+  if(node?.nodeId)nodeById.set(node.nodeId,node);
+  if(Number(node?.originPhase)!==Number(phase))continue;
+  if(typeof node.sourceRecordIdentity==='string')
+   nodeBySource.set(sourceIndex(node.nodeType,node.sourceRecordIdentity),node);
+  else if(typeof node.sourceRecordPath==='string')
+   legacyByPath.set(sourceIndex(node.nodeType,node.sourceRecordPath),node);
+ }
+ const usableCanonicalId=value=>typeof value==='string'&&value.trim()&&
+  !value.startsWith('<')&&value!=='TODO'&&
+  !['NONE_IDENTIFIED','NO_CANDIDATE','NOT_APPLICABLE'].includes(value);
  for(const action of Object.values(canonical.actions??{})){
   for(const value of Object.values(action.outputs??{})){
    if(!Array.isArray(value))continue;
    for(const item of value)if(item&&typeof item==='object'&&!Array.isArray(item)&&
-       typeof item.canonicalId==='string'&&item.canonicalId.trim())
+       usableCanonicalId(item.canonicalId))
     reserved.add(item.canonicalId);
   }
  }
@@ -155,14 +168,11 @@ function assignCanonicalIds(canonical,graph,phase){
       chunkNumber:source.chunkNumber??source.appendChunkNumber??null,
       originalRecordOrdinal:source.originalRecordOrdinal??null
      }):null;
-    const previous=graph.nodes.find(n=>n.nodeType===family&&
-     Number(n.originPhase)===Number(phase)&&
-     (sourceRecordIdentity?n.sourceRecordIdentity===sourceRecordIdentity:
-       n.sourceRecordIdentity===undefined&&
-       n.sourceRecordPath===sourceRecordPath));
-    const supplied=typeof item.canonicalId==='string'&&item.canonicalId.trim()?
-     item.canonicalId:null;
-    const priorOwner=supplied?graph.nodes.find(n=>n.nodeId===supplied):null;
+    const previous=sourceRecordIdentity?
+     nodeBySource.get(sourceIndex(family,sourceRecordIdentity)):
+     legacyByPath.get(sourceIndex(family,sourceRecordPath));
+    const supplied=usableCanonicalId(item.canonicalId)?item.canonicalId:null;
+    const priorOwner=supplied?nodeById.get(supplied):null;
     const suppliedBelongsToSource=!priorOwner||
      (priorOwner.nodeType===family&&
       Number(priorOwner.originPhase)===Number(phase)&&
@@ -174,10 +184,12 @@ function assignCanonicalIds(canonical,graph,phase){
      supplied&&!occupied.has(supplied)&&suppliedBelongsToSource?
       supplied:nextId(graph,family,reserved,canonicalIdCounters);
     while(occupied.has(canonicalId)||
-      graph.nodes.some(n=>n.nodeId===canonicalId&&
-       !(n.nodeType===family&&Number(n.originPhase)===Number(phase)&&
-        (sourceRecordIdentity?n.sourceRecordIdentity===sourceRecordIdentity:
-         n.sourceRecordPath===sourceRecordPath))))
+      (nodeById.has(canonicalId)&&
+       !(nodeById.get(canonicalId).nodeType===family&&
+         Number(nodeById.get(canonicalId).originPhase)===Number(phase)&&
+         (sourceRecordIdentity?
+          nodeById.get(canonicalId).sourceRecordIdentity===sourceRecordIdentity:
+          nodeById.get(canonicalId).sourceRecordPath===sourceRecordPath))))
      canonicalId=nextId(graph,family,reserved,canonicalIdCounters);
     item.canonicalId=canonicalId;
     reserved.add(canonicalId);occupied.add(canonicalId);
@@ -199,11 +211,16 @@ function assignCanonicalIds(canonical,graph,phase){
       {sourceAuthoredCanonicalId:supplied}: {})
     };
     links.push(sourceLink);
-    if(!graph.nodes.some(n=>n.nodeId===canonicalId))
-     graph.nodes.push({nodeId:canonicalId,nodeType:family,originPhase:phase,
+    if(!nodeById.has(canonicalId)){
+     const node={nodeId:canonicalId,nodeType:family,originPhase:phase,
       sourceRecordPath,
       ...(sourceRecordIdentity?{sourceRecordIdentity}:{}),
-      ...(source?{originalAcceptedRecordSource:structuredClone(source)}:{})});
+      ...(source?{originalAcceptedRecordSource:structuredClone(source)}:{})};
+     graph.nodes.push(node);nodeById.set(canonicalId,node);
+     if(sourceRecordIdentity)
+      nodeBySource.set(sourceIndex(family,sourceRecordIdentity),node);
+     else legacyByPath.set(sourceIndex(family,sourceRecordPath),node);
+    }
    }
   }
  }
