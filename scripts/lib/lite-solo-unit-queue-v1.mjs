@@ -283,7 +283,9 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
      acceptedUnitPath:owner.acceptedPath,
      acceptedUnitArtifactSha256:hex(fs.readFileSync(repoFile(root,owner.acceptedPath))),
      acceptedSubmissionSha256:accepted.submissionSha256,
-     answerVersions:[]};
+     // Preserve question creation and subsequent source events separately.
+     // PLAN/EXPAND with null answers are not answered revisions.
+     checkpointEvents:[],answerVersions:[]};
     out.questions.push(entry);keyMap.set(identity,entry);
    }
    // Every immutable checkpoint revision, not just the last answer, remains
@@ -351,12 +353,10 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
        questionId:record.questionId,reason:'CHECKPOINT_QUESTION_NOT_IN_INDEX',
        path:checkpoint.path,revision:checkpoint.revision});continue;
      }
-     question.answerVersions.push({
+     const checkpointEvent={
       checkpointRevision:checkpoint.revision,mode:source.mode,
       checkpointPath:checkpoint.path,checkpointSha256:checkpoint.sha256,
       checkpointRecordSelector:'records['+i+']',
-      ...(Object.hasOwn(record,'answerText')?
-       {answerTextSourceSelector:'records['+i+'].answerText'}:{}),
       ...(Object.hasOwn(record,'questionText')?
        {historicalQuestionTextSelector:'records['+i+'].questionText'}:{}),
       recordedStatus:record.status??null,
@@ -364,7 +364,15 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
        Object.hasOwn(source,'revisionReason')?
        {path:checkpoint.path,sha256:checkpoint.sha256,
         selector:'revisionReason'}:null
-     });
+     };
+     question.checkpointEvents.push(checkpointEvent);
+     // An answer version requires an actually authored non-null answer,
+     // not a planned question merely appearing in an EXPAND checkpoint.
+     if((source.mode==='ANSWERS'||source.mode==='REVISE')&&
+        typeof record.answerText==='string')
+      question.answerVersions.push({
+       ...checkpointEvent,answerTextSourceSelector:'records['+i+'].answerText'
+      });
     }
    }
   }
