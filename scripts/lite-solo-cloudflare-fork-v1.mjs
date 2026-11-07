@@ -766,6 +766,15 @@ function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
   const phase1EvidenceRefs=AUTH==='Machine Intelligence Audit Controller/Audit Skill v8'&&
    Number(c.directory.currentAssignment.phaseSequence)===4&&
    fs.existsSync(relative(phase1CanonicalPath))?[phase1CanonicalPath]:[];
+  // Existing evidenceRefs transport: one source-canonical reference per
+  // earlier question-bearing phase, never a copy of hundreds of question
+  // texts or fabricated candidate conclusions. Exact original answers are
+  // recoverable through the source-bound checkpoint selectors in each file.
+  const currentPhase=Number(c.directory.currentAssignment.phaseSequence);
+  const priorQuestionCanonicalRefs=[4,5,6].filter(p=>p<currentPhase)
+   .map(p=>path.posix.join(c.campaignPath,
+    'derived/phase-'+p+'/PHASE_'+String(p).padStart(2,'0')+'_CANONICAL_DATA_v1.json'))
+   .filter(rel=>fs.existsSync(relative(rel)));
   return {unitId:u.unitId,kind:u.kind,step:0,stage:'',unitSpecRevision:u.unitSpecRevision,
     packetPath,packetSha256,packetIndexPath:u.packetIndexPath||null,recordKeys:u.recordKeys||[],
     dependencies:u.dependencies||[],path:u.path,members:u.members,field:u.field,
@@ -775,7 +784,7 @@ function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
     // Existing same-unit evidence channel makes the original immutable Worker
      // file available to the reconciliation agent along with its work row.
      evidenceRefs:[...(u.packetIndexPath?[u.packetIndexPath]:[]),questionQueuePath,
-      ...phase1EvidenceRefs,
+      ...phase1EvidenceRefs,...priorQuestionCanonicalRefs,
       // One full summary reference for each unit, not thousands of repeated
       // source records. The agent follows exact selectors when relevant.
       ...([4,5,6,8,10].includes(Number(c.directory.currentAssignment.phaseSequence))?
