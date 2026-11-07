@@ -1381,7 +1381,13 @@ function assembleBoundAnswersV1(c,u,submitted){
   }
   const envelope={schemaVersion:'curveyield-work-shard-v13',kind:'array',
    path:u.path,startIndex:u.appendOrdinalStart??0,entries:result.entries};
-  strict(Buffer.byteLength(bytes(envelope))<=1024*1024,
+  for(const [i,entry] of result.entries.entries()){
+   const single={...envelope,entries:[entry]};
+   strict(bytes(single).length<=1024*1024,
+    'APPEND_SINGLE_RECORD_TRANSPORT_LIMIT: '+u.unitId+
+    ' record ordinal '+String(i+1)+' cannot fit an authorized chunk');
+  }
+  strict(bytes(envelope).length<=1024*1024,
    'APPEND_CHUNK_TRANSPORT_LIMIT: issue a smaller independently bounded chunk');
  }else if(['FLOW','ATTACK'].includes(u.kind)){
   const lists=u.kind==='FLOW'?['rows','flowNotes','integrationAnswers','contractChecks']:
