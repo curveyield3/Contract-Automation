@@ -1183,7 +1183,8 @@ function issueAcceptedAppendContinuationsV1({root,campaign,phase,plan,queue}){
   if(accepted?.submission?.appendContinuation!==true)continue;
   if(!Array.isArray(accepted.submission.entries))continue;
   const chunk=(previous.appendChunkNumber??1)+1;
-  if(chunk>9999)throw Error('APPEND_CONTINUATION_CHUNK_NAMESPACE_EXHAUSTED: '+previous.unitId);
+  if(!Number.isSafeInteger(chunk))
+   throw Error('APPEND_CONTINUATION_ORDINAL_EXCEEDS_SAFE_INTEGER: '+previous.unitId);
   const seriesId=previous.appendSeriesUnitId??previous.unitId;
   const unitId=seriesId+'-C'+String(chunk).padStart(4,'0');
   const existing=plan.units.find(unit=>unit.unitId===unitId);
@@ -1388,8 +1389,22 @@ function restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan}
 // transport. It is read from the existing immutable accepted unit snapshots.
 export function collectAcceptedAppendContinuationsV1({root,campaignPath,phase}){
  if(![4,5,6].includes(Number(phase)))return [];
+ if(!maybe(root,planRel(campaignPath,phase))||
+    !maybe(root,queueRel(campaignPath,phase)))return [];
  const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
  const pages=[];
+ // A continuation request is only fulfilled by a separately issued and
+ // accepted successor. Never treat an unfinished accepted chain as complete.
+ for(const u of plan.units.filter(unit=>unit.kind==='APPEND')){
+  const state=queue.units?.[u.unitId];
+  if(state?.status!=='ACCEPTED')continue;
+  const snap=read(root,state.acceptedPath);
+  if(snap.submission?.appendContinuation!==true)continue;
+  const successor=plan.units.find(next=>next.kind==='APPEND'&&
+   next.continuationAfterUnitId===u.unitId);
+  if(!successor)
+   throw Error('APPEND_CONTINUATION_AWAITING_ISSUANCE: '+u.unitId);
+ }
  for(const u of plan.units){
   if(u.kind!=='APPEND'||!(u.appendChunkNumber>1))continue;
   const state=queue.units?.[u.unitId];
