@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v45, controller-issued field answer transport.
+// Lite-Solo MiMo / Worker transport bridge v46, exact original field submission disposition.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2522,12 +2522,21 @@ async function runControllerIssuedFieldAnswersV1(ready){
  }
  if(result.status!=='AI_FIELD_SUBMISSION_DISPOSITION')
   throw Error('Worker did not receive source-bound field submission: '+result.status);
- console.log(JSON.stringify({status:'MIMO_EXPLICIT_FIELD_ANSWERS_TRANSPORTED',
+ const originalSubmissionSha256=sha(JSON.stringify(submission,null,2)+'\n');
+ if(result.submissionSha256!==originalSubmissionSha256)
+  throw Error('Original Worker submission byte digest differs from signed field transport');
+ const disposition=result.originalWorkerDisposition||{};
+ if(result.originalWorkerStatus==='REWORK_REQUIRED'||
+    Array.isArray(disposition.fieldErrors)&&disposition.fieldErrors.length)
+  throw Error('ORIGINAL_CONTROLLER_FIELD_REWORK_REQUIRED: '+
+   JSON.stringify(disposition.fieldErrors??disposition).slice(0,3000));
+ console.log(JSON.stringify({status:'MIMO_EXPLICIT_FIELD_WORKER_DISPOSITION',
   campaignId,unitId:ready.unitId,unitKind:contract.unitKind,
   authoredFieldCount:submission.answers?.length??null,
   appendRecordCount:submission.appendRecords?.length??null,
-  originalSubmissionSha256:sha(JSON.stringify(submission)),
+  originalSubmissionSha256,
   workerDisposition:result.originalWorkerStatus,
+  originalWorkerDisposition:disposition,
   controllerAccepted:result.controllerAccepted===true,
   nextOwner:'EXISTING_CONTROLLER_VALIDATION_AND_STEP_LIFECYCLE'}));
 }
