@@ -1090,8 +1090,42 @@ function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,state
   queue.acceptedRecords[member.unitId]={status:'ACCEPTED',path:rel,
    snapshotSha256:sha(snapshot),parentUnitId:u.unitId};refs.push(rel);
  }
+ // The ordered accepted snapshot is authoritative for BATCH member
+ // positions. Preserve optional authored question links and translate their
+ // original entry ordinal to the accepted member ordinal, retaining the raw
+ // selector separately. A missing link remains unresolved, not a veto.
+ const links=Array.isArray(submission.questionRecordLinks)?
+  submission.questionRecordLinks.map(link=>{
+   if(!isObject(link))return clone(link);
+   const source=typeof link.acceptedOutputSelector==='string'?
+    link.acceptedOutputSelector:link.outputSelector;
+   let acceptedOutputSelector=source;
+   if(typeof source==='string'&&source.startsWith('entries[')){
+    const end=source.indexOf(']');
+    const ordinal=Number(source.slice(8,end));
+    const member=end>8&&Number.isSafeInteger(ordinal)&&ordinal>=0?
+     entries[ordinal]:null;
+    const position=member?
+     ordered.findIndex(e=>e?.key===member.key):-1;
+    if(position>=0&&source.slice(end+1).startsWith('.value'))
+     acceptedOutputSelector='entries['+position+']'+source.slice(end+1);
+   }else if(typeof link.recordKey==='string'){
+    const position=ordered.findIndex(e=>e?.key===link.recordKey);
+    if(position>=0)acceptedOutputSelector='entries['+position+'].value';
+   }
+   return {...clone(link),
+    ...(typeof source==='string'?{sourceAuthoredOutputSelector:
+     link.sourceAuthoredOutputSelector??source}:{}),
+    ...(typeof acceptedOutputSelector==='string'?{acceptedOutputSelector}:{})};
+  }):null;
  return {errors:[],assembledSubmission:{
-  schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:ordered},recordEvidenceRefs:refs};
+  schemaVersion:UNIT_ARTIFACT_SCHEMAS.submission,entries:ordered,
+  ...(links?{questionRecordLinks:links}:{}),
+  ...(submission.questionRecordLinks!==undefined&&!links?
+   {unmappedQuestionRecordLinks:clone(submission.questionRecordLinks)}:{}),
+  ...(submission.unmappedQuestionRecordLinks!==undefined?
+   {unmappedQuestionRecordLinks:clone(submission.unmappedQuestionRecordLinks)}:{})
+ },recordEvidenceRefs:refs};
 }
 // Source provenance is optional evidence metadata and never an acceptance gate.
 // The original Worker path comes from the GitHub adapter, not from an inferred
