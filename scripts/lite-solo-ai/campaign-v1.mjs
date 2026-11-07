@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v42, retained wave methodology across question turns.
+// Lite-Solo MiMo / Worker transport bridge v43, committed question recovery and bounded dialogue.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2240,7 +2240,18 @@ async function runTechnicalQuestionTransportV1(){
     lease:issued.scope.lease,scopeSha256:issued.scopeSha256,
     questionId:issued.scope.questionId,questionSha256:issued.scope.questionSha256,
     answerText:original};
-   const textResponse=await workerCall(body);
+   let textResponse;
+   try{textResponse=await workerCall(body);}
+   catch(error){
+    // GitHub may have committed the checkpoint before a network failure.
+    // The identical request is safe to replay: Worker verifies the original
+    // immutable GitHub checkpoint, not a transient in-memory acknowledgement.
+    console.log(JSON.stringify({status:'MIMO_AMBIGUOUS_CHECKPOINT_TRANSPORT',
+     campaignId,unitId:issued.scope.unitId,questionId:issued.scope.questionId,
+     originalAnswerSha256:sha(original),responseMissing:true,
+     retryStrategy:'SAME_IMMUTABLE_REQUEST_ID'}));
+    textResponse=await workerCall(body);
+   }
    try{receipt=JSON.parse(textResponse);}catch{throw Error('Original answer receipt is not JSON');}
    if(receipt.status==='AI_TECHNICAL_FORMAT_CLARIFICATION'){
     dialogue.push({role:'assistant',content:original});
@@ -2253,25 +2264,33 @@ async function runTechnicalQuestionTransportV1(){
     original=await modelCall(dialogue,{technicalAnswer:true});
     continue;
    }
+   if(receipt.status==='AI_TECHNICAL_CHECKPOINT_CAPACITY_UNPUBLISHED'){
+    console.log(JSON.stringify({status:'MIMO_ORIGINAL_ANSWER_NOT_COMMITTED_CAPACITY',
+     campaignId,unitId:issued.scope.unitId,questionId:issued.scope.questionId,
+     answerSha256:receipt.originalAnswerSha256,
+     originalPrivateR2Key:receipt.originalAnswerR2Key,
+     nextOwner:'EXISTING_CONTROLLER_QUESTION_PAGING_CONTRACT',
+     githubQuestionCheckpointPublished:false,controllerAccepted:false}));
+    throw Error('QUESTION_INDEX_OR_CHECKPOINT_CAPACITY: original MiMo answer preserved privately but NOT committed to GitHub; '+receipt.nextAction);
+   }
    if(receipt.status==='AI_TECHNICAL_CHECKPOINT_REQUIRES_RECOVERY'){
-    // A publish race can already have committed this exact answer. Preserve
-    // its private R2 copy and ask the controller for the next ACTUAL status.
+    // Do not infer commit success because a DIFFERENT next question appears.
+    // Recover the exact same answer from the original GitHub checkpoint.
+    // A stale-revision response supplies a verified fresh controller state;
+    // only that change justifies one identical replay.
     const probeRaw=await workerCall({operation:'next_question',
-     unitId:issued.scope.unitId,lease:issued.scope.lease});
-    let probe;try{probe=JSON.parse(probeRaw);}catch{throw Error('Cannot inspect controller checkpoint after recovery');}
-    if(probe.status==='AI_TECHNICAL_QUESTION_ISSUED'&&
-       probe.scopeSha256===issued.scopeSha256&&attempt<3){
-     attempt++;continue; // exact original answer, no duplicate model inference
+     unitId:issued.scope.unitId,lease:issued.scope.lease,
+     methodologyAlreadyDelivered:true});
+    let probe;try{probe=JSON.parse(probeRaw);}catch{throw Error('Cannot inspect committed question status');}
+    if(attempt<2&&(probe.status==='AI_TECHNICAL_PACKET_QUESTIONS_COMPLETE'||
+       probe.status==='AI_TECHNICAL_QUESTION_ISSUED'&&
+       (probe.scopeSha256!==issued.scopeSha256||
+        probe.scope.questionIndexRevision!==issued.scope.questionIndexRevision))){
+     attempt++;continue; // Retry original request; Worker verifies its actual checkpoint.
     }
-    if(probe.status==='AI_TECHNICAL_PACKET_QUESTIONS_COMPLETE'||
-       probe.status==='AI_TECHNICAL_QUESTION_ISSUED'&&probe.scope.questionId!==issued.scope.questionId){
-     console.log(JSON.stringify({status:'MIMO_CHECKPOINT_RECONCILED',
-      campaignId,unitId:issued.scope.unitId,oldQuestion:issued.scope.questionId,
-      nextQuestion:probe.scope?.questionId??null,controllerAccepted:false}));
-     break;
-    }
-    throw Error('Original controller checkpoint could not be reconciled for '+issued.scope.questionId+
-     ': '+String(receipt.controllerStatus||receipt.status));
+    throw Error('QUESTION_CHECKPOINT_UNVERIFIED: original answer is staged but cannot be identified in committed index for '+
+     issued.scope.questionId+'; source='+String(receipt.originalAnswerR2Key||'none')+
+     ' state='+String(receipt.controllerStatus||'unknown'));
    }
    const supported=receipt.status=== 'AI_TECHNICAL_QUESTION_RECORDED' ||
     receipt.status==='AI_TECHNICAL_ANSWER_STAGED';
@@ -2287,9 +2306,14 @@ async function runTechnicalQuestionTransportV1(){
     nextQuestionSelectedOnlyByController:true}));
    break;
   }
-  dialogue.push({role:'assistant',content:original});
   questionIterations++;
   if(issued.question.mode!=='PLANNED_PER_PACKET')return;
+  // Original answered/expanded question text and revisions now live in GitHub.
+  // Retain full frozen wave methodology but avoid accumulating a synthetic,
+  // truncated, in-memory question history across arbitrarily many rounds.
+  // The next issued roster and immutable evidence-read interface reconstruct
+  // every previously committed original question and answer by identity.
+  dialogue=dialogue.slice(0,2);
   // Next loop obtains the ACTUAL committed roster, never infers the next
   // question from this answer or a locally guessed coverage threshold.
  }
