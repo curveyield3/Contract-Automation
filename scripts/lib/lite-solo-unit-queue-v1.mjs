@@ -1861,7 +1861,10 @@ function explicitQuestionRefsInRecordV1(value,{phase,unitId,selector}){
       (Array.isArray(child)?'['+i+']':'');
      if(authored)refs.push({authored,sourceSelector,
       originalExplicitReference:structuredClone(ref)});
-     else if(typeof ref==='string'&&/^Q-[0-9]+$/.test(ref.trim())||
+     else if(typeof ref==='string'&&(
+       /^Q-[0-9]+$/.test(ref.trim())||
+       /\\/Q-[0-9]+/.test(ref)||
+       key.toLowerCase().includes('question'))||
        isObject(ref)&&Object.hasOwn(ref,'questionId'))
       refs.push({authored:null,sourceSelector,
        originalExplicitReference:structuredClone(ref),
