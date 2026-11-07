@@ -565,16 +565,17 @@ async function sourceBoundQuestionHistoryV1(raw){
     indexPath,status:'NOT_PUBLISHED_OR_UNREADABLE'});continue;
   }
   const index=ix.data;
-  if(index.schemaVersion!=='curveyield-ai-question-index-v1'||
-     index.campaignId!==campaignId||
-     index.campaignGenerationId!==directory.campaignGenerationId||
-     index.sourceSha256!==directory.sourceSha256||
-     index.authorityDigest!==directory.authorityDigest||
-     index.phaseSequence!==item.phaseSequence||
-     index.unitId!==item.unitId||
-     (item.ref?.packetSha256&&index.packetSha256!==item.ref.packetSha256)||
-     (item.ref?.phaseEpoch&&index.phaseEpoch!==item.ref.phaseEpoch)||
-     !Array.isArray(index.checkpoints)){
+  if(index?.schemaVersion!=='curveyield-ai-question-index-v1'||
+     index?.campaignId!==campaignId||
+     index?.campaignGenerationId!==directory.campaignGenerationId||
+     index?.sourceSha256!==directory.sourceSha256||
+     index?.authorityDigest!==directory.authorityDigest||
+     index?.phaseSequence!==item.phaseSequence||
+     index?.unitId!==item.unitId||
+     (item.ref?.packetSha256&&index?.packetSha256!==item.ref.packetSha256)||
+     (item.ref?.phaseEpoch&&index?.phaseEpoch!==item.ref.phaseEpoch)||
+     !Array.isArray(index?.questions)||
+     !Array.isArray(index?.checkpoints)){
    unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
     indexPath,status:'IDENTITY_MISMATCH'});continue;
   }
