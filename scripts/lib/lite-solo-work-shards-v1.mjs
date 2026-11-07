@@ -321,7 +321,19 @@ export function secureShardWorkFormV13({root,formRel,phase,retireFull=true}){
        if(bytes(body)>MAX_V13_SHARD_BYTES)throw new Error('v13 work shard exceeds 100 KiB: '+file);
        secureWriteV13(root,path.posix.join(workDir,file),body);
        descriptions.push({file,kind,path:tokens,startIndex,append,
-         recordKeys:append?[]:entries.map(x=>x.key.slice(prefix.length))});
+         recordKeys:append?[]:entries.map(x=>x.key.slice(prefix.length)),
+         ...(append?{continuationTransport:{
+          format:'curveyield-work-shard-v13',
+          nextChunkFile:appendContinuationFileV13(file,2),
+          filenameRule:'ORIGINAL_SHARD_CONT_XXXX_v1.json',
+          chunkStart:2,
+          appendContinuationFlag:'appendContinuation: true requests next page',
+          chunkRecordKeys:'PATH_JSON:APPEND-CXXXX-YYYY',
+          maxRecordsPerChunk:MAX_V13_APPEND_RECORDS,
+          maxSerializedBytesPerChunk:MAX_V13_APPEND_BYTES,
+          finalChunkMustNotRequestContinuation:true,
+          preserveExistingIndex:true
+         }}:{})});
      };
      if(!Array.isArray(value)){
        add('scalar',0,[{key:prefix+'value',value}]);
