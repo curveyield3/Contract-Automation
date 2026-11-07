@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v51, Step 7 exact overflow disposition.
+// Lite-Solo MiMo / Worker transport bridge v52, Step 7 exact overflow disposition.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2933,8 +2933,21 @@ if(negotiated.machineIntelligence===true){
  if(negotiated.authorityRelease!=='machine-intelligence-v8'||
     negotiated.protocol!=='machine-intelligence-technical-question-transport-v1')
   throw Error('Machine Intelligence frozen release and inference protocol disagree');
- const ready=await runTechnicalQuestionTransportV1();
- if(ready)await runControllerIssuedFieldAnswersV1(ready);
+ try{await miStep8RunLifecycle();}
+ catch(error){
+  if(String(error?.message||error)!=='MI_STEP8_RUN_HANDOFF_DUE')throw error;
+  // A current signed GitHub run only asks the existing Worker to dispatch an
+  // authorized successor; the Worker chooses current phase/step and lease.
+  const handoff=JSON.parse(await workerCall({operation:'handoff'}));
+  console.log(JSON.stringify({status:'MIMO_STEP8_BOUNDED_RUN_HANDOFF',
+   campaignId,workerStatus:handoff.status,phase:handoff.phase??null,
+   step:handoff.step??null,dispatchState:handoff.dispatchState??null,
+   controllerAccepted:handoff.controllerAccepted===true,
+   nextOwner:'EXISTING_CONTROLLER_AND_ORIGINAL_GITHUB_QUESTION_INDEX'}));
+  if(!['MI_HANDOFF_DISPATCHED','MI_HANDOFF_ALREADY_RECORDED',
+    'MI_HANDOFF_CONTROLLER_OWNED'].includes(handoff.status))
+   throw Error('Signed Worker did not confirm continuation: '+String(handoff.status));
+ }
 }else{
 let workerResponse=await workerCall({operation:'start'});
 // Keep every MiMo-produced command and every Worker response presented to MiMo
