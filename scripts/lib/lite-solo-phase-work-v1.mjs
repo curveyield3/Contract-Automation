@@ -156,9 +156,12 @@ export function buildDerivedOutputs({root,campaignPath,schema,canonicalData,cano
       selectedCanonicalPaths:[...(spec.selectors??[])],
       completeSourceSelectors:[
         'actions','automationInputs','automationOutputs',
-        'automationOutputs.acceptedUnitRecordOrigins',
-        'automationOutputs.directPhaseRecordOrigins',
-        'automationOutputs.canonicalGraphSourceRefs'
+        ...(canonicalData.automationOutputs?.acceptedUnitRecordOrigins?
+         ['automationOutputs.acceptedUnitRecordOrigins']:[]),
+        ...(canonicalData.automationOutputs?.directPhaseRecordOrigins?
+         ['automationOutputs.directPhaseRecordOrigins']:[]),
+        ...(canonicalData.automationOutputs?.canonicalGraphSourceRefs?
+         ['automationOutputs.canonicalGraphSourceRefs']:[])
       ],
       sourceRecordCount:
         (canonicalData.automationOutputs?.acceptedUnitRecordOrigins?.records?.length??0)+
