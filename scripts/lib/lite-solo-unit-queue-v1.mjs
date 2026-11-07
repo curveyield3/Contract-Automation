@@ -1377,9 +1377,28 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
   root,campaignPath:campaign,phase:4,unitId:unit.unitId,
   directory,queue,plan}));
  updated.automationInputs.questionHistoryRefs=phaseQuestionHistory;
+ // Phase-4 reconciliation begins before Phase 4 has a sealed canonical.
+ // Make the original accepted FLOW/ATTACK output rows and question histories
+ // retrievable NOW, including explicitly linked and unpromoted answers.
+ // This is an index of exact accepted bytes, not an inferred relationship.
+ updated.automationInputs.discoveryQuestionOutputSourceRefs=
+  acceptedSubmissions.map(source=>({
+   phaseSequence:4,unitId:source.unitId,
+   acceptedUnitPath:source.sourceReference.acceptedPath,
+   acceptedUnitArtifactSha256:source.sourceReference.acceptedSha256,
+   acceptedSubmissionSelector:'submission',
+   questionHistorySource:phaseQuestionHistory.find(
+    ref=>ref.unitId===source.unitId)??null,
+   explicitQuestionLinkSelector:
+    Array.isArray(source.submission?.questionRecordLinks)?
+     'submission.questionRecordLinks':null,
+   originalQuestionHistoryStatus:
+    phaseQuestionHistory.find(ref=>ref.unitId===source.unitId)?.availability??
+     'HISTORY_SOURCE_UNAVAILABLE'
+  }));
  updated.automationInputs.controllerOwnedAutomationInputs=[...new Set([
   ...(updated.automationInputs.controllerOwnedAutomationInputs??[]),
-  'questionHistoryRefs'])];
+  'questionHistoryRefs','discoveryQuestionOutputSourceRefs'])];
  refreshControllerPrefillDigest(updated);
  put(root,assignment.workFormPath,updated);
  const shards=secureShardWorkFormV13({root,formRel:assignment.workFormPath,phase:4,retireFull:true});
