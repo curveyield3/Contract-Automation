@@ -488,6 +488,9 @@ function semanticAnswerBindingV1({c,u,schema,initial}){
   bindings:definition.type==='REQUIRED_RECORD_LIST'&&member.initialValue&&
    typeof member.initialValue==='object'&&!Array.isArray(member.initialValue)
    ?[...new Set([...(definition.itemRequiredFields??[]),
+      // Preserve optional typed fields already present in an issued fixed row.
+      // They are not new subjects and must not disappear during compilation.
+      ...Object.keys(member.initialValue),
       ...(definition.controllerCollectedFields??[]),...actionCollectedFields,
       ...(definition.conditionalExecutionBlueprint?['executionBlueprint']:[])])].map(itemField=>controllerAnswerFieldBindingV1({
      c,fieldName,sourceRow:member.initialValue,definition,itemField,
@@ -1253,6 +1256,39 @@ function assembleBoundAnswersV1(c,u,submitted){
   strict(rows.length<=route.appendMaximumRecords,'append exceeds existing controller capacity');
   const fieldDef=schema.actions[route.step]?.fields?.find(x=>x.name===route.field);
   const keyRoot=JSON.stringify(u.path)+':APPEND-';
+  const policies=new Map(route.recordFieldTemplate.map(spec=>[spec.field,spec]));
+  const reservedIdentities=new Set(knownSubjectIds);
+  // Reserve unique AI-authored keys across the WHOLE submission before
+  // generating any new keys, so a missing earlier key cannot take a valid
+  // later key. Previously accepted identities always take precedence.
+  const authoredIds=new Map();
+  for(const input of rows){
+   if(!input||typeof input!=='object'||Array.isArray(input))continue;
+   for(const spec of route.recordFieldTemplate){
+    if(!['ALLOCATE_MECHANICALLY_IF_NEW','PRESERVE_ISSUED_VALUE'].includes(spec.source)||
+       !MECHANICAL_ID_FIELDS.has(spec.field))continue;
+    const id=input[spec.field];
+    if(typeof id!=='string'||!id.trim()||isPendingAnswerValue(id)||negativeSentinel(id))continue;
+    authoredIds.set(id,(authoredIds.get(id)??0)+1);
+   }
+  }
+  const allocatedIdentities=new Set();
+  const allocateNewIdentity=(field,ordinal,authored,authoredOrigins)=>{
+   const supplied=typeof authored==='string'?authored.trim():'';
+   if(supplied&&!isPendingAnswerValue(supplied)&&!negativeSentinel(supplied)&&
+      !reservedIdentities.has(supplied)&&!allocatedIdentities.has(supplied)){
+    reservedIdentities.add(supplied);allocatedIdentities.add(supplied);
+    return supplied; // Distinct AI-authored stable identity wins.
+   }
+   let offset=ordinal,id;
+   do{
+    id=allocatedRecordId(phase,u.unitId,field,offset++);
+   }while(reservedIdentities.has(id)||authoredIds.has(id));
+   if(supplied&&!isPendingAnswerValue(supplied)&&!negativeSentinel(supplied))
+    authoredOrigins[field]=supplied;
+   reservedIdentities.add(id);allocatedIdentities.add(id);
+   return id;
+  };
   result.entries=rows.map((input,i)=>{
    const key=keyRoot+String(i+1).padStart(4,'0');
    // Original REQUIRED_LIST append slots contain literal scalars; record-list
@@ -1263,42 +1299,48 @@ function assembleBoundAnswersV1(c,u,submitted){
    }
    strict(input&&typeof input==='object'&&!Array.isArray(input),'append record is not a typed object');
    const value=structuredClone(input);
+   const authoredOrigins={},subjectBindings={};
    // APPEND applies the same field ownership policy as fixed issued records.
    // Unissued controller/machine fields cannot be smuggled in as optional data.
-   const policies=new Map(route.recordFieldTemplate.map(spec=>[spec.field,spec]));
    const reserved=new Set([...MECHANICAL_ID_FIELDS,...MACHINE_EXECUTION_FIELDS.keys(),
     ...route.controllerCollectedBindings.map(spec=>spec.field),
     ...(fieldDef?.controllerCollectedFields??[]),
     ...(schema.actions[route.step]?.controllerCollectedFields??[])]);
    for(const field of Object.keys(value))
     if(reserved.has(field)&&!policies.has(field))delete value[field];
-   for(const ref of ['subjectKey','candidateKey','obligationId','findingKey']){
-    if(Object.hasOwn(value,ref)){
-     const policy=route.recordFieldTemplate.find(x=>x.field===ref);
-     if(policy?.source==='BIND_EXISTING_CONTROLLER_SUBJECT')
-      bindExistingSubjectV1(knownSubjectIds,ref,value[ref]);
-    }
+   // A literal reference may identify an accepted subject, or may remain
+   // unresolved. Preserve it in either case; never merge two authored records
+   // or synthesize a matching subject from its title/description.
+   for(const field of ['subjectKey','candidateKey','obligationId','findingKey']){
+    if(!Object.hasOwn(value,field))continue;
+    const spec=policies.get(field);
+    if(spec?.source!=='BIND_EXISTING_CONTROLLER_SUBJECT')continue;
+    subjectBindings[field]=typeof value[field]==='string'&&
+     knownSubjectIds.has(value[field])?'EXACT_ACCEPTED_SUBJECT':
+     'UNRESOLVED_EXPLICIT_REFERENCE';
    }
    for(const spec of route.recordFieldTemplate){
     if(spec.source==='ALLOCATE_MECHANICALLY_IF_NEW')
-     value[spec.field]=allocatedRecordId(phase,u.unitId,spec.field,i+1);
+     value[spec.field]=allocateNewIdentity(spec.field,i+1,value[spec.field],authoredOrigins);
     if(spec.source==='PRESERVE_ISSUED_VALUE'){
      if(spec.value!==undefined)value[spec.field]=structuredClone(spec.value);
      else if(MECHANICAL_ID_FIELDS.has(spec.field))
-      value[spec.field]=allocatedRecordId(phase,u.unitId,spec.field,i+1);
+      value[spec.field]=allocateNewIdentity(spec.field,i+1,value[spec.field],authoredOrigins);
      else delete value[spec.field];
     }
-    if(spec.source==='BIND_EXISTING_CONTROLLER_SUBJECT')
-     strict(bindExistingSubjectV1(knownSubjectIds,spec.field,value[spec.field]),
-      'APPEND field requires accepted subject identity: '+spec.field);
+    // Unresolved exact references remain visible as such in controller-owned
+    // provenance; semantic sufficiency and subject judgments belong to MiMo.
     if(['CONTROLLER_COLLECT_AFTER_EXECUTION','CONTROLLER_VERIFIED_EXECUTION'].includes(spec.source)){
      const verified=machineVerifiedValueV1(c,value,spec.field);
      value[spec.field]=verified&&Object.hasOwn(verified,'value')?
       structuredClone(verified.value):unresolvedMachineFieldV1(spec.field,undefined);
     }
    }
-   // Record completeness belongs to the Worker; preserve partial answers.
-   return {key,value};
+   // Record completeness belongs to the Worker. Keep provenance outside the
+   // substantive value so the source schema remains backward compatible.
+   return {key,value,
+    ...(Object.keys(authoredOrigins).length?{sourceAuthoredIdentities:authoredOrigins}:{}),
+    ...(Object.keys(subjectBindings).length?{controllerSubjectBindings:subjectBindings}:{})};
   });
  }else if(['FLOW','ATTACK'].includes(u.kind)){
   const lists=u.kind==='FLOW'?['rows','flowNotes','integrationAnswers','contractChecks']:
