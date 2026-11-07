@@ -655,7 +655,7 @@ function questionHistoryModelContextV1(history){
   }
  };
 }
-function questionHistoryEvidenceReadV1(history,request){
+async function questionHistoryEvidenceReadV1(history,request){
  const req=request&&typeof request==='object'&&!Array.isArray(request)?request:{};
  const records=history?.histories??[],unavailable=history?.unavailable??[];
  const base={
@@ -688,9 +688,9 @@ function questionHistoryEvidenceReadV1(history,request){
   kind:req.kind,availability:'AVAILABLE',
   ...window(source.checkpoints.map((c,index)=>({
    checkpointIndex:index,path:c.path,sha256:c.sha256,
-   revision:c.checkpoint?.revision??null,
-   requestId:c.checkpoint?.requestId??null,
-   requestDigest:c.checkpoint?.requestDigest??null
+   revision:c.expectedReference?.revision??c.checkpoint?.revision??null,
+   requestId:c.expectedReference?.requestId??c.checkpoint?.requestId??null,
+   requestDigest:c.expectedReference?.requestDigest??c.checkpoint?.requestDigest??null
   })),at(req.start))};
  if(req.kind==='QUESTION_INDEX_PAGE'||req.kind==='CHECKPOINT_PAGE'){
   const cpIndex=req.kind==='CHECKPOINT_PAGE'?Number(req.checkpointIndex):null;
@@ -699,6 +699,36 @@ function questionHistoryEvidenceReadV1(history,request){
    return {...base,...sourceIdentity,availability:'CHECKPOINT_INDEX_OUT_OF_RANGE',
     requestedIndex:req.checkpointIndex};
   const checkpoint=req.kind==='CHECKPOINT_PAGE'?source.checkpoints[cpIndex]:null;
+  if(checkpoint&&typeof checkpoint.originalCheckpointText!=='string'){
+   // Do not mix source revisions if the global bridge has since pinned a
+   // different accepted Git commit. No moving-branch fallback is permitted.
+   if(!/^[a-f0-9]{40}$/.test(String(history?.snapshotCommit??''))||
+      history.snapshotCommit!==historySnapshotCommit)
+    return {...base,...sourceIdentity,availability:'PINNED_QUESTION_COMMIT_CHANGED',
+     checkpointIndex:cpIndex};
+   const index=JSON.parse(source.originalIndexText);
+   const ref=checkpoint.expectedReference??{};
+   const loaded=await historyJsonV1(checkpoint.path).catch(()=>null);
+   if(!loaded||loaded.file.sha256!==ref.sha256||
+      loaded.data.campaignId!==index.campaignId||
+      loaded.data.campaignGenerationId!==index.campaignGenerationId||
+      loaded.data.sourceSha256!==index.sourceSha256||
+      loaded.data.authorityDigest!==index.authorityDigest||
+      loaded.data.phaseSequence!==index.phaseSequence||
+      loaded.data.unitId!==index.unitId||
+      loaded.data.phaseEpoch!==index.phaseEpoch||
+      loaded.data.packetSha256!==index.packetSha256||
+      (ref.revision!==undefined&&loaded.data.revision!==ref.revision)||
+      (ref.requestId!==undefined&&loaded.data.requestId!==ref.requestId)||
+      (ref.requestDigest!==undefined&&loaded.data.requestDigest!==ref.requestDigest)){
+    return {...base,...sourceIdentity,availability:'CHECKPOINT_NOT_AVAILABLE_OR_IDENTITY_MISMATCH',
+     checkpointIndex:cpIndex,checkpointPath:checkpoint.path,
+     expectedCheckpointSha256:ref.sha256};
+   }
+   checkpoint.originalCheckpointText=loaded.file.text;
+   checkpoint.checkpoint=loaded.data;
+   checkpoint.verification='PINNED_SHA256_AND_INDEX_IDENTITY_VERIFIED';
+  }
   const original=checkpoint?checkpoint.originalCheckpointText:source.originalIndexText;
   const hash=checkpoint?checkpoint.sha256:source.indexSha256;
   if(typeof original!=='string')return {...base,...sourceIdentity,
@@ -1247,7 +1277,7 @@ function canonicalHistoryModelContextV1(history){
   }
  };
 }
-function modelLocalEvidenceReadV1(raw,canonicalHistory,phase1Evidence,questionHistory){
+async function modelLocalEvidenceReadV1(raw,canonicalHistory,phase1Evidence,questionHistory){
  let answer;
  try{answer=JSON.parse(raw);}catch{return null;}
  if(!answer||typeof answer!=='object'||Array.isArray(answer))return null;
@@ -1270,7 +1300,7 @@ function modelLocalEvidenceReadV1(raw,canonicalHistory,phase1Evidence,questionHi
  };
  if(hasHistory)return canonicalHistoryEvidenceReadV1(
   canonicalHistory,answer.originalCanonicalEvidenceRequest);
- if(hasQuestion)return questionHistoryEvidenceReadV1(
+ if(hasQuestion)return await questionHistoryEvidenceReadV1(
   questionHistory,answer.questionHistoryEvidenceRequest);
  return sourceEvidenceRequestV1(raw,phase1Evidence);
 }
@@ -1721,10 +1751,10 @@ while(true){
  // Keep two recent exact read exchanges in model context; older source bytes
  // remain available by pinned selector and page, without imposing a read cap.
  const evidenceReadPairs=[];
- for(let read=modelLocalEvidenceReadV1(
+ for(let read=await modelLocalEvidenceReadV1(
       raw,activeCanonicalHistory,activePhase1Evidence,activeQuestionHistory);
      read;
-     read=modelLocalEvidenceReadV1(
+     read=await modelLocalEvidenceReadV1(
       raw,activeCanonicalHistory,activePhase1Evidence,activeQuestionHistory)){
   if(evidenceReadPairs.length===2){
    const at=evidenceReadPairs.shift();
