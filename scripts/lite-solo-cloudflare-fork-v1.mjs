@@ -1414,7 +1414,7 @@ function assembleBoundAnswersV1(c,u,submitted){
     typeof link.acceptedOutputSelector==='string'?link.acceptedOutputSelector:null;
    let acceptedOutputSelector=source;
    if(u.kind==='APPEND'&&typeof source==='string'){
-    const match=source.match(/^appendRecords\\[([0-9]+)\\](.*)$/);
+    const match=source.match(/^appendRecords\[([0-9]+)\](.*)$/);
     if(match)acceptedOutputSelector='entries['+Number(match[1])+'].value'+match[2];
    }
    if(u.kind==='APPEND'&&!acceptedOutputSelector&&
