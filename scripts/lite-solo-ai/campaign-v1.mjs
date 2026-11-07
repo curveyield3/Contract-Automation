@@ -692,11 +692,11 @@ async function questionHistoryEvidenceReadV1(history,request){
   questionCount:Array.isArray(h.questionRoster)?h.questionRoster.length:null,
   checkpointCount:h.checkpoints?.length??0
  });
+ if(!history)return {...base,availability:'QUESTION_HISTORY_NOT_RETRIEVED'};
  if(req.kind==='HISTORY_INDEX')return {...base,kind:req.kind,availability:'AVAILABLE',
   ...window(records.map(identity),at(req.start))};
  if(req.kind==='UNAVAILABLE_INDEX')return {...base,kind:req.kind,availability:'AVAILABLE',
   ...window(unavailable,at(req.start))};
- if(!history)return {...base,availability:'QUESTION_HISTORY_NOT_RETRIEVED'};
  const requestedKey=typeof req.historyReferenceKey==='string'?req.historyReferenceKey:null;
  const phase=Number(req.phaseSequence),unitId=req.unitId;
  const matches=requestedKey?
