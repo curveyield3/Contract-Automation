@@ -2484,14 +2484,36 @@ async function runControllerIssuedFieldAnswersV1(ready){
   if(contract.unitKind==='APPEND'){
    const records=await ask({task:'AUTHOR_ADDITIONAL_AI_OWNED_APPEND_RECORDS',
     fieldTemplate:contract.answerRouting?.recordFieldTemplate,
-    originalMaximumRecords:transport.maxChunkRecords,appendSubjectOwner:'MIMO',
-    responseShape:{appendRecords:'<array of typed records; [] if none>'}},'appendRecords');
+    originalMaximumRecords:transport.maxChunkRecords,
+    originalMaximumSerializedBytes:transport.maxChunkBytes,
+    appendSubjectOwner:'MIMO',
+    responseShape:{appendRecords:'<array of typed records; [] if none>'},
+    instructions:'Supply one independently bounded prefix of your original distinct AI-authored records, at most 1,024 records and 1 MiB of serialized issued work-shard bytes. If additional distinct source-grounded records remain, do not drop, merge or summarize them; reserve them for the separately issued continuation unit and explicitly request a continuation in the next original decision. These limits apply per chunk, not to the logical count of security discoveries.'},'appendRecords');
    if(!Array.isArray(records))throw Error('AI APPEND records are not a JSON array');
    submission.appendRecords=records;
+   // Each ask() starts with a fresh model conversation. Supply the exact
+   // mechanically authored identity roster from the immediately preceding
+   // MiMo answer, so the next continuation decision does not forget its
+   // own output or guess that the issued fixed-record count is a limit.
+   const authoredRecordIdentities=records.map((row,ordinal)=>({
+    originalOrdinal:ordinal,
+    originalAuthoredRecordSha256:sha(JSON.stringify(row)),
+    ...(row&&typeof row==='object'&&!Array.isArray(row)?{
+     authoredIdentities:Object.fromEntries(Object.entries(row).filter(
+      ([key,value])=>['recordKey','tempKey','candidateKey','obligationId',
+       'findingKey','subjectKey','groupKey','dependencyKey','sourceCallsite']
+       .includes(key)&&(typeof value==='string'||typeof value==='number')))
+    }:{})
+   }));
    const continuation=await ask({task:'AUTHOR_EXPLICIT_CONTINUATION_DECISION',
     originalAppendContinuationContract:transport.appendContinuationField,
+    originalMaximumRecords:transport.maxChunkRecords,
+    originalMaximumSerializedBytes:transport.maxChunkBytes,
+    justAuthoredAppendRecordCount:records.length,
+    justAuthoredAppendRecordIdentities:authoredRecordIdentities,
+    originalChunkRecordsSha256:sha(JSON.stringify(records)),
     responseShape:{appendContinuation:true},
-    instructions:'Choose true or false yourself. The adapter cannot create a continuation unit or lease.'},'appendContinuation');
+    instructions:'Reexamine your original planned source-grounded set against your just-authored record identity roster. Choose true if any additional distinct authorized records remain for a separately leased next bounded chunk. Choose false only if this logical collection is complete. This is your substantive decision, never an adapter inference; neither answer fabricates records nor leases the next unit.'},'appendContinuation');
    if(typeof continuation!=='boolean')throw Error('AI APPEND continuation not boolean');
    submission.appendContinuation=continuation;
   }
