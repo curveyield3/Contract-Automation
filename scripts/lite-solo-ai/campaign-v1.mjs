@@ -600,11 +600,17 @@ async function sourceBoundQuestionHistoryV1(raw){
   }
   records.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
    indexPath,indexSha256:ix.file.sha256,indexRevision:index.revision,
+   phaseEpoch:index.phaseEpoch,packetSha256:index.packetSha256,
+   historyReferenceKey:[item.phaseSequence,item.unitId,ix.file.sha256,index.phaseEpoch].join(':'),
+   referenceOrigin:'CURRENT_ACCEPTED_UNIT',
+   acceptedCanonicalRefs:[],availability:'PINNED_QUESTION_INDEX_VERIFIED',
    questionRoster:index.questions,originalIndexText:ix.file.text,checkpoints});
  }
  return records.length||unavailable.length?{
   schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
-  campaignId,sourceSha256:directory.sourceSha256,
+  campaignId,campaignGenerationId:directory.campaignGenerationId,
+  authorityDigest:directory.authorityDigest,
+  sourceSha256:directory.sourceSha256,
   sourceRepo:historyRepo,sourceBranch:historyBranch,
   snapshotCommit:historySnapshotCommit,
   description:'Exact committed source-bound investigative question and answer records; not inferred formal audit conclusions.',
