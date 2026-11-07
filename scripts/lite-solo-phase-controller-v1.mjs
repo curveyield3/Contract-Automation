@@ -177,7 +177,10 @@ function assignCanonicalIds(canonical,graph,phase){
      (priorOwner.nodeType===family&&
       Number(priorOwner.originPhase)===Number(phase)&&
       (sourceRecordIdentity?
-       priorOwner.sourceRecordIdentity===sourceRecordIdentity:
+       priorOwner.sourceRecordIdentity===sourceRecordIdentity||
+       (priorOwner.sourceRecordIdentity===undefined&&
+        priorOwner.sourceRecordPath===sourceRecordPath&&
+        supplied===priorOwner.nodeId):
        priorOwner.sourceRecordPath===sourceRecordPath));
     let canonicalId=previous&&!occupied.has(previous.nodeId)?
      previous.nodeId:
@@ -188,7 +191,10 @@ function assignCanonicalIds(canonical,graph,phase){
        !(nodeById.get(canonicalId).nodeType===family&&
          Number(nodeById.get(canonicalId).originPhase)===Number(phase)&&
          (sourceRecordIdentity?
-          nodeById.get(canonicalId).sourceRecordIdentity===sourceRecordIdentity:
+          nodeById.get(canonicalId).sourceRecordIdentity===sourceRecordIdentity||
+          (nodeById.get(canonicalId).sourceRecordIdentity===undefined&&
+           nodeById.get(canonicalId).sourceRecordPath===sourceRecordPath&&
+           supplied===canonicalId):
           nodeById.get(canonicalId).sourceRecordPath===sourceRecordPath))))
      canonicalId=nextId(graph,family,reserved,canonicalIdCounters);
     item.canonicalId=canonicalId;
