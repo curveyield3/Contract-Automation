@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v36, v8 questions plus legacy support.
+// Lite-Solo MiMo / Worker transport bridge v37, source-bound v8 evidence delivery.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -1717,6 +1717,216 @@ function assignmentScope(response){
   w.unitId+':'+w.lease:w.status==='LEASED_PACKET'?
   (w.items||[]).map(x=>x.unitId+':'+x.lease).join(','):null;
  return {step:[p,s,w.stage||''].join(':'),unit};
+}
+
+// Step 3: original admitted-source file inventory and exact on-demand reads.
+// The source commit is distinct from the immutable v8 authority commit and the
+// live controller snapshot. No branch HEAD is substituted for either revision.
+const miTechnicalFileCache=new Map();
+async function miPinnedGithubFileV1(path,commit,expectedGitBlobSha=null){
+ if(typeof path!=='string'||!path||path.includes('\\')||
+    path.split('/').some(x=>!x||x==='.'||x==='..')||
+    !/^[a-f0-9]{40}$/.test(String(commit||'')))
+  throw Error('Immutable GitHub file requires valid path and commit');
+ const key=commit+':'+path;
+ if(miTechnicalFileCache.has(key)){
+  const cached=miTechnicalFileCache.get(key);
+  if(expectedGitBlobSha&&cached.gitBlobSha!==expectedGitBlobSha)
+   throw Error('Cached original Git blob differs from controller reference');
+  return cached;
+ }
+ const token=process.env.AUDIT_CONTROLLER_GITHUB_TOKEN;
+ if(!token)throw Error('Authorized controller read credential unavailable');
+ const url='https://api.github.com/repos/'+historyRepo+'/contents/'+
+  path.split('/').map(encodeURIComponent).join('/')+'?ref='+commit;
+ const headers={authorization:'Bearer '+token,accept:'application/vnd.github+json',
+  'x-github-api-version':'2022-11-28'};
+ const resp=await fetch(url,{headers,signal:AbortSignal.timeout(30000)});
+ if(!resp.ok)throw Error('Pinned source file HTTP '+resp.status+': '+path);
+ const entry=await resp.json();
+ if(entry.type!=='file'||!/^[a-f0-9]{40}$/.test(entry.sha||''))
+  throw Error('Pinned source path is not an original Git file');
+ if(expectedGitBlobSha&&entry.sha!==expectedGitBlobSha)
+  throw Error('Original source Git blob changed: '+path);
+ let bytes;
+ if(entry.encoding==='base64'&&typeof entry.content==='string'&&entry.content)
+  bytes=Buffer.from(entry.content.replace(/\s/g,''),'base64');
+ else{
+  const blob=await fetch('https://api.github.com/repos/'+historyRepo+'/git/blobs/'+entry.sha,{
+   headers,signal:AbortSignal.timeout(60000)});
+  if(!blob.ok)throw Error('Original source Git blob read HTTP '+blob.status);
+  const data=await blob.json();
+  if(data.encoding!=='base64'||typeof data.content!=='string')
+   throw Error('Original committed file body unavailable, never substitute partial text');
+  bytes=Buffer.from(data.content.replace(/\s/g,''),'base64');
+ }
+ const actualGit=createHash('sha1').update(Buffer.concat([
+  Buffer.from('blob '+bytes.length),Buffer.from([0]),bytes])).digest('hex');
+ if(actualGit!==entry.sha)throw Error('Original committed source Git SHA mismatch: '+path);
+ let text=null;
+ try{text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{}
+ const result={path,snapshotCommit:commit,sha256:sha(bytes),gitBlobSha:actualGit,
+  bytes:bytes.length,text,availability:text===null?'NON_UTF8_SOURCE_FILE':'ORIGINAL_UTF8_TEXT'};
+ miTechnicalFileCache.set(key,result);
+ return result;
+}
+async function miAdmittedSourceInventoryV1(admitted){
+ const commit=admitted?.sourceArchiveCommit,archive=admitted?.sourceArchivePath;
+ if(!/^[a-f0-9]{40}$/.test(commit||'')||typeof archive!=='string'||
+    !archive.startsWith('campaigns/')||archive.includes('\\')||
+    archive.split('/').some(x=>!x||x==='.'||x==='..')||
+    !/^[a-f0-9]{40}$/.test(admitted.sourceArchiveGitBlobSha||''))
+  throw Error('Accepted source archive path or immutable commit missing');
+ const directory=archive.slice(0,archive.lastIndexOf('/'));
+ const commitMeta=await historyGitMetadataV1('git/commits/'+commit);
+ let treeSha=commitMeta?.tree?.sha;
+ if(!/^[a-f0-9]{40}$/.test(treeSha||''))throw Error('Pinned source commit tree unavailable');
+ for(const name of directory.split('/')){
+  const tree=await historyGitMetadataV1('git/trees/'+treeSha);
+  if(!Array.isArray(tree?.tree)||tree.truncated)
+   throw Error('Incomplete original source directory Git tree');
+  const child=tree.tree.find(x=>x.type==='tree'&&x.path===name);
+  if(!child)throw Error('Admitted source directory missing at pinned source commit: '+name);
+  treeSha=child.sha;
+ }
+ const entries=[];
+ async function walk(shaTree,prefix){
+  const tree=await historyGitMetadataV1('git/trees/'+shaTree);
+  if(!Array.isArray(tree?.tree)||tree.truncated)
+   throw Error('Incomplete admitted source tree; no names silently omitted');
+  for(const x of tree.tree){
+   const path=prefix+'/'+x.path;
+   if(x.type==='tree')await walk(x.sha,path);
+   else if(x.type==='blob')
+    entries.push({path,gitBlobSha:x.sha,bytes:x.size??null,
+     fileType:path===archive?'ADMITTED_SOURCE_ARCHIVE':
+      /\.(?:sol|vy|vyi|md|json|toml|yaml|yml|ts|js|jsx|tsx|txt|rs|cfg|ini|py|sh|lock|xml|csv)$/i.test(path)?
+       'SOURCE_OR_CONTEXT_TEXT':'OTHER_SOURCE_ARTIFACT'});
+  }
+ }
+ await walk(treeSha,directory);
+ const original=entries.find(x=>x.path===archive);
+ if(!original||original.gitBlobSha!==admitted.sourceArchiveGitBlobSha)
+  throw Error('Frozen admitted source archive blob missing from source commit');
+ const sourceFiles=entries.filter(x=>x.path!==archive).sort((a,b)=>a.path.localeCompare(b.path));
+ return {schemaVersion:'machine-intelligence-source-file-inventory-v1',
+  campaignId,sourceArchiveCommit:commit,sourceArchivePath:archive,
+  sourceArchiveGitBlobSha:original.gitBlobSha,admittedSourceSha256:admitted.admittedSourceSha256,
+  originalSourceDirectory:directory,files:sourceFiles,
+  availability:sourceFiles.length?'PINNED_SOURCE_TREE_AVAILABLE':'NO_EXTRACTED_SOURCE_FILES',
+  originalFileCount:sourceFiles.length,
+  initialFileRefs:sourceFiles.slice(0,40),initialFileRefsComplete:sourceFiles.length<=40,
+  nextIndexStart:sourceFiles.length>40?40:null,
+  exactReadExamples:{
+   index:{admittedSourceEvidenceRequest:{kind:'INDEX',start:0}},
+   file:{admittedSourceEvidenceRequest:{kind:'FILE',path:sourceFiles[0]?.path||'<exact source path>',offset:0}}},
+  continuedReading:'Request consecutive INDEX pages, then FILE offset pages. Original bytes are SHA256/Git bound; previews are never complete unless explicit.'};
+}
+async function miAdmittedSourceReadV1(source,request){
+ const base={schemaVersion:'machine-intelligence-admitted-source-read-v1',
+  sourceArchiveCommit:source.sourceArchiveCommit,
+  auditedSourceSha256:source.admittedSourceSha256};
+ if(request?.kind==='INDEX'){
+  const start=Number.isSafeInteger(request.start)&&request.start>=0?request.start:0;
+  const refs=source.files.slice(start,start+40);
+  return {...base,kind:'INDEX',start,total:source.files.length,refs,
+   nextStart:start+refs.length<source.files.length?start+refs.length:null};
+ }
+ if(request?.kind!=='FILE')return {...base,availability:'UNRECOGNIZED_SOURCE_READ_KIND'};
+ const entry=source.files.find(x=>x.path===request.path);
+ if(!entry)return {...base,availability:'PATH_OUTSIDE_PINNED_ADMITTED_SOURCE'};
+ const file=await miPinnedGithubFileV1(entry.path,source.sourceArchiveCommit,entry.gitBlobSha);
+ if(file.text===null)return {...base,path:entry.path,gitBlobSha:file.gitBlobSha,
+  sha256:file.sha256,bytes:file.bytes,availability:'NON_UTF8_OR_BINARY_ORIGINAL'};
+ const start=Number.isSafeInteger(request.offset)&&request.offset>=0?request.offset:0;
+ const page=phase1EvidencePageV1(file.text,start,6000);
+ return {...base,availability:'EXACT_ORIGINAL_FILE_TEXT',path:entry.path,
+  gitBlobSha:file.gitBlobSha,sha256:file.sha256,bytes:file.bytes,
+  kind:'FILE',start:page.start,end:page.end,totalChars:file.text.length,
+  originalText:page.text,fragmentSha256:sha(page.text),
+  completeOriginalFile:page.start===0&&page.end===file.text.length,
+  nextOffset:page.end<file.text.length?page.end:null};
+}
+async function miCurrentPacketEvidenceV1(issued){
+ const refs=issued.packetEvidenceReferences||{};
+ const original=[refs.canonicalPacket,...(refs.sourceAndExecutionEvidenceRefs||[])]
+  .filter(v=>v&&typeof v.path==='string'&&/^[a-f0-9]{64}$/.test(v.sha256||''));
+ const snapshotCommit=historySnapshotCommit;
+ const sources=new Map(),unavailable=[];
+ for(const ref of original){
+  if(!ref.path.startsWith('campaigns/')){unavailable.push({path:ref.path,status:'NOT_IN_CAMPAIGN_WORKSPACE'});continue;}
+  try{
+   const file=await miPinnedGithubFileV1(ref.path,snapshotCommit);
+   if(file.sha256!==ref.sha256)throw Error('original source-bound packet digest mismatch');
+   sources.set(ref.path,file);
+  }catch(e){unavailable.push({path:ref.path,status:'ORIGINAL_EVIDENCE_UNAVAILABLE',
+   reason:String(e.message||e).slice(0,250)});}
+ }
+ const initial=[];
+ for(const [path,file] of sources){
+  if(file.text===null){initial.push({path,availability:'NON_UTF8_EVIDENCE',sha256:file.sha256});continue;}
+  const page=phase1EvidencePageV1(file.text,0,6000);
+  initial.push({path,sha256:file.sha256,bytes:file.bytes,gitBlobSha:file.gitBlobSha,
+   firstOriginalPage:page.text,firstPageSha256:sha(page.text),
+   completeOriginalEvidence:page.end===file.text.length,
+   nextOffset:page.end<file.text.length?page.end:null});
+ }
+ return {schemaVersion:'machine-intelligence-packet-original-evidence-v1',
+  snapshotCommit,originalSourceCount:sources.size,
+  referencedCount:original.length,initial,unavailable,
+  sources,readSyntax:{packetEvidenceRequest:{kind:'FILE',path:initial[0]?.path||'<original packet path>',offset:0}}};
+}
+function miPacketEvidenceReadV1(packet,request){
+ const file=packet?.sources?.get(request?.path);
+ if(request?.kind!=='FILE'||!file)return {
+  schemaVersion:'machine-intelligence-packet-evidence-read-v1',
+  availability:'SOURCE_NOT_IN_CURRENT_PINNED_PACKET'};
+ if(file.text===null)return {path:file.path,availability:'NON_UTF8_EVIDENCE',
+  sha256:file.sha256,gitBlobSha:file.gitBlobSha};
+ const start=Number.isSafeInteger(request.offset)&&request.offset>=0?request.offset:0;
+ const page=phase1EvidencePageV1(file.text,start,6000);
+ return {schemaVersion:'machine-intelligence-packet-evidence-read-v1',
+  path:file.path,sha256:file.sha256,gitBlobSha:file.gitBlobSha,
+  originalText:page.text,fragmentSha256:sha(page.text),
+  start:page.start,end:page.end,totalChars:file.text.length,
+  completeOriginalEvidence:page.start===0&&page.end===file.text.length,
+  nextOffset:page.end<file.text.length?page.end:null};
+}
+async function miMethodologyV1(issued){
+ const bundle=issued.technicalMethodology;
+ if(bundle?.authorityCommit!==issued.scope.authorityCommit||
+    !bundle.skill?.content||!bundle.phaseGuide?.content)
+  throw Error('Frozen v8 technical methodology missing from signed Worker question');
+ const refs=bundle.technicalMethodologyReferences||[];
+ const methods=[],unavailable=[];
+ for(const ref of refs){
+  const file=await miPinnedGithubFileV1(ref.path,bundle.authorityCommit,ref.gitBlobSha);
+  if(file.sha256!==ref.sha256)throw Error('Frozen specialist methodology digest mismatch');
+  if(file.text===null)unavailable.push({path:ref.path,availability:'NON_UTF8_METHODOLOGY'});
+  else methods.push({path:ref.path,sha256:ref.sha256,gitBlobSha:ref.gitBlobSha,
+   originalText:file.text,completeOriginalText:true});
+ }
+ return {schemaVersion:'machine-intelligence-original-technical-methodology-v1',
+  frozenAuthorityCommit:bundle.authorityCommit,
+  skill:{path:bundle.skill.path,sha256:bundle.skill.sha256,
+   originalText:bundle.skill.content,completeOriginalText:true},
+  phaseGuide:{path:bundle.phaseGuide.path,sha256:bundle.phaseGuide.sha256,
+   originalText:bundle.phaseGuide.content,completeOriginalText:true},
+  selectedSpecialistMethodology:methods,unavailable,
+  applicableMethodologyCount:methods.length+2,
+  originalTextUnabridged:true,controllerFormsOmitted:true};
+}
+function miLocalEvidenceReadRequestV1(raw){
+ let parsed;try{parsed=JSON.parse(raw);}catch{return null;}
+ if(!parsed||Array.isArray(parsed)||typeof parsed!=='object')return null;
+ const families=['admittedSourceEvidenceRequest','packetEvidenceRequest',
+  'sourceEvidenceRequest','originalCanonicalEvidenceRequest','questionHistoryEvidenceRequest'];
+ const active=families.filter(f=>Object.hasOwn(parsed,f));
+ if(!active.length)return null;
+ if(active.length!==1||Object.keys(parsed).length!==1)
+  return {error:{availability:'ONE_LOCAL_READ_PER_MESSAGE',
+   instruction:'Send one JSON object with exactly one local evidence-read request and no API routing instructions.'}};
+ return {family:active[0],request:parsed[active[0]]};
 }
 
 // Step 2 technical-answer transport. MiMo never writes route/request JSON in v8.
