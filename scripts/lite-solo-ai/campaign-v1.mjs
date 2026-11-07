@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v46, exact original field submission disposition.
+// Lite-Solo MiMo / Worker transport bridge v47, source-bound direct analysis included.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2410,6 +2410,7 @@ async function runControllerIssuedFieldAnswersV1(ready){
   originalCompletedQuestionLedger:typed?miQuestionLedgerContextV1(issued):null,
   recentOriginalAnswers:typed?await miRecentOriginalAnswersV1(issued):[],
   originalDirectQuestion:contract.originalTechnicalQuestion??null,
+  directOriginalTechnicalAnswer:contract.directOriginalTechnicalAnswer??null,
   evidenceAccess:{
    source:{admittedSourceEvidenceRequest:{kind:'INDEX',start:0}},
    packet:{packetEvidenceRequest:{kind:'FILE',path:packet?.initial?.[0]?.path??'',offset:0}},
@@ -2453,6 +2454,7 @@ async function runControllerIssuedFieldAnswersV1(ready){
  if(!typed){
   const shard=await ask({task:'AUTHOR_COMPLETE_ORIGINAL_DIRECT_SHARD',
    originalQuestion:contract.originalTechnicalQuestion,
+   priorOriginalTechnicalAnswer:contract.directOriginalTechnicalAnswer??null,
    originalControllerDescriptor:contract.descriptor,
    unmodifiedOriginalShard:contract.inputFileTemplate,
    responseShape:{shard:'<complete JSON shard>'},
