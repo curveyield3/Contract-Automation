@@ -263,6 +263,20 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
   const ledger=readJson(requiredFile(root,ledgerRel,'obligation ledger'));
   const invalid=readJson(requiredFile(root,invalidRel,'invalidation matrix'));
   assignCanonicalIds(canonical,graph,schema.phase);
+  // Question links were collected from immutable accepted sources BEFORE
+  // canonical IDs are allocated. Add the exact final ID where this canonical
+  // row has one, without changing the AI-authored association or inventing a
+  // graph node for an unpromoted investigative question.
+  for(const link of canonical.automationOutputs?.explicitQuestionOutputLinks?.associations??[]){
+    const source=link?.outputRecord?.selector;
+    if(typeof source!=='string')continue;
+    const match=source.match(/^actions\\.([^.]+)\\.outputs\\.([^.]+)\\[([0-9]+)\\]$/);
+    if(!match)continue;
+    const row=canonical.actions?.[match[1]]?.outputs?.[match[2]]?.[Number(match[3])];
+    if(row&&typeof row==='object'&&!Array.isArray(row)&&
+       typeof row.canonicalId==='string'&&row.canonicalId)
+      link.outputRecord.canonicalId=row.canonicalId;
+  }
   graph.controllerImports??=[]; ledger.controllerImports??=[]; invalid.controllerImports??=[];
   if(replacePhase){
     graph.controllerImports=graph.controllerImports.filter(x=>x?.phase!==schema.phase);
