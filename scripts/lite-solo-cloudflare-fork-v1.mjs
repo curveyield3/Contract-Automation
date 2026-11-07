@@ -1150,10 +1150,13 @@ function controllerAcceptedSubjectIdsV1(c){
  return out;
 }
 function bindExistingSubjectV1(ids,field,value){
- if(value===undefined||value===null||isPendingAnswerValue(value))return false;
- strict(typeof value==='string'&&ids.has(value),
-  'new '+field+' must resolve to exact accepted controller subject identity');
- return true;
+ // A literal AI reference is either matched against an accepted subject or
+ // retained unresolved. GitHub cannot infer a subject or reject an audit
+ // observation because its claimed relationship is not established yet.
+ if(value===undefined||value===null||isPendingAnswerValue(value))
+  return 'UNRESOLVED_NOT_SUPPLIED';
+ return typeof value==='string'&&ids.has(value)?
+  'EXACT_ACCEPTED_SUBJECT':'UNRESOLVED_EXPLICIT_REFERENCE';
 }
 
 function assembleBoundAnswersV1(c,u,submitted){
@@ -1223,8 +1226,9 @@ function assembleBoundAnswersV1(c,u,submitted){
        if(target.value?.[field]!==undefined&&!isPendingAnswerValue(target.value[field]))
         strict(target.value[field]===a.value,'issued subject identity is immutable');
        else{
-        bindExistingSubjectV1(knownSubjectIds,field,a.value);
-        target.value=target.value??{};target.value[field]=a.value;
+        const resolution=bindExistingSubjectV1(knownSubjectIds,field,a.value);
+        target.value=target.value??{};target.value[field]=structuredClone(a.value);
+        (target.controllerSubjectBindings??={})[field]=resolution;
        }
       }
       continue;
