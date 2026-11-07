@@ -193,7 +193,7 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
  const out={schemaVersion:'curveyield-accepted-question-answer-sources-v1',
   phaseSequence:phase,campaignId:directory.campaignId,
   campaignGenerationId:directory.campaignGenerationId,
-  questions:[],unavailable:[],histories:[],
+  questions:[],unavailable:[],histories:[],checkpoints:[],
   sourceMeaning:'QUESTION_HISTORY_NOT_SECURITY_DISPOSITION'};
  for(const sourcePhase of [4,5,6]){
   if(sourcePhase>phase)continue;
@@ -271,6 +271,10 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
       selector:'questions['+i+'].questionText'},
      questionIndexPath:ref.indexPath,questionIndexSha256:ref.indexSha256,
      questionIndexRevision:index.revision,
+     currentAnswerCheckpoint:question.answerCheckpoint??null,
+     currentAnswerCheckpointSource:{
+      path:ref.indexPath,sha256:ref.indexSha256,
+      selector:'questions['+i+'].answerCheckpoint'},
      packetSha256:accepted.packetSha256,
      acceptedUnitPath:owner.acceptedPath,
      acceptedUnitArtifactSha256:hex(fs.readFileSync(repoFile(root,owner.acceptedPath))),
@@ -289,6 +293,10 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
      if(rawSha!==checkpoint.sha256)
       throw Error('checkpoint SHA-256 differs from index');
      source=JSON.parse(raw.toString('utf8'));
+     if(!Array.isArray(source.records)||
+        Number.isSafeInteger(checkpoint.recordCount)&&
+         source.records.length!==checkpoint.recordCount)
+      throw Error('checkpoint source record count differs from index');
      if(source.schemaVersion!=='curveyield-ai-question-checkpoint-v1'||
         source.phaseSequence!==sourcePhase||source.unitId!==unitId||
         source.packetSha256!==accepted.packetSha256||
@@ -304,7 +312,29 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
       sha256:checkpoint.sha256,revision:checkpoint.revision,
       diagnostic:String(error?.message??error)});continue;
     }
-    for(const [i,record] of (source.records??[]).entries()){
+    // PLAN, EXPAND, ANSWERS, REVISE and COMPLETE are durable events.
+    // COMPLETE is merely the AI's question-ledger decision, not a
+    // determination that every security risk has been resolved.
+    out.checkpoints.push({
+     phaseSequence:sourcePhase,unitId,
+     revision:checkpoint.revision,mode:source.mode,
+     path:checkpoint.path,sha256:checkpoint.sha256,
+     packetSha256:accepted.packetSha256,
+     acceptedUnitPath:owner.acceptedPath,
+     recordCount:source.records.length,
+     recordedAt:source.recordedAt??null,
+     requestId:source.requestId??checkpoint.requestId??null,
+     ...(Object.hasOwn(source,'revisionReason')?{
+      revisionReasonSource:{path:checkpoint.path,sha256:checkpoint.sha256,
+       selector:'revisionReason'}}:{}),
+     ...(Object.hasOwn(source,'aiCompletionDecision')?{
+      completionDecisionSource:{path:checkpoint.path,sha256:checkpoint.sha256,
+       selector:'aiCompletionDecision'}}:{}),
+     ...(Object.hasOwn(source,'decision')?{
+      completionDecisionSource:{path:checkpoint.path,sha256:checkpoint.sha256,
+       selector:'decision'}}:{})
+    });
+    for(const [i,record] of source.records.entries()){
      if(!record||typeof record.questionId!=='string')continue;
      const identity=JSON.stringify([sourcePhase,unitId,record.questionId]);
      const question=keyMap.get(identity);
@@ -333,6 +363,7 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
  }
  out.questionCount=out.questions.length;
  out.answerVersionCount=out.questions.reduce((n,q)=>n+q.answerVersions.length,0);
+ out.checkpointCount=out.checkpoints.length;
  out.availability=out.unavailable.length?'PARTIAL_OR_SOURCE_UNAVAILABLE':'COLLECTED_NONBLOCKING';
  return out;
 }
