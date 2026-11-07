@@ -30,7 +30,7 @@ import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/a
 import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 import {isReassignedV13AuthorityV1} from './lib/lite-authority-lineup-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
-import {createUnitPlanV1,collectAcceptedQuestionHistoryRefsV1,collectAcceptedUnitRecordOriginsV1,collectAcceptedAppendContinuationsV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {createUnitPlanV1,collectAcceptedQuestionHistoryRefsV1,collectAcceptedUnitRecordOriginsV1,collectAcceptedAppendContinuationsV1,collectAcceptedQuestionAnswerSourcesV1,collectExplicitQuestionOutputLinksV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -280,6 +280,8 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,autho
       'automationOutputs.acceptedUnitRecordOrigins',
       'automationOutputs.directPhaseRecordOrigins'],
     canonicalGraphSourceSelector:'automationOutputs.canonicalGraphSourceRefs',
+    questionAnswerSourceSelector:'automationOutputs.questionAnswerSources',
+    explicitQuestionOutputLinkSelector:'automationOutputs.explicitQuestionOutputLinks',
     completeAcceptedActionSelector:'actions'
   };
   graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,
@@ -1234,6 +1236,30 @@ if([1,2,3,8,9,10].includes(sequence)){
    availability:'DIRECT_ORIGIN_COLLECTION_UNAVAILABLE',records:[],
    diagnostics:[String(error?.message??error)]};
   githubDiagnostics.push('Direct source record references unavailable: '+
+   String(error?.message??error));
+ }
+}
+// An answer history and an output-record family grow independently. Build
+// only explicit authored many-to-many links; unanswered and unpromoted
+// questions stay available by exact GitHub checkpoint source, without
+// becoming a GitHub-determined security judgment.
+if([4,5,6,8,9,10].includes(sequence)){
+ try{
+  const questionAnswerSources=collectAcceptedQuestionAnswerSourcesV1({
+   root,campaignPath,directory,phase:sequence});
+  canonical.automationOutputs.questionAnswerSources=questionAnswerSources;
+  canonical.automationOutputs.explicitQuestionOutputLinks=
+   collectExplicitQuestionOutputLinksV1({
+    root,campaignPath,directory,phase:sequence,canonical,questionSources:questionAnswerSources});
+ }catch(error){
+  canonical.automationOutputs.questionAnswerSources={
+   availability:'ORIGINAL_QUESTION_SOURCE_COLLECTION_UNAVAILABLE',
+   diagnostics:[String(error?.message??error)],questions:[]};
+  canonical.automationOutputs.explicitQuestionOutputLinks={
+   availability:'QUESTION_OUTPUT_LINK_COLLECTION_UNAVAILABLE',
+   diagnostics:[String(error?.message??error)],associations:[],
+   unpromotedQuestions:[]};
+  githubDiagnostics.push('Question-to-output provenance collection unavailable: '+
    String(error?.message??error));
  }
 }
