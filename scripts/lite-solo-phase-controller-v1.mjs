@@ -93,11 +93,20 @@ function completeDirectPhaseRecordIdsV1({form,sequence,campaignId}){
 }
 
 function canonicalFamilyForField(name){return ({propertyDesigns:'PROP',attackHypotheses:'HYP',candidateRecords:'CAND',newCandidateRecords:'CAND',validatedFindings:'FIND',remediationDispositions:'REM'})[name]??null;}
-function nextId(graph,family,reserved){
- let max=0;
- for(const id of reserved){const m=String(id).match(new RegExp('^'+family+'-(\\d+)$'));if(m)max=Math.max(max,Number(m[1]));}
- for(const n of graph.nodes??[]){const m=String(n.nodeId??'').match(new RegExp('^'+family+'-(\\d+)$'));if(m)max=Math.max(max,Number(m[1]));}
- return family+'-'+String(max+1).padStart(3,'0');
+function nextId(graph,family,reserved,counters){
+ if(!counters.has(family)){
+  const re=new RegExp('^'+family+'-(\\d+)$');let max=0;
+  for(const id of reserved){const match=String(id).match(re);if(match)max=Math.max(max,Number(match[1]));}
+  for(const node of graph.nodes??[]){const match=String(node.nodeId??'').match(re);if(match)max=Math.max(max,Number(match[1]));}
+  counters.set(family,max);
+ }
+ let next;
+ do{
+  const n=counters.get(family)+1;
+  counters.set(family,n);
+  next=family+'-'+String(n).padStart(3,'0');
+ }while(reserved.has(next));
+ return next;
 }
 function assignCanonicalIds(canonical,graph,phase){
  graph.nodes??=[];
@@ -116,6 +125,7 @@ function assignCanonicalIds(canonical,graph,phase){
    .push(source);
  }
  const reserved=new Set(graph.nodes.map(n=>n.nodeId).filter(Boolean));
+ const canonicalIdCounters=new Map();
  for(const action of Object.values(canonical.actions??{})){
   for(const value of Object.values(action.outputs??{})){
    if(!Array.isArray(value))continue;
@@ -162,13 +172,13 @@ function assignCanonicalIds(canonical,graph,phase){
     let canonicalId=previous&&!occupied.has(previous.nodeId)?
      previous.nodeId:
      supplied&&!occupied.has(supplied)&&suppliedBelongsToSource?
-      supplied:nextId(graph,family,reserved);
+      supplied:nextId(graph,family,reserved,canonicalIdCounters);
     while(occupied.has(canonicalId)||
       graph.nodes.some(n=>n.nodeId===canonicalId&&
        !(n.nodeType===family&&Number(n.originPhase)===Number(phase)&&
         (sourceRecordIdentity?n.sourceRecordIdentity===sourceRecordIdentity:
          n.sourceRecordPath===sourceRecordPath))))
-     canonicalId=nextId(graph,family,reserved);
+     canonicalId=nextId(graph,family,reserved,canonicalIdCounters);
     item.canonicalId=canonicalId;
     reserved.add(canonicalId);occupied.add(canonicalId);
     const originalSubjectReferences=Object.fromEntries(
