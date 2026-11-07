@@ -8,7 +8,7 @@ import {createHash} from 'node:crypto';
 import {readV7RawResultV1} from '../packages/github-native-sim/src/v7-compact-result-v1.mjs';
 import {pathToFileURL} from 'node:url';
 import {storeControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
-import {materializeSemanticWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
+import {materializeSemanticWorkFormV13,collectDirectPhaseRecordOriginsV13} from './lib/lite-solo-work-shards-v1.mjs';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,validateBoundAuthorityV1,loadPhaseSchema,
   buildDerivedOutputs,preparePhaseWork,getByPath,buildOriginalCanonicalEvidenceRosterV1,
@@ -1093,6 +1093,21 @@ if([4,5,6].includes(sequence)){
    availability:'ORIGIN_COLLECTION_UNAVAILABLE',
    diagnostics:[String(error?.message??error)],records:[]};
   githubDiagnostics.push('Accepted unit source origins unavailable: '+
+   String(error?.message??error));
+ }
+}
+// Direct phases have no accepted unit queue. Preserve exact original shard
+// names, hashes and per-chunk ordinals next to their canonical output instead.
+if([1,2,3,8,9,10].includes(sequence)){
+ try{
+  canonical.automationOutputs.directPhaseRecordOrigins=
+   collectDirectPhaseRecordOriginsV13({
+    root,formRel:assignment.workFormPath,phase:sequence});
+ }catch(error){
+  canonical.automationOutputs.directPhaseRecordOrigins={
+   availability:'DIRECT_ORIGIN_COLLECTION_UNAVAILABLE',records:[],
+   diagnostics:[String(error?.message??error)]};
+  githubDiagnostics.push('Direct source record references unavailable: '+
    String(error?.message??error));
  }
 }
