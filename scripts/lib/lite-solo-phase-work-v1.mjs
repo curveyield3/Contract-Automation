@@ -147,7 +147,30 @@ export function buildDerivedOutputs({root,campaignPath,schema,canonicalData,cano
     const data={};
     for(const selector of spec.selectors??[]) setByPath(data,selector,getByPath(canonicalData,selector));
     const rel=fullCampaignPath(campaignPath,spec.path);
-    writeJson(repoFile(root,rel),{schemaVersion:'curveyield-lite-derived-phase-data-v1',phase:schema.phase,sourceCanonicalData:canonicalRel,generatedAt:now,data});
+    // A derived artifact can select only a subset of the complete accepted
+    // outputs. Retain exact selectors back to the full canonical source and
+    // its source-bound record provenance instead of treating this projection
+    // as an exhaustive evidence roster.
+    const originalSourceRefs={
+      canonicalArtifactPath:canonicalRel,
+      selectedCanonicalPaths:[...(spec.selectors??[])],
+      completeSourceSelectors:[
+        'actions','automationInputs','automationOutputs',
+        'automationOutputs.acceptedUnitRecordOrigins',
+        'automationOutputs.directPhaseRecordOrigins',
+        'automationOutputs.canonicalGraphSourceRefs'
+      ],
+      sourceRecordCount:
+        (canonicalData.automationOutputs?.acceptedUnitRecordOrigins?.records?.length??0)+
+        (canonicalData.automationOutputs?.directPhaseRecordOrigins?.records?.length??0),
+      provenanceAvailability:
+        canonicalData.automationOutputs?.acceptedUnitRecordOrigins?.availability??
+        canonicalData.automationOutputs?.directPhaseRecordOrigins?.availability??
+        'ORIGINAL_SOURCE_ROSTER_NOT_AVAILABLE'
+    };
+    writeJson(repoFile(root,rel),{schemaVersion:'curveyield-lite-derived-phase-data-v1',
+      phase:schema.phase,sourceCanonicalData:canonicalRel,generatedAt:now,
+      originalSourceRefs,data});
     out.push(rel);
   }
   return out;
