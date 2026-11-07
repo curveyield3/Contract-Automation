@@ -1813,8 +1813,31 @@ const QUESTION_REFERENCE_FIELDS_V1=new Set([
 ]);
 const QUESTION_ID_V1=/^Q-[0-9]{6,}$/;
 function typedQuestionReferenceV1(value,{phase,unitId}){
+ // A literal checkpoint record selector is already an exact source
+ // reference. Resolve it only against VERIFIED index/checkpoint metadata.
+ const checkpointPointer=(checkpointPath,selector)=>{
+  if(typeof checkpointPath!=='string'||
+     !checkpointPath.includes('/questions/checkpoints/')||
+     typeof selector!=='string')return null;
+  let ordinal=null;
+  if(selector.startsWith('records[')&&selector.endsWith(']')){
+   const number=selector.slice(8,-1);
+   if(/^[0-9]+$/.test(number))ordinal=Number(number);
+  }else if(selector.startsWith('/records/')){
+   const number=selector.slice(9);
+   if(/^[0-9]+$/.test(number))ordinal=Number(number);
+  }
+  if(!Number.isSafeInteger(ordinal)||ordinal<0)return null;
+  return {checkpointPath,checkpointRecordSelector:'records['+ordinal+']',
+   sourceReferenceKind:'EXACT_CHECKPOINT_RECORD_POINTER'};
+ };
  if(typeof value==='string'){
   const ref=value.trim();
+  const hash=ref.indexOf('#');
+  if(hash>0){
+   const source=checkpointPointer(ref.slice(0,hash),ref.slice(hash+1));
+   if(source)return source;
+  }
   if(QUESTION_ID_V1.test(ref)&&unitId)
    return {phaseSequence:phase,unitId,questionId:ref,
     sourceReferenceKind:'LOCAL_ISSUED_UNIT_REFERENCE'};
@@ -1824,6 +1847,10 @@ function typedQuestionReferenceV1(value,{phase,unitId}){
    ...(composite[4]?{checkpointRevision:Number(composite[4])}:{}),
    sourceReferenceKind:'EXPLICIT_COMPOSITE_REFERENCE'};
   return null;
+ }
+ if(isObject(value)&&value.checkpointPath&&value.checkpointRecordSelector){
+  const source=checkpointPointer(value.checkpointPath,value.checkpointRecordSelector);
+  if(source)return source;
  }
  if(!isObject(value)||!QUESTION_ID_V1.test(String(value.questionId??'')))
   return null;
@@ -1864,6 +1891,7 @@ function explicitQuestionRefsInRecordV1(value,{phase,unitId,selector}){
      else if(typeof ref==='string'&&(
        /^Q-[0-9]+$/.test(ref.trim())||
        /\/Q-[0-9]+/.test(ref)||
+       ref.includes('/questions/checkpoints/')||
        key.toLowerCase().includes('question'))||
        isObject(ref)&&Object.hasOwn(ref,'questionId'))
       refs.push({authored:null,sourceSelector,
@@ -1893,10 +1921,31 @@ export function collectExplicitQuestionOutputLinksV1({
   sourceMeaning:'NO_SECURITY_INFERENCE'};
  const questionByIdentity=new Map(histories.questions.map((q,i)=>[
   JSON.stringify([q.phaseSequence,q.unitId,q.questionId]),{q,index:i}]));
+ const questionByCheckpoint=new Map();
+ for(const [i,question] of histories.questions.entries()){
+  for(const version of question.answerVersions??[]){
+   const key=JSON.stringify([version.checkpointPath,
+    version.checkpointRecordSelector]);
+   const candidates=questionByCheckpoint.get(key)??[];
+   candidates.push({q:question,index:i,version});
+   questionByCheckpoint.set(key,candidates);
+  }
+ }
  const linked=new Set();
  const appendLink=({ref,record,selector,ownerPhase,ownerUnit,outputOrigin})=>{
   if(!ref)return;
-  const question=ref.authored;
+  let question=ref.authored;
+  if(question?.sourceReferenceKind==='EXACT_CHECKPOINT_RECORD_POINTER'){
+   const candidates=questionByCheckpoint.get(JSON.stringify([
+    question.checkpointPath,question.checkpointRecordSelector]))??[];
+   if(candidates.length===1){
+    const match=candidates[0];
+    question={phaseSequence:match.q.phaseSequence,unitId:match.q.unitId,
+     questionId:match.q.questionId,
+     checkpointRevision:match.version.checkpointRevision,
+     sourceReferenceKind:'EXACT_CHECKPOINT_RECORD_POINTER'};
+   }else question=null;
+  }
   if(!question){
    output.unresolvedReferences.push({outputRecordSelector:selector,
     originalOutputSource:outputOrigin,
