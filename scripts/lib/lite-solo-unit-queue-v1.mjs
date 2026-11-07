@@ -1920,11 +1920,15 @@ function typedQuestionReferenceV1(value,{phase,unitId}){
      !checkpointPath.includes('/questions/checkpoints/')||
      typeof selector!=='string')return null;
   let ordinal=null;
-  if(selector.startsWith('records[')&&selector.endsWith(']')){
-   const number=selector.slice(8,-1);
+  const recordSelector=selector.endsWith('.answerText')?
+   selector.slice(0,-'.answerText'.length):
+   selector.endsWith('.questionText')?
+    selector.slice(0,-'.questionText'.length):selector;
+  if(recordSelector.startsWith('records[')&&recordSelector.endsWith(']')){
+   const number=recordSelector.slice(8,-1);
    if(/^[0-9]+$/.test(number))ordinal=Number(number);
-  }else if(selector.startsWith('/records/')){
-   const number=selector.slice(9);
+  }else if(recordSelector.startsWith('/records/')){
+   const number=recordSelector.slice(9);
    if(/^[0-9]+$/.test(number))ordinal=Number(number);
   }
   if(!Number.isSafeInteger(ordinal)||ordinal<0)return null;
@@ -1936,11 +1940,13 @@ function typedQuestionReferenceV1(value,{phase,unitId}){
      !indexPath.endsWith('/questions/QUESTION_INDEX_v1.json')||
      typeof selector!=='string')return null;
   let ordinal=null;
-  if(selector.startsWith('questions[')&&selector.endsWith(']')){
-   const value=selector.slice(10,-1);
+  const questionSelector=selector.endsWith('.questionText')?
+   selector.slice(0,-'.questionText'.length):selector;
+  if(questionSelector.startsWith('questions[')&&questionSelector.endsWith(']')){
+   const value=questionSelector.slice(10,-1);
    if(/^[0-9]+$/.test(value))ordinal=Number(value);
-  }else if(selector.startsWith('/questions/')){
-   const value=selector.slice(11);
+  }else if(questionSelector.startsWith('/questions/')){
+   const value=questionSelector.slice(11);
    if(/^[0-9]+$/.test(value))ordinal=Number(value);
   }
   if(!Number.isSafeInteger(ordinal)||ordinal<0)return null;
