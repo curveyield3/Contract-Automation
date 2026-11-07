@@ -1829,17 +1829,7 @@ while(true){
    .catch(error=>({schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
     campaignId,histories:[],unavailable:[{status:'GITHUB_READ_UNAVAILABLE',
      detail:String(error?.message??error).slice(0,160)}]})):null;
-  if(priorEvidence){
-   activeQuestionHistory=priorEvidence;
-   const questionContext=questionHistoryModelContextV1(priorEvidence);
-   dialogue.push({role:'user',content:JSON.stringify(questionContext)});
-   console.log(JSON.stringify({status:'MIMO_SOURCE_QUESTION_HISTORY_DELIVERED',
-    phase:priorEvidence.histories?.at(-1)?.phaseSequence??null,
-    histories:priorEvidence.histories?.length??0,
-    checkpoints:priorEvidence.histories?.reduce((n,h)=>n+h.checkpoints.length,0)??0,
-    unavailable:priorEvidence.unavailable?.length??0,
-    originalTextPreserved:true,privateContent:'MODEL_INPUT_ONLY'}));
-  }
+  if(priorEvidence)activeQuestionHistory=priorEvidence;
   // Independently retrieve ORIGINAL accepted canonical records at the same
   // committed snapshot as the checkpoint family, then send source-bound
   // navigation and original content into the actual model dialogue.
@@ -1869,6 +1859,26 @@ while(true){
     unavailable:activeCanonicalHistory.manifest.unavailable?.length??0,
     interpretationOwner:'MIMO',
     noWorkerSubmission:true,privateContent:'MODEL_INPUT_ONLY'}));
+  }
+  if(originalEvidenceLease){
+   // The canonical accepted-revision roster may contain older question-index
+   // SHA-256/epoch identities absent from the latest queue. Reconcile every
+   // accepted historical reference before giving MiMo the question index.
+   activeQuestionHistory=mergeAcceptedCanonicalQuestionRostersV1(
+    activeQuestionHistory,activeCanonicalHistory);
+  }
+  if(originalEvidenceLease&&activeQuestionHistory){
+   const questionContext=questionHistoryModelContextV1(activeQuestionHistory);
+   dialogue.push({role:'user',content:JSON.stringify(questionContext)});
+   console.log(JSON.stringify({status:'MIMO_SOURCE_QUESTION_HISTORY_DELIVERED',
+    phase:activeQuestionHistory.histories?.at(-1)?.phaseSequence??null,
+    histories:activeQuestionHistory.histories?.length??0,
+    checkpointsReferenced:activeQuestionHistory.histories
+     ?.reduce((n,h)=>n+(h.checkpoints?.length??0),0)??0,
+    olderAcceptedRevisions:activeQuestionHistory.histories
+     ?.filter(h=>h.referenceOrigin==='HISTORICAL_ACCEPTED_CANONICAL_REVISION').length??0,
+    unavailable:activeQuestionHistory.unavailable?.length??0,
+    originalTextReadOnDemand:true,privateContent:'MODEL_INPUT_ONLY'}));
   }
   // A mere canonical filename in derivedInputPaths is not model access.
   // Fetch the accepted original source privately at the pinned controller commit.
