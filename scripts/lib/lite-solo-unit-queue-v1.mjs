@@ -1316,6 +1316,20 @@ export function collectAcceptedUnitRecordOriginsV1({root,campaignPath,directory,
     queue.authorityDigest!==plan.authorityDigest||queue.phaseEpoch!==plan.phaseEpoch)
   return {...roster,availability:'ISSUED_IDENTITY_MISMATCH'};
  const units=plan.units.filter(u=>['SHARD','BATCH','APPEND'].includes(u.kind));
+ // The same frozen descriptor fixes the canonical append start position during
+ // materializeSemanticWorkFormV13. Mutable submitted slab metadata is not the
+ // source of truth for the record-to-canonical index relationship.
+ const issuedDescriptors=new Map();
+ try{
+  const trustedDir=path.posix.join(campaignPath,'controller/shards/phase-'+
+   String(phase).padStart(2,'0'));
+  const index=read(root,path.posix.join(trustedDir,'INDEX_v1.json'));
+  for(const pageRef of asArray(index.pages)){
+   const page=read(root,path.posix.join(trustedDir,pageRef.file));
+   for(const desc of asArray(page.shards))
+    issuedDescriptors.set(desc.file,desc);
+  }
+ }catch{ /* Record exact source identity even if issuance metadata is lost. */ }
  for(const u of units){
   const state=queue.units?.[u.unitId];
   if(state?.status!=='ACCEPTED'||!state.acceptedPath){
@@ -1405,12 +1419,10 @@ export function collectAcceptedUnitRecordOriginsV1({root,campaignPath,directory,
    }
    acceptedReference(u,entries[index],index,u.shardIndex,u.recordIndex);
   }else{
-   let start=null;
-   try{
-    const slab=read(root,u.shardPath);
-    if(Number.isSafeInteger(slab.startIndex)&&slab.startIndex>=0)
-     start=slab.startIndex;
-   }catch{ /* Keep the original unit and ordinal even if the shard is gone. */ }
+   const desc=issuedDescriptors.get(u.shardFile);
+   const start=desc?.append===true&&
+    Number.isSafeInteger(desc.startIndex)&&desc.startIndex>=0?
+     desc.startIndex:null;
    for(const [index,entry] of entries.entries()){
     acceptedReference(u,entry,index,index,
      start===null?null:start+index);
