@@ -238,6 +238,62 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
  return true;
 }
 
+// Source-bound direct-phase companion to the existing queue acceptance roster.
+// Records are indexed by the exact immutable issued collection and original
+// working-shard/chunk ordinal. No AI text is normalized or deduplicated.
+export function collectDirectPhaseRecordOriginsV13({root,formRel,phase}){
+ const roster={schemaVersion:'curveyield-direct-phase-record-origins-v1',
+  phaseSequence:phase,records:[],availability:'COLLECTED_NONBLOCKING'};
+ if(![1,2,3,8,9,10].includes(Number(phase)))
+  return {...roster,availability:'NOT_APPLICABLE'};
+ const workDir=path.posix.join(path.posix.dirname(formRel),'shards');
+ const controllerDir=secureLocationV13(formRel,phase);
+ const index=secureReadV13(root,path.posix.join(controllerDir,'INDEX_v1.json'));
+ const seen=new Set();
+ for(const pageRef of index.pages??[]){
+  const trusted=secureReadV13(root,path.posix.join(controllerDir,pageRef.file));
+  for(const desc of trusted.shards??[]){
+   if(desc.kind!=='array')continue;
+   const primary=secureReadV13(root,path.posix.join(workDir,desc.file));
+   const continuation=desc.append?
+    directAppendPagesV13({root,workDir,desc,primary}):[];
+   const chunks=[{file:desc.file,chunkNumber:desc.append?1:0,
+      startIndex:desc.startIndex,entries:primary.entries},...continuation];
+   for(const chunk of chunks){
+    const sourceShardPath=path.posix.join(workDir,chunk.file);
+    const sourceShardSha256=digest(fs.readFileSync(relfile(root,sourceShardPath)));
+    for(const [ordinal,entry] of chunk.entries.entries()){
+     const canonicalIndex=chunk.startIndex+ordinal;
+     const collection=desc.path.join('.');
+     const selector=collection+'['+canonicalIndex+']';
+     if(seen.has(selector))
+      throw Error('DIRECT_RECORD_SOURCE_POSITION_CONFLICT: '+selector);
+     seen.add(selector);
+     const authored=entry?.value&&typeof entry.value==='object'&&
+      !Array.isArray(entry.value)?entry.value:null;
+     const subjectRefs=authored?Object.fromEntries(Object.entries(authored).filter(
+      ([key,value])=>/(?:Key|Id)$/.test(key)&&
+        (typeof value==='string'||typeof value==='number'))):{};
+     roster.records.push({
+      collection,canonicalRecordIndex:canonicalIndex,
+      canonicalRecordSelector:selector,
+      recordKey:entry.key,
+      unitKind:desc.append?'APPEND':'FIXED_DIRECT_SHARD',
+      chunkNumber:chunk.chunkNumber,
+      originalRecordOrdinal:ordinal,
+      sourceShardPath,sourceShardSha256,
+      originalSourceSelector:'entries['+ordinal+'].value',
+      ...(Object.keys(subjectRefs).length?
+       {originalSubjectReferences:subjectRefs}:{})
+     });
+    }
+   }
+  }
+ }
+ roster.recordCount=roster.records.length;
+ return roster;
+}
+
 export function semanticShardFailureIndexV13({root,indexRel,deficiencies=[]}={}){
  if(!indexRel)return {shards:[],unmapped:deficiencies};
  const index=JSON.parse(fs.readFileSync(relfile(root,indexRel),'utf8'));
