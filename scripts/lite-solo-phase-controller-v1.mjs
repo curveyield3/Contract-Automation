@@ -30,7 +30,7 @@ import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/a
 import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 import {isReassignedV13AuthorityV1} from './lib/lite-authority-lineup-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
-import {createUnitPlanV1,collectAcceptedQuestionHistoryRefsV1,collectAcceptedUnitRecordOriginsV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {createUnitPlanV1,collectAcceptedQuestionHistoryRefsV1,collectAcceptedUnitRecordOriginsV1,collectAcceptedAppendContinuationsV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -1013,7 +1013,9 @@ const packet=buildControllerPacket({directory,assignment,existing:existingPacket
 // their contents. No controller-side rejection or rework decision is issued.
 let deficiencies=[];
 let form=null;
-materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
+materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath,
+ acceptedContinuations:[4,5,6].includes(sequence)?
+  collectAcceptedAppendContinuationsV1({root,campaignPath,phase:sequence}):[]});
 form=readJson(requiredFile(root,assignment.workFormPath,'Worker-provided phase work file'));
 
 // Record identity allocation does not analyze vulnerabilities or reject AI work.
