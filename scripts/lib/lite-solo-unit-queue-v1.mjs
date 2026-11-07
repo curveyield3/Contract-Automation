@@ -2223,7 +2223,7 @@ export function collectExplicitQuestionOutputLinksV1({
     for(const unmapped of accepted.sourceProvenance.unmappedAttackPathRefs){
      const selector=unmapped?.sourceSelector;
      const match=typeof selector==='string'?
-      selector.match(/^extraRecords\\.attackPaths\\[([0-9]+)\\]$/):null;
+      selector.match(/^extraRecords\.attackPaths\[([0-9]+)\]$/):null;
      if(!match)continue; // Other original ATTACK rows are handled below.
      const sourceRow=original?.extraRecords?.attackPaths?.[Number(match[1])];
      if(!sourceRow||typeof sourceRow!=='object'||Array.isArray(sourceRow)){
