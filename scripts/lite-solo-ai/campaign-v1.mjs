@@ -583,29 +583,20 @@ async function sourceBoundQuestionHistoryV1(raw){
    if(typeof ref?.path!=='string'||!ref.path.startsWith(prefix+'/checkpoints/')||
       !/^[a-f0-9]{64}$/.test(String(ref.sha256??''))){
     unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
-     indexPath,status:'INVALID_CHECKPOINT_REFERENCE'});continue;
-   }
-   const cp=await historyJsonV1(ref.path).catch(()=>null);
-   if(!cp||cp.file.sha256!==ref.sha256||
-      cp.data.campaignId!==campaignId||
-      cp.data.campaignGenerationId!==directory.campaignGenerationId||
-      cp.data.sourceSha256!==directory.sourceSha256||
-      cp.data.authorityDigest!==directory.authorityDigest||
-      cp.data.phaseSequence!==item.phaseSequence||
-      cp.data.unitId!==item.unitId||
-      cp.data.phaseEpoch!==index.phaseEpoch||
-      cp.data.packetSha256!==index.packetSha256||
-      (ref.revision!==undefined&&cp.data.revision!==ref.revision)||
-      (ref.requestId!==undefined&&cp.data.requestId!==ref.requestId)||
-      (ref.requestDigest!==undefined&&cp.data.requestDigest!==ref.requestDigest)){
-    unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
-     indexPath,checkpointPath:ref.path,status:'CHECKPOINT_NOT_AVAILABLE'});
+     indexPath,status:'INVALID_CHECKPOINT_REFERENCE',
+     invalidOriginalReference:structuredClone(ref)});
     continue;
    }
-   // Deliver each exact immutable checkpoint, including PLAN, ANSWERS,
-   // EXPAND and REVISE history; never summarize or overwrite prior revisions.
-   checkpoints.push({path:ref.path,sha256:cp.file.sha256,
-    checkpoint:cp.data,originalCheckpointText:cp.file.text});
+   // Accepted index/checkpoint references are retained verbatim. Reading ALL
+   // potentially thousands of checkpoint files for every new assignment would
+   // exhaust GitHub requests and model context; verify exact original bytes
+   // only when MiMo asks for an individual checkpoint or page.
+   checkpoints.push({
+    path:ref.path,sha256:ref.sha256,
+    checkpoint:null,originalCheckpointText:null,
+    expectedReference:structuredClone(ref),
+    verification:'PINNED_REFERENCE_NOT_YET_READ'
+   });
   }
   records.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
    indexPath,indexSha256:ix.file.sha256,indexRevision:index.revision,
