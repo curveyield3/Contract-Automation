@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v57, Step 10 same-step wave provenance replay.
+// Lite-Solo MiMo / Worker transport bridge v58, Step 10 original checkpoint generation and packet binding.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -1958,6 +1958,8 @@ async function miQuestionCheckpointOriginalV1(issued,checkpointIndex){
   const data=JSON.parse(source.text);
   if(data.schemaVersion!=='curveyield-ai-question-checkpoint-v1'||
      data.campaignId!==campaignId||data.unitId!==issued.scope.unitId||
+     data.campaignGenerationId!==issued.scope.generationId||
+     data.packetSha256!==issued.scope.packetSha256||
      data.phaseSequence!==issued.scope.phase||data.phaseEpoch!==issued.scope.phaseEpoch||
      data.revision!==ref.revision||data.requestDigest!==ref.requestDigest||
      data.sourceSha256!==issued.scope.sourceSha256||
