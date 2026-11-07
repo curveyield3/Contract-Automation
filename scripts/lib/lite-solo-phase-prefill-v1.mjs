@@ -1574,33 +1574,75 @@ function compact(v){
 // Separate a finding's retained prior evidence from the execution state of
 // the CURRENT phase. A missing new harness cannot negate an older proof.
 export function buildCandidateEvidenceContinuityV1({phase5,phase6}){
-  const prior=phase5?.actions?.['step-2']?.outputs?.reconciliationRecords??[];
-  const runs=phase6?.actions?.['step-2']?.outputs?.targetDispositions??[];
-  const proofs=phase6?.actions?.['step-5']?.outputs?.candidateProofRecords??[];
-  const byKey=new Map(runs.filter(x=>x&&typeof x==='object'&&x.candidateKey).map(x=>[String(x.candidateKey),x]));
-  const priorCounts=new Map(),proofCounts=new Map();
-  for(const x of prior)if(x&&typeof x==='object'&&x.sourceAnchor)
-    priorCounts.set(x.sourceAnchor,(priorCounts.get(x.sourceAnchor)??0)+1);
-  for(const x of proofs)if(x&&typeof x==='object'&&x.sourceAnchor)
-    proofCounts.set(x.sourceAnchor,(proofCounts.get(x.sourceAnchor)??0)+1);
-  return prior.filter(x=>x&&typeof x==='object'&&x.subjectKey).map(x=>{
-    const execution=byKey.get(String(x.subjectKey));
-    const proof=priorCounts.get(x.sourceAnchor)===1&&proofCounts.get(x.sourceAnchor)===1
-      ?proofs.find(y=>y&&typeof y==='object'&&y.sourceAnchor===x.sourceAnchor):null;
-    return {
-      candidateKey:String(x.subjectKey),
-      sourceAnchor:x.sourceAnchor??'UNBOUND_SOURCE_ANCHOR',
-      priorEvidenceInterpretation:x.priorConclusion??'NOT_RECORDED',
-      priorEvidenceDisposition:x.disposition??'NOT_RECORDED',
-      priorEvidenceBasis:'REVIEWER_INTERPRETATION_NOT_AUTOMATICALLY_REVALIDATED',
-      currentPhaseExecutionStatus:execution?.reproductionStatus??'NO_PHASE6_EXECUTION_STATUS',
-      currentPhaseOracleOutcome:execution?.oracleOutcome??'NO_PHASE6_ORACLE',
-      phase6ProofVerdict:proof?.verdict??'NOT_LINKED_OR_UNRESOLVED',
-      phase6ProofCandidateKey:proof?.candidateKey??null,
-      phase6ExecutionRounds:proof?.dispatchRounds??null,
-      residualLimitation:execution?.limitations??x.downstreamValidationNeed??'SEE_ACCEPTED_SOURCE_EVIDENCE'
-    };
-  });
+ const prior=phase5?.actions?.['step-2']?.outputs?.reconciliationRecords??[];
+ const runs=phase6?.actions?.['step-2']?.outputs?.targetDispositions??[];
+ const proofs=phase6?.actions?.['step-5']?.outputs?.candidateProofRecords??[];
+ const provenanceRows=[
+  ...(phase5?.automationOutputs?.acceptedUnitRecordOrigins?.records??[]),
+  ...(phase6?.automationOutputs?.acceptedUnitRecordOrigins?.records??[])
+ ];
+ const sourceFor=selector=>{
+  const originals=provenanceRows.filter(ref=>ref?.canonicalRecordSelector===selector);
+  return {selector,
+   ...(originals.length===1?{originalAcceptedRecordSource:structuredClone(originals[0])}:
+    {sourceAvailability:originals.length>1?
+      'MULTIPLE_ORIGINAL_SOURCES':'ORIGINAL_SOURCE_UNAVAILABLE'})};
+ };
+ const runRecords=Array.isArray(runs)?runs.map((row,index)=>({
+  row,source:sourceFor('actions.step-2.outputs.targetDispositions['+index+']')
+ })):[],proofRecords=Array.isArray(proofs)?proofs.map((row,index)=>({
+  row,source:sourceFor('actions.step-5.outputs.candidateProofRecords['+index+']')
+ })):[];
+ const anchorCounts=new Map(),proofAnchorCounts=new Map();
+ for(const x of prior)if(x&&typeof x==='object'&&x.sourceAnchor)
+  anchorCounts.set(x.sourceAnchor,(anchorCounts.get(x.sourceAnchor)??0)+1);
+ for(const {row} of proofRecords)if(row&&typeof row==='object'&&row.sourceAnchor)
+  proofAnchorCounts.set(row.sourceAnchor,(proofAnchorCounts.get(row.sourceAnchor)??0)+1);
+ return (Array.isArray(prior)?prior:[]).flatMap((x,index)=>{
+  if(!x||typeof x!=='object'||Array.isArray(x)||!x.subjectKey)return [];
+  const candidateKey=String(x.subjectKey);
+  const matches=runRecords.filter(({row})=>row&&typeof row==='object'&&
+   String(row.candidateKey??'')===candidateKey);
+  const exactProofs=proofRecords.filter(({row})=>row&&typeof row==='object'&&
+   String(row.candidateKey??'')===candidateKey);
+  const anchored=exactProofs.length?[]:proofRecords.filter(({row})=>
+   row&&typeof row==='object'&&x.sourceAnchor&&
+   row.sourceAnchor===x.sourceAnchor&&
+   anchorCounts.get(x.sourceAnchor)===1&&
+   proofAnchorCounts.get(x.sourceAnchor)===1);
+  const applicableProofs=exactProofs.length?exactProofs:anchored;
+  // Never pick an arbitrary first/last proof among repeated accepted rows.
+  // Preserve all records and make the concise presentation ambiguous.
+  const execution=matches.length===1?matches[0].row:null;
+  const proof=applicableProofs.length===1?applicableProofs[0].row:null;
+  return [{
+   candidateKey,sourceAnchor:x.sourceAnchor??'UNBOUND_SOURCE_ANCHOR',
+   priorEvidenceInterpretation:x.priorConclusion??'NOT_RECORDED',
+   priorEvidenceDisposition:x.disposition??'NOT_RECORDED',
+   priorEvidenceBasis:'REVIEWER_INTERPRETATION_NOT_AUTOMATICALLY_REVALIDATED',
+   currentPhaseExecutionStatus:execution?.reproductionStatus??
+    (matches.length>1?'MULTIPLE_DISTINCT_EXECUTION_RECORDS':'NO_PHASE6_EXECUTION_STATUS'),
+   currentPhaseOracleOutcome:execution?.oracleOutcome??
+    (matches.length>1?'MULTIPLE_DISTINCT_ORACLE_RECORDS':'NO_PHASE6_ORACLE'),
+   phase6ProofVerdict:proof?.verdict??
+    (applicableProofs.length>1?'MULTIPLE_DISTINCT_PROOF_RECORDS':'NOT_LINKED_OR_UNRESOLVED'),
+   phase6ProofCandidateKey:proof?.candidateKey??null,
+   phase6ExecutionRounds:proof?.dispatchRounds??null,
+   residualLimitation:execution?.limitations??
+    x.downstreamValidationNeed??'SEE_ACCEPTED_SOURCE_EVIDENCE',
+   originalPriorRecordSource:sourceFor(
+    'actions.step-2.outputs.reconciliationRecords['+index+']'),
+   exactPhase6ExecutionRecords:matches.map(({row,source})=>({
+    ...source,originalSubmittedRecord:structuredClone(row)})),
+   exactPhase6ProofRecords:applicableProofs.map(({row,source})=>({
+    ...source,originalSubmittedRecord:structuredClone(row)})),
+   evidenceLinkBasis:exactProofs.length?'EXACT_CANDIDATE_KEY':
+    anchored.length?'UNIQUE_RECORDED_SOURCE_ANCHOR':'NO_EXACT_LINK',
+   originalSubjectReferences:{
+    phase5SubjectKey:x.subjectKey,
+    phase6CandidateKey:proof?.candidateKey??null}
+  }];
+ });
 }
 function nestedUnresolvedEvidenceV1(sourceActions,controllerOutputs){
   const rows=[];
