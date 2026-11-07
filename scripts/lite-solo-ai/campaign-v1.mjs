@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v50, Step 7 exact overflow disposition.
+// Lite-Solo MiMo / Worker transport bridge v51, Step 7 exact overflow disposition.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -174,6 +174,7 @@ function ownerOfWorkerReply(raw){
 }
 
 async function modelCall(messages,{technicalAnswer=false}={}){
+ if(miStep8HandoffDue())throw Error('MI_STEP8_RUN_HANDOFF_DUE');
  const request=JSON.stringify({
   model:'lite-solo-mimo-v1',
   messages,
@@ -2700,6 +2701,229 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
   nextOwner:'EXISTING_CONTROLLER_VALIDATION_AND_STEP_LIFECYCLE'}));
  return {status:result.originalWorkerStatus,unitId:ready.unitId,lease:ready.lease,
   originalSubmissionSha256,controllerAccepted:result.controllerAccepted===true};
+}
+
+
+// The original Worker/DO owns the current stage and the existing GitHub
+// controller owns final acceptance; this adapter only supplies MiMo's answers.
+const MI_STEP8_START=Number(process.env.AUDIT_AI_STARTED_AT_MS)||Date.now();
+// Handoff before a new 120-minute inference could exceed the 5h45 budget.
+const MI_STEP8_HANDOFF_AT=MI_STEP8_START+225*60*1000;
+let miStep8Active=false;
+function miStep8HandoffDue(){return miStep8Active&&Date.now()>=MI_STEP8_HANDOFF_AT;}
+async function miStep8Native(route,command={}){
+ const body={campaignId,...command};
+ await recordPrivateCommunication('worker_request',JSON.stringify({route,...body}));
+ const res=await fetch(workerBase.replace(/\/$/,'')+route,{
+  method:'POST',headers:{authorization:'Bearer '+await identity(),
+   'content-type':'application/json'},
+  body:JSON.stringify(body),signal:AbortSignal.timeout(150000)});
+ const raw=await res.text();
+ await recordPrivateCommunication('worker_response',raw);
+ let data;try{data=JSON.parse(raw);}catch{throw Error('Original Worker lifecycle reply is not JSON: '+route);}
+ updateTranscriptScope(data,null);
+ if(!res.ok)throw Error('Existing Worker lifecycle HTTP '+res.status+
+  ' route='+route+' state='+JSON.stringify(data).slice(0,2000));
+ return data;
+}
+// Expose exactly original controller-issued instruction text, original issued
+// forms, and source-bound staged unit records, using existing offset paging.
+async function miStep8Ask(state,task){
+ const original=String(state.authoritativeStepInstructions||'');
+ const head=phase1EvidencePageV1(original,0,6000);
+ let index=null;
+ if(state.engagement?.stage!=='INSTRUCTIONS')
+  index=JSON.parse(await workerCall({operation:'stage_evidence',kind:'INDEX',start:0}));
+ const form=state.engagement?.instructionCompletionForm||
+  state.engagement?.reviewForm||state.engagement?.remediationForm||null;
+ const context={campaignId,phase:state.phase,step:state.currentStep??state.step,
+  stage:state.engagement?.stage,controllerStatus:state.status,
+  originalAuthorityCommit:state.authorityCommit??null,
+  sourceSha256:state.sourceSha256??null,authorityDigest:state.authorityDigest??null,
+  exactOriginalIssuedForm:form,referencedInstructionFiles:state.referencedInstructionFiles??[],
+  currentOriginalWorkIndex:index,
+  originalInstructionText:{sha256:sha(original),start:head.start,end:head.end,
+   totalCharacters:original.length,text:head.text,
+   nextOffset:head.end<original.length?head.end:null},
+  evidenceRequests:{
+   moreInstructions:{instructionEvidenceRequest:{offset:head.end}},
+   moreStagedUnits:{stageWorkEvidenceRequest:{kind:'INDEX',start:0}},
+   originalStagedUnit:{stageWorkEvidenceRequest:{kind:'UNIT',unitId:'<exact issued unitId>',offset:0}}},
+  evidenceCompleteness:'Read subsequent original pages whenever nextOffset or nextStart is present. No preview or missing data implies a negative finding.',
+  exactTask:task};
+ const messages=[{role:'system',content:
+  'You are MiMo, the sole substantive smart-contract security auditor. Answer only the exact current original instruction/review/remediation questions. You may request one local instructionEvidenceRequest or stageWorkEvidenceRequest in JSON; it is only a read, not a Worker action. Inspect original issued instructions, source-bound staged work and supporting evidence where necessary. Do not invent security discoveries, repaired work, acceptance, lease or procedural approvals. For final output use only the requested authored answer fields; the existing Worker compiles and authenticates the original forms.'},
+  {role:'user',content:JSON.stringify(context)}];
+ const prior=[];let raw=await modelCall(messages);
+ for(;;){
+  let answer;try{answer=JSON.parse(raw);}catch{throw Error('MiMo did not produce a JSON lifecycle answer or evidence read');}
+  if(!answer||typeof answer!=='object'||Array.isArray(answer))
+   throw Error('Current substep model response must be an object');
+  const local=Object.hasOwn(answer,'instructionEvidenceRequest')?
+   {kind:'INSTRUCTIONS',request:answer.instructionEvidenceRequest}:
+   Object.hasOwn(answer,'stageWorkEvidenceRequest')?
+   {kind:'STAGED_WORK',request:answer.stageWorkEvidenceRequest}:null;
+  if(!local)return answer;
+  let page;
+  if(Object.keys(answer).length!==1)
+   page={availability:'ONE_LOCAL_READ_ONLY',
+    nextAction:'Read one source-bound original evidence page before final answer'};
+  else if(local.kind==='INSTRUCTIONS'){
+   const offset=local.request?.offset;
+   if(!Number.isSafeInteger(offset)||offset<0||offset>original.length)
+    page={availability:'INVALID_ORIGINAL_INSTRUCTION_OFFSET',totalCharacters:original.length};
+   else{
+    const fragment=phase1EvidencePageV1(original,offset,6000);
+    page={availability:'EXACT_ORIGINAL_INSTRUCTIONS',sha256:sha(original),
+     start:fragment.start,end:fragment.end,text:fragment.text,
+     fragmentSha256:sha(fragment.text),totalCharacters:original.length,
+     nextOffset:fragment.end<original.length?fragment.end:null};
+   }
+  }else{
+   const q=local.request||{};
+   page=JSON.parse(await workerCall({operation:'stage_evidence',kind:q.kind??'INDEX',
+    ...(q.start!==undefined?{start:q.start}:{}),
+    ...(q.unitId!==undefined?{unitId:q.unitId}:{}),
+    ...(q.offset!==undefined?{offset:q.offset}:{})}));
+  }
+  if(prior.length===2){
+   const at=prior.shift();messages.splice(at,2);
+   for(let i=0;i<prior.length;i++)prior[i]-=2;
+  }
+  prior.push(messages.length);
+  messages.push({role:'assistant',content:raw});
+  messages.push({role:'user',content:JSON.stringify(page)});
+  console.log(JSON.stringify({status:'MIMO_STEP8_EXACT_SOURCE_READ',
+   campaignId,phase:state.phase,step:state.currentStep??state.step,
+   stage:state.engagement?.stage,kind:local.kind,
+   availability:page.availability??null,nextOffset:page.nextOffset??null,
+   nextStart:page.nextStart??null,sourceSha256:page.originalWorkSha256??page.sha256??null,
+   acceptanceOwner:'EXISTING_CONTROLLER'}));
+  raw=await modelCall(messages);
+ }
+}
+async function miStep8Instructions(state){
+ const issued=state.engagement?.instructionCompletionForm;
+ if(!issued)throw Error('Original instruction substep form is not issued');
+ const authored=await miStep8Ask(state,{
+  task:'ANSWER_EXACT_THREE_ISSUED_INSTRUCTION_QUESTIONS',
+  originalQuestions:['A','B','C'].map(k=>issued['QUESTION '+k]),
+  requiredOutput:{answers:{Q1:'...',Q2:'...',Q3:'...'}},
+  instruction:'Read and understand ALL original current-step instructions before completing these original questions; the Worker alone builds the immutable form'});
+ const result=await miStep8Native('/api/step/interaction',{action:'acknowledge',answers:authored.answers});
+ console.log(JSON.stringify({status:'MIMO_STEP8_INSTRUCTIONS_RECORDED',
+  phase:state.phase,step:state.currentStep??state.step,
+  workerStatus:result.status,controllerAccepted:false}));
+ if(result.engagement?.stage!=='WORK')
+  throw Error('Original Worker did not advance instruction substep to WORK: '+String(result.status));
+}
+async function miStep8Review(state){
+ const form=state.engagement?.reviewForm;
+ if(!form)throw Error('Original review form is not issued');
+ const authored=await miStep8Ask(state,{
+  task:'SOURCE_BOUND_SECURITY_REVIEW_AND_DISTINCT_REMEDIATION_DISCOVERY',
+  exactQuestions:['A','B','C','D','E'].map(k=>form['QUESTION '+k]),
+  requiredOutput:{answers:{Q1:'...',Q2:'...',Q3:'...',Q4:'...',Q5:'...'},
+   repairChecklist:[{issue:'...',location:'...',requiredAction:'...',verificationEvidence:'...'}]},
+  instruction:'Read actual staged first-round work pages before reviewing. Independently identify at least three distinct genuine problems or deeper analysis obligations; do not invent vulnerabilities or claim controller acceptance.'});
+ const result=await miStep8Native('/api/step/interaction',{
+  action:'review_answers',answers:authored.answers,repairChecklist:authored.repairChecklist});
+ console.log(JSON.stringify({status:'MIMO_STEP8_REVIEW_RECORDED',
+  phase:state.phase,step:state.currentStep??state.step,workerStatus:result.status,
+  authoredChecklistCount:authored.repairChecklist?.length??null,controllerAccepted:false}));
+ if(result.status!=='REMEDIATION_SUBSTEP_READY')
+  throw Error('Review substep not durably recorded by Worker: '+String(result.status));
+}
+async function miStep8Remediation(state){
+ const original=state.engagement?.remediationForm;
+ if(!original)throw Error('Original remediation form is not issued');
+ const issues=original['REPAIR ITEMS'];
+ if(!Array.isArray(issues))throw Error('Original remediation repair list missing');
+ const authored=await miStep8Ask(state,{
+  task:'DOCUMENT_GENUINE_CHANGES_AND_SOURCE_BOUND_DEEPER_ANALYSIS',
+  exactOriginalRepairQuestions:issues.map(x=>({
+   repairId:x['REPAIR ID'],issue:x.ISSUE,question:x.QUESTION,
+   referenceQuestion:x['REFERENCE QUESTION']})),
+  exactClosingQuestions:['A','B','C'].map(k=>original['CLOSING QUESTION '+k]),
+  requiredOutput:{repairs:[{repairId:'<exact issued ID>',
+   analysis:'<actual security work>',changedWorkReference:'<exact revised unit evidence>'}],
+   closingAnswers:{A:'...',B:'...',C:'...'}},
+  instruction:'Use the ORIGINAL revised work and source citations. Do not fabricate changes or proof. Existing Worker decides whether all revised work and forms are sufficient.'});
+ const form=structuredClone(original),
+  replies=new Map((authored.repairs??[]).map(x=>[x.repairId,x]));
+ for(const item of form['REPAIR ITEMS']){
+  const a=replies.get(item['REPAIR ID']);
+  if(a){item.ANSWER=a.analysis;item['REFERENCE ANSWER']=a.changedWorkReference;}
+ }
+ for(const k of ['A','B','C'])if(Object.hasOwn(authored.closingAnswers??{},k))
+  form['CLOSING ANSWER '+k]=authored.closingAnswers[k];
+ const result=await miStep8Native('/api/step/interaction',{
+  action:'remediation_complete',form});
+ console.log(JSON.stringify({status:'MIMO_STEP8_REMEDIATION_RECORDED',
+  phase:state.phase,step:state.currentStep??state.step,workerStatus:result.status,
+  originalRepairItems:issues.length,controllerAccepted:false}));
+ if(result.status!=='SUBSTEP_WORK_SUBMISSION_QUEUED'&&
+    result.status!=='SUBSTEP_SUBMISSION_PENDING')
+  throw Error('Remediation form not recorded by original Worker: '+String(result.status));
+}
+async function miStep8RunLifecycle(){
+ miStep8Active=true;let prior=null;
+ for(;;){
+  if(miStep8HandoffDue())throw Error('MI_STEP8_RUN_HANDOFF_DUE');
+  const state=await miStep8Native('/api/step/current');
+  if(state.status==='AUDIT_COMPLETE'){
+   console.log(JSON.stringify({status:'MIMO_CONTROLLER_REPORTS_AUDIT_COMPLETE',
+    campaignId,source:'CURRENT_ORIGINAL_CONTROLLER',controllerAccepted:true}));
+   return;
+  }
+  const sig=[state.phase,state.currentStep??state.step,
+   state.status,state.engagement?.stage??'CONTROLLER'].join(':');
+  if(prior!==sig){prior=sig;console.log(JSON.stringify({
+   status:'MIMO_STEP8_CONTROLLER_LIFECYCLE',campaignId,phase:state.phase,
+   step:state.currentStep??state.step,workerStatus:state.status,
+   substep:state.engagement?.stage??null,modelOwnsLifecycle:false,
+   controllerAccepted:false}));}
+  if(state.status!=='ACTIVE'||!state.engagement?.stage){
+   await new Promise(resolve=>setTimeout(resolve,30000));continue;
+  }
+  const stage=state.engagement.stage;
+  if(stage==='INSTRUCTIONS'){await miStep8Instructions(state);continue;}
+  if(stage==='WORK'){
+   const ready=await runTechnicalQuestionTransportV1();
+   if(ready)await runControllerIssuedFieldAnswersV1(ready);
+   else await new Promise(resolve=>setTimeout(resolve,15000));
+   continue;
+  }
+  if(stage==='REVIEW'){await miStep8Review(state);continue;}
+  if(stage==='REMEDIATION'){
+   const response=await miStep8Native('/api/step/process',{
+    action:'claim',revisionClaim:true});
+   if(['LEASED_SHARD','LEASED_PACKET'].includes(response.status)){
+    const unit=response.status==='LEASED_PACKET'?
+     response.items?.[0]:response;
+    if(!unit?.unitId||!unit?.lease)throw Error('Incomplete original revised work claim');
+    await runControllerIssuedFieldAnswersV1({unitId:unit.unitId,lease:unit.lease},
+     {remediation:true});
+    continue;
+   }
+   if(response.status==='NO_UNREVISED_WORK_UNITS'){
+    await miStep8Remediation(state);continue;
+   }
+   if(['AI_LEASE_RECOVERY_BLOCKED','AI_LEASE_HELD_BY_ACTIVE_RUN',
+    'REMEDIATION_SUBSTEP_READY','SUBSTEP_SUBMISSION_PENDING',
+    'NO_AVAILABLE_SHARD','NO_AVAILABLE_UNIT'].includes(response.status)){
+    await new Promise(resolve=>setTimeout(resolve,30000));continue;
+   }
+   throw Error('Original Worker remediation claim requires diagnosis: '+String(response.status));
+  }
+  if(stage==='SUBMISSION'){
+   await new Promise(resolve=>setTimeout(resolve,30000));continue;
+  }
+  console.log(JSON.stringify({status:'MIMO_STEP8_UNRECOGNIZED_CONTROLLER_SUBSTEP',
+   campaignId,phase:state.phase,step:state.currentStep??state.step,
+   stage,modelMayNotAdvancePhase:true,controllerAccepted:false}));
+  await new Promise(resolve=>setTimeout(resolve,30000));
+ }
 }
 
 const negotiatedText=await workerCall({operation:'protocol'});
