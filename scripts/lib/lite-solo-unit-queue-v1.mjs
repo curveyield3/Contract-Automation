@@ -360,7 +360,8 @@ function readPlan(root,campaign,phase){
  for(const u of units){
   for(const m of u.kind==='BATCH'?u.members:[u]){
    if(!m.path)continue;
-   const key=m.kind==='APPEND'?dot([...m.path,'APPEND']):
+   const key=m.kind==='APPEND'?dot([...m.path,
+    m.appendChunkNumber>1?'APPEND-C'+String(m.appendChunkNumber).padStart(4,'0'):'APPEND']):
     Number.isInteger(m.recordIndex)?dot([...m.path,String(m.recordIndex)]):null;
    if(!key)continue;
    if(ownership[key])throw Error('duplicate canonical unit owner: '+key);
@@ -797,11 +798,25 @@ function assertSubmissionEnvelopeV1(u,submission){
      entries.some(x=>!expected.includes(x.key)))
    throw Error('batch record identity/count differs from issued members');
  }else if(u.kind==='APPEND'){
-  if(entries.length>1024)throw Error('APPEND exceeds controller file capacity');
-  const root=JSON.stringify(u.path)+':APPEND-';
-  for(let i=0;i<entries.length;i++)
-   if(entries[i].key!==root+String(i+1).padStart(4,'0'))
-    throw Error('APPEND changed its controller-assigned record identity');
+  if(entries.length>1024)throw Error('APPEND exceeds per-chunk controller capacity');
+  const prefix=JSON.stringify(u.path),chunk=u.appendChunkNumber??1;
+  for(let i=0;i<entries.length;i++){
+   const expected=chunk>1?
+    prefix+':APPEND-C'+String(chunk).padStart(4,'0')+'-'+
+     String(i+1).padStart(4,'0'):
+    prefix+':APPEND-'+String(i+1).padStart(4,'0');
+   if(entries[i]?.key!==expected)
+    throw Error('APPEND changed its controller-assigned chunk record identity');
+  }
+  if(submission.appendContinuation!==undefined&&
+     typeof submission.appendContinuation!=='boolean')
+   throw Error('APPEND continuation request must be explicitly boolean');
+  // A full accepted chunk is always independently bounded. The next chunk
+  // is another issued unit, never an extension of these accepted bytes.
+  const slab={schemaVersion:'curveyield-work-shard-v13',kind:'array',
+   path:u.path,startIndex:u.appendOrdinalStart??0,entries};
+  if(Buffer.byteLength(pretty(slab))>1024*1024)
+   throw Error('APPEND_CHUNK_TRANSPORT_LIMIT: supply a smaller chunk');
  }
 }
 function acceptBatchRecordsV1({root,campaign,phase,u,submission,queue,plan,state,request,digest}){
@@ -1180,7 +1195,8 @@ function restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan}
  const working=read(root,assignment.workShardIndexPath),trusted=read(root,trustedRel);
  if(JSON.stringify(working)!==JSON.stringify(trusted))
   throw Error('v13 index authority mismatch before unit-plan recovery');
- const records=plan.units.flatMap(u=>u.kind==='BATCH'?u.members:[u]).filter(u=>['SHARD','APPEND'].includes(u.kind));
+ const records=plan.units.flatMap(u=>u.kind==='BATCH'?u.members:[u]).filter(u=>
+  ['SHARD','APPEND'].includes(u.kind)&&!(u.appendChunkNumber>1));
  let changed=false;
  for(let i=0;i<working.pages.length;i++){
   const desc=working.pages[i],pageRel=path.posix.join(workDir,desc.file);
