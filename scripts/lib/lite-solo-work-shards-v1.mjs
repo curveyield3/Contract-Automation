@@ -26,10 +26,19 @@ const DIRECT_OPEN_ARRAYS_V13={
   2:{'step-1':['relevantInheritedFacts','inheritedAssumptions','unresolvedPropertyQuestions'],
     'step-2':['requirements'],'step-3':['propertyDesigns']},
   3:{'step-1':['attackHypotheses'],'step-2':['customValidationObligations']},
+  // Phase 4–6 queue unit families share the same issued v13 array shards.
+  // Fixed subject rows remain in SHARD/BATCH; new discoveries, distinct
+  // observations, and existing-subject additions use only permitted APPENDs.
+  4:{'step-2':['specialistReviewRecords'],
+     'step-3':['typedLimitations','candidateRecords']},
+  5:{'step-1':['economicReviewRecords'],
+     'step-2':['reconciliationRecords','newCandidateRecords'],
+     'step-3':['targetDesigns']},
+  6:{'step-1':['deploymentAssessments'],
+     'step-5':['candidateProofRecords','newCandidateRecords']},
   8:{'step-1':['candidateGroups']},9:{},10:{'step-2':['assuranceClaims']}
 };
 const mayAppendDirectArrayV13=(phase,step,field)=>
-  [4,5,6].includes(Number(phase)) ||
   Boolean(DIRECT_OPEN_ARRAYS_V13[phase]?.[step]?.includes(field));
 const recordKey=(pathTokens,value,i)=>{
  const field=['contextId','candidateKey','tempKey','canonicalId','obligationId',
