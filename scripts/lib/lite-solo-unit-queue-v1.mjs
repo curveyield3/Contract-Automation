@@ -939,14 +939,17 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
  const questionLedger=questionLedgerReferenceV1({root,campaign,phase,unitId:u.unitId,
   directory,phaseEpoch:request.phaseEpoch,packetSha256:item.packetSha256});
  const isDiscovery=u.kind==='FLOW'||u.kind==='ATTACK';
- const sourceProvenance=isDiscovery?{
-  schemaVersion:'curveyield-discovery-source-provenance-v1',
+ // Preserve this independently for ALL accepted unit kinds, including
+ // SHARD/BATCH/APPEND. A compiled submission is not the original AI attempt.
+ const sourceProvenance={
+  schemaVersion:isDiscovery?'curveyield-discovery-source-provenance-v1':
+   'curveyield-semantic-unit-source-provenance-v1',
   submittedPath:item.submissionPath,submittedSha256:digest,
   submittedRepresentation:item.submissionPath.includes('/controller-compiled/')
    ?'CONTROLLER_COMPILED':'DIRECT_WORKER_SUBMISSION',
   originalWorkerAttempt:originalWorkerAttemptReferenceV1({
    root,campaign,phase,unitId:u.unitId,request,item,state,digest})
- }:null;
+ };
  if(u.kind==='ATTACK'){
   const extra=unmappedAttackPathProvenanceV1({
    root,campaign,u,originalWorkerAttempt:sourceProvenance.originalWorkerAttempt,submission});
