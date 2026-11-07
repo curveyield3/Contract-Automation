@@ -260,7 +260,11 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
    }
    const keyMap=new Map();
    for(const [i,question] of (index.questions??[]).entries()){
-    if(!question||typeof question.questionId!=='string')continue;
+    if(!question||typeof question.questionId!=='string'){
+     out.unavailable.push({phaseSequence:sourcePhase,unitId,
+      questionIndexOrdinal:i,reason:'INDEX_QUESTION_IDENTITY_UNREADABLE',
+      questionIndexPath:ref.indexPath});continue;
+    }
     const identity=JSON.stringify([sourcePhase,unitId,question.questionId]);
     const entry={phaseSequence:sourcePhase,unitId,
      questionId:question.questionId,round:question.round??null,
@@ -284,8 +288,12 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
    }
    // Every immutable checkpoint revision, not just the last answer, remains
    // addressable. An ANSWERS or REVISE event is not a security resolution.
-   for(const checkpoint of index.checkpoints??[]){
-    if(!checkpoint||typeof checkpoint.path!=='string')continue;
+   for(const [checkpointIndex,checkpoint] of (index.checkpoints??[]).entries()){
+    if(!checkpoint||typeof checkpoint.path!=='string'){
+     out.unavailable.push({phaseSequence:sourcePhase,unitId,
+      checkpointIndex,reason:'CHECKPOINT_REFERENCE_UNREADABLE',
+      questionIndexPath:ref.indexPath});continue;
+    }
     let source,rawSha;
     try{
      const raw=fs.readFileSync(repoFile(root,checkpoint.path));
