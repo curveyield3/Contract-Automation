@@ -412,7 +412,9 @@ function controllerAnswerFieldBindingV1({c,fieldName,sourceRow,definition,itemFi
  actionPrefillFields=[],actionCollectedFields=[],appendNew=false}){
  const value=sourceRow?.[itemField],allowed=definition?.itemFieldAllowedValues?.[itemField]??null;
  const collected=[...(definition?.controllerCollectedFields??[]),...actionCollectedFields].includes(itemField);
- const owned=[...(definition?.controllerPrefillFields??[]),...actionPrefillFields].includes(itemField)||
+ const owned=itemField==='automationOwnedFields'&&
+   Object.hasOwn(sourceRow??{},'automationOwnedFields')||
+   [...(definition?.controllerPrefillFields??[]),...actionPrefillFields].includes(itemField)||
    (Array.isArray(sourceRow?.automationOwnedFields)&&sourceRow.automationOwnedFields.includes(itemField));
  if(appendNew&&owned&&(value===undefined||isPendingAnswerValue(value))){
   // No prefilled value exists for an APPEND; never copy or erase a new row.
