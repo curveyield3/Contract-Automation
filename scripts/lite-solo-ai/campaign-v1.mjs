@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v39, original intra-phase evidence propagation.
+// Lite-Solo MiMo / Worker transport bridge v40, source-bound question checkpoint history.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -1930,7 +1930,8 @@ function miLocalEvidenceReadRequestV1(raw){
  let parsed;try{parsed=JSON.parse(raw);}catch{return null;}
  if(!parsed||Array.isArray(parsed)||typeof parsed!=='object')return null;
  const families=['admittedSourceEvidenceRequest','packetEvidenceRequest',
-  'sourceEvidenceRequest','originalCanonicalEvidenceRequest','questionHistoryEvidenceRequest'];
+  'sourceEvidenceRequest','originalCanonicalEvidenceRequest','questionHistoryEvidenceRequest',
+  'packetQuestionEvidenceRequest'];
  const active=families.filter(f=>Object.hasOwn(parsed,f));
  if(!active.length)return null;
  if(active.length!==1||Object.keys(parsed).length!==1)
@@ -1939,6 +1940,133 @@ function miLocalEvidenceReadRequestV1(raw){
  return {family:active[0],request:parsed[active[0]]};
 }
 
+// Step 4: original GitHub question/checkpoint evidence for the CURRENT packet.
+// Question metadata comes from the authenticated controller status, not model
+// guesses. Continuation reads use immutable GitHub blobs at the exact index
+// commit; no Cloudflare per-question history database is introduced.
+async function miQuestionCheckpointOriginalV1(issued,checkpointIndex){
+ const q=issued.questionLedger;
+ const ref=q?.checkpoints?.[checkpointIndex];
+ if(!ref||!/^[a-f0-9]{64}$/.test(ref.sha256||'')||
+    !/^[a-f0-9]{40}$/.test(q.indexCommit||''))
+  return {availability:'CHECKPOINT_REFERENCE_UNAVAILABLE',checkpointIndex};
+ try{
+  const source=await miPinnedGithubFileV1(ref.path,q.indexCommit);
+  if(source.sha256!==ref.sha256||source.text===null)
+   throw Error('Committed checkpoint SHA-256 or original UTF-8 unavailable');
+  const data=JSON.parse(source.text);
+  if(data.schemaVersion!=='curveyield-ai-question-checkpoint-v1'||
+     data.campaignId!==campaignId||data.unitId!==issued.scope.unitId||
+     data.phaseSequence!==issued.scope.phase||data.phaseEpoch!==issued.scope.phaseEpoch||
+     data.revision!==ref.revision||data.requestDigest!==ref.requestDigest||
+     data.sourceSha256!==issued.scope.sourceSha256||
+     data.authorityDigest!==issued.scope.authorityDigest)
+   throw Error('Checkpoint original differs from source/authority/packet identity');
+  return {availability:'PINNED_ORIGINAL_CHECKPOINT',checkpointIndex,ref,
+   sha256:source.sha256,snapshotCommit:q.indexCommit,originalText:source.text,checkpoint:data};
+ }catch(e){
+  return {availability:'CHECKPOINT_ORIGINAL_UNAVAILABLE',checkpointIndex,
+   path:ref.path,expectedSha256:ref.sha256,reason:String(e.message||e)};
+ }
+}
+function miQuestionLedgerContextV1(issued){
+ const q=issued.questionLedger;
+ if(!q)return null;
+ const questions=q.questions||[],checkpoints=q.checkpoints||[];
+ return {schemaVersion:'machine-intelligence-current-packet-original-question-ledger-v1',
+  campaignId,phase:issued.scope.phase,step:issued.scope.step,unitId:issued.scope.unitId,
+  round:q.round,indexRevision:q.indexRevision,
+  indexPath:q.indexPath,indexCommit:q.indexCommit,
+  questionCount:q.questionCount,answeredCount:q.answeredCount,status:q.status,
+  originalQuestionCount:questions.length,originalCheckpointCount:checkpoints.length,
+  initialQuestionRefs:questions.slice(0,20),
+  initialQuestionsExhaustive:questions.length<=20,
+  initialCheckpointRefs:checkpoints.slice(0,20),
+  initialCheckpointsExhaustive:checkpoints.length<=20,
+  retrievalExamples:{
+   questionIndex:{packetQuestionEvidenceRequest:{kind:'QUESTION_INDEX',start:0}},
+   checkpointIndex:{packetQuestionEvidenceRequest:{kind:'CHECKPOINT_INDEX',start:0}},
+   checkpointOriginal:{packetQuestionEvidenceRequest:{kind:'CHECKPOINT_PAGE',checkpointIndex:0,offset:0}},
+   previouslyAnswered:{packetQuestionEvidenceRequest:{kind:'ANSWER',questionId:questions.find(q=>q.answered)?.questionId??'Q-000001',offset:0}}
+  },
+  interpretation:'Current packet original planned/answered history, not proof of correctness; consult original committed checkpoint answers and add questions if the analysis requires.',
+  sourceCompleteness:'Original question and checkpoint indexes are pageable. An initial excerpt is not complete unless explicitly marked exhaustive.'};
+}
+async function miQuestionLedgerReadV1(issued,request){
+ const q=issued.questionLedger;
+ const base={schemaVersion:'machine-intelligence-current-packet-question-read-v1',
+  campaignId,unitId:issued.scope.unitId,indexCommit:q?.indexCommit??null,
+  indexRevision:q?.indexRevision??null};
+ if(!q)return {...base,availability:'NO_PLANNED_QUESTION_LEDGER'};
+ const start=Number.isSafeInteger(request?.start)&&request.start>=0?request.start:0;
+ const qs=q.questions||[],refs=q.checkpoints||[];
+ if(request?.kind==='QUESTION_INDEX'){
+  const rows=qs.slice(start,start+25);
+  return {...base,kind:request.kind,start,total:qs.length,questions:rows,
+   nextStart:start+rows.length<qs.length?start+rows.length:null};
+ }
+ if(request?.kind==='CHECKPOINT_INDEX'){
+  const rows=refs.slice(start,start+25);
+  return {...base,kind:request.kind,start,total:refs.length,checkpoints:rows,
+   nextStart:start+rows.length<refs.length?start+rows.length:null};
+ }
+ let index=request?.checkpointIndex;
+ let specificQuestion=null;
+ if(request?.kind==='ANSWER'){
+  specificQuestion=qs.find(x=>x.questionId===request.questionId&&x.answered===true);
+  if(!specificQuestion)return {...base,availability:'QUESTION_NOT_ANSWERED_IN_COMMITTED_INDEX',
+   questionId:request?.questionId??null};
+  index=refs.findIndex(ref=>ref.revision===specificQuestion.answerCheckpoint);
+ }
+ if((request?.kind!=='CHECKPOINT_PAGE'&&request?.kind!=='ANSWER')||
+    !Number.isSafeInteger(index)||index<0||index>=refs.length)
+  return {...base,availability:'INVALID_COMMITTED_CHECKPOINT_SELECTOR'};
+ const original=await miQuestionCheckpointOriginalV1(issued,index);
+ if(original.availability!=='PINNED_ORIGINAL_CHECKPOINT')
+  return {...base,...original};
+ let content=original.originalText;
+ if(specificQuestion){
+  const record=original.checkpoint.records?.find(x=>x.questionId===specificQuestion.questionId);
+  if(!record||typeof record.answerText!=='string')
+   return {...base,availability:'ANSWER_RECORD_ABSENT_FROM_REFERENCED_CHECKPOINT',
+    questionId:specificQuestion.questionId,checkpointIndex:index};
+  content=record.answerText;
+ }
+ const offset=Number.isSafeInteger(request.offset)&&request.offset>=0?request.offset:0;
+ const page=phase1EvidencePageV1(content,offset,6000);
+ return {...base,availability:'EXACT_COMMITTED_QUESTION_OR_ANSWER',kind:request.kind,
+  questionId:specificQuestion?.questionId??null,checkpointIndex:index,
+  sourceCheckpointSha256:original.sha256,originalText:page.text,
+  fragmentSha256:sha(page.text),start:page.start,end:page.end,
+  totalChars:content.length,completeOriginalText:page.start===0&&page.end===content.length,
+  nextOffset:page.end<content.length?page.end:null};
+}
+async function miRecentOriginalAnswersV1(issued){
+ const q=issued.questionLedger;
+ if(!q?.questions?.length||!q?.checkpoints?.length)return [];
+ const answered=q.questions.filter(x=>x.answered===true);
+ const recent=answered.slice(-6),out=[];
+ for(const question of recent){
+  const index=q.checkpoints.findIndex(x=>x.revision===question.answerCheckpoint);
+  if(index<0){out.push({questionId:question.questionId,availability:'CHECKPOINT_REFERENCE_NOT_IN_INDEX'});continue;}
+  const found=await miQuestionCheckpointOriginalV1(issued,index);
+  if(found.availability!=='PINNED_ORIGINAL_CHECKPOINT'){
+   out.push({questionId:question.questionId,availability:found.availability});continue;
+  }
+  const rec=found.checkpoint.records?.find(x=>x.questionId===question.questionId);
+  if(!rec||typeof rec.answerText!=='string'){
+   out.push({questionId:question.questionId,availability:'ANSWER_NOT_IN_ORIGINAL_CHECKPOINT'});continue;
+  }
+  const page=phase1EvidencePageV1(rec.answerText,0,6000);
+  out.push({questionId:question.questionId,originalQuestionText:question.questionText,
+   answerTextPage:page.text,answerTextSha256:sha(rec.answerText),
+   originalAnswerComplete:page.end===rec.answerText.length,
+   completeAnswerChars:rec.answerText.length,
+   nextOffset:page.end<rec.answerText.length?page.end:null,
+   checkpointIndex:index,checkpointSha256:found.sha256});
+ }
+ return out;
+}
 // Step 2 technical-answer transport. MiMo never writes route/request JSON in v8.
 // Existing source, model, OIDC, transcript and CPU watchdog infrastructure is reused.
 async function runTechnicalQuestionTransportV1(){
