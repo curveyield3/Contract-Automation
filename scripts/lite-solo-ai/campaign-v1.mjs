@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v44, automatic exact pending answer replay.
+// Lite-Solo MiMo / Worker transport bridge v45, controller-issued field answer transport.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2087,7 +2087,8 @@ async function runTechnicalQuestionTransportV1(){
     answeredCount:issued.answeredCount,
     questionLedgerComplete:true,controllerAccepted:false,
     nextOwner:'EXISTING_CONTROLLER_UNIT_COMPILATION_AND_SUBMISSION'}));
-   return;
+   return {unitId:issued.unitId,lease:issued.lease,phase:issued.phase,step:issued.step};
+
   }
   if(['AI_TECHNICAL_AWAITING_CONTROLLER','AI_TECHNICAL_AWAITING_OWNED_UNIT',
       'AI_TECHNICAL_CURRENT_UNAVAILABLE','AI_TECHNICAL_PREVIOUS_PACKET_NOT_IN_CURRENT_LEASE'].includes(issued.status)){
@@ -2095,7 +2096,7 @@ async function runTechnicalQuestionTransportV1(){
     campaignId,phase:issued.phase??null,step:issued.step??null,
     controllerStatus:issued.controllerStatus??null,substep:issued.engagementStage??null,
     nextOwner:issued.nextOwner||null,controllerAccepted:false}));
-   return;
+   return null;
   }
   if(issued.status!=='AI_TECHNICAL_QUESTION_ISSUED'||
      issued.schemaVersion!=='machine-intelligence-technical-question-transport-v1'||
@@ -2350,7 +2351,9 @@ async function runTechnicalQuestionTransportV1(){
    break;
   }
   questionIterations++;
-  if(issued.question.mode!=='PLANNED_PER_PACKET')return;
+  if(issued.question.mode!=='PLANNED_PER_PACKET')
+   return {unitId:issued.scope.unitId,lease:issued.scope.lease,
+    phase:issued.scope.phase,step:issued.scope.step};
   // Original answered/expanded question text and revisions now live in GitHub.
   // Retain full frozen wave methodology but avoid accumulating a synthetic,
   // truncated, in-memory question history across arbitrarily many rounds.
@@ -2361,6 +2364,174 @@ async function runTechnicalQuestionTransportV1(){
   // question from this answer or a locally guessed coverage threshold.
  }
 }
+// Step 6: the existing controller-owned answerTransport and answerRouting
+// select destinations; MiMo exclusively supplies typed security conclusions.
+// The runner never compiles a canonical record or creates queue unit IDs.
+async function runControllerIssuedFieldAnswersV1(ready){
+ const raw=await workerCall({operation:'field_contract',unitId:ready.unitId,lease:ready.lease});
+ let contract;try{contract=JSON.parse(raw);}catch{throw Error('Field contract is not JSON');}
+ if(contract.status==='AI_FIELD_TRANSPORT_AWAITING_INVESTIGATION_COMPLETION'){
+  console.log(JSON.stringify({status:'MIMO_FIELD_ANSWERS_AWAIT_INVESTIGATION',unitId:ready.unitId,
+   controllerAccepted:false}));return;
+ }
+ if(contract.status!=='AI_CONTROLLER_FIELD_CONTRACT_ISSUED'||
+    contract.unitId!==ready.unitId||contract.lease!==ready.lease)
+  throw Error('No exact original GitHub field contract for leased unit: '+contract.status);
+ const typed=[4,5,6].includes(contract.phase);
+ if(typed&&(contract.answerTransport?.schemaVersion!=='curveyield-machine-bound-answer-transport-v1'||
+    contract.answerTransport.unitId!==ready.unitId||
+    contract.answerTransport.responseSchemaVersion!=='curveyield-machine-bound-answers-v1'||
+    !Array.isArray(contract.answerTransport.fields)))
+  throw Error('GitHub-issued answerTransport identity unavailable');
+ const issued={scope:{campaignId,phase:contract.phase,step:contract.step,
+  unitId:contract.unitId,authorityCommit:contract.authorityCommit,
+  sourceSha256:contract.sourceSha256,authorityDigest:contract.authorityDigest,
+  phaseEpoch:contract.phaseEpoch},questionLedger:contract.questionLedger,
+  admittedSource:contract.admittedSource,packetEvidenceReferences:contract.packetEvidenceReferences};
+ const methodology=contract.technicalMethodology?
+  await miMethodologyV1({...issued,technicalMethodology:contract.technicalMethodology}):null;
+ const source=contract.admittedSource?
+  await miAdmittedSourceInventoryV1(contract.admittedSource).catch(e=>({
+   availability:'PINNED_ADMITTED_SOURCE_UNAVAILABLE',files:[],originalFileCount:null,
+   reason:String(e.message||e)})):null;
+ const packet=typed?await miCurrentPacketEvidenceV1(issued).catch(e=>({
+  availability:'PINNED_PACKET_EVIDENCE_UNAVAILABLE',sources:new Map(),
+  initial:[],unavailable:[{reason:String(e.message||e)}]})):null;
+ const {files:sourceIndex=[],...sourceContext}=source??{};
+ const {sources:packetIndex=new Map(),...packetContext}=packet??{};
+ const context={
+  campaignId,phase:contract.phase,step:contract.step,unitId:contract.unitId,
+  originalIssuedTemplate:contract.inputFileTemplate,
+  exactGithubAnswerRouting:contract.answerRouting??null,
+  exactGithubAnswerTransport:contract.answerTransport??null,
+  originalTechnicalMethodology:methodology,
+  admittedSourceInventory:sourceContext,
+  assignedPacketSourceEvidence:packetContext,
+  originalCompletedQuestionLedger:typed?miQuestionLedgerContextV1(issued):null,
+  recentOriginalAnswers:typed?await miRecentOriginalAnswersV1(issued):[],
+  originalDirectQuestion:contract.originalTechnicalQuestion??null,
+  evidenceAccess:{
+   source:{admittedSourceEvidenceRequest:{kind:'INDEX',start:0}},
+   packet:{packetEvidenceRequest:{kind:'FILE',path:packet?.initial?.[0]?.path??'',offset:0}},
+   questions:{packetQuestionEvidenceRequest:{kind:'CHECKPOINT_INDEX',start:0}}},
+  rule:'Do not automatically promote investigative questions into findings. Only explicitly authored field answers and question links become formal outputs.'
+ };
+ const system='You are MiMo, the sole substantive smart-contract auditor. Answer the precise GitHub-issued field question as JSON. Original source and prior questions are evidence, not automatic security conclusions. You may request one original evidence page with a JSON admittedSourceEvidenceRequest, packetEvidenceRequest, or packetQuestionEvidenceRequest; local reads are not Worker/API commands. Never invent supporting execution or PASS, canonical field paths, record IDs, lease data or controller acceptance. Preserve controller-owned prefills. The original Github adapter alone compiles output records. Return one JSON object containing exactly the requested answer property after investigation.';
+ async function ask(task,key){
+  const messages=[{role:'system',content:system},
+   {role:'user',content:JSON.stringify(context)},
+   {role:'user',content:JSON.stringify(task)}];
+  let original=await modelCall(messages);
+  const last=[];
+  for(;;){
+   const request=miLocalEvidenceReadRequestV1(original);
+   if(!request)break;
+   let page;
+   if(request.error)page=request.error;
+   else if(request.family==='admittedSourceEvidenceRequest')
+    page=source?await miAdmittedSourceReadV1(source,request.request):
+     {availability:'SOURCE_UNAVAILABLE'};
+   else if(request.family==='packetEvidenceRequest')
+    page=packet?miPacketEvidenceReadV1(packet,request.request):
+     {availability:'PACKET_UNAVAILABLE'};
+   else if(request.family==='packetQuestionEvidenceRequest')
+    page=typed?await miQuestionLedgerReadV1(issued,request.request):
+     {availability:'NO_COMMITTED_PACKET_QUESTION_LEDGER'};
+   else page={availability:'UNAVAILABLE_LOCAL_READ_FAMILY',family:request.family};
+   if(last.length>=2){const old=last.shift();messages.splice(old,2);for(let i=0;i<last.length;i++)last[i]-=2;}
+   last.push(messages.length);
+   messages.push({role:'assistant',content:original});
+   messages.push({role:'user',content:JSON.stringify(page)});
+   original=await modelCall(messages);
+  }
+  let value;try{value=JSON.parse(original);}catch{throw Error('MiMo did not author exact JSON for '+key);}
+  if(!value||typeof value!=='object'||Array.isArray(value)||!Object.hasOwn(value,key))
+   throw Error('Original MiMo field response lacks '+key);
+  return value[key];
+ }
+ let submission;
+ if(!typed){
+  const shard=await ask({task:'AUTHOR_COMPLETE_ORIGINAL_DIRECT_SHARD',
+   originalQuestion:contract.originalTechnicalQuestion,
+   originalControllerDescriptor:contract.descriptor,
+   unmodifiedOriginalShard:contract.inputFileTemplate,
+   responseShape:{shard:'<complete JSON shard>'},
+   instructions:'Preserve all controller-prefilled values and field destinations. The model, not Cloudflare, authors the substantive work-form field.'},'shard');
+  if(!shard||typeof shard!=='object'||Array.isArray(shard))
+   throw Error('Direct shard must be MiMo-authored original JSON object');
+  submission=shard;
+ }else{
+  const transport=contract.answerTransport,answers=[];
+  for(let i=0;i<transport.fields.length;i++){
+   const field=transport.fields[i];
+   if(typeof field?.bindingId!=='string'||field.source!=='AI_TYPED_LITERAL')
+    throw Error('Missing original GitHub AI field-binding identity');
+   const value=await ask({task:'ANSWER_ONE_EXACT_GITHUB_BOUND_FIELD',
+    fieldIndex:i+1,fieldCount:transport.fields.length,
+    controllerIssuedBinding:field,originalBindingId:field.bindingId,
+    expectedJsonType:field.expectedJsonType,
+    allowedValues:field.allowedValues??null,
+    responseShape:{value:'<original typed JSON value>'},
+    instructions:'Answer this field specifically. Never promote unrelated exploration answers, replace the original binding or invent machine observations.'},'value');
+   answers.push({bindingId:field.bindingId,value});
+   console.log(JSON.stringify({status:'MIMO_BOUND_FIELD_VALUE_AUTHORED',
+    campaignId,unitId:contract.unitId,fieldIndex:i+1,fieldCount:transport.fields.length,
+    bindingId:field.bindingId,valueSha256:sha(JSON.stringify(value)),controllerAccepted:false}));
+  }
+  submission={schemaVersion:'curveyield-machine-bound-answers-v1',unitId:ready.unitId,answers};
+  if(contract.unitKind==='APPEND'){
+   const records=await ask({task:'AUTHOR_ADDITIONAL_AI_OWNED_APPEND_RECORDS',
+    fieldTemplate:contract.answerRouting?.recordFieldTemplate,
+    originalMaximumRecords:transport.maxChunkRecords,appendSubjectOwner:'MIMO',
+    responseShape:{appendRecords:'<array of typed records; [] if none>'}},'appendRecords');
+   if(!Array.isArray(records))throw Error('AI APPEND records are not a JSON array');
+   submission.appendRecords=records;
+   const continuation=await ask({task:'AUTHOR_EXPLICIT_CONTINUATION_DECISION',
+    originalAppendContinuationContract:transport.appendContinuationField,
+    responseShape:{appendContinuation:true},
+    instructions:'Choose true or false yourself. The adapter cannot create a continuation unit or lease.'},'appendContinuation');
+   if(typeof continuation!=='boolean')throw Error('AI APPEND continuation not boolean');
+   submission.appendContinuation=continuation;
+  }
+  if(['FLOW','ATTACK'].includes(contract.unitKind)){
+   const extras=await ask({task:'AUTHOR_OPTIONAL_GENUINE_DISCOVERY_RECORDS',
+    allowedCollections:transport.extraCollections,
+    originalDiscoveryRouting:contract.answerRouting?.optionalRecords??null,
+    responseShape:{extraRecords:{}}},
+    'extraRecords');
+   if(!extras||typeof extras!=='object'||Array.isArray(extras))
+    throw Error('AI discovery extraRecords must be an object');
+   submission.extraRecords=extras;
+  }
+  if(transport.optionalQuestionRecordLinks){
+   const links=await ask({task:'AUTHOR_EXPLICIT_OUTPUT_QUESTION_EVIDENCE_ASSOCIATIONS',
+    sourceBoundCompositeIdentity:'phaseSequence/unitId/questionId/checkpointRevision',
+    originalContract:transport.optionalQuestionRecordLinks,
+    originalQuestionLedger:miQuestionLedgerContextV1(issued),
+    responseShape:{questionRecordLinks:[]},
+    instructions:'Use [] unless you explicitly identify a specific original output selector and supporting question identity. Do not infer automatic promotion from exploratory answers.'},
+    'questionRecordLinks');
+   if(!Array.isArray(links))throw Error('AI-authored question links must be an array');
+   if(links.length)submission.questionRecordLinks=links;
+  }
+ }
+ const submitted=await workerCall({operation:'submit_field_answers',unitId:ready.unitId,
+  lease:ready.lease,submission});
+ let result;try{result=JSON.parse(submitted);}catch{
+  throw Error('Source-bound field submission response invalid');
+ }
+ if(result.status!=='AI_FIELD_SUBMISSION_DISPOSITION')
+  throw Error('Worker did not receive source-bound field submission: '+result.status);
+ console.log(JSON.stringify({status:'MIMO_EXPLICIT_FIELD_ANSWERS_TRANSPORTED',
+  campaignId,unitId:ready.unitId,unitKind:contract.unitKind,
+  authoredFieldCount:submission.answers?.length??null,
+  appendRecordCount:submission.appendRecords?.length??null,
+  originalSubmissionSha256:sha(JSON.stringify(submission)),
+  workerDisposition:result.originalWorkerStatus,
+  controllerAccepted:result.controllerAccepted===true,
+  nextOwner:'EXISTING_CONTROLLER_VALIDATION_AND_STEP_LIFECYCLE'}));
+}
+
 const negotiatedText=await workerCall({operation:'protocol'});
 let negotiated;try{negotiated=JSON.parse(negotiatedText);}catch{throw Error('Invalid Worker protocol negotiation');}
 if(negotiated?.status!=='AI_BRIDGE_PROTOCOL_NEGOTIATED')throw Error('Worker protocol negotiation failed');
@@ -2368,7 +2539,8 @@ if(negotiated.machineIntelligence===true){
  if(negotiated.authorityRelease!=='machine-intelligence-v8'||
     negotiated.protocol!=='machine-intelligence-technical-question-transport-v1')
   throw Error('Machine Intelligence frozen release and inference protocol disagree');
- await runTechnicalQuestionTransportV1();
+ const ready=await runTechnicalQuestionTransportV1();
+ if(ready)await runControllerIssuedFieldAnswersV1(ready);
 }else{
 let workerResponse=await workerCall({operation:'start'});
 // Keep every MiMo-produced command and every Worker response presented to MiMo
