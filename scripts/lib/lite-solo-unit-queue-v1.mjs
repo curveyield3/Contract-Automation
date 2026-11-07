@@ -2073,6 +2073,17 @@ export function collectExplicitQuestionOutputLinksV1({
    const links=accepted.submission?.questionRecordLinks;
    if(Array.isArray(links))
     originalLinkRows.set(u.unitId,links);
+   else if(links!==undefined)
+    output.unresolvedReferences.push({unitId:u.unitId,
+     originalOutputSource:state.acceptedPath,
+     originalExplicitReference:structuredClone(links),
+     status:'NON_ARRAY_AI_QUESTION_LINK_METADATA'});
+   if(accepted.submission?.unmappedQuestionRecordLinks!==undefined)
+    output.unresolvedReferences.push({unitId:u.unitId,
+     originalOutputSource:state.acceptedPath,
+     originalExplicitReference:structuredClone(
+      accepted.submission.unmappedQuestionRecordLinks),
+     status:'UNMAPPED_AI_QUESTION_LINK_METADATA'});
    if(!['FLOW','ATTACK'].includes(u.kind))continue;
    for(const [collection,rows] of Object.entries(accepted.submission??{})){
     if(!Array.isArray(rows)||!['rows','flowNotes','integrationAnswers',
@@ -2084,8 +2095,9 @@ export function collectExplicitQuestionOutputLinksV1({
       .flatMap((link,k)=>{
        if(link?.acceptedOutputSelector!==collection+'['+i+']'&&
           link?.outputSelector!==collection+'['+i+']')return [];
+       if(!Array.isArray(link.questionRefs))return [];
        consumedLinkRows.add(JSON.stringify([u.unitId,k]));
-       return (Array.isArray(link.questionRefs)?link.questionRefs:[])
+       return link.questionRefs
         .map((ref,j)=>({authored:typedQuestionReferenceV1(ref,{
          phase,unitId:u.unitId}),originalExplicitReference:structuredClone(ref),
          sourceSelector:'submission.questionRecordLinks['+k+'].questionRefs['+j+']'}));
@@ -2113,9 +2125,9 @@ export function collectExplicitQuestionOutputLinksV1({
      const matches=link?.acceptedOutputSelector===original?.acceptedSourceSelector?.replace(/^submission\./,'')||
       link?.recordKey===original?.recordKey||
       link?.outputSelector===original?.acceptedSourceSelector?.replace(/^submission\./,'');
-     if(!matches)continue;
+     if(!matches||!Array.isArray(link.questionRefs))continue;
      consumedLinkRows.add(JSON.stringify([ownerUnit,k]));
-     for(const [j,ref] of (Array.isArray(link.questionRefs)?link.questionRefs:[]).entries())
+     for(const [j,ref] of link.questionRefs.entries())
       additional.push({authored:typedQuestionReferenceV1(ref,{phase,unitId:ownerUnit}),
        originalExplicitReference:structuredClone(ref),
        sourceSelector:'submission.questionRecordLinks['+k+'].questionRefs['+j+']'});
