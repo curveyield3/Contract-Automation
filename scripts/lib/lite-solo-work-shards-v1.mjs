@@ -44,7 +44,7 @@ const recordKey=(pathTokens,value,i)=>{
  const field=['contextId','candidateKey','tempKey','canonicalId','obligationId',
     'findingTempKey','assetKey','actorKey','boundaryKey','transitionKey',
     'requirementKey','dependencyKey','standardKey','driverKey','groupKey',
-    'findingKey','subjectKey','id','key']
+    'recordKey','testGroupId','findingKey','subjectKey','id','key']
    .find(k=>value&&typeof value==='object'&&!Array.isArray(value)&&typeof value[k]==='string'&&value[k].trim());
  return JSON.stringify(pathTokens)+':'+(field?field+'='+value[field]:String(i));
 };
@@ -343,7 +343,7 @@ export function secureRestoreWorkFormV13({root,indexRel}){
    for(const [j,entry] of item.entries.entries()){
      const pos=desc.startIndex+j;
      const expected=desc.append?prefix+'APPEND-'+String(j+1).padStart(4,'0'):prefix+desc.recordKeys[j];
-     const templateIdentity=!desc.append&&/^(tempKey|findingTempKey|candidateKey|assetKey|actorKey|boundaryKey|transitionKey|requirementKey|dependencyKey|standardKey|driverKey|groupKey)=<REQUIRED(?:_OR_EXPLICIT_NEGATIVE)?>$/.test(desc.recordKeys[j]);
+     const templateIdentity=!desc.append&&/^(tempKey|findingTempKey|candidateKey|assetKey|actorKey|boundaryKey|transitionKey|requirementKey|dependencyKey|standardKey|driverKey|groupKey|recordKey|testGroupId)=<REQUIRED(?:_OR_EXPLICIT_NEGATIVE)?>$/.test(desc.recordKeys[j]);
      const completedTemplateIdentity=templateIdentity&&recordKey(desc.path,entry.value,pos).startsWith(prefix+desc.recordKeys[j].split('=')[0]+'=');
      // Placeholder-keyed optional record slots may be completed with a
      // schema-approved negative sentinel rather than a fabricated finding.
