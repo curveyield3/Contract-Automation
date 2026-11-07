@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v47, source-bound direct analysis included.
+// Lite-Solo MiMo / Worker transport bridge v48, Step 7 bounded original answer transport.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2069,6 +2069,90 @@ async function miRecentOriginalAnswersV1(issued){
 }
 // Step 2 technical-answer transport. MiMo never writes route/request JSON in v8.
 // Existing source, model, OIDC, transcript and CPU watchdog infrastructure is reused.
+
+// Durable original response paging using the EXISTING private R2 and AI bridge.
+// Original security text is never truncated, rewritten or marked accepted by R2.
+const MI_ANSWER_PART_BYTES=96*1024;
+function miAnswerIdentity(issued,buffer){
+ return {unitId:issued.scope.unitId,lease:issued.scope.lease,
+  scopeSha256:issued.scopeSha256,questionId:issued.scope.questionId,
+  questionSha256:issued.scope.questionSha256,fullSha256:sha(buffer),
+  totalBytes:buffer.length,segmentCount:Math.ceil(buffer.length/MI_ANSWER_PART_BYTES)};
+}
+async function miSendOriginalBounded(issued,original,body){
+ const buf=Buffer.from(original,'utf8');
+ if(buf.length<=450000)return workerCall(body);
+ const m=miAnswerIdentity(issued,buf),existing=new Map();let cursor=null;
+ do{
+  const r=JSON.parse(await workerCall({operation:'answer_segments_status',...m,...(cursor?{cursor}:{})}));
+  if(r.status!=='AI_ORIGINAL_SEGMENT_STATUS'||r.fullSha256!==m.fullSha256||
+     r.totalBytes!==m.totalBytes||r.segmentCount!==m.segmentCount||
+     !Array.isArray(r.parts))throw Error('Original staged segment index mismatch');
+  for(const x of r.parts){
+   if(!Number.isSafeInteger(x.index)||x.index<0||x.index>=m.segmentCount||existing.has(x.index))
+    throw Error('Original answer segment ordinal collision');
+   existing.set(x.index,x);
+  }
+  cursor=r.nextCursor??null;
+ }while(cursor);
+ for(let i=0;i<m.segmentCount;i++){
+  const start=i*MI_ANSWER_PART_BYTES,b=buf.subarray(start,Math.min(buf.length,start+MI_ANSWER_PART_BYTES)),h=sha(b),old=existing.get(i);
+  if(old){if(old.sha256!==h||old.bytes!==b.length)throw Error('Original answer part conflict: '+i);continue;}
+  const r=JSON.parse(await workerCall({operation:'answer_segment',...m,
+   segmentIndex:i,segmentSha256:h,segmentBase64:b.toString('base64')}));
+  if(!['AI_ORIGINAL_SEGMENT_STORED','AI_ORIGINAL_SEGMENT_REPLAY'].includes(r.status)||
+    r.segmentIndex!==i||r.fullSha256!==m.fullSha256||r.segmentSha256!==h)
+   throw Error('Original answer segment not durably stored: '+i);
+ }
+ const reply=await workerCall({operation:'commit_segmented_answer',...m}),r=JSON.parse(reply);
+ if(r.status==='AI_ORIGINAL_SEGMENTS_AWAIT_CONTROLLER_QUESTION_RECORD_PAGING')
+  throw Error('Original answer retained, but controller has no compatible larger question-record paging: '+m.fullSha256);
+ if(r.originalSegmentsVerified!==true||r.completeOriginalSha256!==m.fullSha256||
+    r.completeOriginalBytes!==buf.length)
+  throw Error('Original full answer digest not verified at committed checkpoint: '+r.status);
+ return reply;
+}
+// Locate all previously saved segments after process restart, rather than
+// rerunning inference or guessing a digest from an incomplete local state.
+async function miRecoverOriginalBounded(issued){
+ const id={unitId:issued.scope.unitId,lease:issued.scope.lease,
+  scopeSha256:issued.scopeSha256,questionId:issued.scope.questionId,
+  questionSha256:issued.scope.questionSha256};
+ const rows=[],seen=new Set();let cursor=null;
+ do{
+  const r=JSON.parse(await workerCall({operation:'answer_segments_discover',...id,...(cursor?{cursor}:{})}));
+  if(r.status!=='AI_ORIGINAL_SEGMENT_DISCOVERY'||r.scopeSha256!==id.scopeSha256||
+    !Array.isArray(r.recorded))throw Error('Cannot recover durable original answer segment index');
+  for(const x of r.recorded){
+   const k=x.fullSha256+':'+x.index;
+   if(seen.has(k))throw Error('Duplicate stored original segment');
+   seen.add(k);rows.push(x);
+  }
+  cursor=r.nextCursor??null;
+ }while(cursor);
+ if(!rows.length)return null;
+ const digests=new Set(rows.map(x=>x.fullSha256)),first=rows[0];
+ if(digests.size!==1)throw Error('Multiple immutable model answers for one question; no automatic selection allowed');
+ if(!/^[a-f0-9]{64}$/.test(first.fullSha256)||
+   !Number.isSafeInteger(first.segmentCount)||first.segmentCount<1||
+   !Number.isSafeInteger(first.totalBytes)||first.totalBytes<1||
+   first.segmentCount!==Math.ceil(first.totalBytes/MI_ANSWER_PART_BYTES)||
+   rows.some(x=>x.segmentCount!==first.segmentCount||x.totalBytes!==first.totalBytes||
+    !Number.isSafeInteger(x.index)||x.index<0||x.index>=first.segmentCount||
+    !/^[a-f0-9]{64}$/.test(x.segmentSha256)))
+  throw Error('Durable original answer manifest inconsistent');
+ if(rows.length!==first.segmentCount)
+  throw Error('Original answer segment tail not durable; no regeneration or premature completion');
+ const r=JSON.parse(await workerCall({operation:'commit_segmented_answer',...id,
+  fullSha256:first.fullSha256,totalBytes:first.totalBytes,segmentCount:first.segmentCount}));
+ if(r.status==='AI_ORIGINAL_SEGMENTS_AWAIT_CONTROLLER_QUESTION_RECORD_PAGING')
+  throw Error('Original large answer awaits controller-compatible question-record paging: '+first.fullSha256);
+ if(r.status!=='AI_TECHNICAL_QUESTION_RECORDED'||r.originalSegmentsVerified!==true||
+    r.completeOriginalSha256!==first.fullSha256)
+  throw Error('Recovered original answer not GitHub-committed: '+r.status);
+ return r;
+}
+
 async function runTechnicalQuestionTransportV1(){
  // One existing controller unit/lease is the packet identity; question count,
  // ordered text and continuation rounds belong solely to MiMo and its
@@ -2151,6 +2235,13 @@ async function runTechnicalQuestionTransportV1(){
    }
    if(!['AI_TECHNICAL_NO_STAGED_ORIGINAL','AI_TECHNICAL_FORMAT_CLARIFICATION'].includes(recovered.status))
     throw Error('Unexpected source-bound staged answer recovery status: '+String(recovered.status));
+   const oldSegments=await miRecoverOriginalBounded(issued);
+   if(oldSegments){
+    console.log(JSON.stringify({status:'MIMO_SEGMENTED_ORIGINAL_GITHUB_RECOVERED',
+     unitId:issued.scope.unitId,questionId:issued.scope.questionId,
+     originalSha256:oldSegments.completeOriginalSha256,controllerAccepted:false}));
+    questionIterations++;continue;
+   }
   }
   const packetKey=[campaignId,issued.scope.phase,issued.scope.step,
    issued.scope.phaseEpoch,selectedUnit.unitId,selectedUnit.lease].join(':');
@@ -2285,7 +2376,7 @@ async function runTechnicalQuestionTransportV1(){
     questionId:issued.scope.questionId,questionSha256:issued.scope.questionSha256,
     answerText:original};
    let textResponse;
-   try{textResponse=await workerCall(body);}
+   try{textResponse=await miSendOriginalBounded(issued,original,body);}
    catch(error){
     // GitHub may have committed the checkpoint before a network failure.
     // The identical request is safe to replay: Worker verifies the original
@@ -2294,7 +2385,7 @@ async function runTechnicalQuestionTransportV1(){
      campaignId,unitId:issued.scope.unitId,questionId:issued.scope.questionId,
      originalAnswerSha256:sha(original),responseMissing:true,
      retryStrategy:'SAME_IMMUTABLE_REQUEST_ID'}));
-    textResponse=await workerCall(body);
+    textResponse=await miSendOriginalBounded(issued,original,body);
    }
    try{receipt=JSON.parse(textResponse);}catch{throw Error('Original answer receipt is not JSON');}
    if(receipt.status==='AI_TECHNICAL_FORMAT_CLARIFICATION'){
@@ -2558,6 +2649,9 @@ async function runControllerIssuedFieldAnswersV1(ready){
   campaignId,unitId:ready.unitId,unitKind:contract.unitKind,
   authoredFieldCount:submission.answers?.length??null,
   appendRecordCount:submission.appendRecords?.length??null,
+  originalSerializedSubmissionBytes:Buffer.byteLength(JSON.stringify(submission,null,2)+'\n'),
+  appendChunkNumber:contract.answerTransport?.appendChunkNumber??null,
+  appendContinuationRequested:submission.appendContinuation??null,
   originalSubmissionSha256,
   workerDisposition:result.originalWorkerStatus,
   originalWorkerDisposition:disposition,
