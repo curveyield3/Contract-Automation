@@ -1265,6 +1265,135 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  return {status:'READY_FOR_EXISTING_BOUNDARY_SEAL',workShardIndexPath:assignment.workShardIndexPath,
   validationDelegatedTo:'CLOUDFLARE_WORKER'};
 }
+// Provenance-only projection of exact accepted SHARD/BATCH/APPEND work.
+// Keep it inside the existing canonical artifact (not a new standalone
+// database or workflow). Original Worker source status is never a quality gate.
+export function collectAcceptedUnitRecordOriginsV1({root,campaignPath,directory,phase}){
+ const roster={schemaVersion:'curveyield-accepted-unit-record-origins-v1',
+  phaseSequence:phase,campaignId:directory.campaignId,
+  campaignGenerationId:directory.campaignGenerationId,
+  sourceSha256:directory.sourceSha256,records:[],unavailable:[]};
+ if(![4,5,6].includes(phase))return {...roster,availability:'NOT_APPLICABLE'};
+ let plan,queue;
+ try{
+  plan=readPlan(root,campaignPath,phase);
+  queue=read(root,queueRel(campaignPath,phase));
+ }catch(e)return {...roster,availability:'PLAN_OR_QUEUE_UNAVAILABLE',
+  diagnostics:[String(e?.message??e)]};
+ if(queue.campaignId!==directory.campaignId||
+    queue.campaignGenerationId!==directory.campaignGenerationId||
+    queue.phaseSequence!==phase||queue.sourceSha256!==directory.sourceSha256||
+    queue.authorityDigest!==plan.authorityDigest||queue.phaseEpoch!==plan.phaseEpoch)
+  return {...roster,availability:'ISSUED_IDENTITY_MISMATCH'};
+ const units=plan.units.filter(u=>['SHARD','BATCH','APPEND'].includes(u.kind));
+ for(const u of units){
+  const state=queue.units?.[u.unitId];
+  if(state?.status!=='ACCEPTED'||!state.acceptedPath){
+   roster.unavailable.push({unitId:u.unitId,status:'NOT_ACCEPTED'});continue;
+  }
+  let snapshot,acceptedDigest;
+  try{
+   const raw=fs.readFileSync(repoFile(root,state.acceptedPath));
+   acceptedDigest=hex(raw);snapshot=JSON.parse(raw.toString('utf8'));
+   if(snapshot.unitId!==u.unitId||snapshot.phaseSequence!==phase||
+      snapshot.campaignGenerationId!==directory.campaignGenerationId||
+      snapshot.sourceSha256!==directory.sourceSha256||
+      snapshot.submissionSha256!==state.acceptedSha256)
+    throw Error('accepted unit identity mismatch');
+  }catch(e){
+   roster.unavailable.push({unitId:u.unitId,status:'ACCEPTED_SNAPSHOT_UNAVAILABLE',
+    diagnostic:String(e?.message??e)});continue;
+  }
+  let original=null,sourceAvailability='NOT_RECORDED';
+  const originalRef=snapshot.sourceProvenance?.originalWorkerAttempt;
+  if(originalRef?.availability==='AVAILABLE'&&typeof originalRef.path==='string'&&
+     /^[a-f0-9]{64}$/.test(String(originalRef.sha256??''))){
+   try{
+    const raw=fs.readFileSync(repoFile(root,originalRef.path));
+    if(hex(raw)!==originalRef.sha256)throw Error('original worker attempt digest mismatch');
+    original=JSON.parse(raw.toString('utf8'));sourceAvailability='AVAILABLE';
+   }catch(e){sourceAvailability='ORIGINAL_WORKER_SOURCE_UNAVAILABLE';}
+  }else sourceAvailability=originalRef?.availability??'NOT_RECORDED';
+  const entries=Array.isArray(snapshot.submission?.entries)?snapshot.submission.entries:[];
+  const isBound=original?.schemaVersion==='curveyield-machine-bound-answers-v1';
+  const originalAnswerSelectors=key=>{
+   if(!isBound||!Array.isArray(original.answers))return [];
+   const selectors=[];
+   for(let i=0;i<original.answers.length;i++){
+    let tokens;
+    try{tokens=JSON.parse(original.answers[i]?.bindingId??'');}catch{continue;}
+    if(Array.isArray(tokens)&&tokens[0]==='entries'&&tokens[1]===key)
+     selectors.push('answers['+i+']');
+   }
+   return selectors;
+  };
+  const acceptedReference=(member,entry,entryIndex,recordOrdinal,canonicalIndex)=>{
+   const collection=member.path?.join('.')??null;
+   const sourceSelector='submission.entries['+entryIndex+'].value';
+   const originalSelector=sourceAvailability==='AVAILABLE'?
+    (isBound?(u.kind==='APPEND'?'appendRecords['+recordOrdinal+']':null):
+     original?.schemaVersion==='curveyield-lite-solo-unit-submission-v1'?
+      'entries['+entryIndex+'].value':null):null;
+   roster.records.push({
+    unitId:u.unitId,memberUnitId:member.unitId,
+    unitKind:u.kind,field:member.field,collection,
+    originalRecordOrdinal:recordOrdinal,canonicalRecordIndex:canonicalIndex,
+    canonicalRecordSelector:collection!==null&&Number.isInteger(canonicalIndex)?
+     collection+'['+canonicalIndex+']':null,
+    recordKey:entry.key,
+    acceptedPath:state.acceptedPath,acceptedArtifactSha256:acceptedDigest,
+    acceptedSubmissionPath:snapshot.sourceProvenance?.submittedPath??null,
+    acceptedSubmissionSha256:snapshot.submissionSha256,
+    acceptedSourceSelector:sourceSelector,
+    originalWorkerAttempt:{availability:sourceAvailability,
+     path:sourceAvailability==='AVAILABLE'?originalRef?.path??null:null,
+     sha256:sourceAvailability==='AVAILABLE'?originalRef?.sha256??null:null,
+     sourceSelector:originalSelector,
+     ...(isBound&&u.kind!=='APPEND'?
+      {answerSelectors:originalAnswerSelectors(entry.key)}:{})},
+    ...(entry.sourceAuthoredIdentities?
+     {sourceAuthoredIdentities:structuredClone(entry.sourceAuthoredIdentities)}:{}),
+    ...(entry.controllerSubjectBindings?
+     {controllerSubjectBindings:structuredClone(entry.controllerSubjectBindings)}:{})
+   });
+  };
+  if(u.kind==='BATCH'){
+   for(const member of u.members){
+    const index=entries.findIndex(x=>x?.key===member.recordKeys?.[0]);
+    if(index<0){
+     roster.unavailable.push({unitId:u.unitId,memberUnitId:member.unitId,
+      status:'ISSUED_BATCH_MEMBER_MISSING'});continue;
+    }
+    acceptedReference(member,entries[index],index,member.shardIndex,
+     member.recordIndex);
+   }
+  }else if(u.kind==='SHARD'){
+   const index=entries.findIndex(x=>x?.key===u.recordKeys?.[0]);
+   if(index<0){
+    roster.unavailable.push({unitId:u.unitId,status:'ISSUED_SHARD_RECORD_MISSING'});
+    continue;
+   }
+   acceptedReference(u,entries[index],index,u.shardIndex,u.recordIndex);
+  }else{
+   let start=null;
+   try{
+    const slab=read(root,u.shardPath);
+    if(Number.isSafeInteger(slab.startIndex)&&slab.startIndex>=0)
+     start=slab.startIndex;
+   }catch{ /* Keep the original unit and ordinal even if the shard is gone. */ }
+   for(const [index,entry] of entries.entries()){
+    acceptedReference(u,entry,index,index,
+     start===null?null:start+index);
+   }
+   if(start===null)roster.unavailable.push({unitId:u.unitId,
+    status:'APPEND_CANONICAL_POSITION_UNAVAILABLE'});
+  }
+ }
+ roster.availability='COLLECTED_NONBLOCKING';
+ roster.acceptedOriginCount=roster.records.length;
+ return roster;
+}
+
 export function markFinalizationV1({root,campaignPath,phase,status,details=null}){
  const queue=read(root,queueRel(campaignPath,phase));
  queue.finalizeStatus=status;queue.finalizeDetails=details;
