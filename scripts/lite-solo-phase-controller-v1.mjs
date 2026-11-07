@@ -141,7 +141,9 @@ function assignCanonicalIds(canonical,graph,phase){
       recordKey:source.recordKey??null,
       unitId:source.unitId??null,
       memberUnitId:source.memberUnitId??null,
-      shardPath:source.sourceShardPath??null
+      shardPath:source.sourceShardPath??null,
+      chunkNumber:source.chunkNumber??source.appendChunkNumber??null,
+      originalRecordOrdinal:source.originalRecordOrdinal??null
      }):null;
     const previous=graph.nodes.find(n=>n.nodeType===family&&
      Number(n.originPhase)===Number(phase)&&
@@ -171,7 +173,7 @@ function assignCanonicalIds(canonical,graph,phase){
     reserved.add(canonicalId);occupied.add(canonicalId);
     const originalSubjectReferences=Object.fromEntries(
      Object.entries(item).filter(([key,v])=>
-      /(?:Key|Id|Ids|Keys)$/.test(key)&&key!=='canonicalId'&&
+      /(?:Key|Id|Ids|Keys|Refs|Anchors|Anchor)$/.test(key)&&key!=='canonicalId'&&
       (typeof v==='string'||typeof v==='number'||
        Array.isArray(v)&&v.every(x=>typeof x==='string'||typeof x==='number')))
      .map(([key,v])=>[key,structuredClone(v)]));
