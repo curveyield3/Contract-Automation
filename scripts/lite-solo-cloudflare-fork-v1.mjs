@@ -1264,6 +1264,21 @@ function assembleBoundAnswersV1(c,u,submitted){
   const keyRoot=JSON.stringify(u.path)+':APPEND-';
   const policies=new Map(route.recordFieldTemplate.map(spec=>[spec.field,spec]));
   const reservedIdentities=new Set(knownSubjectIds);
+  // Also reserve already ISSUED identities that have not yet been accepted.
+  // This is collision avoidance only; issuance is not evidence of acceptance.
+  for(const issuedUnit of unitPlan(c).plan.units){
+   const members=issuedUnit.kind==='BATCH'?issuedUnit.members:[issuedUnit];
+   for(const member of members){
+    const issued=member.initialValue;
+    if(!issued||typeof issued!=='object'||Array.isArray(issued))continue;
+    for(const field of [...MECHANICAL_ID_FIELDS,'candidateKey','subjectKey',
+      'obligationId','findingKey']){
+     const value=issued[field];
+     if(typeof value==='string'&&value.trim()&&!isPendingAnswerValue(value)&&
+        !negativeSentinel(value))reservedIdentities.add(value);
+    }
+   }
+  }
   // Reserve unique AI-authored keys across the WHOLE submission before
   // generating any new keys, so a missing earlier key cannot take a valid
   // later key. Previously accepted identities always take precedence.
