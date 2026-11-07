@@ -888,11 +888,1117 @@ function inheritedAcceptedRecordSourceRefsV1({root,campaignPath,sequence}){
   }catch(error){
    if(sha256)availability='CANONICAL_UNREADABLE';
   }
+  // Only a matching, SEALED receipt can elevate a currently available
+  // canonical file from "present" to accepted source evidence.
+  const receiptDir=repoFile(root,path.posix.join(campaignPath,'receipts'));
+  let receiptPath=null,receiptSha256=null;
+  if(canonical&&sha256){
+   const phaseNum=String(phase).padStart(2,'0');
+   const selector=path.posix.relative(campaignPath,canonicalPath);
+   let names=[];
+   try{names=fs.readdirSync(receiptDir).filter(name=>
+    new RegExp('^PHASE_'+phaseNum+'_RECEIPT_v[0-9]+\\.json
+   completeActionsSelector:'actions',
+   recordOriginRosterSelector:queued?
+    'automationOutputs.acceptedUnitRecordOrigins':direct?
+    'automationOutputs.directPhaseRecordOrigins':null,
+   canonicalGraphSourceSelector:
+    canonical?.automationOutputs?.canonicalGraphSourceRefs?
+     'automationOutputs.canonicalGraphSourceRefs':null,
+   recordOriginAvailability:queued?.availability??direct?.availability??
+    'NOT_RECORDED_IN_HISTORICAL_CANONICAL',
+   acceptedOriginalRecordCount:
+    queued?.records?.length??direct?.records?.length??null
+  });
+ }
+ return references;
+}
+function originalPhase1DiscoveryRosterV1({root,campaignPath}){
+  const canonicalPath=path.posix.join(campaignPath,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json');
+  const sourceFile=repoFile(root,canonicalPath);
+  const exists=fs.existsSync(sourceFile);
+  let canonical=null,canonicalSha256=null;
+  if(exists){
+    try{
+      const bytes=fs.readFileSync(sourceFile);
+      canonicalSha256=createHash('sha256').update(bytes).digest('hex');
+      const value=JSON.parse(bytes.toString('utf8'));
+      if(value&&typeof value==='object'&&!Array.isArray(value))canonical=value;
+    }catch{/* Preserve an explicit availability diagnostic, not a fabricated empty finding. */}
+  }
+  // Bind provenance to the Phase 1 receipt that actually recorded this canonical
+  // artifact's SHA-256, not to an unrelated later-phase predecessor receipt.
+  const receiptsRel=path.posix.join(campaignPath,'receipts');
+  const receiptsDir=repoFile(root,receiptsRel);
+  let acceptedReceiptPath=null,acceptedSourceSha256=null;
+  let receiptBinding='RECEIPT_UNAVAILABLE';
+  let names=[];
+  if(canonicalSha256&&fs.existsSync(receiptsDir)){
+    try{
+      names=fs.readdirSync(receiptsDir).filter(name=>/^PHASE_01_RECEIPT_v\d+\.json$/.test(name))
+        .sort((a,b)=>Number(b.match(/_v(\d+)\.json$/)[1])-Number(a.match(/_v(\d+)\.json$/)[1]));
+    }catch{receiptBinding='RECEIPT_DIRECTORY_UNREADABLE';}
+  }
+  if(names.length){
+    receiptBinding='CANONICAL_DIGEST_NOT_IN_PHASE1_RECEIPTS';
+    for(const name of names){
+      const rel=path.posix.join(receiptsRel,name);
+      const receipt=readJsonIf(repoFile(root,rel));
+      const evidence=[...(receipt?.evidence??[]),...(receipt?.outputs??[])];
+      const matching=receipt?.phase?.sequence===1&&
+        ['SEALED','COMPLETE'].includes(receipt?.phase?.status)&&
+        receipt?.campaign?.campaignId===canonical?.campaignId&&
+        evidence.some(ref=>ref?.role==='PHASE_CANONICAL_DATA'&&
+          ref.path==='derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json'&&
+          ref.sha256===canonicalSha256);
+      if(!matching)continue;
+      acceptedReceiptPath=rel;
+      acceptedSourceSha256=receipt?.source?.sha256??null;
+      receiptBinding='MATCHED_PHASE1_RECEIPT';
+      break;
+    }
+  }
+  const definitions=[
+    {discoveryPass:'D4',step:'step-4',field:'standardsAssessments',recordKeyField:'standardKey'},
+    {discoveryPass:'D6',step:'step-5',field:'riskDrivers',recordKeyField:'driverKey'},
+    {discoveryPass:'D7',step:'step-6',field:'phase1Limitations',recordKeyField:null}
+  ];
+  const actions=canonical?.actions??{};
+  const leadCollections=definitions.map(({discoveryPass,step,field,recordKeyField})=>{
+    const records=actions?.[step]?.outputs?.[field];
+    return {
+      discoveryPass,
+      sourceSelector:`actions.${step}.outputs.${field}`,
+      recordKeyField,
+      recordCount:Array.isArray(records)?records.length:null,
+      availability:Array.isArray(records)?'AVAILABLE':'SOURCE_COLLECTION_UNAVAILABLE'
+    };
+  });
+  const leadRefs=[];
+  if(canonical){
+    for(const {discoveryPass,step,field,recordKeyField} of definitions){
+      const records=actions?.[step]?.outputs?.[field];
+      if(!Array.isArray(records))continue;
+      records.forEach((record,index)=>{
+        const recordKey=recordKeyField&&record&&typeof record==='object'&&!Array.isArray(record)
+          ?record[recordKeyField]??null:null;
+        leadRefs.push({
+          discoveryPass,
+          sourceSelector:`actions.${step}.outputs.${field}[${index}]`,
+          sourceIndex:index,
+          recordKey,
+          recordJsonSha256:createHash('sha256').update(JSON.stringify(record)).digest('hex')
+        });
+      });
+    }
+  }
+  const allPhase1OutputSelectors=Object.entries(actions).flatMap(([step,action])=>
+    Object.keys(action?.outputs??{}).map(field=>`actions.${step}.outputs.${field}`));
+  return {
+    schemaVersion:'curveyield-phase1-discovery-source-roster-v1',
+    sourcePhaseSequence:1,
+    canonicalPath,
+    canonicalSha256,
+    sourceIdentity:{
+      campaignId:canonical?.campaignId??null,
+      acceptedSourceSha256,
+      originalCanonicalSha256:canonicalSha256,
+      acceptedReceiptPath,
+      receiptBinding
+    },
+    availability:canonical?(acceptedReceiptPath?'AVAILABLE':'ACCEPTANCE_UNVERIFIED'):
+      exists?'SOURCE_UNREADABLE':'SOURCE_UNAVAILABLE',
+    allPhase1SourceSelector:'actions',
+    allPhase1OutputSelectors,
+    leadCollections,
+    leadRefs,
+    securityDispositionOwner:'AI_REVIEWER'
+  };
+}
+
+export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths=[],predecessorReceiptPath,prefillContext={}}){
+  form.automationInputs={
+    ...(form.automationInputs??{}),
+    predecessorReceiptPath,
+    derivedInputPaths:[...derivedInputPaths],
+    controllerOwnedAutomationInputs:uniq([
+      ...((form.automationInputs??{}).controllerOwnedAutomationInputs??[]),
+      'predecessorReceiptPath',
+      'derivedInputPaths'
+    ])
+  };
+  // Re-index the immutable original Phase 1 canonical on each newly issued
+  // Machine Intelligence successor assignment; never rewrite an accepted phase.
+  if(sequence>=2&&authorityRoot==='Machine Intelligence Audit Controller/Audit Skill v8'){
+    form.automationInputs.phase1DiscoverySourceRoster=originalPhase1DiscoveryRosterV1({
+      root,campaignPath
+    });
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...form.automationInputs.controllerOwnedAutomationInputs,
+      'phase1DiscoverySourceRoster'
+    ]);
+  }
+  if(sequence>4){
+    // Phase 10 receives fresh controller-collected rosters when available;
+    // all other successor stages inherit their sealed canonical references.
+    // This is mechanical provenance copying, never security disposition.
+    const source=sequence===10&&Array.isArray(prefillContext.questionHistoryRosters)
+      ?prefillContext.questionHistoryRosters:null;
+    const inherited=source
+      ?{refs:source.flatMap(r=>r?.histories??[]).filter(r=>
+          r?.availability==='AVAILABLE'||r?.previousCommittedIndex),
+        unavailable:source.flatMap(r=>
+          (r?.histories??[]).filter(x=>
+            x?.availability!=='AVAILABLE'&&!x?.previousCommittedIndex)
+          .map(x=>({phaseSequence:r.phaseSequence,unitId:x.unitId,
+            indexPath:x.indexPath??null,availability:x.availability??'UNREADABLE'}))
+        ).concat(source.filter(r=>r?.availability!=='COLLECTED_NONBLOCKING')
+          .map(r=>({phaseSequence:r.phaseSequence,unitId:'UNAVAILABLE',
+            indexPath:null,availability:r.availability??'UNREADABLE'})))}
+      :inheritedQuestionHistoryRefsV1({root,campaignPath,sequence});
+    if(inherited.refs.length||inherited.unavailable.length){
+      form.automationInputs.questionHistoryRefs=inherited.refs;
+      form.automationInputs.questionHistoryUnavailable=inherited.unavailable;
+      form.automationInputs.controllerOwnedAutomationInputs=uniq([
+        ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+        'questionHistoryRefs','questionHistoryUnavailable'
+      ]);
+    }
+  }
+  if(sequence>=2){
+    form.automationInputs.acceptedRecordSourceHistory=
+      inheritedAcceptedRecordSourceRefsV1({root,campaignPath,sequence});
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+      'acceptedRecordSourceHistory'
+    ]);
+  }
+  // Continue exact accepted discovery evidence across the audit phases.
+  // A missing summary remains a nonblocking availability diagnostic.
+  if([4,5,6,8,10].includes(sequence)){
+    const summaryRel=path.posix.join(campaignPath,
+      'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');
+    const summaryFile=repoFile(root,summaryRel),summary=readJsonIf(summaryFile);
+    let summarySha256=null;
+    try{if(fs.existsSync(summaryFile))
+      summarySha256=createHash('sha256').update(fs.readFileSync(summaryFile)).digest('hex');}
+    catch{/* Report missing source; never reject other accepted work. */}
+    const details=summary?.payload??{};
+    form.automationInputs.discoveryEvidenceContinuity={
+      schemaVersion:'curveyield-discovery-evidence-continuity-v1',
+      sourcePhaseSequence:4,summaryPath:summaryRel,summarySha256,
+      availability:summary?
+       (summarySha256?'AVAILABLE':'SOURCE_HASH_UNAVAILABLE'):
+       (summarySha256?'SUMMARY_UNREADABLE':
+        sequence===4?'PENDING_DISCOVERY':'SOURCE_UNAVAILABLE'),
+      sourceCollections:[
+        'discoverySourceRefs','reconciliationEvidenceRefs',
+        'candidateSourceRefIndexes','integrationAnswerRefs','flowNotes',
+        'unmappedAttackPathRefs','unmappedAttackPathSources',
+        'extraAttackPathRefs','functionVerdictObservations',
+        'functionVerdicts','trivialReviewSubstitutions','contractLevelFindings',
+        'discoveryState.scopedClassAssessments',
+        'coverage.functionReviewSummary','coverage.classEvidenceSummary'
+      ],
+      counts:{
+        reconciliationItems:Array.isArray(details.reconciliationItems)?details.reconciliationItems.length:null,
+        discoverySourceRefs:Array.isArray(details.discoverySourceRefs)?details.discoverySourceRefs.length:null,
+        candidateSourceRefIndexes:Array.isArray(details.candidateSourceRefIndexes)?details.candidateSourceRefIndexes.length:null,
+        integrationAnswerRefs:Array.isArray(details.integrationAnswerRefs)?details.integrationAnswerRefs.length:null,
+        flowNotes:Array.isArray(details.flowNotes)?details.flowNotes.length:null,
+        unmappedAttackPathRefs:Array.isArray(details.unmappedAttackPathRefs)?details.unmappedAttackPathRefs.length:null,
+        extraAttackPathRefs:Array.isArray(details.extraAttackPathRefs)?details.extraAttackPathRefs.length:null,
+        functionVerdictObservations:Array.isArray(details.functionVerdictObservations)?details.functionVerdictObservations.length:null,
+        functionVerdicts:details.functionVerdicts&&typeof details.functionVerdicts==='object'?
+          Object.keys(details.functionVerdicts).length:null,
+        trivialReviewSubstitutions:Array.isArray(details.trivialReviewSubstitutions)?
+          details.trivialReviewSubstitutions.length:null,
+        contractLevelFindings:Array.isArray(details.contractLevelFindings)?
+          details.contractLevelFindings.length:null
+      },
+      evidenceDimensions:{
+        functionReview:details.coverage?.functionReviewSummary??null,
+        classAssessment:details.coverage?.classEvidenceSummary??null,
+        executedProperty:'SEPARATE_QUALIFIED_MACHINE_EVIDENCE_ONLY'
+      },
+      reviewInstruction:'Follow the original accepted source selector and SHA-256, never a 600-character preview. An overall CORRECT function verdict does not establish all security classes as SUPPORTED. Keep function review, explicit class assessments and executed property proof separate. Inspect FLOW/ATTACK integration answers, notes, candidates, scoped checks and unmapped paths. The AI decides security significance.',
+      securityDispositionOwner:'AI_REVIEWER',
+      evidenceStatusPolicy:'SOURCE_UNAVAILABLE_IS_VISIBLE_NONBLOCKING'
+    };
+    if(summarySha256)
+      form.automationInputs.derivedInputPaths=uniq([
+        ...form.automationInputs.derivedInputPaths,summaryRel]);
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...form.automationInputs.controllerOwnedAutomationInputs,
+      'discoveryEvidenceContinuity']);
+  }
+  const siEntry=findSourceIntelligence(root,campaignPath);
+  const si=siEntry?.j??null;
+  const derived=loadDerived(root,derivedInputPaths);
+
+  if(sequence===1&&!si){
+    // Missing or unverified Source Intelligence cannot silently become an empty
+    // discovered dependency inventory. This is a diagnostic, never a blocker.
+    const indexRel='evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json';
+    const hasIndex=fs.existsSync(repoFile(root,path.posix.join(campaignPath,indexRel)));
+    form.automationInputs.sourceIntelligenceAvailability={
+      status:hasIndex?'ACCEPTED_SOURCE_INTELLIGENCE_NOT_VERIFIABLE':'SOURCE_INTELLIGENCE_v1_UNAVAILABLE',
+      bundleIndexPath:hasIndex?indexRel:null,
+      sourceIdentityVerification:'NOT_ESTABLISHED',
+      implication:'Exact callsite coverage cannot be inferred from missing Source Intelligence.'
+    };
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...form.automationInputs.controllerOwnedAutomationInputs,'sourceIntelligenceAvailability']);
+  }
+  if(sequence===1&&si){
+    form.automationInputs.structuralInventory={
+      securitySurfaces:si.securitySurfaces??[],
+      privilegeCandidates:si.privilegeCandidates??[],
+      externalInterfaces:si.externalInterfaces??[],
+      sourceAnchors:si.sourceAnchors??[],
+      valueFlowCandidates:si.valueFlowCandidates??[]
+    };
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+      'structuralInventory'
+    ]);
+    // One assessment subject per original Source Intelligence callsite, not per dependency name.
+    // Preserve the original interface ID when unique; for legacy missing/ambiguous IDs,
+    // use the exact immutable Source Intelligence array selector as the source-bound key.
+    const interfaces=Array.isArray(si.externalInterfaces)?si.externalInterfaces:[];
+    const sourceRef=path.relative(repoFile(root,campaignPath),siEntry.file).split(path.sep).join('/');
+    const idCounts=new Map();
+    for(const e of interfaces){
+      const id=typeof e?.interfaceId==='string'?e.interfaceId.trim():'';
+      if(id)idCounts.set(id,(idCounts.get(id)??0)+1);
+    }
+    const deps=interfaces.map((e,index)=>{
+      const id=typeof e?.interfaceId==='string'?e.interfaceId.trim():'';
+      return {
+        dependencyKey:id&&idCounts.get(id)===1?id:`SOURCE_INTELLIGENCE:${sourceRef}#externalInterfaces[${index}]`,
+        identity:e?.dependencyOrInterface??e?.interfaceOrType??e?.targetContractId??'UNRESOLVED_INTERFACE',
+        trustAssumptions:'<REQUIRED>',
+        failureModes:'<REQUIRED>',
+        authorityImplications:'<REQUIRED>',
+        securitySignificance:'<REQUIRED>',
+        laterEvidenceNeeds:'<REQUIRED>',
+        automationOwnedFields:['dependencyKey','identity']
+      };
+    });
+    if(deps.length)form.actions['step-3'].outputs.dependencyAssessments=deps;
+  }
+
+  if(sequence===2){
+    const predecessor=readJsonIf(repoFile(root,predecessorReceiptPath))??{};
+    const build=readJsonIf(repoFile(root,path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json')))??{};
+    const prior=predecessor.sourceSha256??predecessor.source?.sha256??null;
+    const current=build.source?.archiveSha256Observed??build.source?.archiveSha256??prior;
+    form.automationInputs.identityComparison={
+      predecessorSourceSha256:prior,
+      currentSourceSha256:current,
+      status:prior&&current&&prior!==current?'IDENTITY_CHANGE_DETECTED':'NO_IDENTITY_CHANGE_DETECTED_AT_PHASE_BOUNDARY'
+    };
+    form.automationInputs.controllerOwnedAutomationInputs=[...(form.automationInputs.controllerOwnedAutomationInputs??[]),'identityComparison'];
+  }
+
+  if(sequence===3){
+    const matrixRel=path.posix.join(authorityRoot,'shared/controller/DOMAIN_APPLICABILITY_MATRIX.json');
+    const matrixFile=repoFile(root,matrixRel);
+    const matrix=readJsonIf(matrixFile)??{};
+    const sourceIntelligencePath=siEntry?
+      path.relative(repoFile(root,campaignPath),siEntry.file).split(path.sep).join('/'):
+      'UNRESOLVED';
+    const sourceIntelligenceSha256=siEntry?
+      createHash('sha256').update(fs.readFileSync(siEntry.file)).digest('hex'):null;
+    const matrixSha256=fs.existsSync(matrixFile)?
+      createHash('sha256').update(fs.readFileSync(matrixFile)).digest('hex'):null;
+    const domains=classifyDomains(si??{},matrix,{
+      sourceIntelligencePath,sourceIntelligenceSha256,
+      matrixPath:matrixRel,matrixSha256
+    });
+    // The legacy decision and obligation fields are deterministic routing
+    // compatibility data. AI-specific applicability requires a separate
+    // model-authored conclusion supported by the original negative standards.
+    const obligations=domainObligations(matrix,domains);
+    const registryRel=path.posix.join(campaignPath,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json');
+    writeJson(repoFile(root,registryRel),{
+      schemaVersion:'audit-v7-domain-applicability-registry-v1',
+      artifactId:'DOMAIN_APPLICABILITY_REGISTRY',
+      sourceIntelligencePath,
+      sourceIntelligenceSha256,
+      matrixPath:matrixRel,matrixSha256,
+      sourceIdentity:si?.identity?.sourceIdentity??si?.identity?.sourceDigestSha256??'UNRESOLVED',
+      decisions:domains,
+      decisionsScope:'LEGACY_DETERMINISTIC_MACHINE_ROUTING_ONLY',
+      aiApplicabilityVerdict:null,
+      aiApplicabilityStatus:'NOT_AUTHORED',
+      machineNegativeInterpretation:'NOT_TRIGGERED means NO_POSITIVE_MACHINE_SIGNAL_DETECTED, not an AI-authored or source-negative specialist exclusion.',
+      generatedObligations:obligations,
+      owner:'CONTROLLER_AUTOMATION_AT_PHASE_2_BOUNDARY'
+    });
+    form.automationInputs.sourceIntelligencePath=siEntry?path.relative(repoFile(root,campaignPath),siEntry.file).split(path.sep).join('/'):'UNRESOLVED';
+    form.automationInputs.domainRegistryPath=path.posix.relative(campaignPath,registryRel);
+    form.automationInputs.controllerOwnedAutomationInputs=[...(form.automationInputs.controllerOwnedAutomationInputs??[]),'sourceIntelligencePath','domainRegistryPath'];
+  }
+  if([3,4,5,6,8,10].includes(sequence)){
+    const registryRel=path.posix.join(campaignPath,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json');
+    const registry=readJsonIf(repoFile(root,registryRel));
+    // If no accepted/issued registry exists, expose the absence; never
+    // manufacture an AI verdict or auto-add unmatched specialist obligations.
+    form.automationInputs.specialistDiscoveryRoutes=specialistDiscoveryRoutesV1({
+      registry,phase:sequence
+    });
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+      'specialistDiscoveryRoutes'
+    ]);
+  }
+
+  if(sequence===4 && Object.hasOwn(form?.actions?.['step-1']?.outputs??{},'discoveryReconciliationRecords')){
+    const policy=detectionPolicyForAuthorityV1({repoRoot:root,authorityRoot,
+      readJsonIfExists:(rel)=>readJsonIf(repoFile(root,rel))});
+    if(policy){
+      const summary=readJsonIf(repoFile(root,path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')));
+      const items=summary?.payload?.reconciliationItems??null;
+      const controllerFields=['recordKey','contextIds','sourceAnchor','origin','reviewerFinding','attackerFinding'];
+      // Copy exact source identities; controller makes no security judgments.
+      const unmappedSourceRef=item=>{
+        if(item?.origin!=='ATTACK_UNMAPPED_FLOW')return null;
+        const link=summary?.payload?.reconciliationEvidenceRefs?.[item.recordKey];
+        if(link?.referenceCollection!=='unmappedAttackPathRefs')return null;
+        const index=link.sourceRefIndexes?.[0];
+        const ref=Number.isInteger(index)?summary?.payload?.unmappedAttackPathRefs?.[index]:null;
+        return ref?{
+          availability:link.availability??'SOURCE_UNAVAILABLE',
+          phaseSequence:4,unitId:ref.unitId??null,
+          originalWorkerAttempt:structuredClone(ref.originalWorkerAttempt??{availability:'NOT_RECORDED'}),
+          sourceSelector:ref.sourceSelector??null,
+          originalAnchorsSelector:ref.originalAnchorsSelector??null,
+          originalCandidateSelector:ref.originalCandidateSelector??null,
+          originalFlowIds:structuredClone(ref.originalFlowIds??null),
+          originalPathId:ref.originalPathId??null,mappingStatus:ref.mappingStatus??null,
+          acceptedPath:ref.acceptedPath??null,acceptedSha256:ref.acceptedSha256??null
+        }:null;
+      };
+      const records=items===null?['<PENDING_DISCOVERY>']:items.length?items.map(item=>{
+        const evidenceRef=unmappedSourceRef(item);
+        const link=summary?.payload?.reconciliationEvidenceRefs?.[item.recordKey]??{};
+        const sourceIndexes=Array.isArray(link.sourceRefIndexes)?link.sourceRefIndexes:[];
+        const discoveryEvidenceRefs=link.referenceCollection==='discoverySourceRefs'
+          ?sourceIndexes.map(index=>Number.isInteger(index)?
+             summary?.payload?.discoverySourceRefs?.[index]:null).filter(Boolean)
+             .map(ref=>structuredClone(ref)):[];
+        const discoveryEvidenceLookup={
+          summaryPath:form.automationInputs.discoveryEvidenceContinuity?.summaryPath??null,
+          recordKey:item.recordKey,
+          referenceCollection:link.referenceCollection??null,
+          sourceRefIndexes:structuredClone(sourceIndexes),
+          availability:link.availability??'SOURCE_UNAVAILABLE',
+          controllerSourceSelector:link.controllerSourceSelector??null
+        };
+        return {
+          ...Object.fromEntries(controllerFields.map(k=>[k,item[k]])),
+          discoveryEvidenceLookup,discoveryEvidenceRefs,
+          ...(item.origin==='ATTACK_UNMAPPED_FLOW'?{
+            unmappedAttackEvidenceRef:evidenceRef??{availability:'SOURCE_UNAVAILABLE'},
+            unmappedAttackReviewInstruction:
+              'Read the complete original Worker ATTACK record at unmappedAttackEvidenceRef.originalWorkerAttempt.path '+
+              'using unmappedAttackEvidenceRef.sourceSelector. Examine every step, anchor, optional candidate, and unknown '+
+              'flow identity. Do not discard an observation merely because its flow ID is unissued.'
+          }:{}),
+          reconciliation:'<REQUIRED>',disposition:'<REQUIRED>',candidateTempKeyOrNone:'<REQUIRED>',rationale:'<REQUIRED>',
+          automationOwnedFields:item.origin==='ATTACK_UNMAPPED_FLOW'?
+            [...controllerFields,'discoveryEvidenceLookup','discoveryEvidenceRefs',
+             'unmappedAttackEvidenceRef','unmappedAttackReviewInstruction']:
+            [...controllerFields,'discoveryEvidenceLookup','discoveryEvidenceRefs']
+        };
+      }):['NONE_IDENTIFIED'];
+      form.actions['step-1'].outputs.discoveryReconciliationRecords=records;
+      form.automationInputs.expectedDiscoveryRecordKeys=items?.map(x=>x.recordKey)??[];
+      form.automationInputs.unmappedAttackPathSources=
+        structuredClone(summary?.payload?.unmappedAttackPathSources??[]);
+      form.automationInputs.controllerOwnedAutomationInputs=uniq([
+       ...form.automationInputs.controllerOwnedAutomationInputs,
+       'expectedDiscoveryRecordKeys','unmappedAttackPathSources']);
+    }
+  }
+  if(sequence===4){
+    const registryRel=path.posix.join(campaignPath,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json');
+    const registry=readJsonIf(repoFile(root,registryRel))??{};
+    const domains=registry.decisions??[];
+    if(!Object.hasOwn(form.actions['step-1'].outputs,'discoveryReconciliationRecords'))form.actions['step-1'].outputs.sourceReviewRecords=sourceReviewScaffold(si??{});
+    form.actions['step-2'].outputs.specialistReviewRecords=specialistScaffold(si??{},domains);
+    if(!Object.hasOwn(form.actions['step-1'].outputs,'discoveryReconciliationRecords'))form.automationInputs.expectedSourceReviewKeys=(form.actions['step-1'].outputs.sourceReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey);
+    form.automationInputs.expectedSpecialistReviewKeys=(form.actions['step-2'].outputs.specialistReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey);
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+      'expectedSourceReviewKeys',
+      'expectedSpecialistReviewKeys'
+    ]);
+  }
+
+  if(sequence===5){
+    form.actions['step-1'].outputs.economicReviewRecords=economicScaffold(si??{},form.actions['step-1'].outputs.economicReviewRecords);
+    // Prepopulate the same existing reconciliation list from accepted Phase-4
+    // sources. Agents must supply substantive interpretations, but no longer
+    // hand-transcribe hundreds of subject keys, anchors or prior conclusions.
+    const p4=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json')));
+    const priorCandidates=p4?.actions?.['step-3']?.outputs?.candidateRecords??[];
+    // One navigation entry for EVERY accepted candidate source, including
+    // repeated subjects that intentionally share a target/reconciliation key.
+    // A fixed work unit is not the authoritative source-count ceiling.
+    form.automationInputs.phase5OriginalCandidateSourceRoster=
+     (Array.isArray(priorCandidates)?priorCandidates:[]).map((item,index)=>({
+      ...acceptedCanonicalRowReferenceV1({
+       canonical:p4,
+       canonicalArtifactPath:path.posix.join(campaignPath,
+        'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json'),
+       selector:'actions.step-3.outputs.candidateRecords['+index+']'}),
+      originalCandidateKey:item&&typeof item==='object'?
+       item.tempKey??item.candidateKey??item.canonicalId??null:null
+     }));
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+     ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+     'phase5OriginalCandidateSourceRoster']);
+    const priorRows=Array.isArray(form.actions?.['step-2']?.outputs?.reconciliationRecords)
+      ?form.actions['step-2'].outputs.reconciliationRecords.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)):[];
+    const already=new Set(priorRows.map(x=>String(x.subjectKey??'')));
+    for(const item of priorCandidates){
+      if(!item||typeof item!=='object'||Array.isArray(item))continue;
+      const subjectKey=item.tempKey??item.canonicalId??item.candidateKey;
+      if(!subjectKey||already.has(String(subjectKey)))continue;
+      already.add(String(subjectKey));
+      priorRows.push({
+        subjectKey,subjectType:'PHASE4_SOURCE_CANDIDATE',
+        priorConclusion:item.description??item.securityRationale??'PRIOR_CANDIDATE',
+        sourceAnchor:item.sourceAnchor??item.anchors?.[0]??'NONE_IDENTIFIED',
+        phase5Observation:'<REQUIRED>',disposition:'<REQUIRED>',
+        rationale:'<REQUIRED>',downstreamValidationNeed:'<REQUIRED>',
+        automationOwnedFields:['subjectKey','subjectType','priorConclusion','sourceAnchor']
+      });
+    }
+    if(priorRows.length)form.actions['step-2'].outputs.reconciliationRecords=priorRows;
+    // v4: freeze candidate-specific target record ownership before any worker claim.
+    // Reconciliation retains original candidate key; later new candidates use authorized append slots.
+    if(['Machine Intelligence Audit Controller/Audit Skill v7','Machine Intelligence Audit Controller/Audit Skill v8'].includes(authorityRoot)){
+      const templates=form.actions?.['step-3']?.outputs?.targetDesigns??[];
+      const model=templates.find(x=>x&&typeof x==='object'&&!Array.isArray(x));
+      const keys=[...new Set(priorCandidates.filter(x=>x&&typeof x==='object'&&!Array.isArray(x))
+       .map(x=>x.tempKey??x.canonicalId??x.candidateKey)
+       .filter(x=>typeof x==='string'&&x.trim()&&!x.startsWith('<')&&!['NONE_IDENTIFIED','NO_CANDIDATE'].includes(x)))];
+      form.actions['step-3'].outputs.targetDesigns=keys.length
+       ?keys.map(candidateKey=>({...structuredClone(model),candidateKey}))
+       :['NONE_IDENTIFIED'];
+      form.automationInputs.expectedPhase5TargetKeys=keys;
+      form.automationInputs.controllerOwnedAutomationInputs=uniq([
+       ...(form.automationInputs.controllerOwnedAutomationInputs??[]),'expectedPhase5TargetKeys']);
+    }
+    // Phase 5 designs its own candidate-specific simulations from reviewed source evidence.
+    // No Phase-0 randomized simulation, telemetry, or Medusa baseline is required.
+    delete form.automationInputs.phase0BaselineSimulation;
+    form.automationInputs.controllerOwnedAutomationInputs=(form.automationInputs.controllerOwnedAutomationInputs??[]).filter(x=>x!=='phase0BaselineSimulation');
+  }
+
+  if(sequence===6){
+    const deployRows=deployAssessmentScaffold(root,campaignPath);
+    const phase5Rows=targetDispositionScaffold(prefillContext.targetDesigns??[],prefillContext.phase5ExecutionResults??{});
+    const targetRows=Array.isArray(phase5Rows)?phase5Rows.filter(x=>typeof x==='object'):[];
+    form.actions['step-1'].outputs.deploymentAssessments=deployRows;
+    form.actions['step-2'].outputs.targetDispositions=targetRows.length?targetRows:['NONE_IDENTIFIED'];
+    delete form.automationInputs.phase0SimulationRunIndexRef;
+    form.automationInputs.controllerOwnedAutomationInputs=(form.automationInputs.controllerOwnedAutomationInputs??[]).filter(x=>x!=='phase0SimulationRunIndexRef');
+    if(form.actions['step-3']){
+      form.actions['step-3'].outputs.typedExecutionLimitations=uniq(machineLimitations(deployRows,targetRows));
+      const schema=readJsonIf(repoFile(root,path.posix.join(authorityRoot,'phases/phase-6/PHASE_06_SCHEMA_v1.json')))??{};
+      form.actions['step-3'].outputs.fullOnlyOmissions=schema.controllerOwnedDefaults?.fullOnlyOmissions??['NONE_IDENTIFIED'];
+      form.automationInputs.controllerOwnedOutputPaths=[
+        'actions.step-3.outputs.typedExecutionLimitations',
+        'actions.step-3.outputs.fullOnlyOmissions'
+      ];
+    }
+  }
+
+  if(sequence===6&&form.actions?.['step-4']&&form.actions?.['step-5']&&
+     detectionPolicyForAuthorityV1({repoRoot:root,authorityRoot,readJsonIfExists:(rel)=>readJsonIf(repoFile(root,rel))})){
+    const b=readJsonIf(repoFile(root,path.posix.join(campaignPath,'work/phase-06/BASELINE_OBLIGATIONS_v1.json')))?.payload??{};
+    const groups=b.testGroups??[],obligations=b.obligations??[];
+    form.actions['step-4'].outputs.baselineTestRecords=groups.length?groups.map(g=>({
+      testGroupId:g.testGroupId,contract:g.contract,obligationIds:g.obligationIds,
+      obligationsDetail:obligations.filter(o=>g.obligationIds.includes(o.obligationId)),
+      requestDirectory:'controller/phase6-tests/'+g.testGroupId+'/',
+      harnessDesign:'<REQUIRED>',dispatchRounds:'<REQUIRED>',requestPaths:'<REQUIRED>',
+      obligationOutcomes:'<REQUIRED>',limitations:'<REQUIRED>',
+      automationOwnedFields:['testGroupId','contract','obligationIds','obligationsDetail','requestDirectory']
+    })):['NONE_IDENTIFIED'];
+    const p4=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json')));
+    const p5=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json')));
+    const candidateSources=[
+      {canonical:p4,phase:4,step:'step-3',field:'candidateRecords'},
+      {canonical:p5,phase:5,step:'step-2',field:'newCandidateRecords'}
+    ];
+    form.automationInputs.phase6OriginalCandidateSourceRoster=
+     candidateSources.flatMap(({canonical,phase,step,field})=>{
+      const records=canonical?.actions?.[step]?.outputs?.[field]??[];
+      return (Array.isArray(records)?records:[]).map((item,index)=>({
+       ...acceptedCanonicalRowReferenceV1({
+        canonical,
+        canonicalArtifactPath:path.posix.join(campaignPath,
+         'derived/phase-'+phase+'/PHASE_'+String(phase).padStart(2,'0')+
+         '_CANONICAL_DATA_v1.json'),
+        selector:'actions.'+step+'.outputs.'+field+'['+index+']'}),
+       originalCandidateKey:item&&typeof item==='object'?
+        item.tempKey??item.candidateKey??item.canonicalId??null:null
+      }));
+     });
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+     ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+     'phase6OriginalCandidateSourceRoster']);
+    const sources=[...(p4?.actions?.['step-3']?.outputs?.candidateRecords??[]),
+      ...(p5?.actions?.['step-2']?.outputs?.newCandidateRecords??[])].filter(x=>x&&typeof x==='object');
+    // This policy-specific Phase-6 branch has a separate lexical scope from
+    // the ordinary Phase-6 prefill above; read the persisted output instead.
+    const candidateTargets=(form.actions?.['step-2']?.outputs?.targetDispositions??[])
+      .filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
+    const status=new Map(candidateTargets.map(x=>[x.candidateKey,x.reproductionStatus]));
+    // Phase 4 assigns discovery keys (X001-*), whereas Phase 5 often assigns
+    // controller target keys (CAND-*). Never interpret an unmatched ID as a
+    // candidate-wide evidence failure. Bind only through a unique exact source
+    // anchor in the recorded Phase-5 reconciliation, not array position.
+    const p5Reconciliation=p5?.actions?.['step-2']?.outputs?.reconciliationRecords??[];
+    const anchorTargets=new Map(),duplicateAnchors=new Set();
+    for(const row of p5Reconciliation){
+      if(!row||typeof row!=='object'||!row.sourceAnchor||!row.subjectKey||!status.has(row.subjectKey))continue;
+      if(anchorTargets.has(row.sourceAnchor))duplicateAnchors.add(row.sourceAnchor);
+      else anchorTargets.set(row.sourceAnchor,row.subjectKey);
+    }
+    for(const anchor of duplicateAnchors)anchorTargets.delete(anchor);
+    const candidateRows=new Map();
+    for(const item of sources){
+      const key=item.tempKey??item.candidateKey;
+      if(!key||candidateRows.has(key))continue;
+      candidateRows.set(key,{
+        candidateKey:key,sourceAnchor:item.sourceAnchor??item.anchors?.[0]??'NONE_IDENTIFIED',
+        phase5Result:status.get(key)??status.get(anchorTargets.get(item.sourceAnchor??item.anchors?.[0]))??'NOT_EXECUTED',
+        requestDirectory:'controller/phase6-tests/CP-'+String(key).replace(/[^A-Za-z0-9._-]/g,'_')+'/',
+        verdict:'<REQUIRED>',harnessDesign:'<REQUIRED>',dispatchRounds:'<REQUIRED>',
+        requestPaths:'<REQUIRED>',ledgerRef:'<REQUIRED>',
+        attackAssertionNames:'<REQUIRED>',controlAssertionNames:'<REQUIRED>',reasoning:'<REQUIRED>',
+        automationOwnedFields:['candidateKey','sourceAnchor','phase5Result','requestDirectory']
+      });
+    }
+    form.actions['step-5'].outputs.candidateProofRecords=candidateRows.size?[...candidateRows.values()]:['NONE_IDENTIFIED'];
+    form.actions['step-5'].outputs.newCandidateRecords=['NONE_IDENTIFIED'];
+  }
+  if(sequence===9&&Array.isArray(prefillContext.remediationDeltaRows)){
+    const rows=prefillContext.remediationDeltaRows;
+    if(rows.length){
+      form.actions['step-1'].outputs.changedSurfaceAssessments=rows.map(r=>({
+        findingKey:r.findingId??'UNRESOLVED',
+        changedSurface:r.changedFilesAndSymbols??'UNRESOLVED',
+        affectedCallersOrState:r.affectedSurfaces??'UNRESOLVED',
+        securitySignificance:'<REQUIRED>',
+        requiredRegressionScope:'<REQUIRED>',
+        newRiskOrNone:'<REQUIRED>',
+        automationOwnedFields:['findingKey','changedSurface','affectedCallersOrState']
+      }));
+      form.actions['step-2'].outputs.remediationDispositions=rows.map(r=>{
+        const findingKey=r.findingId??'UNRESOLVED';
+        return {
+          findingKey,
+          rerunRequestDirectory:path.posix.join('controller/phase9-reruns',safeSegment(findingKey))+'/',
+          rerunEvidenceRefs:['<CONTROLLER_AUTO_COLLECT_AFTER_RERUNS>'],
+          rootCauseFixed:'<REQUIRED>',
+          regressionAssessment:'<REQUIRED>',
+          disposition:'<REQUIRED>',
+          rationale:'<REQUIRED>',
+          newCandidateOrNone:'<REQUIRED>',
+          automationOwnedFields:['findingKey','rerunRequestDirectory']
+        };
+      });
+    }
+  }
+
+  // Any phase exposing obligationDispositions consumes the canonical due-obligation set.
+  for(const action of Object.values(form.actions??{})){
+    if(!action?.outputs||!Object.prototype.hasOwnProperty.call(action.outputs,'obligationDispositions')) continue;
+    const due=dueObligationScaffold({root,campaignPath,sequence});
+    action.outputs.obligationDispositions=due.rows;
+    form.automationInputs.expectedDueObligationIds=due.expectedIds;
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+      'expectedDueObligationIds'
+    ]);
+    break;
+  }
+
+  refreshControllerPrefillDigest(form);
+  return form;
+}
+
+export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
+  const deficiencies=[];
+  const rows=form?.actions?.['step-2']?.outputs?.remediationDispositions??[];
+  for(const row of rows){
+    if(!row||typeof row!=='object'||Array.isArray(row)) continue;
+    const findingKey=String(row.findingKey??'').trim();
+    if(!findingKey){deficiencies.push('Phase 9 remediation disposition is missing findingKey.');continue;}
+    const requestDirRel=typeof row.rerunRequestDirectory==='string'&&row.rerunRequestDirectory
+      ? row.rerunRequestDirectory.replace(/\/+$/,'')
+      : path.posix.join('controller/phase9-reruns',safeSegment(findingKey));
+    const requestDirAbs=repoFile(root,path.posix.join(campaignPath,requestDirRel));
+    const requestFiles=walk(requestDirAbs).filter(file=>file.toLowerCase().endsWith('.json'));
+    const refs=[];
+    let discoveredRequests=0;
+    let incompleteRequests=0;
+    for(const requestFile of requestFiles){
+      const request=readJsonIf(requestFile);
+      const requestId=typeof request?.requestId==='string'?request.requestId.trim():'';
+      if(!requestId) continue;
+      discoveredRequests++;
+      const safeRequest=safeSegment(requestId,'request');
+      const baseRel=path.posix.join('controller/automation',safeRequest);
+      const evidenceRel=path.posix.join(baseRel,'EXECUTION_EVIDENCE_v1.json');
+      const observerRel=path.posix.join(baseRel,'EXECUTION_OBSERVER_RECEIPT_v1.json');
+      const ingestionRel=path.posix.join(baseRel,'ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json');
+      const evidenceAbs=repoFile(root,path.posix.join(campaignPath,evidenceRel));
+      const ingestionAbs=repoFile(root,path.posix.join(campaignPath,ingestionRel));
+      const observerAbs=repoFile(root,path.posix.join(campaignPath,observerRel));
+      const ingestion=readJsonIf(ingestionAbs);
+      const machine=readJsonIf(evidenceAbs);
+      const valid=ingestion?.schemaVersion==='audit-execution-evidence-ingestion-receipt-v1'
+        && ingestion.requestId===requestId
+        && machine?.requestId===requestId
+        && machine?.requestDigest===request.requestDigest
+        && machine?.blocking===false
+        && ['PASS','FINDINGS'].includes(machine.disposition)
+        && (machine?.failedStepCount??0)===0
+        && (machine?.analysisComponentFailureCount??0)===0
+        && (machine?.failedSteps?.length??0)===0
+        && (!machine?.preflight||machine.preflight.status==='PASS');
+      if(!valid){
+        incompleteRequests++;
+        deficiencies.push('Phase 9 finding '+findingKey+' rerun '+requestId+' lacks successful, request-bound, ingested machine execution; a failed or partial rerun is not remediation proof.');
+        continue;
+      }
+      refs.push(evidenceRel,ingestionRel);
+      if(fs.existsSync(observerAbs)) refs.push(observerRel);
+    }
+    if(!discoveredRequests){
+      deficiencies.push('Phase 9 finding '+findingKey+' has no rerun execution request under '+requestDirRel+'. Run the required remediation sub-phase tests before validation.');
+      continue;
+    }
+    const uniqueRefs=uniq(refs);
+    if(!uniqueRefs.length||incompleteRequests>0){
+      if(!uniqueRefs.length)deficiencies.push('Phase 9 finding '+findingKey+' has no complete, successfully ingested rerun evidence. Repair and rerun required machine work before validation.');
+      continue;
+    }
+    row.rerunEvidenceRefs=uniqueRefs;
+    row.automationOwnedFields=uniq([...(row.automationOwnedFields??[]),'findingKey','rerunRequestDirectory','rerunEvidenceRefs']);
+  }
+  form.automationInputs??={};
+  refreshControllerPrefillDigest(form);
+  return deficiencies;
+}
+
+export function phase4CoverageFromForm(form){
+  const expectedSource=new Set(form?.automationInputs?.expectedSourceReviewKeys??[]);
+  const expectedSpec=new Set(form?.automationInputs?.expectedSpecialistReviewKeys??[]);
+  const actualSource=new Set((form?.actions?.['step-1']?.outputs?.sourceReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey));
+  const actualSpec=new Set((form?.actions?.['step-2']?.outputs?.specialistReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey));
+  const missing=[
+    ...[...expectedSource].filter(x=>!actualSource.has(x)),
+    ...[...expectedSpec].filter(x=>!actualSpec.has(x))
+  ];
+  return {
+    coverageSummary:`Required source rows: ${expectedSource.size}; completed/present: ${actualSource.size}. Required specialist rows: ${expectedSpec.size}; completed/present: ${actualSpec.size}.`,
+    unreviewedRequiredSurfaces:missing.length?missing:['NONE_IDENTIFIED']
+  };
+}
+
+export function phase4DiscoveryCoverageV1({summary}){
+  const coverage=summary?.payload?.coverage??{};
+  const contexts=new Set((coverage.rows??[]).map(x=>x.contextId));
+  const records=summary?.payload??{};
+  const contradicted=(coverage.rows??[]).filter(x=>x.reviewStatus==='CONTRADICTED').length;
+  const accepted=(coverage.rows??[]).filter(x=>x.reviewStatus==='ACCEPTED').length;
+  const na=(records.notApplicableClaims??[]).length;
+  const gaps=(records.gaps??[]).length;
+  const gapIds=[...new Set((records.gaps??[]).flatMap(x=>[x.contextId,...(x.contextIds??[])].filter(Boolean)))].sort();
+  if(coverage.functionReviewSummary&&coverage.classEvidenceSummary){
+    const f=coverage.functionReviewSummary,c=coverage.classEvidenceSummary;
+    return {
+      coverageSummary:'Function reviews: '+f.verdictRecorded+' recorded verdicts; '+
+        f.trivialSubstitutions+' qualified literal substitutions; '+f.notRecorded+
+        ' not recorded of '+f.requiredContexts+' source contexts. '+
+        'Explicit security-class assessments: '+c.supported+' SUPPORTED, '+
+        c.concerns+' CONCERN, '+c.unresolved+' UNRESOLVED, '+
+        c.notApplicable+' NOT_APPLICABLE, '+c.notEstablished+
+        ' NOT_ESTABLISHED of '+c.requiredContextClassPairs+' triggered pairs. '+
+        'Executed properties: NOT_REPORTED_BY_PHASE4_SOURCE_REVIEW. '+
+        'Class-specific contradictions: '+contradicted+'; N/A claims: '+na+
+        '; gaps: '+gaps+'; evidence coverage: '+(coverage.label??'PARTIAL_COVERAGE')+
+        ' (not a security-assurance verdict).',
+      functionReviewSummary:structuredClone(f),
+      classEvidenceSummary:structuredClone(c),
+      executedPropertyStatus:'NOT_REPORTED_BY_PHASE4_SOURCE_REVIEW',
+      unreviewedRequiredSurfaces:gapIds.length?gapIds:['NONE_IDENTIFIED']
+    };
+  }
+  return {coverageSummary:'HISTORICAL_CLASS_PROVENANCE_UNVERIFIED; Required contexts: '+
+    contexts.size+'; accepted class statuses (may be synthesized): '+accepted+
+   '; contradicted by attacker: '+contradicted+'; not-applicable claims: '+na+
+   '; gaps: '+gaps+'; label: '+(coverage.label??'PARTIAL_COVERAGE')+'.',
+    unreviewedRequiredSurfaces:gapIds.length?gapIds:['NONE_IDENTIFIED']};
+}
+
+export function materializeValidatedFindings(candidateValidations=[]){
+  const out=[];let n=1;
+  for(const v of candidateValidations??[]){
+    if(v?.findingPromotion!=='PROMOTE_FINDING')continue;
+    out.push({
+      findingTempKey:'AUTO-FIND-'+String(n++).padStart(3,'0'),
+      candidateKey:v.candidateKey,
+      title:v.findingTitleOrNone,
+      rootCause:v.rootCauseOrNone,
+      impact:v.impact,
+      severity:v.severity,
+      proofEvidenceRefs:v.evidenceRefs,
+      controllerMaterialized:true
+    });
+  }
+  return out.length?out:['NONE_IDENTIFIED'];
+}
+
+function valuesByName(form,re){
+  const out=[];
+  for(const action of Object.values(form?.actions??{})){
+    for(const [k,v] of Object.entries(action?.outputs??{})) if(re.test(k)) out.push({key:k,value:v});
+  }
+  return out;
+}
+function compact(v){
+  if(Array.isArray(v))return v.length===1&&typeof v[0]==='string'?v[0]:`${v.length} record(s)`;
+  if(v&&typeof v==='object')return JSON.stringify(v);
+  return String(v??'NONE_IDENTIFIED');
+}
+// Separate a finding's retained prior evidence from the execution state of
+// the CURRENT phase. A missing new harness cannot negate an older proof.
+export function buildCandidateEvidenceContinuityV1({phase5,phase6}){
+ const prior=phase5?.actions?.['step-2']?.outputs?.reconciliationRecords??[];
+ const runs=phase6?.actions?.['step-2']?.outputs?.targetDispositions??[];
+ const proofs=phase6?.actions?.['step-5']?.outputs?.candidateProofRecords??[];
+ const provenanceRows=[
+  ...(phase5?.automationOutputs?.acceptedUnitRecordOrigins?.records??[]),
+  ...(phase6?.automationOutputs?.acceptedUnitRecordOrigins?.records??[])
+ ];
+ const provenanceIndex=new Map();
+ for(const source of provenanceRows){
+  if(!source?.canonicalRecordSelector)continue;
+  const key=source.canonicalRecordSelector;
+  const refs=provenanceIndex.get(key)??[];
+  refs.push(source);provenanceIndex.set(key,refs);
+ }
+ const sourceFor=selector=>{
+  const originals=provenanceIndex.get(selector)??[];
+  return {selector,
+   ...(originals.length===1?{originalAcceptedRecordSource:structuredClone(originals[0])}:
+    {sourceAvailability:originals.length>1?
+      'MULTIPLE_ORIGINAL_SOURCES':'ORIGINAL_SOURCE_UNAVAILABLE'})};
+ };
+ const runRecords=Array.isArray(runs)?runs.map((row,index)=>({
+  row,source:sourceFor('actions.step-2.outputs.targetDispositions['+index+']')
+ })):[],proofRecords=Array.isArray(proofs)?proofs.map((row,index)=>({
+  row,source:sourceFor('actions.step-5.outputs.candidateProofRecords['+index+']')
+ })):[];
+ const anchorCounts=new Map(),proofAnchorCounts=new Map(),
+  runsByKey=new Map(),proofsByKey=new Map(),proofsByAnchor=new Map();
+ for(const x of prior)if(x&&typeof x==='object'&&x.sourceAnchor)
+  anchorCounts.set(x.sourceAnchor,(anchorCounts.get(x.sourceAnchor)??0)+1);
+ const add=(map,key,entry)=>{
+  const list=map.get(key)??[];
+  list.push(entry);map.set(key,list);
+ };
+ for(const entry of runRecords){
+  if(entry.row&&typeof entry.row==='object'&&entry.row.candidateKey)
+   add(runsByKey,String(entry.row.candidateKey),entry);
+ }
+ for(const entry of proofRecords){
+  const row=entry.row;
+  if(!row||typeof row!=='object')continue;
+  if(row.candidateKey)add(proofsByKey,String(row.candidateKey),entry);
+  if(row.sourceAnchor){
+   add(proofsByAnchor,row.sourceAnchor,entry);
+   proofAnchorCounts.set(row.sourceAnchor,
+    (proofAnchorCounts.get(row.sourceAnchor)??0)+1);
+  }
+ }
+ return (Array.isArray(prior)?prior:[]).flatMap((x,index)=>{
+  if(!x||typeof x!=='object'||Array.isArray(x)||!x.subjectKey)return [];
+  const candidateKey=String(x.subjectKey);
+  const matches=runsByKey.get(candidateKey)??[];
+  const exactProofs=proofsByKey.get(candidateKey)??[];
+  const anchored=exactProofs.length?[]:
+   x.sourceAnchor&&anchorCounts.get(x.sourceAnchor)===1&&
+   proofAnchorCounts.get(x.sourceAnchor)===1?
+    proofsByAnchor.get(x.sourceAnchor)??[]:[];
+  const applicableProofs=exactProofs.length?exactProofs:anchored;
+  // Never pick an arbitrary first/last proof among repeated accepted rows.
+  // Preserve all records and make the concise presentation ambiguous.
+  const execution=matches.length===1?matches[0].row:null;
+  const proof=applicableProofs.length===1?applicableProofs[0].row:null;
+  return [{
+   candidateKey,sourceAnchor:x.sourceAnchor??'UNBOUND_SOURCE_ANCHOR',
+   priorEvidenceInterpretation:x.priorConclusion??'NOT_RECORDED',
+   priorEvidenceDisposition:x.disposition??'NOT_RECORDED',
+   priorEvidenceBasis:'REVIEWER_INTERPRETATION_NOT_AUTOMATICALLY_REVALIDATED',
+   currentPhaseExecutionStatus:execution?.reproductionStatus??
+    (matches.length>1?'MULTIPLE_DISTINCT_EXECUTION_RECORDS':'NO_PHASE6_EXECUTION_STATUS'),
+   currentPhaseOracleOutcome:execution?.oracleOutcome??
+    (matches.length>1?'MULTIPLE_DISTINCT_ORACLE_RECORDS':'NO_PHASE6_ORACLE'),
+   phase6ProofVerdict:proof?.verdict??
+    (applicableProofs.length>1?'MULTIPLE_DISTINCT_PROOF_RECORDS':'NOT_LINKED_OR_UNRESOLVED'),
+   phase6ProofCandidateKey:proof?.candidateKey??null,
+   phase6ExecutionRounds:proof?.dispatchRounds??null,
+   residualLimitation:execution?.limitations??
+    x.downstreamValidationNeed??'SEE_ACCEPTED_SOURCE_EVIDENCE',
+   originalPriorRecordSource:sourceFor(
+    'actions.step-2.outputs.reconciliationRecords['+index+']'),
+   exactPhase6ExecutionRecords:matches.map(({row,source})=>({
+    ...source,originalSubmittedRecord:structuredClone(row)})),
+   exactPhase6ProofRecords:applicableProofs.map(({row,source})=>({
+    ...source,originalSubmittedRecord:structuredClone(row)})),
+   evidenceLinkBasis:exactProofs.length?'EXACT_CANDIDATE_KEY':
+    anchored.length?'UNIQUE_RECORDED_SOURCE_ANCHOR':'NO_EXACT_LINK',
+   originalSubjectReferences:{
+    phase5SubjectKey:x.subjectKey,
+    phase6CandidateKey:proof?.candidateKey??null}
+  }];
+ });
+}
+function nestedUnresolvedEvidenceV1(sourceActions,controllerOutputs){
+  const rows=[];
+  for(const r of sourceActions?.['step-2']?.outputs?.targetDispositions??[]){
+    if(!r||typeof r!=='object'||Array.isArray(r))continue;
+    if(['DEFERRED_UNVERIFIED','INCONCLUSIVE','UNRESOLVED','NOT_EXECUTED'].includes(String(r.reproductionStatus??''))||
+       ['DEFERRED_UNVERIFIED','INCONCLUSIVE','UNRESOLVED'].includes(String(r.oracleOutcome??'')))
+      rows.push('Candidate '+r.candidateKey+': current-phase machine status '+r.reproductionStatus+'; earlier evidence remains separately evaluated');
+  }
+  for(const r of sourceActions?.['step-5']?.outputs?.candidateProofRecords??[]){
+    if(!r||typeof r!=='object'||Array.isArray(r))continue;
+    if(['INCONCLUSIVE','NOT_EXECUTED','DEFERRED_UNVERIFIED'].includes(String(r.verdict??''))||
+       ['NOT_EXECUTED','DEFERRED_UNVERIFIED'].includes(String(r.phase5Result??'')))
+      rows.push('Candidate '+r.candidateKey+': current-phase proof '+r.verdict+'; prior finding not automatically disproved');
+  }
+  for(const r of sourceActions?.['step-3']?.outputs?.obligationDispositions??[]){
+    if(r&&typeof r==='object'&&!Array.isArray(r)&&r.disposition==='BLOCKED_CARRIED')
+      rows.push('Open security obligation '+r.obligationId+' (BLOCKED_CARRIED to Phase '+r.carryForwardPhaseOrNone+')');
+  }
+  const gate=controllerOutputs.find(x=>x.key==='phase5MachineExecutionGate')?.value;
+  if(gate?.status==='DEFERRED_UNVERIFIED')rows.push('Phase-5 machine evidence DEFERRED_UNVERIFIED; controller phase PASS is not a machine/security PASS');
+  return [...new Set(rows)];
+}
+export function renderControllerPhaseReport({schema,form,canonical}){
+  const phase=schema.phase;
+  const sourceActions=canonical?.actions??form?.actions??{};
+  const outputs=Object.entries(sourceActions).flatMap(([step,a])=>Object.entries(a?.outputs??{}).map(([key,value])=>({step,key,value})));
+  const controllerOutputs=Object.entries(canonical?.automationOutputs??{}).map(([key,value])=>({step:'controller',key,value}));
+  const allOutputs=[...outputs,...controllerOutputs];
+  const preferred=['liteVerdict','verdictRationale','clientFacingSummary','mergedExecutionConclusions','riskRationale','architectureTrustModel','findingDispositionSynthesis','residualRiskAssessment'];
+  const executive=preferred.map(k=>allOutputs.find(x=>x.key===k)?.value).find(v=>v!==undefined)??`Phase ${phase} structured substantive work completed and accepted for controller validation.`;
+  const material=allOutputs.filter(x=>!/(limitation|unresolved|ambigu|uncert)/i.test(x.key)).map(x=>`- ${x.step} / ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
+  const limitationRows=[
+    ...valuesByName({actions:sourceActions},/(limitation|ambigu|uncert)/i),
+    ...controllerOutputs.filter(x=>/(limitation|ambigu|uncert)/i.test(x.key))
+  ];
+  const unresolvedRows=[
+    ...valuesByName({actions:sourceActions},/unresolved/i),
+    ...controllerOutputs.filter(x=>/unresolved/i.test(x.key))
+  ];
+  const limitations=limitationRows.map(x=>`- ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
+  const nestedUnresolved=nestedUnresolvedEvidenceV1(sourceActions,controllerOutputs);
+  const unresolved=[...unresolvedRows.map(x=>'- '+x.key+': '+compact(x.value)),
+    ...nestedUnresolved.map(x=>'- '+x)].join('\n')||'- NONE_IDENTIFIED';
+  const continuity=canonical?.automationOutputs?.candidateEvidenceContinuity??[];
+  const reconcile=sourceActions?.['step-2']?.outputs?.reconciliationRecords??[];
+  const lines=Array.isArray(continuity)&&continuity.length
+    ?continuity.map(x=>'- '+x.candidateKey+': PRIOR EVIDENCE — '+x.priorEvidenceInterpretation+
+        ' | CURRENT PHASE — '+x.currentPhaseExecutionStatus+
+        ' | PHASE-6 PROOF — '+x.phase6ProofVerdict+' | LIMITATION — '+x.residualLimitation)
+    :reconcile.filter(x=>x&&typeof x==='object'&&x.subjectKey)
+      .map(x=>'- '+x.subjectKey+': PRIOR EVIDENCE — '+String(x.priorConclusion??'NOT_RECORDED')+
+        ' | CURRENT-PHASE DISPOSITION — '+String(x.disposition??'NOT_RECORDED'));
+  const continuitySection=lines.length?'\n## Prior Evidence vs New Execution\n\n'+lines.join('\n')+'\n':'';
+  const discoveryRef=form?.automationInputs?.discoveryEvidenceContinuity??null;
+  const discoveryDims=discoveryRef?.evidenceDimensions??{};
+  // Phase 10 reports three independent evidence categories without editing
+  // the accepted AI findings or inferring a class or machine verdict.
+  const evidenceSection=Number(phase)===10?'\n## Evidence Categories and Original Source\n\n'+
+    '- Function review: '+(discoveryDims.functionReview?compact(discoveryDims.functionReview):
+      'SOURCE_UNAVAILABLE_OR_HISTORICAL_PROVENANCE_UNVERIFIED')+'\n'+
+    '- Explicit security-class assessments: '+(discoveryDims.classAssessment?
+      compact(discoveryDims.classAssessment):'NOT_INDEPENDENTLY_ESTABLISHED_BY_THIS_REPORT')+'\n'+
+    '- Executed properties: consult the separate context/class coverage matrix and '+
+      'actual qualified machine assertions; bounded PASS never establishes universal safety.\n'+
+    '- Original accepted discovery summary: '+String(discoveryRef?.summaryPath??'SOURCE_UNAVAILABLE')+
+      '; SHA-256: '+String(discoveryRef?.summarySha256??'NOT_AVAILABLE')+'\n'+
+    '- Overall CORRECT/DEFECT/UNRESOLVED verdicts are not class-specific assertions; '+
+      'coverage labels are evidence bookkeeping, not security assurance.\n':'';
+  return `# Phase ${phase} Final Report
+
+> **CONTROLLER-GENERATED:** Deterministically rendered from the accepted schema-governed work form and controller-owned outputs. No hashes, handoff bookkeeping, or predecessor restatement is authored by the reviewer.
+
+## Executive Conclusion
+
+${text(executive)}
+
+## Material Results
+
+${material}
+${continuitySection}
+${evidenceSection}
+## Limitations
+
+${limitations}
+
+## Unresolved Substantive Questions
+
+${unresolved}
+`;
+}
+
+export function buildControllerPacket({directory,assignment,existing,now}){
+  return {
+    schemaVersion:'curveyield-lite-phase-work-packet-v1',
+    campaignId:directory.campaignId,
+    phaseSequence:assignment.phaseSequence,
+    status:'SUBMITTED',
+    workFormPath:assignment.workFormPath,
+    finalReportPath:assignment.finalReportPath??null,
+    submissionAttempt:Math.max(0,Number(existing?.submissionAttempt??0))+1,
+    submittedAt:now,
+    controllerGenerated:true
+  };
+}
+
+export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=null){
+  const deficiencies=[];
+  const formDigest=form?.automationInputs?.controllerPrefillDigestSha256??null;
+  const expectedDigest=assignmentExpectedDigest??formDigest;
+  const ownedProjection=controllerOwnedProjection(form);
+  if(form?.automationInputs&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
+  else if(ownedProjection.length&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
+  if(assignmentExpectedDigest&&formDigest!==assignmentExpectedDigest) deficiencies.push('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.');
+  if(expectedDigest&&controllerOwnedDigest(form)!==expectedDigest) deficiencies.push('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
+  if(sequence===4 && Object.hasOwn(form?.automationInputs??{},'expectedDiscoveryRecordKeys')){
+    const expected=form.automationInputs.expectedDiscoveryRecordKeys??[];
+    const rows=form?.actions?.['step-1']?.outputs?.discoveryReconciliationRecords??[];
+    if(rows.some(x=>x==='<PENDING_DISCOVERY>'))deficiencies.push('Phase 4 discovery summary is still pending.');
+    const actual=rows.filter(x=>x&&typeof x==='object').map(x=>x.recordKey);
+    if(JSON.stringify([...actual].sort())!==JSON.stringify([...expected].sort())||new Set(actual).size!==actual.length)
+      deficiencies.push('Phase 4 discovery reconciliation keys must exactly match controller-prefilled keys.');
+    const candidates=new Set((form?.actions?.['step-3']?.outputs?.candidateRecords??[]).filter(x=>x&&typeof x==='object').map(x=>x.tempKey));
+    for(const row of rows.filter(x=>x&&typeof x==='object')){
+      if(!['CANDIDATE_CREATED','RESOLVED_NO_ISSUE','COVERAGE_GAP_ACCEPTED'].includes(row.disposition))
+        deficiencies.push('Discovery '+row.recordKey+' requires a valid disposition.');
+      if(row.disposition==='CANDIDATE_CREATED'&&!candidates.has(row.candidateTempKeyOrNone))
+        deficiencies.push('Discovery '+row.recordKey+' candidate must be present in Step 3.');
+      if(row.disposition==='RESOLVED_NO_ISSUE'&&!/\.(sol|vy):L\d+/.test([row.rationale,row.reconciliation].filter(x=>typeof x==='string').join(' ')))
+        deficiencies.push('Discovery '+row.recordKey+' resolution requires a source anchor.');
+      if(row.disposition==='RESOLVED_NO_ISSUE'&&['ATTACK_FINDING','ATTACK_CONTRADICTS_REVIEW'].includes(row.origin)&&
+        !/block|guard|revert|check|restrict|prevent/i.test(row.rationale??''))
+        deficiencies.push('Discovery '+row.recordKey+' must name the blocking control.');
+      if(row.disposition==='COVERAGE_GAP_ACCEPTED'&&row.origin!=='COVERAGE_GAP')
+        deficiencies.push('Discovery '+row.recordKey+' cannot accept a non-gap as a coverage gap.');
+    }
+  }
+  if(sequence===4 && !Object.hasOwn(form?.automationInputs??{},'expectedDiscoveryRecordKeys')){
+    const c=phase4CoverageFromForm(form);
+    if(!(c.unreviewedRequiredSurfaces.length===1&&c.unreviewedRequiredSurfaces[0]==='NONE_IDENTIFIED')) deficiencies.push('Phase 4 required review scaffolds were removed or omitted: '+c.unreviewedRequiredSurfaces.join(', '));
+  }
+  if(sequence===5){
+    const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
+    for(const target of targets){
+      if(!target||typeof target!=='object'||Array.isArray(target)) continue;
+      const key=String(target.candidateKey??'UNRESOLVED');
+      const method=String(target.executionMethod??'').toUpperCase();
+      const type=String(target.reproductionType??'').toUpperCase();
+      const observation=target.expectedMachineObservation;
+      if(method==='NOT_APPLICABLE'){
+        if(type!=='NOT_APPLICABLE') deficiencies.push('Phase 5 target '+key+' executionMethod NOT_APPLICABLE requires reproductionType NOT_APPLICABLE.');
+        if(observation!=='NOT_APPLICABLE') deficiencies.push('Phase 5 target '+key+' executionMethod NOT_APPLICABLE requires expectedMachineObservation=NOT_APPLICABLE.');
+      }else if(method==='V7_REQUEST'){
+        if(type==='NOT_APPLICABLE'||!['FOUNDRY_TEST','MEDUSA_PROPERTY','ANVIL_WORKFLOW'].includes(type)) deficiencies.push('Phase 5 target '+key+' V7_REQUEST requires an executable reproductionType.');
+        if(!observation||typeof observation!=='object'||Array.isArray(observation)) deficiencies.push('Phase 5 target '+key+' V7_REQUEST requires expectedMachineObservation as a structured object.');
+      }
+    }
+  }
+  if(Array.isArray(form?.automationInputs?.expectedDueObligationIds)){
+    const expected=[...form.automationInputs.expectedDueObligationIds].sort();
+    const actual=[];
+    for(const action of Object.values(form?.actions??{})){
+      const rows=action?.outputs?.obligationDispositions;
+      if(!Array.isArray(rows))continue;
+      for(const row of rows) if(row&&typeof row==='object'&&!Array.isArray(row)&&row.obligationId) actual.push(String(row.obligationId));
+    }
+    actual.sort();
+    if(JSON.stringify(actual)!==JSON.stringify(expected)) deficiencies.push('Due-obligation disposition rows do not exactly match controller-prefilled obligations. Expected '+expected.join(', ')+'; got '+actual.join(', ')+'.');
+    for(const action of Object.values(form?.actions??{})){
+      for(const row of action?.outputs?.obligationDispositions??[]){
+        if(!row||typeof row!=='object'||Array.isArray(row))continue;
+        const d=String(row.disposition??'');
+        const carry=String(row.carryForwardPhaseOrNone??'');
+        if(['CARRY_FORWARD','BLOCKED_CARRIED'].includes(d)&&(!carry||carry==='NONE_IDENTIFIED'||Number(carry)<=Number(sequence))) deficiencies.push('Obligation '+String(row.obligationId??'UNRESOLVED')+' requires a later carryForwardPhaseOrNone for disposition '+d+'.');
+        if(['SATISFIED','NOT_APPLICABLE'].includes(d)&&carry!=='NONE_IDENTIFIED') deficiencies.push('Obligation '+String(row.obligationId??'UNRESOLVED')+' must use carryForwardPhaseOrNone=NONE_IDENTIFIED for terminal disposition '+d+'.');
+      }
+    }
+  }
+  return deficiencies;
+}
+
+export function resolveTargetExecutionRequestRef({root,campaignPath,target}){
+  if(String(target?.executionMethod??'').toUpperCase()==='NOT_APPLICABLE')return null;
+  const rawExplicit=typeof target?.executionRequestRef==='string'&&!target.executionRequestRef.startsWith('<')
+    ? target.executionRequestRef
+    : null;
+  const explicitRef=rawExplicit
+    ? (rawExplicit.startsWith(campaignPath+'/')?rawExplicit:path.posix.join(campaignPath,rawExplicit))
+    : null;
+  const safe=String(target?.candidateKey??'target').replace(/[^A-Za-z0-9._-]+/g,'_');
+  const candidates=[
+    explicitRef,
+    path.posix.join(campaignPath,'work/phase-05/execution-requests',safe+'.json'),
+    path.posix.join(campaignPath,'evidence/phase5-target-requests',safe+'.json')
+  ].filter(Boolean);
+  for(const repoRel of candidates){
+    if(repoRel.startsWith('/')||repoRel.split('/').includes('..')) continue;
+    if(fs.existsSync(repoFile(root,repoRel))) return path.posix.relative(campaignPath,repoRel);
+  }
+  return null;
+}
+).test(name));
+   }catch{}
+   for(const name of names.sort()){
+    const rel=path.posix.join(campaignPath,'receipts',name);
+    const receipt=readJsonIf(repoFile(root,rel));
+    const entry=receipt?.evidence?.find(x=>
+     x?.role==='PHASE_CANONICAL_DATA'&&x.path===selector);
+    if(receipt?.schemaVersion==='curveyield-lite-phase-receipt-v1'&&
+       receipt?.phase?.sequence===phase&&
+       ['SEALED','COMPLETE'].includes(receipt.phase.status)&&
+       receipt?.campaign?.workspacePath===campaignPath&&
+       receipt?.campaign?.campaignId===canonical.campaignId&&
+       entry?.sha256===sha256){
+     receiptPath=rel;receiptSha256=entry.sha256;
+    }
+   }
+   availability=receiptPath?'ACCEPTED_RECEIPT_BOUND':'PRESENT_NOT_RECEIPT_VERIFIED';
+  }
   const queued=canonical?.automationOutputs?.acceptedUnitRecordOrigins;
   const direct=canonical?.automationOutputs?.directPhaseRecordOrigins;
   references.push({
    phaseSequence:phase,canonicalArtifactPath:canonicalPath,
-   canonicalSha256:sha256,availability,
+   canonicalSha256:sha256,availability,acceptedReceiptPath:receiptPath,
+   acceptedReceiptCanonicalSha256:receiptSha256,
    completeActionsSelector:'actions',
    recordOriginRosterSelector:queued?
     'automationOutputs.acceptedUnitRecordOrigins':direct?
