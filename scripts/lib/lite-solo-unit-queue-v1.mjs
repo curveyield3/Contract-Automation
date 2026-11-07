@@ -2037,7 +2037,7 @@ export function collectExplicitQuestionOutputLinksV1({
   root,campaignPath,directory,phase});
  const output={schemaVersion:'curveyield-explicit-question-output-links-v1',
   phaseSequence:phase,associationOrigin:'AI_EXPLICIT_REFERENCE',
-  associations:[],unresolvedReferences:[],
+  associations:[],nonCanonicalEvidenceAssociations:[],unresolvedReferences:[],
   unpromotedQuestions:[],sourceAvailability:histories.availability,
   questionSourcesSelector:'automationOutputs.questionAnswerSources',
   sourceMeaning:'NO_SECURITY_INFERENCE'};
@@ -2059,7 +2059,8 @@ export function collectExplicitQuestionOutputLinksV1({
   }
  }
  const linked=new Set();
- const appendLink=({ref,record,selector,ownerPhase,ownerUnit,outputOrigin})=>{
+ const appendLink=({ref,record,selector,ownerPhase,ownerUnit,outputOrigin,
+  nonCanonical=false})=>{
   if(!ref)return;
   let question=ref.authored;
   if(question?.sourceReferenceKind==='EXACT_CHECKPOINT_RECORD_POINTER'){
@@ -2128,16 +2129,23 @@ export function collectExplicitQuestionOutputLinksV1({
      'REFERENCED_CHECKPOINT_REVISION_UNAVAILABLE'});
    return;
   }
-  linked.add(identity);output.associations.push(association);
+  if(nonCanonical)output.nonCanonicalEvidenceAssociations.push({
+    ...association,outputRecord:{
+     ...association.outputRecord,formalCanonicalOutput:false}
+   });
+  else{
+   linked.add(identity);output.associations.push(association);
+  }
  };
  const register=({value,selector,ownerPhase=phase,ownerUnit=null,
-  recordKey=null,origin=null,extraRefs=[]})=>{
+  recordKey=null,origin=null,extraRefs=[],nonCanonical=false})=>{
   const record={recordKey};
   for(const ref of [
    ...explicitQuestionRefsInRecordV1(value,{
     phase:ownerPhase,unitId:ownerUnit,selector}),
    ...extraRefs
-  ])appendLink({ref,record,selector,ownerPhase,ownerUnit,outputOrigin:origin});
+  ])appendLink({ref,record,selector,ownerPhase,ownerUnit,
+   outputOrigin:origin,nonCanonical});
  };
  // The canonical row index and accepted record-source roster were assembled
  // mechanically before this collector. Do not use prose/title matching.
@@ -2192,6 +2200,63 @@ export function collectExplicitQuestionOutputLinksV1({
      originalExplicitReference:structuredClone(
       accepted.submission.unmappedQuestionRecordLinks),
      status:'UNMAPPED_AI_QUESTION_LINK_METADATA'});
+   if(u.kind==='ATTACK'&&
+      Array.isArray(accepted.sourceProvenance?.unmappedAttackPathRefs)&&
+      accepted.sourceProvenance.unmappedAttackPathRefs.length){
+    // Unissued-flow ATTACK evidence can be absent from the compiled
+    // attackPaths array. Keep its authored question relationships on the
+    // ORIGINAL, hash-verified Worker source, without promoting it into a
+    // canonical finding or falsely assigning an issued flow.
+    const originalRef=accepted.sourceProvenance.originalWorkerAttempt;
+    let original=null,sourceDiagnostic=null;
+    try{
+     if(originalRef?.availability!=='AVAILABLE'||
+        typeof originalRef.path!=='string'||!originalRef.path.startsWith(
+         unitBase(campaignPath,phase,u.unitId)+'/submissions/')||
+        !/^[a-f0-9]{64}$/.test(String(originalRef.sha256??'')))
+      throw Error('original unissued-flow ATTACK source unavailable');
+     const raw=fs.readFileSync(repoFile(root,originalRef.path));
+     if(hex(raw)!==originalRef.sha256)
+      throw Error('original unissued-flow ATTACK source digest mismatch');
+     original=JSON.parse(raw.toString('utf8'));
+    }catch(error){sourceDiagnostic=String(error?.message??error);}
+    for(const unmapped of accepted.sourceProvenance.unmappedAttackPathRefs){
+     const selector=unmapped?.sourceSelector;
+     const match=typeof selector==='string'?
+      selector.match(/^extraRecords\\.attackPaths\\[([0-9]+)\\]$/):null;
+     if(!match)continue; // Other original ATTACK rows are handled below.
+     const sourceRow=original?.extraRecords?.attackPaths?.[Number(match[1])];
+     if(!sourceRow||typeof sourceRow!=='object'||Array.isArray(sourceRow)){
+      output.unresolvedReferences.push({
+       unitId:u.unitId,originalQuestionReferenceSelector:selector,
+       originalOutputSource:originalRef??null,
+       status:'UNMAPPED_ATTACK_EVIDENCE_NOT_RETRIEVABLE',
+       diagnostic:sourceDiagnostic});continue;
+     }
+     const refs=[];
+     for(const [k,link] of (originalLinkRows.get(u.unitId)??[]).entries()){
+      if(link?.outputSelector!==selector&&
+         link?.acceptedOutputSelector!==selector)continue;
+      if(!Array.isArray(link.questionRefs))continue;
+      consumedLinkRows.add(JSON.stringify([u.unitId,k]));
+      for(const [j,ref] of link.questionRefs.entries())
+       refs.push({authored:typedQuestionReferenceV1(ref,{phase,unitId:u.unitId}),
+        originalExplicitReference:structuredClone(ref),
+        sourceSelector:'submission.questionRecordLinks['+k+'].questionRefs['+j+']'});
+     }
+     register({value:sourceRow,
+      selector:'originalWorkerAttempt.'+selector,
+      ownerUnit:u.unitId,recordKey:sourceRow.pathId??null,
+      nonCanonical:true,
+      origin:{acceptedPath:state.acceptedPath,
+       acceptedSubmissionSha256:accepted.submissionSha256,
+       originalWorkerAttempt:{
+        path:originalRef.path,sha256:originalRef.sha256,
+        sourceSelector:selector},
+       mappingStatus:unmapped.mappingStatus??'UNMAPPED_ATTACK_PATH'},
+      extraRefs:refs});
+    }
+   }
    if(!['FLOW','ATTACK'].includes(u.kind))continue;
    for(const [collection,rows] of Object.entries(accepted.submission??{})){
     if(!Array.isArray(rows)||!['rows','flowNotes','integrationAnswers',
@@ -2272,6 +2337,8 @@ export function collectExplicitQuestionOutputLinksV1({
   });
  }
  output.associationCount=output.associations.length;
+ output.nonCanonicalEvidenceAssociationCount=
+  output.nonCanonicalEvidenceAssociations.length;
  output.unpromotedQuestionCount=output.unpromotedQuestions.length;
  output.availability='COLLECTED_NONBLOCKING';
  return output;
