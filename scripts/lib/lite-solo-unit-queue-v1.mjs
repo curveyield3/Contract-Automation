@@ -1863,7 +1863,7 @@ function explicitQuestionRefsInRecordV1(value,{phase,unitId,selector}){
       originalExplicitReference:structuredClone(ref)});
      else if(typeof ref==='string'&&(
        /^Q-[0-9]+$/.test(ref.trim())||
-       /\\/Q-[0-9]+/.test(ref)||
+       /\/Q-[0-9]+/.test(ref)||
        key.toLowerCase().includes('question'))||
        isObject(ref)&&Object.hasOwn(ref,'questionId'))
       refs.push({authored:null,sourceSelector,
