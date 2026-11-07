@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v49, Step 7 exact overflow disposition.
+// Lite-Solo MiMo / Worker transport bridge v50, Step 7 exact overflow disposition.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2458,8 +2458,9 @@ async function runTechnicalQuestionTransportV1(){
 // Step 6: the existing controller-owned answerTransport and answerRouting
 // select destinations; MiMo exclusively supplies typed security conclusions.
 // The runner never compiles a canonical record or creates queue unit IDs.
-async function runControllerIssuedFieldAnswersV1(ready){
- const raw=await workerCall({operation:'field_contract',unitId:ready.unitId,lease:ready.lease});
+async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
+ const raw=await workerCall({operation:'field_contract',unitId:ready.unitId,lease:ready.lease,
+  ...(remediation?{remediation:true}:{})});
  let contract;try{contract=JSON.parse(raw);}catch{throw Error('Field contract is not JSON');}
  if(contract.status==='AI_FIELD_TRANSPORT_AWAITING_INVESTIGATION_COMPLETION'){
   console.log(JSON.stringify({status:'MIMO_FIELD_ANSWERS_AWAIT_INVESTIGATION',unitId:ready.unitId,
@@ -2519,6 +2520,8 @@ async function runControllerIssuedFieldAnswersV1(ready){
   recentOriginalAnswers:typed?await miRecentOriginalAnswersV1(issued):[],
   originalDirectQuestion:contract.originalTechnicalQuestion??null,
   directOriginalTechnicalAnswer:contract.directOriginalTechnicalAnswer??null,
+  originalRemediationContext:remediation?{issuedForm:contract.remediationForm??null,
+   previousWork:contract.revisionContext??null}:null,
   evidenceAccess:{
    source:{admittedSourceEvidenceRequest:{kind:'INDEX',start:0}},
    packet:{packetEvidenceRequest:{kind:'FILE',path:packet?.initial?.[0]?.path??'',offset:0}},
@@ -2560,7 +2563,7 @@ async function runControllerIssuedFieldAnswersV1(ready){
  }
  let submission;
  if(!typed){
-  const shard=await ask({task:'AUTHOR_COMPLETE_ORIGINAL_DIRECT_SHARD',
+  const shard=await ask({task:remediation?'AUTHOR_SOURCE_BOUND_REVISED_DIRECT_SHARD':'AUTHOR_COMPLETE_ORIGINAL_DIRECT_SHARD',
    originalQuestion:contract.originalTechnicalQuestion,
    priorOriginalTechnicalAnswer:contract.directOriginalTechnicalAnswer??null,
    originalControllerDescriptor:contract.descriptor,
@@ -2576,7 +2579,7 @@ async function runControllerIssuedFieldAnswersV1(ready){
    const field=transport.fields[i];
    if(typeof field?.bindingId!=='string'||field.source!=='AI_TYPED_LITERAL')
     throw Error('Missing original GitHub AI field-binding identity');
-   const value=await ask({task:'ANSWER_ONE_EXACT_GITHUB_BOUND_FIELD',
+   const value=await ask({task:remediation?'AUTHOR_SOURCE_BOUND_REVISED_FIELD':'ANSWER_ONE_EXACT_GITHUB_BOUND_FIELD',
     fieldIndex:i+1,fieldCount:transport.fields.length,
     controllerIssuedBinding:field,originalBindingId:field.bindingId,
     expectedJsonType:field.expectedJsonType,
@@ -2656,7 +2659,7 @@ async function runControllerIssuedFieldAnswersV1(ready){
   }
  }
  const submitted=await workerCall({operation:'submit_field_answers',unitId:ready.unitId,
-  lease:ready.lease,submission});
+  lease:ready.lease,submission,...(remediation?{remediation:true}:{})});
  let result;try{result=JSON.parse(submitted);}catch{
   throw Error('Source-bound field submission response invalid');
  }
@@ -2671,12 +2674,14 @@ async function runControllerIssuedFieldAnswersV1(ready){
    String(disposition.privateR2Key||'private source')+', SHA256='+
    String(disposition.originalSha256||'unknown')+
    '; original unit remains leased; MiMo must author a bounded chunk before controller-issued continuation');
- if(result.originalWorkerStatus!=='CONTROLLER_VALIDATION_QUEUED'&&
-    result.originalWorkerStatus!=='REWORK_REQUIRED')
-  throw Error('ORIGINAL_FIELD_SUBMISSION_NOT_QUEUED: '+
-   String(result.originalWorkerStatus||'UNKNOWN')+
-   ', original submission SHA256='+originalSubmissionSha256);
- if(result.originalWorkerStatus==='REWORK_REQUIRED'||
+ const recordedStageStatuses=new Set(['CONTROLLER_VALIDATION_QUEUED','ACTIVE',
+   'REVIEW_SUBSTEP_READY','REMEDIATION_WORK_UPDATED','SUBSTEP_SUBMISSION_PENDING']);
+  if(!recordedStageStatuses.has(result.originalWorkerStatus)&&
+     result.originalWorkerStatus!=='REWORK_REQUIRED')
+   throw Error('ORIGINAL_FIELD_SUBMISSION_NOT_RECORDED: '+
+    String(result.originalWorkerStatus||'UNKNOWN')+
+    ', original submission SHA256='+originalSubmissionSha256);
+  if(result.originalWorkerStatus==='REWORK_REQUIRED'||
     Array.isArray(disposition.fieldErrors)&&disposition.fieldErrors.length)
   throw Error('ORIGINAL_CONTROLLER_FIELD_REWORK_REQUIRED: '+
    JSON.stringify(disposition.fieldErrors??disposition).slice(0,3000));
@@ -2689,9 +2694,12 @@ async function runControllerIssuedFieldAnswersV1(ready){
   appendContinuationRequested:submission.appendContinuation??null,
   originalSubmissionSha256,
   workerDisposition:result.originalWorkerStatus,
+  substepWorkStagedNotYetControllerAccepted:result.originalWorkerStatus!=='CONTROLLER_VALIDATION_QUEUED',
   originalWorkerDisposition:disposition,
   controllerAccepted:result.controllerAccepted===true,
   nextOwner:'EXISTING_CONTROLLER_VALIDATION_AND_STEP_LIFECYCLE'}));
+ return {status:result.originalWorkerStatus,unitId:ready.unitId,lease:ready.lease,
+  originalSubmissionSha256,controllerAccepted:result.controllerAccepted===true};
 }
 
 const negotiatedText=await workerCall({operation:'protocol'});
