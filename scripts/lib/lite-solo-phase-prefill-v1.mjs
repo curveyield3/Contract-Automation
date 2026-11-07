@@ -768,7 +768,10 @@ export function applyObligationDispositionsToLedger({ledger,canonical,sequence,c
       continue;
     }
     obligation.acceptedDispositionSources??=[];
-    const sourceId=canonicalRel+'#'+selector;
+    const sourceDigest=originalAcceptedRecordSource?.acceptedSubmissionSha256??
+      originalAcceptedRecordSource?.sourceShardSha256??null;
+    const sourceId=canonicalRel+'#'+selector+'#'+
+      (sourceDigest??'SOURCE_DIGEST_NOT_AVAILABLE');
     if(!obligation.acceptedDispositionSources.some(x=>x.sourceId===sourceId))
       obligation.acceptedDispositionSources.push({sourceId,
         canonicalArtifactPath:canonicalRel,originalSourceSelector:selector,
