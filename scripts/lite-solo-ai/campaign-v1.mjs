@@ -739,17 +739,17 @@ async function questionHistoryEvidenceReadV1(history,request){
    const ref=checkpoint.expectedReference??{};
    const loaded=await historyJsonV1(checkpoint.path).catch(()=>null);
    if(!loaded||loaded.file.sha256!==ref.sha256||
-      loaded.data.campaignId!==index.campaignId||
-      loaded.data.campaignGenerationId!==index.campaignGenerationId||
-      loaded.data.sourceSha256!==index.sourceSha256||
-      loaded.data.authorityDigest!==index.authorityDigest||
-      loaded.data.phaseSequence!==index.phaseSequence||
-      loaded.data.unitId!==index.unitId||
-      loaded.data.phaseEpoch!==index.phaseEpoch||
-      loaded.data.packetSha256!==index.packetSha256||
-      (ref.revision!==undefined&&loaded.data.revision!==ref.revision)||
-      (ref.requestId!==undefined&&loaded.data.requestId!==ref.requestId)||
-      (ref.requestDigest!==undefined&&loaded.data.requestDigest!==ref.requestDigest)){
+      loaded.data?.campaignId!==index.campaignId||
+      loaded.data?.campaignGenerationId!==index.campaignGenerationId||
+      loaded.data?.sourceSha256!==index.sourceSha256||
+      loaded.data?.authorityDigest!==index.authorityDigest||
+      loaded.data?.phaseSequence!==index.phaseSequence||
+      loaded.data?.unitId!==index.unitId||
+      loaded.data?.phaseEpoch!==index.phaseEpoch||
+      loaded.data?.packetSha256!==index.packetSha256||
+      (ref.revision!==undefined&&loaded.data?.revision!==ref.revision)||
+      (ref.requestId!==undefined&&loaded.data?.requestId!==ref.requestId)||
+      (ref.requestDigest!==undefined&&loaded.data?.requestDigest!==ref.requestDigest)){
     return {...base,...sourceIdentity,availability:'CHECKPOINT_NOT_AVAILABLE_OR_IDENTITY_MISMATCH',
      checkpointIndex:cpIndex,checkpointPath:checkpoint.path,
      expectedCheckpointSha256:ref.sha256};
@@ -798,7 +798,7 @@ function mergeAcceptedCanonicalQuestionRostersV1(questionHistory,canonicalHistor
  const originals=[...(canonicalHistory?.sources?.values()??[])]
   .filter(s=>[4,5,6].includes(s.phaseSequence));
  const refs=originals.flatMap(source=>(source.canonical?.automationOutputs
-   ?.questionHistoryRoster?.histories??[]).map(ref=>({source,ref})));
+   ?.questionHistoryRoster?.histories??[]).map((ref,index)=>({source,ref,index})));
  if(!refs.length)return questionHistory;
  const manifest=canonicalHistory.manifest;
  const result=questionHistory??{
@@ -813,7 +813,7 @@ function mergeAcceptedCanonicalQuestionRostersV1(questionHistory,canonicalHistor
  const known=new Map(result.histories.map(row=>[
   row.historyReferenceKey??[
    row.phaseSequence,row.unitId,row.indexSha256,row.phaseEpoch].join(':'),row]));
- for(const {source,ref} of refs){
+ for(const {source,ref,index} of refs){
   if(!ref||typeof ref.unitId!=='string'||!ref.unitId.trim()){
    result.unavailable.push({availability:'HISTORICAL_UNIT_REFERENCE_MISSING',
     canonicalReferenceKey:source.referenceKey,originalReference:structuredClone(ref)});
@@ -831,7 +831,7 @@ function mergeAcceptedCanonicalQuestionRostersV1(questionHistory,canonicalHistor
   const key=[source.phaseSequence,ref.unitId,indexSha,phaseEpoch].join(':');
   const sourceLink={canonicalReferenceKey:source.referenceKey,
    acceptedPhaseRevision:source.acceptedRevision,
-   sourceSelector:'/automationOutputs/questionHistoryRoster/histories',
+   sourceSelector:'/automationOutputs/questionHistoryRoster/histories/'+index,
    committedCanonicalPath:source.committedCanonicalPath,
    expectedCanonicalSha256:source.actualCanonicalSha256};
   const existing=known.get(key);
@@ -844,7 +844,7 @@ function mergeAcceptedCanonicalQuestionRostersV1(questionHistory,canonicalHistor
   }
   const record={historyReferenceKey:key,
    phaseSequence:source.phaseSequence,unitId:ref.unitId,
-   indexPath:ref.indexPath??null,indexSha256:indexSha,
+   indexPath:ref.indexPath??ref.previousCommittedIndex?.indexPath??null,indexSha256:indexSha,
    indexRevision:ref.revision??ref.previousCommittedIndex?.revision??null,
    phaseEpoch,packetSha256:ref.packetSha256??null,
    referenceOrigin:'HISTORICAL_ACCEPTED_CANONICAL_REVISION',
