@@ -185,6 +185,158 @@ export function collectAcceptedQuestionHistoryRefsV1({
  roster.availability='COLLECTED_NONBLOCKING';
  return roster;
 }
+// Exact, mechanically verified question sources. The history index and each
+// checkpoint are immutable evidence; questions are NOT security outcomes.
+// A later phase may refer to any earlier accepted question, including one
+// that never contributed to a formal candidate or obligation.
+export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,directory,phase}){
+ const out={schemaVersion:'curveyield-accepted-question-answer-sources-v1',
+  phaseSequence:phase,campaignId:directory.campaignId,
+  campaignGenerationId:directory.campaignGenerationId,
+  questions:[],unavailable:[],histories:[],
+  sourceMeaning:'QUESTION_HISTORY_NOT_SECURITY_DISPOSITION'};
+ for(const sourcePhase of [4,5,6]){
+  if(sourcePhase>phase)continue;
+  let refs;
+  try{
+   refs=collectAcceptedQuestionHistoryRefsV1({
+    root,campaignPath,directory,phase:sourcePhase});
+  }catch(error){
+   out.unavailable.push({phaseSequence:sourcePhase,
+    reason:'QUESTION_HISTORY_ROSTER_UNAVAILABLE',
+    diagnostic:String(error?.message??error)});continue;
+  }
+  if(refs.availability!=='COLLECTED_NONBLOCKING')
+   out.unavailable.push({phaseSequence:sourcePhase,
+    reason:refs.availability??'QUESTION_HISTORY_UNAVAILABLE'});
+  let plan=null,queue=null;
+  try{
+   plan=readPlan(root,campaignPath,sourcePhase);
+   queue=read(root,queueRel(campaignPath,sourcePhase));
+  }catch{/* Individual history may still retain its original reference. */}
+  for(const history of refs.histories??[]){
+   const ref={...history};
+   out.histories.push(ref);
+   const unitId=ref.unitId;
+   const owner=queue?.units?.[unitId];
+   const expectedUnit=plan?.units?.find(u=>u.unitId===unitId);
+   const availability=ref.availability;
+   if(availability!=='AVAILABLE'){
+    out.unavailable.push({phaseSequence:sourcePhase,unitId,
+     reason:availability??'INDEX_NOT_AVAILABLE',
+     indexPath:ref.indexPath??null,
+     previousCommittedIndex:ref.previousCommittedIndex??null});
+    continue;
+   }
+   if(!owner||owner.status!=='ACCEPTED'||!expectedUnit||
+      !owner.acceptedPath){
+    out.unavailable.push({phaseSequence:sourcePhase,unitId,
+     reason:'QUESTION_OWNER_NOT_ACCEPTED'});continue;
+   }
+   let accepted,index;
+   try{
+    accepted=read(root,owner.acceptedPath);
+    const original=fs.readFileSync(repoFile(root,ref.indexPath));
+    if(hex(original)!==ref.indexSha256)
+     throw Error('question index digest does not match accepted reference');
+    index=JSON.parse(original.toString('utf8'));
+    if(index.schemaVersion!=='curveyield-ai-question-index-v1'||
+       index.phaseSequence!==sourcePhase||index.unitId!==unitId||
+       index.phaseEpoch!==accepted.phaseEpoch||
+       index.packetSha256!==accepted.packetSha256||
+       index.campaignId!==directory.campaignId||
+       index.campaignGenerationId!==directory.campaignGenerationId||
+       index.sourceSha256!==directory.sourceSha256||
+       index.authorityDigest!==directory.authorityDigest||
+       accepted.unitId!==unitId||accepted.phaseSequence!==sourcePhase||
+       accepted.submissionSha256!==owner.acceptedSha256||
+       accepted.packetSha256!==index.packetSha256)
+     throw Error('question index or accepted owner identity differs');
+   }catch(error){
+    out.unavailable.push({phaseSequence:sourcePhase,unitId,
+     reason:'INDEX_OR_ACCEPTED_SOURCE_UNREADABLE',
+     diagnostic:String(error?.message??error),
+     indexPath:ref.indexPath??null});continue;
+   }
+   const keyMap=new Map();
+   for(const [i,question] of (index.questions??[]).entries()){
+    if(!question||typeof question.questionId!=='string')continue;
+    const identity=JSON.stringify([sourcePhase,unitId,question.questionId]);
+    const entry={phaseSequence:sourcePhase,unitId,
+     questionId:question.questionId,round:question.round??null,
+     answered:question.answered??null,
+     statusFromCurrentIndex:question.answered===true?'ANSWERED':
+      question.answered===false?'PLANNED':'INDEX_STATUS_UNSPECIFIED',
+     questionTextSource:{path:ref.indexPath,sha256:ref.indexSha256,
+      selector:'questions['+i+'].questionText'},
+     questionIndexPath:ref.indexPath,questionIndexSha256:ref.indexSha256,
+     questionIndexRevision:index.revision,
+     packetSha256:accepted.packetSha256,
+     acceptedUnitPath:owner.acceptedPath,
+     acceptedUnitArtifactSha256:hex(fs.readFileSync(repoFile(root,owner.acceptedPath))),
+     acceptedSubmissionSha256:accepted.submissionSha256,
+     answerVersions:[]};
+    out.questions.push(entry);keyMap.set(identity,entry);
+   }
+   // Every immutable checkpoint revision, not just the last answer, remains
+   // addressable. An ANSWERS or REVISE event is not a security resolution.
+   for(const checkpoint of index.checkpoints??[]){
+    if(!checkpoint||typeof checkpoint.path!=='string')continue;
+    let source,rawSha;
+    try{
+     const raw=fs.readFileSync(repoFile(root,checkpoint.path));
+     rawSha=hex(raw);
+     if(rawSha!==checkpoint.sha256)
+      throw Error('checkpoint SHA-256 differs from index');
+     source=JSON.parse(raw.toString('utf8'));
+     if(source.schemaVersion!=='curveyield-ai-question-checkpoint-v1'||
+        source.phaseSequence!==sourcePhase||source.unitId!==unitId||
+        source.packetSha256!==accepted.packetSha256||
+        source.campaignGenerationId!==directory.campaignGenerationId||
+        source.sourceSha256!==directory.sourceSha256||
+        source.authorityDigest!==directory.authorityDigest||
+        source.phaseEpoch!==accepted.phaseEpoch||
+        source.revision!==checkpoint.revision)
+      throw Error('checkpoint source authority identity differs');
+    }catch(error){
+     out.unavailable.push({phaseSequence:sourcePhase,unitId,
+      reason:'CHECKPOINT_UNAVAILABLE',path:checkpoint.path,
+      sha256:checkpoint.sha256,revision:checkpoint.revision,
+      diagnostic:String(error?.message??error)});continue;
+    }
+    for(const [i,record] of (source.records??[]).entries()){
+     if(!record||typeof record.questionId!=='string')continue;
+     const identity=JSON.stringify([sourcePhase,unitId,record.questionId]);
+     const question=keyMap.get(identity);
+     if(!question){
+      out.unavailable.push({phaseSequence:sourcePhase,unitId,
+       questionId:record.questionId,reason:'CHECKPOINT_QUESTION_NOT_IN_INDEX',
+       path:checkpoint.path,revision:checkpoint.revision});continue;
+     }
+     question.answerVersions.push({
+      checkpointRevision:checkpoint.revision,mode:source.mode,
+      checkpointPath:checkpoint.path,checkpointSha256:checkpoint.sha256,
+      checkpointRecordSelector:'records['+i+']',
+      ...(Object.hasOwn(record,'answerText')?
+       {answerTextSourceSelector:'records['+i+'].answerText'}:{}),
+      ...(Object.hasOwn(record,'questionText')?
+       {historicalQuestionTextSelector:'records['+i+'].questionText'}:{}),
+      recordedStatus:record.status??null,
+      revisionReasonSource:source.mode==='REVISE'&&
+       Object.hasOwn(source,'revisionReason')?
+       {path:checkpoint.path,sha256:checkpoint.sha256,
+        selector:'revisionReason'}:null
+     });
+    }
+   }
+  }
+ }
+ out.questionCount=out.questions.length;
+ out.answerVersionCount=out.questions.reduce((n,q)=>n+q.answerVersions.length,0);
+ out.availability=out.unavailable.length?'PARTIAL_OR_SOURCE_UNAVAILABLE':'COLLECTED_NONBLOCKING';
+ return out;
+}
+
 const asArray=x=>Array.isArray(x)?x:[];
 const isObject=x=>x&&typeof x==='object'&&!Array.isArray(x);
 const clone=x=>structuredClone(x);
