@@ -852,6 +852,16 @@ function inheritedQuestionHistoryRefsV1({root,campaignPath,sequence}){
 // accepted original record rosters. This is not a selected candidate list;
 // neither repeated observations nor unpromoted evidence are hidden by a
 // downstream fixed-subject scaffold.
+function acceptedCanonicalRowReferenceV1({canonical,canonicalArtifactPath,selector}){
+ const origins=[
+  ...(canonical?.automationOutputs?.acceptedUnitRecordOrigins?.records??[]),
+  ...(canonical?.automationOutputs?.directPhaseRecordOrigins?.records??[])
+ ].filter(row=>row?.canonicalRecordSelector===selector);
+ return {canonicalArtifactPath,sourceRecordSelector:selector,
+  ...(origins.length===1?{originalAcceptedRecordSource:structuredClone(origins[0])}:
+   {originalSourceAvailability:origins.length?
+    'MULTIPLE_SOURCE_IDENTITIES':'ORIGINAL_SOURCE_NOT_AVAILABLE'})};
+}
 function inheritedAcceptedRecordSourceRefsV1({root,campaignPath,sequence}){
  const references=[];
  for(const phase of [1,2,3,4,5,6,8,9]){
@@ -1318,6 +1328,22 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     // hand-transcribe hundreds of subject keys, anchors or prior conclusions.
     const p4=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json')));
     const priorCandidates=p4?.actions?.['step-3']?.outputs?.candidateRecords??[];
+    // One navigation entry for EVERY accepted candidate source, including
+    // repeated subjects that intentionally share a target/reconciliation key.
+    // A fixed work unit is not the authoritative source-count ceiling.
+    form.automationInputs.phase5OriginalCandidateSourceRoster=
+     (Array.isArray(priorCandidates)?priorCandidates:[]).map((item,index)=>({
+      ...acceptedCanonicalRowReferenceV1({
+       canonical:p4,
+       canonicalArtifactPath:path.posix.join(campaignPath,
+        'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json'),
+       selector:'actions.step-3.outputs.candidateRecords['+index+']'}),
+      originalCandidateKey:item&&typeof item==='object'?
+       item.tempKey??item.candidateKey??item.canonicalId??null:null
+     }));
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+     ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+     'phase5OriginalCandidateSourceRoster']);
     const priorRows=Array.isArray(form.actions?.['step-2']?.outputs?.reconciliationRecords)
       ?form.actions['step-2'].outputs.reconciliationRecords.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)):[];
     const already=new Set(priorRows.map(x=>String(x.subjectKey??'')));
@@ -1390,6 +1416,27 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     })):['NONE_IDENTIFIED'];
     const p4=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json')));
     const p5=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json')));
+    const candidateSources=[
+      {canonical:p4,phase:4,step:'step-3',field:'candidateRecords'},
+      {canonical:p5,phase:5,step:'step-2',field:'newCandidateRecords'}
+    ];
+    form.automationInputs.phase6OriginalCandidateSourceRoster=
+     candidateSources.flatMap(({canonical,phase,step,field})=>{
+      const records=canonical?.actions?.[step]?.outputs?.[field]??[];
+      return (Array.isArray(records)?records:[]).map((item,index)=>({
+       ...acceptedCanonicalRowReferenceV1({
+        canonical,
+        canonicalArtifactPath:path.posix.join(campaignPath,
+         'derived/phase-'+phase+'/PHASE_'+String(phase).padStart(2,'0')+
+         '_CANONICAL_DATA_v1.json'),
+        selector:'actions.'+step+'.outputs.'+field+'['+index+']'}),
+       originalCandidateKey:item&&typeof item==='object'?
+        item.tempKey??item.candidateKey??item.canonicalId??null:null
+      }));
+     });
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+     ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+     'phase6OriginalCandidateSourceRoster']);
     const sources=[...(p4?.actions?.['step-3']?.outputs?.candidateRecords??[]),
       ...(p5?.actions?.['step-2']?.outputs?.newCandidateRecords??[])].filter(x=>x&&typeof x==='object');
     // This policy-specific Phase-6 branch has a separate lexical scope from
