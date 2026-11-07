@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Lite-Solo MiMo / Worker transport bridge v55, Step 8 source-bound substep replay reconciliation.
+// Lite-Solo MiMo / Worker transport bridge v56, Step 10 original governing document continuation.
 // Model-facing duplicate transport fields are removed; frozen instructions,
 // original controller-issued files, evidence gates and responses remain unchanged.
 // The Worker remains the sole owner of instructions, claims and acceptance.
@@ -2734,6 +2734,12 @@ async function miStep8Native(route,command={}){
 async function miStep8Ask(state,task){
  const original=String(state.authoritativeStepInstructions||'');
  const head=phase1EvidencePageV1(original,0,6000);
+ const governing=JSON.parse(await workerCall({operation:'governing_document',kind:'INDEX',start:0}));
+ if(governing.status!=='ORIGINAL_GOVERNING_DOCUMENT_EVIDENCE'||
+    governing.phase!==state.phase||
+    governing.step!==(state.currentStep??state.step)||
+    governing.authorityCommit!==state.authorityCommit)
+  throw Error('Original frozen v8 governing instruction index unavailable or wrong step');
  let index=null;
  if(state.engagement?.stage!=='INSTRUCTIONS')
   index=JSON.parse(await workerCall({operation:'stage_evidence',kind:'INDEX',start:0}));
@@ -2744,19 +2750,24 @@ async function miStep8Ask(state,task){
   originalAuthorityCommit:state.authorityCommit??null,
   sourceSha256:state.sourceSha256??null,authorityDigest:state.authorityDigest??null,
   exactOriginalIssuedForm:form,referencedInstructionFiles:state.referencedInstructionFiles??[],
+  originalGoverningDocumentIndex:governing,
   currentOriginalWorkIndex:index,
   originalInstructionText:{sha256:sha(original),start:head.start,end:head.end,
    totalCharacters:original.length,text:head.text,
    nextOffset:head.end<original.length?head.end:null},
   evidenceRequests:{
    moreInstructions:{instructionEvidenceRequest:{offset:head.end}},
+   governingOriginal:{governingDocumentRequest:{
+    kind:'DOCUMENT',family:'campaignBoundSkill',path:
+     governing.documents?.find(x=>x.family==='campaignBoundSkill')?.path,offset:0}},
+   moreGoverningDocuments:{governingDocumentRequest:{kind:'INDEX',start:25}},
    moreStagedUnits:{stageWorkEvidenceRequest:{kind:'INDEX',start:0}},
    originalStagedUnit:{stageWorkEvidenceRequest:{kind:'UNIT',unitId:'<exact issued unitId>',offset:0}},
    firstRoundBeforeRevision:{stageWorkEvidenceRequest:{kind:'UNIT',unitId:'<exact issued unitId>',variant:'FIRST_ROUND',offset:0}}},
   evidenceCompleteness:'Read subsequent original pages whenever nextOffset or nextStart is present. No preview or missing data implies a negative finding.',
   exactTask:task};
  const messages=[{role:'system',content:
-  'You are MiMo, the sole substantive smart-contract security auditor. Answer only the exact current original instruction/review/remediation questions. You may request one local instructionEvidenceRequest or stageWorkEvidenceRequest in JSON; it is only a read, not a Worker action. Inspect original issued instructions, source-bound staged work and supporting evidence where necessary. Do not invent security discoveries, repaired work, acceptance, lease or procedural approvals. For final output use only the requested authored answer fields; the existing Worker compiles and authenticates the original forms.'},
+  'You are MiMo, the sole substantive smart-contract security auditor. Answer only the exact current original instruction/review/remediation questions. You may request one local instructionEvidenceRequest, governingDocumentRequest, or stageWorkEvidenceRequest in JSON; each is a source read, never a Worker action. Inspect original issued instructions, source-bound staged work and supporting evidence where necessary. Do not invent security discoveries, repaired work, acceptance, lease or procedural approvals. For final output use only the requested authored answer fields; the existing Worker compiles and authenticates the original forms.'},
   {role:'user',content:JSON.stringify(context)}];
  const prior=[];let raw=await modelCall(messages);
  for(;;){
@@ -2765,6 +2776,8 @@ async function miStep8Ask(state,task){
    throw Error('Current substep model response must be an object');
   const local=Object.hasOwn(answer,'instructionEvidenceRequest')?
    {kind:'INSTRUCTIONS',request:answer.instructionEvidenceRequest}:
+   Object.hasOwn(answer,'governingDocumentRequest')?
+   {kind:'GOVERNING',request:answer.governingDocumentRequest}:
    Object.hasOwn(answer,'stageWorkEvidenceRequest')?
    {kind:'STAGED_WORK',request:answer.stageWorkEvidenceRequest}:null;
   if(!local)return answer;
@@ -2783,6 +2796,17 @@ async function miStep8Ask(state,task){
      fragmentSha256:sha(fragment.text),totalCharacters:original.length,
      nextOffset:fragment.end<original.length?fragment.end:null};
    }
+  }else if(local.kind==='GOVERNING'){
+   const q=local.request||{};
+   page=JSON.parse(await workerCall({operation:'governing_document',kind:q.kind??'INDEX',
+    ...(q.start!==undefined?{start:q.start}:{}),
+    ...(q.family!==undefined?{family:q.family}:{}),
+    ...(q.path!==undefined?{path:q.path}:{}),
+    ...(q.offset!==undefined?{offset:q.offset}:{})}));
+   if(page.status!=='ORIGINAL_GOVERNING_DOCUMENT_EVIDENCE'||
+      page.authorityCommit!==governing.authorityCommit||
+      page.phase!==governing.phase||page.step!==governing.step)
+    throw Error('Governing original paging no longer belongs to the frozen step');
   }else{
    const q=local.request||{};
    page=JSON.parse(await workerCall({operation:'stage_evidence',kind:q.kind??'INDEX',
