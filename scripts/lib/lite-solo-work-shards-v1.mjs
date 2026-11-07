@@ -420,9 +420,19 @@ export function secureRestoreWorkFormV13({root,indexRel}){
    const positions=arrays.get(id)??new Set();
    if(!desc.append&&item.entries.length!==desc.recordKeys.length)
      throw new Error('v13 mandatory work records dropped: '+desc.file);
-   for(const [j,entry] of item.entries.entries()){
+   const continuation=desc.append?
+    directAppendPagesV13({root,workDir,desc,primary:item}):[];
+   for(const chunk of continuation)seenFiles.add(chunk.file);
+   const allEntries=[...item.entries,...continuation.flatMap(page=>page.entries)];
+   for(const [j,entry] of allEntries.entries()){
      const pos=desc.startIndex+j;
-     const expected=desc.append?prefix+'APPEND-'+String(j+1).padStart(4,'0'):prefix+desc.recordKeys[j];
+     const continuationChunk=desc.append&&j>=item.entries.length?
+      continuation.find(page=>j<page.startIndex-desc.startIndex+page.entries.length):null;
+     const chunkOrdinal=continuationChunk?
+      j-(continuationChunk.startIndex-desc.startIndex):j;
+     const expected=desc.append?
+      continuationChunk?appendChunkKeyV13(desc.path,continuationChunk.chunkNumber,chunkOrdinal):
+       prefix+'APPEND-'+String(j+1).padStart(4,'0'):prefix+desc.recordKeys[j];
      const templateIdentity=!desc.append&&/^(tempKey|findingTempKey|candidateKey|assetKey|actorKey|boundaryKey|transitionKey|requirementKey|dependencyKey|standardKey|driverKey|groupKey|recordKey|testGroupId)=<REQUIRED(?:_OR_EXPLICIT_NEGATIVE)?>$/.test(desc.recordKeys[j]);
      const completedTemplateIdentity=templateIdentity&&recordKey(desc.path,entry.value,pos).startsWith(prefix+desc.recordKeys[j].split('=')[0]+'=');
      // Placeholder-keyed optional record slots may be completed with a
@@ -474,7 +484,7 @@ export function secureRestoreWorkFormV13({root,indexRel}){
  }
  const allowed=new Set(['BASE_v1.json','INDEX_v1.json',...basePages,...pageNames,...seenFiles]);
  for(const name of fs.readdirSync(relfile(root,workDir)))
-   if(/^(?:shard-[0-9]+_v1|INDEX_PAGE_[0-9]+_v1|BASE_PART_[0-9]+_v1)\.json$/.test(name)&&!allowed.has(name))
+   if(/^(?:shard-[0-9]+(?:_CONT_[0-9]{4})?_v1|INDEX_PAGE_[0-9]+_v1|BASE_PART_[0-9]+_v1)\.json$/.test(name)&&!allowed.has(name))
      throw new Error('v13 unknown agent shard or index page: '+name);
  return {formRel:working.formRel,content:securePrettyV13(full),
    recordCount:[...arrays.values()].reduce((n,s)=>n+s.size,0)};
