@@ -2023,7 +2023,7 @@ export function collectExplicitQuestionOutputLinksV1({
   JSON.stringify([q.phaseSequence,q.unitId,q.questionId]),{q,index:i}]));
  const questionByCheckpoint=new Map();
  for(const [i,question] of histories.questions.entries()){
-  for(const version of question.answerVersions??[]){
+  for(const version of question.checkpointEvents??[]){
    const key=JSON.stringify([version.checkpointPath,
     version.checkpointRecordSelector]);
    const candidates=questionByCheckpoint.get(key)??[];
@@ -2059,6 +2059,8 @@ export function collectExplicitQuestionOutputLinksV1({
   const revision=question.checkpointRevision??null;
   const version=revision===null?null:accepted?.q.answerVersions.find(
    event=>event.checkpointRevision===revision);
+  const questionEvent=revision===null?null:accepted?.q.checkpointEvents.find(
+   event=>event.checkpointRevision===revision);
   const association={
    outputRecord:{phaseSequence:phase,selector,
     recordKey:record?.recordKey??null,
@@ -2079,11 +2081,12 @@ export function collectExplicitQuestionOutputLinksV1({
     acceptedQuestionUnitPath:accepted.q.acceptedUnitPath,
     acceptedQuestionUnitArtifactSha256:accepted.q.acceptedUnitArtifactSha256,
     answerVersionCount:accepted.q.answerVersions.length,
+    ...(questionEvent?{exactQuestionEventSource:questionEvent}:{}),
     ...(version?{exactAnswerVersionSource:version}:{})
    }:{})
   };
   if(!accepted||
-     revision!==null&&!version){
+     revision!==null&&!questionEvent){
    output.unresolvedReferences.push({...association,
     status:!accepted?'ORIGINAL_QUESTION_SOURCE_UNAVAILABLE':
      'REFERENCED_CHECKPOINT_REVISION_UNAVAILABLE'});
