@@ -377,6 +377,57 @@ function readPlan(root,campaign,phase){
 function publishPlan(root,campaign,phase,plan,queue){
  assertPlan(queue,plan);
  const planDir=path.posix.join(rootOf(campaign,phase),'plan');
+ const previous=maybe(root,planRel(campaign,phase));
+ if(previous&&Array.isArray(previous.pages)&&
+    Number.isInteger(previous.unitCount)&&
+    previous.unitCount<plan.units.length&&
+    plan.units.some(u=>u.appendChunkNumber>1)){
+  // A new continuation may grow the plan but may NEVER rewrite an already
+  // issued plan page. Compare exact stored metadata, including frozen refs,
+  // and append new bounded pages only. Existing issued byte hashes persist.
+  const priorUnits=previous.pages.flatMap(ref=>{
+   const raw=fs.readFileSync(repoFile(root,ref.path));
+   if(hex(raw)!==ref.sha256)throw Error('frozen unit plan page digest mismatch');
+   return JSON.parse(raw.toString('utf8')).units;
+  });
+  if(priorUnits.length!==previous.unitCount)
+   throw Error('frozen unit plan page count mismatch');
+  const serialized=plan.units.map(unit=>{
+   const u=clone(unit);
+   delete u.issuedMeta;
+   if(u.kind==='BATCH')delete u.members;
+   if(u.initialValueRef)delete u.initialValue;
+   return u;
+  });
+  for(let i=0;i<priorUnits.length;i++)
+   if(JSON.stringify(priorUnits[i])!==JSON.stringify(serialized[i]))
+    throw Error('APPEND_CONTINUATION_FROZEN_UNIT_CHANGED: '+
+     String(priorUnits[i]?.unitId??i));
+  const newPages=[...previous.pages],suffix=serialized.slice(priorUnits.length);
+  let pending=[];
+  const flush=()=>{
+   if(!pending.length)return;
+   const file='UNIT_PLAN_PAGE_'+String(newPages.length+1).padStart(4,'0')+'_v1.json';
+   const rel=path.posix.join(planDir,file);
+   const content={schemaVersion:'curveyield-lite-solo-unit-plan-page-v1',units:pending};
+   const raw=pretty(content);
+   if(Buffer.byteLength(raw)>32768)throw Error('continuation plan page exceeds 32 KiB');
+   put(root,rel,content);
+   newPages.push({path:rel,sha256:hex(Buffer.from(raw)),count:pending.length});
+   pending=[];
+  };
+  for(const u of suffix){
+   if(pending.length&&Buffer.byteLength(pretty({
+    schemaVersion:'curveyield-lite-solo-unit-plan-page-v1',units:[...pending,u]}))>30000)
+    flush();
+   pending.push(u);
+  }
+  flush();
+  const {units,recordOwnership,...metadata}=plan;
+  put(root,planRel(campaign,phase),{...metadata,unitCount:units.length,pages:newPages});
+  put(root,queueRel(campaign,phase),queue);
+  return;
+ }
  const pages=[];let batch=[];
  const flush=()=>{
   if(!batch.length)return;
