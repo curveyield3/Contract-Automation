@@ -2025,9 +2025,9 @@ export function collectExplicitQuestionOutputLinksV1({
     const accepted=ownerUnit?saved.get(ownerUnit)?.accepted:null;
     const links=originalLinkRows.get(ownerUnit)??[];
     for(const [k,link] of links.entries()){
-     const matches=link?.acceptedOutputSelector===original?.acceptedSourceSelector?.replace(/^submission\\./,'')||
+     const matches=link?.acceptedOutputSelector===original?.acceptedSourceSelector?.replace(/^submission\./,'')||
       link?.recordKey===original?.recordKey||
-      link?.outputSelector===original?.acceptedSourceSelector?.replace(/^submission\\./,'');
+      link?.outputSelector===original?.acceptedSourceSelector?.replace(/^submission\./,'');
      if(!matches)continue;
      for(const [j,ref] of (Array.isArray(link.questionRefs)?link.questionRefs:[]).entries())
       additional.push({authored:typedQuestionReferenceV1(ref,{phase,unitId:ownerUnit}),
