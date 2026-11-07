@@ -2046,7 +2046,7 @@ export function collectExplicitQuestionOutputLinksV1({
  const questionByCheckpoint=new Map(),questionByIndex=new Map();
  for(const [i,question] of histories.questions.entries()){
   const indexKey=JSON.stringify([question.questionIndexPath,
-   question.questionTextSource?.selector?.replace(/\\.questionText$/,'')]);
+   question.questionTextSource?.selector?.replace(/\.questionText$/,'')]);
   const indexEntries=questionByIndex.get(indexKey)??[];
   indexEntries.push({q:question,index:i});
   questionByIndex.set(indexKey,indexEntries);
