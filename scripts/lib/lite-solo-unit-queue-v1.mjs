@@ -1802,6 +1802,263 @@ export function collectAcceptedUnitRecordOriginsV1({root,campaignPath,directory,
  return roster;
 }
 
+// Explicit means the AI supplied the reference in a reference-typed field
+// or in the optional questionRecordLinks envelope. Ordinary prose and titles
+// are deliberately never parsed for associations.
+const QUESTION_REFERENCE_FIELDS_V1=new Set([
+ 'explicitQuestionRefs','questionRefs','questionEvidenceRefs',
+ 'sourceQuestionRefs','relatedQuestionRefs','investigationQuestionRefs',
+ 'originatingEvidenceRefs','evidenceRefs','sourceRefs','proofEvidenceRefs',
+ 'discoveryEvidenceRefs','anchors'
+]);
+const QUESTION_ID_V1=/^Q-[0-9]{6,}$/;
+function typedQuestionReferenceV1(value,{phase,unitId}){
+ if(typeof value==='string'){
+  const ref=value.trim();
+  if(QUESTION_ID_V1.test(ref)&&unitId)
+   return {phaseSequence:phase,unitId,questionId:ref,
+    sourceReferenceKind:'LOCAL_ISSUED_UNIT_REFERENCE'};
+  const composite=ref.match(/^(?:phase[-_ ]?)?(\\d+)\\/([A-Za-z0-9._-]+)\\/(Q-[0-9]{6,})(?:@(?:rev(?:ision)?[-_ ]?)?(\\d+))?$/i);
+  if(composite)return {phaseSequence:Number(composite[1]),
+   unitId:composite[2],questionId:composite[3],
+   ...(composite[4]?{checkpointRevision:Number(composite[4])}:{}),
+   sourceReferenceKind:'EXPLICIT_COMPOSITE_REFERENCE'};
+  return null;
+ }
+ if(!isObject(value)||!QUESTION_ID_V1.test(String(value.questionId??'')))
+  return null;
+ const sourcePhase=value.phaseSequence===undefined?phase:Number(value.phaseSequence);
+ const sourceUnit=value.unitId??unitId;
+ if(!Number.isSafeInteger(sourcePhase)||sourcePhase<1||
+    typeof sourceUnit!=='string'||!safe(sourceUnit))
+  return null;
+ const revision=value.checkpointRevision===undefined?
+  null:Number(value.checkpointRevision);
+ return {phaseSequence:sourcePhase,unitId:sourceUnit,
+  questionId:value.questionId,
+  ...(revision!==null&&Number.isSafeInteger(revision)&&revision>=1?
+   {checkpointRevision:revision}:{}),
+  sourceReferenceKind:'EXPLICIT_STRUCTURED_REFERENCE'};
+}
+function explicitQuestionRefsInRecordV1(value,{phase,unitId,selector}){
+ const refs=[],stack=[{value,selector}];
+ while(stack.length){
+  const current=stack.pop(),item=current.value;
+  if(!item||typeof item!=='object')continue;
+  if(Array.isArray(item)){
+   for(let i=item.length-1;i>=0;i--)
+    if(item[i]&&typeof item[i]==='object')
+     stack.push({value:item[i],selector:current.selector+'['+i+']'});
+   continue;
+  }
+  for(const [key,child] of Object.entries(item)){
+   const fieldSelector=current.selector+'.'+key;
+   if(QUESTION_REFERENCE_FIELDS_V1.has(key)){
+    const list=Array.isArray(child)?child:[child];
+    for(const [i,ref] of list.entries()){
+     const authored=typedQuestionReferenceV1(ref,{phase,unitId});
+     const sourceSelector=fieldSelector+
+      (Array.isArray(child)?'['+i+']':'');
+     if(authored)refs.push({authored,sourceSelector,
+      originalExplicitReference:structuredClone(ref)});
+     else if(typeof ref==='string'&&/^Q-[0-9]+$/.test(ref.trim())||
+       isObject(ref)&&Object.hasOwn(ref,'questionId'))
+      refs.push({authored:null,sourceSelector,
+       originalExplicitReference:structuredClone(ref),
+       unavailable:'QUESTION_REFERENCE_IDENTITY_INCOMPLETE'});
+    }
+   }
+   if(child&&typeof child==='object')
+    stack.push({value:child,selector:fieldSelector});
+  }
+ }
+ return refs.sort((a,b)=>a.sourceSelector.localeCompare(b.sourceSelector));
+}
+// Build a many-to-many provenance projection over ACTUAL accepted output
+// sources. The original questions and answers remain in their immutable
+// index/checkpoint files; this index never substitutes a security verdict.
+export function collectExplicitQuestionOutputLinksV1({
+ root,campaignPath,directory,phase,canonical,questionSources=null
+}){
+ const histories=questionSources??collectAcceptedQuestionAnswerSourcesV1({
+  root,campaignPath,directory,phase});
+ const output={schemaVersion:'curveyield-explicit-question-output-links-v1',
+  phaseSequence:phase,associationOrigin:'AI_EXPLICIT_REFERENCE',
+  associations:[],unresolvedReferences:[],
+  unpromotedQuestions:[],sourceAvailability:histories.availability,
+  questionSourcesSelector:'automationOutputs.questionAnswerSources',
+  sourceMeaning:'NO_SECURITY_INFERENCE'};
+ const questionByIdentity=new Map(histories.questions.map((q,i)=>[
+  JSON.stringify([q.phaseSequence,q.unitId,q.questionId]),{q,index:i}]));
+ const linked=new Set();
+ const appendLink=({ref,record,selector,ownerPhase,ownerUnit,outputOrigin})=>{
+  if(!ref)return;
+  const question=ref.authored;
+  if(!question){
+   output.unresolvedReferences.push({outputRecordSelector:selector,
+    originalOutputSource:outputOrigin,
+    originalQuestionReferenceSelector:ref.sourceSelector,
+    originalExplicitReference:ref.originalExplicitReference,
+    status:ref.unavailable??'QUESTION_REFERENCE_IDENTITY_INCOMPLETE'});
+   return;
+  }
+  const identity=JSON.stringify([question.phaseSequence,question.unitId,question.questionId]);
+  const accepted=questionByIdentity.get(identity);
+  const revision=question.checkpointRevision??null;
+  const version=revision===null?null:accepted?.q.answerVersions.find(
+   event=>event.checkpointRevision===revision);
+  const association={
+   outputRecord:{phaseSequence:phase,selector,
+    recordKey:record?.recordKey??null,
+    originalAcceptedRecordSource:outputOrigin??null},
+   explicitQuestionReference:{
+    phaseSequence:question.phaseSequence,unitId:question.unitId,
+    questionId:question.questionId,
+    ...(revision!==null?{checkpointRevision:revision}:{})},
+   originalExplicitReference:ref.originalExplicitReference,
+   originalQuestionReferenceSelector:ref.sourceSelector,
+   associationOrigin:'AI_EXPLICIT_REFERENCE',
+   ...(accepted?{
+    questionSourceSelector:'automationOutputs.questionAnswerSources.questions['+
+     accepted.index+']',
+    originalQuestionTextSource:accepted.q.questionTextSource,
+    originalQuestionIndexPath:accepted.q.questionIndexPath,
+    originalQuestionIndexSha256:accepted.q.questionIndexSha256,
+    acceptedQuestionUnitPath:accepted.q.acceptedUnitPath,
+    acceptedQuestionUnitArtifactSha256:accepted.q.acceptedUnitArtifactSha256,
+    answerVersionCount:accepted.q.answerVersions.length,
+    ...(version?{exactAnswerVersionSource:version}:{})
+   }:{})
+  };
+  if(!accepted||
+     revision!==null&&!version){
+   output.unresolvedReferences.push({...association,
+    status:!accepted?'ORIGINAL_QUESTION_SOURCE_UNAVAILABLE':
+     'REFERENCED_CHECKPOINT_REVISION_UNAVAILABLE'});
+   return;
+  }
+  linked.add(identity);output.associations.push(association);
+ };
+ const register=({value,selector,ownerPhase=phase,ownerUnit=null,
+  recordKey=null,origin=null,extraRefs=[]})=>{
+  const record={recordKey};
+  for(const ref of [
+   ...explicitQuestionRefsInRecordV1(value,{
+    phase:ownerPhase,unitId:ownerUnit,selector}),
+   ...extraRefs
+  ])appendLink({ref,record,selector,ownerPhase,ownerUnit,outputOrigin:origin});
+ };
+ // The canonical row index and accepted record-source roster were assembled
+ // mechanically before this collector. Do not use prose/title matching.
+ const sources=[
+  ...(canonical.automationOutputs?.acceptedUnitRecordOrigins?.records??[]),
+  ...(canonical.automationOutputs?.directPhaseRecordOrigins?.records??[])
+ ];
+ const sourceBySelector=new Map();
+ for(const source of sources){
+  if(!source?.canonicalRecordSelector)continue;
+  const key=source.canonicalRecordSelector;
+  const refs=sourceBySelector.get(key)??[];
+  refs.push(source);sourceBySelector.set(key,refs);
+ }
+ const saved=new Map(),originalLinkRows=new Map();
+ // Optional explicitly AI-supplied metadata remains on the accepted unit
+ // snapshot. It is not rewritten into fixed issued output objects.
+ if([4,5,6].includes(Number(phase))){
+  let plan,queue;
+  try{plan=readPlan(root,campaignPath,phase);
+   queue=read(root,queueRel(campaignPath,phase));}
+  catch{plan=null;queue=null;}
+  for(const u of plan?.units??[]){
+   const state=queue?.units?.[u.unitId];
+   if(state?.status!=='ACCEPTED'||!state.acceptedPath)continue;
+   let accepted;
+   try{
+    const raw=fs.readFileSync(repoFile(root,state.acceptedPath));
+    accepted=JSON.parse(raw.toString('utf8'));
+    if(accepted?.unitId!==u.unitId||
+       accepted?.campaignGenerationId!==directory.campaignGenerationId||
+       accepted?.sourceSha256!==directory.sourceSha256||
+       accepted?.submissionSha256!==state.acceptedSha256)
+     throw Error('accepted unit source identity mismatch');
+   }catch(error){
+    output.unresolvedReferences.push({unitId:u.unitId,
+     status:'ACCEPTED_UNIT_SOURCE_UNREADABLE',
+     diagnostic:String(error?.message??error)});continue;
+   }
+   saved.set(u.unitId,{accepted,path:state.acceptedPath});
+   const links=accepted.submission?.questionRecordLinks;
+   if(Array.isArray(links))
+    originalLinkRows.set(u.unitId,links);
+   if(!['FLOW','ATTACK'].includes(u.kind))continue;
+   for(const [collection,rows] of Object.entries(accepted.submission??{})){
+    if(!Array.isArray(rows)||!['rows','flowNotes','integrationAnswers',
+     'contractChecks','attackPaths','trivialReviews','groupChecks','candidates']
+      .includes(collection))continue;
+    for(const [i,row] of rows.entries()){
+     const selector='submission.'+collection+'['+i+']';
+     const extra=(originalLinkRows.get(u.unitId)??[])
+      .filter(link=>link?.acceptedOutputSelector===
+       collection+'['+i+']'||link?.outputSelector===collection+'['+i+']')
+      .flatMap((link,k)=>(Array.isArray(link.questionRefs)?link.questionRefs:[])
+       .map((ref,j)=>({authored:typedQuestionReferenceV1(ref,{
+        phase,unitId:u.unitId}),originalExplicitReference:structuredClone(ref),
+        sourceSelector:'submission.questionRecordLinks['+k+'].questionRefs['+j+']'})));
+     register({value:row,selector,ownerUnit:u.unitId,
+      origin:{acceptedPath:state.acceptedPath,
+       acceptedSubmissionSha256:accepted.submissionSha256,
+       unitId:u.unitId,unitKind:u.kind,
+       acceptedRecordSourceSelector:selector},extraRefs:extra});
+    }
+   }
+  }
+ }
+ for(const [step,action] of Object.entries(canonical.actions??{})){
+  for(const [field,rows] of Object.entries(action?.outputs??{})){
+   if(!Array.isArray(rows))continue;
+   for(const [i,row] of rows.entries()){
+    const selector='actions.'+step+'.outputs.'+field+'['+i+']';
+    const sources=sourceBySelector.get(selector)??[];
+    const original=sources.length===1?sources[0]:null;
+    const ownerUnit=original?.unitId??null;
+    const additional=[];
+    const accepted=ownerUnit?saved.get(ownerUnit)?.accepted:null;
+    const links=originalLinkRows.get(ownerUnit)??[];
+    for(const [k,link] of links.entries()){
+     const matches=link?.acceptedOutputSelector===original?.acceptedSourceSelector?.replace(/^submission\\./,'')||
+      link?.recordKey===original?.recordKey||
+      link?.outputSelector===original?.acceptedSourceSelector?.replace(/^submission\\./,'');
+     if(!matches)continue;
+     for(const [j,ref] of (Array.isArray(link.questionRefs)?link.questionRefs:[]).entries())
+      additional.push({authored:typedQuestionReferenceV1(ref,{phase,unitId:ownerUnit}),
+       originalExplicitReference:structuredClone(ref),
+       sourceSelector:'submission.questionRecordLinks['+k+'].questionRefs['+j+']'});
+    }
+    register({value:row,selector,ownerUnit,recordKey:original?.recordKey??null,
+     origin:original??(sources.length?{availability:'DUPLICATE_ORIGINAL_SOURCE'}:
+      {availability:'SOURCE_RECORD_ORIGIN_NOT_RECORDED'}),
+     extraRefs:additional});
+   }
+  }
+ }
+ for(const [i,q] of histories.questions.entries()){
+  const identity=JSON.stringify([q.phaseSequence,q.unitId,q.questionId]);
+  if(linked.has(identity))continue;
+  output.unpromotedQuestions.push({
+   phaseSequence:q.phaseSequence,unitId:q.unitId,questionId:q.questionId,
+   questionSourceSelector:'automationOutputs.questionAnswerSources.questions['+i+']',
+   questionTextSource:q.questionTextSource,
+   answerVersionCount:q.answerVersions.length,
+   statusFromCurrentIndex:q.statusFromCurrentIndex,
+   disposition:'NO_EXPLICIT_OUTPUT_LINK_RECORDED'
+  });
+ }
+ output.associationCount=output.associations.length;
+ output.unpromotedQuestionCount=output.unpromotedQuestions.length;
+ output.availability='COLLECTED_NONBLOCKING';
+ return output;
+}
+
 export function markFinalizationV1({root,campaignPath,phase,status,details=null}){
  const queue=read(root,queueRel(campaignPath,phase));
  queue.finalizeStatus=status;queue.finalizeDetails=details;
