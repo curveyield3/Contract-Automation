@@ -624,6 +624,11 @@ function questionHistoryModelContextV1(history){
  const histories=history?.histories??[],unavailable=history?.unavailable??[];
  const identity=h=>({
   phaseSequence:h.phaseSequence,unitId:h.unitId,
+  historyReferenceKey:h.historyReferenceKey??null,
+  referenceOrigin:h.referenceOrigin??null,
+  availability:h.availability??'PINNED_QUESTION_INDEX_VERIFIED',
+  acceptedCanonicalRefs:h.acceptedCanonicalRefs??[],
+  phaseEpoch:h.phaseEpoch??null,packetSha256:h.packetSha256??null,
   indexPath:h.indexPath,indexSha256:h.indexSha256,
   indexRevision:h.indexRevision,
   questionCount:Array.isArray(h.questionRoster)?h.questionRoster.length:null,
@@ -649,11 +654,11 @@ function questionHistoryModelContextV1(history){
    firstIndex:{questionHistoryEvidenceRequest:{kind:'HISTORY_INDEX',start:0}},
    unavailableIndex:{questionHistoryEvidenceRequest:{kind:'UNAVAILABLE_INDEX',start:0}},
    questionIndexPage:{questionHistoryEvidenceRequest:{
-    kind:'QUESTION_INDEX_PAGE',phaseSequence:4,unitId:'<exact unitId from HISTORY_INDEX>',offset:0}},
+    kind:'QUESTION_INDEX_PAGE',historyReferenceKey:'<exact historyReferenceKey from HISTORY_INDEX>',offset:0}},
    checkpointIndex:{questionHistoryEvidenceRequest:{
-    kind:'CHECKPOINT_INDEX',phaseSequence:4,unitId:'<exact unitId from HISTORY_INDEX>',start:0}},
+    kind:'CHECKPOINT_INDEX',historyReferenceKey:'<exact historyReferenceKey from HISTORY_INDEX>',start:0}},
    checkpointPage:{questionHistoryEvidenceRequest:{
-    kind:'CHECKPOINT_PAGE',phaseSequence:4,unitId:'<exact unitId from HISTORY_INDEX>',
+    kind:'CHECKPOINT_PAGE',historyReferenceKey:'<exact historyReferenceKey from HISTORY_INDEX>',
     checkpointIndex:0,offset:0}},
    continuation:'Use nextStart for roster/index and nextOffset for original JSON text pages; every committed checkpoint is addressable by zero-based checkpointIndex.',
    interpretation:'A PLANNED or unanswered question is not resolved; ANSWERED and COMPLETE do not establish proof. Preserve original phaseSequence/unitId/questionId plus checkpoint revision. Check adversarial and favorable originals against actual source and qualified execution.',
@@ -677,6 +682,11 @@ async function questionHistoryEvidenceReadV1(history,request){
  });
  const identity=h=>({
   phaseSequence:h.phaseSequence,unitId:h.unitId,
+  historyReferenceKey:h.historyReferenceKey??null,
+  referenceOrigin:h.referenceOrigin??null,
+  availability:h.availability??'PINNED_QUESTION_INDEX_VERIFIED',
+  acceptedCanonicalRefs:h.acceptedCanonicalRefs??[],
+  phaseEpoch:h.phaseEpoch??null,packetSha256:h.packetSha256??null,
   indexPath:h.indexPath,indexSha256:h.indexSha256,indexRevision:h.indexRevision,
   questionCount:Array.isArray(h.questionRoster)?h.questionRoster.length:null,
   checkpointCount:h.checkpoints?.length??0
@@ -685,10 +695,23 @@ async function questionHistoryEvidenceReadV1(history,request){
   ...window(records.map(identity),at(req.start))};
  if(req.kind==='UNAVAILABLE_INDEX')return {...base,kind:req.kind,availability:'AVAILABLE',
   ...window(unavailable,at(req.start))};
+ if(!history)return {...base,availability:'QUESTION_HISTORY_NOT_RETRIEVED'};
+ const requestedKey=typeof req.historyReferenceKey==='string'?req.historyReferenceKey:null;
  const phase=Number(req.phaseSequence),unitId=req.unitId;
- const source=records.find(h=>h.phaseSequence===phase&&h.unitId===unitId);
+ const matches=requestedKey?
+  records.filter(h=>h.historyReferenceKey===requestedKey):
+  records.filter(h=>h.phaseSequence===phase&&h.unitId===unitId);
+ if(matches.length>1)return {...base,
+  availability:'AMBIGUOUS_QUESTION_HISTORY_REFERENCE',
+  phaseSequence:req.phaseSequence,unitId:req.unitId,
+  matchingReferenceKeys:matches.map(h=>h.historyReferenceKey)};
+ const source=matches[0];
  if(!source)return {...base,availability:'QUESTION_HISTORY_REFERENCE_NOT_FOUND',
+  historyReferenceKey:requestedKey,
   phaseSequence:req.phaseSequence,unitId:req.unitId};
+ const historyReadFailure=await sourceBoundHistoricalQuestionIndexV1(history,source);
+ if(historyReadFailure)return {...base,...identity(source),
+  availability:historyReadFailure};
  const sourceIdentity=identity(source);
  if(req.kind==='CHECKPOINT_INDEX')return {...base,...sourceIdentity,
   kind:req.kind,availability:'AVAILABLE',
