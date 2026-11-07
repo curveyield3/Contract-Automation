@@ -65,11 +65,13 @@ function directAppendPagesV13({root,workDir,desc,primary}){
  if(!desc.append)return [];
  if(primary.schemaVersion!=='curveyield-work-shard-v13'||
     primary.kind!=='array'||!secureSameV13(primary.path,desc.path)||
-    primary.startIndex!==desc.startIndex||
-    !Array.isArray(primary.entries)||
-    primary.entries.length>MAX_V13_APPEND_RECORDS||
+    primary.startIndex!==desc.startIndex||!Array.isArray(primary.entries))
+  throw new Error('APPEND_PRIMARY_CHUNK_IDENTITY_MISMATCH: '+desc.file);
+ if(primary.entries.length>MAX_V13_APPEND_RECORDS||
     bytes(primary)>MAX_V13_APPEND_BYTES)
-  throw new Error('APPEND_PRIMARY_CHUNK_TRANSPORT_LIMIT: '+desc.file);
+  throw new Error((primary.entries.length===1?
+   'APPEND_SINGLE_RECORD_TRANSPORT_LIMIT: ':
+   'APPEND_PRIMARY_CHUNK_TRANSPORT_LIMIT: ')+desc.file);
  const names=fs.readdirSync(relfile(root,workDir));
  const prefix=desc.file.replace(/_v1\.json$/,'_CONT_');
  const suffix='_v1.json';
@@ -90,8 +92,12 @@ function directAppendPagesV13({root,workDir,desc,primary}){
    throw new Error('APPEND_CONTINUATION_NOT_REQUESTED: '+file);
   const rel=path.posix.join(workDir,file);
   const raw=fs.readFileSync(relfile(root,rel));
-  if(raw.length>MAX_V13_APPEND_BYTES)
-   throw new Error('APPEND_CONTINUATION_TRANSPORT_LIMIT: '+file);
+  if(raw.length>MAX_V13_APPEND_BYTES){
+   let single=false;
+   try{single=JSON.parse(raw.toString('utf8'))?.entries?.length===1;}catch{}
+   throw new Error((single?'APPEND_SINGLE_RECORD_TRANSPORT_LIMIT: ':
+    'APPEND_CONTINUATION_TRANSPORT_LIMIT: ')+file);
+  }
   const page=JSON.parse(raw.toString('utf8'));
   if(page.schemaVersion!=='curveyield-work-shard-v13'||
      page.kind!=='array'||!secureSameV13(page.path,desc.path)||
