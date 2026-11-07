@@ -580,12 +580,15 @@ async function sourceBoundQuestionHistoryV1(raw){
     indexPath,status:'IDENTITY_MISMATCH'});continue;
   }
   const checkpoints=[];
-  for(const ref of index.checkpoints){
+  for(const [originalCheckpointIndex,ref] of index.checkpoints.entries()){
    if(typeof ref?.path!=='string'||!ref.path.startsWith(prefix+'/checkpoints/')||
       !/^[a-f0-9]{64}$/.test(String(ref.sha256??''))){
     unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
      indexPath,status:'INVALID_CHECKPOINT_REFERENCE',
-     invalidOriginalReference:structuredClone(ref)});
+     originalCheckpointIndex,invalidOriginalReference:structuredClone(ref)});
+    checkpoints.push({originalCheckpointIndex,path:null,sha256:null,
+     checkpoint:null,originalCheckpointText:null,expectedReference:null,
+     verification:'INVALID_ORIGINAL_REFERENCE'});
     continue;
    }
    // Accepted index/checkpoint references are retained verbatim. Reading ALL
@@ -593,7 +596,7 @@ async function sourceBoundQuestionHistoryV1(raw){
    // exhaust GitHub requests and model context; verify exact original bytes
    // only when MiMo asks for an individual checkpoint or page.
    checkpoints.push({
-    path:ref.path,sha256:ref.sha256,
+    originalCheckpointIndex,path:ref.path,sha256:ref.sha256,
     checkpoint:null,originalCheckpointText:null,
     expectedReference:structuredClone(ref),
     verification:'PINNED_REFERENCE_NOT_YET_READ'
@@ -717,7 +720,9 @@ async function questionHistoryEvidenceReadV1(history,request){
  if(req.kind==='CHECKPOINT_INDEX')return {...base,...sourceIdentity,
   kind:req.kind,availability:'AVAILABLE',
   ...window(source.checkpoints.map((c,index)=>({
-   checkpointIndex:index,path:c.path,sha256:c.sha256,
+   checkpointIndex:c.originalCheckpointIndex??index,path:c.path,sha256:c.sha256,
+   referenceAvailability:c.verification==='INVALID_ORIGINAL_REFERENCE'?
+    'INVALID_ORIGINAL_REFERENCE':'PINNED_SOURCE_REFERENCE',
    revision:c.expectedReference?.revision??c.checkpoint?.revision??null,
    requestId:c.expectedReference?.requestId??c.checkpoint?.requestId??null,
    requestDigest:c.expectedReference?.requestDigest??c.checkpoint?.requestDigest??null
@@ -729,6 +734,10 @@ async function questionHistoryEvidenceReadV1(history,request){
    return {...base,...sourceIdentity,availability:'CHECKPOINT_INDEX_OUT_OF_RANGE',
     requestedIndex:req.checkpointIndex};
   const checkpoint=req.kind==='CHECKPOINT_PAGE'?source.checkpoints[cpIndex]:null;
+  if(checkpoint?.verification==='INVALID_ORIGINAL_REFERENCE')
+   return {...base,...sourceIdentity,availability:'INVALID_CHECKPOINT_REFERENCE',
+    checkpointIndex:cpIndex,sourceIndexPath:source.indexPath,
+    noProcessGate:true};
   if(checkpoint&&typeof checkpoint.originalCheckpointText!=='string'){
    // Do not mix source revisions if the global bridge has since pinned a
    // different accepted Git commit. No moving-branch fallback is permitted.
@@ -911,15 +920,19 @@ async function sourceBoundHistoricalQuestionIndexV1(history,source){
  source.packetSha256=index.packetSha256;
  source.checkpoints=[];
  const prefix=source.indexPath.slice(0,-'QUESTION_INDEX_v1.json'.length);
- for(const ref of index.checkpoints){
+ for(const [originalCheckpointIndex,ref] of index.checkpoints.entries()){
   if(typeof ref?.path!=='string'||!ref.path.startsWith(prefix+'checkpoints/')||
      !/^[a-f0-9]{64}$/.test(String(ref.sha256??''))){
    (history.unavailable??=[]).push({
     availability:'INVALID_HISTORICAL_CHECKPOINT_REFERENCE',
-    historyReferenceKey:source.historyReferenceKey,originalReference:structuredClone(ref)});
+    historyReferenceKey:source.historyReferenceKey,originalCheckpointIndex,
+    originalReference:structuredClone(ref)});
+   source.checkpoints.push({originalCheckpointIndex,path:null,sha256:null,
+    checkpoint:null,originalCheckpointText:null,expectedReference:null,
+    verification:'INVALID_ORIGINAL_REFERENCE'});
    continue;
   }
-  source.checkpoints.push({path:ref.path,sha256:ref.sha256,
+  source.checkpoints.push({originalCheckpointIndex,path:ref.path,sha256:ref.sha256,
    checkpoint:null,originalCheckpointText:null,
    expectedReference:structuredClone(ref),
    verification:'HISTORICAL_PINNED_REFERENCE_NOT_YET_READ'});
