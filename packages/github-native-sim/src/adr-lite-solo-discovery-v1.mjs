@@ -613,6 +613,14 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    if(answer?.candidate)recordCandidate(answer.candidate,
     [candidateRefIndex,sourceRefIndex],isAttacker?'ATTACK_INTEGRATION_CANDIDATE':
     'FLOW_INTEGRATION_CANDIDATE');
+   // One accepted integration investigation may expressly author several
+   // distinct candidate objects. Never collapse these to the singular field
+   // or to the parent assessment's classification.
+   arr(answer?.candidates).forEach((candidate,index)=>{
+    recordCandidate(candidate,[sourceIndex(unitId,
+     selector+'.candidates['+index+']'),sourceRefIndex],
+     isAttacker?'ATTACK_INTEGRATION_CANDIDATE':'FLOW_INTEGRATION_CANDIDATE');
+   });
    integrationAnswerRefs.push({
     unitId,role:isAttacker?'ATTACK':'FLOW',originalIndex:i,
     obligationId:answer?.obligationId??null,assessment:answer?.assessment??null,
