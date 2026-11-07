@@ -1253,7 +1253,7 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
   const pinned=new Set([...(definition.controllerPrefillFields??[]),
    ...(action.controllerPrefillFields??[]),
    ...asArray(issued.automationOwnedFields),
-   'recordKey','tempKey','candidateKey','obligationId','subjectKey',
+   'automationOwnedFields','recordKey','tempKey','candidateKey','obligationId','subjectKey',
    'findingKey','testGroupId','groupKey']);
   const next=clone(entry.value);
   for(const key of pinned){
