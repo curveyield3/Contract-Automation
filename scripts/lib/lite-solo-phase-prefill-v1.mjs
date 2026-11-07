@@ -590,6 +590,13 @@ export function normalizeFormalObligationsIntoLedger({
   const byId=new Map(ledger.obligations.map((o,i)=>[
     String(o?.obligationId??''),i]).filter(([id])=>id));
   let created=0;
+  const originalsBySelector=new Map();
+  for(const source of Array.isArray(originalRecordOrigins)?originalRecordOrigins:[]){
+   if(!source?.canonicalRecordSelector)continue;
+   const key=source.canonicalRecordSelector;
+   const list=originalsBySelector.get(key)??[];
+   list.push(source);originalsBySelector.set(key,list);
+  }
   (Array.isArray(items)?items:[items]).forEach((item,index)=>{
     if(!item||typeof item!=='object'||Array.isArray(item))return;
     if(item.requiredPhase===undefined||!item.requiredAction||!item.completionCondition)return;
@@ -601,9 +608,7 @@ export function normalizeFormalObligationsIntoLedger({
     const originalCanonicalRecordPath=
       typeof sourceCollectionPath==='string'?
        sourceCollectionPath+'['+index+']':null;
-    const matchingSources=Array.isArray(originalRecordOrigins)?
-      originalRecordOrigins.filter(ref=>ref?.canonicalRecordSelector===
-       originalCanonicalRecordPath):[];
+    const matchingSources=originalsBySelector.get(originalCanonicalRecordPath)??[];
     const submittedSourceRef={canonicalPath:canonicalRel,
       originalDocumentPath:sourceDocumentPath??canonicalRel,
       originalSourceSelector:sourceSelector,
@@ -726,17 +731,23 @@ export function normalizeFormalObligationsIntoLedger({
 export function applyObligationDispositionsToLedger({ledger,canonical,sequence,canonicalRel,now,root=null,authorityRoot=null}){
   ledger.obligations??=[];
   const byId=new Map(ledger.obligations.map(o=>[String(o?.obligationId??''),o]).filter(([id])=>id));
-  const rows=[],sourceRows=[
+  const rows=[],originalIndex=new Map();
+  for(const source of [
     ...(canonical.automationOutputs?.acceptedUnitRecordOrigins?.records??[]),
     ...(canonical.automationOutputs?.directPhaseRecordOrigins?.records??[])
-  ];
+  ]){
+   if(!source?.canonicalRecordSelector)continue;
+   const selector=source.canonicalRecordSelector;
+   const list=originalIndex.get(selector)??[];
+   list.push(source);originalIndex.set(selector,list);
+  }
   for(const [step,action] of Object.entries(canonical?.actions??{})){
     const value=action?.outputs?.obligationDispositions;
     if(!Array.isArray(value))continue;
     for(const [index,row] of value.entries()){
       if(!row||typeof row!=='object'||Array.isArray(row))continue;
       const selector='actions.'+step+'.outputs.obligationDispositions['+index+']';
-      const matches=sourceRows.filter(x=>x?.canonicalRecordSelector===selector);
+      const matches=originalIndex.get(selector)??[];
       rows.push({row,selector,
         originalAcceptedRecordSource:matches.length===1?matches[0]:null,
         sourceAvailability:matches.length===1?'SOURCE_BOUND':
