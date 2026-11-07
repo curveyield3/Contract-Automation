@@ -1238,6 +1238,34 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  const ready=finalizeReadinessV1({root,campaignPath,directory,phase});
  if(!ready.ready)return {status:'AWAITING_WORKER_FILES',unitIds:ready.unitIds};
  const {plan,queue}=ready,assignment=directory.currentAssignment,byFile=new Map();
+ const phaseSchema=loadPhaseSchema(root,authorityFor(directory),phase).schema;
+ // Reconstruct issued rows from their immutable member identity, not from an
+ // editable raw submission that can rewrite prefilled subject/source fields.
+ // This normalizes only controller-owned values; it never judges AI analysis.
+ const immutableIssuedValue=(member,entry)=>{
+  const issued=member.initialValue;
+  if(!issued||typeof issued!=='object'||Array.isArray(issued)||
+     !entry?.value||typeof entry.value!=='object'||Array.isArray(entry.value))
+   return entry;
+  const step=member.path?.[1],field=member.field;
+  const action=phaseSchema.actions?.[step]??{};
+  const definition=action.fields?.find(spec=>spec.name===field)??{};
+  const pinned=new Set([...(definition.controllerPrefillFields??[]),
+   ...(action.controllerPrefillFields??[]),
+   ...asArray(issued.automationOwnedFields),
+   'recordKey','tempKey','candidateKey','obligationId','subjectKey',
+   'findingKey','testGroupId','groupKey']);
+  const next=clone(entry.value);
+  for(const key of pinned){
+   if(!Object.hasOwn(issued,key))continue;
+   const value=issued[key];
+   if(value===undefined||value===null||
+      (typeof value==='string'&&(!value.trim()||value.startsWith('<')||value==='TODO')))
+    continue;
+   next[key]=clone(value);
+  }
+  return {...entry,value:next};
+ };
  for(const u of plan.units.filter(u=>['SHARD','APPEND','BATCH'].includes(u.kind))){
   const accepted=read(root,queue.units[u.unitId].acceptedPath);
   if(u.kind==='BATCH'){
@@ -1246,11 +1274,13 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
     const entry=entries.find(e=>e?.key===member.recordKeys?.[0]);
     if(!entry)continue; // Do not invent material that the Worker did not send.
     const group=byFile.get(member.shardPath)??[];
-    group.push({unit:member,entries:[entry]});byFile.set(member.shardPath,group);
+    group.push({unit:member,entries:[immutableIssuedValue(member,entry)]});byFile.set(member.shardPath,group);
    }
   }else{
    const group=byFile.get(u.shardPath)??[];
-   group.push({unit:u,entries:Array.isArray(accepted.submission?.entries)?accepted.submission.entries:[]});
+   const entries=Array.isArray(accepted.submission?.entries)?accepted.submission.entries:[];
+   group.push({unit:u,entries:u.kind==='SHARD'?
+    entries.map(entry=>immutableIssuedValue(u,entry)):entries});
    byFile.set(u.shardPath,group);
   }
  }
