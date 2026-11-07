@@ -741,6 +741,7 @@ function noWork(queue,plan){
  if(plan.units.some(u=>queue.units[u.unitId].status==='SUBMITTED'))return 'AWAITING_APPROVAL';
  if(plan.units.some(u=>queue.units[u.unitId].status==='CLAIMED'))return 'ALL_WORK_CLAIMED';
  if(plan.units.some(u=>queue.units[u.unitId].status==='BLOCKED_DEPENDENCY'))return 'AWAITING_WORKER_SUBMISSION';
+ if(available(queue,plan).length)return 'AVAILABLE_WORK';
  return 'NO_ELIGIBLE_WORK';
 }
 function batchIndex(root,campaign,phase,requestId,units){
@@ -1273,7 +1274,7 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
   ...result,
   acceptedUnits:result.acceptedUnits??[],reworkUnits:result.reworkUnits??[],
   staleUnits:result.staleUnits??[],unchangedUnits:result.unchangedUnits??[],
-  waitingUnits:result.waitingUnits??[],newlyEligibleUnits:result.newlyEligibleUnits??[],
+  waitingUnits:result.waitingUnits??[],
   nextPhaseStatus,phaseStatus:nextPhaseStatus,
   ...(issuedContinuationUnitIds.length?{issuedContinuationUnitIds}:{}),
   ...(continuationIssueError?{continuationIssueError}:{}),
