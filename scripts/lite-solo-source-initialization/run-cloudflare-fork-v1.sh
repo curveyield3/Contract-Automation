@@ -117,15 +117,16 @@ else
   git config user.name 'CurveYield Lite-Solo Source Initialization'
   git config user.email 'lite-solo@users.noreply.github.com'
   authority_parent='Machine Intelligence Audit Controller'
-  authority_release='machine-intelligence-v7'
-  authority_root="$authority_parent/Audit Skill v7"
+  authority_release='machine-intelligence-v8'
+  authority_root="$authority_parent/Audit Skill v8"
   test -f "$authority_root/MANIFEST.json" || { echo '::error::Machine Intelligence authority package is missing' >&2; exit 1; }
   authority_packages=("$authority_root")
   skill_home="$authority_root/SKILL.md"
-  skill_repo_path='curveyield3/Audit-Controller/Machine Intelligence Audit Controller/Audit Skill v7'
+  skill_repo_path='curveyield3/Audit-Controller/Machine Intelligence Audit Controller/Audit Skill v8'
   skill_release="$(jq -r .release "$authority_root/MANIFEST.json")"
   skill_revision="$(jq -r .packageRevision "$authority_root/MANIFEST.json")"
-  [ "$skill_release" = "$authority_release" ] && [ "$skill_revision" = 'v7' ] || { echo "::error::Machine Intelligence manifest version mismatch" >&2; exit 1; }
+  [ "${FORK_EXPECTED_AUTHORITY_RELEASE:-}" = "$skill_release" ] || { echo '::error::Worker requested authority release differs from selected Machine Intelligence manifest' >&2; exit 1; }
+  [ "$skill_release" = "$authority_release" ] && [ "$skill_revision" = 'v8' ] || { echo "::error::Machine Intelligence manifest version mismatch" >&2; exit 1; }
   test -f "$skill_home" || { echo "::error::Machine Intelligence SKILL.md missing" >&2; exit 1; }
   skill_sha="$(sha256sum "$skill_home" | awk '{print $1}')"
   skill_blob="$(git rev-parse "HEAD:$skill_home")"
