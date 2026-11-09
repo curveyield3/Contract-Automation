@@ -2729,7 +2729,8 @@ async function miStep8Native(route,command={}){
  await recordPrivateCommunication('worker_request',JSON.stringify({route,...body}));
  const res=await fetch(workerBase.replace(/\/$/,'')+route,{
   method:'POST',headers:{authorization:'Bearer '+await identity(),
-   'content-type':'application/json'},
+   'content-type':'application/json',
+   'x-mi-dispatch-correlation':dispatchCorrelation},
   body:JSON.stringify(body),signal:AbortSignal.timeout(150000)});
  const raw=await res.text();
  await recordPrivateCommunication('worker_response',raw);
