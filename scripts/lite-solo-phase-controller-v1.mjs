@@ -1257,7 +1257,8 @@ if([1,2,3,8,9,10].includes(sequence)){
 // only explicit authored many-to-many links; unanswered and unpromoted
 // questions stay available by exact GitHub checkpoint source, without
 // becoming a GitHub-determined security judgment.
-if([4,5,6,8,9,10].includes(sequence)){
+if([4,5,6,8,9,10].includes(sequence)||
+   [1,2,3].includes(sequence)&&directory.authorityRelease==='machine-intelligence-v8'){
  try{
   const questionAnswerSources=collectAcceptedQuestionAnswerSourcesV1({
    root,campaignPath,directory,phase:sequence});
@@ -1365,8 +1366,27 @@ if(sequence===10){
     ...carriedLimitations,
     ...open.map(o=>[o.obligationId,o.statusReason,o.requiredAction].filter(Boolean).join(' | ')).filter(Boolean)
   ];
-  if(!canonical.automationOutputs.residualLimitations.length) canonical.automationOutputs.residualLimitations=['NONE_IDENTIFIED'];
-  canonical.automationOutputs.unresolvedSubstantiveQuestions=open.length?open.map(o=>o.obligationId??o.statusReason??'OPEN_OBLIGATION'):['NONE_IDENTIFIED'];
+  // A ledger count is administrative bookkeeping; MiMo decides substantive
+  // residual concerns by examining all accepted original questions and evidence.
+  canonical.automationOutputs.formalOpenObligationLedgerStatus={
+    schemaVersion:'curveyield-phase10-formal-ledger-scope-v1',
+    ledgerSource:'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json',
+    openFormalObligationCount:open.length,
+    openFormalObligationIds:open.map(o=>o.obligationId??null),
+    statement:open.length?'FORMAL_OPEN_OBLIGATIONS_RECORDED':
+      'NO_FORMAL_OPEN_OBLIGATIONS_IN_THIS_LEDGER',
+    historicalSubstantiveConcernsEvaluatedByLedger:false,
+    historicalQuestionsAndUnpromotedOriginalsSource:
+      'automationOutputs.originalAcceptedCanonicalEvidenceHistory',
+    historicalRiskDispositionOwner:'MIMO',
+    emptyFormalLedgerMeansNoGlobalRiskClosure:true
+  };
+  if(!canonical.automationOutputs.residualLimitations.length)
+    canonical.automationOutputs.residualLimitations=[
+      'NO_CARRIED_LIMITATIONS_IN_FORMAL_LEDGER; HISTORICAL_CONCERNS_NOT_EVALUATED_BY_THIS_PROJECTION'];
+  canonical.automationOutputs.unresolvedSubstantiveQuestions=open.length?
+    open.map(o=>'FORMAL_OPEN_OBLIGATION: '+String(o.obligationId??o.statusReason??'OPEN_OBLIGATION')):
+    ['NO_FORMAL_OPEN_OBLIGATIONS; HISTORICAL_CONCERNS_NOT_EVALUATED_BY_THIS_PROJECTION'];
   canonical.automationOutputs.fullUpgradeRecommendations=omissions.length&&!(omissions.length===1&&omissions[0]==='NONE_IDENTIFIED')
     ? omissions.map(x=>'Execute Full-path delta for omitted Lite work: '+x)
     : ['NONE_IDENTIFIED'];
