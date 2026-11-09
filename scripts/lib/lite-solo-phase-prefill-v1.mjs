@@ -967,7 +967,9 @@ function inheritedAcceptedRecordSourceRefsV1({root,campaignPath,sequence}){
      'automationOutputs.explicitQuestionOutputLinks':null,
    questionAnswerCheckpointSourceScheme:
     canonical?.automationOutputs?.questionAnswerSources?
-     'questions[].answerVersions[].checkpointPath + checkpointSha256 + checkpointRecordSelector':null,
+     (canonical.automationOutputs.questionAnswerSources.directSourceSidecars?.length?
+      'Direct originals: questions[].answerVersions[].originalPrivateR2Source (authorized Worker read); queued originals: questions[].answerVersions[].checkpointPath + checkpointSha256':
+      'questions[].answerVersions[].checkpointPath + checkpointSha256 + checkpointRecordSelector'):null,
    questionSourceAvailability:
     canonical?.automationOutputs?.questionAnswerSources?.availability??
      'NOT_RECORDED_IN_HISTORICAL_CANONICAL',
@@ -1147,7 +1149,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     // as evidence that there were zero questions or no vulnerabilities.
     const history=form.automationInputs.acceptedRecordSourceHistory??[];
     form.automationInputs.questionOutputAssociationHistory=history
-     .filter(ref=>[4,5,6,8,9].includes(ref.phaseSequence))
+     .filter(ref=>[1,2,3,4,5,6,8,9].includes(ref.phaseSequence))
      .map(ref=>({
       sourcePhaseSequence:ref.phaseSequence,
       canonicalArtifactPath:ref.canonicalArtifactPath,
@@ -1160,6 +1162,10 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
        ref.questionAnswerSourceSelector+'.questions':null,
       originalAnsweredVersionLocator:
        ref.questionAnswerCheckpointSourceScheme,
+      directPrivateAnswerAccess:ref.questionAnswerCheckpointSourceScheme?.includes('Direct originals')?
+        {operation:'direct_question_source',authentication:'SIGNED_MI_RUN',
+         sourceRequired:'SEALED_CANONICAL_RECEIPT_AND_EXACT_R2_SHA256',
+         answerTextNeverPublic:true}:null,
       associationAvailability:ref.explicitQuestionOutputLinkSelector?
        'SOURCE_LINK_ROSTER_PRESENT':'NO_HISTORICAL_LINK_ROSTER_RECORDED',
       questionSourceAvailability:ref.questionSourceAvailability,
