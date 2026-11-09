@@ -2081,7 +2081,8 @@ function miLocalEvidenceReadRequestV1(raw){
  if(!parsed||Array.isArray(parsed)||typeof parsed!=='object')return null;
  const families=['admittedSourceEvidenceRequest','packetEvidenceRequest',
   'sourceEvidenceRequest','originalCanonicalEvidenceRequest','questionHistoryEvidenceRequest',
-  'packetQuestionEvidenceRequest','directQuestionEvidenceRequest'];
+  'packetQuestionEvidenceRequest','directQuestionEvidenceRequest',
+  'currentDirectOriginalAnswerRequest'];
  const active=families.filter(f=>Object.hasOwn(parsed,f));
  if(!active.length)return null;
  if(active.length!==1||Object.keys(parsed).length!==1)
@@ -2717,7 +2718,10 @@ async function runTechnicalQuestionTransportV1(){
      canonicalPath:q.canonicalPath,phaseSequence:q.phaseSequence,
      unitId:q.unitId,questionId:q.questionId,answerSha256:q.answerSha256,
      offset:q.offset??0}));
-   }else result=await modelLocalEvidenceReadV1(original,
+   }else if(read.family==='currentDirectOriginalAnswerRequest')
+    result={availability:'CURRENT_DIRECT_ORIGINAL_AVAILABLE_DURING_FIELD_ANSWER',
+     instruction:'Complete this technical question and use currentDirectOriginalAnswerRequest in the subsequent signed direct field-answer operation.'};
+   else result=await modelLocalEvidenceReadV1(original,
      packetEvidence.canonicals,packetEvidence.phase1,packetEvidence.questions);
    if(localReads.length===2){
     const at=localReads.shift();dialogue.splice(at,2);
@@ -2896,10 +2900,14 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
    priorPrivateDirectAnswer:{directQuestionEvidenceRequest:{
     canonicalPath:'<exact receipt-bound prior canonical path>',
     phaseSequence:1,unitId:'<original shard>',questionId:'<question ID>',
-    answerSha256:'<original private SHA-256>',offset:0}}},
+    answerSha256:'<original private SHA-256>',offset:0}},
+   currentDirectOriginal:typed?null:{
+    currentDirectOriginalAnswerRequest:{offset:0},
+    sourceStatus:contract.directOriginalTechnicalAnswer?.availability??'NOT_AVAILABLE',
+    completeOriginalRequiredBeforeFieldSecurityConclusion:true}},
   rule:'Do not automatically promote investigative questions into findings. Only explicitly authored field answers and question links become formal outputs.'
  };
- const system='You are MiMo, the sole substantive smart-contract auditor. Answer the precise GitHub-issued field question as JSON. Original source and prior questions are evidence, not automatic security conclusions. You may request one original evidence page with a JSON admittedSourceEvidenceRequest, packetEvidenceRequest, packetQuestionEvidenceRequest or directQuestionEvidenceRequest; local reads are not Worker/API commands. Use exact receipt-bound prior canonical, original shard/question and answer SHA for private direct answers. Never invent supporting execution or PASS, canonical field paths, record IDs, lease data or controller acceptance. Preserve controller-owned prefills. The original Github adapter alone compiles output records. Return one JSON object containing exactly the requested answer property after investigation.';
+ const system='You are MiMo, the sole substantive smart-contract auditor. Answer the precise GitHub-issued field question as JSON. Original source and prior questions are evidence, not automatic security conclusions. You may request one original evidence page with a JSON admittedSourceEvidenceRequest, packetEvidenceRequest, packetQuestionEvidenceRequest, directQuestionEvidenceRequest or currentDirectOriginalAnswerRequest; local reads are not Worker/API commands. For the CURRENT direct answer awaiting formal field authoring, retrieve all offset pages from the signed field contract until nextOffset is null; an R2 manifest alone does not contain the answer text. Use exact receipt-bound prior canonical, original shard/question and answer SHA for private direct answers. Never invent supporting execution or PASS, canonical field paths, record IDs, lease data or controller acceptance. Preserve controller-owned prefills. The original Github adapter alone compiles output records. Return one JSON object containing exactly the requested answer property after investigation.';
  async function ask(task,key){
   const messages=[{role:'system',content:system},
    {role:'user',content:JSON.stringify(context)},
@@ -2929,6 +2937,14 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
       canonicalPath:q.canonicalPath,phaseSequence:q.phaseSequence,
       unitId:q.unitId,questionId:q.questionId,answerSha256:q.answerSha256,
       offset:q.offset??0}));
+    }else if(request.family==='currentDirectOriginalAnswerRequest'){
+     if(typed)page={availability:'CURRENT_DIRECT_ORIGINAL_ONLY_FOR_DIRECT_PHASE_FIELDS'};
+     else{
+      const q=request.request??{};
+      page=JSON.parse(await workerCall({operation:'field_contract',
+       unitId:contract.unitId,lease:contract.lease,
+       directOriginalAnswerOffset:q.offset??0}));
+     }
     }else page={availability:'UNAVAILABLE_LOCAL_READ_FAMILY',family:request.family};
     if(last.length>=2){const old=last.shift();messages.splice(old,2);
      for(let i=0;i<last.length;i++)last[i]-=2;}
