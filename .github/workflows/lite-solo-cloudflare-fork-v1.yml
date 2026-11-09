@@ -55,7 +55,7 @@ jobs:
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           FORK_CALLBACK_TOKEN: ${{ secrets.MACHINE_INTELLIGENCE_FORK_TOKEN }}
-          CLOUDFLARE_WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL }}
+          CLOUDFLARE_WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL || 'https://lite-solo-api.jamesnexus9999.workers.dev' }}
           CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
           AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
