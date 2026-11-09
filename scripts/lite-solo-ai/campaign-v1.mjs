@@ -2945,7 +2945,9 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
   }
  }
  let submission;
- if(!typed){
+ const directAppend=!typed&&contract.descriptor?.append===true;
+ const resumedDirectAppend=directAppend?contract.directAppendProgress:null;
+ if(!typed&&!resumedDirectAppend){
   const shard=await ask({task:remediation?'AUTHOR_SOURCE_BOUND_REVISED_DIRECT_SHARD':'AUTHOR_COMPLETE_ORIGINAL_DIRECT_SHARD',
    originalQuestion:contract.originalTechnicalQuestion,
    frozenOriginalFixedQuestionPlan:contract.originalTechnicalQuestion?.fixedQuestionPlan??null,
@@ -2953,7 +2955,9 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
    originalControllerDescriptor:contract.descriptor,
    unmodifiedOriginalShard:contract.inputFileTemplate,
    responseShape:{shard:'<complete JSON shard>'},
-   instructions:'Preserve controller-prefilled values and original record keys, issued ordinals and field destinations. For each existing controller-issued collection row, answer EVERY exact frozen literal item-field question in catalog order. Several item-field questions belong to one original canonical record. Only use collectionQuestion when fixedQuestionPlan.mode is AI_OWNED_OPEN_COLLECTION; do not apply it to fixed prefilled rows. Preserve a legitimate original negative sentinel unless source and frozen form permit genuine replacement. MiMo alone authors all substantive values and the COMPLETE single direct shard.'},'shard');
+   instructions:directAppend?
+    'Author the original direct APPEND first page only, retaining its issued path and exact PATH_JSON:APPEND-0001 etc entry keys; at most 1,024 entries and 1 MiB of pretty-serialized JSON. Include explicit boolean appendContinuation: true if more distinct authored records remain; false only when the full logical collection is complete. MiMo alone authors substantive content and completion; never invent controller-issued fixed record IDs, merge discoveries or mistake the first page for an entire unbounded collection.':
+    'Preserve controller-prefilled values and original record keys, issued ordinals and field destinations. For each existing controller-issued collection row, answer EVERY exact frozen literal item-field question in catalog order. Several item-field questions belong to one original canonical record. Only use collectionQuestion when fixedQuestionPlan.mode is AI_OWNED_OPEN_COLLECTION; do not apply it to fixed prefilled rows. Preserve a legitimate original negative sentinel unless source and frozen form permit genuine replacement. MiMo alone authors all substantive values and the COMPLETE single direct shard.'},'shard');
   if(!shard||typeof shard!=='object'||Array.isArray(shard))
    throw Error('Direct shard must be MiMo-authored original JSON object');
   submission=shard;
@@ -3058,7 +3062,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
    String(disposition.privateR2Key||'private source')+', SHA256='+
    String(disposition.originalSha256||'unknown')+
    '; original unit remains leased; MiMo must author a bounded chunk before controller-issued continuation');
- const recordedStageStatuses=new Set(['CONTROLLER_VALIDATION_QUEUED','ACTIVE',
+ const recordedStageStatuses=new Set(['CONTROLLER_VALIDATION_QUEUED','ACTIVE','UNIT_ACCEPTED_LOCALLY',
    'REVIEW_SUBSTEP_READY','REMEDIATION_WORK_UPDATED','SUBSTEP_SUBMISSION_PENDING']);
   if(!recordedStageStatuses.has(result.originalWorkerStatus)&&
      result.originalWorkerStatus!=='REWORK_REQUIRED')
