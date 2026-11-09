@@ -642,7 +642,7 @@ async function sourceBoundQuestionHistoryV1(raw){
    unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
     indexPath,status:'NOT_PUBLISHED_OR_UNREADABLE'});continue;
   }
-  const index=ix.data;
+  const index=await miQHydratePinnedV1(ix.data,indexPath,historySnapshotCommit);
   if(index?.schemaVersion!=='curveyield-ai-question-index-v1'||
      index?.campaignId!==campaignId||
      index?.campaignGenerationId!==directory.campaignGenerationId||
@@ -686,7 +686,8 @@ async function sourceBoundQuestionHistoryV1(raw){
    historyReferenceKey:[item.phaseSequence,item.unitId,ix.file.sha256,index.phaseEpoch].join(':'),
    referenceOrigin:'CURRENT_ACCEPTED_UNIT',
    acceptedCanonicalRefs:[],availability:'PINNED_QUESTION_INDEX_VERIFIED',
-   questionRoster:index.questions,originalIndexText:ix.file.text,checkpoints});
+   questionRoster:index.questions,logicalQuestionCount:index.questionCount,
+   logicalCheckpointCount:index.revision,originalIndexText:ix.file.text,checkpoints});
  }
  return records.length||unavailable.length?{
   schemaVersion:'curveyield-ai-question-evidence-delivery-v1',
@@ -713,8 +714,8 @@ function questionHistoryModelContextV1(history){
   phaseEpoch:h.phaseEpoch??null,packetSha256:h.packetSha256??null,
   indexPath:h.indexPath,indexSha256:h.indexSha256,
   indexRevision:h.indexRevision,
-  questionCount:Array.isArray(h.questionRoster)?h.questionRoster.length:null,
-  checkpointCount:h.checkpoints?.length??0
+  questionCount:h.logicalQuestionCount??(Array.isArray(h.questionRoster)?h.questionRoster.length:null),
+  checkpointCount:h.logicalCheckpointCount??h.checkpoints?.length??0
  });
  return {
   schemaVersion:'curveyield-ai-question-model-evidence-v1',
@@ -770,8 +771,8 @@ async function questionHistoryEvidenceReadV1(history,request){
   acceptedCanonicalRefs:h.acceptedCanonicalRefs??[],
   phaseEpoch:h.phaseEpoch??null,packetSha256:h.packetSha256??null,
   indexPath:h.indexPath,indexSha256:h.indexSha256,indexRevision:h.indexRevision,
-  questionCount:Array.isArray(h.questionRoster)?h.questionRoster.length:null,
-  checkpointCount:h.checkpoints?.length??0
+  questionCount:h.logicalQuestionCount??(Array.isArray(h.questionRoster)?h.questionRoster.length:null),
+  checkpointCount:h.logicalCheckpointCount??h.checkpoints?.length??0
  });
  if(!history)return {...base,availability:'QUESTION_HISTORY_NOT_RETRIEVED'};
  if(req.kind==='HISTORY_INDEX')return {...base,kind:req.kind,availability:'AVAILABLE',
@@ -976,7 +977,7 @@ async function sourceBoundHistoricalQuestionIndexV1(history,source){
  if(typeof source.indexPath!=='string'||!source.indexPath.startsWith('campaigns/'))
   return 'HISTORICAL_INDEX_PATH_UNAVAILABLE';
  const loaded=await historyJsonV1(source.indexPath).catch(()=>null);
- const index=loaded?.data;
+ const index=loaded?await miQHydratePinnedV1(loaded.data,source.indexPath,historySnapshotCommit):null;
  const original=source.expectedHistoricalReference??{};
  if(!loaded||loaded.file.sha256!==source.indexSha256||
     index?.schemaVersion!=='curveyield-ai-question-index-v1'||
@@ -993,6 +994,8 @@ async function sourceBoundHistoricalQuestionIndexV1(history,source){
   return 'HISTORICAL_INDEX_NOT_RETRIEVABLE_AT_ACCEPTED_SHA';
  source.originalIndexText=loaded.file.text;
  source.questionRoster=index.questions;
+ source.logicalQuestionCount=index.questionCount;
+ source.logicalCheckpointCount=index.revision;
  source.indexRevision=index.revision;
  source.phaseEpoch=index.phaseEpoch;
  source.packetSha256=index.packetSha256;
