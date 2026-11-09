@@ -254,6 +254,78 @@ export function collectAcceptedQuestionHistoryRefsV1({
  roster.availability='COLLECTED_NONBLOCKING';
  return roster;
 }
+// GitHub-only original answer proof. Preserve all original bytes, verify each
+// bound UTF-8 content page and the full SHA before publishing canonical links.
+function verifiedSegmentedAnswerSourceV1(root,ref,index,question){
+ const base=path.posix.dirname(index.questionIndexPath)+'/answers/';
+ if(!ref||typeof ref.path!=='string'||!ref.path.startsWith(base)||
+    !/^[a-f0-9]{64}$/.test(String(ref.sha256??'')))
+  throw Error('original answer manifest pointer missing or outside issued unit');
+ const raw=fs.readFileSync(repoFile(root,ref.path));
+ if(hex(raw)!==ref.sha256)throw Error('committed original answer manifest SHA mismatch');
+ const m=JSON.parse(raw.toString('utf8'));
+ const expected={campaignId:index.campaignId,
+  generationId:index.campaignGenerationId,sourceSha256:index.sourceSha256,
+  authorityDigest:index.authorityDigest,phaseSequence:index.phaseSequence,
+  phaseEpoch:index.phaseEpoch,unitId:index.unitId,packetSha256:index.packetSha256,
+  questionId:question.questionId,questionSha256:hex(Buffer.from(question.questionText,'utf8')),
+  fullSha256:ref.fullSha256,scopeSha256:ref.scopeSha256,
+  totalBytes:ref.totalBytes,segmentCount:ref.segmentCount,pageCount:ref.pageCount};
+ if(m.schemaVersion!=='curveyield-ai-original-answer-manifest-v1'||
+    Object.entries(expected).some(([k,v])=>m[k]!==v)||
+    m.pageCount!==m.segmentCount||m.verifiedOriginalSha256!==m.fullSha256||
+    m.storage!=='IMMUTABLE_GITHUB_PAGES'||m.originalUtf8BoundaryPages!==true)
+  throw Error('original answer manifest scope or contents differ from accepted question');
+ const pages=[],seen=new Set();let pointer=m.tail;
+ while(pointer){
+  if(typeof pointer.path!=='string'||!pointer.path.startsWith(base)||
+     seen.has(pointer.path)||!/^[a-f0-9]{64}$/.test(String(pointer.sha256??'')))
+   throw Error('invalid/cyclic original answer page reference');
+  seen.add(pointer.path);
+  const bytes=fs.readFileSync(repoFile(root,pointer.path));
+  if(hex(bytes)!==pointer.sha256)throw Error('original GitHub answer page digest mismatch');
+  const p=JSON.parse(bytes.toString('utf8'));
+  if(p.schemaVersion!=='curveyield-ai-original-answer-page-v1'||
+     Object.entries(expected).some(([k,v])=>k==='pageCount'?false:p[k]!==v)||
+     p.segmentIndex!==pointer.segmentIndex||p.byteStart!==pointer.byteStart||
+     p.byteEnd!==pointer.byteEnd||typeof p.dataBase64!=='string')
+   throw Error('original answer page is not source- or ordinal-bound');
+  const body=Buffer.from(p.dataBase64,'base64');
+  if(body.toString('base64')!==p.dataBase64||
+     hex(body)!==p.dataSha256||body.length!==p.byteEnd-p.byteStart)
+   throw Error('original answer bytes do not match immutable page digest');
+  new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(body);
+  pages.push({path:pointer.path,sha256:pointer.sha256,index:p.segmentIndex,
+   start:p.byteStart,end:p.byteEnd,previous:p.previous});
+  pointer=p.previous;
+ }
+ pages.reverse();
+ const digest=createHash('sha256');let offset=0;
+ for(let i=0;i<pages.length;i++){
+  const p=pages[i];
+  if(p.index!==i||p.start!==offset||
+    (i===0&&p.previous!==null)||
+    (i>0&&(p.previous?.path!==pages[i-1].path||
+            p.previous?.sha256!==pages[i-1].sha256)))
+   throw Error('original answer page chain is incomplete or reordered');
+  const row=JSON.parse(fs.readFileSync(repoFile(root,p.path),'utf8'));
+  const data=Buffer.from(row.dataBase64,'base64');
+  if(hex(data)!==row.dataSha256)throw Error('original answer source mutated');
+  digest.update(data);offset=p.end;
+ }
+ if(pages.length!==m.pageCount||offset!==m.totalBytes||
+    digest.digest('hex')!==m.fullSha256)
+  throw Error('original GitHub answer incomplete or full SHA mismatch');
+ return {answerManifestSource:{path:ref.path,sha256:ref.sha256,
+   selector:'originalAnswerManifest',sourceCommit:ref.sourceCommit??null},
+  originalAnswerSha256:m.fullSha256,originalAnswerBytes:m.totalBytes,
+  originalPageCount:m.pageCount,
+  firstContentPage:pages[0]?{path:pages[0].path,sha256:pages[0].sha256}:null,
+  lastContentPage:pages.at(-1)?{path:pages.at(-1).path,
+   sha256:pages.at(-1).sha256}:null,
+  originalAnswerVerification:'PINNED_COMPLETE_UTF8_AND_FULL_SHA256'};
+}
+
 // Exact, mechanically verified question sources. The history index and each
 // checkpoint are immutable evidence; questions are NOT security outcomes.
 // A later phase may refer to any earlier accepted question, including one
