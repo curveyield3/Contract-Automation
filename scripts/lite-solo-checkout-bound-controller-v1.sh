@@ -34,7 +34,7 @@ if [ "$bound_path" != "$campaign_path" ]; then
   [ "campaigns/$(git -C "$destination" show "$head:$bound_path")" = "$campaign_path" ] || { echo 'campaign path migration alias mismatch' >&2; exit 1; }
 fi
 homepage="$(read_field '.authority.homepagePath')"
-[ "$homepage" = 'Machine Intelligence Audit Controller/Audit Skill v7/SKILL.md' ] || { echo 'unexpected Machine Intelligence authority root' >&2; exit 1; }
+[[ "$homepage" == 'Machine Intelligence Audit Controller/Audit Skill v7/SKILL.md' || "$homepage" == 'Machine Intelligence Audit Controller/Audit Skill v8/SKILL.md' ]] || { echo 'unexpected Machine Intelligence authority root' >&2; exit 1; }
 authority_root="${homepage%/SKILL.md}"
 authority_commit="$(read_field '.authority.authorityCommitSha')"
 authority_digest="$(read_field '.authority.liteSkillSha256')"
