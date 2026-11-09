@@ -642,7 +642,13 @@ async function sourceBoundQuestionHistoryV1(raw){
    unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
     indexPath,status:'NOT_PUBLISHED_OR_UNREADABLE'});continue;
   }
-  const index=await miQHydratePinnedV1(ix.data,indexPath,historySnapshotCommit);
+  let index;
+  try{index=await miQHydratePinnedV1(ix.data,indexPath,historySnapshotCommit);}
+  catch(error){
+   unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
+    indexPath,status:'PINNED_QUESTION_PAGES_UNAVAILABLE',
+    diagnostic:String(error?.message??error)});continue;
+  }
   if(index?.schemaVersion!=='curveyield-ai-question-index-v1'||
      index?.campaignId!==campaignId||
      index?.campaignGenerationId!==directory.campaignGenerationId||
@@ -982,7 +988,11 @@ async function sourceBoundHistoricalQuestionIndexV1(history,source){
  if(typeof source.indexPath!=='string'||!source.indexPath.startsWith('campaigns/'))
   return 'HISTORICAL_INDEX_PATH_UNAVAILABLE';
  const loaded=await historyJsonV1(source.indexPath).catch(()=>null);
- const index=loaded?await miQHydratePinnedV1(loaded.data,source.indexPath,historySnapshotCommit):null;
+ if(!loaded||loaded.file.sha256!==source.indexSha256)
+  return 'HISTORICAL_INDEX_NOT_RETRIEVABLE_AT_ACCEPTED_SHA';
+ let index;
+ try{index=await miQHydratePinnedV1(loaded.data,source.indexPath,historySnapshotCommit);}
+ catch{return 'HISTORICAL_PINNED_QUESTION_PAGES_UNAVAILABLE';}
  const original=source.expectedHistoricalReference??{};
  if(!loaded||loaded.file.sha256!==source.indexSha256||
     index?.schemaVersion!=='curveyield-ai-question-index-v1'||
