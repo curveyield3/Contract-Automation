@@ -1955,7 +1955,11 @@ export function renderControllerPhaseReport({schema,form,canonical}){
   const discoveryDims=discoveryRef?.evidenceDimensions??{};
   // Phase 10 reports three independent evidence categories without editing
   // the accepted AI findings or inferring a class or machine verdict.
+  const formalLedger=canonical?.automationOutputs?.formalOpenObligationLedgerStatus??null;
   const evidenceSection=Number(phase)===10?'\n## Evidence Categories and Original Source\n\n'+
+    (formalLedger?'- Carried formal-obligation ledger: '+
+      String(formalLedger.openFormalObligationCount??'UNAVAILABLE')+
+      ' open formal obligations; this administrative count does NOT evaluate historical unpromoted or private original investigative concerns. MiMo alone determines residual substantive risk.\n':'')+
     '- Function review: '+(discoveryDims.functionReview?compact(discoveryDims.functionReview):
       'SOURCE_UNAVAILABLE_OR_HISTORICAL_PROVENANCE_UNVERIFIED')+'\n'+
     '- Explicit security-class assessments: '+(discoveryDims.classAssessment?
