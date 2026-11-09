@@ -2040,6 +2040,122 @@ function miLocalEvidenceReadRequestV1(raw){
 // Question metadata comes from the authenticated controller status, not model
 // guesses. Continuation reads use immutable GitHub blobs at the exact index
 // commit; no Cloudflare per-question history database is introduced.
+// Source-bound original answer manifest retrieval. Verify every GitHub
+// UTF-8 page and the full SHA-256 before exposing any text to MiMo. Keep
+// only page locators/character offsets cached; original bytes stay paged.
+const miOriginalAnswerProofsV1=new Map();
+async function miPinnedOriginalAnswerProofV1(ref,commit,expected={}){
+ if(!ref||!ref.path?.includes('/questions/answers/')||
+    !ref.path.endsWith('_MANIFEST_v1.json')||
+    !/^[a-f0-9]{64}$/.test(String(ref.sha256??''))||
+    !/^[a-f0-9]{64}$/.test(String(ref.fullSha256??''))||
+    !/^[a-f0-9]{40}$/.test(String(commit??'')))
+  throw Error('Original answer manifest pointer is not pinned');
+ const key=commit+':'+ref.path+':'+ref.sha256;
+ if(miOriginalAnswerProofsV1.has(key))return miOriginalAnswerProofsV1.get(key);
+ const original=await miPinnedGithubFileV1(ref.path,commit);
+ if(original.text===null||original.sha256!==ref.sha256)
+  throw Error('Committed original answer manifest digest mismatch');
+ const m=JSON.parse(original.text);
+ if(m.schemaVersion!=='curveyield-ai-original-answer-manifest-v1'||
+    Object.entries(expected).some(([k,v])=>v!==undefined&&m[k]!==v)||
+    m.fullSha256!==ref.fullSha256||
+    m.scopeSha256!==ref.scopeSha256||
+    m.totalBytes!==ref.totalBytes||
+    m.segmentCount!==ref.segmentCount||
+    m.pageCount!==ref.pageCount||
+    m.pageCount!==m.segmentCount||
+    !m.originalUtf8BoundaryPages||
+    m.verifiedOriginalSha256!==m.fullSha256||
+    m.storage!=='IMMUTABLE_GITHUB_PAGES')
+  throw Error('Original answer manifest provenance differs from accepted question');
+ const base=ref.path.slice(0,ref.path.lastIndexOf('/')+1);
+ let pointer=m.tail;const seen=new Set(),pages=[];
+ while(pointer){
+  if(typeof pointer.path!=='string'||!pointer.path.startsWith(base)||
+     !/^ANSWER_Q-[0-9]{6,}_[a-f0-9]{64}_PAGE_[0-9]{6,}_v1\.json$/.test(pointer.path.slice(base.length))||
+     seen.has(pointer.path)||!/^[a-f0-9]{64}$/.test(String(pointer.sha256??'')))
+   throw Error('Original answer page chain is invalid or cyclic');
+  seen.add(pointer.path);
+  const file=await miPinnedGithubFileV1(pointer.path,commit);
+  if(file.text===null||file.sha256!==pointer.sha256)
+   throw Error('Original answer GitHub page does not match manifest hash');
+  const p=JSON.parse(file.text);
+  if(p.schemaVersion!=='curveyield-ai-original-answer-page-v1'||
+     Object.entries({campaignId:m.campaignId,generationId:m.generationId,
+      sourceSha256:m.sourceSha256,authorityDigest:m.authorityDigest,
+      phaseSequence:m.phaseSequence,phaseEpoch:m.phaseEpoch,unitId:m.unitId,
+      packetSha256:m.packetSha256,lease:m.lease,scopeSha256:m.scopeSha256,
+      questionId:m.questionId,questionSha256:m.questionSha256,
+      fullSha256:m.fullSha256,totalBytes:m.totalBytes,segmentCount:m.segmentCount})
+      .some(([k,v])=>p[k]!==v)||
+     p.segmentIndex!==pointer.segmentIndex||
+     p.byteStart!==pointer.byteStart||p.byteEnd!==pointer.byteEnd||
+     typeof p.dataBase64!=='string'||!/^[a-f0-9]{64}$/.test(String(p.dataSha256??'')))
+   throw Error('Original GitHub answer page provenance differs from manifest');
+  const data=Buffer.from(p.dataBase64,'base64');
+  if(data.toString('base64')!==p.dataBase64||sha(data)!==p.dataSha256||
+     data.length!==p.byteEnd-p.byteStart)
+   throw Error('Immutable original answer content page byte digest mismatch');
+  const decoded=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(data);
+  pages.push({path:pointer.path,sha256:pointer.sha256,
+   segmentIndex:p.segmentIndex,byteStart:p.byteStart,byteEnd:p.byteEnd,
+   byteCount:data.length,charCount:decoded.length,previous:p.previous});
+  miTechnicalFileCache.delete(commit+':'+pointer.path);
+  pointer=p.previous;
+ }
+ pages.reverse();
+ const digest=createHash('sha256');let byteOffset=0,charOffset=0;
+ for(let i=0;i<pages.length;i++){
+  const row=pages[i];
+  if(row.segmentIndex!==i||row.byteStart!==byteOffset)
+   throw Error('Original answer page chain has missing or reordered bytes');
+  if(i===0&&row.previous!==null||
+     i>0&&(row.previous?.path!==pages[i-1].path||
+             row.previous?.sha256!==pages[i-1].sha256))
+   throw Error('Original answer page predecessor is not contiguous');
+  const file=await miPinnedGithubFileV1(row.path,commit);
+  const page=JSON.parse(file.text),data=Buffer.from(page.dataBase64,'base64');
+  if(file.sha256!==row.sha256||sha(data)!==page.dataSha256)
+   throw Error('Original answer page digest changed during reconstruction');
+  digest.update(data);row.charStart=charOffset;
+  charOffset+=row.charCount;row.charEnd=charOffset;byteOffset=row.byteEnd;
+  miTechnicalFileCache.delete(commit+':'+row.path);
+ }
+ if(pages.length!==m.pageCount||byteOffset!==m.totalBytes||
+    digest.digest('hex')!==m.fullSha256)
+  throw Error('Original answer full SHA-256 or segment count mismatch');
+ const proof={manifest:m,manifestPath:ref.path,manifestSha256:ref.sha256,
+  snapshotCommit:commit,pages,totalCharacters:charOffset,
+  totalBytes:m.totalBytes,fullSha256:m.fullSha256};
+ miOriginalAnswerProofsV1.set(key,proof);
+ return proof;
+}
+async function miPinnedOriginalAnswerTextV1(ref,commit,expected,offset=0){
+ const proof=await miPinnedOriginalAnswerProofV1(ref,commit,expected);
+ if(!Number.isSafeInteger(offset)||offset<0||offset>proof.totalCharacters)
+  return {availability:'ORIGINAL_ANSWER_READ_OFFSET_OUT_OF_RANGE',
+   totalCharacters:proof.totalCharacters,requestedOffset:offset};
+ const row=proof.pages.find(p=>offset<p.charEnd)??proof.pages.at(-1);
+ if(!row)return {availability:'ORIGINAL_ANSWER_PAGES_UNAVAILABLE'};
+ const file=await miPinnedGithubFileV1(row.path,commit);
+ if(file.sha256!==row.sha256)throw Error('Pinned original answer page changed');
+ const page=JSON.parse(file.text),bytes=Buffer.from(page.dataBase64,'base64');
+ if(sha(bytes)!==page.dataSha256)
+  throw Error('Pinned original answer text page SHA-256 differs');
+ const decoded=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);
+ const relative=Math.max(0,offset-row.charStart);
+ const fragment=phase1EvidencePageV1(decoded,relative,6000);
+ const end=row.charStart+fragment.end;
+ return {availability:'EXACT_COMMITTED_ORIGINAL_ANSWER',originalText:fragment.text,
+  originalAnswerSha256:proof.fullSha256,originalAnswerBytes:proof.totalBytes,
+  manifestPath:proof.manifestPath,manifestSha256:proof.manifestSha256,
+  pagePath:row.path,pageSha256:row.sha256,
+  start:offset,end,totalChars:proof.totalCharacters,completeOriginalText:
+   offset===0&&end===proof.totalCharacters,
+  nextOffset:end<proof.totalCharacters?end:null};
+}
+
 async function miQuestionCheckpointOriginalV1(issued,checkpointIndex){
  const q=issued.questionLedger;
  const expanded=q?await miQHydratePinnedV1(q,q.indexPath,q.indexCommit):null;
