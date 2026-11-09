@@ -1162,7 +1162,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       sourceCollections:[
         'discoverySourceRefs','reconciliationEvidenceRefs',
         'candidateSourceRefIndexes','integrationAnswerRefs','flowNotes',
-        'unmappedAttackPathRefs','unmappedAttackPathSources',
+        'unmappedAttackPathRefs','unmappedAttackCandidateRefs','unmappedAttackPathSources',
         'extraAttackPathRefs','functionVerdictObservations',
         'functionVerdicts','trivialReviewSubstitutions','contractLevelFindings',
         'discoveryState.scopedClassAssessments',
@@ -1175,6 +1175,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
         integrationAnswerRefs:Array.isArray(details.integrationAnswerRefs)?details.integrationAnswerRefs.length:null,
         flowNotes:Array.isArray(details.flowNotes)?details.flowNotes.length:null,
         unmappedAttackPathRefs:Array.isArray(details.unmappedAttackPathRefs)?details.unmappedAttackPathRefs.length:null,
+        unmappedAttackCandidateRefs:Array.isArray(details.unmappedAttackCandidateRefs)?details.unmappedAttackCandidateRefs.length:null,
         extraAttackPathRefs:Array.isArray(details.extraAttackPathRefs)?details.extraAttackPathRefs.length:null,
         functionVerdictObservations:Array.isArray(details.functionVerdictObservations)?details.functionVerdictObservations.length:null,
         functionVerdicts:details.functionVerdicts&&typeof details.functionVerdicts==='object'?
@@ -1330,25 +1331,35 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       const items=summary?.payload?.reconciliationItems??null;
       const controllerFields=['recordKey','contextIds','sourceAnchor','origin','reviewerFinding','attackerFinding'];
       // Copy exact source identities; controller makes no security judgments.
-      const unmappedSourceRef=item=>{
-        if(item?.origin!=='ATTACK_UNMAPPED_FLOW')return null;
+      const isUnmappedAttackEvidence=item=>[
+        'ATTACK_UNMAPPED_FLOW','ATTACK_UNMAPPED_CANDIDATE'].includes(item?.origin);
+       const unmappedSourceRef=item=>{
+        if(!isUnmappedAttackEvidence(item))return null;
         const link=summary?.payload?.reconciliationEvidenceRefs?.[item.recordKey];
-        if(link?.referenceCollection!=='unmappedAttackPathRefs')return null;
+        const collection=item.origin==='ATTACK_UNMAPPED_CANDIDATE'?
+         'unmappedAttackCandidateRefs':'unmappedAttackPathRefs';
+        if(link?.referenceCollection!==collection)return null;
         const index=link.sourceRefIndexes?.[0];
-        const ref=Number.isInteger(index)?summary?.payload?.unmappedAttackPathRefs?.[index]:null;
+        const ref=Number.isInteger(index)?summary?.payload?.[collection]?.[index]:null;
         return ref?{
-          availability:link.availability??'SOURCE_UNAVAILABLE',
-          phaseSequence:4,unitId:ref.unitId??null,
-          originalWorkerAttempt:structuredClone(ref.originalWorkerAttempt??{availability:'NOT_RECORDED'}),
-          sourceSelector:ref.sourceSelector??null,
-          originalAnchorsSelector:ref.originalAnchorsSelector??null,
-          originalCandidateSelector:ref.originalCandidateSelector??null,
-          originalFlowIds:structuredClone(ref.originalFlowIds??null),
-          originalPathId:ref.originalPathId??null,mappingStatus:ref.mappingStatus??null,
-          acceptedPath:ref.acceptedPath??null,acceptedSha256:ref.acceptedSha256??null
+         availability:link.availability??'SOURCE_UNAVAILABLE',
+         phaseSequence:4,unitId:ref.unitId??null,
+         originalWorkerAttempt:structuredClone(ref.originalWorkerAttempt??{availability:'NOT_RECORDED'}),
+         sourceSelector:ref.sourceSelector??null,
+         parentSourceSelector:ref.parentSourceSelector??null,
+         originalAnchorsSelector:ref.originalAnchorsSelector??null,
+         originalCandidateSelector:item.origin==='ATTACK_UNMAPPED_CANDIDATE'?
+          ref.sourceSelector??null:ref.originalCandidateSelector??null,
+         originalCandidatesSelector:ref.originalCandidatesSelector??null,
+         originalCandidateValueSha256:ref.originalCandidateValueSha256??null,
+         originalCandidateIndex:ref.originalCandidateIndex??null,
+         candidateKind:ref.candidateKind??null,
+         originalFlowIds:structuredClone(ref.originalFlowIds??null),
+         originalPathId:ref.originalPathId??null,mappingStatus:ref.mappingStatus??null,
+         acceptedPath:ref.acceptedPath??null,acceptedSha256:ref.acceptedSha256??null
         }:null;
-      };
-      const records=items===null?['<PENDING_DISCOVERY>']:items.length?items.map(item=>{
+       };
+       const records=items===null?['<PENDING_DISCOVERY>']:items.length?items.map(item=>{
         const evidenceRef=unmappedSourceRef(item);
         const link=summary?.payload?.reconciliationEvidenceRefs?.[item.recordKey]??{};
         const sourceIndexes=Array.isArray(link.sourceRefIndexes)?link.sourceRefIndexes:[];
@@ -1367,15 +1378,19 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
         return {
           ...Object.fromEntries(controllerFields.map(k=>[k,item[k]])),
           discoveryEvidenceLookup,discoveryEvidenceRefs,
-          ...(item.origin==='ATTACK_UNMAPPED_FLOW'?{
+          ...(isUnmappedAttackEvidence(item)?{
             unmappedAttackEvidenceRef:evidenceRef??{availability:'SOURCE_UNAVAILABLE'},
-            unmappedAttackReviewInstruction:
-              'Read the complete original Worker ATTACK record at unmappedAttackEvidenceRef.originalWorkerAttempt.path '+
-              'using unmappedAttackEvidenceRef.sourceSelector. Examine every step, anchor, optional candidate, and unknown '+
-              'flow identity. Do not discard an observation merely because its flow ID is unissued.'
+            unmappedAttackReviewInstruction:item.origin==='ATTACK_UNMAPPED_CANDIDATE'?
+              'Read the exact original MiMo candidate at unmappedAttackEvidenceRef.originalWorkerAttempt.path '+
+              'using unmappedAttackEvidenceRef.originalCandidateSelector and the original Worker attempt SHA. '+
+              'Preserve distinct candidates even when wording overlaps. Do not invent an issued flow mapping, '+
+              'security verdict or promotion; MiMo owns these decisions.':
+              'Read the complete original Worker ATTACK path at unmappedAttackEvidenceRef.originalWorkerAttempt.path '+
+              'using unmappedAttackEvidenceRef.sourceSelector. Examine every step, anchor and nested candidate. '+
+              'Preserve the unmapped parent path independently of individual candidate leads.'
           }:{}),
           reconciliation:'<REQUIRED>',disposition:'<REQUIRED>',candidateTempKeyOrNone:'<REQUIRED>',rationale:'<REQUIRED>',
-          automationOwnedFields:item.origin==='ATTACK_UNMAPPED_FLOW'?
+          automationOwnedFields:isUnmappedAttackEvidence(item)?
             [...controllerFields,'discoveryEvidenceLookup','discoveryEvidenceRefs',
              'unmappedAttackEvidenceRef','unmappedAttackReviewInstruction']:
             [...controllerFields,'discoveryEvidenceLookup','discoveryEvidenceRefs']
