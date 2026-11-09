@@ -537,7 +537,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  const discoverySourceRefs=discoveryObservationSourceRefsV1(rows);
  // Non-canonical ATTACK extras remain in their original immutable Worker
  // attempt, with exact selector and hash. They are not promoted into findings.
- const unmappedAttackPathRefs=[],unmappedAttackPathSources=[],extraAttackPathRefs=[];
+ const unmappedAttackPathRefs=[],unmappedAttackCandidateRefs=[],unmappedAttackPathSources=[],extraAttackPathRefs=[];
  for(const {unitId,sourceReference} of rows){
   if(!unitId?.startsWith('X-'))continue;
   unmappedAttackPathSources.push({unitId,
@@ -547,6 +547,37 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    unmappedAttackPathRefs.push({...structuredClone(ref),unitId,
     acceptedPath:sourceReference?.acceptedPath??null,
     acceptedSha256:sourceReference?.acceptedSha256??null});
+  // Source-identified candidate objects from unmapped original ATTACK paths
+  // remain independent even when their parent is not a canonical attackPath.
+  for(const ref of arr(sourceReference?.unmappedAttackCandidateRefs)){
+   const candidateRef={...structuredClone(ref),unitId,
+    phaseSequence:4,acceptedPath:sourceReference?.acceptedPath??null,
+    acceptedSha256:sourceReference?.acceptedSha256??null};
+   unmappedAttackCandidateRefs.push(candidateRef);
+   const original=candidateRef.originalWorkerAttempt;
+   discoverySourceRefs.push({
+    sourceCategory:'ATTACK_UNMAPPED_CANDIDATE',
+    phaseSequence:4,unitId,role:'ATTACK',
+    availability:original?.availability==='AVAILABLE'&&
+     typeof original.path==='string'&&
+     /^[a-f0-9]{64}$/.test(String(original.sha256??''))?
+     'AVAILABLE':'SOURCE_UNAVAILABLE',
+    acceptedPath:candidateRef.acceptedPath,acceptedSha256:candidateRef.acceptedSha256,
+    // These candidate objects are NOT in the compiled accepted submission.
+    sourceSelector:null,originalCandidateSelector:candidateRef.sourceSelector,
+    originalParentSelector:candidateRef.parentSourceSelector,
+    originalWorkerAttempt:structuredClone(original??{availability:'NOT_RECORDED'}),
+    originalCandidateValueSha256:candidateRef.originalCandidateValueSha256??null,
+    recordIdentity:{
+     originalPathIndex:candidateRef.originalPathIndex,
+     originalPathId:candidateRef.originalPathId??null,
+     originalFlowIds:structuredClone(candidateRef.originalFlowIds??null),
+     originalCandidateIndex:candidateRef.originalCandidateIndex??null,
+     candidateKind:candidateRef.candidateKind??null,
+     mappingStatus:candidateRef.mappingStatus??null
+    }
+   });
+  }
   // Every extra ATTACK path, including those successfully placed into the
   // issued-flow attackPaths array, keeps its ORIGINAL Worker selector and hash.
   for(const ref of arr(sourceReference?.extraAttackPathRefs))
@@ -1037,6 +1068,24 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    originalRecordSelector:ref.sourceSelector??null
   };
  });
+ // The unmapped parent path stays separately addressable. Every original
+ // singular/plural candidate object is an additional source-bound lead;
+ // no synthesized flow mapping, finding, similarity merge or verdict.
+ unmappedAttackCandidateRefs.forEach((ref,index)=>{
+  add('ATTACK_UNMAPPED_CANDIDATE',[],null,'NO_SUBMISSION',
+   'Original ATTACK candidate at '+String(ref.sourceSelector??'SOURCE_UNAVAILABLE')+
+   '; inspect exact source before deciding any promotion.',[]);
+  const recordKey=items[items.length-1].recordKey;
+  reconciliationEvidenceRefs[recordKey]={
+   referenceCollection:'unmappedAttackCandidateRefs',sourceRefIndexes:[index],
+   availability:ref.originalWorkerAttempt?.availability==='AVAILABLE'&&
+    /^[a-f0-9]{64}$/.test(String(ref.originalWorkerAttempt.sha256??''))?
+    'AVAILABLE':'SOURCE_UNAVAILABLE',
+   originalRecordSelector:ref.sourceSelector??null,
+   originalParentSelector:ref.parentSourceSelector??null,
+   sourceMeaning:'EXPLICIT_AUTHORED_CANDIDATE_NO_FLOW_OR_VALIDITY_INFERENCE'
+  };
+ });
  const verdictRecords=Object.fromEntries([...functionVerdicts.entries()].sort(([a],[b])=>sort(a,b)));
  const discoveryState={reviewChecks:Object.fromEntries([...checks.entries()]),gaps,attackContradictions:contradictions,
   ...(state?.payload?.reviewPolicy==='correctness-verdict-v13'?{
@@ -1071,7 +1120,8 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   functionVerdicts:verdictRecords,functionVerdictObservations,
   ...(state?.payload?.reviewPolicy==='correctness-verdict-v13'
    ?{trivialReviewSubstitutions,contractLevelFindings}:{}),
-  unmappedAttackPathRefs,unmappedAttackPathSources,extraAttackPathRefs,
+  unmappedAttackPathRefs,unmappedAttackCandidateRefs,
+  unmappedAttackPathSources,extraAttackPathRefs,
   // All candidate origins, including nested ATTACK/integration/check
   // candidates, remain accessible by exact accepted-source selector.
   candidateSourceRefIndexes:discoverySourceRefs.flatMap((ref,index)=>
