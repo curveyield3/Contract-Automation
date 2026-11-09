@@ -2027,7 +2027,8 @@ function miLocalEvidenceReadRequestV1(raw){
 // commit; no Cloudflare per-question history database is introduced.
 async function miQuestionCheckpointOriginalV1(issued,checkpointIndex){
  const q=issued.questionLedger;
- const ref=q?.checkpoints?.[checkpointIndex];
+ const expanded=q?await miQHydratePinnedV1(q,q.indexPath,q.indexCommit):null;
+ const ref=expanded?.checkpoints?.[checkpointIndex];
  if(!ref||!/^[a-f0-9]{64}$/.test(ref.sha256||'')||
     !/^[a-f0-9]{40}$/.test(q.indexCommit||''))
   return {availability:'CHECKPOINT_REFERENCE_UNAVAILABLE',checkpointIndex};
@@ -2055,17 +2056,19 @@ async function miQuestionCheckpointOriginalV1(issued,checkpointIndex){
 function miQuestionLedgerContextV1(issued){
  const q=issued.questionLedger;
  if(!q)return null;
- const questions=q.questions||[],checkpoints=q.checkpoints||[];
+ const questions=q.questions??(q.nextUnanswered?[q.nextUnanswered]:[]),
+  checkpoints=q.checkpoints??(q.latestCheckpoint?[q.latestCheckpoint]:[]);
+ const paged=q.indexLayout==='PAGED_IMMUTABLE_CHAIN_V1';
  return {schemaVersion:'machine-intelligence-current-packet-original-question-ledger-v1',
   campaignId,phase:issued.scope.phase,step:issued.scope.step,unitId:issued.scope.unitId,
   round:q.round,indexRevision:q.indexRevision,
   indexPath:q.indexPath,indexCommit:q.indexCommit,
   questionCount:q.questionCount,answeredCount:q.answeredCount,status:q.status,
-  originalQuestionCount:questions.length,originalCheckpointCount:checkpoints.length,
+  originalQuestionCount:q.questionCount,originalCheckpointCount:q.indexRevision,
   initialQuestionRefs:questions.slice(0,20),
-  initialQuestionsExhaustive:questions.length<=20,
+  initialQuestionsExhaustive:!paged&&questions.length<=20,
   initialCheckpointRefs:checkpoints.slice(0,20),
-  initialCheckpointsExhaustive:checkpoints.length<=20,
+  initialCheckpointsExhaustive:!paged&&checkpoints.length<=20,
   retrievalExamples:{
    questionIndex:{packetQuestionEvidenceRequest:{kind:'QUESTION_INDEX',start:0}},
    checkpointIndex:{packetQuestionEvidenceRequest:{kind:'CHECKPOINT_INDEX',start:0}},
@@ -2082,7 +2085,8 @@ async function miQuestionLedgerReadV1(issued,request){
   indexRevision:q?.indexRevision??null};
  if(!q)return {...base,availability:'NO_PLANNED_QUESTION_LEDGER'};
  const start=Number.isSafeInteger(request?.start)&&request.start>=0?request.start:0;
- const qs=q.questions||[],refs=q.checkpoints||[];
+ const expanded=await miQHydratePinnedV1(q,q.indexPath,q.indexCommit);
+ const qs=expanded.questions||[],refs=expanded.checkpoints||[];
  if(request?.kind==='QUESTION_INDEX'){
   const rows=qs.slice(start,start+25);
   return {...base,kind:request.kind,start,total:qs.length,questions:rows,
@@ -2126,11 +2130,13 @@ async function miQuestionLedgerReadV1(issued,request){
 }
 async function miRecentOriginalAnswersV1(issued){
  const q=issued.questionLedger;
- if(!q?.questions?.length||!q?.checkpoints?.length)return [];
- const answered=q.questions.filter(x=>x.answered===true);
+ if(!q||!q.questionCount)return [];
+ const expanded=await miQHydratePinnedV1(q,q.indexPath,q.indexCommit);
+ if(!expanded.questions?.length||!expanded.checkpoints?.length)return [];
+ const answered=expanded.questions.filter(x=>x.answered===true);
  const recent=answered.slice(-6),out=[];
  for(const question of recent){
-  const index=q.checkpoints.findIndex(x=>x.revision===question.answerCheckpoint);
+  const index=expanded.checkpoints.findIndex(x=>x.revision===question.answerCheckpoint);
   if(index<0){out.push({questionId:question.questionId,availability:'CHECKPOINT_REFERENCE_NOT_IN_INDEX'});continue;}
   const found=await miQuestionCheckpointOriginalV1(issued,index);
   if(found.availability!=='PINNED_ORIGINAL_CHECKPOINT'){
