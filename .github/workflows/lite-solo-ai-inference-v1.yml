@@ -1,4 +1,5 @@
 name: Lite-Solo AI Source Inference and Autonomous Beta v6
+run-name: ${{ inputs.mode == 'autonomous' && format('MI-{0}', inputs.dispatch_tag) || github.workflow }}
 on:
   push:
     branches: [machine-intelligence-audit-controller-v1]
@@ -30,6 +31,14 @@ on:
         type: string
       campaign_id:
         description: Exact private campaign ID, including -rN (campaign mode)
+        required: false
+        type: string
+      dispatch_correlation:
+        description: Private Worker-issued correlation for a dispatched Machine Intelligence run; never supply manually
+        required: false
+        type: string
+      dispatch_tag:
+        description: SHA-256 of Worker-issued correlation, used only for authenticated run metadata
         required: false
         type: string
       expected_phase:
@@ -203,6 +212,8 @@ jobs:
       AUDIT_AI_HOP: ${{ inputs.ai_hop }}
       AUDIT_AI_SOURCE_PATH: ${{ inputs.source_path }}
       AUDIT_AI_CAMPAIGN_ID: ${{ inputs.campaign_id }}
+      AUDIT_AI_DISPATCH_CORRELATION: ${{ inputs.dispatch_correlation }}
+      AUDIT_AI_DISPATCH_TAG: ${{ inputs.dispatch_tag }}
       AUDIT_AI_EXPECTED_PHASE: ${{ inputs.expected_phase }}
       AUDIT_AI_EXPECTED_STEP: ${{ inputs.expected_step }}
       AUDIT_AI_SUBMISSION_MODE: ${{ inputs.submission_mode }}
@@ -241,6 +252,9 @@ jobs:
               ;;
             autonomous)
               test -n "$AUDIT_AI_CAMPAIGN_ID"
+              [[ "$AUDIT_AI_DISPATCH_CORRELATION" =~ ^[0-9a-f]{64}$ ]] || { echo 'Worker-issued dispatch correlation required'; exit 1; }
+              [[ "$AUDIT_AI_DISPATCH_TAG" =~ ^[0-9a-f]{64}$ ]] || { echo 'Worker-issued dispatch tag required'; exit 1; }
+              test "$(printf '%s' "$AUDIT_AI_DISPATCH_CORRELATION" | sha256sum | cut -d' ' -f1)" = "$AUDIT_AI_DISPATCH_TAG" || { echo 'Dispatch correlation/tag mismatch'; exit 1; }
               [[ "$AUDIT_AI_EXPECTED_PHASE" =~ ^[0-9]+$ ]]
               [[ "$AUDIT_AI_EXPECTED_STEP" =~ ^[0-9]+$ ]]
               [[ "$AUDIT_AI_HOP" =~ ^[0-9]+$ ]]
@@ -276,7 +290,8 @@ jobs:
           if(typeof token!=='string')throw Error('Signed OIDC identity missing');
           async function worker(route,body){
             const response=await fetch(process.env.MACHINE_INTELLIGENCE_WORKER_URL+route,{
-              method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},
+              method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json',
+                'x-mi-dispatch-correlation':process.env.AUDIT_AI_DISPATCH_CORRELATION||''},
               body:JSON.stringify({campaignId,...body}),signal:AbortSignal.timeout(90000)});
             const data=await response.json();
             if(!response.ok)throw Error('Worker '+route+' HTTP '+response.status+': '+
@@ -677,7 +692,8 @@ jobs:
           for(;pages<10000;pages++){
             const response=await fetch(process.env.MACHINE_INTELLIGENCE_WORKER_URL+'/api/ai/bridge',{
               method:'POST',
-              headers:{authorization:'Bearer '+await token(),'content-type':'application/json'},
+              headers:{authorization:'Bearer '+await token(),'content-type':'application/json',
+                'x-mi-dispatch-correlation':process.env.AUDIT_AI_DISPATCH_CORRELATION||''},
               body:JSON.stringify({campaignId,operation:'archive',...(cursor?{cursor}:{})}),
               signal:AbortSignal.timeout(150000)});
             const data=await response.json().catch(()=>null);
