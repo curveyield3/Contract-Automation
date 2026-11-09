@@ -468,7 +468,31 @@ function collectDirectQuestionSourcesV1({root,campaignPath,directory,phase}){
       originalAnswerBytes:proof.originalAnswerBytes,
       originalPrivateR2Source:{key:proof.privateR2Key,
        sha256:proof.originalAnswerSha256,
+       storageKind:'SINGLE_UTF8_R2_OBJECT',
        availability:'WORKER_R2_HASH_VERIFIED_AT_LOCAL_ACCEPTANCE',
+       retrievalOperation:'direct_question_source',
+       controllerAccepted:acceptance==='ACCEPTED_RECEIPT_BOUND'},
+      fullAnswerTextInPublicGithub:false});
+    }else if(proof.availability==='EXACT_PRIVATE_SEGMENTED_ORIGINAL_SHA256_VERIFIED'&&
+       /^[a-f0-9]{64}$/.test(proof.originalAnswerSha256??'')&&
+       /^[a-f0-9]{64}$/.test(proof.originalAnswerManifestSha256??'')&&
+       Number.isSafeInteger(proof.originalAnswerBytes)&&proof.originalAnswerBytes>0&&
+       Number.isSafeInteger(proof.originalSegmentCount)&&proof.originalSegmentCount>0&&
+       typeof proof.privateR2ManifestKey==='string'&&
+       proof.privateR2ManifestKey.endsWith('/'+proof.originalAnswerSha256+'.json')&&
+       proof.retrievalOperation==='direct_question_source'){
+     // The accepted shard and its source SHA remain the canonical owner.
+     // This additional version points to private original segments, not
+     // a synthesized finding or a publicly accessible answer.
+     group.versions.push({...event,
+      originalAnswerSha256:proof.originalAnswerSha256,
+      originalAnswerBytes:proof.originalAnswerBytes,
+      originalPrivateR2Source:{key:proof.privateR2ManifestKey,
+       sha256:proof.originalAnswerSha256,
+       manifestSha256:proof.originalAnswerManifestSha256,
+       segmentCount:proof.originalSegmentCount,
+       storageKind:'SEGMENTED_UTF8_R2_MANIFEST',
+       availability:'WORKER_PRIVATE_MANIFEST_VERIFIED_AT_LOCAL_ACCEPTANCE',
        retrievalOperation:'direct_question_source',
        controllerAccepted:acceptance==='ACCEPTED_RECEIPT_BOUND'},
       fullAnswerTextInPublicGithub:false});
