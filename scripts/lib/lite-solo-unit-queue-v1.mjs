@@ -512,6 +512,7 @@ function collectDirectQuestionSourcesV1({root,campaignPath,directory,phase}){
      questionIndexPath:rel,questionIndexSha256:sourceSha256,
      questionIndexRevision:null,sourceKind:'DIRECT_FIXED_ORIGINAL',
      originalDirectFieldPath:'actions.step-'+record.step+'.outputs.'+record.originalField,
+     originalFixedMemberBinding:proof.memberBinding??null,
      originalAcceptedShardPath:record.originalShardPath,
      originalAcceptedShardSha256:record.originalShardSha256,
      acceptedUnitPath:record.originalShardPath,
