@@ -2389,8 +2389,11 @@ async function miSendOriginalBounded(issued,original,body){
  const buf=Buffer.from(original,'utf8');
  if(buf.length<=450000)return workerCall(body);
  const m=miAnswerIdentity(issued,buf),existing=new Map();let cursor=null;
+ const member=body.fixedRecordOrdinal!==undefined?{
+  fixedRecordOrdinal:body.fixedRecordOrdinal,fixedItemField:body.fixedItemField}:{};
+ const revision=body.revisionClaim===true?{revisionClaim:true}:{};
  do{
-  const r=JSON.parse(await workerCall({operation:'answer_segments_status',...m,...(cursor?{cursor}:{})}));
+  const r=JSON.parse(await workerCall({operation:'answer_segments_status',...m,...member,...revision,...(cursor?{cursor}:{})}));
   if(r.status!=='AI_ORIGINAL_SEGMENT_STATUS'||r.fullSha256!==m.fullSha256||
      r.totalBytes!==m.totalBytes||r.segmentCount!==m.segmentCount||
      !Array.isArray(r.parts))throw Error('Original staged segment index mismatch');
@@ -2404,7 +2407,7 @@ async function miSendOriginalBounded(issued,original,body){
  for(let i=0;i<m.segmentCount;i++){
   const start=i*MI_ANSWER_PART_BYTES,b=buf.subarray(start,Math.min(buf.length,start+MI_ANSWER_PART_BYTES)),h=sha(b),old=existing.get(i);
   if(old){if(old.sha256!==h||old.bytes!==b.length)throw Error('Original answer part conflict: '+i);continue;}
-  const r=JSON.parse(await workerCall({operation:'answer_segment',...m,
+  const r=JSON.parse(await workerCall({operation:'answer_segment',...m,...member,...revision,
    segmentIndex:i,segmentSha256:h,segmentBase64:b.toString('base64')}));
   if(!['AI_ORIGINAL_SEGMENT_STORED','AI_ORIGINAL_SEGMENT_REPLAY'].includes(r.status)||
     r.segmentIndex!==i||r.fullSha256!==m.fullSha256||r.segmentSha256!==h)
@@ -2412,7 +2415,7 @@ async function miSendOriginalBounded(issued,original,body){
  }
  let reply,r,next=-1,unresolved=0;
  for(let attempt=0;attempt<=m.segmentCount+4;attempt++){
-  reply=await workerCall({operation:'commit_segmented_answer',...m});
+  reply=await workerCall({operation:'commit_segmented_answer',...m,...member,...revision});
   r=JSON.parse(reply);
   if(r.status==='AI_ORIGINAL_GITHUB_PAGES_PENDING'){
    if(!Number.isSafeInteger(r.nextSegmentIndex)||
