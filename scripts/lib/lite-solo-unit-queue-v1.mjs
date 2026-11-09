@@ -2403,7 +2403,19 @@ export function collectExplicitQuestionOutputLinksV1({
  const output={schemaVersion:'curveyield-explicit-question-output-links-v1',
   phaseSequence:phase,associationOrigin:'AI_EXPLICIT_REFERENCE',
   associations:[],nonCanonicalEvidenceAssociations:[],unresolvedReferences:[],
-  unpromotedQuestions:[],sourceAvailability:histories.availability,
+  unpromotedQuestions:[],
+  // Original direct field ownership is clerical, not an AI security link.
+  originalDirectQuestionFieldOwners:histories.questions.filter(q=>
+   q.sourceKind==='DIRECT_FIXED_ORIGINAL').map(q=>({
+    phaseSequence:q.phaseSequence,unitId:q.unitId,questionId:q.questionId,
+    originalDirectFieldPath:q.originalDirectFieldPath,
+    originalAcceptedShardPath:q.originalAcceptedShardPath,
+    originalAcceptedShardSha256:q.originalAcceptedShardSha256,
+    sourceAcceptance:q.sourceAcceptance,
+    originalAnswerVersionCount:q.answerVersions?.length??0,
+    associationMeaning:'ISSUED_FIELD_OWNERSHIP_NOT_AI_EXPLICIT_FINDING_LINK'
+   })),
+  sourceAvailability:histories.availability,
   questionSourcesSelector:'automationOutputs.questionAnswerSources',
   sourceMeaning:'NO_SECURITY_INFERENCE'};
  const questionByIdentity=new Map(histories.questions.map((q,i)=>[
@@ -2705,6 +2717,7 @@ export function collectExplicitQuestionOutputLinksV1({
  output.nonCanonicalEvidenceAssociationCount=
   output.nonCanonicalEvidenceAssociations.length;
  output.unpromotedQuestionCount=output.unpromotedQuestions.length;
+ output.originalDirectQuestionFieldOwnerCount=output.originalDirectQuestionFieldOwners.length;
  output.availability='COLLECTED_NONBLOCKING';
  return output;
 }
