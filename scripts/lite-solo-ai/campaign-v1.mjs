@@ -2550,6 +2550,12 @@ async function runTechnicalQuestionTransportV1(){
      issued.scope.lease!==selectedUnit.lease))
    throw Error('Original controller packet ownership changed during technical investigation');
   selectedUnit={unitId:issued.scope.unitId,lease:issued.scope.lease};
+  // Every original FIXED item-field question is answered separately in the
+  // existing source-bound direct-field transport, not skipped after item one.
+  if(issued.question.mode==='FIXED'&&
+     issued.question.fixedQuestionPlan?.mode==='CONTROLLER_ISSUED_ROWS')
+   return {unitId:selectedUnit.unitId,lease:selectedUnit.lease,
+    phase:issued.scope.phase,step:issued.scope.step};
   // Exact private transport-staged original recovery is tried before model
   // inference. The Worker rechecks this current signed lease and publishes via
   // its existing GitHub question checkpoint writer; R2 is not acceptance.
