@@ -510,11 +510,27 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
      question.checkpointEvents.push(checkpointEvent);
      // An answer version requires an actually authored non-null answer,
      // not a planned question merely appearing in an EXPAND checkpoint.
-     if((source.mode==='ANSWERS'||source.mode==='REVISE')&&
-        typeof record.answerText==='string')
-      question.answerVersions.push({
-       ...checkpointEvent,answerTextSourceSelector:'records['+i+'].answerText'
-      });
+     if(source.mode==='ANSWERS'||source.mode==='REVISE'){
+      if(typeof record.answerText==='string')
+       question.answerVersions.push({...checkpointEvent,
+        answerTextSourceSelector:'records['+i+'].answerText'});
+      else if(record.answerManifest){
+       try{
+        const sourceBound=verifiedSegmentedAnswerSourceV1(
+         root,record.answerManifest,{...index,questionIndexPath:ref.indexPath},question);
+        question.answerVersions.push({...checkpointEvent,
+         answerTextSourceSelector:'records['+i+'].answerManifest',
+         ...sourceBound});
+       }catch(error){
+        out.unavailable.push({phaseSequence:sourcePhase,unitId,
+         questionId:record.questionId,checkpointIndex,
+         reason:'SEGMENTED_ANSWER_SOURCE_UNAVAILABLE',
+         checkpointPath:checkpoint.path,
+         manifestPath:record.answerManifest?.path??null,
+         diagnostic:String(error?.message??error)});
+       }
+      }
+     }
     }
    }
   }
