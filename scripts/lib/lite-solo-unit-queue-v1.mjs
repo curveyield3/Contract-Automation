@@ -499,7 +499,18 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
   phaseSequence:phase,campaignId:directory.campaignId,
   campaignGenerationId:directory.campaignGenerationId,
   questions:[],unavailable:[],histories:[],checkpoints:[],
+  directSourceSidecars:[],
   sourceMeaning:'QUESTION_HISTORY_NOT_SECURITY_DISPOSITION'};
+ // Direct-phase evidence shares the existing canonical source/link schema.
+ // The private answer text remains in R2, never in the public record.
+ if(directory.authorityRelease==='machine-intelligence-v8'){
+  const direct=collectDirectQuestionSourcesV1({root,campaignPath,directory,phase});
+  out.questions.push(...direct.questions);
+  out.unavailable.push(...direct.unavailable);
+  out.histories.push(...direct.histories);
+  out.checkpoints.push(...direct.checkpoints);
+  out.directSourceSidecars=direct.sidecars;
+ }
  for(const sourcePhase of [4,5,6]){
   if(sourcePhase>phase)continue;
   let refs;
