@@ -1360,7 +1360,9 @@ if(sequence===10){
   const p6=canonicalFor(root,campaignPath,6);
   const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
   const open=finalIndexObligations(ledger);
-  const carriedLimitations=collectCarriedLimitations({root,campaignPath,maxPhase:9});
+  const machineIntelligenceV8=directory.authorityRelease==='machine-intelligence-v8';
+  const carriedLimitations=collectCarriedLimitations({root,campaignPath,maxPhase:9})
+    .filter(x=>!machineIntelligenceV8||x!=='NONE_IDENTIFIED');
   const omissions=phaseOutput(p6,'step-3','fullOnlyOmissions')??[];
   canonical.automationOutputs.residualLimitations=[
     ...carriedLimitations,
@@ -1368,7 +1370,7 @@ if(sequence===10){
   ];
   // A ledger count is administrative bookkeeping; MiMo decides substantive
   // residual concerns by examining all accepted original questions and evidence.
-  canonical.automationOutputs.formalOpenObligationLedgerStatus={
+  if(machineIntelligenceV8)canonical.automationOutputs.formalOpenObligationLedgerStatus={
     schemaVersion:'curveyield-phase10-formal-ledger-scope-v1',
     ledgerSource:'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json',
     openFormalObligationCount:open.length,
@@ -1382,11 +1384,14 @@ if(sequence===10){
     emptyFormalLedgerMeansNoGlobalRiskClosure:true
   };
   if(!canonical.automationOutputs.residualLimitations.length)
-    canonical.automationOutputs.residualLimitations=[
-      'NO_CARRIED_LIMITATIONS_IN_FORMAL_LEDGER; HISTORICAL_CONCERNS_NOT_EVALUATED_BY_THIS_PROJECTION'];
-  canonical.automationOutputs.unresolvedSubstantiveQuestions=open.length?
-    open.map(o=>'FORMAL_OPEN_OBLIGATION: '+String(o.obligationId??o.statusReason??'OPEN_OBLIGATION')):
-    ['NO_FORMAL_OPEN_OBLIGATIONS; HISTORICAL_CONCERNS_NOT_EVALUATED_BY_THIS_PROJECTION'];
+    canonical.automationOutputs.residualLimitations=machineIntelligenceV8?
+      ['NO_CARRIED_LIMITATIONS_IN_FORMAL_LEDGER; HISTORICAL_CONCERNS_NOT_EVALUATED_BY_THIS_PROJECTION']:
+      ['NONE_IDENTIFIED'];
+  canonical.automationOutputs.unresolvedSubstantiveQuestions=machineIntelligenceV8?
+    (open.length?
+      open.map(o=>'FORMAL_OPEN_OBLIGATION: '+String(o.obligationId??o.statusReason??'OPEN_OBLIGATION')):
+      ['NO_FORMAL_OPEN_OBLIGATIONS; HISTORICAL_CONCERNS_NOT_EVALUATED_BY_THIS_PROJECTION']):
+    (open.length?open.map(o=>o.obligationId??o.statusReason??'OPEN_OBLIGATION'):['NONE_IDENTIFIED']);
   canonical.automationOutputs.fullUpgradeRecommendations=omissions.length&&!(omissions.length===1&&omissions[0]==='NONE_IDENTIFIED')
     ? omissions.map(x=>'Execute Full-path delta for omitted Lite work: '+x)
     : ['NONE_IDENTIFIED'];
