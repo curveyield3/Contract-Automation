@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "curveyield-lite-solo-source-report-v1",
+  "mode": "LITE_SOLO",
+  "status": "PASS",
+  "requestId": "ai-42677332266",
+  "publicationPolicySha256": "625078c13fcd3d689bb5bca323630c956259f3cc28a27819cb1343e991da58fb",
+  "actor": {
+    "actorId": "lite-solo-agent"
+  },
+  "source": {
+    "sha256": "299fda8224b658a17bf0068690a321f295c1d7ee655eaf72470023ec33a0eb71",
+    "inputUrl": "https://github.com/curveyield3/Audit-Controller/blob/machine-intelligence-audit-controller-v1/campaigns/cyvbUSDCv28.zip",
+    "scanUrls": []
+  },
+  "campaign": {
+    "campaignId": "cyvbusdcv28-r7",
+    "campaignGenerationId": "cyvbusdcv28-r7-g1-20261109T184911Z",
+    "campaignName": "cyvbUSDCv28 r7",
+    "workspacePath": "campaigns/cyvbUSDCv28/cyvbUSDCv28 r7"
+  },
+  "completedAt": "2026-11-09T18:49:14Z"
+}
