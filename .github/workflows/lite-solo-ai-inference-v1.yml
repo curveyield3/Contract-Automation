@@ -135,17 +135,6 @@ jobs:
             exit 0
           fi
           test -s "$request"
-          # One-time recovery of the admitted Phase-0 campaign using the
-          # preexisting audit-request file trigger; no campaign re-admission.
-          if [ "$(jq -r '.phase0Retry.enabled // false' "$request")" = true ]; then
-            retry_campaign_id="$(jq -r '.phase0Retry.campaign_id' "$request")"
-            retry_campaign_path="$(jq -r '.phase0Retry.campaign_path' "$request")"
-            gh workflow run lite-solo-cloudflare-phase0-bootstrap-v1.yml --repo curveyield3/Contract-Automation --ref machine-intelligence-audit-controller-v1 \
-              -f "campaign_id=$retry_campaign_id" -f "campaign_path=$retry_campaign_path" \
-              -f "audit_controller_ref=machine-intelligence-audit-controller-v1"
-            echo "Existing Phase-0 workflow dispatched for already-admitted $retry_campaign_id"
-            exit 0
-          fi
           # New campaign initiation reuses the EXISTING autonomous_start mode.
           # Do not duplicate campaign creation, Worker's admission logic, or phase orchestration.
           if [ "$(jq -r '.mode // empty' "$request")" = autonomous_start ]; then
