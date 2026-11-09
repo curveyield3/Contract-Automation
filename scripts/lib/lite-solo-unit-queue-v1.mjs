@@ -2161,8 +2161,8 @@ export function collectAcceptedUnitRecordOriginsV1({root,campaignPath,directory,
  try{
   plan=readPlan(root,campaignPath,phase);
   queue=read(root,queueRel(campaignPath,phase));
- }catch(e)return {...roster,availability:'PLAN_OR_QUEUE_UNAVAILABLE',
-  diagnostics:[String(e?.message??e)]};
+ }catch(e){return {...roster,availability:'PLAN_OR_QUEUE_UNAVAILABLE',
+  diagnostics:[String(e?.message??e)]};}
  if(queue.campaignId!==directory.campaignId||
     queue.campaignGenerationId!==directory.campaignGenerationId||
     queue.phaseSequence!==phase||queue.sourceSha256!==directory.sourceSha256||
