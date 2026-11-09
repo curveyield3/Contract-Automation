@@ -140,7 +140,8 @@ jobs:
             gh workflow run lite-solo-cloudflare-phase0-bootstrap-v1.yml --repo curveyield3/Contract-Automation --ref machine-intelligence-audit-controller-v1 \
               -f "campaign_id=$(jq -r .phase0Retry.campaign_id "$request")" \
               -f "campaign_path=$(jq -r .phase0Retry.campaign_path "$request")" \
-              -f "audit_controller_ref=machine-intelligence-audit-controller-v1"
+              -f "audit_controller_ref=machine-intelligence-audit-controller-v1" \
+              -f "resume_from_deploy=$(jq -r '.phase0Retry.resume_from_deploy // false' "$request")"
             exit 0
           fi
           # New campaign initiation reuses the EXISTING autonomous_start mode.
