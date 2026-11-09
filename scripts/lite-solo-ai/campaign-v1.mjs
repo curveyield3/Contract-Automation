@@ -2119,6 +2119,7 @@ async function miPinnedOriginalAnswerProofV1(ref,commit,expected={}){
     m.segmentCount!==ref.segmentCount||
     m.pageCount!==ref.pageCount||
     m.pageCount!==m.segmentCount||
+    !Number.isSafeInteger(m.pageCount)||m.pageCount<1||m.pageCount>8192||
     !m.originalUtf8BoundaryPages||
     m.verifiedOriginalSha256!==m.fullSha256||
     m.storage!=='IMMUTABLE_GITHUB_PAGES')
@@ -2190,6 +2191,10 @@ async function miPinnedOriginalAnswerTextV1(ref,commit,expected,offset=0){
   throw Error('Pinned original answer text page SHA-256 differs');
  const decoded=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);
  const relative=Math.max(0,offset-row.charStart);
+ if(relative>0&&relative<decoded.length&&
+    decoded.charCodeAt(relative)>=0xDC00&&decoded.charCodeAt(relative)<=0xDFFF)
+  return {availability:'ORIGINAL_ANSWER_OFFSET_SPLITS_UNICODE',
+   nearestValidOffset:offset-1,totalCharacters:proof.totalCharacters};
  const fragment=phase1EvidencePageV1(decoded,relative,6000);
  const end=row.charStart+fragment.end;
  return {availability:'EXACT_COMMITTED_ORIGINAL_ANSWER',originalText:fragment.text,
