@@ -2961,7 +2961,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
   if(!shard||typeof shard!=='object'||Array.isArray(shard))
    throw Error('Direct shard must be MiMo-authored original JSON object');
   submission=shard;
- }else{
+ }else if(typed){
   const transport=contract.answerTransport,answers=[];
   for(let i=0;i<transport.fields.length;i++){
    const field=transport.fields[i];
@@ -3044,6 +3044,93 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
     'questionRecordLinks');
    if(!Array.isArray(links))throw Error('AI-authored question links must be an array');
    if(links.length)submission.questionRecordLinks=links;
+  }
+ }
+ // Original direct Phase 1-3/8-10 continuation. The queued Phase 4-6
+ // APPEND units retain their separately issued controller-authorized leases.
+ if(directAppend){
+  let chunk=resumedDirectAppend?.nextChunkNumber??1;
+  let startIndex=resumedDirectAppend?.nextStartIndex??contract.descriptor.startIndex;
+  let predecessor=resumedDirectAppend?.lastPageSourceSha256??null;
+  let precedingOriginalIds=resumedDirectAppend?.previousChunkAuthoredIdentities??[];
+  const tokens=contract.descriptor.path,prefix=JSON.stringify(tokens);
+  if(!Number.isSafeInteger(chunk)||chunk<1||!Number.isSafeInteger(startIndex)||
+   startIndex<contract.descriptor.startIndex||
+   (chunk>1&&!/^[a-f0-9]{64}$/.test(predecessor||'')))
+   throw Error('Direct APPEND recovery lacks original predecessor identity');
+  for(;;){
+   if(!submission){
+    submission=await ask({task:'AUTHOR_NEXT_ORIGINAL_DIRECT_APPEND_CONTINUATION',
+     originalQuestion:contract.originalTechnicalQuestion,
+     frozenOriginalFixedQuestionPlan:contract.originalTechnicalQuestion?.fixedQuestionPlan??null,
+     priorOriginalTechnicalAnswer:contract.directOriginalTechnicalAnswer??null,
+     originalControllerDescriptor:contract.descriptor,
+     originalIssuedAppendCollection:contract.inputFileTemplate,
+     originalAppendSourceScope:{campaignId,phase:contract.phase,step:contract.step,
+      unitId:contract.unitId,lease:ready.lease,sourceSha256:contract.sourceSha256??null},
+     authorizedChunkNumber:chunk,authorizedNextStartIndex:startIndex,
+     requiredPreviousPageSha256:predecessor,
+     precedingOriginalAuthoredRecordIdentities:precedingOriginalIds,
+     exactOriginalRecordKeyPrefix:prefix+':APPEND-C'+String(chunk).padStart(4,'0')+'-',
+     originalChunkMaximumRecords:1024,originalChunkMaximumPrettySerializedBytes:1024*1024,
+     responseShape:{shard:{schemaVersion:'curveyield-work-shard-v13',
+      kind:'array',path:tokens,startIndex,entries:[],appendContinuation:false}},
+     instructions:'Author the next distinct source-grounded original records of the SAME direct APPEND collection, not a new unit, revised fixed subject or replacement primary page. Preserve the controller-issued path, previous original page and original authored identities without repeating or omitting prior discoveries. Output a bounded page with keys exactly PATH_JSON:APPEND-CXXXX-YYYY using the supplied chunk number and sequential record number. At most 1,024 entries and 1 MiB of pretty-serialized bytes. Set appendContinuation true if further distinct original records remain, and false only when the entire logical collection is complete. MiMo alone chooses substantive findings and completion; infrastructure never guesses how many records are needed. If necessary prior context is unavailable, retain that uncertainty rather than inventing an empty history.'},'shard');
+   }
+   if(!submission||typeof submission!=='object'||Array.isArray(submission)||
+    submission.schemaVersion!=='curveyield-work-shard-v13'||
+    submission.kind!=='array'||JSON.stringify(submission.path)!==prefix||
+    submission.startIndex!==startIndex||!Array.isArray(submission.entries)||
+    typeof submission.appendContinuation!=='boolean')
+    throw Error('Direct APPEND page does not match original issued collection identity');
+   const originalBytes=JSON.stringify(submission,null,2)+'\n';
+   if(submission.entries.length>1024||Buffer.byteLength(originalBytes)>1024*1024)
+    throw Error('DIRECT_APPEND_ORIGINAL_OVER_BOUND: original MiMo page remains in private transcript; request a MiMo-authored bounded page, never truncate or merge its records');
+   const pageSha256=sha(originalBytes);
+   const raw=await workerCall({operation:'submit_field_answers',
+    unitId:ready.unitId,lease:ready.lease,submission,continuationChunkNumber:chunk,
+    ...(chunk>1?{previousPageSourceSha256:predecessor}:{}),
+    ...(remediation?{remediation:true}:{})});
+   let result;try{result=JSON.parse(raw);}catch{
+    throw Error('Original direct APPEND page disposition is not JSON');
+   }
+   if(result.status!=='AI_FIELD_SUBMISSION_DISPOSITION'||
+    result.submissionSha256!==pageSha256)
+    throw Error('Direct APPEND original page SHA256 was not acknowledged by Worker');
+   if(result.originalWorkerStatus==='REWORK_REQUIRED'||
+    result.originalWorkerDisposition?.fieldErrors?.length)
+    throw Error('DIRECT_APPEND_ORIGINAL_SOURCE_BOUND_REWORK: '+
+     JSON.stringify(result.originalWorkerDisposition?.fieldErrors??result.originalWorkerDisposition).slice(0,3000));
+   console.log(JSON.stringify({status:'MIMO_DIRECT_APPEND_PAGE_RECORDED',
+    campaignId,unitId:ready.unitId,chunkNumber:chunk,startIndex,
+    originalPageSha256:pageSha256,originalEntryCount:submission.entries.length,
+    appendContinuation:submission.appendContinuation,
+    originalWorkerStatus:result.originalWorkerStatus,
+    controllerAccepted:result.controllerAccepted===true}));
+   if(result.originalWorkerStatus==='DIRECT_APPEND_CONTINUATION_REQUIRED'){
+    const reply=result.originalWorkerDisposition||{};
+    if(submission.appendContinuation!==true||
+     reply.originalUnitStillLeased!==true||
+     reply.nextChunkNumber!==chunk+1||
+     reply.nextStartIndex!==startIndex+submission.entries.length||
+     reply.lastPageSourceSha256!==pageSha256)
+     throw Error('Direct APPEND continuation ordinal or previous source SHA mismatch');
+    precedingOriginalIds=submission.entries.map((entry,index)=>({
+     originalOrdinal:startIndex+index,issuedRecordKey:entry.key,
+     originalAuthoredRecordSha256:sha(JSON.stringify(entry.value))}));
+    predecessor=pageSha256;startIndex=reply.nextStartIndex;
+    chunk=reply.nextChunkNumber;submission=null;
+    continue;
+   }
+   const completed=new Set(['ACTIVE','FILING_PHASE','UNIT_ACCEPTED_LOCALLY',
+    'REVIEW_SUBSTEP_READY','REMEDIATION_WORK_UPDATED','SUBSTEP_SUBMISSION_PENDING']);
+   if(submission.appendContinuation!==false||
+    !completed.has(result.originalWorkerStatus))
+    throw Error('Direct APPEND cannot complete without accepted final page and explicit false: '+
+     String(result.originalWorkerStatus));
+   return {status:result.originalWorkerStatus,unitId:ready.unitId,
+    lease:ready.lease,originalSubmissionSha256:pageSha256,
+    originalDirectAppendPageCount:chunk,controllerAccepted:result.controllerAccepted===true};
   }
  }
  const submitted=await workerCall({operation:'submit_field_answers',unitId:ready.unitId,
