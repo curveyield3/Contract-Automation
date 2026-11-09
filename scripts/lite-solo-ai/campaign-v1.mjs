@@ -2972,7 +2972,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
      expectedProperty:key,corrections:formatCorrections,
      originalPrivateResponseSha256:firstResponseSha256,
      correctedPrivateResponseSha256:sha(original),controllerAccepted:false}));
-    return value[key];
+    return task.captureOriginal===true?{value:value[key],originalResponse:original}:value[key];
    }
    // Bounded schema-only correction, no new questions or security judgment.
    if(formatCorrections>=2){
