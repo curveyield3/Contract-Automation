@@ -298,7 +298,26 @@ jobs:
               String(data.error||data.reason||data.status).slice(0,160));
             return data;
           }
-          const current=await worker('/api/step/current',{});
+          // A signed successor can start while the earlier inference workflow
+          // still archives its original private transcript. Its current
+          // assignment remains exclusively owned by that preceding run.
+          // Retry only the exact original predecessor-active response,
+          // without issuing another dispatch, changing lease or weakening auth.
+          let current=null;
+          for(let attempt=0;attempt<60;attempt++){
+            try{current=await worker('/api/step/current',{});break;}
+            catch(error){
+              const detail=String(error?.message||error);
+              if(!detail.includes('Worker /api/step/current HTTP 409: Prior GitHub run still owns this exact assignment')||
+                 attempt===59)throw error;
+              if(attempt%10===0)console.log(JSON.stringify({
+                status:'MI_SIGNED_SUCCESSOR_WAITING_FOR_PREDECESSOR_COMPLETION',
+                campaignId,attempt:attempt+1,maximumAttempts:60,
+                originalLeasePreserved:true,controllerAccepted:false}));
+              await new Promise(resolve=>setTimeout(resolve,30000));
+            }
+          }
+          if(!current)throw Error('Signed successor predecessor wait exhausted');
           if(current.campaignId!==campaignId)
             throw Error('Signed MiMo campaign differs from the current Worker campaign');
           if(current.phase!==expectedPhase||current.currentStep!==expectedStep)
