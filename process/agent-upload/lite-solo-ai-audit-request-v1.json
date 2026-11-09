@@ -6,9 +6,9 @@
   "submission_mode": "submit",
   "max_chunks": "32",
   "ai_hop": "0",
-  "dispatchRevision": "v22",
+  "dispatchRevision": "v23",
   "sourceExpectedSha256": "299fda8224b658a17bf0068690a321f295c1d7ee655eaf72470023ec33a0eb71",
-  "previousCampaign": "cyvbusdcv28-r5",
-  "retryReason": "Start a fresh Machine Intelligence autonomous run using the same source and 2-runner submit configuration, with MACHINE_TAILSCALE_ID and MACHINE_TAILSCALE_AUDIENCE fixes on current branch; prior r5 inference failed Tailscale OIDC and must remain unchanged.",
-  "retryOfFailedInferenceRun": "42671171347"
+  "previousCampaign": "cyvbusdcv28-r6",
+  "retryReason": "Re-execute existing Machine Intelligence 2-runner source and settings after canonical Tailscale OIDC audience repair and public-claim diagnostics, preserving previous campaign.",
+  "retryOfFailedInferenceRun": "42675654063"
 }
