@@ -69,9 +69,15 @@ fi
   echo "::error::Invalid Tailscale workload-identity client identifier" >&2
   exit 1
 }
-# Accept an explicitly configured audience for this branch's workload identity.
-# Other existing callers can still use Tailscale's client-ID-derived audience.
-audience="${TS_OIDC_AUDIENCE:-api.tailscale.com/$TS_CLIENT_ID}"
+# Tailscale generates the OIDC audience from the credential's exact client ID.
+# Prefer the new branch credential's supplied audience when it matches; repair
+# a mismatched or accidentally pasted audience without exposing either value.
+expected_audience="api.tailscale.com/$TS_CLIENT_ID"
+audience="${TS_OIDC_AUDIENCE:-$expected_audience}"
+if [[ "$audience" != "$expected_audience" ]]; then
+  echo "::warning::Configured Machine Intelligence Tailscale audience does not match the generated audience for its client ID; using the canonical Tailscale audience." >&2
+  audience="$expected_audience"
+fi
 umask 077
 oidc_file="$(mktemp "$RUNNER_TEMP/tailscale-id-token.XXXXXXXX")"
 trap 'rm -f "$oidc_file"' EXIT
@@ -84,6 +90,21 @@ if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
   exit 1
 fi
 test -s "$oidc_file" || { echo "::error::GitHub returned no valid OIDC token" >&2; exit 1; }
+# Print only non-secret issuer/subject and audience match status, never the JWT,
+# client ID or audience itself. Tailscale suppresses precise 403 details.
+python3 - "$oidc_file" "$audience" <<'PY'
+import base64, json, pathlib, sys
+token=pathlib.Path(sys.argv[1]).read_text().strip()
+body=token.split(".")[1]
+claims=json.loads(base64.urlsafe_b64decode(body+"="*((-len(body))%4)))
+issuer=claims.get("iss")
+subject=claims.get("sub")
+actual_aud=claims.get("aud")
+match=sys.argv[2] in actual_aud if isinstance(actual_aud,list) else actual_aud==sys.argv[2]
+print("GitHub OIDC issuer: "+str(issuer))
+print("GitHub OIDC subject: "+str(subject))
+print("GitHub OIDC JWT audience matches the selected credential: "+str(match).lower())
+PY
 echo "Connecting via explicit, short-lived GitHub OIDC JWT (no credential logging)."
 if ! timeout -k 5s 120s sudo /usr/local/bin/tailscale up \
   --client-id="$TS_CLIENT_ID" \
