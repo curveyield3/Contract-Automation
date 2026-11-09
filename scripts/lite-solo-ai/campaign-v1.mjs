@@ -2423,6 +2423,18 @@ async function miSendOriginalBounded(issued,original,body){
    continue;
   break;
  }
+ const direct=[1,2,3,8,9,10].includes(issued.scope.phase);
+ if(direct){
+  if(r.status!=='AI_TECHNICAL_ANSWER_STAGED'||
+     r.originalSegmentsVerified!==true||
+     r.completeOriginalSha256!==m.fullSha256||
+     r.completeOriginalBytes!==buf.length||
+     !/^[a-f0-9]{64}$/.test(r.originalManifestSha256||'')||
+     typeof r.privateR2ManifestKey!=='string')
+   throw Error('Direct original segments not verified in private R2: '+
+    String(r.status??'NO_STATUS')+' '+m.fullSha256);
+  return reply;
+ }
  if(r.status!=='AI_TECHNICAL_QUESTION_RECORDED'||
     r.originalSegmentsVerified!==true||
     r.completeOriginalSha256!==m.fullSha256||
@@ -2477,6 +2489,16 @@ async function miRecoverOriginalBounded(issued){
   if(r.status==='AI_ORIGINAL_GITHUB_MANIFEST_AWAIT_CHECKPOINT'&&unresolved++<3)
    continue;
   break;
+ }
+ if([1,2,3,8,9,10].includes(issued.scope.phase)){
+  if(r.status!=='AI_TECHNICAL_ANSWER_STAGED'||
+     r.originalSegmentsVerified!==true||
+     r.completeOriginalSha256!==first.fullSha256||
+     r.completeOriginalBytes!==first.totalBytes||
+     !/^[a-f0-9]{64}$/.test(r.originalManifestSha256||''))
+   throw Error('Recovered direct original segments lack verified private manifest: '+
+    String(r.status));
+  return r;
  }
  if(r.status!=='AI_TECHNICAL_QUESTION_RECORDED'||
     r.originalSegmentsVerified!==true||
