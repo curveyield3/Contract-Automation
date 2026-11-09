@@ -106,7 +106,7 @@ concurrency:
   group: lite-solo-ai-${{ inputs.mode }}-${{ (inputs.mode == 'campaign' || inputs.mode == 'autonomous') && inputs.campaign_id || inputs.mode == 'autonomous_start' && inputs.source_url || inputs.source_path }}
   cancel-in-progress: false
 env:
-  MACHINE_INTELLIGENCE_WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL }}
+  MACHINE_INTELLIGENCE_WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL || 'https://lite-solo-api.jamesnexus9999.workers.dev' }}
   MODEL_SHA256: 4bca6f18c73f72270c7a20c2ea2bea581de8246e318714277120369d34048c81
   LLAMA_SHA: 8642541b255bfb5dc39cd351a178be09013a55d6
   GGML_RPC_NO_RDMA: '1'
