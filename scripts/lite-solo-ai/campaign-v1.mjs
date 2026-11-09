@@ -3042,10 +3042,10 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
     // On an interrupted first submission, recover the exact staged original.
     // A conflicting/multiple original must never be guessed or overwritten.
     let original=null;
-    if(!remediation){
+    {
      let page=JSON.parse(await workerCall({operation:'field_contract',
       unitId:ready.unitId,lease:ready.lease,...selector,
-      directOriginalAnswerOffset:0}));
+      ...(remediation?{remediation:true}:{}),directOriginalAnswerOffset:0}));
      if(page.status==='AI_CURRENT_DIRECT_TECHNICAL_ANSWER_PAGE'){
       let offset=0,fullSha=null,fullBytes=null,body='';
       for(let i=0;i<10000;i++){
@@ -3069,7 +3069,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
        offset=page.nextOffset;
        page=JSON.parse(await workerCall({operation:'field_contract',
         unitId:ready.unitId,lease:ready.lease,...selector,
-        directOriginalAnswerOffset:offset}));
+        ...(remediation?{remediation:true}:{}),directOriginalAnswerOffset:offset}));
       }
       if(original===null)throw Error('Previous fixed original exceeded source paging limit');
      }else if(page.status!=='AI_CURRENT_DIRECT_ORIGINAL_UNAVAILABLE'||
