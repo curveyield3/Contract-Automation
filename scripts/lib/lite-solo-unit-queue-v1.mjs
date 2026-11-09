@@ -131,7 +131,7 @@ function questionLedgerReferenceV1({root,campaign,phase,unitId,directory,phaseEp
  try{
   const file=repoFile(root,indexPath);
   if(!fs.existsSync(file))return reference;
-  const raw=fs.readFileSync(file),index=JSON.parse(raw.toString('utf8'));
+  const raw=fs.readFileSync(file),index=hydratePagedQuestionIndexV1(root,JSON.parse(raw.toString('utf8')),indexPath);
   if(!index||index.schemaVersion!=='curveyield-ai-question-index-v1'||
      Object.entries(bound).some(([k,value])=>index[k]!==value))
    return {...reference,availability:'IDENTITY_MISMATCH'};
@@ -308,7 +308,7 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
     const original=fs.readFileSync(repoFile(root,ref.indexPath));
     if(hex(original)!==ref.indexSha256)
      throw Error('question index digest does not match accepted reference');
-    index=JSON.parse(original.toString('utf8'));
+    index=hydratePagedQuestionIndexV1(root,JSON.parse(original.toString('utf8')),ref.indexPath);
     if(index.schemaVersion!=='curveyield-ai-question-index-v1'||
        index.phaseSequence!==sourcePhase||index.unitId!==unitId||
        index.phaseEpoch!==accepted.phaseEpoch||
@@ -340,14 +340,15 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
      answered:question.answered??null,
      statusFromCurrentIndex:question.answered===true?'ANSWERED':
       question.answered===false?'PLANNED':'INDEX_STATUS_UNSPECIFIED',
-     questionTextSource:{path:ref.indexPath,sha256:ref.indexSha256,
-      selector:'questions['+i+'].questionText'},
+     questionTextSource:index._questionPageSources?.[question.questionId]??
+      {path:ref.indexPath,sha256:ref.indexSha256,
+       selector:'questions['+i+'].questionText'},
      questionIndexPath:ref.indexPath,questionIndexSha256:ref.indexSha256,
      questionIndexRevision:index.revision,
      currentAnswerCheckpoint:question.answerCheckpoint??null,
-     currentAnswerCheckpointSource:{
-      path:ref.indexPath,sha256:ref.indexSha256,
-      selector:'questions['+i+'].answerCheckpoint'},
+     currentAnswerCheckpointSource:index._answerPageSources?.[question.questionId]??
+      {path:ref.indexPath,sha256:ref.indexSha256,
+       selector:'questions['+i+'].answerCheckpoint'},
      packetSha256:accepted.packetSha256,
      acceptedUnitPath:owner.acceptedPath,
      acceptedUnitArtifactSha256:hex(fs.readFileSync(repoFile(root,owner.acceptedPath))),
