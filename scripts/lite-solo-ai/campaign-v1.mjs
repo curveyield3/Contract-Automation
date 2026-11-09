@@ -3011,6 +3011,126 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
    original=await modelCall(messages);
   }
  }
+ // Each original FIXED row/member has its own frozen literal security
+ // question and private answer source, independent of the final form record.
+ const fixedPlan=!typed&&contract.originalTechnicalQuestion?.fixedQuestionPlan?.mode===
+  'CONTROLLER_ISSUED_ROWS'?contract.originalTechnicalQuestion.fixedQuestionPlan:null;
+ const fixedMemberAnswers=[],fixedMemberAnswerRefs=[];
+ if(fixedPlan){
+  const template=contract.inputFileTemplate;
+  if(template?.kind!=='array'||!Array.isArray(template.entries)||
+     fixedPlan.originalIssuedRecordCount!==template.entries.length)
+   throw Error('Fixed member roster differs from assigned original shard');
+  for(const row of fixedPlan.controllerRecordQuestions){
+   const index=row.recordOrdinal-template.startIndex,entry=template.entries[index];
+   if(!entry||entry.key!==row.controllerIssuedRecordKey)
+    throw Error('Fixed member row no longer has original controller record key');
+   for(const item of row.itemFields){
+    const def=fixedPlan.allLiteralItemFields[item.originalItemFieldOrdinal];
+    if(!def||def.field!==item.field||typeof def.questionText!=='string')
+     throw Error('Frozen member question text/field unavailable');
+    const selector={fixedRecordOrdinal:row.recordOrdinal,fixedItemField:item.field};
+    const issued=JSON.parse(await workerCall({operation:'next_question',
+     unitId:ready.unitId,lease:ready.lease,...selector,
+     methodologyAlreadyDelivered:true,...(remediation?{revisionClaim:true}:{})}));
+    if(issued.status!=='AI_TECHNICAL_QUESTION_ISSUED'||
+       issued.scope.unitId!==ready.unitId||issued.scope.lease!==ready.lease||
+       issued.scope.questionId!==item.questionId||
+       issued.question.questionText!==def.questionText||
+       issued.question.fixedQuestionPlan?.mode!=='CONTROLLER_ISSUED_ROWS')
+     throw Error('Member question differs from exact Worker-issued frozen catalog');
+    // On an interrupted first submission, recover the exact staged original.
+    // A conflicting/multiple original must never be guessed or overwritten.
+    let original=null;
+    if(!remediation){
+     let page=JSON.parse(await workerCall({operation:'field_contract',
+      unitId:ready.unitId,lease:ready.lease,...selector,
+      directOriginalAnswerOffset:0}));
+     if(page.status==='AI_CURRENT_DIRECT_TECHNICAL_ANSWER_PAGE'){
+      let offset=0,fullSha=null,fullBytes=null,body='';
+      for(let i=0;i<10000;i++){
+       if(page.status!=='AI_CURRENT_DIRECT_TECHNICAL_ANSWER_PAGE'||
+          page.scopeSha256!==issued.scopeSha256||
+          page.questionId!==item.questionId||page.start!==offset||
+          typeof page.exactOriginalFragment!=='string'||
+          sha(page.exactOriginalFragment)!==page.fragmentSha256)
+        throw Error('Previous fixed-member source page identity changed');
+       if(fullSha===null){fullSha=page.answerSha256;fullBytes=page.answerBytes;}
+       if(page.answerSha256!==fullSha||page.answerBytes!==fullBytes)
+        throw Error('Previous original member-answer hash changed');
+       body+=page.exactOriginalFragment;
+       if(page.nextOffset===null){
+        if(sha(body)!==fullSha||Buffer.byteLength(body)!==fullBytes)
+         throw Error('Previous fixed member not recovered byte-for-byte');
+        original=body;break;
+       }
+       if(!Number.isSafeInteger(page.nextOffset)||page.nextOffset<=offset)
+        throw Error('Previous fixed-member page cursor did not advance');
+       offset=page.nextOffset;
+       page=JSON.parse(await workerCall({operation:'field_contract',
+        unitId:ready.unitId,lease:ready.lease,...selector,
+        directOriginalAnswerOffset:offset}));
+      }
+      if(original===null)throw Error('Previous fixed original exceeded source paging limit');
+     }else if(page.status!=='AI_CURRENT_DIRECT_ORIGINAL_UNAVAILABLE'||
+              page.availability!=='ORIGINAL_TECHNICAL_ANSWER_NOT_STAGED')
+      throw Error('Ambiguous fixed-member original; preserve it for repair: '+
+       String(page.availability??page.status));
+    }
+    let value,rawAnswer,receipt;
+    if(original!==null){
+     let parsed;try{parsed=JSON.parse(original);}catch{
+      throw Error('Old fixed member is untyped; cannot overwrite original source');}
+     if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)||
+        !Object.hasOwn(parsed,'value'))
+      throw Error('Previous original fixed-member answer lacks required value');
+     value=parsed.value;rawAnswer=original;
+     receipt={status:'AI_TECHNICAL_ANSWER_STAGED',
+      answerSha256:sha(original),answerBytes:Buffer.byteLength(original),
+      scopeSha256:issued.scopeSha256};
+    }else{
+     const answer=await ask({
+      task:'ANSWER_ONE_EXACT_WORKER_ISSUED_FIXED_ITEM_QUESTION',
+      captureOriginal:true,
+      originalQuestion:{questionId:item.questionId,questionText:def.questionText,
+       technicalCriteria:def.technicalCriteria??null},
+      controllerIssuedRecord:{ordinal:row.recordOrdinal,
+       key:row.controllerIssuedRecordKey,originalValue:entry.value},
+      originalFieldBinding:{field:item.field,path:item.fieldPath,
+       answerMode:def.answerMode,allowedValues:def.allowedValues},
+      expectedJsonType:'ORIGINAL_SCHEMA_MEMBER_VALUE',
+      responseShape:{value:'<exact source-grounded member-field answer>'},
+      instructions:'Answer only the single literal question above. Return your complete original substantive value in the exact issued schema type under the value key. Preserve evidence, nuance, uncertainty and real negative outcomes. Do not answer other record questions, fabricate controller IDs, or claim controller acceptance.'},'value');
+     value=answer.value;rawAnswer=answer.originalResponse;
+     receipt=JSON.parse(await miSendOriginalBounded(issued,rawAnswer,{
+      operation:'answer_question',unitId:ready.unitId,lease:ready.lease,
+      scopeSha256:issued.scopeSha256,questionId:item.questionId,
+      questionSha256:issued.scope.questionSha256,answerText:rawAnswer,
+      ...selector,...(remediation?{revisionClaim:true}:{})}));
+     if(receipt.status!=='AI_TECHNICAL_ANSWER_STAGED'||
+        receipt.scopeSha256!==issued.scopeSha256||
+        receipt.answerSha256!==sha(rawAnswer)||
+        receipt.answerBytes!==Buffer.byteLength(rawAnswer))
+      throw Error('Original fixed member answer was not durably source-bound');
+    }
+    if(Array.isArray(def.allowedValues)&&def.allowedValues.length&&
+       !def.allowedValues.includes(String(value)))
+     throw Error('Fixed member answer token is outside the original frozen list');
+    fixedMemberAnswerRefs.push({fixedRecordOrdinal:row.recordOrdinal,
+     fixedItemField:item.field,questionId:item.questionId,
+     questionSha256:issued.scope.questionSha256,
+     scopeSha256:issued.scopeSha256,
+     answerSha256:receipt.answerSha256,answerBytes:receipt.answerBytes});
+    fixedMemberAnswers.push({recordOrdinal:row.recordOrdinal,
+     originalRecordKey:entry.key,questionId:item.questionId,
+     field:item.field,originalAnswerSha256:receipt.answerSha256,value});
+    console.log(JSON.stringify({status:'MIMO_FIXED_MEMBER_ANSWER_STAGED',
+     campaignId,phase:contract.phase,step:contract.step,unitId:ready.unitId,
+     recordOrdinal:row.recordOrdinal,field:item.field,questionId:item.questionId,
+     answerSha256:receipt.answerSha256,controllerAccepted:false}));
+   }
+  }
+ }
  let submission;
  const directAppend=!typed&&contract.descriptor?.append===true;
  const resumedDirectAppend=directAppend?contract.directAppendProgress:null;
