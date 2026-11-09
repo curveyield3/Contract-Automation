@@ -740,6 +740,8 @@ function questionHistoryModelContextV1(history){
     kind:'QUESTION_INDEX_PAGE',historyReferenceKey:'<exact historyReferenceKey from HISTORY_INDEX>',offset:0}},
    checkpointIndex:{questionHistoryEvidenceRequest:{
     kind:'CHECKPOINT_INDEX',historyReferenceKey:'<exact historyReferenceKey from HISTORY_INDEX>',start:0}},
+   questionRoster:{questionHistoryEvidenceRequest:{
+    kind:'QUESTION_ROSTER',historyReferenceKey:'<exact historyReferenceKey from HISTORY_INDEX>',start:0}},
    checkpointPage:{questionHistoryEvidenceRequest:{
     kind:'CHECKPOINT_PAGE',historyReferenceKey:'<exact historyReferenceKey from HISTORY_INDEX>',
     checkpointIndex:0,offset:0}},
@@ -796,6 +798,9 @@ async function questionHistoryEvidenceReadV1(history,request){
  if(historyReadFailure)return {...base,...identity(source),
   availability:historyReadFailure};
  const sourceIdentity=identity(source);
+ if(req.kind==='QUESTION_ROSTER')return {...base,...sourceIdentity,
+  kind:req.kind,availability:'AVAILABLE',
+  ...window(source.questionRoster??[],at(req.start))};
  if(req.kind==='CHECKPOINT_INDEX')return {...base,...sourceIdentity,
   kind:req.kind,availability:'AVAILABLE',
   ...window(source.checkpoints.map((c,index)=>({
@@ -874,8 +879,8 @@ async function questionHistoryEvidenceReadV1(history,request){
   };
  }
  return {...base,...sourceIdentity,availability:'UNRECOGNIZED_QUESTION_READ',
-  supportedKinds:['HISTORY_INDEX','UNAVAILABLE_INDEX','CHECKPOINT_INDEX',
-   'QUESTION_INDEX_PAGE','CHECKPOINT_PAGE']};
+   supportedKinds:['HISTORY_INDEX','UNAVAILABLE_INDEX','QUESTION_ROSTER',
+   'CHECKPOINT_INDEX','QUESTION_INDEX_PAGE','CHECKPOINT_PAGE']};
 }
 
 // Accepted historical PHASE_CANONICAL_DATA revisions may describe distinct
