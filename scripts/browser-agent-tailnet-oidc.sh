@@ -69,16 +69,16 @@ fi
   echo "::error::Invalid Tailscale workload-identity client identifier" >&2
   exit 1
 }
-audience="api.tailscale.com/$TS_CLIENT_ID"
-oidc_url="$ACTIONS_ID_TOKEN_REQUEST_URL"
-if [[ "$oidc_url" == *\?* ]]; then oidc_url+="&"; else oidc_url+="?"; fi
-oidc_url+="audience=api.tailscale.com%2F$TS_CLIENT_ID"
+# Accept an explicitly configured audience for this branch's workload identity.
+# Other existing callers can still use Tailscale's client-ID-derived audience.
+audience="${TS_OIDC_AUDIENCE:-api.tailscale.com/$TS_CLIENT_ID}"
 umask 077
 oidc_file="$(mktemp "$RUNNER_TEMP/tailscale-id-token.XXXXXXXX")"
 trap 'rm -f "$oidc_file"' EXIT
 if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
     --retry 2 --retry-all-errors --max-time 30 \
-    -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$oidc_url" |
+    --get --data-urlencode "audience=$audience" \
+    -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" |
    jq -er '.value | select(type=="string" and (split(".")|length==3))' > "$oidc_file"; then
   echo "::error::GitHub OIDC JWT issuance failed for Tailscale workload identity" >&2
   exit 1
