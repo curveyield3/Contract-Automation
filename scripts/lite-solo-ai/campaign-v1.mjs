@@ -751,6 +751,9 @@ function questionHistoryModelContextV1(history){
    checkpointPage:{questionHistoryEvidenceRequest:{
     kind:'CHECKPOINT_PAGE',historyReferenceKey:'<exact historyReferenceKey from HISTORY_INDEX>',
     checkpointIndex:0,offset:0}},
+   answerPage:{questionHistoryEvidenceRequest:{
+    kind:'ANSWER_PAGE',historyReferenceKey:'<exact historyReferenceKey from HISTORY_INDEX>',
+    checkpointIndex:0,questionId:'Q-000001',offset:0}},
    continuation:'Use nextStart for roster/index and nextOffset for original JSON text pages; every committed checkpoint is addressable by zero-based checkpointIndex.',
    interpretation:'A PLANNED or unanswered question is not resolved; ANSWERED and COMPLETE do not establish proof. Preserve original phaseSequence/unitId/questionId plus checkpoint revision. Check adversarial and favorable originals against actual source and qualified execution.',
    afterReading:'Answer using the original Worker-issued route/request JSON; a local evidence read is not a Worker action.'
@@ -804,6 +807,57 @@ async function questionHistoryEvidenceReadV1(history,request){
  if(historyReadFailure)return {...base,...identity(source),
   availability:historyReadFailure};
  const sourceIdentity=identity(source);
+ if(req.kind==='ANSWER_PAGE'){
+  const n=Number(req.checkpointIndex);
+  if(!Number.isSafeInteger(n)||n<0||n>=source.checkpoints.length)
+   return {...base,...sourceIdentity,availability:'ANSWER_CHECKPOINT_INDEX_OUT_OF_RANGE'};
+  const selected=source.checkpoints[n];
+  if(!selected?.path||!/^[a-f0-9]{64}$/.test(String(selected.sha256??'')))
+   return {...base,...sourceIdentity,availability:'ANSWER_CHECKPOINT_ORIGINAL_UNAVAILABLE'};
+  if(history.snapshotCommit!==historySnapshotCommit)
+   return {...base,...sourceIdentity,availability:'PINNED_QUESTION_COMMIT_CHANGED'};
+  const cp=await historyJsonV1(selected.path).catch(()=>null);
+  const head=JSON.parse(source.originalIndexText);
+  if(!cp||cp.file.sha256!==selected.sha256||
+     cp.data?.schemaVersion!=='curveyield-ai-question-checkpoint-v1'||
+     cp.data.campaignId!==head.campaignId||
+     cp.data.campaignGenerationId!==head.campaignGenerationId||
+     cp.data.sourceSha256!==head.sourceSha256||
+     cp.data.authorityDigest!==head.authorityDigest||
+     cp.data.phaseSequence!==head.phaseSequence||
+     cp.data.phaseEpoch!==head.phaseEpoch||
+     cp.data.packetSha256!==head.packetSha256||
+     cp.data.unitId!==head.unitId||
+     cp.data.revision!==selected.expectedReference?.revision)
+   return {...base,...sourceIdentity,availability:'ANSWER_CHECKPOINT_SOURCE_MISMATCH'};
+  const qId=req.questionId,record=cp.data.records?.find(v=>v.questionId===qId);
+  if(!record||!['ANSWERS','REVISE'].includes(cp.data.mode))
+   return {...base,...sourceIdentity,availability:'ANSWER_RECORD_NOT_IN_ORIGINAL_CHECKPOINT'};
+  const start=at(req.offset);
+  if(record.answerManifest){
+   const question=source.questionRoster?.find(q=>q.questionId===qId);
+   if(!question)return {...base,...sourceIdentity,availability:'ORIGINAL_QUESTION_NOT_IN_ROSTER'};
+   const original=await miPinnedOriginalAnswerTextV1(
+    record.answerManifest,history.snapshotCommit,{
+     campaignId:head.campaignId,generationId:head.campaignGenerationId,
+     sourceSha256:head.sourceSha256,authorityDigest:head.authorityDigest,
+     phaseSequence:head.phaseSequence,phaseEpoch:head.phaseEpoch,
+     unitId:head.unitId,packetSha256:head.packetSha256,
+     questionId:qId,questionSha256:sha(question.questionText)},start);
+   return {...base,...sourceIdentity,...original,kind:req.kind,
+    checkpointIndex:n,questionId:qId,
+    originalCheckpointPath:selected.path,originalCheckpointSha256:selected.sha256};
+  }
+  if(typeof record.answerText!=='string')
+   return {...base,...sourceIdentity,availability:'ORIGINAL_ANSWER_TEXT_UNAVAILABLE'};
+  const fragment=phase1EvidencePageV1(record.answerText,start,6000);
+  return {...base,...sourceIdentity,kind:req.kind,availability:'EXACT_COMMITTED_ORIGINAL_ANSWER',
+   checkpointIndex:n,questionId:qId,originalText:fragment.text,
+   originalAnswerSha256:sha(record.answerText),
+   originalCheckpointPath:selected.path,originalCheckpointSha256:selected.sha256,
+   start:fragment.start,end:fragment.end,totalChars:record.answerText.length,
+   nextOffset:fragment.end<record.answerText.length?fragment.end:null};
+ }
  if(req.kind==='QUESTION_ROSTER')return {...base,...sourceIdentity,
   kind:req.kind,availability:'AVAILABLE',
   ...window(source.questionRoster??[],at(req.start))};
@@ -885,8 +939,8 @@ async function questionHistoryEvidenceReadV1(history,request){
   };
  }
  return {...base,...sourceIdentity,availability:'UNRECOGNIZED_QUESTION_READ',
-   supportedKinds:['HISTORY_INDEX','UNAVAILABLE_INDEX','QUESTION_ROSTER',
-   'CHECKPOINT_INDEX','QUESTION_INDEX_PAGE','CHECKPOINT_PAGE']};
+    supportedKinds:['HISTORY_INDEX','UNAVAILABLE_INDEX','QUESTION_ROSTER',
+   'CHECKPOINT_INDEX','QUESTION_INDEX_PAGE','CHECKPOINT_PAGE','ANSWER_PAGE']};
 }
 
 // Accepted historical PHASE_CANONICAL_DATA revisions may describe distinct
