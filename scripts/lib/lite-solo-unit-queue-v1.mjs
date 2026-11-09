@@ -326,6 +326,170 @@ function verifiedSegmentedAnswerSourceV1(root,ref,index,question){
   originalAnswerVerification:'PINNED_COMPLETE_UTF8_AND_FULL_SHA256'};
 }
 
+// Direct v8 phases have no queue-owned question checkpoint. The Worker
+// publishes a non-confidential sidecar with the accepted ORIGINAL shard
+// digest and a SHA-256-verified private R2 answer pointer at phase filing.
+// Only a later sealed canonical receipt attests controller acceptance.
+function collectDirectQuestionSourcesV1({root,campaignPath,directory,phase}){
+ const out={questions:[],histories:[],unavailable:[],sidecars:[],checkpoints:[]};
+ for(const sourcePhase of [1,2,3,8,9,10]){
+  if(sourcePhase>phase)continue;
+  const digits=String(sourcePhase).padStart(2,'0');
+  const rel=path.posix.join(campaignPath,'work/phase-'+digits,
+   'shards/DIRECT_QUESTION_PROVENANCE_v1.json');
+  let raw,sidecar,sourceSha256;
+  try{
+   raw=fs.readFileSync(repoFile(root,rel));
+   sourceSha256=hex(raw);sidecar=JSON.parse(raw.toString('utf8'));
+   if(sidecar.schemaVersion!=='curveyield-mi-direct-question-provenance-v1'||
+      sidecar.campaignId!==directory.campaignId||
+      sidecar.campaignGenerationId!==directory.campaignGenerationId||
+      sidecar.sourceSha256!==directory.sourceSha256||
+      sidecar.authorityDigest!==directory.authorityDigest||
+      sidecar.phaseSequence!==sourcePhase||
+      !Array.isArray(sidecar.records))
+    throw Error('direct source sidecar campaign/authority mismatch');
+  }catch(error){
+   out.unavailable.push({phaseSequence:sourcePhase,
+    reason:'DIRECT_QUESTION_PROVENANCE_UNAVAILABLE',
+    originalSourcePath:rel,diagnostic:String(error?.message??error)});
+   continue;
+  }
+  let acceptance='CURRENT_PHASE_LOCAL_SHARD_ACCEPTED_PENDING_SEAL';
+  let receiptPath=null,canonicalPath=null,canonicalSha256=null;
+  if(sourcePhase<phase){
+   canonicalPath=path.posix.join(campaignPath,'derived/phase-'+sourcePhase,
+    'PHASE_'+digits+'_CANONICAL_DATA_v1.json');
+   receiptPath=path.posix.join(campaignPath,'receipts/PHASE_'+digits+'_RECEIPT_v1.json');
+   try{
+    const canBytes=fs.readFileSync(repoFile(root,canonicalPath));
+    const prior=JSON.parse(canBytes.toString('utf8'));
+    canonicalSha256=hex(canBytes);
+    const receipt=read(root,receiptPath);
+    const relative=path.posix.relative(campaignPath,canonicalPath);
+    const evidence=(receipt.evidence??[]).find(x=>
+     x.role==='PHASE_CANONICAL_DATA'&&x.path===relative);
+    const sidecarRef=prior?.automationOutputs?.questionAnswerSources?.
+     directSourceSidecars?.find(x=>x.path===rel);
+    if(!['SEALED','COMPLETE'].includes(receipt.phase?.status)||
+       receipt.phase?.sequence!==sourcePhase||
+       receipt.validation?.status!=='PASS'||
+       receipt.campaign?.campaignId!==directory.campaignId||
+       receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId||
+       evidence?.sha256!==canonicalSha256||
+       sidecarRef?.sha256!==sourceSha256)
+     throw Error('historical direct source not bound to sealed canonical receipt');
+    acceptance='ACCEPTED_RECEIPT_BOUND';
+   }catch(error){
+    out.unavailable.push({phaseSequence:sourcePhase,
+     reason:'DIRECT_QUESTION_SOURCE_NOT_RECEIPT_VERIFIED',
+     originalSourcePath:rel,sourceSha256,
+     diagnostic:String(error?.message??error)});
+    continue;
+   }
+  }
+  out.sidecars.push({phaseSequence:sourcePhase,path:rel,sha256:sourceSha256,
+   availability:acceptance,acceptedReceiptPath:sourcePhase<phase?receiptPath:null,
+   acceptedCanonicalPath:sourcePhase<phase?canonicalPath:null,
+   acceptedCanonicalSha256:sourcePhase<phase?canonicalSha256:null});
+  out.histories.push({phaseSequence:sourcePhase,availability:acceptance,
+   directQuestionSourcePath:rel,directQuestionSourceSha256:sourceSha256,
+   acceptedReceiptPath:sourcePhase<phase?receiptPath:null,
+   sourceMeaning:'ORIGINAL_DIRECT_FIXED_QUESTION_NOT_SECURITY_VERDICT'});
+  for(const [i,record] of sidecar.records.entries()){
+   if(!record||record.phaseSequence!==sourcePhase||
+      !Number.isSafeInteger(record.step)||
+      typeof record.unitId!=='string'||!record.unitId||
+      record.originalShardPath!==path.posix.join(
+       campaignPath,'work/phase-'+digits,'shards',record.unitId)||
+      !/^[a-f0-9]{64}$/.test(record.originalShardSha256??'')||
+      !Array.isArray(record.questionSources)){
+    out.unavailable.push({phaseSequence:sourcePhase,
+     reason:'DIRECT_QUESTION_RECORD_IDENTITY_UNAVAILABLE',sourcePath:rel,index:i});
+    continue;
+   }
+   try{
+    const bytes=fs.readFileSync(repoFile(root,record.originalShardPath));
+    if(hex(bytes)!==record.originalShardSha256)
+     throw Error('original accepted shard SHA-256 differs');
+   }catch(error){
+    out.unavailable.push({phaseSequence:sourcePhase,unitId:record.unitId,
+     reason:'DIRECT_QUESTION_ACCEPTED_SHARD_UNAVAILABLE',
+     diagnostic:String(error?.message??error)});
+    continue;
+   }
+   if(!record.questionSources.length){
+    out.unavailable.push({phaseSequence:sourcePhase,unitId:record.unitId,
+     reason:'NO_ORIGINAL_DIRECT_QUESTION_PROOF_IN_ACCEPTED_SHARD',
+     acceptedShardPath:record.originalShardPath});continue;
+   }
+   const groups=new Map();
+   for(const [j,proof] of record.questionSources.entries()){
+    if(!proof||proof.schemaVersion!=='curveyield-mi-accepted-direct-question-reference-v1'||
+       proof.phaseSequence!==sourcePhase||proof.step!==record.step||
+       proof.unitId!==record.unitId||proof.originalField!==record.originalField||
+       typeof proof.questionId!=='string'||typeof proof.questionText!=='string'||
+       proof.questionSha256!==hex(Buffer.from(proof.questionText,'utf8'))||
+       proof.sourceSha256!==directory.sourceSha256||
+       proof.authorityDigest!==directory.authorityDigest){
+     out.unavailable.push({phaseSequence:sourcePhase,unitId:record.unitId,
+      reason:'DIRECT_QUESTION_PROOF_IDENTITY_MISMATCH',sourcePath:rel,
+      sourceSelector:'records['+i+'].questionSources['+j+']'});continue;
+    }
+    const id=JSON.stringify([proof.questionId,proof.questionSha256]);
+    const group=groups.get(id)??{proof,versions:[],events:[]};
+    const locator='records['+i+'].questionSources['+j+']';
+    const event={checkpointRevision:j+1,mode:'DIRECT_SOURCE_BOUND',
+     sourcePath:rel,sourceSha256,sourceSelector:locator,
+     recordedStatus:proof.availability,
+     sourceAcceptance:acceptance};
+    group.events.push(event);
+    if(proof.availability==='EXACT_PRIVATE_ORIGINAL_SHA256_VERIFIED'&&
+       /^[a-f0-9]{64}$/.test(proof.originalAnswerSha256??'')&&
+       typeof proof.privateR2Key==='string'&&
+       proof.privateR2Key.endsWith('/'+proof.originalAnswerSha256+'.txt')&&
+       proof.retrievalOperation==='direct_question_source'){
+     group.versions.push({...event,
+      originalAnswerSha256:proof.originalAnswerSha256,
+      originalAnswerBytes:proof.originalAnswerBytes,
+      originalPrivateR2Source:{key:proof.privateR2Key,
+       sha256:proof.originalAnswerSha256,
+       availability:'WORKER_R2_HASH_VERIFIED_AT_LOCAL_ACCEPTANCE',
+       retrievalOperation:'direct_question_source',
+       controllerAccepted:acceptance==='ACCEPTED_RECEIPT_BOUND'},
+      fullAnswerTextInPublicGithub:false});
+    }else out.unavailable.push({phaseSequence:sourcePhase,
+     unitId:record.unitId,questionId:proof.questionId,
+     reason:proof.availability??'DIRECT_PRIVATE_ANSWER_UNAVAILABLE',
+     sourcePath:rel,sourceSelector:locator});
+    groups.set(id,group);
+   }
+   for(const group of groups.values()){
+    const proof=group.proof;
+    out.questions.push({phaseSequence:sourcePhase,
+     unitId:record.unitId,questionId:proof.questionId,
+     questionTextSource:{path:rel,sha256:sourceSha256,
+      selector:'records['+i+'].questionSources'},
+     questionText:proof.questionText,
+     questionIndexPath:rel,questionIndexSha256:sourceSha256,
+     questionIndexRevision:null,sourceKind:'DIRECT_FIXED_ORIGINAL',
+     originalDirectFieldPath:'actions.step-'+record.step+'.outputs.'+record.originalField,
+     originalAcceptedShardPath:record.originalShardPath,
+     originalAcceptedShardSha256:record.originalShardSha256,
+     acceptedUnitPath:record.originalShardPath,
+     acceptedUnitArtifactSha256:record.originalShardSha256,
+     sourceAcceptance:acceptance,
+     acceptedReceiptPath:sourcePhase<phase?receiptPath:null,
+     checkpointEvents:group.events,answerVersions:group.versions,
+     answered:group.versions.length>0,
+     statusFromCurrentIndex:group.versions.length?'ANSWERED_SOURCE_BOUND':
+      'ANSWER_SOURCE_UNAVAILABLE_OR_NOT_STAGED',
+     securityDisposition:'NOT_INFERRED'});
+   }
+  }
+ }
+ return out;
+}
 // Exact, mechanically verified question sources. The history index and each
 // checkpoint are immutable evidence; questions are NOT security outcomes.
 // A later phase may refer to any earlier accepted question, including one
