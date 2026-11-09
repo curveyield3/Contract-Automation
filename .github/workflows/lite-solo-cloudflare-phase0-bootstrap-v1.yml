@@ -343,7 +343,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL }}
+          WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL || 'https://lite-solo-api.jamesnexus9999.workers.dev' }}
           WORKER_FORK_TOKEN: ${{ secrets.MACHINE_INTELLIGENCE_FORK_TOKEN }}
         run: |
           set -euo pipefail
