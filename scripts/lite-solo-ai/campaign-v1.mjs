@@ -2081,7 +2081,7 @@ function miLocalEvidenceReadRequestV1(raw){
  if(!parsed||Array.isArray(parsed)||typeof parsed!=='object')return null;
  const families=['admittedSourceEvidenceRequest','packetEvidenceRequest',
   'sourceEvidenceRequest','originalCanonicalEvidenceRequest','questionHistoryEvidenceRequest',
-  'packetQuestionEvidenceRequest'];
+  'packetQuestionEvidenceRequest','directQuestionEvidenceRequest'];
  const active=families.filter(f=>Object.hasOwn(parsed,f));
  if(!active.length)return null;
  if(active.length!==1||Object.keys(parsed).length!==1)
@@ -2644,7 +2644,11 @@ async function runTechnicalQuestionTransportV1(){
       source:{admittedSourceEvidenceRequest:{kind:'INDEX',start:0}},
       packet:{packetEvidenceRequest:{kind:'FILE',
        path:packet.initial?.[0]?.path??'<exact packet path>',offset:0}},
-      currentQuestionHistory:{packetQuestionEvidenceRequest:{kind:'CHECKPOINT_INDEX',start:0}}},
+      currentQuestionHistory:{packetQuestionEvidenceRequest:{kind:'CHECKPOINT_INDEX',start:0}},
+      priorPrivateDirectAnswer:{directQuestionEvidenceRequest:{
+       canonicalPath:'<exact receipt-bound prior canonical path>',
+       phaseSequence:1,unitId:'<original shard>',questionId:'<question ID>',
+       answerSha256:'<original private SHA-256>',offset:0}}},
      originalEvidenceAvailability:'All sources and checkpoints remain available by pinned index/file/offset reads. A preview is not complete if nextOffset/nextStart is present.',
      sourceBoundInterpretationOwner:'MIMO',modelMayNeverDecideControllerAcceptance:true})}
    ];
@@ -2685,7 +2689,13 @@ async function runTechnicalQuestionTransportV1(){
     result=miPacketEvidenceReadV1(packetEvidence.packet,read.request);
    else if(read.family==='packetQuestionEvidenceRequest')
     result=await miQuestionLedgerReadV1(issued,read.request);
-   else result=await modelLocalEvidenceReadV1(original,
+   else if(read.family==='directQuestionEvidenceRequest'){
+    const q=read.request??{};
+    result=JSON.parse(await workerCall({operation:'direct_question_source',
+     canonicalPath:q.canonicalPath,phaseSequence:q.phaseSequence,
+     unitId:q.unitId,questionId:q.questionId,answerSha256:q.answerSha256,
+     offset:q.offset??0}));
+   }else result=await modelLocalEvidenceReadV1(original,
      packetEvidence.canonicals,packetEvidence.phase1,packetEvidence.questions);
    if(localReads.length===2){
     const at=localReads.shift();dialogue.splice(at,2);
@@ -2860,10 +2870,14 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
   evidenceAccess:{
    source:{admittedSourceEvidenceRequest:{kind:'INDEX',start:0}},
    packet:{packetEvidenceRequest:{kind:'FILE',path:packet?.initial?.[0]?.path??'',offset:0}},
-   questions:{packetQuestionEvidenceRequest:{kind:'CHECKPOINT_INDEX',start:0}}},
+   questions:{packetQuestionEvidenceRequest:{kind:'CHECKPOINT_INDEX',start:0}},
+   priorPrivateDirectAnswer:{directQuestionEvidenceRequest:{
+    canonicalPath:'<exact receipt-bound prior canonical path>',
+    phaseSequence:1,unitId:'<original shard>',questionId:'<question ID>',
+    answerSha256:'<original private SHA-256>',offset:0}}},
   rule:'Do not automatically promote investigative questions into findings. Only explicitly authored field answers and question links become formal outputs.'
  };
- const system='You are MiMo, the sole substantive smart-contract auditor. Answer the precise GitHub-issued field question as JSON. Original source and prior questions are evidence, not automatic security conclusions. You may request one original evidence page with a JSON admittedSourceEvidenceRequest, packetEvidenceRequest, or packetQuestionEvidenceRequest; local reads are not Worker/API commands. Never invent supporting execution or PASS, canonical field paths, record IDs, lease data or controller acceptance. Preserve controller-owned prefills. The original Github adapter alone compiles output records. Return one JSON object containing exactly the requested answer property after investigation.';
+ const system='You are MiMo, the sole substantive smart-contract auditor. Answer the precise GitHub-issued field question as JSON. Original source and prior questions are evidence, not automatic security conclusions. You may request one original evidence page with a JSON admittedSourceEvidenceRequest, packetEvidenceRequest, packetQuestionEvidenceRequest or directQuestionEvidenceRequest; local reads are not Worker/API commands. Use exact receipt-bound prior canonical, original shard/question and answer SHA for private direct answers. Never invent supporting execution or PASS, canonical field paths, record IDs, lease data or controller acceptance. Preserve controller-owned prefills. The original Github adapter alone compiles output records. Return one JSON object containing exactly the requested answer property after investigation.';
  async function ask(task,key){
   const messages=[{role:'system',content:system},
    {role:'user',content:JSON.stringify(context)},
@@ -2887,7 +2901,13 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
     else if(request.family==='packetQuestionEvidenceRequest')
      page=typed?await miQuestionLedgerReadV1(issued,request.request):
       {availability:'NO_COMMITTED_PACKET_QUESTION_LEDGER'};
-    else page={availability:'UNAVAILABLE_LOCAL_READ_FAMILY',family:request.family};
+    else if(request.family==='directQuestionEvidenceRequest'){
+     const q=request.request??{};
+     page=JSON.parse(await workerCall({operation:'direct_question_source',
+      canonicalPath:q.canonicalPath,phaseSequence:q.phaseSequence,
+      unitId:q.unitId,questionId:q.questionId,answerSha256:q.answerSha256,
+      offset:q.offset??0}));
+    }else page={availability:'UNAVAILABLE_LOCAL_READ_FAMILY',family:request.family};
     if(last.length>=2){const old=last.shift();messages.splice(old,2);
      for(let i=0;i<last.length;i++)last[i]-=2;}
     last.push(messages.length);
