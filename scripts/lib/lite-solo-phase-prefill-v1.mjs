@@ -192,9 +192,8 @@ function classifyDomains(si,matrix,{
   matrixPath='UNRESOLVED',matrixSha256=null
 }={}){
   const corpus=domainClassificationCorpus(si,matrix);
-  // Keep the existing deterministic machine-routing behavior exactly. No
-  // unmatched domain is auto-promoted to UNCERTAIN_INCLUDE solely to manufacture
-  // an AI verdict; later AI review is distinct from this machine signal.
+  // Keep positive matches, domain-specific matcher gaps and global source
+  // limitations as separate machine observations. None is an AI verdict.
   const complete=si?.completion?.status==='PASS'||si?.completion?.status==='COMPLETE'||
     si?.completion?.noFillSentinelsRemaining===true;
   const allLimitations=Array.isArray(si?.limitations)?si.limitations:[];
@@ -205,18 +204,16 @@ function classifyDomains(si,matrix,{
     const results=matchers.map(m=>evaluateDomainMatcher(si,corpus,m));
     const triggered=results.some(result=>result.matched);
     const matcherCoverageComplete=matchers.length>0&&results.every(result=>result.supported);
-    const uncertain=!complete||effectiveLimitations.length>0||!matcherCoverageComplete;
-    // Legacy classification controls only existing automated routing and
-    // generated obligations. NOT_TRIGGERED cannot attest AI inapplicability.
-    const classification=triggered?'TRIGGERED':(uncertain?'UNCERTAIN_INCLUDE':'NOT_TRIGGERED');
+    const sourceCoverageUncertain=!complete||effectiveLimitations.length>0;
+    const matcherCoverageUncertain=!matcherCoverageComplete;
+    // A global limitation does not mechanically mark every unmatched domain
+    // UNCERTAIN_INCLUDE. Coverage uncertainty remains separately visible.
+    const classification=triggered?'TRIGGERED':
+      matcherCoverageUncertain?'UNCERTAIN_INCLUDE':'NOT_TRIGGERED';
     const matchedFacts=results.flatMap(result=>result.facts);
     const triggerFacts=triggered?matchedFacts:
-      classification==='UNCERTAIN_INCLUDE'?
-        [
-          ...(!complete?['SOURCE_INTELLIGENCE_INCOMPLETE']:[]),
-          ...(effectiveLimitations.length?['SOURCE_INTELLIGENCE_LIMITATIONS_PRESENT']:[]),
-          ...(!matcherCoverageComplete?['MACHINE_MATCHER_COVERAGE_INCOMPLETE']:[])
-        ]:['COMPLETE_SOURCE_INTELLIGENCE_AND_MATRIX_MATCHERS_FOUND_NO_POSITIVE_TRIGGER'];
+      matcherCoverageUncertain?['MACHINE_MATCHER_COVERAGE_INCOMPLETE']:
+      ['NO_POSITIVE_MACHINE_MATCHER_SIGNAL_DETECTED'];
     const sourceInput={path:sourceIntelligencePath,sha256:sourceIntelligenceSha256,
       observedCompletion:si?.completion??null,
       originalLimitations:allLimitations.map((limitation,index)=>({
@@ -237,8 +234,8 @@ function classifyDomains(si,matrix,{
       rationale:triggered?
         'Positive deterministic machine signal from accepted Source Intelligence; MiMo applicability has not been decided.':
         classification==='UNCERTAIN_INCLUDE'?
-          'Machine signal coverage is incomplete or Source Intelligence has limitations; conservatively retain legacy specialist routing without asserting an AI verdict.':
-          'No positive deterministic machine signal detected in the examined inputs; this does not establish source-specific negative evidence or AI inapplicability.',
+          'This domain has incomplete machine matcher coverage; this is not an AI verdict or required formal obligation.':
+          'No positive machine signal detected in examined inputs; global Source Intelligence limitations remain separately recorded and no AI inapplicability was established.',
       requiredPhase4Method:(d.methodResources??[])[0]??'DOMAIN_METHOD_RESOURCE',
       // Preserve the original methodology and source-specific standards
       // verbatim, independent of any current machine match.
@@ -251,11 +248,20 @@ function classifyDomains(si,matrix,{
       },
       machineClassification:{
         status:triggered?'POSITIVE_MACHINE_SIGNAL':
-          uncertain?'NO_POSITIVE_MACHINE_SIGNAL_INCOMPLETE_INPUT':
+          (sourceCoverageUncertain||matcherCoverageUncertain)?
+            'NO_POSITIVE_MACHINE_SIGNAL_INCOMPLETE_INPUT':
             'NO_POSITIVE_MACHINE_SIGNAL_DETECTED',
         scope:'DETERMINISTIC_DISCOVERY_AND_LEGACY_ROUTING_ONLY',
         legacyRoutingClassification:classification,
         legacyRoutingStatusMeansAIVerdict:false,
+        machineCoverageUncertainty:{
+          globalSourceIntelligenceIncomplete:!complete,
+          globalSourceIntelligenceLimitationsPresent:effectiveLimitations.length>0,
+          domainMatcherCoverageIncomplete:matcherCoverageUncertain,
+          noAIApplicabilityInference:true
+        },
+        formalObligationPolicy:triggered?
+          'POSITIVE_MACHINE_TRIGGER_ONLY':'NO_AUTOMATIC_SPECIALIST_OBLIGATION',
         inputProvenance:{
           sourceIntelligence:sourceInput,
           domainMatrix:{path:matrixPath,sha256:matrixSha256},
@@ -283,7 +289,10 @@ function domainObligations(matrix,assessments,{originPhase=3}={}){
   const out=[];
   let n=1;
   for(const a of assessments){
-    if(!['TRIGGERED','UNCERTAIN_INCLUDE'].includes(a.classification)) continue;
+    // Only a positive machine trigger creates an automatic future obligation.
+    // MiMo-authored obligations use existing canonical forms and ledger imports.
+    // Already accepted historical generated obligations remain unchanged.
+    if(a.classification!=='TRIGGERED')continue;
     const d=byId.get(a.domainId);
     for(const phase of d?.requiredExecutionPhases??[]){
       // Current-phase domain modeling is performed directly by the active
@@ -295,7 +304,7 @@ function domainObligations(matrix,assessments,{originPhase=3}={}){
         requiredPhase:String(phase),
         requiredAction:`Apply ${a.domainId} specialist method at Phase ${phase}`,
         completionCondition:`Accepted Phase-${phase} evidence addresses ${a.domainId}`,
-        priority:a.classification==='TRIGGERED'?'REQUIRED':'REQUIRED_UNCERTAIN_INCLUDE',
+        priority:'REQUIRED',
         automationGenerated:true
       });
     }
@@ -388,6 +397,7 @@ function specialistDiscoveryRoutesV1({registry,phase}){
     },
     domainSignalIndex:index,
     machineNegativeIsNotApplicabilityVerdict:true,
+    globalCoverageUncertaintyNeverMandatesAllSpecialists:true,
     noAutomaticSpecialistWorkForUnmatchedDomains:true,
     preserveMachinePositivePrefills:true,
     authoringContracts:{
@@ -417,7 +427,9 @@ function specialistDiscoveryRoutesV1({registry,phase}){
 function specialistScaffold(si,domainAssessments){
   const rows=[];let n=1;
   for(const d of domainAssessments??[]){
-    if(!['TRIGGERED','UNCERTAIN_INCLUDE'].includes(d.classification)) continue;
+    // Source-wide limitations cannot prefill compulsory work for every
+    // unmatched domain. MiMo can still author new specialist APPEND records.
+    if(d.classification!=='TRIGGERED')continue;
     rows.push({
       recordKey:'AUTO-SPEC-'+String(n++).padStart(4,'0'),
       domainOrPrivilege:d.domainId,
@@ -1285,9 +1297,8 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       sourceIntelligencePath,sourceIntelligenceSha256,
       matrixPath:matrixRel,matrixSha256
     });
-    // The legacy decision and obligation fields are deterministic routing
-    // compatibility data. AI-specific applicability requires a separate
-    // model-authored conclusion supported by the original negative standards.
+    // Positive machine triggers may generate obligations. Global limitations
+    // remain observations, not blanket mandates or AI applicability verdicts.
     const obligations=domainObligations(matrix,domains);
     const registryRel=path.posix.join(campaignPath,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json');
     writeJson(repoFile(root,registryRel),{
@@ -1298,7 +1309,9 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       matrixPath:matrixRel,matrixSha256,
       sourceIdentity:si?.identity?.sourceIdentity??si?.identity?.sourceDigestSha256??'UNRESOLVED',
       decisions:domains,
-      decisionsScope:'LEGACY_DETERMINISTIC_MACHINE_ROUTING_ONLY',
+      decisionsScope:'DETERMINISTIC_MACHINE_SIGNAL_AND_COVERAGE_ONLY',
+      generatedObligationPolicy:'POSITIVE_MACHINE_TRIGGER_ONLY',
+      globalSourceIntelligenceLimitations:structuredClone(si?.limitations??[]),
       aiApplicabilityVerdict:null,
       aiApplicabilityStatus:'NOT_AUTHORED',
       machineNegativeInterpretation:'NOT_TRIGGERED means NO_POSITIVE_MACHINE_SIGNAL_DETECTED, not an AI-authored or source-negative specialist exclusion.',
