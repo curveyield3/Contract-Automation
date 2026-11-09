@@ -42,6 +42,75 @@ const rootOf=(campaign,phase)=>path.posix.join(campaign,'work/phase-'+String(pha
 const queueRel=(campaign,phase)=>path.posix.join(rootOf(campaign,phase),'UNIT_QUEUE_STATE_v1.json');
 const planRel=(campaign,phase)=>path.posix.join(rootOf(campaign,phase),'UNIT_PLAN_INDEX_v1.json');
 const unitBase=(campaign,phase,id)=>path.posix.join(rootOf(campaign,phase),id);
+// Restore exact current and historical investigative question identities from
+// immutable CP/index-page sources. Legacy full question indexes stay read-only.
+function hydratePagedQuestionIndexV1(root,index,indexPath){
+ if(!index?.historyTail)return index;
+ if(index.indexLayout!=='PAGED_IMMUTABLE_CHAIN_V1'||
+    !indexPath.endsWith('/questions/QUESTION_INDEX_v1.json'))
+  throw Error('Unknown immutable question head layout');
+ const prefix=indexPath.slice(0,-'QUESTION_INDEX_v1.json'.length);
+ const bound={campaignId:index.campaignId,
+  campaignGenerationId:index.campaignGenerationId,
+  sourceSha256:index.sourceSha256,authorityDigest:index.authorityDigest,
+  phaseSequence:index.phaseSequence,phaseEpoch:index.phaseEpoch,
+  unitId:index.unitId,packetSha256:index.packetSha256};
+ const pages=[],seen=new Set();let pointer=index.historyTail;
+ while(pointer){
+  if(typeof pointer.path!=='string'||
+     !pointer.path.startsWith(prefix+'index-pages/')||
+     !/^INDEX_PAGE_[0-9]{6,}_[0-9]{4}_v1\.json$/.test(
+      pointer.path.slice((prefix+'index-pages/').length))||
+     !/^[a-f0-9]{64}$/.test(String(pointer.sha256??''))||
+     seen.has(pointer.path))
+   throw Error('Question page path or immutable reference invalid');
+  seen.add(pointer.path);
+  const raw=fs.readFileSync(repoFile(root,pointer.path));
+  if(hex(raw)!==pointer.sha256)
+   throw Error('Committed question page SHA-256 mismatch');
+  const page=JSON.parse(raw.toString('utf8'));
+  if(page.schemaVersion!=='curveyield-ai-question-index-page-v1'||
+     Object.entries(bound).some(([k,v])=>page[k]!==v)||
+     page.publishRevision!==pointer.publishRevision||page.part!==pointer.part||
+     page.questionOrdinalStart!==pointer.questionOrdinalStart||
+     page.questionOrdinalEnd!==pointer.questionOrdinalEnd||
+     page.checkpointRevisionStart!==pointer.checkpointRevisionStart||
+     page.checkpointRevisionEnd!==pointer.checkpointRevisionEnd||
+     !Array.isArray(page.questionAdds)||!Array.isArray(page.answerUpdates)||
+     !Array.isArray(page.checkpointRefs))
+   throw Error('Committed question page identity mismatch');
+  pages.push({page,pointer});pointer=page.previous;
+ }
+ const questions=[],checkpoints=[],known=new Map(),
+  _questionPageSources={},_answerPageSources={};
+ for(const {page,pointer} of pages.reverse()){
+  for(const [ordinal,q] of page.questionAdds.entries()){
+   if(!q||typeof q.questionId!=='string'||known.has(q.questionId))
+    throw Error('Duplicate immutable question row');
+   const record=structuredClone(q);
+   questions.push(record);known.set(record.questionId,record);
+   _questionPageSources[record.questionId]={path:pointer.path,
+    sha256:pointer.sha256,selector:'questionAdds['+ordinal+'].questionText'};
+  }
+  for(const [ordinal,u] of page.answerUpdates.entries()){
+   const q=known.get(u.questionId);
+   if(!q||!Number.isSafeInteger(u.answerCheckpoint)||u.answerCheckpoint<1)
+    throw Error('Unissued question in immutable answer page');
+   q.answered=true;q.answerCheckpoint=u.answerCheckpoint;
+   _answerPageSources[q.questionId]={path:pointer.path,
+    sha256:pointer.sha256,selector:'answerUpdates['+ordinal+'].answerCheckpoint'};
+  }
+  checkpoints.push(...page.checkpointRefs);
+ }
+ if(questions.length!==index.questionCount||
+    questions.filter(q=>q.answered).length!==index.answeredCount||
+    checkpoints.length!==index.revision||
+    index.nextUnanswered&&
+     !questions.some(q=>!q.answered&&q.questionId===index.nextUnanswered.questionId))
+  throw Error('Question page history differs from head counters or cursor');
+ return {...index,questions,checkpoints,_questionPageSources,_answerPageSources};
+}
+
 // Question checkpoints are immutable Audit-Controller GitHub records. The
 // index is optional evidence metadata, NEVER a unit/phase acceptance gate.
 // Always retain its deterministic path and source-bound lookup identity, even
