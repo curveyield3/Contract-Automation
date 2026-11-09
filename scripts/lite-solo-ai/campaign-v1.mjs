@@ -477,6 +477,76 @@ async function historyJsonV1(rel){
  if(!file)return null;
  return {file,data:JSON.parse(file.text)};
 }
+// Read immutable question index pages from one exact GitHub commit. Legacy
+// pre-pagination indexes are returned unchanged. Both current and historical
+// packet readers use this same source-bound reconstruction, never a HEAD guess.
+const miQFullCacheV1=new Map();
+async function miQHydratePinnedV1(index,indexPath,commit){
+ if(!index?.historyTail)return index;
+ if(index.indexLayout!=='PAGED_IMMUTABLE_CHAIN_V1'||
+    !/^[a-f0-9]{40}$/.test(String(commit??''))||
+    !indexPath?.endsWith('/questions/QUESTION_INDEX_v1.json'))
+  throw Error('Invalid paged original question source identity');
+ const cacheKey=commit+':'+indexPath+':'+index.historyTail.sha256;
+ if(miQFullCacheV1.has(cacheKey))return miQFullCacheV1.get(cacheKey);
+ const prefix=indexPath.slice(0,-'QUESTION_INDEX_v1.json'.length);
+ const bound={campaignId:index.campaignId,
+  campaignGenerationId:index.campaignGenerationId,
+  sourceSha256:index.sourceSha256,authorityDigest:index.authorityDigest,
+  phaseSequence:index.phaseSequence,phaseEpoch:index.phaseEpoch,
+  unitId:index.unitId,packetSha256:index.packetSha256};
+ const pages=[],seen=new Set();let pointer=index.historyTail;
+ while(pointer){
+  if(typeof pointer.path!=='string'||
+     !pointer.path.startsWith(prefix+'index-pages/')||
+     !/^INDEX_PAGE_[0-9]{6,}_[0-9]{4}_v1\.json$/.test(
+      pointer.path.slice((prefix+'index-pages/').length))||
+     !/^[a-f0-9]{64}$/.test(String(pointer.sha256??''))||
+     seen.has(pointer.path))
+   throw Error('Original question index page reference invalid');
+  seen.add(pointer.path);
+  const file=await miPinnedGithubFileV1(pointer.path,commit);
+  if(file.text===null||file.sha256!==pointer.sha256)
+   throw Error('Original immutable question index page SHA mismatch');
+  const page=JSON.parse(file.text);
+  if(page.schemaVersion!=='curveyield-ai-question-index-page-v1'||
+     Object.entries(bound).some(([k,v])=>page[k]!==v)||
+     page.publishRevision!==pointer.publishRevision||page.part!==pointer.part||
+     page.questionOrdinalStart!==pointer.questionOrdinalStart||
+     page.questionOrdinalEnd!==pointer.questionOrdinalEnd||
+     page.checkpointRevisionStart!==pointer.checkpointRevisionStart||
+     page.checkpointRevisionEnd!==pointer.checkpointRevisionEnd||
+     !Array.isArray(page.questionAdds)||!Array.isArray(page.answerUpdates)||
+     !Array.isArray(page.checkpointRefs))
+   throw Error('Original question index page identity differs from head');
+  pages.push(page);pointer=page.previous;
+ }
+ const questions=[],checkpoints=[],map=new Map();
+ for(const page of pages.reverse()){
+  for(const q of page.questionAdds){
+   if(!q||typeof q.questionId!=='string'||map.has(q.questionId))
+    throw Error('Repeated original question page identity');
+   const row=structuredClone(q);map.set(q.questionId,row);questions.push(row);
+  }
+  for(const u of page.answerUpdates){
+   const q=map.get(u.questionId);
+   if(!q||!Number.isSafeInteger(u.answerCheckpoint)||u.answerCheckpoint<1)
+    throw Error('Original question update lacks issued question');
+   q.answered=true;q.answerCheckpoint=u.answerCheckpoint;
+  }
+  checkpoints.push(...page.checkpointRefs);
+ }
+ if(questions.length!==index.questionCount||
+    questions.filter(q=>q.answered).length!==index.answeredCount||
+    checkpoints.length!==index.revision||
+    index.nextUnanswered&&
+     !questions.some(q=>!q.answered&&q.questionId===index.nextUnanswered.questionId))
+  throw Error('Original question page count or cursor differs from head');
+ const expanded={...index,questions,checkpoints};
+ miQFullCacheV1.set(cacheKey,expanded);
+ return expanded;
+}
+
 async function sourceBoundQuestionHistoryV1(raw){
  let envelope;
  try{envelope=JSON.parse(raw);}catch{return null;}
