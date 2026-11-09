@@ -2208,12 +2208,27 @@ async function miSendOriginalBounded(issued,original,body){
     r.segmentIndex!==i||r.fullSha256!==m.fullSha256||r.segmentSha256!==h)
    throw Error('Original answer segment not durably stored: '+i);
  }
- const reply=await workerCall({operation:'commit_segmented_answer',...m}),r=JSON.parse(reply);
- if(r.status==='AI_ORIGINAL_SEGMENTS_AWAIT_CONTROLLER_QUESTION_RECORD_PAGING')
-  throw Error('Original answer retained, but controller has no compatible larger question-record paging: '+m.fullSha256);
- if(r.originalSegmentsVerified!==true||r.completeOriginalSha256!==m.fullSha256||
-    r.completeOriginalBytes!==buf.length)
-  throw Error('Original full answer digest not verified at committed checkpoint: '+r.status);
+ let reply,r,next=-1,unresolved=0;
+ for(let attempt=0;attempt<=m.segmentCount+4;attempt++){
+  reply=await workerCall({operation:'commit_segmented_answer',...m});
+  r=JSON.parse(reply);
+  if(r.status==='AI_ORIGINAL_GITHUB_PAGES_PENDING'){
+   if(!Number.isSafeInteger(r.nextSegmentIndex)||
+      r.nextSegmentIndex<=next||r.nextSegmentIndex>m.segmentCount)
+    throw Error('Original immutable answer page cursor did not advance');
+   next=r.nextSegmentIndex;continue;
+  }
+  if(r.status==='AI_ORIGINAL_GITHUB_MANIFEST_AWAIT_CHECKPOINT'&&unresolved++<3)
+   continue;
+  break;
+ }
+ if(r.status!=='AI_TECHNICAL_QUESTION_RECORDED'||
+    r.originalSegmentsVerified!==true||
+    r.completeOriginalSha256!==m.fullSha256||
+    r.completeOriginalBytes!==buf.length||
+    r.originalCommittedToGitHub!==true)
+  throw Error('Original segmented answer is not completely GitHub committed: '+
+   String(r.status??'NO_STATUS')+' '+m.fullSha256);
  return reply;
 }
 // Locate all previously saved segments after process restart, rather than
@@ -2247,13 +2262,27 @@ async function miRecoverOriginalBounded(issued){
   throw Error('Durable original answer manifest inconsistent');
  if(rows.length!==first.segmentCount)
   throw Error('Original answer segment tail not durable; no regeneration or premature completion');
- const r=JSON.parse(await workerCall({operation:'commit_segmented_answer',...id,
-  fullSha256:first.fullSha256,totalBytes:first.totalBytes,segmentCount:first.segmentCount}));
- if(r.status==='AI_ORIGINAL_SEGMENTS_AWAIT_CONTROLLER_QUESTION_RECORD_PAGING')
-  throw Error('Original large answer awaits controller-compatible question-record paging: '+first.fullSha256);
- if(r.status!=='AI_TECHNICAL_QUESTION_RECORDED'||r.originalSegmentsVerified!==true||
-    r.completeOriginalSha256!==first.fullSha256)
-  throw Error('Recovered original answer not GitHub-committed: '+r.status);
+ let r,next=-1,unresolved=0;
+ for(let attempt=0;attempt<=first.segmentCount+4;attempt++){
+  r=JSON.parse(await workerCall({operation:'commit_segmented_answer',...id,
+   fullSha256:first.fullSha256,totalBytes:first.totalBytes,
+   segmentCount:first.segmentCount}));
+  if(r.status==='AI_ORIGINAL_GITHUB_PAGES_PENDING'){
+   if(!Number.isSafeInteger(r.nextSegmentIndex)||
+      r.nextSegmentIndex<=next||r.nextSegmentIndex>first.segmentCount)
+    throw Error('Restored original answer page cursor is not advancing');
+   next=r.nextSegmentIndex;continue;
+  }
+  if(r.status==='AI_ORIGINAL_GITHUB_MANIFEST_AWAIT_CHECKPOINT'&&unresolved++<3)
+   continue;
+  break;
+ }
+ if(r.status!=='AI_TECHNICAL_QUESTION_RECORDED'||
+    r.originalSegmentsVerified!==true||
+    r.completeOriginalSha256!==first.fullSha256||
+    r.completeOriginalBytes!==first.totalBytes||
+    r.originalCommittedToGitHub!==true)
+  throw Error('Recovered original answer not GitHub-committed: '+String(r.status));
  return r;
 }
 
