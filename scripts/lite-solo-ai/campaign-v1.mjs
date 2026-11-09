@@ -13,6 +13,11 @@ const endpoint=workerBase.replace(/\/$/,'')+'/api/ai/bridge';
 const audience='urn:curveyield:lite-solo:github-actions-ai:v1';
 const identityEndpoint=process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
 const identityBearer=process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+// Raw Worker-issued dispatch correlation stays in the authenticated request header,
+// never in model prompts, private transcript bodies or public workflow logs.
+const dispatchCorrelation=process.env.AUDIT_AI_DISPATCH_CORRELATION||'';
+if(process.env.AUDIT_AI_MODE==='autonomous'&&!/^[0-9a-f]{64}$/.test(dispatchCorrelation))
+ throw Error('Autonomous MiMo transport requires the Worker-issued dispatch correlation');
 if(!/^[A-Za-z0-9_.-]+-r[0-9]+$/.test(campaignId||'')||
    !identityEndpoint||!identityBearer||
    process.env.GITHUB_REPOSITORY!=='curveyield3/Contract-Automation'||
@@ -61,7 +66,8 @@ async function recordPrivateCommunication(direction,content){
  if(!parts.length)parts.push('');
  for(let index=0;index<parts.length;index++){
   const res=await fetch(endpoint,{
-   method:'POST',headers:{authorization:'Bearer '+await identity(),'content-type':'application/json'},
+   method:'POST',headers:{authorization:'Bearer '+await identity(),'content-type':'application/json',
+    'x-mi-dispatch-correlation':dispatchCorrelation},
    body:JSON.stringify({campaignId,operation:'record',eventId,direction,part:index,
     totalParts:parts.length,content:parts[index],
     startPhase:firstTranscriptScope?.phase??null,startStep:firstTranscriptScope?.step??null,
@@ -82,7 +88,8 @@ async function workerCall(payload){
  await recordPrivateCommunication('worker_request',JSON.stringify({campaignId,...payload}));
  const res=await fetch(endpoint,{
   method:'POST',
-  headers:{authorization:'Bearer '+await identity(),'content-type':'application/json'},
+  headers:{authorization:'Bearer '+await identity(),'content-type':'application/json',
+    'x-mi-dispatch-correlation':dispatchCorrelation},
   body:JSON.stringify({campaignId,...payload}),
   signal:AbortSignal.timeout(150000)
  });
