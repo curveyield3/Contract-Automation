@@ -6,17 +6,9 @@
   "submission_mode": "submit",
   "max_chunks": "32",
   "ai_hop": "0",
-  "dispatchRevision": "v20",
+  "dispatchRevision": "v21",
   "sourceExpectedSha256": "299fda8224b658a17bf0068690a321f295c1d7ee655eaf72470023ec33a0eb71",
   "previousCampaign": "cyvbusdcv28-r4",
   "retryOfFailedInitializationRun": "42647312107",
-  "retryReason": "Retry failed Machine Intelligence Phase 0 initialization from current branch after restoring existing CLOUDFLARE_FORK_TOKEN workflow reference and fixing adapter syntax.",
-  "phase0Retry": {
-    "enabled": true,
-    "campaign_id": "cyvbusdcv28-r5",
-    "campaign_path": "campaigns/cyvbUSDCv28/cyvbUSDCv28 r5",
-    "resume_from_finalize": true,
-    "failedRunId": 42670614988,
-    "reason": "Resume Phase 0 finalization with existing accepted intelligence/deploy after v8 authority repair"
-  }
+  "retryReason": "Retry failed Machine Intelligence Phase 0 initialization from current branch after restoring existing CLOUDFLARE_FORK_TOKEN workflow reference and fixing adapter syntax."
 }
