@@ -2245,6 +2245,24 @@ async function miQuestionLedgerReadV1(issued,request){
  let content=original.originalText;
  if(specificQuestion){
   const record=original.checkpoint.records?.find(x=>x.questionId===specificQuestion.questionId);
+  if(record?.answerManifest){
+   const originalWindow=await miPinnedOriginalAnswerTextV1(
+    record.answerManifest,q.indexCommit,{
+     campaignId,unitId:issued.scope.unitId,
+     generationId:issued.scope.generationId,lease:issued.scope.lease,
+     questionId:specificQuestion.questionId,sourceSha256:issued.scope.sourceSha256,
+     authorityDigest:issued.scope.authorityDigest,
+     phaseSequence:issued.scope.phase,phaseEpoch:issued.scope.phaseEpoch,
+     packetSha256:issued.scope.packetSha256,
+     questionSha256:sha(specificQuestion.questionText)},
+    Number.isSafeInteger(request.offset)?request.offset:0);
+   return {...base,...originalWindow,kind:request.kind,
+    questionId:specificQuestion.questionId,checkpointIndex:index,
+    sourceCheckpointSha256:original.sha256,
+    fragmentSha256:originalWindow.originalText!==undefined?
+     sha(originalWindow.originalText):null,
+    completeOriginalText:originalWindow.completeOriginalText??false};
+  }
   if(!record||typeof record.answerText!=='string')
    return {...base,availability:'ANSWER_RECORD_ABSENT_FROM_REFERENCED_CHECKPOINT',
     questionId:specificQuestion.questionId,checkpointIndex:index};
@@ -2274,6 +2292,23 @@ async function miRecentOriginalAnswersV1(issued){
    out.push({questionId:question.questionId,availability:found.availability});continue;
   }
   const rec=found.checkpoint.records?.find(x=>x.questionId===question.questionId);
+  if(rec?.answerManifest){
+   const page=await miPinnedOriginalAnswerTextV1(
+    rec.answerManifest,q.indexCommit,{campaignId,unitId:issued.scope.unitId,
+     generationId:issued.scope.generationId,lease:issued.scope.lease,
+     questionId:question.questionId,sourceSha256:issued.scope.sourceSha256,
+     authorityDigest:issued.scope.authorityDigest,
+     phaseSequence:issued.scope.phase,phaseEpoch:issued.scope.phaseEpoch,
+     packetSha256:issued.scope.packetSha256,
+     questionSha256:sha(question.questionText)},0);
+   out.push({questionId:question.questionId,
+    originalQuestionText:question.questionText,
+    answerTextPage:page.originalText,answerTextSha256:page.originalAnswerSha256,
+    originalAnswerComplete:page.completeOriginalText,
+    completeAnswerChars:page.totalChars,nextOffset:page.nextOffset,
+    originalAnswerManifest:page.manifestPath,
+    checkpointIndex:index,checkpointSha256:found.sha256});continue;
+  }
   if(!rec||typeof rec.answerText!=='string'){
    out.push({questionId:question.questionId,availability:'ANSWER_NOT_IN_ORIGINAL_CHECKPOINT'});continue;
   }
