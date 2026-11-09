@@ -1327,7 +1327,7 @@ function originalWorkerAttemptReferenceV1({root,campaign,phase,unitId,request,it
 // cannot be placed in the issued-flow canonical attackPaths collection.
 // Never classify, repair, or drop the Worker-authored records here.
 function unmappedAttackPathProvenanceV1({root,campaign,u,originalWorkerAttempt,submission=null}){
- const missing=status=>({status,refs:[],allRefs:[]});
+ const missing=status=>({status,refs:[],allRefs:[],candidateRefs:[]});
  if(originalWorkerAttempt?.availability!=='AVAILABLE')
   return missing(originalWorkerAttempt?.availability??'ORIGINAL_ATTEMPT_UNAVAILABLE');
  const sourcePath=originalWorkerAttempt.path,sourceSha=originalWorkerAttempt.sha256;
@@ -1355,7 +1355,7 @@ function unmappedAttackPathProvenanceV1({root,campaign,u,originalWorkerAttempt,s
     fixedCount=packet.payload.flowIds.length;
    }
   }catch{/* Missing packet does not block acceptance. */}
-  const refs=[],allRefs=[];let mappedCount=0;
+  const refs=[],allRefs=[],candidateRefs=[];let mappedCount=0;
   extras.forEach((record,index)=>{
    const ids=record?.flowIds;
    const mappingStatus=!issuedFlows?'ISSUED_FLOWS_UNAVAILABLE':
@@ -1385,10 +1385,32 @@ function unmappedAttackPathProvenanceV1({root,campaign,u,originalWorkerAttempt,s
     originalWorkerAttempt:{availability:'AVAILABLE',path:sourcePath,sha256:sourceSha}
    };
    allRefs.push(ref);
-   if(!acceptedSelector)refs.push(ref);
+   if(!acceptedSelector){
+    refs.push(ref);
+    // Preserve every EXPLICIT original nested candidate as its own independent
+    // source-bound lead, even when the parent ATTACK flow is not issued.
+    // Neither its content nor its source relationship is a security verdict.
+    const addOriginalCandidate=(candidate,candidateSelector,kind,candidateIndex)=>{
+     if(!candidate||typeof candidate!=='object'||Array.isArray(candidate))return;
+     candidateRefs.push({
+      sourceSelector:candidateSelector,parentSourceSelector:selector,
+      originalPathIndex:index,originalPathId:fields.pathId??null,
+      originalFlowIds:ids===undefined?null:structuredClone(ids),
+      mappingStatus:status,unitId:u.unitId,
+      candidateKind:kind,originalCandidateIndex:candidateIndex,
+      originalCandidateValueSha256:hex(JSON.stringify(candidate)),
+      originalWorkerAttempt:{availability:'AVAILABLE',path:sourcePath,sha256:sourceSha}
+     });
+    };
+    if(Object.hasOwn(fields,'candidate'))
+     addOriginalCandidate(fields.candidate,selector+'.candidate','SINGULAR',null);
+    if(Array.isArray(fields.candidates))
+     fields.candidates.forEach((candidate,j)=>
+      addOriginalCandidate(candidate,selector+'.candidates['+j+']','PLURAL',j));
+   }
   });
   return {status:issuedFlows?'COLLECTED_NONBLOCKING':'ISSUED_FLOWS_UNAVAILABLE',
-   refs,allRefs};
+   refs,allRefs,candidateRefs};
  }catch{return missing('ORIGINAL_ATTEMPT_UNREADABLE');}
 }
 function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory}){
@@ -1428,6 +1450,7 @@ function acceptSubmission({root,campaign,phase,request,item,queue,plan,directory
    root,campaign,u,originalWorkerAttempt:sourceProvenance.originalWorkerAttempt,submission});
   sourceProvenance.extraAttackPathRefs=extra.allRefs;
   sourceProvenance.unmappedAttackPathRefs=extra.refs;
+  sourceProvenance.unmappedAttackCandidateRefs=extra.candidateRefs;
   sourceProvenance.unmappedAttackPathExtractionStatus=extra.status;
  }
  put(root,acceptedRel,{schemaVersion:'curveyield-lite-solo-accepted-unit-v1',unitId:u.unitId,
@@ -1512,7 +1535,9 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
    allRefs:Array.isArray(accepted.sourceProvenance?.extraAttackPathRefs)
     ?accepted.sourceProvenance.extraAttackPathRefs:reconstructed.allRefs,
    status:accepted.sourceProvenance?.unmappedAttackPathExtractionStatus??
-    reconstructed.status
+    reconstructed.status,
+   candidateRefs:Array.isArray(accepted.sourceProvenance?.unmappedAttackCandidateRefs)?
+    accepted.sourceProvenance.unmappedAttackCandidateRefs:reconstructed.candidateRefs
   }:null;
   return {unitId:u.unitId,submission:accepted.submission,
    sourceReference:{phaseSequence:4,unitId:u.unitId,acceptedPath,
@@ -1525,6 +1550,7 @@ function finishDiscovery({root,campaign,directory,plan,queue,automationRoot}){
     originalWorkerAttempt:accepted.sourceProvenance?.originalWorkerAttempt??
      {availability:'NOT_RECORDED'},
     ...(extra?{unmappedAttackPathRefs:extra.refs,
+     unmappedAttackCandidateRefs:extra.candidateRefs,
      extraAttackPathRefs:extra.allRefs,
      unmappedAttackPathExtractionStatus:extra.status}:{})}};
  });
