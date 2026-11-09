@@ -571,7 +571,7 @@ function discoveryAnswerBindingV1({u,packet,initial}){
           signature:g.signature,memberContextIds:(g.members??[]).map(m=>m.contextId)}))}
     },
     allowedVerdict:['CORRECT','DEFECT','UNRESOLVED'],
-    controllerPrefill:found?.contextId});
+    controllerPrefill:found?.contextId};
  }):[];
  const attack=flow?[]:requiredFlows.map((id,i)=>({
   recordIndex:i,destination:'attackPaths['+i+']',
