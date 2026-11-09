@@ -3134,7 +3134,54 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
  let submission;
  const directAppend=!typed&&contract.descriptor?.append===true;
  const resumedDirectAppend=directAppend?contract.directAppendProgress:null;
- if(!typed&&!resumedDirectAppend){
+ if(fixedPlan){
+  const shard=structuredClone(contract.inputFileTemplate);
+  for(const row of fixedPlan.controllerRecordQuestions){
+   const index=row.recordOrdinal-shard.startIndex,entry=shard.entries[index];
+   const values=fixedMemberAnswers.filter(v=>v.recordOrdinal===row.recordOrdinal);
+   if(!entry||entry.key!==row.controllerIssuedRecordKey||
+      values.length!==row.itemFields.length)
+    throw Error('Fixed member original answer roster no longer matches issued row');
+   const original=entry.value;
+   if(typeof original==='string'&&
+      ['NONE_IDENTIFIED','NO_CANDIDATE'].includes(original)&&
+      values.every(v=>v.value===original))continue;
+   const needsIdentity=original&&typeof original==='object'&&!Array.isArray(original)&&
+    fixedPlan.controllerOnlyFields.some(q=>typeof original[q.field]==='string'&&
+      original[q.field].startsWith('<REQUIRED'));
+   let compiled;
+   if(original&&typeof original==='object'&&!Array.isArray(original)&&
+      !needsIdentity){
+    compiled=structuredClone(original);
+    for(const v of values)compiled[v.field]=v.value;
+   }else{
+    compiled=await ask({
+     task:'SERIALIZE_ONE_ORIGINAL_FIXED_ROW_FROM_ALREADY_ANSWERED_MEMBERS',
+     originalIssuedRecord:{ordinal:row.recordOrdinal,
+      key:row.controllerIssuedRecordKey,originalValue:original},
+     exactPreviouslyAuthoredMemberAnswers:values,
+     originalControllerOnlyFields:fixedPlan.controllerOnlyFields,
+     responseShape:{recordValue:'<one original keyed record value>'},
+     instructions:'This is serialization ONLY, not another security investigation. Copy every exact already-authored member value into its original property without paraphrase, omission or change. Preserve original controller-owned identities and issued shard entry key. If the original template explicitly permits an AI-owned placeholder record identity, choose its unique record identifier without changing existing prefilled IDs. Return the original allowed negative sentinel only if ALL independently authored item-field answers explicitly support that same sentinel. Do not create additional records, invent new security judgments or assume missing evidence is resolved.'},'recordValue');
+   }
+   if(compiled&&typeof compiled==='object'&&!Array.isArray(compiled)){
+    for(const v of values)
+     if(JSON.stringify(compiled[v.field])!==JSON.stringify(v.value))
+      throw Error('Original fixed member was changed or dropped during serialization');
+    for(const source of fixedPlan.controllerOnlyFields){
+     const old=original?.[source.field];
+     if(old!==undefined&&!(typeof old==='string'&&old.startsWith('<REQUIRED'))&&
+        JSON.stringify(compiled[source.field])!==JSON.stringify(old))
+      throw Error('Controller-issued fixed member identity/prefill changed');
+    }
+   }else if(!(typeof compiled==='string'&&
+      ['NONE_IDENTIFIED','NO_CANDIDATE'].includes(compiled)&&
+      values.every(v=>v.value===compiled)))
+    throw Error('Fixed member answers cannot be replaced by a new negative sentinel');
+   entry.value=compiled;
+  }
+  submission=shard;
+ }else if(!typed&&!resumedDirectAppend){
   const shard=await ask({task:remediation?'AUTHOR_SOURCE_BOUND_REVISED_DIRECT_SHARD':'AUTHOR_COMPLETE_ORIGINAL_DIRECT_SHARD',
    originalQuestion:contract.originalTechnicalQuestion,
    frozenOriginalFixedQuestionPlan:contract.originalTechnicalQuestion?.fixedQuestionPlan??null,
@@ -3321,7 +3368,8 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
   }
  }
  const submitted=await workerCall({operation:'submit_field_answers',unitId:ready.unitId,
-  lease:ready.lease,submission,...(remediation?{remediation:true}:{})});
+  lease:ready.lease,submission,...(fixedPlan?{fixedMemberAnswerRefs}:{}),
+  ...(remediation?{remediation:true}:{})});
  let result;try{result=JSON.parse(submitted);}catch{
   throw Error('Source-bound field submission response invalid');
  }
