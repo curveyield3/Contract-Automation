@@ -6,7 +6,7 @@
   "submission_mode": "submit",
   "max_chunks": "32",
   "ai_hop": "0",
-  "dispatchRevision": "v19",
+  "dispatchRevision": "v20",
   "sourceExpectedSha256": "299fda8224b658a17bf0068690a321f295c1d7ee655eaf72470023ec33a0eb71",
   "previousCampaign": "cyvbusdcv28-r4",
   "retryOfFailedInitializationRun": "42647312107",
@@ -15,8 +15,8 @@
     "enabled": true,
     "campaign_id": "cyvbusdcv28-r5",
     "campaign_path": "campaigns/cyvbUSDCv28/cyvbUSDCv28 r5",
-    "resume_from_deploy": true,
-    "failedRunId": 42670154084,
-    "reason": "Retain already-written Phase0 intelligence evidence and retry deploy/config with v8 authority checkout"
+    "resume_from_finalize": true,
+    "failedRunId": 42670614988,
+    "reason": "Resume Phase 0 finalization with existing accepted intelligence/deploy after v8 authority repair"
   }
 }
