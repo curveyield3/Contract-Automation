@@ -188,7 +188,7 @@ try {
 
 // v3 cannot promote an absent or incomplete source-review inventory to a
 // completed discovery: Phase 4 has to be generated from real source contexts.
-if(receipt.authority?.liteRelease==='machine-intelligence-v7'){
+if(['machine-intelligence-v7','machine-intelligence-v8'].includes(receipt.authority?.liteRelease)){
   const reviewRoot=path.join(campaignRoot,'evidence/review-inventory');
   const inventory=read(required(path.join(reviewRoot,'REVIEW_INVENTORY_v1.json'),'complete source review inventory'));
   const facts=read(required(path.join(reviewRoot,'SYSTEM_FACTS_v1.json'),'system facts'));
@@ -233,7 +233,7 @@ const directory=read(required(directoryPath,'Audit Campaign Directory entry'));
 if(directory.campaignId!==receipt.campaign.campaignId) throw new Error('campaign directory identity mismatch');
 const sealedPhase0Receipt=rel(controllerRoot,receiptPath);
 const authorityRoot=path.posix.dirname(receipt.authority.homepagePath);
-if(authorityRoot!=='Machine Intelligence Audit Controller/Audit Skill v7'||receipt.authority.liteRelease!=='machine-intelligence-v7')
+if(!((authorityRoot==='Machine Intelligence Audit Controller/Audit Skill v7'&&receipt.authority.liteRelease==='machine-intelligence-v7')||(authorityRoot==='Machine Intelligence Audit Controller/Audit Skill v8'&&receipt.authority.liteRelease==='machine-intelligence-v8')))
  throw new Error('Machine Intelligence authority identity mismatch');
 if(directory.mode!=='LITE_SOLO'||directory.agent?.actorId!=='lite-solo-agent'||directory.deliveryTransport!=='DIRECT'||directory.agent?.chatUrl!=null)throw new Error('lite-solo Phase-0 directory identity mismatch');
 const assignment=preparePhaseWork({
@@ -258,8 +258,8 @@ const directoryV2={
   mode:'LITE_SOLO',
   deliveryTransport:'DIRECT',
   agent:directory.agent,
-  agentModel:receipt.authority.liteRelease==='machine-intelligence-v7'?'PARALLEL_WORKER_UNITS':'ONE_PERSISTENT_AGENT',
-  executionModel:receipt.authority.liteRelease==='machine-intelligence-v7'?'PARALLEL_WORKER_UNITS':null,
+  agentModel:'PARALLEL_WORKER_UNITS',
+  executionModel:'PARALLEL_WORKER_UNITS',
   authorityRelease:receipt.authority.liteRelease,
   authorityDigest:receipt.authority.manifestSha256,
   unitPhaseEpoch:1,
