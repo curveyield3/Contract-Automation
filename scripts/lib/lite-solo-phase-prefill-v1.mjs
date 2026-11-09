@@ -213,12 +213,13 @@ function classifyDomains(si,matrix,{
         'UNCERTAIN_INCLUDE':'NOT_TRIGGERED';
     const matchedFacts=results.flatMap(result=>result.facts);
     const triggerFacts=triggered?matchedFacts:
-      !machineIntelligence&&classification==='UNCERTAIN_INCLUDE'?
-        [
-          ...(!complete?['SOURCE_INTELLIGENCE_INCOMPLETE']:[]),
-          ...(effectiveLimitations.length?['SOURCE_INTELLIGENCE_LIMITATIONS_PRESENT']:[]),
-          ...(!matcherCoverageComplete?['MACHINE_MATCHER_COVERAGE_INCOMPLETE']:[])
-        ]:
+      !machineIntelligence?
+        classification==='UNCERTAIN_INCLUDE'?
+          [
+            ...(!complete?['SOURCE_INTELLIGENCE_INCOMPLETE']:[]),
+            ...(effectiveLimitations.length?['SOURCE_INTELLIGENCE_LIMITATIONS_PRESENT']:[]),
+            ...(!matcherCoverageComplete?['MACHINE_MATCHER_COVERAGE_INCOMPLETE']:[])
+          ]:['COMPLETE_SOURCE_INTELLIGENCE_AND_MATRIX_MATCHERS_FOUND_NO_POSITIVE_TRIGGER']:
       matcherCoverageUncertain?['MACHINE_MATCHER_COVERAGE_INCOMPLETE']:
       ['NO_POSITIVE_MACHINE_MATCHER_SIGNAL_DETECTED'];
     const sourceInput={path:sourceIntelligencePath,sha256:sourceIntelligenceSha256,
@@ -244,7 +245,9 @@ function classifyDomains(si,matrix,{
           machineIntelligence?
             'This domain has incomplete machine matcher coverage; this is not an AI verdict or required formal obligation.':
             'Machine signal coverage is incomplete or Source Intelligence has limitations; conservatively retain legacy specialist routing without asserting an AI verdict.':
-          'No positive machine signal detected in examined inputs; global Source Intelligence limitations remain separately recorded and no AI inapplicability was established.',
+          machineIntelligence?
+            'No positive machine signal detected in examined inputs; global Source Intelligence limitations remain separately recorded and no AI inapplicability was established.':
+            'No positive deterministic machine signal detected in the examined inputs; this does not establish source-specific negative evidence or AI inapplicability.',
       requiredPhase4Method:(d.methodResources??[])[0]??'DOMAIN_METHOD_RESOURCE',
       // Preserve the original methodology and source-specific standards
       // verbatim, independent of any current machine match.
@@ -263,15 +266,16 @@ function classifyDomains(si,matrix,{
         scope:'DETERMINISTIC_DISCOVERY_AND_LEGACY_ROUTING_ONLY',
         legacyRoutingClassification:classification,
         legacyRoutingStatusMeansAIVerdict:false,
-        machineCoverageUncertainty:{
-          globalSourceIntelligenceIncomplete:!complete,
-          globalSourceIntelligenceLimitationsPresent:effectiveLimitations.length>0,
-          domainMatcherCoverageIncomplete:matcherCoverageUncertain,
-          noAIApplicabilityInference:true
-        },
-        formalObligationPolicy:machineIntelligence?
-          (triggered?'POSITIVE_MACHINE_TRIGGER_ONLY':'NO_AUTOMATIC_SPECIALIST_OBLIGATION'):
-          'LEGACY_ROUTING_CLASSIFICATION_COMPATIBILITY',
+        ...(machineIntelligence?{
+          machineCoverageUncertainty:{
+            globalSourceIntelligenceIncomplete:!complete,
+            globalSourceIntelligenceLimitationsPresent:effectiveLimitations.length>0,
+            domainMatcherCoverageIncomplete:matcherCoverageUncertain,
+            noAIApplicabilityInference:true
+          },
+          formalObligationPolicy:triggered?
+            'POSITIVE_MACHINE_TRIGGER_ONLY':'NO_AUTOMATIC_SPECIALIST_OBLIGATION'
+        }:{}),
         inputProvenance:{
           sourceIntelligence:sourceInput,
           domainMatrix:{path:matrixPath,sha256:matrixSha256},
