@@ -2544,43 +2544,92 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
   const messages=[{role:'system',content:system},
    {role:'user',content:JSON.stringify(context)},
    {role:'user',content:JSON.stringify(task)}];
-  let original=await modelCall(messages);
-  const last=[];
+  // modelCall archives EACH raw original to private Worker R2 before parsing.
+  // Corrections are separate originals, not overwrites of the model's bytes.
+  let original=await modelCall(messages),formatCorrections=0;
+  const firstResponseSha256=sha(original),last=[];
   for(;;){
-   const request=miLocalEvidenceReadRequestV1(original);
-   if(!request)break;
-   let page;
-   if(request.error)page=request.error;
-   else if(request.family==='admittedSourceEvidenceRequest')
-    page=source?await miAdmittedSourceReadV1(source,request.request):
-     {availability:'SOURCE_UNAVAILABLE'};
-   else if(request.family==='packetEvidenceRequest')
-    page=packet?miPacketEvidenceReadV1(packet,request.request):
-     {availability:'PACKET_UNAVAILABLE'};
-   else if(request.family==='packetQuestionEvidenceRequest')
-    page=typed?await miQuestionLedgerReadV1(issued,request.request):
-     {availability:'NO_COMMITTED_PACKET_QUESTION_LEDGER'};
-   else page={availability:'UNAVAILABLE_LOCAL_READ_FAMILY',family:request.family};
-   if(last.length>=2){const old=last.shift();messages.splice(old,2);for(let i=0;i<last.length;i++)last[i]-=2;}
-   last.push(messages.length);
+   for(;;){
+    const request=miLocalEvidenceReadRequestV1(original);
+    if(!request)break;
+    let page;
+    if(request.error)page=request.error;
+    else if(request.family==='admittedSourceEvidenceRequest')
+     page=source?await miAdmittedSourceReadV1(source,request.request):
+      {availability:'SOURCE_UNAVAILABLE'};
+    else if(request.family==='packetEvidenceRequest')
+     page=packet?miPacketEvidenceReadV1(packet,request.request):
+      {availability:'PACKET_UNAVAILABLE'};
+    else if(request.family==='packetQuestionEvidenceRequest')
+     page=typed?await miQuestionLedgerReadV1(issued,request.request):
+      {availability:'NO_COMMITTED_PACKET_QUESTION_LEDGER'};
+    else page={availability:'UNAVAILABLE_LOCAL_READ_FAMILY',family:request.family};
+    if(last.length>=2){const old=last.shift();messages.splice(old,2);
+     for(let i=0;i<last.length;i++)last[i]-=2;}
+    last.push(messages.length);
+    messages.push({role:'assistant',content:original});
+    messages.push({role:'user',content:JSON.stringify(page)});
+    original=await modelCall(messages);
+   }
+   let value,formatProblem=null;
+   try{value=JSON.parse(original);}
+   catch{formatProblem='INVALID_JSON_SYNTAX';}
+   if(!formatProblem&&(!value||typeof value!=='object'||Array.isArray(value)||
+      !Object.hasOwn(value,key)))
+    formatProblem='REQUIRED_PROPERTY_ABSENT';
+   if(!formatProblem){
+    if(formatCorrections)console.log(JSON.stringify({
+     status:'MIMO_TYPED_FORMAT_RECOVERED',
+     campaignId,phase:contract.phase,step:contract.step,unitId:contract.unitId,
+     expectedProperty:key,corrections:formatCorrections,
+     originalPrivateResponseSha256:firstResponseSha256,
+     correctedPrivateResponseSha256:sha(original),controllerAccepted:false}));
+    return value[key];
+   }
+   // Bounded schema-only correction, no new questions or security judgment.
+   if(formatCorrections>=2){
+    console.log(JSON.stringify({status:'MIMO_TYPED_FORMAT_RECOVERABLE_UNRESOLVED',
+     campaignId,unitId:contract.unitId,expectedProperty:key,
+     formatProblem,attempts:formatCorrections+1,
+     originalPrivateResponseSha256:firstResponseSha256,
+     lastPrivateResponseSha256:sha(original),controllerAccepted:false}));
+    throw Error('AI_TYPED_FORMAT_UNRESOLVED: '+key+
+     ' original and corrected model replies remain separate in private R2');
+   }
+   formatCorrections++;
    messages.push({role:'assistant',content:original});
-   messages.push({role:'user',content:JSON.stringify(page)});
+   messages.push({role:'user',content:JSON.stringify({
+    task:'FORMAT_ONLY_CORRECTION_OF_PREVIOUS_ORIGINAL_RESPONSE',
+    formattingProblem:formatProblem,
+    exactRequiredJsonProperty:key,
+    expectedJsonType:task.expectedJsonType??
+     task.controllerIssuedBinding?.expectedJsonType??null,
+    originalResponseShape:task.responseShape??null,
+    unchangedAuthoritativeQuestion:task.originalQuestion??
+     task.controllerIssuedBinding?.question??
+     contract.originalTechnicalQuestion??null,
+    unchangedFrozenFieldBinding:task.controllerIssuedBinding??null,
+    unchangedCampaignSourceScope:{campaignId,phase:contract.phase,
+     step:contract.step,unitId:contract.unitId,
+     sourceSha256:contract.sourceSha256??null,
+     authorityCommit:contract.authorityCommit??null,
+     authorityDigest:contract.authorityDigest??null,
+     lease:ready.lease},
+    instructions:'Only correct JSON syntax or the missing required JSON property of your immediately previous response. Keep your original substantive security conclusion, full content, source citations, uncertainty, exact bound record keys and frozen field type unchanged. Do not reconsider findings, re-analyze source, invent default values, alter the risk verdict or issue Worker actions. Return one valid JSON object with the exact required property and the same original substantive answer.'
+   })});
    original=await modelCall(messages);
   }
-  let value;try{value=JSON.parse(original);}catch{throw Error('MiMo did not author exact JSON for '+key);}
-  if(!value||typeof value!=='object'||Array.isArray(value)||!Object.hasOwn(value,key))
-   throw Error('Original MiMo field response lacks '+key);
-  return value[key];
  }
  let submission;
  if(!typed){
   const shard=await ask({task:remediation?'AUTHOR_SOURCE_BOUND_REVISED_DIRECT_SHARD':'AUTHOR_COMPLETE_ORIGINAL_DIRECT_SHARD',
    originalQuestion:contract.originalTechnicalQuestion,
+   frozenOriginalFixedQuestionPlan:contract.originalTechnicalQuestion?.fixedQuestionPlan??null,
    priorOriginalTechnicalAnswer:contract.directOriginalTechnicalAnswer??null,
    originalControllerDescriptor:contract.descriptor,
    unmodifiedOriginalShard:contract.inputFileTemplate,
    responseShape:{shard:'<complete JSON shard>'},
-   instructions:'Preserve all controller-prefilled values and field destinations. The model, not Cloudflare, authors the substantive work-form field.'},'shard');
+   instructions:'Preserve controller-prefilled values and original record keys, issued ordinals and field destinations. For each existing controller-issued collection row, answer EVERY exact frozen literal item-field question in catalog order. Several item-field questions belong to one original canonical record. Only use collectionQuestion when fixedQuestionPlan.mode is AI_OWNED_OPEN_COLLECTION; do not apply it to fixed prefilled rows. Preserve a legitimate original negative sentinel unless source and frozen form permit genuine replacement. MiMo alone authors all substantive values and the COMPLETE single direct shard.'},'shard');
   if(!shard||typeof shard!=='object'||Array.isArray(shard))
    throw Error('Direct shard must be MiMo-authored original JSON object');
   submission=shard;
