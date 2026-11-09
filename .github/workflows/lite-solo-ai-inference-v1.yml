@@ -1,5 +1,5 @@
 name: Lite-Solo AI Source Inference and Autonomous Beta v6
-run-name: ${{ inputs.mode == 'autonomous' && format('MI-{0}', inputs.dispatch_tag) || github.workflow }}
+run-name: ${{ inputs.mode == 'autonomous' && format('MI-{0}', inputs.dispatch_tag) || inputs.mode == 'autonomous_start' && 'MI-AUTONOMOUS-START' || github.workflow }}
 on:
   push:
     branches: [machine-intelligence-audit-controller-v1]
