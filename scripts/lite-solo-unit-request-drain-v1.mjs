@@ -143,7 +143,7 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
     const affectedFile=directory.currentAssignment?.workFormPath;
     if(affectedFile)recordPhaseFinalizationVerificationWarningV1({
      root,campaignPath,phase:seq,affectedFile,
-     check:'PHASE_FINALIZATION_SOURCE_VERIFICATION',
+     check:reason.split('\n')[0].split(':')[0].trim()||'PHASE_FINALIZATION_SOURCE_VERIFICATION',
      reason:'Existing phase assembler/controller verification did not succeed: '+reason,
      expected:'Source-bound phase work can be read and packaged',observed:reason
     });
@@ -167,7 +167,7 @@ function finalizeReadinessV1Safe(root,campaignPath,directory,phase){
    assignment.unitQueueStatePath??assignment.workFormPath;
   if(affectedFile)recordPhaseFinalizationVerificationWarningV1({
    root,campaignPath,phase,affectedFile,
-   check:'FINALIZE_READINESS_SOURCE_VERIFICATION',
+   check:reason.split(':')[0].trim()||'FINALIZE_READINESS_SOURCE_VERIFICATION',
    reason:'Cannot recover the existing issued unit state: '+reason,
    expected:'Readable source-bound accepted unit plan and queue',
    observed:reason
