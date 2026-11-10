@@ -157,7 +157,7 @@ function deterministicSummary(r){
   if(x.status) return x.status;
   return r?.status??'NO_DETERMINISTIC_RESULT';
 }
-function fuzzSummary(r){
+function foundryTargetSummary(r){
   const x=r?.rawResult??{};
   const native=x.analysis?.nativeFuzz;
   if(native) return native.componentStatus??native.status??'RECORDED';
@@ -267,21 +267,21 @@ export function renderTargetedTestMatrixV1({targetDesigns=[],executionResults={}
     if(!t||typeof t!=='object') continue;
     const key=t.candidateKey??`TARGET-${i+1}`;
     const r=executionResults[key]??null;
-    rows.push(`| ${md(key)} | ${md([key,t.expectedSecurityProperty].filter(Boolean).join(' — '))} | ${md([t.setup,t.prerequisites].filter(Boolean).join(' / '))} | ${md(t.transactionSequence)} | ${md(t.expectedSecurityProperty)} | ${md(t.oracle)} | ${md(r?.requestBindingStatus??t.requestBindingStatus??'UNVERIFIED')} | ${md(deterministicSummary(r))} | ${md(t.fuzzVariablesAndBounds)} | ${md(`deterministic=${deterministicSummary(r)}; targetedFuzz=${fuzzSummary(r)}; status=${statusText(r)}`)} | ${md(r?.evidenceRef??'NO_MACHINE_EVIDENCE')} |`);
+    rows.push(`| ${md(key)} | ${md([key,t.expectedSecurityProperty].filter(Boolean).join(' — '))} | ${md([t.setup,t.prerequisites].filter(Boolean).join(' / '))} | ${md(t.transactionSequence)} | ${md(t.expectedSecurityProperty)} | ${md(t.oracle)} | ${md(r?.requestBindingStatus??t.requestBindingStatus??'UNVERIFIED')} | ${md(deterministicSummary(r))} | ${md(t.fuzzVariablesAndBounds)} | ${md(`deterministic=${deterministicSummary(r)}; candidateProof=${foundryTargetSummary(r)}; status=${statusText(r)}`)} | ${md(r?.evidenceRef??'NO_MACHINE_EVIDENCE')} |`);
   }
   if(!rows.length) rows.push('| NO_TARGET | NO_CANDIDATE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NO_CANDIDATE | NO_MACHINE_EVIDENCE |');
   return `# Lite Candidate Target Matrix
 
 > **CONTROLLER-POPULATED:** Seeded from accepted Phase-2–5 candidate-specific target designs and finalized from Phase-5 boundary machine execution. Phase 0 supplies forked deploy/configuration evidence, not randomized simulation or telemetry. The Phase-6 reviewer consumes the completed matrix and records only semantic interpretation/disposition in the Phase-6 work form. Phase-0 baseline rows are investigative context, not pre-decided findings. Do not duplicate campaign identity or controller bookkeeping here.
 
-| Target ID | Candidate / property / hypothesis | Exact setup and attacker/actor | AI-guided attacker/exploit sequence | Expected secure outcome | Exploit/failure oracle | Request/target structural binding | Attacker/exploit simulation result | AI-guided targeted fuzz variables/bounds | Result | Evidence |
+| Target ID | Candidate / property / hypothesis | Exact setup and attacker/actor | AI-guided attacker/exploit sequence | Expected secure outcome | Exploit/failure oracle | Request/target structural binding | Attacker/exploit simulation result | Candidate-specific parameters (historical reviewer bounds, not randomized execution) | Result | Evidence |
 |---|---|---|---|---|---|---|---|---|---|---|
 ${rows.join('\n')}
 
 Rules:
 
 - Include every material candidate and every due retained execution obligation from accepted Phase-2–5 canonical data.
-- AI-guided targeted fuzzing varies only reviewer-selected candidate-relevant inputs and boundaries.
+- Execute only deliberately chosen deterministic candidate-specific witness/control assertions; no randomized fuzz test suites. Historical variable bounds in the accepted work form are descriptive, not execution commands.
 - A target cannot be closed merely because one happy-path case passed.
 `;
 }
