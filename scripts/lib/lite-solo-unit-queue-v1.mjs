@@ -1960,32 +1960,60 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
  }
  return result;
 }
-function durablyAcceptedUnitV1({root,plan,queue,u}){
+function durablyAcceptedUnitV1({root,plan,queue,u,onVerificationFailure=null}){
  const state=queue.units?.[u.unitId];
- if(state?.status!=='ACCEPTED'||!state.acceptedPath||
-    !/^[a-f0-9]{64}$/.test(String(state.acceptedSha256??'')))return false;
- const prefix=path.posix.join(plan.campaignPath,'work/phase-'+
+ // Unsubmitted, reopened or physically missing work is an outstanding
+ // dependency, not a failed verification to mislabel as a completed audit.
+ if(state?.status!=='ACCEPTED'||!state.acceptedPath)return false;
+ const campaignPrefix=plan.campaignPath+'/work/';
+ if(!state.acceptedPath.startsWith(campaignPrefix))return false;
+ const originalPrefix=path.posix.join(plan.campaignPath,'work/phase-'+
   String(plan.phaseSequence).padStart(2,'0'),'units',u.unitId)+'/';
- if(!state.acceptedPath.startsWith(prefix))return false;
- try{
-  const snapshot=read(root,state.acceptedPath);
-  return snapshot.unitId===u.unitId&&
-   snapshot.campaignGenerationId===plan.campaignGenerationId&&
-   snapshot.sourceSha256===plan.sourceSha256&&
-   snapshot.authorityDigest===plan.authorityDigest&&
-   snapshot.phaseSequence===plan.phaseSequence&&
-   snapshot.phaseEpoch===plan.phaseEpoch&&
-   snapshot.claimEpoch===state.claimEpoch&&
-   snapshot.unitSpecRevision===u.unitSpecRevision&&
-   snapshot.submissionSha256===state.acceptedSha256&&
-   (!u.packetSha256||snapshot.packetSha256===u.packetSha256);
- }catch{return false;}
+ const warn=(check,reason,expected=null,observed=null)=>{
+  if(onVerificationFailure)onVerificationFailure(state.acceptedPath,check,reason,expected,observed);
+ };
+ if(!state.acceptedPath.startsWith(originalPrefix))
+  warn('FINALIZE_ACCEPTED_UNIT_SOURCE_PATH','Accepted unit path differs from originally issued unit directory; retain original bytes',
+   originalPrefix,state.acceptedPath);
+ let snapshot;
+ try{snapshot=read(root,state.acceptedPath);}
+ catch(error){
+  warn('FINALIZE_ACCEPTED_UNIT_SOURCE_UNREADABLE',
+   'Accepted snapshot bytes are missing or not parseable; no alternative content was fabricated: '+String(error?.message??error),
+   'Readable accepted unit JSON',String(error?.code??'UNREADABLE'));
+  return false;
+ }
+ if(!/^[a-f0-9]{64}$/.test(String(state.acceptedSha256??'')))
+  warn('FINALIZE_ACCEPTED_UNIT_DIGEST_FORMAT',
+   'Accepted queue digest does not use the expected SHA-256 format; preserve actual accepted source bytes',
+   '64 lowercase hexadecimal characters',state.acceptedSha256??null);
+ const checks=[
+  ['unitId',u.unitId,snapshot.unitId],
+  ['campaignGenerationId',plan.campaignGenerationId,snapshot.campaignGenerationId],
+  ['sourceSha256',plan.sourceSha256,snapshot.sourceSha256],
+  ['authorityDigest',plan.authorityDigest,snapshot.authorityDigest],
+  ['phaseSequence',plan.phaseSequence,snapshot.phaseSequence],
+  ['phaseEpoch',plan.phaseEpoch,snapshot.phaseEpoch],
+  ['claimEpoch',state.claimEpoch,snapshot.claimEpoch],
+  ['unitSpecRevision',u.unitSpecRevision,snapshot.unitSpecRevision],
+  ['submissionSha256',state.acceptedSha256,snapshot.submissionSha256],
+  ...(u.packetSha256?[['packetSha256',u.packetSha256,snapshot.packetSha256]]:[])
+ ];
+ for(const [field,expected,observed] of checks)
+  if(expected!==observed)
+   warn('FINALIZE_ACCEPTED_UNIT_'+field.toUpperCase()+'_MISMATCH',
+    'Recorded accepted source field '+field+' differs from original issued queue/plan identity; source bytes retained for audit review',
+    expected??null,observed??null);
+ return true; // Verification deviations are warnings, not phase vetoes.
 }
 export function finalizeReadinessV1({root,campaignPath,directory,phase}){
- // A prior accepted file is insufficient after a unit is reopened for rework.
  const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
- const pending=plan.units.filter(u=>!durablyAcceptedUnitV1({root,plan,queue,u}));
- if(pending.length)return {ready:false,reason:'AWAITING_DURABLY_ACCEPTED_WORKER_FILES',
+ const pending=plan.units.filter(u=>!durablyAcceptedUnitV1({root,plan,queue,u,
+  onVerificationFailure:(affectedFile,check,reason,expected,observed)=>
+   recordPhaseFinalizationVerificationWarningV1({
+    root,campaignPath,phase,affectedFile,check,reason,expected,observed
+   })}));
+ if(pending.length)return {ready:false,reason:'AWAITING_ACTUAL_ACCEPTED_WORKER_FILES',
   unitIds:pending.map(u=>u.unitId)};
  return {ready:true,plan,queue};
 }
