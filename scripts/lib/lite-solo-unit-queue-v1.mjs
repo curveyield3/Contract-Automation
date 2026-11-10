@@ -2084,11 +2084,11 @@ function restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan}
 }
 // Collect accepted continuation page content without creating another
 // transport. It is read from the existing immutable accepted unit snapshots.
-export function collectAcceptedAppendContinuationsV1({root,campaignPath,phase}){
+export function collectAcceptedAppendContinuationsV1({root,campaignPath,phase,revision=1}){
  if(![4,5,6].includes(Number(phase)))return [];
  const warn=(affectedFile,check,reason,expected=null,observed=null)=>
   recordPhaseFinalizationVerificationWarningV1({
-   root,campaignPath,phase,affectedFile,check,reason,expected,observed
+   root,campaignPath,phase,revision,affectedFile,check,reason,expected,observed
   });
  if(!maybe(root,planRel(campaignPath,phase))||
     !maybe(root,queueRel(campaignPath,phase)))return [];
@@ -2147,9 +2147,10 @@ export function collectAcceptedAppendContinuationsV1({root,campaignPath,phase}){
 }
 
 export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}){
+ const revision=Number(directory.currentAssignment?.phaseRevision??1);
  const warn=(affectedFile,check,reason,expected=null,observed=null)=>
   recordPhaseFinalizationVerificationWarningV1({
-   root,campaignPath,phase,affectedFile,check,reason,expected,observed
+   root,campaignPath,phase,revision,affectedFile,check,reason,expected,observed
   });
  // GitHub copies and orders the actual Worker-provided bytes; no additional
  // identity, value, coverage, dependency, or security validation is performed.
@@ -2217,7 +2218,7 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
   slab.entries=fixed.length?fixed.flatMap(e=>e.entries):appended.flatMap(e=>e.entries);
   put(root,rel,slab);
  }
- const acceptedContinuations=collectAcceptedAppendContinuationsV1({root,campaignPath,phase});
+ const acceptedContinuations=collectAcceptedAppendContinuationsV1({root,campaignPath,phase,revision});
  materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath,
   acceptedContinuations,
   onVerificationFailure:({affectedFile,check,reason,expected,observed})=>
