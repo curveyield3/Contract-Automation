@@ -33,7 +33,7 @@ jobs:
           mkdir -p "$root"
           if [ -n "$ONE_CAMPAIGN" ]; then
             [[ "$ONE_CAMPAIGN" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]]
-            test -d "$root/$ONE_CAMPAIGN"
+
             json="$(jq -nc --arg c "$ONE_CAMPAIGN" '[$c]')"
           else
             # Include every request from multi-commit pushes, not only the tip commit.
@@ -112,10 +112,8 @@ jobs:
           mkdir -p ".audit-controller/$CAMPAIGN_PATH/controller/preflight"
           cp /tmp/unit-phase5-preflight.json ".audit-controller/$CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
           echo "runnable=$(jq -r .runnable /tmp/unit-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
-      - name: Set up existing source-bound Phase-5 execution toolchain only at seal
-        if: ${{ steps.process.outputs.ready == 'true' && steps.process.outputs.phase == '5' && steps.preflight.outputs.runnable == 'true' }}
-        uses: ./.github/actions/setup-v7-toolchain
       - name: Finalize only when all unit and machine evidence requirements pass
+        id: finalize
         if: ${{ steps.process.outputs.ready == 'true' }}
         shell: bash
         env:
@@ -123,8 +121,30 @@ jobs:
           RPC_KATANA: ${{ secrets.RPC_KATANA }}
           RPC_BASE: ${{ secrets.RPC_BASE }}
           CAMPAIGN_ID: ${{ matrix.campaign }}
+          CAMPAIGN_PATH: ${{ steps.process.outputs.campaign_path }}
+          DIRECTORY: ${{ steps.process.outputs.directory }}
+          PHASE: ${{ steps.process.outputs.phase }}
+          PREFLIGHT_RUNNABLE: ${{ steps.preflight.outputs.runnable }}
         run: |
           set -euo pipefail
+          echo "machine_needed=false" >> "$GITHUB_OUTPUT"
+          if [ "$PHASE" = 5 ] && [ "$PREFLIGHT_RUNNABLE" = true ]; then
+            manifest=".audit-controller/$CAMPAIGN_PATH/evidence/phase-05-machine/EXECUTION_MANIFEST_v1.json"
+            gen="$(jq -er .campaignGenerationId ".audit-controller/$DIRECTORY")"
+            source_sha="$(jq -er .sourceSha256 ".audit-controller/$DIRECTORY")"
+            authority="$(jq -er .authorityDigest ".audit-controller/$DIRECTORY")"
+            epoch="$(jq -c .unitPhaseEpoch ".audit-controller/$DIRECTORY")"
+            if [ ! -f "$manifest" ] || ! jq -e \
+              --arg id "$CAMPAIGN_ID" --arg gen "$gen" --arg src "$source_sha" \
+              --arg auth "$authority" --argjson epoch "$epoch" \
+              '.schemaVersion=="curveyield-lite-machine-evidence-v1" and .status=="COMPLETE" and
+               .phaseSequence==5 and .campaignId==$id and .campaignGenerationId==$gen and
+               .sourceSha256==$src and .authorityDigest==$auth and .phaseEpoch==$epoch' "$manifest" >/dev/null; then
+              echo "machine_needed=true" >> "$GITHUB_OUTPUT"
+              echo "Machine evidence pending; phase finalization skipped."
+              exit 0
+            fi
+          fi
           node scripts/lite-solo-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode finalize > /tmp/unit-finalize.json
       - name: Publish recomputed controller state without overwriting concurrent commits
         shell: bash
@@ -133,6 +153,7 @@ jobs:
           CAMPAIGN_ID: ${{ matrix.campaign }}
           CAMPAIGN_PATH: ${{ steps.process.outputs.campaign_path }}
           DIRECTORY: ${{ steps.process.outputs.directory }}
+          MACHINE_NEEDED: ${{ steps.finalize.outputs.machine_needed }}
         run: |
           set -euo pipefail
           git -C .audit-controller config user.name 'CurveYield Lite-Solo Unit Controller'
@@ -155,8 +176,24 @@ jobs:
                 mkdir -p ".audit-controller/$CAMPAIGN_PATH/controller/preflight"
                 cp /tmp/unit-phase5-preflight.json ".audit-controller/$CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
               fi
-              node scripts/lite-solo-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode finalize > /tmp/unit-refinalize.json
+              if [ "$MACHINE_NEEDED" != true ]; then
+                node scripts/lite-solo-unit-request-drain-v1.mjs --root .audit-controller --campaign-id "$CAMPAIGN_ID" --mode finalize > /tmp/unit-refinalize.json
+              fi
             fi
           done
           [ "$success" = true ] || { echo '::error::Unable to publish recalculated queue after conflicts'; exit 1; }
           echo "Lite-Solo v4/v5 controller drained immutable requests for $CAMPAIGN_ID" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch separate machine execution after accepted work is published
+        if: ${{ steps.finalize.outputs.machine_needed == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAMPAIGN_ID: ${{ matrix.campaign }}
+          DIRECTORY: ${{ steps.process.outputs.directory }}
+        run: |
+          set -euo pipefail
+          generation="$(jq -er .campaignGenerationId ".audit-controller/$DIRECTORY")"
+          gh workflow run lite-solo-machine-execution-v1.yml \
+            --repo "$GITHUB_REPOSITORY" -f campaign_id="$CAMPAIGN_ID" \
+            -f generation_id="$generation" -f phase_sequence=5
