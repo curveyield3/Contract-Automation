@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {detectionPolicyForAuthorityV1} from '../../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {classifyDeploymentExecutionV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {boundReviewerForPhaseV1 as originalReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
@@ -920,8 +921,24 @@ function frozenMiPhaseQuestionArchiveRefV1({root,campaignPath,phase,receiptPath}
   !/^[a-f0-9]{40}$/.test(manifest.archivePhaseTreeSha||'')||
   !Number.isSafeInteger(manifest.fileCount)||manifest.fileCount<2)return null;
  const raw=fs.readFileSync(repoFile(root,p));
+ const sha256=createHash('sha256').update(raw).digest('hex');
+ // The manifest alone is not a sealed phase; the real accepted receipt must
+ // authenticate the same external manifest and source/archive Git trees.
+ const sealed=receipt.miloQuestionsAndAnswersArchive;
+ if(!['SEALED','COMPLETE'].includes(receipt.phase?.status)||
+  receipt.phase?.sequence!==phase||
+  sealed?.status!=='FROZEN_GITHUB_PHASE_TREE'||
+  sealed.manifestRel!==p||sealed.manifestSha256!==sha256||
+  sealed.destination!==archive||sealed.archivePhaseTreeSha!==manifest.archivePhaseTreeSha||
+  sealed.sourcePhaseTreeSha!==manifest.sourcePhaseTreeSha||
+  !/^[a-f0-9]{40}$/.test(sealed.archiveCommitSha||''))return null;
+ let actualArchiveTree;
+ try{actualArchiveTree=execFileSync('git',['-C',root,'rev-parse','HEAD:'+archive],
+  {encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();}
+ catch{return null;}
+ if(actualArchiveTree!==manifest.archivePhaseTreeSha)return null;
  return {archivePath:archive,archiveManifestPath:p,
-  archiveManifestSha256:createHash('sha256').update(raw).digest('hex'),
+  archiveManifestSha256:sha256,
   archivePhaseTreeSha:manifest.archivePhaseTreeSha,
   pairedQuestionCount:manifest.pairedQuestionCount,
   sourcePhaseSequence:phase,acceptedReceiptPath:receiptPath,
