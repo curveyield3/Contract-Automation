@@ -108,25 +108,25 @@ if(phase===5){
       expectedSourceSha256:directory.sourceSha256
     });
     if(verificationFailures.length){
-      process.stderr.write('[phase5-sim] STRICT_GATE '+key+' '+JSON.stringify(verificationFailures.slice(0,4))+'\\n');
+      process.stderr.write('[phase5-sim] STRICT_GATE '+key+' '+JSON.stringify(verificationFailures.slice(0,4))+'\n');
       // Execution diagnostics are already redacted by the native-fuzz adapter;
       // print only bounded error lines, never full machine output or RPC URLs.
       for(const name of ['nativeFuzz','slither']){
         const component=results[key]?.rawResult?.analysis?.[name];
         const raw=component?.rawOutput;
-        const output=String(raw?.stdout??'')+'\\n'+String(raw?.stderr??'');
-        const lines=output.split(/\\r?\\n/);
+        const output=String(raw?.stdout??'')+'\n'+String(raw?.stderr??'');
+        const lines=output.split(/\r?\n/);
         const errorLines=lines.map((line,i)=>({line,i}))
-          .filter(x=>/(?:Compiler run failed|Error \\(\\d+\\)|ParserError|TypeError|DeclarationError|SyntaxError|ImportError|Source .* not found|failed to compile|error:)/i.test(x.line))
+          .filter(x=>/(?:Compiler run failed|Error \(\d+\)|ParserError|TypeError|DeclarationError|SyntaxError|ImportError|Source .* not found|failed to compile|error:)/i.test(x.line))
           .slice(0,8);
         for(const {line,i} of errorLines){
           for(const item of lines.slice(Math.max(0,i-1),Math.min(lines.length,i+3))){
-            const sanitized=String(item).replace(/https?:\\/\\/[^\\s]+/g,'<redacted-url>').slice(0,420);
-            process.stderr.write('[phase5-sim] '+name+' '+key+' '+sanitized+'\\n');
+            const sanitized=String(item).replace(/https?:\/\/[^\s]+/g,'<redacted-url>').slice(0,420);
+            process.stderr.write('[phase5-sim] '+name+' '+key+' '+sanitized+'\n');
           }
         }
         process.stderr.write('[phase5-sim] '+name+' '+key+' exitCode='+String(raw?.exitCode??'NOT_RECORDED')+
-          ' failureKind='+String(component?.failureKind??'NONE')+'\\n');
+          ' failureKind='+String(component?.failureKind??'NONE')+'\n');
       }
     }
     collect(key,requestPath,results[key],{strictlyVerified:verificationFailures.length===0});
