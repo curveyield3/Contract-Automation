@@ -147,7 +147,7 @@ export function generateV7ExecutionRequestV1({campaignId,campaignGenerationId,so
          !sourceFile.split('/').some(x=>!x||x==='.'||x==='..')&&
          bound.files?.some(f=>f.source===sourceFile)&&Array.isArray(selected.matchedTestNames)){
         const text=fs.readFileSync(path.join(dir,sourceFile),'utf8');
-        const names=[...text.matchAll(/\\bfunction\\s+(test[A-Za-z0-9_]+)\\s*\\(/g)]
+        const names=[...text.matchAll(/\bfunction\s+(test[A-Za-z0-9_]+)\s*\(/g)]
           .map(x=>x[1]).filter(x=>x.startsWith(name)).sort();
         const expected=[...selected.matchedTestNames].sort();
         if(names.length>0&&JSON.stringify(names)===JSON.stringify(expected))
