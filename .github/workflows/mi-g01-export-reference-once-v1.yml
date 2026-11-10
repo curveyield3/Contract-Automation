@@ -1,0 +1,42 @@
+name: "MI G01 one-time v10 source export"
+on:
+  push:
+    branches: [machine-intelligence-audit-controller-v1]
+    paths:
+      - 'isolated-mi-exploit-g01-v10/export-request/*.json'
+permissions:
+  contents: read
+jobs:
+  export:
+    if: github.ref_name == 'machine-intelligence-audit-controller-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout immutable commit, no credential persistence
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Package source snapshots without executing contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -q -r "$RUNNER_TEMP/MI_G01_Exact_Source_v10.zip" \
+            isolated-mi-exploit-g01-v10 \
+            .github/actions/mi-g01-toolchain-v10 \
+            .github/workflows/mi-g01-real-immunity-v10.yml \
+            .github/workflows/mi-g01-standalone-v6.yml \
+            -x 'isolated-mi-exploit-g01-v10/export-request/*' \
+               'isolated-mi-exploit-g01-v10/node_modules/*' \
+               'isolated-mi-exploit-g01-v10/forge/out/*' \
+               'isolated-mi-exploit-g01-v10/forge/cache/*'
+          sha256sum "$RUNNER_TEMP/MI_G01_Exact_Source_v10.zip" > "$RUNNER_TEMP/SOURCE_ZIP_SHA256_v1.txt"
+      - name: Retain exact v10 reference archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-g01-exact-source-v10-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/MI_G01_Exact_Source_v10.zip
+            ${{ runner.temp }}/SOURCE_ZIP_SHA256_v1.txt
+          retention-days: 7
+          if-no-files-found: error
