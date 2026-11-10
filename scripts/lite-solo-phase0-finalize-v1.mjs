@@ -93,15 +93,33 @@ if(bundle.identity?.sourceDigestSha256!==sourceSha)
 const artifacts=readEvidence(evidence.executionBuildArtifacts);
 if(artifacts.source?.archiveSha256!==sourceSha)
  phase0Warning(evidence.executionBuildArtifacts,'PHASE0_REUSABLE_ARTIFACT_SOURCE_BINDING','Reusable build-artifact source digest differs from original admitted source',sourceSha??null,artifacts.source?.archiveSha256??null);
-if(artifacts.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2'||artifacts.reuseContract?.secondBuildRequired!==false)githubPhase0Diagnostics.push('reusable build artifact contract is missing');
+if(artifacts.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2'||artifacts.reuseContract?.secondBuildRequired!==false)
+ phase0Warning(evidence.executionBuildArtifacts,'PHASE0_BUILD_ARTIFACT_SCHEMA',
+  'Execution build-artifact schema or second-build reuse declaration does not match expected original contract',
+  {schemaVersion:'curveyield-phase0-execution-build-artifacts-v2',secondBuildRequired:false},
+  {schemaVersion:artifacts.schemaVersion??null,secondBuildRequired:artifacts.reuseContract?.secondBuildRequired??null});
 const deploy=readEvidence(evidence.deployConfigExecution);
-if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||deploy.executionMode!=='ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY')githubPhase0Diagnostics.push('Phase-0 requires only source package forked deployment evidence');
+if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||deploy.executionMode!=='ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY')
+ phase0Warning(evidence.deployConfigExecution,'PHASE0_DEPLOY_EVIDENCE_SCHEMA',
+  'Deployment evidence schema or execution mode does not match the original source-package fork contract',
+  {schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v3',executionMode:'ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY'},
+  {schemaVersion:deploy.schemaVersion??null,executionMode:deploy.executionMode??null});
 if(deploy.campaignId!==receipt.campaign.campaignId||deploy.sourceSha256!==sourceSha)
  phase0Warning(evidence.deployConfigExecution,'PHASE0_DEPLOY_EVIDENCE_BINDING','Deployment evidence does not reference the exact Phase-0 campaign and source',{campaignId:receipt.campaign.campaignId,sourceSha256:sourceSha??null},{campaignId:deploy.campaignId??null,sourceSha256:deploy.sourceSha256??null});
-if(deploy.fork?.engine!=='anvil')githubPhase0Diagnostics.push('Phase-0 fork deployment engine requires Worker review');
-try{assertDeployGateEvidenceV2(deploy);}catch(error){githubPhase0Diagnostics.push('Phase-0 deploy-evidence assessment: '+String(error?.message??error));}
+if(deploy.fork?.engine!=='anvil')
+ phase0Warning(evidence.deployConfigExecution,'PHASE0_DEPLOY_FORK_ENGINE',
+  'Deployment evidence does not identify the Anvil fork execution engine',
+  'anvil',deploy.fork?.engine??null);
+try{assertDeployGateEvidenceV2(deploy);}
+catch(error){phase0Warning(evidence.deployConfigExecution,'PHASE0_DEPLOY_EVIDENCE_ASSERTION',
+ 'Exact deployment-evidence assessment failed: '+String(error?.message??error),
+ 'Source-bound deployment evidence satisfying the issued assessment',String(error?.message??error));}
 if(receipt.source?.inputMode==='LIVE_SCAN'){
-  if(receipt.source.kind!=='EXPLORER_INITIALIZED_VERIFIED_LIVE_SNAPSHOT'||!Array.isArray(receipt.source.originUrls))githubPhase0Diagnostics.push('SCAN_RECEIPT_PROVENANCE_MISSING');
+  if(receipt.source.kind!=='EXPLORER_INITIALIZED_VERIFIED_LIVE_SNAPSHOT'||!Array.isArray(receipt.source.originUrls))
+   phase0Warning(receiptPath,'SCAN_RECEIPT_PROVENANCE_MISSING',
+    'Phase-0 receipt does not contain the required frozen explorer-scan provenance and URL list',
+    {kind:'EXPLORER_INITIALIZED_VERIFIED_LIVE_SNAPSHOT',originUrls:'array'},
+    {kind:receipt.source.kind??null,originUrls:receipt.source.originUrls??null});
   const manifestPath=path.resolve(controllerRoot,...String(receipt.source.scanManifestPath??'').split('/'));
   if(!manifestPath.startsWith(campaignRoot+path.sep))throw new Error('SCAN_MANIFEST_PATH_ESCAPES_CAMPAIGN');
   evidenceFile(manifestPath,'frozen LIVE_SCAN source manifest');
@@ -113,12 +131,24 @@ if(receipt.source?.inputMode==='LIVE_SCAN'){
   if(manifest.schemaVersion!=='curveyield-scan-source-manifest-v1'||manifest.inputMode!=='LIVE_SCAN'||
      sha(canonical(unsigned))!==manifestDigestSha256||
      manifestDigestSha256!==receipt.source.scanTargetSetSha256)
-    githubPhase0Diagnostics.push('SCAN_TARGET_SET_IDENTITY_MISMATCH');
+    phase0Warning(manifestPath,'SCAN_TARGET_SET_IDENTITY_MISMATCH',
+     'SCAN manifest canonical digest, schema, input mode, or receipt target-set binding differs',
+     {schemaVersion:'curveyield-scan-source-manifest-v1',inputMode:'LIVE_SCAN',
+      receiptTargetSetSha256:receipt.source.scanTargetSetSha256??null},
+     {schemaVersion:manifest.schemaVersion??null,inputMode:manifest.inputMode??null,
+      manifestDigestSha256:manifestDigestSha256??null,recomputedDigestSha256:sha(canonical(unsigned))});
   const requested=Array.isArray(manifest.requestedTargets)?manifest.requestedTargets:[],
       targets=Array.isArray(manifest.resolvedTargets)?manifest.resolvedTargets:[],
       units=Array.isArray(manifest.compilerUnits)?manifest.compilerUnits:[];
-  if(!requested.length||!targets.length||targets.length>64||!units.length)githubPhase0Diagnostics.push('SCAN_SOURCE_TARGETS_INCOMPLETE');
-  if(requested.length!==(receipt.source.originUrls?.length??0))githubPhase0Diagnostics.push('SCAN_SOURCE_REQUEST_COUNT_MISMATCH');
+  if(!requested.length||!targets.length||targets.length>64||!units.length)
+   phase0Warning(manifestPath,'SCAN_SOURCE_TARGETS_INCOMPLETE',
+    'Frozen scan target and compiler-unit inventory does not contain the required target coverage',
+    {requestedMin:1,resolvedMin:1,resolvedMax:64,compilerUnitsMin:1},
+    {requested:requested.length,resolved:targets.length,compilerUnits:units.length});
+  if(requested.length!==(receipt.source.originUrls?.length??0))
+   phase0Warning(manifestPath,'SCAN_SOURCE_REQUEST_COUNT_MISMATCH',
+    'Frozen scan manifest requested-target count differs from Phase-0 receipt origin URL count',
+    receipt.source.originUrls?.length??0,requested.length);
   for(let i=0;i<requested.length;i++){
     try{
       const u=new URL(receipt.source.originUrls?.[i]??'https://invalid.example/');
