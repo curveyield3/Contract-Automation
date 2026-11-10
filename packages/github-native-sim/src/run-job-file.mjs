@@ -222,8 +222,10 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
     'boosthub-v9-r1-phase5-candidate-targets-v1-g7adcb74caefeeef3'
   ].includes(request.configuration?.harness?.bundleId)
     && request.source?.archiveSha256 === '876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3';
+  // Forge matches test signatures including parentheses and argument types.
+  // End-of-name anchors select zero tests even when the named functions exist.
   const selectedRegex = boosthubP5 && matchTest === 'testFuzz_P5T007_'
-    ? '^testFuzz_P5T007_[A-Za-z0-9_]+$' : '^' + matchTest + '$';
+    ? '^testFuzz_P5T007_[A-Za-z0-9_]+\\(' : '^' + matchTest + '\\(';
   const matchContract = native.matchContract;
   if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const rpcUrl = phase6MutableRpc?.url;
@@ -241,7 +243,9 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
       // Skip this redundant compilation umbrella, which combines OZ v4 and v5
       // into one namespace. Original project files remain unchanged.
       ...(boosthubP5 ? ['--skip', 'contracts/BoostHubBeefyCompileImports_v9.sol'] : []),
-      '--fuzz-runs', String(native.fuzzRuns ?? 256),
+      // A selected zero-argument test_ function is an ordinary Foundry test.
+      // Apply fuzz iteration settings only to explicitly authored testFuzz_ functions.
+      ...(matchTest.startsWith('testFuzz_') ? ['--fuzz-runs', String(native.fuzzRuns ?? 256)] : []),
       '--fork-url', rpcUrl, '--fork-block-number', String(blockNumber)],
     // This frozen BoostHub archive has a mixed-OZ compilation anchor under
     // contracts/, although its source-bound tests only need the imported
@@ -349,10 +353,26 @@ export async function runGitHubNativeJob(input, {
   } else {
     const requestedAnalysis = request.configuration.analysis ?? {};
     const stage2aConfig = guidedAnalysisConfig(requestedAnalysis);
+    // The Phase-0 exact-build static analysis already supplies source-intelligence
+    // candidates. Phase-5 target execution runs Slither only when explicitly asked
+    // for it; implicit project-wide Slither is unrelated to selected test proof.
+    const phase5Target = request.gateId === 'phase5-target-execution';
+    if (phase5Target && requestedAnalysis.slither === undefined) stage2aConfig.slither = false;
     try {
       await runStage2aAnalysis(stage2aConfig, {
         runSlither: async () => {
-          analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
+          try {
+            analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
+          } catch (error) {
+            if (!phase5Target) throw error;
+            // Slither is supplementary Phase-5 evidence, never a reason to
+            // invalidate an independently executed Foundry reproduction.
+            analysis.slither = { backend: 'slither', status: 'completed_with_failures',
+              terminal: true, componentStatus: 'COMPLETED_WITH_FAILURES',
+              continuationDisposition: 'CONTINUE_WITH_LIMITATION',
+              failureKind: error?.kind ?? 'ANALYSIS_COMPONENT_FAILURE',
+              error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) } };
+          }
           return analysis.slither;
         },
         runMedusa: async () => {
