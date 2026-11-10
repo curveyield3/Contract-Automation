@@ -908,7 +908,8 @@ export function recoverSourceBoundRequestReworkV1({root,campaignPath,directory}=
      accepted.authorityDigest!==directory.authorityDigest||
      accepted.phaseSequence!==phase||accepted.phaseEpoch!==plan.phaseEpoch||
      accepted.unitSpecRevision!==u.unitSpecRevision||
-     accepted.packetSha256!==u.packetSha256||
+     !/^[a-f0-9]{64}$/.test(String(accepted.packetSha256??''))||
+     (u.packetSha256!==undefined&&accepted.packetSha256!==u.packetSha256)||
      accepted.submissionSha256!==state.acceptedSha256||
      !dependenciesFresh(queue,u,accepted.prerequisiteEvidence))continue;
   const entries=accepted.submission?.entries??[];
