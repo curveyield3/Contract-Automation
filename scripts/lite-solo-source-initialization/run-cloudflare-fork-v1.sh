@@ -232,6 +232,7 @@ else
     campaign_id="$slug-r$revision"
     campaign_name="$display_base r$revision"
     campaign_root="campaigns/$master_base/$campaign_name"
+    temp_root="Milo Temp Work/$master_base/$campaign_name"
     source_dir="$campaign_root/source"
     source_path="$source_dir/$filename"
     receipts_dir="$campaign_root/receipts"
@@ -241,17 +242,21 @@ else
     generation_id="$campaign_id-g1-$compact"
 
     ! git cat-file -e "HEAD:$campaign_root" 2>/dev/null || { echo "::error::Campaign path collision: $campaign_root"; exit 1; }
+    ! git cat-file -e "HEAD:$temp_root" 2>/dev/null || { echo "::error::Milo temporary work path collision: $temp_root"; exit 1; }
+    literal_temp_root="$(printf '%s' "$temp_root" | sed -e 's/[][*?!#\\]/\\&/g')"
+    git sparse-checkout add "/$literal_temp_root/"
     literal_root="$(printf '%s' "$campaign_root" | sed -e 's/[][*?!#\\]/\\&/g')"
     git sparse-checkout add "/$literal_root/"
 
-    mkdir -p "$source_dir" "$receipts_dir" "$campaign_root/reports" "Audit Campaign Directory/campaigns"
+    mkdir -p "$source_dir" "$receipts_dir" "$campaign_root/reports" "Audit Campaign Directory/campaigns" "$temp_root"
+    : > "$temp_root/.gitkeep"
     # Git cannot store an empty directory: retain the new campaign sub-step folder from initialization.
     mkdir -p "$campaign_root/Sub-Steps Checks"
     : > "$campaign_root/Sub-Steps Checks/.gitkeep"
     cp "$work/$filename" "$source_path"
     tree_sha="$(safe_extract_audit_zip "$source_path" "$source_dir" "$filename")"
 
-    git add -- "$source_dir"
+    git add -- "$source_dir" "$temp_root/.gitkeep"
     git commit -m "audit(source): admit $campaign_id"
     admission_commit="$(git rev-parse HEAD)"
     source_blob="$(git rev-parse "HEAD:$source_path")"
