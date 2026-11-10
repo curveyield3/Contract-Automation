@@ -152,12 +152,18 @@ export function generateV7ExecutionRequestV1({campaignId,campaignGenerationId,so
      chainId:reuse.chainId,finalBlock:reuse.finalBlock,hardfork:reuse.hardfork
    };
  }
- const basis={campaignId,candidateKey:key,source,configuration,phaseId};
+ // Bind machine identity to the exact campaign generation, independently of
+ // an earlier campaign's source, request or harness bundle.
+ const generationKey=campaignGenerationId ? hash(campaignGenerationId).slice(0,24) : null;
+ const candidateKeyHash=hash(key).slice(0,24);
+ const basis={campaignId,campaignGenerationId:campaignGenerationId??null,candidateKey:key,source,configuration,phaseId};
  const id=hash(basis);
  const request={schemaVersion:'deep-assurance-github-request-v2',
    processId:'audit-v7-independent-review',
    contractAutomationRelease:V2_AUTOMATION_RELEASE,runnerRelease:V2_RUNNER_RELEASE,
-   campaignId,assignmentId:'phase5-target-'+key,phaseId,gateId:'phase5-target-execution',
+   campaignId,assignmentId:generationKey
+     ? `phase-05-g${generationKey}-c${candidateKeyHash}` : 'phase5-target-'+key,
+   phaseId,gateId:'phase5-target-execution',
    profileId:'github-native-simulate-v2',source,configuration,
    requestId:'dar-'+id.slice(0,32),requestDigest:id};
  try{validateDeepAssuranceRequestWithV26V1(request);}
