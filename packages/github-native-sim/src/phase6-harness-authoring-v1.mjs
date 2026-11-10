@@ -73,6 +73,7 @@ export async function initializePhase6HarnessBundle({
   campaign = 'property',
   type = 'standard',
   bundleId = null,
+  campaignGenerationId = null,
 } = {}) {
   if (!requestPath) throw new Error('Phase 6 harness init requires --request <request.json>');
   if (!runnerRoot) throw new Error('Phase 6 harness init requires runnerRoot');
@@ -80,8 +81,14 @@ export async function initializePhase6HarnessBundle({
 
   const request = validateDeepAssuranceRequestV2(await readJson(path.resolve(requestPath), 'request'));
   if (request.phaseId !== 'build-and-test') throw new Error('Phase 6 harness init requires a build-and-test request');
-
-  const id = bundleId ?? `${safeId(request.campaignId)}-phase6-${safeId(type)}-${campaign}-v1`;
+  const generation = campaignGenerationId ?? process.env.AUDIT_CAMPAIGN_GENERATION_ID ?? null;
+  const boundCampaign = /-r[0-9]+$/.test(request.campaignId);
+  if (boundCampaign && (typeof generation !== 'string' || !/^[A-Za-z0-9._-]{8,150}$/.test(generation)))
+    throw new Error('Exact-generation campaign harness requires --generation-id (campaignGenerationId); an earlier campaign harness cannot be reused');
+  const generationTag = generation ? sha256(Buffer.from(generation)).slice(0, 12) : null;
+  const id = bundleId ?? (boundCampaign
+    ? `${safeId(request.campaignId).slice(0, 56)}-g${generationTag}-phase6-${safeId(type).slice(0, 14)}-${campaign}-v1`
+    : `${safeId(request.campaignId)}-phase6-${safeId(type)}-${campaign}-v1`);
   if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(id)) throw new Error(`Invalid generated/provided bundle id: ${id}`);
 
   const skeletonRoot = path.join(runnerRoot, V7_POLICY.phase6.skeletonRoot);
@@ -108,6 +115,7 @@ export async function initializePhase6HarnessBundle({
   const manifest = {
     schemaVersion: 'phase6-audit-harness-overlay-v1',
     bundleId: id,
+    ...(boundCampaign ? { campaignId: request.campaignId, campaignGenerationId: generation } : {}),
     generatedBy: 'v7:harness:init',
     skeletonKit: V7_POLICY.phase6.skeletonRoot,
     campaign,
@@ -127,6 +135,7 @@ export async function initializePhase6HarnessBundle({
     status: 'CREATED_REQUIRES_TARGET_AUTHORING',
     bundleId: id,
     bundleRoot,
+    ...(boundCampaign ? { campaignId: request.campaignId, campaignGenerationId: generation } : {}),
     campaign,
     type,
     requestId: request.requestId,
@@ -145,7 +154,7 @@ function unresolvedMarkers(text) {
   return TARGET_PLACEHOLDERS.filter((marker) => String(text).includes(marker));
 }
 
-export async function validatePhase6HarnessBundle({ bundleId, runnerRoot, requestPath = null } = {}) {
+export async function validatePhase6HarnessBundle({ bundleId, runnerRoot, requestPath = null, campaignGenerationId = null } = {}) {
   if (!runnerRoot) throw new Error('Phase 6 harness validation requires runnerRoot');
   if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(bundleId ?? '')) throw new Error('Phase 6 harness validation requires a valid --bundle id');
 
@@ -159,6 +168,10 @@ export async function validatePhase6HarnessBundle({ bundleId, runnerRoot, reques
   if (requestPath) {
     const request = validateDeepAssuranceRequestV2(await readJson(path.resolve(requestPath), 'request'));
     const expected = sourceBinding(request);
+    const generation = campaignGenerationId ?? process.env.AUDIT_CAMPAIGN_GENERATION_ID ?? null;
+    if (/-r[0-9]+$/.test(request.campaignId) &&
+        (!generation || manifest.campaignId !== request.campaignId || manifest.campaignGenerationId !== generation))
+      defects.push({ type: 'CAMPAIGN_GENERATION_BINDING_MISMATCH', expectedCampaignId: request.campaignId, expectedGenerationId: generation, observedCampaignId: manifest.campaignId ?? null, observedGenerationId: manifest.campaignGenerationId ?? null });
     if (JSON.stringify(manifest.sourceBinding ?? null) !== JSON.stringify(expected)) {
       defects.push({ type: 'SOURCE_BINDING_MISMATCH', expected, observed: manifest.sourceBinding ?? null });
     }
