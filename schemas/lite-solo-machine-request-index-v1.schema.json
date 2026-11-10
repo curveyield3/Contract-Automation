@@ -44,14 +44,17 @@
         "properties": {
           "candidateKey": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._-]{1,128}$"
           },
           "requestPath": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Campaign-local work/phase-NN/execution-requests/ request JSON bound to campaign ID, generation-derived assignment ID and source digest; previous-generation requests are invalid."
           }
         }
       }
     }
-  }
+  },
+  "description": "One exact campaign generation and phase per request index. Every referenced V7 request must have assignmentId phase-NN-g<first24 of SHA256(JSON.stringify(campaignGenerationId))>-c<first24 of SHA256(JSON.stringify(candidateKey))>. Phase finalization consumes already persisted machine results; it never executes tests."
 }
