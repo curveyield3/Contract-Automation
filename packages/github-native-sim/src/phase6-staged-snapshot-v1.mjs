@@ -83,7 +83,8 @@ export async function stagePhase6Snapshot(request, {
 
   const bundleId = requestedBundleId(request);
   const harnessOverlay = bundleId
-    ? await materializePhase6HarnessOverlayV1({ projectRoot, runnerRoot, bundleId, source: request.source })
+    ? await materializePhase6HarnessOverlayV1({ projectRoot, runnerRoot, bundleId, source: request.source,
+        campaignId:request.campaignId,campaignGenerationId:environment.AUDIT_CAMPAIGN_GENERATION_ID??null })
     : null;
 
   const snapshot = await digestDirectory(projectRoot);

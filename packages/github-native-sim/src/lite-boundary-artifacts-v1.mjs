@@ -72,7 +72,7 @@ export function inspectPhase5OwnerEvidenceDeferralV1({
     status:'DEFERRED_UNVERIFIED',securityConclusion:'UNVERIFIED'};
 }
 
-export function validateTargetExecutionRequestBindingV1({controllerRoot,campaignPath,target,expectedCampaignId=null,expectedSourceSha256=null}={}){
+export function validateTargetExecutionRequestBindingV1({controllerRoot,campaignPath,target,expectedCampaignId=null,expectedCampaignGenerationId=null,expectedSourceSha256=null}={}){
   const key=String(target?.candidateKey??'').trim();
   const method=String(target?.executionMethod??'').toUpperCase();
   if(method==='NOT_APPLICABLE'){
@@ -114,6 +114,18 @@ export function validateTargetExecutionRequestBindingV1({controllerRoot,campaign
     if(type==='ANVIL_WORKFLOW'&&request.phaseId!=='fork-simulation-lifecycle') reasons.push('Anvil reproduction must use fork-simulation-lifecycle');
   }
   const harness=request?.configuration?.harness;
+  if(expectedCampaignGenerationId && harness?.bundleId){
+    const id=String(harness.bundleId);
+    if(!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(id))reasons.push('invalid harness bundle ID');
+    else{
+      try{
+        const manifest=JSON.parse(fs.readFileSync(path.join(process.cwd(),'packages/github-native-sim/audit-harnesses',id,'manifest.json'),'utf8'));
+        if(manifest.campaignId!==expectedCampaignId||
+           manifest.campaignGenerationId!==expectedCampaignGenerationId)
+          reasons.push('harness belongs to another audit generation');
+      }catch{reasons.push('generation-bound harness manifest is unavailable');}
+    }
+  }
   return {
     status:reasons.length?'FAIL_STRUCTURAL_REQUEST_TARGET_BINDING':'PASS_STRUCTURAL_BINDING_REQUIRES_PHASE6_SEMANTIC_HARNESS_REVIEW',
     requestRef:rel,
@@ -468,7 +480,7 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
 // Recheck sealed machine evidence at Phase-6 admission and every downstream
 // master review. No reviewer-supplied PASS status or receipt can substitute for
 // re-reading the exact source-bound V7 request and nested execution artifact.
-export function validateRecordedPhase5MachineEvidenceV1({controllerRoot,campaignPath,targetDesigns=[],expectedCampaignId=null,expectedSourceSha256=null,requireCompletedMatrix=false}={}){
+export function validateRecordedPhase5MachineEvidenceV1({controllerRoot,campaignPath,targetDesigns=[],expectedCampaignId=null,expectedCampaignGenerationId=null,expectedSourceSha256=null,requireCompletedMatrix=false}={}){
   const failures=[];
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
   const readJsonRel=rel=>JSON.parse(fs.readFileSync(path.join(controllerRoot,...rel.split('/')),'utf8'));
@@ -486,7 +498,7 @@ export function validateRecordedPhase5MachineEvidenceV1({controllerRoot,campaign
     if(!target||typeof target!=='object'||Array.isArray(target))continue;
     const key=String(target.candidateKey??'').trim();
     if(!key||target.executionMethod==='NOT_APPLICABLE')continue;
-    const binding=validateTargetExecutionRequestBindingV1({controllerRoot,campaignPath,target,expectedCampaignId,expectedSourceSha256});
+    const binding=validateTargetExecutionRequestBindingV1({controllerRoot,campaignPath,target,expectedCampaignId,expectedCampaignGenerationId,expectedSourceSha256});
     if(!String(binding.status).startsWith('PASS_')){
       failures.push(key+': sealed execution request failed binding validation: '+String(binding.status));
       continue;
@@ -572,12 +584,12 @@ export function selectReusablePhase5TargetsV1({
 // Reading raw-result.json never counts as evidence unless the SAME strict
 // machine-evidence verifier used by the phase gate accepts it.
 export function verifiedReusablePhase5ResultV1({
-  controllerRoot,campaignPath,target,expectedCampaignId,expectedSourceSha256
+  controllerRoot,campaignPath,target,expectedCampaignId,expectedCampaignGenerationId=null,expectedSourceSha256
 }={}){
   if(!controllerRoot||!campaignPath||target?.executionMethod!=='V7_REQUEST')return null;
   const key=String(target.candidateKey??'').trim();
   const binding=validateTargetExecutionRequestBindingV1({
-    controllerRoot,campaignPath,target,expectedCampaignId,expectedSourceSha256
+    controllerRoot,campaignPath,target,expectedCampaignId,expectedCampaignGenerationId,expectedSourceSha256
   });
   if(!String(binding.status).startsWith('PASS_'))return null;
   try{
@@ -600,7 +612,7 @@ export function verifiedReusablePhase5ResultV1({
 
 export async function executePhase5TargetsV1({
   controllerRoot,campaignPath,targetDesigns=[],
-  expectedCampaignId=null,expectedSourceSha256=null,
+  expectedCampaignId=null,expectedCampaignGenerationId=null,expectedSourceSha256=null,
   reuseCandidateKeys=[],runProcessFn=null
 }={}){
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
@@ -622,12 +634,12 @@ export async function executePhase5TargetsV1({
     }
     if(reuseCandidateKeys.includes(key)){
       const reused=verifiedReusablePhase5ResultV1({
-        controllerRoot,campaignPath,target:t,expectedCampaignId,expectedSourceSha256
+        controllerRoot,campaignPath,target:t,expectedCampaignId,expectedCampaignGenerationId,expectedSourceSha256
       });
       if(reused){process.stderr.write(`[phase5-sim] REUSE ${key}: verified exact completed machine evidence\n`);executionResults[key]=reused;continue;}
     }
     const binding=validateTargetExecutionRequestBindingV1({
-      controllerRoot,campaignPath,target:t,expectedCampaignId,expectedSourceSha256
+      controllerRoot,campaignPath,target:t,expectedCampaignId,expectedCampaignGenerationId,expectedSourceSha256
     });
     if(!String(binding.status).startsWith('PASS_')){
       process.stderr.write(`[phase5-sim] BLOCKED ${key}: request binding ${binding.status}\n`);
@@ -688,7 +700,7 @@ export async function executePhase5TargetsV1({
         command:process.execPath,
         args:['packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace,'--compact-raw-result'],
         cwd:process.cwd(),
-        env:{...process.env,PHASE5_BOUNDARY_PROGRESS:'true',PHASE5_CONTROLLER_ROOT:path.resolve(controllerRoot)},
+        env:{...process.env,AUDIT_CAMPAIGN_GENERATION_ID:expectedCampaignGenerationId??'',PHASE5_BOUNDARY_PROGRESS:'true',PHASE5_CONTROLLER_ROOT:path.resolve(controllerRoot)},
         timeoutMs:candidateTimeoutMs,
         onStderr:relayProgress
       });

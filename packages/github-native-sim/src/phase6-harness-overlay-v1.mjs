@@ -91,7 +91,7 @@ function assertNoUsableRpcLiteral(bytes, sourcePath) {
   if (forbidden.length > 0) throw new Error(`Phase 6 audit overlay contains a forbidden literal RPC URL in ${sourcePath}`);
 }
 
-export async function materializePhase6HarnessOverlayV1({ projectRoot, runnerRoot, bundleId, source }) {
+export async function materializePhase6HarnessOverlayV1({ projectRoot, runnerRoot, bundleId, source, campaignId=null, campaignGenerationId=null }) {
   if (typeof projectRoot !== 'string' || projectRoot.length === 0) throw new Error('Phase 6 harness overlay requires projectRoot');
   if (typeof runnerRoot !== 'string' || runnerRoot.length === 0) throw new Error('Phase 6 harness overlay requires runnerRoot');
   if (!BUNDLE_ID.test(bundleId ?? '')) throw new Error(`Invalid Phase 6 harness bundle id: ${bundleId ?? ''}`);
@@ -109,6 +109,12 @@ export async function materializePhase6HarnessOverlayV1({ projectRoot, runnerRoo
   if (manifest?.schemaVersion !== 'phase6-audit-harness-overlay-v1') throw new Error(`Unsupported Phase 6 harness manifest schema for ${bundleId}`);
   if (manifest?.bundleId !== bundleId) throw new Error(`Phase 6 harness manifest bundleId mismatch for ${bundleId}`);
   validateSourceBinding(manifest, source);
+  // A source archive can be audited by multiple generations. Never import the
+  // harness of an earlier campaign even if commit and archive hashes match.
+  if(campaignId && /-r[0-9]+$/.test(campaignId) &&
+     (!campaignGenerationId||manifest.campaignId!==campaignId||
+      manifest.campaignGenerationId!==campaignGenerationId))
+    throw new Error('HARNESS_CAMPAIGN_GENERATION_MISMATCH: exact-generation harness required');
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) throw new Error(`Phase 6 harness manifest ${bundleId} has no files`);
 
   // Source-owned compiler settings, remappings and test layout always win.
