@@ -93,11 +93,35 @@ async function recordPrivateCommunication(direction,content){
 async function recordMiloTempRound(modelRequest,modelOutput,scope,roundOrdinal){
  if(!scope||!Number.isSafeInteger(scope.phase)||!Number.isSafeInteger(scope.step))
   throw Error('Source-bound Milo Temp Work question phase/step unavailable');
- const res=await fetch(endpoint,{method:'POST',headers:{authorization:'Bearer '+await identity(),'content-type':'application/json','x-mi-dispatch-correlation':dispatchCorrelation},
-  body:JSON.stringify({campaignId,operation:'mimo_round_pair',phase:scope.phase,step:scope.step,roundOrdinal,runAttempt:miloRunAttempt,...(typeof scope.questionId==='string'&&scope.questionId?{questionScope:scope}:{}),modelRequest,modelOutput}),signal:AbortSignal.timeout(150000)});
- const receipt=await res.json().catch(()=>null);
- if(!res.ok||receipt?.status!=='MIMO_TEMP_ROUND_PUBLISHED')
-  throw Error('Complete Milo input/output pair not committed to GitHub: HTTP '+res.status+' '+String(receipt?.status||receipt?.error||'UNKNOWN'));
+ // Serialize once. An ambiguous HTTP response may follow a successful GitHub
+ // atomic commit; retry ONLY identical bytes under the same run/attempt/ordinal.
+ const exactBody=JSON.stringify({campaignId,operation:'mimo_round_pair',
+  phase:scope.phase,step:scope.step,roundOrdinal,runAttempt:miloRunAttempt,
+  ...(typeof scope.questionId==='string'&&scope.questionId?{questionScope:scope}:{}),
+  modelRequest,modelOutput});
+ let receipt=null;
+ for(let attempt=1;attempt<=3;attempt++){
+  let res,answer;
+  try{
+   res=await fetch(endpoint,{method:'POST',headers:{
+    authorization:'Bearer '+await identity(),'content-type':'application/json',
+    'x-mi-dispatch-correlation':dispatchCorrelation},
+    body:exactBody,signal:AbortSignal.timeout(150000)});
+   answer=await res.json().catch(()=>null);
+  }catch(error){
+   if(attempt===3)throw Error('Milo GitHub original pair publication unconfirmed after identical transport retries: '+String(error.message||error));
+   continue;
+  }
+  if(res.ok&&answer?.status==='MIMO_TEMP_ROUND_PUBLISHED'){
+   receipt=answer;break;
+  }
+  if(res.status>=400&&res.status<500)
+   throw Error('Milo original pair rejected without any reinterpretation: HTTP '+
+    res.status+' '+String(answer?.status||answer?.error||'UNKNOWN'));
+  if(attempt===3)throw Error('Milo original pair publication unconfirmed; original answer must not be regenerated on this basis: HTTP '+
+   res.status+' '+String(answer?.status||answer?.error||'UNKNOWN'));
+ }
+ if(!receipt)throw Error('Milo original pair has no exact successful GitHub commit receipt');
  if(receipt.inputSha256!==sha(modelRequest)||receipt.outputSha256!==sha(modelOutput)||
     !Number.isSafeInteger(receipt.questionNumber)||receipt.questionNumber<1)
   throw Error('Milo GitHub pair receipt differs from exact original input/output bytes or question identity');
@@ -214,6 +238,10 @@ async function modelCall(messages,{technicalAnswer=false,scope=null,scopeSha256=
  const start=Date.now();
  const tempRoundOrdinal=++miloRunRoundOrdinal;
  const tempRoundScope=scope&&Number.isInteger(Number(scope.phase))&&Number.isInteger(Number(scope.step))?scope:lastTranscriptScope?{...lastTranscriptScope}:null;
+ // Do not spend an inference when its eventual original output cannot be
+ // bound to the Worker-issued question and resumed without guessing.
+ if(miloTempRounds&&tempRoundScope?.questionId&&!/^[a-f0-9]{64}$/.test(scopeSha256||''))
+  throw Error('Exact Worker-issued question digest is missing before MiMo inference');
  if(!miloTempRounds)await recordPrivateCommunication('mimo_input',request);
  console.log(JSON.stringify({status:'AI_BRIDGE_MODEL_REQUEST',
   conversationMessages:messages.length,promptBytes:Buffer.byteLength(request)}));
