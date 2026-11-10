@@ -236,7 +236,11 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
     : (boosthubP5 && matchTest === 'testFuzz_P5T007_'
       ? '^testFuzz_P5T007_[A-Za-z0-9_]+\\('
       : '^' + matchTest + '\\(');
-  const matchContract = native.matchContract;
+  // The seventh source-bound candidate's manifest names only its vault
+  // witness/control suite. Exclude older auxiliary P5T007 functions in the
+  // hub-strategy suite instead of broadening the test's hypothesis.
+  const matchContract = deterministicBoosthubP5 && candidatePrefix==='P5T007'
+    ? 'BoostHubV9VaultP5TargetsV1' : native.matchContract;
   if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const rpcUrl = phase6MutableRpc?.url;
   const blockNumber = phase6MutableRpc?.blockNumber;
