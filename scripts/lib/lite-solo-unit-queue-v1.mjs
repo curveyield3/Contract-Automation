@@ -888,6 +888,36 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
 // Never replace reviewer answers, accepted snapshot bytes or a substantive rework.
 export function recoverSourceBoundRequestReworkV1({root,campaignPath,directory}={}){
  const phase=5,rel=queueRel(campaignPath,phase),queue=maybe(root,rel);
+ // Preserve the original accepted work when its independently generated
+ // exact-generation execution request is already available. A later repair
+ // to the candidate's deterministic harness must not require re-generating
+ // its immutable request or recopying a byte-identical legacy harness.
+ // The original accepted submission and all existing binding checks remain.
+ const trustedCurrentGenerationRequest=(target,phase0Source)=>{
+  const currentRef=resolveTargetExecutionRequestRef({
+   root,campaignPath,target,expectedCampaignGenerationId:directory.campaignGenerationId
+  });
+  if(currentRef){
+   const binding=validateTargetExecutionRequestBindingV1({
+    controllerRoot:root,campaignPath,target:{...target,executionRequestRef:currentRef},
+    expectedCampaignId:directory.campaignId,
+    expectedCampaignGenerationId:directory.campaignGenerationId,
+    expectedSourceSha256:directory.sourceSha256
+   });
+   const request=maybe(root,path.posix.join(campaignPath,currentRef));
+   return String(binding.status).startsWith('PASS_')&&
+    request?.campaignId===directory.campaignId&&
+    request?.source?.archiveSha256===directory.sourceSha256&&
+    request?.assignmentId?.startsWith('phase-05-g');
+  }
+  const made=generateV7ExecutionRequestV1({
+   campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
+   sourceSha256:directory.sourceSha256,phase0Source,target,automationRoot:process.cwd()
+  });
+  return made.status==='GENERATED'&&
+   made.request?.source?.archiveSha256===directory.sourceSha256&&
+   made.request?.assignmentId?.startsWith('phase-05-g');
+ };
  // A source-only request-generation failure is not a reviewer deficiency.
  // Retry a historical unmapped blocker only after every named target's
  // immutable accepted snapshot independently regenerates a valid exact-gen
@@ -921,14 +951,7 @@ export function recoverSourceBoundRequestReworkV1({root,campaignPath,directory}=
     if(!entry||(u.kind==='APPEND'
        ?!entry.key.startsWith(JSON.stringify(u.path)+':APPEND-')
        :!u.recordKeys?.includes(entry.key)))return false;
-    const made=generateV7ExecutionRequestV1({
-     campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
-     sourceSha256:directory.sourceSha256,phase0Source:source,
-     target:entry.value,automationRoot:process.cwd()
-    });
-    return made.status==='GENERATED'&&
-      made.request?.source?.archiveSha256===directory.sourceSha256&&
-      made.request?.assignmentId?.startsWith('phase-05-g');
+    return trustedCurrentGenerationRequest(entry.value,source);
    }));
    if(valid){
     queue.finalizeStatus='NOT_STARTED';queue.finalizeDetails=null;queue.revision++;
@@ -964,14 +987,7 @@ export function recoverSourceBoundRequestReworkV1({root,campaignPath,directory}=
   const entries=accepted.submission?.entries??[];
   if(entries.length!==1||entries[0].key!==u.recordKeys?.[0]||
      entries[0].value?.candidateKey!==key)continue;
-  const generated=generateV7ExecutionRequestV1({
-   campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
-   sourceSha256:directory.sourceSha256,phase0Source:source,
-   target:entries[0].value,automationRoot:process.cwd()
-  });
-  if(generated.status!=='GENERATED'||generated.request?.campaignId!==directory.campaignId||
-     generated.request?.source?.archiveSha256!==directory.sourceSha256||
-     !generated.request?.assignmentId?.startsWith('phase-05-g'))continue;
+  if(!trustedCurrentGenerationRequest(entries[0].value,source))continue;
   state.status='ACCEPTED';
   state.lastSubmissionSha256=state.acceptedSha256;
   state.lastErrors=[];
