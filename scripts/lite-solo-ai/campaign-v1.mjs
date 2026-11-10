@@ -2978,6 +2978,44 @@ async function runTechnicalQuestionTransportV1(){
   // question from this answer or a locally guessed coverage threshold.
  }
 }
+async function miReadFixedMemberOriginalV1(ready,issued,item,selector,remediation){
+ let original=null;
+ let page=JSON.parse(await workerCall({operation:'field_contract',
+  unitId:ready.unitId,lease:ready.lease,...selector,
+  ...(remediation?{remediation:true}:{}),directOriginalAnswerOffset:0}));
+ if(page.status==='AI_CURRENT_DIRECT_TECHNICAL_ANSWER_PAGE'){
+  let offset=0,fullSha=null,fullBytes=null,body='';
+  for(let i=0;i<10000;i++){
+   if(page.status!=='AI_CURRENT_DIRECT_TECHNICAL_ANSWER_PAGE'||
+      page.scopeSha256!==issued.scopeSha256||
+      page.questionId!==item.questionId||page.start!==offset||
+      typeof page.exactOriginalFragment!=='string'||
+      sha(page.exactOriginalFragment)!==page.fragmentSha256)
+    throw Error('Previous fixed-member source page identity changed');
+   if(fullSha===null){fullSha=page.answerSha256;fullBytes=page.answerBytes;}
+   if(page.answerSha256!==fullSha||page.answerBytes!==fullBytes)
+    throw Error('Previous original member-answer hash changed');
+   body+=page.exactOriginalFragment;
+   if(page.nextOffset===null){
+    if(sha(body)!==fullSha||Buffer.byteLength(body)!==fullBytes)
+     throw Error('Previous fixed member not recovered byte-for-byte');
+    original=body;break;
+   }
+   if(!Number.isSafeInteger(page.nextOffset)||page.nextOffset<=offset)
+    throw Error('Previous fixed-member page cursor did not advance');
+   offset=page.nextOffset;
+   page=JSON.parse(await workerCall({operation:'field_contract',
+    unitId:ready.unitId,lease:ready.lease,...selector,
+    ...(remediation?{remediation:true}:{}),directOriginalAnswerOffset:offset}));
+  }
+  if(original===null)throw Error('Previous fixed original exceeded source paging limit');
+ }else if(page.status!=='AI_CURRENT_DIRECT_ORIGINAL_UNAVAILABLE'||
+          page.availability!=='ORIGINAL_TECHNICAL_ANSWER_NOT_STAGED')
+  throw Error('Ambiguous fixed-member original; preserve it for repair: '+
+   String(page.availability??page.status));
+ return original;
+}
+
 // Step 6: the existing controller-owned answerTransport and answerRouting
 // select destinations; MiMo exclusively supplies typed security conclusions.
 // The runner never compiles a canonical record or creates queue unit IDs.
@@ -3185,41 +3223,61 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
      throw Error('Member question differs from exact Worker-issued frozen catalog');
     // On an interrupted first submission, recover the exact staged original.
     // A conflicting/multiple original must never be guessed or overwritten.
-    let original=null;
-    {
-     let page=JSON.parse(await workerCall({operation:'field_contract',
-      unitId:ready.unitId,lease:ready.lease,...selector,
-      ...(remediation?{remediation:true}:{}),directOriginalAnswerOffset:0}));
-     if(page.status==='AI_CURRENT_DIRECT_TECHNICAL_ANSWER_PAGE'){
-      let offset=0,fullSha=null,fullBytes=null,body='';
-      for(let i=0;i<10000;i++){
-       if(page.status!=='AI_CURRENT_DIRECT_TECHNICAL_ANSWER_PAGE'||
-          page.scopeSha256!==issued.scopeSha256||
-          page.questionId!==item.questionId||page.start!==offset||
-          typeof page.exactOriginalFragment!=='string'||
-          sha(page.exactOriginalFragment)!==page.fragmentSha256)
-        throw Error('Previous fixed-member source page identity changed');
-       if(fullSha===null){fullSha=page.answerSha256;fullBytes=page.answerBytes;}
-       if(page.answerSha256!==fullSha||page.answerBytes!==fullBytes)
-        throw Error('Previous original member-answer hash changed');
-       body+=page.exactOriginalFragment;
-       if(page.nextOffset===null){
-        if(sha(body)!==fullSha||Buffer.byteLength(body)!==fullBytes)
-         throw Error('Previous fixed member not recovered byte-for-byte');
-        original=body;break;
-       }
-       if(!Number.isSafeInteger(page.nextOffset)||page.nextOffset<=offset)
-        throw Error('Previous fixed-member page cursor did not advance');
-       offset=page.nextOffset;
-       page=JSON.parse(await workerCall({operation:'field_contract',
-        unitId:ready.unitId,lease:ready.lease,...selector,
-        ...(remediation?{remediation:true}:{}),directOriginalAnswerOffset:offset}));
-      }
-      if(original===null)throw Error('Previous fixed original exceeded source paging limit');
-     }else if(page.status!=='AI_CURRENT_DIRECT_ORIGINAL_UNAVAILABLE'||
-              page.availability!=='ORIGINAL_TECHNICAL_ANSWER_NOT_STAGED')
-      throw Error('Ambiguous fixed-member original; preserve it for repair: '+
-       String(page.availability??page.status));
+    let original=await miReadFixedMemberOriginalV1(ready,issued,item,selector,remediation);
+    if(original===null&&miloTempRounds){
+     // Recover an already generated original GitHub Output.json before a new
+     // inference. This is a source-identity operation, never a new question.
+     const recovered=JSON.parse(await workerCall({operation:'recover_question',
+      unitId:issued.scope.unitId,lease:issued.scope.lease,
+      scopeSha256:issued.scopeSha256,questionId:issued.scope.questionId,
+      questionSha256:issued.scope.questionSha256,
+      ...selector,storageMode:'DIRECT_GITHUB_API_JSON'}));
+     if(recovered.status==='AI_TECHNICAL_GITHUB_OUTPUT_AWAITING_SELECTION'){
+      const refs=recovered.unselectedOutputRefs;
+      if(!Array.isArray(refs)||!refs.length)
+       throw Error('Fixed member has no source-bound GitHub output refs');
+      const owners=new Set(refs.map(x=>x.workflowRunId+':'+x.workflowRunAttempt));
+      if(owners.size!==1)
+       throw Error('Different MiMo runs authored conflicting unselected fixed-member outputs');
+      const latest=refs.at(-1);
+      const snapshot=JSON.parse(await workerCall({operation:'mimo_round_output',
+       phase:issued.scope.phase,step:issued.scope.step,
+       questionNumber:latest.questionNumber,includeModelRequest:true}));
+      if(snapshot.status!=='MIMO_TEMP_OUTPUT_FOUND'||
+         snapshot.generationId!==issued.scope.generationId||
+         snapshot.questionScopeSha256!==issued.scopeSha256||
+         snapshot.questionId!==issued.scope.questionId||
+         snapshot.outputSha256!==latest.answerSha256||
+         sha(snapshot.outputText)!==latest.answerSha256||
+         sha(snapshot.modelRequest)!==snapshot.modelRequestSha256)
+       throw Error('Fixed-member saved GitHub round changed across recovery');
+      const saved=JSON.parse(snapshot.modelRequest);
+      if(saved.model!=='lite-solo-mimo-v1'||!Array.isArray(saved.messages)||
+         !saved.messages.some(m=>{if(m.role!=='user')return false;try{
+          const q=JSON.parse(m.content);
+          return q.task==='ANSWER_ONE_EXACT_WORKER_ISSUED_FIXED_ITEM_QUESTION'&&
+           q.originalQuestion?.questionId===item.questionId&&
+           q.originalQuestion?.questionText===def.questionText&&
+           q.controllerIssuedRecord?.ordinal===row.recordOrdinal&&
+           q.originalFieldBinding?.field===item.field;
+         }catch{return false;}}))
+       throw Error('Saved original fixed-member prompt is not the same issued field');
+      const receipt=JSON.parse(await miSendOriginalBounded(issued,snapshot.outputText,{
+       operation:'answer_question',unitId:ready.unitId,lease:ready.lease,
+       scopeSha256:issued.scopeSha256,questionId:item.questionId,
+       questionSha256:issued.scope.questionSha256,answerText:snapshot.outputText,
+       ...selector,...(remediation?{revisionClaim:true}:{})}));
+      if(receipt.status!=='AI_TECHNICAL_ANSWER_STAGED'||
+         receipt.scopeSha256!==issued.scopeSha256||
+         receipt.answerSha256!==latest.answerSha256)
+       throw Error('Unselected fixed-member GitHub original was not recorded');
+      original=snapshot.outputText;
+     }else if(recovered.status==='AI_TECHNICAL_ANSWER_STAGED'&&
+              recovered.recoveredFromGitHubTempOriginal===true){
+      original=await miReadFixedMemberOriginalV1(ready,issued,item,selector,remediation);
+      if(original===null)throw Error('Fixed-member selected original missing after GitHub recovery');
+     }else if(recovered.status!=='AI_TECHNICAL_NO_STAGED_ORIGINAL')
+      throw Error('Fixed-member GitHub recovery requires source diagnosis: '+String(recovered.status));
     }
     let value,rawAnswer,receipt;
     if(original!==null){
