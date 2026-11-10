@@ -99,9 +99,6 @@ jobs:
         if: ${{ steps.process.outputs.ready == 'true' }}
         shell: bash
         env:
-          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
-          RPC_KATANA: ${{ secrets.RPC_KATANA }}
-          RPC_BASE: ${{ secrets.RPC_BASE }}
           CAMPAIGN_ID: ${{ matrix.campaign }}
         run: |
           set -euo pipefail
