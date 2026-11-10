@@ -1019,8 +1019,12 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
     const rows=form?.actions?.['step-1']?.outputs?.discoveryReconciliationRecords??[];
     if(rows.some(x=>x==='<PENDING_DISCOVERY>'))deficiencies.push('Phase 4 discovery summary is still pending.');
     const actual=rows.filter(x=>x&&typeof x==='object').map(x=>x.recordKey);
-    if(JSON.stringify([...actual].sort())!==JSON.stringify([...expected].sort())||new Set(actual).size!==actual.length)
-      deficiencies.push('Phase 4 discovery reconciliation keys must exactly match controller-prefilled keys.');
+    // New AI-generated discovery records are valid additions. Preserve the
+    // required source-origin records without freezing the total question count.
+    const present=new Set(actual);
+    const missing=expected.filter(key=>!present.has(key));
+    if(missing.length) deficiencies.push('Phase 4 required discovery records are missing: '+missing.join(', '));
+    if(new Set(actual).size!==actual.length) deficiencies.push('Phase 4 discovery reconciliation contains duplicate record keys.');
     const candidates=new Set((form?.actions?.['step-3']?.outputs?.candidateRecords??[]).filter(x=>x&&typeof x==='object').map(x=>x.tempKey));
     for(const row of rows.filter(x=>x&&typeof x==='object')){
       if(!['CANDIDATE_CREATED','RESOLVED_NO_ISSUE','COVERAGE_GAP_ACCEPTED'].includes(row.disposition))
@@ -1065,8 +1069,12 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
       if(!Array.isArray(rows))continue;
       for(const row of rows) if(row&&typeof row==='object'&&!Array.isArray(row)&&row.obligationId) actual.push(String(row.obligationId));
     }
-    actual.sort();
-    if(JSON.stringify(actual)!==JSON.stringify(expected)) deficiencies.push('Due-obligation disposition rows do not exactly match controller-prefilled obligations. Expected '+expected.join(', ')+'; got '+actual.join(', ')+'.');
+    // Adaptive phase forms may add new obligation records. Retain every
+    // previously due obligation, but do not reject newly discovered ones.
+    const present=new Set(actual);
+    const missing=expected.filter(key=>!present.has(key));
+    if(missing.length) deficiencies.push('Missing required due-obligation dispositions: '+missing.join(', ')+'.');
+    if(present.size!==actual.length) deficiencies.push('Duplicate due-obligation disposition records.');
     for(const action of Object.values(form?.actions??{})){
       for(const row of action?.outputs?.obligationDispositions??[]){
         if(!row||typeof row!=='object'||Array.isArray(row))continue;
