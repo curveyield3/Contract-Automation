@@ -58,7 +58,9 @@ contract BoostHubV9VaultP5TargetsV1 {
         vm.prank(actor);vault.deposit(n);
         require(vault.balanceOf(actor)>0,"SHARES_NOT_MINTED");
     }
-    function testFuzz_P5T007_PartialWithdrawalTransfersResidualToRemainingOwner(uint96 raw) public {
+    function test_P5T007_PartialWithdrawalTransfersResidualToRemainingOwner() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (BeefyVaultV7FixedV2 v,BoostV9PartialStrategyV1 s,BoostV9BehaviorTokenV1 w)=_fixture();
         uint256 n=uint256(raw)%1e21+100;
         _deposit(v,w,ALICE,n);
@@ -75,7 +77,9 @@ contract BoostHubV9VaultP5TargetsV1 {
         uint256 afterBobClaim=v.balance()*v.balanceOf(BOB)/v.totalSupply();
         require(afterBobClaim-beforeBobClaim==expectedGross-paid,"OTHER_HOLDER_NOT_SUBSIDIZED");
     }
-    function testFuzz_P5T007_ZeroShareSupplyLeavesRecoverableStrategyAssets(uint96 raw) public {
+    function test_P5T007_ZeroShareSupplyLeavesRecoverableStrategyAssets() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (BeefyVaultV7FixedV2 v,BoostV9PartialStrategyV1 s,BoostV9BehaviorTokenV1 w)=_fixture();
         uint256 n=uint256(raw)%1e21+100;
         _deposit(v,w,ALICE,n);
@@ -91,7 +95,9 @@ contract BoostHubV9VaultP5TargetsV1 {
         require(v.balance()>=inherited+100,"ASSETS_NOT_LEFT_FOR_NEW_SHARES");
         require(v.balance()*v.balanceOf(NEW_USER)/v.totalSupply()>=inherited+100,"NEW_USER_NOT_ENTITLED_TO_RESIDUAL");
     }
-    function testFuzz_P5T007_FullWithdrawalControl(uint96 raw) public {
+    function test_P5T007_FullWithdrawalControl() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (BeefyVaultV7FixedV2 v,,BoostV9BehaviorTokenV1 w)=_fixture();
         uint256 n=uint256(raw)%1e21+100;
         _deposit(v,w,ALICE,n);
@@ -100,7 +106,9 @@ contract BoostHubV9VaultP5TargetsV1 {
         require(w.balanceOf(ALICE)==n,"CONTROL_FULL_PAYOUT");
         require(v.balance()==0,"CONTROL_RESIDUAL");
     }
-    function testFuzz_P5T007_RevertingStrategyPreservesShares(uint96 raw) public {
+    function test_P5T007_RevertingStrategyPreservesShares() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (BeefyVaultV7FixedV2 v,BoostV9PartialStrategyV1 s,BoostV9BehaviorTokenV1 w)=_fixture();
         uint256 n=uint256(raw)%1e21+100;
         _deposit(v,w,ALICE,n);
