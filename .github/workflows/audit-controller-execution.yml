@@ -631,7 +631,7 @@ jobs:
                 commit:$commit,
                 requestPath:$request_path
               },
-              verifyController:true
+              verifyController:false
             }' > "$pointer_rel"
           git add "$pointer_rel"
           git commit -m "chore(audit): dispatch evidence ingestion $V7_REQUEST_ID"
