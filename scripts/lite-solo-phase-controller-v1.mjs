@@ -1147,8 +1147,12 @@ if(a['milo-qa-archive-only']==='true'){
  const directory=readJson(requiredFile(root,dirRel,'bound campaign directory'));
  if(directory.campaignId!==campaignId||directory.workspacePath!==campaignPath)
   throw Error('MILO_ARCHIVE_CAMPAIGN_DIRECTORY_MISMATCH');
+ if(Number(directory.currentAssignment?.phaseSequence)!==phase||
+    !Number.isSafeInteger(Number(directory.currentAssignment?.phaseRevision))||
+    Number(directory.currentAssignment.phaseRevision)<1)
+  throw Error('MILO_ARCHIVE_NOT_CURRENT_CONTROLLER_ISSUED_PHASE_REVISION');
  const result=miloPhaseArchiveV1({root,campaignPath,campaignId,generation:directory.campaignGenerationId,phase,
-  revision:Number(directory.currentAssignment?.phaseRevision??1),prepare:true});
+  revision:Number(directory.currentAssignment.phaseRevision),prepare:true});
  process.stdout.write(JSON.stringify(result)+'\n');
  process.exit(0);
 }
