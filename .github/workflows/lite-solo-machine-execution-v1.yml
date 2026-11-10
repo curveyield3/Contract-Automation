@@ -124,7 +124,9 @@ jobs:
             preflight:raw.preflight?.status,slitherInvoked:Boolean(raw.analysis?.slither),
             foundryStatus:n.status,componentStatus:n.componentStatus,
             failureKind:n.failureKind,testExecution:n.testExecution,testResults:n.testResults,
-            exitCode:out.exitCode,stdoutTail:scrub(out.stdout).slice(-4500),stderrTail:scrub(out.stderr).slice(-4500),
+            exitCode:out.exitCode,stdoutHead:scrub(out.stdout).slice(0,2000),
+            stdoutTail:scrub(out.stdout).slice(-3500),stderrTail:scrub(out.stderr).slice(-2200),
+            testAndErrorLines:(scrub(out.stdout)+'\\n'+scrub(out.stderr)).split(/\\r?\\n/).filter(x=>/\\[PASS\\]|\\[FAIL\\]|(no tests match)|(Compiler run successful)|(Error \\(\\d+\\))|(Suite result)|(Ran \\d+ test)|(Test result)|(Failing tests)|(Warning: no tests)/i.test(x)).slice(-45),
             error:raw.error?.message??null};
           fs.writeFileSync(path.join(p,'ISOLATED_TEST_RESULT_v1.json'),JSON.stringify(record,null,2)+'\n');
           console.log('BOOSTHUB_PHASE5_ONE_RESULT_START');
@@ -141,6 +143,7 @@ jobs:
           name: boosthub-phase5-one-${{ github.run_id }}
           path: .isolated-phase5-evidence/
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 20
       - name: Execute only this generation's explicit tests
         if: ${{ github.event_name == 'workflow_dispatch' }}
