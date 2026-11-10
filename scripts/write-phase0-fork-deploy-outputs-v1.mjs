@@ -33,10 +33,20 @@ try{
 const {assertDeployGateEvidenceV2,digestV2}=await import('./lib/phase0-deploy-gate-v2.mjs');
 try{assertDeployGateEvidenceV2(deploy);}catch(error){warn('PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json','PHASE0_DEPLOY_GATE_EVIDENCE_ASSESSMENT','Original deployment/configuration evidence verification failed: '+String(error?.message??error),'Verified deployment/configuration evidence',String(error?.message??error));}
 const rawPath=path.join(src,'PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json');
+let rawDeploymentEvidencePresent=false;
 if(deploy.reconciliation){
+ try{
   const original=await fs.readFile(rawPath);
+  rawDeploymentEvidencePresent=true;
   if(digestV2(original)!==deploy.reconciliation.originalEvidenceSha256)
-   warn('PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json','PHASE0_ORIGINAL_DEPLOY_EVIDENCE_SHA256','Original deployment evidence bytes do not match the declared digest',deploy.reconciliation.originalEvidenceSha256,digestV2(original));
+   warn('PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json','PHASE0_ORIGINAL_DEPLOY_EVIDENCE_SHA256',
+    'Original deployment evidence bytes do not match the declared digest; exact bytes remain available',
+    deploy.reconciliation.originalEvidenceSha256,digestV2(original));
+ }catch(error){
+  warn('PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json','PHASE0_ORIGINAL_DEPLOY_EVIDENCE_MISSING',
+   'Original deployment evidence file cannot be read: '+String(error?.message??error),
+   'Readable original deployment evidence file','MISSING_OR_UNREADABLE');
+ }
 }
 if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||!['PASS','PASS_LIVE_DEPLOYMENT','NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'].includes(deploy.status))
  warn('PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json','PHASE0_DEPLOY_EVIDENCE_SCHEMA_OR_STATUS','Deployment evidence does not match the expected schema and accepted status',{schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v3',status:['PASS','PASS_LIVE_DEPLOYMENT','NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT']},{schemaVersion:deploy.schemaVersion??null,status:deploy.status??null});
@@ -80,7 +90,8 @@ try {
     await fs.copyFile(snapshotFile,path.join(target,'DEPLOYED_STATE_SNAPSHOT_v1.json'));
   }
 } catch { /* Snapshot must never block the existing Phase-0 deployment writer. */ }
-if(deploy.reconciliation)await fs.copyFile(rawPath,path.join(destination,'PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json'));
+if(deploy.reconciliation&&rawDeploymentEvidencePresent)
+ await fs.copyFile(rawPath,path.join(destination,'PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json'));
 let readiness=null;
 try{readiness=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'utf8'));}catch(error){
  recordPhaseFinalizationVerificationWarningV1({root:controllerRoot,campaignPath,phase:0,
