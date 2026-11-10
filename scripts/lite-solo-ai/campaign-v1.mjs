@@ -2618,7 +2618,8 @@ async function runTechnicalQuestionTransportV1(){
    }
    if(recovered.status==='AI_TECHNICAL_QUESTION_RECORDED'&&
       recovered.originalCommittedToGitHub===true&&
-      recovered.recoveredFromPrivateStagedOriginal===true){
+      (recovered.recoveredFromPrivateStagedOriginal===true||
+       recovered.recoveredFromGitHubTempOriginal===true)){
     console.log(JSON.stringify({status:'MIMO_STAGED_ORIGINAL_RESUMED_FROM_GITHUB',
      campaignId,unitId:issued.scope.unitId,questionId:issued.scope.questionId,
      checkpointPath:recovered.checkpointPath,indexRevision:recovered.indexRevision,
@@ -2634,6 +2635,8 @@ async function runTechnicalQuestionTransportV1(){
     throw Error('STAGED_ANSWER_CAPACITY: Original answer retained at '+
      String(recovered.originalAnswerR2Key||'private source')+
      ' but not committed to GitHub; existing question index contract requires paging.');
+   if(recovered.status==='AI_TECHNICAL_GITHUB_OUTPUT_AWAITING_SELECTION')
+    throw Error('EXACT_MIMO_OUTPUT_UNSELECTED: source-bound original Output.json exists; do not regenerate; '+JSON.stringify(recovered.unselectedOutputRefs));
    if(recovered.status==='AI_TECHNICAL_MULTIPLE_STAGED_ORIGINALS')
     throw Error('AMBIGUOUS_UNCOMMITTED_AI_ANSWERS: multiple originals exist for the same question; preserve all without choosing one.');
    if(recovered.status==='AI_TECHNICAL_CHECKPOINT_REQUIRES_RECOVERY')
@@ -2647,7 +2650,7 @@ async function runTechnicalQuestionTransportV1(){
    }
    if(!['AI_TECHNICAL_NO_STAGED_ORIGINAL','AI_TECHNICAL_FORMAT_CLARIFICATION'].includes(recovered.status))
     throw Error('Unexpected source-bound staged answer recovery status: '+String(recovered.status));
-   const oldSegments=await miRecoverOriginalBounded(issued);
+   const oldSegments=miloTempRounds?null:await miRecoverOriginalBounded(issued);
    if(oldSegments){
     console.log(JSON.stringify({status:'MIMO_SEGMENTED_ORIGINAL_GITHUB_RECOVERED',
      unitId:issued.scope.unitId,questionId:issued.scope.questionId,
