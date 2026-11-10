@@ -602,6 +602,7 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
   if(phase===6&&u.field==='baselineTestRecords'&&isObject(val)){
    errors.push(...validateLiveForkBaselineRecordV1({
     root,campaignPath:plan.campaignPath,campaignId:plan.campaignId,
+    campaignGenerationId:plan.campaignGenerationId,
     sourceSha256:plan.sourceSha256,record:val
    }));
   }
