@@ -118,5 +118,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CAMPAIGN_ID: ${{ inputs.campaign_id }}
         run: |
-          gh workflow run lite-solo-unit-controller-v1.yml \
+          # Re-enter the exact controller family; do not cross an Audit Preview
+          # generation into an unrelated Lite-Solo request queue.
+          if [[ "$CAMPAIGN_ID" == audit-preview-completion-* ]]; then
+            workflow=audit-preview-completion-unit-controller-v1.yml
+          else
+            workflow=lite-solo-unit-controller-v1.yml
+          fi
+          gh workflow run "$workflow" \
             --repo "$GITHUB_REPOSITORY" -f campaign_id="$CAMPAIGN_ID"
