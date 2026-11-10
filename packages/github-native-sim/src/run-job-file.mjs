@@ -217,7 +217,10 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
     return skippedUnguided('native-fuzz', 'NO_AGENT_SELECTED_FOUNDRY_TEST');
   // An exact-bound BoostHub V9 request selects the P5-T007 proof and controls
   // by prefix, so resolve those named functions without rewriting accepted work.
-  const boosthubP5 = request.configuration?.harness?.bundleId === 'boosthub-v9-r1-phase5-candidate-targets-v1'
+  const boosthubP5 = [
+    'boosthub-v9-r1-phase5-candidate-targets-v1',
+    'boosthub-v9-r1-phase5-candidate-targets-v1-g7adcb74caefeeef3'
+  ].includes(request.configuration?.harness?.bundleId)
     && request.source?.archiveSha256 === '876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3';
   const selectedRegex = boosthubP5 && matchTest === 'testFuzz_P5T007_'
     ? '^testFuzz_P5T007_[A-Za-z0-9_]+$' : '^' + matchTest + '$';
