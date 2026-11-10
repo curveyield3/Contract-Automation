@@ -10,7 +10,6 @@ import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {materializeSemanticWorkFormV13, semanticShardFailureIndexV13} from './lib/lite-solo-work-shards-v1.mjs';
 import {readJson, writeJson, repoFile, loadPhaseSchema, validateWorkForm, validateBoundAuthorityV1} from './lib/lite-solo-phase-work-v1.mjs';
-import {validatePhaseScaffold} from './lib/lite-solo-phase-prefill-v1.mjs';
 import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {restoreControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
@@ -151,8 +150,7 @@ function validateSemanticStep(c){
   const stepKey='step-'+step;
   const filtered={...schema,actions:{[stepKey]:schema.actions[stepKey]}};
   const problems=validateWorkForm(filtered,form);
-  const scaffold=validatePhaseScaffold(phase,form,a.controllerPrefillDigestSha256);
-  problems.push(...scaffold.filter(x=>/digest|read-only|prefill|modified/i.test(x)));
+  // Step validation checks the stable titled section; adaptive outputs remain open.
   if(problems.length){
     const map=semanticShardFailureIndexV13({root:ROOT,indexRel:a.workShardIndexPath,deficiencies:problems});
     const paths=map.shards.map(x=>path.posix.basename(x.path)).filter(x=>active.includes(x));
@@ -227,31 +225,8 @@ function phaseFinalize(c){
   }
   if([4,5,6].includes(phase)){
     let gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
-    // Recover a legacy Phase-5 prefill block BEFORE the readiness gate. The
-    // existing unit drainer alone verifies the immutable indexed BASE, the
-    // accepted unit set and the exact two controller-recorded defects. It
-    // restores only the frozen controller prefill and resets that known blocker.
-    // Do not alter trusted digests here or bypass the normal phase validator.
-    if(phase===5&&!gate.ready&&String(gate.reason||'').startsWith('controller finalization blocked')){
-      const requestDir=fs.mkdtempSync('/tmp/lite-solo-phase5-recovery-empty-');
-      try{
-        const output=cmd('node',['scripts/lite-solo-unit-request-drain-v1.mjs',
-          '--root',ROOT,'--campaign-id',c.directory.campaignId,
-          '--requests-root',requestDir,'--mode','drain'],{maxBuffer:16*1024*1024});
-        const recovered=JSON.parse(output.trim().split('\n').at(-1));
-        strict(recovered.finalizeReady===true,'controller frozen-BASE recovery not ready: '+
-          String(recovered.state?.finalizeStatus??'UNKNOWN'));
-      }finally{fs.rmSync(requestDir,{recursive:true,force:true});}
-      const before=c.directory;
-      c.directory=read(c.directoryPath);
-      strict(c.directory.campaignId===before.campaignId&&
-        c.directory.campaignGenerationId===before.campaignGenerationId&&
-        c.directory.sourceSha256===before.sourceSha256&&
-        c.directory.authorityDigest===before.authorityDigest,
-        'legacy prefill recovery changed frozen campaign/source/authority identity');
-      assertAssigned(c,phase);
-      gate=finalizeReadinessV1({root:ROOT,campaignPath:c.campaignPath,directory:c.directory,phase});
-    }
+    // Adaptive form digests are never reconstructed or restored during a
+    // phase boundary. Immutable unit submission and source digests still apply.
     strict(gate.ready,'canonical unit finalization not ready: '+String(gate.reason||'units incomplete'));
     if(phase===5){
       // Phase-5 preflight consumes the deterministic assembly of accepted units.

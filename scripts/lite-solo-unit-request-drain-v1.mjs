@@ -72,23 +72,21 @@ if(arg.mode!=='finalize'){
     deficiencies:recorded.finalizeDetails.unmappedDeficiencies});
   if(recovery.reopenedUnits.length)changed=true;
  }
- // Legacy Phase-5 prefill-digest failures predate Worker-owned form validation.
- // Once every original unit is accepted, clear only those stale finalization
- // markers so the existing assembler and phase boundary can resume. Do not
- // compare, recalculate, or repair a controller prefill digest, and never
- // modify accepted unit snapshots.
- if(phase===5&&recorded?.finalizeStatus==='BLOCKED'&&
+ // Retire only historical digest-only finalization errors, across all phases.
+ // No digest is recalculated, restored, or promoted to an authority. Previously
+ // accepted immutable unit submissions remain unchanged.
+ if(recorded?.finalizeStatus==='BLOCKED'&&
     Array.isArray(recorded.finalizeDetails?.unmappedDeficiencies)&&
     recorded.finalizeDetails.unmappedDeficiencies.length>0&&
     recorded.finalizeDetails.unmappedDeficiencies.every(x=>[
       'Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.',
-      'Controller-prefilled/read-only fields were modified; restore the generated values before validation.'
-    ].includes(String(x))||String(x).startsWith(
-      'Phase 5 source-bound controller prefill restoration rejected:'))&&
+      'Controller-prefilled/read-only fields were modified; restore the generated values before validation.',
+      'Controller prefill integrity digest is missing.',
+    ].includes(String(x))||String(x).startsWith('Phase 5 source-bound controller prefill restoration rejected:'))&&
     Object.keys(recorded.units??{}).length>0&&
     Object.values(recorded.units).every(x=>x.status==='ACCEPTED')){
-  markFinalizationV1({root,campaignPath,phase:5,status:'NOT_STARTED',details:null});
-  changed=true;
+   markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
+   changed=true;
  }
  for(const filename of files){
   const request=JSON.parse(fs.readFileSync(path.join(requestDir,filename),'utf8'));

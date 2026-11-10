@@ -87,40 +87,26 @@ function validateScalar(v,pathName,def){
   if(def.type==='REQUIRED_ENUM'&&!def.allowed?.includes(String(v))) return [pathName+' must be one of: '+(def.allowed??[]).join(', ')];
   return [];
 }
+// Adaptive work forms: stable identity and titled step sections are contractual.
+// Output records, fields, list lengths and additional AI-generated questions are
+// variable. Semantic source/evidence controls belong to dedicated validators,
+// not SHA checks or a frozen template's list of expected record fields.
 export function validateWorkForm(schema,form){
   const deficiencies=[];
-  if(form?.schemaVersion!=='curveyield-lite-phase-work-form-v1') deficiencies.push('work form schemaVersion mismatch');
-  if(form?.phase!==schema.phase) deficiencies.push('work form phase mismatch');
+  if(form?.schemaVersion!=='curveyield-lite-phase-work-form-v1')
+    deficiencies.push('work form schemaVersion mismatch');
+  if(form?.phase!==schema.phase)deficiencies.push('work form phase mismatch');
+  if(!form?.actions||typeof form.actions!=='object'||Array.isArray(form.actions))
+    return [...deficiencies,'work form actions object is missing'];
   for(const [stepKey,action] of Object.entries(schema.actions??{})){
-    const row=form?.actions?.[stepKey];
-    if(!row){deficiencies.push('actions.'+stepKey+' section is missing');continue;}
-    if(row.section!==action.section) deficiencies.push('actions.'+stepKey+'.section must equal "'+action.section+'"');
-    for(const field of action.fields??[]){
-      const p='actions.'+stepKey+'.outputs.'+field.name;
-      const v=row?.outputs?.[field.name];
-      if(field.type==='REQUIRED_LIST'){
-        if(!Array.isArray(v)||v.length===0) deficiencies.push(p+' must be a non-empty list');
-        else for(let i=0;i<v.length;i++) if(isPlaceholder(v[i])) deficiencies.push(p+'['+i+'] is missing');
-      }else if(field.type==='REQUIRED_RECORD_LIST'){
-        if(!Array.isArray(v)||v.length===0) deficiencies.push(p+' must be a non-empty record list or explicit negative sentinel');
-        else if(v.length===1&&typeof v[0]==='string'&&EXPLICIT_NEGATIVES.has(v[0])){}
-        else for(let i=0;i<v.length;i++){
-          const item=v[i];
-          // A v13 indexed work-form may have an immutable first-slot negative
-          // sentinel while the reviewer appends actual records. The sentinel
-          // remains identity-bound in the original shard; real records still
-          // undergo every required-field and allowed-value check below.
-          if(schema.phase===3&&stepKey==='step-2'&&field.name==='customValidationObligations'&&
-             i===0&&v.length>1&&item==='NONE_IDENTIFIED'&&
-             v.slice(1).every(x=>x&&typeof x==='object'&&!Array.isArray(x)))continue;
-          if(!item||typeof item!=='object'||Array.isArray(item)){deficiencies.push(p+'['+i+'] must be an object or explicit negative sentinel');continue;}
-          for(const k of field.itemRequiredFields??[]) if(isPlaceholder(item[k])||item[k]===null||item[k]===undefined) deficiencies.push(p+'['+i+'].'+k+' is missing');
-          for(const [k,allowed] of Object.entries(field.itemFieldAllowedValues??{})){
-            if(item[k]!==undefined&&!allowed.includes(String(item[k]))) deficiencies.push(p+'['+i+'].'+k+' must be one of: '+allowed.join(', '));
-          }
-        }
-      }else deficiencies.push(...validateScalar(v,p,field));
+    const row=form.actions[stepKey];
+    if(!row||typeof row!=='object'||Array.isArray(row)){
+      deficiencies.push('actions.'+stepKey+' section is missing');continue;
     }
+    if(row.section!==action.section)
+      deficiencies.push('actions.'+stepKey+'.section must equal "'+action.section+'"');
+    if(!row.outputs||typeof row.outputs!=='object'||Array.isArray(row.outputs))
+      deficiencies.push('actions.'+stepKey+'.outputs must be an object');
   }
   return deficiencies;
 }

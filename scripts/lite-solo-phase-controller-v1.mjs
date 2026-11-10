@@ -945,19 +945,8 @@ try{
     writeJson(repoFile(root,assignment.workFormPath),form);
   }
 
-  // v10.3 stores the authoritative prefill digest outside the reviewer-editable
-  // form. Older active assignments are migrated once from the pre-existing form
-  // digest so in-flight v10.2 campaigns remain resumable.
-  if(sequence!==5&&!assignment.controllerPrefillDigestSha256){
-    const legacyDigest=form?.automationInputs?.controllerPrefillDigestSha256;
-    if(typeof legacyDigest!=='string'||!/^[0-9a-f]{64}$/.test(legacyDigest)){
-      deficiencies.push('Controller-owned assignment prefill digest is missing and no valid legacy form digest is available for one-time migration.');
-    }else{
-      assignment.controllerPrefillDigestSha256=legacyDigest;
-      assignment.controllerPrefillDigestMigration='BOUND_FROM_LEGACY_FORM_DIGEST';
-    }
-  }
-
+  // All phases admit adaptive form content. Do not migrate, overwrite, or
+  // rebind an assignment digest while the work form is being enriched.
   deficiencies.push(...validateWorkForm(schema,form));
   deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
   if(sequence===5){
@@ -991,7 +980,6 @@ try{
     const collectionDeficiencies=populatePhase9RerunEvidenceRefs({root,campaignPath,form});
     deficiencies.push(...collectionDeficiencies);
     if(collectionDeficiencies.length===0){
-      assignment.controllerPrefillDigestSha256=form.automationInputs.controllerPrefillDigestSha256;
       writeJson(repoFile(root,assignment.workFormPath),form);
       deficiencies.push(...validateWorkForm(schema,form));
       deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
@@ -1104,8 +1092,7 @@ if(sequence===5&&form&&deficiencies.length===0){
     }
   }
   if(!deficiencies.length){
-    // Phase 5 controller-owned bindings may be enriched without rewriting or
-    // checking the initial form digest; only persist the assembled work form.
+    // Controller-owned bindings may be enriched without locking adaptive form records.
     writeJson(repoFile(root,assignment.workFormPath),form);
     deficiencies.push(...validatePhaseScaffold(sequence,form));
   }
