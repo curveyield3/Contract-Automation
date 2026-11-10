@@ -2082,13 +2082,16 @@ function durablyAcceptedUnitV1({root,plan,queue,u,onVerificationFailure=null}){
     expected??null,observed??null);
  return true; // Verification deviations are warnings, not phase vetoes.
 }
-export function finalizeReadinessV1({root,campaignPath,directory,phase}){
- const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
- const pending=plan.units.filter(u=>!durablyAcceptedUnitV1({root,plan,queue,u,
-  onVerificationFailure:(affectedFile,check,reason,expected,observed)=>
-   recordPhaseFinalizationVerificationWarningV1({
-    root,campaignPath,phase,affectedFile,check,reason,expected,observed
-   })}));
+export function finalizeReadinessV1({root,campaignPath,directory,phase,onVerificationFailure=null}){
+ const warn=onVerificationFailure??((affectedFile,check,reason,expected,observed)=>
+  recordPhaseFinalizationVerificationWarningV1({
+   root,campaignPath,phase,revision:Number(directory.currentAssignment?.phaseRevision??1),
+   affectedFile,check,reason,expected,observed
+  }));
+ const plan=readPlan(root,campaignPath,phase,warn),queue=read(root,queueRel(campaignPath,phase));
+ const pending=plan.units.filter(u=>!durablyAcceptedUnitV1({
+  root,plan,queue,u,onVerificationFailure:warn
+ }));
  if(pending.length)return {ready:false,reason:'AWAITING_ACTUAL_ACCEPTED_WORKER_FILES',
   unitIds:pending.map(u=>u.unitId)};
  return {ready:true,plan,queue};
@@ -2168,7 +2171,7 @@ export function collectAcceptedAppendContinuationsV1({root,campaignPath,phase,re
   });
  if(!maybe(root,planRel(campaignPath,phase))||
     !maybe(root,queueRel(campaignPath,phase)))return [];
- const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
+ const plan=readPlan(root,campaignPath,phase,warn),queue=read(root,queueRel(campaignPath,phase));
  const pages=[];
  // A continuation request is only fulfilled by a separately issued and
  // accepted successor. Never treat an unfinished accepted chain as complete.
@@ -2230,7 +2233,7 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
   });
  // GitHub copies and orders the actual Worker-provided bytes; no additional
  // identity, value, coverage, dependency, or security validation is performed.
- const ready=finalizeReadinessV1({root,campaignPath,directory,phase});
+ const ready=finalizeReadinessV1({root,campaignPath,directory,phase,onVerificationFailure:warn});
  if(!ready.ready)return {status:'AWAITING_WORKER_FILES',unitIds:ready.unitIds};
  const {plan,queue}=ready,assignment=directory.currentAssignment,byFile=new Map();
  const phaseSchema=loadPhaseSchema(root,authorityFor(directory),phase).schema;
