@@ -104,7 +104,10 @@ export async function runPhase6ExecutionPreflightV1({
   // The accepted BoostHub V9 P5-T007 request explicitly selects the candidate
   // test prefix, which the existing harness implements in several proof/control
   // functions. Restrict this compatibility behavior to its bound source bundle.
-  const boosthubP5 = request.configuration?.harness?.bundleId === 'boosthub-v9-r1-phase5-candidate-targets-v1'
+  const boosthubP5 = [
+    'boosthub-v9-r1-phase5-candidate-targets-v1',
+    'boosthub-v9-r1-phase5-candidate-targets-v1-g7adcb74caefeeef3'
+  ].includes(request.configuration?.harness?.bundleId)
     && request.source?.archiveSha256 === '876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3';
   let nativeTestGuided = false;
   if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(selectedTest ?? '')) {
