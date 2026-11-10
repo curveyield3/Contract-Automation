@@ -2,8 +2,8 @@
   "schemaVersion": "boosthub-phase5-one-target-v1",
   "campaignId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1",
   "generationId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z",
-  "candidateKey": "P4-CAND-LP-WITHDRAW-SILENT-ERC20-FAIL",
+  "candidateKey": "P4-CAND-STRATEGY-HARVEST-NESTED-CALL",
   "testKind": "FOUNDRY_PARAMETERIZED",
-  "attempt": 6,
-  "note": "Source-bound LP withdrawal false-return proof on isolated pinned Anvil fork"
+  "attempt": 7,
+  "note": "Source-bound strategy nested-harvest accounting proof on isolated pinned Anvil fork"
 }
