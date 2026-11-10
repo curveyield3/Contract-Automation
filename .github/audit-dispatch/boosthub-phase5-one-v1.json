@@ -4,6 +4,6 @@
   "generationId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z",
   "candidateKey": "P5-CAND-VAULT-PARTIAL-REDEMPTION-SHARE-EXTINCTION",
   "testKind": "CANDIDATE_DETERMINISTIC_PROOF_AND_CONTROLS",
-  "attempt": 9,
-  "note": "Only exact-source deterministic vault partial-redemption witness, zero-share condition, full-withdrawal and rollback controls"
+  "attempt": 10,
+  "note": "Repeat four deterministic vault candidate witness/control tests after correcting prank call consumption by balanceOf"
 }
