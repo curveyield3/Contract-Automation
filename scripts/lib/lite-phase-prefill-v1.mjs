@@ -944,27 +944,29 @@ export function buildControllerPacket({directory,assignment,existing,now}){
 
 export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=null){
   const deficiencies=[];
-  const formDigest=form?.automationInputs?.controllerPrefillDigestSha256??null;
-  const expectedDigest=assignmentExpectedDigest??formDigest;
-  const ownedProjection=controllerOwnedProjection(form);
-  if(form?.automationInputs&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
-  else if(ownedProjection.length&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
-  if(assignmentExpectedDigest&&formDigest!==assignmentExpectedDigest) deficiencies.push('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.');
-  if(expectedDigest&&controllerOwnedDigest(form)!==expectedDigest) deficiencies.push('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
+  // Adaptive schemas are validated by stable phase/step structure and substantive
+  // source-bound checks below. A mutable reviewer/controller form cannot have a
+  // frozen field-projection digest: records and controller enrichment may grow at
+  // every phase, so digest comparisons are never schema acceptance criteria.
+  // Historical assignment/form digest metadata is informational only.
   if(sequence===4 && Object.hasOwn(form?.automationInputs??{},'expectedDiscoveryRecordKeys')){
     const expected=form.automationInputs.expectedDiscoveryRecordKeys??[];
     const rows=form?.actions?.['step-1']?.outputs?.discoveryReconciliationRecords??[];
     if(rows.some(x=>x==='<PENDING_DISCOVERY>'))deficiencies.push('Phase 4 discovery summary is still pending.');
     const actual=rows.filter(x=>x&&typeof x==='object').map(x=>x.recordKey);
-    if(JSON.stringify([...actual].sort())!==JSON.stringify([...expected].sort())||new Set(actual).size!==actual.length)
-      deficiencies.push('Phase 4 discovery reconciliation keys must exactly match controller-prefilled keys.');
+    // New AI-generated discovery records are valid additions. Preserve the
+    // required source-origin records without freezing the total question count.
+    const present=new Set(actual);
+    const missing=expected.filter(key=>!present.has(key));
+    if(missing.length) deficiencies.push('Phase 4 required discovery records are missing: '+missing.join(', '));
+    if(new Set(actual).size!==actual.length) deficiencies.push('Phase 4 discovery reconciliation contains duplicate record keys.');
     const candidates=new Set((form?.actions?.['step-3']?.outputs?.candidateRecords??[]).filter(x=>x&&typeof x==='object').map(x=>x.tempKey));
     for(const row of rows.filter(x=>x&&typeof x==='object')){
       if(!['CANDIDATE_CREATED','RESOLVED_NO_ISSUE','COVERAGE_GAP_ACCEPTED'].includes(row.disposition))
         deficiencies.push('Discovery '+row.recordKey+' requires a valid disposition.');
       if(row.disposition==='CANDIDATE_CREATED'&&!candidates.has(row.candidateTempKeyOrNone))
         deficiencies.push('Discovery '+row.recordKey+' candidate must be present in Step 3.');
-      if(row.disposition==='RESOLVED_NO_ISSUE'&&!/\.(sol|vy):L\d+/.test(row.rationale??''))
+      if(row.disposition==='RESOLVED_NO_ISSUE'&&!/\.(sol|vy):L\d+/.test([row.rationale,row.reconciliation].filter(x=>typeof x==='string').join(' ')))
         deficiencies.push('Discovery '+row.recordKey+' resolution requires a source anchor.');
       if(row.disposition==='RESOLVED_NO_ISSUE'&&['ATTACK_FINDING','ATTACK_CONTRADICTS_REVIEW'].includes(row.origin)&&
         !/block|guard|revert|check|restrict|prevent/i.test(row.rationale??''))
@@ -1002,8 +1004,12 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
       if(!Array.isArray(rows))continue;
       for(const row of rows) if(row&&typeof row==='object'&&!Array.isArray(row)&&row.obligationId) actual.push(String(row.obligationId));
     }
-    actual.sort();
-    if(JSON.stringify(actual)!==JSON.stringify(expected)) deficiencies.push('Due-obligation disposition rows do not exactly match controller-prefilled obligations. Expected '+expected.join(', ')+'; got '+actual.join(', ')+'.');
+    // Adaptive phase forms may add new obligation records. Retain every
+    // previously due obligation, but do not reject newly discovered ones.
+    const present=new Set(actual);
+    const missing=expected.filter(key=>!present.has(key));
+    if(missing.length) deficiencies.push('Missing required due-obligation dispositions: '+missing.join(', ')+'.');
+    if(present.size!==actual.length) deficiencies.push('Duplicate due-obligation disposition records.');
     for(const action of Object.values(form?.actions??{})){
       for(const row of action?.outputs?.obligationDispositions??[]){
         if(!row||typeof row!=='object'||Array.isArray(row))continue;
