@@ -898,7 +898,7 @@ export function recoverSourceBoundRequestReworkV1({root,campaignPath,directory}=
  const candidateForSourceOnlyError=(value)=>{
   const reason=String(value??'');
   return reason.match(/^Phase 5 trusted execution request missing for ([A-Za-z0-9._-]+)$/)?.[1]
-   ??reason.match(/^Phase 5 preflight candidate ([A-Za-z0-9._-]+), field targetDesigns\\[[0-9]+\\]\\.executionBlueprint\\.configuration\\.harness\\.campaignGenerationId, shard .+: harness requires an independently copied, source-verified, exact-generation bundle; legacy bundles cannot run directly$/)?.[1]
+   ??reason.match(/^Phase 5 preflight candidate ([A-Za-z0-9._-]+), field targetDesigns\[[0-9]+\]\.executionBlueprint\.configuration\.harness\.campaignGenerationId, shard .+: harness requires an independently copied, source-verified, exact-generation bundle; legacy bundles cannot run directly$/)?.[1]
    ??null;
  };
  const trustedCurrentGenerationRequest=(target,phase0Source)=>{
