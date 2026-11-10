@@ -27,7 +27,7 @@ if(!/^[A-Za-z0-9_.-]+-r[0-9]+$/.test(campaignId||'')||
 
 const sha=text=>createHash('sha256').update(text).digest('hex');
 // Staged only: the active Worker remains on the legacy transcript transport until activation.
-const miloTempRounds=process.env.MILO_TEMP_WORK_ROUNDS==='1';
+let miloTempRounds=process.env.MILO_TEMP_WORK_ROUNDS==='1';
 let miloRunRoundOrdinal=0;
 const miloRunAttempt=Number(process.env.GITHUB_RUN_ATTEMPT||1);
 const miloTempRawOutputs=new Map();
@@ -130,7 +130,7 @@ async function recordMiloTempRound(modelRequest,modelOutput,scope,roundOrdinal){
 }
 
 async function workerCall(payload){
- if(!miloTempRounds)await recordPrivateCommunication('worker_request',JSON.stringify({campaignId,...payload}));
+ if(!miloTempRounds&&payload.operation!=='protocol')await recordPrivateCommunication('worker_request',JSON.stringify({campaignId,...payload}));
  const res=await fetch(endpoint,{
   method:'POST',
   headers:{authorization:'Bearer '+await identity(),'content-type':'application/json',
@@ -161,7 +161,7 @@ async function workerCall(payload){
   privateOutputKey:envelope?.rawR2Key||null,
   privateOutputSha256:envelope?.rawSha256||null,
   responseSha256:sha(raw),responseBytes:Buffer.byteLength(raw)}));
- if(!miloTempRounds)await recordPrivateCommunication('worker_response',raw);
+ if(!miloTempRounds&&payload.operation!=='protocol')await recordPrivateCommunication('worker_response',raw);
  return raw;
 }
 
@@ -4069,10 +4069,11 @@ const negotiatedText=await workerCall({operation:'protocol'});
 let negotiated;try{negotiated=JSON.parse(negotiatedText);}catch{throw Error('Invalid Worker protocol negotiation');}
 if(negotiated?.status!=='AI_BRIDGE_PROTOCOL_NEGOTIATED')throw Error('Worker protocol negotiation failed');
 if(negotiated.machineIntelligence===true){
+ miloTempRounds=true; // Each MI model round has only its exact GitHub Input/Output originals.
  if(negotiated.authorityRelease!=='machine-intelligence-v8'||
     negotiated.protocol!=='machine-intelligence-technical-question-transport-v1')
   throw Error('Machine Intelligence frozen release and inference protocol disagree');
- try{if(miloTempRounds)await miAdaptiveSingleQuestionTransportV1();else await miStep8RunLifecycle();}
+ try{await miAdaptiveSingleQuestionTransportV1();}
  catch(error){
   if(String(error?.message||error)!=='MI_STEP8_RUN_HANDOFF_DUE')throw error;
   // A current signed GitHub run only asks the existing Worker to dispatch an
