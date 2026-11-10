@@ -451,6 +451,11 @@ const secureSameV13=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
        warn('BASE_v1.json','PHASE_FINALIZE_INVALID_BASE_PAGE_DESCRIPTOR',
         'One original base page descriptor is not canonical; preserve its original source identity and all readable fragments',
         'Numbered unique page file and SHA-256 metadata',spec??null);
+     if(!spec||typeof spec.file!=='string'||!SOLO_BASE_PAGE_RE.test(spec.file)){
+      // The source manifest has no safe readable page locator. Nothing can be
+      // recovered from it without inventing a page; retain the warning.
+      continue;
+     }
      seen.add(spec.file);
      const page=secureReadV13(root,path.posix.join(workDir,spec.file));
      if(page?.schemaVersion!=='curveyield-lite-solo-locked-base-page-v1'||
@@ -459,7 +464,8 @@ const secureSameV13=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
        warn(spec.file,'PHASE_FINALIZE_BASE_PAGE_INTEGRITY',
         'Base page schema, ordinal, size, or source SHA-256 differs from descriptor; original page content retained',
         {index:i,bytes:spec.bytes,sha256:spec.sha256},
-        {index:page.index,bytes:bytes(page),sha256:secureHashV13(page)});
+        {index:page?.index??null,bytes:bytes(page),sha256:secureHashV13(page)});
+     if(typeof page?.contentBase64!=='string')continue;
      const fragment=Buffer.from(page.contentBase64,'base64');
      if(fragment.toString('base64')!==page.contentBase64||fragment.length!==spec.chunkBytes)
        warn(spec.file,'PHASE_FINALIZE_BASE_FRAGMENT_ENCODING',
