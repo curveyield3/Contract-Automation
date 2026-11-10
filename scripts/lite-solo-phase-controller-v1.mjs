@@ -43,12 +43,14 @@ function hasRemediation(campaignRoot){return listFilesRecursive(path.join(campai
 
 /* Milo phase originals: source-owned GitHub JSON, copied without re-encoding.
    This extends the existing phase-boundary controller; it is not a second transcript. */
-function miloPhaseArchiveV1({root,campaignPath,campaignId,generation,phase,prepare=false}){
+function miloPhaseArchiveV1({root,campaignPath,campaignId,generation,phase,revision=1,prepare=false}){
  const campaignMatch=/^campaigns\/([^/]+)\/([^/]+)$/.exec(campaignPath);
- if(!campaignMatch||!Number.isSafeInteger(phase)||phase<1||phase>10)throw Error('Milo archive requires exact generation-bound campaign/phase');
+ if(!campaignMatch||!Number.isSafeInteger(phase)||phase<1||phase>10||!Number.isSafeInteger(revision)||revision<1)throw Error('Milo archive requires exact generation-bound campaign/phase/revision');
  const source='Milo Temp Work/'+campaignMatch[1]+'/'+campaignMatch[2]+'/Phase '+phase;
- const destination=campaignPath+'/Questions and Answers/Phase '+phase;
- const manifestRel=campaignPath+'/Questions and Answers/PHASE_'+phaseNum(phase)+'_ARCHIVE_MANIFEST_v1.json';
+ const destination=campaignPath+'/Questions and Answers/'+
+  (revision===1?'Phase '+phase:'Phase '+phase+', Revision '+revision);
+ const manifestRel=campaignPath+'/Questions and Answers/PHASE_'+phaseNum(phase)+
+  (revision===1?'':'_REVISION_'+revision)+'_ARCHIVE_MANIFEST_v1.json';
  const src=repoFile(root,source),dst=repoFile(root,destination);
  if(!fs.existsSync(src)){
   if(fs.existsSync(dst))throw Error('MILO_ARCHIVE_SOURCE_MISSING_WITH_EXISTING_DESTINATION: '+source);
@@ -102,25 +104,25 @@ function miloPhaseArchiveV1({root,campaignPath,campaignId,generation,phase,prepa
   if(archiveTree!==tree)throw Error('MILO_ARCHIVE_COMMITTED_TREE_SHA_MISMATCH');
  }
  const manifest={schemaVersion:'milo-phase-qa-frozen-archive-v1',campaignId,campaignGenerationId:generation,
-  phase,sourcePath:source,archivePath:destination,sourceCommitSha:sourceCommit,sourcePhaseTreeSha:tree,
+  phase,phaseRevision:revision,sourcePath:source,archivePath:destination,sourceCommitSha:sourceCommit,sourcePhaseTreeSha:tree,
   archivePhaseTreeSha:tree,archiveCommitSha,pairedQuestionCount:pairs.size,fileCount:blobs.length,
   files:blobs};
  const manifestFile=repoFile(root,manifestRel);
  if(prepare){fs.mkdirSync(path.dirname(manifestFile),{recursive:true});
   if(fs.existsSync(manifestFile)){const existing=readJson(manifestFile);
-   if(existing.sourcePhaseTreeSha!==tree||existing.campaignGenerationId!==generation)
+   if(existing.sourcePhaseTreeSha!==tree||existing.campaignGenerationId!==generation||Number(existing.phaseRevision??1)!==revision)
     throw Error('MILO_ARCHIVE_MANIFEST_ALREADY_EXISTS_FOR_DIFFERENT_SOURCE');
   }else writeJson(manifestFile,{...manifest,archiveCommitSha:null});
  }else{
   const existing=readJson(requiredFile(root,manifestRel,'Milo prepublished phase archive manifest'));
   if(existing.sourcePhaseTreeSha!==tree||existing.archivePhaseTreeSha!==tree||
-     existing.campaignId!==campaignId||existing.campaignGenerationId!==generation||
+     existing.campaignId!==campaignId||existing.campaignGenerationId!==generation||Number(existing.phaseRevision??1)!==revision||
      existing.pairedQuestionCount!==pairs.size||existing.fileCount!==blobs.length||
      JSON.stringify(existing.files)!==JSON.stringify(blobs))
    throw Error('MILO_ARCHIVE_PREPUBLISHED_MANIFEST_CONFLICT');
  }
  return {status:prepare?'ARCHIVE_PREPARED_FOR_COMMIT':'ARCHIVE_CONFIRMED_COMMITTED',
-  manifestRel,source,destination,sourcePhaseTreeSha:tree,archivePhaseTreeSha:tree,
+  phaseRevision:revision,manifestRel,source,destination,sourcePhaseTreeSha:tree,archivePhaseTreeSha:tree,
   sourceCommitSha:prepare?sourceCommit:readJson(manifestFile).sourceCommitSha,archiveCommitSha,pairedQuestionCount:pairs.size,fileCount:blobs.length,
   manifestSha256:shaFile(manifestFile)};
 }
@@ -1145,7 +1147,8 @@ if(a['milo-qa-archive-only']==='true'){
  const directory=readJson(requiredFile(root,dirRel,'bound campaign directory'));
  if(directory.campaignId!==campaignId||directory.workspacePath!==campaignPath)
   throw Error('MILO_ARCHIVE_CAMPAIGN_DIRECTORY_MISMATCH');
- const result=miloPhaseArchiveV1({root,campaignPath,campaignId,generation:directory.campaignGenerationId,phase,prepare:true});
+ const result=miloPhaseArchiveV1({root,campaignPath,campaignId,generation:directory.campaignGenerationId,phase,
+  revision:Number(directory.currentAssignment?.phaseRevision??1),prepare:true});
  process.stdout.write(JSON.stringify(result)+'\n');
  process.exit(0);
 }
@@ -1714,7 +1717,7 @@ if(sequence===5&&phase5OwnerDeferral)receipt.machineExecutionDisclaimer={
   notAMachinePass:true,finalAuditSecurityAssurance:'INCOMPLETE'
 };
 const miloArchive=miloPhaseArchiveV1({root,campaignPath,campaignId:directory.campaignId,
- generation:directory.campaignGenerationId,phase:sequence,prepare:false});
+ generation:directory.campaignGenerationId,phase:sequence,revision:phaseRevision,prepare:false});
 if(miloArchive.status==='ARCHIVE_CONFIRMED_COMMITTED'){
  receipt.miloQuestionsAndAnswersArchive={...miloArchive,status:'FROZEN_GITHUB_PHASE_TREE'};
  receipt.evidence.push(receiptRef(root,campaignPath,miloArchive.manifestRel,'MILO_PHASE_QA_ARCHIVE_MANIFEST'));
