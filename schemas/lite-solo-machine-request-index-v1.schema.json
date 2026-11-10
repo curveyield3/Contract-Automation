@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lite-Solo exact generation phase machine request index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "campaignId",
+    "campaignGenerationId",
+    "phaseSequence",
+    "sourceSha256",
+    "requests"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "curveyield-lite-machine-request-index-v1"
+    },
+    "campaignId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "campaignGenerationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phaseSequence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "sourceSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidateKey",
+          "requestPath"
+        ],
+        "properties": {
+          "candidateKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requestPath": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}
