@@ -174,6 +174,20 @@ function phaseFinalize(c){
  // No Phase-5 test/preflight, semantic gate, reviewer rework or rejection.
  const requestDir=fs.mkdtempSync('/tmp/machine-intelligence-finalize-');
  try{
+  // The same original phase-controller implementation prepares the exact
+  // Milo Temp Work subtree for phases 4-6. Publish it in an earlier Git commit,
+  // so the subsequent sealed receipt can reference its immutable commit SHA.
+  const archiveResult=JSON.parse(cmd('node',['scripts/lite-solo-phase-controller-v1.mjs',
+   '--milo-qa-archive-only','true','--controller-root',ROOT,
+   '--campaign-id',c.directory.campaignId,'--campaign-path',c.directory.workspacePath,
+   '--campaign-directory-path',c.directoryPath,'--phase-sequence',String(phase)]).trim());
+  if(archiveResult.status==='ARCHIVE_PREPARED_FOR_COMMIT'){
+   publishCanonical(c);
+   const sourceTree=cmd('git',['-C',ROOT,'rev-parse','HEAD:'+archiveResult.source]).trim();
+   const archiveTree=cmd('git',['-C',ROOT,'rev-parse','HEAD:'+archiveResult.destination]).trim();
+   strict(sourceTree===archiveResult.sourcePhaseTreeSha&&archiveTree===sourceTree,
+    'MILO_FINALIZE_SOURCE_OR_ARCHIVE_TREE_CHANGED_DURING_PUBLICATION');
+  }
   const output=cmd('node',['scripts/lite-solo-unit-request-drain-v1.mjs',
    '--root',ROOT,'--campaign-id',c.directory.campaignId,
    '--requests-root',requestDir,'--mode','finalize'],{maxBuffer:16*1024*1024});
