@@ -1,6 +1,10 @@
 name: Lite-Solo Generation-Bound Machine Execution v1
 run-name: lite-solo-machine-${{ inputs.phase_sequence }}-${{ inputs.campaign_id }}
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lite-solo-machine-execution-v1.yml'
   workflow_dispatch:
     inputs:
       campaign_id:
@@ -22,7 +26,91 @@ concurrency:
   group: lite-solo-machine-${{ inputs.campaign_id }}-${{ inputs.generation_id }}-${{ inputs.phase_sequence }}
   cancel-in-progress: false
 jobs:
+  evidence-diagnostics:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select existing Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Extract authenticated existing Phase-5 raw reports (read only)
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import zlib from 'node:zlib';
+          import {execFileSync} from 'node:child_process';
+          const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
+          const root='campaigns/cloudflare-audit-boosthub-v9-20261029-mcp-0812/cloudflare-audit-boosthub-v9-20261029-mcp-0812 r1/evidence/phase5-boundary';
+          const cases=[
+            ['Reward claim','P4-CAND-REWARD-CLAIM-SILENT-ERC20-FAIL','dar-f8d21764b6bc2f0eba01f8385669d0ec'],
+            ['LP withdrawal','P4-CAND-LP-WITHDRAW-SILENT-ERC20-FAIL','dar-42de841c2d3ac8053537ce508eae1087'],
+            ['Reward slot boundary','P4-CAND-STAKING-REWARD-SLOT-OVERFLOW','dar-51fce408bc6976ec1b023d355cc992ec'],
+            ['Nested harvest','P4-CAND-STRATEGY-HARVEST-NESTED-CALL','dar-9f4b5b2591f8cc0bc07c8be5fd4a8bd9'],
+            ['Last stake gauge','P4-CAND-LAST-STAKE-GAUGE-REWARDS-UNHARVESTED','dar-ffa81475b648dd58022c1c138aabd089'],
+            ['Role/config binding','P4-CAND-LIVE-ROLE-CONFIG-BINDING','dar-cb6b19058d6982b9c6c691b7de9ba7d6'],
+            ['Vault shares extinction','P5-CAND-VAULT-PARTIAL-REDEMPTION-SHARE-EXTINCTION','dar-a12283f08c3cb91d87e084094285278d']
+          ];
+          const scrub=x=>String(x??'').replace(/https?:\/\/\S+/g,'<redacted-url>').replace(/(?:Bearer|token|password|secret)\s*[=:]\s*\S+/gi,'<redacted-credential>');
+          const api=(p)=>{
+            const location='/repos/curveyield3/Audit-Controller/contents/'+p.split('/').map(encodeURIComponent).join('/')+'?ref=main';
+            const json=JSON.parse(execFileSync('gh',['api',location],{maxBuffer:12*1024*1024,encoding:'utf8'}));
+            if(json.encoding!=='base64')throw Error('unexpected GitHub content encoding for '+p);
+            return Buffer.from(json.content.replace(/\s/g,''),'base64');
+          };
+          function extractOutput(comp){
+            const o=comp?.rawOutput??{};
+            const out=String(o.stdout??''),err=String(o.stderr??''),joined=out+'\n'+err;
+            const lines=joined.split(/\r?\n/);
+            const interesting=lines.filter(x=>/(?:No tests|no tests|No matches|Ran \d+ tests?|Suite result|Test result|\[PASS\]|\[FAIL\]|Compiler run failed|ParserError|TypeError|DeclarationError|Compilation failed|error:|Exception|Traceback|Error \(\d+\))/i.test(x));
+            let parsed=null;
+            if(out.trim().startsWith('{'))try{parsed=JSON.parse(out)}catch{}
+            const detectors=parsed?.results?.detectors;
+            const severities={};
+            for(const d of Array.isArray(detectors)?detectors:[]){const k=d.impact??'UNKNOWN';severities[k]=(severities[k]??0)+1;}
+            return {status:comp?.status??null,componentStatus:comp?.componentStatus??null,failureKind:comp?.failureKind??null,
+              toolInvoked:comp?.toolInvoked??null,exitCode:o.exitCode??null,stdoutChars:out.length,stderrChars:err.length,
+              parsedJSON:parsed?{success:parsed.success,errors:parsed.error??parsed.errors??null,keys:Object.keys(parsed),
+                detectorCount:Array.isArray(detectors)?detectors.length:null,detectorSeverities:severities,
+                detectorSamples:(detectors??[]).slice(0,7).map(d=>({check:d.check,impact:d.impact,description:scrub(d.description).slice(0,350)}))}:null,
+              first:scrub(joined.slice(0,1500)),last:scrub(joined.slice(-2000)),
+              interesting:interesting.slice(0,25).map(x=>scrub(x).slice(0,480)),
+              testResults:comp?.testResults??null,testExecution:comp?.testExecution??null};
+          }
+          const report=[];
+          for(const [label,key,id] of cases){
+            const dir=root+'/'+key+'/'+id;
+            const env=JSON.parse(api(dir+'/raw-result.json').toString('utf8'));
+            const compressed=Buffer.concat(env.parts.map(p=>{
+              const bytes=api(dir+'/'+p.file);
+              if(hash(bytes)!==p.sha256)throw Error('part checksum invalid for '+key);
+              return bytes;
+            }));
+            if(hash(compressed)!==env.compressedSha256)throw Error('compressed checksum invalid for '+key);
+            const full=zlib.gunzipSync(compressed);
+            if(hash(full)!==env.originalSha256)throw Error('raw checksum invalid for '+key);
+            const raw=JSON.parse(full.toString('utf8'));
+            report.push({label,key,requestId:id,integrity:'VERIFIED',rawBytes:full.length,
+              overall:{status:raw.status,disposition:raw.disposition,blocking:raw.blocking,
+                preflight:raw.preflight?.status,error:raw.error??null,
+                analysisComponentFailureCount:raw.analysisComponentFailureCount,
+                reproduction:raw.reproduction?.status},
+              foundry:extractOutput(raw.analysis?.nativeFuzz),slither:extractOutput(raw.analysis?.slither)});
+          }
+          console.log('PHASE5_EXTRACTED_DIAGNOSTICS_START');
+          console.log(JSON.stringify(report,null,2));
+          console.log('PHASE5_EXTRACTED_DIAGNOSTICS_END');
+          NODE
   execute:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
