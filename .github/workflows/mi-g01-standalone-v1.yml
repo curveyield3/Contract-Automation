@@ -39,6 +39,78 @@ jobs:
           persist-credentials: false
       - name: Setup isolated, copied/pinned G01 toolchain
         uses: ./.github/actions/mi-g01-toolchain-v1
+      - name: Resolve standalone run mode from trigger file or manual inputs
+        shell: bash
+        env:
+          INPUT_MODE: ${{ inputs.mode || 'historical' }}
+          INPUT_CASE: ${{ inputs.historical_case || 'all' }}
+          INPUT_PROFILE: ${{ inputs.target_profile || '' }}
+        run: |
+          set -euo pipefail
+          mode="$INPUT_MODE"
+          case_id="$INPUT_CASE"
+          profile="$INPUT_PROFILE"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -E '^isolated-mi-exploit-g01-v1/trigger/armed/[A-Za-z0-9._-]+[.]json        continue-on-error: true
+        env:
+          G01_ETHEREUM_RPC: ${{ secrets.RPC_ETHEREUM }}
+          G01_BSC_RPC: ${{ secrets.RPC_BSC }}
+          G01_OUTPUT_DIR: ${{ runner.temp }}/mi-g01-standalone-report-v1
+          G01_REPO_SHA: ${{ github.sha }}
+          G01_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$G01_OUTPUT_DIR"
+          timeout -s TERM -k 15s 2400s node isolated-mi-exploit-g01-v1/src/cli.mjs
+      - name: Build versioned isolated source ZIP
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -q -r "$RUNNER_TEMP/MI_G01_Standalone_Source_Package_v1.zip" \
+            isolated-mi-exploit-g01-v1 \
+            .github/actions/mi-g01-toolchain-v1 \
+            .github/workflows/mi-g01-standalone-v1.yml \
+            -x 'isolated-mi-exploit-g01-v1/node_modules/*' \
+               'isolated-mi-exploit-g01-v1/forge/out/*' \
+               'isolated-mi-exploit-g01-v1/forge/cache/*' \
+               'isolated-mi-exploit-g01-v1/forge/broadcast/*'
+      - name: Upload complete isolated source package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-g01-source-v1-${{ github.run_id }}
+          path: ${{ runner.temp }}/MI_G01_Standalone_Source_Package_v1.zip
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Retain standalone evidence (including blocked and partial cases)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-g01-standalone-${{ github.run_id }}
+          path: ${{ runner.temp }}/mi-g01-standalone-report-v1
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
+ || true)
+            if [ "${#changed[@]}" -ne 1 ]; then
+              echo "::error::Exactly one newly committed isolated trigger required"
+              exit 1
+            fi
+            file="${changed[0]}"
+            mode="$(jq -r '.mode // "historical"' "$file")"
+            case_id="$(jq -r '.historical_case // "all"' "$file")"
+            profile="$(jq -r '.target_profile // ""' "$file")"
+          fi
+          case "$mode" in historical|target|both|qualify) ;; *) echo "::error::Unknown G01 mode"; exit 1;; esac
+          case "$case_id" in all|E1|E2|E5|E55|E60) ;; *) echo "::error::Unknown historical case"; exit 1;; esac
+          if [ -n "$profile" ] && [[ ! "$profile" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*[.]json$ ]]; then
+            echo "::error::Unsafe target profile filename"; exit 1
+          fi
+          echo "G01_MODE=$mode" >> "$GITHUB_ENV"
+          echo "G01_HISTORICAL_CASE=$case_id" >> "$GITHUB_ENV"
+          echo "G01_TARGET_PROFILE=$profile" >> "$GITHUB_ENV"
       - name: Run standalone historical and/or target simulations
         continue-on-error: true
         env:
