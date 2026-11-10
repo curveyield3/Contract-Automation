@@ -867,19 +867,7 @@ try{
   materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath});
   form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
 
-  // v10.3 stores the authoritative prefill digest outside the reviewer-editable
-  // form. Older active assignments are migrated once from the pre-existing form
-  // digest so in-flight v10.2 campaigns remain resumable.
-  if(!assignment.controllerPrefillDigestSha256){
-    const legacyDigest=form?.automationInputs?.controllerPrefillDigestSha256;
-    if(typeof legacyDigest!=='string'||!/^[0-9a-f]{64}$/.test(legacyDigest)){
-      deficiencies.push('Controller-owned assignment prefill digest is missing and no valid legacy form digest is available for one-time migration.');
-    }else{
-      assignment.controllerPrefillDigestSha256=legacyDigest;
-      assignment.controllerPrefillDigestMigration='BOUND_FROM_LEGACY_FORM_DIGEST';
-    }
-  }
-
+  // All preview phase forms are adaptive: no mutable prefill digest migration.
   deficiencies.push(...validateWorkForm(schema,form));
   deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
   if(sequence===5){
@@ -907,7 +895,7 @@ try{
     const collectionDeficiencies=populatePhase9RerunEvidenceRefs({root,campaignPath,form});
     deficiencies.push(...collectionDeficiencies);
     if(collectionDeficiencies.length===0){
-      assignment.controllerPrefillDigestSha256=form.automationInputs.controllerPrefillDigestSha256;
+
       writeJson(repoFile(root,assignment.workFormPath),form);
       deficiencies.push(...validateWorkForm(schema,form));
       deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
@@ -977,7 +965,7 @@ if(sequence===5&&form&&deficiencies.length===0){
     const explicitBeforeResolve=typeof target.executionRequestRef==='string'
       && !target.executionRequestRef.startsWith('<')
       && target.executionRequestRef!=='NOT_APPLICABLE';
-    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
+    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target,expectedCampaignGenerationId:directory.campaignGenerationId});
     if(!resolved){
       deficiencies.push('Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+' has no deterministically resolvable execution request. Materialize the exact trusted V7 request at a conventional campaign request path or provide a campaign-relative executionRequestRef only for this target.');
       continue;
@@ -990,6 +978,7 @@ if(sequence===5&&form&&deficiencies.length===0){
       campaignPath,
       target,
       expectedCampaignId:directory.campaignId,
+      expectedCampaignGenerationId:directory.campaignGenerationId,
       expectedSourceSha256:directory.sourceSha256
     });
     target.requestBindingStatus=binding.status;
@@ -1007,7 +996,7 @@ if(sequence===5&&form&&deficiencies.length===0){
     }
   }
   if(!deficiencies.length){
-    assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
+
     writeJson(repoFile(root,assignment.workFormPath),form);
     deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
   }
@@ -1043,6 +1032,7 @@ if([6,8].includes(sequence)&&deficiencies.length===0){
         controllerRoot:root,campaignPath,
         targetDesigns:phaseOutput(sealedP5,'step-3','targetDesigns')??[],
         expectedCampaignId:directory.campaignId,
+        expectedCampaignGenerationId:directory.campaignGenerationId,
         expectedSourceSha256:directory.sourceSha256,requireCompletedMatrix:true
       }));
     }
