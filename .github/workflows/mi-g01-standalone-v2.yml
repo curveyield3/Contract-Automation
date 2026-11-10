@@ -8,7 +8,7 @@ on:
         required: true
         default: validation
         type: choice
-        options: [historical, target, both, qualify]
+        options: [validation, historical, target, both, qualify]
       target_profile:
         description: "Exact basename of the target profile JSON under isolated-mi-exploit-g01-v2/target-profiles/"
         required: false
@@ -65,11 +65,11 @@ jobs:
               exit 1
             fi
             file="${changed[0]}"
-            mode="$(jq -r '.mode // "historical"' "$file")"
+            mode="$(jq -r '.mode // "validation"' "$file")"
             case_id="$(jq -r '.historical_case // "all"' "$file")"
             profile="$(jq -r '.target_profile // ""' "$file")"
           fi
-          case "$mode" in historical|target|both|qualify) ;; *) echo "::error::Invalid mode"; exit 1;; esac
+          case "$mode" in validation|historical|target|both|qualify) ;; *) echo "::error::Invalid mode"; exit 1;; esac
           case "$case_id" in all|E1|E2|E5|E55|E60) ;; *) echo "::error::Invalid historical case"; exit 1;; esac
           if [ -n "$profile" ] && [[ ! "$profile" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*[.]json$ ]]; then
             echo "::error::Invalid target profile name"
@@ -84,7 +84,7 @@ jobs:
         env:
           G01_ETHEREUM_RPC: ${{ secrets.RPC_ETHEREUM }}
           G01_BSC_RPC: ${{ secrets.RPC_BSC }}
-          G01_OUTPUT_DIR: ${{ runner.temp }}/mi-g01-v2-report-v1
+          G01_OUTPUT_DIR: ${{ runner.temp }}/mi-g01-v2-report-v2
           G01_REPO_SHA: ${{ github.sha }}
           G01_RUN_ID: ${{ github.run_id }}
         shell: bash
@@ -98,10 +98,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          zip -q -r "$RUNNER_TEMP/MI_G01_Standalone_Source_Package_v1.zip" \
+          zip -q -r "$RUNNER_TEMP/MI_G01_Standalone_Source_Package_v2.zip" \
             isolated-mi-exploit-g01-v2 \
             .github/actions/mi-g01-toolchain-v2 \
-            .github/workflows/mi-g01-v2-v2.yml \
+            .github/workflows/mi-g01-standalone-v2.yml \
             -x 'isolated-mi-exploit-g01-v2/node_modules/*' \
                'isolated-mi-exploit-g01-v2/forge/out/*' \
                'isolated-mi-exploit-g01-v2/forge/cache/*' \
@@ -111,8 +111,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mi-g01-source-v1-${{ github.run_id }}
-          path: ${{ runner.temp }}/MI_G01_Standalone_Source_Package_v1.zip
+          name: mi-g01-source-v2-${{ github.run_id }}
+          path: ${{ runner.temp }}/MI_G01_Standalone_Source_Package_v2.zip
           if-no-files-found: warn
           retention-days: 14
 
@@ -121,7 +121,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mi-g01-v2-${{ github.run_id }}
-          path: ${{ runner.temp }}/mi-g01-v2-report-v1
+          path: ${{ runner.temp }}/mi-g01-v2-report-v2
           if-no-files-found: warn
           retention-days: 14
           include-hidden-files: false
