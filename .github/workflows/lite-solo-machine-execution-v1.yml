@@ -1,0 +1,122 @@
+name: Lite-Solo Generation-Bound Machine Execution v1
+run-name: lite-solo-machine-${{ inputs.phase_sequence }}-${{ inputs.campaign_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        description: Exact audit campaign ID including r-number
+        type: string
+        required: true
+      generation_id:
+        description: Immutable Audit-Controller campaignGenerationId
+        type: string
+        required: true
+      phase_sequence:
+        description: Phase of exact-generation machine requests
+        type: number
+        required: true
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: lite-solo-machine-${{ inputs.campaign_id }}-${{ inputs.generation_id }}-${{ inputs.phase_sequence }}
+  cancel-in-progress: false
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore existing dependencies
+        run: npm ci --force --ignore-scripts --no-audit --no-fund
+      - name: Checkout only exact campaign generation
+        id: scope
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          GENERATION_ID: ${{ inputs.generation_id }}
+        run: |
+          set -euo pipefail
+          [[ "$CAMPAIGN_ID" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]]
+          slug="$(printf '%s' "$CAMPAIGN_ID" | sed -E 's/-r[0-9]+$//')"
+          directory="Audit Campaign Directory/campaigns/$slug.json"
+          encoded="$(jq -rn --arg p "$directory" '$p|split("/")|map(@uri)|join("/")')"
+          gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=main" --jq .content | base64 -d > /tmp/lite-machine-directory.json
+          jq -e --arg id "$CAMPAIGN_ID" --arg gen "$GENERATION_ID" \
+            '.campaignId==$id and .campaignGenerationId==$gen' /tmp/lite-machine-directory.json
+          campaign_path="$(jq -er .workspacePath /tmp/lite-machine-directory.json)"
+          bash scripts/lite-solo-checkout-bound-controller-v1.sh .audit-controller main "$campaign_path"
+          echo "campaign_path=$campaign_path" >> "$GITHUB_OUTPUT"
+      - name: Install the existing V7 execution toolchain in machine lane only
+        uses: ./.github/actions/setup-v7-toolchain
+      - name: Execute only this generation's explicit tests
+        id: result
+        shell: bash
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+          RPC_KATANA: ${{ secrets.RPC_KATANA }}
+          RPC_BASE: ${{ secrets.RPC_BASE }}
+          CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          GENERATION_ID: ${{ inputs.generation_id }}
+          PHASE_SEQUENCE: ${{ inputs.phase_sequence }}
+          AUDIT_CAMPAIGN_GENERATION_ID: ${{ inputs.generation_id }}
+        run: |
+          set -euo pipefail
+          node scripts/lite-solo-machine-execution-v1.mjs \
+            --controller-root .audit-controller \
+            --campaign-id "$CAMPAIGN_ID" \
+            --generation-id "$GENERATION_ID" \
+            --phase "$PHASE_SEQUENCE" > /tmp/lite-machine-execution.json
+          cat /tmp/lite-machine-execution.json
+          echo "status=$(jq -er .status /tmp/lite-machine-execution.json)" >> "$GITHUB_OUTPUT"
+      - name: Publish only generation-owned requests and machine results
+        shell: bash
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_PATH: ${{ steps.scope.outputs.campaign_path }}
+          PHASE_SEQUENCE: ${{ inputs.phase_sequence }}
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git config user.name 'CurveYield Lite-Solo Machine Executor'
+          git config user.email 'lite-solo-machine-executor@users.noreply.github.com'
+          tag="$(printf '%02d' "$PHASE_SEQUENCE")"
+          git add -- "$CAMPAIGN_PATH/evidence/phase-$tag-machine"
+          if [ "$PHASE_SEQUENCE" = 5 ]; then
+            git add -- "$CAMPAIGN_PATH/evidence/phase5-boundary"
+            if [ -d "$CAMPAIGN_PATH/work/phase-05/execution-requests" ]; then
+              git add -- "$CAMPAIGN_PATH/work/phase-05/execution-requests"
+            fi
+            git add -- "$CAMPAIGN_PATH/controller/preflight"
+          fi
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "audit(machine): generation-bound phase-$tag execution evidence"
+          for attempt in $(seq 1 8); do
+            if git push origin HEAD:main; then exit 0; fi
+            git fetch origin main
+            git rebase origin/main
+          done
+          echo '::error::Machine results could not be persisted at authoritative main' >&2
+          exit 1
+      - name: Re-enter existing unit finalization only after evidence was persisted
+        if: ${{ inputs.phase_sequence == 5 && steps.result.outputs.status == 'COMPLETE' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAMPAIGN_ID: ${{ inputs.campaign_id }}
+        run: |
+          gh workflow run lite-solo-unit-controller-v1.yml \
+            --repo "$GITHUB_REPOSITORY" -f campaign_id="$CAMPAIGN_ID"
