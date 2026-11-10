@@ -1183,8 +1183,9 @@ if(completeDirectPhaseRecordIdsV1({form,sequence,campaignId:directory.campaignId
 // collection issues are diagnostics, never GitHub-side quality vetoes.
 if(sequence===9&&form){
   try{
-    const gaps=populatePhase9RerunEvidenceRefs({root,campaignPath,form});
-    if(gaps.length)deficiencies.push(...gaps.map(x=>'Phase 9 execution evidence unresolved: '+x));
+    populatePhase9RerunEvidenceRefs({root,campaignPath,form,
+      workFormPath:assignment.workFormPath,
+      onVerificationFailure:materializationVerificationFailure});
     writeJson(repoFile(root,assignment.workFormPath),form);
   }catch(error){
     deficiencies.push('Phase 9 authenticated rerun evidence collection unavailable: '+String(error?.message??error));
