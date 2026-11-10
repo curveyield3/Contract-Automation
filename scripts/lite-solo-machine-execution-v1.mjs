@@ -6,6 +6,7 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {runProcess} from '../packages/github-native-sim/src/execution.mjs';
 import {assembleAcceptedUnitShardsV1,finalizeReadinessV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {assembleAcceptedUnitShardsV1 as assemblePreviewAcceptedUnitShardsV1,finalizeReadinessV1 as previewFinalizeReadinessV1} from './lib/audit-preview-unit-queue-v1.mjs';
 import {executePhase5TargetsV1,validateTargetExecutionRequestBindingV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {resolveTargetExecutionRequestRef} from './lib/lite-solo-phase-prefill-v1.mjs';
 
@@ -57,9 +58,14 @@ function collect(candidateKey,requestRel,result){
     exitCode:result?.exitCode??null});
 }
 if(phase===5){
-  const gate=finalizeReadinessV1({root,campaignPath,directory,phase});
+  // Both existing controller families retain their own accepted-unit authority.
+  // Execute only after the correct queue admits this exact campaign and phase.
+  const preview=directory.authorityRelease==='audit-preview-v1';
+  const queueReady=preview?previewFinalizeReadinessV1:finalizeReadinessV1;
+  const assemble=preview?assemblePreviewAcceptedUnitShardsV1:assembleAcceptedUnitShardsV1;
+  const gate=queueReady({root,campaignPath,directory,phase});
   if(!gate.ready)throw Error('Phase 5 has unaccepted units; execute tests only after all questions are completed');
-  assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase});
+  assemble({root,campaignPath,directory,phase});
   const out=execFileSync(process.execPath,['scripts/lite-phase5-preflight-v1.mjs',
     root,campaignPath,campaignId,directory.sourceSha256],{encoding:'utf8',maxBuffer:8*1024*1024});
   const preflight=JSON.parse(out.trim().split('\n').at(-1));
