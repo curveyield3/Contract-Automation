@@ -1680,7 +1680,8 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form,onVerifi
       ? row.rerunRequestDirectory.replace(/\/+$/,'')
       : path.posix.join('controller/phase9-reruns',safeSegment(findingKey));
     const requestDirAbs=repoFile(root,path.posix.join(campaignPath,requestDirRel));
-    const requestFiles=walk(requestDirAbs).filter(file=>file.toLowerCase().endsWith('.json'));
+    const requestFiles=walk(requestDirAbs).filter(file=>file.toLowerCase().endsWith('.json')&&
+      !file.endsWith('.VERIFICATION_WARNINGS_v1.json'));
     const refs=[];
     let discoveredRequests=0;
     let incompleteRequests=0;
