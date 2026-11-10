@@ -35,7 +35,7 @@ jobs:
   group1:
     if: github.ref_name == 'machine-intelligence-audit-controller-v1'
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 55
     steps:
       - name: Checkout isolated Machine Intelligence branch at exact commit
         uses: actions/checkout@v4
@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$G01_OUTPUT_DIR"
-          timeout -s TERM -k 15s 2400s node isolated-mi-exploit-g01-v2/src/cli.mjs
+          timeout -s TERM -k 15s 3000s node isolated-mi-exploit-g01-v2/src/cli-v2.mjs
 
       - name: Build complete standalone source package
         if: always()
