@@ -136,7 +136,11 @@ function queuedAppendPagesV13({desc,provided,primaryCount}){
 
 // Reviewer-authored semantic shards are the sole Lite-Solo work transport.
  // Full-form materialization happens only at the phase controller boundary.
-export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuations=[]}){
+export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuations=[],onVerificationFailure=null}){
+ const warn=(affectedFile,check,reason,expected=null,observed=null)=>{
+  if(typeof onVerificationFailure!=='function')throw new Error(check+': '+reason);
+  onVerificationFailure({affectedFile,check,reason,expected,observed});
+ };
  // Reconstruct from issued controller descriptors, never mutable index pages.
  // This is deterministic transport assembly, not a security quality gate.
  const indexRel=path.posix.join(path.posix.dirname(formRel),'shards','INDEX_v1.json');
@@ -173,9 +177,14 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
     // Fixed shards fill only issued slots; they cannot shift originals or
     // overwrite entries of separately allocated APPEND shards.
     if(!desc.append&&entries.length!==(desc.recordKeys?.length??0))
-     throw new Error('FIXED_ISSUED_SHARD_RECORDS_UNAVAILABLE: '+desc.file);
-    if(!Number.isSafeInteger(desc.startIndex)||desc.startIndex<0)
-     throw new Error('INVALID_ISSUED_SHARD_START_INDEX: '+desc.file);
+     warn(path.posix.join(workDir,desc.file),'FIXED_ISSUED_SHARD_RECORD_COUNT',
+      'Submitted fixed shard count differs from the originally issued record count; all available values remain included',
+      desc.recordKeys?.length??0,entries.length);
+    const validStart=Number.isSafeInteger(desc.startIndex)&&desc.startIndex>=0;
+    if(!validStart)warn(path.posix.join(workDir,desc.file),'INVALID_ISSUED_SHARD_START_INDEX',
+     'Issued shard index is invalid; available values use the next nonoverlapping collection position',
+     'nonnegative safe integer',desc.startIndex??null);
+    const shardStart=validStart?desc.startIndex:output.length;
     const count=entries.length;
     // Do not collapse continuation pages into an oversized APPEND shard.
     // Each page stays separately bounded and retains its own original key.
@@ -189,12 +198,21 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
     const pathKey=JSON.stringify(desc.path);
     const positions=occupied.get(pathKey)??new Set();
     for(let j=0;j<records.length;j++){
-     const position=desc.startIndex+j;
-     if(positions.has(position))
-      throw new Error('SHARD_POSITION_COLLISION: '+pathKey+'['+position+']');
+     let position=shardStart+j;
+     if(positions.has(position)){
+      const originalPosition=position;
+      while(positions.has(position)||Object.hasOwn(output,position))position++;
+      warn(path.posix.join(workDir,desc.file),'SHARD_POSITION_COLLISION',
+       'Two distinct source records address one canonical position; the second source value is retained at the next unused index',
+       'Unique canonical position',originalPosition);
+     }
      const entry=records[j];
-     if(!entry||typeof entry.key!=='string')
-      throw new Error('SHARD_RECORD_IDENTITY_MISSING: '+desc.file+'['+j+']');
+     if(!entry||typeof entry.key!=='string'){
+      warn(path.posix.join(workDir,desc.file),'SHARD_RECORD_IDENTITY_MISSING',
+       'Submitted record lacks an issued key; any original value present is retained without inventing an identity',
+       'source-issued string record key',entry?.key??null);
+      if(!entry||!Object.hasOwn(entry,'value'))continue;
+     }
      if(desc.append){
       const chunk=additional.find(page=>j>=page.startIndex-desc.startIndex&&
        j<page.startIndex-desc.startIndex+page.entries.length);
@@ -202,9 +220,12 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
        j-(chunk.startIndex-desc.startIndex)):
        pathKey+':APPEND-'+String(j+1).padStart(4,'0');
       if(entry.key!==key)
-       throw new Error('APPEND_CHUNK_RECORD_IDENTITY_MISMATCH: '+entry.key);
+       warn(path.posix.join(workDir,desc.file),'APPEND_CHUNK_RECORD_IDENTITY_MISMATCH',
+        'Original APPEND record key differs from issued identity; original submitted value is retained',key,entry.key??null);
      }else if(entry.key!==pathKey+':'+desc.recordKeys[j])
-      throw new Error('FIXED_ISSUED_RECORD_KEY_CHANGED: '+entry.key);
+      warn(path.posix.join(workDir,desc.file),'FIXED_ISSUED_RECORD_KEY_CHANGED',
+       'Original fixed record key differs from issued identity; submitted value is retained',
+       pathKey+':'+String(desc.recordKeys[j]??''),entry.key??null);
      let value=entry.value;
      if(!desc.append&&value&&typeof value==='object'&&!Array.isArray(value)){
       const identity=String(desc.recordKeys[j]??'').match(/^([A-Za-z][A-Za-z0-9_]*)=(.*)$/);
@@ -222,7 +243,9 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
   }
  }
  for(const page of acceptedContinuations)if(!consumedContinuationUnits.has(page.unitId))
-  throw new Error('ACCEPTED_CONTINUATION_HAS_NO_AUTHORIZED_DESTINATION: '+page.unitId);
+  warn(formRel,'ACCEPTED_CONTINUATION_HAS_NO_AUTHORIZED_DESTINATION',
+   'Accepted continuation cannot be assigned to the current form; original accepted unit snapshot is retained and must remain available for follow-up',
+   'Matching original APPEND destination',page.unitId??null);
  // Contiguity is based on original immutable start indices; missing pages
  // must not shift later accepted evidence into a fabricated earlier slot.
  for(const [source,positions] of occupied){
@@ -230,7 +253,9 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
   for(const token of JSON.parse(source))target=target?.[token];
   if(!Array.isArray(target)||positions.size!==target.length||
      Array.from({length:target.length},(_,i)=>i).some(i=>!positions.has(i)))
-   throw new Error('CANONICAL_SHARD_COLLECTION_HAS_MISSING_POSITION: '+source);
+   warn(formRel,'CANONICAL_SHARD_COLLECTION_HAS_MISSING_POSITION',
+    'Canonical collection has missing issued positions; do not infer that absent source records were answered',
+    'Every issued position present',source);
  }
  const output=relfile(root,formRel);
  fs.mkdirSync(path.dirname(output),{recursive:true});
