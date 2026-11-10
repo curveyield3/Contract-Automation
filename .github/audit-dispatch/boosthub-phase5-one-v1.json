@@ -2,8 +2,8 @@
   "schemaVersion": "boosthub-phase5-one-target-v1",
   "campaignId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1",
   "generationId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z",
-  "candidateKey": "P4-CAND-REWARD-CLAIM-SILENT-ERC20-FAIL",
+  "candidateKey": "P4-CAND-LP-WITHDRAW-SILENT-ERC20-FAIL",
   "testKind": "CANDIDATE_DETERMINISTIC_PROOF_AND_CONTROLS",
-  "attempt": 11,
-  "note": "Run three targeted deterministic ERC20 reward-claim witness/revert/standard-delivery controls; no fuzzing"
+  "attempt": 12,
+  "note": "Verify existing candidate-specific deterministic withdrawal witness/controls and new heartbeat/early-exit timeout (no fuzz)"
 }
