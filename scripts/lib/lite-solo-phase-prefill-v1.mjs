@@ -1715,7 +1715,6 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form,onVerifi
         && (machine?.failedSteps?.length??0)===0
         && (!machine?.preflight||machine.preflight.status==='PASS');
       if(!valid){
-        const sourcePrefix=path.posix.join(campaignPath,baseRel);
         const fileChecks=[
          [path.posix.join(campaignPath,ingestionRel),'PHASE9_INGESTION_RECEIPT_SCHEMA',
           ingestion?.schemaVersion==='audit-execution-evidence-ingestion-receipt-v1',
