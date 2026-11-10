@@ -1023,7 +1023,7 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
   return deficiencies;
 }
 
-export function resolveTargetExecutionRequestRef({root,campaignPath,target}){
+export function resolveTargetExecutionRequestRef({root,campaignPath,target,expectedCampaignGenerationId=null}){
   if(String(target?.executionMethod??'').toUpperCase()==='NOT_APPLICABLE')return null;
   const rawExplicit=typeof target?.executionRequestRef==='string'&&!target.executionRequestRef.startsWith('<')
     ? target.executionRequestRef
@@ -1037,9 +1037,21 @@ export function resolveTargetExecutionRequestRef({root,campaignPath,target}){
     path.posix.join(campaignPath,'work/phase-05/execution-requests',safe+'.json'),
     path.posix.join(campaignPath,'evidence/phase5-target-requests',safe+'.json')
   ].filter(Boolean);
+  // Prefer only current-generation requests. Old explicit refs remain recorded
+  // but cannot shadow a newly generated request after a campaign is refreshed.
+  const expectedAssignment=expectedCampaignGenerationId
+    ? `phase-05-g${createHash('sha256').update(JSON.stringify(expectedCampaignGenerationId)).digest('hex').slice(0,24)}-c${createHash('sha256').update(JSON.stringify(String(target?.candidateKey??'').trim())).digest('hex').slice(0,24)}`
+    : null;
   for(const repoRel of candidates){
     if(repoRel.startsWith('/')||repoRel.split('/').includes('..')) continue;
-    if(fs.existsSync(repoFile(root,repoRel))) return path.posix.relative(campaignPath,repoRel);
+    if(!fs.existsSync(repoFile(root,repoRel)))continue;
+    if(expectedAssignment){
+      try{
+        const request=readJsonIf(repoFile(root,repoRel));
+        if(request?.assignmentId!==expectedAssignment)continue;
+      }catch{continue;}
+    }
+    return path.posix.relative(campaignPath,repoRel);
   }
   return null;
 }
