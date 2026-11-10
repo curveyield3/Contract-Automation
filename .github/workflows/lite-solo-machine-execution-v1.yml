@@ -81,6 +81,7 @@ jobs:
           RPC_KATANA: ${{ secrets.RPC_KATANA }}
           RPC_BASE: ${{ secrets.RPC_BASE }}
           GENERATION_ID: cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z
+          PHASE5_BOUNDARY_PROGRESS: 'true'
           CANDIDATE_KEY: ${{ steps.scope.outputs.candidate_key }}
           CAMPAIGN_PATH: ${{ steps.scope.outputs.campaign_path }}
         run: |
