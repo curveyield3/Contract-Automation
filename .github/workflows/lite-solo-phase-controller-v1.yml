@@ -215,9 +215,6 @@ jobs:
           mkdir -p ".audit-controller/$AUDIT_CAMPAIGN_PATH/controller/preflight"
           cp /tmp/lite-solo-phase5-preflight.json ".audit-controller/$AUDIT_CAMPAIGN_PATH/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
           echo "runnable=$(jq -r .runnable /tmp/lite-solo-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
-      - name: Install existing pinned Anvil execution toolchain only for runnable Phase 5
-        if: ${{ steps.phase5.outputs.runnable == 'true' }}
-        uses: ./.github/actions/setup-v7-toolchain
       - name: Validate, seal and generate exact solo controller response
         id: controller
         shell: bash
