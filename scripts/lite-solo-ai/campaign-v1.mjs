@@ -424,26 +424,40 @@ async function historyGitMetadataV1(endpoint){
 // most accepted units have not published question checkpoints.
 async function historyIndexPathsForPhaseV1(workspace,phase){
  const commit=await historyGitMetadataV1('git/commits/'+historySnapshotCommit);
- let treeSha=commit?.tree?.sha;
- if(!/^[0-9a-f]{40}$/.test(String(treeSha??'')))return null;
- const prefix=workspace+'/work/phase-'+String(phase).padStart(2,'0')+'/units';
- for(const segment of prefix.split('/')){
-  const tree=await historyGitMetadataV1('git/trees/'+treeSha);
-  const child=tree?.tree?.find(x=>x.path===segment&&x.type==='tree');
-  if(!child)return new Set();
-  treeSha=child.sha;
+ const root=commit?.tree?.sha;
+ if(!/^[0-9a-f]{40}$/.test(String(root??''))||!validHistoryWorkspacePathV1(workspace))return null;
+ const prefixes=[workspace+'/work/phase-'+String(phase).padStart(2,'0')+'/units',
+  'Milo Temp Work/'+workspace.slice('campaigns/'.length)+'/work/phase-'+String(phase).padStart(2,'0')+'/units'];
+ const result=new Set();
+ for(const prefix of prefixes){
+  let treeSha=root,available=true;
+  for(const segment of prefix.split('/')){
+   const tree=await historyGitMetadataV1('git/trees/'+treeSha);
+   if(!Array.isArray(tree?.tree)||tree.truncated)return null;
+   const child=tree.tree.find(x=>x.path===segment&&x.type==='tree');
+   if(!child){available=false;break;}
+   treeSha=child.sha;
+  }
+  if(!available)continue;
+  const listing=await historyGitMetadataV1('git/trees/'+treeSha+'?recursive=1');
+  if(!Array.isArray(listing?.tree)||listing.truncated)return null;
+  for(const file of listing.tree){
+   if(file.type==='blob'&&/^[A-Za-z0-9._-]+\\/questions\\/QUESTION_INDEX_v1\\.json$/.test(file.path))
+    result.add(prefix+'/'+file.path);
+  }
  }
- const listing=await historyGitMetadataV1('git/trees/'+treeSha+'?recursive=1');
- // Never treat a truncated Git tree as a complete absence of indexes.
- if(!Array.isArray(listing?.tree)||listing.truncated)return null;
- return new Set(listing.tree.filter(x=>x.type==='blob'&&
-  /^[A-Za-z0-9._-]+\/questions\/QUESTION_INDEX_v1\.json$/.test(x.path))
-  .map(x=>prefix+'/'+x.path));
+ return result;
 }
 async function historyGithubFileV1(rel){
- if(typeof rel!=='string'||!rel.startsWith('campaigns/')||
+ if(typeof rel!=='string'||!(rel.startsWith('campaigns/')||rel.startsWith('Milo Temp Work/'))||
     rel.includes('\\')||rel.split('/').some(s=>!s||s==='.'||s==='..'))
   return null;
+ if(rel.startsWith('Milo Temp Work/')){
+  const bound=await historyDirectoryV1();
+  if(bound?.campaignId!==campaignId||!validHistoryWorkspacePathV1(bound.workspacePath)||
+     !rel.startsWith('Milo Temp Work/'+bound.workspacePath.slice('campaigns/'.length)+'/'))
+   return null;
+ }
  // Never fall back to a moving branch or reuse cache entries across snapshots.
  if(!/^[0-9a-f]{40}$/.test(String(historySnapshotCommit??'')))return null;
  const cacheKey=historySnapshotCommit+':'+rel;
@@ -646,10 +660,14 @@ async function sourceBoundQuestionHistoryV1(raw){
  const records=[];
  for(const item of [...selected.values()].sort((a,b)=>
     a.phaseSequence-b.phaseSequence||a.unitId.localeCompare(b.unitId))){
-  const prefix=workspace+'/work/phase-'+String(item.phaseSequence).padStart(2,'0')+
-   '/units/'+item.unitId+'/questions';
-  const indexPath=prefix+'/QUESTION_INDEX_v1.json';
+  const relative='/work/phase-'+String(item.phaseSequence).padStart(2,'0')+
+   '/units/'+item.unitId+'/questions/QUESTION_INDEX_v1.json';
+  const canonicalPath=workspace+relative;
+  const tempPath='Milo Temp Work/'+workspace.slice('campaigns/'.length)+relative;
   const existingIndexes=indexedPaths.get(item.phaseSequence);
+  const exactRosterPath=[canonicalPath,tempPath].includes(item.ref?.indexPath)?item.ref.indexPath:null;
+  const indexPath=[exactRosterPath,tempPath,canonicalPath].find(p=>
+    p&&(!existingIndexes||existingIndexes.has(p)))??(exactRosterPath??tempPath);
   if(existingIndexes&&!existingIndexes.has(indexPath)){
    unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
     indexPath,status:'NOT_PUBLISHED'});continue;
