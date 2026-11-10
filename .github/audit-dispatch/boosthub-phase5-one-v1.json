@@ -2,8 +2,8 @@
   "schemaVersion": "boosthub-phase5-one-target-v1",
   "campaignId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1",
   "generationId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z",
-  "candidateKey": "P4-CAND-LAST-STAKE-GAUGE-REWARDS-UNHARVESTED",
-  "testKind": "FOUNDRY_PARAMETERIZED",
-  "attempt": 8,
-  "note": "Source-bound final-stake gauge reward accounting proof on isolated pinned Anvil fork"
+  "candidateKey": "P5-CAND-VAULT-PARTIAL-REDEMPTION-SHARE-EXTINCTION",
+  "testKind": "CANDIDATE_DETERMINISTIC_PROOF_AND_CONTROLS",
+  "attempt": 9,
+  "note": "Only exact-source deterministic vault partial-redemption witness, zero-share condition, full-withdrawal and rollback controls"
 }
