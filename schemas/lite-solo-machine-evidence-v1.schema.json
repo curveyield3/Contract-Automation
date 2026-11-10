@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lite-Solo exact campaign-generation machine evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "campaignId",
+    "campaignGenerationId",
+    "phaseSequence",
+    "sourceSha256",
+    "authorityDigest",
+    "phaseEpoch",
+    "status",
+    "createdAt",
+    "records"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "curveyield-lite-machine-evidence-v1"
+    },
+    "campaignId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "campaignGenerationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phaseSequence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "sourceSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "authorityDigest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "phaseEpoch": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "status": {
+      "enum": [
+        "COMPLETE",
+        "INCOMPLETE"
+      ]
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidateKey",
+          "status",
+          "requestPath",
+          "requestId",
+          "requestDigest",
+          "sourceCommit",
+          "harnessBundleId",
+          "rawResultPath",
+          "rawResultSha256",
+          "exitCode"
+        ],
+        "properties": {
+          "candidateKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": [
+              "PASS",
+              "INCOMPLETE",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "requestPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestDigest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sourceCommit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "harnessBundleId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rawResultPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rawResultSha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exitCode": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
