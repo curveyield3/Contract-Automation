@@ -12,6 +12,7 @@ import {validateTargetExecutionRequestBindingV1} from '../../packages/github-nat
 import {validateLiveForkBaselineRecordV1} from './lite-solo-live-fork-baseline-gate-v1.mjs';
 import {secureRestoreWorkFormV13,secureShardWorkFormV13} from './lite-solo-work-shards-v1.mjs';
 import {planSemanticBatchesV1,SEMANTIC_BATCH_READING_GUIDE_V1} from './lite-solo-semantic-batches-v1.mjs';
+import {generateV7ExecutionRequestV1} from './lite-phase5-request-generation-v1.mjs';
 
 export const UNIT_POLICY=Object.freeze({issueBatchDefault:50,issueBatchMax:50,approvalBatchMax:50,maxParallelWorkers:null});
 export const REQUEST_SCHEMA='curveyield-lite-solo-unit-batch-request-v1';
@@ -879,6 +880,61 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
   directory.currentAssignment.unitQueueStatePath=directory.unitQueueStatePath;
  }
  return result;
+}
+// A prior controller finalization could re-open a valid accepted unit solely
+// because its V7 request predated exact-generation request binding. Restore
+// only the ORIGINAL immutable accepted unit, and only after the existing request
+// generator can produce a valid, separately source-verified generation request.
+// Never replace reviewer answers, accepted snapshot bytes or a substantive rework.
+export function recoverSourceBoundRequestReworkV1({root,campaignPath,directory}={}){
+ const phase=5,rel=queueRel(campaignPath,phase),queue=maybe(root,rel);
+ if(queue?.finalizeStatus!=='REWORK_REQUIRED'||
+    !Array.isArray(queue.finalizeDetails?.reopenedUnits)||
+    !queue.finalizeDetails.reopenedUnits.length)return {restored:[]};
+ const plan=readPlan(root,campaignPath,phase);assertPlan(queue,plan);
+ const source=read(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'))?.source;
+ const restored=[];
+ for(const id of queue.finalizeDetails.reopenedUnits){
+  const u=plan.units.find(x=>x.unitId===id),state=queue.units[id];
+  if(!u||!state||u.field!=='targetDesigns'||state.status!=='REWORK_REQUIRED'||
+     !state.acceptedPath||!state.acceptedSha256||
+     !Array.isArray(state.lastErrors)||state.lastErrors.length!==1)continue;
+  const key=state.lastErrors[0].match(/^Phase 5 trusted execution request missing for ([A-Za-z0-9._-]+)$/)?.[1];
+  if(!key||!state.acceptedPath.startsWith(unitBase(campaignPath,phase,id)+'/'))continue;
+  const accepted=maybe(root,state.acceptedPath);
+  if(accepted?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.accepted||
+     accepted.unitId!==id||accepted.campaignGenerationId!==directory.campaignGenerationId||
+     accepted.sourceSha256!==directory.sourceSha256||
+     accepted.authorityDigest!==directory.authorityDigest||
+     accepted.phaseSequence!==phase||accepted.phaseEpoch!==plan.phaseEpoch||
+     accepted.unitSpecRevision!==u.unitSpecRevision||
+     accepted.packetSha256!==u.packetSha256||
+     accepted.submissionSha256!==state.acceptedSha256||
+     !dependenciesFresh(queue,u,accepted.prerequisiteEvidence))continue;
+  const entries=accepted.submission?.entries??[];
+  if(entries.length!==1||entries[0].key!==u.recordKeys?.[0]||
+     entries[0].value?.candidateKey!==key)continue;
+  const generated=generateV7ExecutionRequestV1({
+   campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
+   sourceSha256:directory.sourceSha256,phase0Source:source,
+   target:entries[0].value,automationRoot:process.cwd()
+  });
+  if(generated.status!=='GENERATED'||generated.request?.campaignId!==directory.campaignId||
+     generated.request?.source?.archiveSha256!==directory.sourceSha256||
+     !generated.request?.assignmentId?.startsWith('phase-05-g'))continue;
+  state.status='ACCEPTED';
+  state.lastSubmissionSha256=state.acceptedSha256;
+  state.lastErrors=[];
+  restored.push(id);
+ }
+ if(restored.length){
+  const remaining=queue.finalizeDetails.reopenedUnits.filter(id=>!restored.includes(id));
+  queue.finalizeStatus=remaining.length?'REWORK_REQUIRED':'NOT_STARTED';
+  queue.finalizeDetails=remaining.length?{...queue.finalizeDetails,reopenedUnits:remaining}:null;
+  queue.revision++;
+  put(root,rel,queue);
+ }
+ return {restored};
 }
 export function finalizeReadinessV1({root,campaignPath,directory,phase}){
  assertParallelSolo(directory,phase);
