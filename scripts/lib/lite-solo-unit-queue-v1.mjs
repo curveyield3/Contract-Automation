@@ -116,8 +116,26 @@ function hydratePagedQuestionIndexV1(root,index,indexPath){
 // Always retain its deterministic path and source-bound lookup identity, even
 // before the Worker publishes the first checkpoint.
 function questionLedgerReferenceV1({root,campaign,phase,unitId,directory,phaseEpoch,packetSha256}){
- const indexPath=path.posix.join(unitBase(campaign,phase,unitId),
+ const canonicalIndexPath=path.posix.join(unitBase(campaign,phase,unitId),
   'questions/QUESTION_INDEX_v1.json');
+ const tempIndexPath=path.posix.join('Milo Temp Work',campaign.slice('campaigns/'.length),
+  'work/phase-'+String(phase).padStart(2,'0'),'units',unitId,'questions/QUESTION_INDEX_v1.json');
+ // In-phase originals remain outside controller-owned campaigns. Reuse a canonical
+ // historical index unless the temporary ledger belongs to this exact packet epoch.
+ let indexPath=canonicalIndexPath;
+ if(directory.authorityRelease==='machine-intelligence-v8'&&
+    campaign.startsWith('campaigns/')&&fs.existsSync(repoFile(root,tempIndexPath))){
+  try{
+   const candidate=JSON.parse(fs.readFileSync(repoFile(root,tempIndexPath),'utf8'));
+   if(candidate.campaignId===directory.campaignId&&
+      candidate.campaignGenerationId===directory.campaignGenerationId&&
+      candidate.sourceSha256===directory.sourceSha256&&
+      candidate.authorityDigest===directory.authorityDigest&&
+      candidate.phaseSequence===phase&&candidate.phaseEpoch===phaseEpoch&&
+      candidate.unitId===unitId&&candidate.packetSha256===packetSha256)
+    indexPath=tempIndexPath;
+  }catch{/* Preserve canonical availability diagnostics when temporary history is unreadable. */}
+ }
  const bound={campaignId:directory.campaignId,
   campaignGenerationId:directory.campaignGenerationId,
   sourceSha256:directory.sourceSha256,authorityDigest:directory.authorityDigest,
@@ -201,9 +219,9 @@ export function recoverAcceptedQuestionLedgerReferenceV1({
     earlier.authorityDigest===directory.authorityDigest&&
     earlier.phaseSequence===phase&&earlier.phaseEpoch===accepted.phaseEpoch&&
     earlier.unitId===unitId&&earlier.packetSha256===accepted.packetSha256;
- if((legacy||current)&&earlier.indexPath===indexPath&&
+ if((legacy||current)&&earlier.indexPath===live.indexPath&&
     /^[a-f0-9]{64}$/.test(String(earlier.indexSha256??'')))
-  return {...live,previousCommittedIndex:{indexPath,
+  return {...live,previousCommittedIndex:{indexPath:live.indexPath,
    indexSha256:earlier.indexSha256,revision:earlier.revision,
    questionCount:earlier.questionCount,answeredCount:earlier.answeredCount,
    ledgerStatus:earlier.ledgerStatus??earlier.status??null,
