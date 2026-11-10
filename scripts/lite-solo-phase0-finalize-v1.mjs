@@ -261,7 +261,9 @@ for(const message of githubPhase0Diagnostics){
  }));
 }
 const now=new Date().toISOString();
-const refs=Object.entries(evidence).map(([role,file])=>({role:role.startsWith('ADR_REVIEW_INVENTORY:')?'ADR_REVIEW_INVENTORY':role,path:rel(campaignRoot,file),sha256:digestFile(file)}));
+const refs=Object.entries(evidence).filter(([,file])=>fs.existsSync(file)&&fs.statSync(file).isFile())
+ .map(([role,file])=>({role:role.startsWith('ADR_REVIEW_INVENTORY:')?'ADR_REVIEW_INVENTORY':role,
+  path:rel(campaignRoot,file),sha256:digestFile(file)}));
 const retired=/PHASE0_RANDOMIZED_SIMULATION|PHASE0_SIMULATION_RUN_INDEX|PHASE5_SIMULATION_BASELINE_INPUT|PHASE6_SIMULATION_BASELINE_INPUT|PHASE0_TELEMETRY_ANALYSIS|MEDUSA/;
 receipt.evidence=refs.reduce((rows,row)=>upsert(rows,row),(receipt.evidence??[]).filter(row=>!retired.test(String(row.role??'')+' '+String(row.path??''))));
 for(const warningPath of phase0VerificationWarnings){
@@ -269,10 +271,17 @@ for(const warningPath of phase0VerificationWarnings){
  receipt.evidence=upsert(receipt.evidence,{role:'FINALIZATION_VERIFICATION_WARNING',path:rel(campaignRoot,file),sha256:digestFile(file)});
 }
 receipt.outputs=(receipt.outputs??[]).filter(row=>!retired.test(String(row.role??'')+' '+String(row.path??'')));
-receipt.outputs=upsert(receipt.outputs??[],{role:'PHASE0_AUDIT_SURFACE',path:'evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json',sha256:digestFile(evidence.auditSurface)});
-receipt.outputs=upsert(receipt.outputs,{role:'PRECOMPUTED_DEPLOY_CONFIG_EVIDENCE',path:'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md',sha256:digestFile(evidence.deployConfigMatrix)});
-receipt.outputs=upsert(receipt.outputs,{role:'PHASE0_FORK_DEPLOY_CONFIG',path:'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',sha256:digestFile(evidence.deployConfigExecution)});
-receipt.outputs=upsert(receipt.outputs,{role:'PRECOMPUTED_TARGETED_TEST_EVIDENCE',path:'work/phase-06/LITE_TARGETED_TEST_MATRIX.md',sha256:digestFile(evidence.targetedTestMatrix)});
+// Missing physical output files remain missing. Never add a false receipt
+// evidence reference or an empty digest merely to bypass a verification.
+for(const [role,file] of [
+ ['PHASE0_AUDIT_SURFACE',evidence.auditSurface],
+ ['PRECOMPUTED_DEPLOY_CONFIG_EVIDENCE',evidence.deployConfigMatrix],
+ ['PHASE0_FORK_DEPLOY_CONFIG',evidence.deployConfigExecution],
+ ['PRECOMPUTED_TARGETED_TEST_EVIDENCE',evidence.targetedTestMatrix]
+]){
+ if(fs.existsSync(file)&&fs.statSync(file).isFile())
+  receipt.outputs=upsert(receipt.outputs,{role,path:rel(campaignRoot,file),sha256:digestFile(file)});
+}
 receipt.globalControls={
   securityTraceabilityGraph:'controller/SECURITY_TRACEABILITY_GRAPH_v1.json',
   carriedForwardObligationLedger:'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json',
@@ -284,7 +293,7 @@ receipt.obligations.due=(ledger.obligations??[]).filter(x=>String(x.status??'OPE
 // Retired infrastructure qualification is not evidence for a new Phase-0 run.
 receipt.automation=(receipt.automation??[]).filter(row=>row?.workflow!=='v7-execution-infrastructure-qualification.yml');
 receipt.automation=upsert(receipt.automation,{workflow:'lite-solo-phase0-bootstrap-v1.yml',runId:Number(a['workflow-run-id']),status:'PASS',contractAutomationCommit:a['contract-automation-sha'],bootstrapCommit:a['bootstrap-sha']??a['contract-automation-sha']},'workflow');
-receipt.validation={status:'PASS',validatedAt:now,failures:[],validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false,githubDiagnostics:githubPhase0Diagnostics,warningPaths:[...phase0VerificationWarnings]};
+receipt.validation={status:'PASS',validatedAt:now,failures:[],validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false,githubDiagnostics:githubPhase0Diagnostics,warningPaths:[...phase0VerificationWarnings],evidenceLimitationsPresent:phase0VerificationWarnings.size>0};
 receipt.phase.status='SEALED';
 receipt.sealedAt=now;
 receipt.updatedAt=now;
