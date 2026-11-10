@@ -1168,7 +1168,7 @@ const materializationVerificationFailure=({affectedFile,check,reason,expected=nu
 };
 materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath,
  acceptedContinuations:[4,5,6].includes(sequence)?
-  collectAcceptedAppendContinuationsV1({root,campaignPath,phase:sequence}):[],
+  collectAcceptedAppendContinuationsV1({root,campaignPath,phase:sequence,revision:phaseRevision}):[],
  onVerificationFailure:materializationVerificationFailure});
 form=readJson(requiredFile(root,assignment.workFormPath,'Worker-provided phase work file'));
 
