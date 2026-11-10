@@ -3,11 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "historical or target or both"
+        description: "historical, target, both or qualify (source-only)"
         required: true
         default: historical
         type: choice
-        options: [historical, target, both]
+        options: [historical, target, both, qualify]
       target_profile:
         description: "Relative path under isolated-mi-exploit-g01-v1/target-profiles/"
         required: false
@@ -55,6 +55,27 @@ jobs:
           set -euo pipefail
           mkdir -p "$G01_OUTPUT_DIR"
           timeout -s TERM -k 15s 2400s node isolated-mi-exploit-g01-v1/src/cli.mjs
+      - name: Build versioned isolated source ZIP
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -q -r "$RUNNER_TEMP/MI_G01_Standalone_Source_Package_v1.zip" \
+            isolated-mi-exploit-g01-v1 \
+            .github/actions/mi-g01-toolchain-v1 \
+            .github/workflows/mi-g01-standalone-v1.yml \
+            -x 'isolated-mi-exploit-g01-v1/node_modules/*' \
+               'isolated-mi-exploit-g01-v1/forge/out/*' \
+               'isolated-mi-exploit-g01-v1/forge/cache/*' \
+               'isolated-mi-exploit-g01-v1/forge/broadcast/*'
+      - name: Upload complete isolated source package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-g01-source-v1-${{ github.run_id }}
+          path: ${{ runner.temp }}/MI_G01_Standalone_Source_Package_v1.zip
+          if-no-files-found: warn
+          retention-days: 14
       - name: Retain standalone evidence (including blocked and partial cases)
         if: always()
         uses: actions/upload-artifact@v4
