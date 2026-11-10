@@ -904,6 +904,56 @@ function acceptedCanonicalRowReferenceV1({canonical,canonicalArtifactPath,select
    {originalSourceAvailability:origins.length?
     'MULTIPLE_SOURCE_IDENTITIES':'ORIGINAL_SOURCE_NOT_AVAILABLE'})};
 }
+// Source-bound cross-phase reuse. These are references to accepted audit
+// fields and the one existing frozen original Q/A tree, not a model transcript.
+function frozenMiPhaseQuestionArchiveRefV1({root,campaignPath,phase,receiptPath}){
+ const p=path.posix.join(campaignPath,'Questions and Answers',
+  'PHASE_'+String(phase).padStart(2,'0')+'_ARCHIVE_MANIFEST_v1.json');
+ const manifest=readJsonIf(repoFile(root,p));
+ const receipt=receiptPath?readJsonIf(repoFile(root,receiptPath)):null;
+ const archive=path.posix.join(campaignPath,'Questions and Answers','Phase '+phase);
+ if(!manifest||!receipt||manifest.schemaVersion!=='milo-phase-qa-frozen-archive-v1'||
+  manifest.campaignId!==receipt.campaign?.campaignId||
+  manifest.campaignGenerationId!==receipt.campaign?.campaignGenerationId||
+  manifest.phase!==phase||manifest.archivePath!==archive||
+  manifest.archivePhaseTreeSha!==manifest.sourcePhaseTreeSha||
+  !/^[a-f0-9]{40}$/.test(manifest.archivePhaseTreeSha||'')||
+  !Number.isSafeInteger(manifest.fileCount)||manifest.fileCount<2)return null;
+ const raw=fs.readFileSync(repoFile(root,p));
+ return {archivePath:archive,archiveManifestPath:p,
+  archiveManifestSha256:createHash('sha256').update(raw).digest('hex'),
+  archivePhaseTreeSha:manifest.archivePhaseTreeSha,
+  pairedQuestionCount:manifest.pairedQuestionCount,
+  sourcePhaseSequence:phase,acceptedReceiptPath:receiptPath,
+  availability:'FROZEN_GITHUB_QA_PHASE_TREE'};
+}
+function miCrossPhaseAdaptiveFieldSourcesV1({root,campaignPath,authorityRoot,sequence,history}){
+ const sources=[];
+ for(const prior of history||[]){
+  if(prior.availability!=='ACCEPTED_RECEIPT_BOUND'||
+   !Number.isInteger(prior.phaseSequence)||prior.phaseSequence>=sequence||
+   !prior.canonicalSha256)continue;
+  let schema;
+  try{schema=loadPhaseSchema(root,authorityRoot,prior.phaseSequence).schema;}catch{continue;}
+  for(const [step,action] of Object.entries(schema.actions||{}))
+   for(const field of action.fields||[]){
+    const consumerPhases=(field.consumers||[]).filter(v=>/^phase-(?:[1-9]|10)$/.test(v))
+     .map(v=>Number(v.slice('phase-'.length))).filter(p=>p>=sequence).sort((a,b)=>a-b);
+    if(!consumerPhases.length)continue;
+    sources.push({sourcePhaseSequence:prior.phaseSequence,sourceStep:step,
+     sourceField:field.name,sourceSelector:'actions.'+step+'.outputs.'+field.name,
+     canonicalArtifactPath:prior.canonicalArtifactPath,
+     canonicalSha256:prior.canonicalSha256,
+     acceptedReceiptPath:prior.acceptedReceiptPath,
+     consumerPhases,currentPhaseEligible:consumerPhases.includes(sequence),
+     originalQaArchive:prior.frozenMiloQuestionArchive??null,
+     selectionPolicy:'SOURCE_DECLARED_PHASE_CONSUMER;NO_CONTROLLER_SECURITY_INFERENCE'});
+   }
+ }
+ return {schemaVersion:'curveyield-mi-cross-phase-adaptive-source-bindings-v1',
+  assignedPhase:sequence,sources,
+  unresolvedDependencyPolicy:'PRESERVE_PENDING;NO_INFERRED_SECURITY_DISPOSITION'};
+}
 function inheritedAcceptedRecordSourceRefsV1({root,campaignPath,sequence}){
  const references=[];
  for(const phase of [1,2,3,4,5,6,8,9]){
@@ -965,11 +1015,13 @@ function inheritedAcceptedRecordSourceRefsV1({root,campaignPath,sequence}){
    explicitQuestionOutputLinkSelector:
     canonical?.automationOutputs?.explicitQuestionOutputLinks?
      'automationOutputs.explicitQuestionOutputLinks':null,
+   frozenMiloQuestionArchive:frozenMiPhaseQuestionArchiveRefV1({
+    root,campaignPath,phase,receiptPath}),
    questionAnswerCheckpointSourceScheme:
+    frozenMiPhaseQuestionArchiveRefV1({root,campaignPath,phase,receiptPath})?
+      'GITHUB_FROZEN_QA_INPUT_OUTPUT_JSON':
     canonical?.automationOutputs?.questionAnswerSources?
-     (canonical.automationOutputs.questionAnswerSources.directSourceSidecars?.length?
-      'Direct originals: questions[].answerVersions[].originalPrivateR2Source (authorized Worker read); queued originals: questions[].answerVersions[].checkpointPath + checkpointSha256':
-      'questions[].answerVersions[].checkpointPath + checkpointSha256 + checkpointRecordSelector'):null,
+      'LEGACY_ACCEPTED_HISTORY_READ_ONLY':null,
    questionSourceAvailability:
     canonical?.automationOutputs?.questionAnswerSources?.availability??
      'NOT_RECORDED_IN_HISTORICAL_CANONICAL',
@@ -1141,6 +1193,13 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       'acceptedRecordSourceHistory'
     ]);
   }
+  if(sequence>=2&&authorityRoot==='Machine Intelligence Audit Controller/Audit Skill v8'){
+    form.automationInputs.crossPhaseAdaptiveQuestionSources=
+      miCrossPhaseAdaptiveFieldSourcesV1({root,campaignPath,authorityRoot,sequence,
+        history:form.automationInputs.acceptedRecordSourceHistory??[]});
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...form.automationInputs.controllerOwnedAutomationInputs,'crossPhaseAdaptiveQuestionSources']);
+  }
   if(sequence>4){
     // A later AI gets the complete earlier source, not merely promoted
     // candidates. The exact question text lives at the question-index
@@ -1162,10 +1221,9 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
        ref.questionAnswerSourceSelector+'.questions':null,
       originalAnsweredVersionLocator:
        ref.questionAnswerCheckpointSourceScheme,
-      directPrivateAnswerAccess:ref.questionAnswerCheckpointSourceScheme?.includes('Direct originals')?
-        {operation:'direct_question_source',authentication:'SIGNED_MI_RUN',
-         sourceRequired:'SEALED_CANONICAL_RECEIPT_AND_EXACT_R2_SHA256',
-         answerTextNeverPublic:true}:null,
+      frozenGithubQuestionAnswerArchive:ref.frozenMiloQuestionArchive??null,
+      legacyPreMigrationReadOnly:ref.questionAnswerCheckpointSourceScheme?.
+       startsWith('LEGACY_')?true:false,
       associationAvailability:ref.explicitQuestionOutputLinkSelector?
        'SOURCE_LINK_ROSTER_PRESENT':'NO_HISTORICAL_LINK_ROSTER_RECORDED',
       questionSourceAvailability:ref.questionSourceAvailability,
