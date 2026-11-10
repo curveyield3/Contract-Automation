@@ -1529,7 +1529,7 @@ if(sequence===10){
 let reportText='';
 if(schema.finalReport){
   try{
-    reportText=renderControllerPhaseReport({schema,form,canonical});
+    reportText=renderControllerPhaseReport({schema,form,canonical,canonicalPath:canonicalRel});
   }catch(error){
     const reason=String(error?.message??error);
     githubDiagnostics.push('Phase '+sequence+' report formatting unavailable: '+reason);
