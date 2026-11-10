@@ -3,5 +3,7 @@
   "campaignId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1",
   "generationId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z",
   "candidateKey": "P4-CAND-LIVE-ROLE-CONFIG-BINDING",
-  "testKind": "FOUNDRY_DETERMINISTIC"
+  "testKind": "FOUNDRY_DETERMINISTIC",
+  "attempt": 2,
+  "note": "Source-owned Foundry harness maps to verification_v6/phase5; rerun with corrected destination root"
 }
