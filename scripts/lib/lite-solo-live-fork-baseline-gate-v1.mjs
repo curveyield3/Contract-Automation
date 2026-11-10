@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {classifyDeploymentExecutionV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 
 const sourceFile=(root,rel)=>path.join(root,...rel.split('/'));
@@ -24,7 +25,7 @@ const supportedSource=x=>x?.status==='LIVE_FORK_SOURCE_VERIFIED'&&x?.targets?.le
  * Validates real, ingested V7 machine evidence, not a reviewer's claim that
  * the source did not contain deployment scripts. Does not change frozen audits.
  */
-export function validateLiveForkBaselineRecordV1({root,campaignPath,campaignId,sourceSha256,record}={}){
+export function validateLiveForkBaselineRecordV1({root,campaignPath,campaignId,campaignGenerationId,sourceSha256,record}={}){
   const evidence=json(root,path.posix.join(campaignPath,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'));
   const profile=classifyDeploymentExecutionV1({execution:evidence??{}});
   if(profile.mode!=='LIVE_DEPLOYED_FORK')return [];
@@ -45,6 +46,10 @@ export function validateLiveForkBaselineRecordV1({root,campaignPath,campaignId,s
   const paths=Array.isArray(record?.requestPaths)?record.requestPaths.filter(x=>x!=='NONE_IDENTIFIED'):[];
   if(!paths.length)errors.push('Live-fork baseline obligations require committed V7 Phase-6 test request paths');
   const prefix=String(record?.requestDirectory??'').replace(/\/+$/,'')+'/';
+  const generationTag=campaignGenerationId
+    ? createHash('sha256').update(JSON.stringify(campaignGenerationId)).digest('hex').slice(0,24)
+    : null;
+  if(!generationTag)return ['Live-fork baseline is missing an exact campaign-generation binding'];
   const ledgers=[];
   let observedAttempts=0,qualifiedExecutions=0,failedRuns=0;
   for(const requestPath of paths){
@@ -53,6 +58,7 @@ export function validateLiveForkBaselineRecordV1({root,campaignPath,campaignId,s
     if(!local.startsWith(prefix)){errors.push('Baseline V7 request is not in its controller-prefilled group directory: '+requestPath);continue;}
     const full=localRel(campaignPath,local),request=json(root,full);
     if(!request?.requestId||!request?.requestDigest||request.campaignId!==campaignId
+      ||!String(request.assignmentId??'').startsWith('phase-06-g'+generationTag+'-c')
       ||(request?.source?.archiveSha256!==undefined&&request.source.archiveSha256!==sourceSha256)||request?.phaseId!=='build-and-test'){
       errors.push('V7 baseline request is missing or not bound to campaign/source/Phase 6: '+requestPath);continue;
     }
