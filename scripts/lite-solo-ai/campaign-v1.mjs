@@ -360,7 +360,7 @@ async function modelCall(messages,{technicalAnswer=false,scope=null,scopeSha256=
   promptTokens:reply.usage?.prompt_tokens||null,
   completionTokens:reply.usage?.completion_tokens||null,
   elapsedSeconds:Math.round((Date.now()-start)/1000),
-  substantiveText:'PRIVATE_WORKER_R2_ONLY'}));
+  substantiveText:miloTempRounds?'ORIGINAL_GITHUB_TEMP_PAIR':'PRIVATE_WORKER_R2_ONLY'}));
  return returnUnpublishedRound?{original:raw,modelRequest:request,roundOrdinal:tempRoundOrdinal}:raw;
 }
 
@@ -4026,7 +4026,7 @@ async function miAdaptiveSingleQuestionTransportV1(){
     return;
    }
    await new Promise(resolve=>setTimeout(resolve,15000));
-   prepared=JSON.parse(await workerCall({operation:'adaptive_turn'}));continue;
+   prepared=JSON.parse(await workerCall({operation:'adaptive_turn',recoveryProbe:true}));continue;
   }
   if(prepared.status!=='AI_ADAPTIVE_QUESTION_PREPARED'||
      prepared.protocol!=='machine-intelligence-adaptive-turn-v1')
