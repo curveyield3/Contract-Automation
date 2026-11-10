@@ -893,6 +893,14 @@ export function recoverSourceBoundRequestReworkV1({root,campaignPath,directory}=
  // to the candidate's deterministic harness must not require re-generating
  // its immutable request or recopying a byte-identical legacy harness.
  // The original accepted submission and all existing binding checks remain.
+ // Only previously source-bound generation-harness identity errors qualify
+ // for accepted-record recovery. Never reinterpret substantive audit rework.
+ const candidateForSourceOnlyError=(value)=>{
+  const reason=String(value??'');
+  return reason.match(/^Phase 5 trusted execution request missing for ([A-Za-z0-9._-]+)$/)?.[1]
+   ??reason.match(/^Phase 5 preflight candidate ([A-Za-z0-9._-]+), field targetDesigns\\[[0-9]+\\]\\.executionBlueprint\\.configuration\\.harness\\.campaignGenerationId, shard .+: harness requires an independently copied, source-verified, exact-generation bundle; legacy bundles cannot run directly$/)?.[1]
+   ??null;
+ };
  const trustedCurrentGenerationRequest=(target,phase0Source)=>{
   const currentRef=resolveTargetExecutionRequestRef({
    root,campaignPath,target,expectedCampaignGenerationId:directory.campaignGenerationId
@@ -928,8 +936,7 @@ export function recoverSourceBoundRequestReworkV1({root,campaignPath,directory}=
     Array.isArray(queue.finalizeDetails?.unmappedDeficiencies)&&
     queue.finalizeDetails.unmappedDeficiencies.length>0){
   const reasons=queue.finalizeDetails.unmappedDeficiencies;
-  const keys=reasons.map(reason=>
-    String(reason).match(/^Phase 5 trusted execution request missing for ([A-Za-z0-9._-]+)$/)?.[1]);
+  const keys=reasons.map(candidateForSourceOnlyError);
   if(keys.every(Boolean)){
    const plan=readPlan(root,campaignPath,phase);assertPlan(queue,plan);
    const source=read(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'))?.source;
@@ -971,7 +978,7 @@ export function recoverSourceBoundRequestReworkV1({root,campaignPath,directory}=
   if(!u||!state||u.field!=='targetDesigns'||state.status!=='REWORK_REQUIRED'||
      !state.acceptedPath||!state.acceptedSha256||
      !Array.isArray(state.lastErrors)||state.lastErrors.length!==1)continue;
-  const key=state.lastErrors[0].match(/^Phase 5 trusted execution request missing for ([A-Za-z0-9._-]+)$/)?.[1];
+  const key=candidateForSourceOnlyError(state.lastErrors[0]);
   if(!key||!state.acceptedPath.startsWith(unitBase(campaignPath,phase,id)+'/'))continue;
   const accepted=maybe(root,state.acceptedPath);
   if(accepted?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.accepted||
