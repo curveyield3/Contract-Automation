@@ -108,7 +108,7 @@ async function workerCall(payload){
   method:'POST',
   headers:{authorization:'Bearer '+await identity(),'content-type':'application/json',
     'x-mi-dispatch-correlation':dispatchCorrelation},
-  body:JSON.stringify({campaignId,...payload}),
+  body:JSON.stringify({campaignId,...(miloTempRounds?{storageMode:'DIRECT_GITHUB_API_JSON'}:{}),...payload}),
   signal:AbortSignal.timeout(150000)
  });
  // Preserve the exact Worker response body including rejected API requests.
