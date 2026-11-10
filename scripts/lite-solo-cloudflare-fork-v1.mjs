@@ -877,10 +877,22 @@ function buildUnitMeta(c,u,schema,queueState=null,questionSource=null){
    .map(p=>path.posix.join(c.campaignPath,
     'derived/phase-'+p+'/PHASE_'+String(p).padStart(2,'0')+'_CANONICAL_DATA_v1.json'))
    .filter(rel=>fs.existsSync(relative(rel)));
+  // Source-bound cross-phase inputs are resolved at the existing unit packet
+  // issuance boundary. This is a compact SHA/path roster, not saved MiMo Q/A.
+  const discoverySummaryPath=path.posix.join(c.campaignPath,
+   'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');
+  const sourceBoundQuestionEvidenceRefs=[...new Set([
+   ...phase1EvidenceRefs,...priorQuestionCanonicalRefs,
+   ...(c.directory.currentAssignment.derivedInputPaths??[]),
+   ...(fs.existsSync(relative(discoverySummaryPath))?[discoverySummaryPath]:[])
+  ])].filter(rel=>typeof rel==='string'&&rel.startsWith(c.campaignPath+'/')&&
+   fs.existsSync(relative(rel))&&fs.statSync(relative(rel)).isFile())
+   .map(rel=>({path:rel,sha256:sha(fs.readFileSync(relative(rel)))}));
   return {unitId:u.unitId,kind:u.kind,step:0,stage:'',unitSpecRevision:u.unitSpecRevision,
     packetPath,packetSha256,packetIndexPath:u.packetIndexPath||null,recordKeys:u.recordKeys||[],
     dependencies:u.dependencies||[],path:u.path,members:u.members,field:u.field,
     inputTemplate:initial,validationSchema:inputSchema,answerRouting,answerTransport,
+    sourceBoundQuestionEvidenceRefs,
     templateSha256:sha(JSON.stringify(initial)),schemaSha256:sha(JSON.stringify(inputSchema)),
     supportingFileRequirements:assignedExecutionSupport(c,u),
     // Existing same-unit evidence channel makes the original immutable Worker
