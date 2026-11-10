@@ -1,6 +1,10 @@
 name: Lite-Solo Generation-Bound Machine Execution v1
 run-name: lite-solo-machine-${{ inputs.phase_sequence }}-${{ inputs.campaign_id }}
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/audit-dispatch/boosthub-phase5-one-v1.json'
   workflow_dispatch:
     inputs:
       campaign_id:
@@ -50,6 +54,13 @@ jobs:
           GENERATION_ID: ${{ inputs.generation_id }}
         run: |
           set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            input=.github/audit-dispatch/boosthub-phase5-one-v1.json
+            jq -e '.schemaVersion=="boosthub-phase5-one-target-v1" and .campaignId=="cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1" and .generationId=="cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z" and (.candidateKey|test("^[A-Za-z0-9._-]{1,128}$"))' "$input"
+            CAMPAIGN_ID="$(jq -er .campaignId "$input")"
+            GENERATION_ID="$(jq -er .generationId "$input")"
+            echo "candidate_key=$(jq -er .candidateKey "$input")" >> "$GITHUB_OUTPUT"
+          fi
           [[ "$CAMPAIGN_ID" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]]
           slug="$(printf '%s' "$CAMPAIGN_ID" | sed -E 's/-r[0-9]+$//')"
           directory="Audit Campaign Directory/campaigns/$slug.json"
@@ -62,7 +73,77 @@ jobs:
           echo "campaign_path=$campaign_path" >> "$GITHUB_OUTPUT"
       - name: Install the existing V7 execution toolchain in machine lane only
         uses: ./.github/actions/setup-v7-toolchain
+      - name: Execute one accepted Foundry test against pinned live Ethereum Anvil fork
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+          RPC_KATANA: ${{ secrets.RPC_KATANA }}
+          RPC_BASE: ${{ secrets.RPC_BASE }}
+          GENERATION_ID: cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z
+          CANDIDATE_KEY: ${{ steps.scope.outputs.candidate_key }}
+          CAMPAIGN_PATH: ${{ steps.scope.outputs.campaign_path }}
+        run: |
+          set -euo pipefail
+          test -n "$CANDIDATE_KEY"
+          request=".audit-controller/$CAMPAIGN_PATH/work/phase-05/execution-requests/$CANDIDATE_KEY.json"
+          test -s "$request"
+          jq -e --arg src "876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3" \
+            '.gateId=="phase5-target-execution" and .source.archiveSha256==$src and .configuration.v26.reproduction.reproductionType=="FOUNDRY_TEST"' "$request"
+          mkdir -p .isolated-phase5-evidence
+          set +e
+          AUDIT_CAMPAIGN_GENERATION_ID="$GENERATION_ID" \
+            node packages/github-native-sim/src/v7-cli.mjs execute \
+            --request "$request" --evidence-dir .isolated-phase5-evidence \
+            --workspace ".audit-work/phase5-one/$CANDIDATE_KEY" \
+            --compact-raw-result
+          result=$?
+          set -e
+          CANDIDATE_KEY="$CANDIDATE_KEY" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import zlib from 'node:zlib';
+          import crypto from 'node:crypto';
+          const files=fs.readdirSync('.isolated-phase5-evidence',{withFileTypes:true}).filter(d=>d.isDirectory());
+          if(files.length!==1)throw Error('Exactly one request evidence directory expected, received '+files.length);
+          const p=path.join('.isolated-phase5-evidence',files[0].name);
+          const env=JSON.parse(fs.readFileSync(path.join(p,'raw-result.json'),'utf8'));
+          const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
+          const packed=Buffer.concat(env.parts.map(f=>{
+            const b=fs.readFileSync(path.join(p,f.file));
+            if(hash(b)!==f.sha256)throw Error('Evidence chunk integrity failure');
+            return b;
+          }));
+          if(hash(packed)!==env.compressedSha256)throw Error('Evidence gzip integrity failure');
+          const full=zlib.gunzipSync(packed);
+          if(hash(full)!==env.originalSha256)throw Error('Evidence raw integrity failure');
+          const raw=JSON.parse(full.toString('utf8'));
+          const n=raw.analysis?.nativeFuzz??{}, out=n.rawOutput??{};
+          const scrub=s=>String(s??'').replace(/https?:\/\/\S+/g,'<redacted-rpc>');
+          const record={candidate:process.env.CANDIDATE_KEY,status:raw.status,disposition:raw.disposition,
+            preflight:raw.preflight?.status,slitherInvoked:Boolean(raw.analysis?.slither),
+            foundryStatus:n.status,componentStatus:n.componentStatus,
+            failureKind:n.failureKind,testExecution:n.testExecution,testResults:n.testResults,
+            exitCode:out.exitCode,stdoutTail:scrub(out.stdout).slice(-4500),stderrTail:scrub(out.stderr).slice(-4500),
+            error:raw.error?.message??null};
+          fs.writeFileSync(path.join(p,'ISOLATED_TEST_RESULT_v1.json'),JSON.stringify(record,null,2)+'\n');
+          console.log('BOOSTHUB_PHASE5_ONE_RESULT_START');
+          console.log(JSON.stringify(record,null,2));
+          console.log('BOOSTHUB_PHASE5_ONE_RESULT_END');
+          if(raw.analysis?.slither)process.exitCode=1;
+          if(raw.status!=='completed'||n.componentStatus!=='COMPLETED'||n.testExecution?.successful!==true)process.exitCode=1;
+          NODE
+          test "$result" = 0
+      - name: Retain single-test execution evidence
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: boosthub-phase5-one-${{ github.run_id }}
+          path: .isolated-phase5-evidence/
+          if-no-files-found: warn
+          retention-days: 20
       - name: Execute only this generation's explicit tests
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         id: result
         shell: bash
         env:
@@ -83,6 +164,7 @@ jobs:
           cat /tmp/lite-machine-execution.json
           echo "status=$(jq -er .status /tmp/lite-machine-execution.json)" >> "$GITHUB_OUTPUT"
       - name: Publish only generation-owned requests and machine results
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         shell: bash
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -112,7 +194,7 @@ jobs:
           echo '::error::Machine results could not be persisted at authoritative main' >&2
           exit 1
       - name: Re-enter existing unit finalization only after evidence was persisted
-        if: ${{ inputs.phase_sequence == 5 && steps.result.outputs.status == 'COMPLETE' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.phase_sequence == 5 && steps.result.outputs.status == 'COMPLETE' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
