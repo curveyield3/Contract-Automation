@@ -23,6 +23,7 @@ const slug=campaignId.replace(/-r[0-9]+$/,'');
 const abs=rel=>path.join(root,...String(rel).split('/'));
 const read=rel=>JSON.parse(fs.readFileSync(abs(rel),'utf8'));
 const hash=x=>createHash('sha256').update(x).digest('hex');
+const assignmentHash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex').slice(0,24);
 const directory=read('Audit Campaign Directory/campaigns/'+slug+'.json');
 if(directory.campaignId!==campaignId||directory.campaignGenerationId!==generationId||
    (phase>0&&directory.currentAssignment?.phaseSequence!==phase)||
@@ -106,8 +107,9 @@ if(phase===5){
     throw Error('machine request index generation/phase/source mismatch');
   const seen=new Set();
   for(const entry of index.requests){
-    if(typeof entry?.candidateKey!=='string'||!entry.candidateKey.trim()||
-       seen.has(entry.candidateKey))throw Error('missing or duplicate candidate identity');
+    if(typeof entry?.candidateKey!=='string'||
+       !/^[A-Za-z0-9._-]{1,128}$/.test(entry.candidateKey)||
+       seen.has(entry.candidateKey))throw Error('unsafe, missing or duplicate candidate identity');
     seen.add(entry.candidateKey);
     const requestRel=safeRel(entry.requestPath);
     if(!requestRel.startsWith(campaignPath+'/work/phase-'+tag+'/execution-requests/'))
@@ -115,6 +117,9 @@ if(phase===5){
     const request=read(requestRel);
     if(request.campaignId!==campaignId||request.source?.archiveSha256!==directory.sourceSha256)
       throw Error('machine request identity differs from the exact campaign generation');
+    const expectedAssignment=`phase-${tag}-g${assignmentHash(generationId)}-c${assignmentHash(entry.candidateKey)}`;
+    if(request.assignmentId!==expectedAssignment)
+      throw Error('machine request assignment identity belongs to another campaign generation or candidate');
     const ev=path.posix.join(campaignPath,'evidence/phase-'+tag+'-machine',entry.candidateKey);
     const result=await runProcess({
       command:process.execPath,
