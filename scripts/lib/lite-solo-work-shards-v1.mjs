@@ -130,7 +130,7 @@ function directAppendPagesV13({root,workDir,desc,primary,onVerificationFailure=n
     {path:page.path,startIndex:page.startIndex,chunk:index});
    if(!Array.isArray(page.entries))continue;
   }
-  out.push({file,chunkNumber:index,...page});
+  out.push({...page,file,chunkNumber:index});
   preceding=page;ordinalStart+=page.entries.length;
  }
  if(preceding.appendContinuation===true)
@@ -168,7 +168,7 @@ function queuedAppendPagesV13({desc,provided,primaryCount,onVerificationFailure=
     MAX_V13_APPEND_BYTES,bytes(slab));
   expectedIndex+=page.entries.length;
  }
- return sorted;
+ return sorted.filter(page=>Array.isArray(page.entries));
 }
 
 // Reviewer-authored semantic shards are the sole Lite-Solo work transport.
@@ -193,7 +193,7 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
  const issuedBase=path.posix.join(controllerDir,index.baseFile);
  const sourceDir=fs.existsSync(relfile(root,issuedBase))?controllerDir:workDir;
  const baseText=fs.readFileSync(relfile(root,path.posix.join(sourceDir,index.baseFile)),'utf8');
- const full=readSoloLockedBaseV1({root,workDir:sourceDir,baseText}).full;
+ const full=readSoloLockedBaseV1({root,workDir:sourceDir,baseText,onVerificationFailure:warn}).full;
  const occupied=new Map(),consumedContinuationUnits=new Set();
  for(const pageRef of index.pages||[]){
   const page=secureReadV13(root,path.posix.join(controllerDir,pageRef.file));
@@ -426,37 +426,60 @@ const secureSameV13=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
    secureWriteV13(root,path.posix.join(workDir,'BASE_v1.json'),descriptor);
    return pages.map(x=>x.file);
  }
- function readSoloLockedBaseV1({root,workDir,baseText}){
+ function readSoloLockedBaseV1({root,workDir,baseText,onVerificationFailure=null}){
+   const warn=(file,check,reason,expected=null,observed=null)=>{
+    if(!onVerificationFailure)throw new Error(check+': '+reason);
+    onVerificationFailure(path.posix.join(workDir,file),check,reason,expected,observed);
+   };
    const payload=JSON.parse(baseText);
    if(payload?.schemaVersion!=='curveyield-lite-solo-locked-base-v1')
      return {full:payload,pages:[]};
    if(payload.encoding!=='base64'||!Array.isArray(payload.pages)||!payload.pages.length||
       !Number.isSafeInteger(payload.originalBytes)||payload.originalBytes<=MAX_SHARD||
-      payload.originalBytes>MAX_SOLO_BASE_BYTES||!(/^[a-f0-9]{64}$/.test(payload.originalSha256)))
-     throw new Error('invalid lite-solo immutable base descriptor');
+      payload.originalBytes>MAX_SOLO_BASE_BYTES||!(/^[a-f0-9]{64}$/.test(payload.originalSha256))){
+     warn('BASE_v1.json','PHASE_FINALIZE_INVALID_BASE_DESCRIPTOR',
+      'Original locked-base descriptor has noncanonical pagination metadata; retain its original bytes',
+      'base64 with source pages and declared digest',payload);
+     if(!Array.isArray(payload.pages)||!payload.pages.length)return {full:payload,pages:[]};
+   }
    const fragments=[],seen=new Set();let length=0;
    for(const [i,spec] of payload.pages.entries()){
      if(!spec||!SOLO_BASE_PAGE_RE.test(spec.file)||seen.has(spec.file)||
         !(/^[a-f0-9]{64}$/.test(spec.sha256))||
         !Number.isInteger(spec.bytes)||spec.bytes<=0||spec.bytes>MAX_SHARD||
         !Number.isInteger(spec.chunkBytes)||spec.chunkBytes<1||spec.chunkBytes>SOLO_BASE_CHUNK_BYTES)
-       throw new Error('invalid lite-solo immutable base page descriptor');
+       warn('BASE_v1.json','PHASE_FINALIZE_INVALID_BASE_PAGE_DESCRIPTOR',
+        'One original base page descriptor is not canonical; preserve its original source identity and all readable fragments',
+        'Numbered unique page file and SHA-256 metadata',spec??null);
      seen.add(spec.file);
      const page=secureReadV13(root,path.posix.join(workDir,spec.file));
      if(page?.schemaVersion!=='curveyield-lite-solo-locked-base-page-v1'||
         page.index!==i||typeof page.contentBase64!=='string'||
         bytes(page)!==spec.bytes||secureHashV13(page)!==spec.sha256)
-       throw new Error('lite-solo immutable base page integrity mismatch: '+spec.file);
+       warn(spec.file,'PHASE_FINALIZE_BASE_PAGE_INTEGRITY',
+        'Base page schema, ordinal, size, or source SHA-256 differs from descriptor; original page content retained',
+        {index:i,bytes:spec.bytes,sha256:spec.sha256},
+        {index:page.index,bytes:bytes(page),sha256:secureHashV13(page)});
      const fragment=Buffer.from(page.contentBase64,'base64');
      if(fragment.toString('base64')!==page.contentBase64||fragment.length!==spec.chunkBytes)
-       throw new Error('lite-solo immutable base fragment encoding mismatch: '+spec.file);
+       warn(spec.file,'PHASE_FINALIZE_BASE_FRAGMENT_ENCODING',
+        'Original base page encoding or decoded byte length differs from recorded metadata; decoded bytes retained',
+        {chunkBytes:spec.chunkBytes,base64:page.contentBase64},
+        {chunkBytes:fragment.length,base64:fragment.toString('base64')});
      length+=fragment.length;
-     if(length>MAX_SOLO_BASE_BYTES)throw new Error('lite-solo immutable base exceeds bounded total');
+     if(length>MAX_SOLO_BASE_BYTES)
+      warn(spec.file,'PHASE_FINALIZE_BASE_SIZE_LIMIT',
+       'Original base exceeds prior 32-MiB aggregate verification limit; do not discard source fragments',
+       MAX_SOLO_BASE_BYTES,length);
      fragments.push(fragment);
    }
-   if(length!==payload.originalBytes)throw new Error('lite-solo immutable base fragment length mismatch');
+   if(length!==payload.originalBytes)warn('BASE_v1.json','PHASE_FINALIZE_BASE_FRAGMENT_LENGTH',
+    'Full base data length differs from originally declared length; reconstruct complete available bytes',
+    payload.originalBytes,length);
    const restored=Buffer.concat(fragments);
-   if(digest(restored)!==payload.originalSha256)throw new Error('lite-solo immutable base hash mismatch');
+   if(digest(restored)!==payload.originalSha256)warn('BASE_v1.json','PHASE_FINALIZE_BASE_SHA256',
+    'Reassembled base SHA-256 differs from recorded original; original fragment bytes retained',
+    payload.originalSha256,digest(restored));
    return {full:JSON.parse(restored.toString('utf8')),pages:[...seen]};
  }
 
