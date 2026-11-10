@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "curveyield-lite-interphase-work-packet-v2",
+  "title": "CurveYield Lite Interphase Mechanical Work Packet v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion","campaignId","completedMilestoneId","handoffPath","taskClass","instructions","workUnits","reconciliationOutputPath","requiredOutputs"],
+  "properties": {
+    "schemaVersion": { "const": "curveyield-lite-interphase-work-packet-v2" },
+    "campaignId": { "type": "string", "minLength": 1 },
+    "completedMilestoneId": { "type": "string", "minLength": 1 },
+    "handoffPath": { "type": "string", "minLength": 1 },
+    "taskClass": { "const": "MECHANICAL_ONLY" },
+    "instructions": { "type": "string", "minLength": 1 },
+    "workUnits": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id","instructions","outputPath","verification"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,80}$" },
+          "instructions": { "type": "string", "minLength": 1 },
+          "outputPath": { "type": "string", "minLength": 1 },
+          "verification": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "reconciliationOutputPath": { "type": "string", "minLength": 1 },
+    "requiredOutputs": {
+      "type": "array",
+      "minItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "purpose": { "type": "string" }
+        }
+      }
+    }
+  }
+}

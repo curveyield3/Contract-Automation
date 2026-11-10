@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "curveyield-lite-interphase-completion-v2",
+  "title": "CurveYield Lite Interphase Mechanical Completion v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion","status","campaignId","completedMilestoneId","handoffPath","workPacketPath","workPacketSha256","workUnitReceipts","outputs","completedAt"],
+  "properties": {
+    "schemaVersion": { "const": "curveyield-lite-interphase-completion-v2" },
+    "status": { "const": "PASS" },
+    "campaignId": { "type": "string", "minLength": 1 },
+    "completedMilestoneId": { "type": "string", "minLength": 1 },
+    "handoffPath": { "type": "string", "minLength": 1 },
+    "workPacketPath": { "type": "string", "minLength": 1 },
+    "workPacketSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "workUnitReceipts": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id","outputPath","sha256"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,80}$" },
+          "outputPath": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "minItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path","sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "completedAt": { "type": "string", "format": "date-time" }
+  }
+}

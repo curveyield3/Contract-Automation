@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://curveyield.local/schemas/curveyield-reviewer-repair-request-v1.schema.json",
+  "title": "CurveYield reviewer repair request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "campaignId",
+    "reviewer",
+    "milestoneId",
+    "action",
+    "handoffPath",
+    "baselineCommit",
+    "reason",
+    "requestedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "curveyield-reviewer-repair-request-v1"
+    },
+    "campaignId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reviewer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "milestoneId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "const": "RESET_TO_HANDOFF"
+    },
+    "handoffPath": {
+      "type": "string",
+      "pattern": "^campaigns/.+/handoffs/.+/SUCCESSOR_HANDOFF\\.json$"
+    },
+    "baselineCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requestedAt": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

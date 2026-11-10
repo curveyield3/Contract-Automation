@@ -1,0 +1,23 @@
+name: "MI G01 v5 isolated pinned toolchain"
+description: "Standalone fork of Phase 0 toolchain installation: isolated lockfile and cache only"
+runs:
+  using: composite
+  steps:
+    - name: Node.js 22
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+    - name: Restore isolated G01 dependencies
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: isolated-mi-exploit-g01-v5/node_modules
+        key: mi-g01-dependencies-v5-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('isolated-mi-exploit-g01-v5/package-lock.json') }}
+    - name: Install only isolated pinned dependency tree
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci --prefix isolated-mi-exploit-g01-v5 --no-audit --no-fund --force
+    - name: Verify exact standalone versions
+      shell: bash
+      run: |
+        node -e "for (const [n,v] of Object.entries({'@foundry-rs/anvil':'1.7.1','@foundry-rs/forge':'1.7.1','ethers':'6.15.0'})) { const p=require('./isolated-mi-exploit-g01-v5/node_modules/'+n+'/package.json'); if(p.version!==v)throw Error('PIN_MISMATCH '+n); }"

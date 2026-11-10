@@ -1,0 +1,128 @@
+name: "MI G01 Standalone Ethereum Verified Source v3"
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "historical, target, both or qualify (source-only)"
+        required: true
+        default: validation
+        type: choice
+        options: [validation, historical, target, both, qualify]
+      target_profile:
+        description: "Exact basename of the target profile JSON under isolated-mi-exploit-g01-v3/target-profiles/"
+        required: false
+        type: string
+      historical_case:
+        description: "E1, E2, E5, E55, E60, or all"
+        required: false
+        default: all
+        type: string
+  push:
+    branches:
+      - machine-intelligence-audit-controller-v1
+    paths:
+      - 'isolated-mi-exploit-g01-v3/trigger/armed/*.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mi-g01-v3-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  group1:
+    if: github.ref_name == 'machine-intelligence-audit-controller-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout isolated Machine Intelligence branch at exact commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Setup isolated pinned G01 toolchain
+        uses: ./.github/actions/mi-g01-toolchain-v3
+
+      - name: Resolve standalone trigger metadata
+        shell: bash
+        env:
+          INPUT_MODE: ${{ inputs.mode || 'validation' }}
+          INPUT_CASE: ${{ inputs.historical_case || 'all' }}
+          INPUT_PROFILE: ${{ inputs.target_profile || '' }}
+        run: |
+          set -euo pipefail
+          mode="$INPUT_MODE"
+          case_id="$INPUT_CASE"
+          profile="$INPUT_PROFILE"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            mapfile -t changed < <(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -E '^isolated-mi-exploit-g01-v3/trigger/armed/[A-Za-z0-9._-]+[.]json$' || true)
+            if [ "${#changed[@]}" -ne 1 ]; then
+              echo "::error::Exactly one isolated trigger file is required in the pushed commit"
+              exit 1
+            fi
+            file="${changed[0]}"
+            mode="$(jq -r '.mode // "validation"' "$file")"
+            case_id="$(jq -r '.historical_case // "all"' "$file")"
+            profile="$(jq -r '.target_profile // ""' "$file")"
+          fi
+          case "$mode" in validation|historical|target|both|qualify) ;; *) echo "::error::Invalid mode"; exit 1;; esac
+          case "$case_id" in all|E1|E2|E5|E55|E60) ;; *) echo "::error::Invalid historical case"; exit 1;; esac
+          if [ -n "$profile" ] && [[ ! "$profile" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*[.]json$ ]]; then
+            echo "::error::Invalid target profile name"
+            exit 1
+          fi
+          echo "G01_MODE=$mode" >> "$GITHUB_ENV"
+          echo "G01_HISTORICAL_CASE=$case_id" >> "$GITHUB_ENV"
+          echo "G01_TARGET_PROFILE=$profile" >> "$GITHUB_ENV"
+
+      - name: Execute standalone Group 1 runner
+        continue-on-error: true
+        env:
+          G01_ETHEREUM_RPC: ${{ secrets.RPC_ETHEREUM }}
+          G01_ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          G01_BSC_RPC: ${{ secrets.RPC_BSC }}
+          G01_OUTPUT_DIR: ${{ runner.temp }}/mi-g01-v3-report-v2
+          G01_REPO_SHA: ${{ github.sha }}
+          G01_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$G01_OUTPUT_DIR"
+          timeout -s TERM -k 15s 3000s node isolated-mi-exploit-g01-v3/src/cli-v2.mjs
+
+      - name: Build complete standalone source package
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -q -r "$RUNNER_TEMP/MI_G01_Standalone_Source_Package_v3.zip" \
+            isolated-mi-exploit-g01-v3 \
+            .github/actions/mi-g01-toolchain-v3 \
+            .github/workflows/mi-g01-standalone-v3.yml \
+            -x 'isolated-mi-exploit-g01-v3/node_modules/*' \
+               'isolated-mi-exploit-g01-v3/forge/out/*' \
+               'isolated-mi-exploit-g01-v3/forge/cache/*' \
+               'isolated-mi-exploit-g01-v3/forge/broadcast/*'
+
+      - name: Upload isolated source package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-g01-source-v3-${{ github.run_id }}
+          path: ${{ runner.temp }}/MI_G01_Standalone_Source_Package_v3.zip
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Retain standalone run evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-g01-v3-${{ github.run_id }}
+          path: ${{ runner.temp }}/mi-g01-v3-report-v2
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false

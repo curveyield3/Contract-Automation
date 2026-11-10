@@ -1,0 +1,338 @@
+{
+  "schemaVersion": "curveyield-defect-taxonomy-v1",
+  "triggerKeys": [
+    "APPROVE_OR_PERMIT",
+    "ARBITRARY_TARGET_CALL",
+    "ARITHMETIC_ON_STATE",
+    "BLOCK_NUMBER",
+    "BLOCK_TIMESTAMP",
+    "BPS_OR_SCALE_CONSTANT",
+    "CONSTANT",
+    "CONSTRUCTOR_OR_INITIALIZER_PARAM",
+    "CROSS_CHAIN_MESSAGE",
+    "DEADLINE_PARAM",
+    "DELEGATECALL",
+    "DEPLOY_ROLE_STATE",
+    "DIVISION",
+    "EIP712",
+    "EXTERNAL_CALL",
+    "EXTERNAL_CALL_BEFORE_STATE_WRITE",
+    "EXTERNAL_CALL_IN_LOOP",
+    "FEE_DISTRIBUTION",
+    "INITIALIZER",
+    "KEY_DERIVATION",
+    "LOOP_OVER_DYNAMIC",
+    "LOW_LEVEL_CALL",
+    "MAPPING_STRUCT_WRITE",
+    "MIN_OUT_PARAM",
+    "NONCE_USE",
+    "ORACLE_READ",
+    "ORDER_SENSITIVE_PAIR",
+    "OWNERSHIP_OR_ROLE_WRITE",
+    "PAYABLE",
+    "PENDING_STATE",
+    "PRIVILEGED_GUARD",
+    "PROXY_PATTERN",
+    "PUSH_TO_UNBOUNDED_ARRAY",
+    "RETURN_VALUE_USED",
+    "SHARE_MINT_BURN",
+    "SIGNATURE_VERIFY",
+    "SPOT_PRICE_READ",
+    "STATE_WRITE_EXTERNAL",
+    "STATUS_FLAG_WRITE",
+    "STORAGE_GAP",
+    "SWAP_OR_TRADE",
+    "TOKEN_BALANCE_READ",
+    "TOKEN_TRANSFER",
+    "TX_ORIGIN",
+    "VALUE_FLOW_CROSS_USER"
+  ],
+  "classes": [
+    {
+      "classId": "ACCESS_CONTROL",
+      "title": "Access control and privilege",
+      "triggers": [
+        "STATE_WRITE_EXTERNAL",
+        "PRIVILEGED_GUARD",
+        "TX_ORIGIN",
+        "PAYABLE"
+      ],
+      "reviewChecks": [
+        "Cite the exact guard expression or guard call that protects the effect",
+        "List every actor or role that can reach the effect, including roles other than the intended one",
+        "Check every entry path including inherited, fallback and receive",
+        "Flag any use of tx.origin for authorization"
+      ],
+      "testMethod": "FOUNDRY_PERMISSION_MATRIX",
+      "testRequired": true
+    },
+    {
+      "classId": "ROLE_LIFECYCLE",
+      "title": "Role Lifecycle",
+      "triggers": [
+        "OWNERSHIP_OR_ROLE_WRITE",
+        "PENDING_STATE",
+        "INITIALIZER"
+      ],
+      "reviewChecks": [
+        "Check transfer, accept, renounce and revoke paths and who may call each",
+        "Check pending or temporary state is cleared after use",
+        "Check initializers run exactly once"
+      ],
+      "testMethod": "FOUNDRY_PROPERTY",
+      "testRequired": true
+    },
+    {
+      "classId": "ACCOUNTING_MATH",
+      "title": "Accounting Math",
+      "triggers": [
+        "ARITHMETIC_ON_STATE",
+        "DIVISION",
+        "BPS_OR_SCALE_CONSTANT",
+        "PAYABLE"
+      ],
+      "reviewChecks": [
+        "State the unit of every term and every scale constant",
+        "State the rounding direction and who benefits",
+        "Compare every cap and bound, including inclusive versus exclusive, with the documented or required value",
+        "State the conservation relation (parts never exceed the whole)"
+      ],
+      "testMethod": "FOUNDRY_INVARIANT",
+      "testRequired": true
+    },
+    {
+      "classId": "STATE_MACHINE",
+      "title": "State Machine",
+      "triggers": [
+        "STATUS_FLAG_WRITE",
+        "MAPPING_STRUCT_WRITE"
+      ],
+      "reviewChecks": [
+        "List valid transitions and check invalid ones revert",
+        "Check an executed, claimed or cancelled item cannot be used again",
+        "Check ordering assumptions between steps"
+      ],
+      "testMethod": "FOUNDRY_PROPERTY",
+      "testRequired": true
+    },
+    {
+      "classId": "REENTRANCY_CALLBACK",
+      "title": "Reentrancy Callback",
+      "triggers": [
+        "EXTERNAL_CALL_BEFORE_STATE_WRITE",
+        "ARBITRARY_TARGET_CALL",
+        "TOKEN_TRANSFER"
+      ],
+      "reviewChecks": [
+        "Check state is final before external calls or a reentrancy guard covers the path",
+        "Check cross-function, cross-contract and read-only reentrancy",
+        "Check callbacks and hooks into user-supplied contracts"
+      ],
+      "testMethod": "FOUNDRY_PROPERTY",
+      "testRequired": true
+    },
+    {
+      "classId": "EXTERNAL_CALL_TRUST",
+      "title": "External Call Trust",
+      "triggers": [
+        "EXTERNAL_CALL",
+        "LOW_LEVEL_CALL",
+        "RETURN_VALUE_USED"
+      ],
+      "reviewChecks": [
+        "Check the call target is validated",
+        "Check code existence for low-level calls",
+        "Check returned values against actual balance changes",
+        "Check what local state results when the call fails"
+      ],
+      "testMethod": "FOUNDRY_PROPERTY",
+      "testRequired": true
+    },
+    {
+      "classId": "TOKEN_INTEGRATION",
+      "title": "Token Integration",
+      "triggers": [
+        "TOKEN_TRANSFER",
+        "TOKEN_BALANCE_READ"
+      ],
+      "reviewChecks": [
+        "Check behaviour with fee-on-transfer, rebasing, no-return-value, reverting and hook-calling tokens",
+        "Check the amount actually received is used",
+        "Check token decimals assumptions"
+      ],
+      "testMethod": "FOUNDRY_PROPERTY",
+      "testRequired": true
+    },
+    {
+      "classId": "APPROVAL_ALLOWANCE",
+      "title": "Approval Allowance",
+      "triggers": [
+        "APPROVE_OR_PERMIT"
+      ],
+      "reviewChecks": [
+        "Check spender and amount scope",
+        "Check allowances are reset after use",
+        "Check permit replay and deadline"
+      ],
+      "testMethod": "FOUNDRY_PROPERTY",
+      "testRequired": true
+    },
+    {
+      "classId": "ORACLE_PRICE",
+      "title": "Oracle Price",
+      "triggers": [
+        "ORACLE_READ",
+        "SPOT_PRICE_READ"
+      ],
+      "reviewChecks": [
+        "Check manipulation resistance (spot versus time-weighted)",
+        "Check staleness and decimals",
+        "Check behaviour when the price is zero, stale or invalid (must fail closed)"
+      ],
+      "testMethod": "FOUNDRY_PROPERTY",
+      "testRequired": true
+    },
+    {
+      "classId": "SLIPPAGE_MEV",
+      "title": "Slippage Mev",
+      "triggers": [
+        "SWAP_OR_TRADE",
+        "MIN_OUT_PARAM",
+        "DEADLINE_PARAM"
+      ],
+      "reviewChecks": [
+        "Check the minimum output is enforced on the balance actually received",
+        "Check a zero minimum is rejected where value is at risk",
+        "Check deadlines",
+        "Check sandwich exposure"
+      ],
+      "testMethod": "FOUNDRY_PROPERTY",
+      "testRequired": true
+    },
+    {
+      "classId": "SIGNATURE_REPLAY",
+      "title": "Signature Replay",
+      "triggers": [
+        "SIGNATURE_VERIFY",
+        "NONCE_USE",
+        "EIP712"
+      ],
+      "reviewChecks": [
+        "Check domain binding (chain id, contract address)",
+        "Check nonce consumption and deadline",
+        "Check signature malleability and ERC-1271 paths"
+      ],
+      "testMethod": "FOUNDRY_PROPERTY",
+      "testRequired": true
+    },
+    {
+      "classId": "IDENTITY_KEYING",
+      "title": "Identity Keying",
+      "triggers": [
+        "KEY_DERIVATION",
+        "ORDER_SENSITIVE_PAIR"
+      ],
+      "reviewChecks": [
+        "Check that distinct intended identities produce distinct keys",
+        "Check direction or order sensitivity",
+        "Check abi.encodePacked collisions"
+      ],
+      "testMethod": "FOUNDRY_PROPERTY",
+      "testRequired": true
+    },
+    {
+      "classId": "UPGRADE_INIT_STORAGE",
+      "title": "Upgrade Init Storage",
+      "triggers": [
+        "DELEGATECALL",
+        "PROXY_PATTERN",
+        "INITIALIZER",
+        "STORAGE_GAP"
+      ],
+      "reviewChecks": [
+        "Check initializer protection",
+        "Check storage layout compatibility",
+        "Check upgrade authorization",
+        "Check delegatecall targets"
+      ],
+      "testMethod": "REVIEW_ONLY",
+      "testRequired": false
+    },
+    {
+      "classId": "DOS_GAS",
+      "title": "Dos Gas",
+      "triggers": [
+        "LOOP_OVER_DYNAMIC",
+        "EXTERNAL_CALL_IN_LOOP",
+        "PUSH_TO_UNBOUNDED_ARRAY"
+      ],
+      "reviewChecks": [
+        "Check loops over user-growable data",
+        "Check a single failing item cannot block everyone",
+        "Check griefing via dust or many small entries"
+      ],
+      "testMethod": "FOUNDRY_PROPERTY",
+      "testRequired": true
+    },
+    {
+      "classId": "ECONOMIC_INCENTIVE",
+      "title": "Economic Incentive",
+      "triggers": [
+        "VALUE_FLOW_CROSS_USER",
+        "SHARE_MINT_BURN",
+        "FEE_DISTRIBUTION",
+        "PAYABLE"
+      ],
+      "reviewChecks": [
+        "Check flash-loan and donation manipulation",
+        "Check share price and first-depositor manipulation",
+        "Check value extraction across users",
+        "Check solvency"
+      ],
+      "testMethod": "FOUNDRY_INVARIANT",
+      "testRequired": true
+    },
+    {
+      "classId": "CONFIG_DEPLOYMENT",
+      "title": "Config Deployment",
+      "triggers": [
+        "CONSTANT",
+        "CONSTRUCTOR_OR_INITIALIZER_PARAM",
+        "DEPLOY_ROLE_STATE"
+      ],
+      "reviewChecks": [
+        "Check every constant against documented values",
+        "Check deployed owners, roles and allowlists match the intended configuration",
+        "Check parameters stay within bounds"
+      ],
+      "testMethod": "ANVIL_STATE_CHECK",
+      "testRequired": true
+    },
+    {
+      "classId": "TIME_BLOCK",
+      "title": "Time Block",
+      "triggers": [
+        "BLOCK_TIMESTAMP",
+        "BLOCK_NUMBER"
+      ],
+      "reviewChecks": [
+        "Check tolerance to timestamp manipulation and boundary times"
+      ],
+      "testMethod": "REVIEW_ONLY",
+      "testRequired": false
+    },
+    {
+      "classId": "CROSS_CHAIN",
+      "title": "Cross Chain",
+      "triggers": [
+        "CROSS_CHAIN_MESSAGE"
+      ],
+      "reviewChecks": [
+        "Check message source authentication",
+        "Check replay and ordering"
+      ],
+      "testMethod": "REVIEW_ONLY",
+      "testRequired": false
+    }
+  ]
+}

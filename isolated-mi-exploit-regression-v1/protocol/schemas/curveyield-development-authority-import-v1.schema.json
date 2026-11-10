@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "curveyield-development-authority-import-v1",
+  "title": "CurveYield Development Authority Import v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "request_id", "source", "target"],
+  "properties": {
+    "schema": {
+      "const": "curveyield-development-authority-import/v1"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9._-]{1,160}$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "url", "drive_file_id", "filename", "format", "sha256", "size"],
+      "properties": {
+        "type": {"const": "google-drive"},
+        "url": {"type": "string", "minLength": 1},
+        "drive_file_id": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "filename": {"type": "string", "minLength": 1},
+        "format": {"enum": ["raw", "zip"]},
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "branch", "path"],
+      "properties": {
+        "repository": {"const": "CurveYield2/Contract-Automation"},
+        "branch": {"const": "main"},
+        "path": {
+          "type": "string",
+          "pattern": "^process/development-agent-task-manager/.+"
+        }
+      }
+    }
+  }
+}
