@@ -12,7 +12,7 @@ import {materializeSemanticWorkFormV13,collectDirectPhaseRecordOriginsV13} from 
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,validateBoundAuthorityV1,loadPhaseSchema,
   buildDerivedOutputs,preparePhaseWork,getByPath,buildOriginalCanonicalEvidenceRosterV1,
-  collectAcceptedOriginalCanonicalEvidenceV1
+  collectAcceptedOriginalCanonicalEvidenceV1,recordPhaseFinalizationVerificationWarningV1
 } from './lib/lite-solo-phase-work-v1.mjs';
 import {
   selectReusablePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
@@ -1489,6 +1489,26 @@ if(sequence===9){
   boundaryArtifactRels.push(indexRel);
 }
 
+// Persist only FAILED verification diagnostics, co-located with the affected
+// campaign source. No warning artifact is created when there are no failures.
+const finalizationWarningPaths=[];
+for(const diagnostic of githubDiagnostics){
+ const reason=String(diagnostic).trim();
+ if(!reason)continue;
+ const colon=reason.indexOf(':');
+ const check=colon>0?reason.slice(0,colon).trim():
+  'PHASE_'+phaseNum(sequence)+'_FINALIZATION_VERIFICATION';
+ const affectedFile=/question.to.output|question history|provenance|canonical|coverage projection|evidence.continuity/i.test(reason)
+  ?canonicalRel:assignment.workFormPath;
+ const warningPath=recordPhaseFinalizationVerificationWarningV1({
+  root,campaignPath,phase:sequence,affectedFile,check,reason,
+  expected:'Verification check passes for the exact source-bound evidence file',
+  observed:'FAILED: '+reason
+ });
+ if(!finalizationWarningPaths.includes(warningPath))
+  finalizationWarningPaths.push(warningPath);
+}
+packet.controllerValidation.warningPaths=finalizationWarningPaths;
 const receiptLibUrl=pathToFileURL(repoFile(root,'packages/controller-core/src/lite-phase-receipt-v1.mjs')).href;
 const receiptLib=await import(receiptLibUrl);
 const phaseRevision=Number(assignment.phaseRevision??1);
@@ -1503,6 +1523,7 @@ const substepCheckPaths=fs.readdirSync(repoFile(root,substepFolderRel))
 const receiptRel=receiptLib.phaseReceiptPath(campaignPath,sequence,phaseRevision);
 const evidence=[receiptRef(root,campaignPath,assignment.workFormPath,'PHASE_WORK_FORM')];
 for(const rel of substepCheckPaths)evidence.push(receiptRef(root,campaignPath,rel,'SUB_STEP_CHECKS'));
+for(const rel of finalizationWarningPaths)evidence.push(receiptRef(root,campaignPath,rel,'FINALIZATION_VERIFICATION_WARNING'));
 
 if(sealedRework){
   evidence.push(receiptRef(root,campaignPath,sealedRework.request.priorReceipt.path,'PRIOR_PHASE_REVISION'));
@@ -1543,7 +1564,7 @@ const receipt=receiptLib.createLitePhaseReceiptV1({
   evidence,outputs:evidence,
   globalControls:{securityTraceabilityGraph:path.posix.relative(campaignPath,controls.graphRel),carriedForwardObligationLedger:path.posix.relative(campaignPath,controls.ledgerRel),evidenceInvalidationMatrix:path.posix.relative(campaignPath,controls.invalidRel),sourceIntelligenceBundle:predecessor.globalControls?.sourceIntelligenceBundle??null},
   obligations:receiptObligationSummary({ledger:ledgerAfter,canonical,form,sequence,now}),
-  validation:{status:'PASS',validatedAt:now,failures:[],validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false},handoff,now
+  validation:{status:'PASS',validatedAt:now,failures:[],validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false,warningPaths:finalizationWarningPaths},handoff,now
 });
 if(sequence===5&&phase5OwnerDeferral)receipt.machineExecutionDisclaimer={
   status:'DEFERRED_UNVERIFIED',securityConclusion:'UNVERIFIED',
