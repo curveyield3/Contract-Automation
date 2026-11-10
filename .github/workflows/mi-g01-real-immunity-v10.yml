@@ -1,0 +1,51 @@
+name: "MI G01 Real Ethereum Fork Immunity v10"
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "real-erc20-immunity"
+        type: choice
+        default: real-erc20-immunity
+        required: true
+        options: [real-erc20-immunity]
+  push:
+    branches: [machine-intelligence-audit-controller-v1]
+    paths:
+      - 'isolated-mi-exploit-g01-v10/trigger/armed/*.json'
+permissions:
+  contents: read
+concurrency:
+  group: mi-g01-immunity-v10-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  immunity:
+    if: github.ref_name == 'machine-intelligence-audit-controller-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 48
+    steps:
+      - name: Checkout exact Machine Intelligence branch commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install isolated pinned toolchain
+        uses: ./.github/actions/mi-g01-toolchain-v10
+      - name: Execute 5 real ERC20 live fork immunity probes
+        env:
+          G01_ETHEREUM_RPC: ${{ secrets.RPC_ETHEREUM }}
+          G01_OUTPUT_DIR: ${{ runner.temp }}/mi-g01-immunity-v10
+          G01_REPO_SHA: ${{ github.sha }}
+          G01_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$G01_OUTPUT_DIR"
+          timeout -s TERM -k 20s 2400s node isolated-mi-exploit-g01-v10/src/cli-immunity-v10.mjs
+      - name: Upload full standalone simulation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-g01-real-immunity-v10-${{ github.run_id }}
+          path: ${{ runner.temp }}/mi-g01-immunity-v10
+          if-no-files-found: warn
+          retention-days: 14
