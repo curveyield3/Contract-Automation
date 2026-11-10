@@ -99,7 +99,7 @@ async function recordMiloTempRound(modelRequest,modelOutput,scope,roundOrdinal){
 }
 
 async function workerCall(payload){
- await recordPrivateCommunication('worker_request',JSON.stringify({campaignId,...payload}));
+ if(!miloTempRounds)await recordPrivateCommunication('worker_request',JSON.stringify({campaignId,...payload}));
  const res=await fetch(endpoint,{
   method:'POST',
   headers:{authorization:'Bearer '+await identity(),'content-type':'application/json',
@@ -130,7 +130,7 @@ async function workerCall(payload){
   privateOutputKey:envelope?.rawR2Key||null,
   privateOutputSha256:envelope?.rawSha256||null,
   responseSha256:sha(raw),responseBytes:Buffer.byteLength(raw)}));
- await recordPrivateCommunication('worker_response',raw);
+ if(!miloTempRounds)await recordPrivateCommunication('worker_response',raw);
  return raw;
 }
 
@@ -3442,14 +3442,14 @@ let miStep8Active=false;
 function miStep8HandoffDue(){return miStep8Active&&Date.now()>=MI_STEP8_HANDOFF_AT;}
 async function miStep8Native(route,command={}){
  const body={campaignId,...command};
- await recordPrivateCommunication('worker_request',JSON.stringify({route,...body}));
+ if(!miloTempRounds)await recordPrivateCommunication('worker_request',JSON.stringify({route,...body}));
  const res=await fetch(workerBase.replace(/\/$/,'')+route,{
   method:'POST',headers:{authorization:'Bearer '+await identity(),
    'content-type':'application/json',
    'x-mi-dispatch-correlation':dispatchCorrelation},
   body:JSON.stringify(body),signal:AbortSignal.timeout(150000)});
  const raw=await res.text();
- await recordPrivateCommunication('worker_response',raw);
+ if(!miloTempRounds)await recordPrivateCommunication('worker_response',raw);
  let data;try{data=JSON.parse(raw);}catch{throw Error('Original Worker lifecycle reply is not JSON: '+route);}
  updateTranscriptScope(data,null);
  if(!res.ok)throw Error('Existing Worker lifecycle HTTP '+res.status+
