@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {readV7RawResultV1} from './v7-compact-result-v1.mjs';
 import {inspectForgeTestEvidenceV1} from './native-fuzz.mjs';
 
@@ -93,6 +94,12 @@ export function validateTargetExecutionRequestBindingV1({controllerRoot,campaign
   }
   const reasons=[];
   if(expectedCampaignId&&request.campaignId!==expectedCampaignId) reasons.push('campaignId mismatch');
+  if(expectedCampaignGenerationId){
+    const genHash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0,24);
+    const assignment=`phase-05-g${genHash(expectedCampaignGenerationId)}-c${genHash(key)}`;
+    if(request.assignmentId!==assignment)
+      reasons.push('execution request assignmentId is not bound to the exact campaign generation and candidate');
+  }
   if(expectedSourceSha256){
     if(!request?.source?.archiveSha256) reasons.push('request source.archiveSha256 missing');
     else if(request.source.archiveSha256!==expectedSourceSha256) reasons.push('source archive SHA-256 mismatch');
