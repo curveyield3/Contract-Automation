@@ -704,6 +704,7 @@ async function sourceBoundQuestionHistoryV1(raw){
    unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
     indexPath,status:'IDENTITY_MISMATCH'});continue;
   }
+  const prefix=indexPath.slice(0,-'QUESTION_INDEX_v1.json'.length).replace(/\/$/,'');
   const checkpoints=[];
   for(const [originalCheckpointIndex,ref] of index.checkpoints.entries()){
    if(typeof ref?.path!=='string'||!ref.path.startsWith(prefix+'/checkpoints/')||
