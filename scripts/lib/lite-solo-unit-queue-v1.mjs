@@ -380,6 +380,42 @@ function verifiedSegmentedAnswerSourceV1(root,ref,index,question){
 // publishes a non-confidential sidecar with the accepted ORIGINAL shard
 // digest and a SHA-256-verified private R2 answer pointer at phase filing.
 // Only a later sealed canonical receipt attests controller acceptance.
+// Exact immutable Milo original lookup. Only source metadata is projected
+// into accepted question provenance; the full body remains in Q Output.json.
+function verifiedMiloOutputPointerV1(root,ref,index,question,campaignPath){
+ if(ref?.schemaVersion!=='milo-original-output-pointer-v1'||
+   typeof ref.outputPath!=='string'||
+   !ref.outputPath.startsWith('Milo Temp Work/'+campaignPath.slice('campaigns/'.length)+'/Phase '+index.phaseSequence+'/')||
+   !/^Milo Temp Work\/.+\/Phase [0-9]+\/Step [0-9]+\/Q[0-9]+, Phase [0-9]+, Step [0-9]+, Output[.]json$/.test(ref.outputPath)||
+   !/^[a-f0-9]{64}$/.test(ref.answerSha256||'')||
+   !/^[a-f0-9]{64}$/.test(ref.scopeSha256||'')||
+   !/^[a-f0-9]{40}$/.test(ref.sourceCommit||'')||
+   !Number.isSafeInteger(ref.questionNumber)||ref.questionNumber<1||
+   !Number.isSafeInteger(ref.answerBytes)||ref.answerBytes<1)
+   throw Error('MILO_GITHUB_OUTPUT_POINTER_IDENTITY_INVALID');
+ const raw=fs.readFileSync(repoFile(root,ref.outputPath));
+ const o=JSON.parse(raw.toString('utf8'));
+ if(o.schemaVersion!=='milo-temp-question-round-v1'||o.direction!=='Output'||
+   o.campaignId!==index.campaignId||
+   o.campaignGenerationId!==index.campaignGenerationId||
+   o.phase!==index.phaseSequence||o.unitId!==index.unitId||
+   o.questionId!==question.questionId||
+   o.questionSha256!==hex(Buffer.from(question.questionText,'utf8'))||
+   o.questionScopeSha256!==ref.scopeSha256||
+   o.questionNumber!==ref.questionNumber||
+   o.originalContentSha256!==ref.answerSha256||
+   typeof o.originalContent!=='string'||
+   Buffer.byteLength(o.originalContent,'utf8')!==ref.answerBytes||
+   hex(Buffer.from(o.originalContent,'utf8'))!==ref.answerSha256)
+   throw Error('MILO_GITHUB_ORIGINAL_CONTENT_OR_SCOPE_MISMATCH');
+ return {answerTextSourceSelector:'Milo Temp Work original Output.json originalContent',
+   originalGithubOutputSource:{path:ref.outputPath,rawJsonSha256:hex(raw),
+    sourceCommit:ref.sourceCommit,originalContentSha256:ref.answerSha256,
+    originalContentBytes:ref.answerBytes,scopeSha256:ref.scopeSha256,
+    questionNumber:ref.questionNumber},
+   originalAnswerStorage:'MILO_TEMP_GITHUB_QA_JSON',
+   originalAnswerVerification:'EXACT_GITHUB_OUTPUT_ORIGINAL_SHA256'};
+}
 function collectDirectQuestionSourcesV1({root,campaignPath,directory,phase}){
  const out={questions:[],histories:[],unavailable:[],sidecars:[],checkpoints:[]};
  for(const sourcePhase of [1,2,3,8,9,10]){
@@ -801,6 +837,20 @@ export function collectAcceptedQuestionAnswerSourcesV1({root,campaignPath,direct
       if(typeof record.answerText==='string')
        question.answerVersions.push({...checkpointEvent,
         answerTextSourceSelector:'records['+i+'].answerText'});
+      else if(record.githubOriginal){
+       try{
+        const original=verifiedMiloOutputPointerV1(
+          root,record.githubOriginal,index,question,campaignPath);
+        question.answerVersions.push({...checkpointEvent,...original});
+       }catch(error){
+        out.unavailable.push({phaseSequence:sourcePhase,unitId,
+         questionId:record.questionId,checkpointIndex,
+         reason:'MILO_GITHUB_ORIGINAL_OUTPUT_UNAVAILABLE',
+         checkpointPath:checkpoint.path,
+         outputPath:record.githubOriginal?.outputPath??null,
+         diagnostic:String(error?.message??error)});
+       }
+      }
       else if(record.answerManifest){
        try{
         const sourceBound=verifiedSegmentedAnswerSourceV1(
