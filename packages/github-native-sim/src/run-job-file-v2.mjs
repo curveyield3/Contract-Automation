@@ -113,14 +113,25 @@ async function executePhase6V2({
   let mutableRpcSession = null;
   let executionSnapshot = null;
   try {
-    if(environment.PHASE5_BOUNDARY_PROGRESS==='true')process.stderr.write('[phase5-v7] Staging exact source and audit overlay\n');
-    phase6Snapshot = await stagePhase6Snapshot(legacyRequest, {
-      workspaceRoot: path.join(workspaceRoot, 'staging'),
-      environment,
-      runnerRoot,
-    });
+    const reportPhase5Progress = environment.PHASE5_BOUNDARY_PROGRESS === 'true';
+    if (reportPhase5Progress) process.stderr.write('[phase5-v7] Staging exact source and audit overlay\n');
+    const stagingStarted = Date.now();
+    const stagingHeartbeat = reportPhase5Progress ? setInterval(() => {
+      process.stderr.write('[phase5-v7] Source staging active elapsed=' +
+        Math.floor((Date.now()-stagingStarted)/1000) + 's\n');
+    }, 20_000) : null;
+    stagingHeartbeat?.unref();
+    try {
+      phase6Snapshot = await stagePhase6Snapshot(legacyRequest, {
+        workspaceRoot: path.join(workspaceRoot, 'staging'),
+        environment,
+        runnerRoot,
+      });
+    } finally {
+      if (stagingHeartbeat) clearInterval(stagingHeartbeat);
+    }
 
-    if(environment.PHASE5_BOUNDARY_PROGRESS==='true')process.stderr.write('[phase5-v7] Source snapshot ready; checking fork preflight\n');
+    if (reportPhase5Progress) process.stderr.write('[phase5-v7] Source snapshot ready; checking fork preflight\n');
     if (phase6RequiresMutableRpc(request)) {
       const medusaForkPin = request.configuration?.analysis?.medusa;
       const sourceFork=await liveScanForkBindingV1(phase6Snapshot.projectRoot);
