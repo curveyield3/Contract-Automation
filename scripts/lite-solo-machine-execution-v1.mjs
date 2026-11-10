@@ -73,7 +73,7 @@ if(phase===5){
   // the exact generated request only in this transient machine execution view.
   for(const target of targets){
     if(!target||typeof target!=='object'||target.executionMethod!=='V7_REQUEST')continue;
-    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
+    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target,expectedCampaignGenerationId:generationId});
     if(!resolved)throw Error('current-generation execution request missing for '+String(target.candidateKey));
     target.executionRequestRef=resolved;
   }
