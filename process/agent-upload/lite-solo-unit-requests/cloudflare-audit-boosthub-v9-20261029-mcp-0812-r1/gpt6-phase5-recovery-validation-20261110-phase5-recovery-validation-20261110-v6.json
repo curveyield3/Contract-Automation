@@ -1,6 +1,6 @@
 {
   "schemaVersion": "curveyield-lite-solo-unit-batch-request-v1",
-  "requestId": "phase5-recovery-validation-20261110-v6",
+  "requestId": "phase5-targeted-deterministic-finalize-20261110-v7",
   "operation": "CLAIM",
   "campaignId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1",
   "campaignGenerationId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z",
