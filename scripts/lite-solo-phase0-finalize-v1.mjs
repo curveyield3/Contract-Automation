@@ -219,6 +219,7 @@ try {
   }
 } catch(error) {
   // Invalid or absent authority manifests do not alter legacy behavior.
+  githubPhase0Diagnostics.push('PHASE0_OPTIONAL_FLOW_PLAN_UNAVAILABLE: '+String(error?.message??error).slice(0,2000));
   console.error('ADR Phase-0 optional flow plan unavailable: '+String(error?.message??error).slice(0,2000));
 }
 
