@@ -107,6 +107,7 @@ concurrency:
   cancel-in-progress: false
 env:
   MACHINE_INTELLIGENCE_WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL || 'https://lite-solo-api.jamesnexus9999.workers.dev' }}
+  MILO_TEMP_WORK_ROUNDS: ${{ vars.MILO_TEMP_WORK_ROUNDS || '0' }}
   MODEL_SHA256: 4bca6f18c73f72270c7a20c2ea2bea581de8246e318714277120369d34048c81
   LLAMA_SHA: 8642541b255bfb5dc39cd351a178be09013a55d6
   GGML_RPC_NO_RDMA: '1'
