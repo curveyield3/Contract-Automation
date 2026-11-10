@@ -910,6 +910,12 @@ function readPagedPrefillV1(root,rel,rawManifest,onVerificationFailure=null){
     'Prefill page identity does not match original manifest; submitted bytes retained',
     {schemaVersion:'curveyield-lite-solo-unit-prefill-page-v1',index:i+1,total:manifest.pageCount,offset:i*PREFILL_PART_BYTES},
     {schemaVersion:page.schemaVersion,index:page.index,total:page.total,offset:page.offset});
+  if(typeof page.base64!=='string'){
+   check(file,'FINALIZE_PREFILL_PAGE_ENCODING_MISSING',
+    'Prefill page has no readable original base64 fragment; no substitute bytes are generated',
+    'Original base64 fragment',page.base64??null);
+   return null;
+  }
   const part=Buffer.from(page.base64,'base64');
   if(part.length>PREFILL_PART_BYTES||hex(part)!==page.sha256)
    check(file,'FINALIZE_PREFILL_PAGE_SHA256',
@@ -957,6 +963,12 @@ function readPlan(root,campaign,phase,onVerificationFailure=null){
   ?campaign+s.slice(prior.length):s;
  const units=[];
  for(const p of index.pages){
+  if(!p||typeof p.path!=='string'||!p.path.startsWith(campaign+'/')){
+   check(planRel(campaign,phase),'FINALIZE_UNIT_PLAN_PAGE_LOCATOR',
+    'Plan index contains a page with no valid path within the exact campaign; cannot safely read it',
+    'Campaign-scoped unit-plan page',p?.path??null);
+   continue;
+  }
   const raw=fs.readFileSync(repoFile(root,p.path));
   if(hex(raw)!==p.sha256||raw.length>32768)
    check(p.path,'FINALIZE_UNIT_PLAN_PAGE_SHA256',
@@ -970,6 +982,12 @@ function readPlan(root,campaign,phase,onVerificationFailure=null){
    continue;
   }
   for(const u of data.units){
+   if(!u||typeof u!=='object'||Array.isArray(u)){
+    check(p.path,'FINALIZE_UNIT_PLAN_RECORD_STRUCTURE',
+     'An issued unit record is not a JSON object and cannot be reconstructed without fabrication',
+     'Object with unitId and issued work path',u??null);
+    continue;
+   }
    if(u.initialValueRef){
     const rawValue=fs.readFileSync(repoFile(root,u.initialValueRef));
     if(hex(rawValue)!==u.initialValueSha256)
@@ -1007,7 +1025,13 @@ function readPlan(root,campaign,phase,onVerificationFailure=null){
       {unitId:u.unitId,phaseSequence:phase,schemaVersion:'curveyield-lite-solo-batched-assignment-v1'},
       {unitId:payload?.unitId??null,phaseSequence:payload?.phaseSequence??null,
        schemaVersion:payload?.schemaVersion??null,memberCount:payload?.members?.length??null});
-    u.members=Array.isArray(payload?.members)?payload.members:[];
+    u.members=Array.isArray(payload?.members)?payload.members.filter(m=>{
+     if(m&&typeof m==='object'&&!Array.isArray(m))return true;
+     check(u.membersRef,'FINALIZE_BATCH_MEMBER_STRUCTURE',
+      'BATCH manifest contains a non-object member; original source record remains stored without fabricated metadata',
+      'Object member record',m??null);
+     return false;
+    }):[];
    }
    units.push(u);
   }
