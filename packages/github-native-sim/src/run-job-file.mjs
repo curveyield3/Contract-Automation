@@ -253,10 +253,11 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
     // Forge subprocess. Do not rewrite foundry.toml or any audited source.
     env: { ...environment, ETH_RPC_URL: rpcUrl,
       ...(boosthubP5 ? {
-        // Phase 5 harness stages Solidity tests into test/phase5. The
-        // frozen source archive has no verification_v6/phase5 directory.
+        // The source-owned foundry.toml has test="verification_v6".
+        // Phase-5 overlay maps test/phase5/*.t.sol to verification_v6/phase5.
+        // Keep the production Solidity src root and select that mapped test root.
         FOUNDRY_SRC: 'contracts',
-        FOUNDRY_TEST: 'test'
+        FOUNDRY_TEST: 'verification_v6/phase5'
       } : {}) }, redactValues: [rpcUrl], forkEvidence,
     recoverableExitCodes: native.recoverableExitCodes ?? [],
   }, { ...(runCommand ? { runCommand } : {}) });
