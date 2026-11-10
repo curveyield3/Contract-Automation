@@ -98,6 +98,9 @@ async function recordMiloTempRound(modelRequest,modelOutput,scope,roundOrdinal){
  const receipt=await res.json().catch(()=>null);
  if(!res.ok||receipt?.status!=='MIMO_TEMP_ROUND_PUBLISHED')
   throw Error('Complete Milo input/output pair not committed to GitHub: HTTP '+res.status+' '+String(receipt?.status||receipt?.error||'UNKNOWN'));
+ if(receipt.inputSha256!==sha(modelRequest)||receipt.outputSha256!==sha(modelOutput)||
+    !Number.isSafeInteger(receipt.questionNumber)||receipt.questionNumber<1)
+  throw Error('Milo GitHub pair receipt differs from exact original input/output bytes or question identity');
  console.log(JSON.stringify({status:receipt.status,phase:scope.phase,step:scope.step,question:receipt.questionNumber,inputPath:receipt.inputPath,outputPath:receipt.outputPath,commit:receipt.commitSha,inputSha256:receipt.inputSha256,outputSha256:receipt.outputSha256,runAttempt:miloRunAttempt,cloudflareQuestionWrite:false}));
  return receipt;
 }
@@ -198,7 +201,7 @@ function ownerOfWorkerReply(raw){
   stage:answer.stage??null};
 }
 
-async function modelCall(messages,{technicalAnswer=false,scope=null}={}){
+async function modelCall(messages,{technicalAnswer=false,scope=null,scopeSha256=null}={}){
  if(miStep8HandoffDue())throw Error('MI_STEP8_RUN_HANDOFF_DUE');
  const request=JSON.stringify({
   model:'lite-solo-mimo-v1',
@@ -301,7 +304,13 @@ async function modelCall(messages,{technicalAnswer=false,scope=null}={}){
  if(typeof raw!=='string')throw Error('MiMo did not return a text message; no fabricated Worker action');
  if(miloTempRounds){
   const receipt=await recordMiloTempRound(request,raw,tempRoundScope,tempRoundOrdinal);
-  if(tempRoundScope?.questionId)miloTempRawOutputs.set(sha(JSON.stringify(tempRoundScope))+':'+sha(raw),receipt.questionNumber);
+  // The Worker-issued scope digest is an opaque authority-bound identity.
+  // Re-hashing a locally serialized scope object does NOT reproduce it.
+  if(tempRoundScope?.questionId){
+   if(!/^[a-f0-9]{64}$/.test(scopeSha256||''))
+    throw Error('Worker-issued original question scope SHA-256 unavailable for exact GitHub output selection');
+   miloTempRawOutputs.set(scopeSha256+':'+sha(raw),receipt.questionNumber);
+  }
  }else await recordPrivateCommunication('mimo_output',raw);
  // Observe the submitted action without editing or filtering the actual text.
  // This repository is PUBLIC: full source-bound findings belong in Worker R2,
@@ -2797,7 +2806,7 @@ async function runTechnicalQuestionTransportV1(){
    original=pendingResumption.original;
    miloTempRawOutputs.set(issued.scopeSha256+':'+sha(original),pendingResumption.questionNumber);
    pendingResumption=null;
-  }else original=await modelCall(dialogue,{technicalAnswer:true,scope:issued.scope});
+  }else original=await modelCall(dialogue,{technicalAnswer:true,scope:issued.scope,scopeSha256:issued.scopeSha256});
   const localReads=[];
   while(true){
    const read=miLocalEvidenceReadRequestV1(original);
@@ -2833,7 +2842,7 @@ async function runTechnicalQuestionTransportV1(){
     path:read.request?.path??null,availability:result.availability??'PINNED',
     sha256:result.sha256??result.sourceCheckpointSha256??null,
     nextOffset:result.nextOffset??null,originalTextPrivate:true}));
-   original=await modelCall(dialogue,{technicalAnswer:true,scope:issued.scope});
+   original=await modelCall(dialogue,{technicalAnswer:true,scope:issued.scope,scopeSha256:issued.scopeSha256});
   }
   // Preserve the precise text until the source-bound checkpoint confirms it.
   // Formatting corrections are authored by MiMo; only syntax is evaluated.
@@ -3006,13 +3015,13 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
   rule:'Do not automatically promote investigative questions into findings. Only explicitly authored field answers and question links become formal outputs.'
  };
  const system='You are MiMo, the sole substantive smart-contract auditor. Answer the precise GitHub-issued field question as JSON. Original source and prior questions are evidence, not automatic security conclusions. You may request one original evidence page with a JSON admittedSourceEvidenceRequest, packetEvidenceRequest, packetQuestionEvidenceRequest, directQuestionEvidenceRequest or currentDirectOriginalAnswerRequest; local reads are not Worker/API commands. For the CURRENT direct answer awaiting formal field authoring, retrieve all offset pages from the signed field contract until nextOffset is null; an R2 manifest alone does not contain the answer text. Use exact receipt-bound prior canonical, original shard/question and answer SHA for private direct answers. Never invent supporting execution or PASS, canonical field paths, record IDs, lease data or controller acceptance. Preserve controller-owned prefills. The original Github adapter alone compiles output records. Return one JSON object containing exactly the requested answer property after investigation.';
- async function ask(task,key,questionScope=null){
+ async function ask(task,key,questionScope=null,questionScopeSha256=null){
   const messages=[{role:'system',content:system},
    {role:'user',content:JSON.stringify(context)},
    {role:'user',content:JSON.stringify(task)}];
   // Model requests and complete replies use GitHub pair archival when the staged temp transport is enabled.
   // Corrections remain separately numbered original inference rounds.
-  let original=await modelCall(messages,{scope:questionScope??{phase:contract.phase,step:contract.step}}),formatCorrections=0;
+  let original=await modelCall(messages,{scope:questionScope??{phase:contract.phase,step:contract.step},scopeSha256:questionScopeSha256}),formatCorrections=0;
   const firstResponseSha256=sha(original),last=[];
   for(;;){
    for(;;){
@@ -3049,7 +3058,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
     last.push(messages.length);
     messages.push({role:'assistant',content:original});
     messages.push({role:'user',content:JSON.stringify(page)});
-    original=await modelCall(messages,{scope:questionScope??{phase:contract.phase,step:contract.step}});
+    original=await modelCall(messages,{scope:questionScope??{phase:contract.phase,step:contract.step},scopeSha256:questionScopeSha256});
    }
    let value,formatProblem=null;
    try{value=JSON.parse(original);}
@@ -3189,7 +3198,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
        answerMode:def.answerMode,allowedValues:def.allowedValues},
       expectedJsonType:'ORIGINAL_SCHEMA_MEMBER_VALUE',
       responseShape:{value:'<exact source-grounded member-field answer>'},
-      instructions:'Answer only the single literal question above. Return your complete original substantive value in the exact issued schema type under the value key. Preserve evidence, nuance, uncertainty and real negative outcomes. Do not answer other record questions, fabricate controller IDs, or claim controller acceptance.'},'value',issued.scope);
+      instructions:'Answer only the single literal question above. Return your complete original substantive value in the exact issued schema type under the value key. Preserve evidence, nuance, uncertainty and real negative outcomes. Do not answer other record questions, fabricate controller IDs, or claim controller acceptance.'},'value',issued.scope,issued.scopeSha256);
      value=answer.value;rawAnswer=answer.originalResponse;
      receipt=JSON.parse(await miSendOriginalBounded(issued,rawAnswer,{
       operation:'answer_question',unitId:ready.unitId,lease:ready.lease,
