@@ -85,7 +85,8 @@ function directAppendPagesV13({root,workDir,desc,primary,onVerificationFailure=n
  const names=fs.readdirSync(relfile(root,workDir));
  const prefix=desc.file.replace(/_v1\.json$/,'_CONT_');
  const suffix='_v1.json';
- const found=names.filter(name=>name.startsWith(prefix)&&name.endsWith(suffix));
+ const found=names.filter(name=>name.startsWith(prefix)&&name.endsWith(suffix)&&
+  !name.endsWith('.VERIFICATION_WARNINGS_v1.json'));
  const numbered=found.map((file,order)=>{
   const index=Number(file.slice(prefix.length,-suffix.length));
   if(!Number.isSafeInteger(index)||index<2||
