@@ -7,7 +7,7 @@ import {execFileSync} from 'node:child_process';
 import {runProcess} from '../packages/github-native-sim/src/execution.mjs';
 import {assembleAcceptedUnitShardsV1,finalizeReadinessV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {assembleAcceptedUnitShardsV1 as assemblePreviewAcceptedUnitShardsV1,finalizeReadinessV1 as previewFinalizeReadinessV1} from './lib/audit-preview-unit-queue-v1.mjs';
-import {executePhase5TargetsV1,validateTargetExecutionRequestBindingV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
+import {executePhase5TargetsV1,validateTargetExecutionRequestBindingV1,validatePhase5TargetExecutionGateV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {resolveTargetExecutionRequestRef} from './lib/lite-solo-phase-prefill-v1.mjs';
 
 const args=Object.fromEntries(process.argv.slice(2).reduce((acc,x,i,all)=>{
@@ -44,12 +44,15 @@ function safeRel(rel){
      rel.split('/').some(x=>!x||x==='.'||x==='..'))throw Error('unsafe machine request path');
   return rel;
 }
-function collect(candidateKey,requestRel,result){
+function collect(candidateKey,requestRel,result,{strictlyVerified=false}={}){
   const request=requestRel?read(requestRel):null,rel=result?.evidenceRef;
   const valid=typeof rel==='string'&&rel.startsWith(campaignPath+'/')&&
     rel.endsWith('/raw-result.json')&&fs.existsSync(abs(rel));
+  // An outer V7 exit code is not a Foundry PASS. Phase 5 must reuse the
+  // controller's existing raw-evidence verifier before labeling any target PASS.
   const status=!request?'NOT_APPLICABLE':
-    (result?.status==='PASS'&&result?.exitCode===0&&valid?'PASS':'INCOMPLETE');
+    (result?.status==='PASS'&&result?.exitCode===0&&valid&&
+      (phase!==5||strictlyVerified)?'PASS':'INCOMPLETE');
   records.push({candidateKey,status,requestPath:requestRel??null,
     requestId:request?.requestId??null,requestDigest:request?.requestDigest??null,
     sourceCommit:request?.source?.commit??null,
@@ -97,8 +100,36 @@ if(phase===5){
       controllerRoot:root,campaignPath,target,expectedCampaignId:campaignId,
       expectedCampaignGenerationId:generationId,expectedSourceSha256:directory.sourceSha256
     });
-    collect(key,String(binding.status).startsWith('PASS_')?
-      path.posix.join(campaignPath,binding.requestRef):null,results[key]);
+    const requestPath=String(binding.status).startsWith('PASS_')
+      ? path.posix.join(campaignPath,binding.requestRef):null;
+    const verificationFailures=validatePhase5TargetExecutionGateV1({
+      controllerRoot:root,campaignPath,targetDesigns:[target],
+      executionResults:{[key]:results[key]},materialCandidateKeys:[key],
+      expectedSourceSha256:directory.sourceSha256
+    });
+    if(verificationFailures.length){
+      process.stderr.write('[phase5-sim] STRICT_GATE '+key+' '+JSON.stringify(verificationFailures.slice(0,4))+'\\n');
+      // Execution diagnostics are already redacted by the native-fuzz adapter;
+      // print only bounded error lines, never full machine output or RPC URLs.
+      for(const name of ['nativeFuzz','slither']){
+        const component=results[key]?.rawResult?.analysis?.[name];
+        const raw=component?.rawOutput;
+        const output=String(raw?.stdout??'')+'\\n'+String(raw?.stderr??'');
+        const lines=output.split(/\\r?\\n/);
+        const errorLines=lines.map((line,i)=>({line,i}))
+          .filter(x=>/(?:Compiler run failed|Error \\(\\d+\\)|ParserError|TypeError|DeclarationError|SyntaxError|ImportError|Source .* not found|failed to compile|error:)/i.test(x.line))
+          .slice(0,8);
+        for(const {line,i} of errorLines){
+          for(const item of lines.slice(Math.max(0,i-1),Math.min(lines.length,i+3))){
+            const sanitized=String(item).replace(/https?:\\/\\/[^\\s]+/g,'<redacted-url>').slice(0,420);
+            process.stderr.write('[phase5-sim] '+name+' '+key+' '+sanitized+'\\n');
+          }
+        }
+        process.stderr.write('[phase5-sim] '+name+' '+key+' exitCode='+String(raw?.exitCode??'NOT_RECORDED')+
+          ' failureKind='+String(component?.failureKind??'NONE')+'\\n');
+      }
+    }
+    collect(key,requestPath,results[key],{strictlyVerified:verificationFailures.length===0});
   }
 }else{
   // Every other phase uses an explicit same-phase request index created for
