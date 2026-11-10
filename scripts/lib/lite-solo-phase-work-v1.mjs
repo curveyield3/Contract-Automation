@@ -10,6 +10,45 @@ export const EXPLICIT_NEGATIVES=new Set(['NONE_IDENTIFIED','NOT_APPLICABLE','NOT
 export function readJson(file){return JSON.parse(fs.readFileSync(file,'utf8'));}
 export function writeJson(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify(value,null,2)+'\n');}
 export function writeText(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);}
+
+/**
+ * Persist an actual failed end-of-phase verification beside the affected
+ * campaign file. Never manufacture a warning for a successful check or edit
+ * the original evidence. Repeated identical failures are idempotent.
+ */
+export function recordPhaseFinalizationVerificationWarningV1({
+ root,campaignPath,phase,affectedFile,check,reason,expected=null,observed=null
+}){
+ if(typeof check!=='string'||!check.trim()||typeof reason!=='string'||!reason.trim())
+  throw Error('Failed verification warning requires the exact check and failure reason');
+ const campaignDir=path.resolve(repoFile(root,campaignPath));
+ const affected=path.resolve(repoFile(root,affectedFile));
+ const relative=path.relative(campaignDir,affected).replaceAll('\\','/');
+ if(!relative||relative==='..'||relative.startsWith('../')||path.isAbsolute(relative))
+  throw Error('Verification warning must accompany a file inside its campaign');
+ const warningFile=path.join(path.dirname(affected),path.basename(affected)+'.VERIFICATION_WARNINGS_v1.json');
+ const warningRel=path.relative(path.resolve(root),warningFile).replaceAll('\\','/');
+ let document=null;
+ if(fs.existsSync(warningFile))document=readJson(warningFile);
+ if(document&&(document.schemaVersion!=='curveyield-machine-finalization-verification-warnings-v1'||
+     document.campaignPath!==campaignPath||document.affectedFile!==affectedFile))
+  throw Error('Existing verification-warning sidecar belongs to a different evidence source');
+ if(!document)document={
+  schemaVersion:'curveyield-machine-finalization-verification-warnings-v1',
+  warningType:'NON_BLOCKING_FAILED_VERIFICATION',
+  campaignPath,affectedFile,originalEvidenceUnmodified:true,warnings:[]
+ };
+ const identity=JSON.stringify({phase,check,reason,expected,observed});
+ if(!document.warnings.some(w=>JSON.stringify({
+   phase:w.phase,check:w.check,reason:w.reason,expected:w.expected,observed:w.observed
+  })===identity)){
+  document.warnings.push({status:'WARNING_VERIFICATION_FAILED_NON_BLOCKING',
+   phase,check,reason,expected,observed,recordedAt:new Date().toISOString(),
+   finalizationDisposition:'RETAIN_EVIDENCE_AND_REPORT_WARNING'});
+  writeJson(warningFile,document);
+ }
+ return warningRel;
+}
 export function safeRel(rel,label='path'){if(typeof rel!=='string'||!rel||rel.startsWith('/')||rel.split('/').includes('..')) throw new Error('unsafe '+label+': '+rel);return rel;}
 export function repoFile(root,rel){return path.join(root,...safeRel(rel).split('/'));}
 export function requiredFile(root,rel,label='file'){
