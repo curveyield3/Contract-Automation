@@ -6,7 +6,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1,markFinalizationV1,statusUnitQueueV1} from './lib/lite-solo-unit-queue-v1.mjs';
-import {repoFile,readJson,writeJson} from './lib/lite-solo-phase-work-v1.mjs';
+import {repoFile,readJson,writeJson,recordPhaseFinalizationVerificationWarningV1} from './lib/lite-solo-phase-work-v1.mjs';
 const arg=Object.fromEntries(process.argv.slice(2).reduce((out,s,i,a)=>{
  if(i%2===0){if(!s.startsWith('--')||a[i+1]===undefined)throw Error('invalid CLI parameters');
   out.push([s.slice(2),a[i+1]]);}return out;},[]));
@@ -18,13 +18,13 @@ if(slug===campaignId)throw Error('campaign generation suffix missing');
 const directoryRel='Audit Campaign Directory/campaigns/'+slug+'.json';
 const directoryFile=repoFile(root,directoryRel);
 const directory=readJson(directoryFile);
-if(directory.campaignId!==campaignId||directory.mode!=='LITE_SOLO'||!['machine-intelligence-v7'].includes(directory.authorityRelease))
+if(directory.campaignId!==campaignId||directory.mode!=='LITE_SOLO'||!['machine-intelligence-v7','machine-intelligence-v8'].includes(directory.authorityRelease))
  throw Error('request drainer requires Machine Intelligence campaign');
 const campaignPath=directory.workspacePath;
 if(typeof campaignPath!=='string'||!campaignPath.startsWith('campaigns/')||campaignPath.split('/').includes('..'))
  throw Error('unsafe campaign workspace');
 const receipt=readJson(repoFile(root,campaignPath+'/receipts/PHASE_00_RECEIPT_v1.json'));
-if(!['machine-intelligence-v7'].includes(receipt.authority?.liteRelease)||receipt.authority?.manifestSha256!==directory.authorityDigest||
+if(!['machine-intelligence-v7','machine-intelligence-v8'].includes(receipt.authority?.liteRelease)||receipt.authority?.manifestSha256!==directory.authorityDigest||
  receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId||
  receipt.source?.sha256!==directory.sourceSha256)throw Error('source/authority generation binding invalid');
 const requestDir=path.resolve(arg['requests-root']??'process/agent-upload/lite-solo-unit-requests',campaignId);
@@ -139,6 +139,15 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
   }catch(error){
    // Transport and physical assembly errors remain visible and retryable.
    const reason=String(error.stderr??error.message??error).slice(0,1800);
+   if(/(?:digest|hash|sha256|mismatch|validation|schema|incorrect|verify|verification|unrecognized authority)/i.test(reason)){
+    const affectedFile=directory.currentAssignment?.workFormPath;
+    if(affectedFile)recordPhaseFinalizationVerificationWarningV1({
+     root,campaignPath,phase:seq,affectedFile,
+     check:'PHASE_FINALIZATION_SOURCE_VERIFICATION',
+     reason:'Existing phase assembler/controller verification did not succeed: '+reason,
+     expected:'Source-bound phase work can be read and packaged',observed:reason
+    });
+   }
    markFinalizationV1({root,campaignPath,phase:seq,status:'NOT_STARTED',
      details:{lastTransportError:reason}});
    seal={status:'RETRYABLE_TRANSPORT_ERROR',phase:seq,error:reason};
@@ -147,7 +156,24 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
 }
 function finalizeReadinessV1Safe(root,campaignPath,directory,phase){
  try{return finalizeReadinessV1({root,campaignPath,directory,phase});}
- catch(e){return {ready:false,reason:String(e.message??e)};}
+ catch(e){
+  const reason=String(e?.message??e);
+  // This is an actual unsuccessful structural verification, not ordinary
+  // AWAITING_DURABLY_ACCEPTED_WORKER_FILES. Preserve the check as a warning
+  // beside the controller-owned source while leaving accepted evidence intact.
+  const assignment=directory.currentAssignment||{};
+  const affectedFile=/plan|shard|append|prefill/i.test(reason)?
+   assignment.unitQueueIndexPath??assignment.workShardIndexPath??assignment.unitQueueStatePath:
+   assignment.unitQueueStatePath??assignment.workFormPath;
+  if(affectedFile)recordPhaseFinalizationVerificationWarningV1({
+   root,campaignPath,phase,affectedFile,
+   check:'FINALIZE_READINESS_SOURCE_VERIFICATION',
+   reason:'Cannot recover the existing issued unit state: '+reason,
+   expected:'Readable source-bound accepted unit plan and queue',
+   observed:reason
+  });
+  return {ready:false,reason,sourceVerificationWarning:true};
+ }
 }
 const result={schemaVersion:'curveyield-lite-solo-unit-drain-summary-v1',
  campaignId,phase,processed:results,finalizeReady:ready,seal,
