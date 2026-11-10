@@ -91,9 +91,6 @@ jobs:
         id: controller
         shell: bash
         env:
-          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
-          RPC_KATANA: ${{ secrets.RPC_KATANA }}
-          RPC_BASE: ${{ secrets.RPC_BASE }}
           AUDIT_DIRECTORY: ${{ steps.request.outputs.directory }}
           AUDIT_CAMPAIGN: ${{ steps.request.outputs.id }}
           AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
