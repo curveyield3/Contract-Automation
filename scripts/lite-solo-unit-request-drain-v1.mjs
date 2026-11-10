@@ -91,9 +91,9 @@ if(arg.mode!=='finalize'){
  // Resume only a previously accepted source-bound Phase-5 unit whose sole
  // recorded rework was the superseded request identity. Keep substantive
  // rework and all original acceptance evidence untouched.
- if(phase===5&&recorded?.finalizeStatus==='REWORK_REQUIRED'){
+ if(phase===5&&['BLOCKED','REWORK_REQUIRED'].includes(recorded?.finalizeStatus)){
   const recovered=recoverSourceBoundRequestReworkV1({root,campaignPath,directory});
-  if(recovered.restored.length)changed=true;
+  if(recovered.restored.length||recovered.clearedBlocked)changed=true;
  }
  for(const filename of files){
   const request=JSON.parse(fs.readFileSync(path.join(requestDir,filename),'utf8'));
