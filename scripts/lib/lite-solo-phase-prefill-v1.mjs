@@ -950,8 +950,35 @@ function miCrossPhaseAdaptiveFieldSourcesV1({root,campaignPath,authorityRoot,seq
      selectionPolicy:'SOURCE_DECLARED_PHASE_CONSUMER;NO_CONTROLLER_SECURITY_INFERENCE'});
    }
  }
+ const catalogRel=path.posix.join(authorityRoot,'docs/QUESTION_CATALOG_v7.json');
+ const catalog=readJsonIf(repoFile(root,catalogRel));
+ const remainingQuestionFamilies=[];
+ if(catalog?.schemaVersion==='machine-intelligence-literal-question-catalog-v7')
+  for(const phase of catalog.phases||[]){
+   if(!Number.isInteger(phase.phase)||phase.phase<sequence)continue;
+   for(const step of phase.steps||[]){
+    for(const output of step.outputs||[]){
+     const matched=sources.filter(src=>
+      src.sourcePhaseSequence<phase.phase&&src.consumerPhases.includes(phase.phase));
+     remainingQuestionFamilies.push({phaseSequence:phase.phase,step:step.step,
+      field:output.field,questionMode:phase.packetMode,
+      catalogFieldSelector:'phases[phase='+phase.phase+'].steps['+step.step+'].outputs['+output.field+']',
+      inheritedAcceptedSourceRefs:matched.map(src=>({
+       sourcePhaseSequence:src.sourcePhaseSequence,sourceField:src.sourceField,
+       sourceSelector:src.sourceSelector,canonicalArtifactPath:src.canonicalArtifactPath,
+       canonicalSha256:src.canonicalSha256,acceptedReceiptPath:src.acceptedReceiptPath
+      })),
+      questionPlanOwner:phase.packetMode==='PLANNED_PER_PACKET'?'MIMO_AUTHORED_AT_ISSUED_PACKET':
+       'FROZEN_QUESTION_CATALOG',
+      eligibility:'PENDING_ORIGINAL_ISSUED_UNIT_AND_WORKER_CONDITIONS',
+      investigatorDecision:'NOT_INFERRED'});
+    }
+   }
+  }
  return {schemaVersion:'curveyield-mi-cross-phase-adaptive-source-bindings-v1',
-  assignedPhase:sequence,sources,
+  assignedPhase:sequence,sources,remainingQuestionFamilies,
+  catalogSourcePath:catalogRel,originalCatalogPresent:catalog?.schemaVersion===
+   'machine-intelligence-literal-question-catalog-v7',
   unresolvedDependencyPolicy:'PRESERVE_PENDING;NO_INFERRED_SECURITY_DISPOSITION'};
 }
 function inheritedAcceptedRecordSourceRefsV1({root,campaignPath,sequence}){
