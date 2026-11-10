@@ -27,9 +27,8 @@ const receiptPath=path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json');
 const receipt=read(required(receiptPath,'Phase-0 receipt'));
 if(receipt.schemaVersion!=='curveyield-lite-phase-receipt-v1'||receipt.campaign?.mode!=='LITE_SOLO'||receipt.phase?.sequence!==0) throw new Error('invalid Phase-0 receipt');
 if(!['ACTIVE','EVIDENCE_READY','VALIDATING','BLOCKED'].includes(receipt.phase.status)) throw new Error('Phase-0 receipt has no eligible unfinished state'); // Worker decides whether previous BLOCKED is eligible.
-if(!/^[0-9a-f]{40}$/.test(a['contract-automation-sha'])||
-   !/^[0-9a-f]{40}$/.test(a['bootstrap-sha']))
-  throw new Error('Phase-0 recorded workflow commits must be valid Git SHAs');
+const invalidWorkflowCommitIdentity=!/^[0-9a-f]{40}$/.test(a['contract-automation-sha'])||
+ !/^[0-9a-f]{40}$/.test(a['bootstrap-sha']);
  // The two executable revisions may differ after Contract-Automation upgrades.
  // Preserve both values in the receipt without rejecting the campaign.
 
@@ -45,6 +44,8 @@ function phase0Warning(file,check,reason,expected=null,observed=null){
   root:controllerRoot,campaignPath,phase:0,affectedFile,check,reason,expected,observed
  }));
 }
+if(invalidWorkflowCommitIdentity)
+ phase0Warning(receiptPath,'PHASE0_WORKFLOW_COMMIT_FORMAT','Recorded workflow commit identifiers are not both 40-character Git SHAs','Two 40-character lowercase Git commit identifiers',{contractAutomationSha:a['contract-automation-sha'],bootstrapSha:a['bootstrap-sha']});
 function evidenceFile(file,label){
  if(!fs.existsSync(file)||!fs.statSync(file).isFile())
   phase0Warning(file,'PHASE0_REQUIRED_EVIDENCE_FILE_MISSING',
@@ -247,7 +248,8 @@ for(const message of githubPhase0Diagnostics){
   /FLOW_PLAN|flow plan/i.test(reason)?
   path.join(campaignRoot,'evidence/review-inventory/FLOW_PLAN_v1.json'):
   /SCAN_/i.test(reason)?
-  path.join(campaignRoot,'source',path.basename(String(receipt.source?.scanManifestPath??'SOURCE_SCAN_MANIFEST_v1.json'))):
+  (typeof receipt.source?.scanManifestPath==='string'&&receipt.source.scanManifestPath.startsWith(campaignPath+'/')?
+   path.resolve(controllerRoot,...receipt.source.scanManifestPath.split('/')):receiptPath):
   /SOURCE_INTELLIGENCE/i.test(reason)?evidence.bundle:
   /build artifact|reusable build/i.test(reason)?evidence.executionBuildArtifacts:
   /deploy|fork/i.test(reason)?evidence.deployConfigExecution:receiptPath;
@@ -276,7 +278,7 @@ receipt.globalControls={
   evidenceInvalidationMatrix:'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json',
   sourceIntelligenceBundle:'evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json'
 };
-const ledger=read(evidence.ledger);
+const ledger=readEvidence(evidence.ledger);
 receipt.obligations.due=(ledger.obligations??[]).filter(x=>String(x.status??'OPEN').toUpperCase()==='OPEN'&&String(x.requiredPhase??'')==='1');
 // Retired infrastructure qualification is not evidence for a new Phase-0 run.
 receipt.automation=(receipt.automation??[]).filter(row=>row?.workflow!=='v7-execution-infrastructure-qualification.yml');
