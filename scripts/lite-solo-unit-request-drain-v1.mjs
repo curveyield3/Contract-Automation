@@ -29,7 +29,7 @@ if(receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId)
 const phase0ReceiptRel=campaignPath+'/receipts/PHASE_00_RECEIPT_v1.json';
 const warnReceipt=(check,reason,expected,observed)=>recordPhaseFinalizationVerificationWarningV1({
  root,campaignPath,phase:Number(directory.currentAssignment?.phaseSequence??0),
- affectedFile:phase0ReceiptRel,check,reason,expected,observed
+ revision:Number(directory.currentAssignment?.phaseRevision??1),affectedFile:phase0ReceiptRel,check,reason,expected,observed
 });
 if(!['machine-intelligence-v7','machine-intelligence-v8'].includes(receipt.authority?.liteRelease))
  warnReceipt('FINALIZE_RECEIPT_AUTHORITY_RELEASE','Phase-0 receipt declares an unsupported Machine Intelligence release',
@@ -155,7 +155,7 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
    if(/(?:digest|hash|sha256|mismatch|validation|schema|incorrect|verify|verification|unrecognized authority)/i.test(reason)){
     const affectedFile=directory.currentAssignment?.workFormPath;
     if(affectedFile)recordPhaseFinalizationVerificationWarningV1({
-     root,campaignPath,phase:seq,affectedFile,
+     root,campaignPath,phase:seq,revision:Number(directory.currentAssignment?.phaseRevision??1),affectedFile,
      check:reason.split('\n')[0].split(':')[0].trim()||'PHASE_FINALIZATION_SOURCE_VERIFICATION',
      reason:'Existing phase assembler/controller verification did not succeed: '+reason,
      expected:'Source-bound phase work can be read and packaged',observed:reason
@@ -179,7 +179,7 @@ function finalizeReadinessV1Safe(root,campaignPath,directory,phase){
    assignment.unitQueueIndexPath??assignment.workShardIndexPath??assignment.unitQueueStatePath:
    assignment.unitQueueStatePath??assignment.workFormPath;
   if(affectedFile)recordPhaseFinalizationVerificationWarningV1({
-   root,campaignPath,phase,affectedFile,
+   root,campaignPath,phase,revision:Number(directory.currentAssignment?.phaseRevision??1),affectedFile,
    check:reason.split(':')[0].trim()||'FINALIZE_READINESS_SOURCE_VERIFICATION',
    reason:'Cannot recover the existing issued unit state: '+reason,
    expected:'Readable source-bound accepted unit plan and queue',
