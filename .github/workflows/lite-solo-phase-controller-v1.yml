@@ -236,7 +236,7 @@ jobs:
                 for attempt in 1 2 3; do
                   if git -C .audit-controller push origin HEAD:machine-intelligence-audit-controller-v1; then break; fi
                   [ "$attempt" -lt 3 ] || exit 1
-                  git -C .audit-controller pull --rebase origin machine-intelligence-audit-controller-v1
+                  git -C .audit-controller -c rebase.autoStash=true pull --rebase origin machine-intelligence-audit-controller-v1
                   after_pull_tree="$(git -C .audit-controller rev-parse "HEAD:$source_path")"
                   test "$after_pull_tree" = "$expected_tree" || {
                     echo "::error::MILO_SOURCE_CHANGED_DURING_ARCHIVE_PUBLICATION"; exit 1;
@@ -293,7 +293,21 @@ jobs:
             for attempt in 1 2 3; do
               if git push origin HEAD:machine-intelligence-audit-controller-v1; then break; fi
               [ "$attempt" -lt 3 ] || exit 1
-              git pull --rebase origin machine-intelligence-audit-controller-v1
+              git -c rebase.autoStash=true pull --rebase origin machine-intelligence-audit-controller-v1
+              # The original source Q/A tree must not advance after archive
+              # publication without a new authenticated phase snapshot.
+              if [ "$REVIEW_KIND" = phase ]; then
+                phase_number="$(jq -r .phaseSequence "$REQUEST_FILE")"
+                manifest="$AUDIT_CAMPAIGN_PATH/Questions and Answers/PHASE_$(printf '%02d' "$phase_number")_ARCHIVE_MANIFEST_v1.json"
+                if [ -f "$manifest" ]; then
+                  archive_source="$(jq -r .sourcePath "$manifest")"
+                  frozen_tree="$(jq -r .sourcePhaseTreeSha "$manifest")"
+                  committed_tree="$(git rev-parse "HEAD:$archive_source")"
+                  test "$committed_tree" = "$frozen_tree" || {
+                    echo "::error::MILO_PHASE_SOURCE_ADVANCED_AFTER_ARCHIVE"; exit 1;
+                  }
+                fi
+              fi
             done
           fi
       - name: Generate immutable Phase-10 PDF and publish selected evidence
