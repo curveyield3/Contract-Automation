@@ -919,7 +919,7 @@ try{
         const explicit=typeof target.executionRequestRef==='string' &&
           !target.executionRequestRef.startsWith('<') &&
           target.executionRequestRef!=='NOT_APPLICABLE';
-        const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
+        const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target,expectedCampaignGenerationId:directory.campaignGenerationId});
         if(!resolved)throw new Error('Phase 5 trusted execution request missing for '+
           String(target.candidateKey??'UNKNOWN'));
         target.executionRequestRef=resolved;
@@ -1063,7 +1063,7 @@ if(sequence===5&&form&&deficiencies.length===0){
     const explicitBeforeResolve=typeof target.executionRequestRef==='string'
       && !target.executionRequestRef.startsWith('<')
       && target.executionRequestRef!=='NOT_APPLICABLE';
-    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
+    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target,expectedCampaignGenerationId:directory.campaignGenerationId});
     if(!resolved){
       deficiencies.push('Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+' has no deterministically resolvable execution request. Materialize the exact trusted V7 request at a conventional campaign request path or provide a campaign-relative executionRequestRef only for this target.');
       continue;
