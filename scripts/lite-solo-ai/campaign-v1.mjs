@@ -2431,7 +2431,7 @@ async function miSendOriginalBounded(issued,original,body){
  if(miloTempRounds){
   const q=miloTempRawOutputs.get(issued.scopeSha256+':'+sha(original));
   if(!Number.isSafeInteger(q))throw Error('Original MiMo response is not source-bound to an immutable GitHub Output.json for this exact question; refusing R2 fallback');
-  return workerCall({...body,tempRoundQuestionNumber:q});
+  return workerCall({...body,tempRoundQuestionNumber:q,storageMode:'DIRECT_GITHUB_API_JSON'});
  }
  const buf=Buffer.from(original,'utf8');
  if(buf.length<=450000)return workerCall(body);
@@ -2613,7 +2613,8 @@ async function runTechnicalQuestionTransportV1(){
    const recoveryRaw=await workerCall({operation:'recover_question',
     unitId:issued.scope.unitId,lease:issued.scope.lease,
     scopeSha256:issued.scopeSha256,questionId:issued.scope.questionId,
-    questionSha256:issued.scope.questionSha256});
+    questionSha256:issued.scope.questionSha256,
+    ...(miloTempRounds?{storageMode:'DIRECT_GITHUB_API_JSON'}:{})});
    let recovered;try{recovered=JSON.parse(recoveryRaw);}catch{
     throw Error('Original staged-answer recovery returned invalid Worker JSON');
    }
