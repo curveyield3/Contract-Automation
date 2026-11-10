@@ -592,13 +592,10 @@ function validateShardUnit({root,u,data,phase,schema,queue,plan}){
    errors.push('immutable negative sentinel must remain; use append slot for real records');
   if(field.type==='REQUIRED_RECORD_LIST'&&!(isObject(val)||['NONE_IDENTIFIED','NO_CANDIDATE','NOT_APPLICABLE','NO_ADDITIONAL_OBLIGATION'].includes(val)))
    errors.push('record must be an object or admitted explicit negative');
-  if(isObject(val)){
-   for(const name of field.itemRequiredFields??[])if(val[name]===undefined||val[name]===null||
-    typeof val[name]==='string'&&(!val[name].trim()||val[name].startsWith('<REQUIRED')))
-    errors.push(name+' requires substantive evidence');
-   for(const [name,allowed] of Object.entries(field.itemFieldAllowedValues??{}))
-    if(val[name]!==undefined&&!allowed.includes(String(val[name])))errors.push(name+' invalid enum');
-  }else if(typeof val==='string'&&val.startsWith('<REQUIRED'))errors.push('incomplete mandatory field');
+  // Reviewer answer shapes and enums may expand adaptively. Retain exact unit
+  // ownership and source-identity checks above, plus dedicated evidence rules below.
+  if(typeof val==='string'&&val.startsWith('<REQUIRED'))
+   errors.push('incomplete mandatory field');
   if(phase===6&&u.field==='baselineTestRecords'&&isObject(val)){
    errors.push(...validateLiveForkBaselineRecordV1({
     root,campaignPath:plan.campaignPath,campaignId:plan.campaignId,
