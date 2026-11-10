@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1,markFinalizationV1,statusUnitQueueV1,reopenAggregateDefectsV1} from './lib/lite-solo-unit-queue-v1.mjs';
+import {processUnitRequestV1,finalizeReadinessV1,assembleAcceptedUnitShardsV1,markFinalizationV1,statusUnitQueueV1,reopenAggregateDefectsV1,recoverSourceBoundRequestReworkV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {repoFile,readJson,writeJson} from './lib/lite-solo-phase-work-v1.mjs';
 const arg=Object.fromEntries(process.argv.slice(2).reduce((out,s,i,a)=>{
  if(i%2===0){if(!s.startsWith('--')||a[i+1]===undefined)throw Error('invalid CLI parameters');
@@ -87,6 +87,13 @@ if(arg.mode!=='finalize'){
     Object.values(recorded.units).every(x=>x.status==='ACCEPTED')){
    markFinalizationV1({root,campaignPath,phase,status:'NOT_STARTED',details:null});
    changed=true;
+ }
+ // Resume only a previously accepted source-bound Phase-5 unit whose sole
+ // recorded rework was the superseded request identity. Keep substantive
+ // rework and all original acceptance evidence untouched.
+ if(phase===5&&recorded?.finalizeStatus==='REWORK_REQUIRED'){
+  const recovered=recoverSourceBoundRequestReworkV1({root,campaignPath,directory});
+  if(recovered.restored.length)changed=true;
  }
  for(const filename of files){
   const request=JSON.parse(fs.readFileSync(path.join(requestDir,filename),'utf8'));
