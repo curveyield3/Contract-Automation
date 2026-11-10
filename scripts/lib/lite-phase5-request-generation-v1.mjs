@@ -37,6 +37,7 @@ export function generateV7ExecutionRequestV1({campaignId,campaignGenerationId,so
     'must match the candidateKey; candidate identity is carried by the reproduction metadata');
  const blueprint=target?.executionBlueprint;
  let resolvedGenerationHarnessId=null;
+ let resolvedNativeFuzzMatchTest=null;
  need('executionBlueprint',blueprint&&typeof blueprint==='object'&&!Array.isArray(blueprint),
    'provide concrete trusted runner configuration: exact source root, compiler, harness/simulation');
  if(blueprint){
@@ -51,9 +52,7 @@ export function generateV7ExecutionRequestV1({campaignId,campaignGenerationId,so
     need('executionBlueprint.configuration.analysis.nativeFuzz.enabled',
       blueprint.configuration?.analysis?.nativeFuzz?.enabled===true,
       'FOUNDRY_TEST must explicitly enable the Foundry execution adapter');
-    need('executionBlueprint.configuration.analysis.nativeFuzz.matchTest',
-      /^[A-Za-z_][A-Za-z0-9_]*$/.test(blueprint.configuration?.analysis?.nativeFuzz?.matchTest??''),
-      'an agent-selected named test is required; automatic fuzz/invariant runs are disabled');
+
   }
   if(type==='MEDUSA_PROPERTY'){
     need('executionBlueprint.configuration.analysis.medusa',
@@ -130,6 +129,38 @@ export function generateV7ExecutionRequestV1({campaignId,campaignGenerationId,so
       }
     }
   }
+  // A generation-specific audited harness may explicitly select existing named
+  // source test methods when an older accepted target did not store matchTest.
+  // Selection is a pure copy from a source-verified bound manifest, never a
+  // discovery of tests from a previous campaign or execution of arbitrary fuzz.
+  if(type==='FOUNDRY_TEST'&&resolvedGenerationHarnessId&&
+     !blueprint.configuration?.analysis?.nativeFuzz?.matchTest){
+    try{
+      const dir=path.resolve(automationRoot,'packages/github-native-sim/audit-harnesses',resolvedGenerationHarnessId);
+      const bound=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json'),'utf8'));
+      const selected=bound.testSelections?.[key];
+      const name=selected?.matchTest,sourceFile=selected?.sourceFile;
+      if(bound.campaignId===campaignId&&bound.campaignGenerationId===campaignGenerationId&&
+         bound.sourceBinding?.archiveSha256===sourceSha256&&
+         /^[A-Za-z_][A-Za-z0-9_]*$/.test(name??'')&&
+         typeof sourceFile==='string'&&!sourceFile.startsWith('/')&&
+         !sourceFile.split('/').some(x=>!x||x==='.'||x==='..')&&
+         bound.files?.some(f=>f.source===sourceFile)&&Array.isArray(selected.matchedTestNames)){
+        const text=fs.readFileSync(path.join(dir,sourceFile),'utf8');
+        const names=[...text.matchAll(/\\bfunction\\s+(test[A-Za-z0-9_]+)\\s*\\(/g)]
+          .map(x=>x[1]).filter(x=>x.startsWith(name)).sort();
+        const expected=[...selected.matchedTestNames].sort();
+        if(names.length>0&&JSON.stringify(names)===JSON.stringify(expected))
+          resolvedNativeFuzzMatchTest=name;
+      }
+    }catch{}
+  }
+  if(type==='FOUNDRY_TEST'){
+    const match=blueprint.configuration?.analysis?.nativeFuzz?.matchTest??resolvedNativeFuzzMatchTest;
+    need('executionBlueprint.configuration.analysis.nativeFuzz.matchTest',
+      /^[A-Za-z_][A-Za-z0-9_]*$/.test(match??''),
+      'an exact generation-bound, agent-selected existing test name is required; automatic fuzz/invariant runs are disabled');
+  }
  }
  need('phase0Source.archiveRepository',nonempty(phase0Source?.archiveRepository));
  need('phase0Source.archiveCommit',/^[0-9a-f]{40}$/.test(phase0Source?.archiveCommit??''));
@@ -172,6 +203,8 @@ export function generateV7ExecutionRequestV1({campaignId,campaignGenerationId,so
  const configuration=structuredClone(blueprint.configuration);
  if(resolvedGenerationHarnessId && configuration.harness)
    configuration.harness.bundleId=resolvedGenerationHarnessId;
+ if(resolvedNativeFuzzMatchTest&&configuration.analysis?.nativeFuzz)
+   configuration.analysis.nativeFuzz.matchTest=resolvedNativeFuzzMatchTest;
  // Preserve test intent in a non-executable, controller-owned sidecar emitted
  // with the machine request; the V7 configuration schema forbids arbitrary fields.
  const designEvidence={setup:target.setup,prerequisites:target.prerequisites,
