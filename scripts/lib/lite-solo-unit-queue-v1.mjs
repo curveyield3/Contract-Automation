@@ -941,7 +941,11 @@ function readPagedPrefillV1(root,rel,rawManifest,onVerificationFailure=null){
 function readPlan(root,campaign,phase,onVerificationFailure=null){
  const check=(affectedFile,name,reason,expected=null,observed=null)=>{
   if(typeof onVerificationFailure==='function'){
-   onVerificationFailure(affectedFile,name,reason,expected,observed);
+   const priorPath=index?.campaignPath;
+   const campaignScoped=typeof affectedFile==='string'&&typeof priorPath==='string'&&
+    priorPath!==campaign&&affectedFile.startsWith(priorPath+'/')?
+    campaign+affectedFile.slice(priorPath.length):affectedFile;
+   onVerificationFailure(campaignScoped,name,reason,expected,observed);
    return;
   }
   throw Error(reason);
@@ -963,7 +967,8 @@ function readPlan(root,campaign,phase,onVerificationFailure=null){
   ?campaign+s.slice(prior.length):s;
  const units=[];
  for(const p of index.pages){
-  if(!p||typeof p.path!=='string'||!p.path.startsWith(campaign+'/')){
+  if(!p||typeof p.path!=='string'||
+     !(p.path.startsWith(campaign+'/')||(prior!==campaign&&p.path.startsWith(prior+'/')))){
    check(planRel(campaign,phase),'FINALIZE_UNIT_PLAN_PAGE_LOCATOR',
     'Plan index contains a page with no valid path within the exact campaign; cannot safely read it',
     'Campaign-scoped unit-plan page',p?.path??null);
@@ -994,7 +999,7 @@ function readPlan(root,campaign,phase,onVerificationFailure=null){
      check(u.initialValueRef,'FINALIZE_UNIT_PREFILL_SOURCE_SHA256',
       'Original unit prefill bytes differ from issued SHA-256; keep exact readable bytes',
       u.initialValueSha256,hex(rawValue));
-    u.initialValue=readPagedPrefillV1(root,u.initialValueRef,rawValue,onVerificationFailure);
+    u.initialValue=readPagedPrefillV1(root,u.initialValueRef,rawValue,check);
    }
    if(u.issuedMetaRef){
     const raw=fs.readFileSync(repoFile(root,u.issuedMetaRef));
@@ -1002,7 +1007,7 @@ function readPlan(root,campaign,phase,onVerificationFailure=null){
      check(u.issuedMetaRef,'FINALIZE_ISSUED_METADATA_SHA256',
       'Issued roster metadata SHA-256 differs from original record; keep received metadata bytes',
       u.issuedMetaSha256,hex(raw));
-    u.issuedMeta=readPagedPrefillV1(root,u.issuedMetaRef,raw,onVerificationFailure);
+    u.issuedMeta=readPagedPrefillV1(root,u.issuedMetaRef,raw,check);
    }
    if(u.kind==='BATCH'){
     if(!u.membersRef||u.membersRef!==u.packetPath){
@@ -1016,7 +1021,7 @@ function readPlan(root,campaign,phase,onVerificationFailure=null){
      check(u.membersRef,'FINALIZE_BATCH_PACKET_SHA256',
       'BATCH member manifest digest differs from issued metadata; retain original bytes',
       u.packetSha256,hex(raw));
-    const payload=readPagedPrefillV1(root,u.membersRef,raw,onVerificationFailure);
+    const payload=readPagedPrefillV1(root,u.membersRef,raw,check);
     if(payload?.unitId!==u.unitId||payload?.phaseSequence!==phase||
        payload?.schemaVersion!=='curveyield-lite-solo-batched-assignment-v1'||
        !Array.isArray(payload?.members)||payload.members.length<2)
