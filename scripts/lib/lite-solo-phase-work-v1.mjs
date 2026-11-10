@@ -17,7 +17,7 @@ export function writeText(file,value){fs.mkdirSync(path.dirname(file),{recursive
  * the original evidence. Repeated identical failures are idempotent.
  */
 export function recordPhaseFinalizationVerificationWarningV1({
- root,campaignPath,phase,affectedFile,check,reason,expected=null,observed=null
+ root,campaignPath,phase,revision=1,affectedFile,check,reason,expected=null,observed=null
 }){
  if(typeof check!=='string'||!check.trim()||typeof reason!=='string'||!reason.trim())
   throw Error('Failed verification warning requires the exact check and failure reason');
@@ -26,17 +26,23 @@ export function recordPhaseFinalizationVerificationWarningV1({
  const relative=path.relative(campaignDir,affected).replaceAll('\\','/');
  if(!relative||relative==='..'||relative.startsWith('../')||path.isAbsolute(relative))
   throw Error('Verification warning must accompany a file inside its campaign');
- const warningFile=path.join(path.dirname(affected),path.basename(affected)+'.VERIFICATION_WARNINGS_v1.json');
+ if(!Number.isInteger(Number(phase))||Number(phase)<0||Number(phase)>10||
+    !Number.isInteger(Number(revision))||Number(revision)<1)
+  throw Error('Verification warning requires a valid phase and revision');
+ const warningFile=path.join(path.dirname(affected),path.basename(affected)+
+  '.PHASE_'+String(phase).padStart(2,'0')+'_R'+String(revision).padStart(4,'0')+
+  '.VERIFICATION_WARNINGS_v1.json');
  const warningRel=path.relative(path.resolve(root),warningFile).replaceAll('\\','/');
  let document=null;
  if(fs.existsSync(warningFile))document=readJson(warningFile);
  if(document&&(document.schemaVersion!=='curveyield-machine-finalization-verification-warnings-v1'||
-     document.campaignPath!==campaignPath||document.affectedFile!==affectedFile))
+     document.campaignPath!==campaignPath||document.affectedFile!==affectedFile||
+     document.phase!==Number(phase)||document.revision!==Number(revision)))
   throw Error('Existing verification-warning sidecar belongs to a different evidence source');
  if(!document)document={
   schemaVersion:'curveyield-machine-finalization-verification-warnings-v1',
   warningType:'NON_BLOCKING_FAILED_VERIFICATION',
-  campaignPath,affectedFile,originalEvidenceUnmodified:true,warnings:[]
+  campaignPath,affectedFile,phase:Number(phase),revision:Number(revision),originalEvidenceUnmodified:true,warnings:[]
  };
  const identity=JSON.stringify({phase,check,reason,expected,observed});
  if(!document.warnings.some(w=>JSON.stringify({
