@@ -888,6 +888,53 @@ export function processUnitRequestV1({root,campaignPath,directory,request,automa
 // Never replace reviewer answers, accepted snapshot bytes or a substantive rework.
 export function recoverSourceBoundRequestReworkV1({root,campaignPath,directory}={}){
  const phase=5,rel=queueRel(campaignPath,phase),queue=maybe(root,rel);
+ // A source-only request-generation failure is not a reviewer deficiency.
+ // Retry a historical unmapped blocker only after every named target's
+ // immutable accepted snapshot independently regenerates a valid exact-gen
+ // request from the frozen Phase-0 source and the verified harness copy.
+ if(queue?.finalizeStatus==='BLOCKED'&&
+    Object.values(queue.units??{}).length>0&&
+    Object.values(queue.units).every(x=>x.status==='ACCEPTED')&&
+    Array.isArray(queue.finalizeDetails?.unmappedDeficiencies)&&
+    queue.finalizeDetails.unmappedDeficiencies.length>0){
+  const reasons=queue.finalizeDetails.unmappedDeficiencies;
+  const keys=reasons.map(reason=>
+    String(reason).match(/^Phase 5 trusted execution request missing for ([A-Za-z0-9._-]+)$/)?.[1]);
+  if(keys.every(Boolean)){
+   const plan=readPlan(root,campaignPath,phase);assertPlan(queue,plan);
+   const source=read(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'))?.source;
+   const valid=keys.every(key=>plan.units.some(u=>{
+    if(u.field!=='targetDesigns')return false;
+    const state=queue.units[u.unitId];
+    if(!state?.acceptedPath?.startsWith(unitBase(campaignPath,phase,u.unitId)+'/'))return false;
+    const accepted=maybe(root,state.acceptedPath);
+    if(accepted?.schemaVersion!==UNIT_ARTIFACT_SCHEMAS.accepted||
+       accepted.unitId!==u.unitId||
+       accepted.campaignGenerationId!==directory.campaignGenerationId||
+       accepted.sourceSha256!==directory.sourceSha256||
+       accepted.authorityDigest!==directory.authorityDigest||
+       accepted.phaseSequence!==phase||accepted.phaseEpoch!==plan.phaseEpoch||
+       accepted.unitSpecRevision!==u.unitSpecRevision||
+       accepted.submissionSha256!==state.acceptedSha256||
+       !dependenciesFresh(queue,u,accepted.prerequisiteEvidence))return false;
+    const entry=accepted.submission?.entries?.find(e=>e.value?.candidateKey===key);
+    if(!entry||!u.recordKeys?.includes(entry.key))return false;
+    const made=generateV7ExecutionRequestV1({
+     campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
+     sourceSha256:directory.sourceSha256,phase0Source:source,
+     target:entry.value,automationRoot:process.cwd()
+    });
+    return made.status==='GENERATED'&&
+      made.request?.source?.archiveSha256===directory.sourceSha256&&
+      made.request?.assignmentId?.startsWith('phase-05-g');
+   }));
+   if(valid){
+    queue.finalizeStatus='NOT_STARTED';queue.finalizeDetails=null;queue.revision++;
+    put(root,rel,queue);
+    return {restored:[],clearedBlocked:true};
+   }
+  }
+ }
  if(queue?.finalizeStatus!=='REWORK_REQUIRED'||
     !Array.isArray(queue.finalizeDetails?.reopenedUnits)||
     !queue.finalizeDetails.reopenedUnits.length)return {restored:[]};
