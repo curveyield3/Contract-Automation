@@ -6,9 +6,9 @@
   "submission_mode": "submit",
   "max_chunks": "32",
   "ai_hop": "0",
-  "dispatchRevision": "v23",
+  "dispatchRevision": "v24",
   "sourceExpectedSha256": "299fda8224b658a17bf0068690a321f295c1d7ee655eaf72470023ec33a0eb71",
-  "previousCampaign": "cyvbusdcv28-r6",
-  "retryReason": "Re-execute existing Machine Intelligence 2-runner source and settings after canonical Tailscale OIDC audience repair and public-claim diagnostics, preserving previous campaign.",
-  "retryOfFailedInferenceRun": "42675654063"
+  "previousCampaign": "cyvbusdcv28-r7",
+  "retryReason": "New independent Machine Intelligence audit after production deployment of Lite-Solo Cloudflare Worker v294; reuse prior cyvbusdcv28-r7 source and existing 2-runner, submit, max_chunks 32 settings without altering prior accepted work.",
+  "retryOfFailedInferenceRun": "42677785236"
 }
