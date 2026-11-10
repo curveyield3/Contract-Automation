@@ -6,6 +6,7 @@ import path from 'node:path';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
 import {materializeSemanticWorkFormV13} from './lib/lite-solo-work-shards-v1.mjs';
 import {validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
+import {resolveTargetExecutionRequestRef} from './lib/lite-solo-phase-prefill-v1.mjs';
 import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
 const [root,campaignPath,campaignId,sourceSha256]=process.argv.slice(2);
@@ -71,6 +72,25 @@ else if(!noExecutableCandidates)for(const [i,target] of designs.entries()){
   const method=String(target.executionMethod??'');
   if(method==='NOT_APPLICABLE')continue;
   if(method!=='V7_REQUEST'){fail(prefix+'.executionMethod','Unsupported method');continue;}
+  // Reuse the exact-generation, already-produced request before considering
+  // new request generation. Phase-5 test harnesses can be repaired after the
+  // request was generated; requiring their bytes to equal the historical
+  // legacy harness would wrongly block valid current-generation evidence.
+  // The existing binding verifier still validates source, generation,
+  // candidate, expected observation, and harness campaign provenance.
+  const currentRef=resolveTargetExecutionRequestRef({
+    root,campaignPath,target,expectedCampaignGenerationId:campaignGenerationId
+  });
+  if(currentRef){
+    const existing=validateTargetExecutionRequestBindingV1({
+      controllerRoot:root,campaignPath,target:{...target,executionRequestRef:currentRef},
+      expectedCampaignId:campaignId,
+      expectedCampaignGenerationId:campaignGenerationId,expectedSourceSha256:sourceSha256
+    });
+    if(existing.status.startsWith('PASS_'))ready.push(key);
+    else fail(prefix+'.executionRequestRef',existing.status,existing.reasons);
+    continue;
+  }
   const explicitRequestRef=target.executionRequestRef&&!String(target.executionRequestRef).trim().startsWith('<')
     ? String(target.executionRequestRef) : null;
   const explicitBinding=explicitRequestRef?validateTargetExecutionRequestBindingV1({
