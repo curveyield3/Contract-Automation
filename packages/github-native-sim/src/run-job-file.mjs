@@ -253,8 +253,10 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
     // Forge subprocess. Do not rewrite foundry.toml or any audited source.
     env: { ...environment, ETH_RPC_URL: rpcUrl,
       ...(boosthubP5 ? {
-        FOUNDRY_SRC: 'verification_v6/phase5',
-        FOUNDRY_TEST: 'verification_v6/phase5'
+        // Phase 5 harness stages Solidity tests into test/phase5. The
+        // frozen source archive has no verification_v6/phase5 directory.
+        FOUNDRY_SRC: 'contracts',
+        FOUNDRY_TEST: 'test'
       } : {}) }, redactValues: [rpcUrl], forkEvidence,
     recoverableExitCodes: native.recoverableExitCodes ?? [],
   }, { ...(runCommand ? { runCommand } : {}) });
@@ -357,7 +359,7 @@ export async function runGitHubNativeJob(input, {
     // candidates. Phase-5 target execution runs Slither only when explicitly asked
     // for it; implicit project-wide Slither is unrelated to selected test proof.
     const phase5Target = request.gateId === 'phase5-target-execution';
-    if (phase5Target && requestedAnalysis.slither === undefined) stage2aConfig.slither = false;
+    if (phase5Target) stage2aConfig.slither = false;
     try {
       await runStage2aAnalysis(stage2aConfig, {
         runSlither: async () => {
