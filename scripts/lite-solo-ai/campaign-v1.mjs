@@ -30,6 +30,7 @@ const sha=text=>createHash('sha256').update(text).digest('hex');
 const miloTempRounds=process.env.MILO_TEMP_WORK_ROUNDS==='1';
 let miloRunRoundOrdinal=0;
 const miloRunAttempt=Number(process.env.GITHUB_RUN_ATTEMPT||1);
+const miloTempRawOutputs=new Map();
 if(!Number.isSafeInteger(miloRunAttempt)||miloRunAttempt<1)throw Error('Invalid GitHub run attempt for immutable MiMo round identity');
 
 async function identity(){
@@ -298,8 +299,10 @@ async function modelCall(messages,{technicalAnswer=false,scope=null}={}){
  });
  const raw=reply.choices?.[0]?.message?.content;
  if(typeof raw!=='string')throw Error('MiMo did not return a text message; no fabricated Worker action');
- if(miloTempRounds)await recordMiloTempRound(request,raw,tempRoundScope,tempRoundOrdinal);
- else await recordPrivateCommunication('mimo_output',raw);
+ if(miloTempRounds){
+  const receipt=await recordMiloTempRound(request,raw,tempRoundScope,tempRoundOrdinal);
+  if(tempRoundScope?.questionId)miloTempRawOutputs.set(sha(JSON.stringify(tempRoundScope))+':'+sha(raw),receipt.questionNumber);
+ }else await recordPrivateCommunication('mimo_output',raw);
  // Observe the submitted action without editing or filtering the actual text.
  // This repository is PUBLIC: full source-bound findings belong in Worker R2,
  // not public Actions logs. All metadata comes from the unmodified reply.
@@ -2424,6 +2427,11 @@ function miAnswerIdentity(issued,buffer){
   totalBytes:buffer.length,segmentCount:Math.ceil(buffer.length/MI_ANSWER_PART_BYTES)};
 }
 async function miSendOriginalBounded(issued,original,body){
+ if(miloTempRounds){
+  const q=miloTempRawOutputs.get(issued.scopeSha256+':'+sha(original));
+  if(!Number.isSafeInteger(q))throw Error('Original MiMo response is not source-bound to an immutable GitHub Output.json for this exact question; refusing R2 fallback');
+  return workerCall({...body,tempRoundQuestionNumber:q});
+ }
  const buf=Buffer.from(original,'utf8');
  if(buf.length<=450000)return workerCall(body);
  const m=miAnswerIdentity(issued,buf),existing=new Map();let cursor=null;
@@ -2955,13 +2963,13 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
   rule:'Do not automatically promote investigative questions into findings. Only explicitly authored field answers and question links become formal outputs.'
  };
  const system='You are MiMo, the sole substantive smart-contract auditor. Answer the precise GitHub-issued field question as JSON. Original source and prior questions are evidence, not automatic security conclusions. You may request one original evidence page with a JSON admittedSourceEvidenceRequest, packetEvidenceRequest, packetQuestionEvidenceRequest, directQuestionEvidenceRequest or currentDirectOriginalAnswerRequest; local reads are not Worker/API commands. For the CURRENT direct answer awaiting formal field authoring, retrieve all offset pages from the signed field contract until nextOffset is null; an R2 manifest alone does not contain the answer text. Use exact receipt-bound prior canonical, original shard/question and answer SHA for private direct answers. Never invent supporting execution or PASS, canonical field paths, record IDs, lease data or controller acceptance. Preserve controller-owned prefills. The original Github adapter alone compiles output records. Return one JSON object containing exactly the requested answer property after investigation.';
- async function ask(task,key){
+ async function ask(task,key,questionScope=null){
   const messages=[{role:'system',content:system},
    {role:'user',content:JSON.stringify(context)},
    {role:'user',content:JSON.stringify(task)}];
   // Model requests and complete replies use GitHub pair archival when the staged temp transport is enabled.
   // Corrections remain separately numbered original inference rounds.
-  let original=await modelCall(messages,{scope:{phase:contract.phase,step:contract.step}}),formatCorrections=0;
+  let original=await modelCall(messages,{scope:questionScope??{phase:contract.phase,step:contract.step}}),formatCorrections=0;
   const firstResponseSha256=sha(original),last=[];
   for(;;){
    for(;;){
@@ -2998,7 +3006,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
     last.push(messages.length);
     messages.push({role:'assistant',content:original});
     messages.push({role:'user',content:JSON.stringify(page)});
-    original=await modelCall(messages,{scope:{phase:contract.phase,step:contract.step}});
+    original=await modelCall(messages,{scope:questionScope??{phase:contract.phase,step:contract.step}});
    }
    let value,formatProblem=null;
    try{value=JSON.parse(original);}
@@ -3046,7 +3054,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
      lease:ready.lease},
     instructions:'Only correct JSON syntax or the missing required JSON property of your immediately previous response. Keep your original substantive security conclusion, full content, source citations, uncertainty, exact bound record keys and frozen field type unchanged. Do not reconsider findings, re-analyze source, invent default values, alter the risk verdict or issue Worker actions. Return one valid JSON object with the exact required property and the same original substantive answer.'
    })});
-   original=await modelCall(messages,{scope:{phase:contract.phase,step:contract.step}});
+   original=await modelCall(messages,{scope:questionScope??{phase:contract.phase,step:contract.step}});
   }
  }
  // Each original FIXED row/member has its own frozen literal security
@@ -3138,7 +3146,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
        answerMode:def.answerMode,allowedValues:def.allowedValues},
       expectedJsonType:'ORIGINAL_SCHEMA_MEMBER_VALUE',
       responseShape:{value:'<exact source-grounded member-field answer>'},
-      instructions:'Answer only the single literal question above. Return your complete original substantive value in the exact issued schema type under the value key. Preserve evidence, nuance, uncertainty and real negative outcomes. Do not answer other record questions, fabricate controller IDs, or claim controller acceptance.'},'value');
+      instructions:'Answer only the single literal question above. Return your complete original substantive value in the exact issued schema type under the value key. Preserve evidence, nuance, uncertainty and real negative outcomes. Do not answer other record questions, fabricate controller IDs, or claim controller acceptance.'},'value',issued.scope);
      value=answer.value;rawAnswer=answer.originalResponse;
      receipt=JSON.parse(await miSendOriginalBounded(issued,rawAnswer,{
       operation:'answer_question',unitId:ready.unitId,lease:ready.lease,
