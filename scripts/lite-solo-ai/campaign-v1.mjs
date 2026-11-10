@@ -225,7 +225,7 @@ function ownerOfWorkerReply(raw){
   stage:answer.stage??null};
 }
 
-async function modelCall(messages,{technicalAnswer=false,scope=null,scopeSha256=null}={}){
+async function modelCall(messages,{technicalAnswer=false,scope=null,scopeSha256=null,returnUnpublishedRound=false}={}){
  if(miStep8HandoffDue())throw Error('MI_STEP8_RUN_HANDOFF_DUE');
  const request=JSON.stringify({
   model:'lite-solo-mimo-v1',
@@ -330,7 +330,7 @@ async function modelCall(messages,{technicalAnswer=false,scope=null,scopeSha256=
  });
  const raw=reply.choices?.[0]?.message?.content;
  if(typeof raw!=='string')throw Error('MiMo did not return a text message; no fabricated Worker action');
- if(miloTempRounds){
+ if(miloTempRounds&&!returnUnpublishedRound){
   const receipt=await recordMiloTempRound(request,raw,tempRoundScope,tempRoundOrdinal);
   // The Worker-issued scope digest is an opaque authority-bound identity.
   // Re-hashing a locally serialized scope object does NOT reproduce it.
@@ -339,7 +339,7 @@ async function modelCall(messages,{technicalAnswer=false,scope=null,scopeSha256=
     throw Error('Worker-issued original question scope SHA-256 unavailable for exact GitHub output selection');
    miloTempRawOutputs.set(scopeSha256+':'+sha(raw),receipt.questionNumber);
   }
- }else await recordPrivateCommunication('mimo_output',raw);
+ }else if(!miloTempRounds)await recordPrivateCommunication('mimo_output',raw);
  // Observe the submitted action without editing or filtering the actual text.
  // This repository is PUBLIC: full source-bound findings belong in Worker R2,
  // not public Actions logs. All metadata comes from the unmodified reply.
@@ -361,7 +361,7 @@ async function modelCall(messages,{technicalAnswer=false,scope=null,scopeSha256=
   completionTokens:reply.usage?.completion_tokens||null,
   elapsedSeconds:Math.round((Date.now()-start)/1000),
   substantiveText:'PRIVATE_WORKER_R2_ONLY'}));
- return raw;
+ return returnUnpublishedRound?{original:raw,modelRequest:request,roundOrdinal:tempRoundOrdinal}:raw;
 }
 
 // The Worker includes complete policy copies both in the original current/claim
@@ -3955,6 +3955,74 @@ async function miStep8RunLifecycle(){
  }
 }
 
+
+// Staged one-inference/one-question protocol. Worker owns the controller and
+// original GitHub Input/Output storage; MiMo receives no administrative forms.
+async function miAdaptiveSingleQuestionTransportV1(){
+ miStep8Active=true;
+ let prepared=JSON.parse(await workerCall({operation:'adaptive_turn'}));
+ for(;;){
+  if(miStep8HandoffDue())throw Error('MI_STEP8_RUN_HANDOFF_DUE');
+  if(prepared.status==='AI_ADAPTIVE_SUBMISSION_DISPOSITION'){
+   const disposition=prepared.submissionDisposition??{};
+   if(disposition.originalWorkerStatus==='REWORK_REQUIRED'||
+      disposition.originalWorkerDisposition?.fieldErrors?.length)
+    throw Error('Adaptive controller submission requires source-bound rework; original answers preserved');
+   prepared=JSON.parse(await workerCall({operation:'adaptive_turn'}));continue;
+  }
+  if(prepared.status==='AI_ADAPTIVE_AWAITING_PHASE_EVIDENCE'){
+   console.log(JSON.stringify({status:prepared.status,phase:prepared.transport?.scope?.phase,
+    step:prepared.transport?.scope?.step,originalQuestionPreserved:true,
+    nextOwner:'PHASE_SPECIFIC_SOURCE_EVIDENCE_IMPLEMENTATION',modelInferenceSkipped:true}));
+   return;
+  }
+  if(prepared.status==='AI_ADAPTIVE_WAITING'){
+   if(prepared.compilationStatus&&prepared.compilationStatus!=='CONTROLLER_CONTRACT_NOT_AVAILABLE'){
+    console.log(JSON.stringify({status:prepared.status,
+     compilationStatus:prepared.compilationStatus,sourceRecordsPreserved:true,
+     nextOwner:'EXISTING_CONTROLLER_FIELD_BINDING',modelInferenceSkipped:true}));
+    return;
+   }
+   await new Promise(resolve=>setTimeout(resolve,15000));
+   prepared=JSON.parse(await workerCall({operation:'adaptive_turn'}));continue;
+  }
+  if(prepared.status!=='AI_ADAPTIVE_QUESTION_PREPARED'||
+     prepared.protocol!=='machine-intelligence-adaptive-turn-v1')
+   throw Error('Unexpected adaptive Worker question/answer ownership: '+String(prepared.status));
+  const t=prepared.transport??{},m=prepared.modelInput??{};
+  if(typeof m.question!=='string'||!m.question.trim()||
+     !Array.isArray(m.evidence)||!m.evidence.length||
+     m.evidence.some(e=>typeof e.description!=='string'||typeof e.content!=='string'||!e.content)||
+     !t.scope||t.scope.questionId!==t.questionId||
+     sha(JSON.stringify(t.scope))!==t.scopeSha256)
+   throw Error('Adaptive one-question model input lacks complete actual source evidence or authenticated scope');
+  const messages=[
+   {role:'system',content:'You are an independent smart-contract security investigator. Answer the single supplied substantive question using only its actual source evidence. If asked to enumerate future questions, enumerate them without answering them. Do not produce controller forms, storage records, workflow instructions or administrative actions.'},
+   {role:'user',content:JSON.stringify(m)}];
+  const pending=await modelCall(messages,{technicalAnswer:true,scope:t.scope,
+   scopeSha256:t.scopeSha256,returnUnpublishedRound:true});
+  const payload={operation:'adaptive_turn',...t,questionScope:t.scope,
+   questionScopeSha256:t.scopeSha256,phase:t.scope.phase,step:t.scope.step,
+   runAttempt:miloRunAttempt,roundOrdinal:pending.roundOrdinal,
+   modelRequest:pending.modelRequest,modelOutput:pending.original,
+   answerText:pending.original,storageMode:'DIRECT_GITHUB_API_JSON'};
+  // Retry identical bytes only. Never ask MiMo to regenerate an ambiguous answer.
+  let answer=null;
+  for(let retry=0;retry<3;retry++){
+   try{answer=JSON.parse(await workerCall(payload));break;}
+   catch(error){if(retry===2)throw Error('Adaptive original source publication unconfirmed after identical retries: '+
+    String(error.message||error));}
+  }
+  if(!answer||!['AI_ADAPTIVE_QUESTION_PREPARED','AI_ADAPTIVE_AWAITING_PHASE_EVIDENCE',
+    'AI_ADAPTIVE_WAITING','AI_ADAPTIVE_SUBMISSION_DISPOSITION'].includes(answer.status))
+   throw Error('Adaptive original answer persisted without confirmed next state: '+String(answer?.status));
+  if(answer.previousDisposition&&
+     answer.previousDisposition.answerSha256!==sha(pending.original))
+   throw Error('Adaptive stored answer SHA differs from original model output');
+  prepared=answer;
+ }
+}
+
 const negotiatedText=await workerCall({operation:'protocol'});
 let negotiated;try{negotiated=JSON.parse(negotiatedText);}catch{throw Error('Invalid Worker protocol negotiation');}
 if(negotiated?.status!=='AI_BRIDGE_PROTOCOL_NEGOTIATED')throw Error('Worker protocol negotiation failed');
@@ -3962,7 +4030,7 @@ if(negotiated.machineIntelligence===true){
  if(negotiated.authorityRelease!=='machine-intelligence-v8'||
     negotiated.protocol!=='machine-intelligence-technical-question-transport-v1')
   throw Error('Machine Intelligence frozen release and inference protocol disagree');
- try{await miStep8RunLifecycle();}
+ try{if(miloTempRounds)await miAdaptiveSingleQuestionTransportV1();else await miStep8RunLifecycle();}
  catch(error){
   if(String(error?.message||error)!=='MI_STEP8_RUN_HANDOFF_DUE')throw error;
   // A current signed GitHub run only asks the existing Worker to dispatch an
