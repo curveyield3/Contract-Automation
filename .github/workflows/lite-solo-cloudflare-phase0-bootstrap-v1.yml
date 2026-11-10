@@ -282,6 +282,9 @@ jobs:
           echo "campaign_name=$(jq -r '.campaignName' /tmp/phase0-finalize.json)" >> "$GITHUB_OUTPUT"
 
       - name: Publish sealed Phase 0 receipt
+        # When Phase-0 packaging cannot physically finish, publish only
+        # existing failed-verification warnings, never an unsealed receipt.
+        if: ${{ always() && (steps.finalize.outcome == 'success' || steps.finalize.outcome == 'failure') }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
@@ -290,8 +293,18 @@ jobs:
           cd .audit-controller
           git config user.name 'CurveYield Phase0 Automation'
           git config user.email 'phase0-automation@users.noreply.github.com'
-          git add -- "$CAMPAIGN_PATH" "Audit Campaign Directory/campaigns"
+          if [ "${{ steps.finalize.outcome }}" = failure ]; then
+            mapfile -d '' -t warning_files < <(find "$CAMPAIGN_PATH" -type f -name '*.VERIFICATION_WARNINGS_v1.json' -print0)
+            if [ "${#warning_files[@]}" -eq 0 ]; then
+              echo "::warning::Phase-0 finalizer failed before generating a source verification warning; no partial receipt was published"
+              exit 0
+            fi
+            git add -- "${warning_files[@]}"
+          else
+            git add -- "$CAMPAIGN_PATH" "Audit Campaign Directory/campaigns"
+          fi
           if git diff --cached --quiet; then
+            if [ "${{ steps.finalize.outcome }}" = failure ]; then exit 0; fi
             echo "::error::Phase 0 finalizer produced no durable changes"
             exit 1
           fi
