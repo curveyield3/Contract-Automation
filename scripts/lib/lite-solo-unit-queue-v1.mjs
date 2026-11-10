@@ -2058,6 +2058,10 @@ function restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan}
 // transport. It is read from the existing immutable accepted unit snapshots.
 export function collectAcceptedAppendContinuationsV1({root,campaignPath,phase}){
  if(![4,5,6].includes(Number(phase)))return [];
+ const warn=(affectedFile,check,reason,expected=null,observed=null)=>
+  recordPhaseFinalizationVerificationWarningV1({
+   root,campaignPath,phase,affectedFile,check,reason,expected,observed
+  });
  if(!maybe(root,planRel(campaignPath,phase))||
     !maybe(root,queueRel(campaignPath,phase)))return [];
  const plan=readPlan(root,campaignPath,phase),queue=read(root,queueRel(campaignPath,phase));
@@ -2072,13 +2076,19 @@ export function collectAcceptedAppendContinuationsV1({root,campaignPath,phase}){
   const successor=plan.units.find(next=>next.kind==='APPEND'&&
    next.continuationAfterUnitId===u.unitId);
   if(!successor)
-   throw Error('APPEND_CONTINUATION_AWAITING_ISSUANCE: '+u.unitId);
+   warn(state.acceptedPath,'APPEND_CONTINUATION_AWAITING_ISSUANCE',
+    'Accepted source explicitly requests additional records, but no next unit has been issued; original accepted bytes retained and absence disclosed',
+    'Issued continuation unit',u.unitId);
  }
  for(const u of plan.units){
   if(u.kind!=='APPEND'||!(u.appendChunkNumber>1))continue;
   const state=queue.units?.[u.unitId];
-  if(state?.status!=='ACCEPTED'||!state.acceptedPath)
-   throw Error('APPEND_CONTINUATION_AWAITING_ACCEPTED_UNIT: '+u.unitId);
+  if(state?.status!=='ACCEPTED'||!state.acceptedPath){
+   warn(queueRel(campaignPath,phase),'APPEND_CONTINUATION_AWAITING_ACCEPTED_UNIT',
+    'Previously issued APPEND continuation has no accepted source; do not infer any negative result or discard pending work',
+    'Accepted continuation snapshot for '+u.unitId,state?.status??'UNAVAILABLE');
+   continue;
+  }
   const snapshot=read(root,state.acceptedPath);
   if(snapshot.unitId!==u.unitId||snapshot.phaseSequence!==phase||
      snapshot.campaignGenerationId!==plan.campaignGenerationId||
@@ -2086,8 +2096,18 @@ export function collectAcceptedAppendContinuationsV1({root,campaignPath,phase}){
      snapshot.authorityDigest!==plan.authorityDigest||
      snapshot.phaseEpoch!==plan.phaseEpoch||
      snapshot.submissionSha256!==state.acceptedSha256||
-     !Array.isArray(snapshot.submission?.entries))
-   throw Error('APPEND_CONTINUATION_ACCEPTED_SOURCE_MISMATCH: '+u.unitId);
+     !Array.isArray(snapshot.submission?.entries)){
+   warn(state.acceptedPath,'APPEND_CONTINUATION_ACCEPTED_SOURCE_MISMATCH',
+    'Accepted continuation source does not match issued campaign, generation, source, authority, epoch, digest, or entry structure; original bytes remain available without impersonating a verified source',
+    {unitId:u.unitId,phaseSequence:phase,campaignGenerationId:plan.campaignGenerationId,
+     sourceSha256:plan.sourceSha256,authorityDigest:plan.authorityDigest,
+     phaseEpoch:plan.phaseEpoch,submissionSha256:state.acceptedSha256},
+    {unitId:snapshot.unitId,phaseSequence:snapshot.phaseSequence,
+     campaignGenerationId:snapshot.campaignGenerationId,sourceSha256:snapshot.sourceSha256,
+     authorityDigest:snapshot.authorityDigest,phaseEpoch:snapshot.phaseEpoch,
+     submissionSha256:snapshot.submissionSha256});
+   continue;
+  }
   pages.push({unitId:u.unitId,path:u.path,
    chunkNumber:u.appendChunkNumber,startIndex:u.appendOrdinalStart,
    continuationAfterUnitId:u.continuationAfterUnitId,
