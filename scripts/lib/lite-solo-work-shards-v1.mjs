@@ -61,42 +61,61 @@ const appendChunkKeyV13=(tokens,chunk,ordinal)=>
 // continuation is a new agent-authored page, never a rewrite of that index.
 // appendContinuation:true explicitly promises the next page, so an incomplete
 // delivery cannot be silently mistaken for a completed collection.
-function directAppendPagesV13({root,workDir,desc,primary}){
+function directAppendPagesV13({root,workDir,desc,primary,onVerificationFailure=null}){
  if(!desc.append)return [];
+ const warn=(file,check,reason,expected=null,observed=null)=>{
+  if(!onVerificationFailure)throw new Error(check+': '+file);
+  onVerificationFailure(path.posix.join(workDir,file),check,reason,expected,observed);
+ };
  if(primary.schemaVersion!=='curveyield-work-shard-v13'||
     primary.kind!=='array'||!secureSameV13(primary.path,desc.path)||
-    primary.startIndex!==desc.startIndex||!Array.isArray(primary.entries))
-  throw new Error('APPEND_PRIMARY_CHUNK_IDENTITY_MISMATCH: '+desc.file);
+    primary.startIndex!==desc.startIndex||!Array.isArray(primary.entries)){
+  warn(desc.file,'APPEND_PRIMARY_CHUNK_IDENTITY_MISMATCH',
+   'Primary APPEND shard does not match the issued path, start, or type; preserve original submitted bytes',
+   {path:desc.path,startIndex:desc.startIndex,kind:'array'},{
+    path:primary?.path,startIndex:primary?.startIndex,kind:primary?.kind});
+  if(!Array.isArray(primary.entries))return [];
+ }
  if(primary.entries.length>MAX_V13_APPEND_RECORDS||
     bytes(primary)>MAX_V13_APPEND_BYTES)
-  throw new Error((primary.entries.length===1?
-   'APPEND_SINGLE_RECORD_TRANSPORT_LIMIT: ':
-   'APPEND_PRIMARY_CHUNK_TRANSPORT_LIMIT: ')+desc.file);
+  warn(desc.file,primary.entries.length===1?'APPEND_SINGLE_RECORD_TRANSPORT_LIMIT':'APPEND_PRIMARY_CHUNK_TRANSPORT_LIMIT',
+   'Original primary APPEND chunk exceeds legacy size/count bound; keep all original records',
+   {maximumRecords:MAX_V13_APPEND_RECORDS,maximumBytes:MAX_V13_APPEND_BYTES},
+   {records:primary.entries.length,bytes:bytes(primary)});
  const names=fs.readdirSync(relfile(root,workDir));
  const prefix=desc.file.replace(/_v1\.json$/,'_CONT_');
  const suffix='_v1.json';
  const found=names.filter(name=>name.startsWith(prefix)&&name.endsWith(suffix));
- const numbered=found.map(file=>{
+ const numbered=found.map((file,order)=>{
   const index=Number(file.slice(prefix.length,-suffix.length));
   if(!Number.isSafeInteger(index)||index<2||
-     file!==appendContinuationFileV13(desc.file,index))
-   throw new Error('APPEND_CONTINUATION_INVALID_FILENAME: '+file);
+     file!==appendContinuationFileV13(desc.file,index)){
+   warn(file,'APPEND_CONTINUATION_INVALID_FILENAME',
+    'Continuation filename does not encode a valid original APPEND chunk ordinal; source remains in its original file',
+    'Issued _CONT_NNNN_v1.json sequence',file);
+   return {file,index:100000000+order};
+  }
   return {file,index};
  }).sort((a,b)=>a.index-b.index);
  const out=[];
  let preceding=primary,ordinalStart=desc.startIndex+primary.entries.length;
  for(let i=0;i<numbered.length;i++){
   const {file,index}=numbered[i];
-  if(index!==i+2)throw new Error('APPEND_CONTINUATION_MISSING_CHUNK: '+desc.file);
+  if(index!==i+2)warn(file,'APPEND_CONTINUATION_MISSING_CHUNK',
+   'Expected continuation ordinal is missing; all physically present continuation sources remain in numeric order',
+   i+2,index);
   if(preceding.appendContinuation!==true)
-   throw new Error('APPEND_CONTINUATION_NOT_REQUESTED: '+file);
+   warn(file,'APPEND_CONTINUATION_NOT_REQUESTED',
+    'Continuation file exists without an earlier explicit continuation request; source contents are retained',
+    true,preceding.appendContinuation??null);
   const rel=path.posix.join(workDir,file);
   const raw=fs.readFileSync(relfile(root,rel));
   if(raw.length>MAX_V13_APPEND_BYTES){
    let single=false;
    try{single=JSON.parse(raw.toString('utf8'))?.entries?.length===1;}catch{}
-   throw new Error((single?'APPEND_SINGLE_RECORD_TRANSPORT_LIMIT: ':
-    'APPEND_CONTINUATION_TRANSPORT_LIMIT: ')+file);
+   warn(file,single?'APPEND_SINGLE_RECORD_TRANSPORT_LIMIT':'APPEND_CONTINUATION_TRANSPORT_LIMIT',
+    'Source APPEND continuation exceeds old serialized byte bound; keep entire original source',
+    MAX_V13_APPEND_BYTES,raw.length);
   }
   const page=JSON.parse(raw.toString('utf8'));
   if(page.schemaVersion!=='curveyield-work-shard-v13'||
@@ -104,31 +123,49 @@ function directAppendPagesV13({root,workDir,desc,primary}){
      page.startIndex!==ordinalStart||!Array.isArray(page.entries)||
      page.entries.length>MAX_V13_APPEND_RECORDS||
      page.entries.some((entry,j)=>entry?.key!==
-      appendChunkKeyV13(desc.path,index,j)))
-   throw new Error('APPEND_CONTINUATION_IDENTITY_MISMATCH: '+file);
+      appendChunkKeyV13(desc.path,index,j))){
+   warn(file,'APPEND_CONTINUATION_IDENTITY_MISMATCH',
+    'Original continuation content differs from issued path, index, or record keys; retain its unaltered source values',
+    {path:desc.path,startIndex:ordinalStart,chunk:index},
+    {path:page.path,startIndex:page.startIndex,chunk:index});
+   if(!Array.isArray(page.entries))continue;
+  }
   out.push({file,chunkNumber:index,...page});
   preceding=page;ordinalStart+=page.entries.length;
  }
  if(preceding.appendContinuation===true)
-  throw new Error('APPEND_CONTINUATION_AWAITING_NEXT_CHUNK: '+desc.file);
+  warn(desc.file,'APPEND_CONTINUATION_AWAITING_NEXT_CHUNK',
+   'Last received page declares more source records that are not physically present; do not claim the collection is complete',
+   'Next source continuation exists',null);
  return out;
 }
 // Queue-owned continuation arrays are only supplied from the accepted unit
 // roster, never inferred from editable shard files. Source-bound ordering is
 // controlled by the issued continuation ordinal and not by commit order.
-function queuedAppendPagesV13({desc,provided,primaryCount}){
+function queuedAppendPagesV13({desc,provided,primaryCount,onVerificationFailure=null,workDir=null}){
+ const warn=(check,reason,expected=null,observed=null)=>{
+  if(!onVerificationFailure)throw new Error(check+': '+desc.file);
+  onVerificationFailure(path.posix.join(workDir||'',desc.file),check,reason,expected,observed);
+ };
  const selected=provided.filter(page=>secureSameV13(page.path,desc.path));
  const sorted=[...selected].sort((a,b)=>a.chunkNumber-b.chunkNumber);
  let expectedIndex=desc.startIndex+primaryCount;
  for(const [i,page] of sorted.entries()){
   if(page.chunkNumber!==i+2||page.startIndex!==expectedIndex||
      !Array.isArray(page.entries)||page.entries.length>MAX_V13_APPEND_RECORDS||
-     page.entries.some((entry,j)=>entry?.key!==appendChunkKeyV13(desc.path,page.chunkNumber,j)))
-   throw new Error('QUEUED_APPEND_CONTINUATION_IDENTITY_MISMATCH: '+desc.file);
+     page.entries.some((entry,j)=>entry?.key!==appendChunkKeyV13(desc.path,page.chunkNumber,j))){
+   warn('QUEUED_APPEND_CONTINUATION_IDENTITY_MISMATCH',
+    'Accepted continuation differs from original issued sequence; original source retained without truncation',
+    {chunkNumber:i+2,startIndex:expectedIndex,maximumRecords:MAX_V13_APPEND_RECORDS},
+    {chunkNumber:page.chunkNumber,startIndex:page.startIndex,records:page.entries?.length??null});
+   if(!Array.isArray(page.entries))continue;
+  }
   const slab={schemaVersion:'curveyield-work-shard-v13',kind:'array',
    path:desc.path,startIndex:page.startIndex,entries:page.entries};
   if(bytes(slab)>MAX_V13_APPEND_BYTES)
-   throw new Error('QUEUED_APPEND_CONTINUATION_TRANSPORT_LIMIT: '+desc.file);
+   warn('QUEUED_APPEND_CONTINUATION_TRANSPORT_LIMIT',
+    'Accepted continuation is larger than former per-chunk bound; do not truncate original data',
+    MAX_V13_APPEND_BYTES,bytes(slab));
   expectedIndex+=page.entries.length;
  }
  return sorted;
@@ -190,9 +227,9 @@ export function materializeSemanticWorkFormV13({root,formRel,acceptedContinuatio
     // Each page stays separately bounded and retains its own original key.
     const additional=desc.append?
      (acceptedContinuations.length?
-       queuedAppendPagesV13({desc,provided:acceptedContinuations,primaryCount:entries.length}):
+       queuedAppendPagesV13({desc,provided:acceptedContinuations,primaryCount:entries.length,onVerificationFailure:warn,workDir}):
        [1,2,3,8,9,10].includes(issuedPhase)?
-        directAppendPagesV13({root,workDir,desc,primary:shard}):[]):[];
+        directAppendPagesV13({root,workDir,desc,primary:shard,onVerificationFailure:warn}):[]):[];
     const records=[...entries.slice(0,count),...additional.flatMap(page=>page.entries)];
     for(const page of additional)if(page.unitId)consumedContinuationUnits.add(page.unitId);
     const pathKey=JSON.stringify(desc.path);
