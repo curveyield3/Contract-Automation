@@ -292,8 +292,40 @@ function verifiedSegmentedAnswerSourceV1(root,ref,index,question){
  if(m.schemaVersion!=='curveyield-ai-original-answer-manifest-v1'||
     Object.entries(expected).some(([k,v])=>m[k]!==v)||
     m.pageCount!==m.segmentCount||m.verifiedOriginalSha256!==m.fullSha256||
-    m.storage!=='IMMUTABLE_GITHUB_PAGES'||m.originalUtf8BoundaryPages!==true)
+    !['IMMUTABLE_GITHUB_PAGES','MILO_TEMP_GITHUB_OUTPUT_POINTER'].includes(m.storage)||(m.storage==='IMMUTABLE_GITHUB_PAGES'&&m.originalUtf8BoundaryPages!==true))
   throw Error('original answer manifest scope or contents differ from accepted question');
+ if(m.storage==='MILO_TEMP_GITHUB_OUTPUT_POINTER'){
+  const campaignRoot=index.questionIndexPath.split('/work/')[0];
+  const rootPrefix='Milo Temp Work/'+campaignRoot.slice('campaigns/'.length)+'/Phase '+index.phaseSequence+'/';
+  if(!campaignRoot.startsWith('campaigns/')||!m.outputPath?.startsWith(rootPrefix)||
+   !/\/Step [0-9]+\/Q[0-9]+, Phase [0-9]+, Step [0-9]+, Output[.]json$/.test(m.outputPath)||
+   !/^[a-f0-9]{40}$/.test(m.outputSourceCommit||'')||
+   m.pageCount!==1||m.segmentCount!==1||m.verifiedOriginalSha256!==m.fullSha256)
+   throw Error('Milo answer source pointer lacks exact bound campaign/phase identity');
+  const outputBytes=fs.readFileSync(repoFile(root,m.outputPath));
+  const o=JSON.parse(outputBytes.toString('utf8'));
+  if(o.schemaVersion!=='milo-temp-question-round-v1'||
+   o.campaignId!==index.campaignId||o.campaignGenerationId!==index.campaignGenerationId||
+   o.phase!==index.phaseSequence||o.direction!=='Output'||
+   o.questionId!==question.questionId||o.questionSha256!==expected.questionSha256||
+   o.originalContentSha256!==m.fullSha256||
+   hex(Buffer.from(o.originalContent,'utf8'))!==m.fullSha256||
+   Buffer.byteLength(o.originalContent,'utf8')!==m.totalBytes)
+   throw Error('Original Milo Output.json does not verify against the accepted question');
+  const inputPath=m.outputPath.replace(/Output[.]json$/,'Input.json');
+  const input=JSON.parse(fs.readFileSync(repoFile(root,inputPath),'utf8'));
+  if(input.campaignId!==o.campaignId||input.campaignGenerationId!==o.campaignGenerationId||
+   input.phase!==o.phase||input.step!==o.step||input.questionNumber!==o.questionNumber||
+   input.workflowRunId!==o.workflowRunId||input.runRoundOrdinal!==o.runRoundOrdinal||
+   input.questionScopeSha256!==o.questionScopeSha256||input.direction!=='Input'||
+   hex(Buffer.from(input.originalContent,'utf8'))!==input.originalContentSha256)
+   throw Error('Original Milo Input.json is absent or differs from paired output');
+  return {answerManifestSource:{path:ref.path,sha256:ref.sha256,selector:'originalGithubOutputJson',
+    originalOutputPath:m.outputPath,originalInputPath:inputPath,sourceCommit:m.outputSourceCommit},
+   originalAnswerSha256:m.fullSha256,originalAnswerBytes:m.totalBytes,originalPageCount:0,
+   firstContentPage:null,lastContentPage:null,
+   originalAnswerVerification:'DIRECT_GITHUB_INPUT_OUTPUT_SHA256_VERIFIED'};
+ }
  const pages=[],seen=new Set();let pointer=m.tail;
  while(pointer){
   if(typeof pointer.path!=='string'||!pointer.path.startsWith(base)||
