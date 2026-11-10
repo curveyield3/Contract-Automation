@@ -166,7 +166,9 @@ contract BoostHubV9VyperP5TargetsV1 {
         eligible=staking.claimable_reward(USER,address(reward));
         require(eligible>0,"REWARD_NOT_ACCRUED");
     }
-    function testFuzz_P5T001_ActualVyperRewardClaimFalseReturn(uint96 amount) public {
+    function test_P5T001_ActualVyperRewardClaimFalseReturn() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 amount = 1e18;
         (BoostV9BehaviorTokenV1 reward,IBoostVyperV22 st,uint256 accrued)=_rewardFixture(amount);
         uint256 preUser=reward.balanceOf(USER);
         reward.setBehavior(address(st),true,false);
@@ -175,21 +177,27 @@ contract BoostHubV9VyperP5TargetsV1 {
         require(reward.balanceOf(USER)==preUser,"FALSE_TRANSFER_DELIVERED");
         require(reward.balanceOf(address(st))>=accrued,"MISSING_STAKING_REWARD");
     }
-    function testFuzz_P5T001_ActualVyperRevertingRewardRollback(uint96 amount) public {
+    function test_P5T001_ActualVyperRevertingRewardRollback() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 amount = 1e18;
         (BoostV9BehaviorTokenV1 reward,IBoostVyperV22 st,uint256 accrued)=_rewardFixture(amount);
         reward.setBehavior(address(st),false,true);
         vm.expectRevert();
         vm.prank(USER);st.claim_reward(address(reward));
         require(st.claimable_reward(USER,address(reward))==accrued,"REVERT_DID_NOT_PRESERVE_CLAIM");
     }
-    function testFuzz_P5T001_ActualVyperStandardRewardDelivery(uint96 amount) public {
+    function test_P5T001_ActualVyperStandardRewardDelivery() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 amount = 1e18;
         (BoostV9BehaviorTokenV1 reward,IBoostVyperV22 st,uint256 accrued)=_rewardFixture(amount);
         uint256 before=reward.balanceOf(USER);
         vm.prank(USER);st.claim_reward(address(reward));
         require(reward.balanceOf(USER)-before==accrued,"STANDARD_PAYOUT_DELTA");
         require(st.claimable_reward(USER,address(reward))==0,"STANDARD_CLAIM_NOT_CLEARED");
     }
-    function testFuzz_P5T002_ActualVyperLPFalseReturn(uint96 amount) public {
+    function test_P5T002_ActualVyperLPFalseReturn() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 amount = 1e18;
         (BoostV9BehaviorTokenV1 lp,BoostV9VyperHubStubV1 hub,IBoostVyperV22 st)=_base();
         uint256 n=uint256(amount)%1e21+1;
         _stake(lp,st,n);
@@ -201,7 +209,9 @@ contract BoostHubV9VyperP5TargetsV1 {
         require(lp.balanceOf(USER)==oldUser,"FALSE_LP_TRANSFER_PAID");
         require(lp.balanceOf(address(st))>=n,"LP_NOT_STRANDED");
     }
-    function testFuzz_P5T002_ActualVyperStandardLPReturn(uint96 amount) public {
+    function test_P5T002_ActualVyperStandardLPReturn() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 amount = 1e18;
         (BoostV9BehaviorTokenV1 lp,,IBoostVyperV22 st)=_base();
         uint256 n=uint256(amount)%1e21+1;
         _stake(lp,st,n);
@@ -209,7 +219,9 @@ contract BoostHubV9VyperP5TargetsV1 {
         require(st.staked_balance(USER)==0,"STANDARD_STAKE_NOT_DEBITED");
         require(lp.balanceOf(USER)==n,"STANDARD_LP_NOT_RETURNED");
     }
-    function testFuzz_P5T002_ActualVyperLPRevertRollback(uint96 amount) public {
+    function test_P5T002_ActualVyperLPRevertRollback() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 amount = 1e18;
         (BoostV9BehaviorTokenV1 lp,,IBoostVyperV22 st)=_base();
         uint256 n=uint256(amount)%1e21+1;
         _stake(lp,st,n);
