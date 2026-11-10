@@ -63,8 +63,12 @@ jobs:
           const api=(p)=>{
             const location='/repos/curveyield3/Audit-Controller/contents/'+p.split('/').map(encodeURIComponent).join('/')+'?ref=main';
             const json=JSON.parse(execFileSync('gh',['api',location],{maxBuffer:12*1024*1024,encoding:'utf8'}));
-            if(json.encoding!=='base64')throw Error('unexpected GitHub content encoding for '+p);
-            return Buffer.from(json.content.replace(/\s/g,''),'base64');
+            // GitHub Contents API omits inline base64 above 1 MiB.
+            // Fetch the immutable Git blob by SHA for those large evidence parts.
+            const encoded=json.encoding==='base64'?json:
+              json.sha?JSON.parse(execFileSync('gh',['api','/repos/curveyield3/Audit-Controller/git/blobs/'+json.sha],{maxBuffer:12*1024*1024,encoding:'utf8'})):null;
+            if(encoded?.encoding!=='base64'||!encoded.content)throw Error('GitHub blob base64 unavailable for '+p);
+            return Buffer.from(encoded.content.replace(/\s/g,''),'base64');
           };
           function extractOutput(comp){
             const o=comp?.rawOutput??{};
