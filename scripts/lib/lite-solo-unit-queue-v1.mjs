@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
-import {repoFile,readJson,writeJson,loadPhaseSchema,validateWorkForm,requiredFile,attachOriginalCanonicalEvidenceRefsV1} from './lite-solo-phase-work-v1.mjs';
+import {repoFile,readJson,writeJson,loadPhaseSchema,validateWorkForm,requiredFile,attachOriginalCanonicalEvidenceRefsV1,recordPhaseFinalizationVerificationWarningV1} from './lite-solo-phase-work-v1.mjs';
 import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1} from '../../packages/github-native-sim/src/adr-discovery-validators-v1.mjs';
 import {reviewInventoryRelV1} from '../../packages/github-native-sim/src/adr-review-inventory-v1.mjs';
 import {buildUnitPacketV1,writeUnitPacketIndexV1,buildDiscoverySummaryV1,readUnitPacketV1} from '../../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
@@ -2099,6 +2099,10 @@ export function collectAcceptedAppendContinuationsV1({root,campaignPath,phase}){
 }
 
 export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}){
+ const warn=(affectedFile,check,reason,expected=null,observed=null)=>
+  recordPhaseFinalizationVerificationWarningV1({
+   root,campaignPath,phase,affectedFile,check,reason,expected,observed
+  });
  // GitHub copies and orders the actual Worker-provided bytes; no additional
  // identity, value, coverage, dependency, or security validation is performed.
  const ready=finalizeReadinessV1({root,campaignPath,directory,phase});
@@ -2141,7 +2145,12 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
    const entries=Array.isArray(accepted.submission?.entries)?accepted.submission.entries:[];
    for(const member of u.members){
     const entry=entries.find(e=>e?.key===member.recordKeys?.[0]);
-    if(!entry)continue; // Do not invent material that the Worker did not send.
+    if(!entry){
+     warn(queue.units[u.unitId].acceptedPath,'PHASE_FINALIZE_ACCEPTED_BATCH_MEMBER_MISSING',
+      'Accepted BATCH evidence has no entry for this originally issued member; original accepted snapshot remains unchanged',
+      member.recordKeys?.[0]??null,entries.map(e=>e?.key??null));
+     continue; // Preserve exact accepted source; never invent missing member answers.
+    }
     const group=byFile.get(member.shardPath)??[];
     group.push({unit:member,entries:[immutableIssuedValue(member,entry)]});byFile.set(member.shardPath,group);
    }
@@ -2162,7 +2171,9 @@ export function assembleAcceptedUnitShardsV1({root,campaignPath,directory,phase}
  }
  const acceptedContinuations=collectAcceptedAppendContinuationsV1({root,campaignPath,phase});
  materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath,
-  acceptedContinuations});
+  acceptedContinuations,
+  onVerificationFailure:({affectedFile,check,reason,expected,observed})=>
+   warn(affectedFile,check,reason,expected,observed)});
  return {status:'READY_FOR_EXISTING_BOUNDARY_SEAL',workShardIndexPath:assignment.workShardIndexPath,
   validationDelegatedTo:'CLOUDFLARE_WORKER'};
 }
