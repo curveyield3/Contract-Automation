@@ -4071,8 +4071,10 @@ if(negotiated?.status!=='AI_BRIDGE_PROTOCOL_NEGOTIATED')throw Error('Worker prot
 if(negotiated.machineIntelligence===true){
  miloTempRounds=true; // Each MI model round has only its exact GitHub Input/Output originals.
  if(negotiated.authorityRelease!=='machine-intelligence-v8'||
-    negotiated.protocol!=='machine-intelligence-technical-question-transport-v1')
-  throw Error('Machine Intelligence frozen release and inference protocol disagree');
+    negotiated.protocol!=='machine-intelligence-technical-question-transport-v1'||
+    negotiated.adaptiveTurnAvailable!==true||
+    negotiated.originalModelCallStorage!=='MILO_TEMP_WORK_GITHUB_JSON')
+  throw Error('Machine Intelligence adaptive GitHub-only Q&A is not activated on the deployed Worker; do not use legacy multi-question or R2 transcript transport');
  try{await miAdaptiveSingleQuestionTransportV1();}
  catch(error){
   if(String(error?.message||error)!=='MI_STEP8_RUN_HANDOFF_DUE')throw error;
