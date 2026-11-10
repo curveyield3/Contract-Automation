@@ -121,7 +121,7 @@ function miloPhaseArchiveV1({root,campaignPath,campaignId,generation,phase,prepa
  }
  return {status:prepare?'ARCHIVE_PREPARED_FOR_COMMIT':'ARCHIVE_CONFIRMED_COMMITTED',
   manifestRel,source,destination,sourcePhaseTreeSha:tree,archivePhaseTreeSha:tree,
-  sourceCommitSha:sourceCommit,archiveCommitSha,pairedQuestionCount:pairs.size,fileCount:blobs.length,
+  sourceCommitSha:prepare?sourceCommit:readJson(manifestFile).sourceCommitSha,archiveCommitSha,pairedQuestionCount:pairs.size,fileCount:blobs.length,
   manifestSha256:shaFile(manifestFile)};
 }
 function shaFileSourceString(text){return createHash('sha256').update(Buffer.from(text,'utf8')).digest('hex');}
