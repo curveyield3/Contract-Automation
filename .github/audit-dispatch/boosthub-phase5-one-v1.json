@@ -4,6 +4,6 @@
   "generationId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z",
   "candidateKey": "P4-CAND-STAKING-REWARD-SLOT-OVERFLOW",
   "testKind": "FOUNDRY_DETERMINISTIC",
-  "attempt": 3,
-  "note": "Isolated no-fuzz static eight-slot reward boundary test"
+  "attempt": 4,
+  "note": "Rerun deterministic P5T003 after trimming terminal newline from Phase-0 exact Vyper creation-hex text before vm.parseBytes"
 }
