@@ -4,7 +4,7 @@ import path from 'node:path';
 import {assertDeployGateEvidenceV2,digestV2} from './lib/phase0-deploy-gate-v2.mjs';
 import {compareLiveRuntimeV1} from '../packages/github-native-sim/src/phase0-deployment-profile-v1.mjs';
 import { createHash } from 'node:crypto';
-import {preparePhaseWork} from './lib/lite-solo-phase-work-v1.mjs';
+import {preparePhaseWork,recordPhaseFinalizationVerificationWarningV1} from './lib/lite-solo-phase-work-v1.mjs';
 import {detectionPolicyForAuthorityV1,authorityRootFromHomepageV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {buildFlowPlanV1} from '../packages/github-native-sim/src/adr-flow-plan-v1.mjs';
 
@@ -12,7 +12,7 @@ function args(argv){const out={};for(let i=2;i<argv.length;i+=2){const k=argv[i]
 function sha(bytes){return createHash('sha256').update(bytes).digest('hex');}
 function read(file){return JSON.parse(fs.readFileSync(file,'utf8'));}
 function write(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify(value,null,2)+'\n');}
-function digestFile(file){return sha(fs.readFileSync(file));}
+function digestFile(file){return fs.existsSync(file)?sha(fs.readFileSync(file)):null;}
 function required(file,label){if(!fs.existsSync(file)||!fs.statSync(file).isFile())throw new Error('missing '+label+': '+file);return file;}
 function rel(root,file){return path.relative(root,file).replaceAll('\\','/');}
 function upsert(rows,row,key='path'){const out=Array.isArray(rows)?structuredClone(rows):[];const i=out.findIndex(x=>x?.[key]===row?.[key]);if(i>=0)out[i]=row;else out.push(row);return out;}
@@ -34,45 +34,79 @@ if(!/^[0-9a-f]{40}$/.test(a['contract-automation-sha'])||
  // Preserve both values in the receipt without rejecting the campaign.
 
 const githubPhase0Diagnostics=[];
+const phase0VerificationWarnings=new Set();
+const phase0RecordedDiagnostics=new Set();
+function phase0Warning(file,check,reason,expected=null,observed=null){
+ const affectedFile=rel(controllerRoot,file);
+ const diagnostic=check+': '+reason;
+ githubPhase0Diagnostics.push(diagnostic);
+ phase0RecordedDiagnostics.add(diagnostic);
+ phase0VerificationWarnings.add(recordPhaseFinalizationVerificationWarningV1({
+  root:controllerRoot,campaignPath,phase:0,affectedFile,check,reason,expected,observed
+ }));
+}
+function evidenceFile(file,label){
+ if(!fs.existsSync(file)||!fs.statSync(file).isFile())
+  phase0Warning(file,'PHASE0_REQUIRED_EVIDENCE_FILE_MISSING',
+   label+' is not present at the issued campaign evidence path',
+   'Existing readable '+label+' file','MISSING');
+ return file;
+}
+function readEvidence(file){
+ try{return read(file);}
+ catch(error){
+  phase0Warning(file,'PHASE0_EVIDENCE_JSON_UNREADABLE',
+   'Cannot parse the supplied evidence JSON: '+String(error?.message??error),
+   'Readable JSON evidence',String(error?.code??'JSON_READ_FAILED'));
+  return {};
+ }
+}
+
 const evidence={
-  build:required(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'build identity'),
-  executionBuildArtifacts:required(path.join(campaignRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'reusable build artifacts'),
-  sbom:required(path.join(campaignRoot,'evidence/dependencies/SBOM_v1.json'),'SBOM'),
-  slither:required(path.join(campaignRoot,'evidence/static-analysis/SLITHER_v1.json'),'Slither evidence'),
-  sourceIntelligence:required(path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_v1.json'),'Source Intelligence'),
-  runtimeOverlay:required(path.join(campaignRoot,'evidence/source-intelligence/runtime-deployment-overlay_v1.json'),'runtime overlay'),
-  readinessOverlay:required(path.join(campaignRoot,'evidence/source-intelligence/assurance-readiness-overlay_v1.json'),'readiness overlay'),
-  bundle:required(path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json'),'Source Intelligence bundle'),
-  readiness:required(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'project readiness'),
-  deployConfigExecution:required(path.join(campaignRoot,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),'forked package deploy/config evidence'),
-  deployConfigMatrix:required(path.join(campaignRoot,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md'),'Phase-6 deploy/config matrix'),
-  targetedTestMatrix:required(path.join(campaignRoot,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md'),'Phase-6 targeted-test matrix'),
-  auditSurface:required(path.join(campaignRoot,'evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json'),'Phase-0 audit surface'),
-  graph:required(path.join(campaignRoot,'controller/SECURITY_TRACEABILITY_GRAPH_v1.json'),'traceability graph'),
-  ledger:required(path.join(campaignRoot,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),'obligation ledger'),
-  invalidation:required(path.join(campaignRoot,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json'),'evidence invalidation matrix')
+  build:evidenceFile(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'build identity'),
+  executionBuildArtifacts:evidenceFile(path.join(campaignRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'reusable build artifacts'),
+  sbom:evidenceFile(path.join(campaignRoot,'evidence/dependencies/SBOM_v1.json'),'SBOM'),
+  slither:evidenceFile(path.join(campaignRoot,'evidence/static-analysis/SLITHER_v1.json'),'Slither evidence'),
+  sourceIntelligence:evidenceFile(path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_v1.json'),'Source Intelligence'),
+  runtimeOverlay:evidenceFile(path.join(campaignRoot,'evidence/source-intelligence/runtime-deployment-overlay_v1.json'),'runtime overlay'),
+  readinessOverlay:evidenceFile(path.join(campaignRoot,'evidence/source-intelligence/assurance-readiness-overlay_v1.json'),'readiness overlay'),
+  bundle:evidenceFile(path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json'),'Source Intelligence bundle'),
+  readiness:evidenceFile(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'project readiness'),
+  deployConfigExecution:evidenceFile(path.join(campaignRoot,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),'forked package deploy/config evidence'),
+  deployConfigMatrix:evidenceFile(path.join(campaignRoot,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md'),'Phase-6 deploy/config matrix'),
+  targetedTestMatrix:evidenceFile(path.join(campaignRoot,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md'),'Phase-6 targeted-test matrix'),
+  auditSurface:evidenceFile(path.join(campaignRoot,'evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json'),'Phase-0 audit surface'),
+  graph:evidenceFile(path.join(campaignRoot,'controller/SECURITY_TRACEABILITY_GRAPH_v1.json'),'traceability graph'),
+  ledger:evidenceFile(path.join(campaignRoot,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),'obligation ledger'),
+  invalidation:evidenceFile(path.join(campaignRoot,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json'),'evidence invalidation matrix')
 };
 const sourceSha=receipt.source?.sha256;
-if(typeof sourceSha!=='string'||!/^[0-9a-f]{64}$/.test(sourceSha))throw new Error('canonical source digest missing');
-const build=read(evidence.build);
-if(build.source?.archiveSha256Observed!==sourceSha&&build.source?.archiveSha256!==sourceSha)throw new Error('build identity differs from canonical archive');
-const bundle=read(evidence.bundle);
-if(bundle.identity?.sourceDigestSha256!==sourceSha)throw new Error('Source Intelligence source digest mismatch');
-const artifacts=read(evidence.executionBuildArtifacts);
-if(artifacts.source?.archiveSha256!==sourceSha)throw new Error('reusable build artifacts differ from canonical archive');
+if(typeof sourceSha!=='string'||!/^[0-9a-f]{64}$/.test(sourceSha))
+ phase0Warning(receiptPath,'PHASE0_CANONICAL_SOURCE_DIGEST_FORMAT','Recorded source digest is missing or malformed','64 lowercase hexadecimal characters',sourceSha??null);
+const build=readEvidence(evidence.build);
+if(build.source?.archiveSha256Observed!==sourceSha&&build.source?.archiveSha256!==sourceSha)
+ phase0Warning(evidence.build,'PHASE0_BUILD_SOURCE_BINDING','Build source SHA-256 differs from receipt source','receipt.source.sha256 = '+String(sourceSha),build.source?.archiveSha256Observed??build.source?.archiveSha256??null);
+const bundle=readEvidence(evidence.bundle);
+if(bundle.identity?.sourceDigestSha256!==sourceSha)
+ phase0Warning(evidence.bundle,'PHASE0_SOURCE_INTELLIGENCE_SOURCE_BINDING','Source Intelligence bundle digest differs from Phase-0 receipt source',sourceSha??null,bundle.identity?.sourceDigestSha256??null);
+const artifacts=readEvidence(evidence.executionBuildArtifacts);
+if(artifacts.source?.archiveSha256!==sourceSha)
+ phase0Warning(evidence.executionBuildArtifacts,'PHASE0_REUSABLE_ARTIFACT_SOURCE_BINDING','Reusable build-artifact source digest differs from original admitted source',sourceSha??null,artifacts.source?.archiveSha256??null);
 if(artifacts.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2'||artifacts.reuseContract?.secondBuildRequired!==false)githubPhase0Diagnostics.push('reusable build artifact contract is missing');
-const deploy=read(evidence.deployConfigExecution);
+const deploy=readEvidence(evidence.deployConfigExecution);
 if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||deploy.executionMode!=='ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY')githubPhase0Diagnostics.push('Phase-0 requires only source package forked deployment evidence');
-if(deploy.campaignId!==receipt.campaign.campaignId||deploy.sourceSha256!==sourceSha)throw new Error('Phase-0 deployment evidence campaign/source identity mismatch');
+if(deploy.campaignId!==receipt.campaign.campaignId||deploy.sourceSha256!==sourceSha)
+ phase0Warning(evidence.deployConfigExecution,'PHASE0_DEPLOY_EVIDENCE_BINDING','Deployment evidence does not reference the exact Phase-0 campaign and source',{campaignId:receipt.campaign.campaignId,sourceSha256:sourceSha??null},{campaignId:deploy.campaignId??null,sourceSha256:deploy.sourceSha256??null});
 if(deploy.fork?.engine!=='anvil')githubPhase0Diagnostics.push('Phase-0 fork deployment engine requires Worker review');
 try{assertDeployGateEvidenceV2(deploy);}catch(error){githubPhase0Diagnostics.push('Phase-0 deploy-evidence assessment: '+String(error?.message??error));}
 if(receipt.source?.inputMode==='LIVE_SCAN'){
   if(receipt.source.kind!=='EXPLORER_INITIALIZED_VERIFIED_LIVE_SNAPSHOT'||!Array.isArray(receipt.source.originUrls))githubPhase0Diagnostics.push('SCAN_RECEIPT_PROVENANCE_MISSING');
   const manifestPath=path.resolve(controllerRoot,...String(receipt.source.scanManifestPath??'').split('/'));
   if(!manifestPath.startsWith(campaignRoot+path.sep))throw new Error('SCAN_MANIFEST_PATH_ESCAPES_CAMPAIGN');
-  required(manifestPath,'frozen LIVE_SCAN source manifest');
-  if(digestFile(manifestPath)!==receipt.source.scanManifestSha256)throw new Error('SCAN_MANIFEST_FILE_DIGEST_MISMATCH');
-  const manifest=read(manifestPath);
+  evidenceFile(manifestPath,'frozen LIVE_SCAN source manifest');
+  if(digestFile(manifestPath)!==receipt.source.scanManifestSha256)
+   phase0Warning(manifestPath,'PHASE0_SCAN_MANIFEST_SHA256','Frozen LIVE_SCAN source manifest bytes do not match recorded source receipt digest',receipt.source.scanManifestSha256??null,digestFile(manifestPath));
+  const manifest=readEvidence(manifestPath);
   const {manifestDigestSha256,...unsigned}=manifest;
   const canonical=x=>Array.isArray(x)?'['+x.map(canonical).join(',')+']':x&&typeof x==='object'?'{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canonical(x[k])).join(',')+'}':JSON.stringify(x);
   if(manifest.schemaVersion!=='curveyield-scan-source-manifest-v1'||manifest.inputMode!=='LIVE_SCAN'||
@@ -126,8 +160,9 @@ if(receipt.source?.inputMode==='LIVE_SCAN'){
 }
 
 if(deploy.reconciliation){
-  const rawFile=required(path.join(campaignRoot,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json'),'immutable original fork deploy evidence');
-  if(digestV2(fs.readFileSync(rawFile))!==deploy.reconciliation.originalEvidenceSha256)throw new Error('Phase-0 original deployment evidence is not byte-identical');
+  const rawFile=evidenceFile(path.join(campaignRoot,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json'),'immutable original fork deploy evidence');
+  if(fs.existsSync(rawFile)&&digestV2(fs.readFileSync(rawFile))!==deploy.reconciliation.originalEvidenceSha256)
+   phase0Warning(rawFile,'PHASE0_ORIGINAL_DEPLOY_BYTES','Immutable original fork deployment evidence bytes do not match the declared digest',deploy.reconciliation.originalEvidenceSha256??null,digestV2(fs.readFileSync(rawFile)));
   evidence.deployConfigExecutionRaw=rawFile;
 }
 
@@ -190,9 +225,9 @@ try {
 // completed discovery: Phase 4 has to be generated from real source contexts.
 if(['machine-intelligence-v7','machine-intelligence-v8'].includes(receipt.authority?.liteRelease)){
   const reviewRoot=path.join(campaignRoot,'evidence/review-inventory');
-  const inventory=read(required(path.join(reviewRoot,'REVIEW_INVENTORY_v1.json'),'complete source review inventory'));
-  const facts=read(required(path.join(reviewRoot,'SYSTEM_FACTS_v1.json'),'system facts'));
-  const plan=read(required(path.join(reviewRoot,'FLOW_PLAN_v1.json'),'flow plan'));
+  const inventory=readEvidence(evidenceFile(path.join(reviewRoot,'REVIEW_INVENTORY_v1.json'),'complete source review inventory'));
+  const facts=readEvidence(evidenceFile(path.join(reviewRoot,'SYSTEM_FACTS_v1.json'),'system facts'));
+  const plan=readEvidence(evidenceFile(path.join(reviewRoot,'FLOW_PLAN_v1.json'),'flow plan'));
   if(inventory?.payload?.complete!==true||!Array.isArray(inventory?.payload?.contexts)||!inventory.payload.contexts.length)
     githubPhase0Diagnostics.push('LITE_SOLO_INCOMPLETE_REVIEW_INVENTORY: no complete reviewable source-context inventory');
   if(!facts?.payload||!Array.isArray(plan?.payload?.reviewUnits)||!plan.payload.reviewUnits.length||
@@ -201,10 +236,35 @@ if(['machine-intelligence-v7','machine-intelligence-v8'].includes(receipt.author
     githubPhase0Diagnostics.push('LITE_SOLO_INCOMPLETE_FLOW_PLAN: required correctness and attack units must be generated from complete inventory');
 }
 
+// Existing nonfatal verification diagnostics also receive an adjacent source
+// warning; successful checks never create an artifact.
+for(const message of githubPhase0Diagnostics){
+ if(phase0RecordedDiagnostics.has(message))continue;
+ const check=String(message).split(':')[0].trim();
+ const reason=String(message);
+ const file=/REVIEW_INVENTORY|inventory/i.test(reason)?
+  path.join(campaignRoot,'evidence/review-inventory/REVIEW_INVENTORY_v1.json'):
+  /FLOW_PLAN|flow plan/i.test(reason)?
+  path.join(campaignRoot,'evidence/review-inventory/FLOW_PLAN_v1.json'):
+  /SCAN_/i.test(reason)?
+  path.join(campaignRoot,'source',path.basename(String(receipt.source?.scanManifestPath??'SOURCE_SCAN_MANIFEST_v1.json'))):
+  /SOURCE_INTELLIGENCE/i.test(reason)?evidence.bundle:
+  /build artifact|reusable build/i.test(reason)?evidence.executionBuildArtifacts:
+  /deploy|fork/i.test(reason)?evidence.deployConfigExecution:receiptPath;
+ phase0VerificationWarnings.add(recordPhaseFinalizationVerificationWarningV1({
+  root:controllerRoot,campaignPath,phase:0,affectedFile:rel(controllerRoot,file),
+  check:check||'PHASE0_FINALIZATION_VERIFICATION',reason,
+  expected:'Required verification satisfied',observed:'FAILED: '+reason
+ }));
+}
 const now=new Date().toISOString();
 const refs=Object.entries(evidence).map(([role,file])=>({role:role.startsWith('ADR_REVIEW_INVENTORY:')?'ADR_REVIEW_INVENTORY':role,path:rel(campaignRoot,file),sha256:digestFile(file)}));
 const retired=/PHASE0_RANDOMIZED_SIMULATION|PHASE0_SIMULATION_RUN_INDEX|PHASE5_SIMULATION_BASELINE_INPUT|PHASE6_SIMULATION_BASELINE_INPUT|PHASE0_TELEMETRY_ANALYSIS|MEDUSA/;
 receipt.evidence=refs.reduce((rows,row)=>upsert(rows,row),(receipt.evidence??[]).filter(row=>!retired.test(String(row.role??'')+' '+String(row.path??''))));
+for(const warningPath of phase0VerificationWarnings){
+ const file=path.resolve(controllerRoot,...warningPath.split('/'));
+ receipt.evidence=upsert(receipt.evidence,{role:'FINALIZATION_VERIFICATION_WARNING',path:rel(campaignRoot,file),sha256:digestFile(file)});
+}
 receipt.outputs=(receipt.outputs??[]).filter(row=>!retired.test(String(row.role??'')+' '+String(row.path??'')));
 receipt.outputs=upsert(receipt.outputs??[],{role:'PHASE0_AUDIT_SURFACE',path:'evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json',sha256:digestFile(evidence.auditSurface)});
 receipt.outputs=upsert(receipt.outputs,{role:'PRECOMPUTED_DEPLOY_CONFIG_EVIDENCE',path:'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md',sha256:digestFile(evidence.deployConfigMatrix)});
@@ -221,7 +281,7 @@ receipt.obligations.due=(ledger.obligations??[]).filter(x=>String(x.status??'OPE
 // Retired infrastructure qualification is not evidence for a new Phase-0 run.
 receipt.automation=(receipt.automation??[]).filter(row=>row?.workflow!=='v7-execution-infrastructure-qualification.yml');
 receipt.automation=upsert(receipt.automation,{workflow:'lite-solo-phase0-bootstrap-v1.yml',runId:Number(a['workflow-run-id']),status:'PASS',contractAutomationCommit:a['contract-automation-sha'],bootstrapCommit:a['bootstrap-sha']??a['contract-automation-sha']},'workflow');
-receipt.validation={status:'PASS',validatedAt:now,failures:[],validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false,githubDiagnostics:githubPhase0Diagnostics};
+receipt.validation={status:'PASS',validatedAt:now,failures:[],validationDelegatedTo:'CLOUDFLARE_WORKER',githubContentValidationPerformed:false,githubDiagnostics:githubPhase0Diagnostics,warningPaths:[...phase0VerificationWarnings]};
 receipt.phase.status='SEALED';
 receipt.sealedAt=now;
 receipt.updatedAt=now;
