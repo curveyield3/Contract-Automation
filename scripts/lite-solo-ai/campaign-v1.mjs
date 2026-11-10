@@ -3960,7 +3960,7 @@ async function miStep8RunLifecycle(){
 // original GitHub Input/Output storage; MiMo receives no administrative forms.
 async function miAdaptiveSingleQuestionTransportV1(){
  miStep8Active=true;
- let prepared=JSON.parse(await workerCall({operation:'adaptive_turn'}));
+ let prepared=JSON.parse(await workerCall({operation:'adaptive_turn',recoveryProbe:true}));
  for(;;){
   if(miStep8HandoffDue())throw Error('MI_STEP8_RUN_HANDOFF_DUE');
   if(prepared.status==='AI_ADAPTIVE_SUBMISSION_DISPOSITION'){
@@ -3968,7 +3968,49 @@ async function miAdaptiveSingleQuestionTransportV1(){
    if(disposition.originalWorkerStatus==='REWORK_REQUIRED'||
       disposition.originalWorkerDisposition?.fieldErrors?.length)
     throw Error('Adaptive controller submission requires source-bound rework; original answers preserved');
-   prepared=JSON.parse(await workerCall({operation:'adaptive_turn'}));continue;
+   prepared=JSON.parse(await workerCall({operation:'adaptive_turn',recoveryProbe:true}));continue;
+  }
+  if(prepared.status==='AI_ADAPTIVE_RECOVER_SAVED_OUTPUT'){
+   const t=prepared.transport??{},refs=prepared.candidates??[];
+   if(!t.scope||sha(JSON.stringify(t.scope))!==t.scopeSha256||!refs.length)
+    throw Error('Recovered adaptive source missing exact Worker-issued question');
+   const runs=new Set(refs.map(x=>x.workflowRunId+':'+x.workflowRunAttempt));
+   if(runs.size!==1)throw Error('Independent MiMo runs created conflicting original outputs for one question');
+   const prior=refs.at(-1);
+   const saved=JSON.parse(await workerCall({operation:'mimo_round_output',
+    phase:t.scope.phase,step:t.scope.step,questionNumber:prior.questionNumber,
+    includeModelRequest:true}));
+   if(saved.status!=='MIMO_TEMP_OUTPUT_FOUND'||
+      saved.generationId!==t.scope.generationId||
+      saved.questionScopeSha256!==t.scopeSha256||
+      saved.questionId!==t.questionId||
+      saved.outputSha256!==prior.answerSha256||
+      sha(saved.outputText)!==saved.outputSha256||
+      sha(saved.modelRequest)!==saved.modelRequestSha256)
+    throw Error('Previously committed GitHub original input/output identity changed');
+   const request=JSON.parse(saved.modelRequest);
+   if(request.model!=='lite-solo-mimo-v1'||!Array.isArray(request.messages)||
+      !request.messages.some(m=>{if(m.role!=='user')return false;try{
+       return JSON.parse(m.content).question===prepared.originalQuestionText;
+      }catch{return false;}}))
+    throw Error('Recovered model input did not ask the exact Worker-issued question');
+   const payload={operation:'adaptive_turn',...t,questionScope:t.scope,
+    questionScopeSha256:t.scopeSha256,phase:t.scope.phase,step:t.scope.step,
+    tempRoundQuestionNumber:prior.questionNumber,
+    replayExistingOriginal:true,modelRequest:saved.modelRequest,
+    modelOutput:saved.outputText,answerText:saved.outputText,
+    storageMode:'DIRECT_GITHUB_API_JSON'};
+   let confirmed=null;
+   for(let retry=0;retry<3;retry++){
+    try{confirmed=JSON.parse(await workerCall(payload));break;}
+    catch(error){if(retry===2)throw Error('Saved MiMo original exists but controller continuation remains unconfirmed: '+String(error.message||error));}
+   }
+   if(!confirmed||!['AI_ADAPTIVE_QUESTION_PREPARED',
+      'AI_ADAPTIVE_AWAITING_PHASE_EVIDENCE','AI_ADAPTIVE_WAITING',
+      'AI_ADAPTIVE_SUBMISSION_DISPOSITION'].includes(confirmed.status)||
+      confirmed.previousDisposition?.answerSha256!==saved.outputSha256)
+    throw Error('Original GitHub output was not source-confirmed as accepted by adaptive transport');
+   prepared=confirmed;continue;
   }
   if(prepared.status==='AI_ADAPTIVE_AWAITING_PHASE_EVIDENCE'){
    console.log(JSON.stringify({status:prepared.status,phase:prepared.transport?.scope?.phase,
