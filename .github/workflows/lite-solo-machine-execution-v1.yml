@@ -126,7 +126,7 @@ jobs:
             failureKind:n.failureKind,testExecution:n.testExecution,testResults:n.testResults,
             exitCode:out.exitCode,stdoutHead:scrub(out.stdout).slice(0,2000),
             stdoutTail:scrub(out.stdout).slice(-3500),stderrTail:scrub(out.stderr).slice(-2200),
-            testAndErrorLines:(scrub(out.stdout)+'\\n'+scrub(out.stderr)).split(/\\r?\\n/).filter(x=>/\\[PASS\\]|\\[FAIL\\]|(no tests match)|(Compiler run successful)|(Error \\(\\d+\\))|(Suite result)|(Ran \\d+ test)|(Test result)|(Failing tests)|(Warning: no tests)/i.test(x)).slice(-45),
+            testAndErrorLines:(scrub(out.stdout)+'\n'+scrub(out.stderr)).split(/\r?\n/).filter(x=>/\[PASS\]|\[FAIL\]|(no tests match)|(Compiler run successful)|(Error \(\d+\))|(Suite result)|(Ran \d+ test)|(Test result)|(Failing tests)|(Warning: no tests)/i.test(x)).slice(-45),
             error:raw.error?.message??null};
           fs.writeFileSync(path.join(p,'ISOLATED_TEST_RESULT_v1.json'),JSON.stringify(record,null,2)+'\n');
           console.log('BOOSTHUB_PHASE5_ONE_RESULT_START');
