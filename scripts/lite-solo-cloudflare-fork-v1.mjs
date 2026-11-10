@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {readJson, writeJson, repoFile, loadPhaseSchema, validateBoundAuthorityV1, EXPLICIT_NEGATIVES} from './lib/lite-solo-phase-work-v1.mjs';
+import {readJson, writeJson, repoFile, loadPhaseSchema, validateBoundAuthorityV1, EXPLICIT_NEGATIVES, recordPhaseFinalizationVerificationWarningV1} from './lib/lite-solo-phase-work-v1.mjs';
 import {readUnitPacketIndexV1, readUnitPacketV1} from '../packages/github-native-sim/src/adr-lite-solo-discovery-v1.mjs';
 import {qualifiesLiteralTrivialReviewV13} from '../packages/github-native-sim/src/adr-discovery-validators-v1.mjs';
 import {processUnitRequestV1,freezeIssuedUnitMetaV1,recoverAcceptedQuestionLedgerReferenceV1} from './lib/lite-solo-unit-queue-v1.mjs';
@@ -88,10 +88,38 @@ function checkout(){
   strict(local.workspacePath===directory.workspacePath,'campaign workspace path changed');
   const p0=read(local.workspacePath+'/receipts/PHASE_00_RECEIPT_v1.json');
   strict(p0.phase?.status==='SEALED','Phase-0 prerequisite receipt is not structurally sealed'); // Worker owns content validation.
-  strict(p0.authority?.manifestSha256===local.authorityDigest,'source-bound manifest identity changed');
-  strict(p0.source?.sha256===local.sourceSha256,'admitted source identity changed');
-  const boundRoot=validateBoundAuthorityV1({root:ROOT,receipt:p0});
-  strict(boundRoot===AUTH,'unexpected frozen audit authority');
+  // At PHASE_FINALIZE only, record failed file/authority content verification
+  // beside the original Phase-0 receipt instead of vetoing data packaging.
+  // Exact campaign/generation, destination branch and issued phase assignment
+  // remain separate ownership/routing requirements.
+  const receiptFile=directory.workspacePath+'/receipts/PHASE_00_RECEIPT_v1.json';
+  const warn=(check,reason,expected,observed)=>recordPhaseFinalizationVerificationWarningV1({
+   root:ROOT,campaignPath:directory.workspacePath,phase:Number(payload.phase),
+   affectedFile:receiptFile,check,reason,expected,observed
+  });
+  if(OP==='PHASE_FINALIZE'){
+   if(p0.authority?.manifestSha256!==local.authorityDigest)
+    warn('PHASE_FINALIZE_MANIFEST_DIGEST','Phase-0 receipt authority digest differs from current campaign directory',
+     local.authorityDigest,p0.authority?.manifestSha256??null);
+   if(p0.source?.sha256!==local.sourceSha256)
+    warn('PHASE_FINALIZE_SOURCE_DIGEST','Phase-0 receipt audited source SHA differs from current campaign directory',
+     local.sourceSha256,p0.source?.sha256??null);
+   let boundRoot=null;
+   try{boundRoot=validateBoundAuthorityV1({root:ROOT,receipt:p0});}
+   catch(error){
+    warn('PHASE_FINALIZE_BOUND_AUTHORITY_PACKAGE','Frozen campaign authority package verification failed: '+String(error?.message??error),
+     'Source-bound authority files and declared SHA-256 entries are available and match',String(error?.message??error));
+    boundRoot=path.posix.dirname(String(p0.authority?.homepagePath??''));
+   }
+   if(boundRoot!==AUTH)
+    warn('PHASE_FINALIZE_AUTHORITY_ROOT','Phase-0 source-declared authority root differs from fork-selected authority root',
+     AUTH,boundRoot);
+  }else{
+   strict(p0.authority?.manifestSha256===local.authorityDigest,'source-bound manifest identity changed');
+   strict(p0.source?.sha256===local.sourceSha256,'admitted source identity changed');
+   const boundRoot=validateBoundAuthorityV1({root:ROOT,receipt:p0});
+   strict(boundRoot===AUTH,'unexpected frozen audit authority');
+  }
   return {directory:local,p0,campaignPath:directory.workspacePath,directoryPath:target};
 }
 function assertAssigned(c,phase){
