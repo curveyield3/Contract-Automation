@@ -476,7 +476,30 @@ function collectDirectQuestionSourcesV1({root,campaignPath,directory,phase}){
      recordedStatus:proof.availability,
      sourceAcceptance:acceptance};
     group.events.push(event);
-    if(proof.availability==='EXACT_PRIVATE_ORIGINAL_SHA256_VERIFIED'&&
+    if(proof.availability==='EXACT_GITHUB_ORIGINAL_SHA256_VERIFIED'&&
+       /^[a-f0-9]{64}$/.test(proof.originalAnswerSha256??'')&&
+       Number.isSafeInteger(proof.originalAnswerBytes)&&proof.originalAnswerBytes>0&&
+       Number.isSafeInteger(proof.originalQuestionNumber)&&proof.originalQuestionNumber>0&&
+       /^[a-f0-9]{40}$/.test(proof.originalSourceCommit??'')&&
+       typeof proof.originalGithubAnswerRef==='string'&&
+       typeof proof.originalGithubOutputPath==='string'&&
+       proof.originalGithubAnswerRef.startsWith('Milo Temp Work/'+campaignPath.slice('campaigns/'.length)+'/technical-answers/')&&
+       proof.originalGithubAnswerRef.endsWith('/'+proof.questionScopeSha256+'.json')&&
+       proof.retrievalOperation==='direct_question_source'){
+     group.versions.push({...event,
+      originalAnswerSha256:proof.originalAnswerSha256,
+      originalAnswerBytes:proof.originalAnswerBytes,
+      originalGithubSource:{referencePath:proof.originalGithubAnswerRef,
+       outputPath:proof.originalGithubOutputPath,
+       sourceCommit:proof.originalSourceCommit,
+       questionNumber:proof.originalQuestionNumber,
+       sha256:proof.originalAnswerSha256,
+       storageKind:'MILO_TEMP_IMMUTABLE_GITHUB_JSON',
+       availability:'WORKER_GITHUB_JSON_HASH_VERIFIED_AT_LOCAL_ACCEPTANCE',
+       retrievalOperation:'direct_question_source',
+       controllerAccepted:acceptance==='ACCEPTED_RECEIPT_BOUND'},
+      fullAnswerTextInPublicGithub:true});
+    }else if(proof.availability==='EXACT_PRIVATE_ORIGINAL_SHA256_VERIFIED'&&
        /^[a-f0-9]{64}$/.test(proof.originalAnswerSha256??'')&&
        typeof proof.privateR2Key==='string'&&
        proof.privateR2Key.endsWith('/'+proof.originalAnswerSha256+'.txt')&&
