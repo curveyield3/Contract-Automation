@@ -2069,8 +2069,80 @@ function nestedUnresolvedEvidenceV1(sourceActions,controllerOutputs){
   if(gate?.status==='DEFERRED_UNVERIFIED')rows.push('Phase-5 machine evidence DEFERRED_UNVERIFIED; controller phase PASS is not a machine/security PASS');
   return [...new Set(rows)];
 }
-export function renderControllerPhaseReport({schema,form,canonical}){
+// Render only accepted substantive Phase 1 fields. The complete original
+// MiMo Input/Output history stays in its two permitted GitHub subtrees.
+function miPhase1SourceReportV1({schema,canonical,form,canonicalPath}){
+ const actions=canonical?.actions??form?.actions??{};
+ const selectorsRoot=canonicalPath??'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json';
+ const literal=value=>{
+  if(value===undefined)return '    SOURCE_UNAVAILABLE (not a negative security conclusion)';
+  const v=typeof value==='string'?value:JSON.stringify(value,null,2);
+  return String(v).split(/\r?\n/).map(line=>'    '+line).join('\n');
+ };
+ const valueSha=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+ const fieldView=(value,selector)=>{
+  const encoded=JSON.stringify(value);
+  if(value===undefined)return literal(value);
+  if(encoded.length>16000)return '    COMPLETE_UNABRIDGED_SOURCE_IN_CANONICAL_JSON\n'+
+   '    Canonical artifact: '+selectorsRoot+'\n'+
+   '    JSON pointer: '+selector+'\n'+
+   '    Original field-value JSON SHA-256: '+valueSha(value)+'\n'+
+   '    Display abridged only; the canonical source retains the complete value.';
+  return literal(value);
+ };
+ const output=(step,field)=>actions?.[step]?.outputs?.[field];
+ const fieldLines=(step,field)=>{
+  const value=output(step,field);
+  const pointer='/actions/'+step+'/outputs/'+field;
+  const lines=['**'+step+' / '+field+'**'];
+  if(!Array.isArray(value))return lines.concat(['',fieldView(value,pointer),'']).join('\n');
+  if(value.length===0)return lines.concat(['','    SOURCE_ARRAY_EMPTY (no model verdict inferred)','']).join('\n');
+  const out=[...lines,''];
+  for(let i=0;i<value.length;i++){
+   const item=value[i],p=pointer+'/'+i;
+   out.push('**Source record '+(i+1)+'**');
+   if(item&&typeof item==='object'&&!Array.isArray(item)){
+    for(const [member,memberValue] of Object.entries(item)){
+     out.push('- '+member,'',fieldView(memberValue,p+'/'+member.replaceAll('~','~0').replaceAll('/','~1')),'');
+    }
+   }else out.push(fieldView(item,p),'');
+  }
+  return out.join('\n');
+ };
+ const grade=output('step-6','riskGrade'),rationale=output('step-6','riskRationale');
+ const executive=['**MiMo security-risk grade**','',literal(grade),'',
+  '**MiMo supporting rationale**','',literal(rationale)].join('\n');
+ const material=[];
+ for(const [step,definition] of Object.entries(schema.actions??{})){
+  const fields=definition?.fields??[];
+  material.push('### '+step);
+  for(const field of fields)material.push(fieldLines(step,field.name));
+ }
+ const limits=['phase0LimitationsRelevantToPhase1','unresolvedStructuralUncertainties',
+  'ambiguities','phase1Limitations'].map(field=>{
+   const step=field==='phase1Limitations'?'step-6':
+    field==='ambiguities'?'step-2':'step-1';
+   return fieldLines(step,field);
+  }).join('\n\n');
+ const unresolved=['unresolvedStructuralUncertainties','targetedVerificationNeeds','ambiguities']
+  .map(field=>fieldLines(field==='ambiguities'?'step-2':'step-1',field)).join('\n\n');
+ const due=output('step-1','obligationDispositions');
+ const obligationRows=Array.isArray(due)&&due.length?
+  '\n\n**Actual carried formal-obligation dispositions (not an inferred security verdict)**\n\n'+
+  fieldLines('step-1','obligationDispositions'):'';
+ return '# Phase 1 Final Report\n\n'+
+  '> CONTROLLER-GENERATED from schema-bound substantive work. Source/receipt metadata remains controller-owned; missing values are not security negatives.\n\n'+
+  '## Executive Conclusion\n\n'+executive+'\n\n'+
+  '## Material Results\n\n'+material.join('\n\n')+'\n\n'+
+  '## Limitations\n\n'+limits+'\n\n'+
+  '## Unresolved Substantive Questions\n\n'+unresolved+obligationRows+'\n';
+}
+export function renderControllerPhaseReport({schema,form,canonical,canonicalPath}){
   const phase=schema.phase;
+  if(Number(phase)===1&&
+    schema.actions?.['step-1']?.fields?.some(x=>x.name==='sourceIntelligenceUseAssessment')&&
+    schema.actions?.['step-6']?.fields?.some(x=>x.name==='riskGrade'))
+    return miPhase1SourceReportV1({schema,canonical,form,canonicalPath});
   const sourceActions=canonical?.actions??form?.actions??{};
   const outputs=Object.entries(sourceActions).flatMap(([step,a])=>Object.entries(a?.outputs??{}).map(([key,value])=>({step,key,value})));
   const controllerOutputs=Object.entries(canonical?.automationOutputs??{}).map(([key,value])=>({step:'controller',key,value}));
