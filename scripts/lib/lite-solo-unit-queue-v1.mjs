@@ -874,28 +874,63 @@ function writePagedPrefillV1(root,rel,value){
   sha256:hex(raw),byteLength:raw.length,partBytes:PREFILL_PART_BYTES,pageCount:count};
  put(root,rel,manifest);return manifest;
 }
-function readPagedPrefillV1(root,rel,rawManifest){
+function readPagedPrefillV1(root,rel,rawManifest,onVerificationFailure=null){
+ const check=(file,name,reason,expected=null,observed=null)=>{
+  if(typeof onVerificationFailure==='function'){
+   onVerificationFailure(file,name,reason,expected,observed);
+   return;
+  }
+  throw Error(reason);
+ };
  const manifest=JSON.parse(rawManifest.toString('utf8'));
  if(manifest.schemaVersion!=='curveyield-lite-solo-unit-prefill-manifest-v1')
   return manifest.value;
  if(!Number.isSafeInteger(manifest.pageCount)||manifest.pageCount<1||
-    manifest.partBytes!==PREFILL_PART_BYTES||!/^[a-f0-9]{64}$/.test(manifest.sha256))
-  throw Error('invalid bounded prefill manifest');
+    manifest.partBytes!==PREFILL_PART_BYTES||!/^[a-f0-9]{64}$/.test(manifest.sha256)){
+  check(rel,'FINALIZE_INVALID_PREFILL_MANIFEST','Invalid bounded prefill descriptor; source bytes kept intact',
+   {partBytes:PREFILL_PART_BYTES,sha256:'64 hexadecimal characters',pageCount:'positive safe integer'},
+   {partBytes:manifest.partBytes,sha256:manifest.sha256,pageCount:manifest.pageCount});
+  if(!Number.isSafeInteger(manifest.pageCount)||manifest.pageCount<1)return null;
+ }
  const chunks=[];
  for(let i=0;i<manifest.pageCount;i++){
-  const page=read(root,prefillPartRel(rel,i));
+  const file=prefillPartRel(rel,i);
+  let page;
+  try{page=read(root,file);}
+  catch(error){
+   check(file,'FINALIZE_PREFILL_PAGE_UNAVAILABLE',
+    'Cannot read the original prefill page; no content is invented: '+String(error?.message??error),
+    'Original issued prefill page JSON','UNAVAILABLE');
+   return null;
+  }
   if(page.schemaVersion!=='curveyield-lite-solo-unit-prefill-page-v1'||
      page.index!==i+1||page.total!==manifest.pageCount||
-     page.offset!==i*PREFILL_PART_BYTES)throw Error('prefill page identity mismatch');
+     page.offset!==i*PREFILL_PART_BYTES)
+   check(file,'FINALIZE_PREFILL_PAGE_IDENTITY',
+    'Prefill page identity does not match original manifest; submitted bytes retained',
+    {schemaVersion:'curveyield-lite-solo-unit-prefill-page-v1',index:i+1,total:manifest.pageCount,offset:i*PREFILL_PART_BYTES},
+    {schemaVersion:page.schemaVersion,index:page.index,total:page.total,offset:page.offset});
   const part=Buffer.from(page.base64,'base64');
   if(part.length>PREFILL_PART_BYTES||hex(part)!==page.sha256)
-   throw Error('prefill page digest mismatch');
+   check(file,'FINALIZE_PREFILL_PAGE_SHA256',
+    'Prefill page SHA-256 or legacy per-page byte limit differs; preserve full decoded source bytes',
+    {sha256:page.sha256,maximumBytes:PREFILL_PART_BYTES},
+    {sha256:hex(part),actualBytes:part.length});
   chunks.push(part);
  }
  const full=Buffer.concat(chunks);
  if(full.length!==manifest.byteLength||hex(full)!==manifest.sha256)
-  throw Error('prefill reconstruction digest mismatch');
- return JSON.parse(full.toString('utf8')).value;
+  check(rel,'FINALIZE_PREFILL_REASSEMBLY_SHA256',
+   'Reassembled prefill bytes differ from original manifest digest or length; preserve full received pages',
+   {sha256:manifest.sha256,byteLength:manifest.byteLength},
+   {sha256:hex(full),byteLength:full.length});
+ try{return JSON.parse(full.toString('utf8')).value;}
+ catch(error){
+  check(rel,'FINALIZE_PREFILL_JSON_UNREADABLE',
+   'Reassembled received prefill bytes are not parseable JSON; no replacement value is invented: '+String(error?.message??error),
+   'Readable original prefill JSON','UNREADABLE');
+  return null;
+ }
 }
 function readPlan(root,campaign,phase){
  const index=read(root,planRel(campaign,phase));
