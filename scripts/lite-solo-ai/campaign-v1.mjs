@@ -2653,7 +2653,7 @@ async function runTechnicalQuestionTransportV1(){
   // Exact private transport-staged original recovery is tried before model
   // inference. The Worker rechecks this current signed lease and publishes via
   // its existing GitHub question checkpoint writer; R2 is not acceptance.
-  if(issued.question.mode==='PLANNED_PER_PACKET'){
+  if(issued.question.mode==='PLANNED_PER_PACKET'||miloTempRounds){
    const recoveryRaw=await workerCall({operation:'recover_question',
     unitId:issued.scope.unitId,lease:issued.scope.lease,
     scopeSha256:issued.scopeSha256,questionId:issued.scope.questionId,
@@ -2661,6 +2661,17 @@ async function runTechnicalQuestionTransportV1(){
     ...(miloTempRounds?{storageMode:'DIRECT_GITHUB_API_JSON'}:{})});
    let recovered;try{recovered=JSON.parse(recoveryRaw);}catch{
     throw Error('Original staged-answer recovery returned invalid Worker JSON');
+   }
+   // A staged direct FIXED answer is ready for mechanical field compilation;
+   // a planned packet answer instead needs its published Q checkpoint.
+   if(miloTempRounds&&issued.question.mode!=='PLANNED_PER_PACKET'&&
+      recovered.status==='AI_TECHNICAL_ANSWER_STAGED'&&
+      recovered.recoveredFromGitHubTempOriginal===true){
+    console.log(JSON.stringify({status:'MIMO_DIRECT_FIXED_ORIGINAL_RESUMED_FROM_GITHUB',
+     campaignId,unitId:issued.scope.unitId,questionId:issued.scope.questionId,
+     answerSha256:recovered.answerSha256,modelInferenceSkipped:true,controllerAccepted:false}));
+    return {unitId:issued.scope.unitId,lease:issued.scope.lease,
+     phase:issued.scope.phase,step:issued.scope.step};
    }
    if(recovered.status==='AI_TECHNICAL_QUESTION_RECORDED'&&
       recovered.originalCommittedToGitHub===true&&
