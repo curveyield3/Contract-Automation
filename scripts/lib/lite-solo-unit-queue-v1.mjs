@@ -932,7 +932,14 @@ function readPagedPrefillV1(root,rel,rawManifest,onVerificationFailure=null){
   return null;
  }
 }
-function readPlan(root,campaign,phase){
+function readPlan(root,campaign,phase,onVerificationFailure=null){
+ const check=(affectedFile,name,reason,expected=null,observed=null)=>{
+  if(typeof onVerificationFailure==='function'){
+   onVerificationFailure(affectedFile,name,reason,expected,observed);
+   return;
+  }
+  throw Error(reason);
+ };
  const index=read(root,planRel(campaign,phase));
  if(index.schemaVersion!=='curveyield-lite-solo-unit-plan-v1'||!Array.isArray(index.pages))
   throw Error('unrecognized or unpaged v4 unit plan');
@@ -951,35 +958,64 @@ function readPlan(root,campaign,phase){
  const units=[];
  for(const p of index.pages){
   const raw=fs.readFileSync(repoFile(root,p.path));
-  if(hex(raw)!==p.sha256||raw.length>32768)throw Error('unit plan page digest/size mismatch: '+p.path);
+  if(hex(raw)!==p.sha256||raw.length>32768)
+   check(p.path,'FINALIZE_UNIT_PLAN_PAGE_SHA256',
+    'Unit plan page SHA-256 differs from issued index or exceeds obsolete per-page bound; full page bytes retained',
+    {sha256:p.sha256,maxBytes:32768},{sha256:hex(raw),bytes:raw.length});
   const data=JSON.parse(raw.toString('utf8'));
+  if(!Array.isArray(data?.units)){
+   check(p.path,'FINALIZE_UNIT_PLAN_PAGE_STRUCTURE',
+    'Unit plan page does not contain an array of issued units; no units are fabricated',
+    'Array of issued unit records',data?.units===null?'null':typeof data?.units);
+   continue;
+  }
   for(const u of data.units){
    if(u.initialValueRef){
     const rawValue=fs.readFileSync(repoFile(root,u.initialValueRef));
-    if(hex(rawValue)!==u.initialValueSha256)throw Error('unit prefill digest mismatch');
-    u.initialValue=readPagedPrefillV1(root,u.initialValueRef,rawValue);
+    if(hex(rawValue)!==u.initialValueSha256)
+     check(u.initialValueRef,'FINALIZE_UNIT_PREFILL_SOURCE_SHA256',
+      'Original unit prefill bytes differ from issued SHA-256; keep exact readable bytes',
+      u.initialValueSha256,hex(rawValue));
+    u.initialValue=readPagedPrefillV1(root,u.initialValueRef,rawValue,onVerificationFailure);
    }
    if(u.issuedMetaRef){
     const raw=fs.readFileSync(repoFile(root,u.issuedMetaRef));
     if(hex(raw)!==u.issuedMetaSha256)
-     throw Error('issued roster metadata changed after delivery: '+u.unitId);
-    u.issuedMeta=readPagedPrefillV1(root,u.issuedMetaRef,raw);
+     check(u.issuedMetaRef,'FINALIZE_ISSUED_METADATA_SHA256',
+      'Issued roster metadata SHA-256 differs from original record; keep received metadata bytes',
+      u.issuedMetaSha256,hex(raw));
+    u.issuedMeta=readPagedPrefillV1(root,u.issuedMetaRef,raw,onVerificationFailure);
    }
    if(u.kind==='BATCH'){
-    if(!u.membersRef||u.membersRef!==u.packetPath)throw Error('missing batch assignment manifest');
+    if(!u.membersRef||u.membersRef!==u.packetPath){
+     check(p.path,'FINALIZE_BATCH_MEMBERS_REF',
+      'BATCH member manifest is absent or points outside issued packet; preserve original record without inventing members',
+      u.packetPath??null,u.membersRef??null);
+     u.members=[];units.push(u);continue;
+    }
     const raw=fs.readFileSync(repoFile(root,u.membersRef));
-    if(hex(raw)!==u.packetSha256)throw Error('batch packet digest mismatch');
-    const payload=readPagedPrefillV1(root,u.membersRef,raw);
-    if(payload.unitId!==u.unitId||payload.phaseSequence!==phase||
-       payload.schemaVersion!=='curveyield-lite-solo-batched-assignment-v1'||
-       !Array.isArray(payload.members)||payload.members.length<2)
-      throw Error('invalid batch assignment payload');
-    u.members=payload.members;
+    if(hex(raw)!==u.packetSha256)
+     check(u.membersRef,'FINALIZE_BATCH_PACKET_SHA256',
+      'BATCH member manifest digest differs from issued metadata; retain original bytes',
+      u.packetSha256,hex(raw));
+    const payload=readPagedPrefillV1(root,u.membersRef,raw,onVerificationFailure);
+    if(payload?.unitId!==u.unitId||payload?.phaseSequence!==phase||
+       payload?.schemaVersion!=='curveyield-lite-solo-batched-assignment-v1'||
+       !Array.isArray(payload?.members)||payload.members.length<2)
+     check(u.membersRef,'FINALIZE_BATCH_ASSIGNMENT_STRUCTURE',
+      'BATCH manifest does not match its issued unit, phase or required member structure; no members are fabricated',
+      {unitId:u.unitId,phaseSequence:phase,schemaVersion:'curveyield-lite-solo-batched-assignment-v1'},
+      {unitId:payload?.unitId??null,phaseSequence:payload?.phaseSequence??null,
+       schemaVersion:payload?.schemaVersion??null,memberCount:payload?.members?.length??null});
+    u.members=Array.isArray(payload?.members)?payload.members:[];
    }
    units.push(u);
   }
  }
- if(units.length!==index.unitCount)throw Error('missing unit plan pages');
+ if(units.length!==index.unitCount)
+  check(planRel(campaign,phase),'FINALIZE_UNIT_PLAN_COUNT',
+   'Physical unit plan pages contain a different unit count than the original index; retain all readable units',
+   index.unitCount,units.length);
  const ownership={};
  for(const u of units){
   for(const m of u.kind==='BATCH'?u.members:[u]){
@@ -988,7 +1024,12 @@ function readPlan(root,campaign,phase){
     m.appendChunkNumber>1?'APPEND-C'+String(m.appendChunkNumber).padStart(4,'0'):'APPEND']):
     Number.isInteger(m.recordIndex)?dot([...m.path,String(m.recordIndex)]):null;
    if(!key)continue;
-   if(ownership[key])throw Error('duplicate canonical unit owner: '+key);
+   if(ownership[key]){
+    check(planRel(campaign,phase),'FINALIZE_UNIT_PLAN_OWNER_COLLISION',
+     'Two issued units claim the same canonical key; retain both source records without overwriting the first owner',
+     {recordKey:key,firstOwner:ownership[key]},{recordKey:key,additionalOwner:u.unitId});
+    continue;
+   }
    ownership[key]=u.unitId;
   }
  }
