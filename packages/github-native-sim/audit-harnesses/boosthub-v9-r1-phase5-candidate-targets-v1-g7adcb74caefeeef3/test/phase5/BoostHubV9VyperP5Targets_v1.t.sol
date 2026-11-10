@@ -99,9 +99,23 @@ contract BoostHubV9VyperP5TargetsV1 {
     address constant USER=address(0xBEE1);
     // This relative location is installed by the existing audit-harness manifest.
     string constant VYPER_BYTECODE="artifacts_v6/phase5/BoostHubStaking_v22.creation.hex";
+    // The Phase-0 bytecode artifact is stored as a text line ending in LF.
+    // vm.parseBytes rejects that newline; trim ASCII whitespace in memory
+    // without modifying or replacing the exact pinned Vyper bytecode bytes.
+    function _creationCode() internal view returns (bytes memory) {
+        bytes memory raw=bytes(vm.readFile(VYPER_BYTECODE));
+        uint256 end=raw.length;
+        while(end>0 && (
+            raw[end-1]==0x0a || raw[end-1]==0x0d ||
+            raw[end-1]==0x20 || raw[end-1]==0x09
+        )) end--;
+        require(end>2 && raw[0]==0x30 && raw[1]==0x78 && (end-2)%2==0,"BAD_PINNED_VYPER_HEX");
+        assembly { mstore(raw, end) }
+        return vm.parseBytes(string(raw));
+    }
     function _staking(BoostV9BehaviorTokenV1 lp,BoostV9VyperHubStubV1 hub,address[8] memory configured)
         internal returns(IBoostVyperV22 staking) {
-        bytes memory sourceCode=vm.parseBytes(vm.readFile(VYPER_BYTECODE));
+        bytes memory sourceCode=_creationCode();
         bytes memory init=bytes.concat(sourceCode,abi.encode(
             address(lp),address(hub),uint256(0),address(this),configured,
             address(this),uint256(0),address(this)
@@ -223,7 +237,7 @@ contract BoostHubV9VyperP5TargetsV1 {
         address[] memory eight=new address[](8);
         for(uint256 i;i<8;i++)eight[i]=configured[i];
         excessiveHub.setRewards(eight);
-        bytes memory sourceCode=vm.parseBytes(vm.readFile(VYPER_BYTECODE));
+        bytes memory sourceCode=_creationCode();
         bytes memory init=bytes.concat(sourceCode,abi.encode(
             address(lp),address(excessiveHub),uint256(0),address(this),configured,
             address(this),uint256(0),address(this)
