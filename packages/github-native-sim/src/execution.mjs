@@ -46,6 +46,7 @@ export function runProcess({ command, args = [], cwd, env = process.env, onStdou
     const group = bounded && process.platform !== 'win32';
     const child = spawn(command, args, { cwd, env, shell: false, detached: group });
     let killTimer = null;
+    let exitDrainTimer = null;
     const terminate = (signal) => {
       try { if (group && child.pid) process.kill(-child.pid, signal); else child.kill(signal); } catch {}
     };
@@ -61,12 +62,27 @@ export function runProcess({ command, args = [], cwd, env = process.env, onStdou
       settled = true;
       if (timeout) clearTimeout(timeout);
       if (killTimer) clearTimeout(killTimer);
+      if (exitDrainTimer) clearTimeout(exitDrainTimer);
       resolve({ exitCode: timedOut ? -1 : Number.isInteger(code) ? code : -1,
         signal: signal ?? null, timedOut, stdout, stderr: error ? `${stderr}${error.message}` : stderr });
     };
     child.stdout?.on('data', (chunk) => { const text = chunk.toString(); stdout += text; if (onStdout) onStdout(text, child); });
     child.stderr?.on('data', (chunk) => { const text = chunk.toString(); stderr += text; if (onStderr) onStderr(text, child); });
     child.on('error', (error) => finish(-1, null, error));
+    // A completed Forge child can leave descendant processes holding its
+    // stdout/stderr descriptors open. The Node 'close' event then never fires
+    // despite a definitive exit code. Drain the pipes briefly, terminate the
+    // isolated process group, and preserve the real child's exit result.
+    // Only bounded subprocesses use this recovery path.
+    child.on('exit', (code, signal) => {
+      if (!bounded || settled) return;
+      exitDrainTimer = setTimeout(() => {
+        stderr += '\nV7_DESCENDANT_PIPE_DRAIN_TIMEOUT: child exited but descendant stdio remained open\n';
+        terminate('SIGTERM');
+        finish(code, signal);
+      }, 3_000);
+      exitDrainTimer.unref();
+    });
     child.on('close', (code, signal) => finish(code, signal));
   });
 }
