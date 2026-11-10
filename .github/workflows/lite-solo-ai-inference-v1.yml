@@ -687,7 +687,7 @@ jobs:
           fi
 
       - name: Archive finished MiMo communications from private R2 to Audit-Controller MiMo
-        if: always() && (inputs.mode == 'campaign' || inputs.mode == 'autonomous')
+        if: always() && env.MILO_TEMP_WORK_ROUNDS != '1' && (inputs.mode == 'campaign' || inputs.mode == 'autonomous')
         timeout-minutes: 20
         shell: bash
         run: |
