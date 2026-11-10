@@ -442,7 +442,7 @@ async function historyIndexPathsForPhaseV1(workspace,phase){
   const listing=await historyGitMetadataV1('git/trees/'+treeSha+'?recursive=1');
   if(!Array.isArray(listing?.tree)||listing.truncated)return null;
   for(const file of listing.tree){
-   if(file.type==='blob'&&/^[A-Za-z0-9._-]+\\/questions\\/QUESTION_INDEX_v1\\.json$/.test(file.path))
+   if(file.type==='blob'&&new RegExp('^[A-Za-z0-9._-]+/questions/QUESTION_INDEX_v1[.]json$').test(file.path))
     result.add(prefix+'/'+file.path);
   }
  }
