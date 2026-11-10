@@ -26,6 +26,9 @@ if(!/^[A-Za-z0-9_.-]+-r[0-9]+$/.test(campaignId||'')||
  throw Error('Missing exact authorized campaign or signed GitHub Actions identity');
 
 const sha=text=>createHash('sha256').update(text).digest('hex');
+// Staged only: the active Worker remains on the legacy transcript transport until activation.
+const miloTempRounds=process.env.MILO_TEMP_WORK_ROUNDS==='1';
+let miloRunRoundOrdinal=0;
 
 async function identity(){
  const url=identityEndpoint+(identityEndpoint.includes('?')?'&':'?')+
@@ -46,8 +49,8 @@ async function identity(){
 let transcriptEvent=0;
 let firstTranscriptScope=null,lastTranscriptScope=null;
 function updateTranscriptScope(reply,envelope){
- const phase=Number(reply?.phase??envelope?.governingDocuments?.phase);
- const step=Number(reply?.currentStep??reply?.step??envelope?.governingDocuments?.step);
+ const phase=Number(reply?.phase??reply?.scope?.phase??envelope?.governingDocuments?.phase);
+ const step=Number(reply?.currentStep??reply?.step??reply?.scope?.step??envelope?.governingDocuments?.step);
  if(Number.isInteger(phase)&&phase>=0&&phase<=99&&
     Number.isInteger(step)&&step>=0&&step<=99){
   if(!firstTranscriptScope)firstTranscriptScope={phase,step};
@@ -82,6 +85,17 @@ async function recordPrivateCommunication(direction,content){
   time:new Date().toISOString(),workflowRunId:process.env.GITHUB_RUN_ID||null,
   direction,eventId,parts:parts.length,bytes:Buffer.byteLength(content),
   sha256:sha(content),visibility:'PRIVATE_CLOUDFLARE_R2'}));
+}
+
+async function recordMiloTempRound(modelRequest,modelOutput,scope,roundOrdinal){
+ if(!scope||!Number.isSafeInteger(scope.phase)||!Number.isSafeInteger(scope.step))
+  throw Error('Source-bound Milo Temp Work question phase/step unavailable');
+ const res=await fetch(endpoint,{method:'POST',headers:{authorization:'Bearer '+await identity(),'content-type':'application/json','x-mi-dispatch-correlation':dispatchCorrelation},
+  body:JSON.stringify({campaignId,operation:'mimo_round_pair',phase:scope.phase,step:scope.step,roundOrdinal,modelRequest,modelOutput}),signal:AbortSignal.timeout(150000)});
+ const receipt=await res.json().catch(()=>null);
+ if(!res.ok||receipt?.status!=='MIMO_TEMP_ROUND_PUBLISHED')
+  throw Error('Complete Milo input/output pair not committed to GitHub: HTTP '+res.status+' '+String(receipt?.status||receipt?.error||'UNKNOWN'));
+ console.log(JSON.stringify({status:receipt.status,phase:scope.phase,step:scope.step,question:receipt.questionNumber,inputPath:receipt.inputPath,outputPath:receipt.outputPath,commit:receipt.commitSha,inputSha256:receipt.inputSha256,outputSha256:receipt.outputSha256,cloudflareQuestionWrite:false}));
 }
 
 async function workerCall(payload){
@@ -191,7 +205,9 @@ async function modelCall(messages,{technicalAnswer=false}={}){
   ...(technicalAnswer?{}:{response_format:{type:'json_object'}})
  });
  const start=Date.now();
- await recordPrivateCommunication('mimo_input',request);
+ const tempRoundOrdinal=++miloRunRoundOrdinal;
+ const tempRoundScope=lastTranscriptScope?{...lastTranscriptScope}:null;
+ if(!miloTempRounds)await recordPrivateCommunication('mimo_input',request);
  console.log(JSON.stringify({status:'AI_BRIDGE_MODEL_REQUEST',
   conversationMessages:messages.length,promptBytes:Buffer.byteLength(request)}));
  const reply=await new Promise((resolve,reject)=>{
@@ -279,7 +295,8 @@ async function modelCall(messages,{technicalAnswer=false}={}){
  });
  const raw=reply.choices?.[0]?.message?.content;
  if(typeof raw!=='string')throw Error('MiMo did not return a text message; no fabricated Worker action');
- await recordPrivateCommunication('mimo_output',raw);
+ if(miloTempRounds)await recordMiloTempRound(request,raw,tempRoundScope,tempRoundOrdinal);
+ else await recordPrivateCommunication('mimo_output',raw);
  // Observe the submitted action without editing or filtering the actual text.
  // This repository is PUBLIC: full source-bound findings belong in Worker R2,
  // not public Actions logs. All metadata comes from the unmodified reply.
