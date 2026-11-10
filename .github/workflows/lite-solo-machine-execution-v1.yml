@@ -75,6 +75,7 @@ jobs:
         uses: ./.github/actions/setup-v7-toolchain
       - name: Execute one accepted Foundry test against pinned live Ethereum Anvil fork
         if: ${{ github.event_name == 'push' }}
+        timeout-minutes: 12
         shell: bash
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
