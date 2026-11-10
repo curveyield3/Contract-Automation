@@ -1658,13 +1658,24 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
   return form;
 }
 
-export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
+export function populatePhase9RerunEvidenceRefs({root,campaignPath,form,onVerificationFailure=null,workFormPath=null}){
   const deficiencies=[];
+  const warn=(file,check,reason,expected=null,observed=null)=>{
+   if(typeof onVerificationFailure!=='function')return;
+   onVerificationFailure({affectedFile:file,check,reason,expected,observed});
+  };
+  const boundWorkForm=workFormPath??path.posix.join(campaignPath,'work/phase-09/PHASE_09_WORK_FORM_v1.json');
   const rows=form?.actions?.['step-2']?.outputs?.remediationDispositions??[];
   for(const row of rows){
     if(!row||typeof row!=='object'||Array.isArray(row)) continue;
     const findingKey=String(row.findingKey??'').trim();
-    if(!findingKey){deficiencies.push('Phase 9 remediation disposition is missing findingKey.');continue;}
+    if(!findingKey){
+     deficiencies.push('Phase 9 remediation disposition is missing findingKey.');
+     warn(boundWorkForm,'PHASE9_REMEDIATION_FINDING_KEY_MISSING',
+      'Remediation disposition has no original finding key; no execution evidence can be bound',
+      'Nonempty findingKey',row.findingKey??null);
+     continue;
+    }
     const requestDirRel=typeof row.rerunRequestDirectory==='string'&&row.rerunRequestDirectory
       ? row.rerunRequestDirectory.replace(/\/+$/,'')
       : path.posix.join('controller/phase9-reruns',safeSegment(findingKey));
@@ -1676,7 +1687,12 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
     for(const requestFile of requestFiles){
       const request=readJsonIf(requestFile);
       const requestId=typeof request?.requestId==='string'?request.requestId.trim():'';
-      if(!requestId) continue;
+      if(!requestId){
+       warn(path.relative(root,requestFile).replaceAll('\\','/'),'PHASE9_RERUN_REQUEST_ID_MISSING',
+        'Rerun request JSON has no usable requestId; it cannot be matched to machine evidence',
+        'Nonempty requestId',request?.requestId??null);
+       continue;
+      }
       discoveredRequests++;
       const safeRequest=safeSegment(requestId,'request');
       const baseRel=path.posix.join('controller/automation',safeRequest);
@@ -1699,6 +1715,34 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
         && (machine?.failedSteps?.length??0)===0
         && (!machine?.preflight||machine.preflight.status==='PASS');
       if(!valid){
+        const sourcePrefix=path.posix.join(campaignPath,baseRel);
+        const fileChecks=[
+         [path.posix.join(campaignPath,ingestionRel),'PHASE9_INGESTION_RECEIPT_SCHEMA',
+          ingestion?.schemaVersion==='audit-execution-evidence-ingestion-receipt-v1',
+          'audit-execution-evidence-ingestion-receipt-v1',ingestion?.schemaVersion??null],
+         [path.posix.join(campaignPath,ingestionRel),'PHASE9_INGESTION_REQUEST_ID',
+          ingestion?.requestId===requestId,requestId,ingestion?.requestId??null],
+         [path.posix.join(campaignPath,evidenceRel),'PHASE9_MACHINE_REQUEST_ID',
+          machine?.requestId===requestId,requestId,machine?.requestId??null],
+         [path.posix.join(campaignPath,evidenceRel),'PHASE9_MACHINE_REQUEST_DIGEST',
+          machine?.requestDigest===request.requestDigest,request.requestDigest??null,machine?.requestDigest??null],
+         [path.posix.join(campaignPath,evidenceRel),'PHASE9_MACHINE_BLOCKING_STATUS',
+          machine?.blocking===false,false,machine?.blocking??null],
+         [path.posix.join(campaignPath,evidenceRel),'PHASE9_MACHINE_DISPOSITION',
+          ['PASS','FINDINGS'].includes(machine?.disposition),['PASS','FINDINGS'],machine?.disposition??null],
+         [path.posix.join(campaignPath,evidenceRel),'PHASE9_MACHINE_FAILED_STEPS',
+          (machine?.failedStepCount??0)===0&&(machine?.failedSteps?.length??0)===0,
+          {failedStepCount:0,failedSteps:0},
+          {failedStepCount:machine?.failedStepCount??null,failedSteps:machine?.failedSteps?.length??null}],
+         [path.posix.join(campaignPath,evidenceRel),'PHASE9_MACHINE_ANALYSIS_FAILURES',
+          (machine?.analysisComponentFailureCount??0)===0,0,machine?.analysisComponentFailureCount??null],
+         [path.posix.join(campaignPath,evidenceRel),'PHASE9_MACHINE_PREFLIGHT_STATUS',
+          !machine?.preflight||machine.preflight.status==='PASS','PASS or no preflight',machine?.preflight?.status??null]
+        ];
+        for(const [file,check,passed,expected,observed] of fileChecks)
+         if(!passed)warn(file,check,
+          'Rerun '+requestId+' for finding '+findingKey+' did not meet this exact verification; original evidence remains unaltered and is not classified as successful remediation proof',
+          expected,observed);
         incompleteRequests++;
         deficiencies.push('Phase 9 finding '+findingKey+' rerun '+requestId+' lacks successful, request-bound, ingested machine execution; a failed or partial rerun is not remediation proof.');
         continue;
@@ -1708,6 +1752,9 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
     }
     if(!discoveredRequests){
       deficiencies.push('Phase 9 finding '+findingKey+' has no rerun execution request under '+requestDirRel+'. Run the required remediation sub-phase tests before validation.');
+      warn(boundWorkForm,'PHASE9_RERUN_REQUEST_REFERENCE_MISSING',
+       'Finding '+findingKey+' references a rerun request directory with no readable requestId; no proof was invented',
+       'At least one source-bound execution request for finding '+findingKey,requestDirRel);
       continue;
     }
     const uniqueRefs=uniq(refs);
