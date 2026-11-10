@@ -5,10 +5,11 @@ import {V2_AUTOMATION_RELEASE,V2_RUNNER_RELEASE} from '../../packages/github-nat
 import {validateDeepAssuranceRequestWithV26V1} from '../../packages/github-native-sim/src/schema-v26.mjs';
 
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
-const nonempty=x=>typeof x==='string'&&x.trim()&&!/(?:<[^>]*>|\b(?:TODO|TBD)\b)/i.test(x);
+const PLACEHOLDER=/<\s*(?:REQUIRED(?:_[A-Z0-9]+)*|PENDING(?:_[A-Z0-9]+)*|CONTROLLER(?:_[A-Z0-9]+)*|TODO|TBD|PLACEHOLDER(?:_[A-Z0-9]+)*|INSERT(?:_[A-Z0-9]+)*)\s*>|\b(?:TODO|TBD)\b/i;
+const nonempty=x=>typeof x==='string'&&x.trim()&&!PLACEHOLDER.test(x);
 const complete=x=>Array.isArray(x)?x.length>0&&x.every(complete):nonempty(x);
 const noPlaceholders=x=>{
- if(typeof x==='string')return !/(?:<[^>]*>|\b(?:TODO|TBD)\b)/i.test(x);
+ if(typeof x==='string')return !PLACEHOLDER.test(x);
  if(Array.isArray(x))return x.every(noPlaceholders);
  if(x&&typeof x==='object')return Object.values(x).every(noPlaceholders);
  return true;
@@ -35,6 +36,7 @@ export function generateV7ExecutionRequestV1({campaignId,campaignGenerationId,so
   need('expectedMachineObservation.candidateId',observation.candidateId===key,
     'must match the candidateKey; candidate identity is carried by the reproduction metadata');
  const blueprint=target?.executionBlueprint;
+ let resolvedGenerationHarnessId=null;
  need('executionBlueprint',blueprint&&typeof blueprint==='object'&&!Array.isArray(blueprint),
    'provide concrete trusted runner configuration: exact source root, compiler, harness/simulation');
  if(blueprint){
@@ -81,11 +83,46 @@ export function generateV7ExecutionRequestV1({campaignId,campaignGenerationId,so
       if(ready){
         try{
           const manifest=JSON.parse(fs.readFileSync(path.join(base,'manifest.json'),'utf8'));
-          need('executionBlueprint.configuration.harness.campaignGenerationId',
-            Boolean(campaignGenerationId) &&
-            manifest.campaignId===campaignId &&
-            manifest.campaignGenerationId===campaignGenerationId,
-            'harness is not bound to this exact campaign generation; historical test bundles cannot be reused');
+          if(Boolean(campaignGenerationId) &&
+             manifest.campaignId===campaignId &&
+             manifest.campaignGenerationId===campaignGenerationId){
+            resolvedGenerationHarnessId=id;
+          }else{
+            // Never automatically reuse historical test bytes. A previous,
+            // source-bound harness is eligible only when an operator has
+            // installed a separate, byte-identical fork explicitly stamped
+            // for THIS campaign generation; the old bundle stays untouched.
+            const forkId=id+'-g'+hash(campaignGenerationId??'').slice(0,16);
+            const forkBase=path.resolve(automationRoot,'packages/github-native-sim/audit-harnesses',forkId);
+            let verified=false;
+            try{
+              if(campaignGenerationId && fs.statSync(forkBase).isDirectory()){
+                const fork=JSON.parse(fs.readFileSync(path.join(forkBase,'manifest.json'),'utf8'));
+                const origin=manifest.sourceBinding??{};
+                const binding=fork.sourceBinding??{};
+                const files=manifest.files??[];
+                const safeFile=f=>typeof f?.source==='string'&&
+                  !f.source.startsWith('/')&&
+                  !f.source.split('/').some(part=>!part||part==='.'||part==='..');
+                verified=fork.bundleId===forkId &&
+                  fork.derivedFromBundleId===id &&
+                  fork.campaignId===campaignId &&
+                  fork.campaignGenerationId===campaignGenerationId &&
+                  origin.archiveSha256===sourceSha256 &&
+                  origin.repository===phase0Source?.archiveRepository &&
+                  origin.commit===phase0Source?.archiveCommit &&
+                  JSON.stringify(binding)===JSON.stringify(origin) &&
+                  Array.isArray(files)&&files.length>0 &&
+                  JSON.stringify(fork.files)===JSON.stringify(files) &&
+                  files.every(f=>safeFile(f)&&
+                    fs.readFileSync(path.join(base,f.source))
+                      .equals(fs.readFileSync(path.join(forkBase,f.source))));
+              }
+            }catch{verified=false;}
+            need('executionBlueprint.configuration.harness.campaignGenerationId',verified,
+              'harness requires an independently copied, source-verified, exact-generation bundle; legacy bundles cannot run directly');
+            if(verified)resolvedGenerationHarnessId=forkId;
+          }
         }catch(error){
           need('executionBlueprint.configuration.harness.manifest',false,
             'generation-bound harness manifest unavailable: '+String(error.message||error));
@@ -133,6 +170,8 @@ export function generateV7ExecutionRequestV1({campaignId,campaignGenerationId,so
  // type-specific and correctly excludes redundant candidateId.
  delete machineObservation.candidateId;
  const configuration=structuredClone(blueprint.configuration);
+ if(resolvedGenerationHarnessId && configuration.harness)
+   configuration.harness.bundleId=resolvedGenerationHarnessId;
  // Preserve test intent in a non-executable, controller-owned sidecar emitted
  // with the machine request; the V7 configuration schema forbids arbitrary fields.
  const designEvidence={setup:target.setup,prerequisites:target.prerequisites,
