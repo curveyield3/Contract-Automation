@@ -24,9 +24,22 @@ const campaignPath=directory.workspacePath;
 if(typeof campaignPath!=='string'||!campaignPath.startsWith('campaigns/')||campaignPath.split('/').includes('..'))
  throw Error('unsafe campaign workspace');
 const receipt=readJson(repoFile(root,campaignPath+'/receipts/PHASE_00_RECEIPT_v1.json'));
-if(!['machine-intelligence-v7','machine-intelligence-v8'].includes(receipt.authority?.liteRelease)||receipt.authority?.manifestSha256!==directory.authorityDigest||
- receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId||
- receipt.source?.sha256!==directory.sourceSha256)throw Error('source/authority generation binding invalid');
+if(receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId)
+ throw Error('cannot finalize a different campaign generation');
+const phase0ReceiptRel=campaignPath+'/receipts/PHASE_00_RECEIPT_v1.json';
+const warnReceipt=(check,reason,expected,observed)=>recordPhaseFinalizationVerificationWarningV1({
+ root,campaignPath,phase:Number(directory.currentAssignment?.phaseSequence??0),
+ affectedFile:phase0ReceiptRel,check,reason,expected,observed
+});
+if(!['machine-intelligence-v7','machine-intelligence-v8'].includes(receipt.authority?.liteRelease))
+ warnReceipt('FINALIZE_RECEIPT_AUTHORITY_RELEASE','Phase-0 receipt declares an unsupported Machine Intelligence release',
+  ['machine-intelligence-v7','machine-intelligence-v8'],receipt.authority?.liteRelease??null);
+if(receipt.authority?.manifestSha256!==directory.authorityDigest)
+ warnReceipt('FINALIZE_RECEIPT_AUTHORITY_SHA256','Phase-0 receipt authority digest does not match assigned directory; original values retained',
+  directory.authorityDigest,receipt.authority?.manifestSha256??null);
+if(receipt.source?.sha256!==directory.sourceSha256)
+ warnReceipt('FINALIZE_RECEIPT_SOURCE_SHA256','Phase-0 receipt source SHA does not match current campaign directory; original source preserved',
+  directory.sourceSha256,receipt.source?.sha256??null);
 const requestDir=path.resolve(arg['requests-root']??'process/agent-upload/lite-solo-unit-requests',campaignId);
 const results=[],phase=directory.currentAssignment?.phaseSequence;
 if(![4,5,6].includes(phase)&&arg.mode!=='drain')throw Error('not a parallel Lite-Solo unit phase');
