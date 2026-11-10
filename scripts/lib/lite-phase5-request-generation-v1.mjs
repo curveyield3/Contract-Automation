@@ -16,7 +16,7 @@ const noPlaceholders=x=>{
 const okPath=x=>nonempty(x)&&!x.startsWith('/')&&!x.split('/').some(y=>!y||y==='.'||y==='..');
 const validType=new Set(['ANVIL_WORKFLOW','FOUNDRY_TEST','MEDUSA_PROPERTY']);
 
-export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Source,target,automationRoot}={}){
+export function generateV7ExecutionRequestV1({campaignId,campaignGenerationId,sourceSha256,phase0Source,target,automationRoot}={}){
  const missing=[],key=String(target?.candidateKey??'').trim(),type=target?.reproductionType;
  const need=(field,valid,reason='required')=>{if(!valid)missing.push({field,reason});};
  need('candidateKey',nonempty(key));
@@ -78,6 +78,19 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
         ['medusa.json','foundry.toml'].every(name=>fs.existsSync(path.join(base,name)));
       need('executionBlueprint.configuration.harness.bundleId',ready,
         'bundle must exist in the trusted runner overlay registry with medusa.json and foundry.toml');
+      if(ready){
+        try{
+          const manifest=JSON.parse(fs.readFileSync(path.join(base,'manifest.json'),'utf8'));
+          need('executionBlueprint.configuration.harness.campaignGenerationId',
+            Boolean(campaignGenerationId) &&
+            manifest.campaignId===campaignId &&
+            manifest.campaignGenerationId===campaignGenerationId,
+            'harness is not bound to this exact campaign generation; historical test bundles cannot be reused');
+        }catch(error){
+          need('executionBlueprint.configuration.harness.manifest',false,
+            'generation-bound harness manifest unavailable: '+String(error.message||error));
+        }
+      }
     }
   }
  }

@@ -11,6 +11,11 @@ import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-
 const [root,campaignPath,campaignId,sourceSha256]=process.argv.slice(2);
 if(!root||!/^campaigns\//.test(campaignPath??'')||!campaignId||!/^[a-f0-9]{64}$/i.test(sourceSha256??''))
   throw new Error('Usage: node scripts/lite-phase5-preflight-v1.mjs ROOT campaigns/PATH CAMPAIGN_ID SOURCE_SHA256');
+const directory=JSON.parse(fs.readFileSync(path.join(root,'Audit Campaign Directory/campaigns',campaignId.replace(/-r[0-9]+$/,'')+'.json'),'utf8'));
+if(directory.campaignId!==campaignId||directory.workspacePath!==campaignPath||
+   directory.sourceSha256!==sourceSha256||!directory.campaignGenerationId)
+  throw new Error('Phase 5 preflight generation/source binding mismatch');
+const campaignGenerationId=directory.campaignGenerationId;
 const fullRel=path.posix.join(campaignPath,'work/phase-05/PHASE_05_WORK_FORM_v1.json');
 const fullFile=path.join(root,...fullRel.split('/'));
 const indexRel=path.posix.join(campaignPath,'work/phase-05/shards/INDEX_v1.json');
@@ -68,7 +73,7 @@ else if(!noExecutableCandidates)for(const [i,target] of designs.entries()){
   if(method!=='V7_REQUEST'){fail(prefix+'.executionMethod','Unsupported method');continue;}
   if(!target.executionRequestRef||String(target.executionRequestRef).trim().startsWith('<')){
     const generatedRequest=generateV7ExecutionRequestV1({
-      campaignId,sourceSha256,phase0Source,target,automationRoot:process.cwd()});
+      campaignId,campaignGenerationId,sourceSha256,phase0Source,target,automationRoot:process.cwd()});
     if(generatedRequest.status!=='GENERATED'){
       for(const item of generatedRequest.missing)fail(prefix+'.'+item.field,item.reason);
       continue;
@@ -86,14 +91,14 @@ else if(!noExecutableCandidates)for(const [i,target] of designs.entries()){
     const evidenceRel='work/phase-05/execution-requests/'+safe+'.design-v1.json';
     const evidencePath=path.join(root,campaignPath,evidenceRel);
     fs.writeFileSync(evidencePath,JSON.stringify({schemaVersion:'curveyield-phase5-machine-design-v1',
-      campaignId,sourceSha256,candidateKey:key,requestDigest:generatedRequest.request.requestDigest,
+      campaignId,campaignGenerationId,sourceSha256,candidateKey:key,requestDigest:generatedRequest.request.requestDigest,
       ...generatedRequest.designEvidence},null,2)+'\n');
   }
   const candidateRef=(target.executionRequestRef&&!String(target.executionRequestRef).trim().startsWith('<')?target.executionRequestRef:null)||(generated.some(x=>x.candidateKey===key)?
     generated.find(x=>x.candidateKey===key).executionRequestRef:null);
   const binding=validateTargetExecutionRequestBindingV1({controllerRoot:root,campaignPath,
     target:{...target,executionRequestRef:candidateRef},expectedCampaignId:campaignId,
-    expectedSourceSha256:sourceSha256});
+    expectedCampaignGenerationId:campaignGenerationId,expectedSourceSha256:sourceSha256});
   if(!binding.status.startsWith('PASS_'))
     fail(prefix+'.executionRequestRef',binding.status,binding.reasons);
   else ready.push(key);

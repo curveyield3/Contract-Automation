@@ -544,14 +544,14 @@ async function materializePhase5Request(c,u,selected){
    const rel=c.campaignPath+'/work/phase-05/execution-requests/'+name+'.json';
    if(fs.existsSync(relative(rel)))continue; // Existing immutable requests are validator-owned.
    const generated=generateV7ExecutionRequestV1({campaignId:c.directory.campaignId,
-     sourceSha256:c.directory.sourceSha256,phase0Source,target,automationRoot:process.cwd()});
+     campaignGenerationId:c.directory.campaignGenerationId,sourceSha256:c.directory.sourceSha256,phase0Source,target,automationRoot:process.cwd()});
    if(generated.status!=='GENERATED')continue; // Controller returns existing named rework.
    fs.mkdirSync(path.dirname(relative(rel)),{recursive:true});
    writeJson(relative(rel),generated.request);
    const evidence=c.campaignPath+'/work/phase-05/execution-requests/'+name+'.design-v1.json';
    writeJson(relative(evidence),{schemaVersion:'curveyield-phase5-machine-design-v1',
-     campaignId:c.directory.campaignId,sourceSha256:c.directory.sourceSha256,
-     candidateKey:target.candidateKey,requestDigest:generated.request.requestDigest,...generated.designEvidence});
+     campaignId:c.directory.campaignId,campaignGenerationId:c.directory.campaignGenerationId,
+     sourceSha256:c.directory.sourceSha256,candidateKey:target.candidateKey,requestDigest:generated.request.requestDigest,...generated.designEvidence});
  }
 }
 async function unitValidateSingle(c,item){
