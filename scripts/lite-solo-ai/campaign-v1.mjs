@@ -29,6 +29,8 @@ const sha=text=>createHash('sha256').update(text).digest('hex');
 // Staged only: the active Worker remains on the legacy transcript transport until activation.
 const miloTempRounds=process.env.MILO_TEMP_WORK_ROUNDS==='1';
 let miloRunRoundOrdinal=0;
+const miloRunAttempt=Number(process.env.GITHUB_RUN_ATTEMPT||1);
+if(!Number.isSafeInteger(miloRunAttempt)||miloRunAttempt<1)throw Error('Invalid GitHub run attempt for immutable MiMo round identity');
 
 async function identity(){
  const url=identityEndpoint+(identityEndpoint.includes('?')?'&':'?')+
@@ -91,11 +93,12 @@ async function recordMiloTempRound(modelRequest,modelOutput,scope,roundOrdinal){
  if(!scope||!Number.isSafeInteger(scope.phase)||!Number.isSafeInteger(scope.step))
   throw Error('Source-bound Milo Temp Work question phase/step unavailable');
  const res=await fetch(endpoint,{method:'POST',headers:{authorization:'Bearer '+await identity(),'content-type':'application/json','x-mi-dispatch-correlation':dispatchCorrelation},
-  body:JSON.stringify({campaignId,operation:'mimo_round_pair',phase:scope.phase,step:scope.step,roundOrdinal,modelRequest,modelOutput}),signal:AbortSignal.timeout(150000)});
+  body:JSON.stringify({campaignId,operation:'mimo_round_pair',phase:scope.phase,step:scope.step,roundOrdinal,runAttempt:miloRunAttempt,...(typeof scope.questionId==='string'&&scope.questionId?{questionScope:scope}:{}),modelRequest,modelOutput}),signal:AbortSignal.timeout(150000)});
  const receipt=await res.json().catch(()=>null);
  if(!res.ok||receipt?.status!=='MIMO_TEMP_ROUND_PUBLISHED')
   throw Error('Complete Milo input/output pair not committed to GitHub: HTTP '+res.status+' '+String(receipt?.status||receipt?.error||'UNKNOWN'));
- console.log(JSON.stringify({status:receipt.status,phase:scope.phase,step:scope.step,question:receipt.questionNumber,inputPath:receipt.inputPath,outputPath:receipt.outputPath,commit:receipt.commitSha,inputSha256:receipt.inputSha256,outputSha256:receipt.outputSha256,cloudflareQuestionWrite:false}));
+ console.log(JSON.stringify({status:receipt.status,phase:scope.phase,step:scope.step,question:receipt.questionNumber,inputPath:receipt.inputPath,outputPath:receipt.outputPath,commit:receipt.commitSha,inputSha256:receipt.inputSha256,outputSha256:receipt.outputSha256,runAttempt:miloRunAttempt,cloudflareQuestionWrite:false}));
+ return receipt;
 }
 
 async function workerCall(payload){
@@ -206,7 +209,7 @@ async function modelCall(messages,{technicalAnswer=false,scope=null}={}){
  });
  const start=Date.now();
  const tempRoundOrdinal=++miloRunRoundOrdinal;
- const tempRoundScope=scope?{phase:Number(scope.phase),step:Number(scope.step)}:lastTranscriptScope?{...lastTranscriptScope}:null;
+ const tempRoundScope=scope&&Number.isInteger(Number(scope.phase))&&Number.isInteger(Number(scope.step))?scope:lastTranscriptScope?{...lastTranscriptScope}:null;
  if(!miloTempRounds)await recordPrivateCommunication('mimo_input',request);
  console.log(JSON.stringify({status:'AI_BRIDGE_MODEL_REQUEST',
   conversationMessages:messages.length,promptBytes:Buffer.byteLength(request)}));
