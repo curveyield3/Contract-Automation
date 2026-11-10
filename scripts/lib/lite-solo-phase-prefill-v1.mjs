@@ -908,15 +908,19 @@ function acceptedCanonicalRowReferenceV1({canonical,canonicalArtifactPath,select
 // Source-bound cross-phase reuse. These are references to accepted audit
 // fields and the one existing frozen original Q/A tree, not a model transcript.
 function frozenMiPhaseQuestionArchiveRefV1({root,campaignPath,phase,receiptPath}){
- const p=path.posix.join(campaignPath,'Questions and Answers',
-  'PHASE_'+String(phase).padStart(2,'0')+'_ARCHIVE_MANIFEST_v1.json');
- const manifest=readJsonIf(repoFile(root,p));
  const receipt=receiptPath?readJsonIf(repoFile(root,receiptPath)):null;
- const archive=path.posix.join(campaignPath,'Questions and Answers','Phase '+phase);
+ const revision=Number(receipt?.phase?.revision??1);
+ if(!Number.isSafeInteger(revision)||revision<1)return null;
+ const p=path.posix.join(campaignPath,'Questions and Answers',
+  'PHASE_'+String(phase).padStart(2,'0')+
+  (revision===1?'':'_REVISION_'+revision)+'_ARCHIVE_MANIFEST_v1.json');
+ const manifest=readJsonIf(repoFile(root,p));
+ const archive=path.posix.join(campaignPath,'Questions and Answers',
+  revision===1?'Phase '+phase:'Phase '+phase+', Revision '+revision);
  if(!manifest||!receipt||manifest.schemaVersion!=='milo-phase-qa-frozen-archive-v1'||
   manifest.campaignId!==receipt.campaign?.campaignId||
   manifest.campaignGenerationId!==receipt.campaign?.campaignGenerationId||
-  manifest.phase!==phase||manifest.archivePath!==archive||
+  manifest.phase!==phase||Number(manifest.phaseRevision??1)!==revision||manifest.archivePath!==archive||
   manifest.archivePhaseTreeSha!==manifest.sourcePhaseTreeSha||
   !/^[a-f0-9]{40}$/.test(manifest.archivePhaseTreeSha||'')||
   !Number.isSafeInteger(manifest.fileCount)||manifest.fileCount<2)return null;
@@ -928,7 +932,7 @@ function frozenMiPhaseQuestionArchiveRefV1({root,campaignPath,phase,receiptPath}
  if(!['SEALED','COMPLETE'].includes(receipt.phase?.status)||
   receipt.phase?.sequence!==phase||
   sealed?.status!=='FROZEN_GITHUB_PHASE_TREE'||
-  sealed.manifestRel!==p||sealed.manifestSha256!==sha256||
+  sealed.phaseRevision!==revision||sealed.manifestRel!==p||sealed.manifestSha256!==sha256||
   sealed.destination!==archive||sealed.archivePhaseTreeSha!==manifest.archivePhaseTreeSha||
   sealed.sourcePhaseTreeSha!==manifest.sourcePhaseTreeSha||
   !/^[a-f0-9]{40}$/.test(sealed.archiveCommitSha||''))return null;
@@ -1024,7 +1028,7 @@ function inheritedAcceptedRecordSourceRefsV1({root,campaignPath,sequence}){
    try{names=fs.readdirSync(receiptDir).filter(name=>
     new RegExp('^PHASE_'+phaseNum+'_RECEIPT_v[0-9]+\\.json$').test(name));
    }catch{}
-   for(const name of names.sort()){
+   for(const name of names.sort((a,b)=>Number(a.match(/_v(\d+)\.json$/)?.[1]??0)-Number(b.match(/_v(\d+)\.json$/)?.[1]??0))){
     const rel=path.posix.join(campaignPath,'receipts',name);
     const receipt=readJsonIf(repoFile(root,rel));
     const entry=receipt?.evidence?.find(x=>
