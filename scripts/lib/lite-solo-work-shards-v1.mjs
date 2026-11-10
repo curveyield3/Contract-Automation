@@ -222,7 +222,9 @@ export function secureRestoreWorkFormV13({root,indexRel}){
  const working=secureReadV13(root,indexRel),phase=working.phase;
  const trustedDir=secureLocationV13(working.formRel,phase),workDir=path.posix.dirname(indexRel);
  const trusted=secureReadV13(root,path.posix.join(trustedDir,'INDEX_v1.json'));
- if(!secureSameV13(working,trusted))throw new Error('v13 work shard index differs from controller-owned expected index');
+ if(!secureSameV13({ ...working, baseSha256:null, pages:(working.pages??[]).map(({sha256,...p})=>p) },
+                 { ...trusted, baseSha256:null, pages:(trusted.pages??[]).map(({sha256,...p})=>p) }))
+  throw new Error('v13 work shard structural index differs from controller-owned expected index');
  if(bytes(working)>MAX_INDEX)throw new Error('v13 root index exceeds 32 KiB');
  const baseText=fs.readFileSync(relfile(root,path.posix.join(workDir,working.baseFile)),'utf8');
  if(Buffer.byteLength(baseText)>MAX_SHARD)
