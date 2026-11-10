@@ -15,7 +15,8 @@ function normalizedRaw(result = {}, secrets = []) {
     exitCode: Number.isInteger(result.exitCode) ? result.exitCode : -1,
     stdout: redact(result.stdout, secrets),
     stderr: redact(result.stderr, secrets),
-    ...(result.signal ? { signal: result.signal } : {})
+    ...(result.signal ? { signal: result.signal } : {}),
+    ...(result.timedOut === true ? { timedOut: true } : {})
   };
 }
 
@@ -68,6 +69,8 @@ function validateInput(input) {
   if (input.args !== undefined && !Array.isArray(input.args)) throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'args must be an array');
   if (input.env !== undefined && (!input.env || typeof input.env !== 'object' || Array.isArray(input.env))) throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'env must be an object');
   if (input.redactValues !== undefined && !Array.isArray(input.redactValues)) throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'redactValues must be an array');
+  if (input.timeoutMs !== undefined && (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0))
+    throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'timeoutMs must be a positive safe integer');
   if (input.recoverableExitCodes !== undefined && (!Array.isArray(input.recoverableExitCodes) || input.recoverableExitCodes.some((code) => !Number.isInteger(code)))) {
     throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'recoverableExitCodes must contain integers');
   }
@@ -87,11 +90,31 @@ export async function runNativeFuzzAnalysis(input, { runCommand = runProcess } =
   validateInput(input);
   const args = input.args ? [...input.args] : [];
   const secrets = input.redactValues ?? [];
-  const result = await runCommand({ command: input.command, args, cwd: input.projectRoot, ...(input.env ? { env: input.env } : {}) });
+  const phase5Progress = input.env?.PHASE5_BOUNDARY_PROGRESS === 'true' && input.command === 'forge';
+  const started = Date.now();
+  if (phase5Progress) process.stderr.write('[phase5-v7] Foundry selected test subprocess started\n');
+  const heartbeat = phase5Progress ? setInterval(() => {
+    process.stderr.write('[phase5-v7] Foundry still running elapsed=' + Math.floor((Date.now()-started)/1000) + 's\n');
+  }, 20_000) : null;
+  heartbeat?.unref();
+  let result;
+  try {
+    result = await runCommand({ command: input.command, args, cwd: input.projectRoot,
+      ...(input.env ? { env: input.env } : {}),
+      ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}) });
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+  }
+  if (phase5Progress) process.stderr.write('[phase5-v7] Foundry subprocess ended exitCode=' + String(result?.exitCode??-1) +
+    ' elapsed=' + Math.floor((Date.now()-started)/1000) + 's timedOut=' + Boolean(result?.timedOut) + '\n');
   const rawOutput = normalizedRaw(result, secrets);
 
   const testExecution=inspectForgeTestEvidenceV1(input.command,rawOutput);
   const testResults=input.command==='forge'?parseForgeTestResultsV1((rawOutput.stdout??'')+'\n'+(rawOutput.stderr??'')):null;
+  if (rawOutput.timedOut) return baseResult(input, { status:'failed', terminal:true,
+    failureKind:'SELECTED_FOUNDRY_EXECUTION_TIMEOUT', componentStatus:'FAILED',
+    continuationDisposition:'STOP_EXECUTION', testExecution,
+    ...(testResults?{testResults}:{}), rawOutput });
   if (forgeReportsFailedTests(input.command, rawOutput)||testExecution.applicable&&!testExecution.successful)
     return baseResult(input, { status:'failed', terminal:true, failureKind:testExecution.compilerFailure?'COMPILER_OUTPUT_FAILURE':'NO_SUCCESSFUL_TEST_EXECUTION', componentStatus:'FAILED', continuationDisposition:'STOP_EXECUTION', testExecution, ...(testResults?{testResults}:{}), rawOutput });
   if (rawOutput.exitCode === 0) return baseResult(input, { status:'completed', terminal:true, componentStatus:'COMPLETED', continuationDisposition:'COMPLETE_EVIDENCE', toolInvoked:true, ...(testExecution.applicable?{testExecution}:{}), ...(testResults?{testResults}:{}), rawOutput });
