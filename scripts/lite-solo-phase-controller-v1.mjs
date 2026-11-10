@@ -1496,8 +1496,7 @@ for(const diagnostic of githubDiagnostics){
  const reason=String(diagnostic).trim();
  if(!reason)continue;
  const colon=reason.indexOf(':');
- const check=colon>0?reason.slice(0,colon).trim():
-  'PHASE_'+phaseNum(sequence)+'_FINALIZATION_VERIFICATION';
+ const check=colon>0?reason.slice(0,colon).trim():reason;
  const affectedFile=/question.to.output|question history|provenance|canonical|coverage projection|evidence.continuity/i.test(reason)
   ?canonicalRel:assignment.workFormPath;
  const warningPath=recordPhaseFinalizationVerificationWarningV1({
