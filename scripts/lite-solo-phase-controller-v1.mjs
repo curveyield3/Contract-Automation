@@ -1155,11 +1155,12 @@ const packet=buildControllerPacket({directory,assignment,existing:existingPacket
 // their contents. No controller-side rejection or rework decision is issued.
 let deficiencies=[];
 let form=null;
+const phaseRevision=Number(assignment.phaseRevision??1);
 const materializationWarningPaths=[];
 const materializationWarnings=[];
 const materializationVerificationFailure=({affectedFile,check,reason,expected=null,observed=null})=>{
  const warningPath=recordPhaseFinalizationVerificationWarningV1({
-  root,campaignPath,phase:sequence,affectedFile,check,reason,expected,observed
+  root,campaignPath,phase:sequence,revision:phaseRevision,affectedFile,check,reason,expected,observed
  });
  if(!materializationWarningPaths.includes(warningPath))
   materializationWarningPaths.push(warningPath);
@@ -1512,7 +1513,7 @@ for(const diagnostic of githubDiagnostics){
  const affectedFile=/question.to.output|question history|provenance|canonical|coverage projection|evidence.continuity/i.test(reason)
   ?canonicalRel:assignment.workFormPath;
  const warningPath=recordPhaseFinalizationVerificationWarningV1({
-  root,campaignPath,phase:sequence,affectedFile,check,reason,
+  root,campaignPath,phase:sequence,revision:phaseRevision,affectedFile,check,reason,
   expected:'Verification check passes for the exact source-bound evidence file',
   observed:'FAILED: '+reason
  });
@@ -1527,14 +1528,14 @@ for(const file of listFilesRecursive(campaignRoot)){
  let document=null;
  try{document=readJson(file);}catch{continue;}
  if(document?.schemaVersion!=='curveyield-machine-finalization-verification-warnings-v1'||
-    !Array.isArray(document.warnings)||!document.warnings.some(w=>w.phase===sequence))continue;
+    !Array.isArray(document.warnings)||document.revision!==phaseRevision||
+    !document.warnings.some(w=>w.phase===sequence))continue;
  const warningRel=path.relative(root,file).replaceAll('\\','/');
  if(!finalizationWarningPaths.includes(warningRel))finalizationWarningPaths.push(warningRel);
 }
 packet.controllerValidation.warningPaths=finalizationWarningPaths;
 const receiptLibUrl=pathToFileURL(repoFile(root,'packages/controller-core/src/lite-phase-receipt-v1.mjs')).href;
 const receiptLib=await import(receiptLibUrl);
-const phaseRevision=Number(assignment.phaseRevision??1);
 if(!Number.isInteger(phaseRevision)||phaseRevision<1) throw new Error('assignment.phaseRevision must be an integer >= 1 when present');
 // Filing-only addition: preserve already-authored Worker SUB-STEP CHECKS artifacts.
 // The controller does not parse, score, or validate their titles or contents.
