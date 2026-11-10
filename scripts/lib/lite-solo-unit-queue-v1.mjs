@@ -951,8 +951,16 @@ function readPlan(root,campaign,phase,onVerificationFailure=null){
   throw Error(reason);
  };
  const index=read(root,planRel(campaign,phase));
- if(index.schemaVersion!=='curveyield-lite-solo-unit-plan-v1'||!Array.isArray(index.pages))
-  throw Error('unrecognized or unpaged v4 unit plan');
+ if(index.schemaVersion!=='curveyield-lite-solo-unit-plan-v1')
+  check(planRel(campaign,phase),'FINALIZE_UNIT_PLAN_INDEX_SCHEMA',
+   'Unit plan index schema differs from original expected version; continue with its physically readable page references',
+   'curveyield-lite-solo-unit-plan-v1',index.schemaVersion??null);
+ if(!Array.isArray(index.pages)){
+  check(planRel(campaign,phase),'FINALIZE_UNIT_PLAN_PAGE_INDEX_MISSING',
+   'Unit plan index has no readable page list; no source units may be reconstructed without fabricating page locators',
+   'Array of original page references',index.pages??null);
+  throw Error('UNIT_PLAN_PAGE_LOCATORS_PHYSICALLY_UNAVAILABLE');
+ }
  // Normalize only a Git-verified alias of this same exact campaign workspace.
  const prior=index.campaignPath;
  if(prior!==campaign){
