@@ -3991,7 +3991,7 @@ async function miAdaptiveSingleQuestionTransportV1(){
    const request=JSON.parse(saved.modelRequest);
    if(request.model!=='lite-solo-mimo-v1'||!Array.isArray(request.messages)||
       !request.messages.some(m=>{if(m.role!=='user')return false;try{
-       return JSON.parse(m.content).question===prepared.originalQuestionText;
+       return [prepared.originalQuestionText,prepared.modelFacingQuestionText].includes(JSON.parse(m.content).question);
       }catch{return false;}}))
     throw Error('Recovered model input did not ask the exact Worker-issued question');
    const payload={operation:'adaptive_turn',...t,questionScope:t.scope,
