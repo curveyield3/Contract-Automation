@@ -111,8 +111,16 @@ export async function runPhase6ExecutionPreflightV1({
     && request.source?.archiveSha256 === '876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3';
   let nativeTestGuided = false;
   if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(selectedTest ?? '')) {
-    const selectedDeclaration = boosthubP5 && selectedTest === 'testFuzz_P5T007_'
-      ? 'testFuzz_P5T007_[A-Za-z0-9_]+' : selectedTest;
+    const deterministicBoosthubP5 = boosthubP5 &&
+      request.configuration?.harness?.bundleId ===
+        'boosthub-v9-r1-phase5-candidate-targets-v1-g7adcb74caefeeef3';
+    const selectedCandidate = deterministicBoosthubP5
+      ? /^testFuzz_(P5T00[12457])_/.exec(selectedTest)?.[1] : null;
+    const selectedDeclaration = selectedCandidate
+      ? 'test_' + selectedCandidate + '_[A-Za-z0-9_]+'
+      : (boosthubP5 && selectedTest === 'testFuzz_P5T007_'
+        ? 'testFuzz_P5T007_[A-Za-z0-9_]+'
+        : selectedTest);
     const declaration = new RegExp('\\bfunction\\s+' + selectedDeclaration + '\\s*\\(');
     for (const file of solidityTests) {
       if (declaration.test(await fs.readFile(path.join(projectRoot, file), 'utf8'))) {
