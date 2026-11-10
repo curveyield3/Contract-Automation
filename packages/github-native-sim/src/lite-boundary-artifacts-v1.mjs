@@ -682,12 +682,12 @@ export async function executePhase5TargetsV1({
     // Each candidate is independently observable and time-bounded. The
     // stdout evidence channel stays structured; progress goes only to stderr.
     const startedAt=Date.now();
-    const candidateTimeoutMs=40*60*1000;
-    process.stderr.write(`[phase5-sim] START ${key} V7 execution (max 40 minutes)\n`);
+    const candidateTimeoutMs=12*60*1000;
+    process.stderr.write(`[phase5-sim] START ${key} V7 execution (max 12 minutes; Foundry subprocess max 5 minutes)\n`);
     const heartbeat=setInterval(()=>{
-      const elapsed=Math.floor((Date.now()-startedAt)/60000);
-      process.stderr.write(`[phase5-sim] RUNNING ${key} elapsed=${elapsed}m; awaiting runner result\n`);
-    },60_000);
+      const elapsed=Math.floor((Date.now()-startedAt)/1000);
+      process.stderr.write(`[phase5-sim] HEARTBEAT ${key} elapsed=${elapsed}s; awaiting V7 stage or result\n`);
+    },20_000);
     let result;
     let markerBuffer='';
     const relayProgress=(chunk)=>{
