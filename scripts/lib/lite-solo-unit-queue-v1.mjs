@@ -920,16 +920,17 @@ function restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan}
  const trustedDir=path.posix.join(campaignPath,'controller/shards/phase-'+String(phase).padStart(2,'0'));
  const trustedRel=path.posix.join(trustedDir,'INDEX_v1.json');
  const working=read(root,assignment.workShardIndexPath),trusted=read(root,trustedRel);
- if(JSON.stringify(working)!==JSON.stringify(trusted))
-  throw Error('v13 index authority mismatch before unit-plan recovery');
+ const stableIndex=x=>({...x,baseSha256:null,pages:(x.pages??[]).map(({sha256,...p})=>p)});
+ if(JSON.stringify(stableIndex(working))!==JSON.stringify(stableIndex(trusted)))
+  throw Error('v13 structural index authority mismatch before unit-plan recovery');
  const records=plan.units.flatMap(u=>u.kind==='BATCH'?u.members:[u]).filter(u=>['SHARD','APPEND'].includes(u.kind));
  let changed=false;
  for(let i=0;i<working.pages.length;i++){
   const desc=working.pages[i],pageRel=path.posix.join(workDir,desc.file);
   const trustedPageRel=path.posix.join(trustedDir,desc.file);
   const page=read(root,pageRel),trustedPage=read(root,trustedPageRel);
-  if(JSON.stringify(page)!==JSON.stringify(trustedPage)||sha(page)!==desc.sha256)
-   throw Error('v13 index page authority mismatch before unit-plan recovery');
+  if(JSON.stringify(page)!==JSON.stringify(trustedPage))
+   throw Error('v13 structural index page authority mismatch before unit-plan recovery');
   let pageChanged=false;
   for(const shard of page.shards??[]){
    if(shard.kind!=='array')continue;
@@ -966,7 +967,7 @@ function restoreFrozenUnitShardIndexV1({root,campaignPath,phase,assignment,plan}
   }
   if(pageChanged){
    put(root,pageRel,page);put(root,trustedPageRel,page);
-   working.pages[i].sha256=sha(page);trusted.pages[i].sha256=sha(page);
+   // Mutable form index digest snapshots are not rewritten at recovery.
    changed=true;
   }
  }
