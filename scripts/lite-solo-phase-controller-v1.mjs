@@ -1155,9 +1155,20 @@ const packet=buildControllerPacket({directory,assignment,existing:existingPacket
 // their contents. No controller-side rejection or rework decision is issued.
 let deficiencies=[];
 let form=null;
+const materializationWarningPaths=[];
+const materializationWarnings=[];
+const materializationVerificationFailure=({affectedFile,check,reason,expected=null,observed=null})=>{
+ const warningPath=recordPhaseFinalizationVerificationWarningV1({
+  root,campaignPath,phase:sequence,affectedFile,check,reason,expected,observed
+ });
+ if(!materializationWarningPaths.includes(warningPath))
+  materializationWarningPaths.push(warningPath);
+ materializationWarnings.push({check,reason});
+};
 materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath,
  acceptedContinuations:[4,5,6].includes(sequence)?
-  collectAcceptedAppendContinuationsV1({root,campaignPath,phase:sequence}):[]});
+  collectAcceptedAppendContinuationsV1({root,campaignPath,phase:sequence}):[],
+ onVerificationFailure:materializationVerificationFailure});
 form=readJson(requiredFile(root,assignment.workFormPath,'Worker-provided phase work file'));
 
 // Record identity allocation does not analyze vulnerabilities or reject AI work.
@@ -1192,7 +1203,7 @@ if(sequence===5&&form){
 
 // The Worker owns all audit-quality decisions. Retain GitHub diagnostics for
 // downstream inspection without changing assignment status or freezing the run.
-const githubDiagnostics=[...deficiencies];
+const githubDiagnostics=[...deficiencies,...materializationWarnings.map(x=>x.check+': '+x.reason)];
 
 // No tests, runner gates, approvals or machine-evidence verdicts occur in the
 // GitHub controller. The Worker/adapter owns that validation responsibility.
@@ -1491,8 +1502,9 @@ if(sequence===9){
 
 // Persist only FAILED verification diagnostics, co-located with the affected
 // campaign source. No warning artifact is created when there are no failures.
-const finalizationWarningPaths=[];
+const finalizationWarningPaths=[...materializationWarningPaths];
 for(const diagnostic of githubDiagnostics){
+ if(materializationWarnings.some(w=>diagnostic===w.check+': '+w.reason))continue;
  const reason=String(diagnostic).trim();
  if(!reason)continue;
  const colon=reason.indexOf(':');
@@ -1506,6 +1518,18 @@ for(const diagnostic of githubDiagnostics){
  });
  if(!finalizationWarningPaths.includes(warningPath))
   finalizationWarningPaths.push(warningPath);
+}
+// Include earlier failed finalization verifications from the same phase,
+// including the preceding accepted-unit assembler. Never create an artifact
+// for a successful check or alter the original files.
+for(const file of listFilesRecursive(campaignRoot)){
+ if(!file.endsWith('.VERIFICATION_WARNINGS_v1.json'))continue;
+ let document=null;
+ try{document=readJson(file);}catch{continue;}
+ if(document?.schemaVersion!=='curveyield-machine-finalization-verification-warnings-v1'||
+    !Array.isArray(document.warnings)||!document.warnings.some(w=>w.phase===sequence))continue;
+ const warningRel=path.relative(root,file).replaceAll('\\','/');
+ if(!finalizationWarningPaths.includes(warningRel))finalizationWarningPaths.push(warningRel);
 }
 packet.controllerValidation.warningPaths=finalizationWarningPaths;
 const receiptLibUrl=pathToFileURL(repoFile(root,'packages/controller-core/src/lite-phase-receipt-v1.mjs')).href;
