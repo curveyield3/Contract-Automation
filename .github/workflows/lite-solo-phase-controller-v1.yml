@@ -199,6 +199,7 @@ jobs:
           AUDIT_CAMPAIGN_PATH: ${{ steps.scope.outputs.path }}
           REQUEST_FILE: ${{ steps.request.outputs.request }}
           REVIEW_KIND: ${{ steps.request.outputs.kind }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           args=(--controller-root .audit-controller --campaign-id "$AUDIT_CAMPAIGN" --campaign-path "$AUDIT_CAMPAIGN_PATH" --campaign-directory-path "$AUDIT_DIRECTORY" --review-kind "$REVIEW_KIND" --audit-controller-ref machine-intelligence-audit-controller-v1)
@@ -209,6 +210,45 @@ jobs:
             fi
           else
             args+=(--phase-sequence "$(jq -r .phaseSequence "$REQUEST_FILE")")
+          fi
+          # Publish the exact archived Milo Phase Q/A tree FIRST. The existing
+          # phase controller then binds its receipt to this actual commit.
+          # No extra workflow, per-question Action, or Cloudflare R2 write.
+          if [ "$REVIEW_KIND" = phase ]; then
+            node scripts/lite-solo-phase-controller-v1.mjs \
+              --milo-qa-archive-only true \
+              --controller-root .audit-controller \
+              --campaign-id "$AUDIT_CAMPAIGN" \
+              --campaign-path "$AUDIT_CAMPAIGN_PATH" \
+              --campaign-directory-path "$AUDIT_DIRECTORY" \
+              --phase-sequence "$(jq -r .phaseSequence "$REQUEST_FILE")" \
+              > /tmp/milo-phase-archive.json
+            if jq -e '.status=="ARCHIVE_PREPARED_FOR_COMMIT"' /tmp/milo-phase-archive.json >/dev/null; then
+              archive_path="$(jq -r .destination /tmp/milo-phase-archive.json)"
+              manifest_path="$(jq -r .manifestRel /tmp/milo-phase-archive.json)"
+              source_path="$(jq -r .source /tmp/milo-phase-archive.json)"
+              expected_tree="$(jq -r .sourcePhaseTreeSha /tmp/milo-phase-archive.json)"
+              git -C .audit-controller config user.name 'CurveYield Lite-Solo Phase Controller'
+              git -C .audit-controller config user.email 'lite-solo-controller@users.noreply.github.com'
+              git -C .audit-controller add --sparse -- "$archive_path" "$manifest_path"
+              if ! git -C .audit-controller diff --cached --quiet; then
+                git -C .audit-controller commit -m "audit(mi): freeze source-identical Milo phase Q/A before receipt $GITHUB_RUN_ID"
+                for attempt in 1 2 3; do
+                  if git -C .audit-controller push origin HEAD:machine-intelligence-audit-controller-v1; then break; fi
+                  [ "$attempt" -lt 3 ] || exit 1
+                  git -C .audit-controller pull --rebase origin machine-intelligence-audit-controller-v1
+                  after_pull_tree="$(git -C .audit-controller rev-parse "HEAD:$source_path")"
+                  test "$after_pull_tree" = "$expected_tree" || {
+                    echo "::error::MILO_SOURCE_CHANGED_DURING_ARCHIVE_PUBLICATION"; exit 1;
+                  }
+                done
+              fi
+              published_source="$(git -C .audit-controller rev-parse "HEAD:$source_path")"
+              published_archive="$(git -C .audit-controller rev-parse "HEAD:$archive_path")"
+              test "$published_source" = "$expected_tree" && test "$published_archive" = "$expected_tree" || {
+                echo "::error::MILO_PHASE_ARCHIVE_TREE_MISMATCH"; exit 1;
+              }
+            fi
           fi
           node scripts/lite-solo-phase-controller-v1.mjs "${args[@]}" > /tmp/lite-solo-envelope.json
           test "$(wc -c </tmp/lite-solo-envelope.json)" -le 8192
