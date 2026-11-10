@@ -7,6 +7,7 @@ import {execFileSync} from 'node:child_process';
 import {runProcess} from '../packages/github-native-sim/src/execution.mjs';
 import {assembleAcceptedUnitShardsV1,finalizeReadinessV1} from './lib/lite-solo-unit-queue-v1.mjs';
 import {executePhase5TargetsV1,validateTargetExecutionRequestBindingV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
+import {resolveTargetExecutionRequestRef} from './lib/lite-solo-phase-prefill-v1.mjs';
 
 const args=Object.fromEntries(process.argv.slice(2).reduce((acc,x,i,all)=>{
   if(i%2===0){if(!x.startsWith('--')||!all[i+1])throw Error('invalid argument');acc.push([x.slice(2),all[i+1]]);}
@@ -67,6 +68,14 @@ if(phase===5){
   fs.writeFileSync(abs(preRel),JSON.stringify(preflight,null,2)+'\n');
   const form=read(path.posix.join(campaignPath,'work/phase-05/PHASE_05_WORK_FORM_v1.json'));
   const targets=form.actions?.['step-3']?.outputs?.targetDesigns??[];
+  // The preflight deliberately does not mutate reviewer-owned shards. Resolve
+  // the exact generated request only in this transient machine execution view.
+  for(const target of targets){
+    if(!target||typeof target!=='object'||target.executionMethod!=='V7_REQUEST')continue;
+    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
+    if(!resolved)throw Error('current-generation execution request missing for '+String(target.candidateKey));
+    target.executionRequestRef=resolved;
+  }
   const results=await executePhase5TargetsV1({
     controllerRoot:root,campaignPath,targetDesigns:targets,
     expectedCampaignId:campaignId,expectedCampaignGenerationId:generationId,
