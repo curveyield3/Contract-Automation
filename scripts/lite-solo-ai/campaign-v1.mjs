@@ -3262,6 +3262,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
            q.originalFieldBinding?.field===item.field;
          }catch{return false;}}))
        throw Error('Saved original fixed-member prompt is not the same issued field');
+      miloTempRawOutputs.set(issued.scopeSha256+':'+sha(snapshot.outputText),latest.questionNumber);
       const receipt=JSON.parse(await miSendOriginalBounded(issued,snapshot.outputText,{
        operation:'answer_question',unitId:ready.unitId,lease:ready.lease,
        scopeSha256:issued.scopeSha256,questionId:item.questionId,
