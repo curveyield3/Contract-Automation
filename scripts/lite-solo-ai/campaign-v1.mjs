@@ -709,16 +709,23 @@ async function sourceBoundQuestionHistoryV1(raw){
   const tempPath='Milo Temp Work/'+workspace.slice('campaigns/'.length)+relative;
   const existingIndexes=indexedPaths.get(item.phaseSequence);
   const exactRosterPath=[canonicalPath,tempPath].includes(item.ref?.indexPath)?item.ref.indexPath:null;
-  const indexPath=[exactRosterPath,tempPath,canonicalPath].find(p=>
-    p&&(!existingIndexes||existingIndexes.has(p)))??(exactRosterPath??tempPath);
-  if(existingIndexes&&!existingIndexes.has(indexPath)){
-   unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
-    indexPath,status:'NOT_PUBLISHED'});continue;
+  // An accepted canonical roster's exact original path takes precedence; it
+  // must not be replaced by an unrelated newer temp or legacy index.
+  // Without that original binding, probe both generation-scoped locations at
+  // the same pinned commit. A missing directory listing is NOT proof that the
+  // first guessed path exists or that an alternate accepted source is absent.
+  const candidatePaths=exactRosterPath?[exactRosterPath]:[tempPath,canonicalPath];
+  let ix=null,indexPath=null;
+  for(const candidatePath of candidatePaths){
+   if(existingIndexes&&!existingIndexes.has(candidatePath))continue;
+   const pinned=await historyJsonV1(candidatePath).catch(()=>null);
+   if(pinned){ix=pinned;indexPath=candidatePath;break;}
   }
-  const ix=await historyJsonV1(indexPath).catch(()=>null);
   if(!ix){
    unavailable.push({phaseSequence:item.phaseSequence,unitId:item.unitId,
-    indexPath,status:'NOT_PUBLISHED_OR_UNREADABLE'});continue;
+    indexPath:exactRosterPath??tempPath,
+    alternateLegacyPath:exactRosterPath?null:canonicalPath,
+    status:'NOT_PUBLISHED_OR_UNREADABLE'});continue;
   }
   let index;
   try{index=await miQHydratePinnedV1(ix.data,indexPath,historySnapshotCommit);}
