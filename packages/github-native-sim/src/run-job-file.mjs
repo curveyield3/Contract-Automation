@@ -275,6 +275,11 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
         FOUNDRY_TEST: 'verification_v6/phase5'
       } : {}) }, redactValues: [rpcUrl], forkEvidence,
     recoverableExitCodes: native.recoverableExitCodes ?? [],
+    // Limit the selected candidate's Forge process, not source checkout,
+    // compilation staging or the audit's evidence serialization. Historical
+    // requests may specify a larger global timeout, but there is no reason
+    // for a completed deterministic proof to linger until that timeout.
+    ...(request.gateId === 'phase5-target-execution' ? {timeoutMs: 5*60*1000} : {}),
   }, { ...(runCommand ? { runCommand } : {}) });
 }
 
