@@ -85,7 +85,10 @@ contract BoostHubV9VaultP5TargetsV1 {
         _deposit(v,w,ALICE,n);
         uint256 paid=n/5;
         s.configure(paid,false);
-        vm.prank(ALICE);v.withdraw(v.balanceOf(ALICE));
+        // Resolve the shares BEFORE vm.prank: otherwise balanceOf() consumes
+        // Foundry's next-call prank, and withdraw() executes as this contract.
+        uint256 aliceShares=v.balanceOf(ALICE);
+        vm.prank(ALICE);v.withdraw(aliceShares);
         require(v.totalSupply()==0,"TERMINAL_SHARES_NOT_BURNED");
         require(w.balanceOf(ALICE)==paid,"TERMINAL_UNEXPECTED_PAYMENT");
         require(s.balanceOf()==n-paid,"TERMINAL_VALUE_NOT_PRESENT");
@@ -101,7 +104,10 @@ contract BoostHubV9VaultP5TargetsV1 {
         (BeefyVaultV7FixedV2 v,,BoostV9BehaviorTokenV1 w)=_fixture();
         uint256 n=uint256(raw)%1e21+100;
         _deposit(v,w,ALICE,n);
-        vm.prank(ALICE);v.withdraw(v.balanceOf(ALICE));
+        // Resolve the shares BEFORE vm.prank: otherwise balanceOf() consumes
+        // Foundry's next-call prank, and withdraw() executes as this contract.
+        uint256 aliceShares=v.balanceOf(ALICE);
+        vm.prank(ALICE);v.withdraw(aliceShares);
         require(v.totalSupply()==0,"CONTROL_SUPPLY");
         require(w.balanceOf(ALICE)==n,"CONTROL_FULL_PAYOUT");
         require(v.balance()==0,"CONTROL_RESIDUAL");
