@@ -14,7 +14,7 @@ import {
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-solo-phase-work-v1.mjs';
 import {
-  executePhase5TargetsV1,selectReusablePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
+  verifiedReusablePhase5ResultV1,selectReusablePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
   validateTargetExecutionRequestBindingV1,inspectPhase5OwnerEvidenceDeferralV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
@@ -927,6 +927,7 @@ try{
         const binding=validateTargetExecutionRequestBindingV1({
           controllerRoot:root,campaignPath,target,
           expectedCampaignId:directory.campaignId,
+          expectedCampaignGenerationId:directory.campaignGenerationId,
           expectedSourceSha256:directory.sourceSha256
         });
         if(!String(binding.status).startsWith('PASS_'))
@@ -1075,6 +1076,7 @@ if(sequence===5&&form&&deficiencies.length===0){
       campaignPath,
       target,
       expectedCampaignId:directory.campaignId,
+      expectedCampaignGenerationId:directory.campaignGenerationId,
       expectedSourceSha256:directory.sourceSha256
     });
     target.requestBindingStatus=binding.status;
@@ -1128,7 +1130,9 @@ if([6,8].includes(sequence)&&deficiencies.length===0){
         controllerRoot:root,campaignPath,
         targetDesigns:phaseOutput(sealedP5,'step-3','targetDesigns')??[],
         expectedCampaignId:directory.campaignId,
-        expectedSourceSha256:directory.sourceSha256,requireCompletedMatrix:true
+        expectedCampaignGenerationId:directory.campaignGenerationId,
+        expectedCampaignGenerationId:directory.campaignGenerationId,
+          expectedSourceSha256:directory.sourceSha256,requireCompletedMatrix:true
       }));
     }
   }catch(e){deficiencies.push('Phase '+sequence+' mandatory predecessor/evidence gate failed: '+String(e.message||e));}
@@ -1152,77 +1156,108 @@ if(sequence===5 && !['Audit Skill - Lite-Solo Authority/lite-solo-v3','Audit Ski
   directory.machineExecutionAuthorization?.sourceSha256===directory.sourceSha256 &&
   directory.machineExecutionAuthorization?.scope==='PHASE5_TARGET_EXECUTION'))
  throw new Error('LITE_SOLO_TEST_AUTHORIZATION_REQUIRED: Phase 5 machine execution has no exact human-approved source-bound authorization.');
-// Execute mandatory Phase-5 candidate tests before any PASS, bookkeeping or seal.
+// Phase finalization consumes completed, exact-generation machine results only.
+// No Foundry, Anvil, Medusa, RPC or V7 runner starts from this controller.
 let phase5MachineResults=null;
 if(sequence===5){
   const targetDesigns=form.actions['step-3'].outputs.targetDesigns;
   const {keys:materialCandidateKeys,sourceAnchors:candidateSourceAnchors}=
     materialPhase5Candidates({root,campaignPath,form});
-  try{
-    if(phase5OwnerDeferral){
-      if(JSON.stringify(materialCandidateKeys.slice().sort())!==JSON.stringify(phase5OwnerDeferral.candidateKeys.slice().sort()))
-        throw new Error('Owner Phase-5 deferral does not cover exactly the mandatory candidate set');
-      phase5MachineResults=Object.fromEntries(phase5OwnerDeferral.candidateKeys.map(key=>[key,{
-        status:'DEFERRED_UNVERIFIED',exitCode:null,evidenceRef:'NO_MACHINE_EVIDENCE',
-        requestBindingStatus:targetDesigns.find(x=>x.candidateKey===key)?.requestBindingStatus??'UNVERIFIED',
-        requestBindingEvidenceRef:targetDesigns.find(x=>x.candidateKey===key)?.executionRequestRef??'NO_REQUEST',
-        requestBindingReasons:['OWNER_DEFERRED_NOT_AN_EXECUTION_RESULT'],
-        rawResult:null
-      }]));
-    }else{
-      phase5MachineResults=await executePhase5TargetsV1({
-        controllerRoot:root,campaignPath,targetDesigns,
-        expectedCampaignId:directory.campaignId,expectedSourceSha256:directory.sourceSha256,
-        reuseCandidateKeys:phase5ReuseCandidateKeys
-      });
-      deficiencies.push(...validatePhase5TargetExecutionGateV1({
-        controllerRoot:root,campaignPath,targetDesigns,
-        materialCandidateKeys,candidateSourceAnchors,executionResults:phase5MachineResults,
+  const manifestRel=path.posix.join(campaignPath,'evidence/phase-05-machine/EXECUTION_MANIFEST_v1.json');
+  const manifest=maybeJson(root,manifestRel);
+  const executable=targetDesigns.filter(t=>t&&typeof t==='object'&&t.executionMethod==='V7_REQUEST');
+  phase5MachineResults={};
+  if(phase5OwnerDeferral){
+    if(JSON.stringify(materialCandidateKeys.slice().sort())!==JSON.stringify(phase5OwnerDeferral.candidateKeys.slice().sort()))
+      deficiencies.push('Owner Phase-5 deferral does not cover exactly the mandatory candidate set');
+    phase5MachineResults=Object.fromEntries(phase5OwnerDeferral.candidateKeys.map(key=>[key,{
+      status:'DEFERRED_UNVERIFIED',exitCode:null,evidenceRef:'NO_MACHINE_EVIDENCE',
+      requestBindingStatus:targetDesigns.find(x=>x.candidateKey===key)?.requestBindingStatus??'UNVERIFIED',
+      requestBindingEvidenceRef:targetDesigns.find(x=>x.candidateKey===key)?.executionRequestRef??'NO_REQUEST',
+      requestBindingReasons:['OWNER_DEFERRED_NOT_AN_EXECUTION_RESULT'],rawResult:null
+    }]));
+  }else{
+    if(executable.length){
+      if(!manifest||manifest.schemaVersion!=='curveyield-lite-machine-evidence-v1'||
+         manifest.campaignId!==directory.campaignId||
+         manifest.campaignGenerationId!==directory.campaignGenerationId||
+         manifest.phaseSequence!==5||
+         manifest.phaseEpoch!==(directory.unitPhaseEpoch??null)||
+         manifest.sourceSha256!==directory.sourceSha256||
+         manifest.authorityDigest!==directory.authorityDigest||
+         manifest.status!=='COMPLETE'||!Array.isArray(manifest.records))
+        deficiencies.push('Phase 5 exact-generation machine evidence manifest is missing, incomplete or belongs to a different campaign generation. Run the separate machine-execution workflow before finalization.');
+    }
+    for(const target of targetDesigns){
+      if(!target||typeof target!=='object'||Array.isArray(target))continue;
+      const key=String(target.candidateKey??'').trim();
+      if(!key)continue;
+      if(target.executionMethod==='NOT_APPLICABLE'){
+        phase5MachineResults[key]={
+          status:'NOT_APPLICABLE',notApplicableDisposition:target.notApplicableDisposition??null,
+          evidenceRef:'VERIFIED_COVERING_TARGET_REQUIRED'
+        };
+        continue;
+      }
+      const matching=(manifest?.records??[]).filter(x=>x?.candidateKey===key);
+      if(matching.length!==1||matching[0].status!=='PASS'){
+        deficiencies.push('Phase 5 '+key+' requires one completed current-generation machine result');
+        phase5MachineResults[key]={status:'MISSING',exitCode:null,evidenceRef:'NO_MACHINE_EVIDENCE'};
+        continue;
+      }
+      const record=matching[0];
+      const binding=validateTargetExecutionRequestBindingV1({
+        controllerRoot:root,campaignPath,target,
+        expectedCampaignId:directory.campaignId,
+        expectedCampaignGenerationId:directory.campaignGenerationId,
         expectedSourceSha256:directory.sourceSha256
-      }));
+      });
+      if(!String(binding.status).startsWith('PASS_')){
+        deficiencies.push('Phase 5 '+key+' execution request generation binding failed: '+String(binding.status));
+        continue;
+      }
+      const expectedRequestPath=path.posix.join(campaignPath,binding.requestRef);
+      let request=null;
+      try{request=readJson(requiredFile(root,expectedRequestPath,'machine request'));}
+      catch(e){deficiencies.push('Phase 5 '+key+' current-generation request missing: '+String(e.message||e));}
+      if(!request||record.requestPath!==expectedRequestPath||
+         record.requestId!==request.requestId||
+         record.requestDigest!==request.requestDigest||
+         record.sourceCommit!==request.source?.commit||
+         record.harnessBundleId!==(request.configuration?.harness?.bundleId??null))
+        deficiencies.push('Phase 5 '+key+' machine manifest request/source binding differs from the exact controller request');
+      const rawRel=record.rawResultPath;
+      if(typeof rawRel!=='string'||!rawRel.startsWith(campaignPath+'/evidence/phase5-boundary/')||
+         !rawRel.endsWith('/raw-result.json')){
+        deficiencies.push('Phase 5 '+key+' machine manifest raw evidence path is outside this campaign');
+      }else{
+        try{
+          if(shaFile(requiredFile(root,rawRel,'completed machine result'))!==record.rawResultSha256)
+            deficiencies.push('Phase 5 '+key+' machine result SHA differs from the persisted exact-generation evidence');
+        }catch(e){deficiencies.push('Phase 5 '+key+' machine raw result cannot be read: '+String(e.message||e));}
+      }
+      const saved=verifiedReusablePhase5ResultV1({
+        controllerRoot:root,campaignPath,target,
+        expectedCampaignId:directory.campaignId,
+        expectedCampaignGenerationId:directory.campaignGenerationId,
+        expectedSourceSha256:directory.sourceSha256
+      });
+      phase5MachineResults[key]=saved??{status:'INCOMPLETE',exitCode:null,evidenceRef:'NO_MACHINE_EVIDENCE'};
+      if(!saved||saved.evidenceRef!==record.rawResultPath)
+        deficiencies.push('Phase 5 '+key+' has no independently verified current-generation machine execution');
     }
-    // Report the actual runner cause, not merely BLOCKED. The shadow
-    // campaign is discarded on failed master refresh, so these diagnostics
-    // are essential to distinguish harness defects from RPC or build faults.
-    for(const [key,machine] of Object.entries(phase5MachineResults??{})){
-      if(machine?.status==='PASS'||machine?.status==='NOT_APPLICABLE'||machine?.status==='DEFERRED_UNVERIFIED')continue;
-      let cli=null;
-      try{cli=JSON.parse(String(machine?.stdout??''));}catch{}
-      const failed=(machine?.rawResult?.failedSteps??[]).slice(0,3).map(x=>({
-        component:x?.component??x?.name??x?.step??null,
-        kind:x?.kind??x?.failureKind??null,
-        error:String(x?.error??x?.message??'').slice(0,450)
-      }));
-      const cause={
-        candidate:key,status:machine?.status,exitCode:machine?.exitCode,
-        disposition:machine?.rawResult?.disposition??cli?.disposition??null,
-        runnerError:machine?.rawResult?.error??cli?.error??null,
-        preflight:machine?.rawResult?.preflight?.failureKind??null,
-        build:machine?.rawResult?.build?.status??null,
-        nativeFuzz:machine?.rawResult?.analysis?.nativeFuzz?{
-          status:machine.rawResult.analysis.nativeFuzz.componentStatus,
-          failureKind:machine.rawResult.analysis.nativeFuzz.failureKind??null,
-          exitCode:machine.rawResult.analysis.nativeFuzz.rawOutput?.exitCode??null,
-          outputTail:String(machine.rawResult.analysis.nativeFuzz.rawOutput?.stdout??'').slice(-3000),
-          errorTail:String(machine.rawResult.analysis.nativeFuzz.rawOutput?.stderr??'').slice(-1800)
-        }:null,
-        failedSteps:failed,
-        stderrTail:String(machine?.stderr??'').slice(-1500)
-      };
-      deficiencies.push('Phase 5 machine diagnostic: '+JSON.stringify(cause));
-    }
-  }catch(e){
-    deficiencies.push('Phase 5 mandatory machine execution failed: '+String(e.message||e));
+    deficiencies.push(...validatePhase5TargetExecutionGateV1({
+      controllerRoot:root,campaignPath,targetDesigns,materialCandidateKeys,
+      candidateSourceAnchors,executionResults:phase5MachineResults,
+      expectedSourceSha256:directory.sourceSha256
+    }));
   }
   const matrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
-  // No Phase-0 fuzz/telemetry is imported as target evidence.
-  const baselineRows=[];
   fs.mkdirSync(path.dirname(repoFile(root,matrixRel)),{recursive:true});
   fs.writeFileSync(repoFile(root,matrixRel),renderTargetedTestMatrixV1({
-    targetDesigns,executionResults:phase5MachineResults??{},baselineRows
+    targetDesigns,executionResults:phase5MachineResults,baselineRows:[]
   }));
   if(deficiencies.length){
-    // Evidence and diagnostic matrix may persist; receipt and graph cannot.
     persistReviewerReworkShardsV1();
     packet.status='REWORK_REQUIRED';
     packet.controllerValidation={status:'FAIL',machineExecutionGate:'BLOCKED',validatedAt:now,deficiencies};
@@ -1230,14 +1265,13 @@ if(sequence===5){
     writeJson(packetFile,packet);writeJson(directoryFile,directory);
     const shardGuidance=annotateShardReworkV1(packet,deficiencies);
     writeJson(packetFile,packet);
-    const feedback=['Phase 5 execution gate BLOCKED: no receipt, PASS or handoff was issued.',
-      'Repair the exact runner, harness or machine-evidence defect, then invoke the same phase controller again.',
-      ...deficiencies.map(x=>'- '+x),
-      'Machine failure is not a vulnerability finding.'].join('\n')+shardGuidance;
-    process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',campaignId:directory.campaignId,
-      campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-5',
-      reviewer:assignment.reviewer,feedbackText:feedback,
-      feedbackB64:Buffer.from(feedback).toString('base64'),
+    const feedback=['Phase 5 evidence admission BLOCKED: no receipt, PASS or handoff was issued.',
+      'Complete exact-generation machine execution in the separate workflow, then retry finalization.',
+      ...deficiencies.map(x=>'- '+x)].join('\n')+shardGuidance;
+    process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',
+      campaignId:directory.campaignId,campaignName:directory.campaignName,
+      phaseSequence:sequence,phaseId:'phase-5',reviewer:assignment.reviewer,
+      feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),
       packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
     process.exit(0);
   }
