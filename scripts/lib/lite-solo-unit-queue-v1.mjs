@@ -918,7 +918,9 @@ export function recoverSourceBoundRequestReworkV1({root,campaignPath,directory}=
        accepted.submissionSha256!==state.acceptedSha256||
        !dependenciesFresh(queue,u,accepted.prerequisiteEvidence))return false;
     const entry=accepted.submission?.entries?.find(e=>e.value?.candidateKey===key);
-    if(!entry||!u.recordKeys?.includes(entry.key))return false;
+    if(!entry||(u.kind==='APPEND'
+       ?!entry.key.startsWith(JSON.stringify(u.path)+':APPEND-')
+       :!u.recordKeys?.includes(entry.key)))return false;
     const made=generateV7ExecutionRequestV1({
      campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
      sourceSha256:directory.sourceSha256,phase0Source:source,
