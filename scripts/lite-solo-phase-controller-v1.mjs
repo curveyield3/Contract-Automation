@@ -40,6 +40,92 @@ function feedbackText(sequence,defs){return ['Phase '+sequence+' semantic valida
 function listFilesRecursive(dir){if(!fs.existsSync(dir)) return [];const out=[];for(const ent of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,ent.name);if(ent.isDirectory()) out.push(...listFilesRecursive(p));else if(ent.isFile()) out.push(p);}return out;}
 function hasRemediation(campaignRoot){return listFilesRecursive(path.join(campaignRoot,'remediation'))
  .some(file=>!file.endsWith('.VERIFICATION_WARNINGS_v1.json'));}
+
+/* Milo phase originals: source-owned GitHub JSON, copied without re-encoding.
+   This extends the existing phase-boundary controller; it is not a second transcript. */
+function miloPhaseArchiveV1({root,campaignPath,campaignId,generation,phase,prepare=false}){
+ const campaignMatch=/^campaigns\/([^/]+)\/([^/]+)$/.exec(campaignPath);
+ if(!campaignMatch||!Number.isSafeInteger(phase)||phase<1||phase>10)throw Error('Milo archive requires exact generation-bound campaign/phase');
+ const source='Milo Temp Work/'+campaignMatch[1]+'/'+campaignMatch[2]+'/Phase '+phase;
+ const destination=campaignPath+'/Questions and Answers/Phase '+phase;
+ const manifestRel=campaignPath+'/Questions and Answers/PHASE_'+phaseNum(phase)+'_ARCHIVE_MANIFEST_v1.json';
+ const src=repoFile(root,source),dst=repoFile(root,destination);
+ if(!fs.existsSync(src)){
+  if(fs.existsSync(dst))throw Error('MILO_ARCHIVE_SOURCE_MISSING_WITH_EXISTING_DESTINATION: '+source);
+  return {status:'NO_GITHUB_MILO_PHASE_SOURCE',phase,source,destination,manifestRel};
+ }
+ const sourceCommit=execFileSync('git',['-C',root,'rev-parse','HEAD'],{encoding:'utf8'}).trim();
+ const tree=execFileSync('git',['-C',root,'rev-parse','HEAD:'+source],{encoding:'utf8'}).trim();
+ if(!/^[a-f0-9]{40}$/.test(tree))throw Error('MILO_ARCHIVE_UNPINNED_SOURCE_TREE');
+ const paths=listFilesRecursive(src).map(f=>path.relative(src,f).split(path.sep).join('/')).sort();
+ const pairs=new Map();const blobs=[];
+ for(const rel of paths){
+  if(!/^Step [0-9]+\/Q[0-9]+, Phase [0-9]+, Step [0-9]+, (?:Input|Output)\.json$/.test(rel))
+   throw Error('MILO_ARCHIVE_UNEXPECTED_PHASE_SOURCE: '+rel);
+  const found=/^Step ([0-9]+)\/Q([0-9]+), Phase ([0-9]+), Step ([0-9]+), (Input|Output)\.json$/.exec(rel);
+  if(Number(found[1])!==Number(found[4])||Number(found[3])!==phase)throw Error('MILO_ARCHIVE_WRONG_PHASE_OR_STEP: '+rel);
+  const raw=fs.readFileSync(path.join(src,rel));
+  const item=JSON.parse(raw.toString('utf8'));
+  if(item.schemaVersion!=='milo-temp-question-round-v1'||item.campaignId!==campaignId||item.campaignGenerationId!==generation||item.phase!==phase||item.step!==Number(found[1])||item.questionNumber!==Number(found[2])||item.direction!==found[5]||
+    typeof item.originalContent!=='string'||shaFileSourceString(item.originalContent)!==item.originalContentSha256)
+   throw Error('MILO_ARCHIVE_ORIGINAL_PAIR_IDENTITY_MISMATCH: '+rel);
+  const pairKey=found[1]+'/'+found[2],pair=pairs.get(pairKey)||{};
+  pair[found[5]]=item;pairs.set(pairKey,pair);
+  const gitBlobSha=execFileSync('git',['-C',root,'hash-object','--',path.join(src,rel)],{encoding:'utf8'}).trim();
+  blobs.push({path:rel,gitBlobSha,sha256:createHash('sha256').update(raw).digest('hex')});
+ }
+ if(!paths.length)throw Error('MILO_ARCHIVE_EMPTY_PHASE_SOURCE: '+source);
+ for(const [key,pair] of pairs){
+  if(!pair.Input||!pair.Output||pair.Input.workflowRunId!==pair.Output.workflowRunId||pair.Input.workflowRunAttempt!==pair.Output.workflowRunAttempt||pair.Input.runRoundOrdinal!==pair.Output.runRoundOrdinal||pair.Input.questionScopeSha256!==pair.Output.questionScopeSha256||pair.Input.questionId!==pair.Output.questionId)
+   throw Error('MILO_ARCHIVE_UNPAIRED_OR_MISMATCHED_INPUT_OUTPUT: '+key);
+ }
+ if(prepare){
+  for(const rel of paths){
+   const to=path.join(dst,rel),from=path.join(src,rel);
+   fs.mkdirSync(path.dirname(to),{recursive:true});
+   if(fs.existsSync(to)){
+    if(!fs.readFileSync(to).equals(fs.readFileSync(from)))throw Error('MILO_ARCHIVE_IMMUTABLE_DESTINATION_CONFLICT: '+rel);
+   }else fs.copyFileSync(from,to);
+  }
+ }
+ if(!fs.existsSync(dst))throw Error('MILO_ARCHIVE_COPY_NOT_PUBLISHED');
+ const archived=listFilesRecursive(dst).map(f=>path.relative(dst,f).split(path.sep).join('/')).sort();
+ if(JSON.stringify(paths)!==JSON.stringify(archived))throw Error('MILO_ARCHIVE_RELATIVE_FILE_SET_DIFFERS');
+ for(const entry of blobs){
+  const target=path.join(dst,entry.path);
+  const actual=execFileSync('git',['-C',root,'hash-object','--',target],{encoding:'utf8'}).trim();
+  if(actual!==entry.gitBlobSha)throw Error('MILO_ARCHIVE_GIT_BLOB_MISMATCH: '+entry.path);
+ }
+ const archiveCommitSha=prepare?null:sourceCommit;
+ if(!prepare){
+  const archiveTree=execFileSync('git',['-C',root,'rev-parse','HEAD:'+destination],{encoding:'utf8'}).trim();
+  if(archiveTree!==tree)throw Error('MILO_ARCHIVE_COMMITTED_TREE_SHA_MISMATCH');
+ }
+ const manifest={schemaVersion:'milo-phase-qa-frozen-archive-v1',campaignId,campaignGenerationId:generation,
+  phase,sourcePath:source,archivePath:destination,sourceCommitSha:sourceCommit,sourcePhaseTreeSha:tree,
+  archivePhaseTreeSha:tree,archiveCommitSha,pairedQuestionCount:pairs.size,fileCount:blobs.length,
+  files:blobs};
+ const manifestFile=repoFile(root,manifestRel);
+ if(prepare){fs.mkdirSync(path.dirname(manifestFile),{recursive:true});
+  if(fs.existsSync(manifestFile)){const existing=readJson(manifestFile);
+   if(existing.sourcePhaseTreeSha!==tree||existing.campaignGenerationId!==generation)
+    throw Error('MILO_ARCHIVE_MANIFEST_ALREADY_EXISTS_FOR_DIFFERENT_SOURCE');
+  }else writeJson(manifestFile,{...manifest,archiveCommitSha:null});
+ }else{
+  const existing=readJson(requiredFile(root,manifestRel,'Milo prepublished phase archive manifest'));
+  if(existing.sourcePhaseTreeSha!==tree||existing.archivePhaseTreeSha!==tree||
+     existing.campaignId!==campaignId||existing.campaignGenerationId!==generation||
+     existing.pairedQuestionCount!==pairs.size||existing.fileCount!==blobs.length||
+     JSON.stringify(existing.files)!==JSON.stringify(blobs))
+   throw Error('MILO_ARCHIVE_PREPUBLISHED_MANIFEST_CONFLICT');
+ }
+ return {status:prepare?'ARCHIVE_PREPARED_FOR_COMMIT':'ARCHIVE_CONFIRMED_COMMITTED',
+  manifestRel,source,destination,sourcePhaseTreeSha:tree,archivePhaseTreeSha:tree,
+  sourceCommitSha:sourceCommit,archiveCommitSha,pairedQuestionCount:pairs.size,fileCount:blobs.length,
+  manifestSha256:shaFile(manifestFile)};
+}
+function shaFileSourceString(text){return createHash('sha256').update(Buffer.from(text,'utf8')).digest('hex');}
+
 // Direct phase work forms (1–3, 8–10) do not use Phase 4–6 APPEND
 // units. Give every genuinely new AI-authored record its deterministic
 // controller ID before canonical packaging. This is clerical identity
@@ -1052,6 +1138,17 @@ if(reviewKind==='master-test-result'&&!a['test-result-path'])throw new Error('mi
 if(reviewKind==='master'&&a['master-outcome']==='REQUEST_TARGETED_TESTS'&&!a['test-plan-path'])throw new Error('missing --test-plan-path');
 if(['sealed-rework','post-completion-followup'].includes(reviewKind)&&!a['rework-request-path']) throw new Error('missing --rework-request-path');
 if(!['phase','discovery'].includes(reviewKind)) throw new Error('unsupported review-kind');
+if(a['milo-qa-archive-only']==='true'){
+ const root=path.resolve(a['controller-root']),campaignPath=a['campaign-path'],campaignId=a['campaign-id'];
+ const phase=Number(a['phase-sequence']);
+ const dirRel=a['campaign-directory-path'];
+ const directory=readJson(requiredFile(root,dirRel,'bound campaign directory'));
+ if(directory.campaignId!==campaignId||directory.workspacePath!==campaignPath)
+  throw Error('MILO_ARCHIVE_CAMPAIGN_DIRECTORY_MISMATCH');
+ const result=miloPhaseArchiveV1({root,campaignPath,campaignId,generation:directory.campaignGenerationId,phase,prepare:true});
+ process.stdout.write(JSON.stringify(result)+'\n');
+ process.exit(0);
+}
 const root=path.resolve(a['controller-root']);
 const expectedCampaignId=a['campaign-id'];
 const campaignPath=a['campaign-path']; const campaignRoot=repoFile(root,campaignPath);
@@ -1616,6 +1713,15 @@ if(sequence===5&&phase5OwnerDeferral)receipt.machineExecutionDisclaimer={
   unresolvedCandidateKeys:phase5OwnerDeferral.candidateKeys,
   notAMachinePass:true,finalAuditSecurityAssurance:'INCOMPLETE'
 };
+const miloArchive=miloPhaseArchiveV1({root,campaignPath,campaignId:directory.campaignId,
+ generation:directory.campaignGenerationId,phase:sequence,prepare:false});
+if(miloArchive.status==='ARCHIVE_CONFIRMED_COMMITTED'){
+ receipt.miloQuestionsAndAnswersArchive={...miloArchive,status:'FROZEN_GITHUB_PHASE_TREE'};
+ receipt.evidence.push(receiptRef(root,campaignPath,miloArchive.manifestRel,'MILO_PHASE_QA_ARCHIVE_MANIFEST'));
+}else{
+ receipt.miloQuestionsAndAnswersArchive={status:'NO_GITHUB_MILO_PHASE_SOURCE',
+  legacyOrAutomatedPhaseNeedsClassification:true,phase:sequence};
+}
 receipt.sealedAt=now;receipt.updatedAt=now;
 // Preserve an exhaustive, source-hashed inventory in this new accepted receipt.
 // The receipt already authenticates the original canonical artifact bytes.
