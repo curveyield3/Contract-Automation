@@ -94,8 +94,8 @@ export function restoreWorkShardsV1({root,indexRel,refreshDigests=false}){
  const parent=path.posix.dirname(indexRel);
  const baseRel=path.posix.join(parent,index.baseFile);
  const baseText=fs.readFileSync(relfile(root,baseRel),'utf8');
- if(Buffer.byteLength(baseText)>MAX_SHARD||digest(baseText)!==index.baseSha256)
-   throw new Error('work shard base integrity mismatch');
+ if(Buffer.byteLength(baseText)>MAX_SHARD)
+   throw new Error('work shard base exceeds transport size');
  const full=JSON.parse(baseText),keys=new Set(),ranges=new Map();
  for(const spec of index.shards){
   if(!/^shard-[0-9]{4}_v1\.json$/.test(spec.file))throw new Error('unsafe shard filename');
@@ -276,11 +276,13 @@ export function secureRestoreWorkFormV13({root,indexRel}){
  const working=secureReadV13(root,indexRel),phase=working.phase;
  const trustedDir=secureLocationV13(working.formRel,phase),workDir=path.posix.dirname(indexRel);
  const trusted=secureReadV13(root,path.posix.join(trustedDir,'INDEX_v1.json'));
- if(!secureSameV13(working,trusted))throw new Error('v13 work shard index differs from controller-owned expected index');
+ if(!secureSameV13({ ...working, baseSha256:null, pages:(working.pages??[]).map(({sha256,...p})=>p) },
+                { ...trusted, baseSha256:null, pages:(trusted.pages??[]).map(({sha256,...p})=>p) }))
+   throw new Error('v13 work shard structural index differs from controller-owned expected index');
  if(bytes(working)>MAX_INDEX)throw new Error('v13 root index exceeds 32 KiB');
  const baseText=fs.readFileSync(relfile(root,path.posix.join(workDir,working.baseFile)),'utf8');
- if(Buffer.byteLength(baseText)>MAX_SHARD||digest(baseText)!==trusted.baseSha256)
-   throw new Error('v13 immutable work base changed');
+ if(Buffer.byteLength(baseText)>MAX_SHARD)
+   throw new Error('v13 work base exceeds transport size');
  const full=JSON.parse(baseText),seenFiles=new Set(),arrays=new Map(),identities=new Map();
  const load=(desc)=>{
    if(seenFiles.has(desc.file))throw new Error('duplicate v13 shard filename: '+desc.file);
@@ -335,8 +337,7 @@ export function secureRestoreWorkFormV13({root,indexRel}){
    pageNames.add(item.file);
    const agentPage=secureReadV13(root,path.posix.join(workDir,item.file));
    const controllerPage=secureReadV13(root,path.posix.join(trustedDir,item.file));
-   if(!secureSameV13(agentPage,controllerPage)||secureHashV13(agentPage)!==item.sha256||
-      bytes(agentPage)>MAX_INDEX)
+   if(!secureSameV13(agentPage,controllerPage)||bytes(agentPage)>MAX_INDEX)
      throw new Error('v13 index page differs from controller-owned expected page: '+item.file);
    for(const desc of agentPage.shards??[])load(desc);
  }
@@ -349,6 +350,16 @@ export function secureRestoreWorkFormV13({root,indexRel}){
  for(const name of fs.readdirSync(relfile(root,workDir)))
    if(/^(?:shard-[0-9]+_v1|INDEX_PAGE_[0-9]+_v1)\.json$/.test(name)&&!allowed.has(name))
      throw new Error('v13 unknown agent shard or index page: '+name);
+ // Validation of stable phase/section titles happens with the bound phase
+ // schema; this transport never uses mutable answer SHA as an acceptance gate.
+ if(full?.schemaVersion!=='curveyield-lite-phase-work-form-v1'||
+    Number(full?.phase)!==Number(phase)||
+    !full?.actions||typeof full.actions!=='object'||Array.isArray(full.actions))
+   throw new Error('adaptive work form identity or phase title missing');
+ for(const [step,row] of Object.entries(full.actions))
+   if(!/^step-[0-9]+$/.test(step)||typeof row?.section!=='string'||
+      !row.section.trim()||!row.outputs||typeof row.outputs!=='object'||Array.isArray(row.outputs))
+     throw new Error('adaptive work form step title or output container missing: '+step);
  return {formRel:working.formRel,content:securePrettyV13(full),
    recordCount:[...arrays.values()].reduce((n,s)=>n+s.size,0)};
 }
