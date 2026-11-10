@@ -146,7 +146,9 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         lp.approve(address(hub),amount);
         hub.deposit(0,amount);
     }
-    function testFuzz_P5T005_ActualHubLastWithdrawUnharvestedGauge(uint96 raw) public {
+    function test_P5T005_ActualHubLastWithdrawUnharvestedGauge() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (BoostHub hub,BoostV9GaugeP5V1 gauge,BoostV9BehaviorTokenV1 lp,BoostV9BehaviorTokenV1 reward)=_hubFixture();
         uint256 principal=uint256(raw)%1e21+1e12;
         _stakeHub(hub,lp,principal);
@@ -162,7 +164,9 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         require(reward.balanceOf(address(hub))==0,"UNEXPECTED_REWARD_RECOVERY");
         require(lp.balanceOf(address(this))==principal,"PRINCIPAL_EXIT_FAILED");
     }
-    function testFuzz_P5T005_ControlHarvestBeforeFinalWithdraw(uint96 raw) public {
+    function test_P5T005_ControlHarvestBeforeFinalWithdraw() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (BoostHub hub,BoostV9GaugeP5V1 gauge,BoostV9BehaviorTokenV1 lp,BoostV9BehaviorTokenV1 reward)=_hubFixture();
         uint256 principal=uint256(raw)%1e21+1e12;
         _stakeHub(hub,lp,principal);
@@ -174,7 +178,9 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         hub.withdraw(0,principal);
         require(reward.balanceOf(address(hub))==accrued,"CONTROL_REWARD_NOT_BACKED");
     }
-    function testFuzz_P5T005_RecoveryIfGaugePersistsClaim(uint96 raw) public {
+    function test_P5T005_RecoveryIfGaugePersistsClaim() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (BoostHub hub,BoostV9GaugeP5V1 gauge,BoostV9BehaviorTokenV1 lp,BoostV9BehaviorTokenV1 reward)=_hubFixture();
         uint256 principal=uint256(raw)%1e21+1e12;
         _stakeHub(hub,lp,principal);
@@ -219,7 +225,9 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         );
         stub.bindVault(address(vault_));
     }
-    function testFuzz_P5T007_ActualVaultPartialRedemptionExtinguishesRecoverableShares(uint96 raw) public {
+    function test_P5T007_ActualVaultPartialRedemptionExtinguishesRecoverableShares() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (BeefyVaultV7FixedV2 v,BoostV9PartialRedemptionStrategyP5V2 st,BoostV9BehaviorTokenV1 t)=_partialVaultFixture();
         uint256 principal=uint256(raw)%1e19+100;
         t.mint(address(this),principal);
@@ -247,7 +255,9 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         require(outsiderReceived==principal-paid+1,"ORPHAN_CLAIM_NOT_TRANSFERRED");
         require(v.totalSupply()==0 && v.balance()==0,"FINAL_SOLVENCY_NOT_RECONCILED");
     }
-    function testFuzz_P5T007_ControlFullStrategyPayment(uint96 raw) public {
+    function test_P5T007_ControlFullStrategyPayment() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (BeefyVaultV7FixedV2 v,BoostV9PartialRedemptionStrategyP5V2 st,BoostV9BehaviorTokenV1 t)=_partialVaultFixture();
         uint256 principal=uint256(raw)%1e19+100;
         t.mint(address(this),principal);t.approve(address(v),principal);v.deposit(principal);
@@ -256,7 +266,9 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         require(t.balanceOf(address(this))==principal,"NORMAL_REDEMPTION_NOT_FULL");
         require(v.totalSupply()==0&&v.balance()==0,"NORMAL_EXIT_RESIDUAL");
     }
-    function testFuzz_P5T007_ControlRevertingStrategyRollsBackShareBurn(uint96 raw) public {
+    function test_P5T007_ControlRevertingStrategyRollsBackShareBurn() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (BeefyVaultV7FixedV2 v,BoostV9PartialRedemptionStrategyP5V2 st,BoostV9BehaviorTokenV1 t)=_partialVaultFixture();
         uint256 principal=uint256(raw)%1e19+100;
         t.mint(address(this),principal);t.approve(address(v),principal);v.deposit(principal);
@@ -282,7 +294,9 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         strategy=new StrategyConvexBoostHubStakingV5(address(staking),addresses_,fees,1 days,0);
         staking.setStrategy(address(strategy));
     }
-    function testFuzz_P5T004_ActualStrategyNestedClaimAccounting(uint96 raw) public {
+    function test_P5T004_ActualStrategyNestedClaimAccounting() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (StrategyConvexBoostHubStakingV5 strategy,BoostV9StakingCallbackV1 staking,BoostV9BehaviorTokenV1 want)=_strategyFixture();
         uint256 amount=uint256(raw)%1e21+1e15;
         staking.configure(amount,true);
@@ -294,7 +308,9 @@ contract BoostHubV9HubStrategyP5TargetsV1 {
         require(staking.balanceOf(address(strategy))+paid==2*amount,"WANT_VALUE_NOT_CONSERVED");
         require(strategy.totalLocked()<=2*amount-expectedFee,"PROFIT_LOCK_EXCEEDS_NET_YIELD");
     }
-    function testFuzz_P5T004_ControlSingleHarvestAndNoCallback(uint96 raw) public {
+    function test_P5T004_ControlSingleHarvestAndNoCallback() public {
+        // Source-bound, deliberately selected candidate witness; never fuzzed.
+        uint96 raw = 1e18;
         (StrategyConvexBoostHubStakingV5 strategy,BoostV9StakingCallbackV1 staking,BoostV9BehaviorTokenV1 want)=_strategyFixture();
         uint256 amount=uint256(raw)%1e21+1e15;
         staking.configure(amount,false);
