@@ -38,7 +38,8 @@ function shaFile(file){return createHash('sha256').update(fs.readFileSync(file))
 function phaseNum(n){return String(n).padStart(2,'0');}
 function feedbackText(sequence,defs){return ['Phase '+sequence+' semantic validation failed.','Repair only the exact substantive items below and invoke controller validation again.','',...defs.map(x=>'- '+x),'','Do not advance, retire, update receipts, or perform controller bookkeeping.'].join('\n');}
 function listFilesRecursive(dir){if(!fs.existsSync(dir)) return [];const out=[];for(const ent of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,ent.name);if(ent.isDirectory()) out.push(...listFilesRecursive(p));else if(ent.isFile()) out.push(p);}return out;}
-function hasRemediation(campaignRoot){return listFilesRecursive(path.join(campaignRoot,'remediation')).length>0;}
+function hasRemediation(campaignRoot){return listFilesRecursive(path.join(campaignRoot,'remediation'))
+ .some(file=>!file.endsWith('.VERIFICATION_WARNINGS_v1.json'));}
 // Direct phase work forms (1–3, 8–10) do not use Phase 4–6 APPEND
 // units. Give every genuinely new AI-authored record its deterministic
 // controller ID before canonical packaging. This is clerical identity
