@@ -2564,7 +2564,7 @@ async function runTechnicalQuestionTransportV1(){
  // ordered text and continuation rounds belong solely to MiMo and its
  // committed controller question index. A checkpoint is not work acceptance.
  let selectedUnit=null,activePacketKey=null,dialogue=null;
- let packetEvidence=null,questionIterations=0;
+ let packetEvidence=null,questionIterations=0,pendingResumption=null;
  while(true){
   const issuedText=await workerCall({operation:'next_question',
    ...(selectedUnit?{unitId:selectedUnit.unitId,lease:selectedUnit.lease,
@@ -2635,8 +2635,38 @@ async function runTechnicalQuestionTransportV1(){
     throw Error('STAGED_ANSWER_CAPACITY: Original answer retained at '+
      String(recovered.originalAnswerR2Key||'private source')+
      ' but not committed to GitHub; existing question index contract requires paging.');
-   if(recovered.status==='AI_TECHNICAL_GITHUB_OUTPUT_AWAITING_SELECTION')
-    throw Error('EXACT_MIMO_OUTPUT_UNSELECTED: source-bound original Output.json exists; do not regenerate; '+JSON.stringify(recovered.unselectedOutputRefs));
+   if(recovered.status==='AI_TECHNICAL_GITHUB_OUTPUT_AWAITING_SELECTION'){
+    const refs=recovered.unselectedOutputRefs;
+    if(!miloTempRounds||!Array.isArray(refs)||!refs.length)
+     throw Error('Original MiMo output exists but exact GitHub resume is unavailable');
+    const owners=new Set(refs.map(x=>x.workflowRunId+':'+x.workflowRunAttempt));
+    if(owners.size!==1)throw Error('Independent MiMo runs produced conflicting unselected question outputs');
+    const latest=refs.at(-1);
+    const snapshot=JSON.parse(await workerCall({operation:'mimo_round_output',
+     phase:issued.scope.phase,step:issued.scope.step,
+     questionNumber:latest.questionNumber,includeModelRequest:true}));
+    if(snapshot.status!=='MIMO_TEMP_OUTPUT_FOUND'||
+       snapshot.generationId!==issued.scope.generationId||
+       snapshot.questionScopeSha256!==issued.scopeSha256||
+       snapshot.questionId!==issued.scope.questionId||
+       snapshot.outputSha256!==latest.answerSha256||
+       sha(snapshot.outputText)!==latest.answerSha256||
+       sha(snapshot.modelRequest)!==snapshot.modelRequestSha256)
+     throw Error('Exact old MiMo input/output pair changed during replay');
+    const saved=JSON.parse(snapshot.modelRequest);
+    if(saved.model!=='lite-solo-mimo-v1'||!Array.isArray(saved.messages)||
+       !saved.messages.some(m=>{if(m.role!=='user')return false;try{
+        const q=JSON.parse(m.content);
+        return q.schemaVersion==='machine-intelligence-issued-one-technical-question-v1'&&
+         q.questionId===issued.scope.questionId&&q.originalText===issued.question.questionText;
+       }catch{return false;}}))
+     throw Error('Recovered MiMo request does not contain exact Worker-issued question');
+    pendingResumption={messages:saved.messages,original:snapshot.outputText,
+     questionNumber:latest.questionNumber,scopeSha256:issued.scopeSha256};
+    console.log(JSON.stringify({status:'MIMO_EXACT_GITHUB_OUTPUT_RECOVERED',
+     questionId:issued.scope.questionId,questionNumber:latest.questionNumber,
+     outputSha256:latest.answerSha256,modelInferenceSkipped:true,controllerAccepted:false}));
+   }
    if(recovered.status==='AI_TECHNICAL_MULTIPLE_STAGED_ORIGINALS')
     throw Error('AMBIGUOUS_UNCOMMITTED_AI_ANSWERS: multiple originals exist for the same question; preserve all without choosing one.');
    if(recovered.status==='AI_TECHNICAL_CHECKPOINT_REQUIRES_RECOVERY')
@@ -2757,7 +2787,15 @@ async function runTechnicalQuestionTransportV1(){
      await miRecentOriginalAnswersV1(issued):[],
    completeOnlyIfMiMoExplicitlyDecides:'No additional questions',
    responseProtocol:'Original verbatim question plan, expansion decision or plain-text answer only. No Worker route/request.'})});
-  let original=await modelCall(dialogue,{technicalAnswer:true,scope:issued.scope});
+  let original;
+  if(pendingResumption){
+   if(pendingResumption.scopeSha256!==issued.scopeSha256)
+    throw Error('Recovered question scope differs from current issued question');
+   dialogue=pendingResumption.messages;
+   original=pendingResumption.original;
+   miloTempRawOutputs.set(issued.scopeSha256+':'+sha(original),pendingResumption.questionNumber);
+   pendingResumption=null;
+  }else original=await modelCall(dialogue,{technicalAnswer:true,scope:issued.scope});
   const localReads=[];
   while(true){
    const read=miLocalEvidenceReadRequestV1(original);
