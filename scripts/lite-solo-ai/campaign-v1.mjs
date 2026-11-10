@@ -194,7 +194,7 @@ function ownerOfWorkerReply(raw){
   stage:answer.stage??null};
 }
 
-async function modelCall(messages,{technicalAnswer=false}={}){
+async function modelCall(messages,{technicalAnswer=false,scope=null}={}){
  if(miStep8HandoffDue())throw Error('MI_STEP8_RUN_HANDOFF_DUE');
  const request=JSON.stringify({
   model:'lite-solo-mimo-v1',
@@ -206,7 +206,7 @@ async function modelCall(messages,{technicalAnswer=false}={}){
  });
  const start=Date.now();
  const tempRoundOrdinal=++miloRunRoundOrdinal;
- const tempRoundScope=lastTranscriptScope?{...lastTranscriptScope}:null;
+ const tempRoundScope=scope?{phase:Number(scope.phase),step:Number(scope.step)}:lastTranscriptScope?{...lastTranscriptScope}:null;
  if(!miloTempRounds)await recordPrivateCommunication('mimo_input',request);
  console.log(JSON.stringify({status:'AI_BRIDGE_MODEL_REQUEST',
   conversationMessages:messages.length,promptBytes:Buffer.byteLength(request)}));
@@ -2725,7 +2725,7 @@ async function runTechnicalQuestionTransportV1(){
      await miRecentOriginalAnswersV1(issued):[],
    completeOnlyIfMiMoExplicitlyDecides:'No additional questions',
    responseProtocol:'Original verbatim question plan, expansion decision or plain-text answer only. No Worker route/request.'})});
-  let original=await modelCall(dialogue,{technicalAnswer:true});
+  let original=await modelCall(dialogue,{technicalAnswer:true,scope:issued.scope});
   const localReads=[];
   while(true){
    const read=miLocalEvidenceReadRequestV1(original);
@@ -2761,7 +2761,7 @@ async function runTechnicalQuestionTransportV1(){
     path:read.request?.path??null,availability:result.availability??'PINNED',
     sha256:result.sha256??result.sourceCheckpointSha256??null,
     nextOffset:result.nextOffset??null,originalTextPrivate:true}));
-   original=await modelCall(dialogue,{technicalAnswer:true});
+   original=await modelCall(dialogue,{technicalAnswer:true,scope:issued.scope});
   }
   // Preserve the precise text until the source-bound checkpoint confirms it.
   // Formatting corrections are authored by MiMo; only syntax is evaluated.
@@ -2792,7 +2792,7 @@ async function runTechnicalQuestionTransportV1(){
      syntaxProblem:'The list did not match the original numbered question-count grammar.',
      exactRequiredHeader:receipt.requiredHeader,
      instruction:'Reissue your own ORIGINAL planned questions with exactly the required count and ordered 1. ... N. entries. Do not answer them, change their security meaning for controller convenience, or emit any API command.'})});
-    original=await modelCall(dialogue,{technicalAnswer:true});
+    original=await modelCall(dialogue,{technicalAnswer:true,scope:issued.scope});
     continue;
    }
    if(receipt.status==='AI_TECHNICAL_CHECKPOINT_CAPACITY_UNPUBLISHED'){
@@ -2938,9 +2938,9 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
   const messages=[{role:'system',content:system},
    {role:'user',content:JSON.stringify(context)},
    {role:'user',content:JSON.stringify(task)}];
-  // modelCall archives EACH raw original to private Worker R2 before parsing.
-  // Corrections are separate originals, not overwrites of the model's bytes.
-  let original=await modelCall(messages),formatCorrections=0;
+  // Model requests and complete replies use GitHub pair archival when the staged temp transport is enabled.
+  // Corrections remain separately numbered original inference rounds.
+  let original=await modelCall(messages,{scope:{phase:contract.phase,step:contract.step}}),formatCorrections=0;
   const firstResponseSha256=sha(original),last=[];
   for(;;){
    for(;;){
@@ -2977,7 +2977,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
     last.push(messages.length);
     messages.push({role:'assistant',content:original});
     messages.push({role:'user',content:JSON.stringify(page)});
-    original=await modelCall(messages);
+    original=await modelCall(messages,{scope:{phase:contract.phase,step:contract.step}});
    }
    let value,formatProblem=null;
    try{value=JSON.parse(original);}
@@ -3025,7 +3025,7 @@ async function runControllerIssuedFieldAnswersV1(ready,{remediation=false}={}){
      lease:ready.lease},
     instructions:'Only correct JSON syntax or the missing required JSON property of your immediately previous response. Keep your original substantive security conclusion, full content, source citations, uncertainty, exact bound record keys and frozen field type unchanged. Do not reconsider findings, re-analyze source, invent default values, alter the risk verdict or issue Worker actions. Return one valid JSON object with the exact required property and the same original substantive answer.'
    })});
-   original=await modelCall(messages);
+   original=await modelCall(messages,{scope:{phase:contract.phase,step:contract.step}});
   }
  }
  // Each original FIXED row/member has its own frozen literal security
