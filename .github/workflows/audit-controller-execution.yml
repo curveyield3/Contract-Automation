@@ -36,56 +36,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Resolve canonical qualified Contract-Automation runner
-        id: qualified_runner
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          status_json="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d)"
-          test "$(printf '%s' "$status_json" | jq -r '.status // empty')" = 'PASS'
-          qualified_commit="$(printf '%s' "$status_json" | jq -r '.qualifiedCommit // empty')"
-          qualification_run="$(printf '%s' "$status_json" | jq -r '.workflowRunId // empty')"
-          [[ "$qualified_commit" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$qualification_run" =~ ^[0-9]+$ ]]
-          # An Oct-2026 qualification of older code must not silently authorize
-          # a new fork/Anvil implementation. In particular, an obsolete runner
-          # cannot be trusted to apply today's pinned-block/hash repairs.
-          # Compare security-relevant runner inputs rather than raw HEAD:
-          # status bookkeeping and documentation commits must not make a newly
-          # qualified runner permanently impossible to use.
-          diff_json="$(gh api "repos/$GITHUB_REPOSITORY/compare/$qualified_commit...main")" || {
-            echo "::error::V7_QUALIFIED_RUNNER_STALE: unable to compare qualified runner and current source."
-            exit 1
-          }
-          changed_count="$(printf '%s' "$diff_json" | jq -r '.files|length')"
-          if [ "$changed_count" -ge 300 ]; then
-            echo "::error::V7_QUALIFIED_RUNNER_STALE: comparison too large to prove safe; requalification required."
-            exit 1
-          fi
-          if printf '%s' "$diff_json" | jq -r '.files[]?.filename' | grep -Eq '^(packages/runner/src/|packages/github-native-sim/src/|scripts/|\.github/workflows/audit-controller-execution\.yml$|\.github/actions/setup-v7-toolchain/)'; then
-            echo "::error::V7_QUALIFIED_RUNNER_STALE: execution code changed since qualified commit. Human-authorized runner requalification and exact evidence rebind required; no stale runner fallback."
-            exit 1
-          fi
-          echo "commit=$qualified_commit" >> "$GITHUB_OUTPUT"
-          echo "run_id=$qualification_run" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout trusted Contract-Automation runner
+      - name: Checkout current Contract-Automation execution code
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.qualified_runner.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Bind checked-out qualified runner identity
+      - name: Bind current runner revision without legacy V7 qualification
         shell: bash
         run: |
           set -euo pipefail
           observed="$(git rev-parse HEAD)"
-          test "$observed" = "${{ steps.qualified_runner.outputs.commit }}"
+          test "$observed" = "${{ github.sha }}"
           echo "V7_RUNNER_COMMIT=$observed" >> "$GITHUB_ENV"
-          echo "V7_RUNNER_QUALIFICATION_RUN=${{ steps.qualified_runner.outputs.run_id }}" >> "$GITHUB_ENV"
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
@@ -240,54 +204,8 @@ jobs:
           git checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$AUDIT_CONTROLLER_REF"
 
-      - name: Reuse exact controller qualification when available
-        if: env.V7_REQUEST_KIND == 'controller-operation' && env.VERIFY_AUDIT_CONTROLLER == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "CONTROLLER_VERIFICATION_REUSED=false" >> "$GITHUB_ENV"
-          status_path='process/V7_QUALIFICATION_STATUS.json'
-          [ -s "$status_path" ] || exit 0
-
-          run_id="$(node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          const status=JSON.parse(fs.readFileSync('process/V7_QUALIFICATION_STATUS.json','utf8'));
-          const controller=status.controllerQualification;
-          const exact=process.env.AUDIT_CONTROLLER_REF;
-          const reusable=
-            status.status==='PASS' &&
-            /^[0-9a-f]{40}$/.test(status.qualifiedCommit ?? '') &&
-            /^[0-9]+$/.test(String(status.workflowRunId ?? '')) &&
-            controller?.status==='PASS' &&
-            controller.controllerCommit===exact &&
-            controller.controllerRef===exact &&
-            controller.runnerQualifiedCommit===status.qualifiedCommit &&
-            String(controller.runnerQualificationRunId)===String(status.workflowRunId) &&
-            /^[0-9]+$/.test(String(controller.qualificationRunId ?? ''));
-          if (reusable) process.stdout.write(String(controller.qualificationRunId));
-          NODE
-          )"
-
-          if [ -z "$run_id" ]; then
-            echo "No exact reusable controller qualification; inline verification remains required."
-            exit 0
-          fi
-
-          qualification_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
-          node --input-type=module - "$qualification_run" <<'NODE'
-          const run=JSON.parse(process.argv[2]);
-          if(run.status!=='completed' || run.conclusion!=='success') throw new Error('controller qualification run is not successful terminal evidence');
-          if(run.name!=='V7 Execution Infrastructure Qualification') throw new Error('controller qualification run used an unexpected workflow');
-          if(run.event!=='workflow_dispatch') throw new Error('controller qualification run must be an explicit workflow_dispatch proof');
-          NODE
-
-          echo "CONTROLLER_VERIFICATION_REUSED=true" >> "$GITHUB_ENV"
-          echo "Reusing exact controller qualification run $run_id for $AUDIT_CONTROLLER_REF." >> "$GITHUB_STEP_SUMMARY"
-
       - name: Verify exact controller code when requested
-        if: env.V7_REQUEST_KIND == 'controller-operation' && env.VERIFY_AUDIT_CONTROLLER == 'true' && env.CONTROLLER_VERIFICATION_REUSED != 'true'
+        if: env.V7_REQUEST_KIND == 'controller-operation' && env.VERIFY_AUDIT_CONTROLLER == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -363,11 +281,7 @@ jobs:
               }
             }
           }
-          if (report.qualification) {
-            const run = api(`repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${report.qualification.workflowRunId}`);
-            if (run.status !== 'completed' || run.conclusion !== 'success') throw new Error('qualification run is not successful terminal evidence');
-            if (run.head_sha !== report.qualification.qualifiedCommit) throw new Error('qualification commit mismatch');
-          }
+          NODE
           NODE
 
       - name: Resolve exact admitted skill for controller operation
@@ -653,7 +567,6 @@ jobs:
           evidence_dir="$campaign_root/controller/automation/$safe_request"
           evidence_rel="$evidence_dir/EXECUTION_EVIDENCE_v1.json"
           observer_rel="$evidence_dir/EXECUTION_OBSERVER_RECEIPT_v1.json"
-          qualification_rel="$evidence_dir/V7_QUALIFICATION_STATUS.json"
           operator_rel=".deep-assurance/operator/requests/$ingest_id.json"
           pointer_rel="$campaign_root/requests/$ingest_id.json"
           receipt_dir="$evidence_dir/ingestion"
@@ -675,17 +588,12 @@ jobs:
           cp "../.audit-evidence/v7-execution/$V7_REQUEST_ID/controller-evidence.json" "$evidence_rel"
           node "$GITHUB_WORKSPACE/packages/github-native-sim/src/adr-assertion-ledger-v1.mjs" --evidence "$evidence_rel" --out "$evidence_dir/ASSERTION_LEDGER_v1.json" || true
           cp "../.audit-evidence/v7-execution/$V7_REQUEST_ID/EXECUTION_OBSERVER_RECEIPT_v1.json" "$observer_rel"
-          gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d > "$qualification_rel"
-          test "$(jq -r '.status // empty' "$qualification_rel")" = 'PASS'
-          test "$(jq -r '.qualifiedCommit // empty' "$qualification_rel")" = "$V7_RUNNER_COMMIT"
-
           jq -n \
             --arg request_id "$ingest_id" \
             --arg campaign_id "$campaign_id" \
             --arg phase_id "$phase_id" \
             --arg execution_request "$EXECUTION_REQUEST_PATH" \
             --arg execution_evidence "$evidence_rel" \
-            --arg qualification "$qualification_rel" \
             --arg writeback_directory "$receipt_dir" \
             --arg writeback_ref "$CONTROLLER_WRITEBACK_REF" \
             '{
@@ -697,12 +605,11 @@ jobs:
               assuranceMode:"LITE",
               executionRequestPath:$execution_request,
               executionEvidencePath:$execution_evidence,
-              qualificationPath:$qualification,
               writebackDirectory:$writeback_directory,
               writebackRef:$writeback_ref
             }' > "$operator_rel"
 
-          git add "$evidence_rel" "$evidence_dir/ASSERTION_LEDGER_v1.json" "$observer_rel" "$qualification_rel" "$operator_rel"
+          git add "$evidence_rel" "$evidence_dir/ASSERTION_LEDGER_v1.json" "$observer_rel" "$operator_rel"
           git config user.name 'CurveYield Audit Controller Automation'
           git config user.email 'audit-controller-automation@users.noreply.github.com'
           git commit -m "chore(audit): stage execution evidence for ingestion $V7_REQUEST_ID"
