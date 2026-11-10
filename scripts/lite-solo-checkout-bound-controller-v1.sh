@@ -58,6 +58,8 @@ git -C "$destination" config core.sparseCheckout true
 git -C "$destination" config core.sparseCheckoutCone false
 {
   printf '%s/\n' "$(literal_pattern "$campaign_path")"
+  # Controller reads current in-phase originals only from this exact campaign's Milo Temp Work mirror.
+  printf '%s/\n' "$(literal_pattern "Milo Temp Work/${campaign_path#campaigns/}")"
   if [ "$bound_path" != "$campaign_path" ]; then printf '%s\n' "$(literal_pattern "$bound_path")"; fi
   printf '%s\n' "$(literal_pattern "$directory_entry")"
   printf '%s/\n' "$(literal_pattern "$authority_root")"
