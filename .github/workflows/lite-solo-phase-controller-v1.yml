@@ -225,6 +225,9 @@ jobs:
           ' .audit-controller "$AUDIT_CAMPAIGN_PATH"
           echo "status=$(jq -r .status /tmp/lite-solo-controller-result.json)" >> "$GITHUB_OUTPUT"
       - name: Publish only the current lite-solo campaign and directory
+        # If controller packaging encounters a physical transport error, retain
+        # only previously generated file-adjacent warnings, never a partial seal.
+        if: ${{ always() && steps.scope.outcome == 'success' && (steps.controller.outcome == 'success' || steps.controller.outcome == 'failure') }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           AUDIT_DIRECTORY: ${{ steps.scope.outputs.directory }}
@@ -235,7 +238,16 @@ jobs:
           cd .audit-controller
           git config user.name 'CurveYield Lite-Solo Phase Controller'
           git config user.email 'lite-solo-controller@users.noreply.github.com'
-          git add --sparse -- "$AUDIT_CAMPAIGN_PATH" "$AUDIT_DIRECTORY"
+          if [ "${{ steps.controller.outcome }}" = failure ]; then
+            mapfile -d '' -t warning_files < <(find "$AUDIT_CAMPAIGN_PATH" -type f -name '*.VERIFICATION_WARNINGS_v1.json' -print0)
+            if [ "${#warning_files[@]}" -eq 0 ]; then
+              echo "::warning::Controller exited before producing a failed-verification sidecar; no partial campaign files published"
+              exit 0
+            fi
+            git add --sparse -- "${warning_files[@]}"
+          else
+            git add --sparse -- "$AUDIT_CAMPAIGN_PATH" "$AUDIT_DIRECTORY"
+          fi
           if ! git diff --cached --quiet; then
             git commit -m "audit(lite-solo): validated boundary $GITHUB_RUN_ID"
             for attempt in 1 2 3; do
