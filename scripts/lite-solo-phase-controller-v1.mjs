@@ -1167,11 +1167,29 @@ const materializationVerificationFailure=({affectedFile,check,reason,expected=nu
   materializationWarningPaths.push(warningPath);
  materializationWarnings.push({check,reason});
 };
-materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath,
- acceptedContinuations:[4,5,6].includes(sequence)?
-  collectAcceptedAppendContinuationsV1({root,campaignPath,phase:sequence,revision:phaseRevision}):[],
- onVerificationFailure:materializationVerificationFailure});
-form=readJson(requiredFile(root,assignment.workFormPath,'Worker-provided phase work file'));
+try{
+ materializeSemanticWorkFormV13({root,formRel:assignment.workFormPath,
+  acceptedContinuations:[4,5,6].includes(sequence)?
+   collectAcceptedAppendContinuationsV1({root,campaignPath,phase:sequence,revision:phaseRevision}):[],
+  onVerificationFailure:materializationVerificationFailure});
+ form=readJson(requiredFile(root,assignment.workFormPath,'Worker-provided phase work file'));
+}catch(error){
+ const reason=String(error?.message??error);
+ const pathInError=(reason.match(/campaigns\/[A-Za-z0-9._\/-]+\.(?:json|md)/)??[])[0];
+ const affectedFile=pathInError?.startsWith(campaignPath+'/')?pathInError:
+  assignment.workShardIndexPath??assignment.workFormPath;
+ materializationVerificationFailure({
+  affectedFile,
+  check:/ENOENT|not found|missing|unreadable|parse/i.test(reason)?
+   'PHASE_FINALIZE_REQUIRED_EVIDENCE_UNAVAILABLE':
+   (reason.split(':')[0]||'PHASE_FINALIZE_SOURCE_ASSEMBLY_FAILED'),
+  reason:'Original phase work could not be physically assembled: '+reason+
+   '. Source bytes and accepted unit snapshots remain unmodified; no replacement output was invented.',
+  expected:'Readable original source files sufficient to construct the complete phase form',
+  observed:reason
+ });
+ throw error; // Unreadable physical evidence cannot be packaged as a fabricated phase.
+}
 
 // Record identity allocation does not analyze vulnerabilities or reject AI work.
 if(completeDirectPhaseRecordIdsV1({form,sequence,campaignId:directory.campaignId})>0){
