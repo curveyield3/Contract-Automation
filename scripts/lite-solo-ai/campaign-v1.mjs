@@ -3516,7 +3516,7 @@ async function miStep8Ask(state,task){
  const messages=[{role:'system',content:
   'You are MiMo, the sole substantive smart-contract security auditor. Answer only the exact current original instruction/review/remediation questions. You may request one local instructionEvidenceRequest, governingDocumentRequest, or stageWorkEvidenceRequest in JSON; each is a source read, never a Worker action. Inspect original issued instructions, source-bound staged work and supporting evidence where necessary. Do not invent security discoveries, repaired work, acceptance, lease or procedural approvals. For final output use only the requested authored answer fields; the existing Worker compiles and authenticates the original forms.'},
   {role:'user',content:JSON.stringify(context)}];
- const prior=[];let raw=await modelCall(messages);
+ const prior=[];let raw=await modelCall(messages,{scope:{phase:state.phase,step:state.currentStep??state.step}});
  for(;;){
   let answer;try{answer=JSON.parse(raw);}catch{throw Error('MiMo did not produce a JSON lifecycle answer or evidence read');}
   if(!answer||typeof answer!=='object'||Array.isArray(answer))
@@ -3576,7 +3576,7 @@ async function miStep8Ask(state,task){
    availability:page.availability??null,nextOffset:page.nextOffset??null,
    nextStart:page.nextStart??null,sourceSha256:page.originalWorkSha256??page.sha256??null,
    acceptanceOwner:'EXISTING_CONTROLLER'}));
-  raw=await modelCall(messages);
+  raw=await modelCall(messages,{scope:{phase:state.phase,step:state.currentStep??state.step}});
  }
 }
 
