@@ -95,7 +95,7 @@ function checkout(){
   const receiptFile=directory.workspacePath+'/receipts/PHASE_00_RECEIPT_v1.json';
   const warn=(check,reason,expected,observed)=>recordPhaseFinalizationVerificationWarningV1({
    root:ROOT,campaignPath:directory.workspacePath,phase:Number(payload.phase),
-   affectedFile:receiptFile,check,reason,expected,observed
+   revision:Number(directory.currentAssignment?.phaseRevision??1),affectedFile:receiptFile,check,reason,expected,observed
   });
   if(OP==='PHASE_FINALIZE'){
    if(p0.authority?.manifestSha256!==local.authorityDigest)
