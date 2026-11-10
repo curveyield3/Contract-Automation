@@ -222,10 +222,20 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
     'boosthub-v9-r1-phase5-candidate-targets-v1-g7adcb74caefeeef3'
   ].includes(request.configuration?.harness?.bundleId)
     && request.source?.archiveSha256 === '876bae622270c99a48fa7cf5e984ee0b46f74b02d38e32a2be394bbc69aeb5b3';
-  // Forge matches test signatures including parentheses and argument types.
-  // End-of-name anchors select zero tests even when the named functions exist.
-  const selectedRegex = boosthubP5 && matchTest === 'testFuzz_P5T007_'
-    ? '^testFuzz_P5T007_[A-Za-z0-9_]+\\(' : '^' + matchTest + '\\(';
+  // This generation deliberately replaces old submitted fuzz selectors with
+  // source-bound deterministic proof AND control cases for that same candidate.
+  // The accepted request and its digest remain immutable.
+  const deterministicBoosthubP5 = boosthubP5 &&
+    request.configuration?.harness?.bundleId ===
+      'boosthub-v9-r1-phase5-candidate-targets-v1-g7adcb74caefeeef3';
+  const candidatePrefix = deterministicBoosthubP5
+    ? /^testFuzz_(P5T00[12457])_/.exec(matchTest)?.[1] : null;
+  // Forge matches complete signatures, including argument parentheses.
+  const selectedRegex = candidatePrefix
+    ? '^test_' + candidatePrefix + '_[A-Za-z0-9_]+\\('
+    : (boosthubP5 && matchTest === 'testFuzz_P5T007_'
+      ? '^testFuzz_P5T007_[A-Za-z0-9_]+\\('
+      : '^' + matchTest + '\\(');
   const matchContract = native.matchContract;
   if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const rpcUrl = phase6MutableRpc?.url;
@@ -245,7 +255,8 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
       ...(boosthubP5 ? ['--skip', 'contracts/BoostHubBeefyCompileImports_v9.sol'] : []),
       // A selected zero-argument test_ function is an ordinary Foundry test.
       // Apply fuzz iteration settings only to explicitly authored testFuzz_ functions.
-      ...(matchTest.startsWith('testFuzz_') ? ['--fuzz-runs', String(native.fuzzRuns ?? 256)] : []),
+      ...(!deterministicBoosthubP5 && matchTest.startsWith('testFuzz_')
+        ? ['--fuzz-runs', String(native.fuzzRuns ?? 256)] : []),
       '--fork-url', rpcUrl, '--fork-block-number', String(blockNumber)],
     // This frozen BoostHub archive has a mixed-OZ compilation anchor under
     // contracts/, although its source-bound tests only need the imported
