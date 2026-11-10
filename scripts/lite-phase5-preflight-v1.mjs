@@ -71,7 +71,15 @@ else if(!noExecutableCandidates)for(const [i,target] of designs.entries()){
   const method=String(target.executionMethod??'');
   if(method==='NOT_APPLICABLE')continue;
   if(method!=='V7_REQUEST'){fail(prefix+'.executionMethod','Unsupported method');continue;}
-  if(!target.executionRequestRef||String(target.executionRequestRef).trim().startsWith('<')){
+  const explicitRequestRef=target.executionRequestRef&&!String(target.executionRequestRef).trim().startsWith('<')
+    ? String(target.executionRequestRef) : null;
+  const explicitBinding=explicitRequestRef?validateTargetExecutionRequestBindingV1({
+    controllerRoot:root,campaignPath,target,expectedCampaignId:campaignId,
+    expectedCampaignGenerationId:campaignGenerationId,expectedSourceSha256:sourceSha256
+  }):null;
+  const oldGenerationRequest=Boolean(explicitBinding?.reasons?.some(reason=>
+    String(reason).includes('assignmentId is not bound to the exact campaign generation')));
+  if(!explicitRequestRef||oldGenerationRequest){
     const generatedRequest=generateV7ExecutionRequestV1({
       campaignId,campaignGenerationId,sourceSha256,phase0Source,target,automationRoot:process.cwd()});
     if(generatedRequest.status!=='GENERATED'){
@@ -94,7 +102,7 @@ else if(!noExecutableCandidates)for(const [i,target] of designs.entries()){
       campaignId,campaignGenerationId,sourceSha256,candidateKey:key,requestDigest:generatedRequest.request.requestDigest,
       ...generatedRequest.designEvidence},null,2)+'\n');
   }
-  const candidateRef=(target.executionRequestRef&&!String(target.executionRequestRef).trim().startsWith('<')?target.executionRequestRef:null)||(generated.some(x=>x.candidateKey===key)?
+  const candidateRef=(!oldGenerationRequest?explicitRequestRef:null)||(generated.some(x=>x.candidateKey===key)?
     generated.find(x=>x.candidateKey===key).executionRequestRef:null);
   const binding=validateTargetExecutionRequestBindingV1({controllerRoot:root,campaignPath,
     target:{...target,executionRequestRef:candidateRef},expectedCampaignId:campaignId,
