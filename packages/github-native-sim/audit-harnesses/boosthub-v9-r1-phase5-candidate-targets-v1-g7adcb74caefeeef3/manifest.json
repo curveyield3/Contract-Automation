@@ -37,5 +37,18 @@
   ],
   "campaignId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1",
   "campaignGenerationId": "cloudflare-audit-boosthub-v9-20261029-mcp-0812-r1-g1-20261029T151418Z",
-  "derivedFromBundleId": "boosthub-v9-r1-phase5-candidate-targets-v1"
+  "derivedFromBundleId": "boosthub-v9-r1-phase5-candidate-targets-v1",
+  "testSelections": {
+    "P5-CAND-VAULT-PARTIAL-REDEMPTION-SHARE-EXTINCTION": {
+      "matchTest": "testFuzz_P5T007_",
+      "matchedTestNames": [
+        "testFuzz_P5T007_FullWithdrawalControl",
+        "testFuzz_P5T007_PartialWithdrawalTransfersResidualToRemainingOwner",
+        "testFuzz_P5T007_RevertingStrategyPreservesShares",
+        "testFuzz_P5T007_ZeroShareSupplyLeavesRecoverableStrategyAssets"
+      ],
+      "sourceFile": "test/phase5/BoostHubV9VaultP5Targets_v1.t.sol",
+      "selectionPurpose": "Execute the existing attack, zero-supply, full-withdrawal, and revert controls in this exact generation; no test bytes changed"
+    }
+  }
 }
