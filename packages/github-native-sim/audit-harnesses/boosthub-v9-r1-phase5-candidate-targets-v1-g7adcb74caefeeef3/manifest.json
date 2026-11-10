@@ -1,7 +1,7 @@
 {
   "schemaVersion": "phase6-audit-harness-overlay-v1",
   "bundleId": "boosthub-v9-r1-phase5-candidate-targets-v1-g7adcb74caefeeef3",
-  "purpose": "Required exact-source Phase5 candidate-specific Foundry execution; original Solidity source imported unchanged and original Vyper 0.4.3 creation bytecode loaded from sealed Phase0 compilation evidence. Does not establish any production-runtime exploit unless deployed-token/gauge/authority identity is separately verified.",
+  "purpose": "Exact-source Phase 5 candidate-specific deterministic Foundry proof and disproof; production Solidity imported unchanged and Vyper 0.4.3 bytecode loaded from Phase 0. No randomized/fuzz execution. Deployed-runtime exploit claims require separate live identity verification.",
   "sourceBinding": {
     "repository": "curveyield3/Audit-Controller",
     "commit": "7c4f513d8158c393f5e196e9b2640833648dce96",
@@ -40,15 +40,16 @@
   "derivedFromBundleId": "boosthub-v9-r1-phase5-candidate-targets-v1",
   "testSelections": {
     "P5-CAND-VAULT-PARTIAL-REDEMPTION-SHARE-EXTINCTION": {
-      "matchTest": "testFuzz_P5T007_",
+      "matchTest": "test_P5T007_",
       "matchedTestNames": [
-        "testFuzz_P5T007_FullWithdrawalControl",
-        "testFuzz_P5T007_PartialWithdrawalTransfersResidualToRemainingOwner",
-        "testFuzz_P5T007_RevertingStrategyPreservesShares",
-        "testFuzz_P5T007_ZeroShareSupplyLeavesRecoverableStrategyAssets"
+        "test_P5T007_FullWithdrawalControl",
+        "test_P5T007_PartialWithdrawalTransfersResidualToRemainingOwner",
+        "test_P5T007_RevertingStrategyPreservesShares",
+        "test_P5T007_ZeroShareSupplyLeavesRecoverableStrategyAssets"
       ],
       "sourceFile": "test/phase5/BoostHubV9VaultP5Targets_v1.t.sol",
-      "selectionPurpose": "Execute the existing attack, zero-supply, full-withdrawal, and revert controls in this exact generation; no test bytes changed"
+      "selectionPurpose": "Execute the candidate-specific source-bound vulnerability witnesses and their control outcomes; deterministic inputs only, no fuzzing or randomized runs"
     }
-  }
+  },
+  "testMethodology": "Only source-bound, deterministic candidate witness and control functions. Never run generic fuzz suites."
 }
