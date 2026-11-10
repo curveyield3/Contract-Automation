@@ -152,7 +152,10 @@ if(receipt.source?.inputMode==='LIVE_SCAN'){
   for(let i=0;i<requested.length;i++){
     try{
       const u=new URL(receipt.source.originUrls?.[i]??'https://invalid.example/');
-      if(String(requested[i]??'').toLowerCase()!==u.pathname.split('/').pop()?.toLowerCase())githubPhase0Diagnostics.push('SCAN_REQUEST_URL_ADDRESS_MISMATCH');
+      if(String(requested[i]??'').toLowerCase()!==u.pathname.split('/').pop()?.toLowerCase())
+       phase0Warning(manifestPath,'SCAN_REQUEST_URL_ADDRESS_MISMATCH',
+        'Frozen requested target at index '+i+' differs from address parsed from receipt origin URL',
+        String(requested[i]??'').toLowerCase(),u.pathname.split('/').pop()?.toLowerCase()??null);
     }catch(error){githubPhase0Diagnostics.push('SCAN_REQUEST_URL_ASSESSMENT_ERROR: '+String(error?.message??error));}
   }
   if(deploy.status!=='PASS_LIVE_DEPLOYMENT'||deploy.deploymentProfile?.mode!=='LIVE'||
@@ -160,10 +163,23 @@ if(receipt.source?.inputMode==='LIVE_SCAN'){
      deploy.liveDeployment?.blockNumber!==manifest.frozenBlock?.number||
      String(deploy.liveDeployment?.blockHash??'').toLowerCase()!==String(manifest.frozenBlock?.hash??'').toLowerCase()||
      deploy.scanSourceSnapshot?.manifestDigestSha256!==manifestDigestSha256)
-    githubPhase0Diagnostics.push('SCAN_FROZEN_LIVE_EVIDENCE_MISMATCH');
+    phase0Warning(evidence.deployConfigExecution,'SCAN_FROZEN_LIVE_EVIDENCE_MISMATCH',
+     'Live fork deployment evidence does not match frozen source scan chain, block, hash, or manifest digest',
+     {status:'PASS_LIVE_DEPLOYMENT',mode:'LIVE',chainId:manifest.chainId??null,
+      blockNumber:manifest.frozenBlock?.number??null,blockHash:manifest.frozenBlock?.hash??null,
+      manifestDigestSha256:manifestDigestSha256??null},
+     {status:deploy.status??null,mode:deploy.deploymentProfile?.mode??null,
+      chainId:deploy.fork?.chainId??null,initialBlock:deploy.fork?.initialBlock??null,
+      liveBlockNumber:deploy.liveDeployment?.blockNumber??null,
+      liveBlockHash:deploy.liveDeployment?.blockHash??null,
+      manifestDigestSha256:deploy.scanSourceSnapshot?.manifestDigestSha256??null});
   const declared=Array.isArray(deploy.deploymentProfile?.contracts)?deploy.deploymentProfile.contracts:[],
         observed=Array.isArray(deploy.liveDeployment?.contracts)?deploy.liveDeployment.contracts:[];
-  if(declared.length!==targets.length||observed.length!==targets.length)githubPhase0Diagnostics.push('SCAN_LIVE_TARGET_COVERAGE_INCOMPLETE');
+  if(declared.length!==targets.length||observed.length!==targets.length)
+   phase0Warning(evidence.deployConfigExecution,'SCAN_LIVE_TARGET_COVERAGE_INCOMPLETE',
+    'Deployment-declared and runtime-observed contracts do not cover all frozen scan targets',
+    {declaredCount:targets.length,observedCount:targets.length},
+    {declaredCount:declared.length,observedCount:observed.length});
   const compiled=Array.isArray(artifacts.artifacts)?artifacts.artifacts:[];
   for(let i=0;i<targets.length;i++){
     const t=targets[i],d=declared[i],live=observed[i];
@@ -171,22 +187,45 @@ if(receipt.source?.inputMode==='LIVE_SCAN'){
     if(d?.address?.toLowerCase()!==t?.address||live?.address?.toLowerCase()!==t?.address||
        d?.qualifiedName!==t?.qualifiedName||live?.compilationUnitId!==t?.compilationUnitId||
        live?.runtimeSha256!==t?.runtimeSha256)
-      githubPhase0Diagnostics.push('SCAN_TARGET_CODE_BINDING_MISMATCH: '+t.address);
+      phase0Warning(evidence.deployConfigExecution,'SCAN_TARGET_CODE_BINDING_MISMATCH',
+       'Target '+t.address+' deployment/runtime contract identity differs from frozen manifest source binding',
+       {address:t.address,qualifiedName:t.qualifiedName,compilationUnitId:t.compilationUnitId,runtimeSha256:t.runtimeSha256,sourceBinding:'EXACT_COMPILED_RUNTIME'},
+       {declaredAddress:d?.address??null,observedAddress:live?.address??null,
+        declaredName:d?.qualifiedName??null,observedCompilationUnitId:live?.compilationUnitId??null,
+        observedRuntimeSha256:live?.runtimeSha256??null,sourceBinding:live?.sourceBinding??null});
     const artifact=compiled.find(a=>a.compilationUnitId===t.compilationUnitId&&a.qualifiedName===t.qualifiedName);
-    if(!artifact)githubPhase0Diagnostics.push('SCAN_TARGET_ARTIFACT_BINDING_MISSING: '+t.address);
+    if(!artifact)
+      phase0Warning(evidence.executionBuildArtifacts,'SCAN_TARGET_ARTIFACT_BINDING_MISSING',
+       'No compiled artifact matches frozen target '+t.address+' qualified name and compiler unit',
+       {qualifiedName:t.qualifiedName,compilationUnitId:t.compilationUnitId},'ARTIFACT_NOT_FOUND');
     if(live?.sourceBinding==='EXECUTABLE_RUNTIME_MATCH_METADATA_HASH_ONLY'){
       if(!artifact||live.runtimeComparison?.compiled?.toLowerCase()!==artifact.deployedBytecode?.toLowerCase()||
          compareLiveRuntimeV1(live.runtimeComparison?.observed,artifact.deployedBytecode,{allowScanMetadata:true}).sourceBinding!==live.sourceBinding)
-        githubPhase0Diagnostics.push('SCAN_TARGET_COMPILED_RUNTIME_BINDING_MISMATCH: '+t.address);
-    }else if(live?.sourceBinding!=='EXACT_COMPILED_RUNTIME')githubPhase0Diagnostics.push('SCAN_TARGET_CODE_BINDING_MISMATCH: '+t.address);
+        phase0Warning(evidence.deployConfigExecution,'SCAN_TARGET_COMPILED_RUNTIME_BINDING_MISMATCH',
+         'Live runtime metadata comparison for target '+t.address+' differs from the matching compiled artifact',
+         {sourceBinding:live.sourceBinding,compiledRuntime:artifact?.deployedBytecode??null},
+         {compiledRuntime:live.runtimeComparison?.compiled??null,observedRuntime:live.runtimeComparison?.observed??null});
+    }else if(live?.sourceBinding!=='EXACT_COMPILED_RUNTIME')phase0Warning(evidence.deployConfigExecution,'SCAN_TARGET_CODE_BINDING_MISMATCH',
+       'Target '+t.address+' deployment/runtime contract identity differs from frozen manifest source binding',
+       {address:t.address,qualifiedName:t.qualifiedName,compilationUnitId:t.compilationUnitId,runtimeSha256:t.runtimeSha256,sourceBinding:'EXACT_COMPILED_RUNTIME'},
+       {declaredAddress:d?.address??null,observedAddress:live?.address??null,
+        declaredName:d?.qualifiedName??null,observedCompilationUnitId:live?.compilationUnitId??null,
+        observedRuntimeSha256:live?.runtimeSha256??null,sourceBinding:live?.sourceBinding??null});
     if(!units.some(u=>u.unitId===t.compilationUnitId&&(u.targetBindings??[{address:u.address,qualifiedName:u.qualifiedName}]).some(binding=>binding.qualifiedName===t.qualifiedName&&binding.address===t.address)))
-      githubPhase0Diagnostics.push('SCAN_TARGET_COMPILER_INPUT_BINDING_MISSING: '+t.address);
+      phase0Warning(manifestPath,'SCAN_TARGET_COMPILER_INPUT_BINDING_MISSING',
+       'Frozen manifest compiler units do not bind target '+t.address+' to its expected qualified source',
+       {address:t.address,qualifiedName:t.qualifiedName,compilationUnitId:t.compilationUnitId},
+       'NO_MATCHING_COMPILER_UNIT_TARGET_BINDING');
     if(t.proxyImplementation&&!targets.some(candidate=>candidate.address===t.proxyImplementation&&candidate.role==='IMPLEMENTATION'))
-      githubPhase0Diagnostics.push('SCAN_PROXY_IMPLEMENTATION_COVERAGE_MISSING: '+t.address);
+      phase0Warning(manifestPath,'SCAN_PROXY_IMPLEMENTATION_COVERAGE_MISSING',
+       'Frozen proxy target '+t.address+' names an implementation not represented by any resolved target',
+       {implementationAddress:t.proxyImplementation,role:'IMPLEMENTATION'},'NO_RESOLVED_IMPLEMENTATION_TARGET');
     }catch(error){githubPhase0Diagnostics.push('SCAN_TARGET_ASSESSMENT_ERROR: '+String(error?.message??error));}
   }
   for(const address of requested)if(!targets.some(t=>t.address===address&&t.role==='REQUESTED'))
-    githubPhase0Diagnostics.push('SCAN_REQUESTED_TARGET_NOT_VERIFIED: '+address);
+    phase0Warning(manifestPath,'SCAN_REQUESTED_TARGET_NOT_VERIFIED',
+     'Requested explorer target '+address+' is absent from the frozen resolved target roster with REQUESTED role',
+     {address,role:'REQUESTED'},'NOT_FOUND');
   evidence.scanSourceManifest=manifestPath;
 }
 
