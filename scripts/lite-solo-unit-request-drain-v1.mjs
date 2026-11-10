@@ -152,13 +152,20 @@ if([4,5,6].includes(directory.currentAssignment?.phaseSequence)){
   }catch(error){
    // Transport and physical assembly errors remain visible and retryable.
    const reason=String(error.stderr??error.message??error).slice(0,1800);
-   if(/(?:digest|hash|sha256|mismatch|validation|schema|incorrect|verify|verification|unrecognized authority)/i.test(reason)){
-    const affectedFile=directory.currentAssignment?.workFormPath;
+   if(/(?:digest|hash|sha256|mismatch|validation|schema|incorrect|verify|verification|unrecognized authority|ENOENT|file not found|missing|unreadable)/i.test(reason)){
+    // Source-path provenance is selected from the actual error, never from a
+    // fabricated file. Fall back to the phase form when no exact path is known.
+    const citedFiles=reason.match(/campaigns\/[A-Za-z0-9._\/-]+\.(?:json|md)/g)??[];
+    const affectedFile=citedFiles.find(file=>file.startsWith(campaignPath+'/'))??
+     directory.currentAssignment?.workFormPath;
     if(affectedFile)recordPhaseFinalizationVerificationWarningV1({
      root,campaignPath,phase:seq,revision:Number(directory.currentAssignment?.phaseRevision??1),affectedFile,
-     check:reason.split('\n')[0].split(':')[0].trim()||'PHASE_FINALIZATION_SOURCE_VERIFICATION',
+     check:/ENOENT|file not found|missing|unreadable/i.test(reason)?
+      'PHASE_FINALIZATION_REQUIRED_FILE_UNAVAILABLE':
+      (reason.split('\n')[0].split(':')[0].trim()||'PHASE_FINALIZATION_SOURCE_VERIFICATION'),
      reason:'Existing phase assembler/controller verification did not succeed: '+reason,
-     expected:'Source-bound phase work can be read and packaged',observed:reason
+     expected:'Readable source-bound phase evidence and valid file metadata',
+     observed:reason
     });
    }
    markFinalizationV1({root,campaignPath,phase:seq,status:'NOT_STARTED',
