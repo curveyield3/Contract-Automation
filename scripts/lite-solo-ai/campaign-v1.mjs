@@ -4047,9 +4047,49 @@ async function miAdaptiveSingleQuestionTransportV1(){
      !t.scope||t.scope.questionId!==t.questionId||
      sha(JSON.stringify(t.scope))!==t.scopeSha256)
    throw Error('Adaptive one-question model input lacks complete actual source evidence or authenticated scope');
+// Present only source-relevant material to MiMo. GitHub Input.json still stores
+// the exact API envelope; controller data/JSON are not model-facing instructions.
+function miReadableEvidenceContent(entry){
+ const raw=entry.content;
+ if(/(?:implementation|dependency|specification|source code)/i.test(entry.description))return raw;
+ let value;try{value=JSON.parse(raw);}catch{return raw;}
+ const administrative=/^(?:schemaVersion|kind|key|lease|unitId|questionId|scopeSha256|sha256|gitBlobSha|sourceSha256|controllerAccepted|answerSha256|candidateId|functionId|contractId|sourceContractId|sourceFunctionId|compilationUnitId|astNodeId|astSourceSpan|sourceDigestSha256|recordKey|obligationId|assetKey|actorKey|boundaryKey|transitionKey|requirementKey|dependencyKey|standardKey|driverKey|status|basis|phase1Ownership|laterPhaseTreatment|automationOwnedFields)$/;
+ const indexOnly=/^(?:sourceIds|contractIds|functionIds|storageIds|externalInterfaceIds|privilegeCandidateIds|valueFlowCandidateIds|sourceAnchorIds)$/;
+ const human=k=>k.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_-]/g,' ').replace(/^./,m=>m.toUpperCase());
+ const lines=[];const visit=(v,depth=0,name='')=>{
+  if(v===null||v===undefined||depth>5)return;
+  if(Array.isArray(v)){
+   if(indexOnly.test(name)){lines.push(' '.repeat(depth*2)+human(name)+': '+v.length+' indexed observations; see directly selected source evidence');return;}
+   if(v.length>35&&v.every(x=>typeof x==='string'&&/^(?:FUNC|CONTRACT|SRC|ANCHOR|EXT|PRIV|VALUE|STORAGE)[-_]/.test(x))){lines.push(' '.repeat(depth*2)+human(name)+': '+v.length+' internal identifiers');return;}
+   for(const item of v)visit(item,depth+1,'');return;
+  }
+  if(typeof v==='object'){
+   for(const [k,item] of Object.entries(v)){
+    if(administrative.test(k))continue;
+    if(item&&typeof item==='object'&&!Array.isArray(item)){lines.push(' '.repeat(depth*2)+human(k)+':');visit(item,depth+1,k);}
+    else if(Array.isArray(item))visit(item,depth,k);
+    else if(item!==null&&item!==''&&item!==undefined)lines.push(' '.repeat(depth*2)+human(k)+': '+String(item));
+   }
+   return;
+  }
+  if(name)lines.push(' '.repeat(depth*2)+human(name)+': '+String(v));
+ };
+ visit(value);
+ return lines.join('\n')||raw;
+}
+function miReadableQuestion(m){
+ const lines=['Security investigation question',m.question];
+ if(m.subject)lines.push('Exact subject under investigation',String(m.subject));
+ if(m.investigationFocus)lines.push('Focus for this question',String(m.investigationFocus));
+ if(m.analysisCriteria)lines.push('Relevant reasoning criteria',String(m.analysisCriteria));
+ if(m.answerFormat)lines.push('Answer convention',String(m.answerFormat));
+ lines.push('Source evidence relevant to this question');
+ for(const e of m.evidence)lines.push(e.description,miReadableEvidenceContent(e));
+ return lines.join('\n\n');
+}
   const messages=[
    {role:'system',content:'You are an independent smart-contract security investigator. Answer the single supplied substantive question using only its actual source evidence. If asked to enumerate future questions, enumerate them without answering them. Do not produce controller forms, storage records, workflow instructions or administrative actions.'},
-   {role:'user',content:JSON.stringify(m)}];
+   {role:'user',content:miReadableQuestion(m)}];
   const pending=await modelCall(messages,{technicalAnswer:true,scope:t.scope,
    scopeSha256:t.scopeSha256,returnUnpublishedRound:true});
   const payload={operation:'adaptive_turn',...t,questionScope:t.scope,
