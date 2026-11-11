@@ -96,7 +96,7 @@ function deploymentScriptKeyV2(item){
 async function rpc(url,method,params=[]){
   // RPC requests can hang without a deadline even after the upstream preflight succeeds.
   // State export is larger than ordinary JSON-RPC reads and receives a separate allowance.
-  const deadlineMs=method==='anvil_dumpState'?120000:60000;
+  const deadlineMs=(method==='anvil_dumpState'||method==='debug_traceTransaction')?120000:60000;
   const res=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(deadlineMs)});
   if(!res.ok)throw new Error(`RPC ${method}: HTTP ${res.status}`);
   const body=await res.json();
@@ -262,7 +262,7 @@ export async function startStateSnapshotAnvilV1({sourceUrl,projectRoot,evmVersio
   await fs.writeFile(statePath,stateJson);
   const url=`http://127.0.0.1:${port}`;
   const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
-  const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--load-state',statePath,'--auto-impersonate','--silent'];
+  const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--load-state',statePath,'--silent'];
   // Own process group: the npm anvil entry point is a node wrapper around the native binary, so signal the group.
   const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe'],detached:true});
   let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
