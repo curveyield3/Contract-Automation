@@ -299,37 +299,48 @@ async function buildForkRelationshipGraphV1(){
         throw new Error('GRAPH_TRACE_JOURNAL_DUPLICATED_TX_OR_BLOCK_OUTSIDE_SCRIPT_RANGE');
       }
       rowIds.add(txHash);
-      const pathToTrace=row.evidence?.find(x=>x.kind==='CALL_TRACE');
-      if(!pathToTrace){addUnknown('CALL_TRACE_MISSING',rawIndex.ref?.path??null,{txHash:row.transactionHash});continue}
-      const expected=pathToTrace.sha256;
-      const observed=await readCompleteCapturedRpcJsonV1(pathToTrace,'CALL_TRACE');
-      if(observed.limitation||observed.ref?.sha256!==expected||
-         observed.manifest?.scenarioId!==scenario||
-         String(observed.manifest?.txHash??'').toLowerCase()!==txHash||
-         observed.manifest?.blockNumber!==row.blockNumber||
-         observed.manifest?.chainId!==pinned.chainId||
-         observed.manifest?.sourceIdentity?.sourceArchiveSha256!==source.sourceArchiveSha256){
-        limitations.push({type:'CALL_TRACE_SHA_MISSING_OR_MISMATCH',txHash:row.transactionHash,
-          expectedSha256:expected,actualSha256:observed.ref?.sha256??null});
-        continue;
+      const pathToTrace=row.evidence?.find(x=>x.kind==='CALL_TRACE')??null;
+      let observed=null,verifiedFrames=[];
+      if(!pathToTrace){
+        addUnknown('CALL_TRACE_MISSING',rawIndex.ref?.path??null,
+          {txHash:row.transactionHash,receiptAndStateEvidenceMayStillBeUsable:true});
+      }else{
+        observed=await readCompleteCapturedRpcJsonV1(pathToTrace,'CALL_TRACE');
+        if(observed.limitation||observed.ref?.sha256!==pathToTrace.sha256||
+           observed.manifest?.scenarioId!==scenario||
+           String(observed.manifest?.txHash??'').toLowerCase()!==txHash||
+           observed.manifest?.blockNumber!==row.blockNumber||
+           observed.manifest?.chainId!==pinned.chainId||
+           observed.manifest?.sourceIdentity?.sourceArchiveSha256!==source.sourceArchiveSha256){
+          limitations.push({type:'CALL_TRACE_SHA_IDENTITY_OR_COMPLETENESS_INVALID',
+            txHash:row.transactionHash,
+            expectedSha256:pathToTrace.sha256,
+            actualSha256:observed.ref?.sha256??null});
+        }else{
+          try{
+            verifiedFrames=normalizeVerifiedCallFrames({
+              callTrace:observed.value,traceIdentity:actualTrace.sourceIdentity,
+              txHash:row.transactionHash
+            });
+            const recordedFrames=row.mechanicalCallFrames??[];
+            const fields=['frameId','parentFrameId','framePath','callType','from','to',
+              'runtimeCodeAddress','storageContextAddress','inputSelector',
+              'inputSha256','reverted','revertedInAncestor','effectiveReverted'];
+            const frameMismatch=verifiedFrames.length!==recordedFrames.length||
+              verifiedFrames.some((frame,index)=>fields.some(field=>
+                (frame[field]??null)!==(recordedFrames[index]?.[field]??null)));
+            if(frameMismatch)
+              limitations.push({type:'NORMALIZED_FRAMES_DIVERGE_FROM_VERIFIED_RAW_TRACE',
+                transactionHash:row.transactionHash,
+                rawFrameCount:verifiedFrames.length,indexFrameCount:recordedFrames.length});
+          }catch(error){
+            verifiedFrames=[];
+            limitations.push({type:'RAW_CALL_TRACE_NORMALIZATION_UNAVAILABLE',
+              transactionHash:row.transactionHash,
+              reason:String(error?.message??error).slice(0,300)});
+          }
+        }
       }
-      const rawFrames=normalizeVerifiedCallFrames({
-        callTrace:observed.value,traceIdentity:actualTrace.sourceIdentity,
-        txHash:row.transactionHash
-      });
-      const recordedFrames=row.mechanicalCallFrames??[];
-      const fields=['frameId','parentFrameId','framePath','callType','from','to',
-        'runtimeCodeAddress','storageContextAddress','inputSelector',
-        'inputSha256','reverted','revertedInAncestor','effectiveReverted'];
-      const frameMismatch=rawFrames.length!==recordedFrames.length||
-        rawFrames.some((frame,index)=>fields.some(field=>
-          (frame[field]??null)!==(recordedFrames[index]?.[field]??null)));
-      if(frameMismatch){
-        limitations.push({type:'NORMALIZED_FRAMES_DIVERGE_FROM_VERIFIED_RAW_TRACE',
-          transactionHash:row.transactionHash,
-          rawFrameCount:rawFrames.length,indexFrameCount:recordedFrames.length});
-      }
-      const verifiedFrames=rawFrames; // the authoritative raw trace, never the unverified derivative
       const runtimeByAddress=new Map();
       for(const observation of row.runtimeCodeObservations??[]){
         const address=String(observation.address??'').toLowerCase();
