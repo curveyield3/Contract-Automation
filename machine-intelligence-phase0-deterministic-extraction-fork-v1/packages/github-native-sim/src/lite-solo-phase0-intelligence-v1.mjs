@@ -1026,15 +1026,15 @@ async function main(){
   // Single immutable exact-byte handoff from this copied compiler job to the
   // copied deploy job. The latter may not fall back to campaign evidence.
   const destinationByName={
-    BUILD_AND_SOURCE_IDENTITY_v1.json:'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json',
-    PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json:'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json',
-    CONTRACT_IDENTITY_INDEX_v1.json:'evidence/phase0/CONTRACT_IDENTITY_INDEX_v1.json',
-    SBOM_v1.json:'evidence/build/SBOM_v1.json',
-    SLITHER_v1.json:'evidence/static-analysis/SLITHER_v1.json',
-    SLITHER_RELATIONAL_FACTS_v1.json:'evidence/static-analysis/SLITHER_RELATIONAL_FACTS_v1.json',
-    SOURCE_INTELLIGENCE_AUTOMATED_v1.json:'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json',
-    PROJECT_READINESS_AUTOMATED_v1.json:'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json',
-    PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json:'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'
+    'BUILD_AND_SOURCE_IDENTITY_v1.json':'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json',
+    'PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json':'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json',
+    'CONTRACT_IDENTITY_INDEX_v1.json':'evidence/phase0/CONTRACT_IDENTITY_INDEX_v1.json',
+    'SBOM_v1.json':'evidence/build/SBOM_v1.json',
+    'SLITHER_v1.json':'evidence/static-analysis/SLITHER_v1.json',
+    'SLITHER_RELATIONAL_FACTS_v1.json':'evidence/static-analysis/SLITHER_RELATIONAL_FACTS_v1.json',
+    'SOURCE_INTELLIGENCE_AUTOMATED_v1.json':'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json',
+    'PROJECT_READINESS_AUTOMATED_v1.json':'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json',
+    'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json':'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'
   };
   const staticHandoffRecords=[];
   await withProgressStage('write-machine-evidence',async()=>{
