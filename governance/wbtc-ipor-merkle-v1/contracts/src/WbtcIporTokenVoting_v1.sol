@@ -56,6 +56,19 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     using SafeCastUpgradeable for uint256;
     using EnumerableSet for EnumerableSet.AddressSet;
 
+    /// @notice The [ERC-165](https://eips.ethereum.org/EIPS/eip-165) interface ID of the contract.
+    bytes4 internal constant TOKEN_VOTING_INTERFACE_ID = this.getVotingToken.selector;
+
+    /// @notice An [OpenZeppelin `Votes`](https://docs.openzeppelin.com/contracts/4.x/api/governance#Votes)
+    ///         compatible contract referencing the token being used for voting.
+    IVotesUpgradeable private votingToken; // Slot 0
+
+    /// @notice Wether the token contract indexes past voting power by timestamp.
+    bool public tokenIndexedByTimestamp; // Slot 0
+
+    /// @notice The list of addresses excluded from voting
+    EnumerableSet.AddressSet internal excludedAccounts; // Slot 1
+
     // Source-fork additions (appended after existing Aragon storage).
     enum ProposalKind { Standard, RemoveDaoGuardian }
 
@@ -110,22 +123,11 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     }
 
     modifier onlyDaoExecution() {
-        if (_msgSender() != address(dao())) revert OnlyGuardianOrDAO();
+        if (msg.sender != address(dao())) revert OnlyGuardianOrDAO();
         _;
     }
 
-    /// @notice The [ERC-165](https://eips.ethereum.org/EIPS/eip-165) interface ID of the contract.
-    bytes4 internal constant TOKEN_VOTING_INTERFACE_ID = this.getVotingToken.selector;
 
-    /// @notice An [OpenZeppelin `Votes`](https://docs.openzeppelin.com/contracts/4.x/api/governance#Votes)
-    ///         compatible contract referencing the token being used for voting.
-    IVotesUpgradeable private votingToken; // Slot 0
-
-    /// @notice Wether the token contract indexes past voting power by timestamp.
-    bool public tokenIndexedByTimestamp; // Slot 0
-
-    /// @notice The list of addresses excluded from voting
-    EnumerableSet.AddressSet internal excludedAccounts; // Slot 1
 
     /// @notice Emitted when an account's balance is considered as non-circulating supply. Its balance will be excluded from the token supply computation.
     /// @param accounts The addresses whose balance is considered as not circulating
@@ -578,8 +580,8 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
 
     /// @dev Helper function to avoid stack too deep in non via-ir compilation mode.
     function _emitProposalCreatedEvent(
-        bytes calldata _metadata,
-        Action[] calldata _actions,
+        bytes memory _metadata,
+        Action[] memory _actions,
         uint256 _allowFailureMap,
         uint256 proposalId,
         uint64 _startDate,
