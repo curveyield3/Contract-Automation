@@ -1,0 +1,7 @@
+{
+  "name":"wbtc-ipor-merkle-format-v12",
+  "private":true,
+  "type":"module",
+  "version":"12.0.0",
+  "dependencies":{"ethers":"6.15.0"}
+}
