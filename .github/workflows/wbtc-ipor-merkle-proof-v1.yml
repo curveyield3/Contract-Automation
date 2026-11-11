@@ -135,40 +135,45 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Compile v14 weighted TokenVoting (no tests or forks)
+      - name: Compile v17 native weighted TokenVoting and Standard SPP (no tests or forks)
         if: contains(github.event.head_commit.message, '[compile-only]')
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$GITHUB_WORKSPACE/compile-evidence"
-          git clone https://github.com/aragon/token-voting-plugin.git "$RUNNER_TEMP/aragon-token-v14"
+          git clone https://github.com/aragon/token-voting-plugin.git "$RUNNER_TEMP/aragon-token-v17"
           (
-            cd "$RUNNER_TEMP/aragon-token-v14"
+            cd "$RUNNER_TEMP/aragon-token-v17"
             git checkout e726c28061486114d601c547e4da1180ed5ab6da
             git submodule update --init --recursive
-            cp -r "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/native-restart-v14/src/." src/
+            cp -r "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/native-restart-v17/src/." src/
             status=0
-            forge build src/extensions/WbtcCollateralTokenVoting_v7.sol --via-ir --optimizer-runs 1 --sizes || status=$?
-            artifact="out/WbtcCollateralTokenVoting_v7.sol/WbtcCollateralTokenVoting.json"
-            if test -f "$artifact"; then
-              jq -r '.deployedBytecode.object' "$artifact" > "$GITHUB_WORKSPACE/compile-evidence/v14-runtime-bytecode.txt"
-              hex=$(cat "$GITHUB_WORKSPACE/compile-evidence/v14-runtime-bytecode.txt")
-              if [[ "$hex" == 0x* ]]; then
-                bytes=$(( (${#hex} - 2) / 2 ))
-                echo "V14_RUNTIME_BYTES=$bytes" | tee "$GITHUB_WORKSPACE/compile-evidence/v14-size.txt"
-                echo "EIP170_HEADROOM_BYTES=$(( 24576 - bytes ))" | tee -a "$GITHUB_WORKSPACE/compile-evidence/v14-size.txt"
+            forge build src/weighted/WbtcWeightedTokenVoting_v3.sol src/staged/WbtcStandardSPP_v2.sol --via-ir --optimizer-runs 1 --sizes || status=$?
+            for spec in "WbtcWeightedTokenVoting_v3.sol:WbtcWeightedTokenVoting" "WbtcStandardSPP_v2.sol:WbtcStandardSPP"; do
+              file="${spec%%:*}"
+              contract="${spec#*:}"
+              artifact="out/$file/$contract.json"
+              if test -f "$artifact"; then
+                hex=$(jq -r '.deployedBytecode.object' "$artifact")
+                if [[ "$hex" == 0x* ]]; then
+                  bytes=$(( (${#hex} - 2) / 2 ))
+                  echo "$contract RUNTIME_BYTES=$bytes EIP170_HEADROOM=$(( 24576 - bytes ))" | tee -a "$GITHUB_WORKSPACE/compile-evidence/v17-sizes.txt"
+                else
+                  echo "$contract EMPTY_BYTECODE" | tee -a "$GITHUB_WORKSPACE/compile-evidence/v17-sizes.txt"
+                  status=1
+                fi
+              else
+                echo "$contract ARTIFACT_MISSING" | tee -a "$GITHUB_WORKSPACE/compile-evidence/v17-sizes.txt"
+                status=1
               fi
-            else
-              echo "V14_ARTIFACT_MISSING" | tee "$GITHUB_WORKSPACE/compile-evidence/v14-size.txt"
-              status=1
-            fi
+            done
             exit "$status"
-          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/v14-compile.log"
-      - name: Upload v14 compile and size evidence
+          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/v17-compile.log"
+      - name: Upload v17 compile and size evidence
         if: always() && contains(github.event.head_commit.message, '[compile-only]')
         uses: actions/upload-artifact@v4
         with:
-          name: wbtc-ipor-v14-weighted-tokenvoting-compile
+          name: wbtc-ipor-v17-weighted-voting-compile
           path: compile-evidence/
           if-no-files-found: warn
           retention-days: 30

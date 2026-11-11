@@ -1,8 +1,9 @@
 {
-  "phase": "v14-weighted-tokenvoting-compile-only",
+  "phase": "v17-clean-weighted-voting-compile-only",
   "request": 1,
-  "source": "native-restart-v14/src/extensions/WbtcCollateralTokenVoting_v7.sol",
-  "optimizer": "via-ir / runs 1",
+  "source": "native-restart-v17/src/weighted/WbtcWeightedTokenVoting_v3.sol",
+  "also": "native-restart-v17/src/staged/WbtcStandardSPP_v2.sol",
+  "optimizer": "via-ir optimizer-runs 1",
   "tests": false,
   "fork": false
 }
