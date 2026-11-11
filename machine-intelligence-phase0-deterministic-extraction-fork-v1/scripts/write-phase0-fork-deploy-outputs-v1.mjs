@@ -259,6 +259,26 @@ async function buildForkRelationshipGraphV1(){
     visit(callTrace,'0',null);
     return normalized;
   };
+  const verifiedRuntimeForTx=new Map();
+  const readVerifiedRuntimeCode=async(entry)=>{
+    if(!entry)return null;
+    const relative=String(entry.path??'');
+    if(!/^evidence\/phase0\/scenarios\/[^/]+\/transactions\/0x[a-f0-9]{64}\/runtime-code\/0x[a-f0-9]{40}-(?:before_block|after_block)\.hex$/i.test(relative)||
+       !/^[0-9a-f]{64}$/.test(String(entry.sha256??'')))
+      return null;
+    const absolute=path.resolve(forkRunRoot,...relative.split('/'));
+    if(!absolute.startsWith(forkRunRoot+path.sep))return null;
+    const stat=await fs.lstat(absolute).catch(()=>null);
+    if(!stat?.isFile()||stat.isSymbolicLink())return null;
+    const raw=await fs.readFile(absolute);
+    if(sha256(raw)!==entry.sha256)return null;
+    const code=raw.toString('utf8');
+    if(!/^0x(?:[0-9a-f]{2})*\n$/.test(code))return null;
+    const body=code.trim();
+    if(sha256(Buffer.from(body.slice(2),'hex'))!==entry.bytecodeSha256||
+      (body.length-2)/2!==entry.bytecodeLength)return null;
+    return{code:body,ref:{path:relative,sha256:entry.sha256}};
+  };
   const actualTrace=rawIndex.value;
   if(actualTrace){
     if(actualTrace.sourceIdentity?.sourceArchiveSha256!==source.sourceArchiveSha256||
@@ -292,6 +312,76 @@ async function buildForkRelationshipGraphV1(){
           rawFrameCount:rawFrames.length,indexFrameCount:recordedFrames.length});
       }
       const verifiedFrames=rawFrames; // the authoritative raw trace, never the unverified derivative
+      const runtimeByAddress=new Map();
+      for(const observation of row.runtimeCodeObservations??[]){
+        const address=String(observation.address??'').toLowerCase();
+        if(!/^0x[0-9a-f]{40}$/.test(address)||
+           String(observation.transactionHash??'').toLowerCase()!==String(row.transactionHash).toLowerCase()||
+           observation.scenarioId!==scenario||observation.blockNumber!==row.blockNumber){
+          limitations.push({type:'RUNTIME_CODE_OBSERVATION_IDENTITY_INVALID',
+            transactionHash:row.transactionHash,address});
+          continue;
+        }
+        if(runtimeByAddress.has(address)){
+          limitations.push({type:'DUPLICATE_RUNTIME_CODE_OBSERVATION_FOR_TRANSACTION',
+            transactionHash:row.transactionHash,address});
+          runtimeByAddress.set(address,null);continue;
+        }
+        const start=await readVerifiedRuntimeCode(observation.codeAtBlockStart),
+          end=await readVerifiedRuntimeCode(observation.codeAtBlockEnd);
+        const refs=[start?.ref,end?.ref].filter(Boolean);
+        const stable=start&&end&&start.code===end.code&&end.code.length>2;
+        const matching=stable?(compilerBundle.value?.artifacts??[]).filter(a=>
+          String(a.deployedBytecode??'').toLowerCase()===end.code&&
+          !Object.keys(a.immutableReferences??{}).length&&
+          !Object.keys(a.deployedLinkReferences??{}).length):[];
+        const exact=stable&&observation.exactTransactionBoundary===true&&
+          matching.length===1&&
+          String(observation.sourceBinding)==='EXACT_SOURCE_AND_RUNTIME_MATCH'&&
+          observation.compilationUnitId===matching[0].compilationUnitId&&
+          observation.sourceName===matching[0].sourceName&&
+          observation.contractName===matching[0].contractName;
+        if(String(observation.sourceBinding)==='EXACT_SOURCE_AND_RUNTIME_MATCH'&&!exact){
+          throw new Error('GRAPH_OBSERVED_RUNTIME_CODE_CLAIMS_UNVERIFIED_COMPILER_MATCH');
+        }
+        const result={
+          address,sourceBinding:exact?'EXACT_SOURCE_AND_RUNTIME_MATCH':
+            !start||!end?'UNVERIFIED_RUNTIME_CODE_OR_SHA':
+            !stable?'CODE_CHANGED_OR_EMPTY_ACROSS_BLOCK':
+            observation.exactTransactionBoundary!==true?'BLOCK_HAS_MULTIPLE_TRANSACTIONS':
+            matching.length>1?'AMBIGUOUS_EXACT_COMPILER_RUNTIME':
+            'NO_VERIFIED_COMPILER_IDENTITY',
+          sourceIdentity:exact?{
+            compilationUnitId:matching[0].compilationUnitId,
+            sourceName:matching[0].sourceName,contractName:matching[0].contractName
+          }:null,
+          codeAtStartSha256:start?.ref?.sha256??null,
+          codeAtEndSha256:end?.ref?.sha256??null,
+          observedRuntimeSha256:end?sha256(Buffer.from(end.code.slice(2),'hex')):null,
+          evidenceRefs:refs
+        };
+        runtimeByAddress.set(address,result);
+        verifiedRuntimeForTx.set(String(row.transactionHash).toLowerCase()+'::'+address,result);
+        if(result.sourceBinding!=='EXACT_SOURCE_AND_RUNTIME_MATCH')
+          addUnknown('RUNTIME_CODE_SOURCE_IDENTITY_UNRESOLVED',
+            refs[0]?.path??rawIndex.ref?.path??null,
+            {transactionHash:row.transactionHash,address,reason:result.sourceBinding});
+        addNode({nodeId:mkid('NODE-CODE-AT-TX-',scenario,row.transactionHash,address),
+          kind:'BLOCK_SCOPED_RUNTIME_CODE',scenarioId:scenario,
+          transactionHash:row.transactionHash,blockNumber:row.blockNumber,
+          address,observedRuntimeSha256:result.observedRuntimeSha256,
+          sourceIdentity:result.sourceIdentity,
+          bindingStatus:result.sourceBinding,
+          evidenceRefs:result.evidenceRefs});
+      }
+      for(const frame of verifiedFrames){
+        if(!frame.runtimeCodeAddress)continue;
+        if(!runtimeByAddress.has(frame.runtimeCodeAddress)){
+          addUnknown('FRAME_TARGET_RUNTIME_BYTECODE_NOT_CAPTURED',
+            pathToTrace.path,{frameId:frame.frameId,address:frame.runtimeCodeAddress,
+              transactionHash:row.transactionHash});
+        }
+      }
       const txid=addNode({nodeId:mkid('NODE-TX-',scenario,row.transactionHash),
         kind:'MINED_TRANSACTION',scenarioId:scenario,transactionHash:row.transactionHash,
         blockNumber:row.blockNumber,evidenceRefs:[rawIndex.ref,pathToTrace].filter(Boolean)});
@@ -347,10 +437,16 @@ async function buildForkRelationshipGraphV1(){
         }
       }
       for(const frame of verifiedFrames){
+        const frameBinding=runtimeByAddress.get(frame.runtimeCodeAddress)??null;
         const frameid=addNode({nodeId:frame.frameId,kind:'EVM_CALL_FRAME',
           scenarioId:scenario,transactionHash:row.transactionHash,
-          callType:frame.callType,framePath:frame.framePath,reverted:Boolean(frame.error),
-          inputSelector:frame.inputSelector,evidenceRefs:[pathToTrace]});
+          callType:frame.callType,framePath:frame.framePath,reverted:frame.effectiveReverted,
+          runtimeCodeAddress:frame.runtimeCodeAddress,
+          storageContextAddress:frame.storageContextAddress,
+          sourceIdentity:frameBinding?.sourceIdentity??null,
+          sourceRuntimeBindingStatus:frameBinding?.sourceBinding??'CODE_NOT_CAPTURED',
+          inputSelector:frame.inputSelector,
+          evidenceRefs:[pathToTrace,...(frameBinding?.evidenceRefs??[])]});
         const from=frame.from?.toLowerCase()??null,to=frame.to?.toLowerCase()??null;
         edges.push({edgeId:mkid('EDGE-TX-FRAME-',row.transactionHash,frame.frameId),
           kind:'TRANSACTION_CONTAINS_FRAME',from:txid,to:frameid,
@@ -371,10 +467,16 @@ async function buildForkRelationshipGraphV1(){
           edges.push({edgeId,kind:'OBSERVED_'+kind,scenarioId:scenario,
             from:mkid('NODE-RUNTIME-',scenario,from),to:mkid('NODE-RUNTIME-',scenario,to),
             originatingFrameId:frame.frameId,transactionHash:row.transactionHash,
-            reverted:Boolean(frame.error),inputSelector:frame.inputSelector,
-            storageContextResolution:kind==='DELEGATECALL'?'CALLER_STORAGE_CONTEXT_UNVERIFIED':'NOT_APPLICABLE',
-            runtimeCodeIdentityStatus:byRuntime.has(to)?'VERIFIED_COMPILED_MATCH':'UNKNOWN',
-            observation:'OBSERVED_LOCAL_FORK',evidenceRefs:[pathToTrace]});
+            reverted:frame.effectiveReverted,inputSelector:frame.inputSelector,
+            runtimeCodeAddress:frame.runtimeCodeAddress,
+            storageContextAddress:frame.storageContextAddress,
+            storageContextResolution:frame.storageContextAddress?
+              'DERIVED_FROM_VERIFIED_RAW_EVM_CALL_TREE':'STORAGE_CONTEXT_UNRESOLVED',
+            runtimeCodeIdentityStatus:frameBinding?.sourceBinding==='EXACT_SOURCE_AND_RUNTIME_MATCH'?
+              'VERIFIED_COMPILER_UNIT_AND_BLOCK_CODE':'UNKNOWN',
+            sourceIdentity:frameBinding?.sourceIdentity??null,
+            observation:'OBSERVED_LOCAL_FORK',
+            evidenceRefs:[pathToTrace,...(frameBinding?.evidenceRefs??[])]});
           const policyType=kind==='DELEGATECALL'?'DELEGATECALL_STORAGE_CONTEXT':
             kind==='CALL'&&from!==to?'CROSS_CONTRACT_CALL':
             kind==='CREATE'||kind==='CREATE2'?'CONTRACT_CREATION':
