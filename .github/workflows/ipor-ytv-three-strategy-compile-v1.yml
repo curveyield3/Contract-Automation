@@ -71,6 +71,7 @@ jobs:
           out = pathlib.Path("ipor/ytv-three-strategy-v1/compiled-artifacts/creation-bytecode-v1.json")
           out.write_text(json.dumps({"sourcePin":"636bb4c2b78826586a0c0c8c9083c5c285692657","build":artifacts}, separators=(",",":")))
           print("COMPILE_SUCCESS_BUNDLE_BYTES", out.stat().st_size)
+          print("IPOR_DEPLOYMENT_BYTECODE_MANIFEST="+out.read_text())
           PY
       - name: Upload bytecode artifact
         uses: actions/upload-artifact@v4
