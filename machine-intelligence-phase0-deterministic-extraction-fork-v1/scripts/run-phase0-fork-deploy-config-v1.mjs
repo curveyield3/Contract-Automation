@@ -27,19 +27,27 @@ const expected=[
   ['PROJECT_READINESS_AUTOMATED_v1.json','evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'],
   ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json','evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json']
 ];
+const optionalExistingReview=[
+  ['REVIEW_INVENTORY_v1.json','evidence/review-inventory/REVIEW_INVENTORY_v1.json'],
+  ['SYSTEM_FACTS_v1.json','evidence/review-inventory/SYSTEM_FACTS_v1.json']
+];
 if(handoff.schemaVersion!=='mi-phase0-fork-static-handoff-v1'||
   handoff.campaignId!==receipt.campaign?.campaignId||
   handoff.campaignGenerationId!==receipt.campaign?.campaignGenerationId||
   handoff.sourceArchiveSha256!==receipt.source?.sha256||
-  handoff.fileCount!==expected.length||handoff.files?.length!==expected.length)
+  handoff.fileCount!==handoff.files?.length||
+  handoff.fileCount<expected.length||handoff.fileCount>expected.length+optionalExistingReview.length)
   throw new Error('FORK_STATIC_HANDOFF_SOURCE_GENERATION_OR_CENSUS_MISMATCH');
 const manifestByName=new Map();
 for(const row of handoff.files){
   if(!row||manifestByName.has(row.sourceFile))throw new Error('FORK_STATIC_HANDOFF_DUPLICATE_OR_INVALID_FILE');
   manifestByName.set(row.sourceFile,row);
 }
+const optionalPresent=optionalExistingReview.filter(([filename])=>manifestByName.has(filename));
+if(handoff.fileCount!==expected.length+optionalPresent.length)
+  throw new Error('FORK_STATIC_HANDOFF_UNEXPECTED_ARTIFACTS');
 const resolved=new Map();
-for(const [filename,relative] of expected){
+for(const [filename,relative] of [...expected,...optionalPresent]){
   const row=manifestByName.get(filename);
   if(!row||row.destinationRelativePath!==relative||
     !/^[0-9a-f]{64}$/.test(String(row.sha256??''))||
@@ -72,7 +80,7 @@ if(buildBundle.source?.archiveSha256!==sourceSha||
   identity.coverage?.compiledArtifactCount!==buildBundle.artifacts?.length||
   JSON.stringify(identity.compilationUnits)!==JSON.stringify(buildBundle.buildIdentity?.compilationUnits))
     throw new Error('FORK_STATIC_HANDOFF_COMPILER_OR_SLITHER_IDENTITY_MISMATCH');
-process.stdout.write(JSON.stringify({handoff:'EXACT_COMPILER_BYTES_BOUND',files:expected.length,
+process.stdout.write(JSON.stringify({handoff:'EXACT_COMPILER_BYTES_BOUND',files:handoff.fileCount,
   campaignId:receipt.campaign.campaignId,sourceSha256:sourceSha})+'\n');
 const forkSecretVariable=String(a['fork-url-env']);
 if(forkSecretVariable!=='MI_FORK_ETHEREUM_RPC_URL')

@@ -141,6 +141,12 @@ jobs:
           cp .fork-static-output/SBOM_v1.json "$forkroot/evidence/build/"
           cp .fork-static-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json "$forkroot/evidence/phase0/"
           cp .fork-static-output/FORK_STATIC_HANDOFF_MANIFEST_v1.json "$forkroot/inputs/"
+          mkdir -p "$forkroot/evidence/review-inventory"
+          for review_file in REVIEW_INVENTORY_v1.json SYSTEM_FACTS_v1.json; do
+            if [ -f ".fork-static-output/$review_file" ]; then
+              cp ".fork-static-output/$review_file" "$forkroot/evidence/review-inventory/"
+            fi
+          done
           cp .fork-static-output/PROJECT_READINESS_AUTOMATED_v1.json "$forkroot/evidence/readiness/"
           cp .fork-static-output/SLITHER_v1.json "$forkroot/evidence/static-analysis/"
           cp .fork-static-output/SOURCE_INTELLIGENCE_AUTOMATED_v1.json "$forkroot/evidence/source-intelligence/"

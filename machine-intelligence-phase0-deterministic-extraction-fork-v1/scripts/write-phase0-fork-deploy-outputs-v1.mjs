@@ -53,6 +53,8 @@ const staticMap=[
   ['SBOM_v1.json','evidence/build/SBOM_v1.json'],
   ['SLITHER_v1.json','evidence/static-analysis/SLITHER_v1.json'],
   ['SLITHER_RELATIONAL_FACTS_v1.json','evidence/static-analysis/SLITHER_RELATIONAL_FACTS_v1.json'],
+  ['REVIEW_INVENTORY_v1.json','evidence/review-inventory/REVIEW_INVENTORY_v1.json'],
+  ['SYSTEM_FACTS_v1.json','evidence/review-inventory/SYSTEM_FACTS_v1.json'],
   ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json','evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json'],
   ['PROJECT_READINESS_AUTOMATED_v1.json','evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json']
 ];
