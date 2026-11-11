@@ -25,6 +25,9 @@ const FULL_OUTPUT_SELECTION = Object.freeze([
   'evm.deployedBytecode.object',
   'evm.deployedBytecode.sourceMap',
   'evm.deployedBytecode.linkReferences',
+  'evm.deployedBytecode.immutableReferences',
+  'evm.bytecode.generatedSources',
+  'evm.deployedBytecode.generatedSources',
   'evm.methodIdentifiers',
   'evm.gasEstimates'
 ]);

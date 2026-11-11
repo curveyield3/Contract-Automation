@@ -222,6 +222,11 @@ export async function collectNativeContractArtifacts(projectRoot, fsApi = fs) {
           bytecodeSourceMap: raw?.evm?.bytecode?.sourceMap ?? '',
           deployedBytecodeSourceMap: raw?.evm?.deployedBytecode?.sourceMap ?? '',
           gasEstimates: raw?.evm?.gasEstimates ?? null,
+          linkReferences:raw?.evm?.bytecode?.linkReferences??{},
+          deployedLinkReferences:raw?.evm?.deployedBytecode?.linkReferences??{},
+          immutableReferences:raw?.evm?.deployedBytecode?.immutableReferences??null,
+          creationGeneratedSources:raw?.evm?.bytecode?.generatedSources??null,
+          deployedGeneratedSources:raw?.evm?.deployedBytecode?.generatedSources??null,
           compilationUnitId,
         };
         const existing = byCompilationIdentity.get(key);
@@ -576,6 +581,9 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
         deployedBytecode:raw.evm?.deployedBytecode?.object?'0x'+raw.evm.deployedBytecode.object:'0x',
         bytecodeSourceMap:raw.evm?.bytecode?.sourceMap??'',deployedBytecodeSourceMap:raw.evm?.deployedBytecode?.sourceMap??'',
         linkReferences:raw.evm?.bytecode?.linkReferences??{},deployedLinkReferences:raw.evm?.deployedBytecode?.linkReferences??{},
+        immutableReferences:raw.evm?.deployedBytecode?.immutableReferences??null,
+        creationGeneratedSources:raw.evm?.bytecode?.generatedSources??null,
+        deployedGeneratedSources:raw.evm?.deployedBytecode?.generatedSources??null,
         compilationUnitId:unitId
       }))
     );
@@ -591,11 +599,13 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
   }
   if(!artifacts.length||!units.every(unit=>unit.compilerVersion))
     throw new Error('Foundry build lacks usable contract artifacts or exact compiler versions');
-  const qualified=new Set();
+  // Identical source declarations may legitimately be present in multiple exact
+  // compilation units. Preserve all; consumers must join on unit + declaration.
+  const unitQualified=new Set();
   for(const a of artifacts){
-    const key=a.sourceName+':'+a.contractName;
-    if(qualified.has(key))throw new Error('Ambiguous duplicate Foundry compiler artifact: '+key);
-    qualified.add(key);
+    const key=a.compilationUnitId+':'+a.sourceName+':'+a.contractName;
+    if(unitQualified.has(key))throw new Error('Duplicate artifact within exact Foundry unit: '+key);
+    unitQualified.add(key);
   }
   const compilerVersions=[...new Set(units.map(unit=>unit.compilerVersion))].sort();
   return {status:'completed',system:'foundry-native',compilerVersion:compilerVersions.length===1?compilerVersions[0]:'multi-profile',

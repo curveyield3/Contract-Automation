@@ -33,7 +33,10 @@ function normalizedArtifact(a={}){
     bytecodeSourceMap:a.bytecodeSourceMap??'',
     deployedBytecodeSourceMap:a.deployedBytecodeSourceMap??'',
     linkReferences:clone(a.linkReferences??{}),
-    deployedLinkReferences:clone(a.deployedLinkReferences??{})
+    deployedLinkReferences:clone(a.deployedLinkReferences??{}),
+    immutableReferences:clone(a.immutableReferences??null),
+    creationGeneratedSources:clone(a.creationGeneratedSources??null),
+    deployedGeneratedSources:clone(a.deployedGeneratedSources??null)
   };
   return {
     ...row,
@@ -91,7 +94,7 @@ export function buildExecutionArtifactBundleV2({request,build}={}){
       profile:raw.profile??unit?.profile??null,
       compilerVersion:raw.compilerVersion??unit?.compilerVersion??build.compilerVersion??null
     });
-  }).sort((a,b)=>a.qualifiedName.localeCompare(b.qualifiedName));
+  }).sort((a,b)=>`${a.compilationUnitId}:${a.qualifiedName}`.localeCompare(`${b.compilationUnitId}:${b.qualifiedName}`));
   if(!artifacts.length)throw new Error('execution artifact export requires at least one compiler artifact');
   for(const artifact of artifacts)if(!artifact.compilationUnitId)throw new Error(`compiler artifact lacks exact compilation-unit identity: ${artifact.qualifiedName}`);
   const identityRows=artifacts.map(a=>({
