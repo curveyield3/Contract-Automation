@@ -174,6 +174,192 @@ contract WbtcIporWeightedSources {
         return false;
     }
 
+    // Activated-voter registry and proposal-frozen snapshots. The original
+    // Gardens source-aggregation rule remains rawSources() above.
+    address public votingPlugin;
+    uint64 public constant INACTIVITY_WINDOW = 90 days;
+    uint8 public constant MINIMUM_MISSED_PROPOSALS = 2;
+
+    struct ActivatedVoter {
+        uint64 continuousSince;
+        uint64 lastVoteOrResetAt;
+        bool everRegistered;
+    }
+    struct TrackedProposal {
+        uint64 votingEnd;
+        bool canceled;
+        bool registered;
+    }
+
+    address[] private registeredVoters;
+    uint256[] private proposalIds;
+    mapping(address => ActivatedVoter) public voterState;
+    mapping(uint256 => TrackedProposal) public trackedProposal;
+    mapping(uint256 => mapping(address => uint256)) public frozenVotingPower;
+    mapping(uint256 => mapping(address => bool)) public votedOnProposal;
+    mapping(uint256 => bool) public snapshotFrozen;
+    mapping(uint256 => uint256) public snapshotTotalWeight;
+
+    error OnlyVotingPlugin();
+    error VotingPluginAlreadyBound();
+    error InvalidSnapshot();
+    error SnapshotExists();
+    error NoActiveCommunity();
+
+    event VotingPluginBound(address indexed plugin);
+    event VoterActivated(address indexed voter, uint64 continuousSince);
+    event SnapshotFrozen(uint256 indexed proposalId, uint256 totalWeight, uint256 communityMembers);
+    event VoterParticipationRecorded(uint256 indexed proposalId, address indexed voter);
+
+    modifier onlyPlugin() {
+        if (msg.sender != votingPlugin || votingPlugin == address(0)) revert OnlyVotingPlugin();
+        _;
+    }
+
+    /// @notice Bind once through the authorized Aragon DAO deployment process.
+    function bindVotingPlugin(address plugin) external onlyDAO {
+        if (votingPlugin != address(0)) revert VotingPluginAlreadyBound();
+        if (plugin.code.length == 0) revert InvalidSnapshot();
+        votingPlugin = plugin;
+        emit VotingPluginBound(plugin);
+    }
+
+    function voterCount() external view returns (uint256) {
+        return registeredVoters.length;
+    }
+
+    function voterAt(uint256 index) external view returns (address) {
+        return registeredVoters[index];
+    }
+
+    function trackedProposalCount() external view returns (uint256) {
+        return proposalIds.length;
+    }
+
+    /// @notice Called after IPOR's existing delegateBySig has confirmed
+    /// self-delegation. A second opt-in resets expiry only when expired.
+    function activate(address voter) external onlyPlugin {
+        if (voter == address(0) || voter == address(morphoBlue) || _isApprovedCustody(voter)) {
+            revert InvalidSnapshot();
+        }
+        ActivatedVoter storage state = voterState[voter];
+        if (!state.everRegistered) {
+            registeredVoters.push(voter);
+            state.everRegistered = true;
+        }
+        if (!_active(voter)) {
+            state.continuousSince = uint64(block.timestamp);
+            state.lastVoteOrResetAt = uint64(block.timestamp);
+        }
+        emit VoterActivated(voter, state.continuousSince);
+    }
+
+    function activated(address voter) external view returns (bool) {
+        return _active(voter);
+    }
+
+    function _active(address voter) internal view returns (bool) {
+        if (!voterState[voter].everRegistered) return false;
+        (uint256 misses, uint256 firstMissEnd) = _missedSinceLastVote(voter);
+        return misses < MINIMUM_MISSED_PROPOSALS
+            || firstMissEnd == 0 || block.timestamp < firstMissEnd + INACTIVITY_WINDOW;
+    }
+
+    function _missedSinceLastVote(address voter)
+        internal view returns (uint256 misses, uint256 firstMissEnd)
+    {
+        uint64 lastParticipation = voterState[voter].lastVoteOrResetAt;
+        for (uint256 i; i < proposalIds.length;) {
+            uint256 id = proposalIds[i];
+            TrackedProposal storage p = trackedProposal[id];
+            if (p.registered && !p.canceled && p.votingEnd != 0
+                && p.votingEnd <= block.timestamp && p.votingEnd > lastParticipation
+                && frozenVotingPower[id][voter] > 0 && !votedOnProposal[id][voter]) {
+                misses += 1;
+                if (firstMissEnd == 0 || p.votingEnd < firstMissEnd) firstMissEnd = p.votingEnd;
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    function recordVote(uint256 id, address voter) external onlyPlugin {
+        if (!snapshotFrozen[id] || frozenVotingPower[id][voter] == 0 || votedOnProposal[id][voter]) {
+            revert InvalidSnapshot();
+        }
+        votedOnProposal[id][voter] = true;
+        if (voterState[voter].everRegistered) {
+            ActivatedVoter storage state = voterState[voter];
+            if (!_active(voter)) state.continuousSince = uint64(block.timestamp);
+            state.lastVoteOrResetAt = uint64(block.timestamp);
+        }
+        emit VoterParticipationRecorded(id, voter);
+    }
+
+    function registerProposal(uint256 id, uint64 votingEnd) external onlyPlugin {
+        if (!snapshotFrozen[id] || trackedProposal[id].registered || votingEnd <= block.timestamp) {
+            revert InvalidSnapshot();
+        }
+        trackedProposal[id] = TrackedProposal(votingEnd, false, true);
+        proposalIds.push(id);
+    }
+
+    function updateVotingEnd(uint256 id, uint64 newEnd) external onlyPlugin {
+        TrackedProposal storage p = trackedProposal[id];
+        if (!p.registered || p.canceled || p.votingEnd <= block.timestamp || newEnd <= block.timestamp) {
+            revert InvalidSnapshot();
+        }
+        p.votingEnd = newEnd;
+    }
+
+    function cancelGuardianVeto(uint256 id) external onlyPlugin {
+        TrackedProposal storage p = trackedProposal[id];
+        if (!p.registered || p.votingEnd <= block.timestamp) revert InvalidSnapshot();
+        p.canceled = true;
+    }
+
+    /// @notice Full atomic census of currently active registered addresses.
+    /// Safe bonus is exactly 15/85 of the non-Safe community (integer exact).
+    function freezeAtomic(
+        uint256 id, uint8 kind, uint256 anchorBlock, address creator, address guardian, bool removed
+    ) external onlyPlugin returns (uint256 eligibleWeight, uint256 denominator, uint256 creatorWeight) {
+        if (block.number != anchorBlock || guardian == address(0)) revert InvalidSnapshot();
+        if (snapshotFrozen[id]) revert SnapshotExists();
+        if (kind != 0) revert WholeSupplyProofRequired(); // special type requires proven whole-supply weight
+        uint256 community;
+        uint256 members;
+        for (uint256 i; i < registeredVoters.length;) {
+            address voter = registeredVoters[i];
+            if (_active(voter) && (voter != guardian || removed)) {
+                (uint256 directShares, uint256 marketShares) = rawSources(voter);
+                uint256 basePower = directShares + marketShares / 2;
+                if (basePower != 0) {
+                    frozenVotingPower[id][voter] = removed ? basePower : basePower * 85;
+                    community += basePower;
+                    members += 1;
+                }
+            }
+            unchecked { ++i; }
+        }
+        if (community == 0) revert NoActiveCommunity();
+        if (removed) {
+            eligibleWeight = community;
+        } else {
+            frozenVotingPower[id][guardian] = community * 15;
+            eligibleWeight = community * 100;
+        }
+        denominator = eligibleWeight;
+        creatorWeight = frozenVotingPower[id][creator];
+        snapshotFrozen[id] = true;
+        snapshotTotalWeight[id] = eligibleWeight;
+        emit SnapshotFrozen(id, eligibleWeight, members);
+    }
+
+    /// @notice Historical previews are not authoritative from live balances.
+    /// Actual per-proposal denominators are frozen by freezeAtomic().
+    function previewStandardTotalVotingPower(uint256) external pure returns (uint256) {
+        revert InvalidSnapshot();
+    }
+
     /// @notice Intentionally fail-closed. Morpho Blue exposes a per-user
     ///         collateral field but no simple aggregate per-market collateral
     ///         getter. totalSupply - 0.5 * balanceOf(Morpho) is NOT equivalent
