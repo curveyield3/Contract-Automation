@@ -123,6 +123,7 @@ jobs:
         run: |
           set -euo pipefail
           # This path is unreachable until the OS source-sandbox policy is verified.
+          gh auth setup-git
           gh repo clone curveyield3/Audit-Controller .fork-controller -- --filter=blob:none
           git -C .fork-controller checkout machine-intelligence-audit-controller-v1
           receipt=".fork-controller/$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"
@@ -139,7 +140,9 @@ jobs:
           cp .fork-static-output/SOURCE_INTELLIGENCE_AUTOMATED_v1.json "$forkroot/evidence/source-intelligence/"
           source_commit="$(jq -r '.source.archiveCommit' "$receipt")"
           git clone --filter=blob:none --no-checkout "$(git -C .fork-controller remote get-url origin)" .fork-source
-          git -C .fork-source checkout "$source_commit"
+          git -C .fork-source fetch --no-tags origin "$source_commit"
+          git -C .fork-source checkout --detach FETCH_HEAD
+          test "$(git -C .fork-source rev-parse HEAD)" = "$source_commit"
           echo "FORK_RUN_ROOT=$forkroot" >> "$GITHUB_ENV"
       - name: Run only source-defined deploy/config against contained local Anvil
         env:
