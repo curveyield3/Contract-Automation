@@ -1022,7 +1022,46 @@ async function main(){
     ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness],
     ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',deployConfigExecution]
   ];
-  await withProgressStage('write-machine-evidence',async()=>{for(const [name,obj] of files)await fs.writeFile(path.join(out,name),JSON.stringify(obj,null,2)+'\n');});
+
+  // Single immutable exact-byte handoff from this copied compiler job to the
+  // copied deploy job. The latter may not fall back to campaign evidence.
+  const destinationByName={
+    BUILD_AND_SOURCE_IDENTITY_v1.json:'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json',
+    PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json:'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json',
+    CONTRACT_IDENTITY_INDEX_v1.json:'evidence/phase0/CONTRACT_IDENTITY_INDEX_v1.json',
+    SBOM_v1.json:'evidence/build/SBOM_v1.json',
+    SLITHER_v1.json:'evidence/static-analysis/SLITHER_v1.json',
+    SLITHER_RELATIONAL_FACTS_v1.json:'evidence/static-analysis/SLITHER_RELATIONAL_FACTS_v1.json',
+    SOURCE_INTELLIGENCE_AUTOMATED_v1.json:'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json',
+    PROJECT_READINESS_AUTOMATED_v1.json:'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json',
+    PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json:'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'
+  };
+  const staticHandoffRecords=[];
+  await withProgressStage('write-machine-evidence',async()=>{
+    for(const [name,obj] of files){
+      const raw=Buffer.from(JSON.stringify(obj,null,2)+'\n','utf8');
+      await fs.writeFile(path.join(out,name),raw,{flag:'wx'});
+      const confirmed=await fs.readFile(path.join(out,name));
+      const exact=sha256(confirmed);
+      if(confirmed.length!==raw.length||exact!==sha256(raw))
+        throw new Error('FORK_STATIC_SOURCE_WRITE_READBACK_MISMATCH: '+name);
+      const destination=destinationByName[name];
+      if(!destination)throw new Error('FORK_STATIC_OUTPUT_DESTINATION_UNDECLARED: '+name);
+      staticHandoffRecords.push({sourceFile:name,destinationRelativePath:destination,
+        sha256:exact,bytes:raw.length,schemaVersion:obj?.schemaVersion??null,
+        sourceArchiveSha256:request.source.archiveSha256});
+    }
+    const manifest={schemaVersion:'mi-phase0-fork-static-handoff-v1',
+      campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,
+      sourceArchiveSha256:request.source.archiveSha256,
+      buildArtifactBundleSha256,
+      fileCount:staticHandoffRecords.length,
+      files:staticHandoffRecords.sort((a,b)=>a.destinationRelativePath.localeCompare(b.destinationRelativePath)),
+      status:'FORK_ONLY_BYTES_READY_NOT_CONTROLLER_ACCEPTED'};
+    await fs.writeFile(path.join(out,'FORK_STATIC_HANDOFF_MANIFEST_v1.json'),
+      JSON.stringify(manifest,null,2)+'\n',{flag:'wx'});
+  });
+
   process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},deployConfigExecution:{status:deployConfigExecution.status,attempts:deployConfigExecution.attempts.length,gaps:deployConfigExecution.gaps.length},outputs:files.map(([name])=>name)},null,2)+'\n');
 }
 
