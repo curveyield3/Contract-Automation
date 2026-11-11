@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 
 import {runPhase0RandomizedSimulationV1} from '../packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs';
 const a={};for(let i=2;i<process.argv.length;i++){if(process.argv[i].startsWith('--'))a[process.argv[i].slice(2)]=process.argv[++i];}
-for(const k of ['source-checkout-root','source-receipt','static-evidence-root','fork-run-root','output','fork-url'])
+for(const k of ['source-checkout-root','source-receipt','static-evidence-root','fork-run-root','output','fork-url-env'])
   if(!a[k])throw new Error('missing --'+k);
 if(a['campaign-path'])throw new Error('FORK_RUNNER_CAMPAIGN_MUTATION_PATH_PROHIBITED');
 const forkRunRoot=path.resolve(a['fork-run-root']);
@@ -74,12 +74,24 @@ if(buildBundle.source?.archiveSha256!==sourceSha||
     throw new Error('FORK_STATIC_HANDOFF_COMPILER_OR_SLITHER_IDENTITY_MISMATCH');
 process.stdout.write(JSON.stringify({handoff:'EXACT_COMPILER_BYTES_BOUND',files:expected.length,
   campaignId:receipt.campaign.campaignId,sourceSha256:sourceSha})+'\n');
+const forkSecretVariable=String(a['fork-url-env']);
+if(forkSecretVariable!=='MI_FORK_ETHEREUM_RPC_URL')
+  throw new Error('FORK_UPSTREAM_SECRET_ENV_NAME_NOT_ALLOWED');
+const forkUrl=process.env[forkSecretVariable];
+const katanaForkUrl=process.env.KATANA_FORK_RPC_URL??null;
+if(typeof forkUrl!=='string'||!forkUrl.startsWith('https://'))
+  throw new Error('FORK_UPSTREAM_SECRET_MISSING_OR_NOT_TLS');
+// Remove all upstream credentials before any source package process is invoked.
+// Local Anvil retains the selected upstream URLs in this trusted process memory.
+for(const name of ['AUDIT_CONTROLLER_GITHUB_TOKEN','PREFLIGHTSIM_GITHUB_TOKEN',
+  'GITHUB_TOKEN','GH_TOKEN','MI_FORK_ETHEREUM_RPC_URL','KATANA_FORK_RPC_URL'])
+  delete process.env[name];
 const {deployEvidence}=await runPhase0RandomizedSimulationV1({
   sourceCheckoutRoot:path.resolve(a['source-checkout-root']),
   sourceReceiptPath:path.resolve(a['source-receipt']),
   staticEvidenceRoot:path.resolve(a['static-evidence-root']),
-  outputRoot:path.resolve(a.output),forkUrl:a['fork-url'],
-  forkUrls:{katana:process.env.KATANA_FORK_RPC_URL||undefined},deploymentOnly:true});
+  outputRoot:path.resolve(a.output),forkUrl,
+  forkUrls:{katana:katanaForkUrl??undefined},deploymentOnly:true});
 process.stdout.write(JSON.stringify({status:deployEvidence?.status??'BLOCKED',executionMode:deployEvidence?.executionMode??null,attempts:deployEvidence?.attempts?.length??0})+'\n');
 // Do not print source-script stdout/stderr into public workflow logs. Source
 // scripts may intentionally output calldata, secrets, or unbounded data.

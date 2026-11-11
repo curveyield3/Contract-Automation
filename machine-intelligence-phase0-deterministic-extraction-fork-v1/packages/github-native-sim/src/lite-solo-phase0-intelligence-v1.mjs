@@ -895,6 +895,11 @@ async function main(){
   const archiveAbs=path.join(checkoutRoot,...request.source.archivePath.split('/'));
   const archiveBytes=await fs.readFile(archiveAbs); const observed=sha256(archiveBytes);
   if(observed!==request.source.archiveSha256)throw new Error(`source archive SHA mismatch expected ${request.source.archiveSha256} observed ${observed}`);
+  // The immutable archive is already checked out and hash-verified. Compilation,
+  // Slither and source-native scripts must not inherit GitHub credentials.
+  for(const name of ['AUDIT_CONTROLLER_GITHUB_TOKEN','PREFLIGHTSIM_GITHUB_TOKEN',
+    'GITHUB_TOKEN','GH_TOKEN','GIT_CONFIG_VALUE_0','GIT_CONFIG_KEY_0','GIT_CONFIG_COUNT'])
+    delete process.env[name];
   const extractionRoot=path.join(work,'archive'); const extraction=await withProgressStage('extract-verified-archive',()=>extractArchive(archiveAbs,extractionRoot));
   const detected=await withProgressStage('detect-project-root',()=>detectProjectRoot(extractionRoot)); const cfg=await withProgressStage('detect-build-config',()=>detectBuildConfig(detected.absolute));
   // Foundry's pinned source pragma is authoritative for the Vyper compiler.

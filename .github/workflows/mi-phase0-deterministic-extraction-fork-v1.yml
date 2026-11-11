@@ -152,17 +152,17 @@ jobs:
           echo "FORK_RUN_ROOT=$forkroot" >> "$GITHUB_ENV"
       - name: Run only source-defined deploy/config against contained local Anvil
         env:
-          FORK_URL: ${{ secrets.ETHEREUM_FORK_RPC_URL }}
+          MI_FORK_ETHEREUM_RPC_URL: ${{ secrets.ETHEREUM_FORK_RPC_URL }}
           KATANA_FORK_RPC_URL: ${{ secrets.KATANA_FORK_RPC_URL }}
         run: |
           set -euo pipefail
-          test -n "$FORK_URL"
+          test -n "$MI_FORK_ETHEREUM_RPC_URL"
           node machine-intelligence-phase0-deterministic-extraction-fork-v1/scripts/run-phase0-fork-deploy-config-v1.mjs \
             --source-checkout-root .fork-source \
             --source-receipt "$FORK_RUN_ROOT/inputs/READ_ONLY_INPUT_RECEIPT_COPY.json" \
             --static-evidence-root "$FORK_RUN_ROOT" \
             --fork-run-root "$FORK_RUN_ROOT" \
-            --output .fork-deploy-output --fork-url "$FORK_URL"
+            --output .fork-deploy-output --fork-url-env MI_FORK_ETHEREUM_RPC_URL
           node machine-intelligence-phase0-deterministic-extraction-fork-v1/scripts/write-phase0-fork-deploy-outputs-v1.mjs \
             --controller-root .fork-controller \
             --fork-run-root "$FORK_RUN_ROOT" \
