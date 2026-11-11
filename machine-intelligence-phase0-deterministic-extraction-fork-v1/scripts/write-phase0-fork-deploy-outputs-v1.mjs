@@ -910,6 +910,55 @@ async function buildForkRelationshipGraphV1(){
             observation:evidenceClass,
             evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
         }
+        // Convert function-local Slither variable facts into traversable graph
+        // nodes and data-flow edges. Distinct SSA names and types remain distinct.
+        const attachedValueNodes=new Set();
+        const bindSourceValue=(variable,representation)=>{
+          if(!variable?.name||!variable?.type)return null;
+          const nodeId=mkid('NODE-SLITHER-DATA-VALUE-',functionId,representation,
+            variable.type,variable.name,
+            variable.sourceSpan?.file??null,variable.sourceSpan?.start??null);
+          addNode({nodeId,kind:'SLITHER_DATA_VALUE',
+            sourceFunctionId:functionId,compilationUnitId:unit.unitId,
+            representation,valueName:variable.name,valueType:variable.type,
+            sourceSpan:variable.sourceSpan??null,
+            evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
+          if(!attachedValueNodes.has(nodeId)){
+            attachedValueNodes.add(nodeId);
+            edges.push({edgeId:mkid('EDGE-FUNCTION-DATA-VALUE-',functionId,nodeId),
+              kind:'SLITHER_FUNCTION_CONTAINS_DATA_VALUE',from:functionId,to:nodeId,
+              observation:evidenceClass,
+              evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
+          }
+          return nodeId;
+        };
+        for(const [ordinal,ssa] of (f.directIrSsaDependencies??[]).entries()){
+          const writtenId=bindSourceValue(ssa.written,'SSA'),
+            readId=bindSourceValue(ssa.read,'SSA');
+          if(!writtenId||!readId)continue;
+          edges.push({edgeId:mkid('EDGE-SSA-DATA-FLOW-',functionId,
+              ssa.sourceNodeId,ssa.operationOrdinal,ssa.operandOrdinal,ordinal),
+            kind:'SLITHER_SSA_WRITTEN_VALUE_DEPENDS_ON_READ_VALUE',
+            from:writtenId,to:readId,
+            sourceFunctionId:functionId,operatorType:ssa.operatorType,
+            sourceNodeId:ssa.sourceNodeId,sourceSpan:ssa.sourceSpan,
+            bindingStatus:'SLITHER_IR_DIRECT_OPERAND',
+            observation:evidenceClass,
+            evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
+        }
+        for(const [ordinal,dep] of (f.variableDependencies??[]).entries()){
+          const writtenId=bindSourceValue(dep.written,'NON_SSA'),
+            readId=bindSourceValue(dep.dependsOn,'NON_SSA');
+          if(!writtenId||!readId)continue;
+          edges.push({edgeId:mkid('EDGE-SLITHER-VARIABLE-DEPENDENCY-',functionId,
+              writtenId,readId,ordinal),
+            kind:'SLITHER_FUNCTION_VARIABLE_DEPENDS_ON_VARIABLE',
+            from:writtenId,to:readId,sourceFunctionId:functionId,
+            context:dep.context??'DECLARING_FUNCTION',
+            bindingStatus:'SLITHER_FUNCTION_DATA_DEPENDENCY_API',
+            observation:evidenceClass,
+            evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
+        }
         if((f.limitations??[]).length)addUnknown(
           'SLITHER_FUNCTION_FACT_LIMITATIONS',staticFacts.ref?.path??null,
           {functionId,limitations:f.limitations});
