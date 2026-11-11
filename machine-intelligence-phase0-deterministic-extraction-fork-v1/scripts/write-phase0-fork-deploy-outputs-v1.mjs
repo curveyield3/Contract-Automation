@@ -226,6 +226,39 @@ async function buildForkRelationshipGraphV1(){
   if(rawIndex.value&&rawIndex.ref?.sha256!==deploy.value?.deploymentTraceIndex?.manifestSha256)
     throw new Error('GRAPH_TRANSACTION_TRACE_INDEX_SHA_MISMATCH');
   if(rawIndex.limitation)limitations.push(rawIndex.limitation);
+  const normalizeVerifiedCallFrames=({callTrace,traceIdentity,txHash})=>{
+    const normalized=[],validAddress=x=>/^0x[0-9a-f]{40}$/.test(String(x??'').toLowerCase());
+    const visit=(raw,framePath,parentFrameId,parentStorageAddress=null,ancestorReverted=false)=>{
+      if(!raw||typeof raw!=='object'){
+        throw new Error('GRAPH_RAW_CALL_TRACER_FRAME_NOT_OBJECT');
+      }
+      const frameId='FRAME-'+sha256(Buffer.from(JSON.stringify({
+        scenarioIdentity:traceIdentity,transactionHash:txHash,framePath
+      }),'utf8')).slice(0,40);
+      const kind=String(raw.type??'UNKNOWN').toUpperCase(),
+        from=String(raw.from??'').toLowerCase(),to=String(raw.to??'').toLowerCase(),
+        isDelegate=kind==='DELEGATECALL'||kind==='CALLCODE';
+      const storageContextAddress=isDelegate?
+        (validAddress(parentStorageAddress)?parentStorageAddress:null):
+        (validAddress(to)?to:null);
+      const input=typeof raw.input==='string'?raw.input:null;
+      const ownReverted=Boolean(raw.error);
+      normalized.push({frameId,parentFrameId,framePath,callType:kind,
+        from:validAddress(from)?from:null,to:validAddress(to)?to:null,
+        runtimeCodeAddress:validAddress(to)?to:null,storageContextAddress,
+        inputSelector:input&&/^0x[0-9a-fA-F]{8}/.test(input)?input.slice(0,10).toLowerCase():null,
+        inputSha256:input?sha256(Buffer.from(input,'utf8')):null,
+        error:raw.error??null,reverted:ownReverted,revertedInAncestor:ancestorReverted,
+        effectiveReverted:ownReverted||ancestorReverted});
+      if(raw.calls!==undefined&&!Array.isArray(raw.calls))
+        throw new Error('GRAPH_RAW_CALL_TRACER_CHILD_ARRAY_INVALID');
+      for(const [idx,child] of (raw.calls??[]).entries())
+        visit(child,framePath+'/'+idx,frameId,storageContextAddress,
+          ancestorReverted||ownReverted);
+    };
+    visit(callTrace,'0',null);
+    return normalized;
+  };
   const actualTrace=rawIndex.value;
   if(actualTrace){
     if(actualTrace.sourceIdentity?.sourceArchiveSha256!==source.sourceArchiveSha256||
@@ -242,6 +275,23 @@ async function buildForkRelationshipGraphV1(){
           expectedSha256:expected,actualSha256:observed.ref?.sha256??null});
         continue;
       }
+      const rawFrames=normalizeVerifiedCallFrames({
+        callTrace:observed.value,traceIdentity:actualTrace.sourceIdentity,
+        txHash:row.transactionHash
+      });
+      const recordedFrames=row.mechanicalCallFrames??[];
+      const fields=['frameId','parentFrameId','framePath','callType','from','to',
+        'runtimeCodeAddress','storageContextAddress','inputSelector',
+        'inputSha256','reverted','revertedInAncestor','effectiveReverted'];
+      const frameMismatch=rawFrames.length!==recordedFrames.length||
+        rawFrames.some((frame,index)=>fields.some(field=>
+          (frame[field]??null)!==(recordedFrames[index]?.[field]??null)));
+      if(frameMismatch){
+        limitations.push({type:'NORMALIZED_FRAMES_DIVERGE_FROM_VERIFIED_RAW_TRACE',
+          transactionHash:row.transactionHash,
+          rawFrameCount:rawFrames.length,indexFrameCount:recordedFrames.length});
+      }
+      const verifiedFrames=rawFrames; // the authoritative raw trace, never the unverified derivative
       const txid=addNode({nodeId:mkid('NODE-TX-',scenario,row.transactionHash),
         kind:'MINED_TRANSACTION',scenarioId:scenario,transactionHash:row.transactionHash,
         blockNumber:row.blockNumber,evidenceRefs:[rawIndex.ref,pathToTrace].filter(Boolean)});
@@ -296,7 +346,7 @@ async function buildForkRelationshipGraphV1(){
           }
         }
       }
-      for(const frame of row.mechanicalCallFrames??[]){
+      for(const frame of verifiedFrames){
         const frameid=addNode({nodeId:frame.frameId,kind:'EVM_CALL_FRAME',
           scenarioId:scenario,transactionHash:row.transactionHash,
           callType:frame.callType,framePath:frame.framePath,reverted:Boolean(frame.error),
