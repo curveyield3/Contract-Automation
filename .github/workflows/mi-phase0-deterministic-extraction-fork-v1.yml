@@ -1,0 +1,179 @@
+name: MI Phase0 Deterministic Extraction Isolated Fork v1
+
+on:
+  push:
+    branches: [machine-intelligence-audit-controller-v1]
+    paths:
+      - 'machine-intelligence-phase0-deterministic-extraction-fork-v1/requests/active-request.json'
+  workflow_call:
+    inputs:
+      campaign_id: {required: true, type: string}
+      campaign_path: {required: true, type: string}
+      audit_controller_ref: {required: true, type: string}
+      authorization_confirmed: {required: true, type: boolean}
+      resume_from_deploy: {required: true, type: boolean}
+      resume_from_finalize: {required: true, type: boolean}
+      activation_mode: {required: true, type: string}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mi-phase0-deterministic-fork-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  admission:
+    if: ${{ github.repository == 'curveyield3/Contract-Automation' && github.ref == 'refs/heads/machine-intelligence-audit-controller-v1' }}
+    runs-on: ubuntu-latest
+    outputs:
+      runnable: ${{ steps.input.outputs.runnable }}
+      campaign_id: ${{ steps.input.outputs.campaign_id }}
+      campaign_path: ${{ steps.input.outputs.campaign_path }}
+    steps:
+      - name: Checkout trusted feature-branch source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Admit only authenticated, source-bound fork requests
+        id: input
+        env:
+          REQUEST_PATH: machine-intelligence-phase0-deterministic-extraction-fork-v1/requests/active-request.json
+          HOST_EVENT_NAME: ${{ github.event_name }}
+          HOST_WORKFLOW_REF: ${{ github.workflow_ref }}
+          ACTIVATION_MODE: ${{ inputs.activation_mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('node:fs');
+          const r=JSON.parse(fs.readFileSync(process.env.REQUEST_PATH,'utf8'));
+          const out=process.env.GITHUB_OUTPUT;
+          const emit=(key,value)=>fs.appendFileSync(out,key+'='+String(value)+'\n');
+          if(r.schemaVersion!=='mi-phase0-isolated-run-request-v1')throw Error('REQUEST_SCHEMA_UNRECOGNIZED');
+          if(process.env.HOST_EVENT_NAME==='push'){
+            if(r.runMode==='SOURCE_REVIEW_ONLY' && r.executionAuthorized===false){
+              emit('runnable','false');process.exit(0);
+            }
+            if(!['ISOLATED_FORK_EXTRACTION','ISOLATED_FORK_QUALIFICATION'].includes(r.runMode)||r.executionAuthorized!==true)
+              throw Error('REQUEST_MODE_OR_EXECUTION_AUTHORIZATION_INVALID');
+            if(r.auditControllerRef!=='machine-intelligence-audit-controller-v1')throw Error('CONTROLLER_BRANCH_INVALID');
+            if(typeof r.campaignId!=='string'||!/^[a-zA-Z0-9._-]+$/.test(r.campaignId))throw Error('CAMPAIGN_ID_INVALID');
+            if(typeof r.campaignPath!=='string'||!r.campaignPath.startsWith('campaigns/')||r.campaignPath.includes('..'))throw Error('CAMPAIGN_PATH_INVALID');
+            if(!/^[a-f0-9]{64}$/i.test(String(r.expectedSourceSha256??'')))throw Error('SOURCE_SHA_REQUIRED');
+            if(typeof r.expectedCampaignGenerationId!=='string'||!r.expectedCampaignGenerationId)throw Error('GENERATION_REQUIRED');
+          }else if(process.env.HOST_EVENT_NAME==='workflow_dispatch'){
+            if(process.env.ACTIVATION_MODE!=='MI_CAMPAIGN'||!process.env.HOST_WORKFLOW_REF.includes('/.github/workflows/lite-solo-cloudflare-phase0-bootstrap-v1.yml@'))
+              throw Error('PRODUCTION_CALLER_IDENTITY_NOT_AUTHORIZED');
+            // The production gate and finalizer are still unimplemented here.
+            throw Error('PRODUCTION_ROUTE_CHANGE_AWAITING_3_OF_3_QUALIFICATION_AND_AUTHORIZATION');
+          }else throw Error('UNSUPPORTED_CALLER_EVENT');
+          // Isolated execution requires OS-enforced local-Anvil-only egress and
+          // a source-sandboxed compiler/Node/Foundry subprocess for every source.
+          // That boundary is not yet source-implemented; no request flag can waive it.
+          throw Error('FORK_OS_NETWORK_AND_FILESYSTEM_ISOLATION_NOT_PROVEN');
+          NODE
+      - name: Summarize inert source-review request
+        if: ${{ success() && steps.input.outputs.runnable == 'false' }}
+        run: echo 'Fork source review only; no source ZIP, compiler, Anvil, historical campaign, or Worker was executed.' >> "$GITHUB_STEP_SUMMARY"
+
+  intelligence:
+    needs: admission
+    if: ${{ needs.admission.outputs.runnable == 'true' }}
+    uses: ./.github/workflows/mi-phase0-deterministic-intelligence-fork-v1.yml
+    with:
+      campaign_id: ${{ needs.admission.outputs.campaign_id }}
+      campaign_path: ${{ needs.admission.outputs.campaign_path }}
+      audit_controller_ref: machine-intelligence-audit-controller-v1
+    secrets: inherit
+
+  fork-deploy-config:
+    needs: [admission, intelligence]
+    if: ${{ needs.admission.outputs.runnable == 'true' && needs.intelligence.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout trusted feature-branch source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Restore forked Node toolchain
+        uses: ./.github/actions/mi-phase0-deterministic-node-cache-fork-v1
+      - name: Restore forked Foundry toolchain
+        uses: ./.github/actions/mi-phase0-deterministic-deployment-toolchain-fork-v1
+      - name: Download fork-only intelligence evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: mi-phase0-fork-static-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .fork-static-output
+      - name: Prepare trusted private source credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash machine-intelligence-phase0-deterministic-extraction-fork-v1/scripts/select-audit-controller-token.sh
+      - name: Materialize exact source and immutable receipt only in fork roots
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ needs.admission.outputs.campaign_id }}
+          CAMPAIGN_PATH: ${{ needs.admission.outputs.campaign_path }}
+        run: |
+          set -euo pipefail
+          # This path is unreachable until the OS source-sandbox policy is verified.
+          gh repo clone curveyield3/Audit-Controller .fork-controller -- --filter=blob:none
+          git -C .fork-controller checkout machine-intelligence-audit-controller-v1
+          receipt=".fork-controller/$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"
+          test -s "$receipt"
+          test "$(jq -r '.campaign.campaignId' "$receipt")" = "$CAMPAIGN_ID"
+          forkrel="Machine Intelligence Phase0 Deterministic Extraction Fork v1/runs/$CAMPAIGN_ID/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          forkroot=".fork-controller/$forkrel"
+          mkdir -p "$forkroot/inputs" "$forkroot/evidence/build" "$forkroot/evidence/readiness" "$forkroot/evidence/static-analysis" "$forkroot/evidence/source-intelligence"
+          cp "$receipt" "$forkroot/inputs/READ_ONLY_INPUT_RECEIPT_COPY.json"
+          cp .fork-static-output/BUILD_AND_SOURCE_IDENTITY_v1.json "$forkroot/evidence/build/"
+          cp .fork-static-output/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json "$forkroot/evidence/build/"
+          cp .fork-static-output/PROJECT_READINESS_AUTOMATED_v1.json "$forkroot/evidence/readiness/"
+          cp .fork-static-output/SLITHER_v1.json "$forkroot/evidence/static-analysis/"
+          cp .fork-static-output/SOURCE_INTELLIGENCE_AUTOMATED_v1.json "$forkroot/evidence/source-intelligence/"
+          source_commit="$(jq -r '.source.archiveCommit' "$receipt")"
+          git clone --filter=blob:none --no-checkout "$(git -C .fork-controller remote get-url origin)" .fork-source
+          git -C .fork-source checkout "$source_commit"
+          echo "FORK_RUN_ROOT=$forkroot" >> "$GITHUB_ENV"
+      - name: Run only source-defined deploy/config against contained local Anvil
+        env:
+          FORK_URL: ${{ secrets.ETHEREUM_FORK_RPC_URL }}
+          KATANA_FORK_RPC_URL: ${{ secrets.KATANA_FORK_RPC_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$FORK_URL"
+          node machine-intelligence-phase0-deterministic-extraction-fork-v1/scripts/run-phase0-fork-deploy-config-v1.mjs \
+            --source-checkout-root .fork-source \
+            --source-receipt "$FORK_RUN_ROOT/inputs/READ_ONLY_INPUT_RECEIPT_COPY.json" \
+            --static-evidence-root "$FORK_RUN_ROOT" \
+            --fork-run-root "$FORK_RUN_ROOT" \
+            --output .fork-deploy-output --fork-url "$FORK_URL"
+          node machine-intelligence-phase0-deterministic-extraction-fork-v1/scripts/write-phase0-fork-deploy-outputs-v1.mjs \
+            --controller-root .fork-controller \
+            --fork-run-root "$FORK_RUN_ROOT" \
+            --source-receipt "$FORK_RUN_ROOT/inputs/READ_ONLY_INPUT_RECEIPT_COPY.json" \
+            --simulation-output .fork-deploy-output \
+            --static-output .fork-static-output
+      - name: Publish only the immutable isolated fork-run prefix
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          forkrel="${FORK_RUN_ROOT#.fork-controller/}"
+          case "$forkrel" in 'Machine Intelligence Phase0 Deterministic Extraction Fork v1/runs/'*) ;; *) exit 1;; esac
+          cd .fork-controller
+          test "$(git symbolic-ref --short HEAD)" = machine-intelligence-audit-controller-v1
+          git add -- "$forkrel"
+          test -n "$(git diff --cached --name-only)"
+          git config user.name 'Machine Intelligence Fork Publisher'
+          git config user.email 'mi-phase0-fork@users.noreply.github.com'
+          git commit -m "mi(phase0): retain isolated deterministic extraction ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git push origin HEAD:machine-intelligence-audit-controller-v1
