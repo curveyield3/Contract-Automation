@@ -1071,11 +1071,11 @@ contract WbtcIporStagedProposalProcessor is
 
 
     /// @notice Internal function to calculate and retrieve the number of approvals and
-    ///         vetoes for a proposal in the `_stageId`.
+    ///         vetoes for a proposal in the `stageId`.
     /// @dev Assumes that bodies are not duplicated in the same stage. See `_updateStages` function.
     ///      This function ensures that only records from addresses in the stage configuration are used.
-    /// @param _proposalId The proposal Id.
-    /// @param _stageId The stage index.
+    /// @param id The proposal Id.
+    /// @param stageId The stage index.
     /// @return approvals The number of approvals for the proposal.
     /// @return vetoes The number of vetoes for the proposal.
     /// @notice The configured SPP stages have precisely one body each.
@@ -1095,7 +1095,8 @@ contract WbtcIporStagedProposalProcessor is
             abi.encodeCall(IProposal.hasSucceeded, (subId))
         );
         if (ok && returned.length == 32 && abi.decode(returned, (bool))) {
-            return body.resultType == ResultType.Approval ? (1, 0) : (0, 1);
+            if (body.resultType == ResultType.Approval) return (1, 0);
+            return (0, 1);
         }
         return (0, 0);
     }
