@@ -4051,7 +4051,11 @@ async function miAdaptiveSingleQuestionTransportV1(){
 // the exact API envelope; controller data/JSON are not model-facing instructions.
 function miReadableEvidenceContent(entry){
  const raw=entry.content;
- let value;try{value=JSON.parse(raw);}catch{return raw;}
+ let value;try{value=JSON.parse(raw);}catch{
+  // Preserve actual source verbatim, but do not send navigational URLs as security evidence.
+  const actualCode=/^(?:Original implementation or specification|Complete pinned admitted implementation|Actual admitted implementation|Original pinned source|Complete pinned code)/.test(entry.description);
+  return actualCode?raw:raw.replace(/\b(?:https?:\/\/|www\.)\S+/g,'').trim();
+ }
  if(value&&value.schemaVersion==='milo-temp-question-round-v1'&&
   value.direction==='output'&&typeof value.originalContent==='string')return value.originalContent;
  const structural=/^Accepted source observation about /.test(entry.description);
@@ -4062,13 +4066,14 @@ function miReadableEvidenceContent(entry){
  const lines=[];const visit=(v,depth=0,name='')=>{
   if(v===null||v===undefined||depth>5)return;
   if(Array.isArray(v)){
-   if(indexOnly.test(name)){lines.push(' '.repeat(depth*2)+human(name)+': '+v.length+' indexed observations; see directly selected source evidence');return;}
-   if(v.length>35&&v.every(x=>typeof x==='string'&&/^(?:FUNC|CONTRACT|SRC|ANCHOR|EXT|PRIV|VALUE|STORAGE)[-_]/.test(x))){lines.push(' '.repeat(depth*2)+human(name)+': '+v.length+' internal identifiers');return;}
+   if(indexOnly.test(name))return; // Machine-only record indices do not help MiMo reason about source behavior.
+   if(v.length>35&&v.every(x=>typeof x==='string'&&/^(?:FUNC|CONTRACT|SRC|ANCHOR|EXT|PRIV|VALUE|STORAGE)[-_]/.test(x)))return;
    for(const item of v)visit(item,depth+1,'');return;
   }
   if(typeof v==='object'){
    for(const [k,item] of Object.entries(v)){
-    if(administrative.test(k)||(structural&&structuralIds.test(k)))continue;
+    if(administrative.test(k)||(structural&&structuralIds.test(k))||
+      (typeof item==='string'&&/^(?:FUNC|CONTRACT|SRC|ANCHOR|EXT|PRIV|VALUE|STORAGE)[-_][A-Za-z0-9_-]+$/.test(item)))continue;
     if(item&&typeof item==='object'&&!Array.isArray(item)){lines.push(' '.repeat(depth*2)+human(k)+':');visit(item,depth+1,k);}
     else if(Array.isArray(item))visit(item,depth,k);
     else if(item!==null&&item!==''&&item!==undefined)lines.push(' '.repeat(depth*2)+human(k)+': '+String(item));
