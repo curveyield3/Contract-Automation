@@ -208,6 +208,15 @@ async function buildForkRelationshipGraphV1(){
   const byRuntime=new Map();
   const compilerByIdentity=new Map((compilerBundle.value?.artifacts??[]).map(a=>[[a.compilationUnitId,a.sourceName,a.contractName].join('::'),a]));
   const compilerUnitSourceHashes=new Map((contractIdentityIndex.value?.sourceFiles??[]).map(row=>[row.compilationUnitId+'::'+row.sourcePath,row.sourceContentSha256]));
+  const compilerContractNodeLookup=new Map();
+  for(const identity of contractIdentityIndex.value?.contractIdentities??[]){
+    const k=[identity.compilationUnitId,identity.sourceName,identity.contractName].join('::');
+    if(compilerContractNodeLookup.has(k)){
+      compilerContractNodeLookup.set(k,null);continue;
+    }
+    compilerContractNodeLookup.set(k,
+      mkid('NODE-COMPILED-CONTRACT-',identity.contractIdentityId));
+  }
   const matched=(deploy.value?.deployedContracts??[]).filter(x=>/^0x[0-9a-f]{40}$/i.test(String(x?.address??'')));
   for(const item of matched){
     const address=item.address.toLowerCase();
@@ -640,7 +649,7 @@ async function buildForkRelationshipGraphV1(){
               frameBinding.sourceIdentity.sourceName,
               frameBinding.sourceIdentity.contractName
             ].join('::');
-            const declaredContractId=contractNodeByUnitQualified.get(exactKey)??null;
+            const declaredContractId=compilerContractNodeLookup.get(exactKey)??null;
             if(declaredContractId){
               edges.push({edgeId:mkid('EDGE-EXACT-CODE-COMPILER-',codeNodeId,declaredContractId),
                 kind:'OBSERVED_RUNTIME_CODE_EXACTLY_MATCHES_COMPILER_CONTRACT',
