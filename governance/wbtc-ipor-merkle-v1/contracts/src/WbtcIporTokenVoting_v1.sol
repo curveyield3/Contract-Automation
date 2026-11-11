@@ -28,6 +28,9 @@ interface IWbtcIporSnapshotSource {
     function activated(address voter) external view returns (bool);
     function activate(address voter) external;
     function recordVote(uint256 proposalId, address voter) external;
+    function registerProposal(uint256 proposalId, uint64 votingEnd) external;
+    function updateVotingEnd(uint256 proposalId, uint64 votingEnd) external;
+    function cancelGuardianVeto(uint256 proposalId) external;
     function previewStandardTotalVotingPower(uint256 timepoint) external view returns (uint256);
 }
 
@@ -346,6 +349,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         if (!IERC20Upgradeable(address(votingToken)).transferFrom(creator, address(this), bond)) {
             revert InvalidGovernanceProposal();
         }
+        snapshotSource.registerProposal(id, voteEnd);
         emit FrozenGovernanceSnapshot(id, kind, eligiblePower, denominator);
         _emitProposalCreatedEvent(metadata, actions_, 0, id, voteStart, voteEnd);
     }
@@ -413,8 +417,10 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
             guardianApprovedEarly[id] = true;
             p.parameters.startDate = uint64(block.timestamp);
             p.parameters.endDate = uint64(block.timestamp) + governanceConfig.standardVoteDuration;
+            snapshotSource.updateVotingEnd(id, p.parameters.endDate);
         } else {
             guardianVetoed[id] = true;
+            snapshotSource.cancelGuardianVeto(id);
         }
         emit GuardianReview(id, approve);
     }
