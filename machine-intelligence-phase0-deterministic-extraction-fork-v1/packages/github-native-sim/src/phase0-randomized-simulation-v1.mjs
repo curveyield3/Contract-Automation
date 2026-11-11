@@ -293,26 +293,44 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
             // Retain every observed call-frame occurrence, including reverted children.
             // A call frame proves execution only; bytecode-to-source and proxy storage
             // context are unresolved until the graph's exact identity join.
-            const visit=(frame,framePath,parentFrameId)=>{
+            const visit=(frame,framePath,parentFrameId,parentStorageAddress=null,ancestorReverted=false)=>{
               if(!frame||typeof frame!=='object')return;
               const frameId='FRAME-'+sha256(Buffer.from(JSON.stringify({
                 scenarioIdentity,transactionHash:txHash,framePath
               }),'utf8')).slice(0,40);
+              const kind=String(frame.type??'UNKNOWN').toUpperCase();
+              const from=String(frame.from??'').toLowerCase();
+              const to=String(frame.to??'').toLowerCase();
+              const validAddress=value=>/^0x[0-9a-f]{40}$/.test(value);
+              const isDelegate=kind==='DELEGATECALL'||kind==='CALLCODE';
+              const storageContextAddress=isDelegate?
+                (validAddress(String(parentStorageAddress??''))?parentStorageAddress:null):
+                (validAddress(to)?to:null);
               const input=typeof frame.input==='string'?frame.input:null;
+              const ownRevert=Boolean(frame.error);
               row.mechanicalCallFrames.push({frameId,parentFrameId,framePath,
-                transactionHash:txHash,callType:frame.type??'UNKNOWN',
-                from:frame.from??null,to:frame.to??null,
+                transactionHash:txHash,blockNumber:number,
+                callType:kind,
+                from:validAddress(from)?from:null,to:validAddress(to)?to:null,
+                runtimeCodeAddress:validAddress(to)?to:null,
+                storageContextAddress,
+                storageContextEvidence:isDelegate?
+                  (storageContextAddress?'DERIVED_FROM_PARENT_EVM_CONTEXT':'PARENT_EXECUTION_CONTEXT_UNRESOLVED'):
+                  (storageContextAddress?'DERIVED_FROM_EVM_TARGET_ADDRESS':'TARGET_ADDRESS_UNRESOLVED'),
                 value:frame.value??null,gasUsed:frame.gasUsed??null,
                 inputSelector:input&&/^0x[0-9a-fA-F]{8}/.test(input)?input.slice(0,10).toLowerCase():null,
                 inputSha256:input?sha256(Buffer.from(input,'utf8')):null,
-                error:frame.error??null,reverted:Boolean(frame.error),
-                runtimeCodeIdentityId:null,storageContextAddress:null,
-                bindingStatus:'SOURCE_AND_STORAGE_CONTEXT_UNRESOLVED',
+                error:frame.error??null,reverted:ownRevert,
+                revertedInAncestor:ancestorReverted,
+                effectiveReverted:ownRevert||ancestorReverted,
+                runtimeCodeIdentityId:null,
+                bindingStatus:'SOURCE_RUNTIME_CODE_JOIN_PENDING',
                 rawCallTraceRef:recorded.path,rawCallTraceSha256:recorded.rawSha256});
               for(const [childIndex,child] of (frame.calls??[]).entries())
-                visit(child,framePath+'/'+childIndex,frameId);
+                visit(child,framePath+'/'+childIndex,frameId,
+                  storageContextAddress,ancestorReverted||ownRevert);
             };
-            visit(result,'0',null);
+            visit(result,'0',null,null,false);
             row.callTraceNormalization=row.mechanicalCallFrames.length>0&&
               typeof result?.type==='string'?'COMPLETE':'RAW_COMPLETE_NORMALIZATION_FAILED';
             if(row.callTraceNormalization!=='COMPLETE'){
