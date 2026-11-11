@@ -4050,7 +4050,7 @@ async function miAdaptiveSingleQuestionTransportV1(){
 // Present only source-relevant material to MiMo. GitHub Input.json still stores
 // the exact API envelope; controller data/JSON are not model-facing instructions.
 function miVerbatimSourceEvidence(description){
- return /^(?:Original implementation or specification|Complete original admitted implementation|Complete pinned admitted implementation|Actual admitted implementation|Original pinned source|Complete pinned code)/.test(String(description||''));
+ return /^(?:Original implementation or specification|Complete original admitted implementation|Complete pinned admitted implementation|Actual admitted implementation|Machine-generated candidate source|Original pinned source|Complete pinned code)/.test(String(description||''));
 }
 function miReadableEvidenceContent(entry){
  const raw=entry.content;
