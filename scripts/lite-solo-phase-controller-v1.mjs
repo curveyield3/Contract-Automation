@@ -1722,6 +1722,13 @@ if(sequence===5&&phase5OwnerDeferral)receipt.machineExecutionDisclaimer={
 };
 const miloArchive=miloPhaseArchiveV1({root,campaignPath,campaignId:directory.campaignId,
  generation:directory.campaignGenerationId,phase:sequence,revision:phaseRevision,prepare:false});
+// A Machine Intelligence Phase 1 necessarily contains actual model turns.
+// Missing original GitHub Input/Output pairs are an incomplete evidence
+// transfer, not a zero-model phase and not permission to seal a receipt.
+// This is transport integrity, not a GitHub-side security-quality gate.
+if(sequence===1&&authorityRoot==='Machine Intelligence Audit Controller/Audit Skill v8'&&
+   miloArchive.status!=='ARCHIVE_CONFIRMED_COMMITTED')
+ throw Error('MILO_PHASE1_ORIGINAL_QA_TRANSFER_INCOMPLETE: '+miloArchive.status);
 if(miloArchive.status==='ARCHIVE_CONFIRMED_COMMITTED'){
  receipt.miloQuestionsAndAnswersArchive={...miloArchive,status:'FROZEN_GITHUB_PHASE_TREE'};
  receipt.evidence.push(receiptRef(root,campaignPath,miloArchive.manifestRel,'MILO_PHASE_QA_ARCHIVE_MANIFEST'));
