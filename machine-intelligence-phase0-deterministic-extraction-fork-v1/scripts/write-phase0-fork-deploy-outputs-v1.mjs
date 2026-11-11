@@ -105,6 +105,56 @@ async function buildForkRelationshipGraphV1(){
     catch(error){return{value:null,ref:null,limitation:{kind,
       type:'MISSING_OR_INVALID_SOURCE',path:relative,reason:String(error?.message??error)}};}
   };
+  // Read whole RPC evidence by its SHA-bound manifest, not an unverified
+  // preview or guessed first part. Parts are byte slices, not independent JSON.
+  const readCompleteCapturedRpcJsonV1=async(pointer,kind)=>{
+    if(!pointer?.path||!/^[0-9a-f]{64}$/.test(String(pointer.sha256??'')))
+      return{value:null,ref:null,limitation:{kind,type:'RAW_TRACE_POINTER_INVALID'}};
+    const shell=await optional(pointer.path,kind+'_MANIFEST');
+    if(shell.limitation)return shell;
+    if(shell.ref.sha256!==pointer.sha256||
+       shell.value?.schemaVersion!=='mi-phase0-raw-call-trace-manifest-v1'||
+       shell.value?.kind!==kind||
+       shell.value?.allPartsPresentAndVerified!==true||
+       shell.value?.publicationStatus!=='COMPLETE_LOCAL_VERIFIED')
+      return{value:null,ref:shell.ref,
+        limitation:{kind,type:'RAW_TRACE_MANIFEST_IDENTITY_OR_COMPLETENESS_INVALID'}};
+    const manifest=shell.value;
+    const all=[];
+    let nextByte=0;
+    for(const [index,part] of (manifest.parts??[]).entries()){
+      if(!part||part.ordinal!==index+1||part.startByte!==nextByte||
+         !/^[a-f0-9]{64}$/.test(String(part.sha256??'')))
+        return{value:null,ref:shell.ref,limitation:{kind,type:'RAW_TRACE_PART_ORDER_INVALID'}};
+      const target=path.resolve(forkRunRoot,...String(part.path??'').split('/'));
+      if(!target.startsWith(forkRunRoot+path.sep))
+        return{value:null,ref:shell.ref,limitation:{kind,type:'RAW_TRACE_PART_PATH_ESCAPE'}};
+      let data;
+      try{
+        const stat=await fs.lstat(target);
+        if(!stat.isFile()||stat.isSymbolicLink())throw new Error('NOT_REGULAR_FILE');
+        data=await fs.readFile(target);
+      }catch(error){
+        return{value:null,ref:shell.ref,
+          limitation:{kind,type:'RAW_TRACE_PART_UNAVAILABLE',partOrdinal:index+1}};
+      }
+      if(data.length!==part.byteLength||sha256(data)!==part.sha256)
+        return{value:null,ref:shell.ref,
+          limitation:{kind,type:'RAW_TRACE_PART_BYTE_DIGEST_MISMATCH',partOrdinal:index+1}};
+      all.push(data);
+      nextByte+=data.length;
+    }
+    if(!all.length||nextByte!==manifest.totalRawBytes)
+      return{value:null,ref:shell.ref,
+        limitation:{kind,type:'RAW_TRACE_PART_BYTE_CENSUS_INCOMPLETE'}};
+    const raw=Buffer.concat(all);
+    if(sha256(raw)!==manifest.rawSha256||sha256(raw)!==pointer.rawSha256)
+      return{value:null,ref:shell.ref,
+        limitation:{kind,type:'RAW_TRACE_FULL_BYTE_DIGEST_MISMATCH'}};
+    try{return{value:JSON.parse(raw.toString('utf8')),ref:shell.ref,
+      rawSha256:manifest.rawSha256,manifest,partsVerified:all.length};}
+    catch{return{value:null,ref:shell.ref,limitation:{kind,type:'RAW_TRACE_JSON_REASSEMBLY_FAILED'}};}
+  };
   const limitations=[];
   const deploy=await optional('evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json','DEPLOYMENT');
   const staticFacts=await optional('evidence/static-analysis/SLITHER_RELATIONAL_FACTS_v1.json','SLITHER');
@@ -155,7 +205,7 @@ async function buildForkRelationshipGraphV1(){
       const pathToTrace=row.evidence?.find(x=>x.kind==='CALL_TRACE');
       if(!pathToTrace){addUnknown('CALL_TRACE_MISSING',rawIndex.ref?.path??null,{txHash:row.transactionHash});continue}
       const expected=pathToTrace.sha256;
-      const observed=await optional(pathToTrace.path,'CALL_TRACE_FILE');
+      const observed=await readCompleteCapturedRpcJsonV1(pathToTrace,'CALL_TRACE');
       if(observed.limitation||observed.ref?.sha256!==expected){
         limitations.push({type:'CALL_TRACE_SHA_MISSING_OR_MISMATCH',txHash:row.transactionHash,
           expectedSha256:expected,actualSha256:observed.ref?.sha256??null});
@@ -166,7 +216,7 @@ async function buildForkRelationshipGraphV1(){
         blockNumber:row.blockNumber,evidenceRefs:[rawIndex.ref,pathToTrace].filter(Boolean)});
       // A receipt event is an observed emitted log, not a source-level ABI match.
       const receiptPointer=row.evidence?.find(x=>x.kind==='MINED_RECEIPT');
-      const receiptEvidence=receiptPointer?await optional(receiptPointer.path,'MINED_RECEIPT'):null;
+      const receiptEvidence=receiptPointer?await readCompleteCapturedRpcJsonV1(receiptPointer,'MINED_RECEIPT'):null;
       const receiptChecked=receiptEvidence?.ref?.sha256===receiptPointer?.sha256;
       if(receiptPointer&&!receiptChecked)limitations.push({type:'RECEIPT_CONTENT_DIGEST_UNVERIFIED',
         transactionHash:row.transactionHash,sourceRef:receiptPointer.path});
@@ -188,7 +238,7 @@ async function buildForkRelationshipGraphV1(){
         }
       }
       const statePointer=row.evidence?.find(x=>x.kind==='PRESTATE_DIFF');
-      const stateEvidence=statePointer?await optional(statePointer.path,'PRESTATE_DIFF'):null;
+      const stateEvidence=statePointer?await readCompleteCapturedRpcJsonV1(statePointer,'PRESTATE_DIFF'):null;
       if(statePointer&&stateEvidence?.ref?.sha256!==statePointer.sha256){
         limitations.push({type:'PRESTATE_DIFF_CONTENT_DIGEST_UNVERIFIED',
           transactionHash:row.transactionHash,sourceRef:statePointer.path});
