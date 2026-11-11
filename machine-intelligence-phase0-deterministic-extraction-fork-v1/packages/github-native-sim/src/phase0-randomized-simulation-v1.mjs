@@ -2842,6 +2842,34 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
   }else if(receipt.source?.inputMode==='LIVE_SCAN')throw new Error('SCAN_MANIFEST_MISSING');
   const detected=await detectDeploymentScripts(staged.projectRoot);
   // Fork-owned mechanical discovery evidence: does not authorize executing unclassified scripts.
+  // Enumerate every nested manifest root before execution; no first-N cap.
+  // Root selection remains separate from authorization to run a script.
+  const projectTreeFiles=await walk(staged.projectRoot);
+  const rootMarkers=/^(?:foundry\.toml|package\.json|hardhat\.config\.(?:js|cjs|mjs|ts))$/i;
+  const sourceConfigPaths=projectTreeFiles.filter(rel=>rootMarkers.test(path.posix.basename(rel)));
+  const candidateRoots=[...new Set(['.',...sourceConfigPaths.map(rel=>path.posix.dirname(rel))])].sort();
+  const nestedProjectRootsV1=[];
+  for(const rootRel of candidateRoots){
+    const physicalRoot=rootRel==='.'?staged.projectRoot:path.join(staged.projectRoot,...rootRel.split('/'));
+    const localDetected=rootRel==='.'?detected:await detectDeploymentScripts(physicalRoot);
+    const sources=[...localDetected.foundry,...localDetected.hardhat,...localDetected.unsafeHardhat,
+      ...localDetected.genericPackageScripts,...localDetected.unclassifiedFoundry];
+    const ownedRows=[];
+    for(const entry of sources){
+      const entryName=entry.path??entry.entry??null;
+      const sourceRel=entryName?path.posix.normalize(path.posix.join(rootRel,entryName)):null;
+      if(sourceRel&&candidateRoots.some(other=>other!==rootRel&&other.startsWith(rootRel==='.'?'':rootRel+'/')&&
+        sourceRel.startsWith(other+'/')))continue;
+      let sourceFileSha256=null;
+      if(sourceRel){
+        const bytes=await fs.readFile(path.join(staged.projectRoot,...sourceRel.split('/'))).catch(()=>null);
+        if(bytes)sourceFileSha256=sha256(bytes);
+      }
+      ownedRows.push({...entry,sourceRel,sourceFileSha256,projectRootRel:rootRel});
+    }
+    nestedProjectRootsV1.push({projectRootRel:rootRel,configPaths:sourceConfigPaths.filter(rel=>
+      path.posix.dirname(rel)===rootRel),entrypoints:ownedRows});
+  }
   const inventoryEntries=[
     ...detected.foundry.map(item=>({...item,disposition:'EXECUTION_CANDIDATE',sourceEvidence:'FOUNDRY_SCRIPT_CONTRACT'})),
     ...detected.hardhat.map(item=>({...item,disposition:'EXECUTION_CANDIDATE',sourceEvidence:'HARDHAT_LOCALHOST_DECLARATION'})),
@@ -2857,11 +2885,13 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
     sourceArchiveSha256:receipt.source.sha256,
     projectRoot:buildIdentity.discovery.projectPath,
     inventoryCompleteness:'INCOMPLETE_WITH_EXPLICIT_LIMITATIONS',
+    nestedProjectRoots:nestedProjectRootsV1,
+    nestedProjectRootCount:nestedProjectRootsV1.length,
     projectRoots:[buildIdentity.discovery.projectPath],
     frameworkConfigurations:[],
     entrypoints:inventoryEntries,
     executionGroups:[],
-    discoveryLimitations:['Other framework-specific and non-deploy-named entrypoints still require full source-bound classification; this inventory does not claim complete coverage.'],
+    discoveryLimitations:['Nonstandard framework entrypoints still require full source-bound classification; inventory is not an execution-permission manifest.'],
     counts:{discoveredTotal:inventoryEntries.length,declaredTotal:detected.genericPackageScripts.length,
       autoDetectedTotal:inventoryEntries.length-detected.genericPackageScripts.length,
       executableCandidateTotal:inventoryEntries.filter(x=>x.disposition==='EXECUTION_CANDIDATE').length,
