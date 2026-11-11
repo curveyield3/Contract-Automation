@@ -604,6 +604,133 @@ async function buildForkRelationshipGraphV1(){
     eligibilityRecords:eligible,unmatchedGraphCandidateIds:[],
     census:{candidateCount:candidates.length,testEligibilityRecordCount:eligible.length,
       configurableNowCount:0,requiresMimoCount:eligible.length,unmatchedCount:0}});
+  // Step 8 original Flow Plan bridge: source review, not runtime-name inference.
+  // Only an exact source file SHA, unique compilation unit, exact signature
+  // and source span may become a prefilled caller context.
+  const reviewInventory=await optional('evidence/review-inventory/REVIEW_INVENTORY_v1.json','REVIEW_INVENTORY');
+  const originalFacts=await optional('evidence/review-inventory/SYSTEM_FACTS_v1.json','SYSTEM_FACTS');
+  const contractIdentities=await optional('evidence/phase0/CONTRACT_IDENTITY_INDEX_v1.json','CONTRACT_IDENTITIES');
+  const graphInvestigationInputs=[],unresolvedFlowPlanSourceJoins=[];
+  const reviewReady=reviewInventory.value?.schemaVersion==='curveyield-review-inventory-v1'&&
+    originalFacts.value?.schemaVersion==='curveyield-system-facts-v1'&&
+    contractIdentities.value?.schemaVersion==='mi-phase0-contract-identity-index-v1'&&
+    reviewInventory.value?.payload?.complete===true&&
+    Array.isArray(reviewInventory.value?.payload?.contexts)&&
+    reviewInventory.value.campaignId===source.campaignId&&
+    originalFacts.value.campaignId===source.campaignId&&
+    reviewInventory.value.campaignGenerationId===source.campaignGenerationId&&
+    originalFacts.value.campaignGenerationId===source.campaignGenerationId&&
+    contractIdentities.value.campaignGenerationId===source.campaignGenerationId&&
+    reviewInventory.value.sourceSha256===source.sourceArchiveSha256&&
+    originalFacts.value.sourceSha256===source.sourceArchiveSha256&&
+    contractIdentities.value.sourceArchiveSha256===source.sourceArchiveSha256;
+  const graphNodeById=new Map(nodes.map(node=>[node.nodeId,node]));
+  const graphEdgeById=new Map(edges.map(edge=>[edge.edgeId,edge]));
+  if(reviewReady){
+    for(const c of candidates){
+      const candidatesSourceFunctions=c.exactGraphOccurrenceIds.flatMap(edgeId=>{
+        const edge=graphEdgeById.get(edgeId);
+        const node=graphNodeById.get(edge?.from);
+        return node?.kind==='SOURCE_FUNCTION'?[node]:[];
+      });
+      const exactMatches=[];
+      for(const node of candidatesSourceFunctions){
+        const span=node.sourceSpan??{},sourcePath=String(span.file??'').replaceAll('\\','/');
+        const originLine=span.lines?.[0]??null;
+        if(!sourcePath||!Number.isInteger(originLine))continue;
+        const confirmed=(contractIdentities.value.sourceFiles??[]).filter(file=>
+          file.compilationUnitId===node.compilationUnitId&&
+          file.sourcePath===sourcePath&&/^[a-f0-9]{64}$/.test(String(file.sourceContentSha256??'')));
+        const accepted=(reviewInventory.value.payload.sourceUnits??[]).filter(file=>
+          file.path===sourcePath&&confirmed.some(row=>row.sourceContentSha256===file.sha256));
+        if(confirmed.length!==1||accepted.length!==1)continue;
+        const matchedContexts=reviewInventory.value.payload.contexts.filter(ctx=>
+          ['FUNCTION','INHERITED_DEPENDENCY'].includes(ctx.kind)&&
+          ['IN_SCOPE','INHERITED_DEPENDENCY'].includes(ctx.scopeTier)&&
+          ctx.path===sourcePath&&
+          ctx.qualifiedContainer===sourcePath+':'+node.contractName&&
+          ctx.canonicalSignature===node.signature&&
+          Number.isInteger(ctx.lineStart)&&Number.isInteger(ctx.lineEnd)&&
+          originLine>=ctx.lineStart&&originLine<=ctx.lineEnd);
+        if(matchedContexts.length===1)exactMatches.push(matchedContexts[0]);
+      }
+      const bound=[...new Map(exactMatches.map(x=>[x.contextId,x])).values()];
+      if(bound.length===1){
+        graphInvestigationInputs.push({
+          graphCandidateId:c.graphCandidateId,patternFamily:c.patternFamily,
+          sourceContextId:bound[0].contextId,
+          investigationQuestion:c.investigationQuestion,
+          evidenceRefs:[graphRef,...(c.sourceEvidenceRefs??[])].filter(ref=>
+            ref?.path&&/^[a-f0-9]{64}$/.test(String(ref.sha256??''))),
+          compilerContextProof:{sourcePath:bound[0].path,
+            canonicalSignature:bound[0].canonicalSignature,
+            originalSourceContextId:bound[0].contextId,
+            reviewInventoryRef:reviewInventory.ref,
+            contractIdentityIndexRef:contractIdentities.ref}
+        });
+      }else unresolvedFlowPlanSourceJoins.push({
+        graphCandidateId:c.graphCandidateId,disposition:bound.length?
+          'MULTIPLE_POTENTIAL_ORIGIN_CONTEXTS':'NO_UNIQUE_EXACT_SOURCE_CONTEXT',
+        evidenceRefs:[graphRef,...(c.sourceEvidenceRefs??[])].filter(Boolean)});
+    }
+  }else{
+    unresolvedFlowPlanSourceJoins.push({
+      graphCandidateId:null,disposition:'ORIGINAL_SOURCE_REVIEW_INPUTS_MISSING_INCOMPLETE_OR_WRONG_IDENTITY',
+      evidenceRefs:[reviewInventory.ref,originalFacts.ref,contractIdentities.ref].filter(Boolean)});
+  }
+  let graphFlowPlanBridgeV1={status:'UNAVAILABLE_INCOMPLETE_REVIEW_CONTEXTS',
+    originalPlanRef:null,bindings:[],unresolved:unresolvedFlowPlanSourceJoins,
+    flowPlanQuestionCount:0,assignedAttackUnitQuestions:0,packetIssuedCount:0};
+  if(reviewReady){
+    const {buildFlowPlanV1}=await import('../packages/github-native-sim/src/adr-flow-plan-v1.mjs');
+    const snapshot=await optional('evidence/phase0/DEPLOYED_STATE_SNAPSHOT_v1.json','DEPLOYED_STATE_SNAPSHOT');
+    const plan=buildFlowPlanV1({
+      inventory:reviewInventory.value,facts:originalFacts.value,
+      snapshot:snapshot.value??null,graphInvestigations:graphInvestigationInputs
+    });
+    const originalPlanRef=await writeOutput('previews/phase-04/FLOW_PLAN_GRAPH_FORK_PREVIEW_v1.json',plan);
+    const assigned=new Map((plan.payload?.attackUnits??[]).flatMap(unit=>
+      (unit.integrationQuestionIds??[]).map(questionId=>[questionId,unit.unitId])));
+    const boundIds=new Set((plan.payload?.graphQuestionBindings??[]).map(x=>x.graphCandidateId));
+    for(const item of graphInvestigationInputs){
+      if(boundIds.has(item.graphCandidateId))continue;
+      unresolvedFlowPlanSourceJoins.push({
+        graphCandidateId:item.graphCandidateId,
+        disposition:'NO_VALID_EXISTING_FLOW_PLAN_CLUSTER_ASSIGNMENT',
+        evidenceRefs:item.evidenceRefs});
+    }
+    const bindings=(plan.payload?.graphQuestionBindings??[]).map(row=>({
+      graphCandidateId:row.graphCandidateId,
+      flowPlanQuestionId:row.flowPlanQuestionId,
+      sourceContextIds:row.sourceContextIds,
+      sourceGraphEvidenceRefs:row.sourceGraphEvidenceRefs,
+      assignedAttackUnitId:assigned.get(row.flowPlanQuestionId)??null,
+      issuedUnitId:null,packetPath:null,packetSha256:null,
+      availabilityStatus:assigned.has(row.flowPlanQuestionId)?
+        'FLOW_PLAN_QUESTION_ASSIGNED_NOT_ISSUED':'FLOW_PLAN_QUESTION_NOT_ASSIGNED',
+      originalPlanRef
+    }));
+    graphFlowPlanBridgeV1={
+      status:'SOURCE_BOUND_FORK_PREVIEW_NO_PACKET_ISSUED',
+      originalPlanRef,bindings,
+      unresolved:[...unresolvedFlowPlanSourceJoins,...(plan.payload?.unresolvedGraphInvestigations??[])],
+      flowPlanQuestionCount:plan.payload?.integrationQuestions?.length??0,
+      graphQuestionCount:bindings.length,assignedAttackUnitQuestions:bindings.filter(x=>x.assignedAttackUnitId).length,
+      packetIssuedCount:0
+    };
+  }
+  const flowPlanBridgeRef=await writeOutput('previews/phase-04/GRAPH_DISCOVERY_PACKET_BRIDGE_v1.json',{
+    schemaVersion:'mi-phase0-graph-discovery-packet-bridge-v1',
+    ...source,graphIndexRef:graphRef,candidateIndexRef:candidateRef,
+    evidenceStatus:graphFlowPlanBridgeV1.status,
+    originalPlanRef:graphFlowPlanBridgeV1.originalPlanRef,
+    bindingRecords:graphFlowPlanBridgeV1.bindings,
+    unresolvedSourceJoins:graphFlowPlanBridgeV1.unresolved,
+    flowPlanQuestionCount:graphFlowPlanBridgeV1.flowPlanQuestionCount,
+    graphQuestionCount:graphFlowPlanBridgeV1.graphQuestionCount??0,
+    assignedPacketQuestionCount:0,issuedPacketQuestionCount:0,
+    status:'READ_ONLY_FORK_PREVIEW_NOT_ORIGINAL_PACKET_ISSUED'
+  });
   const censusRef=await writeOutput('evidence/phase0/GRAPH_TO_AUDIT_SUBJECT_CENSUS_v1.json',{
     schemaVersion:'mi-phase0-graph-to-audit-subject-census-v1',...source,
     graphIndexRef:graphRef,candidateIndexRef:candidateRef,
@@ -614,7 +741,9 @@ async function buildForkRelationshipGraphV1(){
       unmatched:staticOnlyUnmatchedSourceSubjects.length},
     AUTOMATIC_CANDIDATE_OCCURRENCE_COUNT:candidates.length,
     AUTOMATIC_CANDIDATE_GROUP_COUNT:candidates.length,
-    FLOW_PLAN_QUESTION_COUNT:0,ASSIGNED_PACKET_QUESTION_COUNT:0,
+    FLOW_PLAN_QUESTION_COUNT:graphFlowPlanBridgeV1.flowPlanQuestionCount,
+    GRAPH_FLOW_PLAN_QUESTION_COUNT:graphFlowPlanBridgeV1.graphQuestionCount??0,
+    ASSIGNED_PACKET_QUESTION_COUNT:0,
     MIMO_PHASE1_QUESTION_COUNT:0,MIMO_PHASE1_ANSWERED_COUNT:0,
     MIMO_NOVEL_CANDIDATE_COUNT:0,TEST_ELIGIBILITY_RECORD_COUNT:eligible.length,
     TEST_CONFIG_EXECUTABLE_COUNT:0,TEST_CONFIG_UNRESOLVED_COUNT:eligible.length,
@@ -735,7 +864,7 @@ async function buildForkRelationshipGraphV1(){
     ...source,graphIndexRef:graphRef,slitherAnalysisRef:slitherRef,
     candidatesRef:candidateRef,simulationEligibilityRef:eligibilityRef,
     censusRef,phase1ReadOnlyPreviewRef:preview,
-    previewFormRefs,previewBindingRefs,
+    previewFormRefs,previewBindingRefs,flowPlanBridgeRef,
     status:'FORK_ONLY_NOT_CONTROLLER_ACCEPTED',
     limitations:['This extension index is not referenced by the immutable graph base or its addenda.']});
   return{graphRef,extensionRef,censusRef,preview,previewFormRefs,previewBindingRefs,counts:graph.counts};
