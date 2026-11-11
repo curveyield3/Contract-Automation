@@ -1,8 +1,18 @@
 import path from 'node:path';
 import {runPhase0RandomizedSimulationV1} from '../packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs';
 const a={};for(let i=2;i<process.argv.length;i++){if(process.argv[i].startsWith('--'))a[process.argv[i].slice(2)]=process.argv[++i];}
-for(const k of ['controller-root','campaign-path','output','fork-url'])if(!a[k])throw new Error('missing --'+k);
-const {deployEvidence}=await runPhase0RandomizedSimulationV1({controllerRoot:path.resolve(a['controller-root']),campaignPath:a['campaign-path'],outputRoot:path.resolve(a.output),forkUrl:a['fork-url'],forkUrls:{katana:process.env.KATANA_FORK_RPC_URL||undefined},deploymentOnly:true});
+for(const k of ['source-checkout-root','source-receipt','static-evidence-root','fork-run-root','output','fork-url'])
+  if(!a[k])throw new Error('missing --'+k);
+if(a['campaign-path'])throw new Error('FORK_RUNNER_CAMPAIGN_MUTATION_PATH_PROHIBITED');
+const forkRunRoot=path.resolve(a['fork-run-root']);
+if(path.resolve(a['source-receipt'])!==path.join(forkRunRoot,'inputs','READ_ONLY_INPUT_RECEIPT_COPY.json'))
+  throw new Error('FORK_RUNNER_RECEIPT_COPY_PATH_INVALID');
+const {deployEvidence}=await runPhase0RandomizedSimulationV1({
+  sourceCheckoutRoot:path.resolve(a['source-checkout-root']),
+  sourceReceiptPath:path.resolve(a['source-receipt']),
+  staticEvidenceRoot:path.resolve(a['static-evidence-root']),
+  outputRoot:path.resolve(a.output),forkUrl:a['fork-url'],
+  forkUrls:{katana:process.env.KATANA_FORK_RPC_URL||undefined},deploymentOnly:true});
 process.stdout.write(JSON.stringify({status:deployEvidence?.status??'BLOCKED',executionMode:deployEvidence?.executionMode??null,attempts:deployEvidence?.attempts?.length??0})+'\n');
 // The full attempt output lives in the uploaded artifact; also surface the tail of each failed
 // attempt in the job log so a failed deployment is diagnosable from the run page. Fork RPC

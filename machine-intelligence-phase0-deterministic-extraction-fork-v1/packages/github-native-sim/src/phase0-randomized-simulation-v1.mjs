@@ -2818,7 +2818,7 @@ function baselineTargetRows({medusa,telemetry}){
     {candidateKey:'PHASE0-BASELINE-ABI-TELEMETRY',executionEvidenceRefs:refs,oracleOutcome:'INVESTIGATIVE_BASELINE_TELEMETRY_GENERATED',reproductionStatus:telemetry.every(x=>x.status==='PASS')?'PASS':'INCOMPLETE',requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',requestBindingEvidenceRef:'evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.json'}
   ];
 }
-export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl,forkUrls={},medusaSmokeCalls=null,telemetrySmokeCalls=null,deploymentOnly=false}){
+export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,sourceReceiptPath,staticEvidenceRoot,outputRoot,forkUrl,forkUrls={},medusaSmokeCalls=null,telemetrySmokeCalls=null,deploymentOnly=false}){
   // The old randomized/Medusa lane duplicated mutable state in a network-free
   // node; unqueried upstream slots could become zero. It cannot establish full
   // historical Ethereum assurance and must never be issued as audit evidence.
@@ -2828,17 +2828,18 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   // Smoke budgets are independent and never produce campaign evidence. Medusa-only preserves the prior smoke behavior.
   const medusaSmoke=Number.isInteger(medusaSmokeCalls)&&medusaSmokeCalls>0;
   const telemetrySmoke=Number.isInteger(telemetrySmokeCalls)&&telemetrySmokeCalls>0;
-  const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
-  const buildIdentity=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
-  const executionBuildArtifacts=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'utf8'));
-  const receipt=JSON.parse(await fs.readFile(path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json'),'utf8'));
-  const readiness=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'utf8'));
-  const sourceIntelligence=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json'),'utf8'));
-  const slither=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/static-analysis/SLITHER_v1.json'),'utf8'));
+  if(!sourceCheckoutRoot||!sourceReceiptPath||!staticEvidenceRoot)
+    throw new Error('FORK_ONLY_SOURCE_CHECKOUT_RECEIPT_AND_STATIC_EVIDENCE_REQUIRED');
+  const buildIdentity=JSON.parse(await fs.readFile(path.join(staticEvidenceRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
+  const executionBuildArtifacts=JSON.parse(await fs.readFile(path.join(staticEvidenceRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'utf8'));
+  const receipt=JSON.parse(await fs.readFile(sourceReceiptPath,'utf8'));
+  const readiness=JSON.parse(await fs.readFile(path.join(staticEvidenceRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'utf8'));
+  const sourceIntelligence=JSON.parse(await fs.readFile(path.join(staticEvidenceRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json'),'utf8'));
+  const slither=JSON.parse(await fs.readFile(path.join(staticEvidenceRoot,'evidence/static-analysis/SLITHER_v1.json'),'utf8'));
   const sharedExecutionInputs=validateExecutionInputJoinV2({receipt,buildIdentity,artifactBundle:executionBuildArtifacts,sourceIntelligence,slither,readiness});
   const targetChainIds=phase0DiscoveredTargetChainIdsV1(readiness);
   const archivePath=receipt.source.archivePath,archiveSha256=receipt.source.sha256,workspace=path.join(path.dirname(outputRoot),'.phase0-simulation-work');
-  const staged=await stageExactArchiveSource({checkoutRoot:controllerRoot,workspaceRoot:workspace,archivePath,archiveSha256,projectPath:buildIdentity.discovery.projectPath});
+  const staged=await stageExactArchiveSource({checkoutRoot:sourceCheckoutRoot,workspaceRoot:workspace,archivePath,archiveSha256,projectPath:buildIdentity.discovery.projectPath});
   const cfg=buildIdentity.configurationDetection,pseudo={requestId:`phase0-sim-${receipt.campaign.campaignId}`,requestDigest:sha256(JSON.stringify(buildIdentity)),campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,assignmentId:'phase0-simulation',phaseId:'phase-0',profileId:'github-native-compile-v2',source:{repository:'curveyield3/Audit-Controller',commit:receipt.source.archiveCommit,projectPath:buildIdentity.discovery.projectPath,archivePath,archiveSha256},configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}};
   const deploymentProfile=await loadDeploymentProfile(staged.projectRoot);
   if(deploymentProfile&&!deploymentOnly)throw new Error('audit-deployment.json is supported only by the Phase-0 deployment-only lane');
