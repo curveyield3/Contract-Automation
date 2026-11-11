@@ -91,6 +91,10 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     mapping(uint256 => mapping(address => uint256)) private frozen;
     mapping(uint256 => bool) private bonusAt;
     mapping(uint256 => bool) private removalAt;
+    mapping(uint256 => uint256) private parentSnapshotTotal;
+    mapping(uint256 => uint256) private childToParent;
+    mapping(uint256 => uint64) private parentSnapshotMoment;
+    mapping(uint256 => uint256) private spamWeight;
 
     event VoterActivated(address indexed voter, uint64 continuousSince);
     event VotingMarketAdded(address indexed market, bytes32 marketId, MarketKind kind);
@@ -188,7 +192,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
             Proposal storage proposal_ = proposals[id];
             if (proposal_.parameters.endDate <= block.timestamp
                 && proposal_.parameters.endDate > m.lastVote
-                && frozen[id][account] != 0
+                && frozen[childToParent[id]][account] != 0
                 && proposal_.voters[account] == VoteOption.None) {
                 ++count;
                 if (firstMiss == 0) firstMiss = proposal_.parameters.endDate;
@@ -262,27 +266,34 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
             bonusAt[id] = true;
             total = 100 * sum;
         }
-        priorBallots.push(id);
+        parentSnapshotTotal[id] = total;
+        parentSnapshotMoment[id] = uint64(tokenIndexedByTimestamp ? block.timestamp : block.number);
     }
 
-    /// @notice Prospective original-proposer check. The SPP remains the
-    /// creator of all TokenVoting subproposals.
-    function canSponsorParent(address account, bool removal) external view returns (bool) {
-        if (msg.sender != stagedProcessor) revert UnauthorizedParent();
-        if (removal || registered.length > 64 || priorBallots.length >= 64) return false;
-        uint256 base;
-        uint256 ownerWeight;
-        for (uint256 i; i < registered.length; ++i) {
-            address member = registered[i];
-            if (_active(member) && (member != guardianSafe || guardianRemoved)) {
-                uint256 power = _walletAndMarkets(member);
-                base += power;
-                if (member == account) ownerWeight = guardianRemoved ? power : 85 * power;
-            }
-        }
-        if (base == 0) return false;
-        if (account == guardianSafe && !guardianRemoved) ownerWeight = 15 * base;
-        return ownerWeight * 10 >= (guardianRemoved ? base : 100 * base);
+    /// @notice SPP creates a parent ID first, and freezes the eligible
+    /// community at that exact transaction. Stage 2 later reuses the
+    /// immutable original proposal weights, not today's market balances.
+    function reserveParentSnapshot(uint256 parentId, address creator, bool removal)
+        external
+    {
+        if (msg.sender != stagedProcessor || parentSnapshotTotal[parentId] != 0)
+            revert UnauthorizedParent();
+        uint256 eligible = _freezeAtomic(parentId, removal);
+        if (frozen[parentId][creator] * 10 < eligible) revert NoVotingPower();
+    }
+
+    /// @notice One spam bit on Aragon's original ballot, not another vote.
+    function voteWithSpamFlag(uint256 id, VoteOption option) external {
+        address account = _msgSender();
+        vote(id, option, false);
+        spamWeight[id] += frozen[childToParent[id]][account];
+    }
+
+    function isSpamApproved(uint256 id) external view returns (bool) {
+        Proposal storage p = proposals[id];
+        uint256 castWeight = p.tally.yes + p.tally.no + p.tally.abstain;
+        return castWeight != 0 && isMinParticipationReached(id)
+            && spamWeight[id] * 2 > castWeight;
     }
 
     /// @notice getter function for the voting token.
@@ -341,8 +352,11 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         Proposal storage existing_ = proposals[proposalId];
         if (existing_.parameters.snapshotTimepoint != 0)
             revert ProposalAlreadyExists(proposalId);
-        uint256 totalVotingPower_ = _freezeAtomic(proposalId, special);
-        uint256 snapshotTimepoint = tokenIndexedByTimestamp ? block.timestamp : block.number;
+        uint256 totalVotingPower_ = parentSnapshotTotal[parentId];
+        if (totalVotingPower_ == 0) revert IncompleteCensus();
+        childToParent[proposalId] = parentId;
+        priorBallots.push(proposalId);
+        uint256 snapshotTimepoint = parentSnapshotMoment[parentId];
 
         // Store proposal related information
         Proposal storage proposal_ = proposals[proposalId];
@@ -418,7 +432,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     /// @inheritdoc MajorityVotingBase
     function _vote(uint256 id, VoteOption option, address voter, bool) internal override {
         Proposal storage p = proposals[id];
-        uint256 w = frozen[id][voter];
+        uint256 w = frozen[childToParent[id]][voter];
         if (w == 0 || p.voters[voter] != VoteOption.None) revert UnauthorizedParent();
         if (option == VoteOption.Yes) p.tally.yes += w;
         else if (option == VoteOption.No) p.tally.no += w;
@@ -435,8 +449,9 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     {
         Proposal storage p = proposals[id];
         return _isProposalOpen(p) && option != VoteOption.None
-            && p.voters[voter] == VoteOption.None && frozen[id][voter] != 0
-            && !(guardianRemoved && bonusAt[id] && voter == guardianSafe);
+            && p.voters[voter] == VoteOption.None
+            && frozen[childToParent[id]][voter] != 0
+            && !(guardianRemoved && bonusAt[childToParent[id]] && voter == guardianSafe);
     }
 
     /// @dev Helper function to identify the clock mode used by the given voting token.
