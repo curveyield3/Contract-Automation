@@ -356,7 +356,7 @@ async function runExactVyperAstStaticV1({projectRoot,unit,sourceName}){
   };
 }
 
-const SLITHER_RELATIONAL_API_V1=String.raw\`
+const SLITHER_RELATIONAL_API_V1=String.raw`
 import json,sys
 from slither.slither import Slither
 from slither.analyses.data_dependency.data_dependency import get_dependencies
@@ -415,7 +415,7 @@ for contract in analysis.contracts:
         c["functions"].append(f)
     result["contracts"].append(c)
 print(json.dumps(result,separators=(",",":"),sort_keys=True))
-\`;
+`;
 async function collectSlitherRelationalFactsV1({projectRoot,target,unit,unitId}){
   const sourceUnitRecords=Object.entries(unit?.sourceContents??{}).sort(([a],[b])=>a.localeCompare(b))
     .map(([sourceName,bytes])=>({sourceName,sourceSha256:sha256(Buffer.from(String(bytes),'utf8'))}));
@@ -967,7 +967,7 @@ async function main(){
     campaignId:request.campaignId,
     campaignGenerationId:request.campaignGenerationId,
     sourceArchiveSha256:request.source.archiveSha256,
-    buildBundleSha256:executionBuildArtifacts.buildConfigurationDigestSha256??null,
+    buildBundleSha256:null, // Exact accepted bundle SHA is bound only at canonical publication; configuration digest is not a bundle.
     slitherVersion:'0.11.6',
     sourceUnitRecords:(slither.relationalUnitResults??[]).filter(x=>x?.analysisStatus==='SLITHER_RELATIONAL_FACTS_AVAILABLE'),
     unavailableUnitRecords:(slither.relationalUnitResults??[]).filter(x=>x?.analysisStatus!=='SLITHER_RELATIONAL_FACTS_AVAILABLE'),
