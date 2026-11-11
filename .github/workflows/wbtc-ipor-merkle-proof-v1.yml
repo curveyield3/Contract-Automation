@@ -1,11 +1,6 @@
 name: WBTC IPOR governance Merkle preparation and Ethereum fork rehearsal v2
 
 on:
-  push:
-    branches:
-      - feature/wbtc-ipor-aragon-governance-v1
-    paths:
-      - governance/wbtc-ipor-merkle-v1/.compile-request-v2.json
   workflow_dispatch:
     inputs:
       mode:
@@ -35,7 +30,7 @@ concurrency:
 
 jobs:
   prepare:
-    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'prepare' || inputs.mode == '')
+    if: inputs.mode == 'prepare' || inputs.mode == ''
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
@@ -83,7 +78,7 @@ jobs:
           retention-days: 30
 
   fork-rehearsal:
-    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full')
+    if: inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -110,105 +105,3 @@ jobs:
           path: governance/wbtc-ipor-merkle-v1/fork-output/
           if-no-files-found: warn
           retention-days: 14
-
-  compile-only:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: stable
-      - name: Compile exact adapted Aragon SPP source
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/compile-evidence"
-          git clone https://github.com/aragon/staged-proposal-processor-plugin.git "$RUNNER_TEMP/aragon-spp"
-          (
-            cd "$RUNNER_TEMP/aragon-spp"
-            git checkout a1d84e0542cf2db0a542f0159878457dbb7e3515
-            git submodule update --init --recursive
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporStagedProposalProcessor_v1.sol" src/
-            forge build src/StagedProposalProcessor.sol --via-ir --optimizer-runs 1 --sizes
-            forge build src/WbtcIporStagedProposalProcessor_v1.sol --via-ir --optimizer-runs 1 --sizes
-          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/spp-build.log"
-      - name: Compile exact Aragon TokenVoting fork and ZK verifier
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone https://github.com/aragon/token-voting-plugin.git "$RUNNER_TEMP/aragon-token"
-          (
-            cd "$RUNNER_TEMP/aragon-token"
-            git checkout e726c28061486114d601c547e4da1180ed5ab6da
-            git submodule update --init --recursive
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/MajorityVotingBase.sol" src/base/
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/IMajorityVoting.sol" src/base/
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v3.sol" src/
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v1.sol" src/
-            mkdir -p src/lib
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/lib/BokkyPooBahsDateTimeLibrary.sol" src/lib/
-            forge build src/WbtcIporTokenVoting_v3.sol src/WbtcIporZkProofVerifier_v1.sol --via-ir --optimizer-runs 1 --sizes
-          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build.log"
-      - name: Preserve compile diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wbtc-ipor-native-spp-compile-v1
-          path: compile-evidence/
-          if-no-files-found: warn
-          retention-days: 5
-
-      - name: Package exact development source v3
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          folder="$RUNNER_TEMP/wbtc-ipor-development-v3"
-          mkdir -p "$folder"
-          git archive HEAD .github/workflows/wbtc-ipor-merkle-proof-v1.yml governance/wbtc-ipor-merkle-v1/ | tar -xf - -C "$folder"
-          if [ -d compile-evidence ]; then cp -r compile-evidence "$folder/"; fi
-          cat > "$folder/CURRENT_STATUS_v3.md" <<'STATUS'
-          # WBTC IPOR Aragon DAO — Development Snapshot v3
-
-          Repository: curveyield3/Contract-Automation
-          Branch: feature/wbtc-ipor-aragon-governance-v1
-          Source commit: archive matches this workflow's Git checkout (see CURRENT_COMMIT_v3.txt)
-          Design authority: governance/wbtc-ipor-merkle-v1/CONTRACT_DESIGN_SPEC_v9.md
-
-          ## Included
-          - Custom source-derived Aragon SPP v1 (guardian first stage, two native stage choices, DAO action policy, parent bond).
-          - Custom source-derived Aragon TokenVoting v3 (native Aragon tally, activation, 85/15 scaling, market weighting, pre-registered atomic census).
-          - Custom RISC Zero proof adapter v1.
-          - Original Aragon reference source files, inherited Aragon base, dependency remappings and foundry settings.
-          - Source-confirmed v9 specification; original Merkle proof preparation archive and fork-rehearsal script.
-          - Exact compile logs produced with this snapshot, in compile-evidence/.
-
-          ## Explicit limitations — NOT production-ready
-          Solidity compilation/size alone does not prove governance correctness.
-          The complete authenticated RISC Zero guest/host and historical economic census remain unimplemented.
-          Special Remove DAO Guardian proposal currently cannot create its complete supply-wide census: the onchain atomic path fails closed.
-          Verified CurveLend factory identity, full borrower attribution, and lending/custody reconciliation remain incomplete.
-          Native SPP/TokenVoting parent-child lifecycle requires onchain integration and full mainnet fork rehearsal.
-          No tests, fork simulation, deployment or smart-contract audit are claimed by this archive.
-          Older WbtcIporTokenVoting_v2.sol is included for historical comparison only, NOT the current implementation.
-          No mainnet deployment or transaction was attempted.
-          STATUS
-          git rev-parse HEAD > "$folder/CURRENT_COMMIT_v3.txt"
-          (
-            cd "$folder"
-            zip -qr "$GITHUB_WORKSPACE/WBTC_IPOR_Aragon_DAO_Development_v3.zip" .
-          )
-          unzip -t "$GITHUB_WORKSPACE/WBTC_IPOR_Aragon_DAO_Development_v3.zip"
-          sha256sum "$GITHUB_WORKSPACE/WBTC_IPOR_Aragon_DAO_Development_v3.zip"
-      - name: Upload current development package v3
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wbtc-ipor-dao-development-v3
-          path: WBTC_IPOR_Aragon_DAO_Development_v3.zip
-          if-no-files-found: error
-          retention-days: 7
