@@ -1,5 +1,6 @@
 {
   "purpose": "compile-only",
   "version": 5,
-  "sourceCommit": "d522bc6eed02547777834b56d9cf87ef6c87758c"
+  "sourceCommit": "4bab0df49d10df69c5f1c1f45a81e4ca5769e312",
+  "repair": "alias Proposal extension vs Proposal struct"
 }

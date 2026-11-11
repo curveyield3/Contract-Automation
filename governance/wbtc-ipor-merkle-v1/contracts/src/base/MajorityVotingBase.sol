@@ -8,7 +8,7 @@ import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
 import {SafeCastUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/math/SafeCastUpgradeable.sol";
 
-import {Proposal} from "@aragon/osx-commons-contracts/src/plugin/extensions/proposal/Proposal.sol";
+import {Proposal as AragonProposalExtension} from "@aragon/osx-commons-contracts/src/plugin/extensions/proposal/Proposal.sol";
 import {RATIO_BASE, RatioOutOfBounds} from "@aragon/osx-commons-contracts/src/utils/math/Ratio.sol";
 import {Plugin} from "@aragon/osx-commons-contracts/src/plugin/Plugin.sol";
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
@@ -125,7 +125,7 @@ abstract contract MajorityVotingBase is
     ERC165,
     MetadataExtension,
     Plugin,
-    Proposal
+    AragonProposalExtension
 {
     using SafeCastUpgradeable for uint256;
 
@@ -322,7 +322,7 @@ abstract contract MajorityVotingBase is
         public
         view
         virtual
-        override(ERC165, MetadataExtension, Plugin, Proposal)
+        override(ERC165, MetadataExtension, Plugin, AragonProposalExtension)
         returns (bool)
     {
         // In addition to the current IMajorityVoting interface, also support previous version
