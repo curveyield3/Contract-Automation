@@ -63,9 +63,9 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     address public immutable curveLendFactory;
     IProvedSnapshot public snapshotVerifier;
     bool public guardianRemoved;
-    uint8 public inactivityMonths = 3;
-    uint8 public missedProposalLimit = 2;
-    uint8 public removalQualificationMonths = 3;
+    uint8 public constant inactivityMonths = 3;
+    uint8 public constant missedProposalLimit = 2;
+    uint8 public constant removalQualificationMonths = 3;
 
     enum MarketKind { Invalid, MorphoBlue, CurveLend }
     struct Market {
@@ -73,12 +73,10 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         address market;
         address custody;
         bytes32 id;
-        bool enabled;
     }
     struct Voter {
         uint64 activeSince;
         uint64 lastVote;
-        bool enrolled;
         uint16 missedVotes;
         uint64 firstMissAt;
         uint256 nextBallot;
@@ -103,7 +101,6 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     mapping(uint256 => uint256) public snapshotBlockNumber;
     mapping(uint256 => uint256) public qualifiedElectorate;
     mapping(uint256 => uint256) public economicDenominator;
-    mapping(uint256 => bool) public snapshotPending;
     mapping(uint256 => bool) public snapshotReady;
     mapping(uint256 => bool) public verifiedSnapshot;
     mapping(uint256 => uint256) public snapshotRosterSize;
@@ -204,7 +201,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function checkpointVoter(address account, uint256 maxBallots) public {
         if (maxBallots == 0 || maxBallots > 128) revert IncompleteCensus();
         Voter storage m = voters[account];
-        if (!m.enrolled) revert NoVotingPower();
+        if (registrationIndexPlusOne[account] == 0) revert NoVotingPower();
         uint256 cursor = m.nextBallot;
         uint256 examined;
         while (cursor < priorBallots.length && examined < maxBallots) {
@@ -238,7 +235,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
 
     function _active(address account) private view returns (bool) {
         Voter storage m = voters[account];
-        if (!m.enrolled || votingToken.delegates(account) != account) return false;
+        if (registrationIndexPlusOne[account] == 0 || votingToken.delegates(account) != account) return false;
         if (!_activityCaughtUp(account)) revert IncompleteCensus();
         return !(_expired(m));
     }
@@ -250,8 +247,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
 
     function _activate(address account) private {
         Voter storage m = voters[account];
-        if (!m.enrolled) {
-            m.enrolled = true;
+        if (registrationIndexPlusOne[account] == 0) {
             m.nextBallot = priorBallots.length;
             registered.push(account);
             registrationIndexPlusOne[account] = registered.length;
@@ -284,18 +280,23 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         return registered[index];
     }
 
+    /// @notice Derived from native snapshot terminal state; no second pending flag.
+    /// Preserves the existing public getter ABI for the verifier and guest.
+    function snapshotPending(uint256 parentId) public view returns (bool) {
+        return verifiedSnapshot[parentId] && !snapshotReady[parentId];
+    }
     function getSnapshotMode(uint256 parentId) external view
         returns (bool removal, bool guardianBonus, bool verified, bool pending)
     {
         return (removalAt[parentId], bonusAt[parentId],
-            verifiedSnapshot[parentId], snapshotPending[parentId]);
+            verifiedSnapshot[parentId], snapshotPending(parentId));
     }
 
     function getVotingMarketAt(uint256 index) external view
         returns (MarketKind kind, address market, address custody, bytes32 id, bool enabled)
     {
         Market storage m = markets[index];
-        return (m.kind, m.market, m.custody, m.id, m.enabled);
+        return (m.kind, m.market, m.custody, m.id, true);
     }
 
     function getEconomicExclusionCount() external view returns (uint256) {
@@ -321,7 +322,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
             return (0, activeSince, false);
         if (removal && !snapshotVerifier.hasElapsedMonths(activeSince, removalQualificationMonths, block.timestamp))
             return (0, activeSince, false);
-        economic = _walletAndMarkets(account);
+        economic = snapshotVerifier.economicWeight(account);
         qualified = economic != 0;
     }
 
@@ -365,16 +366,12 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         for (uint256 i; i < markets.length; ++i) {
             if (markets[i].market == market && markets[i].id == id) revert InvalidMarket();
         }
-        markets.push(Market(kind, market, custody, id, true));
+        markets.push(Market(kind, market, custody, id));
         emit VotingMarketAdded(market, id, kind);
     }
 
     function sourceConfigurationHash() public view returns (bytes32) {
         return snapshotVerifier.sourceConfigurationHash();
-    }
-
-    function _walletAndMarkets(address account) private view returns (uint256) {
-        return snapshotVerifier.economicWeight(account);
     }
 
     /// @dev For normal proposals the registered non-Safe community is 85%
@@ -389,7 +386,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
             address account = registered[i];
             if ((guardianRemoved || account != guardianSafe)
                 && !excludedEconomicAccounts[account] && _active(account)) {
-                uint256 economic = _walletAndMarkets(account);
+                uint256 economic = snapshotVerifier.economicWeight(account);
                 frozen[id][account] = bonus ? economic * 85 : economic;
                 if (account == creator) creatorWeight = economic;
                 sum += economic;
@@ -420,15 +417,15 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function reserveParentSnapshot(uint256 parentId, address creator, bool removal, bool verified)
         external
     {
-        if (msg.sender != stagedProcessor || snapshotReady[parentId] || snapshotPending[parentId]
+        if (msg.sender != stagedProcessor || snapshotReady[parentId] || snapshotPending(parentId)
             || (removal && !verified) || (creator == guardianSafe && !guardianRemoved))
             revert UnauthorizedParent();
         if (!verified) {
             _freezeAtomic(parentId, creator);
             return;
         }
-        if (address(snapshotVerifier) == address(0) || !voters[creator].enrolled
-            || !_active(creator) || _walletAndMarkets(creator) == 0)
+        if (address(snapshotVerifier) == address(0) || registrationIndexPlusOne[creator] == 0
+            || !_active(creator) || snapshotVerifier.economicWeight(creator) == 0)
             revert UnverifiedCensus();
         if (removal && !snapshotVerifier.hasElapsedMonths(voters[creator].activeSince, removalQualificationMonths, block.timestamp))
             revert UnverifiedCensus();
@@ -441,7 +438,6 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         snapshotBlockNumber[parentId] = block.number - 1;
         snapshotBlockHash[parentId] = blockhash(block.number - 1);
         parentSnapshotMoment[parentId] = uint64(tokenIndexedByTimestamp ? block.timestamp : block.number - 1);
-        snapshotPending[parentId] = true;
     }
 
     /// @notice Accept only a valid pinned-image RISC Zero receipt, with a
@@ -451,7 +447,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function submitVerifiedSnapshot(uint256 parentId, bytes calldata seal,
         bytes calldata journal, uint256 creatorEconomic, uint64 creatorActiveSince,
         bytes32[] calldata creatorProof) external {
-        if (!snapshotPending[parentId] || snapshotReady[parentId]) revert SnapshotPending();
+        if (!snapshotPending(parentId)) revert SnapshotPending();
         (bytes32 root,uint256 qualified,uint256 whole,uint256 roster,
             uint256 anchorTimestamp,uint256 anchorBlock,bool bonus) =
             snapshotVerifier.verifyProposerSnapshot(parentId,seal,journal,
@@ -468,7 +464,6 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         parentSnapshotTotal[parentId] = total;
         if (bonus) frozen[parentId][guardianSafe] = 15 * qualified;
         snapshotReady[parentId] = true;
-        snapshotPending[parentId] = false;
         emit VerifiedSnapshotAccepted(parentId, root,
             qualified, economicDenominator[parentId]);
         IParentSnapshotCallback(stagedProcessor).onParentSnapshotFinalized(parentId);
@@ -476,11 +471,6 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
 
     /// @notice Lazy, authenticated voter-weight materialization, with only one
     /// Merkle verification for the same historic parent/voter identity.
-    function registerVerifiedWeight(uint256 parentId, uint256 economic,
-        uint64 activeSince, bytes32[] calldata proof) public {
-        _registerVerifiedWeightFor(parentId, _msgSender(), economic, activeSince, proof);
-    }
-
     /// @notice Permissionless authentication for members who did not cast
     /// a vote. A keeper can settle their missed-eligible/ineligible history
     /// without possessing the member's key. Exactly one leaf per historical
@@ -512,7 +502,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         uint64 activeSince, bytes32[] calldata proof, bool spam) external {
         uint256 parentId = childToParent[childId];
         if (verifiedSnapshot[parentId] && frozen[parentId][_msgSender()] == 0)
-            registerVerifiedWeight(parentId, economic, activeSince, proof);
+            _registerVerifiedWeightFor(parentId, _msgSender(), economic, activeSince, proof);
         vote(childId, option, false);
         if (spam) spamWeight[childId] += frozen[parentId][_msgSender()];
     }
@@ -520,10 +510,6 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function getFrozenPower(uint256 parentId, address account)
         external view returns (uint256) {
         return frozen[parentId][account];
-    }
-
-    function isParentSnapshotReady(uint256 parentId) external view returns (bool) {
-        return snapshotReady[parentId];
     }
 
     function getSnapshotAccounting(uint256 parentId) external view
@@ -669,7 +655,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         else if (option == VoteOption.Abstain) p.tally.abstain += w;
         else revert UnauthorizedParent();
         p.voters[voter] = option;
-        if (voters[voter].enrolled) {
+        if (registrationIndexPlusOne[voter] != 0) {
             Voter storage m = voters[voter];
             m.lastVote = uint64(block.timestamp);
             m.firstMissAt = 0;

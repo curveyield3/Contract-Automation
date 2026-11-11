@@ -21,7 +21,8 @@ interface IWbtcIporGuardianVoting {
     function getVotingToken() external view returns (address);
     function snapshotVerifier() external view returns (address);
     function reserveParentSnapshot(uint256 parentId, address proposer, bool removal, bool verified) external;
-    function isParentSnapshotReady(uint256 parentId) external view returns (bool);
+    function snapshotReady(uint256 parentId) external view returns (bool);
+    function verifiedSnapshot(uint256 parentId) external view returns (bool);
     function isSpamApproved(uint256 subproposalId) external view returns (bool);
 }
 
@@ -55,7 +56,6 @@ contract WbtcIporStagedProposalProcessor is
     uint16 public noGuardianStagesIndex;
     mapping(uint256 => bool) public isGuardianRemoval;
     mapping(bytes32 => bool) public allowedStandardAction;
-    mapping(uint256 => bool) public hasVerifiedSnapshotMode;
     mapping(uint256 => bool) private bodyProposalStarted;
     event ParentBondSettled(uint256 indexed parentId, uint256 amount, bool forfeited);
     error ParentBondNotSettled();
@@ -396,12 +396,13 @@ contract WbtcIporStagedProposalProcessor is
 
         Body storage body = stages[proposal.stageConfigIndex][_stageId].bodies[0];
         if (body.addr != sender) return;
+        bool safeReview = _isPendingSafeReview(_proposalId, _stageId);
         if (_resultType != ResultType.None && _resultType != body.resultType
-            && !(_isPendingSafeReview(_proposalId, _stageId)
+            && !(safeReview
                 && sender == guardianSafe && _resultType == ResultType.Approval))
             revert Errors.ResultTypeNotAllowed(_stageId, sender, uint8(_resultType));
 
-        if (_isPendingSafeReview(_proposalId, _stageId)) {
+        if (safeReview) {
             if (sender != guardianSafe || guardianVoting.guardianRemoved()
                 || block.timestamp < proposal.lastStageTransition
                 || block.timestamp >= proposal.lastStageTransition + 7 days
@@ -514,7 +515,6 @@ contract WbtcIporStagedProposalProcessor is
         // Special proposals MUST use the proof-backed supply-wide census.
         // For Standard parents the caller may explicitly request verified mode.
         verified = verified || removal;
-        hasVerifiedSnapshotMode[proposalId] = verified;
         guardianVoting.reserveParentSnapshot(proposalId, creator, removal, verified);
 
         // The verifier is the sole pre-existing escrow, while SPP alone decides forfeiture.
@@ -691,20 +691,19 @@ contract WbtcIporStagedProposalProcessor is
         }
 
         Stage storage stage = stages[proposal.stageConfigIndex][proposal.currentStage];
-        if (!guardianVoting.isParentSnapshotReady(_proposalId)
-            && !_isPendingSafeReview(_proposalId, proposal.currentStage))
+        bool safeReview = _isPendingSafeReview(_proposalId, proposal.currentStage);
+        if (!guardianVoting.snapshotReady(_proposalId) && !safeReview)
             return ProposalState.Active;
 
         // Native optimistic-veto stage specialized for the single Safe.
         // Safe approval advances early; silence advances after 7d; a
         // finalized Safe veto blocks advancement even after removal.
         // No proposal is invalidated by Guardian removal.
-        if (_isPendingSafeReview(_proposalId, proposal.currentStage)) {
+        if (safeReview) {
             if (block.timestamp < proposal.lastStageTransition) return ProposalState.Active;
             ResultType result = bodyResults[_proposalId][0][guardianSafe];
             if (result == ResultType.Veto) return ProposalState.Active;
             if (guardianVoting.guardianRemoved() || result == ResultType.Approval
-                || block.timestamp < proposal.lastStageTransition
                 || block.timestamp >= proposal.lastStageTransition + 7 days) {
                 return ProposalState.Advanceable;
             }
@@ -745,8 +744,8 @@ contract WbtcIporStagedProposalProcessor is
     /// start. Accepting it starts the full 14/30-day voting clock. The original
     /// parent, parent actions and prior Safe decision are never recreated.
     function onParentSnapshotFinalized(uint256 parentId) external {
-        if (msg.sender != address(guardianVoting) || !hasVerifiedSnapshotMode[parentId]
-            || !guardianVoting.isParentSnapshotReady(parentId)) revert ForbiddenGovernanceAction();
+        if (msg.sender != address(guardianVoting) || !guardianVoting.verifiedSnapshot(parentId)
+            || !guardianVoting.snapshotReady(parentId)) revert ForbiddenGovernanceAction();
         Proposal storage parent = proposals[parentId];
         if (!_proposalExists(parent) || parent.executed || parent.canceled)
             revert ForbiddenGovernanceAction();
@@ -767,7 +766,7 @@ contract WbtcIporStagedProposalProcessor is
         uint16 ballotStage = stages[parent.stageConfigIndex].length == 1 ? 0 : 1;
         bool vetoed = parent.currentStage == 0 && !isGuardianRemoval[id]
             && bodyResults[id][0][guardianSafe] == ResultType.Veto;
-        bool completed = parent.executed || (guardianVoting.isParentSnapshotReady(id)
+        bool completed = parent.executed || (guardianVoting.snapshotReady(id)
             && parent.currentStage == ballotStage
             && parent.lastStageTransition + stages[parent.stageConfigIndex][ballotStage].voteDuration
                 <= block.timestamp);
@@ -991,7 +990,7 @@ contract WbtcIporStagedProposalProcessor is
     ) internal virtual {
         Stage storage st = stages[proposals[proposalId].stageConfigIndex][stageId];
         Body storage body = st.bodies[0];
-        if (body.isManual || !guardianVoting.isParentSnapshotReady(proposalId)) return;
+        if (body.isManual || !guardianVoting.snapshotReady(proposalId)) return;
         if (bodyProposalStarted[proposalId]) revert InvalidGuardianStageConfiguration();
         bodyProposalStarted[proposalId] = true;
         Action[] memory actions = new Action[](1);

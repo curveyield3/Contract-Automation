@@ -1,5 +1,10 @@
 {
-  "purpose": "strict three-contract EIP-170 with vault economic membership",
-  "version": 15,
-  "tests": false
+  "version": 6,
+  "purpose": "compile-only native-authoritative redundancy consolidation",
+  "deployable_contracts": [
+    "WbtcIporStagedProposalProcessor_v8.sol",
+    "WbtcIporTokenVoting_v14.sol",
+    "WbtcIporZkProofVerifier_v6.sol"
+  ],
+  "run_tests": false
 }

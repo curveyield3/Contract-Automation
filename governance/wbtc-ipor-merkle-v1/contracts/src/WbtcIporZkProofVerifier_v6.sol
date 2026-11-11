@@ -74,7 +74,6 @@ contract WbtcIporZkProofVerifier {
     IRiscZeroReceiptVerifier public immutable receiptVerifier;
     bytes32 public immutable guestImageId;
     mapping(uint256 => uint256) private bondAmounts;
-    mapping(uint256 => bool) private bondSettled;
     bool private bondLock;
     bytes32 private constant LEAF_DOMAIN = keccak256("WBTC_IPOR_GOVERNANCE_VOTER_LEAF_V1");
     error InvalidVerificationConfiguration();
@@ -166,10 +165,12 @@ contract WbtcIporZkProofVerifier {
     }
     function settleBond(uint256 parentId,address proposer,bool spam) external returns(uint256 amount) {
         _requireStagedProcessor();
-        if(bondLock || bondAmounts[parentId]==0 || bondSettled[parentId])revert InvalidSource();
+        if(bondLock || bondAmounts[parentId]==0)revert InvalidSource();
         bondLock=true;
-        bondSettled[parentId]=true;
         amount=bondAmounts[parentId];
+        // Clear exactly once before token call; the existing reentrancy lock
+        // remains authoritative. A second settlement cannot consume a bond.
+        bondAmounts[parentId]=0;
         if(!IShareBondToken(_v().getVotingToken()).transfer(spam ? dao : proposer,amount))
             revert InvalidSource();
         bondLock=false;
@@ -213,10 +214,11 @@ contract WbtcIporZkProofVerifier {
     }
     function sourceConfigurationHash() external view returns (bytes32 digest) {
         IWbtcIporVotingSource v=_v();
+        uint256 count = v.getMarketCount();
         digest=keccak256(abi.encode(block.chainid,dao,v.getVotingToken(),v.guardianSafe(),
-            v.morphoBlue(),v.curveLendFactory(),v.getMarketCount(),
+            v.morphoBlue(),v.curveLendFactory(),count,
             v.getRegisteredVoterCount(),v.economicExclusionDigest(),v.getEconomicExclusionCount()));
-        for(uint256 i;i<v.getMarketCount();++i){
+        for(uint256 i;i<count;++i){
             (uint8 kind,address market,address custody,bytes32 id,bool enabled)=v.getVotingMarketAt(i);
             digest=keccak256(abi.encode(digest,kind,market,custody,id,enabled));
         }
@@ -247,27 +249,15 @@ contract WbtcIporZkProofVerifier {
         for(uint256 i;i<rest.length;++i)rest[i]=raw[i+4];
     }
 
-    function sourceMarketHash(bytes32 digest) external view returns (bytes32) {
-        IWbtcIporVotingSource v = _v();
-        for (uint256 i; i < v.getMarketCount(); ++i) {
-            (uint8 kind, address market, address custody, bytes32 id, bool enabled) = v.getVotingMarketAt(i);
-            digest = keccak256(abi.encode(digest, kind, market, custody, id, enabled));
-        }
-        return digest;
-    }
     function economicWeight(address account) external view returns (uint256 weight) {
         IWbtcIporVotingSource v = _v();
         uint256 count = v.getMarketCount();
         bool custody = account == v.morphoBlue() || v.excludedEconomicAccounts(account);
-        for (uint256 i; i < count; ++i) {
-            (,, address c,,) = v.getVotingMarketAt(i);
-            if (c == account) custody = true;
-        }
-        if (!custody) weight = IWbtcIporShareSource(v.getVotingToken()).balanceOf(account);
         uint256 marketTotal;
         for (uint256 i; i < count; ++i) {
-            (uint8 kind, address market, address c, bytes32 id, bool enabled) = v.getVotingMarketAt(i);
-            if (!enabled) continue;
+            (uint8 kind, address market, address c, bytes32 id,) = v.getVotingMarketAt(i);
+            // A custody address is never also credited as an economic wallet.
+            if (c == account) custody = true;
             if (kind == 1) {
                 (,, uint128 collateral) = IWbtcIporMorphoRead(market).position(id, account);
                 marketTotal += uint256(collateral);
@@ -276,6 +266,7 @@ contract WbtcIporZkProofVerifier {
                 marketTotal += amounts[1];
             }
         }
+        if (!custody) weight = IWbtcIporShareSource(v.getVotingToken()).balanceOf(account);
         return weight + marketTotal / 2;
     }
     function wholeEconomicSupply() external view returns (uint256 supply) {
@@ -287,9 +278,11 @@ contract WbtcIporZkProofVerifier {
             if (v.excludedEconomicAccounts(account)) supply -= shares.balanceOf(account);
         }
     }
-    function verifyVoterLeaf(bytes32 root, uint256 parentId, address voter,
+    /// @notice Shared proof calculation for permissionless roster inclusion and
+    /// proposer eligibility. Keep identical domain, leaf encoding and sibling order.
+    function _verifyLeaf(bytes32 root, uint256 parentId, address voter,
         uint256 economic, uint64 activeSince, bytes32[] calldata siblings)
-        external view returns (bool)
+        private view returns (bool)
     {
         if (siblings.length > 32) revert InvalidSnapshot();
         bytes32 hash = keccak256(abi.encodePacked(keccak256(abi.encode(
@@ -300,6 +293,12 @@ contract WbtcIporZkProofVerifier {
                 : keccak256(abi.encodePacked(sibling, hash));
         }
         return hash == root;
+    }
+    function verifyVoterLeaf(bytes32 root, uint256 parentId, address voter,
+        uint256 economic, uint64 activeSince, bytes32[] calldata siblings)
+        external view returns (bool)
+    {
+        return _verifyLeaf(root, parentId, voter, economic, activeSince, siblings);
     }
     function _verifySnapshot(bytes calldata seal, bytes calldata journal)
         private view returns (SnapshotJournal memory j)
@@ -338,15 +337,8 @@ contract WbtcIporZkProofVerifier {
             || creatorEconomic<(j.qualifiedEconomicWeight+9)/10)
             revert InvalidSnapshot();
         address creator=IProposalCreatorRead(_v().stagedProcessor()).getProposalCreator(parentId);
-        bytes32 leaf=keccak256(abi.encodePacked(keccak256(abi.encode(
-            LEAF_DOMAIN,block.chainid,votingPlugin,parentId,creator,creatorEconomic,creatorActiveSince))));
-        if(proof.length>32)revert InvalidSnapshot();
-        for(uint256 i;i<proof.length;++i){
-            bytes32 sibling=proof[i];
-            leaf=leaf<sibling ? keccak256(abi.encodePacked(leaf,sibling))
-                : keccak256(abi.encodePacked(sibling,leaf));
-        }
-        if(leaf!=j.rosterRoot || (j.removal && j.anchorTimestamp<
+        if(!_verifyLeaf(j.rosterRoot,parentId,creator,creatorEconomic,creatorActiveSince,proof)
+            || (j.removal && j.anchorTimestamp<
             BokkyPooBahsDateTimeLibrary.addMonths(uint256(creatorActiveSince),minMonths)))
             revert InvalidSnapshot();
         return(j.rosterRoot,j.qualifiedEconomicWeight,j.wholeSupplyEconomicWeight,
