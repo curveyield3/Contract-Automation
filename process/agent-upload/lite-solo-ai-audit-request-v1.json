@@ -6,9 +6,9 @@
   "submission_mode": "submit",
   "max_chunks": "32",
   "ai_hop": "0",
-  "dispatchRevision": "v24",
+  "dispatchRevision": "v25",
   "sourceExpectedSha256": "299fda8224b658a17bf0068690a321f295c1d7ee655eaf72470023ec33a0eb71",
-  "previousCampaign": "cyvbusdcv28-r7",
-  "retryReason": "New independent Machine Intelligence audit after production deployment of Lite-Solo Cloudflare Worker v294; reuse prior cyvbusdcv28-r7 source and existing 2-runner, submit, max_chunks 32 settings without altering prior accepted work.",
-  "retryOfFailedInferenceRun": "42677785236"
+  "previousCampaign": "cyvbusdcv28-r8",
+  "retryReason": "Fresh independent MI audit on restored pre-hour workflow and Worker v298, same pinned cyvbUSDCv28 source SHA256, two inference runners, submit mode and max_chunks=32. Previous r8 remains immutable; no audit workflow repair performed.",
+  "retryOfFailedInferenceRun": "42937576341"
 }
