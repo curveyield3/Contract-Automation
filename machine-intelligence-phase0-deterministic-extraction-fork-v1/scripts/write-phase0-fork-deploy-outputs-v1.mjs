@@ -1051,6 +1051,16 @@ async function buildForkRelationshipGraphV1(){
         jointEvidenceClass:'EXACT_SOURCE_AND_RUNTIME_MATCH',
         joinLimitations:join.storageAddress?[]:['STORAGE_CONTEXT_UNRESOLVED']};
     });
+    const joinPages={
+      matched:await writePagedRecordsV1({collection:'slither-runtime-matched',
+        records:entries,rootDir:path.posix.join('evidence/phase0/scenarios',scenario,'pages')}),
+      unmatchedSource:await writePagedRecordsV1({collection:'slither-unmatched-source',
+        records:unmatchedSlitherFacts,
+        rootDir:path.posix.join('evidence/phase0/scenarios',scenario,'pages')}),
+      unmatchedFrames:await writePagedRecordsV1({collection:'slither-unmatched-frames',
+        records:unmatchedRuntimeFrames,
+        rootDir:path.posix.join('evidence/phase0/scenarios',scenario,'pages')})
+    };
     const joinRecordRef=await writeOutput(
       path.posix.join('evidence/phase0/scenarios',scenario,'SLITHER_RUNTIME_STATE_JOIN_v1.json'),{
       schemaVersion:'mi-phase0-slither-runtime-join-v1',...source,
@@ -1060,8 +1070,8 @@ async function buildForkRelationshipGraphV1(){
       buildBundleSha256:compilerBundle.ref?.sha256??null,
       sourceGraphIndexRef:graphRef,
       staticAnalysisRef:{...originalSlitherDetectors.ref,slitherVersion:'0.11.6'},
-      staticRelationFactsRef:staticFacts.ref,entries,
-      unmatchedSlitherFacts,unmatchedRuntimeFrames,
+      staticRelationFactsRef:staticFacts.ref,
+      pageCatalog:joinPages,entries:[],unmatchedSlitherFacts:[],unmatchedRuntimeFrames:[],
       sourceFactCount:staticFunctionNodes.length,
       runtimeFrameCount:observedRuntimeFrames.length,
       exactJoinedFrameCount:entries.length,
@@ -1080,8 +1090,10 @@ async function buildForkRelationshipGraphV1(){
     staticEdgeCount:edges.filter(edge=>String(edge.kind??'').startsWith('SLITHER_')).length,
     analysisMethod:'STATIC_RELATIONSHIP_JOIN',
     runtimeJoinStatus:slitherJoins.length?'PARTIALLY_SOURCE_RUNTIME_BOUND':'NOT_PROVEN',
-    runtimeJoinRecords:slitherJoins,perScenarioJoinRefs:slitherJoinRefs,
-    unmatchedSlitherFacts,unmatchedRuntimeFrames,
+    runtimeJoinRecords:[],perScenarioJoinRefs:slitherJoinRefs,
+    runtimeJoinRecordCount:slitherJoins.length,
+    unmatchedSlitherFactCount:unmatchedSlitherFacts.length,
+    unmatchedRuntimeFrameCount:unmatchedRuntimeFrames.length,
     detectorAttributionStatus:'NOT_ATTRIBUTED_WITHOUT_EXACT_UNIT_SOURCE_SPAN',
     detectorCount:originalSlitherDetectors.value?.detectors?.length??0,
     limitations:staticFacts.value?.unavailableUnitRecords??[]
