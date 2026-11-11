@@ -284,3 +284,201 @@ export function validateExecutionInputJoinV2({receipt,buildIdentity,artifactBund
     }
   };
 }
+
+
+/**
+ * Derive the Phase-0 fork's unit-qualified identity census from exactly the
+ * compilation results already accepted by buildExecutionArtifactBundleV2.
+ * This is a mechanical compiler inventory, never an assertion about deployed
+ * code, contract safety, runtime ownership, or ABI compatibility.
+ */
+export function buildContractIdentityIndexV1({request,build,artifactBundle,buildArtifactBundleSha256}={}){
+  if(!SHA256.test(String(buildArtifactBundleSha256??'')))throw new Error('PHASE0_IDENTITY_BUNDLE_BYTE_DIGEST_REQUIRED');
+  if(artifactBundle?.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2' ||
+     artifactBundle?.requestIdentity?.campaignId!==request?.campaignId ||
+     artifactBundle?.requestIdentity?.campaignGenerationId!==request?.campaignGenerationId ||
+     artifactBundle?.source?.archiveSha256!==request?.source?.archiveSha256)
+    throw new Error('PHASE0_IDENTITY_SOURCE_GENERATION_BUNDLE_MISMATCH');
+
+  const digest=value=>createHash('sha256').update(value).digest('hex');
+  const stable=x=>Array.isArray(x)?'['+x.map(stable).join(',')+']':
+    x&&typeof x==='object'?'{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+stable(x[k])).join(',')+'}':
+    JSON.stringify(x);
+  const abiType=param=>{
+    const type=String(param?.type??'');
+    return type.startsWith('tuple')
+      ? '('+(param.components??[]).map(abiType).join(',')+')'+type.slice(5)
+      :type;
+  };
+  const units=new Map((build?.compilationUnits??[]).map(unit=>[unit.unitId,unit]));
+  const artifactUnits=new Map((artifactBundle?.buildIdentity?.compilationUnits??[]).map(unit=>[unit.unitId,unit]));
+  const sourceFiles=[],sourceKeyMap=new Map(),sourceKinds=new Map(),sourceSymbols=[];
+  const inheritanceEdges=[],libraryLinkEdges=[],abiSelectors=[],contractIdentities=[],identityLimitations=[];
+  const sortedEntries=obj=>Object.entries(obj??{}).sort(([a],[b])=>a.localeCompare(b));
+  const nodeKey=(unitId,sourceName,contractName)=>[unitId,sourceName,contractName].join(':');
+
+  for(const [unitId,unit] of [...units].sort(([a],[b])=>a.localeCompare(b))){
+    const declared=artifactUnits.get(unitId);
+    if(!declared)identityLimitations.push({type:'COMPILATION_UNIT_NOT_IN_ACCEPTED_BUNDLE',unitId});
+    const astById=new Map();
+    for(const [sourceName,ast] of sortedEntries(unit.sourceAsts??{})){
+      for(const node of ast?.nodes??[]){
+        if(node?.nodeType!=='ContractDefinition')continue;
+        astById.set(node.id,{sourceName,contractName:node.name,node});
+        const kind=node.abstract===true?'ABSTRACT':String(node.contractKind??'UNKNOWN').toUpperCase();
+        sourceKinds.set(nodeKey(unitId,sourceName,node.name),kind);
+        sourceSymbols.push({symbolType:'CONTRACT_DECLARATION',compilationUnitId:unitId,
+          sourceName,contractName:node.name,compilerAstId:node.id??null,sourceSpan:node.src??null,
+          sourceKind:kind});
+        for(const child of node.nodes??[]){
+          if(!['FunctionDefinition','VariableDeclaration','ModifierDefinition','EventDefinition','ErrorDefinition'].includes(child?.nodeType))continue;
+          sourceSymbols.push({symbolType:child.nodeType,compilationUnitId:unitId,
+            sourceName,contractName:node.name,compilerAstId:child.id??null,
+            symbolName:child.name??null,sourceSpan:child.src??null,
+            stateVisibility:child.visibility??null});
+        }
+      }
+    }
+    for(const [name,content] of sortedEntries(unit.sourceContents??{})){
+      const bytes=Buffer.from(String(content),'utf8');
+      const sourceContentSha256=digest(bytes);
+      const key=unitId+':'+name;
+      sourceKeyMap.set(key,sourceContentSha256);
+      const ast=unit.sourceAsts?.[name]??null;
+      const sourceId=ast?.src?String(ast.src).split(':').at(-1):null;
+      sourceFiles.push({compilationUnitId:unitId,sourcePath:name,
+        sourceContentSha256,sourceByteLength:bytes.length,
+        compilerFileId:sourceId!==null&&/^[0-9]+$/.test(sourceId)?Number(sourceId):null,
+        astNodeId:ast?.id??null,astAvailability:ast?'COMPILER_AST_PRESENT':'AST_NOT_EMITTED'});
+    }
+    for(const [sourceName,ast] of sortedEntries(unit.sourceAsts??{})){
+      for(const node of ast?.nodes??[]){
+        if(node?.nodeType!=='ContractDefinition')continue;
+        for(const [i,base] of (node.baseContracts??[]).entries()){
+          const referenced=base?.baseName?.referencedDeclaration;
+          const parent=astById.get(referenced);
+          inheritanceEdges.push({
+            fromCompilationUnitId:unitId,fromSourceName:sourceName,fromContractName:node.name,
+            parentCompilationUnitId:parent?unitId:null,parentSourceName:parent?.sourceName??null,
+            parentContractName:parent?.contractName??base?.baseName?.name??null,
+            parentAstId:referenced??null,baseOrdinal:i,
+            resolutionStatus:parent?'COMPILER_AST_REFERENCE':'UNRESOLVED_AST_REFERENCE',
+            sourceSpan:base?.src??null
+          });
+        }
+      }
+    }
+  }
+  const pathDigests=new Map();
+  for(const source of sourceFiles){
+    const seen=pathDigests.get(source.sourcePath);
+    if(seen&&seen!==source.sourceContentSha256)
+      identityLimitations.push({type:'SAME_PATH_DIFFERENT_BYTES',sourcePath:source.sourcePath,
+        compilationUnitId:source.compilationUnitId,sourceContentSha256:source.sourceContentSha256,
+        previousSourceContentSha256:seen});
+    pathDigests.set(source.sourcePath,source.sourceContentSha256);
+  }
+  for(const artifact of artifactBundle.artifacts??[]){
+    const unit=artifactUnits.get(artifact.compilationUnitId);
+    const qualified=artifact.qualifiedName??artifact.sourceName+':'+artifact.contractName;
+    const sourceContentSha256=sourceKeyMap.get(artifact.compilationUnitId+':'+artifact.sourceName)??null;
+    const contractIdentityId='CONTRACT-'+digest(stable([
+      artifact.compilationUnitId,artifact.sourceName,artifact.contractName,
+      unit?.compilerInputSha256??null,artifact.creationBytecodeDigestSha256
+    ])).slice(0,40);
+    const sourceKind=sourceKinds.get(nodeKey(artifact.compilationUnitId,artifact.sourceName,artifact.contractName))??'UNKNOWN';
+    const linkRefs=artifact.linkReferences??{},immutable=artifact.immutableReferences;
+    const needsLinks=Object.values(linkRefs).some(libraries=>Object.values(libraries??{}).some(refs=>Array.isArray(refs)&&refs.length>0));
+    const creation=String(artifact.bytecode??'');
+    const deployabilityClass=sourceKind==='ABSTRACT'||sourceKind==='INTERFACE'
+      ?sourceKind
+      :creation==='0x'?'NO_CREATION_BYTECODE'
+      :needsLinks?'DEPLOYABLE_AFTER_LIBRARY_LINK':'DEPLOYABLE';
+    const abiDeclarations=[];
+    for(const [index,entry] of (artifact.abi??[]).entries()){
+      if(!['constructor','function','event','error','fallback','receive'].includes(entry?.type))continue;
+      const sig=entry.type==='function'||entry.type==='event'||entry.type==='error'
+        ?String(entry.name??'')+'('+(entry.inputs??[]).map(abiType).join(',')+')'
+        :entry.type==='constructor'?'constructor('+(entry.inputs??[]).map(abiType).join(',')+')':entry.type;
+      const selectorRaw=entry.type==='function'?(artifact.methodIdentifiers?.[sig]??null):null;
+      const selector=/^(?:0x)?[a-fA-F0-9]{8}$/.test(String(selectorRaw??''))
+        ?'0x'+String(selectorRaw).replace(/^0x/i,'').toLowerCase():null;
+      const record={contractIdentityId,compilationUnitId:artifact.compilationUnitId,
+        abiIndex:index,sourceName:artifact.sourceName,contractName:artifact.contractName,
+        declarationType:entry.type,canonicalSignature:sig,selector,
+        selectorStatus:selector?'COMPILER_METHOD_ID':'NOT_EXPORTED_AS_METHOD_ID',
+        stateMutability:entry.stateMutability??null,
+        inputTypes:(entry.inputs??[]).map(abiType),outputTypes:(entry.outputs??[]).map(abiType)};
+      abiDeclarations.push(record);
+      if(entry.type==='function'||entry.type==='event'||entry.type==='error')abiSelectors.push(record);
+    }
+    for(const [linkFile,libraries] of sortedEntries(linkRefs)){
+      for(const [libraryName,offsets] of sortedEntries(libraries)){
+        libraryLinkEdges.push({compilationUnitId:artifact.compilationUnitId,
+          requestingContractIdentityId:contractIdentityId,
+          linkedLibrarySourceName:linkFile,linkedLibraryName:libraryName,
+          creationBytecodeOffsets:(offsets??[]).map(offset=>({
+            start:offset.start??null,length:offset.length??null
+          })),resolutionStatus:'COMPILER_LINK_REFERENCE_NOT_RUNTIME_CALL'});
+      }
+    }
+    if(!sourceContentSha256)identityLimitations.push({
+      type:'ARTIFACT_SOURCE_CONTENT_NOT_IN_EXACT_UNIT',
+      compilationUnitId:artifact.compilationUnitId,sourceName:artifact.sourceName,contractName:artifact.contractName});
+    if(sourceKind==='UNKNOWN')identityLimitations.push({
+      type:'SOURCE_DECLARATION_KIND_NOT_IN_EXACT_AST',
+      contractIdentityId,sourceName:artifact.sourceName});
+    const storageLayoutAvailable=artifact.storageLayout!==null;
+    contractIdentities.push({
+      contractIdentityId,compilationUnitId:artifact.compilationUnitId,
+      qualifiedName:qualified,sourceName:artifact.sourceName,contractName:artifact.contractName,
+      sourceKind,deployabilityClass,language:artifact.language??'solidity',
+      compilerVersion:artifact.compilerVersion,compilerProfile:artifact.profile,
+      compilerInputSha256:unit?.compilerInputSha256??null,
+      compilerOutputSha256:unit?.compilerOutputSha256??null,
+      sourceContentSha256,abiDigestSha256:artifact.abiDigestSha256,
+      creationBytecodeDigestSha256:artifact.creationBytecodeDigestSha256,
+      deployedRuntimeDigestSha256:artifact.deployedBytecodeDigestSha256,
+      constructorParameterTypes:abiDeclarations.find(x=>x.declarationType==='constructor')?.inputTypes??[],
+      abiDeclarations,creationBytecodeSourceMap:artifact.bytecodeSourceMap??null,
+      deployedBytecodeSourceMap:artifact.deployedBytecodeSourceMap??null,
+      linkReferences:clone(linkRefs),deployedLinkReferences:clone(artifact.deployedLinkReferences??{}),
+      immutableReferences:clone(immutable??null),
+      generatedSources:clone({creation:artifact.creationGeneratedSources??null,
+        deployed:artifact.deployedGeneratedSources??null}),
+      storageLayout:clone(artifact.storageLayout??null),
+      storageLayoutStatus:storageLayoutAvailable?'COMPILER_EMITTED':'LAYOUT_NOT_EMITTED',
+      gasEstimates:clone(artifact.gasEstimates??null),
+      gasEstimateStatus:'PRELIMINARY_COMPILER_ESTIMATE_NOT_RUNTIME',
+      evidenceProvenance:{artifactBundleSha256:buildArtifactBundleSha256,
+        compilationUnitId:artifact.compilationUnitId,sourceContentSha256,
+        compilerInputSha256:unit?.compilerInputSha256??null}
+    });
+  }
+  const sort=arr=>arr.sort((a,b)=>stable(a).localeCompare(stable(b)));
+  for(const arr of [sourceFiles,sourceSymbols,inheritanceEdges,libraryLinkEdges,
+    abiSelectors,contractIdentities,identityLimitations])sort(arr);
+  const seenId=new Set();
+  for(const row of contractIdentities){
+    if(seenId.has(row.contractIdentityId))identityLimitations.push({
+      type:'DUPLICATED_CONTRACT_IDENTITY',contractIdentityId:row.contractIdentityId});
+    seenId.add(row.contractIdentityId);
+  }
+  return{
+    schemaVersion:'mi-phase0-contract-identity-index-v1',
+    artifactType:'CONTRACT_IDENTITY_INDEX',
+    campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,
+    sourceArchiveSha256:request.source.archiveSha256,
+    buildArtifactBundleSha256,compilationUnits:clone(artifactBundle.buildIdentity.compilationUnits),
+    sourceFiles,contractIdentities,abiSelectors,sourceSymbols,inheritanceEdges,libraryLinkEdges,
+    deploymentMatches:[],identityLimitations,
+    internalCreateTraceStatus:'NOT_CAPTURED_STEP_2',
+    scriptExecutionStatus:'NOT_EXECUTED_IN_COMPILER_STAGE',
+    identityCoverageStatus:identityLimitations.length?'PARTIAL_WITH_GAPS':'COMPILER_ONLY_COMPLETE',
+    coverage:{compiledArtifactCount:artifactBundle.artifacts.length,
+      indexedArtifactCount:contractIdentities.length,
+      storageLayoutPresent:contractIdentities.filter(x=>x.storageLayoutStatus==='COMPILER_EMITTED').length,
+      storageLayoutUnavailable:contractIdentities.filter(x=>x.storageLayoutStatus!=='COMPILER_EMITTED').length,
+      observedCreationCount:0,matchedCreationCount:0,ambiguousCreationCount:0,unmappedCreationCount:0}
+  };
+}
