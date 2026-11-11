@@ -4051,9 +4051,12 @@ async function miAdaptiveSingleQuestionTransportV1(){
 // the exact API envelope; controller data/JSON are not model-facing instructions.
 function miReadableEvidenceContent(entry){
  const raw=entry.content;
- if(/(?:implementation|dependency|specification|source code)/i.test(entry.description))return raw;
  let value;try{value=JSON.parse(raw);}catch{return raw;}
- const administrative=/^(?:schemaVersion|kind|key|lease|unitId|questionId|scopeSha256|sha256|gitBlobSha|sourceSha256|controllerAccepted|answerSha256|candidateId|functionId|contractId|sourceContractId|sourceFunctionId|compilationUnitId|astNodeId|astSourceSpan|sourceDigestSha256|recordKey|obligationId|assetKey|actorKey|boundaryKey|transitionKey|requirementKey|dependencyKey|standardKey|driverKey|status|basis|phase1Ownership|laterPhaseTreatment|automationOwnedFields)$/;
+ if(value&&value.schemaVersion==='milo-temp-question-round-v1'&&
+  value.direction==='output'&&typeof value.originalContent==='string')return value.originalContent;
+ const structural=/^Accepted source observation about /.test(entry.description);
+ const administrative=/^(?:schemaVersion|key|lease|unitId|scopeSha256|sha256|gitBlobSha|sourceSha256|controllerAccepted|answerSha256|compilationUnitId|astNodeId|astSourceSpan|sourceDigestSha256|automationOwnedFields)$/;
+ const structuralIds=/^(?:kind|candidateId|functionId|contractId|sourceContractId|sourceFunctionId|recordKey|obligationId|assetKey|actorKey|boundaryKey|transitionKey|requirementKey|dependencyKey|standardKey|driverKey|phase1Ownership|laterPhaseTreatment)$/;
  const indexOnly=/^(?:sourceIds|contractIds|functionIds|storageIds|externalInterfaceIds|privilegeCandidateIds|valueFlowCandidateIds|sourceAnchorIds)$/;
  const human=k=>k.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_-]/g,' ').replace(/^./,m=>m.toUpperCase());
  const lines=[];const visit=(v,depth=0,name='')=>{
@@ -4065,7 +4068,7 @@ function miReadableEvidenceContent(entry){
   }
   if(typeof v==='object'){
    for(const [k,item] of Object.entries(v)){
-    if(administrative.test(k))continue;
+    if(administrative.test(k)||(structural&&structuralIds.test(k)))continue;
     if(item&&typeof item==='object'&&!Array.isArray(item)){lines.push(' '.repeat(depth*2)+human(k)+':');visit(item,depth+1,k);}
     else if(Array.isArray(item))visit(item,depth,k);
     else if(item!==null&&item!==''&&item!==undefined)lines.push(' '.repeat(depth*2)+human(k)+': '+String(item));
