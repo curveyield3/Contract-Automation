@@ -1,0 +1,172 @@
+name: MI Phase0 Deterministic Extraction Fork Intelligence v1
+
+on:
+  workflow_call:
+    inputs:
+      campaign_id:
+        required: true
+        type: string
+      campaign_path:
+        required: true
+        type: string
+      audit_controller_ref:
+        required: false
+        type: string
+        default: machine-intelligence-audit-controller-v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lite-solo-phase0-intelligence-${{ inputs.campaign_id || github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  phase0-intelligence:
+    if: ${{ github.repository == 'curveyield3/Contract-Automation' && github.ref == 'refs/heads/machine-intelligence-audit-controller-v1' && contains(github.workflow_ref, '/.github/workflows/mi-phase0-deterministic-extraction-fork-v1.yml@') }}
+    runs-on: ubuntu-latest
+    # 30m solc compile plus full Phase 0 intelligence and publication stages.
+    timeout-minutes: 60
+    steps:
+      - name: Checkout trusted Contract-Automation base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout atomic request (not used by lite-solo)
+        if: false
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .request-source
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Restore pinned Node dependencies (shared Phase 0 cache)
+        uses: ./.github/actions/mi-phase0-deterministic-node-cache-fork-v1
+
+      - name: Enable pinned Forge for Phase-0 source compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          forge_entry="$GITHUB_WORKSPACE/machine-intelligence-phase0-deterministic-extraction-fork-v1/node_modules/@foundry-rs/forge/bin.mjs"
+          test -f "$forge_entry"
+          chmod +x "$forge_entry"
+          mkdir -p "$RUNNER_TEMP/phase0-intelligence/bin"
+          ln -sfn "$forge_entry" "$RUNNER_TEMP/phase0-intelligence/bin/forge"
+          echo "$RUNNER_TEMP/phase0-intelligence/bin" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/machine-intelligence-phase0-deterministic-extraction-fork-v1/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Set up Python for pinned Phase-0 Slither
+        continue-on-error: true
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.15'
+
+      - name: Install pinned Phase-0 Slither without V7 or Medusa
+        continue-on-error: true # Preserve actual missing-analyzer limitations for Worker review
+        shell: bash
+        run: |
+          set -euo pipefail
+          slither_env="$RUNNER_TEMP/phase0-slither-0.11.6"
+          python3 -m venv "$slither_env"
+          timeout -s TERM -k 15s 240s "$slither_env/bin/python" -m pip install --disable-pip-version-check --no-input --timeout 20 --retries 2 'slither-analyzer==0.11.6'
+          "$slither_env/bin/python" -c "import importlib.metadata as m; assert m.version('slither-analyzer') == '0.11.6'"
+          echo "$slither_env/bin" >> "$GITHUB_PATH"
+
+      - name: Select cross-repository credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash machine-intelligence-phase0-deterministic-extraction-fork-v1/scripts/select-audit-controller-token.sh
+
+      - name: Materialize workflow-call Phase-0 request
+        if: inputs.campaign_id != ''
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+          AUDIT_CONTROLLER_REF: machine-intelligence-audit-controller-v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$CAMPAIGN_PATH" in campaigns/*) ;; *) echo "::error::campaign_path must be under campaigns/"; exit 1;; esac
+          receipt_path="$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"
+          gh api "repos/curveyield3/Audit-Controller/contents/$receipt_path?ref=$AUDIT_CONTROLLER_REF" --jq '.content' | base64 -d > /tmp/phase0-receipt.json
+          test "$(jq -r '.campaign.campaignId' /tmp/phase0-receipt.json)" = "$CAMPAIGN_ID"
+          test "$(jq -r '.phase.sequence' /tmp/phase0-receipt.json)" = "0"
+          jq -e '.campaign.mode=="LITE_SOLO" and ((.authority.liteRelease=="machine-intelligence-v7" and .authority.homepagePath=="Machine Intelligence Audit Controller/Audit Skill v7/SKILL.md") or (.authority.liteRelease=="machine-intelligence-v8" and .authority.homepagePath=="Machine Intelligence Audit Controller/Audit Skill v8/SKILL.md"))' /tmp/phase0-receipt.json >/dev/null
+          jq -n             --arg requestId "phase0-$CAMPAIGN_ID-$GITHUB_RUN_ID"             --arg campaignId "$CAMPAIGN_ID"             --arg campaignGenerationId "$(jq -r '.campaign.campaignGenerationId' /tmp/phase0-receipt.json)"             --arg sourceCommit "$(jq -r '.source.archiveCommit' /tmp/phase0-receipt.json)"             --arg archivePath "$(jq -r '.source.archivePath' /tmp/phase0-receipt.json)"             --arg archiveSha "$(jq -r '.source.sha256' /tmp/phase0-receipt.json)"             --arg destRef "$AUDIT_CONTROLLER_REF"             --arg campaignPath "$CAMPAIGN_PATH"             '{
+              schemaVersion:"curveyield-lite-phase0-intelligence-request-v1",
+              requestId:$requestId,
+              campaignId:$campaignId,
+              campaignGenerationId:$campaignGenerationId,
+              source:{repository:"curveyield3/Audit-Controller",commit:$sourceCommit,archivePath:$archivePath,archiveSha256:$archiveSha},
+              destination:{repository:"curveyield3/Audit-Controller",ref:$destRef,campaignPath:$campaignPath}
+            }' > .phase0-request.json
+          homepage="$(jq -r '.authority.homepagePath // empty' /tmp/phase0-receipt.json)"
+          adr_policy=""
+          if [ -n "$homepage" ]; then
+            manifest_path="$(dirname "$homepage")/MANIFEST.json"
+            encoded="$(jq -rn --arg p "$manifest_path" '$p|split("/")|map(@uri)|join("/")')"
+            if gh api "repos/curveyield3/Audit-Controller/contents/$encoded?ref=$AUDIT_CONTROLLER_REF" --jq '.content' > /tmp/adr-manifest.b64 2>/dev/null; then
+              adr_policy="$(base64 -d /tmp/adr-manifest.b64 2>/dev/null | jq -r '.detectionPolicy // empty' 2>/dev/null || true)"
+            fi
+          fi
+          [ "$adr_policy" = "audit-detection-rebuild-v1" ] || adr_policy=""
+          echo "ADR_DETECTION_POLICY=$adr_policy" >> "$GITHUB_ENV"
+          review_policy=""
+          if [ "$adr_policy" = "audit-detection-rebuild-v1" ] && [[ "$homepage" == "Machine Intelligence Audit Controller/Audit Skill v7/SKILL.md" || "$homepage" == "Machine Intelligence Audit Controller/Audit Skill v8/SKILL.md" ]]; then
+            # Owner-authorized v13 live activation: select the v13 review mode
+            # whenever the admitted campaign authority is v13. Qualification
+            # remains an independent evidence status, not a bootstrap blocker.
+            review_policy="correctness-verdict-v13"
+          fi
+          echo "ADR_DETECTION_REVIEW_POLICY=$review_policy" >> "$GITHUB_ENV"
+
+      - name: Resolve exactly one lean Phase-0 request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -s .phase0-request.json ]; then
+            echo "path=.phase0-request.json" >> "$GITHUB_OUTPUT"
+          else
+            mapfile -t requests < <(find .request-source/lite-phase0/requests -type f -name request.json | sort)
+            test "${#requests[@]}" -eq 1
+            echo "path=${requests[0]}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate useful Phase-0 machine intelligence
+        continue-on-error: true # Publish only genuine generated artifacts; Worker owns analyzer quality
+        env:
+          AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PHASE0_PRIVATE_BUILD_CACHE_ENABLED: ${{ github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .phase0-intelligence-output
+          # External wall-clock guard: synchronous solc can block Node watchdog timers.
+          timeout -s TERM -k 30s 3000s node machine-intelligence-phase0-deterministic-extraction-fork-v1/scripts/lite-solo-phase0-compile-watchdog-v1.mjs primary -- node machine-intelligence-phase0-deterministic-extraction-fork-v1/packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs \
+            --request "${{ steps.request.outputs.path }}" \
+            --output .phase0-intelligence-output
+
+      - name: Retain genuine partial Phase-0 intelligence evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-phase0-fork-static-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .phase0-intelligence-output/*.json
+          if-no-files-found: warn
+          retention-days: 14
+          include-hidden-files: false
+
+      - name: Record source-only isolated intelligence artifact handoff
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          echo 'Intelligence evidence is a fork-only GitHub artifact; no canonical campaign publication, phase sealing, or Worker notification was executed.' >> "$GITHUB_STEP_SUMMARY"
