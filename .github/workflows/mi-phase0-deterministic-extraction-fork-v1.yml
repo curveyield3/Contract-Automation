@@ -186,3 +186,41 @@ jobs:
           git config user.email 'mi-phase0-fork@users.noreply.github.com'
           git commit -m "mi(phase0): retain isolated deterministic extraction ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           git push origin HEAD:machine-intelligence-audit-controller-v1
+          # A successful push alone is not proof that every graph part actually
+          # landed in the returned Git tree. Verify exact bytes, without
+          # constructing a new controller acceptance or modifying the manifest.
+          published_commit="$(git rev-parse HEAD)"
+          remote_commit="$(git ls-remote --exit-code origin refs/heads/machine-intelligence-audit-controller-v1 | awk '{print $1}')"
+          test "$remote_commit" = "$published_commit" || {
+            echo "::error::FORK_PUBLISHED_COMMIT_NOT_CURRENT_REMOTE_REF"; exit 1;
+          }
+          manifest="$forkrel/evidence/FORK_WRITER_READBACK_v1.json"
+          test -s "$manifest"
+          jq -e '.schemaVersion=="mi-phase0-fork-only-writer-v1" and
+            .status=="FORK_ONLY_NOT_CONTROLLER_ACCEPTED" and
+            .files|type=="array"' "$manifest" >/dev/null
+          verified=0
+          while IFS=
+\t' read -r rel expected; do
+            case "$rel" in
+              ""|/*|../*|*/../*|*/..|*'\'*) echo "::error::FORK_TREE_UNSAFE_EVIDENCE_PATH"; exit 1 ;;
+            esac
+            case "$expected" in
+              *[!0-9a-f]*|"") echo "::error::FORK_TREE_INVALID_SHA"; exit 1 ;;
+            esac
+            target="$forkrel/$rel"
+            git ls-tree -r HEAD -- "$target" | grep -q . || {
+              echo "::error::FORK_TREE_EVIDENCE_BLOB_MISSING"; exit 1;
+            }
+            observed="$(git cat-file blob "HEAD:$target" | sha256sum | awk '{print $1}')"
+            test "$observed" = "$expected" || {
+              echo "::error::FORK_TREE_EVIDENCE_SHA_MISMATCH"; exit 1;
+            }
+            verified=$((verified+1))
+          done < <(jq -r '.files[] | select(.sha256!=null) | [.path,.sha256] | @tsv' "$manifest")
+          expected_count="$(jq '[.files[] | select(.sha256!=null)] | length' "$manifest")"
+          test "$verified" -eq "$expected_count" || {
+            echo "::error::FORK_TREE_INCOMPLETE_EVIDENCE_CENSUS"; exit 1;
+          }
+          echo "Fork evidence Git-tree verified at $published_commit ($verified hashed files); no controller acceptance claimed" >> "$GITHUB_STEP_SUMMARY"
+
