@@ -4057,9 +4057,9 @@ function miReadableEvidenceContent(entry){
   return actualCode?raw:raw.replace(/\b(?:https?:\/\/|www\.)\S+/g,'').trim();
  }
  if(value&&value.schemaVersion==='milo-temp-question-round-v1'&&
-  value.direction==='output'&&typeof value.originalContent==='string')return value.originalContent;
+  value.direction==='output'&&typeof value.originalContent==='string')return value.originalContent.replace(/\b(?:https?:\/\/|www\.)\S+/g,'');
  const structural=/^Accepted source observation about /.test(entry.description);
- const administrative=/^(?:schemaVersion|key|lease|unitId|scopeSha256|sha256|gitBlobSha|sourceSha256|controllerAccepted|answerSha256|compilationUnitId|astNodeId|astSourceSpan|sourceDigestSha256|automationOwnedFields)$/;
+ const administrative=/^(?:schemaVersion|key|lease|unitId|scopeSha256|sha256|gitBlobSha|sourceSha256|controllerAccepted|answerSha256|compilationUnitId|astNodeId|astSourceSpan|sourceDigestSha256|automationOwnedFields|sourceLocation|sourcePath|originalPath|outputPath|originalOutputPath|referencePath|rawEvidenceRef|sourceFilePath|sourceFileName|lineNumber|lineStart|lineEnd|sourceLine|sourceLink|url|uri)$/i;
  const structuralIds=/^(?:kind|candidateId|functionId|contractId|sourceContractId|sourceFunctionId|recordKey|obligationId|assetKey|actorKey|boundaryKey|transitionKey|requirementKey|dependencyKey|standardKey|driverKey|phase1Ownership|laterPhaseTreatment)$/;
  const indexOnly=/^(?:sourceIds|contractIds|functionIds|storageIds|externalInterfaceIds|privilegeCandidateIds|valueFlowCandidateIds|sourceAnchorIds)$/;
  const human=k=>k.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_-]/g,' ').replace(/^./,m=>m.toUpperCase());
@@ -4076,7 +4076,10 @@ function miReadableEvidenceContent(entry){
       (typeof item==='string'&&/^(?:FUNC|CONTRACT|SRC|ANCHOR|EXT|PRIV|VALUE|STORAGE)[-_][A-Za-z0-9_-]+$/.test(item)))continue;
     if(item&&typeof item==='object'&&!Array.isArray(item)){lines.push(' '.repeat(depth*2)+human(k)+':');visit(item,depth+1,k);}
     else if(Array.isArray(item))visit(item,depth,k);
-    else if(item!==null&&item!==''&&item!==undefined)lines.push(' '.repeat(depth*2)+human(k)+': '+String(item));
+    else if(item!==null&&item!==''&&item!==undefined){
+      const readable=String(item).replace(/\b(?:https?:\/\/|www\.)\S+/g,'').trim();
+      if(readable&&!/^[a-f0-9]{64}$/i.test(readable))lines.push(' '.repeat(depth*2)+human(k)+': '+readable);
+    }
    }
    return;
   }
@@ -4092,7 +4095,12 @@ function miReadableQuestion(m){
  if(m.analysisCriteria)lines.push('Relevant reasoning criteria',String(m.analysisCriteria));
  if(m.answerFormat)lines.push('Answer convention',String(m.answerFormat));
  lines.push('Source evidence relevant to this question');
- for(const e of m.evidence)lines.push(e.description,miReadableEvidenceContent(e));
+ for(const e of m.evidence){
+  const readableDescription=String(e.description||'').replace(/\b(?:https?:\/\/|www\.)\S+/g,'')
+   .replace(/(?:[A-Za-z0-9_.-]+\/)+([A-Za-z0-9_.-]+)\.(?:sol|vy|vyi|ts|tsx|js|jsx|py|rs)(?::\d+(?:-\d+)?)?/g,(_m,name)=>name)
+   .replace(/\b(?:FUNC|CONTRACT|SRC|ANCHOR|EXT|PRIV|VALUE|STORAGE)[-_][A-Za-z0-9_-]+\b/g,'').trim();
+  lines.push(readableDescription,miReadableEvidenceContent(e));
+ }
  return lines.join('\n\n');
 }
   const messages=[
