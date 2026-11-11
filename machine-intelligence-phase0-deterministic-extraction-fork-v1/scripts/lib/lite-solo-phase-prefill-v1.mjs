@@ -1269,7 +1269,6 @@ export function applyForkDeterministicEvidencePrefillV1({root,campaignPath,autho
     forkGraphEvidenceStatus:graph.graphStatus,
     controllerOwnedAutomationInputs:[...new Set([...(copy.automationInputs?.controllerOwnedAutomationInputs??[]),
       'forkSourceGraphEvidenceRef','forkGraphEvidenceStatus'])]};
-  copy.forkPreviewStatus='FORK_ONLY_NO_CONTROLLER_ACCEPTANCE';
   return copy;
 }
 
