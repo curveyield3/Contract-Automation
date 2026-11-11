@@ -99,3 +99,16 @@ An approved market gets **50%** base weight; wallet-held vault shares **100%**. 
 7. Source-bind the existing GitHub fork-full runner to the actual contracts and verifier; exercise the user-authorized Ethereum live-fork rehearsal, record real receipts and gas, and fix observed failures before ever considering mainnet.
 
 **No mainnet deployment, no claim of compile success, and no testing has occurred in this baseline step.** This spec states explicit implementation requirements, not implemented behaviors.
+
+
+## Source adaptation progress — development step 2
+
+The file \`contracts/src/WbtcIporTokenVoting_v1.sol\` is a **source-derived draft** based on the exact Aragon TokenVoting v1.4 source. It retains \`MajorityVotingBase\` inheritance, Aragon's proposal/tally/permission code and the original token clock detection. This is *not deployable* until the snapshot provider, action policy, one-way guardian constitution, plugin setup, upstream dependency remapping, and RISC Zero guest/verifier are implemented and compiled.
+
+Implemented in the source-draft: standard vs removal proposal creation, kind-specific snapshot storage and thresholds, Safe-only up-to-seven-day security stage, early Stage-2 start on Safe approval, permanent stage-one veto, 14/30-day windows, dual-quorum denominator via adapter, one-transaction signature delegation plus activation, frozen-vote tally, spam classification, refundable/forfeitable vault-share bonds, configurable ratios and durations, exact guardian-removal action constraints, and a fail-closed action policy.
+
+**NOT IMPLEMENTED:** \`IWbtcIporSnapshotSource\` implementation for historical wallet + market positions, 3-month/two-miss voter ledger and 3-month special qualification; verified 15/85 scaling; Morpho/CurveLend 50% source adapters; ERC20 raw balance checkpoints; 0.001 share market registration rules; Guardian constitution bytecode and authority guard; updater permissions & dependency deployment setup; ZK proof circuit and acceptance; compilation and live-fork tests. Do not treat the interface as having proved these claims. The source is intentionally a staged development artifact; it is NOT approved for mainnet or a public non-fork testnet.
+
+**Source reality checks:** Snapshot adapter MUST be plugin-only and source-authenticated. Action-policy code-hash pinning is not sufficient to prevent proxy implementation upgrades or DAO-level privilege bypass; the factory/setup must enforce non-upgradeability and DAO permission topology. Early Yes triggers a real transition; a silent 7-day expiration requires a later transaction to advance operationally. Both vote periods and parameters are copied into proposal storage, not referenced dynamically.
+
+**Audit-required issues before deployment:** supermajority support comparison now uses exact \`>=\`; check delegated shares do not become spendable duplicate voting weight; check ERC20 metadata decimal scale; prevent stage-one Yes after cutoff; check all stored actions are covered by the restrictive policy and no alternate OSx executor can bypass guardian removal; ensure \`freezeAtomic\` has a bounded registry and will revert on any missing market data. Draft code has NOT been compiled or executed; required dependencies are not yet vendored.
