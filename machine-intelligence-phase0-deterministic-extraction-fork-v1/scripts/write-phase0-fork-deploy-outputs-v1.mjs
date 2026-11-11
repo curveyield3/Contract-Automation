@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
 
 // Fork-only implementation of the existing Phase 0 output writer.
 // Never writes to a campaign, a receipt, main, the private cache, or the Worker.
@@ -446,10 +447,11 @@ async function buildForkRelationshipGraphV1(){
       question:'Which assumptions about a remote endpoint, keeper, bridge or asynchronous message remain unverified?',
       families:['EXTERNAL_MESSAGE_ASSUME','KEEPER_BOUNDARY']}
   };
-  const patternImplementationSha256=sha256(Buffer.from(JSON.stringify({
+  const patternRulesSha256=sha256(Buffer.from(JSON.stringify({
     implementation:'MI_PHASE0_GRAPH_PATTERN_RULES_V1',
     rules:Object.entries(candidatePatternsV1).sort(([a],[b])=>a.localeCompare(b))
   }), 'utf8'));
+  const patternImplementationSha256=sha256(await fs.readFile(fileURLToPath(import.meta.url)));
   // Existing deploy-candidate observations are retired in favor of graph-root
   // occurrence IDs; the graph root is written before any addendum candidate.
   candidates.length=0;
@@ -536,9 +538,26 @@ async function buildForkRelationshipGraphV1(){
     }
     if(kind==='SLITHER_STATIC_CALLSITE'){
       const callee=String(edge.calleeSignature??'');
+      const functionNode=nodes.find(node=>node.nodeId===edge.from&&node.kind==='SOURCE_FUNCTION');
+      const callingSignature=String(functionNode?.signature??'');
+      const financialAction=/(?:mint|redeem|withdraw|deposit|borrow|repay|liquidat|swap|settle)/i.test(callingSignature);
       if(/(?:^|[^A-Za-z])(on(?:Token|FlashLoan|Swap|Deposit|Withdraw)|fallback|receive|callback|hook)\b/i.test(callee)){
         addGraphCandidate('EXTERNAL_HOOK_OR_CALLBACK',edge,{
           ...options,prerequisites:['VERIFY_CALLER_RESTRICTIONS','REPRODUCE_AUTHORIZED_CALLBACK_CONTEXT']});
+      }
+      if(financialAction&&/(?:oracle|latestRoundData|latestAnswer|getPrice|peekPrice|quotePrice|priceFeed)/i.test(callee)){
+        addGraphCandidate('ORACLE_TO_VALUE_ACTION',edge,{
+          ...options,prerequisites:['PROVE_SOURCE_PRICE_DEPENDENCY_PATH','IDENTIFY_ORACLE_TRUST_AND_STALENESS_POLICY']});
+      }
+      if(financialAction&&/(?:cooldown|timelock|unlock|deadline|maturity|timestamp|blockTime)/i.test(callee)){
+        addGraphCandidate('TIME_OR_STATE_GATE',edge,{
+          ...options,prerequisites:['VERIFY_EXACT_TIME_COMPARISON_FROM_SOURCE',
+            'VERIFY_SOURCE_DEFINED_BOUNDARY_STATE']});
+      }
+      if(/(?:bridge|sendMessage|messenger|xDomain|crossChain|remoteOracle|receiveMessage|keeper)/i.test(callee)){
+        addGraphCandidate('CROSS_CHAIN_OR_AUTOMATION_DEPENDENCY',edge,{
+          ...options,prerequisites:['VERIFY_REMOTE_ENDPOINT_IDENTITY',
+            'VERIFY_MESSAGE_AUTHORITY_AND_REPLAY_POLICY']});
       }
     }
     // Storage-variable names are only source-static leads, never evidence that
@@ -565,7 +584,7 @@ async function buildForkRelationshipGraphV1(){
   const unknownRelationshipRefs=unknowns.map(unknown=>unknown.unknownId);
   const candidateRef=await writeOutput('evidence/phase0/GRAPH_INVESTIGATION_CANDIDATES_v1.json',{
     schemaVersion:'mi-phase0-graph-investigation-candidates-v1',...source,sourceGraphIndexRef:graphRef,
-    patternImplementationSha256,graphIndexRef:graphRef,
+    patternImplementationSha256,patternRulesSha256,graphIndexRef:graphRef,
     candidateCount:candidates.length,candidates,
     subjectDisposition,staticOnlyUnmatchedSourceSubjects,unknownRelationshipRefs,
     candidateCensus:{inputSubjects:edges.length,generatedOccurrences:candidates.length,
@@ -573,8 +592,7 @@ async function buildForkRelationshipGraphV1(){
     patternCoverage:Object.keys(candidatePatternsV1).sort().map(patternFamily=>({
       patternFamily,producedOccurrences:candidates.filter(c=>c.patternFamily===patternFamily).length,
       implementationStatus:[
-        'ACTUAL_ALLOWANCE_OR_PRIVILEGE_EDGE','ORACLE_TO_VALUE_ACTION',
-        'TIME_OR_STATE_GATE','CROSS_CHAIN_OR_AUTOMATION_DEPENDENCY'
+        'ACTUAL_ALLOWANCE_OR_PRIVILEGE_EDGE'
       ].includes(patternFamily)?'SOURCE_JOIN_NOT_IMPLEMENTED':
       'EXACT_GRAPH_OCCURRENCE_MECHANICAL_RULE',
       negativeSecurityConclusion:false})),
