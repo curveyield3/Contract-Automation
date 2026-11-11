@@ -1,9 +1,9 @@
 {
-  "purpose": "three-contract-size-check-source-split",
-  "version": 7,
+  "purpose": "three-contract-compile-size-not-tests",
+  "version": 8,
   "contracts": [
-    "SPP_v6",
-    "TokenVoting_v8",
-    "Risc0Verifier_v2"
+    "SPP_v7",
+    "TV_v9",
+    "Verifier_v3"
   ]
 }
