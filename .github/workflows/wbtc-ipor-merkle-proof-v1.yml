@@ -1,6 +1,11 @@
 name: WBTC IPOR governance Merkle preparation and Ethereum fork rehearsal v2
 
 on:
+  push:
+    branches:
+      - feature/wbtc-ipor-aragon-governance-v1
+    paths:
+      - governance/wbtc-ipor-merkle-v1/.compile-request-v2.json
   workflow_dispatch:
     inputs:
       mode:
@@ -30,73 +35,86 @@ concurrency:
 
 jobs:
   prepare:
-    if: inputs.mode == 'prepare' || inputs.mode == ''
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'prepare' || inputs.mode == '')
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
       ETH_RPC_URL: ${{ secrets.GOVERNANCE_ARCHIVE_RPC_URL }}
       PROPOSAL_ID: ${{ inputs.proposal_id }}
-      CONFIG_PATH: ${{ github.workspace }}/governance/wbtc-ipor-merkle-v1/config/protocol.json
+      CONFIG_PATH: config/protocol.json
+      GOVERNANCE_PROTOCOL_CONFIG_JSON: ${{ secrets.GOVERNANCE_PROTOCOL_CONFIG_JSON }}
       RISC0_DEV_MODE: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Extract pinned governance preparation package
+      - name: Require configured deployed-source manifest
         shell: bash
+        working-directory: ${{ github.workspace }}/governance/wbtc-ipor-merkle-v1/proof
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/wbtc-ipor-governance"
-          tar -xJf governance/wbtc-ipor-merkle-v1/WBTC_IPOR_Governance_Merkle_Workflow_v1.tar.xz -C "$RUNNER_TEMP/wbtc-ipor-governance"
-      - name: Require deployed-contract configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -s "$CONFIG_PATH" || { echo "::error::Configure governance/wbtc-ipor-merkle-v1/config/protocol.json after governance contracts deploy"; exit 1; }
+          test -n "$GOVERNANCE_PROTOCOL_CONFIG_JSON" || { echo "::error::Missing GOVERNANCE_PROTOCOL_CONFIG_JSON secret"; exit 1; }
+          printf '%s\n' "$GOVERNANCE_PROTOCOL_CONFIG_JSON" > config/protocol.json
       - name: Install exact direct dependencies
-        working-directory: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1
+        working-directory: ${{ github.workspace }}/governance/wbtc-ipor-merkle-v1/proof
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Read finalized proposal state
-        working-directory: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1
+        working-directory: ${{ github.workspace }}/governance/wbtc-ipor-merkle-v1/proof
         run: node scripts/collect-snapshot.mjs
       - name: Build standard Merkle tree
-        working-directory: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1
+        working-directory: ${{ github.workspace }}/governance/wbtc-ipor-merkle-v1/proof
         run: node scripts/build-tree.mjs
+      - name: Install pinned RISC Zero Rust toolchain
+        uses: risc0/risc0/.github/actions/rustup@352dea62857ba57331053cd0986a12c1a4708732
+        with:
+          toolchain: '1.94.1'
+      - name: Install official Groth16 prover toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L https://risczero.com/install | bash
+          echo "$HOME/.risc0/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.risc0/bin:$PATH"
+          rzup install --verbose --force cargo-risczero 3.0.5
+          rzup install --verbose --force r0vm 3.0.5
+          rzup install --verbose --force rust 1.94.1
+          rzup install --verbose --force cpp
       - name: Prove authenticated historical state (no mock or dev mode)
-        working-directory: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1
+        working-directory: ${{ github.workspace }}/governance/wbtc-ipor-merkle-v1/proof
         run: bash scripts/prove.sh
       - name: Verify receipt and build unsigned submission
-        working-directory: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1
+        working-directory: ${{ github.workspace }}/governance/wbtc-ipor-merkle-v1/proof
         run: node scripts/prepare-submission.mjs
       - name: Upload verified submission bundle
         uses: actions/upload-artifact@v4
         with:
           name: wbtc-ipor-proposal-${{ inputs.proposal_id }}-submission
-          path: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1/output/
+          path: ${{ github.workspace }}/governance/wbtc-ipor-merkle-v1/proof/output/
           if-no-files-found: error
           retention-days: 30
 
   fork-rehearsal:
-    if: inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full'
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
       UPSTREAM_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+      GOVERNANCE_DEPLOY_CONFIG_JSON: ${{ secrets.GOVERNANCE_DEPLOY_CONFIG_JSON }}
       FORK_BLOCK: ${{ inputs.fork_block }}
       FORK_ONLY_PREFLIGHT: ${{ inputs.mode == 'fork_preflight' && '1' || '0' }}
       RISC0_DEV_MODE: '0'
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: feature/wbtc-ipor-aragon-governance-v1
           persist-credentials: false
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
       - name: Run authenticated local fork and source-bound governance rehearsal
         shell: bash
-        run: bash governance/wbtc-ipor-merkle-v1/fork/fork-rehearsal-v1.sh
+        run: bash governance/wbtc-ipor-merkle-v1/fork/fork-rehearsal-v2.sh
       - name: Publish fork evidence, even if a required integration is missing
         if: always()
         uses: actions/upload-artifact@v4
@@ -105,3 +123,55 @@ jobs:
           path: governance/wbtc-ipor-merkle-v1/fork-output/
           if-no-files-found: warn
           retention-days: 14
+
+  compile-only:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Compile exact adapted Aragon SPP source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/compile-evidence"
+          git clone https://github.com/aragon/staged-proposal-processor-plugin.git "$RUNNER_TEMP/aragon-spp"
+          (
+            cd "$RUNNER_TEMP/aragon-spp"
+            git checkout a1d84e0542cf2db0a542f0159878457dbb7e3515
+            git submodule update --init --recursive
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporStagedProposalProcessor_v4.sol" src/
+            forge build src/StagedProposalProcessor.sol --via-ir --optimizer-runs 1 --sizes
+            forge build src/WbtcIporStagedProposalProcessor_v4.sol --via-ir --optimizer-runs 1 --sizes
+          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/spp-build.log"
+      - name: Compile exact Aragon TokenVoting fork and ZK verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/aragon/token-voting-plugin.git "$RUNNER_TEMP/aragon-token"
+          (
+            cd "$RUNNER_TEMP/aragon-token"
+            git checkout e726c28061486114d601c547e4da1180ed5ab6da
+            git submodule update --init --recursive
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/MajorityVotingBase.sol" src/base/
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/IMajorityVoting.sol" src/base/
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v6.sol" src/
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v1.sol" src/
+            mkdir -p src/lib
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/lib/BokkyPooBahsDateTimeLibrary.sol" src/lib/
+            forge build src/WbtcIporTokenVoting_v6.sol src/WbtcIporZkProofVerifier_v1.sol --via-ir --optimizer-runs 1 --sizes
+          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build.log"
+      - name: Preserve compile diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wbtc-ipor-native-spp-compile-v4
+          path: compile-evidence/
+          if-no-files-found: warn
+          retention-days: 5
+
