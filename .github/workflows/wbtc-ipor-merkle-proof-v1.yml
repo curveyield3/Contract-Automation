@@ -160,6 +160,42 @@ jobs:
             cp -r "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/native-restart-v12/src/." src/
             forge build src/extensions/WbtcCollateralTokenVoting_v4.sol src/verifier/WbtcIporZkProofVerifier_v1.sol --via-ir --optimizer-runs 1 --sizes || { echo "TOKEN_BUILD_OR_SIZE_FAILED" >&2; touch "$GITHUB_WORKSPACE/compile-evidence/token-failed.marker"; }
           ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build-v12.log"
+      - name: Check v11 collateral Merkle generation and tampering resistance (format-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd governance/wbtc-ipor-merkle-v1/proof
+          npm install --ignore-scripts --no-audit --no-fund
+          mkdir -p output
+          cat > output/snapshot.json <<'JSON'
+          {"schemaVersion":3,"processor":"0x3000000000000000000000000000000000000003","parentId":"123","snapshotBlock":1234567,"collateralPenaltyBps":5000,"positions":[{"delegate":"0x1000000000000000000000000000000000000001","rawShares":"100"},{"delegate":"0x2000000000000000000000000000000000000002","rawShares":"200"},{"delegate":"0x1000000000000000000000000000000000000001","rawShares":"100"}]}
+          JSON
+          node scripts/build-tree.mjs
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          import {AbiCoder, keccak256, concat} from 'ethers';
+          const t=JSON.parse(fs.readFileSync('output/merkle.json','utf8'));
+          assert.equal(t.membershipCount,2);
+          assert.equal(t.positionsProvided,3);
+          assert.equal(t.rawCollateralShares,'400');
+          assert.equal(t.weightedCollateralShares,'200');
+          assert.equal(t.proofAuthenticated,false);
+          const abi=AbiCoder.defaultAbiCoder();
+          function pair(a,b){return keccak256(concat(a.toLowerCase()<b.toLowerCase()?[a,b]:[b,a]));}
+          function pathOk(address,raw,proof){
+            let h=keccak256(abi.encode(['address','uint256','address','uint256'],
+              [t.processor,BigInt(t.parentId),address,BigInt(raw)]));
+            for(const sib of proof)h=pair(h,sib);
+            return h.toLowerCase()===t.collateralMerkleRoot.toLowerCase();
+          }
+          for(const [addr,v] of Object.entries(t.proofs)){
+            assert.ok(pathOk(addr,v.rawShares,v.proof),'valid onchain-equivalent proof');
+            assert.equal(pathOk(addr,(BigInt(v.rawShares)+1n).toString(),v.proof),false,
+              'tampered balance must not verify');
+          }
+          console.log('MERKLE_FORMAT_AND_NEGATIVE_TAMPER_CHECK_PASS; no historical census or RISC0 receipt implied');
+          JS
       - name: Preserve compile diagnostics
         if: always()
         uses: actions/upload-artifact@v4

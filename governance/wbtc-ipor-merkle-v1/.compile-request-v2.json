@@ -1,6 +1,6 @@
 {
-  "phase": "fork-risc-zero-router-negative-verification",
-  "attempt": 5,
-  "sourceVersion": 11,
-  "testScope": "authentic-mainnet-fork-router-bytecode-and-reject-invalid-receipt"
+  "phase": "v12-merkle-format-test",
+  "attempt": 6,
+  "contract": "TokenVoting v4",
+  "tests": "Merkle leaves, roots, positive and negative membership; fork router preflight"
 }
