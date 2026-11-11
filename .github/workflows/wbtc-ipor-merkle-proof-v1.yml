@@ -158,7 +158,7 @@ jobs:
             git checkout e726c28061486114d601c547e4da1180ed5ab6da
             git submodule update --init --recursive
             cp -r "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/native-restart-v12/src/." src/
-            forge build src/extensions/WbtcCollateralTokenVoting_v3.sol src/verifier/WbtcIporZkProofVerifier_v1.sol --via-ir --optimizer-runs 1 --sizes || { echo "TOKEN_BUILD_OR_SIZE_FAILED" >&2; touch "$GITHUB_WORKSPACE/compile-evidence/token-failed.marker"; }
+            forge build src/extensions/WbtcCollateralTokenVoting_v4.sol src/verifier/WbtcIporZkProofVerifier_v1.sol --via-ir --optimizer-runs 1 --sizes || { echo "TOKEN_BUILD_OR_SIZE_FAILED" >&2; touch "$GITHUB_WORKSPACE/compile-evidence/token-failed.marker"; }
           ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build-v12.log"
       - name: Preserve compile diagnostics
         if: always()

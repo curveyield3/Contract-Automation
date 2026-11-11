@@ -1,6 +1,6 @@
 {
-  "phase": "fork-preflight-and-token-voting-compilation",
-  "attempt": 3,
-  "reason": "recover existing fork runner path",
-  "testedVersion": 11
+  "phase": "v12-collateral-voting-Yul-repair",
+  "attempt": 4,
+  "reason": "remove compiler-generated 16-return ABI getter",
+  "tests": true
 }
