@@ -69,8 +69,8 @@ contract WbtcIporStagedProposalProcessor is
             || noGuardianIdx > currentConfigIndex) revert InvalidGuardianStageConfiguration();
         Stage[] storage normal = stages[standardIdx];
         Stage[] storage special = stages[removalIdx];
-        Stage[] storage after = stages[noGuardianIdx];
-        if (normal.length != 2 || special.length != 1 || after.length != 1)
+        Stage[] storage afterRemoval = stages[noGuardianIdx];
+        if (normal.length != 2 || special.length != 1 || afterRemoval.length != 1)
             revert InvalidGuardianStageConfiguration();
         Stage storage review = normal[0];
         if (review.bodies.length != 1 || review.bodies[0].addr != safe
@@ -81,7 +81,7 @@ contract WbtcIporStagedProposalProcessor is
             revert InvalidGuardianStageConfiguration();
         if (!_validVotingStage(normal[1], voting, 14 days)
             || !_validVotingStage(special[0], voting, 30 days)
-            || !_validVotingStage(after[0], voting, 14 days))
+            || !_validVotingStage(afterRemoval[0], voting, 14 days))
             revert InvalidGuardianStageConfiguration();
         guardianSafe = safe;
         guardianVoting = IWbtcIporGuardianVoting(voting);
