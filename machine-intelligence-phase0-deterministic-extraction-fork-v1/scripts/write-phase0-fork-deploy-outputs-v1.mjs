@@ -3,6 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {id as ethersTopicId,Interface as EthersInterface} from 'ethers';
+import {findSourceRuntimeTemplateMatchesV1} from '../packages/github-native-sim/src/phase0-execution-input-v2.mjs';
 
 // Fork-only implementation of the existing Phase 0 output writer.
 // Never writes to a campaign, a receipt, main, the private cache, or the Worker.
@@ -357,16 +358,20 @@ async function buildForkRelationshipGraphV1(){
           end=await readVerifiedRuntimeCode(observation.codeAtBlockEnd);
         const refs=[start?.ref,end?.ref].filter(Boolean);
         const stable=start&&end&&start.code===end.code&&end.code.length>2;
-        const matching=stable?(compilerBundle.value?.artifacts??[]).filter(a=>
-          String(a.deployedBytecode??'').toLowerCase()===end.code&&
-          !Object.keys(a.immutableReferences??{}).length&&
-          !Object.keys(a.deployedLinkReferences??{}).length):[];
+        const matching=stable?findSourceRuntimeTemplateMatchesV1({
+          observedBytecode:end.code,artifacts:compilerBundle.value?.artifacts??[]
+        }):[];
+        const exactMatches=matching.filter(x=>x.matchClass==='EXACT_FULL_RUNTIME_BYTECODE');
+        const maskedMatches=matching.filter(x=>x.matchClass!=='EXACT_FULL_RUNTIME_BYTECODE');
+        if(stable&&JSON.stringify(maskedMatches)!==
+          JSON.stringify(observation.maskedTemplateCandidates??[]))
+          throw new Error('GRAPH_MASKED_COMPILER_CODE_REFERENCE_RECONCILIATION_FAILED');
         const exact=stable&&observation.exactTransactionBoundary===true&&
-          matching.length===1&&
+          exactMatches.length===1&&
           String(observation.sourceBinding)==='EXACT_SOURCE_AND_RUNTIME_MATCH'&&
-          observation.compilationUnitId===matching[0].compilationUnitId&&
-          observation.sourceName===matching[0].sourceName&&
-          observation.contractName===matching[0].contractName;
+          observation.compilationUnitId===exactMatches[0].compilationUnitId&&
+          observation.sourceName===exactMatches[0].sourceName&&
+          observation.contractName===exactMatches[0].contractName;
         if(String(observation.sourceBinding)==='EXACT_SOURCE_AND_RUNTIME_MATCH'&&!exact){
           throw new Error('GRAPH_OBSERVED_RUNTIME_CODE_CLAIMS_UNVERIFIED_COMPILER_MATCH');
         }
@@ -375,7 +380,8 @@ async function buildForkRelationshipGraphV1(){
             !start||!end?'UNVERIFIED_RUNTIME_CODE_OR_SHA':
             !stable?'CODE_CHANGED_OR_EMPTY_ACROSS_BLOCK':
             observation.exactTransactionBoundary!==true?'BLOCK_HAS_MULTIPLE_TRANSACTIONS':
-            matching.length>1?'AMBIGUOUS_EXACT_COMPILER_RUNTIME':
+            exactMatches.length>1?'AMBIGUOUS_EXACT_COMPILER_RUNTIME':
+            maskedMatches.length?'MASKED_COMPILER_TEMPLATE_CANDIDATES_ONLY':
             'NO_VERIFIED_COMPILER_IDENTITY',
           sourceIdentity:exact?{
             compilationUnitId:matching[0].compilationUnitId,
@@ -384,6 +390,7 @@ async function buildForkRelationshipGraphV1(){
           codeAtStartSha256:start?.ref?.sha256??null,
           codeAtEndSha256:end?.ref?.sha256??null,
           observedRuntimeSha256:end?sha256(Buffer.from(end.code.slice(2),'hex')):null,
+          maskedCompilerTemplateCandidates:maskedMatches,
           evidenceRefs:refs
         };
         runtimeByAddress.set(address,result);
@@ -397,6 +404,7 @@ async function buildForkRelationshipGraphV1(){
           transactionHash:row.transactionHash,blockNumber:row.blockNumber,
           address,observedRuntimeSha256:result.observedRuntimeSha256,
           sourceIdentity:result.sourceIdentity,
+          compilerTemplateCandidates:result.maskedCompilerTemplateCandidates,
           bindingStatus:result.sourceBinding,
           evidenceRefs:result.evidenceRefs});
       }
@@ -599,6 +607,7 @@ async function buildForkRelationshipGraphV1(){
           runtimeCodeAddress:frame.runtimeCodeAddress,
           storageContextAddress:frame.storageContextAddress,
           sourceIdentity:frameBinding?.sourceIdentity??null,
+          compilerTemplateCandidates:frameBinding?.maskedCompilerTemplateCandidates??[],
           sourceRuntimeBindingStatus:frameBinding?.sourceBinding??'CODE_NOT_CAPTURED',
           inputSelector:frame.inputSelector,
           evidenceRefs:[pathToTrace,...(frameBinding?.evidenceRefs??[])]});
