@@ -1060,6 +1060,28 @@ async function buildForkRelationshipGraphV1(){
   const sorted=arr=>arr.sort((a,b)=>String(a.edgeId??a.nodeId??a.unknownId??a.candidateId)
     .localeCompare(String(b.edgeId??b.nodeId??b.unknownId??b.candidateId)));
   for(const a of [nodes,edges,unknowns,candidates])sorted(a);
+  const encounteredEdgeIds=new Set(),edgeIdentityConflicts=[];
+  for(const edge of edges){
+    const original=edge.edgeId;
+    if(!encounteredEdgeIds.has(original)){
+      encounteredEdgeIds.add(original);continue;
+    }
+    let duplicateOrdinal=1,disambiguated=null;
+    do{
+      disambiguated=mkid('EDGE-DUPLICATE-OCCURRENCE-',original,duplicateOrdinal++);
+    }while(encounteredEdgeIds.has(disambiguated));
+    encounteredEdgeIds.add(disambiguated);
+    edge.originalCollisionId=original;
+    edge.edgeId=disambiguated;
+    edge.duplicateDerivedOccurrenceOrdinal=duplicateOrdinal-1;
+    edgeIdentityConflicts.push({originalEdgeId:original,newEdgeId:disambiguated,
+      type:'SOURCE_DERIVED_GRAPH_EDGE_ID_COLLISION_PRESERVED_NOT_DROPPED'});
+  }
+  if(edgeIdentityConflicts.length){
+    for(const collision of edgeIdentityConflicts)
+      addUnknown('GRAPH_SOURCE_DERIVED_EDGE_ID_COLLISION',rawIndex.ref?.path??null,collision);
+    sorted(unknowns);
+  }
   const writeOutput=async(relative,value)=>{
     const target=path.join(forkRunRoot,...relative.split('/'));
     await fs.mkdir(path.dirname(target),{recursive:true});
@@ -1117,9 +1139,24 @@ async function buildForkRelationshipGraphV1(){
     controllerAcceptance:false,...source,pinnedSource:pinned,
     sourceRefs:[deploy.ref,rawIndex.ref,compilerBundle.ref,contractIdentityIndex.ref,
       runtimeIdentityIndex.ref,staticFacts.ref,methods.ref,sourceIntelligence.ref].filter(Boolean),
-    counts:{nodes:nodes.length,edges:edges.length,unknowns:unknowns.length,
+    counts:{
+      nodes:nodes.length,edges:edges.length,unknowns:unknowns.length,
       observedRuntimeEdges:edges.filter(x=>x.observation==='OBSERVED_LOCAL_FORK').length,
-      staticRelationships:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length},
+      staticRelationships:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length,
+      compilerStaticEdges:edges.filter(x=>String(x.observation??'').startsWith('COMPILER_')).length,
+      slitherSourceEdges:edges.filter(x=>String(x.kind??'').startsWith('SLITHER_')).length,
+      observedFrames:nodes.filter(n=>n.kind==='EVM_CALL_FRAME').length,
+      observedEventLogs: nodes.filter(n=>n.kind==='OBSERVED_EVENT_LOG').length,
+      exactDecodedEventLogs:nodes.filter(n=>
+        n.kind==='OBSERVED_EVENT_LOG'&&n.eventDecodeStatus===
+          'EXACT_RUNTIME_EMITTER_AND_COMPILER_ABI_EVENT_MATCH').length,
+      observedRuntimeCodeAtTx: nodes.filter(n=>n.kind==='BLOCK_SCOPED_RUNTIME_CODE').length,
+      exactCompilerCodeBindings: nodes.filter(n=>
+        n.kind==='BLOCK_SCOPED_RUNTIME_CODE'&&n.bindingStatus==='EXACT_SOURCE_AND_RUNTIME_MATCH').length,
+      storageDeltaEdges:edges.filter(e=>e.kind==='OBSERVED_SUCCESSFUL_TX_STORAGE_CHANGE').length,
+      oneSidedStorageDiffs:edges.filter(e=>e.kind==='OBSERVED_PRESTATE_DIFF_ONE_SIDED_SLOT_UNDETERMINED').length,
+      duplicateEdgeIdentityOccurrencesPreserved:edgeIdentityConflicts.length
+    },
     nodes:[],edges:[],unknowns:[],
     pageCatalog:graphPages,
     recordStorageMode:'COMPLETE_SHA_VERIFIED_PAGES',
@@ -1128,6 +1165,90 @@ async function buildForkRelationshipGraphV1(){
       'NO_PHASE6_PREFILL','NO_COMPLETE_SCENARIO_CENSUS',
       'ACTIVE_USE_METHOD_EXECUTION_NOT_IMPLEMENTED']};
   const graphRef=await writeOutput('evidence/phase0/INTERCONTRACT_RELATIONSHIP_GRAPH_INDEX_v1.json',graph);
+  const archiveUnits=compilerBundle.value?.buildIdentity?.compilationUnits??[];
+  const availableSlitherUnits=staticFacts.value?.sourceUnitRecords??[];
+  const unavailableSlitherUnits=staticFacts.value?.unavailableUnitRecords??[];
+  const reportedUnitIds=new Set([...availableSlitherUnits,...unavailableSlitherUnits]
+    .map(u=>u.unitId));
+  const unitCoverage=archiveUnits.map(unit=>({
+    compilationUnitId:unit.unitId,
+    compilerInputSha256:unit.compilerInputSha256,
+    compilerOutputSha256:unit.compilerOutputSha256,
+    sourceCount:unit.sourceNames?.length??null,
+    contractArtifactCount:unit.artifactQualifiedNames?.length??null,
+    slitherFactStatus:availableSlitherUnits.some(u=>u.unitId===unit.unitId)?
+      'SLITHER_RELATIONAL_REPORTED':
+      unavailableSlitherUnits.some(u=>u.unitId===unit.unitId)?
+        'SLITHER_OR_VYPER_EXPLICITLY_UNAVAILABLE':
+        'NO_UNIT_SPECIFIC_SLITHER_RELATIONAL_RECORD',
+    compiledSourceFiles:(contractIdentityIndex.value?.sourceFiles??[])
+      .filter(file=>file.compilationUnitId===unit.unitId).length,
+    exactCompiledContractIdentities:(contractIdentityIndex.value?.contractIdentities??[])
+      .filter(item=>item.compilationUnitId===unit.unitId).length,
+    sourceGraphContractNodes:nodes.filter(node=>
+      node.kind==='COMPILER_CONTRACT_DECLARATION'&&node.compilationUnitId===unit.unitId).length,
+    sourceSlitherFunctionNodes:nodes.filter(node=>
+      node.kind==='SLITHER_SOURCE_FUNCTION'&&node.compilationUnitId===unit.unitId).length,
+    originalUnitSourceStatus:reportedUnitIds.has(unit.unitId)?
+      'SOURCE_BOUND_OR_EXPLICITLY_UNAVAILABLE':'SOURCE_UNIT_UNRECONCILED'
+  }));
+  const originalTraceRows=actualTrace?.rows??[];
+  const traceCoverage=originalTraceRows.map(tx=>{
+    const frameRows=observedRuntimeFrames.filter(frame=>
+      frame.transactionHash===tx.transactionHash);
+    return{
+      transactionHash:tx.transactionHash,blockNumber:tx.blockNumber,
+      originalTraceStatus:tx.callTraceNormalization,
+      emittedGraphFrameCount:frameRows.length,
+      collectorFrameCount:tx.mechanicalCallFrames?.length??0,
+      hasReceipt:tx.evidence?.some(item=>item.kind==='MINED_RECEIPT')??false,
+      hasCallTrace:tx.evidence?.some(item=>item.kind==='CALL_TRACE')??false,
+      hasOpcodeTrace:tx.evidence?.some(item=>item.kind==='OPCODE_TRACE')??false,
+      hasOptionalPrestateDiff:tx.evidence?.some(item=>item.kind==='PRESTATE_DIFF')??false,
+      codeObservationCount:tx.runtimeCodeObservations?.length??0,
+      exactRuntimeCodeMatchCount:(tx.runtimeCodeObservations??[]).filter(o=>
+        o.sourceBinding==='EXACT_SOURCE_AND_RUNTIME_MATCH').length,
+      rawTraceEvidenceRef:tx.evidence?.find(item=>item.kind==='CALL_TRACE')?.path??null,
+      rawTraceOriginalRecordRetained:true
+    };
+  });
+  const extractionCoverageRef=await writeOutput(
+    'evidence/phase0/GRAPH_EXTRACTION_COVERAGE_v1.json',{
+    schemaVersion:'mi-phase0-graph-extraction-coverage-v1',...source,
+    graphIndexRef:graphRef,compilerBundleRef:compilerBundle.ref,
+    compilerIdentityIndexRef:contractIdentityIndex.ref,slitherRelationalRef:staticFacts.ref,
+    minedTransactionJournalRef:rawIndex.ref,
+    unitCoverage,traceCoverage,
+    counts:{
+      compilerUnits:archiveUnits.length,
+      indexedContractIdentities:contractIdentityIndex.value?.contractIdentities?.length??0,
+      indexedSourceFiles:contractIdentityIndex.value?.sourceFiles?.length??0,
+      slitherRelationalUnits:availableSlitherUnits.length,
+      slitherExplicitlyUnavailableUnits:unavailableSlitherUnits.length,
+      compilerUnitsNotRepresentedInSlither:
+        archiveUnits.filter(unit=>!reportedUnitIds.has(unit.unitId)).length,
+      journalTransactions:actualTrace?.expectedTransactions??0,
+      materializedJournalRows:originalTraceRows.length,
+      graphObservedFrames:observedRuntimeFrames.length,
+      graphRuntimeCodeObservations:graph.counts.observedRuntimeCodeAtTx,
+      graphExactRuntimeBindings:graph.counts.exactCompilerCodeBindings,
+      graphEvents:graph.counts.observedEventLogs,
+      graphStorageDeltas:graph.counts.storageDeltaEdges,
+      graphUnknowns:graph.counts.unknowns,
+      graphPageNodes:graph.pageCatalog.nodes.totalRecords,
+      graphPageEdges:graph.pageCatalog.edges.totalRecords,
+      graphPageUnknowns:graph.pageCatalog.unknowns.totalRecords
+    },
+    allCompiledUnitsReported:archiveUnits.every(unit=>reportedUnitIds.has(unit.unitId)),
+    allJournalTransactionsRepresented:originalTraceRows.length===
+      (actualTrace?.expectedTransactions??0),
+    allGraphPagesHaveCompleteByteReadback:true,
+    hasExecutionAcceptance:false,
+    status:'SOURCE_REVIEW_ONLY_NO_RUNTIME_QUALIFICATION',
+    limitations:[...limitations,
+      'A graph source fact does not establish protocol use, audit safety or full test coverage.']
+  });
+
   const originalSlitherDetectors=await optional('evidence/static-analysis/SLITHER_v1.json','SLITHER_DETECTORS');
   const staticFunctionNodes=nodes.filter(node=>node.kind==='SLITHER_SOURCE_FUNCTION');
   const joinedFunctionIds=new Set(slitherJoins.map(join=>join.sourceFunctionId));
@@ -1771,6 +1892,7 @@ async function buildForkRelationshipGraphV1(){
     candidatesRef:candidateRef,simulationEligibilityRef:eligibilityRef,
     censusRef,phase1ReadOnlyPreviewRef:preview,
     previewFormRefs,previewBindingRefs,flowPlanBridgeRef,testConfigurationHandoffRef,
+    extractionCoverageRef,
     status:'FORK_ONLY_NOT_CONTROLLER_ACCEPTED',
     limitations:['This extension index is not referenced by the immutable graph base or its addenda.']});
   return{graphRef,extensionRef,censusRef,preview,previewFormRefs,previewBindingRefs,counts:graph.counts};
