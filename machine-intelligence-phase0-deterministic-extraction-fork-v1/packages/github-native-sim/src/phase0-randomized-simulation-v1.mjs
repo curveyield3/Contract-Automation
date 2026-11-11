@@ -3060,6 +3060,36 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
     ...detected.genericPackageScripts.map(item=>({...item,framework:'PACKAGE_SCRIPT',disposition:item.safe?'EXECUTION_CANDIDATE':'UNSUPPORTED_NOT_EXECUTED',sourceEvidence:'PACKAGE_JSON'})),
     ...detected.unclassifiedFoundry.map(item=>({...item,disposition:'UNCLASSIFIED_NOT_EXECUTED',sourceEvidence:'FOUNDRY_SCRIPT_FILE'}))
   ];
+  // Preserve every nested-root launch declaration as a separate source-defined
+  // candidate group. The legacy aggregate script run below is NOT evidence that
+  // these independent groups were executed or replay-qualified.
+  const sourceExecutionGroupsV1=nestedProjectRootsV1.flatMap(root=>
+    root.entrypoints.map((entry,ordinal)=>{
+      const identity={sourceArchiveSha256:receipt.source.sha256,
+        projectRootRel:root.projectRootRel,sourceRel:entry.sourceRel??null,
+        sourceFileSha256:entry.sourceFileSha256??null,framework:entry.framework??'UNKNOWN',
+        entry:entry.entry??entry.name??null,ordinal};
+      return{
+        executionGroupId:'EXEC-GROUP-'+sha256(Buffer.from(JSON.stringify(identity),'utf8')).slice(0,40),
+        ...identity,
+        sourceDeclaration:{path:entry.path??null,entry:entry.entry??null,
+          name:entry.name??null,command:entry.command??null},
+        sourceDeclaredNetwork:root.configPaths??[],
+        groupQualificationStatus:'NOT_EXECUTED_ON_INDEPENDENT_FORK',
+        runtimeIsolationStatus:'NOT_PROVEN',
+        commandExecutionPermission:'NOT_GRANTED_BY_DISCOVERY',
+        scenarioId:null,scenarioEvidenceRef:null,
+        limitations:['A discovered launcher is not a proven safe deployment action. Independent fork replay and sandboxing are still required.']
+      };
+    })
+  );
+  const configEvidenceV1=[];
+  for(const rel of sourceConfigPaths){
+    const file=path.join(staged.projectRoot,...rel.split('/'));
+    const bytes=await fs.readFile(file);
+    configEvidenceV1.push({path:rel,sha256:sha256(bytes),bytes:bytes.length,
+      rootRel:path.posix.dirname(rel)});
+  }
   const entrypointInventory={
     schemaVersion:'mi-phase0-deployment-entrypoint-inventory-v1',
     artifactType:'DEPLOYMENT_ENTRYPOINT_INVENTORY',
@@ -3070,10 +3100,12 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
     inventoryCompleteness:'INCOMPLETE_WITH_EXPLICIT_LIMITATIONS',
     nestedProjectRoots:nestedProjectRootsV1,
     nestedProjectRootCount:nestedProjectRootsV1.length,
-    projectRoots:[buildIdentity.discovery.projectPath],
-    frameworkConfigurations:[],
+    projectRoots:nestedProjectRootsV1.map(root=>root.projectRootRel),
+    frameworkConfigurations:configEvidenceV1,
     entrypoints:inventoryEntries,
-    executionGroups:[],
+    executionGroups:sourceExecutionGroupsV1,
+    executionGroupCensus:{planned:sourceExecutionGroupsV1.length,independentlyExecuted:0,
+      sourceOnlyDiscoveryNotExecution:true},
     discoveryLimitations:['Nonstandard framework entrypoints still require full source-bound classification; inventory is not an execution-permission manifest.'],
     counts:{discoveredTotal:inventoryEntries.length,declaredTotal:detected.genericPackageScripts.length,
       autoDetectedTotal:inventoryEntries.length-detected.genericPackageScripts.length,
@@ -3135,7 +3167,11 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
       reuseBasis:'EXACT_ACCEPTED_PHASE0_EXECUTION_BUILD_ARTIFACTS_V2'
     };
     const artifactByQualified=new Map();
-    for(const artifact of build.artifacts??[])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
+    for(const artifact of build.artifacts??[]){
+      const key=`${artifact.sourceName}:${artifact.contractName}`;
+      if(artifactByQualified.has(key))artifactByQualified.set(key,null);
+      else artifactByQualified.set(key,artifact);
+    }
     const artifacts=[...(build.artifacts??[])]; // Do not drop duplicate qualified names across compiler units.
     anvil=await startAnvil({forkUrl:effectiveForkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion,chainId:forkChain.chainId,requireUpstreamChainId:Boolean(forkSelection),forkBlockNumber:scanManifest?.frozenBlock.number??null});
     const localRequest=new ethers.FetchRequest(anvil.url);
