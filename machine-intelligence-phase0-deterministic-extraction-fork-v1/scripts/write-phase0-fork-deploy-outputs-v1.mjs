@@ -268,6 +268,30 @@ async function buildForkRelationshipGraphV1(){
           kind:'SOURCE_FUNCTION',compilationUnitId:unit.unitId,contractName:contract.contractName,
           signature:f.soliditySignature??f.name,sourceSpan:f.sourceSpan,
           evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
+        const sourceFile=String(f.sourceSpan?.file??'').replaceAll('\\','/');
+        const verifiedMethodBindings=(methods.value?.methodCandidates??[]).filter(method=>
+          method.compilationUnitId===unit.unitId&&
+          method.contractName===contract.contractName&&
+          method.signature===(f.soliditySignature??f.name)&&
+          method.runtimeAddress&&
+          byRuntime.get(method.runtimeAddress.toLowerCase())?.compilationUnitId===unit.unitId&&
+          byRuntime.get(method.runtimeAddress.toLowerCase())?.sourceName===method.sourceName&&
+          (sourceFile===method.sourceName||sourceFile.endsWith('/'+method.sourceName)));
+        for(const binding of verifiedMethodBindings){
+          const address=binding.runtimeAddress.toLowerCase();
+          const targetId=mkid('NODE-RUNTIME-',scenario,address);
+          const refSet=[staticFacts.ref,methods.ref,deploy.ref].filter(Boolean);
+          const joinId=mkid('SLIT-JOIN-',functionId,address,binding.signature);
+          slitherJoins.push({joinId,sourceFunctionId:functionId,runtimeAddress:address,
+            compilationUnitId:unit.unitId,sourceName:binding.sourceName,
+            canonicalSignature:binding.signature,selector:binding.selector,
+            status:'COMPILER_SOURCE_AND_BYTE_EXACT_RUNTIME_BOUND',
+            observationClass:'STATIC_SOURCE_FUNCTION_JOIN_NOT_A_CALL_OBSERVATION',evidenceRefs:refSet});
+          edges.push({edgeId:mkid('EDGE-SOURCE-TO-RUNTIME-',joinId),
+            kind:'SOURCE_FUNCTION_BOUND_TO_RUNTIME_CODE',from:functionId,to:targetId,
+            observation:'EXACT_COMPILATION_AND_RUNTIME_IDENTITY_NOT_CALL_EXECUTION',
+            evidenceRefs:refSet});
+        }
         for(const [direction,variables] of [['READ',f.readStorageIds],['WRITE',f.writtenStorageIds]]){
           for(const [n,v] of (variables??[]).entries()){
             const varId=addNode({nodeId:mkid('NODE-STATE-VAR-',unit.unitId,contract.contractName,v.name),
@@ -314,7 +338,7 @@ async function buildForkRelationshipGraphV1(){
     schemaVersion:'mi-phase0-graph-slither-relationship-analysis-v1',
     ...source,slitherInputRef:staticFacts.ref,staticUnitCount:units.length,
     staticEdgeCount:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length,
-    runtimeJoinStatus:'NOT_PROVEN',runtimeJoinRecords:slitherJoins,
+    runtimeJoinStatus:slitherJoins.length?'PARTIALLY_SOURCE_RUNTIME_BOUND':'NOT_PROVEN',runtimeJoinRecords:slitherJoins,
     limitations:staticFacts.value?.unavailableUnitRecords??[]});
   const candidateRef=await writeOutput('evidence/phase0/GRAPH_INVESTIGATION_CANDIDATES_v1.json',{
     schemaVersion:'mi-phase0-graph-investigation-candidates-v1',...source,
@@ -343,7 +367,7 @@ async function buildForkRelationshipGraphV1(){
       staticRelationships:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length},
     nodes,edges,unknowns,limitations,
     extensions:{slitherAnalysisRef:slitherRef,candidatesRef:candidateRef,simulationEligibilityRef:eligibilityRef},
-    coverageLimitations:['NO_GENERALIZED_STATE_OR_EVENT_JOIN_YET','NO_PHASE1_ACCEPTANCE',
+    coverageLimitations:['NO_VERIFIED_STORAGE_SLOT_TO_SOURCE_VARIABLE_OR_EVENT_ABI_JOIN','NO_PHASE1_ACCEPTANCE',
       'NO_PHASE6_PREFILL','NO_COMPLETE_SCENARIO_CENSUS',
       'ACTIVE_USE_METHOD_EXECUTION_NOT_IMPLEMENTED']};
   const graphRef=await writeOutput('evidence/phase0/INTERCONTRACT_RELATIONSHIP_GRAPH_INDEX_v1.json',graph);
