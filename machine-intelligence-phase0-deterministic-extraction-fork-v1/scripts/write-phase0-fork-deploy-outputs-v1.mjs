@@ -790,6 +790,8 @@ async function buildForkRelationshipGraphV1(){
   }
   const units=staticFacts.value?.sourceUnitRecords??[];
   const slitherFunctionIndex=new Map();
+  const slitherFunctionByExactSourceSpan=new Map();
+  const slitherCalleeResolutionRequests=[];
   const exactSourceFunctionCountByUnit=new Map();
   for(const unit of units){
     const unitSourceHashes=new Map((unit.sourceUnitRecords??[]).map(row=>[
@@ -834,6 +836,13 @@ async function buildForkRelationshipGraphV1(){
           arr.push({functionId,sourceName:declaringSource,sourceSha256:originalSourceHash,
             sourceSpan:f.sourceSpan});
           slitherFunctionIndex.set(k,arr);
+          if(Number.isSafeInteger(f.sourceSpan?.start)){
+            const key=[unit.unitId,declaringSource,f.sourceSpan.start,signature].join('::');
+            const bySpan=slitherFunctionByExactSourceSpan.get(key)??[];
+            bySpan.push({functionId,sourceName:declaringSource,
+              sourceSha256:originalSourceHash});
+            slitherFunctionByExactSourceSpan.set(key,bySpan);
+          }
           exactSourceFunctionCountByUnit.set(unit.unitId,
             (exactSourceFunctionCountByUnit.get(unit.unitId)??0)+1);
         }else{
@@ -866,6 +875,8 @@ async function buildForkRelationshipGraphV1(){
             kind:'SLITHER_IR_CALLSITE',
             compilationUnitId:unit.unitId,sourceFunctionId:functionId,
             callKind:call.kind,calleeSignature:call.calleeSignature??null,
+            calleeDeclarationSpan:call.calleeDeclarationSpan??null,
+            calleeReferenceStatus:call.calleeReferenceStatus??'UNRESOLVED',
             destination:call.destination??null,arguments:call.arguments??[],
             callValue:call.callValue??null,returnedInto:call.returnedInto??null,
             sourceSpan:call.sourceSpan,
@@ -875,6 +886,11 @@ async function buildForkRelationshipGraphV1(){
             callKind:call.kind,calleeSignature:call.calleeSignature??null,
             sourceSpan:call.sourceSpan,observation:evidenceClass,
             evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
+          slitherCalleeResolutionRequests.push({unitId:unit.unitId,sourceFunctionId:functionId,
+            callsiteId:callNode,calleeDeclarationSpan:call.calleeDeclarationSpan??null,
+            calleeSignature:call.calleeSignature??null,
+            calleeReferenceStatus:call.calleeReferenceStatus??'UNRESOLVED',
+            callKind:call.kind});
         }
         for(const [n,dep] of (f.variableDependencies??[]).entries()){
           edges.push({edgeId:mkid('EDGE-SLITHER-DATA-',functionId,n,
@@ -903,6 +919,33 @@ async function buildForkRelationshipGraphV1(){
   for(const failed of staticFacts.value?.unavailableUnitRecords??[])
     addUnknown('SLITHER_RELATIONAL_COMPILATION_UNIT_UNAVAILABLE',staticFacts.ref?.path??null,
       {unitId:failed.unitId,analysisStatus:failed.analysisStatus,limitations:failed.limitations??[]});
+  // A Slither call target is resolved only from the API's actual callee
+  // Function object and an exact original source declaration span.
+  for(const call of slitherCalleeResolutionRequests){
+    const callee=call.calleeDeclarationSpan,
+      sourceName=String(callee?.file??'').replaceAll('\\','/');
+    if(call.calleeReferenceStatus!=='SLITHER_FUNCTION_OBJECT'||
+       !Number.isSafeInteger(callee?.start)||!call.calleeSignature||!sourceName)continue;
+    const key=[call.unitId,sourceName,callee.start,call.calleeSignature].join('::');
+    const targets=slitherFunctionByExactSourceSpan.get(key)??[];
+    if(targets.length!==1){
+      addUnknown('SLITHER_STATIC_CALLEE_EXACT_DECLARATION_UNRESOLVED',
+        staticFacts.ref?.path??null,{
+          sourceCallsiteId:call.callsiteId,calleeKey:key,
+          exactDeclarationCandidates:targets.length});
+      continue;
+    }
+    edges.push({edgeId:mkid('EDGE-SLITHER-RESOLVED-CALLEE-',call.callsiteId,
+      targets[0].functionId),
+      kind:'SLITHER_IR_CALLS_DECLARED_FUNCTION',
+      from:call.callsiteId,to:targets[0].functionId,
+      callerFunctionId:call.sourceFunctionId,
+      callKind:call.callKind,
+      targetSourceSha256:targets[0].sourceSha256,
+      bindingStatus:'EXACT_SLITHER_FUNCTION_OBJECT_AND_SOURCE_SPAN',
+      observation:'SOURCE_STATIC_NOT_RUNTIME',
+      evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
+  }
   // Runtime function binding is a two-input join. Code identity and selector
   // must be independently exact; Slither does NOT prove that a runtime call
   // happened simply because the function exists in its source AST.
