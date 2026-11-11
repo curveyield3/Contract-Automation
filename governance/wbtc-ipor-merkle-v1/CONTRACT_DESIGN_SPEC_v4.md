@@ -167,3 +167,8 @@ The policy allows exact vault selectors only after a DAO execution. The DAO's ou
 The intended initial guardian Safe is **`0x47623C62f281807D615eeb4A2CEee9d97F9D3C49`**, as previously designated for the WBTC/IPOR vault system. The OSx setup currently accepts the guardian Safe as an installation parameter instead of embedding it into the contract bytecode; **production deployment must require the exact intended Safe address on the selected chain and independently confirm its owners/threshold**. In an authenticated fork, use the real Safe contract for stage-one `reviewStandardProposal` transactions, never an EOA substitute.
 
 **Important:** Source compilation is not yet reported as successful. An Aragon proposal's voting start/end changes in Stage 1 are recorded both in the plugin and the snapshot registry; the snapshot anchor and weights do not move. This is not yet a complete RISC Zero / special-removal implementation.
+
+
+## Pinned original Aragon build environment
+
+Reused the original Aragon TokenVoting `foundry.toml` and `remappings.txt` under `contracts/` with only the source-relative path changes necessary for this package. Original exact OSx, osx-commons, OpenZeppelin, forge-std and ENS gitlink SHAs are documented in `contracts/DEPENDENCIES_v1.md`. Actual dependency checkout and source compilation are not yet performed. The implementation remains draft until pinned transitive dependencies are available and the compiler confirms source validity.
