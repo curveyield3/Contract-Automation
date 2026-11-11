@@ -646,15 +646,28 @@ jobs:
             kill "$pid" 2>/dev/null || true
           }
           trap cleanup_mimo EXIT
+          # The pinned 9B model is spread over CPU GGML RPC peers through a private
+          # tailnet. Initial tensor transfer and the full 262144-token KV
+          # allocation can exceed the old four-minute startup window.
+          # A 503 /health response is still-loading, not a failed inference.
           ready=false
-          for i in $(seq 1 120); do
+          for i in $(seq 1 600); do
             if curl -fsS http://127.0.0.1:8080/health | jq -e '.status == "ok"' >/dev/null 2>&1; then ready=true; break; fi
             if ! kill -0 "$pid" 2>/dev/null; then
-              tail -n 30 "$RUNNER_TEMP/mimo-server.log"; exit 1
+              echo "::error::MiMo server exited during pinned model initialization"
+              tail -n 80 "$RUNNER_TEMP/mimo-server.log"; exit 1
+            fi
+            if (( i % 30 == 0 )); then
+              echo "MiMo model still initializing after $((i * 2)) seconds; recent server diagnostics:"
+              tail -n 15 "$RUNNER_TEMP/mimo-server.log"
             fi
             sleep 2
           done
-          test "$ready" = true || { echo "Model load timeout"; exit 1; }
+          if [ "$ready" != true ]; then
+            echo "::error::MiMo pinned model still not ready after 1200 seconds; reporting server diagnostics rather than hiding the cause"
+            tail -n 120 "$RUNNER_TEMP/mimo-server.log"
+            exit 1
+          fi
           if [ "$AUDIT_AI_MODE" = campaign ] || [ "$AUDIT_AI_MODE" = autonomous ]; then
             export AUDIT_CONTROLLER_GITHUB_TOKEN="${AUDIT_CONTROLLER_GITHUB_TOKEN:-}"
             test -n "$AUDIT_CONTROLLER_GITHUB_TOKEN"
