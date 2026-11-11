@@ -138,7 +138,7 @@ jobs:
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v1.sol" src/
             mkdir -p src/lib
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/lib/BokkyPooBahsDateTimeLibrary.sol" src/lib/
-            forge build src/WbtcIporTokenVoting_v2.sol src/WbtcIporZkProofVerifier_v1.sol --sizes 2>&1
+            forge build src/WbtcIporTokenVoting_v2.sol src/WbtcIporZkProofVerifier_v1.sol --sizes --via-ir 2>&1
           ) | tee "$GITHUB_WORKSPACE/compile-evidence/solc-build.log"
       - name: Upload exact compiler diagnostics
         if: always()
