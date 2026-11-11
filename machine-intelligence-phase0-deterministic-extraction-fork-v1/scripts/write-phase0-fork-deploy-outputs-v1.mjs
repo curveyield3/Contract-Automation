@@ -424,15 +424,25 @@ async function buildForkRelationshipGraphV1(){
           end=await readVerifiedRuntimeCode(observation.codeAtBlockEnd);
         const refs=[start?.ref,end?.ref].filter(Boolean);
         const stable=start&&end&&start.code===end.code&&end.code.length>2;
-        const matching=stable?findSourceRuntimeTemplateMatchesV1({
+        const success=String(row.receiptStatus??'').toLowerCase()==='0x1'||
+          String(row.receiptStatus??'').toLowerCase()==='0x01'||row.receiptStatus===1;
+        const creationFrames=verifiedFrames.filter(frame=>
+          ['CREATE','CREATE2'].includes(frame.callType)&&
+          frame.to===address&&frame.effectiveReverted!==true);
+        const confirmedCreated=Boolean(success&&start?.code==='0x'&&
+          end?.code?.length>2&&creationFrames.length===1&&
+          observation.codeTransitionMode==='CREATED_DURING_MINED_TRANSACTION'&&
+          JSON.stringify(creationFrames.map(frame=>frame.frameId))===
+            JSON.stringify(observation.confirmedCreationFrameIds??[]));
+        const matching=(stable||confirmedCreated)?findSourceRuntimeTemplateMatchesV1({
           observedBytecode:end.code,artifacts:compilerBundle.value?.artifacts??[]
         }):[];
         const exactMatches=matching.filter(x=>x.matchClass==='EXACT_FULL_RUNTIME_BYTECODE');
         const maskedMatches=matching.filter(x=>x.matchClass!=='EXACT_FULL_RUNTIME_BYTECODE');
-        if(stable&&JSON.stringify(maskedMatches)!==
+        if((stable||confirmedCreated)&&JSON.stringify(maskedMatches)!==
           JSON.stringify(observation.maskedTemplateCandidates??[]))
           throw new Error('GRAPH_MASKED_COMPILER_CODE_REFERENCE_RECONCILIATION_FAILED');
-        const exact=stable&&observation.exactTransactionBoundary===true&&
+        const exact=(stable||confirmedCreated)&&observation.exactTransactionBoundary===true&&
           exactMatches.length===1&&
           String(observation.sourceBinding)==='EXACT_SOURCE_AND_RUNTIME_MATCH'&&
           observation.compilationUnitId===exactMatches[0].compilationUnitId&&
@@ -444,18 +454,21 @@ async function buildForkRelationshipGraphV1(){
         const result={
           address,sourceBinding:exact?'EXACT_SOURCE_AND_RUNTIME_MATCH':
             !start||!end?'UNVERIFIED_RUNTIME_CODE_OR_SHA':
-            !stable?'CODE_CHANGED_OR_EMPTY_ACROSS_BLOCK':
+            !stable&&!confirmedCreated?'CODE_CHANGED_WITHOUT_CONFIRMED_CREATION':
             observation.exactTransactionBoundary!==true?'BLOCK_HAS_MULTIPLE_TRANSACTIONS':
             exactMatches.length>1?'AMBIGUOUS_EXACT_COMPILER_RUNTIME':
             maskedMatches.length?'MASKED_COMPILER_TEMPLATE_CANDIDATES_ONLY':
             'NO_VERIFIED_COMPILER_IDENTITY',
           sourceIdentity:exact?{
-            compilationUnitId:matching[0].compilationUnitId,
-            sourceName:matching[0].sourceName,contractName:matching[0].contractName
+            compilationUnitId:exactMatches[0].compilationUnitId,
+            sourceName:exactMatches[0].sourceName,contractName:exactMatches[0].contractName
           }:null,
           codeAtStartSha256:start?.ref?.sha256??null,
           codeAtEndSha256:end?.ref?.sha256??null,
           observedRuntimeSha256:end?sha256(Buffer.from(end.code.slice(2),'hex')):null,
+          codeTransitionMode:confirmedCreated?'CREATED_DURING_MINED_TRANSACTION':
+            stable?'STABLE_AT_BOUNDARIES':'UNRESOLVED_CODE_TRANSITION',
+          confirmedCreationFrameIds:confirmedCreated?creationFrames.map(frame=>frame.frameId):[],
           maskedCompilerTemplateCandidates:maskedMatches,
           evidenceRefs:refs
         };
