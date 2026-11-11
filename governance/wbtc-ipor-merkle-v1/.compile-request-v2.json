@@ -1,5 +1,6 @@
 {
   "mode": "compile_both_only",
-  "iteration": 4,
-  "source": "aaef538d9516fbf3ab62ee5c9862490d8df91467"
+  "iteration": 5,
+  "source": "6e1434e78415d71b99a44ee67c78b8fb5b610645",
+  "optimization": "non-upgradeable Plugin base"
 }

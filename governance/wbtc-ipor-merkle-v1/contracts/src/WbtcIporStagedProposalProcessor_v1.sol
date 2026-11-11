@@ -5,19 +5,13 @@ import {Errors} from "./libraries/Errors.sol";
 import {Permissions} from "./libraries/Permissions.sol";
 
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
-import {
-    PluginUUPSUpgradeable
-} from "@aragon/osx-commons-contracts/src/plugin/PluginUUPSUpgradeable.sol";
+import {Plugin} from "@aragon/osx-commons-contracts/src/plugin/Plugin.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
 import {
     IProposal
 } from "@aragon/osx-commons-contracts/src/plugin/extensions/proposal/IProposal.sol";
-import {
-    MetadataExtensionUpgradeable
-} from "@aragon/osx-commons-contracts/src/utils/metadata/MetadataExtensionUpgradeable.sol";
-import {
-    ProposalUpgradeable
-} from "@aragon/osx-commons-contracts/src/plugin/extensions/proposal/ProposalUpgradeable.sol";
+import {MetadataExtension} from "@aragon/osx-commons-contracts/src/utils/metadata/MetadataExtension.sol";
+import {Proposal as AragonProposalExtension} from "@aragon/osx-commons-contracts/src/plugin/extensions/proposal/Proposal.sol";
 
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -37,9 +31,9 @@ interface IWbtcIporGuardianVoting {
 ///         Each stage is evaluated by the responsible bodies, determining whether the proposal advances
 ///         to the next stage. Once a proposal successfully passes all stages, it can be executed.
 contract WbtcIporStagedProposalProcessor is
-    ProposalUpgradeable,
-    MetadataExtensionUpgradeable,
-    PluginUUPSUpgradeable
+    AragonProposalExtension,
+    MetadataExtension,
+    Plugin
 {
     using ERC165Checker for address;
 
@@ -332,35 +326,12 @@ contract WbtcIporStagedProposalProcessor is
     /// @param forwarder The new trusted forwarder address.
     event TrustedForwarderUpdated(address indexed forwarder);
 
-    /// @notice Initializes the component.
-    /// @dev This method is required to support [ERC-1822](https://eips.ethereum.org/EIPS/eip-1822).
-    /// @param _dao The IDAO interface of the associated DAO.
-    /// @param _trustedForwarder The trusted forwarder responsible for extracting the original sender.
-    /// @param _stages The stages configuration.
-    /// @param _pluginMetadata The utf8 bytes of a content addressing cid that stores plugin's information.
-    /// @param _targetConfig The target to which this contract will pass actions with an operation type.
-    function initialize(
-        IDAO _dao,
-        address _trustedForwarder,
-        Stage[] calldata _stages,
-        bytes calldata _pluginMetadata,
-        TargetConfig calldata _targetConfig
-    ) external initializer {
-        __PluginUUPSUpgradeable_init(_dao);
-
-        // Allows installation even if `stages` are not present.
-        // This ensures flexibility as users can still install the plugin and decide
-        // later to apply configurations.
-        if (_stages.length > 0) {
-            _updateStages(_stages);
-        }
-
-        if (_trustedForwarder != address(0)) {
-            _setTrustedForwarder(_trustedForwarder);
-        }
-
-        _setMetadata(_pluginMetadata);
-        _setTargetConfig(_targetConfig);
+    /// @notice Source-derived direct Aragon Plugin bound to the
+    /// factory-produced DAO. No voting proxy, upgrade method or custom setup.
+    constructor(IDAO boundDao, bytes memory metadata) Plugin(boundDao) {
+        if (address(boundDao).code.length == 0) revert GovernanceConfigurationMissing();
+        _setMetadata(metadata);
+        _setTargetConfig(TargetConfig({target: address(boundDao), operation: Operation.Call}));
     }
 
     /// @notice Allows to update stage configuration.
@@ -470,14 +441,7 @@ contract WbtcIporStagedProposalProcessor is
         return "(bytes[][] subBodiesCustomProposalParamsABI)";
     }
 
-    /// @notice Sets a new trusted forwarder address.
-    /// @dev Requires the caller to have the `SET_TRUSTED_FORWARDER_PERMISSION_ID` permission.
-    /// @param _forwarder The new trusted forwarder address.
-    function setTrustedForwarder(
-        address _forwarder
-    ) public virtual auth(Permissions.SET_TRUSTED_FORWARDER_PERMISSION_ID) {
-        _setTrustedForwarder(_forwarder);
-    }
+
 
     /// @notice Creates a new proposal in this `StagedProposalProcessor` plugin.
     /// @dev Requires the caller to have the `CREATE_PROPOSAL_PERMISSION_ID` permission.
@@ -676,18 +640,13 @@ contract WbtcIporStagedProposalProcessor is
         public
         view
         virtual
-        override(PluginUUPSUpgradeable, MetadataExtensionUpgradeable, ProposalUpgradeable)
+        override(Plugin, MetadataExtension, AragonProposalExtension)
         returns (bool)
     {
         return super.supportsInterface(_interfaceId);
     }
 
-    /// @notice Indicates whether any particular address is the trusted forwarder.
-    /// @param _forwarder The address of the Forwarder contract that is being used.
-    /// @return `true` if the forwarder is trusted, otherwise false.
-    function isTrustedForwarder(address _forwarder) public view virtual returns (bool) {
-        return _forwarder == getTrustedForwarder();
-    }
+
 
     /// @notice Determines whether the specified proposal can be advanced to the next stage.
     /// @dev Reverts if the proposal with the given `_proposalId` does not exist.
@@ -769,11 +728,7 @@ contract WbtcIporStagedProposalProcessor is
         return ProposalState.Active;
     }
 
-    /// @notice Retrieves the address of the trusted forwarder.
-    /// @return The address of the trusted forwarder.
-    function getTrustedForwarder() public view virtual returns (address) {
-        return trustedForwarder;
-    }
+
 
     /// @notice Permissionless settlement once a parent review was vetoed
     /// or its community ballot has finished. Spam forfeiture requires actual
@@ -1113,13 +1068,7 @@ contract WbtcIporStagedProposalProcessor is
         }
     }
 
-    /// @notice Sets a new trusted forwarder address and emits the event.
-    /// @param _forwarder The trusted forwarder.
-    function _setTrustedForwarder(address _forwarder) internal virtual {
-        trustedForwarder = _forwarder;
 
-        emit TrustedForwarderUpdated(_forwarder);
-    }
 
     /// @notice Internal function to calculate and retrieve the number of approvals and
     ///         vetoes for a proposal in the `_stageId`.
@@ -1181,35 +1130,7 @@ contract WbtcIporStagedProposalProcessor is
         }
     }
 
-    /// @notice Retrieves the original sender address, considering if the call was made through a trusted forwarder.
-    /// @dev If the `msg.sender` is the trusted forwarder, extracts the original sender from the calldata.
-    /// @return The address of the original caller or the `msg.sender` if not called through the trusted forwarder.
-    function _msgSender() internal view override returns (address) {
-        uint256 calldataLength = msg.data.length;
 
-        if (isTrustedForwarder(msg.sender) && calldataLength >= 20) {
-            // At this point we know that the sender is a trusted forwarder,
-            // so we trust that the last bytes of msg.data are the verified sender address.
-            // extract sender address from the end of msg.data
-            return address(bytes20(msg.data[calldataLength - 20:]));
-        } else {
-            return msg.sender;
-        }
-    }
-
-    /// @notice Overrides for `msg.data`. Defaults to the original `msg.data` whenever
-    ///         a call is not performed by the trusted forwarder or the calldata length
-    ///         is less than 20 bytes (an address length).
-    /// @return The calldata without appended address.
-    function _msgData() internal view virtual override returns (bytes calldata) {
-        uint256 calldataLength = msg.data.length;
-
-        if (isTrustedForwarder(msg.sender) && calldataLength >= 20) {
-            return msg.data[:calldataLength - 20];
-        } else {
-            return msg.data;
-        }
-    }
 
     /// @notice Internal helper function that decides if the stage's thresholds are satisfied.
     /// @param _proposalId The proposal id.
