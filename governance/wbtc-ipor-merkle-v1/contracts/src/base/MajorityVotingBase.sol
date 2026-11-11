@@ -4,18 +4,18 @@ pragma solidity ^0.8.8;
 
 /* solhint-disable max-line-length */
 
-import {ERC165Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol";
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
+
 import {SafeCastUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/math/SafeCastUpgradeable.sol";
 
-import {ProposalUpgradeable} from "@aragon/osx-commons-contracts/src/plugin/extensions/proposal/ProposalUpgradeable.sol";
+import {Proposal} from "@aragon/osx-commons-contracts/src/plugin/extensions/proposal/Proposal.sol";
 import {RATIO_BASE, RatioOutOfBounds} from "@aragon/osx-commons-contracts/src/utils/math/Ratio.sol";
-import {PluginUUPSUpgradeable} from "@aragon/osx-commons-contracts/src/plugin/PluginUUPSUpgradeable.sol";
+import {Plugin} from "@aragon/osx-commons-contracts/src/plugin/Plugin.sol";
 import {IDAO} from "@aragon/osx-commons-contracts/src/dao/IDAO.sol";
 import {IProposal} from "@aragon/osx-commons-contracts/src/plugin/extensions/proposal/IProposal.sol";
 import {Action} from "@aragon/osx-commons-contracts/src/executors/IExecutor.sol";
-import {MetadataExtensionUpgradeable} from
-    "@aragon/osx-commons-contracts/src/utils/metadata/MetadataExtensionUpgradeable.sol";
+import {MetadataExtension} from
+    "@aragon/osx-commons-contracts/src/utils/metadata/MetadataExtension.sol";
 
 import {IMajorityVoting} from "./IMajorityVoting.sol";
 
@@ -122,11 +122,10 @@ import {IMajorityVoting} from "./IMajorityVoting.sol";
 /// @custom:security-contact sirt@aragon.org
 abstract contract MajorityVotingBase is
     IMajorityVoting,
-    Initializable,
-    ERC165Upgradeable,
-    MetadataExtensionUpgradeable,
-    PluginUUPSUpgradeable,
-    ProposalUpgradeable
+    ERC165,
+    MetadataExtension,
+    Plugin,
+    Proposal
 {
     using SafeCastUpgradeable for uint256;
 
@@ -301,18 +300,19 @@ abstract contract MajorityVotingBase is
     /// @param _pluginMetadata The plugin specific information encoded in bytes.
     ///     This can also be an ipfs cid encoded in bytes.
     // solhint-disable-next-line func-name-mixedcase
-    function __MajorityVotingBase_init(
-        IDAO _dao,
-        VotingSettings calldata _votingSettings,
-        TargetConfig calldata _targetConfig,
-        uint256 _minApprovals,
-        bytes calldata _pluginMetadata
-    ) internal onlyInitializing {
-        __PluginUUPSUpgradeable_init(_dao);
-        _updateVotingSettings(_votingSettings);
-        _updateMinApprovals(_minApprovals);
-        _setTargetConfig(_targetConfig);
-        _setMetadata(_pluginMetadata);
+    /// @notice Non-upgradeable, direct contract deployment tied to the
+    /// DAO created by the existing Aragon mainnet factory. This is the
+    /// maintained MajorityVotingBase adapted to the official Plugin base,
+    /// not a separate protocol or upgradeable/proxy voting deployment.
+    constructor(IDAO boundDao) Plugin(boundDao) {
+        votingSettings = VotingSettings({
+            votingMode: VotingMode.Standard,
+            supportThreshold: 670000,
+            minParticipation: 250000,
+            minDuration: 14 days,
+            minProposerVotingPower: 0
+        });
+        _setTargetConfig(TargetConfig({target: address(boundDao), operation: Operation.Call}));
     }
 
     /// @notice Checks if this or the parent contract supports an interface by its ID.
@@ -322,7 +322,7 @@ abstract contract MajorityVotingBase is
         public
         view
         virtual
-        override(ERC165Upgradeable, MetadataExtensionUpgradeable, PluginUUPSUpgradeable, ProposalUpgradeable)
+        override(ERC165, MetadataExtension, Plugin, Proposal)
         returns (bool)
     {
         // In addition to the current IMajorityVoting interface, also support previous version
