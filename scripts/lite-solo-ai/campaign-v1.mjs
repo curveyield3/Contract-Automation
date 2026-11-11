@@ -4049,12 +4049,15 @@ async function miAdaptiveSingleQuestionTransportV1(){
    throw Error('Adaptive one-question model input lacks complete actual source evidence or authenticated scope');
 // Present only source-relevant material to MiMo. GitHub Input.json still stores
 // the exact API envelope; controller data/JSON are not model-facing instructions.
+function miVerbatimSourceEvidence(description){
+ return /^(?:Original implementation or specification|Complete original admitted implementation|Complete pinned admitted implementation|Actual admitted implementation|Original pinned source|Complete pinned code)/.test(String(description||''));
+}
 function miReadableEvidenceContent(entry){
  const raw=entry.content;
+ // Never rewrite admitted source, including original imports and comments.
+ if(miVerbatimSourceEvidence(entry.description))return raw;
  let value;try{value=JSON.parse(raw);}catch{
-  // Preserve actual source verbatim, but do not send navigational URLs as security evidence.
-  const actualCode=/^(?:Original implementation or specification|Complete pinned admitted implementation|Actual admitted implementation|Original pinned source|Complete pinned code)/.test(entry.description);
-  return actualCode?raw:raw.replace(/\b(?:https?:\/\/|www\.)\S+/g,'').trim();
+  return raw.replace(/\b(?:https?:\/\/|www\.)\S+/g,'').trim();
  }
  if(value&&value.schemaVersion==='milo-temp-question-round-v1'&&
   value.direction==='output'&&typeof value.originalContent==='string')return value.originalContent.replace(/\b(?:https?:\/\/|www\.)\S+/g,'');
@@ -4096,10 +4099,14 @@ function miReadableQuestion(m){
  if(m.answerFormat)lines.push('Answer convention',String(m.answerFormat));
  lines.push('Source evidence relevant to this question');
  for(const e of m.evidence){
-  const readableDescription=String(e.description||'').replace(/\b(?:https?:\/\/|www\.)\S+/g,'')
-   .replace(/(?:[A-Za-z0-9_.-]+\/)+([A-Za-z0-9_.-]+)\.(?:sol|vy|vyi|ts|tsx|js|jsx|py|rs)(?::\d+(?:-\d+)?)?/g,(_m,name)=>name)
-   .replace(/\b(?:FUNC|CONTRACT|SRC|ANCHOR|EXT|PRIV|VALUE|STORAGE)[-_][A-Za-z0-9_-]+\b/g,'').trim();
-  lines.push(readableDescription,miReadableEvidenceContent(e));
+  let readableDescription=String(e.description||'').replace(/\b(?:https?:\/\/|www\.)\S+/g,'');
+  // Paths and line ranges distinguish different admitted source contexts.
+  // Strip machine identifiers only from non-source narrative evidence.
+  if(!miVerbatimSourceEvidence(e.description))
+   readableDescription=readableDescription
+    .replace(/(?:[A-Za-z0-9_.-]+\/)+([A-Za-z0-9_.-]+)\.(?:sol|vy|vyi|ts|tsx|js|jsx|py|rs)(?::\d+(?:-\d+)?)?/g,(_m,name)=>name)
+    .replace(/\b(?:FUNC|CONTRACT|SRC|ANCHOR|EXT|PRIV|VALUE|STORAGE)[-_][A-Za-z0-9_-]+\b/g,'');
+  lines.push(readableDescription.trim(),miReadableEvidenceContent(e));
  }
  return lines.join('\n\n');
 }
