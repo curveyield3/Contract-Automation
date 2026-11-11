@@ -1,11 +1,6 @@
 name: WBTC IPOR governance Merkle preparation and Ethereum fork rehearsal v2
 
 on:
-  push:
-    branches:
-      - feature/wbtc-ipor-aragon-governance-v1
-    paths:
-      - governance/wbtc-ipor-merkle-v1/.compile-request-v1.json
   workflow_dispatch:
     inputs:
       mode:
@@ -35,7 +30,7 @@ concurrency:
 
 jobs:
   prepare:
-    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'prepare' || inputs.mode == '')
+    if: inputs.mode == 'prepare' || inputs.mode == ''
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
@@ -110,41 +105,3 @@ jobs:
           path: governance/wbtc-ipor-merkle-v1/fork-output/
           if-no-files-found: warn
           retention-days: 14
-
-  source-compile:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: stable
-      - name: Compile only - original pinned Aragon framework
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/compile-evidence"
-          (
-            git clone https://github.com/aragon/token-voting-plugin.git "$RUNNER_TEMP/aragon-voting"
-            cd "$RUNNER_TEMP/aragon-voting"
-            git checkout e726c28061486114d601c547e4da1180ed5ab6da
-            git submodule update --init --recursive
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/MajorityVotingBase.sol" src/base/MajorityVotingBase.sol
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/IMajorityVoting.sol" src/base/IMajorityVoting.sol
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v2.sol" src/
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v1.sol" src/
-            mkdir -p src/lib
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/lib/BokkyPooBahsDateTimeLibrary.sol" src/lib/
-            forge build src/WbtcIporTokenVoting_v2.sol src/WbtcIporZkProofVerifier_v1.sol --sizes --via-ir --optimizer-runs 1 2>&1
-          ) | tee "$GITHUB_WORKSPACE/compile-evidence/solc-build.log"
-      - name: Upload exact compiler diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wbtc-ipor-v5-source-compile-${{ github.run_id }}
-          path: compile-evidence/
-          if-no-files-found: warn
-          retention-days: 5
