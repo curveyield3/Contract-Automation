@@ -625,78 +625,12 @@ contract WbtcIporStagedProposalProcessor is
         _advanceProposal(_proposalId, sender);
     }
 
-    /// @notice Cancels the proposal.
-    /// @dev The proposal can be canceled only if it's allowed in the stage configuration.
-    ///      The caller must have the `CANCEL_PERMISSION_ID` permission to cancel it.
-    /// @param _proposalId The id of the proposal.
-    function cancel(uint256 _proposalId) public virtual auth(Permissions.CANCEL_PERMISSION_ID) {
-        Proposal storage proposal = proposals[_proposalId];
+    // Stage configurations are non-cancelable and non-editable.
+    // Preserve API identifiers but omit the unneeded mutable action paths.
+    function cancel(uint256) public pure virtual { revert ForbiddenGovernanceAction(); }
+    function edit(uint256, bytes calldata, Action[] calldata)
+        public pure virtual { revert ForbiddenGovernanceAction(); }
 
-        // Reverts if proposal is not Active, Advanceable or doesn't exist.
-        _validateStateBitmap(
-            _proposalId,
-            _encodeStateBitmap(ProposalState.Active) | _encodeStateBitmap(ProposalState.Advanceable)
-        );
-
-        uint16 currentStage = proposal.currentStage;
-        Stage storage stage = stages[proposal.stageConfigIndex][currentStage];
-
-        if (!stage.cancelable) {
-            revert Errors.ProposalCanNotBeCancelled(_proposalId, currentStage);
-        }
-
-        proposal.canceled = true;
-
-        emit ProposalCanceled(_proposalId, currentStage, _msgSender());
-    }
-
-    /// @notice Edits the proposal.
-    /// @dev The proposal can be editable only if it's allowed in the stage configuration.
-    ///      The caller must have the `EDIT_PERMISSION_ID` permission to edit
-    ///      and stage must be advanceable.
-    /// @param _proposalId The id of the proposal.
-    /// @param _metadata The metadata of the proposal.
-    /// @param _actions The actions that will be executed after the proposal passes.
-    function edit(
-        uint256 _proposalId,
-        bytes calldata _metadata,
-        Action[] calldata _actions
-    ) public virtual auth(Permissions.EDIT_PERMISSION_ID) {
-        Proposal storage proposal = proposals[_proposalId];
-
-        // Reverts if proposal doesn't exist.
-        ProposalState currentState = _validateStateBitmap(
-            _proposalId,
-            _encodeStateBitmap(ProposalState.Advanceable) | _encodeStateBitmap(ProposalState.Active)
-        );
-
-        uint16 currentStage = proposal.currentStage;
-        Stage storage stage = stages[proposal.stageConfigIndex][currentStage];
-
-        // If there're bodies in a stage, state must be Advanceable, otherwise revert.
-        if (stage.bodies.length != 0 && currentState != ProposalState.Advanceable) {
-            revert Errors.UnexpectedProposalState(
-                _proposalId,
-                uint8(currentState),
-                _encodeStateBitmap(ProposalState.Advanceable)
-            );
-        }
-
-        if (!stage.editable) {
-            revert Errors.ProposalCanNotBeEdited(_proposalId, currentStage);
-        }
-
-        delete proposal.actions;
-
-        for (uint256 i = 0; i < _actions.length; ++i) {
-            proposal.actions.push(_actions[i]);
-        }
-
-        emit ProposalEdited(_proposalId, currentStage, _msgSender(), _metadata, _actions);
-    }
-
-    /// @inheritdoc IProposal
-    /// @dev Requires the `EXECUTE_PERMISSION_ID` permission.
     function execute(
         uint256 _proposalId
     ) public virtual auth(Permissions.EXECUTE_PROPOSAL_PERMISSION_ID) {
@@ -813,6 +747,10 @@ contract WbtcIporStagedProposalProcessor is
     /// @return The address of the trusted forwarder.
     function getTrustedForwarder() public view virtual returns (address) {
         return trustedForwarder;
+    }
+
+    function getProposalCreator(uint256 id) external view returns (address) {
+        return proposals[id].creator;
     }
 
     /// @notice Retrieves all information associated with a proposal by its ID.
