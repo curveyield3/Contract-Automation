@@ -422,6 +422,11 @@ for contract in analysis.contracts:
                     "ir":safe_text(ir),
                     "calleeSignature":safe_text(getattr(callee,"solidity_signature",None)),
                     "calleeName":safe_text(callee),
+                    "calleeDeclarationSpan":source_span(callee),
+                    "calleeDeclaringContractName":safe_text(
+                        getattr(getattr(callee,"contract",None),"name",None)),
+                    "calleeReferenceStatus":"SLITHER_FUNCTION_OBJECT" if callee is not None
+                        else "DYNAMIC_CALLEE_UNRESOLVED",
                     "destination":variable_ref(getattr(ir,"destination",None)),
                     "callValue":variable_ref(getattr(ir,"call_value",None)),
                     "arguments":[variable_ref(v) for v in as_list(getattr(ir,"arguments",[]))],
