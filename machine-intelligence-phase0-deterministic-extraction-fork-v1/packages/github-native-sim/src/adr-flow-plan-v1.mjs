@@ -14,7 +14,7 @@ function components(names){
   groups(){const sets=new Map();for(const k of parents.keys()){const id=find(k),v=sets.get(id)??[];v.push(k);sets.set(id,v);}
   return [...sets.values()].map(uniq).sort((a,b)=>cmp(a[0],b[0]));}};
 }
-export function buildFlowPlanV1({inventory,facts,snapshot=null,limits=DEFAULT_LIMITS}) {
+export function buildFlowPlanV1({inventory,facts,snapshot=null,limits=DEFAULT_LIMITS,graphInvestigations=[]}) {
  if(!inventory||!facts)throw new TypeError('inventory and facts are required');
  const cfg={...DEFAULT_LIMITS,...limits};
  for(const k of Object.keys(DEFAULT_LIMITS))if(!Number.isInteger(cfg[k])||cfg[k]<1)throw new TypeError('invalid '+k);
@@ -99,9 +99,11 @@ export function buildFlowPlanV1({inventory,facts,snapshot=null,limits=DEFAULT_LI
  const questions=[];
  const ask=(kind,names,contexts,evidence,question)=>{
    const namesSorted=uniq(names);
-   questions.push({obligationId:'IOB-'+pad(questions.length+1,4),kind,
-    clusterId:namesSorted.map(clusterOf).find(Boolean)??null,contracts:namesSorted,
-    contextIds:uniq(contexts),evidence:uniq(evidence),question});
+   const next={obligationId:'IOB-'+pad(questions.length+1,4),kind,
+     clusterId:namesSorted.map(clusterOf).find(Boolean)??null,contracts:namesSorted,
+     contextIds:uniq(contexts),evidence:uniq(evidence),question};
+   questions.push(next);
+   return next;
  };
  const pairEdges=new Map();
  for(const e of edges)for(const target of targetContexts(e))
@@ -152,6 +154,45 @@ export function buildFlowPlanV1({inventory,facts,snapshot=null,limits=DEFAULT_LI
   for(const c of ctxs.filter(c=>c.kind==='CONSTRUCTOR'&&deployed.some(n=>owners(c).includes(n))))
     triggers[c.contextId]=uniq([...(triggers[c.contextId]??[]),'DEPLOY_ROLE_STATE']);
  }
+ // A graph investigation is eligible for the existing Flow Plan only after
+ // an exact existing review context has been established by the graph bridge.
+ // Never infer contextIds from addresses or names, and never synthesize AI answers.
+ const graphQuestionBindings=[],unresolvedGraphInvestigations=[];
+ const seenGraphOccurrence=new Set();
+ for(const item of [...graphInvestigations].sort((a,b)=>cmp(a.graphCandidateId,b.graphCandidateId))){
+   const ctx=ctxs.find(c=>c.contextId===item.sourceContextId);
+   const graphId=String(item.graphCandidateId??'');
+   if(!graphId||seenGraphOccurrence.has(graphId)){
+     unresolvedGraphInvestigations.push({graphCandidateId:graphId||null,
+       disposition:'DUPLICATE_OR_ABSENT_GRAPH_CANDIDATE_ID'});continue;
+   }
+   seenGraphOccurrence.add(graphId);
+   if(!ctx||!owners(ctx).some(owner=>clusterOf(owner))){
+     unresolvedGraphInvestigations.push({graphCandidateId:graphId,
+       disposition:'NO_VERIFIED_EXISTING_SOURCE_CONTEXT_AND_CLUSTER',
+       proposedContextId:item.sourceContextId??null});continue;
+   }
+   if(typeof item.investigationQuestion!=='string'||!item.investigationQuestion.trim()||
+      !Array.isArray(item.evidenceRefs)||!item.evidenceRefs.length){
+     unresolvedGraphInvestigations.push({graphCandidateId:graphId,
+       disposition:'MISSING_EXACT_GRAPH_QUESTION_OR_SOURCE_EVIDENCE'});continue;
+   }
+   const exactEvidence=uniq(item.evidenceRefs.map(ref=>
+     typeof ref?.path==='string'&&/^[a-f0-9]{64}$/.test(String(ref.sha256??''))
+       ?ref.path+'@'+ref.sha256:null));
+   if(!exactEvidence.length){
+     unresolvedGraphInvestigations.push({graphCandidateId:graphId,
+       disposition:'GRAPH_SHA_BOUND_EVIDENCE_UNAVAILABLE'});continue;
+   }
+   const q=ask('GRAPH_'+String(item.patternFamily??'UNCLASSIFIED'),owners(ctx),
+     [ctx.contextId],[graphId,...exactEvidence],item.investigationQuestion);
+   q.graphCandidateId=graphId;
+   q.graphEvidenceRefs=item.evidenceRefs;
+   q.sourceContextId=ctx.contextId;
+   graphQuestionBindings.push({graphCandidateId:graphId,flowPlanQuestionId:q.obligationId,
+     sourceContextIds:[ctx.contextId],sourceGraphEvidenceRefs:item.evidenceRefs,
+     clusterId:q.clusterId,disposition:'FLOW_PLAN_QUESTION_GENERATED_NOT_PACKET_ISSUED'});
+ }
  const attackUnits=[];let xi=0;
  for(const cluster of clusters){
   const qs=questions.filter(q=>q.clusterId===cluster.clusterId);
@@ -170,5 +211,6 @@ export function buildFlowPlanV1({inventory,facts,snapshot=null,limits=DEFAULT_LI
  const capacity={flows:flows.length,crossContractFlows:flows.filter(x=>x.crossContract).length,
   clusters:clusters.length,flowReviewUnits:fIndex,residualUnits:rIndex,attackUnits:attackUnits.length,
   reviewableContexts:ctxs.length,integrationQuestions:questions.length};
- return artifact(inventory,{limits:cfg,flows,clusters,reviewUnits,attackUnits,integrationQuestions:questions,gaps,capacity});
+ return artifact(inventory,{limits:cfg,flows,clusters,reviewUnits,attackUnits,integrationQuestions:questions,
+   graphQuestionBindings,unresolvedGraphInvestigations,gaps,capacity});
 }
