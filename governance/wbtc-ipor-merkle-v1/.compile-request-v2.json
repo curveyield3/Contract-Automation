@@ -1,6 +1,8 @@
 {
-  "phase": "v12-merkle-format-test",
-  "attempt": 6,
-  "contract": "TokenVoting v4",
-  "tests": "Merkle leaves, roots, positive and negative membership; fork router preflight"
+  "phase": "v14-weighted-tokenvoting-compile-only",
+  "request": 1,
+  "source": "native-restart-v14/src/extensions/WbtcCollateralTokenVoting_v7.sol",
+  "optimizer": "via-ir / runs 1",
+  "tests": false,
+  "fork": false
 }

@@ -95,7 +95,7 @@ jobs:
           retention-days: 30
 
   fork-rehearsal:
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full'))
+    if: (github.event_name == 'push' && !contains(github.event.head_commit.message, '[compile-only]')) || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full'))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -135,7 +135,45 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
+      - name: Compile v14 weighted TokenVoting (no tests or forks)
+        if: contains(github.event.head_commit.message, '[compile-only]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/compile-evidence"
+          git clone https://github.com/aragon/token-voting-plugin.git "$RUNNER_TEMP/aragon-token-v14"
+          (
+            cd "$RUNNER_TEMP/aragon-token-v14"
+            git checkout e726c28061486114d601c547e4da1180ed5ab6da
+            git submodule update --init --recursive
+            cp -r "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/native-restart-v14/src/." src/
+            status=0
+            forge build src/extensions/WbtcCollateralTokenVoting_v7.sol --via-ir --optimizer-runs 1 --sizes || status=$?
+            artifact="out/WbtcCollateralTokenVoting_v7.sol/WbtcCollateralTokenVoting.json"
+            if test -f "$artifact"; then
+              jq -r '.deployedBytecode.object' "$artifact" > "$GITHUB_WORKSPACE/compile-evidence/v14-runtime-bytecode.txt"
+              hex=$(cat "$GITHUB_WORKSPACE/compile-evidence/v14-runtime-bytecode.txt")
+              if [[ "$hex" == 0x* ]]; then
+                bytes=$(( (${#hex} - 2) / 2 ))
+                echo "V14_RUNTIME_BYTES=$bytes" | tee "$GITHUB_WORKSPACE/compile-evidence/v14-size.txt"
+                echo "EIP170_HEADROOM_BYTES=$(( 24576 - bytes ))" | tee -a "$GITHUB_WORKSPACE/compile-evidence/v14-size.txt"
+              fi
+            else
+              echo "V14_ARTIFACT_MISSING" | tee "$GITHUB_WORKSPACE/compile-evidence/v14-size.txt"
+              status=1
+            fi
+            exit "$status"
+          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/v14-compile.log"
+      - name: Upload v14 compile and size evidence
+        if: always() && contains(github.event.head_commit.message, '[compile-only]')
+        uses: actions/upload-artifact@v4
+        with:
+          name: wbtc-ipor-v14-weighted-tokenvoting-compile
+          path: compile-evidence/
+          if-no-files-found: warn
+          retention-days: 30
       - name: Compile v11 native-based Standard and Guardian SPP (v12 rehearsal)
+        if: "!contains(github.event.head_commit.message, '[compile-only]')"
         shell: bash
         run: |
           set -euo pipefail
@@ -149,6 +187,7 @@ jobs:
             forge build src/extensions/WbtcStandardSPP_v2.sol src/extensions/WbtcGuardianRemovalSPP_v1.sol --via-ir --optimizer-runs 1 --sizes || { echo "SPP_BUILD_OR_SIZE_FAILED" >&2; touch "$GITHUB_WORKSPACE/compile-evidence/spp-failed.marker"; }
           ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/spp-build-v12.log"
       - name: Compile v11 collateral TokenVoting and original RISC Zero verifier
+        if: "!contains(github.event.head_commit.message, '[compile-only]')"
         shell: bash
         run: |
           set -euo pipefail
@@ -161,6 +200,7 @@ jobs:
             forge build src/extensions/WbtcCollateralTokenVoting_v4.sol src/verifier/WbtcIporZkProofVerifier_v1.sol --via-ir --optimizer-runs 1 --sizes || { echo "TOKEN_BUILD_OR_SIZE_FAILED" >&2; touch "$GITHUB_WORKSPACE/compile-evidence/token-failed.marker"; }
           ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build-v12.log"
       - name: Check v11 collateral Merkle generation and tampering resistance (format-only)
+        if: "!contains(github.event.head_commit.message, '[compile-only]')"
         shell: bash
         run: |
           set -euo pipefail
@@ -197,7 +237,7 @@ jobs:
           console.log('MERKLE_FORMAT_AND_NEGATIVE_TAMPER_CHECK_PASS; no historical census or RISC0 receipt implied');
           JS
       - name: Preserve compile diagnostics
-        if: always()
+        if: always() && !contains(github.event.head_commit.message, '[compile-only]')
         uses: actions/upload-artifact@v4
         with:
           name: wbtc-ipor-native-restart-contracts-compile-v12
@@ -208,7 +248,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Enforce all native compilation and EIP-170 size gates
-        if: always()
+        if: always() && !contains(github.event.head_commit.message, '[compile-only]')
         shell: bash
         run: |
           set -euo pipefail
