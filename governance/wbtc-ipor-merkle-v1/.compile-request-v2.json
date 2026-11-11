@@ -1,9 +1,4 @@
 {
-  "purpose": "three-contract-compile-sizes",
-  "version": 9,
-  "contracts": [
-    "SPP8",
-    "TV9",
-    "Verifier4"
-  ]
+  "purpose": "3-contract size optimization, no tests",
+  "version": 10
 }

@@ -160,11 +160,11 @@ jobs:
             git submodule update --init --recursive
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/MajorityVotingBase.sol" src/base/
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/IMajorityVoting.sol" src/base/
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v9.sol" src/
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v4.sol" src/
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v10.sol" src/
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v5.sol" src/
             mkdir -p src/lib
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/lib/BokkyPooBahsDateTimeLibrary.sol" src/lib/
-            forge build src/WbtcIporTokenVoting_v9.sol src/WbtcIporZkProofVerifier_v4.sol --via-ir --optimizer-runs 1 --sizes || echo '::warning::TokenVoting size/compile gate failed; evidence retained'
+            forge build src/WbtcIporTokenVoting_v10.sol src/WbtcIporZkProofVerifier_v5.sol --via-ir --optimizer-runs 1 --sizes || echo '::warning::TokenVoting size/compile gate failed; evidence retained'
           ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build.log"
       - name: Preserve compile diagnostics
         if: always()
