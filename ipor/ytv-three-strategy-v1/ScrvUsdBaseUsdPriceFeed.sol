@@ -23,8 +23,8 @@ contract ScrvUsdBaseUsdPriceFeed {
     using SafeCast for uint256;
 
     address public constant SCRVUSD_RATE_ORACLE = 0x3d8EADb739D1Ef95dd53D718e4810721837c69c1;
-    address public constant CURVE_POOL = 0x5ab01ee6208596f2204b85bdfa39d34c2add98f6;
-    address public constant USDC = 0x833589fCD6EDB6E08f4c7C32D4f71b54bdA02913;
+    address public constant CURVE_POOL = 0x5aB01ee6208596f2204B85bDFA39d34c2aDD98F6;
+    address public constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
     address public constant IPOR_GLOBAL_MIDDLEWARE = 0xD9b73Af0b29Cbaf88F01384EA1fB5ADcb608bed0;
 
     error InvalidSourcePrice();
