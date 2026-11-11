@@ -394,14 +394,59 @@ async function buildForkRelationshipGraphV1(){
     })),coverage:{allGraphSubjectsAccountedFor:false,occurrenceCount:edges.length,
       assignedCount:edges.length,explicitUnknownCount:unknowns.length},
     status:'UNACCEPTED_PREVIEW_NOT_MIMO_QUESTION_INPUT'});
+  // Exercise the actual copied form prefill consumer only against fork-owned
+  // authority templates and source-bound read-back graph evidence.
+  const {applyPhaseBoundaryPrefill}=await import('./lib/lite-solo-phase-prefill-v1.mjs');
+  const authorityRoot='Machine Intelligence Phase0 Deterministic Extraction Fork v1/authority';
+  const previewFormRefs={};
+  const previewBindingRefs={};
+  for(const [sequence,phase] of [[1,'01'],[6,'06']]){
+    const relativeTemplate=path.posix.join(authorityRoot,'phases','phase-'+String(sequence),
+      'resources','PHASE_'+phase+'_WORK_FORM_TEMPLATE_v1.json');
+    const template=JSON.parse(await fs.readFile(
+      path.join(controllerRoot,...relativeTemplate.split('/')),'utf8'));
+    const form=applyPhaseBoundaryPrefill({
+      root:controllerRoot,campaignPath:rel,authorityRoot,sequence,form:template,
+      prefillContext:{isolatedPhase0DeterministicFork:true,forkRunRoot,graphIndexRef:graphRef}
+    });
+    const formRel='previews/phase-'+phase+'/PHASE_'+phase+'_WORK_FORM_FORK_PREVIEW_v1.json';
+    previewFormRefs['phase'+phase]=await writeOutput(formRel,form);
+    const records=sequence===1?
+      (form.actions?.['step-3']?.outputs?.dependencyAssessments??[]).filter(x=>x&&typeof x==='object')
+      :(form.actions?.['step-1']?.outputs?.deploymentAssessments??[]).filter(x=>x&&typeof x==='object');
+    const bindingRecords=records.map((item,index)=>({
+      key:sequence===1?item.dependencyKey:item.componentOrAction,
+      formJsonPointer:sequence===1?
+        '/actions/step-3/outputs/dependencyAssessments/'+index
+        :'/actions/step-1/outputs/deploymentAssessments/'+index,
+      graphIndexRef:graphRef,
+      evidenceRef:sequence===1?
+        (String(item.dependencyKey??'').startsWith('FORK_GRAPH_UNKNOWN:')
+          ?graphRef
+          :{path:'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json',
+             sha256:observedFiles.get('evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json')??null})
+        :{path:item.executionEvidenceRef,sourceGraphIndexSha256:graphRef.sha256},
+      disposition:'MACHINE_PREFILL_SUBJECT_ONLY_SEMANTIC_FIELDS_UNANSWERED'
+    }));
+    const bindings={schemaVersion:'mi-phase0-fork-prefill-bindings-v1',...source,
+      graphIndexRef:graphRef,formRef:previewFormRefs['phase'+phase],
+      phase:sequence,recordCount:bindingRecords.length,
+      records:bindingRecords,sourceHashLimitations:bindingRecords
+        .filter(item=>!item.evidenceRef?.sha256&&sequence===1&&!String(item.key).startsWith('FORK_GRAPH_UNKNOWN:'))
+        .map(item=>({type:'STATIC_SOURCE_RECORD_SHA_UNAVAILABLE',key:item.key}))};
+    const bindsRel='previews/phase-'+phase+'/FORK_PREFILL_'+
+      (sequence===1?'RELATIONSHIP':'CONFIGURATION')+'_BINDINGS_v1.json';
+    previewBindingRefs['phase'+phase]=await writeOutput(bindsRel,bindings);
+  }
   const extensionRef=await writeOutput('evidence/phase0/GRAPH_INTELLIGENCE_EXTENSION_INDEX_v1.json',{
     schemaVersion:'mi-phase0-graph-intelligence-extension-index-v1',
     ...source,graphIndexRef:graphRef,slitherAnalysisRef:slitherRef,
     candidatesRef:candidateRef,simulationEligibilityRef:eligibilityRef,
     censusRef,phase1ReadOnlyPreviewRef:preview,
+    previewFormRefs,previewBindingRefs,
     status:'FORK_ONLY_NOT_CONTROLLER_ACCEPTED',
     limitations:['This extension index is not referenced by the immutable graph base or its addenda.']});
-  return{graphRef,extensionRef,censusRef,preview,counts:graph.counts};
+  return{graphRef,extensionRef,censusRef,preview,previewFormRefs,previewBindingRefs,counts:graph.counts};
 }
 const relationshipGraph=await buildForkRelationshipGraphV1();
 
