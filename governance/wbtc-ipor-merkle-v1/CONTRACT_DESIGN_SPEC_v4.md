@@ -112,3 +112,12 @@ Implemented in the source-draft: standard vs removal proposal creation, kind-spe
 **Source reality checks:** Snapshot adapter MUST be plugin-only and source-authenticated. Action-policy code-hash pinning is not sufficient to prevent proxy implementation upgrades or DAO-level privilege bypass; the factory/setup must enforce non-upgradeability and DAO permission topology. Early Yes triggers a real transition; a silent 7-day expiration requires a later transaction to advance operationally. Both vote periods and parameters are copied into proposal storage, not referenced dynamically.
 
 **Audit-required issues before deployment:** supermajority support comparison now uses exact \`>=\`; check delegated shares do not become spendable duplicate voting weight; check ERC20 metadata decimal scale; prevent stage-one Yes after cutoff; check all stored actions are covered by the restrictive policy and no alternate OSx executor can bypass guardian removal; ensure \`freezeAtomic\` has a bounded registry and will revert on any missing market data. Draft code has NOT been compiled or executed; required dependencies are not yet vendored.
+
+
+## Source-bound guardian constitution implementation
+
+`contracts/src/WbtcIporGuardianConstitution_v1.sol` is a deliberately narrow **non-upgradeable** Aragon-bound implementation of `permanentlyRemoveDaoGuardian()` and `isGuardianRemoved()`. It has only a one-way state transition, guarded by `msg.sender == boundDAO`; it cannot be reset or upgraded at that address. `WbtcIporTokenVoting_v1` reads this contract and requires a successful post-execution removal state.
+
+This is **not yet a complete permanent constitutional guarantee**: OSx root permissions, alternate DAO execute paths, plugin upgrades, DAO target changes and privileged deployment setup could otherwise install a replacement system that ignores the constitution. The deployable factory/DAO permission topology MUST bind the sole authoritative governance plugin to the constitution and ensure no alternate privileged execution path can bypass it. The Guardian-removal proposal must be the only authorized route to call this function. This file is implementation code, not a replacement for audited Aragon permissions.
+
+The origin of the one-way authorization is OSx's existing DAO execution path (`dao().execute`), not a new administrator. The additional small contract is necessary because the base Aragon voting plugin's UUPS upgradeability cannot itself guarantee permanent removal.
