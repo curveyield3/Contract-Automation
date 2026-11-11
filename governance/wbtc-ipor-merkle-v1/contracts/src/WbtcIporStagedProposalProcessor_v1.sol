@@ -20,11 +20,15 @@ import {
 } from "@aragon/osx-commons-contracts/src/plugin/extensions/proposal/ProposalUpgradeable.sol";
 
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 interface IWbtcIporGuardianVoting {
     function guardianRemoved() external view returns (bool);
     function permanentlyRemoveDaoGuardian() external;
     function getVotingToken() external view returns (address);
+    function reserveParentSnapshot(uint256 parentId, address proposer, bool removal) external;
+    function isSpamApproved(uint256 subproposalId) external view returns (bool);
 }
 
 /// @title StagedProposalProcessor
@@ -49,6 +53,11 @@ contract WbtcIporStagedProposalProcessor is
     uint16 public noGuardianStagesIndex;
     mapping(uint256 => bool) public isGuardianRemoval;
     mapping(bytes32 => bool) public allowedStandardAction;
+    mapping(uint256 => uint256) private parentBond;
+    mapping(uint256 => bool) private parentBondClaimed;
+    bool private bondEntryLock;
+    event ParentBondSettled(uint256 indexed parentId, uint256 amount, bool forfeited);
+    error ParentBondNotSettled();
     event StandardActionPolicyUpdated(address indexed target, bytes4 indexed selector, bool enabled);
     error GovernanceConfigurationMissing();
     error InvalidGuardianReview();
@@ -525,6 +534,23 @@ contract WbtcIporStagedProposalProcessor is
         // changing it while proposal is still open
         proposal.stageConfigIndex = index;
         isGuardianRemoval[proposalId] = removal;
+        // The voting body proves proposer eligibility and freezes all
+        // registered community positions at the PARENT creation block.
+        guardianVoting.reserveParentSnapshot(proposalId, creator, removal);
+
+        // Lock one refundable share-token bond on the SPP PARENT only.
+        // The automatically created TokenVoting subproposal has no deposit.
+        if (bondEntryLock) revert ForbiddenGovernanceAction();
+        bondEntryLock = true;
+        address shareToken = guardianVoting.getVotingToken();
+        uint8 decimals = IERC20Metadata(shareToken).decimals();
+        if (decimals < 3 || decimals > 36) revert ForbiddenGovernanceAction();
+        uint256 bond = 10 ** uint256(decimals - 3); // 0.001 actual vault shares
+        if (removal) bond *= 5; // 0.005 shares
+        parentBond[proposalId] = bond;
+        if (!IERC20(shareToken).transferFrom(creator, address(this), bond))
+            revert ForbiddenGovernanceAction();
+        bondEntryLock = false;
 
         if (_startDate == 0) {
             _startDate = uint64(block.timestamp);
@@ -747,6 +773,34 @@ contract WbtcIporStagedProposalProcessor is
     /// @return The address of the trusted forwarder.
     function getTrustedForwarder() public view virtual returns (address) {
         return trustedForwarder;
+    }
+
+    /// @notice Permissionless settlement once a parent review was vetoed
+    /// or its community ballot has finished. Spam forfeiture requires actual
+    /// community quorum and majority on the one native TokenVoting tally.
+    function settleParentBond(uint256 id) external {
+        Proposal storage parent = proposals[id];
+        uint256 bond = parentBond[id];
+        if (bond == 0 || parentBondClaimed[id]) revert ParentBondNotSettled();
+        uint16 ballotStage = isGuardianRemoval[id] || parent.stageConfigIndex == noGuardianStagesIndex
+            ? 0 : 1;
+        bool vetoed = parent.currentStage == 0 && !isGuardianRemoval[id]
+            && bodyResults[id][0][guardianSafe] == ResultType.Veto;
+        bool completed = parent.executed || (parent.currentStage == ballotStage
+            && parent.lastStageTransition + stages[parent.stageConfigIndex][ballotStage].voteDuration
+                <= block.timestamp);
+        if (!vetoed && !completed) revert ParentBondNotSettled();
+
+        bool spam;
+        if (!vetoed) {
+            uint256 subId = bodyProposalIds[id][ballotStage][address(guardianVoting)];
+            if (subId != 0) spam = guardianVoting.isSpamApproved(subId);
+        }
+        parentBondClaimed[id] = true;
+        address recipient = spam ? address(dao()) : parent.creator;
+        if (!IERC20(guardianVoting.getVotingToken()).transfer(recipient, bond))
+            revert ParentBondNotSettled();
+        emit ParentBondSettled(id, bond, spam);
     }
 
     function getProposalCreator(uint256 id) external view returns (address) {
