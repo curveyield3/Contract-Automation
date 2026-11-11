@@ -334,14 +334,26 @@ async function buildForkRelationshipGraphV1(){
     files.push({path:relative,sha256:ref.sha256,bytes:bytes.length});
     return ref;
   };
+  const graph={schemaVersion:'mi-phase0-intercontract-relationship-graph-index-v1',
+    graphStatus:limitations.length||unknowns.length?'INCOMPLETE_WITH_TYPED_UNKNOWNS':'SOURCE_BOUND_PARTIAL_COVERAGE',
+    controllerAcceptance:false,...source,pinnedSource:pinned,
+    sourceRefs:[deploy.ref,rawIndex.ref,staticFacts.ref,methods.ref].filter(Boolean),
+    counts:{nodes:nodes.length,edges:edges.length,unknowns:unknowns.length,
+      observedRuntimeEdges:edges.filter(x=>x.observation==='OBSERVED_LOCAL_FORK').length,
+      staticRelationships:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length},
+    nodes,edges,unknowns,limitations,
+    coverageLimitations:['NO_VERIFIED_STORAGE_SLOT_TO_SOURCE_VARIABLE_OR_EVENT_ABI_JOIN','NO_PHASE1_ACCEPTANCE',
+      'NO_PHASE6_PREFILL','NO_COMPLETE_SCENARIO_CENSUS',
+      'ACTIVE_USE_METHOD_EXECUTION_NOT_IMPLEMENTED']};
+  const graphRef=await writeOutput('evidence/phase0/INTERCONTRACT_RELATIONSHIP_GRAPH_INDEX_v1.json',graph);
   const slitherRef=await writeOutput('evidence/phase0/GRAPH_SLITHER_RELATIONSHIP_ANALYSIS_v1.json',{
     schemaVersion:'mi-phase0-graph-slither-relationship-analysis-v1',
-    ...source,slitherInputRef:staticFacts.ref,staticUnitCount:units.length,
+    ...source,sourceGraphIndexRef:graphRef,slitherInputRef:staticFacts.ref,staticUnitCount:units.length,
     staticEdgeCount:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length,
     runtimeJoinStatus:slitherJoins.length?'PARTIALLY_SOURCE_RUNTIME_BOUND':'NOT_PROVEN',runtimeJoinRecords:slitherJoins,
     limitations:staticFacts.value?.unavailableUnitRecords??[]});
   const candidateRef=await writeOutput('evidence/phase0/GRAPH_INVESTIGATION_CANDIDATES_v1.json',{
-    schemaVersion:'mi-phase0-graph-investigation-candidates-v1',...source,
+    schemaVersion:'mi-phase0-graph-investigation-candidates-v1',...source,sourceGraphIndexRef:graphRef,
     candidateCount:candidates.length,candidates,
     disposition:'MECHANICAL_CANDIDATES_ONLY_NOT_ACCEPTED'});
   const eligible=candidates.map(c=>({
@@ -353,24 +365,11 @@ async function buildForkRelationshipGraphV1(){
     callPathGraphEdgeIds:c.sourceGraphEdgeIds,missingPrerequisites:c.decidingEvidenceNeeded,
     typedLimitations:['LIBRARY_API_NOT_AVAILABLE']}));
   const eligibilityRef=await writeOutput('evidence/phase0/GRAPH_SIMULATION_ELIGIBILITY_v1.json',{
-    schemaVersion:'mi-phase0-graph-simulation-eligibility-v1',...source,
+    schemaVersion:'mi-phase0-graph-simulation-eligibility-v1',...source,sourceGraphIndexRef:graphRef,
     libraryRegistry:{status:'NOT_PROVIDED',version:null,sha256:null},
     eligibilityRecords:eligible,unmatchedGraphCandidateIds:[],
     census:{candidateCount:candidates.length,testEligibilityRecordCount:eligible.length,
       configurableNowCount:0,requiresMimoCount:0,unmatchedCount:0}});
-  const graph={schemaVersion:'mi-phase0-intercontract-relationship-graph-index-v1',
-    graphStatus:limitations.length||unknowns.length?'INCOMPLETE_WITH_TYPED_UNKNOWNS':'SOURCE_BOUND_PARTIAL_COVERAGE',
-    controllerAcceptance:false,...source,pinnedSource:pinned,
-    sourceRefs:[deploy.ref,rawIndex.ref,staticFacts.ref,methods.ref].filter(Boolean),
-    counts:{nodes:nodes.length,edges:edges.length,unknowns:unknowns.length,
-      observedRuntimeEdges:edges.filter(x=>x.observation==='OBSERVED_LOCAL_FORK').length,
-      staticRelationships:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length},
-    nodes,edges,unknowns,limitations,
-    extensions:{slitherAnalysisRef:slitherRef,candidatesRef:candidateRef,simulationEligibilityRef:eligibilityRef},
-    coverageLimitations:['NO_VERIFIED_STORAGE_SLOT_TO_SOURCE_VARIABLE_OR_EVENT_ABI_JOIN','NO_PHASE1_ACCEPTANCE',
-      'NO_PHASE6_PREFILL','NO_COMPLETE_SCENARIO_CENSUS',
-      'ACTIVE_USE_METHOD_EXECUTION_NOT_IMPLEMENTED']};
-  const graphRef=await writeOutput('evidence/phase0/INTERCONTRACT_RELATIONSHIP_GRAPH_INDEX_v1.json',graph);
   const censusRef=await writeOutput('evidence/phase0/GRAPH_TO_AUDIT_SUBJECT_CENSUS_v1.json',{
     schemaVersion:'mi-phase0-graph-to-audit-subject-census-v1',...source,
     graphIndexRef:graphRef,candidateIndexRef:candidateRef,
@@ -395,7 +394,14 @@ async function buildForkRelationshipGraphV1(){
     })),coverage:{allGraphSubjectsAccountedFor:false,occurrenceCount:edges.length,
       assignedCount:edges.length,explicitUnknownCount:unknowns.length},
     status:'UNACCEPTED_PREVIEW_NOT_MIMO_QUESTION_INPUT'});
-  return{graphRef,censusRef,preview,counts:graph.counts};
+  const extensionRef=await writeOutput('evidence/phase0/GRAPH_INTELLIGENCE_EXTENSION_INDEX_v1.json',{
+    schemaVersion:'mi-phase0-graph-intelligence-extension-index-v1',
+    ...source,graphIndexRef:graphRef,slitherAnalysisRef:slitherRef,
+    candidatesRef:candidateRef,simulationEligibilityRef:eligibilityRef,
+    censusRef,phase1ReadOnlyPreviewRef:preview,
+    status:'FORK_ONLY_NOT_CONTROLLER_ACCEPTED',
+    limitations:['This extension index is not referenced by the immutable graph base or its addenda.']});
+  return{graphRef,extensionRef,censusRef,preview,counts:graph.counts};
 }
 const relationshipGraph=await buildForkRelationshipGraphV1();
 
