@@ -3092,6 +3092,50 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
       const methodInventoryPath=path.join(outputRoot,'evidence','phase0','ACTIVE_USE_METHOD_INVENTORY_v1.json');
       await fs.mkdir(path.dirname(methodInventoryPath),{recursive:true});
       await fs.writeFile(methodInventoryPath,JSON.stringify(methodInventory,null,2)+'\n');
+      const activeUseScenario=deploymentTraceIndex.scenarioId;
+      const activeUseRoot=path.join(outputRoot,'evidence','phase0','scenarios',activeUseScenario);
+      await fs.mkdir(activeUseRoot,{recursive:true});
+      const activeUsePlan={schemaVersion:'mi-phase0-active-use-plan-v1',
+        campaignId:receipt.campaign.campaignId,
+        campaignGenerationId:receipt.campaign.campaignGenerationId,
+        sourceArchiveSha256:archiveSha256,scenarioId:activeUseScenario,
+        chainId:forkChain.chainId,pinnedForkBlockNumber:anvil.pinnedBlockNumber,
+        pinnedForkBlockHash:anvil.pinnedBlockHash,
+        planStatus:'INCOMPLETE_SOURCE_CONFIGURATION_REQUIRED',
+        methods:methodInventory.methodCandidates.map(item=>({
+          methodCandidateId:item.methodCandidateId,runtimeAddress:item.runtimeAddress,
+          canonicalSignature:item.signature,selector:item.selector,
+          evidenceClass:item.familyMatchEvidence,
+          sourceExecutionAuthorized:false,
+          missingPrerequisites:[
+            ...(item.runtimeAddress?[]:['EXACT_RUNTIME_ADDRESS']),
+            'SOURCE_DEFINED_ACTOR_AND_ROLE',
+            ...(item.inputTypes.length?['SOURCE_DEFINED_ARGUMENTS']:[]),
+            ...(item.stateMutability==='payable'?['SOURCE_DEFINED_NATIVE_VALUE']:[]),
+            'SOURCE_VERIFIED_STATE_PRECONDITIONS'
+          ],
+          disposition:'UNRESOLVED_NOT_SUBMITTED',
+          qualification:'NOT_A_NEGATIVE_SECURITY_FINDING'
+        })),
+        plannedOperationCount:methodInventory.candidateCount,
+        authorizedUserTransactionCount:0,
+        limitations:['No original source-defined actor/amount/role/action sequence has been established for method calls. Do not synthesize them.']
+      };
+      const activeUseExecution={schemaVersion:'mi-phase0-active-use-execution-v1',
+        ...{campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,
+        sourceArchiveSha256:archiveSha256,scenarioId:activeUseScenario},
+        status:'NOT_EXECUTED_INCOMPLETE_SOURCE_DEFINED_PLAN',
+        submittedTransactions:[],observedRuntimeEffects:[],
+        limitations:activeUsePlan.limitations};
+      const activeUseStateWitnesses={schemaVersion:'mi-phase0-active-use-state-witnesses-v1',
+        scenarioId:activeUseScenario,status:'NOT_CAPTURED_NO_AUTHORIZED_ACTIVE_USE',
+        observationsBeforeUse:[],observationsAfterUse:[],
+        limitations:activeUsePlan.limitations};
+      for(const [name,row] of [
+        ['ACTIVE_USE_PLAN_v1.json',activeUsePlan],
+        ['ACTIVE_USE_EXECUTION_v1.json',activeUseExecution],
+        ['ACTIVE_USE_STATE_WITNESSES_v1.json',activeUseStateWitnesses]
+      ])await fs.writeFile(path.join(activeUseRoot,name),JSON.stringify(row,null,2)+'\n');
       witness.activeUseMethodInventory={status:methodInventory.status,
         path:'evidence/phase0/ACTIVE_USE_METHOD_INVENTORY_v1.json',
         methodCandidateCount:methodInventory.candidateCount};
