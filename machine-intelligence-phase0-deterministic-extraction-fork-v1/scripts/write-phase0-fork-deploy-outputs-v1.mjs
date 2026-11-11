@@ -607,6 +607,37 @@ async function buildForkRelationshipGraphV1(){
   // Step 8 original Flow Plan bridge: source review, not runtime-name inference.
   // Only an exact source file SHA, unique compilation unit, exact signature
   // and source span may become a prefilled caller context.
+  // Configuration handoff reuses the existing library's future selection path.
+  // No registry API or executable target recipe is assumed to exist.
+  const testConfigurationHandoffRef=await writeOutput(
+    'previews/simulation-library/GRAPH_TEST_CONFIGURATION_HANDOFF_v1.json',{
+    schemaVersion:'mi-phase0-graph-test-configuration-handoff-v1',
+    ...source,graphIndexRef:graphRef,candidateIndexRef:candidateRef,
+    eligibilityIndexRef:eligibilityRef,
+    registryStatus:'LIBRARY_API_NOT_SOURCE_VERIFIED',
+    sourceBoundProposals:eligible.map(record=>({
+      eligibilityId:record.eligibilityId,
+      candidateIds:record.sourceGraphCandidateIds,
+      suggestedTestFamilyKeys:record.suggestedTestFamilies,
+      testFamilyKey:record.testFamilyKey,
+      registeredLibraryTestId:null,
+      sourceGraphEvidenceRefs:[graphRef,candidateRef,eligibilityRef],
+      sourceCallPathOccurrenceIds:record.callPathGraphEdgeIds,
+      actorConfig:null,assetsConfig:null,amountConfig:null,oracleConfig:null,
+      runtimeScenarioConfig:null,sourceConfigurationStatus:'NEEDS_SOURCE_DEFINED_PREREQUISITES',
+      selectionStatus:'POSSIBLY_ELIGIBLE',
+      executionStatus:'NOT_EXECUTED_BY_PHASE0_LIBRARY',
+      immunityClaim:false,securityVerdict:null,
+      missingPrerequisites:[
+        ...record.missingPrerequisites,
+        'VERIFY_REAL_LIBRARY_REGISTRY_AND_TEST_IMPLEMENTATION',
+        'IDENTIFY_SOURCE_DEFINED_ACTORS_AND_AMOUNTS',
+        'VERIFY_PINNED_RUNTIME_AND_STATE'
+      ]
+    })),
+    proposalCount:eligible.length,configuredCount:0,executedCount:0,
+    status:'FORK_PREVIEW_CONFIGURATION_UNRESOLVED_NO_TEST_EXECUTION'
+  });
   const reviewInventory=await optional('evidence/review-inventory/REVIEW_INVENTORY_v1.json','REVIEW_INVENTORY');
   const originalFacts=await optional('evidence/review-inventory/SYSTEM_FACTS_v1.json','SYSTEM_FACTS');
   const contractIdentities=await optional('evidence/phase0/CONTRACT_IDENTITY_INDEX_v1.json','CONTRACT_IDENTITIES');
@@ -864,7 +895,7 @@ async function buildForkRelationshipGraphV1(){
     ...source,graphIndexRef:graphRef,slitherAnalysisRef:slitherRef,
     candidatesRef:candidateRef,simulationEligibilityRef:eligibilityRef,
     censusRef,phase1ReadOnlyPreviewRef:preview,
-    previewFormRefs,previewBindingRefs,flowPlanBridgeRef,
+    previewFormRefs,previewBindingRefs,flowPlanBridgeRef,testConfigurationHandoffRef,
     status:'FORK_ONLY_NOT_CONTROLLER_ACCEPTED',
     limitations:['This extension index is not referenced by the immutable graph base or its addenda.']});
   return{graphRef,extensionRef,censusRef,preview,previewFormRefs,previewBindingRefs,counts:graph.counts};
