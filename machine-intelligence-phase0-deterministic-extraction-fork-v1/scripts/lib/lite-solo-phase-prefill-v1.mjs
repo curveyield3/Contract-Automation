@@ -1184,7 +1184,99 @@ function originalPhase1DiscoveryRosterV1({root,campaignPath}){
   };
 }
 
+// Fork-only mechanical graph preview: never writes an accepted campaign form.
+// The original non-fork phase prefill path below remains intact.
+export function applyForkDeterministicEvidencePrefillV1({root,campaignPath,authorityRoot,sequence,form,prefillContext={}}){
+  const runRel=path.relative(path.resolve(root),path.resolve(prefillContext.forkRunRoot??'')).split(path.sep).join('/');
+  const expectedPrefix='Machine Intelligence Phase0 Deterministic Extraction Fork v1/runs/';
+  if(!runRel.startsWith(expectedPrefix)||runRel.split('/').length!==4||runRel.includes('..'))
+    throw new Error('FORK_PREFILL_ROOT_NOT_ISOLATED');
+  if(![1,6].includes(sequence))return {...form,forkPreviewStatus:'FORK_PREFILL_SEQUENCE_NOT_SUPPORTED'};
+  const graphRef=prefillContext.graphIndexRef;
+  if(!graphRef?.path||!/^[a-f0-9]{64}$/i.test(String(graphRef.sha256??'')))
+    throw new Error('FORK_PREFILL_GRAPH_SHA_OR_PATH_REQUIRED');
+  const graphPath=path.resolve(prefillContext.forkRunRoot,...graphRef.path.split('/'));
+  if(!graphPath.startsWith(path.resolve(prefillContext.forkRunRoot)+path.sep))
+    throw new Error('FORK_PREFILL_GRAPH_PATH_ESCAPE');
+  const graphBytes=fs.readFileSync(graphPath);
+  const digest=createHash('sha256').update(graphBytes).digest('hex');
+  if(digest!==graphRef.sha256)throw new Error('FORK_PREFILL_GRAPH_DIGEST_MISMATCH');
+  const graph=JSON.parse(graphBytes.toString('utf8'));
+  const receipt=readJsonIf(path.join(prefillContext.forkRunRoot,'inputs','READ_ONLY_INPUT_RECEIPT_COPY.json'));
+  if(!receipt||graph.campaignId!==receipt.campaign?.campaignId||
+    graph.campaignGenerationId!==receipt.campaign?.campaignGenerationId||
+    graph.sourceArchiveSha256!==receipt.source?.sha256)
+    throw new Error('FORK_PREFILL_GRAPH_SOURCE_GENERATION_MISMATCH');
+  const originalSourceIntelligence=readJsonIf(path.join(prefillContext.forkRunRoot,
+    'evidence','source-intelligence','SOURCE_INTELLIGENCE_AUTOMATED_v1.json'))??{};
+  const si=originalSourceIntelligence.sourceIntelligence??originalSourceIntelligence;
+  const interfaces=Array.isArray(si.externalInterfaces)?si.externalInterfaces:[];
+  const graphRows=Array.isArray(graph.edges)?graph.edges:[];
+  const mk=field=>({...field,trustAssumptions:'<REQUIRED>',failureModes:'<REQUIRED>',
+    authorityImplications:'<REQUIRED>',securitySignificance:'<REQUIRED>',laterEvidenceNeeds:'<REQUIRED>'});
+  const copy=structuredClone(form);
+  if(sequence===1){
+    const idCounts=new Map();
+    for(const entry of interfaces){const id=String(entry?.interfaceId??'').trim();if(id)idCounts.set(id,(idCounts.get(id)??0)+1);}
+    const rows=interfaces.map((entry,index)=>{
+      const id=String(entry?.interfaceId??'').trim();
+      const key=id&&idCounts.get(id)===1?id:'SOURCE_INTELLIGENCE_AUTOMATED_v1.json#externalInterfaces['+index+']';
+      const value=entry?.dependencyOrInterface??entry?.interfaceOrType??entry?.targetContractId??null;
+      const base={dependencyKey:key,identity:value??'<REQUIRED>',
+        automationOwnedFields:value?['dependencyKey','identity']:['dependencyKey']};
+      return mk(base);
+    });
+    const originalKeys=new Set(rows.map(row=>row.dependencyKey));
+    for(const item of graph.unknowns??[]){
+      const key='FORK_GRAPH_UNKNOWN:'+item.unknownId;
+      if(originalKeys.has(key))continue;
+      rows.push(mk({dependencyKey:key,identity:item.kind+' / '+(item.details?.address??'UNRESOLVED'),
+        automationOwnedFields:['dependencyKey','identity']}));
+    }
+    if(rows.length)copy.actions['step-3'].outputs.dependencyAssessments=rows;
+  }else{
+    const originalDeploy=readJsonIf(path.join(prefillContext.forkRunRoot,
+      'evidence','phase0','PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'))??{};
+    const rows=[];
+    for(const [index,attempt] of (originalDeploy.attempts??[]).entries()){
+      rows.push({componentOrAction:attempt.script??attempt.action??'DEPLOY_ATTEMPT_'+index,
+        executionEvidenceRef:'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',
+        observedState:attempt.resultSummary??attempt.status??'ATTEMPT_RECORDED',
+        securityInterpretation:'<REQUIRED>',contradictionOrNone:'<REQUIRED>',
+        limitationOrNone:'<REQUIRED>',
+        automationOwnedFields:['componentOrAction','executionEvidenceRef','observedState']});
+    }
+    for(const edge of graphRows.filter(row=>row.observation==='OBSERVED_LOCAL_FORK')){
+      rows.push({componentOrAction:'GRAPH_EDGE:'+edge.edgeId,
+        executionEvidenceRef:graphRef.path+'#edges/'+graphRows.indexOf(edge),
+        observedState:edge.kind+'; scenario='+String(edge.scenarioId??'UNRESOLVED')+
+          '; source-bound runtime observation (not a security conclusion)',
+        securityInterpretation:'<REQUIRED>',contradictionOrNone:'<REQUIRED>',
+        limitationOrNone:'<REQUIRED>',
+        automationOwnedFields:['componentOrAction','executionEvidenceRef','observedState']});
+    }
+    for(const unknown of graph.unknowns??[]){
+      rows.push({componentOrAction:'GRAPH_UNKNOWN:'+unknown.unknownId,
+        executionEvidenceRef:graphRef.path,observedState:'UNRESOLVED '+unknown.kind,
+        securityInterpretation:'<REQUIRED>',contradictionOrNone:'<REQUIRED>',
+        limitationOrNone:'<REQUIRED>',
+        automationOwnedFields:['componentOrAction','executionEvidenceRef','observedState']});
+    }
+    if(rows.length)copy.actions['step-1'].outputs.deploymentAssessments=rows;
+  }
+  copy.automationInputs={...(copy.automationInputs??{}),
+    forkSourceGraphEvidenceRef:graphRef,
+    forkGraphEvidenceStatus:graph.graphStatus,
+    controllerOwnedAutomationInputs:[...new Set([...(copy.automationInputs?.controllerOwnedAutomationInputs??[]),
+      'forkSourceGraphEvidenceRef','forkGraphEvidenceStatus'])]};
+  copy.forkPreviewStatus='FORK_ONLY_NO_CONTROLLER_ACCEPTANCE';
+  return copy;
+}
+
 export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths=[],predecessorReceiptPath,prefillContext={}}){
+  if(prefillContext?.isolatedPhase0DeterministicFork===true)
+    return applyForkDeterministicEvidencePrefillV1({
+      root,campaignPath,authorityRoot,sequence,form,prefillContext});
   form.automationInputs={
     ...(form.automationInputs??{}),
     predecessorReceiptPath,
