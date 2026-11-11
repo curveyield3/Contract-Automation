@@ -160,11 +160,11 @@ jobs:
             git submodule update --init --recursive
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/MajorityVotingBase.sol" src/base/
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/IMajorityVoting.sol" src/base/
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v13.sol" src/
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v14.sol" src/
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v6.sol" src/
             mkdir -p src/lib
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/lib/BokkyPooBahsDateTimeLibrary.sol" src/lib/
-            forge build src/WbtcIporTokenVoting_v13.sol src/WbtcIporZkProofVerifier_v6.sol --via-ir --optimizer-runs 1 --sizes
+            forge build src/WbtcIporTokenVoting_v14.sol src/WbtcIporZkProofVerifier_v6.sol --via-ir --optimizer-runs 1 --sizes
           ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build.log"
       - name: Preserve compile diagnostics
         if: always()
@@ -174,7 +174,7 @@ jobs:
           path: |
             compile-evidence/
             governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporStagedProposalProcessor_v8.sol
-            governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v13.sol
+            governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v14.sol
             governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v6.sol
             governance/wbtc-ipor-merkle-v1/contracts/src/base/MajorityVotingBase.sol
             governance/wbtc-ipor-merkle-v1/contracts/src/base/IMajorityVoting.sol
