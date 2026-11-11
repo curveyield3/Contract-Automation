@@ -568,21 +568,40 @@ async function buildForkRelationshipGraphV1(){
     subjectDisposition,staticOnlyUnmatchedSourceSubjects,unknownRelationshipRefs,
     candidateCensus:{inputSubjects:edges.length,generatedOccurrences:candidates.length,
       groupedCandidates:candidates.length,explicitUnknowns:unknowns.length},
+    patternCoverage:Object.keys(candidatePatternsV1).sort().map(patternFamily=>({
+      patternFamily,producedOccurrences:candidates.filter(c=>c.patternFamily===patternFamily).length,
+      implementationStatus:[
+        'ACTUAL_ALLOWANCE_OR_PRIVILEGE_EDGE','ORACLE_TO_VALUE_ACTION',
+        'TIME_OR_STATE_GATE','CROSS_CHAIN_OR_AUTOMATION_DEPENDENCY'
+      ].includes(patternFamily)?'SOURCE_JOIN_NOT_IMPLEMENTED':
+      'EXACT_GRAPH_OCCURRENCE_MECHANICAL_RULE',
+      negativeSecurityConclusion:false})),
     disposition:'MECHANICAL_CANDIDATES_ONLY_NOT_ACCEPTED'});
+  // Family keys are proposals taken from registered pattern definitions;
+  // they are never represented as resolved exploit-immunity library test IDs.
   const eligible=candidates.map(c=>({
-    eligibilityId:mkid('TEST-ELIG-',c.candidateId),sourceGraphCandidateIds:[c.candidateId],
-    testFamilyKey:c.patternType==='DELEGATECALL_STORAGE_CONTEXT'?'DELEGATECALL_CONTEXT':
-      c.patternType==='CONTRACT_CREATION'?'FACTORY_CREATION':'CROSS_CONTRACT_ACCOUNTING',
-    registeredLibraryTestId:null,selectionStatus:'POSSIBLY_ELIGIBLE',
-    configurationStatus:'REQUIRES_LIBRARY_REGISTRY',executionStatus:'NOT_EXECUTED_BY_PHASE0_LIBRARY',
-    callPathGraphEdgeIds:c.sourceGraphEdgeIds,missingPrerequisites:c.decidingEvidenceNeeded,
-    typedLimitations:['LIBRARY_API_NOT_AVAILABLE']}));
+    eligibilityId:mkid('TEST-ELIG-',c.graphCandidateId),
+    sourceGraphCandidateIds:[c.graphCandidateId],
+    suggestedTestFamilies:c.suggestedTestFamilies,
+    testFamilyKey:c.suggestedTestFamilies?.[0]??null,
+    registeredLibraryTestId:null,
+    selectionStatus:'POSSIBLY_ELIGIBLE',
+    configurationStatus:'REQUIRES_LIBRARY_REGISTRY',
+    executionStatus:'NOT_EXECUTED_BY_PHASE0_LIBRARY',
+    callPathGraphEdgeIds:c.exactGraphOccurrenceIds,
+    missingPrerequisites:c.unresolvedPrerequisites,
+    evidenceClass:c.candidateEvidenceClass,
+    sourceGraphIndexRef:graphRef,
+    candidateIndexRef:candidateRef,
+    typedLimitations:['LIBRARY_REGISTRY_NOT_INSPECTED',
+      'TEST_CONFIGURATION_NOT_SOURCE_VERIFIED',
+      'NO_IMMUNITY_OR_SAFE_VERDICT']}));
   const eligibilityRef=await writeOutput('evidence/phase0/GRAPH_SIMULATION_ELIGIBILITY_v1.json',{
     schemaVersion:'mi-phase0-graph-simulation-eligibility-v1',...source,sourceGraphIndexRef:graphRef,
     libraryRegistry:{status:'NOT_PROVIDED',version:null,sha256:null},
     eligibilityRecords:eligible,unmatchedGraphCandidateIds:[],
     census:{candidateCount:candidates.length,testEligibilityRecordCount:eligible.length,
-      configurableNowCount:0,requiresMimoCount:0,unmatchedCount:0}});
+      configurableNowCount:0,requiresMimoCount:eligible.length,unmatchedCount:0}});
   const censusRef=await writeOutput('evidence/phase0/GRAPH_TO_AUDIT_SUBJECT_CENSUS_v1.json',{
     schemaVersion:'mi-phase0-graph-to-audit-subject-census-v1',...source,
     graphIndexRef:graphRef,candidateIndexRef:candidateRef,
