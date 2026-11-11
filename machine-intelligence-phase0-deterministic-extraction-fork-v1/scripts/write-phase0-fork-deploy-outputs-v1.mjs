@@ -422,16 +422,77 @@ async function buildForkRelationshipGraphV1(){
           for(const slot of [...new Set([...Object.keys(oldStorage),...Object.keys(newStorage)])].sort()){
             const before=oldStorage[slot]??null,after=newStorage[slot]??null;
             if(before===after)continue;
-            const slotId=addNode({nodeId:mkid('NODE-SLOT-',scenario,address,slot),
-              kind:'OBSERVED_STORAGE_SLOT',scenarioId:scenario,address:address.toLowerCase(),slot,
-              sourceVariableIdentity:null,bindingStatus:'STORAGE_SLOT_SOURCE_UNKNOWN',
+            const validValue=value=>typeof value==='string'&&
+              /^(?:0x[0-9a-f]+|[0-9]+)$/i.test(value);
+            let numericSlot=null,beforeNumeric=null,afterNumeric=null;
+            try{numericSlot=BigInt(slot);}catch{}
+            try{if(validValue(before))beforeNumeric=BigInt(before);}catch{}
+            try{if(validValue(after))afterNumeric=BigInt(after);}catch{}
+            if(beforeNumeric!==null&&afterNumeric!==null&&beforeNumeric===afterNumeric)
+              continue;
+            const exactBoth=beforeNumeric!==null&&afterNumeric!==null;
+            const layoutCandidates=[];
+            const stateAddress=String(address).toLowerCase();
+            for(const frame of verifiedFrames){
+              if(frame.storageContextAddress!==stateAddress)continue;
+              const identity=runtimeByAddress.get(frame.runtimeCodeAddress)?.sourceIdentity;
+              if(!identity)continue;
+              const artifact=compilerByIdentity.get([
+                identity.compilationUnitId,identity.sourceName,identity.contractName].join('::'));
+              if(!artifact)continue;
+              for(const variable of artifact.storageLayout?.storage??[]){
+                let baseSlot=null;
+                try{baseSlot=BigInt(String(variable.slot));}catch{}
+                if(baseSlot===null||numericSlot===null||baseSlot!==numericSlot)continue;
+                const detail=artifact.storageLayout?.types?.[variable.type]??null;
+                layoutCandidates.push({
+                  sourceCompUnitId:identity.compilationUnitId,
+                  sourceName:identity.sourceName,contractName:identity.contractName,
+                  storageContextAddress:stateAddress,
+                  codeAddress:frame.runtimeCodeAddress,
+                  originalFrameId:frame.frameId,
+                  variableLabel:variable.label,
+                  slot:String(variable.slot),offset:Number(variable.offset),
+                  typeId:variable.type,encoding:detail?.encoding??'UNKNOWN',
+                  staticLayoutOnly:true
+                });
+              }
+            }
+            const layoutDistinct=[...new Map(layoutCandidates.map(v=>[
+              [v.sourceCompUnitId,v.sourceName,v.contractName,v.variableLabel,v.offset,v.typeId].join('::'),v
+            ])).values()];
+            const sourceLayoutStatus=layoutDistinct.length===1&&
+              layoutDistinct[0].encoding!=='mapping'&&
+              layoutDistinct[0].encoding!=='dynamic_array'?
+              'UNIQUE_COMPILER_LAYOUT_BASE_SLOT_ONLY':
+              layoutDistinct.length>1?'MULTIPLE_LAYOUT_ENTRIES_SHARE_SLOT':
+              layoutDistinct.length===1?'DYNAMIC_STORAGE_LAYOUT_REQUIRES_KEY_OR_OFFSET':
+              'SOURCE_STORAGE_LAYOUT_UNRESOLVED';
+            const slotId=addNode({
+              nodeId:mkid('NODE-SLOT-',scenario,address,slot),
+              kind:'OBSERVED_STORAGE_SLOT',scenarioId:scenario,
+              address:stateAddress,slot,normalizedNumericSlot:numericSlot?.toString()??null,
+              sourceVariableIdentity:null,
+              bindingStatus:'TRANSACTION_SCOPED_LAYOUT_ON_EDGES_NOT_GLOBAL',
               evidenceRefs:[stateEvidence.ref]});
-            edges.push({edgeId:mkid('EDGE-STORAGE-MUTATION-',scenario,row.transactionHash,address,slot),
-              kind:'OBSERVED_SUCCESSFUL_TX_STORAGE_CHANGE',from:txid,to:slotId,
+            edges.push({
+              edgeId:mkid('EDGE-STORAGE-MUTATION-',scenario,row.transactionHash,address,slot),
+              kind:exactBoth?'OBSERVED_SUCCESSFUL_TX_STORAGE_CHANGE':
+                'OBSERVED_PRESTATE_DIFF_ONE_SIDED_SLOT_UNDETERMINED',
+              from:txid,to:slotId,
+              transactionHash:row.transactionHash,
+              storageAddress:stateAddress,slot,
+              oldValue:before,newValue:after,
               oldValueSha256:before===null?null:sha256(Buffer.from(String(before))),
               newValueSha256:after===null?null:sha256(Buffer.from(String(after))),
-              stateDisposition:'TRANSACTION_RECEIPT_SUCCESS',
-              observation:'OBSERVED_LOCAL_FORK',evidenceRefs:[stateEvidence.ref,receiptEvidence.ref]});
+              numericValueDelta:exactBoth?(afterNumeric-beforeNumeric).toString():null,
+              diffCompleteness:exactBoth?'BOTH_VALUES_PRESENT':
+                'ONE_SIDED_DIFF_TRACER_NO_EXACT_DELTA',
+              storageLayoutCandidates:layoutDistinct,
+              storageLayoutBindingStatus:sourceLayoutStatus,
+              stateDisposition:'MINED_RECEIPT_SUCCESS_AND_PRESTATE_DIFF',
+              observation:'OBSERVED_LOCAL_FORK',
+              evidenceRefs:[stateEvidence.ref,receiptEvidence.ref]});
           }
         }
       }
