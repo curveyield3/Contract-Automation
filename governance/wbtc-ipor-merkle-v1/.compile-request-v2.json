@@ -1,5 +1,5 @@
 {
-  "purpose": "EIP170 three-contract size confirmation",
-  "version": 12,
+  "purpose": "three-contract runtime, correct meta-tx authenticated voter",
+  "version": 13,
   "tests": false
 }
