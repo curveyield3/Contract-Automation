@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "mi-phase0-isolated-run-request-v1",
+  "executionAuthorized": false,
+  "runMode": "SOURCE_REVIEW_ONLY",
+  "campaignId": null,
+  "campaignPath": null,
+  "auditControllerRef": "machine-intelligence-audit-controller-v1",
+  "expectedSourceSha256": null,
+  "expectedCampaignGenerationId": null
+}
