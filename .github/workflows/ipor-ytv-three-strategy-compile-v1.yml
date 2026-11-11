@@ -1,0 +1,81 @@
+name: IPOR ytv three-strategy source compile v1
+
+on:
+  push:
+    branches: [ipor-ytv-three-strategy-build-v1]
+    paths:
+      - 'ipor/ytv-three-strategy-v1/**'
+      - '.github/workflows/ipor-ytv-three-strategy-compile-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout isolated ytv compile branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+      - name: Retrieve pinned official IPOR source and exact dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none https://github.com/IPOR-Labs/ipor-fusion.git .ipor
+          git -C .ipor checkout --quiet 636bb4c2b78826586a0c0c8c9083c5c285692657
+          cd .ipor
+          npm ci --ignore-scripts --no-audit --no-fund
+          cd ..
+          cp ipor/ytv-three-strategy-v1/ScrvUsdBaseUsdPriceFeed.sol .ipor/contracts/price_oracle/price_feed/
+      - name: Compile official fuses and price-feed alongside single custom adapter (no tests)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$GITHUB_WORKSPACE/.ipor"
+          forge --version
+          forge build --root "$ROOT" --force -vv \
+            contracts/fuses/curve_stableswap_ng/CurveStableswapNGSingleSideSupplyFuse.sol \
+            contracts/fuses/curve_stableswap_ng/CurveStableswapNGSingleSideBalanceFuse.sol \
+            contracts/price_oracle/price_feed/CurveStableSwapNGPriceFeed.sol \
+            contracts/price_oracle/price_feed/ScrvUsdBaseUsdPriceFeed.sol
+          mkdir -p ipor/ytv-three-strategy-v1/compiled-artifacts
+          python3 - <<'PY'
+          import json, pathlib, hashlib
+          root = pathlib.Path(".ipor/out")
+          names = (
+            "CurveStableswapNGSingleSideSupplyFuse",
+            "CurveStableswapNGSingleSideBalanceFuse",
+            "CurveStableSwapNGPriceFeed",
+            "ScrvUsdBaseUsdPriceFeed",
+          )
+          artifacts = {}
+          for name in names:
+            path = root / (name + ".sol") / (name + ".json")
+            artifact = json.loads(path.read_text())
+            code = artifact["bytecode"]["object"]
+            assert code.startswith("0x") and len(code) > 102
+            artifacts[name] = {
+              "creationBytecode": code,
+              "creationBytes": (len(code)-2)//2,
+              "sha256": hashlib.sha256(bytes.fromhex(code[2:])).hexdigest(),
+              "abi": artifact["abi"],
+            }
+            print("COMPILED", name, "size", artifacts[name]["creationBytes"], "sha256", artifacts[name]["sha256"])
+          out = pathlib.Path("ipor/ytv-three-strategy-v1/compiled-artifacts/creation-bytecode-v1.json")
+          out.write_text(json.dumps({"sourcePin":"636bb4c2b78826586a0c0c8c9083c5c285692657","build":artifacts}, separators=(",",":")))
+          print("COMPILE_SUCCESS_BUNDLE_BYTES", out.stat().st_size)
+          PY
+      - name: Upload bytecode artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipor-ytv-three-strategy-bytecode-v1
+          path: ipor/ytv-three-strategy-v1/compiled-artifacts/creation-bytecode-v1.json
+          if-no-files-found: error
+          retention-days: 30
