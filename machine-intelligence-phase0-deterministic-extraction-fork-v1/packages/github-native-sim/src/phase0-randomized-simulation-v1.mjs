@@ -105,6 +105,64 @@ async function rpc(url,method,params=[]){
 }
 // Capture all actually mined package-deployment transactions on the same fork
 // before teardown; no RPC traces are reconstructed from post-revert state.
+function canonicalAbiParameterTypeV1(param){
+  const type=String(param?.type??'');
+  return type.startsWith('tuple')
+    ? '('+(param.components??[]).map(canonicalAbiParameterTypeV1).join(',')+')'+type.slice(5)
+    : type;
+}
+function buildActiveUseMethodInventoryV1({receipt,artifacts,deployedContracts,chainId,pinnedBlockNumber,pinnedBlockHash}){
+  const operationName=/^(deposit|depositFor|mint|withdraw|redeem|stake|unstake|supply|borrow|repay|claim|harvest|swap|exactInput|exactOutput|addLiquidity|removeLiquidity|joinPool|exitPool|open|close|settle|wrap|unwrap|liquidate)$/i;
+  const items=[];
+  for(const artifact of artifacts){
+    const sourceId={compilationUnitId:artifact.compilationUnitId??null,
+      sourceName:artifact.sourceName,contractName:artifact.contractName};
+    const potentiallyNamed=(deployedContracts??[]).filter(dep=>
+      dep.compilationUnitId===sourceId.compilationUnitId&&
+      dep.sourceName===sourceId.sourceName&&dep.contractName===sourceId.contractName);
+    const runtimeBindings=potentiallyNamed.filter(dep=>
+      dep.sourceBinding==='EXACT_SOURCE_AND_RUNTIME_MATCH'&&/^0x[0-9a-fA-F]{40}$/.test(dep.address??''));
+    for(const abi of artifact.abi??[]){
+      if(!['function','fallback','receive'].includes(abi?.type))continue;
+      const signature=abi.type==='function'
+        ? String(abi.name)+'('+(abi.inputs??[]).map(canonicalAbiParameterTypeV1).join(',')+')'
+        : abi.type;
+      const selectorRaw=artifact.methodIdentifiers?.[signature]??null;
+      const selector=/^(?:0x)?[a-f0-9]{8}$/i.test(String(selectorRaw??''))
+        ? '0x'+String(selectorRaw).replace(/^0x/i,'').toLowerCase():null;
+      const name=String(abi.name??'');
+      const bindingRows=runtimeBindings.length?runtimeBindings:[null];
+      for(const binding of bindingRows){
+        const identity={...sourceId,signature,chainId,pinnedBlockNumber,pinnedBlockHash,
+          runtimeAddress:binding?.address?.toLowerCase()??null};
+        items.push({
+          methodCandidateId:'METHOD-'+sha256(Buffer.from(JSON.stringify(identity))).slice(0,32),
+          ...identity,
+          abiType:abi.type,selector,inputTypes:(abi.inputs??[]).map(canonicalAbiParameterTypeV1),
+          outputTypes:(abi.outputs??[]).map(canonicalAbiParameterTypeV1),
+          stateMutability:abi.stateMutability??null,
+          potentialOperationFamily:operationName.test(name)?name:null,
+          familyMatchEvidence:operationName.test(name)?'ABI_SIGNATURE':'ELIGIBILITY_UNKNOWN_INVENTORIED',
+          runtimeIdentityStatus:binding?'EXACT_SOURCE_AND_RUNTIME_MATCH':'UNRESOLVED_NO_EXACT_RUNTIME_PROOF',
+          eligibility:'UNRESOLVED_NEEDS_SOURCE_CONFIGURATION',
+          executionStatus:'NOT_EXECUTED',
+          executionAuthorized:false
+        });
+      }
+    }
+  }
+  return{schemaVersion:'mi-phase0-active-use-method-inventory-v1',
+    campaignId:receipt.campaign.campaignId,
+    campaignGenerationId:receipt.campaign.campaignGenerationId,
+    sourceArchiveSha256:receipt.source.sha256,
+    chainId,pinnedBlockNumber,pinnedBlockHash,
+    methodCandidates:items,
+    candidateCount:items.length,
+    unresolvedRuntimeBindings:items.filter(x=>x.runtimeIdentityStatus!=='EXACT_SOURCE_AND_RUNTIME_MATCH').length,
+    status:'METHOD_CENSUS_ONLY_ACTIVE_USE_EXECUTION_NOT_IMPLEMENTED',
+    limitations:['A compiled ABI is not a verified runtime contract identity, permitted actor or executable transaction; no actor, fixture or transaction has been manufactured.']};
+}
+
 async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceIdentity,chainId,pinnedBlockNumber,pinnedBlockHash,initialBlock,scriptEnd}){
   const scenarioIdentity={...sourceIdentity,chainId,pinnedBlockNumber,pinnedBlockHash,
     branch:'SOURCE_DEPLOYMENT',runId:String(process.env.GITHUB_RUN_ID??'LOCAL'),
@@ -3000,6 +3058,17 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         gaps,limitations:gaps,
         coverage:{detectedScripts:dispositions.length,requiredScripts:dispositions.length,executedScripts:deployment.attempts.length,passedScripts:deployment.attempts.filter(row=>row.status==='PASS').length,failedOrUnsupportedScripts:dispositions.filter(row=>row.disposition!=='EXECUTED_PASS').length,excludedScripts:0}
       };
+      const methodInventory=buildActiveUseMethodInventoryV1({
+        receipt,artifacts:sharedExecutionInputs.artifacts,
+        deployedContracts:witness.deployedContracts,chainId:forkChain.chainId,
+        pinnedBlockNumber:anvil.pinnedBlockNumber,pinnedBlockHash:anvil.pinnedBlockHash
+      });
+      const methodInventoryPath=path.join(outputRoot,'evidence','phase0','ACTIVE_USE_METHOD_INVENTORY_v1.json');
+      await fs.mkdir(path.dirname(methodInventoryPath),{recursive:true});
+      await fs.writeFile(methodInventoryPath,JSON.stringify(methodInventory,null,2)+'\n');
+      witness.activeUseMethodInventory={status:methodInventory.status,
+        path:'evidence/phase0/ACTIVE_USE_METHOD_INVENTORY_v1.json',
+        methodCandidateCount:methodInventory.candidateCount};
       deploymentEvidence=witness;
       await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(witness,null,2)+'\n');
       let deployedStateSnapshot;
