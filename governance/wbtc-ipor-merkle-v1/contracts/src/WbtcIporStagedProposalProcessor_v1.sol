@@ -336,7 +336,7 @@ contract WbtcIporStagedProposalProcessor is
     /// @dev This method is required to support [ERC-1822](https://eips.ethereum.org/EIPS/eip-1822).
     /// @param _dao The IDAO interface of the associated DAO.
     /// @param _trustedForwarder The trusted forwarder responsible for extracting the original sender.
-    /// @param requested The stages configuration.
+    /// @param _stages The stages configuration.
     /// @param _pluginMetadata The utf8 bytes of a content addressing cid that stores plugin's information.
     /// @param _targetConfig The target to which this contract will pass actions with an operation type.
     function initialize(
@@ -936,7 +936,7 @@ contract WbtcIporStagedProposalProcessor is
     /// @dev It's a caller's responsibility not to call this in case `_stages` are empty.
     ///      This function can not be overridden as it's crucial to not allow duplicating bodies
     ///      in the same stage, because proposal creation and report functions depend on this assumption.
-    /// @param _stages The stages configuration.
+    /// @param requested The stages configuration.
     /// @notice Only one authorized governance body per stage is supported.
     /// This preserves native Aragon stage versions and execution machinery,
     /// while removing arbitrary N-body combinations we never install.
