@@ -281,15 +281,33 @@ async function buildForkRelationshipGraphV1(){
   const actualTrace=rawIndex.value;
   if(actualTrace){
     if(actualTrace.sourceIdentity?.sourceArchiveSha256!==source.sourceArchiveSha256||
-      actualTrace.sourceIdentity?.campaignGenerationId!==source.campaignGenerationId)
-      throw new Error('GRAPH_TRACE_SOURCE_GENERATION_JOIN_MISMATCH');
+      actualTrace.sourceIdentity?.campaignGenerationId!==source.campaignGenerationId||
+      actualTrace.sourceIdentity?.campaignId!==source.campaignId||
+      actualTrace.sourceIdentity?.chainId!==pinned.chainId||
+      actualTrace.sourceIdentity?.pinnedBlockNumber!==pinned.pinnedForkBlockNumber||
+      String(actualTrace.sourceIdentity?.pinnedBlockHash??'').toLowerCase()!==
+        String(pinned.pinnedForkBlockHash??'').toLowerCase())
+      throw new Error('GRAPH_TRACE_SOURCE_GENERATION_CHAIN_OR_FORK_PIN_MISMATCH');
     if(actualTrace.scenarioId!==scenario)throw new Error('GRAPH_SCENARIO_ID_MISMATCH');
+    const rowIds=new Set();
     for(const row of actualTrace.rows??[]){
+      const txHash=String(row.transactionHash??'').toLowerCase();
+      if(!/^0x[0-9a-f]{64}$/.test(txHash)||
+         rowIds.has(txHash)||!Number.isSafeInteger(row.blockNumber)||
+         row.blockNumber<=actualTrace.initialBlock||row.blockNumber>actualTrace.scriptEnd){
+        throw new Error('GRAPH_TRACE_JOURNAL_DUPLICATED_TX_OR_BLOCK_OUTSIDE_SCRIPT_RANGE');
+      }
+      rowIds.add(txHash);
       const pathToTrace=row.evidence?.find(x=>x.kind==='CALL_TRACE');
       if(!pathToTrace){addUnknown('CALL_TRACE_MISSING',rawIndex.ref?.path??null,{txHash:row.transactionHash});continue}
       const expected=pathToTrace.sha256;
       const observed=await readCompleteCapturedRpcJsonV1(pathToTrace,'CALL_TRACE');
-      if(observed.limitation||observed.ref?.sha256!==expected){
+      if(observed.limitation||observed.ref?.sha256!==expected||
+         observed.manifest?.scenarioId!==scenario||
+         String(observed.manifest?.txHash??'').toLowerCase()!==txHash||
+         observed.manifest?.blockNumber!==row.blockNumber||
+         observed.manifest?.chainId!==pinned.chainId||
+         observed.manifest?.sourceIdentity?.sourceArchiveSha256!==source.sourceArchiveSha256){
         limitations.push({type:'CALL_TRACE_SHA_MISSING_OR_MISMATCH',txHash:row.transactionHash,
           expectedSha256:expected,actualSha256:observed.ref?.sha256??null});
         continue;
@@ -319,6 +337,15 @@ async function buildForkRelationshipGraphV1(){
            observation.scenarioId!==scenario||observation.blockNumber!==row.blockNumber){
           limitations.push({type:'RUNTIME_CODE_OBSERVATION_IDENTITY_INVALID',
             transactionHash:row.transactionHash,address});
+          continue;
+        }
+        const listedFrames=verifiedFrames.filter(frame=>frame.runtimeCodeAddress===address)
+          .map(frame=>frame.frameId).sort();
+        const claimedFrames=[...(observation.frameIds??[])].sort();
+        if(JSON.stringify(listedFrames)!==JSON.stringify(claimedFrames)){
+          limitations.push({type:'RUNTIME_CODE_FRAME_OCCURRENCE_CENSUS_MISMATCH',
+            transactionHash:row.transactionHash,address,
+            originalFrameCount:listedFrames.length,claimedFrameCount:claimedFrames.length});
           continue;
         }
         if(runtimeByAddress.has(address)){
@@ -387,7 +414,12 @@ async function buildForkRelationshipGraphV1(){
       // A receipt event is an observed emitted log, not a source-level ABI match.
       const receiptPointer=row.evidence?.find(x=>x.kind==='MINED_RECEIPT');
       const receiptEvidence=receiptPointer?await readCompleteCapturedRpcJsonV1(receiptPointer,'MINED_RECEIPT'):null;
-      const receiptChecked=receiptEvidence?.ref?.sha256===receiptPointer?.sha256;
+      const receiptChecked=receiptEvidence?.ref?.sha256===receiptPointer?.sha256&&
+        receiptEvidence.manifest?.scenarioId===scenario&&
+        String(receiptEvidence.manifest?.txHash??'').toLowerCase()===txHash&&
+        receiptEvidence.manifest?.blockNumber===row.blockNumber&&
+        String(receiptEvidence.value?.transactionHash??'').toLowerCase()===txHash&&
+        Number(BigInt(receiptEvidence.value?.blockNumber??'0x0'))===row.blockNumber;
       if(receiptPointer&&!receiptChecked)limitations.push({type:'RECEIPT_CONTENT_DIGEST_UNVERIFIED',
         transactionHash:row.transactionHash,sourceRef:receiptPointer.path});
       const receiptStatus=receiptChecked?receiptEvidence.value?.status:null;
@@ -463,10 +495,14 @@ async function buildForkRelationshipGraphV1(){
       }
       const statePointer=row.evidence?.find(x=>x.kind==='PRESTATE_DIFF');
       const stateEvidence=statePointer?await readCompleteCapturedRpcJsonV1(statePointer,'PRESTATE_DIFF'):null;
-      if(statePointer&&stateEvidence?.ref?.sha256!==statePointer.sha256){
+      const stateBound=stateEvidence?.ref?.sha256===statePointer?.sha256&&
+        stateEvidence?.manifest?.scenarioId===scenario&&
+        String(stateEvidence?.manifest?.txHash??'').toLowerCase()===txHash&&
+        stateEvidence?.manifest?.blockNumber===row.blockNumber;
+      if(statePointer&&!stateBound){
         limitations.push({type:'PRESTATE_DIFF_CONTENT_DIGEST_UNVERIFIED',
           transactionHash:row.transactionHash,sourceRef:statePointer.path});
-      }else if(stateEvidence?.value&&transactionSucceeded){
+      }else if(stateBound&&stateEvidence?.value&&transactionSucceeded){
         const beforeState=stateEvidence.value.pre??{};
         const afterState=stateEvidence.value.post??{};
         for(const address of [...new Set([...Object.keys(beforeState),...Object.keys(afterState)])].sort()){
