@@ -387,9 +387,52 @@ async function buildForkRelationshipGraphV1(){
     await fs.mkdir(path.dirname(target),{recursive:true});
     const bytes=Buffer.from(JSON.stringify(value,null,2)+'\n');
     await fs.writeFile(target,bytes,{flag:'wx'});
+    const observed=await fs.readFile(target);
+    if(observed.length!==bytes.length||sha256(observed)!==sha256(bytes))
+      throw new Error('FORK_GRAPH_WRITER_IMMUTABLE_READBACK_SHA_MISMATCH: '+relative);
     const ref={path:relative,sha256:sha256(bytes)};
     files.push({path:relative,sha256:ref.sha256,bytes:bytes.length});
     return ref;
+  };
+  // Graph evidence pages are emitted before the immutable root index that
+  // references them. No page can point back to the future root hash.
+  const writePagedRecordsV1=async({collection,records,rootDir})=>{
+    const pageRefs=[],targetBytes=720*1024;
+    let current=[],size=0,startOrdinal=0;
+    const flush=async()=>{
+      if(!current.length)return;
+      const ordinal=pageRefs.length;
+      const rel=path.posix.join(rootDir,collection+'-'+String(ordinal+1).padStart(6,'0')+'.json');
+      const payload={schemaVersion:'mi-phase0-evidence-page-v1',
+        ...source,collection,pageOrdinal:ordinal,
+        firstRecordOrdinal:startOrdinal,recordCount:current.length,
+        records:current};
+      const ref=await writeOutput(rel,payload);
+      pageRefs.push({...ref,collection,pageOrdinal:ordinal,
+        firstRecordOrdinal:startOrdinal,recordCount:current.length});
+      startOrdinal+=current.length;
+      current=[];size=0;
+    };
+    for(const row of records){
+      const bytes=Buffer.byteLength(JSON.stringify(row),'utf8');
+      // Never drop an oversized original record to fit a target page size.
+      if(current.length&&size+bytes>targetBytes)await flush();
+      current.push(row);size+=bytes;
+    }
+    await flush();
+    if(startOrdinal!==records.length)
+      throw new Error('FORK_PAGED_EVIDENCE_ORIGINAL_RECORD_CENSUS_INCOMPLETE');
+    return{collection,totalRecords:startOrdinal,pageCount:pageRefs.length,
+      pages:pageRefs,complete:true,
+      oversizedRecordPolicy:'PRESERVE_FULL_RECORD_IN_OWN_PAGE'};
+  };
+  const graphPages={
+    nodes:await writePagedRecordsV1({collection:'nodes',records:nodes,
+      rootDir:'evidence/phase0/graph-pages'}),
+    edges:await writePagedRecordsV1({collection:'edges',records:edges,
+      rootDir:'evidence/phase0/graph-pages'}),
+    unknowns:await writePagedRecordsV1({collection:'unknowns',records:unknowns,
+      rootDir:'evidence/phase0/graph-pages'})
   };
   const graph={schemaVersion:'mi-phase0-intercontract-relationship-graph-index-v1',
     graphStatus:limitations.length||unknowns.length?'INCOMPLETE_WITH_TYPED_UNKNOWNS':'SOURCE_BOUND_PARTIAL_COVERAGE',
@@ -398,7 +441,10 @@ async function buildForkRelationshipGraphV1(){
     counts:{nodes:nodes.length,edges:edges.length,unknowns:unknowns.length,
       observedRuntimeEdges:edges.filter(x=>x.observation==='OBSERVED_LOCAL_FORK').length,
       staticRelationships:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length},
-    nodes,edges,unknowns,limitations,
+    nodes:[],edges:[],unknowns:[],
+    pageCatalog:graphPages,
+    recordStorageMode:'COMPLETE_SHA_VERIFIED_PAGES',
+    limitations,
     coverageLimitations:['NO_VERIFIED_STORAGE_SLOT_TO_SOURCE_VARIABLE_OR_EVENT_ABI_JOIN','NO_PHASE1_ACCEPTANCE',
       'NO_PHASE6_PREFILL','NO_COMPLETE_SCENARIO_CENSUS',
       'ACTIVE_USE_METHOD_EXECUTION_NOT_IMPLEMENTED']};
@@ -868,12 +914,15 @@ async function buildForkRelationshipGraphV1(){
     questionStatus:'PENDING_EXISTING_MIMO_ADAPTER_NOT_ISSUED',
     acceptedResponse:null
   }));
+  const rosterPages=await writePagedRecordsV1({collection:'phase1-subjects',
+    records:phase1Subjects,rootDir:'previews/phase-01/pages'});
   const preview=await writeOutput('previews/phase-01/GRAPH_DISCOVERY_QUESTION_ROSTER_v1.json',{
     schemaVersion:'mi-phase1-full-graph-discovery-roster-v1',
     ...source,graphIndexRef:graphRef,candidateIndexRef:candidateRef,
-    methodInventoryRef:methods.ref,allGraphPagesIndexed:false,
+    methodInventoryRef:methods.ref,allGraphPagesIndexed:true,
     allCurrentRootGraphRecordsIndexed:true,
-    subjects:phase1Subjects,
+    subjectPageCatalog:rosterPages,
+    subjects:[],
     coverage:{
       allGraphSubjectsAccountedFor:true,
       occurrenceCount:phase1Subjects.length,assignedCount:phase1Subjects.length,
@@ -881,7 +930,7 @@ async function buildForkRelationshipGraphV1(){
       unknownCount:unknowns.length,candidateCount:candidates.length,
       methodCount:methods.value?.methodCandidates?.length??0,
       explicitUnknownCount:unknowns.length,
-      pageManifestStatus:'NOT_GENERATED_IN_THIS_FORK'
+      pageManifestStatus:'ALL_SOURCE_RECORD_PAGES_EMITTED_AND_LOCAL_READBACK_VERIFIED'
     },
     status:'UNACCEPTED_PREVIEW_NOT_MIMO_QUESTION_INPUT',
     limitations:['Existing MiMo single-question transport and graph paging are not yet source-bound and qualified.',
