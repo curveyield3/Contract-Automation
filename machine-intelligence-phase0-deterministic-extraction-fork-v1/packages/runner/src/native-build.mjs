@@ -251,14 +251,18 @@ export async function collectNativeSourceAsts(projectRoot, fsApi = fs) {
       const serialized = JSON.stringify(source.ast);
       const existing = bySource.get(sourceName);
       if (existing && existing.serialized !== serialized) {
-        throw new Error(`Hardhat build-info AST mismatch for ${sourceName}`);
+        // This source path has distinct compiler-unit AST identities; callers
+        // must use the unit-qualified AST instead of guessing a global one.
+        bySource.set(sourceName, { ast:null, serialized:null, ambiguous:true });
+        continue;
       }
-      if (!existing) bySource.set(sourceName, { ast: source.ast, serialized });
+      if (!existing) bySource.set(sourceName, { ast: source.ast, serialized, ambiguous:false });
     }
   }
   return Object.fromEntries(
     [...bySource.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
+      .filter(([,entry])=>entry.ambiguous!==true)
       .map(([sourceName, entry]) => [sourceName, entry.ast])
   );
 }

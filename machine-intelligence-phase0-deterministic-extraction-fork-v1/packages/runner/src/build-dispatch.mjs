@@ -16,7 +16,7 @@ const scanHash = x => createHash('sha256').update(x).digest('hex');
 async function compileVerifiedScanProject(projectRoot) {
   const manifest=JSON.parse(await fs.readFile(path.join(projectRoot,'scan-source-manifest.json'),'utf8'));
   if(manifest.schemaVersion!=='curveyield-scan-source-manifest-v1'||manifest.inputMode!=='LIVE_SCAN')throw new Error('INVALID_SCAN_SOURCE_MANIFEST');
-  if(!Array.isArray(manifest.compilerUnits)||manifest.compilerUnits.length<1||manifest.compilerUnits.length>64)throw new Error('INVALID_SCAN_COMPILER_UNITS');
+  if(!Array.isArray(manifest.compilerUnits)||manifest.compilerUnits.length<1)throw new Error('INVALID_SCAN_COMPILER_UNITS');
   const units=[],artifacts=[],seen=new Set(),sourceNames=new Set(),allAsts={},diagnostics=[];
   for(const info of manifest.compilerUnits){
     if(!/^scan-[0-9a-f]{16}$/.test(info.unitId)||info.file!==('scan-compiler-units/'+info.unitId+'.json'))throw new Error('INVALID_SCAN_COMPILER_UNIT_PATH');
@@ -50,8 +50,8 @@ async function compileVerifiedScanProject(projectRoot) {
       if(!unitArtifacts.some(a=>a.sourceName+':'+a.contractName===binding.qualifiedName))throw new Error('SCAN_VERIFIED_TARGET_ARTIFACT_MISSING: '+binding.qualifiedName);
     }
     for(const a of unitArtifacts){
-      const key=a.sourceName+':'+a.contractName;
-      if(seen.has(key))throw new Error('AMBIGUOUS_COMPILATION_TARGET: '+key);
+      const key=a.compilationUnitId+':'+a.sourceName+':'+a.contractName;
+      if(seen.has(key))throw new Error('DUPLICATED_ARTIFACT_WITHIN_EXACT_COMPILATION_UNIT: '+key);
       seen.add(key);artifacts.push(a);
     }
     const sourceAsts=Object.fromEntries(Object.entries(output.sources??{}).filter(([,v])=>v?.ast).map(([n,v])=>[n,v.ast]));
@@ -70,7 +70,7 @@ async function compileVerifiedScanProject(projectRoot) {
     compilerVersions:[...new Set(units.map(u=>u.compilerVersion))].sort(),
     compilerProfiles:units.map(u=>({name:u.unitId,compilerVersion:u.compilerVersion,settings:u.settings})),
     compilerDiagnostics:diagnostics,sourceAsts:allAsts,
-    artifacts:artifacts.sort((a,b)=>(a.sourceName+':'+a.contractName).localeCompare(b.sourceName+':'+b.contractName)),
+    artifacts:artifacts.sort((a,b)=>(a.compilationUnitId+':'+a.sourceName+':'+a.contractName).localeCompare(b.compilationUnitId+':'+b.sourceName+':'+b.contractName)),
     compilationUnits:units,sourceInventory:[...sourceNames].sort(),sourceInventoryFiles:sourceNames.size};
 }
 
@@ -92,7 +92,7 @@ function mergeArtifacts(solidityArtifacts, vyperArtifacts) {
   const merged = [];
   const seen = new Set();
   for (const artifact of [...(solidityArtifacts ?? []), ...(vyperArtifacts ?? [])]) {
-    const key = `${artifact.sourceName}:${artifact.contractName}`;
+    const key = `${artifact.compilationUnitId??'UNRESOLVED_UNIT'}:${artifact.sourceName}:${artifact.contractName}`;
     if (seen.has(key)) throw new Error(`Duplicate mixed-language compiler artifact: ${key}`);
     seen.add(key);
     merged.push(artifact);
