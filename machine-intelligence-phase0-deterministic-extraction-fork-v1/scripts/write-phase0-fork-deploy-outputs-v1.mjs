@@ -199,11 +199,57 @@ async function buildForkRelationshipGraphV1(){
   checkIdentity(methods.value,'METHOD_CENSUS');
   const mkid=(prefix,...ids)=>prefix+sha256(Buffer.from(JSON.stringify([source,...ids]),'utf8')).slice(0,40);
   const nodes=[],edges=[],unknowns=[],candidates=[],slitherJoins=[],observedRuntimeFrames=[];
-  const seenNode=new Set();
-  const addNode=x=>{if(!seenNode.has(x.nodeId)){seenNode.add(x.nodeId);nodes.push(x)}return x.nodeId};
+  const seenNode=new Map(),nodeIdentityCollisions=[];
+  const stableString=value=>{
+    if(value===null||typeof value!=='object')return JSON.stringify(value);
+    if(Array.isArray(value))return '['+value.map(stableString).join(',')+']';
+    return '{'+Object.keys(value).sort().map(key=>
+      JSON.stringify(key)+':'+stableString(value[key])).join(',')+'}';
+  };
+  const canonicalNodeValue=node=>{
+    const {evidenceRefs,...semantic}=node;
+    return stableString(semantic);
+  };
   const addUnknown=(kind,ref,details)=>unknowns.push({
     unknownId:mkid('UNKNOWN-',kind,ref,details),kind,sourceRef:ref,details,
     status:'UNRESOLVED',needsSourceInspection:true});
+  const addNode=node=>{
+    if(!node?.nodeId)throw new Error('GRAPH_NODE_ID_REQUIRED');
+    const existing=seenNode.get(node.nodeId);
+    if(!existing){
+      seenNode.set(node.nodeId,node);nodes.push(node);return node.nodeId;
+    }
+    if(canonicalNodeValue(existing)===canonicalNodeValue(node)){
+      const bound=new Map([...(existing.evidenceRefs??[]),...(node.evidenceRefs??[])]
+        .filter(ref=>ref?.path).map(ref=>[ref.path+'::'+String(ref.sha256??''),ref]));
+      existing.evidenceRefs=[...bound.values()].sort((a,b)=>
+        (a.path+'::'+String(a.sha256??'')).localeCompare(b.path+'::'+String(b.sha256??'')));
+      return node.nodeId;
+    }
+    // A conflicting node must never inherit the first declaration's identity
+    // silently. Preserve both originals separately and mark the shared ID
+    // unsafe as a target for exact automated relationships.
+    const id=node.nodeId;
+    const collisionOrdinal=nodeIdentityCollisions.filter(x=>x.originalNodeId===id).length+1;
+    const collisionId=mkid('NODE-IDENTITY-COLLISION-',id,collisionOrdinal,
+      canonicalNodeValue(node));
+    if(seenNode.has(collisionId))throw new Error('GRAPH_NODE_COLLISION_REKEY_NOT_UNIQUE');
+    const alternative={...node,nodeId:collisionId,originalNodeId:id,
+      identityStatus:'CONFLICTING_DUPLICATE_NODE_ID_UNVERIFIED'};
+    const priorIdentityStatus=existing.identityStatus??existing.bindingStatus??null;
+    existing.identityStatus='CONFLICTING_DUPLICATE_NODE_ID_UNVERIFIED';
+    if('sourceIdentity' in existing)existing.sourceIdentity=null;
+    if('bindingStatus' in existing)existing.bindingStatus='NODE_IDENTITY_COLLISION_UNRESOLVED';
+    seenNode.set(collisionId,alternative);nodes.push(alternative);
+    const collision={originalNodeId:id,alternativeNodeId:collisionId,
+      collisionOrdinal,priorIdentityStatus,
+      semanticDigestA:sha256(Buffer.from(canonicalNodeValue(existing))),
+      semanticDigestB:sha256(Buffer.from(canonicalNodeValue(node)))};
+    nodeIdentityCollisions.push(collision);
+    addUnknown('GRAPH_SEMANTIC_NODE_ID_COLLISION',
+      node.evidenceRefs?.[0]?.path??existing.evidenceRefs?.[0]?.path??null,collision);
+    return id;
+  };
   const scenario=deploy.value?.deploymentTraceIndex?.scenarioId??null;
   const byRuntime=new Map();
   const compilerByIdentity=new Map((compilerBundle.value?.artifacts??[]).map(a=>[[a.compilationUnitId,a.sourceName,a.contractName].join('::'),a]));
@@ -1214,7 +1260,8 @@ async function buildForkRelationshipGraphV1(){
         n.kind==='BLOCK_SCOPED_RUNTIME_CODE'&&n.bindingStatus==='EXACT_SOURCE_AND_RUNTIME_MATCH').length,
       storageDeltaEdges:edges.filter(e=>e.kind==='OBSERVED_SUCCESSFUL_TX_STORAGE_CHANGE').length,
       oneSidedStorageDiffs:edges.filter(e=>e.kind==='OBSERVED_PRESTATE_DIFF_ONE_SIDED_SLOT_UNDETERMINED').length,
-      duplicateEdgeIdentityOccurrencesPreserved:edgeIdentityConflicts.length
+      duplicateEdgeIdentityOccurrencesPreserved:edgeIdentityConflicts.length,
+      duplicateSemanticNodeIdentitiesPreserved:nodeIdentityCollisions.length
     },
     nodes:[],edges:[],unknowns:[],
     pageCatalog:graphPages,
