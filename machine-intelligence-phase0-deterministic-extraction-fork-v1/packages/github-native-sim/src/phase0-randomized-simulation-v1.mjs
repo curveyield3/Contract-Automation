@@ -15,7 +15,7 @@ import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {installNativeFoundryDependencies} from '../../runner/src/native-build.mjs';
 import {captureDeployedStateSnapshotV1} from './adr-deployed-state-snapshot-v1.mjs';
 import {capturePhase0ForkStateV1} from './phase0-fork-state-reuse-v1.mjs';
-import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
+import {validateExecutionInputJoinV2,findSourceRuntimeTemplateMatchesV1} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
 import {isBalancerV3TargetV1,discoverBalancerV3PoolsV1,buildBalancerV3ActionV1,balancerV3BptTransferRecipeV1,bootstrapBalancerV3PoolsV1} from './phase0-balancer-v3-planner-v1.mjs';
@@ -392,13 +392,11 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
         const codeStable=typeof before?.code==='string'&&typeof after?.code==='string'&&
           before.code===after.code&&after.bytecodeLength>0;
         const codeForMatching=codeStable?after.code:null;
-        const matches=codeForMatching?compiledArtifacts.filter(artifact=>{
-          const expected=String(artifact.deployedBytecode??'').toLowerCase();
-          return /^0x[0-9a-f]+$/.test(expected)&&expected===codeForMatching&&
-            !Object.keys(artifact.immutableReferences??{}).length&&
-            !Object.keys(artifact.deployedLinkReferences??{}).length;
-        }):[];
-        const exact=codeStable&&!blockScopedOnly&&matches.length===1;
+        const matches=codeForMatching?findSourceRuntimeTemplateMatchesV1({
+          observedBytecode:codeForMatching,artifacts:compiledArtifacts}):[];
+        const exactMatches=matches.filter(row=>row.matchClass==='EXACT_FULL_RUNTIME_BYTECODE');
+        const maskedMatches=matches.filter(row=>row.matchClass!=='EXACT_FULL_RUNTIME_BYTECODE');
+        const exact=codeStable&&!blockScopedOnly&&exactMatches.length===1;
         row.runtimeCodeObservations.push({
           observationId:'RT-CODE-'+sha256(Buffer.from(JSON.stringify([
             scenarioIdentity,txHash,address,number,frameIds])).slice(0,40),
@@ -415,12 +413,15 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
             !before?.code||!after?.code?'CODE_OBSERVATION_INCOMPLETE':
             blockScopedOnly?'MULTI_TRANSACTION_BLOCK_CODE_ORDER_UNRESOLVED':
             before.code!==after.code?'CODE_CHANGED_ACROSS_TRANSACTION':
-            matches.length>1?'AMBIGUOUS_EQUAL_RUNTIME_BYTECODE':
+            exactMatches.length>1?'AMBIGUOUS_EQUAL_RUNTIME_BYTECODE':
+            maskedMatches.length?'MASKED_COMPILER_SOURCE_TEMPLATE_CANDIDATES_ONLY':
             'NO_EXACT_RUNTIME_BYTECODE_MATCH',
-          compilationUnitId:exact?matches[0].compilationUnitId:null,
-          sourceName:exact?matches[0].sourceName:null,
-          contractName:exact?matches[0].contractName:null,
+          compilationUnitId:exact?exactMatches[0].compilationUnitId:null,
+          sourceName:exact?exactMatches[0].sourceName:null,
+          contractName:exact?exactMatches[0].contractName:null,
           matchCandidateCount:matches.length,
+          exactMatchCandidateCount:exactMatches.length,
+          maskedTemplateCandidates:maskedMatches,
           candidateCompilationUnitIds:exact?[]:matches.map(m=>m.compilationUnitId).filter(Boolean),
           evidenceStatus:'OBSERVED_LOCAL_FORK_BLOCK_BOUNDARY_CODE',
           limitations:[
