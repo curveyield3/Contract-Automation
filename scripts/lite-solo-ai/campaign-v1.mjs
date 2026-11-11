@@ -4013,18 +4013,27 @@ async function miAdaptiveSingleQuestionTransportV1(){
    prepared=confirmed;continue;
   }
   if(prepared.status==='AI_ADAPTIVE_AWAITING_PHASE_EVIDENCE'){
+   const missing=String(prepared.evidenceStatus||'UNSPECIFIED_EVIDENCE_STATUS');
    console.log(JSON.stringify({status:prepared.status,phase:prepared.transport?.scope?.phase,
-    step:prepared.transport?.scope?.step,originalQuestionPreserved:true,
-    nextOwner:'PHASE_SPECIFIC_SOURCE_EVIDENCE_IMPLEMENTATION',modelInferenceSkipped:true}));
-   return;
+    step:prepared.transport?.scope?.step,questionId:prepared.transport?.questionId,
+    evidenceStatus:missing,originalQuestionPreserved:true,
+    nextOwner:'PHASE_SPECIFIC_SOURCE_EVIDENCE_IMPLEMENTATION',modelInferenceSkipped:true,
+    inferenceWorkflowContinues:true}));
+   // Evidence absence is a controller/Worker continuation condition, not an
+   // inference success or a reason to dispatch another expensive CPU model.
+   await new Promise(resolve=>setTimeout(resolve,30000));
+   prepared=JSON.parse(await workerCall({operation:'adaptive_turn',recoveryProbe:true}));
+   continue;
   }
   if(prepared.status==='AI_ADAPTIVE_WAITING'){
-   if(prepared.compilationStatus&&prepared.compilationStatus!=='CONTROLLER_CONTRACT_NOT_AVAILABLE'){
+   if(prepared.compilationStatus&&prepared.compilationStatus!=='CONTROLLER_CONTRACT_NOT_AVAILABLE')
     console.log(JSON.stringify({status:prepared.status,
      compilationStatus:prepared.compilationStatus,sourceRecordsPreserved:true,
-     nextOwner:'EXISTING_CONTROLLER_FIELD_BINDING',modelInferenceSkipped:true}));
-    return;
-   }
+     nextOwner:'EXISTING_CONTROLLER_FIELD_BINDING',
+     inferenceWorkflowContinues:true}));
+   // An unsubmitted controller work record is not phase completion.
+   // Reconcile through the original adaptive Worker until accepted evidence
+   // advances the assignment, or the existing bounded handoff is due.
    await new Promise(resolve=>setTimeout(resolve,15000));
    prepared=JSON.parse(await workerCall({operation:'adaptive_turn',recoveryProbe:true}));continue;
   }
