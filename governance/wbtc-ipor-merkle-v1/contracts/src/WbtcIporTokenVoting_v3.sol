@@ -137,6 +137,154 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
             || super.supportsInterface(_interfaceId);
     }
 
+    /// @notice Immutable Guardian removal is executed by the DAO through
+    /// the native SPP plugin, never by Guardian or the token voting body.
+    function permanentlyRemoveDaoGuardian() external {
+        if (msg.sender != address(dao())) revert UnauthorizedParent();
+        if (guardianRemoved) return; // idempotent for pre-existing proposals
+        guardianRemoved = true;
+        emit GuardianPermanentlyRemoved();
+    }
+
+    /// @notice Activation and IPOR-native EIP-712 self-delegation in one tx.
+    function activateVotingPower(
+        uint256 nonce, uint256 expiry, uint8 v, bytes32 r, bytes32 sigS
+    ) external {
+        address account = _msgSender();
+        if (INonceSource(address(votingToken)).nonces(account) != nonce)
+            revert UnauthorizedParent();
+        votingToken.delegateBySig(account, nonce, expiry, v, r, sigS);
+        if (INonceSource(address(votingToken)).nonces(account) != nonce + 1
+            || votingToken.delegates(account) != account) revert UnauthorizedParent();
+        _activate(account);
+    }
+
+    function activateVotingPower() external {
+        address account = _msgSender();
+        if (votingToken.delegates(account) != account) revert UnauthorizedParent();
+        _activate(account);
+    }
+
+    function _activate(address account) private {
+        Voter storage m = voters[account];
+        if (!m.enrolled) { m.enrolled = true; registered.push(account); }
+        if (!_active(account)) {
+            m.activeSince = uint64(block.timestamp);
+            m.lastVote = uint64(block.timestamp);
+        }
+        emit VoterActivated(account, m.activeSince);
+    }
+
+    function _active(address account) private view returns (bool) {
+        Voter storage m = voters[account];
+        if (!m.enrolled || votingToken.delegates(account) != account) return false;
+        // No changes to historical participation without genuine records.
+        // No unbounded voter*history scans: old data requires a ZK checkpoint.
+        if (priorBallots.length > 64) revert IncompleteCensus();
+        uint256 firstMiss;
+        uint256 count;
+        for (uint256 i; i < priorBallots.length; ++i) {
+            uint256 id = priorBallots[i];
+            Proposal storage proposal_ = proposals[id];
+            if (proposal_.parameters.endDate <= block.timestamp
+                && proposal_.parameters.endDate > m.lastVote
+                && frozen[id][account] != 0
+                && proposal_.voters[account] == VoteOption.None) {
+                ++count;
+                if (firstMiss == 0) firstMiss = proposal_.parameters.endDate;
+            }
+        }
+        return count < missedProposalLimit || firstMiss == 0
+            || block.timestamp < BokkyPooBahsDateTimeLibrary.addMonths(firstMiss, inactivityMonths);
+    }
+
+    function getRegisteredVoterCount() external view returns (uint256) { return registered.length; }
+    function getMarketCount() external view returns (uint256) { return markets.length; }
+
+    /// @notice DAO-approved ordinary parent proposals authorize additions.
+    /// Only Morpho markets whose exact collateral is the IPOR vault share
+    /// token can currently pass source authentication. Curve factory
+    /// membership needs an authenticated canonical factory and is blocked.
+    function addVotingMarket(MarketKind kind, address market, bytes32 id) external {
+        if (msg.sender != address(dao()) || markets.length >= 20)
+            revert UnauthorizedParent();
+        if (kind != MarketKind.MorphoBlue
+            || market != address(morphoBlue) || id == bytes32(0)) revert InvalidMarket();
+        (address loanToken, address collateralToken,,,) = morphoBlue.idToMarketParams(id);
+        if (loanToken == address(0) || collateralToken != address(votingToken))
+            revert InvalidMarket();
+        for (uint256 i; i < markets.length; ++i) {
+            if (markets[i].market == market && markets[i].id == id) revert InvalidMarket();
+        }
+        markets.push(Market(kind, market, market, id, true));
+        emit VotingMarketAdded(market, id, kind);
+    }
+
+    function _walletAndMarkets(address account) private view returns (uint256 weight) {
+        bool custody = account == address(morphoBlue);
+        for (uint256 i; i < markets.length; ++i) {
+            if (markets[i].custody == account) custody = true;
+        }
+        if (!custody) weight = IERC20Upgradeable(address(votingToken)).balanceOf(account);
+        uint256 marketTotal;
+        for (uint256 i; i < markets.length; ++i) {
+            Market storage market = markets[i];
+            if (!market.enabled) continue;
+            if (market.kind == MarketKind.MorphoBlue) {
+                (,, uint128 collateral) = morphoBlue.position(market.id, account);
+                marketTotal += uint256(collateral);
+            } else if (market.kind == MarketKind.CurveLend) {
+                uint256[2] memory amounts = ICurveAmmRead(market.custody).get_sum_xy(account);
+                marketTotal += amounts[1];
+            }
+        }
+        return weight + marketTotal / 2;
+    }
+
+    /// @dev For normal proposals, the registered non-Safe community is 85%
+    /// and the Safe receives 15%. The formula is integer exact.
+    function _freezeAtomic(uint256 id, bool removal) private returns (uint256 total) {
+        if (removal) revert IncompleteCensus(); // supply-wide ZK proof required
+        if (registered.length > 64 || priorBallots.length >= 64) revert IncompleteCensus();
+        uint256 sum;
+        for (uint256 i; i < registered.length; ++i) {
+            address account = registered[i];
+            if (_active(account) && (account != guardianSafe || guardianRemoved)) {
+                uint256 economic = _walletAndMarkets(account);
+                frozen[id][account] = guardianRemoved ? economic : 85 * economic;
+                sum += economic;
+            }
+        }
+        if (sum == 0) revert NoVotingPower();
+        if (guardianRemoved) total = sum;
+        else {
+            frozen[id][guardianSafe] = 15 * sum;
+            bonusAt[id] = true;
+            total = 100 * sum;
+        }
+        priorBallots.push(id);
+    }
+
+    /// @notice Prospective original-proposer check. The SPP remains the
+    /// creator of all TokenVoting subproposals.
+    function canSponsorParent(address account, bool removal) external view returns (bool) {
+        if (msg.sender != stagedProcessor) revert UnauthorizedParent();
+        if (removal || registered.length > 64 || priorBallots.length >= 64) return false;
+        uint256 base;
+        uint256 ownerWeight;
+        for (uint256 i; i < registered.length; ++i) {
+            address member = registered[i];
+            if (_active(member) && (member != guardianSafe || guardianRemoved)) {
+                uint256 power = _walletAndMarkets(member);
+                base += power;
+                if (member == account) ownerWeight = guardianRemoved ? power : 85 * power;
+            }
+        }
+        if (base == 0) return false;
+        if (account == guardianSafe && !guardianRemoved) ownerWeight = 15 * base;
+        return ownerWeight * 10 >= (guardianRemoved ? base : 100 * base);
+    }
+
     /// @notice getter function for the voting token.
     /// @dev public function also useful for registering interfaceId
     ///      and for distinguishing from majority voting interface.
