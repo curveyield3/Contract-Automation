@@ -1,6 +1,6 @@
 {
   "purpose": "compile-only",
   "version": 5,
-  "sourceCommit": "2643b5fdcbaa06ca74fae6cdbc041aa7fbcc9735",
-  "repair": "via-IR to resolve Solidity stack too deep; no tests"
+  "repair": "optimize viaIR runtime size with runs 1",
+  "sourceCommit": "2a8133703041afa8f464888cdfe8fa8db7adb778"
 }
