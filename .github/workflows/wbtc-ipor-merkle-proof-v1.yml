@@ -1,0 +1,64 @@
+name: WBTC IPOR governance Merkle validity preparation v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      proposal_id:
+        description: On-chain pending proposal ID (decimal uint256)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wbtc-ipor-governance-proof-${{ inputs.proposal_id }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      ETH_RPC_URL: ${{ secrets.GOVERNANCE_ARCHIVE_RPC_URL }}
+      PROPOSAL_ID: ${{ inputs.proposal_id }}
+      CONFIG_PATH: ${{ github.workspace }}/governance/wbtc-ipor-merkle-v1/config/protocol.json
+      RISC0_DEV_MODE: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Extract pinned governance preparation package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/wbtc-ipor-governance"
+          tar -xJf governance/wbtc-ipor-merkle-v1/WBTC_IPOR_Governance_Merkle_Workflow_v1.tar.xz -C "$RUNNER_TEMP/wbtc-ipor-governance"
+      - name: Require deployed-contract configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$CONFIG_PATH" || { echo "::error::Configure governance/wbtc-ipor-merkle-v1/config/protocol.json after governance contracts deploy"; exit 1; }
+      - name: Install exact direct dependencies
+        working-directory: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Read finalized proposal state
+        working-directory: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1
+        run: node scripts/collect-snapshot.mjs
+      - name: Build standard Merkle tree
+        working-directory: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1
+        run: node scripts/build-tree.mjs
+      - name: Prove authenticated historical state (no mock or dev mode)
+        working-directory: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1
+        run: bash scripts/prove.sh
+      - name: Verify receipt and build unsigned submission
+        working-directory: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1
+        run: node scripts/prepare-submission.mjs
+      - name: Upload verified submission bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: wbtc-ipor-proposal-${{ inputs.proposal_id }}-submission
+          path: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1/output/
+          if-no-files-found: error
+          retention-days: 30
