@@ -1,6 +1,6 @@
 {
   "mode": "compile_both_only",
-  "iteration": 8,
-  "source": "4bb0843c9547077daa9369b80cfb662164c31498",
-  "goal": "EIP170 compliant and DAO-voted action policy"
+  "iteration": 9,
+  "source": "51f47a9caf9b906c2290846c022d24dfe204bb47",
+  "goal": "one-body proposal creation"
 }

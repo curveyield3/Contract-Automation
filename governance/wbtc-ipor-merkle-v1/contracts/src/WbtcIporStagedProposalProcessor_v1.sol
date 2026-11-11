@@ -962,66 +962,39 @@ contract WbtcIporStagedProposalProcessor is
     /// @param _stageId The stage index.
     /// @param _startDate The start date that proposals on sub-bodies will be created with.
     /// @param _stageProposalParams The custom params required for each sub-body to create a proposal.
+    /// @notice Every configured stage has exactly one Aragon body. Preserve
+    /// the original IProposal result-reporting handshake, with no N-body loop.
     function _createBodyProposals(
-        uint256 _proposalId,
-        uint16 _stageId,
-        uint64 _startDate,
-        bytes[] memory _stageProposalParams
+        uint256 proposalId, uint16 stageId, uint64 startDate, bytes[] memory params
     ) internal virtual {
-        Stage storage stage;
-
-        // avoid stack too deep.
-        {
-            Proposal storage proposal = proposals[_proposalId];
-            stage = stages[proposal.stageConfigIndex][_stageId];
-        }
-
-        for (uint256 i = 0; i < stage.bodies.length; ++i) {
-            Body storage body = stage.bodies[i];
-
-            // If body proposal creation should be manual, skip it.
-            if (body.isManual) continue;
-
-            Action[] memory actions = new Action[](1);
-
-            actions[0] = Action({
-                to: address(this),
-                value: 0,
-                data: abi.encodeCall(
-                    this.reportProposalResult,
-                    (_proposalId, _stageId, body.resultType, body.tryAdvance)
-                )
-            });
-
-            // Mark the sub-proposal as in progress before handing control to the body. The
-            // real id is only known once the call returns, and until then the slot would
-            // otherwise hold a zero that a reentrant tally could mistake for a real id.
-            bodyProposalIds[_proposalId][_stageId][body.addr] = PROPOSAL_IN_PROGRESS;
-
-            // A sub-body that fails to create the sub-proposal reverts the outer tx
-            // instead of being recorded and skipped. The failure is rethrown as
-            // `SubProposalCreationFailed` so it names the body that caused it.
-            try
-                IProposal(body.addr).createProposal(
-                    abi.encode(address(this), _proposalId, _stageId),
-                    actions,
-                    _startDate,
-                    _startDate + stage.voteDuration,
-                    _stageProposalParams.length > i ? _stageProposalParams[i] : new bytes(0)
-                )
-            returns (uint256 subProposalId) {
-                // The marker must never be stored as a real id, or the stage would look
-                // in progress forever.
-                if (subProposalId == PROPOSAL_IN_PROGRESS) {
-                    revert Errors.SubProposalCreationFailed(body.addr, "");
-                }
-
-                bodyProposalIds[_proposalId][_stageId][body.addr] = subProposalId;
-
-                emit SubProposalCreated(_proposalId, _stageId, body.addr, subProposalId);
-            } catch (bytes memory reason) {
-                revert Errors.SubProposalCreationFailed(body.addr, reason);
+        Stage storage st = stages[proposals[proposalId].stageConfigIndex][stageId];
+        Body storage body = st.bodies[0];
+        if (body.isManual) return;
+        Action[] memory actions = new Action[](1);
+        actions[0] = Action({
+            to: address(this),
+            value: 0,
+            data: abi.encodeCall(
+                this.reportProposalResult,
+                (proposalId, stageId, body.resultType, body.tryAdvance)
+            )
+        });
+        bodyProposalIds[proposalId][stageId][body.addr] = PROPOSAL_IN_PROGRESS;
+        bytes memory parameters = params.length == 0 ? new bytes(0) : params[0];
+        try IProposal(body.addr).createProposal(
+            abi.encode(address(this), proposalId, stageId),
+            actions,
+            startDate,
+            startDate + st.voteDuration,
+            parameters
+        ) returns (uint256 childId) {
+            if (childId == PROPOSAL_IN_PROGRESS) {
+                revert Errors.SubProposalCreationFailed(body.addr, "");
             }
+            bodyProposalIds[proposalId][stageId][body.addr] = childId;
+            emit SubProposalCreated(proposalId, stageId, body.addr, childId);
+        } catch (bytes memory reason) {
+            revert Errors.SubProposalCreationFailed(body.addr, reason);
         }
     }
 
