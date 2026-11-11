@@ -95,14 +95,14 @@ jobs:
           retention-days: 30
 
   fork-rehearsal:
-    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full')
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full'))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
       UPSTREAM_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
       GOVERNANCE_DEPLOY_CONFIG_JSON: ${{ secrets.GOVERNANCE_DEPLOY_CONFIG_JSON }}
       FORK_BLOCK: ${{ inputs.fork_block }}
-      FORK_ONLY_PREFLIGHT: ${{ inputs.mode == 'fork_preflight' && '1' || '0' }}
+      FORK_ONLY_PREFLIGHT: ${{ github.event_name == 'push' && '1' || (inputs.mode == 'fork_preflight' && '1' || '0') }}
       RISC0_DEV_MODE: '0'
     steps:
       - uses: actions/checkout@v4
@@ -146,7 +146,7 @@ jobs:
             git checkout a1d84e0542cf2db0a542f0159878457dbb7e3515
             git submodule update --init --recursive
             cp -r "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/native-restart-v12/src/." src/
-            forge build src/extensions/WbtcStandardSPP_v2.sol src/extensions/WbtcGuardianRemovalSPP_v1.sol --via-ir --optimizer-runs 1 --sizes
+            forge build src/extensions/WbtcStandardSPP_v2.sol src/extensions/WbtcGuardianRemovalSPP_v1.sol --via-ir --optimizer-runs 1 --sizes || { echo "SPP_BUILD_OR_SIZE_FAILED" >&2; touch "$GITHUB_WORKSPACE/compile-evidence/spp-failed.marker"; }
           ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/spp-build-v12.log"
       - name: Compile v11 collateral TokenVoting and original RISC Zero verifier
         shell: bash
@@ -158,7 +158,7 @@ jobs:
             git checkout e726c28061486114d601c547e4da1180ed5ab6da
             git submodule update --init --recursive
             cp -r "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/native-restart-v12/src/." src/
-            forge build src/extensions/WbtcCollateralTokenVoting_v3.sol src/verifier/WbtcIporZkProofVerifier_v1.sol --via-ir --optimizer-runs 1 --sizes
+            forge build src/extensions/WbtcCollateralTokenVoting_v3.sol src/verifier/WbtcIporZkProofVerifier_v1.sol --via-ir --optimizer-runs 1 --sizes || { echo "TOKEN_BUILD_OR_SIZE_FAILED" >&2; touch "$GITHUB_WORKSPACE/compile-evidence/token-failed.marker"; }
           ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build-v12.log"
       - name: Preserve compile diagnostics
         if: always()
@@ -171,4 +171,11 @@ jobs:
             governance/wbtc-ipor-merkle-v1/CONTRACT_DESIGN_SPEC_v9.md
           if-no-files-found: error
           retention-days: 30
+      - name: Enforce all native compilation and EIP-170 size gates
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! test -e compile-evidence/spp-failed.marker
+          ! test -e compile-evidence/token-failed.marker
 

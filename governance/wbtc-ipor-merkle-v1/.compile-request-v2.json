@@ -1,12 +1,7 @@
 {
-  "phase": "v12-native-restart-initial-compile",
+  "phase": "v12-compile-and-fork-preflight",
   "sourceVersion": "v11",
-  "runTests": false,
-  "targetContracts": [
-    "WbtcStandardSPP",
-    "WbtcGuardianRemovalSPP",
-    "WbtcCollateralTokenVoting",
-    "WbtcIporZkProofVerifier"
-  ],
-  "requested": "fork proof rehearsal prerequisites"
+  "runTests": true,
+  "observedPrevious": "SPP Standard 28559 bytes; measure TokenVoting independently",
+  "attempt": 2
 }
