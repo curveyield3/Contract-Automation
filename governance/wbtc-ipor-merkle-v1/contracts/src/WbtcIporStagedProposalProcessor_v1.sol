@@ -883,64 +883,35 @@ contract WbtcIporStagedProposalProcessor is
     ///      This function can not be overridden as it's crucial to not allow duplicating bodies
     ///      in the same stage, because proposal creation and report functions depend on this assumption.
     /// @param _stages The stages configuration.
-    function _updateStages(Stage[] memory _stages) internal {
-        Stage[] storage storedStages = stages[++currentConfigIndex];
-
-        for (uint256 i = 0; i < _stages.length; ++i) {
-            Stage storage stage = storedStages.push();
-            Body[] memory bodies = _stages[i].bodies;
-
-            uint64 maxAdvance = _stages[i].maxAdvance;
-            uint64 minAdvance = _stages[i].minAdvance;
-            uint64 voteDuration = _stages[i].voteDuration;
-            uint16 approvalThreshold = _stages[i].approvalThreshold;
-            uint16 vetoThreshold = _stages[i].vetoThreshold;
-
-            if (minAdvance >= maxAdvance || voteDuration >= maxAdvance) {
-                revert Errors.StageDurationsInvalid();
-            }
-
-            if (approvalThreshold > bodies.length || vetoThreshold > bodies.length) {
-                revert Errors.StageThresholdsInvalid();
-            }
-
-            for (uint256 j = 0; j < bodies.length; ++j) {
-                // Ensure that body addresses are not duplicated in the same stage.
-                for (uint256 k = j + 1; k < bodies.length; ++k) {
-                    if (bodies[j].addr == bodies[k].addr) {
-                        revert Errors.DuplicateBodyAddress(i, bodies[j].addr);
-                    }
-                }
-
-                // If the sub-body accepts an automatic creation by SPP,
-                // then it must obey `IProposal` interface.
-                if (
-                    !bodies[j].isManual &&
-                    !bodies[j].addr.supportsInterface(type(IProposal).interfaceId)
-                ) {
-                    revert Errors.InterfaceNotSupported();
-                }
-
-                // body result type must be set
-                if (bodies[j].resultType == ResultType.None) {
-                    revert Errors.BodyResultTypeNotSet(bodies[j].addr);
-                }
-
-                // If not copied manually, requires via-ir compilation
-                // pipeline which is still slow.
-                stage.bodies.push(bodies[j]);
-            }
-
-            stage.maxAdvance = maxAdvance;
-            stage.minAdvance = minAdvance;
-            stage.voteDuration = voteDuration;
-            stage.approvalThreshold = approvalThreshold;
-            stage.vetoThreshold = vetoThreshold;
-            stage.cancelable = _stages[i].cancelable;
-            stage.editable = _stages[i].editable;
+    /// @notice Only one authorized governance body per stage is supported.
+    /// This preserves native Aragon stage versions and execution machinery,
+    /// while removing arbitrary N-body combinations we never install.
+    function _updateStages(Stage[] memory requested) internal {
+        if (requested.length == 0 || requested.length > 2)
+            revert InvalidGuardianStageConfiguration();
+        Stage[] storage destination = stages[++currentConfigIndex];
+        for (uint256 i; i < requested.length; ++i) {
+            Stage memory stage = requested[i];
+            if (stage.bodies.length != 1 || stage.maxAdvance <= stage.minAdvance
+                || stage.maxAdvance <= stage.voteDuration
+                || stage.approvalThreshold > 1 || stage.vetoThreshold > 1)
+                revert InvalidGuardianStageConfiguration();
+            Body memory body = stage.bodies[0];
+            if (body.addr == address(0) || body.resultType == ResultType.None
+                || (!body.isManual
+                    && !body.addr.supportsInterface(type(IProposal).interfaceId)))
+                revert InvalidGuardianStageConfiguration();
+            Stage storage current = destination.push();
+            current.bodies.push(body);
+            current.maxAdvance = stage.maxAdvance;
+            current.minAdvance = stage.minAdvance;
+            current.voteDuration = stage.voteDuration;
+            current.approvalThreshold = stage.approvalThreshold;
+            current.vetoThreshold = stage.vetoThreshold;
+            current.cancelable = stage.cancelable;
+            current.editable = stage.editable;
         }
-
-        emit StagesUpdated(_stages);
+        emit StagesUpdated(requested);
     }
 
     /// @notice Internal function that executes the proposal's actions.

@@ -307,7 +307,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function isSupportThresholdReached(uint256 id) public view override returns (bool) {
         Proposal storage p = proposals[id];
         if (p.tally.yes == 0) return false;
-        return (RATIO_BASE - p.parameters.supportThreshold) * p.tally.yes
+        return (1_000_000 - p.parameters.supportThreshold) * p.tally.yes
             >= p.parameters.supportThreshold * p.tally.no;
     }
 
