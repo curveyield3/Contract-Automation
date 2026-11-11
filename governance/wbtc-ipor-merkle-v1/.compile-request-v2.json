@@ -1,6 +1,5 @@
 {
-  "mode": "source_compile_only",
-  "component": "spp",
-  "source": "65b877c1cfb6e57e78fa4f041a31725f0f508c64",
-  "fix": "Solidity reserved keyword after"
+  "mode": "compile_both_only",
+  "version": 3,
+  "source": "2eb8d95ccd13b94817783360d37df181292822e2"
 }

@@ -133,8 +133,29 @@ jobs:
             git checkout a1d84e0542cf2db0a542f0159878457dbb7e3515
             git submodule update --init --recursive
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporStagedProposalProcessor_v1.sol" src/
+            set +e
+            forge build src/StagedProposalProcessor.sol --via-ir --optimizer-runs 1 --sizes
+            echo "STOCK_SPP_EXIT=$?"
             forge build src/WbtcIporStagedProposalProcessor_v1.sol --via-ir --optimizer-runs 1 --sizes
+            echo "ADAPTED_SPP_EXIT=$?"
           ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/spp-build.log"
+      - name: Compile exact Aragon TokenVoting fork and ZK verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/aragon/token-voting-plugin.git "$RUNNER_TEMP/aragon-token"
+          (
+            cd "$RUNNER_TEMP/aragon-token"
+            git checkout e726c28061486114d601c547e4da1180ed5ab6da
+            git submodule update --init --recursive
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/MajorityVotingBase.sol" src/base/
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/IMajorityVoting.sol" src/base/
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v3.sol" src/
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v1.sol" src/
+            mkdir -p src/lib
+            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/lib/BokkyPooBahsDateTimeLibrary.sol" src/lib/
+            forge build src/WbtcIporTokenVoting_v3.sol src/WbtcIporZkProofVerifier_v1.sol --via-ir --optimizer-runs 1 --sizes
+          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build.log"
       - name: Preserve compile diagnostics
         if: always()
         uses: actions/upload-artifact@v4
