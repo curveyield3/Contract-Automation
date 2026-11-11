@@ -311,6 +311,126 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         proposalId = _createPendingMerkle(ProposalKind.RemoveDaoGuardian, _metadata, actions_, _msgSender());
     }
 
+    /// @notice Optional authenticated Merkle snapshot; default remains atomic.
+    function createMerkleStandardProposal(bytes calldata metadata, Action[] calldata actions)
+        external auth(CREATE_PROPOSAL_PERMISSION_ID) singleGovernanceEntry returns (uint256 id)
+    {
+        Action[] memory a = actions;
+        _checkStandardActions(a);
+        id = _createPendingMerkle(ProposalKind.Standard, metadata, a, _msgSender());
+    }
+
+    /// @dev Guardian removal uses only this complete, proven economic census.
+    function _createPendingMerkle(ProposalKind kind, bytes memory metadata, Action[] memory a, address creator)
+        private returns (uint256 id)
+    {
+        if (address(proofVerifier) == address(0)) revert ProofNotReady();
+        if (kind == ProposalKind.RemoveDaoGuardian && guardianRemoved) revert GuardianAlreadyRemoved();
+        id = _createProposalId(keccak256(abi.encode(kind, a, metadata, ++proposalSerial)));
+        Proposal storage p = proposals[id];
+        if (p.parameters.snapshotTimepoint != 0) revert ProposalAlreadyExists(id);
+        uint256 anchorBlock = block.number - 1;
+        bytes32 anchorHash = blockhash(anchorBlock);
+        if (anchorHash == bytes32(0)) revert InvalidGovernanceProposal();
+        p.parameters.snapshotTimepoint = anchorBlock.toUint64();
+        p.parameters.votingMode = VotingMode.Standard;
+        p.parameters.supportThreshold = kind == ProposalKind.Standard
+            ? governanceConfig.standardSupportPpm : governanceConfig.removalSupportPpm;
+        p.targetConfig = getTargetConfig();
+        for (uint256 i; i < a.length;) { p.actions.push(a[i]); unchecked { ++i; } }
+        proposer[id] = creator;
+        proposalKind[id] = kind;
+        pendingMetadata[id] = metadata;
+        sourceConfigHashAt[id] = _configurationDigest();
+        snapshotBlockHash[id] = anchorHash;
+        proposalDuration[id] = kind == ProposalKind.Standard
+            ? governanceConfig.standardVoteDuration : governanceConfig.removalVoteDuration;
+        proposalReviewDuration[id] = kind == ProposalKind.Standard && !guardianRemoved
+            ? governanceConfig.securityReviewDuration : 0;
+        proposalQuorumPpm[id] = kind == ProposalKind.Standard
+            ? governanceConfig.standardQuorumPpm : governanceConfig.removalQuorumPpm;
+        proposerThresholdPpmAt[id] = governanceConfig.proposerThresholdPpm;
+        proofDeadline[id] = uint64(block.timestamp) + 7 days;
+        zkSnapshotPending[id] = true;
+        uint256 bond = governanceConfig.standardBond * (kind == ProposalKind.Standard ? 1 : 5);
+        bondAmount[id] = bond;
+        if (!IERC20Upgradeable(address(votingToken)).transferFrom(creator, address(this), bond))
+            revert InvalidGovernanceProposal();
+    }
+
+    function submitVerifiedMerkleSnapshot(
+        uint256 id, bytes calldata journal, bytes calldata seal, bytes32[] calldata proposerProof
+    ) external singleGovernanceEntry {
+        if (!zkSnapshotPending[id] || block.timestamp >= proofDeadline[id]
+            || address(proofVerifier) == address(0)) revert ProofNotReady();
+        SnapshotJournal memory v = abi.decode(journal, (SnapshotJournal));
+        if (v.chainId != block.chainid || v.dao != address(dao()) || v.plugin != address(this)
+            || v.proposalId != id || v.anchorBlock != proposals[id].parameters.snapshotTimepoint
+            || v.anchorHash != snapshotBlockHash[id] || v.sourceConfigHash != sourceConfigHashAt[id]
+            || v.proposalKind != uint8(proposalKind[id]) || v.proposer != proposer[id]
+            || v.votingRoot == bytes32(0) || v.eligibleTotal == 0 || v.quorumDenominator == 0
+            || v.proposerWeight == 0 || v.proposerWeight > v.eligibleTotal
+            || v.proposerWeight * 1000000 < v.eligibleTotal * proposerThresholdPpmAt[id])
+            revert InvalidGovernanceProposal();
+        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(id, proposer[id], v.proposerWeight))));
+        if (!MerkleProof.verify(proposerProof, v.votingRoot, leaf)) revert InvalidGovernanceProposal();
+        if (!proofVerifier.verifySnapshot(seal, journal)) revert InvalidGovernanceProposal();
+        zkSnapshotPending[id] = false;
+        merkleSnapshot[id] = true;
+        merkleRoot[id] = v.votingRoot;
+        censusFrozen[id] = true;
+        frozenEligiblePower[id] = v.eligibleTotal;
+        frozenQuorumDenominator[id] = v.quorumDenominator;
+        Proposal storage p = proposals[id];
+        uint64 start = uint64(block.timestamp) + proposalReviewDuration[id];
+        uint64 end = start + proposalDuration[id];
+        p.parameters.startDate = start;
+        p.parameters.endDate = end;
+        p.parameters.minVotingPower = _applyRatioCeiled(v.quorumDenominator, proposalQuorumPpm[id]);
+        p.minApprovalPower = 0;
+        _registerTracked(id, end);
+        emit VerifiedMerkleSnapshot(id, v.votingRoot, v.eligibleTotal, v.quorumDenominator);
+        Action[] memory actions = p.actions;
+        _emitProposalCreatedEvent(pendingMetadata[id], actions, 0, id, start, end);
+        delete pendingMetadata[id];
+    }
+
+    /// @notice Membership is accepted only against the proven root.
+    function voteWithMerkleProof(
+        uint256 id, VoteOption choice, uint256 weight, bool spam, bytes32[] calldata proof
+    ) external singleGovernanceEntry {
+        address voter = _msgSender();
+        Proposal storage p = proposals[id];
+        if (!merkleSnapshot[id] || zkSnapshotPending[id] || guardianVetoed[id]
+            || !_isProposalOpen(p) || choice == VoteOption.None || cast[id][voter] || weight == 0
+            || (guardianRemoved && voter == guardianSafe && proposalKind[id] == ProposalKind.Standard
+                && !voterState[voter].registered))
+            revert VoteCastForbidden(id, voter, choice);
+        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(id, voter, weight))));
+        if (!MerkleProof.verify(proof, merkleRoot[id], leaf)) revert InvalidGovernanceProposal();
+        _castWeightedVote(id, choice, voter, weight);
+        if (spam) spamFlaggedPower[id] += weight;
+    }
+
+    /// @notice The original proposer can reclaim its bond after proof timeout.
+    function expireUnprovenProposal(uint256 id) external singleGovernanceEntry {
+        if (!zkSnapshotPending[id] || block.timestamp < proofDeadline[id] || bondSettled[id])
+            revert ProposalBondNotReady();
+        zkSnapshotPending[id] = false;
+        bondSettled[id] = true;
+        if (!IERC20Upgradeable(address(votingToken)).transfer(proposer[id], bondAmount[id]))
+            revert InvalidGovernanceProposal();
+        emit ProposalBondSettled(id, false, bondAmount[id]);
+    }
+
+    function _configurationDigest() private view returns (bytes32) {
+        return keccak256(abi.encode(
+            block.chainid, address(dao()), address(votingToken), address(morphoBlue),
+            guardianSafe, guardianRemoved, sourceConfigVersion,
+            inactivityMonths, minimumMissedProposals, guardianQualificationMonths
+        ));
+    }
+
     function _createWeightedProposal(
         ProposalKind kind, bytes memory metadata, Action[] memory actions_, address creator
     ) private returns (uint256 id) {
@@ -580,19 +700,21 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     }
 
     /// @inheritdoc MajorityVotingBase
-    function _vote(uint256 _proposalId, VoteOption _voteOption, address _voter, bool)
-        internal override
-    {
-        Proposal storage p = proposals[_proposalId];
-        uint256 weight = frozenWeight[_proposalId][_voter];
-        // No replacements: the frozen voting snapshot can be counted only once.
-        if (_voteOption == VoteOption.Yes) p.tally.yes += weight;
-        else if (_voteOption == VoteOption.No) p.tally.no += weight;
-        else if (_voteOption == VoteOption.Abstain) p.tally.abstain += weight;
+    function _vote(uint256 id, VoteOption option, address voter, bool) internal override {
+        uint256 weight = frozenWeight[id][voter];
+        if (merkleSnapshot[id] || weight == 0) revert InvalidGovernanceProposal();
+        _castWeightedVote(id, option, voter, weight);
+    }
+
+    function _castWeightedVote(uint256 id, VoteOption option, address voter, uint256 weight) internal {
+        Proposal storage p = proposals[id];
+        if (option == VoteOption.Yes) p.tally.yes += weight;
+        else if (option == VoteOption.No) p.tally.no += weight;
+        else if (option == VoteOption.Abstain) p.tally.abstain += weight;
         else revert InvalidGovernanceProposal();
-        p.voters[_voter] = _voteOption;
-        _recordVote(_proposalId, _voter);
-        emit VoteCast({proposalId: _proposalId, voter: _voter, voteOption: _voteOption, votingPower: weight});
+        p.voters[voter] = option;
+        _recordVote(id, voter);
+        emit VoteCast({proposalId: id, voter: voter, voteOption: option, votingPower: weight});
     }
 
     /// @inheritdoc MajorityVotingBase
