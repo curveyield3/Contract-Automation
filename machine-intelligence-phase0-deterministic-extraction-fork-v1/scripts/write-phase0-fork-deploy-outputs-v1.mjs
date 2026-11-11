@@ -900,7 +900,7 @@ async function buildForkRelationshipGraphV1(){
   for(const frame of observedRuntimeFrames){
     const identity=frame.sourceIdentity;
     if(frame.runtimeBindingStatus!=='EXACT_SOURCE_AND_RUNTIME_MATCH'||!identity)continue;
-    if(frame.effectiveReverted)continue; // still in trace; no committed-effect inference
+    // Reverted EVM calls are still observed calls; do not infer committed effects.
     const artifact=compilerByIdentity.get([
       identity.compilationUnitId,identity.sourceName,identity.contractName].join('::'));
     if(!artifact)continue;
@@ -928,6 +928,7 @@ async function buildForkRelationshipGraphV1(){
       joinId,sourceFunctionId:fn.functionId,runtimeAddress:frame.runtimeCodeAddress,
       observedFrameId:frame.frameId,storageAddress:frame.storageContextAddress,
       transactionHash:frame.transactionHash,scenarioId:frame.scenarioId,
+      effectiveReverted:frame.effectiveReverted===true,
       compilationUnitId:identity.compilationUnitId,sourceName:identity.sourceName,
       canonicalSignature:signature,selector:frame.inputSelector,
       status:'EXACT_SOURCE_FUNCTION_AND_OBSERVED_CALL_FRAME_CODE',
@@ -1015,12 +1016,76 @@ async function buildForkRelationshipGraphV1(){
       'NO_PHASE6_PREFILL','NO_COMPLETE_SCENARIO_CENSUS',
       'ACTIVE_USE_METHOD_EXECUTION_NOT_IMPLEMENTED']};
   const graphRef=await writeOutput('evidence/phase0/INTERCONTRACT_RELATIONSHIP_GRAPH_INDEX_v1.json',graph);
+  const originalSlitherDetectors=await optional('evidence/static-analysis/SLITHER_v1.json','SLITHER_DETECTORS');
+  const staticFunctionNodes=nodes.filter(node=>node.kind==='SLITHER_SOURCE_FUNCTION');
+  const joinedFunctionIds=new Set(slitherJoins.map(join=>join.sourceFunctionId));
+  const joinedFrameIds=new Set(slitherJoins.map(join=>join.observedFrameId));
+  const unmatchedSlitherFacts=staticFunctionNodes.filter(node=>!joinedFunctionIds.has(node.nodeId))
+    .map(node=>({sourceFunctionId:node.nodeId,
+      compilationUnitId:node.compilationUnitId,sourceName:node.sourceName,
+      sourceBindingStatus:node.staticSourceBindingStatus,
+      disposition:'NO_VERIFIED_OBSERVED_CALL_FRAME_MATCH',
+      sourceRef:staticFacts.ref}));
+  const unmatchedRuntimeFrames=observedRuntimeFrames.filter(frame=>!joinedFrameIds.has(frame.frameId))
+    .map(frame=>({observedFrameId:frame.frameId,
+      transactionHash:frame.transactionHash,codeAddress:frame.runtimeCodeAddress,
+      storageAddress:frame.storageContextAddress,
+      sourceBindingStatus:frame.runtimeBindingStatus,
+      disposition:'NO_EXACT_COMPILER_SLITHER_SELECTOR_JOIN',
+      frameRef:frame.callTraceEvidenceRef}));
+  const slitherJoinRefs=[];
+  if(scenario){
+    const entries=slitherJoins.map(join=>{
+      const sourceFactEdges=edges.filter(edge=>edge.from===join.sourceFunctionId&&
+        String(edge.kind??'').startsWith('SLITHER_'));
+      const correlatedStateEdges=edges.filter(edge=>
+        edge.kind==='OBSERVED_SUCCESSFUL_TX_STORAGE_CHANGE'&&
+        edge.transactionHash===join.transactionHash&&
+        edge.storageAddress===join.storageAddress);
+      return{...join,
+        runtimeCodeIdentityId:mkid('NODE-CODE-AT-TX-',scenario,join.transactionHash,join.runtimeAddress),
+        observedStateWitnessIds:[],
+        potentiallyCorrelatedStateEdgeIds:correlatedStateEdges.map(edge=>edge.edgeId),
+        stateEvidenceQualifier:'TRANSACTION_AND_STORAGE_CONTEXT_ONLY_NOT_FRAME_WRITER_PROOF',
+        slitherFactSelectors:sourceFactEdges.map(edge=>edge.edgeId),
+        jointEvidenceClass:'EXACT_SOURCE_AND_RUNTIME_MATCH',
+        joinLimitations:join.storageAddress?[]:['STORAGE_CONTEXT_UNRESOLVED']};
+    });
+    const joinRecordRef=await writeOutput(
+      path.posix.join('evidence/phase0/scenarios',scenario,'SLITHER_RUNTIME_STATE_JOIN_v1.json'),{
+      schemaVersion:'mi-phase0-slither-runtime-join-v1',...source,
+      scenarioId:scenario,chainId:pinned.chainId,
+      pinnedForkBlockNumber:pinned.pinnedForkBlockNumber,
+      pinnedForkBlockHash:pinned.pinnedForkBlockHash,
+      buildBundleSha256:compilerBundle.ref?.sha256??null,
+      sourceGraphIndexRef:graphRef,
+      staticAnalysisRef:{...originalSlitherDetectors.ref,slitherVersion:'0.11.6'},
+      staticRelationFactsRef:staticFacts.ref,entries,
+      unmatchedSlitherFacts,unmatchedRuntimeFrames,
+      sourceFactCount:staticFunctionNodes.length,
+      runtimeFrameCount:observedRuntimeFrames.length,
+      exactJoinedFrameCount:entries.length,
+      semanticSecurityVerdicts:[],
+      status:unmatchedSlitherFacts.length||unmatchedRuntimeFrames.length?
+        'PARTIAL_EXACT_JOINS_WITH_UNMATCHED_EVIDENCE':'ALL_OBSERVED_FRAMES_JOINED',
+      limitations:['Transaction-level slot changes cannot prove which nested frame wrote a slot.']
+    });
+    slitherJoinRefs.push(joinRecordRef);
+  }
   const slitherRef=await writeOutput('evidence/phase0/GRAPH_SLITHER_RELATIONSHIP_ANALYSIS_v1.json',{
     schemaVersion:'mi-phase0-graph-slither-relationship-analysis-v1',
-    ...source,sourceGraphIndexRef:graphRef,slitherInputRef:staticFacts.ref,staticUnitCount:units.length,
-    staticEdgeCount:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length,
-    runtimeJoinStatus:slitherJoins.length?'PARTIALLY_SOURCE_RUNTIME_BOUND':'NOT_PROVEN',runtimeJoinRecords:slitherJoins,
-    limitations:staticFacts.value?.unavailableUnitRecords??[]});
+    ...source,sourceGraphIndexRef:graphRef,
+    slitherInputRef:staticFacts.ref,detectorInputRef:originalSlitherDetectors.ref,
+    staticUnitCount:units.length,
+    staticEdgeCount:edges.filter(edge=>String(edge.kind??'').startsWith('SLITHER_')).length,
+    analysisMethod:'STATIC_RELATIONSHIP_JOIN',
+    runtimeJoinStatus:slitherJoins.length?'PARTIALLY_SOURCE_RUNTIME_BOUND':'NOT_PROVEN',
+    runtimeJoinRecords:slitherJoins,perScenarioJoinRefs:slitherJoinRefs,
+    unmatchedSlitherFacts,unmatchedRuntimeFrames,
+    detectorAttributionStatus:'NOT_ATTRIBUTED_WITHOUT_EXACT_UNIT_SOURCE_SPAN',
+    detectorCount:originalSlitherDetectors.value?.detectors?.length??0,
+    limitations:staticFacts.value?.unavailableUnitRecords??[]
+  });
   // Step 8: evaluate every graph occurrence, never an arbitrary top-N excerpt.
   // These are source-bound investigation prompts, not vulnerability verdicts.
   const candidatePatternsV1={
