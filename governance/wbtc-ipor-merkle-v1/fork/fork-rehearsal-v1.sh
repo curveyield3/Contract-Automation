@@ -4,7 +4,7 @@ set -euo pipefail
 # Authenticated Ethereum-mainnet fork. All transactions must target the loopback node.
 # This is the fork test runner for the existing governance workflow (revision v2).
 LOCAL_RPC='http://127.0.0.1:8545'
-ROOT="\${GITHUB_WORKSPACE:-$(pwd)}"
+ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
 OUT="$ROOT/governance/wbtc-ipor-merkle-v1/fork-output"
 PROJECT="$ROOT/governance/wbtc-ipor-merkle-v1/contracts"
 mkdir -p "$OUT"
@@ -15,13 +15,13 @@ cleanup() {
 trap cleanup EXIT
 fail() { printf 'FORK BLOCKED: %s\n' "$*" >&2; return 1; }
 
-[[ -n "\${UPSTREAM_RPC_URL:-}" ]] || fail 'RPC_ETHEREUM secret is missing'
-[[ -z "\${ETH_RPC_URL:-}" || "$ETH_RPC_URL" == "$LOCAL_RPC" ]] || fail 'ETH_RPC_URL must be unset or local only'
+[[ -n "${UPSTREAM_RPC_URL:-}" ]] || fail 'RPC_ETHEREUM secret is missing'
+[[ -z "${ETH_RPC_URL:-}" || "$ETH_RPC_URL" == "$LOCAL_RPC" ]] || fail 'ETH_RPC_URL must be unset or local only'
 UPSTREAM_CHAIN="$(cast chain-id --rpc-url "$UPSTREAM_RPC_URL")"
 [[ "$UPSTREAM_CHAIN" == '1' ]] || fail 'upstream is not Ethereum mainnet (chainId 1)'
 LATEST="$(cast block-number --rpc-url "$UPSTREAM_RPC_URL")"
 [[ "$LATEST" =~ ^[0-9]+$ && "$LATEST" -gt 120 ]] || fail 'unexpected upstream height'
-PIN="\${FORK_BLOCK:-}"
+PIN="${FORK_BLOCK:-}"
 if [[ -z "$PIN" ]]; then PIN="$((LATEST - 80))"; fi
 [[ "$PIN" =~ ^[0-9]+$ && "$PIN" -gt 0 && "$PIN" -le $((LATEST - 64)) ]] || fail 'fork block must be at least 64 blocks behind head'
 UPSTREAM_HASH="$(cast block "$PIN" --field hash --rpc-url "$UPSTREAM_RPC_URL" | tr -d '\r\n')"
@@ -38,16 +38,16 @@ done
 [[ "$READY" == 1 ]] || { tail -70 "$OUT/anvil.log" >&2 || true; fail 'local Anvil did not start'; }
 [[ "$(cast chain-id --rpc-url "$LOCAL_RPC")" == '1' ]] || fail 'local chain ID mismatch'
 LOCAL_HASH="$(cast block "$PIN" --field hash --rpc-url "$LOCAL_RPC" | tr -d '\r\n')"
-[[ "\${LOCAL_HASH,,}" == "\${UPSTREAM_HASH,,}" ]] || fail 'local pinned block hash differs from authenticated upstream'
+[[ "${LOCAL_HASH,,}" == "${UPSTREAM_HASH,,}" ]] || fail 'local pinned block hash differs from authenticated upstream'
 MORPHO_BLUE='0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb'
 MORPHO_CODE="$(cast code "$MORPHO_BLUE" --rpc-url "$LOCAL_RPC")"
 [[ "$MORPHO_CODE" != '0x' && "$MORPHO_CODE" != '0x0' ]] || fail 'real Morpho Blue mainnet contract bytecode is missing'
 
-jq -n --arg status FORK_READY_ONLY --arg block "$PIN" --arg blockHash "$UPSTREAM_HASH" --arg head "$LATEST" --arg gitSha "\${GITHUB_SHA:-unknown}" --arg morphoBlue "$MORPHO_BLUE" \
+jq -n --arg status FORK_READY_ONLY --arg block "$PIN" --arg blockHash "$UPSTREAM_HASH" --arg head "$LATEST" --arg gitSha "${GITHUB_SHA:-unknown}" --arg morphoBlue "$MORPHO_BLUE" \
  '{schema:"wbtc-ipor-governance-fork-rehearsal-v1",status:$status,chainId:1,upstreamHeight:$head,upstreamBlock:$block,upstreamBlockHash:$blockHash,morphoBlue:$morphoBlue,runnerCommit:$gitSha,localRPC:"http://127.0.0.1:8545",liveGovernanceExecuted:false,realProofVerifiedOnchain:false}' > "$OUT/fork-report.json"
 printf 'Verified mainnet fork: block=%s hash=%s; Morpho Blue code present. Mainnet was not modified.\n' "$PIN" "$UPSTREAM_HASH"
 
-if [[ "\${FORK_ONLY_PREFLIGHT:-0}" == '1' ]]; then
+if [[ "${FORK_ONLY_PREFLIGHT:-0}" == '1' ]]; then
   echo 'Fork infrastructure ready. No governance or proof tests were executed.'
   exit 0
 fi

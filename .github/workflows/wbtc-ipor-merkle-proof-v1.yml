@@ -82,9 +82,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      UPSTREAM_RPC_URL: \${{ secrets.RPC_ETHEREUM }}
-      FORK_BLOCK: \${{ inputs.fork_block }}
-      FORK_ONLY_PREFLIGHT: \${{ inputs.mode == 'fork_preflight' && '1' || '0' }}
+      UPSTREAM_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+      FORK_BLOCK: ${{ inputs.fork_block }}
+      FORK_ONLY_PREFLIGHT: ${{ inputs.mode == 'fork_preflight' && '1' || '0' }}
       RISC0_DEV_MODE: '0'
     steps:
       - uses: actions/checkout@v4
@@ -101,7 +101,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wbtc-ipor-mainnet-fork-\${{ inputs.mode }}-\${{ github.run_id }}
+          name: wbtc-ipor-mainnet-fork-${{ inputs.mode }}-${{ github.run_id }}
           path: governance/wbtc-ipor-merkle-v1/fork-output/
           if-no-files-found: warn
           retention-days: 14
