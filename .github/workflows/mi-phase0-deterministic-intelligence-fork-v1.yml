@@ -145,7 +145,7 @@ jobs:
         continue-on-error: true # Publish only genuine generated artifacts; Worker owns analyzer quality
         env:
           AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          PHASE0_PRIVATE_BUILD_CACHE_ENABLED: ${{ github.event_name != 'pull_request' }}
+          PHASE0_PRIVATE_BUILD_CACHE_ENABLED: 'false'
         shell: bash
         run: |
           set -euo pipefail
