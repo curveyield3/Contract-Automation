@@ -147,7 +147,7 @@ jobs:
             git submodule update --init --recursive
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporStagedProposalProcessor_v8.sol" src/
             forge build src/StagedProposalProcessor.sol --via-ir --optimizer-runs 1 --sizes
-            forge build src/WbtcIporStagedProposalProcessor_v8.sol --via-ir --optimizer-runs 1 --sizes || echo '::warning::SPP size/compile gate failed; measuring TokenVoting independently'
+            forge build src/WbtcIporStagedProposalProcessor_v8.sol --via-ir --optimizer-runs 1 --sizes
           ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/spp-build.log"
       - name: Compile exact Aragon TokenVoting fork and ZK verifier
         shell: bash
@@ -164,14 +164,25 @@ jobs:
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v6.sol" src/
             mkdir -p src/lib
             cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/lib/BokkyPooBahsDateTimeLibrary.sol" src/lib/
-            forge build src/WbtcIporTokenVoting_v13.sol src/WbtcIporZkProofVerifier_v6.sol --via-ir --optimizer-runs 1 --sizes || echo '::warning::TokenVoting size/compile gate failed; evidence retained'
+            forge build src/WbtcIporTokenVoting_v13.sol src/WbtcIporZkProofVerifier_v6.sol --via-ir --optimizer-runs 1 --sizes
           ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build.log"
       - name: Preserve compile diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wbtc-ipor-native-spp-compile-v4
-          path: compile-evidence/
-          if-no-files-found: warn
-          retention-days: 5
+          name: wbtc-ipor-three-contract-sources-and-compile-v5
+          path: |
+            compile-evidence/
+            governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporStagedProposalProcessor_v8.sol
+            governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v13.sol
+            governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v6.sol
+            governance/wbtc-ipor-merkle-v1/contracts/src/base/MajorityVotingBase.sol
+            governance/wbtc-ipor-merkle-v1/contracts/src/base/IMajorityVoting.sol
+            governance/wbtc-ipor-merkle-v1/contracts/src/lib/BokkyPooBahsDateTimeLibrary.sol
+            governance/wbtc-ipor-merkle-v1/contracts/src/libraries/Errors.sol
+            governance/wbtc-ipor-merkle-v1/contracts/src/libraries/Permissions.sol
+            governance/wbtc-ipor-merkle-v1/contracts/DEPENDENCIES_v1.md
+            governance/wbtc-ipor-merkle-v1/CONTRACT_DESIGN_SPEC_v9.md
+          if-no-files-found: error
+          retention-days: 30
 

@@ -1,5 +1,10 @@
 {
-  "purpose": "three-contract runtime, correct meta-tx authenticated voter",
-  "version": 13,
+  "purpose": "strict EIP-170 three-contract compile and exact-source export",
+  "version": 14,
+  "contracts": [
+    "SPP v8",
+    "TokenVoting v13",
+    "ZK verifier v6"
+  ],
   "tests": false
 }
