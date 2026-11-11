@@ -3258,6 +3258,24 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
       chainId:forkChain.chainId,pinnedBlockNumber:anvil.pinnedBlockNumber,
       pinnedBlockHash:anvil.pinnedBlockHash,initialBlock,scriptEnd
     });
+    const observedCreations=deploymentTraceIndex.actualCreations??[];
+    const committedCreationOccurrences=observedCreations.filter(row=>
+      row.effectiveCommitStatus==='PERSISTED_IF_APPLICABLE');
+    const factoryRuntimeIdentityRows=await resolveExactRuntimeDeploymentIdentityV1({
+      provider,artifacts:sharedExecutionInputs.artifacts,
+      deployments:committedCreationOccurrences.map(row=>({
+        ...row,mappingStatus:'OBSERVED_FACTORY_CREATE_FRAME',
+        creationSourceEvidenceRef:deploymentTraceIndex.manifestRef
+      }))
+    });
+    const allResolvedDeploymentRows=[...resolvedDeploymentRows,...factoryRuntimeIdentityRows];
+    runtimeIdentityIndex.rows=allResolvedDeploymentRows;
+    runtimeIdentityIndex.createdContractOccurrences=observedCreations;
+    runtimeIdentityIndex.status=allResolvedDeploymentRows.every(row=>
+      row.sourceBinding==='EXACT_SOURCE_AND_RUNTIME_MATCH')
+      ?'ALL_OBSERVED_RUNTIME_IDENTITIES_EXACT':'PARTIAL_WITH_TYPED_UNRESOLVED_IDENTITIES';
+    await fs.writeFile(path.join(outputRoot,'evidence','phase0','RUNTIME_ADDRESS_IDENTITY_INDEX_v1.json'),
+      JSON.stringify(runtimeIdentityIndex,null,2)+'\n');
     if(deploymentOnly){
       // Only original package deployment/config scripts run on the fork. No fallback
       // deployments, fixture generation, Medusa, or ABI accounting telemetry.
@@ -3284,7 +3302,7 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
         attempts:deployment.attempts,
         ...(auditPreviewCreationTrace?{auditPreviewCreationTrace}:{}),
         runtimeIdentityIndexRef:'evidence/phase0/RUNTIME_ADDRESS_IDENTITY_INDEX_v1.json',
-        deployedContracts:[...new Map(resolvedDeploymentRows.map(row=>[String(row.address).toLowerCase(),row])).values()],
+        deployedContracts:[...new Map(allResolvedDeploymentRows.map(row=>[String(row.address).toLowerCase(),row])).values()],
         gaps,limitations:gaps,
         coverage:{detectedScripts:dispositions.length,requiredScripts:dispositions.length,executedScripts:deployment.attempts.length,passedScripts:deployment.attempts.filter(row=>row.status==='PASS').length,failedOrUnsupportedScripts:dispositions.filter(row=>row.disposition!=='EXECUTED_PASS').length,excludedScripts:0}
       };
