@@ -5,7 +5,8 @@ pragma solidity ^0.8.8;
 import {DAO, IDAO, Action} from "@aragon/osx/core/dao/DAO.sol";
 import {IProposal} from "@aragon/osx-commons-contracts/src/plugin/extensions/proposal/IProposal.sol";
 import {MajorityVotingBase} from "./base/MajorityVotingBase.sol";
-import {PluginUUPSUpgradeable} from "@aragon/osx/framework/plugin/setup/PluginSetupProcessor.sol";
+import {BokkyPooBahsDateTimeLibrary} from "./lib/BokkyPooBahsDateTimeLibrary.sol";
+import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {IMembership} from "@aragon/osx-commons-contracts/src/plugin/extensions/membership/IMembership.sol";
 import {_applyRatioCeiled} from "@aragon/osx-commons-contracts/src/utils/math/Ratio.sol";
 
@@ -16,35 +17,23 @@ import {IERC6372Upgradeable} from "@openzeppelin/contracts-upgradeable/interface
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IERC20MetadataUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/IERC20MetadataUpgradeable.sol";
 
-/// @dev A separately implemented, plugin-authorized, source-bound census.
-///      It MUST freeze a complete consistent snapshot and never return unverified
-///      externally supplied totals. Not supplied by this contract-development step.
-interface IWbtcIporSnapshotSource {
-    function freezeAtomic(
-        uint256 proposalId, uint8 kind, uint256 anchorBlock, address proposer, address guardian,
-        bool guardianRemoved
-    ) external returns (uint256 eligibleWeight, uint256 quorumDenominator, uint256 proposerWeight);
-    function frozenVotingPower(uint256 proposalId, address voter) external view returns (uint256);
-    function activated(address voter) external view returns (bool);
-    function activate(address voter) external;
-    function recordVote(uint256 proposalId, address voter) external;
-    function registerProposal(uint256 proposalId, uint64 votingEnd) external;
-    function updateVotingEnd(uint256 proposalId, uint64 votingEnd) external;
-    function cancelGuardianVeto(uint256 proposalId) external;
-    function previewStandardTotalVotingPower(uint256 timepoint) external view returns (uint256);
+/// @notice The sole auxiliary contract is a fixed-image RISC Zero proof verifier.
+interface IWbtcIporZkProofVerifier {
+    function verifySnapshot(bytes calldata seal, bytes calldata journal) external view returns (bool);
 }
-
-/// @dev Must be non-upgradeable and permanently enforce one-way removal; deployment
-///      must deny alternate DAO execution/permission routes that could bypass it.
-interface IWbtcIporGuardianConstitution {
-    function permanentlyRemoveDaoGuardian() external;
-    function isGuardianRemoved() external view returns (bool);
+interface IMorphoBlueMarket {
+    function position(bytes32 id, address user)
+        external view returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral);
+    function idToMarketParams(bytes32 id)
+        external view returns (address loanToken, address collateralToken, address oracle, address irm, uint256 lltv);
 }
-
-/// @dev Immutable, restrictive execution policy. A governance proposal may call
-///      only exact, explicitly authorized target/selector/value combinations.
-interface IWbtcIporActionPolicy {
-    function isAllowed(address target, uint256 value, bytes calldata data) external view returns (bool);
+interface ICurveLendController {
+    function collateral_token() external view returns (address);
+    function amm() external view returns (address);
+}
+interface ICurveLendAMM {
+    function coins(uint256 index) external view returns (address);
+    function get_sum_xy(address user) external view returns (uint256[2] memory amounts);
 }
 
 /// @title TokenVoting
@@ -72,8 +61,10 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     /// @notice The list of addresses excluded from voting
     EnumerableSet.AddressSet internal excludedAccounts; // Slot 1
 
-    // Source-fork additions (appended after existing Aragon storage).
+    // Source-derived from deployed Aragon TokenVoting v1.4. Added storage
+    // subsumes the old standalone registry/market-policy/guardian contracts.
     enum ProposalKind { Standard, RemoveDaoGuardian }
+    enum MarketType { None, MorphoBlue, CurveLend }
 
     struct GovernanceConfig {
         uint32 standardQuorumPpm;
@@ -86,14 +77,65 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         uint64 removalVoteDuration;
         uint256 standardBond;
     }
+    struct Market {
+        MarketType marketType;
+        address market;
+        address custody;
+        bytes32 marketId;
+        bool enabled;
+    }
+    struct Voter {
+        uint64 activeSince;
+        uint64 lastParticipationAt;
+        bool registered;
+    }
+    struct Tracked {
+        uint64 end;
+        bool canceled;
+        bool exists;
+    }
+    struct SnapshotJournal {
+        uint256 chainId;
+        address dao;
+        address plugin;
+        uint256 proposalId;
+        uint256 anchorBlock;
+        bytes32 anchorHash;
+        bytes32 sourceConfigHash;
+        bytes32 votingRoot;
+        uint256 eligibleTotal;
+        uint256 quorumDenominator;
+        address proposer;
+        uint256 proposerWeight;
+        uint8 proposalKind;
+    }
 
     GovernanceConfig public governanceConfig;
-    IWbtcIporSnapshotSource public snapshotSource;
-    IWbtcIporGuardianConstitution public guardianConstitution;
-    IWbtcIporActionPolicy public actionPolicy;
-    address public guardianSafe;
-    bytes32 public actionPolicyCodeHash;
+    address public immutable guardianSafe;
+    IMorphoBlueMarket public immutable morphoBlue;
+    IWbtcIporZkProofVerifier public proofVerifier;
+    bool public guardianRemoved;
     uint256 private governanceEntryLock;
+    uint8 public inactivityMonths = 3;
+    uint8 public minimumMissedProposals = 2;
+    uint8 public guardianQualificationMonths = 3;
+
+    Market[] private trackedMarkets;
+    mapping(bytes32 => bool) public marketRegistered;
+    mapping(bytes4 => bool) public allowedVaultSelector;
+    address[] private knownVoters;
+    uint256[] private allProposals;
+    mapping(address => Voter) public voterState;
+    mapping(uint256 => Tracked) public tracked;
+    mapping(uint256 => mapping(address => uint256)) public frozenWeight;
+    mapping(uint256 => mapping(address => bool)) public cast;
+    mapping(uint256 => bool) public merkleSnapshot;
+    mapping(uint256 => bool) public zkSnapshotPending;
+    mapping(uint256 => bytes32) public merkleRoot;
+    mapping(uint256 => bytes32) public snapshotBlockHash;
+    mapping(uint256 => bytes32) public sourceConfigHashAt;
+    mapping(uint256 => bool) public censusFrozen;
+    uint256 public sourceConfigVersion;
 
     mapping(uint256 => ProposalKind) public proposalKind;
     mapping(uint256 => bool) public guardianVetoed;
@@ -108,15 +150,22 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     event GuardianReview(uint256 indexed proposalId, bool approved);
     event ProposalBondSettled(uint256 indexed proposalId, bool forfeited, uint256 amount);
     event GovernanceConfigurationUpdated();
-    event FrozenGovernanceSnapshot(uint256 indexed proposalId, ProposalKind kind, uint256 eligiblePower, uint256 denominator);
+    event FrozenGovernanceSnapshot(uint256 indexed proposalId, ProposalKind kind, uint256 eligible, uint256 denominator);
+    event VerifiedMerkleSnapshot(uint256 indexed proposalId, bytes32 root, uint256 eligible, uint256 denominator);
+    event MarketChanged(uint256 indexed index, MarketType kind, address market, bool enabled);
+    event VoterActivated(address indexed voter, uint64 since);
+    event GuardianPermanentlyRemoved();
+    event ProofVerifierBound(address verifier);
 
-    error SnapshotIntegrationRequired();
+    error NoVotingPower();
     error InvalidGovernanceProposal();
     error GuardianAlreadyRemoved();
     error InvalidGovernanceAction();
     error OnlyGuardianOrDAO();
     error ProposalBondNotReady();
     error ProposalAlreadySettled();
+    error IncompleteEconomicCensus();
+    error ProofNotReady();
 
     modifier singleGovernanceEntry() {
         if (governanceEntryLock != 0) revert InvalidGovernanceProposal();
@@ -124,86 +173,37 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         _;
         governanceEntryLock = 0;
     }
-
     modifier onlyDaoExecution() {
         if (msg.sender != address(dao())) revert OnlyGuardianOrDAO();
         _;
     }
-
-
 
     /// @notice Emitted when an account's balance is considered as non-circulating supply. Its balance will be excluded from the token supply computation.
     /// @param accounts The addresses whose balance is considered as not circulating
     event ExcludedFromSupply(address[] accounts);
 
     /// @notice Thrown if the voting power is zero
-    error NoVotingPower();
-
     /// @notice Thrown if the token reports an inconsistent clock mode and clock value
     error TokenClockMismatch();
 
-    /// @notice Initializes the component.
-    /// @dev This method is required to support [ERC-1822](https://eips.ethereum.org/EIPS/eip-1822).
-    /// @param _dao The IDAO interface of the associated DAO.
-    /// @param _votingSettings The voting settings.
-    /// @param _token The [ERC-20](https://eips.ethereum.org/EIPS/eip-20) token to use for voting.
-    ///     If the given token implements https://eips.ethereum.org/EIPS/eip-6372,
-    ///     then `CLOCK_MODE()` or `clock()` will determine the clock type used by the plugin.
-    ///     The token will be assumed to use a block number based clock otherwise.
-    /// @param _targetConfig Configuration for the execution target, specifying the target address and operation type
-    ///     (either `Call` or `DelegateCall`). Defined by `TargetConfig` in the `IPlugin` interface,
-    ///     part of the `osx-commons-contracts` package, added in build 3.
-    /// @param _minApprovals The minimal amount of approvals the proposal needs to succeed.
-    /// @param _pluginMetadata The plugin specific information encoded in bytes.
-    ///     This can also be an ipfs cid encoded in bytes.
-    function initialize(
-        IDAO _dao,
-        VotingSettings calldata _votingSettings,
-        IVotesUpgradeable _token,
-        TargetConfig calldata _targetConfig,
-        uint256 _minApprovals,
-        bytes calldata _pluginMetadata,
-        address[] memory _excludedAccounts,
-        address _guardianSafe,
-        IWbtcIporGuardianConstitution _constitution,
-        IWbtcIporSnapshotSource _snapshotSource,
-        IWbtcIporActionPolicy _actionPolicy
-    ) external onlyCallAtInitialization reinitializer(3) {
-        // Preserve the Aragon base initializer with immutable default boundaries.
-        require(
-            _votingSettings.votingMode == VotingMode.Standard
-                && _votingSettings.supportThreshold == 670000
-                && _votingSettings.minParticipation == 250000
-                && _votingSettings.minDuration == 14 days
-                && _votingSettings.minProposerVotingPower == 0 && _minApprovals == 0,
-            "NONSTANDARD_INITIAL_SETTINGS"
-        );
-        require(
-            _guardianSafe != address(0) && address(_constitution).code.length != 0
-                && address(_snapshotSource).code.length != 0 && address(_actionPolicy).code.length != 0,
-            "MISSING_GOVERNANCE_DEPENDENCY"
-        );
-        // EVM action operation must be Call (not DelegateCall). The setup
-        // contract must additionally ensure only this plugin holds DAO executor rights.
-        require(uint8(_targetConfig.operation) == 0, "DELEGATECALL_NOT_ALLOWED");
-        __MajorityVotingBase_init(_dao, _votingSettings, _targetConfig, _minApprovals, _pluginMetadata);
-
-        votingToken = _token;
+    /// @notice Directly deployed, non-upgradeable Aragon plugin (no UUPS proxy).
+    /// Deploy after DAOFactory.createDao(settings, []). The creator's temporary
+    /// EXECUTE permission is relinquished after granting EXECUTE to this plugin.
+    constructor(
+        IDAO boundDao,
+        IVotesUpgradeable vaultShareToken,
+        address guardian,
+        address morphoBlueSingleton
+    ) MajorityVotingBase(boundDao) {
+        if (address(boundDao).code.length == 0 || address(vaultShareToken).code.length == 0
+            || guardian == address(0) || morphoBlueSingleton.code.length == 0)
+            revert InvalidGovernanceProposal();
+        guardianSafe = guardian;
+        morphoBlue = IMorphoBlueMarket(morphoBlueSingleton);
+        votingToken = vaultShareToken;
         _detectTokenClock();
-        for (uint256 i; i < _excludedAccounts.length;) {
-            excludedAccounts.add(_excludedAccounts[i]);
-            unchecked { ++i; }
-        }
-        if (_excludedAccounts.length > 0) emit ExcludedFromSupply(_excludedAccounts);
-
-        guardianSafe = _guardianSafe;
-        guardianConstitution = _constitution;
-        snapshotSource = _snapshotSource;
-        actionPolicy = _actionPolicy;
-        actionPolicyCodeHash = address(_actionPolicy).codehash;
-        uint8 decimals_ = IERC20MetadataUpgradeable(address(_token)).decimals();
-        require(decimals_ >= 3 && decimals_ <= 36, "UNSUPPORTED_SHARE_DECIMALS");
-        uint256 bond = 10 ** uint256(decimals_ - 3); // 0.001 actual vault shares
+        uint8 d = IERC20MetadataUpgradeable(address(vaultShareToken)).decimals();
+        if (d < 3 || d > 36) revert InvalidGovernanceProposal();
         governanceConfig = GovernanceConfig({
             standardQuorumPpm: 250000,
             standardSupportPpm: 670000,
@@ -213,24 +213,18 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
             securityReviewDuration: 7 days,
             standardVoteDuration: 14 days,
             removalVoteDuration: 30 days,
-            standardBond: bond
+            standardBond: 10 ** uint256(d - 3)
         });
-        emit MembershipContractAnnounced({definingContract: address(_token)});
+        emit MembershipContractAnnounced({definingContract: address(vaultShareToken)});
     }
 
-    /// @notice Reinitializes the TokenVoting after an upgrade from a previous build version. For each
-    ///         reinitialization step, use the `_fromBuild` version to decide which internal functions to
-    ///         call for reinitialization.
-    /// @dev WARNING: The contract should only be upgradeable through PSP to ensure that _fromBuild is not
-    ///      incorrectly passed, and that the appropriate permissions for the upgrade are properly configured.
-    /// @param _fromBuild Build version number of previous implementation contract this upgrade is transitioning from.
-    /// @param _initData The initialization data to be passed to via `upgradeToAndCall`
-    ///     (see [ERC-1967](https://docs.openzeppelin.com/contracts/4.x/api/proxy#ERC1967Upgrade)).
-    /// @notice Fresh deployment only. The original Aragon upgrade-migration entrypoint
-    /// is intentionally disabled until a complete upgrade/guardian immutability
-    /// policy has been proven against the DAO permission graph.
-    function initializeFrom(uint16, bytes calldata) external pure {
-        revert("UNSUPPORTED_MIGRATION");
+    /// @notice Bind the only custom verification contract once, after it is
+    /// deployed with this plugin's address and a nonzero pinned guest image.
+    function bindProofVerifier(IWbtcIporZkProofVerifier verifier) external onlyDaoExecution {
+        if (address(proofVerifier) != address(0) || address(verifier).code.length == 0)
+            revert InvalidGovernanceProposal();
+        proofVerifier = verifier;
+        emit ProofVerifierBound(address(verifier));
     }
 
     /// @notice Checks if this or the parent contract supports an interface by its ID.
@@ -255,7 +249,16 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function totalVotingPower(uint256 _timePoint) public view override returns (uint256) {
         // Preview is informational. Proposal quorum uses freezeAtomic's
         // immutable, kind-specific denominator instead of token total supply.
-        return snapshotSource.previewStandardTotalVotingPower(_timePoint);
+        if (_timePoint != block.number) revert InvalidGovernanceProposal();
+        uint256 activeShares;
+        for (uint256 i; i < knownVoters.length;) {
+            address v = knownVoters[i];
+            if (_active(v) && (v != guardianSafe || guardianRemoved)) {
+                activeShares += _rawVotingPower(v);
+            }
+            unchecked { ++i; }
+        }
+        return guardianRemoved ? activeShares : 100 * activeShares;
     }
 
     /// @inheritdoc MajorityVotingBase
@@ -286,12 +289,12 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function createGuardianRemovalProposal(bytes calldata _metadata)
         external auth(CREATE_PROPOSAL_PERMISSION_ID) singleGovernanceEntry returns (uint256 proposalId)
     {
-        if (guardianConstitution.isGuardianRemoved()) revert GuardianAlreadyRemoved();
+        if (guardianRemoved) revert GuardianAlreadyRemoved();
         Action[] memory actions_ = new Action[](1);
         actions_[0] = Action({
-            to: address(guardianConstitution),
+            to: address(this),
             value: 0,
-            data: abi.encodeCall(IWbtcIporGuardianConstitution.permanentlyRemoveDaoGuardian, ())
+            data: abi.encodeWithSelector(this.permanentlyRemoveDaoGuardian.selector)
         });
         proposalId = _createWeightedProposal(ProposalKind.RemoveDaoGuardian, _metadata, actions_, _msgSender());
     }
@@ -299,7 +302,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function _createWeightedProposal(
         ProposalKind kind, bytes memory metadata, Action[] memory actions_, address creator
     ) private returns (uint256 id) {
-        bool removed = guardianConstitution.isGuardianRemoved();
+        bool removed = guardianRemoved;
         uint64 now_ = uint64(block.timestamp);
         uint64 voteStart = now_;
         uint64 voteDuration = kind == ProposalKind.Standard
@@ -314,11 +317,12 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         id = _createProposalId(keccak256(abi.encode(kind, actions_, metadata)));
         Proposal storage proposal_ = proposals[id];
         if (proposal_.parameters.snapshotTimepoint != 0) revert ProposalAlreadyExists(id);
+        if (kind == ProposalKind.RemoveDaoGuardian) revert IncompleteEconomicCensus();
         (
             uint256 eligiblePower,
             uint256 denominator,
             uint256 creatorPower
-        ) = snapshotSource.freezeAtomic(id, uint8(kind), block.number, creator, guardianSafe, removed);
+        ) = _freezeAtomic(id, creator, removed);
 
         if (denominator == 0 || eligiblePower == 0 || creatorPower * 1000000 <
             eligiblePower * governanceConfig.proposerThresholdPpm) revert NoVotingPower();
@@ -349,7 +353,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         if (!IERC20Upgradeable(address(votingToken)).transferFrom(creator, address(this), bond)) {
             revert InvalidGovernanceProposal();
         }
-        snapshotSource.registerProposal(id, voteEnd);
+        _registerTracked(id, voteEnd);
         emit FrozenGovernanceSnapshot(id, kind, eligiblePower, denominator);
         _emitProposalCreatedEvent(metadata, actions_, 0, id, voteStart, voteEnd);
     }
@@ -382,7 +386,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
 
     /// @inheritdoc IMembership
     function isMember(address _account) external view returns (bool) {
-        return snapshotSource.activated(_account) || (_account == guardianSafe && !guardianConstitution.isGuardianRemoved());
+        return _active(_account) || (_account == guardianSafe && !guardianRemoved);
     }
 
     /// @notice Single transaction: EIP712 self delegation and registry activation.
@@ -393,19 +397,19 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         address voter = _msgSender();
         votingToken.delegateBySig(voter, nonce, expiry, v, r, s);
         if (votingToken.delegates(voter) != voter) revert InvalidGovernanceProposal();
-        snapshotSource.activate(voter);
+        _activate(voter);
     }
 
     /// @notice Already self-delegated accounts can activate without a new signature.
     function activateVotingPower() external singleGovernanceEntry {
         address voter = _msgSender();
         if (votingToken.delegates(voter) != voter) revert InvalidGovernanceProposal();
-        snapshotSource.activate(voter);
+        _activate(voter);
     }
 
     /// @notice Guardian's stage-one veto/approval never contributes a voting tally.
     function reviewStandardProposal(uint256 id, bool approve) external singleGovernanceEntry {
-        if (_msgSender() != guardianSafe || guardianConstitution.isGuardianRemoved()) {
+        if (_msgSender() != guardianSafe || guardianRemoved) {
             revert OnlyGuardianOrDAO();
         }
         if (proposalKind[id] != ProposalKind.Standard || proposer[id] == address(0)
@@ -417,10 +421,10 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
             guardianApprovedEarly[id] = true;
             p.parameters.startDate = uint64(block.timestamp);
             p.parameters.endDate = uint64(block.timestamp) + governanceConfig.standardVoteDuration;
-            snapshotSource.updateVotingEnd(id, p.parameters.endDate);
+            tracked[id].end = p.parameters.endDate;
         } else {
             guardianVetoed[id] = true;
-            snapshotSource.cancelGuardianVeto(id);
+            tracked[id].canceled = true;
         }
         emit GuardianReview(id, approve);
     }
@@ -429,7 +433,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function voteWithSpamFlag(uint256 id, VoteOption choice, bool markSpam) external {
         if (!markSpam) revert InvalidGovernanceProposal();
         vote(id, choice, false); // uses Aragon's existing permission/eligibility path
-        spamFlaggedPower[id] += snapshotSource.frozenVotingPower(id, _msgSender());
+        spamFlaggedPower[id] += frozenWeight[id][_msgSender()];
     }
 
     /// @notice Governance settings changes must be executed by the DAO itself.
@@ -486,7 +490,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
             if (guardianVetoed[id]) return false;
         } else {
             // No duplicate irreversible removal execution after a prior removal.
-            if (guardianConstitution.isGuardianRemoved()) return false;
+            if (guardianRemoved) return false;
             if (!_isExactRemovalAction(id)) return false;
         }
         if (block.timestamp < proposals[id].parameters.endDate) return false;
@@ -494,34 +498,49 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     }
 
     function _execute(uint256 id) internal override {
-        // The execution policy must be exactly the immutable code approved at
-        // initialization. Merely checking the policy address is insufficient.
-        if (address(actionPolicy).codehash != actionPolicyCodeHash) revert InvalidGovernanceAction();
         if (proposalKind[id] == ProposalKind.RemoveDaoGuardian) {
             if (!_isExactRemovalAction(id)) revert InvalidGovernanceAction();
         } else {
             _checkStandardStorageActions(id);
         }
         super._execute(id);
-        if (proposalKind[id] == ProposalKind.RemoveDaoGuardian
-            && !guardianConstitution.isGuardianRemoved()) revert InvalidGovernanceAction();
+        if (proposalKind[id] == ProposalKind.RemoveDaoGuardian && !guardianRemoved)
+            revert InvalidGovernanceAction();
+    }
+
+    /// @notice Irreversible DAO-executed one-way transition. Only a successful
+    /// 30-day, 75%-approval, 33%-quorum guardian-removal ballot may reach this.
+    function permanentlyRemoveDaoGuardian() external onlyDaoExecution {
+        if (guardianRemoved) revert GuardianAlreadyRemoved();
+        guardianRemoved = true;
+        emit GuardianPermanentlyRemoved();
     }
 
     function _isExactRemovalAction(uint256 id) private view returns (bool) {
         Proposal storage p = proposals[id];
         return p.actions.length == 1 && p.allowFailureMap == 0
-            && p.actions[0].to == address(guardianConstitution) && p.actions[0].value == 0
-            && keccak256(p.actions[0].data) == keccak256(
-                abi.encodeCall(IWbtcIporGuardianConstitution.permanentlyRemoveDaoGuardian, ())
-            );
+            && p.actions[0].to == address(this) && p.actions[0].value == 0
+            && keccak256(p.actions[0].data)
+                == keccak256(abi.encodeWithSelector(this.permanentlyRemoveDaoGuardian.selector));
     }
 
-    function _checkStandardActions(Action[] memory actions_) private view {
-        if (address(actionPolicy).codehash != actionPolicyCodeHash) revert InvalidGovernanceAction();
-        for (uint256 i; i < actions_.length;) {
-            if (!actionPolicy.isAllowed(actions_[i].to, actions_[i].value, actions_[i].data)) {
-                revert InvalidGovernanceAction();
-            }
+    function _allowedAction(address target, uint256 value, bytes memory data) private view returns (bool) {
+        if (value != 0 || data.length < 4 || target == address(dao())) return false;
+        bytes4 selector;
+        assembly { selector := mload(add(data, 32)) }
+        if (target == address(this)) {
+            return selector == this.updateGovernanceConfiguration.selector
+                || selector == this.configureVoterActivity.selector
+                || selector == this.addVotingMarket.selector
+                || selector == this.setMarketEnabled.selector
+                || selector == this.setVaultSelectorAllowed.selector;
+        }
+        return target == address(votingToken) && allowedVaultSelector[selector];
+    }
+
+    function _checkStandardActions(Action[] memory a) private view {
+        for (uint256 i; i < a.length;) {
+            if (!_allowedAction(a[i].to, a[i].value, a[i].data)) revert InvalidGovernanceAction();
             unchecked { ++i; }
         }
     }
@@ -531,9 +550,21 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         if (p.allowFailureMap != 0) revert InvalidGovernanceAction();
         for (uint256 i; i < p.actions.length;) {
             Action storage a = p.actions[i];
-            if (!actionPolicy.isAllowed(a.to, a.value, a.data)) revert InvalidGovernanceAction();
+            if (!_allowedAction(a.to, a.value, a.data)) revert InvalidGovernanceAction();
             unchecked { ++i; }
         }
+    }
+
+    function setVaultSelectorAllowed(bytes4 selector, bool allowed) external onlyDaoExecution {
+        // No generic execute/upgrade/role/permission function may be whitelisted.
+        if (selector == bytes4(0)
+            || selector == bytes4(keccak256("upgradeTo(address)"))
+            || selector == bytes4(keccak256("upgradeToAndCall(address,bytes)"))
+            || selector == bytes4(keccak256("execute(address,bytes)"))
+            || selector == bytes4(keccak256("grantRole(bytes32,address)"))
+            || selector == bytes4(keccak256("revokeRole(bytes32,address)")))
+            revert InvalidGovernanceAction();
+        allowedVaultSelector[selector] = allowed;
     }
 
     /// @inheritdoc MajorityVotingBase
@@ -541,14 +572,14 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         internal override
     {
         Proposal storage p = proposals[_proposalId];
-        uint256 weight = snapshotSource.frozenVotingPower(_proposalId, _voter);
+        uint256 weight = frozenWeight[_proposalId][_voter];
         // No replacements: the frozen voting snapshot can be counted only once.
         if (_voteOption == VoteOption.Yes) p.tally.yes += weight;
         else if (_voteOption == VoteOption.No) p.tally.no += weight;
         else if (_voteOption == VoteOption.Abstain) p.tally.abstain += weight;
         else revert InvalidGovernanceProposal();
         p.voters[_voter] = _voteOption;
-        snapshotSource.recordVote(_proposalId, _voter);
+        _recordVote(_proposalId, _voter);
         emit VoteCast({proposalId: _proposalId, voter: _voter, voteOption: _voteOption, votingPower: weight});
     }
 
@@ -560,7 +591,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         return proposer[_proposalId] != address(0) && !guardianVetoed[_proposalId]
             && _isProposalOpen(p) && _voteOption != VoteOption.None
             && p.voters[_account] == VoteOption.None
-            && snapshotSource.frozenVotingPower(_proposalId, _account) != 0;
+            && frozenWeight[_proposalId][_account] != 0 && !merkleSnapshot[_proposalId];
     }
 
     /// @dev Helper function to identify the clock mode used by the given voting token.
@@ -599,5 +630,6 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     /// @dev This empty reserved space is put in place to allow future versions to add new
     /// variables without shifting down storage in the inheritance chain.
     /// https://docs.openzeppelin.com/contracts/4.x/upgradeable#storage_gaps
-    uint256[24] private __gap;
+    // Non-upgradeable plugin: no storage gap or UUPS migration.
+
 }
