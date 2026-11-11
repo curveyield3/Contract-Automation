@@ -123,6 +123,8 @@ contract WbtcIporStagedProposalProcessor is
             bytes4 selector;
             bytes memory d = a.data;
             assembly { selector := mload(add(d, 32)) }
+            if (a.to == address(this)
+                && selector == this.setStandardActionAllowed.selector) continue;
             if (!allowedStandardAction[keccak256(abi.encode(a.to, selector))])
                 return false;
         }
@@ -812,20 +814,6 @@ contract WbtcIporStagedProposalProcessor is
         }
 
         return stages[_index];
-    }
-
-    /// @notice Retrieves the `data` parameter encoded for a sub-body's `createProposal` function in a specific stage.
-    ///         Excludes sub-bodies from the first stage, as their parameters are not stored for efficiency.
-    /// @param _proposalId The ID of the proposal.
-    /// @param _stageId The stage index.
-    /// @param _index The index of the body within the stage.
-    /// @return The encoded `data` parameter for the specified sub-body's `createProposal` function.
-    function getCreateProposalParams(
-        uint256 _proposalId,
-        uint16 _stageId,
-        uint256 _index
-    ) public view returns (bytes memory) {
-        return createProposalParams[_proposalId][_stageId][_index];
     }
 
     /// @notice Calculates and retrieves the number of approvals and vetoes for a proposal on the stage.
