@@ -953,7 +953,14 @@ async function main(){
   }
   const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
   const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}}));
-  await writeReviewInventoryOutputsV1({outputDir:out,projectRoot:detected.absolute,build,request,slither,policy:process.env.ADR_DETECTION_POLICY||null,reviewPolicy:process.env.ADR_DETECTION_REVIEW_POLICY||null});
+  // Fork-owned Phase 0 graph/Flow Plan source subjects need exactly the
+  // preexisting source-AST inventory and SYSTEM_FACTS builder, regardless of
+  // whether a legacy accepted campaign's optional review policy enabled it.
+  // This fork writes evidence only; no controller acceptance verdict is issued.
+  await withProgressStage('source-review-inventory-and-existing-facts',
+    ()=>writeReviewInventoryOutputsV1({outputDir:out,projectRoot:detected.absolute,
+      build,request,slither,policy:'audit-detection-rebuild-v1',
+      reviewPolicy:process.env.ADR_DETECTION_REVIEW_POLICY||null}));
   const projectReadiness=await withProgressStage('scan-project-readiness',()=>scanProjectReadiness({projectRoot:detected.absolute,build,cfg:effectiveCfg}));
   const deployConfigExecution=await withProgressStage('execute-local-deployment-inventory',()=>executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness}));
 
@@ -1041,8 +1048,34 @@ async function main(){
     'PROJECT_READINESS_AUTOMATED_v1.json':'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json',
     'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json':'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'
   };
+  // The existing review-inventory builder writes these only on actual source-
+  // backed success. Missing or incomplete records are explicit, never empty
+  // facts silently treated as comprehensive audit coverage.
+  for(const [name,destination] of [
+    ['REVIEW_INVENTORY_v1.json','evidence/review-inventory/REVIEW_INVENTORY_v1.json'],
+    ['SYSTEM_FACTS_v1.json','evidence/review-inventory/SYSTEM_FACTS_v1.json']
+  ]){
+    const file=path.join(out,name);
+    const exists=await fs.stat(file).then(x=>x.isFile()).catch(()=>false);
+    if(exists){
+      const parsed=JSON.parse(await fs.readFile(file,'utf8'));
+      if(parsed?.campaignId!==request.campaignId||
+         parsed?.campaignGenerationId!==request.campaignGenerationId||
+         parsed?.sourceSha256!==request.source.archiveSha256)
+        throw new Error('FORK_OPTIONAL_REVIEW_EVIDENCE_SOURCE_GENERATION_INVALID: '+name);
+      destinationByName[name]=destination;
+    }
+  }
   const staticHandoffRecords=[];
   await withProgressStage('write-machine-evidence',async()=>{
+    for(const [name,dest] of Object.entries(destinationByName)){
+      if(files.some(([existing])=>existing===name))continue;
+      const raw=await fs.readFile(path.join(out,name));
+      const parsed=JSON.parse(raw.toString('utf8'));
+      staticHandoffRecords.push({sourceFile:name,destinationRelativePath:dest,
+        sha256:sha256(raw),bytes:raw.length,schemaVersion:parsed.schemaVersion??null,
+        sourceArchiveSha256:request.source.archiveSha256});
+    }
     for(const [name,obj] of files){
       const raw=Buffer.from(JSON.stringify(obj,null,2)+'\n','utf8');
       await fs.writeFile(path.join(out,name),raw,{flag:'wx'});
