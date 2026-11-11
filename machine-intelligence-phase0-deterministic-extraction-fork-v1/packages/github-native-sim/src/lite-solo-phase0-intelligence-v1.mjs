@@ -962,6 +962,38 @@ async function main(){
     status:'PASS'
   };
 
+  // Every admitted compiled public/external ABI operation is preserved independently.
+  // Names suggest possible protocol usage, not that a call is safe or supported.
+  const canonicalAbiType=param=>String(param?.type??'').startsWith('tuple')
+    ? '('+(param.components??[]).map(canonicalAbiType).join(',')+')'+String(param.type).slice(5)
+    : String(param?.type??'');
+  const familySignals=/^(deposit|depositFor|mint|withdraw|redeem|stake|unstake|supply|borrow|repay|claim|harvest|swap|exactInput|exactOutput|addLiquidity|removeLiquidity|joinPool|exitPool|open|close|settle|wrap|unwrap|liquidate)$/i;
+  const compiledMethodCandidates=(build.artifacts??[]).flatMap(artifact=>
+    (artifact.abi??[]).filter(entry=>['function','fallback','receive'].includes(entry?.type)).map(entry=>{
+      const signature=entry.type==='function'?String(entry.name)+'('+(entry.inputs??[]).map(canonicalAbiType).join(',')+')':entry.type;
+      const rawSelector=artifact.methodIdentifiers?.[signature]??null;
+      const selector=/^(?:0x)?[0-9a-fA-F]{8}$/.test(String(rawSelector??''))
+        ? '0x'+String(rawSelector).replace(/^0x/i,'').toLowerCase():null;
+      return {
+        compilationUnitId:artifact.compilationUnitId??null,
+        sourceName:artifact.sourceName,contractName:artifact.contractName,
+        canonicalSignature:signature,selector,
+        abiType:entry.type,stateMutability:entry.stateMutability??null,
+        payable:entry.stateMutability==='payable',
+        inputTypes:(entry.inputs??[]).map(canonicalAbiType),
+        outputTypes:(entry.outputs??[]).map(canonicalAbiType),
+        familyMatchEvidence:familySignals.test(String(entry.name??''))?'ABI_SIGNATURE':'ELIGIBILITY_UNKNOWN_INVENTORIED',
+        operationFamilyCandidate:familySignals.test(String(entry.name??''))?entry.name:null,
+        eligibility:'UNKNOWN_PREDEPLOYMENT',
+        // Static ABI evidence alone never authorizes an account or privileged call.
+        executionAuthorized:false
+      };
+    })
+  ).sort((a,b)=>[
+    a.compilationUnitId,a.sourceName,a.contractName,a.canonicalSignature
+  ].join(':').localeCompare([
+    b.compilationUnitId,b.sourceName,b.contractName,b.canonicalSignature
+  ].join(':')));
   const relationalFacts={
     schemaVersion:'mi-phase0-slither-relational-facts-v1',
     campaignId:request.campaignId,
@@ -970,6 +1002,7 @@ async function main(){
     buildBundleSha256:null, // Exact accepted bundle SHA is bound only at canonical publication; configuration digest is not a bundle.
     slitherVersion:'0.11.6',
     sourceUnitRecords:(slither.relationalUnitResults??[]).filter(x=>x?.analysisStatus==='SLITHER_RELATIONAL_FACTS_AVAILABLE'),
+    compiledMethodCandidates,
     unavailableUnitRecords:(slither.relationalUnitResults??[]).filter(x=>x?.analysisStatus!=='SLITHER_RELATIONAL_FACTS_AVAILABLE'),
     limitations:slither.relationalUnitResults?.length?[]:['NO_EXACT_PER_UNIT_SLITHER_RELATIONAL_OUTPUT']
   };
