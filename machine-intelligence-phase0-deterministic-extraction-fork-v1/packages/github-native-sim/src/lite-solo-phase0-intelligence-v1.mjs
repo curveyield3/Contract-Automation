@@ -355,13 +355,98 @@ async function runExactVyperAstStaticV1({projectRoot,unit,sourceName}){
     limitations:['Slither 0.11.6 Vyper 0.4.3 semantic detectors are unavailable; source-anchored AST structural surfaces are retained for required Phase 4–6 semantic review.']
   };
 }
+
+const SLITHER_RELATIONAL_API_V1=String.raw\`
+import json,sys
+from slither.slither import Slither
+from slither.analyses.data_dependency.data_dependency import get_dependencies
+def source_span(node):
+    span=getattr(node,"source_mapping",None)
+    if span is None: return None
+    fn=getattr(span,"filename",None)
+    return {"file":str(getattr(fn,"relative",None) or getattr(fn,"short",None) or getattr(fn,"absolute",None) or ""),
+            "start":getattr(span,"start",None),"length":getattr(span,"length",None),
+            "lines":list(getattr(span,"lines",[]) or [])}
+def variable_ref(v):
+    span=source_span(v)
+    return {"name":str(getattr(v,"name",str(v))),"type":type(v).__name__,"sourceSpan":span}
+def safe_text(v):
+    if v is None:return None
+    try:return str(v)
+    except Exception:return None
+unit=sys.argv[2]
+result={"schemaVersion":"mi-phase0-slither-relational-unit-v1","unitId":unit,"analyzer":"slither-0.11.6-python-api",
+        "contracts":[],"limitations":[]}
+analysis=Slither(sys.argv[1],compile_force_framework="standard")
+call_kinds={"HighLevelCall","LowLevelCall","LibraryCall","InternalCall","InternalDynamicCall","SolidityCall","Transfer","Send"}
+for contract in analysis.contracts:
+    c={"contractName":contract.name,"sourceSpan":source_span(contract),"functions":[]}
+    for function in getattr(contract,"functions_and_modifiers_declared",[]):
+        f={"name":function.name,"soliditySignature":safe_text(getattr(function,"solidity_signature",None)),
+           "sourceSpan":source_span(function),
+           "readStorageIds":[variable_ref(v) for v in function.state_variables_read],
+           "writtenStorageIds":[variable_ref(v) for v in function.state_variables_written],
+           "callSites":[],"directIrSsaDependencies":[],"variableDependencies":[],"limitations":[]}
+        for node in function.nodes:
+            for ir in getattr(node,"irs",[]) or []:
+                kind=type(ir).__name__
+                if kind in call_kinds:
+                    callee=getattr(ir,"function",None)
+                    f["callSites"].append({"kind":kind,"ir":safe_text(ir),
+                       "calleeSignature":safe_text(getattr(callee,"solidity_signature",None)),
+                       "calleeName":safe_text(callee),"sourceSpan":source_span(node)})
+            for ir in getattr(node,"irs_ssa",[]) or []:
+                written=getattr(ir,"lvalue",None)
+                if written is None:continue
+                for read in getattr(ir,"read",[]) or []:
+                    f["directIrSsaDependencies"].append({
+                      "operatorType":type(ir).__name__,"written":variable_ref(written),
+                      "read":variable_ref(read),"sourceSpan":source_span(node),
+                      "evidenceClass":"DIRECT_SLITHIR_SSA_OPERATION"})
+        for variable in function.variables_written:
+            try:
+                deps=get_dependencies(variable,function)
+                for dep in deps:
+                    f["variableDependencies"].append({"written":variable_ref(variable),"dependsOn":variable_ref(dep),
+                      "evidenceClass":"SLITHER_DATA_DEPENDENCY_API"})
+            except Exception as ex:
+                f["limitations"].append({"type":"DATA_DEPENDENCY_API_UNAVAILABLE",
+                                          "variable":safe_text(variable),"reason":type(ex).__name__+":"+str(ex)})
+        c["functions"].append(f)
+    result["contracts"].append(c)
+print(json.dumps(result,separators=(",",":"),sort_keys=True))
+\`;
+async function collectSlitherRelationalFactsV1({projectRoot,target,unit,unitId}){
+  const sourceUnitRecords=Object.entries(unit?.sourceContents??{}).sort(([a],[b])=>a.localeCompare(b))
+    .map(([sourceName,bytes])=>({sourceName,sourceSha256:sha256(Buffer.from(String(bytes),'utf8'))}));
+  const call=await runProcess({command:'python3',
+    args:['-c',SLITHER_RELATIONAL_API_V1,target,unitId],cwd:projectRoot});
+  if(call.exitCode!==0){
+    return{unitId,analysisStatus:'ANALYZER_FACT_UNAVAILABLE',sourceUnitRecords,contracts:[],
+      limitations:[{reason:'PYTHON_SLITHER_API_FAILED',exitCode:call.exitCode,
+        diagnostic:cleanText(String(call.stderr??call.stdout??''))}]};
+  }
+  try{
+    const parsed=JSON.parse(String(call.stdout??''));
+    if(parsed.schemaVersion!=='mi-phase0-slither-relational-unit-v1'||parsed.unitId!==unitId||!Array.isArray(parsed.contracts))
+      throw new Error('RELATIONAL_API_SCHEMA_OR_IDENTITY_INVALID');
+    return{...parsed,analysisStatus:'SLITHER_RELATIONAL_FACTS_AVAILABLE',sourceUnitRecords};
+  }catch(error){
+    return{unitId,analysisStatus:'ANALYZER_FACT_UNAVAILABLE',sourceUnitRecords,contracts:[],
+      limitations:[{reason:'RELATIONAL_API_OUTPUT_INVALID',detail:String(error?.message??error)}]};
+  }
+}
+
 async function runSlitherExport({projectRoot,build,sourceCommit}){
   const compilationUnits=Array.isArray(build?.compilationUnits)?build.compilationUnits.filter(Boolean):[];
   if(compilationUnits.length<=1){
     const exportInfo=await writeCryticCompileExport({projectRoot,build,outDir:path.join(projectRoot,'.audit-slither-export')});
     const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--compile-force-framework','standard','--json','-','--exclude-dependencies','--fail-none'],cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
-    return{exportInfo,raw,parsed,success:parsed?.success===true};
+    const singleUnit=compilationUnits[0]??{sourceContents:{}};
+    const unitId=String(singleUnit.unitId??'single-compilation-unit');
+    const relational=await collectSlitherRelationalFactsV1({projectRoot,target:exportInfo.exportPath,unit:singleUnit,unitId});
+    return{exportInfo,raw,parsed,success:parsed?.success===true,relationalUnitResults:[relational]};
   }
 
   const unitResults=[];
@@ -399,6 +484,9 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
       ? {exitCode:0,signal:null,stdout:JSON.stringify({success:true,results:{detectors:[]}}),stderr:''}
       : await runProcess({command:'slither',args:slitherArgs,cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
+    const relational=vyperAnalysis
+      ? {unitId,analysisStatus:'VYPER_AST_ONLY',sourceUnitRecords:[{sourceName:vyperSources[0]}],contracts:[],limitations:vyperAnalysis.limitations}
+      : await collectSlitherRelationalFactsV1({projectRoot,target,unit,unitId});
     if(parsed?.success!==true && !String(raw.stdout??'').trim() && !String(raw.stderr??'').trim()){
       // Slither JSON mode may exit silently on an invalid crytic export.
       // Capture its ordinary CLI diagnostics without weakening the required
@@ -422,6 +510,7 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
       stderr:cleanText(raw.stderr),
       parsedSuccess:parsed?.success??false,
       findingCount:parsed?.detectors?.length??0,
+      relational,
       analyzer:vyperAnalysis?.analyzer??'slither',
       ...(vyperAnalysis?{vyperAnalysis,staticLimitations:vyperAnalysis.limitations}: {})
     });
@@ -431,7 +520,7 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
         raw:{exitCode:raw.exitCode,signal:raw.signal??null,stdout:raw.stdout,stderr:raw.stderr},
         parsed,
         success:false,
-        unitResults
+        unitResults,relationalUnitResults:unitResults.map(x=>x.relational)
       };
     }
     for(const detector of parsed.detectors??[]){
@@ -446,7 +535,7 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
     raw:{exitCode:0,signal:null,stdout:'',stderr:''},
     parsed:{success:true,detectors},
     success:true,
-    unitResults
+    unitResults,relationalUnitResults:unitResults.map(x=>x.relational)
   };
 }
 
@@ -504,6 +593,7 @@ async function slitherRepair({projectRoot,build,sourceCommit}){
         repairAttempts:attempts,
         inputMode:'EXACT_BUILD_CRYTIC_COMPILE_EXPORT',
         analyzerCoverage:exact.unitResults?.map(u=>({unitId:u.unitId,analyzer:u.analyzer??'slither',staticLimitations:u.staticLimitations??[],vyperAnalysis:u.vyperAnalysis??null}))??[],
+        relationalUnitResults:exact.relationalUnitResults??[],
         limitations:exact.unitResults?.flatMap(u=>u.staticLimitations??[])??[],
         requiredSemanticReview:exact.unitResults?.some(u=>Boolean(u.vyperAnalysis))??false
       };
@@ -872,11 +962,23 @@ async function main(){
     status:'PASS'
   };
 
+  const relationalFacts={
+    schemaVersion:'mi-phase0-slither-relational-facts-v1',
+    campaignId:request.campaignId,
+    campaignGenerationId:request.campaignGenerationId,
+    sourceArchiveSha256:request.source.archiveSha256,
+    buildBundleSha256:executionBuildArtifacts.buildConfigurationDigestSha256??null,
+    slitherVersion:'0.11.6',
+    sourceUnitRecords:(slither.relationalUnitResults??[]).filter(x=>x?.analysisStatus==='SLITHER_RELATIONAL_FACTS_AVAILABLE'),
+    unavailableUnitRecords:(slither.relationalUnitResults??[]).filter(x=>x?.analysisStatus!=='SLITHER_RELATIONAL_FACTS_AVAILABLE'),
+    limitations:slither.relationalUnitResults?.length?[]:['NO_EXACT_PER_UNIT_SLITHER_RELATIONAL_OUTPUT']
+  };
   const files=[
     ['BUILD_AND_SOURCE_IDENTITY_v1.json',buildIdentity],
     ['PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json',executionBuildArtifacts],
     ['SBOM_v1.json',sbom],
     ['SLITHER_v1.json',slither],
+    ['SLITHER_RELATIONAL_FACTS_v1.json',relationalFacts],
     ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence],
     ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness],
     ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',deployConfigExecution]
