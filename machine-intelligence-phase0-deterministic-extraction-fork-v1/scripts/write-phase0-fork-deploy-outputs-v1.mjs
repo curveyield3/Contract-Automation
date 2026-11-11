@@ -619,17 +619,71 @@ async function buildForkRelationshipGraphV1(){
     UNRESOLVED_GRAPH_SUBJECT_COUNT:unknowns.length,
     UNMAPPED_STATIC_SOURCE_COUNT:units.filter(x=>x.analysisStatus!=='SLITHER_RELATIONAL_FACTS_AVAILABLE').length,
     limitations:['Graph is a source-only, unaccepted fork preview. No question issued.']});
+  // Enumerate the complete immutable graph source roster; no "top" sampling.
+  // A roster is not a pending MiMo question, nor a new question scheduler.
+  const phase1OriginalSubjects=[
+    ...nodes.map(row=>({
+      recordKind:'GRAPH_NODE',recordId:row.nodeId,
+      evidenceRefs:row.evidenceRefs??[],graphSelector:'nodes/'+row.nodeId,
+      scenarioId:row.scenarioId??null})),
+    ...edges.map(row=>({
+      recordKind:'GRAPH_EDGE',recordId:row.edgeId,
+      evidenceRefs:row.evidenceRefs??[],graphSelector:'edges/'+row.edgeId,
+      scenarioId:row.scenarioId??null})),
+    ...unknowns.map(row=>({
+      recordKind:'GRAPH_UNKNOWN',recordId:row.unknownId,
+      evidenceRefs:row.sourceRef?[{path:row.sourceRef}]:[],
+      graphSelector:'unknowns/'+row.unknownId,scenarioId:scenario})),
+    ...candidates.map(row=>({
+      recordKind:'GRAPH_AUTO_CANDIDATE',recordId:row.graphCandidateId,
+      evidenceRefs:row.sourceEvidenceRefs??[],
+      graphSelector:'graph-candidates/'+row.graphCandidateId,
+      scenarioId:row.scenarioId??null})),
+    ...(methods.value?.methodCandidates??[]).map((row,index)=>({
+      recordKind:'ACTIVE_USE_METHOD_CENSUS',
+      recordId:row.methodCandidateId??mkid('METHOD-STATIC-',index,row.signature),
+      evidenceRefs:methods.ref?[methods.ref]:[],
+      graphSelector:'active-use-methods/'+index,
+      scenarioId:scenario}))
+  ];
+  const phase1Subjects=phase1OriginalSubjects.map(record=>({
+    subjectId:mkid('GRAPH-SUBJECT-',record.recordKind,record.recordId),
+    recordKind:record.recordKind,
+    subjectGraphOccurrenceIds:[record.recordId],
+    sourceGraphIndexRef:graphRef,
+    originalSourceSelector:record.graphSelector,
+    scenarioRefs:record.scenarioId?[record.scenarioId]:[],
+    exactSourceRefs:record.evidenceRefs,
+    runtimeTraceRefs:record.recordKind==='GRAPH_EDGE'?
+      record.evidenceRefs.filter(ref=>ref?.path?.includes('/scenarios/')):[],
+    configurationAndStateRefs:record.recordKind==='ACTIVE_USE_METHOD_CENSUS'?
+      [methods.ref].filter(Boolean):[],
+    autoGraphCandidateIds:record.recordKind==='GRAPH_EDGE'?
+      candidateLookup.get(record.recordId)??[]:
+      record.recordKind==='GRAPH_AUTO_CANDIDATE'?[record.recordId]:[],
+    questionId:null,questionText:null,
+    questionStatus:'PENDING_EXISTING_MIMO_ADAPTER_NOT_ISSUED',
+    acceptedResponse:null
+  }));
   const preview=await writeOutput('previews/phase-01/GRAPH_DISCOVERY_QUESTION_ROSTER_v1.json',{
-    schemaVersion:'mi-phase1-full-graph-discovery-roster-v1',graphIndexRef:graphRef,
-    allGraphPagesIndexed:false,subjects:edges.map(edge=>({
-      subjectId:mkid('GRAPH-SUBJECT-',edge.edgeId),subjectGraphOccurrenceIds:[edge.edgeId],
-      scenarioRefs:edge.scenarioId?[edge.scenarioId]:[],exactSourceRefs:edge.evidenceRefs??[],
-      runtimeTraceRefs:edge.observation==='OBSERVED_LOCAL_FORK'?edge.evidenceRefs??[]:[],
-      configurationAndStateRefs:[],autoGraphCandidateIds:candidates.filter(c=>c.sourceGraphEdgeIds?.includes(edge.edgeId)).map(c=>c.candidateId),
-      questionId:null,questionText:null,questionStatus:'PENDING_SOURCE_BOUND_MIMO_ADAPTER'
-    })),coverage:{allGraphSubjectsAccountedFor:false,occurrenceCount:edges.length,
-      assignedCount:edges.length,explicitUnknownCount:unknowns.length},
-    status:'UNACCEPTED_PREVIEW_NOT_MIMO_QUESTION_INPUT'});
+    schemaVersion:'mi-phase1-full-graph-discovery-roster-v1',
+    ...source,graphIndexRef:graphRef,candidateIndexRef:candidateRef,
+    methodInventoryRef:methods.ref,allGraphPagesIndexed:false,
+    allCurrentRootGraphRecordsIndexed:true,
+    subjects:phase1Subjects,
+    coverage:{
+      allGraphSubjectsAccountedFor:true,
+      occurrenceCount:phase1Subjects.length,assignedCount:phase1Subjects.length,
+      nodeCount:nodes.length,edgeCount:edges.length,
+      unknownCount:unknowns.length,candidateCount:candidates.length,
+      methodCount:methods.value?.methodCandidates?.length??0,
+      explicitUnknownCount:unknowns.length,
+      pageManifestStatus:'NOT_GENERATED_IN_THIS_FORK'
+    },
+    status:'UNACCEPTED_PREVIEW_NOT_MIMO_QUESTION_INPUT',
+    limitations:['Existing MiMo single-question transport and graph paging are not yet source-bound and qualified.',
+      'No original question was issued and no MiMo-authored disposition exists.']
+  });
   // Exercise the actual copied form prefill consumer only against fork-owned
   // authority templates and source-bound read-back graph evidence.
   const {applyPhaseBoundaryPrefill}=await import('./lib/lite-solo-phase-prefill-v1.mjs');
