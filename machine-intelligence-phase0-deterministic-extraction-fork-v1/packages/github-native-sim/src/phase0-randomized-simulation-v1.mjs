@@ -593,26 +593,8 @@ export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,lo
   if(detected.foundry.length){const h=await runProcess({command:'forge',args:['script','--help'],cwd:projectRoot,env:scrubbedEnv()});help=`${h.stdout}\n${h.stderr}`;}
   for(const item of detected.foundry){
     const args=['script',item.entry,'--rpc-url',anvilUrl,'--broadcast'];
-    // A source-authored compile-only wildcard-import anchor can collide with
-    // the same implementations' named imports in the native deployment script.
-    // Narrow only this verified BoostHub v9 entrypoint's compilation roots to
-    // its own script directory; the original source and its transitive imports
-    // remain untouched and Forge still compiles the full deployment closure.
-    if(item.path==='script/DeployBoostHubStack_v9.s.sol'){
-      const anchor=path.join(projectRoot,'contracts/BoostHubBeefyCompileImports_v9.sol');
-      const anchorText=await fs.readFile(anchor,'utf8').catch(()=>null);
-      const scriptText=await fs.readFile(path.join(projectRoot,item.path),'utf8');
-      const required=[
-        'BoostHubEthereumRewardConverter_v4.sol',
-        'StrategyConvexBoostHubStakingV5.sol',
-        'BeefyVaultV7FixedV2.sol'
-      ];
-      if(anchorText?.includes('Compilation anchor for the native Solo-Lite Phase 0 exact-source build.')&&
-         required.every(name=>anchorText.includes(name)&&scriptText.includes(name))&&
-         scriptText.includes('contract DeployBoostHubStackV9 is Script')){
-        args.push('--contracts','script');
-      }
-    }
+    // No project-specific --contracts selector: use source-declared Foundry
+    // compilation roots unmodified; an incompatible root remains a typed gap.
     if(pinnedLibraries.length)args.push('--libraries',pinnedLibraries.join(','));
     if(/--unlocked/.test(help))args.push('--unlocked');
     if(/--sender/.test(help))args.push('--sender',account0);
@@ -2896,30 +2878,14 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
   const acceptedVyper=sharedExecutionInputs.artifacts.filter(a=>a.language==='vyper');
   if(acceptedVyper.length){
     const versions=[...new Set(acceptedVyper.map(a=>a.compilerVersion))];
-    if(versions.length!==1||versions[0]!=='0.4.3')throw new Error('PHASE0_VYPER_UNSUPPORTED_VERSION: '+versions.join(','));
-    const install=await runProcess({command:'timeout',args:['240s','python3','-m','pip','install','--disable-pip-version-check','--no-input','vyper==0.4.3'],cwd:staged.projectRoot});
+    if(versions.length!==1||!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(String(versions[0]??'')))throw new Error('PHASE0_VYPER_UNSUPPORTED_SOURCE_VERSION: '+versions.join(','));
+    const install=await runProcess({command:'timeout',args:['240s','python3','-m','pip','install','--disable-pip-version-check','--no-input','vyper=='+versions[0]],cwd:staged.projectRoot});
     if(install.exitCode!==0)throw new Error('PHASE0_VYPER_INSTALL_FAILED: '+String(install.stderr??install.stdout??'').slice(-1000));
     const probe=await runProcess({command:'vyper',args:['--version'],cwd:staged.projectRoot});
-    if(probe.exitCode!==0||!String(probe.stdout??'').trim().startsWith('0.4.3'))throw new Error('PHASE0_VYPER_VERSION_MISMATCH');
-    const staking=acceptedVyper.find(a=>a.sourceName==='contracts/BoostHubStaking.vy'&&a.contractName==='BoostHubStaking');
-    if(staking){
-      const original=await fs.readFile(path.join(staged.projectRoot,'contracts/BoostHubStaking.vy'));
-      const sourceSha256=sha256(original);
-      if(!/^0x[0-9a-f]+$/i.test(String(staking.bytecode??''))||
-         !/^0x[0-9a-f]+$/i.test(String(staking.deployedBytecode??''))||
-         !staking.compilationUnitId)throw new Error('PHASE0_VYPER_ACCEPTED_ARTIFACT_INVALID');
-      const artifactDir=path.join(staged.projectRoot,'artifacts_v6');
-      await fs.mkdir(artifactDir,{recursive:true});
-      await fs.writeFile(path.join(artifactDir,'staking_v6.json'),JSON.stringify({
-        bytecode:staking.bytecode,deployedBytecode:staking.deployedBytecode,
-        sourceSha256:'0x'+sourceSha256,compilationUnitId:staking.compilationUnitId,
-        compilerVersion:'0.4.3',archiveSha256
-      },null,2)+'\n');
-      await fs.writeFile(path.join(artifactDir,'build_provenance_v6.json'),JSON.stringify({
-        compiler_settings:{vyper:'0.4.3'},compilationUnitId:staking.compilationUnitId,
-        sourceSha256:'0x'+sourceSha256,archiveSha256
-      },null,2)+'\n');
-    }
+    if(probe.exitCode!==0||!String(probe.stdout??'').trim().startsWith(versions[0]))throw new Error('PHASE0_VYPER_VERSION_MISMATCH');
+    // Never emit source-name-specific Vyper output aliases or build fake
+    // artifact manifests. The accepted compiler bundle remains the authority.
+
   }
   // Use the same isolated, source-configured Foundry dependency resolution as
   // Phase-0 compilation before invoking any declared Forge deployment entry.
