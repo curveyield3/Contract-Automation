@@ -246,7 +246,7 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
       const base=path.join(evidenceRoot,'transactions',String(txHash).toLowerCase());
       await fs.mkdir(base,{recursive:true});
       const row={blockNumber:number,transactionOrdinal:ordinal,transactionHash:txHash,
-        frameIdentity:{scenarioId,branchId:'SOURCE_DEPLOYMENT',attemptOrdinal:ordinal},
+        callTraceNormalization:'NOT_ATTEMPTED',frameIdentity:{scenarioId,branchId:'SOURCE_DEPLOYMENT',attemptOrdinal:ordinal},
         evidence:[],limitations:[],mechanicalCallFrames:[]};
       for(const [kind,method,params] of [
         ['MINED_RECEIPT','eth_getTransactionReceipt',[txHash]],
@@ -287,9 +287,15 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
                 visit(child,framePath+'/'+childIndex,frameId);
             };
             visit(result,'0',null);
+            row.callTraceNormalization=row.mechanicalCallFrames.length>0&&
+              typeof result?.type==='string'?'COMPLETE':'RAW_COMPLETE_NORMALIZATION_FAILED';
+            if(row.callTraceNormalization!=='COMPLETE'){
+              row.limitations.push({type:'CALL_TRACE_NORMALIZATION_UNAVAILABLE',
+                errorCode:'TRACE_WRONG_FORMAT'});
+            }
           }
           if(kind==='MINED_RECEIPT')receiptsRecorded++;
-          if(kind==='CALL_TRACE')callTraces++;
+          if(kind==='CALL_TRACE'&&row.callTraceNormalization==='COMPLETE')callTraces++;
           if(kind==='OPCODE_TRACE')opcodeTraces++;
         }catch(error){
           row.limitations.push({type:kind+'_UNAVAILABLE',
@@ -301,6 +307,34 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
       rows.push(row);
     }
   }
+  // CREATE/CREATE2 is a witnessed EVM event, not a source contract identity.
+  // A child created inside an ancestor that later reverted is not persisted.
+  const actualCreations=[];
+  for(const row of rows){
+    const receiptSuccess=row.receiptStatus===1||
+      ['0x1','0x01'].includes(String(row.receiptStatus??'').toLowerCase());
+    if(!receiptSuccess||row.callTraceNormalization!=='COMPLETE')continue;
+    const byId=new Map(row.mechanicalCallFrames.map(frame=>[frame.frameId,frame]));
+    for(const frame of row.mechanicalCallFrames){
+      if(!['CREATE','CREATE2'].includes(String(frame.callType??'').toUpperCase()))continue;
+      const createdAddress=String(frame.to??'').toLowerCase();
+      if(!/^0x[0-9a-f]{40}$/.test(createdAddress))continue;
+      let cursor=frame,rolledBack=false;
+      const visited=new Set();
+      while(cursor){
+        if(visited.has(cursor.frameId)){rolledBack=true;break}
+        visited.add(cursor.frameId);
+        if(cursor.reverted||cursor.error){rolledBack=true;break}
+        cursor=cursor.parentFrameId?byId.get(cursor.parentFrameId):null;
+      }
+      actualCreations.push({scenarioId,
+        transactionHash:String(row.transactionHash).toLowerCase(),
+        blockNumber:row.blockNumber,frameId:frame.frameId,framePath:frame.framePath,
+        creationType:String(frame.callType).toUpperCase(),address:createdAddress,
+        effectiveCommitStatus:rolledBack?'ROLLED_BACK':'PERSISTED_IF_APPLICABLE',
+        sourceBinding:'UNRESOLVED_PENDING_EXACT_RUNTIME_CODE'});
+    }
+  }
   const manifest={schemaVersion:'mi-phase0-deployment-transaction-trace-v1',scenarioId,
     sourceIdentity:scenarioIdentity,initialBlock,scriptEnd,
     expectedTransactions,receiptsRecorded,callTraces,opcodeTraces,
@@ -310,7 +344,7 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
     status:expectedTransactions===receiptsRecorded&&expectedTransactions===callTraces&&
       expectedTransactions===opcodeTraces&&limitations.length===0
         ?'COMPLETE':'INCOMPLETE_WITH_TYPED_LIMITATIONS',
-    rows,limitations};
+    rows,actualCreations,limitations};
   const raw=JSON.stringify(manifest,null,2)+'\n';
   await fs.writeFile(path.join(evidenceRoot,'DEPLOYMENT_TRANSACTION_TRACE_INDEX_v1.json'),raw);
 
@@ -326,9 +360,10 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
       const call=row.evidence.find(e=>e.kind==='CALL_TRACE');
       const receipt=row.evidence.find(e=>e.kind==='MINED_RECEIPT');
       const missing=row.limitations.find(x=>x.type==='CALL_TRACE_UNAVAILABLE');
+      const normalized=row.callTraceNormalization==='COMPLETE';
       return{txHash:row.transactionHash,blockNumber:row.blockNumber,
         transactionIndex:row.transactionOrdinal,receiptStatus:row.receiptStatus??null,
-        traceStatus:call?'COMPLETE_RAW_AND_NORMALIZED':
+        traceStatus:call?(normalized?'COMPLETE_RAW_AND_NORMALIZED':'RAW_COMPLETE_NORMALIZATION_FAILED'):
           missing?.errorCode==='SENSITIVE_TRACE_PUBLICATION_BLOCKED'?
             'SENSITIVE_TRACE_PUBLICATION_BLOCKED':
             'TRACE_RPC_FAILED',
@@ -345,18 +380,18 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
     traceLimitations:limitations,
     counts:{journalTransactions:expectedTransactions,
       traceEligibleTransactions:expectedTransactions,
-      completeRawTraces:callTraces,
-      completeNormalizedTraces:rows.filter(row=>
-        row.evidence.some(e=>e.kind==='CALL_TRACE')&&row.mechanicalCallFrames.length>0).length,
+      completeRawTraces:rows.filter(row=>row.evidence.some(e=>e.kind==='CALL_TRACE')).length,
+      completeNormalizedTraces:rows.filter(row=>row.callTraceNormalization==='COMPLETE').length,
       tracedFrames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.length,0),
       createFrames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.filter(x=>x.callType==='CREATE').length,0),
       create2Frames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.filter(x=>x.callType==='CREATE2').length,0),
       revertedFrames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.filter(x=>x.reverted).length,0),
       traceUnavailableTransactions:expectedTransactions-callTraces,
       pendingTransactions:0,unaccountedTransactions:0},
-    rawCompletenessStatus:expectedTransactions===callTraces?'COMPLETE':'PARTIAL',
-    normalizedCompletenessStatus:expectedTransactions===callTraces&&
-      rows.every(row=>row.mechanicalCallFrames.length>0)?'COMPLETE':'PARTIAL',
+    rawCompletenessStatus:expectedTransactions===0?'COMPLETE_ZERO_TRANSACTIONS':
+      rows.filter(row=>row.evidence.some(e=>e.kind==='CALL_TRACE')).length===expectedTransactions?'COMPLETE':'PARTIAL',
+    normalizedCompletenessStatus:expectedTransactions===0?'COMPLETE_ZERO_TRANSACTIONS':
+      expectedTransactions===callTraces?'COMPLETE':'PARTIAL',
     semanticCompletenessStatus:'NOT_ASSESSED'
   };
   await fs.writeFile(path.join(evidenceRoot,'TRACE_INDEX_v1.json'),
