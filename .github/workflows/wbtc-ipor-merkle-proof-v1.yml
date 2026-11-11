@@ -135,7 +135,7 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Compile exact adapted Aragon SPP source
+      - name: Compile v11 native-based Standard and Guardian SPP (v12 rehearsal)
         shell: bash
         run: |
           set -euo pipefail
@@ -145,11 +145,10 @@ jobs:
             cd "$RUNNER_TEMP/aragon-spp"
             git checkout a1d84e0542cf2db0a542f0159878457dbb7e3515
             git submodule update --init --recursive
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporStagedProposalProcessor_v8.sol" src/
-            forge build src/StagedProposalProcessor.sol --via-ir --optimizer-runs 1 --sizes
-            forge build src/WbtcIporStagedProposalProcessor_v8.sol --via-ir --optimizer-runs 1 --sizes
-          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/spp-build.log"
-      - name: Compile exact Aragon TokenVoting fork and ZK verifier
+            cp -r "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/native-restart-v12/src/." src/
+            forge build src/extensions/WbtcStandardSPP_v2.sol src/extensions/WbtcGuardianRemovalSPP_v1.sol --via-ir --optimizer-runs 1 --sizes
+          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/spp-build-v12.log"
+      - name: Compile v11 collateral TokenVoting and original RISC Zero verifier
         shell: bash
         run: |
           set -euo pipefail
@@ -158,30 +157,17 @@ jobs:
             cd "$RUNNER_TEMP/aragon-token"
             git checkout e726c28061486114d601c547e4da1180ed5ab6da
             git submodule update --init --recursive
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/MajorityVotingBase.sol" src/base/
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/base/IMajorityVoting.sol" src/base/
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v14.sol" src/
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v6.sol" src/
-            mkdir -p src/lib
-            cp "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/contracts/src/lib/BokkyPooBahsDateTimeLibrary.sol" src/lib/
-            forge build src/WbtcIporTokenVoting_v14.sol src/WbtcIporZkProofVerifier_v6.sol --via-ir --optimizer-runs 1 --sizes
-          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build.log"
+            cp -r "$GITHUB_WORKSPACE/governance/wbtc-ipor-merkle-v1/native-restart-v12/src/." src/
+            forge build src/extensions/WbtcCollateralTokenVoting_v3.sol src/verifier/WbtcIporZkProofVerifier_v1.sol --via-ir --optimizer-runs 1 --sizes
+          ) 2>&1 | tee "$GITHUB_WORKSPACE/compile-evidence/voting-build-v12.log"
       - name: Preserve compile diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: wbtc-ipor-three-contract-sources-and-compile-v5
+          name: wbtc-ipor-native-restart-contracts-compile-v12
           path: |
             compile-evidence/
-            governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporStagedProposalProcessor_v8.sol
-            governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v14.sol
-            governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v6.sol
-            governance/wbtc-ipor-merkle-v1/contracts/src/base/MajorityVotingBase.sol
-            governance/wbtc-ipor-merkle-v1/contracts/src/base/IMajorityVoting.sol
-            governance/wbtc-ipor-merkle-v1/contracts/src/lib/BokkyPooBahsDateTimeLibrary.sol
-            governance/wbtc-ipor-merkle-v1/contracts/src/libraries/Errors.sol
-            governance/wbtc-ipor-merkle-v1/contracts/src/libraries/Permissions.sol
-            governance/wbtc-ipor-merkle-v1/contracts/DEPENDENCIES_v1.md
+            governance/wbtc-ipor-merkle-v1/native-restart-v12/src/
             governance/wbtc-ipor-merkle-v1/CONTRACT_DESIGN_SPEC_v9.md
           if-no-files-found: error
           retention-days: 30
