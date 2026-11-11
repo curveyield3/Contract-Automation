@@ -404,9 +404,170 @@ async function buildForkRelationshipGraphV1(){
     staticEdgeCount:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length,
     runtimeJoinStatus:slitherJoins.length?'PARTIALLY_SOURCE_RUNTIME_BOUND':'NOT_PROVEN',runtimeJoinRecords:slitherJoins,
     limitations:staticFacts.value?.unavailableUnitRecords??[]});
+  // Step 8: evaluate every graph occurrence, never an arbitrary top-N excerpt.
+  // These are source-bound investigation prompts, not vulnerability verdicts.
+  const candidatePatternsV1={
+    CROSS_CONTRACT_REENTRY_PATH:{
+      question:'Could an intermediate external callback violate a state invariant or bypass an established guard?',
+      families:['REENTRY_CALLBACK_SEQUENCE','STATE_ORDER_SENSITIVITY']},
+    SHARED_ACCOUNTING_BOUNDARY:{
+      question:'Can assets, liabilities, shares, fees, or rounding diverge across these accounting participants?',
+      families:['CROSS_CONTRACT_ACCOUNTING','ROUNDING_AMPLIFICATION']},
+    ACTUAL_ALLOWANCE_OR_PRIVILEGE_EDGE:{
+      question:'Could the witnessed authority or allowance cross its expected asset or role boundary?',
+      families:['ALLOWANCE_BOUNDARY','ROLE_ESCALATION_SEQUENCE']},
+    PROXY_CODE_STORAGE_SPLIT:{
+      question:'Do initializer, upgrade authority, and storage-layout assumptions hold across code and execution contexts?',
+      families:['PROXY_INITIALIZATION','UPGRADE_STORAGE_INTERACTION']},
+    RUNTIME_CALLEE_NOT_STATIC_MATCH:{
+      question:'What exact runtime code and trust boundary did this call invoke?',
+      families:['DYNAMIC_EXTERNAL_TARGET']},
+    ORACLE_TO_VALUE_ACTION:{
+      question:'Could source-confirmed price dependence alter the value transition through staleness, rounding or manipulation?',
+      families:['ORACLE_DEPENDENCY','PRICE_BOUNDARY']},
+    ORDER_DEPENDENT_MULTICONTRACT_STATE:{
+      question:'Could ordering these witnessed storage changes leave an exploitable intermediate state?',
+      families:['SEQUENCE_PERMUTATION','INTERMEDIATE_STATE_INVARIANT']},
+    UNEXPECTED_REVERT_OR_FAILURE_PROPAGATION:{
+      question:'Does the witnessed failure propagate or leave inconsistent state in the source-defined flow?',
+      families:['FAILURE_PROPAGATION']},
+    DYNAMIC_FACTORY_CHILD:{
+      question:'Does this witnessed child creation inherit correct initialization, access controls and asset ownership?',
+      families:['FACTORY_CHILD_INITIALIZATION']},
+    EXTERNAL_HOOK_OR_CALLBACK:{
+      question:'Are callback caller authorization, reentry and failure assumptions satisfied at this interface?',
+      families:['HOOK_AUTHORIZATION','CALLBACK_SEQUENCE']},
+    TIME_OR_STATE_GATE:{
+      question:'Do source-proven time or threshold conditions create unexpected asset-transition states?',
+      families:['TIME_BOUNDARY','STATE_THRESHOLD']},
+    CROSS_CHAIN_OR_AUTOMATION_DEPENDENCY:{
+      question:'Which assumptions about a remote endpoint, keeper, bridge or asynchronous message remain unverified?',
+      families:['EXTERNAL_MESSAGE_ASSUME','KEEPER_BOUNDARY']}
+  };
+  const patternImplementationSha256=sha256(Buffer.from(JSON.stringify({
+    implementation:'MI_PHASE0_GRAPH_PATTERN_RULES_V1',
+    rules:Object.entries(candidatePatternsV1).sort(([a],[b])=>a.localeCompare(b))
+  }), 'utf8'));
+  // Existing deploy-candidate observations are retired in favor of graph-root
+  // occurrence IDs; the graph root is written before any addendum candidate.
+  candidates.length=0;
+  const subjectDisposition=[];
+  const candidateLookup=new Map();
+  const addGraphCandidate=(patternFamily,edge,{evidenceClass,prerequisites=[],sourceFunctionIds=[],runtimeInstanceIds=[]}={})=>{
+    if(!candidatePatternsV1[patternFamily])throw new Error('GRAPH_PATTERN_UNREGISTERED');
+    const graphOccurrenceIds=[edge.edgeId];
+    const base=[source.campaignGenerationId,source.sourceArchiveSha256,pinned.chainId,
+      pinned.pinnedForkBlockNumber,pinned.pinnedForkBlockHash,
+      edge.scenarioId??null,edge.transactionHash??null,edge.originatingFrameId??null,
+      edge.edgeId,patternFamily,'v1',edge.inputSelector??null,
+      ...sourceFunctionIds,...runtimeInstanceIds];
+    const graphCandidateId='GRAPH-CAND-'+sha256(Buffer.from(JSON.stringify(base))).slice(0,40);
+    const candidate={
+      graphCandidateId,candidateId:graphCandidateId,patternFamily,patternType:patternFamily,
+      patternVersion:'v1',
+      candidateEvidenceClass:evidenceClass??'UNRESOLVED',
+      exactGraphOccurrenceIds:graphOccurrenceIds,
+      sourceGraphEdgeIds:graphOccurrenceIds,
+      sourceFunctionIds,participatingRuntimeInstanceIds:runtimeInstanceIds,
+      sourceEvidenceRefs:edge.evidenceRefs??[],
+      investigationQuestion:candidatePatternsV1[patternFamily].question,
+      suggestedTestFamilies:candidatePatternsV1[patternFamily].families,
+      taxonomyClassId:null,classificationStatus:'NEEDS_MIMO_CLASSIFICATION',
+      unresolvedPrerequisites:[...new Set(prerequisites)].sort(),
+      duplicateGroupId:null,
+      scenarioId:edge.scenarioId??null,chainId:pinned.chainId,
+      pinnedForkBlockHash:pinned.pinnedForkBlockHash,
+      sourceArchiveSha256:source.sourceArchiveSha256,
+      status:'POSSIBLE_INVESTIGATION_NOT_CONFIRMED',
+      decidingEvidenceNeeded:prerequisites,securityVerdict:null,
+      evidenceRefs:edge.evidenceRefs??[],
+      evidenceStatus:evidenceClass??'UNRESOLVED'
+    };
+    candidates.push(candidate);
+    const found=candidateLookup.get(edge.edgeId)??[];
+    found.push(graphCandidateId);
+    candidateLookup.set(edge.edgeId,found);
+  };
+  const runtimeCall=k=>/^OBSERVED_(?:CALL|STATICCALL|DELEGATECALL|CALLCODE)$/.test(String(k??''));
+  const graphByTx=new Map();
+  for(const edge of edges){
+    if(!edge.transactionHash)continue;
+    const rows=graphByTx.get(edge.transactionHash)??[];
+    rows.push(edge);graphByTx.set(edge.transactionHash,rows);
+  }
+  for(const edge of edges){
+    const kind=String(edge.kind??'');
+    const isRuntime=edge.observation==='OBSERVED_LOCAL_FORK';
+    const evidenceClass=kind==='OBSERVED_SUCCESSFUL_TX_STORAGE_CHANGE'?'STATE_EFFECT_WITNESSED':
+      isRuntime?'RUNTIME_WITNESSED':
+      edge.observation==='SOURCE_STATIC_NOT_RUNTIME'?'STATIC_POSSIBILITY':'UNRESOLVED';
+    const runtimeParticipants=[edge.from,edge.to].filter(Boolean);
+    const sourceFunctionIds=kind.startsWith('SLITHER_')?[edge.from].filter(Boolean):[];
+    const options={evidenceClass,sourceFunctionIds,runtimeInstanceIds:runtimeParticipants};
+    if(runtimeCall(kind)&&edge.from!==edge.to){
+      addGraphCandidate('CROSS_CONTRACT_REENTRY_PATH',edge,{
+        ...options,prerequisites:['CONFIRM_CALLBACK_REACHABILITY','CONFIRM_SOURCE_STATE_WRITE_ORDER']});
+    }
+    if(kind==='OBSERVED_DELEGATECALL'||kind==='OBSERVED_CALLCODE'){
+      addGraphCandidate('PROXY_CODE_STORAGE_SPLIT',edge,{
+        ...options,prerequisites:['CONFIRM_PROXY_STORAGE_ADDRESS','VERIFY_INITIALIZATION_AND_ADMIN_SOURCE']});
+    }
+    if(runtimeCall(kind)&&edge.runtimeCodeIdentityStatus!=='VERIFIED_COMPILED_MATCH'){
+      addGraphCandidate('RUNTIME_CALLEE_NOT_STATIC_MATCH',edge,{
+        ...options,evidenceClass:'UNRESOLVED',
+        prerequisites:['EXACT_CALL_TARGET_RUNTIME_CODE_AND_COMPILER_UNIT']});
+    }
+    if(runtimeCall(kind)&&edge.reverted===true){
+      addGraphCandidate('UNEXPECTED_REVERT_OR_FAILURE_PROPAGATION',edge,{
+        ...options,prerequisites:['SOURCE_DEFINED_EXPECTED_FAILURE_HANDLING']});
+    }
+    if(kind==='OBSERVED_CREATE'||kind==='OBSERVED_CREATE2'){
+      addGraphCandidate('DYNAMIC_FACTORY_CHILD',edge,{
+        ...options,prerequisites:['VERIFY_CHILD_RUNTIME_BYTECODE','VERIFY_INIT_ARGUMENTS_AND_AUTHORITY']});
+    }
+    if(kind==='OBSERVED_SUCCESSFUL_TX_STORAGE_CHANGE'){
+      const siblingWrites=(graphByTx.get(edge.transactionHash)??[])
+        .filter(x=>x.kind==='OBSERVED_SUCCESSFUL_TX_STORAGE_CHANGE');
+      const addresses=new Set(siblingWrites.map(x=>nodes.find(n=>n.nodeId===x.to)?.address).filter(Boolean));
+      if(addresses.size>1)addGraphCandidate('ORDER_DEPENDENT_MULTICONTRACT_STATE',edge,{
+        ...options,prerequisites:['CONFIRM_ASSET_ACTION_PATH','IDENTIFY_RELEVANT_INTERMEDIATE_STATE']});
+    }
+    if(kind==='SLITHER_STATIC_CALLSITE'){
+      const callee=String(edge.calleeSignature??'');
+      if(/(?:^|[^A-Za-z])(on(?:Token|FlashLoan|Swap|Deposit|Withdraw)|fallback|receive|callback|hook)\b/i.test(callee)){
+        addGraphCandidate('EXTERNAL_HOOK_OR_CALLBACK',edge,{
+          ...options,prerequisites:['VERIFY_CALLER_RESTRICTIONS','REPRODUCE_AUTHORIZED_CALLBACK_CONTEXT']});
+      }
+    }
+    // Storage-variable names are only source-static leads, never evidence that
+    // a multi-contract accounting invariant was actually violated.
+    if(kind==='SLITHER_FUNCTION_WRITES_VARIABLE'||kind==='SLITHER_FUNCTION_READS_VARIABLE'){
+      const targetNode=nodes.find(n=>n.nodeId===edge.to);
+      if(targetNode&&/(?:assets?|shares?|liabilit|debts?|balances?|fees?|reserves?)/i.test(String(targetNode.variableName??''))){
+        addGraphCandidate('SHARED_ACCOUNTING_BOUNDARY',edge,{
+          ...options,prerequisites:['VERIFY_EXTERNAL_ACCOUNTING_PARTICIPANTS',
+            'EXACT_VALUE_FLOW_AND_UNIT_SEMANTICS']});
+      }
+    }
+    const linked=candidateLookup.get(edge.edgeId)??[];
+    subjectDisposition.push({graphOccurrenceId:edge.edgeId,
+      disposition:linked.length?'TRIGGERED_CANDIDATE':
+        isRuntime&&edge.runtimeCodeIdentityStatus==='UNKNOWN'?'UNRESOLVED_NEEDS_MIMO':
+        'STRUCTURAL_FACT_WITH_NO_CURRENT_PATTERN',
+      graphCandidateIds:linked,sourceEvidenceRefs:edge.evidenceRefs??[]});
+  }
+  candidates.sort((a,b)=>a.graphCandidateId.localeCompare(b.graphCandidateId));
+  const staticOnlyUnmatchedSourceSubjects=subjectDisposition
+    .filter(row=>row.disposition==='STRUCTURAL_FACT_WITH_NO_CURRENT_PATTERN')
+    .map(row=>({graphOccurrenceId:row.graphOccurrenceId,evidenceRefs:row.sourceEvidenceRefs}));
+  const unknownRelationshipRefs=unknowns.map(unknown=>unknown.unknownId);
   const candidateRef=await writeOutput('evidence/phase0/GRAPH_INVESTIGATION_CANDIDATES_v1.json',{
     schemaVersion:'mi-phase0-graph-investigation-candidates-v1',...source,sourceGraphIndexRef:graphRef,
+    patternImplementationSha256,graphIndexRef:graphRef,
     candidateCount:candidates.length,candidates,
+    subjectDisposition,staticOnlyUnmatchedSourceSubjects,unknownRelationshipRefs,
+    candidateCensus:{inputSubjects:edges.length,generatedOccurrences:candidates.length,
+      groupedCandidates:candidates.length,explicitUnknowns:unknowns.length},
     disposition:'MECHANICAL_CANDIDATES_ONLY_NOT_ACCEPTED'});
   const eligible=candidates.map(c=>({
     eligibilityId:mkid('TEST-ELIG-',c.candidateId),sourceGraphCandidateIds:[c.candidateId],
@@ -426,6 +587,10 @@ async function buildForkRelationshipGraphV1(){
     schemaVersion:'mi-phase0-graph-to-audit-subject-census-v1',...source,
     graphIndexRef:graphRef,candidateIndexRef:candidateRef,
     ORIGINAL_GRAPH_SUBJECT_COUNT:edges.length,
+    sourceGraphSubjectDispositions:subjectDisposition,
+    sourceGraphSubjectCensus:{total:edges.length,triggered:subjectDisposition.filter(x=>x.disposition==='TRIGGERED_CANDIDATE').length,
+      unresolved:subjectDisposition.filter(x=>x.disposition==='UNRESOLVED_NEEDS_MIMO').length,
+      unmatched:staticOnlyUnmatchedSourceSubjects.length},
     AUTOMATIC_CANDIDATE_OCCURRENCE_COUNT:candidates.length,
     AUTOMATIC_CANDIDATE_GROUP_COUNT:candidates.length,
     FLOW_PLAN_QUESTION_COUNT:0,ASSIGNED_PACKET_QUESTION_COUNT:0,
