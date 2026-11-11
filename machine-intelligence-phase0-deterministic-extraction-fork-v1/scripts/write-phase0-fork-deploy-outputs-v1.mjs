@@ -162,6 +162,56 @@ async function buildForkRelationshipGraphV1(){
       const txid=addNode({nodeId:mkid('NODE-TX-',scenario,row.transactionHash),
         kind:'MINED_TRANSACTION',scenarioId:scenario,transactionHash:row.transactionHash,
         blockNumber:row.blockNumber,evidenceRefs:[rawIndex.ref,pathToTrace].filter(Boolean)});
+      // A receipt event is an observed emitted log, not a source-level ABI match.
+      const receiptPointer=row.evidence?.find(x=>x.kind==='MINED_RECEIPT');
+      const receiptEvidence=receiptPointer?await optional(receiptPointer.path,'MINED_RECEIPT'):null;
+      const receiptChecked=receiptEvidence?.ref?.sha256===receiptPointer?.sha256;
+      if(receiptPointer&&!receiptChecked)limitations.push({type:'RECEIPT_CONTENT_DIGEST_UNVERIFIED',
+        transactionHash:row.transactionHash,sourceRef:receiptPointer.path});
+      const receiptStatus=receiptChecked?receiptEvidence.value?.status:null;
+      const transactionSucceeded=receiptStatus===1||receiptStatus==='0x1'||receiptStatus==='0x01';
+      if(receiptChecked){
+        for(const [eventOrdinal,log] of (receiptEvidence.value.logs??[]).entries()){
+          const emitter=String(log.address??'').toLowerCase();
+          const eventId=addNode({nodeId:mkid('NODE-OBSERVED-EVENT-',scenario,row.transactionHash,eventOrdinal),
+            kind:'OBSERVED_EVENT_LOG',scenarioId:scenario,transactionHash:row.transactionHash,
+            logOrdinal:eventOrdinal,emitterAddress:emitter,
+            topic0:log.topics?.[0]??null,
+            dataSha256:sha256(Buffer.from(String(log.data??''),'utf8')),
+            eventSourceIdentity:null,eventDecodeStatus:'ABI_EVENT_JOIN_NOT_PROVEN',
+            evidenceRefs:[receiptEvidence.ref]});
+          edges.push({edgeId:mkid('EDGE-OBSERVED-EMISSION-',scenario,row.transactionHash,eventOrdinal),
+            kind:'OBSERVED_TRANSACTION_EMITTED_LOG',from:txid,to:eventId,
+            observation:'OBSERVED_LOCAL_FORK',evidenceRefs:[receiptEvidence.ref]});
+        }
+      }
+      const statePointer=row.evidence?.find(x=>x.kind==='PRESTATE_DIFF');
+      const stateEvidence=statePointer?await optional(statePointer.path,'PRESTATE_DIFF'):null;
+      if(statePointer&&stateEvidence?.ref?.sha256!==statePointer.sha256){
+        limitations.push({type:'PRESTATE_DIFF_CONTENT_DIGEST_UNVERIFIED',
+          transactionHash:row.transactionHash,sourceRef:statePointer.path});
+      }else if(stateEvidence?.value&&transactionSucceeded){
+        const beforeState=stateEvidence.value.pre??{};
+        const afterState=stateEvidence.value.post??{};
+        for(const address of [...new Set([...Object.keys(beforeState),...Object.keys(afterState)])].sort()){
+          const pre=beforeState[address]??{},post=afterState[address]??{};
+          const oldStorage=pre.storage??{},newStorage=post.storage??{};
+          for(const slot of [...new Set([...Object.keys(oldStorage),...Object.keys(newStorage)])].sort()){
+            const before=oldStorage[slot]??null,after=newStorage[slot]??null;
+            if(before===after)continue;
+            const slotId=addNode({nodeId:mkid('NODE-SLOT-',scenario,address,slot),
+              kind:'OBSERVED_STORAGE_SLOT',scenarioId:scenario,address:address.toLowerCase(),slot,
+              sourceVariableIdentity:null,bindingStatus:'STORAGE_SLOT_SOURCE_UNKNOWN',
+              evidenceRefs:[stateEvidence.ref]});
+            edges.push({edgeId:mkid('EDGE-STORAGE-MUTATION-',scenario,row.transactionHash,address,slot),
+              kind:'OBSERVED_SUCCESSFUL_TX_STORAGE_CHANGE',from:txid,to:slotId,
+              oldValueSha256:before===null?null:sha256(Buffer.from(String(before))),
+              newValueSha256:after===null?null:sha256(Buffer.from(String(after))),
+              stateDisposition:'TRANSACTION_RECEIPT_SUCCESS',
+              observation:'OBSERVED_LOCAL_FORK',evidenceRefs:[stateEvidence.ref,receiptEvidence.ref]});
+          }
+        }
+      }
       for(const frame of row.mechanicalCallFrames??[]){
         const frameid=addNode({nodeId:frame.frameId,kind:'EVM_CALL_FRAME',
           scenarioId:scenario,transactionHash:row.transactionHash,
