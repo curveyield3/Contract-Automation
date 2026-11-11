@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pragma solidity ^0.8.18;
 
+import {BokkyPooBahsDateTimeLibrary} from "./lib/BokkyPooBahsDateTimeLibrary.sol";
+
 /// @notice Vault's original ERC-20 shares. These units are NOT transferable governance tokens.
 interface IWbtcVaultShares {
     function balanceOf(address account) external view returns (uint256);
@@ -124,6 +126,20 @@ contract WbtcIporWeightedSources {
         emit AddPowerSource(powerSources.length - 1, market, sourceType, marketId, uint16(MARKET_SHARE_WEIGHT_BPS));
     }
 
+    /// @notice Aragon standard proposals may modify the exact calendar-month
+    /// window, minimum missed proposals, and removal voter qualification.
+    /// Changes affect future proposal eligibility, not frozen ballots.
+    function configureVoterActivity(uint8 monthsInactive, uint8 minimumMisses, uint8 monthsGuardianQualification)
+        external onlyDAO
+    {
+        require(monthsInactive > 0 && monthsInactive <= 24, "INACTIVITY_MONTHS");
+        require(minimumMisses > 0 && minimumMisses <= 100, "MISSED_PROPOSALS");
+        require(monthsGuardianQualification > 0 && monthsGuardianQualification <= 24, "QUALIFICATION_MONTHS");
+        inactivityMonths = monthsInactive;
+        minimumMissedProposals = minimumMisses;
+        guardianQualificationMonths = monthsGuardianQualification;
+    }
+
     function setVotingMarketEnabled(uint256 index, bool enabled) external onlyDAO {
         PowerSource storage source = powerSources[index];
         if (source.enabled == enabled) revert InvalidMarketSource();
@@ -177,8 +193,10 @@ contract WbtcIporWeightedSources {
     // Activated-voter registry and proposal-frozen snapshots. The original
     // Gardens source-aggregation rule remains rawSources() above.
     address public votingPlugin;
-    uint64 public constant INACTIVITY_WINDOW = 90 days;
-    uint8 public constant MINIMUM_MISSED_PROPOSALS = 2;
+    // Calendar month arithmetic matches the three-month governance rule.
+    uint8 public inactivityMonths = 3;
+    uint8 public minimumMissedProposals = 2;
+    uint8 public guardianQualificationMonths = 3;
 
     struct ActivatedVoter {
         uint64 continuousSince;
@@ -261,8 +279,9 @@ contract WbtcIporWeightedSources {
     function _active(address voter) internal view returns (bool) {
         if (!voterState[voter].everRegistered) return false;
         (uint256 misses, uint256 firstMissEnd) = _missedSinceLastVote(voter);
-        return misses < MINIMUM_MISSED_PROPOSALS
-            || firstMissEnd == 0 || block.timestamp < firstMissEnd + INACTIVITY_WINDOW;
+        return misses < minimumMissedProposals
+            || firstMissEnd == 0
+            || block.timestamp < BokkyPooBahsDateTimeLibrary.addMonths(firstMissEnd, inactivityMonths);
     }
 
     function _missedSinceLastVote(address voter)
