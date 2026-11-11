@@ -163,6 +163,68 @@ function buildActiveUseMethodInventoryV1({receipt,artifacts,deployedContracts,ch
     limitations:['A compiled ABI is not a verified runtime contract identity, permitted actor or executable transaction; no actor, fixture or transaction has been manufactured.']};
 }
 
+
+const MI_TRACE_PART_BYTES_V1=4*1024*1024;
+async function persistCompleteForkRpcJsonV1({base,scenarioId,txHash,chainId,blockNumber,
+  blockHash,kind,method,result,sourceIdentity}){
+  // Source-submitted input/outputs and RPC secrets must never flow to Actions logs.
+  // A detected credential blocks raw publication rather than redacting original bytes.
+  const raw=Buffer.from(JSON.stringify(result)+'\n','utf8');
+  const secretKeys=Object.entries(process.env).filter(([key,val])=>
+    /(?:TOKEN|SECRET|API_KEY|PRIVATE_KEY|RPC_URL)$/i.test(key)&&
+    typeof val==='string'&&val.length>=16&&raw.includes(Buffer.from(val,'utf8')))
+    .map(([key])=>key);
+  if(secretKeys.length){
+    const e=new Error('SENSITIVE_TRACE_PUBLICATION_BLOCKED');
+    e.code='SENSITIVE_TRACE_PUBLICATION_BLOCKED';
+    e.secretEnvironmentKeyNames=secretKeys; // never retain secret values
+    throw e;
+  }
+  const traceRoot=path.join(base,kind+'_RAW');
+  const entries=[],shaRaw=sha256(raw);
+  await fs.mkdir(traceRoot,{recursive:true});
+  let offset=0;
+  for(let n=0;offset<raw.length;n++){
+    const slice=raw.subarray(offset,Math.min(raw.length,offset+MI_TRACE_PART_BYTES_V1));
+    const name='part-'+String(n+1).padStart(6,'0')+'.jsonpart';
+    const target=path.join(traceRoot,name);
+    await fs.writeFile(target,slice,{flag:'wx'});
+    const observed=await fs.readFile(target);
+    const partSha256=sha256(observed);
+    if(partSha256!==sha256(slice)||observed.length!==slice.length)
+      throw new Error('FORK_RAW_TRACE_PART_READBACK_MISMATCH');
+    entries.push({path:path.posix.join('evidence/phase0/scenarios',scenarioId,'transactions',
+      txHash.toLowerCase(),kind+'_RAW',name),
+      ordinal:n+1,startByte:offset,byteLength:slice.length,sha256:partSha256});
+    offset+=slice.length;
+  }
+  if(offset!==raw.length||!entries.length)
+    throw new Error('FORK_RAW_TRACE_PART_CENSUS_INCOMPLETE');
+  const manifest={
+    schemaVersion:'mi-phase0-raw-call-trace-manifest-v1',
+    artifactType:'COMPLETE_RPC_CLIENT_OBSERVED_JSON',
+    scenarioId,txHash:txHash.toLowerCase(),chainId,blockNumber,blockHash,
+    sourceIdentity,kind,traceMethod:method,
+    tracer:kind==='CALL_TRACE'?'callTracer':
+      kind==='PRESTATE_DIFF'?'prestateTracer':
+      kind==='OPCODE_TRACE'?'structLogger':null,
+    rawEncoding:'UTF8_CLIENT_SERIALIZED_JSON_BYTE_SEQUENCE',
+    totalRawBytes:raw.length,rawSha256:shaRaw,parts:entries,
+    allPartsPresentAndVerified:true,publicationStatus:'COMPLETE_LOCAL_VERIFIED',
+    controllerAcceptance:false,gitPublicationStatus:'NOT_ATTEMPTED'
+  };
+  const manifestName=kind+'_RAW_MANIFEST_v1.json';
+  const manifestRelative=path.posix.join('evidence/phase0/scenarios',scenarioId,
+    'transactions',txHash.toLowerCase(),manifestName);
+  const manifestBytes=Buffer.from(JSON.stringify(manifest,null,2)+'\n');
+  const manifestPath=path.join(base,manifestName);
+  await fs.writeFile(manifestPath,manifestBytes,{flag:'wx'});
+  const check=await fs.readFile(manifestPath);
+  if(sha256(check)!==sha256(manifestBytes))throw new Error('FORK_RAW_MANIFEST_READBACK_MISMATCH');
+  return{kind,path:manifestRelative,sha256:sha256(manifestBytes),
+    rawSha256:shaRaw,bytes:raw.length,partCount:entries.length,storage:'COMPLETE_VERIFIED_JSON_PARTS'};
+}
+
 async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceIdentity,chainId,pinnedBlockNumber,pinnedBlockHash,initialBlock,scriptEnd}){
   const scenarioIdentity={...sourceIdentity,chainId,pinnedBlockNumber,pinnedBlockHash,
     branch:'SOURCE_DEPLOYMENT',runId:String(process.env.GITHUB_RUN_ID??'LOCAL'),
@@ -195,12 +257,12 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
         try{
           const result=await rpc(anvilUrl,method,params);
           if(!result)throw new Error('EMPTY_RPC_RESULT');
-          const raw=JSON.stringify(result)+'\n';
-          const name=kind+'.json',target=path.join(base,name);
-          await fs.writeFile(target,raw);
-          row.evidence.push({kind,path:path.posix.join('evidence/phase0/scenarios',scenarioId,
-            'transactions',String(txHash).toLowerCase(),name),sha256:sha256(Buffer.from(raw,'utf8')),
-            bytes:Buffer.byteLength(raw,'utf8')});
+          const recorded=await persistCompleteForkRpcJsonV1({
+            base,scenarioId,txHash:String(txHash).toLowerCase(),chainId,
+            blockNumber:number,blockHash:block.hash??null,kind,method,result,sourceIdentity:scenarioIdentity
+          });
+          row.evidence.push(recorded);
+          if(kind==='MINED_RECEIPT')row.receiptStatus=result.status??null;
           if(kind==='CALL_TRACE'){
             // Retain every observed call-frame occurrence, including reverted children.
             // A call frame proves execution only; bytecode-to-source and proxy storage
@@ -220,8 +282,7 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
                 error:frame.error??null,reverted:Boolean(frame.error),
                 runtimeCodeIdentityId:null,storageContextAddress:null,
                 bindingStatus:'SOURCE_AND_STORAGE_CONTEXT_UNRESOLVED',
-                rawCallTraceRef:path.posix.join('evidence/phase0/scenarios',scenarioId,
-                  'transactions',String(txHash).toLowerCase(),'CALL_TRACE.json')});
+                rawCallTraceRef:recorded.path,rawCallTraceSha256:recorded.rawSha256});
               for(const [childIndex,child] of (frame.calls??[]).entries())
                 visit(child,framePath+'/'+childIndex,frameId);
             };
@@ -231,7 +292,9 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
           if(kind==='CALL_TRACE')callTraces++;
           if(kind==='OPCODE_TRACE')opcodeTraces++;
         }catch(error){
-          row.limitations.push({type:kind+'_UNAVAILABLE',reason:String(error?.message??error)});
+          row.limitations.push({type:kind+'_UNAVAILABLE',
+            errorCode:error?.code??'RPC_OR_LOCAL_PERSISTENCE_FAILED',
+            reason:String(error?.message??error).slice(0,600)});
           if(kind!=='PRESTATE_DIFF')limitations.push({type:kind+'_UNAVAILABLE',transactionHash:txHash});
         }
       }
@@ -250,6 +313,55 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
     rows,limitations};
   const raw=JSON.stringify(manifest,null,2)+'\n';
   await fs.writeFile(path.join(evidenceRoot,'DEPLOYMENT_TRANSACTION_TRACE_INDEX_v1.json'),raw);
+
+  const traceIndex={
+    schemaVersion:'mi-phase0-call-trace-index-v1',
+    artifactType:'SCENARIO_CALL_TRACE_INDEX',
+    scenarioId,sourceArchiveSha256:sourceIdentity.sourceArchiveSha256,
+    campaignGenerationId:sourceIdentity.campaignGenerationId,
+    chainId,pinnedBlockNumber,pinnedBlockHash,
+    traceBackend:'LOCAL_ANVIL_CALLTRACER',
+    transactionJournalRef:'DEPLOYMENT_TRANSACTION_TRACE_INDEX_v1.json',
+    transactions:rows.map(row=>{
+      const call=row.evidence.find(e=>e.kind==='CALL_TRACE');
+      const receipt=row.evidence.find(e=>e.kind==='MINED_RECEIPT');
+      const missing=row.limitations.find(x=>x.type==='CALL_TRACE_UNAVAILABLE');
+      return{txHash:row.transactionHash,blockNumber:row.blockNumber,
+        transactionIndex:row.transactionOrdinal,receiptStatus:row.receiptStatus??null,
+        traceStatus:call?'COMPLETE_RAW_AND_NORMALIZED':
+          missing?.errorCode==='SENSITIVE_TRACE_PUBLICATION_BLOCKED'?
+            'SENSITIVE_TRACE_PUBLICATION_BLOCKED':
+            'TRACE_RPC_FAILED',
+        traceMethod:call?'debug_traceTransaction':null,
+        rawManifestRef:call?.path??null,
+        rawManifestSha256:call?.sha256??null,
+        frameCount:row.mechanicalCallFrames.length,
+        createCount:row.mechanicalCallFrames.filter(x=>x.callType==='CREATE').length,
+        create2Count:row.mechanicalCallFrames.filter(x=>x.callType==='CREATE2').length,
+        unresolvedFrameCount:row.mechanicalCallFrames.filter(x=>x.bindingStatus!=='EXACT_BOUND').length,
+        errorCode:missing?.errorCode??null,retryable:!call,
+        receiptManifestRef:receipt?.path??null};
+    }),
+    traceLimitations:limitations,
+    counts:{journalTransactions:expectedTransactions,
+      traceEligibleTransactions:expectedTransactions,
+      completeRawTraces:callTraces,
+      completeNormalizedTraces:rows.filter(row=>
+        row.evidence.some(e=>e.kind==='CALL_TRACE')&&row.mechanicalCallFrames.length>0).length,
+      tracedFrames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.length,0),
+      createFrames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.filter(x=>x.callType==='CREATE').length,0),
+      create2Frames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.filter(x=>x.callType==='CREATE2').length,0),
+      revertedFrames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.filter(x=>x.reverted).length,0),
+      traceUnavailableTransactions:expectedTransactions-callTraces,
+      pendingTransactions:0,unaccountedTransactions:0},
+    rawCompletenessStatus:expectedTransactions===callTraces?'COMPLETE':'PARTIAL',
+    normalizedCompletenessStatus:expectedTransactions===callTraces&&
+      rows.every(row=>row.mechanicalCallFrames.length>0)?'COMPLETE':'PARTIAL',
+    semanticCompletenessStatus:'NOT_ASSESSED'
+  };
+  await fs.writeFile(path.join(evidenceRoot,'TRACE_INDEX_v1.json'),
+    JSON.stringify(traceIndex,null,2)+'\n',{flag:'wx'});
+
   return{...manifest,rows:undefined,manifestRef:path.posix.join('evidence/phase0/scenarios',scenarioId,
     'DEPLOYMENT_TRANSACTION_TRACE_INDEX_v1.json'),manifestSha256:sha256(Buffer.from(raw,'utf8'))};
 }
