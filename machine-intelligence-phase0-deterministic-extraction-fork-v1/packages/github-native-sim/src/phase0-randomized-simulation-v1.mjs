@@ -766,6 +766,42 @@ async function reportedPackageDeployments({projectRoot,attempts,artifacts}){
   }
   return{rows,limitations};
 }
+async function resolveExactRuntimeDeploymentIdentityV1({provider,artifacts,deployments}){
+  const rows=[],codeCache=new Map();
+  const admissible=artifacts.filter(artifact=>{
+    const code=String(artifact.deployedBytecode??'').toLowerCase();
+    return /^0x[0-9a-f]+$/.test(code)&&code.length>2&&
+      !code.includes('__$')&&
+      Object.keys(artifact.immutableReferences??{}).length===0&&
+      Object.keys(artifact.deployedLinkReferences??{}).length===0;
+  });
+  for(const row of deployments){
+    const address=String(row.address??'').toLowerCase();
+    if(!/^0x[0-9a-f]{40}$/.test(address)){
+      rows.push({...row,sourceBinding:'INVALID_RUNTIME_ADDRESS'});continue;
+    }
+    if(!codeCache.has(address))codeCache.set(address,String(await provider.getCode(address)).toLowerCase());
+    const code=codeCache.get(address);
+    const observedRuntimeSha256=sha256(Buffer.from(code.replace(/^0x/,''),'hex'));
+    const matching=admissible.filter(artifact=>
+      String(artifact.deployedBytecode??'').toLowerCase()===code);
+    if(matching.length===1){
+      const artifact=matching[0];
+      rows.push({...row,address,compilationUnitId:artifact.compilationUnitId??null,
+        sourceName:artifact.sourceName,contractName:artifact.contractName,
+        qualifiedName:artifact.sourceName+':'+artifact.contractName,
+        sourceBinding:'EXACT_SOURCE_AND_RUNTIME_MATCH',observedRuntimeSha256,
+        sourceRuntimeEvidenceClass:'EXACT_COMPILER_RUNTIME_BYTECODE_EQUALS_FORK_CODE'});
+    }else{
+      rows.push({...row,address,observedRuntimeSha256,
+        sourceBinding:matching.length?'AMBIGUOUS_EQUAL_RUNTIME_BYTECODE':'NO_EXACT_RUNTIME_BYTECODE_MATCH',
+        candidateCompilationUnitIds:matching.map(x=>x.compilationUnitId).filter(Boolean),
+        sourceRuntimeEvidenceClass:matching.length?'AMBIGUOUS':'NOT_PROVEN'});
+    }
+  }
+  return rows;
+}
+
 function deployedBytecodePrefix(a){return String(a?.bytecode??'').replace(/^0x/,'').toLowerCase();}
 export async function discoverDeployments({provider,artifacts,startBlock,endBlock}){
   const rows=[];
@@ -3013,6 +3049,25 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
     const scriptEnd=Number(await provider.getBlockNumber());
     const discoveredScriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
     const reported=await reportedPackageDeployments({projectRoot:staged.projectRoot,attempts:deployment.attempts,artifacts});
+    const resolvedDeploymentRows=await resolveExactRuntimeDeploymentIdentityV1({
+      provider,artifacts:sharedExecutionInputs.artifacts,
+      deployments:[...liveContracts,...discoveredScriptDeployments,...reported.rows]
+    });
+    const runtimeIdentityIndex={
+      schemaVersion:'mi-phase0-runtime-address-identity-index-v1',
+      campaignId:receipt.campaign.campaignId,
+      campaignGenerationId:receipt.campaign.campaignGenerationId,
+      sourceArchiveSha256:archiveSha256,
+      chainId:forkChain.chainId,
+      pinnedBlockNumber:anvil.pinnedBlockNumber,pinnedBlockHash:anvil.pinnedBlockHash,
+      status:resolvedDeploymentRows.every(x=>x.sourceBinding==='EXACT_SOURCE_AND_RUNTIME_MATCH')
+        ?'ALL_OBSERVED_RUNTIME_IDENTITIES_EXACT':'PARTIAL_WITH_TYPED_UNRESOLVED_IDENTITIES',
+      rows:resolvedDeploymentRows
+    };
+    await fs.mkdir(path.join(outputRoot,'evidence','phase0'),{recursive:true});
+    await fs.writeFile(path.join(outputRoot,'evidence','phase0','RUNTIME_ADDRESS_IDENTITY_INDEX_v1.json'),
+      JSON.stringify(runtimeIdentityIndex,null,2)+'\n');
+
     // Audit Preview only: count ALL successful CREATE/CREATE2 call frames executed
     // by submitted deployment scripts, including factory-created contracts.
     // Trace failure is retained as unverifiable; the Phase-0 permit gate rejects it.
@@ -3080,7 +3135,8 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
         packageDependencyInstall,foundryDependencyInstall,detectedScripts:detected,scriptDispositions:dispositions,
         attempts:deployment.attempts,
         ...(auditPreviewCreationTrace?{auditPreviewCreationTrace}:{}),
-        deployedContracts:[...new Map([...liveContracts,...discoveredScriptDeployments,...reported.rows].map(row=>[String(row.address).toLowerCase(),row])).values()],
+        runtimeIdentityIndexRef:'evidence/phase0/RUNTIME_ADDRESS_IDENTITY_INDEX_v1.json',
+        deployedContracts:[...new Map(resolvedDeploymentRows.map(row=>[String(row.address).toLowerCase(),row])).values()],
         gaps,limitations:gaps,
         coverage:{detectedScripts:dispositions.length,requiredScripts:dispositions.length,executedScripts:deployment.attempts.length,passedScripts:deployment.attempts.filter(row=>row.status==='PASS').length,failedOrUnsupportedScripts:dispositions.filter(row=>row.disposition!=='EXECUTED_PASS').length,excludedScripts:0}
       };
