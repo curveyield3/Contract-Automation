@@ -162,9 +162,12 @@ async function buildForkRelationshipGraphV1(){
   const limitations=[];
   const deploy=await optional('evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json','DEPLOYMENT');
   const staticFacts=await optional('evidence/static-analysis/SLITHER_RELATIONAL_FACTS_v1.json','SLITHER');
+  const compilerBundle=await optional('evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json','BUILD_BUNDLE');
+  const contractIdentityIndex=await optional('evidence/phase0/CONTRACT_IDENTITY_INDEX_v1.json','CONTRACT_IDENTITIES');
+  const runtimeIdentityIndex=await optional('evidence/phase0/RUNTIME_ADDRESS_IDENTITY_INDEX_v1.json','RUNTIME_IDENTITIES');
   const methods=await optional('evidence/phase0/ACTIVE_USE_METHOD_INVENTORY_v1.json','ACTIVE_USE');
   const sourceIntelligence=await optional('evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json','SOURCE_INTELLIGENCE');
-  for(const x of [deploy,staticFacts,methods,sourceIntelligence])if(x.limitation)limitations.push(x.limitation);
+  for(const x of [deploy,staticFacts,compilerBundle,contractIdentityIndex,runtimeIdentityIndex,methods,sourceIntelligence])if(x.limitation)limitations.push(x.limitation);
   const source={
     campaignId:receipt.campaign.campaignId,
     campaignGenerationId:receipt.campaign.campaignGenerationId,
@@ -173,6 +176,26 @@ async function buildForkRelationshipGraphV1(){
   const pinned={chainId:deploy.value?.fork?.chainId??null,
     pinnedForkBlockNumber:deploy.value?.fork?.pinnedHistoricalBlock??null,
     pinnedForkBlockHash:deploy.value?.fork?.pinnedHistoricalHash??null};
+  const buildRef=compilerBundle.ref;
+  const checkIdentity=(record,label,shaKey=null,shaValue=null)=>{
+    if(!record)return;
+    if(record.campaignId!==source.campaignId||
+      record.campaignGenerationId!==source.campaignGenerationId||
+      (record.sourceArchiveSha256??record.source?.archiveSha256)!==source.sourceArchiveSha256)
+      throw new Error('GRAPH_'+label+'_FROZEN_SOURCE_GENERATION_MISMATCH');
+    if(shaKey&&record[shaKey]!==shaValue)
+      throw new Error('GRAPH_'+label+'_BUILD_ARTIFACT_SHA_MISMATCH');
+  };
+  if(compilerBundle.value){
+    if(compilerBundle.value.requestIdentity?.campaignId!==source.campaignId||
+       compilerBundle.value.requestIdentity?.campaignGenerationId!==source.campaignGenerationId||
+       compilerBundle.value.source?.archiveSha256!==source.sourceArchiveSha256)
+      throw new Error('GRAPH_BUILD_BUNDLE_CAMPAIGN_SOURCE_MISMATCH');
+    checkIdentity(staticFacts.value,'SLITHER_RELATIONAL','buildBundleSha256',buildRef.sha256);
+    checkIdentity(contractIdentityIndex.value,'CONTRACT_IDENTITIES','buildArtifactBundleSha256',buildRef.sha256);
+  }
+  checkIdentity(runtimeIdentityIndex.value,'RUNTIME_IDENTITIES');
+  checkIdentity(methods.value,'METHOD_CENSUS');
   const mkid=(prefix,...ids)=>prefix+sha256(Buffer.from(JSON.stringify([source,...ids]),'utf8')).slice(0,40);
   const nodes=[],edges=[],unknowns=[],candidates=[],slitherJoins=[];
   const seenNode=new Set();
@@ -182,6 +205,8 @@ async function buildForkRelationshipGraphV1(){
     status:'UNRESOLVED',needsSourceInspection:true});
   const scenario=deploy.value?.deploymentTraceIndex?.scenarioId??null;
   const byRuntime=new Map();
+  const compilerByIdentity=new Map((compilerBundle.value?.artifacts??[]).map(a=>[[a.compilationUnitId,a.sourceName,a.contractName].join('::'),a]));
+  const compilerUnitSourceHashes=new Map((contractIdentityIndex.value?.sourceFiles??[]).map(row=>[row.compilationUnitId+'::'+row.sourcePath,row.sourceContentSha256]));
   const matched=(deploy.value?.deployedContracts??[]).filter(x=>/^0x[0-9a-f]{40}$/i.test(String(x?.address??'')));
   for(const item of matched){
     const address=item.address.toLowerCase();
@@ -198,6 +223,8 @@ async function buildForkRelationshipGraphV1(){
   }
   const indexRef=deploy.value?.deploymentTraceIndex?.manifestRef;
   const rawIndex=indexRef?await optional(indexRef,'TRACE_INDEX'):{value:null,ref:null};
+  if(rawIndex.value&&rawIndex.ref?.sha256!==deploy.value?.deploymentTraceIndex?.manifestSha256)
+    throw new Error('GRAPH_TRANSACTION_TRACE_INDEX_SHA_MISMATCH');
   if(rawIndex.limitation)limitations.push(rawIndex.limitation);
   const actualTrace=rawIndex.value;
   if(actualTrace){
@@ -437,7 +464,8 @@ async function buildForkRelationshipGraphV1(){
   const graph={schemaVersion:'mi-phase0-intercontract-relationship-graph-index-v1',
     graphStatus:limitations.length||unknowns.length?'INCOMPLETE_WITH_TYPED_UNKNOWNS':'SOURCE_BOUND_PARTIAL_COVERAGE',
     controllerAcceptance:false,...source,pinnedSource:pinned,
-    sourceRefs:[deploy.ref,rawIndex.ref,staticFacts.ref,methods.ref,sourceIntelligence.ref].filter(Boolean),
+    sourceRefs:[deploy.ref,rawIndex.ref,compilerBundle.ref,contractIdentityIndex.ref,
+      runtimeIdentityIndex.ref,staticFacts.ref,methods.ref,sourceIntelligence.ref].filter(Boolean),
     counts:{nodes:nodes.length,edges:edges.length,unknowns:unknowns.length,
       observedRuntimeEdges:edges.filter(x=>x.observation==='OBSERVED_LOCAL_FORK').length,
       staticRelationships:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length},
