@@ -496,6 +496,134 @@ async function buildForkRelationshipGraphV1(){
       }
     }
   }else addUnknown('TRACE_INDEX_UNAVAILABLE',deploy.ref?.path??null,{scenarioId:scenario});
+  // Compiler AST/ABI/layout facts survive individual analyzer-unit failures.
+  // This is a distinct provenance class: not Slither inference or fork state.
+  const sourceFileByUnit=new Map();
+  const contractByIdentity=new Map();
+  const contractNodeByUnitQualified=new Map();
+  for(const file of contractIdentityIndex.value?.sourceFiles??[]){
+    const key=file.compilationUnitId+'::'+file.sourcePath;
+    if(sourceFileByUnit.has(key)){
+      addUnknown('DUPLICATE_COMPILER_SOURCE_FILE_RECORD',contractIdentityIndex.ref?.path??null,{key});
+      continue;
+    }
+    sourceFileByUnit.set(key,file);
+    addNode({nodeId:mkid('NODE-SOURCE-FILE-',file.compilationUnitId,file.sourcePath,file.sourceContentSha256),
+      kind:'COMPILER_SOURCE_FILE',compilationUnitId:file.compilationUnitId,
+      sourcePath:file.sourcePath,sourceContentSha256:file.sourceContentSha256,
+      compilerAstStatus:file.astAvailability,compilerAstNodeId:file.astNodeId,
+      evidenceRefs:contractIdentityIndex.ref?[contractIdentityIndex.ref]:[]});
+  }
+  for(const contract of contractIdentityIndex.value?.contractIdentities??[]){
+    const key=[contract.compilationUnitId,contract.sourceName,contract.contractName].join('::');
+    if(contractByIdentity.has(contract.contractIdentityId)||contractNodeByUnitQualified.has(key)){
+      addUnknown('DUPLICATE_EXACT_COMPILER_CONTRACT_IDENTITY',
+        contractIdentityIndex.ref?.path??null,{key});continue;
+    }
+    contractByIdentity.set(contract.contractIdentityId,contract);
+    const nodeId=mkid('NODE-COMPILED-CONTRACT-',contract.contractIdentityId);
+    contractNodeByUnitQualified.set(key,nodeId);
+    addNode({nodeId,kind:'COMPILER_CONTRACT_DECLARATION',
+      contractIdentityId:contract.contractIdentityId,
+      compilationUnitId:contract.compilationUnitId,
+      sourceName:contract.sourceName,contractName:contract.contractName,
+      sourceContentSha256:contract.sourceContentSha256,
+      sourceKind:contract.sourceKind,deployabilityClass:contract.deployabilityClass,
+      deployedRuntimeDigestSha256:contract.deployedRuntimeDigestSha256,
+      bindingStatus:'COMPILER_ARTIFACT_SOURCE_FACT_NOT_DEPLOYMENT',
+      evidenceRefs:contractIdentityIndex.ref?[contractIdentityIndex.ref]:[]});
+    const sourceFile=sourceFileByUnit.get(contract.compilationUnitId+'::'+contract.sourceName);
+    if(sourceFile&&sourceFile.sourceContentSha256===contract.sourceContentSha256){
+      edges.push({edgeId:mkid('EDGE-CONTRACT-DECLARED-IN-',contract.contractIdentityId),
+        kind:'COMPILER_CONTRACT_DECLARED_IN_SOURCE',from:nodeId,
+        to:mkid('NODE-SOURCE-FILE-',sourceFile.compilationUnitId,sourceFile.sourcePath,sourceFile.sourceContentSha256),
+        observation:'COMPILER_AST_SOURCE_STATIC',evidenceRefs:[contractIdentityIndex.ref]});
+    }else{
+      addUnknown('CONTRACT_DECLARATION_SOURCE_BYTES_UNBOUND',
+        contractIdentityIndex.ref?.path??null,{contractIdentityId:contract.contractIdentityId});
+    }
+    for(const [ordinal,entry] of (contract.abiDeclarations??[]).entries()){
+      const entryNodeId=mkid('NODE-COMPILER-ABI-',contract.contractIdentityId,ordinal,
+        entry.canonicalSignature,entry.declarationType);
+      addNode({nodeId:entryNodeId,kind:'COMPILER_ABI_DECLARATION',
+        compilationUnitId:contract.compilationUnitId,sourceName:contract.sourceName,
+        contractName:contract.contractName,contractIdentityId:contract.contractIdentityId,
+        canonicalSignature:entry.canonicalSignature,selector:entry.selector??null,
+        abiType:entry.declarationType,stateMutability:entry.stateMutability??null,
+        evidenceRefs:contractIdentityIndex.ref?[contractIdentityIndex.ref]:[]});
+      edges.push({edgeId:mkid('EDGE-CONTRACT-ABI-',contract.contractIdentityId,ordinal),
+        kind:'COMPILER_ABI_DECLARED_BY_CONTRACT',from:nodeId,to:entryNodeId,
+        observation:'COMPILER_ABI_SOURCE_STATIC',
+        evidenceRefs:contractIdentityIndex.ref?[contractIdentityIndex.ref]:[]});
+    }
+    for(const [ordinal,item] of (contract.storageLayout?.storage??[]).entries()){
+      const storageId=mkid('NODE-COMPILER-LAYOUT-',contract.contractIdentityId,ordinal,
+        item.slot,item.offset,item.label);
+      addNode({nodeId:storageId,kind:'COMPILER_STORAGE_LAYOUT_ENTRY',
+        contractIdentityId:contract.contractIdentityId,
+        compilationUnitId:contract.compilationUnitId,sourceName:contract.sourceName,
+        contractName:contract.contractName,variableName:item.label,
+        slot:String(item.slot),offset:Number(item.offset),typeId:item.type,
+        astId:item.astId??null,sourceContractName:item.contract??null,
+        layoutType:contract.storageLayout?.types?.[item.type]??null,
+        evidenceRefs:contractIdentityIndex.ref?[contractIdentityIndex.ref]:[]});
+      edges.push({edgeId:mkid('EDGE-CONTRACT-STORAGE-LAYOUT-',contract.contractIdentityId,ordinal),
+        kind:'COMPILER_STORAGE_LAYOUT_MEMBER',from:nodeId,to:storageId,
+        observation:'COMPILER_STORAGE_LAYOUT_STATIC',
+        evidenceRefs:contractIdentityIndex.ref?[contractIdentityIndex.ref]:[]});
+    }
+  }
+  for(const edge of contractIdentityIndex.value?.inheritanceEdges??[]){
+    const sourceKey=[edge.fromCompilationUnitId,edge.fromSourceName,edge.fromContractName].join('::');
+    const targetKey=[edge.parentCompilationUnitId,edge.parentSourceName,edge.parentContractName].join('::');
+    const from=contractNodeByUnitQualified.get(sourceKey),to=contractNodeByUnitQualified.get(targetKey);
+    if(!from||!to){
+      addUnknown('INHERITANCE_REFERENCE_NOT_EXACTLY_RESOLVED',contractIdentityIndex.ref?.path??null,
+        {sourceKey,targetKey,parentAstId:edge.parentAstId});continue;
+    }
+    edges.push({edgeId:mkid('EDGE-COMPILER-INHERITANCE-',from,to,edge.baseOrdinal),
+      kind:'COMPILER_AST_INHERITS_FROM',from,to,
+      baseOrdinal:edge.baseOrdinal,parentAstId:edge.parentAstId,
+      observation:'COMPILER_AST_SOURCE_STATIC',
+      evidenceRefs:contractIdentityIndex.ref?[contractIdentityIndex.ref]:[]});
+  }
+  for(const link of contractIdentityIndex.value?.libraryLinkEdges??[]){
+    const from=mkid('NODE-COMPILED-CONTRACT-',link.requestingContractIdentityId);
+    const matches=(contractIdentityIndex.value?.contractIdentities??[]).filter(contract=>
+      contract.compilationUnitId===link.compilationUnitId&&
+      contract.sourceName===link.linkedLibrarySourceName&&
+      contract.contractName===link.linkedLibraryName);
+    const to=matches.length===1?
+      mkid('NODE-COMPILED-CONTRACT-',matches[0].contractIdentityId):null;
+    edges.push({edgeId:mkid('EDGE-LIBRARY-LINK-',from,link.linkedLibrarySourceName,link.linkedLibraryName),
+      kind:'COMPILER_LIBRARY_BYTECODE_LINK_REFERENCE',from,to,
+      libraryName:link.linkedLibraryName,librarySourceName:link.linkedLibrarySourceName,
+      compiledBytecodeOffsets:link.creationBytecodeOffsets,
+      bindingStatus:to?'EXACT_COMPILER_UNIT':'DYNAMIC_LINK_TARGET_UNRESOLVED',
+      observation:'COMPILER_LINK_REFERENCE_NOT_EXECUTED_CALL',
+      evidenceRefs:contractIdentityIndex.ref?[contractIdentityIndex.ref]:[]});
+    if(!to)addUnknown('LIBRARY_LINK_REFERENCE_TARGET_UNRESOLVED',
+      contractIdentityIndex.ref?.path??null,
+      {requestingContractIdentityId:link.requestingContractIdentityId,
+        libraryName:link.linkedLibraryName,sourceName:link.linkedLibrarySourceName});
+  }
+  for(const symbol of contractIdentityIndex.value?.sourceSymbols??[]){
+    const contractKey=[symbol.compilationUnitId,symbol.sourceName,symbol.contractName].join('::');
+    const from=contractNodeByUnitQualified.get(contractKey);
+    if(!from)continue;
+    const symbolId=mkid('NODE-COMPILER-SYMBOL-',contractKey,symbol.compilerAstId,
+      symbol.symbolType,symbol.sourceSpan);
+    addNode({nodeId:symbolId,kind:'COMPILER_AST_SYMBOL',
+      compilationUnitId:symbol.compilationUnitId,sourceName:symbol.sourceName,
+      contractName:symbol.contractName,symbolKind:symbol.symbolType,
+      symbolName:symbol.symbolName??null,compilerAstId:symbol.compilerAstId,
+      sourceSpan:symbol.sourceSpan,
+      evidenceRefs:contractIdentityIndex.ref?[contractIdentityIndex.ref]:[]});
+    edges.push({edgeId:mkid('EDGE-CONTRACT-AST-SYMBOL-',from,symbolId),
+      kind:'COMPILER_AST_CONTAINS_SYMBOL',from,to:symbolId,
+      observation:'COMPILER_AST_SOURCE_STATIC',
+      evidenceRefs:contractIdentityIndex.ref?[contractIdentityIndex.ref]:[]});
+  }
   const units=staticFacts.value?.sourceUnitRecords??[];
   for(const unit of units){
     for(const contract of unit.contracts??[]){
