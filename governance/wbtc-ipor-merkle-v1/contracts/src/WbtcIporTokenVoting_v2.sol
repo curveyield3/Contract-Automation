@@ -594,6 +594,184 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
             && frozenWeight[_proposalId][_account] != 0 && !merkleSnapshot[_proposalId];
     }
 
+    // Source-weight calculations are adapted from the original 1Hive /
+    // AragonOne VotingAggregator._aggregateAt; the source is the existing
+    // WBTC IPOR vault-share token, not another ERC-20 governance token.
+    function getMarketCount() external view returns (uint256) { return trackedMarkets.length; }
+    function getMarket(uint256 index) external view returns (Market memory) { return trackedMarkets[index]; }
+    function getVoterCount() external view returns (uint256) { return knownVoters.length; }
+    function getVoter(uint256 index) external view returns (address) { return knownVoters[index]; }
+
+    /// @notice Add a genuinely source-matching market through an Aragon
+    /// standard proposal. All such positions receive exactly 50% weight.
+    function addVotingMarket(MarketType kind, address market, bytes32 marketId)
+        external onlyDaoExecution
+    {
+        if (trackedMarkets.length >= 20 || market.code.length == 0)
+            revert InvalidGovernanceAction();
+        address custody;
+        if (kind == MarketType.MorphoBlue) {
+            if (market != address(morphoBlue) || marketId == bytes32(0))
+                revert InvalidGovernanceAction();
+            (address loanToken, address collateralToken,,,) = morphoBlue.idToMarketParams(marketId);
+            if (loanToken == address(0) || collateralToken != address(votingToken))
+                revert InvalidGovernanceAction();
+            custody = market;
+        } else if (kind == MarketType.CurveLend) {
+            if (marketId != bytes32(0)) revert InvalidGovernanceAction();
+            ICurveLendController c = ICurveLendController(market);
+            if (c.collateral_token() != address(votingToken)) revert InvalidGovernanceAction();
+            custody = c.amm();
+            if (custody.code.length == 0 || ICurveLendAMM(custody).coins(1) != address(votingToken))
+                revert InvalidGovernanceAction();
+        } else revert InvalidGovernanceAction();
+        bytes32 key = keccak256(abi.encode(kind, market, marketId));
+        if (marketRegistered[key]) revert InvalidGovernanceAction();
+        marketRegistered[key] = true;
+        trackedMarkets.push(Market(kind, market, custody, marketId, true));
+        ++sourceConfigVersion;
+        emit MarketChanged(trackedMarkets.length - 1, kind, market, true);
+    }
+
+    function setMarketEnabled(uint256 index, bool enable) external onlyDaoExecution {
+        Market storage m = trackedMarkets[index];
+        if (m.enabled == enable) revert InvalidGovernanceAction();
+        m.enabled = enable;
+        ++sourceConfigVersion;
+        emit MarketChanged(index, m.marketType, m.market, enable);
+    }
+
+    /// @notice The DAO controls calendar-month inactivity and qualification,
+    /// never retroactively changing a frozen proposal's voting weights.
+    function configureVoterActivity(uint8 monthsInactive, uint8 minimumMisses, uint8 monthsQualification)
+        external onlyDaoExecution
+    {
+        if (monthsInactive == 0 || monthsInactive > 24 || minimumMisses == 0
+            || minimumMisses > 100 || monthsQualification == 0 || monthsQualification > 24)
+            revert InvalidGovernanceAction();
+        inactivityMonths = monthsInactive;
+        minimumMissedProposals = minimumMisses;
+        guardianQualificationMonths = monthsQualification;
+        ++sourceConfigVersion;
+    }
+
+    function _isCustody(address owner) internal view returns (bool) {
+        if (owner == address(morphoBlue)) return true;
+        for (uint256 i; i < trackedMarkets.length;) {
+            if (trackedMarkets[i].custody == owner) return true;
+            unchecked { ++i; }
+        }
+        return false;
+    }
+
+    function _rawSources(address voter) internal view returns (uint256 walletShares, uint256 marketShares) {
+        if (!_isCustody(voter)) walletShares = IERC20Upgradeable(address(votingToken)).balanceOf(voter);
+        for (uint256 i; i < trackedMarkets.length;) {
+            Market storage m = trackedMarkets[i];
+            if (m.enabled) {
+                if (m.marketType == MarketType.MorphoBlue) {
+                    (,,uint128 collateral) = morphoBlue.position(m.marketId, voter);
+                    marketShares += uint256(collateral);
+                } else if (m.marketType == MarketType.CurveLend) {
+                    uint256[2] memory xy = ICurveLendAMM(m.custody).get_sum_xy(voter);
+                    marketShares += xy[1]; // actual LLAMMA collateral after soft liquidation
+                } else revert InvalidGovernanceAction();
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    function _rawVotingPower(address voter) internal view returns (uint256) {
+        (uint256 direct, uint256 inMarkets) = _rawSources(voter);
+        return direct + inMarkets / 2;
+    }
+
+    function isActiveVoter(address voter) public view returns (bool) { return _active(voter); }
+
+    function _active(address voter) internal view returns (bool) {
+        Voter storage v = voterState[voter];
+        if (!v.registered) return false;
+        (uint256 missed, uint256 firstMiss) = _misses(voter);
+        return missed < minimumMissedProposals || firstMiss == 0
+            || block.timestamp < BokkyPooBahsDateTimeLibrary.addMonths(firstMiss, inactivityMonths);
+    }
+
+    function _misses(address voter) internal view returns (uint256 missed, uint256 firstMiss) {
+        uint64 lastParticipation = voterState[voter].lastParticipationAt;
+        for (uint256 i; i < allProposals.length;) {
+            uint256 id = allProposals[i];
+            Tracked storage p = tracked[id];
+            if (p.exists && !p.canceled && p.end <= block.timestamp
+                && p.end > lastParticipation && frozenWeight[id][voter] != 0
+                && !cast[id][voter]) {
+                ++missed;
+                if (firstMiss == 0 || p.end < firstMiss) firstMiss = p.end;
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    function _activate(address voter) internal {
+        if (voter == address(0) || _isCustody(voter)) revert InvalidGovernanceProposal();
+        Voter storage v = voterState[voter];
+        if (!v.registered) {
+            v.registered = true;
+            knownVoters.push(voter);
+        }
+        if (!_active(voter)) {
+            v.activeSince = uint64(block.timestamp);
+            v.lastParticipationAt = uint64(block.timestamp);
+        }
+        emit VoterActivated(voter, v.activeSince);
+    }
+
+    function _recordVote(uint256 id, address voter) internal {
+        if (cast[id][voter]) revert InvalidGovernanceProposal();
+        bool previouslyActive = _active(voter);
+        cast[id][voter] = true;
+        Voter storage v = voterState[voter];
+        if (v.registered) {
+            if (!previouslyActive) v.activeSince = uint64(block.timestamp);
+            v.lastParticipationAt = uint64(block.timestamp);
+        }
+    }
+
+    function _registerTracked(uint256 id, uint64 end) internal {
+        if (tracked[id].exists || end <= block.timestamp) revert InvalidGovernanceProposal();
+        tracked[id] = Tracked(end, false, true);
+        allProposals.push(id);
+    }
+
+    /// @notice Single transaction: all eligible voters and every configured
+    /// market are measured before storing any frozen voting allocation.
+    /// Scaling by 85 and 15 makes Guardian bonus exactly 15% without rounding.
+    function _freezeAtomic(uint256 id, address creator, bool removed)
+        internal returns (uint256 eligible, uint256 denominator, uint256 creatorPower)
+    {
+        if (censusFrozen[id]) revert InvalidGovernanceProposal();
+        uint256 community;
+        for (uint256 i; i < knownVoters.length;) {
+            address voter = knownVoters[i];
+            if (_active(voter) && (voter != guardianSafe || removed)) {
+                uint256 base = _rawVotingPower(voter);
+                if (base != 0) {
+                    frozenWeight[id][voter] = removed ? base : 85 * base;
+                    community += base;
+                }
+            }
+            unchecked { ++i; }
+        }
+        if (community == 0) revert NoVotingPower();
+        if (removed) eligible = community;
+        else {
+            frozenWeight[id][guardianSafe] = 15 * community;
+            eligible = 100 * community;
+        }
+        denominator = eligible;
+        creatorPower = frozenWeight[id][creator];
+        censusFrozen[id] = true;
+    }
+
     /// @dev Helper function to identify the clock mode used by the given voting token.
     function _detectTokenClock() private {
         bool clockModeTimestamp;
