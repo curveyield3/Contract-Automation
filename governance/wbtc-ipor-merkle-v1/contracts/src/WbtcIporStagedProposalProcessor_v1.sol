@@ -336,7 +336,7 @@ contract WbtcIporStagedProposalProcessor is
     /// @dev This method is required to support [ERC-1822](https://eips.ethereum.org/EIPS/eip-1822).
     /// @param _dao The IDAO interface of the associated DAO.
     /// @param _trustedForwarder The trusted forwarder responsible for extracting the original sender.
-    /// @param _stages The stages configuration.
+    /// @param requested The stages configuration.
     /// @param _pluginMetadata The utf8 bytes of a content addressing cid that stores plugin's information.
     /// @param _targetConfig The target to which this contract will pass actions with an operation type.
     function initialize(
