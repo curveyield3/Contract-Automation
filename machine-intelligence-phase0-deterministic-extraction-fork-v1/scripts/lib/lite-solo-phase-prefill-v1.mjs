@@ -1211,7 +1211,46 @@ export function applyForkDeterministicEvidencePrefillV1({root,campaignPath,autho
     'evidence','source-intelligence','SOURCE_INTELLIGENCE_AUTOMATED_v1.json'))??{};
   const si=originalSourceIntelligence.sourceIntelligence??originalSourceIntelligence;
   const interfaces=Array.isArray(si.externalInterfaces)?si.externalInterfaces:[];
-  const graphRows=Array.isArray(graph.edges)?graph.edges:[];
+  const loadBoundGraphCollectionV1=collection=>{
+    const catalog=graph.pageCatalog?.[collection];
+    if(!catalog)return Array.isArray(graph[collection])?graph[collection]:[];
+    if(catalog.complete!==true||catalog.collection!==collection||
+       !Array.isArray(catalog.pages))
+      throw new Error('FORK_GRAPH_PAGE_CATALOG_INCOMPLETE: '+collection);
+    const records=[];
+    for(const [ordinal,entry] of catalog.pages.entries()){
+      const rel=String(entry?.path??'');
+      if(!rel.startsWith('evidence/phase0/graph-pages/')||
+         !/^[a-f0-9]{64}$/.test(String(entry?.sha256??''))||
+         entry.pageOrdinal!==ordinal||entry.firstRecordOrdinal!==records.length)
+        throw new Error('FORK_GRAPH_PAGE_CATALOG_ENTRY_INVALID: '+collection);
+      const target=path.resolve(prefillContext.forkRunRoot,...rel.split('/'));
+      if(!target.startsWith(path.resolve(prefillContext.forkRunRoot)+path.sep)||
+         !fs.statSync(target).isFile()||fs.lstatSync(target).isSymbolicLink())
+        throw new Error('FORK_GRAPH_PAGE_PATH_NOT_IMMUTABLE_REGULAR_FILE');
+      const pageBytes=fs.readFileSync(target);
+      const digest=createHash('sha256').update(pageBytes).digest('hex');
+      if(digest!==entry.sha256)throw new Error('FORK_GRAPH_PAGE_BYTE_SHA_MISMATCH');
+      const page=JSON.parse(pageBytes.toString('utf8'));
+      if(page.schemaVersion!=='mi-phase0-evidence-page-v1'||
+         page.collection!==collection||page.pageOrdinal!==ordinal||
+         page.campaignId!==graph.campaignId||
+         page.campaignGenerationId!==graph.campaignGenerationId||
+         page.sourceArchiveSha256!==graph.sourceArchiveSha256||
+         page.firstRecordOrdinal!==records.length||
+         page.recordCount!==entry.recordCount||
+         page.records?.length!==entry.recordCount)
+        throw new Error('FORK_GRAPH_PAGE_SOURCE_IDENTITY_OR_CENSUS_INVALID');
+      for(const [index,row] of page.records.entries())
+        records.push({...row,graphPageEvidenceRef:{path:entry.path,sha256:entry.sha256},
+          graphPageRecordIndex:index});
+    }
+    if(records.length!==catalog.totalRecords||catalog.pageCount!==catalog.pages.length)
+      throw new Error('FORK_GRAPH_PAGE_TOTAL_CENSUS_MISMATCH: '+collection);
+    return records;
+  };
+  const graphRows=loadBoundGraphCollectionV1('edges');
+  const graphUnknowns=loadBoundGraphCollectionV1('unknowns');
   const mk=field=>({...field,trustAssumptions:'<REQUIRED>',failureModes:'<REQUIRED>',
     authorityImplications:'<REQUIRED>',securitySignificance:'<REQUIRED>',laterEvidenceNeeds:'<REQUIRED>'});
   const copy=structuredClone(form);
@@ -1227,7 +1266,7 @@ export function applyForkDeterministicEvidencePrefillV1({root,campaignPath,autho
       return mk(base);
     });
     const originalKeys=new Set(rows.map(row=>row.dependencyKey));
-    for(const item of graph.unknowns??[]){
+    for(const item of graphUnknowns){
       const key='FORK_GRAPH_UNKNOWN:'+item.unknownId;
       if(originalKeys.has(key))continue;
       rows.push(mk({dependencyKey:key,identity:item.kind+' / '+(item.details?.address??'UNRESOLVED'),
@@ -1248,14 +1287,16 @@ export function applyForkDeterministicEvidencePrefillV1({root,campaignPath,autho
     }
     for(const edge of graphRows.filter(row=>row.observation==='OBSERVED_LOCAL_FORK')){
       rows.push({componentOrAction:'GRAPH_EDGE:'+edge.edgeId,
-        executionEvidenceRef:graphRef.path+'#edges/'+graphRows.indexOf(edge),
+        executionEvidenceRef:edge.graphPageEvidenceRef?
+          edge.graphPageEvidenceRef.path+'#records/'+edge.graphPageRecordIndex:
+          graphRef.path+'#edges/'+graphRows.indexOf(edge),
         observedState:edge.kind+'; scenario='+String(edge.scenarioId??'UNRESOLVED')+
           '; source-bound runtime observation (not a security conclusion)',
         securityInterpretation:'<REQUIRED>',contradictionOrNone:'<REQUIRED>',
         limitationOrNone:'<REQUIRED>',
         automationOwnedFields:['componentOrAction','executionEvidenceRef','observedState']});
     }
-    for(const unknown of graph.unknowns??[]){
+    for(const unknown of graphUnknowns){
       rows.push({componentOrAction:'GRAPH_UNKNOWN:'+unknown.unknownId,
         executionEvidenceRef:graphRef.path,observedState:'UNRESOLVED '+unknown.kind,
         securityInterpretation:'<REQUIRED>',contradictionOrNone:'<REQUIRED>',
