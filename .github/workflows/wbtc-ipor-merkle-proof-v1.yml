@@ -1,11 +1,6 @@
 name: WBTC IPOR governance Merkle preparation and Ethereum fork rehearsal v2
 
 on:
-  push:
-    branches:
-      - feature/wbtc-ipor-aragon-governance-v1
-    paths:
-      - governance/wbtc-ipor-merkle-v1/.package-request-v1.json
   workflow_dispatch:
     inputs:
       mode:
@@ -35,7 +30,7 @@ concurrency:
 
 jobs:
   prepare:
-    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'prepare' || inputs.mode == '')
+    if: inputs.mode == 'prepare' || inputs.mode == ''
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
@@ -83,7 +78,7 @@ jobs:
           retention-days: 30
 
   fork-rehearsal:
-    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full')
+    if: inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -110,43 +105,3 @@ jobs:
           path: governance/wbtc-ipor-merkle-v1/fork-output/
           if-no-files-found: warn
           retention-days: 14
-
-  source-package:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: 9de7ee8b1deee6f5eccedf6644e12db9d00065c7
-          persist-credentials: false
-      - name: Produce source-bound WBTC IPOR DAO ZIP
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "9de7ee8b1deee6f5eccedf6644e12db9d00065c7"
-          mkdir -p "$RUNNER_TEMP/wbtc-ipor-snapshot"
-          git archive HEAD governance/wbtc-ipor-merkle-v1/ .github/workflows/wbtc-ipor-merkle-proof-v1.yml | tar -xf - -C "$RUNNER_TEMP/wbtc-ipor-snapshot"
-          cat > "$RUNNER_TEMP/wbtc-ipor-snapshot/PACKAGE_MANIFEST_v1.md" <<'MANIFEST'
-          # WBTC IPOR Aragon DAO development snapshot — v1
-
-          **Source repository:** curveyield3/Contract-Automation
-          **Branch:** feature/wbtc-ipor-aragon-governance-v1
-          **Immutable source commit:** 9de7ee8b1deee6f5eccedf6644e12db9d00065c7
-          **Contents:** all governance/wbtc-ipor-merkle-v1 files and the existing Merkle/fork workflow.
-          **State:** draft source; uncompiled, unaudited, unfork-tested. Not deployable.
-          **Known incomplete:** source-wide Guardian removal voting-power census, fully authenticated RISC Zero validity proof, deployable setup/permissions, reviewed market whitelist, and complete fork rehearsal.
-          **Source licenses:** Aragon AGPL, legacy AragonOne VotingAggregator GPL/AGPL, calendar library MIT. IPOR plugin external BUSL dependency is referenced but not copied.
-          MANIFEST
-          (
-            cd "$RUNNER_TEMP/wbtc-ipor-snapshot"
-            zip -qr "$GITHUB_WORKSPACE/WBTC_IPOR_Aragon_DAO_Development_v1.zip" .
-          )
-          sha256sum "WBTC_IPOR_Aragon_DAO_Development_v1.zip"
-          unzip -Z1 "WBTC_IPOR_Aragon_DAO_Development_v1.zip"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wbtc-ipor-dao-source-package-v1
-          path: WBTC_IPOR_Aragon_DAO_Development_v1.zip
-          if-no-files-found: error
-          retention-days: 7
