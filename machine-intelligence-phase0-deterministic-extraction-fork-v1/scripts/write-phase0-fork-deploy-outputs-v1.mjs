@@ -216,9 +216,8 @@ async function buildForkRelationshipGraphV1(){
     else addUnknown('UNRESOLVED_RUNTIME_SOURCE_IDENTITY',deploy.ref?.path??null,
       {address,declaredSourceBinding:item.sourceBinding??null});
     addNode({nodeId:mkid('NODE-RUNTIME-',scenario,address),kind:'RUNTIME_ADDRESS',
-      scenarioId:scenario,address,sourceIdentity:identityVerified?{
-        compilationUnitId:item.compilationUnitId,sourceName:item.sourceName,contractName:item.contractName}:null,
-      bindingStatus:identityVerified?'EXACT_RUNTIME_AND_COMPILATION_MATCH':'UNRESOLVED',
+      scenarioId:scenario,address,sourceIdentity:null,
+      bindingStatus:'ADDRESS_ONLY_USE_TRANSACTION_CODE_OBSERVATIONS',
       evidenceRefs:deploy.ref?[deploy.ref]:[]});
   }
   const indexRef=deploy.value?.deploymentTraceIndex?.manifestRef;
@@ -463,8 +462,8 @@ async function buildForkRelationshipGraphV1(){
         for(const address of [from,to]){
           if(!address||!/^0x[0-9a-f]{40}$/.test(address))continue;
           addNode({nodeId:mkid('NODE-RUNTIME-',scenario,address),kind:'RUNTIME_ADDRESS',
-            scenarioId:scenario,address,sourceIdentity:byRuntime.get(address)??null,
-            bindingStatus:byRuntime.has(address)?'EXACT_RUNTIME_AND_COMPILATION_MATCH':'UNRESOLVED',
+            scenarioId:scenario,address,sourceIdentity:null,
+            bindingStatus:'ADDRESS_ONLY_USE_TRANSACTION_CODE_OBSERVATIONS',
             evidenceRefs:[pathToTrace]});
         }
         if(from&&to){
@@ -493,10 +492,10 @@ async function buildForkRelationshipGraphV1(){
               chainId:pinned.chainId,pinnedForkBlockHash:pinned.pinnedForkBlockHash,
               sourceArchiveSha256:source.sourceArchiveSha256,
               evidenceStatus:'OBSERVED',securityVerdict:null,
-              decidingEvidenceNeeded:byRuntime.has(to)?[]:['EXACT_TARGET_SOURCE_IDENTITY'],
+              decidingEvidenceNeeded:frameBinding?.sourceBinding==='EXACT_SOURCE_AND_RUNTIME_MATCH'?[]:['EXACT_TARGET_SOURCE_IDENTITY'],
               status:'POSSIBLE_INVESTIGATION_NOT_CONFIRMED',evidenceRefs:[pathToTrace]});
           }
-          if(!byRuntime.has(to))addUnknown('CALL_TARGET_SOURCE_UNBOUND',pathToTrace.path,
+          if(frameBinding?.sourceBinding!=='EXACT_SOURCE_AND_RUNTIME_MATCH')addUnknown('CALL_TARGET_SOURCE_UNBOUND',pathToTrace.path,
             {frameId:frame.frameId,address:to,selector:frame.inputSelector});
         }
       }
