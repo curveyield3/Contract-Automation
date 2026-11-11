@@ -198,7 +198,7 @@ jobs:
           test -s "$manifest"
           jq -e '.schemaVersion=="mi-phase0-fork-only-writer-v1" and
             .status=="FORK_ONLY_NOT_CONTROLLER_ACCEPTED" and
-            .files|type=="array"' "$manifest" >/dev/null
+            (.files|type)=="array"' "$manifest" >/dev/null
           verified=0
           while IFS=
 \t' read -r rel expected; do
