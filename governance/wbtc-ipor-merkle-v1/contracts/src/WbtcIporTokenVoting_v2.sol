@@ -24,6 +24,7 @@ interface IWbtcIporZkProofVerifier {
     function guestImageId() external view returns (bytes32);
     function verifySnapshot(bytes calldata seal, bytes calldata journal) external view returns (bool);
 }
+interface IVaultVoteNonces { function nonces(address owner) external view returns (uint256); }
 interface IMorphoBlueMarket {
     function position(bytes32 id, address user)
         external view returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral);
@@ -139,6 +140,8 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     mapping(uint256 => bytes32) public sourceConfigHashAt;
     mapping(uint256 => bool) public censusFrozen;
     uint256 public sourceConfigVersion;
+    bool public merkleHistoryPresent;
+    mapping(uint256 => bool) public guardianBonusOnSnapshot;
 
     mapping(uint256 => ProposalKind) public proposalKind;
     mapping(uint256 => bool) public guardianVetoed;
@@ -261,7 +264,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function totalVotingPower(uint256 _timePoint) public view override returns (uint256) {
         // Preview is informational. Proposal quorum uses freezeAtomic's
         // immutable, kind-specific denominator instead of token total supply.
-        if (_timePoint != block.number) revert InvalidGovernanceProposal();
+        if (_timePoint != block.number || merkleHistoryPresent) revert IncompleteEconomicCensus();
         uint256 activeShares;
         for (uint256 i; i < knownVoters.length;) {
             address v = knownVoters[i];
@@ -364,6 +367,9 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         if (!zkSnapshotPending[id] || block.timestamp >= proofDeadline[id]
             || address(proofVerifier) == address(0)) revert ProofNotReady();
         SnapshotJournal memory v = abi.decode(journal, (SnapshotJournal));
+        if ((proposalKind[id] == ProposalKind.Standard && v.eligibleTotal != v.quorumDenominator)
+            || (proposalKind[id] == ProposalKind.RemoveDaoGuardian && v.eligibleTotal > v.quorumDenominator))
+            revert InvalidGovernanceProposal();
         if (v.chainId != block.chainid || v.dao != address(dao()) || v.plugin != address(this)
             || v.proposalId != id || v.anchorBlock != proposals[id].parameters.snapshotTimepoint
             || v.anchorHash != snapshotBlockHash[id] || v.sourceConfigHash != sourceConfigHashAt[id]
@@ -377,6 +383,9 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         if (!proofVerifier.verifySnapshot(seal, journal)) revert InvalidGovernanceProposal();
         zkSnapshotPending[id] = false;
         merkleSnapshot[id] = true;
+        merkleHistoryPresent = true;
+        guardianBonusOnSnapshot[id] = proposalKind[id] == ProposalKind.Standard
+            && proposalReviewDuration[id] != 0;
         merkleRoot[id] = v.votingRoot;
         censusFrozen[id] = true;
         frozenEligiblePower[id] = v.eligibleTotal;
@@ -403,8 +412,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         Proposal storage p = proposals[id];
         if (!merkleSnapshot[id] || zkSnapshotPending[id] || guardianVetoed[id]
             || !_isProposalOpen(p) || choice == VoteOption.None || cast[id][voter] || weight == 0
-            || (guardianRemoved && voter == guardianSafe && proposalKind[id] == ProposalKind.Standard
-                && !voterState[voter].registered))
+            || (guardianRemoved && guardianBonusOnSnapshot[id] && voter == guardianSafe))
             revert VoteCastForbidden(id, voter, choice);
         bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(id, voter, weight))));
         if (!MerkleProof.verify(proof, merkleRoot[id], leaf)) revert InvalidGovernanceProposal();
@@ -527,8 +535,11 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         uint256 nonce, uint256 expiry, uint8 v, bytes32 r, bytes32 s
     ) external singleGovernanceEntry {
         address voter = _msgSender();
+        uint256 beforeNonce = IVaultVoteNonces(address(votingToken)).nonces(voter);
+        if (nonce != beforeNonce) revert InvalidGovernanceProposal();
         votingToken.delegateBySig(voter, nonce, expiry, v, r, s);
-        if (votingToken.delegates(voter) != voter) revert InvalidGovernanceProposal();
+        if (IVaultVoteNonces(address(votingToken)).nonces(voter) != beforeNonce + 1
+            || votingToken.delegates(voter) != voter) revert InvalidGovernanceProposal();
         _activate(voter);
     }
 
@@ -723,6 +734,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     {
         Proposal storage p = proposals[_proposalId];
         return proposer[_proposalId] != address(0) && !guardianVetoed[_proposalId]
+            && !(guardianRemoved && guardianBonusOnSnapshot[_proposalId] && _account == guardianSafe)
             && _isProposalOpen(p) && _voteOption != VoteOption.None
             && p.voters[_account] == VoteOption.None
             && frozenWeight[_proposalId][_account] != 0 && !merkleSnapshot[_proposalId];
@@ -824,7 +836,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
 
     function _active(address voter) internal view returns (bool) {
         Voter storage v = voterState[voter];
-        if (!v.registered) return false;
+        if (!v.registered || votingToken.delegates(voter) != voter) return false;
         (uint256 missed, uint256 firstMiss) = _misses(voter);
         return missed < minimumMissedProposals || firstMiss == 0
             || block.timestamp < BokkyPooBahsDateTimeLibrary.addMonths(firstMiss, inactivityMonths);
@@ -882,7 +894,10 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function _freezeAtomic(uint256 id, address creator, bool removed)
         internal returns (uint256 eligible, uint256 denominator, uint256 creatorPower)
     {
-        if (censusFrozen[id]) revert InvalidGovernanceProposal();
+        // Historical Merkle snapshots carry eligibility in proved offchain
+        // state. Never silently omit their missed-proposal records when
+        // returning to an on-chain census.
+        if (censusFrozen[id] || merkleHistoryPresent) revert IncompleteEconomicCensus();
         uint256 community;
         for (uint256 i; i < knownVoters.length;) {
             address voter = knownVoters[i];
@@ -898,6 +913,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         if (community == 0) revert NoVotingPower();
         if (removed) eligible = community;
         else {
+            guardianBonusOnSnapshot[id] = true;
             frozenWeight[id][guardianSafe] = 15 * community;
             eligible = 100 * community;
         }
