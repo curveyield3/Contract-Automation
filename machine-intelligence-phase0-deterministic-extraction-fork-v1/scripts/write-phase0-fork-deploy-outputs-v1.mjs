@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {id as ethersTopicId} from 'ethers';
 
 // Fork-only implementation of the existing Phase 0 output writer.
 // Never writes to a campaign, a receipt, main, the private cache, or the Worker.
@@ -232,6 +233,7 @@ async function buildForkRelationshipGraphV1(){
             kind:'OBSERVED_EVENT_LOG',scenarioId:scenario,transactionHash:row.transactionHash,
             logOrdinal:eventOrdinal,emitterAddress:emitter,
             topic0:log.topics?.[0]??null,
+            observedTopics:(log.topics??[]).filter(topic=>/^0x[a-f0-9]{64}$/i.test(String(topic))),
             dataSha256:sha256(Buffer.from(String(log.data??''),'utf8')),
             eventSourceIdentity:null,eventDecodeStatus:'ABI_EVENT_JOIN_NOT_PROVEN',
             evidenceRefs:[receiptEvidence.ref]});
@@ -529,6 +531,27 @@ async function buildForkRelationshipGraphV1(){
       addGraphCandidate('DYNAMIC_FACTORY_CHILD',edge,{
         ...options,prerequisites:['VERIFY_CHILD_RUNTIME_BYTECODE','VERIFY_INIT_ARGUMENTS_AND_AUTHORITY']});
     }
+    if(kind==='OBSERVED_TRANSACTION_EMITTED_LOG'){
+      const eventNode=nodes.find(node=>node.nodeId===edge.to&&node.kind==='OBSERVED_EVENT_LOG');
+      const topics=eventNode?.observedTopics??[];
+      const isApproval=String(eventNode?.topic0??'').toLowerCase()===
+        ethersTopicId('Approval(address,address,uint256)').toLowerCase();
+      const ownerValid=/^0x[0-9a-f]{64}$/i.test(String(topics[1]??''));
+      const spenderValid=/^0x[0-9a-f]{64}$/i.test(String(topics[2]??''));
+      const txCalls=graphByTx.get(eventNode?.transactionHash)??[];
+      const witnessedAssetMovement=txCalls.some(call=>
+        runtimeCall(call.kind)&&['0x23b872dd','0xa9059cbb'].includes(
+          String(call.inputSelector??'').toLowerCase()));
+      // An Approval event has an actual indexed owner/spender; pairing it with
+      // a witnessed asset-moving call permits an investigation lead, not a
+      // conclusion that the spender exploited this approval.
+      if(isApproval&&ownerValid&&spenderValid&&witnessedAssetMovement){
+        addGraphCandidate('ACTUAL_ALLOWANCE_OR_PRIVILEGE_EDGE',edge,{
+          evidenceClass:'RUNTIME_WITNESSED',runtimeInstanceIds:[edge.to],
+          prerequisites:['VERIFY_APPROVAL_EMITTER_TOKEN_IDENTITY',
+            'VERIFY_INDEXED_SPENDER_EXECUTION_AUTHORITY','VERIFY_ASSET_FLOW_CONNECTION']});
+      }
+    }
     if(kind==='OBSERVED_SUCCESSFUL_TX_STORAGE_CHANGE'){
       const siblingWrites=(graphByTx.get(edge.transactionHash)??[])
         .filter(x=>x.kind==='OBSERVED_SUCCESSFUL_TX_STORAGE_CHANGE');
@@ -592,7 +615,7 @@ async function buildForkRelationshipGraphV1(){
     patternCoverage:Object.keys(candidatePatternsV1).sort().map(patternFamily=>({
       patternFamily,producedOccurrences:candidates.filter(c=>c.patternFamily===patternFamily).length,
       implementationStatus:[
-        'ACTUAL_ALLOWANCE_OR_PRIVILEGE_EDGE'
+        'NO_SOURCE_EVIDENCE_MATCHER_UNIMPLEMENTED'
       ].includes(patternFamily)?'SOURCE_JOIN_NOT_IMPLEMENTED':
       'EXACT_GRAPH_OCCURRENCE_MECHANICAL_RULE',
       negativeSecurityConclusion:false})),
