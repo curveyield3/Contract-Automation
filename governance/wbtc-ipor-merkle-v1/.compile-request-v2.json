@@ -1,6 +1,5 @@
 {
-  "mode": "compile_both_only",
-  "iteration": 9,
-  "source": "51f47a9caf9b906c2290846c022d24dfe204bb47",
-  "goal": "one-body proposal creation"
+  "purpose": "compile-and-snapshot-only",
+  "version": 3,
+  "source": "c7605e654a5e25857146ba648a9775f7d481ca5b"
 }

@@ -958,10 +958,10 @@ contract WbtcIporStagedProposalProcessor is
     ///      Each sub-body is called directly, so a body that reverts or returns a value that can not
     ///      be decoded as a `uint256` reverts the whole transaction. A single misbehaving body
     ///      therefore blocks proposal creation or advancement for the entire stage.
-    /// @param _proposalId The ID of the proposal.
-    /// @param _stageId The stage index.
-    /// @param _startDate The start date that proposals on sub-bodies will be created with.
-    /// @param _stageProposalParams The custom params required for each sub-body to create a proposal.
+    /// @param proposalId The ID of the parent proposal.
+    /// @param stageId The stage index.
+    /// @param startDate The stage start time.
+    /// @param params The per-body creation parameters.
     /// @notice Every configured stage has exactly one Aragon body. Preserve
     /// the original IProposal result-reporting handshake, with no N-body loop.
     function _createBodyProposals(
