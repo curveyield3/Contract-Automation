@@ -1,4 +1,4 @@
-name: IPOR ytv three-strategy source compile v1
+name: IPOR ytv three-strategy source compile v2
 
 on:
   push:
@@ -43,6 +43,7 @@ jobs:
           forge build --root "$ROOT" --force -vv \
             contracts/fuses/curve_stableswap_ng/CurveStableswapNGSingleSideSupplyFuse.sol \
             contracts/fuses/curve_stableswap_ng/CurveStableswapNGSingleSideBalanceFuse.sol \
+            contracts/fuses/erc4626/Erc4626SupplyFuse.sol \
             contracts/price_oracle/price_feed/CurveStableSwapNGPriceFeed.sol \
             contracts/price_oracle/price_feed/ScrvUsdBaseUsdPriceFeed.sol
           mkdir -p ipor/ytv-three-strategy-v1/compiled-artifacts
@@ -52,6 +53,7 @@ jobs:
           names = (
             "CurveStableswapNGSingleSideSupplyFuse",
             "CurveStableswapNGSingleSideBalanceFuse",
+            "Erc4626SupplyFuse",
             "CurveStableSwapNGPriceFeed",
             "ScrvUsdBaseUsdPriceFeed",
           )
@@ -76,7 +78,7 @@ jobs:
       - name: Upload bytecode artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ipor-ytv-three-strategy-bytecode-v1
+          name: ipor-ytv-three-strategy-bytecode-v2
           path: ipor/ytv-three-strategy-v1/compiled-artifacts/creation-bytecode-v1.json
           if-no-files-found: error
           retention-days: 30
