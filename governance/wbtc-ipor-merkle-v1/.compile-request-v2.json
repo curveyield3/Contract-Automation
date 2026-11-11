@@ -1,9 +1,9 @@
 {
-  "purpose": "v5-runtime-size-verification-no-tests",
-  "version": 6,
+  "purpose": "three-contract-size-check-source-split",
+  "version": 7,
   "contracts": [
-    "SPP_v5",
-    "TokenVoting_v7",
-    "ZkVerifier_v1"
+    "SPP_v6",
+    "TokenVoting_v8",
+    "Risc0Verifier_v2"
   ]
 }
