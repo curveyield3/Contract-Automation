@@ -396,6 +396,29 @@ async function buildForkRelationshipGraphV1(){
           }
         }
       }
+      // The original mined receipt, not the derived journal status, decides
+      // whether a CREATE or storage mutation can count as committed.
+      const receiptPointer=row.evidence?.find(x=>x.kind==='MINED_RECEIPT')??null;
+      const receiptEvidence=receiptPointer?
+        await readCompleteCapturedRpcJsonV1(receiptPointer,'MINED_RECEIPT'):null;
+      const receiptChecked=Boolean(receiptPointer&&
+        receiptEvidence?.ref?.sha256===receiptPointer.sha256&&
+        receiptEvidence.manifest?.scenarioId===scenario&&
+        String(receiptEvidence.manifest?.txHash??'').toLowerCase()===txHash&&
+        receiptEvidence.manifest?.blockNumber===row.blockNumber&&
+        String(receiptEvidence.value?.transactionHash??'').toLowerCase()===txHash&&
+        Number(BigInt(receiptEvidence.value?.blockNumber??'0x0'))===row.blockNumber);
+      const receiptStatus=receiptChecked?receiptEvidence.value?.status:null;
+      const transactionSucceeded=receiptStatus===1||
+        receiptStatus==='0x1'||receiptStatus==='0x01';
+      if(!receiptChecked)limitations.push({
+        type:'RECEIPT_CONTENT_DIGEST_IDENTITY_OR_MINED_STATUS_UNVERIFIED',
+        transactionHash:row.transactionHash,sourceRef:receiptPointer?.path??null
+      });
+      if(receiptChecked&&row.receiptStatus!==undefined&&
+         String(row.receiptStatus).toLowerCase()!==String(receiptStatus).toLowerCase())
+        limitations.push({type:'RECEIPT_JOURNAL_SUMMARY_STATUS_CONFLICT',
+          transactionHash:row.transactionHash});
       const runtimeByAddress=new Map();
       for(const observation of row.runtimeCodeObservations??[]){
         const address=String(observation.address??'').toLowerCase();
@@ -424,8 +447,7 @@ async function buildForkRelationshipGraphV1(){
           end=await readVerifiedRuntimeCode(observation.codeAtBlockEnd);
         const refs=[start?.ref,end?.ref].filter(Boolean);
         const stable=start&&end&&start.code===end.code&&end.code.length>2;
-        const success=String(row.receiptStatus??'').toLowerCase()==='0x1'||
-          String(row.receiptStatus??'').toLowerCase()==='0x01'||row.receiptStatus===1;
+        const success=transactionSucceeded;
         const creationFrames=verifiedFrames.filter(frame=>
           ['CREATE','CREATE2'].includes(frame.callType)&&
           frame.to===address&&frame.effectiveReverted!==true);
@@ -499,18 +521,7 @@ async function buildForkRelationshipGraphV1(){
         kind:'MINED_TRANSACTION',scenarioId:scenario,transactionHash:row.transactionHash,
         blockNumber:row.blockNumber,evidenceRefs:[rawIndex.ref,pathToTrace].filter(Boolean)});
       // A receipt event is an observed emitted log, not a source-level ABI match.
-      const receiptPointer=row.evidence?.find(x=>x.kind==='MINED_RECEIPT');
-      const receiptEvidence=receiptPointer?await readCompleteCapturedRpcJsonV1(receiptPointer,'MINED_RECEIPT'):null;
-      const receiptChecked=receiptEvidence?.ref?.sha256===receiptPointer?.sha256&&
-        receiptEvidence.manifest?.scenarioId===scenario&&
-        String(receiptEvidence.manifest?.txHash??'').toLowerCase()===txHash&&
-        receiptEvidence.manifest?.blockNumber===row.blockNumber&&
-        String(receiptEvidence.value?.transactionHash??'').toLowerCase()===txHash&&
-        Number(BigInt(receiptEvidence.value?.blockNumber??'0x0'))===row.blockNumber;
-      if(receiptPointer&&!receiptChecked)limitations.push({type:'RECEIPT_CONTENT_DIGEST_UNVERIFIED',
-        transactionHash:row.transactionHash,sourceRef:receiptPointer.path});
-      const receiptStatus=receiptChecked?receiptEvidence.value?.status:null;
-      const transactionSucceeded=receiptStatus===1||receiptStatus==='0x1'||receiptStatus==='0x01';
+      // Receipt was already independently verified before runtime-code binding.
       if(receiptChecked){
         for(const [eventOrdinal,log] of (receiptEvidence.value.logs??[]).entries()){
           const emitter=String(log.address??'').toLowerCase();
