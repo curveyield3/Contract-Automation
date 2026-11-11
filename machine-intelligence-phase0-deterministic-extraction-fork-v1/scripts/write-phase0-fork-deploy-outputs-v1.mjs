@@ -108,7 +108,8 @@ async function buildForkRelationshipGraphV1(){
   const deploy=await optional('evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json','DEPLOYMENT');
   const staticFacts=await optional('evidence/static-analysis/SLITHER_RELATIONAL_FACTS_v1.json','SLITHER');
   const methods=await optional('evidence/phase0/ACTIVE_USE_METHOD_INVENTORY_v1.json','ACTIVE_USE');
-  for(const x of [deploy,staticFacts,methods])if(x.limitation)limitations.push(x.limitation);
+  const sourceIntelligence=await optional('evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json','SOURCE_INTELLIGENCE');
+  for(const x of [deploy,staticFacts,methods,sourceIntelligence])if(x.limitation)limitations.push(x.limitation);
   const source={
     campaignId:receipt.campaign.campaignId,
     campaignGenerationId:receipt.campaign.campaignGenerationId,
@@ -337,7 +338,7 @@ async function buildForkRelationshipGraphV1(){
   const graph={schemaVersion:'mi-phase0-intercontract-relationship-graph-index-v1',
     graphStatus:limitations.length||unknowns.length?'INCOMPLETE_WITH_TYPED_UNKNOWNS':'SOURCE_BOUND_PARTIAL_COVERAGE',
     controllerAcceptance:false,...source,pinnedSource:pinned,
-    sourceRefs:[deploy.ref,rawIndex.ref,staticFacts.ref,methods.ref].filter(Boolean),
+    sourceRefs:[deploy.ref,rawIndex.ref,staticFacts.ref,methods.ref,sourceIntelligence.ref].filter(Boolean),
     counts:{nodes:nodes.length,edges:edges.length,unknowns:unknowns.length,
       observedRuntimeEdges:edges.filter(x=>x.observation==='OBSERVED_LOCAL_FORK').length,
       staticRelationships:edges.filter(x=>x.observation==='SOURCE_STATIC_NOT_RUNTIME').length},
