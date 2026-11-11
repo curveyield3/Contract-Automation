@@ -1,114 +1,99 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {recordPhaseFinalizationVerificationWarningV1} from './lib/lite-solo-phase-work-v1.mjs';
-import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
-import {renderDeployConfigMatrixV1,renderTargetedTestMatrixV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
-import {detectionPolicyForAuthorityV1,authorityRootFromHomepageV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
-const a={};for(let i=2;i<process.argv.length;i++){if(process.argv[i].startsWith('--'))a[process.argv[i].slice(2)]=process.argv[++i];}
-for(const k of ['controller-root','campaign-path','simulation-output'])if(!a[k])throw new Error('missing --'+k);
+import {createHash} from 'node:crypto';
+
+// Fork-only implementation of the existing Phase 0 output writer.
+// Never writes to a campaign, a receipt, main, the private cache, or the Worker.
+const a={};
+for(let i=2;i<process.argv.length;i++)if(process.argv[i].startsWith('--'))a[process.argv[i].slice(2)]=process.argv[++i];
+for(const key of ['controller-root','fork-run-root','source-receipt','simulation-output'])
+  if(!a[key])throw new Error('FORK_WRITER_REQUIRED_'+key.replaceAll('-','_'));
+if(a['campaign-path']||a['destination-campaign-path'])
+  throw new Error('FORK_WRITER_CAMPAIGN_PATH_WRITE_PROHIBITED');
 const controllerRoot=path.resolve(a['controller-root']);
-const campaignPath=a['campaign-path'];
-const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
-const src=path.resolve(a['simulation-output']);
-const destination=path.join(campaignRoot,'evidence/phase0');
-const warn=(name,check,reason,expected=null,observed=null)=>{
- const affectedFile=path.posix.join(campaignPath,'evidence/phase0',name);
- recordPhaseFinalizationVerificationWarningV1({root:controllerRoot,campaignPath,
-  phase:0,affectedFile,check,reason,expected,observed});
- console.warn('NONBLOCKING_PHASE0_VERIFICATION_WARNING: '+check+': '+reason);
+const forkRunRoot=path.resolve(a['fork-run-root']);
+const prefix='Machine Intelligence Phase0 Deterministic Extraction Fork v1/runs/';
+const rel=path.relative(controllerRoot,forkRunRoot).split(path.sep).join('/');
+if(!rel.startsWith(prefix)||rel.split('/').length<5||rel.includes('..'))
+  throw new Error('FORK_RUN_ROOT_OUTSIDE_AUTHORIZED_ISOLATED_NAMESPACE');
+const receiptFile=path.resolve(a['source-receipt']);
+if(receiptFile!==path.join(forkRunRoot,'inputs','READ_ONLY_INPUT_RECEIPT_COPY.json'))
+  throw new Error('SOURCE_RECEIPT_COPY_MUST_STAY_IN_FORK_INPUTS');
+const receiptBytes=await fs.readFile(receiptFile);
+const receipt=JSON.parse(receiptBytes.toString('utf8'));
+if(receipt?.campaign?.campaignId!==rel.split('/')[2]||
+  !/^[a-f0-9]{64}$/i.test(String(receipt?.source?.sha256??'')))
+  throw new Error('FORK_SOURCE_RECEIPT_OR_CAMPAIGN_IDENTITY_MISMATCH');
+const sha256=bytes=>createHash('sha256').update(bytes).digest('hex');
+const simulationOutput=path.resolve(a['simulation-output']);
+const staticOutput=a['static-output']?path.resolve(a['static-output']):null;
+const files=[];
+const writeVerified=async(source,targetRel)=>{
+  const stat=await fs.lstat(source).catch(()=>null);
+  if(!stat||!stat.isFile()||stat.isSymbolicLink())return false;
+  const dst=path.resolve(forkRunRoot,...targetRel.split('/'));
+  if(!dst.startsWith(forkRunRoot+path.sep))throw new Error('FORK_WRITER_OUTPUT_ESCAPE');
+  await fs.mkdir(path.dirname(dst),{recursive:true});
+  const bytes=await fs.readFile(source);
+  await fs.writeFile(dst,bytes,{flag:'wx'});
+  const observed=await fs.readFile(dst);
+  if(sha256(observed)!==sha256(bytes))throw new Error('FORK_WRITER_READBACK_DIGEST_MISMATCH');
+  files.push({path:targetRel,sha256:sha256(bytes),bytes:bytes.length});
+  return true;
 };
-let raw,deploy;
-try{
- raw=await fs.readFile(path.join(src,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),'utf8');
- deploy=JSON.parse(raw);
-}catch(error){
- warn('PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json','PHASE0_DEPLOY_EVIDENCE_UNAVAILABLE',
-  'No readable deployment/configuration evidence file was produced: '+String(error?.message??error),
-  'Original Phase-0 deployment/configuration JSON exists and parses',String(error?.code??'PARSE_FAILED'));
- process.stdout.write(JSON.stringify({status:'WARNING_SOURCE_EVIDENCE_UNAVAILABLE',
-  deployment:'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',
-  warningIssued:true})+'\n');
- process.exit(0);
-}
-const {assertDeployGateEvidenceV2,digestV2}=await import('./lib/phase0-deploy-gate-v2.mjs');
-try{assertDeployGateEvidenceV2(deploy);}catch(error){warn('PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json','PHASE0_DEPLOY_GATE_EVIDENCE_ASSESSMENT','Original deployment/configuration evidence verification failed: '+String(error?.message??error),'Verified deployment/configuration evidence',String(error?.message??error));}
-const rawPath=path.join(src,'PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json');
-let rawDeploymentEvidencePresent=false;
-if(deploy.reconciliation){
- try{
-  const original=await fs.readFile(rawPath);
-  rawDeploymentEvidencePresent=true;
-  if(digestV2(original)!==deploy.reconciliation.originalEvidenceSha256)
-   warn('PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json','PHASE0_ORIGINAL_DEPLOY_EVIDENCE_SHA256',
-    'Original deployment evidence bytes do not match the declared digest; exact bytes remain available',
-    deploy.reconciliation.originalEvidenceSha256,digestV2(original));
- }catch(error){
-  warn('PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json','PHASE0_ORIGINAL_DEPLOY_EVIDENCE_MISSING',
-   'Original deployment evidence file cannot be read: '+String(error?.message??error),
-   'Readable original deployment evidence file','MISSING_OR_UNREADABLE');
- }
-}
-if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||!['PASS','PASS_LIVE_DEPLOYMENT','NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'].includes(deploy.status))
- warn('PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json','PHASE0_DEPLOY_EVIDENCE_SCHEMA_OR_STATUS','Deployment evidence does not match the expected schema and accepted status',{schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v3',status:['PASS','PASS_LIVE_DEPLOYMENT','NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT']},{schemaVersion:deploy.schemaVersion??null,status:deploy.status??null});
-await fs.mkdir(destination,{recursive:true});
-await fs.writeFile(path.join(destination,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),raw);
-// An opt-in reused fork state is admitted only with exact source/campaign/chain
-// and digest proof. Otherwise the historical deployment-only gate is unchanged.
-if(deploy.reusableForkState?.status==='CAPTURED'){
-  try{
-  const manifestFile=path.join(src,'PHASE0_FORK_STATE_MANIFEST_v1.json');
-  const manifest=JSON.parse(await fs.readFile(manifestFile,'utf8'));
-  if(manifest.campaignId!==deploy.campaignId||
-    manifest.sourceSha256!==deploy.sourceSha256||
-    manifest.chainId!==deploy.fork?.chainId||
-    manifest.finalBlock!==deploy.fork?.finalBlock||
-    manifest.sha256!==deploy.reusableForkState.sha256)
-    throw new Error('Fork-state identity is untrusted; skip reuse');
-  await verifyPhase0ForkStateV1({root:src,manifest});
-  await fs.copyFile(manifestFile,path.join(destination,'PHASE0_FORK_STATE_MANIFEST_v1.json'));
-  await fs.copyFile(path.join(src,manifest.stateFile),path.join(destination,manifest.stateFile));
-  }catch(error){
-   warn('PHASE0_FORK_STATE_MANIFEST_v1.json','PHASE0_REUSABLE_FORK_STATE_VERIFICATION','Reusable fork-state identity or evidence verification failed: '+String(error?.message??error),'Exact campaign/source/chain-bound reusable fork state',String(error?.message??error));
-   try{await fs.copyFile(path.join(src,'PHASE0_FORK_STATE_MANIFEST_v1.json'),path.join(destination,'PHASE0_FORK_STATE_MANIFEST_v1.json'));}catch{}
+const staticMap=[
+  ['BUILD_AND_SOURCE_IDENTITY_v1.json','evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'],
+  ['PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json','evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'],
+  ['SBOM_v1.json','evidence/build/SBOM_v1.json'],
+  ['SLITHER_v1.json','evidence/static-analysis/SLITHER_v1.json'],
+  ['SLITHER_RELATIONAL_FACTS_v1.json','evidence/static-analysis/SLITHER_RELATIONAL_FACTS_v1.json'],
+  ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json','evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json'],
+  ['PROJECT_READINESS_AUTOMATED_v1.json','evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json']
+];
+if(staticOutput){
+  for(const [name,destination] of staticMap){
+    const ok=await writeVerified(path.join(staticOutput,name),destination);
+    if(!ok)files.push({path:destination,status:'UNAVAILABLE'});
   }
 }
-try {
-  const receipt=JSON.parse(await fs.readFile(path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json'),'utf8'));
-  const controllerRoot=path.resolve(a['controller-root']);
-  const policy=await detectionPolicyForAuthorityV1({
-    repoRoot:controllerRoot,
-    authorityRoot:authorityRootFromHomepageV1(receipt.authority.homepagePath),
-    readJsonIfExists:async(rel)=>{
-      try {return JSON.parse(await fs.readFile(path.join(controllerRoot,...rel.split('/')),'utf8'));}
-      catch(error){if(error?.code==='ENOENT')return null;throw error;}
+const simMap=[
+  ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json','evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'],
+  ['DEPLOYED_STATE_SNAPSHOT_v1.json','evidence/phase0/DEPLOYED_STATE_SNAPSHOT_v1.json']
+];
+for(const [name,destination] of simMap){
+  const ok=await writeVerified(path.join(simulationOutput,name),destination);
+  if(!ok)files.push({path:destination,status:'UNAVAILABLE'});
+}
+// Only the copied extractor's own evidence/phase0 tree is eligible.
+// This includes complete hash-bearing trace parts, never an original campaign path.
+const simEvidence=path.join(simulationOutput,'evidence','phase0');
+async function copyTree(from,relative=''){
+  const stat=await fs.lstat(from).catch(()=>null);
+  if(!stat)return;
+  if(stat.isSymbolicLink())throw new Error('FORK_WRITER_SYMLINK_INPUT_FORBIDDEN');
+  if(stat.isFile()){
+    await writeVerified(from,path.posix.join('evidence/phase0',relative));
+  }else if(stat.isDirectory()){
+    for(const ent of await fs.readdir(from,{withFileTypes:true})){
+      if(ent.name==='.'||ent.name==='..')throw new Error('FORK_WRITER_INVALID_FILE_NAME');
+      await copyTree(path.join(from,ent.name),path.posix.join(relative,ent.name));
     }
-  });
-  const snapshotFile=path.join(src,'DEPLOYED_STATE_SNAPSHOT_v1.json');
-  if(policy&&await fs.stat(snapshotFile).then(()=>true,()=>false)) {
-    const target=path.join(campaignRoot,'evidence/review-inventory');
-    await fs.mkdir(target,{recursive:true});
-    await fs.copyFile(snapshotFile,path.join(target,'DEPLOYED_STATE_SNAPSHOT_v1.json'));
   }
-} catch { /* Snapshot must never block the existing Phase-0 deployment writer. */ }
-if(deploy.reconciliation&&rawDeploymentEvidencePresent)
- await fs.copyFile(rawPath,path.join(destination,'PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json'));
-let readiness=null;
-try{readiness=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'utf8'));}catch(error){
- recordPhaseFinalizationVerificationWarningV1({root:controllerRoot,campaignPath,phase:0,
-  affectedFile:path.posix.join(campaignPath,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),
-  check:'PHASE0_READINESS_EVIDENCE_UNAVAILABLE',
-  reason:'Cannot construct a source-grounded deployment matrix from missing or unreadable readiness evidence: '+String(error?.message??error),
-  expected:'Readable project readiness evidence',observed:String(error?.code??'PARSE_FAILED')});
 }
-const work=path.join(campaignRoot,'work/phase-06');await fs.mkdir(work,{recursive:true});
-if(readiness)await fs.writeFile(path.join(work,'LITE_DEPLOY_CONFIG_MATRIX.md'),renderDeployConfigMatrixV1({readiness,execution:deploy}));
-await fs.writeFile(path.join(work,'LITE_TARGETED_TEST_MATRIX.md'),renderTargetedTestMatrixV1({targetDesigns:[],executionResults:{},baselineRows:[]}));
-for(const old of [
-  'evidence/phase0/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json',
-  'evidence/phase0/PHASE0_TELEMETRY_ANALYSIS_v1.json',
-  'evidence/phase0/PHASE0_TELEMETRY_ANALYSIS_v1.md',
-  'evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.json',
-  'derived/phase-0/PHASE5_SIMULATION_BASELINE_INPUT_v1.json',
-  'derived/phase-0/PHASE6_SIMULATION_BASELINE_INPUT_v1.json'
-])await fs.rm(path.join(campaignRoot,...old.split('/')),{force:true});
-process.stdout.write(JSON.stringify({status:'PASS',deployment:'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',baselineSimulationRequired:false})+'\n');
+await copyTree(simEvidence);
+const manifest={schemaVersion:'mi-phase0-fork-only-writer-v1',
+  status:'FORK_ONLY_NOT_CONTROLLER_ACCEPTED',
+  campaignId:receipt.campaign.campaignId,
+  campaignGenerationId:receipt.campaign.campaignGenerationId,
+  sourceArchiveSha256:receipt.source.sha256,
+  originalReceiptSha256:sha256(receiptBytes),
+  sourceReceiptRef:path.posix.join('inputs','READ_ONLY_INPUT_RECEIPT_COPY.json'),
+  outputRootRelative:rel,
+  files:files.sort((a,b)=>a.path.localeCompare(b.path)),
+  publicationLimitations:['No controller core/bundle receipt, phase finalization or Worker acceptance is claimed.']};
+const dst=path.join(forkRunRoot,'evidence','FORK_WRITER_READBACK_v1.json');
+await fs.mkdir(path.dirname(dst),{recursive:true});
+await fs.writeFile(dst,JSON.stringify(manifest,null,2)+'\n',{flag:'wx'});
+process.stdout.write(JSON.stringify({status:manifest.status,campaignId:manifest.campaignId,
+  fileCount:manifest.files.filter(x=>x.sha256).length,
+  unavailable:manifest.files.filter(x=>x.status==='UNAVAILABLE').length})+'\n');
