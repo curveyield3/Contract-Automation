@@ -7,6 +7,8 @@ import zlib from 'node:zlib';
 import {spawn} from 'node:child_process';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+const MI_PHASE0_FORK_PACKAGE_ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 import {startRpcIdentityProxy} from '../../runner/src/rpc-identity-proxy-v1.mjs';
 import {stageExactArchiveSource,runProcess} from './execution.mjs';
 import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
@@ -433,7 +435,7 @@ export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainI
        (forkBlockNumber!==null&&pinnedBlockNumber!==forkBlockNumber))
       throw new Error('PHASE0_ARCHIVE_UPSTREAM_BLOCK_HASH_UNAVAILABLE_OR_MISMATCHED');
     const port=8545,url='http://127.0.0.1:8545';
-    const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
+    const executable=path.join(MI_PHASE0_FORK_PACKAGE_ROOT,'node_modules/@foundry-rs/anvil/bin.mjs');
     const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id',String(chainId),'--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--steps-tracing','--no-rate-limit','--silent'];
     args.push('--fork-block-number',String(pinnedBlockNumber));
     child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
@@ -495,7 +497,7 @@ export async function startStateSnapshotAnvilV1({sourceUrl,projectRoot,evmVersio
   const statePath=path.join(os.tmpdir(),`phase0-medusa-state-${process.pid}-${port}.json`);
   await fs.writeFile(statePath,stateJson);
   const url=`http://127.0.0.1:${port}`;
-  const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
+  const executable=path.join(MI_PHASE0_FORK_PACKAGE_ROOT,'node_modules/@foundry-rs/anvil/bin.mjs');
   const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--load-state',statePath,'--silent'];
   // Own process group: the npm anvil entry point is a node wrapper around the native binary, so signal the group.
   const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe'],detached:true});
