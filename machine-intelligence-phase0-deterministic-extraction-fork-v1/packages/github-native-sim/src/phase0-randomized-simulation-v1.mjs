@@ -2922,7 +2922,7 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
     };
     const artifactByQualified=new Map();
     for(const artifact of build.artifacts??[])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
-    const artifacts=[...artifactByQualified.values()];
+    const artifacts=[...(build.artifacts??[])]; // Do not drop duplicate qualified names across compiler units.
     anvil=await startAnvil({forkUrl:effectiveForkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion,chainId:forkChain.chainId,requireUpstreamChainId:Boolean(forkSelection),forkBlockNumber:scanManifest?.frozenBlock.number??null});
     const localRequest=new ethers.FetchRequest(anvil.url);
     localRequest.timeout=20000;
