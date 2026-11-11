@@ -647,6 +647,26 @@ async function buildForkRelationshipGraphV1(){
       graphCandidateIds:linked,sourceEvidenceRefs:edge.evidenceRefs??[]});
   }
   candidates.sort((a,b)=>a.graphCandidateId.localeCompare(b.graphCandidateId));
+  // Every original graph subject is accounted for, including those that
+  // matched no known pattern. This census never deletes or deduplicates an
+  // original evidence occurrence based on a shared contract or selector.
+  const originalSubjectDispositions=[
+    ...subjectDisposition,
+    ...nodes.map(node=>({
+      graphOccurrenceId:node.nodeId,recordKind:'GRAPH_NODE',
+      disposition:'STRUCTURAL_FACT_WITH_NO_CURRENT_PATTERN',
+      graphCandidateIds:[],sourceEvidenceRefs:node.evidenceRefs??[]})),
+    ...unknowns.map(unknown=>({
+      graphOccurrenceId:unknown.unknownId,recordKind:'GRAPH_UNKNOWN',
+      disposition:'UNRESOLVED_NEEDS_MIMO',graphCandidateIds:[],
+      sourceEvidenceRefs:unknown.sourceRef?[{path:unknown.sourceRef}]:[]})),
+    ...(methods.value?.methodCandidates??[]).map((method,index)=>({
+      graphOccurrenceId:method.methodCandidateId??mkid('METHOD-STATIC-',index,method.signature),
+      recordKind:'ACTIVE_USE_METHOD_CENSUS',
+      disposition:method.executionStatus==='NOT_EXECUTED'?
+        'UNRESOLVED_NEEDS_MIMO':'STRUCTURAL_FACT_WITH_NO_CURRENT_PATTERN',
+      graphCandidateIds:[],sourceEvidenceRefs:methods.ref?[methods.ref]:[]}))
+  ];
   const staticOnlyUnmatchedSourceSubjects=subjectDisposition
     .filter(row=>row.disposition==='STRUCTURAL_FACT_WITH_NO_CURRENT_PATTERN')
     .map(row=>({graphOccurrenceId:row.graphOccurrenceId,evidenceRefs:row.sourceEvidenceRefs}));
@@ -655,7 +675,8 @@ async function buildForkRelationshipGraphV1(){
     schemaVersion:'mi-phase0-graph-investigation-candidates-v1',...source,sourceGraphIndexRef:graphRef,
     patternImplementationSha256,patternRulesSha256,graphIndexRef:graphRef,
     candidateCount:candidates.length,candidates,
-    subjectDisposition,staticOnlyUnmatchedSourceSubjects,unknownRelationshipRefs,
+    subjectDisposition:originalSubjectDispositions,
+    staticOnlyUnmatchedSourceSubjects,unknownRelationshipRefs,
     candidateCensus:{inputSubjects:edges.length,generatedOccurrences:candidates.length,
       groupedCandidates:candidates.length,explicitUnknowns:unknowns.length},
     patternCoverage:Object.keys(candidatePatternsV1).sort().map(patternFamily=>({
@@ -852,11 +873,20 @@ async function buildForkRelationshipGraphV1(){
   const censusRef=await writeOutput('evidence/phase0/GRAPH_TO_AUDIT_SUBJECT_CENSUS_v1.json',{
     schemaVersion:'mi-phase0-graph-to-audit-subject-census-v1',...source,
     graphIndexRef:graphRef,candidateIndexRef:candidateRef,
-    ORIGINAL_GRAPH_SUBJECT_COUNT:edges.length,
-    sourceGraphSubjectDispositions:subjectDisposition,
-    sourceGraphSubjectCensus:{total:edges.length,triggered:subjectDisposition.filter(x=>x.disposition==='TRIGGERED_CANDIDATE').length,
-      unresolved:subjectDisposition.filter(x=>x.disposition==='UNRESOLVED_NEEDS_MIMO').length,
-      unmatched:staticOnlyUnmatchedSourceSubjects.length},
+    ORIGINAL_GRAPH_SUBJECT_COUNT:originalSubjectDispositions.length,
+    originalSubjectCensus:{
+      graphNodes:nodes.length,graphEdges:edges.length,graphUnknowns:unknowns.length,
+      activeUseMethods:methods.value?.methodCandidates?.length??0,
+      candidateProposalsSeparate:candidates.length
+    },
+    sourceGraphSubjectDispositions:originalSubjectDispositions,
+    sourceGraphSubjectCensus:{
+      total:originalSubjectDispositions.length,
+      triggered:originalSubjectDispositions.filter(x=>x.disposition==='TRIGGERED_CANDIDATE').length,
+      unresolved:originalSubjectDispositions.filter(x=>x.disposition==='UNRESOLVED_NEEDS_MIMO').length,
+      unmatched:originalSubjectDispositions.filter(x=>
+        x.disposition==='STRUCTURAL_FACT_WITH_NO_CURRENT_PATTERN').length
+    },
     AUTOMATIC_CANDIDATE_OCCURRENCE_COUNT:candidates.length,
     AUTOMATIC_CANDIDATE_GROUP_COUNT:candidates.length,
     FLOW_PLAN_QUESTION_COUNT:graphFlowPlanBridgeV1.flowPlanQuestionCount,
@@ -865,7 +895,7 @@ async function buildForkRelationshipGraphV1(){
     MIMO_PHASE1_QUESTION_COUNT:0,MIMO_PHASE1_ANSWERED_COUNT:0,
     MIMO_NOVEL_CANDIDATE_COUNT:0,TEST_ELIGIBILITY_RECORD_COUNT:eligible.length,
     TEST_CONFIG_EXECUTABLE_COUNT:0,TEST_CONFIG_UNRESOLVED_COUNT:eligible.length,
-    UNRESOLVED_GRAPH_SUBJECT_COUNT:unknowns.length,
+    UNRESOLVED_GRAPH_SUBJECT_COUNT:originalSubjectDispositions.filter(x=>x.disposition==='UNRESOLVED_NEEDS_MIMO').length,
     UNMAPPED_STATIC_SOURCE_COUNT:units.filter(x=>x.analysisStatus!=='SLITHER_RELATIONAL_FACTS_AVAILABLE').length,
     limitations:['Graph is a source-only, unaccepted fork preview. No question issued.']});
   // Enumerate the complete immutable graph source roster; no "top" sampling.
