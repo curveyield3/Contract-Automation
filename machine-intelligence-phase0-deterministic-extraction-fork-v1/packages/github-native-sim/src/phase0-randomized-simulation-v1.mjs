@@ -137,18 +137,42 @@ function buildActiveUseMethodInventoryV1({receipt,artifacts,deployedContracts,ch
       for(const binding of bindingRows){
         const identity={...sourceId,signature,chainId,pinnedBlockNumber,pinnedBlockHash,
           runtimeAddress:binding?.address?.toLowerCase()??null};
+        const methodCandidateId='ACT-METHOD-'+sha256(Buffer.from(JSON.stringify(identity))).slice(0,40);
+        const inputTypes=(abi.inputs??[]).map(canonicalAbiParameterTypeV1);
+        const outputTypes=(abi.outputs??[]).map(canonicalAbiParameterTypeV1);
+        const methodFamilyCandidates=operationName.test(name)?[name.toUpperCase()]:
+          abi.type==='fallback'||abi.type==='receive'?
+            ['FALLBACK_OR_RECEIVE_CALLBACK']:[];
+        const limitations=[
+          ...(binding?[]:['EXACT_COMPILED_RUNTIME_BINDING_UNRESOLVED']),
+          'CALLER_ROLE_AND_ACCESS_RESTRICTIONS_NOT_SOURCE_VERIFIED',
+          ...(inputTypes.length?['ARGUMENT_SEMANTICS_AND_NATIVE_UNITS_NOT_SOURCE_VERIFIED']:[]),
+          'RUNTIME_STATE_AND_PERMISSION_PRECONDITIONS_NOT_ESTABLISHED'
+        ];
         items.push({
-          methodCandidateId:'METHOD-'+sha256(Buffer.from(JSON.stringify(identity))).slice(0,32),
-          ...identity,
-          abiType:abi.type,selector,inputTypes:(abi.inputs??[]).map(canonicalAbiParameterTypeV1),
-          outputTypes:(abi.outputs??[]).map(canonicalAbiParameterTypeV1),
+          methodCandidateId,...identity,
+          compiledIdentity:{...sourceId,signature,selector},
+          runtimeTarget:{scenarioId:null,address:binding?.address??null,
+            runtimeCodeHash:binding?.runtimeCodeHash??null,
+            runtimeCodeSha256:binding?.observedRuntimeSha256??null,
+            storageAddress:null,implementationAddress:binding?.proxyImplementation??null,
+            blockNumber:pinnedBlockNumber,blockHash:pinnedBlockHash},
+          abiType:abi.type,selector,inputTypes,outputTypes,
           stateMutability:abi.stateMutability??null,
           potentialOperationFamily:operationName.test(name)?name:null,
-          familyMatchEvidence:operationName.test(name)?'ABI_SIGNATURE':'ELIGIBILITY_UNKNOWN_INVENTORIED',
+          methodFamilyCandidates,
+          familyMatchEvidence:methodFamilyCandidates.length?'ABI_SIGNATURE':'ELIGIBILITY_UNKNOWN_INVENTORIED',
+          callerRequirement:{kind:'UNKNOWN',sourceEvidenceRefs:[]},
+          argumentRequirements:{abiTypes:inputTypes,knownConstraints:[],
+            unresolvedInputs:inputTypes.map((type,index)=>({index,type,
+              sourceBindingStatus:'ARGUMENT_SEMANTICS_UNRESOLVED'}))},
+          requiredState:{assets:[],balances:[],allowances:[],poolLiquidity:[],
+            oracles:[],time:[],roles:[],determinationStatus:'NOT_EVALUATED'},
+          eligibilityDisposition:'UNRESOLVED',exclusionEvidenceRefs:[],
+          limitations,
           runtimeIdentityStatus:binding?'EXACT_SOURCE_AND_RUNTIME_MATCH':'UNRESOLVED_NO_EXACT_RUNTIME_PROOF',
           eligibility:'UNRESOLVED_NEEDS_SOURCE_CONFIGURATION',
-          executionStatus:'NOT_EXECUTED',
-          executionAuthorized:false
+          executionStatus:'NOT_EXECUTED',executionAuthorized:false
         });
       }
     }
