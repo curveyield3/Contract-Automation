@@ -14,7 +14,7 @@ const controllerRoot=path.resolve(a['controller-root']);
 const forkRunRoot=path.resolve(a['fork-run-root']);
 const prefix='Machine Intelligence Phase0 Deterministic Extraction Fork v1/runs/';
 const rel=path.relative(controllerRoot,forkRunRoot).split(path.sep).join('/');
-if(!rel.startsWith(prefix)||rel.split('/').length<5||rel.includes('..'))
+if(!rel.startsWith(prefix)||rel.split('/').length!==4||rel.includes('..'))
   throw new Error('FORK_RUN_ROOT_OUTSIDE_AUTHORIZED_ISOLATED_NAMESPACE');
 const receiptFile=path.resolve(a['source-receipt']);
 if(receiptFile!==path.join(forkRunRoot,'inputs','READ_ONLY_INPUT_RECEIPT_COPY.json'))
@@ -35,7 +35,12 @@ const writeVerified=async(source,targetRel)=>{
   if(!dst.startsWith(forkRunRoot+path.sep))throw new Error('FORK_WRITER_OUTPUT_ESCAPE');
   await fs.mkdir(path.dirname(dst),{recursive:true});
   const bytes=await fs.readFile(source);
-  await fs.writeFile(dst,bytes,{flag:'wx'});
+  try{await fs.writeFile(dst,bytes,{flag:'wx'});}
+  catch(error){
+    if(error?.code!=='EEXIST')throw error;
+    const existing=await fs.readFile(dst);
+    if(sha256(existing)!==sha256(bytes))throw new Error('FORK_WRITER_CONFLICTING_IMMUTABLE_EVIDENCE');
+  }
   const observed=await fs.readFile(dst);
   if(sha256(observed)!==sha256(bytes))throw new Error('FORK_WRITER_READBACK_DIGEST_MISMATCH');
   files.push({path:targetRel,sha256:sha256(bytes),bytes:bytes.length});
