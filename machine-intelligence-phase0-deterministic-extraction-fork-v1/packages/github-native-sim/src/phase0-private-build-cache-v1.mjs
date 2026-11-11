@@ -193,44 +193,12 @@ async function tryPublish({url,token,identity,pseudo,build,request}){
     }
   }
 }
-export async function compileWithPrivateCacheV1({request,pseudo,projectRoot,compile,
-  token=process.env.AUDIT_CONTROLLER_GITHUB_TOKEN,
-  enabled=process.env.PHASE0_PRIVATE_BUILD_CACHE_ENABLED==='true'}){
-  if(!enabled||!token){
-    console.log('[phase0-build-cache] disabled (untrusted request or missing private credential); compiling');
-    markCompilation('COMPILATION_START cache_disabled=true');
-    const start=Date.now();
-    const build=await compile();
-    markCompilation('COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-start)/1000));
-    return build;
-  }
-  let identity,url;
-  try{
-    identity=privateBuildCacheIdentityV1({request,pseudo,projectRoot,toolIdentity:currentBuildToolIdentityV1()});
-    url=privateContentUrl({request,key:identity.key});
-  }catch(error){
-    console.log('[phase0-build-cache] cannot establish exact provenance; compiling: '+String(error.message).slice(0,200));
-    markCompilation('COMPILATION_START identity_unavailable=true');
-    const start=Date.now();
-    const build=await compile();
-    markCompilation('COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-start)/1000));
-    return build;
-  }
-  try{
-    const build=await tryLoad({url,ref:PRIVATE_CACHE_REF,token,identity,pseudo});
-    console.log('[phase0-build-cache] verified private cache HIT, key='+identity.key.slice(0,16)+'; skipping Solidity recompilation');
-    return build;
-  }catch(error){
-    // Report the real reason. Distinguish not-yet-populated caches from invalid
-    // manifests, missing chunks, corruption and authentication errors.
-    console.log('[phase0-build-cache] MISS key='+identity.key.slice(0,16)+' reason='+
-      String(error?.message??error).replace(/\s+/g,' ').slice(0,240));
-  }
-  markCompilation('COMPILATION_START key='+identity.key.slice(0,16));
+// Fork-only compilation is always source-defined and never consults or writes the
+// production private cache or the Audit-Controller default branch.
+export async function compileWithPrivateCacheV1({compile}){
+  if(typeof compile!=='function')throw new Error('FORK_COMPILE_FUNCTION_REQUIRED');
+  markCompilation('COMPILATION_START cache_disabled=true fork_isolated=true');
   const started=Date.now();
-  const build=await compile();
-  markCompilation('COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-started)/1000));
-  try{await tryPublish({url,ref:PRIVATE_CACHE_REF,token,identity,pseudo,build,request});}
-  catch(error){console.log('[phase0-build-cache] PUBLISH_FAILED reason='+String(error.message).replace(/\s+/g,' ').slice(0,300));}
-  return build;
+  try{return await compile();}
+  finally{markCompilation('COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-started)/1000));}
 }
