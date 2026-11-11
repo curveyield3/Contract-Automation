@@ -3387,38 +3387,61 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
       const activeUseScenario=deploymentTraceIndex.scenarioId;
       const activeUseRoot=path.join(outputRoot,'evidence','phase0','scenarios',activeUseScenario);
       await fs.mkdir(activeUseRoot,{recursive:true});
-      const activeUsePlan={schemaVersion:'mi-phase0-active-use-plan-v1',
+      const sourceBuildBundleSha256=sha256(Buffer.from(JSON.stringify(
+        executionBuildArtifacts,null,2)+'\n'));
+      const pendingMethods=methodInventory.methodCandidates.map(item=>({
+        methodCandidateId:item.methodCandidateId,
+        compiledIdentity:item.compiledIdentity,
+        runtimeAddress:item.runtimeTarget.address,
+        methodFamilyCandidates:item.methodFamilyCandidates,
+        unresolvedPrerequisites:item.limitations,
+        disposition:'AUTO_CONFIGURATION_UNRESOLVED_NOT_EXECUTED'
+      }));
+      const activeUsePlanUnsigned={
+        schemaVersion:'mi-phase0-active-use-plan-v1',
         campaignId:receipt.campaign.campaignId,
         campaignGenerationId:receipt.campaign.campaignGenerationId,
-        sourceArchiveSha256:archiveSha256,scenarioId:activeUseScenario,
-        chainId:forkChain.chainId,pinnedForkBlockNumber:anvil.pinnedBlockNumber,
+        sourceArchiveSha256:archiveSha256,buildBundleSha256:sourceBuildBundleSha256,
+        scenarioId:activeUseScenario,chainId:forkChain.chainId,
+        pinnedForkBlockNumber:anvil.pinnedBlockNumber,
         pinnedForkBlockHash:anvil.pinnedBlockHash,
+        snapshotBaseline:'POST_SOURCE_CONFIGURATION',
+        actionPlanVersion:'v1',
         planStatus:'INCOMPLETE_SOURCE_CONFIGURATION_REQUIRED',
-        methods:methodInventory.methodCandidates.map(item=>({
-          methodCandidateId:item.methodCandidateId,runtimeAddress:item.runtimeAddress,
-          canonicalSignature:item.signature,selector:item.selector,
-          evidenceClass:item.familyMatchEvidence,
-          sourceExecutionAuthorized:false,
-          missingPrerequisites:[
-            ...(item.runtimeAddress?[]:['EXACT_RUNTIME_ADDRESS']),
-            'SOURCE_DEFINED_ACTOR_AND_ROLE',
-            ...(item.inputTypes.length?['SOURCE_DEFINED_ARGUMENTS']:[]),
-            ...(item.stateMutability==='payable'?['SOURCE_DEFINED_NATIVE_VALUE']:[]),
-            'SOURCE_VERIFIED_STATE_PRECONDITIONS'
-          ],
-          disposition:'UNRESOLVED_NOT_SUBMITTED',
-          qualification:'NOT_A_NEGATIVE_SECURITY_FINDING'
-        })),
-        plannedOperationCount:methodInventory.candidateCount,
-        authorizedUserTransactionCount:0,
-        limitations:['No original source-defined actor/amount/role/action sequence has been established for method calls. Do not synthesize them.']
+        entries:[],inapplicableMethodRefs:[],
+        unknownMethodRefs:pendingMethods.map(row=>row.methodCandidateId),
+        sourceMethodPreconditions:pendingMethods,
+        candidateMethodCount:methodInventory.candidateCount,
+        configuredActionCount:0,authorizedUserTransactionCount:0,
+        fixtureProvenance:[],
+        limitations:['The complete ABI census is available, but neither source-permitted actors nor exact assets, amounts, dependency sequences and state constraints have been established. No user transaction is scheduled.']
       };
-      const activeUseExecution={schemaVersion:'mi-phase0-active-use-execution-v1',
-        ...{campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,
-        sourceArchiveSha256:archiveSha256,scenarioId:activeUseScenario},
+      const canonical=x=>Array.isArray(x)?'['+x.map(canonical).join(',')+']':
+        x&&typeof x==='object'?
+          '{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canonical(x[k])).join(',')+'}':
+          JSON.stringify(x);
+      const planSha256=sha256(Buffer.from(canonical(activeUsePlanUnsigned)));
+      const activeUsePlan={...activeUsePlanUnsigned,planSha256};
+      const activeUseExecution={
+        schemaVersion:'mi-phase0-active-use-execution-v1',
+        campaignId:receipt.campaign.campaignId,
+        campaignGenerationId:receipt.campaign.campaignGenerationId,
+        sourceArchiveSha256:archiveSha256,
+        scenarioId:activeUseScenario,frozenPlanSha256:planSha256,
         status:'NOT_EXECUTED_INCOMPLETE_SOURCE_DEFINED_PLAN',
+        entries:pendingMethods.map(row=>({
+          actionId:null,methodCandidateId:row.methodCandidateId,
+          forkBranchId:null,sequenceId:null,attempted:false,
+          status:'AUTO_CONFIGURATION_UNRESOLVED',
+          observedTxRefs:[],receiptRefs:[],traceRefs:[],stateWitnessRefs:[],
+          measurableNewFacts:[],typedLimitations:row.unresolvedPrerequisites
+        })),
+        statusCounts:{planned:0,success:0,revert:0,unexecutable:0,
+          unresolved:pendingMethods.length,notApplicable:0},
+        unaccountedMethodCandidateIds:pendingMethods.map(row=>row.methodCandidateId),
         submittedTransactions:[],observedRuntimeEffects:[],
-        limitations:activeUsePlan.limitations};
+        limitations:activeUsePlan.limitations
+      };
       const activeUseStateWitnesses={schemaVersion:'mi-phase0-active-use-state-witnesses-v1',
         scenarioId:activeUseScenario,status:'NOT_CAPTURED_NO_AUTHORIZED_ACTIVE_USE',
         observationsBeforeUse:[],observationsAfterUse:[],
