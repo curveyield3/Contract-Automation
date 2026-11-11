@@ -103,6 +103,70 @@ async function rpc(url,method,params=[]){
   if(body.error)throw new Error(`RPC ${method}: ${body.error.message??JSON.stringify(body.error)}`);
   return body.result;
 }
+// Capture all actually mined package-deployment transactions on the same fork
+// before teardown; no RPC traces are reconstructed from post-revert state.
+async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceIdentity,chainId,pinnedBlockNumber,pinnedBlockHash,initialBlock,scriptEnd}){
+  const scenarioIdentity={...sourceIdentity,chainId,pinnedBlockNumber,pinnedBlockHash,
+    branch:'SOURCE_DEPLOYMENT',runId:String(process.env.GITHUB_RUN_ID??'LOCAL'),
+    runAttempt:String(process.env.GITHUB_RUN_ATTEMPT??'1')};
+  const scenarioId='deployment-'+sha256(Buffer.from(JSON.stringify(scenarioIdentity),'utf8')).slice(0,24);
+  const evidenceRoot=path.join(outputRoot,'evidence','phase0','scenarios',scenarioId);
+  await fs.mkdir(evidenceRoot,{recursive:true});
+  const rows=[],limitations=[];
+  let expectedTransactions=0,receiptsRecorded=0,callTraces=0,opcodeTraces=0;
+  for(let number=initialBlock+1;number<=scriptEnd;number++){
+    const tag='0x'+number.toString(16);
+    const block=await rpc(anvilUrl,'eth_getBlockByNumber',[tag,false]);
+    if(!block||!Array.isArray(block.transactions)){
+      limitations.push({type:'MINED_BLOCK_OR_TX_CENSUS_UNAVAILABLE',blockNumber:number});
+      continue;
+    }
+    for(const [ordinal,txHash] of block.transactions.entries()){
+      expectedTransactions++;
+      const base=path.join(evidenceRoot,'transactions',String(txHash).toLowerCase());
+      await fs.mkdir(base,{recursive:true});
+      const row={blockNumber:number,transactionOrdinal:ordinal,transactionHash:txHash,
+        frameIdentity:{scenarioId,branchId:'SOURCE_DEPLOYMENT',attemptOrdinal:ordinal},
+        evidence:[],limitations:[]};
+      for(const [kind,method,params] of [
+        ['MINED_RECEIPT','eth_getTransactionReceipt',[txHash]],
+        ['CALL_TRACE','debug_traceTransaction',[txHash,{tracer:'callTracer',timeout:'120s'}]],
+        ['OPCODE_TRACE','debug_traceTransaction',[txHash,{disableMemory:true,disableStack:false,disableStorage:false,timeout:'120s'}]],
+        ['PRESTATE_DIFF','debug_traceTransaction',[txHash,{tracer:'prestateTracer',tracerConfig:{diffMode:true},timeout:'120s'}]]
+      ]){
+        try{
+          const result=await rpc(anvilUrl,method,params);
+          if(!result)throw new Error('EMPTY_RPC_RESULT');
+          const raw=JSON.stringify(result)+'\n';
+          const name=kind+'.json',target=path.join(base,name);
+          await fs.writeFile(target,raw);
+          row.evidence.push({kind,path:path.posix.join('evidence/phase0/scenarios',scenarioId,
+            'transactions',String(txHash).toLowerCase(),name),sha256:sha256(Buffer.from(raw,'utf8')),
+            bytes:Buffer.byteLength(raw,'utf8')});
+          if(kind==='MINED_RECEIPT')receiptsRecorded++;
+          if(kind==='CALL_TRACE')callTraces++;
+          if(kind==='OPCODE_TRACE')opcodeTraces++;
+        }catch(error){
+          row.limitations.push({type:kind+'_UNAVAILABLE',reason:String(error?.message??error)});
+          if(kind!=='PRESTATE_DIFF')limitations.push({type:kind+'_UNAVAILABLE',transactionHash:txHash});
+        }
+      }
+      rows.push(row);
+    }
+  }
+  const manifest={schemaVersion:'mi-phase0-deployment-transaction-trace-v1',scenarioId,
+    sourceIdentity:scenarioIdentity,initialBlock,scriptEnd,
+    expectedTransactions,receiptsRecorded,callTraces,opcodeTraces,
+    status:expectedTransactions===receiptsRecorded&&expectedTransactions===callTraces&&
+      expectedTransactions===opcodeTraces&&limitations.length===0
+        ?'COMPLETE':'INCOMPLETE_WITH_TYPED_LIMITATIONS',
+    rows,limitations};
+  const raw=JSON.stringify(manifest,null,2)+'\n';
+  await fs.writeFile(path.join(evidenceRoot,'DEPLOYMENT_TRANSACTION_TRACE_INDEX_v1.json'),raw);
+  return{...manifest,rows:undefined,manifestRef:path.posix.join('evidence/phase0/scenarios',scenarioId,
+    'DEPLOYMENT_TRANSACTION_TRACE_INDEX_v1.json'),manifestSha256:sha256(Buffer.from(raw,'utf8'))};
+}
+
 export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainId=1,requireUpstreamChainId=false,forkBlockNumber=null}){
   let identityProxy;
   let child;
@@ -136,7 +200,7 @@ export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainI
       throw new Error('PHASE0_ARCHIVE_UPSTREAM_BLOCK_HASH_UNAVAILABLE_OR_MISMATCHED');
     const port=8545,url='http://127.0.0.1:8545';
     const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
-    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id',String(chainId),'--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--auto-impersonate','--no-rate-limit','--silent'];
+    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id',String(chainId),'--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--steps-tracing','--no-rate-limit','--silent'];
     args.push('--fork-block-number',String(pinnedBlockNumber));
     child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
     let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
@@ -2900,6 +2964,13 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       }
     }
 
+    const deploymentTraceIndex=await collectDeploymentTransactionTraceV1({
+      anvilUrl:anvil.url,outputRoot,
+      sourceIdentity:{campaignGenerationId:receipt.campaign.campaignGenerationId,
+        campaignId:receipt.campaign.campaignId,sourceArchiveSha256:archiveSha256},
+      chainId:forkChain.chainId,pinnedBlockNumber:anvil.pinnedBlockNumber,
+      pinnedBlockHash:anvil.pinnedBlockHash,initialBlock,scriptEnd
+    });
     if(deploymentOnly){
       // Only original package deployment/config scripts run on the fork. No fallback
       // deployments, fixture generation, Medusa, or ABI accounting telemetry.
@@ -2921,6 +2992,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
           requestedTargets:scanManifest.requestedTargets,resolvedTargets:scanManifest.resolvedTargets}}:{}),
         ...(deploymentProfile?.mode==='LIVE'?{liveDeployment:{status:'VERIFIED',blockNumber:initialBlock,blockHash:(await provider.getBlock(initialBlock)).hash,contracts:liveContracts},deploymentLimitation:'Historical deployment transaction and constructor execution were not replayed.'}:{}),
         policy:'PACKAGE_NATIVE_SCRIPT_EXECUTION_ONLY_NO_FALLBACK_NO_FUZZ_NO_MEDUSA_NO_ABI_TELEMETRY',
+        deploymentTraceIndex,
         packageDependencyInstall,foundryDependencyInstall,detectedScripts:detected,scriptDispositions:dispositions,
         attempts:deployment.attempts,
         ...(auditPreviewCreationTrace?{auditPreviewCreationTrace}:{}),
