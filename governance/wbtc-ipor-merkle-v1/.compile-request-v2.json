@@ -1,6 +1,6 @@
 {
   "mode": "compile_both_only",
-  "iteration": 5,
-  "source": "6e1434e78415d71b99a44ee67c78b8fb5b610645",
-  "optimization": "non-upgradeable Plugin base"
+  "iteration": 6,
+  "source": "3dd9e5b5998b69c044dddfb028b4dfd0d70488b1",
+  "optimization": "single existing stage body tally"
 }

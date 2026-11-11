@@ -1078,59 +1078,27 @@ contract WbtcIporStagedProposalProcessor is
     /// @param _stageId The stage index.
     /// @return approvals The number of approvals for the proposal.
     /// @return vetoes The number of vetoes for the proposal.
-    function _getProposalTally(
-        uint256 _proposalId,
-        uint16 _stageId
-    ) internal view virtual returns (uint256 approvals, uint256 vetoes) {
-        // Cheaper to do 2nd sload than to pass Proposal memory.
-        Proposal storage proposal = proposals[_proposalId];
-        Stage storage stage = stages[proposal.stageConfigIndex][_stageId];
-
-        uint256 length = stage.bodies.length;
-
-        for (uint256 i = 0; i < length; ++i) {
-            Body storage body = stage.bodies[i];
-
-            uint256 bodyProposalId = getBodyProposalId(_proposalId, _stageId, body.addr);
-
-            // A stage whose sub-proposals are still being created can not have passed.
-            // Returning here, before any result is counted, also means that no body after
-            // this one is consulted while its own id is still unwritten.
-            //
-            // The returned tally is chosen to fail `_thresholdsMet` whatever the stage's
-            // thresholds are: zero approvals is below any approval threshold of one or
-            // more, and `type(uint256).max` vetoes reaches any veto threshold of one or
-            // more, while a real veto count can never exceed the number of bodies. A stage
-            // with both thresholds at zero passes any tally by definition and is not
-            // protected by this.
-            if (bodyProposalId == PROPOSAL_IN_PROGRESS) {
-                return (0, type(uint256).max);
-            }
-
-            ResultType resultType = getBodyResult(_proposalId, _stageId, body.addr);
-
-            if (resultType != ResultType.None) {
-                // result was already reported
-                resultType == ResultType.Approval ? ++approvals : ++vetoes;
-            } else if (!body.isManual) {
-                // result was not reported yet
-                // Use low-level call to ensure that outer tx doesn't revert
-                // which would cause proposal to never be able to advance.
-                (bool success, bytes memory data) = body.addr.staticcall(
-                    abi.encodeCall(IProposal.hasSucceeded, (bodyProposalId))
-                );
-
-                if (success && data.length == 32) {
-                    bool succeeded = abi.decode(data, (bool));
-                    if (succeeded) {
-                        body.resultType == ResultType.Approval ? ++approvals : ++vetoes;
-                    }
-                }
-            }
+    /// @notice The configured SPP stages have precisely one body each.
+    /// Keep Aragon's existing result semantics without an unbounded loop.
+    function _getProposalTally(uint256 id, uint16 stageId)
+        internal view virtual returns (uint256 approvals, uint256 vetoes)
+    {
+        Proposal storage parent = proposals[id];
+        Body storage body = stages[parent.stageConfigIndex][stageId].bodies[0];
+        uint256 subId = bodyProposalIds[id][stageId][body.addr];
+        if (subId == PROPOSAL_IN_PROGRESS) return (0, type(uint256).max);
+        ResultType result = bodyResults[id][stageId][body.addr];
+        if (result == ResultType.Approval) return (1, 0);
+        if (result == ResultType.Veto) return (0, 1);
+        if (body.isManual) return (0, 0);
+        (bool ok, bytes memory returned) = body.addr.staticcall(
+            abi.encodeCall(IProposal.hasSucceeded, (subId))
+        );
+        if (ok && returned.length == 32 && abi.decode(returned, (bool))) {
+            return body.resultType == ResultType.Approval ? (1, 0) : (0, 1);
         }
+        return (0, 0);
     }
-
-
 
     /// @notice Internal helper function that decides if the stage's thresholds are satisfied.
     /// @param _proposalId The proposal id.
