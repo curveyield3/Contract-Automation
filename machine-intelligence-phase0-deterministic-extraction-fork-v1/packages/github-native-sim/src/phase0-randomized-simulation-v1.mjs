@@ -3195,8 +3195,16 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
     const liveContracts=[];
     if(deploymentProfile?.mode==='LIVE'){
       for(const target of deploymentProfile.contracts){
-        const artifact=artifactByQualified.get(target.qualifiedName);
-        if(!artifact)throw new Error('LIVE target has no admitted artifact: '+target.qualifiedName);
+        const admittedUnit=scanManifest?.resolvedTargets?.find(row=>
+          row.address?.toLowerCase()===target.address?.toLowerCase()&&
+          row.qualifiedName===target.qualifiedName)?.compilationUnitId??
+          target.compilationUnitId??null;
+        const options=artifacts.filter(row=>
+          row.sourceName+':'+row.contractName===target.qualifiedName&&
+          (!admittedUnit||row.compilationUnitId===admittedUnit));
+        if(options.length!==1)throw new Error('LIVE_TARGET_EXACT_COMPILATION_UNIT_AMBIGUOUS_OR_ABSENT: '+
+          target.qualifiedName+' unit='+(admittedUnit??'UNBOUND')+' count='+options.length);
+        const artifact=options[0];
         const code=await provider.getCode(target.address);
         const expected=typeof artifact.deployedBytecode==='string'?artifact.deployedBytecode:artifact.deployedBytecode?.object;
         const comparison=compareLiveRuntimeV1(code,expected,{allowScanMetadata:Boolean(scanManifest)});
