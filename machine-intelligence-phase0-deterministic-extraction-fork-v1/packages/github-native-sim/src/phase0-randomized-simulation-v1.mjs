@@ -391,12 +391,18 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
         const blockScopedOnly=block.transactions.length!==1;
         const codeStable=typeof before?.code==='string'&&typeof after?.code==='string'&&
           before.code===after.code&&after.bytecodeLength>0;
-        const codeForMatching=codeStable?after.code:null;
+        const receiptSuccess=row.receiptStatus===1||['0x1','0x01'].includes(String(row.receiptStatus??'').toLowerCase());
+        const matchingCreateFrames=row.mechanicalCallFrames.filter(frame=>
+          ['CREATE','CREATE2'].includes(String(frame.callType??'').toUpperCase())&&
+          frame.to?.toLowerCase()===address&&frame.effectiveReverted!==true);
+        const createdInThisTx=receiptSuccess&&before?.code==='0x'&&
+          typeof after?.code==='string'&&after.bytecodeLength>0&&matchingCreateFrames.length===1;
+        const codeForMatching=codeStable||createdInThisTx?after.code:null;
         const matches=codeForMatching?findSourceRuntimeTemplateMatchesV1({
           observedBytecode:codeForMatching,artifacts:compiledArtifacts}):[];
         const exactMatches=matches.filter(row=>row.matchClass==='EXACT_FULL_RUNTIME_BYTECODE');
         const maskedMatches=matches.filter(row=>row.matchClass!=='EXACT_FULL_RUNTIME_BYTECODE');
-        const exact=codeStable&&!blockScopedOnly&&exactMatches.length===1;
+        const exact=(codeStable||createdInThisTx)&&!blockScopedOnly&&exactMatches.length===1;
         row.runtimeCodeObservations.push({
           observationId:'RT-CODE-'+sha256(Buffer.from(JSON.stringify([
             scenarioIdentity,txHash,address,number,frameIds])).slice(0,40),
@@ -408,11 +414,13 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
             path:after.path,sha256:after.fileSha256,bytecodeSha256:after.bytecodeSha256,
             bytecodeLength:after.bytecodeLength}:null,
           boundaryCodeStable:codeStable,
+          confirmedCreationFrameIds:createdInThisTx?matchingCreateFrames.map(f=>f.frameId):[],
+          codeTransitionMode:codeStable?'STABLE_AT_BOUNDARIES':createdInThisTx?'CREATED_DURING_MINED_TRANSACTION':'UNRESOLVED_CODE_TRANSITION',
           exactTransactionBoundary:!blockScopedOnly,
           sourceBinding:exact?'EXACT_SOURCE_AND_RUNTIME_MATCH':
             !before?.code||!after?.code?'CODE_OBSERVATION_INCOMPLETE':
             blockScopedOnly?'MULTI_TRANSACTION_BLOCK_CODE_ORDER_UNRESOLVED':
-            before.code!==after.code?'CODE_CHANGED_ACROSS_TRANSACTION':
+            !codeStable&&!createdInThisTx?'CODE_CHANGED_WITHOUT_CONFIRMED_CREATION':
             exactMatches.length>1?'AMBIGUOUS_EQUAL_RUNTIME_BYTECODE':
             maskedMatches.length?'MASKED_COMPILER_SOURCE_TEMPLATE_CANDIDATES_ONLY':
             'NO_EXACT_RUNTIME_BYTECODE_MATCH',
@@ -426,7 +434,7 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
           evidenceStatus:'OBSERVED_LOCAL_FORK_BLOCK_BOUNDARY_CODE',
           limitations:[
             ...(blockScopedOnly?['MULTI_TRANSACTION_BLOCK_NO_PER_TX_CODE_ISOLATION']:[]),
-            ...(!codeStable?['CODE_STABILITY_NOT_ESTABLISHED']:[])
+            ...(!codeStable&&!createdInThisTx?['CODE_STABILITY_NOT_ESTABLISHED']:[])
           ]
         });
       }
