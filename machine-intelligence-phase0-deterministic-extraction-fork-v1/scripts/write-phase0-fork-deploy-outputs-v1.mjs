@@ -197,7 +197,7 @@ async function buildForkRelationshipGraphV1(){
   checkIdentity(runtimeIdentityIndex.value,'RUNTIME_IDENTITIES');
   checkIdentity(methods.value,'METHOD_CENSUS');
   const mkid=(prefix,...ids)=>prefix+sha256(Buffer.from(JSON.stringify([source,...ids]),'utf8')).slice(0,40);
-  const nodes=[],edges=[],unknowns=[],candidates=[],slitherJoins=[];
+  const nodes=[],edges=[],unknowns=[],candidates=[],slitherJoins=[],observedRuntimeFrames=[];
   const seenNode=new Set();
   const addNode=x=>{if(!seenNode.has(x.nodeId)){seenNode.add(x.nodeId);nodes.push(x)}return x.nodeId};
   const addUnknown=(kind,ref,details)=>unknowns.push({
@@ -438,6 +438,12 @@ async function buildForkRelationshipGraphV1(){
       }
       for(const frame of verifiedFrames){
         const frameBinding=runtimeByAddress.get(frame.runtimeCodeAddress)??null;
+        observedRuntimeFrames.push({...frame,
+          scenarioId:scenario,transactionHash:row.transactionHash,
+          sourceIdentity:frameBinding?.sourceIdentity??null,
+          runtimeBindingStatus:frameBinding?.sourceBinding??'UNKNOWN',
+          codeEvidenceRefs:frameBinding?.evidenceRefs??[],
+          callTraceEvidenceRef:pathToTrace});
         const frameid=addNode({nodeId:frame.frameId,kind:'EVM_CALL_FRAME',
           scenarioId:scenario,transactionHash:row.transactionHash,
           callType:frame.callType,framePath:frame.framePath,reverted:frame.effectiveReverted,
@@ -625,64 +631,167 @@ async function buildForkRelationshipGraphV1(){
       evidenceRefs:contractIdentityIndex.ref?[contractIdentityIndex.ref]:[]});
   }
   const units=staticFacts.value?.sourceUnitRecords??[];
+  const slitherFunctionIndex=new Map();
+  const exactSourceFunctionCountByUnit=new Map();
   for(const unit of units){
+    const unitSourceHashes=new Map((unit.sourceUnitRecords??[]).map(row=>[
+      row.sourceName,row.sourceSha256
+    ]));
     for(const contract of unit.contracts??[]){
+      const contractSourceName=String(contract.sourceName??'').replaceAll('\\','/');
+      const compiledContract=contractByIdentity.size?
+        [...contractByIdentity.values()].filter(id=>
+          id.compilationUnitId===unit.unitId&&
+          id.sourceName===contractSourceName&&
+          id.contractName===contract.contractName&&
+          id.sourceContentSha256===contract.sourceContentSha256):[];
+      const contractExact=compiledContract.length===1&&
+        unitSourceHashes.get(contractSourceName)===compiledContract[0].sourceContentSha256;
+      if(!contractExact)addUnknown('SLITHER_CONTRACT_EXACT_COMPILER_SOURCE_UNRESOLVED',
+        staticFacts.ref?.path??null,{
+          unitId:unit.unitId,contractName:contract.contractName,
+          declaredSource:contractSourceName,
+          compilerContractMatches:compiledContract.length});
       for(const f of contract.functions??[]){
-        const functionId=addNode({nodeId:mkid('NODE-FUNCTION-',unit.unitId,contract.contractName,f.soliditySignature??f.name),
-          kind:'SOURCE_FUNCTION',compilationUnitId:unit.unitId,contractName:contract.contractName,
-          signature:f.soliditySignature??f.name,sourceSpan:f.sourceSpan,
-          evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
-        const sourceFile=String(f.sourceSpan?.file??'').replaceAll('\\','/');
-        const verifiedMethodBindings=(methods.value?.methodCandidates??[]).filter(method=>
-          method.compilationUnitId===unit.unitId&&
-          method.contractName===contract.contractName&&
-          method.signature===(f.soliditySignature??f.name)&&
-          method.runtimeAddress&&
-          byRuntime.get(method.runtimeAddress.toLowerCase())?.compilationUnitId===unit.unitId&&
-          byRuntime.get(method.runtimeAddress.toLowerCase())?.sourceName===method.sourceName&&
-          (sourceFile===method.sourceName||sourceFile.endsWith('/'+method.sourceName)));
-        for(const binding of verifiedMethodBindings){
-          const address=binding.runtimeAddress.toLowerCase();
-          const targetId=mkid('NODE-RUNTIME-',scenario,address);
-          const refSet=[staticFacts.ref,methods.ref,deploy.ref].filter(Boolean);
-          const joinId=mkid('SLIT-JOIN-',functionId,address,binding.signature);
-          slitherJoins.push({joinId,sourceFunctionId:functionId,runtimeAddress:address,
-            compilationUnitId:unit.unitId,sourceName:binding.sourceName,
-            canonicalSignature:binding.signature,selector:binding.selector,
-            status:'COMPILER_SOURCE_AND_BYTE_EXACT_RUNTIME_BOUND',
-            observationClass:'STATIC_SOURCE_FUNCTION_JOIN_NOT_A_CALL_OBSERVATION',evidenceRefs:refSet});
-          edges.push({edgeId:mkid('EDGE-SOURCE-TO-RUNTIME-',joinId),
-            kind:'SOURCE_FUNCTION_BOUND_TO_RUNTIME_CODE',from:functionId,to:targetId,
-            observation:'EXACT_COMPILATION_AND_RUNTIME_IDENTITY_NOT_CALL_EXECUTION',
-            evidenceRefs:refSet});
+        const signature=String(f.soliditySignature??f.fullName??f.name??'');
+        const declaringSource=String(f.declaringSourceName??f.sourceSpan?.file??'').replaceAll('\\','/');
+        const originalSourceHash=unitSourceHashes.get(declaringSource)??null;
+        const identityExact=Boolean(contractExact&&originalSourceHash&&
+          compilerUnitSourceHashes.get(unit.unitId+'::'+declaringSource)===originalSourceHash);
+        const functionId=addNode({
+          nodeId:mkid('NODE-FUNCTION-',unit.unitId,contractSourceName,
+            contract.contractName,declaringSource,signature,f.sourceSpan?.start??null),
+          kind:'SLITHER_SOURCE_FUNCTION',
+          compilationUnitId:unit.unitId,sourceName:declaringSource,
+          contractSourceName,contractName:contract.contractName,
+          signature,sourceSpan:f.sourceSpan,
+          originalSourceSha256:originalSourceHash,
+          staticSourceBindingStatus:identityExact?'EXACT_COMPILER_UNIT_AND_SOURCE_BYTES':
+            'SLITHER_SOURCE_REFERENCE_UNRESOLVED',
+          evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]
+        });
+        if(identityExact){
+          const k=[unit.unitId,contractSourceName,contract.contractName,signature].join('::');
+          const arr=slitherFunctionIndex.get(k)??[];
+          arr.push({functionId,sourceName:declaringSource,sourceSha256:originalSourceHash,
+            sourceSpan:f.sourceSpan});
+          slitherFunctionIndex.set(k,arr);
+          exactSourceFunctionCountByUnit.set(unit.unitId,
+            (exactSourceFunctionCountByUnit.get(unit.unitId)??0)+1);
+        }else{
+          addUnknown('SLITHER_FUNCTION_DECLARING_SOURCE_UNBOUND',
+            staticFacts.ref?.path??null,{
+              functionId,unitId:unit.unitId,contractName:contract.contractName,
+              declaringSource,signature});
         }
+        const evidenceClass=identityExact?'SOURCE_STATIC_NOT_RUNTIME':'SOURCE_STATIC_SOURCE_UNRESOLVED';
         for(const [direction,variables] of [['READ',f.readStorageIds],['WRITE',f.writtenStorageIds]]){
           for(const [n,v] of (variables??[]).entries()){
-            const varId=addNode({nodeId:mkid('NODE-STATE-VAR-',unit.unitId,contract.contractName,v.name),
-              kind:'STATIC_STORAGE_VARIABLE',compilationUnitId:unit.unitId,contractName:contract.contractName,
-              variableName:v.name,sourceSpan:v.sourceSpan,evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
-            edges.push({edgeId:mkid('EDGE-SLITHER-VAR-',functionId,varId,direction,n),
-              kind:'SLITHER_FUNCTION_'+direction+'S_VARIABLE',from:functionId,to:varId,
-              observation:'SOURCE_STATIC_NOT_RUNTIME',evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
+            const variableId=addNode({
+              nodeId:mkid('NODE-STATE-VAR-',unit.unitId,contractSourceName,contract.contractName,
+                v.name,v.sourceSpan?.file??null,v.sourceSpan?.start??null),
+              kind:'SLITHER_STATIC_STORAGE_VARIABLE',
+              compilationUnitId:unit.unitId,sourceName:v.sourceSpan?.file??declaringSource,
+              contractName:contract.contractName,variableName:v.name,
+              sourceSpan:v.sourceSpan,
+              evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
+            edges.push({edgeId:mkid('EDGE-SLITHER-VAR-',functionId,variableId,direction,n),
+              kind:'SLITHER_FUNCTION_'+direction+'S_VARIABLE',from:functionId,to:variableId,
+              observation:evidenceClass,sourceFunctionId:functionId,
+              evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
           }
         }
         for(const [n,call] of (f.callSites??[]).entries()){
-          edges.push({edgeId:mkid('EDGE-SLITHER-CALL-',functionId,n,call.ir),
-            kind:'SLITHER_STATIC_CALLSITE',from:functionId,to:null,
+          const callNode=addNode({
+            nodeId:mkid('NODE-SLITHER-CALLSITE-',functionId,n,
+              call.sourceSpan?.start??null,call.operationOrdinal??null),
+            kind:'SLITHER_IR_CALLSITE',
+            compilationUnitId:unit.unitId,sourceFunctionId:functionId,
             callKind:call.kind,calleeSignature:call.calleeSignature??null,
-            sourceSpan:call.sourceSpan,observation:'SOURCE_STATIC_NOT_RUNTIME',
+            destination:call.destination??null,arguments:call.arguments??[],
+            callValue:call.callValue??null,returnedInto:call.returnedInto??null,
+            sourceSpan:call.sourceSpan,
+            evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
+          edges.push({edgeId:mkid('EDGE-SLITHER-CALL-',functionId,callNode,n),
+            kind:'SLITHER_STATIC_CALLSITE',from:functionId,to:callNode,
+            callKind:call.kind,calleeSignature:call.calleeSignature??null,
+            sourceSpan:call.sourceSpan,observation:evidenceClass,
             evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
         }
         for(const [n,dep] of (f.variableDependencies??[]).entries()){
-          edges.push({edgeId:mkid('EDGE-SLITHER-DATA-',functionId,n,dep.written?.name,dep.dependsOn?.name),
+          edges.push({edgeId:mkid('EDGE-SLITHER-DATA-',functionId,n,
+            dep.written?.name,dep.dependsOn?.name),
             kind:'SLITHER_STATIC_DATA_DEPENDENCY',from:functionId,to:null,
-            written:dep.written,dependsOn:dep.dependsOn,observation:'SOURCE_STATIC_NOT_RUNTIME',
+            written:dep.written,dependsOn:dep.dependsOn,context:dep.context??null,
+            observation:evidenceClass,
             evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
         }
-        if((f.limitations??[]).length)addUnknown('SLITHER_FUNCTION_LIMITATIONS',staticFacts.ref?.path??null,
+        for(const [n,ssa] of (f.directIrSsaDependencies??[]).entries()){
+          edges.push({edgeId:mkid('EDGE-SLITHER-SSA-',functionId,
+            ssa.sourceNodeId,ssa.operationOrdinal,ssa.operandOrdinal,n),
+            kind:'SLITHER_DIRECT_SSA_DATA_DEPENDENCY',
+            from:functionId,to:null,
+            operatorType:ssa.operatorType,read:ssa.read,written:ssa.written,
+            sourceNodeId:ssa.sourceNodeId,sourceSpan:ssa.sourceSpan,
+            observation:evidenceClass,
+            evidenceRefs:staticFacts.ref?[staticFacts.ref]:[]});
+        }
+        if((f.limitations??[]).length)addUnknown(
+          'SLITHER_FUNCTION_FACT_LIMITATIONS',staticFacts.ref?.path??null,
           {functionId,limitations:f.limitations});
       }
     }
+  }
+  for(const failed of staticFacts.value?.unavailableUnitRecords??[])
+    addUnknown('SLITHER_RELATIONAL_COMPILATION_UNIT_UNAVAILABLE',staticFacts.ref?.path??null,
+      {unitId:failed.unitId,analysisStatus:failed.analysisStatus,limitations:failed.limitations??[]});
+  // Runtime function binding is a two-input join. Code identity and selector
+  // must be independently exact; Slither does NOT prove that a runtime call
+  // happened simply because the function exists in its source AST.
+  for(const frame of observedRuntimeFrames){
+    const identity=frame.sourceIdentity;
+    if(frame.runtimeBindingStatus!=='EXACT_SOURCE_AND_RUNTIME_MATCH'||!identity)continue;
+    if(frame.effectiveReverted)continue; // still in trace; no committed-effect inference
+    const artifact=compilerByIdentity.get([
+      identity.compilationUnitId,identity.sourceName,identity.contractName].join('::'));
+    if(!artifact)continue;
+    const matchingSignatures=Object.entries(artifact.methodIdentifiers??{})
+      .filter(([,selector])=>('0x'+String(selector).replace(/^0x/i,'').toLowerCase())===
+        String(frame.inputSelector??'').toLowerCase());
+    if(matchingSignatures.length!==1)continue;
+    const signature=matchingSignatures[0][0];
+    const exact=slitherFunctionIndex.get([
+      identity.compilationUnitId,identity.sourceName,identity.contractName,signature].join('::'))??[];
+    if(exact.length!==1){
+      addUnknown('CALL_FRAME_TO_SLITHER_FUNCTION_NOT_UNIQUELY_PROVEN',
+        frame.callTraceEvidenceRef?.path??null,{
+          frameId:frame.frameId,transactionHash:frame.transactionHash,
+          targetSourceName:identity.sourceName,selector:frame.inputSelector,
+          slitherFunctionMatches:exact.length});continue;
+    }
+    const fn=exact[0];
+    const evidenceRefs=[staticFacts.ref,frame.callTraceEvidenceRef,
+      ...(frame.codeEvidenceRefs??[])].filter(Boolean);
+    const joinId=mkid('SLIT-JOIN-',frame.scenarioId,frame.transactionHash,
+      frame.frameId,fn.functionId,identity.compilationUnitId,
+      frame.storageContextAddress);
+    slitherJoins.push({
+      joinId,sourceFunctionId:fn.functionId,runtimeAddress:frame.runtimeCodeAddress,
+      observedFrameId:frame.frameId,storageAddress:frame.storageContextAddress,
+      transactionHash:frame.transactionHash,scenarioId:frame.scenarioId,
+      compilationUnitId:identity.compilationUnitId,sourceName:identity.sourceName,
+      canonicalSignature:signature,selector:frame.inputSelector,
+      status:'EXACT_SOURCE_FUNCTION_AND_OBSERVED_CALL_FRAME_CODE',
+      observationClass:'RUNTIME_TARGET_RESOLVED_FROM_VERIFIED_CALL_FRAME_NOT_SLITHER_EXECUTION',
+      evidenceRefs
+    });
+    edges.push({edgeId:mkid('EDGE-SLITHER-FUNCTION-FRAME-',joinId),
+      kind:'SOURCE_FUNCTION_OBSERVED_IN_FORK_FRAME',
+      from:fn.functionId,to:frame.frameId,
+      observedFrameId:frame.frameId,storageContextAddress:frame.storageContextAddress,
+      runtimeCodeAddress:frame.runtimeCodeAddress,
+      observation:'EXACT_COMPILER_SOURCE_JOIN_WITH_OBSERVED_FORK_CALL',
+      evidenceRefs});
   }
   if(!units.length)addUnknown('SLITHER_RELATIONSHIP_ANALYSIS_NOT_PROVEN',
     staticFacts.ref?.path??null,{reason:'NO_AVAILABLE_PER_UNIT_SLITHER_RECORDS'});
