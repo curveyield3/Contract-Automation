@@ -10,7 +10,7 @@ import { resolveCompiledSourceFile } from './phase0-compiled-source-resolve-v1.m
 import { generateBuildSbomV1 } from './sbom-v1.mjs';
 import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligence-technical-v1.mjs';
 import { writeReviewInventoryOutputsV1 } from './adr-review-inventory-v1.mjs';
-import { buildExecutionArtifactBundleV2 } from './phase0-execution-input-v2.mjs';
+import { buildExecutionArtifactBundleV2, buildContractIdentityIndexV1 } from './phase0-execution-input-v2.mjs';
 import { compileWithPrivateCacheV1 } from './phase0-private-build-cache-v1.mjs';
 import { loadAuditScope, sourceIsInScope } from './phase0-audit-scope-v1.mjs';
 
@@ -923,6 +923,11 @@ async function main(){
 
   const build=await withProgressStage('compile-exact-build',()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
   const executionBuildArtifacts=buildExecutionArtifactBundleV2({request:pseudo,build});
+  const buildArtifactBundleBytes=Buffer.from(JSON.stringify(executionBuildArtifacts,null,2)+'\n','utf8');
+  const buildArtifactBundleSha256=sha256(buildArtifactBundleBytes);
+  const contractIdentityIndex=buildContractIdentityIndexV1({
+    request:pseudo,build,artifactBundle:executionBuildArtifacts,buildArtifactBundleSha256
+  });
   const effectiveCfg={...cfg,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
   let slither;
   try {
@@ -999,7 +1004,7 @@ async function main(){
     campaignId:request.campaignId,
     campaignGenerationId:request.campaignGenerationId,
     sourceArchiveSha256:request.source.archiveSha256,
-    buildBundleSha256:null, // Exact accepted bundle SHA is bound only at canonical publication; configuration digest is not a bundle.
+    buildBundleSha256:buildArtifactBundleSha256, // Digest of the actual UTF-8 build artifact bundle written below.
     slitherVersion:'0.11.6',
     sourceUnitRecords:(slither.relationalUnitResults??[]).filter(x=>x?.analysisStatus==='SLITHER_RELATIONAL_FACTS_AVAILABLE'),
     compiledMethodCandidates,
@@ -1009,6 +1014,7 @@ async function main(){
   const files=[
     ['BUILD_AND_SOURCE_IDENTITY_v1.json',buildIdentity],
     ['PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json',executionBuildArtifacts],
+    ['CONTRACT_IDENTITY_INDEX_v1.json',contractIdentityIndex],
     ['SBOM_v1.json',sbom],
     ['SLITHER_v1.json',slither],
     ['SLITHER_RELATIONAL_FACTS_v1.json',relationalFacts],

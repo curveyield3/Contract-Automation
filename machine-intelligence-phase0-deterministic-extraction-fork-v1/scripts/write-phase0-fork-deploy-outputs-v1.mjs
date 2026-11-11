@@ -49,6 +49,7 @@ const writeVerified=async(source,targetRel)=>{
 const staticMap=[
   ['BUILD_AND_SOURCE_IDENTITY_v1.json','evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'],
   ['PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json','evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'],
+  ['CONTRACT_IDENTITY_INDEX_v1.json','evidence/phase0/CONTRACT_IDENTITY_INDEX_v1.json'],
   ['SBOM_v1.json','evidence/build/SBOM_v1.json'],
   ['SLITHER_v1.json','evidence/static-analysis/SLITHER_v1.json'],
   ['SLITHER_RELATIONAL_FACTS_v1.json','evidence/static-analysis/SLITHER_RELATIONAL_FACTS_v1.json'],
