@@ -622,6 +622,56 @@ async function buildForkRelationshipGraphV1(){
           sourceRuntimeBindingStatus:frameBinding?.sourceBinding??'CODE_NOT_CAPTURED',
           inputSelector:frame.inputSelector,
           evidenceRefs:[pathToTrace,...(frameBinding?.evidenceRefs??[])]});
+        if(frame.runtimeCodeAddress&&frameBinding){
+          const codeNodeId=mkid('NODE-CODE-AT-TX-',scenario,
+            row.transactionHash,frame.runtimeCodeAddress);
+          edges.push({edgeId:mkid('EDGE-FRAME-CODE-BOUNDARY-',frame.frameId,codeNodeId),
+            kind:'OBSERVED_FRAME_TARGETS_TRANSACTION_CODE',
+            from:frameid,to:codeNodeId,
+            observedFrameId:frame.frameId,transactionHash:row.transactionHash,
+            runtimeCodeAddress:frame.runtimeCodeAddress,
+            bindingStatus:frameBinding.sourceBinding,
+            observation:'OBSERVED_LOCAL_FORK_BLOCK_CODE_BOUNDARY',
+            evidenceRefs:[pathToTrace,...(frameBinding.evidenceRefs??[])].filter(Boolean)});
+          if(frameBinding.sourceBinding==='EXACT_SOURCE_AND_RUNTIME_MATCH'&&
+             frameBinding.sourceIdentity){
+            const exactKey=[
+              frameBinding.sourceIdentity.compilationUnitId,
+              frameBinding.sourceIdentity.sourceName,
+              frameBinding.sourceIdentity.contractName
+            ].join('::');
+            const declaredContractId=contractNodeByUnitQualified.get(exactKey)??null;
+            if(declaredContractId){
+              edges.push({edgeId:mkid('EDGE-EXACT-CODE-COMPILER-',codeNodeId,declaredContractId),
+                kind:'OBSERVED_RUNTIME_CODE_EXACTLY_MATCHES_COMPILER_CONTRACT',
+                from:codeNodeId,to:declaredContractId,
+                compilationUnitId:frameBinding.sourceIdentity.compilationUnitId,
+                transactionHash:row.transactionHash,
+                observation:'EXACT_ORIGINAL_COMPILER_BYTECODE_EQUALITY',
+                evidenceRefs:[compilerBundle.ref,contractIdentityIndex.ref,
+                  ...(frameBinding.evidenceRefs??[])].filter(Boolean)});
+            }
+          }
+        }
+        if(frame.storageContextAddress){
+          const storageContextId=addNode({
+            nodeId:mkid('NODE-RUNTIME-',scenario,frame.storageContextAddress),
+            kind:'RUNTIME_ADDRESS',scenarioId:scenario,
+            address:frame.storageContextAddress,sourceIdentity:null,
+            bindingStatus:'ADDRESS_ONLY_USE_TRANSACTION_CODE_OBSERVATIONS',
+            evidenceRefs:[pathToTrace].filter(Boolean)});
+          edges.push({
+            edgeId:mkid('EDGE-FRAME-USES-STORAGE-CONTEXT-',frame.frameId,storageContextId),
+            kind:'OBSERVED_FRAME_EXECUTION_STORAGE_ADDRESS',
+            from:frameid,to:storageContextId,
+            transactionHash:row.transactionHash,observedFrameId:frame.frameId,
+            callType:frame.callType,
+            codeAddress:frame.runtimeCodeAddress,
+            storageAddress:frame.storageContextAddress,
+            observation:'DERIVED_FROM_VERIFIED_EVM_CALL_TREE',
+            evidenceRefs:[pathToTrace].filter(Boolean)
+          });
+        }
         const from=frame.from?.toLowerCase()??null,to=frame.to?.toLowerCase()??null;
         edges.push({edgeId:mkid('EDGE-TX-FRAME-',row.transactionHash,frame.frameId),
           kind:'TRANSACTION_CONTAINS_FRAME',from:txid,to:frameid,
