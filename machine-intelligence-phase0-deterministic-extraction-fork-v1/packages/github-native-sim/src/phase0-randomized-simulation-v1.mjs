@@ -251,7 +251,7 @@ async function persistCompleteForkRpcJsonV1({base,scenarioId,txHash,chainId,bloc
     rawSha256:shaRaw,bytes:raw.length,partCount:entries.length,storage:'COMPLETE_VERIFIED_JSON_PARTS'};
 }
 
-async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceIdentity,chainId,pinnedBlockNumber,pinnedBlockHash,initialBlock,scriptEnd}){
+async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceIdentity,chainId,pinnedBlockNumber,pinnedBlockHash,initialBlock,scriptEnd,compiledArtifacts=[]}){
   const scenarioIdentity={...sourceIdentity,chainId,pinnedBlockNumber,pinnedBlockHash,
     branch:'SOURCE_DEPLOYMENT',runId:String(process.env.GITHUB_RUN_ID??'LOCAL'),
     runAttempt:String(process.env.GITHUB_RUN_ATTEMPT??'1')};
@@ -330,6 +330,87 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
           if(kind!=='PRESTATE_DIFF')limitations.push({type:kind+'_UNAVAILABLE',transactionHash:txHash});
         }
       }
+      // Record the actual source-runtime identity of every observed EVM
+      // callee, including external/fork-preexisting contracts. One address
+      // per transaction, every frame occurrence retained in frameIds.
+      row.runtimeCodeObservations=[];
+      const byTarget=new Map();
+      for(const frame of row.mechanicalCallFrames){
+        const address=String(frame.to??'').toLowerCase();
+        if(!/^0x[0-9a-f]{40}$/.test(address))continue;
+        const bucket=byTarget.get(address)??[];
+        bucket.push(frame.frameId);byTarget.set(address,bucket);
+      }
+      for(const [address,frameIds] of [...byTarget.entries()].sort(([a],[b])=>a.localeCompare(b))){
+        const observations=[];
+        for(const [timepoint,blockNumber] of [
+          ['BEFORE_BLOCK',number-1],['AFTER_BLOCK',number]
+        ]){
+          try{
+            const code=await rpc(anvilUrl,'eth_getCode',[address,'0x'+blockNumber.toString(16)]);
+            if(!/^0x(?:[0-9a-f]{2})*$/i.test(String(code??'')))
+              throw new Error('ETH_GETCODE_INVALID_HEX');
+            const raw=Buffer.from(String(code).toLowerCase()+'\n','utf8');
+            const relative=path.posix.join('evidence/phase0/scenarios',scenarioId,
+              'transactions',String(txHash).toLowerCase(),'runtime-code',
+              address+'-'+timepoint.toLowerCase()+'.hex');
+            const target=path.join(base,'runtime-code',address+'-'+timepoint.toLowerCase()+'.hex');
+            await fs.mkdir(path.dirname(target),{recursive:true});
+            await fs.writeFile(target,raw,{flag:'wx'});
+            const check=await fs.readFile(target);
+            if(check.length!==raw.length||sha256(check)!==sha256(raw))
+              throw new Error('RUNTIME_BYTECODE_CAPTURE_READBACK_MISMATCH');
+            observations.push({timepoint,blockNumber,path:relative,
+              fileSha256:sha256(raw),bytecodeSha256:sha256(Buffer.from(code.slice(2),'hex')),
+              bytecodeLength:(code.length-2)/2,code});
+          }catch(error){
+            observations.push({timepoint,blockNumber,status:'UNAVAILABLE',
+              errorCode:error?.code??'ETH_GETCODE_OR_FILE_READBACK_FAILED'});
+          }
+        }
+        const before=observations.find(o=>o.timepoint==='BEFORE_BLOCK');
+        const after=observations.find(o=>o.timepoint==='AFTER_BLOCK');
+        const blockScopedOnly=block.transactions.length!==1;
+        const codeStable=typeof before?.code==='string'&&typeof after?.code==='string'&&
+          before.code===after.code&&after.bytecodeLength>0;
+        const codeForMatching=codeStable?after.code:null;
+        const matches=codeForMatching?compiledArtifacts.filter(artifact=>{
+          const expected=String(artifact.deployedBytecode??'').toLowerCase();
+          return /^0x[0-9a-f]+$/.test(expected)&&expected===codeForMatching&&
+            !Object.keys(artifact.immutableReferences??{}).length&&
+            !Object.keys(artifact.deployedLinkReferences??{}).length;
+        }):[];
+        const exact=codeStable&&!blockScopedOnly&&matches.length===1;
+        row.runtimeCodeObservations.push({
+          observationId:'RT-CODE-'+sha256(Buffer.from(JSON.stringify([
+            scenarioIdentity,txHash,address,number,frameIds])).slice(0,40),
+          scenarioId,transactionHash:txHash,blockNumber:number,address,frameIds,
+          codeAtBlockStart:before&&before.code!==undefined?{
+            path:before.path,sha256:before.fileSha256,bytecodeSha256:before.bytecodeSha256,
+            bytecodeLength:before.bytecodeLength}:null,
+          codeAtBlockEnd:after&&after.code!==undefined?{
+            path:after.path,sha256:after.fileSha256,bytecodeSha256:after.bytecodeSha256,
+            bytecodeLength:after.bytecodeLength}:null,
+          boundaryCodeStable:codeStable,
+          exactTransactionBoundary:!blockScopedOnly,
+          sourceBinding:exact?'EXACT_SOURCE_AND_RUNTIME_MATCH':
+            !before?.code||!after?.code?'CODE_OBSERVATION_INCOMPLETE':
+            blockScopedOnly?'MULTI_TRANSACTION_BLOCK_CODE_ORDER_UNRESOLVED':
+            before.code!==after.code?'CODE_CHANGED_ACROSS_TRANSACTION':
+            matches.length>1?'AMBIGUOUS_EQUAL_RUNTIME_BYTECODE':
+            'NO_EXACT_RUNTIME_BYTECODE_MATCH',
+          compilationUnitId:exact?matches[0].compilationUnitId:null,
+          sourceName:exact?matches[0].sourceName:null,
+          contractName:exact?matches[0].contractName:null,
+          matchCandidateCount:matches.length,
+          candidateCompilationUnitIds:exact?[]:matches.map(m=>m.compilationUnitId).filter(Boolean),
+          evidenceStatus:'OBSERVED_LOCAL_FORK_BLOCK_BOUNDARY_CODE',
+          limitations:[
+            ...(blockScopedOnly?['MULTI_TRANSACTION_BLOCK_NO_PER_TX_CODE_ISOLATION']:[]),
+            ...(!codeStable?['CODE_STABILITY_NOT_ESTABLISHED']:[])
+          ]
+        });
+      }
       rows.push(row);
     }
   }
@@ -370,7 +451,9 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
     status:expectedTransactions===receiptsRecorded&&expectedTransactions===callTraces&&
       expectedTransactions===opcodeTraces&&limitations.length===0
         ?'COMPLETE':'INCOMPLETE_WITH_TYPED_LIMITATIONS',
-    rows,actualCreations,limitations};
+    rows,actualCreations,
+    observedRuntimeTargetCount:rows.reduce((n,row)=>n+(row.runtimeCodeObservations?.length??0),0),
+    limitations};
   const raw=JSON.stringify(manifest,null,2)+'\n';
   await fs.writeFile(path.join(evidenceRoot,'DEPLOYMENT_TRANSACTION_TRACE_INDEX_v1.json'),raw);
 
@@ -3326,7 +3409,8 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
       sourceIdentity:{campaignGenerationId:receipt.campaign.campaignGenerationId,
         campaignId:receipt.campaign.campaignId,sourceArchiveSha256:archiveSha256},
       chainId:forkChain.chainId,pinnedBlockNumber:anvil.pinnedBlockNumber,
-      pinnedBlockHash:anvil.pinnedBlockHash,initialBlock,scriptEnd
+      pinnedBlockHash:anvil.pinnedBlockHash,initialBlock,scriptEnd,
+      compiledArtifacts:sharedExecutionInputs.artifacts
     });
     const observedCreations=deploymentTraceIndex.actualCreations??[];
     const committedCreationOccurrences=observedCreations.filter(row=>
@@ -3338,7 +3422,15 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
         creationSourceEvidenceRef:deploymentTraceIndex.manifestRef
       }))
     });
-    const allResolvedDeploymentRows=[...resolvedDeploymentRows,...factoryRuntimeIdentityRows];
+    const frameRuntimeIdentityRows=(deploymentTraceIndex.rows??[]).flatMap(record=>
+      (record.runtimeCodeObservations??[]).map(item=>({
+        ...item,origin:'OBSERVED_MINED_TRANSACTION_CODE_AT_BLOCK_BOUNDARIES',
+        runtimeIdentityContext:'TX_BLOCK_SCOPED',
+        observedRuntimeSha256:item.codeAtBlockEnd?.bytecodeSha256??null
+      })));
+    const allResolvedDeploymentRows=[
+      ...resolvedDeploymentRows,...factoryRuntimeIdentityRows,...frameRuntimeIdentityRows
+    ];
     runtimeIdentityIndex.rows=allResolvedDeploymentRows;
     runtimeIdentityIndex.createdContractOccurrences=observedCreations;
     runtimeIdentityIndex.status=allResolvedDeploymentRows.every(row=>
