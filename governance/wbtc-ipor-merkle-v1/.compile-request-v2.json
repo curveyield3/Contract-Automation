@@ -1,5 +1,5 @@
 {
-  "purpose": "3-contract compiler sizes",
-  "version": 11,
+  "purpose": "EIP170 three-contract size confirmation",
+  "version": 12,
   "tests": false
 }
