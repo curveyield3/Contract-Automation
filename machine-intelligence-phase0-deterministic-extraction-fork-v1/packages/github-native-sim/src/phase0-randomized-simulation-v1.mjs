@@ -185,7 +185,7 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
       await fs.mkdir(base,{recursive:true});
       const row={blockNumber:number,transactionOrdinal:ordinal,transactionHash:txHash,
         frameIdentity:{scenarioId,branchId:'SOURCE_DEPLOYMENT',attemptOrdinal:ordinal},
-        evidence:[],limitations:[]};
+        evidence:[],limitations:[],mechanicalCallFrames:[]};
       for(const [kind,method,params] of [
         ['MINED_RECEIPT','eth_getTransactionReceipt',[txHash]],
         ['CALL_TRACE','debug_traceTransaction',[txHash,{tracer:'callTracer',timeout:'120s'}]],
@@ -201,6 +201,32 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
           row.evidence.push({kind,path:path.posix.join('evidence/phase0/scenarios',scenarioId,
             'transactions',String(txHash).toLowerCase(),name),sha256:sha256(Buffer.from(raw,'utf8')),
             bytes:Buffer.byteLength(raw,'utf8')});
+          if(kind==='CALL_TRACE'){
+            // Retain every observed call-frame occurrence, including reverted children.
+            // A call frame proves execution only; bytecode-to-source and proxy storage
+            // context are unresolved until the graph's exact identity join.
+            const visit=(frame,framePath,parentFrameId)=>{
+              if(!frame||typeof frame!=='object')return;
+              const frameId='FRAME-'+sha256(Buffer.from(JSON.stringify({
+                scenarioIdentity,transactionHash:txHash,framePath
+              }),'utf8')).slice(0,40);
+              const input=typeof frame.input==='string'?frame.input:null;
+              row.mechanicalCallFrames.push({frameId,parentFrameId,framePath,
+                transactionHash:txHash,callType:frame.type??'UNKNOWN',
+                from:frame.from??null,to:frame.to??null,
+                value:frame.value??null,gasUsed:frame.gasUsed??null,
+                inputSelector:input&&/^0x[0-9a-fA-F]{8}/.test(input)?input.slice(0,10).toLowerCase():null,
+                inputSha256:input?sha256(Buffer.from(input,'utf8')):null,
+                error:frame.error??null,reverted:Boolean(frame.error),
+                runtimeCodeIdentityId:null,storageContextAddress:null,
+                bindingStatus:'SOURCE_AND_STORAGE_CONTEXT_UNRESOLVED',
+                rawCallTraceRef:path.posix.join('evidence/phase0/scenarios',scenarioId,
+                  'transactions',String(txHash).toLowerCase(),'CALL_TRACE.json')});
+              for(const [childIndex,child] of (frame.calls??[]).entries())
+                visit(child,framePath+'/'+childIndex,frameId);
+            };
+            visit(result,'0',null);
+          }
           if(kind==='MINED_RECEIPT')receiptsRecorded++;
           if(kind==='CALL_TRACE')callTraces++;
           if(kind==='OPCODE_TRACE')opcodeTraces++;
@@ -215,6 +241,9 @@ async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceId
   const manifest={schemaVersion:'mi-phase0-deployment-transaction-trace-v1',scenarioId,
     sourceIdentity:scenarioIdentity,initialBlock,scriptEnd,
     expectedTransactions,receiptsRecorded,callTraces,opcodeTraces,
+    callFrameCount:rows.reduce((total,row)=>total+row.mechanicalCallFrames.length,0),
+    observedCrossContractFrameCount:rows.reduce((total,row)=>total+row.mechanicalCallFrames.filter(frame=>
+      frame.from&&frame.to&&frame.from.toLowerCase()!==frame.to.toLowerCase()).length,0),
     status:expectedTransactions===receiptsRecorded&&expectedTransactions===callTraces&&
       expectedTransactions===opcodeTraces&&limitations.length===0
         ?'COMPLETE':'INCOMPLETE_WITH_TYPED_LIMITATIONS',
