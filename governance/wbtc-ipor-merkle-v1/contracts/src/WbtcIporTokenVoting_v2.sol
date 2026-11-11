@@ -19,6 +19,9 @@ import {IERC20MetadataUpgradeable} from "@openzeppelin/contracts-upgradeable/tok
 
 /// @notice The sole auxiliary contract is a fixed-image RISC Zero proof verifier.
 interface IWbtcIporZkProofVerifier {
+    function dao() external view returns (address);
+    function votingPlugin() external view returns (address);
+    function guestImageId() external view returns (bytes32);
     function verifySnapshot(bytes calldata seal, bytes calldata journal) external view returns (bool);
 }
 interface IMorphoBlueMarket {
@@ -146,6 +149,13 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     mapping(uint256 => uint256) public spamFlaggedPower;
     mapping(uint256 => uint256) public frozenEligiblePower;
     mapping(uint256 => uint256) public frozenQuorumDenominator;
+    mapping(uint256 => uint64) public proofDeadline;
+    mapping(uint256 => bytes) private pendingMetadata;
+    mapping(uint256 => uint64) private proposalDuration;
+    mapping(uint256 => uint64) private proposalReviewDuration;
+    mapping(uint256 => uint32) private proposalQuorumPpm;
+    mapping(uint256 => uint32) private proposerThresholdPpmAt;
+    uint256 private proposalSerial;
 
     event GuardianReview(uint256 indexed proposalId, bool approved);
     event ProposalBondSettled(uint256 indexed proposalId, bool forfeited, uint256 amount);
@@ -223,6 +233,8 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     function bindProofVerifier(IWbtcIporZkProofVerifier verifier) external onlyDaoExecution {
         if (address(proofVerifier) != address(0) || address(verifier).code.length == 0)
             revert InvalidGovernanceProposal();
+        if (verifier.dao() != address(dao()) || verifier.votingPlugin() != address(this)
+            || verifier.guestImageId() == bytes32(0)) revert InvalidGovernanceProposal();
         proofVerifier = verifier;
         emit ProofVerifierBound(address(verifier));
     }
@@ -296,7 +308,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
             value: 0,
             data: abi.encodeWithSelector(this.permanentlyRemoveDaoGuardian.selector)
         });
-        proposalId = _createWeightedProposal(ProposalKind.RemoveDaoGuardian, _metadata, actions_, _msgSender());
+        proposalId = _createPendingMerkle(ProposalKind.RemoveDaoGuardian, _metadata, actions_, _msgSender());
     }
 
     function _createWeightedProposal(
@@ -314,7 +326,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
 
         // The voting source MUST freeze the complete census from a single
         // state. No current market balances may be re-read when votes arrive.
-        id = _createProposalId(keccak256(abi.encode(kind, actions_, metadata)));
+        id = _createProposalId(keccak256(abi.encode(kind, actions_, metadata, ++proposalSerial)));
         Proposal storage proposal_ = proposals[id];
         if (proposal_.parameters.snapshotTimepoint != 0) revert ProposalAlreadyExists(id);
         if (kind == ProposalKind.RemoveDaoGuardian) revert IncompleteEconomicCensus();
@@ -454,7 +466,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     /// spam when the proposal's frozen quorum has been reached.
     function settleProposalBond(uint256 id) external singleGovernanceEntry {
         if (proposer[id] == address(0)) revert InvalidGovernanceProposal();
-        if (bondSettled[id]) revert ProposalAlreadySettled();
+        if (bondSettled[id] || zkSnapshotPending[id]) revert ProposalAlreadySettled();
         Proposal storage p = proposals[id];
         if (!guardianVetoed[id] && block.timestamp < p.parameters.endDate) revert ProposalBondNotReady();
 
@@ -485,7 +497,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     }
 
     function _canExecute(uint256 id) internal view override returns (bool) {
-        if (proposer[id] == address(0)) return false;
+        if (proposer[id] == address(0) || zkSnapshotPending[id] || !censusFrozen[id]) return false;
         if (proposalKind[id] == ProposalKind.Standard) {
             if (guardianVetoed[id]) return false;
         } else {
@@ -802,7 +814,7 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         uint64 _startDate,
         uint64 _endDate
     ) private {
-        emit ProposalCreated(proposalId, _msgSender(), _startDate, _endDate, _metadata, _actions, _allowFailureMap);
+        emit ProposalCreated(proposalId, proposer[proposalId], _startDate, _endDate, _metadata, _actions, _allowFailureMap);
     }
 
     /// @dev This empty reserved space is put in place to allow future versions to add new
