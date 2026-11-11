@@ -2933,9 +2933,6 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
       executableCandidateTotal:inventoryEntries.filter(x=>x.disposition==='EXECUTION_CANDIDATE').length,
       nonExecutableOrUnclassifiedTotal:inventoryEntries.filter(x=>x.disposition!=='EXECUTION_CANDIDATE').length}
   };
-  const inventoryPath=path.join(outputRoot,'evidence','phase0','DEPLOYMENT_ENTRYPOINT_INVENTORY_v1.json');
-  await fs.mkdir(path.dirname(inventoryPath),{recursive:true});
-  await fs.writeFile(inventoryPath,JSON.stringify(entrypointInventory,null,2)+'\n');
 
   // Native Forge can compile Solidity directly. Exact-source Vyper artifacts
   // from the sealed Phase-0 build must be staged separately for source-only
@@ -2972,6 +2969,10 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
     artifacts:sharedExecutionInputs.artifacts
   },ethers=await import('ethers');
   await fs.rm(outputRoot,{recursive:true,force:true});await fs.mkdir(path.join(outputRoot,'runs'),{recursive:true});
+  const inventoryPath=path.join(outputRoot,'evidence','phase0','DEPLOYMENT_ENTRYPOINT_INVENTORY_v1.json');
+  await fs.mkdir(path.dirname(inventoryPath),{recursive:true});
+  await fs.writeFile(inventoryPath,JSON.stringify(entrypointInventory,null,2)+'\n');
+
   let anvil;
   let deploymentEvidence=null;
   try{
