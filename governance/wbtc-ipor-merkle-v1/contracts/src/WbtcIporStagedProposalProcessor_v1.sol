@@ -48,6 +48,8 @@ contract WbtcIporStagedProposalProcessor is
     uint16 public removalStagesIndex;
     uint16 public noGuardianStagesIndex;
     mapping(uint256 => bool) public isGuardianRemoval;
+    mapping(bytes32 => bool) public allowedStandardAction;
+    event StandardActionPolicyUpdated(address indexed target, bytes4 indexed selector, bool enabled);
     error GovernanceConfigurationMissing();
     error InvalidGuardianReview();
     error InvalidGuardianStageConfiguration();
@@ -87,6 +89,41 @@ contract WbtcIporStagedProposalProcessor is
         removalStagesIndex = removalIdx;
         noGuardianStagesIndex = noGuardianIdx;
         emit GovernanceStageConfigBound(safe, voting, standardIdx, removalIdx, noGuardianIdx);
+    }
+
+    /// @notice Narrow bootstrap/DAO-voted action policy. Only exact target
+    /// + selector combinations can be approved; DAO permission management and
+    /// generic self-upgrades are never permissible standard proposal actions.
+    function setStandardActionAllowed(address target, bytes4 selector, bool enabled) external {
+        if (msg.sender != address(dao())
+            && !dao().hasPermission(address(this), _msgSender(),
+                Permissions.UPDATE_STAGES_PERMISSION_ID, _msgData()))
+            revert ForbiddenGovernanceAction();
+        if (target == address(dao()) || target == address(this)
+            || target == address(guardianVoting) && selector
+                == IWbtcIporGuardianVoting.permanentlyRemoveDaoGuardian.selector
+            || target.code.length == 0 || selector == bytes4(0)
+            || selector == bytes4(keccak256("upgradeTo(address)"))
+            || selector == bytes4(keccak256("upgradeToAndCall(address,bytes)"))
+            || selector == bytes4(keccak256("execute(address,bytes)"))
+            || selector == bytes4(keccak256("grant(bytes32,address)"))
+            || selector == bytes4(keccak256("revoke(bytes32,address)")))
+            revert ForbiddenGovernanceAction();
+        allowedStandardAction[keccak256(abi.encode(target, selector))] = enabled;
+        emit StandardActionPolicyUpdated(target, selector, enabled);
+    }
+
+    function _allowedStandardActions(Action[] memory actions) private view returns (bool) {
+        for (uint256 i; i < actions.length; ++i) {
+            Action memory a = actions[i];
+            if (a.value != 0 || a.data.length < 4) return false;
+            bytes4 selector;
+            bytes memory d = a.data;
+            assembly { selector := mload(add(d, 32)) }
+            if (!allowedStandardAction[keccak256(abi.encode(a.to, selector))])
+                return false;
+        }
+        return true;
     }
 
     function _validVotingStage(Stage storage st, address voting, uint64 duration)
@@ -459,7 +496,12 @@ contract WbtcIporStagedProposalProcessor is
         bool removal = _isExactGuardianRemovalAction(_actions, _allowFailureMap);
         // Ordinary actions are scoped to the one registered voting plugin
         // and their downstream DAO-allowed targets; zero-value atomic only.
-        if (!removal && (_allowFailureMap != 0 || _actions.length == 0))
+        if (!removal
+            && (_allowFailureMap != 0 || _actions.length == 0
+                || !_allowedStandardActions(_actions)))
+            revert ForbiddenGovernanceAction();
+        if (getTargetConfig().target != address(dao())
+            || uint8(getTargetConfig().operation) != 0)
             revert ForbiddenGovernanceAction();
         uint16 index = removal ? removalStagesIndex
             : guardianVoting.guardianRemoved() ? noGuardianStagesIndex : standardStagesIndex;
@@ -968,6 +1010,14 @@ contract WbtcIporStagedProposalProcessor is
     function _executeProposal(uint256 _proposalId) internal virtual {
         Proposal storage proposal = proposals[_proposalId];
 
+        // Recheck the execution policy after any configuration updates.
+        // An approval must never become an arbitrary DAO.execute bypass.
+        if (isGuardianRemoval[_proposalId]) {
+            if (!_isExactGuardianRemovalAction(proposal.actions, proposal.allowFailureMap))
+                revert ForbiddenGovernanceAction();
+        } else if (!_allowedStandardActions(proposal.actions)) {
+            revert ForbiddenGovernanceAction();
+        }
         proposal.executed = true;
 
         _execute(
