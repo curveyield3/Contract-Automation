@@ -1,6 +1,6 @@
 {
-  "phase": "v12-collateral-voting-Yul-repair",
-  "attempt": 4,
-  "reason": "remove compiler-generated 16-return ABI getter",
-  "tests": true
+  "phase": "fork-risc-zero-router-negative-verification",
+  "attempt": 5,
+  "sourceVersion": 11,
+  "testScope": "authentic-mainnet-fork-router-bytecode-and-reject-invalid-receipt"
 }
