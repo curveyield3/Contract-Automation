@@ -1,6 +1,11 @@
 name: WBTC IPOR governance Merkle preparation and Ethereum fork rehearsal v2
 
 on:
+  push:
+    branches:
+      - feature/wbtc-ipor-aragon-governance-v1
+    paths:
+      - governance/wbtc-ipor-merkle-v1/.package-request-v2.json
   workflow_dispatch:
     inputs:
       mode:
@@ -30,7 +35,7 @@ concurrency:
 
 jobs:
   prepare:
-    if: inputs.mode == 'prepare' || inputs.mode == ''
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'prepare' || inputs.mode == '')
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
@@ -78,7 +83,7 @@ jobs:
           retention-days: 30
 
   fork-rehearsal:
-    if: inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full'
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -105,3 +110,59 @@ jobs:
           path: governance/wbtc-ipor-merkle-v1/fork-output/
           if-no-files-found: warn
           retention-days: 14
+
+  source-package-v2:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 0667c4d1ae5bfe2cee7d9d9f085e6ea330893edb
+          persist-credentials: false
+      - name: Package versioned source snapshot and compiler status
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "0667c4d1ae5bfe2cee7d9d9f085e6ea330893edb"
+          out="$RUNNER_TEMP/wbtc-ipor-dao-v2"
+          mkdir -p "$out"
+          git archive HEAD governance/wbtc-ipor-merkle-v1/ .github/workflows/wbtc-ipor-merkle-proof-v1.yml | tar -xf - -C "$out"
+          cat > "$out/PACKAGE_MANIFEST_v2.md" <<'EOF_MANIFEST'
+          # WBTC IPOR Aragon DAO — source development snapshot v2
+
+          **Repository:** curveyield3/Contract-Automation
+          **Branch:** feature/wbtc-ipor-aragon-governance-v1
+          **Source commit:** 0667c4d1ae5bfe2cee7d9d9f085e6ea330893edb
+          **Package version:** v2 (supersedes local v1 package)
+          **Scope:** Aragon DAOFactory-generated DAO, one directly deployed custom voting plugin and one fixed-image RISC Zero proof-verification adapter. Includes exact upstream Aragon/Gardens references, existing Merkle preparation workflow and notes.
+
+          ## Implemented draft source
+          - `governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporTokenVoting_v2.sol` — combined custom voting plugin; source derived from official Aragon TokenVoting v1.4, with inlined voter registry, source weights, safe review, proposal kinds and pending-ZK modes.
+          - `governance/wbtc-ipor-merkle-v1/contracts/src/WbtcIporZkProofVerifier_v1.sol` — uses the existing RISC Zero router; authenticates receipts for a pinned guest program image.
+          - `governance/wbtc-ipor-merkle-v1/CONTRACT_DESIGN_SPEC_v5.md` — deployment topology and exact remaining integration requirements.
+
+          ## Actual compiler evidence, 11 November 2026 UTC
+          Foundry pinned to Aragon source `e726c28061486114d601c547e4da1180ed5ab6da`, solc 0.8.28, optimizer via-IR, runtime optimizer runs=1.
+          Compilation **succeeded**, but `forge build --sizes` returned a nonzero exit status because the voting plugin is above EIP-170 maximum size:
+          - `WbtcIporTokenVoting`: 33,300 runtime bytes (Ethereum limit 24,576; 8,724 bytes too large).
+          - `WbtcIporZkProofVerifier`: 899 runtime bytes (within limit).
+          - Evidence: https://github.com/curveyield3/Contract-Automation/actions/runs/42947343709
+
+          ## Important outstanding requirements
+          The voting plugin is NOT deployable because of size. No real RISC Zero guest program / authenticated full-supply census has been completed. The previous GitHub proof/fork workflow is not yet wired into the v5 runtime architecture; full onchain integration, DAO permission bootstrap, complete market authentication and live-fork rehearsal are still pending.
+          No tests were created or executed for this packaging job. No mainnet deployment has taken place. The source is not audited or production approved.
+          EOF_MANIFEST
+          (
+            cd "$out"
+            find governance .github -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS_v2.txt
+            zip -q -r "$GITHUB_WORKSPACE/WBTC_IPOR_Aragon_DAO_Development_v2.zip" .
+          )
+          unzip -t "$GITHUB_WORKSPACE/WBTC_IPOR_Aragon_DAO_Development_v2.zip"
+          sha256sum "$GITHUB_WORKSPACE/WBTC_IPOR_Aragon_DAO_Development_v2.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wbtc-ipor-dao-development-package-v2
+          path: WBTC_IPOR_Aragon_DAO_Development_v2.zip
+          if-no-files-found: error
+          retention-days: 7
