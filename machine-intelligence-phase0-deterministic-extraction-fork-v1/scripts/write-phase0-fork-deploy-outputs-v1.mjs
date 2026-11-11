@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {id as ethersTopicId} from 'ethers';
+import {id as ethersTopicId,Interface as EthersInterface} from 'ethers';
 
 // Fork-only implementation of the existing Phase 0 output writer.
 // Never writes to a campaign, a receipt, main, the private cache, or the Worker.
@@ -395,17 +395,70 @@ async function buildForkRelationshipGraphV1(){
       if(receiptChecked){
         for(const [eventOrdinal,log] of (receiptEvidence.value.logs??[]).entries()){
           const emitter=String(log.address??'').toLowerCase();
-          const eventId=addNode({nodeId:mkid('NODE-OBSERVED-EVENT-',scenario,row.transactionHash,eventOrdinal),
-            kind:'OBSERVED_EVENT_LOG',scenarioId:scenario,transactionHash:row.transactionHash,
+          const emitterRuntime=runtimeByAddress.get(emitter);
+          const identity=emitterRuntime?.sourceIdentity??null;
+          const artifact=identity?compilerByIdentity.get([
+            identity.compilationUnitId,identity.sourceName,identity.contractName].join('::')):null;
+          let eventDecodeStatus='EMITTER_COMPILED_RUNTIME_UNRESOLVED',decodedEvent=null;
+          if(artifact&&emitterRuntime.sourceBinding==='EXACT_SOURCE_AND_RUNTIME_MATCH'){
+            eventDecodeStatus='ABI_EVENT_NOT_PRESENT_OR_TOPIC_NOT_MATCHED';
+            try{
+              const iface=new EthersInterface(artifact.abi??[]);
+              const parsed=iface.parseLog({
+                topics:log.topics??[],data:String(log.data??'0x')
+              });
+              if(parsed){
+                const display=value=>typeof value==='bigint'?value.toString():
+                  Array.isArray(value)?value.map(display):
+                  value===null||typeof value!=='object'?value:
+                  String(value);
+                decodedEvent={
+                  name:parsed.name,signature:parsed.signature,
+                  arguments:parsed.fragment.inputs.map((input,index)=>({
+                    name:input.name??null,abiType:input.type,
+                    indexed:input.indexed===true,
+                    value:display(parsed.args[index])
+                  }))
+                };
+                eventDecodeStatus='EXACT_RUNTIME_EMITTER_AND_COMPILER_ABI_EVENT_MATCH';
+              }
+            }catch{
+              eventDecodeStatus='SOURCE_ABI_DECODING_UNAVAILABLE';
+            }
+          }
+          if(!/^0x[0-9a-f]{40}$/.test(emitter))
+            addUnknown('MINED_RECEIPT_INVALID_LOG_EMITTER',receiptEvidence.ref.path,{
+              transactionHash:row.transactionHash,logOrdinal:eventOrdinal});
+          else addNode({nodeId:mkid('NODE-RUNTIME-',scenario,emitter),
+            kind:'RUNTIME_ADDRESS',scenarioId:scenario,address:emitter,
+            sourceIdentity:null,bindingStatus:'ADDRESS_ONLY_USE_TRANSACTION_CODE_OBSERVATIONS',
+            evidenceRefs:[receiptEvidence.ref]});
+          const eventId=addNode({
+            nodeId:mkid('NODE-OBSERVED-EVENT-',scenario,row.transactionHash,eventOrdinal),
+            kind:'OBSERVED_EVENT_LOG',scenarioId:scenario,
+            transactionHash:row.transactionHash,
             logOrdinal:eventOrdinal,emitterAddress:emitter,
             topic0:log.topics?.[0]??null,
             observedTopics:(log.topics??[]).filter(topic=>/^0x[a-f0-9]{64}$/i.test(String(topic))),
             dataSha256:sha256(Buffer.from(String(log.data??''),'utf8')),
-            eventSourceIdentity:null,eventDecodeStatus:'ABI_EVENT_JOIN_NOT_PROVEN',
-            evidenceRefs:[receiptEvidence.ref]});
-          edges.push({edgeId:mkid('EDGE-OBSERVED-EMISSION-',scenario,row.transactionHash,eventOrdinal),
+            dataByteLength:Math.max(0,(String(log.data??'0x').length-2)/2),
+            eventSourceIdentity:eventDecodeStatus==='EXACT_RUNTIME_EMITTER_AND_COMPILER_ABI_EVENT_MATCH'?
+              identity:null,
+            eventDecodeStatus,decodedEvent,
+            sourceRuntimeCodeSha256:emitterRuntime?.observedRuntimeSha256??null,
+            evidenceRefs:[receiptEvidence.ref,...(emitterRuntime?.evidenceRefs??[])]
+          });
+          edges.push({
+            edgeId:mkid('EDGE-OBSERVED-EMISSION-',scenario,row.transactionHash,eventOrdinal),
             kind:'OBSERVED_TRANSACTION_EMITTED_LOG',from:txid,to:eventId,
-            observation:'OBSERVED_LOCAL_FORK',evidenceRefs:[receiptEvidence.ref]});
+            observation:'OBSERVED_LOCAL_FORK',
+            evidenceRefs:[receiptEvidence.ref]
+          });
+          if(/^0x[0-9a-f]{40}$/.test(emitter))
+            edges.push({edgeId:mkid('EDGE-OBSERVED-EMITTER-',scenario,row.transactionHash,eventOrdinal),
+              kind:'OBSERVED_LOG_EMITTER_ADDRESS',from:eventId,
+              to:mkid('NODE-RUNTIME-',scenario,emitter),observation:'OBSERVED_LOCAL_FORK',
+              evidenceRefs:[receiptEvidence.ref]});
         }
       }
       const statePointer=row.evidence?.find(x=>x.kind==='PRESTATE_DIFF');
