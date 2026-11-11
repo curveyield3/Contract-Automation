@@ -1,11 +1,24 @@
-name: WBTC IPOR governance Merkle validity preparation v1
+name: WBTC IPOR governance Merkle preparation and Ethereum fork rehearsal v2
 
 on:
   workflow_dispatch:
     inputs:
-      proposal_id:
-        description: On-chain pending proposal ID (decimal uint256)
+      mode:
+        description: Choose proof preparation, authenticated fork-only preflight, or full governance fork rehearsal
         required: true
+        type: choice
+        default: prepare
+        options:
+          - prepare
+          - fork_preflight
+          - fork_full
+      fork_block:
+        description: Optional pinned Ethereum fork height (default 80 blocks behind latest)
+        required: false
+        type: string
+      proposal_id:
+        description: On-chain pending proposal ID (required only for prepare)
+        required: false
         type: string
 
 permissions:
@@ -17,6 +30,7 @@ concurrency:
 
 jobs:
   prepare:
+    if: inputs.mode == 'prepare' || inputs.mode == ''
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
@@ -62,3 +76,32 @@ jobs:
           path: ${{ runner.temp }}/wbtc-ipor-governance/WBTC_IPOR_Governance_Merkle_Workflow_v1/output/
           if-no-files-found: error
           retention-days: 30
+
+  fork-rehearsal:
+    if: inputs.mode == 'fork_preflight' || inputs.mode == 'fork_full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      UPSTREAM_RPC_URL: \${{ secrets.RPC_ETHEREUM }}
+      FORK_BLOCK: \${{ inputs.fork_block }}
+      FORK_ONLY_PREFLIGHT: \${{ inputs.mode == 'fork_preflight' && '1' || '0' }}
+      RISC0_DEV_MODE: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Run authenticated local fork and source-bound governance rehearsal
+        shell: bash
+        run: bash governance/wbtc-ipor-merkle-v1/fork/fork-rehearsal-v1.sh
+      - name: Publish fork evidence, even if a required integration is missing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wbtc-ipor-mainnet-fork-\${{ inputs.mode }}-\${{ github.run_id }}
+          path: governance/wbtc-ipor-merkle-v1/fork-output/
+          if-no-files-found: warn
+          retention-days: 14
