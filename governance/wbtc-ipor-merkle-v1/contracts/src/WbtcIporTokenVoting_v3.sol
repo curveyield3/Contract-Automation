@@ -293,19 +293,22 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         return votingToken;
     }
 
-    /// @notice Returns the total voting power checkpointed for a specific timestamp or block number, subtracting the balance of excluded addresses.
-    /// @param _timePoint The block number or timestamp.
-    /// @return The effective voting power.
-    function totalVotingPower(uint256 _timePoint) public view override returns (uint256) {
-        uint256 _excludedSupply;
-        for (uint256 i; i < excludedAccounts.length();) {
-            _excludedSupply += votingToken.getPastVotes(excludedAccounts.at(i), _timePoint);
+    /// @notice Market-adjusted historic supply cannot safely be inferred
+    /// from ERC20Votes.getPastTotalSupply alone. Per-proposal frozen supply
+    /// is stored in Proposal.parameters.minVotingPower.
+    function totalVotingPower(uint256) public pure override returns (uint256) {
+        revert IncompleteCensus();
+    }
 
-            unchecked {
-                ++i;
-            }
-        }
-        return votingToken.getPastTotalSupply(_timePoint) - _excludedSupply;
+    function isSupportThresholdReachedEarly(uint256) public pure override returns (bool) {
+        return false; // full 14/30-day community ballots
+    }
+
+    function isSupportThresholdReached(uint256 id) public view override returns (bool) {
+        Proposal storage p = proposals[id];
+        if (p.tally.yes == 0) return false;
+        return (RATIO_BASE - p.parameters.supportThreshold) * p.tally.yes
+            >= p.parameters.supportThreshold * p.tally.no;
     }
 
     /// @inheritdoc MajorityVotingBase
@@ -319,26 +322,27 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         VoteOption _voteOption,
         bool _tryEarlyExecution
     ) public override auth(CREATE_PROPOSAL_PERMISSION_ID) returns (uint256 proposalId) {
-        uint256 snapshotTimepoint;
-        unchecked {
-            // The time point must be already mined (block) or in the past (timestamp) to
-            // protect against backrunning transactions causing census changes.
-            if (tokenIndexedByTimestamp) {
-                snapshotTimepoint = block.timestamp - 1;
-            } else {
-                snapshotTimepoint = block.number - 1;
-            }
-        }
-
-        uint256 totalVotingPower_ = totalVotingPower(snapshotTimepoint);
-
-        if (totalVotingPower_ == 0) {
-            revert NoVotingPower();
-        }
-
+        if (_msgSender() != stagedProcessor || _allowFailureMap != 0
+            || _voteOption != VoteOption.None || _tryEarlyExecution
+            || _actions.length != 1 || _actions[0].to != stagedProcessor
+            || _actions[0].value != 0 || _actions[0].data.length < 4)
+            revert UnauthorizedParent();
+        (address declaredParent, uint256 parentId, uint16 stageIndex)
+            = abi.decode(_metadata, (address, uint256, uint16));
+        if (declaredParent != stagedProcessor || stageIndex > 1
+            || bytes4(_actions[0].data[:4])
+                != bytes4(keccak256("reportProposalResult(uint256,uint16,uint8,bool)")))
+            revert UnauthorizedParent();
+        bool special = IParentSPP(stagedProcessor).isGuardianRemoval(parentId);
         (_startDate, _endDate) = _validateProposalDates(_startDate, _endDate);
-
+        if (_endDate - _startDate != (special ? 30 days : 14 days))
+            revert UnauthorizedParent();
         proposalId = _createProposalId(keccak256(abi.encode(_actions, _metadata)));
+        Proposal storage existing_ = proposals[proposalId];
+        if (existing_.parameters.snapshotTimepoint != 0)
+            revert ProposalAlreadyExists(proposalId);
+        uint256 totalVotingPower_ = _freezeAtomic(proposalId, special);
+        uint256 snapshotTimepoint = tokenIndexedByTimestamp ? block.timestamp : block.number;
 
         // Store proposal related information
         Proposal storage proposal_ = proposals[proposalId];
@@ -350,9 +354,11 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
         proposal_.parameters.startDate = _startDate;
         proposal_.parameters.endDate = _endDate;
         proposal_.parameters.snapshotTimepoint = snapshotTimepoint.toUint64();
-        proposal_.parameters.votingMode = votingMode();
-        proposal_.parameters.supportThreshold = supportThreshold();
-        proposal_.parameters.minVotingPower = _applyRatioCeiled(totalVotingPower_, minParticipation());
+        proposal_.parameters.votingMode = VotingMode.Standard;
+        proposal_.parameters.supportThreshold = special ? 750000 : 670000;
+        proposal_.parameters.minVotingPower = _applyRatioCeiled(
+            totalVotingPower_, special ? 330000 : 250000
+        );
 
         proposal_.minApprovalPower = _applyRatioCeiled(totalVotingPower_, minApproval());
 
@@ -410,83 +416,27 @@ contract WbtcIporTokenVoting is IMembership, MajorityVotingBase {
     }
 
     /// @inheritdoc MajorityVotingBase
-    function _vote(uint256 _proposalId, VoteOption _voteOption, address _voter, bool _tryEarlyExecution)
-        internal
-        override
-    {
-        Proposal storage proposal_ = proposals[_proposalId];
-
-        // This could re-enter, though we can assume the governance token is not malicious
-        uint256 votingPower = votingToken.getPastVotes(_voter, proposal_.parameters.snapshotTimepoint);
-        VoteOption state = proposal_.voters[_voter];
-
-        // If voter had previously voted, decrease count
-        if (state == VoteOption.Yes) {
-            proposal_.tally.yes = proposal_.tally.yes - votingPower;
-        } else if (state == VoteOption.No) {
-            proposal_.tally.no = proposal_.tally.no - votingPower;
-        } else if (state == VoteOption.Abstain) {
-            proposal_.tally.abstain = proposal_.tally.abstain - votingPower;
-        }
-
-        // write the updated/new vote for the voter.
-        if (_voteOption == VoteOption.Yes) {
-            proposal_.tally.yes = proposal_.tally.yes + votingPower;
-        } else if (_voteOption == VoteOption.No) {
-            proposal_.tally.no = proposal_.tally.no + votingPower;
-        } else if (_voteOption == VoteOption.Abstain) {
-            proposal_.tally.abstain = proposal_.tally.abstain + votingPower;
-        }
-
-        proposal_.voters[_voter] = _voteOption;
-
-        emit VoteCast({proposalId: _proposalId, voter: _voter, voteOption: _voteOption, votingPower: votingPower});
-
-        if (!_tryEarlyExecution) {
-            return;
-        }
-
-        if (
-            _canExecute(_proposalId)
-                && dao().hasPermission(address(this), _voter, EXECUTE_PROPOSAL_PERMISSION_ID, _msgData())
-        ) {
-            _execute(_proposalId);
-        }
+    function _vote(uint256 id, VoteOption option, address voter, bool) internal override {
+        Proposal storage p = proposals[id];
+        uint256 w = frozen[id][voter];
+        if (w == 0 || p.voters[voter] != VoteOption.None) revert UnauthorizedParent();
+        if (option == VoteOption.Yes) p.tally.yes += w;
+        else if (option == VoteOption.No) p.tally.no += w;
+        else if (option == VoteOption.Abstain) p.tally.abstain += w;
+        else revert UnauthorizedParent();
+        p.voters[voter] = option;
+        if (voters[voter].enrolled) voters[voter].lastVote = uint64(block.timestamp);
+        emit VoteCast({proposalId: id, voter: voter, voteOption: option, votingPower: w});
     }
 
     /// @inheritdoc MajorityVotingBase
-    function _canVote(uint256 _proposalId, address _account, VoteOption _voteOption)
-        internal
-        view
-        override
-        returns (bool)
+    function _canVote(uint256 id, address voter, VoteOption option)
+        internal view override returns (bool)
     {
-        Proposal storage proposal_ = proposals[_proposalId];
-
-        // The proposal vote hasn't started or has already ended.
-        if (!_isProposalOpen(proposal_)) {
-            return false;
-        }
-
-        // The voter votes `None` which is not allowed.
-        if (_voteOption == VoteOption.None) {
-            return false;
-        }
-
-        // The voter has no voting power.
-        if (votingToken.getPastVotes(_account, proposal_.parameters.snapshotTimepoint) == 0) {
-            return false;
-        }
-
-        // The voter has already voted but vote replacment is not allowed.
-        if (
-            proposal_.voters[_account] != VoteOption.None
-                && proposal_.parameters.votingMode != VotingMode.VoteReplacement
-        ) {
-            return false;
-        }
-
-        return true;
+        Proposal storage p = proposals[id];
+        return _isProposalOpen(p) && option != VoteOption.None
+            && p.voters[voter] == VoteOption.None && frozen[id][voter] != 0
+            && !(guardianRemoved && bonusAt[id] && voter == guardianSafe);
     }
 
     /// @dev Helper function to identify the clock mode used by the given voting token.
