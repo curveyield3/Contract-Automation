@@ -360,67 +360,115 @@ const SLITHER_RELATIONAL_API_V1=String.raw`
 import json,sys
 from slither.slither import Slither
 from slither.analyses.data_dependency.data_dependency import get_dependencies
-def source_span(node):
-    span=getattr(node,"source_mapping",None)
+
+def safe_text(v):
+    if v is None: return None
+    try: return str(v)
+    except Exception: return None
+
+def source_span(obj):
+    span=getattr(obj,"source_mapping",None)
     if span is None: return None
     fn=getattr(span,"filename",None)
-    return {"file":str(getattr(fn,"relative",None) or getattr(fn,"short",None) or getattr(fn,"absolute",None) or ""),
+    return {"file":safe_text(getattr(fn,"relative",None) or getattr(fn,"short",None) or getattr(fn,"absolute",None)),
             "start":getattr(span,"start",None),"length":getattr(span,"length",None),
             "lines":list(getattr(span,"lines",[]) or [])}
+
 def variable_ref(v):
-    span=source_span(v)
-    return {"name":str(getattr(v,"name",str(v))),"type":type(v).__name__,"sourceSpan":span}
-def safe_text(v):
-    if v is None:return None
-    try:return str(v)
-    except Exception:return None
+    if v is None: return None
+    return {"name":safe_text(getattr(v,"name",None) or v),"type":type(v).__name__,
+            "sourceSpan":source_span(v)}
+
+def as_list(v):
+    if v is None: return []
+    try: return list(v)
+    except Exception: return []
+
 unit=sys.argv[2]
-result={"schemaVersion":"mi-phase0-slither-relational-unit-v1","unitId":unit,"analyzer":"slither-0.11.6-python-api",
-        "contracts":[],"limitations":[]}
+result={"schemaVersion":"mi-phase0-slither-relational-unit-v1",
+        "unitId":unit,"analyzer":"slither-0.11.6-python-api",
+        "contracts":[],"limitations":[],"functionCount":0,"callsiteCount":0,"ssaEdgeCount":0}
 analysis=Slither(sys.argv[1],compile_force_framework="standard")
-call_kinds={"HighLevelCall","LowLevelCall","LibraryCall","InternalCall","InternalDynamicCall","SolidityCall","Transfer","Send"}
+call_kinds={"HighLevelCall","LowLevelCall","LibraryCall","InternalCall","InternalDynamicCall",
+            "SolidityCall","Transfer","Send","NewContract","EventCall"}
+
 for contract in analysis.contracts:
-    c={"contractName":contract.name,"sourceSpan":source_span(contract),"functions":[]}
-    for function in getattr(contract,"functions_and_modifiers_declared",[]):
-        f={"name":function.name,"soliditySignature":safe_text(getattr(function,"solidity_signature",None)),
-           "sourceSpan":source_span(function),
-           "readStorageIds":[variable_ref(v) for v in function.state_variables_read],
-           "writtenStorageIds":[variable_ref(v) for v in function.state_variables_written],
-           "callSites":[],"directIrSsaDependencies":[],"variableDependencies":[],"limitations":[]}
-        for node in function.nodes:
-            for ir in getattr(node,"irs",[]) or []:
+    origin=source_span(contract)
+    c={"contractName":contract.name,"sourceName":origin["file"] if origin else None,
+       "sourceSpan":origin,"functions":[],"limitations":[]}
+    for function in as_list(getattr(contract,"functions_and_modifiers_declared",[])):
+        fspan=source_span(function)
+        f={"name":function.name,"fullName":safe_text(getattr(function,"full_name",None)),
+           "soliditySignature":safe_text(getattr(function,"solidity_signature",None)),
+           "sourceSpan":fspan,"sourceName":fspan["file"] if fspan else None,
+           "visibility":safe_text(getattr(function,"visibility",None)),
+           "isConstructor":bool(getattr(function,"is_constructor",False)),
+           "isModifier":bool(getattr(function,"is_modifier",False)),
+           "parameters":[variable_ref(v) for v in as_list(getattr(function,"parameters",[]))],
+           "returnVariables":[variable_ref(v) for v in as_list(getattr(function,"returns",[]))],
+           "readStorageIds":[variable_ref(v) for v in as_list(getattr(function,"state_variables_read",[]))],
+           "writtenStorageIds":[variable_ref(v) for v in as_list(getattr(function,"state_variables_written",[]))],
+           "callSites":[],"directIrSsaDependencies":[],"variableDependencies":[],
+           "sourceNodeCount":0,"limitations":[]}
+        for node in as_list(getattr(function,"nodes",[])):
+            nspan=source_span(node)
+            f["sourceNodeCount"]+=1
+            for opOrdinal,ir in enumerate(as_list(getattr(node,"irs",[]))):
                 kind=type(ir).__name__
-                if kind in call_kinds:
-                    callee=getattr(ir,"function",None)
-                    f["callSites"].append({"kind":kind,"ir":safe_text(ir),
-                       "calleeSignature":safe_text(getattr(callee,"solidity_signature",None)),
-                       "calleeName":safe_text(callee),"sourceSpan":source_span(node)})
-            for ir in getattr(node,"irs_ssa",[]) or []:
+                if kind not in call_kinds: continue
+                callee=getattr(ir,"function",None)
+                f["callSites"].append({
+                    "kind":kind,"operationOrdinal":opOrdinal,"sourceNodeId":getattr(node,"node_id",None),
+                    "ir":safe_text(ir),
+                    "calleeSignature":safe_text(getattr(callee,"solidity_signature",None)),
+                    "calleeName":safe_text(callee),
+                    "destination":variable_ref(getattr(ir,"destination",None)),
+                    "callValue":variable_ref(getattr(ir,"call_value",None)),
+                    "arguments":[variable_ref(v) for v in as_list(getattr(ir,"arguments",[]))],
+                    "returnedInto":variable_ref(getattr(ir,"lvalue",None)),
+                    "sourceSpan":nspan,"evidenceClass":"SLITHER_IR_CALL_OPERATION"})
+                result["callsiteCount"]+=1
+            for ssaOrdinal,ir in enumerate(as_list(getattr(node,"irs_ssa",[]))):
                 written=getattr(ir,"lvalue",None)
-                if written is None:continue
-                for read in getattr(ir,"read",[]) or []:
+                if written is None: continue
+                for readOrdinal,read in enumerate(as_list(getattr(ir,"read",[]))):
                     f["directIrSsaDependencies"].append({
-                      "operatorType":type(ir).__name__,"written":variable_ref(written),
-                      "read":variable_ref(read),"sourceSpan":source_span(node),
-                      "evidenceClass":"DIRECT_SLITHIR_SSA_OPERATION"})
-        for variable in function.variables_written:
+                        "sourceNodeId":getattr(node,"node_id",None),
+                        "operationOrdinal":ssaOrdinal,"operandOrdinal":readOrdinal,
+                        "operatorType":type(ir).__name__,
+                        "written":variable_ref(written),"read":variable_ref(read),
+                        "sourceSpan":nspan,"evidenceClass":"DIRECT_SLITHIR_SSA_OPERATION"})
+                    result["ssaEdgeCount"]+=1
+        for variable in as_list(getattr(function,"variables_written",[])):
             try:
                 deps=get_dependencies(variable,function)
-                for dep in deps:
-                    f["variableDependencies"].append({"written":variable_ref(variable),"dependsOn":variable_ref(dep),
-                      "evidenceClass":"SLITHER_DATA_DEPENDENCY_API"})
+                for dep in sorted(deps,key=lambda v:(safe_text(v) or "")):
+                    f["variableDependencies"].append({
+                        "written":variable_ref(variable),"dependsOn":variable_ref(dep),
+                        "context":"DECLARING_FUNCTION",
+                        "evidenceClass":"SLITHER_DATA_DEPENDENCY_API"})
             except Exception as ex:
-                f["limitations"].append({"type":"DATA_DEPENDENCY_API_UNAVAILABLE",
-                                          "variable":safe_text(variable),"reason":type(ex).__name__+":"+str(ex)})
+                f["limitations"].append({
+                    "type":"DATA_DEPENDENCY_API_UNAVAILABLE",
+                    "variable":safe_text(variable),"exceptionClass":type(ex).__name__})
+        f["readStorageIds"].sort(key=lambda v:(v["name"] or ""))
+        f["writtenStorageIds"].sort(key=lambda v:(v["name"] or ""))
+        f["variableDependencies"].sort(key=lambda r:((r["written"] or {}).get("name") or "",
+                                                        (r["dependsOn"] or {}).get("name") or ""))
         c["functions"].append(f)
+        result["functionCount"]+=1
+    c["functions"].sort(key=lambda f:(f["sourceName"] or "",f["soliditySignature"] or "",
+                                       ((f["sourceSpan"] or {}).get("start") or 0)))
     result["contracts"].append(c)
+result["contracts"].sort(key=lambda c:(c["sourceName"] or "",c["contractName"]))
 print(json.dumps(result,separators=(",",":"),sort_keys=True))
 `;
 async function collectSlitherRelationalFactsV1({projectRoot,target,unit,unitId}){
   const sourceUnitRecords=Object.entries(unit?.sourceContents??{}).sort(([a],[b])=>a.localeCompare(b))
     .map(([sourceName,bytes])=>({sourceName,sourceSha256:sha256(Buffer.from(String(bytes),'utf8'))}));
   const call=await runProcess({command:'python3',
-    args:['-c',SLITHER_RELATIONAL_API_V1,target,unitId],cwd:projectRoot});
+    args:['-c',SLITHER_RELATIONAL_API_V1,target,unitId],cwd:projectRoot,
+    timeoutMs:180000});
   if(call.exitCode!==0){
     return{unitId,analysisStatus:'ANALYZER_FACT_UNAVAILABLE',sourceUnitRecords,contracts:[],
       limitations:[{reason:'PYTHON_SLITHER_API_FAILED',exitCode:call.exitCode,
@@ -430,7 +478,36 @@ async function collectSlitherRelationalFactsV1({projectRoot,target,unit,unitId})
     const parsed=JSON.parse(String(call.stdout??''));
     if(parsed.schemaVersion!=='mi-phase0-slither-relational-unit-v1'||parsed.unitId!==unitId||!Array.isArray(parsed.contracts))
       throw new Error('RELATIONAL_API_SCHEMA_OR_IDENTITY_INVALID');
-    return{...parsed,analysisStatus:'SLITHER_RELATIONAL_FACTS_AVAILABLE',sourceUnitRecords};
+    const sourceByName=new Map(sourceUnitRecords.map(row=>[row.sourceName,row]));
+    const exactArtifacts=(unit?.artifacts??[]).map(a=>({
+      sourceName:a.sourceName,contractName:a.contractName,
+      compilationUnitId:a.compilationUnitId??unitId
+    }));
+    const unresolvedSourceReferences=[];
+    for(const contract of parsed.contracts){
+      const sourceName=String(contract.sourceName??'').replaceAll('\\','/');
+      const exact=exactArtifacts.filter(a=>a.contractName===contract.contractName&&
+        (a.sourceName===sourceName||sourceName.endsWith('/'+a.sourceName)));
+      if(exact.length===1){
+        contract.compilationUnitId=unitId;
+        contract.sourceName=exact[0].sourceName;
+        contract.sourceContentSha256=sourceByName.get(exact[0].sourceName)?.sourceSha256??null;
+      }else{
+        contract.sourceResolutionStatus='UNRESOLVED_OR_AMBIGUOUS_COMPILER_AST_SOURCE';
+        unresolvedSourceReferences.push({contractName:contract.contractName,
+          slitherSourceName:sourceName,compilerMatches:exact.length});
+      }
+      for(const fn of contract.functions??[]){
+        fn.compilationUnitId=unitId;
+        fn.declaringSourceName=fn.sourceName;
+        fn.sourceResolutionStatus=contract.sourceContentSha256?
+          'SOURCE_UNIT_SHA_BOUND':'UNRESOLVED_SLITHER_SOURCE';
+      }
+    }
+    return{...parsed,analysisStatus:'SLITHER_RELATIONAL_FACTS_AVAILABLE',
+      sourceUnitRecords,unresolvedSourceReferences,
+      compilerArtifactCount:exactArtifacts.length,
+      exposedContractCount:parsed.contracts.length};
   }catch(error){
     return{unitId,analysisStatus:'ANALYZER_FACT_UNAVAILABLE',sourceUnitRecords,contracts:[],
       limitations:[{reason:'RELATIONAL_API_OUTPUT_INVALID',detail:String(error?.message??error)}]};
@@ -514,16 +591,14 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
       analyzer:vyperAnalysis?.analyzer??'slither',
       ...(vyperAnalysis?{vyperAnalysis,staticLimitations:vyperAnalysis.limitations}: {})
     });
-    if(parsed?.success!==true){
-      return{
-        exportInfo:{mode:'PER_COMPILATION_UNIT',compilationUnitCount:compilationUnits.length,sourceUnitCount:totalSourceUnits,contractCount:totalContracts,unitResults},
-        raw:{exitCode:raw.exitCode,signal:raw.signal??null,stdout:raw.stdout,stderr:raw.stderr},
-        parsed,
-        success:false,
-        unitResults,relationalUnitResults:unitResults.map(x=>x.relational)
-      };
-    }
-    for(const detector of parsed.detectors??[]){
+    // Preserve later compiler units even if an earlier unit cannot be analyzed.
+    // Detector failure does not erase SlithIR facts already extracted from
+    // other exact units; no project-wide fallback is labeled unit-exact.
+    if(parsed?.success!==true)unitResults[unitResults.length-1].staticLimitations=[
+      ...(unitResults[unitResults.length-1].staticLimitations??[]),
+      {type:'SLITHER_DETECTOR_UNAVAILABLE',unitId,exitCode:raw.exitCode}
+    ];
+    for(const detector of parsed?.detectors??[]){
       const key=JSON.stringify(detector);
       if(detectorSeen.has(key))continue;
       detectorSeen.add(key);
@@ -533,8 +608,8 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
   return{
     exportInfo:{mode:'PER_COMPILATION_UNIT',compilationUnitCount:compilationUnits.length,sourceUnitCount:totalSourceUnits,contractCount:totalContracts,unitResults},
     raw:{exitCode:0,signal:null,stdout:'',stderr:''},
-    parsed:{success:true,detectors},
-    success:true,
+    parsed:{success:unitResults.every(u=>u.parsedSuccess),detectors},
+    success:unitResults.every(u=>u.parsedSuccess),
     unitResults,relationalUnitResults:unitResults.map(x=>x.relational)
   };
 }
@@ -596,6 +671,26 @@ async function slitherRepair({projectRoot,build,sourceCommit}){
         relationalUnitResults:exact.relationalUnitResults??[],
         limitations:exact.unitResults?.flatMap(u=>u.staticLimitations??[])??[],
         requiredSemanticReview:exact.unitResults?.some(u=>Boolean(u.vyperAnalysis))??false
+      };
+    }
+    if((exact.relationalUnitResults??[]).length){
+      return{
+        backend:'slither',version:'0.11.6',sourceCommit,
+        rawArtifactRef:'github-actions://lite-phase0/slither',
+        status:'partial',terminal:true,componentStatus:'PARTIAL',
+        continuationDisposition:'UNIT_SPECIFIC_ANALYZER_LIMITATIONS',
+        authoritativeFinding:false,
+        findingCount:exact.parsed?.detectors?.length??0,
+        detectors:exact.parsed?.detectors??[],
+        repairAttempts:attempts,
+        inputMode:'EXACT_BUILD_CRYTIC_COMPILE_EXPORT',
+        analyzerCoverage:exact.unitResults?.map(u=>({
+          unitId:u.unitId,analyzer:u.analyzer,
+          staticLimitations:u.staticLimitations??[]
+        }))??[],
+        relationalUnitResults:exact.relationalUnitResults,
+        limitations:exact.unitResults?.flatMap(u=>u.staticLimitations??[])??[],
+        requiredSemanticReview:true
       };
     }
   }catch(error){
