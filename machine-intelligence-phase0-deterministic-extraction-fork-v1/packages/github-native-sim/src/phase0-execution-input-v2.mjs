@@ -482,3 +482,71 @@ export function buildContractIdentityIndexV1({request,build,artifactBundle,build
       observedCreationCount:0,matchedCreationCount:0,ambiguousCreationCount:0,unmappedCreationCount:0}
   };
 }
+
+
+/**
+ * Compare observed on-fork runtime bytes with the exact retained compiler
+ * artifacts. A unique *masked* template match is a candidate, not an exact
+ * code/source identity: constructor immutables and linked addresses have
+ * values that must remain visible and independently attributed.
+ */
+export function findSourceRuntimeTemplateMatchesV1({observedBytecode,artifacts=[]}={}){
+  const observed=String(observedBytecode??'').toLowerCase();
+  if(!/^0x(?:[0-9a-f]{2})+$/.test(observed))return [];
+  const code=observed.slice(2),size=code.length/2;
+  const matches=[];
+  for(const artifact of artifacts){
+    const compiled=String(artifact.deployedBytecode??'').replace(/^0x/i,'').toLowerCase();
+    if(compiled.length!==code.length||!compiled.length)continue;
+    const masked=new Uint8Array(size),ranges=[];
+    let invalid=false;
+    const pushRange=(start,length,kind,origin)=>{
+      if(!Number.isSafeInteger(start)||!Number.isSafeInteger(length)||
+         start<0||length<1||start+length>size){invalid=true;return;}
+      for(let i=start;i<start+length;i++)masked[i]=1;
+      ranges.push({kind,origin,start,length,
+        observedHex:'0x'+code.slice(start*2,(start+length)*2)});
+    };
+    for(const [immutableId,locations] of Object.entries(artifact.immutableReferences??{})){
+      if(!Array.isArray(locations)){invalid=true;continue;}
+      for(const ref of locations)pushRange(ref?.start,ref?.length,'CONSTRUCTOR_IMMUTABLE',immutableId);
+    }
+    for(const [sourceName,libraries] of Object.entries(artifact.deployedLinkReferences??{})){
+      if(!libraries||typeof libraries!=='object'){invalid=true;continue;}
+      for(const [libraryName,locations] of Object.entries(libraries)){
+        if(!Array.isArray(locations)){invalid=true;continue;}
+        for(const ref of locations)
+          pushRange(ref?.start,ref?.length,'LINKED_LIBRARY',
+            sourceName+':'+libraryName);
+      }
+    }
+    if(invalid)continue;
+    let unmaskedCount=0,allUnmaskedEqual=true;
+    for(let byte=0;byte<size;byte++){
+      if(masked[byte])continue;
+      unmaskedCount++;
+      const expected=compiled.slice(byte*2,byte*2+2);
+      if(!/^[a-f0-9]{2}$/.test(expected)||expected!==code.slice(byte*2,byte*2+2)){
+        allUnmaskedEqual=false;break;
+      }
+    }
+    if(!allUnmaskedEqual||unmaskedCount===0)continue;
+    const fullyExact=compiled===code;
+    matches.push({
+      compilationUnitId:artifact.compilationUnitId??null,
+      sourceName:artifact.sourceName,contractName:artifact.contractName,
+      matchClass:fullyExact?'EXACT_FULL_RUNTIME_BYTECODE':
+        'MASKED_IMMUTABLE_OR_LIBRARY_TEMPLATE_CANDIDATE',
+      bytecodeLength:size,unmaskedMatchedBytes:unmaskedCount,
+      maskedBytes:size-unmaskedCount,observedReferenceRanges:ranges,
+      sourceCodeTemplateSha256:artifact.deployedBytecodeDigestSha256??null,
+      evidenceStatus:fullyExact?'EXACT_COMPILER_BYTE_EQUALITY':
+        'COMPILER_TEMPLATE_CANDIDATE_ONLY_NOT_SOURCE_RUNTIME_PROOF'
+    });
+  }
+  return matches.sort((a,b)=>[
+    a.matchClass,a.compilationUnitId,a.sourceName,a.contractName
+  ].join(':').localeCompare([
+    b.matchClass,b.compilationUnitId,b.sourceName,b.contractName
+  ].join(':')));
+}
