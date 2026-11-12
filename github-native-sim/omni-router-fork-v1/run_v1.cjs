@@ -38,7 +38,9 @@ const P={
  v4View:'0x7ffe42c4a5deea5b0fec41c94c136cf115597227',
  aave:'0xA50ba011c48153De246E5192C8f9258A2ba79Ca9'
 };
-const V4HOOK='0x0000113dCf4ADd69999Fad8F20F2b63F979bfcC0';
+for(const k of Object.keys(ADDR))ADDR[k]=ADDR[k].toLowerCase();
+for(const k of Object.keys(P))P[k]=P[k].toLowerCase();
+const V4HOOK='0x0000113dCf4ADd69999Fad8F20F2b63F979bfcC0'.toLowerCase();
 const V4IDL='0x2b21c65d9a7dc6926ee330a1c6e5a8037fd81774f3dc066536f800128e39f634';
 const V4USDGID='0xeda62d2906d0edf26d40c793d581609552a44a87f618a98ff76ebe8dde4b7edb';
 const BAL_WEIGHTED_ID='0x5c6ee304399dbdb9c8ef030ab642b10820db8f56000200000000000000000014';
