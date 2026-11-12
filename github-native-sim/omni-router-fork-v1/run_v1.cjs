@@ -352,7 +352,7 @@ async function main(){
     route.swap={status:0,hash:rawTx.hash,error:err(e)};
    }
    const balInAfter=await ERC[input].balanceOf(owner),balOutAfter=await ERC[output].balanceOf(owner),feeAfter=await ERC[output].balanceOf(feeRecipient);
-   const remainAllowance=await c(ADDR[input,['function allowance(address,address) view returns(uint256)']).allowance(owner,summary.router);
+   const remainAllowance=await c(ADDR[input],['function allowance(address,address) view returns(uint256)']).allowance(owner,summary.router);
    route.balanceAfter={input:balInAfter.toString(),output:balOutAfter.toString(),feeRecipient:feeAfter.toString(),remainingInputAllowance:remainAllowance.toString()};
    route.realizedOutput=(balOutAfter-balOutBefore).toString();
    route.feePaid=(feeAfter-feeBefore).toString();
