@@ -6,7 +6,14 @@ on:
     paths:
       - '.github/workflows/boosthub-v13-full-stack-anvil-v1.yml'
       - 'github-native-sim/boosthub-v13-full-stack-v1/**'
+      - 'github-native-sim/omni-router-fork-v1/**'
   workflow_dispatch:
+    inputs:
+      simulation_target:
+        description: 'Which existing Anvil fork simulation to run?'
+        type: choice
+        options: [boosthub, omni-router]
+        default: boosthub
 
 permissions:
   contents: read
@@ -17,6 +24,7 @@ concurrency:
 
 jobs:
   full-deployment:
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.simulation_target != 'omni-router') || (github.event_name == 'push' && !contains(github.event.head_commit.message, '[omni-router-fork]')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
@@ -69,3 +77,64 @@ jobs:
           for f in .boosthub-ethereum.pid .boosthub-fraxtal.pid; do
             if test -f "$f"; then kill "$(cat "$f")" 2>/dev/null || true; fi
           done
+
+  omni-router-mainnet-fork:
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.simulation_target == 'omni-router') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[omni-router-fork]')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Install existing router compiler and fork-only driver dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/omni-deps" --no-save --no-package-lock --ignore-scripts --no-audit --no-fund ethers@6.15.0 solc@0.8.28 @uniswap/v4-core@1.0.2
+          mkdir -p omni-router-fork-output-v1
+          curl --fail --location --retry 3 --max-time 60 \
+            "https://raw.githubusercontent.com/curveyield3/Smart-Contracts/3ce77dbc7fe427f05ba760c96b22bd7397ca62c3/routers/ethereum-fraxtal/CurveYieldOmniRouter.sol" \
+            -o "$RUNNER_TEMP/omni-router-source.sol"
+          node --check github-native-sim/omni-router-fork-v1/run_v1.cjs
+      - name: Execute Ethereum mainnet fork routing campaign (never broadcast)
+        shell: bash
+        env:
+          RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM }}
+        run: |
+          set -euo pipefail
+          : "${RPC_ETHEREUM:?Missing RPC_ETHEREUM secret}"
+          test "$(timeout 25s cast chain-id --rpc-url "$RPC_ETHEREUM")" = 1
+          mkdir -p omni-router-fork-output-v1
+          anvil --fork-url "$RPC_ETHEREUM" --chain-id 1 --block-time 1 --port 8545 \
+            > omni-router-fork-output-v1/anvil.log 2>&1 &
+          ANVIL_PID=$!
+          trap 'kill "$ANVIL_PID" 2>/dev/null || true' EXIT
+          READY=0
+          for i in $(seq 1 50); do
+            if [ "$(timeout 5s cast chain-id --rpc-url http://127.0.0.1:8545 2>/dev/null || true)" = 1 ]; then READY=1; break; fi
+            sleep 2
+          done
+          test "$READY" = 1
+          export FORK_RPC=http://127.0.0.1:8545
+          export OMNI_DEPS="$RUNNER_TEMP/omni-deps"
+          export ROUTER_SOURCE="$RUNNER_TEMP/omni-router-source.sol"
+          set +e
+          timeout -s TERM -k 10s 2100s node github-native-sim/omni-router-fork-v1/run_v1.cjs 2>&1 | tee omni-router-fork-output-v1/runner.log
+          RC=${PIPESTATUS[0]}
+          set -e
+          exit "$RC"
+      - name: Retain fork-only deployment, route, transaction and live state evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: omni-router-v11-mainnet-fork-v1-${{ github.run_id }}
+          path: omni-router-fork-output-v1/
+          if-no-files-found: warn
+          retention-days: 30
