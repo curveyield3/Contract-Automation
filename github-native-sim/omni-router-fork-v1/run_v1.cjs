@@ -96,8 +96,7 @@ const summary={
  funding:[],oracleReferences:[],routes:[],errors:[]
 };
 const json = (x)=>JSON.stringify(x,(_,v)=>typeof v==='bigint'?v.toString():v,2);
-const write=()=>fs.writeFileSync(path.join(artifactDir,'summary.json'),json(summary)+'
-');
+const write=()=>fs.writeFileSync(path.join(artifactDir,'summary.json'),json(summary)+'\n');
 const err=(e)=>String(e?.shortMessage||e?.reason||e?.message||e).slice(0,750);
 const c=(addr,abi,signer)=>new ethers.Contract(addr,abi,signer||provider);
 async function readState(h,routerAddr,tokenIn){
@@ -139,8 +138,7 @@ function compile(){
  }
  const parsed=JSON.parse(solc.compile(JSON.stringify(input),{import:findImports}));
  const errors=(parsed.errors||[]).filter(x=>x.severity==='error');
- if(errors.length)throw Error(errors.map(x=>x.formattedMessage).join('
-'));
+ if(errors.length)throw Error(errors.map(x=>x.formattedMessage).join('\n'));
  const router=parsed.contracts['routers/ethereum-fraxtal/CurveYieldOmniRouter.sol'].CurveYieldOmniRouter;
  const test=parsed.contracts['ForkOnlyOracle.sol'];
  const bytes=router.evm.deployedBytecode.object.length/2;
