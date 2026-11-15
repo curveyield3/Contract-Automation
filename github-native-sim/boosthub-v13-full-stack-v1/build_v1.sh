@@ -26,7 +26,7 @@ for old,new in [
  ('''import {BoostHubPartnerPairDeployerV4} from "../beefy-partner/contracts/BIFI/strategies/BoostHub/BoostHubPartnerPairDeployerV4.sol";''', '''import {BoostHubPartnerPairDeployerV4} from "../beefy-partner/contracts/BIFI/strategies/BoostHub/BoostHubPartnerPairDeployerV4.sol";
 import {StrategyConvexBoostHubPartnerV2} from "../beefy-partner/contracts/BIFI/strategies/BoostHub/StrategyConvexBoostHubPartnerV2.sol";'''),
  ('''    address private constant ETH_WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;''', '''    address private constant ETH_WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    address private constant ETH_USD_FEED = 0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419;'''),
+    address private constant ETH_USD_FEED = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419;'''),
  ('''        (address strategy,address vault) = deployer.deployPair(
             vaultFactory, staking, want, strategyFactory, omni, strategist,
             strategyOwner, vaultOwner, name, symbol

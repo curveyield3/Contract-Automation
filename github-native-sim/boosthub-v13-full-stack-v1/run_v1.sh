@@ -52,7 +52,18 @@ const slim=(obj)=>JSON.parse(JSON.stringify(obj,(key,value)=>typeof value==='big
 function recordCheck(label,ok,observed){result.assertions.push({label,ok,observed:slim(observed)});if(!ok)result.errors.push({label,kind:'invariant',observed:slim(observed)});}
 async function revertInfo(hash,err){return {hash,errorData:err?.data||err?.error?.data||err?.info?.error?.data||null,trace:'skipped: no slow full-transaction trace; inspect targeted reward/oracle state'};}
 async function act(label,fn,mandatory=true){let tx;
- try{tx=await fn();const rc=await tx.wait();const info={label,ok:rc.status===1,hash:rc.hash,gasUsed:rc.gasUsed.toString(),blockNumber:rc.blockNumber,logs:rc.logs.length};result.steps.push(info);if(!info.ok)throw new Error('Transaction status 0');return rc;}
+ try{tx=await fn();let rc=null;
+  for(let attempt=0;attempt<60;attempt++){
+    rc=await provider.send('eth_getTransactionReceipt',[tx.hash]);
+    if(rc)break;
+    await new Promise(resolve=>setTimeout(resolve,1000));
+  }
+  if(!rc)throw new Error('Mined receipt unavailable after 60 seconds: '+tx.hash);
+  const info={label,ok:BigInt(rc.status)===1n,hash:tx.hash,gasUsed:BigInt(rc.gasUsed).toString(),blockNumber:Number(BigInt(rc.blockNumber)),logs:rc.logs.length};
+  result.steps.push(info);
+  console.log('[v34] '+label+' receipt='+tx.hash+' block='+info.blockNumber+' ok='+info.ok);
+  if(!info.ok)throw new Error('Transaction status 0');
+  return rc;}
  catch(e){const msg=String(e?.shortMessage||e?.reason||e?.message||e).slice(0,2200);const hash=tx?.hash||e?.transactionHash||e?.receipt?.hash||null;
   const diagnosis=await revertInfo(hash,e);result.steps.push({label,ok:false,error:msg,diagnosis});
   if(mandatory)result.errors.push({label,error:msg,diagnosis});return null;}
