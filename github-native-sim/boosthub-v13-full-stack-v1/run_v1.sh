@@ -198,13 +198,32 @@ async function main(){
    }
    result.steps.push({label:`harvest-preflight-${e.kind}-pid${e.pid}`,ok:false,error:String(err?.shortMessage||err?.message||err).slice(0,1500),data,parsed});
   }
+  if(e.kind==='beefy-partner' && e.pid===0){
+    try{
+      const trace=await provider.send('debug_traceCall',[
+        {from:account,to:e.strategy,data:strategy.interface.encodeFunctionData('harvest()',[]),gas:ethers.toQuantity(16000000)},
+        'latest',{tracer:'callTracer',timeout:'20s'}
+      ]);
+      const rows=[];const visit=(node,depth)=>{if(rows.length>350)return;rows.push({depth,from:node.from,to:node.to,selector:String(node.input||'').slice(0,10),error:node.error||null,revertReason:node.revertReason||null,output:String(node.output||'').slice(0,74),gasUsed:node.gasUsed});for(const child of node.calls||[])visit(child,depth+1);};
+      visit(trace,0);
+      const failures=rows.filter(x=>x.error||x.revertReason);
+      result.steps.push({label:'pid0-beefy-nested-call-diagnosis',ok:true,calls:rows.length,failures,tail:rows.slice(-45)});
+      console.log('[v34] nested harvest trace:',JSON.stringify({failures,tail:rows.slice(-18)}));
+    }catch(e){const msg=String(e?.shortMessage||e?.message||e).slice(0,1500);result.steps.push({label:'pid0-beefy-nested-call-diagnosis',ok:false,error:msg});console.log('[v34] trace unavailable: '+msg);}
+  }
   await act(`strategy-harvest-${e.kind}-pid${e.pid}`,()=>strategy['harvest()']({gasLimit:16000000}));
  }
  await snapshot('after-strategy-harvests-and-compounding',ctx);
  for(const e of entries){
   const v=bind(e.kind==='original'?'BeefyVaultV7FixedV2':'BeefyVaultV7',e.vault,signer);
   const shares=await v.balanceOf(account);
-  if(shares>0n) await act(`withdraw-50%-shares-${e.kind}-pid${e.pid}`,()=>v.withdraw(shares/2n,{gasLimit:16000000}));
+  if(shares>0n){
+    const wantToken=new ethers.Contract(wants[e.pid],['function balanceOf(address) view returns(uint256)'],provider);
+    const before=await wantToken.balanceOf(account);
+    const rc=await act(`withdraw-50%-shares-${e.kind}-pid${e.pid}`,()=>v.withdraw(shares/2n,{gasLimit:16000000}));
+    const after=await wantToken.balanceOf(account);
+    result.steps.push({label:`actual-withdrawal-payment-${e.kind}-pid${e.pid}`,ok:!!rc,userUnderlyingDelta:(after-before).toString(),burnedShares:(shares/2n).toString()});
+  }
   else recordCheck(`nonzero vault shares for withdraw ${e.kind}-${e.pid}`,false,{shares:shares.toString()});
  }
  const final=await snapshot('post-all-withdrawals',ctx);
