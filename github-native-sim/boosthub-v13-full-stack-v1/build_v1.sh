@@ -8,6 +8,22 @@ if [[ "${GITHUB_REF_NAME:-}" == "boosthub-v34-ethereum-fork-sim" ]]; then
   tr -d '\r\n' < "$SOURCE" | base64 --decode > "$RUNNER_TEMP/boosthub-v34-source.tar.xz"
   echo '4c371a44aab88dab46e899bb03c98f76517e67db685cf803df84e10e6b18fa00  '"$RUNNER_TEMP/boosthub-v34-source.tar.xz" | sha256sum -c -
   tar -xJf "$RUNNER_TEMP/boosthub-v34-source.tar.xz" -C "$ROOT"
+  cp "$ROOT/script/DeployBoostHubStack.s.sol" "$RUNNER_TEMP/boosthub-v34-original-script.sol"
+  # Source-repair overlay is explicitly recorded; the uploaded v34 archive remains immutable.
+  python3 - "$ROOT/script/DeployBoostHubStack.s.sol" <<'PY'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]);s=p.read_text()
+for old,new in [
+ ("0x919fa96e88d67499339577fa202345436bcdaf79", "0x919Fa96e88d67499339577Fa202345436bcDaf79"),
+ ("0xd340b57aacdd10f96fc1cf10e15921936f41e29c", "0xD340B57AAcDD10F96FC1CF10e15921936F41E29c"),
+ ("BoostHub hub = BoostHub(deployedHub);", "BoostHub hub = BoostHub(payable(deployedHub));")
+]:
+ if s.count(old)!=1:raise SystemExit('Unexpected source count for repair: '+old)
+ s=s.replace(old,new)
+p.write_text(s)
+PY
+  diff -u "$RUNNER_TEMP/boosthub-v34-original-script.sol" "$ROOT/script/DeployBoostHubStack.s.sol" > boosthub-v34-deployment-compile-repair-v1.patch || test "$?" = 1
   echo '[v34] Installing exact dependencies from package source'
   npm install --prefix "$ROOT/dependencies" --no-package-lock --no-audit --no-fund --ignore-scripts
   python3 -m pip install --disable-pip-version-check --no-input vyper==0.4.3
