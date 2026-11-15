@@ -1,5 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Branch-scoped v34 Ethereum source and compiler setup; the existing v13 path below is untouched.
+if [[ "${GITHUB_REF_NAME:-}" == "boosthub-v34-ethereum-fork-sim" ]]; then
+  ROOT="$GITHUB_WORKSPACE/.boosthub-v34-full"
+  SOURCE="github-native-sim/boosthub-v13-full-stack-v1/source/BoostHub_v34_sim_source_v1.tar.xz.b64"
+  mkdir -p "$ROOT"
+  tr -d '\r\n' < "$SOURCE" | base64 --decode > "$RUNNER_TEMP/boosthub-v34-source.tar.xz"
+  echo '4c371a44aab88dab46e899bb03c98f76517e67db685cf803df84e10e6b18fa00  '"$RUNNER_TEMP/boosthub-v34-source.tar.xz" | sha256sum -c -
+  tar -xJf "$RUNNER_TEMP/boosthub-v34-source.tar.xz" -C "$ROOT"
+  echo '[v34] Installing exact dependencies from package source'
+  npm install --prefix "$ROOT/dependencies" --no-package-lock --no-audit --no-fund --ignore-scripts
+  python3 -m pip install --disable-pip-version-check --no-input vyper==0.4.3
+  python3 "$ROOT/tooling/make_staking_artifact.py" 2>&1 | tee boosthub-v34-vyper-compile-v1.log
+  echo '[v34] Compiling exact Ethereum deployment source'
+  forge build --root "$ROOT" 2>&1 | tee boosthub-v34-solidity-compile-v1.log
+  mkdir -p "$RUNNER_TEMP/boosthub-v34-js"
+  npm install --prefix "$RUNNER_TEMP/boosthub-v34-js" --no-save --no-package-lock --no-audit --no-fund --ignore-scripts ethers@6.15.0
+  exit 0
+fi
 ROOT="$GITHUB_WORKSPACE/.boosthub-v13-full"
 SRC=github-native-sim/boosthub-v13-full-stack-v1/source/BoostHub_v13_fork_build_source_v1.tar.xz
 echo '8dbb709fe785b276b388e17c78d57cac36038381bc80b3abb290b99d83cc9474  '${SRC} | sha256sum -c -
