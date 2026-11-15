@@ -50,17 +50,7 @@ const zero=ethers.ZeroAddress;
 const toString=(v)=>typeof v==='bigint'?v.toString():v;
 const slim=(obj)=>JSON.parse(JSON.stringify(obj,(key,value)=>typeof value==='bigint'?value.toString():value));
 function recordCheck(label,ok,observed){result.assertions.push({label,ok,observed:slim(observed)});if(!ok)result.errors.push({label,kind:'invariant',observed:slim(observed)});}
-async function revertInfo(hash,err){
- const out={hash,errorData:err?.data||err?.error?.data||err?.info?.error?.data||null};
- if(!hash)return out;
- try{const t=await provider.send('debug_traceTransaction',[hash,{tracer:'callTracer',timeout:'30s'}]);
-  const frames=[];function walk(f,depth){if(!f||frames.length>=35)return;
-   if(f.error||f.revertReason)frames.push({depth,to:f.to,selector:String(f.input||'').slice(0,10),error:f.error,revertReason:f.revertReason,output:String(f.output||'').slice(0,250)});
-   for(const c of f.calls||[])walk(c,depth+1);
-  }walk(t,0);out.trace=frames;
- }catch(e){out.traceFailure=String(e?.shortMessage||e?.message||e).slice(0,250);}
- return out;
-}
+async function revertInfo(hash,err){return {hash,errorData:err?.data||err?.error?.data||err?.info?.error?.data||null,trace:'skipped: no slow full-transaction trace; inspect targeted reward/oracle state'};}
 async function act(label,fn,mandatory=true){let tx;
  try{tx=await fn();const rc=await tx.wait();const info={label,ok:rc.status===1,hash:rc.hash,gasUsed:rc.gasUsed.toString(),blockNumber:rc.blockNumber,logs:rc.logs.length};result.steps.push(info);if(!info.ok)throw new Error('Transaction status 0');return rc;}
  catch(e){const msg=String(e?.shortMessage||e?.reason||e?.message||e).slice(0,2200);const hash=tx?.hash||e?.transactionHash||e?.receipt?.hash||null;
@@ -189,6 +179,18 @@ async function main(){
  await snapshot('after-100-blocks-and-hub-staking-harvests-before-strategy-harvest',ctx);
  for(const e of entries){
   const strategy=bind(e.kind==='original'?'StrategyConvexBoostHubStakingV5':'StrategyConvexBoostHubPartnerV2',e.strategy,signer);
+  if(e.kind==='beefy-partner' && e.pid===0){
+     const stake=bind('BoostHubStaking',e.staking),hub=bind('BoostHub',hubAddr);
+     const tokens=['0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5','0xD533a949740bb3306d119CC777fa900bA034cd52','0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E','0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'];
+     const probe={};for(const token of tokens){
+       const erc=new ethers.Contract(token,['function balanceOf(address) view returns(uint256)'],provider);
+       const vals={stakingTokenBalance:(await erc.balanceOf(e.staking)).toString(),strategyTokenBalance:(await erc.balanceOf(e.strategy)).toString()};
+       try{vals.stakingClaimable=(await stake.claimable_reward(e.strategy,token)).toString();}catch(err){vals.claimError=String(err.shortMessage||err.message).slice(0,160)}
+       probe[token]=vals;
+     }
+     const p=await hub.positionInfo(e.pid,e.staking);probe.hubPending={rewardTokens:p.rewardTokens,pendingRewards:p.pendingRewards.map(x=>x.toString())};
+     result.steps.push({label:'pid0-beefy-preharvest-token-probe',ok:true,probe});
+  }
   try{await strategy['harvest()'].staticCall({gasLimit:16000000});result.steps.push({label:`harvest-preflight-${e.kind}-pid${e.pid}`,ok:true});}
   catch(err){const data=err?.data||err?.error?.data||err?.info?.error?.data||null;
    let parsed=null;for(const name of ['CurveYieldOmniRouter','StrategyConvexBoostHubPartnerV2','BaseAllToNativeFactoryStrat']){
