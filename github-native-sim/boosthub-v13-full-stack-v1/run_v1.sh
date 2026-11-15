@@ -199,39 +199,14 @@ async function main(){
    result.steps.push({label:`harvest-preflight-${e.kind}-pid${e.pid}`,ok:false,error:String(err?.shortMessage||err?.message||err).slice(0,1500),data,parsed});
   }
   if(e.kind==='beefy-partner' && e.pid===0){
-    const id=await provider.send('evm_snapshot',[]);
-    const row={label:'pid0-beefy-isolated-routing-diagnostics',ok:true};
-    const CRV='0xD533a949740bb3306d119CC777fa900bA034cd52';
-    const crvUSD='0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E';
     try{
-      const nativeAmount=await bind('BoostHubStaking',e.staking).claimable_reward(e.strategy,WETH);
-      row.nativeClaimableBefore=nativeAmount.toString();
-      const swapperAddress=await strategy.swapper();
-      const router=bind('CurveYieldOmniRouter',swapperAddress,signer);
-      try{
-        const quote=await router.getAmountOut(WETH,wants[0],nativeAmount);
-        row.routeNativeToWantQuote=quote.toString();
-      }catch(err){row.routeNativeToWantQuoteError=String(err?.shortMessage||err?.message||err).slice(0,220);}
-      try{
-        const wrapped=bind('BoostHubStaking',e.staking);
-        const token=new ethers.Contract(WETH,['function deposit() payable','function approve(address,uint256) returns(bool)'],signer);
-        await (await token.deposit({value:nativeAmount})).wait();
-        await (await token.approve(swapperAddress,nativeAmount)).wait();
-        const received=await router.swap.staticCall(WETH,wants[0],nativeAmount,{gasLimit:8000000});
-        row.directNativeToWantSwap={ok:true,received:received.toString()};
-      }catch(err){row.directNativeToWantSwap={ok:false,error:String(err?.shortMessage||err?.message||err).slice(0,420),data:err?.data||null};}
-      try{
-        await (await strategy.setRewardMinAmount(CRV,ethers.MaxUint256)).wait();
-        await (await strategy.setRewardMinAmount(crvUSD,ethers.MaxUint256)).wait();
-        await strategy['harvest()'].staticCall({gasLimit:16000000});
-        row.harvestSkippingDust={ok:true};
-      }catch(err){row.harvestSkippingDust={ok:false,error:String(err?.shortMessage||err?.message||err).slice(0,420),data:err?.data||null};}
-    }catch(err){row.ok=false;row.diagnosticError=String(err?.message||err).slice(0,1500);}
-    finally{
-      const reverted=await provider.send('evm_revert',[id]);row.snapshotRestored=!!reverted;
+      const wethClaimable=await bind('BoostHubStaking',e.staking).claimable_reward(e.strategy,WETH);
+      const router=bind('CurveYieldOmniRouter',await strategy.swapper());
+      const quote=await router.getAmountOut(WETH,wants[0],wethClaimable);
+      result.steps.push({label:'pid0-beefy-native-route-historical-quote',ok:true,wethClaimable:wethClaimable.toString(),sdcrvQuote:quote.toString()});
+    }catch(err){
+      result.steps.push({label:'pid0-beefy-native-route-historical-quote',ok:false,error:String(err?.shortMessage||err?.message||err).slice(0,500),data:err?.data||null});
     }
-    result.steps.push(row);
-    console.log('[v34] isolated partner routing diagnostics '+JSON.stringify(row));
   }
   await act(`strategy-harvest-${e.kind}-pid${e.pid}`,()=>strategy['harvest()']({gasLimit:16000000}));
  }
