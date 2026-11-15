@@ -59,6 +59,8 @@ async function act(label,fn,mandatory=true){let tx;
     await new Promise(resolve=>setTimeout(resolve,1000));
   }
   if(!rc)throw new Error('Mined receipt unavailable after 60 seconds: '+tx.hash);
+  const receiptDir=path.join(ROOT,'post-actions','receipts');fs.mkdirSync(receiptDir,{recursive:true});
+  fs.writeFileSync(path.join(receiptDir,tx.hash+'.json'),JSON.stringify({label,receipt:rc}));
   const info={label,ok:BigInt(rc.status)===1n,hash:tx.hash,gasUsed:BigInt(rc.gasUsed).toString(),blockNumber:Number(BigInt(rc.blockNumber)),logs:rc.logs.length};
   result.steps.push(info);
   console.log('[v34] '+label+' receipt='+tx.hash+' block='+info.blockNumber+' ok='+info.ok);
