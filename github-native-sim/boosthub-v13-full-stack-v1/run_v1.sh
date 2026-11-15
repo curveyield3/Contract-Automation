@@ -50,7 +50,23 @@ const zero=ethers.ZeroAddress;
 const toString=(v)=>typeof v==='bigint'?v.toString():v;
 const slim=(obj)=>JSON.parse(JSON.stringify(obj,(key,value)=>typeof value==='bigint'?value.toString():value));
 function recordCheck(label,ok,observed){result.assertions.push({label,ok,observed:slim(observed)});if(!ok)result.errors.push({label,kind:'invariant',observed:slim(observed)});}
-async function act(label,fn,mandatory=true){try{const tx=await fn();const rc=await tx.wait();const info={label,ok:rc.status===1,hash:rc.hash,gasUsed:rc.gasUsed.toString(),blockNumber:rc.blockNumber,logs:rc.logs.length};result.steps.push(info);if(!info.ok)throw new Error('Transaction status 0');return rc;}catch(e){const msg=String(e?.shortMessage||e?.reason||e?.message||e).slice(0,2200);result.steps.push({label,ok:false,error:msg});if(mandatory)result.errors.push({label,error:msg});return null;}}
+async function revertInfo(hash,err){
+ const out={hash,errorData:err?.data||err?.error?.data||err?.info?.error?.data||null};
+ if(!hash)return out;
+ try{const t=await provider.send('debug_traceTransaction',[hash,{tracer:'callTracer',timeout:'30s'}]);
+  const frames=[];function walk(f,depth){if(!f||frames.length>=35)return;
+   if(f.error||f.revertReason)frames.push({depth,to:f.to,selector:String(f.input||'').slice(0,10),error:f.error,revertReason:f.revertReason,output:String(f.output||'').slice(0,250)});
+   for(const c of f.calls||[])walk(c,depth+1);
+  }walk(t,0);out.trace=frames;
+ }catch(e){out.traceFailure=String(e?.shortMessage||e?.message||e).slice(0,250);}
+ return out;
+}
+async function act(label,fn,mandatory=true){let tx;
+ try{tx=await fn();const rc=await tx.wait();const info={label,ok:rc.status===1,hash:rc.hash,gasUsed:rc.gasUsed.toString(),blockNumber:rc.blockNumber,logs:rc.logs.length};result.steps.push(info);if(!info.ok)throw new Error('Transaction status 0');return rc;}
+ catch(e){const msg=String(e?.shortMessage||e?.reason||e?.message||e).slice(0,2200);const hash=tx?.hash||e?.transactionHash||e?.receipt?.hash||null;
+  const diagnosis=await revertInfo(hash,e);result.steps.push({label,ok:false,error:msg,diagnosis});
+  if(mandatory)result.errors.push({label,error:msg,diagnosis});return null;}
+}
 function artifact(contract){if(contract==='BoostHubStaking')return JSON.parse(fs.readFileSync(path.join(ROOT,'artifacts','staking.json'),'utf8'));const d=path.join(ROOT,'build','forge');if(!fs.existsSync(d))throw Error('Missing Forge outputs: '+d);for(const sub of fs.readdirSync(d)){const p=path.join(d,sub,contract+'.json');if(fs.existsSync(p))return JSON.parse(fs.readFileSync(p,'utf8'));}throw Error('Missing artifact '+contract);}
 function bind(contract,address,actor){return new ethers.Contract(address,artifact(contract).abi,actor||provider);}
 async function safeStatic(address,signature,args=[]){try{const c=new ethers.Contract(address,[`function ${signature}`],provider);return await c[signature.split('(')[0]](...args);}catch(e){return null;}}
@@ -173,6 +189,13 @@ async function main(){
  await snapshot('after-100-blocks-and-hub-staking-harvests-before-strategy-harvest',ctx);
  for(const e of entries){
   const strategy=bind(e.kind==='original'?'StrategyConvexBoostHubStakingV5':'StrategyConvexBoostHubPartnerV2',e.strategy,signer);
+  try{await strategy['harvest()'].staticCall({gasLimit:16000000});result.steps.push({label:`harvest-preflight-${e.kind}-pid${e.pid}`,ok:true});}
+  catch(err){const data=err?.data||err?.error?.data||err?.info?.error?.data||null;
+   let parsed=null;for(const name of ['CurveYieldOmniRouter','StrategyConvexBoostHubPartnerV2','BaseAllToNativeFactoryStrat']){
+      try{const p=new ethers.Interface(artifact(name).abi).parseError(data);if(p){parsed={contract:name,error:p.name};break;}}catch(e){}
+   }
+   result.steps.push({label:`harvest-preflight-${e.kind}-pid${e.pid}`,ok:false,error:String(err?.shortMessage||err?.message||err).slice(0,1500),data,parsed});
+  }
   await act(`strategy-harvest-${e.kind}-pid${e.pid}`,()=>strategy['harvest()']({gasLimit:16000000}));
  }
  await snapshot('after-strategy-harvests-and-compounding',ctx);
