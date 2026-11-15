@@ -1,5 +1,205 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Branch-scoped v34 Ethereum complete deployment + 100-block post-action fork campaign.
+if [[ "${GITHUB_REF_NAME:-}" == "boosthub-v34-ethereum-fork-sim" ]]; then
+  ROOT="$GITHUB_WORKSPACE/.boosthub-v34-full"
+  : "${RPC_ETHEREUM:?Missing Ethereum RPC secret}"
+  test "$(timeout 25s cast chain-id --rpc-url "$RPC_ETHEREUM")" = 1
+  mkdir -p "$ROOT/post-actions"
+  anvil --fork-url "$RPC_ETHEREUM" --chain-id 1 --port 8545 \
+    > boosthub-v34-anvil-ethereum-v1.log 2>&1 &
+  ANVIL_PID=$!
+  trap 'kill "$ANVIL_PID" 2>/dev/null || true' EXIT
+  READY=0
+  for i in $(seq 1 60); do
+    if [ "$(timeout 4s cast chain-id --rpc-url http://127.0.0.1:8545 2>/dev/null || true)" = 1 ]; then READY=1; break; fi
+    sleep 2
+  done
+  test "$READY" -eq 1
+  FORK_RPC=http://127.0.0.1:8545
+  SENDER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+  START_BLOCK="$(cast block-number --rpc-url "$FORK_RPC")"
+  export BOOSTHUB_V34_FORK_RPC="$FORK_RPC" BOOSTHUB_V34_START_BLOCK="$START_BLOCK"
+  export BOOSTHUB_V34_ROOT="$ROOT" BOOSTHUB_V34_TEST_ACCOUNT="$SENDER"
+  export NODE_PATH="$RUNNER_TEMP/boosthub-v34-js/node_modules"
+  echo "[v34] Starting Ethereum fork deployment at block $START_BLOCK"
+  set +e
+  (cd "$ROOT" && timeout -s TERM -k 10s 1200s forge script \
+     script/DeployBoostHubStack.s.sol:DeployBoostHubStack \
+     --root "$ROOT" --rpc-url "$FORK_RPC" --broadcast --unlocked \
+     --sender "$SENDER" --slow -vvv) 2>&1 | tee boosthub-v34-full-deploy-v1.log
+  DEPLOY_STATUS=${PIPESTATUS[0]}
+  set -e
+  if [ "$DEPLOY_STATUS" -ne 0 ]; then
+    echo "[v34] Deployment failed, status=$DEPLOY_STATUS; post-action fork calls cannot run"
+    exit "$DEPLOY_STATUS"
+  fi
+
+  cat > "$RUNNER_TEMP/boosthub-v34-js/post_action_v1.cjs" <<'JS'
+'use strict';
+const fs = require('fs'), path = require('path');
+const { ethers } = require('ethers');
+const ROOT=process.env.BOOSTHUB_V34_ROOT;
+const rpc=process.env.BOOSTHUB_V34_FORK_RPC;
+const base=Number(process.env.BOOSTHUB_V34_START_BLOCK);
+const output=path.join(ROOT,'post-actions','ethereum-v34-summary.json');
+const provider=new ethers.JsonRpcProvider(rpc,1,{staticNetwork:true});
+const account=process.env.BOOSTHUB_V34_TEST_ACCOUNT;
+const result={kind:'BoostHub-v34-Ethereum-full-live-fork',chain:1,sourceSha256:'4c371a44aab88dab46e899bb03c98f76517e67db685cf803df84e10e6b18fa00',startBlock:base,steps:[],snapshots:[],assertions:[],errors:[],rewards:'fork-only 0.2 WETH per staking wrapper added through registered external-reward API, separately from actual gauge claim results'};
+const zero=ethers.ZeroAddress;
+const toString=(v)=>typeof v==='bigint'?v.toString():v;
+const slim=(obj)=>JSON.parse(JSON.stringify(obj,(key,value)=>typeof value==='bigint'?value.toString():value));
+function recordCheck(label,ok,observed){result.assertions.push({label,ok,observed:slim(observed)});if(!ok)result.errors.push({label,kind:'invariant',observed:slim(observed)});}
+async function act(label,fn,mandatory=true){try{const tx=await fn();const rc=await tx.wait();const info={label,ok:rc.status===1,hash:rc.hash,gasUsed:rc.gasUsed.toString(),blockNumber:rc.blockNumber,logs:rc.logs.length};result.steps.push(info);if(!info.ok)throw new Error('Transaction status 0');return rc;}catch(e){const msg=String(e?.shortMessage||e?.reason||e?.message||e).slice(0,2200);result.steps.push({label,ok:false,error:msg});if(mandatory)result.errors.push({label,error:msg});return null;}}
+function artifact(contract){if(contract==='BoostHubStaking')return JSON.parse(fs.readFileSync(path.join(ROOT,'artifacts','staking.json'),'utf8'));const d=path.join(ROOT,'build','forge');if(!fs.existsSync(d))throw Error('Missing Forge outputs: '+d);for(const sub of fs.readdirSync(d)){const p=path.join(d,sub,contract+'.json');if(fs.existsSync(p))return JSON.parse(fs.readFileSync(p,'utf8'));}throw Error('Missing artifact '+contract);}
+function bind(contract,address,actor){return new ethers.Contract(address,artifact(contract).abi,actor||provider);}
+async function safeStatic(address,signature,args=[]){try{const c=new ethers.Contract(address,[`function ${signature}`],provider);return await c[signature.split('(')[0]](...args);}catch(e){return null;}}
+async function findDeployment(){
+ const end=await provider.getBlockNumber();result.deploymentEndBlock=end;
+ const evPool=ethers.id('PoolAdded(uint256,address,address)');
+ const evDeposit=ethers.id('PoolDepositorApproval(uint256,address,bool)');
+ const evPartner=ethers.id('PartnerPairCreated(address,address,address)');
+ const poolLogs=await provider.getLogs({fromBlock:base,toBlock:end,topics:[evPool]});
+ if(poolLogs.length!==2)throw Error('Expected 2 Hub PoolAdded logs; saw '+poolLogs.length);
+ const hubAddr=poolLogs[0].address;
+ const stLogs=await provider.getLogs({address:hubAddr,fromBlock:base,toBlock:end,topics:[evDeposit]});
+ const stash={};for(const log of stLogs){const p=Number(BigInt(log.topics[1]));const addr=ethers.getAddress('0x'+log.topics[2].slice(-40));if(BigInt(log.data)===1n)stash[p]=addr;}
+ if(!stash[0]||!stash[1])throw Error('Missing approved staking depositors in Hub events: '+JSON.stringify(stash));
+ const partnerLogs=await provider.getLogs({fromBlock:base,toBlock:end,topics:[evPartner]});
+ if(partnerLogs.length!==2)throw Error('Expected 2 PartnerPairCreated logs; got '+partnerLogs.length);
+ const partner={};for(const log of partnerLogs){const staking=ethers.getAddress('0x'+log.topics[3].slice(-40));const pid=Object.keys(stash).find(x=>stash[x].toLowerCase()===staking.toLowerCase());if(pid===undefined)throw Error('Unexpected partner staking: '+staking);partner[pid]={strategy:ethers.getAddress('0x'+log.topics[1].slice(-40)),vault:ethers.getAddress('0x'+log.topics[2].slice(-40)),staking};}
+ const custom={};let topCreateCount=0;
+ for(let bn=base+1;bn<=end;bn++){
+   const b=await provider.send('eth_getBlockByNumber',[ethers.toQuantity(bn),true]);
+   for(const tx of b.transactions||[]){if(tx.to)continue;topCreateCount++;
+      const rc=await provider.getTransactionReceipt(tx.hash);const addr=rc.contractAddress;if(!addr)continue;
+      let strategy=await safeStatic(addr,'strategy() view returns (address)');
+      let want=await safeStatic(addr,'want() view returns (address)');
+      if(!strategy||!want||strategy===zero)continue;
+      for(const pid of [0,1]){
+        const token=pid===0?'0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5':'0xe19d1c837B8A1C83A56cD9165b2c0256D39653aD';
+        if(want.toLowerCase()===token.toLowerCase())custom[pid]={vault:addr,strategy};
+      }
+   }
+ }
+ if(!custom[0]||!custom[1])throw Error('Could not identify both original custom vaults: '+JSON.stringify(custom));
+ const entries=[];
+ for(const pid of [0,1]){
+   entries.push({pid,kind:'original',...custom[pid],staking:stash[pid]});
+   entries.push({pid,kind:'beefy-partner',...partner[pid]});
+ }
+ result.deployments={hub:hubAddr,staking:stash,custom,partner,topLevelCreated:topCreateCount};
+ return {entries,hubAddr,staking:stash};
+}
+async function snapshot(tag,ctx){
+ const arr=[];const hubs=[];
+ for(const pid of [0,1]){
+  const hub=bind('BoostHub',ctx.hubAddr);
+  const info=await hub.poolInfo(pid);
+  const stake=bind('BoostHubStaking',ctx.staking[pid]);
+  const total=await stake.total_staked();
+  const h=await hub.positionInfo(pid,ctx.staking[pid]);
+  hubs.push({pid,stakingTotal:total.toString(),hubPoolTotal:(info.totalStaked??info[3]??0n).toString(),hubStakingPosition:(h.principal??h[0]??0n).toString(),stakingRewardCount:(await stake.reward_count()).toString()});
+ }
+ for(const e of ctx.entries){
+  const vault=bind(e.kind==='original'?'BeefyVaultV7FixedV2':'BeefyVaultV7',e.vault);
+  const strat=bind(e.kind==='original'?'StrategyConvexBoostHubStakingV5':'StrategyConvexBoostHubPartnerV2',e.strategy);
+  const stake=bind('BoostHubStaking',e.staking);
+    const pool=await strat.balanceOfPool();
+  const reward=await stake.claimable_reward(e.strategy,'0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2').catch(()=>0n);
+  const data={pid:e.pid,kind:e.kind,vault:e.vault,strategy:e.strategy,
+    vaultTotalSupply:(await vault.totalSupply()).toString(),vaultUserShares:(await vault.balanceOf(account)).toString(),
+    vaultAssetBalance:(await vault.balance()).toString(),vaultPPS:(await vault.getPricePerFullShare()).toString(),
+    strategyBalanceOfPool:pool.toString(),stakingStakedBalance:(await stake.balanceOf(e.strategy)).toString(),
+    strategyBalanceOf:(await strat.balanceOf()).toString(),unclaimedWETH:reward.toString(),
+    stakingTotalStaked:(await stake.total_staked()).toString()};
+  arr.push(data);
+ }
+ const block=await provider.getBlock('latest');
+ result.snapshots.push({tag,blockNumber:block.number,timestamp:block.timestamp,hubs,vaults:arr});
+ return {hubs,vaults:arr};
+}
+async function main(){
+ const {entries,hubAddr,staking}=await findDeployment();
+ const ctx={entries,hubAddr,staking};
+ const signer=await provider.getSigner(account);
+ const WETH='0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+ const wants=['0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5','0xe19d1c837B8A1C83A56cD9165b2c0256D39653aD'];
+ const sources=['0xCA0253A98D16e9C1e3614caFDA19318EE69772D0','0x28Ca243dc0aC075dD012fCf9375C25D18A844d96'];
+ const amount=ethers.parseEther('1');
+ const hub=bind('BoostHub',hubAddr,signer);
+ recordCheck('two pools, two staking instances, four vault/strategies',entries.length===4&&Object.keys(staking).length===2,{entries:entries.map(e=>({pid:e.pid,kind:e.kind,vault:e.vault,strategy:e.strategy}))});
+ for(const pid of [0,1]){
+   const token=new ethers.Contract(wants[pid],['function balanceOf(address) view returns(uint256)','function transfer(address,uint256) returns(bool)','function approve(address,uint256) returns(bool)'],provider);
+   const from=sources[pid];const bal=await token.balanceOf(from);
+   recordCheck('source token holder has enough '+pid,bal>=amount*3n,{holder:from,balance:bal.toString()});
+   await provider.send('anvil_setBalance',[from,ethers.toQuantity(ethers.parseEther('5'))]);
+   await provider.send('anvil_impersonateAccount',[from]);
+   await act(`fork-only fund sd token pid=${pid}`,async()=>token.connect(await provider.getSigner(from)).transfer(account,amount*3n));
+   await provider.send('anvil_stopImpersonatingAccount',[from]);
+ }
+ await snapshot('post-deployment-before-deposits',ctx);
+ for(const e of entries){
+   const want=new ethers.Contract(wants[e.pid],['function approve(address,uint256) returns(bool)','function balanceOf(address) view returns(uint256)'],signer);
+   await act(`approve-${e.kind}-pid${e.pid}`,()=>want.approve(e.vault,amount));
+   const v=bind(e.kind==='original'?'BeefyVaultV7FixedV2':'BeefyVaultV7',e.vault,signer);
+   await act(`deposit-${e.kind}-pid${e.pid}`,()=>v.deposit(amount,{gasLimit:12000000}));
+ }
+ const deposits=await snapshot('post-four-deposits',ctx);
+ for(const pid of [0,1]){
+  const stake=bind('BoostHubStaking',staking[pid],signer);
+  await act(`register-external-WETH-reward-pid${pid}`,()=>stake.add_external_reward(WETH));
+ }
+ const weth=new ethers.Contract(WETH,['function deposit() payable','function approve(address,uint256) returns(bool)','function balanceOf(address) view returns(uint256)'],signer);
+ const rewardAmount=ethers.parseEther('0.2');
+ await act('wrap-0.4ETH-into-WETH',()=>weth.deposit({value:rewardAmount*2n}));
+ for(const pid of [0,1]){
+  await act(`approve-WETH-reward-pid${pid}`,()=>weth.approve(staking[pid],rewardAmount));
+  await act(`fund-staking-stream-WETH-pid${pid}`,()=>bind('BoostHubStaking',staking[pid],signer).deposit_reward_token(WETH,rewardAmount));
+ }
+ await snapshot('post-reward-stream-funding',ctx);
+ const priorBlock=await provider.getBlockNumber();
+ await provider.send('anvil_mine',['0x64','0xc']);
+ const afterBlock=await provider.getBlockNumber();
+ recordCheck('100-block jump',afterBlock-priorBlock===100,{priorBlock,afterBlock});
+ await act('boosthub-checkpoint-gauges',()=>hub.checkpoint([0,1],{gasLimit:15000000}));
+ for(const pid of [0,1]){
+   const stake=bind('BoostHubStaking',staking[pid],signer);
+   await act(`staking-checkpoint-ramp-pid${pid}`,()=>stake.checkpoint_ramp(16,{gasLimit:12000000}));
+   for(const e of entries.filter(z=>z.pid===pid)) await act(`staking-checkpoint-${e.kind}-pid${pid}`,()=>stake.checkpoint(e.strategy,{gasLimit:12000000}));
+   await act(`boosthub-harvest-pid${pid}`,()=>hub.harvest(pid,{gasLimit:14000000}));
+   await act(`staking-harvest-pid${pid}`,()=>stake.harvest({gasLimit:14000000}));
+ }
+ await snapshot('after-100-blocks-and-hub-staking-harvests-before-strategy-harvest',ctx);
+ for(const e of entries){
+  const strategy=bind(e.kind==='original'?'StrategyConvexBoostHubStakingV5':'StrategyConvexBoostHubPartnerV2',e.strategy,signer);
+  await act(`strategy-harvest-${e.kind}-pid${e.pid}`,()=>strategy['harvest()']({gasLimit:16000000}));
+ }
+ await snapshot('after-strategy-harvests-and-compounding',ctx);
+ for(const e of entries){
+  const v=bind(e.kind==='original'?'BeefyVaultV7FixedV2':'BeefyVaultV7',e.vault,signer);
+  const shares=await v.balanceOf(account);
+  if(shares>0n) await act(`withdraw-50%-shares-${e.kind}-pid${e.pid}`,()=>v.withdraw(shares/2n,{gasLimit:16000000}));
+  else recordCheck(`nonzero vault shares for withdraw ${e.kind}-${e.pid}`,false,{shares:shares.toString()});
+ }
+ const final=await snapshot('post-all-withdrawals',ctx);
+ for(const pid of [0,1]){
+  const row=final.hubs.find(x=>x.pid===pid);
+  const total=BigInt(row.stakingTotal),positions=final.vaults.filter(v=>v.pid===pid).reduce((a,v)=>a+BigInt(v.stakingStakedBalance),0n);
+  recordCheck(`staking total equals custom+partner principal pid=${pid}`,total===positions,{total:total.toString(),sumPositions:positions.toString()});
+  recordCheck(`Hub position equals staking principal pid=${pid}`,BigInt(row.hubStakingPosition)===total,{hubPosition:row.hubStakingPosition,stakingTotal:row.stakingTotal});
+  for(const v of final.vaults.filter(v=>v.pid===pid)){
+     recordCheck(`vault minted share accounting ${v.kind} pid=${pid}`,BigInt(v.vaultTotalSupply)===BigInt(v.vaultUserShares),{supply:v.vaultTotalSupply,userShares:v.vaultUserShares});
+  }
+ }
+}
+(async()=>{try{await main();}catch(e){const msg=String(e?.stack||e);result.errors.push({stage:'uncaught',error:msg.slice(0,5500)});console.error(msg);}finally{result.completedAt=new Date().toISOString();fs.writeFileSync(output,JSON.stringify(result,null,2));console.log('[v34] post-action evidence: '+output);console.log(JSON.stringify({deployment:result.deployments,steps:result.steps.length,snapshots:result.snapshots.map(x=>x.tag),assertions:result.assertions.length,errors:result.errors},null,2));if(result.errors.length)process.exitCode=1;}})();
+JS
+  echo '[v34] Running fork-only staking, checkpoint, fee, harvest and withdrawal campaign'
+  timeout -s TERM -k 10s 1200s node "$RUNNER_TEMP/boosthub-v34-js/post_action_v1.cjs" \
+    2>&1 | tee boosthub-v34-post-actions-v1.log
+  exit "${PIPESTATUS[0]}"
+fi
 ROOT="$GITHUB_WORKSPACE/.boosthub-v13-full"
 ETH_RPC="${RPC_ETHEREUM:?Missing configured RPC_ETHEREUM secret}"
 FRA_RPC="${RPC_FRAXTAL:-https://rpc.frax.com}"
