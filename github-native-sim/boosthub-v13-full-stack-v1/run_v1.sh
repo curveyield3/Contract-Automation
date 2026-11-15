@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Branch-scoped v34 Ethereum complete deployment + 100-block post-action fork campaign.
+# Branch-scoped v34 Ethereum deployment + 5000-block post-action fork campaign.
 if [[ "${GITHUB_REF_NAME:-}" == "boosthub-v34-ethereum-fork-sim" ]]; then
   ROOT="$GITHUB_WORKSPACE/.boosthub-v34-full"
   : "${RPC_ETHEREUM:?Missing Ethereum RPC secret}"
@@ -132,7 +132,7 @@ async function main(){
  const WETH='0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
  const wants=['0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5','0xe19d1c837B8A1C83A56cD9165b2c0256D39653aD'];
  const sources=['0xCA0253A98D16e9C1e3614caFDA19318EE69772D0','0x28Ca243dc0aC075dD012fCf9375C25D18A844d96'];
- const amount=ethers.parseEther('1');
+ const amount=ethers.parseEther('100');
  const hub=bind('BoostHub',hubAddr,signer);
  recordCheck('two pools, two staking instances, four vault/strategies',entries.length===4&&Object.keys(staking).length===2,{entries:entries.map(e=>({pid:e.pid,kind:e.kind,vault:e.vault,strategy:e.strategy}))});
  for(const pid of [0,1]){
@@ -165,9 +165,9 @@ async function main(){
  }
  await snapshot('post-reward-stream-funding',ctx);
  const priorBlock=await provider.getBlockNumber();
- await provider.send('anvil_mine',['0x64','0xc']);
+ await provider.send('anvil_mine',['0x1388','0xc']);
  const afterBlock=await provider.getBlockNumber();
- recordCheck('100-block jump',afterBlock-priorBlock===100,{priorBlock,afterBlock});
+ recordCheck('5000-block jump',afterBlock-priorBlock===5000,{priorBlock,afterBlock});
  await act('boosthub-checkpoint-gauges',()=>hub.checkpoint([0,1],{gasLimit:15000000}));
  for(const pid of [0,1]){
    const stake=bind('BoostHubStaking',staking[pid],signer);
@@ -176,7 +176,7 @@ async function main(){
    await act(`boosthub-harvest-pid${pid}`,()=>hub.harvest(pid,{gasLimit:14000000}));
    await act(`staking-harvest-pid${pid}`,()=>stake.harvest({gasLimit:14000000}));
  }
- await snapshot('after-100-blocks-and-hub-staking-harvests-before-strategy-harvest',ctx);
+ await snapshot('after-5000-blocks-and-hub-staking-harvests-before-strategy-harvest',ctx);
  for(const e of entries){
   const strategy=bind(e.kind==='original'?'StrategyConvexBoostHubStakingV5':'StrategyConvexBoostHubPartnerV2',e.strategy,signer);
   if(e.kind==='beefy-partner' && e.pid===0){

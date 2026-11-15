@@ -21,6 +21,67 @@ for old,new in [
 ]:
  if s.count(old)!=1:raise SystemExit('Unexpected source count for repair: '+old)
  s=s.replace(old,new)
+# Branch-only configuration of the exact archived deployment script.
+for old,new in [
+ ('''import {BoostHubPartnerPairDeployerV4} from "../beefy-partner/contracts/BIFI/strategies/BoostHub/BoostHubPartnerPairDeployerV4.sol";''', '''import {BoostHubPartnerPairDeployerV4} from "../beefy-partner/contracts/BIFI/strategies/BoostHub/BoostHubPartnerPairDeployerV4.sol";
+import {StrategyConvexBoostHubPartnerV2} from "../beefy-partner/contracts/BIFI/strategies/BoostHub/StrategyConvexBoostHubPartnerV2.sol";'''),
+ ('''    address private constant ETH_WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;''', '''    address private constant ETH_WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address private constant ETH_USD_FEED = 0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419;'''),
+ ('''        (address strategy,address vault) = deployer.deployPair(
+            vaultFactory, staking, want, strategyFactory, omni, strategist,
+            strategyOwner, vaultOwner, name, symbol
+        );
+        emit PartnerDeployed(block.chainid, pid, strategy, vault);''', '''        (address strategy,address vault) = deployer.deployPair(
+            vaultFactory, staking, want, strategyFactory, omni, strategist,
+            strategyOwner, vaultOwner, name, symbol
+        );
+        if (block.chainid == 1) {
+            StrategyConvexBoostHubPartnerV2 partner = StrategyConvexBoostHubPartnerV2(payable(strategy));
+            CurveYieldOmniRouter router = CurveYieldOmniRouter(payable(omni));
+            if (pid == 0) {
+                partner.setRewardMinAmount(ETH_CRVUSD, _tenCentRewardMinimum(router, ETH_CRVUSD));
+                partner.setRewardMinAmount(ETH_CRV, _tenCentRewardMinimum(router, ETH_CRV));
+                partner.setRewardMinAmount(ASSET_0, _tenCentRewardMinimum(router, ASSET_0));
+            } else {
+                partner.setRewardMinAmount(ASSET_1, _tenCentRewardMinimum(router, ASSET_1));
+            }
+            partner.transferOwnership(OWNER);
+            require(partner.owner() == OWNER, "PARTNER_OWNER_HANDOFF");
+        }
+        emit PartnerDeployed(block.chainid, pid, strategy, vault);'''),
+ ('''    function _createPartnerPair(
+''', '''    // On-chain USD reference plus the deployed router's historical reward/WETH price.
+    // Compute once at deployment without an adapter or extra strategy storage.
+    function _tenCentRewardMinimum(CurveYieldOmniRouter router, address token)
+        internal view returns (uint256)
+    {
+        (bool ok, bytes memory data) = ETH_USD_FEED.staticcall(
+            abi.encodeWithSignature("latestRoundData()")
+        );
+        require(ok && data.length >= 160, "PARTNER_ETH_USD_FEED");
+        (, int256 ethUsd,, uint256 updatedAt,) =
+            abi.decode(data, (uint80,int256,uint256,uint256,uint80));
+        require(ethUsd > 0 && updatedAt > 0 && updatedAt <= block.timestamp &&
+            block.timestamp - updatedAt <= 1 days, "PARTNER_ETH_USD_STALE");
+        (ok, data) = ETH_USD_FEED.staticcall(abi.encodeWithSignature("decimals()"));
+        require(ok && data.length >= 32, "PARTNER_ETH_USD_DECIMALS");
+        uint8 feedDecimals = abi.decode(data, (uint8));
+        uint8 tokenDecimals = IERC20PartnerMetadata(token).decimals();
+        require(feedDecimals <= 18 && tokenDecimals <= 18, "PARTNER_USD_DECIMALS_RANGE");
+        uint256 priceUsd1e18 = uint256(ethUsd) * router.price_oracle(token, ETH_WETH)
+            / (10 ** uint256(feedDecimals));
+        require(priceUsd1e18 > 0, "PARTNER_USD_PRICE_ZERO");
+        uint256 numerator = 1e17 * (10 ** uint256(tokenDecimals)); // $0.10 in token base units
+        return (numerator + priceUsd1e18 - 1) / priceUsd1e18;
+    }
+
+    function _createPartnerPair(
+'''),
+ ('''            strategyFactory, omni, OWNER, OWNER, OWNER, name, symbol, pid);''', '''            strategyFactory, omni, OWNER, block.chainid == 1 ? msg.sender : OWNER,
+            OWNER, name, symbol, pid);''')
+]:
+ if s.count(old)!=1: raise SystemExit('Unexpected deployment source match count: '+str(s.count(old))+' for '+old[:100])
+ s=s.replace(old,new)
 p.write_text(s)
 PY
   diff -u "$RUNNER_TEMP/boosthub-v34-original-script.sol" "$ROOT/script/DeployBoostHubStack.s.sol" > boosthub-v34-deployment-compile-repair-v1.patch || test "$?" = 1
