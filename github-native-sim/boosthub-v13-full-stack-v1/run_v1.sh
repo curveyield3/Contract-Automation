@@ -199,17 +199,39 @@ async function main(){
    result.steps.push({label:`harvest-preflight-${e.kind}-pid${e.pid}`,ok:false,error:String(err?.shortMessage||err?.message||err).slice(0,1500),data,parsed});
   }
   if(e.kind==='beefy-partner' && e.pid===0){
+    const id=await provider.send('evm_snapshot',[]);
+    const row={label:'pid0-beefy-isolated-routing-diagnostics',ok:true};
+    const CRV='0xD533a949740bb3306d119CC777fa900bA034cd52';
+    const crvUSD='0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E';
     try{
-      const trace=await provider.send('debug_traceCall',[
-        {from:account,to:e.strategy,data:strategy.interface.encodeFunctionData('harvest()',[]),gas:ethers.toQuantity(16000000)},
-        'latest',{tracer:'callTracer',timeout:'20s'}
-      ]);
-      const rows=[];const visit=(node,depth)=>{if(rows.length>350)return;rows.push({depth,from:node.from,to:node.to,selector:String(node.input||'').slice(0,10),error:node.error||null,revertReason:node.revertReason||null,output:String(node.output||'').slice(0,74),gasUsed:node.gasUsed});for(const child of node.calls||[])visit(child,depth+1);};
-      visit(trace,0);
-      const failures=rows.filter(x=>x.error||x.revertReason);
-      result.steps.push({label:'pid0-beefy-nested-call-diagnosis',ok:true,calls:rows.length,failures,tail:rows.slice(-45)});
-      console.log('[v34] nested harvest trace:',JSON.stringify({failures,tail:rows.slice(-18)}));
-    }catch(e){const msg=String(e?.shortMessage||e?.message||e).slice(0,1500);result.steps.push({label:'pid0-beefy-nested-call-diagnosis',ok:false,error:msg});console.log('[v34] trace unavailable: '+msg);}
+      const nativeAmount=await bind('BoostHubStaking',e.staking).claimable_reward(e.strategy,WETH);
+      row.nativeClaimableBefore=nativeAmount.toString();
+      const swapperAddress=await strategy.swapper();
+      const router=bind('CurveYieldOmniRouter',swapperAddress,signer);
+      try{
+        const quote=await router.getAmountOut(WETH,wants[0],nativeAmount);
+        row.routeNativeToWantQuote=quote.toString();
+      }catch(err){row.routeNativeToWantQuoteError=String(err?.shortMessage||err?.message||err).slice(0,220);}
+      try{
+        const wrapped=bind('BoostHubStaking',e.staking);
+        const token=new ethers.Contract(WETH,['function deposit() payable','function approve(address,uint256) returns(bool)'],signer);
+        await (await token.deposit({value:nativeAmount})).wait();
+        await (await token.approve(swapperAddress,nativeAmount)).wait();
+        const received=await router.swap.staticCall(WETH,wants[0],nativeAmount,{gasLimit:8000000});
+        row.directNativeToWantSwap={ok:true,received:received.toString()};
+      }catch(err){row.directNativeToWantSwap={ok:false,error:String(err?.shortMessage||err?.message||err).slice(0,420),data:err?.data||null};}
+      try{
+        await (await strategy.setRewardMinAmount(CRV,ethers.MaxUint256)).wait();
+        await (await strategy.setRewardMinAmount(crvUSD,ethers.MaxUint256)).wait();
+        await strategy['harvest()'].staticCall({gasLimit:16000000});
+        row.harvestSkippingDust={ok:true};
+      }catch(err){row.harvestSkippingDust={ok:false,error:String(err?.shortMessage||err?.message||err).slice(0,420),data:err?.data||null};}
+    }catch(err){row.ok=false;row.diagnosticError=String(err?.message||err).slice(0,1500);}
+    finally{
+      const reverted=await provider.send('evm_revert',[id]);row.snapshotRestored=!!reverted;
+    }
+    result.steps.push(row);
+    console.log('[v34] isolated partner routing diagnostics '+JSON.stringify(row));
   }
   await act(`strategy-harvest-${e.kind}-pid${e.pid}`,()=>strategy['harvest()']({gasLimit:16000000}));
  }
