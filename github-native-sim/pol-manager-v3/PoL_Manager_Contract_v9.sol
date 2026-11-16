@@ -200,11 +200,6 @@ contract PoLManager {
         }
         _approveOnce(c.curveLp,c.curvePool);
         if(c.curveGauge!=address(0))_approveOnce(c.curveLp,c.curveGauge);
-        for(uint8 i;i<5;++i){
-            if(vaults[i]==address(0))continue;
-            _approveOnce(assets[i],c.omniRouter);
-            _approveOnce(assets[i],vaults[i]);
-        }
         _approveOnce(pos.token0,c.omniRouter);
         _approveOnce(pos.token1,c.omniRouter);
         _approveOnce(pos.token0,c.uniNftManager);
