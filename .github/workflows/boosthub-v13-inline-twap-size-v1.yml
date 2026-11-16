@@ -4,7 +4,7 @@ on:
     branches: [main, pol-manager-v3-size]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
-      - 'github-native-sim/pol-manager-v3/PoL_Manager_Contract_v12.sol'
+      - 'github-native-sim/pol-manager-v3/PoL_Manager_Contract_v13.sol'
   workflow_dispatch:
 permissions:
   contents: read
@@ -109,7 +109,7 @@ jobs:
           set -euo pipefail
           WORK="$RUNNER_TEMP/pol-manager-v3"
           mkdir -p "$WORK/src"
-          cp github-native-sim/pol-manager-v3/PoL_Manager_Contract_v12.sol "$WORK/src/"
+          cp github-native-sim/pol-manager-v3/PoL_Manager_Contract_v13.sol "$WORK/src/"
           cd "$WORK"
           FOUND=0
           for runs in 200 1; do
@@ -138,8 +138,8 @@ jobs:
               creation=artifact["bytecode"]["object"].removeprefix("0x")
               if not runtime or len(runtime)%2: raise SystemExit("Missing runtime")
               size=len(runtime)//2
-              print(f"POL_V12_RUNTIME_BYTES contract={contract} bytes={size} optimizer_runs={sys.argv[1]} limit=24576 headroom={24576-size} over_limit={size>24576}",flush=True)
-              print(f"POL_V12_CREATION_BYTES contract={contract} bytes={len(creation)//2} optimizer_runs={sys.argv[1]}",flush=True)
+              print(f"POL_V13_RUNTIME_BYTES contract={contract} bytes={size} optimizer_runs={sys.argv[1]} limit=24576 headroom={24576-size} over_limit={size>24576}",flush=True)
+              print(f"POL_V13_CREATION_BYTES contract={contract} bytes={len(creation)//2} optimizer_runs={sys.argv[1]}",flush=True)
           PY
               FOUND=1
             else
