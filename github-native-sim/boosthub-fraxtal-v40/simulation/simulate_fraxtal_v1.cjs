@@ -55,7 +55,7 @@ async function state(tag,morpho,markets,loanTokens,vault,strategy,irm){const s={
  const stakeAddr=await staking.getAddress(); report.contracts.staking=stakeAddr;
  await tx(hub.setApprovedDepositors(0,[stakeAddr],[true],false),'hub_approve_new_staking');
  chk('new_depositor_approved',await hub.isApprovedDepositor(0,stakeAddr));
- chk('existing_depositor_preserved',await hub.isApprovedDepositor(0,'0xfE786BEF58cE39Fb4E6154c7C38275a4A71Bf922'));
+ chk('existing_depositor_preserved',await hub.isApprovedDepositor(0,'0xfe786bef58ce39fb4e6154c7c38275a4a71bf922'));
  chk('staking_admin', (await staking.admin()).toLowerCase()===a.ADMIN.toLowerCase());
  chk('staking_fee_receiver', (await staking.fee_receiver()).toLowerCase()===a.ADMIN.toLowerCase());
  chk('staking_smoothing', (await staking.reward_smoothing_units())===150n);
