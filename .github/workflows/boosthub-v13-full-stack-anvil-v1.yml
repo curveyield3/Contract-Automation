@@ -35,6 +35,9 @@ jobs:
           python -m pip install --disable-pip-version-check 'vyper==0.4.3'
           python tooling/make_staking_artifact.py
           forge build script/DeployFraxtalSupplementV41.s.sol --force
+          if [ -f market-creator/CurveYieldMorphoFeeSplitter.sol ]; then
+            forge build market-creator/CurveYieldMorphoFeeSplitter.sol --force
+          fi
       - name: Clone exact unmodified Morpho Blue and compile new Fraxtal IRM/oracles
         shell: bash
         run: |
