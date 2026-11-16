@@ -577,54 +577,66 @@ contract PoLManager {
         _pay(paid);
     }
 
-    function setRateRule(uint8 from,uint8 to,RateRule calldata c) external onlyOwner {
-        if(from>2||to>2||from==to)revert Invalid();
-        if(c.enabled&&(c.quoteAmount==0||c.thresholdWad==0||c.maxDeviationBps>2000||
-            c.yearnRedeemBps>BPS||c.eulerRedeemBps>BPS||
-            (c.yearnRedeemBps==0&&c.eulerRedeemBps==0)||
-            c.persistSeconds<300||c.cooldownSeconds<3600))revert Invalid();
-        if(c.enabled&&(assets[sdtYearnIndex]!=sdt||assets[sdtEulerIndex+3]!=sdt))revert State();
-        rateFrom=from;rateTo=to;
-        RateRule storage r=rateRule;
-        r.quoteAmount=c.quoteAmount;r.thresholdWad=c.thresholdWad;
-        r.maxDeviationBps=c.maxDeviationBps;r.yearnRedeemBps=c.yearnRedeemBps;
-        r.eulerRedeemBps=c.eulerRedeemBps;r.persistSeconds=c.persistSeconds;
-        r.cooldownSeconds=c.cooldownSeconds;r.enabled=c.enabled;r.armedAt=0;
+    /// @notice Three progressively deeper SDT/cyvlSDT price levels and cumulative buy caps.
+    /// @dev For example 0.9, 0.7, 0.5 SDT per cyvlSDT, with 10%, 40%, 75% maximum cumulative shares.
+    ///      Configuration changes do not reset spent amounts or the allocation snapshot.
+    function setBuyLevels(uint256[3] calldata prices,uint16[3] calldata cumulativeBps) external onlyOwner {
+        if(prices[0]==0){
+            if(prices[1]!=0||prices[2]!=0||cumulativeBps[0]!=0||
+                cumulativeBps[1]!=0||cumulativeBps[2]!=0)revert Invalid();
+        }else if(prices[0]<=prices[1]||prices[1]<=prices[2]||prices[2]==0||
+            cumulativeBps[0]==0||cumulativeBps[0]>=cumulativeBps[1]||
+            cumulativeBps[1]>=cumulativeBps[2]||cumulativeBps[2]>BPS)revert Invalid();
+        for(uint8 i;i<3;++i)buyLevels[i]=BuyLevel(prices[i],cumulativeBps[i]);
+        activeBuyTier=0;
+        emit BuyLevelsUpdated();
     }
-    function rateStatus() public view returns(uint256 spot,uint256 oracleRate,uint256 deviationBps){
-        RateRule storage r=rateRule;
-        if(r.quoteAmount==0)revert Invalid();
-        uint8 from=rateFrom;uint8 to=rateTo;
-        uint256 out=IPoLCurve(curvePool).get_dy(int128(uint128(from)),int128(uint128(to)),r.quoteAmount);
-        uint256 scaleIn=10**uint256(IPoL20(curveCoins[from]).decimals());
-        uint256 scaleOut=10**uint256(IPoL20(curveCoins[to]).decimals());
-        spot=out*scaleIn*WAD/(r.quoteAmount*scaleOut);
-        oracleRate=IPoLRouter(omniRouter).price_oracle(curveCoins[from],curveCoins[to]);
-        if(oracleRate==0)revert Invalid();
-        deviationBps=(spot>oracleRate?spot-oracleRate:oracleRate-spot)*BPS/oracleRate;
+    /// @notice Explicitly starts a new budget epoch. Public callers cannot reset spending.
+    function resetBuyBudget() external onlyOwner {
+        buyBudgetInitialized=false;activeBuyTier=0;
+        buyBaseYearn=0;buyBaseEuler=0;buySpentYearn=0;buySpentEuler=0;
     }
-    function observeRate() external active {
-        RateRule storage r=rateRule;if(!r.enabled)revert State();
-        (uint256 spot,,uint256 dev)=rateStatus();
-        if(spot>=r.thresholdWad&&dev<=r.maxDeviationBps){if(r.armedAt==0)r.armedAt=uint64(block.timestamp);}
-        else r.armedAt=0;
+    function buyPrice() public view returns(uint256){
+        return IPoLRouter(omniRouter).price_oracle(cyvlSDT,sdt);
     }
-    function executeRate() external active guard returns(uint256 yearnShares,uint256 eulerShares){
-        RateRule storage r=rateRule;
-        if(!r.enabled||r.armedAt==0||block.timestamp<uint256(r.armedAt)+r.persistSeconds||
-            block.timestamp<uint256(r.lastAt)+r.cooldownSeconds)revert State();
-        (uint256 spot,,uint256 dev)=rateStatus();
-        if(spot<r.thresholdWad||dev>r.maxDeviationBps)revert State();
+    /// @notice Permissionless price-gated conversion of SDT Yearn/Euler capital into cyvlSDT.
+    /// @dev Caps are cumulative fractions of the initial fee-excluded vault share balances.
+    ///      OmniRouter price_oracle is historical, so rate recovery is observed across calls.
+    function swapForCyvlSDT(uint256 maxYearnShares,uint256 maxEulerShares)
+        external active guard returns(uint256 yearnShares,uint256 eulerShares,uint256 received){
+        if(maxYearnShares==0&&maxEulerShares==0)revert Invalid();
+        uint256 p=buyPrice();
+        if(p==0||buyLevels[0].maxPriceWad==0)revert State();
+        uint8 tier;
+        for(uint8 i;i<3;++i)if(p<=buyLevels[i].maxPriceWad)tier=i+1;
+        uint8 old=activeBuyTier;
+        if(old>tier&&p<buyLevels[old-1].maxPriceWad*101/100)tier=old;
+        if(tier==0)revert State();
         uint8 y=sdtYearnIndex;uint8 e=sdtEulerIndex+3;
         if(assets[y]!=sdt||assets[e]!=sdt)revert State();
         _accrue(y);_accrue(e);
-        yearnShares=_min((_balance(vaults[y])-accruedFeeShares[y])*r.yearnRedeemBps/BPS,_maxRedeem(y));
-        eulerShares=_min((_balance(vaults[e])-accruedFeeShares[e])*r.eulerRedeemBps/BPS,_maxRedeem(e));
+        uint256 heldY=_balance(vaults[y])-accruedFeeShares[y];
+        uint256 heldE=_balance(vaults[e])-accruedFeeShares[e];
+        if(!buyBudgetInitialized){
+            buyBudgetInitialized=true;buyBaseYearn=heldY;buyBaseEuler=heldE;
+        }
+        uint256 bps=buyLevels[tier-1].cumulativeBps;
+        uint256 capY=buyBaseYearn*bps/BPS;
+        uint256 capE=buyBaseEuler*bps/BPS;
+        if(capY>buySpentYearn&&maxYearnShares!=0){
+            yearnShares=_min(maxYearnShares,_min(capY-buySpentYearn,_min(heldY,_maxRedeem(y))));
+        }
+        if(capE>buySpentEuler&&maxEulerShares!=0){
+            eulerShares=_min(maxEulerShares,_min(capE-buySpentEuler,_min(heldE,_maxRedeem(e))));
+        }
         if(yearnShares==0&&eulerShares==0)revert State();
-        r.armedAt=0;r.lastAt=uint64(block.timestamp);
-        if(yearnShares>0)_curveInvest(assets[y],_vaultRedeemRaw(y,yearnShares,0));
-        if(eulerShares>0)_curveInvest(assets[e],_vaultRedeemRaw(e,eulerShares,0));
-        emit RateExecuted(rateFrom,rateTo,yearnShares,eulerShares);
+        activeBuyTier=tier;
+        buySpentYearn+=yearnShares;buySpentEuler+=eulerShares;
+        uint256 amount;
+        if(yearnShares!=0)amount+=_vaultRedeemRaw(y,yearnShares,0);
+        if(eulerShares!=0)amount+=_vaultRedeemRaw(e,eulerShares,0);
+        received=_swap(sdt,cyvlSDT,amount);
+        emit CyvlSDTBought(tier,p,yearnShares,eulerShares,received);
     }
     function rescueToken(address token,address recipient,uint256 amount) external onlyOwner guard {
         if(recipient==address(0)||token==curveLp)revert Invalid();
