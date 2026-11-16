@@ -76,6 +76,7 @@ jobs:
           root=pathlib.Path('github-native-sim/boosthub-fraxtal-v40')
           entries={
             'router':root/'build/forge/CurveYieldOmniRouter.sol/CurveYieldOmniRouter.json',
+            'splitter':root/'build/forge/CurveYieldMorphoFeeSplitter.sol/CurveYieldMorphoFeeSplitter.json',
             'strategy':root/'build/forge/StrategyConvexBoostHubStakingV5.sol/StrategyConvexBoostHubStakingV5.json',
             'vault':root/'build/forge/BeefyVaultV7FixedV2.sol/BeefyVaultV7FixedV2.json',
             'morpho':root/'.upstream-morpho/out/Morpho.sol/Morpho.json',
