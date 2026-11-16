@@ -57,7 +57,7 @@ jobs:
           FORK_SOURCE="${RPC_FRAXTAL:-https://fraxtal-rpc.publicnode.com}"
           if [ -n "${RPC_FRAXTAL:-}" ]; then echo "Using configured Fraxtal RPC"; else echo "Using PublicNode Fraxtal RPC"; fi
           mkdir -p github-native-sim/boosthub-fraxtal-v40/sim-results
-          anvil --fork-url "$FORK_SOURCE" --chain-id 252 --port 8545 --host 127.0.0.1 --gas-limit 30000000 > github-native-sim/boosthub-fraxtal-v40/sim-results/anvil.log 2>&1 &
+          anvil --fork-url "$FORK_SOURCE" --chain-id 252 --port 8545 --host 127.0.0.1 --gas-limit 30000000 --block-time 1 > github-native-sim/boosthub-fraxtal-v40/sim-results/anvil.log 2>&1 &
           ANVIL_PID=$!
           trap 'kill "$ANVIL_PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 40); do
