@@ -519,7 +519,7 @@ contract PoLManager {
     function rateStatus() public view returns(uint256 spot,uint256 oracleRate,uint256 deviationBps){
         RateRule storage r=rateRule;
         if(r.quoteAmount==0)revert Invalid();
-        uint8 from=rateFrom,to=rateTo;
+        uint8 from=rateFrom;uint8 to=rateTo;
         uint256 out=IPoLCurve(curvePool).get_dy(int128(uint128(from)),int128(uint128(to)),r.quoteAmount);
         uint256 scaleIn=10**uint256(IPoL20(curveCoins[from]).decimals());
         uint256 scaleOut=10**uint256(IPoL20(curveCoins[to]).decimals());
