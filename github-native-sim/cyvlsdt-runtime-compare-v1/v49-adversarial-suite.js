@@ -359,7 +359,7 @@ describe("CurveYield v49 multiactor adversarial and state-conservation qualifica
         const [mFree,dFree,aFree]=await Promise.all([
           f.locker.merchantDelegableBoost(),f.locker.daoDelegableBoost(),f.locker.adminDelegableBoost()
         ]);
-        let shouldSucceed=false,executed=false;
+        let shouldSucceed=false,executed=false,reverted=false;
         try{
           if(action===0){
             shouldSucceed=amount<=dFree;
@@ -409,10 +409,15 @@ describe("CurveYield v49 multiactor adversarial and state-conservation qualifica
               " amount="+amount+" mFree="+mFree+" dFree="+dFree+" aFree="+aFree+" cause="+String(error));
           }
           same(before,await snapshot(f),"reverted transaction changes account state at run="+run+" step="+step);
+          reverted=true;
           rejected++;
         }
-        if(executed) accepted++;
-        else if(!shouldSucceed) skipped++;
+        if(executed){
+          assert(shouldSucceed,"unexpected success of over-capacity operation run="+run+" step="+step);
+          accepted++;
+        }else if(!reverted){
+          skipped++;
+        }
         await assertBoostState(f,"saturation seed="+run+" step="+step);
         accountChecks+=13;
         if(step%125===0)console.log("SATURATION_STATE",JSON.stringify({
@@ -424,6 +429,7 @@ describe("CurveYield v49 multiactor adversarial and state-conservation qualifica
       await network.provider.send("evm_revert",[snap]);
     }
     assert(accepted>500 && rejected>100,"insufficient saturation/negative-test coverage");
+    assert.equal(accepted+rejected+skipped,3000,"each of the 3000 actions must have exactly one outcome classification");
     console.log("RANDOM_SATURATION_COMPLETED",JSON.stringify({
       runs:12,operations:3000,accepted,rejected,skipped,accountChecks
     }));
