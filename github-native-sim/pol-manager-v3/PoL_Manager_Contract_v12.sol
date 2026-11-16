@@ -512,7 +512,8 @@ contract PoLManager {
         if(token==uniToken0)return(amount,0);
         if(token==uniToken1)return(0,amount);
         uint256 converted=_convert(token,sdt,amount);
-        return sdt==uniToken0?(converted,0):(0,converted);
+        if(sdt==uniToken0)return(converted,0);
+        return(0,converted);
     }
     /// @dev Never changes NFT ticks. Swap price and amount guards are enforced by OmniRouter.
     ///      NFT liquidity minted is bounded by the 2% default (owner-configurable) tolerance.
