@@ -491,6 +491,10 @@ contract PoLManager {
     }
     function _uniAdd(uint256 a0,uint256 a1,uint256 min0,uint256 min1,uint128 minL) private returns(uint128 liquidity,uint256 used0,uint256 used1){
         if(a0+a1==0)revert Invalid();
+        (uint160 twap,)=_uniPrice();
+        (uint256 q0,uint256 q1)=_uniUnitAmounts(twap);
+        uint128 oracleFloor=_uniMinLiquidity(a0,a1,q0,q1);
+        if(oracleFloor>minL)minL=oracleFloor;
         (liquidity,used0,used1)=IPoLNft(uniNftManager).increaseLiquidity(IPoLNft.Increase(uniTokenId,a0,a1,min0,min1,block.timestamp));
         if(liquidity==0||liquidity<minL)revert Slippage();
         emit UniLiquidity(1,used0,used1,liquidity);
@@ -515,14 +519,34 @@ contract PoLManager {
         if(tick>0)ratio=type(uint256).max/ratio;
         sqrtRatio=uint160((ratio>>32)+((ratio&0xffffffff)==0?0:1));
     }
+    // Cumulative ticks cover a real time interval. Same-block swaps have zero
+    // elapsed seconds and cannot replace this historical reference with slot0.
     function _uniPrice() private view returns(uint160 p,uint256 oracle){
-        (p,,,,,,)=IPoLUniPool(uniPool).slot0();
-        oracle=IPoLRouter(omniRouter).price_oracle(uniToken0,uniToken1);
-        if(p==0||oracle==0)revert Invalid();
+        uint32 duration=uniTwapSeconds;
+        uint32[] memory secondsAgos=new uint32[](2);
+        secondsAgos[0]=duration;
+        (int56[] memory cumulatives,)=IPoLUniPool(uniPool).observe(secondsAgos);
+        int56 diff=cumulatives[1]-cumulatives[0];
+        int56 div=int56(uint56(duration));
+        int24 tick=int24(diff/div);
+        if(diff<0&&diff%div!=0)--tick;
+        p=_sqrtAtTick(tick);
         uint256 mid=PoLMath.mulDiv(p,p,uint256(1)<<96);
-        uint256 spot=PoLMath.mulDiv(mid,uniUnit0*WAD,(uint256(1)<<96)*uniUnit1);
-        uint256 delta=spot>oracle?spot-oracle:oracle-spot;
-        if(PoLMath.mulDiv(delta,BPS,oracle)>uniSlippageBps)revert Slippage();
+        oracle=PoLMath.mulDiv(mid,uniUnit0*WAD,(uint256(1)<<96)*uniUnit1);
+        if(oracle==0)revert Invalid();
+    }
+    // Liquidity implied by current holdings, but using a time-weighted price.
+    function _uniMinLiquidity(uint256 a0,uint256 a1,uint256 q0,uint256 q1)
+        private view returns(uint128 minLiquidity){
+        uint256 units;
+        if(q0==0)units=PoLMath.mulDiv(a1,WAD,q1);
+        else if(q1==0)units=PoLMath.mulDiv(a0,WAD,q0);
+        else {
+            units=_min(PoLMath.mulDiv(a0,WAD,q0),PoLMath.mulDiv(a1,WAD,q1));
+        }
+        units=PoLMath.mulDiv(units,BPS-uniSlippageBps,BPS);
+        if(units==0||units>type(uint128).max)revert Slippage();
+        minLiquidity=uint128(units);
     }
     // Raw token quantities for 1e18 liquidity units in the NFT's immutable range.
     function _uniUnitAmounts(uint160 p) private view returns(uint256 q0,uint256 q1){
@@ -541,11 +565,10 @@ contract PoLManager {
         if(sdt==uniToken0)return(converted,0);
         return(0,converted);
     }
-    /// @dev Never changes NFT ticks. Swap price and amount guards are enforced by OmniRouter.
-    ///      NFT liquidity minted is bounded by the 2% default (owner-configurable) tolerance.
-    function _uniSmart(address tokenA,uint256 amountA,address tokenB,uint256 amountB,uint128 referenceExpectedLiquidity)
+    /// @dev Never changes NFT ticks. Only OmniRouter protects swaps.
+    ///      The NFT itself uses the Uniswap v3 TWAP for a 2%-default liquidity floor.
+    function _uniSmart(address tokenA,uint256 amountA,address tokenB,uint256 amountB)
         private returns(uint128 minted){
-        if(referenceExpectedLiquidity==0)revert Invalid();
         (uint256 have0,uint256 have1)=_uniNormalize(tokenA,amountA);
         (uint256 add0,uint256 add1)=_uniNormalize(tokenB,amountB);
         have0+=add0;have1+=add1;
@@ -565,11 +588,7 @@ contract PoLManager {
             if(spend>have1)spend=have1;
             if(spend!=0){have1-=spend;have0+=_swap(uniToken1,uniToken0,spend);}
         }
-        // Apply the configured 2%-default tolerance to an independently sourced expected value.
-        // Never replace this anchor with a mutable same-block pool quote.
-        uint128 floor=uint128(uint256(referenceExpectedLiquidity)*(BPS-uniSlippageBps)/BPS);
-        if(floor==0)revert Slippage();
-        (minted,,)=_uniAdd(have0,have1,0,0,floor);
+        (minted,,)=_uniAdd(have0,have1,0,0,0);
     }
     function _harvestUni() private returns(uint256 paid){
         (uint256 got0,uint256 got1)=IPoLNft(uniNftManager).collect(IPoLNft.Collect(uniTokenId,address(this),type(uint128).max,type(uint128).max));
@@ -611,21 +630,21 @@ contract PoLManager {
         pendingUniCompound0=0;pendingUniCompound1=0;
     }
 
-    function _invest(uint8 dest,address tokenA,uint256 amountA,address tokenB,uint256 amountB,uint256 minShares,uint128 expectedUniLiquidity)
+    function _invest(uint8 dest,address tokenA,uint256 amountA,address tokenB,uint256 amountB,uint256 minShares)
         private returns(uint256 units){
         if(dest>=7||amountA+amountB==0)revert Invalid();
         if(dest==0){
-            units=_curveDeposit(_convert(tokenA,sdt,amountA)+_convert(tokenB,sdt,amountB),minShares);
+            units=_curveDeposit(_convert(tokenA,sdt,amountA)+_convert(tokenB,sdt,amountB));
         }else if(dest==1){
-            units=_uniSmart(tokenA,amountA,tokenB,amountB,expectedUniLiquidity);
+            units=_uniSmart(tokenA,amountA,tokenB,amountB);
         }else{
             uint8 slot=dest-2;
             units=_vaultDeposit(slot,_convert(tokenA,assets[slot],amountA)+_convert(tokenB,assets[slot],amountB),minShares);
         }
     }
     /// @notice Explicitly allocate current idle balance; no passive token scanning or shadow ledger.
-    /// @notice For any active Curve/NFT allocation supply pre-transaction minimum LP/NFT liquidity.
-    function allocateFunds(address token,uint256 amount,uint256 minCurveLp,uint128 expectedUniLiquidity)
+    /// @notice Allocation uses built-in Curve EMA and Uniswap TWAP minimums.
+    function allocateFunds(address token,uint256 amount)
         external onlyOperator active guard returns(uint256[7] memory minted){
         if((token!=sdt&&token!=usdc)||amount==0||amount>_free(token))revert Invalid();
         uint8 mask=allocationEnabledMask;
@@ -639,7 +658,7 @@ contract PoLManager {
             if((mask&(uint8(1)<<i))==0||allocations[i]==0)continue;
             uint256 part=i==last?left:amount*allocations[i]/total;
             if(i!=last)left-=part;
-            if(part!=0)minted[i]=_invest(i,token,part,address(0),0,i==0?minCurveLp:0,i==1?expectedUniLiquidity:0);
+            if(part!=0)minted[i]=_invest(i,token,part,address(0),0,0);
         }
     }
     function migrate(Migration calldata m) external onlyOperator active guard returns(uint256 result){
@@ -648,18 +667,18 @@ contract PoLManager {
         if(m.source==0){
             uint256 idle=_balance(curveLp);
             if(m.amount>idle){if(curveGauge==address(0))revert Invalid();IPoLGauge(curveGauge).withdraw(m.amount-idle);}
-            a=sdt;x=_curveWithdraw(m.amount,m.minSourceSDT,false);
+            a=sdt;x=_curveWithdraw(m.amount,false);
         }else if(m.source==1){
             (x,y)=_uniRemove(m.amount,m.minUniRemoved0,m.minUniRemoved1);
             a=uniToken0;b=uniToken1;
         }else{
             uint8 slot=m.source-2;a=assets[slot];x=_vaultRedeem(slot,m.amount,0);
         }
-        result=_invest(m.destination,a,x,b,y,m.minDestinationShares,m.expectedDestinationUniLiquidity);
+        result=_invest(m.destination,a,x,b,y,m.minDestinationShares);
         emit Migrated(m.source,m.destination,m.amount,result);
     }
 
-    function _harvestCurve(uint256 minCurveLp) private returns(uint256 paid){
+    function _harvestCurve() private returns(uint256 paid){
         if(curveGauge==address(0))return 0;
         uint256 before_=_balance(crv);
         IPoLGauge(curveGauge).claim_rewards();
@@ -667,7 +686,7 @@ contract PoLManager {
         if(reward==0)return 0;
         uint256 cut=reward*profitFeeBps/BPS;
         paid=_convert(crv,sdt,cut);
-        if(reward>cut)_curveDeposit(_convert(crv,sdt,reward-cut),minCurveLp);
+        if(reward>cut)_curveDeposit(_convert(crv,sdt,reward-cut));
     }
     function _harvestVault(uint8 slot) private returns(uint256 paid){
         if(vaults[slot]==address(0))return 0;
@@ -679,20 +698,20 @@ contract PoLManager {
         accruedFeeShares[slot]=due-shares;
         paid=_convert(assets[slot],sdt,_vaultRedeemRaw(slot,shares,0));
     }
-    function _harvestPosition(uint8 position,uint256 minCurveLp) private returns(uint256){
-        if(position==0)return _harvestCurve(minCurveLp);
+    function _harvestPosition(uint8 position) private returns(uint256){
+        if(position==0)return _harvestCurve();
         if(position==1)return _harvestUni();
         return _harvestVault(position-2);
     }
     /// @notice Harvest only components enabled for harvesting; no unnecessary calls to inactive modules.
-    function harvest(uint256 minCurveLp) external onlyOperator active guard returns(uint256 paid){
+    function harvest() external onlyOperator active guard returns(uint256 paid){
         uint8 mask=harvestEnabledMask;
-        for(uint8 i;i<7;++i)if((mask&(uint8(1)<<i))!=0)paid+=_harvestPosition(i,minCurveLp);
+        for(uint8 i;i<7;++i)if((mask&(uint8(1)<<i))!=0)paid+=_harvestPosition(i);
         _pay(paid);
     }
-    function harvestPosition(uint8 position,uint256 minCurveLp) external onlyOperator active guard returns(uint256 paid){
+    function harvestPosition(uint8 position) external onlyOperator active guard returns(uint256 paid){
         if(position>=7||(harvestEnabledMask&(uint8(1)<<position))==0)revert State();
-        paid=_harvestPosition(position,minCurveLp);
+        paid=_harvestPosition(position);
         _pay(paid);
     }
 
