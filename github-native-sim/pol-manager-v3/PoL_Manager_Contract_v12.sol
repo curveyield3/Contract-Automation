@@ -118,7 +118,7 @@ contract PoLManager {
     struct Migration {
         uint8 source;uint8 destination;uint256 amount;
         uint256 minDestinationShares;
-        uint128 minDestinationUniLiquidity;
+        uint128 expectedDestinationUniLiquidity;
         uint256 minSourceSDT;
         uint256 minUniRemoved0;uint256 minUniRemoved1;
     }
@@ -508,9 +508,9 @@ contract PoLManager {
     }
     /// @dev Never changes NFT ticks. Swap price and amount guards are enforced by OmniRouter.
     ///      NFT liquidity minted is bounded by the 2% default (owner-configurable) tolerance.
-    function _uniSmart(address tokenA,uint256 amountA,address tokenB,uint256 amountB,uint128 referenceMinLiquidity)
+    function _uniSmart(address tokenA,uint256 amountA,address tokenB,uint256 amountB,uint128 referenceExpectedLiquidity)
         private returns(uint128 minted){
-        if(referenceMinLiquidity==0)revert Invalid();
+        if(referenceExpectedLiquidity==0)revert Invalid();
         (uint256 have0,uint256 have1)=_uniNormalize(tokenA,amountA);
         (uint256 add0,uint256 add1)=_uniNormalize(tokenB,amountB);
         have0+=add0;have1+=add1;
@@ -530,9 +530,11 @@ contract PoLManager {
             if(spend>have1)spend=have1;
             if(spend!=0){have1-=spend;have0+=_swap(uniToken1,uniToken0,spend);}
         }
-        // The liquidity floor was computed against a pre-transaction reference.
-        // Never replace it with a mutable same-block quote after the swaps.
-        (minted,,)=_uniAdd(have0,have1,0,0,referenceMinLiquidity);
+        // Apply the configured 2%-default tolerance to an independently sourced expected value.
+        // Never replace this anchor with a mutable same-block pool quote.
+        uint128 floor=uint128(uint256(referenceExpectedLiquidity)*(BPS-uniSlippageBps)/BPS);
+        if(floor==0)revert Slippage();
+        (minted,,)=_uniAdd(have0,have1,0,0,floor);
     }
     function _harvestUni() private returns(uint256 paid){
         (uint256 got0,uint256 got1)=IPoLNft(uniNftManager).collect(IPoLNft.Collect(uniTokenId,address(this),type(uint128).max,type(uint128).max));
@@ -574,13 +576,13 @@ contract PoLManager {
         pendingUniCompound0=0;pendingUniCompound1=0;
     }
 
-    function _invest(uint8 dest,address tokenA,uint256 amountA,address tokenB,uint256 amountB,uint256 minShares,uint128 minUniLiquidity)
+    function _invest(uint8 dest,address tokenA,uint256 amountA,address tokenB,uint256 amountB,uint256 minShares,uint128 expectedUniLiquidity)
         private returns(uint256 units){
         if(dest>=7||amountA+amountB==0)revert Invalid();
         if(dest==0){
             units=_curveDeposit(_convert(tokenA,sdt,amountA)+_convert(tokenB,sdt,amountB),minShares);
         }else if(dest==1){
-            units=_uniSmart(tokenA,amountA,tokenB,amountB,minUniLiquidity);
+            units=_uniSmart(tokenA,amountA,tokenB,amountB,expectedUniLiquidity);
         }else{
             uint8 slot=dest-2;
             units=_vaultDeposit(slot,_convert(tokenA,assets[slot],amountA)+_convert(tokenB,assets[slot],amountB),minShares);
@@ -588,7 +590,7 @@ contract PoLManager {
     }
     /// @notice Explicitly allocate current idle balance; no passive token scanning or shadow ledger.
     /// @notice For any active Curve/NFT allocation supply pre-transaction minimum LP/NFT liquidity.
-    function allocateFunds(address token,uint256 amount,uint256 minCurveLp,uint128 minUniLiquidity)
+    function allocateFunds(address token,uint256 amount,uint256 minCurveLp,uint128 expectedUniLiquidity)
         external onlyOperator active guard returns(uint256[7] memory minted){
         if((token!=sdt&&token!=usdc)||amount==0||amount>_free(token))revert Invalid();
         uint8 mask=allocationEnabledMask;
@@ -602,7 +604,7 @@ contract PoLManager {
             if((mask&(uint8(1)<<i))==0||allocations[i]==0)continue;
             uint256 part=i==last?left:amount*allocations[i]/total;
             if(i!=last)left-=part;
-            if(part!=0)minted[i]=_invest(i,token,part,address(0),0,i==0?minCurveLp:0,i==1?minUniLiquidity:0);
+            if(part!=0)minted[i]=_invest(i,token,part,address(0),0,i==0?minCurveLp:0,i==1?expectedUniLiquidity:0);
         }
     }
     function migrate(Migration calldata m) external onlyOperator active guard returns(uint256 result){
@@ -618,7 +620,7 @@ contract PoLManager {
         }else{
             uint8 slot=m.source-2;a=assets[slot];x=_vaultRedeem(slot,m.amount,0);
         }
-        result=_invest(m.destination,a,x,b,y,m.minDestinationShares,m.minDestinationUniLiquidity);
+        result=_invest(m.destination,a,x,b,y,m.minDestinationShares,m.expectedDestinationUniLiquidity);
         emit Migrated(m.source,m.destination,m.amount,result);
     }
 
