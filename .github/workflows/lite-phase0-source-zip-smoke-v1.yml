@@ -9,6 +9,8 @@ on:
       - '.github/smoke-trigger/lite-phase0-source-zip-smoke-v1.json'
       - '.github/workflows/lite-phase0-source-zip-smoke-v1.yml'
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/source-bundle-v47-to-v49.txt'
+      - 'github-native-sim/cyvlsdt-runtime-compare-v1/v49-adversarial-*.sol'
+      - 'github-native-sim/cyvlsdt-runtime-compare-v1/v49-adversarial-*.js'
   workflow_dispatch:
 
 permissions:
@@ -20,7 +22,7 @@ concurrency:
 
 jobs:
   source-zip-smoke:
-    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1' && github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1'
+    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1' && github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1' && github.ref != 'refs/heads/cyvlsdt-v49-adversarial-v1'
     name: ${{ matrix.label }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -300,8 +302,8 @@ jobs:
           include-hidden-files: true
 
   cyvlsdt-v48-compile:
-    if: github.ref == 'refs/heads/cyvlsdt-v48-compile-v1'
-    name: cyvlSDT v49 exact source compile
+    if: github.ref == 'refs/heads/cyvlsdt-v48-compile-v1' || github.ref == 'refs/heads/cyvlsdt-v49-adversarial-v1'
+    name: cyvlSDT v49 exact source compile and adversarial stress qualification
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -372,6 +374,17 @@ jobs:
           assert hashlib.sha256((root/'hardhat.config.js').read_bytes()).hexdigest()=='0bbfa425db0a1236a481e99557c35c7053c077a0474267affe8a316b69810b4f'
           print('All v49 Solidity sources and Hardhat config match delivered package exactly')
           PY
+
+      - name: Stage v49 adversarial mocks and independent multicase suite
+        if: github.ref == 'refs/heads/cyvlsdt-v49-adversarial-v1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$SOURCE_ROOT/test"
+          cp github-native-sim/cyvlsdt-runtime-compare-v1/v49-adversarial-mocks.sol "$SOURCE_ROOT/contracts/StressAdversarialMocks.sol"
+          cp github-native-sim/cyvlsdt-runtime-compare-v1/v49-adversarial-suite.js "$SOURCE_ROOT/test/v49-adversarial.js"
+          test -s "$SOURCE_ROOT/contracts/StressAdversarialMocks.sol"
+          test -s "$SOURCE_ROOT/test/v49-adversarial.js"
       - name: Install dependencies and compile (no tests)
         shell: bash
         run: |
@@ -383,6 +396,13 @@ jobs:
             npm install --ignore-scripts --no-audit --no-fund
           fi
           npx --no-install hardhat compile 2>&1 | tee "$GITHUB_WORKSPACE/.v48-evidence/compile.log"
+      - name: Run v49 multiactor adversarial simulations with per-state invariants
+        if: github.ref == 'refs/heads/cyvlsdt-v49-adversarial-v1'
+        shell: bash
+        run: |
+          set -eo pipefail
+          cd "$SOURCE_ROOT"
+          npx --no-install hardhat test test/v49-adversarial.js --no-compile 2>&1 | tee "$GITHUB_WORKSPACE/.v48-evidence/adversarial.log"
       - name: Record runtime bytecode sizes
         shell: bash
         run: |
@@ -407,7 +427,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cyvlsdt-v49-compile-source
+          name: cyvlsdt-v49-adversarial-qualification
           path: .v48-evidence/
           if-no-files-found: warn
           include-hidden-files: true
