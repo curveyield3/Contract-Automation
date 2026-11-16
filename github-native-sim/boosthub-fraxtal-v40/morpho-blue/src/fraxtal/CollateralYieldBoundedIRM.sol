@@ -22,8 +22,8 @@ contract CollateralYieldBoundedIRM is IIrm {
     uint256 public constant SECONDS_PER_YEAR = 365 days;
     uint256 public constant MAX_MULTIPLIER = 10e18; // up to 1000% of collateral APR
     uint256 public constant HARD_MAX_COLLATERAL_APR = 5e18; // never more than 500% APR
-    uint256 public constant HARD_MAX_BORROW_APR = 3e18; // 300% absolute all-in borrower APR ceiling
-    uint256 public constant HARD_MAX_DAILY_CHANGE = 0.5e18; // never more than 50 APR percentage points per 24 hours
+    uint256 public constant HARD_MAX_BORROW_APR = 3.65e18; // 365% absolute all-in borrower APR ceiling
+    uint256 public constant HARD_MAX_DAILY_CHANGE = 0.01e18; // never more than 1 APR percentage point per 24 hours
     uint256 public constant SFRXUSD_REBATE = 0.04e18;
 
     struct Curve {
