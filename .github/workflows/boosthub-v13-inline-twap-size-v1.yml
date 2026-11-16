@@ -4,7 +4,7 @@ on:
     branches: [main, pol-manager-v3-size]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
-      - 'github-native-sim/pol-manager-v3/PoL_Manager_Contract_v4.sol'
+      - 'github-native-sim/pol-manager-v3/PoL_Manager_Contract_v5.sol'
   workflow_dispatch:
 permissions:
   contents: read
@@ -109,7 +109,7 @@ jobs:
           set -euo pipefail
           WORK="$RUNNER_TEMP/pol-manager-v3"
           mkdir -p "$WORK/src"
-          cp github-native-sim/pol-manager-v3/PoL_Manager_Contract_v4.sol "$WORK/src/"
+          cp github-native-sim/pol-manager-v3/PoL_Manager_Contract_v5.sol "$WORK/src/"
           cd "$WORK"
           FOUND=0
           for runs in 200 1; do
@@ -130,17 +130,16 @@ jobs:
               python3 - "$runs" <<'PY' | tee -a "$GITHUB_WORKSPACE/pol-manager-v3-size.log"
           import json,sys
           from pathlib import Path
-          p=list(Path("out").rglob("PoLManager.json"))
-          if len(p)!=1:
-              raise SystemExit(f"Missing unique compiled PoLManager artifact: {p}")
-          artifact=json.loads(p[0].read_text())
-          runtime=artifact["deployedBytecode"]["object"].removeprefix("0x")
-          creation=artifact["bytecode"]["object"].removeprefix("0x")
-          if not runtime or len(runtime)%2:
-              raise SystemExit("Missing or invalid runtime bytecode")
-          n=len(runtime)//2
-          print(f"POL_V3_RUNTIME_BYTES={n} optimizer_runs={sys.argv[1]} limit=24576 headroom={24576-n} over_limit={n>24576}",flush=True)
-          print(f"POL_V3_CREATION_BYTES={len(creation)//2} optimizer_runs={sys.argv[1]}",flush=True)
+          for contract in ("PoLManager","PoLManagerFacet"):
+              found=list(Path("out").rglob(contract+".json"))
+              if len(found)!=1: raise SystemExit(f"Missing unique artifact for {contract}: {found}")
+              artifact=json.loads(found[0].read_text())
+              runtime=artifact["deployedBytecode"]["object"].removeprefix("0x")
+              creation=artifact["bytecode"]["object"].removeprefix("0x")
+              if not runtime or len(runtime)%2: raise SystemExit("Missing runtime")
+              size=len(runtime)//2
+              print(f"POL_V5_RUNTIME_BYTES contract={contract} bytes={size} optimizer_runs={sys.argv[1]} limit=24576 headroom={24576-size} over_limit={size>24576}",flush=True)
+              print(f"POL_V5_CREATION_BYTES contract={contract} bytes={len(creation)//2} optimizer_runs={sys.argv[1]}",flush=True)
           PY
               FOUND=1
             else
