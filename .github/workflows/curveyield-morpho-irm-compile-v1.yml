@@ -1,0 +1,65 @@
+name: CurveYield Fraxtal Morpho IRM Compile v1
+
+# Compile-only validation. No tests, deployments, broadcast or RPC use.
+on:
+  push:
+    branches:
+      - morpho-fraxtal-compile-v1
+    paths:
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV1.sol'
+      - '.github/workflows/curveyield-morpho-irm-compile-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing pinned Solidity compiler
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile all CurveYield Morpho IRMs and report deployed bytecode sizes
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import solc from 'solc';
+          const path = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV1.sol';
+          const input = {
+            language: 'Solidity',
+            sources: { [path]: { content: fs.readFileSync(path, 'utf8') } },
+            settings: {
+              optimizer: { enabled: true, runs: 200 },
+              outputSelection: { '*': { '*': ['abi','evm.deployedBytecode.object','evm.bytecode.object'] } }
+            }
+          };
+          const output = JSON.parse(solc.compile(JSON.stringify(input)));
+          for (const err of output.errors ?? []) {
+            console.log(err.formattedMessage);
+          }
+          const errors = (output.errors ?? []).filter(e => e.severity === 'error');
+          if (errors.length) process.exit(1);
+          const contracts = output.contracts?.[path] ?? {};
+          const models = Object.entries(contracts).filter(([name]) => name.startsWith('CurveYield'));
+          if (models.length !== 6) {
+            console.error('Expected base plus five IRM contracts, found', models.map(([name]) => name));
+            process.exit(1);
+          }
+          for (const [name, contract] of models) {
+            const bytecode = contract.evm.deployedBytecode.object;
+            const size = bytecode.length / 2;
+            console.log(name, 'runtime bytes:', size, 'ABI entries:', contract.abi.length);
+            if (size > 24576) {
+              console.error('EIP-170 runtime size exceeded:', name);
+              process.exitCode = 1;
+            }
+          }
+          NODE
