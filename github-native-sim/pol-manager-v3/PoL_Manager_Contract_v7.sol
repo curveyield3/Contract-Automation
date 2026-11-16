@@ -307,13 +307,13 @@ contract PoLManager {
     function pendingProfitShares(uint8 slot) public view returns(uint256 amount){
         if(slot>=4)revert Invalid();
         amount=accruedFeeShares[slot];
-        uint256 p=currentPPS(slot),h=highWatermarkPPS[slot];
+        uint256 p=currentPPS(slot);uint256 h=highWatermarkPPS[slot];
         if(profitFeeBps==0||p<=h)return amount;
         uint256 held=_balance(vaults[slot]);
         if(held>amount)amount+=(held-amount)*(p-h)*profitFeeBps/(p*BPS);
     }
     function _accrue(uint8 slot) private {
-        uint256 p=currentPPS(slot),h=highWatermarkPPS[slot];
+        uint256 p=currentPPS(slot);uint256 h=highWatermarkPPS[slot];
         uint256 held=_balance(vaults[slot]);
         uint256 reserved=accruedFeeShares[slot];
         if(held<reserved)revert State();
@@ -384,10 +384,10 @@ contract PoLManager {
     function _harvestUni() private returns(uint256 paid){
         _checkNft();
         (uint256 got0,uint256 got1)=IPoLNft(uniNftManager).collect(IPoLNft.Collect(uniTokenId,address(this),type(uint128).max,type(uint128).max));
-        uint256 old0=_min(got0,initialOwed0),old1=_min(got1,initialOwed1);
+        uint256 old0=_min(got0,initialOwed0);uint256 old1=_min(got1,initialOwed1);
         initialOwed0-=old0;initialOwed1-=old1;
-        uint256 earned0=got0-old0,earned1=got1-old1;
-        uint256 fee0=earned0*profitFeeBps/BPS,fee1=earned1*profitFeeBps/BPS;
+        uint256 earned0=got0-old0;uint256 earned1=got1-old1;
+        uint256 fee0=earned0*profitFeeBps/BPS;uint256 fee1=earned1*profitFeeBps/BPS;
         pendingUniCompound0+=earned0-fee0;pendingUniCompound1+=earned1-fee1;
         paid=_convert(uniToken0,sdt,fee0)+_convert(uniToken1,sdt,fee1);
     }
@@ -410,7 +410,7 @@ contract PoLManager {
     }
     function compoundUni(uint256 desired0,uint256 desired1,uint256 min0,uint256 min1,uint128 minLiquidity)
         external onlyOperator active guard returns(uint128 liquidity){
-        uint256 a0=_min(desired0,pendingUniCompound0),a1=_min(desired1,pendingUniCompound1);
+        uint256 a0=_min(desired0,pendingUniCompound0);uint256 a1=_min(desired1,pendingUniCompound1);
         uint256 used0;uint256 used1;
         (liquidity,used0,used1)=_uniAdd(a0,a1,min0,min1,minLiquidity);
         pendingUniCompound0-=used0;pendingUniCompound1-=used1;
@@ -543,7 +543,7 @@ contract PoLManager {
             block.timestamp<uint256(r.lastAt)+r.cooldownSeconds)revert State();
         (uint256 spot,,uint256 dev)=rateStatus(from,to);
         if(spot<r.thresholdWad||dev>r.maxDeviationBps)revert State();
-        uint8 y=sdtYearnIndex,e=sdtEulerIndex+2;
+        uint8 y=sdtYearnIndex;uint8 e=sdtEulerIndex+2;
         _accrue(y);_accrue(e);
         yearnShares=_min((_balance(vaults[y])-accruedFeeShares[y])*r.yearnRedeemBps/BPS,_maxRedeem(y));
         eulerShares=_min((_balance(vaults[e])-accruedFeeShares[e])*r.eulerRedeemBps/BPS,_maxRedeem(e));
