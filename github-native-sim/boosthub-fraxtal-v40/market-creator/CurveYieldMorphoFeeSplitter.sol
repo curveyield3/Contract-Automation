@@ -11,6 +11,7 @@ interface IMorphoCurveYield {
         uint256 lltv;
     }
 
+    function feeRecipient() external view returns (address);
     function createMarket(MarketParams calldata params) external;
     function accrueInterest(MarketParams calldata params) external;
     function market(bytes32 id) external view returns (
@@ -76,6 +77,7 @@ contract CurveYieldMorphoFeeSplitter {
     error AlreadyExists();
     error NotRegistered();
     error FeeNotConfigured();
+    error FeeRoutingInactive();
     error NoClaimableShares();
     error InsufficientAssets();
     error ShareAccountingMismatch();
@@ -162,6 +164,7 @@ contract CurveYieldMorphoFeeSplitter {
         if (cfg.creator == address(0)) revert NotRegistered();
         if (cfg.active) revert AlreadyExists();
         if (_marketFee(id) != cfg.totalFee) revert FeeNotConfigured();
+        if (morpho.feeRecipient() != address(this)) revert FeeRoutingInactive();
 
         morpho.accrueInterest(params);
         _sync(id, false);
