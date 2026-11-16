@@ -83,7 +83,7 @@ async function main(){
  if(p.curvePool)await call("poLManager","configureCurvePool",[p.curvePool,p.curveLp]);
  if(p.curveGauge)await call("poLManager","configureCurveGauge",[p.curveGauge]);
  if(p.uniNftManager)await call("poLManager","configureUniswapPosition",[p.uniNftManager,p.uniTokenId]);
- if(a.gauge)await call("bribeAllocator","setGauge",[a.gauge]);
+
  if(c.boostEconomics.postListingIfNoAcceptableOffer){
   await call("boostMerchant","setPostListingIfNoAcceptableOffer",[true]);
  }
@@ -93,32 +93,42 @@ async function main(){
  }
  await call("revenueVault","setStrategy",[ADDRS.revenueStrategy]);
  await call("locker","setMarketplaceOperator",[true]);
- const txBytes=ethers.concat(BATCH.map(t=>ethers.solidityPacked(
- ["uint8","address","uint256","uint256","bytes"],
- [0,t.to,0,ethers.dataLength(t.data),t.data]
- )));
- const multisendData=IMULTI.encodeFunctionData("multiSend",[txBytes]);
- const manifest={
-   version:50,chainId:1,safeAddress:SAFE,operation:1,to:MULTISEND_CALL_ONLY,
-   valueWei:"0",data:multisendData,derivedAddresses:ADDRS,
-   createCall:CREATE_CALL,innerTransactions:BATCH,
-   transactionCount:BATCH.length,deployCount:9,
-   keccak256:ethers.keccak256(multisendData),
-   totalCalldataBytes:ethers.dataLength(multisendData),
-   intentionallyDeferred:{
-    stableSwapPool:"not yet deployed",curvePool:p.curvePool,curveGauge:p.curveGauge,
-    uniNftManager:p.uniNftManager,yearnVaults:p.yearnVaults,eulerVaults:p.eulerVaults,
-    merchantSaleRates:rates,bribeGauge:a.gauge
-   }
- };
+ const stages=[BATCH.slice(0,5),BATCH.slice(5)];
+ requireBool(stages[0].length===5 && stages[1].length>=5,"staging invariant");
+ const manifests=[];
+ for(let k=0;k<stages.length;k++){
+  const txs=stages[k];
+  const packed=ethers.concat(txs.map(t=>ethers.solidityPacked(
+   ["uint8","address","uint256","uint256","bytes"],[0,t.to,0,ethers.dataLength(t.data),t.data])));
+  const data=IMULTI.encodeFunctionData("multiSend",[packed]);
+  manifests.push({
+   version:50,stage:k+1,chainId:1,safeAddress:SAFE,operation:1,to:MULTISEND_CALL_ONLY,
+   valueWei:"0",data,derivedAddresses:ADDRS,createCall:CREATE_CALL,
+   innerTransactions:txs,transactionCount:txs.length,keccak256:ethers.keccak256(data),
+   totalCalldataBytes:ethers.dataLength(data)
+  });
+ }
  fs.mkdirSync(OUT,{recursive:true});
- fs.writeFileSync(path.join(OUT,"Safe-CREATE2-MultiSend-v50.json"),JSON.stringify(manifest,null,2)+"\n");
+ for(const m of manifests)fs.writeFileSync(
+  path.join(OUT,"Safe-CREATE2-MultiSend-v50-stage"+m.stage+".json"),
+  JSON.stringify(m,null,2)+"\n"
+ );
  fs.writeFileSync(path.join(OUT,"Deployment-Addresses-v50.json"),JSON.stringify(ADDRS,null,2)+"\n");
  fs.writeFileSync(path.join(OUT,"Batch-Overview-v50.json"),JSON.stringify({
-  version:50,safe:SAFE,to:MULTISEND_CALL_ONLY,hash:manifest.keccak256,
-  transactions:manifest.transactionCount,totalCalldataBytes:manifest.totalCalldataBytes,
-  addresses:ADDRS,labels:BATCH.map(t=>t.label)
+  version:50,safe:SAFE,stages:manifests.map(m=>({
+   stage:m.stage,to:m.to,hash:m.keccak256,transactions:m.transactionCount,
+   totalCalldataBytes:m.totalCalldataBytes,labels:m.innerTransactions.map(t=>t.label)
+  })),addresses:ADDRS,disabledUntilConfigured:true,
+  intentionallyDeferred:{
+   stableSwapPool:"not yet deployed",curvePool:p.curvePool,curveGauge:p.curveGauge,
+   uniNftManager:p.uniNftManager,yearnVaults:p.yearnVaults,eulerVaults:p.eulerVaults,
+   merchantSaleRates:rates,bribeGauge:a.gauge
+  }
  },null,2)+"\n");
- console.log("V50_BATCH_BUILT",JSON.stringify({transactionCount:manifest.transactionCount,deployCount:9,byteLength:manifest.totalCalldataBytes,addresses:ADDRS,batchHash:manifest.keccak256}));
+ console.log("V50_STAGED_BATCH_BUILT",JSON.stringify({
+  stages:manifests.map(m=>({stage:m.stage,transactionCount:m.transactionCount,
+   byteLength:m.totalCalldataBytes,hash:m.keccak256})),addresses:ADDRS
+ }));
+
 }
 main().catch(e=>{console.error("V50_BATCH_BUILD_FAILED",e);process.exitCode=1;});
