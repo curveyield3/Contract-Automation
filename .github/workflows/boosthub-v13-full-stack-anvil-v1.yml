@@ -51,9 +51,9 @@ jobs:
           RPC_FRAXTAL: ${{ secrets.RPC_FRAXTAL }}
         run: |
           set -euo pipefail
-          : "${RPC_FRAXTAL:?Missing RPC_FRAXTAL}"
+          FORK_SOURCE="${RPC_FRAXTAL:-https://rpc.frax.com}"
           mkdir -p github-native-sim/boosthub-fraxtal-v40/sim-results
-          anvil --fork-url "$RPC_FRAXTAL" --chain-id 252 --port 8545 --host 127.0.0.1 --gas-limit 30000000 > github-native-sim/boosthub-fraxtal-v40/sim-results/anvil.log 2>&1 &
+          anvil --fork-url "$FORK_SOURCE" --chain-id 252 --port 8545 --host 127.0.0.1 --gas-limit 30000000 > github-native-sim/boosthub-fraxtal-v40/sim-results/anvil.log 2>&1 &
           ANVIL_PID=$!
           trap 'kill "$ANVIL_PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 40); do
