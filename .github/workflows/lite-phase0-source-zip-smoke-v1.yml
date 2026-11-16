@@ -11,6 +11,7 @@ on:
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/source-bundle-v47-to-v49.txt'
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/v49-adversarial-*.sol'
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/v49-adversarial-*.js'
+      - 'github-native-sim/cyvlsdt-runtime-compare-v1/v49-pol-vault-stress.js'
   workflow_dispatch:
 
 permissions:
@@ -383,6 +384,7 @@ jobs:
           mkdir -p "$SOURCE_ROOT/test"
           cp github-native-sim/cyvlsdt-runtime-compare-v1/v49-adversarial-mocks.sol "$SOURCE_ROOT/contracts/StressAdversarialMocks.sol"
           cp github-native-sim/cyvlsdt-runtime-compare-v1/v49-adversarial-suite.js "$SOURCE_ROOT/test/v49-adversarial.js"
+          cp github-native-sim/cyvlsdt-runtime-compare-v1/v49-pol-vault-stress.js "$SOURCE_ROOT/test/v49-pol-vault.js"
           test -s "$SOURCE_ROOT/contracts/StressAdversarialMocks.sol"
           test -s "$SOURCE_ROOT/test/v49-adversarial.js"
       - name: Install dependencies and compile (no tests)
@@ -402,7 +404,7 @@ jobs:
         run: |
           set -eo pipefail
           cd "$SOURCE_ROOT"
-          npx --no-install hardhat test test/v49-adversarial.js --no-compile 2>&1 | tee "$GITHUB_WORKSPACE/.v48-evidence/adversarial.log"
+          npx --no-install hardhat test test/v49-adversarial.js test/v49-pol-vault.js --no-compile 2>&1 | tee "$GITHUB_WORKSPACE/.v48-evidence/adversarial.log"
       - name: Record runtime bytecode sizes
         shell: bash
         run: |
