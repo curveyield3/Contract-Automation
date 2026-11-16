@@ -1,4 +1,4 @@
-name: CurveYield Fraxtal Morpho IRM Compile v8
+name: CurveYield Fraxtal Morpho IRM Compile v9
 
 # Compile-only validation. No tests, deployments, broadcast or RPC use.
 on:
@@ -8,6 +8,7 @@ on:
     paths:
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV5.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV2.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV1.sol'
       - '.github/workflows/curveyield-morpho-irm-compile-v1.yml'
   workflow_dispatch:
 
@@ -27,7 +28,7 @@ jobs:
           node-version: '22'
       - name: Install existing pinned Solidity compiler
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Compile five sub-IRMs plus the trigger master and report bytecode sizes
+      - name: Compile six IRMs and six factories with Fraxtal deployment bytecode
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -35,9 +36,10 @@ jobs:
           import solc from 'solc';
           const path = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV5.sol';
           const master = 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV2.sol';
+          const factories = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV1.sol';
           const input = {
             language: 'Solidity',
-            sources: { [path]: { content: fs.readFileSync(path, 'utf8') }, [master]: { content: fs.readFileSync(master, 'utf8') } },
+            sources: { [path]: { content: fs.readFileSync(path, 'utf8') }, [master]: { content: fs.readFileSync(master, 'utf8') }, [factories]: { content: fs.readFileSync(factories, 'utf8') } },
             settings: {
               optimizer: { enabled: true, runs: 200 },
               evmVersion: 'cancun',
@@ -51,10 +53,10 @@ jobs:
           }
           const errors = (output.errors ?? []).filter(e => e.severity === 'error');
           if (errors.length) process.exit(1);
-          const contracts = { ...(output.contracts?.[path] ?? {}), ...(output.contracts?.[master] ?? {}) };
+          const contracts = { ...(output.contracts?.[path] ?? {}), ...(output.contracts?.[master] ?? {}), ...(output.contracts?.[factories] ?? {}) };
           const models = Object.entries(contracts).filter(([name]) => name.startsWith('CurveYield'));
-          if (models.length !== 7) {
-            console.error('Expected base plus six IRM contracts, found', models.map(([name]) => name));
+          if (models.length !== 13) {
+            console.error('Expected base plus six IRMs and six factories, found', models.map(([name]) => name));
             process.exit(1);
           }
           for (const [name, contract] of models) {
