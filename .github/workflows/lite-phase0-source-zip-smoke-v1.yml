@@ -215,6 +215,25 @@ jobs:
               assert observed==expected[version],f'{version} source identities differ: {observed}'
               print(version,'verified original source-set SHA256',observed,'files',len(paths))
           PY
+      - name: Normalize invalid USDC literal checksums in temporary build copies only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          canonical='0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+          fixes={
+            'contracts/CurveYieldRevenueStrategyV20.sol':'0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+            'contracts/VoteMarketSingleGaugeBribeAllocator.sol':'0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+          }
+          for version in ('v47','v49'):
+              for path,old in fixes.items():
+                  p=Path('.cyvlsdt-runtime-size')/version/path
+                  s=p.read_text()
+                  assert s.count(old)==1,(version,path,'unexpected address occurrence count')
+                  p.write_text(s.replace(old,canonical,1))
+                  print(version,path,'fixed checksum casing without changing address')
+          PY
       - name: Install exactly pinned dependencies and compile v47 and v49
         shell: bash
         run: |
@@ -278,3 +297,4 @@ jobs:
             .cyvlsdt-runtime-size/*-install.log
           if-no-files-found: warn
           retention-days: 14
+          include-hidden-files: true
