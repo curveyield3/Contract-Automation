@@ -530,16 +530,9 @@ contract PoLManager {
             if(spend>have1)spend=have1;
             if(spend!=0){have1-=spend;have0+=_swap(uniToken1,uniToken0,spend);}
         }
-        (p,)=_uniPrice();
-        (q0,q1)=_uniUnitAmounts(p);
-        uint256 quoted=type(uint256).max;
-        if(q0!=0)quoted=PoLMath.mulDiv(have0,WAD,q0);
-        if(q1!=0){uint256 quote1=PoLMath.mulDiv(have1,WAD,q1);if(quote1<quoted)quoted=quote1;}
-        if(quoted==0||quoted>=type(uint128).max)revert Slippage();
-        // The pre-transaction minimum, not the mutable same-block pool quote, is binding.
-        uint256 inTxFloor=quoted*(BPS-uniSlippageBps)/BPS;
-        uint128 minL=inTxFloor>referenceMinLiquidity?uint128(inTxFloor):referenceMinLiquidity;
-        (minted,,)=_uniAdd(have0,have1,0,0,minL);
+        // The liquidity floor was computed against a pre-transaction reference.
+        // Never replace it with a mutable same-block quote after the swaps.
+        (minted,,)=_uniAdd(have0,have1,0,0,referenceMinLiquidity);
     }
     function _harvestUni() private returns(uint256 paid){
         (uint256 got0,uint256 got1)=IPoLNft(uniNftManager).collect(IPoLNft.Collect(uniTokenId,address(this),type(uint128).max,type(uint128).max));
