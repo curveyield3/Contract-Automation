@@ -1,14 +1,16 @@
 name: BoostHub v13 Inline TWAP Size Qualification v1
 on:
   push:
-    branches: [main]
+    branches: [main, cyvlsdt-v43-optimization]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
+      - 'github-native-sim/cyvlsdt-v43/**'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   inline-evaluation:
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -91,3 +93,47 @@ jobs:
           path: .inline-eval/inline-build.err
           if-no-files-found: warn
           retention-days: 7
+
+  cyvlsdt-v43-size:
+    if: github.ref_name == 'cyvlsdt-v43-optimization'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with: {version: stable}
+      - name: Compile exact cyvlSDT v43 source and report EIP-170 deployed bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .cyvlsdt-v43-compile
+          tar -xJf github-native-sim/cyvlsdt-v43/source/cyvlsdt-v43-sources.tar.xz -C .cyvlsdt-v43-compile
+          cd .cyvlsdt-v43-compile
+          mkdir -p lib
+          git clone --depth 1 -q --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git lib/openzeppelin-contracts
+          cat > foundry.toml <<'EOF'
+          [profile.default]
+          src = "contracts"
+          out = "out"
+          test = "unused"
+          libs = ["lib"]
+          solc_version = "0.8.28"
+          optimizer = true
+          optimizer_runs = 200
+          via_ir = true
+          evm_version = "cancun"
+          bytecode_hash = "ipfs"
+          remappings = ["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"]
+          EOF
+          forge build --sizes 2>&1 | tee build.log
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          for name in ('CurveYieldVlSDTLocker','CurveYieldvlSDTStaking','CurveYieldVlSDTBoostMerchant'):
+              artifact = Path('out') / f'{name}.sol' / f'{name}.json'
+              data=json.loads(artifact.read_text())
+              deployed=data['deployedBytecode']['object'].removeprefix('0x')
+              count=len(deployed)//2
+              print('EIP170_RUNTIME',name,'bytes',count,'headroom',24576-count,
+                    'PASS' if count<=24576 else 'OVER_LIMIT')
+          PY
