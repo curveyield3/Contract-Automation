@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   source-zip-smoke:
-    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1' && github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1' && github.ref != 'refs/heads/cyvlsdt-v49-adversarial-v1'
+    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1' && github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1' && github.ref != 'refs/heads/cyvlsdt-v49-adversarial-v1' && github.ref != 'refs/heads/cyvlsdt-v50-safe-batch-v1'
     name: ${{ matrix.label }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -304,7 +304,9 @@ jobs:
           include-hidden-files: true
 
   cyvlsdt-v48-compile:
-    if: github.ref == 'refs/heads/cyvlsdt-v48-compile-v1' || github.ref == 'refs/heads/cyvlsdt-v49-adversarial-v1'
+    permissions:
+      contents: write
+    if: github.ref == 'refs/heads/cyvlsdt-v48-compile-v1' || github.ref == 'refs/heads/cyvlsdt-v49-adversarial-v1' || github.ref == 'refs/heads/cyvlsdt-v50-safe-batch-v1'
     name: cyvlSDT v49 exact source compile and adversarial stress qualification
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -377,6 +379,46 @@ jobs:
           print('All v49 Solidity sources and Hardhat config match delivered package exactly')
           PY
 
+
+      - name: Apply exact CurveYield v50 header to all Solidity contracts and pin source hashes
+        if: github.ref == 'refs/heads/cyvlsdt-v50-safe-batch-v1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,hashlib
+          root=Path('.v48-source')
+          header="/**\n * @title CurveYield System Component\n * @notice CurveYield is a decentralized NGO building optimized DeFi systems for the good of all.\n *\n * @dev CurveYield integrates specialized AMM infrastructure, tokenized yield strategies, credit\n * markets, and protocol-owned liquidity into a unified, capital-efficient liquidity stack governed\n * by an open, international DAO community.\n *\n * Protocol operations are enhanced by cross-chain bridging and messaging, MEV capture systems,\n * off-chain to on-chain automation, and peer-to-peer data networks.\n *\n * This contract is one component of the CurveYield system.\n *\n * CurveYield uses proven DeFi primitives where possible and adds targeted coordination and\n * capital-efficiency-enhancing contracts where needed. Users and integrators must review\n * CurveYield documentation before use.\n *\n * Learn more:\n * dApp: https://curveyield.com & https://curveyield.org\n *\n * Decentralized links may have limited or delayed availability during periods of high network activity:\n * https://curveyield.eth.limo\n * https://curveyield.dao\n *\n * Note: curveyield.dao may require a Brave Browser or an Unstoppable Domains browser plugin to use.\n */\n"
+          files=sorted((root/'contracts').rglob('*.sol'))
+          assert len(files)==15,len(files)
+          assert hashlib.sha256(header.encode()).hexdigest()=='c48f6e488b623dcbc5ab1b4af6a4cbfa10f51cffdc7172a3a2a28c3ad67a115e'
+          for p in files:
+              src=p.read_text()
+              assert src.startswith('// SPDX-License-Identifier:'),p
+              pos=src.index('\n')+1
+              p.write_text(src[:pos]+'\n'+header+'\n'+src[pos:])
+          h=hashlib.sha256()
+          for p in files:
+              h.update(p.relative_to(root).as_posix().encode())
+              h.update(bytes([0]))
+              h.update(p.read_bytes())
+              h.update(bytes([0]))
+          actual=h.hexdigest()
+          assert actual=='3169b7e5d97e28a1475b210d99fd9984c786693eda71f101cecfa0a1ef5a430b',actual
+          c=json.loads((root/'config-production-v47.json').read_text())
+          c['version']=50
+          c['release']='50'
+          c['finalOwner']='0x47623C62f281807D615eeb4A2CEee9d97F9D3C49'
+          (root/'config-safe-mainnet-v50.json').write_text(json.dumps(c,indent=2)+'\n')
+          assert hashlib.sha256((root/'config-safe-mainnet-v50.json').read_bytes()).hexdigest()=='b212110ed5b2667956d6230641aa8262dcc5ccfca3ec5ef13a4f9fe0242e39d3'
+          pkg=json.loads((root/'package.json').read_text())
+          pkg['name']='curveyield-cyvlsdt-deployment-package-v50'
+          pkg['version']='50.0.0'
+          pkg['description']='v50: exact extended CurveYield headers plus atomic Safe CREATE2 deployment plan'
+          (root/'package.json').write_text(json.dumps(pkg,indent=2)+'\n')
+          print('V50_SOURCE_EXACT',actual,'solidity_files=',len(files))
+          PY
       - name: Stage v49 adversarial mocks and independent multicase suite
         if: github.ref == 'refs/heads/cyvlsdt-v49-adversarial-v1'
         shell: bash
@@ -420,6 +462,104 @@ jobs:
           fi
           cd "$SOURCE_ROOT"
           npx --no-install hardhat test test/v49-external-fork.js --no-compile 2>&1 | tee "$GITHUB_WORKSPACE/.v48-evidence/live-fork.log"
+
+      - name: Generate two deterministic CREATE2 Safe batches from v50 compiler artifacts
+        if: github.ref == 'refs/heads/cyvlsdt-v50-safe-batch-v1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .v50-output
+          cp github-native-sim/cyvlsdt-runtime-compare-v1/v50-safe-batch-builder.js "$SOURCE_ROOT/v50-safe-batch-builder.js"
+          cd "$SOURCE_ROOT"
+          V50_OUTPUT="$GITHUB_WORKSPACE/.v50-output" node v50-safe-batch-builder.js | tee "$GITHUB_WORKSPACE/.v50-output/builder.log"
+      - name: Simulate both Safe batches sequentially on an Ethereum mainnet fork
+        if: github.ref == 'refs/heads/cyvlsdt-v50-safe-batch-v1'
+        shell: bash
+        env:
+          CURVEYIELD_HARDHAT_FORK_URL: ${{ secrets.RPC_ETHEREUM }}
+        run: |
+          set -euo pipefail
+          test -n "$CURVEYIELD_HARDHAT_FORK_URL"
+          cd "$SOURCE_ROOT"
+          node - <<'NODE' 2>&1 | tee "$GITHUB_WORKSPACE/.v50-output/fork-execution.log"
+          const hre=require('hardhat');
+          const {ethers,network}=hre;
+          const fs=require('fs');
+          const path=require('path');
+          (async()=>{
+            const out=process.env.GITHUB_WORKSPACE+'/.v50-output';
+            const stage=[1,2].map(i=>JSON.parse(fs.readFileSync(path.join(out,'Safe-CREATE2-MultiSend-v50-stage'+i+'.json'))));
+            const SAFE=stage[0].safeAddress;
+            const owner='0x9f2B20A772246960810045905B7daccf960eE288';
+            const sig=ethers.concat([ethers.zeroPadValue(owner,32),ethers.ZeroHash,'0x01']);
+            const safe=new ethers.Contract(SAFE,[
+              'function getOwners() view returns(address[])',
+              'function getThreshold() view returns(uint256)',
+              'function nonce() view returns(uint256)',
+              'function execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes) payable returns(bool)'
+            ],ethers.provider);
+            const own=await safe.getOwners();
+            if(!own.some(x=>x.toLowerCase()===owner.toLowerCase())||(await safe.getThreshold())!==1n)throw Error('Safe owner/threshold changed');
+            await network.provider.send('hardhat_impersonateAccount',[owner]);
+            await network.provider.send('hardhat_setBalance',[owner,ethers.toBeHex(ethers.parseEther('100'))]);
+            const signer=await ethers.getSigner(owner);
+            const results=[];
+            for(const m of stage){
+              if(m.operation!==1||m.valueWei!=='0')throw Error('Unsafe Safe operation');
+              const args=[m.to,0,m.data,1,0,0,0,ethers.ZeroAddress,ethers.ZeroAddress,sig];
+              const ok=await safe.connect(signer).execTransaction.staticCall(...args,{gasLimit:16777216n});
+              if(!ok)throw Error('Safe execTransaction static call returned false for stage '+m.stage);
+              const tx=await safe.connect(signer).execTransaction(...args,{gasLimit:16777216n});
+              const receipt=await tx.wait();
+              if(receipt.status!==1||receipt.gasUsed>=16777216n)throw Error('Safe stage did not fit EIP7825 '+m.stage);
+              for(const [key,addr] of Object.entries(m.derivedAddresses)){
+                if(m.stage===1 && !['cyvlSdt','locker','revenueStaking','boostMerchant','revenueVault'].includes(key))continue;
+                const code=await ethers.provider.getCode(addr);
+                if(code==='0x')throw Error('Missing deployed contract '+key+' in stage '+m.stage);
+              }
+              results.push({stage:m.stage,gasUsed:receipt.gasUsed.toString(),safeNonce:(await safe.nonce()).toString(),txHash:receipt.hash});
+            }
+            const addr=stage[0].derivedAddresses;
+            const token=await ethers.getContractAt('CurveYieldVlSDTToken',addr.cyvlSdt);
+            const locker=await ethers.getContractAt('CurveYieldVlSDTLocker',addr.locker);
+            const staking=await ethers.getContractAt('CurveYieldvlSDTStaking',addr.revenueStaking);
+            const vault=await ethers.getContractAt('CurveYieldVault',addr.revenueVault);
+            const pol=await ethers.getContractAt('PoLManager',addr.poLManager);
+            if((await token.locker()).toLowerCase()!==addr.locker.toLowerCase())throw Error('token locker mismatch');
+            if(!(await locker.systemConfigured()))throw Error('Locker unconfigured');
+            if((await vault.strategy()).toLowerCase()!==addr.revenueStrategy.toLowerCase())throw Error('Vault strategy mismatch');
+            if((await pol.liquidityBounds()).toLowerCase()!==addr.poLLiquidityBounds.toLowerCase())throw Error('PoL guard mismatch');
+            for(const tok of ['0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F','0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',addr.cyvlSdt]){
+              if(!(await staking.isRewardToken(tok)))throw Error('Reward token missing '+tok);
+            }
+            fs.writeFileSync(path.join(out,'Fork-Execution-v50.json'),JSON.stringify({results,addresses:addr,allConfigurationsVerified:true},null,2)+'\n');
+            console.log('SAFE_V50_TWO_STAGE_FORK_PASS',JSON.stringify(results));
+          })().catch(e=>{console.error('SAFE_V50_FORK_FAILED',e);process.exitCode=1;});
+          NODE
+      - name: Preserve exact compiled artifact and staged Safe proposals in GitHub branch
+        if: github.ref == 'refs/heads/cyvlsdt-v50-safe-batch-v1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='github-native-sim/cyvlsdt-runtime-compare-v1/v50-deliverables'
+          mkdir -p "$base"
+          tar -czf "$base/CurveYield-v50-compiler-artifacts.tar.gz" -C "$SOURCE_ROOT" artifacts-v47
+          cp .v50-output/{Safe-CREATE2-MultiSend-v50-stage1.json,Safe-CREATE2-MultiSend-v50-stage2.json,Batch-Overview-v50.json,Deployment-Addresses-v50.json,Fork-Execution-v50.json} "$base/"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$base"
+          git commit -m 'Preserve v50 compiled bytecode and fork-qualified two-stage Safe proposals'
+          git push origin HEAD:cyvlsdt-v50-safe-batch-v1
+      - name: Upload complete v50 compiler artifacts and Safe proposal evidence
+        if: always() && github.ref == 'refs/heads/cyvlsdt-v50-safe-batch-v1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyvlsdt-v50-compiled-and-safe-proposals
+          path: |
+            .v48-source/artifacts-v47/
+            .v50-output/
+          if-no-files-found: warn
+          retention-days: 90
       - name: Record runtime bytecode sizes
         shell: bash
         run: |
