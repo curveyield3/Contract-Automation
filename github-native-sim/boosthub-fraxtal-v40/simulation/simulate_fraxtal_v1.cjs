@@ -190,13 +190,21 @@ async function state(tag,morpho,markets,loanTokens,vault,strategy,irm){console.l
  await tx(wfrax.transfer(await strategy.getAddress(),ethers.parseEther('0.05')),'fork_only_seed_WFRAX_yield_0p05');
  const callerWantBefore=await sdUser.balanceOf(a.BORROWER);
  const adminWantBefore=await sdUser.balanceOf(a.ADMIN);
- await tx(strategy.connect(user).harvest(),'harvest_after_16h');
+ const harvestReceipt=await tx(strategy.connect(user).harvest(),'harvest_after_16h');
  const callerYieldFee=(await sdUser.balanceOf(a.BORROWER))-callerWantBefore;
  const adminYieldFee=(await sdUser.balanceOf(a.ADMIN))-adminWantBefore;
- chk('caller_0p09pct_harvest_reward_paid',callerYieldFee>0n,{callerYieldFee:callerYieldFee.toString()});
- chk('admin_2p91pct_harvest_reward_paid',adminYieldFee>0n,{adminYieldFee:adminYieldFee.toString()});
- const grossFee=callerYieldFee+adminYieldFee;
- chk('caller_3pct_share_of_harvest_fee',(callerYieldFee*10000n <= grossFee*300n) && (grossFee*300n-callerYieldFee*10000n<10000n),{caller:callerYieldFee.toString(),admin:adminYieldFee.toString()});
+ const feeEvents=harvestReceipt.logs.map(log=>{try{return strategy.interface.parseLog(log)}catch{return null}}).filter(x=>x?.name==='ChargedFees');
+ chk('harvest_emitted_performance_fee_event',feeEvents.length>0);
+ const eventCallerFee=feeEvents.reduce((t,x)=>t+BigInt(x.args.callFees),0n);
+ const eventAdminFee=feeEvents.reduce((t,x)=>t+BigInt(x.args.adminFees),0n);
+ const eventTotalFee=eventCallerFee+eventAdminFee;
+ chk('caller_0p09pct_harvest_reward_paid',callerYieldFee>0n&&callerYieldFee===eventCallerFee,{callerYieldFee:callerYieldFee.toString(),eventCallerFee:eventCallerFee.toString()});
+ // BoostHub staking ramp can separately pay the same admin, so its balance delta
+ // may exceed the strategy performance-fee event's admin portion.
+ chk('admin_2p91pct_harvest_reward_paid',adminYieldFee>=eventAdminFee,{adminYieldFee:adminYieldFee.toString(),eventAdminFee:eventAdminFee.toString()});
+ chk('caller_3pct_share_of_PERFORMANCE_fee',eventCallerFee*10000n<=eventTotalFee*300n &&
+      eventTotalFee*300n-eventCallerFee*10000n<10000n*BigInt(feeEvents.length),
+      {caller:eventCallerFee.toString(),admin:eventAdminFee.toString(),adminOtherRewards:(adminYieldFee-eventAdminFee).toString()});
  await tx(vault.connect(user).withdraw(ethers.parseEther('1')),'vault_withdraw_tax_0p3pct');
  const lockedNow=await strategy.lockedProfit();chk('withdrawal_tax_profit_locked',lockedNow>0n,{locked:lockedNow.toString()});
  await jump(24*3600,'day_after_harvest');
