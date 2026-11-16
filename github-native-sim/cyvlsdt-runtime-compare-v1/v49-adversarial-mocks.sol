@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 
 contract StressToken is ERC20 {
     uint8 private immutable _dec;
@@ -205,6 +206,15 @@ contract StressOmniRouter {
     function key(address a,address b) internal pure returns(bytes32){return keccak256(abi.encode(a,b));}
     function setRate(address a,address b,uint256 outPerRawInScaled1e18) external {rates[key(a,b)]=outPerRawInScaled1e18;}
     function setFail(bool v) external {failSwap=v;}
+    function swap(address a,address b,uint256 amount) external returns(uint256 output){
+        require(!failSwap,"router fail");
+        uint256 rate=rates[key(a,b)];
+        require(rate>0,"no route");
+        output=amount*rate/1e18;
+        require(output>0,"zero output");
+        IERC20(a).safeTransferFrom(msg.sender,address(this),amount);
+        IERC20(b).safeTransfer(msg.sender,output);
+    }
     function routeLength(address a,address b) external view returns(uint256){return rates[key(a,b)]>0?1:0;}
     function price_oracle(address a,address b) external view returns(uint256){return rates[key(a,b)];}
     function guardedMinOut(address a,address b,uint256 amount) external view returns(uint256){return amount*rates[key(a,b)]/1e18;}
@@ -268,5 +278,78 @@ contract StressVoteMarket {
         require(getCurrentPeriod()>=b.endTimestamp,"not expired");
         address manager=b.manager;b.manager=address(0);
         IERC20(b.rewardToken).safeTransfer(manager,b.totalRewardAmount-claimed[id]);
+    }
+}
+
+contract Stress4626 is ERC4626 {
+    uint256 public totalBorrows;
+    bool public failRedeem;
+    constructor(IERC20 token) ERC20("Stress Vault Shares","svShares") ERC4626(token) {}
+    function setBorrowed(uint256 amount) external {totalBorrows=amount;}
+    function setFailRedeem(bool value) external {failRedeem=value;}
+    function cash() external view returns(uint256) {return IERC20(asset()).balanceOf(address(this));}
+    function redeem(uint256 shares,address receiver,address owner,uint256) external returns(uint256) {
+        return redeem(shares,receiver,owner);
+    }
+    function redeem(uint256 shares,address receiver,address owner)
+        public override returns(uint256 assets) {
+        require(!failRedeem,"forced vault redeem fail");
+        return super.redeem(shares,receiver,owner);
+    }
+    function maxRedeem(address who,uint256) external view returns(uint256){return maxRedeem(who);}
+}
+contract StressCurvePrice {
+    address[3] public coinsList;
+    uint256 public price=95e16;
+    constructor(address c0,address c1,address c2){coinsList=[c0,c1,c2];}
+    function coins(uint256 i) external view returns(address){return coinsList[i];}
+    function price_oracle(uint256) external view returns(uint256){return price;}
+    function setPrice(uint256 p) external {price=p;}
+}
+contract StressVaultStrategy {
+    using SafeERC20 for IERC20;
+    address public immutable want;
+    address public immutable vault;
+    bool public failStrict;
+    bool public failInstant;
+    uint256 public estimated;
+    uint256 public nextRequest=1;
+    struct Req {uint256 assets;uint256 unlock;bool closed;}
+    mapping(uint256=>Req) public requests;
+    constructor(address v,address a){vault=v;want=a;}
+    modifier onlyVault(){require(msg.sender==vault,"only vault");_;}
+    function setEstimated(uint256 amount) external {estimated=amount;}
+    function setFailStrict(bool v) external {failStrict=v;}
+    function setFailInstant(bool v) external {failInstant=v;}
+    function balanceOf() external view returns(uint256){return IERC20(want).balanceOf(address(this));}
+    function estimatedUnharvestedWant() external view returns(uint256){return estimated;}
+    function estimatedTokenAprBps() external pure returns(uint256){return 0;}
+    function beforeDeposit() external view onlyVault {}
+    function beforeDepositStrict() external view onlyVault {require(!failStrict,"forced strict harvest failure");}
+    function beforeWithdraw() external view onlyVault {}
+    function beforeWithdrawStrict() external view onlyVault {require(!failStrict,"forced strict harvest failure");}
+    function deposit() external onlyVault {}
+    function withdrawInstant(uint256 amount) external onlyVault returns(uint256 received){
+        require(!failInstant,"forced instant withdraw failure");
+        uint256 bal=IERC20(want).balanceOf(address(this));
+        received=amount<bal?amount:bal;
+        IERC20(want).safeTransfer(vault,received);
+    }
+    function requestWithdrawal(uint256 amount) external onlyVault returns(uint256 id,uint256 unlock){
+        require(amount<=IERC20(want).balanceOf(address(this)),"not funded");
+        id=nextRequest++;unlock=block.timestamp+7 days;
+        requests[id]=Req(amount,unlock,false);
+    }
+    function completeWithdrawal(uint256 id) external onlyVault returns(uint256 received){
+        Req storage r=requests[id];
+        require(!r.closed && r.assets>0 && block.timestamp>=r.unlock,"request not ready");
+        r.closed=true;received=r.assets;
+        IERC20(want).safeTransfer(vault,received);
+    }
+    function withdrawPendingInstant(uint256 id) external onlyVault returns(uint256 received){
+        Req storage r=requests[id];
+        require(!r.closed && r.assets>0,"request already closed");
+        r.closed=true;received=r.assets;
+        IERC20(want).safeTransfer(vault,received);
     }
 }
