@@ -1,4 +1,4 @@
-name: CurveYield Fraxtal Morpho IRM Compile v7
+name: CurveYield Fraxtal Morpho IRM Compile v8
 
 # Compile-only validation. No tests, deployments, broadcast or RPC use.
 on:
@@ -40,9 +40,11 @@ jobs:
             sources: { [path]: { content: fs.readFileSync(path, 'utf8') }, [master]: { content: fs.readFileSync(master, 'utf8') } },
             settings: {
               optimizer: { enabled: true, runs: 200 },
+              evmVersion: 'cancun',
               outputSelection: { '*': { '*': ['abi','evm.deployedBytecode.object','evm.bytecode.object'] } }
             }
           };
+          console.log('CY_FULL_SOLC_VERSION', solc.version());
           const output = JSON.parse(solc.compile(JSON.stringify(input)));
           for (const err of output.errors ?? []) {
             console.log(err.formattedMessage);
@@ -62,6 +64,16 @@ jobs:
             if (size > 24576) {
               console.error('EIP-170 runtime size exceeded:', name);
               process.exitCode = 1;
+            }
+          }
+          for (const [name, contract] of models) {
+            if (name === 'CurveYieldIrmBase') continue;
+            const creation = contract.evm.bytecode.object;
+            if (!creation || !/^[0-9a-fA-F]+$/.test(creation)) {
+              console.error('Missing creation bytecode:', name);
+              process.exitCode = 1;
+            } else {
+              console.log('CY_CREATION_BYTECODE_' + name + '=0x' + creation);
             }
           }
           NODE
