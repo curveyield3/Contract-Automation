@@ -34,11 +34,11 @@ interface IStakingV40 {
 
 contract DeployFraxtalSupplementV40 {
     VmV40 private constant vm = VmV40(address(uint160(uint256(keccak256("hevm cheat code")))));
-    address private constant HUB = 0x40f7085841034f752f17592875703eb5032f2b42;
-    address private constant ROUTER = 0xb730db2de60877961dd90d1fbf37830f64616df4;
+    address private constant HUB = 0x40f7085841034f752F17592875703EB5032f2B42;
+    address private constant ROUTER = 0xB730db2de60877961dd90D1FbF37830F64616DF4;
     address private constant SDFXS = 0x1AEe2382e05Dc68BDfC472F1E46d570feCca5814;
     address private constant WFRAX = 0xFc00000000000000000000000000000000000002;
-    address private constant DEPLOYER = 0x064256591313eeb86a84a5cbcc4c6460791b96dd;
+    address private constant DEPLOYER = 0x064256591313eEb86a84A5CbCc4C6460791B96DD;
     address private constant ADMIN_AND_FEES = 0x47623C62f281807D615eeb4A2CEee9d97F9D3C49;
     uint256 private constant PID = 0;
 
