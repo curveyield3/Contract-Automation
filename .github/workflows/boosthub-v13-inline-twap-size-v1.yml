@@ -4,7 +4,7 @@ on:
     branches: [main, cyvlsdt-v43-optimization]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
-      - 'github-native-sim/cyvlsdt-v43/**'
+      - 'github-native-sim/cyvlsdt-v44/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -94,7 +94,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  cyvlsdt-v43-size:
+  cyvlsdt-v44-size:
     if: github.ref_name == 'cyvlsdt-v43-optimization'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -102,14 +102,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: foundry-rs/foundry-toolchain@v1
         with: {version: stable}
-      - name: Compile exact cyvlSDT v43 source and report EIP-170 deployed bytes
+      - name: Compile exact cyvlSDT v44 source and report EIP-170 deployed bytes
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .cyvlsdt-v43-compile
-          tar -xJf github-native-sim/cyvlsdt-v43/source/cyvlsdt-v43-sources.tar.xz -C .cyvlsdt-v43-compile
-          sed -i 's/0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/' .cyvlsdt-v43-compile/contracts/CurveYieldVlSDTBoostMerchant.sol
-          cd .cyvlsdt-v43-compile
+          mkdir -p .cyvlsdt-v44-compile
+          tar -xJf github-native-sim/cyvlsdt-v44/source/cyvlsdt-v44-sources.tar.xz -C .cyvlsdt-v44-compile
+          cd .cyvlsdt-v44-compile
           mkdir -p lib
           git clone --depth 1 -q --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git lib/openzeppelin-contracts
           cat > foundry.toml <<'EOF'
