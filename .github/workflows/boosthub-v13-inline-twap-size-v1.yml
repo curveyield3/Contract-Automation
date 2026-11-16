@@ -95,6 +95,8 @@ jobs:
           retention-days: 7
 
   morpho-v1-compile:
+    permissions:
+      contents: write
     name: Compile exact Fraxtal Morpho governance + splitter v1
     if: github.ref_name == 'morpho-fraxtal-compile-v1'
     runs-on: ubuntu-latest
@@ -107,6 +109,7 @@ jobs:
         with:
           version: stable
       - name: Compile isolated original source (no tests)
+        id: compile
         shell: bash
         run: |
           set -euo pipefail
@@ -152,3 +155,39 @@ jobs:
             .morpho-compile/source-sha256.txt
             .morpho-compile/compiler-summary.json
           if-no-files-found: warn
+      - name: Publish branch-local compilation receipt
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPILE_OUTCOME: ${{ steps.compile.outcome }}
+        run: |
+          set -euo pipefail
+          # Only the current branch head may publish a receipt.
+          head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${GITHUB_REF_NAME}" --jq '.object.sha')"
+          if [ "$head_sha" != "$GITHUB_SHA" ]; then echo 'Stale run: skipping receipt'; exit 0; fi
+          mkdir -p .morpho-compile
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, json, os
+          repo = os.environ['GITHUB_REPOSITORY']
+          run_id = os.environ['GITHUB_RUN_ID']
+          path = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol'
+          src = Path(path).read_bytes()
+          summary = Path('.morpho-compile/compiler-summary.json')
+          log = Path('.morpho-compile/compile.log')
+          data = {
+            'status': 'PASS' if os.environ.get('COMPILE_OUTCOME') == 'success' else 'FAIL',
+            'workflowRunId': int(run_id),
+            'workflowRunUrl': 'https://github.com/' + repo + '/actions/runs/' + run_id,
+            'headSha': os.environ['GITHUB_SHA'],
+            'sourceSha256': hashlib.sha256(src).hexdigest(),
+            'compilation': json.loads(summary.read_text()) if summary.exists() else None,
+            'compileLogTail': log.read_text(errors='replace')[-12000:] if log.exists() else None
+          }
+          content = base64.b64encode((json.dumps(data,indent=2)+'\n').encode()).decode()
+          payload = {'message':'Record Morpho Fraxtal compiler result', 'branch':os.environ['GITHUB_REF_NAME'], 'content':content}
+          Path('.morpho-compile/receipt-request.json').write_text(json.dumps(payload))
+          print('COMPILATION_RECEIPT',data['status'],data['workflowRunUrl'])
+          PY
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v1.json" --input .morpho-compile/receipt-request.json
