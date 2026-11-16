@@ -1,4 +1,4 @@
-name: CurveYield Fraxtal Morpho IRM Compile v10
+name: CurveYield Fraxtal Morpho IRM Compile v11
 
 # Compile-only validation. No tests, deployments, broadcast or RPC use.
 on:
@@ -6,10 +6,10 @@ on:
     branches:
       - morpho-fraxtal-compile-v1
     paths:
-      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV5.sol'
-      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV2.sol'
-      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV2.sol'
-      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerV3.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV3.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerV4.sol'
       - '.github/workflows/curveyield-morpho-irm-compile-v1.yml'
   workflow_dispatch:
 
@@ -29,16 +29,16 @@ jobs:
           node-version: '22'
       - name: Install existing pinned Solidity compiler
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Compile six IRMs plus six enabled factories and Safe governance V3
+      - name: Compile header-complete six IRMs, six factories and governance V4
         shell: bash
         run: |
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import solc from 'solc';
-          const path = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV5.sol';
-          const master = 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV2.sol';
-          const factories = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV2.sol';
-          const governor = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerV3.sol';
+          const path = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol';
+          const master = 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol';
+          const factories = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV3.sol';
+          const governor = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerV4.sol';
           const input = {
             language: 'Solidity',
             sources: { [path]: { content: fs.readFileSync(path, 'utf8') }, [master]: { content: fs.readFileSync(master, 'utf8') }, [factories]: { content: fs.readFileSync(factories, 'utf8') }, [governor]: { content: fs.readFileSync(governor, 'utf8') } },
@@ -71,7 +71,7 @@ jobs:
             }
           }
           for (const [name, contract] of models) {
-            if (name === 'CurveYieldIrmBase' || name === 'CurveYieldIRMFactoryBaseV2') continue;
+            if (name === 'CurveYieldIrmBase' || name === 'CurveYieldIRMFactoryBaseV3') continue;
             const creation = contract.evm.bytecode.object;
             if (!creation || !/^[0-9a-fA-F]+$/.test(creation)) {
               console.error('Missing creation bytecode:', name);
@@ -86,68 +86,58 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PACKAGE='CurveYield_Fraxtal_Morpho_IRMs_v1'
+          PACKAGE='CurveYield_Fraxtal_Morpho_IRMs_v2'
           ROOT="$RUNNER_TEMP/$PACKAGE"
           mkdir -p "$ROOT/contracts" "$ROOT/build"
-          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV5.sol "$ROOT/contracts/"
-          cp github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV2.sol "$ROOT/contracts/"
-          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV1.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV3.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerV4.sol "$ROOT/contracts/"
           cp .github/workflows/curveyield-morpho-irm-compile-v1.yml "$ROOT/build/compilation-workflow.yml"
           cat > "$ROOT/foundry.toml" <<'TOML'
           [profile.default]
           src = "contracts"
           out = "out"
           libs = []
-          solc = "0.8.28"
+          solc = "0.8.30"
           optimizer = true
           optimizer_runs = 200
           evm_version = "cancun"
           TOML
-          cat > "$ROOT/README_v1.md" <<'MD'
-          # CurveYield Fraxtal Morpho IRMs — complete local source package v1
+          cat > "$ROOT/README_v2.md" <<'MD'
+          # CurveYield Fraxtal Morpho IRM source package v2
 
-          Includes the latest six custom IRM models plus six companion deployment
-          factories on the existing morpho-fraxtal-compile-v1 GitHub branch.
+          Four current Solidity files with the exact CurveYield v48 extended header
+          preceding each of the 15 concrete or abstract contract declarations.
+          Existing SPDX license identifiers are preserved.
 
-          IRM model source: contracts/CurveYieldMorphoIRMsV5.sol
-          - CurveYieldCollateralYieldIRMV2 (collateral yield)
-          - CurveYieldEulerUtilizationIRMV2 (Euler-style utilization)
-          - CurveYieldLinearUtilizationIRMV1 (linear utilization)
-          - CurveYieldImmutableStaticIRMV1 (unchangeable static rate)
-          - CurveYieldGovernedStaticIRMV2 (governance-controlled static rate)
+          Models: CurveYieldMorphoIRMsV6.sol
+          Master: CurveYieldTriggerMasterIRMV3.sol
+          Factories: CurveYieldMorphoIRMFactoriesV3.sol
+          Governance module: CurveYieldMorphoOwnerV4.sol
 
-          Trigger router: contracts/CurveYieldTriggerMasterIRMV2.sol
-          - CurveYieldTriggerMasterIRMV2 (five prioritized trigger groups,
-            each with five OR conditions and a default sub-IRM).
+          Built with solc v0.8.30, optimizer 200 runs, EVM Cancun.
+          The GitHub compile workflow is in build/compilation-workflow.yml.
+          The separate immutable on-chain legacy V1 owner and fee splitter are
+          not replaced or modified by this source package.
 
-          Factory source: contracts/CurveYieldMorphoIRMFactoriesV1.sol
-          - Six on-chain factories for the six IRM models.
-
-          Keep the three Solidity files together in the contracts/ directory;
-          their shared ABI structs and local imports are included.
-          Uses Solidity 0.8.28, optimizer 200, EVM Cancun.
-          Compile locally: forge build --sizes (Foundry and solc required).
-          The exact GitHub compile-only workflow is in build/.
-          BUILD_PROVENANCE_v1.txt and SOURCE_SHA256SUMS_v1.txt identify this
-          package's exact upstream version and source hashes.
-
-          This package intentionally contains no deployments, key material,
-          test executions, fork simulations, or unrelated owner contracts.
-          GitHub compilation does not certify economic or security safety.
+          Important: Safe activation and factory allowlisting are NOT automatic.
+          Existing proposals targeting previous V3/V2 deployments must not be
+          assumed to authorize these new contracts.
           MD
           (
             cd "$ROOT"
-            sha256sum contracts/*.sol > SOURCE_SHA256SUMS_v1.txt
-            printf 'repository=curveyield3/Contract-Automation\nbranch=morpho-fraxtal-compile-v1\ncommit=%s\nworkflow_run=%s\ncompiler=solc 0.8.28\noptimizer_runs=200\nevm_version=cancun\n' \
-              "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD_PROVENANCE_v1.txt
+            sha256sum contracts/*.sol > SOURCE_SHA256SUMS_v2.txt
+            printf 'repository=curveyield3/Contract-Automation\nbranch=morpho-fraxtal-compile-v1\ncommit=%s\nworkflow_run=%s\ncompiler=solc 0.8.30\noptimizer_runs=200\nevm_version=cancun\n' \
+              "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD_PROVENANCE_v2.txt
           )
           ( cd "$RUNNER_TEMP" && zip -q -r "$GITHUB_WORKSPACE/$PACKAGE.zip" "$PACKAGE" )
           unzip -t "$PACKAGE.zip"
           sha256sum "$PACKAGE.zip"
-      - name: Publish CurveYield IRM ZIP
+      - name: Publish CurveYield IRM ZIP v2
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield_Fraxtal_Morpho_IRMs_v1
-          path: CurveYield_Fraxtal_Morpho_IRMs_v1.zip
+          name: CurveYield_Fraxtal_Morpho_IRMs_v2
+          path: CurveYield_Fraxtal_Morpho_IRMs_v2.zip
           if-no-files-found: error
           retention-days: 30
