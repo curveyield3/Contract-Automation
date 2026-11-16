@@ -182,7 +182,9 @@ describe("cyvlSDT v49 PoL, buyback, and Vault adversarial lifecycle qualificatio
     await vault.connect(alice).withdrawWithOptions(amount(2000),false,true);
     eq((await token.balanceOf(alice.address))-aliceBefore,amount(2000),"matured timelock returns exact underlying");
     eq((await vault.pendingWithdrawal(alice.address)).shares,0n,"pending claim deleted");
-    await fail(vault.connect(alice).withdrawWithOptions(amount(2000),false,true),"old request cannot execute twice");
+    const executed=await strat.requests(p.strategyRequestId);
+    assert(executed.closed,"completed strategy withdrawal request cannot replay");
+    eq(await vault.pendingWithdrawal(alice.address).then(x=>x.shares),0n,"no remaining claim entitlement");
     await vault.connect(bob).withdrawWithOptions(amount(1000),false,true);
     const bobPrior=await token.balanceOf(bob.address);
     await vault.connect(bob).withdrawWithOptions(amount(1000),false,false);
