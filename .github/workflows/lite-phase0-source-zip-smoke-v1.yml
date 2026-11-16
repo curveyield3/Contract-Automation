@@ -9,7 +9,6 @@ on:
       - '.github/smoke-trigger/lite-phase0-source-zip-smoke-v1.json'
       - '.github/workflows/lite-phase0-source-zip-smoke-v1.yml'
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/source-bundle-v47-to-v49.txt'
-      - '.github/workflows/lite-phase0-source-zip-smoke-v1.yml'
   workflow_dispatch:
 
 permissions:
@@ -21,8 +20,7 @@ concurrency:
 
 jobs:
   source-zip-smoke:
-    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1'
-    if: github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1'
+    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1' && github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1'
     name: ${{ matrix.label }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
