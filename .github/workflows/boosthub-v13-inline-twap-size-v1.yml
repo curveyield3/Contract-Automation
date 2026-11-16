@@ -1,14 +1,16 @@
 name: BoostHub v13 Inline TWAP Size Qualification v1
 on:
   push:
-    branches: [main]
+    branches: [main, morpho-fraxtal-compile-v1]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   inline-evaluation:
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -91,3 +93,62 @@ jobs:
           path: .inline-eval/inline-build.err
           if-no-files-found: warn
           retention-days: 7
+
+  morpho-v1-compile:
+    name: Compile exact Fraxtal Morpho governance + splitter v1
+    if: github.ref_name == 'morpho-fraxtal-compile-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Compile isolated original source (no tests)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .morpho-compile
+          cat > foundry.toml <<'TOML'
+          [profile.default]
+          src = "github-native-sim/morpho-fraxtal-v1"
+          test = ".morpho-compile/unused"
+          out = ".morpho-compile/out"
+          libs = []
+          solc_version = "0.8.28"
+          optimizer = true
+          optimizer_runs = 200
+          evm_version = "cancun"
+          TOML
+          echo "Exact compiler-input identity:"
+          sha256sum github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol | tee .morpho-compile/source-sha256.txt
+          forge build --force --sizes 2>&1 | tee .morpho-compile/compile.log
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          root = Path('.morpho-compile/out')
+          rows = []
+          for p in root.rglob('*.json'):
+              d = json.loads(p.read_text())
+              bc = d.get('deployedBytecode',{}).get('object','')
+              if not isinstance(bc,str) or not bc.startswith('0x') or len(bc)<=2: continue
+              rows.append({'contract':p.stem,'runtimeBytes':(len(bc)-2)//2,'eip170Pass':(len(bc)-2)//2 <= 24576})
+          wanted = {'CurveYieldMorphoOwnerV1','CurveYieldMorphoFeeSplitterV2'}
+          names = {r['contract'] for r in rows}
+          assert wanted <= names, f'Missing deployable contracts: {wanted - names}'
+          assert all(row['eip170Pass'] for row in rows), 'Runtime bytecode exceeds EIP-170'
+          Path('.morpho-compile/compiler-summary.json').write_text(json.dumps({'status':'PASS','compiler':'0.8.28','optimizerRuns':200,'evmVersion':'cancun','contracts':rows},indent=2)+'\n')
+          print(json.dumps(rows,indent=2))
+          PY
+      - name: Retain compiler evidence (no tests executed)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: morpho-fraxtal-v1-compiler-evidence
+          path: |
+            .morpho-compile/compile.log
+            .morpho-compile/source-sha256.txt
+            .morpho-compile/compiler-summary.json
+          if-no-files-found: warn
