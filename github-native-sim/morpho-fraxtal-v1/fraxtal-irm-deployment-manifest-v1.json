@@ -1,0 +1,202 @@
+{
+  "version": "v1",
+  "network": "fraxtal",
+  "chainId": 252,
+  "environment": "mainnet",
+  "branch": "morpho-fraxtal-compile-v1",
+  "repo": "curveyield3/Contract-Automation",
+  "build": {
+    "workflowRunId": 43979905074,
+    "workflowRunUrl": "https://github.com/curveyield3/Contract-Automation/actions/runs/43979905074",
+    "compilerVersion": "v0.8.30+commit.73712a01",
+    "optimizerEnabled": true,
+    "optimizerRuns": 200,
+    "evmVersion": "cancun"
+  },
+  "sourceRoot": "github-native-sim/morpho-fraxtal-v1",
+  "owner": "0x064256591313eeb86a84a5cbcc4c6460791b96dd",
+  "signerIndex": 1,
+  "existingMorphoCore": "0xcce2862aed7f2248063c3dcf6906582166c2b6ca",
+  "triggerMaster": "0xeb6649d31563372e536a59e0dce944fbd62a2461",
+  "verification": {
+    "status": "sourcePublicationConfirmed",
+    "method": "Blockchain Operations Hub + Etherscan V2 on Fraxtal",
+    "allTwelveVerified": true
+  },
+  "contracts": [
+    {
+      "name": "CurveYieldTriggerMasterIRMV2",
+      "address": "0xeb6649d31563372e536a59e0dce944fbd62a2461",
+      "txHash": "0xb2922a6848d45eb8be097624f64fc9e5ea93d9f9619b17c0c085eb692d4eb72c",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV2.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0xeb6649d31563372e536a59e0dce944fbd62a2461#code"
+    },
+    {
+      "name": "CurveYieldEulerUtilizationIRMV2",
+      "address": "0x4729624c28281a3e98afa7abe6649a997b160fa2",
+      "txHash": "0xb3c7239ecaaf28cab2bfa08d5dad6de48a50fac51edd8a83e1bd24b867e0727c",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV5.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x4729624c28281a3e98afa7abe6649a997b160fa2#code"
+    },
+    {
+      "name": "CurveYieldLinearUtilizationIRMV1",
+      "address": "0x6abb74672e8f490fa238f169359e84bdedb4e57a",
+      "txHash": "0x7c577665e0e2ce8d8f718973b8578163f1fbbd32a82d1e8e1f92d17300821383",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV5.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x6abb74672e8f490fa238f169359e84bdedb4e57a#code"
+    },
+    {
+      "name": "CurveYieldImmutableStaticIRMV1",
+      "address": "0x4046c6f4dfb57805d86d72a59cd55d65b1156c09",
+      "txHash": "0x08f32dedccc4ec3551d7d88c06f21fdf4d9f44f33f0bfce9c73d43dd67fc4301",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV5.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x4046c6f4dfb57805d86d72a59cd55d65b1156c09#code"
+    },
+    {
+      "name": "CurveYieldGovernedStaticIRMV2",
+      "address": "0xdae5499874d6cd2537f485907b9995a1c27f5bd6",
+      "txHash": "0xbb31d8979e587eedc2f73466a455a0e9f2ba61cddcf6bb70d97ef69dafa27ad4",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV5.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0xdae5499874d6cd2537f485907b9995a1c27f5bd6#code"
+    },
+    {
+      "name": "CurveYieldCollateralYieldIRMV2",
+      "address": "0x2d1404251e9f6c6da59deed4b8a27b690ea28931",
+      "txHash": "0xf15d5dd60448edcf96d4e6694ce14ef69281a232c3811eb6e31e25288975e2e7",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV5.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x2d1404251e9f6c6da59deed4b8a27b690ea28931#code"
+    },
+    {
+      "name": "CurveYieldTriggerMasterIRMFactoryV1",
+      "address": "0x4e481fa909e94883c6049bb8f3d9a6b06295bf30",
+      "txHash": "0x94692aa3c90c67e7232d34ee1d13b2418e17ee822019a564917e1f13f1ca1f3c",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV1.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x4e481fa909e94883c6049bb8f3d9a6b06295bf30#code"
+    },
+    {
+      "name": "CurveYieldEulerUtilizationIRMFactoryV1",
+      "address": "0x86903d602571d5010479e7edc109306046e2e153",
+      "txHash": "0xf85318cbde31ef0c034229c8b5d1a628d11316e4ebb5bda2104006f6108f0fee",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV1.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x86903d602571d5010479e7edc109306046e2e153#code"
+    },
+    {
+      "name": "CurveYieldLinearUtilizationIRMFactoryV1",
+      "address": "0x1751bd70481257c98b87ad692f2b7940b2b1d0e7",
+      "txHash": "0x1018228565f0c635483e9600ab057dceb452836f8efc4288f3b06cf21ec04829",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV1.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x1751bd70481257c98b87ad692f2b7940b2b1d0e7#code"
+    },
+    {
+      "name": "CurveYieldImmutableStaticIRMFactoryV1",
+      "address": "0xda551e719ecadec9a315c8a3ee1dd0f6ce7c8942",
+      "txHash": "0xea6ae7170346fc6b71bd3ac36dc4f20d7979cdd0d4e35346f004e7b9de56bc23",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV1.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0xda551e719ecadec9a315c8a3ee1dd0f6ce7c8942#code"
+    },
+    {
+      "name": "CurveYieldGovernedStaticIRMFactoryV1",
+      "address": "0x85b4a85d06d76d27d31e8c307f02623560796510",
+      "txHash": "0x60586ecf4b80cc07f6ca8fe68a4757c26c44af50db1f65d67ce1ba8970dcf0dd",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV1.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x85b4a85d06d76d27d31e8c307f02623560796510#code"
+    },
+    {
+      "name": "CurveYieldCollateralYieldIRMFactoryV1",
+      "address": "0xd4dfc56a93cb20277e8e85a58801a848a95fb9fe",
+      "txHash": "0x08576925627325dd22c04ba820ba2370c3a0d6ca4c18841b4a27a6420de1a353",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV1.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0xd4dfc56a93cb20277e8e85a58801a848a95fb9fe#code"
+    }
+  ],
+  "deployedExampleConstructorValues": {
+    "CurveYieldImmutableStaticIRMV1": {
+      "morpho": "0xeb6649d31563372e536a59e0dce944fbd62a2461",
+      "aprWad": "0",
+      "note": "Zero APR placeholder; no live market attached"
+    },
+    "CurveYieldGovernedStaticIRMV2": {
+      "morpho": "0xeb6649d31563372e536a59e0dce944fbd62a2461",
+      "owner": "0x064256591313eeb86a84a5cbcc4c6460791b96dd",
+      "minimumAprWad": "0",
+      "maximumAprWad": "3650000000000000000",
+      "initialAprWad": "0",
+      "maximumAprChangePerDayWad": "240000000000000000",
+      "shiftWindowDays": 7,
+      "timelockDays": 1
+    },
+    "CurveYieldCollateralYieldIRMV2": {
+      "morpho": "0xeb6649d31563372e536a59e0dce944fbd62a2461",
+      "owner": "0x064256591313eeb86a84a5cbcc4c6460791b96dd",
+      "vault": "0x876a56e39e51b4b9734d9798c33bfb186d15d766",
+      "fallbackAprWad": "120000000000000000",
+      "collateralCapWad": "1000000000000000000",
+      "borrowCapWad": "2000000000000000000"
+    },
+    "CurveYieldEulerUtilizationIRMV2": {
+      "morpho": "0xeb6649d31563372e536a59e0dce944fbd62a2461",
+      "owner": "0x064256591313eeb86a84a5cbcc4c6460791b96dd"
+    },
+    "CurveYieldLinearUtilizationIRMV1": {
+      "morpho": "0xeb6649d31563372e536a59e0dce944fbd62a2461",
+      "owner": "0x064256591313eeb86a84a5cbcc4c6460791b96dd"
+    },
+    "CurveYieldTriggerMasterIRMV2": {
+      "morpho": "0xcce2862aed7f2248063c3dcf6906582166c2b6ca",
+      "owner": "0x064256591313eeb86a84a5cbcc4c6460791b96dd"
+    }
+  },
+  "configuration": {
+    "activeMarketConfiguration": "none",
+    "morphoIRMEnablement": "not attempted",
+    "guidance": [
+      "Obtain authorization from Morpho core owner before enableIrm(triggerMaster).",
+      "Configure the Trigger Master before creating markets: registerMarket(params with irm=master, defaultChild) then approveProfile for each reused child.",
+      "For each child set configuration using params with irm=child, and supply the same loan/collateral/oracle/LLTV fields as the real market.",
+      "Do not attach the example zero-rate immutable fixed profile to a production market unless zero APR is explicitly desired.",
+      "Set up ordered groups of at most five groups, each containing at most five OR conditions. First matching group wins; default applies otherwise.",
+      "After market creation, permissionless sync() accrues old interest before switching active model. No keeper role is required."
+    ]
+  },
+  "tests": {
+    "created": false,
+    "executed": false
+  },
+  "note": "Existing three collateral-yield markets remain untouched; no market was created or activated by this deployment."
+}
