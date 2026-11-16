@@ -342,6 +342,22 @@ jobs:
           ACTUAL_V48_SHA="$(sha256sum "$ROOT/contracts/CurveYieldVlSDTLocker.sol" | cut -d ' ' -f 1)"
           test "$ACTUAL_V48_SHA" = '15ce47410538a1c2437fb16613eb0194efce42407e7594c890f7c75400bb8166'
           printf 'v47_lock=%s\nv48_lock=%s\n' "$ACTUAL_V47_SHA" "$ACTUAL_V48_SHA" > .v48-evidence/source-identity.txt
+
+          # Compile-only normalization of two pre-existing invalid EIP-55 address literals.
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('.v48-source/contracts')
+          fixed='0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+          for name,old in (
+              ('CurveYieldRevenueStrategyV20.sol','0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'),
+              ('VoteMarketSingleGaugeBribeAllocator.sol','0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'),
+          ):
+              path=root/name
+              text=path.read_text()
+              assert text.count(old)==1,(name,text.count(old))
+              path.write_text(text.replace(old,fixed))
+              print('Fixed EIP-55 literal:',name)
+          PY
       - name: Install dependencies and compile (no tests)
         shell: bash
         run: |
@@ -380,3 +396,4 @@ jobs:
           name: cyvlsdt-v48-compile-source
           path: .v48-evidence/
           if-no-files-found: warn
+          include-hidden-files: true
