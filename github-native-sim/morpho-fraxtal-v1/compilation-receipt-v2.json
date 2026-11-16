@@ -1,0 +1,2106 @@
+{
+  "status": "PASS",
+  "workflowRunId": 43972075508,
+  "workflowRunUrl": "https://github.com/curveyield3/Contract-Automation/actions/runs/43972075508",
+  "headSha": "f693d3a6472e41a45896171ea448619bf700ae91",
+  "sourceSha256": "825e86e5d833fefcd3c475b6722fd29f3237893e63c1eed9a105f705e35d22a7",
+  "compilation": {
+    "status": "PASS",
+    "compiler": "0.8.28",
+    "optimizerRuns": 200,
+    "evmVersion": "cancun",
+    "contracts": [
+      {
+        "contract": "CurveYieldMorphoOwnerV1",
+        "runtimeBytes": 2359,
+        "eip170Pass": true
+      },
+      {
+        "contract": "CurveYieldMorphoFeeSplitterV2",
+        "runtimeBytes": 5743,
+        "eip170Pass": true
+      },
+      {
+        "contract": "CurveYieldEulerUtilizationIRMV2",
+        "runtimeBytes": 3851,
+        "eip170Pass": true
+      },
+      {
+        "contract": "CurveYieldImmutableStaticIRMV1",
+        "runtimeBytes": 1064,
+        "eip170Pass": true
+      },
+      {
+        "contract": "CurveYieldCollateralYieldIRMV2",
+        "runtimeBytes": 4999,
+        "eip170Pass": true
+      },
+      {
+        "contract": "CurveYieldGovernedStaticIRMV1",
+        "runtimeBytes": 4037,
+        "eip170Pass": true
+      }
+    ]
+  },
+  "compileLogTail": "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-events\n\nwarning[reentrancy-events]: event emitted after an external call; reentrancy can reorder or fabricate logs that off-chain consumers rely on\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol:230:9\n    \u2502\n230 \u2502         emit MarketActivated(id, totalFee);\n    \u2502         \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-events\n\nwarning[unsafe-typecast]: typecast can truncate values\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol:220:25\n    \u2502\n220 \u2502             creatorFee: uint128(creatorFee),\n    \u2502                         \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u251c note: consider disabling this lint if you're certain the cast is safe\n    \u2502       \n    \u2502       // casting to 'uint128' is safe because [explain why]\n    \u2502       // forge-lint: disable-next-line(unsafe-typecast)\n    \u2502       \n    \u2502       \n    \u2570 help: https://getfoundry.sh/forge/linting/unsafe-typecast\n\nwarning[unsafe-typecast]: typecast can truncate values\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol:221:23\n    \u2502\n221 \u2502             totalFee: uint128(totalFee),\n    \u2502                       \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u251c note: consider disabling this lint if you're certain the cast is safe\n    \u2502       \n    \u2502       // casting to 'uint128' is safe because [explain why]\n    \u2502       // forge-lint: disable-next-line(unsafe-typecast)\n    \u2502       \n    \u2502       \n    \u2570 help: https://getfoundry.sh/forge/linting/unsafe-typecast\n\nwarning[reentrancy-no-eth]: external call can be reentered before `_entered` is updated\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol:235:9\n    \u2502\n235 \u2502         morpho.accrueInterest(params);\n    \u2502         \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-no-eth\n\nwarning[reentrancy-events]: event emitted after an external call; reentrancy can reorder or fabricate logs that off-chain consumers rely on\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol:318:9\n    \u2502\n318 \u2502         emit FeeSharesAccounted(id, creatorNew, unaccounted - creatorNew);\n    \u2502         \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-events\n\nwarning[reentrancy-no-eth]: external call can be reentered before `_entered` is updated\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol:246:9\n    \u2502\n246 \u2502         morpho.accrueInterest(params);\n    \u2502         \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-no-eth\n\nwarning[reentrancy-no-eth]: external call can be reentered before `_entered` is updated\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol:261:43\n    \u2502\n261 \u2502           (assetsWithdrawn, burnedShares) = morpho.withdraw(\n    \u2502 \u250f\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u251b\n262 \u2502 \u2503             params, 0, sharesWithdrawn, address(this), receiver\n263 \u2502 \u2503         );\n    \u2502 \u2517\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u251b\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-no-eth\n\nwarning[reentrancy-events]: event emitted after an external call; reentrancy can reorder or fabricate logs that off-chain consumers rely on\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol:267:9\n    \u2502\n267 \u2502         emit FeeSharesRedeemed(id, receiver, forCreator, sharesWithdrawn, assetsWithdrawn);\n    \u2502         \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-events\n\nwarning[unused-return]: return value of an external call is not used\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol:301:38\n    \u2502\n301 \u2502         (,,,,, uint128 currentFee) = morpho.market(id);\n    \u2502                                      \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/unused-return\n\nwarning[unused-return]: return value of an external call is not used\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol:306:35\n    \u2502\n306 \u2502         (uint256 totalShares,,) = morpho.position(id, address(this));\n    \u2502                                   \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/unused-return\n\nwarning[reentrancy-no-eth]: external call can be reentered before `configured` is updated\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV3.sol:158:33\n    \u2502\n158 \u2502             if (configured[id]) ICYMorpho(MORPHO).accrueInterest(p);\n    \u2502                                 \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-no-eth\n\nwarning[reentrancy-events]: event emitted after an external call; reentrancy can reorder or fabricate logs that off-chain consumers rely on\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV3.sol:164:9\n    \u2502\n164 \u2502         emit CurveConfigured(id, c.minimumMultiplier, c.targetMultiplier, c.maximumMultiplier, c.targetUtilization, c.aprRebate);\n    \u2502         \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-events\n\nwarning[reentrancy-no-eth]: external call can be reentered before `configured` is updated\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV3.sol:297:17\n    \u2502\n297 \u2502                 ICYMorpho(MORPHO).accrueInterest(p);\n    \u2502                 \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-no-eth\n\nwarning[reentrancy-events]: event emitted after an external call; reentrancy can reorder or fabricate logs that off-chain consumers rely on\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV3.sol:305:9\n    \u2502\n305 \u2502 \u250f         emit CurveConfigured(\n306 \u2502 \u2503             id, c.minimumApr, c.targetApr, c.kinkApr, c.maximumApr,\n307 \u2502 \u2503             c.targetUtilization, c.kinkUtilization, c.curvature\n308 \u2502 \u2503         );\n    \u2502 \u2517\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u251b\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-events\n\nwarning[divide-before-multiply]: division before multiplication may lose precision\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV3.sol:354:28\n    \u2502\n354 \u2502         uint256 progress = aboveKink * WAD / denominator;\n    \u2502                            \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/divide-before-multiply\n\nwarning[divide-before-multiply]: division before multiplication may lose precision\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV3.sol:355:28\n    \u2502\n355 \u2502         return c.kinkApr + (c.maximumApr - c.kinkApr) * progress / WAD;\n    \u2502                            \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/divide-before-multiply\n\nwarning[reentrancy-events]: event emitted after an external call; reentrancy can reorder or fabricate logs that off-chain consumers rely on\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV3.sol:445:9\n    \u2502\n445 \u2502         emit RateTargetSet(id, current, targetApr_, aprChangePerDay, duration);\n    \u2502         \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/reentrancy-events\n\nwarning[block-timestamp]: usage of `block.timestamp` in a comparison may be manipulated by validators\n    \u256d\u25b8 github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV3.sol:464:26\n    \u2502\n464 \u2502         if (from == 0 || from >= now_) return _toSpy(_current(r, now_));\n    \u2502                          \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n    \u2502\n    \u2570 help: https://getfoundry.sh/forge/linting/block-timestamp\n\n",
+  "deployableArtifacts": {
+    "CurveYieldMorphoOwnerV1": {
+      "abi": [
+        {
+          "type": "constructor",
+          "inputs": [
+            {
+              "name": "morpho_",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "safe_",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "configureSplitter",
+          "inputs": [
+            {
+              "name": "newSplitter",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "enableIrm",
+          "inputs": [
+            {
+              "name": "irm",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "enableLltv",
+          "inputs": [
+            {
+              "name": "lltv",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "morpho",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "address",
+              "internalType": "contract ICurveYieldMorphoCore"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "safe",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "setFee",
+          "inputs": [
+            {
+              "name": "params",
+              "type": "tuple",
+              "internalType": "struct ICurveYieldMorphoCore.MarketParams",
+              "components": [
+                {
+                  "name": "loanToken",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "collateralToken",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "oracle",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "irm",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "lltv",
+                  "type": "uint256",
+                  "internalType": "uint256"
+                }
+              ]
+            },
+            {
+              "name": "newFee",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "setFeeRecipient",
+          "inputs": [
+            {
+              "name": "recipient",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "setOwner",
+          "inputs": [
+            {
+              "name": "newOwner",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "splitter",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "event",
+          "name": "SplitterConfigured",
+          "inputs": [
+            {
+              "name": "splitter",
+              "type": "address",
+              "indexed": true,
+              "internalType": "address"
+            }
+          ],
+          "anonymous": false
+        },
+        {
+          "type": "error",
+          "name": "InvalidAddress",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "SplitterAlreadyConfigured",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "Unauthorized",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "WrongSplitterMorpho",
+          "inputs": []
+        }
+      ],
+      "creationBytecode": "0x60c060405234801561000f575f5ffd5b50604051610a7e380380610a7e83398101604081905261002e9161009b565b6001600160a01b038216158061004b57506001600160a01b038116155b156100695760405163e6c4247b60e01b815260040160405180910390fd5b6001600160a01b039182166080521660a0526100cc565b80516001600160a01b0381168114610096575f5ffd5b919050565b5f5f604083850312156100ac575f5ffd5b6100b583610080565b91506100c360208401610080565b90509250929050565b60805160a0516109376101475f395f818160ae0152818161018f015281816102510152818161040c015281816104a101528181610537015261075b01525f818161014f015281816101eb015281816102ec015281816103990152818161045f015281816104fd015281816105c901526107b701526109375ff3fe608060405234801561000f575f5ffd5b5060043610610090575f3560e01c80634d98a93b116100635780634d98a93b146101115780635a64f51e14610124578063b5eaffd114610137578063d8fbc8331461014a578063e74b981b14610171575f5ffd5b806313af403514610094578063186f0354146100a95780632b4f013c146100ec5780633cd8045e146100ff575b5f5ffd5b6100a76100a23660046107fd565b610184565b005b6100d07f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b03909116815260200160405180910390f35b6100a76100fa36600461081f565b610246565b5f546100d0906001600160a01b031681565b6100a761011f36600461084d565b610401565b6100a76101323660046107fd565b610496565b6100a76101453660046107fd565b61052c565b6100d07f000000000000000000000000000000000000000000000000000000000000000081565b6100a761017f3660046107fd565b610750565b336001600160a01b037f000000000000000000000000000000000000000000000000000000000000000016146101cc576040516282b42960e81b815260040160405180910390fd5b6040516313af403560e01b81526001600160a01b0382811660048301527f000000000000000000000000000000000000000000000000000000000000000016906313af4035906024015b5f604051808303815f87803b15801561022d575f5ffd5b505af115801561023f573d5f5f3e3d5ffd5b5050505050565b336001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000161480159061029b57505f546001600160a01b03163314158061029b57505f546001600160a01b0316155b156102b8576040516282b42960e81b815260040160405180910390fd5b5f546001600160a01b03163314801561036557505f546040805163011a412160e61b815290516001600160a01b03928316927f0000000000000000000000000000000000000000000000000000000000000000169163469048409160048083019260209291908290030181865afa158015610335573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906103599190610864565b6001600160a01b031614155b15610382576040516282b42960e81b815260040160405180910390fd5b604051630ad3c04f60e21b81526001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001690632b4f013c906103d0908590859060040161087f565b5f604051808303815f87803b1580156103e7575f5ffd5b505af11580156103f9573d5f5f3e3d5ffd5b505050505050565b336001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001614610449576040516282b42960e81b815260040160405180910390fd5b604051634d98a93b60e01b8152600481018290527f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031690634d98a93b90602401610216565b336001600160a01b037f000000000000000000000000000000000000000000000000000000000000000016146104de576040516282b42960e81b815260040160405180910390fd5b604051632d327a8f60e11b81526001600160a01b0382811660048301527f00000000000000000000000000000000000000000000000000000000000000001690635a64f51e90602401610216565b336001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001614610574576040516282b42960e81b815260040160405180910390fd5b5f546001600160a01b03161561059d576040516399df088560e01b815260040160405180910390fd5b806001600160a01b03163b5f036105c75760405163e6c4247b60e01b815260040160405180910390fd5b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316816001600160a01b031663d8fbc8336040518163ffffffff1660e01b8152600401602060405180830381865afa15801561062d573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906106519190610864565b6001600160a01b0316146106785760405163fe9c9eed60e01b815260040160405180910390fd5b306001600160a01b0316816001600160a01b0316635aa6e6756040518163ffffffff1660e01b8152600401602060405180830381865afa1580156106be573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906106e29190610864565b6001600160a01b0316146107095760405163fe9c9eed60e01b815260040160405180910390fd5b5f80546001600160a01b0319166001600160a01b038316908117825560405190917fa308d19110085273c49e72ece05fd32625d710514f3b0381d073c77562c95bbf91a250565b336001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001614610798576040516282b42960e81b815260040160405180910390fd5b60405163e74b981b60e01b81526001600160a01b0382811660048301527f0000000000000000000000000000000000000000000000000000000000000000169063e74b981b90602401610216565b6001600160a01b03811681146107fa575f5ffd5b50565b5f6020828403121561080d575f5ffd5b8135610818816107e6565b9392505050565b5f5f82840360c0811215610831575f5ffd5b60a081121561083e575f5ffd5b50919360a08501359350915050565b5f6020828403121561085d575f5ffd5b5035919050565b5f60208284031215610874575f5ffd5b8151610818816107e6565b60c08101833561088e816107e6565b6001600160a01b0316825260208401356108a7816107e6565b6001600160a01b0316602083015260408401356108c3816107e6565b6001600160a01b0316604083015260608401356108df816107e6565b6001600160a01b031660608301526080938401359382019390935260a001529056fea264697066735822122038a277df4522b8ae377ecf8e8032e63d44b68d011b61d18673136965f97fbfb864736f6c634300081c0033",
+      "runtimeBytecode": "0x608060405234801561000f575f5ffd5b5060043610610090575f3560e01c80634d98a93b116100635780634d98a93b146101115780635a64f51e14610124578063b5eaffd114610137578063d8fbc8331461014a578063e74b981b14610171575f5ffd5b806313af403514610094578063186f0354146100a95780632b4f013c146100ec5780633cd8045e146100ff575b5f5ffd5b6100a76100a23660046107fd565b610184565b005b6100d07f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b03909116815260200160405180910390f35b6100a76100fa36600461081f565b610246565b5f546100d0906001600160a01b031681565b6100a761011f36600461084d565b610401565b6100a76101323660046107fd565b610496565b6100a76101453660046107fd565b61052c565b6100d07f000000000000000000000000000000000000000000000000000000000000000081565b6100a761017f3660046107fd565b610750565b336001600160a01b037f000000000000000000000000000000000000000000000000000000000000000016146101cc576040516282b42960e81b815260040160405180910390fd5b6040516313af403560e01b81526001600160a01b0382811660048301527f000000000000000000000000000000000000000000000000000000000000000016906313af4035906024015b5f604051808303815f87803b15801561022d575f5ffd5b505af115801561023f573d5f5f3e3d5ffd5b5050505050565b336001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000161480159061029b57505f546001600160a01b03163314158061029b57505f546001600160a01b0316155b156102b8576040516282b42960e81b815260040160405180910390fd5b5f546001600160a01b03163314801561036557505f546040805163011a412160e61b815290516001600160a01b03928316927f0000000000000000000000000000000000000000000000000000000000000000169163469048409160048083019260209291908290030181865afa158015610335573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906103599190610864565b6001600160a01b031614155b15610382576040516282b42960e81b815260040160405180910390fd5b604051630ad3c04f60e21b81526001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001690632b4f013c906103d0908590859060040161087f565b5f604051808303815f87803b1580156103e7575f5ffd5b505af11580156103f9573d5f5f3e3d5ffd5b505050505050565b336001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001614610449576040516282b42960e81b815260040160405180910390fd5b604051634d98a93b60e01b8152600481018290527f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031690634d98a93b90602401610216565b336001600160a01b037f000000000000000000000000000000000000000000000000000000000000000016146104de576040516282b42960e81b815260040160405180910390fd5b604051632d327a8f60e11b81526001600160a01b0382811660048301527f00000000000000000000000000000000000000000000000000000000000000001690635a64f51e90602401610216565b336001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001614610574576040516282b42960e81b815260040160405180910390fd5b5f546001600160a01b03161561059d576040516399df088560e01b815260040160405180910390fd5b806001600160a01b03163b5f036105c75760405163e6c4247b60e01b815260040160405180910390fd5b7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316816001600160a01b031663d8fbc8336040518163ffffffff1660e01b8152600401602060405180830381865afa15801561062d573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906106519190610864565b6001600160a01b0316146106785760405163fe9c9eed60e01b815260040160405180910390fd5b306001600160a01b0316816001600160a01b0316635aa6e6756040518163ffffffff1660e01b8152600401602060405180830381865afa1580156106be573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906106e29190610864565b6001600160a01b0316146107095760405163fe9c9eed60e01b815260040160405180910390fd5b5f80546001600160a01b0319166001600160a01b038316908117825560405190917fa308d19110085273c49e72ece05fd32625d710514f3b0381d073c77562c95bbf91a250565b336001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001614610798576040516282b42960e81b815260040160405180910390fd5b60405163e74b981b60e01b81526001600160a01b0382811660048301527f0000000000000000000000000000000000000000000000000000000000000000169063e74b981b90602401610216565b6001600160a01b03811681146107fa575f5ffd5b50565b5f6020828403121561080d575f5ffd5b8135610818816107e6565b9392505050565b5f5f82840360c0811215610831575f5ffd5b60a081121561083e575f5ffd5b50919360a08501359350915050565b5f6020828403121561085d575f5ffd5b5035919050565b5f60208284031215610874575f5ffd5b8151610818816107e6565b60c08101833561088e816107e6565b6001600160a01b0316825260208401356108a7816107e6565b6001600160a01b0316602083015260408401356108c3816107e6565b6001600160a01b0316604083015260608401356108df816107e6565b6001600160a01b031660608301526080938401359382019390935260a001529056fea264697066735822122038a277df4522b8ae377ecf8e8032e63d44b68d011b61d18673136965f97fbfb864736f6c634300081c0033",
+      "metadata": {
+        "compiler": {
+          "version": "0.8.28+commit.7893614a"
+        },
+        "language": "Solidity",
+        "output": {
+          "abi": [
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "morpho_",
+                  "type": "address"
+                },
+                {
+                  "internalType": "address",
+                  "name": "safe_",
+                  "type": "address"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "constructor"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "InvalidAddress"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "SplitterAlreadyConfigured"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "Unauthorized"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "WrongSplitterMorpho"
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "splitter",
+                  "type": "address",
+                  "indexed": true
+                }
+              ],
+              "type": "event",
+              "name": "SplitterConfigured",
+              "anonymous": false
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "newSplitter",
+                  "type": "address"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "configureSplitter"
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "irm",
+                  "type": "address"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "enableIrm"
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "lltv",
+                  "type": "uint256"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "enableLltv"
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "morpho",
+              "outputs": [
+                {
+                  "internalType": "contract ICurveYieldMorphoCore",
+                  "name": "",
+                  "type": "address"
+                }
+              ]
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "safe",
+              "outputs": [
+                {
+                  "internalType": "address",
+                  "name": "",
+                  "type": "address"
+                }
+              ]
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "struct ICurveYieldMorphoCore.MarketParams",
+                  "name": "params",
+                  "type": "tuple",
+                  "components": [
+                    {
+                      "internalType": "address",
+                      "name": "loanToken",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "collateralToken",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "oracle",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "irm",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "uint256",
+                      "name": "lltv",
+                      "type": "uint256"
+                    }
+                  ]
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "newFee",
+                  "type": "uint256"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "setFee"
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "recipient",
+                  "type": "address"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "setFeeRecipient"
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "newOwner",
+                  "type": "address"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "setOwner"
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "splitter",
+              "outputs": [
+                {
+                  "internalType": "address",
+                  "name": "",
+                  "type": "address"
+                }
+              ]
+            }
+          ],
+          "devdoc": {
+            "kind": "dev",
+            "methods": {},
+            "version": 1
+          },
+          "userdoc": {
+            "kind": "user",
+            "methods": {
+              "configureSplitter(address)": {
+                "notice": "One-time Safe configuration avoids circular constructor dependencies."
+              },
+              "setFee((address,address,address,address,uint256),uint256)": {
+                "notice": "Safe may set arbitrary allowed Morpho fees; splitter may only set the         fee computed during its own atomic createMarket flow."
+              },
+              "setOwner(address)": {
+                "notice": "Safe may transfer the underlying Morpho ownership out of this         contract at any time, including back to the Safe itself."
+              }
+            },
+            "version": 1
+          }
+        },
+        "settings": {
+          "remappings": [],
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "metadata": {
+            "bytecodeHash": "ipfs"
+          },
+          "compilationTarget": {
+            "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol": "CurveYieldMorphoOwnerV1"
+          },
+          "evmVersion": "cancun",
+          "libraries": {}
+        },
+        "sources": {
+          "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol": {
+            "keccak256": "0x815ec515808019be8b153d091abbc8e608efba08d35add182bf80dca7c99562f",
+            "urls": [
+              "bzz-raw://69485dc44469ec4c587ee025110dc9359bf773498d9911f30358fca1db001836",
+              "dweb:/ipfs/QmesuFvhuZBJzYEDNtHzQEdW7z6bsDrDcuntt1ej5aJ6ze"
+            ],
+            "license": "GPL-2.0-or-later"
+          }
+        },
+        "version": 1
+      }
+    },
+    "CurveYieldMorphoFeeSplitterV2": {
+      "abi": [
+        {
+          "type": "constructor",
+          "inputs": [
+            {
+              "name": "morpho_",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "governance_",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "owner_",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "treasury_",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "CURVEYIELD_BASE_FEE",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "CURVEYIELD_REVENUE_SHARE",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "MAX_CREATOR_FEE",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "MORPHO_MAX_FEE",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "WAD",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "acceptOwnership",
+          "inputs": [],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "claim",
+          "inputs": [
+            {
+              "name": "params",
+              "type": "tuple",
+              "internalType": "struct ICurveYieldMorphoCore.MarketParams",
+              "components": [
+                {
+                  "name": "loanToken",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "collateralToken",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "oracle",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "irm",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "lltv",
+                  "type": "uint256",
+                  "internalType": "uint256"
+                }
+              ]
+            },
+            {
+              "name": "forCreator",
+              "type": "bool",
+              "internalType": "bool"
+            },
+            {
+              "name": "maximumShares",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "minimumAssets",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "assetsWithdrawn",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "sharesWithdrawn",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "createMarket",
+          "inputs": [
+            {
+              "name": "params",
+              "type": "tuple",
+              "internalType": "struct ICurveYieldMorphoCore.MarketParams",
+              "components": [
+                {
+                  "name": "loanToken",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "collateralToken",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "oracle",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "irm",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "lltv",
+                  "type": "uint256",
+                  "internalType": "uint256"
+                }
+              ]
+            },
+            {
+              "name": "creatorReceiver",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "creatorFee",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "id",
+              "type": "bytes32",
+              "internalType": "bytes32"
+            }
+          ],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "creatorMarket",
+          "inputs": [
+            {
+              "name": "",
+              "type": "bytes32",
+              "internalType": "bytes32"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "creator",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "receiver",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "creatorFee",
+              "type": "uint128",
+              "internalType": "uint128"
+            },
+            {
+              "name": "totalFee",
+              "type": "uint128",
+              "internalType": "uint128"
+            },
+            {
+              "name": "active",
+              "type": "bool",
+              "internalType": "bool"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "creatorOwedShares",
+          "inputs": [
+            {
+              "name": "",
+              "type": "bytes32",
+              "internalType": "bytes32"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "feeBreakdown",
+          "inputs": [
+            {
+              "name": "creatorFee",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "totalFee",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "curveYieldFee",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "creatorFeeOut",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "stateMutability": "pure"
+        },
+        {
+          "type": "function",
+          "name": "governance",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "address",
+              "internalType": "contract CurveYieldMorphoOwnerV1"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "marketId",
+          "inputs": [
+            {
+              "name": "params",
+              "type": "tuple",
+              "internalType": "struct ICurveYieldMorphoCore.MarketParams",
+              "components": [
+                {
+                  "name": "loanToken",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "collateralToken",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "oracle",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "irm",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "lltv",
+                  "type": "uint256",
+                  "internalType": "uint256"
+                }
+              ]
+            }
+          ],
+          "outputs": [
+            {
+              "name": "",
+              "type": "bytes32",
+              "internalType": "bytes32"
+            }
+          ],
+          "stateMutability": "pure"
+        },
+        {
+          "type": "function",
+          "name": "maxExecutableCreatorFee",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "stateMutability": "pure"
+        },
+        {
+          "type": "function",
+          "name": "morpho",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "address",
+              "internalType": "contract ICurveYieldMorphoCore"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "owner",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "pendingOwner",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "setCreatorReceiver",
+          "inputs": [
+            {
+              "name": "id",
+              "type": "bytes32",
+              "internalType": "bytes32"
+            },
+            {
+              "name": "nextReceiver",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "setTreasury",
+          "inputs": [
+            {
+              "name": "nextTreasury",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "synchronize",
+          "inputs": [
+            {
+              "name": "params",
+              "type": "tuple",
+              "internalType": "struct ICurveYieldMorphoCore.MarketParams",
+              "components": [
+                {
+                  "name": "loanToken",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "collateralToken",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "oracle",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "irm",
+                  "type": "address",
+                  "internalType": "address"
+                },
+                {
+                  "name": "lltv",
+                  "type": "uint256",
+                  "internalType": "uint256"
+                }
+              ]
+            }
+          ],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "transferOwnership",
+          "inputs": [
+            {
+              "name": "nextOwner",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "outputs": [],
+          "stateMutability": "nonpayable"
+        },
+        {
+          "type": "function",
+          "name": "treasury",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "",
+              "type": "address",
+              "internalType": "address"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "treasuryOwedShares",
+          "inputs": [
+            {
+              "name": "",
+              "type": "bytes32",
+              "internalType": "bytes32"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ],
+          "stateMutability": "view"
+        },
+        {
+          "type": "event",
+          "name": "CreatorReceiverUpdated",
+          "inputs": [
+            {
+              "name": "id",
+              "type": "bytes32",
+              "indexed": true,
+              "internalType": "bytes32"
+            },
+            {
+              "name": "receiver",
+              "type": "address",
+              "indexed": true,
+              "internalType": "address"
+            }
+          ],
+          "anonymous": false
+        },
+        {
+          "type": "event",
+          "name": "FeeSharesAccounted",
+          "inputs": [
+            {
+              "name": "id",
+              "type": "bytes32",
+              "indexed": true,
+              "internalType": "bytes32"
+            },
+            {
+              "name": "creatorShares",
+              "type": "uint256",
+              "indexed": false,
+              "internalType": "uint256"
+            },
+            {
+              "name": "treasuryShares",
+              "type": "uint256",
+              "indexed": false,
+              "internalType": "uint256"
+            }
+          ],
+          "anonymous": false
+        },
+        {
+          "type": "event",
+          "name": "FeeSharesRedeemed",
+          "inputs": [
+            {
+              "name": "id",
+              "type": "bytes32",
+              "indexed": true,
+              "internalType": "bytes32"
+            },
+            {
+              "name": "receiver",
+              "type": "address",
+              "indexed": true,
+              "internalType": "address"
+            },
+            {
+              "name": "forCreator",
+              "type": "bool",
+              "indexed": false,
+              "internalType": "bool"
+            },
+            {
+              "name": "shares",
+              "type": "uint256",
+              "indexed": false,
+              "internalType": "uint256"
+            },
+            {
+              "name": "assets",
+              "type": "uint256",
+              "indexed": false,
+              "internalType": "uint256"
+            }
+          ],
+          "anonymous": false
+        },
+        {
+          "type": "event",
+          "name": "MarketActivated",
+          "inputs": [
+            {
+              "name": "id",
+              "type": "bytes32",
+              "indexed": true,
+              "internalType": "bytes32"
+            },
+            {
+              "name": "totalFee",
+              "type": "uint256",
+              "indexed": false,
+              "internalType": "uint256"
+            }
+          ],
+          "anonymous": false
+        },
+        {
+          "type": "event",
+          "name": "MarketRequested",
+          "inputs": [
+            {
+              "name": "id",
+              "type": "bytes32",
+              "indexed": true,
+              "internalType": "bytes32"
+            },
+            {
+              "name": "creator",
+              "type": "address",
+              "indexed": true,
+              "internalType": "address"
+            },
+            {
+              "name": "receiver",
+              "type": "address",
+              "indexed": true,
+              "internalType": "address"
+            },
+            {
+              "name": "creatorFee",
+              "type": "uint256",
+              "indexed": false,
+              "internalType": "uint256"
+            },
+            {
+              "name": "totalFee",
+              "type": "uint256",
+              "indexed": false,
+              "internalType": "uint256"
+            }
+          ],
+          "anonymous": false
+        },
+        {
+          "type": "event",
+          "name": "OwnershipTransferStarted",
+          "inputs": [
+            {
+              "name": "pendingOwner",
+              "type": "address",
+              "indexed": true,
+              "internalType": "address"
+            }
+          ],
+          "anonymous": false
+        },
+        {
+          "type": "event",
+          "name": "OwnershipTransferred",
+          "inputs": [
+            {
+              "name": "owner",
+              "type": "address",
+              "indexed": true,
+              "internalType": "address"
+            }
+          ],
+          "anonymous": false
+        },
+        {
+          "type": "event",
+          "name": "TreasuryUpdated",
+          "inputs": [
+            {
+              "name": "treasury",
+              "type": "address",
+              "indexed": true,
+              "internalType": "address"
+            }
+          ],
+          "anonymous": false
+        },
+        {
+          "type": "error",
+          "name": "AlreadyExists",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "FeeRoutingInactive",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "InsufficientAssets",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "InvalidFee",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "MorphoFeeCapExceeded",
+          "inputs": [
+            {
+              "name": "requested",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "maximum",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
+        },
+        {
+          "type": "error",
+          "name": "NoClaimableShares",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "NotRegistered",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "Reentrant",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "ShareAccountingMismatch",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "Unauthorized",
+          "inputs": []
+        },
+        {
+          "type": "error",
+          "name": "ZeroAddress",
+          "inputs": []
+        }
+      ],
+      "creationBytecode": "0x60c060405234801561000f575f5ffd5b5060405161186d38038061186d83398101604081905261002e91610146565b6001600160a01b038416158061004b57506001600160a01b038316155b8061005d57506001600160a01b038216155b8061006f57506001600160a01b038116155b1561008d5760405163d92e233d60e01b815260040160405180910390fd5b6001600160a01b0380851660805283811660a0525f80548483166001600160a01b03199182168117835560028054948616949092169390931790556040517f04dba622d284ed0014ee4b9a6a68386be1a4c08a4913ae272de89199cc6861639190a26040516001600160a01b038216907f7dae230f18360d76a040c81f050aa14eb9d6dc7901b20fc5d855e2a20fe814d1905f90a250505050610197565b80516001600160a01b0381168114610141575f5ffd5b919050565b5f5f5f5f60808587031215610159575f5ffd5b6101628561012b565b93506101706020860161012b565b925061017e6040860161012b565b915061018c6060860161012b565b905092959194509250565b60805160a05161166f6101fe5f395f81816101ea01528181610573015261084b01525f81816102e90152818161059d01528181610638015281816107d2015281816109ae01528181610b9601528181610d0c015281816110260152611238015261166f5ff3fe608060405234801561000f575f5ffd5b5060043610610148575f3560e01c8063892a52f1116100bf578063dd5fd07011610079578063dd5fd0701461030b578063df3fb657146103a7578063e30c3978146103ba578063f0f44260146103cd578063f2ba4f5f146103e0578063f2fde38b146103e8575f5ffd5b8063892a52f11461026d5780638da5cb5b1461027c5780638f9d0e6d1461028e57806394821f081461029d578063be3864fb146102c5578063d8fbc833146102e4575f5ffd5b806345c036cb1161011057806345c036cb146101b75780635aa6e675146101e557806361d027b3146102245780636530950a146102375780636a1460241461025657806379ba509714610265575f5ffd5b806302b963331461014c57806308be02f71461016d5780631546afdd146101825780632f7d4912146101915780633e902483146101a4575b5f5ffd5b61015a661c6bf52634000081565b6040519081526020015b60405180910390f35b61018061017b3660046112cd565b6103fb565b005b61015a67016345785d8a000081565b61015a61019f366004611311565b610514565b6101806101b236600461134e565b610964565b6101ca6101c536600461136f565b610a21565b60408051938452602084019290925290820152606001610164565b61020c7f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b039091168152602001610164565b60025461020c906001600160a01b031681565b61015a61024536600461136f565b60056020525f908152604090205481565b61015a670de0b6b3a764000081565b610180610ad7565b61015a6703782dace9d9000081565b5f5461020c906001600160a01b031681565b61015a67030d98d59a96000081565b6102b06102ab366004611386565b610b49565b60408051928352602083019190915201610164565b61015a6102d336600461136f565b60046020525f908152604090205481565b61020c7f000000000000000000000000000000000000000000000000000000000000000081565b61036661031936600461136f565b600360208190525f918252604090912080546001820154600283015492909301546001600160a01b0391821693909116916001600160801b0380821692600160801b909204169060ff1685565b604080516001600160a01b0396871681529590941660208601526001600160801b03928316938501939093521660608301521515608082015260a001610164565b61015a6103b536600461134e565b610e51565b60015461020c906001600160a01b031681565b6101806103db3660046113cd565b610e80565b61015a610f19565b6101806103f63660046113cd565b610f6f565b6006541561041c5760405163769dd35360e11b815260040160405180910390fd5b60016006555f82815260036020526040902080546001600160a01b03166104565760405163aba4733960e01b815260040160405180910390fd5b80546001600160a01b0316331480159061047d575060018101546001600160a01b03163314155b1561049a576040516282b42960e81b815260040160405180910390fd5b6001600160a01b0382166104c15760405163d92e233d60e01b815260040160405180910390fd5b6001810180546001600160a01b0319166001600160a01b03841690811790915560405184907f79baa4d9b4b4307ddf4894bb0f88ee7a5e2308b5205a7a3fc8cceb72253a38b3905f90a350505f60065550565b5f6006545f146105375760405163769dd35360e11b815260040160405180910390fd5b60016006556001600160a01b0383166105635760405163d92e233d60e01b815260040160405180910390fd5b5f61056d83610a21565b505090507f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03167f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316638da5cb5b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156105f7573d5f5f3e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061061b91906113e8565b6001600160a01b03161415806106c25750306001600160a01b03167f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031663469048406040518163ffffffff1660e01b8152600401602060405180830381865afa158015610692573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906106b691906113e8565b6001600160a01b031614155b156106e0576040516304dfc41960e01b815260040160405180910390fd5b6106e985610e51565b5f818152600360205260409020549092506001600160a01b0316156107215760405163119b4fd360e11b815260040160405180910390fd5b6040805160a0810182523381526001600160a01b0386811660208084019182526001600160801b03808916858701908152878216606087019081525f608088018181528b825260039586905290899020975188549088166001600160a01b031991821617895595516001890180549189169190971617909555905190518216600160801b02911617600285015590519201805492151560ff19909316929092179091559051634609ac5160e11b81527f000000000000000000000000000000000000000000000000000000000000000090911690638c1358a290610809908890600401611478565b5f604051808303815f87803b158015610820575f5ffd5b505af1158015610832573d5f5f3e3d5ffd5b5050604051630ad3c04f60e21b81526001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000169250632b4f013c9150610884908890859060040161148c565b5f604051808303815f87803b15801561089b575f5ffd5b505af11580156108ad573d5f5f3e3d5ffd5b5050505f8381526003602081905260409182902001805460ff19166001179055516001600160a01b0386169150339084907f7a32ce4ff01835c07f0112eaf5df84f4f059e29bf9b1b58d582e19f6e93e02d5906109169088908790918252602082015260400190565b60405180910390a4817f894ee71e2e7c1541476d237d7bb10f0e0268454f6d483573ef341e5060fa4b1b8260405161095091815260200190565b60405180910390a2505f6006559392505050565b600654156109855760405163769dd35360e11b815260040160405180910390fd5b60016006555f61099482610e51565b604051630a8e0d6f60e11b81529091506001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000169063151c1ade906109e3908590600401611478565b5f604051808303815f87803b1580156109fa575f5ffd5b505af1158015610a0c573d5f5f3e3d5ffd5b50505050610a1981611008565b50505f600655565b5f5f5f67030d98d59a960000841115610a4d576040516358d620b360e01b815260040160405180910390fd5b670de0b6b3a7640000610a6867016345785d8a0000866114bb565b610a7291906114d2565b610a8390661c6bf5263400006114f1565b9150610a8f82856114f1565b92506703782dace9d90000831115610acf57604051632b518a1f60e21b8152600481018490526703782dace9d90000602482015260440160405180910390fd5b509092909190565b6001546001600160a01b03163314610b01576040516282b42960e81b815260040160405180910390fd5b5f8054336001600160a01b0319918216811783556001805490921690915560405190917f04dba622d284ed0014ee4b9a6a68386be1a4c08a4913ae272de89199cc68616391a2565b5f5f6006545f14610b6d5760405163769dd35360e11b815260040160405180910390fd5b60016006555f610b7c87610e51565b604051630a8e0d6f60e11b81529091506001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000169063151c1ade90610bcb908a90600401611478565b5f604051808303815f87803b158015610be2575f5ffd5b505af1158015610bf4573d5f5f3e3d5ffd5b50505050610c0181611008565b5f818152600360205260409020868015610c23575080546001600160a01b0316155b15610c415760405163aba4733960e01b815260040160405180910390fd5b5f87610c5a575f83815260056020526040902054610c69565b5f838152600460205260409020545b9050861580610c7757508087115b610c815786610c83565b805b9350835f03610ca55760405163e584877960e01b815260040160405180910390fd5b8715610cc857610cb58482611504565b5f84815260046020526040902055610ce1565b610cd28482611504565b5f848152600560205260409020555b5f88610cf8576002546001600160a01b0316610d07565b60018301546001600160a01b03165b90505f7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316635c2bea498c5f8930876040518663ffffffff1660e01b8152600401610d5e959493929190611517565b60408051808303815f875af1158015610d79573d5f5f3e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610d9d9190611553565b9097509050858114610dc25760405163b26b36e760e01b815260040160405180910390fd5b861580610dce57508787105b15610dec576040516396d8043360e01b815260040160405180910390fd5b604080518b15158152602081018890529081018890526001600160a01b0383169086907f7d77c3d552a377421655ec448ba0f22e6310cbba38fa55e5dc513db80777284b9060600160405180910390a350505050505f60068190555094509492505050565b5f81604051602001610e639190611478565b604051602081830303815290604052805190602001209050919050565b5f546001600160a01b03163314610ea9576040516282b42960e81b815260040160405180910390fd5b6001600160a01b038116610ed05760405163d92e233d60e01b815260040160405180910390fd5b600280546001600160a01b0319166001600160a01b0383169081179091556040517f7dae230f18360d76a040c81f050aa14eb9d6dc7901b20fc5d855e2a20fe814d1905f90a250565b5f610f3467016345785d8a0000670de0b6b3a76400006114f1565b670de0b6b3a7640000610f56661c6bf5263400006703782dace9d90000611504565b610f6091906114bb565b610f6a91906114d2565b905090565b5f546001600160a01b03163314610f98576040516282b42960e81b815260040160405180910390fd5b6001600160a01b038116610fbf5760405163d92e233d60e01b815260040160405180910390fd5b600180546001600160a01b0319166001600160a01b0383169081179091556040517fd9be0e8e07417e00f2521db636cb53e316fd288f5051f16d2aa2bf0c3938a876905f90a250565b6040516349e2903160e11b8152600481018290523060248201525f907f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316906393c5206290604401606060405180830381865afa158015611073573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906110979190611590565b50505f83815260056020908152604080832054600490925282205492935090916110c191906114f1565b9050808210156110e45760405163b26b36e760e01b815260040160405180910390fd5b5f6110ef8284611504565b9050805f036110fe5750505050565b5f84815260036020819052604082209081015490919060ff16801561113e57506002820154600160801b90046001600160801b031661113c87611216565b145b611148575f611174565b60028201546001600160801b03600160801b820481169161116a9116856114bb565b61117491906114d2565b90508060045f8881526020019081526020015f205f82825461119691906114f1565b909155506111a690508184611504565b5f87815260056020526040812080549091906111c39084906114f1565b909155508690507fbdfd976486699d8349762ced57f3def6c8ec54cc047895c435cfdb2a1d005730826111f68187611504565b6040805192835260208301919091520160405180910390a2505050505050565b604051632e3071cd60e11b8152600481018290525f9081906001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001690635c60e39a9060240160c060405180830381865afa15801561127d573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906112a191906115c9565b6001600160801b031698975050505050505050565b6001600160a01b03811681146112ca575f5ffd5b50565b5f5f604083850312156112de575f5ffd5b8235915060208301356112f0816112b6565b809150509250929050565b5f60a0828403121561130b575f5ffd5b50919050565b5f5f5f60e08486031215611323575f5ffd5b61132d85856112fb565b925060a084013561133d816112b6565b9295929450505060c0919091013590565b5f60a0828403121561135e575f5ffd5b61136883836112fb565b9392505050565b5f6020828403121561137f575f5ffd5b5035919050565b5f5f5f5f610100858703121561139a575f5ffd5b6113a486866112fb565b935060a085013580151581146113b8575f5ffd5b939693955050505060c08201359160e0013590565b5f602082840312156113dd575f5ffd5b8135611368816112b6565b5f602082840312156113f8575f5ffd5b8151611368816112b6565b803561140e816112b6565b6001600160a01b031682526020810135611427816112b6565b6001600160a01b031660208301526040810135611443816112b6565b6001600160a01b03166040830152606081013561145f816112b6565b6001600160a01b03166060830152608090810135910152565b60a081016114868284611403565b92915050565b60c0810161149a8285611403565b8260a08301529392505050565b634e487b7160e01b5f52601160045260245ffd5b8082028115828204841417611486576114866114a7565b5f826114ec57634e487b7160e01b5f52601260045260245ffd5b500490565b80820180821115611486576114866114a7565b81810381811115611486576114866114a7565b61012081016115268288611403565b60a082019590955260c08101939093526001600160a01b0391821660e08401521661010090910152919050565b5f5f60408385031215611564575f5ffd5b505080516020909101519092909150565b80516001600160801b038116811461158b575f5ffd5b919050565b5f5f5f606084860312156115a2575f5ffd5b835192506115b260208501611575565b91506115c060408501611575565b90509250925092565b5f5f5f5f5f5f60c087890312156115de575f5ffd5b6115e787611575565b95506115f560208801611575565b945061160360408801611575565b935061161160608801611575565b925061161f60808801611575565b915061162d60a08801611575565b9050929550929550929556fea26469706673582212206854eba77c90812b06533f92190351c5520ddef1683c950bc81b0f934b7bd4d764736f6c634300081c0033",
+      "runtimeBytecode": "0x608060405234801561000f575f5ffd5b5060043610610148575f3560e01c8063892a52f1116100bf578063dd5fd07011610079578063dd5fd0701461030b578063df3fb657146103a7578063e30c3978146103ba578063f0f44260146103cd578063f2ba4f5f146103e0578063f2fde38b146103e8575f5ffd5b8063892a52f11461026d5780638da5cb5b1461027c5780638f9d0e6d1461028e57806394821f081461029d578063be3864fb146102c5578063d8fbc833146102e4575f5ffd5b806345c036cb1161011057806345c036cb146101b75780635aa6e675146101e557806361d027b3146102245780636530950a146102375780636a1460241461025657806379ba509714610265575f5ffd5b806302b963331461014c57806308be02f71461016d5780631546afdd146101825780632f7d4912146101915780633e902483146101a4575b5f5ffd5b61015a661c6bf52634000081565b6040519081526020015b60405180910390f35b61018061017b3660046112cd565b6103fb565b005b61015a67016345785d8a000081565b61015a61019f366004611311565b610514565b6101806101b236600461134e565b610964565b6101ca6101c536600461136f565b610a21565b60408051938452602084019290925290820152606001610164565b61020c7f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b039091168152602001610164565b60025461020c906001600160a01b031681565b61015a61024536600461136f565b60056020525f908152604090205481565b61015a670de0b6b3a764000081565b610180610ad7565b61015a6703782dace9d9000081565b5f5461020c906001600160a01b031681565b61015a67030d98d59a96000081565b6102b06102ab366004611386565b610b49565b60408051928352602083019190915201610164565b61015a6102d336600461136f565b60046020525f908152604090205481565b61020c7f000000000000000000000000000000000000000000000000000000000000000081565b61036661031936600461136f565b600360208190525f918252604090912080546001820154600283015492909301546001600160a01b0391821693909116916001600160801b0380821692600160801b909204169060ff1685565b604080516001600160a01b0396871681529590941660208601526001600160801b03928316938501939093521660608301521515608082015260a001610164565b61015a6103b536600461134e565b610e51565b60015461020c906001600160a01b031681565b6101806103db3660046113cd565b610e80565b61015a610f19565b6101806103f63660046113cd565b610f6f565b6006541561041c5760405163769dd35360e11b815260040160405180910390fd5b60016006555f82815260036020526040902080546001600160a01b03166104565760405163aba4733960e01b815260040160405180910390fd5b80546001600160a01b0316331480159061047d575060018101546001600160a01b03163314155b1561049a576040516282b42960e81b815260040160405180910390fd5b6001600160a01b0382166104c15760405163d92e233d60e01b815260040160405180910390fd5b6001810180546001600160a01b0319166001600160a01b03841690811790915560405184907f79baa4d9b4b4307ddf4894bb0f88ee7a5e2308b5205a7a3fc8cceb72253a38b3905f90a350505f60065550565b5f6006545f146105375760405163769dd35360e11b815260040160405180910390fd5b60016006556001600160a01b0383166105635760405163d92e233d60e01b815260040160405180910390fd5b5f61056d83610a21565b505090507f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03167f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316638da5cb5b6040518163ffffffff1660e01b8152600401602060405180830381865afa1580156105f7573d5f5f3e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061061b91906113e8565b6001600160a01b03161415806106c25750306001600160a01b03167f00000000000000000000000000000000000000000000000000000000000000006001600160a01b031663469048406040518163ffffffff1660e01b8152600401602060405180830381865afa158015610692573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906106b691906113e8565b6001600160a01b031614155b156106e0576040516304dfc41960e01b815260040160405180910390fd5b6106e985610e51565b5f818152600360205260409020549092506001600160a01b0316156107215760405163119b4fd360e11b815260040160405180910390fd5b6040805160a0810182523381526001600160a01b0386811660208084019182526001600160801b03808916858701908152878216606087019081525f608088018181528b825260039586905290899020975188549088166001600160a01b031991821617895595516001890180549189169190971617909555905190518216600160801b02911617600285015590519201805492151560ff19909316929092179091559051634609ac5160e11b81527f000000000000000000000000000000000000000000000000000000000000000090911690638c1358a290610809908890600401611478565b5f604051808303815f87803b158015610820575f5ffd5b505af1158015610832573d5f5f3e3d5ffd5b5050604051630ad3c04f60e21b81526001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000169250632b4f013c9150610884908890859060040161148c565b5f604051808303815f87803b15801561089b575f5ffd5b505af11580156108ad573d5f5f3e3d5ffd5b5050505f8381526003602081905260409182902001805460ff19166001179055516001600160a01b0386169150339084907f7a32ce4ff01835c07f0112eaf5df84f4f059e29bf9b1b58d582e19f6e93e02d5906109169088908790918252602082015260400190565b60405180910390a4817f894ee71e2e7c1541476d237d7bb10f0e0268454f6d483573ef341e5060fa4b1b8260405161095091815260200190565b60405180910390a2505f6006559392505050565b600654156109855760405163769dd35360e11b815260040160405180910390fd5b60016006555f61099482610e51565b604051630a8e0d6f60e11b81529091506001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000169063151c1ade906109e3908590600401611478565b5f604051808303815f87803b1580156109fa575f5ffd5b505af1158015610a0c573d5f5f3e3d5ffd5b50505050610a1981611008565b50505f600655565b5f5f5f67030d98d59a960000841115610a4d576040516358d620b360e01b815260040160405180910390fd5b670de0b6b3a7640000610a6867016345785d8a0000866114bb565b610a7291906114d2565b610a8390661c6bf5263400006114f1565b9150610a8f82856114f1565b92506703782dace9d90000831115610acf57604051632b518a1f60e21b8152600481018490526703782dace9d90000602482015260440160405180910390fd5b509092909190565b6001546001600160a01b03163314610b01576040516282b42960e81b815260040160405180910390fd5b5f8054336001600160a01b0319918216811783556001805490921690915560405190917f04dba622d284ed0014ee4b9a6a68386be1a4c08a4913ae272de89199cc68616391a2565b5f5f6006545f14610b6d5760405163769dd35360e11b815260040160405180910390fd5b60016006555f610b7c87610e51565b604051630a8e0d6f60e11b81529091506001600160a01b037f0000000000000000000000000000000000000000000000000000000000000000169063151c1ade90610bcb908a90600401611478565b5f604051808303815f87803b158015610be2575f5ffd5b505af1158015610bf4573d5f5f3e3d5ffd5b50505050610c0181611008565b5f818152600360205260409020868015610c23575080546001600160a01b0316155b15610c415760405163aba4733960e01b815260040160405180910390fd5b5f87610c5a575f83815260056020526040902054610c69565b5f838152600460205260409020545b9050861580610c7757508087115b610c815786610c83565b805b9350835f03610ca55760405163e584877960e01b815260040160405180910390fd5b8715610cc857610cb58482611504565b5f84815260046020526040902055610ce1565b610cd28482611504565b5f848152600560205260409020555b5f88610cf8576002546001600160a01b0316610d07565b60018301546001600160a01b03165b90505f7f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316635c2bea498c5f8930876040518663ffffffff1660e01b8152600401610d5e959493929190611517565b60408051808303815f875af1158015610d79573d5f5f3e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610d9d9190611553565b9097509050858114610dc25760405163b26b36e760e01b815260040160405180910390fd5b861580610dce57508787105b15610dec576040516396d8043360e01b815260040160405180910390fd5b604080518b15158152602081018890529081018890526001600160a01b0383169086907f7d77c3d552a377421655ec448ba0f22e6310cbba38fa55e5dc513db80777284b9060600160405180910390a350505050505f60068190555094509492505050565b5f81604051602001610e639190611478565b604051602081830303815290604052805190602001209050919050565b5f546001600160a01b03163314610ea9576040516282b42960e81b815260040160405180910390fd5b6001600160a01b038116610ed05760405163d92e233d60e01b815260040160405180910390fd5b600280546001600160a01b0319166001600160a01b0383169081179091556040517f7dae230f18360d76a040c81f050aa14eb9d6dc7901b20fc5d855e2a20fe814d1905f90a250565b5f610f3467016345785d8a0000670de0b6b3a76400006114f1565b670de0b6b3a7640000610f56661c6bf5263400006703782dace9d90000611504565b610f6091906114bb565b610f6a91906114d2565b905090565b5f546001600160a01b03163314610f98576040516282b42960e81b815260040160405180910390fd5b6001600160a01b038116610fbf5760405163d92e233d60e01b815260040160405180910390fd5b600180546001600160a01b0319166001600160a01b0383169081179091556040517fd9be0e8e07417e00f2521db636cb53e316fd288f5051f16d2aa2bf0c3938a876905f90a250565b6040516349e2903160e11b8152600481018290523060248201525f907f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316906393c5206290604401606060405180830381865afa158015611073573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906110979190611590565b50505f83815260056020908152604080832054600490925282205492935090916110c191906114f1565b9050808210156110e45760405163b26b36e760e01b815260040160405180910390fd5b5f6110ef8284611504565b9050805f036110fe5750505050565b5f84815260036020819052604082209081015490919060ff16801561113e57506002820154600160801b90046001600160801b031661113c87611216565b145b611148575f611174565b60028201546001600160801b03600160801b820481169161116a9116856114bb565b61117491906114d2565b90508060045f8881526020019081526020015f205f82825461119691906114f1565b909155506111a690508184611504565b5f87815260056020526040812080549091906111c39084906114f1565b909155508690507fbdfd976486699d8349762ced57f3def6c8ec54cc047895c435cfdb2a1d005730826111f68187611504565b6040805192835260208301919091520160405180910390a2505050505050565b604051632e3071cd60e11b8152600481018290525f9081906001600160a01b037f00000000000000000000000000000000000000000000000000000000000000001690635c60e39a9060240160c060405180830381865afa15801561127d573d5f5f3e3d5ffd5b505050506040513d601f19601f820116820180604052508101906112a191906115c9565b6001600160801b031698975050505050505050565b6001600160a01b03811681146112ca575f5ffd5b50565b5f5f604083850312156112de575f5ffd5b8235915060208301356112f0816112b6565b809150509250929050565b5f60a0828403121561130b575f5ffd5b50919050565b5f5f5f60e08486031215611323575f5ffd5b61132d85856112fb565b925060a084013561133d816112b6565b9295929450505060c0919091013590565b5f60a0828403121561135e575f5ffd5b61136883836112fb565b9392505050565b5f6020828403121561137f575f5ffd5b5035919050565b5f5f5f5f610100858703121561139a575f5ffd5b6113a486866112fb565b935060a085013580151581146113b8575f5ffd5b939693955050505060c08201359160e0013590565b5f602082840312156113dd575f5ffd5b8135611368816112b6565b5f602082840312156113f8575f5ffd5b8151611368816112b6565b803561140e816112b6565b6001600160a01b031682526020810135611427816112b6565b6001600160a01b031660208301526040810135611443816112b6565b6001600160a01b03166040830152606081013561145f816112b6565b6001600160a01b03166060830152608090810135910152565b60a081016114868284611403565b92915050565b60c0810161149a8285611403565b8260a08301529392505050565b634e487b7160e01b5f52601160045260245ffd5b8082028115828204841417611486576114866114a7565b5f826114ec57634e487b7160e01b5f52601260045260245ffd5b500490565b80820180821115611486576114866114a7565b81810381811115611486576114866114a7565b61012081016115268288611403565b60a082019590955260c08101939093526001600160a01b0391821660e08401521661010090910152919050565b5f5f60408385031215611564575f5ffd5b505080516020909101519092909150565b80516001600160801b038116811461158b575f5ffd5b919050565b5f5f5f606084860312156115a2575f5ffd5b835192506115b260208501611575565b91506115c060408501611575565b90509250925092565b5f5f5f5f5f5f60c087890312156115de575f5ffd5b6115e787611575565b95506115f560208801611575565b945061160360408801611575565b935061161160608801611575565b925061161f60808801611575565b915061162d60a08801611575565b9050929550929550929556fea26469706673582212206854eba77c90812b06533f92190351c5520ddef1683c950bc81b0f934b7bd4d764736f6c634300081c0033",
+      "metadata": {
+        "compiler": {
+          "version": "0.8.28+commit.7893614a"
+        },
+        "language": "Solidity",
+        "output": {
+          "abi": [
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "morpho_",
+                  "type": "address"
+                },
+                {
+                  "internalType": "address",
+                  "name": "governance_",
+                  "type": "address"
+                },
+                {
+                  "internalType": "address",
+                  "name": "owner_",
+                  "type": "address"
+                },
+                {
+                  "internalType": "address",
+                  "name": "treasury_",
+                  "type": "address"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "constructor"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "AlreadyExists"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "FeeRoutingInactive"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "InsufficientAssets"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "InvalidFee"
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "requested",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "maximum",
+                  "type": "uint256"
+                }
+              ],
+              "type": "error",
+              "name": "MorphoFeeCapExceeded"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "NoClaimableShares"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "NotRegistered"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "Reentrant"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "ShareAccountingMismatch"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "Unauthorized"
+            },
+            {
+              "inputs": [],
+              "type": "error",
+              "name": "ZeroAddress"
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "bytes32",
+                  "name": "id",
+                  "type": "bytes32",
+                  "indexed": true
+                },
+                {
+                  "internalType": "address",
+                  "name": "receiver",
+                  "type": "address",
+                  "indexed": true
+                }
+              ],
+              "type": "event",
+              "name": "CreatorReceiverUpdated",
+              "anonymous": false
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "bytes32",
+                  "name": "id",
+                  "type": "bytes32",
+                  "indexed": true
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "creatorShares",
+                  "type": "uint256",
+                  "indexed": false
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "treasuryShares",
+                  "type": "uint256",
+                  "indexed": false
+                }
+              ],
+              "type": "event",
+              "name": "FeeSharesAccounted",
+              "anonymous": false
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "bytes32",
+                  "name": "id",
+                  "type": "bytes32",
+                  "indexed": true
+                },
+                {
+                  "internalType": "address",
+                  "name": "receiver",
+                  "type": "address",
+                  "indexed": true
+                },
+                {
+                  "internalType": "bool",
+                  "name": "forCreator",
+                  "type": "bool",
+                  "indexed": false
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "shares",
+                  "type": "uint256",
+                  "indexed": false
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "assets",
+                  "type": "uint256",
+                  "indexed": false
+                }
+              ],
+              "type": "event",
+              "name": "FeeSharesRedeemed",
+              "anonymous": false
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "bytes32",
+                  "name": "id",
+                  "type": "bytes32",
+                  "indexed": true
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "totalFee",
+                  "type": "uint256",
+                  "indexed": false
+                }
+              ],
+              "type": "event",
+              "name": "MarketActivated",
+              "anonymous": false
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "bytes32",
+                  "name": "id",
+                  "type": "bytes32",
+                  "indexed": true
+                },
+                {
+                  "internalType": "address",
+                  "name": "creator",
+                  "type": "address",
+                  "indexed": true
+                },
+                {
+                  "internalType": "address",
+                  "name": "receiver",
+                  "type": "address",
+                  "indexed": true
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "creatorFee",
+                  "type": "uint256",
+                  "indexed": false
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "totalFee",
+                  "type": "uint256",
+                  "indexed": false
+                }
+              ],
+              "type": "event",
+              "name": "MarketRequested",
+              "anonymous": false
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "pendingOwner",
+                  "type": "address",
+                  "indexed": true
+                }
+              ],
+              "type": "event",
+              "name": "OwnershipTransferStarted",
+              "anonymous": false
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "owner",
+                  "type": "address",
+                  "indexed": true
+                }
+              ],
+              "type": "event",
+              "name": "OwnershipTransferred",
+              "anonymous": false
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "treasury",
+                  "type": "address",
+                  "indexed": true
+                }
+              ],
+              "type": "event",
+              "name": "TreasuryUpdated",
+              "anonymous": false
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "CURVEYIELD_BASE_FEE",
+              "outputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "",
+                  "type": "uint256"
+                }
+              ]
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "CURVEYIELD_REVENUE_SHARE",
+              "outputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "",
+                  "type": "uint256"
+                }
+              ]
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "MAX_CREATOR_FEE",
+              "outputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "",
+                  "type": "uint256"
+                }
+              ]
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "MORPHO_MAX_FEE",
+              "outputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "",
+                  "type": "uint256"
+                }
+              ]
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "WAD",
+              "outputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "",
+                  "type": "uint256"
+                }
+              ]
+            },
+            {
+              "inputs": [],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "acceptOwnership"
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "struct ICurveYieldMorphoCore.MarketParams",
+                  "name": "params",
+                  "type": "tuple",
+                  "components": [
+                    {
+                      "internalType": "address",
+                      "name": "loanToken",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "collateralToken",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "oracle",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "irm",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "uint256",
+                      "name": "lltv",
+                      "type": "uint256"
+                    }
+                  ]
+                },
+                {
+                  "internalType": "bool",
+                  "name": "forCreator",
+                  "type": "bool"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "maximumShares",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "minimumAssets",
+                  "type": "uint256"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "claim",
+              "outputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "assetsWithdrawn",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "sharesWithdrawn",
+                  "type": "uint256"
+                }
+              ]
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "struct ICurveYieldMorphoCore.MarketParams",
+                  "name": "params",
+                  "type": "tuple",
+                  "components": [
+                    {
+                      "internalType": "address",
+                      "name": "loanToken",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "collateralToken",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "oracle",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "irm",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "uint256",
+                      "name": "lltv",
+                      "type": "uint256"
+                    }
+                  ]
+                },
+                {
+                  "internalType": "address",
+                  "name": "creatorReceiver",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "creatorFee",
+                  "type": "uint256"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "createMarket",
+              "outputs": [
+                {
+                  "internalType": "bytes32",
+                  "name": "id",
+                  "type": "bytes32"
+                }
+              ]
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "bytes32",
+                  "name": "",
+                  "type": "bytes32"
+                }
+              ],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "creatorMarket",
+              "outputs": [
+                {
+                  "internalType": "address",
+                  "name": "creator",
+                  "type": "address"
+                },
+                {
+                  "internalType": "address",
+                  "name": "receiver",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint128",
+                  "name": "creatorFee",
+                  "type": "uint128"
+                },
+                {
+                  "internalType": "uint128",
+                  "name": "totalFee",
+                  "type": "uint128"
+                },
+                {
+                  "internalType": "bool",
+                  "name": "active",
+                  "type": "bool"
+                }
+              ]
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "bytes32",
+                  "name": "",
+                  "type": "bytes32"
+                }
+              ],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "creatorOwedShares",
+              "outputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "",
+                  "type": "uint256"
+                }
+              ]
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "creatorFee",
+                  "type": "uint256"
+                }
+              ],
+              "stateMutability": "pure",
+              "type": "function",
+              "name": "feeBreakdown",
+              "outputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "totalFee",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "curveYieldFee",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "creatorFeeOut",
+                  "type": "uint256"
+                }
+              ]
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "governance",
+              "outputs": [
+                {
+                  "internalType": "contract CurveYieldMorphoOwnerV1",
+                  "name": "",
+                  "type": "address"
+                }
+              ]
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "struct ICurveYieldMorphoCore.MarketParams",
+                  "name": "params",
+                  "type": "tuple",
+                  "components": [
+                    {
+                      "internalType": "address",
+                      "name": "loanToken",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "collateralToken",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "oracle",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "irm",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "uint256",
+                      "name": "lltv",
+                      "type": "uint256"
+                    }
+                  ]
+                }
+              ],
+              "stateMutability": "pure",
+              "type": "function",
+              "name": "marketId",
+              "outputs": [
+                {
+                  "internalType": "bytes32",
+                  "name": "",
+                  "type": "bytes32"
+                }
+              ]
+            },
+            {
+              "inputs": [],
+              "stateMutability": "pure",
+              "type": "function",
+              "name": "maxExecutableCreatorFee",
+              "outputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "",
+                  "type": "uint256"
+                }
+              ]
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "morpho",
+              "outputs": [
+                {
+                  "internalType": "contract ICurveYieldMorphoCore",
+                  "name": "",
+                  "type": "address"
+                }
+              ]
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "owner",
+              "outputs": [
+                {
+                  "internalType": "address",
+                  "name": "",
+                  "type": "address"
+                }
+              ]
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "pendingOwner",
+              "outputs": [
+                {
+                  "internalType": "address",
+                  "name": "",
+                  "type": "address"
+                }
+              ]
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "bytes32",
+                  "name": "id",
+                  "type": "bytes32"
+                },
+                {
+                  "internalType": "address",
+                  "name": "nextReceiver",
+                  "type": "address"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "setCreatorReceiver"
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "nextTreasury",
+                  "type": "address"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "setTreasury"
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "struct ICurveYieldMorphoCore.MarketParams",
+                  "name": "params",
+                  "type": "tuple",
+                  "components": [
+                    {
+                      "internalType": "address",
+                      "name": "loanToken",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "collateralToken",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "oracle",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "address",
+                      "name": "irm",
+                      "type": "address"
+                    },
+                    {
+                      "internalType": "uint256",
+                      "name": "lltv",
+                      "type": "uint256"
+                    }
+                  ]
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "synchronize"
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "address",
+                  "name": "nextOwner",
+                  "type": "address"
+                }
+              ],
+              "stateMutability": "nonpayable",
+              "type": "function",
+              "name": "transferOwnership"
+            },
+            {
+              "inputs": [],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "treasury",
+              "outputs": [
+                {
+                  "internalType": "address",
+                  "name": "",
+                  "type": "address"
+                }
+              ]
+            },
+            {
+              "inputs": [
+                {
+                  "internalType": "bytes32",
+                  "name": "",
+                  "type": "bytes32"
+                }
+              ],
+              "stateMutability": "view",
+              "type": "function",
+              "name": "treasuryOwedShares",
+              "outputs": [
+                {
+                  "internalType": "uint256",
+                  "name": "",
+                  "type": "uint256"
+                }
+              ]
+            }
+          ],
+          "devdoc": {
+            "kind": "dev",
+            "methods": {},
+            "version": 1
+          },
+          "userdoc": {
+            "kind": "user",
+            "methods": {
+              "createMarket((address,address,address,address,uint256),address,uint256)": {
+                "notice": "One permissionless transaction: register creator, create market,         configure its actual Morpho fee, then activate creator accounting.         Any failed downstream operation reverts the ENTIRE market creation."
+              },
+              "setCreatorReceiver(bytes32,address)": {
+                "notice": "The original creator or the CURRENT designated creator-fee         receiver may redirect the creator portion. The treasury is separate."
+              }
+            },
+            "version": 1
+          }
+        },
+        "settings": {
+          "remappings": [],
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "metadata": {
+            "bytecodeHash": "ipfs"
+          },
+          "compilationTarget": {
+            "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol": "CurveYieldMorphoFeeSplitterV2"
+          },
+          "evmVersion": "cancun",
+          "libraries": {}
+        },
+        "sources": {
+          "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol": {
+            "keccak256": "0x815ec515808019be8b153d091abbc8e608efba08d35add182bf80dca7c99562f",
+            "urls": [
+              "bzz-raw://69485dc44469ec4c587ee025110dc9359bf773498d9911f30358fca1db001836",
+              "dweb:/ipfs/QmesuFvhuZBJzYEDNtHzQEdW7z6bsDrDcuntt1ej5aJ6ze"
+            ],
+            "license": "GPL-2.0-or-later"
+          }
+        },
+        "version": 1
+      }
+    }
+  }
+}
