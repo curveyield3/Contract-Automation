@@ -7,6 +7,8 @@ on:
   push:
     paths:
       - '.github/smoke-trigger/lite-phase0-source-zip-smoke-v1.json'
+      - 'github-native-sim/cyvlsdt-runtime-compare-v1/source-bundle-v47-to-v49.txt'
+      - '.github/workflows/lite-phase0-source-zip-smoke-v1.yml'
   workflow_dispatch:
 
 permissions:
@@ -18,6 +20,7 @@ concurrency:
 
 jobs:
   source-zip-smoke:
+    if: github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1'
     name: ${{ matrix.label }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -162,3 +165,116 @@ jobs:
           path: .source-zip-smoke/
           if-no-files-found: warn
           include-hidden-files: true
+
+  cyvlsdt-runtime-size:
+    name: cyvlSDT v47-v49 deployed runtime bytecode
+    if: github.ref == 'refs/heads/cyvlsdt-runtime-compare-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore original source sets and verify their identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,hashlib,io,lzma,pathlib,shutil,subprocess,tarfile
+          root=pathlib.Path('.cyvlsdt-runtime-size')
+          root.mkdir(exist_ok=True)
+          lines=pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/source-bundle-v47-to-v49.txt').read_text().splitlines()
+          assert lines[0]=='V47_XZ_BASE64'
+          idx=lines.index('V49_PATCH_XZ_BASE64')
+          archive=base64.b64decode(''.join(lines[1:idx]),validate=True)
+          patch_xz=base64.b64decode(''.join(lines[idx+1:]),validate=True)
+          assert hashlib.sha256(archive).hexdigest()=='495b95243f69ad2b56879c630f7b86b1e2492337e241ba6149b05de61fa91e29'
+          assert hashlib.sha256(patch_xz).hexdigest()=='b98f470501b3fff6bd198f7ee9db142f4c9904d4fda4f11fbc132216e463cc36'
+          with tarfile.open(fileobj=io.BytesIO(lzma.decompress(archive))) as tf:
+              for m in tf.getmembers():
+                  p=pathlib.PurePosixPath(m.name)
+                  assert not p.is_absolute() and '..' not in p.parts
+              tf.extractall(root/'v47',filter='data')
+          shutil.copytree(root/'v47',root/'v49')
+          patch=lzma.decompress(patch_xz)
+          subprocess.run(['patch','--batch','--fuzz=0','-p1'],cwd=root/'v49',input=patch,check=True)
+          expected={
+            'v47':'3613ec9f294ff5b00eb0602c3bba604f190cf4c933da6f70083a5d11a92b6596',
+            'v49':'087e6bdd46f74019eff2750fb028afa02ecc80c2246749874221cca50f7aa1c9'
+          }
+          for version in ('v47','v49'):
+              paths=sorted([x for x in (root/version/'contracts').rglob('*.sol')] +
+                  [root/version/'package.json',root/version/'hardhat.config.js'])
+              digest=''.join(f'{p.relative_to(root/version).as_posix()}:{hashlib.sha256(p.read_bytes()).hexdigest()}\n' for p in paths)
+              observed=hashlib.sha256(digest.encode()).hexdigest()
+              assert observed==expected[version],f'{version} source identities differ: {observed}'
+              print(version,'verified original source-set SHA256',observed,'files',len(paths))
+          PY
+      - name: Install exactly pinned dependencies and compile v47 and v49
+        shell: bash
+        run: |
+          set -euo pipefail
+          for version in v47 v49; do
+            echo "=== COMPILING $version ==="
+            cd "$GITHUB_WORKSPACE/.cyvlsdt-runtime-size/$version"
+            npm install --no-audit --no-fund --package-lock=false 2>&1 | tee "$GITHUB_WORKSPACE/.cyvlsdt-runtime-size/$version-install.log"
+            npx --no-install hardhat compile 2>&1 | tee "$GITHUB_WORKSPACE/.cyvlsdt-runtime-size/$version-compile.log"
+          done
+      - name: Compare measured deployed runtime sizes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import csv,json,pathlib
+          root=pathlib.Path('.cyvlsdt-runtime-size')
+          results={}
+          for version in ('v47','v49'):
+              artifacts=root/version/('artifacts-'+version)/'contracts'
+              assert artifacts.is_dir(),f'{version} artifact directory missing'
+              sizes={}
+              for p in artifacts.rglob('*.json'):
+                  if p.name.endswith('.dbg.json'):continue
+                  d=json.loads(p.read_text())
+                  obj=d.get('deployedBytecode')
+                  if not isinstance(obj,str) or not obj.startswith('0x') or len(obj)<=2:continue
+                  assert (len(obj)-2)%2==0
+                  key=d.get('sourceName','?')+':'+d.get('contractName',p.stem)
+                  sizes[key]=(len(obj)-2)//2
+              assert sizes,f'{version} has no deployable runtime bytecode'
+              results[version]=sizes
+          names=sorted(set(results['v47'])|set(results['v49']))
+          rows=[]
+          for name in names:
+              a=results['v47'].get(name);b=results['v49'].get(name)
+              delta=b-a if a is not None and b is not None else None
+              rows.append({'contract':name,'v47_runtime_bytes':a,'v49_runtime_bytes':b,'delta_bytes':delta,'delta_pct':round(100*delta/a,4) if a and delta is not None else None,'v49_over_EIP170':b>24576 if b is not None else None})
+          (root/'runtime-size-results.json').write_text(json.dumps(rows,indent=2)+'\n')
+          with (root/'runtime-size-results.csv').open('w',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
+          report=['# Compiler-measured cyvlSDT deployed runtime sizes','','Solidity v47 vs v49; 200 optimizer runs, viaIR, Cancun; includes metadata.','','| Contract | v47 | v49 | Difference | Status |','|---|---:|---:|---:|---|']
+          for row in rows:
+              a=row['v47_runtime_bytes'];b=row['v49_runtime_bytes'];d=row['delta_bytes']
+              report.append(f"| `{row['contract']}` | {a if a is not None else 'n/a'} | {b if b is not None else 'n/a'} | {d if d is not None else 'n/a'} | {'OVER EIP-170' if row['v49_over_EIP170'] else 'OK'} |")
+          out='\n'.join(report)+'\n'
+          (root/'runtime-size-report.md').write_text(out)
+          with open(__import__('os').environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write(out)
+          print(out)
+          PY
+      - name: Upload comparison and compiler evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyvlsdt-runtime-compare-v47-v49-${{ github.run_id }}
+          path: |
+            .cyvlsdt-runtime-size/runtime-size-results.json
+            .cyvlsdt-runtime-size/runtime-size-results.csv
+            .cyvlsdt-runtime-size/runtime-size-report.md
+            .cyvlsdt-runtime-size/*-compile.log
+            .cyvlsdt-runtime-size/*-install.log
+          if-no-files-found: warn
+          retention-days: 14
