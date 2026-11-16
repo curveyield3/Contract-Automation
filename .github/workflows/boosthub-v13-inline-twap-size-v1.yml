@@ -4,7 +4,7 @@ on:
     branches: [main, pol-manager-v3-size]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
-      - 'github-native-sim/pol-manager-v3/PoL_Manager_Contract_v3.sol'
+      - 'github-native-sim/pol-manager-v3/PoL_Manager_Contract_v4.sol'
   workflow_dispatch:
 permissions:
   contents: read
@@ -109,7 +109,7 @@ jobs:
           set -euo pipefail
           WORK="$RUNNER_TEMP/pol-manager-v3"
           mkdir -p "$WORK/src"
-          cp github-native-sim/pol-manager-v3/PoL_Manager_Contract_v3.sol "$WORK/src/"
+          cp github-native-sim/pol-manager-v3/PoL_Manager_Contract_v4.sol "$WORK/src/"
           cd "$WORK"
           FOUND=0
           for runs in 200 1; do
@@ -126,7 +126,7 @@ jobs:
           bytecode_hash = "none"
           EOF
             echo "=== BUILD optimizer_runs=$runs via_ir=true ===" | tee -a "$GITHUB_WORKSPACE/pol-manager-v3-size.log"
-            if forge build --skip test --force --sizes 2>&1 | tee -a "$GITHUB_WORKSPACE/pol-manager-v3-size.log"; then
+            if forge build --skip test --force 2>&1 | tee -a "$GITHUB_WORKSPACE/pol-manager-v3-size.log"; then
               python3 - "$runs" <<'PY' | tee -a "$GITHUB_WORKSPACE/pol-manager-v3-size.log"
           import json,sys
           from pathlib import Path
