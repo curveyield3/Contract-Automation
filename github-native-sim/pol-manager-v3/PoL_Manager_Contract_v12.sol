@@ -140,7 +140,6 @@ contract PoLManager {
     address public immutable curveGauge;
     uint8 public immutable curveSdtIndex;
     bool public autoStakeCurve=true;
-    uint16 public maxCurveSlippageBps=300;
     address public immutable crv;
 
     address public immutable uniNftManager;
@@ -253,9 +252,9 @@ contract PoLManager {
     function setOperator(address who,bool on) external onlyOwner {operators[who]=on;}
     function setGuardian(address who) external onlyOwner {guardian=who;}
     function setPaused(bool on) external {if(msg.sender!=owner&&!(on&&msg.sender==guardian))revert Unauthorized();paused=on;}
-    function setSafetyLimits(uint16 curve,uint16 yearn,uint16 euler) external onlyOwner {
-        if(curve>1500||yearn>1000||euler>1000)revert Invalid();
-        maxCurveSlippageBps=curve;maxYearnLossBps=yearn;maxEulerLossBps=euler;
+    function setSafetyLimits(uint16 yearn,uint16 euler) external onlyOwner {
+        if(yearn>1000||euler>1000)revert Invalid();
+        maxYearnLossBps=yearn;maxEulerLossBps=euler;
     }
     function setProfitFee(uint16 bps) external onlyOwner {
         if(bps>5000)revert Invalid();
@@ -394,18 +393,10 @@ contract PoLManager {
         shares=IPoL4626(vault).maxRedeem(address(this));
         uint256 cash_=IPoLEuler(vault).cash();
         uint256 borrows=IPoLEuler(vault).totalBorrows();
-        uint256 needed=borrows*3/97+(borrows*3%97!=0?1:0);
+        uint256 needed=(borrows*3+96)/97;
         if(cash_<=needed)return 0;
         uint256 allowed=IPoLEuler(vault).convertToShares(cash_-needed);
         if(allowed<shares)shares=allowed;
-    }
-    function pendingProfitShares(uint8 slot) public view returns(uint256 amount){
-        if(slot>=5||vaults[slot]==address(0))revert Invalid();
-        amount=accruedFeeShares[slot];
-        uint256 p=currentPPS(slot);uint256 h=highWatermarkPPS[slot];
-        if(profitFeeBps==0||p<=h)return amount;
-        uint256 held=_balance(vaults[slot]);
-        if(held>amount)amount+=(held-amount)*(p-h)*profitFeeBps/(p*BPS);
     }
     function _accrue(uint8 slot) private {
         uint256 p=currentPPS(slot);uint256 h=highWatermarkPPS[slot];
@@ -463,7 +454,6 @@ contract PoLManager {
         return this.onERC721Received.selector;
     }
     function _uniAdd(uint256 a0,uint256 a1,uint256 min0,uint256 min1,uint128 minL) private returns(uint128 liquidity,uint256 used0,uint256 used1){
-        if(IPoLNft(uniNftManager).ownerOf(uniTokenId)!=address(this))revert State();
         if(a0+a1==0)revert Invalid();
         (liquidity,used0,used1)=IPoLNft(uniNftManager).increaseLiquidity(IPoLNft.Increase(uniTokenId,a0,a1,min0,min1,block.timestamp));
         if(liquidity==0||liquidity<minL)revert Slippage();
@@ -551,7 +541,6 @@ contract PoLManager {
         (minted,,)=_uniAdd(have0,have1,0,0,minL);
     }
     function _harvestUni() private returns(uint256 paid){
-        if(IPoLNft(uniNftManager).ownerOf(uniTokenId)!=address(this))revert State();
         (uint256 got0,uint256 got1)=IPoLNft(uniNftManager).collect(IPoLNft.Collect(uniTokenId,address(this),type(uint128).max,type(uint128).max));
         uint256 old0=_min(got0,initialOwed0);uint256 old1=_min(got1,initialOwed1);
         initialOwed0-=old0;initialOwed1-=old1;
