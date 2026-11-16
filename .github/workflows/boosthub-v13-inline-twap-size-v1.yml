@@ -1,14 +1,17 @@
 name: BoostHub v13 Inline TWAP Size Qualification v1
 on:
   push:
-    branches: [main]
+    branches: [main, boosthub-apr15-v36-compile]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
+      - 'github-native-sim/boosthub-v13-full-stack-v1/source/BeefyVaultV7FixedV2.sol'
+      - 'github-native-sim/boosthub-v13-full-stack-v1/source/interfaces/IStrategyBoostHubV1.sol'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   inline-evaluation:
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -91,3 +94,67 @@ jobs:
           path: .inline-eval/inline-build.err
           if-no-files-found: warn
           retention-days: 7
+vault-v36-compile:
+    if: github.ref_name == 'boosthub-apr15-v36-compile'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - uses: foundry-rs/foundry-toolchain@v1
+        with: {version: stable}
+      - name: Set up isolated exact-source vault compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          src='github-native-sim/boosthub-v13-full-stack-v1/source'
+          mkdir -p .apr-v36/contracts/interfaces .apr-v36/dependencies
+          cp "$src/BeefyVaultV7FixedV2.sol" .apr-v36/contracts/
+          cp "$src/interfaces/IStrategyBoostHubV1.sol" .apr-v36/contracts/interfaces/
+          npm install --prefix .apr-v36/dependencies --no-save --no-package-lock --ignore-scripts --no-audit --no-fund '@openzeppelin/contracts@4.9.6'
+          cat > .apr-v36/foundry.toml <<'TOML'
+          [profile.default]
+          src = "contracts"
+          out = "out"
+          libs = ["dependencies/node_modules"]
+          remappings = ["@openzeppelin-4/contracts/=dependencies/node_modules/@openzeppelin/contracts/"]
+          solc_version = "0.8.28"
+          optimizer = true
+          optimizer_runs = 200
+          via_ir = true
+          TOML
+          echo 'EXACT_SOURCE_SHA256:'
+          sha256sum .apr-v36/contracts/BeefyVaultV7FixedV2.sol .apr-v36/contracts/interfaces/IStrategyBoostHubV1.sol
+      - name: Compile v36 vault and enforce EIP-170
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd .apr-v36 && forge build --force --sizes) 2>&1 | tee boosthub-v36-compile.log
+          python3 - <<'PY' | tee boosthub-v36-runtime-size.txt
+          import json
+          from pathlib import Path
+          p = Path('.apr-v36/out/BeefyVaultV7FixedV2.sol/BeefyVaultV7FixedV2.json')
+          a = json.loads(p.read_text())
+          code = a['deployedBytecode']['object']
+          assert code.startswith('0x') and len(code) > 2, 'missing deployed runtime bytecode'
+          n = (len(code) - 2) // 2
+          print(f'EIP170_RUNTIME_BYTES={n}')
+          print(f'EIP170_LIMIT_BYTES=24576')
+          print(f'EIP170_HEADROOM_BYTES={24576-n}')
+          assert n < 24576, f'EIP-170 size exceeded: {n} bytes'
+          print('COMPILATION_AND_SIZE_STATUS=PASS')
+          PY
+      - name: Retain compile result (no tests)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boosthub-v36-vault-compile
+          path: |
+            boosthub-v36-compile.log
+            boosthub-v36-runtime-size.txt
+            .apr-v36/out/BeefyVaultV7FixedV2.sol/BeefyVaultV7FixedV2.json
+          if-no-files-found: warn
