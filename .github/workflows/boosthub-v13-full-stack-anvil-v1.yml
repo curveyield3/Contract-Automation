@@ -41,7 +41,7 @@ jobs:
           git -C .upstream-morpho fetch --depth 1 origin 339a885801972740eb27f51da110a4675b839d42
           git -C .upstream-morpho checkout --detach 339a885801972740eb27f51da110a4675b839d42
           git -C .upstream-morpho submodule update --init --recursive --depth 1
-          mkdir -p .upstream-morpho/src/fraxtal
+          mkdir -p .upstream-morpho/src/fraxtal .upstream-morpho/script
           cp morpho-blue/src/fraxtal/*.sol .upstream-morpho/src/fraxtal/
           cp morpho-blue/script/DeployFraxtalMorpho.s.sol .upstream-morpho/script/
           forge build --root .upstream-morpho src/Morpho.sol src/fraxtal/CollateralYieldIRM.sol src/fraxtal/OmniRouterBeefyShareOracle.sol script/DeployFraxtalMorpho.s.sol --force
