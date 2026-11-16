@@ -1,4 +1,4 @@
-name: BoostHub Fraxtal v40 source-bound live fork and accounting
+name: BoostHub Fraxtal v41 fresh OmniRouter live fork and accounting
 on:
   push:
     branches: [boosthub-fraxtal-v40]
@@ -34,7 +34,7 @@ jobs:
           npm install --prefix dependencies --no-save --no-audit --no-fund --ignore-scripts --package-lock=false ethers@6.15.0
           python -m pip install --disable-pip-version-check 'vyper==0.4.3'
           python tooling/make_staking_artifact.py
-          forge build script/DeployFraxtalSupplementV40.s.sol simulation/ForkOnlyFixedOracle.sol --force
+          forge build script/DeployFraxtalSupplementV41.s.sol --force
       - name: Clone exact unmodified Morpho Blue and compile new Fraxtal IRM/oracles
         shell: bash
         run: |
@@ -71,10 +71,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-fraxtal-v40-morpho-fork-v1
+          name: boosthub-fraxtal-v41-fresh-router-real-routes-fork-v2
           path: |
             github-native-sim/boosthub-fraxtal-v40/sim-results/
             github-native-sim/boosthub-fraxtal-v40/artifacts/staking.json
+            github-native-sim/boosthub-fraxtal-v40/contracts/CurveYieldOmniRouter.sol
+            github-native-sim/boosthub-fraxtal-v40/script/DeployFraxtalSupplementV41.s.sol
+            github-native-sim/boosthub-fraxtal-v40/simulation/simulate_fraxtal_v1.cjs
             github-native-sim/boosthub-fraxtal-v40/build/forge/*/*.json
             github-native-sim/boosthub-fraxtal-v40/.upstream-morpho/out/Morpho.sol/Morpho.json
             github-native-sim/boosthub-fraxtal-v40/.upstream-morpho/out/CollateralYieldIRM.sol/CollateralYieldIRM.json
