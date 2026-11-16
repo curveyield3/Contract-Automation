@@ -94,7 +94,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  cyvlsdt-v44-size:
+  cyvlsdt-v45-size:
     if: github.ref_name == 'cyvlsdt-v43-optimization'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -102,13 +102,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: foundry-rs/foundry-toolchain@v1
         with: {version: stable}
-      - name: Compile exact cyvlSDT v44 source and report EIP-170 deployed bytes
+      - name: Compile cyvlSDT v45 source delta over v44 and report EIP-170 deployed bytes
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .cyvlsdt-v44-compile
           tar -xJf github-native-sim/cyvlsdt-v44/source/cyvlsdt-v44-sources.tar.xz -C .cyvlsdt-v44-compile
           cd .cyvlsdt-v44-compile
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64,hashlib,subprocess,zlib
+          compressed = "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"
+          patch = zlib.decompress(base64.b64decode(compressed))
+          result = subprocess.run(['patch','-p0','--batch','--forward'],input=patch,capture_output=True)
+          if result.returncode: raise RuntimeError(result.stdout.decode()+result.stderr.decode())
+          for path,expected in {
+              'contracts/CurveYieldVlSDTLocker.sol':'ea624b164c7697756e28d8f75bd029d2a41901eb49e66781720b9486b1ea8a1a',
+              'contracts/interfaces/IStakeDao.sol':'8693022ab2b33b18dc5da31ce6e46283e7a66531ca4a4576e7ce79e098ccf9b3',
+          }.items():
+              actual=hashlib.sha256(Path(path).read_bytes()).hexdigest()
+              assert actual==expected,(path,actual,expected)
+          print('CYVLSDT_V45_SOURCE_VERIFIED')
+          PY
           mkdir -p lib
           git clone --depth 1 -q --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git lib/openzeppelin-contracts
           cat > foundry.toml <<'EOF'
