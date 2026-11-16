@@ -121,6 +121,21 @@ describe("cyvlSDT v49 live Ethereum fork: independent Stake DAO/Aladdin/VoteMark
        ethers.getAddress("0x"+l.topics[1].slice(-40)):ethers.getAddress("0x"+l.topics[2].slice(-40));
      if(!seen.has(a.toLowerCase())){seen.add(a.toLowerCase());candidate.push(a);}
    }
+
+   // Historical log scanning can be provider-restricted. Reconstruct live seller
+   // candidates from the marketplace's own current order IDs instead.
+   let liveListings=0;
+   const lastOrderId=await f.market.nextOrderId();
+   for(let id=lastOrderId>60n?lastOrderId-60n:1n;id<lastOrderId;id++){
+     const listing=await f.market.getListing(id);
+     if(listing.seller===ethers.ZeroAddress)continue;
+     liveListings++;
+     const seller=listing.seller;
+     if(!seen.has(seller.toLowerCase())){seen.add(seller.toLowerCase());candidate.push(seller);}
+   }
+   console.log("LIVE_MARKETPLACE_SELLERS",JSON.stringify({
+     lastOrderId:String(lastOrderId),activeListings:liveListings,distinctCandidateAccounts:candidate.length
+   }));
    let checked=0,eligible=null;const min=await f.market.minOrderAmount();
    for(const a of candidate.slice(0,50)){
      const [raw,delegated,free,committed]=await Promise.all([
@@ -133,6 +148,8 @@ describe("cyvlSDT v49 live Ethereum fork: independent Stake DAO/Aladdin/VoteMark
      if(free>=min+committed && !eligible)eligible=a;
    }
    console.log("LIVE_ACCOUNT_RECONCILIATION",JSON.stringify({scanLogs:logs.length,distinctCandidates:candidate.length,checked,eligible,minimum:String(min)}));
+   assert(checked>=1,"No actual Stake DAO accounts reconciled");
+   assert(eligible,"No verified current seller with enough free vlSDT for real marketplace/Aladdin execution");
    if(eligible){
      await network.provider.send("hardhat_impersonateAccount",[eligible]);
      await network.provider.send("hardhat_setBalance",[eligible,"0x56bc75e2d63100000"]);
@@ -164,8 +181,6 @@ describe("cyvlSDT v49 live Ethereum fork: independent Stake DAO/Aladdin/VoteMark
        console.log("LIVE_ALADDIN_FORK_DELEGATION",JSON.stringify({seller:eligible,amount:String(boostAmount),end:String(end)}));
      }
      await f.boost.connect(signer).setOperator(ADDR.aladdin,aladdinApproved);
-   }else{
-     console.log("LIVE_FORK_LISTING_UNEXERCISED no current >= minimum delegator in limited scan; full sale integration remains unverified");
    }
  });
 });
