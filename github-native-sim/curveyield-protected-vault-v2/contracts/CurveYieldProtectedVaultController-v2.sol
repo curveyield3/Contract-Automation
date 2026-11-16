@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-/// @title CurveYield Protected Morpho Vault V2 Deployment
-/// @notice Fraxtal-only, atomic creation of a standard Morpho Vault V2 with non-bypassable
+/// @title CurveYield Protected Morpho Vault V2 Controller
+/// @notice Fraxtal-only, controller-directed creation of a standard Morpho Vault V2 with protected
 ///         performance-fee settings and a vault-share fee splitter.
-/// @dev New vaults ONLY. Never attach this controller to an existing vault with unknown
-///      pending timelock operations. Morpho Vault V2 itself is not forked or altered.
+/// @dev New vaults ONLY. The operator deploys a dedicated controller and then calls its
+///      createVault(), which atomically calls Morpho's existing factory and secures the vault.
+///      Morpho Vault V2 itself is not forked or altered.
 
 interface IVaultV2FactoryCY {
     function createVaultV2(address owner, address asset, bytes32 salt) external returns (address);
@@ -150,7 +151,7 @@ contract CurveYieldProtectedFeeSplitter {
     }
 }
 
-/// @notice Permanent owner+curator of one freshly created Morpho Vault V2.
+/// @notice Permanent owner+curator and ONE-TIME DEPLOYER of a new Morpho Vault V2.
 /// @dev No arbitrary target call, delegatecall, vault ownership transfer, curator replacement,
 ///      gate setters, or fee-recipient setter is exposed to the operator.
 contract CurveYieldProtectedVaultController is ICurveYieldOperatorFee {
@@ -159,7 +160,9 @@ contract CurveYieldProtectedVaultController is ICurveYieldOperatorFee {
     uint256 public constant BPS = 10_000;
     uint256 public constant MORPHO_MAX_PERFORMANCE_FEE_WAD = 5e17;
 
-    address public immutable factory;
+    address public constant MORPHO_VAULT_V2_FACTORY_FRAXTAL =
+        0x711bCE12269a3a496eFaABB8B9AD5A4485E08A24;
+    address public immutable protocolTreasury;
     address public operator;
     address public pendingOperator;
     IVaultV2CY public vault;
@@ -168,7 +171,8 @@ contract CurveYieldProtectedVaultController is ICurveYieldOperatorFee {
     bool public initialized;
     uint256 private entered;
 
-    event Initialized(address indexed vault, address indexed splitter, uint256 operatorFeeWad);
+    event ProtectedVaultCreated(address indexed vault, address indexed splitter,
+        address indexed operator, address asset, uint256 operatorFeeWad);
     event OperatorFeeUpdated(uint256 oldOperatorFeeWad, uint256 newOperatorFeeWad, uint256 totalFeeWad);
     event OperatorProposed(address indexed newOperator);
     event OperatorUpdated(address indexed previousOperator, address indexed newOperator);
@@ -185,6 +189,8 @@ contract CurveYieldProtectedVaultController is ICurveYieldOperatorFee {
     error UnsafeVault();
     error Reentrancy();
     error VaultOperationFailed(bytes returnData);
+    error WrongChain();
+    error DeploymentFailed();
 
     modifier onlyOperator() {
         if (msg.sender != operator) revert Unauthorized();
@@ -203,10 +209,13 @@ contract CurveYieldProtectedVaultController is ICurveYieldOperatorFee {
         entered = 0;
     }
 
-    constructor(address _operator) {
-        if (_operator == address(0)) revert InvalidAddress();
-        factory = msg.sender;
+    /// @param _operator Operator wallet or Safe; it alone can create and manage this vault.
+    /// @param _protocolTreasury CurveYield treasury, fixed when this controller is deployed.
+    constructor(address _operator, address _protocolTreasury) {
+        if (block.chainid != 252) revert WrongChain();
+        if (_operator == address(0) || _protocolTreasury == address(0)) revert InvalidAddress();
         operator = _operator;
+        protocolTreasury = _protocolTreasury;
     }
 
     function totalFeeFor(uint256 opFeeWad) public pure returns (uint256) {
@@ -221,50 +230,74 @@ contract CurveYieldProtectedVaultController is ICurveYieldOperatorFee {
         return BASE_PROTOCOL_FEE_WAD + (operatorFeeWad * OPERATOR_SURCHARGE_BPS) / BPS;
     }
 
-    /// @dev Only callable by the atomically deploying CurveYield factory. The vault was
-    ///      created moments earlier with this contract as its first owner and no curator.
-    function initialize(address _vault, address _splitter, uint256 initialOperatorFeeWad,
-                        string calldata name, string calldata symbol) external {
-        if (msg.sender != factory) revert Unauthorized();
+    /// @notice Create the only Morpho Vault V2 governed by this controller.
+    /// @dev Two user transactions: deploy this controller, then call createVault as operator.
+    ///      All Morpho factory creation, splitter deployment, and fee protection are atomic
+    ///      in THIS creation transaction. A revert rolls back the entire operation.
+    /// @param asset ERC-20 vault deposit token on Fraxtal.
+    /// @param operatorRecipient Account receiving the operator's performance-fee shares.
+    /// @param initialOperatorFeeWad Operator's fee on recognized vault yield (1e18 = 100%).
+    /// @param name Morpho vault share name.
+    /// @param symbol Morpho vault share symbol.
+    /// @param salt Fresh random bytes32 for the existing Morpho factory.
+    function createVault(
+        address asset,
+        address operatorRecipient,
+        uint256 initialOperatorFeeWad,
+        string calldata name,
+        string calldata symbol,
+        bytes32 salt
+    ) external onlyOperator nonReentrant returns (address vaultAddress, address splitterAddress) {
         if (initialized) revert AlreadyInitialized();
-        if (_vault == address(0) || _splitter == address(0)) revert InvalidAddress();
+        if (asset == address(0) || operatorRecipient == address(0)) revert InvalidAddress();
+        if (bytes(name).length == 0 || bytes(symbol).length == 0) revert InvalidOperation();
+
         uint256 total = totalFeeFor(initialOperatorFeeWad);
-        IVaultV2CY v = IVaultV2CY(_vault);
-        if (v.owner() != address(this) || v.curator() != address(0) ||
+        IVaultV2FactoryCY morphoFactory = IVaultV2FactoryCY(MORPHO_VAULT_V2_FACTORY_FRAXTAL);
+        vaultAddress = morphoFactory.createVaultV2(address(this), asset, salt);
+        if (!morphoFactory.isVaultV2(vaultAddress)) revert DeploymentFailed();
+
+        IVaultV2CY v = IVaultV2CY(vaultAddress);
+        if (v.owner() != address(this) || v.asset() != asset || v.curator() != address(0) ||
             v.totalSupply() != 0 || v.performanceFee() != 0 ||
             v.performanceFeeRecipient() != address(0) ||
             v.timelock(IVaultV2CY.setPerformanceFee.selector) != 0 ||
             v.timelock(IVaultV2CY.setPerformanceFeeRecipient.selector) != 0 ||
             v.timelock(IVaultV2CY.abdicate.selector) != 0) revert UnsafeVault();
-        if (CurveYieldProtectedFeeSplitter(_splitter).controller() != address(this) ||
-            address(CurveYieldProtectedFeeSplitter(_splitter).vault()) != _vault) revert UnsafeVault();
 
-        initialized = true;
+        CurveYieldProtectedFeeSplitter feeSplitter = new CurveYieldProtectedFeeSplitter(
+            vaultAddress, address(this), operatorRecipient, protocolTreasury
+        );
+        splitterAddress = address(feeSplitter);
         vault = v;
-        splitter = CurveYieldProtectedFeeSplitter(_splitter);
+        splitter = feeSplitter;
         operatorFeeWad = initialOperatorFeeWad;
 
         v.setName(name);
         v.setSymbol(symbol);
         v.setCurator(address(this));
 
-        // At creation all selector timelocks are zero, so these submissions and their
-        // executions can be done in the SAME transaction without an interleaving window.
-        bytes memory recipientData = abi.encodeCall(IVaultV2CY.setPerformanceFeeRecipient, (_splitter));
+        // All selector timelocks begin at zero. No other account ever controls
+        // this vault's owner or curator role, even temporarily.
+        bytes memory recipientData = abi.encodeCall(IVaultV2CY.setPerformanceFeeRecipient, (splitterAddress));
         v.submit(recipientData);
-        v.setPerformanceFeeRecipient(_splitter);
+        v.setPerformanceFeeRecipient(splitterAddress);
 
         bytes memory feeData = abi.encodeCall(IVaultV2CY.setPerformanceFee, (total));
         v.submit(feeData);
         v.setPerformanceFee(total);
 
-        // Irreversible: nobody (including the operator) can redirect fee shares.
-        bytes4 selector = IVaultV2CY.setPerformanceFeeRecipient.selector;
-        v.submit(abi.encodeCall(IVaultV2CY.abdicate, (selector)));
-        v.abdicate(selector);
-        if (v.performanceFeeRecipient() != _splitter || !v.abdicated(selector) ||
-            v.performanceFee() != total || v.curator() != address(this)) revert UnsafeVault();
-        emit Initialized(_vault, _splitter, initialOperatorFeeWad);
+        // Permanently prevent reassignment of the protected fee recipient.
+        bytes4 protectedSelector = IVaultV2CY.setPerformanceFeeRecipient.selector;
+        v.submit(abi.encodeCall(IVaultV2CY.abdicate, (protectedSelector)));
+        v.abdicate(protectedSelector);
+
+        if (v.performanceFeeRecipient() != splitterAddress ||
+            !v.abdicated(protectedSelector) || v.performanceFee() != total ||
+            v.curator() != address(this) || v.owner() != address(this)) revert UnsafeVault();
+
+        initialized = true;
+        emit ProtectedVaultCreated(vaultAddress, splitterAddress, operator, asset, initialOperatorFeeWad);
     }
 
     /// @notice Operator fee is a fraction of recognized positive vault yield, scaled by 1e18.
@@ -379,53 +412,5 @@ contract CurveYieldProtectedVaultController is ICurveYieldOperatorFee {
     function _callVault(bytes calldata data) internal {
         (bool ok, bytes memory result) = address(vault).call(data);
         if (!ok) revert VaultOperationFailed(result);
-    }
-}
-
-/// @notice Atomic deployment guarantees no operator-controlled setup window.
-contract CurveYieldProtectedVaultFactory {
-    address public constant MORPHO_VAULT_V2_FACTORY_FRAXTAL =
-        0x711bCE12269a3a496eFaABB8B9AD5A4485E08A24;
-
-    address public immutable protocolTreasury;
-    event ProtectedVaultCreated(address indexed vault, address indexed controller,
-        address indexed splitter, address operator, address asset, uint256 operatorFeeWad);
-
-    error InvalidAddress();
-    error WrongChain();
-    error DeploymentFailed();
-
-    constructor(address _protocolTreasury) {
-        if (block.chainid != 252) revert WrongChain();
-        if (_protocolTreasury == address(0)) revert InvalidAddress();
-        protocolTreasury = _protocolTreasury;
-    }
-
-    /// @param asset ERC-20 vault deposit token.
-    /// @param operator Address that can configure the vault; may be a Safe.
-    /// @param operatorRecipient Address that receives the operator's fee shares.
-    /// @param operatorFeeWad Operator's percent of recognized vault yield, scaled by 1e18.
-    /// @param salt Unique deployment salt (use a fresh random salt).
-    function createVault(address asset, address operator, address operatorRecipient,
-        uint256 operatorFeeWad, string calldata name, string calldata symbol, bytes32 salt)
-        external returns (address vault, address controller, address splitter)
-    {
-        if (asset == address(0) || operator == address(0) || operatorRecipient == address(0))
-            revert InvalidAddress();
-        if (bytes(name).length == 0 || bytes(symbol).length == 0) revert DeploymentFailed();
-        CurveYieldProtectedVaultController c = new CurveYieldProtectedVaultController{salt: keccak256(
-            abi.encode(msg.sender, asset, operator, salt)
-        )}(operator);
-        controller = address(c);
-        vault = IVaultV2FactoryCY(MORPHO_VAULT_V2_FACTORY_FRAXTAL)
-            .createVaultV2(controller, asset, salt);
-        if (!IVaultV2FactoryCY(MORPHO_VAULT_V2_FACTORY_FRAXTAL).isVaultV2(vault))
-            revert DeploymentFailed();
-        CurveYieldProtectedFeeSplitter f = new CurveYieldProtectedFeeSplitter(
-            vault, controller, operatorRecipient, protocolTreasury
-        );
-        splitter = address(f);
-        c.initialize(vault, splitter, operatorFeeWad, name, symbol);
-        emit ProtectedVaultCreated(vault, controller, splitter, operator, asset, operatorFeeWad);
     }
 }
