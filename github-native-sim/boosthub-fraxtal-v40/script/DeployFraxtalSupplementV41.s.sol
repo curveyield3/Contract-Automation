@@ -37,11 +37,11 @@ contract DeployFraxtalSupplementV41 {
     VmV40 private constant vm = VmV40(address(uint160(uint256(keccak256("hevm cheat code")))));
     address private constant HUB = 0x40f7085841034f752F17592875703EB5032f2B42;
     // Existing router deliberately excluded; this deployment creates and owns its own router.
-    address private constant SDFXS_WFRAX_POOL = 0x3df1658e3e76d14ef3c4d410829ea7575bb83b9b;
-    address private constant WFRAX_FRXUSD_TRICRYPTO = 0xA0d3911349e701a1f49c1ba2DDA34B4ce9636569;
-    address private constant FRXUSD_SFRXUSD_STABLE = 0x1aB35116C3FA0B2f507D8c8C3261D42683c1e31E;
-    address private constant SFRXUSD_RATE_READER = 0xbfc4d34db83553725ec6c768da71d2d9c1456b55;
-    address private constant FRXUSD = 0xfc00000000000000000000000000000000000001;
+    address private constant SDFXS_WFRAX_POOL = 0x3df1658e3E76d14eF3C4d410829EA7575bB83B9B;
+    address private constant WFRAX_FRXUSD_TRICRYPTO = 0xa0D3911349e701A1F49C1Ba2dDA34b4ce9636569;
+    address private constant FRXUSD_SFRXUSD_STABLE = 0x1aB35116c3FA0B2F507d8C8C3261d42683c1e31e;
+    address private constant SFRXUSD_RATE_READER = 0xBFc4D34Db83553725eC6c768da71D2D9c1456B55;
+    address private constant FRXUSD = 0xFc00000000000000000000000000000000000001;
     address private constant SFRXUSD = 0xfc00000000000000000000000000000000000008;
     address private constant SDFXS = 0x1AEe2382e05Dc68BDfC472F1E46d570feCca5814;
     address private constant WFRAX = 0xFc00000000000000000000000000000000000002;
