@@ -163,52 +163,44 @@ jobs:
           COMPILE_OUTCOME: ${{ steps.compile.outcome }}
         run: |
           set -euo pipefail
-          # Only the current branch head may publish a receipt.
           head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${GITHUB_REF_NAME}" --jq '.object.sha')"
-          if [ "$head_sha" != "$GITHUB_SHA" ]; then echo 'Stale run: skipping receipt'; exit 0; fi
-          mkdir -p .morpho-compile
+          if [ "$head_sha" != "$GITHUB_SHA" ]; then echo 'Stale run, no receipt'; exit 0; fi
           python3 - <<'PY'
           from pathlib import Path
-          import base64, hashlib, json, os
-          repo = os.environ['GITHUB_REPOSITORY']
-          run_id = os.environ['GITHUB_RUN_ID']
-          path = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol'
-          src = Path(path).read_bytes()
-          summary = Path('.morpho-compile/compiler-summary.json')
-          log = Path('.morpho-compile/compile.log')
-          data = {
-            'status': 'PASS' if os.environ.get('COMPILE_OUTCOME') == 'success' else 'FAIL',
-            'workflowRunId': int(run_id),
-            'workflowRunUrl': 'https://github.com/' + repo + '/actions/runs/' + run_id,
-            'headSha': os.environ['GITHUB_SHA'],
-            'sourceSha256': hashlib.sha256(src).hexdigest(),
-            'compilation': json.loads(summary.read_text()) if summary.exists() else None,
-            'compileLogTail': log.read_text(errors='replace')[-12000:] if log.exists() else None
+          import base64, hashlib, json, os, subprocess
+          repo=os.environ['GITHUB_REPOSITORY']
+          path='github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol'
+          source=Path(path).read_bytes()
+          report=Path('.morpho-compile/compiler-summary.json')
+          log=Path('.morpho-compile/compile.log')
+          record={
+              'status': 'PASS' if os.environ.get('COMPILE_OUTCOME')=='success' else 'FAIL',
+              'workflowRunId':int(os.environ['GITHUB_RUN_ID']),
+              'workflowRunUrl':'https://github.com/'+repo+'/actions/runs/'+os.environ['GITHUB_RUN_ID'],
+              'headSha':os.environ['GITHUB_SHA'],
+              'sourceSha256':hashlib.sha256(source).hexdigest(),
+              'compilation':json.loads(report.read_text()) if report.exists() else None,
+              'compileLogTail':log.read_text(errors='replace')[-8000:] if log.exists() else None
           }
-          if data['status'] == 'PASS':
-              artifacts = {}
+          if record['status']=='PASS':
+              artifacts={}
               for name in ('CurveYieldMorphoOwnerV1','CurveYieldMorphoFeeSplitterV2'):
-                  matches = list(Path('.morpho-compile/out').rglob(name+'.json'))
-                  assert len(matches)==1, (name,matches)
-                  c = json.loads(matches[0].read_text())
-                  code = c['bytecode']['object']
-                  assert code.startswith('0x') and len(code)>2 and '__
-          payload = {'message':'Record Morpho compiler result and deployment bytecode','branch':os.environ['GITHUB_REF_NAME'],'content':content}
-          import subprocess
-          remote = subprocess.run(['gh','api','repos/'+repo+'/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v1.json','--jq','.sha'],capture_output=True,text=True)
-          if remote.returncode == 0:
-              payload['sha'] = remote.stdout.strip()
+                  found=list(Path('.morpho-compile/out').rglob(name+'.json'))
+                  assert len(found)==1,(name,found)
+                  artifact=json.loads(found[0].read_text())
+                  creation=artifact['bytecode']['object']
+                  runtime=artifact['deployedBytecode']['object']
+                  assert creation.startswith('0x') and runtime.startswith('0x')
+                  assert all(c in '0123456789abcdefABCDEF' for c in creation[2:])
+                  artifacts[name]={'abi':artifact['abi'],'creationBytecode':creation,
+                                   'runtimeBytecode':runtime,'metadata':artifact.get('metadata')}
+              record['deployableArtifacts']=artifacts
+          content=base64.b64encode((json.dumps(record,indent=2)+'\n').encode()).decode()
+          payload={'message':'Record Morpho Fraxtal v2 compiler and deployable bytecode',
+                   'branch':os.environ['GITHUB_REF_NAME'],'content':content}
+          remote=subprocess.run(['gh','api','repos/'+repo+'/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v1.json','--jq','.sha'],capture_output=True,text=True)
+          if remote.returncode==0: payload['sha']=remote.stdout.strip()
           Path('.morpho-compile/receipt-request.json').write_text(json.dumps(payload))
-          print('COMPILATION_RECEIPT',data['status'],data['workflowRunUrl'])
-          PY
-          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v1.json" --input .morpho-compile/receipt-request.json
- not in code
-                  artifacts[name] = {'abi':c['abi'], 'creationBytecode':code,
-                      'runtimeBytecode':c['deployedBytecode']['object'], 'metadata':c.get('metadata')}
-              data['deployableArtifacts'] = artifacts
-          content = base64.b64encode((json.dumps(data,indent=2)+'\n').encode()).decode()
-          payload = {'message':'Record Morpho Fraxtal compiler result', 'branch':os.environ['GITHUB_REF_NAME'], 'content':content}
-          Path('.morpho-compile/receipt-request.json').write_text(json.dumps(payload))
-          print('COMPILATION_RECEIPT',data['status'],data['workflowRunUrl'])
+          print('COMPILATION_RECEIPT',record['status'],record['workflowRunUrl'])
           PY
           gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v1.json" --input .morpho-compile/receipt-request.json
