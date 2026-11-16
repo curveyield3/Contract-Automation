@@ -185,6 +185,27 @@ jobs:
             'compilation': json.loads(summary.read_text()) if summary.exists() else None,
             'compileLogTail': log.read_text(errors='replace')[-12000:] if log.exists() else None
           }
+          if data['status'] == 'PASS':
+              artifacts = {}
+              for name in ('CurveYieldMorphoOwnerV1','CurveYieldMorphoFeeSplitterV2'):
+                  matches = list(Path('.morpho-compile/out').rglob(name+'.json'))
+                  assert len(matches)==1, (name,matches)
+                  c = json.loads(matches[0].read_text())
+                  code = c['bytecode']['object']
+                  assert code.startswith('0x') and len(code)>2 and '__
+          payload = {'message':'Record Morpho compiler result and deployment bytecode','branch':os.environ['GITHUB_REF_NAME'],'content':content}
+          import subprocess
+          remote = subprocess.run(['gh','api','repos/'+repo+'/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v1.json','--jq','.sha'],capture_output=True,text=True)
+          if remote.returncode == 0:
+              payload['sha'] = remote.stdout.strip()
+          Path('.morpho-compile/receipt-request.json').write_text(json.dumps(payload))
+          print('COMPILATION_RECEIPT',data['status'],data['workflowRunUrl'])
+          PY
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v1.json" --input .morpho-compile/receipt-request.json
+ not in code
+                  artifacts[name] = {'abi':c['abi'], 'creationBytecode':code,
+                      'runtimeBytecode':c['deployedBytecode']['object'], 'metadata':c.get('metadata')}
+              data['deployableArtifacts'] = artifacts
           content = base64.b64encode((json.dumps(data,indent=2)+'\n').encode()).decode()
           payload = {'message':'Record Morpho Fraxtal compiler result', 'branch':os.environ['GITHUB_REF_NAME'], 'content':content}
           Path('.morpho-compile/receipt-request.json').write_text(json.dumps(payload))
