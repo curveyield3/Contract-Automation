@@ -79,3 +79,73 @@ jobs:
             }
           }
           NODE
+
+      - name: Package exact compiled IRM sources and deployment helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE='CurveYield_Fraxtal_Morpho_IRMs_v1'
+          ROOT="$RUNNER_TEMP/$PACKAGE"
+          mkdir -p "$ROOT/contracts" "$ROOT/build"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV5.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV2.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV1.sol "$ROOT/contracts/"
+          cp .github/workflows/curveyield-morpho-irm-compile-v1.yml "$ROOT/build/compilation-workflow.yml"
+          cat > "$ROOT/foundry.toml" <<'TOML'
+          [profile.default]
+          src = "contracts"
+          out = "out"
+          libs = []
+          solc = "0.8.28"
+          optimizer = true
+          optimizer_runs = 200
+          evm_version = "cancun"
+          TOML
+          cat > "$ROOT/README_v1.md" <<'MD'
+          # CurveYield Fraxtal Morpho IRMs — complete local source package v1
+
+          Includes the latest six custom IRM models plus six companion deployment
+          factories on the existing morpho-fraxtal-compile-v1 GitHub branch.
+
+          IRM model source: contracts/CurveYieldMorphoIRMsV5.sol
+          - CurveYieldCollateralYieldIRMV2 (collateral yield)
+          - CurveYieldEulerUtilizationIRMV2 (Euler-style utilization)
+          - CurveYieldLinearUtilizationIRMV1 (linear utilization)
+          - CurveYieldImmutableStaticIRMV1 (unchangeable static rate)
+          - CurveYieldGovernedStaticIRMV2 (governance-controlled static rate)
+
+          Trigger router: contracts/CurveYieldTriggerMasterIRMV2.sol
+          - CurveYieldTriggerMasterIRMV2 (five prioritized trigger groups,
+            each with five OR conditions and a default sub-IRM).
+
+          Factory source: contracts/CurveYieldMorphoIRMFactoriesV1.sol
+          - Six on-chain factories for the six IRM models.
+
+          Keep the three Solidity files together in the contracts/ directory;
+          their shared ABI structs and local imports are included.
+          Uses Solidity 0.8.28, optimizer 200, EVM Cancun.
+          Compile locally: forge build --sizes (Foundry and solc required).
+          The exact GitHub compile-only workflow is in build/.
+          BUILD_PROVENANCE_v1.txt and SOURCE_SHA256SUMS_v1.txt identify this
+          package's exact upstream version and source hashes.
+
+          This package intentionally contains no deployments, key material,
+          test executions, fork simulations, or unrelated owner contracts.
+          GitHub compilation does not certify economic or security safety.
+          MD
+          (
+            cd "$ROOT"
+            sha256sum contracts/*.sol > SOURCE_SHA256SUMS_v1.txt
+            printf 'repository=curveyield3/Contract-Automation\nbranch=morpho-fraxtal-compile-v1\ncommit=%s\nworkflow_run=%s\ncompiler=solc 0.8.28\noptimizer_runs=200\nevm_version=cancun\n' \
+              "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD_PROVENANCE_v1.txt
+          )
+          ( cd "$RUNNER_TEMP" && zip -q -r "$GITHUB_WORKSPACE/$PACKAGE.zip" "$PACKAGE" )
+          unzip -t "$PACKAGE.zip"
+          sha256sum "$PACKAGE.zip"
+      - name: Publish CurveYield IRM ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: CurveYield_Fraxtal_Morpho_IRMs_v1
+          path: CurveYield_Fraxtal_Morpho_IRMs_v1.zip
+          if-no-files-found: error
+          retention-days: 30
