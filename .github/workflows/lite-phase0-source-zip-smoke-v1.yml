@@ -365,9 +365,9 @@ jobs:
           h=hashlib.sha256()
           for p in sorted((root/'contracts').rglob('*.sol')):
               h.update(p.relative_to(root).as_posix().encode())
-              h.update(b'\\0')
+              h.update(bytes([0]))
               h.update(p.read_bytes())
-              h.update(b'\\0')
+              h.update(bytes([0]))
           assert h.hexdigest()=='aaee36e12c911e170c7284cd92ce0919196ca721dc61020c4c8d6baea3f8287d',h.hexdigest()
           assert hashlib.sha256((root/'hardhat.config.js').read_bytes()).hexdigest()=='0bbfa425db0a1236a481e99557c35c7053c077a0474267affe8a316b69810b4f'
           print('All v49 Solidity sources and Hardhat config match delivered package exactly')
