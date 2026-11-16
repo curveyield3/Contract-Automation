@@ -1,10 +1,11 @@
 name: BoostHub v13 Inline TWAP Size Qualification v1
 on:
   push:
-    branches: [main, morpho-fraxtal-compile-v1]
+    branches: [main, morpho-fraxtal-compile-v1, fraxtal-lending-adapters-v1]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldLendingMarketAdapterV1.sol'
   workflow_dispatch:
 permissions:
   contents: read
@@ -98,7 +99,7 @@ jobs:
     permissions:
       contents: write
     name: Compile exact Fraxtal Morpho governance + splitter v2
-    if: github.ref_name == 'morpho-fraxtal-compile-v1'
+    if: github.ref_name == 'morpho-fraxtal-compile-v1' || github.ref_name == 'fraxtal-lending-adapters-v1'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -126,7 +127,7 @@ jobs:
           evm_version = "cancun"
           TOML
           echo "Exact compiler-input identity:"
-          sha256sum github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol | tee .morpho-compile/source-sha256.txt
+          sha256sum github-native-sim/morpho-fraxtal-v1/*.sol | tee .morpho-compile/source-sha256.txt
           forge build --force --sizes 2>&1 | tee .morpho-compile/compile.log
           python3 - <<'PY'
           from pathlib import Path
@@ -138,7 +139,7 @@ jobs:
               bc = d.get('deployedBytecode',{}).get('object','')
               if not isinstance(bc,str) or not bc.startswith('0x') or len(bc)<=2: continue
               rows.append({'contract':p.stem,'runtimeBytes':(len(bc)-2)//2,'eip170Pass':(len(bc)-2)//2 <= 24576})
-          wanted = {'CurveYieldMorphoOwnerV1','CurveYieldMorphoFeeSplitterV2'}
+          wanted = {'CurveYieldMorphoOwnerV1','CurveYieldMorphoFeeSplitterV2','CurveYieldLendingMarketAdapterV1','CurveYieldLendingMarketAdapterFactoryV1'}
           names = {r['contract'] for r in rows}
           assert wanted <= names, f'Missing deployable contracts: {wanted - names}'
           assert all(row['eip170Pass'] for row in rows), 'Runtime bytecode exceeds EIP-170'
@@ -169,8 +170,9 @@ jobs:
           from pathlib import Path
           import base64, hashlib, json, os
           repo=os.environ['GITHUB_REPOSITORY']
-          path='github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol'
-          source=Path(path).read_bytes()
+          paths=list(Path('github-native-sim/morpho-fraxtal-v1').glob('*.sol'))
+          assert len(paths)>=2
+          source=b''.join(p.read_bytes() for p in sorted(paths))
           report=Path('.morpho-compile/compiler-summary.json')
           log=Path('.morpho-compile/compile.log')
           record={
@@ -184,7 +186,7 @@ jobs:
           }
           if record['status']=='PASS':
               artifacts={}
-              for name in ('CurveYieldMorphoOwnerV1','CurveYieldMorphoFeeSplitterV2'):
+              for name in ('CurveYieldMorphoOwnerV1','CurveYieldMorphoFeeSplitterV2','CurveYieldLendingMarketAdapterV1','CurveYieldLendingMarketAdapterFactoryV1'):
                   found=list(Path('.morpho-compile/out').rglob(name+'.json'))
                   assert len(found)==1,(name,found)
                   artifact=json.loads(found[0].read_text())
@@ -196,9 +198,9 @@ jobs:
                                    'runtimeBytecode':runtime,'metadata':artifact.get('metadata')}
               record['deployableArtifacts']=artifacts
           content=base64.b64encode((json.dumps(record,indent=2)+'\n').encode()).decode()
-          payload={'message':'Record Morpho Fraxtal v2 compiler and deployable bytecode',
+          payload={'message':'Record CurveYield Fraxtal lending adapters v1 compiler and deployable bytecode',
                    'branch':os.environ['GITHUB_REF_NAME'],'content':content}
           Path('.morpho-compile/receipt-request.json').write_text(json.dumps(payload))
           print('COMPILATION_RECEIPT',record['status'],record['workflowRunUrl'])
           PY
-          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v2.json" --input .morpho-compile/receipt-request.json
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v3.json" --input .morpho-compile/receipt-request.json
