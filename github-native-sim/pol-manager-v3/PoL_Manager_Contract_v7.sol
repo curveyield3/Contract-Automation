@@ -520,16 +520,16 @@ contract PoLManager {
         r.cooldownSeconds=config.cooldownSeconds;r.enabled=config.enabled;r.armedAt=0;
     }
     function getRateRule(uint8 from,uint8 to) external view returns(RateRule memory){return rates[_key(from,to)];}
-    function rateStatus(uint8 from,uint8 to) public view returns(uint256 spot,uint256 reference,uint256 deviationBps){
+    function rateStatus(uint8 from,uint8 to) public view returns(uint256 spot,uint256 oracleRate,uint256 deviationBps){
         RateRule storage r=rates[_key(from,to)];
         if(r.quoteAmount==0)revert Invalid();
         uint256 out=IPoLCurve(curvePool).get_dy(int128(uint128(from)),int128(uint128(to)),r.quoteAmount);
         uint256 scaleIn=10**uint256(IPoL20(curveCoins[from]).decimals());
         uint256 scaleOut=10**uint256(IPoL20(curveCoins[to]).decimals());
         spot=out*scaleIn*WAD/(r.quoteAmount*scaleOut);
-        reference=IPoLRouter(omniRouter).price_oracle(curveCoins[from],curveCoins[to]);
-        if(reference==0)revert Invalid();
-        deviationBps=(spot>reference?spot-reference:reference-spot)*BPS/reference;
+        oracleRate=IPoLRouter(omniRouter).price_oracle(curveCoins[from],curveCoins[to]);
+        if(oracleRate==0)revert Invalid();
+        deviationBps=(spot>oracleRate?spot-oracleRate:oracleRate-spot)*BPS/oracleRate;
     }
     function observeRate(uint8 from,uint8 to) external active {
         RateRule storage r=rates[_key(from,to)];if(!r.enabled)revert State();
