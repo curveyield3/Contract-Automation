@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import {IIrm} from "../interfaces/IIrm.sol";
-import {MarketParams, Market} from "../interfaces/IMorpho.sol";
+import {MarketParams, Market, Id} from "../interfaces/IMorpho.sol";
 
 /// @dev Euler EVK IIRM rates are SPY (per-second) in RAY (1e27).
 ///      Only the stateless Euler IRMLinearKink is supported by this adapter.
@@ -24,16 +24,24 @@ interface IEulerLinearKinkView {
 ///      Morpho's rate is 1e18-scaled per second, Euler returns 1e27 SPY.
 contract EulerKinkMorphoAdapter is IIrm {
     uint256 public constant SECONDS_PER_YEAR = 365 days;
-    uint256 public constant HARD_MAX_BORROW_APR = 5e18;
+    uint256 public constant WAD = 1e18;
+    uint256 public constant HARD_MAX_BORROW_APR = 3.65e18;
+    uint256 public constant HARD_MAX_DAILY_CHANGE = 0.01e18;
 
     address public immutable morpho;
     IEulerLinearKinkView public immutable eulerKinkIrm;
     uint256 public immutable maximumBorrowApr;
+    uint256 public immutable maximumDailyBorrowAprChange;
+    mapping(Id => uint256) public lastBorrowApr;
+    mapping(Id => uint256) public lastRateTimestamp;
 
-    constructor(address morpho_, address eulerKinkIrm_, uint256 maxBorrowApr_) {
+    event BorrowRateBounded(Id indexed id, uint256 chargedApr, uint256 nextApr, uint256 observedApr);
+
+    constructor(address morpho_, address eulerKinkIrm_, uint256 maxBorrowApr_, uint256 maxDailyChange_) {
         require(morpho_ != address(0) && morpho_.code.length != 0, "MORPHO_MISSING");
         require(eulerKinkIrm_ != address(0) && eulerKinkIrm_.code.length != 0, "EULER_IRM_MISSING");
         require(maxBorrowApr_ != 0 && maxBorrowApr_ <= HARD_MAX_BORROW_APR, "BAD_BORROW_CAP");
+        require(maxDailyChange_ != 0 && maxDailyChange_ <= HARD_MAX_DAILY_CHANGE, "BAD_DAILY_CHANGE_CAP");
         // Verify this is an Euler linear-kink-compatible implementation.
         IEulerLinearKinkView irm = IEulerLinearKinkView(eulerKinkIrm_);
         require(irm.kink() <= type(uint32).max, "INVALID_EULER_KINK");
@@ -44,26 +52,59 @@ contract EulerKinkMorphoAdapter is IIrm {
         morpho = morpho_;
         eulerKinkIrm = irm;
         maximumBorrowApr = maxBorrowApr_;
+        maximumDailyBorrowAprChange = maxDailyChange_;
     }
 
-    function borrowRate(MarketParams memory params, Market memory market) external view override returns (uint256) {
+    /// @notice Returns the preceding period's bounded rate to Morpho.
+    /// Next period's APR is advanced by at most the configured daily delta.
+    function borrowRate(MarketParams memory params, Market memory market) external override returns (uint256) {
         require(msg.sender == morpho, "ONLY_MORPHO");
         require(params.irm == address(this), "IRM_MISMATCH");
-        return _rate(market);
+        Id id = Id.wrap(keccak256(abi.encode(params)));
+        uint256 desiredApr = _desiredApr(market);
+        uint256 nextApr = _boundedApr(id, desiredApr);
+        uint256 chargedApr = lastRateTimestamp[id] == 0 ? nextApr : lastBorrowApr[id];
+        lastBorrowApr[id] = nextApr;
+        lastRateTimestamp[id] = block.timestamp;
+        emit BorrowRateBounded(id, chargedApr, nextApr, desiredApr);
+        return chargedApr / SECONDS_PER_YEAR;
     }
 
+    /// @dev The rate used for pending Morpho accrual, NOT the next quote.
     function borrowRateView(MarketParams memory params, Market memory market) external view override returns (uint256) {
         require(params.irm == address(this), "IRM_MISMATCH");
-        return _rate(market);
+        Id id = Id.wrap(keccak256(abi.encode(params)));
+        return (lastRateTimestamp[id] == 0 ? _desiredApr(market) : lastBorrowApr[id]) / SECONDS_PER_YEAR;
     }
 
-    function _rate(Market memory market) internal view returns (uint256) {
+    function liveBorrowRateView(MarketParams memory params, Market memory market) external view returns (uint256) {
+        require(params.irm == address(this), "IRM_MISMATCH");
+        return _boundedApr(Id.wrap(keccak256(abi.encode(params))), _desiredApr(market)) / SECONDS_PER_YEAR;
+    }
+
+    /// @dev Bounded on every update and independent of transaction frequency.
+    function _boundedApr(Id id, uint256 desiredApr) internal view returns (uint256) {
+        if (desiredApr > maximumBorrowApr) desiredApr = maximumBorrowApr;
+        uint256 last = lastRateTimestamp[id];
+        if (last == 0) return desiredApr;
+        uint256 previous = lastBorrowApr[id];
+        uint256 step = maximumDailyBorrowAprChange * (block.timestamp - last) / 1 days;
+        uint256 upper = previous + step;
+        if (upper > maximumBorrowApr) upper = maximumBorrowApr;
+        if (desiredApr > upper) return upper;
+        uint256 lower = step > previous ? 0 : previous - step;
+        return desiredApr < lower ? lower : desiredApr;
+    }
+
+    function _desiredApr(Market memory market) internal view returns (uint256) {
         uint256 supply = uint256(market.totalSupplyAssets);
         uint256 borrowed = uint256(market.totalBorrowAssets);
         uint256 cash = supply > borrowed ? supply - borrowed : 0;
         uint256 rayPerSecond = eulerKinkIrm.computeInterestRateView(morpho, cash, borrowed);
-        uint256 wadPerSecond = rayPerSecond / 1e9;
-        uint256 ceilingPerSecond = maximumBorrowApr / SECONDS_PER_YEAR;
-        return wadPerSecond > ceilingPerSecond ? ceilingPerSecond : wadPerSecond;
+        // The original Euler IRM's 1e27-per-second rate is capped before
+        // annualization. Prevent multiplication overflow on erroneous models.
+        uint256 maxRayPerSecond = maximumBorrowApr * 1e9 / SECONDS_PER_YEAR;
+        if (rayPerSecond > maxRayPerSecond) rayPerSecond = maxRayPerSecond;
+        return rayPerSecond * SECONDS_PER_YEAR / 1e9;
     }
 }
