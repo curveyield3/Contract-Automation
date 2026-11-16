@@ -343,45 +343,89 @@ describe("CurveYield v49 multiactor adversarial and state-conservation qualifica
     eq(await f.usdc.balanceOf(allocator.target),usd(775),"paused rescue tracked correctly");
   });
 
-  it("seeded adversarial multiactor state machine executes 200 transactions and checks capacity/ownership after every action",async function(){
+  it("seeded 12-run saturation campaign executes 3000 multiactor operations with 39000+ account checks and revert classification",async function(){
     const f=await fixture();await deposit(f);
-    let seed=0x9e3779b9;
-    function rand(n){seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return (seed>>>0)%n;}
-    const pendingListings=[];
-    for(let step=0;step<200;step++){
-      let action=rand(8);
-      const amount=units(100+rand(1800));
-      const now=await stamp();
-      let attempted=false;
-      const before=await snapshot(f);
-      try{
-        if(action===0) await f.locker.delegateDaoBoost(amount,endweek(now,1+rand(6)),f.recipient.address);
-        else if(action===1) await f.locker.connect(f.admin).delegateAdminBoost(amount,endweek(now,1+rand(6)),f.attacker.address);
-        else if(action===2) await f.merchant.connect(f.keeper).delegateAladdinBoost(amount,endweek(now,1+rand(7)));
-        else if(action===3){
-          await refreshAladdin(f);
-          const id=await f.market.nextID();
-          await f.merchant.connect(f.keeper).createMarketplaceListing(amount,1,5,now+2*WEEK);
-          pendingListings.push(id);
-        }else if(action===4 && pendingListings.length){
-          const id=pendingListings.shift();
-          await f.merchant.connect(f.keeper).cancelMarketplaceListing(id);
-        }else if(action===5){
-          await refreshAladdin(f);
-          await f.merchant.connect(f.buyer).leaseBoost(amount,2,f.recipient.address,usd(5000),BigInt(now+60));
-        }else if(action===6){
-          await jump(WEEK+rand(3600));
-        }else if(action===7 && pendingListings.length){
-          const id=pendingListings[rand(pendingListings.length)];
-          const record=await f.market.getListing(id);
-          if(record.seller!==ethers.ZeroAddress && record.expiry>BigInt(now)){
-            await f.market.connect(f.secondBuyer).fillListing(id,record.amount-record.filled,2,f.secondBuyer.address);
+    let accepted=0,rejected=0,skipped=0,accountChecks=0;
+    for(let run=0;run<12;run++){
+      const snap=await network.provider.send("evm_snapshot");
+      let seed=(0x9e3779b9 ^ Math.imul(run+1,0x85ebca6b))|0;
+      function rand(n){seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return (seed>>>0)%n;}
+      const pendingListings=[];
+      for(let step=0;step<250;step++){
+        const action=rand(8);
+        const amount=units(100+rand(12000));
+        const now=await stamp();
+        const before=await snapshot(f);
+        const [mFree,dFree,aFree]=await Promise.all([
+          f.locker.merchantDelegableBoost(),f.locker.daoDelegableBoost(),f.locker.adminDelegableBoost()
+        ]);
+        let shouldSucceed=false,executed=false;
+        try{
+          if(action===0){
+            shouldSucceed=amount<=dFree;
+            await f.locker.delegateDaoBoost(amount,endweek(now,1+rand(6)),f.recipient.address);
+            executed=true;
+          }else if(action===1){
+            shouldSucceed=amount<=aFree;
+            await f.locker.connect(f.admin).delegateAdminBoost(amount,endweek(now,1+rand(6)),f.attacker.address);
+            executed=true;
+          }else if(action===2){
+            shouldSucceed=amount<=mFree;
+            await f.merchant.connect(f.keeper).delegateAladdinBoost(amount,endweek(now,1+rand(7)));
+            executed=true;
+          }else if(action===3){
+            await refreshAladdin(f);
+            shouldSucceed=amount<=mFree;
+            const id=await f.market.nextID();
+            await f.merchant.connect(f.keeper).createMarketplaceListing(amount,1,5,now+2*WEEK);
+            pendingListings.push(id);
+            executed=true;
+          }else if(action===4 && pendingListings.length){
+            shouldSucceed=true;
+            const id=pendingListings.shift();
+            await f.merchant.connect(f.keeper).cancelMarketplaceListing(id);
+            executed=true;
+          }else if(action===5){
+            await refreshAladdin(f);
+            shouldSucceed=amount<=mFree;
+            await f.merchant.connect(f.buyer).leaseBoost(amount,2,f.recipient.address,usd(5000),BigInt(now+60));
+            executed=true;
+          }else if(action===6){
+            shouldSucceed=true;
+            await jump(WEEK+rand(3600));
+            executed=true;
+          }else if(action===7 && pendingListings.length){
+            const id=pendingListings[rand(pendingListings.length)];
+            const record=await f.market.getListing(id);
+            if(record.seller!==ethers.ZeroAddress && record.expiry>BigInt(now)&&record.amount>record.filled){
+              shouldSucceed=true;
+              await f.market.connect(f.secondBuyer).fillListing(id,record.amount-record.filled,2,f.secondBuyer.address);
+              executed=true;
+            }
           }
+        }catch(error){
+          if(shouldSucceed){
+            throw Error("UNEXPECTED_REVERT seed="+run+" step="+step+" action="+action+
+              " amount="+amount+" mFree="+mFree+" dFree="+dFree+" aFree="+aFree+" cause="+String(error));
+          }
+          same(before,await snapshot(f),"reverted transaction changes account state at run="+run+" step="+step);
+          rejected++;
         }
-      }catch(e){attempted=true;const after=await snapshot(f);same(before,after,"revert must be atomic at random step "+step);}
-      await assertBoostState(f,"seed=0x9e3779b9 step="+step);
-      if(step%25===0)console.log("STATE_CHECK",JSON.stringify({step,action,expectedRevert:attempted,seed,actualBalance:(await f.boost.delegatedOut(f.locker.target)).toString()}));
+        if(executed) accepted++;
+        else if(!shouldSucceed) skipped++;
+        await assertBoostState(f,"saturation seed="+run+" step="+step);
+        accountChecks+=13;
+        if(step%125===0)console.log("SATURATION_STATE",JSON.stringify({
+          run,step,accepted,rejected,seed,
+          delegated:(await f.boost.delegatedOut(f.locker.target)).toString(),
+          merchantUsed:(await f.locker.merchantBoostUsed()).toString()
+        }));
+      }
+      await network.provider.send("evm_revert",[snap]);
     }
-    console.log("RANDOM_SEQUENCE_COMPLETED",JSON.stringify({steps:200,seed:"0x9e3779b9",lastBlock:await ethers.provider.getBlockNumber()}));
+    assert(accepted>500 && rejected>100,"insufficient saturation/negative-test coverage");
+    console.log("RANDOM_SATURATION_COMPLETED",JSON.stringify({
+      runs:12,operations:3000,accepted,rejected,skipped,accountChecks
+    }));
   });
 });
