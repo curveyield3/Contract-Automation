@@ -1,0 +1,140 @@
+{
+  "version": "v2",
+  "network": "fraxtal",
+  "chainId": 252,
+  "repo": "curveyield3/Contract-Automation",
+  "branch": "morpho-fraxtal-compile-v1",
+  "previousManifest": "github-native-sim/morpho-fraxtal-v1/fraxtal-irm-deployment-manifest-v1.json",
+  "build": {
+    "workflowRunId": 43982539197,
+    "workflowRunUrl": "https://github.com/curveyield3/Contract-Automation/actions/runs/43982539197",
+    "compiler": "v0.8.30+commit.73712a01",
+    "evmVersion": "cancun",
+    "optimizerRuns": 200,
+    "buildPassed": true
+  },
+  "governance": {
+    "name": "CurveYieldMorphoOwnerV3",
+    "address": "0x299d0e3636db68aaf1b89319ebcaf8ef25fb31e4",
+    "architecture": "Restricted Safe module extension to the existing immutable CurveYieldMorphoOwnerV1, NOT a replacement of the Morpho core owner",
+    "safe": "0x47623c62f281807d615eeb4a2ceee9d97f9d3c49",
+    "existingMorphoCore": "0xcce2862aed7f2248063c3dcf6906582166c2b6ca",
+    "retainedCoreOwner": "0x67f1c48a7d6dcc6c66a0ee2fc3882df63035ecb8",
+    "retainedFeeSplitter": "0xc0890482e5b65b5d8fe9947eb362642435a107f9",
+    "purpose": "Safely allowlist factories to call owner-only enableIrm through Safe.execTransactionFromModule -> V1 governance -> Morpho, without breaking existing splitter market creation."
+  },
+  "contracts": [
+    {
+      "name": "CurveYieldMorphoOwnerV3",
+      "address": "0x299d0e3636db68aaf1b89319ebcaf8ef25fb31e4",
+      "txHash": "0xffb18ed875af6a508b09ff741807435e41ff4c05597e7cbb3dd1dded02630830",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerV3.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x299d0e3636db68aaf1b89319ebcaf8ef25fb31e4#code"
+    },
+    {
+      "name": "CurveYieldCollateralYieldIRMFactoryV2",
+      "address": "0x0244ecf7e3cd14a93a476e47e17a986462abfe7e",
+      "txHash": "0xaf6b985fec0379a4f458e815ae015ca5d3a95450aeb10ed5d9ae2a39f0730f11",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV2.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x0244ecf7e3cd14a93a476e47e17a986462abfe7e#code"
+    },
+    {
+      "name": "CurveYieldEulerUtilizationIRMFactoryV2",
+      "address": "0xd80e70e5072205081bf643d60447598becd77c21",
+      "txHash": "0x6c4f57f9d5eaad263a1c9fa1510c97e8e9371cd465b5c0dc02e2414bd74be4a3",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV2.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0xd80e70e5072205081bf643d60447598becd77c21#code"
+    },
+    {
+      "name": "CurveYieldLinearUtilizationIRMFactoryV2",
+      "address": "0xfc5e2b0616c731562b9dc69c73d8a1226a27ec19",
+      "txHash": "0x9d5e73620fdeca79eb7ec067f96600735c9d21d1c2bade6059b3b46828ad31e5",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV2.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0xfc5e2b0616c731562b9dc69c73d8a1226a27ec19#code"
+    },
+    {
+      "name": "CurveYieldImmutableStaticIRMFactoryV2",
+      "address": "0x06a86b7e4fdd306745c329b272504553ff712eb1",
+      "txHash": "0x01de3a95941698b6fe26066419f2c256126adcfea42aaa16f63861aabaa4fb66",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV2.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x06a86b7e4fdd306745c329b272504553ff712eb1#code"
+    },
+    {
+      "name": "CurveYieldGovernedStaticIRMFactoryV2",
+      "address": "0x3fc62ce15fa4e9ff543f5bcd5c30f1e2da8bba09",
+      "txHash": "0x0cacdf1a93e3808ef477d442f2ee9ddab5130d18c2d91b4ac1049ffae791a5f2",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV2.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x3fc62ce15fa4e9ff543f5bcd5c30f1e2da8bba09#code"
+    },
+    {
+      "name": "CurveYieldTriggerMasterIRMFactoryV2",
+      "address": "0xe596dbaa91daf9e00d29226c5c7a2c0c89801f09",
+      "txHash": "0xb4a92cb72dd8e3d4304d2c97dd4449acec1baad65ad4a00c1f6e3be654a99064",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV2.sol",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0xe596dbaa91daf9e00d29226c5c7a2c0c89801f09#code"
+    }
+  ],
+  "factoryBehavior": {
+    "directMorpho": "Factory V2 calls V3.enableIrm(newIrm) atomically when constructor morpho_ matches the core address.",
+    "triggerChildren": "Factory V2 omits Morpho core registration for child IRMs created with morpho_ set to the Trigger Master.",
+    "permissionedFactoryAllowlist": true,
+    "allowlistControlledBySafe": true,
+    "factoryCanOnlyEnableNewIrmCreatedByItself": true
+  },
+  "activation": {
+    "state": "safe_proposed_not_executed",
+    "safeTxHash": "0x93382b1fdb27866ccc2451a687ab3485f7a9809b52a62e71fe8d5af4b5f258a7",
+    "safeNonce": "2",
+    "safeServiceAccepted": true,
+    "safeQueueInspectorQueueVerified": false,
+    "safeQueueRecordPartial": "AWAITING_CONFIRMATIONS",
+    "multisendCallOnly": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
+    "batchActions": [
+      "Safe.enableModule(governanceV3)",
+      "governanceV3.setFactory(0x0244ecf7e3cd14a93a476e47e17a986462abfe7e, true)",
+      "governanceV3.setFactory(0xd80e70e5072205081bf643d60447598becd77c21, true)",
+      "governanceV3.setFactory(0xfc5e2b0616c731562b9dc69c73d8a1226a27ec19, true)",
+      "governanceV3.setFactory(0x06a86b7e4fdd306745c329b272504553ff712eb1, true)",
+      "governanceV3.setFactory(0x3fc62ce15fa4e9ff543f5bcd5c30f1e2da8bba09, true)",
+      "governanceV3.setFactory(0xe596dbaa91daf9e00d29226c5c7a2c0c89801f09, true)"
+    ],
+    "onchainSafeModuleEnabled": false,
+    "onchainFactoryAllowlistCount": 0,
+    "executionRequiresSafeOwnerApproval": true,
+    "safeOwner": "0x9f2b20a772246960810045905b7daccf960ee288"
+  },
+  "securityAndVerification": {
+    "constructorGovernancePointerVerifiedForAll6": true,
+    "legacyMorphoOwnerUnchanged": true,
+    "legacyFeeRecipientUnchanged": true,
+    "newRuntimeTestsExecuted": false,
+    "existingMarketConfigurationChanged": false
+  },
+  "notes": [
+    "Do not claim factory autoenable is live until Safe has executed proposal nonce 2 and the module/allowlist are true on-chain.",
+    "Do not replace V1 Morpho core ownership in place: the existing V2 fee splitter has immutable checks against it.",
+    "V1 factories remain deployed and cannot auto-enable. Use the six verified V2 factory addresses after Safe authorization.",
+    "Each new V2 factory deployment explicitly supplies the V3 governance address as its constructor input."
+  ]
+}
