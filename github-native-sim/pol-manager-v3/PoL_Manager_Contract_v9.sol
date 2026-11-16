@@ -123,8 +123,6 @@ contract PoLManager {
     uint256 public immutable uniTokenId;
     address public immutable uniToken0;
     address public immutable uniToken1;
-    int24 public immutable uniLower;
-    int24 public immutable uniUpper;
     // Amounts owed to the pre-transfer owner at NFT receipt are not new managed profits.
     uint256 private initialOwed0;
     uint256 private initialOwed1;
@@ -190,7 +188,7 @@ contract PoLManager {
         uniNftManager=c.uniNftManager;uniTokenId=c.uniTokenId;
         IPoLNft.Position memory pos=IPoLNft(c.uniNftManager).positions(c.uniTokenId);
         if(pos.token0.code.length==0||pos.token1.code.length==0||pos.tickLower>=pos.tickUpper)revert Invalid();
-        uniToken0=pos.token0;uniToken1=pos.token1;uniLower=pos.tickLower;uniUpper=pos.tickUpper;
+        uniToken0=pos.token0;uniToken1=pos.token1;
         // One-time authorizations at deployment: no approval reads or writes in hot paths.
         _approveOnce(c.sdt,c.omniRouter);
         _approveOnce(c.usdc,c.omniRouter);
@@ -254,9 +252,7 @@ contract PoLManager {
         emit ModuleEnabled(position,allocation,harvesting);
     }
     function _configured(uint8 position) private view returns(bool){
-        if(position==0)return curvePool!=address(0);
-        if(position==1)return uniNftManager!=address(0);
-        return position<7&&vaults[position-2]!=address(0);
+        return position<2||(position<7&&vaults[position-2]!=address(0));
     }
     /// @notice Add, remove, or replace an empty Yearn (0-2) or Euler (3-4) vault.
     /// @dev Existing vault assets/fee shares must be fully withdrawn/harvested first.
@@ -431,7 +427,6 @@ contract PoLManager {
     function onERC721Received(address,address,uint256 id,bytes calldata) external returns(bytes4){
         if(msg.sender!=uniNftManager||id!=uniTokenId)revert Invalid();
         IPoLNft.Position memory p=IPoLNft(uniNftManager).positions(id);
-        if(p.token0!=uniToken0||p.token1!=uniToken1||p.tickLower!=uniLower||p.tickUpper!=uniUpper)revert Invalid();
         initialOwed0=p.tokensOwed0;initialOwed1=p.tokensOwed1;
         return this.onERC721Received.selector;
     }
