@@ -5,7 +5,7 @@ const ADDR={
   vl:"0x94818A7baa7e9F5dC62ce4da1B52ef9a760b80B8",
   boost:"0xaB05ca46d1c78CAbB051efFE35099714Cad2AddA",
   market:"0xbc38D256E559FEd3fA95A6cdC633C667283fb6b8",
-  aladdin:"0x322c76e1205de5ee4146e40644563B482B1CDA43",
+  aladdin:"0x322c76e1205de5ee4146e40644563b482b1cda43",
   dsdt:"0x6d57d34259f6dc31c9a241c199822861940d38f9",
   dusdc:"0xCa94395469a88E9cAC0D5E5e308910E298270d30",
   sdt:"0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F",
@@ -104,15 +104,15 @@ describe("cyvlSDT v49 live Ethereum fork: independent Stake DAO/Aladdin/VoteMark
    let logs=[];
    const event=ethers.id("Boost(address,address,uint256,uint256)");
    for (let iteration=0;iteration<10;iteration++){
-     const to=latest-iteration*1000;
-     const from=Math.max(0,to-999);
+     const to=latest-iteration*20;
+     const from=Math.max(0,to-19);
      try{logs=logs.concat(await ethers.provider.getLogs({address:ADDR.boost,topics:[event],fromBlock:from,toBlock:to}));}
      catch(err){console.log("LIVE_EVENT_SCAN_PARTIAL",String(err).slice(0,200));break;}
    }
    const zeroTopic=ethers.zeroPadValue(ethers.ZeroAddress,32);
    for (let i=0;i<2;i++){
-     const to=latest-i*1000;
-     try{logs=logs.concat(await ethers.provider.getLogs({address:ADDR.vl,topics:[ethers.id("Transfer(address,address,uint256)"),zeroTopic],fromBlock:to-999,toBlock:to}));}
+     const to=latest-i*20;
+     try{logs=logs.concat(await ethers.provider.getLogs({address:ADDR.vl,topics:[ethers.id("Transfer(address,address,uint256)"),zeroTopic],fromBlock:Math.max(0,to-19),toBlock:to}));}
      catch(err){console.log("LIVE_STAKER_SCAN_PARTIAL",String(err).slice(0,200));}
    }
    const seen=new Set(),candidate=[];
