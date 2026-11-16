@@ -382,7 +382,7 @@ contract PoLManager {
     function stakeCurve(uint256 lp) external onlyOperator active guard {_stake(lp);}
     function unstakeCurve(uint256 lp) external onlyOperator guard {IPoLGauge(curveGauge).withdraw(lp);}
 
-    function currentPPS(uint8 slot) private view returns(uint256){
+    function currentPPS(uint8 slot) public view returns(uint256){
         if(slot>=5||vaults[slot]==address(0))revert Invalid();
         return IPoL4626(vaults[slot]).convertToAssets(shareUnits[slot]);
     }
@@ -443,9 +443,7 @@ contract PoLManager {
     }
 
     function _checkNft() private view returns(IPoLNft.Position memory p){
-        IPoLNft n=IPoLNft(uniNftManager);
-        if(n.ownerOf(uniTokenId)!=address(this))revert State();
-        p=n.positions(uniTokenId);
+        p=IPoLNft(uniNftManager).positions(uniTokenId);
     }
     /// @notice Only accepts the configured pre-existing position; no mint/range-changing function exists.
     function onERC721Received(address,address,uint256 id,bytes calldata) external returns(bytes4){
@@ -681,7 +679,7 @@ contract PoLManager {
         buyBaseYearn=0;buyBaseEuler=0;
         delete buySpentYearn;delete buySpentEuler;
     }
-    function buyPrice() private view returns(uint256){
+    function buyPrice() public view returns(uint256){
         return IPoLRouter(omniRouter).price_oracle(cyvlSDT,sdt);
     }
     /// @notice Public, price-gated purchase of cyvlSDT using redeemed SDT Yearn/Euler shares.
