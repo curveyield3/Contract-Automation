@@ -11,7 +11,7 @@ const ethers = require(path.resolve(__dirname, '../dependencies/node_modules/eth
 const rpc = new ethers.JsonRpcProvider(process.env.FORK_RPC || 'http://127.0.0.1:8545',252,{staticNetwork:true});
 rpc.pollingInterval = 1000; // Fork block cadence is 1s; avoid 4s receipt polling per operation.
 const here=path.resolve(__dirname,'..');
-const report={version:'v1',kind:'Fraxtal stateful fork simulation',chainId:252,forkOnly:true,productionDeployments:false,simulatedOnly:true,steps:[],snapshots:[],contracts:{},markets:{},errors:[],checks:[]};
+const report={version:'v2',kind:'Fraxtal stateful fork simulation',chainId:252,forkOnly:true,productionDeployments:false,simulatedOnly:true,steps:[],snapshots:[],contracts:{},markets:{},errors:[],checks:[]};
 const a={
 HUB:'0x40f7085841034f752F17592875703EB5032f2B42',
 ROUTER:'0xB730db2de60877961dd90D1FbF37830F64616DF4',
@@ -50,6 +50,47 @@ async function state(tag,morpho,markets,loanTokens,vault,strategy,irm){console.l
  const deployer=await impersonate(a.DEPLOYER), admin=await impersonate(a.ADMIN), user=await impersonate(a.BORROWER), lender=await impersonate(a.LENDER);
  const hub=new ethers.Contract(a.HUB,HUB_ABI,deployer);
  chk('hub_owner_matches', (await hub.owner()).toLowerCase()===a.DEPLOYER.toLowerCase());
+ // Production router source bound to exact uploaded CurveYield OmniRouter.
+ const legacyRouter=a.ROUTER;
+ const routerArt=artifact('CurveYieldOmniRouter');
+ const router=await deploy('CurveYieldOmniRouter_v41',routerArt.abi,routerArt.bytecode,deployer,a.DEPLOYER,a.ADMIN);
+ a.ROUTER=await router.getAddress();report.contracts.router=a.ROUTER;
+ chk('fresh_router_not_legacy',a.ROUTER.toLowerCase()!==legacyRouter.toLowerCase());
+ const selector=signature=>ethers.id(signature).slice(0,10);
+ const enc=ethers.AbiCoder.defaultAbiCoder();
+ const hop=(poolType,tokenOut,pool,inIndex,outIndex,oracle,readSignature,arg,invert=false)=>[
+   poolType,tokenOut,pool,ethers.ZeroHash,enc.encode(['uint8','uint8'],[inIndex,outIndex]),
+   [oracle,selector(readSignature),enc.encode(['uint256'],[arg]),invert,18]
+ ];
+ const sdPool='0x3df1658e3e76d14ef3c4d410829ea7575bb83b9b';
+ const triPool='0xa0d3911349e701a1f49c1ba2dda34b4ce9636569';
+ const sfPool='0x1ab35116c3fa0b2f507d8c8c3261d42683c1e31e';
+ const sfMintRedeemer='0xbfc4d34db83553725ec6c768da71d2d9c1456b55';
+ const ab=hop(6,a.WFRAX,sdPool,1,0,sdPool,'price_oracle(uint256)',0);
+ const ba=hop(6,a.SDFXS,sdPool,0,1,sdPool,'price_oracle(uint256)',0,true);
+ const bc=hop(5,a.FRXUSD,triPool,2,0,triPool,'price_oracle(uint256)',1);
+ const cd=hop(6,a.SFRXUSD,sfPool,0,1,sfMintRedeemer,'convertToShares(uint256)',10n**18n);
+ const routes=[
+ [a.SDFXS,a.WFRAX,[ab],'SDFXS_WFRAX'],
+ [a.WFRAX,a.SDFXS,[ba],'WFRAX_SDFXS'],
+ [a.WFRAX,a.FRXUSD,[bc],'WFRAX_FRXUSD'],
+ [a.FRXUSD,a.SFRXUSD,[cd],'FRXUSD_SFRXUSD'],
+ [a.SDFXS,a.FRXUSD,[ab,bc],'SDFXS_FRXUSD'],
+ [a.SDFXS,a.SFRXUSD,[ab,bc,cd],'SDFXS_SFRXUSD']
+ ];
+ for(const [input,output,steps,label] of routes){
+   await tx(router.setRoute(input,output,steps),'new_router_setRoute_'+label);
+   chk('new_router_len_'+label,(await router.routeLength(input,output))===BigInt(steps.length));
+   chk('new_router_positive_price_'+label,(await router.price_oracle(input,output))>0n);
+ }
+ const original=new ethers.Contract(legacyRouter,ROUTER_ABI,deployer);
+ const oldRate=await original.price_oracle(a.SDFXS,a.WFRAX),newRate=await router.price_oracle(a.SDFXS,a.WFRAX);
+ chk('preserved_sdFXS_WFRAX_oracle_value',newRate===oldRate,{original:oldRate.toString(),newRate:newRate.toString()});
+ const realShareRate=await new ethers.Contract(sfMintRedeemer,['function convertToShares(uint256) view returns(uint256)'],deployer).convertToShares(10n**18n);
+ chk('sfrxUSD_rate_from_mint_redeemer',realShareRate===(await router.price_oracle(a.FRXUSD,a.SFRXUSD)));
+ await tx(router.transferOwnership(a.ADMIN),'new_router_admin_handoff');
+ chk('router_final_owner',(await router.owner()).toLowerCase()===a.ADMIN.toLowerCase());
+ chk('router_final_fee_receiver',(await router.feeRecipient()).toLowerCase()===a.ADMIN.toLowerCase());
  const stakingSrc=JSON.parse(fs.readFileSync(path.join(here,'artifacts/staking.json')));
  const rewards=[a.WFRAX,...Array(7).fill(ethers.ZeroAddress)];
  const staking=await deploy('staking',stakingSrc.abi,stakingSrc.bytecode,deployer,a.SDFXS,a.HUB,0,a.ADMIN,rewards,a.ADMIN,150);
@@ -89,31 +130,35 @@ async function state(tag,morpho,markets,loanTokens,vault,strategy,irm){console.l
  await tx(vault.connect(user).deposit(ethers.parseEther('35')),'vault_deposit_main');
  const vaultOwned=await vault.balanceOf(a.BORROWER);chk('vault_shares_at_least_30',vaultOwned>=ethers.parseEther('30'));
  await tx(vault.connect(user).checkpointAPR(),'apr_checkpoint_initial');
- const morphoA=morphoArtifact('Morpho'),irmA=morphoArtifact('CollateralYieldIRM'),oracleA=morphoArtifact('OmniRouterBeefyShareOracle'),mockA=artifact('ForkOnlyFixedOracle');
+ const morphoA=morphoArtifact('Morpho'),irmA=morphoArtifact('CollateralYieldIRM'),oracleA=morphoArtifact('OmniRouterBeefyShareOracle');
  const morpho=await deploy('MorphoBlue',morphoA.abi,morphoA.bytecode,deployer,a.DEPLOYER);report.contracts.morpho=await morpho.getAddress();
  const irm=await deploy('CollateralYieldIRM',irmA.abi,irmA.bytecode,deployer,await morpho.getAddress(),a.DEPLOYER,vaultAddr,ethers.parseEther('0.12'),ethers.parseEther('1'),ethers.parseEther('2'));report.contracts.irm=await irm.getAddress();
  const oracleW=await deploy('WFRAX_real_router_oracle',oracleA.abi,oracleA.bytecode,deployer,vaultAddr,a.ROUTER,a.WFRAX);
  const oracleF=await deploy('frxUSD_real_router_adapter',oracleA.abi,oracleA.bytecode,deployer,vaultAddr,a.ROUTER,a.FRXUSD);
  const oracleS=await deploy('sfrxUSD_real_router_adapter',oracleA.abi,oracleA.bytecode,deployer,vaultAddr,a.ROUTER,a.SFRXUSD);
  const realWPrice=await oracleW.price();chk('real_WFRAX_oracle_nonzero',realWPrice>0n);
- for(const [name,contract] of [['frxUSD',oracleF],['sfrxUSD',oracleS]]) {let priceOk=false;try{priceOk=(await contract.price())>0n}catch(e){}chk('real_'+name+'_route_missing',!priceOk);}
- report.productionRouteStatus={WFRAX:'LIVE_REAL_ORACLE_READY',frxUSD:'MISSING_ROUTE_FIXTURE_ONLY',sfrxUSD:'MISSING_ROUTE_FIXTURE_ONLY'};
- const mockF=await deploy('fork_only_frxUSD_oracle',mockA.abi,mockA.bytecode,deployer,realWPrice);
- const mockS=await deploy('fork_only_sfrxUSD_oracle',mockA.abi,mockA.bytecode,deployer,realWPrice);
- report.contracts.oracles={WFRAX:await oracleW.getAddress(),frxUSD:await mockF.getAddress(),sfrxUSD:await mockS.getAddress()};
- const lltv=ethers.parseEther('0.8');const marketList=[['WFRAX',a.WFRAX,await oracleW.getAddress(),[ethers.parseEther('0.3'),ethers.parseEther('0.5'),ethers.parseEther('1.1'),ethers.parseEther('0.9'),0n]],['frxUSD',a.FRXUSD,await mockF.getAddress(),[ethers.parseEther('0.2'),ethers.parseEther('0.4'),ethers.parseEther('1.2'),ethers.parseEther('0.88'),0n]],['sfrxUSD',a.SFRXUSD,await mockS.getAddress(),[ethers.parseEther('0.2'),ethers.parseEther('0.4'),ethers.parseEther('1.2'),ethers.parseEther('0.88'),ethers.parseEther('0.04')]]];
+ for(const [name,contract] of [['frxUSD',oracleF],['sfrxUSD',oracleS]])chk('real_'+name+'_production_route_works',(await contract.price())>0n);
+ report.productionRouteStatus={WFRAX:'FRESH_ROUTER_REAL_ROUTE',frxUSD:'FRESH_ROUTER_REAL_CURVE_ROUTE',sfrxUSD:'FRESH_ROUTER_REAL_ERC4626_RATE'};
+ report.contracts.oracles={WFRAX:await oracleW.getAddress(),frxUSD:await oracleF.getAddress(),sfrxUSD:await oracleS.getAddress()};
+ const lltvW=ethers.parseEther('0.88'),lltvUSD=ethers.parseEther('0.81');
+ const marketList=[
+  ['WFRAX',a.WFRAX,await oracleW.getAddress(),[ethers.parseEther('0.3'),ethers.parseEther('0.5'),ethers.parseEther('1.1'),ethers.parseEther('0.9'),0n],lltvW],
+  ['frxUSD',a.FRXUSD,await oracleF.getAddress(),[ethers.parseEther('0.2'),ethers.parseEther('0.4'),ethers.parseEther('1.2'),ethers.parseEther('0.88'),0n],lltvUSD],
+  ['sfrxUSD',a.SFRXUSD,await oracleS.getAddress(),[ethers.parseEther('0.2'),ethers.parseEther('0.4'),ethers.parseEther('1.2'),ethers.parseEther('0.88'),ethers.parseEther('0.04')],lltvUSD]
+ ];
  const markets={};
  await tx(morpho.enableIrm(await irm.getAddress()),'morpho_enable_irm');
- await tx(morpho.enableLltv(lltv),'morpho_enable_simulation_lltv_80pct');
+ await tx(morpho.enableLltv(lltvW),'morpho_enable_lltv_WFRAX_88pct');
+ await tx(morpho.enableLltv(lltvUSD),'morpho_enable_lltv_USD_81pct');
  await tx(morpho.setFeeRecipient(a.ADMIN),'morpho_fee_recipient');
- for(const [label,loan,oracle,curve] of marketList){const mp=[loan,vaultAddr,oracle,await irm.getAddress(),lltv];markets[label]=mp;
+ for(const [label,loan,oracle,curve,lltv] of marketList){const mp=[loan,vaultAddr,oracle,await irm.getAddress(),lltv];markets[label]=mp;
    await tx(irm.setCurve(mp,curve),'configure_'+label+'_market_curve');
    await tx(morpho.createMarket(mp),'create_'+label+'_morpho_market');
    await tx(morpho.setFee(mp,ethers.parseEther('0.15')),'set_15pct_'+label+'_fee');
    const id=ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['tuple(address,address,address,address,uint256)'],[mp]));
    const m=await morpho.market(id);chk(label+'_fee_is_15pct',m.fee===ethers.parseEther('0.15'));
    const c=await irm.curves(id);chk(label+'_curve_matches',c.minimumMultiplier===curve[0]&&c.targetMultiplier===curve[1]&&c.maximumMultiplier===curve[2]&&c.targetUtilization===curve[3]&&c.aprRebate===curve[4]);
-   report.markets[label]={id,mp,curve:curve.map(x=>x.toString()),forkOnlyPriceFeed:label!=='WFRAX'};
+   report.markets[label]={id,mp,curve:curve.map(x=>x.toString()),forkOnlyPriceFeed:false};
  }
  await tx(irm.transferOwnership(a.ADMIN),'irm_final_owner');
  await tx(morpho.setOwner(a.ADMIN),'morpho_final_owner');
@@ -124,14 +169,14 @@ async function state(tag,morpho,markets,loanTokens,vault,strategy,irm){console.l
  for(const label of Object.keys(markets)){
    const token=loanTokens[label],p=markets[label];
    await tx(token.approve(await morpho.getAddress(),ethers.MaxUint256),'loan_approve_'+label);
-   await tx(morpho.connect(lender).supply(p,ethers.parseEther('4'),0,a.LENDER,'0x'),'loan_supply_'+label);
+   await tx(morpho.connect(lender).supply(p,label==='WFRAX'?ethers.parseEther('4'):ethers.parseEther('0.8'),0,a.LENDER,'0x'),'loan_supply_'+label);
  }
  await tx(vault.connect(user).approve(await morpho.getAddress(),ethers.MaxUint256),'collateral_approval');
  for(const label of Object.keys(markets)) await tx(morpho.connect(user).supplyCollateral(markets[label],ethers.parseEther('10'),a.BORROWER,'0x'),'supplyCollateral_'+label);
  await state('supplied_before_borrow',morpho,markets,loanTokens,vault,strategy,irm);
  for(const label of Object.keys(markets)){
    const p=markets[label];
-   const borrowAmount=label==='WFRAX'?ethers.parseEther('3.6'):ethers.parseEther('3.52');
+   const borrowAmount=label==='WFRAX'?ethers.parseEther('3.6'):ethers.parseEther('0.704');
    await tx(morpho.connect(user).borrow(p,borrowAmount,0,a.BORROWER,a.BORROWER),'borrow_'+label);
  }
  const postBorrow=await state('borrowed_near_targets',morpho,markets,loanTokens,vault,strategy,irm);
@@ -159,23 +204,23 @@ async function state(tag,morpho,markets,loanTokens,vault,strategy,irm){console.l
  const day1=await state('after_day1_interest_and_harvest',morpho,markets,loanTokens,vault,strategy,irm);
  // The IRM deliberately uses the PRIOR cached collateral APR over each elapsed interval.
  // Zero APR before the first realized, unlocked harvest must never be charged retroactively.
- for(const label of Object.keys(markets))chk('no_negative_or_retroactive_interest_day1_'+label,BigInt(day1.markets[label].borrowAssets)>= (label==='WFRAX'?ethers.parseEther('3.6'):ethers.parseEther('3.52')));
+ for(const label of Object.keys(markets))chk('no_negative_or_retroactive_interest_day1_'+label,BigInt(day1.markets[label].borrowAssets)>= (label==='WFRAX'?ethers.parseEther('3.6'):ethers.parseEther('0.704')));
  for(const label of Object.keys(markets))chk('new_yield_observation_after_day1_'+label,BigInt(day1.markets[label].annualBorrowAprWad)>0n);
  await jump(7*24*3600,'week_after_harvest');
  await tx(strategy.connect(user).harvest(),'harvest_after_week');
  for(const label of Object.keys(markets)) await tx(morpho.accrueInterest(markets[label]),'interest_accrue_week_'+label);
  const week=await state('after_week_interest_and_harvest',morpho,markets,loanTokens,vault,strategy,irm);
  for(const label of Object.keys(markets)){
-   chk('borrow_interest_positive_after_week_'+label,BigInt(week.markets[label].borrowAssets)>(label==='WFRAX'?ethers.parseEther('3.6'):ethers.parseEther('3.52')));
+   chk('borrow_interest_positive_after_week_'+label,BigInt(week.markets[label].borrowAssets)>(label==='WFRAX'?ethers.parseEther('3.6'):ethers.parseEther('0.704')));
    chk('morpho_15pct_fee_shares_minted_'+label,BigInt(week.markets[label].feeShares)>0n);
  }
  for(const label of Object.keys(markets)){
    const p=markets[label];
    await tx(loanTokens[label].connect(user).approve(await morpho.getAddress(),ethers.MaxUint256),'repay_approval_'+label);
-   await tx(morpho.connect(user).repay(p,ethers.parseEther('0.5'),0,a.BORROWER,'0x'),'partial_repay_'+label);
+   await tx(morpho.connect(user).repay(p,(label==='WFRAX'?ethers.parseEther('0.5'):ethers.parseEther('0.1')),0,a.BORROWER,'0x'),'partial_repay_'+label);
    await tx(morpho.connect(lender).withdraw(p,ethers.parseEther('0.1'),0,a.LENDER,a.LENDER),'lender_withdraw_'+label);
    await tx(morpho.connect(user).withdrawCollateral(p,ethers.parseEther('0.5'),a.BORROWER,a.BORROWER),'collateral_withdraw_'+label);
  }
  await state('final_after_repay_lender_withdraw_collateral_withdraw',morpho,markets,loanTokens,vault,strategy,irm);
  jot('SIMULATION_COMPLETE',{totalChecks:report.checks.length,totalSnapshots:report.snapshots.length,transactions:report.steps.filter(x=>x.details?.tx).length});
-})().catch(e=>{report.errors.push({message:e.message,stack:e.stack});console.error('FAIL',e.stack??e);process.exitCode=1}).finally(()=>{try{const out=path.join(here,'sim-results','accounting_v1.json');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,JSON.stringify(report,(key,v)=>typeof v==='bigint'?v.toString():v,2)+'\n');console.log('REPORT',out)}catch(e){console.error(e)}});
+})().catch(e=>{report.errors.push({message:e.message,stack:e.stack});console.error('FAIL',e.stack??e);process.exitCode=1}).finally(()=>{try{const out=path.join(here,'sim-results','accounting_v2.json');fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,JSON.stringify(report,(key,v)=>typeof v==='bigint'?v.toString():v,2)+'\n');console.log('REPORT',out)}catch(e){console.error(e)}});
