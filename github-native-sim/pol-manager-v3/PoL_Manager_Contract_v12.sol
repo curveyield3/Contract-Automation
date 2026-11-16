@@ -298,11 +298,12 @@ contract PoLManager {
             _call(assets[slot],abi.encodeWithSelector(IPoL20.approve.selector,prior,0));
             allowanceInitialized[assets[slot]][prior]=false;
         }
-        vaults[slot]=address(0);assets[slot]=address(0);
-        shareUnits[slot]=0;highWatermarkPPS[slot]=0;accruedFeeShares[slot]=0;
         uint8 bit=uint8(1)<<(slot+2);
-        allocationEnabledMask&=~bit;harvestEnabledMask&=~bit;
-        if(v!=address(0)){
+        if(v==address(0)){
+            delete vaults[slot];delete assets[slot];
+            delete shareUnits[slot];delete highWatermarkPPS[slot];
+            allocationEnabledMask&=~bit;harvestEnabledMask&=~bit;
+        }else{
             if(v.code.length==0)revert Invalid();
             for(uint8 j;j<5;++j)if(j!=slot&&vaults[j]==v)revert Invalid();
             address asset=IPoL4626(v).asset();
