@@ -6,7 +6,7 @@ on:
       - 'github-native-sim/boosthub-fraxtal-v40/**'
       - '.github/workflows/boosthub-v13-full-stack-anvil-v1.yml'
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: boosthub-fraxtal-v40-fork
   cancel-in-progress: true
@@ -67,6 +67,43 @@ jobs:
           test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = 252
           export FORK_RPC=http://127.0.0.1:8545
           timeout -s TERM -k 5s 420s node github-native-sim/boosthub-fraxtal-v40/simulation/simulate_fraxtal_v1.cjs 2>&1 | tee github-native-sim/boosthub-fraxtal-v40/sim-results/run.log
+      - name: Publish exact compiled creation and runtime bytecode for connected-wallet broadcasts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib
+          root=pathlib.Path('github-native-sim/boosthub-fraxtal-v40')
+          entries={
+            'router':root/'build/forge/CurveYieldOmniRouter.sol/CurveYieldOmniRouter.json',
+            'strategy':root/'build/forge/StrategyConvexBoostHubStakingV5.sol/StrategyConvexBoostHubStakingV5.json',
+            'vault':root/'build/forge/BeefyVaultV7FixedV2.sol/BeefyVaultV7FixedV2.json',
+            'morpho':root/'.upstream-morpho/out/Morpho.sol/Morpho.json',
+            'irm':root/'.upstream-morpho/out/CollateralYieldIRM.sol/CollateralYieldIRM.json',
+            'oracle':root/'.upstream-morpho/out/OmniRouterBeefyShareOracle.sol/OmniRouterBeefyShareOracle.json',
+            'staking':root/'artifacts/staking.json',
+          }
+          folder=root/'broadcast-artifacts'
+          folder.mkdir(parents=True,exist_ok=True)
+          for name,filename in entries.items():
+              item=json.loads(filename.read_text())
+              b=item['bytecode']
+              r=item.get('deployedBytecode','0x')
+              creation=b['object'] if isinstance(b,dict) else b
+              runtime=r['object'] if isinstance(r,dict) else r
+              info={'abi':item['abi'],'bytecode':creation,'deployedBytecode':runtime}
+              if name=='staking':
+                  info['sourceSha256']=item['sourceSha256']
+                  info['compilerVersion']=item['compilerVersion']
+              (folder/(name+'.json')).write_text(json.dumps(info,separators=(',',':'))+'\n')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add github-native-sim/boosthub-fraxtal-v40/broadcast-artifacts/
+          if ! git diff --cached --quiet; then
+            git commit -m "Export exact v41 source-bound compiled bytecodes for approved broadcasts [skip ci]"
+            git push origin HEAD:boosthub-fraxtal-v40
+          fi
       - name: Keep source, simulation, state and compiler evidence
         if: always()
         uses: actions/upload-artifact@v4
