@@ -9,7 +9,7 @@ const eq=(a,b,label)=>assert.equal(String(a),String(b),label);
 async function clock(seconds){await network.provider.send("evm_increaseTime",[Number(seconds)]);await network.provider.send("evm_mine");}
 async function polFixture(){
   const [owner,operator,guardian,treasury,attacker,user]=await ethers.getSigners();
-  const sdt=await dep("StressSDT"),usdc=await dep("StressUSDC"),crv=await dep("StressCRV");
+  const sdt=await dep("StressSDT"),usdc=await dep("StressUSDC"),crv=await dep("StressToken","CRV","CRV",18);
   const cyvl=await dep("StressToken","cyvlSDT","cyvl",18);
   const omni=await dep("StressOmniRouter");
   const yearn=await dep("Stress4626",sdt.target),euler=await dep("Stress4626",sdt.target);
