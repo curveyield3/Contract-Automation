@@ -109,7 +109,7 @@ contract PoLManager {
     address public immutable curveLp;
     address public immutable curveGauge;
     address[3] public curveCoins;
-    bool public immutable curveIsNG;
+    bool private immutable curveIsNG;
     bool public autoStakeCurve=true;
     uint8 public defaultCurveCoin;
     uint16 public maxCurveSlippageBps=300;
@@ -122,19 +122,19 @@ contract PoLManager {
     int24 public immutable uniLower;
     int24 public immutable uniUpper;
     // Amounts owed to the pre-transfer owner at NFT receipt are not new managed profits.
-    uint256 public initialOwed0;
-    uint256 public initialOwed1;
+    uint256 private initialOwed0;
+    uint256 private initialOwed1;
     uint256 public pendingUniCompound0;
     uint256 public pendingUniCompound1;
     uint16 public uniAllocationToken0Bps=5000;
 
     address[4] public vaults;
     address[4] public assets;
-    uint256[4] public shareUnits;
-    uint256[4] public highWatermarkPPS;
-    uint256[4] public accruedFeeShares;
-    uint8 public immutable sdtYearnIndex;
-    uint8 public immutable sdtEulerIndex;
+    uint256[4] private shareUnits;
+    uint256[4] private highWatermarkPPS;
+    uint256[4] private accruedFeeShares;
+    uint8 private immutable sdtYearnIndex;
+    uint8 private immutable sdtEulerIndex;
     address public immutable sdt;
     address public immutable omniRouter;
     uint16 public profitFeeBps;
@@ -143,7 +143,9 @@ contract PoLManager {
     uint16 public maxEulerLossBps=100;
     uint16[6] public allocations;
     bool public allocationsSet;
-    mapping(uint8=>RateRule) private rates;
+    RateRule public rateRule;
+    uint8 public rateFrom;
+    uint8 public rateTo;
 
     event ProfitPaid(address recipient,uint256 amountSDT);
     event AllocationSet(uint16[6] allocations);
@@ -234,10 +236,8 @@ contract PoLManager {
     function _min(uint256 a,uint256 b) private pure returns(uint256){return a<b?a:b;}
     function _swap(address from,address to,uint256 amount) private returns(uint256 received){
         if(amount==0||from==to)revert Invalid();
-        uint256 before_=_balance(to);
         _approve(from,omniRouter,amount);
-        IPoLRouter(omniRouter).swap(from,to,amount);
-        received=_balance(to)-before_;
+        received=IPoLRouter(omniRouter).swap(from,to,amount);
         if(received==0)revert Slippage();
     }
     function _convert(address from,address to,uint256 amount) private returns(uint256){
@@ -503,26 +503,23 @@ contract PoLManager {
         _pay(paid);
     }
 
-    function _key(uint8 from,uint8 to) private pure returns(uint8){
-        if(from>2||to>2||from==to)revert Invalid();return from*3+to;
+    function setRateRule(uint8 from,uint8 to,RateRule calldata c) external onlyOwner {
+        if(from>2||to>2||from==to)revert Invalid();
+        if(c.enabled&&(c.quoteAmount==0||c.thresholdWad==0||c.maxDeviationBps>2000||
+            c.yearnRedeemBps>BPS||c.eulerRedeemBps>BPS||
+            (c.yearnRedeemBps==0&&c.eulerRedeemBps==0)||
+            c.persistSeconds<300||c.cooldownSeconds<3600))revert Invalid();
+        rateFrom=from;rateTo=to;
+        RateRule storage r=rateRule;
+        r.quoteAmount=c.quoteAmount;r.thresholdWad=c.thresholdWad;
+        r.maxDeviationBps=c.maxDeviationBps;r.yearnRedeemBps=c.yearnRedeemBps;
+        r.eulerRedeemBps=c.eulerRedeemBps;r.persistSeconds=c.persistSeconds;
+        r.cooldownSeconds=c.cooldownSeconds;r.enabled=c.enabled;r.armedAt=0;
     }
-    function setRateRule(uint8 from,uint8 to,RateRule calldata config) external onlyOwner {
-        uint8 k=_key(from,to);
-        if(config.enabled&&(config.quoteAmount==0||config.thresholdWad==0||config.maxDeviationBps>2000||
-            config.yearnRedeemBps>BPS||config.eulerRedeemBps>BPS||
-            (config.yearnRedeemBps==0&&config.eulerRedeemBps==0)||
-            config.persistSeconds<300||config.cooldownSeconds<3600))revert Invalid();
-        // Only the config fields are authorized; caller-supplied runtime state is never trusted.
-        RateRule storage r=rates[k];
-        r.quoteAmount=config.quoteAmount;r.thresholdWad=config.thresholdWad;
-        r.maxDeviationBps=config.maxDeviationBps;r.yearnRedeemBps=config.yearnRedeemBps;
-        r.eulerRedeemBps=config.eulerRedeemBps;r.persistSeconds=config.persistSeconds;
-        r.cooldownSeconds=config.cooldownSeconds;r.enabled=config.enabled;r.armedAt=0;
-    }
-    function getRateRule(uint8 from,uint8 to) external view returns(RateRule memory){return rates[_key(from,to)];}
-    function rateStatus(uint8 from,uint8 to) public view returns(uint256 spot,uint256 oracleRate,uint256 deviationBps){
-        RateRule storage r=rates[_key(from,to)];
+    function rateStatus() public view returns(uint256 spot,uint256 oracleRate,uint256 deviationBps){
+        RateRule storage r=rateRule;
         if(r.quoteAmount==0)revert Invalid();
+        uint8 from=rateFrom,to=rateTo;
         uint256 out=IPoLCurve(curvePool).get_dy(int128(uint128(from)),int128(uint128(to)),r.quoteAmount);
         uint256 scaleIn=10**uint256(IPoL20(curveCoins[from]).decimals());
         uint256 scaleOut=10**uint256(IPoL20(curveCoins[to]).decimals());
@@ -531,17 +528,17 @@ contract PoLManager {
         if(oracleRate==0)revert Invalid();
         deviationBps=(spot>oracleRate?spot-oracleRate:oracleRate-spot)*BPS/oracleRate;
     }
-    function observeRate(uint8 from,uint8 to) external active {
-        RateRule storage r=rates[_key(from,to)];if(!r.enabled)revert State();
-        (uint256 spot,,uint256 dev)=rateStatus(from,to);
+    function observeRate() external active {
+        RateRule storage r=rateRule;if(!r.enabled)revert State();
+        (uint256 spot,,uint256 dev)=rateStatus();
         if(spot>=r.thresholdWad&&dev<=r.maxDeviationBps){if(r.armedAt==0)r.armedAt=uint64(block.timestamp);}
         else r.armedAt=0;
     }
-    function executeRate(uint8 from,uint8 to) external active guard returns(uint256 yearnShares,uint256 eulerShares){
-        RateRule storage r=rates[_key(from,to)];
+    function executeRate() external active guard returns(uint256 yearnShares,uint256 eulerShares){
+        RateRule storage r=rateRule;
         if(!r.enabled||r.armedAt==0||block.timestamp<uint256(r.armedAt)+r.persistSeconds||
             block.timestamp<uint256(r.lastAt)+r.cooldownSeconds)revert State();
-        (uint256 spot,,uint256 dev)=rateStatus(from,to);
+        (uint256 spot,,uint256 dev)=rateStatus();
         if(spot<r.thresholdWad||dev>r.maxDeviationBps)revert State();
         uint8 y=sdtYearnIndex;uint8 e=sdtEulerIndex+2;
         _accrue(y);_accrue(e);
@@ -551,7 +548,7 @@ contract PoLManager {
         r.armedAt=0;r.lastAt=uint64(block.timestamp);
         if(yearnShares>0)_curveInvest(assets[y],_vaultRedeemRaw(y,yearnShares,0));
         if(eulerShares>0)_curveInvest(assets[e],_vaultRedeemRaw(e,eulerShares,0));
-        emit RateExecuted(from,to,yearnShares,eulerShares);
+        emit RateExecuted(rateFrom,rateTo,yearnShares,eulerShares);
     }
     function rescueToken(address token,address recipient,uint256 amount) external onlyOwner guard {
         if(recipient==address(0)||token==curveLp||token==vaults[0]||token==vaults[1]||
