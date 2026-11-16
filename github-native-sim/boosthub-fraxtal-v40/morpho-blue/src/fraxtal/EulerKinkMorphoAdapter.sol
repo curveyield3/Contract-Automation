@@ -25,8 +25,8 @@ interface IEulerLinearKinkView {
 contract EulerKinkMorphoAdapter is IIrm {
     uint256 public constant SECONDS_PER_YEAR = 365 days;
     uint256 public constant WAD = 1e18;
-    uint256 public constant HARD_MAX_BORROW_APR = 3.65e18;
-    uint256 public constant HARD_MAX_DAILY_CHANGE = 0.01e18;
+    uint256 public constant HARD_MAX_BORROW_APR = 5e18;
+    uint256 public constant HARD_MAX_DAILY_CHANGE = 0.50e18;
 
     address public immutable morpho;
     IEulerLinearKinkView public immutable eulerKinkIrm;
