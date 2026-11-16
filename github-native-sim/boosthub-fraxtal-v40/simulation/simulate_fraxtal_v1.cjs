@@ -9,6 +9,7 @@ const path = require('path');
 const assert = require('node:assert/strict');
 const ethers = require(path.resolve(__dirname, '../dependencies/node_modules/ethers'));
 const rpc = new ethers.JsonRpcProvider(process.env.FORK_RPC || 'http://127.0.0.1:8545',252,{staticNetwork:true});
+rpc.pollingInterval = 1000; // Fork block cadence is 1s; avoid 4s receipt polling per operation.
 const here=path.resolve(__dirname,'..');
 const report={version:'v1',kind:'Fraxtal stateful fork simulation',chainId:252,forkOnly:true,productionDeployments:false,simulatedOnly:true,steps:[],snapshots:[],contracts:{},markets:{},errors:[],checks:[]};
 const a={
