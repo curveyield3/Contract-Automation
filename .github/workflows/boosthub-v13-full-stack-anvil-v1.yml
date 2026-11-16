@@ -1,4 +1,4 @@
-name: BoostHub Fraxtal v40 source-bound compile (no tests)
+name: BoostHub Fraxtal v40 source-bound live fork and accounting
 on:
   push:
     branches: [boosthub-fraxtal-v40]
@@ -8,9 +8,9 @@ on:
 permissions:
   contents: read
 jobs:
-  compile:
+  simulation:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 58
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,23 +22,58 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Compile exact Vyper and Solidity production contracts, no tests
+      - name: Compile exact v40 BoostHub production contracts and fork-only price fixture
         shell: bash
         run: |
           set -euo pipefail
           cd github-native-sim/boosthub-fraxtal-v40
           npm install --prefix dependencies --no-audit --no-fund --ignore-scripts --package-lock=false
+          npm install --prefix dependencies --no-save --no-audit --no-fund --ignore-scripts --package-lock=false ethers@6.15.0
           python -m pip install --disable-pip-version-check 'vyper==0.4.3'
-          vyper --version
           python tooling/make_staking_artifact.py
-          forge build script/DeployFraxtalSupplementV40.s.sol --force
-      - name: Upload source-bound artifacts
+          forge build script/DeployFraxtalSupplementV40.s.sol simulation/ForkOnlyFixedOracle.sol --force
+      - name: Clone exact unmodified Morpho Blue and compile new Fraxtal IRM/oracles
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd github-native-sim/boosthub-fraxtal-v40
+          git clone --no-checkout https://github.com/morpho-org/morpho-blue.git .upstream-morpho
+          git -C .upstream-morpho fetch --depth 1 origin 339a885801972740eb27f51da110a4675b839d42
+          git -C .upstream-morpho checkout --detach 339a885801972740eb27f51da110a4675b839d42
+          git -C .upstream-morpho submodule update --init --recursive --depth 1
+          mkdir -p .upstream-morpho/src/fraxtal
+          cp morpho-blue/src/fraxtal/*.sol .upstream-morpho/src/fraxtal/
+          cp morpho-blue/script/DeployFraxtalMorpho.s.sol .upstream-morpho/script/
+          forge build --root .upstream-morpho src/Morpho.sol src/fraxtal/CollateralYieldIRM.sol src/fraxtal/OmniRouterBeefyShareOracle.sol script/DeployFraxtalMorpho.s.sol --force
+      - name: Perform Fraxtal live-state fork simulation, no broadcast to Fraxtal
+        shell: bash
+        env:
+          RPC_FRAXTAL: ${{ secrets.RPC_FRAXTAL }}
+        run: |
+          set -euo pipefail
+          : "${RPC_FRAXTAL:?Missing RPC_FRAXTAL}"
+          mkdir -p github-native-sim/boosthub-fraxtal-v40/sim-results
+          anvil --fork-url "$RPC_FRAXTAL" --chain-id 252 --port 8545 --host 127.0.0.1 --gas-limit 30000000 > github-native-sim/boosthub-fraxtal-v40/sim-results/anvil.log 2>&1 &
+          ANVIL_PID=$!
+          trap 'kill "$ANVIL_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            if [ "$(cast chain-id --rpc-url http://127.0.0.1:8545 2>/dev/null || true)" = 252 ]; then break; fi
+            sleep 2
+          done
+          test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = 252
+          export FORK_RPC=http://127.0.0.1:8545
+          node github-native-sim/boosthub-fraxtal-v40/simulation/simulate_fraxtal_v1.cjs 2>&1 | tee github-native-sim/boosthub-fraxtal-v40/sim-results/run.log
+      - name: Keep source, simulation, state and compiler evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-fraxtal-v40-compile
+          name: boosthub-fraxtal-v40-morpho-fork-v1
           path: |
+            github-native-sim/boosthub-fraxtal-v40/sim-results/
             github-native-sim/boosthub-fraxtal-v40/artifacts/staking.json
-            github-native-sim/boosthub-fraxtal-v40/build/forge/
+            github-native-sim/boosthub-fraxtal-v40/build/forge/*/*.json
+            github-native-sim/boosthub-fraxtal-v40/.upstream-morpho/out/Morpho.sol/Morpho.json
+            github-native-sim/boosthub-fraxtal-v40/.upstream-morpho/out/CollateralYieldIRM.sol/CollateralYieldIRM.json
+            github-native-sim/boosthub-fraxtal-v40/.upstream-morpho/out/OmniRouterBeefyShareOracle.sol/OmniRouterBeefyShareOracle.json
           if-no-files-found: warn
           retention-days: 7
