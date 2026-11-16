@@ -97,7 +97,7 @@ jobs:
   morpho-v1-compile:
     permissions:
       contents: write
-    name: Compile exact Fraxtal Morpho governance + splitter v1
+    name: Compile exact Fraxtal Morpho governance + splitter v2
     if: github.ref_name == 'morpho-fraxtal-compile-v1'
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -167,7 +167,7 @@ jobs:
           if [ "$head_sha" != "$GITHUB_SHA" ]; then echo 'Stale run, no receipt'; exit 0; fi
           python3 - <<'PY'
           from pathlib import Path
-          import base64, hashlib, json, os, subprocess
+          import base64, hashlib, json, os
           repo=os.environ['GITHUB_REPOSITORY']
           path='github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol'
           source=Path(path).read_bytes()
@@ -198,9 +198,7 @@ jobs:
           content=base64.b64encode((json.dumps(record,indent=2)+'\n').encode()).decode()
           payload={'message':'Record Morpho Fraxtal v2 compiler and deployable bytecode',
                    'branch':os.environ['GITHUB_REF_NAME'],'content':content}
-          remote=subprocess.run(['gh','api','repos/'+repo+'/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v1.json','--jq','.sha'],capture_output=True,text=True)
-          if remote.returncode==0: payload['sha']=remote.stdout.strip()
           Path('.morpho-compile/receipt-request.json').write_text(json.dumps(payload))
           print('COMPILATION_RECEIPT',record['status'],record['workflowRunUrl'])
           PY
-          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v1.json" --input .morpho-compile/receipt-request.json
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-fraxtal-v1/compilation-receipt-v2.json" --input .morpho-compile/receipt-request.json
