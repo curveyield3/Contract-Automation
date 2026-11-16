@@ -4,7 +4,7 @@ on:
     branches: [main, pol-manager-v3-size]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
-      - 'github-native-sim/pol-manager-v3/PoL_Manager_Contract_v5.sol'
+      - 'github-native-sim/pol-manager-v3/PoL_Manager_Contract_v6.sol'
   workflow_dispatch:
 permissions:
   contents: read
@@ -109,7 +109,7 @@ jobs:
           set -euo pipefail
           WORK="$RUNNER_TEMP/pol-manager-v3"
           mkdir -p "$WORK/src"
-          cp github-native-sim/pol-manager-v3/PoL_Manager_Contract_v5.sol "$WORK/src/"
+          cp github-native-sim/pol-manager-v3/PoL_Manager_Contract_v6.sol "$WORK/src/"
           cd "$WORK"
           FOUND=0
           for runs in 200 1; do
