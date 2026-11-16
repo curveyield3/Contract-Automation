@@ -94,7 +94,7 @@ jobs:
           path: .inline-eval/inline-build.err
           if-no-files-found: warn
           retention-days: 7
-vault-v36-compile:
+  vault-v36-compile:
     if: github.ref_name == 'boosthub-apr15-v36-compile'
     runs-on: ubuntu-latest
     timeout-minutes: 25
