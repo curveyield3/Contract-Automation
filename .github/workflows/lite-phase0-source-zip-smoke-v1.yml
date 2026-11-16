@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - '.github/smoke-trigger/lite-phase0-source-zip-smoke-v1.json'
+      - '.github/workflows/lite-phase0-source-zip-smoke-v1.yml'
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/source-bundle-v47-to-v49.txt'
       - '.github/workflows/lite-phase0-source-zip-smoke-v1.yml'
   workflow_dispatch:
@@ -20,6 +21,7 @@ concurrency:
 
 jobs:
   source-zip-smoke:
+    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1'
     if: github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1'
     name: ${{ matrix.label }}
     runs-on: ubuntu-latest
@@ -298,3 +300,81 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
           include-hidden-files: true
+
+  cyvlsdt-v48-compile:
+    if: github.ref == 'refs/heads/cyvlsdt-v48-compile-v1'
+    name: cyvlSDT v48 exact source compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore and identify exact v48 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .v48-source .v48-evidence
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64,lzma
+          lines=Path('github-native-sim/cyvlsdt-runtime-compare-v1/source-bundle-v47-to-v49.txt').read_text().splitlines()
+          a=lines.index('V47_XZ_BASE64')
+          b=lines.index('V49_PATCH_XZ_BASE64')
+          Path('/tmp/cyvlsdt-v47-archive').write_bytes(lzma.decompress(base64.b64decode(''.join(lines[a+1:b]))))
+          idx=lines.index('V48_PATCH_XZ_BASE64')
+          Path('/tmp/v48.patch').write_bytes(lzma.decompress(base64.b64decode(''.join(lines[idx+1:]))))
+          PY
+          file /tmp/cyvlsdt-v47-archive
+          if tar -tf /tmp/cyvlsdt-v47-archive >/dev/null 2>&1; then
+            tar -xf /tmp/cyvlsdt-v47-archive -C .v48-source
+          elif unzip -t /tmp/cyvlsdt-v47-archive >/dev/null 2>&1; then
+            unzip -q /tmp/cyvlsdt-v47-archive -d .v48-source
+          else
+            echo "::error::Unknown v47 source archive format"
+            exit 1
+          fi
+          ROOT="$(find .v48-source -type f -name hardhat.config.js -printf '%h\n' | head -n 1)"
+          test -n "$ROOT"
+          echo "SOURCE_ROOT=$ROOT" >> "$GITHUB_ENV"
+          ACTUAL_V47_SHA="$(sha256sum "$ROOT/contracts/CurveYieldVlSDTLocker.sol" | cut -d ' ' -f 1)"
+          test "$ACTUAL_V47_SHA" = 'ea624b164c7697756e28d8f75bd029d2a41901eb49e66781720b9486b1ea8a1'
+          (cd "$ROOT" && patch -p1 --batch < /tmp/v48.patch)
+          ACTUAL_V48_SHA="$(sha256sum "$ROOT/contracts/CurveYieldVlSDTLocker.sol" | cut -d ' ' -f 1)"
+          test "$ACTUAL_V48_SHA" = '15ce47410538a1c2437fb16613eb0194efce42407e7594c890f7c75400bb8166'
+          printf 'v47_lock=%s\nv48_lock=%s\n' "$ACTUAL_V47_SHA" "$ACTUAL_V48_SHA" > .v48-evidence/source-identity.txt
+      - name: Install dependencies and compile (no tests)
+        shell: bash
+        run: |
+          set -eo pipefail
+          cd "$SOURCE_ROOT"
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install hardhat compile 2>&1 | tee "$GITHUB_WORKSPACE/.v48-evidence/compile.log"
+      - name: Record runtime bytecode sizes
+        shell: bash
+        run: |
+          set -eo pipefail
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['SOURCE_ROOT'])
+          counts=0
+          for p in sorted(root.glob('artifacts*/contracts/**/*.json'))+sorted(root.glob('artifacts/contracts/**/*.json')):
+              try:
+                  obj=json.loads(p.read_text())
+                  name=obj.get('contractName')
+                  code=obj.get('deployedBytecode','0x')
+                  if name and isinstance(code,str) and code.startswith('0x') and len(code)>2:
+                      counts+=1
+                      print(f'RUNTIME_BYTES {name} {(len(code)-2)//2} EIP170_LIMIT 24576')
+              except (ValueError,UnicodeDecodeError): pass
+          assert counts>0, 'No compiled deployable bytecode artifacts'
+          PY
+      - name: Upload compile evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyvlsdt-v48-compile-source
+          path: .v48-evidence/
+          if-no-files-found: warn
