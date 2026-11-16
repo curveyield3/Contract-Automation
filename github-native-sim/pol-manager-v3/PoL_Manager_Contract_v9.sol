@@ -366,7 +366,7 @@ contract PoLManager {
         return IPoL4626(vaults[slot]).convertToAssets(shareUnits[slot]);
     }
     function _maxRedeem(uint8 slot) private view returns(uint256){
-        return slot<2?IPoLYearn(vaults[slot]).maxRedeem(address(this),maxYearnLossBps):IPoL4626(vaults[slot]).maxRedeem(address(this));
+        return slot<3?IPoLYearn(vaults[slot]).maxRedeem(address(this),maxYearnLossBps):IPoL4626(vaults[slot]).maxRedeem(address(this));
     }
     function pendingProfitShares(uint8 slot) public view returns(uint256 amount){
         if(slot>=5||vaults[slot]==address(0))revert Invalid();
@@ -399,10 +399,10 @@ contract PoLManager {
         address v=vaults[slot];
         uint256 expected=IPoL4626(v).convertToAssets(shares);
         uint256 before_=_balance(assets[slot]);
-        if(slot<2)IPoLYearn(v).redeem(shares,address(this),address(this),maxYearnLossBps);
+        if(slot<3)IPoLYearn(v).redeem(shares,address(this),address(this),maxYearnLossBps);
         else IPoL4626(v).redeem(shares,address(this),address(this));
         assetsOut=_balance(assets[slot])-before_;
-        uint256 loss=slot<2?maxYearnLossBps:maxEulerLossBps;
+        uint256 loss=slot<3?maxYearnLossBps:maxEulerLossBps;
         if(assetsOut==0||assetsOut<minAssets||assetsOut<expected*(BPS-loss)/BPS)revert Slippage();
     }
     function _vaultRedeem(uint8 slot,uint256 shares,uint256 minAssets) private returns(uint256){
