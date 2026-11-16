@@ -4,11 +4,13 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
+      - 'github-native-sim/curveyield-protected-vault-v1/**'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   inline-evaluation:
+    if: ${{ !contains(github.event.head_commit.message, '[vault-fee-compile]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -91,3 +93,60 @@ jobs:
           path: .inline-eval/inline-build.err
           if-no-files-found: warn
           retention-days: 7
+
+  compile-protected-vault:
+    if: ${{ contains(github.event.head_commit.message, '[vault-fee-compile]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Install Foundry compiler
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Compile protected vault Solidity 0.8.28 and report EIP-170 runtime size
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/curveyield-protected-vault"
+          mkdir -p "$ROOT/src" "protected-vault-compile-evidence-v1"
+          cp github-native-sim/curveyield-protected-vault-v1/contracts/CurveYieldProtectedVaultFactory.sol "$ROOT/src/"
+          sha256sum "$ROOT/src/CurveYieldProtectedVaultFactory.sol" | tee protected-vault-compile-evidence-v1/source-sha256.txt
+          cat > "$ROOT/foundry.toml" <<'TOML'
+          [profile.default]
+          src = "src"
+          out = "out"
+          libs = ["lib"]
+          solc_version = "0.8.28"
+          optimizer = true
+          optimizer_runs = 200
+          evm_version = "cancun"
+          TOML
+          echo "commit=$GITHUB_SHA" | tee protected-vault-compile-evidence-v1/provenance.txt
+          forge --version | tee -a protected-vault-compile-evidence-v1/provenance.txt
+          ( cd "$ROOT" && forge build --sizes --force ) 2>&1 | tee protected-vault-compile-evidence-v1/compile.log
+          python3 - "$ROOT/out" <<'PY' | tee protected-vault-compile-evidence-v1/runtime-sizes.txt
+          import json,sys
+          from pathlib import Path
+          root=Path(sys.argv[1])
+          for name in ('CurveYieldProtectedVaultFactory','CurveYieldProtectedVaultController','CurveYieldProtectedFeeSplitter'):
+              matches=list(root.rglob(f'{name}.json'))
+              if len(matches)!=1: raise SystemExit(f'ERROR: missing/duplicate {name} artifact: {matches}')
+              artifact=json.loads(matches[0].read_text())
+              obj=artifact['deployedBytecode']['object'].removeprefix('0x')
+              size=len(obj)//2
+              print(f'{name}: runtime_bytes={size} eip170_limit=24576 headroom={24576-size}')
+              if size>24576: raise SystemExit(f'ERROR: EIP-170 runtime size exceeded by {name}')
+          PY
+      - name: Upload compile-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curveyield-protected-vault-v1-compile-${{ github.run_id }}
+          path: protected-vault-compile-evidence-v1/
+          if-no-files-found: warn
+          retention-days: 30
