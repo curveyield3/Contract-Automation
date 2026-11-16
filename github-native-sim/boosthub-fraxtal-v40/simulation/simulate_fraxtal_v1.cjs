@@ -140,18 +140,35 @@ async function state(tag,morpho,markets,loanTokens,vault,strategy,irm){console.l
  await jump(4*3600,'apr_8hours');await tx(vault.connect(user).checkpointAPR(),'checkpoint_after_8h');
  await jump(4*3600,'apr_12hours');await tx(vault.connect(user).checkpointAPR(),'checkpoint_after_12h');
  await jump(4*3600,'apr_16hours');await tx(vault.connect(user).checkpointAPR(),'checkpoint_after_16h');
+ // Fork-only positive-yield input: real WFRAX, real OmniRouter WFRAX->sdFXS swap, unchanged strategy.
+ // Do not introduce this funding step into production deployment.
+ await tx(wfrax.transfer(await strategy.getAddress(),ethers.parseEther('0.05')),'fork_only_seed_WFRAX_yield_0p05');
+ const callerWantBefore=await sdUser.balanceOf(a.BORROWER);
+ const adminWantBefore=await sdUser.balanceOf(a.ADMIN);
  await tx(strategy.connect(user).harvest(),'harvest_after_16h');
+ const callerYieldFee=(await sdUser.balanceOf(a.BORROWER))-callerWantBefore;
+ const adminYieldFee=(await sdUser.balanceOf(a.ADMIN))-adminWantBefore;
+ chk('caller_0p09pct_harvest_reward_paid',callerYieldFee>0n,{callerYieldFee:callerYieldFee.toString()});
+ chk('admin_2p91pct_harvest_reward_paid',adminYieldFee>0n,{adminYieldFee:adminYieldFee.toString()});
+ const grossFee=callerYieldFee+adminYieldFee;
+ chk('caller_3pct_share_of_harvest_fee',(callerYieldFee*10000n <= grossFee*300n) && (grossFee*300n-callerYieldFee*10000n<10000n),{caller:callerYieldFee.toString(),admin:adminYieldFee.toString()});
  await tx(vault.connect(user).withdraw(ethers.parseEther('1')),'vault_withdraw_tax_0p3pct');
  const lockedNow=await strategy.lockedProfit();chk('withdrawal_tax_profit_locked',lockedNow>0n,{locked:lockedNow.toString()});
  await jump(24*3600,'day_after_harvest');
  for(const label of Object.keys(markets))await tx(morpho.accrueInterest(markets[label]),'interest_accrue_'+label+'_day1');
  const day1=await state('after_day1_interest_and_harvest',morpho,markets,loanTokens,vault,strategy,irm);
- for(const label of Object.keys(markets))chk('borrow_interest_positive_'+label,BigInt(day1.markets[label].borrowAssets)> (label==='WFRAX'?ethers.parseEther('3.6'):ethers.parseEther('3.52')));
- for(const label of Object.keys(markets))chk('morpho_15pct_fee_shares_minted_'+label, BigInt(day1.markets[label].feeShares)>0n);
+ // The IRM deliberately uses the PRIOR cached collateral APR over each elapsed interval.
+ // Zero APR before the first realized, unlocked harvest must never be charged retroactively.
+ for(const label of Object.keys(markets))chk('no_negative_or_retroactive_interest_day1_'+label,BigInt(day1.markets[label].borrowAssets)>= (label==='WFRAX'?ethers.parseEther('3.6'):ethers.parseEther('3.52')));
+ for(const label of Object.keys(markets))chk('new_yield_observation_after_day1_'+label,BigInt(day1.markets[label].annualBorrowAprWad)>0n);
  await jump(7*24*3600,'week_after_harvest');
  await tx(strategy.connect(user).harvest(),'harvest_after_week');
  for(const label of Object.keys(markets)) await tx(morpho.accrueInterest(markets[label]),'interest_accrue_week_'+label);
- await state('after_week_interest_and_harvest',morpho,markets,loanTokens,vault,strategy,irm);
+ const week=await state('after_week_interest_and_harvest',morpho,markets,loanTokens,vault,strategy,irm);
+ for(const label of Object.keys(markets)){
+   chk('borrow_interest_positive_after_week_'+label,BigInt(week.markets[label].borrowAssets)>(label==='WFRAX'?ethers.parseEther('3.6'):ethers.parseEther('3.52')));
+   chk('morpho_15pct_fee_shares_minted_'+label,BigInt(week.markets[label].feeShares)>0n);
+ }
  for(const label of Object.keys(markets)){
    const p=markets[label];
    await tx(loanTokens[label].connect(user).approve(await morpho.getAddress(),ethers.MaxUint256),'repay_approval_'+label);
