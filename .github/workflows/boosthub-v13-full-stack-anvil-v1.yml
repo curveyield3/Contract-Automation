@@ -47,7 +47,7 @@ jobs:
           mkdir -p .upstream-morpho/src/fraxtal .upstream-morpho/script
           cp morpho-blue/src/fraxtal/*.sol .upstream-morpho/src/fraxtal/
           cp morpho-blue/script/DeployFraxtalMorpho.s.sol .upstream-morpho/script/
-          forge build --root .upstream-morpho src/Morpho.sol src/fraxtal/CollateralYieldIRM.sol src/fraxtal/OmniRouterBeefyShareOracle.sol script/DeployFraxtalMorpho.s.sol --force
+          forge build --root .upstream-morpho src/Morpho.sol src/fraxtal/CollateralYieldIRM.sol src/fraxtal/CollateralYieldBoundedIRM.sol src/fraxtal/EulerKinkMorphoAdapter.sol src/fraxtal/OmniRouterBeefyShareOracle.sol script/DeployFraxtalMorpho.s.sol --force
       - name: Perform Fraxtal live-state fork simulation, no broadcast to Fraxtal
         shell: bash
         env:
@@ -81,6 +81,8 @@ jobs:
             'vault':root/'build/forge/BeefyVaultV7FixedV2.sol/BeefyVaultV7FixedV2.json',
             'morpho':root/'.upstream-morpho/out/Morpho.sol/Morpho.json',
             'irm':root/'.upstream-morpho/out/CollateralYieldIRM.sol/CollateralYieldIRM.json',
+            'bounded_irm':root/'.upstream-morpho/out/CollateralYieldBoundedIRM.sol/CollateralYieldBoundedIRM.json',
+            'euler_adapter':root/'.upstream-morpho/out/EulerKinkMorphoAdapter.sol/EulerKinkMorphoAdapter.json',
             'oracle':root/'.upstream-morpho/out/OmniRouterBeefyShareOracle.sol/OmniRouterBeefyShareOracle.json',
             'staking':root/'artifacts/staking.json',
           }
@@ -119,6 +121,8 @@ jobs:
             github-native-sim/boosthub-fraxtal-v40/build/forge/*/*.json
             github-native-sim/boosthub-fraxtal-v40/.upstream-morpho/out/Morpho.sol/Morpho.json
             github-native-sim/boosthub-fraxtal-v40/.upstream-morpho/out/CollateralYieldIRM.sol/CollateralYieldIRM.json
+            github-native-sim/boosthub-fraxtal-v40/.upstream-morpho/out/CollateralYieldBoundedIRM.sol/CollateralYieldBoundedIRM.json
+            github-native-sim/boosthub-fraxtal-v40/.upstream-morpho/out/EulerKinkMorphoAdapter.sol/EulerKinkMorphoAdapter.json
             github-native-sim/boosthub-fraxtal-v40/.upstream-morpho/out/OmniRouterBeefyShareOracle.sol/OmniRouterBeefyShareOracle.json
           if-no-files-found: warn
           retention-days: 7
