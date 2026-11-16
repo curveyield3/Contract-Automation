@@ -171,7 +171,7 @@ abstract contract PoLStorage {
     address public immutable swapRouter;
     uint256[4] public highWatermarkPPS;
     uint256[4] public trackedShares;
-    uint256[4] private shareUnits;
+    uint256[4] internal shareUnits;
     uint16 public cyvlSDTProfitShare;
     address public cyvlSDTProfitRecipient;
     uint16 public maxYearnLossBps = 100;
