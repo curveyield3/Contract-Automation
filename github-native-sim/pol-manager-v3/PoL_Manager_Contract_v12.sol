@@ -382,7 +382,7 @@ contract PoLManager {
     function stakeCurve(uint256 lp) external onlyOperator active guard {_stake(lp);}
     function unstakeCurve(uint256 lp) external onlyOperator guard {IPoLGauge(curveGauge).withdraw(lp);}
 
-    function currentPPS(uint8 slot) public view returns(uint256){
+    function currentPPS(uint8 slot) private view returns(uint256){
         if(slot>=5||vaults[slot]==address(0))revert Invalid();
         return IPoL4626(vaults[slot]).convertToAssets(shareUnits[slot]);
     }
@@ -681,7 +681,7 @@ contract PoLManager {
         buyBaseYearn=0;buyBaseEuler=0;
         delete buySpentYearn;delete buySpentEuler;
     }
-    function buyPrice() public view returns(uint256){
+    function buyPrice() private view returns(uint256){
         return IPoLRouter(omniRouter).price_oracle(cyvlSDT,sdt);
     }
     /// @notice Public, price-gated purchase of cyvlSDT using redeemed SDT Yearn/Euler shares.
