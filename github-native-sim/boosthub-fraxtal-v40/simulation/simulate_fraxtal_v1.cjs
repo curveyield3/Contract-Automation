@@ -86,7 +86,8 @@ async function state(tag,morpho,markets,loanTokens,vault,strategy,irm){console.l
  const original=new ethers.Contract(legacyRouter,ROUTER_ABI,deployer);
  const oldRate=await original.price_oracle(a.SDFXS,a.WFRAX),newRate=await router.price_oracle(a.SDFXS,a.WFRAX);
  chk('preserved_sdFXS_WFRAX_oracle_value',newRate===oldRate,{original:oldRate.toString(),newRate:newRate.toString()});
- const realShareRate=await new ethers.Contract(sfMintRedeemer,['function convertToShares(uint256) view returns(uint256)'],deployer).convertToShares(10n**18n);
+ const mintRedeemer=new ethers.Contract(sfMintRedeemer,['function convertToShares(uint256) view returns(uint256)','function updateVaultTknOracle()'],user);
+ const realShareRate=await mintRedeemer.convertToShares(10n**18n);
  chk('sfrxUSD_rate_from_mint_redeemer',realShareRate===(await router.price_oracle(a.FRXUSD,a.SFRXUSD)));
  await tx(router.transferOwnership(a.ADMIN),'new_router_admin_handoff');
  chk('router_final_owner',(await router.owner()).toLowerCase()===a.ADMIN.toLowerCase());
@@ -208,6 +209,9 @@ async function state(tag,morpho,markets,loanTokens,vault,strategy,irm){console.l
  await tx(vault.connect(user).withdraw(ethers.parseEther('1')),'vault_withdraw_tax_0p3pct');
  const lockedNow=await strategy.lockedProfit();chk('withdrawal_tax_profit_locked',lockedNow>0n,{locked:lockedNow.toString()});
  await jump(24*3600,'day_after_harvest');
+ // Simulate the permissionless production keeper against the actual Fraxtal oracle contract.
+ await tx(mintRedeemer.updateVaultTknOracle(),'update_sfrxUSD_rate_after_day1');
+ chk('sfrxUSD_rate_valid_day1',(await router.price_oracle(a.SDFXS,a.SFRXUSD))>0n);
  for(const label of Object.keys(markets))await tx(morpho.accrueInterest(markets[label]),'interest_accrue_'+label+'_day1');
  const day1=await state('after_day1_interest_and_harvest',morpho,markets,loanTokens,vault,strategy,irm);
  // The IRM deliberately uses the PRIOR cached collateral APR over each elapsed interval.
@@ -215,6 +219,8 @@ async function state(tag,morpho,markets,loanTokens,vault,strategy,irm){console.l
  for(const label of Object.keys(markets))chk('no_negative_or_retroactive_interest_day1_'+label,BigInt(day1.markets[label].borrowAssets)>= (label==='WFRAX'?ethers.parseEther('3.6'):ethers.parseEther('0.704')));
  for(const label of Object.keys(markets))chk('new_yield_observation_after_day1_'+label,BigInt(day1.markets[label].annualBorrowAprWad)>0n);
  await jump(7*24*3600,'week_after_harvest');
+ await tx(mintRedeemer.updateVaultTknOracle(),'update_sfrxUSD_rate_after_week');
+ chk('sfrxUSD_rate_valid_after_week',(await router.price_oracle(a.SDFXS,a.SFRXUSD))>0n);
  await tx(strategy.connect(user).harvest(),'harvest_after_week');
  for(const label of Object.keys(markets)) await tx(morpho.accrueInterest(markets[label]),'interest_accrue_week_'+label);
  const week=await state('after_week_interest_and_harvest',morpho,markets,loanTokens,vault,strategy,irm);
