@@ -107,9 +107,9 @@ contract CurveYieldMorphoOwnerV1 {
 ///         as the earlier fee splitter. Supports creator or current receiver rotation.
 contract CurveYieldMorphoFeeSplitterV2 {
     uint256 public constant WAD = 1e18;
-    uint256 public constant CURVEYIELD_BASE_FEE = 0.02e18;
-    uint256 public constant MAX_CREATOR_FEE = 0.20e18;
-    uint256 public constant CURVEYIELD_REVENUE_SHARE = 0.20e18;
+    uint256 public constant CURVEYIELD_BASE_FEE = 0.008e18;
+    uint256 public constant MAX_CREATOR_FEE = 0.22e18;
+    uint256 public constant CURVEYIELD_REVENUE_SHARE = 0.10e18;
     uint256 public constant MORPHO_MAX_FEE = 0.25e18;
 
     ICurveYieldMorphoCore public immutable morpho;
