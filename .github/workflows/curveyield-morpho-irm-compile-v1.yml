@@ -1,4 +1,4 @@
-name: CurveYield Fraxtal Morpho IRM Compile v2
+name: CurveYield Fraxtal Morpho IRM Compile v3
 
 # Compile-only validation. No tests, deployments, broadcast or RPC use.
 on:
@@ -6,7 +6,7 @@ on:
     branches:
       - morpho-fraxtal-compile-v1
     paths:
-      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV2.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV3.sol'
       - '.github/workflows/curveyield-morpho-irm-compile-v1.yml'
   workflow_dispatch:
 
@@ -32,7 +32,7 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import solc from 'solc';
-          const path = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV2.sol';
+          const path = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV3.sol';
           const input = {
             language: 'Solidity',
             sources: { [path]: { content: fs.readFileSync(path, 'utf8') } },
