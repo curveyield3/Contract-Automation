@@ -7,6 +7,9 @@ on:
       - '.github/workflows/boosthub-v13-full-stack-anvil-v1.yml'
 permissions:
   contents: read
+concurrency:
+  group: boosthub-fraxtal-v40-fork
+  cancel-in-progress: true
 jobs:
   simulation:
     runs-on: ubuntu-latest
@@ -62,7 +65,7 @@ jobs:
           done
           test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = 252
           export FORK_RPC=http://127.0.0.1:8545
-          node github-native-sim/boosthub-fraxtal-v40/simulation/simulate_fraxtal_v1.cjs 2>&1 | tee github-native-sim/boosthub-fraxtal-v40/sim-results/run.log
+          timeout -s TERM -k 5s 420s node github-native-sim/boosthub-fraxtal-v40/simulation/simulate_fraxtal_v1.cjs 2>&1 | tee github-native-sim/boosthub-fraxtal-v40/sim-results/run.log
       - name: Keep source, simulation, state and compiler evidence
         if: always()
         uses: actions/upload-artifact@v4
