@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('node:assert/strict');
-const ethers = require(path.resolve(__dirname, 'dependencies/node_modules/ethers'));
+const ethers = require(path.resolve(__dirname, '../dependencies/node_modules/ethers'));
 const rpc = new ethers.JsonRpcProvider(process.env.FORK_RPC || 'http://127.0.0.1:8545',252,{staticNetwork:true});
 const here=path.resolve(__dirname,'..');
 const report={version:'v1',kind:'Fraxtal stateful fork simulation',chainId:252,forkOnly:true,productionDeployments:false,simulatedOnly:true,steps:[],snapshots:[],contracts:{},markets:{},errors:[],checks:[]};
