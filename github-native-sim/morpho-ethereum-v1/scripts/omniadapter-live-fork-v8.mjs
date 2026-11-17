@@ -1,0 +1,323 @@
+/**
+ * CurveYield OmniAdapter v8 / official Morpho Vault V2 LIVE FORK qualification.
+ * Run only on verified localhost Anvil fork pinned to Ethereum mainnet.
+ * Uses real protocol bytecode and token balances, NO mock contracts.
+ * A successful local call/receipt is not a mainnet deployment or security audit.
+ *
+ * Evidence: every stage saves source/chain identity, mined LOCAL fork tx receipt,
+ * full vault accounting, Morpho cap allocations, adapter position valuation,
+ * share price, all active markets, idle liquidity and actual wallet balances.
+ */
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { ethers } from "ethers";
+const OUT=".omni-v8-build/live-fork-evidence-v8.json";
+const RPC="http://127.0.0.1:8545"; // Hard boundary: all writes LOCAL ONLY.
+const USDC="0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+const WHALE="0x55FE002aefF02F77364de339a1292923A15844B8";
+const AAVE="0x87870Bca3F3fD6335C3F4ce8392D69350B4fa4E2";
+const SPARK="0xC13e21B648A5Ee794902342038FF3aDAB66BE987";
+const COMET="0xC3d688B66703497DAA19211EEdff47f25384cdc3";
+const FLUID="0x9Fb7b4477576Fe5B32be4C1843aFB1e55F251B33";
+const YEARNV3="0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204";
+const YEARNV2="0x5f18C75AbDAe578b483E5F43f12a39cF75b973a9";
+const EULER="0x797dd80692c3b2dadabce8e30c07fde5307d48a9";
+const MORPHOV1="0xbeef01735c132ada46aa9aa4c54623caa92a64cb";
+const MORPHOBLUE="0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
+const MORPHOID="0x94b823e6bd8ea533b4e33fbc307faea0b307301bc48763acc4d4aa4def7636cd";
+const WETH="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+const BLUE_ORACLE="0x0f948cba8231db7898ef36a4212581ad7b1b4580";
+const BLUE_IRM="0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC";
+const MAX_RATE=2000000000000000000n / (365n*86400n);
+const WAD=1000000000000000000n;
+const U=1000000n;
+const ZERO=ethers.ZeroAddress, HASH=ethers.ZeroHash;
+const provider=new ethers.JsonRpcProvider(RPC,{chainId:1,name:"pinned-ethereum-fork"},{staticNetwork:true});
+const signer=await provider.getSigner(0);
+const owner=await signer.getAddress();
+const abi=new ethers.AbiCoder();
+const ERC20=new ethers.Interface(["function balanceOf(address) view returns (uint256)","function allowance(address,address) view returns (uint256)","function approve(address,uint256) returns (bool)","function transfer(address,uint256) returns (bool)","function decimals() view returns (uint8)"]);
+const usdc=new ethers.Contract(USDC,ERC20,signer);
+const evidence={schema:"omniadapter-v8-local-anvil-live-fork-evidence",version:"v8",generatedAt:new Date().toISOString(),
+ sourceRepository:"curveyield3/Smart-Contracts",executionRepository:"curveyield3/Contract-Automation",
+ chainId:1,chain:"ethereum",forkBlock:process.env.ETHEREUM_FORK_BLOCK,forkHash:process.env.ETHEREUM_FORK_HASH,
+ rpc:"localhost-anvil-only",mode:"real-protocol-on-archival-fork",mockMarkets:false,
+ snapshots:[],trials:[],portfolio:null,receipts:[],errors:[],unverified:[],
+ acceptance:"REAL transactions + MORPHO native reads + protocol yield growth + positive share PPS + successful exits"};
+function x(v) { if(typeof v==="bigint")return v.toString();if(Array.isArray(v))return v.map(x);if(v&&typeof v==="object"){let o={};for(const [k,val] of Object.entries(v))o[k]=x(val);return o;}return v;}
+function save(){mkdirSync(".omni-v8-build",{recursive:true});writeFileSync(OUT,JSON.stringify(x(evidence),null,2)+"\n");}
+const artifact=(name)=>{
+ const j=JSON.parse(readFileSync(".omni-v8-build/out/"+name+".sol/"+name+".json","utf8"));
+ return {abi:j.abi,bytecode:j.bytecode.object};
+};
+const V2=artifact("VaultV2"),OMNI=artifact("CurveYieldOmniAdapterV8");
+const targets=[
+ {name:"aave-v3-usdc",protocol:"Aave V3",mode:3,target:AAVE,id:HASH,aux:ZERO,extra:"0x"},
+ {name:"spark-aave-v3-usdc",protocol:"Spark",mode:3,target:SPARK,id:HASH,aux:ZERO,extra:"0x"},
+ {name:"compound-iii-usdc",protocol:"Compound III",mode:4,target:COMET,id:HASH,aux:ZERO,extra:"0x"},
+ {name:"fluid-fusdc",protocol:"Fluid",mode:1,target:FLUID,id:HASH,aux:ZERO,extra:"0x"},
+ {name:"yearn-v3-usdc",protocol:"Yearn V3",mode:1,target:YEARNV3,id:HASH,aux:ZERO,extra:"0x"},
+ {name:"euler-evk-usdc",protocol:"Euler EVK",mode:1,target:EULER,id:HASH,aux:ZERO,extra:"0x"},
+ {name:"morpho-v1-steakhouse-usdc",protocol:"Morpho Vault V1",mode:1,target:MORPHOV1,id:HASH,aux:ZERO,extra:"0x"},
+ {name:"yearn-v2-usdc",protocol:"Yearn V2",mode:8,target:YEARNV2,id:HASH,aux:ZERO,extra:"0x"},
+ {name:"morpho-blue-usdc-weth",protocol:"Morpho Blue",mode:5,target:MORPHOBLUE,id:MORPHOID,aux:ZERO,
+   extra:abi.encode(["tuple(address loanToken,address collateralToken,address oracle,address irm,uint256 lltv)"],
+   [[USDC,WETH,BLUE_ORACLE,BLUE_IRM,860000000000000000n]])}
+];
+const fail=(check,reason)=>{if(!check)throw Error(reason);};
+const num=(v)=>BigInt(v);
+function data(t,min=0n,overrideExtra=null){return abi.encode(
+  ["uint8","address","bytes32","address","uint256","bytes"],
+  [t.mode,t.target,t.id,t.aux,min,overrideExtra??t.extra]);}
+async function tx(label,promise,scope) {
+ const t=await promise; const r=await t.wait();
+ fail(r?.status===1,"TX_REVERT "+label);
+ const record={scope,label,txHash:r.hash,blockNumber:r.blockNumber,from:r.from,to:r.to,gasUsed:r.gasUsed.toString(),status:r.status};
+ evidence.receipts.push(record);save();
+ console.log("FORK_TRANSACTION",JSON.stringify(record));return r;
+}
+async function deploy(name,artifact,params,scope){
+ const factory=new ethers.ContractFactory(artifact.abi,artifact.bytecode,signer);
+ const c=await factory.deploy(...params,{gasLimit:25000000});
+ const r=await c.deploymentTransaction().wait();
+ fail(r?.status===1,"DEPLOY_FAILED "+name);
+ const deployed=await c.getAddress();
+ evidence.receipts.push({scope,label:"deploy:"+name,txHash:r.hash,blockNumber:r.blockNumber,to:deployed,gasUsed:r.gasUsed.toString(),status:r.status});
+ save();return new ethers.Contract(deployed,artifact.abi,signer);
+}
+async function timeJump(days) {
+ await provider.send("evm_increaseTime",[days*86400]);
+ await provider.send("evm_mine",[]);
+}
+async function snapshot(label,ctx) {
+ const {vault,adapter,scope,positions}=ctx;
+ const va=await vault.getAddress(),ad=await adapter.getAddress();
+ const [height,block,assets,accrue,cache,supply,holderShares,idle,adapterIdle,observedCount,pps]=await Promise.all([
+ provider.getBlockNumber(),provider.getBlock("latest"),vault.totalAssets(),vault.accrueInterestView(),
+ vault._totalAssets(),vault.totalSupply(),vault.balanceOf(owner),usdc.balanceOf(va),usdc.balanceOf(ad),
+ adapter.marketCount(),vault.previewRedeem(WAD)]);
+ const adapterAssets=await adapter.realAssets();
+ const real=idle+adapterAssets;
+ fail(assets<=real,"REAL_ASSETS_LT_ACCOUNTED "+scope+" "+label+" "+assets+" "+real);
+ fail(accrue[0]===assets,"VAULT_ACCRUE_VIEW_MISMATCH "+scope+" "+label);
+ const obj={scope,label,blockNumber:height,blockHash:block.hash,timestamp:block.timestamp,
+  vault:va,adapter:ad,underlying:USDC,assetDecimals:6,
+  vaultTotalAssets:assets,vaultCachedAssets:cache,accountedAssetsPreview:accrue[0],
+  totalSupplyShares:supply,userShares:holderShares,previewRedeemOneShare:pps,
+  adapterAssets,idleInVault:idle,idleInAdapter:adapterIdle,
+  totalPhysicallyControlledAssets:real,activeMarketCount:observedCount,
+  positionState:[]};
+ let sum=0n;
+ for(let i=0n;i<observedCount;i++){
+  const [id,m]=await adapter.marketAt(i);
+  const alloc=await vault.allocation(id);
+  const target=positions?.find(p=>p.key===id);
+  const current=target ? await adapter.positionAssets(target.mode,target.target,target.id,target.aux):null;
+  if(current!==null)sum+=current;
+  obj.positionState.push({capId:id,mode:m.mode,target:m.target,auxiliary:m.auxiliary,
+    marketId:m.marketId,credit:m.credit,trackedShares:m.trackedShares,
+    capAllocation:alloc,livePositionAssets:current});
+ }
+ // Other-account unsolicited ERC20 donations must not be confused with deployed market value.
+ if(positions?.length===Number(observedCount))fail(sum===adapterAssets,"PER_POSITION_SUM_NOT_REAL_ASSETS "+scope);
+ evidence.snapshots.push(obj);save();
+ console.log("ACCOUNTING_SNAPSHOT",JSON.stringify(x(obj)));
+ return obj;
+}
+async function setup(scope,assets=5000n*U){
+ const vault=await deploy("official VaultV2",V2,[owner,USDC],scope);
+ const va=await vault.getAddress();
+ await tx("set curator",vault.setCurator(owner),scope);
+ const adapter=await deploy("CurveYield OmniAdapter v8",OMNI,[va],scope);
+ const ctx={scope,vault,adapter,positions:[]};
+ await snapshot("01-before-vault-deposit",ctx);
+ const allowAlloc=vault.interface.encodeFunctionData("setIsAllocator",[owner,true]);
+ await tx("submit allocator",vault.submit(allowAlloc),scope);
+ await tx("activate allocator",vault.setIsAllocator(owner,true),scope);
+ const add=vault.interface.encodeFunctionData("addAdapter",[await adapter.getAddress()]);
+ await tx("submit adapter",vault.submit(add),scope);
+ await tx("activate adapter",vault.addAdapter(await adapter.getAddress()),scope);
+ await tx("set max vault earnings rate",vault.setMaxRate(MAX_RATE),scope);
+ await tx("approve vault USDC",usdc.approve(va,ethers.MaxUint256),scope);
+ await snapshot("02-after-role-and-rate-configuration",ctx);
+ await tx("deposit USDC into Morpho Vault V2",vault.deposit(assets,owner),scope);
+ await snapshot("03-after-user-deposit",ctx);
+ return ctx;
+}
+async function cap(ctx,t){
+ const {vault,adapter,scope}=ctx;
+ const key=await adapter.keyOf(t.mode,t.target,t.id,t.aux);
+ const idData=await adapter.idData(t.mode,t.target,t.id,t.aux);
+ fail(ethers.keccak256(idData)===key,"CAP_ID_MISMATCH");
+ const abs=10000000000000n;
+ const setAbs=vault.interface.encodeFunctionData("increaseAbsoluteCap",[idData,abs]);
+ await tx("submit absolute cap "+t.name,vault.submit(setAbs),scope);
+ await tx("set absolute cap "+t.name,vault.increaseAbsoluteCap(idData,abs),scope);
+ const setRel=vault.interface.encodeFunctionData("increaseRelativeCap",[idData,WAD]);
+ await tx("submit relative cap "+t.name,vault.submit(setRel),scope);
+ await tx("set relative cap "+t.name,vault.increaseRelativeCap(idData,WAD),scope);
+ const caps=await vault.caps(key);
+ fail(caps.absoluteCap===abs&&caps.relativeCap===WAD,"CAP_SET_FAILED");
+ return key;
+}
+async function allocate(ctx,t,amount){
+ const {vault,adapter,scope}=ctx;
+ await snapshot("04-before-market-allocation:"+t.name,ctx);
+ const key=await cap(ctx,t);
+ await snapshot("05-after-cap-registration:"+t.name,ctx);
+ await tx("allocate to real market "+t.name,vault.allocate(await adapter.getAddress(),data(t),amount),scope);
+ ctx.positions.push({...t,key});
+ const value=await adapter.positionAssets(t.mode,t.target,t.id,t.aux);
+ fail(value>0n,"EMPTY_ALLOCATION "+t.name);
+ fail((await vault.allocation(key))===value,"ALLOCATION_RETURN_INCORRECT "+t.name);
+ await snapshot("06-after-real-market-deposit:"+t.name,ctx);
+ return {key,value};
+}
+async function accrueMarket(ctx,t) {
+ if(t.mode===4){
+  const comet=new ethers.Contract(t.target,["function accrueAccount(address)"],signer);
+  await tx("Compound III real-market accrueAccount",comet.accrueAccount(await ctx.adapter.getAddress()),ctx.scope);
+ }else if(t.mode===5){
+  const morpho=new ethers.Contract(t.target,["function accrueInterest((address loanToken,address collateralToken,address oracle,address irm,uint256 lltv))"],signer);
+  const p=[USDC,WETH,BLUE_ORACLE,BLUE_IRM,860000000000000000n];
+  await tx("Morpho Blue accrueInterest actual USDC/WETH market",morpho.accrueInterest(p),ctx.scope);
+ }
+}
+async function trial(t){
+ const scope="trial:"+t.name;const record={name:t.name,protocol:t.protocol,target:t.target,mode:t.mode,status:"IN_PROGRESS",snapshots:[]};
+ evidence.trials.push(record);save();
+ try{
+  const ctx=await setup(scope);
+  await snapshot("07-before-market-transaction",ctx);
+  const p=await allocate(ctx,t,1000n*U);
+  const before=await snapshot("08-before-time-jump",ctx);
+  await timeJump(1);await snapshot("09-after-1-day-time-jump",ctx);
+  await timeJump(6);await snapshot("10-after-7-day-time-jump",ctx);
+  await timeJump(23);await snapshot("11-after-30-day-time-jump-before-market-accrual",ctx);
+  await accrueMarket(ctx,t);
+  await snapshot("12-after-market-accrual",ctx);
+  await tx("vault accrual reads actual market",ctx.vault.accrueInterest(),scope);
+  const after=await snapshot("13-after-morpho-vault-accrual",ctx);
+  const gained=await ctx.adapter.positionAssets(t.mode,t.target,t.id,t.aux);
+  fail(gained>p.value,"NO_POSITIVE_REAL_MARKET_YIELD "+t.name+" before="+p.value+" now="+gained);
+  fail(after.previewRedeemOneShare>before.previewRedeemOneShare,"SHARE_PRICE_NOT_HIGHER "+t.name);
+  const beforeVaultBalance=await usdc.balanceOf(await ctx.vault.getAddress());
+  await snapshot("14-before-market-deallocation",ctx);
+  await tx("deallocate market and return real USDC to vault",ctx.vault.deallocate(await ctx.adapter.getAddress(),data(t),200n*U),scope);
+  const afterVaultBalance=await usdc.balanceOf(await ctx.vault.getAddress());
+  fail(afterVaultBalance>=beforeVaultBalance+200n*U,"DEALLOCATE_DID_NOT_DELIVER_USDC");
+  const afterWithdraw=await snapshot("15-after-market-deallocation",ctx);
+  const newValue=await ctx.adapter.positionAssets(t.mode,t.target,t.id,t.aux);
+  fail((await ctx.vault.allocation(p.key))===newValue,"POST_WITHDRAW_CAP_ALLOCATION_MISMATCH");
+  const shares=(await ctx.vault.balanceOf(owner))/5n;
+  const receivedPreview=await ctx.vault.previewRedeem(shares);
+  const initialEquivalent=shares*before.previewRedeemOneShare/WAD;
+  fail(receivedPreview>initialEquivalent,"NO_YIELD_AT_REDEMPTION");
+  await snapshot("16-before-higher-price-vault-redemption",ctx);
+  const walletBefore=await usdc.balanceOf(owner);
+  await tx("user redeems Morpho Vault V2 shares at higher value",ctx.vault.redeem(shares,owner,owner),scope);
+  const redeemed=(await usdc.balanceOf(owner))-walletBefore;
+  fail(redeemed>=receivedPreview&&redeemed>initialEquivalent,"REDEEM_DID_NOT_RETURN_HIGHER_SHARE_VALUE");
+  const ending=await snapshot("17-after-user-redemption-with-active-allocation",ctx);
+  fail(ending.activeMarketCount>0n&&ending.adapterAssets>0n,"POSITION_DID_NOT_REMAIN_ACTIVE");
+  record.status="PROVEN_LOCAL_FORK";record.asset=USDC;record.startPositionAssets=p.value;
+  record.endPositionAssets=newValue;record.yieldEarned=gained-p.value;
+  record.sharePpsBefore=before.previewRedeemOneShare;record.sharePpsAfter=after.previewRedeemOneShare;
+  record.redeemedAssets=redeemed;record.redeemedShares=shares;record.hasActiveEndState=true;
+  console.log("LIVE_FORK_PROTOCOL_PASS",t.name,"yield",String(record.yieldEarned));
+ }catch(e){
+  record.status="NOT_PROVEN";record.error=String(e.stack||e).slice(0,1800);
+  console.error("LIVE_FORK_PROTOCOL_FAIL",t.name,record.error);
+ }finally{save();}
+ return record;
+}
+async function portfolio(passed){
+ const scope="portfolio:multi-protocol-USDC";
+ const rec={status:"IN_PROGRESS",qualifyingMarkets:passed.map(t=>t.name)};
+ evidence.portfolio=rec;save();
+ try{
+  fail(passed.length>0,"NO_VERIFIED_PROTOCOLS");
+  const ctx=await setup(scope,15000n*U);
+  await snapshot("P01-before-deposit-allocations",ctx);
+  const starts=[];
+  for(const t of passed){
+   const p=await allocate(ctx,t,750n*U);
+   starts.push({...t,key:p.key,assetsBefore:p.value});
+   await snapshot("P02-after-each-market-added:"+t.name,ctx);
+  }
+  const initial=await snapshot("P03-all-markets-active-before-timejump",ctx);
+  await timeJump(1);await snapshot("P04-all-active-1-day-checkpoint",ctx);
+  await timeJump(6);await snapshot("P05-all-active-7-day-checkpoint",ctx);
+  await timeJump(23);await snapshot("P06-all-active-30-day-checkpoint",ctx);
+  for(const t of passed){await accrueMarket(ctx,t);await snapshot("P07-after-individual-market-accrual:"+t.name,ctx);}
+  await tx("portfolio Morpho Vault V2 accrueInterest",ctx.vault.accrueInterest(),scope);
+  const postAccrual=await snapshot("P08-portfolio-accrued-all-markets-active",ctx);
+  fail(postAccrual.previewRedeemOneShare>initial.previewRedeemOneShare,"PORTFOLIO_SHARE_RATE_NOT_HIGHER");
+  for(const position of starts){
+   const p=await ctx.adapter.positionAssets(position.mode,position.target,position.id,position.aux);
+   fail(p>position.assetsBefore,"PORTFOLIO_PROTOCOL_WITHOUT_YIELD "+position.name);
+  }
+  for(const t of passed){
+   await snapshot("P09-before-each-position-withdraw:"+t.name,ctx);
+   const balanceBefore=await usdc.balanceOf(await ctx.vault.getAddress());
+   await tx("portfolio withdraw 75 USDC from "+t.name,ctx.vault.deallocate(await ctx.adapter.getAddress(),data(t),75n*U),scope);
+   fail((await usdc.balanceOf(await ctx.vault.getAddress()))>=balanceBefore+75n*U,"PORTFOLIO_DEALLOCATE_MISSING_ASSETS "+t.name);
+   const key=await ctx.adapter.keyOf(t.mode,t.target,t.id,t.aux);
+   fail((await ctx.vault.allocation(key))===await ctx.adapter.positionAssets(t.mode,t.target,t.id,t.aux),"PORTFOLIO_CAP_MISMATCH "+t.name);
+   await snapshot("P10-after-each-position-withdraw:"+t.name,ctx);
+  }
+  const shares=(await ctx.vault.balanceOf(owner))/10n;
+  const startingShareValue=shares*initial.previewRedeemOneShare/WAD;
+  const walletBefore=await usdc.balanceOf(owner);
+  await snapshot("P11-before-final-positive-PPS-user-redeem",ctx);
+  await tx("portfolio user redeems vault shares",ctx.vault.redeem(shares,owner,owner),scope);
+  const received=(await usdc.balanceOf(owner))-walletBefore;
+  fail(received>startingShareValue,"PORTFOLIO_REDEMPTION_NOT_PROFITABLE");
+  const ending=await snapshot("P12-final-portfolio-active-allocations-and-accounting",ctx);
+  fail(ending.activeMarketCount===BigInt(passed.length),"PORTFOLIO_DID_NOT_PRESERVE_ACTIVE_MARKETS");
+  rec.status="PROVEN_LOCAL_FORK";rec.vault=await ctx.vault.getAddress();rec.adapter=await ctx.adapter.getAddress();
+  rec.startingSharePps=initial.previewRedeemOneShare;rec.finalSharePps=ending.previewRedeemOneShare;
+  rec.redeemedUnderlying=received;rec.redeemedShares=shares;
+  rec.finalActivePositions=ending.positionState;rec.finalTotalAssets=ending.vaultTotalAssets;
+  console.log("LIVE_FORK_PORTFOLIO_PASS",passed.length,rec.vault,rec.finalTotalAssets.toString());
+ }catch(e){rec.status="NOT_PROVEN";rec.error=String(e.stack||e).slice(0,1800);console.error("LIVE_FORK_PORTFOLIO_FAIL",rec.error);}
+ save();
+}
+async function main(){
+ const info=await provider.getNetwork();fail(info.chainId===1n,"WRONG_NETWORK");
+ const pin=Number(process.env.ETHEREUM_FORK_BLOCK);fail(Number.isSafeInteger(pin)&&pin>1,"MISSING_PIN");
+ const original=await provider.getBlock(pin);fail(original&&original.hash.toLowerCase()===process.env.ETHEREUM_FORK_HASH?.toLowerCase(),"FORK_BLOCK_HASH_MISMATCH");
+ for(const addr of [USDC,AAVE,SPARK,COMET,FLUID,YEARNV3,YEARNV2,EULER,MORPHOV1,MORPHOBLUE]){
+  const code=await provider.getCode(addr);fail(code.length>2,"MISSING_LIVE_CODE "+addr);
+ }
+ evidence.forkVerified=true;evidence.runnerSha=process.env.GITHUB_SHA;
+ evidence.contractSourceSha=ethers.sha256(ethers.toUtf8Bytes(readFileSync(".omni-v8-contracts/CurveYieldOmniAdapterV8.sol","utf8")));
+ evidence.upstreamMorphoVaultV2Sha="05e440d68b03127b8c62e472f45c3785e5e4d944";
+ await provider.send("anvil_setBalance",[WHALE,ethers.toBeHex(100n*10n**18n)]);
+ await provider.send("anvil_impersonateAccount",[WHALE]);
+ const whale=await provider.getSigner(WHALE);
+ await tx("fund test operator with REAL USDC from source account",new ethers.Contract(USDC,ERC20,whale).transfer(owner,100000n*U),"fork-fixture");
+ await provider.send("anvil_stopImpersonatingAccount",[WHALE]);
+ let base=await provider.send("evm_snapshot",[]);
+ const passed=[];
+ for(const t of targets){
+  fail(await provider.send("evm_revert",[base]),"REVERT_BASE_FAILED"); // snapshot one-shot
+  // Create new independent baseline after revert so each protocol gets identical chain state.
+  const fresh=await provider.send("evm_snapshot",[]);
+  const tr=await trial(t);
+  if(tr.status==="PROVEN_LOCAL_FORK")passed.push(t);
+  // Rewind to the original funded state; next trial must not inherit prior time jumps.
+  fail(await provider.send("evm_revert",[fresh]),"REVERT_TRIAL_FAILED");
+  // Track replacement snapshot id as new baseline for next loop using fresh local variable below.
+  const next=await provider.send("evm_snapshot",[]);
+  // We must not reuse consumed base id; replace it.
+  base=next;
+ }
+ fail(await provider.send("evm_revert",[base]),"PORTFOLIO_RESTORE_FAILED");
+ await portfolio(passed);
+ evidence.summary={totalProtocolCases:targets.length,passed:passed.length,failed:targets.length-passed.length,
+ passedNames:passed.map(t=>t.name),portfolioStatus:evidence.portfolio?.status,
+ snapshots:evidence.snapshots.length,minedForkReceipts:evidence.receipts.length};
+ save();console.log("FINAL_LOCAL_FORK_VERDICT",JSON.stringify(x(evidence.summary)));
+ fail(evidence.summary.failed===0&&evidence.portfolio?.status==="PROVEN_LOCAL_FORK","COMPATIBILITY_INCOMPLETE_EVIDENCE_RETAINED");
+}
+main().catch(e=>{evidence.errors.push(String(e.stack||e));save();console.error("LIVE_FORK_FATAL",e);process.exitCode=1;});
