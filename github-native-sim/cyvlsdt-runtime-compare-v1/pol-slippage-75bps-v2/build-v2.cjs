@@ -55,7 +55,7 @@ async function main(){
  const pol=artifact(m,managerFile,'PoLManager');
  const guard=artifact(g,guardFile,'CurvePairOracleBoundsV7');
  const mocks={};
- for(const name of ['StressERC20V2','StressThreeCoinNGV2','StressUniOraclePoolV2','StressUniFactoryV2','StressUniNFTV2','StressHistoricalRouterV2']){
+ for(const name of ['StressERC20V2','StressThreeCoinNGV2','StressUniOraclePoolV2','StressUniFactoryV2','StressUniNFTV2','StressHistoricalRouterV2','Stress4626BasicV2']){
   mocks[name]=artifact(t,stressFile,name);
  }
  const cfg={owner:SAFE,yearnVaults:[ZERO,ZERO,ZERO],sdtYearnIndex:0,
