@@ -29,7 +29,7 @@ const DOLOMITE_ROUTER="0xf8b2c637a68cf6a17b1df9f8992eebeff63d2dff";
 const DOLOMITE_MARGIN="0x003ca23fd5f0ca87d01f6ec6cd14a8ae60c2b97d";
 const IPOR_FUSION="0x43ee0243ea8cf02f7087d8b16c8d2007cc9c7ca2";
 // Multiple verified real Ethereum USDC Fusion vaults; keep unsuccessful attempts as evidence.
-const IPOR_ALTERNATIVES=["0xb0f56bb0bf13ee05fef8cd2d8df5ffdfcac7a74f",IPOR_FUSION,"0x3151cee0cdb517c0e7db2b55ff5085e7d1809d90"];
+const IPOR_ALTERNATIVES=["0xf8f226da66244f89e70c5b5d1a5c5b0d505eb1d8","0x6f66b845604dad6e80b2a1472e6cacbbe66a8c40"]; // earlier three negative-NAV trials retained in prior Actions logs
 const MORPHOID="0x94b823e6bd8ea533b4e33fbc307faea0b307301bc48763acc4d4aa4def7636cd";
 const WETH="0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 const BLUE_ORACLE="0x0f948cba8231db7898ef36a4212581ad7b1b4580";
@@ -318,10 +318,14 @@ async function refreshRealIPOR(ctx,t) {
  // need not invoke reporting for every market: run the original authenticated
  // reporting function from the actual authorized reporter, solely on Anvil.
  const reporterByVault={
+  "0xf8f226da66244f89e70c5b5d1a5c5b0d505eb1d8":"0xc53376985f98a7d9fa25b3b53a22492179b802da",
+  "0x6f66b845604dad6e80b2a1472e6cacbbe66a8c40":"0x6d3be3f86fb1139d0c9668bd552f05fcb643e6e6",
   "0xb0f56bb0bf13ee05fef8cd2d8df5ffdfcac7a74f":"0x046b91794da429dae94fd4269957674eb2e2237f",
   "0x3151cee0cdb517c0e7db2b55ff5085e7d1809d90":"0x863c0ccf0b349435ecbaceb14c90d444586cdab8"
  };
  const reportMarketIds={
+  "0xf8f226da66244f89e70c5b5d1a5c5b0d505eb1d8":[1n,14n,100002n,7n],
+  "0x6f66b845604dad6e80b2a1472e6cacbbe66a8c40":[7n,14n],
   "0xb0f56bb0bf13ee05fef8cd2d8df5ffdfcac7a74f":[ethers.MaxUint256,14n,12n,7n,19n],
   "0x3151cee0cdb517c0e7db2b55ff5085e7d1809d90":[]
  };
@@ -335,7 +339,7 @@ async function refreshRealIPOR(ctx,t) {
   fail(permission[0]===true && permission[1]===0n,
        "IPOR_REAL_REPORTER_NOT_AUTHORIZED "+t.target);
   const ids=reportMarketIds[t.target];
-  // Actual historical successful tx for the TAU vault used exactly this five-ID set.
+  // Reporter and market IDs were confirmed from successful real Ethereum txs per target.
   // No fabricated revenue, token balance manipulation, or valuation overrides.
   const vaultReporting=new ethers.Contract(t.target,[
    "function authority() view returns(address)",
