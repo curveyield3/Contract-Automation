@@ -1,9 +1,9 @@
 {
-  "scenarioCount": 53,
-  "successful": 23,
+  "scenarioCount": 57,
+  "successful": 27,
   "expectedReverts": 30,
-  "assertions": 388,
-  "mainnetForkBlock": 26431363,
+  "assertions": 420,
+  "mainnetForkBlock": 26431385,
   "policy": {
     "curve": 75,
     "uniswapNFT": 75,
@@ -16,11 +16,51 @@
   ],
   "tests": [
     {
+      "component": "Pending Uniswap NFT deposit",
+      "delayDays": 2,
+      "submissionBlock": 26431407,
+      "executionBlock": 26431408,
+      "submissionTimestamp": 1794877785,
+      "executionTimestamp": 1795050585,
+      "observedDeadline": "1795050585",
+      "pass": true
+    },
+    {
+      "component": "Pending Uniswap NFT withdrawal",
+      "delayDays": 3,
+      "submissionBlock": 26431408,
+      "executionBlock": 26431409,
+      "submissionTimestamp": 1794877786,
+      "executionTimestamp": 1795136986,
+      "observedDeadline": "1795136986",
+      "pass": true
+    },
+    {
+      "component": "Pending NFT inventory balancing swap",
+      "delayDays": 5,
+      "submissionBlock": 26431408,
+      "executionBlock": 26431409,
+      "submissionTimestamp": 1794877786,
+      "executionTimestamp": 1795309786,
+      "observedDeadline": "1795309786",
+      "pass": true
+    },
+    {
+      "component": "Pending nonzero-fee Uniswap NFT harvest",
+      "delayDays": 7,
+      "submissionBlock": 26431411,
+      "executionBlock": 26431412,
+      "submissionTimestamp": 1794877789,
+      "executionTimestamp": 1795482589,
+      "observedDeadline": "1795482589",
+      "pass": true
+    },
+    {
       "component": "Curve deposit",
       "spotRateBps": 10000,
       "lossPercent": 0,
       "pass": true,
-      "block": 26431385,
+      "block": 26431412,
       "gas": "350014"
     },
     {
@@ -28,15 +68,15 @@
       "spotRateBps": 10000,
       "lossPercent": 0,
       "pass": true,
-      "block": 26431386,
+      "block": 26431413,
       "gas": "302913"
     },
     {
       "component": "Uniswap NFT deposit",
       "spotRateBps": 10000,
       "pass": true,
-      "block": 26431386,
-      "gas": "264833",
+      "block": 26431413,
+      "gas": "309308",
       "estimateLiquidity": "33837499809738371427853",
       "minLiquidity": "33583718561165333642144"
     },
@@ -44,15 +84,15 @@
       "component": "Uniswap NFT withdrawal",
       "spotRateBps": 10000,
       "pass": true,
-      "block": 26431386,
-      "gas": "204593"
+      "block": 26431413,
+      "gas": "428022"
     },
     {
       "component": "Curve deposit",
       "spotRateBps": 9926,
       "lossPercent": 0.74,
       "pass": true,
-      "block": 26431385,
+      "block": 26431412,
       "gas": "350014"
     },
     {
@@ -60,15 +100,15 @@
       "spotRateBps": 9926,
       "lossPercent": 0.74,
       "pass": true,
-      "block": 26431386,
+      "block": 26431413,
       "gas": "302913"
     },
     {
       "component": "Uniswap NFT deposit",
       "spotRateBps": 9926,
       "pass": true,
-      "block": 26431386,
-      "gas": "264833",
+      "block": 26431413,
+      "gas": "309308",
       "estimateLiquidity": "33837499809738371427853",
       "minLiquidity": "33583718561165333642144"
     },
@@ -76,15 +116,15 @@
       "component": "Uniswap NFT withdrawal",
       "spotRateBps": 9926,
       "pass": true,
-      "block": 26431386,
-      "gas": "204593"
+      "block": 26431413,
+      "gas": "428022"
     },
     {
       "component": "Curve deposit",
       "spotRateBps": 9925,
       "lossPercent": 0.75,
       "pass": true,
-      "block": 26431385,
+      "block": 26431412,
       "gas": "350014"
     },
     {
@@ -92,15 +132,15 @@
       "spotRateBps": 9925,
       "lossPercent": 0.75,
       "pass": true,
-      "block": 26431386,
+      "block": 26431413,
       "gas": "302913"
     },
     {
       "component": "Uniswap NFT deposit",
       "spotRateBps": 9925,
       "pass": true,
-      "block": 26431386,
-      "gas": "264833",
+      "block": 26431413,
+      "gas": "309308",
       "estimateLiquidity": "33837499809738371427853",
       "minLiquidity": "33583718561165333642144"
     },
@@ -108,15 +148,15 @@
       "component": "Uniswap NFT withdrawal",
       "spotRateBps": 9925,
       "pass": true,
-      "block": 26431386,
-      "gas": "204593"
+      "block": 26431413,
+      "gas": "428022"
     },
     {
       "component": "Curve deposit",
       "spotRateBps": 9924,
       "lossPercent": 0.76,
       "pass": false,
-      "block": 26431385,
+      "block": 26431412,
       "gas": "302720"
     },
     {
@@ -124,15 +164,15 @@
       "spotRateBps": 9924,
       "lossPercent": 0.76,
       "pass": false,
-      "block": 26431386,
+      "block": 26431413,
       "gas": "289881"
     },
     {
       "component": "Uniswap NFT deposit",
       "spotRateBps": 9924,
       "pass": false,
-      "block": 26431386,
-      "gas": "197379",
+      "block": 26431413,
+      "gas": "241854",
       "estimateLiquidity": "33837499809738371427853",
       "minLiquidity": "33583718561165333642144"
     },
@@ -140,15 +180,15 @@
       "component": "Uniswap NFT withdrawal",
       "spotRateBps": 9924,
       "pass": false,
-      "block": 26431386,
-      "gas": "170934"
+      "block": 26431413,
+      "gas": "423241"
     },
     {
       "component": "Curve deposit",
       "spotRateBps": 9860,
       "lossPercent": 1.4000000000000001,
       "pass": false,
-      "block": 26431385,
+      "block": 26431412,
       "gas": "302720"
     },
     {
@@ -156,15 +196,15 @@
       "spotRateBps": 9860,
       "lossPercent": 1.4000000000000001,
       "pass": false,
-      "block": 26431386,
+      "block": 26431413,
       "gas": "289881"
     },
     {
       "component": "Uniswap NFT deposit",
       "spotRateBps": 9860,
       "pass": false,
-      "block": 26431386,
-      "gas": "197379",
+      "block": 26431413,
+      "gas": "241854",
       "estimateLiquidity": "33837499809738371427853",
       "minLiquidity": "33583718561165333642144"
     },
@@ -172,15 +212,15 @@
       "component": "Uniswap NFT withdrawal",
       "spotRateBps": 9860,
       "pass": false,
-      "block": 26431386,
-      "gas": "170934"
+      "block": 26431413,
+      "gas": "423241"
     },
     {
       "component": "Curve deposit",
       "spotRateBps": 9700,
       "lossPercent": 3,
       "pass": false,
-      "block": 26431385,
+      "block": 26431412,
       "gas": "302720"
     },
     {
@@ -188,15 +228,15 @@
       "spotRateBps": 9700,
       "lossPercent": 3,
       "pass": false,
-      "block": 26431386,
+      "block": 26431413,
       "gas": "289881"
     },
     {
       "component": "Uniswap NFT deposit",
       "spotRateBps": 9700,
       "pass": false,
-      "block": 26431386,
-      "gas": "197379",
+      "block": 26431413,
+      "gas": "241854",
       "estimateLiquidity": "33837499809738371427853",
       "minLiquidity": "33583718561165333642144"
     },
@@ -204,15 +244,15 @@
       "component": "Uniswap NFT withdrawal",
       "spotRateBps": 9700,
       "pass": false,
-      "block": 26431386,
-      "gas": "170934"
+      "block": 26431413,
+      "gas": "423241"
     },
     {
       "component": "Curve deposit",
       "spotRateBps": 9500,
       "lossPercent": 5,
       "pass": false,
-      "block": 26431385,
+      "block": 26431412,
       "gas": "302720"
     },
     {
@@ -220,15 +260,15 @@
       "spotRateBps": 9500,
       "lossPercent": 5,
       "pass": false,
-      "block": 26431386,
+      "block": 26431413,
       "gas": "289881"
     },
     {
       "component": "Uniswap NFT deposit",
       "spotRateBps": 9500,
       "pass": false,
-      "block": 26431386,
-      "gas": "197379",
+      "block": 26431413,
+      "gas": "241854",
       "estimateLiquidity": "33837499809738371427853",
       "minLiquidity": "33583718561165333642144"
     },
@@ -236,15 +276,15 @@
       "component": "Uniswap NFT withdrawal",
       "spotRateBps": 9500,
       "pass": false,
-      "block": 26431386,
-      "gas": "170934"
+      "block": 26431413,
+      "gas": "423241"
     },
     {
       "component": "Curve deposit",
       "spotRateBps": 9000,
       "lossPercent": 10,
       "pass": false,
-      "block": 26431385,
+      "block": 26431412,
       "gas": "302720"
     },
     {
@@ -252,15 +292,15 @@
       "spotRateBps": 9000,
       "lossPercent": 10,
       "pass": false,
-      "block": 26431386,
+      "block": 26431413,
       "gas": "289881"
     },
     {
       "component": "Uniswap NFT deposit",
       "spotRateBps": 9000,
       "pass": false,
-      "block": 26431386,
-      "gas": "197379",
+      "block": 26431413,
+      "gas": "241854",
       "estimateLiquidity": "33837499809738371427853",
       "minLiquidity": "33583718561165333642144"
     },
@@ -268,8 +308,8 @@
       "component": "Uniswap NFT withdrawal",
       "spotRateBps": 9000,
       "pass": false,
-      "block": 26431386,
-      "gas": "170934"
+      "block": 26431413,
+      "gas": "423241"
     },
     {
       "component": "Uniswap NFT balancing swap",
@@ -385,5 +425,48 @@
       "spotRateBps": 9500,
       "pass": false
     }
-  ]
+  ],
+  "deadlineProofs": [
+    {
+      "component": "Pending Uniswap NFT deposit",
+      "delayDays": 2,
+      "submissionBlock": 26431407,
+      "executionBlock": 26431408,
+      "submissionTimestamp": 1794877785,
+      "executionTimestamp": 1795050585,
+      "observedDeadline": "1795050585",
+      "pass": true
+    },
+    {
+      "component": "Pending Uniswap NFT withdrawal",
+      "delayDays": 3,
+      "submissionBlock": 26431408,
+      "executionBlock": 26431409,
+      "submissionTimestamp": 1794877786,
+      "executionTimestamp": 1795136986,
+      "observedDeadline": "1795136986",
+      "pass": true
+    },
+    {
+      "component": "Pending NFT inventory balancing swap",
+      "delayDays": 5,
+      "submissionBlock": 26431408,
+      "executionBlock": 26431409,
+      "submissionTimestamp": 1794877786,
+      "executionTimestamp": 1795309786,
+      "observedDeadline": "1795309786",
+      "pass": true
+    },
+    {
+      "component": "Pending nonzero-fee Uniswap NFT harvest",
+      "delayDays": 7,
+      "submissionBlock": 26431411,
+      "executionBlock": 26431412,
+      "submissionTimestamp": 1794877789,
+      "executionTimestamp": 1795482589,
+      "observedDeadline": "1795482589",
+      "pass": true
+    }
+  ],
+  "exactDeadlineEqualityVerified": true
 }
