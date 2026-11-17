@@ -764,7 +764,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$RPC_ETHEREUM"
-          cat > hardhat.config.js <<'HARDHAT_CONFIG'
+          cat > hardhat.config.cjs <<'HARDHAT_CONFIG'
           require('@nomicfoundation/hardhat-ethers');
           module.exports={
             solidity:{version:'0.8.28',settings:{optimizer:{enabled:true,runs:200},viaIR:true,evmVersion:'cancun'}},
@@ -778,6 +778,7 @@ jobs:
           };
           HARDHAT_CONFIG
           export NODE_PATH="$GITHUB_WORKSPACE/.slip-deps28/node_modules"
+          export HARDHAT_CONFIG="$GITHUB_WORKSPACE/hardhat.config.cjs"
           node github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/fork-stress-v2.cjs \
             2>&1 | tee github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/outputs-v2/fork-run.log
           test -s github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/outputs-v2/Fork-Stress-Results-v2.json
