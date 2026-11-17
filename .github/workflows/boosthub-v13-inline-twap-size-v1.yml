@@ -6,7 +6,7 @@ on:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldLendingMarketAdapterV1.sol'
-      - 'github-native-sim/morpho-ethereum-v1/CurveYieldOmniAdapterV5.sol'
+      - 'github-native-sim/morpho-ethereum-v1/CurveYieldOmniAdapterV6.sol'
   workflow_dispatch:
 permissions:
   contents: read
@@ -99,7 +99,7 @@ jobs:
   morpho-v1-compile:
     permissions:
       contents: write
-    name: Compile thin OmniAdapter v5 + optional native FRAX fee deployer
+    name: Compile OmniAdapter v6 projected asset read + native FRAX fee deployer
     if: github.ref_name == 'ethereum-omniadapter-v1'
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -140,7 +140,7 @@ jobs:
               bc = d.get('deployedBytecode',{}).get('object','')
               if not isinstance(bc,str) or not bc.startswith('0x') or len(bc)<=2: continue
               rows.append({'contract':p.stem,'runtimeBytes':(len(bc)-2)//2,'eip170Pass':(len(bc)-2)//2 <= 24576})
-          wanted = {'CurveYieldOmniAdapterV5','CurveYieldOmniAdapterDeployerV5'}
+          wanted = {'CurveYieldOmniAdapterV6','CurveYieldOmniAdapterDeployerV6'}
           names = {r['contract'] for r in rows}
           assert wanted <= names, f'Missing deployable contracts: {wanted - names}'
           assert all(row['eip170Pass'] for row in rows), 'Runtime bytecode exceeds EIP-170'
@@ -187,7 +187,7 @@ jobs:
           }
           if record['status']=='PASS':
               artifacts={}
-              for name in ('CurveYieldOmniAdapterV5','CurveYieldOmniAdapterDeployerV5'):
+              for name in ('CurveYieldOmniAdapterV6','CurveYieldOmniAdapterDeployerV6'):
                   found=list(Path('.morpho-compile/out').rglob(name+'.json'))
                   assert len(found)==1,(name,found)
                   artifact=json.loads(found[0].read_text())
@@ -199,9 +199,9 @@ jobs:
                                    'runtimeBytecode':runtime,'metadata':artifact.get('metadata')}
               record['deployableArtifacts']=artifacts
           content=base64.b64encode((json.dumps(record,indent=2)+'\n').encode()).decode()
-          payload={'message':'Record lean CurveYield OmniAdapter V4 adapter + native fee deployer bytecode v7',
+          payload={'message':'Record CurveYield OmniAdapter V6 asset-read-compatible adapter + native fee deployer bytecode v8',
                    'branch':os.environ['GITHUB_REF_NAME'],'content':content}
           Path('.morpho-compile/receipt-request.json').write_text(json.dumps(payload))
           print('COMPILATION_RECEIPT',record['status'],record['workflowRunUrl'])
           PY
-          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-ethereum-v1/compilation-receipt-v7.json" --input .morpho-compile/receipt-request.json
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-ethereum-v1/compilation-receipt-v8.json" --input .morpho-compile/receipt-request.json
