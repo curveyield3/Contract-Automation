@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-/// @title CurveYield Protected Morpho Vault V2 Controller v5
+/// @title CurveYield Protected Morpho Vault V2 Controller v6
 /// @notice Standalone, immutable per-vault controller with CurveYield fees capped on-chain.
 /// @dev Operator administers strategies within an allowlist. CurveYield governance can
 ///      ONLY schedule fee-rate changes (90-day delay), rotate protocol recipient and
@@ -43,7 +43,7 @@ contract CurveYieldProtectedVaultController {
     uint256 public constant DEFAULT_FLAT_FEE_WAD = 2e15; // 0.20% of yield.
     uint256 public constant MAX_FLAT_FEE_WAD = 1e16; // 1.00% of yield.
     uint256 public constant DEFAULT_OPERATOR_SURCHARGE_BPS = 200; // 2% of operator performance fee.
-    uint256 public constant MAX_OPERATOR_SURCHARGE_BPS = 500; // 5% of operator performance fee.
+    uint256 public constant MAX_OPERATOR_SURCHARGE_BPS = 1000; // 10% of operator performance fee.
     uint256 public constant BPS = 10_000;
     uint256 public constant FEE_CHANGE_DELAY = 90 days;
     uint256 public constant MORPHO_MAX_PERFORMANCE_FEE_WAD = 5e17;

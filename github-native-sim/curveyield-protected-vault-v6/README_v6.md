@@ -1,12 +1,12 @@
-# CurveYield Protected Morpho Vault V2 Controller v5
+# CurveYield Protected Morpho Vault V2 Controller v6
 
-v5 supersedes v4. **There is now one contract per vault**: an immutable controller that is simultaneously Morpho vault owner, curator and performance fee-share recipient. The separate fee splitter and unrestricted governance migration were removed.
+v6 supersedes v5. **There is now one contract per vault**: an immutable controller that is simultaneously Morpho vault owner, curator and performance fee-share recipient. The separate fee splitter and unrestricted governance migration were removed.
 
 ## Revenue model and permanent hard caps
 - Initial flat fee on recognized yield: 0.20% (2e15 WAD)
 - Maximum flat fee: **1.00% (1e16 WAD)**
 - Initial CurveYield surcharge: 2% (200 basis points) of the operator's performance fee
-- Maximum surcharge: **5% (500 basis points)** of the operator's performance fee
+- Maximum surcharge: **10% (1,000 basis points)** of the operator's performance fee
 - Morpho Vault V2's total performance fee is the operator's performance fee plus CurveYield's flat + surcharge components, and is still capped at 50% overall.
 
 Governance schedules fee changes via `scheduleProtocolFeeRates(flatFeeWad,surchargeBps)`. The controller enforces a **non-configurable 90-day delay** before permissionless `executeProtocolFeeRates()`. Governance can `cancelProtocolFeeRates()` at any time before execution, including after the delay expires. There is only one pending fee change. Fee shares from the old rate are accrued and distributed before switching rates. The operator controls only their own fee and recipient.
