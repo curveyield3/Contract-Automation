@@ -1,0 +1,28 @@
+{
+  "results": [
+    {
+      "stage": 1,
+      "gasUsed": "12820253",
+      "safeNonce": "22",
+      "txHash": "0x450938517a20e7f9ef176e16e975950ae99ed822a3a77c7183a1b2cd9b1e0e30"
+    },
+    {
+      "stage": 2,
+      "gasUsed": "12707755",
+      "safeNonce": "23",
+      "txHash": "0x18d319493105466518ba9a9790e3261d06f0774905515500281d9f83203d524f"
+    }
+  ],
+  "addresses": {
+    "cyvlSdt": "0x55Cc9e0e8129fEBB187112E8fd6fF4bb251c814E",
+    "locker": "0xe684befd736634B5D4426caD0A5e16ADD45D32E1",
+    "revenueStaking": "0x617bAd4FD4a12428984C963A03FF23Ceb0F363a5",
+    "boostMerchant": "0x693abd5Afc86aff0df9bDdbCd50Cd5336BF9Fa79",
+    "revenueVault": "0x0A9F4dC0419807A45D269300D9D4cB0cf8FB13Cb",
+    "revenueStrategy": "0x80397c9DFa7cc3929447ea27837c5A0D654A8F73",
+    "bribeAllocator": "0xadabBf5f6d2c7A68178cA69a2EF8dFFd106DD586",
+    "poLLiquidityBounds": "0x752DB629833bEF9a08901062F9D0E503CE6ff9eD",
+    "poLManager": "0x054686CB637A39a3E9A6F732C8A10E0644d5d553"
+  },
+  "allConfigurationsVerified": true
+}

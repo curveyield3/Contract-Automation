@@ -1,0 +1,80 @@
+{
+  "version": 50,
+  "safe": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "stages": [
+    {
+      "stage": 1,
+      "to": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
+      "hash": "0xedcb79d737e2cb1fb25c76e854cc359738faba1da2b61a0c9e7c1ab5b4e692ed",
+      "transactions": 5,
+      "totalCalldataBytes": 62276,
+      "labels": [
+        "deploy:cyvlSdt",
+        "deploy:locker",
+        "deploy:revenueStaking",
+        "deploy:boostMerchant",
+        "deploy:revenueVault"
+      ]
+    },
+    {
+      "stage": 2,
+      "to": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
+      "hash": "0x92be5fa0458e2971c20bdf70f57b3aa2b6007dd76bc9a32da5da0df7b5b48cd6",
+      "transactions": 18,
+      "totalCalldataBytes": 61892,
+      "labels": [
+        "deploy:revenueStrategy",
+        "deploy:bribeAllocator",
+        "deploy:poLLiquidityBounds",
+        "deploy:poLManager",
+        "configure:cyvlSdt.setLocker",
+        "configure:locker.configureSystem",
+        "configure:revenueStaking.addRewardToken",
+        "configure:revenueStaking.addRewardToken",
+        "configure:revenueStaking.addRewardToken",
+        "configure:revenueStaking.setImmediateWithdrawFeePpm",
+        "configure:bribeAllocator.setMinimumReturnWad",
+        "configure:revenueStaking.setLpBribeRevenueShare",
+        "configure:locker.setPoLDepositShare",
+        "configure:poLManager.setLiquidityBounds",
+        "configure:poLManager.setCurveSlippageBps",
+        "configure:poLManager.setProfitRecipient",
+        "configure:revenueVault.setStrategy",
+        "configure:locker.setMarketplaceOperator"
+      ]
+    }
+  ],
+  "addresses": {
+    "cyvlSdt": "0x55Cc9e0e8129fEBB187112E8fd6fF4bb251c814E",
+    "locker": "0xe684befd736634B5D4426caD0A5e16ADD45D32E1",
+    "revenueStaking": "0x617bAd4FD4a12428984C963A03FF23Ceb0F363a5",
+    "boostMerchant": "0x693abd5Afc86aff0df9bDdbCd50Cd5336BF9Fa79",
+    "revenueVault": "0x0A9F4dC0419807A45D269300D9D4cB0cf8FB13Cb",
+    "revenueStrategy": "0x80397c9DFa7cc3929447ea27837c5A0D654A8F73",
+    "bribeAllocator": "0xadabBf5f6d2c7A68178cA69a2EF8dFFd106DD586",
+    "poLLiquidityBounds": "0x752DB629833bEF9a08901062F9D0E503CE6ff9eD",
+    "poLManager": "0x054686CB637A39a3E9A6F732C8A10E0644d5d553"
+  },
+  "disabledUntilConfigured": true,
+  "intentionallyDeferred": {
+    "stableSwapPool": "not yet deployed",
+    "curvePool": null,
+    "curveGauge": null,
+    "uniNftManager": null,
+    "yearnVaults": [
+      null,
+      null,
+      null
+    ],
+    "eulerVaults": [
+      null,
+      null
+    ],
+    "merchantSaleRates": {
+      "postPricePerWeek": null,
+      "minimumFillPricePerWeek": null,
+      "sdtWeiPerUsdc": null
+    },
+    "bribeGauge": null
+  }
+}
