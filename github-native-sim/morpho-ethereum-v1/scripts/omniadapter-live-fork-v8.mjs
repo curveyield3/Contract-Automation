@@ -31,9 +31,17 @@ const MAX_RATE=2000000000000000000n / (365n*86400n);
 const WAD=1000000000000000000n;
 const U=1000000n;
 const ZERO=ethers.ZeroAddress, HASH=ethers.ZeroHash;
+console.log("FORK_BOOTSTRAP_BEGIN",new Date().toISOString(),RPC);
+function bounded(p,ms,label) {
+ let timer;
+ const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("STAGE_TIMEOUT "+label+" "+ms+"ms")),ms);});
+ return Promise.race([Promise.resolve(p),deadline]).finally(()=>clearTimeout(timer));
+}
 const provider=new ethers.JsonRpcProvider(RPC,{chainId:1,name:"pinned-ethereum-fork"},{staticNetwork:true});
-const signer=await provider.getSigner(0);
-const owner=await signer.getAddress();
+console.log("FORK_BOOTSTRAP_GET_SIGNER");
+const signer=await bounded(provider.getSigner(0),12000,"getSigner");
+const owner=await bounded(signer.getAddress(),12000,"getSignerAddress");
+console.log("FORK_BOOTSTRAP_SIGNER_READY",owner);
 const abi=new ethers.AbiCoder();
 const ERC20=new ethers.Interface(["function balanceOf(address) view returns (uint256)","function allowance(address,address) view returns (uint256)","function approve(address,uint256) returns (bool)","function transfer(address,uint256) returns (bool)","function decimals() view returns (uint8)"]);
 const usdc=new ethers.Contract(USDC,ERC20,signer);
@@ -69,16 +77,21 @@ function data(t,min=0n,overrideExtra=null){return abi.encode(
   ["uint8","address","bytes32","address","uint256","bytes"],
   [t.mode,t.target,t.id,t.aux,min,overrideExtra??t.extra]);}
 async function tx(label,promise,scope) {
- const t=await promise; const r=await t.wait();
+ console.log("FORK_TX_SUBMIT",scope,label);
+ const t=await bounded(promise,25000,"send:"+label);
+ console.log("FORK_TX_SENT",scope,label,t.hash);
+ const r=await bounded(t.wait(1),40000,"receipt:"+label);
  fail(r?.status===1,"TX_REVERT "+label);
  const record={scope,label,txHash:r.hash,blockNumber:r.blockNumber,from:r.from,to:r.to,gasUsed:r.gasUsed.toString(),status:r.status};
  evidence.receipts.push(record);save();
  console.log("FORK_TRANSACTION",JSON.stringify(record));return r;
 }
 async function deploy(name,artifact,params,scope){
+ console.log("FORK_DEPLOY_BEGIN",scope,name);
  const factory=new ethers.ContractFactory(artifact.abi,artifact.bytecode,signer);
- const c=await factory.deploy(...params,{gasLimit:25000000});
- const r=await c.deploymentTransaction().wait();
+ const c=await bounded(factory.deploy(...params,{gasLimit:25000000}),25000,"deploy-send:"+name);
+ console.log("FORK_DEPLOY_SENT",scope,name,c.deploymentTransaction().hash);
+ const r=await bounded(c.deploymentTransaction().wait(1),40000,"deploy-mined:"+name);
  fail(r?.status===1,"DEPLOY_FAILED "+name);
  const deployed=await c.getAddress();
  evidence.receipts.push({scope,label:"deploy:"+name,txHash:r.hash,blockNumber:r.blockNumber,to:deployed,gasUsed:r.gasUsed.toString(),status:r.status});
@@ -90,12 +103,13 @@ async function timeJump(days) {
 }
 async function snapshot(label,ctx) {
  const {vault,adapter,scope,positions}=ctx;
+ console.log("FORK_SNAPSHOT_START",scope,label);
  const va=await vault.getAddress(),ad=await adapter.getAddress();
- const [height,block,assets,accrue,cache,supply,holderShares,idle,adapterIdle,observedCount,pps]=await Promise.all([
+ const [height,block,assets,accrue,cache,supply,holderShares,idle,adapterIdle,observedCount,pps]=await bounded(Promise.all([
  provider.getBlockNumber(),provider.getBlock("latest"),vault.totalAssets(),vault.accrueInterestView(),
  vault._totalAssets(),vault.totalSupply(),vault.balanceOf(owner),usdc.balanceOf(va),usdc.balanceOf(ad),
- adapter.marketCount(),vault.previewRedeem(WAD)]);
- const adapterAssets=await adapter.realAssets();
+ adapter.marketCount(),vault.previewRedeem(WAD)]),45000,"snapshot-batch:"+label);
+ const adapterAssets=await bounded(adapter.realAssets(),25000,"adapter-real-assets:"+label);
  const real=idle+adapterAssets;
  fail(assets<=real,"REAL_ASSETS_LT_ACCOUNTED "+scope+" "+label+" "+assets+" "+real);
  fail(accrue[0]===assets,"VAULT_ACCRUE_VIEW_MISMATCH "+scope+" "+label);
@@ -283,20 +297,38 @@ async function portfolio(passed){
  save();
 }
 async function main(){
- const info=await provider.getNetwork();fail(info.chainId===1n,"WRONG_NETWORK");
+ console.log("FORK_MAIN_START");
+ const info=await bounded(provider.getNetwork(),15000,"getNetwork");fail(info.chainId===1n,"WRONG_NETWORK");
+ console.log("FORK_NETWORK_VERIFIED",String(info.chainId));
  const pin=Number(process.env.ETHEREUM_FORK_BLOCK);fail(Number.isSafeInteger(pin)&&pin>1,"MISSING_PIN");
- const original=await provider.getBlock(pin);fail(original&&original.hash.toLowerCase()===process.env.ETHEREUM_FORK_HASH?.toLowerCase(),"FORK_BLOCK_HASH_MISMATCH");
+ console.log("FORK_PIN_LOOKUP_START",pin);
+ const original=await bounded(provider.getBlock(pin),15000,"pinned-getBlock");fail(original&&original.hash.toLowerCase()===process.env.ETHEREUM_FORK_HASH?.toLowerCase(),"FORK_BLOCK_HASH_MISMATCH");
+ console.log("FORK_PIN_MATCH",pin,original.hash);
  for(const addr of [USDC,AAVE,SPARK,COMET,FLUID,YEARNV3,YEARNV2,EULER,MORPHOV1,MORPHOBLUE]){
-  const code=await provider.getCode(addr);fail(code.length>2,"MISSING_LIVE_CODE "+addr);
+  console.log("FORK_CODE_PREFLIGHT_BEGIN",addr);
+  const code=await bounded(provider.getCode(addr),15000,"code:"+addr);fail(code.length>2,"MISSING_LIVE_CODE "+addr);
+  console.log("FORK_CODE_PREFLIGHT_OK",addr,code.length);
  }
  evidence.forkVerified=true;evidence.runnerSha=process.env.GITHUB_SHA;
  evidence.contractSourceSha=ethers.sha256(ethers.toUtf8Bytes(readFileSync(".omni-v8-contracts/CurveYieldOmniAdapterV8.sol","utf8")));
  evidence.upstreamMorphoVaultV2Sha="05e440d68b03127b8c62e472f45c3785e5e4d944";
- await provider.send("anvil_setBalance",[WHALE,ethers.toBeHex(100n*10n**18n)]);
- await provider.send("anvil_impersonateAccount",[WHALE]);
- const whale=await provider.getSigner(WHALE);
+ console.log("FORK_WHALE_IMPERSONATION_START",WHALE);
+ await bounded(provider.send("anvil_setBalance",[WHALE,ethers.toBeHex(100n*10n**18n)]),12000,"anvil-setBalance");
+ await bounded(provider.send("anvil_impersonateAccount",[WHALE]),12000,"anvil-impersonate");
+ const whale=await bounded(provider.getSigner(WHALE),12000,"whale-getSigner");
+ console.log("FORK_WHALE_SIGNER_READY",WHALE);
  await tx("fund test operator with REAL USDC from source account",new ethers.Contract(USDC,ERC20,whale).transfer(owner,100000n*U),"fork-fixture");
- await provider.send("anvil_stopImpersonatingAccount",[WHALE]);
+ await bounded(provider.send("anvil_stopImpersonatingAccount",[WHALE]),12000,"stop-impersonate");
+ if(process.env.OMNI_V8_SMOKE_ONLY==="1"){
+  console.log("FORK_SMOKE_BEGIN");
+  const ctx=await setup("diagnostic-smoke");
+  await snapshot("smoke-before-market-deposit",ctx);
+  await allocate(ctx,targets[0],100n*U);
+  await snapshot("smoke-after-market-deposit",ctx);
+  evidence.summary={status:"SMOKE_ONLY_NOT_YIELD_PROVEN",deposits:1,receipts:evidence.receipts.length,snapshots:evidence.snapshots.length};
+  save();console.log("FORK_SMOKE_OK",JSON.stringify(x(evidence.summary)));
+  return;
+ }
  let base=await provider.send("evm_snapshot",[]);
  const passed=[];
  for(const t of targets){
@@ -320,4 +352,13 @@ async function main(){
  save();console.log("FINAL_LOCAL_FORK_VERDICT",JSON.stringify(x(evidence.summary)));
  fail(evidence.summary.failed===0&&evidence.portfolio?.status==="PROVEN_LOCAL_FORK","COMPATIBILITY_INCOMPLETE_EVIDENCE_RETAINED");
 }
-main().catch(e=>{evidence.errors.push(String(e.stack||e));save();console.error("LIVE_FORK_FATAL",e);process.exitCode=1;});
+console.log("FORK_NODE_MODULE_READY");
+save();
+const stageWatchdog=setTimeout(()=>{
+  evidence.errors.push("FOUR_MINUTE_DIAGNOSTIC_TIMEOUT");save();
+  console.error("LIVE_FORK_DIAGNOSTIC_TIMEOUT");process.exit(124);
+},Number(process.env.OMNI_V8_SMOKE_ONLY==="1"?240000:5400000));
+main().then(()=>clearTimeout(stageWatchdog)).catch(e=>{
+ evidence.errors.push(String(e.stack||e));save();console.error("LIVE_FORK_FATAL",e);
+ clearTimeout(stageWatchdog);process.exit(1);
+});
