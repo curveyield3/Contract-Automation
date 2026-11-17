@@ -29,7 +29,7 @@ const DOLOMITE_ROUTER="0xf8b2c637a68cf6a17b1df9f8992eebeff63d2dff";
 const DOLOMITE_MARGIN="0x003ca23fd5f0ca87d01f6ec6cd14a8ae60c2b97d";
 const IPOR_FUSION="0x43ee0243ea8cf02f7087d8b16c8d2007cc9c7ca2";
 // Multiple verified real Ethereum USDC Fusion vaults; keep unsuccessful attempts as evidence.
-const IPOR_ALTERNATIVES=["0xf8f226da66244f89e70c5b5d1a5c5b0d505eb1d8","0x6f66b845604dad6e80b2a1472e6cacbbe66a8c40"]; // earlier three negative-NAV trials retained in prior Actions logs
+const IPOR_ALTERNATIVES=["0x6f66b845604dad6e80b2a1472e6cacbbe66a8c40"]; // sole source-proven positive-yield alternative; prior failures retained in Actions evidence
 const MORPHOID="0x94b823e6bd8ea533b4e33fbc307faea0b307301bc48763acc4d4aa4def7636cd";
 const WETH="0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 const BLUE_ORACLE="0x0f948cba8231db7898ef36a4212581ad7b1b4580";
@@ -361,6 +361,12 @@ async function refreshRealIPOR(ctx,t) {
    adapterPosition:await ctx.adapter.positionAssets(t.mode,t.target,t.id,t.aux)};
   console.log("IPOR_MARKET_REPORT_AFTER",JSON.stringify(x({target:t.target,...postReport})));
   await snapshot("12c-IPOR-authorized-reporter-market-balance-update",ctx);
+  // Morpho Vault V2 has a per-second MAX_RATE earnings throttle. An abrupt
+  // USDC profit discovered by a Fusion report cannot instantly appear in
+  // Morpho share PPS; let genuine vault accounting recognize it with time.
+  // Do not mint, transfer, donate, override oracle prices or bypass this cap.
+  await timeJump(1);
+  await snapshot("12d-IPOR-one-day-genuine-Morpho-profit-accrual-window",ctx);
  }else console.log("IPOR_NO_AUTHORIZED_REPORTER_KNOWN",t.target);
 
 }
