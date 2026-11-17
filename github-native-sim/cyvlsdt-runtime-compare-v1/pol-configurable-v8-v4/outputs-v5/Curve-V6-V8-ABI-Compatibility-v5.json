@@ -1,0 +1,86 @@
+{
+  "sourceVersion": "CurvePairOracleBoundsV6",
+  "targetVersion": "CurvePairOracleBoundsV8",
+  "curveFunctionCompatibility": [
+    {
+      "name": "quoteDeposit",
+      "selector": "0xde3f9da8",
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "pool",
+          "type": "address"
+        },
+        {
+          "internalType": "uint8",
+          "name": "coinIndex",
+          "type": "uint8"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint16",
+          "name": "slippageBps",
+          "type": "uint16"
+        }
+      ],
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "estimate",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "minOut",
+          "type": "uint256"
+        }
+      ],
+      "exactSignatureAndReturns": true
+    },
+    {
+      "name": "quoteWithdraw",
+      "selector": "0xdebb6c1b",
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "pool",
+          "type": "address"
+        },
+        {
+          "internalType": "uint8",
+          "name": "coinIndex",
+          "type": "uint8"
+        },
+        {
+          "internalType": "uint256",
+          "name": "lpAmount",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint16",
+          "name": "slippageBps",
+          "type": "uint16"
+        }
+      ],
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "estimate",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "minOut",
+          "type": "uint256"
+        }
+      ],
+      "exactSignatureAndReturns": true
+    }
+  ],
+  "exact": true,
+  "notes": "Curve methods preserve the exact V6 selector, argument names/types/order and return types."
+}
