@@ -42,7 +42,7 @@ function bounded(p,ms,label) {
  const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("STAGE_TIMEOUT "+label+" "+ms+"ms")),ms);});
  return Promise.race([Promise.resolve(p),deadline]).finally(()=>clearTimeout(timer));
 }
-const provider=new ethers.JsonRpcProvider(RPC,{chainId:1,name:"pinned-ethereum-fork"},{staticNetwork:true});
+const provider=new ethers.JsonRpcProvider(RPC,{chainId:1,name:"pinned-ethereum-fork"},{staticNetwork:true,cacheTimeout:-1});
 console.log("FORK_BOOTSTRAP_GET_SIGNER");
 const signer=await bounded(provider.getSigner(0),12000,"getSigner");
 const owner=await bounded(signer.getAddress(),12000,"getSignerAddress");
@@ -243,11 +243,17 @@ async function allocate(ctx,t,amount){
  await snapshot("04-before-market-allocation:"+t.name,ctx);
  const key=await cap(ctx,t);
  await snapshot("05-after-cap-registration:"+t.name,ctx);
- await tx("allocate to real market "+t.name,vault.allocate(await adapter.getAddress(),data(t),amount),scope);
+ const receipt=await tx("allocate to real market "+t.name,vault.allocate(await adapter.getAddress(),data(t),amount),scope);
  ctx.positions.push({...t,key});
- const value=await adapter.positionAssets(t.mode,t.target,t.id,t.aux);
+ // Compare actual callback accounting at the exact mined block; prevent time drift.
+ const callBlock={blockTag:receipt.blockNumber};
+ const [value,allocated]=await Promise.all([
+  adapter.positionAssets(t.mode,t.target,t.id,t.aux,callBlock),
+  vault.allocation(key,callBlock)
+ ]);
  fail(value>0n,"EMPTY_ALLOCATION "+t.name);
- fail((await vault.allocation(key))===value,"ALLOCATION_RETURN_INCORRECT "+t.name);
+ fail(allocated===value,"ALLOCATION_RETURN_INCORRECT "+t.name+" block="+receipt.blockNumber+" cap="+allocated+" assets="+value);
+ fail((await adapter.positionAssets(t.mode,t.target,t.id,t.aux))>0n,"LATEST_POSITION_READ_FAILED "+t.name);
  await snapshot("06-after-real-market-deposit:"+t.name,ctx);
  return {key,value};
 }
