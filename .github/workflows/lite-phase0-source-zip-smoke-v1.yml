@@ -574,6 +574,7 @@ jobs:
           path: |
             .v48-source/artifacts-v47/
             .v51-output/
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 90
       - name: Record runtime bytecode sizes
