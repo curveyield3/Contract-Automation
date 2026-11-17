@@ -405,8 +405,8 @@ contract PoLManager {
         if(floor==0)revert Slippage();
         uint256[] memory amounts=new uint256[](3);
         amounts[0]=amount;
+        // Curve pool enforces min_mint_amount supplied directly from Bounds V7.
         lp=IPoLCurveNG(curvePool).add_liquidity(amounts,floor);
-        if(lp<floor)revert Slippage();
         if(curveGauge!=address(0))IPoLGauge(curveGauge).deposit(lp);
     }
     function _curveWithdraw(uint256 lp,bool fromGauge) private returns(uint256 amount){
@@ -414,8 +414,8 @@ contract PoLManager {
         (,uint256 floor)=_bounds().quoteWithdraw(curvePool,0,lp,curveSlippageBps);
         if(floor==0)revert Slippage();
         if(fromGauge)IPoLGauge(curveGauge).withdraw(lp);
+        // Curve pool enforces min_received supplied directly from Bounds V7.
         amount=IPoLCurve(curvePool).remove_liquidity_one_coin(lp,0,floor);
-        if(amount<floor)revert Slippage();
     }
     /// @notice SDT-only Curve operations, bounded by the external Curve EMA/rate model.
     function depositCurve(uint256 amount) external onlyOperator active guard returns(uint256){
@@ -496,6 +496,9 @@ contract PoLManager {
         if(floor==0)revert Slippage();
         (liquidity,used0,used1)=IPoLNft(uniNftManager).increaseLiquidity(
             IPoLNft.Increase(uniTokenId,a0,a1,min0,min1,block.timestamp));
+        // Uniswap increaseLiquidity has NO minimum-liquidity parameter. Its
+        // amount0Min/amount1Min are input amounts, not minted LP liquidity.
+        // This is the sole necessary post-call check for mint-output protection.
         if(liquidity<floor)revert Slippage();
         emit UniLiquidity(1,used0,used1,liquidity);
     }
@@ -551,7 +554,8 @@ contract PoLManager {
         _pay(_harvestUni());
         (a0,a1)=IPoLNft(uniNftManager).decreaseLiquidity(
             IPoLNft.Decrease(uniTokenId,liquidity,min0,min1,block.timestamp));
-        if(a0<min0||a1<min1)revert Slippage();
+        // Uniswap decreaseLiquidity enforces amount0Min and amount1Min
+        // supplied directly from Bounds V7; do not duplicate the check.
         if(a0>type(uint128).max||a1>type(uint128).max)revert Invalid();
         (uint256 c0,uint256 c1)=IPoLNft(uniNftManager).collect(IPoLNft.Collect(uniTokenId,address(this),uint128(a0),uint128(a1)));
         if(c0!=a0||c1!=a1)revert State();
