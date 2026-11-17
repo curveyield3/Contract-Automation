@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   source-zip-smoke:
-    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1' && github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1' && github.ref != 'refs/heads/cyvlsdt-v49-adversarial-v1' && github.ref != 'refs/heads/cyvlsdt-v51-safe-replacements-v1'
+    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1' && github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1' && github.ref != 'refs/heads/cyvlsdt-v49-adversarial-v1' && github.ref != 'refs/heads/cyvlsdt-v51-safe-3-4-2-v2'
     name: ${{ matrix.label }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -308,7 +308,7 @@ jobs:
   cyvlsdt-v48-compile:
     permissions:
       contents: write
-    if: github.ref == 'refs/heads/cyvlsdt-v48-compile-v1' || github.ref == 'refs/heads/cyvlsdt-v49-adversarial-v1' || github.ref == 'refs/heads/cyvlsdt-v51-safe-replacements-v1'
+    if: github.ref == 'refs/heads/cyvlsdt-v48-compile-v1' || github.ref == 'refs/heads/cyvlsdt-v49-adversarial-v1' || github.ref == 'refs/heads/cyvlsdt-v51-safe-3-4-2-v2'
     name: cyvlSDT v49 exact source compile and adversarial stress qualification
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -383,7 +383,7 @@ jobs:
 
 
       - name: Apply exact CurveYield v51 header to all Solidity contracts and pin source hashes
-        if: github.ref == 'refs/heads/cyvlsdt-v51-safe-replacements-v1'
+        if: github.ref == 'refs/heads/cyvlsdt-v51-safe-3-4-2-v2'
         shell: bash
         run: |
           set -euo pipefail
@@ -479,7 +479,7 @@ jobs:
           npx --no-install hardhat test test/v49-external-fork.js --no-compile 2>&1 | tee "$GITHUB_WORKSPACE/.v48-evidence/live-fork.log"
 
       - name: Generate three deterministic CREATE2 Safe batches from v51 compiler artifacts
-        if: github.ref == 'refs/heads/cyvlsdt-v51-safe-replacements-v1'
+        if: github.ref == 'refs/heads/cyvlsdt-v51-safe-3-4-2-v2'
         shell: bash
         run: |
           set -euo pipefail
@@ -488,7 +488,7 @@ jobs:
           cd "$SOURCE_ROOT"
           V51_OUTPUT="$GITHUB_WORKSPACE/.v51-output" node v50-safe-batch-builder.js | tee "$GITHUB_WORKSPACE/.v51-output/builder.log"
       - name: Simulate both Safe batches sequentially on an Ethereum mainnet fork
-        if: github.ref == 'refs/heads/cyvlsdt-v51-safe-replacements-v1'
+        if: github.ref == 'refs/heads/cyvlsdt-v51-safe-3-4-2-v2'
         shell: bash
         env:
           CURVEYIELD_HARDHAT_FORK_URL: ${{ secrets.RPC_ETHEREUM }}
@@ -528,7 +528,7 @@ jobs:
               const receipt=await tx.wait();
               if(receipt.status!==1||receipt.gasUsed>=16777216n)throw Error('Safe stage did not fit EIP7825 '+m.stage);
               for(const [key,addr] of Object.entries(m.derivedAddresses)){
-                if(m.stage===1 && !['cyvlSdt','locker','revenueStaking','boostMerchant'].includes(key))continue;
+                if(m.stage===1 && !['cyvlSdt','locker','revenueStaking'].includes(key))continue;
                 if(m.stage===2 && !['cyvlSdt','locker','revenueStaking','boostMerchant','revenueVault','revenueStrategy','bribeAllocator'].includes(key))continue;
                 const code=await ethers.provider.getCode(addr);
                 if(code==='0x')throw Error('Missing deployed contract '+key+' in stage '+m.stage);
@@ -549,11 +549,11 @@ jobs:
               if(!(await staking.isRewardToken(tok)))throw Error('Reward token missing '+tok);
             }
             fs.writeFileSync(path.join(out,'Fork-Execution-v51.json'),JSON.stringify({results,addresses:addr,allConfigurationsVerified:true},null,2)+'\n');
-            console.log('SAFE_V51_TWO_STAGE_FORK_PASS',JSON.stringify(results));
+            console.log('SAFE_V51_THREE_STAGE_3_4_2_FORK_PASS',JSON.stringify(results));
           })().catch(e=>{console.error('SAFE_V51_FORK_FAILED',e);process.exitCode=1;});
           NODE
       - name: Preserve exact compiled artifact and staged Safe proposals in GitHub branch
-        if: github.ref == 'refs/heads/cyvlsdt-v51-safe-replacements-v1'
+        if: github.ref == 'refs/heads/cyvlsdt-v51-safe-3-4-2-v2'
         shell: bash
         run: |
           set -euo pipefail
@@ -564,10 +564,10 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "$base"
-          git commit -m 'Preserve v51 compiled bytecode and fork-qualified three-stage Safe proposals'
-          git push origin HEAD:cyvlsdt-v51-safe-replacements-v1
+          git commit -m 'Preserve v51 compiled bytecode and fork-qualified 3-4-2 Safe proposals v2'
+          git push origin HEAD:cyvlsdt-v51-safe-3-4-2-v2
       - name: Upload complete v51 compiler artifacts and Safe proposal evidence
-        if: always() && github.ref == 'refs/heads/cyvlsdt-v51-safe-replacements-v1'
+        if: always() && github.ref == 'refs/heads/cyvlsdt-v51-safe-3-4-2-v2'
         uses: actions/upload-artifact@v4
         with:
           name: cyvlsdt-v51-compiled-and-safe-proposals
