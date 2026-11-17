@@ -51,16 +51,18 @@ contract StressThreeCoinNGV2 {
         rates=new uint256[](3);rates[0]=1e18;rates[1]=1e18;rates[2]=1e30;
     }
     function setSpotBps(uint256 bps) external {require(bps<=12000&&bps>0);spotBps=bps;}
-    function add_liquidity(uint256[] calldata amounts,uint256) external returns(uint256 minted){
+    function add_liquidity(uint256[] calldata amounts,uint256 minMint) external returns(uint256 minted){
         require(amounts.length==3 && amounts[0]>0,"amounts");
         require(IMockToken(tokens[0]).transferFrom(msg.sender,address(this),amounts[0]),"transfer");
         minted=amounts[0]*spotBps/10000;
+        require(minted>=minMint,"Curve min_mint_amount");
         IMockToken(lpToken).mint(msg.sender,minted);
     }
-    function remove_liquidity_one_coin(uint256 lp,int128 index,uint256) external returns(uint256 out){
+    function remove_liquidity_one_coin(uint256 lp,int128 index,uint256 minReceived) external returns(uint256 out){
         require(index==0 && lp>0,"index");
         require(IMockToken(lpToken).transferFrom(msg.sender,address(this),lp),"transfer");
         out=lp*spotBps/10000;
+        require(out>=minReceived,"Curve min_received");
         IMockToken(tokens[0]).mint(msg.sender,out);
     }
 }
@@ -103,6 +105,8 @@ contract StressUniNFTV2 {
     address public nftOwner;
     Position private pos;
     uint128 public expectedLiquidity;
+    uint256 public expectedDeposit0;
+    uint256 public expectedDeposit1;
     uint256 public expectedWithdraw0;
     uint256 public expectedWithdraw1;
     uint256 public spotBps=10000;
@@ -133,7 +137,9 @@ contract StressUniNFTV2 {
         require(ok && data.length==32,"not ERC721 receiver");
     }
     function setSpotBps(uint256 bps) external{require(bps>0&&bps<=12000);spotBps=bps;}
-    function setDepositReference(uint128 l) external{expectedLiquidity=l;}
+    function setDepositReference(uint128 l,uint256 a0,uint256 a1) external{
+        expectedLiquidity=l;expectedDeposit0=a0;expectedDeposit1=a1;
+    }
     function setWithdrawalReference(uint256 a0,uint256 a1) external{
         expectedWithdraw0=a0;expectedWithdraw1=a1;
     }
@@ -143,9 +149,13 @@ contract StressUniNFTV2 {
         require(params.deadline>=block.timestamp,"deadline");
         lastDepositMin0=params.amount0Min;
         lastDepositMin1=params.amount1Min;
-        // An untrusted position manager intentionally ignores the minimums.
-        // The PoL Manager MUST reject insufficient returned liquidity itself.
-        amount0=params.amount0Desired;amount1=params.amount1Desired;
+        // Match real NonfungiblePositionManager semantics: it consumes no more
+        // than desired amounts and reverts if either amount is below the
+        // separately supplied amount0Min / amount1Min.
+        amount0=expectedDeposit0*spotBps/10000;
+        amount1=expectedDeposit1*spotBps/10000;
+        require(amount0<=params.amount0Desired && amount1<=params.amount1Desired,"desired cap");
+        require(amount0>=params.amount0Min && amount1>=params.amount1Min,"Uniswap mint token minimum");
         if(amount0!=0)require(IMockToken(pos.token0).transferFrom(msg.sender,address(this),amount0));
         if(amount1!=0)require(IMockToken(pos.token1).transferFrom(msg.sender,address(this),amount1));
         liquidity=uint128(uint256(expectedLiquidity)*spotBps/10000);
@@ -158,9 +168,9 @@ contract StressUniNFTV2 {
         lastWithdrawalLiquidity=params.liquidity;
         lastWithdrawalMin0=params.amount0Min;
         lastWithdrawalMin1=params.amount1Min;
-        // Ignore minimums deliberately; prove the outer PoL Manager reverts.
         amount0=expectedWithdraw0*spotBps/10000;
         amount1=expectedWithdraw1*spotBps/10000;
+        require(amount0>=params.amount0Min && amount1>=params.amount1Min,"Uniswap burn token minimum");
         pos.liquidity-=params.liquidity;
         pos.tokensOwed0+=uint128(amount0);
         pos.tokensOwed1+=uint128(amount1);
