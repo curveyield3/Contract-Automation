@@ -1,4 +1,4 @@
-name: CurveYield Fraxtal Morpho IRM Compile v15
+name: CurveYield Fraxtal Morpho IRM Compile v16
 
 # Compile-only validation. No tests, deployments, broadcast or RPC use.
 on:
@@ -7,6 +7,7 @@ on:
       - morpho-fraxtal-compile-v1
     paths:
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV7.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV6.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV1.sol'
@@ -37,13 +38,14 @@ jobs:
           import fs from 'node:fs';
           import solc from 'solc';
           const path = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol';
+          const candidate = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV7.sol';
           const master = 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol';
           const factories = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV6.sol';
           const governor = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV5.sol';
           const omni = 'github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV1.sol';
           const input = {
             language: 'Solidity',
-            sources: { [path]: { content: fs.readFileSync(path, 'utf8') }, [master]: { content: fs.readFileSync(master, 'utf8') }, [factories]: { content: fs.readFileSync(factories, 'utf8') }, [governor]: { content: fs.readFileSync(governor, 'utf8') }, [omni]: { content: fs.readFileSync(omni, 'utf8') } },
+            sources: { [path]: { content: fs.readFileSync(path, 'utf8') }, [candidate]: { content: fs.readFileSync(candidate, 'utf8') }, [master]: { content: fs.readFileSync(master, 'utf8') }, [factories]: { content: fs.readFileSync(factories, 'utf8') }, [governor]: { content: fs.readFileSync(governor, 'utf8') }, [omni]: { content: fs.readFileSync(omni, 'utf8') } },
             settings: {
               optimizer: { enabled: true, runs: 200 },
               evmVersion: 'cancun',
@@ -57,6 +59,19 @@ jobs:
           }
           const errors = (output.errors ?? []).filter(e => e.severity === 'error');
           if (errors.length) process.exit(1);
+          // Compile-only comparison; the V7 candidate is not active in OmniFactory V1.
+          const oldIrms = output.contracts?.[path] ?? {};
+          const optIrms = output.contracts?.[candidate] ?? {};
+          for (const name of Object.keys(oldIrms)) {
+            if (!name.startsWith('CurveYield')) continue;
+            const oldRuntime = oldIrms[name].evm.deployedBytecode.object.length / 2;
+            const optRuntime = optIrms[name]?.evm?.deployedBytecode?.object.length / 2;
+            console.log('CY_OPT_COMPARE_' + name + '=' + oldRuntime + ',' + optRuntime + ',' + (optRuntime - oldRuntime));
+            if (!Number.isFinite(optRuntime) || optRuntime > oldRuntime) {
+              console.error('Candidate runtime regression:', name);
+              process.exitCode = 1;
+            }
+          }
           const contracts = { ...(output.contracts?.[path] ?? {}), ...(output.contracts?.[master] ?? {}), ...(output.contracts?.[factories] ?? {}), ...(output.contracts?.[governor] ?? {}), ...(output.contracts?.[omni] ?? {}) };
           const models = Object.entries(contracts).filter(([name]) => name.startsWith('CurveYield'));
           if (models.length !== 18) {
@@ -93,10 +108,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PACKAGE='CurveYield_Fraxtal_Morpho_IRMs_v6'
+          PACKAGE='CurveYield_Fraxtal_Morpho_IRMs_v7'
           ROOT="$RUNNER_TEMP/$PACKAGE"
           mkdir -p "$ROOT/contracts" "$ROOT/build"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV7.sol "$ROOT/contracts/"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol "$ROOT/contracts/"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV6.sol "$ROOT/contracts/"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV1.sol "$ROOT/contracts/"
@@ -112,14 +128,16 @@ jobs:
           optimizer_runs = 200
           evm_version = "cancun"
           TOML
-          cat > "$ROOT/README_v6.md" <<'MD'
-          # CurveYield Fraxtal Morpho IRM source package v6
+          cat > "$ROOT/README_v7.md" <<'MD'
+          # CurveYield Fraxtal Morpho IRM source package v7
 
-          Five current Solidity files with the exact CurveYield v48 extended header
-          preceding each of the 18 concrete or abstract contract declarations.
+          Five active Solidity files with exact CurveYield v48 extended headers;
+          a sixth source contains an optimized V7 candidate compiled for comparison.
+          The active deployment templates remain V6 pending size verification.
           Existing SPDX license identifiers are preserved.
 
           Models: CurveYieldMorphoIRMsV6.sol
+          Optimization candidate: CurveYieldMorphoIRMsV7.sol
           Master: CurveYieldTriggerMasterIRMV3.sol
           Factories: CurveYieldMorphoIRMFactoriesV6.sol
           Standalone single-entrypoint OmniFactory: CurveYieldOmniIRMFactoryV1.sol
@@ -146,9 +164,9 @@ jobs:
           MD
           (
             cd "$ROOT"
-            sha256sum contracts/*.sol > SOURCE_SHA256SUMS_v6.txt
+            sha256sum contracts/*.sol > SOURCE_SHA256SUMS_v7.txt
             printf 'repository=curveyield3/Contract-Automation\nbranch=morpho-fraxtal-compile-v1\ncommit=%s\nworkflow_run=%s\ncompiler=solc 0.8.30\noptimizer_runs=200\nevm_version=cancun\n' \
-              "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD_PROVENANCE_v6.txt
+              "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD_PROVENANCE_v7.txt
           )
           ( cd "$RUNNER_TEMP" && zip -q -r "$GITHUB_WORKSPACE/$PACKAGE.zip" "$PACKAGE" )
           unzip -t "$PACKAGE.zip"
@@ -156,7 +174,7 @@ jobs:
       - name: Publish CurveYield IRM ZIP v5
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield_Fraxtal_Morpho_IRMs_v6
-          path: CurveYield_Fraxtal_Morpho_IRMs_v6.zip
+          name: CurveYield_Fraxtal_Morpho_IRMs_v7
+          path: CurveYield_Fraxtal_Morpho_IRMs_v7.zip
           if-no-files-found: error
           retention-days: 30
