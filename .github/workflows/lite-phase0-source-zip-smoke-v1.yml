@@ -487,6 +487,68 @@ jobs:
           cp github-native-sim/cyvlsdt-runtime-compare-v1/v50-safe-batch-builder.js "$SOURCE_ROOT/v50-safe-batch-builder.js"
           cd "$SOURCE_ROOT"
           V51_OUTPUT="$GITHUB_WORKSPACE/.v51-output" node v50-safe-batch-builder.js | tee "$GITHUB_WORKSPACE/.v51-output/builder.log"
+      - name: Export exact v51 Etherscan Standard JSON inputs and deployment constructor args
+        if: github.ref == 'refs/heads/cyvlsdt-v51-safe-3-3-3-v3'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require('fs'),path=require('path');
+          const project=process.env.SOURCE_ROOT;
+          const ethers=require(path.resolve(project,'node_modules/ethers'));
+          const output=path.resolve('.v51-output/verification');
+          const artifacts=path.resolve(project,'artifacts-v47');
+          const manifests=[1,2,3].map(n=>JSON.parse(fs.readFileSync(path.resolve('.v51-output/Safe-CREATE2-MultiSend-v51-stage'+n+'.json'),'utf8')));
+          const jobs={
+            cyvlSdt:['contracts/CurveYieldVlSDTToken.sol','CurveYieldVlSDTToken'],
+            locker:['contracts/CurveYieldVlSDTLocker.sol','CurveYieldVlSDTLocker'],
+            revenueStaking:['contracts/CurveYieldvlSDTStaking.sol','CurveYieldvlSDTStaking'],
+            boostMerchant:['contracts/CurveYieldVlSDTBoostMerchant.sol','CurveYieldVlSDTBoostMerchant'],
+            revenueVault:['contracts/CurveYieldVault.sol','CurveYieldVault'],
+            revenueStrategy:['contracts/CurveYieldRevenueStrategyV20.sol','CurveYieldRevenueStrategyV7'],
+            bribeAllocator:['contracts/VoteMarketSingleGaugeBribeAllocator.sol','VoteMarketSingleGaugeBribeAllocator'],
+            poLLiquidityBounds:['contracts/external_guard_v6/CurvePairOracleBounds_v6.sol','CurvePairOracleBoundsV6'],
+            poLManager:['contracts/PoL_Manager_Contract_v19.sol','PoLManager']
+          };
+          const parser=new ethers.Interface(['function performCreate2(uint256 value,bytes deploymentData,bytes32 salt) returns(address)']);
+          const deployments=manifests.flatMap(m=>m.innerTransactions.filter(t=>t.label.startsWith('deploy:')));
+          if(deployments.length!==9)throw Error('Expected exactly nine deployments, got '+deployments.length);
+          fs.mkdirSync(output,{recursive:true});
+          const summary=[];
+          for(const [key,[sourceName,contractName]] of Object.entries(jobs)){
+            const dep=deployments.find(t=>t.label==='deploy:'+key);
+            if(!dep)throw Error('Missing recorded CREATE2 deployment '+key);
+            const artPath=path.join(artifacts,sourceName,contractName+'.json');
+            const dbgPath=path.join(artifacts,sourceName,contractName+'.dbg.json');
+            const artifact=JSON.parse(fs.readFileSync(artPath,'utf8'));
+            const dbg=JSON.parse(fs.readFileSync(dbgPath,'utf8'));
+            const info=JSON.parse(fs.readFileSync(path.resolve(path.dirname(dbgPath),dbg.buildInfo),'utf8'));
+            const initcode=parser.parseTransaction({data:dep.data}).args.deploymentData.toLowerCase();
+            if(!initcode.startsWith(artifact.bytecode.toLowerCase()))throw Error('Creation bytecode mismatch for '+key);
+            const constructorArguments='0x'+initcode.slice(artifact.bytecode.length);
+            const fullCompilerVersion='v'+info.solcLongVersion.match(/^[0-9]+\.[0-9]+\.[0-9]+\+commit\.[0-9a-fA-F]+/)[0];
+            const address=manifests[0].derivedAddresses[key];
+            const fullInput=info.input;
+            if(!fullInput.sources[sourceName])throw Error('Missing original source in build-info: '+sourceName);
+            if(!info.output.contracts[sourceName]?.[contractName])throw Error('Build info contract unavailable '+key);
+            if(!fullInput.settings.optimizer.enabled||!fullInput.settings.viaIR||fullInput.settings.evmVersion!=='cancun')throw Error('Settings mismatch '+key);
+            const payload={
+              chain:'ethereum',address,
+              codeFormat:'solidity-standard-json-input',
+              sourceCode:JSON.stringify(fullInput),
+              contractName:sourceName+':'+contractName,
+              compilerVersion:fullCompilerVersion,
+              constructorArguments
+            };
+            const outfile=path.join(output,'verify-'+key+'-v51.json');
+            fs.writeFileSync(outfile,JSON.stringify(payload,null,2)+'\n');
+            summary.push({key,address,sourceName,contractName,compilerVersion:fullCompilerVersion,
+              sourceCount:Object.keys(fullInput.sources).length,constructorArgsBytes:(constructorArguments.length-2)/2,
+              inputBytes:Buffer.byteLength(payload.sourceCode),dataFile:'verify-'+key+'-v51.json'});
+          }
+          fs.writeFileSync(path.join(output,'Verification-Manifest-v51.json'),JSON.stringify(summary,null,2)+'\n');
+          console.log('V51_ETHERSCAN_INPUTS_PREPARED',JSON.stringify(summary));
+          NODE
       - name: Simulate both Safe batches sequentially on an Ethereum mainnet fork
         if: github.ref == 'refs/heads/cyvlsdt-v51-safe-3-3-3-v3'
         shell: bash
@@ -561,6 +623,8 @@ jobs:
           mkdir -p "$base"
           tar -czf "$base/CurveYield-v51-compiler-artifacts.tar.gz" -C "$SOURCE_ROOT" artifacts-v47
           cp .v51-output/{Safe-CREATE2-MultiSend-v51-stage1.json,Safe-CREATE2-MultiSend-v51-stage2.json,Safe-CREATE2-MultiSend-v51-stage3.json,Batch-Overview-v51.json,Deployment-Addresses-v51.json,Fork-Execution-v51.json} "$base/"
+          mkdir -p "$base/verification"
+          cp .v51-output/verification/*.json "$base/verification/"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "$base"
