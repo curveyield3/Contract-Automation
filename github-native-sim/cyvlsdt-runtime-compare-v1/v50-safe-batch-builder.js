@@ -5,8 +5,8 @@ const hre = require("hardhat");
 const { ethers } = hre;
 
 const SAFE = "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49";
-const CREATE_CALL = "0x9b35AF71d77eaf8d7e40252370304687390A1A52";
-const MULTISEND_CALL_ONLY = "0x40A2aCCbd92BCA938b02010E17A5b8929b49130D";
+const CREATE_CALL = "0x9b35af71d77eaf8d7e40252370304687390a1a52";
+const MULTISEND_CALL_ONLY = "0x40a2accbd92bca938b02010e17a5b8929b49130d";
 const ZERO = ethers.ZeroAddress;
 const PROJECT = process.cwd();
 const OUT = path.resolve(process.env.V50_OUTPUT || path.join(PROJECT, "v50-output"));
