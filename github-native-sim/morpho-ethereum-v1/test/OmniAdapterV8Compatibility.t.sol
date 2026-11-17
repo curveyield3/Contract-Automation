@@ -24,6 +24,7 @@ contract HarnessShare is HarnessToken {
     constructor(HarnessToken t){asset=t;}
     function deposit(uint256 n,address to) external returns(uint256){asset.transferFrom(msg.sender,address(this),n);this.mint(to,n);return n;}
     function withdraw(uint256 n,address to,address owner) external returns(uint256){require(owner==msg.sender);this.burn(owner,n);asset.transfer(to,n);return n;}
+    function redeem(uint256 shares,address to,address owner) external returns(uint256){require(owner==msg.sender);this.burn(owner,shares);asset.transfer(to,shares);return shares;}
     function previewRedeem(uint256 n) external pure returns(uint256){return n;}
 }
 contract HarnessYearn is HarnessToken {
