@@ -1,0 +1,98 @@
+{
+  "version": "v3",
+  "scope": "ethereum",
+  "safe": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "verificationType": "INDEPENDENT_SAFE_SERVICE_READBACK_EXACT_MATCH",
+  "executionStatus": "NOT_EXECUTED",
+  "ownerSignatures": "0",
+  "requiredOwnerSignatures": 1,
+  "submittedBatches": [
+    {
+      "batch": 1,
+      "nonce": "24",
+      "hash": "0x294e1bcd0c7c598fe1d643a477d8e530cdac2809a6d536b9b7c24925510db713",
+      "checks": {
+        "serviceQueueVerified": true,
+        "hash": true,
+        "safe": true,
+        "nonce": true,
+        "recipient": true,
+        "calldata": true,
+        "operation": true,
+        "value": true,
+        "notExecuted": true,
+        "confirmations": true
+      },
+      "ok": true,
+      "confirmationRequirement": 1,
+      "createdContracts": [
+        "CurveYieldSafeDeployHelperV1",
+        "BoostHubStaking (sdCRV)",
+        "BoostHubStaking (sdFXN)"
+      ],
+      "callCount": 6,
+      "calldataBytes": 49796,
+      "creationBytes": 47184,
+      "runtimeBytes": 40392
+    },
+    {
+      "batch": 2,
+      "nonce": "25",
+      "hash": "0x9b0811ecd8696255b620aa22ab62b412093358ea65a456f7b0e0312a6440f264",
+      "checks": {
+        "serviceQueueVerified": true,
+        "hash": true,
+        "safe": true,
+        "nonce": true,
+        "recipient": true,
+        "calldata": true,
+        "operation": true,
+        "value": true,
+        "notExecuted": true,
+        "confirmations": true
+      },
+      "ok": true,
+      "confirmationRequirement": 1,
+      "createdContracts": [
+        "StrategyConvexBoostHubStakingV5 (sdCRV)",
+        "BeefyVaultV7FixedV2 (sdCRV)",
+        "StrategyDualFXNMasterV42",
+        "CurvePairOracleBoundsV8",
+        "StrategyBoostHubChildV42"
+      ],
+      "callCount": 6,
+      "calldataBytes": 59812,
+      "creationBytes": 58332,
+      "runtimeBytes": 50242
+    },
+    {
+      "batch": 3,
+      "nonce": "26",
+      "hash": "0x0bb05b4badfb06105a57fc24dadf3ffea3c187c0515e5ae3f9d325df43de7097",
+      "checks": {
+        "serviceQueueVerified": true,
+        "hash": true,
+        "safe": true,
+        "nonce": true,
+        "recipient": true,
+        "calldata": true,
+        "operation": true,
+        "value": true,
+        "notExecuted": true,
+        "confirmations": true
+      },
+      "ok": true,
+      "confirmationRequirement": 1,
+      "createdContracts": [
+        "StrategyConvexFXNPool8V42",
+        "BeefyVaultV7FixedV2 (sdFXN)",
+        "PoLManagerV23"
+      ],
+      "callCount": 11,
+      "calldataBytes": 59524,
+      "creationBytes": 57366,
+      "runtimeBytes": 47337
+    }
+  ],
+  "notice": "The older v1 and v2 Safe proposals at nonces 24/25/26 remain superseded; do not sign or execute them."
+}
