@@ -1,10 +1,10 @@
-# CurveYield Protected Morpho Vault V2 Controller v4
+# CurveYield Protected Morpho Vault V2 Controller v5
 
-v4 supersedes v3. **There is now one contract per vault**: an immutable controller that is simultaneously Morpho vault owner, curator and performance fee-share recipient. The separate fee splitter and unrestricted governance migration were removed.
+v5 supersedes v4. **There is now one contract per vault**: an immutable controller that is simultaneously Morpho vault owner, curator and performance fee-share recipient. The separate fee splitter and unrestricted governance migration were removed.
 
 ## Revenue model and permanent hard caps
 - Initial flat fee on recognized yield: 0.20% (2e15 WAD)
-- Maximum flat fee: **0.50% (5e15 WAD)**
+- Maximum flat fee: **1.00% (1e16 WAD)**
 - Initial CurveYield surcharge: 2% (200 basis points) of the operator's performance fee
 - Maximum surcharge: **5% (500 basis points)** of the operator's performance fee
 - Morpho Vault V2's total performance fee is the operator's performance fee plus CurveYield's flat + surcharge components, and is still capped at 50% overall.
