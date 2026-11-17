@@ -98,6 +98,8 @@ jobs:
           echo "ETHEREUM_FORK_HASH=$HASH" >> "$GITHUB_ENV"
           echo "LOCAL_FORK_SOURCE_BLOCK=$PIN HASH=$HASH, chainId=1 verified"
       - name: Execute mined fork transactions with frequent accounting snapshots
+        env:
+          OMNI_V8_FULL_QUALIFICATION: '1'
         shell: bash
         run: |
           set -o pipefail

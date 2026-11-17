@@ -23,6 +23,11 @@ const YEARNV2="0x5f18c75abdae578b483e5f43f12a39cf75b973a9";
 const EULER="0x797dd80692c3b2dadabce8e30c07fde5307d48a9";
 const MORPHOV1="0xbeef01735c132ada46aa9aa4c54623caa92a64cb";
 const MORPHOBLUE="0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb";
+const BEEFY="0x562ea6fffd1293b9433e7b81a2682c31892ea013";
+const AAVE4="0x94e7a5dcbe816e498b89ab752661904e2f56c485";
+const DOLOMITE_ROUTER="0xf8b2c637a68cf6a17b1df9f8992eebeff63d2dff";
+const DOLOMITE_MARGIN="0x003ca23fd5f0ca87d01f6ec6cd14a8ae60c2b97d";
+const IPOR_FUSION="0x3151cee0cdb517c0e7db2b55ff5085e7d1809d90";
 const MORPHOID="0x94b823e6bd8ea533b4e33fbc307faea0b307301bc48763acc4d4aa4def7636cd";
 const WETH="0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 const BLUE_ORACLE="0x0f948cba8231db7898ef36a4212581ad7b1b4580";
@@ -69,7 +74,11 @@ const targets=[
  {name:"yearn-v2-usdc",protocol:"Yearn V2",mode:8,target:YEARNV2,id:HASH,aux:ZERO,extra:"0x"},
  {name:"morpho-blue-usdc-weth",protocol:"Morpho Blue",mode:5,target:MORPHOBLUE,id:MORPHOID,aux:ZERO,
    extra:abi.encode(["tuple(address loanToken,address collateralToken,address oracle,address irm,uint256 lltv)"],
-   [[USDC,WETH,BLUE_ORACLE,BLUE_IRM,860000000000000000n]])}
+   [[USDC,WETH,BLUE_ORACLE,BLUE_IRM,860000000000000000n]])},
+ {name:"beefy-v7-smokehouse-usdc",protocol:"Beefy V7",mode:2,target:BEEFY,id:HASH,aux:ZERO,extra:"0x"},
+ {name:"aave-v4-main-spoke-usdc",protocol:"Aave V4",mode:6,target:AAVE4,id:ethers.toBeHex(7,32),aux:ZERO,extra:"0x"},
+ {name:"dolomite-normal-usdc",protocol:"Dolomite",mode:7,target:DOLOMITE_ROUTER,id:ethers.toBeHex(2,32),aux:DOLOMITE_MARGIN,extra:"0x"},
+ {name:"ipor-fusion-usdc",protocol:"IPOR Fusion",mode:1,target:IPOR_FUSION,id:HASH,aux:ZERO,extra:"0x"}
 ];
 const fail=(check,reason)=>{if(!check)throw Error(reason);};
 const num=(v)=>BigInt(v);
@@ -129,6 +138,14 @@ async function snapshot(label,ctx) {
  vault._totalAssets(),vault.totalSupply(),vault.balanceOf(owner),usdc.balanceOf(va),usdc.balanceOf(ad),
  adapter.marketCount(),vault.previewRedeem(WAD)]),45000,"snapshot-batch:"+label);
  const adapterAssets=await bounded(adapter.realAssets(),25000,"adapter-real-assets:"+label);
+ const [previewDepositOne,previewMintOne,previewWithdrawOne,convertToAssetsOne,convertToSharesOne,
+        maxDeposit,maxMint,maxWithdraw,maxRedeem,decimals,underlying]=await bounded(Promise.all([
+   vault.previewDeposit(U),vault.previewMint(WAD),vault.previewWithdraw(U),
+   vault.convertToAssets(WAD),vault.convertToShares(U),
+   vault.maxDeposit(owner),vault.maxMint(owner),vault.maxWithdraw(owner),vault.maxRedeem(owner),
+   vault.decimals(),vault.asset()
+ ]),25000,"general-vault-views:"+label);
+ fail(underlying.toLowerCase()===USDC,"VAULT_ASSET_READ_MISMATCH "+scope+" "+label);
  const real=idle+adapterAssets;
  fail(assets<=real,"REAL_ASSETS_LT_ACCOUNTED "+scope+" "+label+" "+assets+" "+real);
  fail(accrue[0]===assets,"VAULT_ACCRUE_VIEW_MISMATCH "+scope+" "+label);
@@ -136,6 +153,8 @@ async function snapshot(label,ctx) {
   vault:va,adapter:ad,underlying:USDC,assetDecimals:6,
   vaultTotalAssets:assets,vaultCachedAssets:cache,accountedAssetsPreview:accrue[0],
   totalSupplyShares:supply,userShares:holderShares,previewRedeemOneShare:pps,
+  generalVaultReads:{previewDepositOne,previewMintOne,previewWithdrawOne,
+   convertToAssetsOne,convertToSharesOne,maxDeposit,maxMint,maxWithdraw,maxRedeem,decimals,underlying},
   adapterAssets,idleInVault:idle,idleInAdapter:adapterIdle,
   totalPhysicallyControlledAssets:real,activeMarketCount:observedCount,
   positionState:[]};
@@ -146,9 +165,36 @@ async function snapshot(label,ctx) {
   const target=positions?.find(p=>p.key===id);
   const current=target ? await adapter.positionAssets(target.mode,target.target,target.id,target.aux):null;
   if(current!==null)sum+=current;
+  let directProtocolPosition=null;
+  if(target){
+   if([1,2,8].includes(Number(m.mode))) {
+    const owned=await bounded(new ethers.Contract(m.target,ERC20,signer).balanceOf(ad),20000,"protocol-owned-shares:"+target.name);
+    fail(owned>=m.trackedShares,"PROTOCOL_TOKEN_SHARES_MISMATCH "+target.name);
+    directProtocolPosition={kind:"vaultShares",balance:owned};
+   } else if(Number(m.mode)===3) {
+    const supplied=await bounded(new ethers.Contract(m.auxiliary,ERC20,signer).balanceOf(ad),20000,"aToken-balance:"+target.name);
+    directProtocolPosition={kind:"aTokenBalance",balance:supplied};
+   } else if(Number(m.mode)===4) {
+    const supplied=await bounded(new ethers.Contract(m.target,ERC20,signer).balanceOf(ad),20000,"comet-supplied:"+target.name);
+    directProtocolPosition={kind:"cometBalance",balance:supplied};
+   } else if(Number(m.mode)===5) {
+    const market=new ethers.Contract(m.target,["function position(bytes32,address) view returns(uint256,uint128,uint128)"],signer);
+    const [shares,borrowShares,collateral]=await bounded(market.position(m.marketId,ad),20000,"morpho-blue-position:"+target.name);
+    fail(shares>=m.trackedShares,"MORPHO_SUPPLY_SHARES_MISMATCH "+target.name);
+    directProtocolPosition={kind:"morphoBlueShares",supplyShares:shares,borrowShares,collateral};
+   } else if(Number(m.mode)===6) {
+    const spoke=new ethers.Contract(m.target,["function getUserSuppliedAssets(uint256,address) view returns(uint256)"],signer);
+    const supplied=await bounded(spoke.getUserSuppliedAssets(BigInt(m.marketId),ad),20000,"aave-v4-balance:"+target.name);
+    directProtocolPosition={kind:"aaveV4SuppliedAssets",balance:supplied};
+   } else if(Number(m.mode)===7) {
+    const margin=new ethers.Contract(m.auxiliary,["function getAccountWei((address,uint256),uint256) view returns(bool,uint256)"],signer);
+    const [positive,weiValue]=await bounded(margin.getAccountWei([ad,0],BigInt(m.marketId)),20000,"dolomite-account:"+target.name);
+    directProtocolPosition={kind:"dolomiteAccountWei",positive,balance:weiValue};
+   }
+  }
   obj.positionState.push({capId:id,mode:m.mode,target:m.target,auxiliary:m.auxiliary,
     marketId:m.marketId,credit:m.credit,trackedShares:m.trackedShares,
-    capAllocation:alloc,livePositionAssets:current});
+    capAllocation:alloc,livePositionAssets:current,directProtocolPosition});
  }
  // Other-account unsolicited ERC20 donations must not be confused with deployed market value.
  if(positions?.length===Number(observedCount))fail(sum===adapterAssets,"PER_POSITION_SUM_NOT_REAL_ASSETS "+scope);
@@ -323,7 +369,7 @@ async function main(){
  console.log("FORK_PIN_LOOKUP_START",pin);
  const original=await bounded(provider.getBlock(pin),15000,"pinned-getBlock");fail(original&&original.hash.toLowerCase()===process.env.ETHEREUM_FORK_HASH?.toLowerCase(),"FORK_BLOCK_HASH_MISMATCH");
  console.log("FORK_PIN_MATCH",pin,original.hash);
- for(const addr of [USDC,AAVE,SPARK,COMET,FLUID,YEARNV3,YEARNV2,EULER,MORPHOV1,MORPHOBLUE]){
+ for(const addr of [USDC,AAVE,SPARK,COMET,FLUID,YEARNV3,YEARNV2,EULER,MORPHOV1,MORPHOBLUE,BEEFY,AAVE4,DOLOMITE_ROUTER,DOLOMITE_MARGIN,IPOR_FUSION]){
   console.log("FORK_CODE_PREFLIGHT_BEGIN",addr);
   const code=await bounded(provider.getCode(addr),15000,"code:"+addr);fail(code.length>2,"MISSING_LIVE_CODE "+addr);
   console.log("FORK_CODE_PREFLIGHT_OK",addr,code.length);
@@ -376,7 +422,7 @@ save();
 const stageWatchdog=setTimeout(()=>{
   evidence.errors.push("FOUR_MINUTE_DIAGNOSTIC_TIMEOUT");save();
   console.error("LIVE_FORK_DIAGNOSTIC_TIMEOUT");process.exit(124);
-},Number(process.env.OMNI_V8_FULL_QUALIFICATION==="1"?5400000:240000));
+},Number(process.env.OMNI_V8_FULL_QUALIFICATION==="1"?1500000:240000));
 main().then(()=>clearTimeout(stageWatchdog)).catch(e=>{
  evidence.errors.push(String(e.stack||e));save();console.error("LIVE_FORK_FATAL",e);
  clearTimeout(stageWatchdog);process.exit(1);
