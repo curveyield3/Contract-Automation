@@ -28,6 +28,8 @@ const AAVE4="0x94e7a5dcbe816e498b89ab752661904e2f56c485";
 const DOLOMITE_ROUTER="0xf8b2c637a68cf6a17b1df9f8992eebeff63d2dff";
 const DOLOMITE_MARGIN="0x003ca23fd5f0ca87d01f6ec6cd14a8ae60c2b97d";
 const IPOR_FUSION="0x43ee0243ea8cf02f7087d8b16c8d2007cc9c7ca2";
+// Multiple verified real Ethereum USDC Fusion vaults; keep unsuccessful attempts as evidence.
+const IPOR_ALTERNATIVES=[IPOR_FUSION,"0xb0f56bb0bf13ee05fef8cd2d8df5ffdfcac7a74f","0x3151cee0cdb517c0e7db2b55ff5085e7d1809d90"];
 const MORPHOID="0x94b823e6bd8ea533b4e33fbc307faea0b307301bc48763acc4d4aa4def7636cd";
 const WETH="0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 const BLUE_ORACLE="0x0f948cba8231db7898ef36a4212581ad7b1b4580";
@@ -257,7 +259,64 @@ async function allocate(ctx,t,amount){
  await snapshot("06-after-real-market-deposit:"+t.name,ctx);
  return {key,value};
 }
+async function harvestRealYearnV2(ctx,t) {
+ // Actual V2 vault keeper harvest is required for new earnings to reach the share price.
+ // Impersonation is restricted to the pinned local Anvil fork; no live-chain writes.
+ const yearn=new ethers.Contract(t.target,[
+  "function withdrawalQueue(uint256) view returns (address)",
+  "function pricePerShare() view returns (uint256)",
+  "function lastReport() view returns (uint256)"
+ ],signer);
+ const strategyAddress=await yearn.withdrawalQueue(0);
+ fail(strategyAddress!==ZERO,"YEARN_NO_WITHDRAWAL_STRATEGY");
+ const strategy=new ethers.Contract(strategyAddress,[
+  "function keeper() view returns (address)",
+  "function strategist() view returns (address)",
+  "function vault() view returns (address)",
+  "function estimatedTotalAssets() view returns (uint256)",
+  "function harvest()"
+ ],signer);
+ fail((await strategy.vault()).toLowerCase()===t.target,"YEARN_STRATEGY_WRONG_VAULT");
+ const keeper=await strategy.keeper();
+ fail(keeper!==ZERO,"YEARN_KEEPER_NOT_SET");
+ const pre={strategy:strategyAddress,keeper,estimatedAssets:await strategy.estimatedTotalAssets(),
+  pricePerShare:await yearn.pricePerShare(),lastReport:await yearn.lastReport()};
+ console.log("YEARN_REAL_HARVEST_BEFORE",JSON.stringify(x(pre)));
+ await bounded(provider.send("anvil_setBalance",[keeper,ethers.toBeHex(10n*10n**18n)]),12000,"yearn-local-keeper-gas");
+ await bounded(provider.send("anvil_impersonateAccount",[keeper]),12000,"yearn-local-keeper-impersonate");
+ try{
+  const keeperSigner=await provider.getSigner(keeper);
+  await tx("real Yearn V2 keeper strategy.harvest()",strategy.connect(keeperSigner).harvest({gasLimit:9_000_000}),ctx.scope);
+ }finally{
+  await provider.send("anvil_stopImpersonatingAccount",[keeper]);
+ }
+ const post={strategy:strategyAddress,keeper,estimatedAssets:await strategy.estimatedTotalAssets(),
+  pricePerShare:await yearn.pricePerShare(),lastReport:await yearn.lastReport()};
+ console.log("YEARN_REAL_HARVEST_AFTER",JSON.stringify(x(post)));
+ // Yearn V2 locks reported profit; wait for the genuine lockedProfit degradation.
+ await timeJump(1);
+ await snapshot("12a-Yearn-real-keeper-harvest-and-profit-unlock",ctx);
+}
+async function refreshRealIPOR(ctx,t) {
+ // Trigger real IPOR Fusion accounting changes through its real ERC4626 calls.
+ const fusion=new ethers.Contract(t.target,[
+  "function asset() view returns(address)",
+  "function totalAssets() view returns(uint256)"
+ ],signer);
+ fail((await fusion.asset()).toLowerCase()===USDC,"IPOR_NOT_REAL_USDC_VAULT");
+ const ad=await ctx.adapter.getAddress();
+ const before={totalAssets:await fusion.totalAssets(),positionAssets:await ctx.adapter.positionAssets(t.mode,t.target,t.id,t.aux)};
+ console.log("IPOR_REFRESH_BEFORE",JSON.stringify(x({target:t.target,...before})));
+ await tx("IPOR real Fusion withdrawal accounting refresh",ctx.vault.deallocate(ad,data(t),1n*U,{gasLimit:9_000_000}),ctx.scope);
+ await snapshot("12a-IPOR-after-real-withdrawal-checkpoint",ctx);
+ await tx("IPOR real Fusion deposit accounting refresh",ctx.vault.allocate(ad,data(t),1n*U,{gasLimit:9_000_000}),ctx.scope);
+ const after={totalAssets:await fusion.totalAssets(),positionAssets:await ctx.adapter.positionAssets(t.mode,t.target,t.id,t.aux)};
+ console.log("IPOR_REFRESH_AFTER",JSON.stringify(x({target:t.target,...after})));
+ await snapshot("12b-IPOR-after-real-deposit-checkpoint",ctx);
+}
 async function accrueMarket(ctx,t) {
+ if(t.protocol==="Yearn V2"){await harvestRealYearnV2(ctx,t);}
+ if(t.protocol==="IPOR Fusion"){await refreshRealIPOR(ctx,t);}
  if(t.mode===4){
   const comet=new ethers.Contract(t.target,["function accrueAccount(address)"],signer);
   await tx("Compound III real-market accrueAccount",comet.accrueAccount(await ctx.adapter.getAddress()),ctx.scope);
@@ -386,7 +445,7 @@ async function main(){
  console.log("FORK_PIN_LOOKUP_START",pin);
  const original=await bounded(provider.getBlock(pin),15000,"pinned-getBlock");fail(original&&original.hash.toLowerCase()===process.env.ETHEREUM_FORK_HASH?.toLowerCase(),"FORK_BLOCK_HASH_MISMATCH");
  console.log("FORK_PIN_MATCH",pin,original.hash);
- for(const addr of [USDC,AAVE,SPARK,COMET,FLUID,YEARNV3,YEARNV2,EULER,MORPHOV1,MORPHOBLUE,BEEFY,AAVE4,DOLOMITE_ROUTER,DOLOMITE_MARGIN,IPOR_FUSION]){
+ for(const addr of [USDC,AAVE,SPARK,COMET,FLUID,YEARNV3,YEARNV2,EULER,MORPHOV1,MORPHOBLUE,BEEFY,AAVE4,DOLOMITE_ROUTER,DOLOMITE_MARGIN,...IPOR_ALTERNATIVES]){
   console.log("FORK_CODE_PREFLIGHT_BEGIN",addr);
   const code=await bounded(provider.getCode(addr),15000,"code:"+addr);fail(code.length>2,"MISSING_LIVE_CODE "+addr);
   console.log("FORK_CODE_PREFLIGHT_OK",addr,code.length);
@@ -413,18 +472,19 @@ async function main(){
  }
  let base=await provider.send("evm_snapshot",[]);
  const passed=[];
- for(const t of targets){
-  fail(await provider.send("evm_revert",[base]),"REVERT_BASE_FAILED"); // snapshot one-shot
-  // Create new independent baseline after revert so each protocol gets identical chain state.
-  const fresh=await provider.send("evm_snapshot",[]);
-  const tr=await trial(t);
-  if(tr.status==="PROVEN_LOCAL_FORK")passed.push(t);
-  // Rewind to the original funded state; next trial must not inherit prior time jumps.
-  fail(await provider.send("evm_revert",[fresh]),"REVERT_TRIAL_FAILED");
-  // Track replacement snapshot id as new baseline for next loop using fresh local variable below.
-  const next=await provider.send("evm_snapshot",[]);
-  // We must not reuse consumed base id; replace it.
-  base=next;
+ for(const target of targets){
+  const alternatives=target.protocol==="IPOR Fusion"
+    ? IPOR_ALTERNATIVES.map(address=>({...target,target:address})): [target];
+  for(const t of alternatives){
+   fail(await provider.send("evm_revert",[base]),"REVERT_BASE_FAILED");
+   const fresh=await provider.send("evm_snapshot",[]);
+   const tr=await trial(t);
+   if(tr.status==="PROVEN_LOCAL_FORK")passed.push(t);
+   fail(await provider.send("evm_revert",[fresh]),"REVERT_TRIAL_FAILED");
+   base=await provider.send("evm_snapshot",[]);
+   if(tr.status==="PROVEN_LOCAL_FORK")break;
+   if(target.protocol==="IPOR Fusion")console.log("IPOR_VAULT_NOT_QUALIFIED_TRY_ALTERNATIVE",t.target,tr.error);
+  }
  }
  fail(await provider.send("evm_revert",[base]),"PORTFOLIO_RESTORE_FAILED");
  // Dolomite's price oracle intentionally expires before a 30-day artificial
@@ -434,7 +494,7 @@ async function main(){
  evidence.portfolioLongHorizonExclusions=passed.filter(t=>t.mode===7).map(t=>({name:t.name,
   reason:"live Chainlink oracle cannot be synthetically refreshed for the 30-day fork warp"}));
  await portfolio(longHorizonMarkets);
- evidence.summary={totalProtocolCases:targets.length,passed:passed.length,failed:targets.length-passed.length,
+ evidence.summary={totalProtocolCases:targets.length,iporAlternativesAttempted:evidence.trials.filter(t=>t.protocol==="IPOR Fusion").map(t=>({target:t.target,status:t.status,error:t.error})),passed:passed.length,failed:targets.length-passed.length,
  passedNames:passed.map(t=>t.name),portfolioStatus:evidence.portfolio?.status,
  snapshots:evidence.snapshots.length,minedForkReceipts:evidence.receipts.length};
  save();console.log("FINAL_LOCAL_FORK_VERDICT",JSON.stringify(x(evidence.summary)));
