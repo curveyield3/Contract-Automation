@@ -11,6 +11,14 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { ethers } from "ethers";
 const OUT=".omni-v8-build/live-fork-evidence-v8.json";
+// Additional user-approved target protocols: only existing harness, no new workflow.
+const EXTENDED_FIVE=[
+ {name:"StakeDAO",market:"StakeDAO USDC V2 ERC4626",target:"0x8EDCC305E633d29BFB383872e79401c506cE9E6f",asset:"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",holder:"0x55fe002aeff02f77364de339a1292923a15844b8",units:6,mode:1},
+ {name:"Convex",market:"Convex BaseRewardPool cvxCRV rewards",target:"0x3Fe65692bfCD0e6CF84cB1E7d24108E434A7587e",asset:"0x62b9c7356A2Dc64a1969e19C23e4f579F9810Aa7",holder:null,units:18,mode:1},
+ {name:"Fraxlend",market:"Fraxlend V2 sUSDe / FRAX lending",target:"0xb5ae5b75c0df5632c572a657109375646ce66f90",asset:"0x853d955acef822db058eb8505911ed77f175b99e",holder:"0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B",units:18,mode:1},
+ {name:"CurveLend",market:"Curve LlamaLend V2 market 0 crvUSD",target:"0x2b5a321c3cb1f33e1abecd047c2649d0b4c47eba",asset:"0xf939e0a03fb07f59a73314e73794be0e57ac1b4e",holder:"0x4dece678ceceb27446b35c672dc7d61f30bad69e",units:18,mode:1},
+ {name:"Pendle",market:"Pendle SY USD3 active mainnet",target:"0xeA3BC608F32847B97965C5e1648BDFCd4C2C40d0",asset:"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",holder:"0x55fe002aeff02f77364de339a1292923a15844b8",units:6,mode:1}
+];
 const RPC="http://127.0.0.1:8545"; // Hard boundary: all writes LOCAL ONLY.
 const USDC="0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 const WHALE="0x55fe002aeff02f77364de339a1292923a15844b8";
@@ -56,7 +64,7 @@ const evidence={schema:"omniadapter-v8-local-anvil-live-fork-evidence",version:"
  sourceRepository:"curveyield3/Smart-Contracts",executionRepository:"curveyield3/Contract-Automation",
  chainId:1,chain:"ethereum",forkBlock:process.env.ETHEREUM_FORK_BLOCK,forkHash:process.env.ETHEREUM_FORK_HASH,
  rpc:"localhost-anvil-only",mode:"real-protocol-on-archival-fork",mockMarkets:false,
- snapshots:[],trials:[],portfolio:null,receipts:[],errors:[],unverified:[],
+ snapshots:[],trials:[],extendedFive:[],portfolio:null,receipts:[],errors:[],unverified:[],
  acceptance:"REAL transactions + MORPHO native reads + protocol yield growth + positive share PPS + successful exits"};
 function x(v) { if(typeof v==="bigint")return v.toString();if(Array.isArray(v))return v.map(x);if(v&&typeof v==="object"){let o={};for(const [k,val] of Object.entries(v))o[k]=x(val);return o;}return v;}
 function save(){mkdirSync(".omni-v8-build",{recursive:true});writeFileSync(OUT,JSON.stringify(x(evidence),null,2)+"\n");}
@@ -493,6 +501,121 @@ async function portfolio(passed){
  }catch(e){rec.status="NOT_PROVEN";rec.error=String(e.stack||e).slice(0,1800);console.error("LIVE_FORK_PORTFOLIO_FAIL",rec.error);}
  save();
 }
+
+async function extendedFiveTrial(spec) {
+ const scope="extended-five:"+spec.name;
+ const result={name:spec.name,market:spec.market,target:spec.target,asset:spec.asset,requestedMethod:"Morpho Vault V2 -> OmniAdapter v8 -> protocol",status:"IN_PROGRESS",readProbes:{},receipts:[]};
+ evidence.extendedFive.push(result);save();
+ const target=new ethers.Contract(spec.target,[
+  "function asset() view returns(address)",
+  "function maxDeposit(address) view returns(uint256)",
+  "function previewRedeem(uint256) view returns(uint256)",
+  "function getTokensIn() view returns(address[])",
+  "function exchangeRate() view returns(uint256)",
+  "function stakingToken() view returns(address)"
+ ],signer);
+ const get=async(label,fn)=>{try{result.readProbes[label]=x(await bounded(fn(),12000,"probe:"+spec.name+":"+label));}catch(e){result.readProbes[label]="REVERT_OR_MISSING_ABI:"+String(e.shortMessage||e.message).slice(0,140);}save();};
+ await get("ERC4626_asset",()=>target.asset());
+ await get("ERC4626_maxDeposit",()=>target.maxDeposit(owner));
+ await get("ERC4626_previewRedeem",()=>target.previewRedeem(10n**BigInt(spec.units)));
+ if(spec.name==="Pendle"){await get("Pendle_SY_getTokensIn",()=>target.getTokensIn());await get("Pendle_SY_exchangeRate",()=>target.exchangeRate());}
+ if(spec.name==="Convex")await get("Convex_rewardPool_stakingToken",()=>target.stakingToken());
+ try{
+  const underlying=new ethers.Contract(spec.asset,ERC20,signer);
+  const scale=10n**BigInt(spec.units);
+  if(spec.holder){
+   const wallet=await underlying.balanceOf(owner);
+   if(wallet<1000n*scale){
+    const sourceBal=await underlying.balanceOf(spec.holder);
+    fail(sourceBal>=1000n*scale,"SOURCE_BOUND_REAL_TOKEN_HOLDER_INSUFFICIENT "+sourceBal);
+    await provider.send("anvil_setBalance",[spec.holder,ethers.toBeHex(10n*10n**18n)]);
+    await provider.send("anvil_impersonateAccount",[spec.holder]);
+    try{
+     await tx("source-owned underlying token transfer on local Anvil",
+       underlying.connect(await provider.getSigner(spec.holder)).transfer(owner,1000n*scale,{gasLimit:700000}),scope);
+    }finally{await provider.send("anvil_stopImpersonatingAccount",[spec.holder]);}
+   }
+  }
+  const vault=await deploy("official VaultV2 for "+spec.name,V2,[owner,spec.asset],scope);
+  const va=await vault.getAddress();
+  await tx("set curator",vault.setCurator(owner),scope);
+  const adapter=await deploy("OmniAdapter v8 for "+spec.name,OMNI,[va],scope);
+  const ad=await adapter.getAddress();
+  const allocRole=vault.interface.encodeFunctionData("setIsAllocator",[owner,true]);
+  await tx("submit allocator",vault.submit(allocRole),scope);
+  await tx("activate allocator",vault.setIsAllocator(owner,true),scope);
+  const allow=vault.interface.encodeFunctionData("addAdapter",[ad]);
+  await tx("submit adapter",vault.submit(allow),scope);
+  await tx("activate adapter",vault.addAdapter(ad),scope);
+  await tx("set Morpho maximum earnings rate",vault.setMaxRate(MAX_RATE),scope);
+  if(spec.holder){
+   await tx("approve source-bound asset to parent Vault V2",underlying.approve(va,ethers.MaxUint256),scope);
+   await tx("deposit actual source-bound assets to parent Vault V2",vault.deposit(800n*scale,owner,{gasLimit:8_000_000}),scope);
+  }else{
+   // Convex BaseRewardPool is non-ERC4626: check adapter's actual registration call
+   // without inventing or transferring staking rewards.
+   const claimed=await target.stakingToken();
+   fail(claimed.toLowerCase()===spec.asset.toLowerCase(),"CONVEX_STAKING_TOKEN_MISMATCH");
+  }
+  const key=await adapter.keyOf(1,spec.target,HASH,ZERO);
+  const idData=await adapter.idData(1,spec.target,HASH,ZERO);
+  const addAbs=vault.interface.encodeFunctionData("increaseAbsoluteCap",[idData,10n**32n]);
+  const addRel=vault.interface.encodeFunctionData("increaseRelativeCap",[idData,WAD]);
+  await tx("submit cap",vault.submit(addAbs),scope);
+  await tx("raise absolute cap",vault.increaseAbsoluteCap(idData,10n**32n),scope);
+  await tx("submit relative cap",vault.submit(addRel),scope);
+  await tx("raise relative cap",vault.increaseRelativeCap(idData,WAD),scope);
+  const dat=abi.encode(["uint8","address","bytes32","address","uint256","bytes"],[1,spec.target,HASH,ZERO,0,"0x"]);
+  result.before={vaultAssets:await vault.totalAssets(),sharePps:await vault.previewRedeem(WAD),
+   positionAssets:await adapter.positionAssets(1,spec.target,HASH,ZERO)};
+  console.log("EXTENDED_FIVE_BEFORE",JSON.stringify(x({...result.before,name:spec.name,market:spec.market})));
+  if(!spec.holder){
+   // Must be rejected when no real matching token funding path exists; call
+   // real native adapter entrypoint and preserve exact revert reason.
+   await vault.allocate(ad,dat,0,{gasLimit:9_000_000});
+   fail(false,"UNFUNDED_CONVEX_MODE_UNEXPECTEDLY_ACCEPTED");
+  }
+  await tx("real native protocol investment",vault.allocate(ad,dat,100n*scale,{gasLimit:9_000_000}),scope);
+  const invested=await adapter.positionAssets(1,spec.target,HASH,ZERO);
+  result.invested=invested;
+  fail(invested>0n,"NO_ACTIVE_POSITION");
+  const matched=await vault.allocation(key);
+  fail(matched===invested,"EXTENDED_CAP_ALLOCATION_MISMATCH");
+  await timeJump(30);
+  if(spec.name==="Fraxlend"){
+   const pair=new ethers.Contract(spec.target,["function addInterest()"],signer);
+   await tx("Fraxlend actual pair addInterest",pair.addInterest({gasLimit:9_000_000}),scope);
+  }
+  await tx("accrue official Morpho Vault V2",vault.accrueInterest({gasLimit:9_000_000}),scope);
+  await timeJump(1);
+  await tx("recognize rate-limited market profit",vault.accrueInterest({gasLimit:9_000_000}),scope);
+  result.accrued={positionAssets:await adapter.positionAssets(1,spec.target,HASH,ZERO),
+    vaultAssets:await vault.totalAssets(),sharePps:await vault.previewRedeem(WAD)};
+  console.log("EXTENDED_FIVE_ACCRUED",JSON.stringify(x({...result.accrued,name:spec.name})));
+  fail(result.accrued.positionAssets>invested,"EXTENDED_NO_POSITIVE_NATIVE_MARKET_YIELD");
+  fail(result.accrued.sharePps>result.before.sharePps,"EXTENDED_NO_HIGHER_MORPHO_SHARE_RATE");
+  const balanceBefore=await underlying.balanceOf(va);
+  await tx("withdraw directly from real protocol",vault.deallocate(ad,dat,20n*scale,{gasLimit:9_000_000}),scope);
+  fail((await underlying.balanceOf(va))>=balanceBefore+20n*scale,"EXTENDED_UNDERLYING_NOT_RETURNED");
+  const beforeWallet=await underlying.balanceOf(owner);
+  const shares=await vault.balanceOf(owner)/5n;
+  await tx("redeem official Morpho V2 share at appreciated rate",
+    vault.redeem(shares,owner,owner,{gasLimit:9_000_000}),scope);
+  result.ending={positionAssets:await adapter.positionAssets(1,spec.target,HASH,ZERO),
+    vaultAssets:await vault.totalAssets(),sharePps:await vault.previewRedeem(WAD),
+    returnedUnderlying:(await underlying.balanceOf(owner))-beforeWallet,
+    activeMarketCount:await adapter.marketCount()};
+  fail(result.ending.positionAssets>0n&&result.ending.activeMarketCount>0n,"EXTENDED_POSITION_NOT_LEFT_ACTIVE");
+  result.status="PROVEN_LOCAL_FORK";result.yieldEarned=result.accrued.positionAssets-invested;
+  console.log("EXTENDED_FIVE_PASS",JSON.stringify(x(result)));
+ }catch(e){
+  result.status="NOT_PROVEN";
+  result.error=String(e.stack||e).slice(0,1300);
+  console.log("EXTENDED_FIVE_NOT_PROVEN",JSON.stringify(x({name:spec.name,error:result.error})));
+ }finally{save();}
+ return result;
+}
+
 async function main(){
  console.log("FORK_MAIN_START");
  const info=await bounded(provider.getNetwork(),15000,"getNetwork");fail(info.chainId===1n,"WRONG_NETWORK");
@@ -550,11 +673,24 @@ async function main(){
  evidence.portfolioLongHorizonExclusions=passed.filter(t=>t.mode===7).map(t=>({name:t.name,
   reason:"live Chainlink oracle cannot be synthetically refreshed for the 30-day fork warp"}));
  await portfolio(longHorizonMarkets);
+ // These five were explicitly requested after the already-proven 13 cases.
+ // Isolate each target from preceding market/time mutations.
+ const baseFive=await provider.send("evm_snapshot",[]);
+ let snapFive=baseFive;
+ for(const spec of EXTENDED_FIVE){
+  fail(await provider.send("evm_revert",[snapFive]),"EXTENDED_FIVE_RESTORE_FAILED");
+  snapFive=await provider.send("evm_snapshot",[]);
+  await extendedFiveTrial(spec);
+ }
  evidence.summary={totalProtocolCases:targets.length,iporAlternativesAttempted:evidence.trials.filter(t=>t.protocol==="IPOR Fusion").map(t=>({target:t.target,status:t.status,error:t.error})),passed:passed.length,failed:targets.length-passed.length,
  passedNames:passed.map(t=>t.name),portfolioStatus:evidence.portfolio?.status,
+ extendedFive:evidence.extendedFive.map(t=>({name:t.name,status:t.status,error:t.error,readProbes:t.readProbes})),
  snapshots:evidence.snapshots.length,minedForkReceipts:evidence.receipts.length};
  save();console.log("FINAL_LOCAL_FORK_VERDICT",JSON.stringify(x(evidence.summary)));
  fail(evidence.summary.failed===0&&evidence.portfolio?.status==="PROVEN_LOCAL_FORK","COMPATIBILITY_INCOMPLETE_EVIDENCE_RETAINED");
+ // The preceding 13 remain source-bound and independently qualified; the five
+ // requested extension classes must not be reported as qualified on failed proofs.
+ fail(evidence.extendedFive.every(t=>t.status==="PROVEN_LOCAL_FORK"),"EXTENDED_FIVE_NOT_ALL_COMPATIBLE_EVIDENCE_RETAINED");
 }
 console.log("FORK_NODE_MODULE_READY");
 save();
