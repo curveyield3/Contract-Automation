@@ -178,7 +178,7 @@ contract CurveYieldMorphoFeeSplitterV2 {
     uint256 public constant MORPHO_MAX_FEE = 0.25e18;
 
     ICurveYieldMorphoCore public immutable morpho;
-    CurveYieldMorphoOwnerV1 public immutable governance;
+    CurveYieldMorphoOwnerV3 public immutable governance;
     address public owner;
     address public pendingOwner;
     address public treasury;
@@ -235,7 +235,7 @@ contract CurveYieldMorphoFeeSplitterV2 {
         if (morpho_ == address(0) || governance_ == address(0) || owner_ == address(0)
             || treasury_ == address(0)) revert ZeroAddress();
         morpho = ICurveYieldMorphoCore(morpho_);
-        governance = CurveYieldMorphoOwnerV1(governance_);
+        governance = CurveYieldMorphoOwnerV3(governance_);
         owner = owner_;
         treasury = treasury_;
         emit OwnershipTransferred(owner_);
