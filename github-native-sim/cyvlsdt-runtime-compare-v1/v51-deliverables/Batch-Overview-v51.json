@@ -5,23 +5,23 @@
     {
       "stage": 1,
       "to": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
-      "hash": "0x4835001220cd76814f2d314f22dcb8e5e6abdf3c724096a1964859b2e73b3ebd",
-      "transactions": 4,
-      "totalCalldataBytes": 51428,
+      "hash": "0x104a2bbfe603872c74fbe89783df8cccc3d9c89400cbac395b7bdf8126f4d54d",
+      "transactions": 3,
+      "totalCalldataBytes": 39940,
       "labels": [
         "deploy:cyvlSdt",
         "deploy:locker",
-        "deploy:revenueStaking",
-        "deploy:boostMerchant"
+        "deploy:revenueStaking"
       ]
     },
     {
       "stage": 2,
       "to": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
-      "hash": "0xf47e657d4b615a61185991e6b24ae42e5572a9df2653a6bbed182553fd6f2f3c",
-      "transactions": 3,
-      "totalCalldataBytes": 35364,
+      "hash": "0x77e00df615a1fd6db5609da356385124d00e20d47b5fd9615f6f09283b06308b",
+      "transactions": 4,
+      "totalCalldataBytes": 46852,
       "labels": [
+        "deploy:boostMerchant",
         "deploy:revenueVault",
         "deploy:revenueStrategy",
         "deploy:bribeAllocator"
