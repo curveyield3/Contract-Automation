@@ -4,6 +4,7 @@ on:
     branches: [ethereum-omniadapter-v7-compatibility-v1]
     paths:
       - github-native-sim/morpho-ethereum-v1/test/OmniAdapterV8Compatibility.t.sol
+      - github-native-sim/morpho-ethereum-v1/scripts/omniadapter-live-fork-v8.mjs
       - .github/workflows/omniadapter-v7-compatibility.yml
   workflow_dispatch:
 permissions:
@@ -62,6 +63,46 @@ jobs:
         run: |
           set -euo pipefail
           forge test --match-path 'github-native-sim/morpho-ethereum-v1/test/OmniAdapterV8Compatibility.t.sol' -vvv 2>&1 | tee .omni-v8-build/compatibility-test.log
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing pinned ethers.js dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Freeze authenticated Ethereum archival block and start verified local Anvil fork
+        id: local-fork
+        shell: bash
+        env:
+          ETHEREUM_ARCHIVE_RPC: ${{ secrets.RPC_ETHEREUM }}
+        run: |
+          set -euo pipefail
+          test -n "${ETHEREUM_ARCHIVE_RPC:-}" || { echo "::error::RPC_ETHEREUM authenticated archival secret required"; exit 1; }
+          CHAIN_ID="$(cast chain-id --rpc-url "$ETHEREUM_ARCHIVE_RPC")"
+          test "$CHAIN_ID" = "1" || { echo "::error::Authenticated source is not Ethereum"; exit 1; }
+          PIN="$(cast block-number --rpc-url "$ETHEREUM_ARCHIVE_RPC")"
+          test "$PIN" -gt 20000000 || { echo "::error::Invalid archive block"; exit 1; }
+          HASH="$(cast block "$PIN" --field hash --rpc-url "$ETHEREUM_ARCHIVE_RPC" | tr -d '\r\n')"
+          [[ "$HASH" =~ ^0x[0-9a-fA-F]{64}$ ]] || { echo "::error::Missing pinned historical block hash"; exit 1; }
+          anvil --fork-url "$ETHEREUM_ARCHIVE_RPC" --fork-block-number "$PIN" --chain-id 1 --port 8545 --host 127.0.0.1 \
+              > .omni-v8-build/anvil-v8.log 2>&1 &
+          echo "$!" > .omni-v8-build/anvil.pid
+          for attempt in $(seq 1 80); do
+            if LOCAL_CHAIN="$(cast chain-id --rpc-url http://127.0.0.1:8545 2>/dev/null)"; then
+              if [ "$LOCAL_CHAIN" = 1 ]; then break; fi
+            fi
+            sleep 2
+          done
+          test "${LOCAL_CHAIN:-}" = "1" || { echo "::error::Local Anvil fork unavailable"; tail -60 .omni-v8-build/anvil-v8.log; exit 1; }
+          LOCAL_HASH="$(cast block "$PIN" --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
+          test "${LOCAL_HASH,,}" = "${HASH,,}" || { echo "::error::Fork hash mismatches archival source"; exit 1; }
+          echo "ETHEREUM_FORK_BLOCK=$PIN" >> "$GITHUB_ENV"
+          echo "ETHEREUM_FORK_HASH=$HASH" >> "$GITHUB_ENV"
+          echo "LOCAL_FORK_SOURCE_BLOCK=$PIN HASH=$HASH, chainId=1 verified"
+      - name: Execute mined fork transactions with frequent accounting snapshots
+        shell: bash
+        run: |
+          set -o pipefail
+          node github-native-sim/morpho-ethereum-v1/scripts/omniadapter-live-fork-v8.mjs \
+            2>&1 | tee .omni-v8-build/live-fork-run.log
       - name: Archive source-bound compiler and test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -70,4 +111,13 @@ jobs:
           path: |
             .omni-v8-build/compile.log
             .omni-v8-build/compatibility-test.log
+            .omni-v8-build/live-fork-run.log
+            .omni-v8-build/live-fork-evidence-v8.json
+            .omni-v8-build/anvil-v8.log
           if-no-files-found: warn
+
+      - name: Stop isolated Anvil fork
+        if: always()
+        shell: bash
+        run: |
+          if test -f .omni-v8-build/anvil.pid; then kill "$(cat .omni-v8-build/anvil.pid)" || true; fi
