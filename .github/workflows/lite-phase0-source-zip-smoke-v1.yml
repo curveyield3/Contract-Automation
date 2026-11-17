@@ -406,11 +406,9 @@ jobs:
               h.update(bytes([0]))
           actual=h.hexdigest()
           assert actual=='3169b7e5d97e28a1475b210d99fd9984c786693eda71f101cecfa0a1ef5a430b',actual
-          c=json.loads((root/'config-production-v47.json').read_text())
-          c['version']=50
-          c['release']='50'
-          c['finalOwner']='0x47623C62f281807D615eeb4A2CEee9d97F9D3C49'
-          (root/'config-safe-mainnet-v50.json').write_text(json.dumps(c,indent=2)+'\n')
+          (root/'config-safe-mainnet-v50.json').write_bytes(
+              Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v50.json').read_bytes()
+          )
           assert hashlib.sha256((root/'config-safe-mainnet-v50.json').read_bytes()).hexdigest()=='b212110ed5b2667956d6230641aa8262dcc5ccfca3ec5ef13a4f9fe0242e39d3'
           pkg=json.loads((root/'package.json').read_text())
           pkg['name']='curveyield-cyvlsdt-deployment-package-v50'
