@@ -202,7 +202,7 @@ contract VaultFactoryV7Fixture {
     function allow(address vault) external {isVaultV2[vault]=true;}
 }
 contract OmniAdapterV7CompatibilityTest {
-    VmV7Fixture private constant vm=VmV7Fixture(address(uint160(uint256(keccak256('hevm cheat code'))));
+    VmV7Fixture private constant vm=VmV7Fixture(address(uint160(uint256(keccak256('hevm cheat code')))));
     address private constant SAFE=0x47623C62f281807D615eeb4A2CEee9d97F9D3C49;
     TokenV7Fixture token;
     ParentV7Fixture parent;
