@@ -1,4 +1,4 @@
-name: CurveYield Fraxtal Morpho IRM Compile v12
+name: CurveYield Fraxtal Morpho IRM Compile v13
 
 # Compile-only validation. No tests, deployments, broadcast or RPC use.
 on:
@@ -8,8 +8,8 @@ on:
     paths:
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol'
-      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV4.sol'
-      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV3.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV5.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV4.sol'
       - '.github/workflows/curveyield-morpho-irm-compile-v1.yml'
   workflow_dispatch:
 
@@ -29,7 +29,7 @@ jobs:
           node-version: '22'
       - name: Install existing pinned Solidity compiler
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Compile six IRMs, six factories, production-owner-derived V3 and fee splitter V2
+      - name: Compile six IRMs, six factories, owner V3 and Safe-controlled splitter V3
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -37,8 +37,8 @@ jobs:
           import solc from 'solc';
           const path = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol';
           const master = 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol';
-          const factories = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV4.sol';
-          const governor = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV3.sol';
+          const factories = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV5.sol';
+          const governor = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV4.sol';
           const input = {
             language: 'Solidity',
             sources: { [path]: { content: fs.readFileSync(path, 'utf8') }, [master]: { content: fs.readFileSync(master, 'utf8') }, [factories]: { content: fs.readFileSync(factories, 'utf8') }, [governor]: { content: fs.readFileSync(governor, 'utf8') } },
@@ -58,7 +58,7 @@ jobs:
           const contracts = { ...(output.contracts?.[path] ?? {}), ...(output.contracts?.[master] ?? {}), ...(output.contracts?.[factories] ?? {}), ...(output.contracts?.[governor] ?? {}) };
           const models = Object.entries(contracts).filter(([name]) => name.startsWith('CurveYield'));
           if (models.length !== 16) {
-            console.error('Expected six IRMs, six factories, owner V3, splitter V2 and two abstract bases, found', models.map(([name]) => name));
+            console.error('Expected six IRMs, six factories, owner V3, splitter V3 and two abstract bases, found', models.map(([name]) => name));
             process.exit(1);
           }
           for (const [name, contract] of models) {
@@ -71,7 +71,7 @@ jobs:
             }
           }
           for (const [name, contract] of models) {
-            if (name === 'CurveYieldIrmBase' || name === 'CurveYieldIRMFactoryBaseV4') continue;
+            if (name === 'CurveYieldIrmBase' || name === 'CurveYieldIRMFactoryBaseV5') continue;
             const creation = contract.evm.bytecode.object;
             if (!creation || !/^[0-9a-fA-F]+$/.test(creation)) {
               console.error('Missing creation bytecode:', name);
@@ -86,13 +86,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PACKAGE='CurveYield_Fraxtal_Morpho_IRMs_v3'
+          PACKAGE='CurveYield_Fraxtal_Morpho_IRMs_v4'
           ROOT="$RUNNER_TEMP/$PACKAGE"
           mkdir -p "$ROOT/contracts" "$ROOT/build"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol "$ROOT/contracts/"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol "$ROOT/contracts/"
-          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV4.sol "$ROOT/contracts/"
-          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV3.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV5.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV4.sol "$ROOT/contracts/"
           cp .github/workflows/curveyield-morpho-irm-compile-v1.yml "$ROOT/build/compilation-workflow.yml"
           cat > "$ROOT/foundry.toml" <<'TOML'
           [profile.default]
@@ -104,8 +104,8 @@ jobs:
           optimizer_runs = 200
           evm_version = "cancun"
           TOML
-          cat > "$ROOT/README_v3.md" <<'MD'
-          # CurveYield Fraxtal Morpho IRM source package v3
+          cat > "$ROOT/README_v4.md" <<'MD'
+          # CurveYield Fraxtal Morpho IRM source package v4
 
           Four current Solidity files with the exact CurveYield v48 extended header
           preceding each of the 16 concrete or abstract contract declarations.
@@ -113,14 +113,15 @@ jobs:
 
           Models: CurveYieldMorphoIRMsV6.sol
           Master: CurveYieldTriggerMasterIRMV3.sol
-          Factories: CurveYieldMorphoIRMFactoriesV4.sol
-          Governance: CurveYieldMorphoOwnerAndSplitterV3.sol
+          Factories: CurveYieldMorphoIRMFactoriesV5.sol
+          Governance and splitter: CurveYieldMorphoOwnerAndSplitterV4.sol
 
           Built with solc v0.8.30, optimizer 200 runs, EVM Cancun.
           The GitHub compile workflow is in build/compilation-workflow.yml.
           The new owner V3 is an exact code copy of the verified live owner V1, with
           only Safe-controlled approvedFactory and enableIrm authorization edits.
-          The paired splitter V2 implementation is otherwise unchanged.
+          The V3 splitter preserves V2 fee and share accounting, but its Safe can update
+          the governance controller after registration.
 
           Important: Safe activation and factory allowlisting are NOT automatic.
           Prior Safe proposal 0x93382b1fdb27866ccc2451a687ab3485f7a9809b52a62e71fe8d5af4b5f258a7
@@ -130,17 +131,17 @@ jobs:
           MD
           (
             cd "$ROOT"
-            sha256sum contracts/*.sol > SOURCE_SHA256SUMS_v3.txt
+            sha256sum contracts/*.sol > SOURCE_SHA256SUMS_v4.txt
             printf 'repository=curveyield3/Contract-Automation\nbranch=morpho-fraxtal-compile-v1\ncommit=%s\nworkflow_run=%s\ncompiler=solc 0.8.30\noptimizer_runs=200\nevm_version=cancun\n' \
-              "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD_PROVENANCE_v3.txt
+              "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD_PROVENANCE_v4.txt
           )
           ( cd "$RUNNER_TEMP" && zip -q -r "$GITHUB_WORKSPACE/$PACKAGE.zip" "$PACKAGE" )
           unzip -t "$PACKAGE.zip"
           sha256sum "$PACKAGE.zip"
-      - name: Publish CurveYield IRM ZIP v3
+      - name: Publish CurveYield IRM ZIP v4
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield_Fraxtal_Morpho_IRMs_v3
-          path: CurveYield_Fraxtal_Morpho_IRMs_v3.zip
+          name: CurveYield_Fraxtal_Morpho_IRMs_v4
+          path: CurveYield_Fraxtal_Morpho_IRMs_v4.zip
           if-no-files-found: error
           retention-days: 30
