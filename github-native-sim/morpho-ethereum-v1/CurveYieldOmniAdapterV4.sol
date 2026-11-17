@@ -388,7 +388,8 @@ contract CurveYieldOmniAdapterV4 {
         (ids,change)=_response(key,previous);
         // Remove completely exited positions; cap/ownership rights stay in Vault V2.
         if(_value(key)==0){
-            uint256 index=indexPlusOne[key]-1,last=active.length-1;
+            uint256 index=indexPlusOne[key]-1;
+            uint256 last=active.length-1;
             if(index!=last){
                 bytes32 swapKey=active[last];active[index]=swapKey;
                 indexPlusOne[swapKey]=index+1;
