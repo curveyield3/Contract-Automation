@@ -1,0 +1,32 @@
+{
+  "StrategyConvexBoostHubStakingV5": {
+    "creationBytes": 9676,
+    "runtimeBytes": 7514,
+    "artifact": "build/forge/StrategyConvexBoostHubStakingV5.sol/StrategyConvexBoostHubStakingV5.json"
+  },
+  "StrategyBoostHubChildV42": {
+    "creationBytes": 11860,
+    "runtimeBytes": 9698,
+    "artifact": "build/forge/StrategyBoostHubChildV42.sol/StrategyBoostHubChildV42.json"
+  },
+  "StrategyConvexFXNPool8V42": {
+    "creationBytes": 17409,
+    "runtimeBytes": 13577,
+    "artifact": "build/forge/StrategyConvexFXNPool8V42.sol/StrategyConvexFXNPool8V42.json"
+  },
+  "StrategyDualFXNMasterV42": {
+    "creationBytes": 12136,
+    "runtimeBytes": 11313,
+    "artifact": "build/forge/StrategyDualFXNMasterV42.sol/StrategyDualFXNMasterV42.json"
+  },
+  "BeefyVaultV7FixedV2": {
+    "creationBytes": 12815,
+    "runtimeBytes": 10954,
+    "artifact": "build/forge/BeefyVaultV7FixedV2.sol/BeefyVaultV7FixedV2.json"
+  },
+  "BoostHubStaking": {
+    "creationBytes": 22567,
+    "runtimeBytes": 19717,
+    "artifact": "artifacts/staking.json"
+  }
+}
