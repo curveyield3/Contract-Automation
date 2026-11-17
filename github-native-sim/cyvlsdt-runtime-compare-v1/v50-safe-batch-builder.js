@@ -9,8 +9,8 @@ const CREATE_CALL = "0x9b35af71d77eaf8d7e40252370304687390a1a52";
 const MULTISEND_CALL_ONLY = "0x40a2accbd92bca938b02010e17a5b8929b49130d";
 const ZERO = ethers.ZeroAddress;
 const PROJECT = process.cwd();
-const OUT = path.resolve(process.env.V50_OUTPUT || path.join(PROJECT, "v50-output"));
-const CONFIG = JSON.parse(fs.readFileSync("config-safe-mainnet-v50.json","utf8"));
+const OUT = path.resolve(process.env.V51_OUTPUT || path.join(PROJECT, "v51-output"));
+const CONFIG = JSON.parse(fs.readFileSync("config-safe-mainnet-v51.json","utf8"));
 const NAME_BY_KEY = Object.fromEntries([
  ["cyvlSdt","CurveYieldVlSDTToken"],["locker","CurveYieldVlSDTLocker"],
  ["revenueStaking","CurveYieldvlSDTStaking"],["boostMerchant","CurveYieldVlSDTBoostMerchant"],
@@ -34,7 +34,7 @@ async function deploy(key,args){
  const initcode=deployTx.data;
  requireBool(ethers.isHexString(initcode)&&ethers.dataLength(initcode)>100, "bad initcode "+name);
  const salt=ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-  ["address","uint256","string"],[SAFE,50,key]));
+  ["address","uint256","string"],[SAFE,51,key]));
  const addr=ethers.getCreate2Address(CREATE_CALL,salt,ethers.keccak256(initcode));
  ADDRS[key]=addr;
  addTx("deploy:"+key,CREATE_CALL,ICREATE.encodeFunctionData("performCreate2",[0,initcode,salt]));
@@ -47,7 +47,7 @@ async function call(key,method,args){
  addTx("configure:"+key+"."+method,target,iface.encodeFunctionData(method,args));
 }
 async function main(){
- requireBool(CONFIG.version===50 && CONFIG.chainId===1,"wrong chain/config");
+ requireBool(CONFIG.version===51 && CONFIG.chainId===1,"wrong chain/config");
  requireBool(CONFIG.finalOwner.toLowerCase()===SAFE.toLowerCase(),"Safe must be constructor owner");
  const c=CONFIG, s=c.stakeDao, p=c.poLManager, a=c.bribeAllocator;
  await deploy("cyvlSdt",[SAFE]);
@@ -93,8 +93,9 @@ async function main(){
  }
  await call("revenueVault","setStrategy",[ADDRS.revenueStrategy]);
  await call("locker","setMarketplaceOperator",[true]);
- const stages=[BATCH.slice(0,5),BATCH.slice(5)];
- requireBool(stages[0].length===5 && stages[1].length>=5,"staging invariant");
+ const stages=[BATCH.slice(0,4),BATCH.slice(4,7),BATCH.slice(7)];
+ requireBool(stages.length===3 && stages[0].length===4 && stages[1].length===3 && stages[2].length>=3,"staging invariant");
+ requireBool(stages[0].every(x=>x.label.startsWith("deploy:")) && stages[1].every(x=>x.label.startsWith("deploy:")) && stages[2].slice(0,2).every(x=>x.label.startsWith("deploy:")),"deployment order invariant");
  const manifests=[];
  for(let k=0;k<stages.length;k++){
   const txs=stages[k];
@@ -102,7 +103,7 @@ async function main(){
    ["uint8","address","uint256","uint256","bytes"],[0,t.to,0,ethers.dataLength(t.data),t.data])));
   const data=IMULTI.encodeFunctionData("multiSend",[packed]);
   manifests.push({
-   version:50,stage:k+1,chainId:1,safeAddress:SAFE,operation:1,to:MULTISEND_CALL_ONLY,
+   version:51,stage:k+1,chainId:1,safeAddress:SAFE,operation:1,to:MULTISEND_CALL_ONLY,
    valueWei:"0",data,derivedAddresses:ADDRS,createCall:CREATE_CALL,
    innerTransactions:txs,transactionCount:txs.length,keccak256:ethers.keccak256(data),
    totalCalldataBytes:ethers.dataLength(data)
@@ -110,12 +111,12 @@ async function main(){
  }
  fs.mkdirSync(OUT,{recursive:true});
  for(const m of manifests)fs.writeFileSync(
-  path.join(OUT,"Safe-CREATE2-MultiSend-v50-stage"+m.stage+".json"),
+  path.join(OUT,"Safe-CREATE2-MultiSend-v51-stage"+m.stage+".json"),
   JSON.stringify(m,null,2)+"\n"
  );
- fs.writeFileSync(path.join(OUT,"Deployment-Addresses-v50.json"),JSON.stringify(ADDRS,null,2)+"\n");
- fs.writeFileSync(path.join(OUT,"Batch-Overview-v50.json"),JSON.stringify({
-  version:50,safe:SAFE,stages:manifests.map(m=>({
+ fs.writeFileSync(path.join(OUT,"Deployment-Addresses-v51.json"),JSON.stringify(ADDRS,null,2)+"\n");
+ fs.writeFileSync(path.join(OUT,"Batch-Overview-v51.json"),JSON.stringify({
+  version:51,safe:SAFE,stages:manifests.map(m=>({
    stage:m.stage,to:m.to,hash:m.keccak256,transactions:m.transactionCount,
    totalCalldataBytes:m.totalCalldataBytes,labels:m.innerTransactions.map(t=>t.label)
   })),addresses:ADDRS,disabledUntilConfigured:true,
@@ -125,10 +126,10 @@ async function main(){
    merchantSaleRates:rates,bribeGauge:a.gauge
   }
  },null,2)+"\n");
- console.log("V50_STAGED_BATCH_BUILT",JSON.stringify({
+ console.log("V51_STAGED_BATCH_BUILT",JSON.stringify({
   stages:manifests.map(m=>({stage:m.stage,transactionCount:m.transactionCount,
    byteLength:m.totalCalldataBytes,hash:m.keccak256})),addresses:ADDRS
  }));
 
 }
-main().catch(e=>{console.error("V50_BATCH_BUILD_FAILED",e);process.exitCode=1;});
+main().catch(e=>{console.error("V51_BATCH_BUILD_FAILED",e);process.exitCode=1;});
