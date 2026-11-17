@@ -1,0 +1,36 @@
+{
+  "version": "v4",
+  "safe": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "executedKeep": {
+    "nonce": "24",
+    "hash": "0x294e1bcd0c7c598fe1d643a477d8e530cdac2809a6d536b9b7c24925510db713"
+  },
+  "supersededHashes": [
+    {
+      "nonce": 25,
+      "hash": "0x9b0811ecd8696255b620aa22ab62b412093358ea65a456f7b0e0312a6440f264",
+      "version": "v3"
+    },
+    {
+      "nonce": 26,
+      "hash": "0x0bb05b4badfb06105a57fc24dadf3ffea3c187c0515e5ae3f9d325df43de7097",
+      "version": "v3"
+    },
+    {
+      "nonce": 25,
+      "hash": "0x9b58b6b45f29bb21b83cd91f180a52315522f3655a5c164079f7c4aa98b4bf6c",
+      "version": "v2"
+    },
+    {
+      "nonce": 26,
+      "hash": "0x4f7795f6782c9828600f8ae5debb64da445edafe03419469b2b23cf3bb50219e",
+      "version": "v2"
+    },
+    {
+      "nonce": 25,
+      "hash": "0x1353ba3508f09dd9a197928b7595aa62fd776f1443d733587d9892c3c8439b35",
+      "version": "v1"
+    }
+  ],
+  "warning": "Competing queued hashes may remain. Never execute superseded hash; no cancellation action exposed by Blockchain Operations Hub."
+}
