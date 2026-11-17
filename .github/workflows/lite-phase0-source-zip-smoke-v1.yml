@@ -783,7 +783,7 @@ jobs:
           export HARDHAT_CONFIG="$GITHUB_WORKSPACE/hardhat.config.cjs"
           node github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/fork-stress-v4.cjs \
             2>&1 | tee github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v4/fork-run.log
-          test -s github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v4/Fork-Stress-Results-v2.json
+          test -s github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v4/Fork-Stress-Results-v4.json
       - name: Preserve compiled artifacts, exact calldata and fork receipts on GitHub
         shell: bash
         run: |
