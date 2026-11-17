@@ -1,5 +1,22 @@
 # CurveYield Fraxtal Morpho V2 Protected Fee Controller v8
 
+## Fraxtal mainnet — DEPLOYED AND SOURCE VERIFIED (2026-11-17)
+- Controller: `0x33d0fc6db3f50a4f0133817a59cedea639d0c942`
+- Deployment transaction: `0x204bd7255a3b02c8df02337fc1daed7664d8fa730fe404ed319255da0ea6275b`
+- Chain ID: 252, Fraxtal native FRAX
+- Fraxscan verified source: https://fraxscan.com/address/0x33d0fc6db3f50a4f0133817a59cedea639d0c942#code
+- Source-verification receipt: `pft9qstsfbmbfjubaq2zsbcl5wpbjf16d83mi1yewig4rdmzdp`; Fraxscan status: **Pass - Verified**
+- GitHub compiled source commit: `81f12ab9ee596587d04e87be76fc2acbc69076c6`; latest repeat compile: `c8482ae23a96e2a29ccff985521461801641e1de`
+- GitHub Actions successful compile: https://github.com/curveyield3/Contract-Automation/actions/runs/44003701932
+- Exact deployed runtime match to GitHub compiler deployment simulation: **YES**, 14,834 bytes
+- Deployed constructor operator: `0x064256591313eeb86a84a5cbcc4c6460791b96dd`
+- Governance and initial protocolRecipient: `0x47623C62f281807D615eeb4A2CEee9d97F9D3C49`
+- Constructor immutable max creation fee: 1 FRAX; current creation charge: 1 FRAX
+- 90-day delay immutable: 7,776,000 seconds
+- Initialized: **false**. This is the controller only; no Morpho vault or fee custody contracts created yet.
+- Source verification and bytecode matching are not security tests or a protocol audit.
+
+
 Supersedes v7; exact CurveYield extended header v48 immediately follows SPDX.
 
 ## Vault creation fee
