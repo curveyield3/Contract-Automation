@@ -1,0 +1,235 @@
+{
+  "version": "v7",
+  "network": "fraxtal",
+  "chainId": 252,
+  "repo": "curveyield3/Contract-Automation",
+  "branch": "morpho-fraxtal-compile-v1",
+  "previousManifest": "github-native-sim/morpho-fraxtal-v1/fraxtal-irm-deployment-manifest-v6.json",
+  "verifiedContracts": {
+    "governanceV3": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+    "splitterV3": "0x5f19be0378fb06ebacdf6eb2fdc2af15db38d198",
+    "core": "0xcce2862aed7f2248063c3dcf6906582166c2b6ca",
+    "legacyGovernance": "0x67f1c48a7d6dcc6c66a0ee2fc3882df63035ecb8",
+    "legacyFeeSplitter": "0xc0890482e5b65b5d8fe9947eb362642435a107f9"
+  },
+  "factories": [
+    {
+      "name": "CurveYieldCollateralYieldIRMFactoryV6",
+      "address": "0x14d181eff9dee66ec729fc7d115ad27d4dbc80d8",
+      "txHash": "0x3a6027a30c6b4376ed7ece9162c0155202046b236146580fffaa15a696e941de",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x14d181eff9dee66ec729fc7d115ad27d4dbc80d8#code",
+      "constructorArgs": [
+        "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0"
+      ]
+    },
+    {
+      "name": "CurveYieldEulerUtilizationIRMFactoryV6",
+      "address": "0xd36ecf655b33920bce3afe64f8d0bc69e43449ed",
+      "txHash": "0xb1bb77bd3543c58db03f92cc22f1b3d3ab16d0cd7dc934a485e86b92c6e3cf6f",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0xd36ecf655b33920bce3afe64f8d0bc69e43449ed#code",
+      "constructorArgs": [
+        "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0"
+      ]
+    },
+    {
+      "name": "CurveYieldLinearUtilizationIRMFactoryV6",
+      "address": "0xf8158d1582cca2f308bfc3e74c951bc088f0c945",
+      "txHash": "0xe10a08c80386c97415268ad79653d7be1d4bfdb96e775edbd91e83887d7a2814",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0xf8158d1582cca2f308bfc3e74c951bc088f0c945#code",
+      "constructorArgs": [
+        "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0"
+      ]
+    },
+    {
+      "name": "CurveYieldImmutableStaticIRMFactoryV6",
+      "address": "0x7ac6e5aeec183ae4b2d9b3ffd48bd35f31b4d838",
+      "txHash": "0x5c6b01ffc6b16af81551e5cd9e314cd1c92d5f5d206d7c370b3d8be04460c681",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x7ac6e5aeec183ae4b2d9b3ffd48bd35f31b4d838#code",
+      "constructorArgs": [
+        "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0"
+      ]
+    },
+    {
+      "name": "CurveYieldGovernedStaticIRMFactoryV6",
+      "address": "0x7f54dd2fc5f3e2ae0a03b85561c01e3e3d4c0a8c",
+      "txHash": "0xc2f28ffbf6342be271dbe47b307569a3214f8377999565a7469b87c036ea7609",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x7f54dd2fc5f3e2ae0a03b85561c01e3e3d4c0a8c#code",
+      "constructorArgs": [
+        "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0"
+      ]
+    },
+    {
+      "name": "CurveYieldTriggerMasterIRMFactoryV6",
+      "address": "0xa85d41e984ffcf1b1c2e20c164fecdc7123dabe4",
+      "txHash": "0x468fd59a94670f4ffef729feb2923ec71c643347700e6a47b95a12961d17142e",
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0xa85d41e984ffcf1b1c2e20c164fecdc7123dabe4#code",
+      "constructorArgs": [
+        "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0"
+      ]
+    }
+  ],
+  "source": {
+    "path": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV6.sol",
+    "governancePath": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV5.sol",
+    "header": "CurveYield Extended Contract Header v48",
+    "compiler": "v0.8.30+commit.73712a01",
+    "optimizerRuns": 200,
+    "evmVersion": "cancun",
+    "buildRun": "https://github.com/curveyield3/Contract-Automation/actions/runs/43986452465"
+  },
+  "safeProposal": {
+    "safe": "0x47623c62f281807d615eeb4a2ceee9d97f9d3c49",
+    "nonce": "2",
+    "safeTxHash": "0xce738cb1483968098a8a1a8c7bb39db0ad3f017c8e5feb0ff5957cb5b78d7565",
+    "intentSha256": "0x9d6045da13dd773dfc679ba64317756c203361a9b86aa049ade198c6da5fb2d3",
+    "status": "submitted_serviceAccepted_awaiting_confirmations",
+    "serviceAccepted": true,
+    "recordShowsAwaitingConfirmations": true,
+    "queueVerified": false,
+    "executed": false,
+    "to": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
+    "operation": 1,
+    "valueWei": "0",
+    "safeTxGas": "0",
+    "baseGas": "0",
+    "gasPrice": "0",
+    "gasToken": "0x0000000000000000000000000000000000000000",
+    "refundReceiver": "0x0000000000000000000000000000000000000000",
+    "batchCalls": [
+      {
+        "sequence": 1,
+        "target": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+        "signature": "configureSplitter(address)",
+        "args": [
+          "0x5f19be0378fb06ebacdf6eb2fdc2af15db38d198"
+        ],
+        "data": "0x610b59250000000000000000000000005f19be0378fb06ebacdf6eb2fdc2af15db38d198"
+      },
+      {
+        "sequence": 2,
+        "target": "0x67f1c48a7d6dcc6c66a0ee2fc3882df63035ecb8",
+        "signature": "setOwner(address)",
+        "args": [
+          "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0"
+        ],
+        "data": "0x13af4035000000000000000000000000c715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+        "notes": "Mandatory ownership handoff through the original Morpho owner, called by Safe"
+      },
+      {
+        "sequence": 3,
+        "target": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+        "signature": "setFeeRecipient(address)",
+        "args": [
+          "0x5f19be0378fb06ebacdf6eb2fdc2af15db38d198"
+        ],
+        "data": "0xe74b981b0000000000000000000000005f19be0378fb06ebacdf6eb2fdc2af15db38d198"
+      },
+      {
+        "sequence": 4,
+        "target": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+        "signature": "setFactory(address,bool)",
+        "args": [
+          "0x14d181eff9dee66ec729fc7d115ad27d4dbc80d8",
+          true
+        ],
+        "data": "0x71013c1000000000000000000000000014d181eff9dee66ec729fc7d115ad27d4dbc80d80000000000000000000000000000000000000000000000000000000000000001"
+      },
+      {
+        "sequence": 5,
+        "target": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+        "signature": "setFactory(address,bool)",
+        "args": [
+          "0xd36ecf655b33920bce3afe64f8d0bc69e43449ed",
+          true
+        ],
+        "data": "0x71013c10000000000000000000000000d36ecf655b33920bce3afe64f8d0bc69e43449ed0000000000000000000000000000000000000000000000000000000000000001"
+      },
+      {
+        "sequence": 6,
+        "target": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+        "signature": "setFactory(address,bool)",
+        "args": [
+          "0xf8158d1582cca2f308bfc3e74c951bc088f0c945",
+          true
+        ],
+        "data": "0x71013c10000000000000000000000000f8158d1582cca2f308bfc3e74c951bc088f0c9450000000000000000000000000000000000000000000000000000000000000001"
+      },
+      {
+        "sequence": 7,
+        "target": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+        "signature": "setFactory(address,bool)",
+        "args": [
+          "0x7ac6e5aeec183ae4b2d9b3ffd48bd35f31b4d838",
+          true
+        ],
+        "data": "0x71013c100000000000000000000000007ac6e5aeec183ae4b2d9b3ffd48bd35f31b4d8380000000000000000000000000000000000000000000000000000000000000001"
+      },
+      {
+        "sequence": 8,
+        "target": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+        "signature": "setFactory(address,bool)",
+        "args": [
+          "0x7f54dd2fc5f3e2ae0a03b85561c01e3e3d4c0a8c",
+          true
+        ],
+        "data": "0x71013c100000000000000000000000007f54dd2fc5f3e2ae0a03b85561c01e3e3d4c0a8c0000000000000000000000000000000000000000000000000000000000000001"
+      },
+      {
+        "sequence": 9,
+        "target": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+        "signature": "setFactory(address,bool)",
+        "args": [
+          "0xa85d41e984ffcf1b1c2e20c164fecdc7123dabe4",
+          true
+        ],
+        "data": "0x71013c10000000000000000000000000a85d41e984ffcf1b1c2e20c164fecdc7123dabe40000000000000000000000000000000000000000000000000000000000000001"
+      }
+    ],
+    "multisendCalldata": "0x8d80ff0a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000050100c715fc8944d565e27cc5598d8aeabb42e4ce71a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000024610b59250000000000000000000000005f19be0378fb06ebacdf6eb2fdc2af15db38d1980067f1c48a7d6dcc6c66a0ee2fc3882df63035ecb80000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002413af4035000000000000000000000000c715fc8944d565e27cc5598d8aeabb42e4ce71a000c715fc8944d565e27cc5598d8aeabb42e4ce71a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000024e74b981b0000000000000000000000005f19be0378fb06ebacdf6eb2fdc2af15db38d19800c715fc8944d565e27cc5598d8aeabb42e4ce71a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004471013c1000000000000000000000000014d181eff9dee66ec729fc7d115ad27d4dbc80d8000000000000000000000000000000000000000000000000000000000000000100c715fc8944d565e27cc5598d8aeabb42e4ce71a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004471013c10000000000000000000000000d36ecf655b33920bce3afe64f8d0bc69e43449ed000000000000000000000000000000000000000000000000000000000000000100c715fc8944d565e27cc5598d8aeabb42e4ce71a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004471013c10000000000000000000000000f8158d1582cca2f308bfc3e74c951bc088f0c945000000000000000000000000000000000000000000000000000000000000000100c715fc8944d565e27cc5598d8aeabb42e4ce71a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004471013c100000000000000000000000007ac6e5aeec183ae4b2d9b3ffd48bd35f31b4d838000000000000000000000000000000000000000000000000000000000000000100c715fc8944d565e27cc5598d8aeabb42e4ce71a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004471013c100000000000000000000000007f54dd2fc5f3e2ae0a03b85561c01e3e3d4c0a8c000000000000000000000000000000000000000000000000000000000000000100c715fc8944d565e27cc5598d8aeabb42e4ce71a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004471013c10000000000000000000000000a85d41e984ffcf1b1c2e20c164fecdc7123dabe4000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000",
+    "innerTransactionCount": 9,
+    "obsoleteConflictingProposal": {
+      "safeTxHash": "0x93382b1fdb27866ccc2451a687ab3485f7a9809b52a62e71fe8d5af4b5f258a7",
+      "nonce": "2",
+      "warning": "Do not approve or execute this earlier proposal; it enables the superseded Safe-module implementation."
+    }
+  },
+  "currentChainState": {
+    "morphoOwner": "0x67f1c48a7d6dcc6c66a0ee2fc3882df63035ecb8",
+    "morphoFeeRecipient": "0xc0890482e5b65b5d8fe9947eb362642435a107f9",
+    "newGovernanceConfiguredSplitter": "0x0000000000000000000000000000000000000000",
+    "factoryApprovals": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "safeNonce": "2"
+  },
+  "notes": [
+    "Proposal has NOT executed. The Safe owner must approve/execute the new transaction, specifically hash 0xce738cb1...d7565.",
+    "After execution verify owner=newGov, feeRecipient=splitter, governance splitter=splitter and all six approvedFactory mappings true.",
+    "Past fee-receivable shares stay in the old fee splitter. No automatic migration of old balances or historical creator entitlements.",
+    "Existing enabled IRMs and previously opened markets are unaffected by the pending proposal until Safe execution.",
+    "This v7 manifest is a record of new factories and proposal; no on-chain market tests were created or run."
+  ]
+}
