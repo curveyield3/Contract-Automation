@@ -1,0 +1,9 @@
+{
+  "status": "FAIL",
+  "workflowRunId": 44000621712,
+  "workflowRunUrl": "https://github.com/curveyield3/Contract-Automation/actions/runs/44000621712",
+  "headSha": "42a2535c9ec06aa70b78b32157458e55118d74b0",
+  "sourceSha256": "25199507e2dbb6b96d1401ca81bcad8fe3fb88c048365c51536ab2499c7dc426",
+  "compilation": null,
+  "compileLogTail": "Compiling 1 files with Solc 0.8.28\nSolc 0.8.28 finished in 24.48ms\nError: Compiler run failed:\nError: Compiler error (/solidity/libsolidity/codegen/LValue.cpp:50):Stack too deep. Try compiling with `--via-ir` (cli) or the equivalent `viaIR: true` (standard JSON) while enabling the optimizer. Otherwise, try removing local variables.\n   --> github-native-sim/morpho-ethereum-v1/CurveYieldOmniAdapterV4.sol:386:40:\n    |\n386 |             m.credit=m.credit+received-assets;\n    |                                        ^^^^^^\n"
+}
