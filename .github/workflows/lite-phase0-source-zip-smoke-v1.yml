@@ -759,6 +759,30 @@ jobs:
           export NODE_PATH="$GITHUB_WORKSPACE/.slip-deps28/node_modules"
           export SOLC30_PATH="$GITHUB_WORKSPACE/.slip-deps30/node_modules/solc"
           node github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/build-v4.cjs
+      - name: Compile v51 Safe ownership-preserving deploy helper (source only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NODE_PATH="$GITHUB_WORKSPACE/.slip-deps28/node_modules"
+          node - <<'NODE'
+          const fs=require('fs');const crypto=require('crypto');const solc=require('solc');
+          const path='github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/CurveYieldSafeDeployHelper_v1.sol';
+          const source=fs.readFileSync(path,'utf8');
+          const input={language:'Solidity',sources:{'CurveYieldSafeDeployHelper_v1.sol':{content:source}},
+            settings:{optimizer:{enabled:true,runs:200},viaIR:true,evmVersion:'cancun',
+              outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object']}}}};
+          const res=JSON.parse(solc.compile(JSON.stringify(input)));
+          const errors=(res.errors||[]).filter(x=>x.severity==='error');
+          if(errors.length)throw Error(JSON.stringify(errors));
+          const a=res.contracts['CurveYieldSafeDeployHelper_v1.sol'].CurveYieldSafeDeployHelperV1;
+          const out={abi:a.abi,bytecode:'0x'+a.evm.bytecode.object,deployedBytecode:'0x'+a.evm.deployedBytecode.object,
+            sourceSha256:crypto.createHash('sha256').update(source).digest('hex'),compilerVersion:solc.version()};
+          const dir='github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v5';
+          fs.writeFileSync(dir+'/CurveYieldSafeDeployHelper-v1-Artifact.json',JSON.stringify(out,null,2));
+          const creation=out.bytecode.length/2-1,runtime=out.deployedBytecode.length/2-1;
+          if(runtime>24576)throw Error('Helper EIP170 max runtime exceeded');
+          console.log(JSON.stringify({creationBytes:creation,runtimeBytes:runtime,sha256:out.sourceSha256},null,2));
+          NODE
       - name: Execute mainnet-fork simultaneous adverse-price scenarios
         if: false # Source-only compile requested; no test execution authorized.
         shell: bash
