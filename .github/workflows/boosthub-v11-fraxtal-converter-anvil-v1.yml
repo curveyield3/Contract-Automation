@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/boosthub-v11-fraxtal-converter-anvil-v1.yml'
       - 'github-native-sim/boosthub-fraxtal-v40/v51-essential-source-v1.tar.xz'
+      - 'github-native-sim/boosthub-fraxtal-v40/tooling/v51-safe-builder-v1.cjs'
   workflow_dispatch:
 permissions:
   contents: write
@@ -54,6 +55,21 @@ jobs:
           pathlib.Path('build/v51-runtime-manifest-v1.json').write_text(json.dumps(out,indent=2)+'\n')
           print(json.dumps(out,indent=2))
           PY
+      - name: Build two equal-size Ethereum Safe proposals from exact v51 and v23 artifacts
+        working-directory: github-native-sim/boosthub-fraxtal-v40
+        env:
+          RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM }}
+        run: |
+          set -euo pipefail
+          test -n "$RPC_ETHEREUM"
+          npm install --prefix .safe-builder-node --ignore-scripts --no-audit --no-fund --no-save ethers@6.14.4
+          mkdir -p build/pol-artifacts-v23
+          git fetch --depth=1 origin cyvlsdt-pol-v23-morpho-v2-safe-v1
+          for f in CurveYieldSafeDeployHelper-v1-Artifact.json Build-Manifest-v5.json Safe-Transaction-Builder-AddOn-v5.json Predicted-Addresses-and-ConstructorArgs-v5.json; do
+            git show "FETCH_HEAD:github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v5/$f" > "build/pol-artifacts-v23/$f"
+          done
+          export NODE_PATH="$PWD/.safe-builder-node/node_modules"
+          node tooling/v51-safe-builder-v1.cjs
       - name: Commit compiled bytecode and sizes to source branch
         run: |
           set -euo pipefail
@@ -62,7 +78,8 @@ jobs:
           git add -f github-native-sim/boosthub-fraxtal-v40/artifacts/staking.json
           git add -f github-native-sim/boosthub-fraxtal-v40/build/forge/
           git add -f github-native-sim/boosthub-fraxtal-v40/build/v51-runtime-manifest-v1.json
-          git commit -m 'Preserve BoostHub v51 exact bytecode and runtime sizes'
+          git add -f github-native-sim/boosthub-fraxtal-v40/build/safe-mainnet-v51-v23-v1/
+          git commit -m 'Preserve exact v51 bytecode and two balanced Ethereum Safe batches v1'
           git push origin HEAD:boosthub-v51-safe-staging-v1
       - name: Upload compiled artifacts
         if: always()
@@ -73,5 +90,6 @@ jobs:
             github-native-sim/boosthub-fraxtal-v40/artifacts/staking.json
             github-native-sim/boosthub-fraxtal-v40/build/forge/
             github-native-sim/boosthub-fraxtal-v40/build/v51-runtime-manifest-v1.json
+            github-native-sim/boosthub-fraxtal-v40/build/safe-mainnet-v51-v23-v1/
           if-no-files-found: warn
           retention-days: 90
