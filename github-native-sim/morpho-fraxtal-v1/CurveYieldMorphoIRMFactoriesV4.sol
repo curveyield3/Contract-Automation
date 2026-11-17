@@ -52,7 +52,7 @@ abstract contract CurveYieldIRMFactoryBaseV4 {
     }
 
     function _enableWhenDirect(address morpho_, address irm) internal {
-        if (morpho_ == governance.morpho()) {
+        if (morpho_ == address(governance.morpho())) {
             governance.enableIrm(irm);
         }
     }
