@@ -221,3 +221,26 @@ contract StressHistoricalRouterV2 {
         IMockToken(b).mint(receiver,out);
     }
 }
+
+contract Stress4626BasicV2 {
+    address public immutable asset;
+    uint8 public constant decimals=18;
+    uint256 public totalSupply;
+    mapping(address=>uint256) public balanceOf;
+    constructor(address token){asset=token;}
+    function convertToAssets(uint256 shares) external pure returns(uint256){return shares;}
+    function convertToShares(uint256 assets) external pure returns(uint256){return assets;}
+    function maxRedeem(address holder) external view returns(uint256){return balanceOf[holder];}
+    function maxRedeem(address holder,uint256) external view returns(uint256){return balanceOf[holder];}
+    function deposit(uint256 amount,address receiver) external returns(uint256){
+        require(IMockToken(asset).transferFrom(msg.sender,address(this),amount));
+        balanceOf[receiver]+=amount;totalSupply+=amount;return amount;
+    }
+    function redeem(uint256 shares,address receiver,address holder) public returns(uint256){
+        require(holder==msg.sender&&balanceOf[holder]>=shares);
+        balanceOf[holder]-=shares;totalSupply-=shares;
+        require(IMockToken(asset).transfer(receiver,shares));return shares;
+    }
+    function redeem(uint256 shares,address receiver,address holder,uint256)
+        external returns(uint256){return redeem(shares,receiver,holder);}
+}
