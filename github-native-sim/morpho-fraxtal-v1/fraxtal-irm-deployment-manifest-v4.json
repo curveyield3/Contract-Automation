@@ -1,0 +1,97 @@
+{
+  "version": "v4",
+  "network": "fraxtal",
+  "chainId": 252,
+  "repository": "curveyield3/Contract-Automation",
+  "branch": "morpho-fraxtal-compile-v1",
+  "previousManifest": "github-native-sim/morpho-fraxtal-v1/fraxtal-irm-deployment-manifest-v3.json",
+  "verifiedProductionOwnerRecovery": {
+    "morphoCore": "0xcce2862aed7f2248063c3dcf6906582166c2b6ca",
+    "currentOwner": "0x67f1c48a7d6dcc6c66a0ee2fc3882df63035ecb8",
+    "contractNameOnExplorer": "CurveYieldMorphoOwnerV1",
+    "deployer": "0x064256591313eeb86a84a5cbcc4c6460791b96dd",
+    "deployerNonce": "57",
+    "creationTx": "0xa99d31576882a0d2204f4754afd8ccaa2ec332571af4554ac5877d8c809db427",
+    "verifiedSourcePath": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV1.sol",
+    "explorerSourceIdenticalToGitHub": true,
+    "linkedSplitter": {
+      "address": "0xc0890482e5b65b5d8fe9947eb362642435a107f9",
+      "contractName": "CurveYieldMorphoFeeSplitterV2",
+      "governanceImmutable": "0x67f1c48a7d6dcc6c66a0ee2fc3882df63035ecb8",
+      "morphoFeeRecipient": true
+    },
+    "explanation": "The verified owner is V1; V2 refers to the accompanying deployed fee splitter. No distinct deployed MorphoOwnerV2 appears in the inspected deployer history."
+  },
+  "newSource": {
+    "ownerAndSplitter": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV3.sol",
+    "ownerContract": "CurveYieldMorphoOwnerV3",
+    "base": "Exact verified live CurveYieldMorphoOwnerV1 Solidity source",
+    "addedOnly": [
+      "mapping(address => bool) approvedFactory",
+      "event FactoryAuthorizationChanged",
+      "onlySafe setFactory(address,bool)",
+      "enableIrm allowed to Safe or approved factory, with otherwise unchanged Morpho call"
+    ],
+    "requiredRenames": [
+      "OwnerV1 -> OwnerV3",
+      "splitter immutable governance type V1 -> V3"
+    ],
+    "sameSplitterLogic": "CurveYieldMorphoFeeSplitterV2",
+    "factorySource": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV4.sol",
+    "modelSource": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol",
+    "triggerMasterSource": "github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol",
+    "sourceHeader": "CurveYield Extended Contract Header v48 on every contract declaration"
+  },
+  "build": {
+    "workflow": "https://github.com/curveyield3/Contract-Automation/actions/runs/43985376749",
+    "runId": 43985376749,
+    "status": "success",
+    "compilerVersion": "v0.8.30+commit.73712a01",
+    "optimizerRuns": 200,
+    "evmVersion": "cancun",
+    "contractsCompiled": 16,
+    "ownerRuntimeBytes": 2773,
+    "artifactName": "CurveYield_Fraxtal_Morpho_IRMs_v3",
+    "artifactUrl": "https://github.com/curveyield3/Contract-Automation/actions/runs/43985376749"
+  },
+  "newHeaderedOnchainAlreadyDeployedAndVerified": [
+    {
+      "name": "CurveYieldTriggerMasterIRMV3",
+      "address": "0x60b55a76c3fdc4e1b928153205c4d02fc4bf6cc0",
+      "txHash": "0x2774cc148ecd8a05b6b76dcb01e89bf069f7fef5087b1d3d32ab39b9eb9b1759"
+    },
+    {
+      "name": "CurveYieldEulerUtilizationIRMV3",
+      "address": "0x324f99dbc3b5c00bb5fffeefbfc31b1c20b6926b",
+      "txHash": "0x2bb3862996a4e60ea7a3d58aa49b02a85643666498b2c094aa9f5a73bf105cc1"
+    }
+  ],
+  "newProductionOwnerV3Deployment": {
+    "status": "BLOCKED_BY_TOOL_SAFETY",
+    "deployed": false,
+    "contractAddress": null,
+    "transactionBroadcast": false
+  },
+  "remainingWork": {
+    "onchain": "Other four headered sub-IRMs, six headered V4 factories, production-derived governance V3 and paired splitter V2 are compiled but not all newly deployed.",
+    "safe": "A replacement Safe proposal is required only AFTER the new stack is deployed and migration details are validated.",
+    "migration": "The original V2 splitter's immutable governance points to V1 and cannot set fees after a transfer of Morpho ownership to V3. Must also deploy a V2 splitter pointing to V3 and switch fee recipient, handling existing receivable shares and any unaccrued interest."
+  },
+  "previousSafeProposal": {
+    "safe": "0x47623c62f281807d615eeb4a2ceee9d97f9d3c49",
+    "nonce": "2",
+    "hash": "0x93382b1fdb27866ccc2451a687ab3485f7a9809b52a62e71fe8d5af4b5f258a7",
+    "status": "obsolete_pending_not_executed",
+    "warning": "This proposal would enable a superseded Safe-module extension. Do NOT execute; replace or reject it. No new corrected migration proposal was submitted."
+  },
+  "liveStateCheck": {
+    "morphoOwnerStillV1": true,
+    "feeRecipientStillOldSplitter": true,
+    "safeNonce": "2",
+    "obsoleteModuleEnabled": false
+  },
+  "tests": {
+    "created": false,
+    "executed": false
+  }
+}
