@@ -29,7 +29,7 @@ const DOLOMITE_ROUTER="0xf8b2c637a68cf6a17b1df9f8992eebeff63d2dff";
 const DOLOMITE_MARGIN="0x003ca23fd5f0ca87d01f6ec6cd14a8ae60c2b97d";
 const IPOR_FUSION="0x43ee0243ea8cf02f7087d8b16c8d2007cc9c7ca2";
 // Multiple verified real Ethereum USDC Fusion vaults; keep unsuccessful attempts as evidence.
-const IPOR_ALTERNATIVES=[IPOR_FUSION,"0xb0f56bb0bf13ee05fef8cd2d8df5ffdfcac7a74f","0x3151cee0cdb517c0e7db2b55ff5085e7d1809d90"];
+const IPOR_ALTERNATIVES=["0xb0f56bb0bf13ee05fef8cd2d8df5ffdfcac7a74f",IPOR_FUSION,"0x3151cee0cdb517c0e7db2b55ff5085e7d1809d90"];
 const MORPHOID="0x94b823e6bd8ea533b4e33fbc307faea0b307301bc48763acc4d4aa4def7636cd";
 const WETH="0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 const BLUE_ORACLE="0x0f948cba8231db7898ef36a4212581ad7b1b4580";
@@ -301,6 +301,7 @@ async function refreshRealIPOR(ctx,t) {
  // Trigger real IPOR Fusion accounting changes through its real ERC4626 calls.
  const fusion=new ethers.Contract(t.target,[
   "function asset() view returns(address)",
+  "function authority() view returns(address)",
   "function totalAssets() view returns(uint256)"
  ],signer);
  fail((await fusion.asset()).toLowerCase()===USDC,"IPOR_NOT_REAL_USDC_VAULT");
@@ -313,6 +314,51 @@ async function refreshRealIPOR(ctx,t) {
  const after={totalAssets:await fusion.totalAssets(),positionAssets:await ctx.adapter.positionAssets(t.mode,t.target,t.id,t.aux)};
  console.log("IPOR_REFRESH_AFTER",JSON.stringify(x({target:t.target,...after})));
  await snapshot("12b-IPOR-after-real-deposit-checkpoint",ctx);
+ // IPOR Fusion deliberately caches passive strategy yield. A deposit or exit
+ // need not invoke reporting for every market: run the original authenticated
+ // reporting function from the actual authorized reporter, solely on Anvil.
+ const reporterByVault={
+  "0xb0f56bb0bf13ee05fef8cd2d8df5ffdfcac7a74f":"0x046b91794da429dae94fd4269957674eb2e2237f",
+  "0x3151cee0cdb517c0e7db2b55ff5085e7d1809d90":"0x863c0ccf0b349435ecbaceb14c90d444586cdab8"
+ };
+ const reportMarketIds={
+  "0xb0f56bb0bf13ee05fef8cd2d8df5ffdfcac7a74f":[ethers.MaxUint256,14n,12n,7n,19n],
+  "0x3151cee0cdb517c0e7db2b55ff5085e7d1809d90":[]
+ };
+ const reporter=reporterByVault[t.target];
+ if(reporter){
+  const permissions=new ethers.Contract(await fusion.authority(),[
+   "function canCall(address,address,bytes4) view returns(bool,uint32)"
+  ],signer);
+  const reportSelector="0xe9a2e778";
+  const permission=await permissions.canCall(reporter,t.target,reportSelector);
+  fail(permission[0]===true && permission[1]===0n,
+       "IPOR_REAL_REPORTER_NOT_AUTHORIZED "+t.target);
+  const ids=reportMarketIds[t.target];
+  // Actual historical successful tx for the TAU vault used exactly this five-ID set.
+  // No fabricated revenue, token balance manipulation, or valuation overrides.
+  const vaultReporting=new ethers.Contract(t.target,[
+   "function authority() view returns(address)",
+   "function updateMarketsBalances(uint256[]) returns(uint256)"
+  ],signer);
+  const preReport={vaultAssets:await fusion.totalAssets(),
+   adapterPosition:await ctx.adapter.positionAssets(t.mode,t.target,t.id,t.aux)};
+  console.log("IPOR_MARKET_REPORT_BEFORE",JSON.stringify(x({target:t.target,reporter,ids,...preReport})));
+  await provider.send("anvil_setBalance",[reporter,ethers.toBeHex(10n*10n**18n)]);
+  await provider.send("anvil_impersonateAccount",[reporter]);
+  try{
+   await tx("real IPOR updateMarketsBalances() authorized keeper reporting",
+     vaultReporting.connect(await provider.getSigner(reporter))
+       .updateMarketsBalances(ids,{gasLimit:9_000_000}),ctx.scope);
+  }finally{
+   await provider.send("anvil_stopImpersonatingAccount",[reporter]);
+  }
+  const postReport={vaultAssets:await fusion.totalAssets(),
+   adapterPosition:await ctx.adapter.positionAssets(t.mode,t.target,t.id,t.aux)};
+  console.log("IPOR_MARKET_REPORT_AFTER",JSON.stringify(x({target:t.target,...postReport})));
+  await snapshot("12c-IPOR-authorized-reporter-market-balance-update",ctx);
+ }else console.log("IPOR_NO_AUTHORIZED_REPORTER_KNOWN",t.target);
+
 }
 async function accrueMarket(ctx,t) {
  if(t.protocol==="Yearn V2"){await harvestRealYearnV2(ctx,t);}
