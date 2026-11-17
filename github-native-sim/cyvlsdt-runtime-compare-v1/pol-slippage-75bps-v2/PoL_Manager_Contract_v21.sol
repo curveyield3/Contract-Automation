@@ -52,6 +52,8 @@ interface IPoLYearn is IPoL4626 {
 }
 interface IPoLRouter {
     function swap(address,address,uint256) external returns (uint256);
+    function swapExactInput(address,address,uint256,uint256,address,uint256) external returns (uint256);
+    function estimate_exact_output(address,address,uint256) external view returns (uint256);
     function price_oracle(address,address) external view returns (uint256);
 }
 interface IPoLGauge {
@@ -67,7 +69,7 @@ interface IPoLCurve {
 interface IPoLCurveNG {
     function add_liquidity(uint256[] calldata,uint256) external returns (uint256);
 }
-/// @notice Read-only bounds from CurvePairOracleBoundsV6 (a separate, owner-configured deployment).
+/// @notice Read-only bounds from CurvePairOracleBoundsV7 (a separate, owner-configured deployment).
 interface IPoLLiquidityBounds {
     function quoteDeposit(address pool,uint8 coinIndex,uint256 amount,uint16 slippageBps)
         external view returns(uint256 estimate,uint256 minOut);
@@ -99,6 +101,8 @@ interface IPoLNft {
 contract PoLManager {
     uint256 private constant BPS=10_000;
     uint256 private constant WAD=1e18;
+    uint16 public constant NFT_SWAP_SLIPPAGE_BPS=75;
+    uint16 public constant SDT_USDC_SWAP_SLIPPAGE_BPS=200;
     uint256 private entered=1;
 
     struct DeployConfig {
@@ -354,10 +358,32 @@ contract PoLManager {
     }
     function _balance(address token) private view returns(uint256){return IPoL20(token).balanceOf(address(this));}
     function _min(uint256 a,uint256 b) private pure returns(uint256){return a<b?a:b;}
+    /// @dev Enforce route-independent historical execution limits at this caller.
+    ///      SDT/cyvlSDT swaps are used to balance the Uniswap NFT.
+    ///      SDT/USDC swaps retain a distinct 2% ceiling; other routes keep
+    ///      the OmniRouter's native configured historical-price protection.
     function _swap(address from,address to,uint256 amount) private returns(uint256 received){
         if(amount==0||from==to)revert Invalid();
-        received=IPoLRouter(omniRouter).swap(from,to,amount);
-        if(received==0)revert Slippage();
+        uint16 limit;
+        if((from==sdt&&to==cyvlSDT)||(from==cyvlSDT&&to==sdt)){
+            limit=NFT_SWAP_SLIPPAGE_BPS;
+        }else if((from==sdt&&to==usdc)||(from==usdc&&to==sdt)){
+            limit=SDT_USDC_SWAP_SLIPPAGE_BPS;
+        }else{
+            received=IPoLRouter(omniRouter).swap(from,to,amount);
+            if(received==0)revert Slippage();
+            return received;
+        }
+        uint256 reference=IPoLRouter(omniRouter).estimate_exact_output(from,to,amount);
+        if(reference==0)revert Slippage();
+        uint256 minimum=reference*(BPS-limit)/BPS;
+        if(minimum==0)revert Slippage();
+        received=IPoLRouter(omniRouter).swapExactInput(
+            from,to,amount,minimum,address(this),block.timestamp
+        );
+        // Deliberately check actual returned output as well: a future or
+        // noncompliant router implementation must not silently bypass minOut.
+        if(received<minimum)revert Slippage();
     }
     function _convert(address from,address to,uint256 amount) private returns(uint256){
         return amount==0?0:from==to?amount:_swap(from,to,amount);
@@ -475,6 +501,32 @@ contract PoLManager {
         (liquidity,used0,used1)=_uniAdd(amount0,amount1);
         pendingUniCompound0-=_min(used0,pendingUniCompound0);
         pendingUniCompound1-=_min(used1,pendingUniCompound1);
+    }
+    /// @notice Rebalance the token inventory of the managed Uniswap NFT at
+    ///         a hard 75-bps historical execution-loss ceiling.
+    /// @dev Preserve pending compounding reward attribution across the swap.
+    function rebalanceUniTokens(address tokenIn,uint256 amountIn)
+        external onlyOperator active guard returns(uint256 amountOut){
+        if(uniNftManager==address(0)||amountIn==0||amountIn>_balance(tokenIn))revert Invalid();
+        address tokenOut;
+        uint256 pendingIn;
+        if(tokenIn==uniToken0){
+            tokenOut=uniToken1;pendingIn=pendingUniCompound0;
+        }else if(tokenIn==uniToken1){
+            tokenOut=uniToken0;pendingIn=pendingUniCompound1;
+        }else revert Invalid();
+        amountOut=_swap(tokenIn,tokenOut,amountIn);
+        uint256 consumed=_min(amountIn,pendingIn);
+        if(consumed!=0){
+            uint256 attributed=amountOut*consumed/amountIn;
+            if(tokenIn==uniToken0){
+                pendingUniCompound0-=consumed;
+                pendingUniCompound1+=attributed;
+            }else{
+                pendingUniCompound1-=consumed;
+                pendingUniCompound0+=attributed;
+            }
+        }
     }
     function _harvestUni() private returns(uint256 paid){
         (uint256 got0,uint256 got1)=IPoLNft(uniNftManager).collect(IPoLNft.Collect(uniTokenId,address(this),type(uint128).max,type(uint128).max));
