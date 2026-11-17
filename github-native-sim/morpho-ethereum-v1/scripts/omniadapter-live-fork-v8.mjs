@@ -14,7 +14,7 @@ const OUT=".omni-v8-build/live-fork-evidence-v8.json";
 // Additional user-approved target protocols: only existing harness, no new workflow.
 const EXTENDED_FIVE=[
  {name:"StakeDAO",market:"StakeDAO USDC V2 ERC4626",target:"0x8EDCC305E633d29BFB383872e79401c506cE9E6f",asset:"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",holder:"0x55fe002aeff02f77364de339a1292923a15844b8",units:6,mode:1},
- {name:"Convex",market:"Convex BaseRewardPool cvxCRV rewards",target:"0x3Fe65692bfCD0e6CF84cB1E7d24108E434A7587e",asset:"0x62b9c7356a2dc64a1969e19c23e4f579f9810aa7",holder:null,units:18,mode:1},
+ {name:"Convex",market:"Aladdin aCRV ERC4626 autocompounding cvxCRV staked through Convex",target:"0x2b95A1Dcc3D405535f9ed33c219ab38E8d7e0884",asset:"0x62b9c7356a2dc64a1969e19c23e4f579f9810aa7",holder:"0xaa0C3f5F7DFD688C6E646F66CD2a6B66ACdbE434",units:18,mode:1},
  {name:"Fraxlend",market:"Fraxlend V2 sUSDe / FRAX lending",target:"0xb5ae5b75c0df5632c572a657109375646ce66f90",asset:"0x853d955acef822db058eb8505911ed77f175b99e",holder:"0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B",units:18,mode:1},
  {name:"CurveLend",market:"Curve LlamaLend V2 market 0 crvUSD",target:"0x2b5a321c3cb1f33e1abecd047c2649d0b4c47eba",asset:"0xf939e0a03fb07f59a73314e73794be0e57ac1b4e",holder:"0x4dece678ceceb27446b35c672dc7d61f30bad69e",units:18,mode:1},
  {name:"Pendle",market:"Pendle SY USD3 active mainnet",target:"0xeA3BC608F32847B97965C5e1648BDFCd4C2C40d0",asset:"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",holder:"0x55fe002aeff02f77364de339a1292923a15844b8",units:6,mode:1}
@@ -585,8 +585,29 @@ async function extendedFiveTrial(spec) {
   const invested=positionAtBlock;
   await timeJump(30);
   if(spec.name==="Fraxlend"){
-   const pair=new ethers.Contract(spec.target,["function addInterest()"],signer);
-   await tx("Fraxlend actual pair addInterest",pair.addInterest({gasLimit:9_000_000}),scope);
+   // FraxlendPairCore exposes addInterest(bool), NOT addInterest().
+   // Source: FraxFinance/fraxlend src/contracts/FraxlendPairCore.sol.
+   const pair=new ethers.Contract(spec.target,["function addInterest(bool)"],signer);
+   await tx("Fraxlend actual pair addInterest(bool) after 30 days",pair.addInterest(true,{gasLimit:9_000_000}),scope);
+  }
+  if(spec.name==="Convex"){
+   // Aladdin aCRV is a real ERC4626 auto-compounding Convex position;
+   // its delegated rewards need a real harvest, not a synthetic donation.
+   const harvestAddress="0xfa86aa141e45da5183b42792d99dede3d26ec515";
+   const compounder=new ethers.Contract(spec.target,
+      ["function harvest(address,uint256) returns(uint256)"],signer);
+   await provider.send("anvil_setBalance",[harvestAddress,ethers.toBeHex(10n*10n**18n)]);
+   await provider.send("anvil_impersonateAccount",[harvestAddress]);
+   try{
+    await tx("real Aladdin Convex compounder harvest via authorized harvester",
+      compounder.connect(await provider.getSigner(harvestAddress))
+        .harvest(harvestAddress,0,{gasLimit:9_000_000}),scope);
+   }catch(e){
+    result.harvestFailure=String(e.shortMessage||e.message).slice(0,400);
+    console.log("CONVEX_HARVEST_NOT_EXECUTABLE",result.harvestFailure);
+   }finally{
+    await provider.send("anvil_stopImpersonatingAccount",[harvestAddress]);
+   }
   }
   await tx("accrue official Morpho Vault V2",vault.accrueInterest({gasLimit:9_000_000}),scope);
   await timeJump(1);
@@ -613,7 +634,39 @@ async function extendedFiveTrial(spec) {
  }catch(e){
   result.status="NOT_PROVEN";
   result.error=String(e.stack||e).slice(0,1300);
-  console.log("EXTENDED_FIVE_NOT_PROVEN",JSON.stringify(x({name:spec.name,error:result.error})));
+  // Native Pendle SY has a different ABI from ERC4626. Prove its real
+  // protocol deposit and redemption separately; never call this OmniAdapter proof.
+  if(spec.name==="Pendle"){
+   const underlying=new ethers.Contract(spec.asset,ERC20,signer);
+   const sy=new ethers.Contract(spec.target,[
+      "function getTokensIn() view returns(address[])",
+      "function getTokensOut() view returns(address[])",
+      "function previewDeposit(address,uint256) view returns(uint256)",
+      "function previewRedeem(address,uint256) view returns(uint256)",
+      "function deposit(address,address,uint256,uint256) payable returns(uint256)",
+      "function redeem(address,uint256,address,uint256,bool) returns(uint256)",
+      "function balanceOf(address) view returns(uint256)"
+   ],signer);
+   const direct={status:"IN_PROGRESS"};
+   try{
+    direct.tokensIn=await sy.getTokensIn();direct.tokensOut=await sy.getTokensOut();
+    direct.previewDeposit=await sy.previewDeposit(spec.asset,10n**BigInt(spec.units));
+    const before=await sy.balanceOf(owner);
+    await tx("real Pendle SY direct interface approve",underlying.approve(spec.target,ethers.MaxUint256),scope);
+    await tx("real Pendle SY native deposit USDC",sy.deposit(owner,spec.asset,10n**BigInt(spec.units),0,{gasLimit:9_000_000}),scope);
+    const receivedShares=(await sy.balanceOf(owner))-before;
+    fail(receivedShares>0n,"PENDLE_NATIVE_DEPOSIT_NO_SHARES");
+    direct.receivedShares=receivedShares;
+    direct.previewRedeem=await sy.previewRedeem(spec.asset,receivedShares);
+    await tx("real Pendle SY native redeem into USDC",
+      sy.redeem(owner,receivedShares,spec.asset,0,false,{gasLimit:9_000_000}),scope);
+    direct.redeemedAll=(await sy.balanceOf(owner))===before;
+    fail(direct.redeemedAll,"PENDLE_NATIVE_REDEEM_SHARES_REMAIN");
+    direct.status="PROVEN_NATIVE_INTERFACE_NOT_OMNIADAPTER";
+   }catch(nativeError){direct.status="NOT_PROVEN";direct.error=String(nativeError.stack||nativeError).slice(0,1100);}
+   result.directProtocolProof=direct;
+  }
+  console.log("EXTENDED_FIVE_NOT_PROVEN",JSON.stringify(x({name:spec.name,error:result.error,directProtocolProof:result.directProtocolProof})));
  }finally{save();}
  return result;
 }
