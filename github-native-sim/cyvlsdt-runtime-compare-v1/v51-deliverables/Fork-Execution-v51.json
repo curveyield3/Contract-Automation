@@ -2,21 +2,21 @@
   "results": [
     {
       "stage": 1,
-      "gasUsed": "10632587",
+      "gasUsed": "8191396",
       "safeNonce": "22",
-      "txHash": "0xfbd35a7d92400592ad680e6ff8dfa393fd310dc438f12f158b6101b4db4cae77"
+      "txHash": "0x02d5998dfe082c2b0830ea6683ac03d5cdd1f539bc165e20aa6fa684265c9cbc"
     },
     {
       "stage": 2,
-      "gasUsed": "7176481",
+      "gasUsed": "7614969",
       "safeNonce": "23",
-      "txHash": "0xbe194f4b3bbf3aa6d15c81b4d28d0ddce5c0091008d90cffac44e9c4775bb448"
+      "txHash": "0xaa89155e31d886bdcc5aca2f5ccd44d06eec06da368e2130237baafdfdecb99a"
     },
     {
       "stage": 3,
-      "gasUsed": "7768735",
+      "gasUsed": "9761772",
       "safeNonce": "24",
-      "txHash": "0x4e08138df713e21a3329f87dc61e47f42a0f45b292c7a32a02dc2c555cc90f7b"
+      "txHash": "0x90e931919ee028d3ce023217b9f5884670eb57cb515834201c2e23f562252a5d"
     }
   ],
   "addresses": {

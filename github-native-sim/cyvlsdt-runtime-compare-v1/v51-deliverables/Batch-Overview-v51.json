@@ -5,35 +5,35 @@
     {
       "stage": 1,
       "to": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
-      "hash": "0x4835001220cd76814f2d314f22dcb8e5e6abdf3c724096a1964859b2e73b3ebd",
-      "transactions": 4,
-      "totalCalldataBytes": 51428,
+      "hash": "0x104a2bbfe603872c74fbe89783df8cccc3d9c89400cbac395b7bdf8126f4d54d",
+      "transactions": 3,
+      "totalCalldataBytes": 39940,
       "labels": [
         "deploy:cyvlSdt",
         "deploy:locker",
-        "deploy:revenueStaking",
-        "deploy:boostMerchant"
+        "deploy:revenueStaking"
       ]
     },
     {
       "stage": 2,
       "to": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
-      "hash": "0xf47e657d4b615a61185991e6b24ae42e5572a9df2653a6bbed182553fd6f2f3c",
+      "hash": "0xc46652396f00a2f139aa9fd1fd6682879ab9fa451f6a54ee24840fb189b75a18",
       "transactions": 3,
-      "totalCalldataBytes": 35364,
+      "totalCalldataBytes": 37156,
       "labels": [
+        "deploy:boostMerchant",
         "deploy:revenueVault",
-        "deploy:revenueStrategy",
-        "deploy:bribeAllocator"
+        "deploy:revenueStrategy"
       ]
     },
     {
       "stage": 3,
       "to": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
-      "hash": "0x25ac761babc497894bcb077600ecba86e1518a3d981205a1eaff8de7af1bcb06",
-      "transactions": 16,
-      "totalCalldataBytes": 37476,
+      "hash": "0x71ef17910e994598dbfc2d08aa009b52346c17b4c5d134e1f445042f329b7619",
+      "transactions": 17,
+      "totalCalldataBytes": 47172,
       "labels": [
+        "deploy:bribeAllocator",
         "deploy:poLLiquidityBounds",
         "deploy:poLManager",
         "configure:cyvlSdt.setLocker",
