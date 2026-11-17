@@ -4,7 +4,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
-      - 'github-native-sim/curveyield-protected-vault-v3/**'
+      - 'github-native-sim/curveyield-protected-vault-v4/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -113,9 +113,9 @@ jobs:
         run: |
           set -euo pipefail
           ROOT="$RUNNER_TEMP/curveyield-protected-vault"
-          mkdir -p "$ROOT/src" "protected-vault-compile-evidence-v3"
-          cp github-native-sim/curveyield-protected-vault-v3/contracts/CurveYieldProtectedVaultController-v3.sol "$ROOT/src/"
-          sha256sum "$ROOT/src/CurveYieldProtectedVaultController-v3.sol" | tee protected-vault-compile-evidence-v3/source-sha256.txt
+          mkdir -p "$ROOT/src" "protected-vault-compile-evidence-v4"
+          cp github-native-sim/curveyield-protected-vault-v4/contracts/CurveYieldProtectedVaultController-v4.sol "$ROOT/src/"
+          sha256sum "$ROOT/src/CurveYieldProtectedVaultController-v4.sol" | tee protected-vault-compile-evidence-v4/source-sha256.txt
           cat > "$ROOT/foundry.toml" <<'TOML'
           [profile.default]
           src = "src"
@@ -127,14 +127,14 @@ jobs:
           via_ir = true
           evm_version = "cancun"
           TOML
-          echo "commit=$GITHUB_SHA" | tee protected-vault-compile-evidence-v3/provenance.txt
-          forge --version | tee -a protected-vault-compile-evidence-v3/provenance.txt
-          ( cd "$ROOT" && forge build --sizes --force ) 2>&1 | tee protected-vault-compile-evidence-v3/compile.log
-          python3 - "$ROOT/out" <<'PY' | tee protected-vault-compile-evidence-v3/runtime-sizes.txt
+          echo "commit=$GITHUB_SHA" | tee protected-vault-compile-evidence-v4/provenance.txt
+          forge --version | tee -a protected-vault-compile-evidence-v4/provenance.txt
+          ( cd "$ROOT" && forge build --sizes --force ) 2>&1 | tee protected-vault-compile-evidence-v4/compile.log
+          python3 - "$ROOT/out" <<'PY' | tee protected-vault-compile-evidence-v4/runtime-sizes.txt
           import json,sys
           from pathlib import Path
           root=Path(sys.argv[1])
-          for name in ('CurveYieldProtectedVaultController','CurveYieldProtectedFeeSplitter'):
+          for name in ('CurveYieldProtectedVaultController',):
               matches=list(root.rglob(f'{name}.json'))
               if len(matches)!=1: raise SystemExit(f'ERROR: missing/duplicate {name} artifact: {matches}')
               artifact=json.loads(matches[0].read_text())
@@ -147,7 +147,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: curveyield-protected-vault-v3-compile-${{ github.run_id }}
-          path: protected-vault-compile-evidence-v3/
+          name: curveyield-protected-vault-v4-compile-${{ github.run_id }}
+          path: protected-vault-compile-evidence-v4/
           if-no-files-found: warn
           retention-days: 30
