@@ -1,0 +1,141 @@
+{
+  "version": "v12",
+  "chain": "fraxtal",
+  "chainId": 252,
+  "repo": "curveyield3/Contract-Automation",
+  "branch": "morpho-fraxtal-compile-v1",
+  "previousManifest": "github-native-sim/morpho-fraxtal-v1/fraxtal-irm-deployment-manifest-v11.json",
+  "status": "source_compiled_only; no replacement deployments or migrations",
+  "compiled": {
+    "githubRunId": 43996837164,
+    "url": "https://github.com/curveyield3/Contract-Automation/actions/runs/43996837164",
+    "result": "success",
+    "solc": "0.8.30",
+    "optimizerRuns": 200,
+    "evmVersion": "cancun",
+    "artifact": "CurveYield_Fraxtal_Morpho_IRMs_v11"
+  },
+  "newContracts": [
+    {
+      "name": "CurveYieldOmniIRMFactoryV3",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV3.sol",
+      "runtimeBytes": 2170,
+      "creationBytes": 34535,
+      "settings": "standard optimizer",
+      "deployed": false,
+      "constructor": [
+        "governance",
+        "initialCallerFeeWei",
+        "maxCallerFeeWei"
+      ],
+      "ethCallerFee": {
+        "appliesTo": "create(uint8,bytes)",
+        "payable": true,
+        "startingFeeSetByConstructor": true,
+        "immutableMaximum": true,
+        "mutableBy": "Safe owner",
+        "withdrawBy": "Safe owner",
+        "otherFunctionsCharged": false
+      }
+    },
+    {
+      "name": "CurveYieldMarketFactory",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v5.sol",
+      "runtimeBytes": 6723,
+      "viaIrRuntimeBytes": 5484,
+      "creationBytesStandard": 7659,
+      "deployed": false,
+      "constructor": [
+        "morpho",
+        "governanceV5",
+        "ownerSafe",
+        "treasury",
+        "initialCallerFeeWei",
+        "maxCallerFeeWei"
+      ],
+      "ethCallerFee": {
+        "appliesTo": "createMarket(...)",
+        "payable": true,
+        "startingFeeSetByConstructor": true,
+        "immutableMaximum": true,
+        "mutableBy": "contract owner",
+        "withdrawBy": "contract owner",
+        "claimFeeWei": 0
+      },
+      "publicMethods": [
+        "feeBreakdown",
+        "marketId",
+        "createMarket",
+        "claim",
+        "setCreatorReceiver",
+        "setGovernance",
+        "setCallerFee",
+        "withdrawCallerFees",
+        "setTreasury",
+        "transferOwnership",
+        "acceptOwnership"
+      ],
+      "removedRedundancy": [
+        "synchronize external function (claim already syncs internally)",
+        "CreatorMarket.active flag (atomic market creation either fully commits or reverts)",
+        "one duplicate market-creation event",
+        "maxExecutableCreatorFee getter (identical to MAX_CREATOR_FEE public getter)",
+        "unnecessary nonReentrant on no-external-call setCreatorReceiver"
+      ],
+      "stillCallsMorpho": [
+        "accrueInterest inside claim",
+        "withdraw inside claim",
+        "createMarket inside createMarket"
+      ],
+      "noPublicDepositOrWithdraw": true
+    },
+    {
+      "name": "CurveYieldMorphoOwnerV5",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerV5.sol",
+      "runtimeBytes": 2882,
+      "viaIrRuntimeBytes": 2681,
+      "creationBytesStandard": 3242,
+      "deployed": false,
+      "reason": "Deployed Governance V3 permanently binds the old splitter. New MarketFactory requires a matching governance owner to authorize MarketFactory.setFee and caller-side market creation.",
+      "safeControlledMarketFactoryRotation": true,
+      "notASafeModule": true
+    }
+  ],
+  "sizeComparison": {
+    "legacyDeployedSplitterV3RuntimeBytes": 6448,
+    "MarketFactoryV5ViaIrRuntimeBytes": 5484,
+    "runtimeSavingsBytes": 964,
+    "totalOldGovernorV3PlusSplitterBytes": 9221,
+    "totalNewGovernorV5PlusMarketFactoryV5ViaIrBytes": 8165,
+    "totalRuntimeSavingsBytes": 1056
+  },
+  "legacySplitterState": {
+    "deployedV3": "0x5f19be0378fb06ebacdf6eb2fdc2af15db38d198",
+    "eventScan": {
+      "fromBlock": "0x29fe119",
+      "throughBlock": "0x29fe8ec",
+      "eventsTotal": 2,
+      "eventsAreConstructorOwnershipAndTreasury": true,
+      "marketCreatedEvents": 0
+    },
+    "warning": "The earlier original splitter at 0xc0890482e5b65b5d8fe9947eb362642435a107f9 may retain claims; do not sweep or destroy it."
+  },
+  "migration": {
+    "notSubmitted": true,
+    "existingGovernorV3": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+    "requires": [
+      "Deploy and verify Governor V5, MarketFactory V5 and fee-enabled OmniFactory V3 separately with agreed constructor fee values",
+      "Safe calls newGovernance.setMarketFactory(newMarketFactory)",
+      "Safe calls existing Governance V3.setOwner(newGovernance) to migrate Morpho",
+      "Safe calls newGovernance.setFeeRecipient(newMarketFactory)",
+      "Safe whitelists 6 existing IRM factories and selected OmniFactories on new governance to preserve existing auto enable",
+      "Verify creator-fee entitlements and preserve historical splitter claims"
+    ],
+    "note": "No replacement contract source can work with V3's one-time splitter authorization. No new Safe transaction was submitted."
+  },
+  "tests": {
+    "created": false,
+    "executed": false,
+    "forkSimulations": false
+  }
+}
