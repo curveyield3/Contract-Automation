@@ -144,6 +144,14 @@ jobs:
               if size>24576: raise SystemExit(f'ERROR: EIP-170 runtime size exceeded by {name}')
           PY
           cp -a "$ROOT/out" "protected-vault-compile-evidence-v8/foundry-out"
+          # Emit publicly compiled creation bytecode for the existing transaction signer tool.
+          python3 - "$ROOT/out" <<'PYINIT'
+          import json,sys
+          from pathlib import Path
+          p=next(Path(sys.argv[1]).rglob('CurveYieldProtectedVaultController.json'))
+          b=json.loads(p.read_text())['bytecode']['object']
+          print('CURVEYIELD_V8_DEPLOY_BYTECODE='+ ('0x'+b.removeprefix('0x')))
+          PYINIT
       - name: Upload compile-only evidence
         if: always()
         uses: actions/upload-artifact@v4
