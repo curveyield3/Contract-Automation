@@ -464,7 +464,7 @@ contract CurveYieldOmniAdapterDeployerV5 {
 
     /// @param vaultFactory_ Existing native Morpho Vault V2 factory on the target chain.
     /// @param maximumCreationFeeWei_ Absolute fee ceiling, in native gas-token wei.
-    ///        Fraxtal deployment parameter: 1 ether (1 frxETH).
+    ///        Fraxtal deployment parameter: 1 ether (1 native FRAX, 10**18 wei).
     /// @dev Initial owner & fee recipient = CurveYield Safe. Fee starts at 0.
     ///      The owner can set the fee to any amount <= immutable maximum.
     constructor(address vaultFactory_, uint256 maximumCreationFeeWei_) {
