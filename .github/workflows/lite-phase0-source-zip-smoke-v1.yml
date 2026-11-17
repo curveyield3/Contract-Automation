@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   source-zip-smoke:
-    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1' && github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1' && github.ref != 'refs/heads/cyvlsdt-v49-adversarial-v1' && github.ref != 'refs/heads/cyvlsdt-v51-safe-3-3-3-v3' && github.ref != 'refs/heads/cyvlsdt-pol-morpho-v20-v1' && github.ref != 'refs/heads/cyvlsdt-pol-v22-guard-v8-configurable-v1'
+    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1' && github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1' && github.ref != 'refs/heads/cyvlsdt-v49-adversarial-v1' && github.ref != 'refs/heads/cyvlsdt-v51-safe-3-3-3-v3' && github.ref != 'refs/heads/cyvlsdt-pol-morpho-v20-v1' && github.ref != 'refs/heads/cyvlsdt-pol-v22-guard-v8-configurable-v1' && github.ref != 'refs/heads/cyvlsdt-pol-v23-morpho-v2-safe-v1'
     name: ${{ matrix.label }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -735,8 +735,8 @@ jobs:
           retention-days: 90
 
   pol-slippage-v21-v7-fork:
-    if: github.ref == 'refs/heads/cyvlsdt-pol-v22-guard-v8-configurable-v1'
-    name: PoL v22 + guard v8 exact Curve V6 ABI and configurable-slippage Ethereum fork proof
+    if: github.ref == 'refs/heads/cyvlsdt-pol-v23-morpho-v2-safe-v1'
+    name: PoL v23 Morpho V2 + guard V8 compile and Safe calldata (no tests)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -760,6 +760,7 @@ jobs:
           export SOLC30_PATH="$GITHUB_WORKSPACE/.slip-deps30/node_modules/solc"
           node github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/build-v4.cjs
       - name: Execute mainnet-fork simultaneous adverse-price scenarios
+        if: false # Source-only compile requested; no test execution authorized.
         shell: bash
         env:
           RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM }}
@@ -784,25 +785,25 @@ jobs:
           node github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/fork-stress-v4.cjs \
             2>&1 | tee github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v4/fork-run.log
           test -s github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v4/Fork-Stress-Results-v4.json
-      - name: Preserve compiled artifacts, exact calldata and fork receipts on GitHub
+      - name: Preserve v23 compiled artifacts and Safe calldata on GitHub
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v4/
-          git commit -m 'Preserve PoL v22 and guard v8 compiled artifacts, exact V6 Curve ABI and fork evidence v4'
-          git push origin HEAD:cyvlsdt-pol-v22-guard-v8-configurable-v1
+          git add github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v5/
+          git commit -m 'Preserve PoL v23 Morpho V2 and guard V8 compiled artifacts and Safe calldata v5'
+          git push origin HEAD:cyvlsdt-pol-v23-morpho-v2-safe-v1
       - name: Upload v2 compiled and fork-tested deployment package
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield-PoL-v22-GuardV8-Configurable-Safe-Handoff-v4
+          name: CurveYield-PoL-v23-MorphoV2-GuardV8-Compile-v5
           path: |
             github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/*.sol
             github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/UniV3TickMath_v6.sol
             github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/StressSlippageHarness_v2.sol
             github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/*.cjs
-            github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v4/
+            github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v5/
           if-no-files-found: warn
           retention-days: 90
