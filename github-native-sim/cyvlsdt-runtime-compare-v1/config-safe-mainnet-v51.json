@@ -1,0 +1,111 @@
+{
+  "version": 51,
+  "network": "ethereum-mainnet",
+  "chainId": 1,
+  "finalOwner": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "finalAdmin": "0x9f2B20A772246960810045905B7daccf960eE288",
+  "feeReceivers": {
+    "treasury": "0x9f2B20A772246960810045905B7daccf960eE288"
+  },
+  "stakeDao": {
+    "sdt": "0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F",
+    "vlSdt": "0x94818A7baa7e9F5dC62ce4da1B52ef9a760b80B8",
+    "vlBoost": "0xaB05ca46d1c78CAbB051efFE35099714Cad2AddA",
+    "router": "0x0f542fA75c871EB1b93Ef881b73e46acF733392f",
+    "vlSdtFeeDistributorUsdc": "0xCa94395469a88E9cAC0D5E5e308910E298270d30",
+    "vlSdtFeeDistributorSdt": "0x6d57d34259f6dc31c9a241c199822861940d38f9",
+    "boostMarketplace": "0xbc38D256E559FEd3fA95A6cdC633C667283fb6b8"
+  },
+  "boostEconomics": {
+    "merchantStandingReserveBps": 0,
+    "daoBoostReleasedToModules": "0",
+    "postListingIfNoAcceptableOffer": false,
+    "merchantSaleRates": {
+      "postPricePerWeek": null,
+      "minimumFillPricePerWeek": null,
+      "sdtWeiPerUsdc": null
+    },
+    "daoBoostBps": 1000
+  },
+  "deployment": {
+    "confirmations": 2,
+    "gasLimitMultiplierBps": 12000,
+    "anvilPort": 8545,
+    "anvilBalanceWei": "100000000000000000000",
+    "anvilBlockTimeSeconds": 0,
+    "anvilForkBlockNumber": null
+  },
+  "release": "51",
+  "revenueStakingConfig": {
+    "rewardStreamSeconds": 604800,
+    "excessTier1": {
+      "stakersBps": 7500,
+      "daoBps": 1500,
+      "adminBps": 500,
+      "poLBps": 500
+    },
+    "excessTier2": {
+      "stakersBps": 6000,
+      "daoBps": 2000,
+      "adminBps": 1000,
+      "poLBps": 1000
+    },
+    "immediateWithdrawFeePpm": 31250
+  },
+  "revenueVault": {
+    "name": "CurveYield Compounding vlSDT",
+    "symbol": "cycvlSDT",
+    "withdrawalFeeBps": 10,
+    "performanceFeeBps": 390,
+    "callFeeBps": 10
+  },
+  "omniRouter": "0xa4a533025fef8d3446e7cb8a434824e1ee865b00",
+  "usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  "postDeploymentStablePool": {
+    "address": null,
+    "coinIndices": null,
+    "routeConfiguredLater": true
+  },
+  "lockerRevenueDiversions": {
+    "lpBribeRevenue": {
+      "shareBps": 0,
+      "recipient": null
+    },
+    "poLDeposit": {
+      "shareBps": 0,
+      "recipient": null
+    }
+  },
+  "bribeAllocator": {
+    "voteMarket": "0x0000000895cB182E6f983eb4D8b4E0Aa0B31Ae4c",
+    "gauge": null,
+    "minimumReturnWad": "1250000000000000000"
+  },
+  "poLManager": {
+    "sourceVersion": 19,
+    "deployment": "with-core; one-time post-deployment Curve/Uniswap configuration",
+    "crv": "0xD533a949740bb3306d119CC777fa900bA034cd52",
+    "curvePool": null,
+    "curveLp": null,
+    "curveGauge": null,
+    "uniNftManager": null,
+    "uniTokenId": null,
+    "sdtYearnIndex": 0,
+    "sdtEulerIndex": 0,
+    "yearnVaults": [
+      null,
+      null,
+      null
+    ],
+    "eulerVaults": [
+      null,
+      null
+    ],
+    "liquidityBounds": {
+      "contract": "CurvePairOracleBoundsV6",
+      "sourceVersion": 6,
+      "deployWithCore": true
+    },
+    "curveSlippageBps": 200
+  }
+}
