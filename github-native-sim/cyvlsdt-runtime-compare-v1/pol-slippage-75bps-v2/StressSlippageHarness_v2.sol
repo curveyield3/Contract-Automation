@@ -110,6 +110,10 @@ contract StressUniNFTV2 {
     uint256 public expectedWithdraw0;
     uint256 public expectedWithdraw1;
     uint256 public spotBps=10000;
+    uint256 public lastDepositDeadline;
+    uint256 public lastDepositExecutionTimestamp;
+    uint256 public lastWithdrawalDeadline;
+    uint256 public lastWithdrawalExecutionTimestamp;
     uint256 public lastDepositDesired0;
     uint256 public lastDepositDesired1;
     uint256 public lastDepositMin0;
@@ -145,10 +149,17 @@ contract StressUniNFTV2 {
     function setWithdrawalReference(uint256 a0,uint256 a1) external{
         expectedWithdraw0=a0;expectedWithdraw1=a1;
     }
+    // Only the test harness uses this to simulate fees earned before a pending harvest.
+    function setFeeOwed(uint128 a0,uint128 a1) external{
+        pos.tokensOwed0+=a0;
+        pos.tokensOwed1+=a1;
+    }
     function increaseLiquidity(Increase calldata params)
         external returns(uint128 liquidity,uint256 amount0,uint256 amount1){
         require(params.tokenId==TOKEN_ID && nftOwner==msg.sender,"manager NFT custody");
         require(params.deadline>=block.timestamp,"deadline");
+        lastDepositDeadline=params.deadline;
+        lastDepositExecutionTimestamp=block.timestamp;
         lastDepositDesired0=params.amount0Desired;
         lastDepositDesired1=params.amount1Desired;
         lastDepositMin0=params.amount0Min;
@@ -169,6 +180,8 @@ contract StressUniNFTV2 {
         external returns(uint256 amount0,uint256 amount1){
         require(params.tokenId==TOKEN_ID && nftOwner==msg.sender,"manager NFT custody");
         require(params.deadline>=block.timestamp && params.liquidity<=pos.liquidity,"liquidity");
+        lastWithdrawalDeadline=params.deadline;
+        lastWithdrawalExecutionTimestamp=block.timestamp;
         lastWithdrawalLiquidity=params.liquidity;
         lastWithdrawalMin0=params.amount0Min;
         lastWithdrawalMin1=params.amount1Min;
@@ -193,6 +206,8 @@ contract StressUniNFTV2 {
 contract StressHistoricalRouterV2 {
     mapping(bytes32=>uint256) public spotBps;
     mapping(bytes32=>uint256) public reportedBps;
+    uint256 public lastSwapDeadline;
+    uint256 public lastSwapExecutionTimestamp;
     uint256 public lastUserMin;
     address public lastRecipient;
     function key(address a,address b) public pure returns(bytes32){
@@ -219,6 +234,8 @@ contract StressHistoricalRouterV2 {
     function swapExactInput(address a,address b,uint256 amount,uint256 userMin,address receiver,uint256 deadline)
         external returns(uint256 reported){
         require(deadline>=block.timestamp,"deadline");
+        lastSwapDeadline=deadline;
+        lastSwapExecutionTimestamp=block.timestamp;
         lastUserMin=userMin;
         lastRecipient=receiver;
         uint256 received=_execute(a,b,amount,receiver);
