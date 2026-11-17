@@ -1,0 +1,250 @@
+'use strict';
+const fs=require('node:fs');
+const path=require('node:path');
+const assert=require('node:assert/strict');
+const hre=require('hardhat');
+const {ethers,network}=hre;
+const OUTPUT=path.join(__dirname,'outputs-v2');
+const ART=(name)=>JSON.parse(fs.readFileSync(path.join(OUTPUT,name),'utf8'));
+const managerArtifact=ART('PoLManager-v21-Artifact-v2.json');
+const guardArtifact=ART('CurvePairOracleBounds-v7-Artifact-v2.json');
+const mocks=ART('Stress-Simulation-Mock-Artifacts-v2.json');
+const W=10n**18n, U=10n**6n;
+const ALIVE_OLD_POL='0x54a71cA4F139e674fAd3B9F18cFc013d6175D677';
+const ALIVE_OLD_GUARD='0x840fa8496e3B5Ac306281d5Bb5224fA08b5865F8';
+const reports=[];
+let assertions=0;
+function check(cond,label){assert(cond,label);assertions++}
+function eq(a,b,label){assert.equal(String(a),String(b),label);assertions++}
+async function deploy(artifact,...args){
+ const [owner]=await ethers.getSigners();
+ const c=await new ethers.ContractFactory(artifact.abi,artifact.bytecode,owner).deploy(...args);
+ await c.waitForDeployment();return c;
+}
+async function fixture(){
+ const [owner,attacker]=await ethers.getSigners();
+ const sdt=await deploy(mocks.StressERC20V2,'Mock SDT','SDT',18);
+ const cyvl=await deploy(mocks.StressERC20V2,'Mock cyvlSDT','cyvlSDT',18);
+ const usdc=await deploy(mocks.StressERC20V2,'Mock USDC','USDC',6);
+ const crv=await deploy(mocks.StressERC20V2,'Mock CRV','CRV',18);
+ const lp=await deploy(mocks.StressERC20V2,'Mock LP','LP',18);
+ const router=await deploy(mocks.StressHistoricalRouterV2);
+ const pool=await deploy(mocks.StressThreeCoinNGV2,sdt.target,cyvl.target,usdc.target,lp.target);
+ const guard=await deploy(guardArtifact);
+ const pol=await deploy(managerArtifact,{
+  owner:owner.address,yearnVaults:[ethers.ZeroAddress,ethers.ZeroAddress,ethers.ZeroAddress],
+  sdtYearnIndex:0,eulerVaults:[ethers.ZeroAddress,ethers.ZeroAddress],sdtEulerIndex:0,
+  crv:crv.target,cyvlSDT:cyvl.target,sdt:sdt.target,usdc:usdc.target,omniRouter:router.target
+ });
+ await pol.setLiquidityBounds(guard.target);
+ await pol.setCurveSlippageBps(75);
+ await pol.configureCurvePool(pool.target,lp.target);
+ await sdt.mint(pol.target,1000000n*W);
+ await usdc.mint(pol.target,1000000n*U);
+ await cyvl.mint(pol.target,1000000n*W);
+ const oracle=await deploy(mocks.StressUniOraclePoolV2);
+ const factory=await deploy(mocks.StressUniFactoryV2,oracle.target);
+ const tokens=[sdt.target,cyvl.target].sort((a,b)=>BigInt(a)<BigInt(b)?-1:1);
+ const nft=await deploy(mocks.StressUniNFTV2,tokens[0],tokens[1],factory.target,owner.address);
+ await pol.configureUniswapPosition(nft.target,7);
+ await nft.safeTransferFrom(owner.address,pol.target,7);
+ const token0=tokens[0].toLowerCase()===sdt.target.toLowerCase()?sdt:cyvl;
+ const token1=tokens[1].toLowerCase()===sdt.target.toLowerCase()?sdt:cyvl;
+ return {owner,attacker,sdt,cyvl,usdc,crv,lp,router,pool,guard,pol,oracle,factory,nft,token0,token1};
+}
+async function snap(){return network.provider.send('evm_snapshot')}
+async function restore(s){const ok=await network.provider.send('evm_revert',[s]);check(ok,'snapshot restored')}
+async function revertTx(p,label){
+ let threw=false;
+ try{const tx=await p;if(tx?.wait)await tx.wait()}catch(e){threw=true}
+ check(threw,'Expected transaction revert: '+label);
+}
+async function sameBlockSpotMove(spotter,submit,expectedSuccess,label){
+ let tx0,tx1,rc0,rc1;
+ await network.provider.send('evm_setAutomine',[false]);
+ try{
+  tx0=await spotter({gasLimit:120000});
+  tx1=await submit({gasLimit:5500000});
+  await network.provider.send('evm_mine',[]);
+  rc0=await ethers.provider.getTransactionReceipt(tx0.hash);
+  rc1=await ethers.provider.getTransactionReceipt(tx1.hash);
+ }finally{
+  await network.provider.send('evm_setAutomine',[true]);
+ }
+ check(rc0!=null && rc1!=null,label+' receipts present');
+ eq(rc0.blockNumber,rc1.blockNumber,label+' same block number');
+ eq(rc0.status,1,label+' adverse price move mined');
+ eq(rc1.status,expectedSuccess?1:0,label+' expected execution status');
+ return {blockNumber:rc1.blockNumber,status:rc1.status,gasUsed:String(rc1.gasUsed)};
+}
+async function curveDepositTrial(f,bps,pass){
+ const checkpoint=await snap();
+ const input=1000n*W;
+ const quote=await f.guard.quoteDeposit(f.pool.target,0,input,75);
+ const output=input*BigInt(bps)/10000n;
+ const expectedLoss=(Number(quote[0]-output)/Number(quote[0]))*100;
+ const beforeSdt=await f.sdt.balanceOf(f.pol.target);
+ const beforeLP=await f.lp.balanceOf(f.pol.target);
+ const r=await sameBlockSpotMove(
+  opts=>f.pool.setSpotBps(bps,opts),
+  opts=>f.pol.depositCurve(input,opts),pass,'Curve deposit '+bps);
+ const afterSdt=await f.sdt.balanceOf(f.pol.target),afterLP=await f.lp.balanceOf(f.pol.target);
+ if(!pass){eq(afterSdt,beforeSdt,'failed Curve deposit SDT unchanged');eq(afterLP,beforeLP,'failed Curve deposit LP unchanged')}
+ else check(afterLP>beforeLP,'successful Curve deposit mints LP');
+ reports.push({component:'Curve deposit',spotRateBps:bps,lossPercent:expectedLoss,pass,block:r.blockNumber,gas:r.gasUsed});
+ await restore(checkpoint);
+}
+async function curveWithdrawTrial(f,bps,pass){
+ const checkpoint=await snap();
+ await f.pol.depositCurve(2000n*W);
+ const lp=1000n*W;
+ const quote=await f.guard.quoteWithdraw(f.pool.target,0,lp,75);
+ const actual=lp*BigInt(bps)/10000n;
+ const loss=(Number(quote[0]-actual)/Number(quote[0]))*100;
+ const beforeLP=await f.lp.balanceOf(f.pol.target),beforeSDT=await f.sdt.balanceOf(f.pol.target);
+ const r=await sameBlockSpotMove(
+  opts=>f.pool.setSpotBps(bps,opts),
+  opts=>f.pol.withdrawCurve(lp,false,opts),pass,'Curve withdraw '+bps);
+ if(!pass){eq(await f.lp.balanceOf(f.pol.target),beforeLP,'failed Curve redeem LP unchanged');eq(await f.sdt.balanceOf(f.pol.target),beforeSDT,'failed Curve redeem SDT unchanged')}
+ else check((await f.sdt.balanceOf(f.pol.target))>beforeSDT,'successful Curve withdrawal pays SDT');
+ reports.push({component:'Curve withdrawal',spotRateBps:bps,lossPercent:loss,pass,block:r.blockNumber,gas:r.gasUsed});
+ await restore(checkpoint);
+}
+async function uniAddTrial(f,bps,pass){
+ const checkpoint=await snap();
+ const amount0=1000n*W,amount1=1000n*W;
+ const q=await f.guard.quoteUniV3Deposit(f.nft.target,7,amount0,amount1);
+ check(q[0]>0n&&q[1]>0n,'Uniswap guard liquidity quote valid');
+ eq(q[1],q[0]*9925n/10000n,'Uniswap mint minLiquidity 75 bps');
+ await f.nft.setDepositReference(q[0]);
+ const before0=await f.token0.balanceOf(f.pol.target),before1=await f.token1.balanceOf(f.pol.target);
+ const beforeLiquidity=(await f.nft.positions(7)).liquidity;
+ const r=await sameBlockSpotMove(
+  opts=>f.nft.setSpotBps(bps,opts),
+  opts=>f.pol.addUniLiquidity(amount0,amount1,opts),pass,'NFT add '+bps);
+ if(!pass){
+  eq(await f.token0.balanceOf(f.pol.target),before0,'reverted NFT add token0 safe');
+  eq(await f.token1.balanceOf(f.pol.target),before1,'reverted NFT add token1 safe');
+  eq((await f.nft.positions(7)).liquidity,beforeLiquidity,'reverted NFT add liquidity unchanged');
+ }else{
+  eq(await f.nft.lastDepositMin0(),q[4],'actual NFT call amount0Min forwarded from guard');
+  eq(await f.nft.lastDepositMin1(),q[5],'actual NFT call amount1Min forwarded from guard');
+  check((await f.nft.positions(7)).liquidity>beforeLiquidity,'NFT new liquidity minted');
+ }
+ reports.push({component:'Uniswap NFT deposit',spotRateBps:bps,pass,block:r.blockNumber,gas:r.gasUsed,
+  estimateLiquidity:String(q[0]),minLiquidity:String(q[1])});
+ await restore(checkpoint);
+}
+async function uniRemoveTrial(f,bps,pass){
+ const checkpoint=await snap();
+ const q=await f.guard.quoteUniV3Withdraw(f.nft.target,7,2500);
+ check(q[0]>0n&&q[1]>0n&&q[2]>0n,'Uniswap withdraw quote');
+ eq(q[3],q[1]*9925n/10000n,'Uniswap withdraw token0 min 75 bps');
+ eq(q[4],q[2]*9925n/10000n,'Uniswap withdraw token1 min 75 bps');
+ await f.nft.setWithdrawalReference(q[1],q[2]);
+ const liquidity=(await f.nft.positions(7)).liquidity;
+ const before0=await f.token0.balanceOf(f.pol.target),before1=await f.token1.balanceOf(f.pol.target);
+ const r=await sameBlockSpotMove(
+  opts=>f.nft.setSpotBps(bps,opts),
+  opts=>f.pol.removeUniLiquidity(2500,opts),pass,'NFT remove '+bps);
+ if(!pass){
+  eq((await f.nft.positions(7)).liquidity,liquidity,'failed NFT redeem liquidity unchanged');
+  eq(await f.token0.balanceOf(f.pol.target),before0,'failed NFT redeem token0 unchanged');
+  eq(await f.token1.balanceOf(f.pol.target),before1,'failed NFT redeem token1 unchanged');
+ }else{
+  eq(await f.nft.lastWithdrawalMin0(),q[3],'guard minAmount0 forwarded');
+  eq(await f.nft.lastWithdrawalMin1(),q[4],'guard minAmount1 forwarded');
+  check((await f.nft.positions(7)).liquidity<liquidity,'NFT redeemed liquidity');
+ }
+ reports.push({component:'Uniswap NFT withdrawal',spotRateBps:bps,pass,block:r.blockNumber,gas:r.gasUsed});
+ await restore(checkpoint);
+}
+async function rebalanceTrial(f,bps,pass,lying=false){
+ const checkpoint=await snap();
+ const [a,b]=[f.token0,f.token1];const amount=1000n*W;
+ await f.router.setSpotBps(a.target,b.target,bps);
+ if(lying)await f.router.setReportedBps(a.target,b.target,10000);
+ const beforeA=await a.balanceOf(f.pol.target),beforeB=await b.balanceOf(f.pol.target);
+ if(pass){
+  await f.pol.rebalanceUniTokens(a.target,amount);
+  eq(await f.router.lastUserMin(),amount*9925n/10000n,'actual router call received 75 bps minNet');
+  eq(await f.router.lastRecipient(),f.pol.target,'actual router recipient is PoL Manager');
+  eq(beforeA-(await a.balanceOf(f.pol.target)),amount,'NFT balancing input conserved');
+  eq((await b.balanceOf(f.pol.target))-beforeB,amount*BigInt(bps)/10000n,'NFT balancing output recorded');
+ }else{
+  await revertTx(f.pol.rebalanceUniTokens(a.target,amount),'NFT balancing 75 bps bps='+bps);
+  eq(await a.balanceOf(f.pol.target),beforeA,'NFT rebalance failed input rolled back');
+  eq(await b.balanceOf(f.pol.target),beforeB,'NFT rebalance failed output rolled back');
+ }
+ reports.push({component:lying?'Uniswap NFT swap dishonest router':'Uniswap NFT balancing swap',spotRateBps:bps,pass,lying});
+ await restore(checkpoint);
+}
+async function sdtUsdcTrial(f,forward,bps,pass){
+ const checkpoint=await snap();
+ const input=forward?1000n*W:1000n*U;
+ const a=forward?f.sdt:f.usdc,b=forward?f.usdc:f.sdt;
+ await f.router.setSpotBps(a.target,b.target,bps);
+ if(forward){
+  const usdcVault=await deploy(mocks.Stress4626BasicV2,f.usdc.target);
+  await f.pol.setVault(0,usdcVault.target);
+  await f.pol.setAllocations([0,0,10000,0,0,0,0]);
+ }else{
+  await f.pol.setAllocations([10000,0,0,0,0,0,0]);
+ }
+ const balanceBefore=await a.balanceOf(f.pol.target);
+ if(pass){
+  await f.pol.allocateFunds(a.target,input);
+  const quoted=input*(forward?U:W)/(forward?W:U);
+  eq(await f.router.lastUserMin(),quoted*9800n/10000n,'SDT/USDC must preserve 200-bps minimum');
+  check((await a.balanceOf(f.pol.target))<balanceBefore,'successful SDT/USDC spends source');
+ }else{
+  await revertTx(f.pol.allocateFunds(a.target,input),'SDT/USDC over 2%');
+  eq(await a.balanceOf(f.pol.target),balanceBefore,'failed SDT/USDC rolled back');
+ }
+ reports.push({component:forward?'SDT to USDC':'USDC to SDT',spotRateBps:bps,pass});
+ await restore(checkpoint);
+}
+async function main(){
+ const net=await ethers.provider.getNetwork();
+ eq(net.chainId,1n,'Ethereum fork network chain ID 1');
+ const block=await ethers.provider.getBlock('latest');
+ check(block.number>21000000,'forked current Ethereum block, not fresh local chain');
+ check((await ethers.provider.getCode(ALIVE_OLD_POL)).length>2,'real existing v19 PoL Manager exists on fork');
+ check((await ethers.provider.getCode(ALIVE_OLD_GUARD)).length>2,'real existing V6 guard exists on fork');
+ console.log('MAINNET_FORK_BLOCK',JSON.stringify({number:block.number,hash:block.hash,chainId:String(net.chainId)}));
+ const f=await fixture();
+ eq(await f.guard.UNI_V3_SLIPPAGE_BPS(),75,'new Uniswap guard reads 75 bps');
+ eq(await f.pol.curveSlippageBps(),75,'Manager Curve default 75 bps');
+ await revertTx(f.pol.setCurveSlippageBps(76),'reject 76 bps configuration');
+ eq(await f.pol.NFT_SWAP_SLIPPAGE_BPS(),75,'NFT router 75 bps constant');
+ eq(await f.pol.SDT_USDC_SWAP_SLIPPAGE_BPS(),200,'SDT/USDC router 200 bps constant');
+ for(const bps of [10000,9926,9925,9924,9860,9700,9500,9000]){
+  const pass=bps>=9925;
+  await curveDepositTrial(f,bps,pass);
+  await curveWithdrawTrial(f,bps,pass);
+  await uniAddTrial(f,bps,pass);
+  await uniRemoveTrial(f,bps,pass);
+ }
+ for(const bps of [10000,9926,9925,9924,9860,9700,9500,9000]){
+  await rebalanceTrial(f,bps,bps>=9925);
+ }
+ await rebalanceTrial(f,9000,false,true); // lie about received, actual < min => revert
+ for(const forward of [true,false]){
+  for(const bps of [10000,9801,9800,9799,9860,9500]){
+    await sdtUsdcTrial(f,forward,bps,bps>=9800);
+  }
+ }
+ const counts={
+  scenarioCount:reports.length,
+  successful:reports.filter(x=>x.pass).length,
+  expectedReverts:reports.filter(x=>!x.pass).length,
+  assertions,mainnetForkBlock:block.number,
+  policy:{curve:75,uniswapNFT:75,nftBalancingSwap:75,sdtUsdcBothDirections:200},
+  realEthereumCodeChecked:[ALIVE_OLD_POL,ALIVE_OLD_GUARD],
+  tests:reports
+ };
+ const file=path.join(OUTPUT,'Fork-Stress-Results-v2.json');
+ fs.writeFileSync(file,JSON.stringify(counts,null,2)+'\n');
+ console.log('FULL_FORK_75_200_BPS_PASS',JSON.stringify({scenarios:counts.scenarioCount,successful:counts.successful,reverts:counts.expectedReverts,assertions,block:block.number}));
+}
+main().catch(e=>{console.error('FORK_75_200_BPS_FAILED',e.stack||e);process.exitCode=1;});
