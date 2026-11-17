@@ -8,7 +8,7 @@ on:
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldLendingMarketAdapterV1.sol'
       - 'github-native-sim/morpho-ethereum-v1/CurveYieldEthereumLendingAdapterV1.sol'
       - 'github-native-sim/morpho-ethereum-v1/CurveYieldOmniAdapterV1.sol'
-      - 'github-native-sim/morpho-ethereum-v1/CurveYieldOmniAdapterV2.sol'
+      - 'github-native-sim/morpho-ethereum-v1/CurveYieldOmniAdapterV3.sol'
   workflow_dispatch:
 permissions:
   contents: read
@@ -142,7 +142,7 @@ jobs:
               bc = d.get('deployedBytecode',{}).get('object','')
               if not isinstance(bc,str) or not bc.startswith('0x') or len(bc)<=2: continue
               rows.append({'contract':p.stem,'runtimeBytes':(len(bc)-2)//2,'eip170Pass':(len(bc)-2)//2 <= 24576})
-          wanted = {'CurveYieldEthereumLendingAdapterV1','CurveYieldEthereumLendingAdapterFactoryV1','CurveYieldOmniAdapterV1','CurveYieldOmniAdapterFactoryV1','CurveYieldOmniAdapterV2','CurveYieldOmniAdapterFactoryV2'}
+          wanted = {'CurveYieldEthereumLendingAdapterV1','CurveYieldEthereumLendingAdapterFactoryV1','CurveYieldOmniAdapterV1','CurveYieldOmniAdapterFactoryV1','CurveYieldOmniAdapterV3','CurveYieldOmniAdapterFactoryV3'}
           names = {r['contract'] for r in rows}
           assert wanted <= names, f'Missing deployable contracts: {wanted - names}'
           assert all(row['eip170Pass'] for row in rows), 'Runtime bytecode exceeds EIP-170'
@@ -189,7 +189,7 @@ jobs:
           }
           if record['status']=='PASS':
               artifacts={}
-              for name in ('CurveYieldEthereumLendingAdapterV1','CurveYieldEthereumLendingAdapterFactoryV1','CurveYieldOmniAdapterV1','CurveYieldOmniAdapterFactoryV1','CurveYieldOmniAdapterV2','CurveYieldOmniAdapterFactoryV2'):
+              for name in ('CurveYieldEthereumLendingAdapterV1','CurveYieldEthereumLendingAdapterFactoryV1','CurveYieldOmniAdapterV1','CurveYieldOmniAdapterFactoryV1','CurveYieldOmniAdapterV3','CurveYieldOmniAdapterFactoryV3'):
                   found=list(Path('.morpho-compile/out').rglob(name+'.json'))
                   assert len(found)==1,(name,found)
                   artifact=json.loads(found[0].read_text())
@@ -206,4 +206,4 @@ jobs:
           Path('.morpho-compile/receipt-request.json').write_text(json.dumps(payload))
           print('COMPILATION_RECEIPT',record['status'],record['workflowRunUrl'])
           PY
-          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-ethereum-v1/compilation-receipt-v3.json" --input .morpho-compile/receipt-request.json
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-ethereum-v1/compilation-receipt-v4.json" --input .morpho-compile/receipt-request.json
