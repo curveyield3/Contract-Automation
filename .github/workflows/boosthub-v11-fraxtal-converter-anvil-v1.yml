@@ -70,6 +70,38 @@ jobs:
           done
           export NODE_PATH="$PWD/.safe-builder-node/node_modules"
           node tooling/v51-safe-builder-v1.cjs
+      - name: Read back Safe service registration for both exact EIP-712 hashes
+        working-directory: github-native-sim/boosthub-fraxtal-v40
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,urllib.request,pathlib,hashlib
+          base=pathlib.Path('build/safe-mainnet-v51-v23-v1')
+          safe='0x47623C62f281807D615eeb4A2CEee9d97F9D3C49'
+          hashes=[
+            '0x7a751ed1152e3a813b4e37eb5cc68693c75cd3c6fce839c7bede12a695bdce93',
+            '0x1353ba3508f09dd9a197928b7595aa62fd776f1443d733587d9892c3c8439b35']
+          out=[]
+          for i,h in enumerate(hashes,1):
+            expected=json.loads((base/('Safe-Batch-'+str(i)+'-v1.json')).read_text())
+            url='https://safe-transaction-mainnet.safe.global/api/v1/multisig-transactions/'+h+'/'
+            with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'CurveYield-GitHub-Safe-Queue-Verify-v1'}),timeout=60) as resp:
+              record=json.load(resp)
+            verified=(record.get('safe','').lower()==safe.lower() and
+              record.get('safeTxHash','').lower()==h.lower() and
+              record.get('to','').lower()==expected['to'].lower() and
+              str(record.get('nonce'))==expected['nonce'] and
+              int(record.get('operation',-1))==1 and
+              record.get('data','').lower()==expected['data'].lower() and
+              not record.get('isExecuted',True))
+            if not verified: raise SystemExit('Safe service registration did not match batch '+str(i))
+            out.append({'batch':i,'safeTxHash':h,'nonce':record['nonce'],'queueVerified':True,
+              'executed':record['isExecuted'],'confirmationsRequired':record.get('confirmationsRequired'),
+              'confirmations':len(record.get('confirmations') or []),
+              'calldataSha256':hashlib.sha256(bytes.fromhex(expected['data'][2:])).hexdigest()})
+          (base/'Safe-Queue-Verification-v1.json').write_text(json.dumps(out,indent=2)+'\\n')
+          print(json.dumps(out,indent=2))
+          PY
       - name: Commit compiled bytecode and sizes to source branch
         run: |
           set -euo pipefail
