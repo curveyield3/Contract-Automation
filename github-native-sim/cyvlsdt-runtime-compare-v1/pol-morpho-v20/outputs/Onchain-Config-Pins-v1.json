@@ -1,0 +1,27 @@
+{
+  "chainId": 1,
+  "originalPoL": "0x54a71cA4F139e674fAd3B9F18cFc013d6175D677",
+  "newPoL": "0x3960EA7D70a0AAB3206CC3D0F2f1bCb8A54745cf",
+  "locker": "0x4DC535b6aD9eb381A91e472aa3f24F1FDC6Cb21b",
+  "liquidityBounds": "0x840fa8496e3B5Ac306281d5Bb5224fA08b5865F8",
+  "depositShareBps": 0,
+  "profitRecipient": "0x4DC535b6aD9eb381A91e472aa3f24F1FDC6Cb21b",
+  "curveSlippageBps": 200,
+  "defaultLossLimitBps": {
+    "yearn": 100,
+    "morpho": 100
+  },
+  "owner": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "yearnVaultSlots": [
+    0,
+    1,
+    2
+  ],
+  "morphoVaultSlots": [
+    3,
+    4
+  ],
+  "designatedSDTYearnSlot": 0,
+  "designatedSDTMorphoSlot": 3,
+  "otherContractsRedeployRequired": false
+}

@@ -1,0 +1,20 @@
+{
+  "version": "v20-v1",
+  "sha256Source": "d598149e2837ab1acc0482ef420f166286657ea539c779e6975c4bd12f7e391f",
+  "compilerVersion": "0.8.28+commit.7893614a.Emscripten.clang",
+  "evmVersion": "cancun",
+  "optimizerRuns": 200,
+  "viaIR": true,
+  "contractName": "PoLManager",
+  "bytecodeBytes": 23624,
+  "deployedBytes": 20490,
+  "predictedAddress": "0x3960EA7D70a0AAB3206CC3D0F2f1bCb8A54745cf",
+  "constructorArgsBytes": 416,
+  "safeCalls": 4,
+  "totalMultiSendCalldataBytes": 24772,
+  "notes": [
+    "Morpho V1 ONLY: V2 maxRedeem is always zero.",
+    "Yearn/Morpho vaults left unconfigured, owner may setVault later.",
+    "Existing Locker PoL deposit share retained at 0%; no new fund flow enabled."
+  ]
+}
