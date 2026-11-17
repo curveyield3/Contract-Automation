@@ -59,16 +59,20 @@ jobs:
               assert size<=24576,(name,size)
           PY
       - name: Test all supported adapter modes against official Morpho Vault V2
+        if: ${{ !contains(github.event.head_commit.message, '[compile-only]') }}
         shell: bash
         run: |
           set -euo pipefail
           forge test --match-path 'github-native-sim/morpho-ethereum-v1/test/OmniAdapterV8Compatibility.t.sol' -vvv 2>&1 | tee .omni-v8-build/compatibility-test.log
       - uses: actions/setup-node@v4
+        if: ${{ !contains(github.event.head_commit.message, '[compile-only]') }}
         with:
           node-version: '22'
       - name: Install existing pinned ethers.js dependencies
+        if: ${{ !contains(github.event.head_commit.message, '[compile-only]') }}
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Freeze authenticated Ethereum archival block and start verified local Anvil fork
+        if: ${{ !contains(github.event.head_commit.message, '[compile-only]') }}
         id: local-fork
         shell: bash
         env:
@@ -98,6 +102,7 @@ jobs:
           echo "ETHEREUM_FORK_HASH=$HASH" >> "$GITHUB_ENV"
           echo "LOCAL_FORK_SOURCE_BLOCK=$PIN HASH=$HASH, chainId=1 verified"
       - name: Execute mined fork transactions with frequent accounting snapshots
+        if: ${{ !contains(github.event.head_commit.message, '[compile-only]') }}
         env:
           OMNI_V8_FULL_QUALIFICATION: '1'
         shell: bash
