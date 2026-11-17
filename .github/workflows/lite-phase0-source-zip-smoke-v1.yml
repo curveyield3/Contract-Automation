@@ -13,6 +13,8 @@ on:
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/v49-adversarial-*.js'
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/v49-pol-vault-stress.js'
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/v49-live-mainnet-fork.js'
+      - 'github-native-sim/cyvlsdt-runtime-compare-v1/v50-safe-batch-builder.js'
+      - 'github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v50.json'
   workflow_dispatch:
 
 permissions:
