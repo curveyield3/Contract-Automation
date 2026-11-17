@@ -199,9 +199,9 @@ jobs:
                                    'runtimeBytecode':runtime,'metadata':artifact.get('metadata')}
               record['deployableArtifacts']=artifacts
           content=base64.b64encode((json.dumps(record,indent=2)+'\n').encode()).decode()
-          payload={'message':'Record CurveYield OmniAdapter V6 asset-read-compatible adapter + native fee deployer bytecode v8',
+          payload={'message':'Record CurveYield OmniAdapter V6 asset-read-compatible adapter + native fee deployer bytecode v9',
                    'branch':os.environ['GITHUB_REF_NAME'],'content':content}
           Path('.morpho-compile/receipt-request.json').write_text(json.dumps(payload))
           print('COMPILATION_RECEIPT',record['status'],record['workflowRunUrl'])
           PY
-          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-ethereum-v1/compilation-receipt-v8.json" --input .morpho-compile/receipt-request.json
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-ethereum-v1/compilation-receipt-v9.json" --input .morpho-compile/receipt-request.json
