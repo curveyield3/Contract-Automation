@@ -110,6 +110,8 @@ contract StressUniNFTV2 {
     uint256 public expectedWithdraw0;
     uint256 public expectedWithdraw1;
     uint256 public spotBps=10000;
+    uint256 public lastDepositDesired0;
+    uint256 public lastDepositDesired1;
     uint256 public lastDepositMin0;
     uint256 public lastDepositMin1;
     uint128 public lastWithdrawalLiquidity;
@@ -147,6 +149,8 @@ contract StressUniNFTV2 {
         external returns(uint128 liquidity,uint256 amount0,uint256 amount1){
         require(params.tokenId==TOKEN_ID && nftOwner==msg.sender,"manager NFT custody");
         require(params.deadline>=block.timestamp,"deadline");
+        lastDepositDesired0=params.amount0Desired;
+        lastDepositDesired1=params.amount1Desired;
         lastDepositMin0=params.amount0Min;
         lastDepositMin1=params.amount1Min;
         // Match real NonfungiblePositionManager semantics: it consumes no more
