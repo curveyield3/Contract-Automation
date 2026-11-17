@@ -14,7 +14,7 @@ const OUT=".omni-v8-build/live-fork-evidence-v8.json";
 // Additional user-approved target protocols: only existing harness, no new workflow.
 const EXTENDED_FIVE=[
  {name:"StakeDAO",market:"StakeDAO USDC V2 ERC4626",target:"0x8EDCC305E633d29BFB383872e79401c506cE9E6f",asset:"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",holder:"0x55fe002aeff02f77364de339a1292923a15844b8",units:6,mode:1},
- {name:"Convex",market:"Convex BaseRewardPool cvxCRV rewards",target:"0x3Fe65692bfCD0e6CF84cB1E7d24108E434A7587e",asset:"0x62b9c7356A2Dc64a1969e19C23e4f579F9810Aa7",holder:null,units:18,mode:1},
+ {name:"Convex",market:"Convex BaseRewardPool cvxCRV rewards",target:"0x3Fe65692bfCD0e6CF84cB1E7d24108E434A7587e",asset:"0x62b9c7356a2dc64a1969e19c23e4f579f9810aa7",holder:null,units:18,mode:1},
  {name:"Fraxlend",market:"Fraxlend V2 sUSDe / FRAX lending",target:"0xb5ae5b75c0df5632c572a657109375646ce66f90",asset:"0x853d955acef822db058eb8505911ed77f175b99e",holder:"0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B",units:18,mode:1},
  {name:"CurveLend",market:"Curve LlamaLend V2 market 0 crvUSD",target:"0x2b5a321c3cb1f33e1abecd047c2649d0b4c47eba",asset:"0xf939e0a03fb07f59a73314e73794be0e57ac1b4e",holder:"0x4dece678ceceb27446b35c672dc7d61f30bad69e",units:18,mode:1},
  {name:"Pendle",market:"Pendle SY USD3 active mainnet",target:"0xeA3BC608F32847B97965C5e1648BDFCd4C2C40d0",asset:"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",holder:"0x55fe002aeff02f77364de339a1292923a15844b8",units:6,mode:1}
@@ -575,12 +575,14 @@ async function extendedFiveTrial(spec) {
    await vault.allocate(ad,dat,0,{gasLimit:9_000_000});
    fail(false,"UNFUNDED_CONVEX_MODE_UNEXPECTEDLY_ACCEPTED");
   }
-  await tx("real native protocol investment",vault.allocate(ad,dat,100n*scale,{gasLimit:9_000_000}),scope);
-  const invested=await adapter.positionAssets(1,spec.target,HASH,ZERO);
-  result.invested=invested;
-  fail(invested>0n,"NO_ACTIVE_POSITION");
-  const matched=await vault.allocation(key);
-  fail(matched===invested,"EXTENDED_CAP_ALLOCATION_MISMATCH");
+  const investedReceipt=await tx("real native protocol investment",vault.allocate(ad,dat,100n*scale,{gasLimit:9_000_000}),scope);
+  const positionAtBlock=await adapter.positionAssets(1,spec.target,HASH,ZERO,{blockTag:investedReceipt.blockNumber});
+  const capAtBlock=await vault.allocation(key,{blockTag:investedReceipt.blockNumber});
+  result.invested=positionAtBlock;
+  result.allocationAtDepositBlock=capAtBlock;
+  fail(positionAtBlock>0n,"NO_ACTIVE_POSITION");
+  fail(capAtBlock===positionAtBlock,"EXTENDED_CAP_ALLOCATION_MISMATCH_AT_RECEIPT_BLOCK");
+  const invested=positionAtBlock;
   await timeJump(30);
   if(spec.name==="Fraxlend"){
    const pair=new ethers.Contract(spec.target,["function addInterest()"],signer);
