@@ -1,0 +1,122 @@
+{
+  "version": "v10",
+  "network": "fraxtal",
+  "chainId": 252,
+  "repository": "curveyield3/Contract-Automation",
+  "branch": "morpho-fraxtal-compile-v1",
+  "previousManifest": "github-native-sim/morpho-fraxtal-v1/fraxtal-irm-deployment-manifest-v9.json",
+  "factory": {
+    "name": "CurveYieldOmniIRMFactoryV2",
+    "address": "0x1ccd1b85b720f59efe1a485a0f1249c122bd1e77",
+    "explorer": "https://fraxscan.com/address/0x1ccd1b85b720f59efe1a485a0f1249c122bd1e77#code",
+    "creationTransaction": "0xa77a972bca952fa9824b2edbe642ac090611e0f5be5075afa89a11fabb74d289",
+    "transactionNonce": 89,
+    "receiptSuccess": true,
+    "receiptBlock": "0x29fe119",
+    "gasUsedHex": "0x6fd423",
+    "deployedRuntimeBytes": 1316,
+    "creationCodeBytes": 33460,
+    "creationCodeIncludesConstructorArgs": true,
+    "compiledCreationBytes": 33428,
+    "constructorArgs": [
+      "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0"
+    ],
+    "verifiedSource": true,
+    "sourcePublicationConfirmed": true,
+    "verifiedContractName": "CurveYieldOmniIRMFactoryV2",
+    "compiler": "v0.8.30+commit.73712a01",
+    "sourceFile": "github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV2.sol",
+    "originalHeader": "CurveYield Extended Contract Header v48",
+    "governance": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+    "morpho": "0xcce2862aed7f2248063c3dcf6906582166c2b6ca",
+    "existingFactoryDependencies": false,
+    "templates": 6,
+    "externalUserEntry": "create(uint8,bytes)"
+  },
+  "creationCodeStores": [
+    {
+      "templateId": 0,
+      "template": "Collateral Yield",
+      "address": "0xce466790098c79927bbe0d7bcb88d152c2ab29e1",
+      "codeBytes": 5399,
+      "verifiedByEthGetCodeNonempty": true,
+      "selfDeployedDuringOmniConstructor": true
+    },
+    {
+      "templateId": 1,
+      "template": "Euler Utilization",
+      "address": "0x8d86aeaf938d521becb8edf5cd8555ba0ca5ed79",
+      "codeBytes": 3970,
+      "verifiedByEthGetCodeNonempty": true,
+      "selfDeployedDuringOmniConstructor": true
+    },
+    {
+      "templateId": 2,
+      "template": "Linear Utilization",
+      "address": "0x7c76eff85e2993696d1e9027ee6ee55491059166",
+      "codeBytes": 3368,
+      "verifiedByEthGetCodeNonempty": true,
+      "selfDeployedDuringOmniConstructor": true
+    },
+    {
+      "templateId": 3,
+      "template": "Immutable Static",
+      "address": "0x5053ca1ca518718630ec97d1c955b8aaa08264d0",
+      "codeBytes": 1445,
+      "verifiedByEthGetCodeNonempty": true,
+      "selfDeployedDuringOmniConstructor": true
+    },
+    {
+      "templateId": 4,
+      "template": "Governed Static",
+      "address": "0x09f776e9ec5add4ffdb1fec0493423907573bf98",
+      "codeBytes": 6021,
+      "verifiedByEthGetCodeNonempty": true,
+      "selfDeployedDuringOmniConstructor": true
+    },
+    {
+      "templateId": 5,
+      "template": "Trigger Master",
+      "address": "0x738e731e8920efbf0ab37da347a3bddace47fc8c",
+      "codeBytes": 10478,
+      "verifiedByEthGetCodeNonempty": true,
+      "selfDeployedDuringOmniConstructor": true
+    }
+  ],
+  "compiled": {
+    "workflowRun": "https://github.com/curveyield3/Contract-Automation/actions/runs/43993146695",
+    "workflowId": 43993146695,
+    "buildStatus": "success",
+    "optimizer": 200,
+    "evmVersion": "cancun",
+    "compilerVersion": "v0.8.30+commit.73712a01",
+    "runtimeLimit": 24576,
+    "initcodeLimit": 49152,
+    "optimizedIRMSource": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV7.sol",
+    "baselineIRMSource": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol",
+    "masterIRMSource": "github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol",
+    "totalIRMsRuntimeSavingsBytes": 417
+  },
+  "safeApproval": {
+    "safe": "0x47623c62f281807d615eeb4a2ceee9d97f9d3c49",
+    "nonce": "3",
+    "hash": "0x38c2babdc627433e181e47afbc9fd50f5503a2a820df41b026580a78683b95d3",
+    "action": "CurveYieldMorphoOwnerV3.setFactory(0x1ccd1b85b720f59efe1a485a0f1249c122bd1e77,true)",
+    "calldata": "0x71013c100000000000000000000000001ccd1b85b720f59efe1a485a0f1249c122bd1e770000000000000000000000000000000000000000000000000000000000000001",
+    "serviceAccepted": true,
+    "queueVerified": true,
+    "executed": false,
+    "approvedOnChain": false,
+    "requiresOwnerApproval": true
+  },
+  "tests": {
+    "created": false,
+    "executed": false,
+    "forkSimulations": false
+  },
+  "notes": [
+    "Deployed factory and all six bytecode stores exist on-chain. Direct-to-Morpho IRM enabling will revert until the Safe approval transaction executes.",
+    "No new logic or tests were added beyond the previously compiled V2. Users submit exact constructor arguments for the selected template.",
+    "Source verification independently confirmed by explorer inspection."
+  ]
+}
