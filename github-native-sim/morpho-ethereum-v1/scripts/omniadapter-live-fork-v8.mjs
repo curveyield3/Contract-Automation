@@ -12,21 +12,21 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { ethers } from "ethers";
 const OUT=".omni-v8-build/live-fork-evidence-v8.json";
 const RPC="http://127.0.0.1:8545"; // Hard boundary: all writes LOCAL ONLY.
-const USDC="0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
-const WHALE="0x55FE002aefF02F77364de339a1292923A15844B8";
-const AAVE="0x87870Bca3F3fD6335C3F4ce8392D69350B4fa4E2";
-const SPARK="0xC13e21B648A5Ee794902342038FF3aDAB66BE987";
-const COMET="0xC3d688B66703497DAA19211EEdff47f25384cdc3";
-const FLUID="0x9Fb7b4477576Fe5B32be4C1843aFB1e55F251B33";
-const YEARNV3="0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204";
-const YEARNV2="0x5f18C75AbDAe578b483E5F43f12a39cF75b973a9";
+const USDC="0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+const WHALE="0x55fe002aeff02f77364de339a1292923a15844b8";
+const AAVE="0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2";
+const SPARK="0xc13e21b648a5ee794902342038ff3adab66be987";
+const COMET="0xc3d688b66703497daa19211eedff47f25384cdc3";
+const FLUID="0x9fb7b4477576fe5b32be4c1843afb1e55f251b33";
+const YEARNV3="0xbe53a109b494e5c9f97b9cd39fe969be68bf6204";
+const YEARNV2="0x5f18c75abdae578b483e5f43f12a39cf75b973a9";
 const EULER="0x797dd80692c3b2dadabce8e30c07fde5307d48a9";
 const MORPHOV1="0xbeef01735c132ada46aa9aa4c54623caa92a64cb";
-const MORPHOBLUE="0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
+const MORPHOBLUE="0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb";
 const MORPHOID="0x94b823e6bd8ea533b4e33fbc307faea0b307301bc48763acc4d4aa4def7636cd";
-const WETH="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+const WETH="0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
 const BLUE_ORACLE="0x0f948cba8231db7898ef36a4212581ad7b1b4580";
-const BLUE_IRM="0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC";
+const BLUE_IRM="0x870ac11d48b15db9a138cf899d20f13f79ba00bc";
 const MAX_RATE=2000000000000000000n / (365n*86400n);
 const WAD=1000000000000000000n;
 const U=1000000n;
@@ -155,8 +155,8 @@ async function cap(ctx,t){
  const setRel=vault.interface.encodeFunctionData("increaseRelativeCap",[idData,WAD]);
  await tx("submit relative cap "+t.name,vault.submit(setRel),scope);
  await tx("set relative cap "+t.name,vault.increaseRelativeCap(idData,WAD),scope);
- const caps=await vault.caps(key);
- fail(caps.absoluteCap===abs&&caps.relativeCap===WAD,"CAP_SET_FAILED");
+ const [capAbs,capRel]=await Promise.all([vault.absoluteCap(key),vault.relativeCap(key)]);
+ fail(capAbs===abs&&capRel===WAD,"CAP_SET_FAILED");
  return key;
 }
 async function allocate(ctx,t,amount){
