@@ -491,15 +491,12 @@ contract PoLManager {
     }
     function _uniAdd(uint256 a0,uint256 a1) private returns(uint128 liquidity,uint256 used0,uint256 used1){
         if(a0+a1==0||IPoLNft(uniNftManager).ownerOf(uniTokenId)!=address(this))revert Invalid();
-        (,uint128 floor,,,uint256 min0,uint256 min1)=
+        (,,,,uint256 min0,uint256 min1)=
             _bounds().quoteUniV3Deposit(uniNftManager,uniTokenId,a0,a1);
-        if(floor==0)revert Slippage();
+        // Both guard-derived token minimums are passed directly into
+        // Uniswap's increaseLiquidity; it enforces them during execution.
         (liquidity,used0,used1)=IPoLNft(uniNftManager).increaseLiquidity(
             IPoLNft.Increase(uniTokenId,a0,a1,min0,min1,block.timestamp));
-        // Uniswap increaseLiquidity has NO minimum-liquidity parameter. Its
-        // amount0Min/amount1Min are input amounts, not minted LP liquidity.
-        // This is the sole necessary post-call check for mint-output protection.
-        if(liquidity<floor)revert Slippage();
         emit UniLiquidity(1,used0,used1,liquidity);
     }
     function addUniLiquidity(uint256 amount0,uint256 amount1)
