@@ -93,8 +93,8 @@ async function main(){
  }
  await call("revenueVault","setStrategy",[ADDRS.revenueStrategy]);
  await call("locker","setMarketplaceOperator",[true]);
- const stages=[BATCH.slice(0,4),BATCH.slice(4,7),BATCH.slice(7)];
- requireBool(stages.length===3 && stages[0].length===4 && stages[1].length===3 && stages[2].length>=3,"staging invariant");
+ const stages=[BATCH.slice(0,3),BATCH.slice(3,7),BATCH.slice(7)];
+ requireBool(stages.length===3 && stages[0].length===3 && stages[1].length===4 && stages[2].length>=3,"staging invariant");
  requireBool(stages[0].every(x=>x.label.startsWith("deploy:")) && stages[1].every(x=>x.label.startsWith("deploy:")) && stages[2].slice(0,2).every(x=>x.label.startsWith("deploy:")),"deployment order invariant");
  const manifests=[];
  for(let k=0;k<stages.length;k++){
