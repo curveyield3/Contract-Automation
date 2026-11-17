@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-/// @title CurveYield Protected Morpho Vault V2 Controller v6
+/// @title CurveYield Protected Morpho Vault V2 Controller v7
 /// @notice Standalone, immutable per-vault controller with CurveYield fees capped on-chain.
 /// @dev Operator administers strategies within an allowlist. CurveYield governance can
 ///      ONLY schedule fee-rate changes (90-day delay), rotate protocol recipient and
@@ -18,6 +18,8 @@ interface IVaultV2CY {
     function asset() external view returns (address);
     function performanceFee() external view returns (uint96);
     function performanceFeeRecipient() external view returns (address);
+    function managementFee() external view returns (uint96);
+    function managementFeeRecipient() external view returns (address);
     function totalSupply() external view returns (uint256);
     function balanceOf(address account) external view returns (uint256);
     function timelock(bytes4 selector) external view returns (uint256);
@@ -33,15 +35,47 @@ interface IVaultV2CY {
     function abdicate(bytes4 selector) external;
     function setPerformanceFee(uint256 newPerformanceFee) external;
     function setPerformanceFeeRecipient(address recipient) external;
+    function setManagementFee(uint256 newFeePerSecondWad) external;
+    function setManagementFeeRecipient(address recipient) external;
     function accrueInterest() external;
     function transfer(address recipient, uint256 shares) external returns (bool);
 }
 
-/// @notice Owns/curates one Morpho V2 vault, receives fee shares and distributes them.
-/// @dev No splitter, no proxy, no general-purpose governance call and no vault migration.
+/// @notice Minimal, non-discretionary custody of ONE category of Morpho fee shares.
+/// @dev We deploy the SAME contract twice, once per independent Morpho fee category.
+///      It has no upgradeability, configuration, public withdrawals or fee math.
+contract CurveYieldFeeShareCustody {
+    IVaultV2CY public immutable vault;
+    address public immutable controller;
+
+    error Unauthorized();
+    error InvalidAddress();
+    error TransferFailed();
+
+    constructor(address _vault) {
+        if (_vault == address(0)) revert InvalidAddress();
+        vault = IVaultV2CY(_vault);
+        controller = msg.sender;
+    }
+
+    function sendShares(address recipient, uint256 amount) external {
+        if (msg.sender != controller) revert Unauthorized();
+        if (!vault.transfer(recipient, amount)) revert TransferFailed();
+    }
+}
+
+/// @notice Owns/curates one Morpho V2 vault and splits BOTH kinds of fee shares.
+/// @dev One controller handles fee math, two tiny custody instances hold separate streams.
+///      No general-purpose governance call, vault migration, proxy or replacement.
 contract CurveYieldProtectedVaultController {
     uint256 public constant DEFAULT_FLAT_FEE_WAD = 2e15; // 0.20% of yield.
-    uint256 public constant MAX_FLAT_FEE_WAD = 1e16; // 1.00% of yield.
+    uint256 public constant MAX_FLAT_FEE_WAD = 2e16; // 2.00% of yield.
+    uint256 public constant DEFAULT_FLAT_MANAGEMENT_FEE_WAD = 5e14; // 0.05% of TVL APR.
+    uint256 public constant MAX_FLAT_MANAGEMENT_FEE_WAD = 25e14; // 0.25% of TVL APR.
+    uint256 public constant DEFAULT_MANAGEMENT_SURCHARGE_BPS = 200; // 2% of operator management fee.
+    uint256 public constant MAX_MANAGEMENT_SURCHARGE_BPS = 1000; // 10% of operator management fee.
+    uint256 public constant MAX_MANAGEMENT_FEE_ANNUAL_WAD = 5e16; // Morpho: 5% TVL APR.
+    uint256 public constant YEAR = 365 days;
     uint256 public constant DEFAULT_OPERATOR_SURCHARGE_BPS = 200; // 2% of operator performance fee.
     uint256 public constant MAX_OPERATOR_SURCHARGE_BPS = 1000; // 10% of operator performance fee.
     uint256 public constant BPS = 10_000;
@@ -56,6 +90,12 @@ contract CurveYieldProtectedVaultController {
     address public protocolRecipient;
     address public operatorRecipient;
     IVaultV2CY public vault;
+    CurveYieldFeeShareCustody public performanceFeeCustody;
+    CurveYieldFeeShareCustody public managementFeeCustody;
+    uint256 public operatorManagementFeeAnnualWad;
+    uint256 public flatManagementFeeAnnualWad = DEFAULT_FLAT_MANAGEMENT_FEE_WAD;
+    uint256 public managementSurchargeBps = DEFAULT_MANAGEMENT_SURCHARGE_BPS;
+    uint256 public managementFeeRemainder;
     uint256 public operatorFeeWad;
     uint256 public flatProtocolFeeWad = DEFAULT_FLAT_FEE_WAD;
     uint256 public operatorSurchargeBps = DEFAULT_OPERATOR_SURCHARGE_BPS;
@@ -66,18 +106,25 @@ contract CurveYieldProtectedVaultController {
     struct PendingFeeRates {
         uint256 flatFeeWad;
         uint256 surchargeBps;
+        uint256 flatManagementFeeAnnualWad;
+        uint256 managementSurchargeBps;
         uint256 executableAt;
     }
     PendingFeeRates public pendingFeeRates;
 
     event ProtectedVaultCreated(address indexed vault, address indexed operator,
         address indexed protocolRecipient, address asset, uint256 operatorFeeWad);
-    event Distributed(uint256 protocolShares, uint256 operatorShares);
+    event Distributed(uint256 performanceProtocolShares, uint256 performanceOperatorShares,
+        uint256 managementProtocolShares, uint256 managementOperatorShares);
     event OperatorFeeUpdated(uint256 oldOperatorFeeWad, uint256 newOperatorFeeWad, uint256 newTotalFeeWad);
-    event FeeRatesScheduled(uint256 flatFeeWad, uint256 surchargeBps, uint256 executableAt);
+    event OperatorManagementFeeUpdated(uint256 oldAnnualWad, uint256 newAnnualWad, uint256 totalAnnualWad);
+    event FeeRatesScheduled(uint256 flatFeeWad, uint256 surchargeBps,
+        uint256 flatManagementAnnualWad, uint256 managementSurchargeBps, uint256 executableAt);
     event FeeRatesCancelled();
     event FeeRatesUpdated(uint256 oldFlatFeeWad, uint256 oldSurchargeBps,
-        uint256 newFlatFeeWad, uint256 newSurchargeBps);
+        uint256 newFlatFeeWad, uint256 newSurchargeBps,
+        uint256 oldFlatManagementAnnualWad, uint256 oldManagementSurchargeBps,
+        uint256 newFlatManagementAnnualWad, uint256 newManagementSurchargeBps);
     event GovernanceTransferred(address indexed previousGovernance, address indexed newGovernance);
     event ProtocolFeeRecipientChanged(address indexed previousRecipient, address indexed newRecipient);
     event OperatorFeeRecipientChanged(address indexed previousRecipient, address indexed newRecipient);
@@ -156,6 +203,32 @@ contract CurveYieldProtectedVaultController {
         return totalFeeFor(operatorFeeWad);
     }
 
+    /// @notice Annualized WAD fee rates; Morpho accepts a per-second WAD rate.
+    function _managementAnnualFor(uint256 operatorAnnualWad, uint256 flatAnnualWad, uint256 surchargeBps)
+        internal pure returns (uint256)
+    {
+        if (flatAnnualWad > MAX_FLAT_MANAGEMENT_FEE_WAD ||
+            surchargeBps > MAX_MANAGEMENT_SURCHARGE_BPS ||
+            operatorAnnualWad > MAX_MANAGEMENT_FEE_ANNUAL_WAD) revert InvalidFee();
+        uint256 annual = flatAnnualWad + operatorAnnualWad +
+            (operatorAnnualWad * surchargeBps) / BPS;
+        if (annual > MAX_MANAGEMENT_FEE_ANNUAL_WAD) revert InvalidFee();
+        return annual;
+    }
+
+    function managementAnnualFor(uint256 operatorAnnualWad) public view returns (uint256) {
+        return _managementAnnualFor(operatorAnnualWad, flatManagementFeeAnnualWad, managementSurchargeBps);
+    }
+
+    function managementFeePerSecondFor(uint256 operatorAnnualWad) public view returns (uint256) {
+        return managementAnnualFor(operatorAnnualWad) / YEAR;
+    }
+
+    function managementProtocolFeeAnnualWad() public view returns (uint256) {
+        return flatManagementFeeAnnualWad +
+            (operatorManagementFeeAnnualWad * managementSurchargeBps) / BPS;
+    }
+
     /// @notice Create the only vault that this controller can manage.
     /// @dev Creates the official Morpho V2 vault and configures this controller as both
     ///      owner+curator and performance fee recipient, atomically.
@@ -177,14 +250,21 @@ contract CurveYieldProtectedVaultController {
         if (!morphoFactory.isVaultV2(vaultAddress)) revert DeploymentFailed();
         IVaultV2CY v = IVaultV2CY(vaultAddress);
         if (v.owner() != address(this) || v.asset() != asset || v.curator() != address(0) ||
-            v.totalSupply() != 0 || v.performanceFee() != 0 ||
+            v.totalSupply() != 0 || v.performanceFee() != 0 || v.managementFee() != 0 ||
             v.performanceFeeRecipient() != address(0) ||
+            v.managementFeeRecipient() != address(0) ||
             v.timelock(IVaultV2CY.setPerformanceFee.selector) != 0 ||
             v.timelock(IVaultV2CY.setPerformanceFeeRecipient.selector) != 0 ||
+            v.timelock(IVaultV2CY.setManagementFee.selector) != 0 ||
+            v.timelock(IVaultV2CY.setManagementFeeRecipient.selector) != 0 ||
             v.abdicated(IVaultV2CY.setPerformanceFee.selector) ||
-            v.abdicated(IVaultV2CY.setPerformanceFeeRecipient.selector)) revert UnsafeVault();
+            v.abdicated(IVaultV2CY.setPerformanceFeeRecipient.selector) ||
+            v.abdicated(IVaultV2CY.setManagementFee.selector) ||
+            v.abdicated(IVaultV2CY.setManagementFeeRecipient.selector)) revert UnsafeVault();
 
         vault = v;
+        performanceFeeCustody = new CurveYieldFeeShareCustody(vaultAddress);
+        managementFeeCustody = new CurveYieldFeeShareCustody(vaultAddress);
         operatorFeeWad = initialOperatorFeeWad;
         operatorRecipient = _operatorRecipient;
         v.setName(name);
@@ -192,7 +272,7 @@ contract CurveYieldProtectedVaultController {
         v.setCurator(address(this));
 
         bytes memory recipientData = abi.encodeCall(
-            IVaultV2CY.setPerformanceFeeRecipient, (address(this))
+            IVaultV2CY.setPerformanceFeeRecipient, (address(performanceFeeCustody))
         );
         v.submit(recipientData);
         v.setPerformanceFeeRecipient(address(this));
@@ -200,43 +280,70 @@ contract CurveYieldProtectedVaultController {
         v.submit(feeData);
         v.setPerformanceFee(total);
 
+        bytes memory managementRecipientAction = abi.encodeCall(
+            IVaultV2CY.setManagementFeeRecipient, (address(managementFeeCustody))
+        );
+        v.submit(managementRecipientAction);
+        v.setManagementFeeRecipient(address(managementFeeCustody));
+
+        uint256 initialManagementRate = managementAnnualFor(0) / YEAR;
+        bytes memory managementFeeAction = abi.encodeCall(
+            IVaultV2CY.setManagementFee, (initialManagementRate)
+        );
+        v.submit(managementFeeAction);
+        v.setManagementFee(initialManagementRate);
+
         // Ownership/curatorship remain at this immutable controller.
         // Do not abdicate fee-setting: governance and operator need bounded fee adjustments.
-        if (v.performanceFeeRecipient() != address(this) ||
-            v.performanceFee() != total || v.curator() != address(this) ||
-            v.owner() != address(this)) revert UnsafeVault();
+        if (v.performanceFeeRecipient() != address(performanceFeeCustody) ||
+            v.managementFeeRecipient() != address(managementFeeCustody) ||
+            v.performanceFee() != total || v.managementFee() != initialManagementRate ||
+            v.curator() != address(this) || v.owner() != address(this)) revert UnsafeVault();
 
         initialized = true;
         emit ProtectedVaultCreated(vaultAddress, operator, protocolRecipient, asset, initialOperatorFeeWad);
     }
 
-    /// @notice Distribute accrued Morpho fee shares, under the CURRENT recorded fee split.
-    /// @dev External transfers of vault shares to this contract are treated as fee shares.
-    function distribute() external ready nonReentrant returns (uint256 protocolShares, uint256 operatorShares) {
+    /// @notice Permissionless distribution of both independently accrued fee-share streams.
+    /// @dev Morpho can mint both kinds during unrelated transactions, so they have
+    ///      distinct custody addresses. Controller alone calculates and directs payouts.
+    function distribute() external ready nonReentrant
+        returns (uint256 protocolShares, uint256 operatorShares)
+    {
         return _distribute();
+    }
+
+    function _splitShares(uint256 shares, uint256 totalRate, uint256 protocolRate, uint256 carry)
+        internal pure returns (uint256 protocolShares, uint256 operatorShares, uint256 newCarry)
+    {
+        if (shares == 0) return (0, 0, carry);
+        if (totalRate == 0) return (0, shares, 0);
+        uint256 numerator = (shares % totalRate) * protocolRate + carry;
+        protocolShares = (shares / totalRate) * protocolRate + numerator / totalRate;
+        newCarry = numerator % totalRate;
+        operatorShares = shares - protocolShares;
     }
 
     function _distribute() internal returns (uint256 protocolShares, uint256 operatorShares) {
         vault.accrueInterest();
-        uint256 shares = vault.balanceOf(address(this));
-        if (shares == 0) return (0, 0);
-
-        uint256 total = totalFeeFor(operatorFeeWad);
-        uint256 protocolPortion = protocolFeeWad();
-        if (total == 0) {
-            // No fees are enabled. Any externally transferred shares belong to the operator.
-            operatorShares = shares;
-        } else {
-            // Quotient/remainder avoids overflow on large share balances.
-            uint256 numerator = (shares % total) * protocolPortion + feeRemainder;
-            protocolShares = (shares / total) * protocolPortion + numerator / total;
-            feeRemainder = numerator % total;
-            operatorShares = shares - protocolShares;
-        }
-
-        if (protocolShares != 0 && !vault.transfer(protocolRecipient, protocolShares)) revert TransferFailed();
-        if (operatorShares != 0 && !vault.transfer(operatorRecipient, operatorShares)) revert TransferFailed();
-        emit Distributed(protocolShares, operatorShares);
+        (uint256 perfProtocol, uint256 perfOperator, uint256 perfCarry) = _splitShares(
+            vault.balanceOf(address(performanceFeeCustody)),
+            totalFeeFor(operatorFeeWad), protocolFeeWad(), feeRemainder
+        );
+        feeRemainder = perfCarry;
+        (uint256 mgmtProtocol, uint256 mgmtOperator, uint256 mgmtCarry) = _splitShares(
+            vault.balanceOf(address(managementFeeCustody)),
+            managementAnnualFor(operatorManagementFeeAnnualWad),
+            managementProtocolFeeAnnualWad(), managementFeeRemainder
+        );
+        managementFeeRemainder = mgmtCarry;
+        if (perfProtocol != 0) performanceFeeCustody.sendShares(protocolRecipient, perfProtocol);
+        if (perfOperator != 0) performanceFeeCustody.sendShares(operatorRecipient, perfOperator);
+        if (mgmtProtocol != 0) managementFeeCustody.sendShares(protocolRecipient, mgmtProtocol);
+        if (mgmtOperator != 0) managementFeeCustody.sendShares(operatorRecipient, mgmtOperator);
+        emit Distributed(perfProtocol, perfOperator, mgmtProtocol, mgmtOperator);
+        protocolShares = perfProtocol + mgmtProtocol;
+        operatorShares = perfOperator + mgmtOperator;
     }
 
     function _setVaultPerformanceFee(uint256 newTotal) internal {
@@ -248,49 +355,80 @@ contract CurveYieldProtectedVaultController {
         if (vault.performanceFee() != newTotal) revert UnsafeVault();
     }
 
+    function _setVaultManagementFee(uint256 annualWad) internal {
+        bytes4 selector = IVaultV2CY.setManagementFee.selector;
+        if (vault.timelock(selector) != 0 || vault.abdicated(selector) ||
+            vault.managementFeeRecipient() != address(managementFeeCustody)) revert UnsafeVault();
+        uint256 perSecond = annualWad / YEAR;
+        bytes memory action = abi.encodeCall(IVaultV2CY.setManagementFee, (perSecond));
+        vault.submit(action);
+        vault.setManagementFee(perSecond);
+        if (vault.managementFee() != perSecond) revert UnsafeVault();
+    }
+
     function _rebaseFeeRemainder(uint256 oldTotal, uint256 newTotal) internal {
         feeRemainder = oldTotal == 0 ? 0 : (feeRemainder * newTotal) / oldTotal;
     }
 
-    /// @notice Governance-only proposal: both rate components are subject to a full
-    ///         90-day delay, irrespective of whether rates increase or decrease.
-    function scheduleProtocolFeeRates(uint256 newFlatFeeWad, uint256 newSurchargeBps)
-        external onlyGovernance ready
-    {
-        if (pendingFeeRates.executableAt != 0) revert FeeChangePending();
-        _totalFeeFor(0, newFlatFeeWad, newSurchargeBps); // Validate both immutable caps.
-        pendingFeeRates = PendingFeeRates({
-            flatFeeWad: newFlatFeeWad,
-            surchargeBps: newSurchargeBps,
-            executableAt: block.timestamp + FEE_CHANGE_DELAY
-        });
-        emit FeeRatesScheduled(newFlatFeeWad, newSurchargeBps, pendingFeeRates.executableAt);
+    function _rebaseManagementRemainder(uint256 oldTotal, uint256 newTotal) internal {
+        managementFeeRemainder = oldTotal == 0 ? 0 : (managementFeeRemainder * newTotal) / oldTotal;
     }
 
-    /// @notice Governance may cancel pending or matured fee changes.
+    /// @notice Schedule four CurveYield fee components behind one immutable 90-day delay.
+    /// @dev To leave any component unchanged, supply its current stored value.
+    function scheduleProtocolFeeRates(
+        uint256 newFlatPerformanceWad,
+        uint256 newPerformanceSurchargeBps,
+        uint256 newFlatManagementAnnualWad,
+        uint256 newManagementSurchargeBps
+    ) external onlyGovernance ready {
+        if (pendingFeeRates.executableAt != 0) revert FeeChangePending();
+        _totalFeeFor(0, newFlatPerformanceWad, newPerformanceSurchargeBps);
+        _managementAnnualFor(0, newFlatManagementAnnualWad, newManagementSurchargeBps);
+        pendingFeeRates = PendingFeeRates({
+            flatFeeWad: newFlatPerformanceWad,
+            surchargeBps: newPerformanceSurchargeBps,
+            flatManagementFeeAnnualWad: newFlatManagementAnnualWad,
+            managementSurchargeBps: newManagementSurchargeBps,
+            executableAt: block.timestamp + FEE_CHANGE_DELAY
+        });
+        emit FeeRatesScheduled(newFlatPerformanceWad, newPerformanceSurchargeBps,
+            newFlatManagementAnnualWad, newManagementSurchargeBps, pendingFeeRates.executableAt);
+    }
+
+    /// @notice Governance can cancel proposals before or after maturity but before execution.
     function cancelProtocolFeeRates() external onlyGovernance {
         if (pendingFeeRates.executableAt == 0) revert InvalidOperation();
         delete pendingFeeRates;
         emit FeeRatesCancelled();
     }
 
-    /// @notice Permissionless execution of the scheduled fee change after >=90 days.
-    /// @dev Accrue/distribute under prior rates, then update Morpho rate and stored split
-    ///      atomically. A failed execution leaves the proposal available for retry.
+    /// @notice Anyone may apply a matured proposal. Failed calls can be retried.
+    /// @dev Fully settles fees at old rates before changing either Morpho fee setting.
     function executeProtocolFeeRates() external ready nonReentrant {
         PendingFeeRates memory next = pendingFeeRates;
         if (next.executableAt == 0 || block.timestamp < next.executableAt) revert FeeChangeNotReady();
-        uint256 newTotal = _totalFeeFor(operatorFeeWad, next.flatFeeWad, next.surchargeBps);
-        uint256 oldTotal = totalFeeFor(operatorFeeWad);
+        uint256 newPerfTotal = _totalFeeFor(operatorFeeWad, next.flatFeeWad, next.surchargeBps);
+        uint256 newMgmtTotal = _managementAnnualFor(operatorManagementFeeAnnualWad,
+            next.flatManagementFeeAnnualWad, next.managementSurchargeBps);
+        uint256 oldPerfTotal = totalFeeFor(operatorFeeWad);
+        uint256 oldMgmtTotal = managementAnnualFor(operatorManagementFeeAnnualWad);
         _distribute();
-        _setVaultPerformanceFee(newTotal);
-        _rebaseFeeRemainder(oldTotal, newTotal);
-        uint256 oldFlat = flatProtocolFeeWad;
-        uint256 oldSurcharge = operatorSurchargeBps;
+        _setVaultPerformanceFee(newPerfTotal);
+        _setVaultManagementFee(newMgmtTotal);
+        _rebaseFeeRemainder(oldPerfTotal, newPerfTotal);
+        _rebaseManagementRemainder(oldMgmtTotal, newMgmtTotal);
+        uint256 oldFlatPerf = flatProtocolFeeWad;
+        uint256 oldPerfBps = operatorSurchargeBps;
+        uint256 oldFlatMgmt = flatManagementFeeAnnualWad;
+        uint256 oldMgmtBps = managementSurchargeBps;
         flatProtocolFeeWad = next.flatFeeWad;
         operatorSurchargeBps = next.surchargeBps;
+        flatManagementFeeAnnualWad = next.flatManagementFeeAnnualWad;
+        managementSurchargeBps = next.managementSurchargeBps;
         delete pendingFeeRates;
-        emit FeeRatesUpdated(oldFlat, oldSurcharge, next.flatFeeWad, next.surchargeBps);
+        emit FeeRatesUpdated(oldFlatPerf, oldPerfBps, next.flatFeeWad, next.surchargeBps,
+            oldFlatMgmt, oldMgmtBps, next.flatManagementFeeAnnualWad, next.managementSurchargeBps);
     }
 
     /// @notice Operator controls its own portion of the vault performance fee.
@@ -325,6 +463,22 @@ contract CurveYieldProtectedVaultController {
         address previous = governance;
         governance = nextGovernance;
         emit GovernanceTransferred(previous, nextGovernance);
+    }
+
+    /// @notice Operator's annualized management fee, also charged in losses or flat returns.
+    /// @dev Hard-capped together with CurveYield's annualized TVL fee at Morpho's 5% limit.
+    function setOperatorManagementFee(uint256 newOperatorAnnualWad)
+        external onlyOperator ready nonReentrant
+    {
+        uint256 newTotal = managementAnnualFor(newOperatorAnnualWad);
+        uint256 oldAnnual = operatorManagementFeeAnnualWad;
+        if (oldAnnual == newOperatorAnnualWad) return;
+        uint256 oldTotal = managementAnnualFor(oldAnnual);
+        _distribute();
+        _setVaultManagementFee(newTotal);
+        _rebaseManagementRemainder(oldTotal, newTotal);
+        operatorManagementFeeAnnualWad = newOperatorAnnualWad;
+        emit OperatorManagementFeeUpdated(oldAnnual, newOperatorAnnualWad, newTotal);
     }
 
     function setOperatorFeeRecipient(address nextRecipient)
@@ -399,9 +553,7 @@ contract CurveYieldProtectedVaultController {
             selector == bytes4(keccak256("removeAdapter(address)")) ||
             selector == bytes4(keccak256("increaseAbsoluteCap(bytes,uint256)")) ||
             selector == bytes4(keccak256("increaseRelativeCap(bytes,uint256)")) ||
-            selector == bytes4(keccak256("setForceDeallocatePenalty(address,uint256)")) ||
-            selector == bytes4(keccak256("setManagementFee(uint256)")) ||
-            selector == bytes4(keccak256("setManagementFeeRecipient(address)"))) return;
+            selector == bytes4(keccak256("setForceDeallocatePenalty(address,uint256)"))) return;
 
         if (selector == bytes4(keccak256("increaseTimelock(bytes4,uint256)")) ||
             selector == bytes4(keccak256("decreaseTimelock(bytes4,uint256)"))) {
@@ -410,6 +562,8 @@ contract CurveYieldProtectedVaultController {
             // abdication (and never expose share/asset gates).
             if (target == IVaultV2CY.setPerformanceFee.selector ||
                 target == IVaultV2CY.setPerformanceFeeRecipient.selector ||
+                target == IVaultV2CY.setManagementFee.selector ||
+                target == IVaultV2CY.setManagementFeeRecipient.selector ||
                 target == IVaultV2CY.abdicate.selector ||
                 target == bytes4(keccak256("setReceiveSharesGate(address)")) ||
                 target == bytes4(keccak256("setSendSharesGate(address)")) ||
