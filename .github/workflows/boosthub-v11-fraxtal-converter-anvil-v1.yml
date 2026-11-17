@@ -1,99 +1,77 @@
-name: BoostHub v11 Fraxtal Converter Anvil Simulation v1
-
-# Only explicitly authorized execution; no test-on-push.
+name: BoostHub v51 Ethereum source-only compile v1
 on:
+  push:
+    branches: [boosthub-v51-safe-staging-v1]
+    paths:
+      - '.github/workflows/boosthub-v11-fraxtal-converter-anvil-v1.yml'
+      - 'github-native-sim/boosthub-fraxtal-v40/v51-essential-source-v1.tar.xz'
   workflow_dispatch:
-
 permissions:
-  contents: read
-
+  contents: write
 jobs:
-  fraxtal-converter-fork:
+  compile-v51:
+    name: Compile exact BoostHub v51 staking and strategies, no tests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          ref: main
-          persist-credentials: false
+          python-version: '3.12'
       - uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: stable
-      - name: Supply third-party dependencies within GitHub runner only
-        working-directory: github-native-sim/boosthub-v11-fraxtal-fork-v1
-        shell: bash
+          version: v1.7.1
+      - name: Install source and pinned compiler dependencies
+        working-directory: github-native-sim/boosthub-fraxtal-v40
         run: |
           set -euo pipefail
-          mkdir -p lib
-          git clone -q --depth=1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git lib/openzeppelin-contracts
-          git clone -q --depth=1 https://github.com/foundry-rs/forge-std.git lib/forge-std
+          tar -xJf v51-essential-source-v1.tar.xz
+          pip install vyper==0.4.3
+          npm install --prefix dependencies --ignore-scripts --no-audit --no-fund
           forge --version
-          git -C lib/openzeppelin-contracts rev-parse HEAD
-          git -C lib/forge-std rev-parse HEAD
-      - name: Verify Fraxtal upstream state before forking
-        shell: bash
-        env:
-          FRA_RPC: ${{ secrets.RPC_FRAXTAL }}
+          vyper --version
+      - name: Build Solidity and Vyper artifacts without running tests
+        working-directory: github-native-sim/boosthub-fraxtal-v40
         run: |
           set -euo pipefail
-          URL="${FRA_RPC:-}"
-          test -n "$URL" || { echo "::error::RPC_FRAXTAL secret required; no public RPC fallback"; exit 1; }
-          for i in 1 2 3; do
-            if chainid=$(cast chain-id --rpc-url "$URL" 2>/dev/null); then break; fi
-            sleep 4
-          done
-          test "${chainid:-}" = '252' || { echo "::error::Fraxtal RPC is unavailable or returned wrong chain"; exit 1; }
-          POOL=0x3df1658e3E76d14eF3C4d410829EA7575bB83B9B
-          echo "coin0: $(cast call "$POOL" 'coins(uint256)(address)' 0 --rpc-url "$URL")"
-          echo "coin1: $(cast call "$POOL" 'coins(uint256)(address)' 1 --rpc-url "$URL")"
-          (cast call "$POOL" 'price_oracle()(uint256)' --rpc-url "$URL" || cast call "$POOL" 'price_oracle(uint256)(uint256)' 0 --rpc-url "$URL") | tee fraxtal-ema-oracle-v1.txt
-          PIN="$(cast block-number --rpc-url "$URL")"
-          [[ "$PIN" =~ ^[0-9]+$ ]] && [ "$PIN" -gt 0 ]
-          HASH="$(cast block "$PIN" --field hash --rpc-url "$URL" | tr -d '\r\n')"
-          [[ "$HASH" =~ ^0x[0-9a-fA-F]{64}$ ]] || { echo "::error::Fraxtal historical block hash missing"; exit 1; }
-          echo "FRAXTAL_FORK_BLOCK=$PIN" >> "$GITHUB_ENV"
-          echo "FRAXTAL_FORK_HASH=$HASH" >> "$GITHUB_ENV"
-          echo "FRAXTAL_FORK_UPSTREAM=$URL" >> "$GITHUB_ENV"
-      - name: Start isolated Anvil Fraxtal fork
-        shell: bash
+          python tooling/make_staking_artifact.py
+          forge build --root . contracts/StrategyConvexBoostHubStakingV5.sol contracts/StrategyBoostHubChildV42.sol contracts/StrategyConvexFXNPool8V42.sol contracts/StrategyDualFXNMasterV42.sol contracts/BeefyVaultV7FixedV2.sol --force -vvv
+          python3 - <<'PY'
+          import json,pathlib
+          root=pathlib.Path('build/forge')
+          out={}
+          for name in ('StrategyConvexBoostHubStakingV5','StrategyBoostHubChildV42','StrategyConvexFXNPool8V42','StrategyDualFXNMasterV42','BeefyVaultV7FixedV2'):
+              files=list(root.rglob(name+'.json'))
+              if len(files)!=1: raise SystemExit('Missing or duplicate artifact '+name+': '+str(files))
+              a=json.loads(files[0].read_text())
+              bc=a['bytecode']['object']; deployed=a['deployedBytecode']['object']
+              assert bc.startswith('0x') and deployed.startswith('0x')
+              out[name]={'creationBytes':(len(bc)-2)//2,'runtimeBytes':(len(deployed)-2)//2,'artifact':str(files[0])}
+              if out[name]['runtimeBytes']>24576: raise SystemExit('Runtime EIP170 limit exceeded: '+name)
+          a=json.loads(pathlib.Path('artifacts/staking.json').read_text())
+          out['BoostHubStaking']={'creationBytes':(len(a['bytecode'])-2)//2,'runtimeBytes':(len(a['deployedBytecode'])-2)//2,'artifact':'artifacts/staking.json'}
+          if out['BoostHubStaking']['runtimeBytes']>24576: raise SystemExit('Staking runtime EIP170 limit exceeded')
+          pathlib.Path('build/v51-runtime-manifest-v1.json').write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
+          PY
+      - name: Commit compiled bytecode and sizes to source branch
         run: |
           set -euo pipefail
-          anvil --fork-url "$FRAXTAL_FORK_UPSTREAM" --fork-block-number "$FRAXTAL_FORK_BLOCK" --chain-id 252 --port 8545 > fraxtal-anvil-v1.log 2>&1 &
-          echo $! > .fraxtal-anvil.pid
-          for i in $(seq 1 90); do
-            if cid=$(cast chain-id --rpc-url http://127.0.0.1:8545 2>/dev/null); then
-              if [ "$cid" = '252' ]; then
-                  LOCAL_HASH="$(cast block "$FRAXTAL_FORK_BLOCK" --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
-                  test "${LOCAL_HASH,,}" = "${FRAXTAL_FORK_HASH,,}" || { echo "::error::Fraxtal fork historical hash mismatch"; exit 1; }
-                  echo "Fraxtal historical Anvil fork verified"; exit 0
-                fi
-            fi
-            sleep 2
-          done
-          echo '::error::Fraxtal Anvil fork did not come online'
-          tail -100 fraxtal-anvil-v1.log
-          exit 1
-      - name: Compile converter source and simulate on fork
-        working-directory: github-native-sim/boosthub-v11-fraxtal-fork-v1
-        env:
-          FRAXTAL_FORK_RPC: http://127.0.0.1:8545
-        shell: bash
-        run: |
-          set -o pipefail
-          forge test -vvv --match-path 'test/BoostHubV11FraxtalFork.t.sol' 2>&1 | tee "$GITHUB_WORKSPACE/boosthub-v11-fraxtal-simulation-v1.log"
-      - name: Archive simulation evidence
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f github-native-sim/boosthub-fraxtal-v40/artifacts/staking.json
+          git add -f github-native-sim/boosthub-fraxtal-v40/build/forge/
+          git add -f github-native-sim/boosthub-fraxtal-v40/build/v51-runtime-manifest-v1.json
+          git commit -m 'Preserve BoostHub v51 exact bytecode and runtime sizes'
+          git push origin HEAD:boosthub-v51-safe-staging-v1
+      - name: Upload compiled artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-v11-fraxtal-converter-sim-v1-${{ github.run_id }}
+          name: BoostHub-v51-Ethereum-Compiled-v1
           path: |
-            boosthub-v11-fraxtal-simulation-v1.log
-            fraxtal-ema-oracle-v1.txt
-            fraxtal-anvil-v1.log
+            github-native-sim/boosthub-fraxtal-v40/artifacts/staking.json
+            github-native-sim/boosthub-fraxtal-v40/build/forge/
+            github-native-sim/boosthub-fraxtal-v40/build/v51-runtime-manifest-v1.json
           if-no-files-found: warn
-          retention-days: 14
-      - name: Stop Anvil
-        if: always()
-        shell: bash
-        run: |
-          if [ -f .fraxtal-anvil.pid ]; then kill "$(cat .fraxtal-anvil.pid)" || true; fi
+          retention-days: 90
