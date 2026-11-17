@@ -322,6 +322,19 @@ contract CurveYieldOmniAdapterV4 {
         else revert UnsupportedMode();
     }
 
+    function _release(MarketRef storage m,uint256 assets,bytes memory extra) private {
+        if(assets<=m.credit) {
+            m.credit-=assets;
+            return;
+        }
+        uint256 needed=assets-m.credit;
+        uint256 beforeAssets=ICYV4Token(asset).balanceOf(address(this));
+        _withdraw(m,needed,extra);
+        uint256 received=ICYV4Token(asset).balanceOf(address(this))-beforeAssets;
+        if(received<needed)revert InsufficientAssets();
+        m.credit=m.credit+received-assets;
+    }
+
     function _response(bytes32 key,uint256 previous) private view returns(bytes32[] memory ids,int256 change) {
         uint256 current=_value(key);
         if(current>uint256(type(int256).max)||previous>uint256(type(int256).max))revert ValuationOverflow();
@@ -377,14 +390,7 @@ contract CurveYieldOmniAdapterV4 {
         else if(extra.length!=0)revert InvalidInput();
         if(assets<minAssets)revert InsufficientAssets();
         uint256 previous=ICYV4Parent(parentVault).allocation(_capId(key));
-        if(assets>m.credit){
-            uint256 needed=assets-m.credit;
-            uint256 beforeAssets=ICYV4Token(asset).balanceOf(address(this));
-            _withdraw(m,needed,extra);
-            uint256 received=ICYV4Token(asset).balanceOf(address(this))-beforeAssets;
-            if(received<needed)revert InsufficientAssets();
-            m.credit=m.credit+received-assets;
-        }else m.credit-=assets;
+        _release(m,assets,extra);
         (ids,change)=_response(key,previous);
         // Remove completely exited positions; cap/ownership rights stay in Vault V2.
         if(_value(key)==0){
