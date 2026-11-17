@@ -14,7 +14,7 @@ const OUT=".omni-v8-build/live-fork-evidence-v8.json";
 // Additional user-approved target protocols: only existing harness, no new workflow.
 const EXTENDED_FIVE=[
  {name:"StakeDAO",market:"StakeDAO USDC V2 ERC4626",target:"0x8EDCC305E633d29BFB383872e79401c506cE9E6f",asset:"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",holder:"0x55fe002aeff02f77364de339a1292923a15844b8",units:6,mode:1},
- {name:"Convex",market:"Aladdin aCRV ERC4626 autocompounding cvxCRV staked through Convex",target:"0x2b95A1Dcc3D405535f9ed33c219ab38E8d7e0884",asset:"0x62b9c7356a2dc64a1969e19c23e4f579f9810aa7",holder:"0xaa0C3f5F7DFD688C6E646F66CD2a6B66ACdbE434",units:18,mode:1},
+ {name:"Convex",market:"Aladdin aCRV ERC4626 autocompounding cvxCRV staked through Convex",target:"0x2b95A1Dcc3D405535f9ed33c219ab38E8d7e0884",asset:"0x62b9c7356a2dc64a1969e19c23e4f579f9810aa7",holder:"0x3Fe65692bfCD0e6CF84cB1E7d24108E434A7587e",units:18,mode:1},
  {name:"Fraxlend",market:"Fraxlend V2 sUSDe / FRAX lending",target:"0xb5ae5b75c0df5632c572a657109375646ce66f90",asset:"0x853d955acef822db058eb8505911ed77f175b99e",holder:"0xd632f22692FaC7611d2AA1C0D552930D43CAEd3B",units:18,mode:1},
  {name:"CurveLend",market:"Curve LlamaLend V2 market 0 crvUSD",target:"0x2b5a321c3cb1f33e1abecd047c2649d0b4c47eba",asset:"0xf939e0a03fb07f59a73314e73794be0e57ac1b4e",holder:"0x4dece678ceceb27446b35c672dc7d61f30bad69e",units:18,mode:1},
  {name:"Pendle",market:"Pendle SY USD3 active mainnet",target:"0xeA3BC608F32847B97965C5e1648BDFCd4C2C40d0",asset:"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",holder:"0x55fe002aeff02f77364de339a1292923a15844b8",units:6,mode:1}
@@ -519,7 +519,11 @@ async function extendedFiveTrial(spec) {
  await get("ERC4626_maxDeposit",()=>target.maxDeposit(owner));
  await get("ERC4626_previewRedeem",()=>target.previewRedeem(10n**BigInt(spec.units)));
  if(spec.name==="Pendle"){await get("Pendle_SY_getTokensIn",()=>target.getTokensIn());await get("Pendle_SY_exchangeRate",()=>target.exchangeRate());}
- if(spec.name==="Convex")await get("Convex_rewardPool_stakingToken",()=>target.stakingToken());
+ if(spec.name==="Convex"){
+  const actualPool=new ethers.Contract("0x3Fe65692bfCD0e6CF84cB1E7d24108E434A7587e",
+   ["function stakingToken() view returns(address)"],signer);
+  await get("nativeConvexRewardPool_stakingToken",()=>actualPool.stakingToken());
+ }
  try{
   const underlying=new ethers.Contract(spec.asset,ERC20,signer);
   const scale=10n**BigInt(spec.units);
@@ -551,11 +555,6 @@ async function extendedFiveTrial(spec) {
   if(spec.holder){
    await tx("approve source-bound asset to parent Vault V2",underlying.approve(va,ethers.MaxUint256),scope);
    await tx("deposit actual source-bound assets to parent Vault V2",vault.deposit(800n*scale,owner,{gasLimit:8_000_000}),scope);
-  }else{
-   // Convex BaseRewardPool is non-ERC4626: check adapter's actual registration call
-   // without inventing or transferring staking rewards.
-   const claimed=await target.stakingToken();
-   fail(claimed.toLowerCase()===spec.asset.toLowerCase(),"CONVEX_STAKING_TOKEN_MISMATCH");
   }
   const key=await adapter.keyOf(1,spec.target,HASH,ZERO);
   const idData=await adapter.idData(1,spec.target,HASH,ZERO);
@@ -569,13 +568,7 @@ async function extendedFiveTrial(spec) {
   result.before={vaultAssets:await vault.totalAssets(),sharePps:await vault.previewRedeem(WAD),
    positionAssets:await adapter.positionAssets(1,spec.target,HASH,ZERO)};
   console.log("EXTENDED_FIVE_BEFORE",JSON.stringify(x({...result.before,name:spec.name,market:spec.market})));
-  if(!spec.holder){
-   // Must be rejected when no real matching token funding path exists; call
-   // real native adapter entrypoint and preserve exact revert reason.
-   await vault.allocate(ad,dat,0,{gasLimit:9_000_000});
-   fail(false,"UNFUNDED_CONVEX_MODE_UNEXPECTEDLY_ACCEPTED");
-  }
-  const investedReceipt=await tx("real native protocol investment",vault.allocate(ad,dat,100n*scale,{gasLimit:9_000_000}),scope);
+   const investedReceipt=await tx("real native protocol investment",vault.allocate(ad,dat,100n*scale,{gasLimit:9_000_000}),scope);
   const positionAtBlock=await adapter.positionAssets(1,spec.target,HASH,ZERO,{blockTag:investedReceipt.blockNumber});
   const capAtBlock=await vault.allocation(key,{blockTag:investedReceipt.blockNumber});
   result.invested=positionAtBlock;
