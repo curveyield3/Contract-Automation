@@ -90,6 +90,109 @@ contract LiquityV7Fixture {
     function provideToSP(uint256 n,bool claim) external {require(!claim);boldToken.transferFrom(msg.sender,address(this),n);deposits[msg.sender]+=n;}
     function withdrawFromSP(uint256 n,bool claim) external {require(claim);deposits[msg.sender]-=n;boldToken.transfer(msg.sender,n);}
 }
+
+contract BeefyV7Fixture is TokenV7Fixture {
+    TokenV7Fixture public immutable want;
+    constructor(TokenV7Fixture a){want=a;}
+    function getPricePerFullShare() external pure returns(uint256){return 1e18;}
+    function deposit(uint256 n) external {want.transferFrom(msg.sender,address(this),n);mint(msg.sender,n);}
+    function withdraw(uint256 shares) external {burn(msg.sender,shares);want.transfer(msg.sender,shares);}
+}
+contract CompoundV7Fixture {
+    TokenV7Fixture public immutable baseToken;
+    mapping(address=>uint256) public balanceOf;
+    constructor(TokenV7Fixture a){baseToken=a;}
+    function supply(address a,uint256 n) external {require(a==address(baseToken));baseToken.transferFrom(msg.sender,address(this),n);balanceOf[msg.sender]+=n;}
+    function withdraw(address a,uint256 n) external {require(a==address(baseToken));balanceOf[msg.sender]-=n;baseToken.transfer(msg.sender,n);}
+}
+contract ATokenV7Fixture is TokenV7Fixture {
+    address public immutable POOL;
+    address public immutable UNDERLYING_ASSET_ADDRESS;
+    constructor(address p,address a){POOL=p;UNDERLYING_ASSET_ADDRESS=a;}
+}
+contract AaveV3Fixture {
+    TokenV7Fixture public immutable base;
+    ATokenV7Fixture public immutable aToken;
+    constructor(TokenV7Fixture a){base=a;aToken=new ATokenV7Fixture(address(this),address(a));}
+    function getReserveData(address a) external view returns(ICYV7AaveV3.ReserveData memory r){require(a==address(base));r.aTokenAddress=address(aToken);}
+    function supply(address a,uint256 n,address to,uint16) external {require(a==address(base));base.transferFrom(msg.sender,address(this),n);aToken.mint(to,n);}
+    function withdraw(address a,uint256 n,address to) external returns(uint256){require(a==address(base));aToken.burn(msg.sender,n);base.transfer(to,n);return n;}
+}
+contract AaveV4Fixture {
+    TokenV7Fixture public immutable underlying;
+    mapping(uint256=>mapping(address=>uint256)) public supplied;
+    constructor(TokenV7Fixture a){underlying=a;}
+    function getReserve(uint256 id) external view returns(ICYV7AaveSpoke.Reserve memory r){require(id==5);r.underlying=address(underlying);}
+    function getUserSuppliedAssets(uint256 id,address user) external view returns(uint256){return supplied[id][user];}
+    function supply(uint256 id,uint256 n,address to) external returns(uint256,uint256){require(id==5);underlying.transferFrom(msg.sender,address(this),n);supplied[id][to]+=n;return(n,n);}
+    function withdraw(uint256 id,uint256 n,address from) external returns(uint256,uint256){require(id==5);supplied[id][from]-=n;underlying.transfer(msg.sender,n);return(n,n);}
+}
+contract MorphoBlueV7Fixture {
+    TokenV7Fixture public immutable underlying;
+    ICYV7Morpho.MarketParams private mParams;
+    bytes32 public immutable marketId;
+    uint128 public supplyAssets=uint128(1000e18);
+    uint128 public supplyShares=uint128(1000e18);
+    mapping(address=>uint256) public positions;
+    constructor(TokenV7Fixture a){
+        underlying=a;mParams=ICYV7Morpho.MarketParams(address(a),address(0),address(0),address(0),0);
+        marketId=keccak256(abi.encode(mParams));
+    }
+    function params() external view returns(ICYV7Morpho.MarketParams memory){return mParams;}
+    function market(bytes32 id) external view returns(ICYV7Morpho.Market memory m){
+        require(id==marketId);m.totalSupplyAssets=supplyAssets;m.totalSupplyShares=supplyShares;m.lastUpdate=uint128(block.timestamp);
+    }
+    function idToMarketParams(bytes32 id) external view returns(ICYV7Morpho.MarketParams memory){require(id==marketId);return mParams;}
+    function position(bytes32 id,address a) external view returns(ICYV7Morpho.Position memory p){require(id==marketId);p.supplyShares=positions[a];}
+    function supply(ICYV7Morpho.MarketParams calldata p,uint256 n,uint256,address to,bytes calldata) external returns(uint256,uint256){
+        require(keccak256(abi.encode(p))==marketId);underlying.transferFrom(msg.sender,address(this),n);
+        positions[to]+=n;supplyAssets+=uint128(n);supplyShares+=uint128(n);return(n,n);
+    }
+    function withdraw(ICYV7Morpho.MarketParams calldata p,uint256 n,uint256,address from,address to) external returns(uint256,uint256){
+        require(keccak256(abi.encode(p))==marketId);positions[from]-=n;
+        supplyAssets-=uint128(n);supplyShares-=uint128(n);underlying.transfer(to,n);return(n,n);
+    }
+}
+contract DolomiteIsolationVaultV7Fixture {}
+contract DolomiteIsolationFactoryV7Fixture {
+    mapping(address=>address) public getVaultByAccount;
+    function ensure(address who) external returns(address result) {
+        result=getVaultByAccount[who];
+        if(result==address(0)){result=address(new DolomiteIsolationVaultV7Fixture());getVaultByAccount[who]=result;}
+    }
+}
+contract DolomiteMarginV7Fixture {
+    mapping(uint256=>address) public getMarketTokenAddress;
+    mapping(bytes32=>uint256) public holdings;
+    function register(uint256 market,address t) external {getMarketTokenAddress[market]=t;}
+    function slot(address who,uint256 account,uint256 market) public pure returns(bytes32){return keccak256(abi.encode(who,account,market));}
+    function add(address who,uint256 account,uint256 market,uint256 n) external {holdings[slot(who,account,market)]+=n;}
+    function take(address who,uint256 account,uint256 market,uint256 n) external {holdings[slot(who,account,market)]-=n;}
+    function getAccountWei(ICYV7Dolomite.Account calldata who,uint256 market) external view returns(ICYV7Dolomite.SignedWei memory r) {
+        r.sign=true;r.value=holdings[slot(who.owner,who.number,market)];
+    }
+}
+contract DolomiteRouterV7Fixture {
+    DolomiteMarginV7Fixture public immutable DOLOMITE_MARGIN;
+    constructor(DolomiteMarginV7Fixture m){DOLOMITE_MARGIN=m;}
+    function _owner(uint256 iso) private returns(address who) {
+        who=msg.sender;
+        if(iso!=0)who=DolomiteIsolationFactoryV7Fixture(DOLOMITE_MARGIN.getMarketTokenAddress(iso)).ensure(msg.sender);
+    }
+    function _account(uint256 iso) private view returns(address who) {
+        who=msg.sender;
+        if(iso!=0)who=DolomiteIsolationFactoryV7Fixture(DOLOMITE_MARGIN.getMarketTokenAddress(iso)).getVaultByAccount(msg.sender);
+    }
+    function depositWei(uint256 iso,uint256 account,uint256 market,uint256 n,uint8) external {
+        TokenV7Fixture(DOLOMITE_MARGIN.getMarketTokenAddress(market)).transferFrom(msg.sender,address(this),n);
+        DOLOMITE_MARGIN.add(_owner(iso),account,market,n);
+    }
+    function withdrawWei(uint256 iso,uint256 account,uint256 market,uint256 n,uint8) external {
+        DOLOMITE_MARGIN.take(_account(iso),account,market,n);
+        TokenV7Fixture(DOLOMITE_MARGIN.getMarketTokenAddress(market)).transfer(msg.sender,n);
+    }
+}
+
 contract OmniAdapterV7CompatibilityTest {
     TokenV7Fixture token;
     ParentV7Fixture parent;
@@ -147,4 +250,66 @@ contract OmniAdapterV7CompatibilityTest {
             revert('BAD_UNAUTHORIZED_ACCESS');
         }catch{}
     }
+
+    function testBeefyV7SharesAndExit() public {
+        BeefyV7Fixture x=new BeefyV7Fixture(token);setCap(2,address(x));
+        parent.allocate(data(2,address(x),0,''),100e18);
+        parent.deallocate(data(2,address(x),20e18,''),20e18);
+        matchCap(2,address(x));
+    }
+    function testCompoundIIISupplyWithdraw() public {
+        CompoundV7Fixture x=new CompoundV7Fixture(token);setCap(4,address(x));
+        parent.allocate(data(4,address(x),0,''),100e18);
+        parent.deallocate(data(4,address(x),25e18,''),25e18);
+        matchCap(4,address(x));
+    }
+    function testAaveV3ATokenBalanceAndWithdraw() public {
+        AaveV3Fixture x=new AaveV3Fixture(token);setCap(3,address(x));
+        parent.allocate(data(3,address(x),0,''),100e18);
+        parent.deallocate(data(3,address(x),25e18,''),25e18);
+        matchCap(3,address(x));
+    }
+    function testAaveV4SpokeReserveAndExit() public {
+        AaveV4Fixture x=new AaveV4Fixture(token);
+        bytes32 market=bytes32(uint256(5));
+        parent.setCap(adapter.keyOf(6,address(x),market,address(0)),type(uint256).max);
+        bytes memory d=abi.encode(uint8(6),address(x),market,address(0),uint256(0),bytes(''));
+        parent.allocate(d,100e18);
+        parent.deallocate(d,20e18);
+        require(parent.allocation(adapter.keyOf(6,address(x),market,address(0)))==
+           adapter.positionAssets(6,address(x),market,address(0)),'V4_CAP_DELTA');
+    }
+    function testMorphoBlueShareAccounting() public {
+        MorphoBlueV7Fixture x=new MorphoBlueV7Fixture(token);
+        bytes32 market=x.marketId();
+        parent.setCap(adapter.keyOf(5,address(x),market,address(0)),type(uint256).max);
+        bytes memory extra=abi.encode(x.params());
+        bytes memory d=abi.encode(uint8(5),address(x),market,address(0),uint256(0),extra);
+        parent.allocate(d,100e18);
+        parent.deallocate(d,25e18);
+        require(parent.allocation(adapter.keyOf(5,address(x),market,address(0)))==
+            adapter.positionAssets(5,address(x),market,address(0)),'MORPHO_CAP_DELTA');
+    }
+    function testDolomiteNormalAndIsolatedAccounts() public {
+        DolomiteMarginV7Fixture margin=new DolomiteMarginV7Fixture();
+        DolomiteRouterV7Fixture router=new DolomiteRouterV7Fixture(margin);
+        DolomiteIsolationFactoryV7Fixture factory=new DolomiteIsolationFactoryV7Fixture();
+        margin.register(3,address(token));margin.register(19,address(factory));
+        bytes32 market=bytes32(uint256(3));
+        parent.setCap(adapter.keyOf(7,address(router),market,address(margin)),type(uint256).max);
+        bytes memory standard=abi.encode(uint8(7),address(router),market,address(margin),uint256(0),bytes(''));
+        parent.allocate(standard,100e18);
+        parent.deallocate(standard,30e18);
+        require(parent.allocation(adapter.keyOf(7,address(router),market,address(margin)))==
+            adapter.positionAssets(7,address(router),market,address(margin)),'DOLOMITE_NORMAL_DELTA');
+        bytes memory extra=abi.encode(uint256(19),uint256(150),uint256(3));
+        bytes32 isolatedMarketId=keccak256(extra);
+        parent.setCap(adapter.keyOf(11,address(router),isolatedMarketId,address(margin)),type(uint256).max);
+        bytes memory isolated=abi.encode(uint8(11),address(router),isolatedMarketId,address(margin),uint256(0),extra);
+        parent.allocate(isolated,100e18);
+        parent.deallocate(isolated,30e18);
+        require(parent.allocation(adapter.keyOf(11,address(router),isolatedMarketId,address(margin)))==
+            adapter.positionAssets(11,address(router),isolatedMarketId,address(margin)),'DOLOMITE_ISOLATED_DELTA');
+    }
+
 }
