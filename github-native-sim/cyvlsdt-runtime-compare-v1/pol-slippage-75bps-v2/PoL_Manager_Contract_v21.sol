@@ -374,9 +374,9 @@ contract PoLManager {
             if(received==0)revert Slippage();
             return received;
         }
-        uint256 reference=IPoLRouter(omniRouter).estimate_exact_output(from,to,amount);
-        if(reference==0)revert Slippage();
-        uint256 minimum=reference*(BPS-limit)/BPS;
+        uint256 referenceOutput=IPoLRouter(omniRouter).estimate_exact_output(from,to,amount);
+        if(referenceOutput==0)revert Slippage();
+        uint256 minimum=referenceOutput*(BPS-limit)/BPS;
         if(minimum==0)revert Slippage();
         uint256 previousOutputBalance=_balance(to);
         received=IPoLRouter(omniRouter).swapExactInput(
