@@ -76,12 +76,31 @@ const num=(v)=>BigInt(v);
 function data(t,min=0n,overrideExtra=null){return abi.encode(
   ["uint8","address","bytes32","address","uint256","bytes"],
   [t.mode,t.target,t.id,t.aux,min,overrideExtra??t.extra]);}
+async function minedReceipt(hash,label) {
+ const ask=()=>bounded(provider.send("eth_getTransactionReceipt",[hash]),15000,"raw-receipt:"+label);
+ let raw=await ask();
+ console.log("FORK_RECEIPT_INITIAL",label,raw?JSON.stringify({blockNumber:raw.blockNumber,status:raw.status}):"pending");
+ if(!raw){
+  // Local Anvil mining only. This cannot broadcast or modify Ethereum mainnet.
+  const pending=await bounded(provider.send("eth_getTransactionByHash",[hash]),15000,"pending-tx:"+label);
+  console.log("FORK_TX_PENDING_DETAIL",label,JSON.stringify(pending?{
+    nonce:pending.nonce,blockHash:pending.blockHash,gasPrice:pending.gasPrice,
+    maxFeePerGas:pending.maxFeePerGas,maxPriorityFeePerGas:pending.maxPriorityFeePerGas
+  }:"not-found"));
+  await bounded(provider.send("evm_mine",[]),15000,"mine-fork:"+label);
+  raw=await ask();
+ }
+ if(!raw)throw Error("TX_HAS_NO_MINED_RECEIPT "+label+" "+hash);
+ console.log("FORK_RECEIPT_MINED",label,JSON.stringify({blockNumber:raw.blockNumber,blockHash:raw.blockHash,status:raw.status}));
+ if(BigInt(raw.status)!==1n)throw Error("TX_REVERTED_ON_ANVIL "+label+" "+hash);
+ return {hash,blockHash:raw.blockHash,blockNumber:Number(raw.blockNumber),
+  from:raw.from,to:raw.to,gasUsed:BigInt(raw.gasUsed),status:Number(raw.status)};
+}
 async function tx(label,promise,scope) {
  console.log("FORK_TX_SUBMIT",scope,label);
  const t=await bounded(promise,25000,"send:"+label);
  console.log("FORK_TX_SENT",scope,label,t.hash);
- const r=await bounded(t.wait(1),40000,"receipt:"+label);
- fail(r?.status===1,"TX_REVERT "+label);
+ const r=await minedReceipt(t.hash,label);
  const record={scope,label,txHash:r.hash,blockNumber:r.blockNumber,from:r.from,to:r.to,gasUsed:r.gasUsed.toString(),status:r.status};
  evidence.receipts.push(record);save();
  console.log("FORK_TRANSACTION",JSON.stringify(record));return r;
@@ -91,7 +110,7 @@ async function deploy(name,artifact,params,scope){
  const factory=new ethers.ContractFactory(artifact.abi,artifact.bytecode,signer);
  const c=await bounded(factory.deploy(...params,{gasLimit:25000000}),25000,"deploy-send:"+name);
  console.log("FORK_DEPLOY_SENT",scope,name,c.deploymentTransaction().hash);
- const r=await bounded(c.deploymentTransaction().wait(1),40000,"deploy-mined:"+name);
+ const r=await minedReceipt(c.deploymentTransaction().hash,"deploy:"+name);
  fail(r?.status===1,"DEPLOY_FAILED "+name);
  const deployed=await c.getAddress();
  evidence.receipts.push({scope,label:"deploy:"+name,txHash:r.hash,blockNumber:r.blockNumber,to:deployed,gasUsed:r.gasUsed.toString(),status:r.status});
@@ -319,7 +338,7 @@ async function main(){
  console.log("FORK_WHALE_SIGNER_READY",WHALE);
  await tx("fund test operator with REAL USDC from source account",new ethers.Contract(USDC,ERC20,whale).transfer(owner,100000n*U),"fork-fixture");
  await bounded(provider.send("anvil_stopImpersonatingAccount",[WHALE]),12000,"stop-impersonate");
- if(process.env.OMNI_V8_SMOKE_ONLY==="1"){
+ if(process.env.OMNI_V8_FULL_QUALIFICATION!=="1"){
   console.log("FORK_SMOKE_BEGIN");
   const ctx=await setup("diagnostic-smoke");
   await snapshot("smoke-before-market-deposit",ctx);
@@ -357,7 +376,7 @@ save();
 const stageWatchdog=setTimeout(()=>{
   evidence.errors.push("FOUR_MINUTE_DIAGNOSTIC_TIMEOUT");save();
   console.error("LIVE_FORK_DIAGNOSTIC_TIMEOUT");process.exit(124);
-},Number(process.env.OMNI_V8_SMOKE_ONLY==="1"?240000:5400000));
+},Number(process.env.OMNI_V8_FULL_QUALIFICATION==="1"?5400000:240000));
 main().then(()=>clearTimeout(stageWatchdog)).catch(e=>{
  evidence.errors.push(String(e.stack||e));save();console.error("LIVE_FORK_FATAL",e);
  clearTimeout(stageWatchdog);process.exit(1);
