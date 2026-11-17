@@ -701,7 +701,7 @@ jobs:
           base=Path('github-native-sim/cyvlsdt-runtime-compare-v1/pol-morpho-v20/outputs')
           manifest=json.loads((base/'Build-Manifest-v1.json').read_text())
           assert 0<manifest['deployedBytes']<=24576
-          assert manifest['addOnCalls']==4
+          assert manifest['safeCalls']==4
           assert manifest['constructorArgsBytes']>0
           tx=json.loads((base/'Safe-Transaction-Builder-AddOn-v1.json').read_text())
           assert len(tx['transactions'])==4
