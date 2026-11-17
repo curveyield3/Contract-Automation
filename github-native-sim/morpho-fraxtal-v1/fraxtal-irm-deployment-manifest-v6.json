@@ -1,0 +1,79 @@
+{
+  "version": "v6",
+  "chain": "fraxtal",
+  "chainId": 252,
+  "repository": "curveyield3/Contract-Automation",
+  "branch": "morpho-fraxtal-compile-v1",
+  "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV5.sol",
+  "sourceHeader": "CurveYield Extended Contract Header v48",
+  "build": {
+    "githubActionsRunId": 43986452465,
+    "githubActionsUrl": "https://github.com/curveyield3/Contract-Automation/actions/runs/43986452465",
+    "compiler": "v0.8.30+commit.73712a01",
+    "optimizerRuns": 200,
+    "evmVersion": "cancun",
+    "status": "success"
+  },
+  "contracts": [
+    {
+      "name": "CurveYieldMorphoOwnerV3",
+      "address": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+      "txHash": "0xdaba4cfbc3719c08caa408b3de16e6dbf23685e66c67bd66912c74b06c74ae92",
+      "nonce": 81,
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0#code",
+      "constructor": [
+        "0xcce2862aed7f2248063c3dcf6906582166c2b6ca",
+        "0x47623c62f281807d615eeb4a2ceee9d97f9d3c49"
+      ],
+      "creationInputMatchedGitHubBuild": true
+    },
+    {
+      "name": "CurveYieldMorphoFeeSplitterV3",
+      "address": "0x5f19be0378fb06ebacdf6eb2fdc2af15db38d198",
+      "txHash": "0xc99174971d473dac500342462eb2df3238bb5738be422fbcb869871cecec67ef",
+      "nonce": 82,
+      "receiptStatus": "0x1",
+      "verified": true,
+      "sourcePublicationConfirmed": true,
+      "explorer": "https://fraxscan.com/address/0x5f19be0378fb06ebacdf6eb2fdc2af15db38d198#code",
+      "constructor": [
+        "0xcce2862aed7f2248063c3dcf6906582166c2b6ca",
+        "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+        "0x47623c62f281807d615eeb4a2ceee9d97f9d3c49",
+        "0x47623c62f281807d615eeb4a2ceee9d97f9d3c49"
+      ],
+      "creationInputMatchedGitHubBuild": true
+    }
+  ],
+  "liveStateAfterDeploy": {
+    "morpho": "0xcce2862aed7f2248063c3dcf6906582166c2b6ca",
+    "morphoCurrentOwner": "0x67f1c48a7d6dcc6c66a0ee2fc3882df63035ecb8",
+    "morphoCurrentFeeRecipient": "0xc0890482e5b65b5d8fe9947eb362642435a107f9",
+    "newGovernanceSplitter": "0x0000000000000000000000000000000000000000",
+    "newSplitterOwner": "0x47623c62f281807d615eeb4a2ceee9d97f9d3c49",
+    "newSplitterGovernance": "0xc715fc8944d565e27cc5598d8aeabb42e4ce71a0",
+    "safeNonce": "2"
+  },
+  "pendingMigration": {
+    "status": "not_started",
+    "safe": "0x47623c62f281807d615eeb4a2ceee9d97f9d3c49",
+    "legacyOwner": "0x67f1c48a7d6dcc6c66a0ee2fc3882df63035ecb8",
+    "legacySplitter": "0xc0890482e5b65b5d8fe9947eb362642435a107f9",
+    "requires": [
+      "address existing accrued interest and fee entitlements before fee recipient change",
+      "Safe call newGovernance.configureSplitter(newSplitter)",
+      "Safe call legacyGovernance.setOwner(newGovernance)",
+      "Safe call newGovernance.setFeeRecipient(newSplitter)"
+    ],
+    "obsoleteSafeProposal": {
+      "hash": "0x93382b1fdb27866ccc2451a687ab3485f7a9809b52a62e71fe8d5af4b5f258a7",
+      "nonce": "2",
+      "warning": "Targets superseded module; do not execute"
+    },
+    "newSafeProposalSubmitted": false,
+    "note": "Deployed and verified only. No ownership transfer or fee-recipient change executed."
+  }
+}
