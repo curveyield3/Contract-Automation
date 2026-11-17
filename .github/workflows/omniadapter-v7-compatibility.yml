@@ -14,29 +14,43 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Install existing pinned compiler and ethers
-        run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Compile V7 source and enforce runtime limit
+        with: {persist-credentials: false}
+      - uses: foundry-rs/foundry-toolchain@v1
+        with: {version: stable}
+      - name: Compile original exact Solidity 0.8.28 version and enforce EIP-170
         shell: bash
         run: |
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import solc from 'solc';
-          const path='github-native-sim/morpho-ethereum-v1/CurveYieldOmniAdapterV7.sol';
-          const source=fs.readFileSync(path,'utf8');
-          const input={language:'Solidity',sources:{[path]:{content:source}},settings:{optimizer:{enabled:true,runs:200},evmVersion:'cancun',outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object']}}}};
-          const output=JSON.parse(solc.compile(JSON.stringify(input)));
-          for(const x of output.errors??[])console.log(x.formattedMessage);
-          if((output.errors??[]).some(x=>x.severity==='error'))process.exit(1);
-          const contracts=output.contracts?.[path]??{};
-          for(const name of ['CurveYieldOmniAdapterV7','CurveYieldOmniAdapterDeployerV7']){
-            const cc=contracts[name];
-            if(!cc)throw new Error('Missing '+name);
-            const size=cc.evm.deployedBytecode.object.length/2;
-            console.log(name,'runtimeBytes',size,'creationBytes',cc.evm.bytecode.object.length/2);
-            if(size>24576)throw new Error('EIP-170 limit '+name);
-          }
-          NODE
+          set -euo pipefail
+          mkdir -p .omni-v7-build
+          cat > foundry.toml <<'TOML'
+          [profile.default]
+          src = "github-native-sim/morpho-ethereum-v1"
+          test = ".omni-v7-build/unused"
+          out = ".omni-v7-build/out"
+          libs = []
+          solc_version = "0.8.28"
+          optimizer = true
+          optimizer_runs = 200
+          evm_version = "cancun"
+          TOML
+          forge build --force --sizes 2>&1 | tee .omni-v7-build/compile.log
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          for name in ('CurveYieldOmniAdapterV7','CurveYieldOmniAdapterDeployerV7'):
+              artifacts=list(Path('.omni-v7-build/out').rglob(name+'.json'))
+              assert len(artifacts)==1,(name,artifacts)
+              d=json.loads(artifacts[0].read_text())
+              deployed=d['deployedBytecode']['object']
+              created=d['bytecode']['object']
+              size=(len(deployed)-2)//2
+              print('RUNTIME_BYTES',name,size,'CREATION_BYTES',(len(created)-2)//2)
+              assert size<=24576,(name,'EIP-170',size)
+          PY
+      - name: Archive exact compiler evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: omniadapter-v7-compilation-${{ github.run_id }}
+          path: .omni-v7-build/compile.log
+          if-no-files-found: warn
