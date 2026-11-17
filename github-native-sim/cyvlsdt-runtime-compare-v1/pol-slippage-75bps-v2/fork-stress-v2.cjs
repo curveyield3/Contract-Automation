@@ -211,6 +211,64 @@ async function sdtUsdcTrial(f,forward,bps,pass){
  reports.push({component:forward?'SDT to USDC':'USDC to SDT',spotRateBps:bps,pass});
  await restore(checkpoint);
 }
+// Create the transaction first, leave it pending, then advance the EXECUTION
+// block by multiple days. A deadline captured when the user constructed or
+// submitted the transaction would be stale and the mock would revert.
+async function queuedWithDelayedExecution(label,submit,readObserved,delayDays){
+ const snapshot=await snap();
+ const before=await ethers.provider.getBlock('latest');
+ let tx,receipt;
+ const futureTimestamp=before.timestamp+delayDays*86400;
+ await network.provider.send('evm_setAutomine',[false]);
+ try{
+  tx=await submit({gasLimit:5500000});
+  check((await ethers.provider.getTransactionReceipt(tx.hash))===null,
+    label+' genuinely pending before future block');
+  await network.provider.send('evm_setNextBlockTimestamp',[futureTimestamp]);
+  await network.provider.send('evm_mine',[]);
+  receipt=await ethers.provider.getTransactionReceipt(tx.hash);
+ }finally{
+  await network.provider.send('evm_setAutomine',[true]);
+ }
+ check(receipt!==null,label+' mined receipt exists');
+ eq(receipt.status,1,label+' execution succeeds despite delayed inclusion');
+ const executionBlock=await ethers.provider.getBlock(receipt.blockNumber);
+ eq(executionBlock.timestamp,futureTimestamp,label+' execution timestamp advanced by days');
+ check(executionBlock.timestamp>before.timestamp+86400,label+' delay would invalidate any old deadline');
+ const [deadline,insideTimestamp]=await readObserved();
+ eq(deadline,BigInt(executionBlock.timestamp),label+' callee deadline derives from execution block');
+ eq(insideTimestamp,BigInt(executionBlock.timestamp),label+' callee timestamp is same executing block');
+ reports.push({component:label,delayDays,submissionBlock:before.number,executionBlock:receipt.blockNumber,
+  submissionTimestamp:before.timestamp,executionTimestamp:executionBlock.timestamp,
+  observedDeadline:String(deadline),pass:true});
+ await restore(snapshot);
+}
+async function deadlineQueuedProof(f){
+ const a0=1000n*W,a1=1000n*W;
+ const addQuote=await f.guard.quoteUniV3Deposit(f.nft.target,7,a0,a1);
+ await f.nft.setDepositReference(addQuote[0],addQuote[2],addQuote[3]);
+ await queuedWithDelayedExecution('Pending Uniswap NFT deposit', 
+   opts=>f.pol.addUniLiquidity(a0,a1,opts),
+   async()=>[await f.nft.lastDepositDeadline(),await f.nft.lastDepositExecutionTimestamp()],2);
+ const removeQuote=await f.guard.quoteUniV3Withdraw(f.nft.target,7,2500);
+ await f.nft.setWithdrawalReference(removeQuote[1],removeQuote[2]);
+ await queuedWithDelayedExecution('Pending Uniswap NFT withdrawal',
+   opts=>f.pol.removeUniLiquidity(2500,opts),
+   async()=>[await f.nft.lastWithdrawalDeadline(),await f.nft.lastWithdrawalExecutionTimestamp()],3);
+ await queuedWithDelayedExecution('Pending NFT inventory balancing swap',
+   opts=>f.pol.rebalanceUniTokens(f.token0.target,1000n*W,opts),
+   async()=>[await f.router.lastSwapDeadline(),await f.router.lastSwapExecutionTimestamp()],5);
+ // Harvest must actually convert earned non-SDT rewards using swapExactInput;
+ // simply harvesting an empty position would not cover any deadline-bearing call.
+ await f.pol.setProfitFee(1000);
+ await f.pol.setModuleEnabled(1,false,true);
+ const cyvlIs0=f.token0.target.toLowerCase()===f.cyvl.target.toLowerCase();
+ await f.nft.setFeeOwed(cyvlIs0?100n*W:0n,cyvlIs0?0n:100n*W);
+ await queuedWithDelayedExecution('Pending nonzero-fee Uniswap NFT harvest',
+   opts=>f.pol.harvest(2,opts),
+   async()=>[await f.router.lastSwapDeadline(),await f.router.lastSwapExecutionTimestamp()],7);
+}
+
 async function main(){
  const net=await ethers.provider.getNetwork();
  eq(net.chainId,1n,'Ethereum fork network chain ID 1');
@@ -225,6 +283,7 @@ async function main(){
  await revertTx(f.pol.setCurveSlippageBps(76),'reject 76 bps configuration');
  eq(await f.pol.NFT_SWAP_SLIPPAGE_BPS(),75,'NFT router 75 bps constant');
  eq(await f.pol.SDT_USDC_SWAP_SLIPPAGE_BPS(),200,'SDT/USDC router 200 bps constant');
+ await deadlineQueuedProof(f);
  for(const bps of [10000,9926,9925,9924,9860,9700,9500,9000]){
   const pass=bps>=9925;
   await curveDepositTrial(f,bps);
@@ -248,7 +307,9 @@ async function main(){
   assertions,mainnetForkBlock:block.number,
   policy:{curve:75,uniswapNFT:75,nftBalancingSwap:75,sdtUsdcBothDirections:200},
   realEthereumCodeChecked:[ALIVE_OLD_POL,ALIVE_OLD_GUARD],
-  tests:reports
+  tests:reports,
+  deadlineProofs:reports.filter(t=>t.component.startsWith('Pending ')),
+  exactDeadlineEqualityVerified:true
  };
  const file=path.join(OUTPUT,'Fork-Stress-Results-v2.json');
  fs.writeFileSync(file,JSON.stringify(counts,null,2)+'\n');
