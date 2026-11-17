@@ -1,0 +1,103 @@
+{
+  "version": "v1",
+  "chainId": 1,
+  "safe": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "startNonce": "24",
+  "deploymentHelper": "0xe530c247341e857042FdFf953E73Dd6c580f8D42",
+  "sdCRV": {
+    "staking": "0x1a0263873c7671691EFf84B20666Ed1fb2337967",
+    "strategy": "0x3Da548EE3C9d7fb614C869e53ffdaa1a07b8A0a0",
+    "vault": "0x47C6CE915E24e50A5aa98e10d310968a554Ee8af"
+  },
+  "sdFXN": {
+    "staking": "0x32a8864466AE0D240c4cA7f3e4fBcA2cA1f3ac60",
+    "master": "0x2505Ac2e825f8a65e9B2393E65c4A940d52a9385",
+    "boostChild": "0x25d00f49ce4FE090136BE666F7d2f741977Fc8b5",
+    "convexChild": "0x393EeCEcDa452bc359F0A22238dCa95F8c2051c9",
+    "vault": "0x2d27fa0BE96FB830D47607213b32803a0b48844F"
+  },
+  "polManager": "0xc2381A483FD735A1e323b85536901D83D4E75f58",
+  "polGuard": "0xAB989D9Daa0279e123d453204545be556F2D3072",
+  "reusedConvexGuard": "0x840fa8496e3B5Ac306281d5Bb5224fA08b5865F8",
+  "creationByteDifference": 738,
+  "runtimeByteDifference": 1275,
+  "batches": [
+    {
+      "batch": 1,
+      "contracts": [
+        {
+          "name": "CurveYieldSafeDeployHelperV1",
+          "creationBytes": 1154,
+          "runtimeBytes": 958
+        },
+        {
+          "name": "BoostHubStaking",
+          "creationBytes": 23015,
+          "runtimeBytes": 19717
+        },
+        {
+          "name": "BoostHubStaking",
+          "creationBytes": 23015,
+          "runtimeBytes": 19717
+        },
+        {
+          "name": "StrategyConvexBoostHubStakingV5",
+          "creationBytes": 9996,
+          "runtimeBytes": 7514
+        },
+        {
+          "name": "BeefyVaultV7FixedV2",
+          "creationBytes": 13103,
+          "runtimeBytes": 10954
+        },
+        {
+          "name": "CurvePairOracleBoundsV8",
+          "creationBytes": 10789,
+          "runtimeBytes": 10763
+        }
+      ],
+      "creationBytes": 81072,
+      "runtimeBytes": 69623,
+      "transactionCount": 10,
+      "innerCalldataBytes": 83752,
+      "multiSendCalldataBytes": 84676
+    },
+    {
+      "batch": 2,
+      "contracts": [
+        {
+          "name": "StrategyDualFXNMasterV42",
+          "creationBytes": 12264,
+          "runtimeBytes": 11313
+        },
+        {
+          "name": "StrategyBoostHubChildV42",
+          "creationBytes": 12180,
+          "runtimeBytes": 9698
+        },
+        {
+          "name": "StrategyConvexFXNPool8V42",
+          "creationBytes": 17793,
+          "runtimeBytes": 13577
+        },
+        {
+          "name": "BeefyVaultV7FixedV2",
+          "creationBytes": 13103,
+          "runtimeBytes": 10954
+        },
+        {
+          "name": "PoLManagerV23",
+          "creationBytes": 26470,
+          "runtimeBytes": 22806
+        }
+      ],
+      "creationBytes": 81810,
+      "runtimeBytes": 68348,
+      "transactionCount": 13,
+      "innerCalldataBytes": 83188,
+      "multiSendCalldataBytes": 84388
+    }
+  ],
+  "source": "GitHub-compiled exact v51 Vyper/Solidity plus PoL v23",
+  "submissionState": "UNSUBMITTED"
+}
