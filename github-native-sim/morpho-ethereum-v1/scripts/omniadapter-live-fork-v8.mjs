@@ -664,6 +664,62 @@ async function extendedFiveTrial(spec) {
  return result;
 }
 
+
+// Regression of genuine realized losses, not synthetic token minting or price edits.
+// A live IPOR vault that actually loses value over the fork must reduce Vault V2
+// NAV and still allow a correctly priced partial market withdrawal + user redemption.
+async function genuineLossTrial() {
+ const scope="loss-regression:real-negative-return-fusion-usdc";
+ const rec={status:"IN_PROGRESS",name:"real-negative-return-IPOR-Fusion",target:"0x3151cee0cdb517c0e7db2b55ff5085e7d1809d90"};
+ evidence.lossTrial=rec;save();
+ const t={name:rec.name,protocol:"IPOR Fusion",mode:1,target:rec.target,id:HASH,aux:ZERO,extra:"0x"};
+ try{
+  const ctx=await setup(scope);
+  const p=await allocate(ctx,t,1000n*U);
+  const before=await snapshot("L01-before-actual-market-loss",ctx);
+  await timeJump(30);
+  // Real Fusion fees and strategy market accounting are observed from the pinned
+  // archive source. Run source-verified transactions, including authorized keeper.
+  await refreshRealIPOR(ctx,t);
+  await tx("Morpho Vault V2 accounts actual negative strategy NAV",ctx.vault.accrueInterest({gasLimit:9_000_000}),scope);
+  const down=await snapshot("L02-after-actual-market-loss-and-V2-recognition",ctx);
+  const afterAssets=await ctx.adapter.positionAssets(t.mode,t.target,t.id,t.aux);
+  rec.beforePosition=p.value;rec.afterLossPosition=afterAssets;
+  rec.initialSharePps=before.previewRedeemOneShare;
+  rec.lossSharePps=down.previewRedeemOneShare;
+  fail(afterAssets<p.value,"LOSS_TEST_MARKET_DID_NOT_LOSE_VALUE");
+  fail(down.previewRedeemOneShare<before.previewRedeemOneShare,"LOSS_TEST_NAV_NOT_REDUCED");
+  const va=await ctx.vault.getAddress(),ad=await ctx.adapter.getAddress();
+  const idleBefore=await usdc.balanceOf(va);
+  await tx("real withdrawal from losing strategy without hiding its NAV haircut",
+    ctx.vault.deallocate(ad,data(t),200n*U,{gasLimit:9_000_000}),scope);
+  const idleAfter=await usdc.balanceOf(va);
+  fail(idleAfter>=idleBefore+200n*U,"LOSS_TEST_DEALLOCATE_FAILED");
+  const shares=(await ctx.vault.balanceOf(owner))/5n;
+  const lowerPreview=await ctx.vault.previewRedeem(shares);
+  const noLossEquivalent=shares*before.previewRedeemOneShare/WAD;
+  fail(lowerPreview<noLossEquivalent,"LOSS_TEST_SHARE_PAYOUT_NOT_REPRICED");
+  const userBefore=await usdc.balanceOf(owner);
+  await tx("user redeems V2 shares at actual reduced value",
+    ctx.vault.redeem(shares,owner,owner,{gasLimit:9_000_000}),scope);
+  const received=(await usdc.balanceOf(owner))-userBefore;
+  fail(received>=lowerPreview,"LOSS_TEST_REDEMPTION_UNDERPAID");
+  fail(received<noLossEquivalent,"LOSS_TEST_DID_NOT_SOCIALIZE_LOSS");
+  const ending=await snapshot("L03-after-reduced-price-redeem-while-loss-position-active",ctx);
+  fail(ending.activeMarketCount>0n&&ending.adapterAssets>0n,"LOSS_TEST_POSITION_CLOSED");
+  rec.status="PROVEN_LOSS_PRICED_REDEMPTION";
+  rec.lossAmount=p.value-afterAssets;
+  rec.redeemedAssets=received;
+  rec.redeemWithoutLoss=noLossEquivalent;
+  rec.endingPositionAssets=ending.adapterAssets;
+  console.log("GENUINE_LOSS_REDEMPTION_PASS",JSON.stringify(x(rec)));
+ }catch(e){
+  rec.status="NOT_PROVEN";rec.error=String(e.stack||e).slice(0,1800);
+  console.error("GENUINE_LOSS_REDEMPTION_FAIL",rec.error);
+ }finally{save();}
+ return rec;
+}
+
 async function main(){
  console.log("FORK_MAIN_START");
  const info=await bounded(provider.getNetwork(),15000,"getNetwork");fail(info.chainId===1n,"WRONG_NETWORK");
@@ -730,14 +786,18 @@ async function main(){
   snapFive=await provider.send("evm_snapshot",[]);
   await extendedFiveTrial(spec);
  }
+ fail(await provider.send("evm_revert",[snapFive]),"LOSS_TRIAL_RESTORE_FAILED");
+ await genuineLossTrial();
  evidence.summary={totalProtocolCases:targets.length,iporAlternativesAttempted:evidence.trials.filter(t=>t.protocol==="IPOR Fusion").map(t=>({target:t.target,status:t.status,error:t.error})),passed:passed.length,failed:targets.length-passed.length,
  passedNames:passed.map(t=>t.name),portfolioStatus:evidence.portfolio?.status,
  extendedFive:evidence.extendedFive.map(t=>({name:t.name,status:t.status,error:t.error,readProbes:t.readProbes})),
+ lossRegression:{status:evidence.lossTrial?.status,lossAmount:evidence.lossTrial?.lossAmount,error:evidence.lossTrial?.error},
  snapshots:evidence.snapshots.length,minedForkReceipts:evidence.receipts.length};
  save();console.log("FINAL_LOCAL_FORK_VERDICT",JSON.stringify(x(evidence.summary)));
  fail(evidence.summary.failed===0&&evidence.portfolio?.status==="PROVEN_LOCAL_FORK","COMPATIBILITY_INCOMPLETE_EVIDENCE_RETAINED");
  // The preceding 13 remain source-bound and independently qualified; the five
  // requested extension classes must not be reported as qualified on failed proofs.
+ fail(evidence.lossTrial?.status==="PROVEN_LOSS_PRICED_REDEMPTION","GENUINE_STRATEGY_LOSS_REDEMPTION_NOT_PROVEN");
  fail(evidence.extendedFive.every(t=>t.status==="PROVEN_LOCAL_FORK"),"EXTENDED_FIVE_NOT_ALL_COMPATIBLE_EVIDENCE_RETAINED");
 }
 console.log("FORK_NODE_MODULE_READY");
