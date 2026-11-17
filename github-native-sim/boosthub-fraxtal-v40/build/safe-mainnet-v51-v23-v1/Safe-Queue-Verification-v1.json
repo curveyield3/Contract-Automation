@@ -1,0 +1,22 @@
+[
+  {
+    "batch": 1,
+    "safeTxHash": "0x7a751ed1152e3a813b4e37eb5cc68693c75cd3c6fce839c7bede12a695bdce93",
+    "nonce": 24,
+    "queueVerified": true,
+    "executed": false,
+    "confirmationsRequired": 1,
+    "confirmations": 0,
+    "calldataSha256": "026d9d3f5ba2bad7ccf85c8937c27156936be8d319c95ac92ef534c7b4571908"
+  },
+  {
+    "batch": 2,
+    "safeTxHash": "0x1353ba3508f09dd9a197928b7595aa62fd776f1443d733587d9892c3c8439b35",
+    "nonce": 25,
+    "queueVerified": true,
+    "executed": false,
+    "confirmationsRequired": 1,
+    "confirmations": 0,
+    "calldataSha256": "71b830701147ac45e4e807d6a150a5513902dfcb6a34ec414561a1f3d96db6db"
+  }
+]\n
