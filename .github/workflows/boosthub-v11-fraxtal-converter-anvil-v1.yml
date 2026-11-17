@@ -99,7 +99,7 @@ jobs:
               'executed':record['isExecuted'],'confirmationsRequired':record.get('confirmationsRequired'),
               'confirmations':len(record.get('confirmations') or []),
               'calldataSha256':hashlib.sha256(bytes.fromhex(expected['data'][2:])).hexdigest()})
-          (base/'Safe-Queue-Verification-v1.json').write_text(json.dumps(out,indent=2)+'\\n')
+          (base/'Safe-Queue-Verification-v1.json').write_text(json.dumps(out,indent=2)+'\n')
           print(json.dumps(out,indent=2))
           PY
       - name: Commit compiled bytecode and sizes to source branch
