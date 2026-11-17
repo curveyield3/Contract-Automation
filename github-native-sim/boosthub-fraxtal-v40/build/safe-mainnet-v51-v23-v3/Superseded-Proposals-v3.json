@@ -1,0 +1,32 @@
+{
+  "version": "v3",
+  "safe": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "old": [
+    {
+      "version": "v1",
+      "nonce": 24,
+      "hash": "0x7a751ed1152e3a813b4e37eb5cc68693c75cd3c6fce839c7bede12a695bdce93"
+    },
+    {
+      "version": "v1",
+      "nonce": 25,
+      "hash": "0x1353ba3508f09dd9a197928b7595aa62fd776f1443d733587d9892c3c8439b35"
+    },
+    {
+      "version": "v2",
+      "nonce": 24,
+      "hash": "0xe6026219334ad58f7fd6b2cfbc1b61e9fb19ef8dbb8d8203cf6e05b94ac13a5d"
+    },
+    {
+      "version": "v2",
+      "nonce": 25,
+      "hash": "0x9b58b6b45f29bb21b83cd91f180a52315522f3655a5c164079f7c4aa98b4bf6c"
+    },
+    {
+      "version": "v2",
+      "nonce": 26,
+      "hash": "0x4f7795f6782c9828600f8ae5debb64da445edafe03419469b2b23cf3bb50219e"
+    }
+  ],
+  "instruction": "All older proposals superseded; no cancellation capability in connected Blockchain Operations Hub; DO NOT EXECUTE old hashes."
+}

@@ -1,0 +1,158 @@
+{
+  "version": "v3",
+  "network": "ethereum",
+  "chainId": 1,
+  "safe": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "nonces": [
+    "24",
+    "25",
+    "26"
+  ],
+  "sourceContractManifest": {
+    "branch": "boosthub-v51-safe-three-batch-v2",
+    "path": "github-native-sim/boosthub-fraxtal-v40/build/safe-mainnet-v51-v23-v2/Balanced-Safe-Manifest-v2.json"
+  },
+  "contractAddresses": {
+    "helper": "0xe530c247341e857042FdFf953E73Dd6c580f8D42",
+    "sdCRV": {
+      "staking": "0x1a0263873c7671691EFf84B20666Ed1fb2337967",
+      "strategy": "0x3Da548EE3C9d7fb614C869e53ffdaa1a07b8A0a0",
+      "vault": "0x47C6CE915E24e50A5aa98e10d310968a554Ee8af"
+    },
+    "sdFXN": {
+      "staking": "0x32a8864466AE0D240c4cA7f3e4fBcA2cA1f3ac60",
+      "master": "0x2505Ac2e825f8a65e9B2393E65c4A940d52a9385",
+      "boostChild": "0x25d00f49ce4FE090136BE666F7d2f741977Fc8b5",
+      "convexChild": "0x393EeCEcDa452bc359F0A22238dCa95F8c2051c9",
+      "vault": "0x2d27fa0BE96FB830D47607213b32803a0b48844F"
+    },
+    "polManager": "0xc2381A483FD735A1e323b85536901D83D4E75f58",
+    "polGuard": "0xAB989D9Daa0279e123d453204545be556F2D3072",
+    "reusedConvexGuard": "0x840fa8496e3B5Ac306281d5Bb5224fA08b5865F8"
+  },
+  "batches": [
+    {
+      "batch": 1,
+      "contracts": [
+        {
+          "id": "a0",
+          "name": "CurveYieldSafeDeployHelperV1",
+          "creationBytes": 1154,
+          "runtimeBytes": 958
+        },
+        {
+          "id": "a1",
+          "name": "BoostHubStaking (sdCRV)",
+          "creationBytes": 23015,
+          "runtimeBytes": 19717
+        },
+        {
+          "id": "a2",
+          "name": "BoostHubStaking (sdFXN)",
+          "creationBytes": 23015,
+          "runtimeBytes": 19717
+        }
+      ],
+      "creationBytes": 47184,
+      "runtimeBytes": 40392,
+      "contractDeployments": 3,
+      "transactionCount": 6,
+      "innerCalldataBytes": 49208,
+      "multiSendCalldataBytes": 49796
+    },
+    {
+      "batch": 2,
+      "contracts": [
+        {
+          "id": "a5",
+          "name": "StrategyConvexBoostHubStakingV5 (sdCRV)",
+          "creationBytes": 9996,
+          "runtimeBytes": 7514
+        },
+        {
+          "id": "b0",
+          "name": "BeefyVaultV7FixedV2 (sdCRV)",
+          "creationBytes": 13103,
+          "runtimeBytes": 10954
+        },
+        {
+          "id": "b1",
+          "name": "StrategyDualFXNMasterV42",
+          "creationBytes": 12264,
+          "runtimeBytes": 11313
+        },
+        {
+          "id": "c0",
+          "name": "CurvePairOracleBoundsV8",
+          "creationBytes": 10789,
+          "runtimeBytes": 10763
+        },
+        {
+          "id": "c1",
+          "name": "StrategyBoostHubChildV42",
+          "creationBytes": 12180,
+          "runtimeBytes": 9698
+        }
+      ],
+      "creationBytes": 58332,
+      "runtimeBytes": 50242,
+      "contractDeployments": 5,
+      "transactionCount": 6,
+      "innerCalldataBytes": 59224,
+      "multiSendCalldataBytes": 59812
+    },
+    {
+      "batch": 3,
+      "contracts": [
+        {
+          "id": "c2",
+          "name": "StrategyConvexFXNPool8V42",
+          "creationBytes": 17793,
+          "runtimeBytes": 13577
+        },
+        {
+          "id": "c5",
+          "name": "BeefyVaultV7FixedV2 (sdFXN)",
+          "creationBytes": 13103,
+          "runtimeBytes": 10954
+        },
+        {
+          "id": "b2",
+          "name": "PoLManagerV23",
+          "creationBytes": 26470,
+          "runtimeBytes": 22806
+        }
+      ],
+      "creationBytes": 57366,
+      "runtimeBytes": 47337,
+      "contractDeployments": 3,
+      "transactionCount": 11,
+      "innerCalldataBytes": 58508,
+      "multiSendCalldataBytes": 59524
+    }
+  ],
+  "creationBytesTotal": 162882,
+  "runtimeBytesTotal": 137971,
+  "creationByteMaxDifference": 11148,
+  "runtimeByteMaxDifference": 9850,
+  "original23TransactionsPreserved": true,
+  "originalConstructorCalldataPreserved": true,
+  "helperCreateSequencePreserved": [
+    "a5",
+    "b0",
+    "b1",
+    "c1",
+    "c2",
+    "c5"
+  ],
+  "compileArtifactsReused": true,
+  "newCompilationRequired": false,
+  "allBatchesCalldataUnder60000": true,
+  "firstBatchUnder50000": true,
+  "submissionState": "PREPARED_NOT_SUBMITTED",
+  "supersedes": [
+    "v1 two-batch proposals (nonces 24,25)",
+    "v2 three-batch proposals (nonces 24,25,26)"
+  ],
+  "warning": "Old v1/v2 Safe queue proposals may remain visible at conflicting nonces. Execute only v3 in order; do not sign or execute superseded hashes."
+}
