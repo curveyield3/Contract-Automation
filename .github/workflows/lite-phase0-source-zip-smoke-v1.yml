@@ -748,7 +748,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install --prefix .slip-deps28 --ignore-scripts --no-audit --no-fund --no-save solc@0.8.28 ethers@6.13.5 hardhat@2.26.3 @nomicfoundation/hardhat-ethers@3.1.0
+          npm install --prefix .slip-deps28 --ignore-scripts --no-audit --no-fund --no-save solc@0.8.28 ethers@6.14.4 hardhat@2.26.3 @nomicfoundation/hardhat-ethers@3.1.0
           npm install --prefix .slip-deps30 --ignore-scripts --no-audit --no-fund --no-save solc@0.8.30
       - name: Compile exact Manager, Guard, dependencies, simulations and Safe artifacts
         shell: bash
