@@ -193,7 +193,17 @@ contract DolomiteRouterV7Fixture {
     }
 }
 
+interface VmV7Fixture {
+    function prank(address who) external;
+    function deal(address who,uint256 value) external;
+}
+contract VaultFactoryV7Fixture {
+    mapping(address=>bool) public isVaultV2;
+    function allow(address vault) external {isVaultV2[vault]=true;}
+}
 contract OmniAdapterV7CompatibilityTest {
+    VmV7Fixture private constant vm=VmV7Fixture(address(uint160(uint256(keccak256('hevm cheat code'))));
+    address private constant SAFE=0x47623C62f281807D615eeb4A2CEee9d97F9D3C49;
     TokenV7Fixture token;
     ParentV7Fixture parent;
     CurveYieldOmniAdapterV7 adapter;
@@ -310,6 +320,28 @@ contract OmniAdapterV7CompatibilityTest {
         parent.deallocate(isolated,30e18);
         require(parent.allocation(adapter.keyOf(11,address(router),isolatedMarketId,address(margin)))==
             adapter.positionAssets(11,address(router),isolatedMarketId,address(margin)),'DOLOMITE_ISOLATED_DELTA');
+    }
+
+
+    function testNativeFeeDeployerCapAndOwner() public {
+        VaultFactoryV7Fixture factory=new VaultFactoryV7Fixture();
+        factory.allow(address(parent));
+        CurveYieldOmniAdapterDeployerV7 d=new CurveYieldOmniAdapterDeployerV7(address(factory),1 ether);
+        require(d.owner()==SAFE&&d.feeRecipient()==SAFE,'SAFE_OWNER_RECIPIENT');
+        require(d.maximumCreationFee()==1 ether&&d.creationFee()==0,'NATIVE_FEE_CAP');
+        try d.setCreationFee(1) {revert('WRONG_OWNER_ACCEPTED');}catch {}
+        vm.prank(SAFE);
+        try d.setCreationFee(1 ether+1){revert('FEE_OVER_CAP_ACCEPTED');}catch {}
+        vm.prank(SAFE);
+        d.setCreationFee(1 ether);
+        vm.deal(address(this),3 ether);
+        uint256 beforeSafe=SAFE.balance;
+        try d.createAdapter{value:1 ether}(address(0x1234)) {revert('INVALID_VAULT_ACCEPTED');}catch {}
+        try d.createAdapter(address(parent)) {revert('WRONG_FEE_ACCEPTED');}catch {}
+        address created=d.createAdapter{value:1 ether}(address(parent));
+        require(created.code.length!=0&&d.adapterOf(address(parent))==created,'ADAPTER_CREATED');
+        require(SAFE.balance==beforeSafe+1 ether,'NATIVE_FEE_TRANSFER');
+        try d.createAdapter{value:1 ether}(address(parent)) {revert('DUPLICATE_ACCEPTED');}catch {}
     }
 
 }
