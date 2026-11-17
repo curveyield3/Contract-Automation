@@ -1,0 +1,101 @@
+[
+  {
+    "key": "cyvlSdt",
+    "address": "0x4B4aA34e805d87458a64d8d745cF7B18e24AeACe",
+    "sourceName": "contracts/CurveYieldVlSDTToken.sol",
+    "contractName": "CurveYieldVlSDTToken",
+    "compilerVersion": "v0.8.28+commit.7893614a",
+    "sourceCount": 29,
+    "constructorArgsBytes": 32,
+    "inputBytes": 270887,
+    "dataFile": "verify-cyvlSdt-v51.json"
+  },
+  {
+    "key": "locker",
+    "address": "0x4DC535b6aD9eb381A91e472aa3f24F1FDC6Cb21b",
+    "sourceName": "contracts/CurveYieldVlSDTLocker.sol",
+    "contractName": "CurveYieldVlSDTLocker",
+    "compilerVersion": "v0.8.28+commit.7893614a",
+    "sourceCount": 29,
+    "constructorArgsBytes": 320,
+    "inputBytes": 270887,
+    "dataFile": "verify-locker-v51.json"
+  },
+  {
+    "key": "revenueStaking",
+    "address": "0x98d2e6a894ebf04B4009543aa6cCEb6417404E6F",
+    "sourceName": "contracts/CurveYieldvlSDTStaking.sol",
+    "contractName": "CurveYieldvlSDTStaking",
+    "compilerVersion": "v0.8.28+commit.7893614a",
+    "sourceCount": 29,
+    "constructorArgsBytes": 352,
+    "inputBytes": 270887,
+    "dataFile": "verify-revenueStaking-v51.json"
+  },
+  {
+    "key": "boostMerchant",
+    "address": "0x93dE71bEe573e764e8D462042888ff2598A10726",
+    "sourceName": "contracts/CurveYieldVlSDTBoostMerchant.sol",
+    "contractName": "CurveYieldVlSDTBoostMerchant",
+    "compilerVersion": "v0.8.28+commit.7893614a",
+    "sourceCount": 29,
+    "constructorArgsBytes": 96,
+    "inputBytes": 270887,
+    "dataFile": "verify-boostMerchant-v51.json"
+  },
+  {
+    "key": "revenueVault",
+    "address": "0x65847aD0eeF247D212c815aF5f80477a57Fb0AB9",
+    "sourceName": "contracts/CurveYieldVault.sol",
+    "contractName": "CurveYieldVault",
+    "compilerVersion": "v0.8.28+commit.7893614a",
+    "sourceCount": 29,
+    "constructorArgsBytes": 288,
+    "inputBytes": 270887,
+    "dataFile": "verify-revenueVault-v51.json"
+  },
+  {
+    "key": "revenueStrategy",
+    "address": "0x09139f04227a4E413869aBC2Ef1E31D9A82606fd",
+    "sourceName": "contracts/CurveYieldRevenueStrategyV20.sol",
+    "contractName": "CurveYieldRevenueStrategyV7",
+    "compilerVersion": "v0.8.28+commit.7893614a",
+    "sourceCount": 29,
+    "constructorArgsBytes": 320,
+    "inputBytes": 270887,
+    "dataFile": "verify-revenueStrategy-v51.json"
+  },
+  {
+    "key": "bribeAllocator",
+    "address": "0x70518b38ceF2118DE94BaC312A284889b1c16aa4",
+    "sourceName": "contracts/VoteMarketSingleGaugeBribeAllocator.sol",
+    "contractName": "VoteMarketSingleGaugeBribeAllocator",
+    "compilerVersion": "v0.8.28+commit.7893614a",
+    "sourceCount": 29,
+    "constructorArgsBytes": 96,
+    "inputBytes": 270887,
+    "dataFile": "verify-bribeAllocator-v51.json"
+  },
+  {
+    "key": "poLLiquidityBounds",
+    "address": "0x840fa8496e3B5Ac306281d5Bb5224fA08b5865F8",
+    "sourceName": "contracts/external_guard_v6/CurvePairOracleBounds_v6.sol",
+    "contractName": "CurvePairOracleBoundsV6",
+    "compilerVersion": "v0.8.30+commit.73712a01",
+    "sourceCount": 19,
+    "constructorArgsBytes": 0,
+    "inputBytes": 151763,
+    "dataFile": "verify-poLLiquidityBounds-v51.json"
+  },
+  {
+    "key": "poLManager",
+    "address": "0x54a71cA4F139e674fAd3B9F18cFc013d6175D677",
+    "sourceName": "contracts/PoL_Manager_Contract_v19.sol",
+    "contractName": "PoLManager",
+    "compilerVersion": "v0.8.28+commit.7893614a",
+    "sourceCount": 1,
+    "constructorArgsBytes": 416,
+    "inputBytes": 37488,
+    "dataFile": "verify-poLManager-v51.json"
+  }
+]
