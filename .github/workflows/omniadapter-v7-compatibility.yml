@@ -4,6 +4,7 @@ on:
     branches: [ethereum-omniadapter-v7-compatibility-v1]
     paths:
       - github-native-sim/morpho-ethereum-v1/CurveYieldOmniAdapterV7.sol
+      - github-native-sim/morpho-ethereum-v1/test/OmniAdapterV7Compatibility.t.sol
       - .github/workflows/omniadapter-v7-compatibility.yml
   workflow_dispatch:
 permissions:
@@ -25,7 +26,7 @@ jobs:
           cat > foundry.toml <<'TOML'
           [profile.default]
           src = "github-native-sim/morpho-ethereum-v1"
-          test = ".omni-v7-build/unused"
+          test = "github-native-sim/morpho-ethereum-v1/test"
           out = ".omni-v7-build/out"
           libs = []
           solc_version = "0.8.28"
@@ -47,10 +48,17 @@ jobs:
               print('RUNTIME_BYTES',name,size,'CREATION_BYTES',(len(created)-2)//2)
               assert size<=24576,(name,'EIP-170',size)
           PY
+      - name: Execute dedicated Vault V2 callback compatibility tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          forge test --match-path 'github-native-sim/morpho-ethereum-v1/test/OmniAdapterV7Compatibility.t.sol' -vvv 2>&1 | tee .omni-v7-build/compatibility-test.log
       - name: Archive exact compiler evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: omniadapter-v7-compilation-${{ github.run_id }}
-          path: .omni-v7-build/compile.log
+          path: |
+            .omni-v7-build/compile.log
+            .omni-v7-build/compatibility-test.log
           if-no-files-found: warn
