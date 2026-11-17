@@ -1,0 +1,87 @@
+{
+  "version": "v3",
+  "repo": "curveyield3/Contract-Automation",
+  "branch": "morpho-fraxtal-compile-v1",
+  "network": "fraxtal",
+  "chainId": 252,
+  "priorManifest": "github-native-sim/morpho-fraxtal-v1/fraxtal-irm-deployment-manifest-v2.json",
+  "sourceHeader": "CurveYield Extended Contract Header — v48",
+  "build": {
+    "runId": 43983752243,
+    "runUrl": "https://github.com/curveyield3/Contract-Automation/actions/runs/43983752243",
+    "status": "success",
+    "compiler": "v0.8.30+commit.73712a01",
+    "optimizerRuns": 200,
+    "evmVersion": "cancun",
+    "headerAppliedToAllCurrentSourceContractDeclarations": true,
+    "headeredSourceFiles": [
+      "CurveYieldMorphoIRMsV6.sol",
+      "CurveYieldTriggerMasterIRMV3.sol",
+      "CurveYieldMorphoIRMFactoriesV3.sol",
+      "CurveYieldMorphoOwnerV4.sol"
+    ],
+    "packageArtifact": "CurveYield_Fraxtal_Morpho_IRMs_v2"
+  },
+  "freshConfirmedDeployments": [
+    {
+      "name": "CurveYieldTriggerMasterIRMV3",
+      "address": "0x60b55a76c3fdc4e1b928153205c4d02fc4bf6cc0",
+      "txHash": "0x2774cc148ecd8a05b6b76dcb01e89bf069f7fef5087b1d3d32ab39b9eb9b1759",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol",
+      "receiptStatus": "0x1",
+      "publicSourceVerified": true,
+      "verifiedSourcePublished": true,
+      "explorer": "https://fraxscan.com/address/0x60b55a76c3fdc4e1b928153205c4d02fc4bf6cc0#code"
+    },
+    {
+      "name": "CurveYieldEulerUtilizationIRMV3",
+      "address": "0x324f99dbc3b5c00bb5fffeefbfc31b1c20b6926b",
+      "txHash": "0x2bb3862996a4e60ea7a3d58aa49b02a85643666498b2c094aa9f5a73bf105cc1",
+      "source": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol",
+      "receiptStatus": "0x1",
+      "publicSourceVerified": true,
+      "verifiedSourcePublished": true,
+      "explorer": "https://fraxscan.com/address/0x324f99dbc3b5c00bb5fffeefbfc31b1c20b6926b#code"
+    }
+  ],
+  "deploymentIncomplete": true,
+  "remainingIRMModels": [
+    "CurveYieldLinearUtilizationIRMV2",
+    "CurveYieldImmutableStaticIRMV2",
+    "CurveYieldGovernedStaticIRMV3",
+    "CurveYieldCollateralYieldIRMV3"
+  ],
+  "remainingFactoryModels": [
+    "CurveYieldCollateralYieldIRMFactoryV3",
+    "CurveYieldEulerUtilizationIRMFactoryV3",
+    "CurveYieldLinearUtilizationIRMFactoryV3",
+    "CurveYieldImmutableStaticIRMFactoryV3",
+    "CurveYieldGovernedStaticIRMFactoryV3",
+    "CurveYieldTriggerMasterIRMFactoryV3"
+  ],
+  "governance": {
+    "requested": "Literal copy of the actual CurveYield Morpho governance V2 source with only a factory enableIrm whitelist enhancement",
+    "blocker": "No actual CurveYieldMorphoOwnerV2 base source was found in GitHub branches checked or accessible user files; live Morpho core owner is CurveYieldMorphoOwnerV1",
+    "liveCoreOwner": "0x67f1c48a7d6dcc6c66a0ee2fc3882df63035ecb8",
+    "legacySplitter": "0xc0890482e5b65b5d8fe9947eb362642435a107f9",
+    "unapprovedHeaderedExtension": "CurveYieldMorphoOwnerV4.sol",
+    "extensionApprovedByUser": false,
+    "extensionDeployed": false,
+    "ownerSourceModificationDeferred": true
+  },
+  "safe": {
+    "address": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+    "previousProposalHash": "0x93382b1fdb27866ccc2451a687ab3485f7a9809b52a62e71fe8d5af4b5f258a7",
+    "previousProposalNonce": "2",
+    "previousProposalExecutionState": "not executed as of read",
+    "newProposalPrepared": false,
+    "newProposalSubmitted": false,
+    "reason": "Do not propose activation until exact governance V2 base is located, updated minimally, and remaining stack is deployed."
+  },
+  "verification": {
+    "sourcePublicationConfirmedCount": 2,
+    "testsExecuted": 0,
+    "sourceVerifiedOnExplorerForDeployedNewContracts": true
+  },
+  "restriction": "Do not deploy the current V4 governance extension as a substitute for the requested V2-derived V3 source, and do not activate any replacement Safe module or factory allowlist without authorization."
+}
