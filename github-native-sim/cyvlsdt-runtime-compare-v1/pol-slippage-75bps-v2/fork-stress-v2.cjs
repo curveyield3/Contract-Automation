@@ -77,12 +77,14 @@ async function sameBlockSpotMove(spotter,submit,expectedSuccess,label){
  eq(rc1.status,expectedSuccess?1:0,label+' expected execution status');
  return {blockNumber:rc1.blockNumber,status:rc1.status,gasUsed:String(rc1.gasUsed)};
 }
-async function curveDepositTrial(f,bps,pass){
+async function curveDepositTrial(f,bps){
  const checkpoint=await snap();
  const input=1000n*W;
  const quote=await f.guard.quoteDeposit(f.pool.target,0,input,75);
  const output=input*BigInt(bps)/10000n;
  const expectedLoss=(Number(quote[0]-output)/Number(quote[0]))*100;
+ const pass=output>=quote[1];
+ eq(quote[1],quote[0]*9925n/10000n,'Curve deposit minMint exactly 75bps below guard estimate');
  const beforeSdt=await f.sdt.balanceOf(f.pol.target);
  const beforeLP=await f.lp.balanceOf(f.pol.target);
  const r=await sameBlockSpotMove(
@@ -94,13 +96,15 @@ async function curveDepositTrial(f,bps,pass){
  reports.push({component:'Curve deposit',spotRateBps:bps,lossPercent:expectedLoss,pass,block:r.blockNumber,gas:r.gasUsed});
  await restore(checkpoint);
 }
-async function curveWithdrawTrial(f,bps,pass){
+async function curveWithdrawTrial(f,bps){
  const checkpoint=await snap();
  await f.pol.depositCurve(2000n*W);
  const lp=1000n*W;
  const quote=await f.guard.quoteWithdraw(f.pool.target,0,lp,75);
  const actual=lp*BigInt(bps)/10000n;
  const loss=(Number(quote[0]-actual)/Number(quote[0]))*100;
+ const pass=actual>=quote[1];
+ eq(quote[1],quote[0]*9925n/10000n,'Curve withdrawal minReceived exactly 75bps below guard estimate');
  const beforeLP=await f.lp.balanceOf(f.pol.target),beforeSDT=await f.sdt.balanceOf(f.pol.target);
  const r=await sameBlockSpotMove(
   opts=>f.pool.setSpotBps(bps,opts),
@@ -115,8 +119,9 @@ async function uniAddTrial(f,bps,pass){
  const amount0=1000n*W,amount1=1000n*W;
  const q=await f.guard.quoteUniV3Deposit(f.nft.target,7,amount0,amount1);
  check(q[0]>0n&&q[1]>0n,'Uniswap guard liquidity quote valid');
- eq(q[1],q[0]*9925n/10000n,'Uniswap mint minLiquidity 75 bps');
- await f.nft.setDepositReference(q[0]);
+ eq(q[4],q[2]*9925n/10000n,'guard 75bps minAmount0Used');
+ eq(q[5],q[3]*9925n/10000n,'guard 75bps minAmount1Used');
+ await f.nft.setDepositReference(q[0],q[2],q[3]);
  const before0=await f.token0.balanceOf(f.pol.target),before1=await f.token1.balanceOf(f.pol.target);
  const beforeLiquidity=(await f.nft.positions(7)).liquidity;
  const r=await sameBlockSpotMove(
@@ -127,6 +132,8 @@ async function uniAddTrial(f,bps,pass){
   eq(await f.token1.balanceOf(f.pol.target),before1,'reverted NFT add token1 safe');
   eq((await f.nft.positions(7)).liquidity,beforeLiquidity,'reverted NFT add liquidity unchanged');
  }else{
+  eq(await f.nft.lastDepositDesired0(),amount0,'same amount0Desired provided to guard and NFT');
+  eq(await f.nft.lastDepositDesired1(),amount1,'same amount1Desired provided to guard and NFT');
   eq(await f.nft.lastDepositMin0(),q[4],'actual NFT call amount0Min forwarded from guard');
   eq(await f.nft.lastDepositMin1(),q[5],'actual NFT call amount1Min forwarded from guard');
   check((await f.nft.positions(7)).liquidity>beforeLiquidity,'NFT new liquidity minted');
@@ -220,8 +227,8 @@ async function main(){
  eq(await f.pol.SDT_USDC_SWAP_SLIPPAGE_BPS(),200,'SDT/USDC router 200 bps constant');
  for(const bps of [10000,9926,9925,9924,9860,9700,9500,9000]){
   const pass=bps>=9925;
-  await curveDepositTrial(f,bps,pass);
-  await curveWithdrawTrial(f,bps,pass);
+  await curveDepositTrial(f,bps);
+  await curveWithdrawTrial(f,bps);
   await uniAddTrial(f,bps,pass);
   await uniRemoveTrial(f,bps,pass);
  }
