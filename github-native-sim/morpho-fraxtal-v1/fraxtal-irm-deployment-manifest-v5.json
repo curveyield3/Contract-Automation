@@ -1,0 +1,70 @@
+{
+  "version": "v5",
+  "network": "fraxtal",
+  "chainId": 252,
+  "repository": "curveyield3/Contract-Automation",
+  "branch": "morpho-fraxtal-compile-v1",
+  "previousManifest": "github-native-sim/morpho-fraxtal-v1/fraxtal-irm-deployment-manifest-v4.json",
+  "change": "CurveYieldMorphoFeeSplitterV3: Safe-controlled configurable governance controller without changing V2 fee/accounting functions",
+  "source": {
+    "governanceAndSplitter": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV4.sol",
+    "governanceContract": "CurveYieldMorphoOwnerV3",
+    "splitterContract": "CurveYieldMorphoFeeSplitterV3",
+    "factories": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV5.sol",
+    "modelSource": "github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol",
+    "triggerMasterSource": "github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol",
+    "header": "CurveYield Extended Contract Header v48"
+  },
+  "ownership": {
+    "safe": "0x47623c62f281807d615eeb4a2ceee9d97f9d3c49",
+    "splitterInitialOwnerMustEqualGovernanceSafe": true,
+    "splitterSafeImmutable": true,
+    "operationalOwnershipTransferFunctionsPreserved": true,
+    "governanceSelectionSafeOnly": true
+  },
+  "controller": {
+    "function": "setGovernance(address)",
+    "requires": "caller is immutable Safe; target is deployed contract with same Morpho core, same Safe, and splitter() equal to new V3 splitter address",
+    "newPointerStorage": "mutable",
+    "previousPointerStorage": "immutable",
+    "feeAndAccountingLogicUnchanged": true,
+    "noNewAccountingOrMigrationFunctions": true
+  },
+  "build": {
+    "status": "success",
+    "workflowRunId": 43986130699,
+    "url": "https://github.com/curveyield3/Contract-Automation/actions/runs/43986130699",
+    "sha": "14a8745702316768ac46964e95dc48ef9660afcc",
+    "compiler": "0.8.30+commit.73712a01",
+    "optimizerRuns": 200,
+    "evmVersion": "cancun",
+    "splitterRuntimeBytes": 6433,
+    "ownerRuntimeBytes": 2773,
+    "factoryCount": 6,
+    "artifactName": "CurveYield_Fraxtal_Morpho_IRMs_v4"
+  },
+  "deployment": {
+    "currentMorphoCore": "0xcce2862aed7f2248063c3dcf6906582166c2b6ca",
+    "currentMorphoOwner": "0x67f1c48a7d6dcc6c66a0ee2fc3882df63035ecb8",
+    "currentFeeRecipient": "0xc0890482e5b65b5d8fe9947eb362642435a107f9",
+    "newSplitterV3Deployed": false,
+    "newOwnerV3Deployed": false,
+    "newFactoriesV5Deployed": false,
+    "newSafeProposalSubmitted": false,
+    "previousSafeNonce": 2,
+    "previousProposalHash": "0x93382b1fdb27866ccc2451a687ab3485f7a9809b52a62e71fe8d5af4b5f258a7",
+    "previousProposalObsolete": true,
+    "priorTransactionWriteBlock": "Blockchain deployment request for corrected V3 owner was blocked by transaction safety checks in preceding work. No bypass or new deployment attempted in this update."
+  },
+  "migrationConsiderations": [
+    "The existing V2 splitter has an immutable governance pointer, so V3 must be deployed separately; the old splitter cannot be converted in place.",
+    "Initialize a fresh V3 splitter with Safe owner and V3 governance; V3 governance must call configureSplitter once for it before being used as market controller.",
+    "Set new fee recipient and transfer Morpho ownership with an approved Safe transaction sequence only after new controller/splitter are deployed and configured.",
+    "Existing splitter fee entitlements, creatorMarket configuration and balances do not automatically migrate. Preserve old claim rights, and separately address historical creator allocations if necessary.",
+    "Do not execute obsolete Safe proposal targeting the previous module."
+  ],
+  "tests": {
+    "created": false,
+    "executed": false
+  }
+}
