@@ -18,6 +18,8 @@ on:
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/pol-morpho-v20/PoL_Manager_Contract_v20.sol'
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/pol-morpho-v20/build-v1.cjs'
       - 'github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/**'
+      - 'github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/*.sol'
+      - 'github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/*.cjs'
   workflow_dispatch:
 
 permissions:
@@ -29,7 +31,7 @@ concurrency:
 
 jobs:
   source-zip-smoke:
-    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1' && github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1' && github.ref != 'refs/heads/cyvlsdt-v49-adversarial-v1' && github.ref != 'refs/heads/cyvlsdt-v51-safe-3-3-3-v3' && github.ref != 'refs/heads/cyvlsdt-pol-morpho-v20-v1'
+    if: github.ref != 'refs/heads/cyvlsdt-v48-compile-v1' && github.ref != 'refs/heads/cyvlsdt-runtime-compare-v1' && github.ref != 'refs/heads/cyvlsdt-v49-adversarial-v1' && github.ref != 'refs/heads/cyvlsdt-v51-safe-3-3-3-v3' && github.ref != 'refs/heads/cyvlsdt-pol-morpho-v20-v1' && github.ref != 'refs/heads/cyvlsdt-pol-v22-guard-v8-configurable-v1'
     name: ${{ matrix.label }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -733,8 +735,8 @@ jobs:
           retention-days: 90
 
   pol-slippage-v21-v7-fork:
-    if: github.ref == 'refs/heads/cyvlsdt-pol-slippage-75bps-v2'
-    name: PoL v21 + guard v7 75/200-bps Ethereum fork proof
+    if: github.ref == 'refs/heads/cyvlsdt-pol-v22-guard-v8-configurable-v1'
+    name: PoL v22 + guard v8 exact Curve V6 ABI and configurable-slippage Ethereum fork proof
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -756,7 +758,7 @@ jobs:
           set -euo pipefail
           export NODE_PATH="$GITHUB_WORKSPACE/.slip-deps28/node_modules"
           export SOLC30_PATH="$GITHUB_WORKSPACE/.slip-deps30/node_modules/solc"
-          node github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/build-v2.cjs
+          node github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/build-v4.cjs
       - name: Execute mainnet-fork simultaneous adverse-price scenarios
         shell: bash
         env:
@@ -779,26 +781,28 @@ jobs:
           HARDHAT_CONFIG
           export NODE_PATH="$GITHUB_WORKSPACE/.slip-deps28/node_modules"
           export HARDHAT_CONFIG="$GITHUB_WORKSPACE/hardhat.config.cjs"
-          node github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/fork-stress-v2.cjs \
-            2>&1 | tee github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/outputs-v2/fork-run.log
-          test -s github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/outputs-v2/Fork-Stress-Results-v2.json
+          node github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/fork-stress-v4.cjs \
+            2>&1 | tee github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v4/fork-run.log
+          test -s github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v4/Fork-Stress-Results-v2.json
       - name: Preserve compiled artifacts, exact calldata and fork receipts on GitHub
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/outputs-v2/
-          git commit -m 'Preserve v21+v7 75/200-bps compiled artifacts and adversarial fork evidence v2'
-          git push origin HEAD:cyvlsdt-pol-slippage-75bps-v2
+          git add github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v4/
+          git commit -m 'Preserve PoL v22 and guard v8 compiled artifacts, exact V6 Curve ABI and fork evidence v4'
+          git push origin HEAD:cyvlsdt-pol-v22-guard-v8-configurable-v1
       - name: Upload v2 compiled and fork-tested deployment package
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield-PoL-v21-BoundsV7-75bps-ForkProof-v2
+          name: CurveYield-PoL-v22-GuardV8-Configurable-Safe-Handoff-v4
           path: |
-            github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/*.sol
-            github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/*.cjs
-            github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/outputs-v2/
+            github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/*.sol
+            github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/UniV3TickMath_v6.sol
+            github-native-sim/cyvlsdt-runtime-compare-v1/pol-slippage-75bps-v2/StressSlippageHarness_v2.sol
+            github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/*.cjs
+            github-native-sim/cyvlsdt-runtime-compare-v1/pol-configurable-v8-v4/outputs-v4/
           if-no-files-found: warn
           retention-days: 90
