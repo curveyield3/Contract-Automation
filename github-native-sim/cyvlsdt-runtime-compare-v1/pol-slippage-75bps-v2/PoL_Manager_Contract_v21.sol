@@ -378,12 +378,16 @@ contract PoLManager {
         if(reference==0)revert Slippage();
         uint256 minimum=reference*(BPS-limit)/BPS;
         if(minimum==0)revert Slippage();
+        uint256 previousOutputBalance=_balance(to);
         received=IPoLRouter(omniRouter).swapExactInput(
             from,to,amount,minimum,address(this),block.timestamp
         );
-        // Deliberately check actual returned output as well: a future or
-        // noncompliant router implementation must not silently bypass minOut.
-        if(received<minimum)revert Slippage();
+        // Also measure actual transferred tokens; do not trust a router's return
+        // value or its claimed enforcement of minNetAmountOut.
+        uint256 currentOutputBalance=_balance(to);
+        if(currentOutputBalance<previousOutputBalance)revert Slippage();
+        uint256 actual=currentOutputBalance-previousOutputBalance;
+        if(received!=actual||actual<minimum)revert Slippage();
     }
     function _convert(address from,address to,uint256 amount) private returns(uint256){
         return amount==0?0:from==to?amount:_swap(from,to,amount);
