@@ -1,0 +1,89 @@
+{
+  "version": 51,
+  "safe": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "stages": [
+    {
+      "stage": 1,
+      "to": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
+      "hash": "0x4835001220cd76814f2d314f22dcb8e5e6abdf3c724096a1964859b2e73b3ebd",
+      "transactions": 4,
+      "totalCalldataBytes": 51428,
+      "labels": [
+        "deploy:cyvlSdt",
+        "deploy:locker",
+        "deploy:revenueStaking",
+        "deploy:boostMerchant"
+      ]
+    },
+    {
+      "stage": 2,
+      "to": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
+      "hash": "0xf47e657d4b615a61185991e6b24ae42e5572a9df2653a6bbed182553fd6f2f3c",
+      "transactions": 3,
+      "totalCalldataBytes": 35364,
+      "labels": [
+        "deploy:revenueVault",
+        "deploy:revenueStrategy",
+        "deploy:bribeAllocator"
+      ]
+    },
+    {
+      "stage": 3,
+      "to": "0x40a2accbd92bca938b02010e17a5b8929b49130d",
+      "hash": "0x25ac761babc497894bcb077600ecba86e1518a3d981205a1eaff8de7af1bcb06",
+      "transactions": 16,
+      "totalCalldataBytes": 37476,
+      "labels": [
+        "deploy:poLLiquidityBounds",
+        "deploy:poLManager",
+        "configure:cyvlSdt.setLocker",
+        "configure:locker.configureSystem",
+        "configure:revenueStaking.addRewardToken",
+        "configure:revenueStaking.addRewardToken",
+        "configure:revenueStaking.addRewardToken",
+        "configure:revenueStaking.setImmediateWithdrawFeePpm",
+        "configure:bribeAllocator.setMinimumReturnWad",
+        "configure:revenueStaking.setLpBribeRevenueShare",
+        "configure:locker.setPoLDepositShare",
+        "configure:poLManager.setLiquidityBounds",
+        "configure:poLManager.setCurveSlippageBps",
+        "configure:poLManager.setProfitRecipient",
+        "configure:revenueVault.setStrategy",
+        "configure:locker.setMarketplaceOperator"
+      ]
+    }
+  ],
+  "addresses": {
+    "cyvlSdt": "0x4B4aA34e805d87458a64d8d745cF7B18e24AeACe",
+    "locker": "0x4DC535b6aD9eb381A91e472aa3f24F1FDC6Cb21b",
+    "revenueStaking": "0x98d2e6a894ebf04B4009543aa6cCEb6417404E6F",
+    "boostMerchant": "0x93dE71bEe573e764e8D462042888ff2598A10726",
+    "revenueVault": "0x65847aD0eeF247D212c815aF5f80477a57Fb0AB9",
+    "revenueStrategy": "0x09139f04227a4E413869aBC2Ef1E31D9A82606fd",
+    "bribeAllocator": "0x70518b38ceF2118DE94BaC312A284889b1c16aa4",
+    "poLLiquidityBounds": "0x840fa8496e3B5Ac306281d5Bb5224fA08b5865F8",
+    "poLManager": "0x54a71cA4F139e674fAd3B9F18cFc013d6175D677"
+  },
+  "disabledUntilConfigured": true,
+  "intentionallyDeferred": {
+    "stableSwapPool": "not yet deployed",
+    "curvePool": null,
+    "curveGauge": null,
+    "uniNftManager": null,
+    "yearnVaults": [
+      null,
+      null,
+      null
+    ],
+    "eulerVaults": [
+      null,
+      null
+    ],
+    "merchantSaleRates": {
+      "postPricePerWeek": null,
+      "minimumFillPricePerWeek": null,
+      "sdtWeiPerUsdc": null
+    },
+    "bribeGauge": null
+  }
+}
