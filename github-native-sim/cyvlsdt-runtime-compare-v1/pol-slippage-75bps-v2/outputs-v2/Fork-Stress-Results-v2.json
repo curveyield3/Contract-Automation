@@ -1,0 +1,389 @@
+{
+  "scenarioCount": 53,
+  "successful": 23,
+  "expectedReverts": 30,
+  "assertions": 388,
+  "mainnetForkBlock": 26431363,
+  "policy": {
+    "curve": 75,
+    "uniswapNFT": 75,
+    "nftBalancingSwap": 75,
+    "sdtUsdcBothDirections": 200
+  },
+  "realEthereumCodeChecked": [
+    "0x54a71cA4F139e674fAd3B9F18cFc013d6175D677",
+    "0x840fa8496e3B5Ac306281d5Bb5224fA08b5865F8"
+  ],
+  "tests": [
+    {
+      "component": "Curve deposit",
+      "spotRateBps": 10000,
+      "lossPercent": 0,
+      "pass": true,
+      "block": 26431385,
+      "gas": "350014"
+    },
+    {
+      "component": "Curve withdrawal",
+      "spotRateBps": 10000,
+      "lossPercent": 0,
+      "pass": true,
+      "block": 26431386,
+      "gas": "302913"
+    },
+    {
+      "component": "Uniswap NFT deposit",
+      "spotRateBps": 10000,
+      "pass": true,
+      "block": 26431386,
+      "gas": "264833",
+      "estimateLiquidity": "33837499809738371427853",
+      "minLiquidity": "33583718561165333642144"
+    },
+    {
+      "component": "Uniswap NFT withdrawal",
+      "spotRateBps": 10000,
+      "pass": true,
+      "block": 26431386,
+      "gas": "204593"
+    },
+    {
+      "component": "Curve deposit",
+      "spotRateBps": 9926,
+      "lossPercent": 0.74,
+      "pass": true,
+      "block": 26431385,
+      "gas": "350014"
+    },
+    {
+      "component": "Curve withdrawal",
+      "spotRateBps": 9926,
+      "lossPercent": 0.74,
+      "pass": true,
+      "block": 26431386,
+      "gas": "302913"
+    },
+    {
+      "component": "Uniswap NFT deposit",
+      "spotRateBps": 9926,
+      "pass": true,
+      "block": 26431386,
+      "gas": "264833",
+      "estimateLiquidity": "33837499809738371427853",
+      "minLiquidity": "33583718561165333642144"
+    },
+    {
+      "component": "Uniswap NFT withdrawal",
+      "spotRateBps": 9926,
+      "pass": true,
+      "block": 26431386,
+      "gas": "204593"
+    },
+    {
+      "component": "Curve deposit",
+      "spotRateBps": 9925,
+      "lossPercent": 0.75,
+      "pass": true,
+      "block": 26431385,
+      "gas": "350014"
+    },
+    {
+      "component": "Curve withdrawal",
+      "spotRateBps": 9925,
+      "lossPercent": 0.75,
+      "pass": true,
+      "block": 26431386,
+      "gas": "302913"
+    },
+    {
+      "component": "Uniswap NFT deposit",
+      "spotRateBps": 9925,
+      "pass": true,
+      "block": 26431386,
+      "gas": "264833",
+      "estimateLiquidity": "33837499809738371427853",
+      "minLiquidity": "33583718561165333642144"
+    },
+    {
+      "component": "Uniswap NFT withdrawal",
+      "spotRateBps": 9925,
+      "pass": true,
+      "block": 26431386,
+      "gas": "204593"
+    },
+    {
+      "component": "Curve deposit",
+      "spotRateBps": 9924,
+      "lossPercent": 0.76,
+      "pass": false,
+      "block": 26431385,
+      "gas": "302720"
+    },
+    {
+      "component": "Curve withdrawal",
+      "spotRateBps": 9924,
+      "lossPercent": 0.76,
+      "pass": false,
+      "block": 26431386,
+      "gas": "289881"
+    },
+    {
+      "component": "Uniswap NFT deposit",
+      "spotRateBps": 9924,
+      "pass": false,
+      "block": 26431386,
+      "gas": "197379",
+      "estimateLiquidity": "33837499809738371427853",
+      "minLiquidity": "33583718561165333642144"
+    },
+    {
+      "component": "Uniswap NFT withdrawal",
+      "spotRateBps": 9924,
+      "pass": false,
+      "block": 26431386,
+      "gas": "170934"
+    },
+    {
+      "component": "Curve deposit",
+      "spotRateBps": 9860,
+      "lossPercent": 1.4000000000000001,
+      "pass": false,
+      "block": 26431385,
+      "gas": "302720"
+    },
+    {
+      "component": "Curve withdrawal",
+      "spotRateBps": 9860,
+      "lossPercent": 1.4000000000000001,
+      "pass": false,
+      "block": 26431386,
+      "gas": "289881"
+    },
+    {
+      "component": "Uniswap NFT deposit",
+      "spotRateBps": 9860,
+      "pass": false,
+      "block": 26431386,
+      "gas": "197379",
+      "estimateLiquidity": "33837499809738371427853",
+      "minLiquidity": "33583718561165333642144"
+    },
+    {
+      "component": "Uniswap NFT withdrawal",
+      "spotRateBps": 9860,
+      "pass": false,
+      "block": 26431386,
+      "gas": "170934"
+    },
+    {
+      "component": "Curve deposit",
+      "spotRateBps": 9700,
+      "lossPercent": 3,
+      "pass": false,
+      "block": 26431385,
+      "gas": "302720"
+    },
+    {
+      "component": "Curve withdrawal",
+      "spotRateBps": 9700,
+      "lossPercent": 3,
+      "pass": false,
+      "block": 26431386,
+      "gas": "289881"
+    },
+    {
+      "component": "Uniswap NFT deposit",
+      "spotRateBps": 9700,
+      "pass": false,
+      "block": 26431386,
+      "gas": "197379",
+      "estimateLiquidity": "33837499809738371427853",
+      "minLiquidity": "33583718561165333642144"
+    },
+    {
+      "component": "Uniswap NFT withdrawal",
+      "spotRateBps": 9700,
+      "pass": false,
+      "block": 26431386,
+      "gas": "170934"
+    },
+    {
+      "component": "Curve deposit",
+      "spotRateBps": 9500,
+      "lossPercent": 5,
+      "pass": false,
+      "block": 26431385,
+      "gas": "302720"
+    },
+    {
+      "component": "Curve withdrawal",
+      "spotRateBps": 9500,
+      "lossPercent": 5,
+      "pass": false,
+      "block": 26431386,
+      "gas": "289881"
+    },
+    {
+      "component": "Uniswap NFT deposit",
+      "spotRateBps": 9500,
+      "pass": false,
+      "block": 26431386,
+      "gas": "197379",
+      "estimateLiquidity": "33837499809738371427853",
+      "minLiquidity": "33583718561165333642144"
+    },
+    {
+      "component": "Uniswap NFT withdrawal",
+      "spotRateBps": 9500,
+      "pass": false,
+      "block": 26431386,
+      "gas": "170934"
+    },
+    {
+      "component": "Curve deposit",
+      "spotRateBps": 9000,
+      "lossPercent": 10,
+      "pass": false,
+      "block": 26431385,
+      "gas": "302720"
+    },
+    {
+      "component": "Curve withdrawal",
+      "spotRateBps": 9000,
+      "lossPercent": 10,
+      "pass": false,
+      "block": 26431386,
+      "gas": "289881"
+    },
+    {
+      "component": "Uniswap NFT deposit",
+      "spotRateBps": 9000,
+      "pass": false,
+      "block": 26431386,
+      "gas": "197379",
+      "estimateLiquidity": "33837499809738371427853",
+      "minLiquidity": "33583718561165333642144"
+    },
+    {
+      "component": "Uniswap NFT withdrawal",
+      "spotRateBps": 9000,
+      "pass": false,
+      "block": 26431386,
+      "gas": "170934"
+    },
+    {
+      "component": "Uniswap NFT balancing swap",
+      "spotRateBps": 10000,
+      "pass": true,
+      "lying": false
+    },
+    {
+      "component": "Uniswap NFT balancing swap",
+      "spotRateBps": 9926,
+      "pass": true,
+      "lying": false
+    },
+    {
+      "component": "Uniswap NFT balancing swap",
+      "spotRateBps": 9925,
+      "pass": true,
+      "lying": false
+    },
+    {
+      "component": "Uniswap NFT balancing swap",
+      "spotRateBps": 9924,
+      "pass": false,
+      "lying": false
+    },
+    {
+      "component": "Uniswap NFT balancing swap",
+      "spotRateBps": 9860,
+      "pass": false,
+      "lying": false
+    },
+    {
+      "component": "Uniswap NFT balancing swap",
+      "spotRateBps": 9700,
+      "pass": false,
+      "lying": false
+    },
+    {
+      "component": "Uniswap NFT balancing swap",
+      "spotRateBps": 9500,
+      "pass": false,
+      "lying": false
+    },
+    {
+      "component": "Uniswap NFT balancing swap",
+      "spotRateBps": 9000,
+      "pass": false,
+      "lying": false
+    },
+    {
+      "component": "Uniswap NFT swap dishonest router",
+      "spotRateBps": 9000,
+      "pass": false,
+      "lying": true
+    },
+    {
+      "component": "SDT to USDC",
+      "spotRateBps": 10000,
+      "pass": true
+    },
+    {
+      "component": "SDT to USDC",
+      "spotRateBps": 9801,
+      "pass": true
+    },
+    {
+      "component": "SDT to USDC",
+      "spotRateBps": 9800,
+      "pass": true
+    },
+    {
+      "component": "SDT to USDC",
+      "spotRateBps": 9799,
+      "pass": false
+    },
+    {
+      "component": "SDT to USDC",
+      "spotRateBps": 9860,
+      "pass": true
+    },
+    {
+      "component": "SDT to USDC",
+      "spotRateBps": 9500,
+      "pass": false
+    },
+    {
+      "component": "USDC to SDT",
+      "spotRateBps": 10000,
+      "pass": true
+    },
+    {
+      "component": "USDC to SDT",
+      "spotRateBps": 9801,
+      "pass": true
+    },
+    {
+      "component": "USDC to SDT",
+      "spotRateBps": 9800,
+      "pass": true
+    },
+    {
+      "component": "USDC to SDT",
+      "spotRateBps": 9799,
+      "pass": false
+    },
+    {
+      "component": "USDC to SDT",
+      "spotRateBps": 9860,
+      "pass": true
+    },
+    {
+      "component": "USDC to SDT",
+      "spotRateBps": 9500,
+      "pass": false
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "version": "v2",
+  "managerSourceSha256": "676d2aa7ce63a13c7a25f1725f04bec8011682825da79f409efb408f07007a98",
+  "guardSourceSha256": "e960f54e01e0c7d29b3b5a05354c0722f525093359205b37e838f722be317eed",
+  "dependencySourceSha256": "6fb5834c4f3108a5bd74cc5f37d5788878628504b8818cdf02988038ab7d082a",
+  "compilerManager": "0.8.28+commit.7893614a.Emscripten.clang",
+  "compilerGuard": "0.8.30+commit.73712a01.Emscripten.clang",
+  "managerRuntimeBytes": 21687,
+  "guardRuntimeBytes": 10681,
+  "predictedManager": "0xc93c115f214E653515F3DFA3d77a31D22f06A10b",
+  "predictedGuard": "0x2EB8F71B47Ea9FEA6bb08e9c3284Ff43D8193e83",
+  "safeActions": 6,
+  "multiSendBytes": 37028,
+  "deploymentAuthorized": false,
+  "risk": "Route availability currently unconfigured; 2% SDT/USDC limit is enforced as a maximum in PoL, not proof Router has routes set. Uniswap NFT must be configured separately after NFT/pool exist."
+}
