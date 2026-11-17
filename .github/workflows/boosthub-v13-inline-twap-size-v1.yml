@@ -199,9 +199,9 @@ jobs:
                                    'runtimeBytecode':runtime,'metadata':artifact.get('metadata')}
               record['deployableArtifacts']=artifacts
           content=base64.b64encode((json.dumps(record,indent=2)+'\n').encode()).decode()
-          payload={'message':'Record lean CurveYield OmniAdapter V4 single-contract deployment bytecode v5',
+          payload={'message':'Record lean CurveYield OmniAdapter V4 single-contract deployment bytecode v6',
                    'branch':os.environ['GITHUB_REF_NAME'],'content':content}
           Path('.morpho-compile/receipt-request.json').write_text(json.dumps(payload))
           print('COMPILATION_RECEIPT',record['status'],record['workflowRunUrl'])
           PY
-          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-ethereum-v1/compilation-receipt-v5.json" --input .morpho-compile/receipt-request.json
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/github-native-sim/morpho-ethereum-v1/compilation-receipt-v6.json" --input .morpho-compile/receipt-request.json
