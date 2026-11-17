@@ -1,0 +1,42 @@
+name: CurveYield OmniAdapter V7 Compatibility
+on:
+  push:
+    branches: [ethereum-omniadapter-v7-compatibility-v1]
+    paths:
+      - github-native-sim/morpho-ethereum-v1/CurveYieldOmniAdapterV7.sol
+      - .github/workflows/omniadapter-v7-compatibility.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile-and-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing pinned compiler and ethers
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile V7 source and enforce runtime limit
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import solc from 'solc';
+          const path='github-native-sim/morpho-ethereum-v1/CurveYieldOmniAdapterV7.sol';
+          const source=fs.readFileSync(path,'utf8');
+          const input={language:'Solidity',sources:{[path]:{content:source}},settings:{optimizer:{enabled:true,runs:200},evmVersion:'cancun',outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object']}}}};
+          const output=JSON.parse(solc.compile(JSON.stringify(input)));
+          for(const x of output.errors??[])console.log(x.formattedMessage);
+          if((output.errors??[]).some(x=>x.severity==='error'))process.exit(1);
+          const contracts=output.contracts?.[path]??{};
+          for(const name of ['CurveYieldOmniAdapterV7','CurveYieldOmniAdapterDeployerV7']){
+            const cc=contracts[name];
+            if(!cc)throw new Error('Missing '+name);
+            const size=cc.evm.deployedBytecode.object.length/2;
+            console.log(name,'runtimeBytes',size,'creationBytes',cc.evm.bytecode.object.length/2);
+            if(size>24576)throw new Error('EIP-170 limit '+name);
+          }
+          NODE
