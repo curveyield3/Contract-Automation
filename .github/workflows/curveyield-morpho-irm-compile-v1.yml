@@ -1,4 +1,4 @@
-name: CurveYield Fraxtal Morpho IRM Compile v17
+name: CurveYield Fraxtal Morpho IRM Compile v18
 
 # Compile-only validation. No tests, deployments, broadcast or RPC use.
 on:
@@ -10,7 +10,9 @@ on:
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV7.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV6.sol'
-      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV2.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV3.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v1.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v2.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV5.sol'
       - '.github/workflows/curveyield-morpho-irm-compile-v1.yml'
   workflow_dispatch:
@@ -42,10 +44,12 @@ jobs:
           const master = 'github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol';
           const factories = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV6.sol';
           const governor = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV5.sol';
-          const omni = 'github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV2.sol';
+          const omni = 'github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV3.sol';
+          const marketV1 = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v1.sol';
+          const marketV2 = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v2.sol';
           const input = {
             language: 'Solidity',
-            sources: { [path]: { content: fs.readFileSync(path, 'utf8') }, [candidate]: { content: fs.readFileSync(candidate, 'utf8') }, [master]: { content: fs.readFileSync(master, 'utf8') }, [factories]: { content: fs.readFileSync(factories, 'utf8') }, [governor]: { content: fs.readFileSync(governor, 'utf8') }, [omni]: { content: fs.readFileSync(omni, 'utf8') } },
+            sources: { [path]: { content: fs.readFileSync(path, 'utf8') }, [candidate]: { content: fs.readFileSync(candidate, 'utf8') }, [master]: { content: fs.readFileSync(master, 'utf8') }, [factories]: { content: fs.readFileSync(factories, 'utf8') }, [governor]: { content: fs.readFileSync(governor, 'utf8') }, [omni]: { content: fs.readFileSync(omni, 'utf8') }, [marketV1]: { content: fs.readFileSync(marketV1, 'utf8') }, [marketV2]: { content: fs.readFileSync(marketV2, 'utf8') } },
             settings: {
               optimizer: { enabled: true, runs: 200 },
               evmVersion: 'cancun',
@@ -59,7 +63,7 @@ jobs:
           }
           const errors = (output.errors ?? []).filter(e => e.severity === 'error');
           if (errors.length) process.exit(1);
-          // Compile-only comparison; V7 bounded-math optimized models are used by OmniFactory V2.
+          // Compile-only comparison; V7 bounded-math optimized models are used by OmniFactory V3.
           const oldIrms = output.contracts?.[path] ?? {};
           const optIrms = output.contracts?.[candidate] ?? {};
           for (const name of Object.keys(oldIrms)) {
@@ -72,6 +76,27 @@ jobs:
               process.exitCode = 1;
             }
           }
+          const splitLegacy = output.contracts?.[governor]?.CurveYieldMorphoFeeSplitterV3;
+          const splitA = output.contracts?.[marketV1]?.CurveYieldMarketFactory;
+          const splitB = output.contracts?.[marketV2]?.CurveYieldMarketFactory;
+          if (!splitA || !splitB || !splitLegacy) { console.error('Missing MarketFactory compilation'); process.exit(1); }
+          const sz = c => c.evm.deployedBytecode.object.length / 2;
+          console.log('CY_MARKET_FACTORY_SIZES=' + [sz(splitLegacy),sz(splitA),sz(splitB)].join(','));
+          console.log('CY_MARKET_FACTORY_CREATION_SIZES=' + [splitA.evm.bytecode.object.length/2,splitB.evm.bytecode.object.length/2].join(','));
+          console.log('CY_MARKET_FACTORY_ABI_ENTRIES=' + [splitA.abi.length,splitB.abi.length].join(','));
+          // Separate viaIR optimizer check, using the same deployed-source Solidity compiler.
+          const irInput = {
+            language: 'Solidity',
+            sources: { [governor]: input.sources[governor], [marketV2]: input.sources[marketV2] },
+            settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true, evmVersion: 'cancun',
+              outputSelection: { '*': { '*': ['evm.deployedBytecode.object'] } } }
+          };
+          const irOutput = JSON.parse(solc.compile(JSON.stringify(irInput)));
+          for (const err of irOutput.errors ?? []) { if (err.severity === 'error') console.error(err.formattedMessage); }
+          if ((irOutput.errors ?? []).some(e => e.severity === 'error')) process.exit(1);
+          const irContract = irOutput.contracts?.[marketV2]?.CurveYieldMarketFactory;
+          if (!irContract) { console.error('Missing viaIR MarketFactory'); process.exit(1); }
+          console.log('CY_MARKET_FACTORY_VIAIR_RUNTIME=' + irContract.evm.deployedBytecode.object.length / 2);
           const contracts = { ...(output.contracts?.[path] ?? {}), ...(output.contracts?.[master] ?? {}), ...(output.contracts?.[factories] ?? {}), ...(output.contracts?.[governor] ?? {}), ...(output.contracts?.[omni] ?? {}) };
           const models = Object.entries(contracts).filter(([name]) => name.startsWith('CurveYield'));
           if (models.length !== 18) {
@@ -90,7 +115,7 @@ jobs:
           for (const [name, contract] of models) {
             if (name === 'CurveYieldIrmBase' || name === 'CurveYieldIRMFactoryBaseV6') continue;
             const creation = contract.evm.bytecode.object;
-            if (name === 'CurveYieldOmniIRMFactoryV2') {
+            if (name === 'CurveYieldOmniIRMFactoryV3') {
               const initBytes = creation.length / 2;
               console.log('CY_OMNI_CREATION_BYTES=' + initBytes);
               if (initBytes > 49152) { console.error('OmniFactory EIP-3860 initcode limit exceeded'); process.exitCode = 1; }
@@ -108,14 +133,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PACKAGE='CurveYield_Fraxtal_Morpho_IRMs_v8'
+          PACKAGE='CurveYield_Fraxtal_Morpho_IRMs_v9'
           ROOT="$RUNNER_TEMP/$PACKAGE"
           mkdir -p "$ROOT/contracts" "$ROOT/build"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol "$ROOT/contracts/"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV7.sol "$ROOT/contracts/"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldTriggerMasterIRMV3.sol "$ROOT/contracts/"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMFactoriesV6.sol "$ROOT/contracts/"
-          cp github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV2.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV3.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v1.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v2.sol "$ROOT/contracts/"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV5.sol "$ROOT/contracts/"
           cp .github/workflows/curveyield-morpho-irm-compile-v1.yml "$ROOT/build/compilation-workflow.yml"
           cat > "$ROOT/foundry.toml" <<'TOML'
@@ -128,10 +155,10 @@ jobs:
           optimizer_runs = 200
           evm_version = "cancun"
           TOML
-          cat > "$ROOT/README_v8.md" <<'MD'
-          # CurveYield Fraxtal Morpho IRM source package v8
+          cat > "$ROOT/README_v9.md" <<'MD'
+          # CurveYield Fraxtal Morpho IRM source package v9
 
-          Standalone OmniFactory V2 compiles against optimized IRMs V7 and
+          Standalone OmniFactory V3 compiles against optimized IRMs V7 and
           unchanged TriggerMaster V3. Original IRMs V6 are retained as
           benchmark references, not used by the new standalone factory.
           Existing SPDX license identifiers are preserved.
@@ -164,9 +191,9 @@ jobs:
           MD
           (
             cd "$ROOT"
-            sha256sum contracts/*.sol > SOURCE_SHA256SUMS_v8.txt
+            sha256sum contracts/*.sol > SOURCE_SHA256SUMS_v9.txt
             printf 'repository=curveyield3/Contract-Automation\nbranch=morpho-fraxtal-compile-v1\ncommit=%s\nworkflow_run=%s\ncompiler=solc 0.8.30\noptimizer_runs=200\nevm_version=cancun\n' \
-              "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD_PROVENANCE_v8.txt
+              "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD_PROVENANCE_v9.txt
           )
           ( cd "$RUNNER_TEMP" && zip -q -r "$GITHUB_WORKSPACE/$PACKAGE.zip" "$PACKAGE" )
           unzip -t "$PACKAGE.zip"
@@ -174,7 +201,7 @@ jobs:
       - name: Publish CurveYield IRM ZIP v5
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield_Fraxtal_Morpho_IRMs_v8
-          path: CurveYield_Fraxtal_Morpho_IRMs_v8.zip
+          name: CurveYield_Fraxtal_Morpho_IRMs_v9
+          path: CurveYield_Fraxtal_Morpho_IRMs_v9.zip
           if-no-files-found: error
           retention-days: 30
