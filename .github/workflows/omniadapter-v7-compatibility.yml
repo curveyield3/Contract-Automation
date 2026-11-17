@@ -1,10 +1,9 @@
-name: CurveYield OmniAdapter V7 Compatibility
+name: CurveYield OmniAdapter V8 Compatibility
 on:
   push:
     branches: [ethereum-omniadapter-v7-compatibility-v1]
     paths:
-      - github-native-sim/morpho-ethereum-v1/CurveYieldOmniAdapterV7.sol
-      - github-native-sim/morpho-ethereum-v1/test/OmniAdapterV7Compatibility.t.sol
+      - github-native-sim/morpho-ethereum-v1/test/OmniAdapterV8Compatibility.t.sol
       - .github/workflows/omniadapter-v7-compatibility.yml
   workflow_dispatch:
 permissions:
@@ -12,53 +11,63 @@ permissions:
 jobs:
   compile-and-compatibility:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
       - uses: foundry-rs/foundry-toolchain@v1
         with: {version: stable}
-      - name: Compile original exact Solidity 0.8.28 version and enforce EIP-170
+      - name: Retrieve exact source from Smart-Contracts and Morpho upstream
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .omni-v7-build
+          mkdir -p .omni-v8-contracts .omni-v8-build
+          git clone -q --depth 1 --branch ethereum-omniadapter-v8-compatibility-v1 https://github.com/curveyield3/Smart-Contracts.git .omni-v8-owned-repo
+          cp .omni-v8-owned-repo/OmniAdapter/contracts/CurveYieldOmniAdapterV8.sol .omni-v8-contracts/CurveYieldOmniAdapterV8.sol
+          git clone -q --filter=blob:none --no-checkout https://github.com/morpho-org/vault-v2.git .omni-v8-upstream
+          git -C .omni-v8-upstream checkout -q 05e440d68b03127b8c62e472f45c3785e5e4d944
+          echo 'SOURCE_SHA256'
+          sha256sum .omni-v8-contracts/CurveYieldOmniAdapterV8.sol
+          echo 'MORPHO_VAULT_V2_SHA'
+          git -C .omni-v8-upstream rev-parse HEAD
+      - name: Compile exact Solidity 0.8.28 and enforce EIP-170
+        shell: bash
+        run: |
+          set -euo pipefail
           cat > foundry.toml <<'TOML'
           [profile.default]
-          src = "github-native-sim/morpho-ethereum-v1"
+          src = ".omni-v8-contracts"
           test = "github-native-sim/morpho-ethereum-v1/test"
-          out = ".omni-v7-build/out"
+          out = ".omni-v8-build/out"
           libs = []
           solc_version = "0.8.28"
           optimizer = true
           optimizer_runs = 200
           evm_version = "cancun"
           TOML
-          forge build --force --sizes 2>&1 | tee .omni-v7-build/compile.log
+          forge build --force --sizes 2>&1 | tee .omni-v8-build/compile.log
           python3 - <<'PY'
           import json
           from pathlib import Path
-          for name in ('CurveYieldOmniAdapterV7','CurveYieldOmniAdapterDeployerV7'):
-              artifacts=list(Path('.omni-v7-build/out').rglob(name+'.json'))
-              assert len(artifacts)==1,(name,artifacts)
-              d=json.loads(artifacts[0].read_text())
-              deployed=d['deployedBytecode']['object']
-              created=d['bytecode']['object']
-              size=(len(deployed)-2)//2
-              print('RUNTIME_BYTES',name,size,'CREATION_BYTES',(len(created)-2)//2)
-              assert size<=24576,(name,'EIP-170',size)
+          for name in ('CurveYieldOmniAdapterV8','CurveYieldOmniAdapterDeployerV8'):
+              arr=list(Path('.omni-v8-build/out').rglob(name+'.json'))
+              assert len(arr)==1,(name,arr)
+              blob=json.loads(arr[0].read_text())
+              size=(len(blob['deployedBytecode']['object'])-2)//2
+              print('RUNTIME_BYTES',name,size)
+              assert size<=24576,(name,size)
           PY
-      - name: Execute dedicated Vault V2 callback compatibility tests
+      - name: Test all supported adapter modes against official Morpho Vault V2
         shell: bash
         run: |
           set -euo pipefail
-          forge test --match-path 'github-native-sim/morpho-ethereum-v1/test/OmniAdapterV7Compatibility.t.sol' -vvv 2>&1 | tee .omni-v7-build/compatibility-test.log
-      - name: Archive exact compiler evidence
+          forge test --match-path 'github-native-sim/morpho-ethereum-v1/test/OmniAdapterV8Compatibility.t.sol' -vvv 2>&1 | tee .omni-v8-build/compatibility-test.log
+      - name: Archive source-bound compiler and test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: omniadapter-v7-compilation-${{ github.run_id }}
+          name: omniadapter-v8-compatibility-${{ github.run_id }}
           path: |
-            .omni-v7-build/compile.log
-            .omni-v7-build/compatibility-test.log
+            .omni-v8-build/compile.log
+            .omni-v8-build/compatibility-test.log
           if-no-files-found: warn
