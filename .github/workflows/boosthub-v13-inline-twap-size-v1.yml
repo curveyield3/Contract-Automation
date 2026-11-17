@@ -4,7 +4,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
-      - 'github-native-sim/curveyield-protected-vault-v9/**'
+      - 'github-native-sim/curveyield-protected-vault-v10/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -114,8 +114,9 @@ jobs:
           set -euo pipefail
           ROOT="$RUNNER_TEMP/curveyield-protected-vault"
           mkdir -p "$ROOT/src" "protected-vault-compile-evidence-v9"
-          cp github-native-sim/curveyield-protected-vault-v9/contracts/CurveYieldProtectedVaultController-v9.sol "$ROOT/src/"
-          sha256sum "$ROOT/src/CurveYieldProtectedVaultController-v9.sol" | tee protected-vault-compile-evidence-v9/source-sha256.txt
+          cp github-native-sim/curveyield-protected-vault-v10/contracts/CurveYieldProtectedVaultController-v10.sol "$ROOT/src/"
+          cp github-native-sim/curveyield-protected-vault-v10/contracts/CurveYieldVaultMasterFeePolicy-v10.sol "$ROOT/src/"
+          sha256sum "$ROOT/src/CurveYieldProtectedVaultController-v10.sol" | tee protected-vault-compile-evidence-v9/source-sha256.txt
           cat > "$ROOT/foundry.toml" <<'TOML'
           [profile.default]
           src = "src"
@@ -134,7 +135,7 @@ jobs:
           import json,sys
           from pathlib import Path
           root=Path(sys.argv[1])
-          for name in ('CurveYieldProtectedVaultController','CurveYieldFeeShareCustody'):
+          for name in ('CurveYieldProtectedVaultController','CurveYieldFeeShareCustody','CurveYieldVaultMasterFeePolicy'):
               matches=list(root.rglob(f'{name}.json'))
               if len(matches)!=1: raise SystemExit(f'ERROR: missing/duplicate {name} artifact: {matches}')
               artifact=json.loads(matches[0].read_text())
@@ -150,13 +151,16 @@ jobs:
           from pathlib import Path
           p=next(Path(sys.argv[1]).rglob('CurveYieldProtectedVaultController.json'))
           b=json.loads(p.read_text())['bytecode']['object']
-          print('CURVEYIELD_V9_DEPLOY_BYTECODE='+ ('0x'+b.removeprefix('0x')))
+          print('CURVEYIELD_V10_DEPLOY_BYTECODE='+ ('0x'+b.removeprefix('0x')))
+          pm=next(Path(sys.argv[1]).rglob('CurveYieldVaultMasterFeePolicy.json'))
+          pb=json.loads(pm.read_text())['bytecode']['object']
+          print('CURVEYIELD_V10_POLICY_DEPLOY_BYTECODE='+ ('0x'+pb.removeprefix('0x')))
           PYINIT
       - name: Upload compile-only evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: curveyield-protected-vault-v9-compile-${{ github.run_id }}
+          name: curveyield-protected-vault-v10-compile-${{ github.run_id }}
           path: protected-vault-compile-evidence-v9/
           if-no-files-found: warn
           retention-days: 30

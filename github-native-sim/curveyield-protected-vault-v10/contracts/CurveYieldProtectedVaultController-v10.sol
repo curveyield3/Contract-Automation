@@ -27,7 +27,7 @@
  */
 pragma solidity 0.8.28;
 
-/// @title CurveYield Protected Morpho Vault V2 Controller v9
+/// @title CurveYield Protected Morpho Vault V2 Controller v10
 /// @notice Standalone, immutable per-vault controller with CurveYield fees capped on-chain.
 /// @dev Operator administers strategies within an allowlist. CurveYield governance can
 ///      ONLY schedule fee-rate changes (90-day delay), rotate protocol recipient and
@@ -65,6 +65,17 @@ interface IVaultV2CY {
     function setManagementFeeRecipient(address recipient) external;
     function accrueInterest() external;
     function transfer(address recipient, uint256 shares) external returns (bool);
+}
+
+/// @notice Read-only master policy; controller remains independently owned and governed.
+interface ICurveYieldVaultMasterFeePolicy {
+    function currentRates() external view returns (
+        uint256 flatPerformanceFeeWad,
+        uint256 performanceSurchargeBps,
+        uint256 flatManagementAnnualWad,
+        uint256 managementSurchargeBps,
+        uint256 policyVersion
+    );
 }
 
 /// @notice Minimal, non-discretionary custody of ONE category of Morpho fee shares.
@@ -107,10 +118,16 @@ contract CurveYieldProtectedVaultController {
     uint256 public constant BPS = 10_000;
     uint256 public constant FEE_CHANGE_DELAY = 90 days;
     uint256 public constant MORPHO_MAX_PERFORMANCE_FEE_WAD = 5e17;
+    /// @dev Keep margin for the highest permitted future master rates, so permissionless
+    ///      synchronization cannot be blocked by otherwise valid operator fee settings.
+    uint256 public constant MAX_OPERATOR_PERFORMANCE_FEE_WAD = 436363636363636363;
+    uint256 public constant MAX_OPERATOR_MANAGEMENT_FEE_ANNUAL_WAD = 43181818181818181;
 
     address public constant MORPHO_VAULT_V2_FACTORY_FRAXTAL =
         0x711bCE12269a3a496eFaABB8B9AD5A4485E08A24;
     address public governance;
+    ICurveYieldVaultMasterFeePolicy public immutable masterFeePolicy;
+    uint256 public appliedPolicyVersion;
     uint256 public immutable maxVaultCreationFeeWei;
     uint256 public vaultCreationFeeWei;
     address public operator;
@@ -131,14 +148,13 @@ contract CurveYieldProtectedVaultController {
     bool public initialized;
     uint256 private entered;
 
-    struct PendingFeeRates {
-        uint256 flatFeeWad;
-        uint256 surchargeBps;
-        uint256 flatManagementFeeAnnualWad;
+    struct PolicyRates {
+        uint256 flatPerformanceWad;
+        uint256 performanceSurchargeBps;
+        uint256 flatManagementAnnualWad;
         uint256 managementSurchargeBps;
-        uint256 executableAt;
+        uint256 version;
     }
-    PendingFeeRates public pendingFeeRates;
 
     event VaultCreationFeeUpdated(uint256 previousWei, uint256 nextWei);
     event VaultCreationFeePaid(address indexed payer, address indexed recipient, uint256 amountWei);
@@ -148,13 +164,9 @@ contract CurveYieldProtectedVaultController {
         uint256 managementProtocolShares, uint256 managementOperatorShares);
     event OperatorFeeUpdated(uint256 oldOperatorFeeWad, uint256 newOperatorFeeWad, uint256 newTotalFeeWad);
     event OperatorManagementFeeUpdated(uint256 oldAnnualWad, uint256 newAnnualWad, uint256 totalAnnualWad);
-    event FeeRatesScheduled(uint256 flatFeeWad, uint256 surchargeBps,
-        uint256 flatManagementAnnualWad, uint256 managementSurchargeBps, uint256 executableAt);
-    event FeeRatesCancelled();
-    event FeeRatesUpdated(uint256 oldFlatFeeWad, uint256 oldSurchargeBps,
-        uint256 newFlatFeeWad, uint256 newSurchargeBps,
-        uint256 oldFlatManagementAnnualWad, uint256 oldManagementSurchargeBps,
-        uint256 newFlatManagementAnnualWad, uint256 newManagementSurchargeBps);
+    event MasterPolicySynchronized(uint256 indexed version,
+        uint256 flatPerformanceWad, uint256 performanceSurchargeBps,
+        uint256 flatManagementAnnualWad, uint256 managementSurchargeBps);
     event GovernanceTransferred(address indexed previousGovernance, address indexed newGovernance);
     event ProtocolFeeRecipientChanged(address indexed previousRecipient, address indexed newRecipient);
     event OperatorFeeRecipientChanged(address indexed previousRecipient, address indexed newRecipient);
@@ -178,8 +190,6 @@ contract CurveYieldProtectedVaultController {
     error DeploymentFailed();
     error InvalidCreationFeePayment();
     error CreationFeeForwardFailed();
-    error FeeChangePending();
-    error FeeChangeNotReady();
 
     modifier onlyOperator() {
         if (msg.sender != operator) revert Unauthorized();
@@ -206,14 +216,50 @@ contract CurveYieldProtectedVaultController {
     /// @param _operator Vault operator wallet/Safe.
     /// @param _protocolTreasury CurveYield's initial fee-only governance AND fee recipient.
     /// @param _maxVaultCreationFeeWei Immutable cap in native FRAX wei; Fraxtal deployment 1 ether.
-    constructor(address _operator, address _protocolTreasury, uint256 _maxVaultCreationFeeWei) {
+    constructor(address _operator, address _protocolTreasury, uint256 _maxVaultCreationFeeWei,
+        address _masterFeePolicy)
+    {
         if (block.chainid != 252) revert WrongChain();
-        if (_operator == address(0) || _protocolTreasury == address(0)) revert InvalidAddress();
+        if (_operator == address(0) || _protocolTreasury == address(0) ||
+            _masterFeePolicy.code.length == 0) revert InvalidAddress();
         operator = _operator;
         governance = _protocolTreasury;
         protocolRecipient = _protocolTreasury;
         maxVaultCreationFeeWei = _maxVaultCreationFeeWei;
         vaultCreationFeeWei = _maxVaultCreationFeeWei;
+        masterFeePolicy = ICurveYieldVaultMasterFeePolicy(_masterFeePolicy);
+        _setAppliedPolicy(_readMasterPolicy());
+    }
+
+    function _readMasterPolicy() internal view returns (PolicyRates memory p) {
+        (p.flatPerformanceWad, p.performanceSurchargeBps,
+            p.flatManagementAnnualWad, p.managementSurchargeBps, p.version)
+            = masterFeePolicy.currentRates();
+        if (p.version == 0) revert InvalidFee();
+        _totalFeeFor(0, p.flatPerformanceWad, p.performanceSurchargeBps);
+        _managementAnnualFor(0, p.flatManagementAnnualWad, p.managementSurchargeBps);
+    }
+
+    function _setAppliedPolicy(PolicyRates memory p) internal {
+        flatProtocolFeeWad = p.flatPerformanceWad;
+        operatorSurchargeBps = p.performanceSurchargeBps;
+        flatManagementFeeAnnualWad = p.flatManagementAnnualWad;
+        managementSurchargeBps = p.managementSurchargeBps;
+        appliedPolicyVersion = p.version;
+    }
+
+    /// @notice Live master rates, irrespective of whether this vault has applied them.
+    function liveProtocolFeeRates() external view returns (
+        uint256 flatPerformanceWad, uint256 performanceSurchargeBps,
+        uint256 flatManagementAnnualWad, uint256 managementSurchargeBps, uint256 version
+    ) {
+        PolicyRates memory p = _readMasterPolicy();
+        return (p.flatPerformanceWad, p.performanceSurchargeBps,
+            p.flatManagementAnnualWad, p.managementSurchargeBps, p.version);
+    }
+
+    function policySyncRequired() external view returns (bool) {
+        return _readMasterPolicy().version != appliedPolicyVersion;
     }
 
     function _totalFeeFor(uint256 opFee, uint256 flatRate, uint256 surchargeBps)
@@ -287,6 +333,8 @@ contract CurveYieldProtectedVaultController {
         if (asset == address(0) || _operatorRecipient == address(0)) revert InvalidAddress();
         if (bytes(name).length == 0 || bytes(symbol).length == 0) revert InvalidOperation();
 
+        if (initialOperatorFeeWad > MAX_OPERATOR_PERFORMANCE_FEE_WAD) revert InvalidFee();
+        _setAppliedPolicy(_readMasterPolicy());
         uint256 total = totalFeeFor(initialOperatorFeeWad);
         IVaultV2FactoryCY morphoFactory = IVaultV2FactoryCY(MORPHO_VAULT_V2_FACTORY_FRAXTAL);
         vaultAddress = morphoFactory.createVaultV2(address(this), asset, salt);
@@ -422,76 +470,51 @@ contract CurveYieldProtectedVaultController {
         managementFeeRemainder = oldTotal == 0 ? 0 : (managementFeeRemainder * newTotal) / oldTotal;
     }
 
-    /// @notice Schedule four CurveYield fee components behind one immutable 90-day delay.
-    /// @dev To leave any component unchanged, supply its current stored value.
-    function scheduleProtocolFeeRates(
-        uint256 newFlatPerformanceWad,
-        uint256 newPerformanceSurchargeBps,
-        uint256 newFlatManagementAnnualWad,
-        uint256 newManagementSurchargeBps
-    ) external onlyGovernance ready {
-        if (pendingFeeRates.executableAt != 0) revert FeeChangePending();
-        _totalFeeFor(0, newFlatPerformanceWad, newPerformanceSurchargeBps);
-        _managementAnnualFor(0, newFlatManagementAnnualWad, newManagementSurchargeBps);
-        pendingFeeRates = PendingFeeRates({
-            flatFeeWad: newFlatPerformanceWad,
-            surchargeBps: newPerformanceSurchargeBps,
-            flatManagementFeeAnnualWad: newFlatManagementAnnualWad,
-            managementSurchargeBps: newManagementSurchargeBps,
-            executableAt: block.timestamp + FEE_CHANGE_DELAY
-        });
-        emit FeeRatesScheduled(newFlatPerformanceWad, newPerformanceSurchargeBps,
-            newFlatManagementAnnualWad, newManagementSurchargeBps, pendingFeeRates.executableAt);
+    /// @notice Anyone may apply the latest master fee schedule to this vault.
+    /// @dev Existing fees must be distributed at the prior applied rates first.
+    ///      Morpho fee settings only change when an on-chain transaction executes.
+    function syncProtocolFees() external ready nonReentrant {
+        _synchronize(operatorFeeWad, operatorManagementFeeAnnualWad);
     }
 
-    /// @notice Governance can cancel proposals before or after maturity but before execution.
-    function cancelProtocolFeeRates() external onlyGovernance {
-        if (pendingFeeRates.executableAt == 0) revert InvalidOperation();
-        delete pendingFeeRates;
-        emit FeeRatesCancelled();
-    }
-
-    /// @notice Anyone may apply a matured proposal. Failed calls can be retried.
-    /// @dev Fully settles fees at old rates before changing either Morpho fee setting.
-    function executeProtocolFeeRates() external ready nonReentrant {
-        PendingFeeRates memory next = pendingFeeRates;
-        if (next.executableAt == 0 || block.timestamp < next.executableAt) revert FeeChangeNotReady();
-        uint256 newPerfTotal = _totalFeeFor(operatorFeeWad, next.flatFeeWad, next.surchargeBps);
-        uint256 newMgmtTotal = _managementAnnualFor(operatorManagementFeeAnnualWad,
-            next.flatManagementFeeAnnualWad, next.managementSurchargeBps);
+    function _synchronize(uint256 nextOperatorPerformance, uint256 nextOperatorManagement)
+        internal
+    {
+        if (nextOperatorPerformance > MAX_OPERATOR_PERFORMANCE_FEE_WAD ||
+            nextOperatorManagement > MAX_OPERATOR_MANAGEMENT_FEE_ANNUAL_WAD) revert InvalidFee();
+        PolicyRates memory p = _readMasterPolicy();
+        uint256 newPerfTotal = _totalFeeFor(nextOperatorPerformance,
+            p.flatPerformanceWad, p.performanceSurchargeBps);
+        uint256 newMgmtTotal = _managementAnnualFor(nextOperatorManagement,
+            p.flatManagementAnnualWad, p.managementSurchargeBps);
         uint256 oldPerfTotal = totalFeeFor(operatorFeeWad);
         uint256 oldMgmtTotal = managementAnnualFor(operatorManagementFeeAnnualWad);
+        bool changedPolicy = p.version != appliedPolicyVersion;
+        if (!changedPolicy && nextOperatorPerformance == operatorFeeWad &&
+            nextOperatorManagement == operatorManagementFeeAnnualWad) return;
+
+        // One settlement before changing either Morpho fee or distribution ratio.
         _distribute();
-        _setVaultPerformanceFee(newPerfTotal);
-        _setVaultManagementFee(newMgmtTotal);
+        if (oldPerfTotal != newPerfTotal) _setVaultPerformanceFee(newPerfTotal);
+        if (oldMgmtTotal != newMgmtTotal) _setVaultManagementFee(newMgmtTotal);
         _rebaseFeeRemainder(oldPerfTotal, newPerfTotal);
         _rebaseManagementRemainder(oldMgmtTotal, newMgmtTotal);
-        uint256 oldFlatPerf = flatProtocolFeeWad;
-        uint256 oldPerfBps = operatorSurchargeBps;
-        uint256 oldFlatMgmt = flatManagementFeeAnnualWad;
-        uint256 oldMgmtBps = managementSurchargeBps;
-        flatProtocolFeeWad = next.flatFeeWad;
-        operatorSurchargeBps = next.surchargeBps;
-        flatManagementFeeAnnualWad = next.flatManagementFeeAnnualWad;
-        managementSurchargeBps = next.managementSurchargeBps;
-        delete pendingFeeRates;
-        emit FeeRatesUpdated(oldFlatPerf, oldPerfBps, next.flatFeeWad, next.surchargeBps,
-            oldFlatMgmt, oldMgmtBps, next.flatManagementFeeAnnualWad, next.managementSurchargeBps);
+        _setAppliedPolicy(p);
+        operatorFeeWad = nextOperatorPerformance;
+        operatorManagementFeeAnnualWad = nextOperatorManagement;
+        if (changedPolicy) emit MasterPolicySynchronized(p.version,
+            p.flatPerformanceWad, p.performanceSurchargeBps,
+            p.flatManagementAnnualWad, p.managementSurchargeBps);
     }
 
     /// @notice Operator controls its own portion of the vault performance fee.
     function setOperatorPerformanceFee(uint256 newOperatorFeeWad)
         external onlyOperator ready nonReentrant
     {
-        uint256 total = totalFeeFor(newOperatorFeeWad);
         uint256 old = operatorFeeWad;
-        if (old == newOperatorFeeWad) return;
-        uint256 oldTotal = totalFeeFor(old);
-        _distribute();
-        _setVaultPerformanceFee(total);
-        _rebaseFeeRemainder(oldTotal, total);
-        operatorFeeWad = newOperatorFeeWad;
-        emit OperatorFeeUpdated(old, newOperatorFeeWad, total);
+        _synchronize(newOperatorFeeWad, operatorManagementFeeAnnualWad);
+        if (old != newOperatorFeeWad)
+            emit OperatorFeeUpdated(old, newOperatorFeeWad, totalFeeFor(newOperatorFeeWad));
     }
 
     /// @notice Treasury rotation for fee collection only: never gains vault powers.
@@ -499,6 +522,7 @@ contract CurveYieldProtectedVaultController {
         external onlyGovernance ready nonReentrant
     {
         if (nextRecipient == address(0)) revert InvalidAddress();
+        _synchronize(operatorFeeWad, operatorManagementFeeAnnualWad);
         _distribute();
         address previous = protocolRecipient;
         protocolRecipient = nextRecipient;
@@ -518,21 +542,18 @@ contract CurveYieldProtectedVaultController {
     function setOperatorManagementFee(uint256 newOperatorAnnualWad)
         external onlyOperator ready nonReentrant
     {
-        uint256 newTotal = managementAnnualFor(newOperatorAnnualWad);
-        uint256 oldAnnual = operatorManagementFeeAnnualWad;
-        if (oldAnnual == newOperatorAnnualWad) return;
-        uint256 oldTotal = managementAnnualFor(oldAnnual);
-        _distribute();
-        _setVaultManagementFee(newTotal);
-        _rebaseManagementRemainder(oldTotal, newTotal);
-        operatorManagementFeeAnnualWad = newOperatorAnnualWad;
-        emit OperatorManagementFeeUpdated(oldAnnual, newOperatorAnnualWad, newTotal);
+        uint256 old = operatorManagementFeeAnnualWad;
+        _synchronize(operatorFeeWad, newOperatorAnnualWad);
+        if (old != newOperatorAnnualWad)
+            emit OperatorManagementFeeUpdated(old, newOperatorAnnualWad,
+                managementAnnualFor(newOperatorAnnualWad));
     }
 
     function setOperatorFeeRecipient(address nextRecipient)
         external onlyOperator ready nonReentrant
     {
         if (nextRecipient == address(0)) revert InvalidAddress();
+        _synchronize(operatorFeeWad, operatorManagementFeeAnnualWad);
         _distribute();
         address previous = operatorRecipient;
         operatorRecipient = nextRecipient;

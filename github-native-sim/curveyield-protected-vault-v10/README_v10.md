@@ -1,0 +1,15 @@
+# CurveYield Fraxtal Protected Vault Controller v10 — Shared Fee Policy
+
+**Core:** The official Morpho Vault V2 factory creates each vault; that vault's immutable v10 controller is owner and curator. There is no additional vault-owner factory, arbitrary forwarder, registry, upgrade mechanism, or redundant custody accounting. Every vault has its own v10 controller and two minimal v9-equivalent custody instances.
+
+**Master:** The new, separately deployed `CurveYieldVaultMasterFeePolicy` exposes the live four protocol rates and monotonically increasing `policyVersion`. Global CurveYield governance may schedule/cancel changes, and anyone may execute after an immutable **90 days**. It has no vault asset, curator, or fee-transfer privileges. Deploy it first with CurveYield Safe governance `0x47623C62f281807D615eeb4A2CEee9d97F9D3C49`. The existing reference v8 deployment is not a master policy.
+
+**Vault controllers:** v10 constructor `(operator, protocolTreasury, maxVaultCreationFeeWei, masterFeePolicyAddress)`, with Fraxtal max creation fee **1 native FRAX**. It loads master rates at deployment and once more when creating its single official Morpho vault. It caches the *applied* rates for correct accounting of unsynchronized Morpho fee shares. `liveProtocolFeeRates()` always reads the master; `policySyncRequired()` exposes version drift.
+
+**Permissionless:** `syncProtocolFees()` re-reads the master, accrues and distributes accrued shares under the previous applied rates, then updates Morpho's native performance/management fee settings, applies new splits, and updates the cached version. Both `setOperatorPerformanceFee` and `setOperatorManagementFee` automatically do the same sync in one settlement, applying the new operator fee without an intermediate invalid Morpho setting. Operator or CurveYield recipient changes also synchronize before distributing at their previous addresses.
+
+**Fee limits:** Global flat performance 0.20% default (2% max of yield), share of operator performance fee 2% default (10% max); flat management 0.05% default (0.25% max TVL/year), share operator management fee 2% default (10% max). Native Morpho performance and management totals are capped 50% and 5% annualized. To guarantee sync after any legal master rate change, v10 reserves worst-case headroom with a fixed operator performance limit of 43.6363636363636363% of yield and annual operator management limit of 4.3181818181818181% TVL, below Morpho maximums.
+
+**Fee streams:** Morpho mints shares independently to the performance and management custody instances, whose only external action is an authorized transfer by their associated controller. Neither custody contract reads rates or takes governance directions. Global policy never moves vault assets or custody shares.
+
+**Migration:** Existing v8 contracts and v9 source are **not retroactively editable** and cannot be attached to this master. New v10 vaults use the master; previously deployed single-vault contracts keep their original immutable code. New controllers must be compiled and explorer-verified. No tests were created/executed, and compilation alone is not a protocol security audit.
