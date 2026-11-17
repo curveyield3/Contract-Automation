@@ -1,4 +1,4 @@
-name: CurveYield Fraxtal Morpho IRM Compile v18
+name: CurveYield Fraxtal Morpho IRM Compile v19
 
 # Compile-only validation. No tests, deployments, broadcast or RPC use.
 on:
@@ -13,6 +13,8 @@ on:
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV3.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v1.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v2.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v3.sol'
+      - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v4.sol'
       - 'github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV5.sol'
       - '.github/workflows/curveyield-morpho-irm-compile-v1.yml'
   workflow_dispatch:
@@ -47,9 +49,11 @@ jobs:
           const omni = 'github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV3.sol';
           const marketV1 = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v1.sol';
           const marketV2 = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v2.sol';
+          const marketV3 = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v3.sol';
+          const marketV4 = 'github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v4.sol';
           const input = {
             language: 'Solidity',
-            sources: { [path]: { content: fs.readFileSync(path, 'utf8') }, [candidate]: { content: fs.readFileSync(candidate, 'utf8') }, [master]: { content: fs.readFileSync(master, 'utf8') }, [factories]: { content: fs.readFileSync(factories, 'utf8') }, [governor]: { content: fs.readFileSync(governor, 'utf8') }, [omni]: { content: fs.readFileSync(omni, 'utf8') }, [marketV1]: { content: fs.readFileSync(marketV1, 'utf8') }, [marketV2]: { content: fs.readFileSync(marketV2, 'utf8') } },
+            sources: { [path]: { content: fs.readFileSync(path, 'utf8') }, [candidate]: { content: fs.readFileSync(candidate, 'utf8') }, [master]: { content: fs.readFileSync(master, 'utf8') }, [factories]: { content: fs.readFileSync(factories, 'utf8') }, [governor]: { content: fs.readFileSync(governor, 'utf8') }, [omni]: { content: fs.readFileSync(omni, 'utf8') }, [marketV1]: { content: fs.readFileSync(marketV1, 'utf8') }, [marketV2]: { content: fs.readFileSync(marketV2, 'utf8') }, [marketV3]: { content: fs.readFileSync(marketV3, 'utf8') }, [marketV4]: { content: fs.readFileSync(marketV4, 'utf8') } },
             settings: {
               optimizer: { enabled: true, runs: 200 },
               evmVersion: 'cancun',
@@ -79,15 +83,17 @@ jobs:
           const splitLegacy = output.contracts?.[governor]?.CurveYieldMorphoFeeSplitterV3;
           const splitA = output.contracts?.[marketV1]?.CurveYieldMarketFactory;
           const splitB = output.contracts?.[marketV2]?.CurveYieldMarketFactory;
-          if (!splitA || !splitB || !splitLegacy) { console.error('Missing MarketFactory compilation'); process.exit(1); }
+          const splitC = output.contracts?.[marketV3]?.CurveYieldMarketFactory;
+          const splitD = output.contracts?.[marketV4]?.CurveYieldMarketFactory;
+          if (!splitA || !splitB || !splitC || !splitD || !splitLegacy) { console.error('Missing MarketFactory compilation'); process.exit(1); }
           const sz = c => c.evm.deployedBytecode.object.length / 2;
-          console.log('CY_MARKET_FACTORY_SIZES=' + [sz(splitLegacy),sz(splitA),sz(splitB)].join(','));
-          console.log('CY_MARKET_FACTORY_CREATION_SIZES=' + [splitA.evm.bytecode.object.length/2,splitB.evm.bytecode.object.length/2].join(','));
-          console.log('CY_MARKET_FACTORY_ABI_ENTRIES=' + [splitA.abi.length,splitB.abi.length].join(','));
+          console.log('CY_MARKET_FACTORY_SIZES=' + [sz(splitLegacy),sz(splitA),sz(splitB),sz(splitC),sz(splitD)].join(','));
+          console.log('CY_MARKET_FACTORY_CREATION_SIZES=' + [splitA.evm.bytecode.object.length/2,splitB.evm.bytecode.object.length/2,splitC.evm.bytecode.object.length/2,splitD.evm.bytecode.object.length/2].join(','));
+          console.log('CY_MARKET_FACTORY_ABI_ENTRIES=' + [splitA.abi.length,splitB.abi.length,splitC.abi.length,splitD.abi.length].join(','));
           // Separate viaIR optimizer check, using the same deployed-source Solidity compiler.
           const irInput = {
             language: 'Solidity',
-            sources: { [governor]: input.sources[governor], [marketV2]: input.sources[marketV2] },
+            sources: { [governor]: input.sources[governor], [marketV2]: input.sources[marketV2], [marketV4]: input.sources[marketV4] },
             settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true, evmVersion: 'cancun',
               outputSelection: { '*': { '*': ['evm.deployedBytecode.object'] } } }
           };
@@ -95,8 +101,10 @@ jobs:
           for (const err of irOutput.errors ?? []) { if (err.severity === 'error') console.error(err.formattedMessage); }
           if ((irOutput.errors ?? []).some(e => e.severity === 'error')) process.exit(1);
           const irContract = irOutput.contracts?.[marketV2]?.CurveYieldMarketFactory;
-          if (!irContract) { console.error('Missing viaIR MarketFactory'); process.exit(1); }
+          const irV4 = irOutput.contracts?.[marketV4]?.CurveYieldMarketFactory;
+          if (!irContract || !irV4) { console.error('Missing viaIR MarketFactory'); process.exit(1); }
           console.log('CY_MARKET_FACTORY_VIAIR_RUNTIME=' + irContract.evm.deployedBytecode.object.length / 2);
+          console.log('CY_MARKET_FACTORY_V4_VIAIR_RUNTIME=' + irV4.evm.deployedBytecode.object.length / 2);
           const contracts = { ...(output.contracts?.[path] ?? {}), ...(output.contracts?.[master] ?? {}), ...(output.contracts?.[factories] ?? {}), ...(output.contracts?.[governor] ?? {}), ...(output.contracts?.[omni] ?? {}) };
           const models = Object.entries(contracts).filter(([name]) => name.startsWith('CurveYield'));
           if (models.length !== 18) {
@@ -133,7 +141,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PACKAGE='CurveYield_Fraxtal_Morpho_IRMs_v9'
+          PACKAGE='CurveYield_Fraxtal_Morpho_IRMs_v10'
           ROOT="$RUNNER_TEMP/$PACKAGE"
           mkdir -p "$ROOT/contracts" "$ROOT/build"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoIRMsV6.sol "$ROOT/contracts/"
@@ -143,6 +151,8 @@ jobs:
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldOmniIRMFactoryV3.sol "$ROOT/contracts/"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v1.sol "$ROOT/contracts/"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v2.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v3.sol "$ROOT/contracts/"
+          cp github-native-sim/morpho-fraxtal-v1/CurveYieldMarketFactory_v4.sol "$ROOT/contracts/"
           cp github-native-sim/morpho-fraxtal-v1/CurveYieldMorphoOwnerAndSplitterV5.sol "$ROOT/contracts/"
           cp .github/workflows/curveyield-morpho-irm-compile-v1.yml "$ROOT/build/compilation-workflow.yml"
           cat > "$ROOT/foundry.toml" <<'TOML'
@@ -155,8 +165,8 @@ jobs:
           optimizer_runs = 200
           evm_version = "cancun"
           TOML
-          cat > "$ROOT/README_v9.md" <<'MD'
-          # CurveYield Fraxtal Morpho IRM source package v9
+          cat > "$ROOT/README_v10.md" <<'MD'
+          # CurveYield Fraxtal Morpho IRM source package v10
 
           Standalone OmniFactory V3 compiles against optimized IRMs V7 and
           unchanged TriggerMaster V3. Original IRMs V6 are retained as
@@ -191,9 +201,9 @@ jobs:
           MD
           (
             cd "$ROOT"
-            sha256sum contracts/*.sol > SOURCE_SHA256SUMS_v9.txt
+            sha256sum contracts/*.sol > SOURCE_SHA256SUMS_v10.txt
             printf 'repository=curveyield3/Contract-Automation\nbranch=morpho-fraxtal-compile-v1\ncommit=%s\nworkflow_run=%s\ncompiler=solc 0.8.30\noptimizer_runs=200\nevm_version=cancun\n' \
-              "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD_PROVENANCE_v9.txt
+              "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD_PROVENANCE_v10.txt
           )
           ( cd "$RUNNER_TEMP" && zip -q -r "$GITHUB_WORKSPACE/$PACKAGE.zip" "$PACKAGE" )
           unzip -t "$PACKAGE.zip"
@@ -201,7 +211,7 @@ jobs:
       - name: Publish CurveYield IRM ZIP v5
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield_Fraxtal_Morpho_IRMs_v9
-          path: CurveYield_Fraxtal_Morpho_IRMs_v9.zip
+          name: CurveYield_Fraxtal_Morpho_IRMs_v10
+          path: CurveYield_Fraxtal_Morpho_IRMs_v10.zip
           if-no-files-found: error
           retention-days: 30
