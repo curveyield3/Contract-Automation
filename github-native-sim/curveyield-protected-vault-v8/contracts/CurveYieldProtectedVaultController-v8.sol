@@ -1,7 +1,33 @@
 // SPDX-License-Identifier: MIT
+/**
+ * @title CurveYield System Component
+ * @notice CurveYield is a decentralized NGO building optimized DeFi systems for the good of all.
+ *
+ * @dev CurveYield integrates specialized AMM infrastructure, tokenized yield strategies, credit
+ * markets, and protocol-owned liquidity into a unified, capital-efficient liquidity stack governed
+ * by an open, international DAO community.
+ *
+ * Protocol operations are enhanced by cross-chain bridging and messaging, MEV capture systems,
+ * off-chain to on-chain automation, and peer-to-peer data networks.
+ *
+ * This contract is one component of the CurveYield system.
+ *
+ * CurveYield uses proven DeFi primitives where possible and adds targeted coordination and
+ * capital-efficiency-enhancing contracts where needed. Users and integrators must review
+ * CurveYield documentation before use.
+ *
+ * Learn more:
+ * dApp: https://curveyield.com & https://curveyield.org
+ *
+ * Decentralized links may have limited or delayed availability during periods of high network activity:
+ * https://curveyield.eth.limo
+ * https://curveyield.dao
+ *
+ * Note: curveyield.dao may require a Brave Browser or an Unstoppable Domains browser plugin to use.
+ */
 pragma solidity 0.8.28;
 
-/// @title CurveYield Protected Morpho Vault V2 Controller v7
+/// @title CurveYield Protected Morpho Vault V2 Controller v8
 /// @notice Standalone, immutable per-vault controller with CurveYield fees capped on-chain.
 /// @dev Operator administers strategies within an allowlist. CurveYield governance can
 ///      ONLY schedule fee-rate changes (90-day delay), rotate protocol recipient and
@@ -85,6 +111,8 @@ contract CurveYieldProtectedVaultController {
     address public constant MORPHO_VAULT_V2_FACTORY_FRAXTAL =
         0x711bCE12269a3a496eFaABB8B9AD5A4485E08A24;
     address public governance;
+    uint256 public immutable maxVaultCreationFeeWei;
+    uint256 public vaultCreationFeeWei;
     address public operator;
     address public pendingOperator;
     address public protocolRecipient;
@@ -112,6 +140,8 @@ contract CurveYieldProtectedVaultController {
     }
     PendingFeeRates public pendingFeeRates;
 
+    event VaultCreationFeeUpdated(uint256 previousWei, uint256 nextWei);
+    event VaultCreationFeePaid(address indexed payer, address indexed recipient, uint256 amountWei);
     event ProtectedVaultCreated(address indexed vault, address indexed operator,
         address indexed protocolRecipient, address asset, uint256 operatorFeeWad);
     event Distributed(uint256 performanceProtocolShares, uint256 performanceOperatorShares,
@@ -146,6 +176,8 @@ contract CurveYieldProtectedVaultController {
     error VaultOperationFailed(bytes returnData);
     error WrongChain();
     error DeploymentFailed();
+    error InvalidCreationFeePayment();
+    error CreationFeeForwardFailed();
     error FeeChangePending();
     error FeeChangeNotReady();
 
@@ -173,12 +205,15 @@ contract CurveYieldProtectedVaultController {
 
     /// @param _operator Vault operator wallet/Safe.
     /// @param _protocolTreasury CurveYield's initial fee-only governance AND fee recipient.
-    constructor(address _operator, address _protocolTreasury) {
+    /// @param _maxVaultCreationFeeWei Immutable cap in native FRAX wei; Fraxtal deployment 1 ether.
+    constructor(address _operator, address _protocolTreasury, uint256 _maxVaultCreationFeeWei) {
         if (block.chainid != 252) revert WrongChain();
         if (_operator == address(0) || _protocolTreasury == address(0)) revert InvalidAddress();
         operator = _operator;
         governance = _protocolTreasury;
         protocolRecipient = _protocolTreasury;
+        maxVaultCreationFeeWei = _maxVaultCreationFeeWei;
+        vaultCreationFeeWei = _maxVaultCreationFeeWei;
     }
 
     function _totalFeeFor(uint256 opFee, uint256 flatRate, uint256 surchargeBps)
@@ -229,9 +264,16 @@ contract CurveYieldProtectedVaultController {
             (operatorManagementFeeAnnualWad * managementSurchargeBps) / BPS;
     }
 
+    /// @notice CurveYield fee-only governance adjusts the native FRAX creation fee, capped forever.
+    function setVaultCreationFeeWei(uint256 nextFeeWei) external onlyGovernance {
+        if (nextFeeWei > maxVaultCreationFeeWei) revert InvalidFee();
+        uint256 previous = vaultCreationFeeWei;
+        vaultCreationFeeWei = nextFeeWei;
+        emit VaultCreationFeeUpdated(previous, nextFeeWei);
+    }
+
     /// @notice Create the only vault that this controller can manage.
-    /// @dev Creates the official Morpho V2 vault and configures this controller as both
-    ///      owner+curator and performance fee recipient, atomically.
+    /// @dev Exact native FRAX fee is sent to the current CurveYield protocol recipient atomically.
     function createVault(
         address asset,
         address _operatorRecipient,
@@ -239,8 +281,9 @@ contract CurveYieldProtectedVaultController {
         string calldata name,
         string calldata symbol,
         bytes32 salt
-    ) external onlyOperator nonReentrant returns (address vaultAddress) {
+    ) external payable onlyOperator nonReentrant returns (address vaultAddress) {
         if (initialized) revert AlreadyInitialized();
+        if (msg.value != vaultCreationFeeWei) revert InvalidCreationFeePayment();
         if (asset == address(0) || _operatorRecipient == address(0)) revert InvalidAddress();
         if (bytes(name).length == 0 || bytes(symbol).length == 0) revert InvalidOperation();
 
@@ -301,6 +344,11 @@ contract CurveYieldProtectedVaultController {
             v.curator() != address(this) || v.owner() != address(this)) revert UnsafeVault();
 
         initialized = true;
+        if (msg.value != 0) {
+            (bool sent,) = payable(protocolRecipient).call{value: msg.value}("");
+            if (!sent) revert CreationFeeForwardFailed();
+            emit VaultCreationFeePaid(msg.sender, protocolRecipient, msg.value);
+        }
         emit ProtectedVaultCreated(vaultAddress, operator, protocolRecipient, asset, initialOperatorFeeWad);
     }
 

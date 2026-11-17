@@ -4,7 +4,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/boosthub-v13-inline-twap-size-v1.yml'
-      - 'github-native-sim/curveyield-protected-vault-v7/**'
+      - 'github-native-sim/curveyield-protected-vault-v8/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -113,9 +113,9 @@ jobs:
         run: |
           set -euo pipefail
           ROOT="$RUNNER_TEMP/curveyield-protected-vault"
-          mkdir -p "$ROOT/src" "protected-vault-compile-evidence-v7"
-          cp github-native-sim/curveyield-protected-vault-v7/contracts/CurveYieldProtectedVaultController-v7.sol "$ROOT/src/"
-          sha256sum "$ROOT/src/CurveYieldProtectedVaultController-v7.sol" | tee protected-vault-compile-evidence-v7/source-sha256.txt
+          mkdir -p "$ROOT/src" "protected-vault-compile-evidence-v8"
+          cp github-native-sim/curveyield-protected-vault-v8/contracts/CurveYieldProtectedVaultController-v8.sol "$ROOT/src/"
+          sha256sum "$ROOT/src/CurveYieldProtectedVaultController-v8.sol" | tee protected-vault-compile-evidence-v8/source-sha256.txt
           cat > "$ROOT/foundry.toml" <<'TOML'
           [profile.default]
           src = "src"
@@ -127,10 +127,10 @@ jobs:
           via_ir = true
           evm_version = "cancun"
           TOML
-          echo "commit=$GITHUB_SHA" | tee protected-vault-compile-evidence-v7/provenance.txt
-          forge --version | tee -a protected-vault-compile-evidence-v7/provenance.txt
-          ( cd "$ROOT" && forge build --sizes --force ) 2>&1 | tee protected-vault-compile-evidence-v7/compile.log
-          python3 - "$ROOT/out" <<'PY' | tee protected-vault-compile-evidence-v7/runtime-sizes.txt
+          echo "commit=$GITHUB_SHA" | tee protected-vault-compile-evidence-v8/provenance.txt
+          forge --version | tee -a protected-vault-compile-evidence-v8/provenance.txt
+          ( cd "$ROOT" && forge build --sizes --force ) 2>&1 | tee protected-vault-compile-evidence-v8/compile.log
+          python3 - "$ROOT/out" <<'PY' | tee protected-vault-compile-evidence-v8/runtime-sizes.txt
           import json,sys
           from pathlib import Path
           root=Path(sys.argv[1])
@@ -143,11 +143,12 @@ jobs:
               print(f'{name}: runtime_bytes={size} eip170_limit=24576 headroom={24576-size}')
               if size>24576: raise SystemExit(f'ERROR: EIP-170 runtime size exceeded by {name}')
           PY
+          cp -a "$ROOT/out" "protected-vault-compile-evidence-v8/foundry-out"
       - name: Upload compile-only evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: curveyield-protected-vault-v7-compile-${{ github.run_id }}
-          path: protected-vault-compile-evidence-v7/
+          name: curveyield-protected-vault-v8-compile-${{ github.run_id }}
+          path: protected-vault-compile-evidence-v8/
           if-no-files-found: warn
           retention-days: 30
