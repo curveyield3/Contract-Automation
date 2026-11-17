@@ -365,6 +365,8 @@ contract CurveYieldOmniAdapterV6 {
         else if(m.mode==MORPHO) {
             ICYV6Morpho.MarketParams memory p=abi.decode(extra,(ICYV6Morpho.MarketParams));
             (,minted)=ICYV6Morpho(m.target).supply(p,amount,0,address(this),"");
+            // Match Morpho's native Vault V2 adapter: reject share-price-above-one/inflation states.
+            if(minted<amount)revert InsufficientAssets();
             m.trackedShares+=minted;
         } else if(m.mode==DOLOMITE)ICYV6DolomiteRouter(m.target).depositWei(0,0,uint256(m.marketId),amount,0);
         else revert UnsupportedMode();
