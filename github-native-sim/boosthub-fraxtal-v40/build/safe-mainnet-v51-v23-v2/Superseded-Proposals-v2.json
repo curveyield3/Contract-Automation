@@ -1,0 +1,20 @@
+{
+  "version": "v2",
+  "safe": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "old": [
+    {
+      "nonce": "24",
+      "safeTxHash": "0x7a751ed1152e3a813b4e37eb5cc68693c75cd3c6fce839c7bede12a695bdce93"
+    },
+    {
+      "nonce": "25",
+      "safeTxHash": "0x1353ba3508f09dd9a197928b7595aa62fd776f1443d733587d9892c3c8439b35"
+    }
+  ],
+  "newNonces": [
+    "24",
+    "25",
+    "26"
+  ],
+  "requiredAction": "Do not execute old proposals. New proposals replace original intent at same Safe nonces 24 and 25; Safe Transaction Service may preserve both conflicting versions."
+}
