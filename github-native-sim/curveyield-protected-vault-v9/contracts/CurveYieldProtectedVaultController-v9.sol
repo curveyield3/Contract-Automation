@@ -27,7 +27,7 @@
  */
 pragma solidity 0.8.28;
 
-/// @title CurveYield Protected Morpho Vault V2 Controller v8
+/// @title CurveYield Protected Morpho Vault V2 Controller v9
 /// @notice Standalone, immutable per-vault controller with CurveYield fees capped on-chain.
 /// @dev Operator administers strategies within an allowlist. CurveYield governance can
 ///      ONLY schedule fee-rate changes (90-day delay), rotate protocol recipient and
@@ -318,7 +318,7 @@ contract CurveYieldProtectedVaultController {
             IVaultV2CY.setPerformanceFeeRecipient, (address(performanceFeeCustody))
         );
         v.submit(recipientData);
-        v.setPerformanceFeeRecipient(address(this));
+        v.setPerformanceFeeRecipient(address(performanceFeeCustody));
         bytes memory feeData = abi.encodeCall(IVaultV2CY.setPerformanceFee, (total));
         v.submit(feeData);
         v.setPerformanceFee(total);
