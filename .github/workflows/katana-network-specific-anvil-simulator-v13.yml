@@ -7,6 +7,7 @@ on:
       - '.github/workflows/katana-network-specific-anvil-simulator-v13.yml'
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/run-v13.mjs'
       - 'test/katana/cyavkat-morpho-fulfill-safe-batch-v6.mjs'
+      - 'test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs'
   workflow_dispatch:
 
 permissions:
@@ -14,7 +15,7 @@ permissions:
 
 jobs:
   cyvbwbtc-lifecycle:
-    if: ${{ !contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') && !contains(github.event.head_commit.message, '[cyavkat-ltv-swap]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -96,7 +97,7 @@ jobs:
           fi
 
   cyavkat-morpho-partial-exit:
-    if: ${{ contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') }}
+    if: ${{ contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') || contains(github.event.head_commit.message, '[cyavkat-ltv-swap]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     permissions:
@@ -137,9 +138,13 @@ jobs:
           test "$(cast block "$PIN" --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')" = "$HASH"
           echo "Pinned Katana fork block $PIN, hash $HASH. All writes LOCAL to Anvil." >> "$GITHUB_STEP_SUMMARY"
       - name: Simulate OWNER Safe callback unwind and full 6113 avKAT pending withdrawal request fulfillment
+        if: ${{ contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') }}
         run: node test/katana/cyavkat-morpho-fulfill-safe-batch-v6.mjs
+      - name: Replay exact queued Safe role grants, Morpho exit and KAT-to-avKAT swap; prove idle ERC4626 withdrawal
+        if: ${{ contains(github.event.head_commit.message, '[cyavkat-ltv-swap]') }}
+        run: node test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs
       - name: Display evidence and fork receipts
-        if: always()
+        if: ${{ always() && contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') }}
         shell: bash
         run: |
           if [ -f cyavkat-morpho-fulfill-safe-batch-v6-report.json ]; then
@@ -153,6 +158,18 @@ jobs:
             echo '::error::Simulation evidence missing'
             tail -100 "$RUNNER_TEMP/avkat-anvil.log" || true
           fi
+      - name: Display exact queued Safe replay and vault-user withdrawal evidence
+        if: ${{ always() && contains(github.event.head_commit.message, '[cyavkat-ltv-swap]') }}
+        shell: bash
+        run: |
+          if [ -f cyavkat-safe-proposal-ltv-swap-v1-report.json ]; then
+            cat cyavkat-safe-proposal-ltv-swap-v1-report.json
+            echo '### cyavKAT queued Safe proposal live fork v1' >> "$GITHUB_STEP_SUMMARY"
+            jq -r '"Status: " + .status, "Pinned block: " + (.pinnedBlock.number|tostring), "Atomic resulting LTV bps: " + (.atomic.resultingLtvBps // "unavailable"), "Swap output avKAT: " + (.atomic.swappedAvkat // "unavailable"), "Vault withdrawal successful: " + ((.withdrawability.atomic.success // false)|tostring)' cyavkat-safe-proposal-ltv-swap-v1-report.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '::error::Queued-Safe fork evidence missing'
+            tail -100 "$RUNNER_TEMP/avkat-anvil.log" || true
+          fi
       - name: Upload immutable simulation report
         if: always()
         uses: actions/upload-artifact@v4
@@ -161,5 +178,6 @@ jobs:
           path: |
             cyavkat-morpho-fulfill-safe-batch-v6-report.json
             cyavkat-morpho-fulfill-safe-batch-v6.json
+            cyavkat-safe-proposal-ltv-swap-v1-report.json
           if-no-files-found: warn
           retention-days: 30
