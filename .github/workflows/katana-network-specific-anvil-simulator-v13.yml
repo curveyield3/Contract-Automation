@@ -8,7 +8,7 @@ on:
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/run-v13.mjs'
       - 'test/katana/cyavkat-morpho-fulfill-safe-batch-v6.mjs'
       - 'test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs'
-      - 'test/katana/cyavkat-scheduled-recovery-v8.mjs'
+      - 'test/katana/cyavkat-scheduled-recovery-v9.mjs'
   workflow_dispatch:
 
 permissions:
@@ -163,15 +163,15 @@ jobs:
         run: node test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs
       - name: Run two-block 0% scheduled request and full flash-deleverage Safe recovery
         if: ${{ contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
-        run: node test/katana/cyavkat-scheduled-recovery-v8.mjs
+        run: node test/katana/cyavkat-scheduled-recovery-v9.mjs
       - name: Show scheduled recovery checkpoint outcomes
         if: ${{ always() && contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
         shell: bash
         run: |
-          if [ -f cyavkat-scheduled-recovery-v2-report.json ]; then
-            jq '{version,status,fork,plan,errors,atomic,steps: [.steps[] | {n,ltvBps,idleAvkat,safeAvkat,managerEarnedShares,safeShares}]}' cyavkat-scheduled-recovery-v2-report.json
-            if [ -f cyavkat-scheduled-recovery-v2-proposal.json ]; then
-              echo 'Simulated Safe proposal v1 exists; no public Katana writes performed.' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f cyavkat-scheduled-recovery-v9-report.json ]; then
+            jq '{version,status,fork,plan,errors,atomic,steps: [.steps[] | {n,ltvBps,idleAvkat,safeAvkat,managerEarnedShares,safeShares}]}' cyavkat-scheduled-recovery-v9-report.json
+            if [ -f cyavkat-scheduled-recovery-v9-proposal.json ]; then
+              echo 'Fork-only atomic Safe proposal v9 verified; no public Katana writes performed.' >> "$GITHUB_STEP_SUMMARY"
             fi
           else
             echo '::error::Scheduled withdrawal fork evidence missing'
@@ -213,7 +213,7 @@ jobs:
             cyavkat-morpho-fulfill-safe-batch-v6-report.json
             cyavkat-morpho-fulfill-safe-batch-v6.json
             cyavkat-safe-proposal-ltv-swap-v1-report.json
-            cyavkat-scheduled-recovery-v2-report.json
-            cyavkat-scheduled-recovery-v2-proposal.json
+            cyavkat-scheduled-recovery-v9-report.json
+            cyavkat-scheduled-recovery-v9-proposal.json
           if-no-files-found: warn
           retention-days: 30
