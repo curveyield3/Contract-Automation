@@ -8,7 +8,7 @@ on:
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/run-v13.mjs'
       - 'test/katana/cyavkat-morpho-fulfill-safe-batch-v6.mjs'
       - 'test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs'
-      - 'test/katana/cyavkat-scheduled-recovery-v13.mjs'
+      - 'test/katana/cyavkat-scheduled-recovery-v14.mjs'
   workflow_dispatch:
 
 permissions:
@@ -144,17 +144,17 @@ jobs:
       - name: Replay exact queued Safe role grants, Morpho exit and KAT-to-avKAT swap; prove idle ERC4626 withdrawal
         if: ${{ contains(github.event.head_commit.message, '[cyavkat-ltv-swap]') }}
         run: node test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs
-      - name: Run v13 minimum two-call scheduled Safe fulfillment+claim
+      - name: Run v14 existing fuses Morpho flash plus one scheduled fulfillment and claim
         if: ${{ contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
-        run: timeout 300s node test/katana/cyavkat-scheduled-recovery-v13.mjs
+        run: timeout 300s node test/katana/cyavkat-scheduled-recovery-v14.mjs
       - name: Show scheduled recovery checkpoint outcomes
         if: ${{ always() && contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
         shell: bash
         run: |
-          if [ -f cyavkat-scheduled-recovery-v13-report.json ]; then
-            jq '{version,status,fork,plan,errors,atomic,steps: [.steps[] | {n,ltvBps,idleAvkat,safeAvkat,managerEarnedShares,safeShares}]}' cyavkat-scheduled-recovery-v13-report.json
-            if [ -f cyavkat-scheduled-recovery-v13-proposal.json ]; then
-              echo 'Fork-only atomic Safe proposal v13 verified; no public Katana writes performed.' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f cyavkat-scheduled-recovery-v14-report.json ]; then
+            jq '{version,status,fork,plan,errors,atomic,steps: [.steps[] | {n,ltvBps,idleAvkat,safeAvkat,managerEarnedShares,safeShares}]}' cyavkat-scheduled-recovery-v14-report.json
+            if [ -f cyavkat-scheduled-recovery-v14-proposal.json ]; then
+              echo 'Fork-only atomic Safe proposal v14 verified; no public Katana writes performed.' >> "$GITHUB_STEP_SUMMARY"
             fi
           else
             echo '::error::Scheduled withdrawal fork evidence missing'
@@ -196,7 +196,7 @@ jobs:
             cyavkat-morpho-fulfill-safe-batch-v6-report.json
             cyavkat-morpho-fulfill-safe-batch-v6.json
             cyavkat-safe-proposal-ltv-swap-v1-report.json
-            cyavkat-scheduled-recovery-v13-report.json
-            cyavkat-scheduled-recovery-v13-proposal.json
+            cyavkat-scheduled-recovery-v14-report.json
+            cyavkat-scheduled-recovery-v14-proposal.json
           if-no-files-found: warn
           retention-days: 30
