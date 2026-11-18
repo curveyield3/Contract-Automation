@@ -8,6 +8,7 @@ on:
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/run-v13.mjs'
       - 'test/katana/cyavkat-morpho-fulfill-safe-batch-v6.mjs'
       - 'test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs'
+      - 'test/katana/cyavkat-scheduled-recovery-v1.mjs'
   workflow_dispatch:
 
 permissions:
@@ -15,7 +16,7 @@ permissions:
 
 jobs:
   cyvbwbtc-lifecycle:
-    if: ${{ !contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') && !contains(github.event.head_commit.message, '[cyavkat-ltv-swap]') && !contains(github.event.head_commit.message, '[cyavkat-fee-fuse]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') && !contains(github.event.head_commit.message, '[cyavkat-ltv-swap]') && !contains(github.event.head_commit.message, '[cyavkat-fee-fuse]') && !contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -143,7 +144,7 @@ jobs:
           retention-days: 30
 
   cyavkat-morpho-partial-exit:
-    if: ${{ contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') || contains(github.event.head_commit.message, '[cyavkat-ltv-swap]') }}
+    if: ${{ contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') || contains(github.event.head_commit.message, '[cyavkat-ltv-swap]') || contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     permissions:
@@ -161,6 +162,23 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
+      - name: Checkout canonical Smart-Contracts for corrected fee-fuse compilation
+        if: ${{ contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
+        uses: actions/checkout@v4
+        with:
+          repository: curveyield3/Smart-Contracts
+          ref: main
+          path: .smart-contracts
+          persist-credentials: false
+      - name: Build canonical corrected IPOR fee-burn fuse for fork-only CREATE2
+        if: ${{ contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
+        working-directory: .smart-contracts/cyavKAT Ipor Vault/next-phase
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qi '465d2ff0062318fe6f4c7e9ac78cfcd70bc86a1d992722875ef83a9770513100' ../ipor-fusion/contracts/libraries/PlasmaVaultStorageLib.sol
+          forge build ../ipor-fusion/contracts/fuses/burn_request_fee/BurnRequestFeeFuse.sol --force --skip test
+          test -s out/BurnRequestFeeFuse.sol/BurnRequestFeeFuse.json
       - name: Start pinned Katana Anvil fork (no public-chain writes)
         shell: bash
         env:
@@ -189,6 +207,22 @@ jobs:
       - name: Replay exact queued Safe role grants, Morpho exit and KAT-to-avKAT swap; prove idle ERC4626 withdrawal
         if: ${{ contains(github.event.head_commit.message, '[cyavkat-ltv-swap]') }}
         run: node test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs
+      - name: Run two-block 0% scheduled request and full flash-deleverage Safe recovery
+        if: ${{ contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
+        run: node test/katana/cyavkat-scheduled-recovery-v1.mjs
+      - name: Show scheduled recovery checkpoint outcomes
+        if: ${{ always() && contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
+        shell: bash
+        run: |
+          if [ -f cyavkat-scheduled-recovery-v1-report.json ]; then
+            jq '{version,status,fork,plan,errors,atomic,steps: [.steps[] | {n,ltvBps,idleAvkat,safeAvkat,managerEarnedShares,safeShares}]}' cyavkat-scheduled-recovery-v1-report.json
+            if [ -f cyavkat-scheduled-recovery-v1-proposal.json ]; then
+              echo 'Simulated Safe proposal v1 exists; no public Katana writes performed.' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo '::error::Scheduled withdrawal fork evidence missing'
+            tail -80 "$RUNNER_TEMP/avkat-anvil.log" || true
+          fi
       - name: Display evidence and fork receipts
         if: ${{ always() && contains(github.event.head_commit.message, '[cyavkat-morpho-exit]') }}
         shell: bash
@@ -225,5 +259,7 @@ jobs:
             cyavkat-morpho-fulfill-safe-batch-v6-report.json
             cyavkat-morpho-fulfill-safe-batch-v6.json
             cyavkat-safe-proposal-ltv-swap-v1-report.json
+            cyavkat-scheduled-recovery-v1-report.json
+            cyavkat-scheduled-recovery-v1-proposal.json
           if-no-files-found: warn
           retention-days: 30
