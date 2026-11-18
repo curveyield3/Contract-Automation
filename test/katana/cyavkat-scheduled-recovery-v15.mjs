@@ -29,7 +29,7 @@ const mor=con(A.morpho,["function position(bytes32,address) view returns(uint256
 const router=con(A.swap,["function requiredInputView(address,address,uint256,uint256) view returns(uint256)"]);
 const oracle=con("0xc5d4f6f7b1f5dec7ec191d3612388f95f5f7f47c",["function price() view returns(uint256)"]);
 const f=n=>formatUnits(n,18),fs=n=>formatUnits(n,20),ensure=(x,s)=>{if(!x)throw Error("ASSERTION: "+s);};
-const report={version:"v15",status:"FAIL",chainId:747474,mode:"PINNED_LOCAL_KATANA_ANVIL_ONLY",proposalHash1:"0xcf3361b9dd99fefcaf1d1a8ba67f7056c6446bfceb23234d5705268ee0ad25b3",snapshots:[],steps:[],errors:[],proposal2:null};
+const report={version:"v16",status:"FAIL",chainId:747474,mode:"PINNED_LOCAL_KATANA_ANVIL_ONLY",proposalHash1:"0xcf3361b9dd99fefcaf1d1a8ba67f7056c6446bfceb23234d5705268ee0ad25b3",snapshots:[],steps:[],errors:[],proposal2:null};
 const step=(n,x)=>{report.steps.push({n,...x});console.log("CHECKPOINT",n,JSON.stringify(x));};
 const pack=(to,data)=>"00"+to.slice(2).toLowerCase()+"0".repeat(64)+BigInt((data.length-2)/2).toString(16).padStart(64,"0")+data.slice(2);
 const msdata=calls=>interfaces.multisend.encodeFunctionData("multiSend",["0x"+calls.map(c=>pack(c.to,c.data)).join("")]);
@@ -104,7 +104,7 @@ try{
  ensure(BigInt(requested.requestFee)===0n,"Scheduled request fee not disabled");
  step("02_SEPARATE_BLOCK_RELEASE_ELIGIBILITY",{requestShares:fs(BigInt(requested.requestShares)),feeBps:"0",at:await provider.getBlockNumber()});
  const C=BigInt(requested.collateral),D=BigInt(requested.debt),price=await oracle.price();
- const targetNet=36n*10n**18n,ltv=7665n;
+ const targetNet=30n*10n**18n,ltv=7600n;
  const remainColl=targetNet*10000n/(10000n-ltv);
  const targetDebt=remainColl*price/10n**36n*ltv/10000n;
  const repay=D-targetDebt,exit=C-remainColl;
@@ -112,26 +112,34 @@ try{
  const quoted=await router.requiredInputView(A.avkat,A.kat,repay,exit);
  const toSell=quoted+quoted/1000n+1n;
  ensure(toSell<exit,"Insufficient avKAT for Morpho unwind");
- const retainSafeShares=285n*10n**19n; // 28.5 shares = ~26 avKAT at current share price with fee-manager escrow preserved
+ const retainSafeShares=0n; // no leftover Safe shares
  const claimShares=safeShares-retainSafeShares;
  ensure(claimShares>0n,"No requested shares to withdraw");
- const tranches=[claimShares];
+ const tranches=[claimShares*95n/100n,claimShares-claimShares*95n/100n]; // two withdrawals for 2% buffer
  const callback=[{fuse:A.borrow,data:interfaces.borrow.encodeFunctionData("exit",[[A.market,repay,0n]])},
    {fuse:A.collateral,data:interfaces.collateral.encodeFunctionData("exit",[[A.market,exit]])},
    {fuse:A.swap,data:interfaces.swap.encodeFunctionData("enter",[[A.avkat,A.kat,toSell,repay]])}];
  const payload=AbiCoder.defaultAbiCoder().encode(["tuple(address fuse,bytes data)[]"],[callback]);
  const flashData=interfaces.vault.encodeFunctionData("execute",[[{fuse:A.flash,data:interfaces.flash.encodeFunctionData("enter",[[A.kat,repay,payload]])}]]);
- report.plan={targetNetEquityAvkat:"36",targetLtvBps:7665,collateralLeft:f(remainColl),
+ report.plan={targetNetEquityAvkat:"30",targetLtvBps:7600,collateralLeft:f(remainColl),
     debtLeftKat:f(targetDebt),repayKat:f(repay),collateralExitAvkat:f(exit),
     swapAvkat:f(toSell),claimShares:fs(claimShares),retainedSafeShares:fs(retainSafeShares),
-    deployContracts:false,changeDependencies:false,changeFees:false,burnAccruedFeeShares:false};
+    deployContracts:false,changeDependencies:false,changeInstantWithdrawFee:true,burnAccruedFeeShares:true,withdrawals:tranches.map(fs)};
+ const cfgRole=await ac.getTargetFunctionRole(A.template,interfaces.manager.getFunction("updateWithdrawFee").selector);
+ ensure(cfgRole===902n&&(await ac.getRoleAdmin(cfgRole))===100n,"Unexpected fee role");
+ ensure(!(await ac.hasRole(cfgRole,A.safe))[0],"Fee role pregranted");
+ ensure((await con(A.custody,interfaces.custody).revenueShareBps())===3000n,"Unexpected revenue share");
  const second=[
- {name:"grant_governor_for_existing_vault_execute",to:A.access,data:interfaces.access.encodeFunctionData("grantRole",[300n,A.safe,0])},
+ {name:"stop_custody_revenue_share",to:A.custody,data:interfaces.custody.encodeFunctionData("setRevenueShareBps",[0])},
+ {name:"grant_existing_vault_governor",to:A.access,data:interfaces.access.encodeFunctionData("grantRole",[300n,A.safe,0])},
+ {name:"grant_instant_fee_config",to:A.access,data:interfaces.access.encodeFunctionData("grantRole",[cfgRole,A.safe,0])},
+ {name:"disable_instant_withdraw_fee",to:A.manager,data:interfaces.manager.encodeFunctionData("updateWithdrawFee",[0n])},
  {name:"register_existing_Morpho_flash_callback",to:A.vault,data:interfaces.vault.encodeFunctionData("updateCallbackHandler",[A.handler,A.morpho,"0x31f57072"])},
- {name:"flash_deleverage_to_36_equity",to:A.vault,data:flashData},
+ {name:"flash_deleverage_to_30_equity_76_LTV",to:A.vault,data:flashData},
+ {name:"burn_existing_fee_shares_using_deployed_fuse",to:A.manager,data:interfaces.manager.encodeFunctionData("pruneExpiredRequests",[500n])},
  {name:"recover_vested_avKAT",to:A.rewardsManager,data:new Interface(["function transferVestedTokensToVault()"]).encodeFunctionData("transferVestedTokensToVault",[])},
- {name:"fulfill_Safe_scheduled_0",to:A.controller,data:interfaces.controller.encodeFunctionData("fulfillFor",[A.safe,claimShares,0n])},
- {name:"claim_Safe_scheduled_0",to:A.vault,data:interfaces.vault.encodeFunctionData("redeemFromRequest",[claimShares,A.safe,A.safe])}
+ {name:"fulfill_existing_Safe_request",to:A.controller,data:interfaces.controller.encodeFunctionData("fulfillFor",[A.safe,claimShares,0n])},
+ ...tranches.map((shares,i)=>({name:"claim_Safe_scheduled_"+i,to:A.vault,data:interfaces.vault.encodeFunctionData("redeemFromRequest",[shares,A.safe,A.safe])}))
  ];
  const batch=msdata(second),nextNonce=await safe.nonce(),hash=await safe.getTransactionHash(A.ms,0n,batch,1,0n,0n,0n,ZERO,ZERO,nextNonce);
  report.proposal2={hash,nonce:String(nextNonce),safe:A.safe,to:A.ms,data:batch,operation:1,valueWei:"0",
@@ -147,11 +155,13 @@ try{
       {tx,ltvBps:q.ltvBps,netEquity:f(BigInt(q.netEquity)),idleAvkat:f(BigInt(q.idleAvkat)),
        safeAvkat:f(BigInt(q.safeAsset)),safeShares:fs(BigInt(q.safeShares)),
        managerShares:fs(BigInt(q.managerShares)),canWithdraw:q.requestCanWithdraw});
-  if(x.name==="flash_deleverage_to_36_equity"){
-    ensure(BigInt(q.netEquity)>=parseUnits("35.5",18)&&BigInt(q.netEquity)<=parseUnits("36.5",18),"Morpho equity 36 avKAT guard");
+  if(x.name==="flash_deleverage_to_30_equity_76_LTV"){
+    ensure(BigInt(q.netEquity)>=parseUnits("29.5",18)&&BigInt(q.netEquity)<=parseUnits("30.5",18),"Morpho 30 equity guard");
+    ensure(BigInt(q.ltvBps)>7500n&&BigInt(q.ltvBps)<7700n,"Morpho LTV 75-77%");
   }
-  if(x.name==="fulfill_Safe_scheduled_0")ensure(q.requestCanWithdraw,"Safe request not fulfilled");
-  if(x.name==="claim_Safe_scheduled_0")ensure(BigInt(q.safeShares)===retainSafeShares,"Safe share retention mismatch");
+  if(x.name==="burn_existing_fee_shares_using_deployed_fuse")ensure(BigInt(q.managerEarned)<parseUnits("1",20),"Existing fuse cannot burn manager accrued fees");
+  if(x.name==="fulfill_existing_Safe_request")ensure(q.requestCanWithdraw,"Safe request not fulfilled");
+  if(x.name==="claim_Safe_scheduled_1")ensure(BigInt(q.safeShares)===retainSafeShares,"Safe shares not fully claimed");
  }
  report.sequential=await state();
  await provider.send("anvil_stopImpersonatingAccount",[A.safe]);
@@ -160,15 +170,17 @@ try{
  const end=await state();report.atomic={receipt:exact,final:end};
  ensure(end.safeShares===report.sequential.safeShares,"Atomic Safe shares mismatch");
  ensure(end.collateral===report.sequential.collateral,"Atomic Morpho mismatch");
- ensure(end.managerEarned===report.sequential.managerEarned,"Unexpected fee-share burn");
+ ensure(end.managerEarned===report.sequential.managerEarned&&BigInt(end.managerEarned)<parseUnits("1",20),"Manager earned fee not burned");
  ensure((await av.balanceOf(A.custody))===custodyBefore,"Custody received new avKAT");
  const diff=(a,b)=>a>=b?a-b:b-a;
  ensure(diff(BigInt(end.safeAsset),BigInt(report.sequential.safeAsset))<=parseUnits("0.02",18),"Atomic Safe avKAT mismatch");
  ensure(BigInt(end.safeShares)===retainSafeShares,"Safe retained share mismatch");
- ensure(BigInt(end.netEquity)>=parseUnits("35.5",18)&&BigInt(end.netEquity)<=parseUnits("36.5",18),"36 avKAT equity not preserved");
- report.plan.retainedSafeClaimAvkat=f(await v.previewRedeem(retainSafeShares));
- ensure(await v.previewRedeem(retainSafeShares)>=parseUnits("25.5",18)&&await v.previewRedeem(retainSafeShares)<=parseUnits("26.5",18),"Retained Safe shares not approximately 26 avKAT");
- ensure(second.length===6,"Unexpected additional Safe calls");
+ ensure(BigInt(end.netEquity)>=parseUnits("29.5",18)&&BigInt(end.netEquity)<=parseUnits("30.5",18),"30 AVKAT equity guard");
+ ensure(BigInt(end.ltvBps)>7500n&&BigInt(end.ltvBps)<7700n,"LTV drift");
+ ensure(BigInt(end.idleAvkat)>=parseUnits("5",18)&&BigInt(end.idleAvkat)<=parseUnits("60",18),"Idle AVKAT not near target");
+ ensure((await mg.getWithdrawFee())===0n,"Instant fee not disabled");
+ ensure((await con(A.custody,interfaces.custody).revenueShareBps())===0n,"Revenue not zero");
+ ensure(tranches.length===2&&second.length===11,"Unexpected Safe actions");
  report.status="PASS";
  step("99_ATOMIC_VERIFIED",{receipt:exact,safeAvkat:f(BigInt(end.safeAsset)-BigInt(before.safeAsset)),end:end.human});
 }catch(e){report.errors.push({message:String(e.shortMessage||e.message||e),code:e.code||"",data:e.data||e.info?.error?.data||null});console.error("FAILED",e);}
