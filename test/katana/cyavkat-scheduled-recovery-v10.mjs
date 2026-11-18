@@ -163,6 +163,7 @@ try{
   {name:"switch_manager_to_corrected_fee_burn",to:A.manager,data:interfaces.manager.encodeFunctionData("setDependencies",[A.controller,fixedBurn,A.feeShares,ZERO])},
   {name:"register_Morpho_flash_callback",to:A.vault,data:interfaces.vault.encodeFunctionData("updateCallbackHandler",[A.handler,A.morpho,"0x31f57072"])},
   {name:"flash_deleverage_to_10_equity_76_65_LTV",to:A.vault,data:flashData},
+  {name:"convert_flash_excess_KAT_to_avKAT",to:A.vault,data:interfaces.vault.encodeFunctionData("execute",[[{fuse:A.swap,data:interfaces.swap.encodeFunctionData("enter",[[A.kat,A.avkat,parseUnits("40",18),0n]])}]])},
   {name:"set_custody_revenue_share_zero",to:A.custody,data:interfaces.custody.encodeFunctionData("setRevenueShareBps",[0])},
   {name:"burn_existing_mature_earned_fee_shares",to:A.manager,data:interfaces.manager.encodeFunctionData("pruneExpiredRequests",[500n])},
   {name:"recover_fully_vested_reward_manager_avkat",to:A.rewardsManager,data:new Interface(["function transferVestedTokensToVault()"] ).encodeFunctionData("transferVestedTokensToVault",[])},
@@ -220,7 +221,7 @@ try{
   const tx=await txAs(signer,x),q=await state();
   step("04_"+String(i+1).padStart(2,"0")+"_"+x.name,{
    tx,ltvBps:q.ltvBps,collateral:f(BigInt(q.collateral)),debtKat:f(BigInt(q.debt)),
-   idleAvkat:f(BigInt(q.idleAvkat)),safeAvkat:f(BigInt(q.safeAsset)),
+   idleAvkat:f(BigInt(q.idleAvkat)),idleKat:f(BigInt(q.idleKat)),safeAvkat:f(BigInt(q.safeAsset)),
    safeShares:fs(BigInt(q.safeShares)),managerEarnedShares:fs(BigInt(q.managerEarned)),
    managerShares:fs(BigInt(q.managerShares)),requestCanWithdraw:q.requestCanWithdraw});
   if(x.name==="flash_deleverage_to_10_equity_76_65_LTV"){
@@ -231,6 +232,7 @@ try{
    ensure(BigInt(q.managerEarned)<BigInt(requested.managerEarned)/20n,"Mature fee shares not burned");
   }
   if(x.name==="redeem_harvested_safe_performance_shares"){ensure(BigInt(q.safeShares)===safeShares,"Harvested Safe shares not fully redeemed, or requested shares disturbed");}
+  if(x.name==="convert_flash_excess_KAT_to_avKAT"){ensure(BigInt(q.idleKat)>=0n,"Invalid KAT sweep");}
   if(x.name==="harvest_IPOR_fee_manager"){ensure((await v.balanceOf(A.performanceAccount))===0n,"Performance fee account not harvested");}
   if(x.name==="recover_fully_vested_reward_manager_avkat"){
     ensure(BigInt(q.idleAvkat)>=parseUnits("1790",18),"Vested rewards not credited as avKAT into vault");
