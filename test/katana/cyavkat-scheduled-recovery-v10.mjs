@@ -132,6 +132,12 @@ try{
  ensure(toSell<exit,"Insufficient collateral to cover flash swap");
  report.plan={targetNetEquityAvkat:"10",targetLtvBps:7665,collateralLeft:f(remainColl),debtLeftKat:f(targetDebt),
   repayKat:f(repay),collateralExitAvkat:f(exit),swapAvkat:f(toSell),predictedRecoveredAvkat:f(exit-toSell),fixedBurn,configRole:String(configRole)};
+ const instantFeeSelector=interfaces.manager.getFunction("updateWithdrawFee").selector;
+ const instantFeeRole=await ac.getTargetFunctionRole(A.template,instantFeeSelector);
+ const alreadyInstantAuthorized=(await ac.hasRole(instantFeeRole,A.safe))[0];
+ const instantAdmin=await ac.getRoleAdmin(instantFeeRole);
+ step("03_INSTANT_FEE_ROLE_PREFLIGHT",{selector:instantFeeSelector,requiredRole:String(instantFeeRole),admin:String(instantAdmin),alreadyAuthorized:alreadyInstantAuthorized});
+ ensure(alreadyInstantAuthorized||instantAdmin===100n,"Safe cannot temporarily zero instant fee");
  const perfShares=await v.balanceOf(A.performanceAccount);
  const initialInstantFee=await mg.getWithdrawFee();
  const initialRevenueShare=await con(A.custody,interfaces.custody).revenueShareBps();
@@ -156,16 +162,16 @@ try{
   {name:"register_corrected_fee_fuse",to:A.vault,data:interfaces.vault.encodeFunctionData("addFuses",[[fixedBurn]])},
   {name:"switch_manager_to_corrected_fee_burn",to:A.manager,data:interfaces.manager.encodeFunctionData("setDependencies",[A.controller,fixedBurn,A.feeShares,ZERO])},
   {name:"register_Morpho_flash_callback",to:A.vault,data:interfaces.vault.encodeFunctionData("updateCallbackHandler",[A.handler,A.morpho,"0x31f57072"])},
-  {name:"flash_deleverage_to_4_equity_76_65_LTV",to:A.vault,data:flashData},
+  {name:"flash_deleverage_to_10_equity_76_65_LTV",to:A.vault,data:flashData},
   {name:"set_custody_revenue_share_zero",to:A.custody,data:interfaces.custody.encodeFunctionData("setRevenueShareBps",[0])},
   {name:"burn_existing_mature_earned_fee_shares",to:A.manager,data:interfaces.manager.encodeFunctionData("pruneExpiredRequests",[500n])},
   {name:"recover_fully_vested_reward_manager_avkat",to:A.rewardsManager,data:new Interface(["function transferVestedTokensToVault()"] ).encodeFunctionData("transferVestedTokensToVault",[])},
   {name:"harvest_IPOR_fee_manager",to:A.feeManager,data:interfaces.feeManager.encodeFunctionData("harvestAllFees",[])},
-  {name:"grant_fee_admin_for_temporary_zero_instant",to:A.access,data:interfaces.access.encodeFunctionData("grantRole",[901n,A.safe,0])},
+  ...(!alreadyInstantAuthorized?[{name:"grant_instant_fee_role",to:A.access,data:interfaces.access.encodeFunctionData("grantRole",[instantFeeRole,A.safe,0])}]:[]),
   {name:"set_instant_withdraw_fee_zero",to:A.manager,data:interfaces.manager.encodeFunctionData("updateWithdrawFee",[0n])},
   {name:"redeem_harvested_safe_performance_shares",to:A.vault,data:interfaces.vault.encodeFunctionData("redeem",[perfShares,A.safe,A.safe])},
   {name:"restore_instant_withdraw_fee",to:A.manager,data:interfaces.manager.encodeFunctionData("updateWithdrawFee",[initialInstantFee])},
-  {name:"revoke_fee_admin_after_zero_instant",to:A.access,data:interfaces.access.encodeFunctionData("revokeRole",[901n,A.safe])},
+  ...(!alreadyInstantAuthorized?[{name:"revoke_instant_fee_role",to:A.access,data:interfaces.access.encodeFunctionData("revokeRole",[instantFeeRole,A.safe])}]:[]),
   ...tranches.flatMap((shares,i)=>[
     {name:"fulfill_Safe_scheduled_"+i,to:A.controller,data:interfaces.controller.encodeFunctionData("fulfillFor",[A.safe,shares,0n])},
     {name:"claim_Safe_scheduled_"+i,to:A.vault,data:interfaces.vault.encodeFunctionData("redeemFromRequest",[shares,A.safe,A.safe])}
@@ -217,7 +223,7 @@ try{
    idleAvkat:f(BigInt(q.idleAvkat)),safeAvkat:f(BigInt(q.safeAsset)),
    safeShares:fs(BigInt(q.safeShares)),managerEarnedShares:fs(BigInt(q.managerEarned)),
    managerShares:fs(BigInt(q.managerShares)),requestCanWithdraw:q.requestCanWithdraw});
-  if(x.name==="flash_deleverage_to_4_equity_76_65_LTV"){
+  if(x.name==="flash_deleverage_to_10_equity_76_65_LTV"){
    ensure(BigInt(q.netEquity)>=parseUnits("9.8",18)&&BigInt(q.netEquity)<=parseUnits("10.2",18),"Morpho equity not 10 avKAT");
    ensure(BigInt(q.ltvBps)>=7650n&&BigInt(q.ltvBps)<7700n,"Morpho LTV not 76.5-77%");
   }
