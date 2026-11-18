@@ -8,7 +8,7 @@ on:
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/run-v13.mjs'
       - 'test/katana/cyavkat-morpho-fulfill-safe-batch-v6.mjs'
       - 'test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs'
-      - 'test/katana/cyavkat-scheduled-recovery-v9.mjs'
+      - 'test/katana/cyavkat-scheduled-recovery-v10.mjs'
   workflow_dispatch:
 
 permissions:
@@ -161,16 +161,16 @@ jobs:
       - name: Replay exact queued Safe role grants, Morpho exit and KAT-to-avKAT swap; prove idle ERC4626 withdrawal
         if: ${{ contains(github.event.head_commit.message, '[cyavkat-ltv-swap]') }}
         run: node test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs
-      - name: Run two-block 0% scheduled request and full flash-deleverage Safe recovery
+      - name: Run 10 avKAT-loop 0% request, IPOR fee harvest, custody-neutral final Safe recovery
         if: ${{ contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
-        run: node test/katana/cyavkat-scheduled-recovery-v9.mjs
+        run: node test/katana/cyavkat-scheduled-recovery-v10.mjs
       - name: Show scheduled recovery checkpoint outcomes
         if: ${{ always() && contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
         shell: bash
         run: |
-          if [ -f cyavkat-scheduled-recovery-v9-report.json ]; then
-            jq '{version,status,fork,plan,errors,atomic,steps: [.steps[] | {n,ltvBps,idleAvkat,safeAvkat,managerEarnedShares,safeShares}]}' cyavkat-scheduled-recovery-v9-report.json
-            if [ -f cyavkat-scheduled-recovery-v9-proposal.json ]; then
+          if [ -f cyavkat-scheduled-recovery-v10-report.json ]; then
+            jq '{version,status,fork,plan,errors,atomic,steps: [.steps[] | {n,ltvBps,idleAvkat,safeAvkat,managerEarnedShares,safeShares}]}' cyavkat-scheduled-recovery-v10-report.json
+            if [ -f cyavkat-scheduled-recovery-v10-proposal.json ]; then
               echo 'Fork-only atomic Safe proposal v9 verified; no public Katana writes performed.' >> "$GITHUB_STEP_SUMMARY"
             fi
           else
@@ -213,7 +213,7 @@ jobs:
             cyavkat-morpho-fulfill-safe-batch-v6-report.json
             cyavkat-morpho-fulfill-safe-batch-v6.json
             cyavkat-safe-proposal-ltv-swap-v1-report.json
-            cyavkat-scheduled-recovery-v9-report.json
-            cyavkat-scheduled-recovery-v9-proposal.json
+            cyavkat-scheduled-recovery-v10-report.json
+            cyavkat-scheduled-recovery-v10-proposal.json
           if-no-files-found: warn
           retention-days: 30
