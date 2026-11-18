@@ -1,0 +1,60 @@
+name: cyvlSDT Vault PPS Live Ethereum Fork v3
+
+on:
+  push:
+    branches: [cyvlsdt-vault-pps-fork-v1]
+    paths:
+      - 'github-native-sim/cyvlsdt-runtime-compare-v1/vault-pps-live-fork-v3.mjs'
+      - '.github/workflows/cyvlsdt-vault-pps-mainnet-fork-v3.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deployed-vault-deposit-instant-withdraw-pps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact fork harness
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing pinned JavaScript dependencies
+        run: npm ci --ignore-scripts
+      - name: Install Anvil and cast
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Run mainnet fork of real deployed vault and strategy
+        shell: bash
+        env:
+          FORK_RPC: ${{ secrets.RPC_ETHEREUM }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FORK_RPC:-}" ]; then echo '::error::RPC_ETHEREUM secret is required'; exit 1; fi
+          test "$(timeout 30s cast chain-id --rpc-url "$FORK_RPC")" = '1'
+          anvil --fork-url "$FORK_RPC" --chain-id 1 --port 8545 --silent > "$RUNNER_TEMP/cyvlsdt-vault-pps-anvil-v3.log" 2>&1 &
+          ANVIL_PID=$!
+          trap 'kill "$ANVIL_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 50); do
+            if cast block-number --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = '1'
+          echo "MAINNET_FORK_BLOCK=$(cast block-number --rpc-url http://127.0.0.1:8545)"
+          node --check github-native-sim/cyvlsdt-runtime-compare-v1/vault-pps-live-fork-v3.mjs
+          timeout --signal=TERM --kill-after=10s 300s node github-native-sim/cyvlsdt-runtime-compare-v1/vault-pps-live-fork-v3.mjs | tee "$RUNNER_TEMP/cyvlsdt-vault-pps-result-v3.log"
+      - name: Upload fork evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyvlsdt-vault-pps-live-fork-v3
+          path: |
+            ${{ runner.temp }}/cyvlsdt-vault-pps-result-v3.log
+            ${{ runner.temp }}/cyvlsdt-vault-pps-anvil-v3.log
+          if-no-files-found: ignore
