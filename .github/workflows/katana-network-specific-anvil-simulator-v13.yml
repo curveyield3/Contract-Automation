@@ -8,7 +8,7 @@ on:
       - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v13/run-v13.mjs'
       - 'test/katana/cyavkat-morpho-fulfill-safe-batch-v6.mjs'
       - 'test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs'
-      - 'test/katana/cyavkat-scheduled-recovery-v4.mjs'
+      - 'test/katana/cyavkat-scheduled-recovery-v5.mjs'
   workflow_dispatch:
 
 permissions:
@@ -209,7 +209,7 @@ jobs:
         run: node test/katana/cyavkat-safe-proposal-ltv-swap-v1.mjs
       - name: Run two-block 0% scheduled request and full flash-deleverage Safe recovery
         if: ${{ contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
-        run: node test/katana/cyavkat-scheduled-recovery-v4.mjs
+        run: node test/katana/cyavkat-scheduled-recovery-v5.mjs
       - name: Show scheduled recovery checkpoint outcomes
         if: ${{ always() && contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
         shell: bash
