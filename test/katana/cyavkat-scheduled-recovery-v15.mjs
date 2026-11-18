@@ -29,7 +29,7 @@ const mor=con(A.morpho,["function position(bytes32,address) view returns(uint256
 const router=con(A.swap,["function requiredInputView(address,address,uint256,uint256) view returns(uint256)"]);
 const oracle=con("0xc5d4f6f7b1f5dec7ec191d3612388f95f5f7f47c",["function price() view returns(uint256)"]);
 const f=n=>formatUnits(n,18),fs=n=>formatUnits(n,20),ensure=(x,s)=>{if(!x)throw Error("ASSERTION: "+s);};
-const report={version:"v16",status:"FAIL",chainId:747474,mode:"PINNED_LOCAL_KATANA_ANVIL_ONLY",proposalHash1:"0xcf3361b9dd99fefcaf1d1a8ba67f7056c6446bfceb23234d5705268ee0ad25b3",snapshots:[],steps:[],errors:[],proposal2:null};
+const report={version:"v17",status:"FAIL",chainId:747474,mode:"PINNED_LOCAL_KATANA_ANVIL_ONLY",proposalHash1:"0xcf3361b9dd99fefcaf1d1a8ba67f7056c6446bfceb23234d5705268ee0ad25b3",snapshots:[],steps:[],errors:[],proposal2:null};
 const step=(n,x)=>{report.steps.push({n,...x});console.log("CHECKPOINT",n,JSON.stringify(x));};
 const pack=(to,data)=>"00"+to.slice(2).toLowerCase()+"0".repeat(64)+BigInt((data.length-2)/2).toString(16).padStart(64,"0")+data.slice(2);
 const msdata=calls=>interfaces.multisend.encodeFunctionData("multiSend",["0x"+calls.map(c=>pack(c.to,c.data)).join("")]);
@@ -112,9 +112,9 @@ try{
  const quoted=await router.requiredInputView(A.avkat,A.kat,repay,exit);
  const toSell=quoted+quoted/1000n+1n;
  ensure(toSell<exit,"Insufficient avKAT for Morpho unwind");
- const retainSafeShares=0n; // no leftover Safe shares
- const claimShares=safeShares-retainSafeShares;
- ensure(claimShares>0n,"No requested shares to withdraw");
+ const claimShares=13n*10n**20n; // preserve ~10 idle
+ const retainSafeShares=safeShares-claimShares;
+ ensure(claimShares>0n&&claimShares<safeShares,"Insufficient Safe shares");
  const tranches=[claimShares*95n/100n,claimShares-claimShares*95n/100n]; // two withdrawals for 2% buffer
  const callback=[{fuse:A.borrow,data:interfaces.borrow.encodeFunctionData("exit",[[A.market,repay,0n]])},
    {fuse:A.collateral,data:interfaces.collateral.encodeFunctionData("exit",[[A.market,exit]])},
@@ -124,7 +124,7 @@ try{
  report.plan={targetNetEquityAvkat:"30",targetLtvBps:7600,collateralLeft:f(remainColl),
     debtLeftKat:f(targetDebt),repayKat:f(repay),collateralExitAvkat:f(exit),
     swapAvkat:f(toSell),claimShares:fs(claimShares),retainedSafeShares:fs(retainSafeShares),
-    deployContracts:false,changeDependencies:false,changeInstantWithdrawFee:true,burnAccruedFeeShares:true,withdrawals:tranches.map(fs)};
+    deployContracts:false,changeDependencies:false,changeInstantWithdrawFee:true,burnAccruedFeeShares:false,withdrawals:tranches.map(fs)};
  const cfgRole=await ac.getTargetFunctionRole(A.template,interfaces.manager.getFunction("updateWithdrawFee").selector);
  ensure(cfgRole===902n&&(await ac.getRoleAdmin(cfgRole))===100n,"Unexpected fee role");
  ensure(!(await ac.hasRole(cfgRole,A.safe))[0],"Fee role pregranted");
@@ -134,10 +134,7 @@ try{
  {name:"grant_existing_vault_governor",to:A.access,data:interfaces.access.encodeFunctionData("grantRole",[300n,A.safe,0])},
  {name:"grant_instant_fee_config",to:A.access,data:interfaces.access.encodeFunctionData("grantRole",[cfgRole,A.safe,0])},
  {name:"disable_instant_withdraw_fee",to:A.manager,data:interfaces.manager.encodeFunctionData("updateWithdrawFee",[0n])},
- {name:"register_existing_Morpho_flash_callback",to:A.vault,data:interfaces.vault.encodeFunctionData("updateCallbackHandler",[A.handler,A.morpho,"0x31f57072"])},
  {name:"flash_deleverage_to_30_equity_76_LTV",to:A.vault,data:flashData},
- {name:"burn_existing_fee_shares_using_deployed_fuse",to:A.manager,data:interfaces.manager.encodeFunctionData("pruneExpiredRequests",[500n])},
- {name:"recover_vested_avKAT",to:A.rewardsManager,data:new Interface(["function transferVestedTokensToVault()"]).encodeFunctionData("transferVestedTokensToVault",[])},
  {name:"fulfill_existing_Safe_request",to:A.controller,data:interfaces.controller.encodeFunctionData("fulfillFor",[A.safe,claimShares,0n])},
  ...tranches.map((shares,i)=>({name:"claim_Safe_scheduled_"+i,to:A.vault,data:interfaces.vault.encodeFunctionData("redeemFromRequest",[shares,A.safe,A.safe])}))
  ];
@@ -159,8 +156,7 @@ try{
     ensure(BigInt(q.netEquity)>=parseUnits("29.5",18)&&BigInt(q.netEquity)<=parseUnits("30.5",18),"Morpho 30 equity guard");
     ensure(BigInt(q.ltvBps)>7500n&&BigInt(q.ltvBps)<7700n,"Morpho LTV 75-77%");
   }
-  if(x.name==="burn_existing_fee_shares_using_deployed_fuse")ensure(BigInt(q.managerEarned)<parseUnits("1",20),"Existing fuse cannot burn manager accrued fees");
-  if(x.name==="fulfill_existing_Safe_request")ensure(q.requestCanWithdraw,"Safe request not fulfilled");
+    if(x.name==="fulfill_existing_Safe_request")ensure(q.requestCanWithdraw,"Safe request not fulfilled");
   if(x.name==="claim_Safe_scheduled_1")ensure(BigInt(q.safeShares)===retainSafeShares,"Safe shares not fully claimed");
  }
  report.sequential=await state();
@@ -170,17 +166,18 @@ try{
  const end=await state();report.atomic={receipt:exact,final:end};
  ensure(end.safeShares===report.sequential.safeShares,"Atomic Safe shares mismatch");
  ensure(end.collateral===report.sequential.collateral,"Atomic Morpho mismatch");
- ensure(end.managerEarned===report.sequential.managerEarned&&BigInt(end.managerEarned)<parseUnits("1",20),"Manager earned fee not burned");
+ ensure(end.managerEarned===report.sequential.managerEarned&&BigInt(end.managerEarned)<parseUnits("1",20),"Fee shares unexpectedly changed");
  ensure((await av.balanceOf(A.custody))===custodyBefore,"Custody received new avKAT");
  const diff=(a,b)=>a>=b?a-b:b-a;
  ensure(diff(BigInt(end.safeAsset),BigInt(report.sequential.safeAsset))<=parseUnits("0.02",18),"Atomic Safe avKAT mismatch");
  ensure(BigInt(end.safeShares)===retainSafeShares,"Safe retained share mismatch");
  ensure(BigInt(end.netEquity)>=parseUnits("29.5",18)&&BigInt(end.netEquity)<=parseUnits("30.5",18),"30 AVKAT equity guard");
  ensure(BigInt(end.ltvBps)>7500n&&BigInt(end.ltvBps)<7700n,"LTV drift");
- ensure(BigInt(end.idleAvkat)>=parseUnits("5",18)&&BigInt(end.idleAvkat)<=parseUnits("60",18),"Idle AVKAT not near target");
+ ensure(BigInt(end.idleAvkat)>=parseUnits("9",18)&&BigInt(end.idleAvkat)<=parseUnits("12",18),"Idle AVKAT not near target");
  ensure((await mg.getWithdrawFee())===0n,"Instant fee not disabled");
  ensure((await con(A.custody,interfaces.custody).revenueShareBps())===0n,"Revenue not zero");
- ensure(tranches.length===2&&second.length===11,"Unexpected Safe actions");
+ ensure(tranches.length===2&&second.length===8,"Unexpected Safe actions");
+ ensure(BigInt(end.safeAsset)-BigInt(before.safeAsset)>parseUnits("14",18),"Safe did not receive AVKAT");
  report.status="PASS";
  step("99_ATOMIC_VERIFIED",{receipt:exact,safeAvkat:f(BigInt(end.safeAsset)-BigInt(before.safeAsset)),end:end.human});
 }catch(e){report.errors.push({message:String(e.shortMessage||e.message||e),code:e.code||"",data:e.data||e.info?.error?.data||null});console.error("FAILED",e);}
