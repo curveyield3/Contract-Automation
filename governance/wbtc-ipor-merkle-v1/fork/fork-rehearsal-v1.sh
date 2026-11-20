@@ -42,9 +42,20 @@ LOCAL_HASH="$(cast block "$PIN" --field hash --rpc-url "$LOCAL_RPC" | tr -d '\r\
 MORPHO_BLUE='0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb'
 MORPHO_CODE="$(cast code "$MORPHO_BLUE" --rpc-url "$LOCAL_RPC")"
 [[ "$MORPHO_CODE" != '0x' && "$MORPHO_CODE" != '0x0' ]] || fail 'real Morpho Blue mainnet contract bytecode is missing'
+# Read-only check against the actual RISC Zero receipt verifier on the
+# authenticated historical Ethereum fork. A malformed seal MUST fail.
+RISC_ZERO_ROUTER='0x8EaB2D97Dfce405A1692a21b3ff3A172d593D319'
+RISC_ZERO_CODE="$(cast code "$RISC_ZERO_ROUTER" --rpc-url "$LOCAL_RPC")"
+[[ "$RISC_ZERO_CODE" != '0x' && "$RISC_ZERO_CODE" != '0x0' ]] || fail 'RISC Zero router not deployed at required address'
+BAD_ID='0x0000000000000000000000000000000000000000000000000000000000000000'
+if cast call "$RISC_ZERO_ROUTER" 'verify(bytes,bytes32,bytes32)' '0x00' "$BAD_ID" "$BAD_ID" --rpc-url "$LOCAL_RPC" > "$OUT/malformed-proof-response.txt" 2>&1; then
+  fail 'real verifier unexpectedly accepted deliberately malformed proof'
+fi
+printf 'Real RISC Zero verifier exists; malformed receipt was rejected (negative control only).\n'
+
 
 jq -n --arg status FORK_READY_ONLY --arg block "$PIN" --arg blockHash "$UPSTREAM_HASH" --arg head "$LATEST" --arg gitSha "${GITHUB_SHA:-unknown}" --arg morphoBlue "$MORPHO_BLUE" \
- '{schema:"wbtc-ipor-governance-fork-rehearsal-v1",status:$status,chainId:1,upstreamHeight:$head,upstreamBlock:$block,upstreamBlockHash:$blockHash,morphoBlue:$morphoBlue,runnerCommit:$gitSha,localRPC:"http://127.0.0.1:8545",liveGovernanceExecuted:false,realProofVerifiedOnchain:false}' > "$OUT/fork-report.json"
+ '{schema:"wbtc-ipor-governance-fork-rehearsal-v1",status:$status,chainId:1,upstreamHeight:$head,upstreamBlock:$block,upstreamBlockHash:$blockHash,morphoBlue:$morphoBlue,runnerCommit:$gitSha,localRPC:"http://127.0.0.1:8545",liveGovernanceExecuted:false,realProofVerifiedOnchain:false,riscZeroRouter:"0x8EaB2D97Dfce405A1692a21b3ff3A172d593D319",malformedProofRejected:true}' > "$OUT/fork-report.json"
 printf 'Verified mainnet fork: block=%s hash=%s; Morpho Blue code present. Mainnet was not modified.\n' "$PIN" "$UPSTREAM_HASH"
 
 if [[ "${FORK_ONLY_PREFLIGHT:-0}" == '1' ]]; then
