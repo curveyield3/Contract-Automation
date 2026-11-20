@@ -1,0 +1,153 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "curveyield3/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "cywbtc-ipor-v19-fork-validation",
+  "assignmentId": "cywbtc-v19-pinned-fuse-lifecycle",
+  "phaseId": "fork-simulation-lifecycle",
+  "gateId": "cywbtc-v19-fxmint-borrow-fuse-live-fork-smoke",
+  "profileId": "github-native-simulate-v2",
+  "source": {
+    "repository": "curveyield3/Smart-Contracts",
+    "commit": "65d1023b9576a49e6de32d0b9f245d06e9c55a3b",
+    "projectPath": "cywbtc-ipor-source-v19",
+    "archivePath": "cywbtc-ipor-source-v19/cyWBTC_IPOR_Source_v19_V7_Compiler_Repair.zip",
+    "archiveSha256": "41a55c5f5d33d0135d0b2ebde0ad8fc558b014060c9d99b15f2bf2bc46b79947"
+  },
+  "configuration": {
+    "compilers": [
+      {
+        "language": "solidity",
+        "version": "0.8.30"
+      }
+    ],
+    "timeoutMinutes": 35,
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun",
+    "viaIR": true,
+    "deploymentGas": {
+      "deployableContracts": [
+        {
+          "sourceName": "contracts/fuses/fxmint/FXMintBorrowFuse.sol",
+          "contractName": "FXMintBorrowFuse"
+        }
+      ]
+    },
+    "simulation": {
+      "chain": "ethereum",
+      "block": 26398382,
+      "workflow": {
+        "steps": [
+          {
+            "action": "snapshot",
+            "alias": "beforeFxmintSmoke",
+            "label": "preserve mainnet-fork baseline"
+          },
+          {
+            "action": "staticCall",
+            "target": "0xAB709e26Fa6B0A30c119D8c55B887DeD24952473",
+            "function": "poolManager() view returns (address)",
+            "args": [],
+            "saveAs": "fxmintManager",
+            "label": "identify real fxMINT pool manager"
+          },
+          {
+            "action": "assertCall",
+            "target": "0xAB709e26Fa6B0A30c119D8c55B887DeD24952473",
+            "function": "fxUSD() view returns (address)",
+            "args": [],
+            "equals": "0x085780639cc2cacd35e474e71f4d000e2405d8f6",
+            "label": "verify real fxMINT pool fxUSD asset"
+          },
+          {
+            "action": "deploy",
+            "alias": "fxmintBorrowFuse",
+            "contract": "FXMintBorrowFuse",
+            "source": "contracts/fuses/fxmint/FXMintBorrowFuse.sol",
+            "args": [
+              "0xAB709e26Fa6B0A30c119D8c55B887DeD24952473",
+              "$fxmintManager",
+              "0x085780639cc2cacd35e474e71f4d000e2405d8f6"
+            ],
+            "from": "$account0",
+            "label": "deploy fxMINT borrow fuse against live pool"
+          },
+          {
+            "action": "assertCall",
+            "target": "$fxmintBorrowFuse",
+            "function": "MARKET_ID() view returns (uint256)",
+            "args": [],
+            "equals": "49",
+            "label": "verify configured fxMINT market ID"
+          },
+          {
+            "action": "assertCall",
+            "target": "$fxmintBorrowFuse",
+            "function": "POOL() view returns (address)",
+            "args": [],
+            "equals": "0xAB709e26Fa6B0A30c119D8c55B887DeD24952473",
+            "label": "verify fxMINT fuse pool address"
+          },
+          {
+            "action": "assertCall",
+            "target": "$fxmintBorrowFuse",
+            "function": "FXUSD() view returns (address)",
+            "args": [],
+            "equals": "0x085780639cc2cacd35e474e71f4d000e2405d8f6",
+            "label": "verify fxMINT fuse fxUSD address"
+          },
+          {
+            "action": "assertCall",
+            "target": "$fxmintBorrowFuse",
+            "function": "MANAGER() view returns (address)",
+            "args": [],
+            "equals": "$fxmintManager",
+            "label": "verify fxMINT fuse manager address"
+          },
+          {
+            "action": "assertCall",
+            "target": "$fxmintBorrowFuse",
+            "function": "VERSION() view returns (address)",
+            "args": [],
+            "equals": "$fxmintBorrowFuse",
+            "label": "verify deployed fuse self-version"
+          },
+          {
+            "action": "expectRevert",
+            "target": "$fxmintBorrowFuse",
+            "function": "enter(uint256,uint256,uint256)",
+            "args": [
+              "0",
+              "1",
+              "0"
+            ],
+            "from": "$account0",
+            "label": "reject borrowing against unowned NFT"
+          },
+          {
+            "action": "revertSnapshot",
+            "snapshot": "$beforeFxmintSmoke",
+            "label": "restore fork baseline after smoke"
+          }
+        ]
+      }
+    },
+    "harness": {
+      "recipeId": "deploy-configure-smoke-v1"
+    }
+  },
+  "requestId": "dar-f7c0a9fb38692cfa58abec69d31403ce",
+  "requestDigest": "969c81c0484cf70a8ea2a0254d2769989f74cb1c81b5834672bb49d8e07d0e49"
+}
