@@ -12,7 +12,13 @@ COPY security-intelligence-phase0/package.json security-intelligence-phase0/pack
 COPY security-intelligence-phase0/packages/runner/package.json ./packages/runner/package.json
 COPY security-intelligence-phase0/packages/protocol/package.json ./packages/protocol/package.json
 RUN npm ci --force --no-audit --no-fund
+RUN test -f node_modules/@foundry-rs/forge/bin.mjs && \
+    test -f node_modules/@foundry-rs/cast/bin.mjs && \
+    chmod +x node_modules/@foundry-rs/forge/bin.mjs node_modules/@foundry-rs/cast/bin.mjs && \
+    ln -s /opt/preflight/node_modules/@foundry-rs/forge/bin.mjs /usr/local/bin/forge && \
+    ln -s /opt/preflight/node_modules/@foundry-rs/cast/bin.mjs /usr/local/bin/cast
 COPY security-intelligence-phase0/packages/ ./packages/
 COPY security-intelligence-phase0/scripts/ ./scripts/
+COPY security-intelligence-phase0/protocol/taxonomy/ ./protocol/taxonomy/
 # Only trusted cloned tooling is embedded. The user ZIP enters a separate
 # read-only bind mount after this image has been completely built.
