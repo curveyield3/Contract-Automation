@@ -74,53 +74,57 @@ async function walk(root){
 
 async function detectProjectRoot(extractRoot){
   const files=await walk(extractRoot);
+  const sourceFiles=files.filter(f=>/\.(?:sol|vy)$/i.test(f));
+  if(!sourceFiles.length)throw new Error('no Solidity or Vyper source in admitted archive');
   const candidates=new Set();
+  const config=/^(?:foundry\.toml|package\.json|package-lock\.json|npm-shrinkwrap\.json|scan-source-manifest\.json|hardhat\.config\.(?:js|cjs|mjs|ts))$/;
   for(const f of files){
-    if(/(^|\/)package\.json$/.test(f)||/(^|\/)package-lock\.json$/.test(f)||/(^|\/)hardhat\.config\.(?:js|cjs|mjs|ts)$/.test(f)||/(^|\/)foundry\.toml$/.test(f)){
-      candidates.add(path.posix.dirname(f));
-    }
-    const m=f.match(/^(?:(.*?)\/)?(?:contracts|src)\/.+\.sol$/);
+    const base=path.posix.basename(f);
+    if(config.test(base))candidates.add(path.posix.dirname(f));
+    const m=f.match(/^(?:(.*?)\/)?(?:contracts|src)\/.+\.(?:sol|vy)$/i);
     if(m)candidates.add(m[1]||'.');
   }
+  // A Vyper-only or source-only archive has no build configuration and is still
+  // admissible for source inspection. Nested projects stay independently listed.
+  if(!candidates.size)candidates.add('.');
   const scored=[];
   for(const rel0 of candidates){
     const rel=rel0==='.'?'':rel0;
     if(rel.toUpperCase().includes('ARCHIVE DO NOT USE'))continue;
     const prefix=rel?rel+'/':'';
-    const child=files.filter(f=>f.startsWith(prefix));
+    const child=sourceFiles.filter(f=>f.startsWith(prefix));
+    if(!child.length)continue;
     const sol=child.filter(f=>f.endsWith('.sol')).length;
-    if(sol===0)continue;
-    const names=new Set(child.filter(f=>!f.slice(prefix.length).includes('/')).map(f=>f.slice(prefix.length)));
+    const vyper=child.filter(f=>f.endsWith('.vy')).length;
+    const names=new Set(files.filter(f=>f.startsWith(prefix)&&!f.slice(prefix.length).includes('/')).map(f=>f.slice(prefix.length)));
     const hasFoundry=names.has('foundry.toml');
     const hasPkg=names.has('package.json');
-    const hasLock=names.has('package-lock.json');
+    const hasLock=names.has('package-lock.json')||names.has('npm-shrinkwrap.json');
     const hasHardhat=[...names].some(n=>/^hardhat\.config\.(js|cjs|mjs|ts)$/.test(n));
     const hasContracts=child.some(f=>f.startsWith(prefix+'contracts/'));
-    const hasTooling=child.some(f=>f.startsWith(prefix+'tooling/'));
-    const hasVendor=child.some(f=>f.startsWith(prefix+'vendor/'));
+    const hasTooling=files.some(f=>f.startsWith(prefix+'tooling/'));
+    const hasVendor=files.some(f=>f.startsWith(prefix+'vendor/'));
+    const hasScanManifest=names.has('scan-source-manifest.json');
     const depth=rel?rel.split('/').length:0;
-    const score=(hasFoundry?240:0)+(hasPkg?120:0)+(hasLock?110:0)+(hasContracts?100:0)+(hasHardhat?70:0)+(hasTooling?60:0)+(hasVendor?40:0)+Math.min(sol,80)-depth;
-    scored.push({relativePath:rel||'.',score,solidityFiles:sol,hasFoundry,hasPkg,hasLock,hasHardhat,hasContracts,hasTooling,hasVendor});
+    const dependencyLikely=rel.split('/').some(x=>['vendor','lib','node_modules'].includes(x));
+    const score=(hasFoundry?240:0)+(hasScanManifest?235:0)+(hasPkg?120:0)+(hasLock?110:0)+(hasContracts?100:0)+(hasHardhat?70:0)+(hasTooling?60:0)+(hasVendor?40:0)+Math.min(sol+vyper,80)-depth-(dependencyLikely?150:0);
+    scored.push({relativePath:rel||'.',score,solidityFiles:sol,vyperFiles:vyper,hasFoundry,hasPkg,hasLock,hasHardhat,hasContracts,hasTooling,hasVendor,hasScanManifest,dependencyLikely,
+      hasDeploymentProfile:hasHardhat&&hasPkg&&hasLock&&files.includes(prefix+'audit-deployment.json')});
   }
-  // An explicit deployment profile is a stronger project-root declaration than
-  // nested foundry.toml discovery. Prefer its Hardhat package wrapper, which
-  // can compile upgrade/src and execute upgrade/scripts against the same archive.
-  const profiled=scored.filter(x=>
-    x.hasHardhat&&x.hasPkg&&x.hasLock&&
-    files.includes((x.relativePath==='.'?'':x.relativePath+'/')+'audit-deployment.json')
-  );
-  if(profiled.length>1)throw new Error('ambiguous explicit deployment-profile project roots');
-  if(profiled.length===1){
-    const winner=profiled[0];
-    const absolute=winner.relativePath==='.'?extractRoot:path.join(extractRoot,...winner.relativePath.split('/'));
-    return{absolute,relativePath:winner.relativePath,candidates:scored.sort((a,b)=>b.score-a.score).slice(0,10)};
-  }
-  scored.sort((a,b)=>b.score-a.score||b.solidityFiles-a.solidityFiles||a.relativePath.localeCompare(b.relativePath));
-  if(!scored.length)throw new Error('unable to detect Solidity project root from archive');
+  scored.sort((a,b)=>Number(b.hasDeploymentProfile)-Number(a.hasDeploymentProfile)||
+    b.score-a.score||(b.solidityFiles+b.vyperFiles)-(a.solidityFiles+a.vyperFiles)||
+    a.relativePath.localeCompare(b.relativePath));
+  if(!scored.length)throw new Error('no supported project root in admitted archive');
   const winner=scored[0];
-  if(scored[1]&&winner.score===scored[1].score&&winner.solidityFiles===scored[1].solidityFiles)throw new Error(`ambiguous project root: ${winner.relativePath} vs ${scored[1].relativePath}`);
   const absolute=winner.relativePath==='.'?extractRoot:path.join(extractRoot,...winner.relativePath.split('/'));
-  return{absolute,relativePath:winner.relativePath,candidates:scored.slice(0,10)};
+  // No silent best-root-only claim: all candidates are returned, including
+  // additional independently configured roots that need distinct compilation.
+  const separate=scored.filter(x=>x.relativePath!==winner.relativePath&&
+    (x.hasFoundry||x.hasHardhat||x.hasScanManifest||
+      !(x.relativePath.startsWith(winner.relativePath+'/')||winner.relativePath==='.')));
+  return{absolute,relativePath:winner.relativePath,candidates:scored,projects:scored,
+    additionalProjectRoots:separate.map(x=>x.relativePath),multipleProjects:separate.length>0,
+    selectionBasis:'DETERMINISTIC_HIGHEST_CONFIDENCE_ROOT_NOT_PROOF_OTHER_ROOTS_BUILT'};
 }
 
 async function readMaybe(file){try{return await fs.readFile(file,'utf8');}catch{return'';}}
@@ -180,7 +184,14 @@ async function detectBuildConfig(projectRoot){
     evidence.push('foundry.toml auto_detect_solc','admitted Solidity pragmas ('+detectedPragmaVersions.length+')');
   }
   candidates.sort((a,b)=>b.priority-a.priority||a.basis.localeCompare(b.basis));
-  if(!candidates.length)throw new Error('unable to detect exact Solidity compiler version from source package');
+  if(!candidates.length){
+    const vyperOnly=(await walk(projectRoot)).some(rel=>rel.endsWith('.vy')) &&
+      !(await walk(projectRoot)).some(rel=>rel.endsWith('.sol'));
+    if(vyperOnly)return{compilerVersion:null,compilerCandidates:[],foundryAutoDetectSolc:false,
+      admittedSolidityPragmas:[],vyperOnly:true,optimizer:{enabled:false,runs:0},
+      viaIR:false,evmVersion:null,evidence:['SOURCE_ONLY_VYPER_COMPILER_REQUIRED']};
+    throw new Error('unable to detect exact Solidity compiler version from source package');
+  }
   const topPriority=candidates[0].priority;
   const topVersions=[...new Set(candidates.filter(x=>x.priority===topPriority).map(x=>x.version))];
   if(topVersions.length>1)throw new Error(`conflicting explicit Solidity compiler versions: ${topVersions.join(', ')}`);
@@ -999,35 +1010,98 @@ async function buildContextReviewPacket({projectRoot,sourceIntelligence,projectR
 // The network-disabled collector may only use dependencies that were fetched
 // during trusted image construction, before the untrusted source ZIP arrived.
 // This is a read-only source-manifest comparison, not source-defined install code.
-async function preparePinnedOfflineDependencies(projectRoot){
-  const depRoot=path.join(projectRoot,'dependencies');
-  const manifest=path.join(depRoot,'package.json');
-  if(!await exists(manifest))return {status:'NOT_APPLICABLE'};
-  const declared=JSON.parse(await fs.readFile(manifest,'utf8'));
-  const deps=declared?.dependencies??{};
-  const exactPins={
-    '@openzeppelin/contracts':'5.4.0',
-    '@openzeppelin-4/contracts':'npm:@openzeppelin/contracts@4.9.6',
-    '@openzeppelin-5/contracts':'npm:@openzeppelin/contracts@5.4.0',
-    '@openzeppelin/contracts-upgradeable':'4.9.6',
-    '@uniswap/v4-core':'1.0.2'
-  };
-  const requested=Object.entries(deps);
-  const unsupported=requested.filter(([name,version])=>exactPins[name]!==version);
-  if(unsupported.length)return {status:'DECLARED_DEPENDENCIES_NOT_PREBUILT',
-    unsupported:unsupported.map(([name,version])=>({name,version}))};
-  const target=path.join(depRoot,'node_modules');
-  if(await isDir(target))return {status:'SOURCE_ALREADY_CONTAINS_DEPENDENCIES',
-    packages:requested.map(([name,version])=>({name,version}))};
-  const prepared='/opt/preflight/trusted-source-deps/node_modules';
-  if(!await isDir(prepared))return {status:'TRUSTED_DEPENDENCY_CACHE_MISSING'};
-  for(const [name] of requested){
-    if(!await exists(path.join(prepared,...name.split('/'),'package.json')))
-      return {status:'TRUSTED_DEPENDENCY_CACHE_INCOMPLETE',missing:name};
+async function preparePinnedOfflineDependencies(extractionRoot,expectedSourceSha256){
+  const planLocation='/toolchain-plan/toolchain-plan.json';
+  if(!await exists(planLocation))return{status:'NO_ADMITTED_TOOLCHAIN_PLAN',packages:[]};
+  const plan=JSON.parse(await fs.readFile(planLocation,'utf8'));
+  if(plan.schemaVersion!=='curveyield-standalone-toolchain-plan-v1'||plan.sourceZipSha256!==expectedSourceSha256)
+    throw new Error('SOURCE_BOUND_TOOLCHAIN_PLAN_IDENTITY_MISMATCH');
+  let toolchainStatus={};
+  try{toolchainStatus=JSON.parse(await fs.readFile('/opt/preflight/toolchain-status.json','utf8'));}catch{}
+  const staged=[];
+  for(const [index,item] of (plan.packages??[]).entries()){
+    if(item.preparedPath!=='packages/'+index||typeof item.root!=='string')
+      throw new Error('SOURCE_TOOLCHAIN_PACKAGE_IDENTITY_INVALID');
+    const relative=item.root==='.'?'':item.root;
+    if(relative&&(!/^[A-Za-z0-9_./ -]+$/.test(relative)||relative.startsWith('/')||relative.split('/').some(x=>!x||x==='..'||x==='.')))
+      throw new Error('SOURCE_TOOLCHAIN_PACKAGE_PATH_INVALID');
+    const root=relative?path.join(extractionRoot,...relative.split('/')):extractionRoot;
+    const original=path.join(root,'package.json');
+    if(!await exists(original))throw new Error('ADMITTED_PACKAGE_MANIFEST_MISSING: '+item.root);
+    if(sha256(await fs.readFile(original))!==item.manifestSha256)
+      throw new Error('SOURCE_BOUND_NPM_MANIFEST_HASH_MISMATCH: '+item.root);
+    if(item.lockSha256){
+      const lockName=item.lockOriginalName??'package-lock.json';
+      if(!['package-lock.json','npm-shrinkwrap.json'].includes(lockName))
+        throw new Error('UNSAFE_SOURCE_LOCKFILE_NAME');
+      const lock=path.join(root,lockName);
+      if(!await exists(lock)||sha256(await fs.readFile(lock))!==item.lockSha256)
+        throw new Error('SOURCE_BOUND_NPM_LOCK_HASH_MISMATCH: '+item.root);
+    }
+    const preinstalled=path.join('/opt/preflight/prepared-packages',String(index),'node_modules');
+    const target=path.join(root,'node_modules');
+    if(await isDir(target)){
+      staged.push({root:item.root,status:'SOURCE_ALREADY_CONTAINS_DEPENDENCIES'});continue;
+    }
+    if(!await isDir(preinstalled)){
+      staged.push({root:item.root,status:'TOOLCHAIN_PACKAGE_NOT_AVAILABLE'});continue;
+    }
+    await fs.cp(preinstalled,target,{recursive:true,force:false,errorOnExist:true});
+    staged.push({root:item.root,status:'PREPARED_FROM_SOURCE_BOUND_INERT_MANIFEST',
+      manifestSha256:item.manifestSha256,lockSha256:item.lockSha256??null});
   }
-  await fs.cp(prepared,target,{recursive:true,force:false,errorOnExist:true});
-  return {status:'PREPARED_FROM_PREBUILT_TRUSTED_PINS',
-    packages:requested.map(([name,version])=>({name,version}))};
+  return{status:'SOURCE_BOUND_TOOLCHAIN_PLAN_CONSUMED',packages:staged,
+    solidityCompilers:toolchainStatus.solidity??[],vyperCompilers:toolchainStatus.vyper??[],
+    unsupportedSourceRequirements:plan.unsupported??[]};
+}
+
+async function writeSourceAdmissionInventory(extractionRoot,out,request,detected,observed){
+  const sourceNames=(await walk(extractionRoot)).filter(f=>/\.(?:sol|vy)$/i.test(f));
+  if(!sourceNames.length)throw new Error('NO_ADMITTED_SOURCE_FILES');
+  const files=[];
+  for(const rel of sourceNames){
+    const buf=await fs.readFile(path.join(extractionRoot,...rel.split('/')));
+    const body=buf.toString('utf8');
+    const imports=rel.endsWith('.sol')
+      ?[...body.matchAll(/\bimport\s+(?:(?:[^;"']+\s+from\s+)?["']([^"']+)["'])/g)].map(x=>x[1])
+      :[...body.matchAll(/^\s*(?:from\s+([a-zA-Z0-9_.]+)\s+import|import\s+([a-zA-Z0-9_.]+))/gm)].map(x=>x[1]??x[2]);
+    files.push({path:rel,language:rel.endsWith('.vy')?'VYPER':'SOLIDITY',
+      sha256:sha256(buf),bytes:buf.length,lines:body.split(/\r?\n/).length,
+      importSpecifiers:[...new Set(imports)].sort(),
+      evidenceClass:'ADMITTED_SOURCE_TEXT_ONLY_NOT_COMPILER_SEMANTICS'});
+  }
+  const inventory={schemaVersion:'curveyield-security-source-admission-inventory-v1',
+    sourceArchiveSha256:observed,sourceRepository:request.source.repository,sourceCommit:request.source.commit,
+    status:'SOURCE_FILES_INVENTORIED_NOT_A_COMPILATION',
+    projects:detected.projects??[],primaryProjectRoot:detected.relativePath,
+    additionalRootsNotYetCompiled:detected.additionalProjectRoots??[],
+    sourceCount:files.length,files};
+  await fs.writeFile(path.join(out,'SOURCE_ADMISSION_INVENTORY_v1.json'),JSON.stringify(inventory,null,2)+'\n');
+  return inventory;
+}
+
+async function writeCompilationUnavailable({out,request,observed,detected,admission,error}){
+  const reason=String(error?.message??error).slice(0,2500);
+  const identity={
+    schemaVersion:'curveyield-lite-phase0-build-source-identity-v1',
+    source:{...request.source,checkoutCommit:request.source.commit,archiveSha256Observed:observed},
+    discovery:{projectPath:detected.relativePath,topCandidates:detected.candidates,projects:detected.projects,
+      admittedSourceFiles:admission.sourceCount},
+    build:{status:'UNAVAILABLE',compilerVersion:null,artifactCount:0,reason},
+    status:'PARTIAL_SOURCE_ONLY',
+    limitations:['NO_COMPILER_AST_ABI_OR_BYTECODE_PROVENANCE','NO_COMPILATION_BASED_SECURITY_CONCLUSIONS']};
+  const sourceIntelligence={
+    schemaVersion:'curveyield-source-intelligence-technical-v1',
+    status:'SOURCE_ONLY_UNCOMPILED',sourceFiles:admission.files,contracts:[],functions:[],
+    callGraph:[],externalInterfaces:[],privilegeCandidates:[],storageLayout:[],valueFlowCandidates:[],
+    admittedProjects:admission.projects,buildLimitation:reason,
+    completion:{semanticReviewRequired:true,compilerEvidenceAvailable:false},
+    note:'Text-level source identities and import syntax only; no callable entrypoint or AST coverage claimed.'};
+  await fs.writeFile(path.join(out,'BUILD_AND_SOURCE_IDENTITY_v1.json'),JSON.stringify(identity,null,2)+'\n');
+  await fs.writeFile(path.join(out,'SOURCE_INTELLIGENCE_AUTOMATED_v1.json'),JSON.stringify(sourceIntelligence,null,2)+'\n');
+  console.error('SOURCE_ONLY_PREFLIGHT: '+reason);
+  process.stdout.write(JSON.stringify({status:'PARTIAL_SOURCE_ONLY',reason,sourceCount:admission.sourceCount,
+    projects:admission.projects.length,buildStatus:'UNAVAILABLE'})+'\n');
 }
 
 async function main(){
@@ -1064,33 +1138,43 @@ async function main(){
     'GITHUB_TOKEN','GH_TOKEN','GIT_CONFIG_VALUE_0','GIT_CONFIG_KEY_0','GIT_CONFIG_COUNT'])
     delete process.env[name];
   const extractionRoot=path.join(work,'archive'); const extraction=await withProgressStage('extract-verified-archive',()=>extractArchive(archiveAbs,extractionRoot));
-  const detected=await withProgressStage('detect-project-root',()=>detectProjectRoot(extractionRoot)); const cfg=await withProgressStage('detect-build-config',()=>detectBuildConfig(detected.absolute));
-  const preparedDependencies=await withProgressStage('prepare-pinned-offline-dependencies',()=>preparePinnedOfflineDependencies(detected.absolute));
+  const detected=await withProgressStage('detect-project-root',()=>detectProjectRoot(extractionRoot));
+  const sourceAdmission=await withProgressStage('source-admission-inventory',()=>
+    writeSourceAdmissionInventory(extractionRoot,out,request,detected,observed));
+  let cfg,preparedDependencies,vyperVersion,requestedCompilers,auditScope,pseudo,build;
+  try{
+    cfg=await withProgressStage('detect-build-config',()=>detectBuildConfig(detected.absolute));
+  preparedDependencies=await withProgressStage('prepare-pinned-offline-dependencies',()=>preparePinnedOfflineDependencies(extractionRoot,observed));
   // Foundry's pinned source pragma is authoritative for the Vyper compiler.
   // Request it explicitly so the mixed-language build and retained artifacts
   // include staking bytecode; never infer from unrelated archive copies.
   const vyperVersions=new Set();
   for(const rel of await walk(detected.absolute)){
-    if(!/^contracts\/.+\.vy$/.test(rel))continue;
+    if(!/\.(?:vy)$/.test(rel))continue;
     const source=await fs.readFile(path.join(detected.absolute,...rel.split('/')),'utf8');
     const version=source.match(/^\s*#\s*pragma\s+version\s+(\d+\.\d+\.\d+)\s*$/m)?.[1];
     if(!version)throw new Error('Vyper source lacks an exact compiler version pragma: '+rel);
     vyperVersions.add(version);
   }
   if(vyperVersions.size>1)throw new Error('Mixed incompatible Vyper compiler pragmas in contracts/');
-  const vyperVersion=[...vyperVersions][0]??null;
-  const requestedCompilers=[{language:'solidity',version:cfg.compilerVersion},
+  vyperVersion=[...vyperVersions][0]??null;
+  if(vyperVersion)process.env.SECURITY_PREFLIGHT_VYPER_VERSION=vyperVersion;
+  requestedCompilers=[...(cfg.compilerVersion?[{language:'solidity',version:cfg.compilerVersion}]:[]),
     ...(vyperVersion?[{language:'vyper',version:vyperVersion}]:[])];
-  const auditScope=await loadAuditScope(detected.absolute);
+  auditScope=await loadAuditScope(detected.absolute);
 
-  const pseudo={
+  pseudo={
     requestId:request.requestId,requestDigest:request.requestDigest??sha256(Buffer.from(JSON.stringify(request))),
     campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,assignmentId:'phase0-intelligence',phaseId:'phase-0',profileId:'github-native-compile-v2',
     source:{repository:request.source.repository,commit:request.source.commit,projectPath:detected.relativePath,archivePath:request.source.archivePath,archiveSha256:request.source.archiveSha256},
     configuration:{compilers:requestedCompilers,analysis:{slither:{version:'0.11.6'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
   };
 
-  const build=await withProgressStage('compile-exact-build',()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
+  build=await withProgressStage('compile-exact-build',()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
+  }catch(error){
+    await writeCompilationUnavailable({out,request,observed,detected,admission:sourceAdmission,error});
+    return;
+  }
   const executionBuildArtifacts=buildExecutionArtifactBundleV2({request:pseudo,build});
   const buildArtifactBundleBytes=Buffer.from(JSON.stringify(executionBuildArtifacts,null,2)+'\n','utf8');
   const buildArtifactBundleSha256=sha256(buildArtifactBundleBytes);
@@ -1117,6 +1201,9 @@ async function main(){
   }
   const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
   const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}}));
+  sourceIntelligence.admissionInventoryRef='SOURCE_ADMISSION_INVENTORY_v1.json';
+  sourceIntelligence.additionalProjectRootsNotCompiled=sourceAdmission.additionalRootsNotYetCompiled;
+  sourceIntelligence.sourceAdmissionCount=sourceAdmission.sourceCount;
   // Fork-owned Phase 0 graph/Flow Plan source subjects need exactly the
   // preexisting source-AST inventory and SYSTEM_FACTS builder, regardless of
   // whether a legacy accepted campaign's optional review policy enabled it.
@@ -1136,11 +1223,11 @@ async function main(){
     schemaVersion:'curveyield-lite-phase0-build-source-identity-v1',
     requestId:request.requestId,campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,
     source:{...request.source,checkoutCommit:checkout.commit,archiveSha256Observed:observed},
-    discovery:{projectPath:detected.relativePath,topCandidates:detected.candidates,archiveEntryCount:extraction.entryCount,archiveExtractedBytes:extraction.extractedBytes},
+    discovery:{projectPath:detected.relativePath,topCandidates:detected.candidates,projects:detected.projects,additionalProjectRootsNotCompiled:detected.additionalProjectRoots,sourceAdmissionInventoryFile:'SOURCE_ADMISSION_INVENTORY_v1.json',archiveEntryCount:extraction.entryCount,archiveExtractedBytes:extraction.extractedBytes},
     configurationDetection:effectiveCfg,
     auditScope,
-    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??0,compilationUnits:executionBuildArtifacts.buildIdentity.compilationUnits,buildConfigurationDigestSha256:executionBuildArtifacts.buildConfigurationDigestSha256,embeddedBuildContract:build.embeddedBuildContract??null,foundryDependencyInstall:build.foundryDependencyInstall??[],sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
-    status:'PASS'
+    build:{status:build.status,system:build.system,wholeProjectCompileSucceeded:build.wholeProjectCompileSucceeded??null,compilationSelection:build.compilationSelection??null,isolatedUnitRoots:build.isolatedUnitRoots??[],isolatedUnitFailures:build.isolatedUnitFailures??[],excludedImportOnlySources:build.excludedImportOnlySources??[],unitCoverageComplete:build.unitCoverageComplete??null,compilerVersion:build.compilerVersion,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??0,compilationUnits:executionBuildArtifacts.buildIdentity.compilationUnits,buildConfigurationDigestSha256:executionBuildArtifacts.buildConfigurationDigestSha256,embeddedBuildContract:build.embeddedBuildContract??null,foundryDependencyInstall:build.foundryDependencyInstall??[],sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
+    status:(detected.multipleProjects||build.unitCoverageComplete===false)?'PARTIAL_UNCOMPILED_PROJECT_ROOTS_OR_UNITS':'PASS'
   };
 
   // Every admitted compiled public/external ABI operation is preserved independently.

@@ -59,12 +59,25 @@ jobs:
           test "$(sha256sum .preflight-input/source.zip | awk '{print $1}')" = "$expected"
           test "$(stat -c%s .preflight-input/source.zip)" -le 16777216
           unzip -tqq .preflight-input/source.zip
-          echo "Exact ZIP admitted and source SHA-256 verified; no source execution"
+          # Parse source manifests as inert DATA, before any dependency download.
+          python3 security-intelligence-phase0/scripts/source-toolchain-plan-v1.py \
+            .preflight-input/source.zip .preflight-plan
+          test "$(jq -er .sourceZipSha256 .preflight-plan/toolchain-plan.json)" = "$expected"
+          echo "Exact ZIP and source-derived toolchain plan admitted; no source execution"
       - name: Hand off ZIP and non-secret request to isolated collector
         uses: actions/upload-artifact@v4
         with:
           name: security-preflight-source-${{ github.run_id }}-${{ github.run_attempt }}
           path: .preflight-input/
+          include-hidden-files: true
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Publish data-only toolchain manifest independently of source ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-preflight-toolchain-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .preflight-plan/
           include-hidden-files: true
           retention-days: 3
           if-no-files-found: error
@@ -79,6 +92,19 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Receive only inert toolchain requirements before Docker build
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-toolchain-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .preflight-plan
+      - name: Bind toolchain plan to pinned admitted source digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .preflight-plan/toolchain-plan.json
+          jq -e '.schemaVersion=="curveyield-standalone-toolchain-plan-v1"
+                 and (.sourceZipSha256 | test("^[0-9a-f]{64}$"))' \
+                 .preflight-plan/toolchain-plan.json >/dev/null
       - name: Build source-blind isolated toolchain BEFORE downloading untrusted ZIP
         shell: bash
         run: |
@@ -100,9 +126,11 @@ jobs:
             --user "$(id -u):$(id -g)" \
             --tmpfs /tmp:rw,nosuid,nodev,size=3g,mode=1777 \
             --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-input,target=/input,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-plan,target=/toolchain-plan,readonly" \
             --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-output,target=/output" \
             --env SECURITY_PREFLIGHT_LOCAL_ARCHIVE=/input/source.zip \
             --env PHASE0_PRIVATE_BUILD_CACHE_ENABLED=false \
+            --env SECURITY_PREFLIGHT_OFFLINE_COMPILERS=1 \
             --env CI=true --env HOME=/opt/preflight \
             --env VIRTUAL_ENV=/tmp \
             --workdir /opt/preflight \
@@ -115,6 +143,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .preflight-output/evidence
+          cp .preflight-plan/toolchain-plan.json .preflight-output/evidence/TOOLCHAIN_REQUIREMENTS_v1.json
           node security-intelligence-phase0/scripts/standalone-preflight-summary-v1.mjs \
             .preflight-output/evidence .preflight-input/request.json
           # Remove the untrusted, extracted working copy; upload only analytical evidence.
@@ -135,29 +164,40 @@ jobs:
         run: |
           set -euo pipefail
           test -s .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json
-          test -s .preflight-output/evidence/REVIEW_INVENTORY_v1.json
-          jq -e --slurpfile inv .preflight-output/evidence/REVIEW_INVENTORY_v1.json '
-            .source.expectedSha256 == .source.observedSha256 and
-            (.status=="COLLECTED" or .status=="PARTIAL") and
-            (.buildStatus=="completed") and
-            ($inv[0].payload.sourceUnits | type=="array") and
-            ([$inv[0].payload.sourceUnits[] | select(.scopeTier=="IN_SCOPE")] | length>0) and
-            (all($inv[0].payload.sourceUnits[];
-              .scopeTier != "IN_SCOPE" or .astStatus == "AVAILABLE" or
-              (. as $unit |
-                .astStatus == "UNSUPPORTED_LANGUAGE" and
-                (.path | endswith(".vy")) and
-                any($inv[0].payload.limitations[];
-                  .code == "UNSUPPORTED_LANGUAGE_FILE_FALLBACK" and
-                  .path == $unit.path)
-              ) or
-              (. as $unit |
-                .astStatus == "AVAILABLE_VYPER_AST" and
-                (.path | endswith(".vy")) and
-                any($inv[0].payload.limitations[];
-                  .code == "VYPER_AST_STRUCTURAL_STATIC_ONLY" and
-                  .path == $unit.path)
-              )
-            ))
-          ' .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
-          echo "Source-bound structural evidence verified; typed Vyper exceptions and Slither limitations remain explicit, no security verdict"
+          # Source-only collection is a valid PARTIAL data handoff, never an
+          # ABI, AST, Slither, or security-coverage success claim.
+          jq -e '.source.expectedSha256 == .source.observedSha256 and
+                   .sourceAdmissionVerified == true and
+                   (.status=="COLLECTED" or .status=="PARTIAL")' \
+                   .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
+          if jq -e '.sourceOnly == true' .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null; then
+            jq -e '.buildStatus=="UNAVAILABLE" and .status=="PARTIAL" and
+                   .admittedSourceCount>0' \
+                   .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
+            echo "::warning::Source-only structural inventory preserved; compilation and AST evidence unavailable"
+          else
+            test -s .preflight-output/evidence/REVIEW_INVENTORY_v1.json
+            jq -e --slurpfile inv .preflight-output/evidence/REVIEW_INVENTORY_v1.json '
+              .buildStatus=="completed" and
+              .sourceOnly==false and
+              ($inv[0].payload.sourceUnits | type=="array") and
+              ([$inv[0].payload.sourceUnits[] | select(.scopeTier=="IN_SCOPE")] | length>0) and
+              (all($inv[0].payload.sourceUnits[];
+                .scopeTier != "IN_SCOPE" or .astStatus == "AVAILABLE" or
+                (. as $unit |
+                  .astStatus == "UNSUPPORTED_LANGUAGE" and
+                  (.path | endswith(".vy")) and
+                  any($inv[0].payload.limitations[];
+                    .code == "UNSUPPORTED_LANGUAGE_FILE_FALLBACK" and
+                    .path == $unit.path)
+                ) or
+                (. as $unit |
+                  .astStatus == "AVAILABLE_VYPER_AST" and
+                  (.path | endswith(".vy")) and
+                  any($inv[0].payload.limitations[];
+                    .code == "VYPER_AST_STRUCTURAL_STATIC_ONLY" and
+                    .path == $unit.path)
+                )
+              ))' .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
+            echo "Compiled source-bound evidence accepted with recorded limitations; no security verdict"
+          fi

@@ -16,6 +16,7 @@ const inventory=read('REVIEW_INVENTORY_v1.json');
 const slither=read('SLITHER_v1.json');
 const readiness=read('PROJECT_READINESS_AUTOMATED_v1.json');
 const sbom=read('SBOM_v1.json');
+const admission=read('SOURCE_ADMISSION_INVENTORY_v1.json');
 const source=request?.source??{};
 const expected=source.archiveSha256??null;
 const observed=build?.source?.archiveSha256Observed??null;
@@ -35,11 +36,20 @@ const typedInScopeComplete=!!inventory&&inScope.length>0&&unsupportedCoverage.le
 const fullySourceSupported=typedInScopeComplete&&inventory?.payload?.complete===true&&
   languageFallbacks.length===0&&vyperAstStructuralOnly.length===0;
 const slitherComplete=slither?.componentStatus==='COMPLETED';
-const manifestStatus=!sourceMatched||!si||!typedInScopeComplete?'INCOMPLETE':!slitherComplete||!fullySourceSupported?'PARTIAL':'COLLECTED';
+const sourceOnly=sourceMatched&&admission?.sourceArchiveSha256===expected&&
+  admission?.status==='SOURCE_FILES_INVENTORIED_NOT_A_COMPILATION'&&
+  admission?.sourceCount>0&&build?.build?.status==='UNAVAILABLE'&&
+  si?.status==='SOURCE_ONLY_UNCOMPILED';
+const multiProjectGap=(admission?.additionalRootsNotYetCompiled??[]).length>0;
+const unitRecoveryGap=build?.build?.unitCoverageComplete===false;
+const sourceAdmissionVerified=admission?.sourceArchiveSha256===expected&&admission?.sourceCount>0;
+const manifestStatus=!sourceMatched||!sourceAdmissionVerified?'INCOMPLETE':
+  sourceOnly?'PARTIAL':!si||!typedInScopeComplete?'INCOMPLETE':
+  !slitherComplete||!fullySourceSupported||multiProjectGap||unitRecoveryGap?'PARTIAL':'COLLECTED';
 const lines=[
   '# CurveYield Security Intelligence — Automated Phase 0 Discovery',
   '',
-  '**Evidence status:** '+(manifestStatus==='COLLECTED'?'COLLECTED — source-identified, not security-approved':manifestStatus==='PARTIAL'?'PARTIAL — typed language fallback or static analysis limitations':'INCOMPLETE — source identity or coverage is insufficient'),
+  '**Evidence status:** '+(manifestStatus==='COLLECTED'?'COLLECTED — source-identified, not security-approved':manifestStatus==='PARTIAL'?'PARTIAL — source-only or compilation/analysis limitations explicitly retained':'INCOMPLETE — source identity or evidence coverage insufficient'),
   '**Source repository:** '+(source.repository??'UNKNOWN'),
   '**Source commit:** '+(source.commit??'UNKNOWN'),
   '**Archive path:** '+(source.archivePath??'UNKNOWN'),
@@ -49,6 +59,12 @@ const lines=[
   '',
   '## Verified build and discovery surface',
   '',
+  '- Source admission inventory: '+(sourceAdmissionVerified?'PRESENT AND SOURCE-BOUND':'UNAVAILABLE OR UNMATCHED'),
+  '- All admitted Solidity/Vyper source files: '+(admission?.sourceCount??'UNAVAILABLE'),
+  '- Discovered potential project roots: '+(admission?.projects?.length??'UNAVAILABLE'),
+  '- Additional projects not compiled: '+((admission?.additionalRootsNotYetCompiled??[]).join(', ')||'none'),
+  '- Compilation selection: '+(build?.build?.compilationSelection??'UNAVAILABLE'),
+  '- Full project native compilation: '+(build?.build?.wholeProjectCompileSucceeded===true?'YES':build?.build?.wholeProjectCompileSucceeded===false?'NO — independent compiler units only':'NOT ESTABLISHED'),
   '- Build status: '+(build?.build?.status??'UNAVAILABLE'),
   '- Compiler: '+(build?.configurationDetection?.compilerVersion??build?.build?.compilerVersion??'UNAVAILABLE'),
   '- Compiler artifacts: '+(build?.build?.artifactCount??'UNAVAILABLE'),
@@ -89,6 +105,8 @@ const lines=[
   '- Slither limitations: '+(slither?.limitations?.map(x=>typeof x==='string'?x:(x.type??JSON.stringify(x))).join('; ')||'none recorded'),
   '- The Vyper language fallback preserves source provenance but does not establish Vyper function-level AST coverage.',
   '- Unread source, unsupported compiler configurations and incomplete Slither results remain explicit audit limitations.',
+  '- Source-only mode may contain source import syntax without ABI, AST, or compiled execution evidence.',
+  '- Additional project roots and compilation-unit failures are not claimed to be compiler-reviewed.',
   '- The exact runtime bytecode at live deployment addresses is not established by this preflight.',
   '',
   '## Evidence index',
@@ -97,6 +115,6 @@ const lines=[
   ''
 ];
 fs.writeFileSync(path.join(output,'DISCOVERY_SUMMARY_v1.md'),lines.join('\n'));
-const manifest={schemaVersion:'curveyield-security-preflight-v1',status:manifestStatus,notSecurityVerdict:true,typedInScopeComplete,typedVyperFallbackPaths:languageFallbacks.map(x=>x.path),typedVyperAstStructuralOnlyPaths:vyperAstStructuralOnly.map(x=>x.path),unresolvedSourceCoveragePaths:unsupportedCoverage.map(x=>x.path),source:{repository:source.repository??null,commit:source.commit??null,archivePath:source.archivePath??null,expectedSha256:expected,observedSha256:observed},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,reviewInventoryComplete:inventory?.payload?.complete===true,files:evidence};
+const manifest={schemaVersion:'curveyield-security-preflight-v1',status:manifestStatus,notSecurityVerdict:true,typedInScopeComplete,typedVyperFallbackPaths:languageFallbacks.map(x=>x.path),typedVyperAstStructuralOnlyPaths:vyperAstStructuralOnly.map(x=>x.path),unresolvedSourceCoveragePaths:unsupportedCoverage.map(x=>x.path),source:{repository:source.repository??null,commit:source.commit??null,archivePath:source.archivePath??null,expectedSha256:expected,observedSha256:observed},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,reviewInventoryComplete:inventory?.payload?.complete===true,sourceAdmissionVerified,sourceOnly,admittedSourceCount:admission?.sourceCount??0,additionalProjectRootsNotCompiled:admission?.additionalRootsNotYetCompiled??[],unitRecoveryGap,files:evidence};
 fs.writeFileSync(path.join(output,'PREFLIGHT_MANIFEST_v1.json'),JSON.stringify(manifest,null,2)+'\n');
 console.log(JSON.stringify({status:manifest.status,files:evidence.length,contracts:allContracts.length,functions:allFunctions.length}));

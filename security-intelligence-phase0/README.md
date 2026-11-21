@@ -122,3 +122,80 @@ This is source-code parity evidence, **not execution qualification**. The isolat
 Docker build and package-specific compilation still require actual authorized GitHub
 Actions run evidence to establish operational success. No Solidity tests, deployments
 or automated campaigns are authorized or executed by this reconciliation.
+
+
+## Standalone Phase 0 — Stage 1 portability revision v2 (November 2026)
+
+This revision is **standalone-fork only**. It does not modify Machine
+Intelligence v8, the original Lite-Solo Phase 0 workflows, or campaign
+controller authority. The workflow path and v1 output names remain stable so
+installed v5 security skills can consume them without a breaking rename.
+
+### Declarative, source-bound preparation (no source execution at admission)
+
+The trusted admission job SHA-verifies the ZIP and reads package manifests,
+Solidity/Vyper version directives and project configuration as inert data.
+A bounded toolchain plan is published separately from the source ZIP.
+The collector job receives **only that data plan**, then builds its toolchain
+with available compiler versions and version-locked npm dependencies.
+The original ZIP is downloaded only **after** the image has been built.
+
+The preparation script refuses unsupported dependency schemes and does not
+execute package lifecycle scripts. Unsupported versions, missing pins or
+download failures remain explicit source-only/partial limitations; neither the
+image builder nor the source sandbox silently fetches unknown resources.
+The source sandbox retains no network, no tokens, read-only root, dropped
+capabilities and no privilege escalation. Exact package manifest and lock
+hashes are verified a second time before preinstalled dependencies are copied
+into the isolated extracted source.
+
+### Project-root and language coverage
+
+The scanner recognizes both Solidity and Vyper, including Vyper-only
+packages, roots at \`src/\`, \`contracts/\` or project root, and independently
+configured nested projects. **Every admitted source file** appears in
+\`SOURCE_ADMISSION_INVENTORY_v1.json\` with SHA-256 and import syntax, even
+when compilation is unavailable. The collector chooses one primary project
+for the full compiled AST/Slither path and explicitly lists any additional
+roots not compiled. An uncompiled root is not claimed as compiler-reviewed.
+
+Native Foundry compilation is attempted unchanged first. If the source's
+original build fails, the copied adapter can try bounded individual source
+roots identified generically from local declaration/import relationships.
+No BoostHub-specific filename or contract-name branch is used. Successful
+independent compiler units are labeled as such; they are **not proof of an
+original whole-project build**. Uncompiled units and source-only gaps are
+retained in the reported limitations.
+
+### Partial evidence is a first-class outcome
+
+If build configuration or compilation cannot be resolved, the exact source
+identity and source admission inventory are still published. The existing
+\`BUILD_AND_SOURCE_IDENTITY_v1.json\` and
+\`SOURCE_INTELLIGENCE_AUTOMATED_v1.json\` report unavailable compiler
+evidence and never fabricate ABIs, ASTs, bytecode or semantic flow coverage.
+The summary and manifest must report \`PARTIAL\`, not \`COLLECTED\`. The
+workflow gate permits this source-only data handoff only when the ZIP digest
+and complete textual-source inventory are verified. Passing the GitHub
+workflow is not passing a security audit.
+
+The pre-existing \`REVIEW_INVENTORY_v1.json\`, \`SYSTEM_FACTS_v1.json\`,
+Slither and contract identity artifacts continue to be generated only when
+their required compiled evidence is available. Partial source inventory can
+support audit scoping, but cannot satisfy v5's source-traced function-coverage
+or economic-security conclusions.
+
+### Scope and verification
+
+- Only the forked standalone workflow and dependencies are edited.
+- No new contract tests, fuzzers, deployment scripts, campaigns or controller
+  receipts are added or executed by this implementation.
+- Source-authorized compilation and static analysis remain part of the
+  original preflight workflow, not a new testing system.
+- Stage 1 adds one data-only toolchain prepass and one source admission
+  inventory because the prior image was BoostHub-pinned and failed to retain
+  source evidence when compilation was unavailable.
+- Runtime behavior is **not** established by a successful code commit.
+  Before production use, compare actual run logs and evidence artifacts for
+  both a known baseline and a structurally different package; no test execution
+  is implied or authorized by this documentation.
