@@ -104,6 +104,7 @@ jobs:
             --env SECURITY_PREFLIGHT_LOCAL_ARCHIVE=/input/source.zip \
             --env PHASE0_PRIVATE_BUILD_CACHE_ENABLED=false \
             --env CI=true --env HOME=/opt/preflight \
+            --env VIRTUAL_ENV=/tmp \
             --workdir /opt/preflight \
             curveyield-security-preflight:local \
             node packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs \
@@ -134,8 +135,22 @@ jobs:
         run: |
           set -euo pipefail
           test -s .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json
-          jq -e '.source.expectedSha256 == .source.observedSha256 and
-                   (.status=="COLLECTED" or .status=="PARTIAL") and
-                   .reviewInventoryComplete==true' \
-                   .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
-          echo "Machine collection completed; findings are NOT evaluated or accepted"
+          test -s .preflight-output/evidence/REVIEW_INVENTORY_v1.json
+          jq -e --slurpfile inv .preflight-output/evidence/REVIEW_INVENTORY_v1.json '
+            .source.expectedSha256 == .source.observedSha256 and
+            (.status=="COLLECTED" or .status=="PARTIAL") and
+            (.buildStatus=="completed") and
+            ($inv[0].payload.sourceUnits | type=="array") and
+            ([$inv[0].payload.sourceUnits[] | select(.scopeTier=="IN_SCOPE")] | length>0) and
+            (all($inv[0].payload.sourceUnits[];
+              .scopeTier != "IN_SCOPE" or .astStatus == "AVAILABLE" or
+              (. as $unit |
+                .astStatus == "UNSUPPORTED_LANGUAGE" and
+                (.path | endswith(".vy")) and
+                any($inv[0].payload.limitations[];
+                  .code == "UNSUPPORTED_LANGUAGE_FILE_FALLBACK" and
+                  .path == $unit.path)
+              )
+            ))
+          ' .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
+          echo "Source-bound structural evidence verified; typed Vyper exceptions and Slither limitations remain explicit, no security verdict"
