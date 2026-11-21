@@ -26,6 +26,19 @@ const evidence=outputNames.map(name=>{const b=fs.readFileSync(path.join(output,n
 const allContracts=si?.contracts??[];
 const allFunctions=si?.functions??[];
 const significant=allFunctions.filter(f=>!['view','pure'].includes(f.stateMutability)&&['public','external','PUBLIC_OR_EXTERNAL_ABI'].includes(f.visibility));
+const stage2=si?.stage2Coverage??null;
+const effectiveEntrypoints=si?.effectiveEntrypoints??[];
+const materialEntrypoints=effectiveEntrypoints.filter(e=>e.stateChanging);
+const effectiveContracts=[...new Set(materialEntrypoints.map(e=>e.qualifiedContract))].sort();
+const effectiveEntrypointLines=effectiveContracts.flatMap(contract=>{
+  const rows=materialEntrypoints.filter(e=>e.qualifiedContract===contract);
+  return ['### '+contract,'',
+    ...rows.map(e=>'- `'+e.canonicalSignature+'` — '+e.implementationOrigin+
+      '; source '+(e.sourceLocation??'UNRESOLVED')+
+      (e.language==='VYPER'?'; Vyper structural AST only':'')+
+      '; ABI compiler unit '+e.compilationUnitId),''];
+});
+
 const inScope=(inventory?.payload?.sourceUnits??[]).filter(x=>x.scopeTier==='IN_SCOPE');
 const languageFallbacks=inScope.filter(x=>x.astStatus==='UNSUPPORTED_LANGUAGE'&&String(x.path??'').endsWith('.vy')&&
   (inventory?.payload?.limitations??[]).some(l=>l.code==='UNSUPPORTED_LANGUAGE_FILE_FALLBACK'&&l.path===x.path));
@@ -71,7 +84,15 @@ const lines=[
   '- Compiler artifacts: '+(build?.build?.artifactCount??'UNAVAILABLE'),
   '- Source Intelligence contracts: '+(si?.contracts?.length??'UNAVAILABLE'),
   '- Compiled ABI functions: '+(si?.functions?.length??'UNAVAILABLE'),
-  '- ABI state-changing entrypoints in compiler evidence: '+(significant.length),
+  '- ABI state-changing function records (all artifacts, including dependencies/abstracts): '+(significant.length),
+  '- Effective first-party deployable callable ABI entries: '+(stage2?.effectiveAbiCallableCount??'UNAVAILABLE'),
+  '- Effective first-party state-changing ABI entries to reconcile: '+(stage2?.stateChangingEffectiveEntrypointCount??'UNAVAILABLE'),
+  '- Inherited effective ABI functions: '+(stage2?.inheritedEntrypointCount??'UNAVAILABLE'),
+  '- Unresolved state-changing implementation origins: '+(stage2?.unresolvedStateChangingEntrypoints??'UNAVAILABLE'),
+  '- Vyper structural call candidates: '+(stage2?.vyperStructuralCallCandidates??'UNAVAILABLE'),
+  '- AST-backed state declarations (slots separate): '+(stage2?.sourceStateDeclarationCount??'UNAVAILABLE'),
+  '- Compiler-emitted state slots: '+(stage2?.compilerLayoutStateDeclarationCount??'UNAVAILABLE'),
+  '- Direct state-read/write contexts: '+(stage2?.localStateEffectContextCount??'UNAVAILABLE'),
   '- Source call relationships: '+(si?.callGraph?.length??'UNAVAILABLE'),
   '- Privilege candidates: '+(si?.privilegeCandidates?.length??'UNAVAILABLE'),
   '- Value-flow candidates: '+(si?.valueFlowCandidates?.length??'UNAVAILABLE'),
@@ -91,7 +112,18 @@ const lines=[
   '',
   ...(allContracts.length?allContracts.slice(0,100).map(c=>'- '+String(c.qualifiedName??c.contractId??'UNKNOWN')+' — '+String(c.contractKind??'unknown')+'; '+String(c.sourceLocation??'source location unavailable')):['- No reliable compiler-grounded contract inventory was generated']),
   '',
-  '## How the eleven-round skill must use this evidence',
+  '## Source-anchored effective state-changing ABI entrypoints',
+  '',
+  'This is the **compiler ABI for in-scope, deployable contracts**, not a direct-declaration count or proof of live reachability. Inheritance and generated getters remain separate from the direct source inventory.',
+  '',
+  ...(effectiveEntrypointLines.length?effectiveEntrypointLines:['- No compiler-grounded effective entrypoint map available; do not claim Round 2 or Round 11 coverage.','']),
+  '## State and storage evidence',
+  '',
+  '- `stateDeclarations` comes from AST-backed source declarations. `storageLayout` stays compiler-emitted only.',
+  '- `stateEffects` provides direct, source-context reads/writes, not transitive or proven reachable economic effects.',
+  '- Solidity and Vyper observations have different evidence classes; Vyper state-read completeness is not assumed.',
+  '',
+    '## How the eleven-round skill must use this evidence',
   '',
   '1. Round 1: Reconcile source digest, admitted contracts, intended scope and missing build or deployed-state evidence.',
   '2. Round 2: Read the full SOURCE_INTELLIGENCE_AUTOMATED_v1.json and REVIEW_INVENTORY_v1.json; trace actual cross-contract flows from source. A call-graph edge is not proof of reachable behavior.',
@@ -104,7 +136,7 @@ const lines=[
   '- No fuzz testing, unit tests, exploit reproduction, transaction replay or security verdict was performed.',
   '- The external interface and value-flow indexes are structural candidates; interpretation belongs to the agent.',
   '- Slither limitations: '+(slither?.limitations?.map(x=>typeof x==='string'?x:(x.type??JSON.stringify(x))).join('; ')||'none recorded'),
-  '- The Vyper language fallback preserves source provenance but does not establish Vyper function-level AST coverage.',
+  '- Vyper compiler AST supplies structural function lines and sensitive-call candidates, not full semantic Slither detectors or complete state-read coverage.',
   '- Unread source, unsupported compiler configurations and incomplete Slither results remain explicit audit limitations.',
   '- Source-only mode may contain source import syntax without ABI, AST, or compiled execution evidence.',
   '- Additional project roots and compilation-unit failures are not claimed to be compiler-reviewed.',
@@ -116,6 +148,6 @@ const lines=[
   ''
 ];
 fs.writeFileSync(path.join(output,'DISCOVERY_SUMMARY_v1.md'),lines.join('\n'));
-const manifest={schemaVersion:'curveyield-security-preflight-v1',status:manifestStatus,notSecurityVerdict:true,typedInScopeComplete,typedVyperFallbackPaths:languageFallbacks.map(x=>x.path),typedVyperAstStructuralOnlyPaths:vyperAstStructuralOnly.map(x=>x.path),unresolvedSourceCoveragePaths:unsupportedCoverage.map(x=>x.path),source:{repository:source.repository??null,commit:source.commit??null,archivePath:source.archivePath??null,expectedSha256:expected,observedSha256:observed},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,reviewInventoryComplete:inventory?.payload?.complete===true,sourceAdmissionVerified,sourceOnly,admittedSourceCount:admission?.sourceCount??0,additionalProjectRootsNotCompiled:admission?.additionalRootsNotYetCompiled??[],unitRecoveryGap,files:evidence};
+const manifest={schemaVersion:'curveyield-security-preflight-v1',status:manifestStatus,notSecurityVerdict:true,typedInScopeComplete,typedVyperFallbackPaths:languageFallbacks.map(x=>x.path),typedVyperAstStructuralOnlyPaths:vyperAstStructuralOnly.map(x=>x.path),unresolvedSourceCoveragePaths:unsupportedCoverage.map(x=>x.path),source:{repository:source.repository??null,commit:source.commit??null,archivePath:source.archivePath??null,expectedSha256:expected,observedSha256:observed},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,reviewInventoryComplete:inventory?.payload?.complete===true,stage2Coverage:stage2?{...stage2,limitations:undefined}:null,sourceAdmissionVerified,sourceOnly,admittedSourceCount:admission?.sourceCount??0,additionalProjectRootsNotCompiled:admission?.additionalRootsNotYetCompiled??[],unitRecoveryGap,files:evidence};
 fs.writeFileSync(path.join(output,'PREFLIGHT_MANIFEST_v1.json'),JSON.stringify(manifest,null,2)+'\n');
 console.log(JSON.stringify({status:manifest.status,files:evidence.length,contracts:allContracts.length,functions:allFunctions.length}));

@@ -127,7 +127,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
     const qualifiedName=`${a.sourceName}:${a.contractName}`, artifactId=`ART-${pad(i+1)}`;
     const source=byPath.get(a.sourceName), sourceId=source?.sourceId??null, lang=language(a.sourceName,a);
     compilerArtifacts.push({
-      artifactId,qualifiedName,sourceId,language:lang,abiDigestSha256:digestCanonicalV1(a.abi??[]),
+      artifactId,qualifiedName,compilationUnitId:a.compilationUnitId??'default',sourcePath:a.sourceName,sourceId,language:lang,abiDigestSha256:digestCanonicalV1(a.abi??[]),
       creationBytecodeDigestSha256:bytecodeDigest(a.bytecode),deployedBytecodeDigestSha256:bytecodeDigest(a.deployedBytecode),
       storageLayoutAvailable:a.storageLayout?'YES':'NO',metadataAvailable:a.metadata!=null,methodIdentifiers:clone(a.methodIdentifiers??{}),
       creationBytecodeBytes:Math.floor(String(a.bytecode??'0x').replace(/^0x/,'').length/2),
@@ -141,7 +141,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
     contractByQualifiedUnit.set(`${unitId}|${qualifiedName}`,contractId);
     if (Number.isInteger(astContract?.node?.id)) contractByAstId.set(`${unitId}:${astContract.node.id}`,contractId);
     const cLoc=loc(source,astContract?.node?.src);
-    contracts.push({contractId,qualifiedName,sourceId,language:lang,contractKind:astContract?.node?.contractKind??(lang==='VYPER'?'contract':'UNKNOWN'),
+    contracts.push({contractId,qualifiedName,compilationUnitId:unitId,sourcePath:a.sourceName,sourceId,language:lang,contractKind:astContract?.node?.contractKind??(lang==='VYPER'?'contract':'UNKNOWN'),
       deployability:(astContract?.node?.abstract===true||['interface','library'].includes(astContract?.node?.contractKind))?'NOT_DIRECTLY_DEPLOYABLE':(String(a.bytecode??'0x')==='0x'?'NO_CREATION_BYTECODE':'DEPLOYABLE'),
       artifactId,sourceLocation:cLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',confidenceClass:'COMPILER_FACT',basis:cLoc?'SOLIDITY_AST_AND_COMPILER_ARTIFACT':'COMPILER_ARTIFACT'});
     if (cLoc) sourceAnchors.push({anchorId:`ANCHOR-${pad(sourceAnchors.length+1,4)}`,sourceId,symbolId:contractId,startLine:cLoc.startLine,endLine:cLoc.endLine,sourceDigestSha256:source.sha256,basis:'SOLIDITY_AST_SRC'});
@@ -424,4 +424,256 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
       canonicalSourceIntelligenceProjectionOwner:'AUDIT_CONTROLLER',semanticReviewRequired:true}
   };
   return {...bundle,technicalBundleDigest:digestCanonicalV1(bundle)};
+}
+
+
+
+/**
+ * Standalone v5 Phase-0 handoff enrichment. Reconcile already generated
+ * compiler ABIs against the existing Source Review Inventory without inventing
+ * inheritance resolution, write transitivity, Vyper semantic detectors or slots.
+ *
+ * Round 2 consumes effectiveEntrypoints; Rounds 3–5 consume stateDeclarations
+ * and stateEffects; Round 11 reconciles the compiler ABI denominator.
+ */
+export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligence,reviewInventory,build}={}){
+  const si=sourceIntelligence, review=reviewInventory?.payload;
+  if(!si||!review||!build||build.status!=='completed')
+    throw new Error('COMPILER_AND_SOURCE_REVIEW_EVIDENCE_REQUIRED_FOR_STAGE2');
+  const sourceUnits=review.sourceUnits??[],decls=review.declarations??[],contexts=review.contexts??[];
+  const tierByPath=new Map(sourceUnits.map(x=>[x.path,x.scopeTier]));
+  const unitByPath=new Map(sourceUnits.map(x=>[x.path,x]));
+  const abiByUnitQualified=new Map((build.artifacts??[]).map(a=>[
+    (a.compilationUnitId??'default')+'|'+a.sourceName+':'+a.contractName,a
+  ]));
+  const normalSig=e=>e?.type==='function'?signature(e):
+    e?.type==='receive'?'receive()':e?.type==='fallback'?'fallback()':String(e?.type??'UNRESOLVED_ABI_ITEM');
+  const anchors=(ctx)=>ctx?.path&&Number.isInteger(ctx?.lineStart)&&ctx.lineStart>0
+    ?ctx.path+':'+ctx.lineStart+'-'+(Number.isInteger(ctx.lineEnd)?ctx.lineEnd:ctx.lineStart):null;
+  const publicState=(entry)=>entry?.stateMutability==='nonpayable'||entry?.stateMutability==='payable';
+  const VYPER_CODES=new Set(['AVAILABLE_VYPER_AST','AVAILABLE_IDENTICAL_VYPER_AST_ALIAS']);
+  const sourceTier=(file)=>tierByPath.get(file)??'SOURCE_TIER_UNRESOLVED';
+  const stateKinds=new Set(['STATE_VARIABLE','IMMUTABLE','CONSTANT']);
+  const effects=contexts.filter(c=>Array.isArray(c.stateReads)&&Array.isArray(c.stateWrites))
+    .filter(c=>c.stateReads.length||c.stateWrites.length)
+    .map(c=>({
+      contextId:c.contextId,symbolId:c.symbolId,sourcePath:c.path,
+      qualifiedContainer:c.qualifiedContainer,signature:c.canonicalSignature,
+      kind:c.kind,sourceTier:c.scopeTier,sourceLocation:anchors(c),
+      effectiveIn:(c.effectiveIn??[]).slice().sort(),
+      directlyObservedStateReads:c.stateReads.slice().sort(),
+      directlyObservedStateWrites:c.stateWrites.slice().sort(),
+      readEvidenceStatus:VYPER_CODES.has(unitByPath.get(c.path)?.astStatus)?
+        'VYPER_READS_NOT_FULLY_EXTRACTED':'SOLIDITY_AST_STRUCTURAL',
+      writeEvidenceStatus:VYPER_CODES.has(unitByPath.get(c.path)?.astStatus)?
+        'VYPER_COMPILER_AST_STRUCTURAL_ONLY':'SOLIDITY_AST_STRUCTURAL',
+      transitiveInternalEffects:'NOT_EXPANDED',
+      interpretation:'LOCAL_FUNCTION_SYNTAX_ONLY_NOT_PROOF_OF_REACHABLE_MUTATION'
+    }))
+    .sort((a,b)=>a.sourcePath.localeCompare(b.sourcePath)||String(a.sourceLocation).localeCompare(String(b.sourceLocation))||
+      a.signature.localeCompare(b.signature));
+
+  const declarations=decls.filter(d=>stateKinds.has(d.kind)).map(d=>({
+    symbolId:d.symbolId,sourcePath:d.path,qualifiedContainer:d.qualifiedContainer,
+    name:d.name,kind:d.kind,visibility:d.visibility,
+    sourceTier:sourceTier(d.path),sourceLocation:anchors(d),
+    compilerType:null,slot:null,offset:null,
+    compilerLayoutStatus:d.kind==='STATE_VARIABLE'?'NOT_EMITTED_OR_UNRESOLVED':'NOT_APPLICABLE_NON_STORAGE',
+    evidenceClass:'SOURCE_REVIEW_SOLIDITY_AST_DECLARATION_NOT_SLOT_DATA'
+  }));
+  const declarationsByKey=new Map();
+  for(const d of declarations){
+    const key=[d.sourcePath,d.qualifiedContainer,d.name].join('|');
+    const items=declarationsByKey.get(key)??[];items.push(d);declarationsByKey.set(key,items);
+  }
+  const units=(Array.isArray(build.compilationUnits)&&build.compilationUnits.length)
+    ?build.compilationUnits:[{unitId:'default',sourceAsts:build.sourceAsts??{}}];
+  const seenTypes=new Set();
+  for(const unit of units){
+    for(const [sourcePath,ast] of Object.entries(unit.sourceAsts??{})){
+      function inspect(node,container=null){
+        if(!node||typeof node!=='object')return;
+        if(Array.isArray(node)){for(const n of node)inspect(n,container);return;}
+        const active=node.nodeType==='ContractDefinition'?sourcePath+':'+node.name:container;
+        if(node.nodeType==='VariableDeclaration'&&node.stateVariable===true&&active){
+          const key=[sourcePath,active,node.name].join('|');
+          const candidates=declarationsByKey.get(key)??[];
+          const type=node.typeDescriptions?.typeString??node.typeName?.typeDescriptions?.typeString??null;
+          const tag=key+'|'+type;
+          if(!seenTypes.has(tag)){
+            for(const d of candidates){if(type)d.compilerType=type;}
+            seenTypes.add(tag);
+          }
+        }
+        if(node.nodeType==='SourceUnit'||node.nodeType==='ContractDefinition'){
+          for(const child of node.nodes??[])inspect(child,active);
+        }
+      }
+      inspect(ast);
+    }
+  }
+  for(const a of build.artifacts??[]){
+    for(const state of a.storageLayout?.storage??[]){
+      const key=[a.sourceName,a.sourceName+':'+a.contractName,state.label].join('|');
+      for(const d of declarationsByKey.get(key)??[]){
+        if(d.kind!=='STATE_VARIABLE')continue;
+        d.slot=String(state.slot??'');d.offset=String(state.offset??'');
+        d.compilerType=a.storageLayout?.types?.[state.type]?.label??d.compilerType??state.type??null;
+        d.compilerLayoutStatus='COMPILER_EMITTED';
+        d.evidenceClass='COMPILER_STORAGE_LAYOUT_PLUS_SOURCE_DECLARATION';
+      }
+    }
+  }
+  const effectiveEntrypoints=[];
+  const inScopeContracts=[];
+  for(const c of si.contracts??[]){
+    const sourcePath=c.sourcePath??String(c.qualifiedName).split(':')[0];
+    c.sourceTier=sourceTier(sourcePath);
+    if(c.deployability!=='DEPLOYABLE'||c.sourceTier!=='IN_SCOPE')continue;
+    inScopeContracts.push(c.contractId);
+    const key=(c.compilationUnitId??'default')+'|'+c.qualifiedName;
+    const a=abiByUnitQualified.get(key);
+    if(!a)throw new Error('STAGE2_COMPILER_ARTIFACT_IDENTITY_MISMATCH: '+key);
+    const candidateContexts=contexts.filter(x=>Array.isArray(x.effectiveIn)&&x.effectiveIn.includes(c.qualifiedName));
+    for(const entry of (a.abi??[]).filter(x=>['function','fallback','receive'].includes(x?.type))){
+      const canonical=normalSig(entry);
+      const fn=(si.functions??[]).find(x=>x.contractId===c.contractId&&x.signature===canonical);
+      const exact=candidateContexts.filter(x=>x.canonicalSignature===canonical&&
+        ['FUNCTION','GENERATED_GETTER','INHERITED_DEPENDENCY','FALLBACK','RECEIVE'].includes(x.kind));
+      const preferred=exact.filter(x=>x.qualifiedContainer===c.qualifiedName);
+      const matches=preferred.length?preferred:exact;
+      const unique=new Map(matches.map(x=>[x.symbolId??x.contextId,x]));
+      const selected=unique.size===1?[...unique.values()][0]:null;
+      const origin=selected?(selected.kind==='GENERATED_GETTER'?'GENERATED_GETTER':
+        selected.qualifiedContainer===c.qualifiedName?'DIRECT_IMPLEMENTATION':'INHERITED_IMPLEMENTATION'):
+        unique.size>1?'AMBIGUOUS_DECLARATIONS':'ABI_ONLY_DECLARATION_UNRESOLVED';
+      const sourceLocation=anchors(selected)??(fn?.sourceLocation!=='UNSUPPORTED_AST_SOURCE_LOCATION'?fn?.sourceLocation:null)??null;
+      const evidenceClass=selected?.path?.endsWith('.vy')?'VYPER_COMPILER_AST_STRUCTURAL_ONLY':
+        selected?'SOLIDITY_SOURCE_REVIEW_AST_WITH_COMPILER_ABI':'COMPILER_ABI_ONLY';
+      const methodSignature=entry.type==='function'?canonical:null;
+      const rawSelector=methodSignature?a.methodIdentifiers?.[methodSignature]:null;
+      const selector=typeof rawSelector==='string'&&/^(?:0x)?[0-9a-fA-F]{8}$/.test(rawSelector)
+        ?'0x'+rawSelector.replace(/^0x/,'').toLowerCase():fn?.selector??null;
+      if(fn&&c.language==='VYPER'&&selected&&fn.sourceLocation==='UNSUPPORTED_AST_SOURCE_LOCATION'){
+        fn.sourceLocation=sourceLocation;
+        fn.basis='COMPILER_ABI_AND_VYPER_COMPILER_AST_STRUCTURAL';
+        fn.sourceLocationEvidenceClass='VYPER_COMPILER_AST_STRUCTURAL_ONLY';
+        const file=si.sourceFiles?.find(f=>f.path===selected.path);
+        if(file&&Number.isInteger(selected.lineStart)){
+          si.sourceAnchors??=[];
+          si.sourceAnchors.push({
+            anchorId:'ANCHOR-'+pad(si.sourceAnchors.length+1,4),sourceId:file.sourceId,
+            symbolId:fn.functionId,startLine:selected.lineStart,endLine:selected.lineEnd??selected.lineStart,
+            sourceDigestSha256:file.sha256,basis:'VYPER_COMPILER_AST_STRUCTURAL_ONLY'});
+        }
+      }
+      effectiveEntrypoints.push({
+        entrypointId:'ENTRY-'+pad(effectiveEntrypoints.length+1,5),
+        contractId:c.contractId,artifactId:c.artifactId,
+        compilationUnitId:c.compilationUnitId,qualifiedContract:c.qualifiedName,contractSourcePath:sourcePath,
+        sourceTier:c.sourceTier,language:c.language,abiType:entry.type,
+        canonicalSignature:canonical,selector,selectorStatus:selector?'COMPILER_PROVIDED':'UNAVAILABLE',
+        stateMutability:entry.stateMutability??null,stateChanging:publicState(entry),
+        implementationOrigin:origin,implementationSymbolId:selected?.symbolId??null,
+        implementationContextId:selected?.contextId??null,
+        implementationContract:selected?.qualifiedContainer??null,
+        implementationPath:selected?.path??null,sourceLocation,
+        evidenceClass,implementationCandidateCount:unique.size,
+        auditFlowAssignment:'REQUIRED_FOR_STATE_CHANGING_ENTRIES',
+        caveat:'ABI is an exposed interface, not proof of live deployment/reachability or security'
+      });
+    }
+  }
+  const effectsBySymbol=new Map(effects.map(e=>[e.symbolId,e]));
+  for(const e of effectiveEntrypoints){
+    const effect=effectsBySymbol.get(e.implementationSymbolId);
+    e.localStateReadCount=effect?.directlyObservedStateReads.length??0;
+    e.localStateWriteCount=effect?.directlyObservedStateWrites.length??0;
+    e.stateEffectEvidenceStatus=effect?effect.writeEvidenceStatus:'NO_MATCHED_IMPLEMENTATION_CONTEXT';
+  }
+  // Vyper's compiler AST is available through the existing review-inventory
+  // provenance. Surface explicitly categorized call candidates beside Solidity's
+  // call graph without claiming an inferred target or a semantic value transfer.
+  const vyperContextCandidates=contexts.filter(c=>c.path?.endsWith('.vy')&&
+    Array.isArray(c.externalCalls)&&c.externalCalls.length>0);
+  const vyperDedup=new Set();
+  for(const ctx of vyperContextCandidates){
+    const contract=si.contracts?.find(c=>c.qualifiedName===ctx.qualifiedContainer&&c.language==='VYPER');
+    const fn=si.functions?.find(f=>f.contractId===contract?.contractId&&f.signature===ctx.canonicalSignature);
+    if(!contract||!fn)continue;
+    for(const call of ctx.externalCalls){
+      const member=String(call.memberName??'UNKNOWN_VYPER_OPERATION');
+      const line=Number.isInteger(call.line)?call.line:ctx.lineStart;
+      const key=[fn.functionId,line,member].join('|');
+      if(vyperDedup.has(key))continue;vyperDedup.add(key);
+      const sourceLocation=ctx.path+':'+line+'-'+line;
+      si.callGraph.push({
+        callEdgeId:'CALL-'+pad(si.callGraph.length+1,4),
+        callerContractId:contract.contractId,callerFunctionId:fn.functionId,
+        targetContractId:null,targetFunctionId:null,memberOrName:member,
+        callClass:'VYPER_AST_SENSITIVE_OPERATION_UNRESOLVED',
+        interfaceOrType:call.targetType??null,sourceLocation,
+        confidenceClass:'VYPER_COMPILER_AST_STRUCTURAL_ONLY',
+        basis:'VYPER_AST_SENSITIVE_CALL_CONTEXT',
+        sourceCallsite:{sourcePath:ctx.path,sourceDigestSha256:si.sourceFiles?.find(x=>x.path===ctx.path)?.sha256??null,
+          compilerLanguage:'VYPER',sourceLine:line}
+      });
+      si.externalInterfaces.push({
+        externalInterfaceId:'EXT-'+pad(si.externalInterfaces.length+1,4),
+        callerContractId:contract.contractId,callerFunctionId:fn.functionId,
+        targetContractId:null,targetFunctionId:null,memberOrName:member,
+        interfaceOrType:call.targetType??null,sourceLocation,status:'CANDIDATE',
+        confidenceClass:'VYPER_COMPILER_AST_STRUCTURAL_ONLY',
+        basis:'VYPER_AST_SENSITIVE_CALL_CONTEXT',securityInterpretation:'DEFER_TO_REVIEWER',
+        sourceCallsite:{sourcePath:ctx.path,sourceLine:line}
+      });
+    }
+  }
+  const mutating=effectiveEntrypoints.filter(e=>e.stateChanging);
+  const sourceOnly=effectiveEntrypoints.filter(e=>e.implementationOrigin==='ABI_ONLY_DECLARATION_UNRESOLVED'||
+    e.implementationOrigin==='AMBIGUOUS_DECLARATIONS');
+  const unitQualifiedGroups=new Map();
+  for(const c of si.contracts??[]){
+    const list=unitQualifiedGroups.get(c.qualifiedName)??[];
+    list.push(c.compilationUnitId);unitQualifiedGroups.set(c.qualifiedName,list);
+  }
+  si.effectiveEntrypoints=effectiveEntrypoints;
+  si.stateDeclarations=declarations.sort((a,b)=>a.sourcePath.localeCompare(b.sourcePath)||
+    String(a.sourceLocation).localeCompare(String(b.sourceLocation))||a.name.localeCompare(b.name));
+  si.stateEffects=effects;
+  si.stage2Coverage={
+    schemaVersion:'curveyield-stage2-structural-coverage-v1',
+    inputReviewInventory:'REVIEW_INVENTORY_v1.json',
+    sourceSha256:reviewInventory.sourceSha256,
+    inScopeDeployableContractIds:inScopeContracts,
+    inScopeDeployableContracts:inScopeContracts.length,
+    effectiveAbiCallableCount:effectiveEntrypoints.length,
+    stateChangingEffectiveEntrypointCount:mutating.length,
+    inheritedEntrypointCount:effectiveEntrypoints.filter(e=>e.implementationOrigin==='INHERITED_IMPLEMENTATION').length,
+    vyperEntrypointCount:effectiveEntrypoints.filter(e=>e.language==='VYPER').length,
+    vyperStructuralCallCandidates:vyperDedup.size,
+    unresolvedImplementationEntrypoints:sourceOnly.length,
+    unresolvedStateChangingEntrypoints:mutating.filter(e=>sourceOnly.includes(e)).length,
+    compilerLayoutStateDeclarationCount:declarations.filter(d=>d.compilerLayoutStatus==='COMPILER_EMITTED').length,
+    sourceStateDeclarationCount:declarations.length,
+    localStateEffectContextCount:effects.length,
+    duplicateQualifiedContractsAcrossCompilationUnits:[...unitQualifiedGroups.entries()]
+      .filter(([,arr])=>new Set(arr).size>1).map(([name,arr])=>({name,units:[...new Set(arr)].sort()})),
+    limitations:[
+      'Effective ABI inventory is a coverage denominator, not proof of deployed code or invocation reachability.',
+      'State effects are direct AST/source-context observations, not transitive inter-contract effects.',
+      'No storage slot is claimed when the exact compiler does not emit storage layout.',
+      'Vyper compiler AST contexts lack full Solidity-equivalent read/write and semantic detector coverage.',
+      'Unresolved declaration matches must be traced directly by the auditor.',
+      'Scope is based on review-inventory tiers and deployability, not inferred from names or fee relationships.'
+    ]
+  };
+  si.limitations??=[];
+  si.limitations.push({category:'STAGE2_NORMALIZED_EVIDENCE_SEMANTICS',
+    affectedSections:['effectiveEntrypoints','stateDeclarations','stateEffects'],
+    reason:'Compiler-ABI and source-context join is structural only. Missing and ambiguous origins are recorded.',
+    downstreamRequiredAction:'Reviewer assigns actual flows and assesses real value/state/security semantics.'});
+  const {technicalBundleDigest,...withoutDigest}=si;
+  si.technicalBundleDigest=digestCanonicalV1(withoutDigest);
+  return si;
 }

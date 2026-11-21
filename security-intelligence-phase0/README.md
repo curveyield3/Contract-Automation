@@ -199,3 +199,48 @@ or economic-security conclusions.
   Before production use, compare actual run logs and evidence artifacts for
   both a known baseline and a structurally different package; no test execution
   is implied or authorized by this documentation.
+
+
+## Stage 2 — normalized entrypoints and source-state evidence (v3)
+
+The existing standalone preflight's successful compiled path now enriches
+\`SOURCE_INTELLIGENCE_AUTOMATED_v1.json\` **after** it writes the same source-bound
+\`REVIEW_INVENTORY_v1.json\`. This reuses original compiler, AST, Vyper analysis,
+and review-inventory context work; it does **not** add a second scanning engine.
+
+- **\`effectiveEntrypoints\`** enumerates the compiler ABI of every *deployable,
+  in-scope* artifact with a compilation-unit-qualified identity, including
+  payable/fallback/receive operations. State-changing entries form an objective
+  Round-2/Round-11 **coverage denominator**; this is not a declaration count,
+  deployed-state attestation, or proof of invocation reachability.
+- **\`implementationOrigin\`** distinguishes source-backed direct, inherited,
+  generated getter, ambiguous, and unresolved ABI items. Every unresolved
+  origin stays unresolved; the agent must trace it from actual source rather
+  than accepting a source-name guess.
+- **\`stateDeclarations\`** projects AST-backed state/constant/immutable
+  declarations with source lines and compiler types where available. Compiler
+  storage slots and offsets are included **only when emitted by the compiler**;
+  the existing \`storageLayout\` field remains compiler-layout evidence alone.
+- **\`stateEffects\`** mirrors source-review contexts' per-function
+  state reads/writes with source anchors and inherited \`effectiveIn\`
+  relationships. Effects are **local syntax observations**, not a
+  transitive call-flow simulation or proof of economic consequences.
+- Vyper functions gain source anchors when the existing compiler-backed
+  Vyper structural AST matches their ABI; structural sensitive-call
+  observations appear as explicitly unresolved call/interface candidates.
+  Vyper state-read completeness and semantic Slither detectors are **not**
+  claimed.
+
+The existing \`DISCOVERY_SUMMARY_v1.md\` now groups effective state-changing
+entrypoints by deployed-capable first-party artifact, with implementation
+origin, line reference, and compiler unit. This is the quick navigation surface
+for v5 Rounds 1–2; the full JSON remains the authoritative machine data.
+
+The Source Intelligence digest is recalculated after adding these fields so
+the enriched document's provenance stays consistent. The scope/tier data comes
+from the existing source review inventory, not repository or contract names.
+
+**Known boundaries:** Uncompiled additional roots stay marked unavailable;
+ABI-only and ambiguous mappings require manual interpretation; no storage
+slot or direct-effect completion is fabricated. The preflight has not run
+any user-contract tests, fork deployments, or exploit trials.
