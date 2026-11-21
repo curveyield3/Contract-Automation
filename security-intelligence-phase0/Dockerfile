@@ -33,9 +33,12 @@ RUN mkdir -p /tmp/security-preflight-solc/src && \
     printf 'pragma solidity 0.8.28; contract PreflightCompiler028 {}\n' > /tmp/security-preflight-solc/src/Compiler028.sol && \
     printf 'pragma solidity 0.8.30; contract PreflightCompiler030 {}\n' > /tmp/security-preflight-solc/src/Compiler030.sol && \
     forge build --root /tmp/security-preflight-solc --force && \
-    mkdir -p /opt/preflight/solc-cache && \
-    cp -R /root/.svm/. /opt/preflight/solc-cache/ && \
-    chmod -R a+rX /opt/preflight/solc-cache
+    mkdir -p /opt/preflight/solc-home && \
+    if [ -d /tmp/.svm ]; then mkdir -p /opt/preflight/solc-home/.svm && cp -R /tmp/.svm/. /opt/preflight/solc-home/.svm/; fi && \
+    if [ -d /tmp/.local/share/svm ]; then mkdir -p /opt/preflight/solc-home/.local/share/svm && cp -R /tmp/.local/share/svm/. /opt/preflight/solc-home/.local/share/svm/; fi && \
+    if [ -d /root/.svm ]; then mkdir -p /opt/preflight/solc-home/.svm && cp -R /root/.svm/. /opt/preflight/solc-home/.svm/; fi && \
+    (test -d /opt/preflight/solc-home/.svm || test -d /opt/preflight/solc-home/.local/share/svm) && \
+    chmod -R a+rX /opt/preflight/solc-home
 COPY security-intelligence-phase0/packages/ ./packages/
 COPY security-intelligence-phase0/scripts/ ./scripts/
 COPY security-intelligence-phase0/protocol/taxonomy/ ./protocol/taxonomy/

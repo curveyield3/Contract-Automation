@@ -106,7 +106,7 @@ jobs:
             --env CI=true --env HOME=/tmp \
             --workdir /opt/preflight \
             curveyield-security-preflight:local \
-            sh -c 'mkdir -p /tmp/.svm && cp -R /opt/preflight/solc-cache/. /tmp/.svm/ && \
+            sh -c 'cp -R /opt/preflight/solc-home/. /tmp/ && \
               exec node packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs \
                 --request /input/request.json --output /output/evidence'
       - name: Produce reader-facing discovery and cryptographic evidence index
