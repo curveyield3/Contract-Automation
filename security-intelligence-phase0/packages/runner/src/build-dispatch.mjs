@@ -16,7 +16,7 @@ const scanHash = x => createHash('sha256').update(x).digest('hex');
 async function compileVerifiedScanProject(projectRoot) {
   const manifest=JSON.parse(await fs.readFile(path.join(projectRoot,'scan-source-manifest.json'),'utf8'));
   if(manifest.schemaVersion!=='curveyield-scan-source-manifest-v1'||manifest.inputMode!=='LIVE_SCAN')throw new Error('INVALID_SCAN_SOURCE_MANIFEST');
-  if(!Array.isArray(manifest.compilerUnits)||manifest.compilerUnits.length<1)throw new Error('INVALID_SCAN_COMPILER_UNITS');
+  if(!Array.isArray(manifest.compilerUnits)||manifest.compilerUnits.length<1||manifest.compilerUnits.length>64)throw new Error('INVALID_SCAN_COMPILER_UNITS');
   const units=[],artifacts=[],seen=new Set(),sourceNames=new Set(),allAsts={},diagnostics=[];
   for(const info of manifest.compilerUnits){
     if(!/^scan-[0-9a-f]{16}$/.test(info.unitId)||info.file!==('scan-compiler-units/'+info.unitId+'.json'))throw new Error('INVALID_SCAN_COMPILER_UNIT_PATH');
