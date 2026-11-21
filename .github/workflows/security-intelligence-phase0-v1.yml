@@ -150,6 +150,13 @@ jobs:
                 any($inv[0].payload.limitations[];
                   .code == "UNSUPPORTED_LANGUAGE_FILE_FALLBACK" and
                   .path == $unit.path)
+              ) or
+              (. as $unit |
+                .astStatus == "AVAILABLE_VYPER_AST" and
+                (.path | endswith(".vy")) and
+                any($inv[0].payload.limitations[];
+                  .code == "VYPER_AST_STRUCTURAL_STATIC_ONLY" and
+                  .path == $unit.path)
               )
             ))
           ' .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null

@@ -28,9 +28,12 @@ const significant=allFunctions.filter(f=>!['view','pure'].includes(f.stateMutabi
 const inScope=(inventory?.payload?.sourceUnits??[]).filter(x=>x.scopeTier==='IN_SCOPE');
 const languageFallbacks=inScope.filter(x=>x.astStatus==='UNSUPPORTED_LANGUAGE'&&String(x.path??'').endsWith('.vy')&&
   (inventory?.payload?.limitations??[]).some(l=>l.code==='UNSUPPORTED_LANGUAGE_FILE_FALLBACK'&&l.path===x.path));
-const unsupportedCoverage=inScope.filter(x=>x.astStatus!=='AVAILABLE'&&!languageFallbacks.includes(x));
+const vyperAstStructuralOnly=inScope.filter(x=>x.astStatus==='AVAILABLE_VYPER_AST'&&String(x.path??'').endsWith('.vy')&&
+  (inventory?.payload?.limitations??[]).some(l=>l.code==='VYPER_AST_STRUCTURAL_STATIC_ONLY'&&l.path===x.path));
+const unsupportedCoverage=inScope.filter(x=>x.astStatus!=='AVAILABLE'&&!languageFallbacks.includes(x)&&!vyperAstStructuralOnly.includes(x));
 const typedInScopeComplete=!!inventory&&inScope.length>0&&unsupportedCoverage.length===0;
-const fullySourceSupported=typedInScopeComplete&&inventory?.payload?.complete===true;
+const fullySourceSupported=typedInScopeComplete&&inventory?.payload?.complete===true&&
+  languageFallbacks.length===0&&vyperAstStructuralOnly.length===0;
 const slitherComplete=slither?.componentStatus==='COMPLETED';
 const manifestStatus=!sourceMatched||!si||!typedInScopeComplete?'INCOMPLETE':!slitherComplete||!fullySourceSupported?'PARTIAL':'COLLECTED';
 const lines=[
@@ -62,6 +65,7 @@ const lines=[
   '- In-scope Solidity AST and typed fallback coverage: '+(typedInScopeComplete?'RECONCILED':'MISSING SOURCE COVERAGE'),
   '- In-scope source records: '+inScope.length,
   '- Vyper file-level fallback(s): '+(languageFallbacks.map(x=>x.path).join(', ')||'none'),
+  '- Vyper compiler AST structural-only coverage (no semantic Slither detectors): '+(vyperAstStructuralOnly.map(x=>x.path).join(', ')||'none'),
   '- Unsupported in-scope records without authorized fallback: '+(unsupportedCoverage.map(x=>x.path).join(', ')||'none'),
   '- Dependency manifest: '+(sbom?'PRESENT':'UNAVAILABLE'),
   '- Deployment/configuration readiness: '+(readiness?'DISCOVERED (not executed)':'UNAVAILABLE'),
@@ -93,6 +97,6 @@ const lines=[
   ''
 ];
 fs.writeFileSync(path.join(output,'DISCOVERY_SUMMARY_v1.md'),lines.join('\n'));
-const manifest={schemaVersion:'curveyield-security-preflight-v1',status:manifestStatus,notSecurityVerdict:true,typedInScopeComplete,typedVyperFallbackPaths:languageFallbacks.map(x=>x.path),unresolvedSourceCoveragePaths:unsupportedCoverage.map(x=>x.path),source:{repository:source.repository??null,commit:source.commit??null,archivePath:source.archivePath??null,expectedSha256:expected,observedSha256:observed},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,reviewInventoryComplete:inventory?.payload?.complete===true,files:evidence};
+const manifest={schemaVersion:'curveyield-security-preflight-v1',status:manifestStatus,notSecurityVerdict:true,typedInScopeComplete,typedVyperFallbackPaths:languageFallbacks.map(x=>x.path),typedVyperAstStructuralOnlyPaths:vyperAstStructuralOnly.map(x=>x.path),unresolvedSourceCoveragePaths:unsupportedCoverage.map(x=>x.path),source:{repository:source.repository??null,commit:source.commit??null,archivePath:source.archivePath??null,expectedSha256:expected,observedSha256:observed},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,reviewInventoryComplete:inventory?.payload?.complete===true,files:evidence};
 fs.writeFileSync(path.join(output,'PREFLIGHT_MANIFEST_v1.json'),JSON.stringify(manifest,null,2)+'\n');
 console.log(JSON.stringify({status:manifest.status,files:evidence.length,contracts:allContracts.length,functions:allFunctions.length}));
