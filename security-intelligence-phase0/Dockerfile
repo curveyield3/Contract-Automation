@@ -39,6 +39,13 @@ RUN mkdir -p /tmp/security-preflight-solc/src && \
     if [ -d /root/.svm ]; then mkdir -p /opt/preflight/solc-home/.svm && cp -R /root/.svm/. /opt/preflight/solc-home/.svm/; fi && \
     (test -d /opt/preflight/solc-home/.svm || test -d /opt/preflight/solc-home/.local/share/svm) && \
     chmod -R a+rX /opt/preflight/solc-home
+# Place the preverified solc binaries inside the immutable image, not a
+# temporary filesystem where executable mappings may be prohibited.
+RUN if [ -d /opt/preflight/solc-home/.svm ]; then mv /opt/preflight/solc-home/.svm /opt/preflight/.svm; fi && \
+    if [ -d /opt/preflight/solc-home/.local ]; then mv /opt/preflight/solc-home/.local /opt/preflight/.local; fi && \
+    test -x /opt/preflight/.svm/0.8.28/solc-0.8.28 && \
+    test -x /opt/preflight/.svm/0.8.30/solc-0.8.30
+ENV HOME="/opt/preflight"
 COPY security-intelligence-phase0/packages/ ./packages/
 COPY security-intelligence-phase0/scripts/ ./scripts/
 COPY security-intelligence-phase0/protocol/taxonomy/ ./protocol/taxonomy/
