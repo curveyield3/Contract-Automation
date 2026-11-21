@@ -107,20 +107,21 @@ jobs:
             --workdir /opt/preflight \
             curveyield-security-preflight:local \
             node packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs \
-              --request /input/request.json --output /output
+              --request /input/request.json --output /output/evidence
       - name: Produce reader-facing discovery and cryptographic evidence index
         if: always()
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p .preflight-output/evidence
           node security-intelligence-phase0/scripts/standalone-preflight-summary-v1.mjs \
-            .preflight-output .preflight-input/request.json
+            .preflight-output/evidence .preflight-input/request.json
       - name: Upload standalone preflight evidence (never source ZIP)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .preflight-output/
+          path: .preflight-output/evidence/
           if-no-files-found: error
           retention-days: 14
       - name: Require source-bound inventory before claiming collection success
@@ -128,9 +129,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s .preflight-output/PREFLIGHT_MANIFEST_v1.json
+          test -s .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json
           jq -e '.source.expectedSha256 == .source.observedSha256 and
                    (.status=="COLLECTED" or .status=="PARTIAL") and
                    .reviewInventoryComplete==true' \
-                   .preflight-output/PREFLIGHT_MANIFEST_v1.json >/dev/null
+                   .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
           echo "Machine collection completed; findings are NOT evaluated or accepted"
