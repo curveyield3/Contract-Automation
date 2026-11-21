@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "curveyield-security-preflight-request-v1",
+  "runMode": "SOURCE_PREFLIGHT",
+  "requestId": "replace-with-unique-source-bound-id",
+  "source": {
+    "repository": "curveyield3/Smart-Contracts",
+    "commit": "0000000000000000000000000000000000000000",
+    "archivePath": "path/to/deployment-package.zip",
+    "archiveSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

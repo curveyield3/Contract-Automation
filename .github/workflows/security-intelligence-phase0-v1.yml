@@ -1,0 +1,136 @@
+name: CurveYield Security Intelligence — Standalone Phase 0 v1
+run-name: security-preflight-${{ github.run_id }}
+on:
+  push:
+    branches: [machine-intelligence-audit-controller-v1]
+    paths:
+      - 'security-intelligence-phase0/requests/active-request.json'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: security-preflight-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  admit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout trusted standalone workflow and copied dependencies
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Admit source-bound request and download ZIP without running it
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?AUDIT_CONTROLLER_GITHUB_TOKEN secret is required to read source repository}"
+          mkdir -p .preflight-input
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const source=JSON.parse(fs.readFileSync('security-intelligence-phase0/requests/active-request.json','utf8'));
+          if(source.schemaVersion!=='curveyield-security-preflight-request-v1'||source.runMode!=='SOURCE_PREFLIGHT')throw Error('REQUEST_SCHEMA_OR_MODE_INVALID');
+          if(typeof source.requestId!=='string'||!/^[a-zA-Z0-9._-]{6,100}$/.test(source.requestId))throw Error('REQUEST_ID_INVALID');
+          const s=source.source??{};
+          if(typeof s.repository!=='string'||!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(s.repository))throw Error('SOURCE_REPOSITORY_INVALID');
+          if(typeof s.commit!=='string'||!/^[a-f0-9]{40}$/.test(s.commit))throw Error('SOURCE_COMMIT_UNPINNED');
+          if(typeof s.archiveSha256!=='string'||!/^[a-f0-9]{64}$/.test(s.archiveSha256))throw Error('SOURCE_SHA_UNPINNED');
+          if(typeof s.archivePath!=='string'||!s.archivePath.endsWith('.zip')||s.archivePath.length>512||
+             s.archivePath.startsWith('/')||s.archivePath.includes('..')||s.archivePath.includes('\\')||s.archivePath.split('/').some(x=>!x))throw Error('SOURCE_ARCHIVE_PATH_INVALID');
+          const adapted={schemaVersion:'curveyield-lite-phase0-intelligence-request-v1',
+            requestId:source.requestId,campaignId:source.requestId,
+            campaignGenerationId:'preflight-'+s.archiveSha256.slice(0,20),
+            source:{repository:s.repository,commit:s.commit,archivePath:s.archivePath,archiveSha256:s.archiveSha256},
+            destination:{repository:'curveyield3/Contract-Automation',ref:'machine-intelligence-audit-controller-v1',campaignPath:'security-intelligence-phase0'}};
+          fs.writeFileSync('.preflight-input/request.json',JSON.stringify(adapted,null,2)+'\n');
+          NODE
+          repo="$(jq -er '.source.repository' .preflight-input/request.json)"
+          commit="$(jq -er '.source.commit' .preflight-input/request.json)"
+          rel="$(jq -er '.source.archivePath' .preflight-input/request.json)"
+          expected="$(jq -er '.source.archiveSha256' .preflight-input/request.json)"
+          encoded="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe="/"))' "$rel")"
+          blob="$(gh api "repos/$repo/contents/$encoded?ref=$commit" --jq '.sha')"
+          [[ "$blob" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::SOURCE_GIT_BLOB_UNAVAILABLE"; exit 1; }
+          gh api "repos/$repo/git/blobs/$blob" --jq '.content' | base64 -d > .preflight-input/source.zip
+          test -s .preflight-input/source.zip
+          test "$(sha256sum .preflight-input/source.zip | awk '{print $1}')" = "$expected"
+          test "$(stat -c%s .preflight-input/source.zip)" -le 16777216
+          unzip -tqq .preflight-input/source.zip
+          echo "Exact ZIP admitted and source SHA-256 verified; no source execution"
+      - name: Hand off ZIP and non-secret request to isolated collector
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-preflight-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .preflight-input/
+          include-hidden-files: true
+          retention-days: 3
+          if-no-files-found: error
+
+  collect:
+    needs: admit
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout only trusted forked collection code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Build source-blind isolated toolchain BEFORE downloading untrusted ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --file security-intelligence-phase0/Dockerfile --tag curveyield-security-preflight:local .
+      - name: Receive exact source artifact; no source credentials in collector job
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .preflight-input
+      - name: Create writable output for sandboxed collection
+        run: mkdir -p .preflight-output
+      - name: Run copied compiler, Source Intelligence, inventory and Slither in network-isolated sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 256 --memory 6g \
+            --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,nosuid,nodev,size=3g,mode=1777 \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-input,target=/input,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-output,target=/output" \
+            --env SECURITY_PREFLIGHT_LOCAL_ARCHIVE=/input/source.zip \
+            --env PHASE0_PRIVATE_BUILD_CACHE_ENABLED=false \
+            --env CI=true --env HOME=/tmp \
+            --workdir /opt/preflight \
+            curveyield-security-preflight:local \
+            node packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs \
+              --request /input/request.json --output /output
+      - name: Produce reader-facing discovery and cryptographic evidence index
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          node security-intelligence-phase0/scripts/standalone-preflight-summary-v1.mjs \
+            .preflight-output .preflight-input/request.json
+      - name: Upload standalone preflight evidence (never source ZIP)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .preflight-output/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Require source-bound inventory before claiming collection success
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .preflight-output/PREFLIGHT_MANIFEST_v1.json
+          jq -e '.source.expectedSha256 == .source.observedSha256 and
+                   (.status=="COLLECTED" or .status=="PARTIAL") and
+                   .reviewInventoryComplete==true' \
+                   .preflight-output/PREFLIGHT_MANIFEST_v1.json >/dev/null
+          echo "Machine collection completed; findings are NOT evaluated or accepted"

@@ -1,0 +1,35 @@
+{
+  "name": "curveyield-contract-automation",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "lint": "node scripts/check.mjs",
+    "runner": "node packages/runner/src/cli.mjs",
+    "integration:local": "node packages/runner/src/integration-local.mjs",
+    "v7": "node packages/github-native-sim/src/v7-cli.mjs",
+    "v7:execute": "node packages/github-native-sim/src/v7-cli.mjs execute",
+    "v7:submit": "node packages/github-native-sim/src/v7-cli.mjs submit",
+    "v7:harness:init": "node packages/github-native-sim/src/v7-cli.mjs harness:init",
+    "v7:harness:validate": "node packages/github-native-sim/src/v7-cli.mjs harness:validate",
+    "v7:toolchain:verify": "node packages/github-native-sim/src/v7-cli.mjs toolchain:verify",
+    "v7:manifest": "node packages/github-native-sim/src/v7-cli.mjs manifest"
+  },
+  "dependencies": {
+    "@foundry-rs/anvil": "1.7.1",
+    "@foundry-rs/cast": "1.7.1",
+    "@foundry-rs/forge": "1.7.1",
+    "ethers": "6.15.0",
+    "solc": "0.8.30",
+    "tar": "7.4.3",
+    "unzipper": "0.12.3"
+  }
+}
