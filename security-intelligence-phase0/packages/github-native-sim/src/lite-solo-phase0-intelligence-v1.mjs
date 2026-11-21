@@ -332,7 +332,8 @@ async function runExactVyperAstStaticV1({projectRoot,unit,sourceName}){
   try{parsed=JSON.parse(compiled.stdout)}catch{throw new Error('Vyper AST output is not valid JSON: '+sourceName)}
   const root=parsed?.ast;
   if(!root||root.ast_type!=='Module'||!Array.isArray(root.body))throw new Error('Vyper AST root invalid: '+sourceName);
-  const functions=[],sensitiveCalls=[],externalEntryPoints=[],stateWrites=[];
+  const functions=[],sensitiveCalls=[],externalEntryPoints=[],stateWrites=[],stateDeclarations=[];
+  const sourceLines=admitted.split(/\r?\n/);
   let nodeCount=0;
   const sensitive=new Set(['raw_call','send','selfdestruct','delegatecall','create_forwarder_to','create_minimal_proxy_to','create_copy_of','create_from_blueprint','unsafe_add','unsafe_sub','unsafe_mul','unsafe_div','convert','staticcall','extcall','raw_log']);
   const seenObjects=new Set();
@@ -375,6 +376,24 @@ async function runExactVyperAstStaticV1({projectRoot,unit,sourceName}){
     }
   }
   visit(root,null);
+  // Module-level Vyper variable declarations are distinct from function-local
+  // typed assignments. Only trust AST root.body entries, and retain the exact
+  // source-line annotation as syntax rather than claiming compiler storage slots.
+  for(const node of root.body){
+    if(!['VariableDecl','AnnAssign'].includes(node?.ast_type))continue;
+    const name=callableName(node.target??node.name);
+    const line=Number(node.lineno??0);
+    if(!name||name.includes('.')||line<1||line>sourceLines.length)continue;
+    const exactLine=sourceLines[line-1].trim();
+    const kind=/\bconstant\s*\(/.test(exactLine)?'CONSTANT':
+      /\bimmutable\s*\(/.test(exactLine)?'IMMUTABLE':'STATE_VARIABLE';
+    stateDeclarations.push({
+      name,line,kind,visibility:/\bpublic\s*\(/.test(exactLine)?'public':'internal',
+      annotationSyntax:exactLine.slice(0,420),
+      compilerType:null,storageSlot:null,
+      evidenceClass:'VYPER_COMPILER_AST_MODULE_DECLARATION_AND_EXACT_SOURCE_LINE'
+    });
+  }
   if(!nodeCount||!functions.length||!externalEntryPoints.length)
     throw new Error('Vyper AST structural inventory incomplete: '+sourceName);
   for(const call of sensitiveCalls)if(call.line<1)throw new Error('Unanchored Vyper sensitive call: '+call.call);
@@ -385,7 +404,7 @@ async function runExactVyperAstStaticV1({projectRoot,unit,sourceName}){
     sourceName,compilerVersion:version,
     sourceSha256:sha256(Buffer.from(admitted,'utf8')),
     astSha256:sha256(Buffer.from(JSON.stringify(root),'utf8')),
-    nodeCount,functions,externalEntryPoints,sensitiveCalls,stateWrites,
+    nodeCount,functions,externalEntryPoints,sensitiveCalls,stateWrites,stateDeclarations,
     reviewRequired:true,
     limitations:['Slither 0.11.6 Vyper 0.4.3 semantic detectors are unavailable; source-anchored AST structural surfaces are retained for required Phase 4–6 semantic review.']
   };
@@ -1219,7 +1238,7 @@ async function main(){
     const reviewInventory=JSON.parse(await fs.readFile(inventoryFile,'utf8'));
     if(reviewInventory.sourceSha256!==request.source.archiveSha256)
       throw new Error('STAGE2_REVIEW_INVENTORY_SOURCE_IDENTITY_MISMATCH');
-    enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligence,reviewInventory,build});
+    enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligence,reviewInventory,build,analysis:{slither}});
   });
   const projectReadiness=await withProgressStage('scan-project-readiness',()=>scanProjectReadiness({projectRoot:detected.absolute,build,cfg:effectiveCfg}));
   const deployConfigExecution=await withProgressStage('execute-local-deployment-inventory',()=>executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness}));

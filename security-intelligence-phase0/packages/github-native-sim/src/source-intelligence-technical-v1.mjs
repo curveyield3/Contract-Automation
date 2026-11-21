@@ -436,7 +436,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
  * Round 2 consumes effectiveEntrypoints; Rounds 3–5 consume stateDeclarations
  * and stateEffects; Round 11 reconciles the compiler ABI denominator.
  */
-export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligence,reviewInventory,build}={}){
+export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligence,reviewInventory,build,analysis={}}={}){
   const si=sourceIntelligence, review=reviewInventory?.payload;
   if(!si||!review||!build||build.status!=='completed')
     throw new Error('COMPILER_AND_SOURCE_REVIEW_EVIDENCE_REQUIRED_FOR_STAGE2');
@@ -481,6 +481,26 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
     compilerLayoutStatus:d.kind==='STATE_VARIABLE'?'NOT_EMITTED_OR_UNRESOLVED':'NOT_APPLICABLE_NON_STORAGE',
     evidenceClass:'SOURCE_REVIEW_SOLIDITY_AST_DECLARATION_NOT_SLOT_DATA'
   }));
+  const vyperAnalyses=(analysis.slither?.analyzerCoverage??[])
+    .map(x=>x.vyperAnalysis).filter(Boolean);
+  for(const vyper of vyperAnalyses){
+    const exactSource=si.sourceFiles?.find(x=>x.path===vyper.sourceName);
+    if(!exactSource||exactSource.sha256!==vyper.sourceSha256)
+      throw new Error('STAGE2_VYPER_AST_ADMITTED_SOURCE_HASH_MISMATCH: '+vyper.sourceName);
+    for(const d of vyper.stateDeclarations??[]){
+      if(!d.name||!Number.isInteger(d.line)||d.line<1)continue;
+      declarations.push({
+        symbolId:'VYPER-DECL-'+sha256(Buffer.from(vyper.sourceName+'|'+d.name+'|'+d.line)).slice(0,20),
+        sourcePath:vyper.sourceName,qualifiedContainer:vyper.sourceName+':'+path.posix.basename(vyper.sourceName,'.vy'),
+        name:d.name,kind:d.kind,visibility:d.visibility,sourceTier:sourceTier(vyper.sourceName),
+        sourceLocation:vyper.sourceName+':'+d.line+'-'+d.line,
+        compilerType:null,typeAnnotationSyntax:d.annotationSyntax??null,
+        slot:null,offset:null,
+        compilerLayoutStatus:d.kind==='STATE_VARIABLE'?'NOT_EMITTED_OR_UNRESOLVED':'NOT_APPLICABLE_NON_STORAGE',
+        evidenceClass:'VYPER_COMPILER_AST_MODULE_DECLARATION_SOURCE_TEXT_NOT_LAYOUT'
+      });
+    }
+  }
   const declarationsByKey=new Map();
   for(const d of declarations){
     const key=[d.sourcePath,d.qualifiedContainer,d.name].join('|');
@@ -607,18 +627,20 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
       const key=[fn.functionId,line,member].join('|');
       if(vyperDedup.has(key))continue;vyperDedup.add(key);
       const sourceLocation=ctx.path+':'+line+'-'+line;
+      const externalMessageCall=member==='raw_call'||member==='send'||member==='delegatecall'||
+        member==='extcall'||member==='staticcall'||member.startsWith('extcall.')||member.startsWith('staticcall.');
       si.callGraph.push({
         callEdgeId:'CALL-'+pad(si.callGraph.length+1,4),
         callerContractId:contract.contractId,callerFunctionId:fn.functionId,
         targetContractId:null,targetFunctionId:null,memberOrName:member,
-        callClass:'VYPER_AST_SENSITIVE_OPERATION_UNRESOLVED',
+        callClass:externalMessageCall?'VYPER_AST_EXTERNAL_OPERATION_UNRESOLVED':'VYPER_AST_BUILTIN_OR_SENSITIVE_OPERATION',
         interfaceOrType:call.targetType??null,sourceLocation,
         confidenceClass:'VYPER_COMPILER_AST_STRUCTURAL_ONLY',
         basis:'VYPER_AST_SENSITIVE_CALL_CONTEXT',
         sourceCallsite:{sourcePath:ctx.path,sourceDigestSha256:si.sourceFiles?.find(x=>x.path===ctx.path)?.sha256??null,
           compilerLanguage:'VYPER',sourceLine:line}
       });
-      si.externalInterfaces.push({
+      if(externalMessageCall)si.externalInterfaces.push({
         externalInterfaceId:'EXT-'+pad(si.externalInterfaces.length+1,4),
         callerContractId:contract.contractId,callerFunctionId:fn.functionId,
         targetContractId:null,targetFunctionId:null,memberOrName:member,
@@ -652,6 +674,7 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
     inheritedEntrypointCount:effectiveEntrypoints.filter(e=>e.implementationOrigin==='INHERITED_IMPLEMENTATION').length,
     vyperEntrypointCount:effectiveEntrypoints.filter(e=>e.language==='VYPER').length,
     vyperStructuralCallCandidates:vyperDedup.size,
+    vyperSourceStateDeclarationCount:declarations.filter(d=>d.evidenceClass?.startsWith('VYPER_COMPILER_AST_MODULE_DECLARATION')).length,
     unresolvedImplementationEntrypoints:sourceOnly.length,
     unresolvedStateChangingEntrypoints:mutating.filter(e=>sourceOnly.includes(e)).length,
     compilerLayoutStateDeclarationCount:declarations.filter(d=>d.compilerLayoutStatus==='COMPILER_EMITTED').length,

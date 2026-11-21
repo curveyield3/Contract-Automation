@@ -244,3 +244,19 @@ from the existing source review inventory, not repository or contract names.
 ABI-only and ambiguous mappings require manual interpretation; no storage
 slot or direct-effect completion is fabricated. The preflight has not run
 any user-contract tests, fork deployments, or exploit trials.
+
+
+### Stage 2 v4 Vyper evidence-preservation correction
+
+Artifact inspection of the first Stage 2 BoostHub collection revealed that the
+source-bound Vyper AST correctly emitted \`stateWrites\` and \`sensitiveCalls\`,
+but the generic Solidity review-context traversal replaced those entries with
+empty arrays. The fork-owned review-inventory writer now preserves Vyper
+compiler-AST contexts, state writes, and source anchors, and no longer
+classifies mere \`convert(...)\` builtins as external-message calls.
+
+The Vyper compiler-AST analyzer additionally projects module-level state,
+constant, and immutable declarations with exact source-line syntax. Their
+types are recorded as syntax, not fabricated compiler storage layout; Vyper
+state reads remain incomplete and require manual reasoning. Raw static
+observations, exact source identities, and language limitations are retained.
