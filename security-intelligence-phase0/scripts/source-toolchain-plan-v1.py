@@ -43,6 +43,8 @@ def exact_dep(spec):
 
 def source_root(name):
     parts = name.split('/')
+    if any(part in ('test','tests','script','scripts') for part in parts):
+        return '.'
     for i, value in enumerate(parts):
         if value in ('contracts', 'src') and i + 1 < len(parts):
             return '/'.join(parts[:i]) or '.'
@@ -93,10 +95,13 @@ def main(source_zip, output_dir):
         if not child:
             continue
         roots.append({'relativePath': root, 'languages': sorted(set('VYPER' if p.endswith('.vy') else 'SOLIDITY' for p in child)),
-                      'sourceCount': len(child), 'configuration': sorted(p for p in important if p.startswith(prefix) and
+                      'sourceCount': len(child),
+                      'rootClass': 'DEPENDENCY_CANDIDATE' if any(part in ('vendor','lib','dependencies','node_modules') for part in root.split('/')) else 'PROJECT_CANDIDATE',
+                      'configuration': sorted(p for p in important if p.startswith(prefix) and
                       p[len(prefix):] in ('foundry.toml', 'package.json', 'package-lock.json', 'hardhat.config.js',
                                          'hardhat.config.ts', 'scan-source-manifest.json'))})
     pragmas = []
+    ranged_constraints = []
     solc_versions = set()
     vyper_versions = set()
     unsupported = []
@@ -107,7 +112,10 @@ def main(source_zip, output_dir):
                 constraint = match.group(1).strip()
                 hit = VERSION.search(constraint)
                 if hit:
-                    solc_versions.add(hit.group(1))
+                    if constraint == hit.group(1) and not any(part in ('test','tests','script','scripts') for part in name.split('/')):
+                        solc_versions.add(hit.group(1))
+                    elif not any(part in ('test','tests','script','scripts') for part in name.split('/')):
+                        ranged_constraints.append((hit.group(1), constraint))
                 else:
                     unsupported.append({'path': name, 'reason': 'UNRESOLVED_SOLIDITY_PRAGMA', 'constraint': constraint[:160]})
                 pragmas.append({'path': name, 'language': 'SOLIDITY', 'constraint': constraint[:160],
@@ -125,6 +133,28 @@ def main(source_zip, output_dir):
             txt = data.decode('utf-8', 'replace')
             for hit in re.finditer(r'^\s*(?:solc|solc_version)\s*=\s*["\x27](\d+\.\d+\.\d+)["\x27]', txt, re.M):
                 solc_versions.add(hit.group(1))
+    def compatible(candidate, constraint, minimum):
+        cv = tuple(map(int, candidate.split('.')))
+        mv = tuple(map(int, minimum.split('.')))
+        if cv < mv:
+            return False
+        if constraint.startswith('^'):
+            return cv[0] == mv[0] and (mv[0] > 0 or cv[1] == mv[1])
+        if constraint.startswith('~'):
+            return cv[:2] == mv[:2]
+        for op, value in re.findall(r'(<=|>=|<|>)\s*(\d+\.\d+\.\d+)', constraint):
+            vv = tuple(map(int, value.split('.')))
+            if op == '<' and not cv < vv: return False
+            if op == '<=' and not cv <= vv: return False
+            if op == '>' and not cv > vv: return False
+            if op == '>=' and not cv >= vv: return False
+        return True
+
+    # Prefer already-required exact compilers satisfying range constraints.
+    # Add a range's lower-bound candidate only if no prepared compiler fits.
+    for minimum, constraint in ranged_constraints:
+        if not any(compatible(candidate, constraint, minimum) for candidate in solc_versions):
+            solc_versions.add(minimum)
     if len(solc_versions) > 20:
         unsupported.append({'reason': 'TOO_MANY_COMPILER_VERSIONS', 'count': len(solc_versions)})
         solc_versions = set(sorted(solc_versions)[:20])
