@@ -604,6 +604,37 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
       });
     }
   }
+  // ABI records are not the entire function-body inventory. Retain Vyper
+  // compiler-AST source functions (especially internal helpers) that do not
+  // appear as independently callable ABI entries, with unresolved parameter
+  // signatures explicitly labeled. No selector or ABI reachability is invented.
+  let vyperSourceOnlyFunctionRecords=0;
+  for(const ctx of contexts.filter(c=>c.analyzer==='VYPER_0_4_3_SOURCE_BOUND_COMPILER_AST'&&
+      c.kind==='FUNCTION')){
+    const contract=si.contracts?.find(c=>c.language==='VYPER'&&c.qualifiedName===ctx.qualifiedContainer);
+    if(!contract)continue;
+    if(si.functions.some(f=>f.contractId===contract.contractId&&f.signature===ctx.canonicalSignature))
+      continue;
+    const id='FUNC-'+pad(si.functions.length+1,4);
+    const source=si.sourceFiles.find(x=>x.path===ctx.path);
+    si.functions.push({
+      functionId:id,contractId:contract.contractId,signature:ctx.canonicalSignature,
+      selector:null,visibility:ctx.visibility,
+      stateMutability:ctx.stateMutability,payable:ctx.stateMutability==='payable',
+      modifiers:ctx.modifiers??[],sourceLocation:anchors(ctx),
+      signatureStatus:'VYPER_SOURCE_ONLY_NAME_PARAMETERS_NOT_ABI_VERIFIED',
+      confidenceClass:'VYPER_COMPILER_AST_STRUCTURAL_ONLY',
+      basis:'VYPER_AST_FUNCTION_DEFINITION_NOT_AN_ABI_ENTRYPOINT'
+    });
+    if(source&&Number.isInteger(ctx.lineStart)){
+      si.sourceAnchors.push({
+        anchorId:'ANCHOR-'+pad(si.sourceAnchors.length+1,4),sourceId:source.sourceId,
+        symbolId:id,startLine:ctx.lineStart,endLine:ctx.lineEnd??ctx.lineStart,
+        sourceDigestSha256:source.sha256,basis:'VYPER_COMPILER_AST_STRUCTURAL_ONLY'
+      });
+    }
+    vyperSourceOnlyFunctionRecords++;
+  }
   const effectsBySymbol=new Map(effects.map(e=>[e.symbolId,e]));
   for(const e of effectiveEntrypoints){
     const effect=effectsBySymbol.get(e.implementationSymbolId);
@@ -674,6 +705,7 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
     inheritedEntrypointCount:effectiveEntrypoints.filter(e=>e.implementationOrigin==='INHERITED_IMPLEMENTATION').length,
     vyperEntrypointCount:effectiveEntrypoints.filter(e=>e.language==='VYPER').length,
     vyperStructuralCallCandidates:vyperDedup.size,
+    vyperSourceOnlyFunctionRecords,
     vyperSourceStateDeclarationCount:declarations.filter(d=>d.evidenceClass?.startsWith('VYPER_COMPILER_AST_MODULE_DECLARATION')).length,
     unresolvedImplementationEntrypoints:sourceOnly.length,
     unresolvedStateChangingEntrypoints:mutating.filter(e=>sourceOnly.includes(e)).length,

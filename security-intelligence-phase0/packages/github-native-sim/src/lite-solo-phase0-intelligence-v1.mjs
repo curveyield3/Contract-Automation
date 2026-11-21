@@ -355,9 +355,15 @@ async function runExactVyperAstStaticV1({projectRoot,unit,sourceName}){
       const item={name:String(node.name??''),line:Number(node.lineno??0),decorators,
         external:decorators.includes('external'),nonreentrant:decorators.some(x=>x.includes('nonreentrant'))};
       if(!item.name||item.line<1)throw new Error('Vyper AST function lacks source anchor');
-      functions.push(item);
-      if(item.external)externalEntryPoints.push(item);
-      nextContext=item;
+      // Nested 'def' declarations inside Vyper interface/struct blocks are
+      // interface signatures, not implemented methods of this module.
+      const definitionLine=sourceLines[item.line-1]??'';
+      const implementedAtModuleLevel=/^def\s+/.test(definitionLine)||/^async\s+def\s+/.test(definitionLine);
+      if(implementedAtModuleLevel){
+        functions.push(item);
+        if(item.external)externalEntryPoints.push(item);
+        nextContext=item;
+      }
     }
     if(type==='Call'){
       const name=callableName(node.func);

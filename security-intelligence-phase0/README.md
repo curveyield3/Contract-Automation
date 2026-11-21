@@ -260,3 +260,14 @@ constant, and immutable declarations with exact source-line syntax. Their
 types are recorded as syntax, not fabricated compiler storage layout; Vyper
 state reads remain incomplete and require manual reasoning. Raw static
 observations, exact source identities, and language limitations are retained.
+
+
+### Stage 2 v5 Vyper internal function ownership
+
+The compiler-backed Vyper function inventory excludes indented interface
+signatures from the concrete module's implemented method list. The unified
+Source Intelligence index additionally includes Vyper *internal* source-only
+functions and their anchored bodies, separate from ABI-authorized external
+entrypoints. Parameter lists for internal source-only functions are labeled
+unresolved rather than asserted as compiler ABI signatures. This allows
+Vyper internal \`raw_call\` sites to retain real caller-function ownership.

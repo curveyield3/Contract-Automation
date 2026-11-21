@@ -90,6 +90,7 @@ const lines=[
   '- Inherited effective ABI functions: '+(stage2?.inheritedEntrypointCount??'UNAVAILABLE'),
   '- Unresolved state-changing implementation origins: '+(stage2?.unresolvedStateChangingEntrypoints??'UNAVAILABLE'),
   '- Vyper structural call candidates: '+(stage2?.vyperStructuralCallCandidates??'UNAVAILABLE'),
+  '- Vyper source-only/internal function records: '+(stage2?.vyperSourceOnlyFunctionRecords??'UNAVAILABLE'),
   '- Vyper compiler-AST module-level state declarations (no inferred slots): '+(stage2?.vyperSourceStateDeclarationCount??'UNAVAILABLE'),
   '- AST-backed state declarations (slots separate): '+(stage2?.sourceStateDeclarationCount??'UNAVAILABLE'),
   '- Compiler-emitted state slots: '+(stage2?.compilerLayoutStateDeclarationCount??'UNAVAILABLE'),
