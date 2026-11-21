@@ -7,5 +7,6 @@
     "commit": "8b647e25d4eb8572b314c5e5728e497013e7dcca",
     "archivePath": "Audit-Intake/BoostHub_Contract_Stack_v55.zip",
     "archiveSha256": "c256c3a4abe5a9616b6dd5bd6842f2d30c6ab9fb49b02612e02b4649acb9febd"
-  }
+  },
+  "retryAttempt": 2
 }

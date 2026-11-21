@@ -155,6 +155,30 @@ async function detectBuildConfig(projectRoot){
   if(exactSemver(pkgSolc))candidates.push({version:exactSemver(pkgSolc),basis:'package.json solc',label:'declared solc dependency',priority:80});
   const lockSolc=lock?.packages?.['node_modules/solc']?.version;
   if(exactSemver(lockSolc))candidates.push({version:exactSemver(lockSolc),basis:'package-lock node_modules/solc',label:'locked solc package',priority:60});
+  // With Foundry auto_detect_solc=true, compiler versions are selected per
+  // Solidity compilation unit. The provisional envelope compiler below is
+  // not an assertion that all Solidity sources use the same compiler.
+  const foundryAutoDetect=/^\s*auto_detect_solc\s*=\s*true(?:\s*(?:#.*)?)?$/m.test(foundryDefault);
+  const detectedPragmaVersions=[];
+  if(!candidates.length && foundryAutoDetect){
+    const srcRoot=foundryDefault.match(/^\s*src\s*=\s*["']([^"']+)["']/m)?.[1]??'src';
+    if(srcRoot.startsWith('/')||srcRoot.split('/').includes('..'))throw new Error('unsafe Foundry source root');
+    for(const rel of (await walk(projectRoot)).filter(rel=>rel.startsWith(srcRoot+'/')&&rel.endsWith('.sol'))){
+      const raw=await readMaybe(path.join(projectRoot,...rel.split('/')));
+      for(const match of raw.matchAll(/\bpragma\s+solidity\s+([^;]+);/g)){
+        const version=exactSemver(match[1]);
+        if(version)detectedPragmaVersions.push({version,path:rel,pragma:match[1].trim()});
+      }
+    }
+    if(!detectedPragmaVersions.length)throw new Error('Foundry auto_detect_solc has no source-bound compiler pragmas');
+    const byVersion=[...new Set(detectedPragmaVersions.map(x=>x.version))].sort((left,right)=>{
+      const A=left.split('.').map(Number),B=right.split('.').map(Number);
+      return (B[0]-A[0])||(B[1]-A[1])||(B[2]-A[2]);
+    });
+    candidates.push({version:byVersion[0],basis:'foundry.toml auto_detect_solc and admitted source pragmas',
+      label:'Provisional request compiler; actual versions are compiler-unit-specific',priority:40});
+    evidence.push('foundry.toml auto_detect_solc','admitted Solidity pragmas ('+detectedPragmaVersions.length+')');
+  }
   candidates.sort((a,b)=>b.priority-a.priority||a.basis.localeCompare(b.basis));
   if(!candidates.length)throw new Error('unable to detect exact Solidity compiler version from source package');
   const topPriority=candidates[0].priority;
@@ -166,7 +190,7 @@ async function detectBuildConfig(projectRoot){
   const runs=opt?Number(opt[2]):Number(foundryDefault.match(/^\s*optimizer_runs\s*=\s*(\d+)/m)?.[1]??200); const enabled=opt?opt[1]==='true':!foundryText||foundryDefault.match(/^\s*optimizer\s*=\s*(true|false)/m)?.[1]==='true';
   const via=allText.match(/viaIR\s*:\s*(true|false)/);
   const evm=allText.match(/evmVersion\s*:\s*['"]([^'"]+)['"]/);
-  return{compilerVersion:compiler.version,compilerCandidates:candidates,optimizer:{enabled,runs},viaIR:via?via[1]==='true':foundryDefault.match(/^\s*via_ir\s*=\s*(true|false)/m)?.[1]==='true',evmVersion:evm?.[1]??foundryDefault.match(/^\s*evm_version\s*=\s*['"]([^'"]+)['"]/m)?.[1]??null,evidence};
+  return{compilerVersion:compiler.version,compilerCandidates:candidates,foundryAutoDetectSolc:foundryAutoDetect,admittedSolidityPragmas:detectedPragmaVersions,optimizer:{enabled,runs},viaIR:via?via[1]==='true':foundryDefault.match(/^\s*via_ir\s*=\s*(true|false)/m)?.[1]==='true',evmVersion:evm?.[1]??foundryDefault.match(/^\s*evm_version\s*=\s*['"]([^'"]+)['"]/m)?.[1]??null,evidence};
 }
 
 
@@ -972,6 +996,40 @@ async function buildContextReviewPacket({projectRoot,sourceIntelligence,projectR
   };
 }
 
+// The network-disabled collector may only use dependencies that were fetched
+// during trusted image construction, before the untrusted source ZIP arrived.
+// This is a read-only source-manifest comparison, not source-defined install code.
+async function preparePinnedOfflineDependencies(projectRoot){
+  const depRoot=path.join(projectRoot,'dependencies');
+  const manifest=path.join(depRoot,'package.json');
+  if(!await exists(manifest))return {status:'NOT_APPLICABLE'};
+  const declared=JSON.parse(await fs.readFile(manifest,'utf8'));
+  const deps=declared?.dependencies??{};
+  const exactPins={
+    '@openzeppelin/contracts':'5.4.0',
+    '@openzeppelin-4/contracts':'npm:@openzeppelin/contracts@4.9.6',
+    '@openzeppelin-5/contracts':'npm:@openzeppelin/contracts@5.4.0',
+    '@openzeppelin/contracts-upgradeable':'4.9.6',
+    '@uniswap/v4-core':'1.0.2'
+  };
+  const requested=Object.entries(deps);
+  const unsupported=requested.filter(([name,version])=>exactPins[name]!==version);
+  if(unsupported.length)return {status:'DECLARED_DEPENDENCIES_NOT_PREBUILT',
+    unsupported:unsupported.map(([name,version])=>({name,version}))};
+  const target=path.join(depRoot,'node_modules');
+  if(await isDir(target))return {status:'SOURCE_ALREADY_CONTAINS_DEPENDENCIES',
+    packages:requested.map(([name,version])=>({name,version}))};
+  const prepared='/opt/preflight/trusted-source-deps/node_modules';
+  if(!await isDir(prepared))return {status:'TRUSTED_DEPENDENCY_CACHE_MISSING'};
+  for(const [name] of requested){
+    if(!await exists(path.join(prepared,...name.split('/'),'package.json')))
+      return {status:'TRUSTED_DEPENDENCY_CACHE_INCOMPLETE',missing:name};
+  }
+  await fs.cp(prepared,target,{recursive:true,force:false,errorOnExist:true});
+  return {status:'PREPARED_FROM_PREBUILT_TRUSTED_PINS',
+    packages:requested.map(([name,version])=>({name,version}))};
+}
+
 async function main(){
   const args=parseArgs(process.argv.slice(2));
   if(!args.request||!args.output)throw new Error('usage: --request <request.json> --output <dir>');
@@ -1007,6 +1065,7 @@ async function main(){
     delete process.env[name];
   const extractionRoot=path.join(work,'archive'); const extraction=await withProgressStage('extract-verified-archive',()=>extractArchive(archiveAbs,extractionRoot));
   const detected=await withProgressStage('detect-project-root',()=>detectProjectRoot(extractionRoot)); const cfg=await withProgressStage('detect-build-config',()=>detectBuildConfig(detected.absolute));
+  const preparedDependencies=await withProgressStage('prepare-pinned-offline-dependencies',()=>preparePinnedOfflineDependencies(detected.absolute));
   // Foundry's pinned source pragma is authoritative for the Vyper compiler.
   // Request it explicitly so the mixed-language build and retained artifacts
   // include staking bytecode; never infer from unrelated archive copies.
@@ -1038,7 +1097,7 @@ async function main(){
   const contractIdentityIndex=buildContractIdentityIndexV1({
     request:pseudo,build,artifactBundle:executionBuildArtifacts,buildArtifactBundleSha256
   });
-  const effectiveCfg={...cfg,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
+  const effectiveCfg={...cfg,offlineDependencyPreparation:preparedDependencies,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
   let slither;
   try {
     slither=await withProgressStage('slither-static-analysis',()=>slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit}));
