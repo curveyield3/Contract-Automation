@@ -1,4 +1,4 @@
-name: BoostHub v64 + CurveGlobal Yearn V2 SDT v10 Emergency fork v10
+name: BoostHub v64 + CurveGlobal Yearn V2 SDT v10 Emergency fork v11
 
 on:
   push:
@@ -106,12 +106,20 @@ jobs:
           
           '''
           base.write_text(content[:start]+replacement+content[end:])
+          text=base.read_text()
+          selector='function emergencyWithdraw(uint256 amount) external {'
+          assert text.count(selector)==1
+          base.write_text(text.replace(selector,'function emergencyWithdraw(uint256 amount) external virtual {'))
+          convex=root/'contracts/StrategyConvexFXNPool8V42.sol'
+          text=convex.read_text()
+          assert text.count(selector)==1
+          convex.write_text(text.replace(selector,'function emergencyWithdraw(uint256 amount) external override {'))
           (root/'contracts/StrategyCurveSDTYearnV9.sol').rename(root/'contracts/StrategyCurveSDTYearnV10.sol')
           expected={
             'BeefyVaultV7FixedV2.sol':'9e453f9cb4815ef57efed0421de76782e71738bfb00cfd15d9afcba335d57a54',
-            'BaseAllToWantBoostHubV5.sol':'34b26e2e85c797e4dc5892a51f6f776fc51ae8ccfc76e1e8395712437e0b1df6',
+            'BaseAllToWantBoostHubV5.sol':'e6f7cbc0b9da7a3c40d51038b3e4a58186592d648152c76598b6b775b913b5e3',
             'StrategyDualFXNMasterV42.sol':'a93269dd956462c0860356581d3f37a3f2825db03444919983c65f62a1b4a79b',
-            'StrategyConvexFXNPool8V42.sol':'e27560e1b87d1eb9c6b6372a53aec935ce4cd0b16ef762e45c84b552092d025a',
+            'StrategyConvexFXNPool8V42.sol':'29388c470ed0b1cf485f6333b75741b2133f73d0de8fc6d4a748a36e32a33562',
             'StrategyCurveSDTYearnV10.sol':'9d01abe53444a43f051373b4c4ff451581adb13a3f1aade354cb22dd9a51b713',
           }
           for path,digest in expected.items():
@@ -126,7 +134,7 @@ jobs:
           set -euo pipefail
           npm install --prefix "$ROOT/dependencies" --no-save --ignore-scripts --no-audit --no-fund '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts@5.4.0'
           npm install --prefix "$ROOT/runner" --no-save --ignore-scripts --no-audit --no-fund 'ethers@6.15.0'
-          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v64-sdt-v10-v10.log
+          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v64-sdt-v10-v11.log
           node --check github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs
       - name: Execute Safe custody campaign on isolated Ethereum and Fraxtal forks
         shell: bash
@@ -165,7 +173,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-v64-sdt-v10-safe-fork-v10-${{ github.run_id }}
+          name: boosthub-v64-sdt-v10-safe-fork-v11-${{ github.run_id }}
           path: |
             source_manifest_v2.txt
             compile-v64-sdt-v10-v8.log
