@@ -66,6 +66,47 @@ for(const version of (plan.solidityCompilerCandidates??[])){
     detail:result.status===0?null:String(result.stderr||result.error||'').slice(-550)});
   fs.rmSync(probe,{force:true,recursive:true});
 }
+// Native solc is already prepared above from the admitted, pinned compiler
+// candidates. Hardhat 2 needs a compiler-index cache as well: otherwise it
+// attempts a network fetch inside the intentionally network-isolated collector.
+// These entries are the official linux-amd64 solc-bin SHA256 records.
+const hardhatKnownBuilds={
+  '0.8.28':{path:'solc-linux-amd64-v0.8.28+commit.7893614a',version:'0.8.28',build:'commit.7893614a',
+    longVersion:'0.8.28+commit.7893614a',
+    keccak256:'0x0d387f5ca7d0f298e79243cec5af7ab42eeb0a414e42f15c66f855d701479c43',
+    sha256:'0x9a0fb7e0db2c0641dbae1c5cc645dc686820c83af516226abb1c0a2f76636f25',urls:[]},
+  '0.8.30':{path:'solc-linux-amd64-v0.8.30+commit.73712a01',version:'0.8.30',build:'commit.73712a01',
+    longVersion:'0.8.30+commit.73712a01',
+    keccak256:'0xc47307cc6d212f7d86af1ad07800f9ed4715454a1c327a7258e62d769ec8bdc1',
+    sha256:'0xf3e987dc6ecebd4bd350c48edcbc320b46cf9e3109bd3fc3d88f1acaf4c428f7',urls:[]}
+};
+const hardhatCache='/opt/preflight/.cache/hardhat-nodejs/compilers-v2/linux-amd64';
+const hardhatBuilds=[],hardhatReleases={};
+for(const item of statuses.solidity){
+  const build=hardhatKnownBuilds[item.version];
+  if(item.status!=='PREPARED'||!build)continue;
+  const native=path.join(os.homedir(),'.svm',item.version,'solc-'+item.version);
+  if(!fs.existsSync(native)){
+    console.error('HARDHAT_CACHE_NATIVE_SOLC_MISSING '+native);
+    continue;
+  }
+  const actual=sha(fs.readFileSync(native));
+  if(actual!==build.sha256.slice(2))throw Error('SOLC_NATIVE_OFFICIAL_SHA256_MISMATCH '+item.version);
+  fs.mkdirSync(hardhatCache,{recursive:true});
+  const cached=path.join(hardhatCache,build.path);
+  fs.copyFileSync(native,cached);
+  fs.chmodSync(cached,0o755);
+  hardhatBuilds.push(build);
+  hardhatReleases[build.version]=build.path;
+}
+if(hardhatBuilds.length){
+  const last=hardhatBuilds[hardhatBuilds.length-1].version;
+  fs.writeFileSync(path.join(hardhatCache,'list.json'),JSON.stringify({
+    builds:hardhatBuilds,releases:hardhatReleases,latestRelease:last
+  },null,2)+'\n');
+  console.error('PREPARED_HARDHAT_OFFLINE_COMPILER_CACHE '+hardhatBuilds.map(x=>x.version).join(','));
+}
+
 for(const version of (plan.vyperCompilerVersions??[])){
   if(!isExact(version))throw Error('UNSAFE_VYPER_COMPILER_VERSION');
   const root=path.join('/opt/preflight/vyper-envs',version);
