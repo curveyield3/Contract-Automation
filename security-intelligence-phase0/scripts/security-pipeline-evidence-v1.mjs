@@ -405,19 +405,56 @@ function qualifyDossier(a){
  if(count<5)issues.push(detail('SECURITY_PIPELINE_RELEASE_STATUS_v1.json.nativeQualifiedCount',
   'five genuinely qualified G3-G7 native programs and source-bound results',
   count,'Complete source-authorized native analyses, preserving original result bytes and hashes'));
+ if(valid){
+  for(const unresolved of row.issues??[]){
+   if(!unresolved||typeof unresolved!=='object')continue;
+   issues.push(detail(String(unresolved.fieldPath??'G8.originalEvidence'),
+    unresolved.expected??'original verified native output/source stage',
+    unresolved.observed??null,
+    unresolved.correction??'Recover original exact source and independently qualified native evidence'));
+  }
+  for(const stage of row.stages??[]){
+   if(!stage||typeof stage!=='object')continue;
+   const warningCount=Array.isArray(stage.warningIds)?stage.warningIds.length:0;
+   if(stage.status!=='COMPLETE'||stage.reasonCode||warningCount>0)
+    issues.push(detail('originalStage.'+stage.stage+'.status',
+     'COMPLETE with original native and source scope qualified',
+     {status:stage.status??null,reasonCode:stage.reasonCode??null,
+      originalStageSha256:stage.originalSha256??null,
+      sourceBound:stage.sourceBound===true,
+      warningCount},
+     'Inspect original stage '+stage.producerJob+' with exact source and native evidence'));
+  }
+ }
  const sourceOk=valid&&row.sourceAdmissionVerified===true&&
   /^[0-9a-f]{64}$/.test(row.sourceArchiveSha256??'');
  if(!sourceOk)issues.push(detail('SECURITY_PIPELINE_RELEASE_STATUS_v1.json.sourceArchiveSha256',
   'verified original source admission',row?.sourceArchiveSha256??null,
   'Restore original source admission and G8 evidence index'));
- const status=!valid||!sourceOk?'INCOMPLETE':count===0?'NOT_EXECUTED':'PARTIAL';
+ const allQualified=valid&&sourceOk&&count===5&&issues.length===0&&
+  row.sourceDenominatorKnownCount===5&&
+  Array.isArray(row.stages)&&row.stages.every(x=>x.originalSha256&&x.status==='COMPLETE')&&
+  Object.values(row.nativeCounts??{}).every(x=>x.sourceCensusQualified===true&&
+    /^[a-f0-9]{64}$/.test(x.actualOriginalNativeEvidenceSha256??''));
+ const status=!valid||!sourceOk?'INCOMPLETE':
+   allQualified?'COMPLETE':count===0?'NOT_EXECUTED':'PARTIAL';
  const release={schemaVersion:'curveyield-security-pipeline-release-status-v1',
   pipelineVersion:'v1',instructionVersion:'v14',runId:a['run-id'],
   runAttempt:Number(a['run-attempt']),headSha:a['run-head-sha'],
   originalSourceArchiveSha256:valid?row.sourceArchiveSha256:null,
   nativeIndexSha256:original.sha256,qualifiedNativeCount:count,
   status,controllerAccepted:false,claimedAuditSecurityPass:false,
-  stageG8Status:valid?row.status:null,unresolvedRequirements:issues};
+  stageG8Status:valid?row.status:null,
+  originalStageCoverage:valid?row.stages.map(x=>({
+    stage:x.stage,producerJob:x.producerJob,
+    originalSha256:x.originalSha256??null,bytes:x.bytes??null,
+    status:x.status,warningIds:x.warningIds??[],
+    reasonCode:x.reasonCode??null})):[ ],
+  analyzerCounts:valid?row.nativeCounts:{},
+  missingNativeAnalyzers:valid?row.missingNativeAnalyzers:[],
+  qualifiedSourceAnalyzerDenominators:valid?row.sourceDenominatorKnownCount:null,
+  observedNativeEfficiencyQualified:false,
+  unresolvedRequirements:issues};
  const qualification={schemaVersion:'curveyield-security-pipeline-dossier-qualification-v1',
   operation:'qualify-dossier',runId:a['run-id'],
   runAttempt:Number(a['run-attempt']),workflowHeadSha:a['run-head-sha'],
