@@ -358,6 +358,144 @@ function modelProposalV1(args,identity,issues){
   return {mode:'validate-proposal',status:'NOT_EXECUTED',sourceBound:false,
     files:[output(args['output-root'],'MIMO_PROPOSAL_DISPOSITION_v1.json',disposition)],issues};
 }
+function planSourceFacts(args,identity,issues){
+  let manifest=null,sha=null;
+  try{
+    manifest=readJson(path.join(args['input-root'],'PREFLIGHT_MANIFEST_v1.json'),args['input-root']).value;
+    sha=manifest?.source?.expectedSha256??null;
+    if(!HEX.test(String(sha))||sha!==manifest.source?.observedSha256||
+       manifest.sourceAdmissionVerified!==true||identity.verifiedForCurrentJob!==true)
+      throw Error('ORIGINAL_SOURCE_AND_RUN_NOT_VERIFIED');
+  }catch(error){
+    issues.push(issue('CONFIG.SOURCE_IDENTITY_UNAVAILABLE','PREFLIGHT_MANIFEST_v1.json.source',
+      'exact same-run expected/observed admitted source SHA-256',
+      String(error),'Restore immutable original preflight source identity'));
+  }
+  const load=(name)=>{
+    if(!manifest)return null;
+    const found=evidence(args['input-root'],manifest,name,issues);
+    return found&&bound(found,name,sha,issues)?found:null;
+  };
+  return {sourceSha256:sha,sourceBound:!!sha&&manifest?.sourceAdmissionVerified===true&&
+    identity.verifiedForCurrentJob,manifest,load};
+}
+function deriveForkPlan(args,identity,issues){
+  const evidence=planSourceFacts(args,identity,issues);
+  const readinessDocument=evidence.load('PROJECT_READINESS_AUTOMATED_v1.json');
+  const build=evidence.load('BUILD_AND_SOURCE_IDENTITY_v1.json');
+  const readiness=readinessDocument?.value?.deploymentAndConfiguration??{};
+  const scripts=(Array.isArray(readiness.scriptFiles)?readiness.scriptFiles:[]).map(x=>
+    typeof x==='string'?x:typeof x?.path==='string'?x.path:null).filter(Boolean);
+  const deploymentFiles=(Array.isArray(readiness.deploymentFiles)?readiness.deploymentFiles:[])
+    .map(x=>typeof x==='string'?x:typeof x?.path==='string'?x.path:null).filter(Boolean);
+  const candidates=(Array.isArray(readiness.contractDeploymentInventory)?
+    readiness.contractDeploymentInventory:[])
+    .map(x=>({qualifiedName:x.qualifiedName??null,
+      deployabilityStatus:x.deployabilityStatus??'UNDETERMINED',
+      constructorInputs:(Array.isArray(x.constructorInputs)?x.constructorInputs:[])
+        .map(p=>({name:p.name??null,type:p.type??null})),
+      requiresLibraryLinking:(x.linkReferences??[]).length>0,
+      sourceClass:x.sourceClass??null}))
+    .filter(x=>x.qualifiedName);
+  const chainCandidates=(Array.isArray(readiness.discoveredChainIds)?readiness.discoveredChainIds:[])
+    .map(x=>typeof x==='number'?x:x?.chainId??null).filter(Number.isInteger);
+  const sourceBound=evidence.sourceBound&&!!readinessDocument&&!!build;
+  const requires=['approvedForkChainId','approvedUpstreamBlockNumber',
+    'approvedUpstreamBlockHash','sourceDeploymentScriptSha256',
+    'sourceConfigurationScriptSha256','sourceFundingScriptSha256',
+    'restrictedLocalRpcIsolationProof','approvedExecutionScopeSha256',
+    'originalSourceCheckoutReceipt','actualActorAndFundingConfiguration'];
+  for(const field of requires)issues.push(issue('FORK.REQUIRED_NATIVE_FACT_MISSING',
+    'FORK_EXECUTION_PLAN_v1.json.'+field,
+    'independently accepted original immutable fact',null,
+    'Supply exact approved source-bound execution receipt and observe real fork state'));
+  const out={schemaVersion:'curveyield-fork-execution-plan-v1',pipelineVersion:'v1',
+    status:sourceBound?'DISCOVERED_NATIVE_UNAUTHORIZED':'SOURCE_FACTS_UNVERIFIED',
+    originalSourceArchiveSha256:evidence.sourceSha256,sourceBound,
+    runIdentity:identity,
+    trustedOriginalRunner:'security-intelligence-phase0/scripts/run-phase0-fork-deploy-config-v1.mjs',
+    trustedOriginalStateHelper:'security-intelligence-phase0/packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs',
+    privateControllerEnvelopeReused:false,executionMode:'DEPLOYMENT_ONLY_NOT_EXECUTED',
+    sourceEvidence:{readinessSha256:readinessDocument?.sha256??null,
+      buildSha256:build?.sha256??null},
+    untrustedSourceScriptPaths:scripts,untrustedSourceDeploymentPaths:deploymentFiles,
+    chainIdMentionsNotAuthorizations:chainCandidates,contractCandidates:candidates,
+    approvedForkChainId:null,approvedUpstreamBlockNumber:null,
+    approvedUpstreamBlockHash:null,sourceDeploymentScriptSha256:null,
+    sourceConfigurationScriptSha256:null,sourceFundingScriptSha256:null,
+    approvedExecutionScopeSha256:null,localOnlyNetworkIsolationVerified:false,
+    c0:null,c1:null,c2:null,controllerAccepted:false,
+    nativeCommandsExecuted:0,sourcePackageScriptsExecuted:0,
+    requiredOriginalFields:requires,issues};
+  return {mode:'fork-plan',status:'NOT_EXECUTED',sourceBound,
+    files:[output(args['output-root'],'FORK_EXECUTION_PLAN_v1.json',out)],issues};
+}
+function deriveStoragePlan(args,identity,issues){
+  const source=planSourceFacts(args,identity,issues);
+  const intelligence=source.load('SOURCE_INTELLIGENCE_AUTOMATED_v1.json');
+  const declarations=Array.isArray(intelligence?.value?.storageLayout)?
+    intelligence.value.storageLayout:[];
+  const perVariable=declarations.map(x=>({
+    sourcePath:x.sourcePath??null,qualifiedContract:x.qualifiedContract??null,
+    stateVariable:x.name??x.label??null,
+    compilerProvenStorageSlot:x.slot??null,
+    compilerStorageEvidenceRef:intelligence?.sha256??null,
+    intendedStorageAddress:null,knownMappingKeys:[],
+    actualC2CheckpointSha256:null,rpcObservationSha256:null,
+    status:'NOT_EXECUTED_C2_STATE_NOT_PROVEN'}));
+  const items=['verifiedC2ForkStateManifestSha256',
+    'verifiedC2ChainId','verifiedC2BlockNumber',
+    'verifiedC2BlockHash','originalLogicAddress',
+    'originalProxyStorageAddress','knownMappingKeysAndOriginalReadbacks'];
+  for(const field of items)issues.push(issue('STORAGE.C2_OBSERVATION_MISSING',
+    'FORK_STORAGE_QUERY_PLAN_v1.json.'+field,
+    'original independent same-run C2/contract evidence',null,
+    'Use original captured C2 manifest and source-bound on-chain storage readback'));
+  const out={schemaVersion:'curveyield-fork-storage-query-plan-v1',pipelineVersion:'v1',
+    sourceArchiveSha256:source.sourceSha256,
+    sourceBound:source.sourceBound&&!!intelligence,
+    status:'NOT_EXECUTED_C2_NOT_PROVEN',runIdentity:identity,
+    originalSourceIntelligenceSha256:intelligence?.sha256??null,
+    records:perVariable,requiredC2Fields:items,actualNativeQueriesExecuted:0,issues};
+  return {mode:'storage-plan',status:'NOT_EXECUTED',
+    sourceBound:out.sourceBound,
+    files:[output(args['output-root'],'FORK_STORAGE_QUERY_PLAN_v1.json',out)],issues};
+}
+function deriveMedusaEligibility(args,identity,issues){
+  const source=planSourceFacts(args,identity,issues);
+  const inventory=source.load('REVIEW_INVENTORY_v1.json');
+  const targetPlanPath=path.join(args['input-root'],'SECURITY_TARGET_PLAN_v1.json');
+  let targetPlan=null;
+  try{targetPlan=readJson(targetPlanPath,args['input-root']).value;}
+  catch(error){issues.push(issue('MEDUSA.TARGET_PLAN_MISSING','SECURITY_TARGET_PLAN_v1.json',
+    'original source-bound exact ABI/bytecode target map',String(error),
+    'Produce source-bound target map before native Medusa init'));}
+  const sourceBound=source.sourceBound&&!!inventory&&
+    targetPlan?.sourceArchiveSha256===source.sourceSha256&&targetPlan?.sourceBound===true;
+  const candidates=(Array.isArray(targetPlan?.targets)?targetPlan.targets:[])
+    .filter(x=>x.compilationStatus==='EXACT_COMPILER_ARTIFACT')
+    .map(x=>({targetId:x.targetId,qualifiedName:x.qualifiedName,
+      status:'NOT_EXECUTED_C2_OR_EXISTING_PROPERTIES_UNVERIFIED',
+      existingPropertySignatures:[],nativeMedusaInitVerified:false,
+      c2OriginalStateSha256:null,protectedActorCollisionCheck:null,
+      executedCallCount:0,propertyPassedCount:0,propertyFailedCount:0}));
+  const missing=['nativeMedusaBinaryAndVerifiedCliSchema','sourceBoundC2StateWrapperSha256',
+    'originalC2ChainIdAndBlockHash','approvedSenderAndDeployerAddresses',
+    'existingAuthorizedPropertySignatures','nonCollidingImportedAccountProof'];
+  for(const field of missing)issues.push(issue('MEDUSA.PREREQUISITE_UNOBSERVED',
+    'MEDUSA_ELIGIBILITY_v1.json.'+field,
+    'real verified original C2/native property evidence',null,
+    'Verify the installed Medusa CLI, captured state and existing permitted source properties'));
+  const out={schemaVersion:'curveyield-medusa-eligibility-v1',pipelineVersion:'v1',
+    status:'NOT_EXECUTED',runIdentity:identity,sourceArchiveSha256:source.sourceSha256,
+    sourceBound,originalInventorySha256:inventory?.sha256??null,
+    targetCount:candidates.length,targets:candidates,
+    nativeMedusaCommandsExecuted:0,nativePropertiesExecuted:0,
+    behaviorOnlyNeverClaimedPropertyPassed:true,
+    requiredNativeFields:missing,issues};
+  return {mode:'medusa-config',status:'NOT_EXECUTED',sourceBound,
+    files:[output(args['output-root'],'MEDUSA_ELIGIBILITY_v1.json',out)],issues};
+}
 function additional(args,identity,issues){
   const folder=args['output-root'], op=args.operation;
   let selected=null;
@@ -443,6 +581,12 @@ function additional(args,identity,issues){
     return modelProposalV1(args,identity,issues);
   }else if(op==='mimo-objective'){
     return modelObjectiveV1(args,identity,issues);
+  }else if(op==='fork-plan'){
+    return deriveForkPlan(args,identity,issues);
+  }else if(op==='storage-plan'){
+    return deriveStoragePlan(args,identity,issues);
+  }else if(op==='medusa-config'){
+    return deriveMedusaEligibility(args,identity,issues);
   }else{
     const key={
       'mimo-objective':'MIMO_STAGE_OBJECTIVE_v1.json',
