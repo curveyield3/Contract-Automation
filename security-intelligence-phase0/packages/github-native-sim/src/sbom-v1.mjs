@@ -26,7 +26,24 @@ export async function generateBuildSbomV1({projectRoot,request,build}){
     artifactSha256:digestCanonicalV1(artifact), bytecodeSha256:hexDigest(artifact.bytecode), deployedBytecodeSha256:hexDigest(artifact.deployedBytecode)
   })).sort((a,b)=>`${a.sourceName}:${a.contractName}`.localeCompare(`${b.sourceName}:${b.contractName}`));
   const source=request?.source??{};
-  const sbom={ schemaVersion:'audit-v7-build-sbom-v1', source:{ repository:source.repository??null, commit:source.commit??build?.sourceCommit??null, archivePath:source.archivePath??null, archiveSha256:source.archiveSha256??null, projectPath:source.projectPath??'.' }, buildIdentity:{ compilerDescriptors:structuredClone(build?.compilerDescriptors??[]), optimizer:structuredClone(build?.optimizer??null), evmVersion:build?.evmVersion??null, viaIR:build?.viaIR===true }, sourceFiles, dependencyFiles, artifacts };
+  // Native Hardhat/Foundry builds expose exact compilation units rather than
+  // compilerDescriptors. Preserve that verified compiler identity in the SBOM
+  // instead of silently emitting empty compiler metadata and viaIR=false.
+  const units=build?.compilationUnits??[];
+  const compilerDescriptors=build?.compilerDescriptors??units.map(unit=>({
+    compilerVersion:unit.compilerVersion??null,
+    compilerPackage:unit.compilerPackage??null,
+    profile:unit.profile??null,
+    compilerInputSha256:unit.compilerInputSha256??null,
+    compilerOutputSha256:unit.compilerOutputSha256??null
+  }));
+  const configuration=request?.configuration??{};
+  const sbom={ schemaVersion:'audit-v7-build-sbom-v1', source:{ repository:source.repository??null, commit:source.commit??build?.sourceCommit??null, archivePath:source.archivePath??null, archiveSha256:source.archiveSha256??null, projectPath:source.projectPath??'.' },
+    buildIdentity:{compilerDescriptors:structuredClone(compilerDescriptors),
+      optimizer:structuredClone(build?.optimizer??configuration.optimizer??null),
+      evmVersion:build?.evmVersion??configuration.evmVersion??null,
+      viaIR:(build?.viaIR??configuration.viaIR)===true},
+    sourceFiles, dependencyFiles, artifacts };
   return {...sbom,sbomDigest:computeBuildSbomDigestV1(sbom)};
 }
 
