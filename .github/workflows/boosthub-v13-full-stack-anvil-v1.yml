@@ -1,4 +1,4 @@
-name: BoostHub v64 + CurveGlobal Yearn V2 SDT v10 Emergency fork v8
+name: BoostHub v64 + CurveGlobal Yearn V2 SDT v10 Emergency fork v9
 
 on:
   push:
@@ -75,17 +75,37 @@ jobs:
           patchFile.write_bytes(patch)
           subprocess.run(['patch','-p1','--batch','--forward','-i',str(patchFile.resolve())],cwd=root,check=True)
           patchFile.unlink()
-          # The direct Beefy strategy parent is an ERC20 vault; the BoostHub child
-          # instead reports to the sdFXN master (not an ERC20). Skip that optional
-          # final-share read for child strategies, preserving the parent-only check.
+          # Standalone strategies belong to ERC20 vaults; sdFXN BoostHub
+          # children belong to the master strategy (which is not ERC20).
           base=root/'contracts/BaseAllToWantBoostHubV5.sol'
-          original='        bool finalExit = IERC20(vault).totalSupply() == 0;\\n        uint256 idle = balanceOfWant();'
-          fixed='        // Standalone strategies see a Beefy ERC-20 vault. BoostHub children\\n        // are instead called by the sdFXN master, which has no totalSupply().\\n        bool finalExit;\\n        try IERC20(vault).totalSupply() returns (uint256 remainingShares) {\\n            finalExit = remainingShares == 0;\\n        } catch {}\\n        uint256 idle = balanceOfWant();'
           content=base.read_text()
-          original=original.replace(chr(92)+'n',chr(10))
-          fixed=fixed.replace(chr(92)+'n',chr(10))
-          assert content.count(original)==1,'Base emergency parent distinction missing'
-          base.write_text(content.replace(original,fixed))
+          start=content.index('    /// @notice Vault-only best-effort unwind.')
+          end=content.index('    function claim() external {',start)
+          replacement='''    /// @notice Vault-only best-effort unwind. Does not require exact quoted NAV
+    ///         or harvest, reward conversions, profit unlocks, or price guards.
+    function emergencyWithdraw(uint256 amount) external {
+        require(msg.sender == vault, "!vault");
+        // Standalone strategies see a Beefy ERC-20 vault. BoostHub children
+        // are instead called by the sdFXN master, which has no totalSupply().
+        bool finalExit;
+        try IERC20(vault).totalSupply() returns (uint256 remainingShares) {
+            finalExit = remainingShares == 0;
+        } catch {}
+        uint256 idle = balanceOfWant();
+        if (finalExit || idle < amount) {
+            uint256 staked = balanceOfPool();
+            uint256 need = finalExit ? staked : amount - idle;
+            if (need > staked) need = staked;
+            if (need != 0) _withdraw(need);
+        }
+        uint256 send = balanceOfWant();
+        if (!finalExit && send > amount) send = amount;
+        if (send != 0) IERC20(want).safeTransfer(vault, send);
+        emit Withdraw(send);
+    }
+
+'''
+          base.write_text(content[:start]+replacement+content[end:])
           (root/'contracts/StrategyCurveSDTYearnV9.sol').rename(root/'contracts/StrategyCurveSDTYearnV10.sol')
           expected={
             'BeefyVaultV7FixedV2.sol':'9e453f9cb4815ef57efed0421de76782e71738bfb00cfd15d9afcba335d57a54',
@@ -106,7 +126,7 @@ jobs:
           set -euo pipefail
           npm install --prefix "$ROOT/dependencies" --no-save --ignore-scripts --no-audit --no-fund '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts@5.4.0'
           npm install --prefix "$ROOT/runner" --no-save --ignore-scripts --no-audit --no-fund 'ethers@6.15.0'
-          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v64-sdt-v10-v8.log
+          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v64-sdt-v10-v9.log
           node --check github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs
       - name: Execute Safe custody campaign on isolated Ethereum and Fraxtal forks
         shell: bash
@@ -145,7 +165,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-v64-sdt-v10-safe-fork-v8-${{ github.run_id }}
+          name: boosthub-v64-sdt-v10-safe-fork-v9-${{ github.run_id }}
           path: |
             source_manifest_v2.txt
             compile-v64-sdt-v10-v8.log
