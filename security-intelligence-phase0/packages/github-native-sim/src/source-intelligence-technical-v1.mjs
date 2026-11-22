@@ -1217,10 +1217,15 @@ export function buildSlitherFlowPrioritizationV1({ sourceIntelligence, reviewInv
         connectedEntrypointIds: new Set(),
         priorityCounts: Object.fromEntries(Object.keys(priorityRank).map(key => [key, 0]))
       };
-      if (!group.candidatePriorities.has(observation.candidateId)) {
+      const existingAnchorPriority = group.candidatePriorities.get(observation.candidateId);
+      if (existingAnchorPriority === undefined) {
         group.candidateIds.add(observation.candidateId);
         group.candidatePriorities.set(observation.candidateId, anchor.reviewPriority);
         group.priorityCounts[anchor.reviewPriority] = (group.priorityCounts[anchor.reviewPriority] ?? 0) + 1;
+      } else if (priorityRank[anchor.reviewPriority] < priorityRank[existingAnchorPriority]) {
+        group.priorityCounts[existingAnchorPriority] = Math.max(0, group.priorityCounts[existingAnchorPriority] - 1);
+        group.priorityCounts[anchor.reviewPriority] = (group.priorityCounts[anchor.reviewPriority] ?? 0) + 1;
+        group.candidatePriorities.set(observation.candidateId, anchor.reviewPriority);
       }
       group.stableCandidateIds.add(observation.stableCandidateId);
       for (const id of anchor.connectedStateChangingEntrypointIds) group.connectedEntrypointIds.add(id);
