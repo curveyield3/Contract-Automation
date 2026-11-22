@@ -1,4 +1,4 @@
-name: BoostHub v63 + CurveGlobal Yearn V2 SDT v9 Safe dual-chain fork v7
+name: BoostHub v64 + CurveGlobal Yearn V2 SDT v10 Emergency fork v8
 
 on:
   push:
@@ -8,18 +8,19 @@ on:
       - '.github/workflows/boosthub-v13-full-stack-anvil-v1.yml'
       - 'github-native-sim/boosthub-v13-full-stack-v1/source/BeefyVaultV7FixedV2_v63.sol'
       - 'github-native-sim/boosthub-v13-full-stack-v1/source/StrategyCurveSDTYearnV9.sol'
+      - 'github-native-sim/boosthub-v13-full-stack-v1/source/Emergency_Withdraw_Corrections_v1.patch.xz.b64'
       - 'github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs'
 permissions:
   contents: read
 concurrency:
-  group: boosthub-v63-sdt-v8-safe-fork-v1
+  group: boosthub-v64-sdt-v10-safe-emergency-fork-v1
   cancel-in-progress: true
 jobs:
   safe-mainnet-forks:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      ROOT: .safe-v63
+      ROOT: .safe-v64
       RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM }}
       RPC_FRAXTAL: ${{ secrets.RPC_FRAXTAL || 'https://rpc.frax.com' }}
     steps:
@@ -35,7 +36,7 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Materialize exact v63 Beefy and CurveGlobal-compatible SDT v9
+      - name: Materialize v64 Beefy emergency exits and CurveGlobal-compatible SDT v10
         shell: bash
         run: |
           set -euo pipefail
@@ -46,7 +47,7 @@ jobs:
           assert x[0]=='BOOSTHUB_V61_SDT_V8_XZ_BASE64_V1'
           raw=base64.b64decode(x[1],validate=True)
           assert hashlib.sha256(raw).hexdigest()=='31160e9e19c22a95db298893563b1d15150958f72330c02a3510f32cfefd98aa'
-          root=pathlib.Path('.safe-v63');root.mkdir(exist_ok=True)
+          root=pathlib.Path('.safe-v64');root.mkdir(exist_ok=True)
           with tarfile.open(fileobj=io.BytesIO(lzma.decompress(raw))) as t:
             m=t.getmembers();assert len(m)==16
             t.extractall(root,filter='data')
@@ -54,7 +55,7 @@ jobs:
           PY
           python - <<'PY'
           import hashlib,pathlib,subprocess
-          root=pathlib.Path('.safe-v63')
+          root=pathlib.Path('.safe-v64')
           f=root/'contracts/BeefyVaultV7FixedV2.sol'
           assert hashlib.sha256(f.read_bytes()).hexdigest() == '30cc49edaef677f60eb6d487098e3e3e3534b80e0ec4eb963278f74ca84bd105', 'Original v61 vault source incorrect'
           source=pathlib.Path('github-native-sim/boosthub-v13-full-stack-v1/source/BeefyVaultV7FixedV2_v63.sol')
@@ -66,6 +67,37 @@ jobs:
           (root/'contracts/StrategyCurveSDTYearnV8.sol').unlink(missing_ok=True)
           (root/'contracts/StrategyCurveSDTYearnV9.sol').write_bytes(sdt.read_bytes())
           print('FACTORY_YEARN_V2_SDT_V9_SOURCE_VERIFIED', sdt)
+          import base64,lzma
+          encoded=pathlib.Path('github-native-sim/boosthub-v13-full-stack-v1/source/Emergency_Withdraw_Corrections_v1.patch.xz.b64').read_text().strip()
+          patch=lzma.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='2cf3f7aeec6428adcb33c0134d19547705356226a96d73ae0883067869cb0004','Emergency source patch mismatch'
+          patchFile=root/'emergency-source-v64.patch'
+          patchFile.write_bytes(patch)
+          subprocess.run(['patch','-p1','--batch','--forward','-i',str(patchFile.resolve())],cwd=root,check=True)
+          patchFile.unlink()
+          # The direct Beefy strategy parent is an ERC20 vault; the BoostHub child
+          # instead reports to the sdFXN master (not an ERC20). Skip that optional
+          # final-share read for child strategies, preserving the parent-only check.
+          base=root/'contracts/BaseAllToWantBoostHubV5.sol'
+          original='        bool finalExit = IERC20(vault).totalSupply() == 0;\\n        uint256 idle = balanceOfWant();'
+          fixed='        // Standalone strategies see a Beefy ERC-20 vault. BoostHub children\\n        // are instead called by the sdFXN master, which has no totalSupply().\\n        bool finalExit;\\n        try IERC20(vault).totalSupply() returns (uint256 remainingShares) {\\n            finalExit = remainingShares == 0;\\n        } catch {}\\n        uint256 idle = balanceOfWant();'
+          content=base.read_text()
+          original=original.replace('\\n','\\n')
+          fixed=fixed.replace('\\n','\\n')
+          assert content.count(original)==1,'Base emergency parent distinction missing'
+          base.write_text(content.replace(original,fixed))
+          (root/'contracts/StrategyCurveSDTYearnV9.sol').rename(root/'contracts/StrategyCurveSDTYearnV10.sol')
+          expected={
+            'BeefyVaultV7FixedV2.sol':'9e453f9cb4815ef57efed0421de76782e71738bfb00cfd15d9afcba335d57a54',
+            'BaseAllToWantBoostHubV5.sol':'34b26e2e85c797e4dc5892a51f6f776fc51ae8ccfc76e1e8395712437e0b1df6',
+            'StrategyDualFXNMasterV42.sol':'a93269dd956462c0860356581d3f37a3f2825db03444919983c65f62a1b4a79b',
+            'StrategyConvexFXNPool8V42.sol':'e27560e1b87d1eb9c6b6372a53aec935ce4cd0b16ef762e45c84b552092d025a',
+            'StrategyCurveSDTYearnV10.sol':'e05035595c43296b0d80dc3b96c092fe96f9729f5b475d52a3c8a7aa946584fb',
+          }
+          for path,digest in expected.items():
+              actual=hashlib.sha256((root/'contracts'/path).read_bytes()).hexdigest()
+              assert actual==digest, f'{path}: SHA mismatch {actual}'
+          print('EMERGENCY_V64_SDT_V10_FIVE_SOURCES_VERIFIED')
           PY
           printf 'baseline_xz_sha256=%s\n' '31160e9e19c22a95db298893563b1d15150958f72330c02a3510f32cfefd98aa' | tee source_manifest_v2.txt
       - name: Install actual source deps and compile only on GitHub
@@ -74,26 +106,26 @@ jobs:
           set -euo pipefail
           npm install --prefix "$ROOT/dependencies" --no-save --ignore-scripts --no-audit --no-fund '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts@5.4.0'
           npm install --prefix "$ROOT/runner" --no-save --ignore-scripts --no-audit --no-fund 'ethers@6.15.0'
-          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v63-sdt-v9-v7.log
+          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v64-sdt-v10-v8.log
           node --check github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs
       - name: Execute Safe custody campaign on isolated Ethereum and Fraxtal forks
         shell: bash
         env:
           LOCAL_ETH_RPC: http://127.0.0.1:8545
           LOCAL_FRAX_RPC: http://127.0.0.1:8546
-          BOOSTHUB_FORK_ROOT: .safe-v63
-          BOOSTHUB_FORK_RESULTS: boosthub-v63-live-fork-results
-          NODE_PATH: ${{ github.workspace }}/.safe-v63/runner/node_modules
+          BOOSTHUB_FORK_ROOT: .safe-v64
+          BOOSTHUB_FORK_RESULTS: boosthub-v64-live-fork-results
+          NODE_PATH: ${{ github.workspace }}/.safe-v64/runner/node_modules
         run: |
           set -euo pipefail
           : "${RPC_ETHEREUM:?RPC_ETHEREUM GitHub secret required}"
           : "${RPC_FRAXTAL:?RPC_FRAXTAL GitHub secret required}"
           test "$(timeout 30s cast chain-id --rpc-url "$RPC_ETHEREUM")" = 1
           test "$(timeout 30s cast chain-id --rpc-url "$RPC_FRAXTAL")" = 252
-          mkdir -p boosthub-v63-live-fork-results
-          anvil --fork-url "$RPC_ETHEREUM" --chain-id 1 --port 8545 --gas-limit 30000000 > boosthub-v63-live-fork-results/ethereum-anvil-v2.log 2>&1 &
+          mkdir -p boosthub-v64-live-fork-results
+          anvil --fork-url "$RPC_ETHEREUM" --chain-id 1 --port 8545 --gas-limit 30000000 > boosthub-v64-live-fork-results/ethereum-anvil-v2.log 2>&1 &
           ETH_PID=$!
-          anvil --fork-url "$RPC_FRAXTAL" --chain-id 252 --port 8546 --gas-limit 30000000 > boosthub-v63-live-fork-results/fraxtal-anvil-v2.log 2>&1 &
+          anvil --fork-url "$RPC_FRAXTAL" --chain-id 252 --port 8546 --gas-limit 30000000 > boosthub-v64-live-fork-results/fraxtal-anvil-v2.log 2>&1 &
           FRAX_PID=$!
           trap 'kill "$ETH_PID" "$FRAX_PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do
@@ -105,7 +137,7 @@ jobs:
           test "${E:-}" = 1
           test "${F:-}" = 252
           set +e
-          timeout -s TERM -k 10s 1950s node github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs 2>&1 | tee boosthub-v63-live-fork-results/execution-v2.log
+          timeout -s TERM -k 10s 1950s node github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs 2>&1 | tee boosthub-v64-live-fork-results/execution-v2.log
           RC=${PIPESTATUS[0]}
           set -e
           exit "$RC"
@@ -113,10 +145,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-v63-sdt-v9-safe-mainnet-forks-v7-${{ github.run_id }}
+          name: boosthub-v64-sdt-v10-safe-fork-v8-${{ github.run_id }}
           path: |
             source_manifest_v2.txt
-            compile-v63-sdt-v9-v5.log
-            boosthub-v63-live-fork-results/
+            compile-v64-sdt-v10-v8.log
+            boosthub-v64-live-fork-results/
           if-no-files-found: warn
           retention-days: 21
