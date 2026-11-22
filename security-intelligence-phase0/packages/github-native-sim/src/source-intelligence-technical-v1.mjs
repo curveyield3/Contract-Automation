@@ -540,7 +540,7 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
       directlyObservedStateReads:c.stateReads.slice().sort(),
       directlyObservedStateWrites:c.stateWrites.slice().sort(),
       readEvidenceStatus:VYPER_CODES.has(unitByPath.get(c.path)?.astStatus)?
-        'VYPER_READS_NOT_FULLY_EXTRACTED':'SOLIDITY_AST_STRUCTURAL',
+        'VYPER_AST_REFERENCES_INCLUDE_ASSIGNMENT_TARGETS':'SOLIDITY_AST_STRUCTURAL',
       writeEvidenceStatus:VYPER_CODES.has(unitByPath.get(c.path)?.astStatus)?
         'VYPER_COMPILER_AST_STRUCTURAL_ONLY':'SOLIDITY_AST_STRUCTURAL',
       transitiveInternalEffects:'NOT_EXPANDED',
@@ -804,13 +804,15 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
       const key=[fn.functionId,line,member].join('|');
       if(vyperDedup.has(key))continue;vyperDedup.add(key);
       const sourceLocation=ctx.path+':'+line+'-'+line;
-      const externalMessageCall=member==='raw_call'||member==='send'||member==='delegatecall'||
+      const externalMessageCall=['VYPER_EXTCALL','VYPER_STATICCALL','VYPER_BUILTIN_EXTERNAL_CALL']
+        .includes(call.callKind)||member==='raw_call'||member==='send'||member==='delegatecall'||
         member==='extcall'||member==='staticcall'||member.startsWith('extcall.')||member.startsWith('staticcall.');
       si.callGraph.push({
         callEdgeId:'CALL-'+pad(si.callGraph.length+1,4),
         callerContractId:contract.contractId,callerFunctionId:fn.functionId,
         targetContractId:null,targetFunctionId:null,memberOrName:member,
         callClass:externalMessageCall?'VYPER_AST_EXTERNAL_OPERATION_UNRESOLVED':'VYPER_AST_BUILTIN_OR_SENSITIVE_OPERATION',
+        vyperCallKind:call.callKind??null,
         interfaceOrType:call.targetType??null,sourceLocation,
         confidenceClass:'VYPER_COMPILER_AST_STRUCTURAL_ONLY',
         basis:'VYPER_AST_SENSITIVE_CALL_CONTEXT',
@@ -822,6 +824,7 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
         callerContractId:contract.contractId,callerFunctionId:fn.functionId,
         targetContractId:null,targetFunctionId:null,memberOrName:member,
         interfaceOrType:call.targetType??null,sourceLocation,status:'CANDIDATE',
+        vyperCallKind:call.callKind??null,
         confidenceClass:'VYPER_COMPILER_AST_STRUCTURAL_ONLY',
         basis:'VYPER_AST_SENSITIVE_CALL_CONTEXT',securityInterpretation:'DEFER_TO_REVIEWER',
         sourceCallsite:{sourcePath:ctx.path,sourceLine:line}
@@ -864,7 +867,7 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
       'Effective ABI inventory is a coverage denominator, not proof of deployed code or invocation reachability.',
       'State effects are direct AST/source-context observations, not transitive inter-contract effects.',
       'No storage slot is claimed when the exact compiler does not emit storage layout.',
-      'Vyper compiler AST contexts lack full Solidity-equivalent read/write and semantic detector coverage.',
+      'Vyper compiler AST references are not proven reads (assignment targets included), and Slither semantic detector coverage remains unavailable.',
       'Unresolved declaration matches must be traced directly by the auditor.',
       'Scope is based on review-inventory tiers and deployability, not inferred from names or fee relationships.'
     ]
