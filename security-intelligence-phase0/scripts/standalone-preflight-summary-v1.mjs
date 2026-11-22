@@ -15,6 +15,7 @@ const si=read('SOURCE_INTELLIGENCE_AUTOMATED_v1.json');
 const inventory=read('REVIEW_INVENTORY_v1.json');
 const slither=read('SLITHER_v1.json');
 const bytecodeSecurity=slither?.vyperBytecodeSecurity??null;
+const compiledBuild=read('PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json');
 const readiness=read('PROJECT_READINESS_AUTOMATED_v1.json');
 const sbom=read('SBOM_v1.json');
 const admission=read('SOURCE_ADMISSION_INVENTORY_v1.json');
@@ -56,8 +57,63 @@ const vyperAstStructuralOnly=inScope.filter(x=>x.astStatus==='AVAILABLE_VYPER_AS
   inventoryLimitations.some(l=>l.code==='VYPER_AST_STRUCTURAL_STATIC_ONLY'&&l.path===x.path));
 const unsupportedCoverage=inScope.filter(x=>x.astStatus!=='AVAILABLE'&&!languageFallbacks.includes(x)&&!vyperAstStructuralOnly.includes(x));
 const typedInScopeComplete=!!inventory&&inScope.length>0&&unsupportedCoverage.length===0;
-const fullySourceSupported=typedInScopeComplete&&inventory?.payload?.complete===true&&
-  languageFallbacks.length===0&&vyperAstStructuralOnly.length===0;
+// An exact-source Vyper AST remains structural evidence; a separate, pinned
+// bytecode security analyzer can complete the MACHINE COLLECTION portion.
+// It does not become a Slither-equivalent source semantic analyzer.
+const inScopeVyperPaths=new Set(inScope.filter(x=>String(x.path??'').endsWith('.vy')).map(x=>x.path));
+const compiledVyperArtifacts=(compiledBuild?.artifacts??[]).filter(a=>
+  inScopeVyperPaths.has(a.sourceName)&&String(a.deployedBytecode??'').startsWith('0x'));
+const analyzedVyper=bytecodeSecurity?.contracts??[];
+const vyperCoverageGaps=[];
+const noVyperSources=inScopeVyperPaths.size===0;
+const verifiedVyperProvider=bytecodeSecurity?.tool==='EVMLiSA'&&
+  bytecodeSecurity?.upstreamCommit==='44ae6dde995c9fb8f4a94932d26d07b11066525f'&&
+  bytecodeSecurity?.model==='EVM_BYTECODE_ABSTRACT_INTERPRETATION'&&
+  bytecodeSecurity?.status==='COMPLETED'&&
+  typeof bytecodeSecurity?.analyzerJarSha256==='string'&&
+  /^[a-f0-9]{64}$/.test(bytecodeSecurity.analyzerJarSha256)&&
+  ['reentrancy','tx-origin','randomness-dependency']
+    .every(name=>bytecodeSecurity.supportedCheckers?.includes(name));
+if(!noVyperSources){
+  if(!verifiedVyperProvider)vyperCoverageGaps.push('PINNED_EVMLISA_COMPLETION_NOT_VERIFIED');
+  if(!compiledBuild)vyperCoverageGaps.push('SOURCE_BOUND_COMPILATION_ARTIFACTS_UNAVAILABLE');
+  if(!Array.isArray(analyzedVyper)||analyzedVyper.length!==compiledVyperArtifacts.length||
+    bytecodeSecurity?.requiredContractCount!==compiledVyperArtifacts.length||
+    bytecodeSecurity?.analyzedContractCount!==compiledVyperArtifacts.length)
+    vyperCoverageGaps.push('VYPER_COMPILER_AND_ANALYZER_ARTIFACT_COUNTS_DISAGREE');
+  const distinctArtifacts=new Set();
+  for(const a of compiledVyperArtifacts){
+    const key=[a.sourceName,a.contractName,a.compilationUnitId].join('|');
+    if(distinctArtifacts.has(key))vyperCoverageGaps.push('DUPLICATE_VYPER_COMPILER_IDENTITY:'+key);
+    distinctArtifacts.add(key);
+    const matching=analyzedVyper.filter(x=>x.sourceName===a.sourceName&&
+      x.contractName===a.contractName&&x.compilationUnitId===a.compilationUnitId);
+    if(matching.length!==1){
+      vyperCoverageGaps.push('MISSING_OR_DUPLICATE_VYPER_ANALYSIS:'+key);continue;
+    }
+    const x=matching[0];
+    const digest=crypto.createHash('sha256').update(
+      Buffer.from(String(a.deployedBytecode??'').replace(/^0x/,''),'hex')).digest('hex');
+    if(!/^0x[0-9a-fA-F]+$/.test(String(a.deployedBytecode??''))||
+      String(a.deployedBytecode).length%2!==0||
+      x.runtimeBytecodeSha256!==digest||
+      a.deployedBytecodeDigestSha256!==digest||
+      x.runtimeBytecodeBytes!==String(a.deployedBytecode).slice(2).length/2)
+      vyperCoverageGaps.push('VYPER_RUNTIME_BYTECODE_DIGEST_OR_SIZE_MISMATCH:'+key);
+    if(x.status!=='COMPLETED'||x.exitCode!==0||x.timedOut!==false||
+      x.outputProduced!==true||x.analyzerJarSha256!==bytecodeSecurity.analyzerJarSha256||
+      x.compilerVersion!==a.compilerVersion)
+      vyperCoverageGaps.push('VYPER_ANALYSIS_INCOMPLETE_OR_UNBOUND:'+key);
+  }
+  for(const p of inScopeVyperPaths)
+    if(!compiledVyperArtifacts.some(a=>a.sourceName===p))
+      vyperCoverageGaps.push('IN_SCOPE_VYPER_SOURCE_WITHOUT_COMPILER_BYTECODE:'+p);
+}
+const vyperBytecodeCoverageComplete=noVyperSources||
+  (verifiedVyperProvider&&vyperCoverageGaps.length===0&&compiledVyperArtifacts.length>0);
+const machineSourceCoverageComplete=typedInScopeComplete&&inventory?.payload?.complete===true&&
+  languageFallbacks.length===0&&
+  (vyperAstStructuralOnly.length===0||vyperBytecodeCoverageComplete);
 // ABI origins and analyzer capabilities are independent from compilation
 // success. Retain each incomplete dimension for the standalone audit gate.
 const unresolvedMaterialOrigins=stage2?.unresolvedStateChangingEntrypoints??null;
@@ -74,7 +130,7 @@ const unitRecoveryGap=build?.build?.unitCoverageComplete===false;
 const sourceAdmissionVerified=admission?.sourceArchiveSha256===expected&&admission?.sourceCount>0;
 const manifestStatus=!sourceMatched||!sourceAdmissionVerified?'INCOMPLETE':
   sourceOnly?'PARTIAL':!si||!typedInScopeComplete?'INCOMPLETE':
-  !slitherComplete||!slitherIndexComplete||!fullySourceSupported||multiProjectGap||unitRecoveryGap||
+  !slitherComplete||!slitherIndexComplete||!machineSourceCoverageComplete||multiProjectGap||unitRecoveryGap||
   unresolvedMaterialOrigins===null||unresolvedMaterialOrigins>0?'PARTIAL':'COLLECTED';
 const slitherEvidence=evidence.find(x=>x.name==='SLITHER_v1.json');
 const priorityOrder=['P1_FLOW_LINKED_HIGH_IMPACT','P2_FLOW_OR_HIGH_IMPACT','P3_IN_SCOPE_CONTEXT','P4_DEPENDENCY_OR_UNMAPPED'];
@@ -180,6 +236,9 @@ const lines=[
   '',
   '- Vyper file-level fallback(s): '+(languageFallbacks.map(x=>x.path).join(', ')||'none'),
   '- Vyper compiler-AST structural-only files (no semantic Slither detectors): '+(vyperAstStructuralOnly.map(x=>x.path).join(', ')||'none'),
+  '- Vyper bytecode security collection: '+(vyperBytecodeCoverageComplete?'COVERED BY EXACT-BYTECODE EVMLiSA':'NOT VERIFIED')+
+    '; independent of Vyper Slither source-semantic support',
+  ...vyperCoverageGaps.map(x=>'- Vyper bytecode analyzer coverage mismatch: '+x),
   '- Vyper bytecode security program: '+(bytecodeSecurity?.tool??'NOT_INSTALLED')+
     ' @ '+(bytecodeSecurity?.upstreamCommit??'UNPINNED')+
     '; status '+(bytecodeSecurity?.status??'NOT_EXECUTED')+
@@ -209,6 +268,7 @@ const lines=[
   '- Entrypoint links are compiler/source inventory facts; source call paths are structural candidates, not proof of live deployment or runtime reachability.',
   '- No unit tests, fuzzers, exploit reproduction, transaction replay, fork deployment or source-defined deployment scripts were executed.',
   '- Vyper compiler AST provides structural function/state-write/call evidence, not complete Solidity-equivalent read coverage or semantic Slither detectors.',
+  '- EVMLiSA covers pinned Vyper runtime bytecode with reentrancy, tx.origin and randomness checkers only; source-level Slither-equivalent detectors remain unavailable.',
   '- Unread source, unsupported compilers, unresolved mappings and uncompiled project roots remain explicit limitations.',
   '- Exact live runtime bytecode and deployed configuration are not established by this preflight.',
   '',
@@ -223,6 +283,9 @@ const manifest={
   status:manifestStatus,
   notSecurityVerdict:true,
   typedInScopeComplete,
+  machineSourceCoverageComplete,
+  vyperBytecodeCoverageComplete,
+  vyperBytecodeCoverageGaps:vyperCoverageGaps,
   typedVyperFallbackPaths:languageFallbacks.map(x=>x.path),
   typedVyperAstStructuralOnlyPaths:vyperAstStructuralOnly.map(x=>x.path),
   unresolvedSourceCoveragePaths:unsupportedCoverage.map(x=>x.path),
@@ -234,6 +297,8 @@ const manifest={
   machineCoverageReadyForGateReview:manifestStatus==='COLLECTED',
   machineCoverageReasons:{
     vyperSemanticSlitherUnavailable:semanticVyperUnsupported,
+    vyperBytecodeCoverageComplete,
+    vyperBytecodeCoverageGaps:vyperCoverageGaps,
     vyperBytecodeSecurity:{tool:bytecodeSecurity?.tool??null,
       status:bytecodeSecurity?.status??'NOT_EXECUTED',
       analyzedContracts:bytecodeSecurity?.analyzedContractCount??0,
@@ -246,7 +311,8 @@ const manifest={
     vyperExternalCallCandidates:stage2?.vyperStructuralCallCandidates??null,
     extraCompilationRootsNotBuilt:admission?.additionalRootsNotYetCompiled??[],
     slitherIndexComplete,slitherCompleted:slitherComplete,
-    humanSourceAnalysisStillRequired:true
+    humanSourceAnalysisStillRequired:true,
+    evmLisaBytecodeAnalysisIsNotSlitherEquivalent:true
   },
   stage2Coverage:stage2?{...stage2,limitations:undefined}:null,
   stage3SlitherPrioritization:triage?{
