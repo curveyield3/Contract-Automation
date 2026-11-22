@@ -620,6 +620,76 @@ def verify_stage(root, args, ctx):
                                 "originalNativeEvidenceSha256": None,
                                 "exactIssueCount": len(warnings)}})
         return
+    if args.stage in ("G3", "G4", "G5", "G6", "G7"):
+        programs = {
+            "G3": ("wake", "wake_analyze"),
+            "G4": ("mythril", "mythril_analyze"),
+            "G5": ("certora-prover", "prover_qualify"),
+            "G6": ("mimo-provider", "mimo_provider_qualify"),
+            "G7": ("autoprover", "autoprover_run")
+        }
+        expected_program, expected_job = programs[args.stage]
+        name = "NATIVE_ANALYZER_ELIGIBILITY_v1.json"
+        source = Path(args.input_root or "") / name
+        record, absent = _read_optional_json(str(source) if args.input_root else None)
+        valid = bool(
+            data.get("schemaVersion") == "curveyield-security-pipeline-config-result-v1" and
+            data.get("mode") == "native-analyzer-eligibility" and
+            data.get("status") == "NOT_EXECUTED" and
+            str(data.get("runId")) == ctx["runId"] and
+            str(data.get("runAttempt")) == str(ctx["runAttempt"]) and
+            expected_job == args.job and
+            isinstance(record, dict) and
+            record.get("schemaVersion") == "curveyield-security-native-analyzer-eligibility-v1" and
+            record.get("gate") == args.stage and
+            record.get("analyzer") == expected_program and
+            record.get("nativeCommandsExecuted") == 0 and
+            record.get("status") == "NOT_EXECUTED" and
+            record.get("sourceBound") == data.get("sourceBound") and
+            str((record.get("runIdentity") or {}).get("runId")) == ctx["runId"] and
+            str((record.get("runIdentity") or {}).get("runAttempt")) == str(ctx["runAttempt"]) and
+            (record.get("runIdentity") or {}).get("workflowHeadSha") == ctx["workflowHeadSha"]
+        )
+        if not valid:
+            warnings.append(make_warning(
+                ctx, args, "NATIVE.ELIGIBILITY_OR_ORIGINAL_IDENTITY_MISSING",
+                args.stage + ".IDENTITY",
+                "NATIVE_ANALYZER_ELIGIBILITY_v1.json.gate/analyzer/runIdentity",
+                {"gate": args.stage, "analyzer": expected_program,
+                 "originalRunId": ctx["runId"], "head": ctx["workflowHeadSha"]},
+                {"schema": record.get("schemaVersion") if isinstance(record, dict) else None,
+                 "gate": record.get("gate") if isinstance(record, dict) else None,
+                 "analyzer": record.get("analyzer") if isinstance(record, dict) else None,
+                 "unavailable": absent},
+                "original native execution cannot be established",
+                "Regenerate exact qualified original source and native tool plan on this run",
+                str(source), observation_failure=absent))
+        observations = (record.get("issues") if isinstance(record, dict) else []) or []
+        for requirement in observations:
+            if not isinstance(requirement, dict):
+                continue
+            warnings.append(make_warning(
+                ctx, args, str(requirement.get("code") or "NATIVE.ISSUE"),
+                args.stage + ".PIN_OR_SCOPE",
+                str(requirement.get("fieldPath") or name),
+                requirement.get("expected"), requirement.get("observed"),
+                "affected native analyzer cannot execute without qualified inputs",
+                str(requirement.get("correction") or "inspect source-bound tool and ABI provenance"),
+                str(source), component=expected_program))
+        _finish(root, args, ctx, warnings, "NOT_EXECUTED", {
+            "sourceBound": bool(valid and record.get("sourceBound") is True),
+            "sourceIdentity": {"archiveSha256": record.get("sourceArchiveSha256")}
+                if valid else None,
+            "attempted": 0, "completed": 0,
+            "notExecuted": record.get("targetCount", 0) if valid else 1,
+            "dependencyFacts": {
+                "sourceCompatibleTargets": record.get("languageSupportedCount") if valid else None,
+                "nativeExecutionNotAttempted": True,
+                "originalNativeOutputSha256": None,
+                "program": expected_program,
+                "exactMissingRequirementCount": len(warnings)
+            }})
+        return
     if args.stage in ("G8", "G9"):
         if args.stage == "G8":
             expected_mode = "reconcile-native"
