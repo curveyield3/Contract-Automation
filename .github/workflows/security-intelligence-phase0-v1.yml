@@ -274,8 +274,102 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  publish_warnings:
+
+  prepare_targets:
     needs: [admit, collect]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_approved == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout exact immutable pipeline v1 implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download original same-attempt preflight evidence
+        id: original_preflight
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/prepare_targets/input/preflight
+        continue-on-error: true
+      - name: Create trusted run identity from GitHub event context
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/prepare_targets/input" \
+                   "$RUNNER_TEMP/security-pipeline/prepare_targets/target-config" \
+                   "$RUNNER_TEMP/security-pipeline/prepare_targets/toolkit-config" \
+                   "$RUNNER_TEMP/security-pipeline/prepare_targets/report"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const identity={
+            schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+            runId:process.env.GITHUB_RUN_ID,
+            runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            workflowHeadSha:process.env.GITHUB_SHA,
+            repository:process.env.GITHUB_REPOSITORY
+          };
+          fs.writeFileSync(path.join(process.env.RUNNER_TEMP,'security-pipeline/prepare_targets/input/RUN_IDENTITY_v1.json'),
+            JSON.stringify(identity,null,2)+'\n',{mode:0o600});
+          NODE
+      - name: Construct source-bound target, build and compatibility records
+        id: target_config
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation enumerate-targets \
+            --input-root "$RUNNER_TEMP/security-pipeline/prepare_targets/input/preflight" \
+            --output-root "$RUNNER_TEMP/security-pipeline/prepare_targets/target-config" \
+            --run-identity "$RUNNER_TEMP/security-pipeline/prepare_targets/input/RUN_IDENTITY_v1.json"
+      - name: Record exact G0 G1 G2 source-bound target statuses
+        if: ${{ always() }}
+        shell: bash
+        env:
+          TARGET_CONFIG_OUTCOME: ${{ steps.target_config.outcome }}
+          ORIGINAL_PREFLIGHT_OUTCOME: ${{ steps.original_preflight.outcome }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/prepare_targets/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-stage --job prepare_targets --stage G0 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-result "$RUNNER_TEMP/security-pipeline/prepare_targets/target-config/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
+            --input-root "$RUNNER_TEMP/security-pipeline/prepare_targets/target-config" \
+            --report-root "$RUNNER_TEMP/security-pipeline/prepare_targets/report"
+      - name: Project current tool requirements to a safe non-authoritative profile
+        id: toolkit_profile
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation toolkit-profile \
+            --input-root "$RUNNER_TEMP/security-pipeline/prepare_targets/target-config" \
+            --output-root "$RUNNER_TEMP/security-pipeline/prepare_targets/toolkit-config" \
+            --run-identity "$RUNNER_TEMP/security-pipeline/prepare_targets/input/RUN_IDENTITY_v1.json"
+      - name: Upload only stage status and sanitized warning part
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-prepare_targets-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/prepare_targets/report/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload non-executable toolkit profile metadata
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-toolkit-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/prepare_targets/toolkit-config/TOOLKIT_PROFILE_v1.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  publish_warnings:
+    needs: [admit, collect, prepare_targets]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
