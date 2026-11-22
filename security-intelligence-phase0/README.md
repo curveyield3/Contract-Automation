@@ -379,3 +379,89 @@ This is a **conditional, out-of-tree source adapter**, not a Certora fork, new A
 - **REPLACED_OR_SUPERSEDED_IMPLEMENTATION:** None. No original Composer prompt, agent, prover, memory engine, or private MiMo script is copied, overwritten, or removed.
 
 **G6 remains `NOT_EXECUTED` for native qualification:** provider registration/import, actual Composer memory/tool calls, context capacity, local model server, original document behavior and native retry semantics have not been exercised. Unsupported binary/PDF context remains an explicit scope limitation. The provider package is not automatically installed or used as trusted execution authority; it can be installed only in an independently approved, source-pinned Composer environment. G7 may not claim formal proof, generated specs or a completed AutoProver run from the mere presence of these files.
+
+## Pipeline v1 construction status after implementation-spec v14 work-unit reconciliation
+
+This is the source-visible construction record, **not a claim of a completed
+native security audit**. All code changes are performed against the moving
+`machine-intelligence-audit-controller-v1` branch using current HEAD+blob
+readback and non-force GitHub ref updates. The pipeline remains **v1**.
+
+**U00–U05 — original standalone source path:** Existing request schema/template,
+source ZIP SHA-256 admission, inert source-derived toolchain plan and network-disabled
+Phase 0 Docker collector remain in their original respective jobs. The active
+request and primary Machine Intelligence controller were not changed as part of
+pipeline construction. Extended-mode authority must come from an independently
+accepted provider; its absence cannot be replaced with the request-supplied
+`authorizationRefSha256`.
+
+**U06 — per-component toolkit:** Ten components retain exact source-compatibility
+requirements, independent pin provenance, fixed-enum isolated software cache
+identities and exact-byte verification. The original MiMo GGUF SHA-256 is known.
+Foundry version, solc/Slither versions and original `llama.cpp` source revision
+are known as **recipes** but not independently attested native executable bytes.
+The toolkit explicitly distinguishes recipe provenance from a byte-qualified
+executable; a missing native pin remains `PIN_UNRESOLVED`. Per-component
+readiness and original byte-verifier receipts are preserved in separate consumer
+paths; `TOOLKIT_QUALIFICATION_v1.json` is emitted from ten independently
+validated original component receipts, not an inferred cache success. Cache
+restore failures/corrupt exact hits never become accepted source bytes.
+
+**U07 — existing MiMo:** Reuses the original pinned `lite-solo-mimo-v1` GGUF
+and the loopback-only `llama-server` contract; the standalone adapter cannot
+borrow the private MI campaign lease. It cannot infer without independent
+accepted typed ABI parameter scope or verified source-bound runtime bytes.
+Cross-run continuation remains `NOT_EXECUTED` until a genuine authorized
+private checkpoint and lease is demonstrated.
+
+**U08 — approved deployment-only fork:** The original controller-bound runner
+cannot be passed a fabricated standalone controller receipt. The narrowly
+separate source-bound wrapper delegates to its existing ZIP staging, Anvil,
+deployment profile and C2 snapshot helpers. It requires original approved
+chain/block hash, project path and source script SHA-256, deployment profile,
+local-only egress/sandbox proof, current-run authority and independent native
+tool pins. The existing, original `security-preflight-source` ZIP artifact is
+reused **only after accepted fork authority**, never used as another controller
+receipt. If any prerequisite is absent, native fork operations remain
+`NOT_EXECUTED`. C2 state is never uploaded in public warning artifacts.
+
+**U09 — post-deployment storage/Medusa:** The G2B producer publishes a
+**digest-only** source-bound C2 disposition; G2C/G2D rebind it to exact
+run/source/head before any interpretation. Digest metadata does *not* qualify
+a private Anvil C2 state restoration. G2C joins actual original Solidity/Vyper
+compiler-emitted storage slot rows to source-intelligence `contractId` and
+leaves unknown proxy storage addresses/mapping keys unfilled. The second
+Slither native storage round and Medusa `init/fuzz` require genuinely restored
+C2, qualified executable/CLI pins and allowed preexisting properties.
+No new tests, generated properties or account collision assertions are implied.
+
+**U10 — Wake/Mythril/local Certora:** G3–G5 source eligibility is bound to
+actual original compilation units and ABI/creation-bytecode digests, including
+target-specific Vyper and unlinked-library exclusions. Original native Wake,
+Mythril, local Certora Prover/JVM/SMT pins and original source/specification
+execution evidence are not independently qualified; source-only classified
+targets remain `NOT_EXECUTED`, not detector-negative or formally proven.
+
+**U11 — Composer and AutoProver:** The conditional out-of-tree Composer
+`ProviderSpec` is grounded in exact upstream source at
+`Certora/AutoProver@81d9626c249a70c0a0f0648a89de175443c0344c`.
+It requires verified original Composer entrypoint, streamed tool calls,
+structured output, source documents, memory/retry semantics and the existing
+MiMo weights/runtime. G6/G7 now preserve explicit compatibility and property
+dispositions without generating CVL properties or claiming a native proof.
+
+**U12 — original evidence index and release:** G8 reports original file SHA,
+byte length, stage/attempt/source identity, source-qualified analyzer
+denominators and real observable metrics only. G9 retains original stage
+limitations and does not assert controller acceptance or source safety. The
+single existing final `publish_warnings` job remains dependent on all other
+16 jobs and publishes exact after-workflow warnings and stage-status records.
+
+**Explicitly uncompleted:** An independent issuer for extended native authority;
+verified original runtime bytes for nine native/cache component requirements
+(the MiMo GGUF alone has an original weight digest); a permitted local-only
+execution sandbox for source-defined deployment; accepted C2 restricted
+transport; actual native Slither/Medusa/Wake/Mythril/Certora/Composer runs;
+and real original native output/efficiency/coverage evidence. No optional
+workflow-success status substitutes for these. Implementation source commits
+alone do not establish a qualifying audit run.
