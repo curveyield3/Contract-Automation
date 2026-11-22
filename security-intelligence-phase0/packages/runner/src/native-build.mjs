@@ -305,7 +305,14 @@ export async function compileRepoNativeHardhat({
       fsApi.readFile(path.join(root, 'toolchain-plan', 'toolchain-plan.json'), 'utf8').then(JSON.parse),
       fsApi.readFile(path.join(root, 'toolchain-status.json'), 'utf8').then(JSON.parse)
     ]);
-    const index = (plan.packages ?? []).findIndex(item => item.root === '.');
+    // Match the selected extracted Hardhat root by the exact admitted lockfile
+    // identity: a ZIP may contain several nested, independently prepared roots.
+    const sourceManifestSha = createHash('sha256')
+      .update(await fsApi.readFile(path.join(projectRoot, 'package.json'))).digest('hex');
+    const sourceLockSha = createHash('sha256')
+      .update(await fsApi.readFile(path.join(projectRoot, 'package-lock.json'))).digest('hex');
+    const index = (plan.packages ?? []).findIndex(item =>
+      item.manifestSha256 === sourceManifestSha && item.lockSha256 === sourceLockSha);
     if (index < 0) throw new Error('OFFLINE_HARDHAT_PACKAGE_PLAN_MISSING');
     const entry = plan.packages[index];
     if (!entry.lockSha256 || entry.preparedPath !== 'packages/' + index) throw new Error('OFFLINE_HARDHAT_LOCK_IDENTITY_MISSING');
