@@ -1159,6 +1159,19 @@ jobs:
           path: ${{ runner.temp }}/security-pipeline/fork_setup/native/FORK_NATIVE_STATE_v1.json
           if-no-files-found: warn
           retention-days: 14
+      - name: Copy source-safe per-component original verification receipts into stage report
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/fork_setup"
+          mkdir -p "$base/report/consumer-toolkit-receipts"
+          for component in foundry-node source-compilers; do
+            file="$base/consumer-toolkit/receipts/$component/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
+            if [ -f "$file" ] && [ ! -L "$file" ]; then
+              install -m 0600 "$file" "$base/report/consumer-toolkit-receipts/${component}.json"
+            fi
+          done
       - name: Publish only non-secret G2B stage warnings and status
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -1364,6 +1377,19 @@ jobs:
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
             --input-root "$base/native" --report-root "$base/report"
+      - name: Copy source-safe per-component original verification receipts into stage report
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/storage_inspect"
+          mkdir -p "$base/report/consumer-toolkit-receipts"
+          for component in slither-storage source-compilers; do
+            file="$base/consumer-toolkit/receipts/$component/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
+            if [ -f "$file" ] && [ ! -L "$file" ]; then
+              install -m 0600 "$file" "$base/report/consumer-toolkit-receipts/${component}.json"
+            fi
+          done
       - name: Publish only non-secret G2C stage warnings and status
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -1574,6 +1600,19 @@ jobs:
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
             --input-root "$base/native" --report-root "$base/report"
+      - name: Copy source-safe per-component original verification receipts into stage report
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/medusa_analyze"
+          mkdir -p "$base/report/consumer-toolkit-receipts"
+          for component in medusa source-compilers; do
+            file="$base/consumer-toolkit/receipts/$component/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
+            if [ -f "$file" ] && [ ! -L "$file" ]; then
+              install -m 0600 "$file" "$base/report/consumer-toolkit-receipts/${component}.json"
+            fi
+          done
       - name: Publish only non-secret G2D stage warnings and status
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -1778,6 +1817,19 @@ jobs:
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
             --input-root "$base/native" --report-root "$base/report"
+      - name: Copy source-safe per-component original verification receipts into stage report
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/wake_analyze"
+          mkdir -p "$base/report/consumer-toolkit-receipts"
+          for component in wake source-compilers; do
+            file="$base/consumer-toolkit/receipts/$component/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
+            if [ -f "$file" ] && [ ! -L "$file" ]; then
+              install -m 0600 "$file" "$base/report/consumer-toolkit-receipts/${component}.json"
+            fi
+          done
       - name: Upload source-eligible G3 stage and exact native-not-executed warnings
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -1928,6 +1980,19 @@ jobs:
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
             --input-root "$base/native" --report-root "$base/report"
+      - name: Copy source-safe per-component original verification receipts into stage report
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/mythril_analyze"
+          mkdir -p "$base/report/consumer-toolkit-receipts"
+          for component in mythril; do
+            file="$base/consumer-toolkit/receipts/$component/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
+            if [ -f "$file" ] && [ ! -L "$file" ]; then
+              install -m 0600 "$file" "$base/report/consumer-toolkit-receipts/${component}.json"
+            fi
+          done
       - name: Upload source-eligible G4 stage and exact native-not-executed warnings
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -2078,6 +2143,19 @@ jobs:
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
             --input-root "$base/native" --report-root "$base/report"
+      - name: Copy source-safe per-component original verification receipts into stage report
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/prover_qualify"
+          mkdir -p "$base/report/consumer-toolkit-receipts"
+          for component in certora-prover; do
+            file="$base/consumer-toolkit/receipts/$component/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
+            if [ -f "$file" ] && [ ! -L "$file" ]; then
+              install -m 0600 "$file" "$base/report/consumer-toolkit-receipts/${component}.json"
+            fi
+          done
       - name: Upload source-eligible G5 stage and exact native-not-executed warnings
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -2336,6 +2414,19 @@ jobs:
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
             --input-root "$base/native" --report-root "$base/report"
+      - name: Copy source-safe per-component original verification receipts into stage report
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/mimo_provider_qualify"
+          mkdir -p "$base/report/consumer-toolkit-receipts"
+          for component in autoprover mimo-runtime mimo-weights; do
+            file="$base/consumer-toolkit/receipts/$component/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
+            if [ -f "$file" ] && [ ! -L "$file" ]; then
+              install -m 0600 "$file" "$base/report/consumer-toolkit-receipts/${component}.json"
+            fi
+          done
       - name: Upload source-eligible G6 stage and exact native-not-executed warnings
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -2648,6 +2739,19 @@ jobs:
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
             --input-root "$base/native" --report-root "$base/report"
+      - name: Copy source-safe per-component original verification receipts into stage report
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/autoprover_run"
+          mkdir -p "$base/report/consumer-toolkit-receipts"
+          for component in autoprover certora-prover mimo-runtime mimo-weights; do
+            file="$base/consumer-toolkit/receipts/$component/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
+            if [ -f "$file" ] && [ ! -L "$file" ]; then
+              install -m 0600 "$file" "$base/report/consumer-toolkit-receipts/${component}.json"
+            fi
+          done
       - name: Upload source-eligible G7 stage and exact native-not-executed warnings
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
