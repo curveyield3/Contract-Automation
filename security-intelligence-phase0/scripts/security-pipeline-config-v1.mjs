@@ -413,7 +413,9 @@ function deriveForkPlan(args,identity,issues){
     .map(x=>typeof x==='number'?x:x?.chainId??null).filter(Number.isInteger);
   const sourceBound=evidence.sourceBound&&!!readinessDocument&&!!build;
   const requires=['approvedForkChainId','approvedUpstreamBlockNumber',
-    'approvedUpstreamBlockHash','sourceDeploymentScriptSha256',
+    'approvedUpstreamBlockHash','approvedForkHardfork',
+    'approvedProjectRelativePath','approvedDeploymentProfileSha256',
+    'sourceDeploymentScriptSha256',
     'sourceConfigurationScriptSha256','sourceFundingScriptSha256',
     'restrictedLocalRpcIsolationProof','approvedExecutionScopeSha256',
     'originalSourceCheckoutReceipt','actualActorAndFundingConfiguration'];
@@ -433,8 +435,10 @@ function deriveForkPlan(args,identity,issues){
     untrustedSourceScriptPaths:scripts,untrustedSourceDeploymentPaths:deploymentFiles,
     chainIdMentionsNotAuthorizations:chainCandidates,contractCandidates:candidates,
     approvedForkChainId:null,approvedUpstreamBlockNumber:null,
-    approvedUpstreamBlockHash:null,sourceDeploymentScriptSha256:null,
-    sourceConfigurationScriptSha256:null,sourceFundingScriptSha256:null,
+    approvedUpstreamBlockHash:null,approvedForkHardfork:null,
+    approvedProjectRelativePath:null,approvedDeploymentProfileSha256:null,
+    sourceDeploymentScriptSha256:null,sourceConfigurationScriptSha256:null,
+    sourceFundingScriptSha256:null,
     approvedExecutionScopeSha256:null,localOnlyNetworkIsolationVerified:false,
     c0:null,c1:null,c2:null,controllerAccepted:false,
     nativeCommandsExecuted:0,sourcePackageScriptsExecuted:0,
