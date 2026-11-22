@@ -1,4 +1,4 @@
-name: BoostHub v63 + guarded SDT v8 Safe dual-chain fork v4
+name: BoostHub v63 + CurveGlobal Yearn V2 SDT v9 Safe dual-chain fork v5
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/boosthub-v13-full-stack-anvil-v1.yml'
       - 'github-native-sim/boosthub-v13-full-stack-v1/source/BeefyVaultV7FixedV2_v63.sol'
+      - 'github-native-sim/boosthub-v13-full-stack-v1/source/StrategyCurveSDTYearnV9.sol'
       - 'github-native-sim/boosthub-v13-full-stack-v1/safe-v63-fork-v2.cjs'
 permissions:
   contents: read
@@ -34,7 +35,7 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Materialize exact v61 base, guarded SDT v8, and v63 ERC4626 vault
+      - name: Materialize exact v63 Beefy and CurveGlobal-compatible SDT v9
         shell: bash
         run: |
           set -euo pipefail
@@ -60,6 +61,11 @@ jobs:
           assert hashlib.sha256(source.read_bytes()).hexdigest() == '6b150c72b1d33609f452e1809719a1da4ba3b929011ea16e65fba7dbbfbec245', 'Exact v63 source mismatch'
           f.write_bytes(source.read_bytes())
           print('ERC4626_V63_SOURCE_VERIFIED', f)
+          sdt=pathlib.Path('github-native-sim/boosthub-v13-full-stack-v1/source/StrategyCurveSDTYearnV9.sol')
+          assert 'contract StrategyCurveSDTYearnV9 is ReentrancyGuard' in sdt.read_text()
+          (root/'contracts/StrategyCurveSDTYearnV8.sol').unlink(missing_ok=True)
+          (root/'contracts/StrategyCurveSDTYearnV9.sol').write_bytes(sdt.read_bytes())
+          print('FACTORY_YEARN_V2_SDT_V9_SOURCE_VERIFIED', sdt)
           PY
           printf 'baseline_xz_sha256=%s\n' '31160e9e19c22a95db298893563b1d15150958f72330c02a3510f32cfefd98aa' | tee source_manifest_v2.txt
       - name: Install actual source deps and compile only on GitHub
@@ -68,7 +74,7 @@ jobs:
           set -euo pipefail
           npm install --prefix "$ROOT/dependencies" --no-save --ignore-scripts --no-audit --no-fund '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts@5.4.0'
           npm install --prefix "$ROOT/runner" --no-save --ignore-scripts --no-audit --no-fund 'ethers@6.15.0'
-          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v63-sdt-v8-v4.log
+          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v63-sdt-v9-v5.log
           node --check github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs
       - name: Execute Safe custody campaign on isolated Ethereum and Fraxtal forks
         shell: bash
@@ -107,10 +113,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-v63-sdt-v8-safe-mainnet-forks-v4-${{ github.run_id }}
+          name: boosthub-v63-sdt-v9-safe-mainnet-forks-v5-${{ github.run_id }}
           path: |
             source_manifest_v2.txt
-            compile-v63-sdt-v8-v4.log
+            compile-v63-sdt-v9-v5.log
             boosthub-v63-live-fork-results/
           if-no-files-found: warn
           retention-days: 21
