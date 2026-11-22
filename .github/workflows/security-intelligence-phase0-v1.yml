@@ -15,6 +15,9 @@ jobs:
   admit:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      extended_approved: ${{ steps.extended_disposition.outputs.extended_approved }}
+      extended_requested: ${{ steps.extended_disposition.outputs.extended_requested }}
     steps:
       - name: Checkout trusted standalone workflow and copied dependencies
         uses: actions/checkout@v4
@@ -22,6 +25,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Admit source-bound request and download ZIP without running it
+        id: admit_native
         env:
           GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
@@ -64,6 +68,20 @@ jobs:
             .preflight-input/source.zip .preflight-plan
           test "$(jq -er .sourceZipSha256 .preflight-plan/toolchain-plan.json)" = "$expected"
           echo "Exact ZIP and source-derived toolchain plan admitted; no source execution"
+      - name: Decide optional extended pipeline from verified original source
+        id: extended_disposition
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/admit/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode admit-extended --job admit --stage ADMIT \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --request-file security-intelligence-phase0/requests/active-request.json \
+            --source-zip .preflight-input/source.zip \
+            --toolchain-plan .preflight-plan/toolchain-plan.json \
+            --report-root "$RUNNER_TEMP/security-pipeline/admit/report" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Hand off ZIP and non-secret request to isolated collector
         uses: actions/upload-artifact@v4
         with:
@@ -81,6 +99,28 @@ jobs:
           include-hidden-files: true
           retention-days: 3
           if-no-files-found: error
+      - name: Summarize admission diagnostics
+        if: ${{ always() }}
+        shell: bash
+        env:
+          ADMISSION_OUTCOME: ${{ steps.admit_native.outcome }}
+          EXTENDED_DISPOSITION_OUTCOME: ${{ steps.extended_disposition.outcome }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/admit/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode summarize-job --job admit --stage ADMIT \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --report-root "$RUNNER_TEMP/security-pipeline/admit/report" \
+            --native-outcome "$ADMISSION_OUTCOME" \
+            --summary-outcome "$EXTENDED_DISPOSITION_OUTCOME"
+      - name: Upload admission warning part
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-admit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/admit/report/
+          if-no-files-found: warn
+          retention-days: 14
 
   collect:
     needs: admit
@@ -118,6 +158,7 @@ jobs:
       - name: Create writable output for sandboxed collection
         run: mkdir -p .preflight-output
       - name: Run copied compiler, Source Intelligence, inventory and Slither in network-isolated sandbox
+        id: collect_native
         shell: bash
         run: |
           set -euo pipefail
@@ -138,6 +179,7 @@ jobs:
             node packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs \
               --request /input/request.json --output /output/evidence
       - name: Produce reader-facing discovery and cryptographic evidence index
+        id: preflight_summary
         if: always()
         shell: bash
         run: |
@@ -159,6 +201,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Require source-bound inventory before claiming collection success
+        id: inventory_acceptance
         if: always()
         shell: bash
         run: |
@@ -205,3 +248,28 @@ jobs:
               echo "Compiled source-bound evidence collected; standalone audit-gate review still required"
             fi
           fi
+      - name: Summarize original collection and exact limitations
+        if: ${{ always() }}
+        shell: bash
+        env:
+          COLLECT_NATIVE_OUTCOME: ${{ steps.collect_native.outcome }}
+          SOURCE_SUMMARY_OUTCOME: ${{ steps.preflight_summary.outcome }}
+          INVENTORY_ACCEPTANCE_OUTCOME: ${{ steps.inventory_acceptance.outcome }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/collect/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode summarize-job --job collect --stage COLLECT \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --input-root "$GITHUB_WORKSPACE/.preflight-output/evidence" \
+            --report-root "$RUNNER_TEMP/security-pipeline/collect/report" \
+            --native-outcome "$COLLECT_NATIVE_OUTCOME" \
+            --summary-outcome "$SOURCE_SUMMARY_OUTCOME" \
+            --inventory-outcome "$INVENTORY_ACCEPTANCE_OUTCOME"
+      - name: Upload collection warning part
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-collect-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/collect/report/
+          if-no-files-found: warn
+          retention-days: 14
