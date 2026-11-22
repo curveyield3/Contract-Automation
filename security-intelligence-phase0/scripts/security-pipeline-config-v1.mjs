@@ -6,7 +6,8 @@ import path from 'node:path';
 import {canonicalJsonV1,sha256HexV1,digestCanonicalV1} from '../packages/github-native-sim/src/canonical-json-v1.mjs';
 
 const OPERATIONS=new Set(['enumerate-targets','toolkit-profile','mimo-objective',
-  'validate-proposal','fork-plan','storage-plan','medusa-config']);
+  'validate-proposal','fork-plan','storage-plan','medusa-config',
+  'native-analyzer-eligibility']);
 const COMPONENTS=['foundry-node','source-compilers','slither-storage','medusa',
   'wake','mythril','certora-prover','autoprover','mimo-runtime','mimo-weights'];
 const ENGINES=['slither-storage','wake','mythril','medusa','certora-prover','autoprover'];
@@ -15,7 +16,7 @@ const MAX_JSON=64*1024*1024;
 
 function argsOf(argv){
   const supported=new Set(['operation','input-root','output-root','run-identity',
-    'profile','target-id','proposal','native-config']);
+    'profile','target-id','proposal','native-config','component']);
   const args={};
   for(let i=0;i<argv.length;i++){
     const key=argv[i]?.startsWith('--')?argv[i].slice(2):'';
@@ -509,6 +510,124 @@ function deriveMedusaEligibility(args,identity,issues){
   return {mode:'medusa-config',status:'NOT_EXECUTED',sourceBound,
     files:[output(args['output-root'],'MEDUSA_ELIGIBILITY_v1.json',out)],issues};
 }
+function deriveNativeAnalyzerEligibility(args,identity,issues){
+  const engines={
+    wake:{gate:'G3',tool:'wake',supports:['SOLIDITY'],
+      requiredNative:['approvedWakeSourceRevision','approvedPythonAbiAndLockSha256',
+        'approvedWakeBinarySha256','originalSourceRootSha256',
+        'observedWakeNativeCliSchema']},
+    mythril:{gate:'G4',tool:'mythril',supports:['SOLIDITY','VYPER'],
+      requiredNative:['approvedMythrilSourceRevision','approvedPythonAbiAndSolverSha256',
+        'approvedMythrilBinarySha256','originalFullyLinkedBytecodeHexSha256',
+        'observedMythrilNativeCliSchema']},
+    'certora-prover':{gate:'G5',tool:'certora-prover',supports:['SOLIDITY'],
+      requiredNative:['approvedLocalProverSourceRevision','approvedLocalProverJarSha256',
+        'approvedJavaRuntimeBinarySha256','approvedZ3OrCVC5BinarySha256',
+        'originalPermittedSourceLinkedCvlSpecificationSha256']},
+    'mimo-provider':{gate:'G6',tool:'autoprover',supports:['SOLIDITY'],
+      requiredNative:['approvedAutoProverSourceRevision','approvedComposerPythonLockSha256',
+        'verifiedProviderSpecAndModelProviderApi','verifiedLocalMiMoRuntimeSha256',
+        'verifiedLocalMiMoWeightsSha256','verifiedComposerToolCallAndMemorySemantics']},
+    autoprover:{gate:'G7',tool:'autoprover',supports:['SOLIDITY'],
+      requiredNative:['approvedAutoProverSourceRevision','approvedComposerPythonLockSha256',
+        'verifiedLocalCertoraProverAndSolvers','verifiedComposerMiMoProvider',
+        'approvedSourceArchiveAndTarget','sourceBoundOriginalNativeProverOutput']}
+  };
+  const name=args.component;
+  const selected=engines[name];
+  if(!selected){
+    issues.push(issue('NATIVE.ANALYZER_NOT_FIXED_ENUM','--component',
+      Object.keys(engines),name,
+      'Choose one of the fixed supported original native tool families'));
+    return {mode:'native-analyzer-eligibility',status:'NOT_EXECUTED',sourceBound:false,
+      files:[output(args['output-root'],'NATIVE_ANALYZER_ELIGIBILITY_v1.json',{
+        schemaVersion:'curveyield-security-native-analyzer-eligibility-v1',
+        analyzer:name??null,sourceBound:false,status:'UNSUPPORTED',issues})],issues};
+  }
+  const identityFacts=planSourceFacts(args,identity,issues);
+  const original=identityFacts.load('PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json');
+  const intelligence=identityFacts.load('SOURCE_INTELLIGENCE_AUTOMATED_v1.json');
+  let plan=null,planDigest=null;
+  try{
+    const file=args['native-config']??path.join(args['input-root'],'SECURITY_TARGET_PLAN_v1.json');
+    const data=readJson(file);
+    plan=data.value;planDigest=data.sha256;
+  }catch(error){
+    issues.push(issue('NATIVE.SOURCE_BOUND_TARGET_PLAN_MISSING',
+      '--native-config','original source-bound target plan file',
+      String(error),'Recreate exact G2 source-bound target census in isolated derived output'));
+  }
+  const sourceBound=identityFacts.sourceBound&&plan?.sourceBound===true&&
+    plan?.sourceArchiveSha256===identityFacts.sourceSha256&&!!intelligence;
+  const compiled=Array.isArray(plan?.targets)?plan.targets:[];
+  const bytecodeMap=new Map((Array.isArray(original?.value?.artifacts)?
+    original.value.artifacts:[]).map(row=>
+      [(row.compilationUnitId??'')+'|'+(row.qualifiedName??''),row]));
+  const targets=[];
+  const knownContexts=[];
+  const originalReadiness=identityFacts.load('PROJECT_READINESS_AUTOMATED_v1.json');
+  if(originalReadiness)knownContexts.push({
+    artifact:'PROJECT_READINESS_AUTOMATED_v1.json',originalSha256:originalReadiness.sha256});
+  for(const row of compiled){
+    const sourceScope=row.sourceBound===true&&row.compilationStatus==='EXACT_COMPILER_ARTIFACT';
+    const languageSupported=selected.supports.includes(row.language);
+    const contract=row.compilationUnitId+'|'+row.qualifiedName;
+    const candidate=bytecodeMap.get(contract)??null;
+    const originalCreation=typeof candidate?.bytecode==='string'?candidate.bytecode:null;
+    const originalBytecodeDigest=originalCreation&&/^(?:0x)?[0-9a-fA-F]*$/.test(originalCreation)?
+      sha256HexV1(Buffer.from(originalCreation.replace(/^0x/,'').toLowerCase(),'hex')):null;
+    const creationDigestMatch=!!originalBytecodeDigest&&
+      originalBytecodeDigest===row.creationBytecodeDigestSha256;
+    const needsLibraryLinking=!!candidate&&
+      Object.values(candidate.linkReferences??{}).some(group=>
+        Object.values(group??{}).some(positions=>Array.isArray(positions)&&positions.length>0));
+    const unsupportedReason=!sourceScope?'SOURCE_COMPILER_TARGET_UNVERIFIED':
+      !languageSupported?'SOURCE_LANGUAGE_UNSUPPORTED_BY_NATIVE_PROGRAM':
+      name==='mythril'&&!creationDigestMatch?'EXACT_LINKED_CREATION_BYTECODE_NOT_RECOVERED':
+      name==='mythril'&&needsLibraryLinking?'UNLINKED_LIBRARY_REFERENCES':
+      'APPROVED_NATIVE_TOOL_AND_SOURCE_EXECUTION_INPUT_MISSING';
+    targets.push({
+      targetId:row.targetId??null,sourcePath:row.sourcePath??null,
+      compilationUnitId:row.compilationUnitId??null,qualifiedName:row.qualifiedName??null,
+      sourceLanguage:row.language??null,
+      compilerAbiSha256:row.abiDigestSha256??null,
+      creationBytecodeSha256:row.creationBytecodeDigestSha256??null,
+      sourceBound:sourceScope,languageSupported,
+      creationBytecodePresentInOriginalCompilerBundle:!!originalCreation,
+      creationBytecodeDigestMatch:creationDigestMatch,
+      needsLibraryLinking,
+      eligibilityClass:languageSupported&&sourceScope?'POTENTIAL_AFTER_QUALIFICATION':'SOURCE_UNSUPPORTED',
+      status:'NOT_EXECUTED',
+      reasonCode:unsupportedReason,
+      originalNativeEvidenceSha256:null,
+      nativeAttempts:0,nativeFindingsObserved:null});
+  }
+  for(const field of selected.requiredNative)
+    issues.push(issue('NATIVE.ORIGINAL_EXECUTION_PREREQUISITE_MISSING',
+      'NATIVE_ANALYZER_ELIGIBILITY_v1.json.'+name+'.'+field,
+      'original independently qualified native evidence for '+selected.gate,
+      null,'Qualify exact source/lock/CLI/binary ABI and preserve original run output before enabling '+name));
+  const report={
+    schemaVersion:'curveyield-security-native-analyzer-eligibility-v1',
+    pipelineVersion:'v1',implementationSpecVersion:'v14',gate:selected.gate,
+    analyzer:name,requiredToolComponent:selected.tool,
+    status:'NOT_EXECUTED',sourceBound,sourceArchiveSha256:identityFacts.sourceSha256,
+    targetPlanSha256:planDigest,originalCompilerArtifactBundleSha256:original?.sha256??null,
+    originalSourceIntelligenceSha256:intelligence?.sha256??null,
+    runIdentity:identity,
+    targetCount:targets.length,languageSupportedCount:targets.filter(x=>x.languageSupported).length,
+    originalCompilerBytecodeCount:targets.filter(x=>x.creationBytecodeDigestMatch).length,
+    targetResults:targets,originalSourceFacts:knownContexts,
+    nativeExecutionAuthorized:false,nativeCommandsExecuted:0,
+    nativeOriginalRawBytesRetained:false,nativeToolVersion:null,
+    originalNativeStdoutSha256:null,originalNativeStderrSha256:null,
+    originalNativeExitCode:null,originalNativeFindings:[],
+    originalNativeCounterexamples:[],
+    requiredNativeFields:selected.requiredNative,issues
+  };
+  return {mode:'native-analyzer-eligibility',status:'NOT_EXECUTED',sourceBound,
+    files:[output(args['output-root'],'NATIVE_ANALYZER_ELIGIBILITY_v1.json',report)],issues};
+}
 function additional(args,identity,issues){
   const folder=args['output-root'], op=args.operation;
   let selected=null;
@@ -600,6 +719,8 @@ function additional(args,identity,issues){
     return deriveStoragePlan(args,identity,issues);
   }else if(op==='medusa-config'){
     return deriveMedusaEligibility(args,identity,issues);
+  }else if(op==='native-analyzer-eligibility'){
+    return deriveNativeAnalyzerEligibility(args,identity,issues);
   }else{
     const key={
       'mimo-objective':'MIMO_STAGE_OBJECTIVE_v1.json',
