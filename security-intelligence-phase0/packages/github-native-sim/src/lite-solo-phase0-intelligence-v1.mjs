@@ -743,7 +743,8 @@ async function analyzeVyperBytecodeWithEvmLisa({build,workDir}){
     await fs.mkdir(results,{recursive:true});
     const bytecodeFile=path.join(root,'runtime.bytecode');
     const abiFile=path.join(root,'compiler.abi.json');
-    await fs.writeFile(bytecodeFile,bytecode+'\n');
+    // EVMLiSA reads bytes verbatim and expects a pure even-length 0x hex string.
+    await fs.writeFile(bytecodeFile,bytecode);
     await fs.writeFile(abiFile,JSON.stringify(artifact.abi??[])+'\n');
     const raw=await runProcess({command:'java',args:[
       '-Xmx2g','-jar',jar,'--bytecode-path',bytecodeFile,
