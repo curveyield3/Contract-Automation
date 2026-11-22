@@ -732,3 +732,550 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
   si.technicalBundleDigest=digestCanonicalV1(withoutDigest);
   return si;
 }
+
+function slitherParentChainV1(element) {
+  const chain = [];
+  let current = element;
+  for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
+    chain.push(current);
+    current = current.type_specific_fields?.parent ?? null;
+  }
+  return chain;
+}
+function slitherSourceLinesV1(element) {
+  const lines = element?.source_mapping?.lines;
+  return Array.isArray(lines) ? lines.filter(x => Number.isInteger(x) && x > 0) : [];
+}
+function parseInventoryLocationV1(location) {
+  const match = String(location ?? '').match(/^(.+):(\d+)-(\d+)$/);
+  return match ? { path: match[1], start: Number(match[2]), end: Number(match[3]) } : null;
+}
+function slitherImpactRankV1(value) {
+  return ({ Critical: 4, High: 3, Medium: 2, Low: 1, Informational: 0 })[value] ?? -1;
+}
+function slitherConfidenceRankV1(value) {
+  return ({ High: 3, Medium: 2, Low: 1 })[value] ?? 0;
+}
+
+/**
+ * Stage 3: project raw Slither detectors onto the existing source inventory,
+ * effective ABI entrypoints and AST call graph. Navigation/triage only; no
+ * analyzer observation is promoted to a security finding and no F# is assigned.
+ */
+export function buildSlitherFlowPrioritizationV1({ sourceIntelligence, reviewInventory, slither } = {}) {
+  const si = sourceIntelligence;
+  const review = reviewInventory?.payload;
+  if (!si || !review || !Array.isArray(review.sourceUnits)) {
+    throw new Error('STAGE3_SOURCE_REVIEW_INVENTORY_REQUIRED');
+  }
+
+  const detectors = Array.isArray(slither?.detectors) ? slither.detectors : [];
+  const contracts = si.contracts ?? [];
+  const functions = si.functions ?? [];
+  const contexts = review.contexts ?? [];
+  const effectiveEntrypoints = si.effectiveEntrypoints ?? [];
+  const sourceTierByPath = new Map(review.sourceUnits.map(x => [x.path, x.scopeTier]));
+  const contractByQualifiedName = new Map(contracts.map(x => [x.qualifiedName, x]));
+  const contractById = new Map(contracts.map(x => [x.contractId, x]));
+  const contractByPathAndName = new Map();
+  const contractByPath = new Map();
+
+  for (const contract of contracts) {
+    const name = String(contract.qualifiedName ?? '').split(':').pop();
+    const key = String(contract.sourcePath ?? '') + '|' + name;
+    const named = contractByPathAndName.get(key) ?? [];
+    named.push(contract);
+    contractByPathAndName.set(key, named);
+    const samePath = contractByPath.get(contract.sourcePath) ?? [];
+    samePath.push(contract);
+    contractByPath.set(contract.sourcePath, samePath);
+  }
+
+  const functionsByContractSignature = new Map();
+  for (const fn of functions) {
+    const key = String(fn.contractId ?? '') + '|' + String(fn.signature ?? '');
+    const matches = functionsByContractSignature.get(key) ?? [];
+    matches.push(fn);
+    functionsByContractSignature.set(key, matches);
+  }
+
+  const contextById = new Map(contexts.map(x => [x.contextId, x]));
+  const stateEffects = si.stateEffects ?? [];
+  const privilegeCandidates = si.privilegeCandidates ?? [];
+  const valueFlowCandidates = si.valueFlowCandidates ?? [];
+  const incomingEdges = new Map();
+
+  for (const edge of si.callGraph ?? []) {
+    if (!edge?.targetFunctionId || !edge?.callerFunctionId) continue;
+    const rows = incomingEdges.get(edge.targetFunctionId) ?? [];
+    rows.push(edge);
+    incomingEdges.set(edge.targetFunctionId, rows);
+  }
+  for (const rows of incomingEdges.values()) {
+    rows.sort((a, b) => String(a.callEdgeId ?? '').localeCompare(String(b.callEdgeId ?? '')));
+  }
+
+  const entrypointsByFunctionId = new Map();
+  const entrypointsByContractSignature = new Map();
+  const addEntrypoint = (map, key, entrypoint) => {
+    const rows = map.get(key) ?? [];
+    if (!rows.some(x => x.entrypointId === entrypoint.entrypointId)) rows.push(entrypoint);
+    map.set(key, rows);
+  };
+
+  for (const entrypoint of effectiveEntrypoints) {
+    const implementationContract = contractByQualifiedName.get(entrypoint.implementationContract ?? entrypoint.qualifiedContract);
+    const implementationContractId = implementationContract?.contractId ?? entrypoint.contractId;
+    const signature = entrypoint.canonicalSignature;
+    addEntrypoint(entrypointsByContractSignature, String(entrypoint.contractId) + '|' + signature, entrypoint);
+    addEntrypoint(entrypointsByContractSignature, String(implementationContractId) + '|' + signature, entrypoint);
+
+    const candidates = functionsByContractSignature.get(String(implementationContractId) + '|' + signature) ??
+      functionsByContractSignature.get(String(entrypoint.contractId) + '|' + signature) ?? [];
+    if (candidates.length === 1) {
+      addEntrypoint(entrypointsByFunctionId, candidates[0].functionId, entrypoint);
+      continue;
+    }
+
+    const context = contextById.get(entrypoint.implementationContextId);
+    if (context?.canonicalSignature) {
+      const contextContract = contracts.find(x => x.qualifiedName === context.qualifiedContainer);
+      const contextFunctions = functionsByContractSignature.get(String(contextContract?.contractId ?? implementationContractId) + '|' + context.canonicalSignature) ?? [];
+      if (contextFunctions.length === 1) addEntrypoint(entrypointsByFunctionId, contextFunctions[0].functionId, entrypoint);
+    }
+  }
+
+  function traceEntrypointsFromFunction(functionId) {
+    if (!functionId) return { paths: [], truncated: false, expanded: 0, attempted: false };
+    const queue = [{ functionId, reverseEdges: [], depth: 0 }];
+    const visited = new Set([functionId]);
+    const found = new Map();
+    let expanded = 0;
+    let truncated = false;
+
+    while (queue.length && expanded < 10000) {
+      const current = queue.shift();
+      expanded++;
+      for (const entrypoint of entrypointsByFunctionId.get(current.functionId) ?? []) {
+        if (!found.has(entrypoint.entrypointId)) {
+          const orderedEdges = current.reverseEdges.slice().reverse();
+          found.set(entrypoint.entrypointId, {
+            entrypointId: entrypoint.entrypointId,
+            canonicalSignature: entrypoint.canonicalSignature,
+            qualifiedContract: entrypoint.qualifiedContract,
+            stateChanging: entrypoint.stateChanging === true,
+            implementationOrigin: entrypoint.implementationOrigin,
+            connectionType: orderedEdges.length ? 'SOURCE_CALL_GRAPH_PATH_CANDIDATE' : 'DIRECT_FUNCTION_MATCH',
+            callPath: orderedEdges.map(edge => ({
+              callEdgeId: edge.callEdgeId ?? null,
+              callerFunctionId: edge.callerFunctionId,
+              targetFunctionId: edge.targetFunctionId,
+              memberOrName: edge.memberOrName ?? null,
+              callClass: edge.callClass ?? null,
+              sourceLocation: edge.sourceLocation ?? null,
+              confidenceClass: edge.confidenceClass ?? null
+            }))
+          });
+        }
+      }
+
+      const inbound = incomingEdges.get(current.functionId) ?? [];
+      if (current.depth >= 12) {
+        if (inbound.length) truncated = true;
+        continue;
+      }
+      for (const edge of inbound) {
+        const callerId = edge.callerFunctionId;
+        if (!callerId || visited.has(callerId)) continue;
+        visited.add(callerId);
+        queue.push({
+          functionId: callerId,
+          reverseEdges: [...current.reverseEdges, edge],
+          depth: current.depth + 1
+        });
+      }
+    }
+    if (queue.length) truncated = true;
+    return {
+      paths: [...found.values()].sort((a, b) => a.entrypointId.localeCompare(b.entrypointId)),
+      truncated,
+      expanded,
+      attempted: true
+    };
+  }
+
+  function resolveContract(sourcePath, contractName, functionRecord) {
+    if (functionRecord?.contractId && contractById.has(functionRecord.contractId)) {
+      return contractById.get(functionRecord.contractId);
+    }
+    if (contractName) {
+      const matches = contractByPathAndName.get(String(sourcePath) + '|' + String(contractName)) ?? [];
+      if (matches.length === 1) return matches[0];
+    }
+    const samePath = contractByPath.get(sourcePath) ?? [];
+    return samePath.length === 1 ? samePath[0] : null;
+  }
+
+  function resolveFunction(sourcePath, contract, signature, functionName, lineStart, lineEnd) {
+    if (contract?.contractId && signature) {
+      const exact = functionsByContractSignature.get(String(contract.contractId) + '|' + signature) ?? [];
+      if (exact.length === 1) return exact[0];
+    }
+    if (signature) {
+      const matches = functions.filter(fn => {
+        if (fn.signature !== signature) return false;
+        const location = parseInventoryLocationV1(fn.sourceLocation);
+        return location?.path === sourcePath &&
+          (!lineStart || (location.start <= lineEnd && location.end >= lineStart));
+      });
+      if (matches.length === 1) return matches[0];
+    }
+    if (functionName && lineStart) {
+      const matches = functions.filter(fn => {
+        if (!String(fn.signature ?? '').startsWith(functionName + '(')) return false;
+        const location = parseInventoryLocationV1(fn.sourceLocation);
+        return location?.path === sourcePath &&
+          location.start <= lineEnd && location.end >= lineStart;
+      });
+      if (matches.length === 1) return matches[0];
+    }
+    return null;
+  }
+
+  const priorityRank = {
+    P1_FLOW_LINKED_HIGH_IMPACT: 1,
+    P2_FLOW_OR_HIGH_IMPACT: 2,
+    P3_IN_SCOPE_CONTEXT: 3,
+    P4_DEPENDENCY_OR_UNMAPPED: 4
+  };
+
+  const observations = detectors.map((detector, rawDetectorIndex) => {
+    const groupedAnchors = new Map();
+    for (const element of detector?.elements ?? []) {
+      const chain = slitherParentChainV1(element);
+      const functionElement = chain.find(x => x.type === 'function') ?? null;
+      const contractElement = chain.find(x => x.type === 'contract') ?? null;
+      const pathCandidates = [
+        functionElement?.source_mapping?.filename_relative,
+        element?.source_mapping?.filename_relative,
+        contractElement?.source_mapping?.filename_relative,
+        functionElement?.source_mapping?.filename_short,
+        element?.source_mapping?.filename_short
+      ];
+      const sourcePath = pathCandidates.find(x => typeof x === 'string' && x.length && !x.startsWith('/')) ?? null;
+      if (!sourcePath) continue;
+
+      const signature = functionElement?.type_specific_fields?.signature ?? null;
+      const functionName = functionElement?.name ?? null;
+      const contractName = contractElement?.name ?? null;
+      const elementLines = slitherSourceLinesV1(element);
+      const functionLines = slitherSourceLinesV1(functionElement);
+      const key = [sourcePath, contractName ?? '', signature ?? functionName ?? 'CONTRACT'].join('|');
+      const anchor = groupedAnchors.get(key) ?? {
+        sourcePath,
+        contractName,
+        functionSignature: signature,
+        functionName,
+        findingLines: new Set(),
+        functionLines: new Set(),
+        elementTypes: new Set(),
+        dependencyFlag: false
+      };
+
+      for (const line of elementLines) anchor.findingLines.add(line);
+      for (const line of functionLines) anchor.functionLines.add(line);
+      if (element?.type) anchor.elementTypes.add(element.type);
+      if (element?.source_mapping?.is_dependency === true ||
+          functionElement?.source_mapping?.is_dependency === true ||
+          contractElement?.source_mapping?.is_dependency === true) {
+        anchor.dependencyFlag = true;
+      }
+      groupedAnchors.set(key, anchor);
+    }
+
+    if (!groupedAnchors.size) {
+      const fallback = String(detector?.first_markdown_element ?? '').match(/^(.+?)#L(\d+)(?:-L?(\d+))?$/);
+      if (fallback) {
+        const sourcePath = fallback[1];
+        const line = Number(fallback[2]);
+        const end = Number(fallback[3] ?? fallback[2]);
+        groupedAnchors.set(sourcePath + '||MARKDOWN_FALLBACK', {
+          sourcePath, contractName: null, functionSignature: null, functionName: null,
+          findingLines: new Set(Array.from({ length: Math.max(1, end - line + 1) }, (_, i) => line + i)),
+          functionLines: new Set(), elementTypes: new Set(['MARKDOWN_SOURCE_ANCHOR']), dependencyFlag: false
+        });
+      }
+    }
+
+    const anchors = [...groupedAnchors.values()].map(rawAnchor => {
+      const findingLines = [...rawAnchor.findingLines].sort((a, b) => a - b);
+      const functionLines = [...rawAnchor.functionLines].sort((a, b) => a - b);
+      const lineStart = findingLines[0] ?? functionLines[0] ?? null;
+      const lineEnd = findingLines.at(-1) ?? functionLines.at(-1) ?? lineStart;
+      const contract = resolveContract(rawAnchor.sourcePath, rawAnchor.contractName, null);
+      const fn = resolveFunction(
+        rawAnchor.sourcePath, contract, rawAnchor.functionSignature,
+        rawAnchor.functionName, lineStart, lineEnd
+      );
+      const resolvedContract = resolveContract(rawAnchor.sourcePath, rawAnchor.contractName, fn);
+      const sourceTier = sourceTierByPath.get(rawAnchor.sourcePath) ??
+        (rawAnchor.dependencyFlag ? 'DEPENDENCY' : 'SOURCE_TIER_UNRESOLVED');
+      const qualifiedContract = resolvedContract?.qualifiedName ??
+        (rawAnchor.contractName ? rawAnchor.sourcePath + ':' + rawAnchor.contractName : null);
+      const reviewContext = contexts.find(x =>
+        x.path === rawAnchor.sourcePath &&
+        x.canonicalSignature === (fn?.signature ?? rawAnchor.functionSignature) &&
+        (!resolvedContract || x.qualifiedContainer === resolvedContract.qualifiedName)
+      ) ?? null;
+      const stateEffect = stateEffects.find(x =>
+        x.sourcePath === rawAnchor.sourcePath &&
+        x.signature === (fn?.signature ?? rawAnchor.functionSignature) &&
+        (!resolvedContract || x.qualifiedContainer === resolvedContract.qualifiedName)
+      ) ?? null;
+      const trace = traceEntrypointsFromFunction(fn?.functionId);
+      const directSignatureEntrypoints = resolvedContract && (fn?.signature ?? rawAnchor.functionSignature)
+        ? (entrypointsByContractSignature.get(String(resolvedContract.contractId) + '|' + (fn?.signature ?? rawAnchor.functionSignature)) ?? [])
+        : [];
+      const pathMap = new Map(trace.paths.map(x => [x.entrypointId, x]));
+      for (const entrypoint of directSignatureEntrypoints) {
+        if (!pathMap.has(entrypoint.entrypointId)) {
+          pathMap.set(entrypoint.entrypointId, {
+            entrypointId: entrypoint.entrypointId,
+            canonicalSignature: entrypoint.canonicalSignature,
+            qualifiedContract: entrypoint.qualifiedContract,
+            stateChanging: entrypoint.stateChanging === true,
+            implementationOrigin: entrypoint.implementationOrigin,
+            connectionType: 'DIRECT_ABI_SIGNATURE_MATCH_WITHOUT_FUNCTION_ID',
+            callPath: []
+          });
+        }
+      }
+      const entrypointPaths = [...pathMap.values()].sort((a, b) => a.entrypointId.localeCompare(b.entrypointId));
+      const connectedEntrypointIds = entrypointPaths.map(x => x.entrypointId);
+      const connectedStateChangingEntrypointIds = entrypointPaths.filter(x => x.stateChanging).map(x => x.entrypointId);
+      const privilegeIds = fn?.functionId
+        ? privilegeCandidates.filter(x => x.functionId === fn.functionId).map(x => x.candidateId)
+        : [];
+      const valueFlowIds = fn?.functionId
+        ? valueFlowCandidates.filter(x => x.callerFunctionId === fn.functionId).map(x => x.valueFlowCandidateId)
+        : [];
+      const functionLocation = functionLines.length
+        ? rawAnchor.sourcePath + ':' + functionLines[0] + '-' + functionLines.at(-1)
+        : null;
+      const findingLocation = lineStart
+        ? rawAnchor.sourcePath + ':' + lineStart + '-' + lineEnd
+        : functionLocation;
+
+      return {
+        contractId: resolvedContract?.contractId ?? null,
+        qualifiedContract,
+        contractKind: resolvedContract?.contractKind ?? null,
+        sourcePath: rawAnchor.sourcePath,
+        sourceTier,
+        functionId: fn?.functionId ?? null,
+        functionSignature: fn?.signature ?? rawAnchor.functionSignature ?? null,
+        functionName: fn?.signature ? String(fn.signature).split('(')[0] : rawAnchor.functionName,
+        functionMappingStatus: fn ? 'SOURCE_PATH_SIGNATURE_AND_CONTRACT_MATCH' :
+          rawAnchor.functionSignature ? 'FUNCTION_SIGNATURE_NOT_RESOLVED' :
+          rawAnchor.contractName ? 'CONTRACT_ONLY_NO_FUNCTION_MAPPING' : 'SOURCE_ANCHOR_ONLY',
+        findingLines,
+        functionLocation,
+        findingLocation,
+        reviewContextId: reviewContext?.contextId ?? null,
+        localStateReads: stateEffect?.directlyObservedStateReads ?? reviewContext?.stateReads ?? [],
+        localStateWrites: stateEffect?.directlyObservedStateWrites ?? reviewContext?.stateWrites ?? [],
+        stateEffectEvidenceStatus: stateEffect?.writeEvidenceStatus ?? 'NO_MATCHED_LOCAL_STATE_EFFECT_CONTEXT',
+        modifiers: reviewContext?.modifiers ?? [],
+        privilegeCandidateIds: privilegeIds,
+        valueFlowCandidateIds: valueFlowIds,
+        connectedEntrypointIds,
+        connectedStateChangingEntrypointIds,
+        entrypointPaths,
+        pathSearchStatus: trace.attempted
+          ? (trace.truncated ? 'SOURCE_CALL_GRAPH_SEARCH_TRUNCATED' : 'SOURCE_CALL_GRAPH_SEARCH_COMPLETE')
+          : 'NOT_ATTEMPTED_NO_FUNCTION_ID',
+        sourceAnchorEvidence: rawAnchor.elementTypes.has('MARKDOWN_SOURCE_ANCHOR')
+          ? 'SLITHER_FIRST_MARKDOWN_ELEMENT'
+          : 'SLITHER_ELEMENT_SOURCE_MAPPING'
+      };
+    });
+
+    const contractIds = [...new Set(anchors.map(x => x.contractId).filter(Boolean))].sort();
+    const functionIds = [...new Set(anchors.map(x => x.functionId).filter(Boolean))].sort();
+    const connectedStateChangingEntrypointIds = [...new Set(anchors.flatMap(x => x.connectedStateChangingEntrypointIds))].sort();
+    const connectedEntrypointIds = [...new Set(anchors.flatMap(x => x.connectedEntrypointIds))].sort();
+    const inScope = anchors.some(x => x.sourceTier === 'IN_SCOPE');
+    const hasStateChangingPath = connectedStateChangingEntrypointIds.length > 0;
+    const highImpact = ['Critical', 'High'].includes(detector?.impact);
+    let priority;
+    if (hasStateChangingPath && highImpact) priority = 'P1_FLOW_LINKED_HIGH_IMPACT';
+    else if (hasStateChangingPath || (inScope && highImpact)) priority = 'P2_FLOW_OR_HIGH_IMPACT';
+    else if (inScope) priority = 'P3_IN_SCOPE_CONTEXT';
+    else priority = 'P4_DEPENDENCY_OR_UNMAPPED';
+
+    const priorityReasonCodes = [];
+    if (inScope) priorityReasonCodes.push('IN_SCOPE_SOURCE_MAPPING');
+    if (hasStateChangingPath) priorityReasonCodes.push('STATE_CHANGING_ENTRYPOINT_PATH_CANDIDATE');
+    if (highImpact) priorityReasonCodes.push('SLITHER_HIGH_OR_CRITICAL_IMPACT_LABEL');
+    if (!hasStateChangingPath && inScope && highImpact) priorityReasonCodes.push('NO_STATE_CHANGING_ENTRYPOINT_PATH_ESTABLISHED');
+    if (!inScope) priorityReasonCodes.push('DEPENDENCY_OR_UNRESOLVED_SCOPE');
+    if (!functionIds.length) priorityReasonCodes.push('FUNCTION_MAPPING_UNRESOLVED');
+
+    const sourceScope = inScope ? 'IN_SCOPE' :
+      anchors.length && anchors.every(x => x.sourceTier === 'DEPENDENCY') ? 'DEPENDENCY' : 'UNRESOLVED';
+
+    return {
+      candidateId: 'SLITHER-' + String(rawDetectorIndex + 1).padStart(4, '0'),
+      findingId: detector?.id ?? null,
+      rawDetectorIndex,
+      rawEvidenceRef: 'SLITHER_v1.json#detectors[' + rawDetectorIndex + ']',
+      check: detector?.check ?? 'UNNAMED_DETECTOR',
+      impact: detector?.impact ?? null,
+      confidence: detector?.confidence ?? null,
+      priority,
+      priorityReasonCodes,
+      sourceScope,
+      contractIds,
+      functionIds,
+      connectedEntrypointIds,
+      connectedStateChangingEntrypointIds,
+      sourceAnchors: anchors,
+      descriptionExcerpt: String(detector?.description ?? '').replace(/\s+/g, ' ').trim().slice(0, 280),
+      status: 'NEUTRAL_ANALYZER_CANDIDATE'
+    };
+  });
+
+  observations.sort((a, b) =>
+    priorityRank[a.priority] - priorityRank[b.priority] ||
+    slitherImpactRankV1(b.impact) - slitherImpactRankV1(a.impact) ||
+    slitherConfidenceRankV1(b.confidence) - slitherConfidenceRankV1(a.confidence) ||
+    String(a.sourceAnchors[0]?.sourcePath ?? '').localeCompare(String(b.sourceAnchors[0]?.sourcePath ?? '')) ||
+    Number(a.sourceAnchors[0]?.findingLines?.[0] ?? 0) - Number(b.sourceAnchors[0]?.findingLines?.[0] ?? 0) ||
+    a.rawDetectorIndex - b.rawDetectorIndex
+  );
+
+  const priorityCounts = Object.fromEntries(Object.keys(priorityRank).map(key => [key, 0]));
+  const byContractMap = new Map();
+  const unmappedCandidateIds = [];
+  const contractUnmappedCandidateIds = [];
+
+  for (const observation of observations) {
+    priorityCounts[observation.priority] = (priorityCounts[observation.priority] ?? 0) + 1;
+    if (!observation.sourceAnchors.length) unmappedCandidateIds.push(observation.candidateId);
+    if (!observation.contractIds.length) contractUnmappedCandidateIds.push(observation.candidateId);
+
+    for (const anchor of observation.sourceAnchors) {
+      const groupKey = anchor.contractId ?? ('SOURCE:' + anchor.sourcePath);
+      const group = byContractMap.get(groupKey) ?? {
+        contractId: anchor.contractId,
+        qualifiedContract: anchor.qualifiedContract ?? ('SOURCE FILE: ' + anchor.sourcePath),
+        sourcePath: anchor.sourcePath,
+        sourceTier: anchor.sourceTier,
+        candidateIds: new Set(),
+        connectedEntrypointIds: new Set(),
+        priorityCounts: Object.fromEntries(Object.keys(priorityRank).map(key => [key, 0]))
+      };
+      if (!group.candidateIds.has(observation.candidateId)) {
+        group.candidateIds.add(observation.candidateId);
+        group.priorityCounts[observation.priority] = (group.priorityCounts[observation.priority] ?? 0) + 1;
+      }
+      for (const id of anchor.connectedStateChangingEntrypointIds) group.connectedEntrypointIds.add(id);
+      if (anchor.sourceTier === 'IN_SCOPE') group.sourceTier = 'IN_SCOPE';
+      byContractMap.set(groupKey, group);
+    }
+  }
+
+  const byContract = [...byContractMap.values()].map(group => ({
+    contractId: group.contractId,
+    qualifiedContract: group.qualifiedContract,
+    sourcePath: group.sourcePath,
+    sourceTier: group.sourceTier,
+    observationCount: group.candidateIds.size,
+    priorityCounts: group.priorityCounts,
+    candidateIds: [...group.candidateIds].sort((a, b) =>
+      priorityRank[observations.find(x => x.candidateId === a)?.priority] -
+      priorityRank[observations.find(x => x.candidateId === b)?.priority] || a.localeCompare(b)
+    ),
+    connectedStateChangingEntrypointIds: [...group.connectedEntrypointIds].sort()
+  })).sort((a, b) =>
+    (b.priorityCounts.P1_FLOW_LINKED_HIGH_IMPACT ?? 0) - (a.priorityCounts.P1_FLOW_LINKED_HIGH_IMPACT ?? 0) ||
+    b.observationCount - a.observationCount ||
+    String(a.qualifiedContract).localeCompare(String(b.qualifiedContract))
+  );
+
+  const mappingCounts = {
+    detectorCount: observations.length,
+    sourceAnchoredDetectorCount: observations.filter(x => x.sourceAnchors.length > 0).length,
+    contractMappedDetectorCount: observations.filter(x => x.contractIds.length > 0).length,
+    functionMappedDetectorCount: observations.filter(x => x.functionIds.length > 0).length,
+    stateChangingFlowConnectedDetectorCount: observations.filter(x => x.connectedStateChangingEntrypointIds.length > 0).length,
+    anyEntrypointConnectedDetectorCount: observations.filter(x => x.connectedEntrypointIds.length > 0).length,
+    sourceUnmappedDetectorCount: unmappedCandidateIds.length,
+    contractUnmappedDetectorCount: contractUnmappedCandidateIds.length
+  };
+
+  const index = {
+    schemaVersion: 'curveyield-slither-flow-prioritization-v1',
+    status: unmappedCandidateIds.length || contractUnmappedCandidateIds.length
+      ? 'INDEXED_WITH_EXPLICIT_UNRESOLVED_MAPPINGS' : 'INDEXED',
+    sourceSha256: reviewInventory.sourceSha256 ?? si.sourceIdentity?.archiveSha256 ?? null,
+    notSecurityVerdict: true,
+    rawEvidence: {
+      file: 'SLITHER_v1.json',
+      rawArtifactRef: slither?.rawArtifactRef ?? null,
+      sourceCommit: slither?.sourceCommit ?? si.sourceIdentity?.commit ?? null,
+      version: slither?.version ?? null,
+      analyzerStatus: slither?.componentStatus ?? slither?.status ?? 'UNAVAILABLE',
+      detectorCount: detectors.length
+    },
+    prioritizationPolicy: {
+      P1_FLOW_LINKED_HIGH_IMPACT: 'High/Critical Slither impact label plus a source call-graph path candidate to at least one state-changing effective ABI entrypoint.',
+      P2_FLOW_OR_HIGH_IMPACT: 'A state-changing effective ABI entrypoint path candidate, or a High/Critical observation in an in-scope source unit without a resolved state-changing path.',
+      P3_IN_SCOPE_CONTEXT: 'Other source-mapped observations in an in-scope source unit.',
+      P4_DEPENDENCY_OR_UNMAPPED: 'Dependency-only, source-unmapped or contract-unmapped observations without an in-scope priority basis.',
+      tieBreak: 'Impact descending, confidence descending, source path, source line, then original detector order.',
+      interpretation: 'Priority is a review-navigation order, not a security severity or finding verdict.'
+    },
+    priorityCounts,
+    mappingCounts,
+    byContract,
+    unmappedCandidateIds,
+    contractUnmappedCandidateIds,
+    limitations: [
+      'Slither observations remain neutral analyzer candidates; this index does not promote them to confirmed security findings.',
+      'Contract and function mappings use Slither source mappings reconciled against the admitted compiler/source inventory; unresolved mappings remain explicit.',
+      'Entrypoint paths are static source call-graph candidates, not proof of runtime reachability, dynamic dispatch, or deployed behavior.',
+      'The index links compiler-effective ABI entrypoints; the auditor still assigns semantic F# flows during Round 2.',
+      'Vyper 0.4.3 structural AST observations do not provide Slither semantic detector coverage.'
+    ],
+    observations
+  };
+  index.indexDigestSha256 = digestCanonicalV1(index);
+
+  si.staticRecon ??= {};
+  si.staticRecon.slither ??= {};
+  si.staticRecon.slither.candidateCount = detectors.length;
+  si.staticRecon.slither.candidateIndex = observations;
+  const { observations: omittedObservations, ...indexSummary } = index;
+  si.staticRecon.slither.prioritization = indexSummary;
+
+  review.slitherTriage = {
+    schemaVersion: index.schemaVersion,
+    status: index.status,
+    sourceSha256: index.sourceSha256,
+    rawEvidenceRef: 'SLITHER_v1.json',
+    notSecurityVerdict: true,
+    detectorCount: detectors.length,
+    priorityCounts,
+    mappingCounts,
+    byContract,
+    unmappedCandidateIds,
+    contractUnmappedCandidateIds,
+    indexDigestSha256: index.indexDigestSha256,
+    limitations: index.limitations
+  };
+
+  const { technicalBundleDigest, ...sourceIntelligenceWithoutDigest } = si;
+  si.technicalBundleDigest = digestCanonicalV1(sourceIntelligenceWithoutDigest);
+  return index;
+}

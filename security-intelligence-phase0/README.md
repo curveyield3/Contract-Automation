@@ -271,3 +271,44 @@ functions and their anchored bodies, separate from ABI-authorized external
 entrypoints. Parameter lists for internal source-only functions are labeled
 unresolved rather than asserted as compiler ABI signatures. This allows
 Vyper internal \`raw_call\` sites to retain real caller-function ownership.
+
+
+## Stage 3 — source-flow-prioritized Slither evidence
+
+Stage 3 keeps the existing Phase 0 workflow, compiler pass, review-inventory builder,
+and raw Slither outputs. It adds a deterministic navigation layer to the existing
+SOURCE_INTELLIGENCE_AUTOMATED_v1.json, REVIEW_INVENTORY_v1.json, and
+DISCOVERY_SUMMARY_v1.md outputs.
+
+- staticRecon.slither.candidateIndex now retains each raw detector's stable
+  candidate ID and Slither finding ID, impact/confidence labels, source anchors,
+  resolved contract/function identities, direct local state/privilege/value-flow
+  context, and source-call-graph path candidates to compiler-effective ABI
+  entrypoints.
+- staticRecon.slither.prioritization records the priority policy, per-priority
+  counts, mapping coverage, contract grouping, unresolved IDs, limitations, and
+  a digest of the derived index.
+- REVIEW_INVENTORY_v1.json adds payload.slitherTriage, a compact per-contract
+  review queue that links back to the canonical candidate IDs in Source Intelligence.
+- DISCOVERY_SUMMARY_v1.md is the concise agent navigation surface: build and
+  coverage facts, significant contracts and entrypoint counts, state evidence,
+  prioritized Slither observations, contract groupings, and exact evidence hashes.
+
+The order is deliberately conservative: P1 is reserved for High/Critical Slither
+labels with a source call-graph path candidate to a state-changing effective ABI
+entrypoint; P2 covers other state-changing-path candidates or High/Critical
+in-scope observations without a resolved path; P3 covers other in-scope observations;
+P4 covers dependency-only or unresolved observations. Tie-breaking is deterministic
+by impact, confidence, source path, source line, and original detector order.
+
+No finding is promoted. Slither impact/confidence remain analyzer labels;
+source call-graph links are structural path candidates, not proof of runtime
+reachability, dynamic dispatch, or deployed behavior. The auditor still assigns
+semantic F# flows in Round 2 and adjudicates every candidate through the existing
+eleven rounds. The full SLITHER_v1.json and SLITHER_RELATIONAL_FACTS_v1.json
+remain unchanged and are included in the evidence manifest by exact SHA-256.
+
+Stage 3 does not add workflows, tests, deployment actions, contract-specific rules,
+a second scanner, or another audit round. The existing artifact names and
+eleven-round v5 handoff remain compatible. Operational qualification requires
+the existing BoostHub v55 regression and a structurally different source package.

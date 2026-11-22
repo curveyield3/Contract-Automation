@@ -8,7 +8,7 @@ import { buildProject } from '../../runner/src/build-dispatch.mjs';
 import { runSlitherAnalysis } from './analysis.mjs';
 import { resolveCompiledSourceFile } from './phase0-compiled-source-resolve-v1.mjs';
 import { generateBuildSbomV1 } from './sbom-v1.mjs';
-import { generateSourceIntelligenceTechnicalBundleV1, enrichSourceIntelligenceWithReviewInventoryV1 } from './source-intelligence-technical-v1.mjs';
+import { generateSourceIntelligenceTechnicalBundleV1, enrichSourceIntelligenceWithReviewInventoryV1, buildSlitherFlowPrioritizationV1 } from './source-intelligence-technical-v1.mjs';
 import { writeReviewInventoryOutputsV1 } from './adr-review-inventory-v1.mjs';
 import { buildExecutionArtifactBundleV2, buildContractIdentityIndexV1 } from './phase0-execution-input-v2.mjs';
 import { compileWithPrivateCacheV1 } from './phase0-private-build-cache-v1.mjs';
@@ -1245,6 +1245,8 @@ async function main(){
     if(reviewInventory.sourceSha256!==request.source.archiveSha256)
       throw new Error('STAGE2_REVIEW_INVENTORY_SOURCE_IDENTITY_MISMATCH');
     enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligence,reviewInventory,build,analysis:{slither}});
+    buildSlitherFlowPrioritizationV1({sourceIntelligence,reviewInventory,slither});
+    await fs.writeFile(inventoryFile,JSON.stringify(reviewInventory,null,2)+'\n');
   });
   const projectReadiness=await withProgressStage('scan-project-readiness',()=>scanProjectReadiness({projectRoot:detected.absolute,build,cfg:effectiveCfg}));
   const deployConfigExecution=await withProgressStage('execute-local-deployment-inventory',()=>executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness}));
