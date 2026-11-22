@@ -1,11 +1,11 @@
 {
   "schemaVersion": "curveyield-security-preflight-request-v1",
   "runMode": "SOURCE_PREFLIGHT",
-  "requestId": "boosthub-v57-20261122-cb6fd18f",
+  "requestId": "boosthub-v63-20261122-b9e407d3",
   "source": {
     "repository": "curveyield3/Smart-Contracts",
-    "commit": "0eec577e203b33af16fbea31481f0aeee28f946a",
-    "archivePath": "Audit-Intake/BoostHub_Contract_Stack_v57.zip",
-    "archiveSha256": "cb6fd18f5364e797a3fb01049cdb822227d8f9898c029519170344bba149f560"
+    "commit": "4451431a0ae3aea70c945acf2525e7c9bc34b443",
+    "archivePath": "Audit-Intake/BoostHub_Contract_Stack_v63.zip",
+    "archiveSha256": "b9e407d396f5e6e9eeaf6575a15672b74e206727c3bc262ff461966771dc2549"
   }
 }
