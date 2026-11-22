@@ -221,7 +221,84 @@ function enumerate(args,identity,globalIssues){
   ];
   return {mode:'enumerate-targets',status:basic.status,files,issues,sourceBound};
 }
-function additional(args,identity,issues){
+function originalMimoObjective(args,identity,issues){
+  let manifest=null,si=null,sourceSha=null,siDigest=null;
+  const root=args['input-root'],targetId=args['target-id']??null;
+  try{
+    manifest=readJson(path.join(root,'PREFLIGHT_MANIFEST_v1.json'),root).value;
+    sourceSha=manifest?.source?.expectedSha256??null;
+    if(!HEX.test(String(sourceSha))||sourceSha!==manifest?.source?.observedSha256||
+       manifest?.sourceAdmissionVerified!==true||identity.verifiedForCurrentJob!==true)
+      throw Error('SOURCE_OR_CURRENT_RUN_UNVERIFIED');
+    const doc=evidence(root,manifest,'SOURCE_INTELLIGENCE_AUTOMATED_v1.json',issues);
+    if(!doc||!bound(doc,'SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceSha,issues))
+      throw Error('SOURCE_INTELLIGENCE_NOT_ORIGINAL_SOURCE_BOUND');
+    si=doc.value;siDigest=doc.sha256;
+  }catch(error){
+    issues.push(issue('MIMO.SOURCE_INTELLIGENCE_UNAVAILABLE',
+      'SOURCE_INTELLIGENCE_AUTOMATED_v1.json.sourceIdentity',
+      'same-run SHA-indexed source intelligence',String(error),
+      'Restore original immutable preflight source-bound evidence'));
+  }
+  const compiled=(Array.isArray(si?.compilerArtifacts)?si.compilerArtifacts:[]).map(row=>{
+    const q=row.qualifiedName??null,unit=row.compilationUnitId??null,abi=row.abiDigestSha256??null;
+    if(!q||!unit||!HEX.test(String(abi)))return null;
+    return {...row,targetId:'TARGET-'+digestCanonicalV1([sourceSha,unit,q,abi]).slice(0,32)};
+  }).filter(Boolean);
+  const target=compiled.find(row=>row.targetId===targetId)??null;
+  if(!target)issues.push(issue('MIMO.TARGET_NOT_SOURCE_BOUND','--target-id',
+    'exact compiler-qualified target ID from current archive',targetId,
+    'Choose a target ID from the original SECURITY_TARGET_PLAN_v1.json'));
+  const contract=(Array.isArray(si?.contracts)?si.contracts:[]).find(row=>
+    row.qualifiedName===target?.qualifiedName&&
+    row.compilationUnitId===target?.compilationUnitId)??null;
+  const entrypoints=(Array.isArray(si?.effectiveEntrypoints)?si.effectiveEntrypoints:[])
+    .filter(row=>row.contractId===contract?.contractId&&
+      (row.compilationUnitId===target?.compilationUnitId||row.compilationUnitId==null))
+    .map(row=>({entrypointId:row.entrypointId??null,
+      canonicalSignature:row.canonicalSignature??null,selector:row.selector??null,
+      stateChanging:row.stateChanging??null,
+      implementationOrigin:row.implementationOrigin??null}))
+    .filter(row=>row.canonicalSignature);
+  if(target&&!entrypoints.length)issues.push(issue('MIMO.ABI_ENTRYPOINTS_UNRESOLVED',
+    'SOURCE_INTELLIGENCE_AUTOMATED_v1.json.effectiveEntrypoints',
+    'source/compilation-unit bound canonical ABI signatures',contract?.contractId??null,
+    'Correct source intelligence ABI identity join without inventing selectors'));
+  issues.push(issue('MIMO.OWNER_SCOPE_UNAVAILABLE',
+    'MIMO_STAGE_OBJECTIVE_v1.json.allowedParameterDeltas',
+    'independently accepted owner-authorized selectors and parameter types',
+    null,'Obtain a source-bound approved operation scope before executing proposals'));
+  const obj={schemaVersion:'curveyield-mimo-stage-objective-v1',pipelineVersion:'v1',
+    status:'PREPARED_NOT_AUTHORIZED',runIdentity:identity,
+    sourceArchiveSha256:sourceSha,sourceIntelligenceSha256:siDigest,
+    targetId,target:target?{qualifiedName:target.qualifiedName,
+      compilationUnitId:target.compilationUnitId,
+      abiDigestSha256:target.abiDigestSha256,sourcePath:target.sourcePath??null}:null,
+    observedCompilerEntrypoints:entrypoints,allowedParameterDeltas:[],
+    previousNativeFeedback:null,previousNativeErrorDigestSha256:null,
+    acceptedConfigurationSha256:null,openRequirementIds:issues.map(x=>x.code),
+    untrustedSourceCommentsAreInstructions:false,
+    nativeExecutionAuthorized:false,issues};
+  return {mode:'mimo-objective',status:'NOT_EXECUTED',
+    files:[output(args['output-root'],'MIMO_STAGE_OBJECTIVE_v1.json',obj)],
+    sourceBound:!!target&&!!si&&identity.verifiedForCurrentJob,issues};
+}
+function modelValueTyped(type,value){
+  if(type==='bool')return typeof value==='boolean';
+  if(type==='address')return typeof value==='string'&&/^0x[0-9a-fA-F]{40}$/.test(value);
+  const integer=/^(u?int)([0-9]{0,3})$/.exec(String(type));
+  if(integer){
+    if(typeof value!=='string'||!^-?(0|[1-9][0-9]*)$/.test(value))return false;
+    const bits=Number(integer[2]||256),signed=integer[1]==='int';
+    if(bits<8||bits>256||bits%8!==0)return false;
+    const n=BigInt(value),lim=1n<<BigInt(signed?bits-1:bits);
+    return signed?n>=-lim&&n<lim:n>=0n&&n<lim;
+  }
+  const bytes=/^bytes([0-9]{1,2})$/.exec(String(type));
+  if(bytes){
+    const count=Number(bytes[1]);
+    return count>=1&&count<=32&&typeof value==='string'&&
+      new RegExp('^0x[0-9a-fA-F]{'+(count*2)+'}
   const folder=args['output-root'], op=args.operation;
   let selected=null;
   if(op==='toolkit-profile'){
@@ -266,6 +343,138 @@ function additional(args,identity,issues){
       status:'NOT_EXECUTED',safeForNativeExecution:false,runIdentity:identity,
       proposalDigestSha256:args.proposal? (()=>{try{return readJson(args.proposal).sha256;}catch{return null;}})():null,
       issues}];
+  }else{
+    const key={
+      'mimo-objective':'MIMO_STAGE_OBJECTIVE_v1.json',
+      'fork-plan':'FORK_EXECUTION_PLAN_v1.json',
+      'storage-plan':'FORK_STORAGE_QUERY_PLAN_v1.json',
+      'medusa-config':'MEDUSA_ELIGIBILITY_v1.json'
+    }[op];
+    const requirement={
+      'mimo-objective':'original verified ABI, approved objective and native feedback',
+      'fork-plan':'approved source script SHA, verified chain/block identity and restricted execution authority',
+      'storage-plan':'original same-run C2 fork checkpoint and exact compiler storage layout',
+      'medusa-config':'native medusa init schema, verified C2 checkpoint and existing user-authored property signatures'
+    }[op];
+    issues.push(issue('CONFIG.NATIVE_PREREQUISITES_NOT_PROVEN',op+'.nativePrerequisites',
+      requirement,'no verified native prerequisite supplied by this mode',
+      'Provide exact independently verified same-run artifact and trusted tool pin'));
+    selected=[key,{schemaVersion:'curveyield-security-pipeline-config-v1',operation:op,
+      sourceBound:false,status:'NOT_EXECUTED',runIdentity:identity,issues,
+      nativeExecutableCreated:false}];
+  }
+  return {mode:op,status:'NOT_EXECUTED',files:[output(folder,selected[0],selected[1])],issues,sourceBound:false};
+}
+function main(){
+  const args=argsOf(process.argv.slice(2)),issues=[];
+  const identity=runIdentity(args['run-identity'],issues);
+  const result=args.operation==='enumerate-targets'?
+    enumerate(args,identity,issues):additional(args,identity,issues);
+  output(args['output-root'],'SECURITY_PIPELINE_CONFIG_RESULT_v1.json',{
+    schemaVersion:'curveyield-security-pipeline-config-result-v1',...result,
+    runId:identity.runId??null,runAttempt:identity.runAttempt??null});
+  console.log(JSON.stringify({mode:result.mode,status:result.status,
+    warningCount:result.issues.length,fileNames:result.files.map(f=>f.name)}));
+}
+try{main();}
+catch(error){
+  console.error('CONFIGURATION_WRITER_UNAVAILABLE:'+error.constructor.name+':'+error.message);
+  process.exitCode=2;
+}
+).test(value);
+  }
+  return false;
+}
+function classifyModelProposal(args,identity,issues){
+  let proposal=null,objective=null,proposalHash=null;
+  try{const doc=readJson(args.proposal);proposal=doc.value;proposalHash=doc.sha256;}
+  catch(e){issues.push(issue('MIMO.PROPOSAL_FILE_UNAVAILABLE','--proposal',
+    'actual bounded strict model response JSON',String(e),
+    'Provide original one-round model response JSON'));}
+  try{objective=readJson(path.join(args['input-root'],'MIMO_STAGE_OBJECTIVE_v1.json'),args['input-root']).value;}
+  catch(e){issues.push(issue('MIMO.OBJECTIVE_FILE_UNAVAILABLE','MIMO_STAGE_OBJECTIVE_v1.json',
+    'same-run source-bound typed objective',String(e),
+    'Generate objective from original compiler/ABI data'));}
+  const rootKeys=new Set(['schemaVersion','targetId','sourceArchiveSha256',
+    'proposedChanges','evidenceRefs','objectiveDigestSha256']);
+  for(const key of Object.keys(proposal??{}))
+    if(!rootKeys.has(key))issues.push(issue('MIMO.PROPOSAL_UNKNOWN_FIELD',
+      'MIMO_PROPOSAL_v1.'+key,'supported typed proposal field',key,
+      'Remove commands, URLs, environment fields and unsupported data'));
+  if(proposal?.schemaVersion!=='curveyield-mimo-proposal-v1'||
+     !Array.isArray(proposal?.proposedChanges))
+    issues.push(issue('MIMO.PROPOSAL_SCHEMA_INVALID','MIMO_PROPOSAL_v1',
+      'schemaVersion curveyield-mimo-proposal-v1 with proposedChanges array',
+      proposal?.schemaVersion??null,'Return one strict typed MIMO_PROPOSAL_v1 object'));
+  if(!objective||proposal?.sourceArchiveSha256!==objective.sourceArchiveSha256||
+     proposal?.targetId!==objective.targetId||!identity.verifiedForCurrentJob||
+     objective.nativeExecutionAuthorized!==true)
+    issues.push(issue('MIMO.PROPOSAL_AUTHORITY_NOT_VERIFIED',
+      'MIMO_PROPOSAL_v1.source/target/authority',
+      'same-run source, exact target and independently authorized objective',
+      {sourceMatch:proposal?.sourceArchiveSha256===objective?.sourceArchiveSha256,
+       targetMatch:proposal?.targetId===objective?.targetId,
+       authorized:objective?.nativeExecutionAuthorized??false},
+      'Provide independently accepted source-bound owner authority'));
+  const allowedKeys=new Set(['targetId','selector','argumentIndex','solidityType','value','evidenceRef']);
+  for(const [i,row] of (Array.isArray(proposal?.proposedChanges)?proposal.proposedChanges:[]).entries()){
+    const root='MIMO_PROPOSAL_v1.proposedChanges['+i+']';
+    if(!row||typeof row!=='object'||Array.isArray(row)){
+      issues.push(issue('MIMO.PROPOSED_CHANGE_NOT_OBJECT',root,'typed change object',row,
+        'Return one supported source-bound ABI argument change'));continue;
+    }
+    for(const key of Object.keys(row))
+      if(!allowedKeys.has(key))issues.push(issue('MIMO.UNSUPPORTED_CHANGE_FIELD',root+'.'+key,
+        'approved typed ABI value field',key,'Remove unauthorized field'));
+    const matched=(objective?.allowedParameterDeltas??[]).find(x=>
+      x.targetId===row.targetId&&x.selector===row.selector&&
+      x.argumentIndex===row.argumentIndex&&x.solidityType===row.solidityType);
+    if(!matched||!modelValueTyped(row.solidityType,row.value))
+      issues.push(issue('MIMO.CHANGE_OUTSIDE_APPROVED_ABI',root,
+        'owner-approved exact selector/index/type and ABI-range valid value',
+        {selector:row.selector??null,index:row.argumentIndex??null,
+         type:row.solidityType??null,value:row.value??null},
+        'Use only approved selector argument and canonical bounded ABI value'));
+  }
+  const result={schemaVersion:'curveyield-mimo-proposal-disposition-v1',
+    pipelineVersion:'v1',status:'NOT_EXECUTED',safeForNativeExecution:false,
+    runIdentity:identity,proposalDigestSha256:proposalHash,
+    objectiveDigestSha256:objective?digestCanonicalV1(objective):null,
+    issueCount:issues.length,issues};
+  return {mode:'validate-proposal',status:'NOT_EXECUTED',sourceBound:false,
+    files:[output(args['output-root'],'MIMO_PROPOSAL_DISPOSITION_v1.json',result)],issues};
+}
+function additional(args,identity,issues){
+  const folder=args['output-root'], op=args.operation;
+  let selected=null;
+  if(op==='toolkit-profile'){
+    const pins=args.profile?readJson(args.profile).value:null;
+    const components=COMPONENTS.map(id=>{
+      const observed=pins?.components?.[id]??null;
+      const digest=observed?.expectedBinarySha256??null;
+      // A profile is proposed data, not authority: a caller-supplied
+      // approvedByTrustedSource flag cannot qualify a reusable executable.
+      const approved=false;
+      if(!approved)issues.push(issue('TOOLKIT.UNRESOLVED_PIN','toolkitComponents['+id+'].expectedBinarySha256',
+        'independently qualified immutable tool pin',
+        {candidateDigest:HEX.test(String(digest))?digest:null,
+         expectedSource:'trusted checkout pin ledger; not request-supplied approval'},
+        'Qualify and record the component pin and binary SHA in trusted current-revision recipe'));
+      return {componentId:id,required:null,notRequiredReason:'TARGET_PLAN_NOT_QUALIFIED',
+        approvedVersion:approved?(observed.approvedVersion??null):null,
+        approvedSourceRevision:approved?(observed.approvedSourceRevision??null):null,
+        expectedBinarySha256:approved?digest:null,os:process.platform,arch:process.arch,
+        abiProfile:observed?.abiProfile??null,lockDigest:observed?.lockDigest??null,
+        recipeDigest:observed?.recipeDigest??null,expectedBytesOrQuota:observed?.expectedBytesOrQuota??null,
+        nativeConsumerStages:observed?.nativeConsumerStages??[],
+        nativeReadinessMode:approved?'PIN_DEFINED_NOT_INSTALLED':'UNRESOLVED_PIN'};
+    });
+    selected=['TOOLKIT_PROFILE_v1.json',{schemaVersion:'curveyield-toolkit-profile-v1',
+      sourceBound:false,runIdentity:identity,status:'NOT_EXECUTED',components,issues}];
+  }else if(op==='validate-proposal'){
+    return classifyModelProposal(args,identity,issues);
+  }else if(op==='mimo-objective'){
+    return originalMimoObjective(args,identity,issues);
   }else{
     const key={
       'mimo-objective':'MIMO_STAGE_OBJECTIVE_v1.json',
