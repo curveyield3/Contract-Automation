@@ -994,6 +994,9 @@ jobs:
             --component foundry-node --profile "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/foundry-node/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/foundry-node/payload" --report-root "$RUNNER_TEMP/security-pipeline/fork_setup/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/receipts/foundry-node"
+          cp "$RUNNER_TEMP/security-pipeline/fork_setup/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/receipts/foundry-node/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Plan the original fixed source-compilers component identity
         id: consumer_source_compilers_plan
         continue-on-error: true
@@ -1045,6 +1048,9 @@ jobs:
             --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/source-compilers/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --report-root "$RUNNER_TEMP/security-pipeline/fork_setup/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/receipts/source-compilers"
+          cp "$RUNNER_TEMP/security-pipeline/fork_setup/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/receipts/source-compilers/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Read exact G0 independently admitted fork capability disposition
         id: fork_authority
         uses: actions/download-artifact@v4
@@ -1219,6 +1225,9 @@ jobs:
             --component slither-storage --profile "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/slither-storage/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/slither-storage/payload" --report-root "$RUNNER_TEMP/security-pipeline/storage_inspect/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/receipts/slither-storage"
+          cp "$RUNNER_TEMP/security-pipeline/storage_inspect/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/receipts/slither-storage/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Plan the original fixed source-compilers component identity
         id: consumer_source_compilers_plan
         continue-on-error: true
@@ -1270,6 +1279,9 @@ jobs:
             --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/source-compilers/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --report-root "$RUNNER_TEMP/security-pipeline/storage_inspect/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/receipts/source-compilers"
+          cp "$RUNNER_TEMP/security-pipeline/storage_inspect/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/receipts/source-compilers/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Retrieve original same-run source evidence
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -1418,6 +1430,9 @@ jobs:
             --component medusa --profile "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/medusa/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/medusa/payload" --report-root "$RUNNER_TEMP/security-pipeline/medusa_analyze/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/receipts/medusa"
+          cp "$RUNNER_TEMP/security-pipeline/medusa_analyze/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/receipts/medusa/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Plan the original fixed source-compilers component identity
         id: consumer_source_compilers_plan
         continue-on-error: true
@@ -1469,6 +1484,9 @@ jobs:
             --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/source-compilers/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --report-root "$RUNNER_TEMP/security-pipeline/medusa_analyze/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/receipts/source-compilers"
+          cp "$RUNNER_TEMP/security-pipeline/medusa_analyze/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/receipts/source-compilers/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Retrieve original same-run source evidence
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -1622,6 +1640,9 @@ jobs:
             --component wake --profile "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/wake/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/wake/payload" --report-root "$RUNNER_TEMP/security-pipeline/wake_analyze/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/receipts/wake"
+          cp "$RUNNER_TEMP/security-pipeline/wake_analyze/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/receipts/wake/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Plan the original fixed source-compilers component identity
         id: consumer_source_compilers_plan
         continue-on-error: true
@@ -1673,6 +1694,9 @@ jobs:
             --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/source-compilers/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --report-root "$RUNNER_TEMP/security-pipeline/wake_analyze/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/receipts/source-compilers"
+          cp "$RUNNER_TEMP/security-pipeline/wake_analyze/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/receipts/source-compilers/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Download original source-bound compiler and Slither collector facts
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -1820,6 +1844,9 @@ jobs:
             --component mythril --profile "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit/mythril/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mythril/payload" --report-root "$RUNNER_TEMP/security-pipeline/mythril_analyze/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit/receipts/mythril"
+          cp "$RUNNER_TEMP/security-pipeline/mythril_analyze/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit/receipts/mythril/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Download original source-bound compiler and Slither collector facts
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -1967,6 +1994,9 @@ jobs:
             --component certora-prover --profile "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit/certora-prover/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/certora-prover/payload" --report-root "$RUNNER_TEMP/security-pipeline/prover_qualify/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit/receipts/certora-prover"
+          cp "$RUNNER_TEMP/security-pipeline/prover_qualify/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit/receipts/certora-prover/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Download original source-bound compiler and Slither collector facts
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -2114,6 +2144,9 @@ jobs:
             --component autoprover --profile "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/autoprover/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/autoprover/payload" --report-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/receipts/autoprover"
+          cp "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/receipts/autoprover/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Plan the original fixed mimo-runtime component identity
         id: consumer_mimo_runtime_plan
         continue-on-error: true
@@ -2165,6 +2198,9 @@ jobs:
             --component mimo-runtime --profile "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-runtime/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-runtime/payload" --report-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/receipts/mimo-runtime"
+          cp "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/receipts/mimo-runtime/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Plan the original fixed mimo-weights component identity
         id: consumer_mimo_weights_plan
         continue-on-error: true
@@ -2216,6 +2252,9 @@ jobs:
             --component mimo-weights --profile "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-weights/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" --report-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/receipts/mimo-weights"
+          cp "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/receipts/mimo-weights/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Download original source-bound compiler and Slither collector facts
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -2363,6 +2402,9 @@ jobs:
             --component autoprover --profile "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/autoprover/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/autoprover/payload" --report-root "$RUNNER_TEMP/security-pipeline/autoprover_run/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/receipts/autoprover"
+          cp "$RUNNER_TEMP/security-pipeline/autoprover_run/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/receipts/autoprover/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Plan the original fixed certora-prover component identity
         id: consumer_certora_prover_plan
         continue-on-error: true
@@ -2414,6 +2456,9 @@ jobs:
             --component certora-prover --profile "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/certora-prover/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/certora-prover/payload" --report-root "$RUNNER_TEMP/security-pipeline/autoprover_run/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/receipts/certora-prover"
+          cp "$RUNNER_TEMP/security-pipeline/autoprover_run/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/receipts/certora-prover/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Plan the original fixed mimo-runtime component identity
         id: consumer_mimo_runtime_plan
         continue-on-error: true
@@ -2465,6 +2510,9 @@ jobs:
             --component mimo-runtime --profile "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-runtime/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-runtime/payload" --report-root "$RUNNER_TEMP/security-pipeline/autoprover_run/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/receipts/mimo-runtime"
+          cp "$RUNNER_TEMP/security-pipeline/autoprover_run/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/receipts/mimo-runtime/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Plan the original fixed mimo-weights component identity
         id: consumer_mimo_weights_plan
         continue-on-error: true
@@ -2516,6 +2564,9 @@ jobs:
             --component mimo-weights --profile "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-weights/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" --report-root "$RUNNER_TEMP/security-pipeline/autoprover_run/report" \
             --github-output "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/receipts/mimo-weights"
+          cp "$RUNNER_TEMP/security-pipeline/autoprover_run/report/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json" \
+            "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/receipts/mimo-weights/TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json"
       - name: Download original source-bound compiler and Slither collector facts
         id: source_evidence
         uses: actions/download-artifact@v4
