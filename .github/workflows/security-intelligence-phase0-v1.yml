@@ -814,8 +814,206 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  fork_setup:
+    needs: [admit, collect, mimo_configure]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout immutable source-bound stage code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Retrieve original same-run source evidence
+        id: source_evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/fork_setup/input/preflight
+        continue-on-error: true
+      - name: Derive factual G2B source and native prerequisites
+        id: native_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/fork_setup"
+          mkdir -p "$base/input" "$base/native" "$base/report"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline/fork_setup/input/RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({
+            schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+            runId:process.env.GITHUB_RUN_ID,
+            runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            workflowHeadSha:process.env.GITHUB_SHA,
+            repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation fork-plan --input-root "$base/input/preflight" \
+            --output-root "$base/native" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json"
+      - name: Record exact G2B missing native state without pretending execution
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/fork_setup"
+          mkdir -p "$base/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-stage --job fork_setup --stage G2B \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
+            --input-root "$base/native" --report-root "$base/report"
+      - name: Publish only non-secret G2B stage warnings and status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-fork_setup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/fork_setup/report/
+          if-no-files-found: warn
+          retention-days: 14
+
+  storage_inspect:
+    needs: [admit, collect, fork_setup]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout immutable source-bound stage code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Retrieve original same-run source evidence
+        id: source_evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/storage_inspect/input/preflight
+        continue-on-error: true
+      - name: Derive factual G2C source and native prerequisites
+        id: native_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/storage_inspect"
+          mkdir -p "$base/input" "$base/native" "$base/report"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline/storage_inspect/input/RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({
+            schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+            runId:process.env.GITHUB_RUN_ID,
+            runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            workflowHeadSha:process.env.GITHUB_SHA,
+            repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation storage-plan --input-root "$base/input/preflight" \
+            --output-root "$base/native" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json"
+      - name: Record exact G2C missing native state without pretending execution
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/storage_inspect"
+          mkdir -p "$base/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-stage --job storage_inspect --stage G2C \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
+            --input-root "$base/native" --report-root "$base/report"
+      - name: Publish only non-secret G2C stage warnings and status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-storage_inspect-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/storage_inspect/report/
+          if-no-files-found: warn
+          retention-days: 14
+
+  medusa_analyze:
+    needs: [admit, collect, fork_setup, storage_inspect]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout immutable source-bound stage code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Retrieve original same-run source evidence
+        id: source_evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/medusa_analyze/input/preflight
+        continue-on-error: true
+      - name: Derive factual G2D source and native prerequisites
+        id: native_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/medusa_analyze"
+          mkdir -p "$base/input" "$base/native" "$base/report"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline/medusa_analyze/input/RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({
+            schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+            runId:process.env.GITHUB_RUN_ID,
+            runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            workflowHeadSha:process.env.GITHUB_SHA,
+            repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation enumerate-targets --input-root "$base/input/preflight" \
+            --output-root "$base/input/preflight" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json" || true
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation medusa-config --input-root "$base/input/preflight" \
+            --output-root "$base/native" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json"
+      - name: Record exact G2D missing native state without pretending execution
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/medusa_analyze"
+          mkdir -p "$base/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-stage --job medusa_analyze --stage G2D \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
+            --input-root "$base/native" --report-root "$base/report"
+      - name: Publish only non-secret G2D stage warnings and status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-medusa_analyze-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/medusa_analyze/report/
+          if-no-files-found: warn
+          retention-days: 14
+
   publish_warnings:
-    needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify, mimo_configure]
+    needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify, mimo_configure, fork_setup, storage_inspect, medusa_analyze]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
