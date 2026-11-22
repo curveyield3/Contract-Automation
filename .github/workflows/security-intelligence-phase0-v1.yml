@@ -1277,6 +1277,13 @@ jobs:
           name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/security-pipeline/storage_inspect/input/preflight
         continue-on-error: true
+      - name: Read original safe C2 disposition only, never fork-state bytes
+        id: c2_native_disposition
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-fork-c2-disposition-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/storage_inspect/input/c2
+        continue-on-error: true
       - name: Derive factual G2C source and native prerequisites
         id: native_plan
         continue-on-error: true
@@ -1299,6 +1306,7 @@ jobs:
 
           node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
             --operation storage-plan --input-root "$base/input/preflight" \
+            --c2-state "$base/input/c2/FORK_NATIVE_STATE_v1.json" \
             --output-root "$base/native" \
             --run-identity "$base/input/RUN_IDENTITY_v1.json"
       - name: Record exact G2C missing native state without pretending execution
@@ -1468,6 +1476,13 @@ jobs:
           name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/security-pipeline/medusa_analyze/input/preflight
         continue-on-error: true
+      - name: Read original safe C2 disposition only, never fork-state bytes
+        id: c2_native_disposition
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-fork-c2-disposition-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/medusa_analyze/input/c2
+        continue-on-error: true
       - name: Derive factual G2D source and native prerequisites
         id: native_plan
         continue-on-error: true
@@ -1494,6 +1509,7 @@ jobs:
             --run-identity "$base/input/RUN_IDENTITY_v1.json" || true
           node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
             --operation medusa-config --input-root "$base/input/preflight" \
+            --c2-state "$base/input/c2/FORK_NATIVE_STATE_v1.json" \
             --output-root "$base/native" \
             --native-config "$base/input/derived-targets/SECURITY_TARGET_PLAN_v1.json" \
             --run-identity "$base/input/RUN_IDENTITY_v1.json"
