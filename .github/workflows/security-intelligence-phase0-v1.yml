@@ -984,13 +984,15 @@ jobs:
             workflowHeadSha:process.env.GITHUB_SHA,
             repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
           NODE
+          mkdir -p "$base/input/derived-targets"
           node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
             --operation enumerate-targets --input-root "$base/input/preflight" \
-            --output-root "$base/input/preflight" \
+            --output-root "$base/input/derived-targets" \
             --run-identity "$base/input/RUN_IDENTITY_v1.json" || true
           node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
             --operation medusa-config --input-root "$base/input/preflight" \
             --output-root "$base/native" \
+            --native-config "$base/input/derived-targets/SECURITY_TARGET_PLAN_v1.json" \
             --run-identity "$base/input/RUN_IDENTITY_v1.json"
       - name: Record exact G2D missing native state without pretending execution
         if: ${{ always() }}

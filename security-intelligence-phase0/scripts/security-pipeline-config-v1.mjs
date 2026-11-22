@@ -475,9 +475,11 @@ function deriveStoragePlan(args,identity,issues){
 function deriveMedusaEligibility(args,identity,issues){
   const source=planSourceFacts(args,identity,issues);
   const inventory=source.load('REVIEW_INVENTORY_v1.json');
-  const targetPlanPath=path.join(args['input-root'],'SECURITY_TARGET_PLAN_v1.json');
+  // Native eligibility plans belong to a new scratch root, never the
+  // original downloaded preflight artifact directory.
+  const targetPlanPath=args['native-config']??path.join(args['input-root'],'SECURITY_TARGET_PLAN_v1.json');
   let targetPlan=null;
-  try{targetPlan=readJson(targetPlanPath,args['input-root']).value;}
+  try{targetPlan=readJson(targetPlanPath).value;}
   catch(error){issues.push(issue('MEDUSA.TARGET_PLAN_MISSING','SECURITY_TARGET_PLAN_v1.json',
     'original source-bound exact ABI/bytecode target map',String(error),
     'Produce source-bound target map before native Medusa init'));}
