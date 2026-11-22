@@ -506,7 +506,7 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
   // First honor the project's exact Foundry build. Never replace a successful
   // native build with independently compiled fragments.
   result=await runCommand({command:'timeout',
-    args:['1500s','forge','build','--force','--build-info','--skip','script','--skip','test'],
+    args:['1500s','forge','build','--force','--build-info','--extra-output','storageLayout','--skip','script','--skip','test'],
     cwd:projectRoot});
   if(result?.exitCode===0){
     paths=await buildInfoFiles(projectRoot,fsApi,{includeFoundry:true});
@@ -552,7 +552,7 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
       await fsApi.rm(unitDir,{recursive:true,force:true});
       await fsApi.mkdir(unitDir,{recursive:true});
       const output=await runCommand({command:'timeout',args:[
-        '300s','forge','build','--force','--build-info','--build-info-path',unitDir,
+        '300s','forge','build','--force','--build-info','--extra-output','storageLayout','--build-info-path',unitDir,
         source.rel,'--skip','script','--skip','test'
       ],cwd:projectRoot});
       if(output?.exitCode!==0){
