@@ -347,23 +347,24 @@ async function main(){
    const result=await executeDeploymentProfileV1({
     projectRoot:staged.projectRoot,anvilUrl:anvil.url,profile,chain});
    const last=Number(BigInt(await rpc(anvil.url,'eth_blockNumber')));
+   // Keep original source-defined deployment stdout/stderr/exit receipts even
+   // when C1 state readbacks or funding verification subsequently fail.
    facts.nativeAttempted=true;
-   const nativeReadbacks=await originalLocalReadbacks(anvil.url,
-     anvil.pinnedBlockNumber,last,profile,result.attempts??[]);
    facts.originalNativeReceiptCount=(result.attempts??[]).length;
-   const raw=Buffer.from(JSON.stringify(result));
    const privateDir=path.join(args['private-root'],'evidence');
    await fs.mkdir(privateDir,{recursive:true,mode:0o700});
    const evidenceFile=await emit(privateDir,'FORK_SETUP_TRANSACTIONS_v1.json',result);
-   const readbackFile=await emit(privateDir,'FORK_SETUP_READBACKS_v1.json',nativeReadbacks);
    facts.originalNativeReceiptSha256=evidenceFile.sha256;
-   facts.originalReadbacksSha256=readbackFile.sha256;
-   facts.deployedCodeReadbackCount=nativeReadbacks.deployedContractCount;
-   facts.nativeReadbackLimitations=nativeReadbacks.readbackGaps;
    facts.c0={chainId:chain.chainId,blockNumber:anvil.pinnedBlockNumber,
      blockHash:anvil.pinnedBlockHash};
    facts.c1={chainId:chain.chainId,blockNumber:last,
      status:result.status,originalReceiptSha256:evidenceFile.sha256};
+   const nativeReadbacks=await originalLocalReadbacks(anvil.url,
+     anvil.pinnedBlockNumber,last,profile,result.attempts??[]);
+   const readbackFile=await emit(privateDir,'FORK_SETUP_READBACKS_v1.json',nativeReadbacks);
+   facts.originalReadbacksSha256=readbackFile.sha256;
+   facts.deployedCodeReadbackCount=nativeReadbacks.deployedContractCount;
+   facts.nativeReadbackLimitations=nativeReadbacks.readbackGaps;
    const fundingExecuted=(result.attempts??[]).some(x=>
      x.scriptSha256===plan.sourceFundingScriptSha256&&x.status==='PASS');
    if(result.status!=='PASS'||!fundingExecuted)
