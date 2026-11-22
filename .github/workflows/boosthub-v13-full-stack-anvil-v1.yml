@@ -82,29 +82,29 @@ jobs:
           start=content.index('    /// @notice Vault-only best-effort unwind.')
           end=content.index('    function claim() external {',start)
           replacement='''    /// @notice Vault-only best-effort unwind. Does not require exact quoted NAV
-    ///         or harvest, reward conversions, profit unlocks, or price guards.
-    function emergencyWithdraw(uint256 amount) external {
-        require(msg.sender == vault, "!vault");
-        // Standalone strategies see a Beefy ERC-20 vault. BoostHub children
-        // are instead called by the sdFXN master, which has no totalSupply().
-        bool finalExit;
-        try IERC20(vault).totalSupply() returns (uint256 remainingShares) {
-            finalExit = remainingShares == 0;
-        } catch {}
-        uint256 idle = balanceOfWant();
-        if (finalExit || idle < amount) {
-            uint256 staked = balanceOfPool();
-            uint256 need = finalExit ? staked : amount - idle;
-            if (need > staked) need = staked;
-            if (need != 0) _withdraw(need);
-        }
-        uint256 send = balanceOfWant();
-        if (!finalExit && send > amount) send = amount;
-        if (send != 0) IERC20(want).safeTransfer(vault, send);
-        emit Withdraw(send);
-    }
-
-'''
+              ///         or harvest, reward conversions, profit unlocks, or price guards.
+              function emergencyWithdraw(uint256 amount) external {
+                  require(msg.sender == vault, "!vault");
+                  // Standalone strategies see a Beefy ERC-20 vault. BoostHub children
+                  // are instead called by the sdFXN master, which has no totalSupply().
+                  bool finalExit;
+                  try IERC20(vault).totalSupply() returns (uint256 remainingShares) {
+                      finalExit = remainingShares == 0;
+                  } catch {}
+                  uint256 idle = balanceOfWant();
+                  if (finalExit || idle < amount) {
+                      uint256 staked = balanceOfPool();
+                      uint256 need = finalExit ? staked : amount - idle;
+                      if (need > staked) need = staked;
+                      if (need != 0) _withdraw(need);
+                  }
+                  uint256 send = balanceOfWant();
+                  if (!finalExit && send > amount) send = amount;
+                  if (send != 0) IERC20(want).safeTransfer(vault, send);
+                  emit Withdraw(send);
+              }
+          
+          '''
           base.write_text(content[:start]+replacement+content[end:])
           (root/'contracts/StrategyCurveSDTYearnV9.sol').rename(root/'contracts/StrategyCurveSDTYearnV10.sol')
           expected={
