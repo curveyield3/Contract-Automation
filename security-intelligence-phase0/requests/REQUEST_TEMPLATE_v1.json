@@ -7,5 +7,13 @@
     "commit": "0000000000000000000000000000000000000000",
     "archivePath": "path/to/deployment-package.zip",
     "archiveSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "extendedSecurityPipeline": false,
+  "qualificationProfile": {
+    "schemaVersion": "curveyield-security-pipeline-qualification-profile-v1",
+    "profileId": "",
+    "authorizationRefSha256": "",
+    "requestedOperations": [],
+    "allowedChainIds": []
   }
 }
