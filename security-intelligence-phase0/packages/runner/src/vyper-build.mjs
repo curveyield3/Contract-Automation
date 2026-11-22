@@ -84,6 +84,13 @@ export async function compileVyperSources({
     const abiText = await compileFormat({ runCommand, projectRoot, sourceName, format: 'abi', evmVersion });
     const bytecode = await compileFormat({ runCommand, projectRoot, sourceName, format: 'bytecode', evmVersion });
     const deployedBytecode = await compileFormat({ runCommand, projectRoot, sourceName, format: 'bytecode_runtime', evmVersion });
+    const compilerLayoutText = await compileFormat({ runCommand, projectRoot, sourceName, format: 'layout', evmVersion });
+    let vyperCompilerLayout;
+    try { vyperCompilerLayout = JSON.parse(compilerLayoutText); }
+    catch (error) { throw new Error(`Vyper layout output invalid for ${sourceName}: ${error.message}`); }
+    if (!vyperCompilerLayout || typeof vyperCompilerLayout !== 'object' ||
+        !vyperCompilerLayout.storage_layout || typeof vyperCompilerLayout.storage_layout !== 'object')
+      throw new Error(`Vyper compiler storage_layout missing for ${sourceName}`);
     let abi;
     try {
       abi = JSON.parse(abiText);
@@ -102,6 +109,7 @@ export async function compileVyperSources({
       abi,
       bytecode,
       deployedBytecode,
+      vyperCompilerLayout,
       gasEstimates: null,
       language: 'vyper'
     });
