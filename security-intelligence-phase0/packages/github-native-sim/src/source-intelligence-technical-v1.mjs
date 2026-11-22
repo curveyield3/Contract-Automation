@@ -453,6 +453,80 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
   const publicState=(entry)=>entry?.stateMutability==='nonpayable'||entry?.stateMutability==='payable';
   const VYPER_CODES=new Set(['AVAILABLE_VYPER_AST','AVAILABLE_IDENTICAL_VYPER_AST_ALIAS']);
   const sourceTier=(file)=>tierByPath.get(file)??'SOURCE_TIER_UNRESOLVED';
+  // Source-review signatures sometimes contain Solidity contract/struct types
+  // rather than canonical ABI tuple/address types. Match by name and arity
+  // only if exactly one source implementation is possible, and preserve the
+  // ABI selector as the dispatch identity.
+  const methodName=(sig)=>String(sig??'').slice(0,String(sig??'').indexOf('('));
+  const parameterCount=(sig)=>{
+    const value=String(sig??''); const inner=value.slice(value.indexOf('(')+1,value.lastIndexOf(')'));
+    if(!inner)return 0;
+    let count=1,depth=0;
+    for(const ch of inner){if(ch==='('||ch==='[')depth++;else if(ch===')'||ch===']')depth--;else if(ch===','&&depth===0)count++;}
+    return count;
+  };
+  // Exact compiler AST permits a source-bound inherited implementation even
+  // where the ZIP itself does not contain the dependency's source file.
+  const compilerAstIndexByUnit=new Map();
+  for(const unit of units){
+    const byId=new Map(),byName=new Map();
+    for(const [src,ast] of Object.entries(unit.sourceAsts??{})){
+      function visit(node){
+        if(!node||typeof node!=='object')return;
+        if(node.nodeType==='ContractDefinition'){
+          const item={node,path:src};
+          if(Number.isInteger(node.id))byId.set(node.id,item);
+          byName.set(src+':'+node.name,item);
+        }
+        for(const child of node.nodes??[])visit(child);
+      }
+      visit(ast);
+    }
+    compilerAstIndexByUnit.set(unit.unitId??'default',{byId,byName,unit});
+  }
+  const compiledImplementation=(artifact,entry)=>{
+    if(!artifact||!artifact.sourceName?.endsWith('.sol')||entry.type!=='function')return null;
+    const index=compilerAstIndexByUnit.get(artifact.compilationUnitId??'default');
+    if(!index)return null;
+    const root=index.byName.get(artifact.sourceName+':'+artifact.contractName);
+    if(!root)return null;
+    const selector=String(artifact.methodIdentifiers?.[signature(entry)]??'').replace(/^0x/,'').toLowerCase();
+    const members=[];
+    for(const id of root.node.linearizedBaseContracts??[root.node.id]){
+      const b=index.byId.get(id);
+      if(!b)continue;
+      for(const f of b.node.nodes??[]){
+        if(f.nodeType!=='FunctionDefinition'||!f.body||!['external','public'].includes(f.visibility))continue;
+        const bySelector=selector&&String(f.functionSelector??'').replace(/^0x/,'').toLowerCase()===selector;
+        const byNameArity=f.name===entry.name&&(f.parameters?.parameters??[]).length===(entry.inputs??[]).length;
+        if(bySelector||byNameArity)members.push({f,b,bySelector});
+      }
+    }
+    const strict=members.filter(m=>m.bySelector);
+    let chosen=null;
+    if(strict.length)chosen=strict[0];
+    else if(members.length===1)chosen=members[0];
+    else if(members.length>1){
+      // Only the first linearized implementation is dispatchable if every
+      // candidate has the same method identity and the compiler AST provides
+      // the derivation order. Do not choose from ambiguous equal-arity overloads.
+      const exactNames=new Set(members.map(m=>m.f.name));
+      const sameArity=members.every(m=>(m.f.parameters?.parameters??[]).length===(entry.inputs??[]).length);
+      if(exactNames.size===1&&sameArity)chosen=members[0];
+    }
+    if(!chosen)return null;
+    const content=index.unit.sourceContents?.[chosen.b.path];
+    if(typeof content!=='string')return null;
+    const span=loc({path:chosen.b.path,content},chosen.f.src);
+    if(!span)return null;
+    return {kind:'COMPILER_AST_INHERITED_IMPLEMENTATION',path:chosen.b.path,
+      sourceLocation:span.label,qualifiedContainer:chosen.b.path+':'+chosen.b.node.name,
+      symbolId:'COMPILER-AST-'+sha256(Buffer.from([index.unit.unitId,chosen.b.path,
+        String(chosen.f.id??''),signature(entry)].join('|'))).slice(0,20),
+      lineStart:span.startLine,lineEnd:span.endLine,
+      evidenceClass:'SOURCE_BOUND_COMPILER_AST_INHERITANCE_METHOD_SELECTOR_OR_UNIQUE_ARITY'};
+  };
+
   const stateKinds=new Set(['STATE_VARIABLE','IMMUTABLE','CONSTANT']);
   const effects=contexts.filter(c=>Array.isArray(c.stateReads)&&Array.isArray(c.stateWrites))
     .filter(c=>c.stateReads.length||c.stateWrites.length)
@@ -558,18 +632,57 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
     for(const entry of (a.abi??[]).filter(x=>['function','fallback','receive'].includes(x?.type))){
       const canonical=normalSig(entry);
       const fn=(si.functions??[]).find(x=>x.contractId===c.contractId&&x.signature===canonical);
-      const exact=candidateContexts.filter(x=>x.canonicalSignature===canonical&&
-        ['FUNCTION','GENERATED_GETTER','INHERITED_DEPENDENCY','FALLBACK','RECEIVE'].includes(x.kind));
+      const allowedKinds=new Set(['FUNCTION','GENERATED_GETTER','INHERITED_DEPENDENCY','FALLBACK','RECEIVE']);
+      const exact=candidateContexts.filter(x=>x.canonicalSignature===canonical&&allowedKinds.has(x.kind));
       const preferred=exact.filter(x=>x.qualifiedContainer===c.qualifiedName);
-      const matches=preferred.length?preferred:exact;
-      const unique=new Map(matches.map(x=>[x.symbolId??x.contextId,x]));
-      const selected=unique.size===1?[...unique.values()][0]:null;
+      let matches=preferred.length?preferred:exact;
+      let matchBasis='EXACT_CANONICAL_SIGNATURE';
+      if(!matches.length&&entry.type==='function'){
+        const sameName=candidateContexts.filter(x=>allowedKinds.has(x.kind)&&
+          methodName(x.canonicalSignature)===entry.name);
+        const arityMatches=sameName.filter(x=>parameterCount(x.canonicalSignature)===(entry.inputs??[]).length);
+        const primary=arityMatches.filter(x=>x.qualifiedContainer===c.qualifiedName);
+        matches=primary.length?primary:arityMatches;
+        if(matches.length===1)matchBasis='SOURCE_NAME_AND_ARITY_UNIQUE';
+        else if(!matches.length&&c.language==='VYPER'){
+          // Vyper @external functions may expose shorter compiler ABI variants
+          // for defaulted trailing parameters, all backed by one FunctionDef.
+          const vyperDefault=sameName.filter(x=>x.qualifiedContainer===c.qualifiedName&&
+            parameterCount(x.canonicalSignature)>=(entry.inputs??[]).length);
+          if(vyperDefault.length===1){
+            matches=vyperDefault;
+            matchBasis='VYPER_DEFAULT_ARGUMENT_ABI_VARIANT';
+          }
+        }
+      }
+      let unique=new Map(matches.map(x=>[x.symbolId??x.contextId,x]));
+      let selected=unique.size===1?[...unique.values()][0]:null;
+      if(!selected&&unique.size===0&&entry.type==='function'){
+        // Public mappings/arrays generate parameterized ABI getters; their
+        // declaration is the source implementation, not a no-arg getter body.
+        const getterCandidates=decls.filter(d=>d.kind==='STATE_VARIABLE'&&d.visibility==='public'&&
+          d.name===entry.name&&d.qualifiedContainer===c.qualifiedName);
+        if(getterCandidates.length===1){
+          const d=getterCandidates[0];
+          selected={...d,path:d.path,kind:'GENERATED_GETTER',
+            contextId:null,sourceLocation:anchors(d)};
+          matchBasis='PUBLIC_STATE_COMPILER_ABI_GETTER';
+        }
+      }
+      let compilerInherited=null;
+      if(!selected&&unique.size===0&&c.language==='SOLIDITY'&&entry.type==='function'){
+        compilerInherited=compiledImplementation(a,entry);
+        if(compilerInherited){selected=compilerInherited;matchBasis='EXACT_BUILD_COMPILER_AST_INHERITANCE';}
+      }
       const origin=selected?(selected.kind==='GENERATED_GETTER'?'GENERATED_GETTER':
+        selected.kind==='COMPILER_AST_INHERITED_IMPLEMENTATION'?'INHERITED_IMPLEMENTATION':
         selected.qualifiedContainer===c.qualifiedName?'DIRECT_IMPLEMENTATION':'INHERITED_IMPLEMENTATION'):
         unique.size>1?'AMBIGUOUS_DECLARATIONS':'ABI_ONLY_DECLARATION_UNRESOLVED';
-      const sourceLocation=anchors(selected)??(fn?.sourceLocation!=='UNSUPPORTED_AST_SOURCE_LOCATION'?fn?.sourceLocation:null)??null;
-      const evidenceClass=selected?.path?.endsWith('.vy')?'VYPER_COMPILER_AST_STRUCTURAL_ONLY':
-        selected?'SOLIDITY_SOURCE_REVIEW_AST_WITH_COMPILER_ABI':'COMPILER_ABI_ONLY';
+      const sourceLocation=anchors(selected)??selected?.sourceLocation??
+        (fn?.sourceLocation!=='UNSUPPORTED_AST_SOURCE_LOCATION'?fn?.sourceLocation:null)??null;
+      const evidenceClass=selected?.evidenceClass??(selected?.path?.endsWith('.vy')?
+        'VYPER_COMPILER_AST_STRUCTURAL_ONLY':
+        selected?'SOLIDITY_SOURCE_REVIEW_AST_WITH_COMPILER_ABI':'COMPILER_ABI_ONLY');
       const methodSignature=entry.type==='function'?canonical:null;
       const rawSelector=methodSignature?a.methodIdentifiers?.[methodSignature]:null;
       const selector=typeof rawSelector==='string'&&/^(?:0x)?[0-9a-fA-F]{8}$/.test(rawSelector)
@@ -598,7 +711,8 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
         implementationContextId:selected?.contextId??null,
         implementationContract:selected?.qualifiedContainer??null,
         implementationPath:selected?.path??null,sourceLocation,
-        evidenceClass,implementationCandidateCount:unique.size,
+        evidenceClass,implementationMatchBasis:matchBasis,
+        implementationCandidateCount:unique.size || (selected?1:0),
         auditFlowAssignment:'REQUIRED_FOR_STATE_CHANGING_ENTRIES',
         caveat:'ABI is an exposed interface, not proof of live deployment/reachability or security'
       });
