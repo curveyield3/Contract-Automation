@@ -77,7 +77,7 @@ function runIdentity(file,issues){
   }
 }
 function evidence(root,manifest,name,issues){
-  const record=manifest?.files?.find(x=>x.name===name)??null;
+  const record=(Array.isArray(manifest?.files)?manifest.files:[]).find(x=>x.name===name)??null;
   if(!record)return null;
   try{
     const entry=readJson(path.join(root,name),root);
@@ -229,9 +229,13 @@ function additional(args,identity,issues){
     const components=COMPONENTS.map(id=>{
       const observed=pins?.components?.[id]??null;
       const digest=observed?.expectedBinarySha256??null;
-      const approved=observed?.approvedByTrustedSource===true&&HEX.test(String(digest));
+      // A profile is proposed data, not authority: a caller-supplied
+      // approvedByTrustedSource flag cannot qualify a reusable executable.
+      const approved=false;
       if(!approved)issues.push(issue('TOOLKIT.UNRESOLVED_PIN','toolkitComponents['+id+'].expectedBinarySha256',
-        'independently qualified immutable tool pin',observed,
+        'independently qualified immutable tool pin',
+        {candidateDigest:HEX.test(String(digest))?digest:null,
+         expectedSource:'trusted checkout pin ledger; not request-supplied approval'},
         'Qualify and record the component pin and binary SHA in trusted current-revision recipe'));
       return {componentId:id,required:null,notRequiredReason:'TARGET_PLAN_NOT_QUALIFIED',
         approvedVersion:approved?(observed.approvedVersion??null):null,

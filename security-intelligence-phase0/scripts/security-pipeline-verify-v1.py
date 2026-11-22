@@ -106,21 +106,24 @@ def _safe(value, limit=320):
 def make_warning(ctx, args, code, check_id, field, expected, observed,
                  impact, correction, evidence=None, component=None,
                  operation=None, observation_failure=None, native_exit=None):
-    source = {"value": expected, "source": "verified original input or trusted workflow configuration"}
-    seen = {"value": observed, "source": evidence or "current trusted job-local observation"}
-    evidence_sha = sha256_bytes(json.dumps(seen, sort_keys=True, default=str).encode())
+    source = {"value": _safe(expected, 320),
+              "source": "verified original input or trusted workflow configuration"}
+    evidence_sha = sha256_bytes(json.dumps(observed, sort_keys=True, default=str).encode())
+    seen = {"value": _safe(observed, 320),
+            "source": _safe(evidence or "current trusted job-local observation", 220)}
     identity = {"run": ctx["runId"], "attempt": ctx["runAttempt"],
                 "stage": args.stage, "check": check_id, "field": field,
                 "evidenceSha256": evidence_sha}
     return {
         "schemaVersion": WARNING_SCHEMA,
         "warningId": sha256_bytes(json.dumps(identity, sort_keys=True).encode()),
-        "code": code, "stage": args.stage, "operation": operation or args.job,
-        "componentId": component, "targetId": None, "checkId": check_id,
-        "configurationField": field, "expected": source, "observed": seen,
+        "code": _safe(code, 90), "stage": args.stage, "operation": _safe(operation or args.job, 90),
+        "componentId": _safe(component, 90) if component else None,
+        "targetId": None, "checkId": _safe(check_id, 100),
+        "configurationField": _safe(field, 240), "expected": source, "observed": seen,
         "observationFailure": observation_failure,
         "mismatch": "{}: expected {}; observed {}".format(field, _safe(expected), _safe(observed)),
-        "impact": impact, "requiredCorrection": correction,
+        "impact": _safe(impact, 420), "requiredCorrection": _safe(correction, 420),
         "nativeEvidenceRefs": [evidence] if evidence else [],
         "runIdentitySha256": None, "runId": ctx["runId"], "runAttempt": ctx["runAttempt"],
         "status": "WARNING", "affectedOperationStatus": "NOT_EXECUTED",
