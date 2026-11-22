@@ -442,6 +442,7 @@ jobs:
       - name: Restore only exact approved component cache key
         id: cache_restore
         if: ${{ steps.tool_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
         uses: actions/cache/restore@v4
         with:
           path: ${{ steps.tool_plan.outputs.cache_path }}
@@ -627,11 +628,63 @@ jobs:
             fs.appendFileSync(process.env.GITHUB_ENV,key+'='+matches[0][1]+'\n');
           }
           NODE
+      - name: Download same-run source-bound software profile for MiMo reuse
+        id: mimo_component_profile
+        if: ${{ needs.admit.outputs.extended_approved == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-toolkit-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit-profile
+        continue-on-error: true
+      - name: Derive exact pinned MiMo GGUF cache key independently
+        id: mimo_cache_plan
+        if: ${{ steps.mimo_component_profile.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component mimo-weights \
+            --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" \
+            --run-identity "$RUNNER_TEMP/security-pipeline/mimo/input/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" \
+            --output-root "$RUNNER_TEMP/security-pipeline/mimo/component-meta" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Restore exact MiMo GGUF cache (never accept a prefix key)
+        id: mimo_cache_restore
+        if: ${{ steps.mimo_cache_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.mimo_cache_plan.outputs.cache_path }}
+          key: ${{ steps.mimo_cache_plan.outputs.cache_key }}
+      - name: Independently check restored MiMo bytes against original source pin
+        id: mimo_cached_bytes
+        if: ${{ steps.mimo_cache_restore.outputs.cache-hit == 'true' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component mimo-weights \
+            --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" \
+            --run-identity "$RUNNER_TEMP/security-pipeline/mimo/input/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" \
+            --output-root "$RUNNER_TEMP/security-pipeline/mimo/component-meta" \
+            --cache-hit true --restore-outcome success
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job mimo_configure --stage G2A \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component mimo-weights \
+            --profile "$RUNNER_TEMP/security-pipeline/mimo/component-meta/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" \
+            --report-root "$RUNNER_TEMP/security-pipeline/mimo/report" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Reuse original pinned CPU llama.cpp build and verified GGUF
         id: mimo_prepare
         if: ${{ steps.mimo_pins.outcome == 'success' && needs.admit.outputs.extended_approved == 'true' }}
         continue-on-error: true
         shell: bash
+        env:
+          PINNED_CACHE_VERIFIED: ${{ steps.mimo_cached_bytes.outputs.usableForExecution || 'false' }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/security-pipeline/mimo"
@@ -643,8 +696,13 @@ jobs:
             -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF
           cmake --build "$root/llama-build" --target llama-server -j 4
           mkdir -p "$root/models"
-          curl -fL --retry 3 --retry-all-errors -o "$root/models/$MODEL_FILE" \
-            "https://huggingface.co/bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF/resolve/$MODEL_REVISION/$MODEL_FILE"
+          cached="$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload/$MODEL_FILE"
+          if [ "$PINNED_CACHE_VERIFIED" = true ] && [ -f "$cached" ]; then
+            ln "$cached" "$root/models/$MODEL_FILE" || cp "$cached" "$root/models/$MODEL_FILE"
+          else
+            curl -fL --retry 3 --retry-all-errors -o "$root/models/$MODEL_FILE" \
+              "https://huggingface.co/bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF/resolve/$MODEL_REVISION/$MODEL_FILE"
+          fi
           printf '%s  %s\n' "$MODEL_SHA256" "$root/models/$MODEL_FILE" | sha256sum --check
           available="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
           model_bytes="$(stat -c%s "$root/models/$MODEL_FILE")"
