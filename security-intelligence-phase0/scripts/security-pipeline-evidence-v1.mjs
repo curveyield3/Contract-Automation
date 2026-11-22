@@ -257,32 +257,161 @@ function consolidate(a){
  }
  console.log(JSON.stringify({files:written,warningCount:warnings.length,stages:stages.length}));
 }
-function native(a){
- const issues=[];
- let result=null;
- try{
-  if(!a['native-result'])throw Error('native result not provided');
-  result=readJson(a['native-result'],a['input-root']);
-  if(String(result.runId)!==a['run-id']||
-    Number(result.runAttempt)!==Number(a['run-attempt'])||
-    result.workflowHeadSha!==a['run-head-sha'])
-   throw Error('native result belongs to different run or attempt');
-  if(result.status!=='NATIVE_COMPLETED'||!/^[0-9a-f]{64}$/.test(
-    String(result.originalNativeEvidenceSha256??'')))throw Error('native completion evidence unavailable');
- }catch(e){issues.push({field:'nativeResult',expected:'same-run native evidence and digest',
-   observed:String(e),operationDisposition:'NOT_EXECUTED'});}
- const status=issues.length?'NOT_EXECUTED':'UNVERIFIED_PENDING_CONTROLLER_ACCEPTANCE';
- const out={schemaVersion:'curveyield-security-pipeline-native-reconciliation-v1',
-  pipelineVersion:'v1',instructionVersion:'v14',operation:a.operation,
-  runId:a['run-id'],runAttempt:Number(a['run-attempt']),headSha:a['run-head-sha'],
-  status,issues,controllerAccepted:false};
- const fn=a.operation==='reconcile-native'?'SECURITY_NATIVE_RECONCILIATION_v1.json':
-  'SECURITY_DOSSIER_QUALIFICATION_v1.json';
- console.log(JSON.stringify({file:writeJson(a['output-root'],fn,out),status}));
+function observedInput(a,file){
+ try{return {value:readJson(path.join(a['input-root'],file),a['input-root']),
+  sha256:sha256HexV1(readBytes(path.join(a['input-root'],file),a['input-root']))};}
+ catch(error){return {value:null,sha256:null,error:String(error)};}
 }
+function detail(field,expected,observed,correction){
+ return {fieldPath:field,expected,observed,
+  operationDisposition:'NOT_EXECUTED',correction};
+}
+function reconcileNative(a){
+ const issues=[],manifest=observedInput(a,'preflight/PREFLIGHT_MANIFEST_v1.json');
+ const identity=manifest.value?.source??{};
+ const admitted=manifest.value?.sourceAdmissionVerified===true&&
+  /^[0-9a-f]{64}$/.test(identity.expectedSha256??'')&&
+  identity.expectedSha256===identity.observedSha256;
+ if(!admitted)issues.push(detail('PREFLIGHT_MANIFEST_v1.json.source',
+  'verified original source archive digest and admission',
+  manifest.error??identity,'Restore the exact source-admitted preflight manifest'));
+ const originalSha=admitted?identity.expectedSha256:null;
+ let needs={};
+ const observedNeeds=observedInput(a,'needs.json');
+ if(observedNeeds.value&&typeof observedNeeds.value==='object'&&!Array.isArray(observedNeeds.value))
+  needs=observedNeeds.value;
+ else issues.push(detail('needs.json','GitHub needs job-result map',
+   observedNeeds.error??observedNeeds.value,
+   'Capture original current-run needs JSON before reconciliation'));
+ const required=[
+  ['ADMIT','admit'],['COLLECT','collect'],...GATES.filter(x=>!['G8','G9'].includes(x[0]))
+ ];
+ const stages=[];
+ for(const [gate,job] of required){
+  const name='security-pipeline-stage-'+job+'-'+a['run-id']+'-'+a['run-attempt'];
+  const relative='parts/stages/'+name+'/PIPELINE_STAGE_'+gate+'_v1.json';
+  const source=observedInput(a,relative),item=source.value;
+  let reason=null;
+  if(!item)reason=source.error??'MISSING_STAGE_ARTIFACT';
+  else if(item.schemaVersion!=='curveyield-security-pipeline-stage-v1'||
+    item.stage!==gate||item.jobId!==job||
+    String(item.jobRunId)!==a['run-id']||
+    Number(item.jobRunAttempt)!==Number(a['run-attempt'])||
+    item.workflowHeadSha&&item.workflowHeadSha!==a['run-head-sha'])
+    reason='ORIGINAL_STAGE_SCHEMA_OR_RUN_IDENTITY_MISMATCH';
+  else if(item.sourceIdentity?.archiveSha256&&
+    originalSha&&item.sourceIdentity.archiveSha256!==originalSha)
+    reason='STAGE_SOURCE_ARCHIVE_SHA_MISMATCH';
+  if(reason)issues.push(detail(relative,
+    'original same-run stage file, source-bound and job-matched',
+    {reason,jobResult:needs[job]?.result??null},
+    'Restore and independently inspect original same-attempt stage part'));
+  stages.push({stage:gate,producerJob:job,expectedFile:relative,
+   originalSha256:reason?null:source.sha256,bytes:null,
+   observedJobResult:needs[job]?.result??'UNKNOWN',
+   status:reason?'UNVERIFIED':item.status,
+   attempted:reason?null:item.attempted??null,
+   completed:reason?null:item.completed??null,
+   nativeEvidenceSha256:reason?null:item.originalNativeEvidenceSha256??null,
+   sourceBound:reason?false:item.sourceBound===true,
+   disposition:reason?'NOT_EXECUTED':'ORIGINAL_STAGE_RECEIPT_OBSERVED',
+   reasonCode:reason,warningIds:reason?[]:(item.warnings??[])});
+ }
+ const analyzerStages=GATES.filter(x=>['G3','G4','G5','G6','G7'].includes(x[0]));
+ const nativeCounts={},absentNames=[];
+ for(const [gate,job] of analyzerStages){
+  const row=stages.find(x=>x.stage===gate);
+  const actualNativeEvidence=!!row?.nativeEvidenceSha256&&
+    row.status==='COMPLETE'&&row.originalSha256!==null;
+  nativeCounts[job]={eligible:null,attempted:row?.attempted??null,
+    nativeCompleted:actualNativeEvidence?row.completed:0,
+    sourceUnsupported:null,configurationSkipped:actualNativeEvidence?0:null,
+    nativeFailed:null,unresolved:actualNativeEvidence?0:null,
+    actualOriginalNativeEvidenceSha256:actualNativeEvidence?row.nativeEvidenceSha256:null};
+  if(!actualNativeEvidence){
+   const expected='original native analyzer output and verified toolchain identity for '+gate;
+   absentNames.push(job);
+   issues.push(detail('nativeAnalyzer.'+job+'.originalNativeEvidenceSha256',
+    expected,row?.nativeEvidenceSha256??null,
+    'Qualify the exact native program pin and execute the approved target against original source'));
+  }
+ }
+ const noNativeEvidence=absentNames.length===analyzerStages.length;
+ const doc={schemaVersion:'curveyield-security-pipeline-native-evidence-index-v1',
+  pipelineVersion:'v1',instructionVersion:'v14',
+  runId:a['run-id'],runAttempt:Number(a['run-attempt']),headSha:a['run-head-sha'],
+  sourceArchiveSha256:originalSha,sourceAdmissionVerified:admitted,
+  sourceManifestSha256:manifest.sha256,observedNeedsSha256:observedNeeds.sha256,
+  stageCount:stages.length,stages,nativeCounts,
+  evidenceFileCount:stages.filter(x=>x.originalSha256).length,
+  nativeQualifiedCount:analyzerStages.length-absentNames.length,
+  missingNativeAnalyzers:absentNames,
+  status:!admitted?'INCOMPLETE':noNativeEvidence?'NO_NATIVE_ANALYSIS':'PARTIAL',
+  originalNativeOutputBytesPreserved:true,controllerAccepted:false,
+  issues};
+ const efficiency={schemaVersion:'curveyield-security-pipeline-efficiency-v1',
+  runId:a['run-id'],runAttempt:Number(a['run-attempt']),headSha:a['run-head-sha'],
+  observedRunnerMinutes:null,actualSuccessfulStateChanges:null,
+  actualNativePropertiesEvaluated:null,successfulStateChangesPerRunnerMinute:null,
+  nativePropertiesPerRunnerMinute:null,toolkitCacheInstallationSavedMilliseconds:null,
+  missingTelemetryReason:'NO_COMPLETE_SOURCE_BOUND_NATIVE_TELEMETRY_AVAILABLE'};
+ const summary={schemaVersion:'curveyield-security-pipeline-native-reconciliation-v1',
+  operation:'reconcile-native',runId:a['run-id'],
+  runAttempt:Number(a['run-attempt']),workflowHeadSha:a['run-head-sha'],
+  sourceArchiveSha256:originalSha,
+  status:doc.status==='NO_NATIVE_ANALYSIS'?'NOT_EXECUTED':'PARTIAL',
+  originalNativeEvidenceSha256:null,issues,controllerAccepted:false};
+ const outputs=[writeJson(a['output-root'],'SECURITY_PIPELINE_NATIVE_EVIDENCE_INDEX_v1.json',doc),
+  writeJson(a['output-root'],'SECURITY_PIPELINE_EFFICIENCY_v1.json',efficiency),
+  writeJson(a['output-root'],'SECURITY_NATIVE_RECONCILIATION_v1.json',summary)];
+ console.log(JSON.stringify({operation:'reconcile-native',outputs,issues:issues.length,
+   nativeQualifiedCount:doc.nativeQualifiedCount,status:summary.status}));
+}
+function qualifyDossier(a){
+ const original=observedInput(a,'SECURITY_PIPELINE_NATIVE_EVIDENCE_INDEX_v1.json');
+ const row=original.value,issues=[];
+ const valid=row?.schemaVersion==='curveyield-security-pipeline-native-evidence-index-v1'&&
+  String(row.runId)===a['run-id']&&
+  Number(row.runAttempt)===Number(a['run-attempt'])&&
+  row.headSha===a['run-head-sha'];
+ if(!valid)issues.push(detail('SECURITY_PIPELINE_NATIVE_EVIDENCE_INDEX_v1.json.runIdentity',
+   'actual same-run native index, exact source and head identity',
+   original.error??{runId:row?.runId,headSha:row?.headSha},
+   'Restore the immutable G8 index from the current run and attempt'));
+ const count=valid?(row.nativeQualifiedCount??0):0;
+ if(count<5)issues.push(detail('SECURITY_PIPELINE_RELEASE_STATUS_v1.json.nativeQualifiedCount',
+  'five genuinely qualified G3-G7 native programs and source-bound results',
+  count,'Complete source-authorized native analyses, preserving original result bytes and hashes'));
+ const sourceOk=valid&&row.sourceAdmissionVerified===true&&
+  /^[0-9a-f]{64}$/.test(row.sourceArchiveSha256??'');
+ if(!sourceOk)issues.push(detail('SECURITY_PIPELINE_RELEASE_STATUS_v1.json.sourceArchiveSha256',
+  'verified original source admission',row?.sourceArchiveSha256??null,
+  'Restore original source admission and G8 evidence index'));
+ const status=!valid||!sourceOk?'INCOMPLETE':count===0?'NOT_EXECUTED':'PARTIAL';
+ const release={schemaVersion:'curveyield-security-pipeline-release-status-v1',
+  pipelineVersion:'v1',instructionVersion:'v14',runId:a['run-id'],
+  runAttempt:Number(a['run-attempt']),headSha:a['run-head-sha'],
+  originalSourceArchiveSha256:valid?row.sourceArchiveSha256:null,
+  nativeIndexSha256:original.sha256,qualifiedNativeCount:count,
+  status,controllerAccepted:false,claimedAuditSecurityPass:false,
+  stageG8Status:valid?row.status:null,unresolvedRequirements:issues};
+ const qualification={schemaVersion:'curveyield-security-pipeline-dossier-qualification-v1',
+  operation:'qualify-dossier',runId:a['run-id'],
+  runAttempt:Number(a['run-attempt']),workflowHeadSha:a['run-head-sha'],
+  status,originalNativeEvidenceSha256:original.sha256,
+  sourceArchiveSha256:release.originalSourceArchiveSha256,
+  issues,controllerAccepted:false};
+ const outputs=[writeJson(a['output-root'],'SECURITY_PIPELINE_RELEASE_STATUS_v1.json',release),
+  writeJson(a['output-root'],'SECURITY_DOSSIER_QUALIFICATION_v1.json',qualification)];
+ console.log(JSON.stringify({operation:'qualify-dossier',outputs,
+  qualifiedNativeCount:count,status,issues:issues.length}));
+}
+
 try{
  const a=argsOf(process.argv.slice(2));
- if(a.operation==='consolidate-warnings')consolidate(a);else native(a);
+ if(a.operation==='consolidate-warnings')consolidate(a);
+ else if(a.operation==='reconcile-native')reconcileNative(a);
+ else qualifyDossier(a);
 }catch(e){
  console.error('REPORT_WRITER_UNAVAILABLE:'+e.constructor.name+':'+e.message);
  process.exitCode=2;
