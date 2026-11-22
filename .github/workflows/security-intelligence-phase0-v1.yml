@@ -277,7 +277,7 @@ jobs:
 
   prepare_targets:
     needs: [admit, collect]
-    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_approved == 'true' }}
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -371,7 +371,7 @@ jobs:
 
   toolkit_prepare:
     needs: [admit, prepare_targets]
-    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_approved == 'true' }}
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -506,7 +506,7 @@ jobs:
 
   toolkit_qualify:
     needs: [admit, toolkit_prepare]
-    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_approved == 'true' }}
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -545,8 +545,285 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  mimo_configure:
+    needs: [admit, collect, prepare_targets, toolkit_qualify]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout current-run immutable code and original MiMo pin source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Receive exact admitted source-intelligence evidence
+        id: mimo_source
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/mimo/input/preflight
+        continue-on-error: true
+      - name: Receive exact non-secret extended-mode disposition
+        id: mimo_authority
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-stage-admit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/mimo/input/admit
+        continue-on-error: true
+      - name: Create same-run identity and enumerate G2A targets
+        id: mimo_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/mimo"
+          mkdir -p "$base/input" "$base/plan" "$base/targets" "$base/report" "$base/private"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          fs.writeFileSync(path.join(process.env.RUNNER_TEMP,'security-pipeline/mimo/input/RUN_IDENTITY_v1.json'),
+            JSON.stringify({schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+              runId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+              workflowHeadSha:process.env.GITHUB_SHA,repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation enumerate-targets --input-root "$base/input/preflight" \
+            --output-root "$base/plan" --run-identity "$base/input/RUN_IDENTITY_v1.json"
+      - name: Resolve model and runtime pins from the installed MiMo workflow
+        id: mimo_pins
+        if: ${{ needs.admit.outputs.extended_approved == 'true' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const source=fs.readFileSync('.github/workflows/lite-solo-ai-inference-v1.yml','utf8');
+          for(const [key,pat] of Object.entries({
+            LLAMA_SHA:'[a-f0-9]{40}',MODEL_SHA256:'[a-f0-9]{64}',
+            MODEL_REVISION:'[a-f0-9]{40}',MODEL_FILE:'[A-Za-z0-9._-]+'
+          })){
+            const matches=[...source.matchAll(new RegExp('^\\s*'+key+':\\s*('+pat+')\\s*    needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout immutable implementation for final report
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Capture observed job results without claiming analyzer success
+        shell: bash
+        env:
+          OBSERVED_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/publish/input" \
+                   "$GITHUB_WORKSPACE/.security-pipeline-warning-report"
+          printf '%s\n' "$OBSERVED_NEEDS_JSON" \
+            > "$RUNNER_TEMP/security-pipeline/publish/input/needs.json"
+      - name: Download current-run stage warning parts only
+        id: report_parts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: security-pipeline-stage-*-${{ github.run_id }}-${{ github.run_attempt }}
+          merge-multiple: false
+          path: ${{ runner.temp }}/security-pipeline/publish/parts/stages
+        continue-on-error: true
+      - name: Download component metadata from the same attempt when present
+        id: toolkit_parts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: security-pipeline-toolkit-component-*-${{ github.run_id }}-${{ github.run_attempt }}
+          merge-multiple: false
+          path: ${{ runner.temp }}/security-pipeline/publish/parts/toolkit
+        continue-on-error: true
+      - name: Observe exact artifact inventory and optional download results
+        if: ${{ always() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGE_DOWNLOAD_OUTCOME: ${{ steps.report_parts.outcome }}
+          TOOLKIT_DOWNLOAD_OUTCOME: ${{ steps.toolkit_parts.outcome }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/publish/input"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --paginate --jq '.artifacts[] | {name,id,size_in_bytes,expired}' \
+            > "$RUNNER_TEMP/security-pipeline/publish/input/artifacts.jsonl" || \
+            printf '%s\n' '{"artifactInventoryUnavailable":true}' \
+              > "$RUNNER_TEMP/security-pipeline/publish/input/artifacts.jsonl"
+          printf '%s\n' "$STAGE_DOWNLOAD_OUTCOME" \
+            > "$RUNNER_TEMP/security-pipeline/publish/input/stage-download-outcome.txt"
+          printf '%s\n' "$TOOLKIT_DOWNLOAD_OUTCOME" \
+            > "$RUNNER_TEMP/security-pipeline/publish/input/toolkit-download-outcome.txt"
+      - name: Publish exact v1 warning and stage status files
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-evidence-v1.mjs \
+            --operation consolidate-warnings \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --run-head-sha "$GITHUB_SHA" \
+            --input-root "$RUNNER_TEMP/security-pipeline/publish" \
+            --output-root "$GITHUB_WORKSPACE/.security-pipeline-warning-report" \
+            --needs-json "$RUNNER_TEMP/security-pipeline/publish/input/needs.json" \
+            --artifacts-json "$RUNNER_TEMP/security-pipeline/publish/input/artifacts.jsonl"
+      - name: Upload after-workflow warnings and stage report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-warnings-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .security-pipeline-warning-report/SECURITY_PIPELINE_WARNINGS_v1.json
+            .security-pipeline-warning-report/SECURITY_PIPELINE_WARNINGS_v1.md
+            .security-pipeline-warning-report/SECURITY_PIPELINE_STAGE_STATUS_v1.json
+          if-no-files-found: error
+          retention-days: 14
+,'gm'))];
+            if(matches.length!==1)throw Error('PIN_NOT_UNIQUE:'+key);
+            fs.appendFileSync(process.env.GITHUB_ENV,key+'='+matches[0][1]+'\n');
+          }
+          NODE
+      - name: Reuse original pinned CPU llama.cpp build and verified GGUF
+        id: mimo_prepare
+        if: ${{ steps.mimo_pins.outcome == 'success' && needs.admit.outputs.extended_approved == 'true' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/security-pipeline/mimo"
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$root/llama-source"
+          git -C "$root/llama-source" fetch --quiet --depth=1 origin "$LLAMA_SHA"
+          git -C "$root/llama-source" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$root/llama-source" rev-parse HEAD)" = "$LLAMA_SHA"
+          cmake -S "$root/llama-source" -B "$root/llama-build" -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF
+          cmake --build "$root/llama-build" --target llama-server -j 4
+          mkdir -p "$root/models"
+          curl -fL --retry 3 --retry-all-errors -o "$root/models/$MODEL_FILE" \
+            "https://huggingface.co/bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF/resolve/$MODEL_REVISION/$MODEL_FILE"
+          printf '%s  %s\n' "$MODEL_SHA256" "$root/models/$MODEL_FILE" | sha256sum --check
+          available="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+          model_bytes="$(stat -c%s "$root/models/$MODEL_FILE")"
+          test "$available" -gt "$((model_bytes/1024+1048576))" || {
+            echo "::warning::G2A.INSUFFICIENT_MODEL_RAM: observed availableKiB=$available and GGUFBytes=$model_bytes; required GGUF plus 1GiB"; exit 1;
+          }
+      - name: Start and health-check verified job-local MiMo on localhost
+        id: mimo_server
+        if: ${{ steps.mimo_prepare.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/security-pipeline/mimo"
+          "$root/llama-build/bin/llama-server" --model "$root/models/$MODEL_FILE" \
+            --alias lite-solo-mimo-v1 --host 127.0.0.1 --port 8080 \
+            --ctx-size 4096 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on \
+            --threads 4 --parallel 1 --n-gpu-layers 0 > "$root/private/server.log" 2>&1 &
+          echo "$!" > "$root/input/server.pid"
+          for i in $(seq 1 36); do
+            kill -0 "$(cat "$root/input/server.pid")" || break
+            if curl -fsS --max-time 2 http://127.0.0.1:8080/health > "$root/private/health.json"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::warning::G2A.MODEL_SERVER_START: local 127.0.0.1:8080 did not report healthy before 180s"
+          exit 1
+      - name: Generate a bounded source-bound objective and proposal per compiled target
+        id: mimo_rounds
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          MODEL_APPROVED: ${{ needs.admit.outputs.extended_approved }}
+          MODEL_STATUS: ${{ steps.mimo_server.outcome }}
+          PREP_STATUS: ${{ steps.mimo_prepare.outcome }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/security-pipeline/mimo"
+          plan="$root/plan/SECURITY_TARGET_PLAN_v1.json"
+          if [ ! -s "$plan" ]; then
+            echo "::warning::G2A.TARGET_PLAN_MISSING: no exact source-bound plan from this run"
+            exit 0
+          fi
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          fs.writeFileSync(path.join(process.env.RUNNER_TEMP,'security-pipeline/mimo/input/model-unavailable.json'),
+            JSON.stringify({configurationField:'toolkit.mimo-runtime_and_mimo-weights',
+              expected:'approved, verified MiMo CPU runtime and exact model bytes',
+              observed:{approved:process.env.MODEL_APPROVED,
+                modelStatus:process.env.MODEL_STATUS,prepareStatus:process.env.PREP_STATUS},
+              requiredCorrection:'Restore independent source-bound inference authority and pinned native model checks'},null,2)+'\n');
+          NODE
+          deadline="$(($(date +%s)+9600))"
+          jq -r '.targets[] | select(.compilationStatus=="EXACT_COMPILER_ARTIFACT" and .sourceBound==true) | .targetId' "$plan" \
+            > "$root/input/targets.txt"
+          while IFS= read -r target; do
+            [[ "$target" =~ ^TARGET-[a-f0-9]{32}$ ]] || continue
+            out="$root/targets/$target"
+            mkdir -p "$out"
+            node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+              --operation mimo-objective --input-root "$root/input/preflight" \
+              --output-root "$out" --run-identity "$root/input/RUN_IDENTITY_v1.json" \
+              --target-id "$target" || continue
+            mode=record-unavailable
+            if [ "$MODEL_APPROVED" = true ] && [ "$MODEL_STATUS" = success ] && \
+               [ "$(date +%s)" -lt "$deadline" ]; then mode=propose; fi
+            node security-intelligence-phase0/scripts/security-pipeline-mimo-v1.mjs \
+              --operation "$mode" --objective "$out/MIMO_STAGE_OBJECTIVE_v1.json" \
+              --authority "$root/input/admit/EXTENDED_MODE_DISPOSITION_v1.json" \
+              --run-identity "$root/input/RUN_IDENTITY_v1.json" \
+              --output-root "$out" --private-root "$root/private/$target" \
+              --reason-file "$root/input/model-unavailable.json" || true
+            if [ -s "$out/MIMO_PROPOSAL_v1.json" ]; then
+              node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+                --operation validate-proposal --input-root "$out" --output-root "$out" \
+                --run-identity "$root/input/RUN_IDENTITY_v1.json" \
+                --proposal "$out/MIMO_PROPOSAL_v1.json" || true
+            fi
+          done < "$root/input/targets.txt"
+      - name: Summarize original MiMo target facts and exact unavailable requirements
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/mimo/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode summarize-job --job mimo_configure --stage G2A \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --input-root "$RUNNER_TEMP/security-pipeline/mimo/targets" \
+            --source-manifest "$RUNNER_TEMP/security-pipeline/mimo/input/preflight/PREFLIGHT_MANIFEST_v1.json" \
+            --report-root "$RUNNER_TEMP/security-pipeline/mimo/report"
+      - name: Terminate this job's own localhost inference server
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          pidfile="$RUNNER_TEMP/security-pipeline/mimo/input/server.pid"
+          if [ -s "$pidfile" ]; then
+            pid="$(cat "$pidfile")"
+            [[ "$pid" =~ ^[0-9]+$ ]] && kill "$pid" 2>/dev/null || true
+          fi
+      - name: Upload only digest and sanitized G2A warning status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-mimo_configure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/mimo/report/
+          if-no-files-found: warn
+          retention-days: 14
+
   publish_warnings:
-    needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify]
+    needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify, mimo_configure]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
