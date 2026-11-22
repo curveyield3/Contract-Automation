@@ -180,44 +180,142 @@ function digestLargeFile(file){
  }finally{fs.closeSync(fd);}
  return hasher.digest('hex');
 }
-function inspect(a,profile){
+function inspect(a,profile,ctx){
  const root=a['toolkit-root'];
  if(!profile.pinQualified)return {verified:false,reason:'INDEPENDENT_NATIVE_PIN_NOT_QUALIFIED',sha256:null};
- const f=profile.trusted.modelFile;
- if(a.component!=='mimo-weights'||!f)
+ const name=profile.trusted.modelFile;
+ if(a.component!=='mimo-weights'||!name)
   return {verified:false,reason:'NO_APPROVED_NATIVE_BINARY_MANIFEST',sha256:null};
+ const start=Date.now();
  try{
-  const file=safeFile(root,f),real=digestLargeFile(file);
-  return {verified:real===profile.expectedBinarySha256,
-   reason:real===profile.expectedBinarySha256?'MATCHES_TRUSTED_WORKFLOW_PIN':'TRUSTED_PIN_MISMATCH',
-   sha256:real,relativeBinaryPath:f};
- }catch(e){return {verified:false,reason:'BINARY_MISSING_OR_INVALID:'+e.message,sha256:null};}
+  const manifestFile=safeFile(root,'TOOLKIT_CACHE_COMPONENT_MANIFEST_v1.json');
+  const original=readJson(manifestFile).value;
+  if(original.schemaVersion!=='curveyield-toolkit-component-manifest-v1'||
+    original.componentId!==a.component||
+    original.componentIdentitySha256!==profile.componentIdentitySha256||
+    original.cacheKey!==profile.cacheKey||
+    original.binaryName!==name||
+    original.originalExpectedBinarySha256!==profile.expectedBinarySha256||
+    original.sourceRevision!==profile.trusted.modelRevision)
+   throw Error('CACHE_MANIFEST_ORIGIN_IDENTITY_MISMATCH');
+  const binary=safeFile(root,name);
+  const stat=fs.statSync(binary);
+  if(!Number.isSafeInteger(stat.size)||stat.size<=0||stat.size!==original.binaryBytes)
+   throw Error('CACHE_BINARY_BYTE_LENGTH_MISMATCH');
+  const real=digestLargeFile(binary);
+  if(real!==profile.expectedBinarySha256||real!==original.originalObservedBinarySha256)
+   throw Error('ORIGINAL_TRUSTED_BINARY_DIGEST_MISMATCH');
+  const warm=a['cache-hit']==='true'&&
+    String(original.originRunId)!==ctx.runId;
+  return {verified:true,reason:warm?'ORIGINAL_BYTES_WARM_REUSE_VERIFIED':
+    'MATCHES_TRUSTED_WORKFLOW_PIN',sha256:real,
+    relativeBinaryPath:name,verifyMs:Date.now()-start,
+    bytes:stat.size,warmReuseDemonstrated:warm,
+    coldInstallMs:original.nativeInstallMs??null,originRunId:original.originRunId};
+ }catch(e){
+  return {verified:false,reason:'CACHE_MANIFEST_OR_BINARY_INVALID:'+e.message,
+   sha256:null,verifyMs:Date.now()-start};
+ }
 }
+async function provisionApprovedComponent(a,profile,ctx){
+ if(a.component!=='mimo-weights'||!profile.pinQualified||!profile.required)
+  throw Error('NO_INDEPENDENTLY_PINNED_INSTALL_RECIPE_FOR_COMPONENT');
+ const root=a['toolkit-root'];
+ const filename=profile.trusted.modelFile;
+ const revision=profile.trusted.modelRevision;
+ const original=profile.expectedBinarySha256;
+ if(!/^[a-f0-9]{40}$/.test(String(revision))||
+    !/^[A-Za-z0-9._-]+$/.test(String(filename))||
+    !SHA.test(String(original)))throw Error('TRUSTED_MIMO_INSTALL_PIN_INVALID');
+ fs.mkdirSync(root,{recursive:true,mode:0o700});
+ const target=path.join(root,filename),tmp=target+'.partial-'+ctx.runId;
+ if(fs.existsSync(target)||fs.existsSync(tmp))
+  throw Error('INSTALL_DESTINATION_ALREADY_EXISTS_REQUIRES_INSPECTION');
+ const started=Date.now();
+ const CAP=8*1024*1024*1024;
+ const available=fs.statfsSync(root);
+ const free=available.bavail*available.bsize;
+ if(free<CAP/2)throw Error('INSUFFICIENT_DISK_FOR_PINNED_GGUF_DOWNLOAD:availableBytes='+free);
+ const trustedURL='https://huggingface.co/bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF/resolve/'+
+    revision+'/'+filename;
+ const response=await fetch(trustedURL,{signal:AbortSignal.timeout(20*60*1000),
+  redirect:'follow'});
+ if(!response.ok||!response.body)throw Error('TRUSTED_MODEL_DOWNLOAD_HTTP_'+response.status);
+ const declared=Number(response.headers.get('content-length')??0);
+ if(declared>CAP)throw Error('TRUSTED_MODEL_DOWNLOAD_EXCEEDS_BYTE_CAP');
+ const hash=crypto.createHash('sha256');
+ const handle=await fs.promises.open(tmp,'wx',0o600);
+ let bytes=0,successful=false;
+ try{
+  const reader=response.body.getReader();
+  for(;;){
+   const {done,value}=await reader.read();
+   if(done)break;
+   bytes+=value.byteLength;
+   if(bytes>CAP)throw Error('GGUF_STREAM_BYTE_CAP_EXCEEDED');
+   hash.update(value);
+   await handle.writeFile(value);
+  }
+  if(declared&&declared!==bytes)throw Error('GGUF_DECLARED_LENGTH_MISMATCH');
+  const observed=hash.digest('hex');
+  if(observed!==original)throw Error('GGUF_TRUSTED_ORIGINAL_SHA256_MISMATCH');
+  await handle.sync();
+  successful=true;
+ }finally{
+  await handle.close();
+  if(!successful)await fs.promises.rm(tmp,{force:true});
+ }
+ await fs.promises.rename(tmp,target);
+ const completed=Date.now();
+ const binaryHash=digestLargeFile(target);
+ if(binaryHash!==original){
+  await fs.promises.rm(target,{force:true});
+  throw Error('GGUF_POST_RENAME_SHA256_MISMATCH');
+ }
+ const record={schemaVersion:'curveyield-toolkit-component-manifest-v1',
+  componentId:a.component,componentIdentitySha256:profile.componentIdentitySha256,
+  cacheKey:profile.cacheKey,binaryName:filename,binaryBytes:bytes,
+  originalExpectedBinarySha256:original,originalObservedBinarySha256:binaryHash,
+  sourceRevision:revision,originRunId:ctx.runId,originRunAttempt:ctx.runAttempt,
+  nativeInstallMs:completed-started,origin:'TRUSTED_PINNED_GGUF_SOURCE',
+  exactTrustedModelAlias:'lite-solo-mimo-v1',controllerAccepted:false};
+ writeJson(root,'TOOLKIT_CACHE_COMPONENT_MANIFEST_v1.json',record);
+ return {bytes,elapsedMs:Date.now()-started,verified:true,sha256:binaryHash};
+}
+
 function outputs(file,values){
  if(!file)return;
  const lines=Object.entries(values).map(([k,v])=>k+'='+String(v).replace(/[\r\n]/g,'')).join('\n')+'\n';
  fs.appendFileSync(file,lines);
 }
-function main(){
+async function main(){
  const a=parseArgs(process.argv.slice(2)),ctx=context(a),profile=approvedComponent(a);
- const root=a['output-root'];
- let status='PIN_UNRESOLVED',verification=null,provisionable=profile.required&&profile.pinQualified;
+ const root=a['output-root'],started=Date.now();
+ const provisionable=profile.required&&profile.pinQualified;
+ let status='PIN_UNRESOLVED',verification=null,installed=null,nativeError=null;
  if(!profile.required&&profile.component.required===false)status='NOT_REQUIRED';
  else if(!profile.required)status='REQUIREMENT_UNRESOLVED';
  else if(provisionable)status='READY_FOR_VERIFIED_RESTORE_OR_INSTALL';
- if(['inspect','verify-tree','restore-consumer','finalize'].includes(a.operation)){
-  verification=inspect(a,profile);
-  status=verification.verified?'RESTORED_VERIFIED':
-   a['cache-hit']==='true'?'CACHE_CORRUPT':'UNVERIFIED';
- }
  if(a.operation==='provision'){
-  // Provisioning is delegated only to an explicitly approved, current-revision
-  // recipe. This adapter cannot manufacture an installer authorization.
-  status='NOT_EXECUTED';
-  profile.warnings.push({code:'TOOLKIT.PROVISION_RECIPE_NOT_AUTHORIZED',
-   fieldPath:'toolkitComponents['+a.component+'].installerAuthorization',
-   expected:'independently approved current checkout pinned installer recipe',
-   observed:null,correction:'Supply and qualify the existing pinned installer before native execution'});
+  try{
+   installed=await provisionApprovedComponent(a,profile,ctx);
+   verification=inspect(a,profile,ctx);
+   status=verification.verified?'INSTALLED_VERIFIED':'UNVERIFIED';
+  }catch(error){
+   nativeError=error.message;
+   status='NOT_EXECUTED';
+   profile.warnings.push({code:'TOOLKIT.PINNED_INSTALL_UNAVAILABLE',
+    fieldPath:'toolkitComponents['+a.component+'].originalByteInstallation',
+    expected:'trusted pinned original-byte source and exact independent SHA256',
+    observed:nativeError,correction:'Repair exact trusted download/byte verification; never execute unverified cache'});
+  }
+ }
+ if(['inspect','verify-tree','restore-consumer','finalize'].includes(a.operation)){
+  verification=inspect(a,profile,ctx);
+  if(verification.verified)
+   status=verification.warmReuseDemonstrated?'RESTORED_VERIFIED':
+     verification.originRunId===ctx.runId?'INSTALLED_VERIFIED':'RESTORED_VERIFIED';
+  else status=a['cache-hit']==='true'?'CACHE_CORRUPT':'UNVERIFIED';
  }
  const metrics={schemaVersion:'curveyield-toolkit-component-metrics-v1',pipelineVersion:'v1',
   componentId:a.component,operation:a.operation,
@@ -228,10 +326,17 @@ function main(){
   observedBinarySha256:verification?.sha256??null,
   cacheHit:a['cache-hit']??null,restoreOutcome:a['restore-outcome']??null,
   componentRequired:profile.component.required??null,pinQualified:profile.pinQualified,
-  profileSha256:profile.profileDigestSha256,sourcePins:profile.trusted.observedTrustedSourceDigests,
-  warnings:profile.warnings,actualInstallerExecuted:false,
-  nativeReadiness:verification?.reason??status,
-  elapsedMilliseconds:null,cacheBytes:null,peakRssBytes:null};
+  profileSha256:profile.profileDigestSha256,
+  sourcePins:profile.trusted.observedTrustedSourceDigests,
+  warnings:profile.warnings,actualInstallerExecuted:installed!==null,
+  nativeReadiness:verification?.reason??nativeError??status,
+  elapsedMilliseconds:Date.now()-started,
+  bytesDownloaded:installed?.bytes??0,
+  cacheBytes:verification?.bytes??null,
+  installMs:installed?.elapsedMs??verification?.coldInstallMs??null,
+  verifyMs:verification?.verifyMs??null,
+  warmReuseDemonstrated:verification?.warmReuseDemonstrated??false,
+  peakRssBytes:process.memoryUsage().rss};
  writeJson(root,'TOOLKIT_CACHE_COMPONENT_IDENTITY_v1.json',{
   schemaVersion:'curveyield-toolkit-component-identity-v1',...profile.identity,
   digestSha256:profile.componentIdentitySha256,cacheKey:profile.cacheKey,
@@ -241,12 +346,13 @@ function main(){
   outputs(a['github-output'],{cache_key:profile.cacheKey,
    cache_path:a['toolkit-root'],provisionable:String(provisionable),
    component_required:String(profile.required)});
- if(a.operation==='verify-tree'||a.operation==='restore-consumer')
+ if(['verify-tree','restore-consumer','provision'].includes(a.operation))
   outputs(a['github-output'],{usableForExecution:String(verification?.verified===true)});
  console.log(JSON.stringify({componentId:a.component,operation:a.operation,status,
-  warningCount:profile.warnings.length,usableForExecution:metrics.usableForExecution}));
+  warningCount:profile.warnings.length,usableForExecution:metrics.usableForExecution,
+  actualInstallerExecuted:metrics.actualInstallerExecuted,bytesDownloaded:metrics.bytesDownloaded}));
 }
-try{main();}catch(e){
+main().catch(e=>{
  console.error('TOOLKIT_ADAPTER_UNAVAILABLE:'+e.constructor.name+':'+e.message);
  process.exitCode=2;
-}
+});
