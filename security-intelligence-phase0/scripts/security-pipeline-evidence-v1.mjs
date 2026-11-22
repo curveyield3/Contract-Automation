@@ -258,9 +258,11 @@ function consolidate(a){
  console.log(JSON.stringify({files:written,warningCount:warnings.length,stages:stages.length}));
 }
 function observedInput(a,file){
- try{return {value:readJson(path.join(a['input-root'],file),a['input-root']),
-  sha256:sha256HexV1(readBytes(path.join(a['input-root'],file),a['input-root']))};}
- catch(error){return {value:null,sha256:null,error:String(error)};}
+ try{
+  const bytes=readBytes(path.join(a['input-root'],file),a['input-root']);
+  return {value:JSON.parse(bytes.toString('utf8')),
+    sha256:sha256HexV1(bytes),bytes:bytes.length};
+ }catch(error){return {value:null,sha256:null,bytes:null,error:String(error)};}
 }
 function detail(field,expected,observed,correction){
  return {fieldPath:field,expected,observed,
@@ -307,13 +309,16 @@ function reconcileNative(a){
     {reason,jobResult:needs[job]?.result??null},
     'Restore and independently inspect original same-attempt stage part'));
   stages.push({stage:gate,producerJob:job,expectedFile:relative,
-   originalSha256:reason?null:source.sha256,bytes:null,
+   observedFile:reason?null:relative,
+   originalSha256:reason?null:source.sha256,bytes:reason?null:source.bytes,
    observedJobResult:needs[job]?.result??'UNKNOWN',
    status:reason?'UNVERIFIED':item.status,
    attempted:reason?null:item.attempted??null,
    completed:reason?null:item.completed??null,
    nativeEvidenceSha256:reason?null:item.originalNativeEvidenceSha256??null,
    sourceBound:reason?false:item.sourceBound===true,
+   sourceIdentity:reason?null:item.sourceIdentity??null,
+   dependencyFacts:reason?null:item.dependencyFacts??null,
    disposition:reason?'NOT_EXECUTED':'ORIGINAL_STAGE_RECEIPT_OBSERVED',
    reasonCode:reason,warningIds:reason?[]:(item.warnings??[])});
  }
@@ -323,11 +328,28 @@ function reconcileNative(a){
   const row=stages.find(x=>x.stage===gate);
   const actualNativeEvidence=!!row?.nativeEvidenceSha256&&
     row.status==='COMPLETE'&&row.originalSha256!==null;
-  nativeCounts[job]={eligible:null,attempted:row?.attempted??null,
-    nativeCompleted:actualNativeEvidence?row.completed:0,
-    sourceUnsupported:null,configurationSkipped:actualNativeEvidence?0:null,
-    nativeFailed:null,unresolved:actualNativeEvidence?0:null,
-    actualOriginalNativeEvidenceSha256:actualNativeEvidence?row.nativeEvidenceSha256:null};
+  const sourceBound=row?.sourceBound===true&&
+    row?.sourceIdentity?.archiveSha256===originalSha&&
+    row?.dependencyFacts?.nativeExecutionNotAttempted===true;
+  const sourceEligible=sourceBound&&
+    Number.isInteger(row.dependencyFacts.sourcePotentiallyEligibleCount)?
+    row.dependencyFacts.sourcePotentiallyEligibleCount:null;
+  const sourceUnsupported=sourceBound&&
+    Number.isInteger(row.dependencyFacts.sourceUnsupportedCount)?
+    row.dependencyFacts.sourceUnsupportedCount:null;
+  const attempts=Number.isInteger(row?.attempted)?row.attempted:null;
+  nativeCounts[job]={
+    eligible:sourceEligible,attempted:attempts,
+    nativeCompleted:actualNativeEvidence?row.completed:attempts===0?0:null,
+    sourceUnsupported,configurationSkipped:sourceEligible!==null&&attempts===0?
+      sourceEligible:null,
+    nativeFailed:attempts===0?0:null,
+    unresolved:sourceEligible===null?null:actualNativeEvidence?0:sourceEligible,
+    sourceCensusQualified:sourceBound,
+    knownOriginalSourceTargetCount:sourceBound?
+      row.dependencyFacts.originalSourceTargetCount:null,
+    actualOriginalNativeEvidenceSha256:actualNativeEvidence?row.nativeEvidenceSha256:null
+  };
   if(!actualNativeEvidence){
    const expected='original native analyzer output and verified toolchain identity for '+gate;
    absentNames.push(job);
@@ -344,6 +366,7 @@ function reconcileNative(a){
   sourceManifestSha256:manifest.sha256,observedNeedsSha256:observedNeeds.sha256,
   stageCount:stages.length,stages,nativeCounts,
   evidenceFileCount:stages.filter(x=>x.originalSha256).length,
+  sourceDenominatorKnownCount:Object.values(nativeCounts).filter(x=>x.sourceCensusQualified).length,
   nativeQualifiedCount:analyzerStages.length-absentNames.length,
   missingNativeAnalyzers:absentNames,
   status:!admitted?'INCOMPLETE':noNativeEvidence?'NO_NATIVE_ANALYSIS':'PARTIAL',
