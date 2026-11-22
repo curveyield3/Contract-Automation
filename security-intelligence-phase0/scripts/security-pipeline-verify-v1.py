@@ -325,6 +325,59 @@ def admit_extended(root, args, ctx):
 
 def summarize_job(root, args, ctx):
     warnings = []
+    if args.stage == "G2T":
+        components = ("foundry-node", "source-compilers", "slither-storage", "medusa",
+                      "wake", "mythril", "certora-prover", "autoprover",
+                      "mimo-runtime", "mimo-weights")
+        statuses = {}
+        for component in components:
+            artifact_name = "security-pipeline-toolkit-component-{}-{}-{}".format(
+                component, ctx["runId"], ctx["runAttempt"])
+            filepath = Path(args.input_root or "") / artifact_name / "TOOLKIT_CACHE_COMPONENT_METRICS_v1.json"
+            data, error = _read_optional_json(str(filepath) if args.input_root else None)
+            if error or not isinstance(data, dict):
+                statuses[component] = "NOT_EXECUTED"
+                warnings.append(make_warning(ctx, args, "TOOLKIT.COMPONENT_METADATA_MISSING",
+                    "G2T.METADATA." + component,
+                    artifact_name + "/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json",
+                    "same-run source-bound component metadata", error or "not object",
+                    "toolkit readiness is unverified",
+                    "Restore the named component's verified same-run metadata artifact",
+                    str(filepath), component=component, observation_failure=error))
+                continue
+            if (data.get("componentId") != component or
+                str(data.get("runId")) != ctx["runId"] or
+                str(data.get("runAttempt")) != str(ctx["runAttempt"]) or
+                data.get("workflowHeadSha") != ctx["workflowHeadSha"]):
+                statuses[component] = "UNVERIFIED"
+                warnings.append(make_warning(ctx, args, "TOOLKIT.COMPONENT_METADATA_IDENTITY",
+                    "G2T.IDENTITY." + component, artifact_name + ".runIdentity",
+                    {"runId": ctx["runId"], "runAttempt": ctx["runAttempt"],
+                     "head": ctx["workflowHeadSha"]},
+                    {"runId": data.get("runId"), "runAttempt": data.get("runAttempt"),
+                     "head": data.get("workflowHeadSha")},
+                    "component metadata cannot establish readiness",
+                    "Use component metadata from this exact GitHub run/attempt and checkout",
+                    str(filepath), component=component))
+                continue
+            state = str(data.get("status") or "UNVERIFIED")
+            statuses[component] = state
+            if data.get("usableForExecution") is not True and state != "NOT_REQUIRED":
+                warnings.append(make_warning(ctx, args, "TOOLKIT.COMPONENT_UNVERIFIED",
+                    "G2T.READINESS." + component,
+                    "toolkitComponents[{}].usableForExecution".format(component),
+                    "verified original binary and current approved pin",
+                    {"status": state, "pinQualified": data.get("pinQualified"),
+                     "expectedBinarySha256": data.get("expectedBinarySha256")},
+                    "native operations requiring this component remain NOT_EXECUTED",
+                    "Qualify and attest the named current component's original bytes and ABI",
+                    str(filepath), component=component))
+        status = "COMPLETE" if all(x in ("RESTORED_VERIFIED", "INSTALLED_VERIFIED", "NOT_REQUIRED")
+                                   for x in statuses.values()) else "PARTIAL"
+        _finish(root, args, ctx, warnings, status,
+                {"attempted": len(components), "completed": len(components) - len(warnings),
+                 "notExecuted": len(warnings), "dependencyFacts": {"componentStatuses": statuses}})
+        return
     outcome_pairs = (("native", args.native_outcome), ("summary", args.summary_outcome),
                      ("inventory", args.inventory_outcome))
     for label, actual in outcome_pairs:
@@ -445,25 +498,59 @@ def emit_warning(root, args, ctx):
 
 def verify_toolkit_component(root, args, ctx):
     warnings = []
-    profile, error = _read_optional_json(args.profile)
+    metric, error = _read_optional_json(args.profile)
     component = args.component
-    expected = profile.get("binarySha256") if isinstance(profile, dict) else None
-    artifact = profile.get("relativeBinaryPath") if isinstance(profile, dict) else None
+    expected = metric.get("expectedBinarySha256") if isinstance(metric, dict) else None
     observed = None
-    if args.toolkit_root and artifact and isinstance(artifact, str):
-        try:
-            observed = sha256_bytes(bounded_file(Path(args.toolkit_root) / artifact, args.toolkit_root, 512 * 1024 * 1024))
-        except (OSError, ValueError) as exc:
-            error = str(exc)
+    if not isinstance(metric, dict) or metric.get("schemaVersion") != "curveyield-toolkit-component-metrics-v1":
+        error = error or "TOOLKIT_METRICS_SCHEMA_INVALID"
+    elif (metric.get("componentId") != component or
+          str(metric.get("runId")) != ctx["runId"] or
+          str(metric.get("runAttempt")) != str(ctx["runAttempt"]) or
+          metric.get("workflowHeadSha") != ctx["workflowHeadSha"]):
+        error = "TOOLKIT_METRICS_COMPONENT_OR_RUN_IDENTITY_MISMATCH"
+    else:
+        # Binary SHA must originate independently from the trusted code checkout.
+        # At present only the current pinned MiMo GGUF has a verified absolute
+        # original-byte reference in the source-controlled inference workflow.
+        if component == "mimo-weights" and args.toolkit_root:
+            try:
+                workflow = bounded_file(
+                    ".github/workflows/lite-solo-ai-inference-v1.yml").decode("utf-8")
+                pinned = re.findall(r"^\s*MODEL_SHA256:\s*([0-9a-f]{64})\s*$", workflow, re.MULTILINE)
+                files = re.findall(r"^\s*MODEL_FILE:\s*([A-Za-z0-9._-]+)\s*$", workflow, re.MULTILINE)
+                if len(pinned) != 1 or len(files) != 1:
+                    raise ValueError("TRUSTED_MIMO_PIN_NOT_UNIQUE")
+                if expected != pinned[0]:
+                    raise ValueError("PROFILE_BINARY_SHA_DIFFERS_FROM_TRUSTED_MIMO_PIN")
+                file = Path(args.toolkit_root) / files[0]
+                if file.is_symlink() or not file.is_file():
+                    raise ValueError("MODEL_BINARY_UNAVAILABLE_OR_SYMLINK")
+                hasher = hashlib.sha256()
+                with file.open("rb") as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        hasher.update(chunk)
+                observed = hasher.hexdigest()
+                if observed != expected:
+                    raise ValueError("MODEL_BINARY_SHA_MISMATCH")
+            except (OSError, ValueError) as exc:
+                error = str(exc)
+        else:
+            error = "NO_INDEPENDENT_APPROVED_BINARY_BYTE_PIN_FOR_COMPONENT"
     if error or not isinstance(expected, str) or not SHA256.fullmatch(expected) or observed != expected:
         warnings.append(make_warning(ctx, args, "TOOLKIT.COMPONENT_PIN_MISMATCH", "TOOLKIT.BINARY_SHA",
-            "toolkitComponents[{}].binarySha256".format(component), expected, observed or error,
-            "unverified executable must not be run", "Rebuild/restore from trusted recipe and verify expected binary SHA",
+            "toolkitComponents[{}].expectedBinarySha256".format(component),
+            expected, observed or error, "unverified executable must not be run",
+            "Verify current trusted source pin and exact component original binary SHA, then restore/rebuild from approved recipe",
             args.profile, component=component, observation_failure=error))
     result = {"schemaVersion": "curveyield-toolkit-component-verification-v1", "componentId": component,
               "usableForExecution": not bool(warnings), "expectedBinarySha256": expected,
-              "observedBinarySha256": observed, "runId": ctx["runId"], "runAttempt": ctx["runAttempt"]}
+              "observedBinarySha256": observed, "runId": ctx["runId"], "runAttempt": ctx["runAttempt"],
+              "workflowHeadSha": ctx["workflowHeadSha"], "originalTrustedPin": component == "mimo-weights"}
     _write_json(root / "TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json", result)
+    if args.github_output:
+        with open(args.github_output, "a", encoding="utf-8") as out:
+            out.write("usableForExecution={}\n".format(str(not bool(warnings)).lower()))
     _finish(root, args, ctx, warnings, "NOT_EXECUTED" if warnings else "COMPLETE")
 
 
