@@ -1,4 +1,4 @@
-name: BoostHub v63 + CurveGlobal Yearn V2 SDT v9 Safe dual-chain fork v5
+name: BoostHub v63 + CurveGlobal Yearn V2 SDT v9 Safe dual-chain fork v6
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
       - '.github/workflows/boosthub-v13-full-stack-anvil-v1.yml'
       - 'github-native-sim/boosthub-v13-full-stack-v1/source/BeefyVaultV7FixedV2_v63.sol'
       - 'github-native-sim/boosthub-v13-full-stack-v1/source/StrategyCurveSDTYearnV9.sol'
-      - 'github-native-sim/boosthub-v13-full-stack-v1/safe-v63-fork-v2.cjs'
+      - 'github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs'
 permissions:
   contents: read
 concurrency:
@@ -74,7 +74,7 @@ jobs:
           set -euo pipefail
           npm install --prefix "$ROOT/dependencies" --no-save --ignore-scripts --no-audit --no-fund '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts@5.4.0'
           npm install --prefix "$ROOT/runner" --no-save --ignore-scripts --no-audit --no-fund 'ethers@6.15.0'
-          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v63-sdt-v9-v5.log
+          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v63-sdt-v9-v6.log
           node --check github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs
       - name: Execute Safe custody campaign on isolated Ethereum and Fraxtal forks
         shell: bash
@@ -113,7 +113,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-v63-sdt-v9-safe-mainnet-forks-v5-${{ github.run_id }}
+          name: boosthub-v63-sdt-v9-safe-mainnet-forks-v6-${{ github.run_id }}
           path: |
             source_manifest_v2.txt
             compile-v63-sdt-v9-v5.log
