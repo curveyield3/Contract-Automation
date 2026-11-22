@@ -75,7 +75,8 @@ async function main(){
  const ctx=(await json(args['run-identity'])).value;
  const plan=(await json(args.plan)).value;
  const authority=(await json(args.authority)).value;
- const original=(await json(args['source-manifest'])).value;
+ const sourceOriginal=await json(args['source-manifest']);
+ const original=sourceOriginal.value;
  const warnings=[],out=args['output-root'];
  const required=(field,test,expected,correction)=>{
   const observed=plan[field];
@@ -98,7 +99,11 @@ async function main(){
     authority.approved!==true||!SHA.test(authority.authorizationRefSha256??'')||
     authority.sourceArchiveSha256!==sourceSha||
     !Array.isArray(authority.authorizedCapabilities)||
-    !authority.authorizedCapabilities.includes('fork_setup'))
+    !authority.authorizedCapabilities.includes('fork_setup')||
+    !SHA.test(authority.approvedExecutionScopeSha256??'')||
+    authority.approvedExecutionScopeSha256!==plan.approvedExecutionScopeSha256||
+    !Array.isArray(authority.allowedChainIds)||
+    !authority.allowedChainIds.includes(plan.approvedForkChainId))
   warnings.push(problem('G2B.INDEPENDENT_FORK_AUTHORITY',
    'EXTENDED_MODE_DISPOSITION_v1.json.authorizedCapabilities',
    'independently accepted exact run/source-bound fork_setup capability',
@@ -120,6 +125,9 @@ async function main(){
   'original authorized funding script SHA-256','Bind source-defined funding phase and actor balances');
  required('approvedForkHardfork',x=>typeof x==='string'&&/^(london|paris|shanghai|cancun|prague)$/.test(x),
   'source-approved Anvil hardfork','Select only an independently approved hardfork');
+ required('approvedDeploymentProfileSha256',x=>SHA.test(x??''),
+  'independently source-approved audit-deployment.json original SHA-256',
+  'Bind exact original deployment profile bytes to the independent issuer');
  if(args.operation==='execute'){
   for(const x of ['source-zip','toolkit-profile','toolkit-root','build-evidence','private-root'])
    if(!args[x])warnings.push(problem('G2B.RESTRICTED_INPUT_NOT_AVAILABLE','--'+x,
@@ -130,7 +138,7 @@ async function main(){
   pipelineVersion:'v1',stage:'G2B',runId:String(ctx.runId),
   runAttempt:ctx.runAttempt,headSha:ctx.workflowHeadSha,
   sourceArchiveSha256:SHA.test(sourceSha??'')?sourceSha:null,
-  originalSourceManifestSha256:sha(Buffer.from(JSON.stringify(original))),
+  originalSourceManifestSha256:sourceOriginal.sha256,
   independentAuthorityAccepted:authority.approved===true&&warnings.length===0,
   claimedControllerAcceptance:false,executionMode:args.operation,
   nativeAttempted:false,status:'NOT_EXECUTED',
@@ -181,6 +189,8 @@ async function main(){
     throw Error('NATIVE_DEPLOYMENT_PROFILE_MISSING_OR_CHAIN_MISMATCH');
    if(profile.mode!=='FOUNDRY')
     throw Error('NATIVE_PROFILE_NOT_APPROVED_FOUNDRY_SOURCE_SCRIPT');
+   if(profile.fileSha256!==plan.approvedDeploymentProfileSha256)
+    throw Error('NATIVE_SOURCE_DEPLOYMENT_PROFILE_SHA256_MISMATCH');
    if(profile.scripts.length<1)throw Error('NO_DECLARED_DEPLOYMENT_SCRIPTS');
    const exactSourceShaSet=profile.scripts.map(x=>x.sha256);
    const authorizedSet=new Set([plan.sourceDeploymentScriptSha256,
