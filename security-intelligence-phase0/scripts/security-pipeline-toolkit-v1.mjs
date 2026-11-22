@@ -115,7 +115,7 @@ function observedPins(component){
    rootDeps['@foundry-rs/forge']==='1.7.1'?
     '1.7.1':rootDeps['@foundry-rs/anvil']??null};
 }
-function approvedComponent(a){
+function approvedComponent(a,ctx){
  const {value:profile,sha256}=readJson(a.profile);
  if(profile.schemaVersion!=='curveyield-toolkit-profile-v1'||
    !Array.isArray(profile.components))throw Error('TOOLKIT_PROFILE_SCHEMA_MISMATCH');
@@ -123,13 +123,31 @@ function approvedComponent(a){
  if(!row||profile.components.filter(x=>x.componentId===a.component).length!==1)
   throw Error('TOOLKIT_PROFILE_COMPONENT_MISSING_OR_DUPLICATED');
  const trusted=observedPins(a.component);
+ const original=profile.runIdentity??{};
+ const runBound=String(original.runId)===ctx.runId&&
+  Number(original.runAttempt)===ctx.runAttempt&&
+  original.workflowHeadSha===ctx.workflowHeadSha&&
+  original.verifiedForCurrentJob===true;
+ const sourceBound=profile.sourceBound===true&&
+  SHA.test(String(profile.sourceArchiveSha256))&&
+  SHA.test(String(profile.targetPlanSha256));
+ const isRealRequirement=runBound&&sourceBound&&
+   (row.required===true||row.required===false)&&
+   row.os===process.platform&&row.arch===process.arch&&
+   (row.required===true||typeof row.notRequiredReason==='string');
+ const required=isRealRequirement&&row.required===true;
+ const sameModelPin={
+  modelSha256:trusted.knownModelSha256,
+  modelRevision:trusted.modelRevision,file:trusted.modelFile
+ };
+ const recipe=digestCanonicalV1(sameModelPin);
  const expected=typeof row.expectedBinarySha256==='string'?row.expectedBinarySha256:null;
- // An input profile cannot approve itself. The only independently existing
- // byte digest qualified here is the current checked-out MiMo GGUF pin.
- const sameTrustedModel=a.component==='mimo-weights'&&SHA.test(String(trusted.knownModelSha256))&&
-  expected===trusted.knownModelSha256&&row.approvedSourceRevision===trusted.modelRevision;
- const pinQualified=sameTrustedModel;
- const required=row.required===true;
+ const pinQualified=a.component==='mimo-weights'&&
+  isRealRequirement&&SHA.test(String(trusted.knownModelSha256))&&
+  expected===trusted.knownModelSha256&&
+  row.approvedSourceRevision===trusted.modelRevision&&
+  row.recipeDigest===recipe&&
+  row.originalPinOrigin==='.github/workflows/lite-solo-ai-inference-v1.yml';
  const keyParts={
   schemaVersion:'curveyield-toolkit-component-identity-v1',
   namespace:'cy-security-pipeline-toolkit-v1',
@@ -138,7 +156,11 @@ function approvedComponent(a){
   approvedSourceRevision:pinQualified?trusted.modelRevision:null,
   dependencyLockSha256:a.component==='foundry-node'||a.component==='source-compilers'?
    trusted.observedTrustedSourceDigests.packageLockSha256:null,
-  installRecipeSha256:digestCanonicalV1([a.component,'trusted-recipe-v1',trusted.observedTrustedSourceDigests]),
+  installRecipeSha256:digestCanonicalV1([a.component,'trusted-recipe-v1',
+    trusted.observedTrustedSourceDigests,
+    // Actual component recipe controls its cache identity, not audit source SHA.
+    row.recipeDigest??null,
+    row.approvedSourceRevision??null]),
   compilerIdentitySha256:null,buildFlagsSha256:null,
   approvedPayloadProfileSha256:pinQualified?digestCanonicalV1([
    trusted.modelFile,trusted.knownModelSha256]):null
@@ -147,18 +169,46 @@ function approvedComponent(a){
  const key='cy-security-pipeline-toolkit-v1-'+a.component+'-'+process.platform+'-'+
   process.arch+'-node'+process.versions.modules+'-'+digest;
  const warnings=[];
- if(row.required!==true&&row.required!==false)
-  warnings.push({code:'TOOLKIT.COMPONENT_REQUIREMENT_UNRESOLVED',
-   fieldPath:'TOOLKIT_PROFILE_v1.json.components['+a.component+'].required',
-   expected:'boolean derived from original G2 compatibility',
-   observed:row.required??null,
-   correction:'Bind required/NOT_REQUIRED to the original source-bound target plan'});
- if(required&&!pinQualified)warnings.push({code:'TOOLKIT.COMPONENT_PIN_UNRESOLVED',
-  fieldPath:'TOOLKIT_PROFILE_v1.json.components['+a.component+'].expectedBinarySha256',
-  expected:'independently qualified binary digest from trusted current checkout',
-  observed:expected,'correction':'Qualify exact native bytes and immutable source revision; do not trust profile self-approval'});
- return {profileDigestSha256:sha256,component:row,trusted,expectedBinarySha256:pinQualified?expected:null,
-  pinQualified,required,identity:keyParts,cacheKey:key,componentIdentitySha256:digest,warnings};
+ if(!runBound)warnings.push({
+  code:'TOOLKIT.PROFILE_RUN_IDENTITY_MISMATCH',
+  fieldPath:'TOOLKIT_PROFILE_v1.json.runIdentity',
+  expected:{runId:ctx.runId,runAttempt:ctx.runAttempt,workflowHeadSha:ctx.workflowHeadSha},
+  observed:{runId:original.runId??null,runAttempt:original.runAttempt??null,
+   workflowHeadSha:original.workflowHeadSha??null},
+  correction:'Recover source-bound G2 profile from the exact original run and attempt'});
+ if(!sourceBound)warnings.push({
+  code:'TOOLKIT.PROFILE_SOURCE_NOT_VERIFIED',
+  fieldPath:'TOOLKIT_PROFILE_v1.json.sourceArchiveSha256/targetPlanSha256',
+  expected:'two admitted original SHA-256 digests and sourceBound=true',
+  observed:{sourceBound:profile.sourceBound??null,
+   sourceArchiveSha256:profile.sourceArchiveSha256??null,
+   targetPlanSha256:profile.targetPlanSha256??null},
+  correction:'Regenerate G2 target plan from the admitted original collector manifest'});
+ if(!isRealRequirement)warnings.push({
+  code:'TOOLKIT.COMPONENT_REQUIREMENT_UNRESOLVED',
+  fieldPath:'TOOLKIT_PROFILE_v1.json.components['+a.component+'].required',
+  expected:'same-run source-bound boolean and current platform ABI',
+  observed:{required:row.required??null,os:row.os??null,arch:row.arch??null},
+  correction:'Bind required/NOT_REQUIRED to exact G2 source compatibility and immutable runner'});
+ if(required&&!pinQualified){
+  const absent=Array.isArray(row.unresolvedNativePinFields)&&row.unresolvedNativePinFields.length?
+   row.unresolvedNativePinFields:['independently attested executable original SHA-256'];
+  for(const field of absent)warnings.push({
+   code:'TOOLKIT.COMPONENT_NATIVE_PIN_UNRESOLVED',
+   fieldPath:'TOOLKIT_PROFILE_v1.json.components['+a.component+'].originalNativePin.'+
+     field.replace(/[^a-zA-Z0-9]+/g,'_'),
+   expected:field,observed:{
+     approvedSourceRevision:row.approvedSourceRevision??null,
+     approvedVersion:row.approvedVersion??null,
+     binarySha256:expected
+   },
+   correction:'Qualify original executable or published build attestation for this exact component and ABI'});
+ }
+ return {profileDigestSha256:sha256,
+  component:{...row,required:isRealRequirement?row.required:null},
+  trusted,expectedBinarySha256:pinQualified?expected:null,
+  pinQualified,required,requirementVerified:isRealRequirement,
+  identity:keyParts,cacheKey:key,componentIdentitySha256:digest,warnings};
 }
 function safeFile(root,filename){
  const target=path.resolve(root,filename),base=path.resolve(root);
@@ -289,8 +339,16 @@ function outputs(file,values){
  fs.appendFileSync(file,lines);
 }
 async function main(){
- const a=parseArgs(process.argv.slice(2)),ctx=context(a),profile=approvedComponent(a);
+ const a=parseArgs(process.argv.slice(2)),ctx=context(a),profile=approvedComponent(a,ctx);
  const root=a['output-root'],started=Date.now();
+ let previous=null;
+ try{
+  const prior=readJson(path.join(root,'TOOLKIT_CACHE_COMPONENT_METRICS_v1.json')).value;
+  if(prior?.schemaVersion==='curveyield-toolkit-component-metrics-v1'&&
+    prior.componentId===a.component&&prior.runId===ctx.runId&&
+    Number(prior.runAttempt)===ctx.runAttempt&&
+    prior.componentIdentitySha256===profile.componentIdentitySha256)previous=prior;
+ }catch{}
  const provisionable=profile.required&&profile.pinQualified;
  let status='PIN_UNRESOLVED',verification=null,installed=null,nativeError=null;
  if(!profile.required&&profile.component.required===false)status='NOT_REQUIRED';
@@ -298,6 +356,8 @@ async function main(){
  else if(provisionable)status='READY_FOR_VERIFIED_RESTORE_OR_INSTALL';
  if(a.operation==='provision'){
   try{
+   if(a['restore-outcome']!=='success'||a['cache-hit']==='true')
+    throw Error('PINNED_COLD_INSTALL_REQUIRES_SUCCESSFUL_EXACT_CACHE_MISS');
    installed=await provisionApprovedComponent(a,profile,ctx);
    verification=inspect(a,profile,ctx);
    status=verification.verified?'INSTALLED_VERIFIED':'UNVERIFIED';
@@ -311,11 +371,27 @@ async function main(){
   }
  }
  if(['inspect','verify-tree','restore-consumer','finalize'].includes(a.operation)){
-  verification=inspect(a,profile,ctx);
-  if(verification.verified)
-   status=verification.warmReuseDemonstrated?'RESTORED_VERIFIED':
-     verification.originRunId===ctx.runId?'INSTALLED_VERIFIED':'RESTORED_VERIFIED';
-  else status=a['cache-hit']==='true'?'CACHE_CORRUPT':'UNVERIFIED';
+  if(a['restore-outcome']==='failure'){
+   verification={verified:false,sha256:null,reason:'CACHE_RESTORE_TRANSPORT_FAILED'};
+   status='RESTORE_FAILED';
+   profile.warnings.push({code:'TOOLKIT.CACHE_RESTORE_FAILED',
+    fieldPath:'actions.cache_restore.outcome',expected:'success',
+    observed:'failure',correction:'Inspect the original cache transport error before an approved cold install'});
+  }else{
+   verification=inspect(a,profile,ctx);
+   if(verification.verified)
+    status=verification.warmReuseDemonstrated?'RESTORED_VERIFIED':
+      verification.originRunId===ctx.runId?'INSTALLED_VERIFIED':'RESTORED_VERIFIED';
+   else status=a['cache-hit']==='true'?'CACHE_CORRUPT':
+     profile.component.required===false?'NOT_REQUIRED':
+     profile.required?'UNVERIFIED':'PIN_UNRESOLVED';
+   if(status==='CACHE_CORRUPT')profile.warnings.push({
+    code:'TOOLKIT.CACHE_CORRUPT',
+    fieldPath:'toolkitComponents['+a.component+'].originalRestoredManifest',
+    expected:profile.expectedBinarySha256,
+    observed:verification.reason,
+    correction:'Quarantine the original exact-key cache; never execute or re-save corrupt cached bytes'});
+  }
  }
  const metrics={schemaVersion:'curveyield-toolkit-component-metrics-v1',pipelineVersion:'v1',
   componentId:a.component,operation:a.operation,
@@ -328,15 +404,24 @@ async function main(){
   componentRequired:profile.component.required??null,pinQualified:profile.pinQualified,
   profileSha256:profile.profileDigestSha256,
   sourcePins:profile.trusted.observedTrustedSourceDigests,
-  warnings:profile.warnings,actualInstallerExecuted:installed!==null,
+  warnings:[...(previous?.warnings??[]),...profile.warnings].filter((v,i,all)=>
+   all.findIndex(a=>a.code===v.code&&a.fieldPath===v.fieldPath)===i),
+  actualInstallerExecuted:installed!==null||previous?.actualInstallerExecuted===true,
   nativeReadiness:verification?.reason??nativeError??status,
   elapsedMilliseconds:Date.now()-started,
-  bytesDownloaded:installed?.bytes??0,
-  cacheBytes:verification?.bytes??null,
-  installMs:installed?.elapsedMs??verification?.coldInstallMs??null,
-  verifyMs:verification?.verifyMs??null,
+  bytesDownloaded:installed?.bytes??previous?.bytesDownloaded??0,
+  cacheBytes:verification?.bytes??previous?.cacheBytes??null,
+  installMs:installed?.elapsedMs??verification?.coldInstallMs??previous?.installMs??null,
+  verifyMs:verification?.verifyMs??previous?.verifyMs??null,
   warmReuseDemonstrated:verification?.warmReuseDemonstrated??false,
-  peakRssBytes:process.memoryUsage().rss};
+  cacheSaveOutcome:process.env.CACHE_SAVE_OUTCOME??previous?.cacheSaveOutcome??null,
+  restoreMs:previous?.restoreMs??null,saveMs:previous?.saveMs??null,
+  bytesRestored:verification?.verified&&a['cache-hit']==='true'?verification.bytes:
+    previous?.bytesRestored??null,
+  bytesSaved:process.env.CACHE_SAVE_OUTCOME==='success'&&
+    verification?.verified===true?verification.bytes:previous?.bytesSaved??null,
+  installationTimeSavedMs:null,
+  peakRssBytes:Math.max(process.memoryUsage().rss,previous?.peakRssBytes??0)};
  writeJson(root,'TOOLKIT_CACHE_COMPONENT_IDENTITY_v1.json',{
   schemaVersion:'curveyield-toolkit-component-identity-v1',...profile.identity,
   digestSha256:profile.componentIdentitySha256,cacheKey:profile.cacheKey,
@@ -345,7 +430,7 @@ async function main(){
  if(a.operation==='plan')
   outputs(a['github-output'],{cache_key:profile.cacheKey,
    cache_path:a['toolkit-root'],provisionable:String(provisionable),
-   component_required:String(profile.required)});
+   component_required:String(profile.component.required)});
  if(['verify-tree','restore-consumer','provision'].includes(a.operation))
   outputs(a['github-output'],{usableForExecution:String(verification?.verified===true)});
  console.log(JSON.stringify({componentId:a.component,operation:a.operation,status,

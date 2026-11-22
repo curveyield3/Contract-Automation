@@ -449,14 +449,16 @@ jobs:
           key: ${{ steps.tool_plan.outputs.cache_key }}
       - name: Provision original trusted software bytes on exact cache miss
         id: cache_provision
-        if: ${{ steps.tool_plan.outputs.provisionable == 'true' && steps.cache_restore.outputs.cache-hit != 'true' }}
+        if: ${{ steps.tool_plan.outputs.provisionable == 'true' && steps.cache_restore.outcome == 'success' && steps.cache_restore.outputs.cache-hit != 'true' }}
         continue-on-error: true
         shell: bash
         env:
           COMPONENT: ${{ matrix.component }}
+          RESTORE_OUTCOME: ${{ steps.cache_restore.outcome }}
+          RESTORED: ${{ steps.cache_restore.outputs.cache-hit || 'false' }}
         run: |
           node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
-            --operation provision --component "$COMPONENT" \
+            --operation provision --cache-hit "$RESTORED" --restore-outcome "$RESTORE_OUTCOME" --component "$COMPONENT" \
             --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" \
             --run-identity "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/run/RUN_IDENTITY_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/payload" \
@@ -500,6 +502,23 @@ jobs:
         with:
           path: ${{ steps.tool_plan.outputs.cache_path }}
           key: ${{ steps.tool_plan.outputs.cache_key }}
+      - name: Finalize only observed cache save outcome and original component metrics
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+          RESTORED: ${{ steps.cache_restore.outputs.cache-hit || 'false' }}
+          RESTORE_OUTCOME: ${{ steps.cache_restore.outcome }}
+          CACHE_SAVE_OUTCOME: ${{ steps.cache_save.outcome }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation finalize --component "$COMPONENT" \
+            --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" \
+            --run-identity "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/run/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/payload" \
+            --output-root "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/safe" \
+            --cache-hit "$RESTORED" --restore-outcome "$RESTORE_OUTCOME"
       - name: Publish component metrics, original restore result and warning part
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
