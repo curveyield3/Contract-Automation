@@ -855,6 +855,132 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Load original source-bound G2 toolkit profile for fork_setup
+        id: consumer_toolkit_profile
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-toolkit-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit-profile
+        continue-on-error: true
+      - name: Set pinned Node 22 for independent component verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve immutable run/attempt identity for fork_setup software consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline','fork_setup','consumer-toolkit','RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+           runId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+           workflowHeadSha:process.env.GITHUB_SHA,repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+      - name: Plan the original fixed foundry-node component identity
+        id: consumer_foundry_node_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component foundry-node --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/foundry-node/payload" --output-root "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/foundry-node" \
+            --consumer-job fork_setup --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned foundry-node cache
+        id: consumer_foundry_node_restore
+        if: ${{ steps.consumer_foundry_node_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_foundry_node_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_foundry_node_plan.outputs.cache_key }}
+      - name: Install foundry-node only after approved cold cache miss
+        id: consumer_foundry_node_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_foundry_node_plan.outputs.provisionable == 'true' && steps.consumer_foundry_node_restore.outcome == 'success' && steps.consumer_foundry_node_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_foundry_node_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_foundry_node_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component foundry-node --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/foundry-node/payload" --output-root "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/foundry-node" \
+            --consumer-job fork_setup --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original foundry-node bytes locally before native G2B
+        id: consumer_foundry_node_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_foundry_node_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_foundry_node_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/foundry-node" "$RUNNER_TEMP/security-pipeline/fork_setup/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component foundry-node --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/foundry-node/payload" --output-root "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/foundry-node" \
+            --consumer-job fork_setup --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job fork_setup --stage G2B \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component foundry-node --profile "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/foundry-node/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/foundry-node/payload" --report-root "$RUNNER_TEMP/security-pipeline/fork_setup/report" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Plan the original fixed source-compilers component identity
+        id: consumer_source_compilers_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/source-compilers" \
+            --consumer-job fork_setup --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned source-compilers cache
+        id: consumer_source_compilers_restore
+        if: ${{ steps.consumer_source_compilers_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_source_compilers_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_source_compilers_plan.outputs.cache_key }}
+      - name: Install source-compilers only after approved cold cache miss
+        id: consumer_source_compilers_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_source_compilers_plan.outputs.provisionable == 'true' && steps.consumer_source_compilers_restore.outcome == 'success' && steps.consumer_source_compilers_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_source_compilers_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_source_compilers_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/source-compilers" \
+            --consumer-job fork_setup --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original source-compilers bytes locally before native G2B
+        id: consumer_source_compilers_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_source_compilers_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_source_compilers_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/source-compilers" "$RUNNER_TEMP/security-pipeline/fork_setup/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/source-compilers" \
+            --consumer-job fork_setup --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job fork_setup --stage G2B \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/source-compilers/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --report-root "$RUNNER_TEMP/security-pipeline/fork_setup/report" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Retrieve original same-run source evidence
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -920,6 +1046,132 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Load original source-bound G2 toolkit profile for storage_inspect
+        id: consumer_toolkit_profile
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-toolkit-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit-profile
+        continue-on-error: true
+      - name: Set pinned Node 22 for independent component verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve immutable run/attempt identity for storage_inspect software consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline','storage_inspect','consumer-toolkit','RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+           runId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+           workflowHeadSha:process.env.GITHUB_SHA,repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+      - name: Plan the original fixed slither-storage component identity
+        id: consumer_slither_storage_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component slither-storage --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/slither-storage/payload" --output-root "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/slither-storage" \
+            --consumer-job storage_inspect --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned slither-storage cache
+        id: consumer_slither_storage_restore
+        if: ${{ steps.consumer_slither_storage_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_slither_storage_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_slither_storage_plan.outputs.cache_key }}
+      - name: Install slither-storage only after approved cold cache miss
+        id: consumer_slither_storage_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_slither_storage_plan.outputs.provisionable == 'true' && steps.consumer_slither_storage_restore.outcome == 'success' && steps.consumer_slither_storage_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_slither_storage_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_slither_storage_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component slither-storage --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/slither-storage/payload" --output-root "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/slither-storage" \
+            --consumer-job storage_inspect --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original slither-storage bytes locally before native G2C
+        id: consumer_slither_storage_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_slither_storage_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_slither_storage_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/slither-storage" "$RUNNER_TEMP/security-pipeline/storage_inspect/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component slither-storage --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/slither-storage/payload" --output-root "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/slither-storage" \
+            --consumer-job storage_inspect --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job storage_inspect --stage G2C \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component slither-storage --profile "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/slither-storage/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/slither-storage/payload" --report-root "$RUNNER_TEMP/security-pipeline/storage_inspect/report" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Plan the original fixed source-compilers component identity
+        id: consumer_source_compilers_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/source-compilers" \
+            --consumer-job storage_inspect --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned source-compilers cache
+        id: consumer_source_compilers_restore
+        if: ${{ steps.consumer_source_compilers_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_source_compilers_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_source_compilers_plan.outputs.cache_key }}
+      - name: Install source-compilers only after approved cold cache miss
+        id: consumer_source_compilers_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_source_compilers_plan.outputs.provisionable == 'true' && steps.consumer_source_compilers_restore.outcome == 'success' && steps.consumer_source_compilers_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_source_compilers_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_source_compilers_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/source-compilers" \
+            --consumer-job storage_inspect --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original source-compilers bytes locally before native G2C
+        id: consumer_source_compilers_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_source_compilers_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_source_compilers_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/source-compilers" "$RUNNER_TEMP/security-pipeline/storage_inspect/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/source-compilers" \
+            --consumer-job storage_inspect --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job storage_inspect --stage G2C \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/storage_inspect/consumer-toolkit/source-compilers/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --report-root "$RUNNER_TEMP/security-pipeline/storage_inspect/report" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Retrieve original same-run source evidence
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -985,6 +1237,132 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Load original source-bound G2 toolkit profile for medusa_analyze
+        id: consumer_toolkit_profile
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-toolkit-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit-profile
+        continue-on-error: true
+      - name: Set pinned Node 22 for independent component verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve immutable run/attempt identity for medusa_analyze software consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline','medusa_analyze','consumer-toolkit','RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+           runId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+           workflowHeadSha:process.env.GITHUB_SHA,repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+      - name: Plan the original fixed medusa component identity
+        id: consumer_medusa_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component medusa --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/medusa/payload" --output-root "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/medusa" \
+            --consumer-job medusa_analyze --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned medusa cache
+        id: consumer_medusa_restore
+        if: ${{ steps.consumer_medusa_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_medusa_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_medusa_plan.outputs.cache_key }}
+      - name: Install medusa only after approved cold cache miss
+        id: consumer_medusa_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_medusa_plan.outputs.provisionable == 'true' && steps.consumer_medusa_restore.outcome == 'success' && steps.consumer_medusa_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_medusa_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_medusa_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component medusa --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/medusa/payload" --output-root "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/medusa" \
+            --consumer-job medusa_analyze --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original medusa bytes locally before native G2D
+        id: consumer_medusa_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_medusa_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_medusa_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/medusa" "$RUNNER_TEMP/security-pipeline/medusa_analyze/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component medusa --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/medusa/payload" --output-root "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/medusa" \
+            --consumer-job medusa_analyze --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job medusa_analyze --stage G2D \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component medusa --profile "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/medusa/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/medusa/payload" --report-root "$RUNNER_TEMP/security-pipeline/medusa_analyze/report" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Plan the original fixed source-compilers component identity
+        id: consumer_source_compilers_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/source-compilers" \
+            --consumer-job medusa_analyze --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned source-compilers cache
+        id: consumer_source_compilers_restore
+        if: ${{ steps.consumer_source_compilers_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_source_compilers_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_source_compilers_plan.outputs.cache_key }}
+      - name: Install source-compilers only after approved cold cache miss
+        id: consumer_source_compilers_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_source_compilers_plan.outputs.provisionable == 'true' && steps.consumer_source_compilers_restore.outcome == 'success' && steps.consumer_source_compilers_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_source_compilers_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_source_compilers_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/source-compilers" \
+            --consumer-job medusa_analyze --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original source-compilers bytes locally before native G2D
+        id: consumer_source_compilers_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_source_compilers_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_source_compilers_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/source-compilers" "$RUNNER_TEMP/security-pipeline/medusa_analyze/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/source-compilers" \
+            --consumer-job medusa_analyze --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job medusa_analyze --stage G2D \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/medusa_analyze/consumer-toolkit/source-compilers/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --report-root "$RUNNER_TEMP/security-pipeline/medusa_analyze/report" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Retrieve original same-run source evidence
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -1055,6 +1433,132 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Load original source-bound G2 toolkit profile for wake_analyze
+        id: consumer_toolkit_profile
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-toolkit-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit-profile
+        continue-on-error: true
+      - name: Set pinned Node 22 for independent component verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve immutable run/attempt identity for wake_analyze software consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline','wake_analyze','consumer-toolkit','RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+           runId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+           workflowHeadSha:process.env.GITHUB_SHA,repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+      - name: Plan the original fixed wake component identity
+        id: consumer_wake_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component wake --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/wake/payload" --output-root "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/wake" \
+            --consumer-job wake_analyze --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned wake cache
+        id: consumer_wake_restore
+        if: ${{ steps.consumer_wake_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_wake_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_wake_plan.outputs.cache_key }}
+      - name: Install wake only after approved cold cache miss
+        id: consumer_wake_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_wake_plan.outputs.provisionable == 'true' && steps.consumer_wake_restore.outcome == 'success' && steps.consumer_wake_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_wake_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_wake_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component wake --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/wake/payload" --output-root "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/wake" \
+            --consumer-job wake_analyze --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original wake bytes locally before native G3
+        id: consumer_wake_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_wake_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_wake_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/wake" "$RUNNER_TEMP/security-pipeline/wake_analyze/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component wake --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/wake/payload" --output-root "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/wake" \
+            --consumer-job wake_analyze --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job wake_analyze --stage G3 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component wake --profile "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/wake/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/wake/payload" --report-root "$RUNNER_TEMP/security-pipeline/wake_analyze/report" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Plan the original fixed source-compilers component identity
+        id: consumer_source_compilers_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/source-compilers" \
+            --consumer-job wake_analyze --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned source-compilers cache
+        id: consumer_source_compilers_restore
+        if: ${{ steps.consumer_source_compilers_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_source_compilers_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_source_compilers_plan.outputs.cache_key }}
+      - name: Install source-compilers only after approved cold cache miss
+        id: consumer_source_compilers_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_source_compilers_plan.outputs.provisionable == 'true' && steps.consumer_source_compilers_restore.outcome == 'success' && steps.consumer_source_compilers_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_source_compilers_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_source_compilers_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/source-compilers" \
+            --consumer-job wake_analyze --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original source-compilers bytes locally before native G3
+        id: consumer_source_compilers_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_source_compilers_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_source_compilers_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/source-compilers" "$RUNNER_TEMP/security-pipeline/wake_analyze/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --output-root "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/source-compilers" \
+            --consumer-job wake_analyze --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job wake_analyze --stage G3 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/wake_analyze/consumer-toolkit/source-compilers/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --report-root "$RUNNER_TEMP/security-pipeline/wake_analyze/report" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Download original source-bound compiler and Slither collector facts
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -1127,6 +1631,81 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Load original source-bound G2 toolkit profile for mythril_analyze
+        id: consumer_toolkit_profile
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-toolkit-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit-profile
+        continue-on-error: true
+      - name: Set pinned Node 22 for independent component verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve immutable run/attempt identity for mythril_analyze software consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline','mythril_analyze','consumer-toolkit','RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+           runId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+           workflowHeadSha:process.env.GITHUB_SHA,repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+      - name: Plan the original fixed mythril component identity
+        id: consumer_mythril_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component mythril --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mythril/payload" --output-root "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit/mythril" \
+            --consumer-job mythril_analyze --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned mythril cache
+        id: consumer_mythril_restore
+        if: ${{ steps.consumer_mythril_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_mythril_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_mythril_plan.outputs.cache_key }}
+      - name: Install mythril only after approved cold cache miss
+        id: consumer_mythril_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_mythril_plan.outputs.provisionable == 'true' && steps.consumer_mythril_restore.outcome == 'success' && steps.consumer_mythril_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_mythril_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_mythril_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component mythril --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mythril/payload" --output-root "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit/mythril" \
+            --consumer-job mythril_analyze --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original mythril bytes locally before native G4
+        id: consumer_mythril_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_mythril_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_mythril_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit/mythril" "$RUNNER_TEMP/security-pipeline/mythril_analyze/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component mythril --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mythril/payload" --output-root "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit/mythril" \
+            --consumer-job mythril_analyze --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job mythril_analyze --stage G4 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component mythril --profile "$RUNNER_TEMP/security-pipeline/mythril_analyze/consumer-toolkit/mythril/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mythril/payload" --report-root "$RUNNER_TEMP/security-pipeline/mythril_analyze/report" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Download original source-bound compiler and Slither collector facts
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -1199,6 +1778,81 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Load original source-bound G2 toolkit profile for prover_qualify
+        id: consumer_toolkit_profile
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-toolkit-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit-profile
+        continue-on-error: true
+      - name: Set pinned Node 22 for independent component verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve immutable run/attempt identity for prover_qualify software consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline','prover_qualify','consumer-toolkit','RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+           runId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+           workflowHeadSha:process.env.GITHUB_SHA,repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+      - name: Plan the original fixed certora-prover component identity
+        id: consumer_certora_prover_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component certora-prover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/certora-prover/payload" --output-root "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit/certora-prover" \
+            --consumer-job prover_qualify --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned certora-prover cache
+        id: consumer_certora_prover_restore
+        if: ${{ steps.consumer_certora_prover_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_certora_prover_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_certora_prover_plan.outputs.cache_key }}
+      - name: Install certora-prover only after approved cold cache miss
+        id: consumer_certora_prover_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_certora_prover_plan.outputs.provisionable == 'true' && steps.consumer_certora_prover_restore.outcome == 'success' && steps.consumer_certora_prover_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_certora_prover_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_certora_prover_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component certora-prover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/certora-prover/payload" --output-root "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit/certora-prover" \
+            --consumer-job prover_qualify --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original certora-prover bytes locally before native G5
+        id: consumer_certora_prover_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_certora_prover_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_certora_prover_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit/certora-prover" "$RUNNER_TEMP/security-pipeline/prover_qualify/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component certora-prover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/certora-prover/payload" --output-root "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit/certora-prover" \
+            --consumer-job prover_qualify --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job prover_qualify --stage G5 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component certora-prover --profile "$RUNNER_TEMP/security-pipeline/prover_qualify/consumer-toolkit/certora-prover/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/certora-prover/payload" --report-root "$RUNNER_TEMP/security-pipeline/prover_qualify/report" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Download original source-bound compiler and Slither collector facts
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -1271,6 +1925,183 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Load original source-bound G2 toolkit profile for mimo_provider_qualify
+        id: consumer_toolkit_profile
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-toolkit-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit-profile
+        continue-on-error: true
+      - name: Set pinned Node 22 for independent component verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve immutable run/attempt identity for mimo_provider_qualify software consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline','mimo_provider_qualify','consumer-toolkit','RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+           runId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+           workflowHeadSha:process.env.GITHUB_SHA,repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+      - name: Plan the original fixed autoprover component identity
+        id: consumer_autoprover_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component autoprover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/autoprover/payload" --output-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/autoprover" \
+            --consumer-job mimo_provider_qualify --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned autoprover cache
+        id: consumer_autoprover_restore
+        if: ${{ steps.consumer_autoprover_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_autoprover_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_autoprover_plan.outputs.cache_key }}
+      - name: Install autoprover only after approved cold cache miss
+        id: consumer_autoprover_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_autoprover_plan.outputs.provisionable == 'true' && steps.consumer_autoprover_restore.outcome == 'success' && steps.consumer_autoprover_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_autoprover_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_autoprover_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component autoprover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/autoprover/payload" --output-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/autoprover" \
+            --consumer-job mimo_provider_qualify --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original autoprover bytes locally before native G6
+        id: consumer_autoprover_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_autoprover_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_autoprover_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/autoprover" "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component autoprover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/autoprover/payload" --output-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/autoprover" \
+            --consumer-job mimo_provider_qualify --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job mimo_provider_qualify --stage G6 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component autoprover --profile "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/autoprover/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/autoprover/payload" --report-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Plan the original fixed mimo-runtime component identity
+        id: consumer_mimo_runtime_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component mimo-runtime --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-runtime/payload" --output-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-runtime" \
+            --consumer-job mimo_provider_qualify --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned mimo-runtime cache
+        id: consumer_mimo_runtime_restore
+        if: ${{ steps.consumer_mimo_runtime_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_mimo_runtime_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_mimo_runtime_plan.outputs.cache_key }}
+      - name: Install mimo-runtime only after approved cold cache miss
+        id: consumer_mimo_runtime_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_mimo_runtime_plan.outputs.provisionable == 'true' && steps.consumer_mimo_runtime_restore.outcome == 'success' && steps.consumer_mimo_runtime_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_mimo_runtime_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_mimo_runtime_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component mimo-runtime --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-runtime/payload" --output-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-runtime" \
+            --consumer-job mimo_provider_qualify --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original mimo-runtime bytes locally before native G6
+        id: consumer_mimo_runtime_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_mimo_runtime_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_mimo_runtime_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-runtime" "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component mimo-runtime --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-runtime/payload" --output-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-runtime" \
+            --consumer-job mimo_provider_qualify --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job mimo_provider_qualify --stage G6 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component mimo-runtime --profile "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-runtime/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-runtime/payload" --report-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Plan the original fixed mimo-weights component identity
+        id: consumer_mimo_weights_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component mimo-weights --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" --output-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-weights" \
+            --consumer-job mimo_provider_qualify --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned mimo-weights cache
+        id: consumer_mimo_weights_restore
+        if: ${{ steps.consumer_mimo_weights_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_mimo_weights_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_mimo_weights_plan.outputs.cache_key }}
+      - name: Install mimo-weights only after approved cold cache miss
+        id: consumer_mimo_weights_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_mimo_weights_plan.outputs.provisionable == 'true' && steps.consumer_mimo_weights_restore.outcome == 'success' && steps.consumer_mimo_weights_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_mimo_weights_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_mimo_weights_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component mimo-weights --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" --output-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-weights" \
+            --consumer-job mimo_provider_qualify --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original mimo-weights bytes locally before native G6
+        id: consumer_mimo_weights_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_mimo_weights_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_mimo_weights_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-weights" "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component mimo-weights --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" --output-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-weights" \
+            --consumer-job mimo_provider_qualify --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job mimo_provider_qualify --stage G6 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component mimo-weights --profile "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/consumer-toolkit/mimo-weights/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" --report-root "$RUNNER_TEMP/security-pipeline/mimo_provider_qualify/report" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Download original source-bound compiler and Slither collector facts
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -1343,6 +2174,234 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Load original source-bound G2 toolkit profile for autoprover_run
+        id: consumer_toolkit_profile
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-toolkit-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit-profile
+        continue-on-error: true
+      - name: Set pinned Node 22 for independent component verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preserve immutable run/attempt identity for autoprover_run software consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline','autoprover_run','consumer-toolkit','RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+           runId:process.env.GITHUB_RUN_ID,runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+           workflowHeadSha:process.env.GITHUB_SHA,repository:process.env.GITHUB_REPOSITORY},null,2)+'\n');
+          NODE
+      - name: Plan the original fixed autoprover component identity
+        id: consumer_autoprover_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component autoprover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/autoprover/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/autoprover" \
+            --consumer-job autoprover_run --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned autoprover cache
+        id: consumer_autoprover_restore
+        if: ${{ steps.consumer_autoprover_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_autoprover_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_autoprover_plan.outputs.cache_key }}
+      - name: Install autoprover only after approved cold cache miss
+        id: consumer_autoprover_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_autoprover_plan.outputs.provisionable == 'true' && steps.consumer_autoprover_restore.outcome == 'success' && steps.consumer_autoprover_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_autoprover_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_autoprover_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component autoprover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/autoprover/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/autoprover" \
+            --consumer-job autoprover_run --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original autoprover bytes locally before native G7
+        id: consumer_autoprover_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_autoprover_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_autoprover_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/autoprover" "$RUNNER_TEMP/security-pipeline/autoprover_run/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component autoprover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/autoprover/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/autoprover" \
+            --consumer-job autoprover_run --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job autoprover_run --stage G7 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component autoprover --profile "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/autoprover/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/autoprover/payload" --report-root "$RUNNER_TEMP/security-pipeline/autoprover_run/report" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Plan the original fixed certora-prover component identity
+        id: consumer_certora_prover_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component certora-prover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/certora-prover/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/certora-prover" \
+            --consumer-job autoprover_run --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned certora-prover cache
+        id: consumer_certora_prover_restore
+        if: ${{ steps.consumer_certora_prover_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_certora_prover_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_certora_prover_plan.outputs.cache_key }}
+      - name: Install certora-prover only after approved cold cache miss
+        id: consumer_certora_prover_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_certora_prover_plan.outputs.provisionable == 'true' && steps.consumer_certora_prover_restore.outcome == 'success' && steps.consumer_certora_prover_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_certora_prover_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_certora_prover_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component certora-prover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/certora-prover/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/certora-prover" \
+            --consumer-job autoprover_run --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original certora-prover bytes locally before native G7
+        id: consumer_certora_prover_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_certora_prover_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_certora_prover_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/certora-prover" "$RUNNER_TEMP/security-pipeline/autoprover_run/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component certora-prover --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/certora-prover/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/certora-prover" \
+            --consumer-job autoprover_run --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job autoprover_run --stage G7 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component certora-prover --profile "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/certora-prover/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/certora-prover/payload" --report-root "$RUNNER_TEMP/security-pipeline/autoprover_run/report" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Plan the original fixed mimo-runtime component identity
+        id: consumer_mimo_runtime_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component mimo-runtime --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-runtime/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-runtime" \
+            --consumer-job autoprover_run --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned mimo-runtime cache
+        id: consumer_mimo_runtime_restore
+        if: ${{ steps.consumer_mimo_runtime_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_mimo_runtime_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_mimo_runtime_plan.outputs.cache_key }}
+      - name: Install mimo-runtime only after approved cold cache miss
+        id: consumer_mimo_runtime_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_mimo_runtime_plan.outputs.provisionable == 'true' && steps.consumer_mimo_runtime_restore.outcome == 'success' && steps.consumer_mimo_runtime_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_mimo_runtime_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_mimo_runtime_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component mimo-runtime --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-runtime/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-runtime" \
+            --consumer-job autoprover_run --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original mimo-runtime bytes locally before native G7
+        id: consumer_mimo_runtime_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_mimo_runtime_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_mimo_runtime_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-runtime" "$RUNNER_TEMP/security-pipeline/autoprover_run/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component mimo-runtime --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-runtime/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-runtime" \
+            --consumer-job autoprover_run --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job autoprover_run --stage G7 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component mimo-runtime --profile "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-runtime/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-runtime/payload" --report-root "$RUNNER_TEMP/security-pipeline/autoprover_run/report" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Plan the original fixed mimo-weights component identity
+        id: consumer_mimo_weights_plan
+        continue-on-error: true
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component mimo-weights --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-weights" \
+            --consumer-job autoprover_run --github-output "$GITHUB_OUTPUT"
+      - name: Restore original SHA-pinned mimo-weights cache
+        id: consumer_mimo_weights_restore
+        if: ${{ steps.consumer_mimo_weights_plan.outputs.provisionable == 'true' }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.consumer_mimo_weights_plan.outputs.cache_path }}
+          key: ${{ steps.consumer_mimo_weights_plan.outputs.cache_key }}
+      - name: Install mimo-weights only after approved cold cache miss
+        id: consumer_mimo_weights_provision
+        if: ${{ needs.admit.outputs.extended_approved == 'true' && steps.consumer_mimo_weights_plan.outputs.provisionable == 'true' && steps.consumer_mimo_weights_restore.outcome == 'success' && steps.consumer_mimo_weights_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_mimo_weights_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_mimo_weights_restore.outputs.cache-hit || 'false' }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component mimo-weights --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-weights" \
+            --consumer-job autoprover_run --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Verify original mimo-weights bytes locally before native G7
+        id: consumer_mimo_weights_verify
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          RESTORE_OUTCOME: ${{ steps.consumer_mimo_weights_restore.outcome }}
+          CACHE_HIT: ${{ steps.consumer_mimo_weights_restore.outputs.cache-hit || 'false' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-weights" "$RUNNER_TEMP/security-pipeline/autoprover_run/report"
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation restore-consumer --component mimo-weights --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" --run-identity "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" --output-root "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-weights" \
+            --consumer-job autoprover_run --cache-hit "$CACHE_HIT" --restore-outcome "$RESTORE_OUTCOME" \
+            --github-output "$GITHUB_OUTPUT" || true
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job autoprover_run --stage G7 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component mimo-weights --profile "$RUNNER_TEMP/security-pipeline/autoprover_run/consumer-toolkit/mimo-weights/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/mimo-weights/payload" --report-root "$RUNNER_TEMP/security-pipeline/autoprover_run/report" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Download original source-bound compiler and Slither collector facts
         id: source_evidence
         uses: actions/download-artifact@v4
