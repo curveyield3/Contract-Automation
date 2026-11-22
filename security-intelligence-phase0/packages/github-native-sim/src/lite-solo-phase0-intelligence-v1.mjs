@@ -890,4 +890,13 @@ async function main(){
   process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},deployConfigExecution:{status:deployConfigExecution.status,attempts:deployConfigExecution.attempts.length,gaps:deployConfigExecution.gaps.length},outputs:files.map(([name])=>name)},null,2)+'\n');
 }
 
-main().catch(error=>{console.error(JSON.stringify({status:'FAIL',message:error?.message??String(error),code:error?.code??null,attempts:error?.attempts??null},null,2));process.exitCode=1;});
+main().catch(error=>{
+  const failedCommand=error?.result
+    ?{exitCode:error.result.exitCode,
+      stderr:String(error.result.stderr??'').slice(-6000),
+      stdout:String(error.result.stdout??'').slice(-2000)}
+    :null;
+  console.error(JSON.stringify({status:'FAIL',message:error?.message??String(error),
+    code:error?.code??null,attempts:error?.attempts??null,failedCommand},null,2));
+  process.exitCode=1;
+});
