@@ -733,6 +733,50 @@ function additional(args,identity,issues){
     const solcPinned=lockRoot.solc==='0.8.30'&&
       lock?.packages?.['node_modules/solc']?.version==='0.8.30'&&
       typeof lock?.packages?.['node_modules/solc']?.integrity==='string';
+    // G2 exports exact source compiler units; the software cache binds only
+    // their approved version/package set, never the confidential source ID.
+    let compilerSubentries=[],compilerEvidenceSha256=null;
+    try{
+      const source=readJson(path.join(args['input-root'],'SECURITY_BUILD_BINDING_v1.json'),
+        args['input-root']);
+      const record=source.value;
+      if(record.sourceBound!==true||record.buildSourceBound!==true||
+         record.sourceArchiveSha256!==plan.sourceArchiveSha256)
+        throw Error('SOURCE_COMPILER_BUILD_RECEIPT_NOT_ORIGINAL_SHA_BOUND');
+      compilerEvidenceSha256=source.sha256;
+      const units=record.buildIdentity?.compilationUnits??[];
+      if(!Array.isArray(units))throw Error('SOURCE_COMPILER_UNITS_NOT_ARRAY');
+      const versions=new Map();
+      for(const unit of units){
+        if(typeof unit?.compilerVersion!=='string'||
+          !/^([0-9]+\.){2}[0-9]+(?:\+[A-Za-z0-9.-]+)?$/.test(unit.compilerVersion)){
+          issues.push(issue('TOOLKIT.COMPILER_UNIT_VERSION_NOT_EXACT',
+            'SECURITY_BUILD_BINDING_v1.json.buildIdentity.compilationUnits[].compilerVersion',
+            'original exact normalized compiler semver',unit?.compilerVersion??null,
+            'Retain this compilation unit as an unqualified subentry until compiler identity is recovered'));
+          continue;
+        }
+        const pkg=typeof unit.compilerPackage==='string'&&
+          /^[A-Za-z0-9._@/-]{1,100}$/.test(unit.compilerPackage)?
+          unit.compilerPackage:null;
+        const label=(pkg??'UNKNOWN_PACKAGE')+'@'+unit.compilerVersion;
+        if(!versions.has(label))versions.set(label,{
+          compilerPackage:pkg,compilerVersion:unit.compilerVersion,
+          originalExecutionUnitCount:0,expectedBinarySha256:null,
+          nativeReadinessMode:'COMPILER_BINARY_SHA_OR_PACKAGE_PIN_UNRESOLVED',
+          originalPinOrigin:'SECURITY_BUILD_BINDING_v1.json.buildIdentity.compilationUnits'
+        });
+        versions.get(label).originalExecutionUnitCount++;
+      }
+      compilerSubentries=[...versions.values()].sort((a,b)=>
+        String(a.compilerPackage).localeCompare(String(b.compilerPackage))||
+        a.compilerVersion.localeCompare(b.compilerVersion));
+    }catch(error){
+      issues.push(issue('TOOLKIT.COMPILER_SOURCE_VERSION_SET_UNAVAILABLE',
+        'SECURITY_BUILD_BINDING_v1.json.buildIdentity.compilationUnits',
+        'same-run source-bound compiler unit/version list',String(error),
+        'Restore exact G2 compiler build binding before native compiler cache planning'));
+    }
     const slitherMatch=originalDocker?.match(/slither-analyzer==([0-9]+\.[0-9]+\.[0-9]+)/);
     const staticSources={
       'foundry-node':foundryPinned?{
@@ -750,7 +794,12 @@ function additional(args,identity,issues){
         originalPinOrigin:'security-intelligence-phase0/package-lock.json and Dockerfile',
         lockDigest:lockHash,recipeDigest:digestCanonicalV1({
           solcLock:lock?.packages?.['node_modules/solc']?.integrity,
-          dockerSha256:dockerHash}),
+          dockerSha256:dockerHash,
+          // Compiler unit IDs and source archive digests NEVER enter software cache keys.
+          compilerVersionSet:compilerSubentries.map(x=>[
+            x.compilerPackage,x.compilerVersion])}),
+        compilerSubentries,
+        compilerVersionSetEvidenceSha256:compilerEvidenceSha256,
         nativeConsumerStages:['fork_setup','medusa_analyze','mythril_analyze']
       }:null,
       'slither-storage':slitherMatch?{
@@ -821,6 +870,8 @@ function additional(args,identity,issues){
         recipeDigest:provenance?.recipeDigest??null,
         expectedBytesOrQuota:null,
         originalPinOrigin:provenance?.originalPinOrigin??null,
+        compilerSubentries:id==='source-compilers'?compilerSubentries:[],
+        compilerVersionSetEvidenceSha256:id==='source-compilers'?compilerEvidenceSha256:null,
         originalPinEvidence:provenance?{
           packageLockSha256:lockHash,originalDockerSha256:dockerHash,
           nodeSetupActionSha256:nodeActionHash}:null,
