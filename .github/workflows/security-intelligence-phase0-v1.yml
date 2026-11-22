@@ -1045,6 +1045,13 @@ jobs:
             --component source-compilers --profile "$RUNNER_TEMP/security-pipeline/fork_setup/consumer-toolkit/source-compilers/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
             --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/source-compilers/payload" --report-root "$RUNNER_TEMP/security-pipeline/fork_setup/report" \
             --github-output "$GITHUB_OUTPUT"
+      - name: Read exact G0 independently admitted fork capability disposition
+        id: fork_authority
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-stage-admit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/fork_setup/input/admit
+        continue-on-error: true
       - name: Retrieve original same-run source evidence
         id: source_evidence
         uses: actions/download-artifact@v4
@@ -1076,6 +1083,25 @@ jobs:
             --operation fork-plan --input-root "$base/input/preflight" \
             --output-root "$base/native" \
             --run-identity "$base/input/RUN_IDENTITY_v1.json"
+      - name: Inspect original fork execution capability and exact source/funding gaps
+        id: fork_native_inspect
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/fork_setup"
+          mkdir -p "$base/native" "$base/report"
+          if [ ! -s "$base/input/admit/EXTENDED_MODE_DISPOSITION_v1.json" ]; then
+            echo "::warning title=G2B.AUTHORITY_ARTIFACT_MISSING::Source-bound admission disposition absent from original same-run artifact"
+          fi
+          node security-intelligence-phase0/scripts/security-pipeline-fork-v1.mjs \
+            --operation inspect \
+            --plan "$base/native/FORK_EXECUTION_PLAN_v1.json" \
+            --authority "$base/input/admit/EXTENDED_MODE_DISPOSITION_v1.json" \
+            --source-manifest "$base/input/preflight/PREFLIGHT_MANIFEST_v1.json" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json" \
+            --output-root "$base/native"
       - name: Record exact G2B missing native state without pretending execution
         if: ${{ always() }}
         shell: bash
