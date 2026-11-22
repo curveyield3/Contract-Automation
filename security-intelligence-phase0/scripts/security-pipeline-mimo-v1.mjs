@@ -195,7 +195,24 @@ async function main(){
     'independently accepted same-run source-bound mimo_configure capability',
     e.message,'Bind exact source archive to independently accepted inference capability'));}
   let model=null,rawProposal=null,nativeError=null;
-  const attempted=args.operation==='propose'&&approved&&!!objective&&notes.length===0;
+  const allowedDeltas=Array.isArray(objective?.allowedParameterDeltas)?
+    objective.allowedParameterDeltas:[];
+  const completeAcceptedObjective=objective?.nativeExecutionAuthorized===true&&
+    allowedDeltas.length>0&&
+    allowedDeltas.every(x=>x&&x.targetId===objective.targetId&&
+      /^(0x)?[0-9a-fA-F]{8}$/.test(String(x.selector??''))&&
+      Number.isInteger(x.argumentIndex)&&x.argumentIndex>=0&&
+      typeof x.solidityType==='string'&&x.solidityType.length<=70);
+  if(args.operation==='propose'&&!completeAcceptedObjective){
+    notes.push(warning('G2A.NO_ACCEPTED_PARAMETER_SCOPE',
+      'MIMO_STAGE_OBJECTIVE_v1.json.allowedParameterDeltas/nativeExecutionAuthorized',
+      'one independently accepted exact owner-authorized ABI parameter in current run',
+      {nativeExecutionAuthorized:objective?.nativeExecutionAuthorized??null,
+       approvedParameterCount:allowedDeltas.length},
+      'Generate the exact source-bound original ABI objective only after accepting the owner-authorized parameter scope'));
+  }
+  const attempted=args.operation==='propose'&&approved&&!!objective&&
+    completeAcceptedObjective&&notes.length===0;
   if(attempted){
     const prompt=objectiveMessages(objective,objectiveDigest);
     const payload={model:MODEL,messages:prompt,temperature:0.1,stream:false,
