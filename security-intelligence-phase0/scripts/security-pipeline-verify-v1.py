@@ -59,7 +59,7 @@ def parse_args_strict(argv):
                  "input-root", "output-root", "native-result", "native-exit-code",
                  "native-outcome", "summary-outcome", "inventory-outcome",
                  "run-identity", "component", "profile", "warning-input",
-                 "toolkit-root"):
+                 "toolkit-root", "source-manifest"):
         parser.add_argument("--" + name)
     args = parser.parse_args(argv)
     if args.mode not in MODES:
@@ -328,6 +328,103 @@ def admit_extended(root, args, ctx):
 
 def summarize_job(root, args, ctx):
     warnings = []
+    if args.stage == "G2A":
+        target_root = Path(args.input_root) if args.input_root else None
+        records = []
+        expected_source = None
+        if args.source_manifest:
+            manifest, failure = _read_optional_json(args.source_manifest)
+            if (failure or not isinstance(manifest, dict) or
+                manifest.get("sourceAdmissionVerified") is not True):
+                warnings.append(make_warning(ctx, args, "G2A.SOURCE_MANIFEST_UNVERIFIED",
+                    "G2A.SOURCE", "PREFLIGHT_MANIFEST_v1.json.sourceAdmissionVerified",
+                    True, failure or (manifest or {}).get("sourceAdmissionVerified"),
+                    "model source facts are not admitted", "Restore original exact current-run source manifest",
+                    args.source_manifest, observation_failure=failure))
+            else:
+                expected_source = (manifest.get("source") or {}).get("expectedSha256")
+                if not SHA256.fullmatch(str(expected_source or "")) or (
+                    (manifest.get("source") or {}).get("observedSha256") != expected_source):
+                    warnings.append(make_warning(ctx, args, "G2A.SOURCE_DIGEST_MISMATCH",
+                        "G2A.SOURCE_SHA", "PREFLIGHT_MANIFEST_v1.json.source",
+                        "matching expected/observed SHA-256", (manifest.get("source") or {}),
+                        "MiMo response is not attributable to admitted bytes",
+                        "Re-admit the exact original source archive and source manifest",
+                        args.source_manifest))
+        else:
+            warnings.append(make_warning(ctx, args, "G2A.SOURCE_MANIFEST_MISSING",
+                "G2A.SOURCE", "--source-manifest", "exact original collector manifest",
+                None, "model source identity unverified",
+                "Provide the original preflight manifest from this same run"))
+        entries = []
+        if target_root and target_root.is_dir():
+            entries = sorted(p for p in target_root.iterdir()
+                             if p.is_dir() and re.fullmatch(r"TARGET-[0-9a-f]{32}", p.name))
+        if not entries:
+            warnings.append(make_warning(ctx, args, "G2A.NO_TARGET_RECORDS",
+                "G2A.TARGETS", "mimo_configure/native-targets",
+                "one same-run typed record per compiled target", None,
+                "native MiMo coverage is NOT_EXECUTED", "Repair source-bound target enumeration or artifact download"))
+        for item in entries:
+            state_path = item / "MIMO_STAGE_STATE_v1.json"
+            record, error = _read_optional_json(str(state_path))
+            if error or not isinstance(record, dict):
+                warnings.append(make_warning(ctx, args, "G2A.TARGET_STATE_MISSING",
+                    "G2A.STATE." + item.name, str(state_path),
+                    "typed current-run model state", error or "not object",
+                    "target model round unverified", "Write and retain original G2A target state",
+                    str(state_path), observation_failure=error))
+                continue
+            if (record.get("schemaVersion") != "curveyield-mimo-stage-state-v1" or
+                record.get("targetId") != item.name or
+                str(record.get("runId")) != ctx["runId"] or
+                str(record.get("runAttempt")) != str(ctx["runAttempt"]) or
+                record.get("workflowHeadSha") != ctx["workflowHeadSha"] or
+                record.get("sourceArchiveSha256") != expected_source):
+                warnings.append(make_warning(ctx, args, "G2A.TARGET_STATE_IDENTITY",
+                    "G2A.STATE_ID." + item.name,
+                    "mimoTargets[{}].runIdentity/sourceArchiveSha256".format(item.name),
+                    {"targetId": item.name, "runId": ctx["runId"],
+                     "runAttempt": ctx["runAttempt"], "sourceArchiveSha256": expected_source},
+                    {"targetId": record.get("targetId"), "runId": record.get("runId"),
+                     "runAttempt": record.get("runAttempt"),
+                     "sourceArchiveSha256": record.get("sourceArchiveSha256")},
+                    "target observations cannot be counted as valid evidence",
+                    "Regenerate from the exact original source and trusted run identity",
+                    str(state_path)))
+                continue
+            records.append({"targetId": item.name,
+                            "status": record.get("status"),
+                            "nativeAttempted": record.get("nativeAttempted") is True,
+                            "modelReplySha256": record.get("modelReplySha256"),
+                            "acceptedConfigSha256": record.get("acceptedConfigSha256")})
+            for issue in record.get("warnings", []):
+                if not isinstance(issue, dict):
+                    continue
+                warnings.append(make_warning(ctx, args,
+                    str(issue.get("code") or "G2A.TARGET_WARNING"),
+                    "G2A.ROUND." + item.name,
+                    "mimoTargets[{}].{}".format(item.name, issue.get("configurationField") or "configuration"),
+                    issue.get("expected"), issue.get("observed"),
+                    str(issue.get("impact") or "model stage incomplete"),
+                    str(issue.get("requiredCorrection") or "repair exact source-bound target issue"),
+                    str(state_path)))
+        # Model proposals require a separate independent validator and an
+        # accepted configuration receipt before any stage can claim completion.
+        native_attempted = sum(1 for r in records if r["nativeAttempted"])
+        completed = sum(1 for r in records if r["acceptedConfigSha256"])
+        disposition = "PARTIAL" if records else "NOT_EXECUTED"
+        _finish(root, args, ctx, warnings, disposition, {
+            "attempted": native_attempted, "completed": completed,
+            "notExecuted": max(0, len(entries) - completed),
+            "sourceBound": bool(expected_source),
+            "sourceIdentity": {"archiveSha256": expected_source},
+            "dependencyFacts": {"targetCount": len(entries),
+                "validStateCount": len(records),
+                "sourceArchiveSha256": expected_source,
+                "perTarget": records,
+                "continuationQualified": False}})
+        return
     if args.stage == "G2T":
         components = ("foundry-node", "source-compilers", "slither-storage", "medusa",
                       "wake", "mythril", "certora-prover", "autoprover",
