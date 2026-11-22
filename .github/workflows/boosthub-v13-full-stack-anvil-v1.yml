@@ -1,4 +1,4 @@
-name: BoostHub v62 + guarded SDT v8 Safe dual-chain fork v2
+name: BoostHub v62 + guarded SDT v8 Safe dual-chain fork v3
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
     env:
       ROOT: .safe-v62
       RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM }}
-      RPC_FRAXTAL: ${{ secrets.RPC_FRAXTAL }}
+      RPC_FRAXTAL: ${{ secrets.RPC_FRAXTAL || 'https://rpc.frax.com' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,7 +55,7 @@ jobs:
           import hashlib,pathlib,subprocess
           root=pathlib.Path('.safe-v62')
           f=root/'contracts/BeefyVaultV7FixedV2.sol'
-          assert hashlib.sha256(f.read_bytes()).hexdigest() == 'e754be49d7605af91ca0a6df24bbec16cac097af0d901d1a1ce0b7559ca2ae4' or len(f.read_bytes()) == 16745, 'Original v61 vault source incorrect'
+          assert hashlib.sha256(f.read_bytes()).hexdigest() == '30cc49edaef677f60eb6d487098e3e3e3534b80e0ec4eb963278f74ca84bd105', 'Original v61 vault source incorrect'
           patch=pathlib.Path('github-native-sim/boosthub-v13-full-stack-v1/source/BoostHub_ERC4626_v62.patch').resolve()
           subprocess.run(['patch','-p1','--batch','-i',str(patch)],cwd=root,check=True)
           assert hashlib.sha256(f.read_bytes()).hexdigest() == '36106c2d984376f782dfdd385dcbd51a4e94730cd3cf20fa6aeee9644e5612a8', 'ERC4626 source patch mismatch'
@@ -68,7 +68,7 @@ jobs:
           set -euo pipefail
           npm install --prefix "$ROOT/dependencies" --no-save --ignore-scripts --no-audit --no-fund '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts@5.4.0'
           npm install --prefix "$ROOT/runner" --no-save --ignore-scripts --no-audit --no-fund 'ethers@6.15.0'
-          forge build --root "$ROOT" --sizes 2>&1 | tee compile-v62-sdt-v8-v2.log
+          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v62-sdt-v8-v3.log
           node --check github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs
       - name: Execute Safe custody campaign on isolated Ethereum and Fraxtal forks
         shell: bash
@@ -107,10 +107,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-v62-sdt-v8-safe-mainnet-forks-v2-${{ github.run_id }}
+          name: boosthub-v62-sdt-v8-safe-mainnet-forks-v3-${{ github.run_id }}
           path: |
             source_manifest_v2.txt
-            compile-v62-sdt-v8-v2.log
+            compile-v62-sdt-v8-v3.log
             boosthub-v62-live-fork-results/
           if-no-files-found: warn
           retention-days: 21
