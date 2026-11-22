@@ -691,8 +691,10 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
       if(!selected&&unique.size===0&&entry.type==='function'){
         // Public mappings/arrays generate parameterized ABI getters; their
         // declaration is the source implementation, not a no-arg getter body.
-        const getters=c.language==='VYPER'?si.stateDeclarations:decls;
-        const getterCandidates=(getters??[]).filter(d=>d.kind==='STATE_VARIABLE'&&d.visibility==='public'&&
+        // Work from the declarations already assembled in this stage: the
+        // published si.stateDeclarations field is assigned only after ABI mapping.
+        const getters=c.language==='VYPER'?declarations:decls;
+        const getterCandidates=(getters??[]).filter(d=>['STATE_VARIABLE','IMMUTABLE'].includes(d.kind)&&d.visibility==='public'&&
           d.name===entry.name&&d.qualifiedContainer===c.qualifiedName);
         if(getterCandidates.length===1){
           const d=getterCandidates[0];
@@ -855,7 +857,7 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
     vyperEntrypointCount:effectiveEntrypoints.filter(e=>e.language==='VYPER').length,
     vyperStructuralCallCandidates:vyperDedup.size,
     vyperSourceOnlyFunctionRecords,
-    vyperSourceStateDeclarationCount:declarations.filter(d=>d.evidenceClass?.startsWith('VYPER_COMPILER_AST_MODULE_DECLARATION')).length,
+    vyperSourceStateDeclarationCount:declarations.filter(d=>d.sourcePath?.endsWith('.vy')).length,
     unresolvedImplementationEntrypoints:sourceOnly.length,
     unresolvedStateChangingEntrypoints:mutating.filter(e=>sourceOnly.includes(e)).length,
     compilerLayoutStateDeclarationCount:declarations.filter(d=>d.compilerLayoutStatus==='COMPILER_EMITTED').length,
