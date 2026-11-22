@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "curveyield-security-preflight-request-v1",
+  "runMode": "SOURCE_PREFLIGHT",
+  "requestId": "cyvlsdt-v63-20261122-ce3fe59c8745",
+  "source": {
+    "repository": "curveyield3/Smart-Contracts",
+    "commit": "f0b72ef54a04336875c70ff148d619e296f2ae61",
+    "archivePath": "Audit-Intake/CurveYield-cyvlSDT-Deployment-Package-v63.zip",
+    "archiveSha256": "ce3fe59c8745a78912f083b9df4467aa4cbecbfab4cd061d7f373e05da7251b9"
+  }
+}
