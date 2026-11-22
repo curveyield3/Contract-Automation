@@ -811,6 +811,26 @@ def verify_toolkit_component(root, args, ctx):
           str(metric.get("runAttempt")) != str(ctx["runAttempt"]) or
           metric.get("workflowHeadSha") != ctx["workflowHeadSha"]):
         error = "TOOLKIT_METRICS_COMPONENT_OR_RUN_IDENTITY_MISMATCH"
+    elif (metric.get("componentRequired") is False and
+          metric.get("status") == "NOT_REQUIRED" and
+          metric.get("usableForExecution") is False):
+        # A legitimate source-derived non-required component must not produce a
+        # fictitious binary-missing defect. It never becomes usableForExecution.
+        record = {"schemaVersion": "curveyield-toolkit-component-verification-v1",
+                  "componentId": component, "status": "NOT_REQUIRED",
+                  "usableForExecution": False, "expectedBinarySha256": expected,
+                  "observedBinarySha256": None, "runId": ctx["runId"],
+                  "runAttempt": ctx["runAttempt"], "workflowHeadSha": ctx["workflowHeadSha"],
+                  "sourceRequirement": "DECLARED_NOT_REQUIRED_IN_CURRENT_RUN"}
+        _write_json(root / "TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json", record)
+        if args.github_output:
+            with open(args.github_output, "a", encoding="utf-8") as out:
+                out.write("usableForExecution=false\n")
+        _finish(root, args, ctx, [], "NOT_REQUIRED",
+                {"attempted": 0, "completed": 0, "notExecuted": 0,
+                 "dependencyFacts": {"component": component,
+                                     "sourceRequirement": "NOT_REQUIRED"}})
+        return
     else:
         # Binary SHA must originate independently from the trusted code checkout.
         # At present only the current pinned MiMo GGUF has a verified absolute
