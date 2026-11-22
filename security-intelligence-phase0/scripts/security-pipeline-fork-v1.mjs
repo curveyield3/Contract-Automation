@@ -113,7 +113,9 @@ async function main(){
     !SHA.test(authority.approvedExecutionScopeSha256??'')||
     authority.approvedExecutionScopeSha256!==plan.approvedExecutionScopeSha256||
     !Array.isArray(authority.allowedChainIds)||
-    !authority.allowedChainIds.includes(plan.approvedForkChainId))
+    !authority.allowedChainIds.includes(plan.approvedForkChainId)||
+    authority.localRpcOnlySandboxAccepted!==true||
+    !SHA.test(authority.localRpcOnlySandboxReceiptSha256??''))
   warnings.push(problem('G2B.INDEPENDENT_FORK_AUTHORITY',
    'EXTENDED_MODE_DISPOSITION_v1.json.authorizedCapabilities',
    'independently accepted exact run/source-bound fork_setup capability',
@@ -138,6 +140,11 @@ async function main(){
  required('approvedDeploymentProfileSha256',x=>SHA.test(x??''),
   'independently source-approved audit-deployment.json original SHA-256',
   'Bind exact original deployment profile bytes to the independent issuer');
+ required('restrictedLocalRpcIsolationProof',x=>x===true&&
+  authority.localRpcOnlySandboxAccepted===true&&
+  SHA.test(authority.localRpcOnlySandboxReceiptSha256??''),
+  'real trusted native network namespace receipt proving source processes can reach only localhost Anvil',
+  'Verify a genuine source-process network namespace or firewall with local RPC-only egress before executing untrusted source scripts');
  // Cross-job materialization of the original admitted ZIP and C2 requires a
  // separately approved restricted transport; GitHub warning artifacts do not
  // establish such transport and are never read as source execution authority.
