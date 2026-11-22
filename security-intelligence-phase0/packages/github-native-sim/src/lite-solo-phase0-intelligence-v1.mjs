@@ -715,6 +715,78 @@ function slitherSucceeded(r){return r&&['completed','completed_with_findings'].i
 function parseSlitherJson(text){
   try{const p=JSON.parse(String(text??''));const d=Array.isArray(p?.results?.detectors)?p.results.detectors:[];return{success:p?.success===true,detectors:d};}catch{return null;}
 }
+// Supplemental source-language-independent Vyper security analysis.
+// EVMLiSA operates on exact Vyper 0.4.x compiler runtime bytecode and supplies
+// CFG, reentrancy, tx.origin and randomness analyses. Unlike Slither, it is
+// not a complete source-aware analyzer and does not waive audit gate limits.
+async function analyzeVyperBytecodeWithEvmLisa({build,workDir}){
+  const upstreamCommit='44ae6dde995c9fb8f4a94932d26d07b11066525f';
+  const jar='/opt/evm-lisa/evm-lisa-all.jar';
+  const vyperArtifacts=(build.artifacts??[]).filter(a=>
+    a.sourceName?.endsWith('.vy')&&/^0x[0-9a-fA-F]+$/.test(String(a.deployedBytecode??'')));
+  const provenance={tool:'EVMLiSA',sourceRepository:'lisa-analyzer/evm-lisa',
+    upstreamCommit,model:'EVM_BYTECODE_ABSTRACT_INTERPRETATION',
+    supportedCheckers:['reentrancy','tx-origin','randomness-dependency'],
+    semanticSlitherEquivalent:false,sourceLevelSemanticAnalysis:false,
+    fullPathCoverageClaim:false};
+  if(!vyperArtifacts.length)return{...provenance,status:'NOT_APPLICABLE',contracts:[]};
+  const jarBytes=await fs.readFile(jar).catch(()=>null);
+  if(!jarBytes)return{...provenance,status:'UNAVAILABLE',
+    limitation:'PINNED_EVMLISA_JAR_NOT_INSTALLED',contracts:[]};
+  const jarSha256=sha256(jarBytes);
+  const contracts=[];
+  for(const [i,artifact] of vyperArtifacts.entries()){
+    const bytecode=String(artifact.deployedBytecode);
+    const inputSha256=sha256(Buffer.from(bytecode.slice(2),'hex'));
+    const root=path.join(workDir,'evm-lisa-vyper-'+(i+1));
+    const results=path.join(root,'results');
+    await fs.mkdir(results,{recursive:true});
+    const bytecodeFile=path.join(root,'runtime.bytecode');
+    const abiFile=path.join(root,'compiler.abi.json');
+    await fs.writeFile(bytecodeFile,bytecode+'\n');
+    await fs.writeFile(abiFile,JSON.stringify(artifact.abi??[])+'\n');
+    const raw=await runProcess({command:'java',args:[
+      '-Xmx2g','-jar',jar,'--bytecode-path',bytecodeFile,
+      '--abi-path',abiFile,'--checker-all','--output-directory-path',results
+    ],cwd:root,timeoutMs:240000});
+    const dirs=await fs.readdir(results,{withFileTypes:true}).catch(()=>[]);
+    const candidates=dirs.filter(x=>x.isDirectory())
+      .map(x=>path.join(results,x.name,'results.json'));
+    let report=null,reportFile=null;
+    for(const file of candidates){
+      try{report=JSON.parse(await fs.readFile(file,'utf8'));reportFile=file;break;}catch{}
+    }
+    const completed=raw.exitCode===0&&!raw.timedOut&&report&&
+      report.statistics&&typeof report.statistics==='object'&&
+      report.vulnerabilities!==undefined;
+    const stats=completed?report.statistics:null;
+    const vulnerabilities=completed?report.vulnerabilities:null;
+    contracts.push({
+      sourceName:artifact.sourceName,contractName:artifact.contractName,
+      compilationUnitId:artifact.compilationUnitId??null,
+      compilerVersion:artifact.compilerVersion??null,
+      runtimeBytecodeSha256:inputSha256,
+      runtimeBytecodeBytes:(bytecode.length-2)/2,
+      analyzerJarSha256:jarSha256,
+      status:completed?'COMPLETED':'INCOMPLETE',
+      exitCode:raw.exitCode,timedOut:raw.timedOut===true,
+      statistics:stats,vulnerabilities,
+      outputProduced:!!reportFile,
+      stdoutTail:cleanText(raw.stdout).slice(-1500),
+      stderrTail:cleanText(raw.stderr).slice(-2500),
+      limitations:completed?[
+        'BINARY_ONLY_NO_VYPER_SOURCE_SEMANTIC_EQUIVALENCE',
+        'EVMLISA_BUILTIN_CHECKERS_LIMITED_TO_REENTRANCY_TXORIGIN_RANDOMNESS',
+        'CALL_AND_EXTERNAL_ACCOUNT_BEHAVIOR_REQUIRE_HUMAN_REVIEW'
+      ]:['EVMLISA_ANALYSIS_INCOMPLETE_OR_REPORT_NOT_PRODUCED']
+    });
+  }
+  return{...provenance,analyzerJarSha256:jarSha256,
+    status:contracts.every(x=>x.status==='COMPLETED')?'COMPLETED':'PARTIAL',
+    analyzedContractCount:contracts.filter(x=>x.status==='COMPLETED').length,
+    requiredContractCount:vyperArtifacts.length,contracts};
+}
+
 async function slitherRepair({projectRoot,build,sourceCommit}){
   // A verified private build-cache HIT skips the native build's Vyper CLI
   // installation. Slither's Vyper backend still needs that exact binary.
@@ -1256,6 +1328,10 @@ async function main(){
       inputMode:'UNRESOLVED_STATIC_ANALYSIS',
       limitations:[detail],requiredSemanticReview:true};
   }
+  // Retain independent bytecode security analysis in the already published
+  // SLITHER_v1.json, without adding a new workflow or inventing Slither success.
+  slither.vyperBytecodeSecurity=await withProgressStage('evm-lisa-vyper-bytecode-security',
+    ()=>analyzeVyperBytecodeWithEvmLisa({build,workDir:work}));
   const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
   const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}}));
   sourceIntelligence.admissionInventoryRef='SOURCE_ADMISSION_INVENTORY_v1.json';
