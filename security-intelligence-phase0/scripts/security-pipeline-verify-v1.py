@@ -570,6 +570,56 @@ def verify_stage(root, args, ctx):
             else:
                 write_stage_disposition(root, record_args, ctx, state, warnings, fact)
         return
+    expected_modes = {"G2B": ("fork-plan", "FORK_EXECUTION_PLAN_v1.json",
+                             "curveyield-fork-execution-plan-v1"),
+                      "G2C": ("storage-plan", "FORK_STORAGE_QUERY_PLAN_v1.json",
+                             "curveyield-fork-storage-query-plan-v1"),
+                      "G2D": ("medusa-config", "MEDUSA_ELIGIBILITY_v1.json",
+                             "curveyield-medusa-eligibility-v1")}
+    if args.stage in expected_modes:
+        expected_mode, filename, expected_schema = expected_modes[args.stage]
+        named = Path(args.input_root or "") / filename
+        doc, failure = _read_optional_json(str(named) if args.input_root else None)
+        matching = (data.get("schemaVersion") == "curveyield-security-pipeline-config-result-v1" and
+                    data.get("mode") == expected_mode and
+                    str(data.get("runId")) == ctx["runId"] and
+                    str(data.get("runAttempt")) == str(ctx["runAttempt"]) and
+                    isinstance(doc, dict) and doc.get("schemaVersion") == expected_schema and
+                    doc.get("sourceBound") == data.get("sourceBound"))
+        if not matching:
+            warnings.append(make_warning(ctx, args, "CONFIG.STAGE_NATIVE_DATA_UNVERIFIED",
+                args.stage + ".SOURCE_BINDING", filename + ".schemaVersion/sourceBound",
+                {"schemaVersion": expected_schema, "sameRun": True,
+                 "sourceBound": data.get("sourceBound")},
+                {"actualSchema": doc.get("schemaVersion") if isinstance(doc, dict) else None,
+                 "actualSourceBound": doc.get("sourceBound") if isinstance(doc, dict) else None,
+                 "failure": failure},
+                "dependent native execution NOT_EXECUTED",
+                "Recreate the exact original source-bound per-stage plan from this run",
+                str(named), observation_failure=failure))
+        for issue in data.get("issues", []):
+            if not isinstance(issue, dict):
+                continue
+            warnings.append(make_warning(ctx, args,
+                str(issue.get("code") or "CONFIG.STAGE_ISSUE"),
+                args.stage + ".REQUIREMENT",
+                str(issue.get("fieldPath") or filename),
+                issue.get("expected"), issue.get("observed"),
+                str(issue.get("impact") or "native prerequisite unavailable"),
+                str(issue.get("correction") or "inspect original planned prerequisite"),
+                args.native_result))
+        # A genuine C2 capture, live storage observation, or native Medusa
+        # result is not established by a compiler-derived plan.
+        _finish(root, args, ctx, warnings, "NOT_EXECUTED", {
+            "attempted": 0, "completed": 0, "notExecuted": 1,
+            "sourceBound": bool(matching and doc.get("sourceBound") is True),
+            "sourceIdentity": {"archiveSha256": doc.get("sourceArchiveSha256") or
+                               doc.get("originalSourceArchiveSha256")}
+                if matching else None,
+            "dependencyFacts": {"planType": filename, "nativeNotExecuted": True,
+                                "originalNativeEvidenceSha256": None,
+                                "exactIssueCount": len(warnings)}})
+        return
     # Other native result types have not been independently classified. A
     # parseable JSON object is not proof that a native analyzer completed.
     _finish(root, args, ctx, [], "UNVERIFIED",
