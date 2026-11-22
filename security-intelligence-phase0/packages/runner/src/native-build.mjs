@@ -244,11 +244,15 @@ export async function collectNativeSourceAsts(projectRoot, fsApi = fs) {
     for (const [sourceName, source] of Object.entries(parsed?.output?.sources ?? {})) {
       if (!source?.ast) continue;
       const serialized = JSON.stringify(source.ast);
+      const content = parsed?.input?.sources?.[sourceName]?.content;
       const existing = bySource.get(sourceName);
-      if (existing && existing.serialized !== serialized) {
-        throw new Error(`Hardhat build-info AST mismatch for ${sourceName}`);
+      // Different compiler versions/units can assign different AST node and
+      // source IDs to the identical dependency. Require byte-identical source
+      // content, but keep each unit's actual AST separately below.
+      if (existing && (typeof content !== 'string' || existing.content !== content)) {
+        throw new Error(`Hardhat build-info source content mismatch for ${sourceName}`);
       }
-      if (!existing) bySource.set(sourceName, { ast: source.ast, serialized });
+      if (!existing) bySource.set(sourceName, { ast: source.ast, serialized, content });
     }
   }
   return Object.fromEntries(
@@ -345,6 +349,14 @@ export async function compileRepoNativeHardhat({
   const buildInfo = await listBuildInfo(projectRoot, fsApi);
   const artifacts = await collectNativeContractArtifacts(projectRoot, fsApi);
   const sourceAsts = await collectNativeSourceAsts(projectRoot, fsApi);
+  // Preserve compiler-profile-specific ASTs verbatim; the aggregate source
+  // view above is only a deterministic discovery index, not an AST substitute.
+  const perUnitAsts = await Promise.all((await buildInfoFiles(projectRoot, fsApi)).map(async absolute => {
+    const parsed = JSON.parse(await fsApi.readFile(absolute, 'utf8'));
+    return Object.fromEntries(Object.entries(parsed?.output?.sources ?? {})
+      .filter(([,source]) => source?.ast)
+      .map(([name,source]) => [name,source.ast]));
+  }));
   const sources = await solidityInventory(projectRoot, fsApi);
   return {
     status: 'completed',
@@ -367,9 +379,9 @@ export async function compileRepoNativeHardhat({
       compilerInputSha256:info.compilerInputSha256,
       compilerOutputSha256:info.compilerOutputSha256,
       sourceContents:Object.fromEntries((info.sourceNames??[]).map(name=>[name,null])),
-      // Each unit carries the ASTs of its own sources so exact-build consumers (Slither export)
-      // work without recompiling; build-info ASTs are identical across units for a shared source.
-      sourceAsts:Object.fromEntries((info.sourceNames??[]).filter(name=>sourceAsts[name]).map(name=>[name,sourceAsts[name]])),
+      // Never substitute a different compiler unit's AST, even for identical
+      // source text: node/source IDs are profile-local.
+      sourceAsts:perUnitAsts[index],
       artifacts:artifacts.filter(a=>(info.artifactQualifiedNames??[]).includes(`${a.sourceName}:${a.contractName}`))
     })),
     artifacts,
