@@ -16,7 +16,7 @@ const MAX_JSON=64*1024*1024;
 
 function argsOf(argv){
   const supported=new Set(['operation','input-root','output-root','run-identity',
-    'profile','target-id','proposal','native-config','component']);
+    'profile','target-id','proposal','native-config','component','c2-state']);
   const args={};
   for(let i=0;i<argv.length;i++){
     const key=argv[i]?.startsWith('--')?argv[i].slice(2):'';
@@ -446,9 +446,52 @@ function deriveForkPlan(args,identity,issues){
   return {mode:'fork-plan',status:'NOT_EXECUTED',sourceBound,
     files:[output(args['output-root'],'FORK_EXECUTION_PLAN_v1.json',out)],issues};
 }
+function observedOriginalC2Disposition(args,identity,sourceSha,issues){
+  let raw=null;
+  try{
+    if(!args['c2-state'])throw Error('EXACT_SAME_RUN_C2_DISPOSITION_ARTIFACT_PATH_MISSING');
+    const doc=readJson(args['c2-state']);
+    const data=doc.value;
+    if(data?.schemaVersion!=='curveyield-security-pipeline-fork-native-v1'||
+      data.stage!=='G2B'||String(data.runId)!==String(identity.runId)||
+      data.runAttempt!==identity.runAttempt||
+      data.headSha!==identity.workflowHeadSha||
+      data.sourceArchiveSha256!==sourceSha)
+      throw Error('C2_DISPOSITION_SOURCE_OR_RUN_IDENTITY_MISMATCH');
+    raw={artifactSha256:doc.sha256,stageStatus:data.status??null,
+      nativeAttempted:data.nativeAttempted===true,
+      originalC2ManifestSha256:data.forkStateManifestSha256??null,
+      capturedBlock:data.c2?.blockNumber??null,
+      capturedBlockHash:data.c2?.blockHash??null,
+      privateTransportStatus:data.restrictedEvidence?.scope??null,
+      originalC2BytesAvailableInThisConsumer:false,
+      sourceBoundMetadata:true};
+  }catch(error){
+    issues.push(issue('G2B.C2_HANDOFF_UNAVAILABLE',
+      'FORK_NATIVE_STATE_v1.json.originalSha256/runId/sourceArchiveSha256',
+      'exact current-run source-bound G2B disposition, separate from private C2 state',
+      String(error),'Restore same-run digest-only disposition and independently accepted restricted C2 transport'));
+    raw={artifactSha256:null,stageStatus:'NOT_EXECUTED',
+      nativeAttempted:false,originalC2ManifestSha256:null,
+      capturedBlock:null,capturedBlockHash:null,
+      privateTransportStatus:null,originalC2BytesAvailableInThisConsumer:false,
+      sourceBoundMetadata:false};
+  }
+  if(raw.sourceBoundMetadata&&!raw.originalC2BytesAvailableInThisConsumer)
+    issues.push(issue('G2B.C2_PRIVATE_RESTORE_UNAVAILABLE',
+      'FORK_C2_RESTRICTED_TRANSPORT_v1.actualRestorableState',
+      'original independently verified restricted gzip C2 state and safe readback in this consumer',
+      {originalDispositionSha256:raw.artifactSha256,
+       nativeStageStatus:raw.stageStatus,
+       originalManifestSha256:raw.originalC2ManifestSha256,
+       crossJobSourceBytesAvailable:false},
+      'Establish approved private transport or same-job verified C2 readback; never treat a digest as chain state'));
+  return raw;
+}
 function deriveStoragePlan(args,identity,issues){
   const source=planSourceFacts(args,identity,issues);
   const intelligence=source.load('SOURCE_INTELLIGENCE_AUTOMATED_v1.json');
+  const c2=observedOriginalC2Disposition(args,identity,source.sourceSha256,issues);
   const declarations=Array.isArray(intelligence?.value?.storageLayout)?
     intelligence.value.storageLayout:[];
   const perVariable=declarations.map(x=>({
@@ -472,6 +515,7 @@ function deriveStoragePlan(args,identity,issues){
     sourceBound:source.sourceBound&&!!intelligence,
     status:'NOT_EXECUTED_C2_NOT_PROVEN',runIdentity:identity,
     originalSourceIntelligenceSha256:intelligence?.sha256??null,
+    originalForkC2Disposition:c2,
     records:perVariable,requiredC2Fields:items,actualNativeQueriesExecuted:0,issues};
   return {mode:'storage-plan',status:'NOT_EXECUTED',
     sourceBound:out.sourceBound,
@@ -480,6 +524,7 @@ function deriveStoragePlan(args,identity,issues){
 function deriveMedusaEligibility(args,identity,issues){
   const source=planSourceFacts(args,identity,issues);
   const inventory=source.load('REVIEW_INVENTORY_v1.json');
+  const c2=observedOriginalC2Disposition(args,identity,source.sourceSha256,issues);
   // Native eligibility plans belong to a new scratch root, never the
   // original downloaded preflight artifact directory.
   const targetPlanPath=args['native-config']??path.join(args['input-root'],'SECURITY_TARGET_PLAN_v1.json');
@@ -507,6 +552,7 @@ function deriveMedusaEligibility(args,identity,issues){
   const out={schemaVersion:'curveyield-medusa-eligibility-v1',pipelineVersion:'v1',
     status:'NOT_EXECUTED',runIdentity:identity,sourceArchiveSha256:source.sourceSha256,
     sourceBound,originalInventorySha256:inventory?.sha256??null,
+    originalForkC2Disposition:c2,
     targetCount:candidates.length,targets:candidates,
     nativeMedusaCommandsExecuted:0,nativePropertiesExecuted:0,
     behaviorOnlyNeverClaimedPropertyPassed:true,
