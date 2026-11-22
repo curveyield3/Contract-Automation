@@ -620,6 +620,88 @@ def verify_stage(root, args, ctx):
                                 "originalNativeEvidenceSha256": None,
                                 "exactIssueCount": len(warnings)}})
         return
+    if args.stage in ("G8", "G9"):
+        if args.stage == "G8":
+            expected_mode = "reconcile-native"
+            filename = "SECURITY_PIPELINE_NATIVE_EVIDENCE_INDEX_v1.json"
+            expected_schema = "curveyield-security-pipeline-native-evidence-index-v1"
+        else:
+            expected_mode = "qualify-dossier"
+            filename = "SECURITY_PIPELINE_RELEASE_STATUS_v1.json"
+            expected_schema = "curveyield-security-pipeline-release-status-v1"
+        doc_path = Path(args.input_root or "") / filename
+        doc, missing = _read_optional_json(str(doc_path) if args.input_root else None)
+        receipt_valid = bool(
+            isinstance(doc, dict) and doc.get("schemaVersion") == expected_schema and
+            data.get("operation") == expected_mode and
+            str(data.get("runId")) == ctx["runId"] and
+            str(data.get("runAttempt")) == str(ctx["runAttempt"]) and
+            data.get("workflowHeadSha") == ctx["workflowHeadSha"] and
+            str(doc.get("runId")) == ctx["runId"] and
+            str(doc.get("runAttempt")) == str(ctx["runAttempt"]) and
+            doc.get("headSha") == ctx["workflowHeadSha"]
+        )
+        if not receipt_valid:
+            warnings.append(make_warning(
+                ctx, args, "EVIDENCE.STAGE_PRODUCER_IDENTITY_MISMATCH",
+                args.stage + ".RECEIPT", filename + ".runId/runAttempt/headSha",
+                {"schemaVersion": expected_schema, "runId": ctx["runId"],
+                 "runAttempt": ctx["runAttempt"], "headSha": ctx["workflowHeadSha"]},
+                {"schemaVersion": doc.get("schemaVersion") if isinstance(doc, dict) else None,
+                 "runId": doc.get("runId") if isinstance(doc, dict) else None,
+                 "headSha": doc.get("headSha") if isinstance(doc, dict) else None,
+                 "sourceFailure": missing},
+                "stage does not establish original native evidence or a release",
+                "Re-run only this stage with original same-attempt evidence and immutable source identity",
+                str(doc_path), observation_failure=missing))
+        if not data.get("issues"):
+            if args.stage == "G8" and (not isinstance(doc, dict) or doc.get("nativeQualifiedCount") != 5):
+                warnings.append(make_warning(
+                    ctx, args, "EVIDENCE.NATIVE_QUALIFICATION_INCOMPLETE",
+                    "G8.NATIVE_COVERAGE", filename + ".nativeQualifiedCount",
+                    "5 independently qualified native analyzer results",
+                    doc.get("nativeQualifiedCount") if isinstance(doc, dict) else None,
+                    "Native security analysis cannot be declared complete",
+                    "Qualify exact program binary pins and preserve each native output",
+                    str(doc_path)))
+            elif args.stage == "G9" and isinstance(doc, dict) and doc.get("status") != "COMPLETE":
+                warnings.append(make_warning(
+                    ctx, args, "EVIDENCE.RELEASE_SCOPE_INCOMPLETE", "G9.RELEASE",
+                    filename + ".status", "COMPLETE for a verified declared scope",
+                    doc.get("status"), "release dossier is not qualified",
+                    "Resolve original stage/native results while retaining all limitations",
+                    str(doc_path)))
+        for issue in data.get("issues", []):
+            if not isinstance(issue, dict):
+                continue
+            warnings.append(make_warning(
+                ctx, args, "EVIDENCE.ORIGINAL_REQUIREMENT_NOT_MET",
+                args.stage + ".NATIVE_REQUIREMENT",
+                str(issue.get("fieldPath") or filename),
+                issue.get("expected"), issue.get("observed"),
+                "source-bound native reconciliation or dossier incomplete",
+                str(issue.get("correction") or "restore exact observed evidence"),
+                args.native_result))
+        actual_status = str(doc.get("status") or "UNVERIFIED") if receipt_valid else "UNVERIFIED"
+        qualified = bool(receipt_valid and actual_status == "COMPLETE" and
+                         not warnings and data.get("status") == "COMPLETE")
+        _finish(root, args, ctx, warnings,
+                "COMPLETE" if qualified else ("PARTIAL" if receipt_valid else "UNVERIFIED"), {
+                    "attempted": 1, "completed": 1 if qualified else 0,
+                    "notExecuted": 0 if qualified else 1,
+                    "sourceBound": bool(receipt_valid and (
+                        doc.get("sourceAdmissionVerified") is True if args.stage == "G8" else
+                        doc.get("originalSourceArchiveSha256"))),
+                    "sourceIdentity": {"archiveSha256": doc.get("sourceArchiveSha256")
+                        if args.stage == "G8" else doc.get("originalSourceArchiveSha256")}
+                        if receipt_valid else None,
+                    "originalNativeEvidenceSha256": None,
+                    "dependencyFacts": {"nativeQualificationCount": doc.get("nativeQualifiedCount")
+                        if args.stage == "G8" else doc.get("qualifiedNativeCount"),
+                        "reportProducerStatus": actual_status,
+                        "controllerAccepted": False,
+                        "originalNativeEvidenceNotSynthesized": True}})
+        return
     # Other native result types have not been independently classified. A
     # parseable JSON object is not proof that a native analyzer completed.
     _finish(root, args, ctx, [], "UNVERIFIED",
