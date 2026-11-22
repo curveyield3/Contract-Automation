@@ -147,7 +147,7 @@ jobs:
             --env SECURITY_PREFLIGHT_LOCAL_ARCHIVE=/input/source.zip \
             --env PHASE0_PRIVATE_BUILD_CACHE_ENABLED=false \
             --env SECURITY_PREFLIGHT_OFFLINE_COMPILERS=1 \
-            --env CI=true --env HOME=/opt/preflight \
+            --env CI=true --env HOME=/tmp \
             --env VIRTUAL_ENV=/tmp \
             --workdir /opt/preflight \
             curveyield-security-preflight:local \
