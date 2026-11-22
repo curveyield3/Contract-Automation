@@ -28,9 +28,32 @@ for(const [index,p] of (plan.packages??[]).entries()){
   if(p.lockSha256)fs.copyFileSync(path.join(source,'package-lock.json'),path.join(dst,'package-lock.json'));
   const args=p.lockSha256?['ci','--ignore-scripts','--no-audit','--no-fund']:
     ['install','--ignore-scripts','--no-audit','--no-fund','--package-lock=false'];
+  // The admitted ZIP remains immutable. Repair only this known corrupted integrity
+  // entry in the pre-admission build cache, after verifying the canonical npm
+  // registry metadata for the same pinned package/version. Report divergence.
+  let correctedLockIntegrity=null;
+  if(p.lockSha256){
+    const lockPath=path.join(dst,'package-lock.json');
+    const lock=JSON.parse(fs.readFileSync(lockPath,'utf8'));
+    const entry=lock.packages?.['node_modules/ansi-regex'];
+    const bad='sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv38qOOb9pdJlMUEKFQ==';
+    const actual='sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==';
+    if(entry?.version==='5.0.1'&&entry.integrity===bad
+      &&entry.resolved==='https://registry.npmjs.org/ansi-regex/-/ansi-regex-5.0.1.tgz'){
+      const registry=command('npm',['view','ansi-regex@5.0.1','dist.integrity','--json','--registry=https://registry.npmjs.org/'],dst);
+      if(registry.status!==0)throw Error('TRUSTED_NPM_INTEGRITY_LOOKUP_FAILED: '+String(registry.stderr||registry.error));
+      const reported=JSON.parse(registry.stdout.trim());
+      if(reported!==actual)throw Error('TRUSTED_NPM_INTEGRITY_NOT_EXPECTED: '+String(reported));
+      entry.integrity=reported;
+      fs.writeFileSync(lockPath,JSON.stringify(lock,null,2)+'\n');
+      correctedLockIntegrity={name:'ansi-regex',version:'5.0.1',sourceIntegrity:bad,registryIntegrity:reported,
+        sourceArchiveUnmodified:true,preparedLockModified:true};
+      console.error('SOURCE_LOCK_INTEGRITY_MISMATCH_CORRECTED_IN_TRUSTED_CACHE_ONLY ansi-regex@5.0.1');
+    }
+  }
   const result=command('npm',args,dst);
   const status=result.status===0&&fs.existsSync(path.join(dst,'node_modules'))?'PREPARED':'UNAVAILABLE';
-  statuses.packages.push({root:p.root,index,status,lockSha256:p.lockSha256??null,
+  statuses.packages.push({root:p.root,index,status,lockSha256:p.lockSha256??null,correctedLockIntegrity,
     detail:status==='UNAVAILABLE'?String(result.stderr||result.error||'').slice(-550):null});
 }
 for(const version of (plan.solidityCompilerCandidates??[])){
