@@ -1,11 +1,11 @@
 {
-    "schemaVersion": "curveyield-security-preflight-request-v1",
-    "runMode": "SOURCE_PREFLIGHT",
-    "requestId": "cyavkat-v25b-20261122-7c620ff30c79",
-    "source": {
-        "repository": "curveyield3/Smart-Contracts",
-        "commit": "7ea1a1f96ecb18dd9876fe697239a731697f38ed",
-        "archivePath": "Audit-Intake/cyavKATv25b_v1-1.zip",
-        "archiveSha256": "7c620ff30c79ceff532af3ad0977d184e66d76a4e00b600d61050799f5b9c8be"
-    }
+  "schemaVersion": "curveyield-security-preflight-request-v1",
+  "runMode": "SOURCE_PREFLIGHT",
+  "requestId": "cyavkat-v25b-20261122-7c620ff30c79",
+  "source": {
+    "repository": "curveyield3/Smart-Contracts",
+    "commit": "7ea1a1f96ecb18dd9876fe697239a731697f38ed",
+    "archivePath": "Audit-Intake/cyavKATv25b_v1-1.zip",
+    "archiveSha256": "7c620ff30c79ceff532af3ad0977d184e66d76a4e00b600d61050799f5b9c8be"
+  }
 }
