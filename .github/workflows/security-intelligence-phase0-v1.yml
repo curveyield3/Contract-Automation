@@ -273,3 +273,85 @@ jobs:
           path: ${{ runner.temp }}/security-pipeline/collect/report/
           if-no-files-found: warn
           retention-days: 14
+
+  publish_warnings:
+    needs: [admit, collect]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout immutable implementation for final report
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Capture observed job results without claiming analyzer success
+        shell: bash
+        env:
+          OBSERVED_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/publish/input" \
+                   "$GITHUB_WORKSPACE/.security-pipeline-warning-report"
+          printf '%s\n' "$OBSERVED_NEEDS_JSON" \
+            > "$RUNNER_TEMP/security-pipeline/publish/input/needs.json"
+      - name: Download current-run stage warning parts only
+        id: report_parts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: security-pipeline-stage-*-${{ github.run_id }}-${{ github.run_attempt }}
+          merge-multiple: false
+          path: ${{ runner.temp }}/security-pipeline/publish/parts/stages
+        continue-on-error: true
+      - name: Download component metadata from the same attempt when present
+        id: toolkit_parts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: security-pipeline-toolkit-component-*-${{ github.run_id }}-${{ github.run_attempt }}
+          merge-multiple: false
+          path: ${{ runner.temp }}/security-pipeline/publish/parts/toolkit
+        continue-on-error: true
+      - name: Observe exact artifact inventory and optional download results
+        if: ${{ always() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGE_DOWNLOAD_OUTCOME: ${{ steps.report_parts.outcome }}
+          TOOLKIT_DOWNLOAD_OUTCOME: ${{ steps.toolkit_parts.outcome }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/publish/input"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --paginate --jq '.artifacts[] | {name,id,size_in_bytes,expired}' \
+            > "$RUNNER_TEMP/security-pipeline/publish/input/artifacts.jsonl" || \
+            printf '%s\n' '{"artifactInventoryUnavailable":true}' \
+              > "$RUNNER_TEMP/security-pipeline/publish/input/artifacts.jsonl"
+          printf '%s\n' "$STAGE_DOWNLOAD_OUTCOME" \
+            > "$RUNNER_TEMP/security-pipeline/publish/input/stage-download-outcome.txt"
+          printf '%s\n' "$TOOLKIT_DOWNLOAD_OUTCOME" \
+            > "$RUNNER_TEMP/security-pipeline/publish/input/toolkit-download-outcome.txt"
+      - name: Publish exact v1 warning and stage status files
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-evidence-v1.mjs \
+            --operation consolidate-warnings \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --run-head-sha "$GITHUB_SHA" \
+            --input-root "$RUNNER_TEMP/security-pipeline/publish" \
+            --output-root "$GITHUB_WORKSPACE/.security-pipeline-warning-report" \
+            --needs-json "$RUNNER_TEMP/security-pipeline/publish/input/needs.json" \
+            --artifacts-json "$RUNNER_TEMP/security-pipeline/publish/input/artifacts.jsonl"
+      - name: Upload after-workflow warnings and stage report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-warnings-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .security-pipeline-warning-report/SECURITY_PIPELINE_WARNINGS_v1.json
+            .security-pipeline-warning-report/SECURITY_PIPELINE_WARNINGS_v1.md
+            .security-pipeline-warning-report/SECURITY_PIPELINE_STAGE_STATUS_v1.json
+          if-no-files-found: error
+          retention-days: 14
