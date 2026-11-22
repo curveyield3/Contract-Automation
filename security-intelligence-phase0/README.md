@@ -280,11 +280,13 @@ and raw Slither outputs. It adds a deterministic navigation layer to the existin
 SOURCE_INTELLIGENCE_AUTOMATED_v1.json, REVIEW_INVENTORY_v1.json, and
 DISCOVERY_SUMMARY_v1.md outputs.
 
-- staticRecon.slither.candidateIndex now retains each raw detector's stable
-  candidate ID and Slither finding ID, impact/confidence labels, source anchors,
-  resolved contract/function identities, direct local state/privilege/value-flow
-  context, and source-call-graph path candidates to compiler-effective ABI
-  entrypoints.
+- staticRecon.slither.candidateIndex now retains each raw detector's per-run
+  candidate ID, stable content-fingerprint ID, and Slither finding ID,
+  impact/confidence labels, source anchors, resolved contract/function identities,
+  direct local state/privilege/value-flow context, and source-call-graph path
+  candidates to compiler-effective ABI entrypoints. Per-contract priority counts
+  are calculated from each contract's own source anchor, not copied from a
+  multi-contract detector's overall queue priority.
 - staticRecon.slither.prioritization records the priority policy, per-priority
   counts, mapping coverage, contract grouping, unresolved IDs, limitations, and
   a digest of the derived index.

@@ -757,6 +757,30 @@ function slitherConfidenceRankV1(value) {
   return ({ High: 3, Medium: 2, Low: 1 })[value] ?? 0;
 }
 
+function stableSlitherCandidateIdV1(detector) {
+  const elements = (detector?.elements ?? []).map(element => {
+    const chain = slitherParentChainV1(element);
+    const functionElement = chain.find(x => x.type === 'function') ?? null;
+    const contractElement = chain.find(x => x.type === 'contract') ?? null;
+    return {
+      type: element?.type ?? null,
+      name: element?.name ?? null,
+      sourcePath: element?.source_mapping?.filename_relative ?? null,
+      lines: slitherSourceLinesV1(element),
+      functionSignature: functionElement?.type_specific_fields?.signature ?? null,
+      contractName: contractElement?.name ?? null
+    };
+  }).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  const fingerprint = {
+    check: detector?.check ?? null,
+    impact: detector?.impact ?? null,
+    confidence: detector?.confidence ?? null,
+    description: String(detector?.description ?? '').replace(/\s+/g, ' ').trim(),
+    elements
+  };
+  return 'SLITHER-' + digestCanonicalV1(fingerprint).slice(0, 16);
+}
+
 /**
  * Stage 3: project raw Slither detectors onto the existing source inventory,
  * effective ABI entrypoints and AST call graph. Navigation/triage only; no
@@ -949,7 +973,12 @@ export function buildSlitherFlowPrioritizationV1({ sourceIntelligence, reviewInv
     P4_DEPENDENCY_OR_UNMAPPED: 4
   };
 
+  const stableCandidateOccurrences = new Map();
   const observations = detectors.map((detector, rawDetectorIndex) => {
+    const stableBase = stableSlitherCandidateIdV1(detector);
+    const stableOccurrence = stableCandidateOccurrences.get(stableBase) ?? 0;
+    stableCandidateOccurrences.set(stableBase, stableOccurrence + 1);
+    const stableCandidateId = stableBase + (stableOccurrence ? '-' + String(stableOccurrence + 1).padStart(2, '0') : '');
     const groupedAnchors = new Map();
     for (const element of detector?.elements ?? []) {
       const chain = slitherParentChainV1(element);
@@ -1065,8 +1094,25 @@ export function buildSlitherFlowPrioritizationV1({ sourceIntelligence, reviewInv
       const findingLocation = lineStart
         ? rawAnchor.sourcePath + ':' + lineStart + '-' + lineEnd
         : functionLocation;
+      const anchorInScope = sourceTier === 'IN_SCOPE';
+      const anchorHasStateChangingPath = connectedStateChangingEntrypointIds.length > 0;
+      const anchorHighImpact = ['Critical', 'High'].includes(detector?.impact);
+      let reviewPriority;
+      if (anchorHasStateChangingPath && anchorHighImpact) reviewPriority = 'P1_FLOW_LINKED_HIGH_IMPACT';
+      else if (anchorHasStateChangingPath || (anchorInScope && anchorHighImpact)) reviewPriority = 'P2_FLOW_OR_HIGH_IMPACT';
+      else if (anchorInScope) reviewPriority = 'P3_IN_SCOPE_CONTEXT';
+      else reviewPriority = 'P4_DEPENDENCY_OR_UNMAPPED';
+      const anchorPriorityReasons = [];
+      if (anchorInScope) anchorPriorityReasons.push('IN_SCOPE_SOURCE_MAPPING');
+      if (anchorHasStateChangingPath) anchorPriorityReasons.push('STATE_CHANGING_ENTRYPOINT_PATH_CANDIDATE');
+      if (anchorHighImpact) anchorPriorityReasons.push('SLITHER_HIGH_OR_CRITICAL_IMPACT_LABEL');
+      if (!anchorHasStateChangingPath && anchorInScope && anchorHighImpact) anchorPriorityReasons.push('NO_STATE_CHANGING_ENTRYPOINT_PATH_ESTABLISHED');
+      if (sourceTier === 'DEPENDENCY') anchorPriorityReasons.push('DEPENDENCY_SOURCE_ANCHOR');
+      if (!fn) anchorPriorityReasons.push('FUNCTION_MAPPING_UNRESOLVED');
 
       return {
+        reviewPriority,
+        priorityReasonCodes: anchorPriorityReasons,
         contractId: resolvedContract?.contractId ?? null,
         qualifiedContract,
         contractKind: resolvedContract?.contractKind ?? null,
@@ -1106,26 +1152,19 @@ export function buildSlitherFlowPrioritizationV1({ sourceIntelligence, reviewInv
     const connectedEntrypointIds = [...new Set(anchors.flatMap(x => x.connectedEntrypointIds))].sort();
     const inScope = anchors.some(x => x.sourceTier === 'IN_SCOPE');
     const hasStateChangingPath = connectedStateChangingEntrypointIds.length > 0;
-    const highImpact = ['Critical', 'High'].includes(detector?.impact);
-    let priority;
-    if (hasStateChangingPath && highImpact) priority = 'P1_FLOW_LINKED_HIGH_IMPACT';
-    else if (hasStateChangingPath || (inScope && highImpact)) priority = 'P2_FLOW_OR_HIGH_IMPACT';
-    else if (inScope) priority = 'P3_IN_SCOPE_CONTEXT';
-    else priority = 'P4_DEPENDENCY_OR_UNMAPPED';
-
-    const priorityReasonCodes = [];
-    if (inScope) priorityReasonCodes.push('IN_SCOPE_SOURCE_MAPPING');
-    if (hasStateChangingPath) priorityReasonCodes.push('STATE_CHANGING_ENTRYPOINT_PATH_CANDIDATE');
-    if (highImpact) priorityReasonCodes.push('SLITHER_HIGH_OR_CRITICAL_IMPACT_LABEL');
-    if (!hasStateChangingPath && inScope && highImpact) priorityReasonCodes.push('NO_STATE_CHANGING_ENTRYPOINT_PATH_ESTABLISHED');
-    if (!inScope) priorityReasonCodes.push('DEPENDENCY_OR_UNRESOLVED_SCOPE');
-    if (!functionIds.length) priorityReasonCodes.push('FUNCTION_MAPPING_UNRESOLVED');
-
+    const priority = anchors.length
+      ? anchors.reduce((best, anchor) =>
+          priorityRank[anchor.reviewPriority] < priorityRank[best] ? anchor.reviewPriority : best,
+        'P4_DEPENDENCY_OR_UNMAPPED')
+      : 'P4_DEPENDENCY_OR_UNMAPPED';
+    const priorityReasonCodes = [...new Set(anchors.flatMap(x => x.priorityReasonCodes))];
+    if (!anchors.length) priorityReasonCodes.push('NO_SOURCE_ANCHOR');
     const sourceScope = inScope ? 'IN_SCOPE' :
       anchors.length && anchors.every(x => x.sourceTier === 'DEPENDENCY') ? 'DEPENDENCY' : 'UNRESOLVED';
 
     return {
       candidateId: 'SLITHER-' + String(rawDetectorIndex + 1).padStart(4, '0'),
+      stableCandidateId,
       findingId: detector?.id ?? null,
       rawDetectorIndex,
       rawEvidenceRef: 'SLITHER_v1.json#detectors[' + rawDetectorIndex + ']',
@@ -1151,6 +1190,7 @@ export function buildSlitherFlowPrioritizationV1({ sourceIntelligence, reviewInv
     slitherConfidenceRankV1(b.confidence) - slitherConfidenceRankV1(a.confidence) ||
     String(a.sourceAnchors[0]?.sourcePath ?? '').localeCompare(String(b.sourceAnchors[0]?.sourcePath ?? '')) ||
     Number(a.sourceAnchors[0]?.findingLines?.[0] ?? 0) - Number(b.sourceAnchors[0]?.findingLines?.[0] ?? 0) ||
+    String(a.stableCandidateId).localeCompare(String(b.stableCandidateId)) ||
     a.rawDetectorIndex - b.rawDetectorIndex
   );
 
@@ -1172,13 +1212,17 @@ export function buildSlitherFlowPrioritizationV1({ sourceIntelligence, reviewInv
         sourcePath: anchor.sourcePath,
         sourceTier: anchor.sourceTier,
         candidateIds: new Set(),
+        stableCandidateIds: new Set(),
+        candidatePriorities: new Map(),
         connectedEntrypointIds: new Set(),
         priorityCounts: Object.fromEntries(Object.keys(priorityRank).map(key => [key, 0]))
       };
-      if (!group.candidateIds.has(observation.candidateId)) {
+      if (!group.candidatePriorities.has(observation.candidateId)) {
         group.candidateIds.add(observation.candidateId);
-        group.priorityCounts[observation.priority] = (group.priorityCounts[observation.priority] ?? 0) + 1;
+        group.candidatePriorities.set(observation.candidateId, anchor.reviewPriority);
+        group.priorityCounts[anchor.reviewPriority] = (group.priorityCounts[anchor.reviewPriority] ?? 0) + 1;
       }
+      group.stableCandidateIds.add(observation.stableCandidateId);
       for (const id of anchor.connectedStateChangingEntrypointIds) group.connectedEntrypointIds.add(id);
       if (anchor.sourceTier === 'IN_SCOPE') group.sourceTier = 'IN_SCOPE';
       byContractMap.set(groupKey, group);
@@ -1193,9 +1237,9 @@ export function buildSlitherFlowPrioritizationV1({ sourceIntelligence, reviewInv
     observationCount: group.candidateIds.size,
     priorityCounts: group.priorityCounts,
     candidateIds: [...group.candidateIds].sort((a, b) =>
-      priorityRank[observations.find(x => x.candidateId === a)?.priority] -
-      priorityRank[observations.find(x => x.candidateId === b)?.priority] || a.localeCompare(b)
+      priorityRank[group.candidatePriorities.get(a)] - priorityRank[group.candidatePriorities.get(b)] || a.localeCompare(b)
     ),
+    stableCandidateIds: [...group.stableCandidateIds].sort(),
     connectedStateChangingEntrypointIds: [...group.connectedEntrypointIds].sort()
   })).sort((a, b) =>
     (b.priorityCounts.P1_FLOW_LINKED_HIGH_IMPACT ?? 0) - (a.priorityCounts.P1_FLOW_LINKED_HIGH_IMPACT ?? 0) ||
@@ -1211,7 +1255,8 @@ export function buildSlitherFlowPrioritizationV1({ sourceIntelligence, reviewInv
     stateChangingFlowConnectedDetectorCount: observations.filter(x => x.connectedStateChangingEntrypointIds.length > 0).length,
     anyEntrypointConnectedDetectorCount: observations.filter(x => x.connectedEntrypointIds.length > 0).length,
     sourceUnmappedDetectorCount: unmappedCandidateIds.length,
-    contractUnmappedDetectorCount: contractUnmappedCandidateIds.length
+    contractUnmappedDetectorCount: contractUnmappedCandidateIds.length,
+    stableCandidateIdCount: new Set(observations.map(x => x.stableCandidateId)).size
   };
 
   const index = {
@@ -1233,7 +1278,7 @@ export function buildSlitherFlowPrioritizationV1({ sourceIntelligence, reviewInv
       P2_FLOW_OR_HIGH_IMPACT: 'A state-changing effective ABI entrypoint path candidate, or a High/Critical observation in an in-scope source unit without a resolved state-changing path.',
       P3_IN_SCOPE_CONTEXT: 'Other source-mapped observations in an in-scope source unit.',
       P4_DEPENDENCY_OR_UNMAPPED: 'Dependency-only, source-unmapped or contract-unmapped observations without an in-scope priority basis.',
-      tieBreak: 'Impact descending, confidence descending, source path, source line, then original detector order.',
+      tieBreak: 'Impact descending, confidence descending, source path, source line, stable content ID, then original detector order.',
       interpretation: 'Priority is a review-navigation order, not a security severity or finding verdict.'
     },
     priorityCounts,
@@ -1266,6 +1311,7 @@ export function buildSlitherFlowPrioritizationV1({ sourceIntelligence, reviewInv
     rawEvidenceRef: 'SLITHER_v1.json',
     notSecurityVerdict: true,
     detectorCount: detectors.length,
+    stableCandidateIdCount: mappingCounts.stableCandidateIdCount,
     priorityCounts,
     mappingCounts,
     byContract,

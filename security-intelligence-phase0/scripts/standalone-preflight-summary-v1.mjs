@@ -74,16 +74,17 @@ const slitherEvidence=evidence.find(x=>x.name==='SLITHER_v1.json');
 const priorityOrder=['P1_FLOW_LINKED_HIGH_IMPACT','P2_FLOW_OR_HIGH_IMPACT','P3_IN_SCOPE_CONTEXT','P4_DEPENDENCY_OR_UNMAPPED'];
 const priorityLines=priorityOrder.map(key=>'- '+key+': '+(priorityCounts[key]??0));
 const topObservations=slitherIndex.slice(0,12).map(row=>{
-  const anchor=row.sourceAnchors?.[0]??null;
-  const connected=(row.connectedStateChangingEntrypointIds??[]).map(id=>entrypointById.get(id)?.canonicalSignature).filter(Boolean);
+  const anchor=row.sourceAnchors?.find(x=>(x.connectedStateChangingEntrypointIds??[]).length>0) ??
+    row.sourceAnchors?.find(x=>x.sourceTier==='IN_SCOPE') ?? row.sourceAnchors?.[0] ?? null;
+  const connected=(anchor?.connectedStateChangingEntrypointIds??[]).map(id=>entrypointById.get(id)?.canonicalSignature).filter(Boolean);
   const location=anchor?.findingLocation??anchor?.functionLocation??anchor?.sourcePath??'SOURCE_UNRESOLVED';
   const subject=anchor?.qualifiedContract??anchor?.sourcePath??'CONTRACT_UNRESOLVED';
   const fn=anchor?.functionSignature??'contract-level or unresolved function';
-  const routes=connected.length?connected.slice(0,3).join(', ')+(connected.length>3?' ...':''):'no state-changing entrypoint path resolved';
-  return '- '+row.candidateId+' '+row.priority+' — '+row.check+' ('+(row.impact??'impact unknown')+'/'+(row.confidence??'confidence unknown')+') — '+subject+' :: '+fn+' — '+location+' — entrypoints: '+routes;
+  const routes=connected.length?connected.slice(0,3).join(', ')+(connected.length>3?' ...':''):'no state-changing entrypoint path resolved for this anchor';
+  return '- '+(row.stableCandidateId??row.candidateId)+' ['+row.candidateId+'] '+row.priority+' — '+row.check+' ('+(row.impact??'impact unknown')+'/'+(row.confidence??'confidence unknown')+') — '+subject+' :: '+fn+' — '+location+' — entrypoints: '+routes;
 });
 const contractTriageLines=byContract.slice(0,15).map(group=>{
-  const counts=priorityOrder.map(key=>(group.priorityCounts?.[key]??0)+' '+key.replace(/^P\d_/, 'P')).join(', ');
+  const counts=priorityOrder.map((key,index)=>'P'+(index+1)+'='+(group.priorityCounts?.[key]??0)).join(', ');
   const routes=(group.connectedStateChangingEntrypointIds??[]).map(id=>entrypointById.get(id)?.canonicalSignature).filter(Boolean);
   return '- '+group.qualifiedContract+' — '+group.observationCount+' observations ('+counts+'); connected state-changing ABI entrypoints: '+(routes.slice(0,8).join(', ')||'none resolved')+(routes.length>8?' ...':'');
 });
@@ -146,6 +147,7 @@ const lines=[
   '- Source-anchored detectors: '+(mappingCounts.sourceAnchoredDetectorCount??'UNAVAILABLE'),
   '- Contract-mapped detectors: '+(mappingCounts.contractMappedDetectorCount??'UNAVAILABLE'),
   '- Function-mapped detectors: '+(mappingCounts.functionMappedDetectorCount??'UNAVAILABLE'),
+  '- Stable content candidate IDs: '+(mappingCounts.stableCandidateIdCount??'UNAVAILABLE'),
   '- Connected to state-changing ABI entrypoint path candidates: '+(mappingCounts.stateChangingFlowConnectedDetectorCount??'UNAVAILABLE'),
   '- Unmapped source detectors: '+(mappingCounts.sourceUnmappedDetectorCount??'UNAVAILABLE'),
   '- Unresolved contract mappings: '+(mappingCounts.contractUnmappedDetectorCount??'UNAVAILABLE'),
@@ -163,6 +165,8 @@ const lines=[
   ...(topObservations.length?topObservations:['- No Slither observations or no usable prioritized index']),
   '',
   '### Observations by contract',
+  '',
+  'Per-contract counts use each source anchor’s own priority; one detector spanning multiple contracts can appear in more than one contract group.',
   '',
   ...(contractTriageLines.length?contractTriageLines:['- No contract-grouped Slither observations']),
   '',
