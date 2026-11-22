@@ -36,11 +36,11 @@ jobs:
       - name: Admit source-bound request and download ZIP without running it
         if: ${{ steps.request_present.outputs.request_present == 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          : "${GH_TOKEN:?AUDIT_CONTROLLER_GITHUB_TOKEN secret is required to read source repository}"
+          : "${GH_TOKEN:?GitHub Actions read token unavailable}"
           mkdir -p .preflight-input
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
