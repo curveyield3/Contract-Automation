@@ -293,12 +293,36 @@ export async function compileRepoNativeHardhat({
   const detected = await detectNativeBuild(projectRoot, { fsApi });
   if (detected.system !== 'hardhat-native') throw new Error('Repository is not an admitted Hardhat native build');
 
-  const install = await runCommand({
-    command: 'npm',
-    args: ['ci', '--ignore-scripts', '--no-audit', '--no-fund'],
-    cwd: projectRoot
-  });
-  if (!install || install.exitCode !== 0) throw commandFailure('Hardhat locked dependency installation failed', install);
+  if (process.env.SECURITY_PREFLIGHT_OFFLINE_COMPILERS === '1' && process.env.SECURITY_PREFLIGHT_LOCAL_ARCHIVE) {
+    // The standalone Docker build prepares locked dependencies before source admission.
+    // Reuse that exact pinned install; the runtime is deliberately network-isolated.
+    const root = '/opt/preflight';
+    const [plan, status] = await Promise.all([
+      fsApi.readFile(path.join(root, 'toolchain-plan', 'toolchain-plan.json'), 'utf8').then(JSON.parse),
+      fsApi.readFile(path.join(root, 'toolchain-status.json'), 'utf8').then(JSON.parse)
+    ]);
+    const index = (plan.packages ?? []).findIndex(item => item.root === '.');
+    if (index < 0) throw new Error('OFFLINE_HARDHAT_PACKAGE_PLAN_MISSING');
+    const entry = plan.packages[index];
+    if (!entry.lockSha256 || entry.preparedPath !== 'packages/' + index) throw new Error('OFFLINE_HARDHAT_LOCK_IDENTITY_MISSING');
+    for (const [name, expected] of [['package.json', entry.manifestSha256], ['package-lock.json', entry.lockSha256]]) {
+      const bytes = await fsApi.readFile(path.join(projectRoot, name));
+      if (createHash('sha256').update(bytes).digest('hex') !== expected)
+        throw new Error('OFFLINE_HARDHAT_SOURCE_LOCK_MISMATCH: ' + name);
+    }
+    const prepared = path.join(root, 'prepared-packages', String(index), 'node_modules');
+    const installStatus = (status.packages ?? []).find(item => item.index === index);
+    if (installStatus?.status !== 'PREPARED' || !(await directoryExists(prepared, fsApi)))
+      throw new Error('OFFLINE_HARDHAT_PREPARED_DEPENDENCIES_UNAVAILABLE: ' + String(installStatus?.detail ?? 'missing prepared installation').slice(-550));
+    await fsApi.symlink(prepared, path.join(projectRoot, 'node_modules'), 'dir');
+  } else {
+    const install = await runCommand({
+      command: 'npm',
+      args: ['ci', '--ignore-scripts', '--no-audit', '--no-fund'],
+      cwd: projectRoot
+    });
+    if (!install || install.exitCode !== 0) throw commandFailure('Hardhat locked dependency installation failed', install);
+  }
 
   // A source-authored Hardhat audit wrapper may compile Solidity from upgrade/src
   // while its Foundry remappings resolve vetted npm packages under
