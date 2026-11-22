@@ -162,10 +162,10 @@ async function detectBuildConfig(projectRoot){
   // Hardhat explicitly supports multiple compiler profiles. Reject ambiguous, unrelated
   // version declarations, but retain every version declared in its compilers array.
   if(topVersions.length>1){
-    const hardhat=texts.find(t=>/^hardhat\\.config\\.(js|cjs|mjs|ts)$/.test(t.path)&&
+    const hardhat=texts.find(t=>/^hardhat\.config\.(js|cjs|mjs|ts)$/.test(t.path)&&
       candidates.filter(x=>x.priority===topPriority).every(x=>x.basis===t.path));
-    const compilerArray=hardhat?.text.match(/\\bcompilers\\s*:\\s*\\[([\\s\\S]*?)\\]/)?.[1]??'';
-    const declared=new Set([...compilerArray.matchAll(/\\bversion\\s*:\\s*['\"](\\d+\\.\\d+\\.\\d+)['\"]/g)].map(x=>x[1]));
+    const compilerArray=hardhat?.text.match(/\bcompilers\s*:\s*\[([\s\S]*?)\]/)?.[1]??'';
+    const declared=new Set([...compilerArray.matchAll(/\bversion\s*:\s*['\"](\d+\.\d+\.\d+)['\"]/g)].map(x=>x[1]));
     if(!compilerArray||topVersions.some(v=>!declared.has(v)))
       throw new Error(`conflicting explicit Solidity compiler versions: ${topVersions.join(', ')}`);
   }
