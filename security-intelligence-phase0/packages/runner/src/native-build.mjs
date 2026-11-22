@@ -325,7 +325,25 @@ export async function compileRepoNativeHardhat({
     const installStatus = (status.packages ?? []).find(item => item.index === index);
     if (installStatus?.status !== 'PREPARED' || !(await directoryExists(prepared, fsApi)))
       throw new Error('OFFLINE_HARDHAT_PREPARED_DEPENDENCIES_UNAVAILABLE: ' + String(installStatus?.detail ?? 'missing prepared installation').slice(-550));
-    await fsApi.symlink(prepared, path.join(projectRoot, 'node_modules'), 'dir');
+    // Keep dependencies pinned to the prebuilt, network-isolated installation.
+    // The package's audit Hardhat wrapper needs to create vendored links under
+    // node_modules; a directory symlink into the read-only image cannot support
+    // those links. Materialize only directory entries as local symlinks, with
+    // writable scope directories, rather than copying or re-installing packages.
+    const modulesDir = path.join(projectRoot, 'node_modules');
+    await fsApi.mkdir(modulesDir, {recursive: true});
+    for (const item of await fsApi.readdir(prepared, {withFileTypes: true})) {
+      const source = path.join(prepared, item.name);
+      const destination = path.join(modulesDir, item.name);
+      if (item.name.startsWith('@') && item.isDirectory()) {
+        await fsApi.mkdir(destination, {recursive: true});
+        for (const scoped of await fsApi.readdir(source)) {
+          await fsApi.symlink(path.join(source, scoped), path.join(destination, scoped));
+        }
+      } else {
+        await fsApi.symlink(source, destination);
+      }
+    }
   } else {
     const install = await runCommand({
       command: 'npm',
