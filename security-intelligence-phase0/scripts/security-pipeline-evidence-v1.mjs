@@ -124,7 +124,7 @@ function consolidate(a){
  const inventory=artifactInventory(a,errors);
  const suffix='-'+a['run-id']+'-'+a['run-attempt'];
  const stageRoot=path.join(a['input-root'],'parts','stages');
- const stageEntries={},parts=[],warnings=[],warningIds=new Set();
+ const stageEntries={},componentStages={},parts=[],warnings=[],warningIds=new Set();
  function addWarning(w){if(!warningIds.has(w.warningId)){warnings.push(w);warningIds.add(w.warningId);}}
  for(const [job,entry] of Object.entries(needs)){
   const result=entry?.result??'unknown';
@@ -132,6 +132,7 @@ function consolidate(a){
   const names=matrix?COMPONENTS.map(c=>'security-pipeline-stage-'+job+'-'+c+suffix):
    ['security-pipeline-stage-'+job+suffix];
   for(const name of names){
+   const component=matrix?COMPONENTS.find(c=>name==='security-pipeline-stage-'+job+'-'+c+suffix):null;
    const dir=path.join(stageRoot,name);
    const observed=inventory.filter(x=>x.name===name);
    parts.push({name,job,result,inventoryCount:observed.length,
@@ -169,9 +170,11 @@ function consolidate(a){
      if(x.stage!==gate||x.jobId!==job||!STATUSES.has(x.status)||
        String(x.jobRunId)!==a['run-id']||Number(x.jobRunAttempt)!==Number(a['run-attempt'])||
        x.workflowHeadSha&&x.workflowHeadSha!==a['run-head-sha']||
-       Object.hasOwn(stageEntries,gate))
+       (matrix?Object.hasOwn(componentStages,component):Object.hasOwn(stageEntries,gate)))
        throw Error('STAGE_DUPLICATE_OR_IDENTITY_MISMATCH');
-     stageEntries[gate]={...x,observedJobResult:result,artifactName:name};
+     const accepted={...x,observedJobResult:result,artifactName:name};
+     if(matrix)componentStages[component]=accepted;
+     else stageEntries[gate]=accepted;
     }catch(e){addWarning(warning(a,'REPORT.STAGE_RECORD_INVALID',gate,job,name+'/'+f,
      'verified unique stage identity and status',String(e),
      'Stage is not treated as complete','Repair original stage receipt',name));}
@@ -209,8 +212,13 @@ function consolidate(a){
  const status={schemaVersion:'curveyield-security-pipeline-stage-status-v1',
   pipelineVersion:'v1',runId:a['run-id'],runAttempt:Number(a['run-attempt']),
   headSha:a['run-head-sha'],stages,jobs:needs,totals,
-  toolkitComponents:COMPONENTS.map(componentId=>({componentId,status:'UNVERIFIED',
-   reason:'NO_QUALIFIED_SAME_RUN_TOOLKIT_METADATA_CONSUMED'})),
+  toolkitComponents:COMPONENTS.map(componentId=>
+   componentStages[componentId]?{componentId,
+    status:componentStages[componentId].status,
+    observedJobResult:componentStages[componentId].observedJobResult,
+    stageEvidenceArtifact:componentStages[componentId].artifactName}:
+   {componentId,status:'UNVERIFIED',
+    reason:'NO_QUALIFIED_SAME_RUN_TOOLKIT_METADATA_CONSUMED'}),
   observedArtifacts:parts,controllerAcceptance:'NOT_ASSERTED'};
  const markdownLines=['# CurveYield Automated Security Pipeline v1 — after-workflow report','',
   'The implementation specification is v14; the pipeline is v1. Controller acceptance is not asserted.','',

@@ -368,8 +368,185 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+
+  toolkit_prepare:
+    needs: [admit, prepare_targets]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_approved == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - foundry-node
+          - source-compilers
+          - slither-storage
+          - medusa
+          - wake
+          - mythril
+          - certora-prover
+          - autoprover
+          - mimo-runtime
+          - mimo-weights
+    steps:
+      - name: Checkout immutable current-run toolkit source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download exact same-run non-executable profile metadata
+        id: profile_download
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-toolkit-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit-profile
+        continue-on-error: true
+      - name: Establish fixed component-local directories and run context
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/run" \
+                   "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/safe" \
+                   "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/report"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dir=path.join(process.env.RUNNER_TEMP,'security-pipeline','toolkit',process.env.COMPONENT,'run');
+          fs.writeFileSync(path.join(dir,'RUN_IDENTITY_v1.json'),JSON.stringify({
+            schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+            runId:process.env.GITHUB_RUN_ID,
+            runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            workflowHeadSha:process.env.GITHUB_SHA,
+            repository:process.env.GITHUB_REPOSITORY
+          },null,2)+'\n',{mode:0o600});
+          NODE
+      - name: Plan component-only cache identity and trusted pin
+        id: tool_plan
+        continue-on-error: true
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation plan --component "$COMPONENT" \
+            --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" \
+            --run-identity "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/run/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/payload" \
+            --output-root "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/safe" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Restore only exact approved component cache key
+        id: cache_restore
+        if: ${{ steps.tool_plan.outputs.provisionable == 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.tool_plan.outputs.cache_path }}
+          key: ${{ steps.tool_plan.outputs.cache_key }}
+      - name: Inspect exact restored component without executing it
+        id: tool_prepare
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+          RESTORED: ${{ steps.cache_restore.outputs.cache-hit || 'false' }}
+          RESTORE_OUTCOME: ${{ steps.cache_restore.outcome }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation inspect --component "$COMPONENT" \
+            --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" \
+            --run-identity "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/run/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/payload" \
+            --output-root "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/safe" \
+            --cache-hit "$RESTORED" --restore-outcome "$RESTORE_OUTCOME"
+      - name: Independently verify original component bytes and publish exact warning
+        id: tool_verify
+        if: ${{ always() }}
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-toolkit-component --job toolkit_prepare --stage G2T \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --component "$COMPONENT" \
+            --profile "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/safe/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/payload" \
+            --report-root "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/report" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Save a new independently verified cache only
+        id: cache_save
+        if: ${{ steps.cache_restore.outcome == 'success' && steps.cache_restore.outputs.cache-hit != 'true' && steps.tool_verify.outputs.usableForExecution == 'true' && steps.tool_plan.outputs.provisionable == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.tool_plan.outputs.cache_path }}
+          key: ${{ steps.tool_plan.outputs.cache_key }}
+      - name: Publish component metrics, original restore result and warning part
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-toolkit_prepare-${{ matrix.component }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit/${{ matrix.component }}/report/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload digest-only component metadata, never cache binaries
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-toolkit-component-${{ matrix.component }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/security-pipeline/toolkit/${{ matrix.component }}/safe/TOOLKIT_CACHE_COMPONENT_IDENTITY_v1.json
+            ${{ runner.temp }}/security-pipeline/toolkit/${{ matrix.component }}/safe/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  toolkit_qualify:
+    needs: [admit, toolkit_prepare]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_approved == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout exact toolkit qualification implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download original same-run component metadata census
+        id: component_metadata
+        uses: actions/download-artifact@v4
+        with:
+          pattern: security-pipeline-toolkit-component-*-${{ github.run_id }}-${{ github.run_attempt }}
+          merge-multiple: false
+          path: ${{ runner.temp }}/security-pipeline/toolkit-qualify/input
+        continue-on-error: true
+      - name: Enumerate ten independently verified or missing component states
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-pipeline/toolkit-qualify/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode summarize-job --job toolkit_qualify --stage G2T \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --input-root "$RUNNER_TEMP/security-pipeline/toolkit-qualify/input" \
+            --report-root "$RUNNER_TEMP/security-pipeline/toolkit-qualify/report"
+      - name: Upload aggregate toolkit qualification and exact warnings
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-toolkit_qualify-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/toolkit-qualify/report/
+          if-no-files-found: warn
+          retention-days: 14
+
   publish_warnings:
-    needs: [admit, collect, prepare_targets]
+    needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
