@@ -560,6 +560,14 @@ jobs:
           merge-multiple: false
           path: ${{ runner.temp }}/security-pipeline/toolkit-qualify/input
         continue-on-error: true
+      - name: Download original byte verifier receipts for all ten components
+        id: component_verification_receipts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: security-pipeline-stage-toolkit_prepare-*-${{ github.run_id }}-${{ github.run_attempt }}
+          merge-multiple: false
+          path: ${{ runner.temp }}/security-pipeline/toolkit-qualify/input/stage-verifications
+        continue-on-error: true
       - name: Enumerate ten independently verified or missing component states
         if: ${{ always() }}
         shell: bash

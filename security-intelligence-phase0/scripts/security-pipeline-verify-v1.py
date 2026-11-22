@@ -436,53 +436,171 @@ def summarize_job(root, args, ctx):
                       "wake", "mythril", "certora-prover", "autoprover",
                       "mimo-runtime", "mimo-weights")
         statuses = {}
+        metadata = {}
+        observed = {}
+        profile_issues = []
+        required_count = verified_ready = not_required = failed = unknown = 0
+        root_path = Path(args.input_root or "")
         for component in components:
             artifact_name = "security-pipeline-toolkit-component-{}-{}-{}".format(
                 component, ctx["runId"], ctx["runAttempt"])
-            filepath = Path(args.input_root or "") / artifact_name / "TOOLKIT_CACHE_COMPONENT_METRICS_v1.json"
-            data, error = _read_optional_json(str(filepath) if args.input_root else None)
-            if error or not isinstance(data, dict):
-                statuses[component] = "NOT_EXECUTED"
-                warnings.append(make_warning(ctx, args, "TOOLKIT.COMPONENT_METADATA_MISSING",
-                    "G2T.METADATA." + component,
-                    artifact_name + "/TOOLKIT_CACHE_COMPONENT_METRICS_v1.json",
-                    "same-run source-bound component metadata", error or "not object",
-                    "toolkit readiness is unverified",
-                    "Restore the named component's verified same-run metadata artifact",
-                    str(filepath), component=component, observation_failure=error))
-                continue
-            if (data.get("componentId") != component or
-                str(data.get("runId")) != ctx["runId"] or
-                str(data.get("runAttempt")) != str(ctx["runAttempt"]) or
-                data.get("workflowHeadSha") != ctx["workflowHeadSha"]):
-                statuses[component] = "UNVERIFIED"
-                warnings.append(make_warning(ctx, args, "TOOLKIT.COMPONENT_METADATA_IDENTITY",
-                    "G2T.IDENTITY." + component, artifact_name + ".runIdentity",
-                    {"runId": ctx["runId"], "runAttempt": ctx["runAttempt"],
-                     "head": ctx["workflowHeadSha"]},
-                    {"runId": data.get("runId"), "runAttempt": data.get("runAttempt"),
-                     "head": data.get("workflowHeadSha")},
-                    "component metadata cannot establish readiness",
-                    "Use component metadata from this exact GitHub run/attempt and checkout",
-                    str(filepath), component=component))
-                continue
-            state = str(data.get("status") or "UNVERIFIED")
-            statuses[component] = state
-            if data.get("usableForExecution") is not True and state != "NOT_REQUIRED":
-                warnings.append(make_warning(ctx, args, "TOOLKIT.COMPONENT_UNVERIFIED",
-                    "G2T.READINESS." + component,
-                    "toolkitComponents[{}].usableForExecution".format(component),
-                    "verified original binary and current approved pin",
-                    {"status": state, "pinQualified": data.get("pinQualified"),
-                     "expectedBinarySha256": data.get("expectedBinarySha256")},
-                    "native operations requiring this component remain NOT_EXECUTED",
-                    "Qualify and attest the named current component's original bytes and ABI",
-                    str(filepath), component=component))
-        status = "COMPLETE" if all(x in ("RESTORED_VERIFIED", "INSTALLED_VERIFIED", "NOT_REQUIRED")
-                                   for x in statuses.values()) else "PARTIAL"
-        _finish(root, args, ctx, warnings, status,
-                {"attempted": len(components), "completed": len(components) - len(warnings),
-                 "notExecuted": len(warnings), "dependencyFacts": {"componentStatuses": statuses}})
+            stage_name = "security-pipeline-stage-toolkit_prepare-{}-{}-{}".format(
+                component, ctx["runId"], ctx["runAttempt"])
+            filepath = root_path / artifact_name / "TOOLKIT_CACHE_COMPONENT_METRICS_v1.json"
+            receipt_path = (root_path / "stage-verifications" / stage_name /
+                            "TOOLKIT_CACHE_COMPONENT_VERIFICATION_v1.json")
+            stage_path = (root_path / "stage-verifications" / stage_name /
+                          "PIPELINE_STAGE_G2T_v1.json")
+            metric, failure = _read_optional_json(str(filepath) if args.input_root else None)
+            receipt, receipt_failure = _read_optional_json(
+                str(receipt_path) if args.input_root else None)
+            native_stage, stage_failure = _read_optional_json(
+                str(stage_path) if args.input_root else None)
+            raw_sha = None
+            if failure is None:
+                try:
+                    raw_sha = sha256_bytes(bounded_file(filepath))
+                except (OSError, ValueError) as exc:
+                    failure = "{}:{}".format(type(exc).__name__, _safe(str(exc)))
+            metric_valid = (
+                isinstance(metric, dict) and failure is None and
+                metric.get("schemaVersion") == "curveyield-toolkit-component-metrics-v1" and
+                metric.get("componentId") == component and
+                str(metric.get("runId")) == ctx["runId"] and
+                str(metric.get("runAttempt")) == str(ctx["runAttempt"]) and
+                metric.get("workflowHeadSha") == ctx["workflowHeadSha"]
+            )
+            receipt_valid = (
+                isinstance(receipt, dict) and receipt_failure is None and
+                receipt.get("schemaVersion") == "curveyield-toolkit-component-verification-v1" and
+                receipt.get("componentId") == component and
+                str(receipt.get("runId")) == ctx["runId"] and
+                str(receipt.get("runAttempt")) == str(ctx["runAttempt"]) and
+                receipt.get("workflowHeadSha") == ctx["workflowHeadSha"]
+            )
+            stage_valid = (
+                isinstance(native_stage, dict) and stage_failure is None and
+                native_stage.get("schemaVersion") == STAGE_SCHEMA and
+                native_stage.get("jobId") == "toolkit_prepare" and
+                native_stage.get("stage") == "G2T" and
+                str(native_stage.get("jobRunId")) == ctx["runId"] and
+                str(native_stage.get("jobRunAttempt")) == str(ctx["runAttempt"]) and
+                native_stage.get("workflowHeadSha") == ctx["workflowHeadSha"]
+            )
+            if not metric_valid or not receipt_valid or not stage_valid:
+                status = "UNVERIFIED"
+                unknown += 1
+                warnings.append(make_warning(
+                    ctx, args, "G2T.ORIGINAL_COMPONENT_RECEIPT_UNVERIFIED",
+                    "G2T.RECEIPT." + component,
+                    "toolkitComponents[{}].originalReceipt".format(component),
+                    "matching original metric, independent byte-verification receipt and stage",
+                    {"metricsFailure": failure, "receiptFailure": receipt_failure,
+                     "stageFailure": stage_failure, "metricIdentityValid": metric_valid,
+                     "receiptIdentityValid": receipt_valid, "stageIdentityValid": stage_valid},
+                    "component readiness is not established",
+                    "Restore exact current-attempt component metrics and original independent verifier output",
+                    str(receipt_path), component=component))
+            else:
+                required = metric.get("componentRequired")
+                actual = metric.get("status")
+                verified = (
+                    actual in ("INSTALLED_VERIFIED", "RESTORED_VERIFIED") and
+                    metric.get("usableForExecution") is True and
+                    metric.get("pinQualified") is True and
+                    receipt.get("usableForExecution") is True and
+                    native_stage.get("status") == "COMPLETE" and
+                    isinstance(metric.get("expectedBinarySha256"), str) and
+                    bool(SHA256.fullmatch(metric["expectedBinarySha256"])) and
+                    metric.get("expectedBinarySha256") == metric.get("observedBinarySha256") and
+                    metric.get("observedBinarySha256") == receipt.get("observedBinarySha256")
+                )
+                unnecessary = (
+                    required is False and actual == "NOT_REQUIRED" and
+                    receipt.get("status") == "NOT_REQUIRED" and
+                    receipt.get("usableForExecution") is False and
+                    native_stage.get("status") == "NOT_REQUIRED"
+                )
+                if required is True:
+                    required_count += 1
+                elif required is not False:
+                    unknown += 1
+                if verified and required is True:
+                    status = actual
+                    verified_ready += 1
+                elif unnecessary:
+                    status = "NOT_REQUIRED"
+                    not_required += 1
+                elif required is None:
+                    status = "UNVERIFIED"
+                else:
+                    status = "UNVERIFIED"
+                    failed += 1
+                if status == "UNVERIFIED":
+                    warnings.append(make_warning(
+                        ctx, args, "G2T.COMPONENT_NOT_INDEPENDENTLY_VERIFIED",
+                        "G2T.NATIVE_PIN." + component,
+                        "toolkitComponents[{}].nativeReady".format(component),
+                        "verified original byte SHA-256 or valid source-derived NOT_REQUIRED",
+                        {"required": required, "state": actual,
+                         "expectedBinarySha256": metric.get("expectedBinarySha256"),
+                         "observedBinarySha256": metric.get("observedBinarySha256"),
+                         "nativeStage": native_stage.get("status"),
+                         "receiptUsable": receipt.get("usableForExecution")},
+                        "native consumer cannot treat tool as executable",
+                        "Qualify this exact component original file and independent tool pin",
+                        str(filepath), component=component))
+                for issue in metric.get("warnings", []) if isinstance(metric.get("warnings"), list) else []:
+                    if not isinstance(issue, dict):
+                        continue
+                    profile_issues.append({
+                        "component": component, "code": issue.get("code"),
+                        "fieldPath": issue.get("fieldPath"), "observed": issue.get("observed")
+                    })
+            statuses[component] = status
+            metadata[component] = {
+                "componentId": component, "expectedArtifact": artifact_name,
+                "expectedOriginalVerifierArtifact": stage_name,
+                "metricSha256": raw_sha, "status": status,
+                "nativeEligible": status in ("INSTALLED_VERIFIED", "RESTORED_VERIFIED"),
+                "required": metric.get("componentRequired") if metric_valid else None,
+                "originalSourcePinDigests": metric.get("sourcePins") if metric_valid else None,
+                "cacheHit": metric.get("cacheHit") if metric_valid else None,
+                "cacheSaveOutcome": metric.get("cacheSaveOutcome") if metric_valid else None,
+                "restoreOutcome": metric.get("restoreOutcome") if metric_valid else None,
+                "warmReuseDemonstrated": metric.get("warmReuseDemonstrated") if metric_valid else False
+            }
+        complete = verified_ready + not_required == len(components) and not warnings
+        counts = {
+            "requiredCount": required_count, "verifiedReadyCount": verified_ready,
+            "nonRequiredCount": not_required, "failedCount": failed, "unknownCount": unknown
+        }
+        original = {
+            "schemaVersion": "curveyield-toolkit-qualification-v1",
+            "pipelineVersion": "v1", "jobId": "toolkit_qualify",
+            "runId": ctx["runId"], "runAttempt": ctx["runAttempt"],
+            "workflowHeadSha": ctx["workflowHeadSha"],
+            **counts, "componentStatuses": statuses, "components": metadata,
+            "componentWarningIds": [w["warningId"] for w in warnings],
+            "componentPinIssues": profile_issues,
+            "sourcePinDigests": {name: row.get("originalSourcePinDigests")
+                                for name, row in metadata.items()},
+            "reportCompleteness": "COMPLETE" if all(row["metricSha256"]
+                                                     for row in metadata.values()) else "PARTIAL",
+            "status": "COMPLETE" if complete else "PARTIAL",
+            "originalNativeExecutionNotInferredFromJobSuccess": True
+        }
+        _write_json(root / "TOOLKIT_QUALIFICATION_v1.json", original)
+        _finish(root, args, ctx, warnings, "COMPLETE" if complete else "PARTIAL", {
+            "attempted": len(components), "completed": verified_ready + not_required,
+            "notExecuted": len(components) - verified_ready - not_required,
+            "sourceBound": False,
+            "dependencyFacts": {
+                "componentStatuses": statuses, **counts,
+                "toolkitQualificationFile": "TOOLKIT_QUALIFICATION_v1.json",
+                "reportCompleteness": original["reportCompleteness"]
+            }
+        })
         return
     outcome_pairs = (("native", args.native_outcome), ("summary", args.summary_outcome),
                      ("inventory", args.inventory_outcome))
