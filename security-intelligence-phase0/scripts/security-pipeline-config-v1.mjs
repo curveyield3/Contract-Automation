@@ -492,16 +492,51 @@ function deriveStoragePlan(args,identity,issues){
   const source=planSourceFacts(args,identity,issues);
   const intelligence=source.load('SOURCE_INTELLIGENCE_AUTOMATED_v1.json');
   const c2=observedOriginalC2Disposition(args,identity,source.sourceSha256,issues);
+  const contracts=(Array.isArray(intelligence?.value?.contracts)?
+    intelligence.value.contracts:[]);
+  const byContractId=new Map(contracts.map(x=>[x.contractId,x]));
   const declarations=Array.isArray(intelligence?.value?.storageLayout)?
     intelligence.value.storageLayout:[];
-  const perVariable=declarations.map(x=>({
-    sourcePath:x.sourcePath??null,qualifiedContract:x.qualifiedContract??null,
-    stateVariable:x.name??x.label??null,
-    compilerProvenStorageSlot:x.slot??null,
-    compilerStorageEvidenceRef:intelligence?.sha256??null,
-    intendedStorageAddress:null,knownMappingKeys:[],
-    actualC2CheckpointSha256:null,rpcObservationSha256:null,
-    status:'NOT_EXECUTED_C2_STATE_NOT_PROVEN'}));
+  const perVariable=declarations.map(x=>{
+    const contract=byContractId.get(x.contractId);
+    const slot=typeof x.slot==='string'&&/^(0|[1-9][0-9]*)$/.test(x.slot)?
+      x.slot:null;
+    const compilerProven=!!contract&&slot!==null&&
+      x.confidenceClass==='COMPILER_FACT'&&
+      /COMPILER_STORAGE_LAYOUT/.test(x.basis??'');
+    const unknownMapping=typeof x.type==='string'&&
+      /(mapping\s*\(|HashMap\s*\[|DynArray\s*\[|dynamic|array\s*\[)/i.test(x.type);
+    if(!compilerProven)issues.push(issue('STORAGE.COMPILER_SLOT_UNVERIFIED',
+      'SOURCE_INTELLIGENCE_AUTOMATED_v1.json.storageLayout['+(x.storageId??'UNKNOWN')+']',
+      'source-bound compiler layout slot and contractId',
+      {storageId:x.storageId??null,slot:x.slot??null,contractId:x.contractId??null,
+       confidenceClass:x.confidenceClass??null,basis:x.basis??null},
+      'Repair original unit-qualified compiler layout join; never treat a lexical declaration as a storage slot'));
+    return{
+      storageId:x.storageId??null,contractId:x.contractId??null,
+      compilationUnitId:contract?.compilationUnitId??null,
+      sourcePath:contract?.sourcePath??null,
+      qualifiedContract:contract?.qualifiedName??null,
+      stateVariable:x.label??null,compilerProvenStorageSlot:compilerProven?slot:null,
+      compilerProvenStorageOffset:compilerProven?x.offset??null:null,
+      compilerType:x.type??null,originalStorageCompilerBasis:x.basis??null,
+      compilerStorageEvidenceRef:intelligence?.sha256??null,
+      slotSourceQualified:compilerProven,
+      requiresKnownOriginalMappingKeys:unknownMapping,
+      intendedStorageAddress:null,logicAddress:null,proxyStorageAddress:null,
+      knownMappingKeys:[],originalReadbacks:[],
+      actualC2CheckpointSha256:null,rpcObservationSha256:null,
+      status:compilerProven?
+        'NOT_EXECUTED_C2_STORAGE_ADDRESS_OR_KEYS_MISSING':
+        'NOT_EXECUTED_ORIGINAL_COMPILER_SLOT_NOT_PROVEN'
+    };
+  });
+  issues.push(issue('STORAGE.SECOND_SLITHER_NATIVE_ROUND_UNEXECUTED',
+    'FORK_STORAGE_QUERY_PLAN_v1.json.secondSlitherRound',
+    'source-bound exact compiler storage layouts, deployed C2 storage/proxy addresses and live original readbacks',
+    {sourceBoundLayoutCount:perVariable.filter(x=>x.slotSourceQualified).length,
+     liveRpcReads:0,verifiedOriginalC2:!!c2.originalC2BytesAvailableInThisConsumer},
+    'Run the existing Slither read-storage CLI only after original C2 and unit-qualified target/proxy state are verified'));
   const items=['verifiedC2ForkStateManifestSha256',
     'verifiedC2ChainId','verifiedC2BlockNumber',
     'verifiedC2BlockHash','originalLogicAddress',
@@ -516,6 +551,9 @@ function deriveStoragePlan(args,identity,issues){
     status:'NOT_EXECUTED_C2_NOT_PROVEN',runIdentity:identity,
     originalSourceIntelligenceSha256:intelligence?.sha256??null,
     originalForkC2Disposition:c2,
+    compilerLayoutSlotCount:perVariable.filter(x=>x.slotSourceQualified).length,
+    compilerLayoutUnverifiedCount:perVariable.filter(x=>!x.slotSourceQualified).length,
+    knownOriginalMappingKeysCount:0,
     records:perVariable,requiredC2Fields:items,actualNativeQueriesExecuted:0,issues};
   return {mode:'storage-plan',status:'NOT_EXECUTED',
     sourceBound:out.sourceBound,
