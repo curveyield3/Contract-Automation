@@ -70,6 +70,89 @@ async function rpc(url,method,params=[]){
  if(body.error)throw Error('FORK_LOCAL_RPC_'+method+'_NATIVE_ERROR');
  return body.result;
 }
+async function originalLocalReadbacks(url,pinnedBlock,endBlock,profile,attempts){
+ // Only observe the finite local Anvil overlay after original approved scripts.
+ // The source package never chooses RPC methods or receipt target addresses.
+ if(!Number.isSafeInteger(pinnedBlock)||!Number.isSafeInteger(endBlock)||
+    pinnedBlock<=0||endBlock<pinnedBlock)
+  throw Error('LOCAL_READBACK_BLOCK_RANGE_INVALID');
+ const limitBlocks=256,limitTransactions=1024,limitContracts=128;
+ if(endBlock-pinnedBlock>limitBlocks)
+  throw Error('LOCAL_READBACK_BLOCK_BUDGET_EXCEEDED');
+ const original={schemaVersion:'curveyield-fork-local-readbacks-v1',
+  originalPinnedBlock:pinnedBlock,endBlock,
+  deployer:profile.deployer,chainId:profile.chainId,
+  observedTransactionCount:0,deployedContractCount:0,
+  sourceReceiptFailures:[],readbackGaps:[],originalTransactionReceipts:[],
+  deployedContractCode:[],actorBalance:null,actorTransactionCount:null,
+  proxyLogicReadback:'UNRESOLVED_SOURCE_SPECIFIC_MAPPING',
+  oracleAndApprovalReadback:'UNRESOLVED_SOURCE_SPECIFIC_SELECTORS'};
+ const covered=new Set();
+ for(const attempt of attempts){
+  const range=attempt?.blockRange??[];
+  if(!Array.isArray(range)||range.length!==2||
+    !Number.isSafeInteger(range[0])||!Number.isSafeInteger(range[1])||
+    range[0]<pinnedBlock+1||range[1]>endBlock||
+    range[1]<range[0]-1)
+   throw Error('ORIGINAL_DEPLOYMENT_SCRIPT_BLOCK_RANGE_MISSING_OR_UNTRUSTED');
+  for(let n=range[0];n<=range[1];n++)covered.add(n);
+ }
+ const blocks=[...covered].sort((a,b)=>a-b);
+ if(blocks.length>limitBlocks)throw Error('LOCAL_READBACK_SCRIPT_BLOCK_SPAN_LIMIT');
+ for(const n of blocks){
+  const row=await rpc(url,'eth_getBlockByNumber',['0x'+n.toString(16),false]);
+  if(!row||Number(BigInt(row.number??'0x0'))!==n||
+    !BLOCK.test(row.hash??'')||!Array.isArray(row.transactions))
+   throw Error('LOCAL_READBACK_ORIGINAL_BLOCK_INVALID:'+n);
+  if(row.transactions.length+original.observedTransactionCount>limitTransactions)
+   throw Error('LOCAL_READBACK_TRANSACTION_BUDGET_EXCEEDED');
+  for(const hash of row.transactions){
+   if(!BLOCK.test(hash??''))throw Error('LOCAL_READBACK_TX_HASH_MALFORMED');
+   const receipt=await rpc(url,'eth_getTransactionReceipt',[hash]);
+   if(!receipt||receipt.transactionHash?.toLowerCase()!==hash.toLowerCase()||
+      Number(BigInt(receipt.blockNumber??'0x0'))!==n)
+    throw Error('LOCAL_READBACK_ORIGINAL_RECEIPT_MISSING:'+hash.slice(0,14));
+   const ok=receipt.status==='0x1';
+   original.observedTransactionCount++;
+   const receiptRow={transactionHash:hash,blockNumber:n,
+     actualReceiptSha256:sha(Buffer.from(JSON.stringify(receipt))),
+     status:receipt.status,gasUsed:receipt.gasUsed??null,
+     contractAddress:ADDR.test(receipt.contractAddress??'')?
+       receipt.contractAddress:null};
+   original.originalTransactionReceipts.push(receiptRow);
+   if(!ok)original.sourceReceiptFailures.push(receiptRow);
+   if(receiptRow.contractAddress){
+    if(original.deployedContractCode.length>=limitContracts)
+     throw Error('LOCAL_READBACK_DEPLOYED_CONTRACT_LIMIT');
+    const deployed=await rpc(url,'eth_getCode',[receiptRow.contractAddress,'latest']);
+    if(typeof deployed!=='string'||!/^0x(?:[0-9a-fA-F]{2})*$/.test(deployed)||
+       deployed.length<=2)
+     throw Error('LOCAL_READBACK_DEPLOYED_CODE_MISSING:'+receiptRow.contractAddress);
+    const codeBytes=Buffer.from(deployed.slice(2),'hex');
+    original.deployedContractCode.push({
+      address:receiptRow.contractAddress,creationTransactionHash:hash,
+      runtimeCodeBytes:codeBytes.length,runtimeCodeSha256:sha(codeBytes),
+      boundToSourceCompilerArtifact:false,
+      proxyStorageAndLogicVerified:false,
+      roleOracleApprovalReadbackVerified:false});
+   }
+  }
+ }
+ original.deployedContractCount=original.deployedContractCode.length;
+ original.actorBalance=await rpc(url,'eth_getBalance',[profile.deployer,'latest']);
+ original.actorTransactionCount=await rpc(url,'eth_getTransactionCount',[profile.deployer,'latest']);
+ if(!/^0x[a-f0-9]+$/i.test(String(original.actorBalance))||
+    !/^0x[a-f0-9]+$/i.test(String(original.actorTransactionCount)))
+  throw Error('LOCAL_READBACK_DEPLOYER_BALANCE_OR_NONCE_MISSING');
+ if(original.sourceReceiptFailures.length)
+  throw Error('LOCAL_READBACK_ORIGINAL_TRANSACTION_RECEIPT_FAILED:'+original.sourceReceiptFailures.length);
+ if(original.deployedContractCount===0)
+  original.readbackGaps.push('NO_CONTRACT_CREATION_RECEIPTS_IN_APPROVED_SCRIPT_BLOCKS');
+ original.readbackGaps.push('SOURCE_COMPILER_RUNTIME_CODE_BINDING_NOT_ESTABLISHED');
+ original.readbackGaps.push('PROXY_LOGIC_STORAGE_ADDRESS_NOT_PROVEN');
+ original.readbackGaps.push('ROLES_APPROVALS_ORACLES_NOT_VERIFIED');
+ return original;
+}
 async function main(){
  const args=argsOf(process.argv.slice(2));
  const ctx=(await json(args['run-identity'])).value;
@@ -180,6 +263,8 @@ async function main(){
   claimedControllerAcceptance:false,executionMode:args.operation,
   nativeAttempted:false,status:'NOT_EXECUTED',
   c0:null,c1:null,c2:null,originalNativeReceiptCount:0,originalNativeReceiptSha256:null,
+  originalReadbacksSha256:null,deployedCodeReadbackCount:null,
+  nativeReadbackLimitations:[],
   forkStateManifestSha256:null,warnings,restrictedEvidence:null};
  if(args.operation==='execute'&&warnings.length===0){
   let anvil=null;
@@ -263,12 +348,18 @@ async function main(){
     projectRoot:staged.projectRoot,anvilUrl:anvil.url,profile,chain});
    const last=Number(BigInt(await rpc(anvil.url,'eth_blockNumber')));
    facts.nativeAttempted=true;
+   const nativeReadbacks=await originalLocalReadbacks(anvil.url,
+     anvil.pinnedBlockNumber,last,profile,result.attempts??[]);
    facts.originalNativeReceiptCount=(result.attempts??[]).length;
    const raw=Buffer.from(JSON.stringify(result));
    const privateDir=path.join(args['private-root'],'evidence');
    await fs.mkdir(privateDir,{recursive:true,mode:0o700});
    const evidenceFile=await emit(privateDir,'FORK_SETUP_TRANSACTIONS_v1.json',result);
+   const readbackFile=await emit(privateDir,'FORK_SETUP_READBACKS_v1.json',nativeReadbacks);
    facts.originalNativeReceiptSha256=evidenceFile.sha256;
+   facts.originalReadbacksSha256=readbackFile.sha256;
+   facts.deployedCodeReadbackCount=nativeReadbacks.deployedContractCount;
+   facts.nativeReadbackLimitations=nativeReadbacks.readbackGaps;
    facts.c0={chainId:chain.chainId,blockNumber:anvil.pinnedBlockNumber,
      blockHash:anvil.pinnedBlockHash};
    facts.c1={chainId:chain.chainId,blockNumber:last,
@@ -296,6 +387,7 @@ async function main(){
      path.join(stateRoot,'PHASE0_FORK_STATE_MANIFEST_v1.json')));
    facts.restrictedEvidence={scope:'CURRENT_JOB_ONLY_NO_PUBLIC_C2_TRANSPORT',
     nativeTransactionsSha256:evidenceFile.sha256,
+    nativeReadbacksSha256:readbackFile.sha256,
     c2ManifestSha256:facts.forkStateManifestSha256};
    facts.status='PARTIAL';
    warnings.push(problem('G2B.C2_CROSS_JOB_HANDOFF_UNAVAILABLE',
