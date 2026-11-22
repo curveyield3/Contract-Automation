@@ -315,3 +315,33 @@ Stage 3 does not add workflows, tests, deployment actions, contract-specific rul
 a second scanner, or another audit round. The existing artifact names and
 eleven-round v5 handoff remain compatible. Operational qualification requires
 the existing BoostHub v55 regression and a structurally different source package.
+
+## Fork-only Phase 0 coverage repair — v4 (22 November 2026)
+
+This change is strictly confined to `security-intelligence-phase0/`. The
+primary `packages/`, Machine Intelligence controller, original workflows,
+production contracts, and pinned user-source ZIP are unchanged.
+
+- The existing Vyper 0.4.3 compiler-AST visitor now retains `ExtCall` and
+  `StaticCall` wrappers, low-level external calls, source-only internal-call
+  ownership and state references. A state reference at an assignment target
+  does **not** establish a true read; all call candidates require review.
+- The existing review inventory preserves these observations and source
+  anchors, including unresolved internal callee identities.
+- Stage 2 now attempts unique source name/arity reconciliation for Solidity
+  structs/interfaces, Vyper default-argument ABI variants, public mapping
+  getters and inherited compiler-AST implementations. It records the exact
+  matching basis and does not invent an implementation on ambiguity.
+- Exact source-bound compiler output includes Foundry `storageLayout` and
+  Vyper `layout` where supported. No slot is inferred from declaration order.
+- The existing evidence manifest identifies independent capability gaps and
+  lists unresolved state-changing ABI origins. The existing Actions job emits
+  a **warning**, not a new hard workflow gate, when data collection is partial.
+- The installed Security Intelligence **v9** audit skill retains final Phase 0
+  gate authority. `PARTIAL` evidence, a green Actions run and an artifact
+  upload never satisfy the skill's gate; Slither 0.11.6's missing Vyper 0.4.3
+  semantic detectors remain an explicit limitation.
+
+The existing workflow path and output filenames are preserved. The only
+permitted execution is existing Phase 0 source compilation/static inspection.
+There are no added tests, deploys, fuzzers, or audit-controller systems.
