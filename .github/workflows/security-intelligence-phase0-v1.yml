@@ -1113,6 +1113,14 @@ jobs:
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
             --input-root "$base/native" --report-root "$base/report"
+      - name: Publish original safe C2 disposition (not fork-state bytes)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-fork-c2-disposition-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/fork_setup/native/FORK_NATIVE_STATE_v1.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Publish only non-secret G2B stage warnings and status
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
