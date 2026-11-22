@@ -362,29 +362,83 @@ function additional(args,identity,issues){
   const folder=args['output-root'], op=args.operation;
   let selected=null;
   if(op==='toolkit-profile'){
-    const pins=args.profile?readJson(args.profile).value:null;
+    let targetDoc=null,plan={};
+    try{
+      targetDoc=readJson(path.join(args['input-root'],'SECURITY_TARGET_PLAN_v1.json'),args['input-root']);
+      plan=targetDoc.value;
+    }catch(error){
+      issues.push(issue('TOOLKIT.SOURCE_TARGET_PLAN_MISSING','SECURITY_TARGET_PLAN_v1.json',
+        'same-run source-bound target plan',String(error),
+        'Restore exact original indexed target-plan bytes'));
+    }
+    const sourceBound=plan.sourceBound===true&&identity.verifiedForCurrentJob;
+    const compiled=(Array.isArray(plan.targets)?plan.targets:[]).filter(x=>
+      x.compilationStatus==='EXACT_COMPILER_ARTIFACT'&&x.sourceBound===true);
+    const hasSolidity=compiled.some(x=>x.language==='SOLIDITY');
+    const hasBytecode=compiled.some(x=>HEX.test(String(x.creationBytecodeDigestSha256??'')));
+    const hasStorage=compiled.some(x=>x.programEligibility?.['slither-storage']?.eligible===true);
+    const requirements={
+      'foundry-node':compiled.length>0,
+      'source-compilers':compiled.length>0,
+      'slither-storage':hasStorage,'medusa':compiled.length>0,'wake':hasSolidity,
+      'mythril':hasBytecode,'certora-prover':compiled.length>0,
+      'autoprover':compiled.length>0,
+      'mimo-runtime':compiled.length>0,'mimo-weights':compiled.length>0
+    };
+    const sourcePath=path.resolve(process.env.GITHUB_WORKSPACE??process.cwd(),
+      '.github/workflows/lite-solo-ai-inference-v1.yml');
+    let nativePins=null;
+    try{
+      const source=fs.readFileSync(sourcePath,'utf8');
+      const unique=(key,predicate)=>{
+        const found=[...source.matchAll(new RegExp('^\\s*'+key+':\\s*('+predicate+')\\s*$','gm'))];
+        if(found.length!==1)throw Error('TRUSTED_MIMO_PIN_MISSING_OR_AMBIGUOUS:'+key);
+        return found[0][1];
+      };
+      nativePins={
+        modelSha256:unique('MODEL_SHA256','[a-f0-9]{64}'),
+        modelRevision:unique('MODEL_REVISION','[a-f0-9]{40}'),
+        modelFile:unique('MODEL_FILE','[A-Za-z0-9._-]+'),
+        llamaCppRevision:unique('LLAMA_SHA','[a-f0-9]{40}')
+      };
+    }catch(error){
+      issues.push(issue('TOOLKIT.CHECKED_OUT_MIMO_PIN_UNAVAILABLE',
+        '.github/workflows/lite-solo-ai-inference-v1.yml.MiMoPins',
+        'original pinned GGUF SHA, revision, filename and llama commit',String(error),
+        'Reinspect the current trusted MiMo workflow and qualify its original source pins'));
+    }
     const components=COMPONENTS.map(id=>{
-      const observed=pins?.components?.[id]??null;
-      const digest=observed?.expectedBinarySha256??null;
-      // A profile is proposed data, not authority: a caller-supplied
-      // approvedByTrustedSource flag cannot qualify a reusable executable.
-      const approved=false;
-      if(!approved)issues.push(issue('TOOLKIT.UNRESOLVED_PIN','toolkitComponents['+id+'].expectedBinarySha256',
-        'independently qualified immutable tool pin',
-        {candidateDigest:HEX.test(String(digest))?digest:null,
-         expectedSource:'trusted checkout pin ledger; not request-supplied approval'},
-        'Qualify and record the component pin and binary SHA in trusted current-revision recipe'));
-      return {componentId:id,required:null,notRequiredReason:'TARGET_PLAN_NOT_QUALIFIED',
-        approvedVersion:approved?(observed.approvedVersion??null):null,
-        approvedSourceRevision:approved?(observed.approvedSourceRevision??null):null,
-        expectedBinarySha256:approved?digest:null,os:process.platform,arch:process.arch,
-        abiProfile:observed?.abiProfile??null,lockDigest:observed?.lockDigest??null,
-        recipeDigest:observed?.recipeDigest??null,expectedBytesOrQuota:observed?.expectedBytesOrQuota??null,
-        nativeConsumerStages:observed?.nativeConsumerStages??[],
-        nativeReadinessMode:approved?'PIN_DEFINED_NOT_INSTALLED':'UNRESOLVED_PIN'};
+      const required=sourceBound?requirements[id]:null;
+      const pinned=id==='mimo-weights'&&nativePins!==null;
+      if(required===null)issues.push(issue('TOOLKIT.COMPONENT_REQUIRED_UNKNOWN',
+        'toolkitComponents['+id+'].required',
+        'boolean from admitted source-bound compatibility',null,
+        'Restore exact original target-plan source binding'));
+      if(required===true&&!pinned)issues.push(issue('TOOLKIT.COMPONENT_BYTES_PIN_UNRESOLVED',
+        'toolkitComponents['+id+'].expectedBinarySha256',
+        'independently qualified original executable or payload SHA-256',null,
+        'Pin native tool source, build, original binary bytes and consumer ABI'));
+      return {componentId:id,required,
+        notRequiredReason:required===false?'NO_MATCHING_ADMITTED_TARGET':
+          required===null?'SOURCE_TARGET_PLAN_NOT_VERIFIED':null,
+        approvedVersion:pinned?'MiMo-V2.6-Distill-Qwen-9B-Q4_K_M':null,
+        approvedSourceRevision:pinned?nativePins.modelRevision:null,
+        expectedBinarySha256:pinned?nativePins.modelSha256:null,
+        os:process.platform,arch:process.arch,abiProfile:null,
+        lockDigest:targetDoc?.sha256??null,
+        recipeDigest:pinned?digestCanonicalV1(nativePins):null,
+        expectedBytesOrQuota:null,
+        nativeConsumerStages:id.startsWith('mimo')?
+          ['mimo_configure','mimo_provider_qualify','autoprover_run']:[],
+        nativeReadinessMode:pinned?'TRUSTED_ORIGINAL_PIN_NOT_YET_INSTALLED':'UNRESOLVED_PIN'};
     });
-    selected=['TOOLKIT_PROFILE_v1.json',{schemaVersion:'curveyield-toolkit-profile-v1',
-      sourceBound:false,runIdentity:identity,status:'NOT_EXECUTED',components,issues}];
+    selected=['TOOLKIT_PROFILE_v1.json',{
+      schemaVersion:'curveyield-toolkit-profile-v1',
+      sourceBound,runIdentity:identity,sourceArchiveSha256:plan.sourceArchiveSha256??null,
+      targetPlanSha256:targetDoc?.sha256??null,
+      sourcePinProvenance:nativePins?{originalWorkflow:
+        '.github/workflows/lite-solo-ai-inference-v1.yml',...nativePins}:null,
+      status:issues.length?'PARTIAL':'SOURCE_BOUND',components,issues}];
   }else if(op==='validate-proposal'){
     return modelProposalV1(args,identity,issues);
   }else if(op==='mimo-objective'){
