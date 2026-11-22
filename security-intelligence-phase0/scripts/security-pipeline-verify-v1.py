@@ -315,6 +315,9 @@ def admit_extended(root, args, ctx):
                "runId": ctx["runId"], "runAttempt": ctx["runAttempt"],
                "workflowHeadSha": ctx["workflowHeadSha"]}
     _write_json(Path(args.source_zip).parent / "extended-mode-disposition.json", payload)
+    # Existing admission warning artifact carries a redacted digest-only copy.
+    # Downstream G2A can verify same-run provenance without downloading source.zip.
+    _write_json(root / "EXTENDED_MODE_DISPOSITION_v1.json", payload)
     with open(args.github_output, "a", encoding="utf-8") as out:
         out.write("extended_requested={}\nextended_approved={}\n".format(
             str(requested).lower(), str(payload["approved"]).lower()))
