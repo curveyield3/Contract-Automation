@@ -237,6 +237,13 @@ async function main(){
       'strict approved one-delta source-bound proposal',e.message,
       'Correct the specific schema/source/ABI field without executing the delta'));}
   }
+  // The existing private MI controller lease cannot be asserted as a
+  // standalone cross-run continuation. Keep explicit source-bound limitation.
+  notes.push(warning('G2A.CONTINUATION_UNQUALIFIED',
+    'MIMO_STAGE_STATE_v1.json.continuationQualified',
+    'independently accepted standalone run identity, restricted evidence transport and replay lease',
+    'no verified standalone continuation issuer/lease or approved private artifact handoff',
+    'Qualify an existing signed standalone continuation source and exact immutable round recovery before cross-run replay'));
   if(args.operation==='record-unavailable'&&args['reason-file']){
     try{
       const reason=jsonInput(args['reason-file']).value;
