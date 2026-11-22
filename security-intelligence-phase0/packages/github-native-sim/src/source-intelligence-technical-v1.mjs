@@ -452,6 +452,8 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
     ?ctx.path+':'+ctx.lineStart+'-'+(Number.isInteger(ctx.lineEnd)?ctx.lineEnd:ctx.lineStart):null;
   const publicState=(entry)=>entry?.stateMutability==='nonpayable'||entry?.stateMutability==='payable';
   const VYPER_CODES=new Set(['AVAILABLE_VYPER_AST','AVAILABLE_IDENTICAL_VYPER_AST_ALIAS']);
+  const units=(Array.isArray(build.compilationUnits)&&build.compilationUnits.length)
+    ?build.compilationUnits:[{unitId:'default',sourceAsts:build.sourceAsts??{}}];
   const sourceTier=(file)=>tierByPath.get(file)??'SOURCE_TIER_UNRESOLVED';
   // Source-review signatures sometimes contain Solidity contract/struct types
   // rather than canonical ABI tuple/address types. Match by name and arity
@@ -575,13 +577,42 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
       });
     }
   }
+  // Project exact Vyper 0.4.x compiler-produced layout, not guessed storage
+  // indices. The raw compiler layout is retained in the build artifact.
+  for(const artifact of build.artifacts??[]){
+    const raw=artifact.vyperCompilerLayout?.storage_layout;
+    if(!raw||!artifact.sourceName?.endsWith('.vy'))continue;
+    const contract=si.contracts?.find(c=>c.sourcePath===artifact.sourceName&&
+      c.qualifiedName===artifact.sourceName+':'+artifact.contractName&&
+      c.compilationUnitId===(artifact.compilationUnitId??'default'));
+    if(!contract)continue;
+    for(const [name,item] of Object.entries(raw)){
+      if(!item||typeof item!=='object'||item.slot===undefined||item.slot===null)continue;
+      const state=declarations.find(d=>d.sourcePath===artifact.sourceName&&
+        d.name===name&&d.kind==='STATE_VARIABLE');
+      if(state){
+        state.slot=String(item.slot);state.offset='0';
+        state.compilerType=typeof item.type==='string'?item.type:state.typeAnnotationSyntax??null;
+        state.compilerLayoutStatus='COMPILER_EMITTED';
+        state.evidenceClass='VYPER_0_4_3_COMPILER_LAYOUT_PLUS_SOURCE_DECLARATION';
+      }
+      si.storageLayout??=[];
+      si.storageLayout.push({
+        storageId:'STORE-'+pad(si.storageLayout.length+1,4),
+        contractId:contract.contractId,label:name,slot:String(item.slot),offset:'0',
+        type:typeof item.type==='string'?item.type:null,
+        nSlots:Number.isInteger(item.n_slots)?item.n_slots:null,
+        sourceLocation:state?.sourceLocation??'VYPER_LAYOUT_DECLARATION_NOT_SOURCE_MATCHED',
+        status:'CURRENT',confidenceClass:'COMPILER_FACT',basis:'VYPER_EXACT_COMPILER_STORAGE_LAYOUT'
+      });
+    }
+  }
   const declarationsByKey=new Map();
   for(const d of declarations){
     const key=[d.sourcePath,d.qualifiedContainer,d.name].join('|');
     const items=declarationsByKey.get(key)??[];items.push(d);declarationsByKey.set(key,items);
   }
-  const units=(Array.isArray(build.compilationUnits)&&build.compilationUnits.length)
-    ?build.compilationUnits:[{unitId:'default',sourceAsts:build.sourceAsts??{}}];
+
   const seenTypes=new Set();
   for(const unit of units){
     for(const [sourcePath,ast] of Object.entries(unit.sourceAsts??{})){
@@ -660,7 +691,8 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
       if(!selected&&unique.size===0&&entry.type==='function'){
         // Public mappings/arrays generate parameterized ABI getters; their
         // declaration is the source implementation, not a no-arg getter body.
-        const getterCandidates=decls.filter(d=>d.kind==='STATE_VARIABLE'&&d.visibility==='public'&&
+        const getters=c.language==='VYPER'?si.stateDeclarations:decls;
+        const getterCandidates=(getters??[]).filter(d=>d.kind==='STATE_VARIABLE'&&d.visibility==='public'&&
           d.name===entry.name&&d.qualifiedContainer===c.qualifiedName);
         if(getterCandidates.length===1){
           const d=getterCandidates[0];
