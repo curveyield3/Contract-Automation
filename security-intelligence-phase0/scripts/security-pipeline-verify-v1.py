@@ -783,6 +783,22 @@ def verify_stage(root, args, ctx):
                         str(item.get("correction") or
                             "Restore exact original approved source/fork evidence"),
                         str(native_file)))
+                for field in native_state.get("nativeReadbackLimitations", []):
+                    if not isinstance(field, str):
+                        continue
+                    warnings.append(make_warning(
+                        ctx, args, "G2B.NATIVE_STATE_READBACK_UNQUALIFIED",
+                        "G2B.STATE_READBACK." + field[:65],
+                        "FORK_SETUP_READBACKS_v1.json." + field[:90],
+                        "actual original source-linked C2 state or receipt evidence",
+                        {"limitation": field,
+                         "originalReadbacksSha256":
+                             native_state.get("originalReadbacksSha256"),
+                         "deployedCodeReadbackCount":
+                             native_state.get("deployedCodeReadbackCount")},
+                        "fork checkpoint is only partially qualified",
+                        "Perform the specified original source/ABI readback and preserve its native receipt",
+                        str(native_file)))
                 if native_state.get("status") != "COMPLETE":
                     warnings.append(make_warning(ctx, args,
                         "G2B.NATIVE_FORK_NOT_COMPLETE", "G2B.NATIVE_COMPLETION",
