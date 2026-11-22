@@ -57,6 +57,10 @@ const unsupportedCoverage=inScope.filter(x=>x.astStatus!=='AVAILABLE'&&!language
 const typedInScopeComplete=!!inventory&&inScope.length>0&&unsupportedCoverage.length===0;
 const fullySourceSupported=typedInScopeComplete&&inventory?.payload?.complete===true&&
   languageFallbacks.length===0&&vyperAstStructuralOnly.length===0;
+// ABI origins and analyzer capabilities are independent from compilation
+// success. Retain each incomplete dimension for the standalone audit gate.
+const unresolvedMaterialOrigins=stage2?.unresolvedStateChangingEntrypoints??null;
+const semanticVyperUnsupported=vyperAstStructuralOnly.length>0;
 const slitherComplete=slither?.componentStatus==='COMPLETED';
 const slitherIndexComplete=!!triage&&triage.mappingCounts?.detectorCount===((slither?.detectors??[]).length)&&
   slitherIndex.length===((slither?.detectors??[]).length);
@@ -69,7 +73,8 @@ const unitRecoveryGap=build?.build?.unitCoverageComplete===false;
 const sourceAdmissionVerified=admission?.sourceArchiveSha256===expected&&admission?.sourceCount>0;
 const manifestStatus=!sourceMatched||!sourceAdmissionVerified?'INCOMPLETE':
   sourceOnly?'PARTIAL':!si||!typedInScopeComplete?'INCOMPLETE':
-  !slitherComplete||!slitherIndexComplete||!fullySourceSupported||multiProjectGap||unitRecoveryGap?'PARTIAL':'COLLECTED';
+  !slitherComplete||!slitherIndexComplete||!fullySourceSupported||multiProjectGap||unitRecoveryGap||
+  unresolvedMaterialOrigins===null||unresolvedMaterialOrigins>0?'PARTIAL':'COLLECTED';
 const slitherEvidence=evidence.find(x=>x.name==='SLITHER_v1.json');
 const priorityOrder=['P1_FLOW_LINKED_HIGH_IMPACT','P2_FLOW_OR_HIGH_IMPACT','P3_IN_SCOPE_CONTEXT','P4_DEPENDENCY_OR_UNMAPPED'];
 const priorityLines=priorityOrder.map(key=>'- '+key+': '+(priorityCounts[key]??0));
@@ -174,6 +179,10 @@ const lines=[
   '',
   '- Vyper file-level fallback(s): '+(languageFallbacks.map(x=>x.path).join(', ')||'none'),
   '- Vyper compiler-AST structural-only files (no semantic Slither detectors): '+(vyperAstStructuralOnly.map(x=>x.path).join(', ')||'none'),
+  '- In-scope Vyper AST external-call candidates: '+(stage2?.vyperStructuralCallCandidates??'UNAVAILABLE'),
+  '- Compiler layout-backed state declarations: '+(stage2?.compilerLayoutStateDeclarationCount??'UNAVAILABLE'),
+  '- Unresolved state-changing ABI implementation origins: '+(unresolvedMaterialOrigins??'UNAVAILABLE'),
+  '- Ready for Phase 0 mandatory source-evidence gate review: '+(manifestStatus==='COLLECTED'?'MACHINE COVERAGE ONLY; HUMAN VERIFICATION STILL REQUIRED':'NO; NAMED LIMITATIONS REMAIN'),
   '- Unsupported in-scope records without an authorized fallback: '+(unsupportedCoverage.map(x=>x.path).join(', ')||'none'),
   '- Dependency manifest: '+(sbom?'PRESENT':'UNAVAILABLE'),
   '- Deployment/configuration readiness: '+(readiness?'DISCOVERED, NOT EXECUTED':'UNAVAILABLE'),
@@ -212,6 +221,18 @@ const manifest={
   buildStatus:build?.build?.status??null,
   slitherStatus:slither?.componentStatus??slither?.status??null,
   reviewInventoryComplete:inventory?.payload?.complete===true,
+  machineCoverageReadyForGateReview:manifestStatus==='COLLECTED',
+  machineCoverageReasons:{
+    vyperSemanticSlitherUnavailable:semanticVyperUnsupported,
+    vyperAstStructuralOnlyPaths:vyperAstStructuralOnly.map(x=>x.path),
+    unresolvedStateChangingImplementationOrigins:unresolvedMaterialOrigins,
+    unresolvedAllImplementationOrigins:stage2?.unresolvedImplementationEntrypoints??null,
+    compilerLayoutStateDeclarationCount:stage2?.compilerLayoutStateDeclarationCount??null,
+    vyperExternalCallCandidates:stage2?.vyperStructuralCallCandidates??null,
+    extraCompilationRootsNotBuilt:admission?.additionalRootsNotYetCompiled??[],
+    slitherIndexComplete,slitherCompleted:slitherComplete,
+    humanSourceAnalysisStillRequired:true
+  },
   stage2Coverage:stage2?{...stage2,limitations:undefined}:null,
   stage3SlitherPrioritization:triage?{
     schemaVersion:triage.schemaVersion,status:triage.status,detectorCount:triage.mappingCounts?.detectorCount??0,
