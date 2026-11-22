@@ -364,8 +364,64 @@ def verify_stage(root, args, ctx):
             "nativeResult", "original observed native result JSON", err or "not a JSON object",
             "native operation not claimed completed", "Provide same-run source-bound native evidence",
             args.native_result, observation_failure=err))
-    status = "NOT_EXECUTED" if warnings else "UNVERIFIED"
-    _finish(root, args, ctx, warnings, status, {"dependencyFacts": {"nativeResultPresent": not bool(err)}})
+        _finish(root, args, ctx, warnings, "NOT_EXECUTED",
+                {"dependencyFacts": {"nativeResultPresent": False}})
+        return
+    if data.get("schemaVersion") == "curveyield-security-pipeline-config-result-v1" and data.get("mode") == "enumerate-targets":
+        bound = data.get("sourceBound") is True and (
+            str(data.get("runId")) == ctx["runId"] and
+            str(data.get("runAttempt")) == str(ctx["runAttempt"]))
+        target, target_error = _read_optional_json(str(
+            Path(args.input_root) / "SECURITY_TARGET_PLAN_v1.json") if args.input_root else None)
+        manifest_bound = bool(bound and isinstance(target, dict) and
+                              target.get("sourceBound") is True)
+        counts = target.get("census") if isinstance(target, dict) else {}
+        counts = counts if isinstance(counts, dict) else {}
+        for issue in data.get("issues", []):
+            if not isinstance(issue, dict):
+                continue
+            warnings.append(make_warning(ctx, args,
+                str(issue.get("code") or "CONFIG.ISSUE_UNCLASSIFIED"),
+                str(issue.get("code") or "CONFIG.ISSUE_UNCLASSIFIED"),
+                str(issue.get("fieldPath") or "config.issue"),
+                issue.get("expected"), issue.get("observed"),
+                str(issue.get("impact") or "source-bound configuration partial"),
+                str(issue.get("correction") or "inspect original source evidence"),
+                args.native_result))
+        if not manifest_bound:
+            warnings.append(make_warning(ctx, args, "CONFIG.TARGET_PLAN_NOT_BOUND",
+                "G0.SOURCE_BOUND", "SECURITY_TARGET_PLAN_v1.json.sourceBound",
+                True, {"resultSourceBound": bound, "planPresent": isinstance(target, dict),
+                       "planError": target_error},
+                "Source-derived targets cannot be used as native executable authority",
+                "Restore the original same-run identity and exact indexed preflight evidence",
+                args.native_result))
+        status0 = "COMPLETE" if manifest_bound else "PARTIAL"
+        status1 = "COMPLETE" if manifest_bound and counts.get("compiledTargets", 0) > 0 else "PARTIAL"
+        status2 = ("COMPLETE" if manifest_bound and
+                   data.get("status") == "SOURCE_BOUND" and
+                   len(data.get("issues", [])) == 0 else "PARTIAL")
+        for gate, state in (("G0", status0), ("G1", status1), ("G2", status2)):
+            record_args = argparse.Namespace(**vars(args))
+            record_args.stage = gate
+            fact = {"sourceBound": manifest_bound,
+                    "sourceIdentity": {"archiveSha256": target.get("sourceArchiveSha256")}
+                        if isinstance(target, dict) else None,
+                    "attempted": 1, "completed": 1 if state == "COMPLETE" else 0,
+                    "notExecuted": 0 if state == "COMPLETE" else 1,
+                    "dependencyFacts": {"targetCensus": counts,
+                                        "sourceManifestVerified": manifest_bound,
+                                        "targetPlanPath": "SECURITY_TARGET_PLAN_v1.json"}}
+            if gate == "G0":
+                _finish(root, record_args, ctx, warnings, state, fact)
+            else:
+                write_stage_disposition(root, record_args, ctx, state, warnings, fact)
+        return
+    # Other native result types have not been independently classified. A
+    # parseable JSON object is not proof that a native analyzer completed.
+    _finish(root, args, ctx, [], "UNVERIFIED",
+            {"dependencyFacts": {"nativeResultPresent": True,
+                                 "schemaVersion": data.get("schemaVersion")}})
 
 
 def emit_warning(root, args, ctx):
