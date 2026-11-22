@@ -694,9 +694,20 @@ function deriveNativeAnalyzerEligibility(args,identity,issues){
         Object.values(group??{}).some(positions=>Array.isArray(positions)&&positions.length>0));
     const unsupportedReason=!sourceScope?'SOURCE_COMPILER_TARGET_UNVERIFIED':
       !languageSupported?'SOURCE_LANGUAGE_UNSUPPORTED_BY_NATIVE_PROGRAM':
-      name==='mythril'&&!creationDigestMatch?'EXACT_LINKED_CREATION_BYTECODE_NOT_RECOVERED':
       name==='mythril'&&needsLibraryLinking?'UNLINKED_LIBRARY_REFERENCES':
+      name==='mythril'&&!creationDigestMatch?'EXACT_CREATION_BYTECODE_SHA256_MISMATCH_OR_UNAVAILABLE':
       'APPROVED_NATIVE_TOOL_AND_SOURCE_EXECUTION_INPUT_MISSING';
+    const sourceEligible=sourceScope&&languageSupported&&
+      (name!=='mythril'||creationDigestMatch&&!needsLibraryLinking);
+    if(!sourceEligible)issues.push(issue('NATIVE.TARGET_SCOPE_UNSUPPORTED',
+      'nativeTarget['+(row.targetId??'UNRESOLVED')+'].sourceEligibility',
+      'source-scoped compiler artifact, supported language'+
+        (name==='mythril'?', original fully linked creation bytecode':''),{
+          targetId:row.targetId??null,reasonCode:unsupportedReason,
+          compilerUnit:row.compilationUnitId??null,
+          originalLinkedBytecodeDigestMatches:creationDigestMatch,
+          hasLibraryReferences:needsLibraryLinking},
+      'Exclude this original target from the native command; never substitute a different source or bytecode'));
     targets.push({
       targetId:row.targetId??null,sourcePath:row.sourcePath??null,
       compilationUnitId:row.compilationUnitId??null,qualifiedName:row.qualifiedName??null,
@@ -707,7 +718,7 @@ function deriveNativeAnalyzerEligibility(args,identity,issues){
       creationBytecodePresentInOriginalCompilerBundle:!!originalCreation,
       creationBytecodeDigestMatch:creationDigestMatch,
       needsLibraryLinking,
-      eligibilityClass:languageSupported&&sourceScope?'POTENTIAL_AFTER_QUALIFICATION':'SOURCE_UNSUPPORTED',
+      eligibilityClass:sourceEligible?'POTENTIAL_AFTER_NATIVE_QUALIFICATION':'SOURCE_UNSUPPORTED',
       status:'NOT_EXECUTED',
       reasonCode:unsupportedReason,
       originalNativeEvidenceSha256:null,
@@ -727,6 +738,8 @@ function deriveNativeAnalyzerEligibility(args,identity,issues){
     originalSourceIntelligenceSha256:intelligence?.sha256??null,
     runIdentity:identity,
     targetCount:targets.length,languageSupportedCount:targets.filter(x=>x.languageSupported).length,
+    exactNativePotentialEligibleCount:targets.filter(x=>x.eligibilityClass==='POTENTIAL_AFTER_NATIVE_QUALIFICATION').length,
+    sourceUnsupportedCount:targets.filter(x=>x.eligibilityClass==='SOURCE_UNSUPPORTED').length,
     originalCompilerBytecodeCount:targets.filter(x=>x.creationBytecodeDigestMatch).length,
     targetResults:targets,originalSourceFacts:knownContexts,
     nativeExecutionAuthorized:false,nativeCommandsExecuted:0,
