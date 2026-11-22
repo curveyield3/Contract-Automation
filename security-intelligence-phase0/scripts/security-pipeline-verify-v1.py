@@ -555,13 +555,25 @@ def summarize_job(root, args, ctx):
                         continue
                     profile_issues.append({
                         "component": component, "code": issue.get("code"),
-                        "fieldPath": issue.get("fieldPath"), "observed": issue.get("observed")
+                        "fieldPath": issue.get("fieldPath"),
+                        "expected": issue.get("expected"),
+                        "observed": issue.get("observed")
                     })
+                    warnings.append(make_warning(
+                        ctx, args, str(issue.get("code") or "G2T.ORIGINAL_PIN_ISSUE"),
+                        "G2T.ORIGINAL_PIN." + component,
+                        str(issue.get("fieldPath") or "toolkitComponents[" + component + "].originalPin"),
+                        issue.get("expected"), issue.get("observed"),
+                        "native component remains NOT_EXECUTED unless independently verified",
+                        str(issue.get("correction") or
+                            "Qualify original version, binary bytes and native component ABI"),
+                        str(filepath), component=component))
             statuses[component] = status
             metadata[component] = {
                 "componentId": component, "expectedArtifact": artifact_name,
                 "expectedOriginalVerifierArtifact": stage_name,
                 "metricSha256": raw_sha, "status": status,
+                "originalIndependentReceiptPresent": receipt_valid and stage_valid,
                 "nativeEligible": status in ("INSTALLED_VERIFIED", "RESTORED_VERIFIED"),
                 "required": metric.get("componentRequired") if metric_valid else None,
                 "originalSourcePinDigests": metric.get("sourcePins") if metric_valid else None,
@@ -585,8 +597,10 @@ def summarize_job(root, args, ctx):
             "componentPinIssues": profile_issues,
             "sourcePinDigests": {name: row.get("originalSourcePinDigests")
                                 for name, row in metadata.items()},
-            "reportCompleteness": "COMPLETE" if all(row["metricSha256"]
-                                                     for row in metadata.values()) else "PARTIAL",
+            "reportCompleteness": "COMPLETE" if all(
+                row["metricSha256"] and row["originalIndependentReceiptPresent"]
+                for row in metadata.values()) else "PARTIAL",
+            "observedToolkitPrepareJobResult": args.native_outcome,
             "status": "COMPLETE" if complete else "PARTIAL",
             "originalNativeExecutionNotInferredFromJobSuccess": True
         }

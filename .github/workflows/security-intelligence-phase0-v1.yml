@@ -576,6 +576,7 @@ jobs:
           python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
             --mode summarize-job --job toolkit_qualify --stage G2T \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-outcome "${{ needs.toolkit_prepare.result }}" \
             --input-root "$RUNNER_TEMP/security-pipeline/toolkit-qualify/input" \
             --report-root "$RUNNER_TEMP/security-pipeline/toolkit-qualify/report"
       - name: Upload aggregate toolkit qualification and exact warnings
