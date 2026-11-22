@@ -700,30 +700,134 @@ function additional(args,identity,issues){
         'original pinned GGUF SHA, revision, filename and llama commit',String(error),
         'Reinspect the current trusted MiMo workflow and qualify its original source pins'));
     }
+    // U06: inspect current source-controlled pin provenance per component.
+    // Lockfile/package versions are recipes, NOT fabricated binary SHA-256.
+    const qualifiedFile=(rel)=>{
+      const absolute=path.resolve(process.env.GITHUB_WORKSPACE??process.cwd(),rel);
+      const bytes=readBytes(absolute);
+      return {content:bytes.toString('utf8'),digest:sha256HexV1(bytes)};
+    };
+    let lock=null,lockHash=null,originalDocker=null,dockerHash=null,nodeActionHash=null;
+    try{
+      const f=qualifiedFile('security-intelligence-phase0/package-lock.json');
+      lock=JSON.parse(f.content);lockHash=f.digest;
+      const d=qualifiedFile('security-intelligence-phase0/Dockerfile');
+      originalDocker=d.content;dockerHash=d.digest;
+      nodeActionHash=qualifiedFile('.github/actions/setup-phase0-node-cache/action.yml').digest;
+    }catch(error){
+      issues.push(issue('TOOLKIT.LOCAL_TRUSTED_RECIPE_UNAVAILABLE',
+        'toolkitSourcePins.packageLock/Dockerfile/setupAction',
+        'actual current checkout package lock, original Docker and cache action',
+        String(error),'Restore original pinned local toolchain provenance before provisioning'));
+    }
+    const lockRoot=lock?.packages?.['']?.dependencies??{};
+    const foundryNames=['anvil','cast','forge'];
+    const foundryLocks=foundryNames.map(name=>({
+      name,version:lock?.packages?.['node_modules/@foundry-rs/'+name]?.version??null,
+      npmTarballIntegrity:lock?.packages?.['node_modules/@foundry-rs/'+name]?.integrity??null
+    }));
+    const foundryPinned=foundryLocks.every(x=>
+      x.version==='1.7.1'&&typeof x.npmTarballIntegrity==='string'&&
+      x.npmTarballIntegrity.startsWith('sha512-'))&&
+      foundryNames.every(x=>lockRoot['@foundry-rs/'+x]==='1.7.1');
+    const solcPinned=lockRoot.solc==='0.8.30'&&
+      lock?.packages?.['node_modules/solc']?.version==='0.8.30'&&
+      typeof lock?.packages?.['node_modules/solc']?.integrity==='string';
+    const slitherMatch=originalDocker?.match(/slither-analyzer==([0-9]+\.[0-9]+\.[0-9]+)/);
+    const staticSources={
+      'foundry-node':foundryPinned?{
+        approvedVersion:'1.7.1',approvedSourceRevision:null,
+        originalPinOrigin:'security-intelligence-phase0/package-lock.json',
+        lockDigest:lockHash,recipeDigest:digestCanonicalV1({
+          nodeMajor:22,packageLockSha256:lockHash,
+          originalActionSha256:nodeActionHash,foundryLocks}),
+        abiProfile:'node22-'+process.platform+'-'+process.arch,
+        nativeConsumerStages:['fork_setup','storage_inspect','medusa_analyze']
+      }:null,
+      'source-compilers':solcPinned?{
+        approvedVersion:'solc-0.8.30-plus-source-admitted-toolchains',
+        approvedSourceRevision:null,
+        originalPinOrigin:'security-intelligence-phase0/package-lock.json and Dockerfile',
+        lockDigest:lockHash,recipeDigest:digestCanonicalV1({
+          solcLock:lock?.packages?.['node_modules/solc']?.integrity,
+          dockerSha256:dockerHash}),
+        nativeConsumerStages:['fork_setup','medusa_analyze','mythril_analyze']
+      }:null,
+      'slither-storage':slitherMatch?{
+        approvedVersion:slitherMatch[1],approvedSourceRevision:null,
+        originalPinOrigin:'security-intelligence-phase0/Dockerfile',
+        lockDigest:dockerHash,recipeDigest:digestCanonicalV1({
+          declaredDockerSha256:dockerHash,slitherVersion:slitherMatch[1]}),
+        abiProfile:'python3-debian-bookworm',
+        nativeConsumerStages:['storage_inspect']
+      }:null,
+      'mimo-runtime':nativePins?{
+        approvedVersion:'pinned-llama.cpp-CPU',approvedSourceRevision:nativePins.llamaCppRevision,
+        originalPinOrigin:'.github/workflows/lite-solo-ai-inference-v1.yml',
+        lockDigest:null,recipeDigest:digestCanonicalV1({
+          sourceCommit:nativePins.llamaCppRevision,
+          cmakeBuildType:'Release',GGML_NATIVE:false,LLAMA_BUILD_TESTS:false,
+          target:'llama-server',cpuOnly:true}),
+        abiProfile:'cpu-'+process.platform+'-'+process.arch,
+        nativeConsumerStages:['mimo_configure','mimo_provider_qualify','autoprover_run']
+      }:null,
+      'mimo-weights':nativePins?{
+        approvedVersion:nativePins.modelFile,approvedSourceRevision:nativePins.modelRevision,
+        originalPinOrigin:'.github/workflows/lite-solo-ai-inference-v1.yml',
+        lockDigest:null,recipeDigest:digestCanonicalV1({
+          modelSha256:nativePins.modelSha256,modelRevision:nativePins.modelRevision,
+          file:nativePins.modelFile}),
+        expectedBinarySha256:nativePins.modelSha256,
+        abiProfile:'gguf-q4_k_m',
+        nativeConsumerStages:['mimo_configure','mimo_provider_qualify','autoprover_run']
+      }:null
+    };
+    const pinDeficits={
+      'foundry-node':['original independent Forge/Anvil/Cast native executable SHA-256'],
+      'source-compilers':['compiler-version-specific solc/Vyper original binary SHA-256 and source resolution ledger'],
+      'slither-storage':['original slither-read-storage CLI/package-tree SHA-256 and Python lock'],
+      'medusa':['approved immutable Go source revision','actual ELF SHA-256','Go build ABI'],
+      'wake':['approved Python package lock/revision','Wake executable SHA-256'],
+      'mythril':['approved Python package lock/revision','Mythril and SMT binary SHA-256'],
+      'certora-prover':['approved local Prover artifact SHA-256','JVM and SMT binary digests'],
+      'autoprover':['approved original Composer dependency lock','original installed entrypoint binary/package-tree SHA-256'],
+      'mimo-runtime':['independent trusted native llama-server ELF SHA-256 or accepted source-build attestation'],
+      'mimo-weights':[]
+    };
     const components=COMPONENTS.map(id=>{
       const required=sourceBound?requirements[id]:null;
-      const pinned=id==='mimo-weights'&&nativePins!==null;
+      const provenance=staticSources[id]??null;
+      const originalBytePinned=id==='mimo-weights'&&provenance?.expectedBinarySha256===nativePins?.modelSha256;
       if(required===null)issues.push(issue('TOOLKIT.COMPONENT_REQUIRED_UNKNOWN',
         'toolkitComponents['+id+'].required',
         'boolean from admitted source-bound compatibility',null,
         'Restore exact original target-plan source binding'));
-      if(required===true&&!pinned)issues.push(issue('TOOLKIT.COMPONENT_BYTES_PIN_UNRESOLVED',
-        'toolkitComponents['+id+'].expectedBinarySha256',
-        'independently qualified original executable or payload SHA-256',null,
-        'Pin native tool source, build, original binary bytes and consumer ABI'));
+      if(required===true&&!originalBytePinned){
+        const specific=pinDeficits[id]??['independent approved executable identity'];
+        for(const field of specific)issues.push(issue('TOOLKIT.COMPONENT_NATIVE_PIN_UNRESOLVED',
+          'toolkitComponents['+id+'].originalNativePin.'+field.replace(/[^a-zA-Z0-9]+/g,'_'),
+          field,provenance?.originalPinOrigin??null,
+          'Qualify this exact independent executable/ABI pin in the trusted current checkout'));
+      }
       return {componentId:id,required,
         notRequiredReason:required===false?'NO_MATCHING_ADMITTED_TARGET':
           required===null?'SOURCE_TARGET_PLAN_NOT_VERIFIED':null,
-        approvedVersion:pinned?'MiMo-V2.6-Distill-Qwen-9B-Q4_K_M':null,
-        approvedSourceRevision:pinned?nativePins.modelRevision:null,
-        expectedBinarySha256:pinned?nativePins.modelSha256:null,
-        os:process.platform,arch:process.arch,abiProfile:null,
-        lockDigest:targetDoc?.sha256??null,
-        recipeDigest:pinned?digestCanonicalV1(nativePins):null,
+        approvedVersion:provenance?.approvedVersion??null,
+        approvedSourceRevision:provenance?.approvedSourceRevision??null,
+        expectedBinarySha256:originalBytePinned?nativePins.modelSha256:null,
+        os:process.platform,arch:process.arch,
+        abiProfile:provenance?.abiProfile??null,
+        lockDigest:provenance?.lockDigest??null,
+        recipeDigest:provenance?.recipeDigest??null,
         expectedBytesOrQuota:null,
-        nativeConsumerStages:id.startsWith('mimo')?
-          ['mimo_configure','mimo_provider_qualify','autoprover_run']:[],
-        nativeReadinessMode:pinned?'TRUSTED_ORIGINAL_PIN_NOT_YET_INSTALLED':'UNRESOLVED_PIN'};
+        originalPinOrigin:provenance?.originalPinOrigin??null,
+        originalPinEvidence:provenance?{
+          packageLockSha256:lockHash,originalDockerSha256:dockerHash,
+          nodeSetupActionSha256:nodeActionHash}:null,
+        unresolvedNativePinFields:required===true&&!originalBytePinned?pinDeficits[id]:[],
+        nativeConsumerStages:provenance?.nativeConsumerStages??[],
+        nativeReadinessMode:originalBytePinned?'TRUSTED_ORIGINAL_PIN_NOT_YET_INSTALLED':
+          provenance?'RECIPE_SOURCE_VERIFIED_BINARY_SHA_UNRESOLVED':'PIN_UNRESOLVED'};
     });
     selected=['TOOLKIT_PROFILE_v1.json',{
       schemaVersion:'curveyield-toolkit-profile-v1',
