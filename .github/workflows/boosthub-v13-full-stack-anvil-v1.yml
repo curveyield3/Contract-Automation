@@ -1,4 +1,4 @@
-name: BoostHub v63 + CurveGlobal Yearn V2 SDT v9 Safe dual-chain fork v6
+name: BoostHub v63 + CurveGlobal Yearn V2 SDT v9 Safe dual-chain fork v7
 
 on:
   push:
@@ -74,7 +74,7 @@ jobs:
           set -euo pipefail
           npm install --prefix "$ROOT/dependencies" --no-save --ignore-scripts --no-audit --no-fund '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts@5.4.0'
           npm install --prefix "$ROOT/runner" --no-save --ignore-scripts --no-audit --no-fund 'ethers@6.15.0'
-          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v63-sdt-v9-v6.log
+          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v63-sdt-v9-v7.log
           node --check github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs
       - name: Execute Safe custody campaign on isolated Ethereum and Fraxtal forks
         shell: bash
@@ -113,7 +113,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-v63-sdt-v9-safe-mainnet-forks-v6-${{ github.run_id }}
+          name: boosthub-v63-sdt-v9-safe-mainnet-forks-v7-${{ github.run_id }}
           path: |
             source_manifest_v2.txt
             compile-v63-sdt-v9-v5.log

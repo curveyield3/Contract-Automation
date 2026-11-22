@@ -77,6 +77,41 @@ async function yearnGlobal(ctx){
  save();console.log('FACTORY_YEARN_V2_VAULT',JSON.stringify(SUMMARY.factoryYearnVault));
  return vault;
 }
+async function diagnoseSDTFullExit(ctx,vault,strategy,yearnAddress){
+ const strategyAddress=await strategy.getAddress();
+ const yv=interfaceAt(ctx.provider,yearnAddress,['function balanceOf(address) view returns(uint256)','function pricePerShare() view returns(uint256)','function decimals() view returns(uint256)','function withdraw(uint256,address,uint256) returns(uint256)']);
+ const lp=interfaceAt(ctx.provider,ETH.sdtPool,ERC20);
+ const sdt=interfaceAt(ctx.provider,ETH.sdt,ERC20);
+ const curve=interfaceAt(ctx.provider,ETH.sdtPool,['function calc_withdraw_one_coin(uint256,uint256) view returns(uint256)','function remove_liquidity_one_coin(uint256,uint256,uint256) returns(uint256)']);
+ const guard=interfaceAt(ctx.provider,ETH.guard,['function quoteWithdraw(address,uint8,uint256,uint16) view returns(uint256,uint256)']);
+ const shares=await yv.balanceOf(strategyAddress),pps=await yv.pricePerShare(),unit=10n**(await yv.decimals());
+ const expectedLp=await lp.balanceOf(strategyAddress)+shares*pps/unit;
+ const quote=await curve.calc_withdraw_one_coin(expectedLp,1);
+ const reported=await vault.balance();
+ const checkpoint=await ctx.provider.send('evm_snapshot',[]);
+ const info={yearnShares:shares.toString(),pps:pps.toString(),yearnShareUnit:unit.toString(),expectedLp:expectedLp.toString(),curveQuote:quote.toString(),vaultReportedAssets:reported.toString()};
+ try {
+  await ctx.provider.send('anvil_impersonateAccount',[strategyAddress]);
+  await ctx.provider.send('anvil_setBalance',[strategyAddress,ethers.toBeHex(ethers.parseEther('5'))]);
+  const owner=await ctx.provider.getSigner(strategyAddress);
+  if(shares!==0n)await (await yv.connect(owner)['withdraw(uint256,address,uint256)'](shares,strategyAddress,0,{gasLimit:9000000})).wait();
+  const actualLp=await lp.balanceOf(strategyAddress);info.actualLp=actualLp.toString();
+  const [estimated,minOut]=await guard.quoteWithdraw(ETH.sdtPool,1,actualLp,200);
+  info.guardEstimate=estimated.toString();info.guardMinOut=minOut.toString();
+  const sdtBefore=await sdt.balanceOf(strategyAddress);
+  const tx=await curve.connect(owner)['remove_liquidity_one_coin(uint256,uint256,uint256)'](actualLp,1,minOut,{gasLimit:9000000});
+  const receipt=await tx.wait();
+  const actualSDT=(await sdt.balanceOf(strategyAddress))-sdtBefore;
+  info.realizedSDT=actualSDT.toString();
+  info.quoteDifference=(quote-actualSDT).toString();
+  info.navDifference=(reported-actualSDT).toString();
+  info.curveWithdrawalGas=receipt.gasUsed.toString();
+ }catch(e){info.error=descError(e);}
+ finally{const reverted=await ctx.provider.send('evm_revert',[checkpoint]);if(!reverted)throw Error('FORK_PROBE_REVERT_FAILED');}
+ assert.equal((await yv.balanceOf(strategyAddress)).toString(),shares.toString(),'probe leaked Yearn position');
+ assert.equal((await vault.balance()).toString(),reported.toString(),'probe leaked vault NAV change');
+ SUMMARY.sdtFullExitProbe=info;save();console.log('SDT_FULL_EXIT_PROBE',JSON.stringify(info));
+}
 async function SDTcycle(ctx,yearn){if(!yearn){SUMMARY.criticalFailures.push({chain:ctx.chain,label:'SDT cycle',error:'No valid CurveGlobal factory-generated Yearn V2 LP vault'});return null;}
 const predicted=ethers.getCreateAddress({from:await ctx.deployer.getAddress(),nonce:(await ctx.provider.getTransactionCount(await ctx.deployer.getAddress(),'pending'))+1});const strat=await deploy(ctx,'StrategyCurveSDTYearnV9','StrategyCurveSDTYearnV9',[predicted,yearn,ETH.guard]);const vault=await deploy(ctx,'BeefyVaultV7FixedV2','BeefyVaultV7FixedV2',[await strat.getAddress(),'CurveYield SDT Yearn','cySDT-Y',50,SAFE]);assert.equal((await vault.getAddress()).toLowerCase(),predicted.toLowerCase());assert.equal((await vault.asset()).toLowerCase(),ETH.sdt.toLowerCase(),'ERC4626 asset mismatch');await action(ctx,'SDT:vault.transferOwnership',async()=>vault.transferOwnership(SAFE));const a={safe:SAFE,vault:await vault.getAddress(),strategy:await strat.getAddress(),curvePool:ETH.sdtPool,yearn};const t={SDT:ETH.sdt,CurveLP:ETH.sdtPool,YearnShares:yearn,SDTVaultShares:await vault.getAddress()};const safeSDT=interfaceAt(ctx.provider,ETH.sdt).connect(ctx.safe);const before=await safeSDT.balanceOf(SAFE);assert(before>=ethers.parseEther('10'),'Safe has less than 10 SDT');await action(ctx,'SDT:approve10',async()=>safeSDT.approve(await vault.getAddress(),ethers.parseEther('10')),{tokens:t,accounts:a,vaults:{vault:await vault.getAddress()}});
 // The existing NAV-adjusted mint mechanism must reject exact-share requests
@@ -94,6 +129,7 @@ const mint=await action(ctx,'SDT:mint.shortfall.expectedRevert',
  {tokens:t,accounts:a,vaults:{vault:await vault.getAddress()},expectRevert:true});
 const depo=await action(ctx,'SDT:deposit10',async()=>vault.connect(ctx.safe)['deposit(uint256,address)'](ethers.parseEther('10'),SAFE,{gasLimit:16000000}),{tokens:t,accounts:a,vaults:{vault:await vault.getAddress()},verify:async()=>assert((await vault.balanceOf(SAFE))>0n,'no SDT vault shares')});
 if(depo.status==='passed'){
+ await diagnoseSDTFullExit(ctx,vault,strat,yearn);
  let preflight={label:'SDT:withdrawAll.staticCall',chain:ctx.chain,status:'passed'};
  try{preflight.assets=(await vault.connect(ctx.safe)['redeem(uint256,address,address)'].staticCall(await vault.balanceOf(SAFE),SAFE,SAFE,{gasLimit:16000000})).toString();}
  catch(e){preflight.status='failed';preflight.error=descError(e);preflight.revertData=e.data||e.info?.error?.data||null;}
