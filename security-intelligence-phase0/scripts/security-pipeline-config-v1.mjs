@@ -374,7 +374,18 @@ function planSourceFacts(args,identity,issues){
   const load=(name)=>{
     if(!manifest)return null;
     const found=evidence(args['input-root'],manifest,name,issues);
-    return found&&bound(found,name,sha,issues)?found:null;
+    if(!found)return null;
+    // Some original machine inventories are bound by the manifest's original
+    // file-byte SHA and admission digest, not by an embedded sourceIdentity.
+    const internal=found.value?.sourceIdentity?.archiveSha256??
+      found.value?.source?.archiveSha256??
+      found.value?.source?.archiveSha256Observed??null;
+    if(internal!==null&&internal!==sha){
+      issues.push(issue('CONFIG.INDEXED_FILE_SOURCE_MISMATCH',name+'.sourceIdentity.archiveSha256',
+        sha,internal,'Restore original exact SHA-indexed preflight evidence file'));
+      return null;
+    }
+    return found;
   };
   return {sourceSha256:sha,sourceBound:!!sha&&manifest?.sourceAdmissionVerified===true&&
     identity.verifiedForCurrentJob,manifest,load};
