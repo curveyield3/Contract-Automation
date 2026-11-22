@@ -332,7 +332,7 @@ async function runExactVyperAstStaticV1({projectRoot,unit,sourceName}){
   try{parsed=JSON.parse(compiled.stdout)}catch{throw new Error('Vyper AST output is not valid JSON: '+sourceName)}
   const root=parsed?.ast;
   if(!root||root.ast_type!=='Module'||!Array.isArray(root.body))throw new Error('Vyper AST root invalid: '+sourceName);
-  const functions=[],sensitiveCalls=[],externalEntryPoints=[],stateWrites=[],stateDeclarations=[];
+  const functions=[],sensitiveCalls=[],externalEntryPoints=[],stateWrites=[],stateReads=[],internalCalls=[],externalCalls=[],stateDeclarations=[];
   const sourceLines=admitted.split(/\r?\n/);
   let nodeCount=0;
   const sensitive=new Set(['raw_call','send','selfdestruct','delegatecall','create_forwarder_to','create_minimal_proxy_to','create_copy_of','create_from_blueprint','unsafe_add','unsafe_sub','unsafe_mul','unsafe_div','convert','staticcall','extcall','raw_log']);
@@ -341,6 +341,7 @@ async function runExactVyperAstStaticV1({projectRoot,unit,sourceName}){
     if(!node||typeof node!=='object')return '';
     if(node.ast_type==='Name')return String(node.id??'');
     if(node.ast_type==='Attribute')return callableName(node.value)+'.'+String(node.attr??'');
+    if(node.ast_type==='Subscript')return callableName(node.value);
     return '';
   }
   function visit(node,context){
@@ -365,16 +366,47 @@ async function runExactVyperAstStaticV1({projectRoot,unit,sourceName}){
         nextContext=item;
       }
     }
+    // Vyper 0.4.x represents 'extcall' and 'staticcall' as dedicated AST
+    // wrappers around a Call, not as Call nodes named extcall/staticcall.
+    // Keep both wrappers and raw_call structurally, without asserting the
+    // dynamically selected target contract or success semantics.
+    const owner=nextContext?.name??'<module>';
+    const line=Number(node.lineno??nextContext?.line??0);
+    if(type==='ExtCall'||type==='StaticCall'){
+      const inner=node.value?.ast_type==='Call'?node.value:
+        node.call?.ast_type==='Call'?node.call:null;
+      const callee=inner?.func;
+      const member=callee?.ast_type==='Attribute'?String(callee.attr??''):callableName(callee);
+      externalCalls.push({function:owner,call:member||'UNRESOLVED_EXTERNAL_MEMBER',
+        line,callKind:type==='ExtCall'?'VYPER_EXTCALL':'VYPER_STATICCALL',
+        targetExpression:callableName(callee?.value)||null,
+        targetType:callee?.value?.type?.type_id??null});
+      sensitiveCalls.push({function:owner,call:type==='ExtCall'?'extcall':'staticcall',line});
+    }
     if(type==='Call'){
       const name=callableName(node.func);
-      if(sensitive.has(name)||name.startsWith('extcall')||name.startsWith('staticcall')){
-        sensitiveCalls.push({function:nextContext?.name??'<module>',call:name,line:Number(node.lineno??nextContext?.line??0)});
+      if(sensitive.has(name)){
+        sensitiveCalls.push({function:owner,call:name,line});
       }
+      if(name==='raw_call'||name==='send'){
+        externalCalls.push({function:owner,call:name,line,callKind:'VYPER_BUILTIN_EXTERNAL_CALL',
+          targetExpression:null,targetType:null});
+      }
+      if(name.startsWith('self.'))internalCalls.push({function:owner,callee:name.slice(5),line});
+    }
+    // Attribute references identify a state surface. References at assignment
+    // targets are intentionally not called proven READ operations.
+    if(type==='Attribute'){
+      const name=callableName(node);
+      if(name.startsWith('self.'))stateReads.push({function:owner,target:name,line,
+        evidenceClass:'VYPER_AST_STATE_REFERENCE_INCLUDES_WRITE_TARGETS'});
     }
     if(['Assign','AugAssign','AnnAssign'].includes(type)){
-      const target=node.target;
-      const name=callableName(target);
-      if(name.startsWith('self.'))stateWrites.push({function:nextContext?.name??'<module>',target:name,line:Number(node.lineno??0)});
+      const targets=node.targets??[node.target];
+      for(const target of targets){
+        const name=callableName(target);
+        if(name.startsWith('self.'))stateWrites.push({function:owner,target:name,line});
+      }
     }
     for(const [key,value] of Object.entries(node)){
       if(['node_id','src','node_source_code','folded_value','type','_metadata'].includes(key))continue;
@@ -410,9 +442,9 @@ async function runExactVyperAstStaticV1({projectRoot,unit,sourceName}){
     sourceName,compilerVersion:version,
     sourceSha256:sha256(Buffer.from(admitted,'utf8')),
     astSha256:sha256(Buffer.from(JSON.stringify(root),'utf8')),
-    nodeCount,functions,externalEntryPoints,sensitiveCalls,stateWrites,stateDeclarations,
+    nodeCount,functions,externalEntryPoints,sensitiveCalls,stateWrites,stateReads,internalCalls,externalCalls,stateDeclarations,
     reviewRequired:true,
-    limitations:['Slither 0.11.6 Vyper 0.4.3 semantic detectors are unavailable; source-anchored AST structural surfaces are retained for required Phase 4–6 semantic review.']
+    limitations:['Slither 0.11.6 Vyper 0.4.3 semantic detectors remain unavailable; source-anchored structural external calls and state references are reviewer-owned, not semantic detector findings.']
   };
 }
 
