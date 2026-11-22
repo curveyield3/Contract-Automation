@@ -14,6 +14,7 @@ const build=read('BUILD_AND_SOURCE_IDENTITY_v1.json');
 const si=read('SOURCE_INTELLIGENCE_AUTOMATED_v1.json');
 const inventory=read('REVIEW_INVENTORY_v1.json');
 const slither=read('SLITHER_v1.json');
+const bytecodeSecurity=slither?.vyperBytecodeSecurity??null;
 const readiness=read('PROJECT_READINESS_AUTOMATED_v1.json');
 const sbom=read('SBOM_v1.json');
 const admission=read('SOURCE_ADMISSION_INVENTORY_v1.json');
@@ -179,6 +180,14 @@ const lines=[
   '',
   '- Vyper file-level fallback(s): '+(languageFallbacks.map(x=>x.path).join(', ')||'none'),
   '- Vyper compiler-AST structural-only files (no semantic Slither detectors): '+(vyperAstStructuralOnly.map(x=>x.path).join(', ')||'none'),
+  '- Vyper bytecode security program: '+(bytecodeSecurity?.tool??'NOT_INSTALLED')+
+    ' @ '+(bytecodeSecurity?.upstreamCommit??'UNPINNED')+
+    '; status '+(bytecodeSecurity?.status??'NOT_EXECUTED')+
+    '; analyzed '+(bytecodeSecurity?.analyzedContractCount??0)+'/'+(bytecodeSecurity?.requiredContractCount??0),
+  ...((bytecodeSecurity?.contracts??[]).filter(x=>x.status!=='COMPLETED')
+    .map(x=>'- Vyper analyzer incomplete: '+x.sourceName+
+      '; exitCode '+x.exitCode+'; timedOut '+x.timedOut+
+      '; cause '+(x.stderrTail||x.stdoutTail||x.limitations?.join(', ')||'UNKNOWN'))),
   '- In-scope Vyper AST external-call candidates: '+(stage2?.vyperStructuralCallCandidates??'UNAVAILABLE'),
   '- Compiler layout-backed state declarations: '+(stage2?.compilerLayoutStateDeclarationCount??'UNAVAILABLE'),
   '- Unresolved state-changing ABI implementation origins: '+(unresolvedMaterialOrigins??'UNAVAILABLE'),
@@ -220,10 +229,16 @@ const manifest={
   source:{repository:source.repository??null,commit:source.commit??null,archivePath:source.archivePath??null,expectedSha256:expected,observedSha256:observed},
   buildStatus:build?.build?.status??null,
   slitherStatus:slither?.componentStatus??slither?.status??null,
+  vyperBytecodeSecurityStatus:bytecodeSecurity?.status??'NOT_EXECUTED',
   reviewInventoryComplete:inventory?.payload?.complete===true,
   machineCoverageReadyForGateReview:manifestStatus==='COLLECTED',
   machineCoverageReasons:{
     vyperSemanticSlitherUnavailable:semanticVyperUnsupported,
+    vyperBytecodeSecurity:{tool:bytecodeSecurity?.tool??null,
+      status:bytecodeSecurity?.status??'NOT_EXECUTED',
+      analyzedContracts:bytecodeSecurity?.analyzedContractCount??0,
+      requiredContracts:bytecodeSecurity?.requiredContractCount??0,
+      slitherEquivalent:false},
     vyperAstStructuralOnlyPaths:vyperAstStructuralOnly.map(x=>x.path),
     unresolvedStateChangingImplementationOrigins:unresolvedMaterialOrigins,
     unresolvedAllImplementationOrigins:stage2?.unresolvedImplementationEntrypoints??null,
