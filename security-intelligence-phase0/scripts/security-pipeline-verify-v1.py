@@ -871,7 +871,12 @@ def verify_stage(root, args, ctx):
             "attempted": 0, "completed": 0,
             "notExecuted": record.get("targetCount", 0) if valid else 1,
             "dependencyFacts": {
-                "sourceCompatibleTargets": record.get("languageSupportedCount") if valid else None,
+                "originalSourceTargetCount": record.get("targetCount") if valid else None,
+                "sourceLanguageSupportedCount": record.get("languageSupportedCount") if valid else None,
+                "sourcePotentiallyEligibleCount": record.get("exactNativePotentialEligibleCount") if valid else None,
+                "sourceUnsupportedCount": record.get("sourceUnsupportedCount") if valid else None,
+                "originalCompilerBundleSha256": record.get("originalCompilerArtifactBundleSha256") if valid else None,
+                "originalSourceIntelligenceSha256": record.get("originalSourceIntelligenceSha256") if valid else None,
                 "nativeExecutionNotAttempted": True,
                 "originalNativeOutputSha256": None,
                 "program": expected_program,
