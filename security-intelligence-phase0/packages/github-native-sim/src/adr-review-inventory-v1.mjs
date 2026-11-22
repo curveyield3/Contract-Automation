@@ -231,18 +231,25 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
       const contextId=symbolId.replace(/^SYM-/,'CTX-');
       const calls=(analysis.sensitiveCalls??[]).filter(x=>x.function===def.name);
       const writes=(analysis.stateWrites??[]).filter(x=>x.function===def.name);
+      const reads=(analysis.stateReads??[]).filter(x=>x.function===def.name);
+      const internal=(analysis.internalCalls??[]).filter(x=>x.function===def.name);
+      const external=(analysis.externalCalls??[]).filter(x=>x.function===def.name);
       const vyperSensitiveOperations=calls.map(x=>({memberName:x.call,
         targetType:'VYPER_COMPILER_AST_SENSITIVE_OPERATION',line:x.line}));
-      const vyperExternalOperations=vyperSensitiveOperations.filter(x=>
-        /^(?:raw_call|send|delegatecall|extcall|staticcall)$/.test(x.memberName)||
-        /^(?:extcall|staticcall)\./.test(x.memberName));
+      const vyperExternalOperations=external.map(x=>({
+        memberName:x.call,targetType:x.targetType??'VYPER_COMPILER_AST_EXTERNAL_TARGET_UNRESOLVED',
+        line:x.line,callKind:x.callKind,targetExpression:x.targetExpression??null}));
       const decorators=def.decorators??[];
       const mutability=decorators.includes('view')?'view':decorators.includes('pure')?'pure':decorators.includes('payable')?'payable':'nonpayable';
       const visibility=def.external?'external':'internal';
       const ctx={contextId,symbolId,path:file,qualifiedContainer,kind:'FUNCTION',canonicalSignature:signature,
         visibility,stateMutability:mutability,lineStart:def.line,lineEnd:end,effectiveIn:[qualifiedContainer],
-        scopeTier:source.tier,dependencySymbolIds:[],stateReads:[],stateWrites:distinct(writes.map(x=>x.target)),
-        internalCalls:[],modifiers:def.nonreentrant?['nonreentrant']:[],
+        scopeTier:source.tier,dependencySymbolIds:[],
+        stateReads:distinct(reads.map(x=>x.target)),
+        stateWrites:distinct(writes.map(x=>x.target)),
+        internalCalls:[],vyperInternalCallees:distinct(internal.map(x=>x.callee)),
+        stateReadEvidenceClass:'VYPER_AST_REFERENCE_INCLUDES_ASSIGNMENT_TARGETS',
+        modifiers:def.nonreentrant?['nonreentrant']:[],
         externalCalls:vyperExternalOperations,vyperSensitiveOperations,
         natSpec:'',directBases:[],implementedInterfaces:[],contractKind:'contract',contractAbstract:false,
         senderCheckLines:sourceLines.slice(def.line-1,end).flatMap((line,index)=>line.includes('msg.sender')?[def.line+index]:[]),
@@ -261,6 +268,21 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
         lineStart:def.line,lineEnd:end,hasBody:true});
       triggers[contextId]=new Set(signals);
     }
+  }
+  // Bind self.foo() to actual source functions after the AST function
+  // definitions have been indexed. Do not invent unresolved implementations.
+  for(const ctx of contexts.filter(x=>x.analyzer==='VYPER_0_4_3_SOURCE_BOUND_COMPILER_AST')){
+    const candidates=contexts.filter(x=>x.analyzer===ctx.analyzer&&x.path===ctx.path&&
+      x.kind==='FUNCTION');
+    const unresolved=[];
+    for(const name of ctx.vyperInternalCallees??[]){
+      const same=candidates.filter(x=>x.canonicalSignature.startsWith(name+'('));
+      if(same.length===1)ctx.internalCalls.push(same[0].symbolId);
+      else unresolved.push(name);
+    }
+    ctx.internalCalls=distinct(ctx.internalCalls);
+    ctx.unresolvedInternalCallees=unresolved;
+    delete ctx.vyperInternalCallees;
   }
   for(const [file,ast] of asts) {
     const source=bySource.get(file);
