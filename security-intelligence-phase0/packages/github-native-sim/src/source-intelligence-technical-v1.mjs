@@ -129,7 +129,10 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
     compilerArtifacts.push({
       artifactId,qualifiedName,compilationUnitId:a.compilationUnitId??'default',sourcePath:a.sourceName,sourceId,language:lang,abiDigestSha256:digestCanonicalV1(a.abi??[]),
       creationBytecodeDigestSha256:bytecodeDigest(a.bytecode),deployedBytecodeDigestSha256:bytecodeDigest(a.deployedBytecode),
-      storageLayoutAvailable:a.storageLayout?'YES':'NO',metadataAvailable:a.metadata!=null,methodIdentifiers:clone(a.methodIdentifiers??{}),
+      storageLayoutAvailable:(a.storageLayout||a.vyperCompilerLayout?.storage_layout)?'YES':'NO',
+      storageLayoutFormat:a.vyperCompilerLayout?.storage_layout?'VYPER_EXACT_COMPILER_LAYOUT':'SOLIDITY_STANDARD_JSON_OR_NONE',
+      vyperCompilerLayout:a.vyperCompilerLayout?clone(a.vyperCompilerLayout):null,
+      metadataAvailable:a.metadata!=null,methodIdentifiers:clone(a.methodIdentifiers??{}),
       creationBytecodeBytes:Math.floor(String(a.bytecode??'0x').replace(/^0x/,'').length/2),
       deployedBytecodeBytes:Math.floor(String(a.deployedBytecode??'0x').replace(/^0x/,'').length/2),
       preliminaryDeploymentGasEstimate:{acceptanceClass:'PRELIMINARY_NOT_PHASE7_ACCEPTED',estimate:a.gasEstimates?.creation?.totalCost??null},
@@ -591,7 +594,7 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
       const state=declarations.find(d=>d.sourcePath===artifact.sourceName&&
         d.name===name&&d.kind==='STATE_VARIABLE');
       if(state){
-        state.slot=String(item.slot);state.offset='0';
+        state.slot=String(item.slot);state.offset=item.offset===undefined?null:String(item.offset);
         state.compilerType=typeof item.type==='string'?item.type:state.typeAnnotationSyntax??null;
         state.compilerLayoutStatus='COMPILER_EMITTED';
         state.evidenceClass='VYPER_0_4_3_COMPILER_LAYOUT_PLUS_SOURCE_DECLARATION';
@@ -599,7 +602,8 @@ export function enrichSourceIntelligenceWithReviewInventoryV1({sourceIntelligenc
       si.storageLayout??=[];
       si.storageLayout.push({
         storageId:'STORE-'+pad(si.storageLayout.length+1,4),
-        contractId:contract.contractId,label:name,slot:String(item.slot),offset:'0',
+        contractId:contract.contractId,label:name,slot:String(item.slot),
+        offset:item.offset===undefined?null:String(item.offset),
         type:typeof item.type==='string'?item.type:null,
         nSlots:Number.isInteger(item.n_slots)?item.n_slots:null,
         sourceLocation:state?.sourceLocation??'VYPER_LAYOUT_DECLARATION_NOT_SOURCE_MATCHED',
