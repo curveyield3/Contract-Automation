@@ -159,14 +159,23 @@ async function detectBuildConfig(projectRoot){
   if(!candidates.length)throw new Error('unable to detect exact Solidity compiler version from source package');
   const topPriority=candidates[0].priority;
   const topVersions=[...new Set(candidates.filter(x=>x.priority===topPriority).map(x=>x.version))];
-  if(topVersions.length>1)throw new Error(`conflicting explicit Solidity compiler versions: ${topVersions.join(', ')}`);
+  // Hardhat explicitly supports multiple compiler profiles. Reject ambiguous, unrelated
+  // version declarations, but retain every version declared in its compilers array.
+  if(topVersions.length>1){
+    const hardhat=texts.find(t=>/^hardhat\\.config\\.(js|cjs|mjs|ts)$/.test(t.path)&&
+      candidates.filter(x=>x.priority===topPriority).every(x=>x.basis===t.path));
+    const compilerArray=hardhat?.text.match(/\\bcompilers\\s*:\\s*\\[([\\s\\S]*?)\\]/)?.[1]??'';
+    const declared=new Set([...compilerArray.matchAll(/\\bversion\\s*:\\s*['\"](\\d+\\.\\d+\\.\\d+)['\"]/g)].map(x=>x[1]));
+    if(!compilerArray||topVersions.some(v=>!declared.has(v)))
+      throw new Error(`conflicting explicit Solidity compiler versions: ${topVersions.join(', ')}`);
+  }
   const compiler=candidates[0];
   const allText=texts.map(x=>x.text).join('\n');
   const opt=allText.match(/optimizer\s*:\s*\{[\s\S]{0,240}?enabled\s*:\s*(true|false)[\s\S]{0,240}?runs\s*:\s*(\d+)/);
   const runs=opt?Number(opt[2]):Number(foundryDefault.match(/^\s*optimizer_runs\s*=\s*(\d+)/m)?.[1]??200); const enabled=opt?opt[1]==='true':!foundryText||foundryDefault.match(/^\s*optimizer\s*=\s*(true|false)/m)?.[1]==='true';
   const via=allText.match(/viaIR\s*:\s*(true|false)/);
   const evm=allText.match(/evmVersion\s*:\s*['"]([^'"]+)['"]/);
-  return{compilerVersion:compiler.version,compilerCandidates:candidates,optimizer:{enabled,runs},viaIR:via?via[1]==='true':foundryDefault.match(/^\s*via_ir\s*=\s*(true|false)/m)?.[1]==='true',evmVersion:evm?.[1]??foundryDefault.match(/^\s*evm_version\s*=\s*['"]([^'"]+)['"]/m)?.[1]??null,evidence};
+  return{compilerVersion:compiler.version,compilerVersions:topVersions,compilerCandidates:candidates,optimizer:{enabled,runs},viaIR:via?via[1]==='true':foundryDefault.match(/^\s*via_ir\s*=\s*(true|false)/m)?.[1]==='true',evmVersion:evm?.[1]??foundryDefault.match(/^\s*evm_version\s*=\s*['"]([^'"]+)['"]/m)?.[1]??null,evidence};
 }
 
 
@@ -816,7 +825,7 @@ async function main(){
   }
   if(vyperVersions.size>1)throw new Error('Mixed incompatible Vyper compiler pragmas in contracts/');
   const vyperVersion=[...vyperVersions][0]??null;
-  const requestedCompilers=[{language:'solidity',version:cfg.compilerVersion},
+  const requestedCompilers=[...(cfg.compilerVersions??[cfg.compilerVersion]).map(version=>({language:'solidity',version})),
     ...(vyperVersion?[{language:'vyper',version:vyperVersion}]:[])];
   const auditScope=await loadAuditScope(detected.absolute);
 
