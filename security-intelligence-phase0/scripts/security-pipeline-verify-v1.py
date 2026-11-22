@@ -106,11 +106,15 @@ def _safe(value, limit=320):
 def make_warning(ctx, args, code, check_id, field, expected, observed,
                  impact, correction, evidence=None, component=None,
                  operation=None, observation_failure=None, native_exit=None):
-    source = {"value": _safe(expected, 320),
+    source = {"value": None if expected is None else _safe(expected, 320),
               "source": "verified original input or trusted workflow configuration"}
     evidence_sha = sha256_bytes(json.dumps(observed, sort_keys=True, default=str).encode())
-    seen = {"value": _safe(observed, 320),
+    seen = {"value": None if observed is None else _safe(observed, 320),
             "source": _safe(evidence or "current trusted job-local observation", 220)}
+    missing_observation = (observation_failure or
+        ("original observation not available at " +
+         _safe(evidence or "current trusted job-local observation", 220) +
+         " for " + _safe(field, 180))) if observed is None else observation_failure
     identity = {"run": ctx["runId"], "attempt": ctx["runAttempt"],
                 "stage": args.stage, "check": check_id, "field": field,
                 "evidenceSha256": evidence_sha}
@@ -121,8 +125,9 @@ def make_warning(ctx, args, code, check_id, field, expected, observed,
         "componentId": _safe(component, 90) if component else None,
         "targetId": None, "checkId": _safe(check_id, 100),
         "configurationField": _safe(field, 240), "expected": source, "observed": seen,
-        "observationFailure": observation_failure,
-        "mismatch": "{}: expected {}; observed {}".format(field, _safe(expected), _safe(observed)),
+        "observationFailure": _safe(missing_observation, 350) if missing_observation else None,
+        "mismatch": "{}: expected {}; observed {}".format(
+            _safe(field, 240), _safe(expected), _safe(observed)),
         "impact": _safe(impact, 420), "requiredCorrection": _safe(correction, 420),
         "nativeEvidenceRefs": [evidence] if evidence else [],
         "runIdentitySha256": None, "runId": ctx["runId"], "runAttempt": ctx["runAttempt"],
@@ -131,7 +136,8 @@ def make_warning(ctx, args, code, check_id, field, expected, observed,
         "redactions": [], "nativeExitCode": native_exit,
         "sourceArtifactName": None,
         "sourceArchiveSha256": None, "workflowHeadSha": ctx["workflowHeadSha"],
-        "jobId": args.job, "fieldPath": field, "correction": correction,
+        "jobId": args.job, "fieldPath": _safe(field, 240),
+        "correction": _safe(correction, 420),
         "operationDisposition": "NOT_EXECUTED", "privacyClass": "PUBLIC_SAFE"
     }
 
