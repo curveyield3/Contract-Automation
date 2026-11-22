@@ -289,6 +289,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Pin original toolkit adapter Node runtime to major 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Download original same-attempt preflight evidence
         id: original_preflight
         uses: actions/download-artifact@v4
@@ -397,6 +401,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Pin original toolkit adapter Node runtime to major 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Download exact same-run non-executable profile metadata
         id: profile_download
         uses: actions/download-artifact@v4
