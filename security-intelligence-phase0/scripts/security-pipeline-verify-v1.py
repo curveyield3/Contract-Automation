@@ -746,6 +746,56 @@ def verify_stage(root, args, ctx):
                 str(issue.get("impact") or "native prerequisite unavailable"),
                 str(issue.get("correction") or "inspect original planned prerequisite"),
                 args.native_result))
+        if args.stage == "G2B":
+            native_file = Path(args.input_root or "") / "FORK_NATIVE_STATE_v1.json"
+            native_state, native_missing = _read_optional_json(
+                str(native_file) if args.input_root else None)
+            native_bound = bool(
+                isinstance(native_state, dict) and
+                native_state.get("schemaVersion") == "curveyield-security-pipeline-fork-native-v1" and
+                native_state.get("stage") == "G2B" and
+                str(native_state.get("runId")) == ctx["runId"] and
+                str(native_state.get("runAttempt")) == str(ctx["runAttempt"]) and
+                native_state.get("headSha") == ctx["workflowHeadSha"] and
+                native_state.get("sourceArchiveSha256") ==
+                (doc.get("originalSourceArchiveSha256") if matching else None)
+            )
+            if not native_bound:
+                warnings.append(make_warning(ctx, args,
+                    "G2B.NATIVE_OBSERVATION_UNAVAILABLE", "G2B.NATIVE_ORIGINAL",
+                    "FORK_NATIVE_STATE_v1.json.runIdentity/sourceArchiveSha256",
+                    "original exact run/attempt/source-bound independent native fork receipt",
+                    {"failure": native_missing, "schema": native_state.get("schemaVersion")
+                     if isinstance(native_state, dict) else None},
+                    "no native C0/C1/C2 execution is verified",
+                    "Restore exact original source/authority-bound native fork state",
+                    str(native_file), observation_failure=native_missing))
+            else:
+                for item in native_state.get("warnings", []):
+                    if not isinstance(item, dict):
+                        continue
+                    warnings.append(make_warning(ctx, args,
+                        str(item.get("code") or "G2B.NATIVE_WARNING"),
+                        "G2B.NATIVE." + str(item.get("code") or "UNKNOWN"),
+                        str(item.get("configurationField") or "FORK_NATIVE_STATE_v1.json"),
+                        item.get("expected"), item.get("observed"),
+                        str(item.get("impact") or "native fork operation NOT_EXECUTED"),
+                        str(item.get("correction") or
+                            "Restore exact original approved source/fork evidence"),
+                        str(native_file)))
+                if native_state.get("status") != "COMPLETE":
+                    warnings.append(make_warning(ctx, args,
+                        "G2B.NATIVE_FORK_NOT_COMPLETE", "G2B.NATIVE_COMPLETION",
+                        "FORK_NATIVE_STATE_v1.json.status",
+                        "COMPLETE with verified C0/C1/C2 and original local receipts",
+                        {"status": native_state.get("status"),
+                         "nativeAttempted": native_state.get("nativeAttempted"),
+                         "c0": native_state.get("c0"),
+                         "c1": native_state.get("c1"),
+                         "c2": native_state.get("c2")},
+                        "C2 proof and private transport remain unverified",
+                        "Complete source-authorized local deployment and original C2 readbacks",
+                        str(native_file)))
         # A genuine C2 capture, live storage observation, or native Medusa
         # result is not established by a compiler-derived plan.
         _finish(root, args, ctx, warnings, "NOT_EXECUTED", {
