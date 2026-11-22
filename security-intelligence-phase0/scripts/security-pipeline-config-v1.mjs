@@ -749,8 +749,46 @@ function deriveNativeAnalyzerEligibility(args,identity,issues){
     originalNativeCounterexamples:[],
     requiredNativeFields:selected.requiredNative,issues
   };
+  const files=[output(args['output-root'],'NATIVE_ANALYZER_ELIGIBILITY_v1.json',report)];
+  if(name==='mimo-provider'){
+    files.push(output(args['output-root'],'MIMO_PROVIDER_COMPATIBILITY_v1.json',{
+      schemaVersion:'curveyield-mimo-provider-compatibility-v1',
+      stage:'G6',runIdentity:identity,sourceArchiveSha256:identityFacts.sourceSha256,
+      sourceBound,upstreamComposerCommit:'81d9626c249a70c0a0f0648a89de175443c0344c',
+      originalEntrypointGroup:'certora.autoprove.llm_provider',
+      localFixedModelAlias:'lite-solo-mimo-v1',
+      expectedHeavyModel:'lite-solo-mimo-v1',expectedLiteModel:'lite-solo-mimo-v1',
+      approvedCurrentAdapterSha256:knownContexts.find(x=>
+        x.artifact==='curveyield_autoprover_mimo/__init__.py')?.originalCurrentCheckoutSha256??null,
+      originalProviderSpecImported:false,originalModelProviderProtocolQualified:false,
+      originalProviderServiceProtocolQualified:false,
+      toolCallArgumentsAndResultsVerified:false,streamingVerified:false,
+      contextWindowAndCompactionVerified:false,
+      fileDocumentSemanticsVerified:false,memoryToolVerified:false,
+      nativeRetryBoundariesVerified:false,
+      nativeComposerCliExecuted:false,observedNativeInteractions:0,
+      status:'NOT_EXECUTED_UNVERIFIED_NATIVE_COMPOSER',
+      requiredCorrection:'Install the exact approved upstream Composer lock and local MiMo/Prover bytes, then qualify every original provider interface against real native calls',
+      controllerAccepted:false
+    }));
+  }
+  if(name==='autoprover'){
+    files.push(output(args['output-root'],'AUTOPROVER_PROPERTIES_v1.json',{
+      schemaVersion:'curveyield-autoprover-properties-v1',
+      stage:'G7',runIdentity:identity,sourceArchiveSha256:identityFacts.sourceSha256,
+      sourceBound,upstreamComposerCommit:'81d9626c249a70c0a0f0648a89de175443c0344c',
+      heavyModel:'lite-solo-mimo-v1',liteModel:'lite-solo-mimo-v1',
+      nativeComposerCliVerified:false,originalLocalProverVerified:false,
+      originalSourceLinkedCvlFiles:[],originalNativeProverResults:[],
+      nativePropertiesGenerated:0,nativePropertiesExecuted:0,
+      proven:0,counterexamples:0,unknown:0,unsupported:0,
+      status:'NOT_EXECUTED',
+      requiredCorrection:'Qualify actual G6 provider, genuine local Prover/JVM/SMT pins and approved source-specific CVL scope before native execution',
+      controllerAccepted:false
+    }));
+  }
   return {mode:'native-analyzer-eligibility',status:'NOT_EXECUTED',sourceBound,
-    files:[output(args['output-root'],'NATIVE_ANALYZER_ELIGIBILITY_v1.json',report)],issues};
+    files,issues};
 }
 function additional(args,identity,issues){
   const folder=args['output-root'], op=args.operation;
