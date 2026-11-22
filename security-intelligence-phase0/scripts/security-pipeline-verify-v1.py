@@ -220,18 +220,40 @@ def _read_optional_json(path):
 
 
 def _finish(root, args, ctx, warnings, status, extra=None):
-    for w in warnings:
+    ledger = root / "SECURITY_PIPELINE_WARNINGS_v1.jsonl"
+    previous = []
+    if ledger.exists():
+        for line in ledger.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                old = json.loads(line)
+                if old.get("runId") != ctx["runId"] or old.get("runAttempt") != ctx["runAttempt"]:
+                    raise ValueError("EXISTING_LEDGER_RUN_IDENTITY_MISMATCH")
+                previous.append(old)
+    previous_ids = {w["warningId"] for w in previous}
+    new = [w for w in warnings if w["warningId"] not in previous_ids]
+    for w in new:
         record_warning_jsonl(root, w)
-    if not warnings:
-        (root / "SECURITY_PIPELINE_WARNINGS_v1.jsonl").touch()
+    total = previous + new
+    if not total:
+        ledger.touch()
         summary = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary:
             with open(summary, "a", encoding="utf-8") as out:
                 out.write("Security pipeline {} / {}: zero configuration warnings recorded.\n".format(args.job, args.stage))
-    write_stage_disposition(root, args, ctx, status, warnings, extra)
+    prior_stage_path = root / ("PIPELINE_STAGE_" + args.stage + "_v1.json")
+    prior_stage, prior_err = _read_optional_json(str(prior_stage_path))
+    if isinstance(prior_stage, dict) and not prior_err:
+        if (prior_stage.get("jobRunId") != ctx["runId"] or
+                prior_stage.get("jobRunAttempt") != ctx["runAttempt"]):
+            raise ValueError("EXISTING_STAGE_RUN_IDENTITY_MISMATCH")
+        if args.mode == "summarize-job" and args.stage == "ADMIT" and not new:
+            status = prior_stage["status"]
+            extra = {**{key: prior_stage.get(key) for key in (
+                "sourceBound", "sourceIdentity", "dependencyFacts")}, **(extra or {})}
+    write_stage_disposition(root, args, ctx, status, total, extra)
     (root / "SECURITY_PIPELINE_STAGE_SUMMARY_v1.md").write_text(
         "# Security pipeline {} / {}\n\nStatus: **{}**\nWarnings: **{}**\nRun: {} attempt {}\n".format(
-            args.job, args.stage, status, len(warnings), ctx["runId"], ctx["runAttempt"]), encoding="utf-8")
+            args.job, args.stage, status, len(total), ctx["runId"], ctx["runAttempt"]), encoding="utf-8")
 
 
 def admit_extended(root, args, ctx):
