@@ -446,6 +446,20 @@ jobs:
         with:
           path: ${{ steps.tool_plan.outputs.cache_path }}
           key: ${{ steps.tool_plan.outputs.cache_key }}
+      - name: Provision original trusted software bytes on exact cache miss
+        id: cache_provision
+        if: ${{ steps.tool_plan.outputs.provisionable == 'true' && steps.cache_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          node security-intelligence-phase0/scripts/security-pipeline-toolkit-v1.mjs \
+            --operation provision --component "$COMPONENT" \
+            --profile "$RUNNER_TEMP/security-pipeline/toolkit-profile/TOOLKIT_PROFILE_v1.json" \
+            --run-identity "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/run/RUN_IDENTITY_v1.json" \
+            --toolkit-root "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/payload" \
+            --output-root "$RUNNER_TEMP/security-pipeline/toolkit/$COMPONENT/safe"
       - name: Inspect exact restored component without executing it
         id: tool_prepare
         if: ${{ always() }}
