@@ -79,17 +79,21 @@ function observedPins(component){
  const packageLock=repoFile('security-intelligence-phase0/package-lock.json');
  const packageMeta=repoFile('security-intelligence-phase0/package.json');
  const source={
-  packageLockSha256:sha256HexV1(packageLock),
-  packageJsonSha256:sha256HexV1(packageMeta),
+  packageLockSha256:null,
+  packageJsonSha256:null,
   workflowPinsSha256:null,
   nativeToolchainPinsSha256:null
  };
+ if(['foundry-node','source-compilers'].includes(component)){
+  source.packageLockSha256=sha256HexV1(packageLock);
+  source.packageJsonSha256=sha256HexV1(packageMeta);
+ }
  const workflowText=repoFile('.github/workflows/lite-solo-ai-inference-v1.yml').toString('utf8');
  const dockerBytes=repoFile('security-intelligence-phase0/Dockerfile');
  if(['slither-storage','source-compilers'].includes(component))
   source.nativeToolchainPinsSha256=sha256HexV1(dockerBytes);
- if(['mimo-runtime','mimo-weights'].includes(component))
-  source.workflowPinsSha256=sha256HexV1(Buffer.from(workflowText,'utf8'));
+ // Hash only the component's actual pin tuple, not unrelated workflow source.
+ // Populated after reading the current trusted workflow's exact pin fields.
  const val=(key,pattern)=>{
   const matches=[...workflowText.matchAll(pattern)];
   return matches.length===1?matches[0][1]:null;
@@ -98,6 +102,10 @@ function observedPins(component){
  const modelRev=val('MODEL_REVISION',/^\s*MODEL_REVISION:\s*([a-f0-9]{40})\s*$/gm);
  const modelFile=val('MODEL_FILE',/^\s*MODEL_FILE:\s*([A-Za-z0-9._-]+)\s*$/gm);
  const llamaSha=val('LLAMA_SHA',/^\s*LLAMA_SHA:\s*([a-f0-9]{40})\s*$/gm);
+ if(component==='mimo-weights')
+  source.workflowPinsSha256=digestCanonicalV1([modelSha,modelRev,modelFile]);
+ if(component==='mimo-runtime')
+  source.workflowPinsSha256=digestCanonicalV1([llamaSha,'cpu','GGML_NATIVE_OFF']);
  const pkg=JSON.parse(packageLock.toString('utf8'));
  const rootDeps=pkg.packages?.['']?.dependencies??{};
  return {observedTrustedSourceDigests:source,
@@ -155,9 +163,22 @@ function approvedComponent(a){
 function safeFile(root,filename){
  const target=path.resolve(root,filename),base=path.resolve(root);
  if(target!==base&&!target.startsWith(base+path.sep))throw Error('TOOLKIT_INVALID_RELATIVE_BINARY_PATH');
+ if(fs.lstatSync(base).isSymbolicLink())throw Error('TOOLKIT_PAYLOAD_ROOT_SYMLINK');
  if(fs.lstatSync(target).isSymbolicLink())throw Error('TOOLKIT_EXECUTABLE_IS_SYMLINK');
  if(!fs.statSync(target).isFile())throw Error('TOOLKIT_EXPECTED_BINARY_NOT_FILE');
  return target;
+}
+function digestLargeFile(file){
+ const hasher=crypto.createHash('sha256'),fd=fs.openSync(file,'r');
+ const chunk=Buffer.allocUnsafe(1024*1024);
+ try{
+  for(;;){
+   const bytes=fs.readSync(fd,chunk,0,chunk.length,null);
+   if(!bytes)break;
+   hasher.update(chunk.subarray(0,bytes));
+  }
+ }finally{fs.closeSync(fd);}
+ return hasher.digest('hex');
 }
 function inspect(a,profile){
  const root=a['toolkit-root'];
@@ -166,7 +187,7 @@ function inspect(a,profile){
  if(a.component!=='mimo-weights'||!f)
   return {verified:false,reason:'NO_APPROVED_NATIVE_BINARY_MANIFEST',sha256:null};
  try{
-  const file=safeFile(root,f),real=sha256HexV1(checkedBytes(file,16*1024*1024*1024));
+  const file=safeFile(root,f),real=digestLargeFile(file);
   return {verified:real===profile.expectedBinarySha256,
    reason:real===profile.expectedBinarySha256?'MATCHES_TRUSTED_WORKFLOW_PIN':'TRUSTED_PIN_MISMATCH',
    sha256:real,relativeBinaryPath:f};
