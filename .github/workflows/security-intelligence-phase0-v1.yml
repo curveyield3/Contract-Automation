@@ -199,5 +199,9 @@ jobs:
                     .path == $unit.path)
                 )
               ))' .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
-            echo "Compiled source-bound evidence accepted with recorded limitations; no security verdict"
+            if jq -e '.status=="PARTIAL"' .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null; then
+              echo "::warning::Phase 0 has named coverage gaps (Vyper semantics, ABI origins or compilation). See PREFLIGHT_MANIFEST_v1.json and DISCOVERY_SUMMARY_v1.md in the published artifact."
+            else
+              echo "Compiled source-bound evidence collected; standalone audit-gate review still required"
+            fi
           fi
