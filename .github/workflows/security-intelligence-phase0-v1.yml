@@ -1014,8 +1014,368 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  wake_analyze:
+    needs: [admit, collect, toolkit_qualify]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout original immutable analyzer source and trusted pin metadata
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download original source-bound compiler and Slither collector facts
+        id: source_evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/wake_analyze/input/preflight
+        continue-on-error: true
+      - name: Reconcile exact compiled ABI targets with native program eligibility
+        id: native_eligibility
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/wake_analyze"
+          mkdir -p "$base/input/target-plan" "$base/native" "$base/report"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline/wake_analyze/input/RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({
+            schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+            runId:process.env.GITHUB_RUN_ID,
+            runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            workflowHeadSha:process.env.GITHUB_SHA,
+            repository:process.env.GITHUB_REPOSITORY
+          },null,2)+'\n',{mode:0o600});
+          NODE
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation enumerate-targets \
+            --input-root "$base/input/preflight" \
+            --output-root "$base/input/target-plan" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json" || true
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation native-analyzer-eligibility --component wake \
+            --input-root "$base/input/preflight" \
+            --native-config "$base/input/target-plan/SECURITY_TARGET_PLAN_v1.json" \
+            --output-root "$base/native" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json"
+      - name: Independently publish exact G3 original native tool and source gaps
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/wake_analyze"
+          mkdir -p "$base/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-stage --job wake_analyze --stage G3 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
+            --input-root "$base/native" --report-root "$base/report"
+      - name: Upload source-eligible G3 stage and exact native-not-executed warnings
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-wake_analyze-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/wake_analyze/report/
+          if-no-files-found: warn
+          retention-days: 14
+
+  mythril_analyze:
+    needs: [admit, collect, toolkit_qualify]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout original immutable analyzer source and trusted pin metadata
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download original source-bound compiler and Slither collector facts
+        id: source_evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/mythril_analyze/input/preflight
+        continue-on-error: true
+      - name: Reconcile exact compiled ABI targets with native program eligibility
+        id: native_eligibility
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/mythril_analyze"
+          mkdir -p "$base/input/target-plan" "$base/native" "$base/report"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline/mythril_analyze/input/RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({
+            schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+            runId:process.env.GITHUB_RUN_ID,
+            runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            workflowHeadSha:process.env.GITHUB_SHA,
+            repository:process.env.GITHUB_REPOSITORY
+          },null,2)+'\n',{mode:0o600});
+          NODE
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation enumerate-targets \
+            --input-root "$base/input/preflight" \
+            --output-root "$base/input/target-plan" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json" || true
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation native-analyzer-eligibility --component mythril \
+            --input-root "$base/input/preflight" \
+            --native-config "$base/input/target-plan/SECURITY_TARGET_PLAN_v1.json" \
+            --output-root "$base/native" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json"
+      - name: Independently publish exact G4 original native tool and source gaps
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/mythril_analyze"
+          mkdir -p "$base/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-stage --job mythril_analyze --stage G4 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
+            --input-root "$base/native" --report-root "$base/report"
+      - name: Upload source-eligible G4 stage and exact native-not-executed warnings
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-mythril_analyze-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/mythril_analyze/report/
+          if-no-files-found: warn
+          retention-days: 14
+
+  prover_qualify:
+    needs: [admit, collect, toolkit_qualify]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout original immutable analyzer source and trusted pin metadata
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download original source-bound compiler and Slither collector facts
+        id: source_evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/prover_qualify/input/preflight
+        continue-on-error: true
+      - name: Reconcile exact compiled ABI targets with native program eligibility
+        id: native_eligibility
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/prover_qualify"
+          mkdir -p "$base/input/target-plan" "$base/native" "$base/report"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline/prover_qualify/input/RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({
+            schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+            runId:process.env.GITHUB_RUN_ID,
+            runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            workflowHeadSha:process.env.GITHUB_SHA,
+            repository:process.env.GITHUB_REPOSITORY
+          },null,2)+'\n',{mode:0o600});
+          NODE
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation enumerate-targets \
+            --input-root "$base/input/preflight" \
+            --output-root "$base/input/target-plan" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json" || true
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation native-analyzer-eligibility --component certora-prover \
+            --input-root "$base/input/preflight" \
+            --native-config "$base/input/target-plan/SECURITY_TARGET_PLAN_v1.json" \
+            --output-root "$base/native" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json"
+      - name: Independently publish exact G5 original native tool and source gaps
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/prover_qualify"
+          mkdir -p "$base/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-stage --job prover_qualify --stage G5 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
+            --input-root "$base/native" --report-root "$base/report"
+      - name: Upload source-eligible G5 stage and exact native-not-executed warnings
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-prover_qualify-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/prover_qualify/report/
+          if-no-files-found: warn
+          retention-days: 14
+
+  mimo_provider_qualify:
+    needs: [admit, collect, mimo_configure, toolkit_qualify]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout original immutable analyzer source and trusted pin metadata
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download original source-bound compiler and Slither collector facts
+        id: source_evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/mimo_provider_qualify/input/preflight
+        continue-on-error: true
+      - name: Reconcile exact compiled ABI targets with native program eligibility
+        id: native_eligibility
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/mimo_provider_qualify"
+          mkdir -p "$base/input/target-plan" "$base/native" "$base/report"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline/mimo_provider_qualify/input/RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({
+            schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+            runId:process.env.GITHUB_RUN_ID,
+            runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            workflowHeadSha:process.env.GITHUB_SHA,
+            repository:process.env.GITHUB_REPOSITORY
+          },null,2)+'\n',{mode:0o600});
+          NODE
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation enumerate-targets \
+            --input-root "$base/input/preflight" \
+            --output-root "$base/input/target-plan" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json" || true
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation native-analyzer-eligibility --component mimo-provider \
+            --input-root "$base/input/preflight" \
+            --native-config "$base/input/target-plan/SECURITY_TARGET_PLAN_v1.json" \
+            --output-root "$base/native" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json"
+      - name: Independently publish exact G6 original native tool and source gaps
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/mimo_provider_qualify"
+          mkdir -p "$base/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-stage --job mimo_provider_qualify --stage G6 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
+            --input-root "$base/native" --report-root "$base/report"
+      - name: Upload source-eligible G6 stage and exact native-not-executed warnings
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-mimo_provider_qualify-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/mimo_provider_qualify/report/
+          if-no-files-found: warn
+          retention-days: 14
+
+  autoprover_run:
+    needs: [admit, collect, prover_qualify, mimo_provider_qualify]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout original immutable analyzer source and trusted pin metadata
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download original source-bound compiler and Slither collector facts
+        id: source_evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/autoprover_run/input/preflight
+        continue-on-error: true
+      - name: Reconcile exact compiled ABI targets with native program eligibility
+        id: native_eligibility
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/autoprover_run"
+          mkdir -p "$base/input/target-plan" "$base/native" "$base/report"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const dest=path.join(process.env.RUNNER_TEMP,'security-pipeline/autoprover_run/input/RUN_IDENTITY_v1.json');
+          fs.writeFileSync(dest,JSON.stringify({
+            schemaVersion:'curveyield-security-pipeline-run-identity-v1',
+            runId:process.env.GITHUB_RUN_ID,
+            runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),
+            workflowHeadSha:process.env.GITHUB_SHA,
+            repository:process.env.GITHUB_REPOSITORY
+          },null,2)+'\n',{mode:0o600});
+          NODE
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation enumerate-targets \
+            --input-root "$base/input/preflight" \
+            --output-root "$base/input/target-plan" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json" || true
+          node security-intelligence-phase0/scripts/security-pipeline-config-v1.mjs \
+            --operation native-analyzer-eligibility --component autoprover \
+            --input-root "$base/input/preflight" \
+            --native-config "$base/input/target-plan/SECURITY_TARGET_PLAN_v1.json" \
+            --output-root "$base/native" \
+            --run-identity "$base/input/RUN_IDENTITY_v1.json"
+      - name: Independently publish exact G7 original native tool and source gaps
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/autoprover_run"
+          mkdir -p "$base/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-stage --job autoprover_run --stage G7 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-result "$base/native/SECURITY_PIPELINE_CONFIG_RESULT_v1.json" \
+            --input-root "$base/native" --report-root "$base/report"
+      - name: Upload source-eligible G7 stage and exact native-not-executed warnings
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-autoprover_run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/autoprover_run/report/
+          if-no-files-found: warn
+          retention-days: 14
+
   reconcile:
-    needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify, mimo_configure, fork_setup, storage_inspect, medusa_analyze]
+    needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify, mimo_configure, fork_setup, storage_inspect, medusa_analyze, wake_analyze, mythril_analyze, prover_qualify, mimo_provider_qualify, autoprover_run]
     if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -1166,7 +1526,7 @@ jobs:
 
 
   publish_warnings:
-    needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify, mimo_configure, fork_setup, storage_inspect, medusa_analyze, reconcile, qualify_release]
+    needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify, mimo_configure, fork_setup, storage_inspect, medusa_analyze, wake_analyze, mythril_analyze, prover_qualify, mimo_provider_qualify, autoprover_run, reconcile, qualify_release]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
