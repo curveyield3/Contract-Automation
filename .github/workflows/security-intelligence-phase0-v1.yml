@@ -1012,8 +1012,159 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  publish_warnings:
+  reconcile:
     needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify, mimo_configure, fork_setup, storage_inspect, medusa_analyze]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout immutable v1 evidence reconciler
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download original collector evidence by exact current-run artifact identity
+        id: preflight_reconciliation
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/reconcile/input/preflight
+        continue-on-error: true
+      - name: Download original stage warning parts without merging foreign identities
+        id: stage_reconciliation
+        uses: actions/download-artifact@v4
+        with:
+          pattern: security-pipeline-stage-*-${{ github.run_id }}-${{ github.run_attempt }}
+          merge-multiple: false
+          path: ${{ runner.temp }}/security-pipeline/reconcile/input/parts/stages
+        continue-on-error: true
+      - name: Save actual GitHub predecessor results and download outcomes
+        shell: bash
+        env:
+          OBSERVED_NEEDS_JSON: ${{ toJSON(needs) }}
+          PREFLIGHT_DOWNLOAD_RESULT: ${{ steps.preflight_reconciliation.outcome }}
+          STAGE_DOWNLOAD_RESULT: ${{ steps.stage_reconciliation.outcome }}
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/security-pipeline/reconcile"
+          mkdir -p "$base/input" "$base/native" "$base/report"
+          printf '%s\n' "$OBSERVED_NEEDS_JSON" > "$base/input/needs.json"
+          printf '%s\n' "$PREFLIGHT_DOWNLOAD_RESULT" > "$base/input/preflight-download-outcome.txt"
+          printf '%s\n' "$STAGE_DOWNLOAD_RESULT" > "$base/input/stage-download-outcome.txt"
+      - name: Reconcile original bytes, actual native stage availability and real metrics
+        id: native_reconciliation
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/reconcile"
+          mkdir -p "$base/native"
+          node security-intelligence-phase0/scripts/security-pipeline-evidence-v1.mjs \
+            --operation reconcile-native \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --run-head-sha "$GITHUB_SHA" \
+            --input-root "$base/input" --output-root "$base/native"
+      - name: Independently label G8 original source and native coverage
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/reconcile"
+          mkdir -p "$base/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-stage --job reconcile --stage G8 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-result "$base/native/SECURITY_NATIVE_RECONCILIATION_v1.json" \
+            --input-root "$base/native" --report-root "$base/report"
+      - name: Publish exact current-run native evidence index and efficiency telemetry
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-native-index-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/security-pipeline/reconcile/native/SECURITY_PIPELINE_NATIVE_EVIDENCE_INDEX_v1.json
+            ${{ runner.temp }}/security-pipeline/reconcile/native/SECURITY_PIPELINE_EFFICIENCY_v1.json
+            ${{ runner.temp }}/security-pipeline/reconcile/native/SECURITY_NATIVE_RECONCILIATION_v1.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Publish G8 original job-owned warning and status part
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-reconcile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/reconcile/report/
+          if-no-files-found: warn
+          retention-days: 14
+
+  qualify_release:
+    needs: [admit, reconcile]
+    if: ${{ always() && !cancelled() && needs.admit.outputs.extended_requested == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout immutable v1 release qualifier
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download original same-run G8 native evidence index
+        id: native_index
+        uses: actions/download-artifact@v4
+        with:
+          name: security-pipeline-native-index-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/qualify_release/input
+        continue-on-error: true
+      - name: Classify original native scope for honest v1 release disposition
+        id: release_classification
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/qualify_release"
+          mkdir -p "$base/native"
+          node security-intelligence-phase0/scripts/security-pipeline-evidence-v1.mjs \
+            --operation qualify-dossier \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --run-head-sha "$GITHUB_SHA" \
+            --input-root "$base/input" --output-root "$base/native"
+      - name: Independently verify G9 dossier source and native completion claims
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          base="$RUNNER_TEMP/security-pipeline/qualify_release"
+          mkdir -p "$base/report"
+          python3 security-intelligence-phase0/scripts/security-pipeline-verify-v1.py \
+            --mode verify-stage --job qualify_release --stage G9 \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --native-result "$base/native/SECURITY_DOSSIER_QUALIFICATION_v1.json" \
+            --input-root "$base/native" --report-root "$base/report"
+      - name: Upload original source-bound G9 status without fabricated security PASS
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-release-status-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/security-pipeline/qualify_release/native/SECURITY_PIPELINE_RELEASE_STATUS_v1.json
+            ${{ runner.temp }}/security-pipeline/qualify_release/native/SECURITY_DOSSIER_QUALIFICATION_v1.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload G9 exact warnings and stage status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-pipeline-stage-qualify_release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-pipeline/qualify_release/report/
+          if-no-files-found: warn
+          retention-days: 14
+
+
+  publish_warnings:
+    needs: [admit, collect, prepare_targets, toolkit_prepare, toolkit_qualify, mimo_configure, fork_setup, storage_inspect, medusa_analyze, reconcile, qualify_release]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
