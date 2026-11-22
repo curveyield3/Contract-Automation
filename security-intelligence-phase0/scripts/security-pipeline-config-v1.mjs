@@ -865,6 +865,19 @@ function additional(args,identity,issues){
       name,version:lock?.packages?.['node_modules/@foundry-rs/'+name]?.version??null,
       npmTarballIntegrity:lock?.packages?.['node_modules/@foundry-rs/'+name]?.integrity??null
     }));
+    // Original Foundry v1.7.1 npm/src/install.mjs (read-only upstream
+    // foundry-rs/foundry@4072e48705af9d93e3c0f6e29e93b5e9a40caed8)
+    // can fetch separate platform-specific binaries from registry metadata.
+    // The wrapper package's sha512 does NOT authenticate downloaded native ELF.
+    const nativePlatformPackages=['forge','cast','anvil'].map(name=>
+      '@foundry-rs/'+name+'-linux-amd64');
+    const nativePlatformLockEntries=nativePlatformPackages.map(name=>{
+      const row=lock?.packages?.['node_modules/'+name]??null;
+      return {name,version:row?.version??null,
+        npmTarballIntegrity:row?.integrity??null,
+        independentlyPinned:row?.version==='1.7.1'&&
+          typeof row?.integrity==='string'&&row.integrity.startsWith('sha512-')};
+    });
     const foundryPinned=foundryLocks.every(x=>
       x.version==='1.7.1'&&typeof x.npmTarballIntegrity==='string'&&
       x.npmTarballIntegrity.startsWith('sha512-'))&&
@@ -923,7 +936,10 @@ function additional(args,identity,issues){
         originalPinOrigin:'security-intelligence-phase0/package-lock.json',
         lockDigest:lockHash,recipeDigest:digestCanonicalV1({
           nodeMajor:22,packageLockSha256:lockHash,
-          originalActionSha256:nodeActionHash,foundryLocks}),
+          originalActionSha256:nodeActionHash,foundryLocks,
+          // These are observations only; an absent platform package digest
+          // cannot be treated as a qualified install recipe or executable.
+          nativePlatformLockEntries}),
         abiProfile:'node22-'+process.platform+'-'+process.arch,
         nativeConsumerStages:['fork_setup','storage_inspect','medusa_analyze']
       }:null,
@@ -971,7 +987,12 @@ function additional(args,identity,issues){
       }:null
     };
     const pinDeficits={
-      'foundry-node':['original independent Forge/Anvil/Cast native executable SHA-256'],
+      'foundry-node':[
+        'original independently pinned native package integrity for @foundry-rs/forge-linux-amd64@1_7_1',
+        'original independently pinned native package integrity for @foundry-rs/cast-linux-amd64@1_7_1',
+        'original independently pinned native package integrity for @foundry-rs/anvil-linux-amd64@1_7_1',
+        'original verified Forge/Cast/Anvil native ELF SHA-256 and loader ABI'
+      ],
       'source-compilers':['compiler-version-specific solc/Vyper original binary SHA-256 and source resolution ledger'],
       'slither-storage':['original slither-read-storage CLI/package-tree SHA-256 and Python lock'],
       'medusa':['approved immutable Go source revision','actual ELF SHA-256','Go build ABI'],
@@ -1009,6 +1030,8 @@ function additional(args,identity,issues){
         recipeDigest:provenance?.recipeDigest??null,
         expectedBytesOrQuota:null,
         originalPinOrigin:provenance?.originalPinOrigin??null,
+        originalNativePlatformPinObservations:id==='foundry-node'?
+          nativePlatformLockEntries:[],
         compilerSubentries:id==='source-compilers'?compilerSubentries:[],
         compilerVersionSetEvidenceSha256:id==='source-compilers'?compilerEvidenceSha256:null,
         originalPinEvidence:provenance?{
