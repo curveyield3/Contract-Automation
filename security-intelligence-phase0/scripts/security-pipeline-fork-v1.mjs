@@ -73,11 +73,21 @@ async function rpc(url,method,params=[]){
 async function main(){
  const args=argsOf(process.argv.slice(2));
  const ctx=(await json(args['run-identity'])).value;
- const plan=(await json(args.plan)).value;
- const authority=(await json(args.authority)).value;
- const sourceOriginal=await json(args['source-manifest']);
- const original=sourceOriginal.value;
  const warnings=[],out=args['output-root'];
+ let plan={},authority={},sourceOriginal={value:{},sha256:null};
+ for(const [label,file,assign] of [
+   ['FORK_EXECUTION_PLAN_v1.json',args.plan,x=>{plan=x.value;}],
+   ['EXTENDED_MODE_DISPOSITION_v1.json',args.authority,x=>{authority=x.value;}],
+   ['PREFLIGHT_MANIFEST_v1.json',args['source-manifest'],x=>{sourceOriginal=x;}]
+ ]){
+   try{assign(await json(file));}
+   catch(error){
+     warnings.push(problem('G2B.ORIGINAL_INPUT_MISSING',
+       label,'valid original source/run-bound input bytes',error.message,
+       'Restore exactly named same-run admitted artifact; no native source code can execute'));
+   }
+ }
+ const original=sourceOriginal.value;
  const required=(field,test,expected,correction)=>{
   const observed=plan[field];
   if(!test(observed))warnings.push(problem('G2B.REQUIRED_ORIGINAL_FACT_MISSING',
@@ -128,6 +138,16 @@ async function main(){
  required('approvedDeploymentProfileSha256',x=>SHA.test(x??''),
   'independently source-approved audit-deployment.json original SHA-256',
   'Bind exact original deployment profile bytes to the independent issuer');
+ // Cross-job materialization of the original admitted ZIP and C2 requires a
+ // separately approved restricted transport; GitHub warning artifacts do not
+ // establish such transport and are never read as source execution authority.
+ if(args.operation==='inspect'){
+  warnings.push(problem('G2B.RESTRICTED_SOURCE_ZIP_HANDOFF_MISSING',
+   'fork_setup.originalSourceZipTransport',
+   'independently approved restricted same-run source ZIP transport with original digest',
+   'preflight artifact exposes metadata, not an executable source ZIP',
+   'Provide a separately accepted restricted same-run source ZIP handoff, never upload source to warnings'));
+ }
  if(args.operation==='execute'){
   for(const x of ['source-zip','toolkit-profile','toolkit-root','build-evidence','private-root'])
    if(!args[x])warnings.push(problem('G2B.RESTRICTED_INPUT_NOT_AVAILABLE','--'+x,
@@ -139,7 +159,8 @@ async function main(){
   runAttempt:ctx.runAttempt,headSha:ctx.workflowHeadSha,
   sourceArchiveSha256:SHA.test(sourceSha??'')?sourceSha:null,
   originalSourceManifestSha256:sourceOriginal.sha256,
-  independentAuthorityAccepted:authority.approved===true&&warnings.length===0,
+  independentAuthorityAccepted:authority.approved===true&&
+    !warnings.some(w=>w.code==='G2B.INDEPENDENT_FORK_AUTHORITY'),
   claimedControllerAcceptance:false,executionMode:args.operation,
   nativeAttempted:false,status:'NOT_EXECUTED',
   c0:null,c1:null,c2:null,originalNativeReceiptCount:0,originalNativeReceiptSha256:null,
