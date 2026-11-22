@@ -565,6 +565,29 @@ function deriveNativeAnalyzerEligibility(args,identity,issues){
       [(row.compilationUnitId??'')+'|'+(row.qualifiedName??''),row]));
   const targets=[];
   const knownContexts=[];
+  if(name==='mimo-provider'||name==='autoprover'){
+    const providerPath=path.resolve(process.env.GITHUB_WORKSPACE??process.cwd(),
+      'security-intelligence-phase0/autoprover-local-provider/curveyield_autoprover_mimo/__init__.py');
+    const packagePath=path.resolve(process.env.GITHUB_WORKSPACE??process.cwd(),
+      'security-intelligence-phase0/autoprover-local-provider/pyproject.toml');
+    try{
+      const pluginBytes=readBytes(providerPath),packageBytes=readBytes(packagePath);
+      knownContexts.push({artifact:'curveyield_autoprover_mimo/__init__.py',
+        originalCurrentCheckoutSha256:sha256HexV1(pluginBytes),
+        entrypointPackageSha256:sha256HexV1(packageBytes),
+        declaredUpstreamComposerInterfaceRevision:
+          '81d9626c249a70c0a0f0648a89de175443c0344c',
+        registrationImportNativeVerified:false,
+        providerToolCallsNativeVerified:false,
+        documentAndMemoryNativeVerified:false,
+        compatibilityClass:'ORIGINAL_SOURCE_ADAPTER_PRESENT_UNQUALIFIED'});
+    }catch(error){
+      issues.push(issue('NATIVE.LOCAL_MIMO_PROVIDER_ADAPTER_MISSING',
+        'security-intelligence-phase0/autoprover-local-provider/curveyield_autoprover_mimo/__init__.py',
+        'original current-revision local Composer provider and entrypoint metadata',
+        String(error),'Restore the existing out-of-tree provider source and original Composer runtime before qualification'));
+    }
+  }
   const originalReadiness=identityFacts.load('PROJECT_READINESS_AUTOMATED_v1.json');
   if(originalReadiness)knownContexts.push({
     artifact:'PROJECT_READINESS_AUTOMATED_v1.json',originalSha256:originalReadiness.sha256});
