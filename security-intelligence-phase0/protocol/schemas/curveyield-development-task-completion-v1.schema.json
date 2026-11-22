@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "curveyield-development-task-completion-v1",
+  "title": "CurveYield Development Task Completion v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "managerId",
+    "status",
+    "specificationSha256",
+    "skillSha256",
+    "implementationHeadSha",
+    "tests"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "curveyield-development-task-completion-v1"
+    },
+    "managerId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "const": "COMPLETE"
+    },
+    "specificationSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "skillSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "implementationHeadSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "tests": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "const": "PASS"
+          },
+          "workflowRunId": {
+            "type": ["integer", "string"]
+          },
+          "details": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "completedAt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string"
+    }
+  }
+}

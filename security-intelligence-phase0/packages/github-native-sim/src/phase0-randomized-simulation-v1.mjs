@@ -7,15 +7,13 @@ import zlib from 'node:zlib';
 import {spawn} from 'node:child_process';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {createHash} from 'node:crypto';
-import {fileURLToPath} from 'node:url';
-const MI_PHASE0_FORK_PACKAGE_ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 import {startRpcIdentityProxy} from '../../runner/src/rpc-identity-proxy-v1.mjs';
 import {stageExactArchiveSource,runProcess} from './execution.mjs';
 import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {installNativeFoundryDependencies} from '../../runner/src/native-build.mjs';
 import {captureDeployedStateSnapshotV1} from './adr-deployed-state-snapshot-v1.mjs';
 import {capturePhase0ForkStateV1} from './phase0-fork-state-reuse-v1.mjs';
-import {validateExecutionInputJoinV2,findSourceRuntimeTemplateMatchesV1} from './phase0-execution-input-v2.mjs';
+import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
 import {isBalancerV3TargetV1,discoverBalancerV3PoolsV1,buildBalancerV3ActionV1,balancerV3BptTransferRecipeV1,bootstrapBalancerV3PoolsV1} from './phase0-balancer-v3-planner-v1.mjs';
@@ -98,445 +96,13 @@ function deploymentScriptKeyV2(item){
 async function rpc(url,method,params=[]){
   // RPC requests can hang without a deadline even after the upstream preflight succeeds.
   // State export is larger than ordinary JSON-RPC reads and receives a separate allowance.
-  const deadlineMs=(method==='anvil_dumpState'||method==='debug_traceTransaction')?120000:60000;
+  const deadlineMs=method==='anvil_dumpState'?120000:60000;
   const res=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(deadlineMs)});
   if(!res.ok)throw new Error(`RPC ${method}: HTTP ${res.status}`);
   const body=await res.json();
   if(body.error)throw new Error(`RPC ${method}: ${body.error.message??JSON.stringify(body.error)}`);
   return body.result;
 }
-// Capture all actually mined package-deployment transactions on the same fork
-// before teardown; no RPC traces are reconstructed from post-revert state.
-function canonicalAbiParameterTypeV1(param){
-  const type=String(param?.type??'');
-  return type.startsWith('tuple')
-    ? '('+(param.components??[]).map(canonicalAbiParameterTypeV1).join(',')+')'+type.slice(5)
-    : type;
-}
-function buildActiveUseMethodInventoryV1({receipt,artifacts,deployedContracts,chainId,pinnedBlockNumber,pinnedBlockHash}){
-  const operationName=/^(deposit|depositFor|mint|withdraw|redeem|stake|unstake|supply|borrow|repay|claim|harvest|swap|exactInput|exactOutput|addLiquidity|removeLiquidity|joinPool|exitPool|open|close|settle|wrap|unwrap|liquidate)$/i;
-  const items=[];
-  for(const artifact of artifacts){
-    const sourceId={compilationUnitId:artifact.compilationUnitId??null,
-      sourceName:artifact.sourceName,contractName:artifact.contractName};
-    const potentiallyNamed=(deployedContracts??[]).filter(dep=>
-      dep.compilationUnitId===sourceId.compilationUnitId&&
-      dep.sourceName===sourceId.sourceName&&dep.contractName===sourceId.contractName);
-    const runtimeBindings=potentiallyNamed.filter(dep=>
-      dep.sourceBinding==='EXACT_SOURCE_AND_RUNTIME_MATCH'&&/^0x[0-9a-fA-F]{40}$/.test(dep.address??''));
-    for(const abi of artifact.abi??[]){
-      if(!['function','fallback','receive'].includes(abi?.type))continue;
-      const signature=abi.type==='function'
-        ? String(abi.name)+'('+(abi.inputs??[]).map(canonicalAbiParameterTypeV1).join(',')+')'
-        : abi.type;
-      const selectorRaw=artifact.methodIdentifiers?.[signature]??null;
-      const selector=/^(?:0x)?[a-f0-9]{8}$/i.test(String(selectorRaw??''))
-        ? '0x'+String(selectorRaw).replace(/^0x/i,'').toLowerCase():null;
-      const name=String(abi.name??'');
-      const bindingRows=runtimeBindings.length?runtimeBindings:[null];
-      for(const binding of bindingRows){
-        const identity={...sourceId,signature,chainId,pinnedBlockNumber,pinnedBlockHash,
-          runtimeAddress:binding?.address?.toLowerCase()??null};
-        const methodCandidateId='ACT-METHOD-'+sha256(Buffer.from(JSON.stringify(identity))).slice(0,40);
-        const inputTypes=(abi.inputs??[]).map(canonicalAbiParameterTypeV1);
-        const outputTypes=(abi.outputs??[]).map(canonicalAbiParameterTypeV1);
-        const methodFamilyCandidates=operationName.test(name)?[name.toUpperCase()]:
-          abi.type==='fallback'||abi.type==='receive'?
-            ['FALLBACK_OR_RECEIVE_CALLBACK']:[];
-        const limitations=[
-          ...(binding?[]:['EXACT_COMPILED_RUNTIME_BINDING_UNRESOLVED']),
-          'CALLER_ROLE_AND_ACCESS_RESTRICTIONS_NOT_SOURCE_VERIFIED',
-          ...(inputTypes.length?['ARGUMENT_SEMANTICS_AND_NATIVE_UNITS_NOT_SOURCE_VERIFIED']:[]),
-          'RUNTIME_STATE_AND_PERMISSION_PRECONDITIONS_NOT_ESTABLISHED'
-        ];
-        items.push({
-          methodCandidateId,...identity,
-          compiledIdentity:{...sourceId,signature,selector},
-          runtimeTarget:{scenarioId:null,address:binding?.address??null,
-            runtimeCodeHash:binding?.runtimeCodeHash??null,
-            runtimeCodeSha256:binding?.observedRuntimeSha256??null,
-            storageAddress:null,implementationAddress:binding?.proxyImplementation??null,
-            blockNumber:pinnedBlockNumber,blockHash:pinnedBlockHash},
-          abiType:abi.type,selector,inputTypes,outputTypes,
-          stateMutability:abi.stateMutability??null,
-          potentialOperationFamily:operationName.test(name)?name:null,
-          methodFamilyCandidates,
-          familyMatchEvidence:methodFamilyCandidates.length?'ABI_SIGNATURE':'ELIGIBILITY_UNKNOWN_INVENTORIED',
-          callerRequirement:{kind:'UNKNOWN',sourceEvidenceRefs:[]},
-          argumentRequirements:{abiTypes:inputTypes,knownConstraints:[],
-            unresolvedInputs:inputTypes.map((type,index)=>({index,type,
-              sourceBindingStatus:'ARGUMENT_SEMANTICS_UNRESOLVED'}))},
-          requiredState:{assets:[],balances:[],allowances:[],poolLiquidity:[],
-            oracles:[],time:[],roles:[],determinationStatus:'NOT_EVALUATED'},
-          eligibilityDisposition:'UNRESOLVED',exclusionEvidenceRefs:[],
-          limitations,
-          runtimeIdentityStatus:binding?'EXACT_SOURCE_AND_RUNTIME_MATCH':'UNRESOLVED_NO_EXACT_RUNTIME_PROOF',
-          eligibility:'UNRESOLVED_NEEDS_SOURCE_CONFIGURATION',
-          executionStatus:'NOT_EXECUTED',executionAuthorized:false
-        });
-      }
-    }
-  }
-  return{schemaVersion:'mi-phase0-active-use-method-inventory-v1',
-    campaignId:receipt.campaign.campaignId,
-    campaignGenerationId:receipt.campaign.campaignGenerationId,
-    sourceArchiveSha256:receipt.source.sha256,
-    chainId,pinnedBlockNumber,pinnedBlockHash,
-    methodCandidates:items,
-    candidateCount:items.length,
-    unresolvedRuntimeBindings:items.filter(x=>x.runtimeIdentityStatus!=='EXACT_SOURCE_AND_RUNTIME_MATCH').length,
-    status:'METHOD_CENSUS_ONLY_ACTIVE_USE_EXECUTION_NOT_IMPLEMENTED',
-    limitations:['A compiled ABI is not a verified runtime contract identity, permitted actor or executable transaction; no actor, fixture or transaction has been manufactured.']};
-}
-
-
-const MI_TRACE_PART_BYTES_V1=4*1024*1024;
-async function persistCompleteForkRpcJsonV1({base,scenarioId,txHash,chainId,blockNumber,
-  blockHash,kind,method,result,sourceIdentity}){
-  // Source-submitted input/outputs and RPC secrets must never flow to Actions logs.
-  // A detected credential blocks raw publication rather than redacting original bytes.
-  const raw=Buffer.from(JSON.stringify(result)+'\n','utf8');
-  const secretKeys=Object.entries(process.env).filter(([key,val])=>
-    /(?:TOKEN|SECRET|API_KEY|PRIVATE_KEY|RPC_URL)$/i.test(key)&&
-    typeof val==='string'&&val.length>=16&&raw.includes(Buffer.from(val,'utf8')))
-    .map(([key])=>key);
-  if(secretKeys.length){
-    const e=new Error('SENSITIVE_TRACE_PUBLICATION_BLOCKED');
-    e.code='SENSITIVE_TRACE_PUBLICATION_BLOCKED';
-    e.secretEnvironmentKeyNames=secretKeys; // never retain secret values
-    throw e;
-  }
-  const traceRoot=path.join(base,kind+'_RAW');
-  const entries=[],shaRaw=sha256(raw);
-  await fs.mkdir(traceRoot,{recursive:true});
-  let offset=0;
-  for(let n=0;offset<raw.length;n++){
-    const slice=raw.subarray(offset,Math.min(raw.length,offset+MI_TRACE_PART_BYTES_V1));
-    const name='part-'+String(n+1).padStart(6,'0')+'.jsonpart';
-    const target=path.join(traceRoot,name);
-    await fs.writeFile(target,slice,{flag:'wx'});
-    const observed=await fs.readFile(target);
-    const partSha256=sha256(observed);
-    if(partSha256!==sha256(slice)||observed.length!==slice.length)
-      throw new Error('FORK_RAW_TRACE_PART_READBACK_MISMATCH');
-    entries.push({path:path.posix.join('evidence/phase0/scenarios',scenarioId,'transactions',
-      txHash.toLowerCase(),kind+'_RAW',name),
-      ordinal:n+1,startByte:offset,byteLength:slice.length,sha256:partSha256});
-    offset+=slice.length;
-  }
-  if(offset!==raw.length||!entries.length)
-    throw new Error('FORK_RAW_TRACE_PART_CENSUS_INCOMPLETE');
-  const manifest={
-    schemaVersion:'mi-phase0-raw-call-trace-manifest-v1',
-    artifactType:'COMPLETE_RPC_CLIENT_OBSERVED_JSON',
-    scenarioId,txHash:txHash.toLowerCase(),chainId,blockNumber,blockHash,
-    sourceIdentity,kind,traceMethod:method,
-    tracer:kind==='CALL_TRACE'?'callTracer':
-      kind==='PRESTATE_DIFF'?'prestateTracer':
-      kind==='OPCODE_TRACE'?'structLogger':null,
-    rawEncoding:'UTF8_CLIENT_SERIALIZED_JSON_BYTE_SEQUENCE',
-    totalRawBytes:raw.length,rawSha256:shaRaw,parts:entries,
-    allPartsPresentAndVerified:true,publicationStatus:'COMPLETE_LOCAL_VERIFIED',
-    controllerAcceptance:false,gitPublicationStatus:'NOT_ATTEMPTED'
-  };
-  const manifestName=kind+'_RAW_MANIFEST_v1.json';
-  const manifestRelative=path.posix.join('evidence/phase0/scenarios',scenarioId,
-    'transactions',txHash.toLowerCase(),manifestName);
-  const manifestBytes=Buffer.from(JSON.stringify(manifest,null,2)+'\n');
-  const manifestPath=path.join(base,manifestName);
-  await fs.writeFile(manifestPath,manifestBytes,{flag:'wx'});
-  const check=await fs.readFile(manifestPath);
-  if(sha256(check)!==sha256(manifestBytes))throw new Error('FORK_RAW_MANIFEST_READBACK_MISMATCH');
-  return{kind,path:manifestRelative,sha256:sha256(manifestBytes),
-    rawSha256:shaRaw,bytes:raw.length,partCount:entries.length,storage:'COMPLETE_VERIFIED_JSON_PARTS'};
-}
-
-async function collectDeploymentTransactionTraceV1({anvilUrl,outputRoot,sourceIdentity,chainId,pinnedBlockNumber,pinnedBlockHash,initialBlock,scriptEnd,compiledArtifacts=[]}){
-  const scenarioIdentity={...sourceIdentity,chainId,pinnedBlockNumber,pinnedBlockHash,
-    branch:'SOURCE_DEPLOYMENT',runId:String(process.env.GITHUB_RUN_ID??'LOCAL'),
-    runAttempt:String(process.env.GITHUB_RUN_ATTEMPT??'1')};
-  const scenarioId='deployment-'+sha256(Buffer.from(JSON.stringify(scenarioIdentity),'utf8')).slice(0,24);
-  const evidenceRoot=path.join(outputRoot,'evidence','phase0','scenarios',scenarioId);
-  await fs.mkdir(evidenceRoot,{recursive:true});
-  const rows=[],limitations=[];
-  let expectedTransactions=0,receiptsRecorded=0,callTraces=0,opcodeTraces=0;
-  for(let number=initialBlock+1;number<=scriptEnd;number++){
-    const tag='0x'+number.toString(16);
-    const block=await rpc(anvilUrl,'eth_getBlockByNumber',[tag,false]);
-    if(!block||!Array.isArray(block.transactions)){
-      limitations.push({type:'MINED_BLOCK_OR_TX_CENSUS_UNAVAILABLE',blockNumber:number});
-      continue;
-    }
-    for(const [ordinal,txHash] of block.transactions.entries()){
-      expectedTransactions++;
-      const base=path.join(evidenceRoot,'transactions',String(txHash).toLowerCase());
-      await fs.mkdir(base,{recursive:true});
-      const row={blockNumber:number,transactionOrdinal:ordinal,transactionHash:txHash,
-        callTraceNormalization:'NOT_ATTEMPTED',frameIdentity:{scenarioId,branchId:'SOURCE_DEPLOYMENT',attemptOrdinal:ordinal},
-        evidence:[],limitations:[],mechanicalCallFrames:[]};
-      for(const [kind,method,params] of [
-        ['MINED_RECEIPT','eth_getTransactionReceipt',[txHash]],
-        ['CALL_TRACE','debug_traceTransaction',[txHash,{tracer:'callTracer',timeout:'120s'}]],
-        ['OPCODE_TRACE','debug_traceTransaction',[txHash,{disableMemory:true,disableStack:false,disableStorage:false,timeout:'120s'}]],
-        ['PRESTATE_DIFF','debug_traceTransaction',[txHash,{tracer:'prestateTracer',tracerConfig:{diffMode:true},timeout:'120s'}]]
-      ]){
-        try{
-          const result=await rpc(anvilUrl,method,params);
-          if(!result)throw new Error('EMPTY_RPC_RESULT');
-          const recorded=await persistCompleteForkRpcJsonV1({
-            base,scenarioId,txHash:String(txHash).toLowerCase(),chainId,
-            blockNumber:number,blockHash:block.hash??null,kind,method,result,sourceIdentity:scenarioIdentity
-          });
-          row.evidence.push(recorded);
-          if(kind==='MINED_RECEIPT')row.receiptStatus=result.status??null;
-          if(kind==='CALL_TRACE'){
-            // Retain every observed call-frame occurrence, including reverted children.
-            // A call frame proves execution only; bytecode-to-source and proxy storage
-            // context are unresolved until the graph's exact identity join.
-            const visit=(frame,framePath,parentFrameId,parentStorageAddress=null,ancestorReverted=false)=>{
-              if(!frame||typeof frame!=='object')return;
-              const frameId='FRAME-'+sha256(Buffer.from(JSON.stringify({
-                scenarioIdentity,transactionHash:txHash,framePath
-              }),'utf8')).slice(0,40);
-              const kind=String(frame.type??'UNKNOWN').toUpperCase();
-              const from=String(frame.from??'').toLowerCase();
-              const to=String(frame.to??'').toLowerCase();
-              const validAddress=value=>/^0x[0-9a-f]{40}$/.test(value);
-              const isDelegate=kind==='DELEGATECALL'||kind==='CALLCODE';
-              const storageContextAddress=isDelegate?
-                (validAddress(String(parentStorageAddress??''))?parentStorageAddress:null):
-                (validAddress(to)?to:null);
-              const input=typeof frame.input==='string'?frame.input:null;
-              const ownRevert=Boolean(frame.error);
-              row.mechanicalCallFrames.push({frameId,parentFrameId,framePath,
-                transactionHash:txHash,blockNumber:number,
-                callType:kind,
-                from:validAddress(from)?from:null,to:validAddress(to)?to:null,
-                runtimeCodeAddress:validAddress(to)?to:null,
-                storageContextAddress,
-                storageContextEvidence:isDelegate?
-                  (storageContextAddress?'DERIVED_FROM_PARENT_EVM_CONTEXT':'PARENT_EXECUTION_CONTEXT_UNRESOLVED'):
-                  (storageContextAddress?'DERIVED_FROM_EVM_TARGET_ADDRESS':'TARGET_ADDRESS_UNRESOLVED'),
-                value:frame.value??null,gasUsed:frame.gasUsed??null,
-                inputSelector:input&&/^0x[0-9a-fA-F]{8}/.test(input)?input.slice(0,10).toLowerCase():null,
-                inputSha256:input?sha256(Buffer.from(input,'utf8')):null,
-                error:frame.error??null,reverted:ownRevert,
-                revertedInAncestor:ancestorReverted,
-                effectiveReverted:ownRevert||ancestorReverted,
-                runtimeCodeIdentityId:null,
-                bindingStatus:'SOURCE_RUNTIME_CODE_JOIN_PENDING',
-                rawCallTraceRef:recorded.path,rawCallTraceSha256:recorded.rawSha256});
-              for(const [childIndex,child] of (frame.calls??[]).entries())
-                visit(child,framePath+'/'+childIndex,frameId,
-                  storageContextAddress,ancestorReverted||ownRevert);
-            };
-            visit(result,'0',null,null,false);
-            row.callTraceNormalization=row.mechanicalCallFrames.length>0&&
-              typeof result?.type==='string'?'COMPLETE':'RAW_COMPLETE_NORMALIZATION_FAILED';
-            if(row.callTraceNormalization!=='COMPLETE'){
-              row.limitations.push({type:'CALL_TRACE_NORMALIZATION_UNAVAILABLE',
-                errorCode:'TRACE_WRONG_FORMAT'});
-            }
-          }
-          if(kind==='MINED_RECEIPT')receiptsRecorded++;
-          if(kind==='CALL_TRACE'&&row.callTraceNormalization==='COMPLETE')callTraces++;
-          if(kind==='OPCODE_TRACE')opcodeTraces++;
-        }catch(error){
-          row.limitations.push({type:kind+'_UNAVAILABLE',
-            errorCode:error?.code??'RPC_OR_LOCAL_PERSISTENCE_FAILED',
-            reason:String(error?.message??error).slice(0,600)});
-          if(kind!=='PRESTATE_DIFF')limitations.push({type:kind+'_UNAVAILABLE',transactionHash:txHash});
-        }
-      }
-      // Record the actual source-runtime identity of every observed EVM
-      // callee, including external/fork-preexisting contracts. One address
-      // per transaction, every frame occurrence retained in frameIds.
-      row.runtimeCodeObservations=[];
-      const byTarget=new Map();
-      for(const frame of row.mechanicalCallFrames){
-        const address=String(frame.to??'').toLowerCase();
-        if(!/^0x[0-9a-f]{40}$/.test(address))continue;
-        const bucket=byTarget.get(address)??[];
-        bucket.push(frame.frameId);byTarget.set(address,bucket);
-      }
-      for(const [address,frameIds] of [...byTarget.entries()].sort(([a],[b])=>a.localeCompare(b))){
-        const observations=[];
-        for(const [timepoint,blockNumber] of [
-          ['BEFORE_BLOCK',number-1],['AFTER_BLOCK',number]
-        ]){
-          try{
-            const code=await rpc(anvilUrl,'eth_getCode',[address,'0x'+blockNumber.toString(16)]);
-            if(!/^0x(?:[0-9a-f]{2})*$/i.test(String(code??'')))
-              throw new Error('ETH_GETCODE_INVALID_HEX');
-            const raw=Buffer.from(String(code).toLowerCase()+'\n','utf8');
-            const relative=path.posix.join('evidence/phase0/scenarios',scenarioId,
-              'transactions',String(txHash).toLowerCase(),'runtime-code',
-              address+'-'+timepoint.toLowerCase()+'.hex');
-            const target=path.join(base,'runtime-code',address+'-'+timepoint.toLowerCase()+'.hex');
-            await fs.mkdir(path.dirname(target),{recursive:true});
-            await fs.writeFile(target,raw,{flag:'wx'});
-            const check=await fs.readFile(target);
-            if(check.length!==raw.length||sha256(check)!==sha256(raw))
-              throw new Error('RUNTIME_BYTECODE_CAPTURE_READBACK_MISMATCH');
-            observations.push({timepoint,blockNumber,path:relative,
-              fileSha256:sha256(raw),bytecodeSha256:sha256(Buffer.from(code.slice(2),'hex')),
-              bytecodeLength:(code.length-2)/2,code});
-          }catch(error){
-            observations.push({timepoint,blockNumber,status:'UNAVAILABLE',
-              errorCode:error?.code??'ETH_GETCODE_OR_FILE_READBACK_FAILED'});
-          }
-        }
-        const before=observations.find(o=>o.timepoint==='BEFORE_BLOCK');
-        const after=observations.find(o=>o.timepoint==='AFTER_BLOCK');
-        const blockScopedOnly=block.transactions.length!==1;
-        const codeStable=typeof before?.code==='string'&&typeof after?.code==='string'&&
-          before.code===after.code&&after.bytecodeLength>0;
-        const receiptSuccess=row.receiptStatus===1||['0x1','0x01'].includes(String(row.receiptStatus??'').toLowerCase());
-        const matchingCreateFrames=row.mechanicalCallFrames.filter(frame=>
-          ['CREATE','CREATE2'].includes(String(frame.callType??'').toUpperCase())&&
-          frame.to?.toLowerCase()===address&&frame.effectiveReverted!==true);
-        const createdInThisTx=receiptSuccess&&before?.code==='0x'&&
-          typeof after?.code==='string'&&after.bytecodeLength>0&&matchingCreateFrames.length===1;
-        const codeForMatching=codeStable||createdInThisTx?after.code:null;
-        const matches=codeForMatching?findSourceRuntimeTemplateMatchesV1({
-          observedBytecode:codeForMatching,artifacts:compiledArtifacts}):[];
-        const exactMatches=matches.filter(row=>row.matchClass==='EXACT_FULL_RUNTIME_BYTECODE');
-        const maskedMatches=matches.filter(row=>row.matchClass!=='EXACT_FULL_RUNTIME_BYTECODE');
-        const exact=(codeStable||createdInThisTx)&&!blockScopedOnly&&exactMatches.length===1;
-        row.runtimeCodeObservations.push({
-          observationId:'RT-CODE-'+sha256(Buffer.from(JSON.stringify([
-            scenarioIdentity,txHash,address,number,frameIds])).slice(0,40),
-          scenarioId,transactionHash:txHash,blockNumber:number,address,frameIds,
-          codeAtBlockStart:before&&before.code!==undefined?{
-            path:before.path,sha256:before.fileSha256,bytecodeSha256:before.bytecodeSha256,
-            bytecodeLength:before.bytecodeLength}:null,
-          codeAtBlockEnd:after&&after.code!==undefined?{
-            path:after.path,sha256:after.fileSha256,bytecodeSha256:after.bytecodeSha256,
-            bytecodeLength:after.bytecodeLength}:null,
-          boundaryCodeStable:codeStable,
-          confirmedCreationFrameIds:createdInThisTx?matchingCreateFrames.map(f=>f.frameId):[],
-          codeTransitionMode:codeStable?'STABLE_AT_BOUNDARIES':createdInThisTx?'CREATED_DURING_MINED_TRANSACTION':'UNRESOLVED_CODE_TRANSITION',
-          exactTransactionBoundary:!blockScopedOnly,
-          sourceBinding:exact?'EXACT_SOURCE_AND_RUNTIME_MATCH':
-            !before?.code||!after?.code?'CODE_OBSERVATION_INCOMPLETE':
-            blockScopedOnly?'MULTI_TRANSACTION_BLOCK_CODE_ORDER_UNRESOLVED':
-            !codeStable&&!createdInThisTx?'CODE_CHANGED_WITHOUT_CONFIRMED_CREATION':
-            exactMatches.length>1?'AMBIGUOUS_EQUAL_RUNTIME_BYTECODE':
-            maskedMatches.length?'MASKED_COMPILER_SOURCE_TEMPLATE_CANDIDATES_ONLY':
-            'NO_EXACT_RUNTIME_BYTECODE_MATCH',
-          compilationUnitId:exact?exactMatches[0].compilationUnitId:null,
-          sourceName:exact?exactMatches[0].sourceName:null,
-          contractName:exact?exactMatches[0].contractName:null,
-          matchCandidateCount:matches.length,
-          exactMatchCandidateCount:exactMatches.length,
-          maskedTemplateCandidates:maskedMatches,
-          candidateCompilationUnitIds:exact?[]:matches.map(m=>m.compilationUnitId).filter(Boolean),
-          evidenceStatus:'OBSERVED_LOCAL_FORK_BLOCK_BOUNDARY_CODE',
-          limitations:[
-            ...(blockScopedOnly?['MULTI_TRANSACTION_BLOCK_NO_PER_TX_CODE_ISOLATION']:[]),
-            ...(!codeStable&&!createdInThisTx?['CODE_STABILITY_NOT_ESTABLISHED']:[])
-          ]
-        });
-      }
-      rows.push(row);
-    }
-  }
-  // CREATE/CREATE2 is a witnessed EVM event, not a source contract identity.
-  // A child created inside an ancestor that later reverted is not persisted.
-  const actualCreations=[];
-  for(const row of rows){
-    const receiptSuccess=row.receiptStatus===1||
-      ['0x1','0x01'].includes(String(row.receiptStatus??'').toLowerCase());
-    if(!receiptSuccess||row.callTraceNormalization!=='COMPLETE')continue;
-    const byId=new Map(row.mechanicalCallFrames.map(frame=>[frame.frameId,frame]));
-    for(const frame of row.mechanicalCallFrames){
-      if(!['CREATE','CREATE2'].includes(String(frame.callType??'').toUpperCase()))continue;
-      const createdAddress=String(frame.to??'').toLowerCase();
-      if(!/^0x[0-9a-f]{40}$/.test(createdAddress))continue;
-      let cursor=frame,rolledBack=false;
-      const visited=new Set();
-      while(cursor){
-        if(visited.has(cursor.frameId)){rolledBack=true;break}
-        visited.add(cursor.frameId);
-        if(cursor.reverted||cursor.error){rolledBack=true;break}
-        cursor=cursor.parentFrameId?byId.get(cursor.parentFrameId):null;
-      }
-      actualCreations.push({scenarioId,
-        transactionHash:String(row.transactionHash).toLowerCase(),
-        blockNumber:row.blockNumber,frameId:frame.frameId,framePath:frame.framePath,
-        creationType:String(frame.callType).toUpperCase(),address:createdAddress,
-        effectiveCommitStatus:rolledBack?'ROLLED_BACK':'PERSISTED_IF_APPLICABLE',
-        sourceBinding:'UNRESOLVED_PENDING_EXACT_RUNTIME_CODE'});
-    }
-  }
-  const manifest={schemaVersion:'mi-phase0-deployment-transaction-trace-v1',scenarioId,
-    sourceIdentity:scenarioIdentity,initialBlock,scriptEnd,
-    expectedTransactions,receiptsRecorded,callTraces,opcodeTraces,
-    callFrameCount:rows.reduce((total,row)=>total+row.mechanicalCallFrames.length,0),
-    observedCrossContractFrameCount:rows.reduce((total,row)=>total+row.mechanicalCallFrames.filter(frame=>
-      frame.from&&frame.to&&frame.from.toLowerCase()!==frame.to.toLowerCase()).length,0),
-    status:expectedTransactions===receiptsRecorded&&expectedTransactions===callTraces&&
-      expectedTransactions===opcodeTraces&&limitations.length===0
-        ?'COMPLETE':'INCOMPLETE_WITH_TYPED_LIMITATIONS',
-    rows,actualCreations,
-    observedRuntimeTargetCount:rows.reduce((n,row)=>n+(row.runtimeCodeObservations?.length??0),0),
-    limitations};
-  const raw=JSON.stringify(manifest,null,2)+'\n';
-  await fs.writeFile(path.join(evidenceRoot,'DEPLOYMENT_TRANSACTION_TRACE_INDEX_v1.json'),raw);
-
-  const traceIndex={
-    schemaVersion:'mi-phase0-call-trace-index-v1',
-    artifactType:'SCENARIO_CALL_TRACE_INDEX',
-    scenarioId,sourceArchiveSha256:sourceIdentity.sourceArchiveSha256,
-    campaignGenerationId:sourceIdentity.campaignGenerationId,
-    chainId,pinnedBlockNumber,pinnedBlockHash,
-    traceBackend:'LOCAL_ANVIL_CALLTRACER',
-    transactionJournalRef:'DEPLOYMENT_TRANSACTION_TRACE_INDEX_v1.json',
-    transactions:rows.map(row=>{
-      const call=row.evidence.find(e=>e.kind==='CALL_TRACE');
-      const receipt=row.evidence.find(e=>e.kind==='MINED_RECEIPT');
-      const missing=row.limitations.find(x=>x.type==='CALL_TRACE_UNAVAILABLE');
-      const normalized=row.callTraceNormalization==='COMPLETE';
-      return{txHash:row.transactionHash,blockNumber:row.blockNumber,
-        transactionIndex:row.transactionOrdinal,receiptStatus:row.receiptStatus??null,
-        traceStatus:call?(normalized?'COMPLETE_RAW_AND_NORMALIZED':'RAW_COMPLETE_NORMALIZATION_FAILED'):
-          missing?.errorCode==='SENSITIVE_TRACE_PUBLICATION_BLOCKED'?
-            'SENSITIVE_TRACE_PUBLICATION_BLOCKED':
-            'TRACE_RPC_FAILED',
-        traceMethod:call?'debug_traceTransaction':null,
-        rawManifestRef:call?.path??null,
-        rawManifestSha256:call?.sha256??null,
-        frameCount:row.mechanicalCallFrames.length,
-        createCount:row.mechanicalCallFrames.filter(x=>x.callType==='CREATE').length,
-        create2Count:row.mechanicalCallFrames.filter(x=>x.callType==='CREATE2').length,
-        unresolvedFrameCount:row.mechanicalCallFrames.filter(x=>x.bindingStatus!=='EXACT_BOUND').length,
-        errorCode:missing?.errorCode??null,retryable:!call,
-        receiptManifestRef:receipt?.path??null};
-    }),
-    traceLimitations:limitations,
-    counts:{journalTransactions:expectedTransactions,
-      traceEligibleTransactions:expectedTransactions,
-      completeRawTraces:rows.filter(row=>row.evidence.some(e=>e.kind==='CALL_TRACE')).length,
-      completeNormalizedTraces:rows.filter(row=>row.callTraceNormalization==='COMPLETE').length,
-      tracedFrames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.length,0),
-      createFrames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.filter(x=>x.callType==='CREATE').length,0),
-      create2Frames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.filter(x=>x.callType==='CREATE2').length,0),
-      revertedFrames:rows.reduce((n,row)=>n+row.mechanicalCallFrames.filter(x=>x.reverted).length,0),
-      traceUnavailableTransactions:expectedTransactions-callTraces,
-      pendingTransactions:0,unaccountedTransactions:0},
-    rawCompletenessStatus:expectedTransactions===0?'COMPLETE_ZERO_TRANSACTIONS':
-      rows.filter(row=>row.evidence.some(e=>e.kind==='CALL_TRACE')).length===expectedTransactions?'COMPLETE':'PARTIAL',
-    normalizedCompletenessStatus:expectedTransactions===0?'COMPLETE_ZERO_TRANSACTIONS':
-      expectedTransactions===callTraces?'COMPLETE':'PARTIAL',
-    semanticCompletenessStatus:'NOT_ASSESSED'
-  };
-  await fs.writeFile(path.join(evidenceRoot,'TRACE_INDEX_v1.json'),
-    JSON.stringify(traceIndex,null,2)+'\n',{flag:'wx'});
-
-  return{...manifest,rows:undefined,manifestRef:path.posix.join('evidence/phase0/scenarios',scenarioId,
-    'DEPLOYMENT_TRANSACTION_TRACE_INDEX_v1.json'),manifestSha256:sha256(Buffer.from(raw,'utf8'))};
-}
-
 export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainId=1,requireUpstreamChainId=false,forkBlockNumber=null}){
   let identityProxy;
   let child;
@@ -569,8 +135,8 @@ export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainI
        (forkBlockNumber!==null&&pinnedBlockNumber!==forkBlockNumber))
       throw new Error('PHASE0_ARCHIVE_UPSTREAM_BLOCK_HASH_UNAVAILABLE_OR_MISMATCHED');
     const port=8545,url='http://127.0.0.1:8545';
-    const executable=path.join(MI_PHASE0_FORK_PACKAGE_ROOT,'node_modules/@foundry-rs/anvil/bin.mjs');
-    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id',String(chainId),'--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--steps-tracing','--no-rate-limit','--silent'];
+    const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
+    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id',String(chainId),'--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--auto-impersonate','--no-rate-limit','--silent'];
     args.push('--fork-block-number',String(pinnedBlockNumber));
     child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
     let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
@@ -631,8 +197,8 @@ export async function startStateSnapshotAnvilV1({sourceUrl,projectRoot,evmVersio
   const statePath=path.join(os.tmpdir(),`phase0-medusa-state-${process.pid}-${port}.json`);
   await fs.writeFile(statePath,stateJson);
   const url=`http://127.0.0.1:${port}`;
-  const executable=path.join(MI_PHASE0_FORK_PACKAGE_ROOT,'node_modules/@foundry-rs/anvil/bin.mjs');
-  const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--load-state',statePath,'--silent'];
+  const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
+  const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--load-state',statePath,'--auto-impersonate','--silent'];
   // Own process group: the npm anvil entry point is a node wrapper around the native binary, so signal the group.
   const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe'],detached:true});
   let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
@@ -653,19 +219,26 @@ export async function startStateSnapshotAnvilV1({sourceUrl,projectRoot,evmVersio
   finally{await fs.rm(statePath,{force:true}).catch(()=>{});}
 }
 function detectFoundryScripts(files,texts){
-  // Inventory every source-declared Foundry Script contract; do not privilege a project name.
+  const consolidated=files.filter(f=>/(^|\/)scripts?\/CyavKatDeployAll_v[0-9]+\.s\.sol$/i.test(f));
+  if(consolidated.length>1)throw new Error('Ambiguous consolidated Foundry deployment scripts');
+  if(consolidated.length===1){
+    const rel=consolidated[0],body=texts.get(rel)??'';
+    const name=rel.match(/CyavKatDeployAll_v[0-9]+(?=\.s\.sol$)/i)?.[0];
+    if(!name||!new RegExp('contract\\s+'+name+'\\s+is\\s+Script\\s*\\{').test(body))
+      throw new Error('Consolidated Foundry deployment does not expose expected Script contract');
+    return [{framework:'FOUNDRY',path:rel,entry:rel+':'+name}];
+  }
   const out=[];
-  for(const rel of files.filter(f=>/(^|\\/)scripts?\\/.*\\.s\\.sol$/i.test(f))){
+  for(const rel of files.filter(f=>/(^|\/)scripts?\/.*\.s\.sol$/i.test(f)&&DEPLOY_SCRIPT_RE.test(f))){
     const text=texts.get(rel)??'';
-    const hasRun=/function\\s+run\\s*\\(/.test(text);
-    for(const m of text.matchAll(/(?<!abstract\\s)contract\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+is\\s+[^{]*\\bScript\\b/g)){
-      if(hasRun)out.push({framework:'FOUNDRY',path:rel,entry:rel+':'+m[1]});
+    for(const m of text.matchAll(/(?<!abstract\s)contract\s+([A-Za-z_][A-Za-z0-9_]*)\s+is\s+[^{]*\bScript\b/g)){
+      if(/function\s+run\s*\(/.test(text))out.push({framework:'FOUNDRY',path:rel,entry:rel+':'+m[1]});
     }
   }
-  return out.sort((a,b)=>a.entry.localeCompare(b.entry));
+  return out.slice(0,4);
 }
 function detectHardhatScripts(files,configText){
-  const scripts=files.filter(f=>/(^|\/)scripts?\/.*\.(?:js|cjs|mjs|ts)$/i.test(f)&&DEPLOY_SCRIPT_RE.test(f));
+  const scripts=files.filter(f=>/(^|\/)scripts?\/.*\.(?:js|cjs|mjs|ts)$/i.test(f)&&DEPLOY_SCRIPT_RE.test(f)).slice(0,4);
   const hasLocalhostNetwork=/localhost\s*:\s*\{[\s\S]{0,800}?(?:127\.0\.0\.1|localhost|ETH_RPC_URL|RPC_URL|LOCALHOST_RPC_URL)/i.test(configText);
   return {
     safe:hasLocalhostNetwork?scripts.map(rel=>({framework:'HARDHAT',path:rel,entry:rel})):[],
@@ -747,12 +320,7 @@ export async function detectDeploymentScripts(projectRoot){
       });
     }
   }catch{}
-  const foundryScriptFiles=files.filter(f=>/(^|\\/)scripts?\\/.*\\.s\\.sol$/i.test(f));
-  const unclassifiedFoundry=foundryScriptFiles.filter(f=>!foundry.some(item=>item.path===f)).map(path=>({
-    framework:'FOUNDRY',path,reason:'NO_SOURCE_CONFIRMED_SCRIPT_RUN_ENTRYPOINT'
-  }));
-  return{foundry,hardhat,unsafeHardhat,genericPackageScripts,unclassifiedFoundry};
-
+  return{foundry,hardhat,unsafeHardhat,genericPackageScripts};
 }
 export function canonicalEthereumExecutionOverrides(source){
   const text=String(source??''),env={};
@@ -876,8 +444,26 @@ export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,lo
   if(detected.foundry.length){const h=await runProcess({command:'forge',args:['script','--help'],cwd:projectRoot,env:scrubbedEnv()});help=`${h.stdout}\n${h.stderr}`;}
   for(const item of detected.foundry){
     const args=['script',item.entry,'--rpc-url',anvilUrl,'--broadcast'];
-    // No project-specific --contracts selector: use source-declared Foundry
-    // compilation roots unmodified; an incompatible root remains a typed gap.
+    // A source-authored compile-only wildcard-import anchor can collide with
+    // the same implementations' named imports in the native deployment script.
+    // Narrow only this verified BoostHub v9 entrypoint's compilation roots to
+    // its own script directory; the original source and its transitive imports
+    // remain untouched and Forge still compiles the full deployment closure.
+    if(item.path==='script/DeployBoostHubStack_v9.s.sol'){
+      const anchor=path.join(projectRoot,'contracts/BoostHubBeefyCompileImports_v9.sol');
+      const anchorText=await fs.readFile(anchor,'utf8').catch(()=>null);
+      const scriptText=await fs.readFile(path.join(projectRoot,item.path),'utf8');
+      const required=[
+        'BoostHubEthereumRewardConverter_v4.sol',
+        'StrategyConvexBoostHubStakingV5.sol',
+        'BeefyVaultV7FixedV2.sol'
+      ];
+      if(anchorText?.includes('Compilation anchor for the native Solo-Lite Phase 0 exact-source build.')&&
+         required.every(name=>anchorText.includes(name)&&scriptText.includes(name))&&
+         scriptText.includes('contract DeployBoostHubStackV9 is Script')){
+        args.push('--contracts','script');
+      }
+    }
     if(pinnedLibraries.length)args.push('--libraries',pinnedLibraries.join(','));
     if(/--unlocked/.test(help))args.push('--unlocked');
     if(/--sender/.test(help))args.push('--sender',account0);
@@ -1049,42 +635,6 @@ async function reportedPackageDeployments({projectRoot,attempts,artifacts}){
   }
   return{rows,limitations};
 }
-async function resolveExactRuntimeDeploymentIdentityV1({provider,artifacts,deployments}){
-  const rows=[],codeCache=new Map();
-  const admissible=artifacts.filter(artifact=>{
-    const code=String(artifact.deployedBytecode??'').toLowerCase();
-    return /^0x[0-9a-f]+$/.test(code)&&code.length>2&&
-      !code.includes('__$')&&
-      Object.keys(artifact.immutableReferences??{}).length===0&&
-      Object.keys(artifact.deployedLinkReferences??{}).length===0;
-  });
-  for(const row of deployments){
-    const address=String(row.address??'').toLowerCase();
-    if(!/^0x[0-9a-f]{40}$/.test(address)){
-      rows.push({...row,sourceBinding:'INVALID_RUNTIME_ADDRESS'});continue;
-    }
-    if(!codeCache.has(address))codeCache.set(address,String(await provider.getCode(address)).toLowerCase());
-    const code=codeCache.get(address);
-    const observedRuntimeSha256=sha256(Buffer.from(code.replace(/^0x/,''),'hex'));
-    const matching=admissible.filter(artifact=>
-      String(artifact.deployedBytecode??'').toLowerCase()===code);
-    if(matching.length===1){
-      const artifact=matching[0];
-      rows.push({...row,address,compilationUnitId:artifact.compilationUnitId??null,
-        sourceName:artifact.sourceName,contractName:artifact.contractName,
-        qualifiedName:artifact.sourceName+':'+artifact.contractName,
-        sourceBinding:'EXACT_SOURCE_AND_RUNTIME_MATCH',observedRuntimeSha256,
-        sourceRuntimeEvidenceClass:'EXACT_COMPILER_RUNTIME_BYTECODE_EQUALS_FORK_CODE'});
-    }else{
-      rows.push({...row,address,observedRuntimeSha256,
-        sourceBinding:matching.length?'AMBIGUOUS_EQUAL_RUNTIME_BYTECODE':'NO_EXACT_RUNTIME_BYTECODE_MATCH',
-        candidateCompilationUnitIds:matching.map(x=>x.compilationUnitId).filter(Boolean),
-        sourceRuntimeEvidenceClass:matching.length?'AMBIGUOUS':'NOT_PROVEN'});
-    }
-  }
-  return rows;
-}
-
 function deployedBytecodePrefix(a){return String(a?.bytecode??'').replace(/^0x/,'').toLowerCase();}
 export async function discoverDeployments({provider,artifacts,startBlock,endBlock}){
   const rows=[];
@@ -3119,7 +2669,7 @@ function baselineTargetRows({medusa,telemetry}){
     {candidateKey:'PHASE0-BASELINE-ABI-TELEMETRY',executionEvidenceRefs:refs,oracleOutcome:'INVESTIGATIVE_BASELINE_TELEMETRY_GENERATED',reproductionStatus:telemetry.every(x=>x.status==='PASS')?'PASS':'INCOMPLETE',requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',requestBindingEvidenceRef:'evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.json'}
   ];
 }
-export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,sourceReceiptPath,staticEvidenceRoot,outputRoot,forkUrl,forkUrls={},medusaSmokeCalls=null,telemetrySmokeCalls=null,deploymentOnly=false}){
+export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl,forkUrls={},medusaSmokeCalls=null,telemetrySmokeCalls=null,deploymentOnly=false}){
   // The old randomized/Medusa lane duplicated mutable state in a network-free
   // node; unqueried upstream slots could become zero. It cannot establish full
   // historical Ethereum assurance and must never be issued as audit evidence.
@@ -3129,18 +2679,17 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
   // Smoke budgets are independent and never produce campaign evidence. Medusa-only preserves the prior smoke behavior.
   const medusaSmoke=Number.isInteger(medusaSmokeCalls)&&medusaSmokeCalls>0;
   const telemetrySmoke=Number.isInteger(telemetrySmokeCalls)&&telemetrySmokeCalls>0;
-  if(!sourceCheckoutRoot||!sourceReceiptPath||!staticEvidenceRoot)
-    throw new Error('FORK_ONLY_SOURCE_CHECKOUT_RECEIPT_AND_STATIC_EVIDENCE_REQUIRED');
-  const buildIdentity=JSON.parse(await fs.readFile(path.join(staticEvidenceRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
-  const executionBuildArtifacts=JSON.parse(await fs.readFile(path.join(staticEvidenceRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'utf8'));
-  const receipt=JSON.parse(await fs.readFile(sourceReceiptPath,'utf8'));
-  const readiness=JSON.parse(await fs.readFile(path.join(staticEvidenceRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'utf8'));
-  const sourceIntelligence=JSON.parse(await fs.readFile(path.join(staticEvidenceRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json'),'utf8'));
-  const slither=JSON.parse(await fs.readFile(path.join(staticEvidenceRoot,'evidence/static-analysis/SLITHER_v1.json'),'utf8'));
+  const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
+  const buildIdentity=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
+  const executionBuildArtifacts=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'utf8'));
+  const receipt=JSON.parse(await fs.readFile(path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json'),'utf8'));
+  const readiness=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'utf8'));
+  const sourceIntelligence=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json'),'utf8'));
+  const slither=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/static-analysis/SLITHER_v1.json'),'utf8'));
   const sharedExecutionInputs=validateExecutionInputJoinV2({receipt,buildIdentity,artifactBundle:executionBuildArtifacts,sourceIntelligence,slither,readiness});
   const targetChainIds=phase0DiscoveredTargetChainIdsV1(readiness);
   const archivePath=receipt.source.archivePath,archiveSha256=receipt.source.sha256,workspace=path.join(path.dirname(outputRoot),'.phase0-simulation-work');
-  const staged=await stageExactArchiveSource({checkoutRoot:sourceCheckoutRoot,workspaceRoot:workspace,archivePath,archiveSha256,projectPath:buildIdentity.discovery.projectPath});
+  const staged=await stageExactArchiveSource({checkoutRoot:controllerRoot,workspaceRoot:workspace,archivePath,archiveSha256,projectPath:buildIdentity.discovery.projectPath});
   const cfg=buildIdentity.configurationDetection,pseudo={requestId:`phase0-sim-${receipt.campaign.campaignId}`,requestDigest:sha256(JSON.stringify(buildIdentity)),campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,assignmentId:'phase0-simulation',phaseId:'phase-0',profileId:'github-native-compile-v2',source:{repository:'curveyield3/Audit-Controller',commit:receipt.source.archiveCommit,projectPath:buildIdentity.discovery.projectPath,archivePath,archiveSha256},configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}};
   const deploymentProfile=await loadDeploymentProfile(staged.projectRoot);
   if(deploymentProfile&&!deploymentOnly)throw new Error('audit-deployment.json is supported only by the Phase-0 deployment-only lane');
@@ -3160,95 +2709,6 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
     if(sha256(canonical(unsigned))!==manifestDigestSha256)throw new Error('SCAN_MANIFEST_DIGEST_MISMATCH');
   }else if(receipt.source?.inputMode==='LIVE_SCAN')throw new Error('SCAN_MANIFEST_MISSING');
   const detected=await detectDeploymentScripts(staged.projectRoot);
-  // Fork-owned mechanical discovery evidence: does not authorize executing unclassified scripts.
-  // Enumerate every nested manifest root before execution; no first-N cap.
-  // Root selection remains separate from authorization to run a script.
-  const projectTreeFiles=await walk(staged.projectRoot);
-  const rootMarkers=/^(?:foundry\.toml|package\.json|hardhat\.config\.(?:js|cjs|mjs|ts))$/i;
-  const sourceConfigPaths=projectTreeFiles.filter(rel=>rootMarkers.test(path.posix.basename(rel)));
-  const candidateRoots=[...new Set(['.',...sourceConfigPaths.map(rel=>path.posix.dirname(rel))])].sort();
-  const nestedProjectRootsV1=[];
-  for(const rootRel of candidateRoots){
-    const physicalRoot=rootRel==='.'?staged.projectRoot:path.join(staged.projectRoot,...rootRel.split('/'));
-    const localDetected=rootRel==='.'?detected:await detectDeploymentScripts(physicalRoot);
-    const sources=[...localDetected.foundry,...localDetected.hardhat,...localDetected.unsafeHardhat,
-      ...localDetected.genericPackageScripts,...localDetected.unclassifiedFoundry];
-    const ownedRows=[];
-    for(const entry of sources){
-      const entryName=entry.path??entry.entry??null;
-      const sourceRel=entryName?path.posix.normalize(path.posix.join(rootRel,entryName)):null;
-      if(sourceRel&&candidateRoots.some(other=>other!==rootRel&&other.startsWith(rootRel==='.'?'':rootRel+'/')&&
-        sourceRel.startsWith(other+'/')))continue;
-      let sourceFileSha256=null;
-      if(sourceRel){
-        const bytes=await fs.readFile(path.join(staged.projectRoot,...sourceRel.split('/'))).catch(()=>null);
-        if(bytes)sourceFileSha256=sha256(bytes);
-      }
-      ownedRows.push({...entry,sourceRel,sourceFileSha256,projectRootRel:rootRel});
-    }
-    nestedProjectRootsV1.push({projectRootRel:rootRel,configPaths:sourceConfigPaths.filter(rel=>
-      path.posix.dirname(rel)===rootRel),entrypoints:ownedRows});
-  }
-  const inventoryEntries=[
-    ...detected.foundry.map(item=>({...item,disposition:'EXECUTION_CANDIDATE',sourceEvidence:'FOUNDRY_SCRIPT_CONTRACT'})),
-    ...detected.hardhat.map(item=>({...item,disposition:'EXECUTION_CANDIDATE',sourceEvidence:'HARDHAT_LOCALHOST_DECLARATION'})),
-    ...detected.unsafeHardhat.map(item=>({...item,disposition:'UNSAFE_NOT_EXECUTED',sourceEvidence:'HARDHAT_CONFIG'})),
-    ...detected.genericPackageScripts.map(item=>({...item,framework:'PACKAGE_SCRIPT',disposition:item.safe?'EXECUTION_CANDIDATE':'UNSUPPORTED_NOT_EXECUTED',sourceEvidence:'PACKAGE_JSON'})),
-    ...detected.unclassifiedFoundry.map(item=>({...item,disposition:'UNCLASSIFIED_NOT_EXECUTED',sourceEvidence:'FOUNDRY_SCRIPT_FILE'}))
-  ];
-  // Preserve every nested-root launch declaration as a separate source-defined
-  // candidate group. The legacy aggregate script run below is NOT evidence that
-  // these independent groups were executed or replay-qualified.
-  const sourceExecutionGroupsV1=nestedProjectRootsV1.flatMap(root=>
-    root.entrypoints.map((entry,ordinal)=>{
-      const identity={sourceArchiveSha256:receipt.source.sha256,
-        projectRootRel:root.projectRootRel,sourceRel:entry.sourceRel??null,
-        sourceFileSha256:entry.sourceFileSha256??null,framework:entry.framework??'UNKNOWN',
-        entry:entry.entry??entry.name??null,ordinal};
-      return{
-        executionGroupId:'EXEC-GROUP-'+sha256(Buffer.from(JSON.stringify(identity),'utf8')).slice(0,40),
-        ...identity,
-        sourceDeclaration:{path:entry.path??null,entry:entry.entry??null,
-          name:entry.name??null,command:entry.command??null},
-        sourceDeclaredNetwork:root.configPaths??[],
-        groupQualificationStatus:'NOT_EXECUTED_ON_INDEPENDENT_FORK',
-        runtimeIsolationStatus:'NOT_PROVEN',
-        commandExecutionPermission:'NOT_GRANTED_BY_DISCOVERY',
-        scenarioId:null,scenarioEvidenceRef:null,
-        limitations:['A discovered launcher is not a proven safe deployment action. Independent fork replay and sandboxing are still required.']
-      };
-    })
-  );
-  const configEvidenceV1=[];
-  for(const rel of sourceConfigPaths){
-    const file=path.join(staged.projectRoot,...rel.split('/'));
-    const bytes=await fs.readFile(file);
-    configEvidenceV1.push({path:rel,sha256:sha256(bytes),bytes:bytes.length,
-      rootRel:path.posix.dirname(rel)});
-  }
-  const entrypointInventory={
-    schemaVersion:'mi-phase0-deployment-entrypoint-inventory-v1',
-    artifactType:'DEPLOYMENT_ENTRYPOINT_INVENTORY',
-    campaignId:receipt.campaign.campaignId,
-    campaignGenerationId:receipt.campaign.campaignGenerationId,
-    sourceArchiveSha256:receipt.source.sha256,
-    projectRoot:buildIdentity.discovery.projectPath,
-    inventoryCompleteness:'INCOMPLETE_WITH_EXPLICIT_LIMITATIONS',
-    nestedProjectRoots:nestedProjectRootsV1,
-    nestedProjectRootCount:nestedProjectRootsV1.length,
-    projectRoots:nestedProjectRootsV1.map(root=>root.projectRootRel),
-    frameworkConfigurations:configEvidenceV1,
-    entrypoints:inventoryEntries,
-    executionGroups:sourceExecutionGroupsV1,
-    executionGroupCensus:{planned:sourceExecutionGroupsV1.length,independentlyExecuted:0,
-      sourceOnlyDiscoveryNotExecution:true},
-    discoveryLimitations:['Nonstandard framework entrypoints still require full source-bound classification; inventory is not an execution-permission manifest.'],
-    counts:{discoveredTotal:inventoryEntries.length,declaredTotal:detected.genericPackageScripts.length,
-      autoDetectedTotal:inventoryEntries.length-detected.genericPackageScripts.length,
-      executableCandidateTotal:inventoryEntries.filter(x=>x.disposition==='EXECUTION_CANDIDATE').length,
-      nonExecutableOrUnclassifiedTotal:inventoryEntries.filter(x=>x.disposition!=='EXECUTION_CANDIDATE').length}
-  };
-
   // Native Forge can compile Solidity directly. Exact-source Vyper artifacts
   // from the sealed Phase-0 build must be staged separately for source-only
   // Foundry deployers because Solidity cannot create Vyper bytecode itself.
@@ -3256,14 +2716,30 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
   const acceptedVyper=sharedExecutionInputs.artifacts.filter(a=>a.language==='vyper');
   if(acceptedVyper.length){
     const versions=[...new Set(acceptedVyper.map(a=>a.compilerVersion))];
-    if(versions.length!==1||!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(String(versions[0]??'')))throw new Error('PHASE0_VYPER_UNSUPPORTED_SOURCE_VERSION: '+versions.join(','));
-    const install=await runProcess({command:'timeout',args:['240s','python3','-m','pip','install','--disable-pip-version-check','--no-input','vyper=='+versions[0]],cwd:staged.projectRoot});
+    if(versions.length!==1||versions[0]!=='0.4.3')throw new Error('PHASE0_VYPER_UNSUPPORTED_VERSION: '+versions.join(','));
+    const install=await runProcess({command:'timeout',args:['240s','python3','-m','pip','install','--disable-pip-version-check','--no-input','vyper==0.4.3'],cwd:staged.projectRoot});
     if(install.exitCode!==0)throw new Error('PHASE0_VYPER_INSTALL_FAILED: '+String(install.stderr??install.stdout??'').slice(-1000));
     const probe=await runProcess({command:'vyper',args:['--version'],cwd:staged.projectRoot});
-    if(probe.exitCode!==0||!String(probe.stdout??'').trim().startsWith(versions[0]))throw new Error('PHASE0_VYPER_VERSION_MISMATCH');
-    // Never emit source-name-specific Vyper output aliases or build fake
-    // artifact manifests. The accepted compiler bundle remains the authority.
-
+    if(probe.exitCode!==0||!String(probe.stdout??'').trim().startsWith('0.4.3'))throw new Error('PHASE0_VYPER_VERSION_MISMATCH');
+    const staking=acceptedVyper.find(a=>a.sourceName==='contracts/BoostHubStaking.vy'&&a.contractName==='BoostHubStaking');
+    if(staking){
+      const original=await fs.readFile(path.join(staged.projectRoot,'contracts/BoostHubStaking.vy'));
+      const sourceSha256=sha256(original);
+      if(!/^0x[0-9a-f]+$/i.test(String(staking.bytecode??''))||
+         !/^0x[0-9a-f]+$/i.test(String(staking.deployedBytecode??''))||
+         !staking.compilationUnitId)throw new Error('PHASE0_VYPER_ACCEPTED_ARTIFACT_INVALID');
+      const artifactDir=path.join(staged.projectRoot,'artifacts_v6');
+      await fs.mkdir(artifactDir,{recursive:true});
+      await fs.writeFile(path.join(artifactDir,'staking_v6.json'),JSON.stringify({
+        bytecode:staking.bytecode,deployedBytecode:staking.deployedBytecode,
+        sourceSha256:'0x'+sourceSha256,compilationUnitId:staking.compilationUnitId,
+        compilerVersion:'0.4.3',archiveSha256
+      },null,2)+'\n');
+      await fs.writeFile(path.join(artifactDir,'build_provenance_v6.json'),JSON.stringify({
+        compiler_settings:{vyper:'0.4.3'},compilationUnitId:staking.compilationUnitId,
+        sourceSha256:'0x'+sourceSha256,archiveSha256
+      },null,2)+'\n');
+    }
   }
   // Use the same isolated, source-configured Foundry dependency resolution as
   // Phase-0 compilation before invoking any declared Forge deployment entry.
@@ -3284,10 +2760,6 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
     artifacts:sharedExecutionInputs.artifacts
   },ethers=await import('ethers');
   await fs.rm(outputRoot,{recursive:true,force:true});await fs.mkdir(path.join(outputRoot,'runs'),{recursive:true});
-  const inventoryPath=path.join(outputRoot,'evidence','phase0','DEPLOYMENT_ENTRYPOINT_INVENTORY_v1.json');
-  await fs.mkdir(path.dirname(inventoryPath),{recursive:true});
-  await fs.writeFile(inventoryPath,JSON.stringify(entrypointInventory,null,2)+'\n');
-
   let anvil;
   let deploymentEvidence=null;
   try{
@@ -3303,12 +2775,8 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
       reuseBasis:'EXACT_ACCEPTED_PHASE0_EXECUTION_BUILD_ARTIFACTS_V2'
     };
     const artifactByQualified=new Map();
-    for(const artifact of build.artifacts??[]){
-      const key=`${artifact.sourceName}:${artifact.contractName}`;
-      if(artifactByQualified.has(key))artifactByQualified.set(key,null);
-      else artifactByQualified.set(key,artifact);
-    }
-    const artifacts=[...(build.artifacts??[])]; // Do not drop duplicate qualified names across compiler units.
+    for(const artifact of build.artifacts??[])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
+    const artifacts=[...artifactByQualified.values()];
     anvil=await startAnvil({forkUrl:effectiveForkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion,chainId:forkChain.chainId,requireUpstreamChainId:Boolean(forkSelection),forkBlockNumber:scanManifest?.frozenBlock.number??null});
     const localRequest=new ethers.FetchRequest(anvil.url);
     localRequest.timeout=20000;
@@ -3331,16 +2799,8 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
     const liveContracts=[];
     if(deploymentProfile?.mode==='LIVE'){
       for(const target of deploymentProfile.contracts){
-        const admittedUnit=scanManifest?.resolvedTargets?.find(row=>
-          row.address?.toLowerCase()===target.address?.toLowerCase()&&
-          row.qualifiedName===target.qualifiedName)?.compilationUnitId??
-          target.compilationUnitId??null;
-        const options=artifacts.filter(row=>
-          row.sourceName+':'+row.contractName===target.qualifiedName&&
-          (!admittedUnit||row.compilationUnitId===admittedUnit));
-        if(options.length!==1)throw new Error('LIVE_TARGET_EXACT_COMPILATION_UNIT_AMBIGUOUS_OR_ABSENT: '+
-          target.qualifiedName+' unit='+(admittedUnit??'UNBOUND')+' count='+options.length);
-        const artifact=options[0];
+        const artifact=artifactByQualified.get(target.qualifiedName);
+        if(!artifact)throw new Error('LIVE target has no admitted artifact: '+target.qualifiedName);
         const code=await provider.getCode(target.address);
         const expected=typeof artifact.deployedBytecode==='string'?artifact.deployedBytecode:artifact.deployedBytecode?.object;
         const comparison=compareLiveRuntimeV1(code,expected,{allowScanMetadata:Boolean(scanManifest)});
@@ -3377,25 +2837,6 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
     const scriptEnd=Number(await provider.getBlockNumber());
     const discoveredScriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
     const reported=await reportedPackageDeployments({projectRoot:staged.projectRoot,attempts:deployment.attempts,artifacts});
-    const resolvedDeploymentRows=await resolveExactRuntimeDeploymentIdentityV1({
-      provider,artifacts:sharedExecutionInputs.artifacts,
-      deployments:[...liveContracts,...discoveredScriptDeployments,...reported.rows]
-    });
-    const runtimeIdentityIndex={
-      schemaVersion:'mi-phase0-runtime-address-identity-index-v1',
-      campaignId:receipt.campaign.campaignId,
-      campaignGenerationId:receipt.campaign.campaignGenerationId,
-      sourceArchiveSha256:archiveSha256,
-      chainId:forkChain.chainId,
-      pinnedBlockNumber:anvil.pinnedBlockNumber,pinnedBlockHash:anvil.pinnedBlockHash,
-      status:resolvedDeploymentRows.every(x=>x.sourceBinding==='EXACT_SOURCE_AND_RUNTIME_MATCH')
-        ?'ALL_OBSERVED_RUNTIME_IDENTITIES_EXACT':'PARTIAL_WITH_TYPED_UNRESOLVED_IDENTITIES',
-      rows:resolvedDeploymentRows
-    };
-    await fs.mkdir(path.join(outputRoot,'evidence','phase0'),{recursive:true});
-    await fs.writeFile(path.join(outputRoot,'evidence','phase0','RUNTIME_ADDRESS_IDENTITY_INDEX_v1.json'),
-      JSON.stringify(runtimeIdentityIndex,null,2)+'\n');
-
     // Audit Preview only: count ALL successful CREATE/CREATE2 call frames executed
     // by submitted deployment scripts, including factory-created contracts.
     // Trace failure is retained as unverifiable; the Phase-0 permit gate rejects it.
@@ -3431,40 +2872,6 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
       }
     }
 
-    const deploymentTraceIndex=await collectDeploymentTransactionTraceV1({
-      anvilUrl:anvil.url,outputRoot,
-      sourceIdentity:{campaignGenerationId:receipt.campaign.campaignGenerationId,
-        campaignId:receipt.campaign.campaignId,sourceArchiveSha256:archiveSha256},
-      chainId:forkChain.chainId,pinnedBlockNumber:anvil.pinnedBlockNumber,
-      pinnedBlockHash:anvil.pinnedBlockHash,initialBlock,scriptEnd,
-      compiledArtifacts:sharedExecutionInputs.artifacts
-    });
-    const observedCreations=deploymentTraceIndex.actualCreations??[];
-    const committedCreationOccurrences=observedCreations.filter(row=>
-      row.effectiveCommitStatus==='PERSISTED_IF_APPLICABLE');
-    const factoryRuntimeIdentityRows=await resolveExactRuntimeDeploymentIdentityV1({
-      provider,artifacts:sharedExecutionInputs.artifacts,
-      deployments:committedCreationOccurrences.map(row=>({
-        ...row,mappingStatus:'OBSERVED_FACTORY_CREATE_FRAME',
-        creationSourceEvidenceRef:deploymentTraceIndex.manifestRef
-      }))
-    });
-    const frameRuntimeIdentityRows=(deploymentTraceIndex.rows??[]).flatMap(record=>
-      (record.runtimeCodeObservations??[]).map(item=>({
-        ...item,origin:'OBSERVED_MINED_TRANSACTION_CODE_AT_BLOCK_BOUNDARIES',
-        runtimeIdentityContext:'TX_BLOCK_SCOPED',
-        observedRuntimeSha256:item.codeAtBlockEnd?.bytecodeSha256??null
-      })));
-    const allResolvedDeploymentRows=[
-      ...resolvedDeploymentRows,...factoryRuntimeIdentityRows,...frameRuntimeIdentityRows
-    ];
-    runtimeIdentityIndex.rows=allResolvedDeploymentRows;
-    runtimeIdentityIndex.createdContractOccurrences=observedCreations;
-    runtimeIdentityIndex.status=allResolvedDeploymentRows.every(row=>
-      row.sourceBinding==='EXACT_SOURCE_AND_RUNTIME_MATCH')
-      ?'ALL_OBSERVED_RUNTIME_IDENTITIES_EXACT':'PARTIAL_WITH_TYPED_UNRESOLVED_IDENTITIES';
-    await fs.writeFile(path.join(outputRoot,'evidence','phase0','RUNTIME_ADDRESS_IDENTITY_INDEX_v1.json'),
-      JSON.stringify(runtimeIdentityIndex,null,2)+'\n');
     if(deploymentOnly){
       // Only original package deployment/config scripts run on the fork. No fallback
       // deployments, fixture generation, Medusa, or ABI accounting telemetry.
@@ -3486,93 +2893,13 @@ export async function runPhase0RandomizedSimulationV1({sourceCheckoutRoot,source
           requestedTargets:scanManifest.requestedTargets,resolvedTargets:scanManifest.resolvedTargets}}:{}),
         ...(deploymentProfile?.mode==='LIVE'?{liveDeployment:{status:'VERIFIED',blockNumber:initialBlock,blockHash:(await provider.getBlock(initialBlock)).hash,contracts:liveContracts},deploymentLimitation:'Historical deployment transaction and constructor execution were not replayed.'}:{}),
         policy:'PACKAGE_NATIVE_SCRIPT_EXECUTION_ONLY_NO_FALLBACK_NO_FUZZ_NO_MEDUSA_NO_ABI_TELEMETRY',
-        deploymentTraceIndex,
         packageDependencyInstall,foundryDependencyInstall,detectedScripts:detected,scriptDispositions:dispositions,
         attempts:deployment.attempts,
         ...(auditPreviewCreationTrace?{auditPreviewCreationTrace}:{}),
-        runtimeIdentityIndexRef:'evidence/phase0/RUNTIME_ADDRESS_IDENTITY_INDEX_v1.json',
-        deployedContracts:[...new Map(allResolvedDeploymentRows.map(row=>[String(row.address).toLowerCase(),row])).values()],
+        deployedContracts:[...new Map([...liveContracts,...discoveredScriptDeployments,...reported.rows].map(row=>[String(row.address).toLowerCase(),row])).values()],
         gaps,limitations:gaps,
         coverage:{detectedScripts:dispositions.length,requiredScripts:dispositions.length,executedScripts:deployment.attempts.length,passedScripts:deployment.attempts.filter(row=>row.status==='PASS').length,failedOrUnsupportedScripts:dispositions.filter(row=>row.disposition!=='EXECUTED_PASS').length,excludedScripts:0}
       };
-      const methodInventory=buildActiveUseMethodInventoryV1({
-        receipt,artifacts:sharedExecutionInputs.artifacts,
-        deployedContracts:witness.deployedContracts,chainId:forkChain.chainId,
-        pinnedBlockNumber:anvil.pinnedBlockNumber,pinnedBlockHash:anvil.pinnedBlockHash
-      });
-      const methodInventoryPath=path.join(outputRoot,'evidence','phase0','ACTIVE_USE_METHOD_INVENTORY_v1.json');
-      await fs.mkdir(path.dirname(methodInventoryPath),{recursive:true});
-      await fs.writeFile(methodInventoryPath,JSON.stringify(methodInventory,null,2)+'\n');
-      const activeUseScenario=deploymentTraceIndex.scenarioId;
-      const activeUseRoot=path.join(outputRoot,'evidence','phase0','scenarios',activeUseScenario);
-      await fs.mkdir(activeUseRoot,{recursive:true});
-      const sourceBuildBundleSha256=sha256(Buffer.from(JSON.stringify(
-        executionBuildArtifacts,null,2)+'\n'));
-      const pendingMethods=methodInventory.methodCandidates.map(item=>({
-        methodCandidateId:item.methodCandidateId,
-        compiledIdentity:item.compiledIdentity,
-        runtimeAddress:item.runtimeTarget.address,
-        methodFamilyCandidates:item.methodFamilyCandidates,
-        unresolvedPrerequisites:item.limitations,
-        disposition:'AUTO_CONFIGURATION_UNRESOLVED_NOT_EXECUTED'
-      }));
-      const activeUsePlanUnsigned={
-        schemaVersion:'mi-phase0-active-use-plan-v1',
-        campaignId:receipt.campaign.campaignId,
-        campaignGenerationId:receipt.campaign.campaignGenerationId,
-        sourceArchiveSha256:archiveSha256,buildBundleSha256:sourceBuildBundleSha256,
-        scenarioId:activeUseScenario,chainId:forkChain.chainId,
-        pinnedForkBlockNumber:anvil.pinnedBlockNumber,
-        pinnedForkBlockHash:anvil.pinnedBlockHash,
-        snapshotBaseline:'POST_SOURCE_CONFIGURATION',
-        actionPlanVersion:'v1',
-        planStatus:'INCOMPLETE_SOURCE_CONFIGURATION_REQUIRED',
-        entries:[],inapplicableMethodRefs:[],
-        unknownMethodRefs:pendingMethods.map(row=>row.methodCandidateId),
-        sourceMethodPreconditions:pendingMethods,
-        candidateMethodCount:methodInventory.candidateCount,
-        configuredActionCount:0,authorizedUserTransactionCount:0,
-        fixtureProvenance:[],
-        limitations:['The complete ABI census is available, but neither source-permitted actors nor exact assets, amounts, dependency sequences and state constraints have been established. No user transaction is scheduled.']
-      };
-      const canonical=x=>Array.isArray(x)?'['+x.map(canonical).join(',')+']':
-        x&&typeof x==='object'?
-          '{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canonical(x[k])).join(',')+'}':
-          JSON.stringify(x);
-      const planSha256=sha256(Buffer.from(canonical(activeUsePlanUnsigned)));
-      const activeUsePlan={...activeUsePlanUnsigned,planSha256};
-      const activeUseExecution={
-        schemaVersion:'mi-phase0-active-use-execution-v1',
-        campaignId:receipt.campaign.campaignId,
-        campaignGenerationId:receipt.campaign.campaignGenerationId,
-        sourceArchiveSha256:archiveSha256,
-        scenarioId:activeUseScenario,frozenPlanSha256:planSha256,
-        status:'NOT_EXECUTED_INCOMPLETE_SOURCE_DEFINED_PLAN',
-        entries:pendingMethods.map(row=>({
-          actionId:null,methodCandidateId:row.methodCandidateId,
-          forkBranchId:null,sequenceId:null,attempted:false,
-          status:'AUTO_CONFIGURATION_UNRESOLVED',
-          observedTxRefs:[],receiptRefs:[],traceRefs:[],stateWitnessRefs:[],
-          measurableNewFacts:[],typedLimitations:row.unresolvedPrerequisites
-        })),
-        statusCounts:{planned:0,success:0,revert:0,unexecutable:0,
-          unresolved:pendingMethods.length,notApplicable:0},
-        unaccountedMethodCandidateIds:pendingMethods.map(row=>row.methodCandidateId),
-        submittedTransactions:[],observedRuntimeEffects:[],
-        limitations:activeUsePlan.limitations
-      };
-      const activeUseStateWitnesses={schemaVersion:'mi-phase0-active-use-state-witnesses-v1',
-        scenarioId:activeUseScenario,status:'NOT_CAPTURED_NO_AUTHORIZED_ACTIVE_USE',
-        observationsBeforeUse:[],observationsAfterUse:[],
-        limitations:activeUsePlan.limitations};
-      for(const [name,row] of [
-        ['ACTIVE_USE_PLAN_v1.json',activeUsePlan],
-        ['ACTIVE_USE_EXECUTION_v1.json',activeUseExecution],
-        ['ACTIVE_USE_STATE_WITNESSES_v1.json',activeUseStateWitnesses]
-      ])await fs.writeFile(path.join(activeUseRoot,name),JSON.stringify(row,null,2)+'\n');
-      witness.activeUseMethodInventory={status:methodInventory.status,
-        path:'evidence/phase0/ACTIVE_USE_METHOD_INVENTORY_v1.json',
-        methodCandidateCount:methodInventory.candidateCount};
       deploymentEvidence=witness;
       await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(witness,null,2)+'\n');
       let deployedStateSnapshot;

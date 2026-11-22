@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audit-controller-operation-pointer-v1",
+  "title": "Audit Controller Operation Pointer v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "processId", "requestId", "controller"],
+  "properties": {
+    "schemaVersion": { "const": "audit-controller-operation-pointer-v1" },
+    "processId": { "const": "audit-v7-independent-review" },
+    "requestId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,160}$"
+    },
+    "controller": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit", "requestPath"],
+      "properties": {
+        "repository": { "const": "curveyield3/Audit-Controller" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "requestPath": {
+          "type": "string",
+          "pattern": "^\\.deep-assurance/operator/requests/[A-Za-z0-9._-]+\\.json$"
+        }
+      }
+    },
+    "verifyController": { "type": "boolean" }
+  }
+}

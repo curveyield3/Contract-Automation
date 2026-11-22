@@ -25,9 +25,6 @@ const FULL_OUTPUT_SELECTION = Object.freeze([
   'evm.deployedBytecode.object',
   'evm.deployedBytecode.sourceMap',
   'evm.deployedBytecode.linkReferences',
-  'evm.deployedBytecode.immutableReferences',
-  'evm.bytecode.generatedSources',
-  'evm.deployedBytecode.generatedSources',
   'evm.methodIdentifiers',
   'evm.gasEstimates'
 ]);
@@ -104,17 +101,16 @@ export async function compileRepoEmbeddedProfiles({
   const detected=await detectEmbeddedProfileBuild(projectRoot,{fsApi});
   if(detected.system!=='embedded-profile-native')throw new Error('Repository is not an admitted embedded-profile build');
 
-  if(process.env.SECURITY_PREFLIGHT_OFFLINE_COMPILERS==='1'){
-    try{await fsApi.stat(path.join(projectRoot,'node_modules'));}
-    catch{throw new Error('EMBEDDED_PROFILE_DEPENDENCIES_NOT_PREPARED_OFFLINE');}
-  }else{
-    const install=await runCommand({command:'npm',args:['ci','--ignore-scripts','--no-audit','--no-fund'],cwd:projectRoot});
-    if(!install||install.exitCode!==0){
-      const error=new Error('Embedded-profile locked dependency installation failed');
-      error.code='embedded_profile_dependency_install_failed';
-      error.result={exitCode:Number.isInteger(install?.exitCode)?install.exitCode:-1,stdout:String(install?.stdout??''),stderr:String(install?.stderr??'')};
-      throw error;
-    }
+  const install=await runCommand({
+    command:'npm',
+    args:['ci','--ignore-scripts','--no-audit','--no-fund'],
+    cwd:projectRoot
+  });
+  if(!install||install.exitCode!==0){
+    const error=new Error('Embedded-profile locked dependency installation failed');
+    error.code='embedded_profile_dependency_install_failed';
+    error.result={exitCode:Number.isInteger(install?.exitCode)?install.exitCode:-1,stdout:String(install?.stdout??''),stderr:String(install?.stderr??'')};
+    throw error;
   }
 
   const deploymentUrl=pathToFileURL(path.join(projectRoot,...detected.deploymentSetModule.split('/'))).href;

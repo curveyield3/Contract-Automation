@@ -50,8 +50,8 @@ async function compileVerifiedScanProject(projectRoot) {
       if(!unitArtifacts.some(a=>a.sourceName+':'+a.contractName===binding.qualifiedName))throw new Error('SCAN_VERIFIED_TARGET_ARTIFACT_MISSING: '+binding.qualifiedName);
     }
     for(const a of unitArtifacts){
-      const key=a.compilationUnitId+':'+a.sourceName+':'+a.contractName;
-      if(seen.has(key))throw new Error('DUPLICATED_ARTIFACT_WITHIN_EXACT_COMPILATION_UNIT: '+key);
+      const key=a.sourceName+':'+a.contractName;
+      if(seen.has(key))throw new Error('AMBIGUOUS_COMPILATION_TARGET: '+key);
       seen.add(key);artifacts.push(a);
     }
     const sourceAsts=Object.fromEntries(Object.entries(output.sources??{}).filter(([,v])=>v?.ast).map(([n,v])=>[n,v.ast]));
@@ -70,7 +70,7 @@ async function compileVerifiedScanProject(projectRoot) {
     compilerVersions:[...new Set(units.map(u=>u.compilerVersion))].sort(),
     compilerProfiles:units.map(u=>({name:u.unitId,compilerVersion:u.compilerVersion,settings:u.settings})),
     compilerDiagnostics:diagnostics,sourceAsts:allAsts,
-    artifacts:artifacts.sort((a,b)=>(a.compilationUnitId+':'+a.sourceName+':'+a.contractName).localeCompare(b.compilationUnitId+':'+b.sourceName+':'+b.contractName)),
+    artifacts:artifacts.sort((a,b)=>(a.sourceName+':'+a.contractName).localeCompare(b.sourceName+':'+b.contractName)),
     compilationUnits:units,sourceInventory:[...sourceNames].sort(),sourceInventoryFiles:sourceNames.size};
 }
 
@@ -92,7 +92,7 @@ function mergeArtifacts(solidityArtifacts, vyperArtifacts) {
   const merged = [];
   const seen = new Set();
   for (const artifact of [...(solidityArtifacts ?? []), ...(vyperArtifacts ?? [])]) {
-    const key = `${artifact.compilationUnitId??'UNRESOLVED_UNIT'}:${artifact.sourceName}:${artifact.contractName}`;
+    const key = `${artifact.sourceName}:${artifact.contractName}`;
     if (seen.has(key)) throw new Error(`Duplicate mixed-language compiler artifact: ${key}`);
     seen.add(key);
     merged.push(artifact);
@@ -110,9 +110,7 @@ export async function buildProject({
   compileVyper = defaultCompileVyperSources,
   compileHermetic = compileRepoHermeticStandardJson
 }) {
-  const vyperCompiler = requestedVyperCompiler(request);
-  const compiler = request?.configuration?.compilers?.find(item=>item?.language==='solidity')??null;
-  if(!compiler&&!vyperCompiler)throw new Error('No exact Solidity or Vyper compiler requested');
+  const compiler = requestedSolidityCompiler(request);
   const scanManifestPath=path.join(projectRoot,'scan-source-manifest.json');
   try { await fs.access(scanManifestPath); return await compileVerifiedScanProject(projectRoot); }
   catch(error){if(error?.code!=='ENOENT')throw error;}
@@ -121,14 +119,7 @@ export async function buildProject({
   const embedded = await detectEmbeddedProfileBuild(projectRoot, { ...(fsApi ? { fsApi } : {}) });
   let solidityBuild;
 
-  if(!compiler){
-    // Source packages containing only Vyper must not require fake Solidity
-    // compiler configuration or fake Solidity artifacts.
-    solidityBuild={status:'completed',system:'vyper-only',compilerVersion:null,
-      compilerVersions:[],compilerProfiles:[],compilerDiagnostics:[],
-      sourceAsts:{},artifacts:[],sourceInventory:[],sourceInventoryFiles:0,
-      compilationUnits:[]};
-  } else if (shouldUseHermeticStandardJson(request)) {
+  if (shouldUseHermeticStandardJson(request)) {
     solidityBuild = await compileHermetic({
       projectRoot,
       request,
@@ -195,6 +186,7 @@ export async function buildProject({
     };
   }
 
+  const vyperCompiler = requestedVyperCompiler(request);
   if (!vyperCompiler) return solidityBuild;
 
   const vyperBuild = await compileVyper({
@@ -211,7 +203,7 @@ export async function buildProject({
   for(const artifact of vyperBuild.artifacts ?? []){
     const sourceName=artifact.sourceName;
     const relative=path.posix.normalize(sourceName);
-    if(relative.startsWith('../')||relative.startsWith('/')||relative.split('/').includes('..'))
+    if(relative.startsWith('../')||relative.startsWith('/')||!relative.startsWith('contracts/'))
       throw new Error('Vyper source must remain inside the admitted contracts/ tree: '+sourceName);
     const source=await fs.readFile(path.join(projectRoot,...relative.split('/')),'utf8');
     const sourceSha256=scanHash(source);
@@ -242,7 +234,7 @@ export async function buildProject({
       throw new Error('Foundry compiler unit unexpectedly mixes Solidity and Vyper artifacts: '+unit.unitId);
     for(const artifact of unit.artifacts){
       const relative=path.posix.normalize(artifact.sourceName);
-      if(relative.startsWith('../')||relative.startsWith('/')||relative.split('/').includes('..'))
+      if(relative.startsWith('../')||relative.startsWith('/')||!relative.startsWith('contracts/'))
         throw new Error('Foundry Vyper source escapes admitted contracts tree: '+relative);
       const original=await fs.readFile(path.join(projectRoot,...relative.split('/')),'utf8');
       if(unit.sourceContents?.[relative]!==original)

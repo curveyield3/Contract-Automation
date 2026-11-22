@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "curveyield-lite-interphase-work-packet-v1",
+  "title": "CurveYield Lite Interphase Mechanical Work Packet v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "campaignId",
+    "completedMilestoneId",
+    "handoffPath",
+    "taskClass",
+    "instructions",
+    "requiredOutputs"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "curveyield-lite-interphase-work-packet-v1"
+    },
+    "campaignId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "completedMilestoneId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoffPath": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instructions": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiredOutputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "purpose": {
+            "type": "string"
+          }
+        }
+      },
+      "uniqueItems": true,
+      "description": "Every output must be a repository-relative path under the authoritative handoff directory's MECHANICAL/ subdirectory."
+    },
+    "taskClass": {
+      "const": "MECHANICAL_ONLY"
+    }
+  }
+}

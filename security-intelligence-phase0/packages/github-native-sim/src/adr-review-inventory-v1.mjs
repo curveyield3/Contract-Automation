@@ -231,35 +231,23 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
       const contextId=symbolId.replace(/^SYM-/,'CTX-');
       const calls=(analysis.sensitiveCalls??[]).filter(x=>x.function===def.name);
       const writes=(analysis.stateWrites??[]).filter(x=>x.function===def.name);
-      const reads=(analysis.stateReads??[]).filter(x=>x.function===def.name);
-      const internal=(analysis.internalCalls??[]).filter(x=>x.function===def.name);
-      const external=(analysis.externalCalls??[]).filter(x=>x.function===def.name);
-      const vyperSensitiveOperations=calls.map(x=>({memberName:x.call,
-        targetType:'VYPER_COMPILER_AST_SENSITIVE_OPERATION',line:x.line}));
-      const vyperExternalOperations=external.map(x=>({
-        memberName:x.call,targetType:x.targetType??'VYPER_COMPILER_AST_EXTERNAL_TARGET_UNRESOLVED',
-        line:x.line,callKind:x.callKind,targetExpression:x.targetExpression??null}));
       const decorators=def.decorators??[];
       const mutability=decorators.includes('view')?'view':decorators.includes('pure')?'pure':decorators.includes('payable')?'payable':'nonpayable';
       const visibility=def.external?'external':'internal';
       const ctx={contextId,symbolId,path:file,qualifiedContainer,kind:'FUNCTION',canonicalSignature:signature,
         visibility,stateMutability:mutability,lineStart:def.line,lineEnd:end,effectiveIn:[qualifiedContainer],
-        scopeTier:source.tier,dependencySymbolIds:[],
-        stateReads:distinct(reads.map(x=>x.target)),
-        stateWrites:distinct(writes.map(x=>x.target)),
-        internalCalls:[],vyperInternalCallees:distinct(internal.map(x=>x.callee)),
-        stateReadEvidenceClass:'VYPER_AST_REFERENCE_INCLUDES_ASSIGNMENT_TARGETS',
-        modifiers:def.nonreentrant?['nonreentrant']:[],
-        externalCalls:vyperExternalOperations,vyperSensitiveOperations,
+        scopeTier:source.tier,dependencySymbolIds:[],stateReads:[],stateWrites:distinct(writes.map(x=>x.target)),
+        internalCalls:[],modifiers:def.nonreentrant?['nonreentrant']:[],
+        externalCalls:calls.map(x=>({memberName:x.call,targetType:'VYPER_COMPILER_AST_SENSITIVE_OPERATION',line:x.line})),
         natSpec:'',directBases:[],implementedInterfaces:[],contractKind:'contract',contractAbstract:false,
         senderCheckLines:sourceLines.slice(def.line-1,end).flatMap((line,index)=>line.includes('msg.sender')?[def.line+index]:[]),
         txOriginLines:sourceLines.slice(def.line-1,end).flatMap((line,index)=>line.includes('tx.origin')?[def.line+index]:[]),
         analyzer:'VYPER_0_4_3_SOURCE_BOUND_COMPILER_AST'};
       const signals=[];
       if(writes.length)signals.push('STATE_WRITE');
-      if(vyperExternalOperations.length)signals.push('EXTERNAL_CALL');
+      if(calls.length)signals.push('EXTERNAL_CALL');
       if(def.external&&writes.length)signals.push('STATE_WRITE_EXTERNAL');
-      if(vyperExternalOperations.some(call=>writes.some(write=>call.line<write.line)))
+      if(calls.some(call=>writes.some(write=>call.line<write.line)))
         signals.push('EXTERNAL_CALL_BEFORE_STATE_WRITE');
       if(decorators.includes('payable'))signals.push('PAYABLE');
       contexts.push(ctx);
@@ -268,21 +256,6 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
         lineStart:def.line,lineEnd:end,hasBody:true});
       triggers[contextId]=new Set(signals);
     }
-  }
-  // Bind self.foo() to actual source functions after the AST function
-  // definitions have been indexed. Do not invent unresolved implementations.
-  for(const ctx of contexts.filter(x=>x.analyzer==='VYPER_0_4_3_SOURCE_BOUND_COMPILER_AST')){
-    const candidates=contexts.filter(x=>x.analyzer===ctx.analyzer&&x.path===ctx.path&&
-      x.kind==='FUNCTION');
-    const unresolved=[];
-    for(const name of ctx.vyperInternalCallees??[]){
-      const same=candidates.filter(x=>x.canonicalSignature.startsWith(name+'('));
-      if(same.length===1)ctx.internalCalls.push(same[0].symbolId);
-      else unresolved.push(name);
-    }
-    ctx.internalCalls=distinct(ctx.internalCalls);
-    ctx.unresolvedInternalCallees=unresolved;
-    delete ctx.vyperInternalCallees;
   }
   for(const [file,ast] of asts) {
     const source=bySource.get(file);
@@ -383,14 +356,6 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
   // Temporary context analysis structures are never serialized into inventory JSON.
   const temp=new Map();
   for(const ctx of contexts) {
-    // Vyper context fields come from the source-hash-bound Vyper compiler AST.
-    // The Solidity AST walker below cannot find a Solidity node for these
-    // records; never erase Vyper state writes or sensitive calls with [].
-    if(ctx.analyzer==='VYPER_0_4_3_SOURCE_BOUND_COMPILER_AST'){
-      temp.set(ctx.contextId,{nodes:[],calls:[],writes:[],reads:[],members:[],external:[],
-        source:bySource.get(ctx.path),meta:null});
-      continue;
-    }
     const meta=metadata.get(ctx.symbolId),source=bySource.get(ctx.path),n=meta?.node;
     const examined=ctx.kind==='STATE_INITIALIZER'?n?.value:ctx.kind==='GENERATED_GETTER'?null:n;
     const nodes=[],calls=[],writes=[],reads=[],members=[],external=[],modifiers=[];
@@ -461,8 +426,6 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign,slither
     if(ctx.stateWrites.some(x=>/executed|cancel|approved|claimed|status|state|active|paused|used/i.test(x)))rules.add('STATUS_FLAG_WRITE');
     if(ctx.stateWrites.length&&nodes.some(x=>x.nodeType==='IndexAccess'||x.nodeType==='MemberAccess'))rules.add('MAPPING_STRUCT_WRITE');
     if(t.external.length)rules.add('EXTERNAL_CALL');
-    if(ctx.analyzer==='VYPER_0_4_3_SOURCE_BOUND_COMPILER_AST'&&(ctx.externalCalls??[]).length)
-      rules.add('EXTERNAL_CALL');
     if(members.some(x=>/^(call|delegatecall|staticcall|send|transfer)$/.test(x.memberName)&&
       /^address\b/.test(x.expression?.typeDescriptions?.typeString??'')))rules.add('LOW_LEVEL_CALL');
     if(members.some(x=>x.memberName==='delegatecall'))rules.add('DELEGATECALL');

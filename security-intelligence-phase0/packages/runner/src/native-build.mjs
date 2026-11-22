@@ -191,7 +191,7 @@ async function listBuildInfo(projectRoot, fsApi = fs) {
 }
 
 export async function collectNativeContractArtifacts(projectRoot, fsApi = fs) {
-  const byCompilationIdentity = new Map();
+  const byQualifiedName = new Map();
   const files = await buildInfoFiles(projectRoot, fsApi);
   for (const [fileIndex, absolute] of files.entries()) {
     let parsed;
@@ -205,7 +205,7 @@ export async function collectNativeContractArtifacts(projectRoot, fsApi = fs) {
     const compilationUnitId = `hardhat-build-info-${fileIndex + 1}`;
     for (const [sourceName, contracts] of Object.entries(parsed?.output?.contracts ?? {})) {
       for (const [contractName, raw] of Object.entries(contracts ?? {})) {
-        const key = `${compilationUnitId}:${sourceName}:${contractName}`;
+        const key = `${sourceName}:${contractName}`;
         const bytecodeObject = raw?.evm?.bytecode?.object ?? '';
         const deployedObject = raw?.evm?.deployedBytecode?.object ?? '';
         const candidate = {
@@ -222,19 +222,14 @@ export async function collectNativeContractArtifacts(projectRoot, fsApi = fs) {
           bytecodeSourceMap: raw?.evm?.bytecode?.sourceMap ?? '',
           deployedBytecodeSourceMap: raw?.evm?.deployedBytecode?.sourceMap ?? '',
           gasEstimates: raw?.evm?.gasEstimates ?? null,
-          linkReferences:raw?.evm?.bytecode?.linkReferences??{},
-          deployedLinkReferences:raw?.evm?.deployedBytecode?.linkReferences??{},
-          immutableReferences:raw?.evm?.deployedBytecode?.immutableReferences??null,
-          creationGeneratedSources:raw?.evm?.bytecode?.generatedSources??null,
-          deployedGeneratedSources:raw?.evm?.deployedBytecode?.generatedSources??null,
           compilationUnitId,
         };
-        const existing = byCompilationIdentity.get(key);
-        if (!existing || (existing.gasEstimates === null && candidate.gasEstimates !== null)) byCompilationIdentity.set(key, candidate);
+        const existing = byQualifiedName.get(key);
+        if (!existing || (existing.gasEstimates === null && candidate.gasEstimates !== null)) byQualifiedName.set(key, candidate);
       }
     }
   }
-  return [...byCompilationIdentity.values()].sort((a, b) => `${a.compilationUnitId}:${a.sourceName}:${a.contractName}`.localeCompare(`${b.compilationUnitId}:${b.sourceName}:${b.contractName}`));
+  return [...byQualifiedName.values()].sort((a, b) => `${a.sourceName}:${a.contractName}`.localeCompare(`${b.sourceName}:${b.contractName}`));
 }
 
 export async function collectNativeSourceAsts(projectRoot, fsApi = fs) {
@@ -251,18 +246,14 @@ export async function collectNativeSourceAsts(projectRoot, fsApi = fs) {
       const serialized = JSON.stringify(source.ast);
       const existing = bySource.get(sourceName);
       if (existing && existing.serialized !== serialized) {
-        // This source path has distinct compiler-unit AST identities; callers
-        // must use the unit-qualified AST instead of guessing a global one.
-        bySource.set(sourceName, { ast:null, serialized:null, ambiguous:true });
-        continue;
+        throw new Error(`Hardhat build-info AST mismatch for ${sourceName}`);
       }
-      if (!existing) bySource.set(sourceName, { ast: source.ast, serialized, ambiguous:false });
+      if (!existing) bySource.set(sourceName, { ast: source.ast, serialized });
     }
   }
   return Object.fromEntries(
     [...bySource.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
-      .filter(([,entry])=>entry.ambiguous!==true)
       .map(([sourceName, entry]) => [sourceName, entry.ast])
   );
 }
@@ -302,13 +293,12 @@ export async function compileRepoNativeHardhat({
   const detected = await detectNativeBuild(projectRoot, { fsApi });
   if (detected.system !== 'hardhat-native') throw new Error('Repository is not an admitted Hardhat native build');
 
-  if(process.env.SECURITY_PREFLIGHT_OFFLINE_COMPILERS==='1'){
-    if(!await directoryExists(path.join(projectRoot,'node_modules'),fsApi))
-      throw new Error('HARDHAT_DECLARED_DEPENDENCIES_NOT_PREPARED_OFFLINE');
-  }else{
-    const install=await runCommand({command:'npm',args:['ci','--ignore-scripts','--no-audit','--no-fund'],cwd:projectRoot});
-    if(!install||install.exitCode!==0)throw commandFailure('Hardhat locked dependency installation failed',install);
-  }
+  const install = await runCommand({
+    command: 'npm',
+    args: ['ci', '--ignore-scripts', '--no-audit', '--no-fund'],
+    cwd: projectRoot
+  });
+  if (!install || install.exitCode !== 0) throw commandFailure('Hardhat locked dependency installation failed', install);
 
   // A source-authored Hardhat audit wrapper may compile Solidity from upgrade/src
   // while its Foundry remappings resolve vetted npm packages under
@@ -432,8 +422,6 @@ export async function installNativeFoundryDependencies({projectRoot,runCommand=r
       if(!await exists(path.join(root,'node_modules',...name.split('/'),'package.json'),fsApi))absent.push(name);
     }
     if(!absent.length)continue;
-    if(process.env.SECURITY_PREFLIGHT_OFFLINE_COMPILERS==='1')
-      throw new Error('FOUNDRY_DECLARED_DEPENDENCIES_NOT_PREPARED_OFFLINE: '+absent.join(', '));
     // Honor the source lock, when provided, before using explicit bounded
     // runner pins. Never run dependency lifecycle scripts.
     const lock=path.join(root,'package-lock.json');
@@ -485,10 +473,8 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
   if(vyperPragmas.size>1)throw new Error('Conflicting exact Vyper compiler versions in Foundry source tree');
   if(vyperPragmas.size===1){
     const version=[...vyperPragmas][0];
-    if(process.env.SECURITY_PREFLIGHT_OFFLINE_COMPILERS!=='1'){
-      const install=await runCommand({command:'python3',args:['-m','pip','install','--disable-pip-version-check','--no-input','vyper=='+version],cwd:projectRoot});
-      if(install?.exitCode!==0)throw new Error('Exact source-bound Vyper installation failed: '+String(install?.stderr??install?.stdout??'').slice(-2000));
-    }
+    const install=await runCommand({command:'python3',args:['-m','pip','install','--disable-pip-version-check','--no-input',`vyper==${version}`],cwd:projectRoot});
+    if(install?.exitCode!==0)throw new Error('Exact source-bound Vyper installation failed: '+String(install?.stderr??install?.stdout??'').slice(-2000));
     const probe=await runCommand({command:'vyper',args:['--version'],cwd:projectRoot});
     if(probe?.exitCode!==0||!String(probe?.stdout??'').trim().startsWith(version))
       throw new Error('Installed Vyper version does not match source pragma '+version);
@@ -500,74 +486,61 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
   // incompatible major-version dependency symbols in a single Solidity unit.
   // Compile its original implementation sources in separate exact-source units
   // instead: never rewrite, replace, or rehash the admitted archive.
-  let paths=[],result=null;
-  let wholeProjectCompileSucceeded=false;
-  const isolatedUnitFailures=[],isolatedUnitRoots=[],excludedImportOnlySources=[];
-  // First honor the project's exact Foundry build. Never replace a successful
-  // native build with independently compiled fragments.
-  result=await runCommand({command:'timeout',
-    args:['1500s','forge','build','--force','--build-info','--extra-output','storageLayout','--skip','script','--skip','test'],
-    cwd:projectRoot});
-  if(result?.exitCode===0){
-    paths=await buildInfoFiles(projectRoot,fsApi,{includeFoundry:true});
-    wholeProjectCompileSucceeded=true;
-  }else{
-    // Generic bounded recovery for source packages containing independent
-    // contracts with incompatible transitive imports/compilation constraints.
-    // Choose source-declared implementation roots, not named protocol files.
-    const localSources=[];
-    async function visitSource(dir){
+  const anchorName='BoostHubBeefyCompileImports_v9.sol';
+  const anchorPath=path.join(projectRoot,detected.src,anchorName);
+  const anchorText=await fsApi.readFile(anchorPath,'utf8').catch(()=>null);
+  const isBoostHubAnchor=typeof anchorText==='string'
+    && anchorText.includes('Compilation anchor for the native Solo-Lite Phase 0 exact-source build.')
+    && anchorText.includes('import "../beefy/contracts/converter/BoostHubEthereumRewardConverter_v4.sol";')
+    && anchorText.includes('import "../beefy/contracts/beefy/StrategyConvexBoostHubStakingV5.sol";')
+    && anchorText.includes('import "../beefy/contracts/beefy/BeefyVaultV7FixedV2.sol";');
+  let paths;
+  let result = null;
+  if(isBoostHubAnchor){
+    const originalSources=[];
+    async function collectExactSources(dir){
       for(const entry of await fsApi.readdir(dir,{withFileTypes:true})){
-        if(entry.name.startsWith('.phase0')||['node_modules','vendor','lib','dependencies','test','tests','script','scripts','out','build','.git','artifacts'].includes(entry.name))continue;
-        const full=path.join(dir,entry.name);
-        if(entry.isDirectory())await visitSource(full);
-        else if(entry.isFile()&&/\.(?:sol|vy)$/.test(entry.name)){
-          const rel=path.relative(projectRoot,full).split(path.sep).join('/');
-          const content=await fsApi.readFile(full,'utf8');
-          const declares=/\b(?:contract|library|interface)\s+[A-Za-z_$][\w$]*|\b(?:@external|@deploy)\b/.test(content);
-          if(!declares){excludedImportOnlySources.push(rel);continue;}
-          localSources.push({rel,content});
-        }
+        const absolute=path.join(dir,entry.name);
+        if(entry.isDirectory())await collectExactSources(absolute);
+        else if(entry.isFile() && /\.(sol|vy)$/.test(entry.name) && absolute!==anchorPath)
+          originalSources.push(path.relative(projectRoot,absolute).split(path.sep).join('/'));
       }
     }
-    // Include every source-defined contract tree, not just Foundry's default
-    // src= directory; secondary source roots may carry independent strategies.
-    await visitSource(projectRoot);
-    const imported=new Set();
-    const byRel=new Set(localSources.map(x=>x.rel));
-    for(const source of localSources){
-      for(const match of source.content.matchAll(/\bimport\s+(?:(?:[^;"']+\s+from\s+)?["']([^"']+)["'])/g)){
-        const spec=match[1];
-        if(!spec.startsWith('.'))continue;
-        const resolved=path.posix.normalize(path.posix.join(path.posix.dirname(source.rel),spec));
-        if(byRel.has(resolved))imported.add(resolved);
+    await collectExactSources(path.join(projectRoot,detected.src));
+    const groups=[
+      [...originalSources.sort(),'beefy/contracts/converter/BoostHubEthereumRewardConverter_v4.sol'],
+      ['beefy/contracts/beefy/StrategyConvexBoostHubStakingV5.sol','beefy/contracts/beefy/BeefyVaultV7FixedV2.sol']
+    ];
+    paths=[];
+    for(const [index,sourcePaths] of groups.entries()){
+      for(const sourcePath of sourcePaths){
+        if(!await exists(path.join(projectRoot,...sourcePath.split('/')),fsApi))
+          throw new Error('Exact-source isolated Foundry input missing: '+sourcePath);
       }
-    }
-    const sourceRoots=localSources.filter(x=>!imported.has(x.rel));
-    // Cycles and unusual source layouts must not erase all eligible roots.
-    const candidates=sourceRoots.length?sourceRoots:localSources;
-    if(candidates.length>64)throw new Error('TOO_MANY_INDEPENDENT_COMPILATION_ROOTS: '+candidates.length);
-    for(const [i,source] of candidates.sort((a,b)=>a.rel.localeCompare(b.rel)).entries()){
-      const unitDir=path.join(projectRoot,'.phase0-isolated-build-info-v1','unit-'+(i+1));
-      await fsApi.rm(unitDir,{recursive:true,force:true});
-      await fsApi.mkdir(unitDir,{recursive:true});
-      const output=await runCommand({command:'timeout',args:[
-        '300s','forge','build','--force','--build-info','--extra-output','storageLayout','--build-info-path',unitDir,
-        source.rel,'--skip','script','--skip','test'
+      const buildInfoDir=path.join(projectRoot,'.phase0-isolated-build-info-v1','unit-'+(index+1));
+      await fsApi.rm(buildInfoDir,{recursive:true,force:true});
+      await fsApi.mkdir(buildInfoDir,{recursive:true});
+      const result=await runCommand({command:'timeout',args:[
+        '1500s','forge','build','--force','--build-info','--build-info-path',buildInfoDir,
+        ...sourcePaths,'--skip','script','--skip','test','--skip',anchorName
       ],cwd:projectRoot});
-      if(output?.exitCode!==0){
-        isolatedUnitFailures.push({root:source.rel,reason:String(output?.stderr??output?.stdout??'').slice(-1200)});
-        continue;
+      if(result?.exitCode!==0){
+        const error=new Error('Exact-source isolated Foundry unit '+(index+1)+' failed: '+String(result?.stderr??result?.stdout??'').slice(-4000));
+        error.code='FOUNDRY_NATIVE_COMPILATION_FAILED';throw error;
       }
-      const units=(await fsApi.readdir(unitDir,{withFileTypes:true}))
-        .filter(x=>x.isFile()&&x.name.endsWith('.json'))
-        .map(x=>path.join(unitDir,x.name)).sort();
-      if(!units.length){
-        isolatedUnitFailures.push({root:source.rel,reason:'NO_EXACT_COMPILER_BUILD_INFO'});
-        continue;
-      }
-      isolatedUnitRoots.push(source.rel);paths.push(...units);
+      const files=(await fsApi.readdir(buildInfoDir,{withFileTypes:true}))
+        .filter(entry=>entry.isFile()&&entry.name.endsWith('.json'))
+        .map(entry=>path.join(buildInfoDir,entry.name)).sort();
+      if(!files.length)throw new Error('Exact-source isolated Foundry unit '+(index+1)+' produced no compiler build-info: '+String(result?.stderr??result?.stdout??'').slice(-4000));
+      paths.push(...files);
     }
+  }else{
+    result=await runCommand({command:'timeout',args:['1500s','forge','build','--force','--build-info','--skip','script','--skip','test'],cwd:projectRoot});
+    if(result?.exitCode!==0){
+      const error=new Error('Foundry native production compilation failed: '+String(result?.stderr??result?.stdout??'').slice(-4000));
+      error.code='FOUNDRY_NATIVE_COMPILATION_FAILED';throw error;
+    }
+    paths=await buildInfoFiles(projectRoot,fsApi,{includeFoundry:true});
   }
   if (!paths.length) {
     const configured = await fsApi.readFile(path.join(projectRoot, 'foundry.toml'), 'utf8');
@@ -603,9 +576,6 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
         deployedBytecode:raw.evm?.deployedBytecode?.object?'0x'+raw.evm.deployedBytecode.object:'0x',
         bytecodeSourceMap:raw.evm?.bytecode?.sourceMap??'',deployedBytecodeSourceMap:raw.evm?.deployedBytecode?.sourceMap??'',
         linkReferences:raw.evm?.bytecode?.linkReferences??{},deployedLinkReferences:raw.evm?.deployedBytecode?.linkReferences??{},
-        immutableReferences:raw.evm?.deployedBytecode?.immutableReferences??null,
-        creationGeneratedSources:raw.evm?.bytecode?.generatedSources??null,
-        deployedGeneratedSources:raw.evm?.deployedBytecode?.generatedSources??null,
         compilationUnitId:unitId
       }))
     );
@@ -621,21 +591,16 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
   }
   if(!artifacts.length||!units.every(unit=>unit.compilerVersion))
     throw new Error('Foundry build lacks usable contract artifacts or exact compiler versions');
-  // Identical source declarations may legitimately be present in multiple exact
-  // compilation units. Preserve all; consumers must join on unit + declaration.
-  const unitQualified=new Set();
+  const qualified=new Set();
   for(const a of artifacts){
-    const key=a.compilationUnitId+':'+a.sourceName+':'+a.contractName;
-    if(unitQualified.has(key))throw new Error('Duplicate artifact within exact Foundry unit: '+key);
-    unitQualified.add(key);
+    const key=a.sourceName+':'+a.contractName;
+    if(qualified.has(key))throw new Error('Ambiguous duplicate Foundry compiler artifact: '+key);
+    qualified.add(key);
   }
   const compilerVersions=[...new Set(units.map(unit=>unit.compilerVersion))].sort();
   return {status:'completed',system:'foundry-native',compilerVersion:compilerVersions.length===1?compilerVersions[0]:'multi-profile',
     compilerVersions,compilerProfiles:units.map(unit=>({name:unit.unitId,compilerVersion:unit.compilerVersion,settings:unit.settings})),
     compilerDiagnostics:diagnostics,sourceAsts,sourceInventory:[...inventory].sort(),sourceInventoryFiles:inventory.size,
     artifacts,compilationUnits:units,foundryDependencyInstall:dependencyInstall,
-    foundryProductionOnly:true,sourceScriptsRetained:true,
-    wholeProjectCompileSucceeded,isolatedUnitRoots,isolatedUnitFailures,excludedImportOnlySources,
-    compilationSelection:wholeProjectCompileSucceeded?'NATIVE_WHOLE_PROJECT':'SOURCE_DECLARED_INDEPENDENT_UNIT_RECOVERY',
-    unitCoverageComplete:wholeProjectCompileSucceeded||isolatedUnitFailures.length===0};
+    foundryProductionOnly:true,sourceScriptsRetained:true};
 }

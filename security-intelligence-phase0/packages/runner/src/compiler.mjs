@@ -15,9 +15,6 @@ const OUTPUT_SELECTION = [
   'evm.deployedBytecode.object',
   'evm.deployedBytecode.sourceMap',
   'evm.deployedBytecode.linkReferences',
-  'evm.deployedBytecode.immutableReferences',
-  'evm.bytecode.generatedSources',
-  'evm.deployedBytecode.generatedSources',
   'evm.methodIdentifiers',
   'evm.gasEstimates'
 ];
@@ -96,10 +93,7 @@ function normalizeArtifact(sourceName, contractName, artifact) {
     bytecodeSourceMap: artifact?.evm?.bytecode?.sourceMap ?? '',
     linkReferences: artifact?.evm?.bytecode?.linkReferences ?? {},
     deployedBytecodeSourceMap: artifact?.evm?.deployedBytecode?.sourceMap ?? '',
-    deployedLinkReferences: artifact?.evm?.deployedBytecode?.linkReferences ?? {},
-    immutableReferences: artifact?.evm?.deployedBytecode?.immutableReferences ?? null,
-    creationGeneratedSources: artifact?.evm?.bytecode?.generatedSources ?? null,
-    deployedGeneratedSources: artifact?.evm?.deployedBytecode?.generatedSources ?? null
+    deployedLinkReferences: artifact?.evm?.deployedBytecode?.linkReferences ?? {}
   };
 }
 

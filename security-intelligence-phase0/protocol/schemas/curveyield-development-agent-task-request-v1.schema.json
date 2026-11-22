@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "curveyield-development-agent-task-request-v1",
+  "title": "CurveYield Development Agent Task Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "managerId",
+    "specificationPath",
+    "skillPath",
+    "targetRepository",
+    "targetBranch"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "curveyield-development-agent-task-request-v1"
+    },
+    "status": {
+      "const": "READY"
+    },
+    "managerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9._-]{1,160}$"
+    },
+    "specificationPath": {
+      "type": "string",
+      "minLength": 1
+    },
+    "skillPath": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authorityRef": {
+      "type": "string",
+      "minLength": 1,
+      "default": "main"
+    },
+    "targetRepository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "targetBranch": {
+      "type": "string",
+      "minLength": 1
+    },
+    "baseRef": {
+      "type": "string",
+      "minLength": 1,
+      "default": "main"
+    },
+    "initialAssignment": {
+      "type": "string"
+    },
+    "continuityMode": {
+      "type": "string",
+      "enum": [
+        "managed_project",
+        "standalone"
+      ],
+      "default": "managed_project"
+    }
+  }
+}
