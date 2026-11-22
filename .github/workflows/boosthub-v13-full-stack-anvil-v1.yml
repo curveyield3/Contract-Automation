@@ -82,8 +82,8 @@ jobs:
           original='        bool finalExit = IERC20(vault).totalSupply() == 0;\\n        uint256 idle = balanceOfWant();'
           fixed='        // Standalone strategies see a Beefy ERC-20 vault. BoostHub children\\n        // are instead called by the sdFXN master, which has no totalSupply().\\n        bool finalExit;\\n        try IERC20(vault).totalSupply() returns (uint256 remainingShares) {\\n            finalExit = remainingShares == 0;\\n        } catch {}\\n        uint256 idle = balanceOfWant();'
           content=base.read_text()
-          original=original.replace('\\n','\\n')
-          fixed=fixed.replace('\\n','\\n')
+          original=original.replace(chr(92)+'n',chr(10))
+          fixed=fixed.replace(chr(92)+'n',chr(10))
           assert content.count(original)==1,'Base emergency parent distinction missing'
           base.write_text(content.replace(original,fixed))
           (root/'contracts/StrategyCurveSDTYearnV9.sol').rename(root/'contracts/StrategyCurveSDTYearnV10.sol')
