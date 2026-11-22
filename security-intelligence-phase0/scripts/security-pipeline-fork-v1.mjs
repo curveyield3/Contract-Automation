@@ -149,11 +149,20 @@ async function main(){
  // separately approved restricted transport; GitHub warning artifacts do not
  // establish such transport and are never read as source execution authority.
  if(args.operation==='inspect'){
-  warnings.push(problem('G2B.RESTRICTED_SOURCE_ZIP_HANDOFF_MISSING',
-   'fork_setup.originalSourceZipTransport',
-   'independently approved restricted same-run source ZIP transport with original digest',
-   'preflight artifact exposes metadata, not an executable source ZIP',
-   'Provide a separately accepted restricted same-run source ZIP handoff, never upload source to warnings'));
+  try{
+   if(!args['source-zip'])throw Error('EXACT_ORIGINAL_ZIP_ARTIFACT_NOT_STAGED_IN_THIS_JOB');
+   const stat=await fs.lstat(args['source-zip']);
+   if(!stat.isFile()||stat.isSymbolicLink()||stat.size>16*1024*1024)
+    throw Error('ORIGINAL_SOURCE_ZIP_NOT_BOUNDED_REGULAR_FILE');
+   if(sha(await fs.readFile(args['source-zip']))!==sourceSha)
+    throw Error('RESTRICTED_SOURCE_ZIP_DIGEST_MISMATCH');
+  }catch(error){
+   warnings.push(problem('G2B.RESTRICTED_SOURCE_ZIP_NOT_VERIFIED',
+     'fork_setup.originalSourceZipTransport',
+     'existing security-preflight-source artifact, exact admitted SHA-256 and same-run approval',
+     error.message,
+     'Restore the existing exact same-run admitted source artifact only under independent authority'));
+  }
  }
  if(args.operation==='execute'){
   for(const x of ['source-zip','toolkit-profile','toolkit-root','build-evidence','private-root'])

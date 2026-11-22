@@ -1115,6 +1115,7 @@ jobs:
             --authority "$base/input/admit/EXTENDED_MODE_DISPOSITION_v1.json" \
             --source-manifest "$base/input/preflight/PREFLIGHT_MANIFEST_v1.json" \
             --run-identity "$base/input/RUN_IDENTITY_v1.json" \
+            --source-zip "$base/input/restricted-source/source.zip" \
             --output-root "$base/native"
       - name: Execute only independently authorized exact source deployment on restricted Anvil
         id: authorized_fork_native
