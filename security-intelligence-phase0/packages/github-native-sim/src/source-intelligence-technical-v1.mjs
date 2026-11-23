@@ -388,6 +388,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
   const sbom=await generateBuildSbomV1({projectRoot,request,build:{compilerDescriptors:clone(request.configuration.compilers??[]),optimizer:clone(request.configuration.optimizer??null),evmVersion:request.configuration.evmVersion??null,viaIR:request.configuration.viaIR===true,sourceCommit:request.source.commit,artifacts:clone(build.artifacts??[])}});
   const slither=analysis.slither??null, detectors=Array.isArray(slither?.detectors)?slither.detectors:[];
   const wake=analysis.wake??null, wakeDetectors=Array.isArray(wake?.detectors)?wake.detectors:[];
+  const mythril=analysis.mythril??null, mythrilDetectors=Array.isArray(mythril?.detectors)?mythril.detectors:[];
   const limitations=[];
   const hasSolidityAsts=Object.keys(build.sourceAsts??{}).length>0||(build.compilationUnits??[]).some(unit=>Object.keys(unit.sourceAsts??{}).length>0);
   if (sourceFiles.some(x=>x.language==='SOLIDITY') && !hasSolidityAsts) limitations.push({limitationId:'SI-TECH-LIM-001',category:'SOLIDITY_AST_UNAVAILABLE',
@@ -419,7 +420,16 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
         storageIds:[],externalInterfaceIds:externalInterfaces.map(x=>x.externalInterfaceId),privilegeCandidateIds:[],valueFlowCandidateIds:valueFlowCandidates.map(x=>x.valueFlowCandidateId),sourceAnchorIds:[],phase1Ownership:'STRUCTURAL_INVENTORY',laterPhaseTreatment:'REVIEW_VALUE_SEMANTICS',status:'CURRENT',basis:'AST_TRANSFER_APPROVAL_LOW_LEVEL_CALL_CANDIDATES'}
     ],
     protocolTopology:{upgradeabilityEdges,dependencyEdges,crossChainEdges:[],offchainAutomationEdges:[],topologyLimitations:['OFFCHAIN_AUTOMATION_AND_CROSS_CHAIN_RELATIONSHIPS_REQUIRE_PROJECT_FILE_REVIEW','DYNAMIC_DISPATCH_AND_BUSINESS_RELATIONSHIPS_REQUIRE_REVIEWER_CONTEXT']},
-    staticRecon:{wake:{status:wake?.status??'UNAVAILABLE',componentStatus:wake?.componentStatus??'MISSING',version:wake?.version??null,rawEvidenceRef:'WAKE_v1.json',
+    staticRecon:{mythril:{status:mythril?.status??'UNAVAILABLE',componentStatus:mythril?.componentStatus??'MISSING',
+      version:mythril?.version??null,rawEvidenceRef:'MYTHRIL_v1.json',candidateCount:mythrilDetectors.length,
+      eligibleContracts:mythril?.eligibleCount??null,completedContracts:mythril?.completedCount??null,
+      candidateIndex:mythrilDetectors.map((d,i)=>({candidateId:`MYTHRIL-${pad(i+1,4)}`,
+        check:d?.title??d?.swc_id??'UNNAMED_SYMBOLIC_CANDIDATE',impact:d?.severity??null,
+        swcId:d?.swc_id??null,qualifiedName:d?.qualifiedName??null,sourceName:d?.sourceName??null,
+        programCounter:d?.address??null,status:'NEUTRAL_ANALYZER_CANDIDATE'})),
+      limitation:mythril&&['COMPLETED','NOT_APPLICABLE'].includes(mythril.componentStatus)
+        ?(mythril?.limitations??[]):[`MYTHRIL_${String(mythril?.status??'UNAVAILABLE').toUpperCase()}`]},
+      wake:{status:wake?.status??'UNAVAILABLE',componentStatus:wake?.componentStatus??'MISSING',version:wake?.version??null,rawEvidenceRef:'WAKE_v1.json',
       candidateCount:wakeDetectors.length,solidityUnitCount:wake?.solidityUnitCount??null,
       candidateIndex:wakeDetectors.map((d,i)=>({candidateId:`WAKE-${pad(i+1,4)}`,check:d?.detector_name??'UNNAMED_DETECTOR',
         impact:d?.impact??null,confidence:d?.confidence??null,suppressed:d?.suppressed===true,
