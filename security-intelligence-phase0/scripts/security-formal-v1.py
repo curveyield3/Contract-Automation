@@ -31,7 +31,9 @@ def invoke(argv: list[str], *, cwd: Path | None = None,
     output = result.stdout or ""
     # No untrusted contract source is present during this subcommand.
     if output:
-        print(output[-12000:], flush=True)
+        # The prior 12k clipping hid the root Kotlin/KSP compiler diagnostic.
+        # This stage is trusted-toolchain-only; retain more native failure output.
+        print(output[-120000:] if result.returncode else output[-12000:], flush=True)
     if result.returncode:
         raise RuntimeError(
             f"Native tool {argv[0]} exited {result.returncode}: {output[-2000:]}"
@@ -122,8 +124,13 @@ def local_toolchain(root: Path) -> dict[str, object]:
         env["PATH"] = f"{target_bin}:{env['PATH']}"
 
     # Native build tasks only: no Gradle test, forge test, fuzz, or deployment.
-    invoke(["bash", "./gradlew", "assemble", "--no-daemon"], cwd=source, env=env)
-    invoke(["bash", "./gradlew", "copy-assets", "--no-daemon"], cwd=source, env=env)
+    # Gradle's pinned project enables parallel KSP tasks; qualify a serial,
+    # non-incremental native build first to avoid CI memory contention.
+    # --stacktrace retains the real Kotlin compiler cause on any failure.
+    build_flags = ["--no-daemon", "--no-parallel", "--max-workers=1",
+                   "-Pksp.incremental=false", "--stacktrace"]
+    invoke(["bash", "./gradlew", "assemble", *build_flags], cwd=source, env=env)
+    invoke(["bash", "./gradlew", "copy-assets", *build_flags], cwd=source, env=env)
     invoke([sys.executable, "-m", "venv", str(venv)], cwd=source, env=env)
     python = venv / "bin" / "python"
     invoke([str(python), "-m", "pip", "install", "--disable-pip-version-check",
