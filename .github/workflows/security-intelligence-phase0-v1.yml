@@ -12,7 +12,10 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: security-preflight-${{ github.ref }}
+  # Keep the I02-only compiler qualification from queueing behind an unintended
+  # source rescanning push. The source scanner jobs and their logic are unchanged.
+  group: >-
+    security-preflight-${{ github.ref }}-${{ github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' && 'compiler-qualification' || 'source-scan' }}
   cancel-in-progress: false
 jobs:
   admit:
