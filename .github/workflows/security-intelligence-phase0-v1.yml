@@ -15,7 +15,7 @@ concurrency:
   # Keep the I02-only compiler qualification from queueing behind an unintended
   # source rescanning push. The source scanner jobs and their logic are unchanged.
   group: >-
-    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary') && 'formal-qualification' || 'source-scan' }}
+    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || github.event.head_commit.message == 'I03.1: install upstream AutoProver') && 'formal-qualification' || 'source-scan' }}
   cancel-in-progress: false
 jobs:
   admit:
@@ -23,6 +23,7 @@ jobs:
     if: >-
       github.event.head_commit.message != 'I02.2: qualify native Solidity compilers' &&
       github.event.head_commit.message != 'I02.3: qualify source boundary' &&
+      github.event.head_commit.message != 'I03.1: install upstream AutoProver' &&
       !startsWith(github.event.head_commit.message, 'FORMAL-QUALIFY:')
     outputs:
       request_present: ${{ steps.request_present.outputs.request_present }}
@@ -251,7 +252,8 @@ jobs:
     # I02.1-only native toolchain qualification, not the I05 formal-analysis job.
     if: >-
       github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' ||
-      github.event.head_commit.message == 'I02.3: qualify source boundary'
+      github.event.head_commit.message == 'I02.3: qualify source boundary' ||
+      github.event.head_commit.message == 'I03.1: install upstream AutoProver'
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
@@ -326,3 +328,43 @@ jobs:
           test ! -e .preflight-input/source.zip
           echo 'I02.3 native dispatcher syntax/readiness and I02.1/I02.2 prerequisites observed.'
           echo 'No source ZIP loaded; authentic source admission remains required at I04/I05.'
+      - name: Select pinned JDK 19 for local native Certora dependency
+        if: >-
+          github.event.head_commit.message == 'I03.1: install upstream AutoProver'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '19'
+      - name: Select Python 3.12 required by upstream AutoProver
+        if: >-
+          github.event.head_commit.message == 'I03.1: install upstream AutoProver'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Rebuild exact pinned local Certora dependency in fresh runner
+        if: >-
+          github.event.head_commit.message == 'I03.1: install upstream AutoProver'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-toolchain \
+            --work-dir "$RUNNER_TEMP/curve-certora-i03"
+      - name: Install pinned AutoProver with locked production dependencies and inspect native CLI
+        if: >-
+          github.event.head_commit.message == 'I03.1: install upstream AutoProver'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-autoprover \
+            --work-dir "$RUNNER_TEMP/curve-certora-i03"
+      - name: Preserve exact I03.1 native GitHub qualification receipts
+        if: >-
+          always() && github.event.head_commit.message == 'I03.1: install upstream AutoProver'
+        uses: actions/upload-artifact@v4
+        with:
+          name: certora-i03-autoprover-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/curve-certora-i03/toolchain-bootstrap-v1.json
+            ${{ runner.temp }}/curve-certora-i03/autoprover-bootstrap-v1.json
+          if-no-files-found: error
+          retention-days: 14
