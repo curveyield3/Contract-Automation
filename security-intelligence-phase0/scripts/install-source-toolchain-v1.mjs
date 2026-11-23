@@ -14,7 +14,7 @@ if(plan.schemaVersion!=='curveyield-standalone-toolchain-plan-v1')throw Error('I
 const sha=x=>crypto.createHash('sha256').update(x).digest('hex');
 const isExact=v=>/^\d+\.\d+\.\d+$/.test(v);
 const statuses={solidity:[],wake:[],vyper:[],packages:[],sourcePlanSha256:sha(fs.readFileSync(path.join(planDir,'toolchain-plan.json')))};
-const command=(bin,args,cwd)=>spawnSync(bin,args,{cwd,env:{...process.env,CI:'true',npm_config_ignore_scripts:'true'},encoding:'utf8',timeout:300000,maxBuffer:1024*1024});
+const command=(bin,args,cwd,extraEnv={})=>spawnSync(bin,args,{cwd,env:{...process.env,CI:'true',npm_config_ignore_scripts:'true',...extraEnv},encoding:'utf8',timeout:300000,maxBuffer:1024*1024});
 
 for(const [index,p] of (plan.packages??[]).entries()){
   if(!/^packages\/\d+$/.test(p.preparedPath)||p.preparedPath!=='packages/'+index)throw Error('INVALID_PREPARED_PACKAGE_PATH');
@@ -73,7 +73,7 @@ for(const item of statuses.solidity){
     statuses.wake.push({version:item.version,status:'UNAVAILABLE',detail:'Native compiler was not prepared'});
     continue;
   }
-  const installed=command('wake',['svm','install',item.version],'/opt/preflight');
+  const installed=command('wake',['svm','install',item.version],'/opt/preflight', {XDG_DATA_HOME:'/opt/preflight/.local/share'});
   statuses.wake.push({version:item.version,status:installed.status===0?'PREPARED':'UNAVAILABLE',
     detail:installed.status===0?null:String(installed.stderr||installed.stdout||installed.error||'').slice(-550)});
 }
