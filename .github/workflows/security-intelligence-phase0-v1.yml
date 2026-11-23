@@ -15,7 +15,7 @@ concurrency:
   # Keep the I02-only compiler qualification from queueing behind an unintended
   # source rescanning push. The source scanner jobs and their logic are unchanged.
   group: >-
-    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || (github.event.head_commit.message == 'I03.1: install upstream AutoProver' || github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider')) && 'formal-qualification' || 'source-scan' }}
+    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || (github.event.head_commit.message == 'I03.1: install upstream AutoProver' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' || github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing'))) && 'formal-qualification' || 'source-scan' }}
   cancel-in-progress: false
 jobs:
   admit:
@@ -254,7 +254,8 @@ jobs:
       github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' ||
       github.event.head_commit.message == 'I02.3: qualify source boundary' ||
       github.event.head_commit.message == 'I03.1: install upstream AutoProver' ||
-      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider'
+      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' ||
+      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing'
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
@@ -371,13 +372,15 @@ jobs:
           retention-days: 14
       - name: Select upstream AutoProver Python 3.12 for I03.2 only
         if: >-
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider'
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' ||
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install pinned upstream AutoProver and register the exact local MiMo entry point
         if: >-
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider'
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' ||
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing'
         shell: bash
         run: |
           set -euo pipefail
@@ -432,5 +435,89 @@ jobs:
               "upstreamProviderInterface":True, "nativeCertoraBuild":False,
               "modelInference":False, "externalProviderCalls":False,
               "realPrivateModelSessionDeferredTo":"I05.2"
+          }, sort_keys=True))
+          PY
+      - name: Qualify heavy/lite, AutoSetup and strict local MiMo API contracts
+        if: >-
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Shape-only adapter qualification; no Tailscale join or live model call.
+          # Runtime I05.2 will replace this placeholder with verified rendezvous IP.
+          export CURVEYIELD_MIMO_VERIFIED_TAILNET_IP=100.64.0.42
+          export CURVEYIELD_MIMO_BASE_URL=http://100.64.0.42:8080/v1
+          "$RUNNER_TEMP/autoprover-i032/.venv/bin/python" - <<'PY'
+          import json
+          from dataclasses import dataclass
+          from pydantic import BaseModel
+          from composer.llm.registry import get_provider_for
+          from curveyield_formal_mimo import (
+              MODEL_ID, MiMoModelProvider, configure_local_mimo_runtime,
+              mimo_autoprover_model_args, validate_mimo_chat_completion,
+          )
+
+          @dataclass
+          class Options:
+              tokens: int = 1024
+              thinking_tokens: int | None = None
+              memory_tool: bool = False
+              interleaved_thinking: bool = False
+
+          class NativeSchema(BaseModel):
+              status: str
+
+          args = mimo_autoprover_model_args()
+          if args != ["--heavy-model", MODEL_ID, "--lite-model", MODEL_ID]:
+              raise RuntimeError("AutoProver heavy/lite are not both pinned to MiMo")
+          provider = get_provider_for(model_name=MODEL_ID, options=Options())
+          if not isinstance(provider, MiMoModelProvider):
+              raise RuntimeError("Upstream registry selected non-MiMo provider")
+          chat = provider.builder_for()
+          if chat.use_responses_api is not False or chat.disable_streaming is not True:
+              raise RuntimeError("MiMo is not pinned to non-streamed chat completions")
+          if not chat.with_structured_output(NativeSchema, method="json_schema"):
+              raise RuntimeError("Required upstream JSON Schema binding unavailable")
+          tool = {
+              "type": "function",
+              "function": {
+                  "name": "read_authorized_source",
+                  "description": "A tool whose authority remains with AutoProver",
+                  "parameters": {
+                      "type": "object",
+                      "properties": {"path": {"type": "string"}},
+                      "required": ["path"],
+                  },
+              },
+          }
+          if not chat.bind_tools([tool]):
+              raise RuntimeError("Native MiMo tool binding unavailable")
+          request = {"model": MODEL_ID, "tools": [tool]}
+          wire = {"model": MODEL_ID, "choices": [{
+              "finish_reason": "tool_calls", "message": {
+                  "role": "assistant", "content": None,
+                  "tool_calls": [{"id": "call_local", "type": "function",
+                                  "function": {"name": "read_authorized_source",
+                                               "arguments": '{"path":"src/Vault.sol"}'}}],
+              }}]}
+          validate_mimo_chat_completion(wire, request)
+          routed = configure_local_mimo_runtime()
+          import certora_autosetup.utils.llm_util as autosetup
+          if (routed["backend"] != "local" or routed["model"] != MODEL_ID
+                  or autosetup._get_backend().value != "local"
+                  or autosetup._local_call_structured.__name__ != "_strict_sync"
+                  or autosetup._local_call_structured_async.__name__ != "_strict_async"):
+              raise RuntimeError("AutoSetup not exclusively routed through strict MiMo")
+          print(json.dumps({
+              "status": "MIMO_ALL_CONSUMERS_ROUTED",
+              "stage": "I03.3",
+              "heavy": MODEL_ID, "lite": MODEL_ID,
+              "autosetup": routed["model"],
+              "jsonSchemaBinding": True,
+              "strictAutoSetupSchemaWithoutFallback": True,
+              "toolCallsRequireNativeAutoProverAuthority": True,
+              "localPrivateURLShape": True,
+              "liveInferenceVerified": False, "liveVerificationDeferredTo": "I05.2",
+              "nativeCertoraBuild": False, "contractTests": False,
           }, sort_keys=True))
           PY
