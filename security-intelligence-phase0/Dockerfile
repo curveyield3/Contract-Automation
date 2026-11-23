@@ -2,7 +2,7 @@
 # Runtime is --network none, read-only, capability-free and receives no credentials.
 FROM node:22-bookworm-slim
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    bash ca-certificates git unzip python3 python3-pip python3-venv build-essential \
+    bash ca-certificates git unzip python3 python3-dev python3-pip python3-venv build-essential \
     && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv /opt/slither && /opt/slither/bin/pip install --no-cache-dir 'slither-analyzer==0.11.6'
 RUN python3 -m venv /opt/wake && /opt/wake/bin/pip install --no-cache-dir 'eth-wake==4.21.0'
