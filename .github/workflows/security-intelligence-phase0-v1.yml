@@ -5,26 +5,14 @@ on:
     branches: [machine-intelligence-audit-controller-v1]
     paths:
       - 'security-intelligence-phase0/requests/active-request.json'
-      # One-time I02.1 native bootstrap; remove at the I05.1 formal-job integration.
-      - '.github/workflows/security-intelligence-phase0-v1.yml'
-      - 'security-intelligence-phase0/scripts/security-formal-v1.py'
 permissions:
   contents: read
   actions: read
 concurrency:
-  # Keep the I02-only compiler qualification from queueing behind an unintended
-  # source rescanning push. The source scanner jobs and their logic are unchanged.
-  group: >-
-    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || (github.event.head_commit.message == 'I03.1: install upstream AutoProver' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG' || github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping'))))) && 'formal-qualification' || 'source-scan' }}
+  group: security-preflight-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   admit:
-    # Preserve source-scanner behavior; skip only the isolated I02.1 bootstrap commit.
-    if: >-
-      github.event.head_commit.message != 'I02.2: qualify native Solidity compilers' &&
-      github.event.head_commit.message != 'I02.3: qualify source boundary' &&
-      github.event.head_commit.message != 'I03.1: install upstream AutoProver' &&
-      !startsWith(github.event.head_commit.message, 'FORMAL-QUALIFY:')
     outputs:
       request_present: ${{ steps.request_present.outputs.request_present }}
     runs-on: ubuntu-latest
@@ -248,420 +236,102 @@ jobs:
             echo "Compiled source-bound evidence accepted with recorded limitations; no security verdict"
           fi
 
-  certora-bootstrap-i02:
-    # I02.1-only native toolchain qualification, not the I05 formal-analysis job.
-    if: >-
-      github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' ||
-      github.event.head_commit.message == 'I02.3: qualify source boundary' ||
-      github.event.head_commit.message == 'I03.1: install upstream AutoProver' ||
-      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' ||
-      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' ||
-      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG' ||
-      github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping'
+  formal:
+    name: Formal integration — authenticated same-run intake
+    needs: [admit, collect]
+    if: ${{ needs.admit.result == 'success' && needs.collect.result == 'success' && needs.admit.outputs.request_present == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 350
+    timeout-minutes: 330
+    permissions:
+      contents: read
+      actions: write
+      id-token: write
     steps:
-      - name: Checkout exact trusted bootstrap revision
+      - name: Checkout exact trusted formal dispatcher
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Download source-bound prior successful Phase 0 evidence (not source ZIP)
-        if: >-
-          github.event.head_commit.message == 'I02.2: qualify native Solidity compilers'
+      - name: Read same-run original source artifact without unpacking
         uses: actions/download-artifact@v4
         with:
-          repository: curveyield3/Contract-Automation
-          run-id: 45144607076
-          name: security-preflight-evidence-45144607076-1
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/certora-i02-evidence
-      - name: Native source-bound Solidity compiler qualification
-        if: >-
-          github.event.head_commit.message == 'I02.2: qualify native Solidity compilers'
+          name: security-preflight-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/formal-source
+      - name: Read same-run successful native scanner evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/formal-evidence
+      - name: Authenticate matching source and native build before I05.2
         shell: bash
         run: |
           set -euo pipefail
-          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-compilers \
-            --work-dir "$RUNNER_TEMP/curve-certora-i02" \
-            --identity "$RUNNER_TEMP/certora-i02-evidence/BUILD_AND_SOURCE_IDENTITY_v1.json" \
-            --requirements "$RUNNER_TEMP/certora-i02-evidence/TOOLCHAIN_REQUIREMENTS_v1.json" \
-            --artifacts "$RUNNER_TEMP/certora-i02-evidence/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json" \
-            --request security-intelligence-phase0/requests/active-request.json
-      - name: Publish authenticated compiler qualification evidence
-        if: >-
-          always() && github.event.head_commit.message == 'I02.2: qualify native Solidity compilers'
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          base=Path(os.environ["RUNNER_TEMP"])
+          request=json.loads(Path("security-intelligence-phase0/requests/active-request.json").read_text())
+          admitted=json.loads((base/"formal-source/request.json").read_text())
+          identity_file=base/"formal-evidence/BUILD_AND_SOURCE_IDENTITY_v1.json"
+          manifest_file=base/"formal-evidence/PREFLIGHT_MANIFEST_v1.json"
+          compiled_file=base/"formal-evidence/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json"
+          identity=json.loads(identity_file.read_text())
+          manifest=json.loads(manifest_file.read_text())
+          compiled=json.loads(compiled_file.read_text())
+          source=request["source"]
+          if (request.get("schemaVersion")!="curveyield-security-preflight-request-v1"
+              or request.get("runMode")!="SOURCE_PREFLIGHT"
+              or admitted.get("requestId")!=request.get("requestId")
+              or admitted.get("source")!=source
+              or identity.get("requestId")!=request.get("requestId")
+              or identity.get("source",{}).get("archiveSha256")!=source["archiveSha256"]
+              or identity.get("source",{}).get("archiveSha256Observed")!=source["archiveSha256"]
+              or compiled.get("requestIdentity",{}).get("requestId")!=request.get("requestId")
+              or compiled.get("source")!=source):
+              raise SystemExit("FORMAL_INTAKE_IDENTITY_INVALID")
+          source_zip=base/"formal-source/source.zip"
+          if (not source_zip.is_file() or source_zip.stat().st_size>16*1024*1024
+              or hashlib.sha256(source_zip.read_bytes()).hexdigest()!=source["archiveSha256"]):
+              raise SystemExit("FORMAL_INTAKE_ZIP_HASH_MISMATCH")
+          if (identity.get("status")!="PASS" or identity.get("build",{}).get("status")!="completed"
+              or manifest.get("status")!="COLLECTED"
+              or manifest.get("sourceAdmissionVerified") is not True
+              or manifest.get("source",{}).get("observedSha256")!=source["archiveSha256"]
+              or compiled.get("schemaVersion")!="curveyield-phase0-execution-build-artifacts-v2"
+              or compiled.get("buildConfigurationDigestSha256")!=identity["build"].get("buildConfigurationDigestSha256")):
+              raise SystemExit("FORMAL_INTAKE_NATIVE_SCANNER_NOT_ACCEPTED")
+          hashes={entry["name"]:entry["sha256"] for entry in manifest.get("files",[])
+                  if isinstance(entry,dict) and "name" in entry and "sha256" in entry}
+          for name,path in (("BUILD_AND_SOURCE_IDENTITY_v1.json",identity_file),
+                             ("PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json",compiled_file)):
+              if hashlib.sha256(path.read_bytes()).hexdigest()!=hashes.get(name):
+                  raise SystemExit("FORMAL_INTAKE_EVIDENCE_HASH_MISMATCH: "+name)
+          dest=base/"formal-intake-v1.json"
+          result={
+              "status":"FORMAL_SAME_RUN_INTAKE_READY",
+              "originRunId":int(os.environ["GITHUB_RUN_ID"]),
+              "originRunAttempt":int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "originCommit":os.environ["GITHUB_SHA"],
+              "requestId":request["requestId"],
+              "source":source,
+              "compilationUnitCount":len(identity["build"].get("compilationUnits") or []),
+              "compiledArtifactCount":len(compiled.get("artifacts") or []),
+              "actualScannerEvidence":True,
+              "sourceUnpacked":False,
+              "nativeProverExecuted":False,
+              "modelSessionStarted":False,
+              "nextStep":"I05.2"
+          }
+          dest.write_text(json.dumps(result,indent=2)+"\n")
+          print(json.dumps({k:v for k,v in result.items() if k!="source"},sort_keys=True))
+          PY
+          test -s "$RUNNER_TEMP/formal-intake-v1.json"
+          echo 'Live formal job reached with exact same-run authenticated source and scanner evidence.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish sanitized same-run formal readiness
+        if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
-          name: certora-i02-compilers-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/curve-certora-i02/compiler-bootstrap-v1.json
-          if-no-files-found: error
-          retention-days: 7
-      - name: Reopen accepted native Certora bootstrap receipt
-        if: >-
-          github.event.head_commit.message == 'I02.3: qualify source boundary'
-        uses: actions/download-artifact@v4
-        with:
-          repository: curveyield3/Contract-Automation
-          run-id: 45162422101
-          name: certora-i02-bootstrap-45162422101-1
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/certora-i02-native
-      - name: Reopen accepted native compiler qualification receipt
-        if: >-
-          github.event.head_commit.message == 'I02.3: qualify source boundary'
-        uses: actions/download-artifact@v4
-        with:
-          repository: curveyield3/Contract-Automation
-          run-id: 45166425004
-          name: certora-i02-compilers-45166425004-1
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/certora-i02-native
-      - name: Verify trusted source-boundary dispatcher before source admission
-        if: >-
-          github.event.head_commit.message == 'I02.3: qualify source boundary'
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq -e '.status=="LOCAL_TOOLCHAIN_STARTUP_VERIFIED" and .proverGitCommit=="4ef546d00cd67d333914845dead2d72081e1f014" and .cliHelpObserved==true' \
-            "$RUNNER_TEMP/certora-i02-native/toolchain-bootstrap-v1.json" >/dev/null
-          jq -e '.status=="COMPILER_TOOLCHAIN_VERIFIED" and .stage=="I02.2" and .noSourceZipRead==true' \
-            "$RUNNER_TEMP/certora-i02-native/compiler-bootstrap-v1.json" >/dev/null
-          python3 -m py_compile security-intelligence-phase0/scripts/security-formal-v1.py
-          python3 security-intelligence-phase0/scripts/security-formal-v1.py --help >/dev/null
-          test ! -e .preflight-input/source.zip
-          echo 'I02.3 native dispatcher syntax/readiness and I02.1/I02.2 prerequisites observed.'
-          echo 'No source ZIP loaded; authentic source admission remains required at I04/I05.'
-      - name: Select pinned JDK 19 for local native Certora dependency
-        if: >-
-          github.event.head_commit.message == 'I03.1: install upstream AutoProver'
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '19'
-      - name: Select Python 3.12 required by upstream AutoProver
-        if: >-
-          github.event.head_commit.message == 'I03.1: install upstream AutoProver'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Rebuild exact pinned local Certora dependency in fresh runner
-        if: >-
-          github.event.head_commit.message == 'I03.1: install upstream AutoProver'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-toolchain \
-            --work-dir "$RUNNER_TEMP/curve-certora-i03"
-      - name: Install pinned AutoProver with locked production dependencies and inspect native CLI
-        if: >-
-          github.event.head_commit.message == 'I03.1: install upstream AutoProver'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-autoprover \
-            --work-dir "$RUNNER_TEMP/curve-certora-i03"
-      - name: Preserve exact I03.1 native GitHub qualification receipts
-        if: >-
-          always() && github.event.head_commit.message == 'I03.1: install upstream AutoProver'
-        uses: actions/upload-artifact@v4
-        with:
-          name: certora-i03-autoprover-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/curve-certora-i03/toolchain-bootstrap-v1.json
-            ${{ runner.temp }}/curve-certora-i03/autoprover-bootstrap-v1.json
+          name: certora-formal-intake-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/formal-intake-v1.json
           if-no-files-found: error
           retention-days: 14
-      - name: Select upstream AutoProver Python 3.12 for I03.2 only
-        if: >-
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' ||
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' ||
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install pinned upstream AutoProver and register the exact local MiMo entry point
-        if: >-
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' ||
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' ||
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG'
-        shell: bash
-        run: |
-          set -euo pipefail
-          source="$RUNNER_TEMP/autoprover-i032"
-          python3 -m venv "$RUNNER_TEMP/uv-i032"
-          "$RUNNER_TEMP/uv-i032/bin/pip" install --disable-pip-version-check 'uv==0.13.9'
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0='url.https://github.com/.insteadOf'
-          export GIT_CONFIG_VALUE_0='git@github.com:'
-          git clone --filter=blob:none --no-checkout https://github.com/Certora/AutoProver.git "$source"
-          git -C "$source" fetch --depth=1 origin 81d9626c249a70c0a0f0648a89de175443c0344c
-          git -C "$source" checkout --detach FETCH_HEAD
-          test "$(git -C "$source" rev-parse HEAD)" = '81d9626c249a70c0a0f0648a89de175443c0344c'
-          git -C "$source" submodule update --init --recursive
-          test "$(git -C "$source/graphcore" rev-parse HEAD)" = 'c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc'
-          (
-            cd "$source"
-            "$RUNNER_TEMP/uv-i032/bin/uv" sync --locked --no-dev --extra certora-cli --python "$(command -v python3)"
-          )
-          "$RUNNER_TEMP/uv-i032/bin/uv" pip install --python "$source/.venv/bin/python" --no-deps --editable \
-            "$GITHUB_WORKSPACE/security-intelligence-phase0/formal-mimo-provider"
-          "$source/.venv/bin/python" - <<'PY'
-          import importlib.metadata
-          import json
-          from dataclasses import dataclass
-          from composer.llm.registry import get_provider_for
-          from curveyield_formal_mimo import MODEL_ID, MiMoModelProvider, MiMoService
-          from composer.llm.provider import ProviderSpec
-
-          @dataclass
-          class Options:
-              tokens: int = 1024
-              thinking_tokens: int | None = None
-              memory_tool: bool = False
-              interleaved_thinking: bool = False
-
-          entries = [entry for entry in importlib.metadata.entry_points(
-              group="certora.autoprove.llm_provider") if entry.name == "curveyield-mimo"]
-          if len(entries) != 1 or not isinstance(entries[0].load(), ProviderSpec):
-              raise RuntimeError("Pinned upstream MiMo provider entry point not discoverable")
-          provider = get_provider_for(model_name=MODEL_ID, options=Options())
-          if not isinstance(provider, MiMoModelProvider):
-              raise RuntimeError("Upstream provider registry did not select local MiMo")
-          if not isinstance(provider.provider, MiMoService):
-              raise RuntimeError("MiMo provider lacks real upstream ProviderService")
-          if provider.model_name != MODEL_ID or provider.max_prompt_tokens <= 0:
-              raise RuntimeError("Registered MiMo adapter has invalid identity/context")
-          print(json.dumps({
-              "status":"LOCAL_MIMO_PROVIDER_REGISTERED",
-              "stage":"I03.2", "model":provider.model_name,
-              "entryPoint":entries[0].value, "pythonRegistry":True,
-              "upstreamProviderInterface":True, "nativeCertoraBuild":False,
-              "modelInference":False, "externalProviderCalls":False,
-              "realPrivateModelSessionDeferredTo":"I05.2"
-          }, sort_keys=True))
-          PY
-      - name: Qualify heavy/lite, AutoSetup and strict local MiMo API contracts
-        if: >-
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing'
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Shape-only adapter qualification; no Tailscale join or live model call.
-          # Runtime I05.2 will replace this placeholder with verified rendezvous IP.
-          export CURVEYIELD_MIMO_VERIFIED_TAILNET_IP=100.64.0.42
-          export CURVEYIELD_MIMO_BASE_URL=http://100.64.0.42:8080/v1
-          "$RUNNER_TEMP/autoprover-i032/.venv/bin/python" - <<'PY'
-          import json
-          from dataclasses import dataclass
-          from pydantic import BaseModel
-          from composer.llm.registry import get_provider_for
-          from curveyield_formal_mimo import (
-              MODEL_ID, MiMoModelProvider, configure_local_mimo_runtime,
-              mimo_autoprover_model_args, validate_mimo_chat_completion,
-          )
-
-          @dataclass
-          class Options:
-              tokens: int = 1024
-              thinking_tokens: int | None = None
-              memory_tool: bool = False
-              interleaved_thinking: bool = False
-
-          class NativeSchema(BaseModel):
-              status: str
-
-          args = mimo_autoprover_model_args()
-          if args != ["--heavy-model", MODEL_ID, "--lite-model", MODEL_ID]:
-              raise RuntimeError("AutoProver heavy/lite are not both pinned to MiMo")
-          provider = get_provider_for(model_name=MODEL_ID, options=Options())
-          if not isinstance(provider, MiMoModelProvider):
-              raise RuntimeError("Upstream registry selected non-MiMo provider")
-          chat = provider.builder_for()
-          if chat.use_responses_api is not False or chat.disable_streaming is not True:
-              raise RuntimeError("MiMo is not pinned to non-streamed chat completions")
-          if not chat.with_structured_output(NativeSchema, method="json_schema"):
-              raise RuntimeError("Required upstream JSON Schema binding unavailable")
-          tool = {
-              "type": "function",
-              "function": {
-                  "name": "read_authorized_source",
-                  "description": "A tool whose authority remains with AutoProver",
-                  "parameters": {
-                      "type": "object",
-                      "properties": {"path": {"type": "string"}},
-                      "required": ["path"],
-                  },
-              },
-          }
-          if not chat.bind_tools([tool]):
-              raise RuntimeError("Native MiMo tool binding unavailable")
-          request = {"model": MODEL_ID, "tools": [tool]}
-          wire = {"model": MODEL_ID, "choices": [{
-              "finish_reason": "tool_calls", "message": {
-                  "role": "assistant", "content": None,
-                  "tool_calls": [{"id": "call_local", "type": "function",
-                                  "function": {"name": "read_authorized_source",
-                                               "arguments": '{"path":"src/Vault.sol"}'}}],
-              }}]}
-          validate_mimo_chat_completion(wire, request)
-          routed = configure_local_mimo_runtime()
-          import certora_autosetup.utils.llm_util as autosetup
-          if (routed["backend"] != "local" or routed["model"] != MODEL_ID
-                  or autosetup._get_backend().value != "local"
-                  or autosetup._local_call_structured.__name__ != "_strict_sync"
-                  or autosetup._local_call_structured_async.__name__ != "_strict_async"):
-              raise RuntimeError("AutoSetup not exclusively routed through strict MiMo")
-          print(json.dumps({
-              "status": "MIMO_ALL_CONSUMERS_ROUTED",
-              "stage": "I03.3",
-              "heavy": MODEL_ID, "lite": MODEL_ID,
-              "autosetup": routed["model"],
-              "jsonSchemaBinding": True,
-              "strictAutoSetupSchemaWithoutFallback": True,
-              "toolCallsRequireNativeAutoProverAuthority": True,
-              "localPrivateURLShape": True,
-              "liveInferenceVerified": False, "liveVerificationDeferredTo": "I05.2",
-              "nativeCertoraBuild": False, "contractTests": False,
-          }, sort_keys=True))
-          PY
-      - name: Prepare upstream PostgreSQL pgvector and genuine CVL RAG corpus
-        if: >-
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG'
-        shell: bash
-        env:
-          CERTORA_AI_COMPOSER_PGHOST: 127.0.0.1
-          CERTORA_AI_COMPOSER_PGPORT: '5432'
-          COMPOSER_EMBED_DEVICE: cpu
-          UV_NO_DEV: '1'
-          UV_LINK_MODE: copy
-        run: |
-          set -euo pipefail
-          source="$RUNNER_TEMP/autoprover-i032"
-          docs="$RUNNER_TEMP/certora-docs"
-          docsenv="$RUNNER_TEMP/docs-env"
-          pg="certora-rag-$GITHUB_RUN_ID"
-          docker run --rm -d --name "$pg" \
-            --publish 127.0.0.1:5432:5432 \
-            --env POSTGRES_USER=postgres --env POSTGRES_PASSWORD=postgres_admin_password \
-            --mount "type=bind,source=$source/composer/scripts/init-db.sql,target=/docker-entrypoint-initdb.d/init-db.sql,readonly" \
-            pgvector/pgvector:pg16 >/dev/null
-          trap 'docker stop "$pg" >/dev/null 2>&1 || true' EXIT
-          ready=false
-          for iteration in $(seq 1 90); do
-            if docker exec "$pg" pg_isready -U postgres -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-              ready=true
-              break
-            fi
-            sleep 2
-          done
-          [ "$ready" = true ] || { docker logs "$pg" | tail -n 80; exit 1; }
-          # The upstream Dockerfile prescribes CPU and ML RAG dependencies.
-          # Do not install any dev/test or CUDA extras.
-          (
-            cd "$source"
-            "$RUNNER_TEMP/uv-i032/bin/uv" sync --locked --no-dev \
-              --extra certora-cli --extra cpu --extra ml --group ragbuild \
-              --python "$(command -v python3)"
-          )
-          # Use upstream's own CVL-only Sphinx build (from its Dockerfile).
-          git clone --depth=1 https://github.com/Certora/Documentation.git "$docs"
-          python3 -m venv "$docsenv"
-          "$docsenv/bin/pip" install --disable-pip-version-check -r "$docs/requirements.txt"
-          cp "$docs/conf.py" "$docs/docs/cvl/conf.py"
-          (
-            cd "$docs/docs/cvl"
-            "$docsenv/bin/sphinx-build" -M singlehtml . tmp
-          )
-          mkdir -p "$source/scripts/prover-docs"
-          cp "$docs/docs/cvl/tmp/singlehtml/index.html" "$source/scripts/prover-docs/cvl.html"
-          test -s "$source/scripts/prover-docs/cvl.html"
-          (
-            cd "$source"
-            "$source/.venv/bin/python" -m composer.scripts.ragbuild \
-              --output postgresql://rag_user:rag_password@127.0.0.1:5432/rag_db \
-              "$source/scripts/prover-docs/cvl.html"
-          )
-          "$source/.venv/bin/python" - <<'PY'
-          import asyncio
-          import json
-          import psycopg
-          from composer.rag.db import PostgreSQLRAGDatabase, DEFAULT_CONNECTION
-          from composer.rag.models import get_model
-
-          async def read_upstream_rag():
-              db = PostgreSQLRAGDatabase(DEFAULT_CONNECTION, get_model())
-              try:
-                  await db.test_connection()
-              finally:
-                  await db.aclose()
-
-          asyncio.run(read_upstream_rag())
-          with psycopg.connect("postgresql://rag_user:rag_password@127.0.0.1:5432/rag_db") as conn:
-              with conn.cursor() as cur:
-                  cur.execute("SELECT count(*) FROM rag.documents")
-                  documents = cur.fetchone()[0]
-                  cur.execute("SELECT count(*) FROM rag.manual_sections")
-                  sections = cur.fetchone()[0]
-                  cur.execute("SELECT count(*) FROM pg_indexes WHERE schemaname='rag' AND indexname='documents_embedding_idx'")
-                  index_count = cur.fetchone()[0]
-          if documents <= 0 or sections <= 0 or index_count != 1:
-              raise RuntimeError("Upstream CVL corpus or pgvector index missing")
-          print(json.dumps({
-              "status": "LOCAL_AUTOPROVER_RAG_READY",
-              "stage": "I03.4",
-              "cvlDocuments": documents,
-              "cvlManualSections": sections,
-              "pgvectorIndex": True,
-              "upstreamClientConnected": True,
-              "dbHost": "127.0.0.1",
-              "paidModelCalls": False,
-              "certoraRebuilt": False,
-              "realFormalRunnerMustRestoreDB": True,
-          }, sort_keys=True))
-          PY
-      - name: Download exact I04.1 source admission artifact
-        if: >-
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping'
-        uses: actions/download-artifact@v4
-        with:
-          repository: curveyield3/Contract-Automation
-          run-id: 45175991294
-          name: security-preflight-source-45175991294-1
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/formal-i04-admitted
-      - name: Download exact I04.1 preflight source/build evidence
-        if: >-
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping'
-        uses: actions/download-artifact@v4
-        with:
-          repository: curveyield3/Contract-Automation
-          run-id: 45175991294
-          name: security-preflight-evidence-45175991294-1
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/formal-i04-evidence
-      - name: Authenticate original ZIP and prepare every eligible formal target
-        if: >-
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-source-targets \
-            --work-dir "$RUNNER_TEMP/formal-i04-targets" \
-            --source-zip "$RUNNER_TEMP/formal-i04-admitted/source.zip" \
-            --artifact-request "$RUNNER_TEMP/formal-i04-admitted/request.json" \
-            --request security-intelligence-phase0/requests/active-request.json \
-            --manifest "$RUNNER_TEMP/formal-i04-evidence/PREFLIGHT_MANIFEST_v1.json" \
-            --identity "$RUNNER_TEMP/formal-i04-evidence/BUILD_AND_SOURCE_IDENTITY_v1.json" \
-            --artifacts "$RUNNER_TEMP/formal-i04-evidence/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json" \
-            --preflight-run-id 45175991294 \
-            --preflight-head-sha a1519f9ffdb519b2552285bf3fc335b02b3f0822
-          jq -e '.status == "AUTHENTICATED_SOURCE_TARGETS_READY" and
-                  .requestId == "cyvlsdt-v64-20261123-a2d46ab6bf63" and
-                  (.eligible | length) > 0 and
-                  .noSourceAuthoredScriptsExecuted == true and
-                  .noSourceCompiledOrProved == true' \
-            "$RUNNER_TEMP/formal-i04-targets/target-map-v1.json" >/dev/null
-          test -s "$RUNNER_TEMP/formal-i04-targets/source-context-v1.md"
-          echo 'Private authenticated source and native compiler-target map are ready; no source scripts or tests executed.'
-          # Do not upload raw source, private target JSON, or source context.
