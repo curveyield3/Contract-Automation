@@ -327,6 +327,126 @@ jobs:
           PY
           test -s "$RUNNER_TEMP/formal-intake-v1.json"
           echo 'Live formal job reached with exact same-run authenticated source and scanner evidence.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Dispatch existing exact-run pinned MiMo private inference
+        id: mimo_dispatch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/branches/$GITHUB_REF_NAME" --jq '.commit.sha')"
+          test "$latest" = "$GITHUB_SHA" || {
+            echo "::error::Formal branch changed before exact-run private model dispatch"; exit 1;
+          }
+          title="CERTORA-QA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          runs_api="repos/$GITHUB_REPOSITORY/actions/workflows/lite-solo-ai-inference-v1.yml/runs?event=workflow_dispatch&per_page=100"
+          existing="$(gh api "$runs_api" --jq ".workflow_runs | map(select(.display_title == \"$title\" and .head_sha == \"$GITHUB_SHA\")) | length")"
+          test "$existing" -eq 0 || {
+            echo "::error::Exactly matching MiMo workflow already exists; do not duplicate dispatch"; exit 1;
+          }
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/lite-solo-ai-inference-v1.yml/dispatches" \
+            -f "ref=$GITHUB_REF_NAME" \
+            -f 'inputs[mode]=certora_qa' \
+            -f "inputs[source_run_id]=$GITHUB_RUN_ID" \
+            -f "inputs[source_run_attempt]=$GITHUB_RUN_ATTEMPT" \
+            -f "inputs[source_head_sha]=$GITHUB_SHA" \
+            -f 'inputs[inference_runners]=1' \
+            -f 'inputs[submission_mode]=draft' >/dev/null
+          discovered=''
+          for attempt in $(seq 1 50); do
+            matches="$(gh api "$runs_api" --jq ".workflow_runs | map(select(.display_title == \"$title\" and .head_sha == \"$GITHUB_SHA\" and .event == \"workflow_dispatch\"))")"
+            count="$(jq 'length' <<< "$matches")"
+            if [ "$count" -eq 1 ]; then
+              discovered="$(jq -r '.[0].id' <<< "$matches")"
+              break
+            fi
+            if [ "$count" -gt 1 ]; then
+              echo "::error::Ambiguous exact-run MiMo workflow response"; exit 1
+            fi
+            sleep 5
+          done
+          [[ "$discovered" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::MiMo dispatch not found after bounded discovery"; exit 1;
+          }
+          echo "MIMO_RUN_ID=$discovered" >> "$GITHUB_ENV"
+          echo "mimo_run_id=$discovered" >> "$GITHUB_OUTPUT"
+          echo "Dispatched exact-run pinned MiMo private inference: $discovered"
+      - name: Select Certora pinned Java 19
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '19'
+      - name: Select upstream AutoProver Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore checked binary-only local Certora build cache
+        id: cached_certora
+        uses: actions/cache/restore@v4
+        with:
+          key: curve-certora-prover-4ef546d00cd67d333914845dead2d72081e1f014-jdk19-v1-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            ${{ runner.temp }}/curve-certora-formal/installed
+            ${{ runner.temp }}/curve-certora-formal/python-venv
+            ${{ runner.temp }}/curve-certora-formal/tool-bin
+            ${{ runner.temp }}/curve-certora-formal/toolchain-bootstrap-v1.json
+      - name: Rebuild pinned native Certora only on actual binary cache miss
+        if: ${{ steps.cached_certora.outputs.cache-hit != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-toolchain \
+            --work-dir "$RUNNER_TEMP/curve-certora-formal"
+      - name: Save verified native build bytes before any model or source execution
+        if: ${{ steps.cached_certora.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          key: curve-certora-prover-4ef546d00cd67d333914845dead2d72081e1f014-jdk19-v1-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            ${{ runner.temp }}/curve-certora-formal/installed
+            ${{ runner.temp }}/curve-certora-formal/python-venv
+            ${{ runner.temp }}/curve-certora-formal/tool-bin
+            ${{ runner.temp }}/curve-certora-formal/toolchain-bootstrap-v1.json
+      - name: Restore native solver packages and verify cached JAR and optimizer
+        if: ${{ steps.cached_certora.outputs.cache-hit == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends z3 cvc5 llvm clang
+          export PATH="$RUNNER_TEMP/curve-certora-formal/tool-bin:$PATH"
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py verify-native-cache \
+            --work-dir "$RUNNER_TEMP/curve-certora-formal"
+      - name: Install actual source-matched Solidity compiler binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-compilers \
+            --work-dir "$RUNNER_TEMP/curve-certora-formal" \
+            --identity "$RUNNER_TEMP/formal-evidence/BUILD_AND_SOURCE_IDENTITY_v1.json" \
+            --requirements "$RUNNER_TEMP/formal-evidence/TOOLCHAIN_REQUIREMENTS_v1.json" \
+            --artifacts "$RUNNER_TEMP/formal-evidence/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json" \
+            --request security-intelligence-phase0/requests/active-request.json
+      - name: Admit verified ZIP into private scratch and map authentic targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-source-targets \
+            --work-dir "$RUNNER_TEMP/formal-targets" \
+            --source-zip "$RUNNER_TEMP/formal-source/source.zip" \
+            --artifact-request "$RUNNER_TEMP/formal-source/request.json" \
+            --request security-intelligence-phase0/requests/active-request.json \
+            --manifest "$RUNNER_TEMP/formal-evidence/PREFLIGHT_MANIFEST_v1.json" \
+            --identity "$RUNNER_TEMP/formal-evidence/BUILD_AND_SOURCE_IDENTITY_v1.json" \
+            --artifacts "$RUNNER_TEMP/formal-evidence/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json" \
+            --native-toolchain "$RUNNER_TEMP/curve-certora-formal/toolchain-bootstrap-v1.json" \
+            --native-compilers "$RUNNER_TEMP/curve-certora-formal/compiler-bootstrap-v1.json" \
+            --preflight-run-id "$GITHUB_RUN_ID" \
+            --preflight-head-sha "$GITHUB_SHA"
+          jq -e '.status=="AUTHENTICATED_SOURCE_TARGETS_READY" and
+                  (.eligible | length)>0 and
+                  .noSourceAuthoredScriptsExecuted==true and .noSourceCompiledOrProved==true' \
+            "$RUNNER_TEMP/formal-targets/target-map-v1.json" >/dev/null
       - name: Publish sanitized same-run formal readiness
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
