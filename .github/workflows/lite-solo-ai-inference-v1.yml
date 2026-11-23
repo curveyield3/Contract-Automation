@@ -495,6 +495,7 @@ jobs:
         if: inputs.mode == 'certora_qa'
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           TS_CLIENT_ID: ${{ secrets.MACHINE_TAILSCALE_ID }}
           TS_OIDC_AUDIENCE: ${{ secrets.MACHINE_TAILSCALE_AUDIENCE }}
           TAILNET_TAG: tag:audit-browser,tag:ai-training
