@@ -46,7 +46,8 @@ def invoke(argv: list[str], *, cwd: Path | None = None,
         print(output[-120000:] if result.returncode else output[-12000:], flush=True)
     if result.returncode:
         raise RuntimeError(
-            f"Native tool {argv[0]} exited {result.returncode}: {output[-2000:]}"
+            f"Native tool {argv[0]} exited {result.returncode}: "
+            f"BEGIN_FAILURE_OUTPUT {output[:6000]} END_FAILURE_OUTPUT {output[-2000:]}"
         )
     return output.strip()
 
@@ -161,8 +162,24 @@ def local_toolchain(root: Path) -> dict[str, object]:
     # --stacktrace retains the native Kotlin compiler cause on failure.
     build_flags = ["--no-daemon", "--no-parallel", "--max-workers=1",
                    "-Pksp.incremental=false", "--stacktrace"]
-    invoke([str(gradle), "assemble", *build_flags], cwd=source, env=env)
-    invoke([str(gradle), "copy-assets", *build_flags], cwd=source, env=env)
+    # The pinned KSP plugin resolved in I02.1 and I03.1's first build;
+    # retry ONLY a verified transient Gradle plugin repository resolution
+    # failure, using a dependency refresh and more diagnostics. Do not
+    # suppress source errors, compile failures, or fabricate build success.
+    def native_gradle_task(task_name: str) -> None:
+        argv = [str(gradle), task_name, *build_flags]
+        try:
+            invoke(argv, cwd=source, env=env)
+        except RuntimeError as exc:
+            detail = str(exc)
+            if not ("com.google.devtools.ksp" in detail and
+                    ("Plugin [id:" in detail or "UnknownPluginException" in detail)):
+                raise
+            print("GRADLE_PLUGIN_REPOSITORY_RECOVERY: pinned KSP metadata unavailable; "
+                  "refreshing repository metadata once", flush=True)
+            invoke([*argv, "--refresh-dependencies", "--info"], cwd=source, env=env)
+    native_gradle_task("assemble")
+    native_gradle_task("copy-assets")
     invoke([sys.executable, "-m", "venv", str(venv)], cwd=source, env=env)
     python = venv / "bin" / "python"
     invoke([str(python), "-m", "pip", "install", "--disable-pip-version-check",
