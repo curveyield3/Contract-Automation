@@ -237,7 +237,7 @@ jobs:
           fi
 
   formal:
-    name: Formal integration — authenticated same-run intake
+    name: formal
     needs: [admit, collect]
     if: ${{ needs.admit.result == 'success' && needs.collect.result == 'success' && needs.admit.outputs.request_present == 'true' }}
     runs-on: ubuntu-24.04
