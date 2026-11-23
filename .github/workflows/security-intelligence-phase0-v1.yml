@@ -5,6 +5,8 @@ on:
     branches: [machine-intelligence-audit-controller-v1]
     paths:
       - 'security-intelligence-phase0/requests/active-request.json'
+      # One-time I02.1 native bootstrap; remove at the I05.1 formal-job integration.
+      - '.github/workflows/security-intelligence-phase0-v1.yml'
 permissions:
   contents: read
   actions: read
@@ -13,6 +15,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   admit:
+    # Preserve source-scanner behavior; skip only the isolated I02.1 bootstrap commit.
+    if: ${{ github.event.head_commit.message != 'I02.1: run local Certora bootstrap' }}
     outputs:
       request_present: ${{ steps.request_present.outputs.request_present }}
     runs-on: ubuntu-latest
@@ -235,3 +239,28 @@ jobs:
               ))' .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
             echo "Compiled source-bound evidence accepted with recorded limitations; no security verdict"
           fi
+
+  certora-bootstrap-i02:
+    # I02.1-only native toolchain qualification, not the I05 formal-analysis job.
+    if: ${{ github.event.head_commit.message == 'I02.1: run local Certora bootstrap' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Checkout exact trusted bootstrap revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Build and invoke local Certora Prover and SMT toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-toolchain --work-dir "$RUNNER_TEMP/curve-certora-i02"
+      - name: Publish native bootstrap evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: certora-i02-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/curve-certora-i02/toolchain-bootstrap-v1.json
+          if-no-files-found: warn
+          retention-days: 7
