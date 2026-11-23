@@ -1070,7 +1070,17 @@ async function main(){
 
   const build=await withProgressStage('compile-exact-build',()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
   const executionBuildArtifacts=buildExecutionArtifactBundleV2({request:pseudo,build});
-  const effectiveCfg={...cfg,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
+  // The native compilation units are authoritative; a mixed Hardhat build can
+  // expose only its primary version in build.compilerVersions. Preserve *all*
+  // Solidity units here, before formal analysis or model dispatch begins.
+  const compiledSolidityVersions=[...new Set(
+    (executionBuildArtifacts.buildIdentity?.compilationUnits??[])
+      .filter(unit=>(unit.sourceNames??[]).some(name=>name.endsWith('.sol')))
+      .map(unit=>unit.compilerVersion).filter(Boolean)
+  )].sort();
+  const effectiveCfg={...cfg,buildSystem:build.system,
+    compilerVersions:compiledSolidityVersions.length?compiledSolidityVersions:(build.compilerVersions??[build.compilerVersion].filter(Boolean)),
+    compilerProfiles:build.compilerProfiles??[]};
   let slither;
   try {
     slither=await withProgressStage('slither-static-analysis',()=>slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit}));
@@ -1129,7 +1139,7 @@ async function main(){
     discovery:{projectPath:detected.relativePath,topCandidates:detected.candidates,archiveEntryCount:extraction.entryCount,archiveExtractedBytes:extraction.extractedBytes},
     configurationDetection:effectiveCfg,
     auditScope,
-    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??0,compilationUnits:executionBuildArtifacts.buildIdentity.compilationUnits,buildConfigurationDigestSha256:executionBuildArtifacts.buildConfigurationDigestSha256,embeddedBuildContract:build.embeddedBuildContract??null,foundryDependencyInstall:build.foundryDependencyInstall??[],sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
+    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,compilerVersions:effectiveCfg.compilerVersions,compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??0,compilationUnits:executionBuildArtifacts.buildIdentity.compilationUnits,buildConfigurationDigestSha256:executionBuildArtifacts.buildConfigurationDigestSha256,embeddedBuildContract:build.embeddedBuildContract??null,foundryDependencyInstall:build.foundryDependencyInstall??[],sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
     status:'PASS'
   };
 
