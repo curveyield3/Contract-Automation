@@ -1203,7 +1203,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         "mimoRunId": session.get("mimoWorkflowRunId"),
         "eligibleTargetCount": len(target_list),
         "results": [],
-        "sourceAuthoredScriptsExecuted": False,
+        "sourceAuthoredScriptExecutionVerified": False,
         "cloudProviderCalls": 0,
         "modelRequestCount": None,
         "nativeProofsProved": None,
@@ -1394,7 +1394,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                 info = json.loads(job_info.read_text())
                 record["nativeJobInfoSha256"] = digest(job_info)
                 if isinstance(info, dict) and isinstance(info.get("token_usage"), dict):
-                    record["observedTokenUsage"] = info["token_usage"]
+                    record["observedTokenUsage"] = {k: v for k, v in info["token_usage"].items()
+                        if isinstance(v, (int, float)) and not isinstance(v, bool)}
             except (ValueError, OSError):
                 pass
         if record["status"] == "NATIVE_AUTOPROVER_EXIT_ZERO_UNCLASSIFIED":
@@ -1414,9 +1415,15 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
     outcome["observedNativePropertyVerdicts"] = observed
     outcome["status"] = ("NATIVE_RULE_VERDICTS_OBSERVED" if observed
                          else "INCOMPLETE_NO_NATIVE_RULE_VERDICTS")
+    outcome["nativeProofsProved"] = sum(
+        v.get("nativeStatus") == "VERIFIED"
+        for r in outcome["results"] for v in r.get("nativePropertyVerdicts", []))
     outcome["elapsedSeconds"] = round(time.monotonic() - begun, 2)
     persist()
-    return 0 if observed and len(outcome["results"]) == len(target_list) else 1
+    meaningful = sum(v.get("nativeStatus") not in ("SKIPPED", None)
+                     for r in outcome["results"]
+                     for v in r.get("nativePropertyVerdicts", []))
+    return 0 if meaningful and len(outcome["results"]) == len(target_list) else 1
 
 
 def main() -> int:
