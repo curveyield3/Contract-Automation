@@ -1,5 +1,5 @@
 name: Lite-Solo AI Source Inference and Autonomous Beta v6
-run-name: ${{ inputs.mode == 'autonomous' && format('MI-{0}', inputs.dispatch_tag) || inputs.mode == 'autonomous_start' && 'MI-AUTONOMOUS-START' || github.workflow }}
+run-name: ${{ inputs.mode == 'certora_qa' && format('CERTORA-QA-{0}-{1}', inputs.source_run_id, inputs.source_run_attempt) || inputs.mode == 'autonomous' && format('MI-{0}', inputs.dispatch_tag) || inputs.mode == 'autonomous_start' && 'MI-AUTONOMOUS-START' || github.workflow }}
 on:
   push:
     branches: [machine-intelligence-audit-controller-v1]
@@ -217,7 +217,7 @@ jobs:
   infer:
     if: github.event_name == 'workflow_dispatch' && inputs.mode != 'train'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ inputs.mode == 'autonomous' && 355 || 100 }}
+    timeout-minutes: ${{ inputs.mode == 'autonomous' && 355 || inputs.mode == 'certora_qa' && 300 || 100 }}
     env:
       AUDIT_AI_MODE: ${{ inputs.mode }}
       CERTORA_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
@@ -523,14 +523,8 @@ jobs:
             --ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on \
             --threads 4 --parallel 1 "$@" > "$RUNNER_TEMP/mimo-certora-server.log" 2>&1 &
           server_pid=$!
-          cleanup_certora_session() {
-            kill "$server_pid" 2>/dev/null || true
-            wait "$server_pid" 2>/dev/null || true
-            tailscale down >/dev/null 2>&1 || true
-          }
-          trap cleanup_certora_session EXIT
-          trap 'exit 143' TERM
-          trap 'exit 130' INT
+          mkdir -p "$RUNNER_TEMP/certora-rendezvous"
+          printf '%s\n' "$server_pid" > "$RUNNER_TEMP/certora-rendezvous/server.pid"
           ready=false
           for attempt in $(seq 1 600); do
             if curl --silent --fail --max-time 3 "http://$address:8080/health" |
@@ -546,14 +540,107 @@ jobs:
             sleep 2
           done
           [ "$ready" = true ] || { echo "::error::MiMo private server not ready within pinned 1200s budget"; exit 1; }
-          echo "Private pinned MiMo process ready; origin-bound rendezvous is added in I01.3." >> "$GITHUB_STEP_SUMMARY"
-          # Temporary finite lifetime until I01.3 supplies origin-job termination.
-          deadline=$(( $(date +%s) + 4200 ))
-          while [ "$(date +%s)" -lt "$deadline" ]; do
-            kill -0 "$server_pid" 2>/dev/null || { echo "::error::MiMo process died"; exit 1; }
-            sleep 10
-          done
+          # Exact workflow/run/attempt/source and live formal job are mandatory.
+          test "$GITHUB_SHA" = "$CERTORA_SOURCE_HEAD_SHA" || { echo "::error::CERTORA_MIXED_CHECKOUT_REVISIONS"; exit 1; }
+          latest="$(gh api repos/curveyield3/Contract-Automation/branches/machine-intelligence-audit-controller-v1 --jq .commit.sha)"
+          test "$latest" = "$CERTORA_SOURCE_HEAD_SHA" || { echo "::error::CERTORA_BRANCH_HEAD_MOVED"; exit 1; }
+          origin="$(gh api "repos/curveyield3/Contract-Automation/actions/runs/$CERTORA_SOURCE_RUN_ID")"
+          jq -e --arg sha "$CERTORA_SOURCE_HEAD_SHA" --argjson attempt "$CERTORA_SOURCE_RUN_ATTEMPT" '
+            .repository.full_name == "curveyield3/Contract-Automation" and
+            .head_branch == "machine-intelligence-audit-controller-v1" and
+            .path == ".github/workflows/security-intelligence-phase0-v1.yml" and
+            .event == "push" and .head_sha == $sha and .run_attempt == $attempt and
+            .status == "in_progress"' <<< "$origin" >/dev/null || {
+            echo "::error::CERTORA_ORIGIN_RUN_IDENTITY_INVALID"; exit 1;
+          }
+          origin_jobs="$(gh api "repos/curveyield3/Contract-Automation/actions/runs/$CERTORA_SOURCE_RUN_ID/attempts/$CERTORA_SOURCE_RUN_ATTEMPT/jobs?per_page=100")"
+          jq -e '[.jobs[] | select(.name=="admit" and .conclusion=="success")] | length==1' <<< "$origin_jobs" >/dev/null
+          jq -e '[.jobs[] | select(.name=="collect" and .conclusion=="success")] | length==1' <<< "$origin_jobs" >/dev/null
+          jq -e '[.jobs[] | select(.name=="formal" and .status=="in_progress")] | length==1' <<< "$origin_jobs" >/dev/null || {
+            echo "::error::CERTORA_ORIGIN_FORMAL_JOB_NOT_RUNNING"; exit 1;
+          }
+          origin_job_id="$(jq -er '.jobs[] | select(.name=="formal" and .status=="in_progress") | .id' <<< "$origin_jobs")"
+          jq -n --argjson sourceRun "$CERTORA_SOURCE_RUN_ID" \
+            --argjson sourceAttempt "$CERTORA_SOURCE_RUN_ATTEMPT" \
+            --arg sourceSha "$CERTORA_SOURCE_HEAD_SHA" \
+            --argjson formalJobId "$origin_job_id" \
+            --argjson mimoRun "$GITHUB_RUN_ID" --argjson mimoAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg mimoSha "$GITHUB_SHA" --arg model "lite-solo-mimo-v1" \
+            --arg weights "$MODEL_SHA256" --arg modelRevision "$MODEL_REVISION" \
+            --arg llama "$LLAMA_SHA" --arg address "$address" '
+            {schemaVersion:"curveyield-certora-mimo-rendezvous-v1",
+             readiness:"READY",originRepository:"curveyield3/Contract-Automation",
+             originRunId:$sourceRun,originRunAttempt:$sourceAttempt,
+             originHeadSha:$sourceSha,originFormalJobId:$formalJobId,
+             mimoRunId:$mimoRun,mimoRunAttempt:$mimoAttempt,mimoHeadSha:$mimoSha,
+             modelAlias:$model,modelSha256:$weights,modelRevision:$modelRevision,
+             llamaCommit:$llama,tailscaleIPv4:$address,port:8080,
+             endpointPath:"/v1/chat/completions"}' > "$RUNNER_TEMP/certora-rendezvous/rendezvous.json"
+          chmod 600 "$RUNNER_TEMP/certora-rendezvous/rendezvous.json"
+          echo "Pinned MiMo readiness and origin identity verified; publishing non-secret rendezvous metadata." >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Publish exact origin-bound private model rendezvous (metadata only)
+        if: inputs.mode == 'certora_qa'
+        uses: actions/upload-artifact@v4
+        with:
+          name: certora-mimo-rendezvous-${{ inputs.source_run_id }}-${{ inputs.source_run_attempt }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/certora-rendezvous/rendezvous.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Keep single MiMo session alive only while matched formal job runs
+        if: inputs.mode == 'certora_qa'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          server_pid="$(cat "$RUNNER_TEMP/certora-rendezvous/server.pid")"
+          origin_job="$(jq -er .originFormalJobId "$RUNNER_TEMP/certora-rendezvous/rendezvous.json")"
+          deadline=$(( $(date +%s) + 15600 ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            kill -0 "$server_pid" 2>/dev/null || { echo "::error::CERTORA_MIMO_SERVER_DIED"; exit 1; }
+            response=''
+            for attempt in 1 2 3; do
+              if response="$(gh api "repos/curveyield3/Contract-Automation/actions/jobs/$origin_job")"; then
+                break
+              fi
+              sleep 10
+            done
+            test -n "$response" || { echo "::error::CERTORA_ORIGIN_MONITOR_UNAVAILABLE"; exit 1; }
+            status="$(jq -er .status <<< "$response")"
+            case "$status" in
+              completed)
+                echo "Origin formal job finished; releasing MiMo server and tailnet session."
+                exit 0
+                ;;
+              in_progress)
+                ;;
+              *)
+                echo "::error::CERTORA_ORIGIN_JOB_UNEXPECTED_STATUS=$status"
+                exit 1
+                ;;
+            esac
+            sleep 20
+          done
+          echo "::error::CERTORA_MIMO_SESSION_LIFETIME_EXHAUSTED"
+          exit 1
+      - name: Stop private Certora model and revoke ephemeral Tailscale connection
+        if: always() && inputs.mode == 'certora_qa'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pid_file="$RUNNER_TEMP/certora-rendezvous/server.pid"
+          if [ -s "$pid_file" ]; then
+            pid="$(cat "$pid_file")"
+            kill "$pid" 2>/dev/null || true
+            for n in $(seq 1 15); do
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi
+          fi
+          tailscale down >/dev/null 2>&1 || true
+          echo 'Certora MiMo process and ephemeral tailnet session closed.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run model inference in authorized mode
         if: inputs.mode != 'autonomous_start' && inputs.mode != 'certora_qa'
         shell: bash
