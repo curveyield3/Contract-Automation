@@ -21,6 +21,13 @@ const wakeComplete=wake?.componentStatus==='COMPLETED' && wake?.solidityUnitCoun
   Array.isArray(wake?.unitResults) && wake.unitResults.length===wake.solidityUnitCount &&
   wake.unitResults.every(unit=>unit.status==='COMPLETED');
 const wakeNotApplicable=wake?.componentStatus==='NOT_APPLICABLE' && wake?.solidityUnitCount===0;
+const wakeUnsupported=wake?.componentStatus==='UNSUPPORTED_COMPILER' &&
+  wake?.version==='4.21.0' && wake?.solidityUnitCount>0 &&
+  Array.isArray(wake?.unitResults) && wake.unitResults.length===wake.solidityUnitCount &&
+  wake.unitResults.every(unit=>unit.status==='UNSUPPORTED_COMPILER' &&
+    unit.exitCode===1 && unit.supportedMinimum==='0.6.2' &&
+    unit.unsupportedReason==='WAKE_HARD_MIN_SOLC_0.6.2' &&
+    /Target configured version\s+\S+\s+is lower than minimum\s+supported version\s+0\.6\.2/.test(unit.stderr??''));
 const expected=request?.source?.archiveSha256??null;
 const actual=build?.source?.archiveSha256Observed??null;
 const sourceMatches=typeof expected==='string'&&expected===actual;
@@ -31,9 +38,12 @@ if(!build)warn('BUILD_IDENTITY_MISSING','BUILD_AND_SOURCE_IDENTITY_v1.json','ori
 if(build&&!sourceMatches)warn('SOURCE_IDENTITY_MISMATCH','build.source.archiveSha256Observed',expected,actual,'Admit same original ZIP SHA');
 if(!source)warn('SOURCE_INTELLIGENCE_MISSING','SOURCE_INTELLIGENCE_AUTOMATED_v1.json','compiled source inventory','unavailable','Inspect original compilation or extractor failure');
 if(!slither||slither.componentStatus!=='COMPLETED')warn('SLITHER_INCOMPLETE','SLITHER_v1.json.componentStatus','COMPLETED',slither?.componentStatus??'missing','Inspect Slither native evidence and compiler settings');
-if(!wakeComplete&&!wakeNotApplicable)warn('WAKE_INCOMPLETE','WAKE_v1.json.componentStatus','COMPLETED or legitimate zero-Solidity NOT_APPLICABLE',wake?.componentStatus??'missing','Inspect Wake native detections, compiler cache and source unit failures');
+if(wakeUnsupported)warn('WAKE_UNSUPPORTED_COMPILER','WAKE_v1.json.componentStatus','No Wake coverage for compiler versions below 0.6.2',wake?.componentStatus,'Wake 4.21.0 cannot compile authenticated legacy source; retain explicit coverage limitation');
+else if(!wakeComplete&&!wakeNotApplicable)warn('WAKE_INCOMPLETE','WAKE_v1.json.componentStatus','COMPLETED or legitimate zero-Solidity NOT_APPLICABLE',wake?.componentStatus??'missing','Inspect Wake native detections, compiler cache and source unit failures');
 if(!mythrilComplete&&!mythrilNotApplicable)warn('MYTHRIL_INCOMPLETE','MYTHRIL_v1.json.componentStatus','COMPLETED or no executable in-scope runtime NOT_APPLICABLE',mythril?.componentStatus??'missing','Inspect Mythril contractResults, pinned bytecode and execution limits');
-const status=!sourceMatches?'INCOMPLETE':!source||build?.build?.status!=='completed'||slither?.componentStatus!=='COMPLETED'||(!wakeComplete&&!wakeNotApplicable)||(!mythrilComplete&&!mythrilNotApplicable)?'PARTIAL':'COLLECTED';
+const nativeReady=sourceMatches&&source&&build?.build?.status==='completed'&&slither?.componentStatus==='COMPLETED'&&
+  (wakeComplete||wakeNotApplicable||wakeUnsupported)&&(mythrilComplete||mythrilNotApplicable);
+const status=!sourceMatches?'INCOMPLETE':!nativeReady?'PARTIAL':wakeUnsupported?'COLLECTED_WITH_ANALYZER_LIMITATION':'COLLECTED';
 const names=fs.readdirSync(dir).filter(x=>x.endsWith('.json')&&x!=='PREFLIGHT_MANIFEST_v1.json').sort();
 const files=names.map(name=>{const raw=fs.readFileSync(path.join(dir,name));return {name,bytes:raw.length,sha256:crypto.createHash('sha256').update(raw).digest('hex')};});
 const manifest={schemaVersion:'curveyield-security-clean-preflight-v1',status,notSecurityVerdict:true,sourceAdmissionVerified:sourceMatches,sourceOnly:build?.build?.status!=='completed',source:{repository:request?.source?.repository??null,commit:request?.source?.commit??null,archivePath:request?.source?.archivePath??null,expectedSha256:expected,observedSha256:actual},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,wakeStatus:wake?.componentStatus??wake?.status??null,wakeSolidityUnitCount:wake?.solidityUnitCount??null,wakeFindingCount:wake?.findingCount??null,mythrilStatus:mythril?.componentStatus??mythril?.status??null,mythrilEligibleCount:mythril?.eligibleCount??null,mythrilCompletedCount:mythril?.completedCount??null,mythrilFindingCount:mythril?.findingCount??null,warnings,files};

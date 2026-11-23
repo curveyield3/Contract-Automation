@@ -679,15 +679,29 @@ async function runWakeDetectors({projectRoot,build,sourceCommit,out,cfg}){
       }
     }catch(error){
       record.error=String(error?.message??error).slice(0,1500);
+      // A real Wake 4.21.0 compiler incompatibility is not a detection pass.
+      const version=String(record.compilerVersion??'').split('.').map(Number);
+      const belowMinimum=version.length===3&&version.every(Number.isSafeInteger)&&
+        (version[0]===0&&(version[1]<6||(version[1]===6&&version[2]<2)));
+      const rejectedByWake=record.exitCode===1&&
+        /Target configured version\s+\S+\s+is lower than minimum\s+supported version\s+0\.6\.2/.test(record.stderr??'');
+      if(belowMinimum&&rejectedByWake){
+        record.status='UNSUPPORTED_COMPILER';
+        record.unsupportedReason='WAKE_HARD_MIN_SOLC_0.6.2';
+        record.supportedMinimum='0.6.2';
+      }
     }
   }
   const completed=unitResults.every(r=>r.status==='COMPLETED');
+  const unsupported=solidityUnitCount>0&&unitResults.length===solidityUnitCount&&
+    unitResults.every(r=>r.status==='UNSUPPORTED_COMPILER'&&r.unsupportedReason==='WAKE_HARD_MIN_SOLC_0.6.2');
   return{backend:'wake',version:'4.21.0',sourceCommit,
-    status:solidityUnitCount===0?'not_applicable':completed?(findings.length?'completed_with_findings':'completed'):'failed',
-    componentStatus:solidityUnitCount===0?'NOT_APPLICABLE':completed?'COMPLETED':'FAILED',
+    status:solidityUnitCount===0?'not_applicable':completed?(findings.length?'completed_with_findings':'completed'):unsupported?'unsupported_compiler':'failed',
+    componentStatus:solidityUnitCount===0?'NOT_APPLICABLE':completed?'COMPLETED':unsupported?'UNSUPPORTED_COMPILER':'FAILED',
     authoritativeFinding:false,inputMode:'COMPILER_OBSERVED_SOURCE_ONLY_OFFLINE_RECOMPILE',
     solidityUnitCount,sourceCount,findingCount:findings.length,detectors:findings,unitResults,
-    limitations:solidityUnitCount===0?['No compiled Solidity source units; Wake does not analyze Vyper']:[]
+    limitations:solidityUnitCount===0?['No compiled Solidity source units; Wake does not analyze Vyper']:
+      unsupported?['Wake 4.21.0 cannot compile authenticated Solidity <0.6.2; Wake detection coverage unavailable']:[]
   };
 }
 
