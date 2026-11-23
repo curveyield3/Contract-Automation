@@ -516,7 +516,12 @@ async function runMythrilDetectors({build,sourceCommit,auditScope,out}){
       record.timedOut=result.timedOut===true;
       record.stderr=cleanText(result.stderr).slice(-2800);
       const parsed=(()=>{try{return JSON.parse(result.stdout)}catch{return null}})();
-      if(result.exitCode!==0||result.timedOut||parsed?.success!==true||!Array.isArray(parsed?.issues))
+      // Mythril CLI exits 1 when findings exist; accept that only when its
+      // native JSON independently reports successful analysis and actual issues.
+      if(![0,1].includes(result.exitCode)||result.timedOut||parsed?.success!==true||
+          !Array.isArray(parsed?.issues)||
+          (result.exitCode===1&&parsed.issues.length===0)||
+          (result.exitCode===0&&parsed.issues.length>0))
         throw Error('Mythril bytecode analysis did not produce a complete native JSON report: '+
           String(parsed?.error??result.stderr??result.stdout??'UNKNOWN').slice(-900));
       record.status='COMPLETED';
