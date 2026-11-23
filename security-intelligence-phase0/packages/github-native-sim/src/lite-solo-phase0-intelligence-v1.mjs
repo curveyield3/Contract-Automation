@@ -463,7 +463,7 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
 // Wake is a separate static-analysis detector, never a test runner or authority.
 // Stage only compiler-observed Solidity source bytes: no source-supplied Python
 // detectors, wake.toml, package scripts, external processes or custom plugins.
-async function runWakeDetectors({projectRoot,build,sourceCommit,out}){
+async function runWakeDetectors({projectRoot,build,sourceCommit,out,cfg}){
   const units=Array.isArray(build?.compilationUnits)&&build.compilationUnits.length
     ? build.compilationUnits
     : [{unitId:'phase0',compilerVersion:build?.compilerVersion,
@@ -532,14 +532,22 @@ async function runWakeDetectors({projectRoot,build,sourceCommit,out}){
       const compilerVersion=record.compilerVersion;
       if(/^\d+\.\d+\.\d+$/.test(compilerVersion))args.push('--target-version',compilerVersion);
       const settings=unit.settings??{};
-      if(settings.optimizer?.enabled===true)args.push('--optimizer-enabled');
-      if(settings.optimizer?.enabled===false)args.push('--no-optimizer-enabled');
-      if(Number.isSafeInteger(settings.optimizer?.runs)&&settings.optimizer.runs>=0)
-        args.push('--optimizer-runs',String(settings.optimizer.runs));
-      if(settings.viaIR===true)args.push('--via-ir');
-      if(settings.viaIR===false)args.push('--no-via-ir');
-      if(typeof settings.evmVersion==='string'&&/^[a-zA-Z0-9_-]+$/.test(settings.evmVersion))
-        args.push('--evm-version',settings.evmVersion);
+      // Compiler-unit exports may omit inherited Hardhat options even when
+      // the source-bound detected configuration proved them (e.g. viaIR=true).
+      // Inherit only absent fields; never override explicit per-unit settings.
+      const optimizerEnabled=settings.optimizer?.enabled??cfg?.optimizer?.enabled??null;
+      const optimizerRuns=settings.optimizer?.runs??cfg?.optimizer?.runs??null;
+      const viaIR=settings.viaIR??cfg?.viaIR??null;
+      const evmVersion=settings.evmVersion??cfg?.evmVersion??null;
+      record.effectiveCompilerOptions={optimizerEnabled,optimizerRuns,viaIR,evmVersion};
+      if(optimizerEnabled===true)args.push('--optimizer-enabled');
+      if(optimizerEnabled===false)args.push('--no-optimizer-enabled');
+      if(Number.isSafeInteger(optimizerRuns)&&optimizerRuns>=0)
+        args.push('--optimizer-runs',String(optimizerRuns));
+      if(viaIR===true)args.push('--via-ir');
+      if(viaIR===false)args.push('--no-via-ir');
+      if(typeof evmVersion==='string'&&/^[a-zA-Z0-9_-]+$/.test(evmVersion))
+        args.push('--evm-version',evmVersion);
       const configuredRemappingPrefixes=new Set();
       for(const remapping of settings.remappings??[]){
         if(typeof remapping!=='string'||!remapping.includes('='))throw Error('Wake remapping is not a string prefix=target: '+String(remapping));
@@ -985,7 +993,7 @@ async function main(){
   }
   let wake;
   try{
-    wake=await withProgressStage('wake-static-analysis',()=>runWakeDetectors({projectRoot:detected.absolute,build,sourceCommit:request.source.commit,out}));
+    wake=await withProgressStage('wake-static-analysis',()=>runWakeDetectors({projectRoot:detected.absolute,build,sourceCommit:request.source.commit,out,cfg}));
   }catch(error){
     const detail=String(error?.message??error);
     wake={backend:'wake',version:'4.21.0',sourceCommit:request.source.commit,status:'failed',
