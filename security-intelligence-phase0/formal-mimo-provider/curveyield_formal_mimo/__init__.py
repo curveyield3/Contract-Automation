@@ -172,6 +172,116 @@ def _trusted_async_http_client() -> httpx.AsyncClient:
     )
 
 
+def mimo_autoprover_model_args() -> list[str]:
+    """Pass the actual upstream AutoProver CLI both model roles; no fallback."""
+    return [
+        "--heavy-model", MODEL_ID,
+        "--lite-model", MODEL_ID,
+    ]
+
+
+def configure_local_mimo_runtime() -> dict[str, str]:
+    """Wire AutoSetup to the same verified MiMo and prohibit schema fallbacks.
+
+    Call before importing AutoProver's CLI in the formal job. Patches *only*
+    live in this Python process; pinned upstream files are never modified.
+    No local/private endpoint implies immediate failure, not cloud fallback.
+    """
+    base_url = _private_chat_completions_base_url()
+    forbidden = (
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
+        "CERTORAKEY", "AWS_BEARER_TOKEN_BEDROCK",
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+    )
+    if any(os.environ.get(key) for key in forbidden):
+        raise RuntimeError("Unexpected cloud/paid inference credentials in MiMo execution")
+    os.environ["PREAUDIT_LLM_BACKEND"] = "local"
+    os.environ["PREAUDIT_LOCAL_LLM_BASE_URL"] = base_url
+    os.environ["PREAUDIT_LOCAL_LLM_MODEL"] = MODEL_ID
+
+    import certora_autosetup.utils.llm_util as llm
+
+    if llm._get_backend().value != "local":
+        raise RuntimeError("Upstream AutoSetup did not select the local backend")
+    if getattr(llm, "_curveyield_mimo_strict", False):
+        return {
+            "backend": "local", "base_url": base_url, "model": MODEL_ID,
+        }
+
+    @cache
+    def _local_sync():
+        real = openai.OpenAI(
+            base_url=base_url, api_key="local-network-only",
+            http_client=_trusted_http_client(), timeout=900.0,
+        )
+        return llm._UsageRecordingOpenAI(real, is_async=False)
+
+    @cache
+    def _local_async():
+        real = openai.AsyncOpenAI(
+            base_url=base_url, api_key="local-network-only",
+            http_client=_trusted_async_http_client(), timeout=900.0,
+        )
+        return llm._UsageRecordingOpenAI(real, is_async=True)
+
+    def _strict_sync(
+        client, model, messages, max_tokens, temperature, output_type,
+        max_retries, verbose, on_usage=None,
+    ):
+        if model != MODEL_ID:
+            raise RuntimeError("AutoSetup attempted to use a non-MiMo model")
+        response = llm._local_retry_transient(
+            lambda: client.chat.completions.create(
+                model=MODEL_ID, messages=messages,
+                max_tokens=max_tokens, temperature=temperature,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "output", "strict": True,
+                        "schema": output_type.model_json_schema(),
+                    },
+                },
+            ),
+            max_retries, verbose,
+        )
+        llm._emit_openai_usage(response, on_usage)
+        # Model JSON schema is validated by Pydantic; a bad output fails closed.
+        # Upstream's prompt-based fallback is deliberately not invoked.
+        return output_type.model_validate_json(response.choices[0].message.content)
+
+    async def _strict_async(
+        client, model, messages, max_tokens, temperature, output_type,
+        max_retries, verbose, on_usage=None,
+    ):
+        if model != MODEL_ID:
+            raise RuntimeError("AutoSetup attempted to use a non-MiMo model")
+        response = await llm._local_retry_transient_async(
+            lambda: client.chat.completions.create(
+                model=MODEL_ID, messages=messages,
+                max_tokens=max_tokens, temperature=temperature,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "output", "strict": True,
+                        "schema": output_type.model_json_schema(),
+                    },
+                },
+            ),
+            max_retries, verbose,
+        )
+        llm._emit_openai_usage(response, on_usage)
+        return output_type.model_validate_json(response.choices[0].message.content)
+
+    llm._init_local_client = _local_sync
+    llm._init_async_local_client = _local_async
+    llm._local_call_structured = _strict_sync
+    llm._local_call_structured_async = _strict_async
+    llm._curveyield_mimo_strict = True
+    return {
+        "backend": "local", "base_url": base_url, "model": MODEL_ID,
+    }
+
+
 class MiMoInlineRenderer:
     """Chat-completions text blocks; never call a provider Files API."""
 
