@@ -1375,6 +1375,20 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "PREAUDIT_LOCAL_LLM_BASE_URL": endpoint,
             "PREAUDIT_LOCAL_LLM_MODEL": "lite-solo-mimo-v1",
         })
+        # These exact immutable source coordinates were authenticated at I04.1.
+        # The public DAI demonstration alone may expose full wire JSON in logs;
+        # all other source packages remain strictly private.
+        trace_public_dai = (
+            mapping["source"].get("repository") == "curveyield3/Contract-Automation"
+            and mapping["source"].get("archivePath") ==
+            "process/audit-source-initialization/dai-live-no-deploy-script-v1.zip"
+            and mapping["source"].get("archiveSha256") ==
+            "0b2ac5fe0f4cb5e60d2f496d517f7251f9e121c5ac21244b8c8d1ccb0b9be8df"
+            and mapping["source"].get("commit") == "85724e7bbb2e3bcbd373ea2464917b62e37541c9"
+            and str(mapping.get("requestId", "")).startswith("dai-ethereum-autoprover-i062-")
+        )
+        if trace_public_dai:
+            env["CURVEYIELD_PUBLIC_DAI_WIRE_TRACE"] = "1"
         # Run the actual pinned console-autoprove main after activating the
         # MiMo-only AutoSetup adapter in the same process. Starting a separate
         # CLI process would lose its fail-closed runtime patch.
@@ -1412,6 +1426,26 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         heartbeat_seconds = 60
         last_activity = started
         last_heartbeat = started - heartbeat_seconds
+        # Read the child's owner-readable native log in sequence. Forward only
+        # the exact wire-trace marker, and only for this verified public DAI.
+        # Each marker carries the full input/output JSON in ordered chunks.
+        trace_offset = 0
+        trace_remainder = b""
+        def forward_dai_wire_trace() -> None:
+            nonlocal trace_offset, trace_remainder
+            if not trace_public_dai:
+                return
+            with logfile.open("rb") as log_reader:
+                log_reader.seek(trace_offset)
+                new_bytes = log_reader.read()
+                trace_offset = log_reader.tell()
+            data = trace_remainder + new_bytes
+            lines = data.split(b"\n")
+            trace_remainder = lines.pop()
+            for row in lines:
+                if row.startswith(b"CURVEYIELD_DAI_WIRE_V1 "):
+                    print(row.decode("utf-8", "strict"), flush=True)
+
         model_idle_since: float | None = None
         previous_cpu: int | None = None
         previous_files: tuple[int, int, int] | None = None
@@ -1424,6 +1458,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "stage": "I06.2", "event": "TARGET_STARTED",
             "targetIndex": index + 1, "targetCount": len(target_list),
             "status": "RUNNING", "watchdog": "ACTIVITY_BASED",
+            "exactPublicDAIWireTrace": trace_public_dai,
         }, sort_keys=True), flush=True)
         with logfile.open("wb") as out:
             process = subprocess.Popen(args, cwd=upstream, env=env, stdout=out,
@@ -1431,13 +1466,14 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             try:
                 while True:
                     try:
-                        returncode = process.wait(timeout=30)
+                        returncode = process.wait(timeout=5 if trace_public_dai else 30)
+                        forward_dai_wire_trace()
                         record["nativeExitCode"] = returncode
                         record["status"] = ("NATIVE_AUTOPROVER_EXIT_ZERO_UNCLASSIFIED"
                                             if returncode == 0 else "NATIVE_AUTOPROVER_FAILED")
                         break
                     except subprocess.TimeoutExpired:
-                        pass
+                        forward_dai_wire_trace()
                     now = time.monotonic()
                     if now - last_mimo_check >= 30:
                         mimo_run_state, mimo_run_reason = matched_mimo_run_state(
@@ -1530,6 +1566,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait(timeout=10)
+        forward_dai_wire_trace()
         logfile.chmod(0o600)
         if record["status"] == "NATIVE_AUTOPROVER_FAILED":
             # The full upstream trace remains private. Publish only a narrow

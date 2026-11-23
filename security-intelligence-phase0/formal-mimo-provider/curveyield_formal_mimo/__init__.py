@@ -7,8 +7,12 @@ entry-point lookup or adapter construction; live inference is I05.2.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import itertools
 import json
 from functools import cache
+import sys
+import threading
 from ipaddress import IPv4Address, IPv4Network
 import os
 from typing import TYPE_CHECKING
@@ -63,6 +67,75 @@ def _private_chat_completions_base_url() -> str:
             or parsed.username is not None or parsed.password is not None):
         raise RuntimeError("MiMo destination is not the matched private /v1 endpoint")
     return f"http://{ip}:8080/v1"
+
+
+
+# Source-locked, explicit public DAI integration tracing. This never records
+# authorization headers, endpoint credentials, or non-DAI campaign payloads.
+_TRACE_LOCK = threading.RLock()
+_TRACE_SEQUENCE = itertools.count(1)
+_TRACE_PREFIX = "CURVEYIELD_DAI_WIRE_V1 "
+
+
+def _trace_enabled() -> bool:
+    return os.environ.get("CURVEYIELD_PUBLIC_DAI_WIRE_TRACE") == "1"
+
+
+def _wire_event(event: dict) -> None:
+    if not _trace_enabled():
+        return
+    with _TRACE_LOCK:
+        print(_TRACE_PREFIX + json.dumps(event, ensure_ascii=False, separators=(",", ":")),
+              file=sys.stderr, flush=True)
+
+
+def _wire_body(direction: str, request_number: int, raw: bytes,
+               status: int | None = None) -> None:
+    """Stream every byte of an exact HTTP JSON body, with no truncation.
+
+    Chunking keeps GitHub Actions log lines small. Join the payload fields
+    in chunk-index order, encode UTF-8, and verify the reported SHA-256 to
+    reconstruct the exact wire body. Non-UTF8 error responses use base64.
+    """
+    if not _trace_enabled():
+        return
+    try:
+        payload = raw.decode("utf-8", "strict")
+        encoding = "utf-8"
+    except UnicodeDecodeError:
+        import base64
+        payload = base64.b64encode(raw).decode("ascii")
+        encoding = "base64"
+    chunks = [payload[i:i + 6000] for i in range(0, len(payload), 6000)]
+    with _TRACE_LOCK:
+        prefix = {"requestNumber": request_number, "direction": direction}
+        for event in (
+            {**prefix, "event": "BEGIN", "encoding": encoding,
+             "byteCount": len(raw), "chunkCount": len(chunks),
+             "sha256": hashlib.sha256(raw).hexdigest(), "httpStatus": status},
+        ):
+            print(_TRACE_PREFIX + json.dumps(event, separators=(",", ":")),
+                  file=sys.stderr, flush=True)
+        for idx, part in enumerate(chunks):
+            print(_TRACE_PREFIX + json.dumps(
+                {**prefix, "event": "CHUNK", "chunkIndex": idx, "payload": part},
+                ensure_ascii=False, separators=(",", ":")),
+                file=sys.stderr, flush=True)
+        print(_TRACE_PREFIX + json.dumps(
+            {**prefix, "event": "END", "chunkCount": len(chunks)},
+            separators=(",", ":"), file=sys.stderr, flush=True)
+
+
+def _log_request(request: httpx.Request) -> None:
+    if not _trace_enabled() or request.url.path != "/v1/chat/completions":
+        return
+    number = next(_TRACE_SEQUENCE)
+    request.extensions["curveyield_dai_wire_number"] = number
+    _wire_body("AUTOPROVER_TO_MIMO", number, request.content)
+
+
+async def _log_request_async(request: httpx.Request) -> None:
+    _log_request(request)
 
 
 class MiMoProtocolError(ValueError):
@@ -148,27 +221,50 @@ def _check_local_response(response: httpx.Response) -> None:
     validate_mimo_chat_completion(response_json, request_json)
 
 
+def _observe_response(response: httpx.Response) -> None:
+    if _trace_enabled() and response.request.url.path == "/v1/chat/completions":
+        number = response.request.extensions.get("curveyield_dai_wire_number")
+        if not isinstance(number, int):
+            raise MiMoProtocolError("DAI wire trace lost request correlation")
+        _wire_body("MIMO_TO_AUTOPROVER", number, response.content,
+                   status=response.status_code)
+    try:
+        _check_local_response(response)
+    except Exception as exc:
+        _wire_event({"event": "RESPONSE_VALIDATION", "requestNumber":
+                     response.request.extensions.get("curveyield_dai_wire_number"),
+                     "outcome": "REJECTED", "exceptionType": type(exc).__name__,
+                     "reason": str(exc) if isinstance(exc, MiMoProtocolError) else
+                     "model response verification exception"})
+        raise
+    _wire_event({"event": "RESPONSE_VALIDATION", "requestNumber":
+                 response.request.extensions.get("curveyield_dai_wire_number"),
+                 "outcome": "ENVELOPE_ACCEPTED" if response.status_code < 400 else
+                 "HTTP_STATUS_REJECTED_BY_SDK",
+                 "httpStatus": response.status_code})
+
+
 def _sync_local_response(response: httpx.Response) -> None:
     response.read()
-    _check_local_response(response)
+    _observe_response(response)
 
 
 async def _async_local_response(response: httpx.Response) -> None:
     await response.aread()
-    _check_local_response(response)
+    _observe_response(response)
 
 
 def _trusted_http_client() -> httpx.Client:
     return httpx.Client(
         trust_env=False,
-        event_hooks={"response": [_sync_local_response]},
+        event_hooks={"request": [_log_request], "response": [_sync_local_response]},
     )
 
 
 def _trusted_async_http_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
         trust_env=False,
-        event_hooks={"response": [_async_local_response]},
+        event_hooks={"request": [_log_request_async], "response": [_async_local_response]},
     )
 
 
@@ -247,7 +343,16 @@ def configure_local_mimo_runtime() -> dict[str, str]:
         llm._emit_openai_usage(response, on_usage)
         # Model JSON schema is validated by Pydantic; a bad output fails closed.
         # Upstream's prompt-based fallback is deliberately not invoked.
-        return output_type.model_validate_json(response.choices[0].message.content)
+        try:
+            parsed = output_type.model_validate_json(response.choices[0].message.content)
+        except Exception as exc:
+            _wire_event({"event": "AUTOSETUP_SCHEMA_VALIDATION",
+                         "outcome": "REJECTED", "schema": output_type.__name__,
+                         "exceptionType": type(exc).__name__})
+            raise
+        _wire_event({"event": "AUTOSETUP_SCHEMA_VALIDATION",
+                     "outcome": "ACCEPTED", "schema": output_type.__name__})
+        return parsed
 
     async def _strict_async(
         client, model, messages, max_tokens, temperature, output_type,
@@ -270,7 +375,16 @@ def configure_local_mimo_runtime() -> dict[str, str]:
             max_retries, verbose,
         )
         llm._emit_openai_usage(response, on_usage)
-        return output_type.model_validate_json(response.choices[0].message.content)
+        try:
+            parsed = output_type.model_validate_json(response.choices[0].message.content)
+        except Exception as exc:
+            _wire_event({"event": "AUTOSETUP_SCHEMA_VALIDATION",
+                         "outcome": "REJECTED", "schema": output_type.__name__,
+                         "exceptionType": type(exc).__name__})
+            raise
+        _wire_event({"event": "AUTOSETUP_SCHEMA_VALIDATION",
+                     "outcome": "ACCEPTED", "schema": output_type.__name__})
+        return parsed
 
     llm._init_local_client = _local_sync
     llm._init_async_local_client = _local_async
