@@ -19,7 +19,19 @@ on:
         required: true
         default: public
         type: choice
-        options: [public, campaign, autonomous_start, autonomous, train]
+        options: [public, campaign, autonomous_start, autonomous, train, certora_qa]
+      source_run_id:
+        description: Exact originating security workflow run ID (certora_qa only)
+        required: false
+        type: string
+      source_run_attempt:
+        description: Exact originating security workflow attempt (certora_qa only)
+        required: false
+        type: string
+      source_head_sha:
+        description: Immutable originating security workflow commit SHA (certora_qa only)
+        required: false
+        type: string
       source_url:
         description: HTTPS source ZIP URL for one-time new autonomous AI-v6 beta start
         required: false
@@ -103,7 +115,7 @@ permissions:
   id-token: write
   actions: write
 concurrency:
-  group: lite-solo-ai-${{ inputs.mode }}-${{ (inputs.mode == 'campaign' || inputs.mode == 'autonomous') && inputs.campaign_id || inputs.mode == 'autonomous_start' && inputs.source_url || inputs.source_path }}
+  group: lite-solo-ai-${{ inputs.mode }}-${{ (inputs.mode == 'campaign' || inputs.mode == 'autonomous') && inputs.campaign_id || inputs.mode == 'autonomous_start' && inputs.source_url || inputs.source_path }}-${{ inputs.mode == 'certora_qa' && inputs.source_run_id || '' }}
   cancel-in-progress: false
 env:
   MACHINE_INTELLIGENCE_WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL || 'https://lite-solo-api.jamesnexus9999.workers.dev' }}
@@ -208,6 +220,9 @@ jobs:
     timeout-minutes: ${{ inputs.mode == 'autonomous' && 355 || 100 }}
     env:
       AUDIT_AI_MODE: ${{ inputs.mode }}
+      CERTORA_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      CERTORA_SOURCE_RUN_ATTEMPT: ${{ inputs.source_run_attempt }}
+      CERTORA_SOURCE_HEAD_SHA: ${{ inputs.source_head_sha }}
       AI_INFERENCE_RUNNERS: ${{ inputs.inference_runners || '1' }}
       AUDIT_AI_SOURCE_URL: ${{ inputs.source_url }}
       AUDIT_AI_HOP: ${{ inputs.ai_hop }}
@@ -261,6 +276,12 @@ jobs:
               [[ "$AUDIT_AI_HOP" =~ ^[0-9]+$ ]]
               test "$AUDIT_AI_HOP" -le 120
               test "$AUDIT_AI_SUBMISSION_MODE" = submit
+              ;;
+            certora_qa)
+              [[ "$CERTORA_SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo '::error::Certora originating run ID required'; exit 1; }
+              [[ "$CERTORA_SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]] || { echo '::error::Certora originating run attempt required'; exit 1; }
+              [[ "$CERTORA_SOURCE_HEAD_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo '::error::Certora originating SHA required'; exit 1; }
+              test "$AUDIT_AI_SUBMISSION_MODE" = draft
               ;;
             campaign)
               test -n "$AUDIT_AI_CAMPAIGN_ID"
@@ -471,7 +492,7 @@ jobs:
           echo "MIMO_RPC_CSV=$rpc" >> "$GITHUB_ENV"
           echo "Selected $AI_INFERENCE_RUNNERS exact-run MiMo RPC devices" >> "$GITHUB_STEP_SUMMARY"
       - name: Run model inference in authorized mode
-        if: inputs.mode != 'autonomous_start'
+        if: inputs.mode != 'autonomous_start' && inputs.mode != 'certora_qa'
         shell: bash
         env:
           GITHUB_ACTIONS_DISPATCH_TOKEN: ${{ github.token }}
@@ -682,7 +703,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: Summarize disposition without private evidence
-        if: always()
+        if: always() && inputs.mode != 'certora_qa'
         shell: bash
         run: |
           file="$RUNNER_TEMP/lite-solo-ai/analysis.json"
