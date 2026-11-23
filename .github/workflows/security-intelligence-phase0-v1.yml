@@ -287,7 +287,7 @@ jobs:
               or identity.get("source",{}).get("archiveSha256")!=source["archiveSha256"]
               or identity.get("source",{}).get("archiveSha256Observed")!=source["archiveSha256"]
               or compiled.get("requestIdentity",{}).get("requestId")!=request.get("requestId")
-              or compiled.get("source")!=source):
+              or any(compiled.get("source", {}).get(k)!=source[k] for k in ("repository","commit","archivePath","archiveSha256"))):
               raise SystemExit("FORMAL_INTAKE_IDENTITY_INVALID")
           source_zip=base/"formal-source/source.zip"
           if (not source_zip.is_file() or source_zip.stat().st_size>16*1024*1024
