@@ -254,6 +254,11 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Select Certora's required Java 19 for KSP and native build
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '19'
       - name: Build and invoke local Certora Prover and SMT toolchain
         shell: bash
         run: |
