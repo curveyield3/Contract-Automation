@@ -962,7 +962,7 @@ async function main(){
     console.error('Wake static analysis incomplete: '+detail);
   }
   const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
-  const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}}));
+  const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither,wake}}));
   await writeReviewInventoryOutputsV1({outputDir:out,projectRoot:detected.absolute,build,request,slither,policy:process.env.ADR_DETECTION_POLICY||null,reviewPolicy:process.env.ADR_DETECTION_REVIEW_POLICY||null});
   const projectReadiness=await withProgressStage('scan-project-readiness',()=>scanProjectReadiness({projectRoot:detected.absolute,build,cfg:effectiveCfg}));
   const deployConfigExecution=await withProgressStage('execute-local-deployment-inventory',()=>executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness}));
