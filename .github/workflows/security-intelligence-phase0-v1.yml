@@ -15,7 +15,7 @@ concurrency:
   # Keep the I02-only compiler qualification from queueing behind an unintended
   # source rescanning push. The source scanner jobs and their logic are unchanged.
   group: >-
-    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || github.event.head_commit.message == 'I03.1: install upstream AutoProver') && 'formal-qualification' || 'source-scan' }}
+    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || (github.event.head_commit.message == 'I03.1: install upstream AutoProver' || github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider')) && 'formal-qualification' || 'source-scan' }}
   cancel-in-progress: false
 jobs:
   admit:
@@ -253,7 +253,8 @@ jobs:
     if: >-
       github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' ||
       github.event.head_commit.message == 'I02.3: qualify source boundary' ||
-      github.event.head_commit.message == 'I03.1: install upstream AutoProver'
+      github.event.head_commit.message == 'I03.1: install upstream AutoProver' ||
+      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider'
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
@@ -368,3 +369,68 @@ jobs:
             ${{ runner.temp }}/curve-certora-i03/autoprover-bootstrap-v1.json
           if-no-files-found: error
           retention-days: 14
+      - name: Select upstream AutoProver Python 3.12 for I03.2 only
+        if: >-
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned upstream AutoProver and register the exact local MiMo entry point
+        if: >-
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="$RUNNER_TEMP/autoprover-i032"
+          python3 -m venv "$RUNNER_TEMP/uv-i032"
+          "$RUNNER_TEMP/uv-i032/bin/pip" install --disable-pip-version-check 'uv==0.13.9'
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0='url.https://github.com/.insteadOf'
+          export GIT_CONFIG_VALUE_0='git@github.com:'
+          git clone --filter=blob:none --no-checkout https://github.com/Certora/AutoProver.git "$source"
+          git -C "$source" fetch --depth=1 origin 81d9626c249a70c0a0f0648a89de175443c0344c
+          git -C "$source" checkout --detach FETCH_HEAD
+          test "$(git -C "$source" rev-parse HEAD)" = '81d9626c249a70c0a0f0648a89de175443c0344c'
+          git -C "$source" submodule update --init --recursive
+          test "$(git -C "$source/graphcore" rev-parse HEAD)" = 'c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc'
+          (
+            cd "$source"
+            "$RUNNER_TEMP/uv-i032/bin/uv" sync --locked --no-dev --extra certora-cli --python "$(command -v python3)"
+          )
+          "$RUNNER_TEMP/uv-i032/bin/uv" pip install --python "$source/.venv/bin/python" --no-deps --editable \
+            "$GITHUB_WORKSPACE/security-intelligence-phase0/formal-mimo-provider"
+          "$source/.venv/bin/python" - <<'PY'
+          import importlib.metadata
+          import json
+          from dataclasses import dataclass
+          from composer.llm.registry import get_provider_for
+          from curveyield_formal_mimo import MODEL_ID, MiMoModelProvider, MiMoService
+          from composer.llm.provider import ProviderSpec
+
+          @dataclass
+          class Options:
+              tokens: int = 1024
+              thinking_tokens: int | None = None
+              memory_tool: bool = False
+              interleaved_thinking: bool = False
+
+          entries = [entry for entry in importlib.metadata.entry_points(
+              group="certora.autoprove.llm_provider") if entry.name == "curveyield-mimo"]
+          if len(entries) != 1 or not isinstance(entries[0].load(), ProviderSpec):
+              raise RuntimeError("Pinned upstream MiMo provider entry point not discoverable")
+          provider = get_provider_for(model_name=MODEL_ID, options=Options())
+          if not isinstance(provider, MiMoModelProvider):
+              raise RuntimeError("Upstream provider registry did not select local MiMo")
+          if not isinstance(provider.provider, MiMoService):
+              raise RuntimeError("MiMo provider lacks real upstream ProviderService")
+          if provider.model_name != MODEL_ID or provider.max_prompt_tokens <= 0:
+              raise RuntimeError("Registered MiMo adapter has invalid identity/context")
+          print(json.dumps({
+              "status":"LOCAL_MIMO_PROVIDER_REGISTERED",
+              "stage":"I03.2", "model":provider.model_name,
+              "entryPoint":entries[0].value, "pythonRegistry":True,
+              "upstreamProviderInterface":True, "nativeCertoraBuild":False,
+              "modelInference":False, "externalProviderCalls":False,
+              "realPrivateModelSessionDeferredTo":"I05.2"
+          }, sort_keys=True))
+          PY
