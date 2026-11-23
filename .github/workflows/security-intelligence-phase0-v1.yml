@@ -401,6 +401,19 @@ jobs:
           export PATH="$RUNNER_TEMP/curve-certora-formal/tool-bin:$PATH"
           python3 security-intelligence-phase0/scripts/security-formal-v1.py verify-native-cache \
             --work-dir "$RUNNER_TEMP/curve-certora-formal"
+      - name: Run native original CVL when authenticated specs exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py run-existing-cvl \\
+            --target-map "$RUNNER_TEMP/formal-targets/target-map-v1.json" \\
+            --native-toolchain "$RUNNER_TEMP/curve-certora-formal/toolchain-bootstrap-v1.json" \\
+            --native-compilers "$RUNNER_TEMP/curve-certora-formal/compiler-bootstrap-v1.json" \\
+            --output "$RUNNER_TEMP/native-existing-cvl-v1.json"
+          jq -e '.stage=="I06.1" and .noCloudProver==true and
+                  (.status=="NOT_APPLICABLE_NO_EXISTING_CVL" or
+                   .status=="EXISTING_CVL_NATIVE_ATTEMPTED")' \\
+            "$RUNNER_TEMP/native-existing-cvl-v1.json" >/dev/null
       - name: Install pinned upstream AutoProver with native local Certora path
         shell: bash
         run: |
@@ -749,6 +762,7 @@ jobs:
           path: |
             ${{ runner.temp }}/formal-intake-v1.json
             ${{ runner.temp }}/formal-session-v1.json
+            ${{ runner.temp }}/native-existing-cvl-v1.json
           if-no-files-found: warn
           retention-days: 7
       - name: Close ephemeral local Postgres and Tailscale after live session
