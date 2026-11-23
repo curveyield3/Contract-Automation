@@ -392,7 +392,7 @@ class MiMoModelProvider:
             api_key=SecretStr("local-network-only"),
             use_responses_api=False,
             max_tokens=self.options.tokens,
-            timeout=900.0,
+            timeout=3600.0,
             max_retries=2,
             streaming=False,
             disable_streaming=True,

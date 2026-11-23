@@ -1317,6 +1317,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         "cloudProviderCalls": 0,
         "modelRequestCount": None,
         "nativeProofsProved": None,
+        "maxPropertyInferenceRoundsPerComponent": 2,
+        "maxResponseTokens": 2048,
     }
     def persist():
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1393,7 +1395,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "--max-concurrent", "1",
             "--max-cpu-tasks", "1",
             "--run-mode", "comprehensive",
-            "--tokens", "4096",
+            "--max-bug-rounds", "2",
+            "--tokens", "2048",
         ]
         logfile = project.parent / "native-autoprover-private.log"
         original_spec_digests = {
