@@ -7,6 +7,7 @@ on:
       - 'security-intelligence-phase0/requests/active-request.json'
       # One-time I02.1 native bootstrap; remove at the I05.1 formal-job integration.
       - '.github/workflows/security-intelligence-phase0-v1.yml'
+      - 'security-intelligence-phase0/scripts/security-formal-v1.py'
 permissions:
   contents: read
   actions: read
