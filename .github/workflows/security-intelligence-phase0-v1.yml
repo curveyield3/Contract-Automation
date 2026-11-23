@@ -15,7 +15,7 @@ concurrency:
   # Keep the I02-only compiler qualification from queueing behind an unintended
   # source rescanning push. The source scanner jobs and their logic are unchanged.
   group: >-
-    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || (github.event.head_commit.message == 'I03.1: install upstream AutoProver' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG' || github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping')))) && 'formal-qualification' || 'source-scan' }}
+    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || (github.event.head_commit.message == 'I03.1: install upstream AutoProver' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG' || github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping'))))) && 'formal-qualification' || 'source-scan' }}
   cancel-in-progress: false
 jobs:
   admit:
