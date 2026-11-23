@@ -491,6 +491,69 @@ jobs:
           done
           echo "MIMO_RPC_CSV=$rpc" >> "$GITHUB_ENV"
           echo "Selected $AI_INFERENCE_RUNNERS exact-run MiMo RPC devices" >> "$GITHUB_STEP_SUMMARY"
+      - name: Host pinned MiMo on an ephemeral private Tailscale address for Certora
+        if: inputs.mode == 'certora_qa'
+        shell: bash
+        env:
+          TS_CLIENT_ID: ${{ secrets.MACHINE_TAILSCALE_ID }}
+          TS_OIDC_AUDIENCE: ${{ secrets.MACHINE_TAILSCALE_AUDIENCE }}
+          TAILNET_TAG: tag:audit-browser,tag:ai-training
+        run: |
+          set -euo pipefail
+          : "${TS_CLIENT_ID:?MACHINE_TAILSCALE_ID required for private Certora session}"
+          : "${TS_OIDC_AUDIENCE:?MACHINE_TAILSCALE_AUDIENCE required for private Certora session}"
+          if ! tailscale status --json 2>/dev/null | jq -e '.BackendState == "Running"' >/dev/null; then
+            bash scripts/browser-agent-tailnet-oidc.sh
+          fi
+          address="$(tailscale ip -4 | head -n 1)"
+          python3 - "$address" <<'PY'
+          import ipaddress,sys
+          candidate=ipaddress.ip_address(sys.argv[1])
+          assert isinstance(candidate,ipaddress.IPv4Address)
+          assert candidate in ipaddress.ip_network("100.64.0.0/10")
+          PY
+          if [ "$AI_INFERENCE_RUNNERS" = 1 ]; then
+            set -- --n-gpu-layers 0
+          else
+            : "${MIMO_RPC_CSV:?exact-run private RPC peers required}"
+            set -- --rpc "$MIMO_RPC_CSV" --n-gpu-layers 99
+          fi
+          "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/models/$MODEL_FILE" \
+            --alias lite-solo-mimo-v1 --host "$address" --port 8080 \
+            --ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on \
+            --threads 4 --parallel 1 "$@" > "$RUNNER_TEMP/mimo-certora-server.log" 2>&1 &
+          server_pid=$!
+          cleanup_certora_session() {
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+            tailscale down >/dev/null 2>&1 || true
+          }
+          trap cleanup_certora_session EXIT
+          trap 'exit 143' TERM
+          trap 'exit 130' INT
+          ready=false
+          for attempt in $(seq 1 600); do
+            if curl --silent --fail --max-time 3 "http://$address:8080/health" |
+              jq -e '.status == "ok"' >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo "::error::Pinned MiMo server exited before private readiness"
+              tail -n 30 "$RUNNER_TEMP/mimo-certora-server.log" | sed -E 's/(token|secret|key)=[^ ]+/\\1=[REDACTED]/g'
+              exit 1
+            fi
+            sleep 2
+          done
+          [ "$ready" = true ] || { echo "::error::MiMo private server not ready within pinned 1200s budget"; exit 1; }
+          echo "Private pinned MiMo process ready; origin-bound rendezvous is added in I01.3." >> "$GITHUB_STEP_SUMMARY"
+          # Temporary finite lifetime until I01.3 supplies origin-job termination.
+          deadline=$(( $(date +%s) + 4200 ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            kill -0 "$server_pid" 2>/dev/null || { echo "::error::MiMo process died"; exit 1; }
+            sleep 10
+          done
+
       - name: Run model inference in authorized mode
         if: inputs.mode != 'autonomous_start' && inputs.mode != 'certora_qa'
         shell: bash
