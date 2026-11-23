@@ -766,11 +766,3 @@ jobs:
             kill "$(cat "$RUNNER_TEMP/browser-tailscaled-oidc.pid")" 2>/dev/null || true
           fi
           echo 'Ephemeral formal-run Postgres and private Tailscale session released.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Publish sanitized same-run formal readiness
-        if: ${{ success() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: certora-formal-intake-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/formal-intake-v1.json
-          if-no-files-found: error
-          retention-days: 14
