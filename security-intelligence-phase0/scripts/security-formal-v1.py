@@ -1313,6 +1313,34 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait(timeout=10)
         logfile.chmod(0o600)
+        if record["status"] == "NATIVE_AUTOPROVER_FAILED":
+            # The full upstream trace remains private. Publish only a narrow
+            # symbolic failure fingerprint; never stdout, source, CVL or prompts.
+            private_log_text = logfile.read_text(errors="replace")[-180000:]
+            types = re.findall(
+                r"(?m)^([A-Za-z_][A-Za-z_0-9]*(?:Error|Exception))(?::|$)",
+                private_log_text)
+            record["nativeFailureException"] = types[-1] if types else "NO_EXCEPTION_LINE"
+            safe_patterns = (
+                ("CLI_ARGUMENTS", r"unrecognized arguments|usage: console-autoprove"),
+                ("MISSING_IMPORT", r"No module named|cannot import name"),
+                ("MISSING_FILE", r"No such file or directory|not found or not a file"),
+                ("BUILD_SYSTEM", r"no build system|unsupported build|hardhat.config|foundry.toml"),
+                ("COMPILER", r"solc|compilation failed|compiler not found"),
+                ("DATABASE", r"psycopg|postgres|connection refused"),
+                ("LOCAL_MODEL", r"model provider|chat.completions|llama-server|MIMO_"),
+                ("PROVER", r"certoraRun|emv.jar|Prover returned"),
+                ("PERMISSION", r"Permission denied|EACCES"),
+            )
+            record["nativeFailureSignatures"] = [
+                name for name, pattern in safe_patterns
+                if re.search(pattern, private_log_text, re.IGNORECASE)][:5]
+            frames = re.findall(r'(?m)^\s*File "([^"\n]+)", line [0-9]+',
+                                private_log_text)
+            trusted_frames = [Path(p).name for p in frames
+                              if "/AutoProver/" in p or "/site-packages/" in p]
+            record["nativeFailureUpstreamFrame"] = (
+                trusted_frames[-1][:80] if trusted_frames else "NO_UPSTREAM_FRAME")
         record["elapsedSeconds"] = round(time.monotonic() - started, 2)
         record["privateNativeLogSha256"] = digest(logfile)
         final_specs = {
@@ -1410,6 +1438,9 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "targetCount": len(target_list), "status": record["status"],
             "generatedSpecCount": record.get("generatedSpecCount", 0),
             "elapsedSeconds": record.get("elapsedSeconds", 0),
+            "nativeFailureException": record.get("nativeFailureException"),
+            "nativeFailureSignatures": record.get("nativeFailureSignatures"),
+            "nativeFailureUpstreamFrame": record.get("nativeFailureUpstreamFrame"),
         }, sort_keys=True), flush=True)
     observed = sum(len(r.get("nativePropertyVerdicts", [])) for r in outcome["results"])
     outcome["observedNativePropertyVerdicts"] = observed
