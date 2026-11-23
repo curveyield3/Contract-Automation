@@ -15,7 +15,7 @@ concurrency:
   # Keep the I02-only compiler qualification from queueing behind an unintended
   # source rescanning push. The source scanner jobs and their logic are unchanged.
   group: >-
-    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || (github.event.head_commit.message == 'I03.1: install upstream AutoProver' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' || github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing'))) && 'formal-qualification' || 'source-scan' }}
+    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || (github.event.head_commit.message == 'I03.1: install upstream AutoProver' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' || github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG')))) && 'formal-qualification' || 'source-scan' }}
   cancel-in-progress: false
 jobs:
   admit:
@@ -255,7 +255,8 @@ jobs:
       github.event.head_commit.message == 'I02.3: qualify source boundary' ||
       github.event.head_commit.message == 'I03.1: install upstream AutoProver' ||
       github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' ||
-      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing'
+      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' ||
+      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG'
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
@@ -373,14 +374,16 @@ jobs:
       - name: Select upstream AutoProver Python 3.12 for I03.2 only
         if: >-
           github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' ||
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing'
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' ||
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install pinned upstream AutoProver and register the exact local MiMo entry point
         if: >-
           github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' ||
-          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing'
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' ||
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG'
         shell: bash
         run: |
           set -euo pipefail
@@ -519,5 +522,100 @@ jobs:
               "localPrivateURLShape": True,
               "liveInferenceVerified": False, "liveVerificationDeferredTo": "I05.2",
               "nativeCertoraBuild": False, "contractTests": False,
+          }, sort_keys=True))
+          PY
+      - name: Prepare upstream PostgreSQL pgvector and genuine CVL RAG corpus
+        if: >-
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG'
+        shell: bash
+        env:
+          CERTORA_AI_COMPOSER_PGHOST: 127.0.0.1
+          CERTORA_AI_COMPOSER_PGPORT: '5432'
+          COMPOSER_EMBED_DEVICE: cpu
+          UV_NO_DEV: '1'
+          UV_LINK_MODE: copy
+        run: |
+          set -euo pipefail
+          source="$RUNNER_TEMP/autoprover-i032"
+          docs="$RUNNER_TEMP/certora-docs"
+          docsenv="$RUNNER_TEMP/docs-env"
+          pg="certora-rag-$GITHUB_RUN_ID"
+          docker run --rm -d --name "$pg" \
+            --publish 127.0.0.1:5432:5432 \
+            --env POSTGRES_USER=postgres --env POSTGRES_PASSWORD=postgres_admin_password \
+            --mount "type=bind,source=$source/composer/scripts/init-db.sql,target=/docker-entrypoint-initdb.d/init-db.sql,readonly" \
+            pgvector/pgvector:pg16 >/dev/null
+          trap 'docker stop "$pg" >/dev/null 2>&1 || true' EXIT
+          ready=false
+          for iteration in $(seq 1 90); do
+            if docker exec "$pg" pg_isready -U postgres -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          [ "$ready" = true ] || { docker logs "$pg" | tail -n 80; exit 1; }
+          # The upstream Dockerfile prescribes CPU and ML RAG dependencies.
+          # Do not install any dev/test or CUDA extras.
+          (
+            cd "$source"
+            "$RUNNER_TEMP/uv-i032/bin/uv" sync --locked --no-dev \
+              --extra certora-cli --extra cpu --extra ml --group ragbuild \
+              --python "$(command -v python3)"
+          )
+          # Use upstream's own CVL-only Sphinx build (from its Dockerfile).
+          git clone --depth=1 https://github.com/Certora/Documentation.git "$docs"
+          python3 -m venv "$docsenv"
+          "$docsenv/bin/pip" install --disable-pip-version-check -r "$docs/requirements.txt"
+          cp "$docs/conf.py" "$docs/docs/cvl/conf.py"
+          (
+            cd "$docs/docs/cvl"
+            "$docsenv/bin/sphinx-build" -M singlehtml . tmp
+          )
+          mkdir -p "$source/scripts/prover-docs"
+          cp "$docs/docs/cvl/tmp/singlehtml/index.html" "$source/scripts/prover-docs/cvl.html"
+          test -s "$source/scripts/prover-docs/cvl.html"
+          (
+            cd "$source"
+            "$source/.venv/bin/python" -m composer.scripts.ragbuild \
+              --output postgresql://rag_user:rag_password@127.0.0.1:5432/rag_db \
+              "$source/scripts/prover-docs/cvl.html"
+          )
+          "$source/.venv/bin/python" - <<'PY'
+          import asyncio
+          import json
+          import psycopg
+          from composer.rag.db import PostgreSQLRAGDatabase, DEFAULT_CONNECTION
+          from composer.rag.models import get_model
+
+          async def read_upstream_rag():
+              db = PostgreSQLRAGDatabase(DEFAULT_CONNECTION, get_model())
+              try:
+                  await db.test_connection()
+              finally:
+                  await db.aclose()
+
+          asyncio.run(read_upstream_rag())
+          with psycopg.connect("postgresql://rag_user:rag_password@127.0.0.1:5432/rag_db") as conn:
+              with conn.cursor() as cur:
+                  cur.execute("SELECT count(*) FROM rag.documents")
+                  documents = cur.fetchone()[0]
+                  cur.execute("SELECT count(*) FROM rag.manual_sections")
+                  sections = cur.fetchone()[0]
+                  cur.execute("SELECT count(*) FROM pg_indexes WHERE schemaname='rag' AND indexname='documents_embedding_idx'")
+                  index_count = cur.fetchone()[0]
+          if documents <= 0 or sections <= 0 or index_count != 1:
+              raise RuntimeError("Upstream CVL corpus or pgvector index missing")
+          print(json.dumps({
+              "status": "LOCAL_AUTOPROVER_RAG_READY",
+              "stage": "I03.4",
+              "cvlDocuments": documents,
+              "cvlManualSections": sections,
+              "pgvectorIndex": True,
+              "upstreamClientConnected": True,
+              "dbHost": "127.0.0.1",
+              "paidModelCalls": False,
+              "certoraRebuilt": False,
+              "realFormalRunnerMustRestoreDB": True,
           }, sort_keys=True))
           PY
