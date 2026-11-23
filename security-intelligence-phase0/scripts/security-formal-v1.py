@@ -1277,7 +1277,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         )
         args = [
             str(upstream / ".venv/bin/python"), "-c", entry,
-            str(project), str(target["target"]), str(mapping["targetContextFile"]),
+            str(project), str(local_contract.resolve(strict=True)) + ":" + str(target["contract"]),
+            str(mapping["targetContextFile"]),
             "--heavy-model", "lite-solo-mimo-v1",
             "--lite-model", "lite-solo-mimo-v1",
             "--max-concurrent", "1",
