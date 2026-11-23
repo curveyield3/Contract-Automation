@@ -972,6 +972,149 @@ def prepare_upstream_autoprover(root: Path) -> dict[str, object]:
         "noSourceContractsLoaded": True, "notAProofResult": True,
     }
 
+
+def run_authenticated_existing_cvl(*, target_map_file: Path, native_toolchain_file: Path,
+                                   compiler_file: Path, output_file: Path) -> dict[str, object]:
+    """I06.1: run only authentic existing CVL; no model-generated specifications.
+
+    Original source/spec/config bytes remain in private runner scratch. A native
+    tool exit is never promoted into a PROVED property without actual rule data.
+    """
+    mapping = json.loads(target_map_file.read_text())
+    toolchain = json.loads(native_toolchain_file.read_text())
+    compilers = json.loads(compiler_file.read_text())
+    if (mapping.get("status") != "AUTHENTICATED_SOURCE_TARGETS_READY"
+            or toolchain.get("status") != "LOCAL_TOOLCHAIN_STARTUP_VERIFIED"
+            or toolchain.get("proverGitCommit") != PROVER_COMMIT
+            or compilers.get("status") != "COMPILER_TOOLCHAIN_VERIFIED"
+            or mapping.get("source") != compilers.get("source")):
+        raise RuntimeError("I06.1 missing authenticated target/native source provenance")
+    root = Path(str(mapping["privateSourceRoot"])).resolve(strict=True)
+    scratch = target_map_file.parent.resolve(strict=True)
+    if (not scratch.is_relative_to(Path(os.environ.get("RUNNER_TEMP", "/invalid")).resolve())
+            or not root.is_relative_to(scratch)):
+        raise RuntimeError("I06.1 source or result scratch escapes private runner")
+    specs = mapping.get("existingCVL")
+    if not isinstance(specs, list):
+        raise RuntimeError("I06.1 existing CVL inventory missing")
+    for spec in specs:
+        if (not isinstance(spec, str) or not spec.endswith((".spec", ".conf"))
+                or not (root / spec).resolve(strict=True).is_relative_to(root)):
+            raise RuntimeError("I06.1 existing CVL path is invalid")
+    versions = {c["version"]: c for c in compilers.get("compilerToolchain", [])}
+    for version, item in versions.items():
+        executable = Path(item["executable"]).resolve(strict=True)
+        if digest(executable) != item["sha256"]:
+            raise RuntimeError("I06.1 native solc digest mismatch for " + version)
+    certora_dir = Path(str(toolchain["certoraDir"])).resolve(strict=True)
+    if digest(certora_dir / "emv.jar") != toolchain["emvJarSha256"]:
+        raise RuntimeError("I06.1 native Prover binary checksum mismatch")
+    outcome: dict[str, object] = {
+        "schemaVersion": "curveyield-existing-cvl-v1",
+        "stage": "I06.1",
+        "sourceSha256": mapping["source"]["archiveSha256"],
+        "requestId": mapping["requestId"],
+        "originRunId": int(os.environ["GITHUB_RUN_ID"]),
+        "originRunAttempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+        "originCommit": os.environ["GITHUB_SHA"],
+        "nativeProverCommit": PROVER_COMMIT,
+        "nativeProverSha256": toolchain["emvJarSha256"],
+        "existingCVLCount": len(specs),
+        "results": [],
+        "nativeProverRuns": 0,
+        "noCloudProver": True,
+    }
+    if not specs:
+        outcome["status"] = "NOT_APPLICABLE_NO_EXISTING_CVL"
+    else:
+        # A .conf is executable configuration, not an authorized shell script.
+        # Reconstruct a narrow config from source-bound contract and CVL paths.
+        # Unknown options must never be silently dropped, because they can
+        # change semantics, permission or compilation assumptions.
+        allowed_conf = {"files", "verify", "solc", "msg"}
+        listed_specs: set[str] = set()
+        eligible = mapping.get("eligible", [])
+        for conf_name in (p for p in specs if p.endswith(".conf")):
+            item: dict[str, object] = {"configSha256": digest(root / conf_name)}
+            try:
+                conf = json.loads((root / conf_name).read_text())
+                if not isinstance(conf, dict) or set(conf) - allowed_conf:
+                    raise ValueError("UNSUPPORTED_OR_NON_DATA_ONLY_CONF")
+                verify = conf.get("verify")
+                if not isinstance(verify, str) or verify.count(":") != 1:
+                    raise ValueError("CONF_HAS_NO_EXACT_VERIFY_MAPPING")
+                contract, spec_path = verify.split(":", 1)
+                matches = [t for t in eligible if t["contract"] == contract]
+                if len(matches) != 1 or spec_path not in specs:
+                    raise ValueError("CONF_AMBIGUOUS_OR_UNAUTHENTICATED_TARGET")
+                selected = matches[0]
+                source_file = selected["sourcePath"]
+                files = conf.get("files", [source_file])
+                if not isinstance(files, list) or not files or source_file not in files:
+                    raise ValueError("CONF_FILES_EXCLUDE_COMPILER_AUTHENTICATED_TARGET")
+                for path in files:
+                    if (not isinstance(path, str) or not path.endswith(".sol")
+                            or not (root / path).resolve(strict=True).is_relative_to(root)):
+                        raise ValueError("CONF_REFERENCES_UNAUTHORIZED_SOURCE")
+                compiler = versions[selected["compilerVersion"]]["executable"]
+                item.update({"target": selected["target"],
+                             "specSha256": digest(root / spec_path),
+                             "compilerVersion": selected["compilerVersion"]})
+                listed_specs.add(spec_path)
+                private_run = scratch / "private" / "native-existing-cvl"
+                private_run.mkdir(parents=True, exist_ok=True, mode=0o700)
+                data_only_conf = private_run / ("native-" + str(len(outcome["results"])) + ".conf")
+                data_only_conf.write_text(json.dumps({
+                    "files": files, "verify": verify, "solc": str(compiler),
+                    **({"msg": conf["msg"]} if isinstance(conf.get("msg"), str) else {}),
+                }))
+                data_only_conf.chmod(0o600)
+                env = uncredentialed_formal_environment(
+                    private_run, {
+                        "PATH": str(Path(str(compiler)).parent) + ":" + os.environ.get("PATH", ""),
+                        "CERTORA": str(certora_dir),
+                        "JAVA_HOME": os.environ.get("JAVA_HOME", ""),
+                    })
+                # Capture all native output privately; never publish source,
+                # CVL, solver diagnostics or counterexample traces.
+                try:
+                    proc = subprocess.run([
+                        str(toolchain.get("certoraPython", scratch.parent / "curve-certora-formal"
+                            / "python-venv" / "bin" / "python")),
+                        str(certora_dir / "certoraRun.py"),
+                        str(data_only_conf), "--local",
+                    ], cwd=root, env=env, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, text=True, timeout=900, check=False)
+                    log = private_run / ("native-" + str(len(outcome["results"])) + ".log")
+                    log.write_text(proc.stdout or "", encoding="utf-8")
+                    log.chmod(0o600)
+                    item["nativeExitCode"] = proc.returncode
+                    item["nativeOutputSha256"] = digest(log)
+                    item["verdict"] = "ERROR" if proc.returncode else "UNKNOWN"
+                    item["verdictReason"] = (
+                        "NATIVE_NONZERO_EXIT" if proc.returncode
+                        else "NATIVE_EXIT_ZERO_RULE_RESULTS_NOT_YET_CLASSIFIED")
+                except subprocess.TimeoutExpired:
+                    item["verdict"] = "TIMEOUT"
+                    item["verdictReason"] = "LOCAL_PROVER_900_SECOND_DEADLINE"
+                outcome["nativeProverRuns"] += 1
+            except (ValueError, OSError, KeyError) as exc:
+                item["verdict"] = "SPEC_INVALID"
+                item["verdictReason"] = str(exc)[:160]
+            outcome["results"].append(item)
+        for spec in (p for p in specs if p.endswith(".spec") and p not in listed_specs):
+            outcome["results"].append({
+                "specSha256": digest(root / spec),
+                "verdict": "NOT_RUN",
+                "verdictReason": "NO_AUTHENTIC_SINGLE_TARGET_CONF_MAPPING",
+            })
+        outcome["status"] = "EXISTING_CVL_NATIVE_ATTEMPTED"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
+    output_file.chmod(0o600)
+    return outcome
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="CurveYield source-bound local formal dispatcher")
     commands = parser.add_subparsers(dest="operation", required=True)
@@ -999,7 +1142,21 @@ def main() -> int:
     intake.add_argument("--native-compilers", type=Path)
     autoprover = commands.add_parser("prepare-autoprover", help="I03.1 upstream AutoProver native CLI qualification")
     autoprover.add_argument("--work-dir", type=Path, required=True)
+    old_cvl = commands.add_parser("run-existing-cvl", help="I06.1 original authenticated CVL only")
+    old_cvl.add_argument("--target-map", type=Path, required=True)
+    old_cvl.add_argument("--native-toolchain", type=Path, required=True)
+    old_cvl.add_argument("--native-compilers", type=Path, required=True)
+    old_cvl.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.operation == "run-existing-cvl":
+        result = run_authenticated_existing_cvl(
+            target_map_file=args.target_map,
+            native_toolchain_file=args.native_toolchain,
+            compiler_file=args.native_compilers,
+            output_file=args.output)
+        print(json.dumps({k: v for k, v in result.items() if k != "results"},
+                         sort_keys=True), flush=True)
+        return 0
     if args.operation == "verify-native-cache":
         verify_cached_native_toolchain(args.work_dir)
         return 0
