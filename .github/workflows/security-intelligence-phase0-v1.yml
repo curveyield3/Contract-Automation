@@ -578,6 +578,194 @@ jobs:
             --jq '.jobs[] | select(.name=="formal" and .status=="in_progress") | .id')"
           test "$(jq -r .originFormalJobId "$RUNNER_TEMP/mimo-private/rendezvous.json")" = "$live_job"
           echo "MIMO_PRIVATE_RENDEZVOUS_AUTHENTICATED"
+      - name: Join authenticated ephemeral Tailscale and reach exact private MiMo peer
+        shell: bash
+        env:
+          TS_CLIENT_ID: ${{ secrets.MACHINE_TAILSCALE_ID }}
+          TS_OIDC_AUDIENCE: ${{ secrets.MACHINE_TAILSCALE_AUDIENCE }}
+          TAILNET_TAG: tag:audit-browser,tag:ai-training
+        run: |
+          set -euo pipefail
+          : "${TS_CLIENT_ID:?Existing Tailscale federated client ID is unavailable}"
+          bash scripts/browser-agent-tailnet-oidc.sh
+          test "$(tailscale status --json | jq -er .BackendState)" = Running
+          peer="$(jq -r '.tailscaleIPv4' "$RUNNER_TEMP/mimo-private/rendezvous.json")"
+          python3 - "$peer" <<'PY'
+          import ipaddress, sys
+          ip = ipaddress.IPv4Address(sys.argv[1])
+          if str(ip) != sys.argv[1] or ip not in ipaddress.ip_network("100.64.0.0/10"):
+              raise RuntimeError("Private MiMo address is not canonical Tailscale IPv4")
+          PY
+          reached=false
+          for attempt in $(seq 1 50); do
+            if curl --noproxy '*' --silent --fail --max-time 5 "http://$peer:8080/health" |
+              jq -e '.status=="ok"' >/dev/null 2>&1; then
+              reached=true
+              break
+            fi
+            sleep 3
+          done
+          test "$reached" = true || {
+            echo "::error::Authenticated MiMo peer not reachable on Tailscale"; exit 1;
+          }
+          echo "CURVEYIELD_MIMO_VERIFIED_TAILNET_IP=$peer" >> "$GITHUB_ENV"
+          echo "CURVEYIELD_MIMO_BASE_URL=http://$peer:8080/v1" >> "$GITHUB_ENV"
+          echo "PRIVATE_MIMO_DIRECT_HEALTH_READY"
+      - name: Exercise real MiMo heavy lite AutoSetup schema and tool-call responses
+        shell: bash
+        env:
+          CERTORA_AI_COMPOSER_PGHOST: 127.0.0.1
+          CERTORA_AI_COMPOSER_PGPORT: '5432'
+          COMPOSER_EMBED_DEVICE: cpu
+        run: |
+          set -euo pipefail
+          source="$RUNNER_TEMP/curve-certora-formal/AutoProver"
+          cd "$source"
+          timeout -k 15s 2700s "$source/.venv/bin/python" - <<'PY'
+          import json, os
+          from dataclasses import dataclass
+          from pathlib import Path
+          from pydantic import BaseModel
+          from langchain_core.messages import HumanMessage
+          from composer.llm.registry import get_provider_for
+          from curveyield_formal_mimo import (
+              MODEL_ID, MiMoModelProvider, configure_local_mimo_runtime,
+              mimo_autoprover_model_args,
+          )
+
+          @dataclass
+          class ModelOptions:
+              tokens: int = 256
+              thinking_tokens: int | None = None
+              memory_tool: bool = False
+              interleaved_thinking: bool = False
+
+          class NativeSchema(BaseModel):
+              stage: str
+              ready: bool
+
+          requested = mimo_autoprover_model_args()
+          if requested != ["--heavy-model", MODEL_ID, "--lite-model", MODEL_ID]:
+              raise RuntimeError("AutoProver heavy/lite roles are not strictly MiMo")
+          provider = get_provider_for(model_name=MODEL_ID, options=ModelOptions())
+          if not isinstance(provider, MiMoModelProvider):
+              raise RuntimeError("Upstream ModelProvider registry did not select MiMo")
+          # Each role must issue an ACTUAL private model completion.
+          role_calls = {}
+          for role in ("heavy", "lite"):
+              chat = provider.builder_for()
+              response = chat.invoke([HumanMessage(content="Reply with the single word READY.")])
+              if not isinstance(response.content, str) or not response.content.strip():
+                  raise RuntimeError("Real MiMo " + role + " completion absent")
+              role_calls[role] = 1
+          schema_chat = provider.builder_for()
+          structured = schema_chat.with_structured_output(NativeSchema, method="json_schema")
+          validated = structured.invoke([HumanMessage(content=(
+              'Return a JSON object with exactly these values: {"stage":"I05.2","ready":true}.'
+          ))])
+          if not isinstance(validated, NativeSchema) or validated.stage != "I05.2" or validated.ready is not True:
+              raise RuntimeError("Live MiMo strict JSON Schema output invalid")
+          spec = {
+              "name": "read_formal_context",
+              "description": "Request the authorized local context path (do not execute this tool)",
+              "parameters": {
+                  "type": "object",
+                  "properties": {"path": {"type": "string"}},
+                  "required": ["path"],
+              },
+          }
+          tool_chat = provider.builder_for().bind_tools([spec], tool_choice="required")
+          tool_response = tool_chat.invoke([HumanMessage(content=(
+              "Call read_formal_context with the single argument path set to src/Vault.sol. "
+              "Do not reply with ordinary text."
+          ))])
+          calls = getattr(tool_response, "tool_calls", [])
+          if (len(calls) != 1 or calls[0].get("name") != "read_formal_context"
+                  or not isinstance(calls[0].get("args"), dict)
+                  or calls[0]["args"].get("path") != "src/Vault.sol"):
+              raise RuntimeError("Real MiMo did not produce an authorized native tool-call envelope")
+          if getattr(tool_response, "invalid_tool_calls", []):
+              raise RuntimeError("Real MiMo tool-call arguments could not be decoded")
+          local = configure_local_mimo_runtime()
+          import certora_autosetup.utils.llm_util as upstream
+          input_model = upstream._get_local_model()
+          if local["backend"] != "local" or input_model != MODEL_ID:
+              raise RuntimeError("AutoSetup backend model escaped the private MiMo pin")
+          autosetup = upstream._local_call_structured(
+              upstream._init_local_client(), MODEL_ID,
+              [{"role":"user","content":
+                 'Return exactly the JSON object {"stage":"I05.2","ready":true}.'}],
+              256, 0.0, NativeSchema, 2, False,
+          )
+          if not isinstance(autosetup, NativeSchema) or autosetup.stage != "I05.2" or autosetup.ready is not True:
+              raise RuntimeError("Native AutoSetup local structured completion failed")
+          work = Path(os.environ["RUNNER_TEMP"])
+          targets = json.loads((work/"formal-targets/target-map-v1.json").read_text())
+          native = json.loads((work/"curve-certora-formal/toolchain-bootstrap-v1.json").read_text())
+          compilers = json.loads((work/"curve-certora-formal/compiler-bootstrap-v1.json").read_text())
+          rendezvous = json.loads((work/"mimo-private/rendezvous.json").read_text())
+          report = {
+              "schemaVersion":"curveyield-formal-session-v1",
+              "stage":"I05.2",
+              "status":"SOURCE_BOUND_PRIVATE_MIMO_CONNECTED",
+              "originRunId":int(os.environ["GITHUB_RUN_ID"]),
+              "originRunAttempt":int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "originHeadSha":os.environ["GITHUB_SHA"],
+              "requestId":targets["requestId"],
+              "sourceSha256":targets["source"]["archiveSha256"],
+              "eligibleTargetCount":len(targets["eligible"]),
+              "nativeProverCommit":native["proverGitCommit"],
+              "nativeProverHashSha256":native["emvJarSha256"],
+              "compilerVersions":[c["version"] for c in compilers["compilerToolchain"]],
+              "autoProverRegistry":True, "localRagDatabase":True,
+              "mimoWorkflowRunId":rendezvous["mimoRunId"],
+              "mimoWorkflowRunAttempt":rendezvous["mimoRunAttempt"],
+              "mimoModelSha256":rendezvous["modelSha256"],
+              "mimoLlamaCommit":rendezvous["llamaCommit"],
+              "privateTailscaleValidated":True,
+              "realHeavyCalls":role_calls["heavy"],
+              "realLiteCalls":role_calls["lite"],
+              "realSchemaCalls":1,
+              "realToolEnvelopeCalls":1,
+              "realAutoSetupCalls":1,
+              "cloudProviderCalls":0,
+              "contractProofsExecuted":0,
+              "existingCVLNextStage":"I06.1",
+              "notAProofVerdict":True,
+          }
+          (work/"formal-session-v1.json").write_text(json.dumps(report,sort_keys=True,indent=2)+"\n")
+          print(json.dumps(report,sort_keys=True))
+          PY
+          jq -e '.status=="SOURCE_BOUND_PRIVATE_MIMO_CONNECTED" and
+                  .privateTailscaleValidated==true and
+                  .realHeavyCalls>0 and .realLiteCalls>0 and
+                  .realSchemaCalls>0 and .realToolEnvelopeCalls>0 and
+                  .realAutoSetupCalls>0 and
+                  .cloudProviderCalls==0 and .eligibleTargetCount>0' \
+            "$RUNNER_TEMP/formal-session-v1.json" >/dev/null
+      - name: Publish sanitized live formal and MiMo handoff state without private material
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: certora-formal-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/formal-intake-v1.json
+            ${{ runner.temp }}/formal-session-v1.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Close ephemeral local Postgres and Tailscale after live session
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker stop "certora-formal-$GITHUB_RUN_ID" >/dev/null 2>&1 || true
+          if command -v tailscale >/dev/null 2>&1; then
+            sudo tailscale down >/dev/null 2>&1 || true
+          fi
+          if [ -s "$RUNNER_TEMP/browser-tailscaled-oidc.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/browser-tailscaled-oidc.pid")" 2>/dev/null || true
+          fi
+          echo 'Ephemeral formal-run Postgres and private Tailscale session released.' >> "$GITHUB_STEP_SUMMARY"
       - name: Publish sanitized same-run formal readiness
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
