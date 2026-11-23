@@ -320,19 +320,36 @@ def prepare_compiler_toolchain(*, root: Path, identity_file: Path,
     units = build.get("compilationUnits")
     if not isinstance(units, list) or not units:
         raise RuntimeError("I02.2 no authenticated compilation units")
-    sol_versions = set(build.get("compilerVersions") or [build.get("compilerVersion")])
-    if not sol_versions or any(not re.fullmatch(r"\d+\.\d+\.\d+", str(v)) for v in sol_versions):
-        raise RuntimeError("I02.2 unqualified Solidity compiler versions")
-    if set(requirements.get("solidityCompilerCandidates") or []) < sol_versions:
-        raise RuntimeError("I02.2 source build compiler version absent from toolchain requirements")
-    if not all(u.get("compilerVersion") in sol_versions for u in units):
-        raise RuntimeError("I02.2 inconsistent compilation-unit compiler version")
+    # The authenticated per-unit manifest is the authoritative version source.
+    # The legacy build.compilerVersions summary can omit versions in a mixed-
+    # compiler Hardhat build; never discard a unit or silently change its version.
+    versions_by_unit: dict[str, str] = {}
+    for unit in units:
+        if not isinstance(unit, dict):
+            raise RuntimeError("I02.2 malformed native compilation unit")
+        unit_id, version = unit.get("unitId"), unit.get("compilerVersion")
+        if (not isinstance(unit_id, str) or not unit_id or unit_id in versions_by_unit or
+                not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version)):
+            raise RuntimeError("I02.2 duplicated unit or invalid compiler version")
+        versions_by_unit[unit_id] = version
+    sol_versions = set(versions_by_unit.values())
+    summary_versions = build.get("compilerVersions") or []
+    if not isinstance(summary_versions, list) or any(
+            v not in sol_versions for v in summary_versions):
+        raise RuntimeError("I02.2 summary asserts a compiler absent from native units")
+    if build.get("compilerVersion") not in (None, *sol_versions):
+        raise RuntimeError("I02.2 primary compiler differs from native unit records")
+    if not sol_versions.issubset(set(requirements.get("solidityCompilerCandidates") or [])):
+        raise RuntimeError("I02.2 native unit compiler absent from source-derived toolchain plan")
     artifacts = compiled.get("artifacts")
     if not isinstance(artifacts, list) or not artifacts:
         raise RuntimeError("I02.2 no compiler-observed ABI/link artifacts")
-    artifact_versions = {a.get("compilerVersion") for a in artifacts}
-    if artifact_versions - sol_versions:
-        raise RuntimeError("I02.2 contract artifact compiler version mismatch")
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            raise RuntimeError("I02.2 malformed compiler-observed artifact")
+        unit_id = artifact.get("compilationUnitId")
+        if unit_id not in versions_by_unit or artifact.get("compilerVersion") != versions_by_unit[unit_id]:
+            raise RuntimeError("I02.2 artifact compiler identity differs from its native compilation unit")
     for artifact in artifacts:
         if (not isinstance(artifact.get("abi"), list) or
                 not isinstance(artifact.get("linkReferences"), dict) or
