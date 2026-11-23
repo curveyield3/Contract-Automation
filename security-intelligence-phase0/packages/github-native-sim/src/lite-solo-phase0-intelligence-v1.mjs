@@ -488,6 +488,7 @@ async function runWakeDetectors({projectRoot,build,sourceCommit,out}){
     try{
       await fs.rm(stage,{recursive:true,force:true});
       await fs.mkdir(stage,{recursive:true});
+      const stagedSources=new Map();
       for(const originalName of sourceNames){
         const sourceName=originalName.replace(/^\.\//,'');
         safeRel(sourceName,'Wake source unit');
@@ -498,6 +499,32 @@ async function runWakeDetectors({projectRoot,build,sourceCommit,out}){
         await fs.mkdir(path.dirname(target),{recursive:true});
         await fs.writeFile(target,sourceBytes);
         record.sourceDigests.push({sourceName,sha256:sha256(sourceBytes)});
+        stagedSources.set(sourceName,sourceBytes.toString('utf8'));
+      }
+      // Reconstruct only unambiguous remappings from compiler-observed source
+      // names and their exact source import strings. This fixes imports such as
+      // "contracts/fuses/X.sol" whose compiler identity is
+      // "ipor-fusion/contracts/fuses/X.sol", without executing source scripts,
+      // reading source-authored Wake config, or copying altered contract bytes.
+      const canonicalNames=[...stagedSources.keys()];
+      const canonicalSet=new Set(canonicalNames);
+      const derived=new Map();
+      for(const [,source] of stagedSources){
+        const importPattern=/\bimport\s+(?:[^;]*?\bfrom\s*)?["']([^"']+)["']\s*;/g;
+        for(const [,specifier] of source.matchAll(importPattern)){
+          if(specifier.startsWith('.')||canonicalSet.has(specifier))continue;
+          const candidates=canonicalNames.filter(name=>name.endsWith('/'+specifier));
+          if(candidates.length!==1)continue; // Do not invent an ambiguous source binding.
+          const slash=specifier.indexOf('/');
+          if(slash<1)continue;
+          const prefix=specifier.slice(0,slash+1);
+          const target=candidates[0].slice(0,-specifier.length)+prefix;
+          if(path.isAbsolute(target)||target.includes('\\')||target.split('/').some(p=>p==='..'))
+            throw Error('Wake derived remapping escapes staged source: '+specifier);
+          const prior=derived.get(prefix);
+          if(prior&&prior!==target)throw Error('Ambiguous Wake import remapping for '+prefix);
+          derived.set(prefix,target);
+        }
       }
       record.sourceCount=sourceNames.length;
       sourceCount+=sourceNames.length;
@@ -513,12 +540,18 @@ async function runWakeDetectors({projectRoot,build,sourceCommit,out}){
       if(settings.viaIR===false)args.push('--no-via-ir');
       if(typeof settings.evmVersion==='string'&&/^[a-zA-Z0-9_-]+$/.test(settings.evmVersion))
         args.push('--evm-version',settings.evmVersion);
+      const configuredRemappingPrefixes=new Set();
       for(const remapping of settings.remappings??[]){
         if(typeof remapping!=='string'||!remapping.includes('='))throw Error('Wake remapping is not a string prefix=target: '+String(remapping));
         const target=remapping.slice(remapping.indexOf('=')+1);
         if(!target||path.isAbsolute(target)||target.includes('\\')||target.split('/').some(x=>x==='..'))
           throw Error('Wake remapping target escapes source-only staging: '+remapping);
+        configuredRemappingPrefixes.add(remapping.slice(0,remapping.indexOf('=')+1));
         args.push('--remapping',remapping);
+      }
+      record.derivedRemappings=[...derived.entries()].map(([prefix,target])=>prefix+'='+target);
+      for(const remapping of record.derivedRemappings){
+        if(!configuredRemappingPrefixes.has(remapping.slice(0,remapping.indexOf('=')+1)))args.push('--remapping',remapping);
       }
       args.push('all');
       const raw=await runProcess({command:'wake',args,cwd:stage,timeoutMs:300000,
