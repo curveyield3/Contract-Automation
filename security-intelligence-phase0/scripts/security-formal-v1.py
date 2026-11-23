@@ -17,6 +17,10 @@ import shutil
 import subprocess
 import sys
 import time
+import stat
+import tempfile
+import zipfile
+from pathlib import PurePosixPath
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -350,6 +354,136 @@ def prepare_compiler_toolchain(*, root: Path, identity_file: Path,
         "notAProofResult": True
     }
 
+
+
+def uncredentialed_formal_environment(private_root: Path, tool_paths: dict[str, str]) -> dict[str, str]:
+    """Construct a narrow environment; never forward a runner's GitHub/AI/chain secrets."""
+    root = private_root.resolve()
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    root.chmod(0o700)
+    home = root / "formal-home"
+    home.mkdir(mode=0o700, exist_ok=True)
+    home.chmod(0o700)
+    env = {"PATH": str(tool_paths["PATH"]), "HOME": str(home),
+           "TMPDIR": str(root), "LANG": "C.UTF-8",
+           "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"}
+    for name in ("JAVA_HOME", "CERTORA"):
+        if name in tool_paths:
+            env[name] = str(tool_paths[name])
+    # Deliberately no GH_TOKEN, GITHUB_TOKEN, Actions OIDC, cloud/AI API keys,
+    # AWS/Cloudflare credentials, proxy variables, or source-authored hooks.
+    return env
+
+
+def admit_source_to_private_scratch(*, work_dir: Path, source_zip: Path,
+                                    request_file: Path, manifest_file: Path,
+                                    toolchain_report: Path, compiler_report: Path) -> Path:
+    """I02.3 source boundary, first exercised with authentic input at I04/I05.
+
+    Call only AFTER trusted native toolchains are prepared in this same runner.
+    Source is inert ZIP data here; no source files, npm hooks, build scripts,
+    forge tests, deployment scripts, or generated shell commands are executed.
+    """
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        raise RuntimeError("Formal source intake requires the authenticated GitHub Actions runner")
+    scratch_parent = Path(os.environ.get("RUNNER_TEMP", "")).resolve()
+    root = work_dir.resolve()
+    if root == scratch_parent or scratch_parent not in root.parents:
+        raise RuntimeError("Formal scratch must be a private child of RUNNER_TEMP")
+    for supplied in (work_dir, source_zip, request_file, manifest_file,
+                     toolchain_report, compiler_report):
+        if supplied.is_symlink():
+            raise RuntimeError("Source admission refuses symlinked input: " + str(supplied))
+    request = json.loads(request_file.read_text())
+    manifest = json.loads(manifest_file.read_text())
+    toolchain = json.loads(toolchain_report.read_text())
+    compilers = json.loads(compiler_report.read_text())
+    if (request.get("schemaVersion") != "curveyield-security-preflight-request-v1" or
+            request.get("runMode") != "SOURCE_PREFLIGHT"):
+        raise RuntimeError("Formal source request type mismatch")
+    source = request.get("source", {})
+    observed = manifest.get("source", {})
+    expected = source.get("archiveSha256")
+    if (not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected) or
+            manifest.get("sourceAdmissionVerified") is not True or
+            observed.get("expectedSha256") != expected or
+            observed.get("observedSha256") != expected or
+            any(observed.get(k) != source.get(k)
+                for k in ("repository", "commit", "archivePath"))):
+        raise RuntimeError("Source ZIP and preflight run identity are not independently authenticated")
+    if (toolchain.get("status") != "LOCAL_TOOLCHAIN_STARTUP_VERIFIED" or
+            toolchain.get("proverGitCommit") != PROVER_COMMIT or
+            toolchain.get("noCloudProver") is not True or
+            compilers.get("status") != "COMPILER_TOOLCHAIN_VERIFIED" or
+            compilers.get("source") != source):
+        raise RuntimeError("Current-run trusted native toolchain receipts missing or inconsistent")
+    if (not source_zip.is_file() or
+            source_zip.stat().st_size > 16 * 1024 * 1024 or
+            digest(source_zip) != expected):
+        raise RuntimeError("Admitted source ZIP bytes or original archive digest invalid")
+    for artifact in ("emv.jar", "certoraRun.py", "tac_optimizer"):
+        if not (Path(str(toolchain.get("certoraDir"))) / artifact).is_file():
+            raise RuntimeError("Current runner lacks verified local Certora asset " + artifact)
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    root.chmod(0o700)
+    private = root / "private"
+    private.mkdir(mode=0o700, exist_ok=True)
+    private.chmod(0o700)
+    destination = Path(tempfile.mkdtemp(prefix="admitted-source-", dir=private))
+    members_seen = set()
+    declared_total = 0
+    extracted_total = 0
+    try:
+        with zipfile.ZipFile(source_zip) as archive:
+            infos = archive.infolist()
+            if len(infos) > 50000:
+                raise RuntimeError("Source ZIP member count exceeds isolated runner budget")
+            for info in infos:
+                original = info.filename
+                if (not original or original.startswith("/") or
+                        "\\" in original or "\x00" in original or
+                        re.match(r"^[A-Za-z]:", original)):
+                    raise RuntimeError("Unsafe ZIP filename: " + repr(original))
+                rel = original[:-1] if info.is_dir() else original
+                parts = rel.split("/")
+                if any(part in ("", ".", "..") for part in parts):
+                    raise RuntimeError("ZIP traversal or ambiguous path: " + repr(original))
+                mode = (info.external_attr >> 16) & 0xFFFF
+                entry_type = stat.S_IFMT(mode)
+                if entry_type not in (0, stat.S_IFDIR, stat.S_IFREG):
+                    raise RuntimeError("ZIP symlink/device/special member rejected: " + repr(original))
+                canonical = str(PurePosixPath(*parts))
+                if canonical in members_seen:
+                    raise RuntimeError("Duplicate ZIP member path: " + canonical)
+                members_seen.add(canonical)
+                declared_total += info.file_size
+                if (info.file_size > 128 * 1024 * 1024 or
+                        declared_total > 1024 * 1024 * 1024 or
+                        info.flag_bits & 0x1):
+                    raise RuntimeError("ZIP member violates budget or is encrypted")
+            for info in infos:
+                name = info.filename[:-1] if info.is_dir() else info.filename
+                target = destination.joinpath(*name.split("/"))
+                if destination not in target.parents:
+                    raise RuntimeError("ZIP destination escapes private scratch")
+                if info.is_dir():
+                    target.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                with archive.open(info, "r") as reader, target.open("xb") as writer:
+                    while True:
+                        chunk = reader.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        extracted_total += len(chunk)
+                        if extracted_total > 1024 * 1024 * 1024:
+                            raise RuntimeError("Extracted ZIP exceeds real output budget")
+                        writer.write(chunk)
+                target.chmod(0o600)
+        return destination
+    except Exception:
+        shutil.rmtree(destination, ignore_errors=True)
+        raise
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="CurveYield source-bound local formal dispatcher")
