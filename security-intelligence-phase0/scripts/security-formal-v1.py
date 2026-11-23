@@ -178,8 +178,59 @@ def local_toolchain(root: Path) -> dict[str, object]:
             print("GRADLE_PLUGIN_REPOSITORY_RECOVERY: pinned KSP metadata unavailable; "
                   "refreshing repository metadata once", flush=True)
             invoke([*argv, "--refresh-dependencies", "--info"], cwd=source, env=env)
-    native_gradle_task("assemble")
-    native_gradle_task("copy-assets")
+    # Maven Central is rate-limiting GitHub-hosted runners (HTTP 429) even
+    # after --refresh-dependencies. Probe a checksum-neutral public mirror
+    # of the exact pinned plugin metadata before changing repository priority.
+    # The checkout's build metadata is restored after the build, so the
+    # source tree remains at its original pinned contents and commit.
+    marker = ("com/google/devtools/ksp/com.google.devtools.ksp.gradle.plugin/"
+              "1.9.20-1.0.14/com.google.devtools.ksp.gradle.plugin-1.9.20-1.0.14.pom")
+    mirrors = (
+        "https://maven-central.storage-download.googleapis.com/maven2",
+        "https://repo1.maven.org/maven2",
+    )
+    qualified_mirror: str | None = None
+    for candidate in mirrors:
+        try:
+            with urlopen(Request(candidate + "/" + marker,
+                                 headers={"User-Agent": "CurveYield-Pinned-Gradle/1"}),
+                         timeout=30) as resp:
+                body = resp.read(8192)
+            if (b"com.google.devtools.ksp" not in body or
+                    b"1.9.20-1.0.14" not in body):
+                raise RuntimeError("Unexpected pinned KSP plugin metadata at mirror")
+            qualified_mirror = candidate
+            break
+        except Exception as exc:
+            print("PINNED_GRADLE_REPOSITORY_PROBE_UNAVAILABLE: " +
+                  candidate + " " + type(exc).__name__, flush=True)
+    if qualified_mirror is None:
+        raise RuntimeError("Pinned KSP metadata unreachable at approved Maven mirrors")
+    settings_path = source / "settings.gradle.kts"
+    root_build_path = source / "build.gradle.kts"
+    original_settings = settings_path.read_text()
+    original_build = root_build_path.read_text()
+    settings_marker = "        mavenCentral()\n        gradlePluginPortal()"
+    build_marker = "\t\tmavenLocal()\n\t\tmavenCentral()"
+    if (original_settings.count(settings_marker) != 1 or
+            original_build.count(build_marker) != 1):
+        raise RuntimeError("Pinned upstream Maven repository declarations changed")
+    settings_path.write_text(original_settings.replace(
+        settings_marker,
+        f'        maven {{ url = uri("{qualified_mirror}") }}\n' + settings_marker,
+    ))
+    root_build_path.write_text(original_build.replace(
+        build_marker,
+        build_marker.replace("\t\tmavenCentral()",
+                             f'\t\tmaven {{ url = uri("{qualified_mirror}") }}\n\t\tmavenCentral()'),
+    ))
+    print("PINNED_GRADLE_METADATA_MIRROR: " + qualified_mirror, flush=True)
+    try:
+        native_gradle_task("assemble")
+        native_gradle_task("copy-assets")
+    finally:
+        settings_path.write_text(original_settings)
+        root_build_path.write_text(original_build)
     invoke([sys.executable, "-m", "venv", str(venv)], cwd=source, env=env)
     python = venv / "bin" / "python"
     invoke([str(python), "-m", "pip", "install", "--disable-pip-version-check",
@@ -219,6 +270,7 @@ def local_toolchain(root: Path) -> dict[str, object]:
         "optimizerSha256": digest(optimizer),
         "versions": versions,
         "solverPaths": {name: str(require_binary(name, env)) for name in ("z3", "cvc5")},
+        "dependencyRepositoryMirror": qualified_mirror,
         "noCloudProver": True,
         "noPaidInference": True,
         "notAProofResult": True,
