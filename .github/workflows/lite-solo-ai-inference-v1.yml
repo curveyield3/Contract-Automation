@@ -574,7 +574,7 @@ jobs:
           "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/models/$MODEL_FILE" \
             --alias lite-solo-mimo-v1 --host "$address" --port 8080 \
             --ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on \
-            --threads 4 --parallel 1 "$@" > "$RUNNER_TEMP/mimo-certora-server.log" 2>&1 &
+            --threads 4 --parallel 1 --metrics --slots "$@" > "$RUNNER_TEMP/mimo-certora-server.log" 2>&1 &
           server_pid=$!
           mkdir -p "$RUNNER_TEMP/certora-rendezvous"
           printf '%s\n' "$server_pid" > "$RUNNER_TEMP/certora-rendezvous/server.pid"

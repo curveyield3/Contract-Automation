@@ -1118,13 +1118,96 @@ def run_authenticated_existing_cvl(*, target_map_file: Path, native_toolchain_fi
 
 def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file: Path,
                                 compiler_file: Path, session_file: Path,
-                                output_file: Path, per_target_timeout: int = 1320) -> int:
+                                output_file: Path) -> int:
     """I06.2: call pinned upstream console AutoProver sequentially, locally.
 
     No target-local failure is a clean verdict. Only observed upstream native
     output can establish CVL property success, never a zero process exit alone.
     """
     import signal
+
+    # No source bytes, prompts, CVL, traces, command arguments, or generated
+    # file paths are ever emitted by these native-process progress probes.
+    def local_progress(pid: int, project_root: Path, native_log: Path) -> tuple[int, tuple[int, int, int]]:
+        ticks = 0
+        try:
+            with os.scandir("/proc") as entries:
+                for entry in entries:
+                    if not entry.name.isdecimal():
+                        continue
+                    try:
+                        # stat's comm field is parenthesized and may contain spaces.
+                        fields = (Path("/proc") / entry.name / "stat").read_text().rsplit(")", 1)[1].split()
+                        if int(fields[2]) == pid:
+                            ticks += int(fields[11]) + int(fields[12])
+                    except (OSError, ValueError, IndexError):
+                        continue
+        except OSError:
+            pass
+        # Generated specs and upstream run files count as activity even when
+        # the native subprocess and its solver children produce no stdout.
+        count, newest, total_bytes = 0, 0, 0
+        paths = [native_log]
+        internal = project_root / ".certora_internal"
+        if internal.is_dir():
+            paths.extend(p for p in internal.rglob("*") if p.is_file())
+        paths.extend(p for p in project_root.rglob("*.spec") if p.is_file())
+        for path in paths:
+            try:
+                item = path.stat()
+                count += 1
+                newest = max(newest, item.st_mtime_ns)
+                total_bytes += item.st_size
+            except OSError:
+                continue
+        return ticks, (count, newest, total_bytes)
+
+    def private_model_progress(ipv4: str) -> tuple[str, tuple[float, ...] | None]:
+        """Read only aggregate counters from the previously authenticated MiMo peer.
+
+        /slots may contain sensitive prompt fields; consume its JSON in memory,
+        but return ONLY processing state and numeric generation counters.
+        """
+        host = "http://" + ipv4 + ":8080"
+        try:
+            with urlopen(Request(host + "/metrics", headers={"Accept": "text/plain"}),
+                         timeout=4) as response:
+                body = response.read(131072).decode("utf-8", "replace")
+            permitted = {
+                "llamacpp:prompt_tokens_total", "llamacpp:tokens_predicted_total",
+                "llamacpp:n_decode_total", "llamacpp:requests_processing",
+                "llamacpp:requests_deferred",
+            }
+            values: dict[str, float] = {}
+            for line in body.splitlines():
+                match = re.fullmatch(
+                    r"(llamacpp:[a-z_]+)(?:\{[^}]*\})?\s+([0-9]+(?:\.[0-9]+)?)", line.strip())
+                if match and match.group(1) in permitted:
+                    values[match.group(1)] = float(match.group(2))
+            if {"llamacpp:requests_processing", "llamacpp:requests_deferred"}.issubset(values):
+                busy = (values["llamacpp:requests_processing"] > 0 or
+                        values["llamacpp:requests_deferred"] > 0)
+                progress = tuple(values.get(name, 0.) for name in (
+                    "llamacpp:prompt_tokens_total", "llamacpp:tokens_predicted_total",
+                    "llamacpp:n_decode_total"))
+                return ("busy" if busy else "idle"), progress
+        except (OSError, ValueError, UnicodeError):
+            pass
+        # The pinned llama.cpp server exposes /slots without additional flags.
+        try:
+            with urlopen(Request(host + "/slots", headers={"Accept": "application/json"}),
+                         timeout=4) as response:
+                slots = json.loads(response.read(131072))
+            if not isinstance(slots, list):
+                return "unknown", None
+            busy = any(isinstance(slot, dict) and slot.get("is_processing") is True
+                       for slot in slots)
+            tokens = sum(int(slot.get("next_token", {}).get("n_decoded", 0))
+                         for slot in slots if isinstance(slot, dict) and
+                         isinstance(slot.get("next_token"), dict))
+            return ("busy" if busy else "idle"), (float(tokens),)
+        except (OSError, ValueError, TypeError, OverflowError):
+            return "unknown", None
 
     mapping = json.loads(target_map_file.read_text())
     native = json.loads(native_toolchain_file.read_text())
@@ -1233,7 +1316,6 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             outcome["results"].append(record)
             persist()
             continue
-        per_timeout = min(per_target_timeout, int(remaining - 50))
         project = private / ("target-" + str(index).zfill(2)) / "source"
         project.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         shutil.copytree(source, project)
@@ -1293,22 +1375,97 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         }
         record["originalSpecDigests"] = original_spec_digests
         started = time.monotonic()
+        # This is an *inactivity* threshold, not a per-contract wall-clock cap.
+        # No process is killed while CPU, filesystem, or MiMo tokens advance.
+        # A busy model without observed tokens is uncertain, NOT proven idle.
+        idle_stall_seconds = 600
+        heartbeat_seconds = 60
+        last_activity = started
+        last_heartbeat = started - heartbeat_seconds
+        model_idle_since: float | None = None
+        previous_cpu: int | None = None
+        previous_files: tuple[int, int, int] | None = None
+        previous_model: tuple[float, ...] | None = None
+        print(json.dumps({
+            "stage": "I06.2", "event": "TARGET_STARTED",
+            "targetIndex": index + 1, "targetCount": len(target_list),
+            "status": "RUNNING", "watchdog": "ACTIVITY_BASED",
+        }, sort_keys=True), flush=True)
         with logfile.open("wb") as out:
             process = subprocess.Popen(args, cwd=upstream, env=env, stdout=out,
                                        stderr=subprocess.STDOUT, start_new_session=True)
             try:
-                returncode = process.wait(timeout=per_timeout)
-                record["nativeExitCode"] = returncode
-                record["status"] = ("NATIVE_AUTOPROVER_EXIT_ZERO_UNCLASSIFIED"
-                                    if returncode == 0 else "NATIVE_AUTOPROVER_FAILED")
-            except subprocess.TimeoutExpired:
-                record["status"] = "TARGET_TIMEOUT"
-                os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    process.wait(timeout=12)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=10)
+                while True:
+                    try:
+                        returncode = process.wait(timeout=30)
+                        record["nativeExitCode"] = returncode
+                        record["status"] = ("NATIVE_AUTOPROVER_EXIT_ZERO_UNCLASSIFIED"
+                                            if returncode == 0 else "NATIVE_AUTOPROVER_FAILED")
+                        break
+                    except subprocess.TimeoutExpired:
+                        pass
+                    now = time.monotonic()
+                    cpu, changed = local_progress(process.pid, project, logfile)
+                    model_state, model_counters = private_model_progress(ip)
+                    local_cpu_advanced = previous_cpu is not None and cpu > previous_cpu
+                    local_files_advanced = previous_files is not None and changed != previous_files
+                    model_advanced = (previous_model is not None and model_counters is not None and
+                                      len(previous_model) == len(model_counters) and
+                                      any(current > old for old, current in
+                                          zip(previous_model, model_counters)))
+                    if local_cpu_advanced or local_files_advanced or model_advanced:
+                        last_activity = now
+                    previous_cpu, previous_files = cpu, changed
+                    if model_counters is not None:
+                        previous_model = model_counters
+                    if model_state == "idle":
+                        if model_idle_since is None:
+                            model_idle_since = now
+                    else:
+                        model_idle_since = None
+                    quiet_for = int(now - last_activity)
+                    if now - last_heartbeat >= heartbeat_seconds:
+                        # These are aggregate measurements ONLY. Upstream stdout
+                        # remains in the owner-readable private source scratch.
+                        heartbeat = {
+                            "stage": "I06.2", "event": "NATIVE_PROGRESS",
+                            "targetIndex": index + 1, "targetCount": len(target_list),
+                            "elapsedSeconds": int(now - started),
+                            "secondsSinceObservedProgress": quiet_for,
+                            "modelState": model_state,
+                            "localCpuAdvanced": local_cpu_advanced,
+                            "privateOutputAdvanced": local_files_advanced,
+                            "modelTokensAdvanced": model_advanced,
+                            "watchdog": ("ACTIVE" if quiet_for < idle_stall_seconds else
+                                         "POSSIBLE_STALL_MODEL_BUSY" if model_state == "busy" else
+                                         "TELEMETRY_UNCERTAIN" if model_state == "unknown" else
+                                         "CONFIRMED_IDLE_CANDIDATE"),
+                        }
+                        print(json.dumps(heartbeat, sort_keys=True), flush=True)
+                        record["lastProgress"] = heartbeat
+                        persist()
+                        last_heartbeat = now
+                    # Do not equate a silent, busy MiMo request with a dead model:
+                    # long prefill or native proving can legitimately be quiet.
+                    # Terminate only after *both* the local group is motionless
+                    # and the authenticated model has confirmed it is idle.
+                    if (quiet_for >= idle_stall_seconds and model_idle_since is not None
+                            and now - model_idle_since >= 120):
+                        record["status"] = "TARGET_STALLED_LOCAL_AND_MIMO_IDLE"
+                        record["watchdogIdleSeconds"] = quiet_for
+                        print(json.dumps({
+                            "stage": "I06.2", "event": "WATCHDOG_CONFIRMED_STALL",
+                            "targetIndex": index + 1, "targetCount": len(target_list),
+                            "idleSeconds": quiet_for, "modelState": model_state,
+                        }, sort_keys=True), flush=True)
+                        os.killpg(process.pid, signal.SIGTERM)
+                        try:
+                            process.wait(timeout=12)
+                        except subprocess.TimeoutExpired:
+                            os.killpg(process.pid, signal.SIGKILL)
+                            process.wait(timeout=10)
+                        record["nativeExitCode"] = process.returncode
+                        break
             finally:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)
