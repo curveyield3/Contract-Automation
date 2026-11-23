@@ -460,6 +460,92 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
 }
 
 
+// Mythril symbolically analyzes source-bound compiled EVM *runtime bytecode*.
+// It never recompiles the user's source or accesses a chain. Analyze every
+// executable in-scope Solidity artifact, not a handpicked vulnerability sample.
+// An explicitly unlinked bytecode cannot be analyzed; preserve that limitation.
+async function runMythrilDetectors({build,sourceCommit,auditScope,out}){
+  const artifacts=Array.isArray(build?.artifacts)?build.artifacts:[];
+  const relevant=artifacts.filter(a=>typeof a?.sourceName==='string'&&a.sourceName.endsWith('.sol')&&sourceIsInScope(a.sourceName,auditScope));
+  const stage=path.join(out,'work','mythril-symbolic');
+  await fs.mkdir(stage,{recursive:true});
+  const results=[],findings=[],limitations=[];
+  const options={version:'0.24.8',bytecodeMode:'RUNTIME_ONLY',maxTransactions:2,maxDepth:64,
+    executionTimeoutSeconds:12,solverTimeoutMilliseconds:3000,wallTimeoutMilliseconds:30000,
+    onchainData:false,dependencyPruning:true};
+  let eligibleCount=0,skippedNonExecutableCount=0,skippedUnlinkedCount=0;
+  for(const [index,artifact] of relevant.entries()){
+    const qualifiedName=String(artifact.qualifiedName??artifact.sourceName+':'+artifact.contractName);
+    const raw=String(artifact.deployedBytecode??'').trim();
+    const record={qualifiedName,sourceName:artifact.sourceName,contractName:artifact.contractName??null,
+      compilationUnitId:artifact.compilationUnitId??null,compilerVersion:artifact.compilerVersion??null,
+      bytecodeDigestSha256:artifact.deployedBytecodeDigestSha256??null,status:'FAILED',findingCount:0};
+    results.push(record);
+    if(raw===''||raw==='0x'){
+      record.status='NOT_EXECUTABLE';
+      record.reason='No compiled deployed runtime bytecode (interface, abstract contract or other non-runtime artifact)';
+      skippedNonExecutableCount++;
+      continue;
+    }
+    if(!/^0x(?:[0-9a-fA-F]{2})+$/.test(raw)){
+      record.status='UNLINKED_RUNTIME';
+      record.reason='Compiled runtime contains unresolved library link placeholders; no source-bound deployable runtime bytecode';
+      skippedUnlinkedCount++;
+      limitations.push({qualifiedName,reason:record.reason});
+      continue;
+    }
+    eligibleCount++;
+    record.bytecodeBytes=(raw.length-2)/2;
+    record.bytecodeDigestSha256=sha256(Buffer.from(raw.slice(2),'hex'));
+    const file=path.join(stage,'runtime-'+index+'.hex');
+    try{
+      await fs.writeFile(file,raw+'\n');
+      const args=['analyze','--codefile',file,'--bin-runtime','--outform','json','--no-onchain-data',
+        '--transaction-count',String(options.maxTransactions),'--max-depth',String(options.maxDepth),
+        '--execution-timeout',String(options.executionTimeoutSeconds),
+        '--solver-timeout',String(options.solverTimeoutMilliseconds)];
+      const result=await runProcess({command:'myth',args,cwd:stage,timeoutMs:options.wallTimeoutMilliseconds,
+        env:{...process.env,HOME:'/tmp',XDG_CACHE_HOME:'/tmp',CI:'true'}});
+      record.exitCode=result.exitCode;
+      record.timedOut=result.timedOut===true;
+      record.stderr=cleanText(result.stderr).slice(-2800);
+      const parsed=(()=>{try{return JSON.parse(result.stdout)}catch{return null}})();
+      if(result.exitCode!==0||result.timedOut||parsed?.success!==true||!Array.isArray(parsed?.issues))
+        throw Error('Mythril bytecode analysis did not produce a complete native JSON report: '+
+          String(parsed?.error??result.stderr??result.stdout??'UNKNOWN').slice(-900));
+      record.status='COMPLETED';
+      record.findingCount=parsed.issues.length;
+      for(const issue of parsed.issues)
+        findings.push({...issue,qualifiedName,sourceName:artifact.sourceName,
+          compilerVersion:record.compilerVersion,runtimeBytecodeSha256:record.bytecodeDigestSha256});
+    }catch(error){
+      record.error=String(error?.message??error).slice(-1500);
+    }finally{
+      await fs.rm(file,{force:true});
+    }
+  }
+  const completed=results.filter(r=>r.status==='COMPLETED').length;
+  const failed=results.filter(r=>r.status==='FAILED').length;
+  const hasRuntime=eligibleCount>0;
+  const componentStatus=failed>0?'FAILED':hasRuntime&&completed===eligibleCount?'COMPLETED':
+    relevant.length?'NOT_APPLICABLE':'NOT_APPLICABLE';
+  if(skippedUnlinkedCount)limitations.push({type:'UNLINKED_CONTRACTS',
+    reason:'Unlinked compiled runtime cannot be scanned as if library addresses were known',
+    count:skippedUnlinkedCount});
+  if(!hasRuntime)limitations.push({type:'NO_EXECUTABLE_RUNTIME',
+    reason:'No in-scope compiled Solidity artifact contains resolved deployed runtime bytecode'});
+  limitations.push({type:'SYMBOLIC_BOUNDS',
+    reason:'Time/depth/two-transaction limits and absent deployed state mean these are bounded candidate detections, not a proof of no vulnerabilities'});
+  return {backend:'mythril',version:options.version,sourceCommit,authoritativeFinding:false,
+    inputMode:'EXACT_COMPILED_RUNTIME_BYTECODE_OFFLINE_SYMBOLIC',
+    scope:{source:auditScope?.source??null,inScopePaths:auditScope?.inScopePaths??[]},
+    status:componentStatus==='FAILED'?'failed':componentStatus==='NOT_APPLICABLE'?'not_applicable':
+      findings.length?'completed_with_findings':'completed',
+    componentStatus,options,sourceArtifactCount:relevant.length,eligibleCount,
+    completedCount:completed,failedCount:failed,skippedNonExecutableCount,skippedUnlinkedCount,
+    findingCount:findings.length,detectors:findings,contractResults:results,limitations};
+}
+
 // Wake is a separate static-analysis detector, never a test runner or authority.
 // Stage only compiler-observed Solidity source bytes: no source-supplied Python
 // detectors, wake.toml, package scripts, external processes or custom plugins.
@@ -968,7 +1054,7 @@ async function main(){
     requestId:request.requestId,requestDigest:request.requestDigest??sha256(Buffer.from(JSON.stringify(request))),
     campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,assignmentId:'phase0-intelligence',phaseId:'phase-0',profileId:'github-native-compile-v2',
     source:{repository:request.source.repository,commit:request.source.commit,projectPath:detected.relativePath,archivePath:request.source.archivePath,archiveSha256:request.source.archiveSha256},
-    configuration:{compilers:requestedCompilers,analysis:{slither:{version:'0.11.6'},wake:{version:'4.21.0'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
+    configuration:{compilers:requestedCompilers,analysis:{slither:{version:'0.11.6'},wake:{version:'4.21.0'},mythril:{version:'0.24.8'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
   };
 
   const build=await withProgressStage('compile-exact-build',()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
@@ -1002,8 +1088,21 @@ async function main(){
       limitations:[detail],requiredSemanticReview:true};
     console.error('Wake static analysis incomplete: '+detail);
   }
+  let mythril;
+  try{
+    mythril=await withProgressStage('mythril-symbolic-analysis',()=>runMythrilDetectors({
+      build,sourceCommit:request.source.commit,auditScope,out}));
+  }catch(error){
+    const detail=String(error?.message??error);
+    mythril={backend:'mythril',version:'0.24.8',sourceCommit:request.source.commit,
+      status:'failed',componentStatus:'FAILED',authoritativeFinding:false,
+      inputMode:'UNRESOLVED_BYTECODE_ANALYSIS',sourceArtifactCount:null,eligibleCount:null,
+      completedCount:0,failedCount:null,findingCount:0,detectors:[],contractResults:[],
+      limitations:[detail],requiredSemanticReview:true};
+    console.error('Mythril symbolic analysis incomplete: '+detail);
+  }
   const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
-  const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither,wake}}));
+  const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither,wake,mythril}}));
   await writeReviewInventoryOutputsV1({outputDir:out,projectRoot:detected.absolute,build,request,slither,policy:process.env.ADR_DETECTION_POLICY||null,reviewPolicy:process.env.ADR_DETECTION_REVIEW_POLICY||null});
   const projectReadiness=await withProgressStage('scan-project-readiness',()=>scanProjectReadiness({projectRoot:detected.absolute,build,cfg:effectiveCfg}));
   const deployConfigExecution=await withProgressStage('execute-local-deployment-inventory',()=>executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness}));
@@ -1029,12 +1128,13 @@ async function main(){
     ['SBOM_v1.json',sbom],
     ['SLITHER_v1.json',slither],
     ['WAKE_v1.json',wake],
+    ['MYTHRIL_v1.json',mythril],
     ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence],
     ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness],
     ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',deployConfigExecution]
   ];
   await withProgressStage('write-machine-evidence',async()=>{for(const [name,obj] of files)await fs.writeFile(path.join(out,name),JSON.stringify(obj,null,2)+'\n');});
-  process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},wake:{status:wake.status,findings:wake.findingCount??0,solidityUnits:wake.solidityUnitCount},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},deployConfigExecution:{status:deployConfigExecution.status,attempts:deployConfigExecution.attempts.length,gaps:deployConfigExecution.gaps.length},outputs:files.map(([name])=>name)},null,2)+'\n');
+  process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},wake:{status:wake.status,findings:wake.findingCount??0,solidityUnits:wake.solidityUnitCount},mythril:{status:mythril.status,findings:mythril.findingCount??0,eligibleContracts:mythril.eligibleCount,completedContracts:mythril.completedCount},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},deployConfigExecution:{status:deployConfigExecution.status,attempts:deployConfigExecution.attempts.length,gaps:deployConfigExecution.gaps.length},outputs:files.map(([name])=>name)},null,2)+'\n');
 }
 
 main().catch(error=>{
