@@ -514,6 +514,243 @@ def admit_source_to_private_scratch(*, work_dir: Path, source_zip: Path,
         raise
 
 
+
+def prepare_authenticated_target_map(*, work_dir: Path, source_zip: Path,
+                                     artifact_request_file: Path, request_file: Path,
+                                     manifest_file: Path, identity_file: Path,
+                                     artifacts_file: Path, preflight_run_id: int,
+                                     preflight_head_sha: str) -> dict[str, object]:
+    """I04.1: real source-bound, inert ZIP intake and all-target inventory.
+
+    The only executable operations are this trusted Python program's data parsers.
+    It deliberately does not execute build hooks, scripts, tests, a compiler,
+    the local prover or a source-derived shell command.
+    """
+    req = json.loads(request_file.read_text())
+    original = json.loads(artifact_request_file.read_text())
+    manifest = json.loads(manifest_file.read_text())
+    identity = json.loads(identity_file.read_text())
+    compiled = json.loads(artifacts_file.read_text())
+    declared = req.get("source", {})
+    if (not isinstance(declared, dict) or
+            req.get("requestId") != original.get("requestId") or
+            req.get("requestId") != identity.get("requestId") or
+            req.get("requestId") != compiled.get("requestIdentity", {}).get("requestId") or
+            original.get("source") != declared):
+        raise RuntimeError("I04.1 current request differs from exact source/artifact admission")
+    if (identity.get("status") != "PASS" or
+            identity.get("source", {}).get("archiveSha256") != declared.get("archiveSha256") or
+            identity.get("source", {}).get("archiveSha256Observed") != declared.get("archiveSha256") or
+            compiled.get("source", {}).get("archiveSha256") != declared.get("archiveSha256") or
+            any(identity.get("source", {}).get(field) != declared.get(field)
+                for field in ("repository", "commit", "archivePath")) or
+            any(compiled.get("source", {}).get(field) != declared.get(field)
+                for field in ("repository", "commit", "archivePath"))):
+        raise RuntimeError("I04.1 source identities differ across evidence artifacts")
+    if (not re.fullmatch(r"[a-f0-9]{40}", preflight_head_sha) or
+            preflight_run_id <= 0 or
+            manifest.get("schemaVersion") != "curveyield-security-clean-preflight-v1" or
+            manifest.get("status") != "COLLECTED" or
+            manifest.get("sourceOnly") is not False or
+            identity.get("build", {}).get("status") != "completed" or
+            compiled.get("schemaVersion") != "curveyield-phase0-execution-build-artifacts-v2"):
+        raise RuntimeError("I04.1 prior preflight or native compiler output is not accepted")
+    expected_hashes = {
+        entry["name"]: entry["sha256"]
+        for entry in manifest.get("files", [])
+        if isinstance(entry, dict) and "name" in entry and "sha256" in entry
+    }
+    for name, file_path in (
+        ("BUILD_AND_SOURCE_IDENTITY_v1.json", identity_file),
+        ("PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json", artifacts_file),
+    ):
+        if (not re.fullmatch(r"[a-f0-9]{64}", str(expected_hashes.get(name, ""))) or
+                digest(file_path) != expected_hashes[name]):
+            raise RuntimeError("I04.1 preflight evidence file checksum mismatch: " + name)
+    if (identity["build"].get("buildConfigurationDigestSha256") !=
+            compiled.get("buildConfigurationDigestSha256")):
+        raise RuntimeError("I04.1 authentic native build settings digest mismatch")
+    scope = identity.get("auditScope", {})
+    included = scope.get("inScopePaths")
+    excluded = scope.get("excludedPaths")
+    if (not isinstance(included, list) or not included or
+            not isinstance(excluded, list) or
+            any(not isinstance(p, str) or not p for p in included + excluded)):
+        raise RuntimeError("I04.1 missing authentic audit scope")
+    units = identity["build"].get("compilationUnits")
+    if not isinstance(units, list) or not units:
+        raise RuntimeError("I04.1 no authenticated native compilation units")
+    unit_compilers = {
+        item["unitId"]: item["compilerVersion"]
+        for item in units
+        if isinstance(item, dict) and "unitId" in item and "compilerVersion" in item
+    }
+    if len(unit_compilers) != len(units):
+        raise RuntimeError("I04.1 native compilation-unit identifiers are invalid")
+    records = compiled.get("artifacts")
+    if not isinstance(records, list) or not records:
+        raise RuntimeError("I04.1 missing authenticated per-contract ABI/artifacts")
+
+    root = work_dir.resolve()
+    if not root.is_relative_to(Path(os.environ.get("RUNNER_TEMP", "/invalid")).resolve()):
+        raise RuntimeError("I04.1 private scratch is not runner-owned")
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root.chmod(0o700)
+    extracted = admit_source_to_private_scratch(
+        work_dir=root, source_zip=source_zip, request_file=request_file,
+        manifest_file=manifest_file, require_native_tools=False,
+    )
+    eligible: list[dict[str, object]] = []
+    ineligible: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for item in records:
+        if not isinstance(item, dict):
+            raise RuntimeError("I04.1 native artifact is not an object")
+        name = item.get("qualifiedName")
+        source_name = item.get("sourceName")
+        contract_name = item.get("contractName")
+        unit_id = item.get("compilationUnitId")
+        version = item.get("compilerVersion")
+        if (not isinstance(name, str) or not isinstance(source_name, str) or
+                not isinstance(contract_name, str) or
+                name != f"{source_name}:{contract_name}" or name in seen):
+            raise RuntimeError("I04.1 invalid or duplicate contract identity")
+        seen.add(name)
+        if unit_id not in unit_compilers or version != unit_compilers[unit_id]:
+            raise RuntimeError("I04.1 per-artifact compiler version/unit mismatch")
+        abi = item.get("abi")
+        abi_digest = item.get("abiDigestSha256")
+        if (not isinstance(abi, list) or
+                not isinstance(abi_digest, str) or
+                not re.fullmatch(r"[a-f0-9]{64}", abi_digest)):
+            raise RuntimeError("I04.1 ABI identity missing for " + name)
+        in_scope = (any(source_name.startswith(prefix) for prefix in included) and
+                    not any(source_name.startswith(prefix) for prefix in excluded))
+        record = {
+            "target": name,
+            "sourcePath": source_name,
+            "contract": contract_name,
+            "compilerVersion": version,
+            "compilationUnitId": unit_id,
+            "abiDigestSha256": abi_digest,
+            "linkReferences": item.get("linkReferences", {}),
+            "deployedLinkReferences": item.get("deployedLinkReferences", {}),
+        }
+        if not in_scope:
+            record["reason"] = "OUTSIDE_AUTHENTIC_AUDIT_SCOPE"
+            ineligible.append(record)
+            continue
+        source_parts = PurePosixPath(source_name).parts
+        if (not source_name.endswith(".sol") or
+                any(part in ("", ".", "..") for part in source_parts) or
+                source_name.startswith("/")):
+            record["reason"] = "NON_SOLIDITY_OR_UNSAFE_SOURCE"
+            ineligible.append(record)
+            continue
+        src_path = extracted.joinpath(*source_parts)
+        if not src_path.is_file() or src_path.is_symlink():
+            raise RuntimeError("I04.1 in-scope contract source absent from authenticated ZIP: " + source_name)
+        source_text = src_path.read_text(encoding="utf-8")
+        declaration = re.search(
+            r"\b(abstract\s+contract|contract|library|interface)\s+" +
+            re.escape(contract_name) + r"\b",
+            source_text,
+        )
+        kind = declaration.group(1) if declaration else "UNDETERMINED"
+        record["sourceDeclarationKind"] = kind
+        deployed = item.get("deployedBytecode")
+        if kind in ("interface", "library", "abstract contract"):
+            record["reason"] = "NON_DEPLOYABLE_SOURCE_DECLARATION"
+            ineligible.append(record)
+        elif not isinstance(deployed, str) or deployed in ("", "0x"):
+            record["reason"] = "NO_COMPILED_RUNTIME_BYTECODE"
+            ineligible.append(record)
+        elif not re.fullmatch(r"0x[0-9a-fA-F]+", deployed):
+            # Unresolved library links require compilation/link repair at I05.2,
+            # not a false clean/verifiable target declaration.
+            if not item.get("deployedLinkReferences"):
+                raise RuntimeError("I04.1 compiler runtime bytecode is not valid linked hex")
+            record["requiresLibraryLinking"] = True
+            eligible.append(record)
+        elif kind == "UNDETERMINED":
+            record["reason"] = "UNKNOWN_COMPILER_DECLARATION"
+            ineligible.append(record)
+        else:
+            record["requiresLibraryLinking"] = bool(item.get("deployedLinkReferences"))
+            eligible.append(record)
+
+    if not eligible:
+        raise RuntimeError("I04.1 authenticated compilation has no eligible contract targets")
+    readme = extracted / "README-v64.md"
+    context = [
+        "# Authenticated Solidity source context (factual, not design intent)",
+        "",
+        f"Source SHA256: {declared['archiveSha256']}",
+        f"Source repository/commit: {declared['repository']} @ {declared['commit']}",
+        "All items below were read from original source or native compiler artifacts.",
+        "This document states no desired invariants or claimed economic guarantees.",
+        "",
+    ]
+    if readme.is_file():
+        context.extend([
+            "Source-package documentation is present at README-v64.md.",
+            "Its contents are not implicitly treated as formally specified invariants.",
+            "",
+        ])
+    for target in eligible:
+        item = next(x for x in records if x["qualifiedName"] == target["target"])
+        funcs = [
+            entry["name"]
+            for entry in item["abi"]
+            if isinstance(entry, dict) and entry.get("type") == "function"
+            and isinstance(entry.get("name"), str)
+        ]
+        context.extend([
+            f"## {target['target']}",
+            f"- Compiler: Solidity {target['compilerVersion']}; unit {target['compilationUnitId']}",
+            f"- Public ABI methods (compiler observed): {', '.join(funcs)}",
+            "",
+        ])
+    target_doc = root / "source-context-v1.md"
+    target_doc.write_text("\n".join(context), encoding="utf-8")
+    target_doc.chmod(0o600)
+    specs = sorted(str(p.relative_to(extracted)) for p in extracted.rglob("*")
+                   if p.is_file() and p.suffix.lower() in (".spec", ".conf"))
+    result = {
+        "schemaVersion": "curveyield-formal-target-map-v1",
+        "status": "AUTHENTICATED_SOURCE_TARGETS_READY",
+        "stage": "I04.1",
+        "source": declared,
+        "requestId": req["requestId"],
+        "preflightRunId": preflight_run_id,
+        "preflightHeadSha": preflight_head_sha,
+        "buildConfigurationDigestSha256": compiled["buildConfigurationDigestSha256"],
+        "compilerVersions": sorted(set(unit_compilers.values())),
+        "scope": scope,
+        "eligible": eligible,
+        "ineligible": ineligible,
+        "existingCVL": specs,
+        "targetContextFile": str(target_doc),
+        "privateSourceRoot": str(extracted),
+        "noSourceAuthoredScriptsExecuted": True,
+        "noSourceCompiledOrProved": True,
+        "notAProofResult": True,
+    }
+    out = root / "target-map-v1.json"
+    out.write_text(json.dumps(result, indent=2) + "\n")
+    out.chmod(0o600)
+    return {
+        "status": result["status"], "stage": "I04.1",
+        "requestId": req["requestId"],
+        "sourceSha256": declared["archiveSha256"],
+        "preflightRunId": preflight_run_id,
+        "compilerVersions": result["compilerVersions"],
+        "eligibleCount": len(eligible), "ineligibleCount": len(ineligible),
+        "existingCVLCount": len(specs),
+        "privateIntake": True, "noSourceExecution": True,
+        "contextDocumentCreated": True, "needsNativeCertoraBuild": False,
+    }
+
 def prepare_upstream_autoprover(root: Path) -> dict[str, object]:
     """I03.1 real pinned host installation; no AutoProver pipeline/LLM/proofs."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -625,9 +862,30 @@ def main() -> int:
     compilers.add_argument("--requirements", type=Path, required=True)
     compilers.add_argument("--artifacts", type=Path, required=True)
     compilers.add_argument("--request", type=Path, required=True)
+    intake = commands.add_parser("prepare-source-targets", help="I04.1 authenticated inert source intake")
+    intake.add_argument("--work-dir", type=Path, required=True)
+    intake.add_argument("--source-zip", type=Path, required=True)
+    intake.add_argument("--artifact-request", type=Path, required=True)
+    intake.add_argument("--request", type=Path, required=True)
+    intake.add_argument("--manifest", type=Path, required=True)
+    intake.add_argument("--identity", type=Path, required=True)
+    intake.add_argument("--artifacts", type=Path, required=True)
+    intake.add_argument("--preflight-run-id", type=int, required=True)
+    intake.add_argument("--preflight-head-sha", required=True)
     autoprover = commands.add_parser("prepare-autoprover", help="I03.1 upstream AutoProver native CLI qualification")
     autoprover.add_argument("--work-dir", type=Path, required=True)
     args = parser.parse_args()
+    if args.operation == "prepare-source-targets":
+        result = prepare_authenticated_target_map(
+            work_dir=args.work_dir, source_zip=args.source_zip,
+            artifact_request_file=args.artifact_request,
+            request_file=args.request, manifest_file=args.manifest,
+            identity_file=args.identity, artifacts_file=args.artifacts,
+            preflight_run_id=args.preflight_run_id,
+            preflight_head_sha=args.preflight_head_sha,
+        )
+        print(json.dumps(result, sort_keys=True), flush=True)
+        return 0
     if args.operation == "prepare-autoprover":
         work_dir = args.work_dir.resolve()
         report_path = work_dir / "autoprover-bootstrap-v1.json"
