@@ -6,7 +6,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv /opt/slither && /opt/slither/bin/pip install --no-cache-dir 'slither-analyzer==0.11.6'
 RUN python3 -m venv /opt/wake && /opt/wake/bin/pip install --no-cache-dir 'eth-wake==4.21.0'
-ENV PATH="/usr/local/bin:/opt/slither/bin:/opt/wake/bin:/opt/preflight/node_modules/.bin:/opt/preflight/node_modules/@foundry-rs/forge:${PATH}" \
+RUN python3 -m venv /opt/mythril && /opt/mythril/bin/pip install --no-cache-dir 'mythril==0.24.8'
+ENV PATH="/usr/local/bin:/opt/slither/bin:/opt/wake/bin:/opt/mythril/bin:/opt/preflight/node_modules/.bin:/opt/preflight/node_modules/@foundry-rs/forge:${PATH}" \
     CI="true" NODE_ENV="test" HOME="/opt/preflight"
 WORKDIR /opt/preflight
 COPY security-intelligence-phase0/package.json security-intelligence-phase0/package-lock.json ./
