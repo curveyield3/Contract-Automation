@@ -387,6 +387,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
     artifacts:compilerArtifacts.map(({qualifiedName,abiDigestSha256,creationBytecodeDigestSha256,deployedBytecodeDigestSha256})=>({qualifiedName,abiDigestSha256,creationBytecodeDigestSha256,deployedBytecodeDigestSha256}))};
   const sbom=await generateBuildSbomV1({projectRoot,request,build:{compilerDescriptors:clone(request.configuration.compilers??[]),optimizer:clone(request.configuration.optimizer??null),evmVersion:request.configuration.evmVersion??null,viaIR:request.configuration.viaIR===true,sourceCommit:request.source.commit,artifacts:clone(build.artifacts??[])}});
   const slither=analysis.slither??null, detectors=Array.isArray(slither?.detectors)?slither.detectors:[];
+  const wake=analysis.wake??null, wakeDetectors=Array.isArray(wake?.detectors)?wake.detectors:[];
   const limitations=[];
   const hasSolidityAsts=Object.keys(build.sourceAsts??{}).length>0||(build.compilationUnits??[]).some(unit=>Object.keys(unit.sourceAsts??{}).length>0);
   if (sourceFiles.some(x=>x.language==='SOLIDITY') && !hasSolidityAsts) limitations.push({limitationId:'SI-TECH-LIM-001',category:'SOLIDITY_AST_UNAVAILABLE',
@@ -400,6 +401,8 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
   if (!slither || !['completed','completed_with_findings'].includes(slither.status)) limitations.push({limitationId:`SI-TECH-LIM-${pad(limitations.length+1)}`,category:'STATIC_RECON_LIMITATION',
     affectedSections:['staticRecon.slither'],reason:`Slither terminal status was ${slither?.status??'UNAVAILABLE'}.`,downstreamRequiredAction:'Carry exact analyzer limitation and raw evidence.'});
 
+  if(!wake||!['COMPLETED','NOT_APPLICABLE'].includes(wake.componentStatus)) limitations.push({limitationId:`SI-TECH-LIM-${pad(limitations.length+1)}`,category:'STATIC_RECON_LIMITATION',
+    affectedSections:['staticRecon.wake'],reason:`Wake native detector status was ${wake?.status??'UNAVAILABLE'}.`,downstreamRequiredAction:'Review WAKE_v1.json failures; do not treat an incomplete scan as zero findings.'});
   const bundle={
     schemaVersion:'curveyield-v7-source-intelligence-technical-bundle-v1',artifactType:'SOURCE_INTELLIGENCE_TECHNICAL_BUNDLE',
     neutrality:{securityDisposition:'REVIEWER_REQUIRED',findingPromotion:'FORBIDDEN_BY_GENERATOR',statement:'Compiler/source/static facts and neutral candidates only; no finding, severity, exploitability, or trust conclusion.'},
@@ -416,7 +419,14 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
         storageIds:[],externalInterfaceIds:externalInterfaces.map(x=>x.externalInterfaceId),privilegeCandidateIds:[],valueFlowCandidateIds:valueFlowCandidates.map(x=>x.valueFlowCandidateId),sourceAnchorIds:[],phase1Ownership:'STRUCTURAL_INVENTORY',laterPhaseTreatment:'REVIEW_VALUE_SEMANTICS',status:'CURRENT',basis:'AST_TRANSFER_APPROVAL_LOW_LEVEL_CALL_CANDIDATES'}
     ],
     protocolTopology:{upgradeabilityEdges,dependencyEdges,crossChainEdges:[],offchainAutomationEdges:[],topologyLimitations:['OFFCHAIN_AUTOMATION_AND_CROSS_CHAIN_RELATIONSHIPS_REQUIRE_PROJECT_FILE_REVIEW','DYNAMIC_DISPATCH_AND_BUSINESS_RELATIONSHIPS_REQUIRE_REVIEWER_CONTEXT']},
-    staticRecon:{slither:{status:slither?.status??'UNAVAILABLE',version:slither?.version??null,rawEvidenceRef:slither?.rawArtifactRef??null,candidateCount:detectors.length,
+    staticRecon:{wake:{status:wake?.status??'UNAVAILABLE',componentStatus:wake?.componentStatus??'MISSING',version:wake?.version??null,rawEvidenceRef:'WAKE_v1.json',
+      candidateCount:wakeDetectors.length,solidityUnitCount:wake?.solidityUnitCount??null,
+      candidateIndex:wakeDetectors.map((d,i)=>({candidateId:`WAKE-${pad(i+1,4)}`,check:d?.detector_name??'UNNAMED_DETECTOR',
+        impact:d?.impact??null,confidence:d?.confidence??null,suppressed:d?.suppressed===true,
+        sourceLocation:d?.detection?.location?.relative_path??d?.detection?.location?.source_unit_name??null,
+        line:d?.detection?.location?.start_line??null,status:'NEUTRAL_ANALYZER_CANDIDATE'})),
+      limitation:wake&&['COMPLETED','NOT_APPLICABLE'].includes(wake.componentStatus)?null:`WAKE_${String(wake?.status??'UNAVAILABLE').toUpperCase()}`},
+      slither:{status:slither?.status??'UNAVAILABLE',version:slither?.version??null,rawEvidenceRef:slither?.rawArtifactRef??null,candidateCount:detectors.length,
       candidateIndex:detectors.map((d,i)=>({candidateId:`SLITHER-${pad(i+1,4)}`,check:d?.check??d?.description??d?.impact??'UNNAMED_DETECTOR',confidence:d?.confidence??null,impact:d?.impact??null,status:'NEUTRAL_ANALYZER_CANDIDATE'})),
       limitation:slither&&['completed','completed_with_findings'].includes(slither.status)?null:`SLITHER_${String(slither?.status??'UNAVAILABLE').toUpperCase()}`},
       sbom:{status:'COMPLETED',digestSha256:sbom.sbomDigest,sourceFileCount:sbom.sourceFiles?.length??0,dependencyFileCount:sbom.dependencyFiles?.length??0,artifactCount:sbom.artifacts?.length??0}},
