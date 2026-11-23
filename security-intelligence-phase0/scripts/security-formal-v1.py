@@ -621,7 +621,7 @@ def prepare_authenticated_target_map(*, work_dir: Path, source_zip: Path,
     if (not re.fullmatch(r"[a-f0-9]{40}", preflight_head_sha) or
             preflight_run_id <= 0 or
             manifest.get("schemaVersion") != "curveyield-security-clean-preflight-v1" or
-            manifest.get("status") != "COLLECTED" or
+            manifest.get("status") not in ("COLLECTED", "COLLECTED_WITH_ANALYZER_LIMITATION") or
             manifest.get("sourceOnly") is not False or
             identity.get("build", {}).get("status") != "completed" or
             compiled.get("schemaVersion") != "curveyield-phase0-execution-build-artifacts-v2"):
