@@ -1183,7 +1183,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         executable = Path(c["executable"]).resolve(strict=True)
         # The pinned AutoSetup expects solc8.N names, while the original
         # compiler qualification stores fully versioned executable names.
-        alias = tool_bin / ("solc" + ".".join(version.split(".")[:2]).removeprefix("0."))
+        alias = tool_bin / ("solc" + ".".join(version.split(".")[1:]))
         if alias.exists() or alias.is_symlink():
             alias.unlink()
         alias.symlink_to(executable)
@@ -1203,7 +1203,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         "mimoRunId": session.get("mimoWorkflowRunId"),
         "eligibleTargetCount": len(target_list),
         "results": [],
-        "sourceExecuted": False,
+        "sourceAuthoredScriptsExecuted": False,
         "cloudProviderCalls": 0,
         "modelRequestCount": None,
         "nativeProofsProved": None,
@@ -1328,7 +1328,65 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                 links = json.loads(run_index.read_text())
                 if isinstance(links, dict):
                     record["nativeProverRunReferences"] = len(links)
-            except (ValueError, OSError):
+                    # Parse only local paths, using the upstream's own strict
+                    # treeView/RuleResult decoder. Do not infer rule success
+                    # from stdout, exit zero, or generated CVL.
+                    native_dirs = []
+                    for link in links.values():
+                        if not isinstance(link, str) or "://" in link:
+                            continue
+                        results_dir = Path(link)
+                        if not results_dir.is_absolute():
+                            results_dir = project / results_dir
+                        results_dir = results_dir.resolve()
+                        if results_dir.is_dir() and results_dir.is_relative_to(runner_temp):
+                            native_dirs.append(str(results_dir))
+                    if native_dirs:
+                        reader = (
+                            "import json,sys; from pathlib import Path; "
+                            "from composer.prover.results import read_and_format_run_result; "
+                            "rows=[]; "
+                            "\nfor d in sys.argv[1:]:"
+                            "\n result=read_and_format_run_result(Path(d),'evm')"
+                            "\n if isinstance(result,str):"
+                            "\n  rows.append({'resultError':result[:140]})"
+                            "\n else:"
+                            "\n  for r in result.values():"
+                            "\n   rows.append({'rule':r.name,'nativeStatus':r.status,"
+                            "'counterexamplePresent':r.counterexample is not None,"
+                            "'sanity':r.path.sanity})"
+                            "\nprint(json.dumps(rows))"
+                        )
+                        parser_result = subprocess.run(
+                            [str(upstream / ".venv/bin/python"), "-c", reader, *native_dirs],
+                            cwd=upstream, env=env, capture_output=True, text=True,
+                            timeout=150, check=False)
+                        if parser_result.returncode == 0:
+                            parsed = json.loads(parser_result.stdout)
+                            if isinstance(parsed, list):
+                                permitted = {"VERIFIED", "VIOLATED", "TIMEOUT", "ERROR",
+                                             "SANITY_FAILED", "SKIPPED"}
+                                for item in parsed:
+                                    if not isinstance(item, dict) or item.get("nativeStatus") not in permitted:
+                                        continue
+                                    normalized = {"VERIFIED": "PROVED",
+                                                  "VIOLATED": "COUNTEREXAMPLE",
+                                                  "TIMEOUT": "TIMEOUT",
+                                                  "ERROR": "ERROR",
+                                                  "SANITY_FAILED": "UNKNOWN",
+                                                  "SKIPPED": "NOT_RUN"}
+                                    record["nativePropertyVerdicts"].append({
+                                        "rule": item.get("rule"),
+                                        "nativeStatus": item["nativeStatus"],
+                                        "verdict": normalized[item["nativeStatus"]],
+                                        "counterexamplePresent": item.get("counterexamplePresent") is True,
+                                        "sanity": item.get("sanity") is True,
+                                    })
+                        else:
+                            record["nativeRuleParseError"] = (
+                                "UPSTREAM_RULE_PARSER_FAILED_EXIT_" +
+                                str(parser_result.returncode))
+            except (ValueError, OSError, subprocess.TimeoutExpired):
                 record["nativeProverRunReferences"] = None
         job_info = internal / "job_info.json"
         if job_info.is_file():
@@ -1340,12 +1398,10 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             except (ValueError, OSError):
                 pass
         if record["status"] == "NATIVE_AUTOPROVER_EXIT_ZERO_UNCLASSIFIED":
-            if record["generatedSpecCount"] == 0 or not record.get("nativeProverRunReferences"):
-                record["status"] = "INCOMPLETE_NO_NATIVE_PROOF_EVIDENCE"
+            if not record["nativePropertyVerdicts"]:
+                record["status"] = "INCOMPLETE_NO_NATIVE_RULE_VERDICTS"
             else:
-                # Native rule verdicts still require decoding authentic Prover
-                # result artifacts; a CLI zero exit does not prove any rule.
-                record["status"] = "NATIVE_AUTOPROVER_RESULTS_REQUIRE_RULE_VERDICTS"
+                record["status"] = "NATIVE_RULE_VERDICTS_CAPTURED"
         outcome["results"].append(record)
         persist()
         print(json.dumps({
@@ -1354,12 +1410,13 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "generatedSpecCount": record.get("generatedSpecCount", 0),
             "elapsedSeconds": record.get("elapsedSeconds", 0),
         }, sort_keys=True), flush=True)
-    outcome["status"] = "EXECUTED_NATIVE_TARGETS_NEED_RULE_CLASSIFICATION"
+    observed = sum(len(r.get("nativePropertyVerdicts", [])) for r in outcome["results"])
+    outcome["observedNativePropertyVerdicts"] = observed
+    outcome["status"] = ("NATIVE_RULE_VERDICTS_OBSERVED" if observed
+                         else "INCOMPLETE_NO_NATIVE_RULE_VERDICTS")
     outcome["elapsedSeconds"] = round(time.monotonic() - begun, 2)
     persist()
-    # No fabricated success. I07 reads the saved source-bound native outputs
-    # and may publish a truthful incomplete/blocked report.
-    return 0 if all(r["status"] != "NOT_RUN" for r in outcome["results"]) else 1
+    return 0 if observed and len(outcome["results"]) == len(target_list) else 1
 
 
 def main() -> int:
