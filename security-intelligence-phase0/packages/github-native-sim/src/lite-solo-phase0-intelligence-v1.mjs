@@ -459,6 +459,100 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
   };
 }
 
+
+// Wake is a separate static-analysis detector, never a test runner or authority.
+// Stage only compiler-observed Solidity source bytes: no source-supplied Python
+// detectors, wake.toml, package scripts, external processes or custom plugins.
+async function runWakeDetectors({projectRoot,build,sourceCommit,out}){
+  const units=Array.isArray(build?.compilationUnits)&&build.compilationUnits.length
+    ? build.compilationUnits
+    : [{unitId:'phase0',compilerVersion:build?.compilerVersion,
+        settings:build?.settings??{},sourceAsts:build?.sourceAsts??{},
+        sourceContents:build?.sourceContents??{},artifacts:build?.artifacts??[]}];
+  const stageRoot=path.join(out,'work','wake-static');
+  const unitResults=[],findings=[];
+  let solidityUnitCount=0,sourceCount=0;
+  for(const [index,unit] of units.entries()){
+    const unitId=String(unit.unitId??'unit-'+(index+1)).replace(/[^A-Za-z0-9._-]/g,'_');
+    const sourceNames=[...new Set([
+      ...Object.keys(unit.sourceAsts??{}),
+      ...Object.keys(unit.sourceContents??{}),
+      ...(unit.artifacts??[]).map(a=>a?.sourceName).filter(Boolean)
+    ])].filter(x=>typeof x==='string'&&x.endsWith('.sol')).sort();
+    if(!sourceNames.length)continue; // Wake has no Vyper compiler: do not mislabel Vyper as scanned.
+    solidityUnitCount++;
+    const stage=path.join(stageRoot,unitId+'-'+index);
+    const record={unitId,compilerVersion:slitherCompilerVersion(unit.compilerVersion??build.compilerVersion),
+      sourceCount:0,sourceDigests:[],status:'FAILED',findingCount:0};
+    unitResults.push(record);
+    try{
+      await fs.rm(stage,{recursive:true,force:true});
+      await fs.mkdir(stage,{recursive:true});
+      for(const originalName of sourceNames){
+        const sourceName=originalName.replace(/^\.\//,'');
+        safeRel(sourceName,'Wake source unit');
+        const sourceBytes=typeof unit.sourceContents?.[originalName]==='string'
+          ?Buffer.from(unit.sourceContents[originalName],'utf8')
+          :await fs.readFile(await resolveCompiledSourceFile(projectRoot,originalName));
+        const target=path.join(stage,...sourceName.split('/'));
+        await fs.mkdir(path.dirname(target),{recursive:true});
+        await fs.writeFile(target,sourceBytes);
+        record.sourceDigests.push({sourceName,sha256:sha256(sourceBytes)});
+      }
+      record.sourceCount=sourceNames.length;
+      sourceCount+=sourceNames.length;
+      const args=['detect','--no-artifacts','--export','json'];
+      const compilerVersion=record.compilerVersion;
+      if(/^\d+\.\d+\.\d+$/.test(compilerVersion))args.push('--target-version',compilerVersion);
+      const settings=unit.settings??{};
+      if(settings.optimizer?.enabled===true)args.push('--optimizer-enabled');
+      if(settings.optimizer?.enabled===false)args.push('--no-optimizer-enabled');
+      if(Number.isSafeInteger(settings.optimizer?.runs)&&settings.optimizer.runs>=0)
+        args.push('--optimizer-runs',String(settings.optimizer.runs));
+      if(settings.viaIR===true)args.push('--via-ir');
+      if(settings.viaIR===false)args.push('--no-via-ir');
+      if(typeof settings.evmVersion==='string'&&/^[a-zA-Z0-9_-]+$/.test(settings.evmVersion))
+        args.push('--evm-version',settings.evmVersion);
+      for(const remapping of settings.remappings??[]){
+        if(typeof remapping!=='string'||!remapping.includes('='))throw Error('Wake remapping is not a string prefix=target: '+String(remapping));
+        const target=remapping.slice(remapping.indexOf('=')+1);
+        if(!target||path.isAbsolute(target)||target.includes('\\')||target.split('/').some(x=>x==='..'))
+          throw Error('Wake remapping target escapes source-only staging: '+remapping);
+        args.push('--remapping',remapping);
+      }
+      args.push('all');
+      const raw=await runProcess({command:'wake',args,cwd:stage,timeoutMs:300000,
+        env:{...process.env,HOME:'/tmp',XDG_CONFIG_HOME:'/tmp',XDG_CACHE_HOME:'/tmp',XDG_DATA_HOME:'/opt/preflight/.local/share',CI:'true'}});
+      record.exitCode=raw.exitCode;
+      record.stderr=cleanText(raw.stderr).slice(-3500);
+      record.stdout=cleanText(raw.stdout).slice(-2500);
+      const jsonPath=path.join(stage,'.wake','detections.json');
+      if(![0,3].includes(raw.exitCode))throw Error('Wake detector or compiler exited '+raw.exitCode);
+      if(!await exists(jsonPath))throw Error('Wake JSON detections export absent despite exit '+raw.exitCode);
+      const parsed=JSON.parse(await fs.readFile(jsonPath,'utf8'));
+      if(!Array.isArray(parsed)||parsed.some(d=>!d||typeof d.detector_name!=='string'||typeof d.impact!=='string'||typeof d.confidence!=='string'||!d.detection?.location))
+        throw Error('Wake detections export schema invalid');
+      record.findingCount=parsed.length;
+      record.status='COMPLETED';
+      for(const detection of parsed){
+        // Preserve each detector's detailed location, impact, confidence,
+        // suppression and nested subdetections, with unit identity.
+        findings.push({...detection,unitId});
+      }
+    }catch(error){
+      record.error=String(error?.message??error).slice(0,1500);
+    }
+  }
+  const completed=unitResults.every(r=>r.status==='COMPLETED');
+  return{backend:'wake',version:'4.21.0',sourceCommit,
+    status:solidityUnitCount===0?'not_applicable':completed?(findings.length?'completed_with_findings':'completed'):'failed',
+    componentStatus:solidityUnitCount===0?'NOT_APPLICABLE':completed?'COMPLETED':'FAILED',
+    authoritativeFinding:false,inputMode:'COMPILER_OBSERVED_SOURCE_ONLY_OFFLINE_RECOMPILE',
+    solidityUnitCount,sourceCount,findingCount:findings.length,detectors:findings,unitResults,
+    limitations:solidityUnitCount===0?['No compiled Solidity source units; Wake does not analyze Vyper']:[]
+  };
+}
+
 function slitherSucceeded(r){return r&&['completed','completed_with_findings'].includes(r.status)&&r.componentStatus==='COMPLETED';}
 function parseSlitherJson(text){
   try{const p=JSON.parse(String(text??''));const d=Array.isArray(p?.results?.detectors)?p.results.detectors:[];return{success:p?.success===true,detectors:d};}catch{return null;}
@@ -833,7 +927,7 @@ async function main(){
     requestId:request.requestId,requestDigest:request.requestDigest??sha256(Buffer.from(JSON.stringify(request))),
     campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,assignmentId:'phase0-intelligence',phaseId:'phase-0',profileId:'github-native-compile-v2',
     source:{repository:request.source.repository,commit:request.source.commit,projectPath:detected.relativePath,archivePath:request.source.archivePath,archiveSha256:request.source.archiveSha256},
-    configuration:{compilers:requestedCompilers,analysis:{slither:{version:'0.11.6'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
+    configuration:{compilers:requestedCompilers,analysis:{slither:{version:'0.11.6'},wake:{version:'4.21.0'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
   };
 
   const build=await withProgressStage('compile-exact-build',()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
@@ -855,6 +949,17 @@ async function main(){
       repairAttempts:error?.attempts??[{strategy:'unhandled-failure',error:{message:detail}}],
       inputMode:'UNRESOLVED_STATIC_ANALYSIS',
       limitations:[detail],requiredSemanticReview:true};
+  }
+  let wake;
+  try{
+    wake=await withProgressStage('wake-static-analysis',()=>runWakeDetectors({projectRoot:detected.absolute,build,sourceCommit:request.source.commit,out}));
+  }catch(error){
+    const detail=String(error?.message??error);
+    wake={backend:'wake',version:'4.21.0',sourceCommit:request.source.commit,status:'failed',
+      componentStatus:'FAILED',authoritativeFinding:false,inputMode:'UNRESOLVED_STATIC_ANALYSIS',
+      solidityUnitCount:null,sourceCount:0,findingCount:0,detectors:[],unitResults:[],
+      limitations:[detail],requiredSemanticReview:true};
+    console.error('Wake static analysis incomplete: '+detail);
   }
   const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
   const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}}));
@@ -882,12 +987,13 @@ async function main(){
     ['PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json',executionBuildArtifacts],
     ['SBOM_v1.json',sbom],
     ['SLITHER_v1.json',slither],
+    ['WAKE_v1.json',wake],
     ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence],
     ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness],
     ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',deployConfigExecution]
   ];
   await withProgressStage('write-machine-evidence',async()=>{for(const [name,obj] of files)await fs.writeFile(path.join(out,name),JSON.stringify(obj,null,2)+'\n');});
-  process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},deployConfigExecution:{status:deployConfigExecution.status,attempts:deployConfigExecution.attempts.length,gaps:deployConfigExecution.gaps.length},outputs:files.map(([name])=>name)},null,2)+'\n');
+  process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},wake:{status:wake.status,findings:wake.findingCount??0,solidityUnits:wake.solidityUnitCount},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},deployConfigExecution:{status:deployConfigExecution.status,attempts:deployConfigExecution.attempts.length,gaps:deployConfigExecution.gaps.length},outputs:files.map(([name])=>name)},null,2)+'\n');
 }
 
 main().catch(error=>{
