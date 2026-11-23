@@ -551,8 +551,11 @@ def prepare_upstream_autoprover(root: Path) -> dict[str, object]:
         raise RuntimeError("I03.1 pinned uv runtime version differs from expected")
     if sys.version_info[:2] != (3, 12):
         raise RuntimeError("I03.1 headless AutoProver must use selected Python 3.12")
+    # Upstream AutoProver imports certora_cli unconditionally at CLI load time.
+    # Install the one upstream-supported stable CLI extra; use local Prover,
+    # never CERTORAKEY or cloud mode for actual verification.
     invoke([str(uv), "sync", "--no-dev", "--locked",
-            "--python", sys.executable], cwd=source, env=env)
+            "--extra", "certora-cli", "--python", sys.executable], cwd=source, env=env)
     cli = source / ".venv" / "bin" / "console-autoprove"
     if not cli.is_file() or not os.access(cli, os.X_OK):
         raise RuntimeError("I03.1 native console-autoprove entrypoint not installed")
