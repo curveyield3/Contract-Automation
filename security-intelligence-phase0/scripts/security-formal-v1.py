@@ -101,6 +101,11 @@ def local_toolchain(root: Path) -> dict[str, object]:
     # Upstream submodule URL is git@github.com:..., unsuitable for CI without SSH.
     invoke(["git", "-C", str(source), "config", "--local",
             "url.https://github.com/.insteadOf", "git@github.com:"], env=env)
+    # Propagate the HTTPS rewrite into nested git submodule clone processes,
+    # not just the superproject's local config (which child clones do not read).
+    env["GIT_CONFIG_COUNT"] = "1"
+    env["GIT_CONFIG_KEY_0"] = "url.https://github.com/.insteadOf"
+    env["GIT_CONFIG_VALUE_0"] = "git@github.com:"
     invoke(["git", "-C", str(source), "submodule", "sync", "--recursive"], env=env)
     invoke(["git", "-C", str(source), "submodule", "update",
             "--init", "--recursive"], env=env)
