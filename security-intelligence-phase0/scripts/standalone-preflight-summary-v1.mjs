@@ -10,6 +10,11 @@ const read=f=>{try{return JSON.parse(fs.readFileSync(f,'utf8'));}catch{return nu
 const request=read(requestFile),build=read(path.join(dir,'BUILD_AND_SOURCE_IDENTITY_v1.json'));
 const source=read(path.join(dir,'SOURCE_INTELLIGENCE_AUTOMATED_v1.json'));
 const slither=read(path.join(dir,'SLITHER_v1.json'));
+const wake=read(path.join(dir,'WAKE_v1.json'));
+const wakeComplete=wake?.componentStatus==='COMPLETED' && wake?.solidityUnitCount>0 &&
+  Array.isArray(wake?.unitResults) && wake.unitResults.length===wake.solidityUnitCount &&
+  wake.unitResults.every(unit=>unit.status==='COMPLETED');
+const wakeNotApplicable=wake?.componentStatus==='NOT_APPLICABLE' && wake?.solidityUnitCount===0;
 const expected=request?.source?.archiveSha256??null;
 const actual=build?.source?.archiveSha256Observed??null;
 const sourceMatches=typeof expected==='string'&&expected===actual;
@@ -20,10 +25,11 @@ if(!build)warn('BUILD_IDENTITY_MISSING','BUILD_AND_SOURCE_IDENTITY_v1.json','ori
 if(build&&!sourceMatches)warn('SOURCE_IDENTITY_MISMATCH','build.source.archiveSha256Observed',expected,actual,'Admit same original ZIP SHA');
 if(!source)warn('SOURCE_INTELLIGENCE_MISSING','SOURCE_INTELLIGENCE_AUTOMATED_v1.json','compiled source inventory','unavailable','Inspect original compilation or extractor failure');
 if(!slither||slither.componentStatus!=='COMPLETED')warn('SLITHER_INCOMPLETE','SLITHER_v1.json.componentStatus','COMPLETED',slither?.componentStatus??'missing','Inspect Slither native evidence and compiler settings');
-const status=!sourceMatches?'INCOMPLETE':!source||build?.build?.status!=='completed'||slither?.componentStatus!=='COMPLETED'?'PARTIAL':'COLLECTED';
+if(!wakeComplete&&!wakeNotApplicable)warn('WAKE_INCOMPLETE','WAKE_v1.json.componentStatus','COMPLETED or legitimate zero-Solidity NOT_APPLICABLE',wake?.componentStatus??'missing','Inspect Wake native detections, compiler cache and source unit failures');
+const status=!sourceMatches?'INCOMPLETE':!source||build?.build?.status!=='completed'||slither?.componentStatus!=='COMPLETED'||(!wakeComplete&&!wakeNotApplicable)?'PARTIAL':'COLLECTED';
 const names=fs.readdirSync(dir).filter(x=>x.endsWith('.json')&&x!=='PREFLIGHT_MANIFEST_v1.json').sort();
 const files=names.map(name=>{const raw=fs.readFileSync(path.join(dir,name));return {name,bytes:raw.length,sha256:crypto.createHash('sha256').update(raw).digest('hex')};});
-const manifest={schemaVersion:'curveyield-security-clean-preflight-v1',status,notSecurityVerdict:true,sourceAdmissionVerified:sourceMatches,sourceOnly:build?.build?.status!=='completed',source:{repository:request?.source?.repository??null,commit:request?.source?.commit??null,archivePath:request?.source?.archivePath??null,expectedSha256:expected,observedSha256:actual},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,warnings,files};
+const manifest={schemaVersion:'curveyield-security-clean-preflight-v1',status,notSecurityVerdict:true,sourceAdmissionVerified:sourceMatches,sourceOnly:build?.build?.status!=='completed',source:{repository:request?.source?.repository??null,commit:request?.source?.commit??null,archivePath:request?.source?.archivePath??null,expectedSha256:expected,observedSha256:actual},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,wakeStatus:wake?.componentStatus??wake?.status??null,wakeSolidityUnitCount:wake?.solidityUnitCount??null,wakeFindingCount:wake?.findingCount??null,warnings,files};
 fs.writeFileSync(path.join(dir,'PREFLIGHT_MANIFEST_v1.json'),JSON.stringify(manifest,null,2)+'\n');
 const lines=['# Clean standalone Phase 0 evidence','','Status: **'+status+'**','',...warnings.map(x=>'- '+x.code+': '+x.configurationField+' | expected: '+JSON.stringify(x.expected)+' | observed: '+JSON.stringify(x.observed)+' | correction: '+x.requiredCorrection),'','Not a deployed-fork proof or security verdict.'];
 fs.writeFileSync(path.join(dir,'DISCOVERY_SUMMARY_v1.md'),lines.join('\n')+'\n');
