@@ -26,6 +26,10 @@ from urllib.request import Request, urlopen
 
 PROVER_REPO = "https://github.com/Certora/CertoraProver.git"
 PROVER_COMMIT = "4ef546d00cd67d333914845dead2d72081e1f014"
+AUTOPROVER_REPO = "https://github.com/Certora/AutoProver.git"
+AUTOPROVER_COMMIT = "81d9626c249a70c0a0f0648a89de175443c0344c"
+AUTOPROVER_GRAPHCORE_COMMIT = "c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc"
+UV_RELEASE = "0.13.9"
 
 
 def invoke(argv: list[str], *, cwd: Path | None = None,
@@ -485,6 +489,104 @@ def admit_source_to_private_scratch(*, work_dir: Path, source_zip: Path,
         shutil.rmtree(destination, ignore_errors=True)
         raise
 
+
+def prepare_upstream_autoprover(root: Path) -> dict[str, object]:
+    """I03.1 real pinned host installation; no AutoProver pipeline/LLM/proofs."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        raise RuntimeError("AutoProver installation must run in the GitHub qualification job")
+    root = root.resolve()
+    native_report = root / "toolchain-bootstrap-v1.json"
+    if not native_report.is_file():
+        raise RuntimeError("I03.1 native Certora must be rebuilt/restored in THIS runner")
+    native = json.loads(native_report.read_text())
+    if (native.get("status") != "LOCAL_TOOLCHAIN_STARTUP_VERIFIED" or
+            native.get("proverGitCommit") != PROVER_COMMIT or
+            native.get("noCloudProver") is not True):
+        raise RuntimeError("I03.1 native toolchain receipt inconsistent")
+    certora_dir = Path(str(native.get("certoraDir")))
+    for name in ("emv.jar", "certoraRun.py", "tac_optimizer"):
+        if not (certora_dir / name).is_file():
+            raise RuntimeError("I03.1 current-run local Certora asset missing " + name)
+
+    source = root / "AutoProver"
+    env = os.environ.copy()
+    env["DEBIAN_FRONTEND"] = "noninteractive"
+    env["GIT_CONFIG_COUNT"] = "1"
+    env["GIT_CONFIG_KEY_0"] = "url.https://github.com/.insteadOf"
+    env["GIT_CONFIG_VALUE_0"] = "git@github.com:"
+    env["UV_NO_DEV"] = "1"
+    env["UV_NO_PROGRESS"] = "1"
+    env["UV_CACHE_DIR"] = str(root / "uv-cache")
+    env["UV_PYTHON_DOWNLOADS"] = "never"
+    env["CERTORA"] = str(certora_dir)
+    if not source.exists():
+        invoke(["git", "clone", "--filter=blob:none", "--no-checkout",
+                AUTOPROVER_REPO, str(source)], env=env)
+    invoke(["git", "-C", str(source), "fetch", "--depth=1",
+            "origin", AUTOPROVER_COMMIT], env=env)
+    invoke(["git", "-C", str(source), "checkout", "--detach", "FETCH_HEAD"], env=env)
+    actual = invoke(["git", "-C", str(source), "rev-parse", "HEAD"], env=env)
+    if actual != AUTOPROVER_COMMIT:
+        raise RuntimeError("I03.1 AutoProver upstream commit mismatch")
+    invoke(["git", "-C", str(source), "submodule", "sync", "--recursive"], env=env)
+    invoke(["git", "-C", str(source), "submodule", "update",
+            "--init", "--recursive"], env=env)
+    graphcore = invoke(["git", "-C", str(source / "graphcore"),
+                        "rev-parse", "HEAD"], env=env)
+    if graphcore != AUTOPROVER_GRAPHCORE_COMMIT:
+        raise RuntimeError("I03.1 graphcore submodule pin mismatch: " + graphcore)
+    lockfile = source / "uv.lock"
+    if not lockfile.is_file() or not lockfile.stat().st_size:
+        raise RuntimeError("I03.1 pinned upstream uv.lock missing")
+
+    # Keep tool installation separate from source-authored audit projects.
+    uvbootstrap = root / "uv-bootstrap"
+    invoke([sys.executable, "-m", "venv", str(uvbootstrap)], env=env)
+    python = uvbootstrap / "bin" / "python"
+    invoke([str(python), "-m", "pip", "install",
+            "--disable-pip-version-check", f"uv=={UV_RELEASE}"], env=env)
+    uv = uvbootstrap / "bin" / "uv"
+    observed_uv = invoke([str(uv), "--version"], env=env)
+    if not observed_uv.startswith("uv " + UV_RELEASE):
+        raise RuntimeError("I03.1 pinned uv runtime version differs from expected")
+    if sys.version_info[:2] != (3, 12):
+        raise RuntimeError("I03.1 headless AutoProver must use selected Python 3.12")
+    invoke([str(uv), "sync", "--no-dev", "--locked",
+            "--python", sys.executable], cwd=source, env=env)
+    cli = source / ".venv" / "bin" / "console-autoprove"
+    if not cli.is_file() or not os.access(cli, os.X_OK):
+        raise RuntimeError("I03.1 native console-autoprove entrypoint not installed")
+    # Help/startup only. Never launch the AutoProver agent or cloud proof.
+    clean_env = uncredentialed_formal_environment(root / "private",
+                {"PATH": str(source / ".venv" / "bin") + ":" + env["PATH"],
+                 "CERTORA": str(certora_dir),
+                 "JAVA_HOME": env.get("JAVA_HOME", "")})
+    help_text = invoke([str(cli), "--help"], cwd=source, env=clean_env)
+    if not help_text or "usage" not in help_text.lower():
+        raise RuntimeError("I03.1 headless console startup/help unavailable")
+    installed_python = source / ".venv" / "bin" / "python"
+    imports = invoke([str(installed_python), "-c",
+                      "import composer.cli.console_autoprove; import graphcore; "
+                      "print('PINNED_AUTOPROVER_IMPORTS_OK')"],
+                     cwd=source, env=clean_env)
+    if "PINNED_AUTOPROVER_IMPORTS_OK" not in imports:
+        raise RuntimeError("I03.1 pinned AutoProver/graphcore imports unavailable")
+    return {
+        "status": "UPSTREAM_AUTOPROVER_CLI_VERIFIED",
+        "stage": "I03.1",
+        "autoproverGitCommit": actual,
+        "graphcoreGitCommit": graphcore,
+        "lockSha256": digest(lockfile),
+        "uvVersion": observed_uv,
+        "pythonVersion": invoke([str(installed_python), "--version"], env=clean_env),
+        "consoleEntrypoint": str(cli),
+        "consoleHelpVerified": True,
+        "nativeCertoraProverCommit": native["proverGitCommit"],
+        "nativeCertoraBuiltThisRunner": True,
+        "noCloudProof": True, "noPaidModelCalls": True,
+        "noSourceContractsLoaded": True, "notAProofResult": True,
+    }
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="CurveYield source-bound local formal dispatcher")
     commands = parser.add_subparsers(dest="operation", required=True)
@@ -496,7 +598,30 @@ def main() -> int:
     compilers.add_argument("--requirements", type=Path, required=True)
     compilers.add_argument("--artifacts", type=Path, required=True)
     compilers.add_argument("--request", type=Path, required=True)
+    autoprover = commands.add_parser("prepare-autoprover", help="I03.1 upstream AutoProver native CLI qualification")
+    autoprover.add_argument("--work-dir", type=Path, required=True)
     args = parser.parse_args()
+    if args.operation == "prepare-autoprover":
+        work_dir = args.work_dir.resolve()
+        report_path = work_dir / "autoprover-bootstrap-v1.json"
+        begun = time.monotonic()
+        try:
+            result = prepare_upstream_autoprover(work_dir)
+            result["elapsedSeconds"] = round(time.monotonic() - begun, 2)
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps(result, indent=2) + "\n")
+            print("LOCAL_AUTOPROVER_BOOTSTRAP_PASS:", str(report_path))
+            return 0
+        except Exception as exc:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps({
+                "status": "UPSTREAM_AUTOPROVER_INSTALL_FAILED", "stage": "I03.1",
+                "error": str(exc),
+                "elapsedSeconds": round(time.monotonic() - begun, 2),
+                "notAProofResult": True
+            }, indent=2) + "\n")
+            print("LOCAL_AUTOPROVER_BOOTSTRAP_FAILURE: " + str(exc), file=sys.stderr)
+            return 1
     if args.operation == "prepare-compilers":
         work_dir = args.work_dir.resolve()
         report_path = work_dir / "compiler-bootstrap-v1.json"
