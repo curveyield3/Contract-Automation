@@ -519,7 +519,9 @@ def prepare_authenticated_target_map(*, work_dir: Path, source_zip: Path,
                                      artifact_request_file: Path, request_file: Path,
                                      manifest_file: Path, identity_file: Path,
                                      artifacts_file: Path, preflight_run_id: int,
-                                     preflight_head_sha: str) -> dict[str, object]:
+                                     preflight_head_sha: str,
+                                     toolchain_report: Path | None = None,
+                                     compiler_report: Path | None = None) -> dict[str, object]:
     """I04.1: real source-bound, inert ZIP intake and all-target inventory.
 
     The only executable operations are this trusted Python program's data parsers.
@@ -598,7 +600,10 @@ def prepare_authenticated_target_map(*, work_dir: Path, source_zip: Path,
     root.chmod(0o700)
     extracted = admit_source_to_private_scratch(
         work_dir=root, source_zip=source_zip, request_file=request_file,
-        manifest_file=manifest_file, require_native_tools=False,
+        manifest_file=manifest_file,
+        toolchain_report=toolchain_report,
+        compiler_report=compiler_report,
+        require_native_tools=toolchain_report is not None and compiler_report is not None,
     )
     eligible: list[dict[str, object]] = []
     ineligible: list[dict[str, object]] = []
@@ -751,6 +756,53 @@ def prepare_authenticated_target_map(*, work_dir: Path, source_zip: Path,
         "contextDocumentCreated": True, "needsNativeCertoraBuild": False,
     }
 
+
+def verify_cached_native_toolchain(root: Path) -> dict[str, object]:
+    """Trust the restored *bytes*, never just an Actions cache-hit indicator.
+
+    This is a source-blind verifier: the pinned toolchain's manifest + actual
+    native JAR, optimizer, CLI and available solvers are mandatory.
+    """
+    root = root.resolve()
+    manifest = root / "toolchain-bootstrap-v1.json"
+    if not manifest.is_file():
+        raise RuntimeError("Restored native cache lacks its original trusted receipt")
+    record = json.loads(manifest.read_text())
+    if (record.get("status") != "LOCAL_TOOLCHAIN_STARTUP_VERIFIED" or
+            record.get("proverGitCommit") != PROVER_COMMIT or
+            record.get("noCloudProver") is not True):
+        raise RuntimeError("Restored native source pin and no-cloud identity invalid")
+    installed = root / "installed"
+    if str(installed) != str(Path(str(record.get("certoraDir", ""))).resolve()):
+        raise RuntimeError("Restored native CERTORA install path changed")
+    emv, optimizer, cli = [installed / name for name in
+                           ("emv.jar", "tac_optimizer", "certoraRun.py")]
+    for file in (emv, optimizer, cli):
+        if not file.is_file() or file.is_symlink() or file.stat().st_size == 0:
+            raise RuntimeError("Native cache missing runnable tool asset: " + file.name)
+    if (digest(emv) != record.get("emvJarSha256") or
+            digest(optimizer) != record.get("optimizerSha256") or
+            not os.access(cli, os.X_OK) or not os.access(optimizer, os.X_OK)):
+        raise RuntimeError("Restored native binary integrity mismatch")
+    java_home = Path(os.environ.get("JAVA_HOME", ""))
+    if not java_home.is_absolute():
+        raise RuntimeError("Current runner did not configure Java 19")
+    version = invoke([str(java_home / "bin/java"), "-version"])
+    if not re.search(r'(?:openjdk|java) version "19(?:[."]|$)', version):
+        raise RuntimeError("Restored native distribution requires Java 19")
+    for tool in ("z3", "cvc5", "llvm-symbolizer", "llvm-dwarfdump"):
+        if shutil.which(tool) is None:
+            raise RuntimeError("Restored runner lacks required native solver/LLVM: " + tool)
+    python = root / "python-venv" / "bin" / "python"
+    if not python.is_file():
+        raise RuntimeError("Restored Certora Python dependency environment missing")
+    help_text = invoke([str(python), str(cli), "-h"])
+    if not help_text:
+        raise RuntimeError("Restored native Certora CLI did not start")
+    print("RESTORED_CERTORA_NATIVE_BINARIES_VERIFIED", flush=True)
+    return record
+
+
 def prepare_upstream_autoprover(root: Path) -> dict[str, object]:
     """I03.1 real pinned host installation; no AutoProver pipeline/LLM/proofs."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -854,6 +906,8 @@ def prepare_upstream_autoprover(root: Path) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="CurveYield source-bound local formal dispatcher")
     commands = parser.add_subparsers(dest="operation", required=True)
+    restored = commands.add_parser("verify-native-cache", help="I05.2 verify restored native Certora binaries")
+    restored.add_argument("--work-dir", type=Path, required=True)
     prep = commands.add_parser("prepare-toolchain", help="I02.1 local Certora Prover build and startup")
     prep.add_argument("--work-dir", type=Path, required=True)
     compilers = commands.add_parser("prepare-compilers", help="I02.2 native source-bound compiler qualification")
@@ -872,9 +926,14 @@ def main() -> int:
     intake.add_argument("--artifacts", type=Path, required=True)
     intake.add_argument("--preflight-run-id", type=int, required=True)
     intake.add_argument("--preflight-head-sha", required=True)
+    intake.add_argument("--native-toolchain", type=Path)
+    intake.add_argument("--native-compilers", type=Path)
     autoprover = commands.add_parser("prepare-autoprover", help="I03.1 upstream AutoProver native CLI qualification")
     autoprover.add_argument("--work-dir", type=Path, required=True)
     args = parser.parse_args()
+    if args.operation == "verify-native-cache":
+        verify_cached_native_toolchain(args.work_dir)
+        return 0
     if args.operation == "prepare-source-targets":
         result = prepare_authenticated_target_map(
             work_dir=args.work_dir, source_zip=args.source_zip,
@@ -883,6 +942,8 @@ def main() -> int:
             identity_file=args.identity, artifacts_file=args.artifacts,
             preflight_run_id=args.preflight_run_id,
             preflight_head_sha=args.preflight_head_sha,
+            toolchain_report=args.native_toolchain,
+            compiler_report=args.native_compilers,
         )
         print(json.dumps(result, sort_keys=True), flush=True)
         return 0
