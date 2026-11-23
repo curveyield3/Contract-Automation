@@ -565,8 +565,20 @@ jobs:
           done
           test -n "$artifact" || { echo "::error::Private MiMo rendezvous timed out"; exit 1; }
           mkdir -p "$RUNNER_TEMP/mimo-private"
-          gh run download "$id" --repo "$GITHUB_REPOSITORY" \
-            --name "$artifact" --dir "$RUNNER_TEMP/mimo-private"
+          # The artifacts listing can show a newly finalized rendezvous before
+          # the ZIP download endpoint becomes readable. Retry that transient
+          # upload/index race without redispatching MiMo or weakening identity.
+          downloaded=false
+          for download_attempt in $(seq 1 12); do
+            if gh run download "$id" --repo "$GITHUB_REPOSITORY" \
+              --name "$artifact" --dir "$RUNNER_TEMP/mimo-private"; then
+              downloaded=true
+              break
+            fi
+            echo "::notice::Exact MiMo artifact not yet downloadable (attempt $download_attempt/12)"
+            sleep 5
+          done
+          test "$downloaded" = true || { echo "::error::Exact MiMo readiness artifact remained unavailable"; exit 1; }
           test -s "$RUNNER_TEMP/mimo-private/rendezvous.json"
           jq -e --arg repo "$GITHUB_REPOSITORY" \
                 --arg sha "$GITHUB_SHA" \
