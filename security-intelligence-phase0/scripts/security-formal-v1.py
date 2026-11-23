@@ -67,12 +67,23 @@ def local_toolchain(root: Path) -> dict[str, object]:
     env = os.environ.copy()
     env["CERTORA"] = str(target)
     env["DEBIAN_FRONTEND"] = "noninteractive"
+    # This pinned Certora source targets Java 19; setup-java supplies the JDK.
+    # Force the JVM loading KSP providers to match the compiled Java 19 classes.
+    java_home_text = env.get("JAVA_HOME", "")
+    java_home = Path(java_home_text) if java_home_text else Path(".")
+    if not java_home.is_absolute() or not (java_home / "bin" / "java").is_file():
+        raise RuntimeError("I02.1 requires setup-java JDK19 and an absolute JAVA_HOME")
+    env["PATH"] = f"{java_home / 'bin'}:{env.get('PATH', '')}"
+    java_version = invoke(["java", "-version"], env=env)
+    if not re.search(r'(?:openjdk|java) version "19(?:[."]|$)', java_version, re.IGNORECASE):
+        raise RuntimeError(f"Expected Java 19 runtime, observed: {java_version[:300]}")
+
 
     # Tool installation occurs before the admitted ZIP is retrieved or unpacked.
     invoke(["sudo", "apt-get", "update"], env=env)
     invoke(["sudo", "apt-get", "install", "-y", "--no-install-recommends",
             "ca-certificates", "curl", "git", "build-essential", "cmake",
-            "pkg-config", "clang", "llvm", "openjdk-21-jdk", "python3-venv",
+            "pkg-config", "clang", "llvm", "unzip", "python3-venv",
             "python3-pip", "z3", "cvc5"], env=env)
     rustup = shutil.which("rustup")
     if not rustup:
@@ -124,13 +135,24 @@ def local_toolchain(root: Path) -> dict[str, object]:
         env["PATH"] = f"{target_bin}:{env['PATH']}"
 
     # Native build tasks only: no Gradle test, forge test, fuzz, or deployment.
-    # Gradle's pinned project enables parallel KSP tasks; qualify a serial,
-    # non-incremental native build first to avoid CI memory contention.
-    # --stacktrace retains the real Kotlin compiler cause on any failure.
+    # Upstream Gradle 7.2 wrapper cannot run on Java 19; official compatibility
+    # starts with Gradle 7.6. Select a checksum-verified 7.6.5 runtime while
+    # keeping the pinned upstream checkout completely unchanged.
+    gradle_zip = root / "gradle-7.6.5-bin.zip"
+    invoke(["curl", "--fail", "--location", "--retry", "3", "--output",
+            str(gradle_zip),
+            "https://services.gradle.org/distributions/gradle-7.6.5-bin.zip"], env=env)
+    gradle_sha = "b812fec0edb7d27e0ae35955887bb2954536fa3e44edaf481150da058e154d9a"
+    if digest(gradle_zip) != gradle_sha:
+        raise RuntimeError("Pinned Gradle 7.6.5 distribution SHA256 mismatch")
+    invoke(["unzip", "-q", str(gradle_zip), "-d", str(root)], env=env)
+    gradle = root / "gradle-7.6.5" / "bin" / "gradle"
+    invoke([str(gradle), "--version"], cwd=source, env=env)
+    # --stacktrace retains the native Kotlin compiler cause on failure.
     build_flags = ["--no-daemon", "--no-parallel", "--max-workers=1",
                    "-Pksp.incremental=false", "--stacktrace"]
-    invoke(["bash", "./gradlew", "assemble", *build_flags], cwd=source, env=env)
-    invoke(["bash", "./gradlew", "copy-assets", *build_flags], cwd=source, env=env)
+    invoke([str(gradle), "assemble", *build_flags], cwd=source, env=env)
+    invoke([str(gradle), "copy-assets", *build_flags], cwd=source, env=env)
     invoke([sys.executable, "-m", "venv", str(venv)], cwd=source, env=env)
     python = venv / "bin" / "python"
     invoke([str(python), "-m", "pip", "install", "--disable-pip-version-check",
@@ -149,7 +171,7 @@ def local_toolchain(root: Path) -> dict[str, object]:
     for name, args in (
         ("java", ["java", "-version"]),
         ("rustc", ["rustc", "--version"]),
-        ("gradle", ["bash", "./gradlew", "--version"]),
+        ("gradle", [str(gradle), "--version"]),
         ("z3", ["z3", "-version"]),
         ("cvc5", ["cvc5", "--version"]),
         ("llvm-symbolizer", ["llvm-symbolizer", "--version"]),
