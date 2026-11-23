@@ -123,7 +123,7 @@ def _wire_body(direction: str, request_number: int, raw: bytes,
                 file=sys.stderr, flush=True)
         print(_TRACE_PREFIX + json.dumps(
             {**prefix, "event": "END", "chunkCount": len(chunks)},
-            separators=(",", ":"), file=sys.stderr, flush=True)
+            separators=(",", ":")), file=sys.stderr, flush=True)
 
 
 def _log_request(request: httpx.Request) -> None:

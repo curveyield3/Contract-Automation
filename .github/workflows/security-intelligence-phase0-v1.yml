@@ -28,6 +28,13 @@ jobs:
         shell: bash
         run: |
           if [ -f security-intelligence-phase0/requests/active-request.json ]; then
+            # The DAI trace adapter is imported only much later in formal.
+            # Catch malformed Python BEFORE collecting source or starting MiMo.
+            # Syntax compilation is not a test or source execution.
+            python3 -m py_compile \
+              security-intelligence-phase0/scripts/security-formal-v1.py \
+              security-intelligence-phase0/formal-mimo-provider/curveyield_formal_mimo/__init__.py
+            echo 'AUTOPROVER_INTEGRATION_SYNTAX_PREFLIGHT_PASS'
             echo 'request_present=true' >> "$GITHUB_OUTPUT"
           else
             echo 'request_present=false' >> "$GITHUB_OUTPUT"
