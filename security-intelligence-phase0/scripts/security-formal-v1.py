@@ -1138,7 +1138,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                     try:
                         # stat's comm field is parenthesized and may contain spaces.
                         fields = (Path("/proc") / entry.name / "stat").read_text().rsplit(")", 1)[1].split()
-                        if int(fields[2]) == pid:
+                        # Process-group CPU includes nested native solvers.
+                        if int(fields[3]) == pid:
                             ticks += int(fields[11]) + int(fields[12])
                     except (OSError, ValueError, IndexError):
                         continue
@@ -1208,6 +1209,32 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             return ("busy" if busy else "idle"), (float(tokens),)
         except (OSError, ValueError, TypeError, OverflowError):
             return "unknown", None
+
+    def matched_mimo_run_state(run_id: int) -> tuple[str, str]:
+        """Inspect only the matching model workflow lifecycle via GitHub."""
+        if not isinstance(run_id, int) or run_id <= 0:
+            return "unavailable", "invalid-id"
+        try:
+            response = subprocess.run(
+                ["gh", "api",
+                 f"repos/curveyield3/Contract-Automation/actions/runs/{run_id}"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, timeout=12, check=False)
+            if response.returncode:
+                return "unavailable", "api-failure"
+            result = json.loads(response.stdout)
+            if result.get("id") != run_id:
+                return "unavailable", "identity-mismatch"
+            state, conclusion = result.get("status"), result.get("conclusion")
+            if state == "completed":
+                return "completed", str(conclusion) if conclusion in (
+                    "success", "failure", "cancelled", "timed_out",
+                    "action_required", "neutral", "skipped", "stale") else "unknown"
+            if state in ("queued", "in_progress", "waiting", "pending", "requested"):
+                return "active", state
+            return "unavailable", "unknown-status"
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return "unavailable", "api-unavailable"
 
     mapping = json.loads(target_map_file.read_text())
     native = json.loads(native_toolchain_file.read_text())
@@ -1386,6 +1413,10 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         previous_cpu: int | None = None
         previous_files: tuple[int, int, int] | None = None
         previous_model: tuple[float, ...] | None = None
+        mimo_monitor_errors = 0
+        last_mimo_check = 0.
+        mimo_run_state = "active"
+        mimo_run_reason = "in_progress"
         print(json.dumps({
             "stage": "I06.2", "event": "TARGET_STARTED",
             "targetIndex": index + 1, "targetCount": len(target_list),
@@ -1405,6 +1436,30 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                     except subprocess.TimeoutExpired:
                         pass
                     now = time.monotonic()
+                    if now - last_mimo_check >= 30:
+                        mimo_run_state, mimo_run_reason = matched_mimo_run_state(
+                            int(session["mimoWorkflowRunId"]))
+                        last_mimo_check = now
+                        mimo_monitor_errors = (mimo_monitor_errors + 1
+                                               if mimo_run_state == "unavailable" else 0)
+                        if mimo_run_state == "completed" or mimo_monitor_errors >= 3:
+                            record["status"] = ("MIMO_DEPENDENCY_TERMINATED" if
+                                                mimo_run_state == "completed" else
+                                                "MIMO_MONITOR_UNAVAILABLE")
+                            record["mimoTerminalReason"] = mimo_run_reason
+                            print(json.dumps({
+                                "stage": "I06.2", "event": "MIMO_DEPENDENCY_FAILURE",
+                                "targetIndex": index + 1, "targetCount": len(target_list),
+                                "mimoState": mimo_run_state, "reason": mimo_run_reason,
+                            }, sort_keys=True), flush=True)
+                            os.killpg(process.pid, signal.SIGTERM)
+                            try:
+                                process.wait(timeout=12)
+                            except subprocess.TimeoutExpired:
+                                os.killpg(process.pid, signal.SIGKILL)
+                                process.wait(timeout=10)
+                            record["nativeExitCode"] = process.returncode
+                            break
                     cpu, changed = local_progress(process.pid, project, logfile)
                     model_state, model_counters = private_model_progress(ip)
                     local_cpu_advanced = previous_cpu is not None and cpu > previous_cpu
@@ -1436,6 +1491,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                             "localCpuAdvanced": local_cpu_advanced,
                             "privateOutputAdvanced": local_files_advanced,
                             "modelTokensAdvanced": model_advanced,
+                            "mimoWorkflowState": mimo_run_state,
+                            "mimoMonitorErrors": mimo_monitor_errors,
                             "watchdog": ("ACTIVE" if quiet_for < idle_stall_seconds else
                                          "POSSIBLE_STALL_MODEL_BUSY" if model_state == "busy" else
                                          "TELEMETRY_UNCERTAIN" if model_state == "unknown" else
@@ -1591,6 +1648,11 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                 record["status"] = "NATIVE_RULE_VERDICTS_CAPTURED"
         outcome["results"].append(record)
         persist()
+        if record["status"] in ("MIMO_DEPENDENCY_TERMINATED", "MIMO_MONITOR_UNAVAILABLE"):
+            outcome["status"] = record["status"]
+            outcome["elapsedSeconds"] = round(time.monotonic() - begun, 2)
+            persist()
+            return 1
         print(json.dumps({
             "stage": "I06.2", "targetIndex": index + 1,
             "targetCount": len(target_list), "status": record["status"],

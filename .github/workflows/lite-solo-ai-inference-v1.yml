@@ -649,8 +649,11 @@ jobs:
           set -euo pipefail
           server_pid="$(cat "$RUNNER_TEMP/certora-rendezvous/server.pid")"
           origin_job="$(jq -er .originFormalJobId "$RUNNER_TEMP/certora-rendezvous/rendezvous.json")"
-          deadline=$(( $(date +%s) + 15600 ))
-          while [ "$(date +%s)" -lt "$deadline" ]; do
+          start_time="$(date +%s)"
+          last_report=0
+          unhealthy_checks=0
+          model_ip="$(tailscale ip -4 | head -n 1)"
+          while true; do
             kill -0 "$server_pid" 2>/dev/null || { echo "::error::CERTORA_MIMO_SERVER_DIED"; exit 1; }
             response=''
             for attempt in 1 2 3; do
@@ -673,10 +676,22 @@ jobs:
                 exit 1
                 ;;
             esac
+            if curl --fail --silent --max-time 8 "http://$model_ip:8080/health" >/dev/null; then
+              unhealthy_checks=0
+            else
+              unhealthy_checks=$(( unhealthy_checks + 1 ))
+              if [ "$unhealthy_checks" -ge 4 ]; then
+                echo "::error::CERTORA_MIMO_HEALTH_UNAVAILABLE"
+                exit 1
+              fi
+            fi
+            now="$(date +%s)"
+            if [ "$(( now - last_report ))" -ge 60 ]; then
+              echo "MIMO_SESSION_ACTIVE originFormalJob=$origin_job originJobStatus=$status uptimeSeconds=$(( now - start_time )) healthFailures=$unhealthy_checks"
+              last_report="$now"
+            fi
             sleep 20
           done
-          echo "::error::CERTORA_MIMO_SESSION_LIFETIME_EXHAUSTED"
-          exit 1
       - name: Stop private Certora model and revoke ephemeral Tailscale connection
         if: always() && inputs.mode == 'certora_qa'
         shell: bash

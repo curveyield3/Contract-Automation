@@ -10,7 +10,7 @@ permissions:
   actions: read
 concurrency:
   group: security-preflight-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   admit:
     outputs:
@@ -811,6 +811,7 @@ jobs:
       - name: Execute pinned upstream AutoProver against authenticated targets
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           CERTORA_AI_COMPOSER_PGHOST: 127.0.0.1
           CERTORA_AI_COMPOSER_PGPORT: '5432'
           COMPOSER_EMBED_DEVICE: cpu
