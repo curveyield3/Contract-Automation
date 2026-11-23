@@ -419,7 +419,14 @@ jobs:
             rpc_opts=(-DGGML_RPC=ON -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DLLAMA_BUILD_TESTS=OFF)
             targets+=(ggml-rpc-server)
           fi
-          cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF "${rpc_opts[@]}"
+          # The private Certora API never serves a browser UI. Prevent an
+          # unrelated Hugging Face UI-asset download from blocking the model.
+          # Preserve the embedded UI behavior of public/autonomous/campaign modes.
+          ui_opts=()
+          if [ "$AUDIT_AI_MODE" = certora_qa ]; then
+            ui_opts=(-DLLAMA_USE_PREBUILT_UI=OFF -DLLAMA_BUILD_UI=OFF)
+          fi
+          cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF "${ui_opts[@]}" "${rpc_opts[@]}"
           cmake --build "$RUNNER_TEMP/llama-build" --target "${targets[@]}" -j 4
       - name: Fetch and verify pinned MiMo weights
         if: inputs.mode != 'autonomous_start'
