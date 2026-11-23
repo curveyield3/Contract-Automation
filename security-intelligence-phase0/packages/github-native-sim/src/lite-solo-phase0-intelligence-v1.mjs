@@ -474,6 +474,12 @@ async function runMythrilDetectors({build,sourceCommit,auditScope,out}){
     executionTimeoutSeconds:12,solverTimeoutMilliseconds:3000,wallTimeoutMilliseconds:30000,
     onchainData:false,dependencyPruning:true};
   let eligibleCount=0,skippedNonExecutableCount=0,skippedUnlinkedCount=0;
+  // Probe the interpreter once. Without this, a broken Mythril environment
+  // produces the same false per-contract failure for every compiled artifact.
+  const startup=await runProcess({command:'myth',args:['--help'],cwd:stage,timeoutMs:15000,
+    env:{...process.env,HOME:'/tmp',XDG_CACHE_HOME:'/tmp',CI:'true'}});
+  if(startup.exitCode!==0||startup.timedOut)
+    throw Error('Mythril runtime startup unavailable: '+cleanText(startup.stderr).slice(-1600));
   for(const [index,artifact] of relevant.entries()){
     const qualifiedName=String(artifact.qualifiedName??artifact.sourceName+':'+artifact.contractName);
     const raw=String(artifact.deployedBytecode??'').trim();
