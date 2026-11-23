@@ -1115,6 +1115,253 @@ def run_authenticated_existing_cvl(*, target_map_file: Path, native_toolchain_fi
     return outcome
 
 
+
+def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file: Path,
+                                compiler_file: Path, session_file: Path,
+                                output_file: Path, per_target_timeout: int = 1320) -> int:
+    """I06.2: call pinned upstream console AutoProver sequentially, locally.
+
+    No target-local failure is a clean verdict. Only observed upstream native
+    output can establish CVL property success, never a zero process exit alone.
+    """
+    import signal
+
+    mapping = json.loads(target_map_file.read_text())
+    native = json.loads(native_toolchain_file.read_text())
+    compilers = json.loads(compiler_file.read_text())
+    session = json.loads(session_file.read_text())
+    origin = int(os.environ["GITHUB_RUN_ID"])
+    attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
+    head = os.environ["GITHUB_SHA"]
+    if (mapping.get("status") != "AUTHENTICATED_SOURCE_TARGETS_READY"
+            or native.get("status") != "LOCAL_TOOLCHAIN_STARTUP_VERIFIED"
+            or native.get("proverGitCommit") != PROVER_COMMIT
+            or compilers.get("status") != "COMPILER_TOOLCHAIN_VERIFIED"
+            or mapping.get("source") != compilers.get("source")
+            or session.get("status") != "SOURCE_BOUND_PRIVATE_MIMO_CONNECTED"
+            or session.get("originRunId") != origin
+            or session.get("originRunAttempt") != attempt
+            or session.get("originHeadSha") != head
+            or session.get("requestId") != mapping.get("requestId")
+            or session.get("sourceSha256") != mapping["source"]["archiveSha256"]
+            or session.get("nativeProverHashSha256") != native.get("emvJarSha256")
+            or session.get("privateTailscaleValidated") is not True
+            or session.get("cloudProviderCalls") != 0):
+        raise RuntimeError("I06.2 missing same-run private model/source/native provenance")
+    ip = os.environ.get("CURVEYIELD_MIMO_VERIFIED_TAILNET_IP", "")
+    endpoint = os.environ.get("CURVEYIELD_MIMO_BASE_URL", "")
+    if (not re.fullmatch(r"100[.]\d+[.]\d+[.]\d+", ip)
+            or endpoint != f"http://{ip}:8080/v1"):
+        raise RuntimeError("I06.2 private MiMo endpoint was not bound to rendezvous")
+    source = Path(str(mapping["privateSourceRoot"])).resolve(strict=True)
+    scratch = target_map_file.parent.resolve(strict=True)
+    runner_temp = Path(os.environ.get("RUNNER_TEMP", "/invalid")).resolve()
+    if not source.is_relative_to(scratch) or not scratch.is_relative_to(runner_temp):
+        raise RuntimeError("I06.2 source outside trusted private runner scratch")
+    prover = Path(str(native["certoraDir"])).resolve(strict=True)
+    if digest(prover / "emv.jar") != native.get("emvJarSha256"):
+        raise RuntimeError("I06.2 local Certora Prover binary pin mismatch")
+    upstream = runner_temp / "curve-certora-formal" / "AutoProver"
+    if (not (upstream / ".venv/bin/console-autoprove").is_file()
+            or not (upstream / "uv.lock").is_file()):
+        raise RuntimeError("I06.2 exact upstream console AutoProver installation absent")
+    if subprocess.run(["git", "-C", str(upstream), "rev-parse", "HEAD"],
+                      capture_output=True, text=True, check=True).stdout.strip() != AUTOPROVER_COMMIT:
+        raise RuntimeError("I06.2 AutoProver source pin mismatch")
+    target_list = mapping.get("eligible", [])
+    if not isinstance(target_list, list) or not target_list:
+        raise RuntimeError("I06.2 requires actual authenticated eligible contracts")
+    versions = {c["version"]: c for c in compilers.get("compilerToolchain", [])}
+    for version, c in versions.items():
+        if digest(Path(c["executable"])) != c.get("sha256"):
+            raise RuntimeError("I06.2 installed native Solidity compiler digest changed")
+    private = scratch / "private" / "autoprover"
+    private.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tool_bin = private / "verified-solc-bin"
+    tool_bin.mkdir(mode=0o700, exist_ok=True)
+    for version, c in versions.items():
+        executable = Path(c["executable"]).resolve(strict=True)
+        # The pinned AutoSetup expects solc8.N names, while the original
+        # compiler qualification stores fully versioned executable names.
+        alias = tool_bin / ("solc" + ".".join(version.split(".")[:2]).removeprefix("0."))
+        if alias.exists() or alias.is_symlink():
+            alias.unlink()
+        alias.symlink_to(executable)
+    outcome: dict[str, object] = {
+        "schemaVersion": "curveyield-autoprover-execution-v1",
+        "stage": "I06.2",
+        "status": "RUNNING",
+        "originRunId": origin,
+        "originRunAttempt": attempt,
+        "originCommit": head,
+        "requestId": mapping["requestId"],
+        "sourceSha256": mapping["source"]["archiveSha256"],
+        "nativeProverCommit": PROVER_COMMIT,
+        "nativeProverSha256": native["emvJarSha256"],
+        "autoProverCommit": AUTOPROVER_COMMIT,
+        "model": "lite-solo-mimo-v1",
+        "mimoRunId": session.get("mimoWorkflowRunId"),
+        "eligibleTargetCount": len(target_list),
+        "results": [],
+        "sourceExecuted": False,
+        "cloudProviderCalls": 0,
+        "modelRequestCount": None,
+        "nativeProofsProved": None,
+    }
+    def persist():
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = output_file.with_suffix(".part")
+        tmp.write_text(json.dumps(outcome, sort_keys=True, indent=2) + "\n")
+        tmp.replace(output_file)
+        output_file.chmod(0o600)
+    persist()
+    begun = time.monotonic()
+    # 330-minute Actions formal job includes source collection, native setup,
+    # DB/RAG bootstrap and cleanup. Reserve time for the remaining runner steps.
+    deadline = begun + 16500
+    for index, target in enumerate(target_list):
+        record: dict[str, object] = {
+            "target": target["target"],
+            "compilerVersion": target["compilerVersion"],
+            "abiDigestSha256": target["abiDigestSha256"],
+            "status": "NOT_RUN",
+            "nativePropertyVerdicts": [],
+        }
+        remaining = deadline - time.monotonic()
+        if remaining < 120:
+            record["status"] = "NOT_RUN_GLOBAL_TIME_BUDGET"
+            outcome["results"].append(record)
+            persist()
+            continue
+        per_timeout = min(per_target_timeout, int(remaining - 50))
+        project = private / ("target-" + str(index).zfill(2)) / "source"
+        project.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        shutil.copytree(source, project)
+        local_contract = project / target["sourcePath"]
+        if not local_contract.is_file() or local_contract.is_symlink():
+            record["status"] = "AUTHENTICATED_TARGET_COPY_MISSING"
+            outcome["results"].append(record)
+            persist()
+            continue
+        compiler = Path(versions[target["compilerVersion"]]["executable"]).resolve(strict=True)
+        default_alias = tool_bin / "solc"
+        if default_alias.exists() or default_alias.is_symlink():
+            default_alias.unlink()
+        default_alias.symlink_to(compiler)
+        env = uncredentialed_formal_environment(private, {
+            "PATH": ":".join([str(tool_bin), str(upstream / ".venv/bin"),
+                              str(prover), os.environ.get("PATH", "/usr/bin:/bin")]),
+            "JAVA_HOME": os.environ.get("JAVA_HOME", ""),
+            "CERTORA": str(prover),
+        })
+        env.update({
+            "CURVEYIELD_MIMO_VERIFIED_TAILNET_IP": ip,
+            "CURVEYIELD_MIMO_BASE_URL": endpoint,
+            "CERTORA_AI_COMPOSER_PGHOST": "127.0.0.1",
+            "CERTORA_AI_COMPOSER_PGPORT": "5432",
+            "COMPOSER_EMBED_DEVICE": "cpu",
+            "PREAUDIT_LLM_BACKEND": "local",
+            "PREAUDIT_LOCAL_LLM_BASE_URL": endpoint,
+            "PREAUDIT_LOCAL_LLM_MODEL": "lite-solo-mimo-v1",
+        })
+        # Run the actual pinned console-autoprove main after activating the
+        # MiMo-only AutoSetup adapter in the same process. Starting a separate
+        # CLI process would lose its fail-closed runtime patch.
+        entry = (
+            "import sys; "
+            "from curveyield_formal_mimo import configure_local_mimo_runtime; "
+            "configure_local_mimo_runtime(); "
+            "from composer.cli.console_autoprove import main; "
+            "sys.argv=['console-autoprove']+sys.argv[1:]; "
+            "raise SystemExit(main())"
+        )
+        args = [
+            str(upstream / ".venv/bin/python"), "-c", entry,
+            str(project), str(target["target"]), str(mapping["targetContextFile"]),
+            "--heavy-model", "lite-solo-mimo-v1",
+            "--lite-model", "lite-solo-mimo-v1",
+            "--max-concurrent", "1",
+            "--max-cpu-tasks", "1",
+            "--run-mode", "comprehensive",
+            "--tokens", "4096",
+        ]
+        logfile = project.parent / "native-autoprover-private.log"
+        original_spec_digests = {
+            p.relative_to(project).as_posix(): digest(p)
+            for p in project.rglob("*.spec") if p.is_file()
+        }
+        record["originalSpecDigests"] = original_spec_digests
+        started = time.monotonic()
+        with logfile.open("wb") as out:
+            process = subprocess.Popen(args, cwd=upstream, env=env, stdout=out,
+                                       stderr=subprocess.STDOUT, start_new_session=True)
+            try:
+                returncode = process.wait(timeout=per_timeout)
+                record["nativeExitCode"] = returncode
+                record["status"] = ("NATIVE_AUTOPROVER_EXIT_ZERO_UNCLASSIFIED"
+                                    if returncode == 0 else "NATIVE_AUTOPROVER_FAILED")
+            except subprocess.TimeoutExpired:
+                record["status"] = "TARGET_TIMEOUT"
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=12)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=10)
+            finally:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=10)
+        logfile.chmod(0o600)
+        record["elapsedSeconds"] = round(time.monotonic() - started, 2)
+        record["privateNativeLogSha256"] = digest(logfile)
+        final_specs = {
+            p.relative_to(project).as_posix(): digest(p)
+            for p in project.rglob("*.spec") if p.is_file()
+        }
+        record["finalSpecDigests"] = final_specs
+        record["generatedSpecCount"] = len(set(final_specs) - set(original_spec_digests))
+        internal = project / ".certora_internal" / "autoProve"
+        run_index = internal / "components_to_prover_runs.json"
+        if run_index.is_file():
+            try:
+                links = json.loads(run_index.read_text())
+                if isinstance(links, dict):
+                    record["nativeProverRunReferences"] = len(links)
+            except (ValueError, OSError):
+                record["nativeProverRunReferences"] = None
+        job_info = internal / "job_info.json"
+        if job_info.is_file():
+            try:
+                info = json.loads(job_info.read_text())
+                record["nativeJobInfoSha256"] = digest(job_info)
+                if isinstance(info, dict) and isinstance(info.get("token_usage"), dict):
+                    record["observedTokenUsage"] = info["token_usage"]
+            except (ValueError, OSError):
+                pass
+        if record["status"] == "NATIVE_AUTOPROVER_EXIT_ZERO_UNCLASSIFIED":
+            if record["generatedSpecCount"] == 0 or not record.get("nativeProverRunReferences"):
+                record["status"] = "INCOMPLETE_NO_NATIVE_PROOF_EVIDENCE"
+            else:
+                # Native rule verdicts still require decoding authentic Prover
+                # result artifacts; a CLI zero exit does not prove any rule.
+                record["status"] = "NATIVE_AUTOPROVER_RESULTS_REQUIRE_RULE_VERDICTS"
+        outcome["results"].append(record)
+        persist()
+        print(json.dumps({
+            "stage": "I06.2", "targetIndex": index + 1,
+            "targetCount": len(target_list), "status": record["status"],
+            "generatedSpecCount": record.get("generatedSpecCount", 0),
+            "elapsedSeconds": record.get("elapsedSeconds", 0),
+        }, sort_keys=True), flush=True)
+    outcome["status"] = "EXECUTED_NATIVE_TARGETS_NEED_RULE_CLASSIFICATION"
+    outcome["elapsedSeconds"] = round(time.monotonic() - begun, 2)
+    persist()
+    # No fabricated success. I07 reads the saved source-bound native outputs
+    # and may publish a truthful incomplete/blocked report.
+    return 0 if all(r["status"] != "NOT_RUN" for r in outcome["results"]) else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="CurveYield source-bound local formal dispatcher")
     commands = parser.add_subparsers(dest="operation", required=True)
@@ -1147,7 +1394,20 @@ def main() -> int:
     old_cvl.add_argument("--native-toolchain", type=Path, required=True)
     old_cvl.add_argument("--native-compilers", type=Path, required=True)
     old_cvl.add_argument("--output", type=Path, required=True)
+    generated = commands.add_parser("run-autoprover", help="I06.2 pinned upstream local AutoProver")
+    generated.add_argument("--target-map", type=Path, required=True)
+    generated.add_argument("--native-toolchain", type=Path, required=True)
+    generated.add_argument("--native-compilers", type=Path, required=True)
+    generated.add_argument("--session", type=Path, required=True)
+    generated.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.operation == "run-autoprover":
+        return run_authenticated_autoprover(
+            target_map_file=args.target_map,
+            native_toolchain_file=args.native_toolchain,
+            compiler_file=args.native_compilers,
+            session_file=args.session,
+            output_file=args.output)
     if args.operation == "run-existing-cvl":
         result = run_authenticated_existing_cvl(
             target_map_file=args.target_map,
