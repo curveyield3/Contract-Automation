@@ -7,6 +7,7 @@ entry-point lookup or adapter construction; live inference is I05.2.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from functools import cache
 from ipaddress import IPv4Address, IPv4Network
 import os
@@ -62,6 +63,113 @@ def _private_chat_completions_base_url() -> str:
             or parsed.username is not None or parsed.password is not None):
         raise RuntimeError("MiMo destination is not the matched private /v1 endpoint")
     return f"http://{ip}:8080/v1"
+
+
+class MiMoProtocolError(ValueError):
+    """Invalid local model transport/JSON/tool envelope; never an accepted answer."""
+
+
+def validate_mimo_chat_completion(body: dict, request: dict) -> None:
+    """Validate the native chat-completions envelope before AutoProver can use it.
+
+    Only AutoProver can execute tools. A model tool call is not evidence of
+    execution; its name must have been offered in the exact originating request.
+    Pydantic validates each structured *schema* after this transport check.
+    """
+    if not isinstance(body, dict) or not isinstance(request, dict):
+        raise MiMoProtocolError("MiMo completion/request is not JSON object")
+    if request.get("model") != MODEL_ID or body.get("model") != MODEL_ID:
+        raise MiMoProtocolError("MiMo completion model identity mismatch")
+    choices = body.get("choices")
+    if not isinstance(choices, list) or len(choices) != 1:
+        raise MiMoProtocolError("Expected exactly one local completion choice")
+    choice = choices[0]
+    if not isinstance(choice, dict) or choice.get("finish_reason") in ("length", "content_filter"):
+        raise MiMoProtocolError("MiMo completion truncated or filtered")
+    msg = choice.get("message")
+    if not isinstance(msg, dict) or msg.get("role") != "assistant":
+        raise MiMoProtocolError("Invalid local assistant message")
+    offered = set()
+    for tool in request.get("tools") or []:
+        if not isinstance(tool, dict) or tool.get("type") != "function":
+            raise MiMoProtocolError("Unknown requested tool type")
+        fn = tool.get("function")
+        if not isinstance(fn, dict) or not isinstance(fn.get("name"), str):
+            raise MiMoProtocolError("Invalid offered tool declaration")
+        offered.add(fn["name"])
+    raw_calls = msg.get("tool_calls") or []
+    if not isinstance(raw_calls, list):
+        raise MiMoProtocolError("MiMo tool_calls must be a list")
+    seen_ids: set[str] = set()
+    for call in raw_calls:
+        if not isinstance(call, dict) or call.get("type") != "function":
+            raise MiMoProtocolError("Unexpected tool-call envelope")
+        call_id = call.get("id")
+        fn = call.get("function")
+        if (not isinstance(call_id, str) or not call_id or call_id in seen_ids
+                or not isinstance(fn, dict) or fn.get("name") not in offered
+                or not isinstance(fn.get("arguments"), str)):
+            raise MiMoProtocolError("Unknown, duplicated, or malformed MiMo tool call")
+        seen_ids.add(call_id)
+        try:
+            args = json.loads(fn["arguments"])
+        except json.JSONDecodeError as exc:
+            raise MiMoProtocolError("MiMo tool arguments are not JSON") from exc
+        if not isinstance(args, dict):
+            raise MiMoProtocolError("MiMo function arguments must be a JSON object")
+    if raw_calls and request.get("tool_choice") == "none":
+        raise MiMoProtocolError("Model invoked tools explicitly prohibited by AutoProver")
+    content = msg.get("content")
+    if not raw_calls and (not isinstance(content, str) or not content.strip()):
+        raise MiMoProtocolError("MiMo returned no textual answer or tool calls")
+    fmt = request.get("response_format")
+    if isinstance(fmt, dict) and fmt.get("type") == "json_schema":
+        if raw_calls or not isinstance(content, str):
+            raise MiMoProtocolError("Schema-directed MiMo reply is not JSON text")
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise MiMoProtocolError("Schema-directed MiMo response is not valid JSON") from exc
+        if not isinstance(parsed, dict):
+            raise MiMoProtocolError("Schema-directed MiMo output must be a JSON object")
+
+
+def _check_local_response(response: httpx.Response) -> None:
+    if response.status_code >= 400:
+        return  # The upstream SDK handles network/status failures.
+    req = response.request
+    if req.url.path != "/v1/chat/completions":
+        raise MiMoProtocolError("Unexpected model API path")
+    try:
+        request_json = json.loads(req.content)
+        response_json = response.json()
+    except (ValueError, TypeError) as exc:
+        raise MiMoProtocolError("Local completion is not JSON") from exc
+    validate_mimo_chat_completion(response_json, request_json)
+
+
+def _sync_local_response(response: httpx.Response) -> None:
+    response.read()
+    _check_local_response(response)
+
+
+async def _async_local_response(response: httpx.Response) -> None:
+    await response.aread()
+    _check_local_response(response)
+
+
+def _trusted_http_client() -> httpx.Client:
+    return httpx.Client(
+        trust_env=False,
+        event_hooks={"response": [_sync_local_response]},
+    )
+
+
+def _trusted_async_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        trust_env=False,
+        event_hooks={"response": [_async_local_response]},
+    )
 
 
 class MiMoInlineRenderer:
@@ -121,6 +229,8 @@ class MiMoService(ProviderServiceBase):
 
     def should_retry(self, exc: Exception) -> bool:
         # Never retry semantic/schema errors as though they were transient.
+        if isinstance(exc, MiMoProtocolError):
+            return True  # Existing graphcore bounded retry policy; no fake success.
         if isinstance(exc, (httpx.TransportError, TimeoutError, openai.APIConnectionError)):
             return True
         if isinstance(exc, openai.APIStatusError):
@@ -172,12 +282,13 @@ class MiMoModelProvider:
             api_key=SecretStr("local-network-only"),
             use_responses_api=False,
             max_tokens=self.options.tokens,
-            timeout=300.0,
+            timeout=900.0,
             max_retries=2,
-            streaming=True,
+            streaming=False,
+            disable_streaming=True,
             # Ignore ambient HTTP(S)_PROXY and other inherited proxy settings.
-            http_client=httpx.Client(trust_env=False),
-            http_async_client=httpx.AsyncClient(trust_env=False),
+            http_client=_trusted_http_client(),
+            http_async_client=_trusted_async_http_client(),
             callbacks=standard_callbacks(self.price_provider),
         )
 
