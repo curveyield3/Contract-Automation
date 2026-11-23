@@ -18,7 +18,7 @@ jobs:
   admit:
     # Preserve source-scanner behavior; skip only the isolated I02.1 bootstrap commit.
     if: >-
-      github.event.head_commit.message != 'I02.1: run local Certora bootstrap'
+      github.event.head_commit.message != 'I02.2: qualify native Solidity compilers'
     outputs:
       request_present: ${{ steps.request_present.outputs.request_present }}
     runs-on: ubuntu-latest
@@ -245,7 +245,7 @@ jobs:
   certora-bootstrap-i02:
     # I02.1-only native toolchain qualification, not the I05 formal-analysis job.
     if: >-
-      github.event.head_commit.message == 'I02.1: run local Certora bootstrap'
+      github.event.head_commit.message == 'I02.2: qualify native Solidity compilers'
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
@@ -254,21 +254,29 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Select Certora's required Java 19 for KSP and native build
-        uses: actions/setup-java@v4
+      - name: Download source-bound prior successful Phase 0 evidence (not source ZIP)
+        uses: actions/download-artifact@v4
         with:
-          distribution: temurin
-          java-version: '19'
-      - name: Build and invoke local Certora Prover and SMT toolchain
+          repository: curveyield3/Contract-Automation
+          run-id: 45144607076
+          name: security-preflight-evidence-45144607076-1
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/certora-i02-evidence
+      - name: Native source-bound Solidity compiler qualification
         shell: bash
         run: |
           set -euo pipefail
-          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-toolchain --work-dir "$RUNNER_TEMP/curve-certora-i02"
-      - name: Publish native bootstrap evidence
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-compilers \
+            --work-dir "$RUNNER_TEMP/curve-certora-i02" \
+            --identity "$RUNNER_TEMP/certora-i02-evidence/BUILD_AND_SOURCE_IDENTITY_v1.json" \
+            --requirements "$RUNNER_TEMP/certora-i02-evidence/TOOLCHAIN_REQUIREMENTS_v1.json" \
+            --artifacts "$RUNNER_TEMP/certora-i02-evidence/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json" \
+            --request security-intelligence-phase0/requests/active-request.json
+      - name: Publish authenticated compiler qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: certora-i02-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/curve-certora-i02/toolchain-bootstrap-v1.json
-          if-no-files-found: warn
+          name: certora-i02-compilers-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/curve-certora-i02/compiler-bootstrap-v1.json
+          if-no-files-found: error
           retention-days: 7
