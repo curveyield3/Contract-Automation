@@ -133,7 +133,7 @@ jobs:
           path: .preflight-input
       - name: Create writable output for sandboxed collection
         run: mkdir -p .preflight-output
-      - name: Run copied compiler, Source Intelligence, inventory and Slither in network-isolated sandbox
+      - name: Run copied compiler, Source Intelligence, inventory, Slither and Wake in network-isolated sandbox
         shell: bash
         run: |
           set -euo pipefail
@@ -182,8 +182,11 @@ jobs:
         run: |
           set -euo pipefail
           test -s .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json
+          # Wake must produce a real native evidence artifact, including explicit
+          # zero-Solidity non-applicability; absence is never an all-clear.
+          test -s .preflight-output/evidence/WAKE_v1.json
           # Source-only collection is a valid PARTIAL data handoff, never an
-          # ABI, AST, Slither, or security-coverage success claim.
+          # ABI, AST, Slither, Wake, or security-coverage success claim.
           jq -e '.source.expectedSha256 == .source.observedSha256 and
                    .sourceAdmissionVerified == true and
                    (.status=="COLLECTED" or .status=="PARTIAL")' \
@@ -194,6 +197,11 @@ jobs:
                    .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
             echo "::warning::Source-only structural inventory preserved; compilation and AST evidence unavailable"
           else
+            jq -e '((.componentStatus=="COMPLETED" and .solidityUnitCount>0 and
+                        (.unitResults|length)==.solidityUnitCount and
+                        (.unitResults|all(.status=="COMPLETED"))) or
+                       (.componentStatus=="NOT_APPLICABLE" and .solidityUnitCount==0))' \
+              .preflight-output/evidence/WAKE_v1.json >/dev/null
             test -s .preflight-output/evidence/REVIEW_INVENTORY_v1.json
             jq -e --slurpfile inv .preflight-output/evidence/REVIEW_INVENTORY_v1.json '
               .buildStatus=="completed" and
