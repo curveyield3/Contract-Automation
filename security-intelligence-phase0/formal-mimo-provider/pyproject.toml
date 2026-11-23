@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=67"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "curveyield-formal-mimo"
+version = "1.0.0"
+description = "Local-only MiMo provider for pinned upstream Certora AutoProver"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.entry-points."certora.autoprove.llm_provider"]
+curveyield-mimo = "curveyield_formal_mimo:MIMO_SPEC"
+
+[tool.setuptools]
+packages = ["curveyield_formal_mimo"]
