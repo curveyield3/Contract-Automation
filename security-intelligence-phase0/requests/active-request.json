@@ -1,11 +1,11 @@
 {
   "schemaVersion": "curveyield-security-preflight-request-v1",
   "runMode": "SOURCE_PREFLIGHT",
-  "requestId": "dai-ethereum-autoprover-i062-r1-20261123-1c384141058f",
+  "requestId": "dai-ethereum-autoprover-i062-r2-20261123-0b2ac5fe0f4c",
   "source": {
-    "repository": "curveyield3/Audit-Controller",
-    "commit": "b66ee2b336c949c3ecb0621307b9c188f8f81e89",
-    "archivePath": "campaigns/audit-preview-live-ethereum-Dai-6b175474 r1/source/live-ethereum-Dai-6b175474.zip",
-    "archiveSha256": "1c384141058f50d53b9e58b89c0b83aa60bd1066406f017d177121de332705f2"
+    "repository": "curveyield3/Contract-Automation",
+    "commit": "85724e7bbb2e3bcbd373ea2464917b62e37541c9",
+    "archivePath": "process/audit-source-initialization/dai-live-no-deploy-script-v1.zip",
+    "archiveSha256": "0b2ac5fe0f4cb5e60d2f496d517f7251f9e121c5ac21244b8c8d1ccb0b9be8df"
   }
 }
