@@ -15,7 +15,7 @@ concurrency:
   # Keep the I02-only compiler qualification from queueing behind an unintended
   # source rescanning push. The source scanner jobs and their logic are unchanged.
   group: >-
-    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || (github.event.head_commit.message == 'I03.1: install upstream AutoProver' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' || github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG')))) && 'formal-qualification' || 'source-scan' }}
+    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary' || (github.event.head_commit.message == 'I03.1: install upstream AutoProver' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' || (github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG' || github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping')))) && 'formal-qualification' || 'source-scan' }}
   cancel-in-progress: false
 jobs:
   admit:
@@ -256,7 +256,8 @@ jobs:
       github.event.head_commit.message == 'I03.1: install upstream AutoProver' ||
       github.event.head_commit.message == 'FORMAL-QUALIFY: I03.2 register local MiMo provider' ||
       github.event.head_commit.message == 'FORMAL-QUALIFY: I03.3 enforce local MiMo response routing' ||
-      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG'
+      github.event.head_commit.message == 'FORMAL-QUALIFY: I03.4 prepare local PostgreSQL RAG' ||
+      github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping'
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
@@ -619,3 +620,48 @@ jobs:
               "realFormalRunnerMustRestoreDB": True,
           }, sort_keys=True))
           PY
+      - name: Download exact I04.1 source admission artifact
+        if: >-
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping'
+        uses: actions/download-artifact@v4
+        with:
+          repository: curveyield3/Contract-Automation
+          run-id: 45175991294
+          name: security-preflight-source-45175991294-1
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/formal-i04-admitted
+      - name: Download exact I04.1 preflight source/build evidence
+        if: >-
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping'
+        uses: actions/download-artifact@v4
+        with:
+          repository: curveyield3/Contract-Automation
+          run-id: 45175991294
+          name: security-preflight-evidence-45175991294-1
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/formal-i04-evidence
+      - name: Authenticate original ZIP and prepare every eligible formal target
+        if: >-
+          github.event.head_commit.message == 'FORMAL-QUALIFY: I04.1 authenticate source target mapping'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-source-targets \
+            --work-dir "$RUNNER_TEMP/formal-i04-targets" \
+            --source-zip "$RUNNER_TEMP/formal-i04-admitted/source.zip" \
+            --artifact-request "$RUNNER_TEMP/formal-i04-admitted/request.json" \
+            --request security-intelligence-phase0/requests/active-request.json \
+            --manifest "$RUNNER_TEMP/formal-i04-evidence/PREFLIGHT_MANIFEST_v1.json" \
+            --identity "$RUNNER_TEMP/formal-i04-evidence/BUILD_AND_SOURCE_IDENTITY_v1.json" \
+            --artifacts "$RUNNER_TEMP/formal-i04-evidence/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json" \
+            --preflight-run-id 45175991294 \
+            --preflight-head-sha a1519f9ffdb519b2552285bf3fc335b02b3f0822
+          jq -e '.status == "AUTHENTICATED_SOURCE_TARGETS_READY" and
+                  .requestId == "cyvlsdt-v64-20261123-a2d46ab6bf63" and
+                  (.eligible | length) > 0 and
+                  .noSourceAuthoredScriptsExecuted == true and
+                  .noSourceCompiledOrProved == true' \
+            "$RUNNER_TEMP/formal-i04-targets/target-map-v1.json" >/dev/null
+          test -s "$RUNNER_TEMP/formal-i04-targets/source-context-v1.md"
+          echo 'Private authenticated source and native compiler-target map are ready; no source scripts or tests executed.'
+          # Do not upload raw source, private target JSON, or source context.
