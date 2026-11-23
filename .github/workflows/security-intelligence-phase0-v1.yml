@@ -121,11 +121,30 @@ jobs:
           jq -e '.schemaVersion=="curveyield-standalone-toolchain-plan-v1"
                  and (.sourceZipSha256 | test("^[0-9a-f]{64}$"))' \
                  .preflight-plan/toolchain-plan.json >/dev/null
+      - name: Set up existing Docker build for source-blind scanner caching
+        uses: docker/setup-buildx-action@v3
+      - name: Restore or publish pinned Slither, Wake and Mythril scanner layers
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: security-intelligence-phase0/Dockerfile
+          target: phase0-scanner-tools
+          load: true
+          tags: curveyield-security-scanners:local
+          cache-from: type=gha,scope=curve-security-scanners-v1
+          cache-to: type=gha,scope=curve-security-scanners-v1,mode=max
+          provenance: false
+          sbom: false
       - name: Build source-blind isolated toolchain BEFORE downloading untrusted ZIP
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker build --file security-intelligence-phase0/Dockerfile --tag curveyield-security-preflight:local .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: security-intelligence-phase0/Dockerfile
+          load: true
+          tags: curveyield-security-preflight:local
+          cache-from: type=gha,scope=curve-security-scanners-v1
+          provenance: false
+          sbom: false
       - name: Receive exact source artifact; no source credentials in collector job
         uses: actions/download-artifact@v4
         with:
@@ -414,12 +433,28 @@ jobs:
                   (.status=="NOT_APPLICABLE_NO_EXISTING_CVL" or
                    .status=="EXISTING_CVL_NATIVE_ATTEMPTED")' \
             "$RUNNER_TEMP/native-existing-cvl-v1.json" >/dev/null
-      - name: Install pinned upstream AutoProver with native local Certora path
+      - name: Restore pinned public upstream AutoProver environment
+        id: cached_autoprover
+        uses: actions/cache/restore@v4
+        with:
+          key: curve-autoprover-81d9626c249a70c0a0f0648a89de175443c0344c-graph-c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc-py312-uv0139-v1-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            ${{ runner.temp }}/curve-certora-formal/AutoProver
+            ${{ runner.temp }}/curve-certora-formal/uv-bootstrap
+      - name: Install and reverify pinned upstream AutoProver with native local Certora path
         shell: bash
         run: |
           set -euo pipefail
           python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-autoprover \
             --work-dir "$RUNNER_TEMP/curve-certora-formal"
+      - name: Save pinned public upstream AutoProver environment before model execution
+        if: ${{ steps.cached_autoprover.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          key: curve-autoprover-81d9626c249a70c0a0f0648a89de175443c0344c-graph-c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc-py312-uv0139-v1-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            ${{ runner.temp }}/curve-certora-formal/AutoProver
+            ${{ runner.temp }}/curve-certora-formal/uv-bootstrap
       - name: Initialize ephemeral localhost PostgreSQL and real CVL documentation index
         shell: bash
         env:
