@@ -398,11 +398,14 @@ def uncredentialed_formal_environment(private_root: Path, tool_paths: dict[str, 
 
 def admit_source_to_private_scratch(*, work_dir: Path, source_zip: Path,
                                     request_file: Path, manifest_file: Path,
-                                    toolchain_report: Path, compiler_report: Path) -> Path:
+                                    toolchain_report: Path | None = None,
+                                    compiler_report: Path | None = None,
+                                    require_native_tools: bool = True) -> Path:
     """I02.3 source boundary, first exercised with authentic input at I04/I05.
 
-    Call only AFTER trusted native toolchains are prepared in this same runner.
-    Source is inert ZIP data here; no source files, npm hooks, build scripts,
+    I04 target inventory is inert data-only extraction, without a compiler.
+    I05 live proving still requires native executable toolchain receipts and
+    same-run tools. No source files, npm hooks, build scripts,
     forge tests, deployment scripts, or generated shell commands are executed.
     """
     if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -412,13 +415,11 @@ def admit_source_to_private_scratch(*, work_dir: Path, source_zip: Path,
     if root == scratch_parent or scratch_parent not in root.parents:
         raise RuntimeError("Formal scratch must be a private child of RUNNER_TEMP")
     for supplied in (work_dir, source_zip, request_file, manifest_file,
-                     toolchain_report, compiler_report):
+                     *(p for p in (toolchain_report, compiler_report) if p is not None)):
         if supplied.is_symlink():
             raise RuntimeError("Source admission refuses symlinked input: " + str(supplied))
     request = json.loads(request_file.read_text())
     manifest = json.loads(manifest_file.read_text())
-    toolchain = json.loads(toolchain_report.read_text())
-    compilers = json.loads(compiler_report.read_text())
     if (request.get("schemaVersion") != "curveyield-security-preflight-request-v1" or
             request.get("runMode") != "SOURCE_PREFLIGHT"):
         raise RuntimeError("Formal source request type mismatch")
@@ -432,19 +433,25 @@ def admit_source_to_private_scratch(*, work_dir: Path, source_zip: Path,
             any(observed.get(k) != source.get(k)
                 for k in ("repository", "commit", "archivePath"))):
         raise RuntimeError("Source ZIP and preflight run identity are not independently authenticated")
-    if (toolchain.get("status") != "LOCAL_TOOLCHAIN_STARTUP_VERIFIED" or
-            toolchain.get("proverGitCommit") != PROVER_COMMIT or
-            toolchain.get("noCloudProver") is not True or
-            compilers.get("status") != "COMPILER_TOOLCHAIN_VERIFIED" or
-            compilers.get("source") != source):
-        raise RuntimeError("Current-run trusted native toolchain receipts missing or inconsistent")
+    if require_native_tools:
+        if toolchain_report is None or compiler_report is None:
+            raise RuntimeError("Live source admission requires current-run native toolchain receipts")
+        toolchain = json.loads(toolchain_report.read_text())
+        compilers = json.loads(compiler_report.read_text())
+        if (toolchain.get("status") != "LOCAL_TOOLCHAIN_STARTUP_VERIFIED" or
+                toolchain.get("proverGitCommit") != PROVER_COMMIT or
+                toolchain.get("noCloudProver") is not True or
+                compilers.get("status") != "COMPILER_TOOLCHAIN_VERIFIED" or
+                compilers.get("source") != source):
+            raise RuntimeError("Current-run native toolchain identity missing or inconsistent")
     if (not source_zip.is_file() or
             source_zip.stat().st_size > 16 * 1024 * 1024 or
             digest(source_zip) != expected):
         raise RuntimeError("Admitted source ZIP bytes or original archive digest invalid")
-    for artifact in ("emv.jar", "certoraRun.py", "tac_optimizer"):
-        if not (Path(str(toolchain.get("certoraDir"))) / artifact).is_file():
-            raise RuntimeError("Current runner lacks verified local Certora asset " + artifact)
+    if require_native_tools:
+        for artifact in ("emv.jar", "certoraRun.py", "tac_optimizer"):
+            if not (Path(str(toolchain.get("certoraDir"))) / artifact).is_file():
+                raise RuntimeError("Current runner lacks verified local Certora asset " + artifact)
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     root.chmod(0o700)
     private = root / "private"
