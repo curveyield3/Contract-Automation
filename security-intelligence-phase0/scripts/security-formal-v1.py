@@ -17,6 +17,8 @@ import shutil
 import subprocess
 import sys
 import time
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 PROVER_REPO = "https://github.com/Certora/CertoraProver.git"
 PROVER_COMMIT = "4ef546d00cd67d333914845dead2d72081e1f014"
@@ -198,12 +200,192 @@ def local_toolchain(root: Path) -> dict[str, object]:
     }
 
 
+def prepare_compiler_toolchain(*, root: Path, identity_file: Path,
+                               requirements_file: Path, artifacts_file: Path,
+                               request_file: Path) -> dict[str, object]:
+    """I02.2: qualify source-bound native compiler versions, without extracting source."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        raise RuntimeError("I02.2 compiler qualification requires GitHub Actions")
+    identity = json.loads(identity_file.read_text())
+    requirements = json.loads(requirements_file.read_text())
+    compiled = json.loads(artifacts_file.read_text())
+    request = json.loads(request_file.read_text())
+
+    if identity.get("schemaVersion") != "curveyield-lite-phase0-build-source-identity-v1":
+        raise RuntimeError("I02.2 unexpected authenticated source identity schema")
+    if identity.get("status") != "PASS" or identity.get("build", {}).get("status") != "completed":
+        raise RuntimeError("I02.2 requires verified completed source build")
+    if requirements.get("schemaVersion") != "curveyield-standalone-toolchain-plan-v1":
+        raise RuntimeError("I02.2 unrecognized toolchain requirement source")
+    if compiled.get("schemaVersion") != "curveyield-phase0-execution-build-artifacts-v2":
+        raise RuntimeError("I02.2 unrecognized native build artifact schema")
+    if request.get("schemaVersion") != "curveyield-security-preflight-request-v1":
+        raise RuntimeError("I02.2 must bind exactly one authorized existing source request")
+    source = identity.get("source", {})
+    required = request.get("source", {})
+    artifact_source = compiled.get("source", {})
+    for field in ("repository", "commit", "archivePath", "archiveSha256"):
+        if not isinstance(required.get(field), str) or source.get(field) != required[field]:
+            raise RuntimeError("I02.2 source/request identity mismatch: " + field)
+        if artifact_source.get(field) != required[field]:
+            raise RuntimeError("I02.2 compiled artifact source mismatch: " + field)
+    expected = required["archiveSha256"]
+    if not re.fullmatch(r"[a-f0-9]{64}", expected):
+        raise RuntimeError("I02.2 source archive SHA256 invalid")
+    if (source.get("archiveSha256Observed") != expected or
+            requirements.get("sourceZipSha256") != expected):
+        raise RuntimeError("I02.2 source artifact checksum not authenticated")
+    if identity.get("requestId") != request.get("requestId"):
+        raise RuntimeError("I02.2 request ID differs from prior certified source")
+    build = identity["build"]
+    if build.get("buildConfigurationDigestSha256") != compiled.get("buildConfigurationDigestSha256"):
+        raise RuntimeError("I02.2 compiled settings digest mismatch")
+    units = build.get("compilationUnits")
+    if not isinstance(units, list) or not units:
+        raise RuntimeError("I02.2 no authenticated compilation units")
+    sol_versions = set(build.get("compilerVersions") or [build.get("compilerVersion")])
+    if not sol_versions or any(not re.fullmatch(r"\d+\.\d+\.\d+", str(v)) for v in sol_versions):
+        raise RuntimeError("I02.2 unqualified Solidity compiler versions")
+    if set(requirements.get("solidityCompilerCandidates") or []) < sol_versions:
+        raise RuntimeError("I02.2 source build compiler version absent from toolchain requirements")
+    if not all(u.get("compilerVersion") in sol_versions for u in units):
+        raise RuntimeError("I02.2 inconsistent compilation-unit compiler version")
+    artifacts = compiled.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        raise RuntimeError("I02.2 no compiler-observed ABI/link artifacts")
+    artifact_versions = {a.get("compilerVersion") for a in artifacts}
+    if artifact_versions - sol_versions:
+        raise RuntimeError("I02.2 contract artifact compiler version mismatch")
+    for artifact in artifacts:
+        if (not isinstance(artifact.get("abi"), list) or
+                not isinstance(artifact.get("linkReferences"), dict) or
+                not isinstance(artifact.get("deployedLinkReferences"), dict)):
+            raise RuntimeError("I02.2 compiled artifact missing ABI or link identity")
+        if not re.fullmatch(r"[a-f0-9]{64}", str(artifact.get("abiDigestSha256", ""))):
+            raise RuntimeError("I02.2 invalid ABI identity digest")
+
+    root.mkdir(parents=True, exist_ok=True)
+    base = "https://binaries.soliditylang.org/linux-amd64"
+    with urlopen(Request(base + "/list.json",
+                         headers={"User-Agent": "CurveYield-Trusted-Compiler-Qualification/1"}),
+                 timeout=45) as response:
+        release_index = json.load(response)
+    if not isinstance(release_index, dict) or not isinstance(release_index.get("builds"), list):
+        raise RuntimeError("I02.2 official Solidity release manifest invalid")
+    release_map = release_index.get("releases", {})
+    native_compilers = []
+    for version in sorted(sol_versions):
+        binary_name = release_map.get(version)
+        matches = [entry for entry in release_index["builds"]
+                   if entry.get("path") == binary_name and entry.get("version") == version]
+        if len(matches) != 1 or not re.fullmatch(
+                r"solc-linux-amd64-v\d+\.\d+\.\d+\+commit\.[a-fA-F0-9]+",
+                str(binary_name)):
+            raise RuntimeError("I02.2 compiler not uniquely pinned by official manifest: " + version)
+        release = matches[0]
+        expected_hash = str(release.get("sha256", "")).removeprefix("0x").lower()
+        if not re.fullmatch(r"[a-f0-9]{64}", expected_hash):
+            raise RuntimeError("I02.2 no official SHA256 compiler identity: " + version)
+        compiler = root / "native-compilers" / ("solc-v" + version)
+        compiler.parent.mkdir(parents=True, exist_ok=True)
+        with urlopen(Request(base + "/" + quote(binary_name, safe=""),
+                             headers={"User-Agent": "CurveYield-Trusted-Compiler-Qualification/1"}),
+                     timeout=90) as response, compiler.open("wb") as target:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                target.write(chunk)
+        observed_hash = digest(compiler)
+        if observed_hash != expected_hash:
+            raise RuntimeError("I02.2 compiler binary SHA256 mismatch: " + version)
+        compiler.chmod(0o755)
+        reported = invoke([str(compiler), "--version"])
+        if not re.search(r"Version:\s*" + re.escape(version) + r"\+commit\.", reported):
+            raise RuntimeError("I02.2 native Solidity executable version mismatch: " + version)
+        native_compilers.append({
+            "language": "Solidity", "version": version, "executable": str(compiler),
+            "sha256": observed_hash, "nativeVersionOutput": reported
+        })
+
+    scope = identity.get("auditScope", {})
+    prefixes = scope.get("inScopePaths")
+    exclusions = scope.get("excludedPaths")
+    if not isinstance(prefixes, list) or not prefixes or not isinstance(exclusions, list):
+        raise RuntimeError("I02.2 authentic audit scope invalid")
+    scoped = [a for a in artifacts
+              if any(str(a.get("sourceName", "")).startswith(prefix) for prefix in prefixes)
+              and not any(str(a.get("sourceName", "")).startswith(ex) for ex in exclusions)]
+    if not scoped:
+        raise RuntimeError("I02.2 authenticated build has no in-scope compiled artifacts")
+    scope_digest = hashlib.sha256(json.dumps([
+        (a["qualifiedName"], a["compilerVersion"], a["abiDigestSha256"],
+         a.get("deployedBytecodeDigestSha256"), a["linkReferences"],
+         a["deployedLinkReferences"])
+        for a in scoped
+    ], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {
+        "status": "COMPILER_TOOLCHAIN_VERIFIED", "stage": "I02.2",
+        "source": required, "requestId": request["requestId"],
+        "buildConfigurationDigestSha256": build["buildConfigurationDigestSha256"],
+        "compilerInputSha256": build.get("compilerInputSha256"),
+        "compilerOutputSha256": build.get("compilerOutputSha256"),
+        "compilationUnits": [{
+            "unitId": u.get("unitId"), "compilerVersion": u.get("compilerVersion"),
+            "settings": u.get("settings"),
+            "compilerInputSha256": u.get("compilerInputSha256"),
+            "compilerOutputSha256": u.get("compilerOutputSha256")
+        } for u in units],
+        "compilerToolchain": native_compilers,
+        "inScopeCompiledArtifactCount": len(scoped),
+        "inScopeABIAndLinkIdentitySha256": scope_digest,
+        "artifactSetDigestSha256": compiled.get("artifactSetDigestSha256"),
+        "sourceEvidenceDigests": {
+            "BUILD_AND_SOURCE_IDENTITY_v1.json": digest(identity_file),
+            "TOOLCHAIN_REQUIREMENTS_v1.json": digest(requirements_file),
+            "PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json": digest(artifacts_file)
+        },
+        "compilerMatchingSourceRecompileDeferredTo": "I05.2",
+        "noSourceZipRead": True, "noContractTests": True,
+        "notAProofResult": True
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="CurveYield source-bound local formal dispatcher")
     commands = parser.add_subparsers(dest="operation", required=True)
     prep = commands.add_parser("prepare-toolchain", help="I02.1 local Certora Prover build and startup")
     prep.add_argument("--work-dir", type=Path, required=True)
+    compilers = commands.add_parser("prepare-compilers", help="I02.2 native source-bound compiler qualification")
+    compilers.add_argument("--work-dir", type=Path, required=True)
+    compilers.add_argument("--identity", type=Path, required=True)
+    compilers.add_argument("--requirements", type=Path, required=True)
+    compilers.add_argument("--artifacts", type=Path, required=True)
+    compilers.add_argument("--request", type=Path, required=True)
     args = parser.parse_args()
+    if args.operation == "prepare-compilers":
+        work_dir = args.work_dir.resolve()
+        report_path = work_dir / "compiler-bootstrap-v1.json"
+        begun = time.monotonic()
+        try:
+            result = prepare_compiler_toolchain(root=work_dir,
+                identity_file=args.identity, requirements_file=args.requirements,
+                artifacts_file=args.artifacts, request_file=args.request)
+            result["elapsedSeconds"] = round(time.monotonic() - begun, 2)
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps(result, indent=2) + "\n")
+            print("LOCAL_CERTORA_COMPILERS_PASS:", str(report_path))
+            return 0
+        except Exception as exc:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps({
+                "status": "COMPILER_TOOLCHAIN_FAILED", "stage": "I02.2",
+                "error": str(exc),
+                "elapsedSeconds": round(time.monotonic() - begun, 2),
+                "notAProofResult": True
+            }, indent=2) + "\n")
+            print("LOCAL_CERTORA_COMPILERS_FAILURE: " + str(exc), file=sys.stderr)
+            return 1
     if args.operation == "prepare-toolchain":
         work_dir = args.work_dir.resolve()
         report_path = work_dir / "toolchain-bootstrap-v1.json"
