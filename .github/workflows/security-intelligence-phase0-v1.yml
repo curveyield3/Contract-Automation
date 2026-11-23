@@ -447,6 +447,137 @@ jobs:
                   (.eligible | length)>0 and
                   .noSourceAuthoredScriptsExecuted==true and .noSourceCompiledOrProved==true' \
             "$RUNNER_TEMP/formal-targets/target-map-v1.json" >/dev/null
+      - name: Install pinned upstream AutoProver with native local Certora path
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py prepare-autoprover \
+            --work-dir "$RUNNER_TEMP/curve-certora-formal"
+      - name: Initialize ephemeral localhost PostgreSQL and real CVL documentation index
+        shell: bash
+        env:
+          CERTORA_AI_COMPOSER_PGHOST: 127.0.0.1
+          CERTORA_AI_COMPOSER_PGPORT: '5432'
+          COMPOSER_EMBED_DEVICE: cpu
+          UV_NO_DEV: '1'
+          UV_LINK_MODE: copy
+        run: |
+          set -euo pipefail
+          source="$RUNNER_TEMP/curve-certora-formal/AutoProver"
+          uv="$RUNNER_TEMP/curve-certora-formal/uv-bootstrap/bin/uv"
+          docs="$RUNNER_TEMP/certora-docs"
+          docsenv="$RUNNER_TEMP/docs-env"
+          pg="certora-formal-$GITHUB_RUN_ID"
+          docker run --rm -d --name "$pg" \
+            --publish 127.0.0.1:5432:5432 \
+            --env POSTGRES_USER=postgres --env POSTGRES_PASSWORD=postgres_admin_password \
+            --mount "type=bind,source=$source/composer/scripts/init-db.sql,target=/docker-entrypoint-initdb.d/init-db.sql,readonly" \
+            pgvector/pgvector:pg16 >/dev/null
+          ready=false
+          for iteration in $(seq 1 90); do
+            if docker exec "$pg" pg_isready -U postgres -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true || { docker logs "$pg" | tail -n 80; exit 1; }
+          (
+            cd "$source"
+            "$uv" sync --locked --no-dev --extra certora-cli --extra cpu --extra ml \
+              --group ragbuild --python "$(command -v python3)"
+          )
+          git clone --depth=1 https://github.com/Certora/Documentation.git "$docs"
+          python3 -m venv "$docsenv"
+          "$docsenv/bin/pip" install --disable-pip-version-check -r "$docs/requirements.txt"
+          cp "$docs/conf.py" "$docs/docs/cvl/conf.py"
+          (
+            cd "$docs/docs/cvl"
+            "$docsenv/bin/sphinx-build" -M singlehtml . tmp
+          )
+          mkdir -p "$source/scripts/prover-docs"
+          cp "$docs/docs/cvl/tmp/singlehtml/index.html" "$source/scripts/prover-docs/cvl.html"
+          test -s "$source/scripts/prover-docs/cvl.html"
+          (
+            cd "$source"
+            "$source/.venv/bin/python" -m composer.scripts.ragbuild \
+              --output 'postgresql://rag_user:rag_password@127.0.0.1:5432/rag_db' \
+              "$source/scripts/prover-docs/cvl.html"
+          )
+          "$source/.venv/bin/python" - <<'PY'
+          import json, psycopg
+          with psycopg.connect("postgresql://rag_user:rag_password@127.0.0.1:5432/rag_db") as conn:
+              with conn.cursor() as cur:
+                  cur.execute("SELECT count(*) FROM rag.documents")
+                  count = cur.fetchone()[0]
+                  cur.execute("SELECT count(*) FROM rag.manual_sections")
+                  sections = cur.fetchone()[0]
+                  cur.execute("SELECT count(*) FROM pg_indexes WHERE schemaname='rag' AND indexname='documents_embedding_idx'")
+                  indexes = cur.fetchone()[0]
+          if count <= 0 or sections <= 0 or indexes != 1:
+              raise RuntimeError("I05.2 ephemeral upstream RAG index incomplete")
+          print(json.dumps({"status":"LOCAL_RAG_CURRENT_RUN_READY","documents":count,"sections":sections}))
+          PY
+          "$uv" pip install --python "$source/.venv/bin/python" --no-deps --editable \
+            "$GITHUB_WORKSPACE/security-intelligence-phase0/formal-mimo-provider"
+      - name: Await unique origin-bound private MiMo readiness artifact
+        id: matched_mimo
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : "${MIMO_RUN_ID:?Exact existing MiMo run ID missing}"
+          id="$MIMO_RUN_ID"
+          prefix="certora-mimo-rendezvous-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$id-"
+          artifact=''
+          for attempt in $(seq 1 960); do
+            run_state="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
+            observed_sha="$(jq -r .head_sha <<< "$run_state")"
+            test "$observed_sha" = "$GITHUB_SHA" || {
+              echo "::error::MiMo workflow head changed before private readiness"; exit 1;
+            }
+            artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts?per_page=100")"
+            names="$(jq -c --arg prefix "$prefix" '[.artifacts[] | select(.expired==false and (.name|startswith($prefix))) | .name]' <<< "$artifacts")"
+            matches="$(jq 'length' <<< "$names")"
+            if [ "$matches" -eq 1 ]; then
+              artifact="$(jq -r '.[0]' <<< "$names")"
+              break
+            fi
+            if [ "$matches" -gt 1 ]; then
+              echo "::error::Ambiguous private MiMo rendezvous artifacts"; exit 1;
+            fi
+            if [ "$(jq -r .status <<< "$run_state")" = completed ]; then
+              echo "::error::MiMo workflow terminated without its exact private readiness artifact"; exit 1;
+            fi
+            sleep 8
+          done
+          test -n "$artifact" || { echo "::error::Private MiMo rendezvous timed out"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/mimo-private"
+          gh run download "$id" --repo "$GITHUB_REPOSITORY" \
+            --name "$artifact" --dir "$RUNNER_TEMP/mimo-private"
+          test -s "$RUNNER_TEMP/mimo-private/rendezvous.json"
+          jq -e --arg repo "$GITHUB_REPOSITORY" \
+                --arg sha "$GITHUB_SHA" \
+                --argjson origin "$GITHUB_RUN_ID" \
+                --argjson attempt "$GITHUB_RUN_ATTEMPT" \
+                --argjson mimo "$id" '
+            .schemaVersion=="curveyield-certora-mimo-rendezvous-v1" and
+            .readiness=="READY" and .originRepository==$repo and
+            .originHeadSha==$sha and .mimoHeadSha==$sha and
+            .originRunId==$origin and .originRunAttempt==$attempt and
+            .mimoRunId==$mimo and
+            .modelAlias=="lite-solo-mimo-v1" and
+            .modelRevision=="4371da10c84fb26da3592d4cf312d24aa82b7b65" and
+            .llamaCommit=="8642541b255bfb5dc39cd351a178be09013a55d6" and
+            (.modelSha256|test("^[a-f0-9]{64}$")) and
+            (.tailscaleIPv4|test("^100[.][0-9]+[.][0-9]+[.][0-9]+$")) and
+            .port==8080 and .endpointPath=="/v1/chat/completions" ' \
+            "$RUNNER_TEMP/mimo-private/rendezvous.json" >/dev/null
+          live_job="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name=="formal" and .status=="in_progress") | .id')"
+          test "$(jq -r .originFormalJobId "$RUNNER_TEMP/mimo-private/rendezvous.json")" = "$live_job"
+          echo "MIMO_PRIVATE_RENDEZVOUS_AUTHENTICATED"
       - name: Publish sanitized same-run formal readiness
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
