@@ -405,14 +405,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 security-intelligence-phase0/scripts/security-formal-v1.py run-existing-cvl \\
-            --target-map "$RUNNER_TEMP/formal-targets/target-map-v1.json" \\
-            --native-toolchain "$RUNNER_TEMP/curve-certora-formal/toolchain-bootstrap-v1.json" \\
-            --native-compilers "$RUNNER_TEMP/curve-certora-formal/compiler-bootstrap-v1.json" \\
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py run-existing-cvl \
+            --target-map "$RUNNER_TEMP/formal-targets/target-map-v1.json" \
+            --native-toolchain "$RUNNER_TEMP/curve-certora-formal/toolchain-bootstrap-v1.json" \
+            --native-compilers "$RUNNER_TEMP/curve-certora-formal/compiler-bootstrap-v1.json" \
             --output "$RUNNER_TEMP/native-existing-cvl-v1.json"
           jq -e '.stage=="I06.1" and .noCloudProver==true and
                   (.status=="NOT_APPLICABLE_NO_EXISTING_CVL" or
-                   .status=="EXISTING_CVL_NATIVE_ATTEMPTED")' \\
+                   .status=="EXISTING_CVL_NATIVE_ATTEMPTED")' \
             "$RUNNER_TEMP/native-existing-cvl-v1.json" >/dev/null
       - name: Install pinned upstream AutoProver with native local Certora path
         shell: bash
@@ -762,16 +762,16 @@ jobs:
           COMPOSER_EMBED_DEVICE: cpu
         run: |
           set -euo pipefail
-          python3 security-intelligence-phase0/scripts/security-formal-v1.py run-autoprover \\
-            --target-map "$RUNNER_TEMP/formal-targets/target-map-v1.json" \\
-            --native-toolchain "$RUNNER_TEMP/curve-certora-formal/toolchain-bootstrap-v1.json" \\
-            --native-compilers "$RUNNER_TEMP/curve-certora-formal/compiler-bootstrap-v1.json" \\
-            --session "$RUNNER_TEMP/formal-session-v1.json" \\
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py run-autoprover \
+            --target-map "$RUNNER_TEMP/formal-targets/target-map-v1.json" \
+            --native-toolchain "$RUNNER_TEMP/curve-certora-formal/toolchain-bootstrap-v1.json" \
+            --native-compilers "$RUNNER_TEMP/curve-certora-formal/compiler-bootstrap-v1.json" \
+            --session "$RUNNER_TEMP/formal-session-v1.json" \
             --output "$RUNNER_TEMP/certora-autoprover-execution-v1.json"
           jq -e '.stage=="I06.2" and
                   .status=="NATIVE_RULE_VERDICTS_OBSERVED" and
                   .observedNativePropertyVerdicts>0 and
-                  (.results | length)==.eligibleTargetCount' \\
+                  (.results | length)==.eligibleTargetCount' \
             "$RUNNER_TEMP/certora-autoprover-execution-v1.json" >/dev/null
       - name: Publish sanitized live formal and MiMo handoff state without private material
         if: ${{ always() }}
