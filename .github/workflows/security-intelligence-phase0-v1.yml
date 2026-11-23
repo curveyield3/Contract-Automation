@@ -15,13 +15,15 @@ concurrency:
   # Keep the I02-only compiler qualification from queueing behind an unintended
   # source rescanning push. The source scanner jobs and their logic are unchanged.
   group: >-
-    security-preflight-${{ github.ref }}-${{ github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' && 'compiler-qualification' || 'source-scan' }}
+    security-preflight-${{ github.ref }}-${{ (github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' || github.event.head_commit.message == 'I02.3: qualify source boundary') && 'formal-qualification' || 'source-scan' }}
   cancel-in-progress: false
 jobs:
   admit:
     # Preserve source-scanner behavior; skip only the isolated I02.1 bootstrap commit.
     if: >-
-      github.event.head_commit.message != 'I02.2: qualify native Solidity compilers'
+      github.event.head_commit.message != 'I02.2: qualify native Solidity compilers' &&
+      github.event.head_commit.message != 'I02.3: qualify source boundary' &&
+      !startsWith(github.event.head_commit.message, 'FORMAL-QUALIFY:')
     outputs:
       request_present: ${{ steps.request_present.outputs.request_present }}
     runs-on: ubuntu-latest
@@ -248,7 +250,8 @@ jobs:
   certora-bootstrap-i02:
     # I02.1-only native toolchain qualification, not the I05 formal-analysis job.
     if: >-
-      github.event.head_commit.message == 'I02.2: qualify native Solidity compilers'
+      github.event.head_commit.message == 'I02.2: qualify native Solidity compilers' ||
+      github.event.head_commit.message == 'I02.3: qualify source boundary'
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
@@ -258,6 +261,8 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Download source-bound prior successful Phase 0 evidence (not source ZIP)
+        if: >-
+          github.event.head_commit.message == 'I02.2: qualify native Solidity compilers'
         uses: actions/download-artifact@v4
         with:
           repository: curveyield3/Contract-Automation
@@ -266,6 +271,8 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/certora-i02-evidence
       - name: Native source-bound Solidity compiler qualification
+        if: >-
+          github.event.head_commit.message == 'I02.2: qualify native Solidity compilers'
         shell: bash
         run: |
           set -euo pipefail
@@ -276,10 +283,46 @@ jobs:
             --artifacts "$RUNNER_TEMP/certora-i02-evidence/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json" \
             --request security-intelligence-phase0/requests/active-request.json
       - name: Publish authenticated compiler qualification evidence
-        if: always()
+        if: >-
+          always() && github.event.head_commit.message == 'I02.2: qualify native Solidity compilers'
         uses: actions/upload-artifact@v4
         with:
           name: certora-i02-compilers-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/curve-certora-i02/compiler-bootstrap-v1.json
           if-no-files-found: error
           retention-days: 7
+      - name: Reopen accepted native Certora bootstrap receipt
+        if: >-
+          github.event.head_commit.message == 'I02.3: qualify source boundary'
+        uses: actions/download-artifact@v4
+        with:
+          repository: curveyield3/Contract-Automation
+          run-id: 45162422101
+          name: certora-i02-bootstrap-45162422101-1
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/certora-i02-native
+      - name: Reopen accepted native compiler qualification receipt
+        if: >-
+          github.event.head_commit.message == 'I02.3: qualify source boundary'
+        uses: actions/download-artifact@v4
+        with:
+          repository: curveyield3/Contract-Automation
+          run-id: 45166425004
+          name: certora-i02-compilers-45166425004-1
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/certora-i02-native
+      - name: Verify trusted source-boundary dispatcher before source admission
+        if: >-
+          github.event.head_commit.message == 'I02.3: qualify source boundary'
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.status=="LOCAL_TOOLCHAIN_STARTUP_VERIFIED" and .proverGitCommit=="4ef546d00cd67d333914845dead2d72081e1f014" and .cliHelpObserved==true' \
+            "$RUNNER_TEMP/certora-i02-native/toolchain-bootstrap-v1.json" >/dev/null
+          jq -e '.status=="COMPILER_TOOLCHAIN_VERIFIED" and .stage=="I02.2" and .noSourceZipRead==true' \
+            "$RUNNER_TEMP/certora-i02-native/compiler-bootstrap-v1.json" >/dev/null
+          python3 -m py_compile security-intelligence-phase0/scripts/security-formal-v1.py
+          python3 security-intelligence-phase0/scripts/security-formal-v1.py --help >/dev/null
+          test ! -e .preflight-input/source.zip
+          echo 'I02.3 native dispatcher syntax/readiness and I02.1/I02.2 prerequisites observed.'
+          echo 'No source ZIP loaded; authentic source admission remains required at I04/I05.'
