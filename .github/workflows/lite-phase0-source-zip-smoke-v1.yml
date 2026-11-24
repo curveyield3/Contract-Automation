@@ -1,4 +1,4 @@
-name: PoL manager v25 mutable token and timelocked migration compile comparison
+name: PoL manager v26 five generic vault slots and consolidation
 on:
   push:
     branches: [cyvlsdt-v69-postdeploy-simulation-v1]
@@ -22,51 +22,44 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Compile verified v24 and v25 with identical settings
+      - name: Compile v25 and v26 with identical production settings
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/pol-v25-report
+          mkdir -p /tmp/pol-v26-report
           python3 - <<'PY'
           import json,pathlib,difflib
-          c=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())['polManagerV25']
-          out=pathlib.Path('/tmp/pol-v25-report')
-          for version,part in [('v24',c['baseline']),('v25',c['candidate'])]:
+          c=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())['polManagerV26']
+          out=pathlib.Path('/tmp/pol-v26-report')
+          for version,part in [('v25',c['baseline']),('v26',c['candidate'])]:
               root=pathlib.Path('/tmp/pol-'+version);root.mkdir(exist_ok=True)
               f=root/part['path'];f.parent.mkdir(exist_ok=True);f.write_text(part['source'])
               (out/f.name).write_text(part['source'])
-              (root/'foundry.toml').write_text('[profile.default]\nsrc="contracts"\nsolc_version="0.8.28"\noptimizer=true\noptimizer_runs=200\nvia_ir=true\nevm_version="cancun"\n')
-          (out/'PoL-v25-source-diff.patch').write_text(''.join(difflib.unified_diff(c['baseline']['source'].splitlines(keepends=True),c['candidate']['source'].splitlines(keepends=True),fromfile=c['baseline']['path'],tofile=c['candidate']['path'])))
-          (out/'PoL-v25-config.json').write_text(json.dumps(c['intendedConfig'],indent=2))
+              (root/'foundry.toml').write_text('[profile.default]\nsrc="contracts"\nsolc_version="0.8.28"\noptimizer=true\noptimizer_runs=25\nvia_ir=true\nevm_version="cancun"\n')
+          (out/'PoL-v26-source-diff.patch').write_text(''.join(difflib.unified_diff(c['baseline']['source'].splitlines(keepends=True),c['candidate']['source'].splitlines(keepends=True),fromfile=c['baseline']['path'],tofile=c['candidate']['path'])))
+          (out/'PoL-v26-config.json').write_text(json.dumps(c['intendedConfig'],indent=2))
           PY
-          FOUNDRY_OPTIMIZER_RUNS=200 forge build --root /tmp/pol-v24 --skip test --skip script
-          FOUNDRY_OPTIMIZER_RUNS=200 forge build --root /tmp/pol-v25 --skip test --skip script
-          FOUNDRY_OUT=out-25 FOUNDRY_OPTIMIZER_RUNS=25 forge build --root /tmp/pol-v25 --skip test --skip script
-          FOUNDRY_OUT=out-1 FOUNDRY_OPTIMIZER_RUNS=1 forge build --root /tmp/pol-v25 --skip test --skip script
+          FOUNDRY_OPTIMIZER_RUNS=25 forge build --root /tmp/pol-v25 --skip test --skip script
+          FOUNDRY_OPTIMIZER_RUNS=25 forge build --root /tmp/pol-v26 --skip test --skip script
           python3 - <<'PY'
           import json,pathlib
-          out=pathlib.Path('/tmp/pol-v25-report')
+          out=pathlib.Path('/tmp/pol-v26-report')
           def read(v):return json.loads(pathlib.Path('/tmp/pol-'+v+'/out/PoL_Manager_Contract_'+v+'.sol/PoLManager.json').read_text())
-          a,b=read('v24'),read('v25')
+          a,b=read('v25'),read('v26')
           def size(o):return {k:len(bytes.fromhex(o[k]['object'].removeprefix('0x'))) for k in ['bytecode','deployedBytecode']}
           def signatures(o):return {f['name']+'('+','.join(x['type'] for x in f['inputs'])+')' for f in o['abi'] if f['type']=='function'}
           x,y=size(a),size(b)
-          result={'baseline':x,'candidate':y,'delta':{k:y[k]-x[k] for k in x},'removed':sorted(signatures(a)-signatures(b)),'added':sorted(signatures(b)-signatures(a)),'compiler':'0.8.28','optimizerRuns':200,'viaIR':True,'evmVersion':'cancun','testsExecuted':False}
-          variants={}
-          for runs in [25,1]:
-              v=json.loads(pathlib.Path('/tmp/pol-v25/out-'+str(runs)+'/PoL_Manager_Contract_v25.sol/PoLManager.json').read_text())
-              variants[str(runs)]=size(v)
-              (out/('PoLManager-v25-runs'+str(runs)+'-artifact.json')).write_text(json.dumps(v))
-          result['optimizerVariants']=variants
-          assert min([y['deployedBytecode']]+[v['deployedBytecode'] for v in variants.values()])<24576
-          (out/'PoL-v25-compilation.json').write_text(json.dumps(result,indent=2))
-          (out/'PoLManager-v25-artifact.json').write_text(json.dumps(b))
-          print('POL_V25_COMPILE',json.dumps(result),flush=True)
+          assert x=={'bytecode':25886,'deployedBytecode':22873},x
+          assert y['deployedBytecode']<=24576
+          result={'baseline':x,'candidate':y,'delta':{k:y[k]-x[k] for k in x},'removed':sorted(signatures(a)-signatures(b)),'added':sorted(signatures(b)-signatures(a)),'compiler':'0.8.28','optimizerRuns':25,'viaIR':True,'evmVersion':'cancun','testsExecuted':False}
+          (out/'PoL-v26-compilation.json').write_text(json.dumps(result,indent=2))
+          (out/'PoLManager-v26-artifact.json').write_text(json.dumps(b))
+          print('POL_V26_COMPILE',json.dumps(result),flush=True)
           PY
       - name: Retain PoL source and compilation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield-PoL-Manager-v25
-          path: /tmp/pol-v25-report/
+          name: CurveYield-PoL-Manager-v26
+          path: /tmp/pol-v26-report/
           if-no-files-found: error
