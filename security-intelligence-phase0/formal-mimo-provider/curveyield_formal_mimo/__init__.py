@@ -379,10 +379,54 @@ def _prepare_native_payload(payload: dict) -> tuple[dict, str]:
                               {"type": "text", "text": evidence}]
     omit = {"write_rough_draft", "read_rough_draft"}
     if complete:
-        omit.update({"memory", "code_explorer"})
-        # This is straightforward inventory, not speculative security reasoning.
-        payload["chat_template_kwargs"] = {"enable_thinking": False}
-        payload["reasoning_effort"] = "none"
+        # This stage has every required source file. Constrain the result
+        # directly to the original native schema, not a voluntary tool choice.
+        # Keep reasoning available for accurate component/interaction analysis.
+        messages[0]["content"] = (
+            "Analyze the authenticated Solidity implementation and any supplied design document. "
+            "Return exactly one JSON object conforming to the supplied result schema. "
+            "Do not write Markdown or a tool-call wrapper. Ground claims in the source; "
+            "check each function's actual modifiers, state mutations and authorization. "
+            "Distinguish external actors from EVM primitives and internal inheritance. "
+            "Use exact source identifiers and project-relative paths. Do not invent design "
+            "requirements, guarantees, actors or interactions. Review for factual accuracy."
+        )
+        messages[1]["content"][0]["text"] = task.replace(
+            "Submit the complete result directly, using the provided native result schema.",
+            "Return the complete application model as a JSON object matching the supplied schema."
+        )
+        # Native validation errors arrive as tool messages. Present the actual
+        # prior model JSON and exact validator feedback as conversational text,
+        # since this schema-only API request offers no executable tools.
+        history = messages[:2]
+        for m in messages[2:]:
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                previous = []
+                for c in m["tool_calls"]:
+                    fn = c.get("function") or {}
+                    previous.append({"name": fn.get("name"), "arguments": fn.get("arguments")})
+                history.append({"role": "assistant", "content":
+                                json.dumps(previous, ensure_ascii=False)})
+            elif m.get("role") == "tool":
+                history.append({"role": "user", "content":
+                                "Native AutoProver tool feedback (correct any reported errors):\n"
+                                + (m["content"] if isinstance(m.get("content"), str)
+                                   else json.dumps(m.get("content"), ensure_ascii=False))})
+            else:
+                history.append(m)
+        payload["messages"] = history
+        payload.pop("tools", None)
+        payload.pop("parallel_tool_calls", None)
+        payload["tool_choice"] = "none"
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": "result", "strict": True,
+                            "schema": result["parameters"]},
+        }
+        payload["chat_template_kwargs"] = {
+            **(payload.get("chat_template_kwargs") or {}), "enable_thinking": True}
+        payload.pop("reasoning_effort", None)
+        return payload, "component_analysis_schema"
     # Keep any tools already used in the conversation so a retry remains
     # protocol-compatible with its historical tool calls.
     used = {c.get("function", {}).get("name") for m in messages
@@ -393,7 +437,7 @@ def _prepare_native_payload(payload: dict) -> tuple[dict, str]:
                             "parameters": _compact_schema(t["function"].get("parameters", {}))}}
         for t in tools if t["function"]["name"] not in omit - used
     ]
-    return payload, "component_analysis_inline" if complete else "component_analysis_retrieval"
+    return payload, "component_analysis_retrieval"
 
 
 class _NativeStream:
@@ -519,10 +563,42 @@ class _NativeStream:
                 "choices": [{"index": 0, "finish_reason": self.finish_reason,
                              "message": msg}], "usage": self.usage,
                 "timings": self.timings}
-        validate_mimo_chat_completion(body, self.request)
+        # Record the actual completed wire stream even if the result is rejected.
         _wire_event({"event": "STREAM_COMPLETE", "requestNumber": self.number,
                      "direction": "MIMO_TO_AUTOPROVER", "byteCount": len(self.wire),
                      "sha256": hashlib.sha256(self.wire).hexdigest()})
+        validate_mimo_chat_completion(body, self.request)
+        if self.mode == "component_analysis_schema":
+            # The server generated the native schema object as JSON text.
+            # Do not synthesize facts or execute the result tool here. Preserve
+            # the exact model-produced arguments; the native result tool's
+            # Pydantic schema and connectivity validator decide acceptance.
+            if self.calls or self.finish_reason != "stop":
+                raise MiMoProtocolError("Component analysis did not return a completed schema object")
+            arguments = msg["content"]
+            if not isinstance(json.loads(arguments), dict):
+                raise MiMoProtocolError("Component analysis result is not a JSON object")
+            schema = self.request["response_format"]["json_schema"]["schema"]
+            call_id = "call_" + hashlib.sha256(
+                (str(self.meta.get("id")) + ":" + str(self.number)).encode("utf-8")
+            ).hexdigest()[:24]
+            msg = {"role": "assistant", "content": None,
+                   "tool_calls": [{"type": "function", "id": call_id,
+                                   "function": {"name": "result", "arguments": arguments}}]}
+            body["choices"][0]["message"] = msg
+            body["choices"][0]["finish_reason"] = "tool_calls"
+            # Validate the actual adapter-to-AutoProver envelope against the
+            # same original native result schema and the only offered tool.
+            validate_mimo_chat_completion(body, {
+                "model": MODEL_ID, "tool_choice": "required",
+                "tools": [{"type": "function", "function": {
+                    "name": "result", "parameters": schema}}],
+            })
+            _progress_event({"event": "NATIVE_RESULT_ENVELOPE_PACKAGED",
+                             "requestNumber": self.number,
+                             "mode": self.mode, "argumentBytes": len(arguments.encode("utf-8")),
+                             "argumentSha256": hashlib.sha256(arguments.encode("utf-8")).hexdigest(),
+                             "nativeValidationPending": True})
         raw = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         _wire_body("ADAPTER_TO_AUTOPROVER", self.number, raw, status=200)
         _progress_event({"event": "MODEL_COMPLETION", "requestNumber": self.number,
@@ -531,7 +607,8 @@ class _NativeStream:
                          "promptTokens": self.usage.get("prompt_tokens"),
                          "completionTokens": self.usage.get("completion_tokens"),
                          "cachedTokens": self.usage.get("prompt_tokens_details", {}).get("cached_tokens"),
-                         "toolCalls": len(self.calls)})
+                         "toolCalls": len(msg.get("tool_calls") or []),
+                         "adapterFinishReason": body["choices"][0]["finish_reason"]})
         return body
 
 
