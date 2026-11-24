@@ -711,6 +711,12 @@ jobs:
           set -euo pipefail
           source="$RUNNER_TEMP/curve-certora-formal/AutoProver"
           cd "$source"
+          # Reuse exact wire capture only for the existing authenticated public DAI benchmark.
+          if jq -e '.source.repository=="curveyield3/Contract-Automation" and .source.commit=="85724e7bbb2e3bcbd373ea2464917b62e37541c9" and .source.archivePath=="process/audit-source-initialization/dai-live-no-deploy-script-v1.zip" and .source.archiveSha256=="0b2ac5fe0f4cb5e60d2f496d517f7251f9e121c5ac21244b8c8d1ccb0b9be8df" and (.requestId|startswith("dai-ethereum-autoprover-i062-"))' "$RUNNER_TEMP/formal-intake-v1.json" >/dev/null; then
+            export CURVEYIELD_PUBLIC_DAI_WIRE_TRACE=1 CURVEYIELD_FORMAL_QUALIFICATION_TRACE=1 CURVEYIELD_FORMAL_TARGET_INDEX=0
+            export CURVEYIELD_DAI_WIRE_PATH="$RUNNER_TEMP/public-dai-qualification-wire-v1.jsonl"
+            (umask 077; jq -nc --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg sha "$GITHUB_SHA" --arg profile "$CURVEYIELD_FORMAL_MODEL" '{event:"QUALIFICATION_TRANSCRIPT_BEGIN",stage:"I05.2",originRunId:($run|tonumber),originRunAttempt:($attempt|tonumber),originCommit:$sha,modelProfile:$profile}' > "$CURVEYIELD_DAI_WIRE_PATH")
+          fi
           timeout -k 15s 2700s "$source/.venv/bin/python" - <<'PY'
           import json, os
           from dataclasses import dataclass
@@ -743,11 +749,14 @@ jobs:
           # Each role must issue an ACTUAL private model completion.
           role_calls = {}
           for role in ("heavy", "lite"):
+              print("QUALIFICATION_REQUEST_BEGIN role=" + role, flush=True)
               chat = provider.builder_for()
               response = chat.invoke([HumanMessage(content="Reply with the single word READY.")])
               if not isinstance(response.content, str) or not response.content.strip():
                   raise RuntimeError("Real MiMo " + role + " completion absent")
               role_calls[role] = 1
+              print("QUALIFICATION_REQUEST_ACCEPTED role=" + role, flush=True)
+          print("QUALIFICATION_REQUEST_BEGIN role=schema", flush=True)
           schema_chat = provider.builder_for()
           structured = schema_chat.with_structured_output(NativeSchema, method="json_schema")
           validated = structured.invoke([HumanMessage(content=(
@@ -755,6 +764,7 @@ jobs:
           ))])
           if not isinstance(validated, NativeSchema) or validated.stage != "I05.2" or validated.ready is not True:
               raise RuntimeError("Live MiMo strict JSON Schema output invalid")
+          print("QUALIFICATION_REQUEST_ACCEPTED role=schema", flush=True)
           spec = {
               "name": "read_formal_context",
               "description": "Request the authorized local context path (do not execute this tool)",
@@ -764,6 +774,7 @@ jobs:
                   "required": ["path"],
               },
           }
+          print("QUALIFICATION_REQUEST_BEGIN role=tool", flush=True)
           tool_chat = provider.builder_for().bind_tools([spec], tool_choice="required")
           tool_response = tool_chat.invoke([HumanMessage(content=(
               "Call read_formal_context with the single argument path set to src/Vault.sol. "
@@ -776,6 +787,8 @@ jobs:
               raise RuntimeError("Real MiMo did not produce an authorized native tool-call envelope")
           if getattr(tool_response, "invalid_tool_calls", []):
               raise RuntimeError("Real MiMo tool-call arguments could not be decoded")
+          print("QUALIFICATION_REQUEST_ACCEPTED role=tool", flush=True)
+          print("QUALIFICATION_REQUEST_BEGIN role=autosetup", flush=True)
           local = configure_local_mimo_runtime()
           import certora_autosetup.utils.llm_util as upstream
           input_model = upstream._get_local_model()
@@ -789,6 +802,7 @@ jobs:
           )
           if not isinstance(autosetup, NativeSchema) or autosetup.stage != "I05.2" or autosetup.ready is not True:
               raise RuntimeError("Native AutoSetup local structured completion failed")
+          print("QUALIFICATION_REQUEST_ACCEPTED role=autosetup", flush=True)
           work = Path(os.environ["RUNNER_TEMP"])
           targets = json.loads((work/"formal-targets/target-map-v1.json").read_text())
           native = json.loads((work/"curve-certora-formal/toolchain-bootstrap-v1.json").read_text())
@@ -835,6 +849,14 @@ jobs:
                   .realAutoSetupCalls>0 and
                   .cloudProviderCalls==0 and .eligibleTargetCount>0' \
             "$RUNNER_TEMP/formal-session-v1.json" >/dev/null
+      - name: Retain existing public DAI qualification wire transcript
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: certora-dai-qualification-wire-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/public-dai-qualification-wire-v1.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Execute pinned upstream AutoProver against authenticated targets
         # A JavaScript action receives the native Actions artifact runtime
         # environment. The trusted Python parent reuses upload-artifact v4
