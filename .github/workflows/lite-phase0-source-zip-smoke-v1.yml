@@ -1,4 +1,4 @@
-name: cyvlSDT v73 exact proposal functional replay
+name: PoL manager v24 ERC4626-only compile comparison
 on:
   push:
     branches: [cyvlsdt-v69-postdeploy-simulation-v1]
@@ -22,100 +22,43 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Materialize exact v64 source and benchmark-only optimization candidate
+      - name: Compile verified v23 and slim v24 with identical settings
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL 'https://raw.githubusercontent.com/curveyield3/Smart-Contracts/6b058498554f58936daf1216c222d554ee666f5e/Audit-Intake/CurveYield-cyvlSDT-Deployment-Package-v64.zip' -o /tmp/cyv64.zip
-          echo 'a2d46ab6bf63a760efecf914f36419b8ec271c0e36f9b3ee9821cd842ea0d7ee  /tmp/cyv64.zip' | sha256sum -c -
-          mkdir -p /tmp/cyv64 /tmp/cyv65
-          unzip -q /tmp/cyv64.zip -d /tmp/cyv64
-          cp -a /tmp/cyv64/contracts /tmp/cyv65/
-          mkdir -p /tmp/cyv-deps
-          npm install --prefix /tmp/cyv-deps --ignore-scripts --no-audit --no-fund --no-save '@openzeppelin/contracts@5.4.0' '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts-upgradeable@4.9.6' 'ethers@6.17.0'
-          ln -s /tmp/cyv-deps/node_modules /tmp/cyv64/node_modules
-          ln -s /tmp/cyv-deps/node_modules /tmp/cyv65/node_modules
-          for ROOT in /tmp/cyv64 /tmp/cyv65; do
-            rm -f "$ROOT/contracts/PoL_Manager_Contract_v22.sol" "$ROOT/contracts/VoteMarketSingleGaugeBribeAllocator.sol"
-            rm -rf "$ROOT/contracts/external_guard_v8"
-            cat > "$ROOT/foundry.toml" <<'EOF'
-          [profile.default]
-          src = "contracts"
-          out = "out"
-          libs = ["node_modules"]
-          remappings = ["@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/", "@openzeppelin-4/contracts/=node_modules/@openzeppelin-4/contracts/", "@openzeppelin/contracts-upgradeable/=node_modules/@openzeppelin/contracts-upgradeable/"]
-          solc_version = "0.8.28"
-          optimizer = true
-          optimizer_runs = 200
-          via_ir = true
-          evm_version = "cancun"
-          EOF
-          done
+          mkdir -p /tmp/pol-v24-report
+          python3 - <<'PY'
+          import json,pathlib,difflib
+          c=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())['polManagerV24']
+          out=pathlib.Path('/tmp/pol-v24-report')
+          for version,part in [('v23',c['baseline']),('v24',c['candidate'])]:
+              root=pathlib.Path('/tmp/pol-'+version);root.mkdir(exist_ok=True)
+              f=root/part['path'];f.parent.mkdir(exist_ok=True);f.write_text(part['source'])
+              (out/f.name).write_text(part['source'])
+              (root/'foundry.toml').write_text('[profile.default]\nsrc="contracts"\nsolc_version="0.8.28"\noptimizer=true\noptimizer_runs=200\nvia_ir=true\nevm_version="cancun"\n')
+          (out/'PoL-v24-source-diff.patch').write_text(''.join(difflib.unified_diff(c['baseline']['source'].splitlines(keepends=True),c['candidate']['source'].splitlines(keepends=True),fromfile=c['baseline']['path'],tofile=c['candidate']['path'])))
+          (out/'PoL-v24-config.json').write_text(json.dumps(c['intendedConfig'],indent=2))
+          PY
+          FOUNDRY_OPTIMIZER_RUNS=200 forge build --root /tmp/pol-v23 --skip test --skip script
+          FOUNDRY_OPTIMIZER_RUNS=200 forge build --root /tmp/pol-v24 --skip test --skip script
           python3 - <<'PY'
           import json,pathlib
-          p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
-          exec(compile(p['transform'],'v65-transform','exec'))
-          exec(compile(p['unifiedTransform'],'v66-transform','exec'))
-          exec(compile(p['packingTransform'],'v67-transform','exec'))
+          out=pathlib.Path('/tmp/pol-v24-report')
+          def read(v):return json.loads(pathlib.Path('/tmp/pol-'+v+'/out/PoL_Manager_Contract_'+v+'.sol/PoLManager.json').read_text())
+          a,b=read('v23'),read('v24')
+          def size(o):return {k:len(bytes.fromhex(o[k]['object'].removeprefix('0x'))) for k in ['bytecode','deployedBytecode']}
+          def signatures(o):return {f['name']+'('+','.join(x['type'] for x in f['inputs'])+')' for f in o['abi'] if f['type']=='function'}
+          x,y=size(a),size(b)
+          result={'baseline':x,'candidate':y,'delta':{k:y[k]-x[k] for k in x},'removed':sorted(signatures(a)-signatures(b)),'added':sorted(signatures(b)-signatures(a)),'compiler':'0.8.28','optimizerRuns':200,'viaIR':True,'evmVersion':'cancun','testsExecuted':False}
+          assert y['deployedBytecode']<24576
+          (out/'PoL-v24-compilation.json').write_text(json.dumps(result,indent=2))
+          (out/'PoLManager-v24-artifact.json').write_text(json.dumps(b))
+          print('POL_V24_COMPILE',json.dumps(result),flush=True)
           PY
-      - name: Compile pinned original proposal artifacts and updated vault and SDT strategy
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/v72-report
-          FOUNDRY_OUT=out-25-v69 forge build --root /tmp/cyv65 --force --skip test --skip script
-          python3 - <<'PY'
-          import json,pathlib,re,difflib
-          p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
-          exec(compile(p['vaultEmergencyCapabilityPatch'],'v70-vault-capability','exec'))
-          exec(compile(p['vaultMintAllowancePatch'],'v71-mint-allowance','exec'))
-          f=pathlib.Path('/tmp/cyv65/contracts/StrategyCurveSDTYearnRebindable.sol')
-          before=f.read_text()
-          after,n=re.subn(r'(\bCURVE_LP_SLIPPAGE_BPS\s*=\s*)200\b',r'\g<1>100',before)
-          assert n==1,('expected exactly one 200 bps SDT slippage constant',n)
-          assert re.search(r'quoteDeposit\s*\([^;]*CURVE_LP_SLIPPAGE_BPS',after)
-          assert re.search(r'quoteWithdraw\s*\([^;]*CURVE_LP_SLIPPAGE_BPS',after)
-          f.write_text(after)
-          diff=''.join(difflib.unified_diff(before.splitlines(keepends=True),after.splitlines(keepends=True),fromfile='v71/'+f.name,tofile='v72/'+f.name))
-          print('SDT_SLIPPAGE_SOURCE_DIFF\n'+diff,flush=True)
-          out=pathlib.Path('/tmp/v72-report')
-          (out/'StrategyCurveSDTYearnRebindable-v72.sol').write_text(after)
-          (out/'SDT-slippage-diff-v1.patch').write_text(diff)
-          (out/'BeefyVaultCurveYieldV8cyvlSDT-v71.sol').write_text(pathlib.Path('/tmp/cyv65/contracts/BeefyVaultCurveYieldV8cyvlSDT.sol').read_text())
-          pathlib.Path('/tmp/cyv64/replay.cjs').write_text(p['replay'])
-          PY
-          FOUNDRY_OUT=out-25-v72 forge build --root /tmp/cyv65 --force --skip test --skip script
-          python3 - <<'PY'
-          import pathlib,json
-          root=pathlib.Path('/tmp/cyv65')
-          report={}
-          for name in ['BeefyVaultCurveYieldV8cyvlSDT','StrategyCurveSDTYearnRebindable']:
-              a=json.loads((root/'out-25-v69'/(name+'.sol')/(name+'.json')).read_text())
-              b=json.loads((root/'out-25-v72'/(name+'.sol')/(name+'.json')).read_text())
-              sizes=lambda v:{k:len(bytes.fromhex(v[k]['object'].removeprefix('0x'))) for k in ['bytecode','deployedBytecode']}
-              report[name]={'before':sizes(a),'after':sizes(b)}
-              assert report[name]['after']['deployedBytecode']<=24576
-          pathlib.Path('/tmp/v72-report/Compiled-size-v72.json').write_text(json.dumps(report,indent=2))
-          print('COMPILED_SIZE_V72',json.dumps(report))
-          PY
-      - name: Replay exact queued Safe payloads and functional suite
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$UPSTREAM_RPC"
-          export FORK_BLOCK=26484022
-          anvil --fork-url "$UPSTREAM_RPC" --fork-block-number "$FORK_BLOCK" --host 127.0.0.1 --port 8545 --silent >/tmp/anvil.log 2>&1 &
-          PID=$!
-          trap 'kill "$PID" 2>/dev/null || true' EXIT
-          for i in $(seq 1 30); do
-            if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
-            sleep 1
-          done
-          node /tmp/cyv64/replay.cjs
-      - name: Retain verified proposal payload and source evidence
+      - name: Retain PoL source and compilation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield-cyvlSDT-PostDeployment-v2
-          path: /tmp/v72-report/
+          name: CurveYield-PoL-Manager-v24
+          path: /tmp/pol-v24-report/
           if-no-files-found: error
