@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "curveyield-security-preflight-request-v1",
+  "runMode": "SOURCE_PREFLIGHT",
+  "requestId": "dai-ethereum-autoprover-i062-mimo-r16-0b2ac5fe0f4c",
+  "source": {
+    "repository": "curveyield3/Contract-Automation",
+    "commit": "85724e7bbb2e3bcbd373ea2464917b62e37541c9",
+    "archivePath": "process/audit-source-initialization/dai-live-no-deploy-script-v1.zip",
+    "archiveSha256": "0b2ac5fe0f4cb5e60d2f496d517f7251f9e121c5ac21244b8c8d1ccb0b9be8df"
+  },
+  "formalModel": "mimo"
+}
