@@ -1329,8 +1329,9 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         "cloudProviderCalls": 0,
         "modelRequestCount": None,
         "nativeProofsProved": None,
-        "maxPropertyInferenceRoundsPerComponent": 2,
-        "maxResponseTokens": 2048,
+        "maxPropertyInferenceRoundsPerComponent": "UPSTREAM_DEFAULT",
+        "initialResponseTokenBudget": 16384,
+        "nativeModelStreaming": True,
     }
     def persist():
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1462,6 +1463,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "PREAUDIT_LLM_BACKEND": "local",
             "PREAUDIT_LOCAL_LLM_BASE_URL": endpoint,
             "PREAUDIT_LOCAL_LLM_MODEL": "lite-solo-mimo-v1",
+            "CURVEYIELD_FORMAL_PROJECT_ROOT": str(project),
         })
         if trace_public_dai:
             env["CURVEYIELD_PUBLIC_DAI_WIRE_TRACE"] = "1"
@@ -1485,8 +1487,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "--max-concurrent", "1",
             "--max-cpu-tasks", "1",
             "--run-mode", "comprehensive",
-            "--max-bug-rounds", "2",
-            "--tokens", "2048",
+            "--tokens", "16384",
         ]
         logfile = project.parent / "native-autoprover-private.log"
         original_spec_digests = {
@@ -1508,11 +1509,11 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         trace_offset = 0
         trace_remainder = b""
         trace_pending: dict[tuple[int, str], dict] = {}
+        model_progress: dict[str, object] = {}
+        stream_digests: dict[int, tuple[object, int]] = {}
 
         def forward_dai_wire_trace() -> None:
             nonlocal trace_offset, trace_remainder
-            if not trace_public_dai:
-                return
             import base64
             with logfile.open("rb") as log_reader:
                 log_reader.seek(trace_offset)
@@ -1522,10 +1523,32 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             trace_remainder = lines.pop()
             completed = []
             for row in lines:
-                if not row.startswith(b"CURVEYIELD_DAI_WIRE_V1 "):
+                if row.startswith(b"CURVEYIELD_MIMO_PROGRESS_V1 "):
+                    status = json.loads(row.split(b" ", 1)[1])
+                    model_progress.update(status)
+                    print(json.dumps({"stage": "I06.2", "targetIndex": index + 1,
+                                      **status}, sort_keys=True), flush=True)
+                    if trace_public_dai:
+                        completed.append({**status, "targetIndex": index + 1})
+                    continue
+                if not trace_public_dai or not row.startswith(b"CURVEYIELD_DAI_WIRE_V1 "):
                     continue
                 item = json.loads(row.split(b" ", 1)[1])
                 event = item["event"]
+                if event == "STREAM_BYTES":
+                    number = item["requestNumber"]
+                    h, offset = stream_digests.get(number, (hashlib.sha256(), 0))
+                    raw_part = base64.b64decode(item["payload"], validate=True)
+                    if item["offset"] != offset or item["byteCount"] != len(raw_part):
+                        raise RuntimeError("DAI_LIVE_SSE_OFFSET_INVALID")
+                    h.update(raw_part)
+                    stream_digests[number] = (h, offset + len(raw_part))
+                    completed.append({**item, "targetIndex": index + 1})
+                    continue
+                if event == "STREAM_COMPLETE":
+                    h, size = stream_digests.pop(item["requestNumber"])
+                    if size != item["byteCount"] or h.hexdigest() != item["sha256"]:
+                        raise RuntimeError("DAI_LIVE_SSE_DIGEST_MISMATCH")
                 if event in ("BEGIN", "CHUNK", "END"):
                     key = (item["requestNumber"], item["direction"])
                     if event == "BEGIN":
@@ -1563,9 +1586,11 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                         transcript.write(json.dumps(item, ensure_ascii=True) + "\n")
                 publish_dai_wire_snapshot()
                 for item in completed:
-                    # Never reintroduce raw body lines into the truncated viewer.
-                    print(json.dumps({k: v for k, v in item.items() if k != "payload"},
-                                     sort_keys=True), flush=True)
+                    # Progress is emitted above. Do not flood the viewer with
+                    # repeated per-token frames or duplicate progress records.
+                    if item["event"] in ("COMPLETE_BODY", "STREAM_COMPLETE", "RESPONSE_VALIDATION"):
+                        print(json.dumps({k: v for k, v in item.items() if k != "payload"},
+                                         sort_keys=True), flush=True)
 
         model_idle_since: float | None = None
         previous_cpu: int | None = None
@@ -1587,7 +1612,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             try:
                 while True:
                     try:
-                        returncode = process.wait(timeout=5 if trace_public_dai else 30)
+                        returncode = process.wait(timeout=5)
                         forward_dai_wire_trace()
                         record["nativeExitCode"] = returncode
                         record["status"] = ("NATIVE_AUTOPROVER_EXIT_ZERO_UNCLASSIFIED"
@@ -1651,6 +1676,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                             "localCpuAdvanced": local_cpu_advanced,
                             "privateOutputAdvanced": local_files_advanced,
                             "modelTokensAdvanced": model_advanced,
+                            "nativeModelProgress": model_progress,
                             "mimoWorkflowState": mimo_run_state,
                             "mimoMonitorErrors": mimo_monitor_errors,
                             "watchdog": ("ACTIVE" if quiet_for < idle_stall_seconds else

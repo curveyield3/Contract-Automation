@@ -10,7 +10,9 @@ from dataclasses import dataclass, field
 import hashlib
 import itertools
 import json
-from functools import cache
+from functools import cache, wraps
+from pathlib import Path
+import time
 import sys
 import threading
 from ipaddress import IPv4Address, IPv4Network
@@ -254,7 +256,406 @@ async def _async_local_response(response: httpx.Response) -> None:
     _observe_response(response)
 
 
+
+# Only the authenticated native execution sets the project root. The existing
+# I05.2 handshake retains its exact previously qualified non-stream protocol.
+_PROGRESS_PREFIX = "CURVEYIELD_MIMO_PROGRESS_V1 "
+_PROGRESS_SEQUENCE = itertools.count(1)
+
+
+def _progress_event(event: dict) -> None:
+    if os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT"):
+        print(_PROGRESS_PREFIX + json.dumps(event, separators=(",", ":")),
+              file=sys.stderr, flush=True)
+
+
+@cache
+def _analysis_source_context(root_name: str) -> tuple[str, bool]:
+    """Inline small authenticated Solidity trees; larger trees retain retrieval.
+    The threshold is a transport optimization, not a source or coverage limit.
+    """
+    root = Path(root_name).resolve(strict=True)
+    paths = []
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = sorted(d for d in dirs
+                         if d not in {".git", ".certora_internal", "out", "cache", "node_modules"}
+                         and not (Path(directory) / d).is_symlink())
+        for name in sorted(files):
+            path = Path(directory) / name
+            if (path.suffix == ".sol" and not path.is_symlink()
+                    and path.is_file() and path.resolve().is_relative_to(root)):
+                paths.append(path)
+    paths.sort(key=lambda p: p.relative_to(root).as_posix())
+    inventory = "Authenticated Solidity source inventory:\n" + "\n".join(
+        p.relative_to(root).as_posix() for p in paths)
+    if not paths or sum(p.stat().st_size for p in paths) > 32768:
+        return inventory, False
+    contents = [inventory]
+    for path in paths:
+        contents.extend(["\n[Source: " + path.relative_to(root).as_posix() + "]\n",
+                         path.read_text(encoding="utf-8"), "\n[/Source]\n"])
+    return "".join(contents), True
+
+
+def _compact_schema(value):
+    # Remove schema display titles, not property names, types, constraints,
+    # descriptions, required fields, or discriminated union definitions.
+    if isinstance(value, list):
+        return [_compact_schema(v) for v in value]
+    if not isinstance(value, dict):
+        return value
+    return {k: ({name: _compact_schema(schema) for name, schema in v.items()}
+                if k in ("properties", "$defs", "definitions", "patternProperties")
+                and isinstance(v, dict) else _compact_schema(v))
+            for k, v in value.items() if k != "title"}
+
+
+def _prepare_native_payload(payload: dict) -> tuple[dict, str]:
+    """Narrow prompt adaptation; the native graph and result validators remain
+    authoritative. No fabricated tool output or preaccepted model results.
+    """
+    root = os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT")
+    if not root:
+        return payload, "native"
+    payload = dict(payload)
+    payload["cache_prompt"] = True
+    messages = payload.get("messages") or []
+    tools = payload.get("tools") or []
+    names = {t.get("function", {}).get("name") for t in tools if isinstance(t, dict)}
+    result = next((t["function"] for t in tools
+                   if t.get("function", {}).get("name") == "result"), {})
+    fields = result.get("parameters", {}).get("properties", {})
+    system = messages[0].get("content", "") if messages else ""
+    is_analysis = (
+        isinstance(system, str) and "experienced system architect" in system
+        and {"application_type", "description", "components"}.issubset(fields)
+        and len(messages) >= 2 and messages[0].get("role") == "system"
+        and messages[1].get("role") == "user"
+        and "get_file" in names
+    )
+    if not is_analysis:
+        return payload, "native"
+    original_user = messages[1].get("content")
+    if not isinstance(original_user, list) or not original_user:
+        return payload, "native"
+    first = original_user[0]
+    if not isinstance(first, dict) or first.get("type") != "text":
+        return payload, "native"
+    if "extract a holistic, structured description" not in first.get("text", ""):
+        return payload, "native"
+    evidence, complete = _analysis_source_context(root)
+    messages = [dict(m) for m in messages]
+    messages[0]["content"] = (
+        "Analyze the authenticated Solidity implementation and any supplied design document. "
+        "Use the native result tool to submit a complete structured application model. "
+        "Ground claims in evidence; use exact Solidity identifiers and project-relative paths. "
+        "Do not invent design intent. Use retrieval only when necessary. "
+        "Record memory only when useful; do not write or reread a ceremonial draft. "
+        "Review the result for completeness before submitting."
+    )
+    task = (
+        "Classify the application and describe it in 2–3 sentences. Enumerate explicit contracts "
+        "and external actors transitively, stopping at external-actor boundaries. "
+        "For each contract give conceptual name, exact Solidity identifier, relative source path, "
+        "description, and deployment sort: singleton (one instance), dynamic (created by the "
+        "application), multiple (externally deployed instances). For each functional component "
+        "describe its behavior, external entry points, state variables, requirements and "
+        "interactions using the declared contract/component/actor names. Include known standard "
+        "interfaces and their entry points. For external actors state role, evidence-supported "
+        "assumptions and interface path if available, otherwise null. A single in-tree "
+        "implementation of an interface is an explicit contract; generic standards allowing "
+        "arbitrary implementations are external actors; domain-specific interfaces with in-tree "
+        "implementations are explicit components. If multiple implementations exist, identify "
+        "the external interface actor and its explicit implementations. Do not hypothesize beyond "
+        "external actors or present pseudocode. The required main entry point must be included. "
+        "Submit the complete result directly, using the provided native result schema."
+    )
+    if complete:
+        task += " All authenticated Solidity files are supplied below; do not rediscover them."
+    else:
+        task += " Use get_file or grep_files for relevant missing source; delegate only genuinely broad exploration."
+    messages[1]["content"] = [{"type": "text", "text": task},
+                              *original_user[1:],
+                              {"type": "text", "text": evidence}]
+    omit = {"write_rough_draft", "read_rough_draft"}
+    if complete:
+        omit.update({"memory", "code_explorer"})
+        # This is straightforward inventory, not speculative security reasoning.
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+        payload["reasoning_effort"] = "none"
+    # Keep any tools already used in the conversation so a retry remains
+    # protocol-compatible with its historical tool calls.
+    used = {c.get("function", {}).get("name") for m in messages
+            for c in (m.get("tool_calls") or [])}
+    payload["messages"] = messages
+    payload["tools"] = [
+        {**t, "function": {**t["function"],
+                            "parameters": _compact_schema(t["function"].get("parameters", {}))}}
+        for t in tools if t["function"]["name"] not in omit - used
+    ]
+    return payload, "component_analysis_inline" if complete else "component_analysis_retrieval"
+
+
+class _NativeStream:
+    """Aggregate the pinned llama.cpp chat-completion SSE protocol into the
+    exact normal OpenAI completion shape expected by the qualified SDK.
+    No tool is delivered to AutoProver before full envelope validation.
+    """
+    def __init__(self, number: int, mode: str, request: dict):
+        self.number, self.mode, self.request = number, mode, request
+        self.content, self.reasoning = [], []
+        self.calls = {}
+        self.meta, self.usage, self.timings, self.prompt = {}, {}, {}, {}
+        self.finish_reason = None
+        self.done = False
+        self.last_report = time.monotonic()
+        self.wire = bytearray()
+        self.pending = b""
+        self.stream_offset = 0
+        self.last_published = 0
+
+    def feed(self, chunk: bytes):
+        self.wire.extend(chunk)
+        data = self.pending + chunk
+        lines = data.split(b"\n")
+        self.pending = lines.pop()
+        for line in lines:
+            line = line.rstrip(b"\r")
+            if not line.startswith(b"data:"):
+                continue
+            body = line[5:].strip()
+            if body == b"[DONE]":
+                self.done = True
+                continue
+            event = json.loads(body)
+            if not isinstance(event, dict) or "error" in event:
+                raise MiMoProtocolError("MiMo returned an SSE error")
+            if event.get("model", MODEL_ID) != MODEL_ID:
+                raise MiMoProtocolError("MiMo stream model identity mismatch")
+            for k in ("id", "created", "model", "system_fingerprint"):
+                if k in event:
+                    self.meta[k] = event[k]
+            for k, dest in (("usage", self.usage), ("timings", self.timings),
+                            ("prompt_progress", self.prompt)):
+                if isinstance(event.get(k), dict):
+                    dest.update(event[k])
+            for choice in event.get("choices") or []:
+                if choice.get("index") != 0:
+                    raise MiMoProtocolError("Unexpected MiMo stream choice index")
+                delta = choice.get("delta") or {}
+                if delta.get("role", "assistant") != "assistant":
+                    raise MiMoProtocolError("Unexpected MiMo stream role")
+                if isinstance(delta.get("content"), str):
+                    self.content.append(delta["content"])
+                if isinstance(delta.get("reasoning_content"), str):
+                    self.reasoning.append(delta["reasoning_content"])
+                for call in delta.get("tool_calls") or []:
+                    idx = call.get("index")
+                    if not isinstance(idx, int) or idx < 0:
+                        raise MiMoProtocolError("MiMo stream tool index missing")
+                    item = self.calls.setdefault(idx, {"type": "function", "id": "",
+                                                       "function": {"name": "", "arguments": ""}})
+                    if call.get("type", "function") != "function":
+                        raise MiMoProtocolError("Unexpected MiMo stream tool type")
+                    if call.get("id"):
+                        if item["id"] and item["id"] != call["id"]:
+                            raise MiMoProtocolError("MiMo stream tool identity changed")
+                        item["id"] = call["id"]
+                    fn = call.get("function") or {}
+                    if fn.get("name"):
+                        item["function"]["name"] += fn["name"]
+                    if isinstance(fn.get("arguments"), str):
+                        item["function"]["arguments"] += fn["arguments"]
+                if choice.get("finish_reason") is not None:
+                    self.finish_reason = choice["finish_reason"]
+        if time.monotonic() - self.last_report >= 15:
+            self.report()
+
+    def report(self, final=False):
+        # Actual partial wire bytes, not a reconstructed paraphrase. Only
+        # source-authorized public DAI receives payload deltas in artifacts.
+        if _trace_enabled() and self.last_published < len(self.wire):
+            import base64
+            end = len(self.wire)
+            # Keep private log lines manageable; the parent stores all deltas.
+            for offset in range(self.last_published, end, 6000):
+                part = bytes(self.wire[offset:min(offset + 6000, end)])
+                _wire_event({"event": "STREAM_BYTES", "requestNumber": self.number,
+                             "direction": "MIMO_TO_AUTOPROVER", "offset": offset,
+                             "byteCount": len(part), "encoding": "base64",
+                             "payload": base64.b64encode(part).decode("ascii")})
+            self.last_published = end
+        reasoning = sum(map(len, self.reasoning))
+        answer = sum(map(len, self.content))
+        tool_chars = sum(len(c["function"]["arguments"]) for c in self.calls.values())
+        phase = ("complete" if final else "tool_arguments" if tool_chars else
+                 "answer" if answer else "reasoning" if reasoning else "prefill")
+        _progress_event({
+            "event": "MODEL_STREAM_PROGRESS", "requestNumber": self.number,
+            "mode": self.mode, "phase": phase,
+            "promptProgress": {k: v for k, v in self.prompt.items()
+                               if k in ("total", "cache", "processed", "time_ms")
+                               and isinstance(v, (int, float))},
+            "reasoningCharacters": reasoning, "answerCharacters": answer,
+            "toolArgumentCharacters": tool_chars, "toolCalls": len(self.calls),
+            "responseBytes": len(self.wire), "finishReason": self.finish_reason,
+        })
+        self.last_report = time.monotonic()
+
+    def finish(self) -> dict:
+        self.report(final=True)
+        if self.pending.strip() or not self.done or self.finish_reason is None:
+            raise MiMoProtocolError("Incomplete MiMo SSE completion")
+        if self.meta.get("model") != MODEL_ID:
+            raise MiMoProtocolError("MiMo stream did not identify the qualified model")
+        msg = {"role": "assistant", "content": "".join(self.content)}
+        if self.reasoning:
+            msg["reasoning_content"] = "".join(self.reasoning)
+        if self.calls:
+            if sorted(self.calls) != list(range(len(self.calls))):
+                raise MiMoProtocolError("MiMo stream tool indices are discontinuous")
+            msg["tool_calls"] = [self.calls[i] for i in sorted(self.calls)]
+        body = {**self.meta, "object": "chat.completion",
+                "choices": [{"index": 0, "finish_reason": self.finish_reason,
+                             "message": msg}], "usage": self.usage,
+                "timings": self.timings}
+        validate_mimo_chat_completion(body, self.request)
+        _wire_event({"event": "STREAM_COMPLETE", "requestNumber": self.number,
+                     "direction": "MIMO_TO_AUTOPROVER", "byteCount": len(self.wire),
+                     "sha256": hashlib.sha256(self.wire).hexdigest()})
+        raw = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        _wire_body("ADAPTER_TO_AUTOPROVER", self.number, raw, status=200)
+        _progress_event({"event": "MODEL_COMPLETION", "requestNumber": self.number,
+                         "mode": self.mode, "outcome": "ENVELOPE_ACCEPTED",
+                         "finishReason": self.finish_reason,
+                         "promptTokens": self.usage.get("prompt_tokens"),
+                         "completionTokens": self.usage.get("completion_tokens"),
+                         "cachedTokens": self.usage.get("prompt_tokens_details", {}).get("cached_tokens"),
+                         "toolCalls": len(self.calls)})
+        return body
+
+
+def _native_stream_request(request: httpx.Request):
+    payload = json.loads(request.read())
+    payload, mode = _prepare_native_payload(payload)
+    payload["stream"] = True
+    payload["stream_options"] = {"include_usage": True}
+    payload["return_progress"] = True
+    payload["sse_ping_interval"] = 15
+    number = next(_PROGRESS_SEQUENCE)
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    headers = request.headers.copy()
+    for key in ("content-length", "transfer-encoding"):
+        headers.pop(key, None)
+    headers["accept"] = "text/event-stream"
+    headers["accept-encoding"] = "identity"
+    actual = httpx.Request(request.method, request.url, headers=headers, content=raw,
+                           extensions=dict(request.extensions))
+    _wire_body("AUTOPROVER_TO_MIMO", number, raw)
+    _progress_event({"event": "MODEL_REQUEST", "requestNumber": number,
+                     "mode": mode, "inputBytes": len(raw),
+                     "tools": len(payload.get("tools") or []),
+                     "maxCompletionTokens": payload.get("max_completion_tokens",
+                                                        payload.get("max_tokens")),
+                     "stream": True})
+    return actual, _NativeStream(number, mode, payload)
+
+
+def _native_stream_response(status: int, body: dict) -> httpx.Response:
+    return httpx.Response(status, json=body)
+
+
+class _NativeSyncTransport(httpx.BaseTransport):
+    def __init__(self):
+        self.inner = httpx.HTTPTransport(trust_env=False)
+
+    def handle_request(self, request):
+        if request.url.path != "/v1/chat/completions":
+            raise MiMoProtocolError("Unexpected native MiMo API path")
+        actual, stream = _native_stream_request(request)
+        response = self.inner.handle_request(actual)
+        response.request = actual
+        try:
+            if response.status_code >= 400:
+                raw = response.read()
+                _wire_body("MIMO_TO_AUTOPROVER", stream.number, raw, response.status_code)
+                return httpx.Response(response.status_code, headers=response.headers, content=raw)
+            if "text/event-stream" not in response.headers.get("content-type", ""):
+                raise MiMoProtocolError("MiMo did not honor streaming request")
+            try:
+                for chunk in response.iter_bytes():
+                    stream.feed(chunk)
+                return _native_stream_response(response.status_code, stream.finish())
+            except Exception as exc:
+                stream.report()
+                _progress_event({"event": "MODEL_COMPLETION", "requestNumber": stream.number,
+                                 "mode": stream.mode, "outcome": "REJECTED",
+                                 "exceptionType": type(exc).__name__})
+                raise
+        finally:
+            response.close()
+
+    def close(self):
+        self.inner.close()
+
+
+class _NativeAsyncTransport(httpx.AsyncBaseTransport):
+    def __init__(self):
+        self.inner = httpx.AsyncHTTPTransport(trust_env=False)
+
+    async def handle_async_request(self, request):
+        await request.aread()
+        actual, stream = _native_stream_request(request)
+        response = await self.inner.handle_async_request(actual)
+        response.request = actual
+        try:
+            if response.status_code >= 400:
+                raw = await response.aread()
+                _wire_body("MIMO_TO_AUTOPROVER", stream.number, raw, response.status_code)
+                return httpx.Response(response.status_code, headers=response.headers, content=raw)
+            if "text/event-stream" not in response.headers.get("content-type", ""):
+                raise MiMoProtocolError("MiMo did not honor streaming request")
+            try:
+                async for chunk in response.aiter_bytes():
+                    stream.feed(chunk)
+                return _native_stream_response(response.status_code, stream.finish())
+            except Exception as exc:
+                stream.report()
+                _progress_event({"event": "MODEL_COMPLETION", "requestNumber": stream.number,
+                                 "mode": stream.mode, "outcome": "REJECTED",
+                                 "exceptionType": type(exc).__name__})
+                raise
+        finally:
+            await response.aclose()
+
+    async def aclose(self):
+        await self.inner.aclose()
+
+
+def _observe_native_component_analysis():
+    if not os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT"):
+        return
+    import composer.spec.system_analysis as analysis
+    original = analysis.run_component_analysis
+    if getattr(original, "_curveyield_observed", False):
+        return
+
+    @wraps(original)
+    async def observed(*args, **kwargs):
+        _progress_event({"event": "NATIVE_COMPONENT_ANALYSIS_STARTED"})
+        result = await original(*args, **kwargs)
+        _progress_event({"event": "NATIVE_COMPONENT_ANALYSIS_ACCEPTED" if result is not None
+                         else "NATIVE_COMPONENT_ANALYSIS_NO_RESULT",
+                         "components": len(result.components) if result is not None else 0})
+        return result
+
+    observed._curveyield_observed = True
+    analysis.run_component_analysis = observed
+
+
 def _trusted_http_client() -> httpx.Client:
+    if os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT"):
+        return httpx.Client(trust_env=False, transport=_NativeSyncTransport())
     return httpx.Client(
         trust_env=False,
         event_hooks={"request": [_log_request], "response": [_sync_local_response]},
@@ -262,6 +663,8 @@ def _trusted_http_client() -> httpx.Client:
 
 
 def _trusted_async_http_client() -> httpx.AsyncClient:
+    if os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT"):
+        return httpx.AsyncClient(trust_env=False, transport=_NativeAsyncTransport())
     return httpx.AsyncClient(
         trust_env=False,
         event_hooks={"request": [_log_request_async], "response": [_async_local_response]},
@@ -391,6 +794,7 @@ def configure_local_mimo_runtime() -> dict[str, str]:
     llm._local_call_structured = _strict_sync
     llm._local_call_structured_async = _strict_async
     llm._curveyield_mimo_strict = True
+    _observe_native_component_analysis()
     return {
         "backend": "local", "base_url": base_url, "model": MODEL_ID,
     }
@@ -509,7 +913,10 @@ class MiMoModelProvider:
             timeout=3600.0,
             max_retries=2,
             streaming=False,
-            disable_streaming=True,
+            disable_streaming=True,  # native SDK receives fully validated JSON; transport streams MiMo.
+            extra_body=({"chat_template_kwargs": {"enable_thinking": False},
+                         "reasoning_effort": "none"} if disable_thinking and
+                        os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT") else None),
             # Ignore ambient HTTP(S)_PROXY and other inherited proxy settings.
             http_client=_trusted_http_client(),
             http_async_client=_trusted_async_http_client(),
