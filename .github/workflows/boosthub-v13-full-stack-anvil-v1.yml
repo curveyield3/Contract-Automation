@@ -1,4 +1,4 @@
-name: BoostHub v64 exact sdCRV and sdFXN deployment gas v1
+name: BoostHub v64 exact sdCRV and sdFXN deployment gas diagnostics v2
 on:
   push:
     branches: [simulation/boosthub-v64-vault-deployment-gas-v1]
@@ -100,9 +100,12 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$RPC_ETHEREUM"
-          BLOCK=$(cast block-number --rpc-url "$RPC_ETHEREUM")
+          BLOCK=26481652
           echo "FORK_BLOCK=$BLOCK"
-          anvil --fork-url "$RPC_ETHEREUM" --fork-block-number "$BLOCK" --host 127.0.0.1 --port 8545 --silent >anvil.log 2>&1 &
+          EXTRA=()
+          if anvil --help | grep -q -- "--disable-tx-gas-limit"; then EXTRA+=(--disable-tx-gas-limit); fi
+          echo "ANVIL_DIAGNOSTIC_FLAGS=${EXTRA[*]}"
+          anvil --fork-url "$RPC_ETHEREUM" --fork-block-number "$BLOCK" --host 127.0.0.1 --port 8545 --silent "${EXTRA[@]}" >anvil.log 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
