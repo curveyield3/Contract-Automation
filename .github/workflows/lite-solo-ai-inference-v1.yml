@@ -236,6 +236,7 @@ jobs:
       AUDIT_AI_MAX_CHUNKS: ${{ inputs.max_chunks }}
       MODEL_FILE: MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf
       MODEL_REVISION: 4371da10c84fb26da3592d4cf312d24aa82b7b65
+      MODEL_REPO: bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF
     steps:
       - name: Record autonomous runner start for bounded 5h45 handoff
         if: inputs.mode == 'autonomous'
@@ -248,6 +249,8 @@ jobs:
           fetch-depth: 1
       - name: Check resource budget
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           [[ "$AI_INFERENCE_RUNNERS" == 1 || "$AI_INFERENCE_RUNNERS" == 2 || "$AI_INFERENCE_RUNNERS" == 4 ]] || {
@@ -282,6 +285,26 @@ jobs:
               [[ "$CERTORA_SOURCE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]] || { echo '::error::Certora originating run attempt required'; exit 1; }
               [[ "$CERTORA_SOURCE_HEAD_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo '::error::Certora originating SHA required'; exit 1; }
               test "$AUDIT_AI_SUBMISSION_MODE" = draft
+              origin="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CERTORA_SOURCE_RUN_ID")"
+              jq -e --arg sha "$CERTORA_SOURCE_HEAD_SHA" --argjson attempt "$CERTORA_SOURCE_RUN_ATTEMPT" '.repository.full_name=="curveyield3/Contract-Automation" and .head_branch=="machine-intelligence-audit-controller-v1" and .path==".github/workflows/security-intelligence-phase0-v1.yml" and .event=="push" and .head_sha==$sha and .run_attempt==$attempt and .status=="in_progress"' <<< "$origin" >/dev/null
+              # Only another request may have moved the authorized branch.
+              if [ "$GITHUB_SHA" != "$CERTORA_SOURCE_HEAD_SHA" ]; then
+                gh api "repos/$GITHUB_REPOSITORY/compare/$CERTORA_SOURCE_HEAD_SHA...$GITHUB_SHA" | jq -e '.status=="ahead" and (.files|length)==1 and .files[0].filename=="security-intelligence-phase0/requests/active-request.json"' >/dev/null
+              fi
+              request="$(gh api "repos/$GITHUB_REPOSITORY/contents/security-intelligence-phase0/requests/active-request.json?ref=$CERTORA_SOURCE_HEAD_SHA" --jq .content | base64 -d)"
+              profile="$(jq -er '.formalModel // "mimo" | select(.=="mimo" or .=="gpt-oss-20b" or .=="qwen-coder-7b")' <<< "$request")"
+              if [ "$profile" != mimo ]; then
+                test "$AI_INFERENCE_RUNNERS" = 1
+                jq -e '.source.repository=="curveyield3/Contract-Automation" and .source.commit=="85724e7bbb2e3bcbd373ea2464917b62e37541c9" and .source.archivePath=="process/audit-source-initialization/dai-live-no-deploy-script-v1.zip" and .source.archiveSha256=="0b2ac5fe0f4cb5e60d2f496d517f7251f9e121c5ac21244b8c8d1ccb0b9be8df"' <<< "$request" >/dev/null
+              fi
+              python3 - "$profile" <<'PY'
+          import os,runpy,sys
+          model=runpy.run_path("security-intelligence-phase0/scripts/security-formal-v1.py")["FORMAL_MODELS"][sys.argv[1]]
+          with open(os.environ["GITHUB_ENV"],"a") as env:
+              for key,field in {"MODEL_FILE":"file","MODEL_REPO":"repo","MODEL_REVISION":"revision","MODEL_SHA256":"sha256","CERTORA_MODEL_ALIAS":"alias","CERTORA_MODEL_FLAGS":"flags"}.items():
+                  env.write(f"{key}={model[field]}\n")
+          print("Selected source-bound formal model:",model["alias"],model["sha256"])
+          PY
               ;;
             campaign)
               test -n "$AUDIT_AI_CAMPAIGN_ID"
@@ -461,7 +484,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           key: curve-mimo-weights-${{ env.MODEL_SHA256 }}-${{ runner.os }}-${{ runner.arch }}-v1
-          path: ${{ runner.temp }}/models/MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf
+          path: ${{ runner.temp }}/models/${{ env.MODEL_FILE }}
       - name: Fetch pinned MiMo weights only on verified cache miss
         if: inputs.mode != 'autonomous_start' && steps.cached_mimo_weights.outputs.cache-hit != 'true'
         shell: bash
@@ -469,7 +492,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/models"
           curl -fL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/models/$MODEL_FILE" \
-            "https://huggingface.co/bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF/resolve/$MODEL_REVISION/$MODEL_FILE"
+            "https://huggingface.co/$MODEL_REPO/resolve/$MODEL_REVISION/$MODEL_FILE"
       - name: Verify pinned MiMo weight SHA-256 on both restore and download
         if: inputs.mode != 'autonomous_start'
         shell: bash
@@ -482,7 +505,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           key: curve-mimo-weights-${{ env.MODEL_SHA256 }}-${{ runner.os }}-${{ runner.arch }}-v1
-          path: ${{ runner.temp }}/models/MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf
+          path: ${{ runner.temp }}/models/${{ env.MODEL_FILE }}
       - name: Join private inference tailnet and start local RPC device
         if: inputs.mode != 'autonomous_start' && (inputs.inference_runners == '2' || inputs.inference_runners == '4')
         shell: bash
@@ -571,9 +594,10 @@ jobs:
             : "${MIMO_RPC_CSV:?exact-run private RPC peers required}"
             set -- --rpc "$MIMO_RPC_CSV" --n-gpu-layers 99
           fi
+          read -r -a model_flags <<< "$CERTORA_MODEL_FLAGS"
           "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/models/$MODEL_FILE" \
-            --alias lite-solo-mimo-v1 --host "$address" --port 8080 \
-            --ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on \
+            --alias "$CERTORA_MODEL_ALIAS" --host "$address" --port 8080 \
+            "${model_flags[@]}" \
             --threads 4 --parallel 1 --metrics --slots "$@" > "$RUNNER_TEMP/mimo-certora-server.log" 2>&1 &
           server_pid=$!
           mkdir -p "$RUNNER_TEMP/certora-rendezvous"
@@ -594,9 +618,8 @@ jobs:
           done
           [ "$ready" = true ] || { echo "::error::MiMo private server not ready within pinned 1200s budget"; exit 1; }
           # Exact workflow/run/attempt/source and live formal job are mandatory.
-          test "$GITHUB_SHA" = "$CERTORA_SOURCE_HEAD_SHA" || { echo "::error::CERTORA_MIXED_CHECKOUT_REVISIONS"; exit 1; }
-          latest="$(gh api repos/curveyield3/Contract-Automation/branches/machine-intelligence-audit-controller-v1 --jq .commit.sha)"
-          test "$latest" = "$CERTORA_SOURCE_HEAD_SHA" || { echo "::error::CERTORA_BRANCH_HEAD_MOVED"; exit 1; }
+          # The resource-budget step already authenticated the source revision
+          # and permitted only a request-file difference on this trusted branch.
           origin="$(gh api "repos/curveyield3/Contract-Automation/actions/runs/$CERTORA_SOURCE_RUN_ID")"
           jq -e --arg sha "$CERTORA_SOURCE_HEAD_SHA" --argjson attempt "$CERTORA_SOURCE_RUN_ATTEMPT" '
             .repository.full_name == "curveyield3/Contract-Automation" and
@@ -618,7 +641,7 @@ jobs:
             --arg sourceSha "$CERTORA_SOURCE_HEAD_SHA" \
             --argjson formalJobId "$origin_job_id" \
             --argjson mimoRun "$GITHUB_RUN_ID" --argjson mimoAttempt "$GITHUB_RUN_ATTEMPT" \
-            --arg mimoSha "$GITHUB_SHA" --arg model "lite-solo-mimo-v1" \
+            --arg mimoSha "$GITHUB_SHA" --arg model "$CERTORA_MODEL_ALIAS" \
             --arg weights "$MODEL_SHA256" --arg modelRevision "$MODEL_REVISION" \
             --arg llama "$LLAMA_SHA" --arg address "$address" '
             {schemaVersion:"curveyield-certora-mimo-rendezvous-v1",
@@ -662,7 +685,11 @@ jobs:
               fi
               sleep 10
             done
-            test -n "$response" || { echo "::error::CERTORA_ORIGIN_MONITOR_UNAVAILABLE"; exit 1; }
+            if [ -z "$response" ]; then
+              echo "::warning::CERTORA_ORIGIN_MONITOR_UNAVAILABLE; rechecking live session"
+              sleep 20
+              continue
+            fi
             status="$(jq -er .status <<< "$response")"
             case "$status" in
               completed)

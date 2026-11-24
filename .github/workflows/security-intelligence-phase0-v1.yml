@@ -9,12 +9,13 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: security-preflight-${{ github.ref }}
+  group: security-preflight-${{ github.ref }}${{ contains(github.event.head_commit.message, '[parallel-formal]') && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 jobs:
   admit:
     outputs:
       request_present: ${{ steps.request_present.outputs.request_present }}
+      formal_model: ${{ steps.request_present.outputs.formal_model }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -34,6 +35,11 @@ jobs:
             python3 -m py_compile \
               security-intelligence-phase0/scripts/security-formal-v1.py \
               security-intelligence-phase0/formal-mimo-provider/curveyield_formal_mimo/__init__.py
+            profile="$(jq -er '.formalModel // "mimo" | select(.=="mimo" or .=="gpt-oss-20b" or .=="qwen-coder-7b")' security-intelligence-phase0/requests/active-request.json)"
+            if [ "$profile" != mimo ]; then
+              jq -e '.source.repository=="curveyield3/Contract-Automation" and .source.commit=="85724e7bbb2e3bcbd373ea2464917b62e37541c9" and .source.archivePath=="process/audit-source-initialization/dai-live-no-deploy-script-v1.zip" and .source.archiveSha256=="0b2ac5fe0f4cb5e60d2f496d517f7251f9e121c5ac21244b8c8d1ccb0b9be8df"' security-intelligence-phase0/requests/active-request.json >/dev/null
+            fi
+            echo "formal_model=$profile" >> "$GITHUB_OUTPUT"
             echo 'AUTOPROVER_INTEGRATION_SYNTAX_PREFLIGHT_PASS'
             echo 'request_present=true' >> "$GITHUB_OUTPUT"
           else
@@ -277,6 +283,8 @@ jobs:
       contents: read
       actions: write
       id-token: write
+    env:
+      CURVEYIELD_FORMAL_MODEL: ${{ needs.admit.outputs.formal_model }}
     steps:
       - name: Checkout exact trusted formal dispatcher
         uses: actions/checkout@v4
@@ -544,12 +552,14 @@ jobs:
         run: |
           set -euo pipefail
           latest="$(gh api "repos/$GITHUB_REPOSITORY/branches/$GITHUB_REF_NAME" --jq '.commit.sha')"
-          test "$latest" = "$GITHUB_SHA" || {
-            echo "::error::Formal branch changed before exact-run private model dispatch"; exit 1;
-          }
+          # The only permitted difference between these two campaign commits is
+          # the immutable per-run request file. Never accept changed executable code.
+          if [ "$latest" != "$GITHUB_SHA" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$latest" | jq -e '.status=="ahead" and (.files|length)==1 and .files[0].filename=="security-intelligence-phase0/requests/active-request.json"' >/dev/null
+          fi
           title="CERTORA-QA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           runs_api="repos/$GITHUB_REPOSITORY/actions/workflows/lite-solo-ai-inference-v1.yml/runs?event=workflow_dispatch&per_page=100"
-          existing="$(gh api "$runs_api" --jq ".workflow_runs | map(select(.display_title == \"$title\" and .head_sha == \"$GITHUB_SHA\")) | length")"
+          existing="$(gh api "$runs_api" --jq ".workflow_runs | map(select(.display_title == \"$title\" and .head_branch == \"$GITHUB_REF_NAME\")) | length")"
           test "$existing" -eq 0 || {
             echo "::error::Exactly matching MiMo workflow already exists; do not duplicate dispatch"; exit 1;
           }
@@ -563,10 +573,15 @@ jobs:
             -f 'inputs[submission_mode]=draft' >/dev/null
           discovered=''
           for attempt in $(seq 1 50); do
-            matches="$(gh api "$runs_api" --jq ".workflow_runs | map(select(.display_title == \"$title\" and .head_sha == \"$GITHUB_SHA\" and .event == \"workflow_dispatch\"))")"
+            matches="$(gh api "$runs_api" --jq ".workflow_runs | map(select(.display_title == \"$title\" and .head_branch == \"$GITHUB_REF_NAME\" and .event == \"workflow_dispatch\"))")"
             count="$(jq 'length' <<< "$matches")"
             if [ "$count" -eq 1 ]; then
               discovered="$(jq -r '.[0].id' <<< "$matches")"
+              inference_sha="$(jq -er '.[0].head_sha|select(test("^[a-f0-9]{40}$"))' <<< "$matches")"
+              if [ "$inference_sha" != "$GITHUB_SHA" ]; then
+                gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$inference_sha" | jq -e '.status=="ahead" and (.files|length)==1 and .files[0].filename=="security-intelligence-phase0/requests/active-request.json"' >/dev/null
+              fi
+              echo "MIMO_WORKFLOW_HEAD_SHA=$inference_sha" >> "$GITHUB_ENV"
               break
             fi
             if [ "$count" -gt 1 ]; then
@@ -594,7 +609,7 @@ jobs:
           for attempt in $(seq 1 960); do
             run_state="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id")"
             observed_sha="$(jq -r .head_sha <<< "$run_state")"
-            test "$observed_sha" = "$GITHUB_SHA" || {
+            test "$observed_sha" = "$MIMO_WORKFLOW_HEAD_SHA" || {
               echo "::error::MiMo workflow head changed before private readiness"; exit 1;
             }
             artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts?per_page=100")"
@@ -629,20 +644,23 @@ jobs:
           done
           test "$downloaded" = true || { echo "::error::Exact MiMo readiness artifact remained unavailable"; exit 1; }
           test -s "$RUNNER_TEMP/mimo-private/rendezvous.json"
+          expected_model="$(python3 -c 'import os,json,runpy; print(json.dumps(runpy.run_path("security-intelligence-phase0/scripts/security-formal-v1.py")["FORMAL_MODELS"][os.environ["CURVEYIELD_FORMAL_MODEL"]]))')"
           jq -e --arg repo "$GITHUB_REPOSITORY" \
                 --arg sha "$GITHUB_SHA" \
+                --arg modelSha "$MIMO_WORKFLOW_HEAD_SHA" \
+                --argjson expectedModel "$expected_model" \
                 --argjson origin "$GITHUB_RUN_ID" \
                 --argjson attempt "$GITHUB_RUN_ATTEMPT" \
                 --argjson mimo "$id" '
             .schemaVersion=="curveyield-certora-mimo-rendezvous-v1" and
             .readiness=="READY" and .originRepository==$repo and
-            .originHeadSha==$sha and .mimoHeadSha==$sha and
+            .originHeadSha==$sha and .mimoHeadSha==$modelSha and
             .originRunId==$origin and .originRunAttempt==$attempt and
             .mimoRunId==$mimo and
-            .modelAlias=="lite-solo-mimo-v1" and
-            .modelRevision=="4371da10c84fb26da3592d4cf312d24aa82b7b65" and
+            .modelAlias==$expectedModel.alias and
+            .modelRevision==$expectedModel.revision and
             .llamaCommit=="8642541b255bfb5dc39cd351a178be09013a55d6" and
-            (.modelSha256|test("^[a-f0-9]{64}$")) and
+            .modelSha256==$expectedModel.sha256 and
             (.tailscaleIPv4|test("^100[.][0-9]+[.][0-9]+[.][0-9]+$")) and
             .port==8080 and .endpointPath=="/v1/chat/completions" ' \
             "$RUNNER_TEMP/mimo-private/rendezvous.json" >/dev/null
@@ -793,6 +811,8 @@ jobs:
               "mimoWorkflowRunId":rendezvous["mimoRunId"],
               "mimoWorkflowRunAttempt":rendezvous["mimoRunAttempt"],
               "mimoModelSha256":rendezvous["modelSha256"],
+              "modelAlias":MODEL_ID,
+              "modelProfile":os.environ["CURVEYIELD_FORMAL_MODEL"],
               "mimoLlamaCommit":rendezvous["llamaCommit"],
               "privateTailscaleValidated":True,
               "realHeavyCalls":role_calls["heavy"],

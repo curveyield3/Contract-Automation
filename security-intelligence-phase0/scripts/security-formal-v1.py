@@ -31,6 +31,39 @@ AUTOPROVER_COMMIT = "81d9626c249a70c0a0f0648a89de175443c0344c"
 AUTOPROVER_GRAPHCORE_COMMIT = "c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc"
 UV_RELEASE = "0.13.9"
 
+# Exact model identities and launch configurations proven in the public DAI
+# replay benchmarks. The existing trusted formal/inference workflows share
+# this immutable allowlist; the default MiMo configuration is unchanged.
+FORMAL_MODELS = {
+    "mimo": {
+        "alias": "lite-solo-mimo-v1",
+        "file": "MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf",
+        "repo": "bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF",
+        "revision": "4371da10c84fb26da3592d4cf312d24aa82b7b65",
+        "sha256": "4bca6f18c73f72270c7a20c2ea2bea581de8246e318714277120369d34048c81",
+        "context": 262144,
+        "flags": "--ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on"
+    },
+    "gpt-oss-20b": {
+        "alias": "lite-solo-gpt-oss-20b-v1",
+        "file": "gpt-oss-20b-MXFP4.gguf",
+        "repo": "ggml-org/gpt-oss-20b-GGUF",
+        "revision": "b97cbb20d1995efd41dce8c4dd1ddf86e8db375b",
+        "sha256": "27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901",
+        "context": 32768,
+        "flags": "--ctx-size 32768 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on --jinja --reasoning-effort low --reasoning-budget 2048"
+    },
+    "qwen-coder-7b": {
+        "alias": "lite-solo-qwen-coder-7b-v1",
+        "file": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+        "repo": "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",
+        "revision": "13fb94bfda8c8cf22497dc57b78f391a9acb426a",
+        "sha256": "509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c",
+        "context": 32768,
+        "flags": "--ctx-size 32768 --jinja"
+    }
+}
+
 
 def invoke(argv: list[str], *, cwd: Path | None = None,
            env: dict[str, str] | None = None) -> str:
@@ -1341,6 +1374,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
     origin = int(os.environ["GITHUB_RUN_ID"])
     attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
     head = os.environ["GITHUB_SHA"]
+    model_profile = os.environ.get("CURVEYIELD_FORMAL_MODEL", "mimo")
+    model = FORMAL_MODELS[model_profile]
     if (mapping.get("status") != "AUTHENTICATED_SOURCE_TARGETS_READY"
             or native.get("status") != "LOCAL_TOOLCHAIN_STARTUP_VERIFIED"
             or native.get("proverGitCommit") != PROVER_COMMIT
@@ -1354,6 +1389,9 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             or session.get("sourceSha256") != mapping["source"]["archiveSha256"]
             or session.get("nativeProverHashSha256") != native.get("emvJarSha256")
             or session.get("privateTailscaleValidated") is not True
+            or session.get("modelAlias") != model["alias"]
+            or session.get("mimoModelSha256") != model["sha256"]
+            or session.get("modelProfile") != model_profile
             or session.get("cloudProviderCalls") != 0):
         raise RuntimeError("I06.2 missing same-run private model/source/native provenance")
     ip = os.environ.get("CURVEYIELD_MIMO_VERIFIED_TAILNET_IP", "")
@@ -1419,7 +1457,9 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         "nativeProverCommit": PROVER_COMMIT,
         "nativeProverSha256": native["emvJarSha256"],
         "autoProverCommit": AUTOPROVER_COMMIT,
-        "model": "lite-solo-mimo-v1",
+        "model": model["alias"],
+        "modelProfile": model_profile,
+        "modelSha256": model["sha256"],
         "mimoRunId": session.get("mimoWorkflowRunId"),
         "eligibleTargetCount": len(target_list),
         "results": [],
@@ -1649,7 +1689,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "COMPOSER_EMBED_DEVICE": "cpu",
             "PREAUDIT_LLM_BACKEND": "local",
             "PREAUDIT_LOCAL_LLM_BASE_URL": endpoint,
-            "PREAUDIT_LOCAL_LLM_MODEL": "lite-solo-mimo-v1",
+            "PREAUDIT_LOCAL_LLM_MODEL": model["alias"],
+            "CURVEYIELD_FORMAL_MODEL": model_profile,
             "CURVEYIELD_FORMAL_PROJECT_ROOT": str(project),
             "CURVEYIELD_FORMAL_TARGET_INDEX": str(index + 1),
         })
@@ -1679,8 +1720,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             str(upstream / ".venv/bin/python"), "-c", entry,
             str(project), str(local_contract.resolve(strict=True)) + ":" + str(target["contract"]),
             str(mapping["targetContextFile"]),
-            "--heavy-model", "lite-solo-mimo-v1",
-            "--lite-model", "lite-solo-mimo-v1",
+            "--heavy-model", model["alias"],
+            "--lite-model", model["alias"],
             "--max-concurrent", "1",
             "--max-cpu-tasks", "1",
             "--run-mode", "comprehensive",
