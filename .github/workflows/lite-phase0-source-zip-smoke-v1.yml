@@ -1,87 +1,51 @@
-name: cyvlSDT v69 exact source recovery
+name: cyvlSDT v69 verify recovered source against queued creation bytecode
 on:
   push:
     branches: [cyvlsdt-v69-source-recovery-v1]
     paths: ['.github/workflows/lite-phase0-source-zip-smoke-v1.yml']
 permissions:
   contents: read
+  actions: read
 jobs:
-  recover-source:
+  verify-source:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          persist-credentials: false
+          name: CurveYield-cyvlSDT-Deployment-Source-v69
+          run-id: 45335465514
+          github-token: ${{ github.token }}
+          path: /tmp/cyv65
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Materialize exact v64 source and benchmark-only optimization candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsSL 'https://raw.githubusercontent.com/curveyield3/Smart-Contracts/6b058498554f58936daf1216c222d554ee666f5e/Audit-Intake/CurveYield-cyvlSDT-Deployment-Package-v64.zip' -o /tmp/cyv64.zip
-          echo 'a2d46ab6bf63a760efecf914f36419b8ec271c0e36f9b3ee9821cd842ea0d7ee  /tmp/cyv64.zip' | sha256sum -c -
-          mkdir -p /tmp/cyv64 /tmp/cyv65
-          unzip -q /tmp/cyv64.zip -d /tmp/cyv64
-          cp -a /tmp/cyv64/contracts /tmp/cyv65/
-          mkdir -p /tmp/cyv-deps
-          npm install --prefix /tmp/cyv-deps --ignore-scripts --no-audit --no-fund --no-save '@openzeppelin/contracts@5.4.0' '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts-upgradeable@4.9.6' 'ethers@6.17.0'
-          ln -s /tmp/cyv-deps/node_modules /tmp/cyv64/node_modules
-          ln -s /tmp/cyv-deps/node_modules /tmp/cyv65/node_modules
-          for ROOT in /tmp/cyv64 /tmp/cyv65; do
-            rm -f "$ROOT/contracts/PoL_Manager_Contract_v22.sol" "$ROOT/contracts/VoteMarketSingleGaugeBribeAllocator.sol"
-            rm -rf "$ROOT/contracts/external_guard_v8"
-            cat > "$ROOT/foundry.toml" <<'EOF'
-          [profile.default]
-          src = "contracts"
-          out = "out"
-          libs = ["node_modules"]
-          remappings = ["@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/", "@openzeppelin-4/contracts/=node_modules/@openzeppelin-4/contracts/", "@openzeppelin/contracts-upgradeable/=node_modules/@openzeppelin/contracts-upgradeable/"]
-          solc_version = "0.8.28"
-          optimizer = true
-          optimizer_runs = 200
-          via_ir = true
-          evm_version = "cancun"
-          EOF
-          done
-          python3 - <<'PY'
-          import json,pathlib
-          p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
-          exec(compile(p['transform'],'v65-transform','exec'))
-          exec(compile(p['unifiedTransform'],'v66-transform','exec'))
-          exec(compile(p['packingTransform'],'v67-transform','exec'))
-          PY
-      - name: Verify recovered source and package exact optimized compilation inputs
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Compile exact downloaded source ZIP without tests
         shell: bash
         run: |
           set -euo pipefail
           cd /tmp/cyv65
-          echo 'a680019babba7e8e482f4bcf3a702b96478c759d04c5a4b51af4a754620d50a6  contracts/BeefyVaultCurveYieldV8cyvlSDT.sol' | sha256sum -c -
-          echo '70d7c163b7e97987cc3b4c21c761de9dc78b7877c7ad631f5884fc984d79ebc7  contracts/boosthub/StrategyDualFXNUnifiedV43.sol' | sha256sum -c -
-          mkdir -p /tmp/recovered
-          cp -a contracts /tmp/recovered/
-          sed 's/optimizer_runs = 200/optimizer_runs = 25/;s/out = "out"/out = "out-25"/' foundry.toml > /tmp/recovered/foundry.toml
-          cat > /tmp/recovered/package.json <<'EOF'
-          {"name":"curveyield-cyvlsdt-v69","private":true,"dependencies":{"@openzeppelin/contracts":"5.4.0","@openzeppelin-4/contracts":"npm:@openzeppelin/contracts@4.9.6","@openzeppelin/contracts-upgradeable":"4.9.6"}}
-          EOF
-          cd /tmp/recovered
-          find contracts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
           sha256sum -c SHA256SUMS
-          cat > SOURCE-PROVENANCE.md <<'EOF'
-          # CurveYield cyvlSDT v69 — recovered source
-          Exact source transformation inputs: curveyield3/Contract-Automation@95ff49c193bc42fcfeda6eea2b6e360878eb003f
-          Successful simulation: https://github.com/curveyield3/Contract-Automation/actions/runs/45334184898
-          Baseline: curveyield3/Smart-Contracts@6b058498554f58936daf1216c222d554ee666f5e/Audit-Intake/CurveYield-cyvlSDT-Deployment-Package-v64.zip
-          Baseline SHA-256: a2d46ab6bf63a760efecf914f36419b8ec271c0e36f9b3ee9821cd842ea0d7ee
-          Ethereum Safe: 0x47623C62f281807D615eeb4A2CEee9d97F9D3C49
-          Nonce 34: 0x87d15484c5331b38695247191866de9bc80b5a35a6a8793945861798cf02e434
-          Nonce 35: 0xcde420704e1e82185c6b2dbf9915ad580615fd097bb7b75e607c5784cfd124fc
-          Solidity 0.8.28, via IR, optimizer 25, Cancun. Original source reconstruction steps replayed without modifying Solidity or executing tests/simulations. Two final source hashes compared against original simulation log. Existing POL contracts not included in the original optimized compilation are not included here.
-          EOF
-          echo "RECOVERED_SOLIDITY_FILES=$(find contracts -name '*.sol' | wc -l)"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: CurveYield-cyvlSDT-Deployment-Source-v69
-          path: /tmp/recovered/
-          if-no-files-found: error
+          npm install --ignore-scripts --no-audit --no-fund
+          forge build --root /tmp/cyv65 --skip test --skip script
+      - name: Compare full creation bytecode and constructor arguments to exact queued Safe inputs
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          cases=json.loads('''[{"nonce":34,"index":1,"contract":"BeefyVaultCurveYieldV8cyvlSDT","creationBytes":20334,"creationSha256":"3211f72d6b2241d0a574c99f44514443b30ce8c5c5153080f67505324356432e","initBytes":20366,"initSha256":"15c7cce8bb0fe9299e9d7a8109f2ecbb4ca3f6b2f7b155a1adb7918339eb1fdc","args":"000000000000000000000000064256591313eeb86a84a5cbcc4c6460791b96dd"},{"nonce":34,"index":2,"contract":"StrategyDualFXNUnifiedV43","creationBytes":17409,"creationSha256":"11460cae9e5bf8e9678acbb7b17c5710d9892aec6f1eb732c4632679dba1fc82","initBytes":17729,"initSha256":"ce2a2bb74fe8839fbfac5adeeb0131f47350326c052d9c07afacf66da4f1cd24","args":"000000000000000000000000ad60c84f4addec612ce6bd329435d5718a4d9b7a000000000000000000000000e19d1c837b8a1c83a56cd9165b2c0256d39653ad000000000000000000000000365accfca291e7d3914637abf1f7635db165bb09000000000000000000000000a4a533025fef8d3446e7cb8a434824e1ee865b0000000000000000000000000032a8864466ae0d240c4ca7f3e4fbca2ca1f3ac60000000000000000000000000affe966b27ba3e4ebb8a0ec124c7b7019cc762f800000000000000000000000028ca243dc0ac075dd012fcf9375c25d18a844d96000000000000000000000000840fa8496e3b5ac306281d5bb5224fa08b5865f800000000000000000000000047623c62f281807d615eeb4a2ceee9d97f9d3c49000000000000000000000000064256591313eeb86a84a5cbcc4c6460791b96dd"},{"nonce":34,"index":3,"contract":"CurveYieldVlSDTToken","creationBytes":3384,"creationSha256":"5e3b9fbcc4123fb2a54439c15a905a52b39da89fdbfc9325560044d1bb8e8a0c","initBytes":3416,"initSha256":"6f87c7afe8fe7a0a845d30e06db64b9d75a10b340be97512199fa38caba40ba2","args":"000000000000000000000000064256591313eeb86a84a5cbcc4c6460791b96dd"},{"nonce":34,"index":4,"contract":"BoostHubInitializedClone","creationBytes":219,"creationSha256":"fe5f993ebcc93de243f4cda28207b9f086732b22046c40eac34fb21c8b84dcde","initBytes":251,"initSha256":"d18afdad26a53f4bb25ce7b860865ab5bdbd6d648d5a2af12694579314f9ca64","args":"00000000000000000000000000f63308ebb429f0967aa36a0def66ec1074975b"},{"nonce":35,"index":0,"contract":"CurveYieldVlSDTLocker","creationBytes":16602,"creationSha256":"74fb21d0005572ff5e23cffa90dbaa48fc70b4d5972d911e6bf9c2243318a2a3","initBytes":16922,"initSha256":"9cf668fb2c1b493914066b54c58a440ba8bd3fb16b147649cb54adeaa321d2e4","args":"000000000000000000000000064256591313eeb86a84a5cbcc4c6460791b96dd0000000000000000000000009f2b20a772246960810045905b7daccf960ee28800000000000000000000000073968b9a57c6e53d41345fd57a6e6ae27d6cdb2f00000000000000000000000094818a7baa7e9f5dc62ce4da1b52ef9a760b80b8000000000000000000000000ab05ca46d1c78cabb051effe35099714cad2adda0000000000000000000000000f542fa75c871eb1b93ef881b73e46acf733392f000000000000000000000000ca94395469a88e9cac0d5e5e308910e298270d300000000000000000000000006d57d34259f6dc31c9a241c199822861940d38f9000000000000000000000000bc38d256e559fed3fa95a6cdc633c667283fb6b80000000000000000000000002d9cc96463a0f21e9836cdb060226d033ec97c22"},{"nonce":35,"index":1,"contract":"CurveYieldvlSDTStaking","creationBytes":15273,"creationSha256":"dc20c8b1aa5fc0ce63a9a70428e111011c3e0e1c25e4147fde51045e7d085aad","initBytes":15625,"initSha256":"67dbc0f700d8643b34e519e380e7cdf816175d5072e05db4b6f6576bc6d4cf47","args":"000000000000000000000000064256591313eeb86a84a5cbcc4c6460791b96dd0000000000000000000000009f2b20a772246960810045905b7daccf960ee2880000000000000000000000009f2b20a772246960810045905b7daccf960ee2880000000000000000000000002d9cc96463a0f21e9836cdb060226d033ec97c2200000000000000000000000073968b9a57c6e53d41345fd57a6e6ae27d6cdb2f000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000005f5da46852de82ae4bd8d1da16bec50b0906b53b00000000000000000000000094818a7baa7e9f5dc62ce4da1b52ef9a760b80b80000000000000000000000006d57d34259f6dc31c9a241c199822861940d38f9000000000000000000000000ca94395469a88e9cac0d5e5e308910e298270d30000000000000000000000000a4a533025fef8d3446e7cb8a434824e1ee865b00"},{"nonce":35,"index":2,"contract":"CurveYieldRevenueStrategyV8","creationBytes":12113,"creationSha256":"055fdbd16ef08ae238bd829145053271aff639cee6551e3c6357fd9dc4d731ee","initBytes":12401,"initSha256":"36e291b100a51db0e509b95655b5eb2136f498ee2af500d75bb4ca290913c066","args":"000000000000000000000000064256591313eeb86a84a5cbcc4c6460791b96dd000000000000000000000000b594ee3514865d7c7eb009af4abe9ab491e9f1e00000000000000000000000002d9cc96463a0f21e9836cdb060226d033ec97c2200000000000000000000000073968b9a57c6e53d41345fd57a6e6ae27d6cdb2f0000000000000000000000002ecf92649595c4f001174470d4c8650da722c9810000000000000000000000005f5da46852de82ae4bd8d1da16bec50b0906b53b000000000000000000000000a4a533025fef8d3446e7cb8a434824e1ee865b000000000000000000000000000000000000000000000000000000000000000186000000000000000000000000000000000000000000000000000000000000000a"},{"nonce":35,"index":3,"contract":"CurveYieldVlSDTBoostMerchant","creationBytes":11521,"creationSha256":"4ca85f36a1ac18795cee61e8b169eea0768838a30b1c87a006068ad3c8c7fdba","initBytes":11617,"initSha256":"f815e0fa6d1d91792e34a59280e8a1225d1fe07a4040da7464ffa3ffd33f904a","args":"000000000000000000000000064256591313eeb86a84a5cbcc4c6460791b96dd0000000000000000000000005f5da46852de82ae4bd8d1da16bec50b0906b53b000000000000000000000000bc38d256e559fed3fa95a6cdc633c667283fb6b8"},{"nonce":35,"index":4,"contract":"StrategyCurveSDTYearnRebindable","creationBytes":10339,"creationSha256":"4918a2668acb920e42e0c873ff9a7d56ccfefe90df3045626bd8caebdd608e8d","initBytes":10467,"initSha256":"b5684c57aed3a3da291262e5c7b83b868e0dff266122291d80b8884aa83b95a3","args":"0000000000000000000000007c9977ce98710eaee2fdaa9c0a425e85f98a7a6c0000000000000000000000000df3604071c080edd761c4bb19e5dc909df5c8f2000000000000000000000000ab989d9daa0279e123d453204545be556f2d3072000000000000000000000000064256591313eeb86a84a5cbcc4c6460791b96dd"},{"nonce":35,"index":5,"contract":"StrategyConvexBoostHubStakingDirectV66","creationBytes":8312,"creationSha256":"d7214eaa2522a25489c22868614341b23e61cb23806cd7b2364d4c9d4b561151","initBytes":8632,"initSha256":"ef979c61ffeeee948058b0112039e2b1f58802154b42910be62e299f575b2e7b","args":"0000000000000000000000001a0263873c7671691eff84b20666ed1fb2337967000000000000000000000000d1b5651e55d4ceed36251c61c50c889b36f6abb50000000000000000000000008da448635ac2d39b8afe252e89e76e45ecd88e45000000000000000000000000a4a533025fef8d3446e7cb8a434824e1ee865b0000000000000000000000000047623c62f281807d615eeb4a2ceee9d97f9d3c49000000000000000000000000000000000000000000000000000000000000012c00000000000000000000000000000000000000000000000000000000000003e8000000000000000000000000000000000000000000000000000000000000232800000000000000000000000000000000000000000000000000000000000151800000000000000000000000000000000000000000000000000000000000000000"},{"nonce":35,"index":6,"contract":"BoostHubInitializedClone","creationBytes":219,"creationSha256":"fe5f993ebcc93de243f4cda28207b9f086732b22046c40eac34fb21c8b84dcde","initBytes":251,"initSha256":"d18afdad26a53f4bb25ce7b860865ab5bdbd6d648d5a2af12694579314f9ca64","args":"00000000000000000000000000f63308ebb429f0967aa36a0def66ec1074975b"},{"nonce":35,"index":7,"contract":"BoostHubInitializedClone","creationBytes":219,"creationSha256":"fe5f993ebcc93de243f4cda28207b9f086732b22046c40eac34fb21c8b84dcde","initBytes":251,"initSha256":"d18afdad26a53f4bb25ce7b860865ab5bdbd6d648d5a2af12694579314f9ca64","args":"00000000000000000000000000f63308ebb429f0967aa36a0def66ec1074975b"},{"nonce":35,"index":8,"contract":"BoostHubInitializedClone","creationBytes":219,"creationSha256":"fe5f993ebcc93de243f4cda28207b9f086732b22046c40eac34fb21c8b84dcde","initBytes":251,"initSha256":"d18afdad26a53f4bb25ce7b860865ab5bdbd6d648d5a2af12694579314f9ca64","args":"00000000000000000000000000f63308ebb429f0967aa36a0def66ec1074975b"}]''')
+          failures=[]
+          for c in cases:
+              a=json.loads((pathlib.Path('/tmp/cyv65/out-25')/(c['contract']+'.sol')/(c['contract']+'.json')).read_text())
+              code=bytes.fromhex(a['bytecode']['object'].removeprefix('0x'))
+              digest=hashlib.sha256(code).hexdigest()
+              full=code+bytes.fromhex(c['args'])
+              ok=len(code)==c['creationBytes'] and digest==c['creationSha256'] and len(full)==c['initBytes'] and hashlib.sha256(full).hexdigest()==c['initSha256']
+              print('CREATION_MATCH',c['nonce'],c['index'],c['contract'],len(code),digest,ok,flush=True)
+              if not ok: failures.append(c['contract'])
+          print('DIRECT_CREATE_MATCHES',len(cases)-len(failures),'/',len(cases))
+          assert not failures, failures
+          PY
