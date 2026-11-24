@@ -1334,6 +1334,7 @@ jobs:
       AUTOPROVER_SHA: 81d9626c249a70c0a0f0648a89de175443c0344c
       GRAPHCORE_SHA: c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc
       PYTHONUNBUFFERED: '1'
+      CURVEYIELD_PUBLIC_DAI_WIRE_TRACE: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1412,13 +1413,14 @@ jobs:
           from pathlib import Path
           from composer.spec.system_model import SourceApplication
           from composer.spec.system_analysis import validate_solidity_connectivity
-          from curveyield_formal_mimo import _NativeStream
+          from curveyield_formal_mimo import _NativeStream, _wire_body, _progress_event
           out = Path(os.environ["RUNNER_TEMP"]) / "qwen-coder-replay"
           raw = (out / "request-exact-v1.json").read_bytes()
           assert hashlib.sha256(raw).hexdigest() == os.environ["REPLAY_SHA256"]
           req = json.loads(raw)
           root = out / "source"
           root.mkdir()
+          os.environ["CURVEYIELD_FORMAL_PROJECT_ROOT"] = str(root)
           source = "\n".join(b["text"] for b in req["messages"][1]["content"] if b["type"] == "text")
           files = re.findall(r"\[Source: ([^\]]+)\]\n(.*?)\n\[/Source\]", source, re.S)
           assert sorted(p for p, _ in files) == ["src/dai.sol", "src/lib.sol"], [p for p, _ in files]
@@ -1429,25 +1431,39 @@ jobs:
           stream = _NativeStream(1, "component_analysis_schema", req)
           summary = {"model": "Qwen2.5-Coder-7B-Instruct Q4_K_M", "requestSha256": hashlib.sha256(raw).hexdigest(), "nativeValidatorCommit": os.environ["AUTOPROVER_SHA"], "modelSha256": os.environ["QWEN_SHA256"], "context": 32768, "threads": 4, "status": "REJECTED"}
           start = time.monotonic()
+          last_report = start
+          answer_index = reasoning_index = 0
+          def live_output(force=False):
+              global last_report, answer_index, reasoning_index
+              now = time.monotonic()
+              if not force and now - last_report < 1.0:
+                  return
+              for label, parts, index in (("MODEL_ANSWER_DELTA", stream.content, answer_index), ("MODEL_REASONING_DELTA", stream.reasoning, reasoning_index)):
+                  if len(parts) > index:
+                      print(label, json.dumps("".join(parts[index:]), ensure_ascii=False), flush=True)
+              answer_index, reasoning_index = len(stream.content), len(stream.reasoning)
+              last_report = now
           try:
               http = urllib.request.Request("http://127.0.0.1:8080/v1/chat/completions", data=raw, headers={"Content-Type": "application/json"}, method="POST")
+              _wire_body("AUTOPROVER_TO_MIMO", 1, raw)
+              _progress_event({"event": "REPLAY_REQUEST", "model": summary["model"], "requestNumber": 1, "requestSha256": summary["requestSha256"]})
               print("EXACT_REQUEST_SENT", summary["requestSha256"], flush=True)
               try:
                   with urllib.request.urlopen(http, timeout=180) as response, (out / "wire-response-v1.sse").open("wb") as wire:
                       print("HTTP", response.status, flush=True)
-                      last = 0
                       for line in response:
                           wire.write(line)
                           wire.flush()
                           stream.feed(line)
-                          answer = "".join(stream.content)
-                          if len(answer) - last >= 800:
-                              print("MODEL_ANSWER_DELTA", repr(answer[last:]), flush=True)
-                              last = len(answer)
+                          live_output()
               except urllib.error.HTTPError as err:
-                  (out / "http-error-v1.txt").write_bytes(err.read())
+                  error_bytes = err.read()
+                  (out / "http-error-v1.txt").write_bytes(error_bytes)
+                  _wire_body("MIMO_TO_AUTOPROVER", 1, error_bytes, status=err.code)
                   raise
               finally:
+                  live_output(force=True)
+                  stream.report(final=False)
                   (out / "model-output-v1.json").write_text("".join(stream.content))
                   (out / "reasoning-v1.txt").write_text("".join(stream.reasoning))
               print("ACTUAL_MODEL_OUTPUT", "".join(stream.content), flush=True)
@@ -1463,6 +1479,7 @@ jobs:
               print("NATIVE_VALIDATORS_ACCEPTED", len(app.components), flush=True)
           except Exception as exc:
               summary["error"] = str(exc)
+              _progress_event({"event": "REPLAY_VALIDATION_REJECTED", "requestNumber": 1, "error": str(exc)})
               traceback.print_exc()
               raise
           finally:
