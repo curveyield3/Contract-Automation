@@ -5,7 +5,7 @@ const SDT='0x73968b9a57c6e53d41345fd57a6e6ae27d6cdb2f',USDC='0xa0b86991c6218b36c
 const erc=['function balanceOf(address) view returns(uint256)','function totalSupply() view returns(uint256)','function transfer(address,uint256) returns(bool)','function transferFrom(address,address,uint256) returns(bool)','function approve(address,uint256) returns(bool)','function allowance(address,address) view returns(uint256)','function decimals() view returns(uint8)'];
 const ercI=new E.Interface(erc),transferTopic=E.id('Transfer(address,address,uint256)'),approvalTopic=E.id('Approval(address,address,uint256)');
 const J=x=>JSON.stringify(x,(_,v)=>typeof v==='bigint'?v.toString():v);
-const report={version:2,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
+const report={version:3,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
 const cleanError=e=>({message:String(e.shortMessage||e.message||e).slice(0,2000),data:e.data||e.info?.error?.data||null});
 const low=x=>String(x).toLowerCase();
 fs.mkdirSync(OUT,{recursive:true});
@@ -18,6 +18,11 @@ async function observe(p,r,label,extra={}){
  const fromBlock=r.blockNumber-1,toBlock=r.blockNumber;
  const events=[],pairs=new Map();
  for(const l of r.logs){
+   if(low(l.address)===low(WETH)&&l.topics.length===2&&[E.id('Deposit(address,uint256)'),E.id('Withdrawal(address,uint256)')].includes(l.topics[0])){
+     const account='0x'+l.topics[1].slice(-40),amount=BigInt(l.data),isDeposit=l.topics[0]===E.id('Deposit(address,uint256)');
+     events.push({token:l.address,from:isDeposit?ZERO:account,to:isDeposit?account:ZERO,amount,logIndex:l.index,event:isDeposit?'WETH Deposit':'WETH Withdrawal'});
+     pairs.set(low(l.address)+':'+low(account),[l.address,account]);
+   }
    if(l.topics[0]===transferTopic&&l.topics.length===3){
      const from='0x'+l.topics[1].slice(-40),to='0x'+l.topics[2].slice(-40),amount=BigInt(l.data);
      events.push({token:l.address,from,to,amount,logIndex:l.index});
@@ -83,7 +88,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
  async function need(k,f,args,caller=U,opts={}){const r=await act(k,f,args,caller,opts);if(!['PASS_ASSERTED','EXECUTED_TRANSFER_UNASSERTED','EXECUTED_NO_TRANSFER','EXPECTED_REVERT'].includes(r.status))throw Error('prerequisite '+k+'.'+f+' '+r.status);return r;}
  async function ext(t,f,args,caller=U,opts={}){return act('external:'+await t.getAddress(),f,args,caller,{...opts,contract:t});}
  async function scenario(label,fn){
-   if(!label.startsWith('SUPPLEMENT '))return;scenarioName=label;let snap=await p.send('evm_snapshot',[]),start=report.actions.length;
+   if(!label.startsWith('FOLLOWUP '))return;scenarioName=label;let snap=await p.send('evm_snapshot',[]),start=report.actions.length;
    try{await fn();report.scenarios.push({label,status:'COMPLETED',actions:report.actions.length-start});}
    catch(e){report.scenarios.push({label,status:'BLOCKED_OR_FAILED',error:cleanError(e),actions:report.actions.length-start});log('SCENARIO_ERROR',{label,error:cleanError(e)});}
    finally{await p.send('evm_revert',[snap]);signers.clear();save();}
@@ -101,7 +106,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    // Try real holders sampled from pinned-block Transfer events first; never debit pool or protocol custody.
    if(low(token)===low(A.token))throw Error('cyvlSDT must be minted through locker; fixture forbidden');
    const head=Number(process.env.FORK_BLOCK),seen=new Set();
-   for(let n=0;n<4;n++){
+   for(let n=0;n<1;n++){
      const logs=await soft(()=>p.getLogs({address:token,topics:[transferTopic],fromBlock:head-n*150-149,toBlock:head-n*150}));
      if(!Array.isArray(logs))continue;
      const candidates=logs.flatMap(l=>l.topics.slice(1,3).map(x=>'0x'+x.slice(-40)));
@@ -476,6 +481,79 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    });
   }
  }
+
+
+ async function vr(k,f,args,check){
+   let row={contract:k,function:N[k].interface.getFunction(f).format('sighash'),params:args};
+   try{row.result=await N[k][f](...args);if(check)await check(row.result);row.status='READ_OK';}catch(e){row.status='READ_REVERT';row.error=cleanError(e);row.decodedError=errorName(N[k],e);}
+   report.views.push(row);log('VIEW',row);return row;
+ }
+ await scenario('FOLLOWUP revenue vault full lifecycle despite mint shortfall',async()=>{
+   await lock(180n*W);await approve(A.token,A.rvault,U);
+   await vd('rvault',A.token,20n*W);
+   let v=N.rvault,t=C(p,A.token),b=await v.balanceOf(U);
+   await act('rvault','transfer',[V,W],U,{check:async()=>eq(await v.balanceOf(U),b-W)});
+   await act('rvault','approve',[V,2n*W],U,{check:async()=>eq(await v.allowance(U,V),2n*W)});
+   await act('rvault','increaseAllowance',[V,W],U,{check:async()=>eq(await v.allowance(U,V),3n*W)});
+   await act('rvault','decreaseAllowance',[V,W],U,{check:async()=>eq(await v.allowance(U,V),2n*W)});
+   let vb=await v.balanceOf(V);await act('rvault','transferFrom',[U,V,W/2n],V,{check:async()=>eq(await v.balanceOf(V),vb+W/2n)});
+   let shares=await v.balanceOf(U),assets=await t.balanceOf(V);
+   await act('rvault','redeem',[W/2n,V,U],V,{check:async()=>{eq(await v.balanceOf(U),shares-W/2n);assert(await t.balanceOf(V)>assets);}});
+   shares=await v.balanceOf(U);await act('rvault','withdraw(uint256)',[W],U,{check:async()=>eq(await v.balanceOf(U),shares-W)});
+   assets=await t.balanceOf(U);await act('rvault','withdraw(uint256,address,address)',[W/4n,U,U],U,{check:async()=>eq(await t.balanceOf(U),assets+W/4n)});
+   const q=await v.balanceOf(U)/8n;
+   await vr('rvault','previewQueuedRedeem',[q],r=>assert(r>0n));
+   let r=await act('rvault','requestWithdrawal',[q],U,{check:async()=>eq((await v.pendingWithdrawal(U)).shares,q)});
+   if(r.status==='PASS_ASSERTED'){
+    await act('rvault','completeWithdrawal',[],U,{reject:'VaultWithdrawalNotReady'});
+    assets=await t.balanceOf(U);await act('rvault','withdrawQueuedImmediate',[],U,{check:async()=>{assert(await t.balanceOf(U)>assets);eq((await v.pendingWithdrawal(U)).shares,0n);}});
+   }
+   r=await act('rvault','requestWithdrawal',[q],U,{check:async()=>eq((await v.pendingWithdrawal(U)).shares,q)});
+   if(r.status==='PASS_ASSERTED'){await warp(WEEK+5);assets=await t.balanceOf(U);await act('rvault','completeWithdrawal',[],U,{check:async()=>{assert(await t.balanceOf(U)>assets);eq((await v.pendingWithdrawal(U)).shares,0n);}});}
+   shares=await v.balanceOf(U);await act('rvault','emergencyWithdraw',[W/8n,0],U,{check:async()=>eq(await v.balanceOf(U),shares-W/8n)});
+   await ext(t,'transfer',[A.rvault,W],U);let idle=await t.balanceOf(A.rvault);await act('rvault','earn',[],U,{check:async()=>{assert(idle>0n);eq(await t.balanceOf(A.rvault),0n);}});
+   await act('revenue','harvest()',[],U);await act('revenue','harvest(address)',[V],U);
+   await warp(43201);await act('rvault','updateAPY',[],U);await vr('rvault','apySample',[0],r=>assert(r[1]>0n));
+   await act('rvault','withdrawAll',[],U,{check:async()=>eq(await v.balanceOf(U),0n)});
+   const ab=await t.balanceOf(U);if(ab>0n)await act('rvault','depositAll',[],U,{check:async()=>{eq(await t.balanceOf(U),0n);assert(await v.balanceOf(U)>0n);}});
+ });
+ for(const [k,token] of [['rvault',A.token],['svault',SDT],['crvVault',CRV],['fxnVault',SDFXN]]){
+   await scenario('FOLLOWUP '+k+' mint size matrix and share allowance, APY',async()=>{
+     if(k==='rvault')await lock(200n*W);else await fund(token,U,200n*W);
+     await approve(token,A[k],U);const v=N[k],t=C(p,token);
+     await act(k,'deposit(uint256,address)',[10n*W,U],U,{check:async()=>assert(await v.balanceOf(U)>0n)});
+     for(const fee of [0,25]){
+       await own(k,'setDepositFeeBps',[fee],async()=>eq(await v.depositFeeBps(),BigInt(fee)));
+       for(const q of [1n,W/100n,W/10n,W,10n*W]){
+         let pre=await v.balanceOf(U),ab=await t.balanceOf(U),quote=await v.previewMint(q);
+         await act(k,'mint',[q,U],U,{purpose:'exact-share mint must deliver quoted shares for previewMint assets: '+quote,check:async()=>{eq(await v.balanceOf(U),pre+q);eq(ab-await t.balanceOf(U),quote);}});
+       }
+     }
+     await act(k,'approve',[V,0],U,{check:async()=>eq(await v.allowance(U,V),0n)});
+     await act(k,'increaseAllowance',[V,W],U,{check:async()=>eq(await v.allowance(U,V),W)});
+     await act(k,'decreaseAllowance',[V,W/2n],U,{check:async()=>eq(await v.allowance(U,V),W/2n)});
+     await warp(43201);await act(k,'updateAPY',[],U);await vr(k,'apySample',[0],r=>assert(r[1]>0n));
+     if(k==='crvVault'){
+       let b=await v.balanceOf(U),ab=await t.balanceOf(U);const row=await act(k,'emergencyWithdraw',[W/2n,0],U,{check:async()=>{eq(await v.balanceOf(U),b-W/2n);assert(await t.balanceOf(U)>ab);}});
+       if(row.status==='FAIL'){const data=v.interface.encodeFunctionData('emergencyWithdraw',[W/2n,0]);row.revertTrace=await soft(()=>p.send('debug_traceCall',[{from:U,to:A[k],data},'latest',{tracer:'callTracer'}]));save();}
+       b=await v.balanceOf(U);ab=await t.balanceOf(U);await act(k,'withdraw(uint256)',[W/2n],U,{check:async()=>{eq(await v.balanceOf(U),b-W/2n);assert(await t.balanceOf(U)>ab);}});
+     }
+     if(k==='fxnVault'){await act('fxn','harvest(address)',[V],U);await act('fxn','harvest()',[],U);}
+   });
+ }
+ await scenario('FOLLOWUP active reward stream and conversion route diagnosis',async()=>{
+   await lock(100n*W);await stake(25n*W);await fund(SDT,U,100n*W);await fund(USDC,U,100000000n);
+   await ext(C(p,SDT),'transfer',[A.locker,20n*W],U);await ext(C(p,USDC),'transfer',[A.locker,20000000n],U);
+   await act('locker','forwardRewards',[],U);
+   let count=await N.staking.pendingConversionCount();
+   for(let i=0n;i<count;i++){
+     const before=await N.staking.pendingConversions(i);await vr('staking','pendingConversions',[i]);
+     const row=await act('staking','convertExcess',[i],U);
+     if(row.status==='FAIL'){const after=await N.staking.pendingConversions(i);eq(J(after),J(before));row.rollbackVerified=true;const router=await N.staking.OMNI_ROUTER();row.routeLength=await soft(()=>C(p,router,['function routeLength(address,address) view returns(uint256)']).routeLength(USDC,SDT));save();}
+   }
+   for(const t of [SDT,USDC,A.token])await vr('staking','getStream',[t,0]);
+   await warp(WEEK+1);await act('staking','claimRewardsSelf',[],U);
+ });
 
  // ABI inventory: explicit, state-meaningful calls first; read each getter using representative live state.
  scenarioName='ABI inventory';const abiRows=[];
