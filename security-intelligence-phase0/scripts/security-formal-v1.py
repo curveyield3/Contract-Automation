@@ -1297,6 +1297,18 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         if alias.exists() or alias.is_symlink():
             alias.unlink()
         alias.symlink_to(executable)
+    # These exact immutable source coordinates were authenticated at I04.1.
+    # The public DAI demonstration alone may expose the explicitly authorized exact wire transcript;
+    # all other source packages remain strictly private.
+    trace_public_dai = (
+        mapping["source"].get("repository") == "curveyield3/Contract-Automation"
+        and mapping["source"].get("archivePath") ==
+        "process/audit-source-initialization/dai-live-no-deploy-script-v1.zip"
+        and mapping["source"].get("archiveSha256") ==
+        "0b2ac5fe0f4cb5e60d2f496d517f7251f9e121c5ac21244b8c8d1ccb0b9be8df"
+        and mapping["source"].get("commit") == "85724e7bbb2e3bcbd373ea2464917b62e37541c9"
+        and str(mapping.get("requestId", "")).startswith("dai-ethereum-autoprover-i062-")
+    )
     outcome: dict[str, object] = {
         "schemaVersion": "curveyield-autoprover-execution-v1",
         "stage": "I06.2",
@@ -1327,6 +1339,82 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         tmp.replace(output_file)
         output_file.chmod(0o600)
     persist()
+    # GitHub clips live log lines and eventually the entire step. Keep the
+    # exact authorized DAI transcript in the existing Actions artifact service.
+    # Two rolling names preserve the preceding snapshot while its successor
+    # uploads; no per-message artifact-count ceiling or public source leakage
+    # for any other campaign. Only the trusted parent receives runtime tokens.
+    wire_path = private / "public-dai-wire-transcript-v1.jsonl"
+    wire_sequence = 0
+
+    def publish_dai_wire_snapshot() -> None:
+        nonlocal wire_sequence
+        node = Path(os.environ.get("CURVEYIELD_ARTIFACT_NODE", ""))
+        uploader = (runner_temp.parent / "_actions" / "actions" /
+                    "upload-artifact" / "v4" / "dist" / "upload" / "index.js")
+        if (not node.is_file() or not uploader.is_file()
+                or not os.environ.get("ACTIONS_RUNTIME_TOKEN")
+                or not os.environ.get("ACTIONS_RESULTS_URL")):
+            raise RuntimeError("DAI_LIVE_ARTIFACT_RUNTIME_UNAVAILABLE")
+        slot = "a" if wire_sequence % 2 == 0 else "b"
+        name = f"certora-dai-wire-v1-{origin}-{attempt}-{slot}"
+        output = private / "wire-artifact-output.txt"
+        output.write_text("")
+        output.chmod(0o600)
+        # Reuse the exact upload-artifact v4 bundle downloaded for the
+        # existing formal artifact step; no extra service or repository writes.
+        upload_env = {
+            k: os.environ[k] for k in (
+                "PATH", "HOME", "TMPDIR", "LANG", "RUNNER_TEMP",
+                "GITHUB_WORKSPACE", "GITHUB_REPOSITORY", "GITHUB_RUN_ID",
+                "GITHUB_RUN_ATTEMPT", "GITHUB_SERVER_URL", "GITHUB_API_URL",
+                "ACTIONS_RUNTIME_TOKEN", "ACTIONS_RUNTIME_URL",
+                "ACTIONS_RESULTS_URL", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+            ) if k in os.environ
+        }
+        upload_env.update({
+            "GITHUB_OUTPUT": str(output),
+            "INPUT_NAME": name,
+            "INPUT_PATH": str(wire_path),
+            "INPUT_IF-NO-FILES-FOUND": "error",
+            "INPUT_RETENTION-DAYS": "1",
+            "INPUT_COMPRESSION-LEVEL": "6",
+            "INPUT_OVERWRITE": "true",
+            "INPUT_INCLUDE-HIDDEN-FILES": "false",
+        })
+        result = subprocess.run([str(node), str(uploader)], env=upload_env,
+                                capture_output=True, text=True, timeout=180,
+                                check=False)
+        if result.returncode:
+            raise RuntimeError("DAI_LIVE_ARTIFACT_UPLOAD_FAILED_" + str(result.returncode))
+        match = re.search(r"(?m)^artifact-id(?:=|<<[^\n]+\n)([0-9]+)$",
+                          output.read_text())
+        if not match:
+            raise RuntimeError("DAI_LIVE_ARTIFACT_ID_MISSING")
+        artifact_id = int(match.group(1))
+        wire_sequence += 1
+        outcome["liveDaiWireSnapshot"] = {
+            "sequence": wire_sequence, "artifactId": artifact_id,
+            "artifactName": name, "transcriptSha256": digest(wire_path),
+            "byteCount": wire_path.stat().st_size,
+        }
+        persist()
+        print(json.dumps({
+            "event": "DAI_LIVE_WIRE_SNAPSHOT", **outcome["liveDaiWireSnapshot"],
+            "url": (f"https://github.com/curveyield3/Contract-Automation/"
+                    f"actions/runs/{origin}/artifacts/{artifact_id}"),
+        }, sort_keys=True), flush=True)
+
+    if trace_public_dai:
+        # Publish before launching the model client. A missing live channel
+        # is an execution failure, not a silent return to truncated logs.
+        wire_path.write_text(json.dumps({
+            "event": "TRANSCRIPT_BEGIN", "schemaVersion": "curveyield-dai-wire-v1",
+            "originRunId": origin, "originRunAttempt": attempt, "originCommit": head,
+            "requestId": mapping["requestId"], "source": mapping["source"],
+        }, sort_keys=True) + "\n", encoding="utf-8")
+        wire_path.chmod(0o600)
+        publish_dai_wire_snapshot()
     begun = time.monotonic()
     # 330-minute Actions formal job includes source collection, native setup,
     # DB/RAG bootstrap and cleanup. Reserve time for the remaining runner steps.
@@ -1375,18 +1463,6 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "PREAUDIT_LOCAL_LLM_BASE_URL": endpoint,
             "PREAUDIT_LOCAL_LLM_MODEL": "lite-solo-mimo-v1",
         })
-        # These exact immutable source coordinates were authenticated at I04.1.
-        # The public DAI demonstration alone may expose full wire JSON in logs;
-        # all other source packages remain strictly private.
-        trace_public_dai = (
-            mapping["source"].get("repository") == "curveyield3/Contract-Automation"
-            and mapping["source"].get("archivePath") ==
-            "process/audit-source-initialization/dai-live-no-deploy-script-v1.zip"
-            and mapping["source"].get("archiveSha256") ==
-            "0b2ac5fe0f4cb5e60d2f496d517f7251f9e121c5ac21244b8c8d1ccb0b9be8df"
-            and mapping["source"].get("commit") == "85724e7bbb2e3bcbd373ea2464917b62e37541c9"
-            and str(mapping.get("requestId", "")).startswith("dai-ethereum-autoprover-i062-")
-        )
         if trace_public_dai:
             env["CURVEYIELD_PUBLIC_DAI_WIRE_TRACE"] = "1"
         # Run the actual pinned console-autoprove main after activating the
@@ -1426,25 +1502,70 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         heartbeat_seconds = 60
         last_activity = started
         last_heartbeat = started - heartbeat_seconds
-        # Read the child's owner-readable native log in sequence. Forward only
-        # the exact wire-trace marker, and only for this verified public DAI.
-        # Each marker carries the full input/output JSON in ordered chunks.
+        # Reassemble each complete native request/response from its original
+        # trace chunks; publish only after exact byte count and SHA-256 match.
+        # A short log pointer remains readable even on very long conversations.
         trace_offset = 0
         trace_remainder = b""
+        trace_pending: dict[tuple[int, str], dict] = {}
+
         def forward_dai_wire_trace() -> None:
             nonlocal trace_offset, trace_remainder
             if not trace_public_dai:
                 return
+            import base64
             with logfile.open("rb") as log_reader:
                 log_reader.seek(trace_offset)
                 new_bytes = log_reader.read()
                 trace_offset = log_reader.tell()
-            data = trace_remainder + new_bytes
-            lines = data.split(b"\n")
+            lines = (trace_remainder + new_bytes).split(b"\n")
             trace_remainder = lines.pop()
+            completed = []
             for row in lines:
-                if row.startswith(b"CURVEYIELD_DAI_WIRE_V1 "):
-                    print(row.decode("utf-8", "strict"), flush=True)
+                if not row.startswith(b"CURVEYIELD_DAI_WIRE_V1 "):
+                    continue
+                item = json.loads(row.split(b" ", 1)[1])
+                event = item["event"]
+                if event in ("BEGIN", "CHUNK", "END"):
+                    key = (item["requestNumber"], item["direction"])
+                    if event == "BEGIN":
+                        if key in trace_pending:
+                            raise RuntimeError("DAI_LIVE_DUPLICATE_WIRE_BEGIN")
+                        trace_pending[key] = {"meta": item, "chunks": []}
+                    elif event == "CHUNK":
+                        pending = trace_pending[key]
+                        if item["chunkIndex"] != len(pending["chunks"]):
+                            raise RuntimeError("DAI_LIVE_WIRE_CHUNK_ORDER_INVALID")
+                        pending["chunks"].append(item["payload"])
+                    else:
+                        pending = trace_pending.pop(key)
+                        meta = pending["meta"]
+                        chunks = pending["chunks"]
+                        if len(chunks) != meta["chunkCount"] or len(chunks) != item["chunkCount"]:
+                            raise RuntimeError("DAI_LIVE_WIRE_CHUNK_COUNT_INVALID")
+                        payload = "".join(chunks)
+                        if meta["encoding"] == "utf-8":
+                            raw = payload.encode("utf-8")
+                        elif meta["encoding"] == "base64":
+                            raw = base64.b64decode(payload, validate=True)
+                        else:
+                            raise RuntimeError("DAI_LIVE_WIRE_ENCODING_INVALID")
+                        if (len(raw) != meta["byteCount"]
+                                or hashlib.sha256(raw).hexdigest() != meta["sha256"]):
+                            raise RuntimeError("DAI_LIVE_WIRE_BODY_DIGEST_MISMATCH")
+                        completed.append({**meta, "event": "COMPLETE_BODY",
+                                          "targetIndex": index + 1, "payload": payload})
+                else:
+                    completed.append({**item, "targetIndex": index + 1})
+            if completed:
+                with wire_path.open("a", encoding="utf-8") as transcript:
+                    for item in completed:
+                        transcript.write(json.dumps(item, ensure_ascii=True) + "\n")
+                publish_dai_wire_snapshot()
+                for item in completed:
+                    # Never reintroduce raw body lines into the truncated viewer.
+                    print(json.dumps({k: v for k, v in item.items() if k != "payload"},
+                                     sort_keys=True), flush=True)
 
         model_idle_since: float | None = None
         previous_cpu: int | None = None
@@ -1567,6 +1688,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait(timeout=10)
         forward_dai_wire_trace()
+        if trace_pending or trace_remainder.startswith(b"CURVEYIELD_DAI_WIRE_V1 "):
+            raise RuntimeError("DAI_LIVE_WIRE_INCOMPLETE_AT_TARGET_EXIT")
         logfile.chmod(0o600)
         if record["status"] == "NATIVE_AUTOPROVER_FAILED":
             # The full upstream trace remains private. Publish only a narrow

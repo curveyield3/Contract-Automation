@@ -816,25 +816,30 @@ jobs:
                   .cloudProviderCalls==0 and .eligibleTargetCount>0' \
             "$RUNNER_TEMP/formal-session-v1.json" >/dev/null
       - name: Execute pinned upstream AutoProver against authenticated targets
-        shell: bash
+        # A JavaScript action receives the native Actions artifact runtime
+        # environment. The trusted Python parent reuses upload-artifact v4
+        # for live public-DAI snapshots; its model child remains uncredentialed.
+        uses: actions/github-script@v7
         env:
           GH_TOKEN: ${{ github.token }}
           CERTORA_AI_COMPOSER_PGHOST: 127.0.0.1
           CERTORA_AI_COMPOSER_PGPORT: '5432'
           COMPOSER_EMBED_DEVICE: cpu
-        run: |
-          set -euo pipefail
-          python3 security-intelligence-phase0/scripts/security-formal-v1.py run-autoprover \
-            --target-map "$RUNNER_TEMP/formal-targets/target-map-v1.json" \
-            --native-toolchain "$RUNNER_TEMP/curve-certora-formal/toolchain-bootstrap-v1.json" \
-            --native-compilers "$RUNNER_TEMP/curve-certora-formal/compiler-bootstrap-v1.json" \
-            --session "$RUNNER_TEMP/formal-session-v1.json" \
-            --output "$RUNNER_TEMP/certora-autoprover-execution-v1.json"
-          jq -e '.stage=="I06.2" and
-                  .status=="NATIVE_RULE_VERDICTS_OBSERVED" and
-                  .observedNativePropertyVerdicts>0 and
-                  (.results | length)==.eligibleTargetCount' \
-            "$RUNNER_TEMP/certora-autoprover-execution-v1.json" >/dev/null
+        with:
+          script: |
+            const tmp = process.env.RUNNER_TEMP;
+            const report = tmp + '/certora-autoprover-execution-v1.json';
+            await exec.exec('python3', [
+              'security-intelligence-phase0/scripts/security-formal-v1.py', 'run-autoprover',
+              '--target-map', tmp + '/formal-targets/target-map-v1.json',
+              '--native-toolchain', tmp + '/curve-certora-formal/toolchain-bootstrap-v1.json',
+              '--native-compilers', tmp + '/curve-certora-formal/compiler-bootstrap-v1.json',
+              '--session', tmp + '/formal-session-v1.json',
+              '--output', report
+            ], {env: {...process.env, CURVEYIELD_ARTIFACT_NODE: process.execPath}});
+            await exec.exec('jq', ['-e',
+              '.stage=="I06.2" and .status=="NATIVE_RULE_VERDICTS_OBSERVED" and .observedNativePropertyVerdicts>0 and (.results | length)==.eligibleTargetCount',
+              report]);
       - name: Publish sanitized live formal and MiMo handoff state without private material
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
