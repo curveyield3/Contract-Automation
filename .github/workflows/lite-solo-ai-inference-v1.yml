@@ -2,7 +2,7 @@ name: Lite-Solo AI Source Inference and Autonomous Beta v6
 run-name: ${{ inputs.mode == 'certora_qa' && format('CERTORA-QA-{0}-{1}', inputs.source_run_id, inputs.source_run_attempt) || inputs.mode == 'autonomous' && format('MI-{0}', inputs.dispatch_tag) || inputs.mode == 'autonomous_start' && 'MI-AUTONOMOUS-START' || github.workflow }}
 on:
   push:
-    branches: [machine-intelligence-audit-controller-v1]
+    branches: [autoprover-gpt-oss-20b-v1]
     paths:
       - 'process/agent-upload/lite-solo-ai-training-request-v1.json'
       - 'process/agent-upload/lite-solo-ai-audit-request-v1.json'
@@ -120,12 +120,12 @@ concurrency:
 env:
   MACHINE_INTELLIGENCE_WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL || 'https://lite-solo-api.jamesnexus9999.workers.dev' }}
   MILO_TEMP_WORK_ROUNDS: ${{ vars.MILO_TEMP_WORK_ROUNDS || '0' }}
-  MODEL_SHA256: 4bca6f18c73f72270c7a20c2ea2bea581de8246e318714277120369d34048c81
+  MODEL_SHA256: 27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901
   LLAMA_SHA: 8642541b255bfb5dc39cd351a178be09013a55d6
   GGML_RPC_NO_RDMA: '1'
 jobs:
   audit-file-trigger:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && false
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -215,7 +215,7 @@ jobs:
             -f "ai_hop=$(jq -r .ai_hop "$request")"
           echo "MiMo autonomous inference dispatch submitted; controller acceptance not yet established."
   infer:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode != 'train'
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'certora_qa'
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.mode == 'autonomous' && 355 || inputs.mode == 'certora_qa' && 300 || 100 }}
     env:
@@ -234,8 +234,8 @@ jobs:
       AUDIT_AI_EXPECTED_STEP: ${{ inputs.expected_step }}
       AUDIT_AI_SUBMISSION_MODE: ${{ inputs.submission_mode }}
       AUDIT_AI_MAX_CHUNKS: ${{ inputs.max_chunks }}
-      MODEL_FILE: MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf
-      MODEL_REVISION: 4371da10c84fb26da3592d4cf312d24aa82b7b65
+      MODEL_FILE: gpt-oss-20b-MXFP4.gguf
+      MODEL_REVISION: b97cbb20d1995efd41dce8c4dd1ddf86e8db375b
     steps:
       - name: Record autonomous runner start for bounded 5h45 handoff
         if: inputs.mode == 'autonomous'
@@ -461,7 +461,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           key: curve-mimo-weights-${{ env.MODEL_SHA256 }}-${{ runner.os }}-${{ runner.arch }}-v1
-          path: ${{ runner.temp }}/models/MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf
+          path: ${{ runner.temp }}/models/gpt-oss-20b-MXFP4.gguf
       - name: Fetch pinned MiMo weights only on verified cache miss
         if: inputs.mode != 'autonomous_start' && steps.cached_mimo_weights.outputs.cache-hit != 'true'
         shell: bash
@@ -469,7 +469,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/models"
           curl -fL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/models/$MODEL_FILE" \
-            "https://huggingface.co/bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF/resolve/$MODEL_REVISION/$MODEL_FILE"
+            "https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/$MODEL_REVISION/$MODEL_FILE"
       - name: Verify pinned MiMo weight SHA-256 on both restore and download
         if: inputs.mode != 'autonomous_start'
         shell: bash
@@ -482,7 +482,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           key: curve-mimo-weights-${{ env.MODEL_SHA256 }}-${{ runner.os }}-${{ runner.arch }}-v1
-          path: ${{ runner.temp }}/models/MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf
+          path: ${{ runner.temp }}/models/gpt-oss-20b-MXFP4.gguf
       - name: Join private inference tailnet and start local RPC device
         if: inputs.mode != 'autonomous_start' && (inputs.inference_runners == '2' || inputs.inference_runners == '4')
         shell: bash
@@ -572,8 +572,8 @@ jobs:
             set -- --rpc "$MIMO_RPC_CSV" --n-gpu-layers 99
           fi
           "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/models/$MODEL_FILE" \
-            --alias lite-solo-mimo-v1 --host "$address" --port 8080 \
-            --ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on \
+            --alias lite-solo-gpt-oss-20b-v1 --host "$address" --port 8080 \
+            --ctx-size 32768 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on --jinja --reasoning-effort low --reasoning-budget 2048 \
             --threads 4 --parallel 1 --metrics --slots "$@" > "$RUNNER_TEMP/mimo-certora-server.log" 2>&1 &
           server_pid=$!
           mkdir -p "$RUNNER_TEMP/certora-rendezvous"
@@ -595,12 +595,12 @@ jobs:
           [ "$ready" = true ] || { echo "::error::MiMo private server not ready within pinned 1200s budget"; exit 1; }
           # Exact workflow/run/attempt/source and live formal job are mandatory.
           test "$GITHUB_SHA" = "$CERTORA_SOURCE_HEAD_SHA" || { echo "::error::CERTORA_MIXED_CHECKOUT_REVISIONS"; exit 1; }
-          latest="$(gh api repos/curveyield3/Contract-Automation/branches/machine-intelligence-audit-controller-v1 --jq .commit.sha)"
+          latest="$(gh api repos/curveyield3/Contract-Automation/branches/autoprover-gpt-oss-20b-v1 --jq .commit.sha)"
           test "$latest" = "$CERTORA_SOURCE_HEAD_SHA" || { echo "::error::CERTORA_BRANCH_HEAD_MOVED"; exit 1; }
           origin="$(gh api "repos/curveyield3/Contract-Automation/actions/runs/$CERTORA_SOURCE_RUN_ID")"
           jq -e --arg sha "$CERTORA_SOURCE_HEAD_SHA" --argjson attempt "$CERTORA_SOURCE_RUN_ATTEMPT" '
             .repository.full_name == "curveyield3/Contract-Automation" and
-            .head_branch == "machine-intelligence-audit-controller-v1" and
+            .head_branch == "autoprover-gpt-oss-20b-v1" and
             .path == ".github/workflows/security-intelligence-phase0-v1.yml" and
             .event == "push" and .head_sha == $sha and .run_attempt == $attempt and
             .status == "in_progress"' <<< "$origin" >/dev/null || {
@@ -618,7 +618,7 @@ jobs:
             --arg sourceSha "$CERTORA_SOURCE_HEAD_SHA" \
             --argjson formalJobId "$origin_job_id" \
             --argjson mimoRun "$GITHUB_RUN_ID" --argjson mimoAttempt "$GITHUB_RUN_ATTEMPT" \
-            --arg mimoSha "$GITHUB_SHA" --arg model "lite-solo-mimo-v1" \
+            --arg mimoSha "$GITHUB_SHA" --arg model "lite-solo-gpt-oss-20b-v1" \
             --arg weights "$MODEL_SHA256" --arg modelRevision "$MODEL_REVISION" \
             --arg llama "$LLAMA_SHA" --arg address "$address" '
             {schemaVersion:"curveyield-certora-mimo-rendezvous-v1",
@@ -662,7 +662,11 @@ jobs:
               fi
               sleep 10
             done
-            test -n "$response" || { echo "::error::CERTORA_ORIGIN_MONITOR_UNAVAILABLE"; exit 1; }
+            if [ -z "$response" ]; then
+              echo "::warning::CERTORA_ORIGIN_MONITOR_UNAVAILABLE; rechecking live session"
+              sleep 20
+              continue
+            fi
             status="$(jq -er .status <<< "$response")"
             case "$status" in
               completed)
@@ -725,7 +729,7 @@ jobs:
             set -- --rpc "$MIMO_RPC_CSV" --n-gpu-layers 99
           fi
           "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/models/$MODEL_FILE" \
-            --alias lite-solo-mimo-v1 --host 127.0.0.1 --port 8080 \
+            --alias lite-solo-gpt-oss-20b-v1 --host 127.0.0.1 --port 8080 \
             --ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on \
             --threads 4 --parallel 1 "$@" \
             > "$RUNNER_TEMP/mimo-server.log" 2>&1 &

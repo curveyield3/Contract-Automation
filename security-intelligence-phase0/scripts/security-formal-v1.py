@@ -1354,6 +1354,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             or session.get("sourceSha256") != mapping["source"]["archiveSha256"]
             or session.get("nativeProverHashSha256") != native.get("emvJarSha256")
             or session.get("privateTailscaleValidated") is not True
+            or session.get("modelAlias") != "lite-solo-gpt-oss-20b-v1"
+            or session.get("mimoModelSha256") != "27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901"
             or session.get("cloudProviderCalls") != 0):
         raise RuntimeError("I06.2 missing same-run private model/source/native provenance")
     ip = os.environ.get("CURVEYIELD_MIMO_VERIFIED_TAILNET_IP", "")
@@ -1419,7 +1421,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         "nativeProverCommit": PROVER_COMMIT,
         "nativeProverSha256": native["emvJarSha256"],
         "autoProverCommit": AUTOPROVER_COMMIT,
-        "model": "lite-solo-mimo-v1",
+        "model": "lite-solo-gpt-oss-20b-v1",
         "mimoRunId": session.get("mimoWorkflowRunId"),
         "eligibleTargetCount": len(target_list),
         "results": [],
@@ -1649,7 +1651,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "COMPOSER_EMBED_DEVICE": "cpu",
             "PREAUDIT_LLM_BACKEND": "local",
             "PREAUDIT_LOCAL_LLM_BASE_URL": endpoint,
-            "PREAUDIT_LOCAL_LLM_MODEL": "lite-solo-mimo-v1",
+            "PREAUDIT_LOCAL_LLM_MODEL": "lite-solo-gpt-oss-20b-v1",
             "CURVEYIELD_FORMAL_PROJECT_ROOT": str(project),
             "CURVEYIELD_FORMAL_TARGET_INDEX": str(index + 1),
         })
@@ -1679,8 +1681,8 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             str(upstream / ".venv/bin/python"), "-c", entry,
             str(project), str(local_contract.resolve(strict=True)) + ":" + str(target["contract"]),
             str(mapping["targetContextFile"]),
-            "--heavy-model", "lite-solo-mimo-v1",
-            "--lite-model", "lite-solo-mimo-v1",
+            "--heavy-model", "lite-solo-gpt-oss-20b-v1",
+            "--lite-model", "lite-solo-gpt-oss-20b-v1",
             "--max-concurrent", "1",
             "--max-cpu-tasks", "1",
             "--run-mode", "comprehensive",

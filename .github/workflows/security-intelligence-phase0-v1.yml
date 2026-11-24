@@ -2,7 +2,7 @@ name: CurveYield Security Intelligence — Standalone Phase 0 v1
 run-name: security-preflight-${{ github.run_id }}
 on:
   push:
-    branches: [machine-intelligence-audit-controller-v1]
+    branches: [autoprover-gpt-oss-20b-v1]
     paths:
       - 'security-intelligence-phase0/requests/active-request.json'
 permissions:
@@ -64,7 +64,7 @@ jobs:
             requestId:source.requestId,campaignId:source.requestId,
             campaignGenerationId:'preflight-'+s.archiveSha256.slice(0,20),
             source:{repository:s.repository,commit:s.commit,archivePath:s.archivePath,archiveSha256:s.archiveSha256},
-            destination:{repository:'curveyield3/Contract-Automation',ref:'machine-intelligence-audit-controller-v1',campaignPath:'security-intelligence-phase0'}};
+            destination:{repository:'curveyield3/Contract-Automation',ref:'autoprover-gpt-oss-20b-v1',campaignPath:'security-intelligence-phase0'}};
           fs.writeFileSync('.preflight-input/request.json',JSON.stringify(adapted,null,2)+'\n');
           NODE
           repo="$(jq -er '.source.repository' .preflight-input/request.json)"
@@ -639,10 +639,10 @@ jobs:
             .originHeadSha==$sha and .mimoHeadSha==$sha and
             .originRunId==$origin and .originRunAttempt==$attempt and
             .mimoRunId==$mimo and
-            .modelAlias=="lite-solo-mimo-v1" and
-            .modelRevision=="4371da10c84fb26da3592d4cf312d24aa82b7b65" and
+            .modelAlias=="lite-solo-gpt-oss-20b-v1" and
+            .modelRevision=="b97cbb20d1995efd41dce8c4dd1ddf86e8db375b" and
             .llamaCommit=="8642541b255bfb5dc39cd351a178be09013a55d6" and
-            (.modelSha256|test("^[a-f0-9]{64}$")) and
+            .modelSha256=="27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901" and
             (.tailscaleIPv4|test("^100[.][0-9]+[.][0-9]+[.][0-9]+$")) and
             .port==8080 and .endpointPath=="/v1/chat/completions" ' \
             "$RUNNER_TEMP/mimo-private/rendezvous.json" >/dev/null
@@ -793,6 +793,7 @@ jobs:
               "mimoWorkflowRunId":rendezvous["mimoRunId"],
               "mimoWorkflowRunAttempt":rendezvous["mimoRunAttempt"],
               "mimoModelSha256":rendezvous["modelSha256"],
+              "modelAlias":MODEL_ID,
               "mimoLlamaCommit":rendezvous["llamaCommit"],
               "privateTailscaleValidated":True,
               "realHeavyCalls":role_calls["heavy"],
