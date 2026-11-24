@@ -116,6 +116,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield-cyvlSDT-Mint-Allowance-v1
+          name: CurveYield-cyvlSDT-Mint-Allowance-v2
           path: /tmp/v71-report/
           if-no-files-found: error
