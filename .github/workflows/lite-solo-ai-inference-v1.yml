@@ -2,8 +2,10 @@ name: Lite-Solo AI Source Inference and Autonomous Beta v6
 run-name: ${{ inputs.mode == 'certora_qa' && format('CERTORA-QA-{0}-{1}', inputs.source_run_id, inputs.source_run_attempt) || inputs.mode == 'autonomous' && format('MI-{0}', inputs.dispatch_tag) || inputs.mode == 'autonomous_start' && 'MI-AUTONOMOUS-START' || github.workflow }}
 on:
   push:
-    branches: [machine-intelligence-audit-controller-v1]
+    branches: [machine-intelligence-audit-controller-v1, granite-autoprover-dai-replay-v1]
     paths:
+      - '.github/workflows/lite-solo-ai-inference-v1.yml'
+      - 'process/agent-upload/DAI_r12_MiMo_request_1_exact_v1.json'
       - 'process/agent-upload/lite-solo-ai-training-request-v1.json'
       - 'process/agent-upload/lite-solo-ai-audit-request-v1.json'
   workflow_dispatch:
@@ -125,7 +127,7 @@ env:
   GGML_RPC_NO_RDMA: '1'
 jobs:
   audit-file-trigger:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref_name == 'machine-intelligence-audit-controller-v1'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -1316,3 +1318,166 @@ jobs:
           path: ${{ runner.temp }}/mimo-training-package/
           if-no-files-found: error
           retention-days: 7
+
+  granite-dai-replay:
+    name: Granite 4.2 8B - exact DAI r12 AutoProver replay v1
+    if: github.event_name == 'push' && github.ref_name == 'granite-autoprover-dai-replay-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    env:
+      REPLAY_FILE: process/agent-upload/DAI_r12_MiMo_request_1_exact_v1.json
+      REPLAY_SHA256: a78712fc1e6c09a9dc060728d8190c8efb838018159b56a877e59f1791227095
+      GRANITE_REVISION: 93f3f6a8938ee922b784cf4e5b4203cd3428df8f
+      GRANITE_SHA256: 16a9369d0805f80b7377d25d87f937a90c05dc04ad79173a52001e42c9aab311
+      AUTOPROVER_SHA: 81d9626c249a70c0a0f0648a89de175443c0344c
+      GRAPHCORE_SHA: c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify exact public request before any installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' "$REPLAY_SHA256" "$REPLAY_FILE" | sha256sum --check
+          test "$(wc -c < "$REPLAY_FILE")" -eq 23088
+          nproc
+          free -h
+          df -h "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/granite-replay"
+          cp "$REPLAY_FILE" "$RUNNER_TEMP/granite-replay/request-exact-v1.json"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned native AutoProver validator and existing provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com:
+          export UV_NO_DEV=1 UV_NO_PROGRESS=1 UV_PYTHON_DOWNLOADS=never
+          p="$RUNNER_TEMP/AutoProver"
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/Certora/AutoProver.git "$p"
+          git -C "$p" fetch --quiet --depth=1 origin "$AUTOPROVER_SHA"
+          git -C "$p" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$p" rev-parse HEAD)" = "$AUTOPROVER_SHA"
+          git -C "$p" submodule sync --recursive
+          git -C "$p" submodule update --init --recursive
+          test "$(git -C "$p/graphcore" rev-parse HEAD)" = "$GRAPHCORE_SHA"
+          python -m pip install --disable-pip-version-check uv==0.13.9
+          (cd "$p" && uv sync --no-dev --locked --extra certora-cli --python "$(command -v python)")
+          export PYTHONPATH="$GITHUB_WORKSPACE/security-intelligence-phase0/formal-mimo-provider"
+          "$p/.venv/bin/python" -c 'from composer.spec.system_model import SourceApplication; from composer.spec.system_analysis import validate_solidity_connectivity; from curveyield_formal_mimo import _NativeStream; print("PINNED_NATIVE_VALIDATOR_IMPORT_OK")'
+      - name: Build existing pinned CPU llama.cpp runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/ggml-org/llama.cpp.git "$RUNNER_TEMP/llama.cpp"
+          git -C "$RUNNER_TEMP/llama.cpp" fetch --quiet --depth=1 origin "$LLAMA_SHA"
+          git -C "$RUNNER_TEMP/llama.cpp" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/llama.cpp" rev-parse HEAD)" = "$LLAMA_SHA"
+          cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_USE_PREBUILT_UI=OFF -DLLAMA_BUILD_UI=OFF
+          cmake --build "$RUNNER_TEMP/llama-build" --target llama-server -j 4
+      - name: Install and verify official IBM Granite 4.2 8B Q4_K_M
+        shell: bash
+        run: |
+          set -euo pipefail
+          model="$RUNNER_TEMP/granite-4.2-8b-Q4_K_M.gguf"
+          curl -fL --retry 3 --retry-all-errors -o "$model" "https://huggingface.co/ibm-granite/granite-4.2-8b-GGUF/resolve/$GRANITE_REVISION/granite-4.2-8b-Q4_K_M.gguf"
+          printf '%s  %s\n' "$GRANITE_SHA256" "$model" | sha256sum --check
+          echo "GRANITE_WEIGHTS_VERIFIED $GRANITE_REVISION $GRANITE_SHA256"
+      - name: Replay exact request and run unmodified native output validators
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$GITHUB_WORKSPACE/security-intelligence-phase0/formal-mimo-provider"
+          out="$RUNNER_TEMP/granite-replay"
+          "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/granite-4.2-8b-Q4_K_M.gguf" \
+            --alias lite-solo-mimo-v1 --host 127.0.0.1 --port 8080 \
+            --ctx-size 32768 --threads 4 --parallel 1 --n-gpu-layers 0 --jinja \
+            > "$out/server-v1.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 180); do
+            if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then ready=1; break; fi
+            kill -0 "$pid" || { tail -100 "$out/server-v1.log"; exit 1; }
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then tail -100 "$out/server-v1.log"; exit 1; fi
+          "$RUNNER_TEMP/AutoProver/.venv/bin/python" -u - <<'PY'
+          import hashlib, json, os, re, time, traceback, urllib.request
+          from pathlib import Path
+          from composer.spec.system_model import SourceApplication
+          from composer.spec.system_analysis import validate_solidity_connectivity
+          from curveyield_formal_mimo import _NativeStream
+          out = Path(os.environ["RUNNER_TEMP"]) / "granite-replay"
+          raw = (out / "request-exact-v1.json").read_bytes()
+          assert hashlib.sha256(raw).hexdigest() == os.environ["REPLAY_SHA256"]
+          req = json.loads(raw)
+          root = out / "source"
+          root.mkdir()
+          source = "\n".join(b["text"] for b in req["messages"][1]["content"] if b["type"] == "text")
+          files = re.findall(r"\[Source: ([^\]]+)\]\n(.*?)\n\[/Source\]", source, re.S)
+          assert sorted(p for p, _ in files) == ["src/dai.sol", "src/lib.sol"], [p for p, _ in files]
+          for path, data in files:
+              p = root / path
+              p.parent.mkdir(parents=True, exist_ok=True)
+              p.write_text(data)
+          stream = _NativeStream(1, "component_analysis_schema", req)
+          summary = {"model": "IBM Granite 4.2 8B Q4_K_M", "requestSha256": hashlib.sha256(raw).hexdigest(), "nativeValidatorCommit": os.environ["AUTOPROVER_SHA"], "modelSha256": os.environ["GRANITE_SHA256"], "context": 32768, "threads": 4, "status": "REJECTED"}
+          start = time.monotonic()
+          try:
+              http = urllib.request.Request("http://127.0.0.1:8080/v1/chat/completions", data=raw, headers={"Content-Type": "application/json"}, method="POST")
+              print("EXACT_REQUEST_SENT", summary["requestSha256"], flush=True)
+              try:
+                  with urllib.request.urlopen(http, timeout=180) as response, (out / "wire-response-v1.sse").open("wb") as wire:
+                      print("HTTP", response.status, flush=True)
+                      last = 0
+                      for line in response:
+                          wire.write(line)
+                          wire.flush()
+                          stream.feed(line)
+                          answer = "".join(stream.content)
+                          if len(answer) - last >= 800:
+                              print("MODEL_ANSWER_DELTA", repr(answer[last:]), flush=True)
+                              last = len(answer)
+              except urllib.error.HTTPError as err:
+                  (out / "http-error-v1.txt").write_bytes(err.read())
+                  raise
+              finally:
+                  (out / "model-output-v1.json").write_text("".join(stream.content))
+                  (out / "reasoning-v1.txt").write_text("".join(stream.reasoning))
+              print("ACTUAL_MODEL_OUTPUT", "".join(stream.content), flush=True)
+              body = stream.finish()
+              (out / "adapter-response-v1.json").write_text(json.dumps(body, indent=2))
+              args = body["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+              app = SourceApplication.model_validate_json(args)
+              summary["nativeSchemaAccepted"] = True
+              error = validate_solidity_connectivity(app, "Dai", root, lambda path: False)
+              if error is not None:
+                  raise ValueError(error)
+              summary.update(status="NATIVE_VALIDATORS_ACCEPTED", nativeConnectivityAccepted=True, componentCount=len(app.components))
+              print("NATIVE_VALIDATORS_ACCEPTED", len(app.components), flush=True)
+          except Exception as exc:
+              summary["error"] = str(exc)
+              traceback.print_exc()
+              raise
+          finally:
+              summary.update(elapsedSeconds=round(time.monotonic()-start, 2), finishReason=stream.finish_reason, usage=stream.usage, timings=stream.timings)
+              (out / "validation-v1.json").write_text(json.dumps(summary, indent=2))
+              print("REPLAY_RESULT", json.dumps(summary), flush=True)
+          PY
+      - name: Publish exact replay evidence regardless of disposition
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: granite-dai-replay-v1
+          path: |
+            ${{ runner.temp }}/granite-replay/*.json
+            ${{ runner.temp }}/granite-replay/*.sse
+            ${{ runner.temp }}/granite-replay/*.log
+            ${{ runner.temp }}/granite-replay/*.txt
+          if-no-files-found: warn
