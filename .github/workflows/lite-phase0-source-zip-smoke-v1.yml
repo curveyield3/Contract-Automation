@@ -1,4 +1,4 @@
-name: cyvlSDT v70 vault capability surgical compile and bytecode comparison
+name: cyvlSDT v71 constructor mint allowance compile and bytecode comparison
 on:
   push:
     branches: [cyvlsdt-v69-postdeploy-simulation-v1]
@@ -57,25 +57,30 @@ jobs:
           exec(compile(p['unifiedTransform'],'v66-transform','exec'))
           exec(compile(p['packingTransform'],'v67-transform','exec'))
           PY
-      - name: Compile exact v69 baseline and minimal v70 candidate (compile only)
+      - name: Compile exact v70 baseline and v71 mint allowance (compile only)
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/v70-report
+          mkdir -p /tmp/v71-report
           forge --version
-          FOUNDRY_OUT=out-25 forge build --root /tmp/cyv65 --force --skip test --skip script
-          (cd /tmp/cyv65 && find contracts -type f -name '*.sol' -print0 | sort -z | xargs -0 sha256sum) > /tmp/v70-report/source-before-v1.sha256
           python3 - <<'PY'
           import json,pathlib
           p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
           exec(compile(p['vaultEmergencyCapabilityPatch'],'v70-vault-capability','exec'))
           PY
-          (cd /tmp/cyv65 && find contracts -type f -name '*.sol' -print0 | sort -z | xargs -0 sha256sum) > /tmp/v70-report/source-after-v1.sha256
-          FOUNDRY_OUT=out-25-capability forge build --root /tmp/cyv65 --force --skip test --skip script
+          FOUNDRY_OUT=out-25 forge build --root /tmp/cyv65 --force --skip test --skip script
+          (cd /tmp/cyv65 && find contracts -type f -name '*.sol' -print0 | sort -z | xargs -0 sha256sum) > /tmp/v71-report/source-before-v1.sha256
+          python3 - <<'PY'
+          import json,pathlib
+          p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
+          exec(compile(p['vaultMintAllowancePatch'],'v71-mint-allowance','exec'))
+          PY
+          (cd /tmp/cyv65 && find contracts -type f -name '*.sol' -print0 | sort -z | xargs -0 sha256sum) > /tmp/v71-report/source-after-v1.sha256
+          FOUNDRY_OUT=out-25-mint forge build --root /tmp/cyv65 --force --skip test --skip script
           python3 - <<'PY'
           import json,pathlib
           root=pathlib.Path('/tmp/cyv65')
-          out=pathlib.Path('/tmp/v70-report')
+          out=pathlib.Path('/tmp/v71-report')
           name='BeefyVaultCurveYieldV8cyvlSDT'
           def hashes(p):
               return {line.split('  ',1)[1]:line.split('  ',1)[0] for line in p.read_text().splitlines()}
@@ -85,28 +90,32 @@ jobs:
           assert changed==['contracts/'+name+'.sol'],changed
           def artifact(directory):
               return json.loads((root/directory/(name+'.sol')/(name+'.json')).read_text())
-          old=artifact('out-25');new=artifact('out-25-capability')
+          old=artifact('out-25');new=artifact('out-25-mint')
           def sizes(o):
               return {k:len(bytes.fromhex(o[k]['object'].removeprefix('0x'))) for k in ('bytecode','deployedBytecode')}
           def sigs(o):
               return sorted(x['name']+'('+','.join(y['type'] for y in x.get('inputs',[]))+')' for x in o['abi'] if x['type']=='function')
+          def ctor(o):
+              return [y['type'] for x in o['abi'] if x['type']=='constructor' for y in x['inputs']]
           before=sizes(old);after=sizes(new)
+          assert before=={'bytecode':20274,'deployedBytecode':19976},before
           added=sorted(set(sigs(new))-set(sigs(old)));removed=sorted(set(sigs(old))-set(sigs(new)))
-          assert added==['initialize(address,string,string,uint256,address,address,bool,bool,bool)','setStrategy(address,bool)'],added
-          assert removed==['initialize(address,string,string,uint256,address,address,bool,bool)','setStrategy(address)'],removed
+          assert added==['mintAllowanceBps()'] and not removed,(added,removed)
+          assert ctor(old)==['address'] and ctor(new)==['address','uint256'],(ctor(old),ctor(new))
           oldmeta=old.get('metadata',{});newmeta=new.get('metadata',{})
           if isinstance(oldmeta,str):oldmeta=json.loads(oldmeta)
           if isinstance(newmeta,str):newmeta=json.loads(newmeta)
           for k in ['compiler','settings']:
               assert oldmeta.get(k)==newmeta.get(k),k
-          result={'contract':name,'changedSoliditySources':changed,'totalSoliditySources':len(a),'compiler':oldmeta.get('compiler'),'settings':oldmeta.get('settings'),'baselineBytes':before,'candidateBytes':after,'deltaBytes':{k:after[k]-before[k] for k in before},'abiAdded':added,'abiRemoved':removed,'runtimeHeadroom':24576-after['deployedBytecode'],'deployment':False,'testsExecuted':False}
+          result={'contract':name,'changedSoliditySources':changed,'totalSoliditySources':len(a),'compiler':oldmeta.get('compiler'),'settings':oldmeta.get('settings'),'baselineBytes':before,'candidateBytes':after,'deltaBytes':{k:after[k]-before[k] for k in before},'abiAdded':added,'abiRemoved':removed,'constructorBefore':ctor(old),'constructorAfter':ctor(new),'runtimeHeadroom':24576-after['deployedBytecode'],'deployment':False,'testsExecuted':False}
           (out/'size-and-abi-comparison-v1.json').write_text(json.dumps(result,indent=2))
-          print('VAULT_CAPABILITY_SIZE',json.dumps(result),flush=True)
+          (out/'vault-abi-v71.json').write_text(json.dumps(new['abi'],indent=2))
+          print('MINT_ALLOWANCE_SIZE',json.dumps(result),flush=True)
           PY
       - name: Retain source diff and bytecode size evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield-cyvlSDT-Vault-Emergency-Capability-v2
-          path: /tmp/v70-report/
+          name: CurveYield-cyvlSDT-Mint-Allowance-v1
+          path: /tmp/v71-report/
           if-no-files-found: error
