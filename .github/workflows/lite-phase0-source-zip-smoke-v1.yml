@@ -1,16 +1,14 @@
-name: cyvlSDT v67 strict two-batch maximum packing
+name: cyvlSDT v69 exact source recovery
 on:
   push:
-    branches: [cyvlsdt-v67-two-batch-max-v1]
-    paths: ['github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json']
+    branches: [cyvlsdt-v69-source-recovery-v1]
+    paths: ['.github/workflows/lite-phase0-source-zip-smoke-v1.yml']
 permissions:
   contents: read
 jobs:
-  fork-gas:
+  recover-source:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    env:
-      UPSTREAM_RPC: ${{ secrets.RPC_ETHEREUM }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,9 +16,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: stable
       - name: Materialize exact v64 source and benchmark-only optimization candidate
         shell: bash
         run: |
@@ -57,31 +52,36 @@ jobs:
           exec(compile(p['unifiedTransform'],'v66-transform','exec'))
           exec(compile(p['packingTransform'],'v67-transform','exec'))
           PY
-      - name: Compile original and revised artifacts and optimizer sweep
+      - name: Verify recovered source and package exact optimized compilation inputs
         shell: bash
         run: |
           set -euo pipefail
-          forge build --root /tmp/cyv64 --skip test --skip script
-          FOUNDRY_OPTIMIZER_RUNS=25 FOUNDRY_OUT=out-25 forge build --root /tmp/cyv65 --force --skip test --skip script
-      - name: Sequential original and optimized Safe batch simulations
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$UPSTREAM_RPC"
-          BLOCK=$(cast block-number --rpc-url "$UPSTREAM_RPC")
-          echo "FORK_BLOCK=$BLOCK"
-          export FORK_BLOCK="$BLOCK"
-          anvil --fork-url "$UPSTREAM_RPC" --fork-block-number "$BLOCK" --host 127.0.0.1 --port 8545 --silent >/tmp/anvil.log 2>&1 &
-          PID=$!
-          trap 'kill "$PID" 2>/dev/null || true' EXIT
-          for i in $(seq 1 30); do
-            if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
-            sleep 1
-          done
-          python3 - <<'PY'
-          import json,pathlib
-          p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
-          pathlib.Path('/tmp/cyv64/replay.cjs').write_text(p['replay'])
-          pathlib.Path('/tmp/cyv64/stages.json').write_text(json.dumps(p['stages']))
-          PY
-          node /tmp/cyv64/replay.cjs
+          cd /tmp/cyv65
+          echo 'a680019babba7e8e482f4bcf3a702b96478c759d04c5a4b51af4a754620d50a6  contracts/BeefyVaultCurveYieldV8cyvlSDT.sol' | sha256sum -c -
+          echo '70d7c163b7e97987cc3b4c21c761de9dc78b7877c7ad631f5884fc984d79ebc7  contracts/boosthub/StrategyDualFXNUnifiedV43.sol' | sha256sum -c -
+          mkdir -p /tmp/recovered
+          cp -a contracts /tmp/recovered/
+          sed 's/optimizer_runs = 200/optimizer_runs = 25/;s/out = "out"/out = "out-25"/' foundry.toml > /tmp/recovered/foundry.toml
+          cat > /tmp/recovered/package.json <<'EOF'
+          {"name":"curveyield-cyvlsdt-v69","private":true,"dependencies":{"@openzeppelin/contracts":"5.4.0","@openzeppelin-4/contracts":"npm:@openzeppelin/contracts@4.9.6","@openzeppelin/contracts-upgradeable":"4.9.6"}}
+          EOF
+          cd /tmp/recovered
+          find contracts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          cat > SOURCE-PROVENANCE.md <<'EOF'
+          # CurveYield cyvlSDT v69 — recovered source
+          Exact source transformation inputs: curveyield3/Contract-Automation@95ff49c193bc42fcfeda6eea2b6e360878eb003f
+          Successful simulation: https://github.com/curveyield3/Contract-Automation/actions/runs/45334184898
+          Baseline: curveyield3/Smart-Contracts@6b058498554f58936daf1216c222d554ee666f5e/Audit-Intake/CurveYield-cyvlSDT-Deployment-Package-v64.zip
+          Baseline SHA-256: a2d46ab6bf63a760efecf914f36419b8ec271c0e36f9b3ee9821cd842ea0d7ee
+          Ethereum Safe: 0x47623C62f281807D615eeb4A2CEee9d97F9D3C49
+          Nonce 34: 0x87d15484c5331b38695247191866de9bc80b5a35a6a8793945861798cf02e434
+          Nonce 35: 0xcde420704e1e82185c6b2dbf9915ad580615fd097bb7b75e607c5784cfd124fc
+          Solidity 0.8.28, via IR, optimizer 25, Cancun. Original source reconstruction steps replayed without modifying Solidity or executing tests/simulations. Two final source hashes compared against original simulation log. Existing POL contracts not included in the original optimized compilation are not included here.
+          EOF
+          echo "RECOVERED_SOLIDITY_FILES=$(find contracts -name '*.sol' | wc -l)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CurveYield-cyvlSDT-Deployment-Source-v69
+          path: /tmp/recovered/
+          if-no-files-found: error
