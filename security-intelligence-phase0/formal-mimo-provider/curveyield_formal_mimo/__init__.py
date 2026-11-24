@@ -128,7 +128,13 @@ def _append_observation(event: dict, path_variable: str) -> bool:
 def _wire_event(event: dict) -> bool:
     if not _trace_enabled():
         return True
-    return _append_observation(event, "CURVEYIELD_DAI_WIRE_PATH")
+    stored = _append_observation(event, "CURVEYIELD_DAI_WIRE_PATH")
+    if os.environ.get("CURVEYIELD_FORMAL_QUALIFICATION_TRACE") == "1":
+        # Qualification is source-authorized public DAI only. Stream bytes
+        # already carry the exact response; avoid duplicating large envelopes.
+        if event.get("direction") != "ADAPTER_TO_AUTOPROVER":
+            print("CURVEYIELD_QUALIFICATION_WIRE_V1 " + json.dumps(event, ensure_ascii=True, separators=(",", ":")), flush=True)
+    return stored
 
 
 def _wire_body(direction: str, request_number: int, raw: bytes,
@@ -285,14 +291,16 @@ async def _async_local_response(response: httpx.Response) -> None:
 
 
 
-# Only the authenticated native execution sets the project root. The existing
-# I05.2 handshake retains its exact previously qualified non-stream protocol.
+# Public DAI qualification uses the existing streaming observer without a
+# project root, so contract-specific prompt adaptation remains disabled.
 _PROGRESS_PREFIX = "CURVEYIELD_MIMO_PROGRESS_V1 "
 _PROGRESS_SEQUENCE = _TRACE_SEQUENCE
 
 
 def _progress_event(event: dict) -> None:
-    if os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT"):
+    if os.environ.get("CURVEYIELD_FORMAL_QUALIFICATION_TRACE") == "1":
+        _wire_event(event)
+    elif os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT"):
         if not _append_observation(event, "CURVEYIELD_FORMAL_PROGRESS_PATH"):
             try:
                 print(_PROGRESS_PREFIX + json.dumps(event, separators=(",", ":")),
@@ -589,6 +597,8 @@ class _NativeStream:
             self._reject_repetition()
 
     def _reject_repetition(self):
+        if os.environ.get("CURVEYIELD_FORMAL_QUALIFICATION_TRACE") == "1":
+            return  # Preserve the qualification gate; observe, do not add acceptance rules.
         # r13 request 17 repeated identical attack-vector descriptions under
         # numbered titles for 78 minutes. Do not reject slow or long answers.
         fields = next((t.get("function", {}).get("parameters", {}).get("properties", {})
@@ -757,7 +767,7 @@ def _native_stream_request(request: httpx.Request):
     payload, mode = _prepare_native_payload(payload)
     with _TRACE_LOCK:
         hint = _RETRY_HINTS.pop(request_key, None)
-    if hint:
+    if hint and os.environ.get("CURVEYIELD_FORMAL_QUALIFICATION_TRACE") != "1":
         messages = [dict(m) for m in payload.get("messages") or []]
         if messages and messages[0].get("role") == "system" and isinstance(messages[0].get("content"), str):
             messages[0]["content"] += "\n\nRetry feedback: " + hint
@@ -882,7 +892,7 @@ def _observe_native_component_analysis():
 
 
 def _trusted_http_client() -> httpx.Client:
-    if os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT"):
+    if os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT") or os.environ.get("CURVEYIELD_FORMAL_QUALIFICATION_TRACE") == "1":
         return httpx.Client(trust_env=False, transport=_NativeSyncTransport())
     return httpx.Client(
         trust_env=False,
@@ -891,7 +901,7 @@ def _trusted_http_client() -> httpx.Client:
 
 
 def _trusted_async_http_client() -> httpx.AsyncClient:
-    if os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT"):
+    if os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT") or os.environ.get("CURVEYIELD_FORMAL_QUALIFICATION_TRACE") == "1":
         return httpx.AsyncClient(trust_env=False, transport=_NativeAsyncTransport())
     return httpx.AsyncClient(
         trust_env=False,
