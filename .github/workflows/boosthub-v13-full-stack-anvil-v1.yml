@@ -1,28 +1,17 @@
-name: BoostHub v64 + CurveGlobal Yearn V2 SDT v10 Emergency fork v11
-
+name: BoostHub v64 exact sdCRV and sdFXN deployment gas v1
 on:
   push:
-    branches:
-      - simulation/boosthub-v61-sdt-v8-safe-v1
-    paths:
-      - '.github/workflows/boosthub-v13-full-stack-anvil-v1.yml'
-      - 'github-native-sim/boosthub-v13-full-stack-v1/source/BeefyVaultV7FixedV2_v63.sol'
-      - 'github-native-sim/boosthub-v13-full-stack-v1/source/StrategyCurveSDTYearnV9.sol'
-      - 'github-native-sim/boosthub-v13-full-stack-v1/source/Emergency_Withdraw_Corrections_v1.patch.xz.b64'
-      - 'github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs'
+    branches: [simulation/boosthub-v64-vault-deployment-gas-v1]
+    paths: ['github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs']
 permissions:
   contents: read
-concurrency:
-  group: boosthub-v64-sdt-v10-safe-emergency-fork-v1
-  cancel-in-progress: true
 jobs:
-  safe-mainnet-forks:
+  safe-vault-gas:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     env:
       ROOT: .safe-v64
       RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM }}
-      RPC_FRAXTAL: ${{ secrets.RPC_FRAXTAL || 'https://rpc.frax.com' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,158 +19,94 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Materialize v64 Beefy emergency exits and CurveGlobal-compatible SDT v10
+      - name: Materialize exact uploaded v64 source using retained v61 and v63 files
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
+          python3 - <<'PY'
           import base64,hashlib,io,lzma,pathlib,tarfile
-          src=pathlib.Path('github-native-sim/boosthub-v13-full-stack-v1/source/BoostHub_v61_SDT_v8_Source_Bundle_v1.md')
-          x=src.read_text().strip().splitlines()
+          root=pathlib.Path('.safe-v64');root.mkdir(exist_ok=True)
+          base=pathlib.Path('github-native-sim/boosthub-v13-full-stack-v1/source')
+          x=(base/'BoostHub_v61_SDT_v8_Source_Bundle_v1.md').read_text().strip().splitlines()
           assert x[0]=='BOOSTHUB_V61_SDT_V8_XZ_BASE64_V1'
           raw=base64.b64decode(x[1],validate=True)
           assert hashlib.sha256(raw).hexdigest()=='31160e9e19c22a95db298893563b1d15150958f72330c02a3510f32cfefd98aa'
-          root=pathlib.Path('.safe-v64');root.mkdir(exist_ok=True)
           with tarfile.open(fileobj=io.BytesIO(lzma.decompress(raw))) as t:
-            m=t.getmembers();assert len(m)==16
-            t.extractall(root,filter='data')
-          print('MATERIALIZED',len(m),'pinned base source for v63/v8 fork')
-          PY
-          python - <<'PY'
-          import hashlib,pathlib,subprocess
-          root=pathlib.Path('.safe-v64')
-          f=root/'contracts/BeefyVaultV7FixedV2.sol'
-          assert hashlib.sha256(f.read_bytes()).hexdigest() == '30cc49edaef677f60eb6d487098e3e3e3534b80e0ec4eb963278f74ca84bd105', 'Original v61 vault source incorrect'
-          source=pathlib.Path('github-native-sim/boosthub-v13-full-stack-v1/source/BeefyVaultV7FixedV2_v63.sol')
-          assert hashlib.sha256(source.read_bytes()).hexdigest() == '6b150c72b1d33609f452e1809719a1da4ba3b929011ea16e65fba7dbbfbec245', 'Exact v63 source mismatch'
-          f.write_bytes(source.read_bytes())
-          print('ERC4626_V63_SOURCE_VERIFIED', f)
-          sdt=pathlib.Path('github-native-sim/boosthub-v13-full-stack-v1/source/StrategyCurveSDTYearnV9.sol')
-          assert 'contract StrategyCurveSDTYearnV9 is ReentrancyGuard' in sdt.read_text()
-          (root/'contracts/StrategyCurveSDTYearnV8.sol').unlink(missing_ok=True)
-          (root/'contracts/StrategyCurveSDTYearnV9.sol').write_bytes(sdt.read_bytes())
-          print('FACTORY_YEARN_V2_SDT_V9_SOURCE_VERIFIED', sdt)
-          import base64,lzma
-          encoded=pathlib.Path('github-native-sim/boosthub-v13-full-stack-v1/source/Emergency_Withdraw_Corrections_v1.patch.xz.b64').read_text().strip()
-          patch=lzma.decompress(base64.b64decode(encoded,validate=True))
-          assert hashlib.sha256(patch).hexdigest()=='2cf3f7aeec6428adcb33c0134d19547705356226a96d73ae0883067869cb0004','Emergency source patch mismatch'
-          patchFile=root/'emergency-source-v64.patch'
-          patchFile.write_bytes(patch)
-          subprocess.run(['patch','-p1','--batch','--forward','-i',str(patchFile.resolve())],cwd=root,check=True)
-          patchFile.unlink()
-          # Standalone strategies belong to ERC20 vaults; sdFXN BoostHub
-          # children belong to the master strategy (which is not ERC20).
-          base=root/'contracts/BaseAllToWantBoostHubV5.sol'
-          content=base.read_text()
-          start=content.index('    /// @notice Vault-only best-effort unwind.')
-          end=content.index('    function claim() external {',start)
-          replacement='''    /// @notice Vault-only best-effort unwind. Does not require exact quoted NAV
-              ///         or harvest, reward conversions, profit unlocks, or price guards.
-              function emergencyWithdraw(uint256 amount) external {
-                  require(msg.sender == vault, "!vault");
-                  // Standalone strategies see a Beefy ERC-20 vault. BoostHub children
-                  // are instead called by the sdFXN master, which has no totalSupply().
-                  bool finalExit;
-                  try IERC20(vault).totalSupply() returns (uint256 remainingShares) {
-                      finalExit = remainingShares == 0;
-                  } catch {}
-                  uint256 idle = balanceOfWant();
-                  if (finalExit || idle < amount) {
-                      uint256 staked = balanceOfPool();
-                      uint256 need = finalExit ? staked : amount - idle;
-                      if (need > staked) need = staked;
-                      if (need != 0) _withdraw(need);
-                  }
-                  uint256 send = balanceOfWant();
-                  if (!finalExit && send > amount) send = amount;
-                  if (send != 0) IERC20(want).safeTransfer(vault, send);
-                  emit Withdraw(send);
-              }
-          
-          '''
-          base.write_text(content[:start]+replacement+content[end:])
-          text=base.read_text()
-          selector='function emergencyWithdraw(uint256 amount) external {'
-          assert text.count(selector)==1
-          base.write_text(text.replace(selector,'function emergencyWithdraw(uint256 amount) external virtual {'))
-          convex=root/'contracts/StrategyConvexFXNPool8V42.sol'
-          text=convex.read_text()
-          assert text.count(selector)==1
-          convex.write_text(text.replace(selector,'function emergencyWithdraw(uint256 amount) external override {'))
-          (root/'contracts/StrategyCurveSDTYearnV9.sol').rename(root/'contracts/StrategyCurveSDTYearnV10.sol')
+              t.extractall(root,filter='data')
+          c=root/'contracts'
+          old=c/'BeefyVaultV7FixedV2.sol'
+          v63=(base/'BeefyVaultV7FixedV2_v63.sol').read_bytes()
+          assert hashlib.sha256(v63).hexdigest()=='6b150c72b1d33609f452e1809719a1da4ba3b929011ea16e65fba7dbbfbec245'
+          (c/'BeefyCurveYieldVaultv8.sol').write_bytes(v63.replace(b'BeefyVaultV7FixedV2',b'BeefyCurveYieldVaultv8'))
+          old.unlink()
           expected={
-            'BeefyVaultV7FixedV2.sol':'9e453f9cb4815ef57efed0421de76782e71738bfb00cfd15d9afcba335d57a54',
-            'BaseAllToWantBoostHubV5.sol':'e6f7cbc0b9da7a3c40d51038b3e4a58186592d648152c76598b6b775b913b5e3',
-            'StrategyDualFXNMasterV42.sol':'a93269dd956462c0860356581d3f37a3f2825db03444919983c65f62a1b4a79b',
-            'StrategyConvexFXNPool8V42.sol':'29388c470ed0b1cf485f6333b75741b2133f73d0de8fc6d4a748a36e32a33562',
-            'StrategyCurveSDTYearnV10.sol':'9d01abe53444a43f051373b4c4ff451581adb13a3f1aade354cb22dd9a51b713',
+              'BaseAllToWantBoostHubV5.sol':'5697ec68f2d93e9931677980300774e9c65faf085f57f1efb00801be62504453',
+              'BeefyCurveYieldVaultv8.sol':'ce25fb6139ef9dbc62f34ff465cbdf96224f3dde2714bc7533e38b1a3d10f1e5',
+              'StrategyBoostHubChildV42.sol':'16cbc2696794a348543433512575c64dc76c1e44e2c437cbf7fce59e15f701bc',
+              'StrategyConvexBoostHubStakingV5.sol':'7db200d36276e7a8cab179f99ce9c47fba824f6500fd1138f56b84ed3cd054d0',
+              'StrategyConvexFXNPool8V42.sol':'4487687523a79879d879e731074a09250021d00e725515ac43caec625b8741b4',
+              'StrategyDualFXNMasterV42.sol':'db76c69e004d6f97108b625dad83520cb996c02618ab30dbfe3dbd26d1d99288',
+              'interfaces/IBeefySwapperV2.sol':'cfea0ac9bfa9980f316d1cb246c788b40631bc625b19b8a0c7279af32eb2ad65',
+              'interfaces/IBoostHubStakingV1.sol':'90f7579d64fdb8727d1c6bd52f7bcdf49dbb0752c44f00a55ceac109a99fd6be',
+              'interfaces/IStrategyBoostHubV1.sol':'d3b3ccae007294a9d572623a4e8c9da3162f4463328152b14041241d385b1c98'
           }
-          for path,digest in expected.items():
-              actual=hashlib.sha256((root/'contracts'/path).read_bytes()).hexdigest()
-              assert actual==digest, f'{path}: SHA mismatch {actual}'
-          print('EMERGENCY_V64_SDT_V10_FIVE_SOURCES_VERIFIED')
+          for file,digest in expected.items():
+              actual=hashlib.sha256((c/file).read_bytes()).hexdigest()
+              print('SOURCE_SHA256',file,actual,flush=True)
+              assert actual==digest, f'Uploaded source mismatch: {file}'
+          print('UPLOADED_V64_ALL_TRANSITIVE_SOURCES_MATCH')
+          # Only exact transitive sources for the six deployments are needed.
+          for f in c.rglob('*.sol'):
+              if str(f.relative_to(c)) not in expected: f.unlink()
+          (root/'foundry.toml').write_text('''[profile.default]
+          src = "contracts"
+          script = "script"
+          out = "build/forge"
+          libs = ["dependencies/node_modules"]
+          remappings = [
+            "@openzeppelin/contracts/=dependencies/node_modules/@openzeppelin/contracts/",
+            "@openzeppelin-4/contracts/=dependencies/node_modules/@openzeppelin-4/contracts/",
+            "@openzeppelin-5/contracts/=dependencies/node_modules/@openzeppelin-5/contracts/",
+            "@openzeppelin/contracts-upgradeable/=dependencies/node_modules/@openzeppelin/contracts-upgradeable/",
+            "solmate/src/=dependencies/solmate/src/"
+          ]
+          auto_detect_solc = true
+          optimizer = true
+          optimizer_runs = 200
+          via_ir = true
+          fs_permissions = [
+            { access = "read", path = "./contracts" },
+            { access = "read", path = "./artifacts" }
+          ]
+
+          [fmt]
+          line_length = 120
+          ''')
           PY
-          printf 'baseline_xz_sha256=%s\n' '31160e9e19c22a95db298893563b1d15150958f72330c02a3510f32cfefd98aa' | tee source_manifest_v2.txt
-      - name: Install actual source deps and compile only on GitHub
+      - name: Compile exact vault and strategy source, no tests
         shell: bash
         run: |
           set -euo pipefail
           npm install --prefix "$ROOT/dependencies" --no-save --ignore-scripts --no-audit --no-fund '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts@5.4.0'
           npm install --prefix "$ROOT/runner" --no-save --ignore-scripts --no-audit --no-fund 'ethers@6.15.0'
-          forge build --root "$ROOT" --sizes --skip script 2>&1 | tee compile-v64-sdt-v10-v11.log
-          node --check github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs
-      - name: Execute Safe custody campaign on isolated Ethereum and Fraxtal forks
+          forge build --root "$ROOT" --use 0.8.28 --sizes --skip script --skip test
+      - name: Replay and measure individual Safe deployment receipts and appended candidates
         shell: bash
         env:
-          LOCAL_ETH_RPC: http://127.0.0.1:8545
-          LOCAL_FRAX_RPC: http://127.0.0.1:8546
-          BOOSTHUB_FORK_ROOT: .safe-v64
-          BOOSTHUB_FORK_RESULTS: boosthub-v64-live-fork-results
           NODE_PATH: ${{ github.workspace }}/.safe-v64/runner/node_modules
         run: |
           set -euo pipefail
-          : "${RPC_ETHEREUM:?RPC_ETHEREUM GitHub secret required}"
-          : "${RPC_FRAXTAL:?RPC_FRAXTAL GitHub secret required}"
-          test "$(timeout 30s cast chain-id --rpc-url "$RPC_ETHEREUM")" = 1
-          test "$(timeout 30s cast chain-id --rpc-url "$RPC_FRAXTAL")" = 252
-          mkdir -p boosthub-v64-live-fork-results
-          anvil --fork-url "$RPC_ETHEREUM" --chain-id 1 --port 8545 --gas-limit 30000000 > boosthub-v64-live-fork-results/ethereum-anvil-v2.log 2>&1 &
-          ETH_PID=$!
-          anvil --fork-url "$RPC_FRAXTAL" --chain-id 252 --port 8546 --gas-limit 30000000 > boosthub-v64-live-fork-results/fraxtal-anvil-v2.log 2>&1 &
-          FRAX_PID=$!
-          trap 'kill "$ETH_PID" "$FRAX_PID" 2>/dev/null || true' EXIT
-          for i in $(seq 1 60); do
-            E="$(timeout 5s cast chain-id --rpc-url "$LOCAL_ETH_RPC" 2>/dev/null || true)"
-            F="$(timeout 5s cast chain-id --rpc-url "$LOCAL_FRAX_RPC" 2>/dev/null || true)"
-            if [[ "$E" == 1 && "$F" == 252 ]]; then break; fi
-            sleep 2
+          test -n "$RPC_ETHEREUM"
+          BLOCK=$(cast block-number --rpc-url "$RPC_ETHEREUM")
+          echo "FORK_BLOCK=$BLOCK"
+          anvil --fork-url "$RPC_ETHEREUM" --fork-block-number "$BLOCK" --host 127.0.0.1 --port 8545 --silent >anvil.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
+            sleep 1
           done
-          test "${E:-}" = 1
-          test "${F:-}" = 252
-          set +e
-          timeout -s TERM -k 10s 1950s node github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs 2>&1 | tee boosthub-v64-live-fork-results/execution-v2.log
-          RC=${PIPESTATUS[0]}
-          set -e
-          exit "$RC"
-      - name: Retain complete per-state balance evidence regardless of execution outcome
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: boosthub-v64-sdt-v10-safe-fork-v11-${{ github.run_id }}
-          path: |
-            source_manifest_v2.txt
-            compile-v64-sdt-v10-v8.log
-            boosthub-v64-live-fork-results/
-            .safe-v64/contracts/BeefyVaultV7FixedV2.sol
-            .safe-v64/contracts/BaseAllToWantBoostHubV5.sol
-            .safe-v64/contracts/StrategyDualFXNMasterV42.sol
-            .safe-v64/contracts/StrategyConvexFXNPool8V42.sol
-            .safe-v64/contracts/StrategyCurveSDTYearnV10.sol
-          if-no-files-found: warn
-          retention-days: 21
+          node 'github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs'
