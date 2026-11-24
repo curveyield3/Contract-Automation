@@ -155,18 +155,6 @@ def _wire_body(direction: str, request_number: int, raw: bytes,
                  "httpStatus": status, "payload": payload})
 
 
-def _log_request(request: httpx.Request) -> None:
-    if not _trace_enabled() or request.url.path != "/v1/chat/completions":
-        return
-    number = next(_TRACE_SEQUENCE)
-    request.extensions["curveyield_dai_wire_number"] = number
-    _wire_body("AUTOPROVER_TO_MIMO", number, request.content)
-
-
-async def _log_request_async(request: httpx.Request) -> None:
-    _log_request(request)
-
-
 class MiMoProtocolError(ValueError):
     """Invalid local model transport/JSON/tool envelope; never an accepted answer."""
 
@@ -241,54 +229,6 @@ def validate_mimo_chat_completion(body: dict, request: dict) -> None:
             raise MiMoProtocolError("Schema-directed MiMo response is not valid JSON") from exc
         if not isinstance(parsed, dict):
             raise MiMoProtocolError("Schema-directed MiMo output must be a JSON object")
-
-
-def _check_local_response(response: httpx.Response) -> None:
-    if response.status_code >= 400:
-        return  # The upstream SDK handles network/status failures.
-    req = response.request
-    if req.url.path != "/v1/chat/completions":
-        raise MiMoProtocolError("Unexpected model API path")
-    try:
-        request_json = json.loads(req.content)
-        response_json = response.json()
-    except (ValueError, TypeError) as exc:
-        raise MiMoProtocolError("Local completion is not JSON") from exc
-    validate_mimo_chat_completion(response_json, request_json)
-
-
-def _observe_response(response: httpx.Response) -> None:
-    if _trace_enabled() and response.request.url.path == "/v1/chat/completions":
-        number = response.request.extensions.get("curveyield_dai_wire_number")
-        if not isinstance(number, int):
-            raise MiMoProtocolError("DAI wire trace lost request correlation")
-        _wire_body("MIMO_TO_AUTOPROVER", number, response.content,
-                   status=response.status_code)
-    try:
-        _check_local_response(response)
-    except Exception as exc:
-        _wire_event({"event": "RESPONSE_VALIDATION", "requestNumber":
-                     response.request.extensions.get("curveyield_dai_wire_number"),
-                     "outcome": "REJECTED", "exceptionType": type(exc).__name__,
-                     "reason": str(exc) if isinstance(exc, MiMoProtocolError) else
-                     "model response verification exception"})
-        raise
-    _wire_event({"event": "RESPONSE_VALIDATION", "requestNumber":
-                 response.request.extensions.get("curveyield_dai_wire_number"),
-                 "outcome": "ENVELOPE_ACCEPTED" if response.status_code < 400 else
-                 "HTTP_STATUS_REJECTED_BY_SDK",
-                 "httpStatus": response.status_code})
-
-
-def _sync_local_response(response: httpx.Response) -> None:
-    response.read()
-    _observe_response(response)
-
-
-async def _async_local_response(response: httpx.Response) -> None:
-    await response.aread()
-    _observe_response(response)
-
 
 
 # Public DAI qualification uses the existing streaming observer without a
@@ -892,21 +832,11 @@ def _observe_native_component_analysis():
 
 
 def _trusted_http_client() -> httpx.Client:
-    if os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT") or os.environ.get("CURVEYIELD_FORMAL_QUALIFICATION_TRACE") == "1":
-        return httpx.Client(trust_env=False, transport=_NativeSyncTransport())
-    return httpx.Client(
-        trust_env=False,
-        event_hooks={"request": [_log_request], "response": [_sync_local_response]},
-    )
+    return httpx.Client(trust_env=False, transport=_NativeSyncTransport())
 
 
 def _trusted_async_http_client() -> httpx.AsyncClient:
-    if os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT") or os.environ.get("CURVEYIELD_FORMAL_QUALIFICATION_TRACE") == "1":
-        return httpx.AsyncClient(trust_env=False, transport=_NativeAsyncTransport())
-    return httpx.AsyncClient(
-        trust_env=False,
-        event_hooks={"request": [_log_request_async], "response": [_async_local_response]},
-    )
+    return httpx.AsyncClient(trust_env=False, transport=_NativeAsyncTransport())
 
 
 def mimo_autoprover_model_args() -> list[str]:
