@@ -46,13 +46,13 @@ MODEL_ID, MIMO_CONTEXT_SIZE = {
     "gpt-oss-20b": ("lite-solo-gpt-oss-20b-v1", 131072),
     "qwen-coder-7b": ("lite-solo-qwen-coder-7b-v1", 32768),
 }[os.environ.get("CURVEYIELD_FORMAL_MODEL", "mimo")]
-FORMAL_INITIAL_OUTPUT_TOKENS = int(os.environ.get("CURVEYIELD_FORMAL_INITIAL_OUTPUT_TOKENS", "256000"))
+FORMAL_INITIAL_OUTPUT_TOKENS = int(os.environ.get("CURVEYIELD_FORMAL_INITIAL_OUTPUT_TOKENS", "24576" if MODEL_ID == "lite-solo-mimo-v1" else "256000"))
 FORMAL_QUALIFICATION_OUTPUT_TOKENS = FORMAL_INITIAL_OUTPUT_TOKENS // 8
 
 
 def _model_output_budget(requested: int) -> int:
     # The pinned server enforces its actual remaining context with context shift disabled.
-    return min(requested, MIMO_CONTEXT_SIZE)
+    return min(requested, MIMO_CONTEXT_SIZE, FORMAL_INITIAL_OUTPUT_TOKENS) if MODEL_ID == "lite-solo-mimo-v1" else min(requested, MIMO_CONTEXT_SIZE)
 
 
 TAILNET = IPv4Network("100.64.0.0/10")
