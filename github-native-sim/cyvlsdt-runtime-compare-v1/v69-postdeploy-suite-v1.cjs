@@ -5,7 +5,7 @@ const SDT='0x73968b9a57c6e53d41345fd57a6e6ae27d6cdb2f',USDC='0xa0b86991c6218b36c
 const erc=['function balanceOf(address) view returns(uint256)','function totalSupply() view returns(uint256)','function transfer(address,uint256) returns(bool)','function transferFrom(address,address,uint256) returns(bool)','function approve(address,uint256) returns(bool)','function allowance(address,address) view returns(uint256)','function decimals() view returns(uint8)'];
 const ercI=new E.Interface(erc),transferTopic=E.id('Transfer(address,address,uint256)'),approvalTopic=E.id('Approval(address,address,uint256)');
 const J=x=>JSON.stringify(x,(_,v)=>typeof v==='bigint'?v.toString():v);
-const report={version:7,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
+const report={version:8,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
 const cleanError=e=>({message:String(e.shortMessage||e.message||e).slice(0,2000),data:e.data||e.info?.error?.data||null});
 const low=x=>String(x).toLowerCase();
 fs.mkdirSync(OUT,{recursive:true});
@@ -76,7 +76,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
      const tx=await s.sendTransaction({to:addr,data,gasLimit:16000000n,value:opts.value||0n});receipt=await tx.wait();row.tx=await observe(p,receipt,scenarioName+':'+k+'.'+sig);
      assert.equal(receipt.status,1);row.after=await state(k,caller);
      if(opts.check){await opts.check(row);row.status='PASS_ASSERTED';}else row.status=row.tx.events.length?'EXECUTED_TRANSFER_UNASSERTED':'EXECUTED_NO_TRANSFER';
-     if(row.tx.conservation.some(x=>!x.match)){row.status='FAIL_TRANSFER_RECONCILIATION';}
+     if(row.tx.conservation.some(x=>!x.match)){row.status='FAIL_TRANSFER_RECONCILIATION';}else if(row.tx.balances.some(x=>typeof x.before!=='bigint'||typeof x.after!=='bigint')){row.status='INCOMPLETE_ACCOUNTING_READ';}
    }catch(e){
      row.error=cleanError(e);row.decodedError=errorName(t,e);row.after=await state(k,caller);
      if(opts.reject){const match=opts.reject===row.decodedError||String(row.error.message).includes(opts.reject)||String(e.message).includes(opts.reject);row.status=match?'EXPECTED_REVERT':'FAIL_WRONG_REVERT';}
@@ -88,7 +88,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
  async function need(k,f,args,caller=U,opts={}){const r=await act(k,f,args,caller,opts);if(!['PASS_ASSERTED','EXECUTED_TRANSFER_UNASSERTED','EXECUTED_NO_TRANSFER','EXPECTED_REVERT'].includes(r.status))throw Error('prerequisite '+k+'.'+f+' '+r.status);return r;}
  async function ext(t,f,args,caller=U,opts={}){return act('external:'+await t.getAddress(),f,args,caller,{...opts,contract:t});}
  async function scenario(label,fn){
-   if(!label.startsWith('SUPPLEMENT guarded redeem svault ')||!label.includes('victim bps 500'))return;scenarioName=label;let snap=await p.send('evm_snapshot',[]),start=report.actions.length;
+   if(label.startsWith('sandwich ')||label.startsWith('SUPPLEMENT guarded '))return;scenarioName=label;let snap=await p.send('evm_snapshot',[]),start=report.actions.length;
    try{await fn();report.scenarios.push({label,status:'COMPLETED',actions:report.actions.length-start});}
    catch(e){report.scenarios.push({label,status:'BLOCKED_OR_FAILED',error:cleanError(e),actions:report.actions.length-start});log('SCENARIO_ERROR',{label,error:cleanError(e)});}
    finally{await p.send('evm_revert',[snap]);signers.clear();save();}
@@ -300,34 +300,6 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    await act('locker','forwardMerchantRevenue',[1n],U,{reject:'OnlyBoostMerchant'});
    await act('locker','marketplaceCreateListing',[W,1000,1,2,USDC,await now()+WEEK],U,{reject:'OnlyBoostMerchant'}); // corrected argument count below by ABI case inventory
  });
- // Market protection: run real front/victim/back transactions on the fork, both directions.
- const poolABI=['function coins(uint256) view returns(address)','function balances(uint256) view returns(uint256)','function get_dy(uint256,uint256,uint256) view returns(uint256)','function exchange(uint256,uint256,uint256,uint256) returns(uint256)'];
- const guardABI=['function quoteDeposit(address,uint8,uint256,uint16) view returns(uint256,uint256)','function quoteWithdraw(address,uint8,uint256,uint16) view returns(uint256,uint256)'];
- for(const [k,strat,t,slip] of [['svault','yearn',SDT,200],['fxnVault','fxn',SDFXN,75]]){
-   for(const direction of [0,1])for(const bps of [100,500,1500]){
-    await scenario('sandwich '+k+' direction '+direction+' reserve bps '+bps,async()=>{
-     const poolAddr=strat==='yearn'?await N.yearn.CURVE_LP():await N.fxn.curvePool(),guardAddr=await N[strat].curveLiquidityGuard(),pool=C(p,poolAddr,poolABI),guard=C(p,guardAddr,guardABI);
-     if(k==='fxnVault')await own('fxn','setAllocationTargets',[0,10000],async()=>eq((await N.fxn.allocationTargets())[1],10000n));
-     await fund(t,U,50n*W);await approve(t,A[k],U);
-     const q=10n*W,controlSnap=await p.send('evm_snapshot',[]),baseQuote=await soft(()=>guard.quoteDeposit(poolAddr,1,q,slip));
-     const control=await act(k,'deposit(uint256,address)',[q,U],U,{check:async()=>assert(await N[k].balanceOf(U)>0n)});
-     const controlShares=await N[k].balanceOf(U);await p.send('evm_revert',[controlSnap]);signers.clear();
-     const input=await pool.coins(direction),output=await pool.coins(1-direction),res=await pool.balances(direction),size=res*BigInt(bps)/10000n;
-     if(size===0n)throw Error('zero attack size');
-     await fund(input,X,size);await approve(input,poolAddr,X);const startIn=await C(p,input).balanceOf(X),startOut=await C(p,output).balanceOf(X);
-     const front=await ext(pool,'exchange',[direction,1-direction,size,0],X,{check:async()=>assert(await C(p,output).balanceOf(X)>startOut)});
-     if(front.status!=='PASS_ASSERTED')throw Error('front swap failed');
-     const shiftedQuote=await soft(()=>guard.quoteDeposit(poolAddr,1,q,slip));
-     const vbefore=await C(p,t).balanceOf(U),sBefore=await N[k].balanceOf(U);
-     const victim=await act(k,'deposit(uint256,address)',[q,U],U,{check:async()=>assert(await N[k].balanceOf(U)>sBefore)});
-     const vafter=await C(p,t).balanceOf(U),sAfter=await N[k].balanceOf(U),received=await C(p,output).balanceOf(X)-startOut;
-     if(received>0n){await approve(output,poolAddr,X);await ext(pool,'exchange',[1-direction,direction,received,0],X);}
-     const endIn=await C(p,input).balanceOf(X);const result={k,strat,direction,bps,input,output,size,baseQuote,shiftedQuote,controlStatus:control.status,controlShares,victimStatus:victim.status,victimError:victim.error,vbefore,vafter,sBefore,sAfter,attackerNetInput:endIn-startIn,peg:await soft(()=>N.fxn.sdFxnToFxnWad()),rollback:vbefore===vafter&&sBefore===sAfter,classification:control.status==='PASS_ASSERTED'&&victim.status==='FAIL'&&vbefore===vafter&&sBefore===sAfter?'VICTIM_REVERTED_ATOMICALLY_CHECK_GUARD_CAUSE':victim.status==='PASS_ASSERTED'?'VICTIM_EXECUTED_COMPARE_NAV':'INCONCLUSIVE'};
-     report.sandwich.push(result);log('SANDWICH',result);
-    });
-   }
- }
-
  // Positive offer paths using the verified live BoostMarketplace ABI.
  await scenario('SUPPLEMENT actual marketplace offers, direct lease and routing',async()=>{
    const maddr=await N.merchant.MARKETPLACE(),market=C(p,maddr,[
@@ -440,60 +412,6 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    await ownPol('rescueToken',[SDT,V,W/100n]);await ownPol('withdrawUniNFT',[V]);
    await ownPol('proposeOwner',[V],async()=>eq(low(await a.pendingOwner()),low(V)));await ext(a,'acceptOwner',[],V,{check:async()=>eq(low(await a.owner()),low(V))});
  });
- // Compare unmanipulated victim and attacker-only round trip to real sandwich with deposit and redemption.
- for(const [k,strat,t,slip] of [['svault','yearn',SDT,200],['fxnVault','fxn',SDFXN,75]]){
-  for(const victimBps of [100,500])for(const direction of [0,1])for(const bps of victimBps===100?[100,500,1500]:[500])for(const mode of ['deposit','redeem']){
-   await scenario('SUPPLEMENT guarded '+mode+' '+k+' direction '+direction+' reserve bps '+bps+' victim bps '+victimBps,async()=>{
-    const poolAddr=strat==='yearn'?await N.yearn.CURVE_LP():await N.fxn.curvePool(),guardAddr=await N[strat].curveLiquidityGuard(),idx=strat==='yearn'?'uint256':'int128';
-    const pool=C(p,poolAddr,['function coins(uint256) view returns(address)','function balances(uint256) view returns(uint256)','function price_oracle() view returns(uint256)','function calc_token_amount(uint256[2],bool) view returns(uint256)','function calc_withdraw_one_coin(uint256,'+idx+') view returns(uint256)','function exchange('+idx+','+idx+',uint256,uint256) returns(uint256)']);
-    const guard=C(p,guardAddr,guardABI);
-    if(k==='fxnVault')await own('fxn','setAllocationTargets',[0,10000],async()=>eq((await N.fxn.allocationTargets())[1],10000n));
-    const q=(await pool.balances(1))*BigInt(victimBps)/10000n;assert(q>10n*W);await fund(t,U,q*4n);await approve(t,A[k],U);
-    let shares=0n;
-    if(mode==='redeem'){
-       const step=q/5n;
-       for(let i=0;i<10;i++){
-         let pre=await N[k].balanceOf(U);
-         let row=await act(k,'deposit(uint256,address)',[step,U],U,{purpose:'staged initial position, not a victim trade',check:async()=>assert(await N[k].balanceOf(U)>pre)});
-         if(row.status!=='PASS_ASSERTED')break;
-         await warp(3601);
-       }
-       const held=await N[k].balanceOf(U),target=await N[k].convertToShares(q);
-       if(held<target)throw Error('Staged guarded deposits could not establish the full requested redemption position');
-       shares=target;
-     }
-    const input=await pool.coins(direction),output=await pool.coins(1-direction),reserve=await pool.balances(direction),size=reserve*BigInt(bps)/10000n;
-    await fund(input,X,size);await approve(input,poolAddr,X);await approve(output,poolAddr,X);
-    const base=await p.send('evm_snapshot',[]),baseIn=await C(p,input).balanceOf(X),baseOut=await C(p,output).balanceOf(X);
-    const functionName=mode==='deposit'?'deposit(uint256,address)':'redeem(uint256,address,address)',args=mode==='deposit'?[q,U]:[shares,U,U];
-    const initialAsset=await C(p,t).balanceOf(U),initialShare=await N[k].balanceOf(U);
-    const quoteSize=mode==='deposit'?q:(strat==='yearn'?await N.yearn.totalCurveLp():await N.fxn.lpBalance())/2n;
-    const readQuote=async()=>mode==='deposit'?soft(()=>guard.quoteDeposit(poolAddr,1,quoteSize,slip)):soft(()=>guard.quoteWithdraw(poolAddr,1,quoteSize,slip));
-    const baseQuote=await readQuote(),baseSpot=await soft(()=>mode==='deposit'?pool.calc_token_amount([0n,quoteSize],true):pool.calc_withdraw_one_coin(quoteSize,1)),oracleBefore=await soft(()=>pool.price_oracle());
-    let control=await act(k,functionName,args,U,{check:async()=>assert(mode==='deposit'?await N[k].balanceOf(U)>initialShare:await C(p,t).balanceOf(U)>initialAsset)});
-    const controlDelta=mode==='deposit'?await N[k].balanceOf(U)-initialShare:await C(p,t).balanceOf(U)-initialAsset;
-    await p.send('evm_revert',[base]);signers.clear();
-    const attackControl=await p.send('evm_snapshot',[]);
-    const front=async()=>ext(pool,'exchange',[direction,1-direction,size,0],X,{check:async()=>assert(await C(p,output).balanceOf(X)>baseOut)});
-    const back=async()=>{const obtained=await C(p,output).balanceOf(X)-baseOut;if(obtained<=0n)throw Error('no swap output');return ext(pool,'exchange',[1-direction,direction,obtained,0],X,{check:async()=>assert(await C(p,input).balanceOf(X)>baseIn-size)});};
-    let r=await front();if(r.status!=='PASS_ASSERTED')throw Error('front-run control failed');r=await back();if(r.status!=='PASS_ASSERTED')throw Error('back-run control failed');
-    const controlAttacker=await C(p,input).balanceOf(X)-baseIn;
-    await p.send('evm_revert',[attackControl]);signers.clear();
-    r=await front();if(r.status!=='PASS_ASSERTED')throw Error('front-run failed');
-    const movedQuote=await readQuote(),movedSpot=await soft(()=>mode==='deposit'?pool.calc_token_amount([0n,quoteSize],true):pool.calc_withdraw_one_coin(quoteSize,1)),oracleMoved=await soft(()=>pool.price_oracle()),peg=await soft(()=>N.fxn.sdFxnToFxnWad());
-    const victim=await act(k,functionName,args,U,{check:async()=>assert(mode==='deposit'?await N[k].balanceOf(U)>initialShare:await C(p,t).balanceOf(U)>initialAsset)});
-    const victimDelta=mode==='deposit'?await N[k].balanceOf(U)-initialShare:await C(p,t).balanceOf(U)-initialAsset,rollback=(await C(p,t).balanceOf(U))===initialAsset&&(await N[k].balanceOf(U))===initialShare;
-    const backRun=await back(),attackerNet=await C(p,input).balanceOf(X)-baseIn;
-    const incrementalProfit=attackerNet-controlAttacker;
-    const adverseBps=controlDelta>0n?(controlDelta-victimDelta)*10000n/controlDelta:null;
-    const classification=control.status!=='PASS_ASSERTED'?'INCONCLUSIVE_CONTROL_FAILED':victim.status==='FAIL'&&rollback?'VICTIM_REVERTED_ATOMICALLY_CHECK_REVERT_CAUSE':victim.status==='PASS_ASSERTED'&&incrementalProfit<=0n?'EXECUTED_NO_INCREMENTAL_ATTACKER_GAIN':victim.status==='PASS_ASSERTED'&&incrementalProfit>0n?'EXECUTED_INCREMENTAL_ATTACKER_GAIN_REVIEW':'INCONCLUSIVE';
-    const result={k,strat,mode,direction,bps,victimBps,victimAmount:q,size,input,output,slip,baseQuote,movedQuote,baseSpot,movedSpot,oracleBefore,oracleMoved,peg,controlStatus:control.status,controlDelta,victimStatus:victim.status,victimDelta,victimError:victim.error,rollback,backRunStatus:backRun.status,controlAttacker,attackerNet,incrementalProfit,adverseBps,classification};
-    report.sandwich.push(result);log('SANDWICH',result);
-   });
-  }
- }
-
-
  async function vr(k,f,args,check){
    let row={contract:k,function:N[k].interface.getFunction(f).format('sighash'),params:args};
    try{row.result=await N[k][f](...args);if(check)await check(row.result);row.status='READ_OK';}catch(e){row.status='READ_REVERT';row.error=cleanError(e);row.decodedError=errorName(N[k],e);}

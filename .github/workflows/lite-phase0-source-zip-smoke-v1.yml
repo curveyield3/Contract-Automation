@@ -1,14 +1,14 @@
-name: cyvlSDT exact two-batch configuration packing
+name: cyvlSDT exact packed proposals and complete ordinary function lifecycle simulation
 on:
   push:
     branches: [cyvlsdt-v69-postdeploy-simulation-v1]
-    paths: ['github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json', '.github/workflows/lite-phase0-source-zip-smoke-v1.yml']
+    paths: ['.github/workflows/lite-phase0-source-zip-smoke-v1.yml', 'github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json', 'github-native-sim/cyvlsdt-runtime-compare-v1/v69-postdeploy-suite-v1.cjs']
 permissions:
   contents: read
 jobs:
   fork-gas:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 90
     env:
       UPSTREAM_RPC: ${{ secrets.RPC_ETHEREUM }}
     steps:
@@ -21,15 +21,57 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Simulate exact already-compiled proposal payloads
+      - name: Materialize exact v64 source and benchmark-only optimization candidate
         shell: bash
         run: |
           set -euo pipefail
-          npm install --prefix /tmp/cyv-deps --ignore-scripts --no-audit --no-fund --no-save ethers@6.17.0
-          mkdir -p /tmp/cyv64
+          curl -fsSL 'https://raw.githubusercontent.com/curveyield3/Smart-Contracts/6b058498554f58936daf1216c222d554ee666f5e/Audit-Intake/CurveYield-cyvlSDT-Deployment-Package-v64.zip' -o /tmp/cyv64.zip
+          echo 'a2d46ab6bf63a760efecf914f36419b8ec271c0e36f9b3ee9821cd842ea0d7ee  /tmp/cyv64.zip' | sha256sum -c -
+          mkdir -p /tmp/cyv64 /tmp/cyv65
+          unzip -q /tmp/cyv64.zip -d /tmp/cyv64
+          cp -a /tmp/cyv64/contracts /tmp/cyv65/
+          mkdir -p /tmp/cyv-deps
+          npm install --prefix /tmp/cyv-deps --ignore-scripts --no-audit --no-fund --no-save '@openzeppelin/contracts@5.4.0' '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts-upgradeable@4.9.6' 'ethers@6.17.0'
           ln -s /tmp/cyv-deps/node_modules /tmp/cyv64/node_modules
-          export FORK_BLOCK=26482950
-          anvil --fork-url "$UPSTREAM_RPC" --fork-block-number "$FORK_BLOCK" --host 127.0.0.1 --port 8545 --silent >/tmp/anvil.log 2>&1 &
+          ln -s /tmp/cyv-deps/node_modules /tmp/cyv65/node_modules
+          for ROOT in /tmp/cyv64 /tmp/cyv65; do
+            rm -f "$ROOT/contracts/PoL_Manager_Contract_v22.sol" "$ROOT/contracts/VoteMarketSingleGaugeBribeAllocator.sol"
+            rm -rf "$ROOT/contracts/external_guard_v8"
+            cat > "$ROOT/foundry.toml" <<'EOF'
+          [profile.default]
+          src = "contracts"
+          out = "out"
+          libs = ["node_modules"]
+          remappings = ["@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/", "@openzeppelin-4/contracts/=node_modules/@openzeppelin-4/contracts/", "@openzeppelin/contracts-upgradeable/=node_modules/@openzeppelin/contracts-upgradeable/"]
+          solc_version = "0.8.28"
+          optimizer = true
+          optimizer_runs = 200
+          via_ir = true
+          evm_version = "cancun"
+          EOF
+          done
+          python3 - <<'PY'
+          import json,pathlib
+          p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
+          exec(compile(p['transform'],'v65-transform','exec'))
+          exec(compile(p['unifiedTransform'],'v66-transform','exec'))
+          exec(compile(p['packingTransform'],'v67-transform','exec'))
+          PY
+      - name: Compile original and revised artifacts and optimizer sweep
+        shell: bash
+        run: |
+          set -euo pipefail
+          forge build --root /tmp/cyv64 --skip test --skip script
+          FOUNDRY_OPTIMIZER_RUNS=25 FOUNDRY_OUT=out-25 forge build --root /tmp/cyv65 --force --skip test --skip script
+      - name: Exact Safe batch deployment, EOA setup and post-deployment fork scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$UPSTREAM_RPC"
+          BLOCK=26482950
+          echo "FORK_BLOCK=$BLOCK"
+          export FORK_BLOCK="$BLOCK"
+          anvil --fork-url "$UPSTREAM_RPC" --fork-block-number "$BLOCK" --host 127.0.0.1 --port 8545 --silent >/tmp/anvil.log 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
@@ -40,5 +82,13 @@ jobs:
           import json,pathlib
           p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
           pathlib.Path('/tmp/cyv64/replay.cjs').write_text(p['replay'])
+          pathlib.Path('/tmp/cyv64/stages.json').write_text(json.dumps(p['stages']))
           PY
           node /tmp/cyv64/replay.cjs
+      - name: Retain complete post-deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CurveYield-cyvlSDT-Packed-PostDeployment-Simulation-v2
+          path: /tmp/v69-report/
+          if-no-files-found: warn
