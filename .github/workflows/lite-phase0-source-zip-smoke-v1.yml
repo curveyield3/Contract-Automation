@@ -1,4 +1,4 @@
-name: Actual cyvlSDT share oracle Safe batch fork v2
+name: Actual cyvlSDT share oracle Safe batch fork v3
 on:
   push:
     branches: [cyvlsdt-v69-postdeploy-simulation-v1]
@@ -102,10 +102,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL 'https://raw.githubusercontent.com/curveyield3/Smart-Contracts/60354e796ce4ed088981187a1493110fe48b0194/cyvlSDT/contracts/CurveYieldSDTShareOracle.sol' -o /tmp/cyv65/contracts/CurveYieldSDTShareOracle.sol
-          FOUNDRY_OUT=out-25-oracle forge build --root /tmp/cyv65 --skip test --skip script /tmp/cyv65/contracts/CurveYieldSDTShareOracle.sol
-          cp /tmp/cyv65/contracts/CurveYieldSDTShareOracle.sol /tmp/v72-report/
-          cp /tmp/cyv65/out-25-oracle/CurveYieldSDTShareOracle.sol/CurveYieldSDTShareOracle.json /tmp/v72-report/CurveYieldSDTShareOracle-v1-artifact.json
+          mkdir -p /tmp/cyv-oracle/contracts
+          ln -s /tmp/cyv-deps/node_modules /tmp/cyv-oracle/node_modules
+          cp /tmp/cyv65/foundry.toml /tmp/cyv-oracle/foundry.toml
+          curl -fsSL 'https://raw.githubusercontent.com/curveyield3/Smart-Contracts/60354e796ce4ed088981187a1493110fe48b0194/cyvlSDT/contracts/CurveYieldSDTShareOracle.sol' -o /tmp/cyv-oracle/contracts/CurveYieldSDTShareOracle.sol
+          FOUNDRY_OUT=out-25-oracle forge build --root /tmp/cyv-oracle --force --skip test --skip script
+          cp /tmp/cyv-oracle/contracts/CurveYieldSDTShareOracle.sol /tmp/v72-report/
+          find /tmp/cyv-oracle -name CurveYieldSDTShareOracle.json -print
+          cp /tmp/cyv-oracle/out-25-oracle/CurveYieldSDTShareOracle.sol/CurveYieldSDTShareOracle.json /tmp/v72-report/CurveYieldSDTShareOracle-v1-artifact.json
       - name: Replay exact queued Safe payloads and oracle batch
         shell: bash
         run: |
@@ -133,6 +137,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield-cyvlSDT-Curve-oracle-fork-v2
+          name: CurveYield-cyvlSDT-Curve-oracle-fork-v3
           path: /tmp/v72-report/
           if-no-files-found: error
