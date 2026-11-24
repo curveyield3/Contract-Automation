@@ -1,7 +1,7 @@
-name: BoostHub v64 exact sdCRV and sdFXN deployment gas diagnostics v2
+name: BoostHub v65 shared vault and strategy compilation
 on:
   push:
-    branches: [simulation/boosthub-v64-vault-deployment-gas-v1]
+    branches: [simulation/boosthub-v65-shared-implementation-compile-v1]
     paths: ['github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs']
 permissions:
   contents: read
@@ -11,7 +11,6 @@ jobs:
     timeout-minutes: 20
     env:
       ROOT: .safe-v64
-      RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,30 +85,60 @@ jobs:
           line_length = 120
           ''')
           PY
-      - name: Compile exact vault and strategy source, no tests
+      - name: Apply exact v65 vault changes and verify uploaded source hashes
         shell: bash
         run: |
           set -euo pipefail
-          npm install --prefix "$ROOT/dependencies" --no-save --ignore-scripts --no-audit --no-fund '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts@5.4.0'
-          npm install --prefix "$ROOT/runner" --no-save --ignore-scripts --no-audit --no-fund 'ethers@6.15.0'
-          forge build --root "$ROOT" --use 0.8.28 --sizes --skip script --skip test
-      - name: Replay and measure individual Safe deployment receipts and appended candidates
+          python3 - <<'PY'
+          import base64,lzma,pathlib,hashlib,subprocess,json
+          root=pathlib.Path('.safe-v64')
+          p=json.loads(pathlib.Path('github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs').read_text())
+          def unpack(key,digest):
+              b=lzma.decompress(base64.b64decode(p[key],validate=True))
+              assert hashlib.sha256(b).hexdigest()==digest,key
+              return b
+          patch=root/'v65.patch'
+          patch.write_bytes(unpack('patch','745f9b983369f0def18bb04f165709e513c91dc1c805676283dbb153714f11c5'))
+          subprocess.run(['patch','-p1','--batch','--forward','-i',str(patch.resolve())],cwd=root,check=True)
+          patch.unlink()
+          (root/'contracts/StrategyBoostHubChildV42.sol').unlink()
+          if (root/'script').exists():
+              import shutil
+              shutil.rmtree(root/'script')
+          (root/'script').mkdir()
+          (root/'script/DeployBoostHubVaultsV57.s.sol').write_bytes(unpack('script','cb3de1d6cb50154714543414899db959046e88d8efe81aadd9e6ffd65fd8a331'))
+          (root/'contracts/interfaces/IBoostHub.sol').write_bytes(unpack('hub','7435f5664dd82c68307f1cc0d8e072cc4405436d8968f7adeb2f4e3eaa1cf793'))
+          expected={
+              'BaseAllToWantBoostHubV5.sol':'1cb67cdad7ae7c140af809e3ead6eea02c8bb600ab364cda23d943c1ae745bc8',
+              'BeefyCurveYieldVaultv8.sol':'7cd66d50c5145cd3dc579d93de38546da24e306319c4a1a50b926215ca2d523a',
+              'StrategyConvexBoostHubStakingV5.sol':'6d7b80d018181224095f138b06a38fecf574fa5996bfea362d2b1032ee37703e',
+              'StrategyConvexFXNPool8V42.sol':'44dfa8e49df7286fec66cc185aa356d72fc273e35b59c248cfdc1d07bf94ba6c',
+              'StrategyDualFXNMasterV42.sol':'50370755e4d59f5f7c8779cff472e98d0ab9616f441df8d7aff37bcd3498c0e5',
+              'BoostHubInitializedClone.sol':'e80b779b51d97843b8104772f17cdfad2204b34b54d5826a39c16dd56d260ff6'
+          }
+          for f,d in expected.items():
+              h=hashlib.sha256((root/'contracts'/f).read_bytes()).hexdigest()
+              assert h==d,(f,h,d)
+              print('V65_SOURCE_MATCH',f,h)
+          PY
+      - name: Compile v65 target contracts and deployment script, optimizer 200 and sweeps
         shell: bash
-        env:
-          NODE_PATH: ${{ github.workspace }}/.safe-v64/runner/node_modules
         run: |
           set -euo pipefail
-          test -n "$RPC_ETHEREUM"
-          BLOCK=26481652
-          echo "FORK_BLOCK=$BLOCK"
-          EXTRA=()
-          if anvil --help | grep -q -- "--disable-tx-gas-limit"; then EXTRA+=(--disable-tx-gas-limit); fi
-          echo "ANVIL_DIAGNOSTIC_FLAGS=${EXTRA[*]}"
-          anvil --fork-url "$RPC_ETHEREUM" --fork-block-number "$BLOCK" --host 127.0.0.1 --port 8545 --silent "${EXTRA[@]}" >anvil.log 2>&1 &
-          PID=$!
-          trap 'kill "$PID" 2>/dev/null || true' EXIT
-          for i in $(seq 1 30); do
-            if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
-            sleep 1
+          npm install --prefix "$ROOT/dependencies" --no-save --ignore-scripts --no-audit --no-fund '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts@5.4.0' '@openzeppelin/contracts-upgradeable@4.9.6'
+          for RUNS in 200 1 25 50; do
+            echo "COMPILER_RUNS=$RUNS"
+            FOUNDRY_OPTIMIZER_RUNS="$RUNS" forge build --root "$ROOT" --use 0.8.28 --force --skip test
+            python3 - "$RUNS" <<'PY'
+          import json,pathlib,sys
+          root=pathlib.Path('.safe-v64/build/forge')
+          names=['BeefyCurveYieldVaultv8','StrategyConvexBoostHubStakingV5','StrategyDualFXNMasterV42','StrategyConvexFXNPool8V42','BoostHubInitializedClone']
+          out={}
+          for n in names:
+              a=json.loads((root/(n+'.sol')/(n+'.json')).read_text())
+              out[n]={'runtime':len(bytes.fromhex(a['deployedBytecode']['object'][2:])),'creation':len(bytes.fromhex(a['bytecode']['object'][2:]))}
+          a=json.loads((root/'DeployBoostHubVaultsV57.s.sol'/'DeployBoostHubVaultsV57.json').read_text())
+          assert a['bytecode']['object']!='0x'
+          print('V65_METRICS',sys.argv[1],json.dumps(out))
+          PY
           done
-          node 'github-native-sim/boosthub-v13-full-stack-v1/safe-v62-fork-v2.cjs'
