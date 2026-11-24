@@ -30,8 +30,10 @@ jobs:
           mkdir -p /tmp/cyv64 /tmp/cyv65
           unzip -q /tmp/cyv64.zip -d /tmp/cyv64
           cp -a /tmp/cyv64/contracts /tmp/cyv65/
-          npm install --prefix /tmp/cyv64 --ignore-scripts --no-audit --no-fund --no-save '@openzeppelin/contracts@5.4.0' '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts-upgradeable@4.9.6' 'ethers@6.17.0'
-          ln -s /tmp/cyv64/node_modules /tmp/cyv65/node_modules
+          mkdir -p /tmp/cyv-deps
+          npm install --prefix /tmp/cyv-deps --ignore-scripts --no-audit --no-fund --no-save '@openzeppelin/contracts@5.4.0' '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts-upgradeable@4.9.6' 'ethers@6.17.0'
+          ln -s /tmp/cyv-deps/node_modules /tmp/cyv64/node_modules
+          ln -s /tmp/cyv-deps/node_modules /tmp/cyv65/node_modules
           for ROOT in /tmp/cyv64 /tmp/cyv65; do
             rm -f "$ROOT/contracts/PoL_Manager_Contract_v22.sol" "$ROOT/contracts/VoteMarketSingleGaugeBribeAllocator.sol"
             rm -rf "$ROOT/contracts/external_guard_v8"
