@@ -2,7 +2,7 @@ name: Lite-Solo AI Source Inference and Autonomous Beta v6
 run-name: ${{ inputs.mode == 'certora_qa' && format('CERTORA-QA-{0}-{1}', inputs.source_run_id, inputs.source_run_attempt) || inputs.mode == 'autonomous' && format('MI-{0}', inputs.dispatch_tag) || inputs.mode == 'autonomous_start' && 'MI-AUTONOMOUS-START' || github.workflow }}
 on:
   push:
-    branches: [machine-intelligence-audit-controller-v1, gpt-oss-autoprover-dai-replay-v1]
+    branches: [machine-intelligence-audit-controller-v1, autoprover-dai-inference-benchmark-v1]
     paths:
       - '.github/workflows/lite-solo-ai-inference-v1.yml'
       - 'process/agent-upload/DAI_r12_MiMo_request_1_exact_v1.json'
@@ -1319,44 +1319,50 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  gpt-oss-dai-replay:
-    name: GPT-OSS-20B - exact DAI r12 AutoProver replay v4
-    if: github.event_name == 'push' && github.ref_name == 'gpt-oss-autoprover-dai-replay-v1'
+  dai-inference-benchmark:
+    name: ${{ matrix.model.label }} / ${{ matrix.config.id }} - exact DAI r12 benchmark v1
+    if: github.event_name == 'push' && github.ref_name == 'autoprover-dai-inference-benchmark-v1'
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        config:
+          - {"id":"01-deterministic","temp":"0.0","top_p":"1.0","top_k":1,"budget":0,"effort":"low","passes":1}
+          - {"id":"02-conservative","temp":"0.1","top_p":"0.9","top_k":20,"budget":1024,"effort":"low","passes":1}
+          - {"id":"03-balanced","temp":"0.3","top_p":"0.95","top_k":40,"budget":2048,"effort":"medium","passes":1}
+          - {"id":"04-extended","temp":"0.2","top_p":"0.95","top_k":40,"budget":8192,"effort":"high","passes":1}
+          - {"id":"05-self-correction","temp":"0.1","top_p":"0.9","top_k":20,"budget":2048,"effort":"medium","passes":2}
+        model:
+          - {"id":"qwen","label":"Qwen2.5-Coder-7B-Instruct","repo":"Qwen/Qwen2.5-Coder-7B-Instruct-GGUF","revision":"13fb94bfda8c8cf22497dc57b78f391a9acb426a","file":"qwen2.5-coder-7b-instruct-q4_k_m.gguf","sha":"509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c"}
+          - {"id":"gpt-oss","label":"GPT-OSS-20B","repo":"ggml-org/gpt-oss-20b-GGUF","revision":"b97cbb20d1995efd41dce8c4dd1ddf86e8db375b","file":"gpt-oss-20b-MXFP4.gguf","sha":"27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901"}
     permissions:
       contents: read
-      actions: write
     env:
       REPLAY_FILE: process/agent-upload/DAI_r12_MiMo_request_1_exact_v1.json
       REPLAY_SHA256: a78712fc1e6c09a9dc060728d8190c8efb838018159b56a877e59f1791227095
-      GPTOSS_REVISION: b97cbb20d1995efd41dce8c4dd1ddf86e8db375b
-      GPTOSS_SHA256: 27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901
       AUTOPROVER_SHA: 81d9626c249a70c0a0f0648a89de175443c0344c
       GRAPHCORE_SHA: c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc
       PYTHONUNBUFFERED: '1'
       CURVEYIELD_PUBLIC_DAI_WIRE_TRACE: '1'
+      BENCH_MODEL: ${{ matrix.model.id }}
+      BENCH_MODEL_LABEL: ${{ matrix.model.label }}
+      BENCH_REPO: ${{ matrix.model.repo }}
+      BENCH_REVISION: ${{ matrix.model.revision }}
+      BENCH_FILE: ${{ matrix.model.file }}
+      BENCH_SHA256: ${{ matrix.model.sha }}
+      BENCH_CONFIG: ${{ matrix.config.id }}
+      BENCH_TEMP: '${{ matrix.config.temp }}'
+      BENCH_TOP_P: '${{ matrix.config.top_p }}'
+      BENCH_TOP_K: '${{ matrix.config.top_k }}'
+      BENCH_BUDGET: '${{ matrix.config.budget }}'
+      BENCH_EFFORT: ${{ matrix.config.effort }}
+      BENCH_PASSES: '${{ matrix.config.passes }}'
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Cancel superseded silent replay after checking exact run identity
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          old=45312213258
-          info="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$old")"
-          jq -e --arg branch "$GITHUB_REF_NAME" --arg sha '718d9d244119515a24cb97ce0a8ea38e282940d0' '.head_branch==$branch and .head_sha==$sha and (.path|startswith(".github/workflows/lite-solo-ai-inference-v1.yml"))' <<< "$info" >/dev/null
-          status="$(jq -r .status <<< "$info")"
-          if [ "$status" != completed ]; then
-            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$old/cancel" || {
-              status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$old" --jq .status)"
-              test "$status" = completed
-            }
-          fi
-          echo "SUPERSEDED_RUN $old cancellation requested or already completed"
       - name: Verify exact public request before any installation
         shell: bash
         run: |
@@ -1366,8 +1372,8 @@ jobs:
           nproc
           free -h
           df -h "$RUNNER_TEMP"
-          mkdir -p "$RUNNER_TEMP/gpt-oss-replay"
-          cp "$REPLAY_FILE" "$RUNNER_TEMP/gpt-oss-replay/request-exact-v1.json"
+          mkdir -p "$RUNNER_TEMP/benchmark"
+          cp "$REPLAY_FILE" "$RUNNER_TEMP/benchmark/request-exact-v1.json"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -1399,25 +1405,33 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/llama.cpp" rev-parse HEAD)" = "$LLAMA_SHA"
           cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_USE_PREBUILT_UI=OFF -DLLAMA_BUILD_UI=OFF
           cmake --build "$RUNNER_TEMP/llama-build" --target llama-server -j 4
-      - name: Install and verify official GPT-OSS-20B MXFP4
+      - name: Install and verify pinned model weights
         shell: bash
         run: |
           set -euo pipefail
-          model="$RUNNER_TEMP/gpt-oss-20b-MXFP4.gguf"
-          curl -fL --retry 3 --retry-all-errors -o "$model" "https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/$GPTOSS_REVISION/gpt-oss-20b-MXFP4.gguf"
-          printf '%s  %s\n' "$GPTOSS_SHA256" "$model" | sha256sum --check
-          echo "GPTOSS_WEIGHTS_VERIFIED $GPTOSS_REVISION $GPTOSS_SHA256"
-      - name: Replay exact request and run unmodified native output validators
+          model="$RUNNER_TEMP/$BENCH_FILE"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 30 --speed-limit 1024 --speed-time 120 -o "$model" "https://huggingface.co/$BENCH_REPO/resolve/$BENCH_REVISION/$BENCH_FILE"
+          printf '%s  %s\n' "$BENCH_SHA256" "$model" | sha256sum --check
+          echo "MODEL_WEIGHTS_VERIFIED $BENCH_MODEL $BENCH_REVISION $BENCH_SHA256"
+      - name: Run configured replay and unchanged native validators
         shell: bash
         run: |
           set -euo pipefail
           export PYTHONPATH="$GITHUB_WORKSPACE/security-intelligence-phase0/formal-mimo-provider"
-          out="$RUNNER_TEMP/gpt-oss-replay"
-          "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/gpt-oss-20b-MXFP4.gguf" \
+          out="$RUNNER_TEMP/benchmark"
+          flags=(--temp "$BENCH_TEMP" --top-p "$BENCH_TOP_P" --top-k "$BENCH_TOP_K" --repeat-penalty 1.0 --seed 42)
+          if [ "$BENCH_MODEL" = gpt-oss ]; then
+            flags+=(--cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on --reasoning-effort "$BENCH_EFFORT" --reasoning-budget "$BENCH_BUDGET")
+          fi
+          printf 'BENCHMARK_CONFIG model=%s configuration=%s passes=%s flags=' "$BENCH_MODEL" "$BENCH_CONFIG" "$BENCH_PASSES"
+          printf '%q ' "${flags[@]}"
+          printf '\n'
+          "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/$BENCH_FILE" \
             --alias lite-solo-mimo-v1 --host 127.0.0.1 --port 8080 \
-            --ctx-size 32768 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on --threads 4 --parallel 1 --n-gpu-layers 0 --jinja --metrics --slots --reasoning-effort low --reasoning-budget 2048 \
+            --ctx-size 32768 --threads 4 --parallel 1 --n-gpu-layers 0 --jinja --metrics --slots "${flags[@]}" \
             > "$out/server-v1.log" 2>&1 &
           pid=$!
+          export BENCH_SERVER_PID="$pid"
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           ready=0
           for i in $(seq 1 180); do
@@ -1427,130 +1441,181 @@ jobs:
           done
           if [ "$ready" != 1 ]; then tail -100 "$out/server-v1.log"; exit 1; fi
           "$RUNNER_TEMP/AutoProver/.venv/bin/python" -u - <<'PY'
-          import hashlib, json, os, re, time, traceback, urllib.request, threading, signal
+          import copy, hashlib, json, os, re, time, traceback, urllib.request, threading, signal
           from pathlib import Path
           from composer.spec.system_model import SourceApplication
           from composer.spec.system_analysis import validate_solidity_connectivity
           from curveyield_formal_mimo import _NativeStream, _wire_body, _progress_event
-          out = Path(os.environ["RUNNER_TEMP"]) / "gpt-oss-replay"
-          raw = (out / "request-exact-v1.json").read_bytes()
-          assert hashlib.sha256(raw).hexdigest() == os.environ["REPLAY_SHA256"]
-          req = json.loads(raw)
+
+          env = os.environ
+          out = Path(env["RUNNER_TEMP"]) / "benchmark"
+          original = (out / "request-exact-v1.json").read_bytes()
+          assert hashlib.sha256(original).hexdigest() == env["REPLAY_SHA256"]
+          req = json.loads(original)
           root = out / "source"
           root.mkdir()
-          os.environ["CURVEYIELD_FORMAL_PROJECT_ROOT"] = str(root)
+          env["CURVEYIELD_FORMAL_PROJECT_ROOT"] = str(root)
           source = "\n".join(b["text"] for b in req["messages"][1]["content"] if b["type"] == "text")
           files = re.findall(r"\[Source: ([^\]]+)\]\n(.*?)\n\[/Source\]", source, re.S)
-          assert sorted(p for p, _ in files) == ["src/dai.sol", "src/lib.sol"], [p for p, _ in files]
+          assert sorted(p for p, _ in files) == ["src/dai.sol", "src/lib.sol"]
           for path, data in files:
               p = root / path
               p.parent.mkdir(parents=True, exist_ok=True)
               p.write_text(data)
-          stream = _NativeStream(1, "component_analysis_schema", req)
-          summary = {"model": "GPT-OSS-20B MXFP4", "requestSha256": hashlib.sha256(raw).hexdigest(), "nativeValidatorCommit": os.environ["AUTOPROVER_SHA"], "modelSha256": os.environ["GPTOSS_SHA256"], "context": 32768, "threads": 4, "status": "REJECTED"}
-          start = time.monotonic()
-          last_report = start
-          stop_watchdog = threading.Event()
-          def abort_stall(signum, frame):
-              raise TimeoutError("No observed prompt/token progress for 180 seconds; server slot counters and SSE payload checked")
-          signal.signal(signal.SIGUSR1, abort_stall)
-          def watch_activity():
-              last_change = time.monotonic()
-              previous = None
-              while not stop_watchdog.wait(5):
-                  now = time.monotonic()
-                  slot = {}
-                  error = None
-                  try:
-                      with urllib.request.urlopen("http://127.0.0.1:8080/slots", timeout=4) as r:
-                          slots = json.load(r)
-                      slot = slots[0] if slots else {}
-                  except Exception as exc:
-                      error = str(exc)
-                  token_info = slot.get("next_token") or [{}]
-                  decoded = token_info[0].get("n_decoded", 0) if isinstance(token_info, list) else 0
-                  progress = (slot.get("n_prompt_tokens_processed", 0), decoded, sum(map(len, stream.content)), sum(map(len, stream.reasoning)), stream.prompt.get("processed", 0))
-                  if previous is None or any(a > b for a,b in zip(progress,previous)):
-                      last_change = now
-                  if previous is None:
-                      previous = progress
-                  else:
-                      previous = tuple(max(a,b) for a,b in zip(progress,previous))
-                  quiet = now-last_change
-                  report = {"event": "REPLAY_LIVE_ACTIVITY", "promptProcessed": progress[0], "promptTotal": slot.get("n_prompt_tokens"), "generatedTokens": decoded, "answerCharacters": progress[2], "reasoningCharacters": progress[3], "ssePromptProcessed": progress[4], "isProcessing": slot.get("is_processing"), "secondsSinceProgress": round(quiet,1), "elapsedSeconds": round(now-start,1), "slotError": error}
-                  _progress_event(report)
-                  if quiet >= 180 and not stop_watchdog.is_set():
-                      _progress_event({**report, "event": "REPLAY_STALLED_NO_TOKEN_PROGRESS"})
-                      os.kill(os.getpid(), signal.SIGUSR1)
-                      return
-          watcher = threading.Thread(target=watch_activity, daemon=True)
-          answer_index = reasoning_index = 0
-          def live_output(force=False):
-              global last_report, answer_index, reasoning_index
-              now = time.monotonic()
-              if not force and now - last_report < 1.0:
-                  return
-              for label, parts, index in (("MODEL_ANSWER_DELTA", stream.content, answer_index), ("MODEL_REASONING_DELTA", stream.reasoning, reasoning_index)):
-                  if len(parts) > index:
-                      print(label, json.dumps("".join(parts[index:]), ensure_ascii=False), flush=True)
-              answer_index, reasoning_index = len(stream.content), len(stream.reasoning)
-              last_report = now
-          try:
-              http = urllib.request.Request("http://127.0.0.1:8080/v1/chat/completions", data=raw, headers={"Content-Type": "application/json"}, method="POST")
-              _wire_body("AUTOPROVER_TO_MIMO", 1, raw)
-              _progress_event({"event": "REPLAY_REQUEST", "model": summary["model"], "requestNumber": 1, "requestSha256": summary["requestSha256"]})
-              print("EXACT_REQUEST_SENT", summary["requestSha256"], flush=True)
-              watcher.start()
+          pid = int(env["BENCH_SERVER_PID"])
+          def resources():
               try:
-                  with urllib.request.urlopen(http, timeout=180) as response, (out / "wire-response-v1.sse").open("wb") as wire:
-                      print("HTTP", response.status, flush=True)
-                      for line in response:
-                          wire.write(line)
-                          wire.flush()
-                          stream.feed(line)
-                          live_output()
-              except urllib.error.HTTPError as err:
-                  error_bytes = err.read()
-                  (out / "http-error-v1.txt").write_bytes(error_bytes)
-                  _wire_body("MIMO_TO_AUTOPROVER", 1, error_bytes, status=err.code)
-                  raise
+                  status = Path(f"/proc/{pid}/status").read_text()
+                  peak = int(re.search(r"^VmHWM:\s+(\d+)", status, re.M)[1])
+                  rss = int(re.search(r"^VmRSS:\s+(\d+)", status, re.M)[1])
+                  stat = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+                  cpu = (int(stat[11]) + int(stat[12])) / os.sysconf("SC_CLK_TCK")
+                  return {"peakServerRssKiB": peak, "serverRssKiB": rss, "serverCpuSeconds": cpu}
+              except (OSError, TypeError, IndexError, ValueError):
+                  return {}
+          def abort_stall(signum, frame):
+              raise TimeoutError("No observed prompt/token progress for 180 seconds")
+          signal.signal(signal.SIGUSR1, abort_stall)
+          def token_estimate(text):
+              if not text:
+                  return 0
+              try:
+                  payload = json.dumps({"content": text, "add_special": False}).encode()
+                  with urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8080/tokenize", data=payload, headers={"Content-Type":"application/json"}), timeout=20) as r:
+                      return len(json.load(r)["tokens"])
+              except Exception:
+                  return None
+          def replay(number, payload):
+              request = json.loads(payload)
+              stream = _NativeStream(number, "component_analysis_schema", request)
+              start = time.monotonic()
+              before = resources()
+              stop = threading.Event()
+              last_report = start
+              answer_index = reasoning_index = 0
+              result = {"pass": number, "status": "REJECTED", "requestSha256": hashlib.sha256(payload).hexdigest()}
+              def live_output(force=False):
+                  nonlocal last_report, answer_index, reasoning_index
+                  now = time.monotonic()
+                  if not force and now - last_report < 1:
+                      return
+                  for label, parts, index in (("MODEL_ANSWER_DELTA", stream.content, answer_index), ("MODEL_REASONING_DELTA", stream.reasoning, reasoning_index)):
+                      if len(parts) > index:
+                          print(label, number, json.dumps("".join(parts[index:]), ensure_ascii=False), flush=True)
+                  answer_index, reasoning_index = len(stream.content), len(stream.reasoning)
+                  last_report = now
+              def watchdog():
+                  last_change = start
+                  previous = None
+                  task = None
+                  while not stop.wait(5):
+                      now = time.monotonic()
+                      slot = {}
+                      error = None
+                      try:
+                          with urllib.request.urlopen("http://127.0.0.1:8080/slots", timeout=4) as r:
+                              slots = json.load(r)
+                          slot = slots[0] if slots else {}
+                      except Exception as exc:
+                          error = str(exc)
+                      token_info = slot.get("next_token") or [{}]
+                      decoded = token_info[0].get("n_decoded", 0) if isinstance(token_info, list) else 0
+                      current_task = slot.get("id_task")
+                      progress = (slot.get("n_prompt_tokens_processed", 0), decoded, sum(map(len, stream.content)), sum(map(len, stream.reasoning)), stream.prompt.get("processed", 0))
+                      if previous is None or (current_task is not None and current_task != task) or any(a > b for a,b in zip(progress,previous)):
+                          last_change = now
+                          previous = progress
+                          task = current_task
+                      quiet = now - last_change
+                      report = {"event": "REPLAY_LIVE_ACTIVITY", "pass": number, "promptProcessed": progress[0], "promptTotal": slot.get("n_prompt_tokens"), "generatedTokens": decoded, "answerCharacters": progress[2], "reasoningCharacters": progress[3], "ssePromptProcessed": progress[4], "isProcessing": slot.get("is_processing"), "secondsSinceProgress": round(quiet,1), "elapsedSeconds": round(now-start,1), "slotError": error, **resources()}
+                      _progress_event(report)
+                      if quiet >= 180 and not stop.is_set():
+                          _progress_event({**report, "event": "REPLAY_STALLED_NO_TOKEN_PROGRESS"})
+                          os.kill(os.getpid(), signal.SIGUSR1)
+                          return
+              watcher = threading.Thread(target=watchdog, daemon=True)
+              (out / f"request-pass{number}-v1.json").write_bytes(payload)
+              try:
+                  http = urllib.request.Request("http://127.0.0.1:8080/v1/chat/completions", data=payload, headers={"Content-Type":"application/json"}, method="POST")
+                  _wire_body("AUTOPROVER_TO_MIMO", number, payload)
+                  _progress_event({"event":"REPLAY_REQUEST","requestNumber":number,"requestSha256":result["requestSha256"],"model":env["BENCH_MODEL"],"configuration":env["BENCH_CONFIG"]})
+                  print("EXACT_REQUEST_SENT" if number == 1 else "REVIEW_REQUEST_SENT", result["requestSha256"], flush=True)
+                  watcher.start()
+                  try:
+                      with urllib.request.urlopen(http, timeout=240) as response, (out / f"wire-pass{number}-v1.sse").open("wb") as wire:
+                          print("HTTP", response.status, flush=True)
+                          for line in response:
+                              wire.write(line)
+                              wire.flush()
+                              stream.feed(line)
+                              live_output()
+                  except urllib.error.HTTPError as err:
+                      error_bytes = err.read()
+                      (out / f"http-error-pass{number}-v1.txt").write_bytes(error_bytes)
+                      _wire_body("MIMO_TO_AUTOPROVER", number, error_bytes, status=err.code)
+                      raise
+                  finally:
+                      stop.set()
+                      watcher.join(timeout=5)
+                      live_output(force=True)
+                      stream.report()
+                  draft = "".join(stream.content)
+                  print("ACTUAL_MODEL_OUTPUT", number, draft, flush=True)
+                  body = stream.finish()
+                  (out / f"adapter-pass{number}-v1.json").write_text(json.dumps(body, indent=2))
+                  args = body["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+                  app = SourceApplication.model_validate_json(args)
+                  result["nativeSchemaAccepted"] = True
+                  error = validate_solidity_connectivity(app, "Dai", root, lambda path: False)
+                  if error is not None:
+                      raise ValueError(error)
+                  result.update(status="NATIVE_VALIDATORS_ACCEPTED",nativeConnectivityAccepted=True,componentCount=len(app.components))
+              except Exception as exc:
+                  result["error"] = str(exc)
+                  traceback.print_exc()
               finally:
-                  stop_watchdog.set()
-                  watcher.join(timeout=5)
-                  live_output(force=True)
-                  stream.report(final=False)
-                  (out / "model-output-v1.json").write_text("".join(stream.content))
-                  (out / "reasoning-v1.txt").write_text("".join(stream.reasoning))
-              print("ACTUAL_MODEL_OUTPUT", "".join(stream.content), flush=True)
-              body = stream.finish()
-              (out / "adapter-response-v1.json").write_text(json.dumps(body, indent=2))
-              args = body["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
-              app = SourceApplication.model_validate_json(args)
-              summary["nativeSchemaAccepted"] = True
-              error = validate_solidity_connectivity(app, "Dai", root, lambda path: False)
-              if error is not None:
-                  raise ValueError(error)
-              summary.update(status="NATIVE_VALIDATORS_ACCEPTED", nativeConnectivityAccepted=True, componentCount=len(app.components))
-              print("NATIVE_VALIDATORS_ACCEPTED", len(app.components), flush=True)
-          except Exception as exc:
-              summary["error"] = str(exc)
-              _progress_event({"event": "REPLAY_VALIDATION_REJECTED", "requestNumber": 1, "error": str(exc)})
-              traceback.print_exc()
-              raise
-          finally:
-              stop_watchdog.set()
-              summary.update(reasoningBudget=2048, elapsedSeconds=round(time.monotonic()-start, 2), finishReason=stream.finish_reason, usage=stream.usage, timings=stream.timings)
-              (out / "validation-v1.json").write_text(json.dumps(summary, indent=2))
-              print("REPLAY_RESULT", json.dumps(summary), flush=True)
+                  stop.set()
+                  draft = "".join(stream.content)
+                  reasoning = "".join(stream.reasoning)
+                  elapsed = time.monotonic()-start
+                  after = resources()
+                  result.update(elapsedSeconds=round(elapsed,2),finishReason=stream.finish_reason,usage=stream.usage,timings=stream.timings,reasoningCharacters=len(reasoning),answerCharacters=len(draft),serverCpuSeconds=round(after.get("serverCpuSeconds",0)-before.get("serverCpuSeconds",0),2) if "serverCpuSeconds" in after and "serverCpuSeconds" in before else None,peakServerRssKiB=after.get("peakServerRssKiB"))
+                  (out / f"model-output-pass{number}-v1.json").write_text(draft)
+                  (out / f"reasoning-pass{number}-v1.txt").write_text(reasoning)
+                  if stream.done:
+                      result["reasoningTokensEstimated"] = token_estimate(reasoning)
+                      result["answerTokensEstimated"] = token_estimate(draft)
+                  (out / f"validation-pass{number}-v1.json").write_text(json.dumps(result,indent=2))
+                  print("REPLAY_PASS_RESULT",json.dumps(result),flush=True)
+              return draft, result, stream.done
+
+          started = time.monotonic()
+          draft, first, completed = replay(1, original)
+          passes = [first]
+          if int(env["BENCH_PASSES"]) == 2:
+              if completed and draft.strip():
+                  review = copy.deepcopy(req)
+                  review["messages"] += [{"role":"assistant","content":draft},{"role":"user","content":[{"type":"text","text":"Review your draft against the original authenticated Solidity source and the original question. Check every factual claim against the actual source, including exact function signatures, modifiers, authorization, mutations, inheritance, and component classifications. Correct all unsupported claims and significant omissions. Do not invent facts, requirements, or interactions. Return the complete corrected JSON object under the same original schema, with no commentary."}]}]
+                  revised = json.dumps(review,ensure_ascii=False,separators=(",",":")).encode()
+                  _, final, _ = replay(2,revised)
+                  passes.append(final)
+              else:
+                  passes.append({"pass":2,"status":"REJECTED","error":"No completed draft available for self-correction"})
+          final = passes[-1]
+          summary = {"model":env["BENCH_MODEL_LABEL"],"configuration":env["BENCH_CONFIG"],"temperature":float(env["BENCH_TEMP"]),"topP":float(env["BENCH_TOP_P"]),"topK":int(env["BENCH_TOP_K"]),"repetitionPenalty":1.0,"seed":42,"reasoningBudgetRequested":int(env["BENCH_BUDGET"]),"reasoningBudgetApplied":int(env["BENCH_BUDGET"]) if env["BENCH_MODEL"]=="gpt-oss" else None,"reasoningEffort":env["BENCH_EFFORT"] if env["BENCH_MODEL"]=="gpt-oss" else None,"requestSha256":env["REPLAY_SHA256"],"nativeValidatorCommit":env["AUTOPROVER_SHA"],"modelSha256":env["BENCH_SHA256"],"status":final["status"],"elapsedSeconds":round(time.monotonic()-started,2),"resources":resources(),"passes":passes}
+          (out / "validation-v1.json").write_text(json.dumps(summary,indent=2))
+          print("REPLAY_RESULT",json.dumps(summary),flush=True)
+          if final["status"] != "NATIVE_VALIDATORS_ACCEPTED":
+              raise SystemExit(1)
           PY
       - name: Publish exact replay evidence regardless of disposition
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gpt-oss-dai-replay-v4
+          name: benchmark-${{ matrix.model.id }}-${{ matrix.config.id }}-v1
           path: |
-            ${{ runner.temp }}/gpt-oss-replay/*.json
-            ${{ runner.temp }}/gpt-oss-replay/*.sse
-            ${{ runner.temp }}/gpt-oss-replay/*.log
-            ${{ runner.temp }}/gpt-oss-replay/*.txt
+            ${{ runner.temp }}/benchmark/*.json
+            ${{ runner.temp }}/benchmark/*.sse
+            ${{ runner.temp }}/benchmark/*.log
+            ${{ runner.temp }}/benchmark/*.txt
           if-no-files-found: warn
