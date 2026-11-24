@@ -2,7 +2,7 @@ name: Lite-Solo AI Source Inference and Autonomous Beta v6
 run-name: ${{ inputs.mode == 'certora_qa' && format('CERTORA-QA-{0}-{1}', inputs.source_run_id, inputs.source_run_attempt) || inputs.mode == 'autonomous' && format('MI-{0}', inputs.dispatch_tag) || inputs.mode == 'autonomous_start' && 'MI-AUTONOMOUS-START' || github.workflow }}
 on:
   push:
-    branches: [machine-intelligence-audit-controller-v1, liquid-autoprover-dai-replay-v1]
+    branches: [machine-intelligence-audit-controller-v1, qwen-coder-autoprover-dai-replay-v1]
     paths:
       - '.github/workflows/lite-solo-ai-inference-v1.yml'
       - 'process/agent-upload/DAI_r12_MiMo_request_1_exact_v1.json'
@@ -1319,9 +1319,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  liquid-dai-replay:
-    name: Liquid LFM2.5-8B-A1B - exact DAI r12 AutoProver replay v1
-    if: github.event_name == 'push' && github.ref_name == 'liquid-autoprover-dai-replay-v1'
+  qwen-coder-dai-replay:
+    name: Qwen2.5-Coder-7B-Instruct - exact DAI r12 AutoProver replay v1
+    if: github.event_name == 'push' && github.ref_name == 'qwen-coder-autoprover-dai-replay-v1'
     runs-on: ubuntu-latest
     timeout-minutes: 55
     permissions:
@@ -1329,8 +1329,8 @@ jobs:
     env:
       REPLAY_FILE: process/agent-upload/DAI_r12_MiMo_request_1_exact_v1.json
       REPLAY_SHA256: a78712fc1e6c09a9dc060728d8190c8efb838018159b56a877e59f1791227095
-      LIQUID_REVISION: dfd5fdcad7a1c0d31473fb4ca443b8befbacddf0
-      LIQUID_SHA256: 4923ec14f06b968b74d663e5949867d2d9c3bf13a20b8be1a9f9af39989b2bb0
+      QWEN_REVISION: 13fb94bfda8c8cf22497dc57b78f391a9acb426a
+      QWEN_SHA256: 509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c
       AUTOPROVER_SHA: 81d9626c249a70c0a0f0648a89de175443c0344c
       GRAPHCORE_SHA: c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc
       PYTHONUNBUFFERED: '1'
@@ -1347,8 +1347,8 @@ jobs:
           nproc
           free -h
           df -h "$RUNNER_TEMP"
-          mkdir -p "$RUNNER_TEMP/liquid-replay"
-          cp "$REPLAY_FILE" "$RUNNER_TEMP/liquid-replay/request-exact-v1.json"
+          mkdir -p "$RUNNER_TEMP/qwen-coder-replay"
+          cp "$REPLAY_FILE" "$RUNNER_TEMP/qwen-coder-replay/request-exact-v1.json"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -1380,21 +1380,21 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/llama.cpp" rev-parse HEAD)" = "$LLAMA_SHA"
           cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_USE_PREBUILT_UI=OFF -DLLAMA_BUILD_UI=OFF
           cmake --build "$RUNNER_TEMP/llama-build" --target llama-server -j 4
-      - name: Install and verify official LiquidAI Liquid LFM2.5-8B-A1B Q4_K_M
+      - name: Install and verify official Qwen2.5-Coder-7B-Instruct Q4_K_M
         shell: bash
         run: |
           set -euo pipefail
-          model="$RUNNER_TEMP/LFM2.5-8B-A1B-Q4_K_M.gguf"
-          curl -fL --retry 3 --retry-all-errors -o "$model" "https://huggingface.co/LiquidAI/LFM2.5-8B-A1B-GGUF/resolve/$LIQUID_REVISION/LFM2.5-8B-A1B-Q4_K_M.gguf"
-          printf '%s  %s\n' "$LIQUID_SHA256" "$model" | sha256sum --check
-          echo "LIQUID_WEIGHTS_VERIFIED $LIQUID_REVISION $LIQUID_SHA256"
+          model="$RUNNER_TEMP/qwen2.5-coder-7b-instruct-q4_k_m.gguf"
+          curl -fL --retry 3 --retry-all-errors -o "$model" "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/$QWEN_REVISION/qwen2.5-coder-7b-instruct-q4_k_m.gguf"
+          printf '%s  %s\n' "$QWEN_SHA256" "$model" | sha256sum --check
+          echo "QWEN_WEIGHTS_VERIFIED $QWEN_REVISION $QWEN_SHA256"
       - name: Replay exact request and run unmodified native output validators
         shell: bash
         run: |
           set -euo pipefail
           export PYTHONPATH="$GITHUB_WORKSPACE/security-intelligence-phase0/formal-mimo-provider"
-          out="$RUNNER_TEMP/liquid-replay"
-          "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/LFM2.5-8B-A1B-Q4_K_M.gguf" \
+          out="$RUNNER_TEMP/qwen-coder-replay"
+          "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/qwen2.5-coder-7b-instruct-q4_k_m.gguf" \
             --alias lite-solo-mimo-v1 --host 127.0.0.1 --port 8080 \
             --ctx-size 32768 --threads 4 --parallel 1 --n-gpu-layers 0 --jinja \
             > "$out/server-v1.log" 2>&1 &
@@ -1413,7 +1413,7 @@ jobs:
           from composer.spec.system_model import SourceApplication
           from composer.spec.system_analysis import validate_solidity_connectivity
           from curveyield_formal_mimo import _NativeStream
-          out = Path(os.environ["RUNNER_TEMP"]) / "liquid-replay"
+          out = Path(os.environ["RUNNER_TEMP"]) / "qwen-coder-replay"
           raw = (out / "request-exact-v1.json").read_bytes()
           assert hashlib.sha256(raw).hexdigest() == os.environ["REPLAY_SHA256"]
           req = json.loads(raw)
@@ -1427,7 +1427,7 @@ jobs:
               p.parent.mkdir(parents=True, exist_ok=True)
               p.write_text(data)
           stream = _NativeStream(1, "component_analysis_schema", req)
-          summary = {"model": "LiquidAI Liquid LFM2.5-8B-A1B Q4_K_M", "requestSha256": hashlib.sha256(raw).hexdigest(), "nativeValidatorCommit": os.environ["AUTOPROVER_SHA"], "modelSha256": os.environ["LIQUID_SHA256"], "context": 32768, "threads": 4, "status": "REJECTED"}
+          summary = {"model": "Qwen2.5-Coder-7B-Instruct Q4_K_M", "requestSha256": hashlib.sha256(raw).hexdigest(), "nativeValidatorCommit": os.environ["AUTOPROVER_SHA"], "modelSha256": os.environ["QWEN_SHA256"], "context": 32768, "threads": 4, "status": "REJECTED"}
           start = time.monotonic()
           try:
               http = urllib.request.Request("http://127.0.0.1:8080/v1/chat/completions", data=raw, headers={"Content-Type": "application/json"}, method="POST")
@@ -1474,10 +1474,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: liquid-dai-replay-v1
+          name: qwen-coder-dai-replay-v1
           path: |
-            ${{ runner.temp }}/liquid-replay/*.json
-            ${{ runner.temp }}/liquid-replay/*.sse
-            ${{ runner.temp }}/liquid-replay/*.log
-            ${{ runner.temp }}/liquid-replay/*.txt
+            ${{ runner.temp }}/qwen-coder-replay/*.json
+            ${{ runner.temp }}/qwen-coder-replay/*.sse
+            ${{ runner.temp }}/qwen-coder-replay/*.log
+            ${{ runner.temp }}/qwen-coder-replay/*.txt
           if-no-files-found: warn
