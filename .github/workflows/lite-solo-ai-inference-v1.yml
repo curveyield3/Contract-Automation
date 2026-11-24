@@ -2,7 +2,7 @@ name: Lite-Solo AI Source Inference and Autonomous Beta v6
 run-name: ${{ inputs.mode == 'certora_qa' && format('CERTORA-QA-{0}-{1}', inputs.source_run_id, inputs.source_run_attempt) || inputs.mode == 'autonomous' && format('MI-{0}', inputs.dispatch_tag) || inputs.mode == 'autonomous_start' && 'MI-AUTONOMOUS-START' || github.workflow }}
 on:
   push:
-    branches: [machine-intelligence-audit-controller-v1, granite-autoprover-dai-replay-v1]
+    branches: [machine-intelligence-audit-controller-v1, gpt-oss-autoprover-dai-replay-v1]
     paths:
       - '.github/workflows/lite-solo-ai-inference-v1.yml'
       - 'process/agent-upload/DAI_r12_MiMo_request_1_exact_v1.json'
@@ -1319,9 +1319,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  granite-dai-replay:
-    name: Granite 4.2 8B - exact DAI r12 AutoProver replay v1
-    if: github.event_name == 'push' && github.ref_name == 'granite-autoprover-dai-replay-v1'
+  gpt-oss-dai-replay:
+    name: GPT-OSS-20B - exact DAI r12 AutoProver replay v1
+    if: github.event_name == 'push' && github.ref_name == 'gpt-oss-autoprover-dai-replay-v1'
     runs-on: ubuntu-latest
     timeout-minutes: 55
     permissions:
@@ -1329,8 +1329,8 @@ jobs:
     env:
       REPLAY_FILE: process/agent-upload/DAI_r12_MiMo_request_1_exact_v1.json
       REPLAY_SHA256: a78712fc1e6c09a9dc060728d8190c8efb838018159b56a877e59f1791227095
-      GRANITE_REVISION: 93f3f6a8938ee922b784cf4e5b4203cd3428df8f
-      GRANITE_SHA256: 16a9369d0805f80b7377d25d87f937a90c05dc04ad79173a52001e42c9aab311
+      GPTOSS_REVISION: b97cbb20d1995efd41dce8c4dd1ddf86e8db375b
+      GPTOSS_SHA256: 27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901
       AUTOPROVER_SHA: 81d9626c249a70c0a0f0648a89de175443c0344c
       GRAPHCORE_SHA: c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc
       PYTHONUNBUFFERED: '1'
@@ -1347,8 +1347,8 @@ jobs:
           nproc
           free -h
           df -h "$RUNNER_TEMP"
-          mkdir -p "$RUNNER_TEMP/granite-replay"
-          cp "$REPLAY_FILE" "$RUNNER_TEMP/granite-replay/request-exact-v1.json"
+          mkdir -p "$RUNNER_TEMP/gpt-oss-replay"
+          cp "$REPLAY_FILE" "$RUNNER_TEMP/gpt-oss-replay/request-exact-v1.json"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -1380,23 +1380,23 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/llama.cpp" rev-parse HEAD)" = "$LLAMA_SHA"
           cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_USE_PREBUILT_UI=OFF -DLLAMA_BUILD_UI=OFF
           cmake --build "$RUNNER_TEMP/llama-build" --target llama-server -j 4
-      - name: Install and verify official IBM Granite 4.2 8B Q4_K_M
+      - name: Install and verify official GPT-OSS-20B MXFP4
         shell: bash
         run: |
           set -euo pipefail
-          model="$RUNNER_TEMP/granite-4.2-8b-Q4_K_M.gguf"
-          curl -fL --retry 3 --retry-all-errors -o "$model" "https://huggingface.co/ibm-granite/granite-4.2-8b-GGUF/resolve/$GRANITE_REVISION/granite-4.2-8b-Q4_K_M.gguf"
-          printf '%s  %s\n' "$GRANITE_SHA256" "$model" | sha256sum --check
-          echo "GRANITE_WEIGHTS_VERIFIED $GRANITE_REVISION $GRANITE_SHA256"
+          model="$RUNNER_TEMP/gpt-oss-20b-MXFP4.gguf"
+          curl -fL --retry 3 --retry-all-errors -o "$model" "https://huggingface.co/ggml-org/gpt-oss-20b-GGUF/resolve/$GPTOSS_REVISION/gpt-oss-20b-MXFP4.gguf"
+          printf '%s  %s\n' "$GPTOSS_SHA256" "$model" | sha256sum --check
+          echo "GPTOSS_WEIGHTS_VERIFIED $GPTOSS_REVISION $GPTOSS_SHA256"
       - name: Replay exact request and run unmodified native output validators
         shell: bash
         run: |
           set -euo pipefail
           export PYTHONPATH="$GITHUB_WORKSPACE/security-intelligence-phase0/formal-mimo-provider"
-          out="$RUNNER_TEMP/granite-replay"
-          "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/granite-4.2-8b-Q4_K_M.gguf" \
+          out="$RUNNER_TEMP/gpt-oss-replay"
+          "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/gpt-oss-20b-MXFP4.gguf" \
             --alias lite-solo-mimo-v1 --host 127.0.0.1 --port 8080 \
-            --ctx-size 32768 --threads 4 --parallel 1 --n-gpu-layers 0 --jinja \
+            --ctx-size 32768 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on --threads 4 --parallel 1 --n-gpu-layers 0 --jinja \
             > "$out/server-v1.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
@@ -1413,7 +1413,7 @@ jobs:
           from composer.spec.system_model import SourceApplication
           from composer.spec.system_analysis import validate_solidity_connectivity
           from curveyield_formal_mimo import _NativeStream
-          out = Path(os.environ["RUNNER_TEMP"]) / "granite-replay"
+          out = Path(os.environ["RUNNER_TEMP"]) / "gpt-oss-replay"
           raw = (out / "request-exact-v1.json").read_bytes()
           assert hashlib.sha256(raw).hexdigest() == os.environ["REPLAY_SHA256"]
           req = json.loads(raw)
@@ -1427,7 +1427,7 @@ jobs:
               p.parent.mkdir(parents=True, exist_ok=True)
               p.write_text(data)
           stream = _NativeStream(1, "component_analysis_schema", req)
-          summary = {"model": "IBM Granite 4.2 8B Q4_K_M", "requestSha256": hashlib.sha256(raw).hexdigest(), "nativeValidatorCommit": os.environ["AUTOPROVER_SHA"], "modelSha256": os.environ["GRANITE_SHA256"], "context": 32768, "threads": 4, "status": "REJECTED"}
+          summary = {"model": "GPT-OSS-20B MXFP4", "requestSha256": hashlib.sha256(raw).hexdigest(), "nativeValidatorCommit": os.environ["AUTOPROVER_SHA"], "modelSha256": os.environ["GPTOSS_SHA256"], "context": 32768, "threads": 4, "status": "REJECTED"}
           start = time.monotonic()
           try:
               http = urllib.request.Request("http://127.0.0.1:8080/v1/chat/completions", data=raw, headers={"Content-Type": "application/json"}, method="POST")
@@ -1474,10 +1474,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: granite-dai-replay-v1
+          name: gpt-oss-dai-replay-v1
           path: |
-            ${{ runner.temp }}/granite-replay/*.json
-            ${{ runner.temp }}/granite-replay/*.sse
-            ${{ runner.temp }}/granite-replay/*.log
-            ${{ runner.temp }}/granite-replay/*.txt
+            ${{ runner.temp }}/gpt-oss-replay/*.json
+            ${{ runner.temp }}/gpt-oss-replay/*.sse
+            ${{ runner.temp }}/gpt-oss-replay/*.log
+            ${{ runner.temp }}/gpt-oss-replay/*.txt
           if-no-files-found: warn
