@@ -5,7 +5,7 @@ const SDT='0x73968b9a57c6e53d41345fd57a6e6ae27d6cdb2f',USDC='0xa0b86991c6218b36c
 const erc=['function balanceOf(address) view returns(uint256)','function totalSupply() view returns(uint256)','function transfer(address,uint256) returns(bool)','function transferFrom(address,address,uint256) returns(bool)','function approve(address,uint256) returns(bool)','function allowance(address,address) view returns(uint256)','function decimals() view returns(uint8)'];
 const ercI=new E.Interface(erc),transferTopic=E.id('Transfer(address,address,uint256)'),approvalTopic=E.id('Approval(address,address,uint256)');
 const J=x=>JSON.stringify(x,(_,v)=>typeof v==='bigint'?v.toString():v);
-const report={version:3,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
+const report={version:4,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
 const cleanError=e=>({message:String(e.shortMessage||e.message||e).slice(0,2000),data:e.data||e.info?.error?.data||null});
 const low=x=>String(x).toLowerCase();
 fs.mkdirSync(OUT,{recursive:true});
@@ -88,7 +88,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
  async function need(k,f,args,caller=U,opts={}){const r=await act(k,f,args,caller,opts);if(!['PASS_ASSERTED','EXECUTED_TRANSFER_UNASSERTED','EXECUTED_NO_TRANSFER','EXPECTED_REVERT'].includes(r.status))throw Error('prerequisite '+k+'.'+f+' '+r.status);return r;}
  async function ext(t,f,args,caller=U,opts={}){return act('external:'+await t.getAddress(),f,args,caller,{...opts,contract:t});}
  async function scenario(label,fn){
-   if(!label.startsWith('FOLLOWUP '))return;scenarioName=label;let snap=await p.send('evm_snapshot',[]),start=report.actions.length;
+   if(!label.startsWith('FINALCHECK '))return;scenarioName=label;let snap=await p.send('evm_snapshot',[]),start=report.actions.length;
    try{await fn();report.scenarios.push({label,status:'COMPLETED',actions:report.actions.length-start});}
    catch(e){report.scenarios.push({label,status:'BLOCKED_OR_FAILED',error:cleanError(e),actions:report.actions.length-start});log('SCENARIO_ERROR',{label,error:cleanError(e)});}
    finally{await p.send('evm_revert',[snap]);signers.clear();save();}
@@ -541,10 +541,10 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
      if(k==='fxnVault'){await act('fxn','harvest(address)',[V],U);await act('fxn','harvest()',[],U);}
    });
  }
- await scenario('FOLLOWUP active reward stream and conversion route diagnosis',async()=>{
+ await scenario('FINALCHECK active reward stream and conversion route diagnosis',async()=>{
    await lock(100n*W);await stake(25n*W);await fund(SDT,U,100n*W);await fund(USDC,U,100000000n);
    await ext(C(p,SDT),'transfer',[A.locker,20n*W],U);await ext(C(p,USDC),'transfer',[A.locker,20000000n],U);
-   await act('locker','forwardRewards',[],U);
+   await act('locker','forwardRevenue',[],U);
    let count=await N.staking.pendingConversionCount();
    for(let i=0n;i<count;i++){
      const before=await N.staking.pendingConversions(i);await vr('staking','pendingConversions',[i]);
@@ -553,6 +553,72 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    }
    for(const t of [SDT,USDC,A.token])await vr('staking','getStream',[t,0]);
    await warp(WEEK+1);await act('staking','claimRewardsSelf',[],U);
+ });
+
+
+ await scenario('FINALCHECK merchant direct listing and actual partial offer settlement',async()=>{
+   const market=C(p,await N.merchant.MARKETPLACE(),[
+     'function minOrderAmount() view returns(uint256)','function minFillAmount() view returns(uint256)','function feeBps() view returns(uint256)',
+     'function createOffer(uint256,uint256,uint256,address,uint256,address) returns(uint256)',
+     'function getOffer(uint256) view returns(tuple(address buyer,uint96 pricePerWeek,address paymentToken,uint32 duration,uint64 expiry,address recipient,uint128 amount,uint128 filled))',
+     'function getListing(uint256) view returns(tuple(address seller,uint96 pricePerWeek,address paymentToken,uint32 maxDuration,uint64 expiry,uint128 amount,uint128 filled,uint32 minDuration))']);
+   const maddr=await market.getAddress(),qty=(await market.minOrderAmount())>(await market.minFillAmount())?await market.minOrderAmount():await market.minFillAmount();
+   await lock(qty*200n+100n*W);await own('merchant','setMinimumLeaseBoost',[qty],async()=>eq(await N.merchant.minimumLeaseBoost(),qty));
+   const min=await N.merchant.aladdinMinimumPriceInSDT(),rate=min*4n*10n**6n/(100n*W)+1000000n;
+   await own('merchant','setSaleRates',[rate,rate,100n*W],async()=>eq(await N.merchant.minimumFillPricePerWeek(),rate));
+   await vr('merchant','priceInSDT',[rate],r=>assert(r>=min));await vr('merchant','currentPricePerWeek',[],r=>eq(r,rate));await vr('merchant','acceptableFillPricePerWeek',[],r=>eq(r,rate));await vr('merchant','quoteLease',[qty,1],r=>assert(r[2]>0n));
+   const expiry=(await now())+WEEK,end=(Math.floor((await now())/WEEK)+2)*WEEK;
+   let row=await act('merchant','createMarketplaceListing',[qty*2n,1,2,expiry],EOA,{check:async r=>{const l=await market.getListing(r.staticResult);eq(l.amount,qty*2n);eq(low(l.seller),low(A.locker));assert(await N.merchant.createdListings(r.staticResult));}});
+   if(row.status==='PASS_ASSERTED'){
+     let id=row.staticResult;await act('merchant','refreshMarketplaceListing',[id,qty],EOA,{check:async()=>eq((await market.getListing(id)).amount,qty)});
+     await act('merchant','cancelMarketplaceListing',[id],EOA,{check:async()=>assert(!(await N.merchant.createdListings(id)))});
+   }
+   const payment=qty*rate/W*40n+10n**6n;await fund(USDC,V,payment);await approve(USDC,maddr,V);
+   let pay=C(p,USDC),boost=C(p,'0xaB05ca46d1c78CAbB051efFE35099714Cad2AddA');
+   for(const mode of ['merchant','locker','best']){
+     const made=await ext(market,'createOffer',[qty*2n,rate*2n,1,USDC,expiry,V],V,{check:async r=>eq((await market.getOffer(r.staticResult)).amount,qty*2n)});
+     if(made.status!=='PASS_ASSERTED')continue;
+     const id=made.staticResult,b=await pay.balanceOf(V),v=await boost.balanceOf(V);
+     const check=async()=>{eq((await market.getOffer(id)).filled,qty);assert(await pay.balanceOf(V)<b);assert(await boost.balanceOf(V)>=v);};
+     if(mode==='merchant')await act('merchant','fillProfitableOffer',[id,qty,0n,2*WEEK],U,{check});
+     if(mode==='locker')await act('locker','marketplaceAcceptOffer',[id,qty,0n,2*WEEK,true],EOA,{check});
+     if(mode==='best')await act('merchant','executeBestRoute',[[id,qty,0n,expiry,1,2,end]],EOA,{check});
+   }
+ });
+ await scenario('FINALCHECK revenue strategy positive reward harvest and fee transfer',async()=>{
+   await lock(100n*W);await vd('rvault',A.token,25n*W);
+   await fund(SDT,U,50n*W);await ext(C(p,SDT),'transfer',[A.locker,50n*W],U);
+   await act('locker','forwardRevenue',[],V);
+   for(let i=0n;i<await N.staking.pendingConversionCount();i++)await act('staking','convertExcess',[i],U);
+   await warp(WEEK+1);
+   const before=await N.revenue.grossBalanceOf(),vb=await C(p,A.token).balanceOf(V);
+   await act('revenue','harvest(address)',[V],U,{check:async row=>{assert(row.staticResult>0n);assert(await N.revenue.grossBalanceOf()>before);assert(await C(p,A.token).balanceOf(V)>=vb);}});
+   await act('revenue','harvest()',[],U,{check:async row=>assert(row.staticResult>=0n)});
+ });
+ await scenario('FINALCHECK disabled queues and implementation lock',async()=>{
+   for(const k of ['svault','crvVault','fxnVault'])await vr(k,'previewQueuedRedeem',[W]);
+   await vr('impl','apySample',[0]);await vr('impl','totalAssets',[]);await vr('impl','available',[]);await vr('impl','balance',[]);await vr('impl','previewQueuedRedeem',[W]);
+ });
+ await scenario('FINALCHECK actual post-deployment PoL configuration and immutable-token binding',async()=>{
+   const a=C(p,manager,[
+      'function owner() view returns(address)','function sdt() view returns(address)','function omniRouter() view returns(address)','function curvePool() view returns(address)','function curveGauge() view returns(address)','function curveLp() view returns(address)','function uniNftManager() view returns(address)','function uniTokenId() view returns(uint256)','function vaults(uint256) view returns(address)','function allocations(uint256) view returns(uint16)','function allocationEnabledMask() view returns(uint8)','function harvestEnabledMask() view returns(uint8)','function buyLevels(uint256) view returns(uint256,uint256)','function buyPrice() view returns(uint256)','function liquidityBounds() view returns(address)','function setVault(uint8,address)','function setAllocations(uint16[7])','function setModuleEnabled(uint8,bool,bool)','function depositVault(uint8,uint256,uint256) returns(uint256)','function redeemVault(uint8,uint256,uint256) returns(uint256)','function currentPPS(uint8) view returns(uint256)','function allocateFunds(address,uint256)','function harvest(uint8) returns(uint256)','error Invalid()','error State()']);
+   const baseline={manager,newToken:A.token,constructorBoundToken:'0x4b4aa34e805d87458a64d8d745cf7b18e24aeace'};
+   for(const f of ['owner','sdt','omniRouter','curvePool','curveGauge','curveLp','uniNftManager','uniTokenId','allocationEnabledMask','harvestEnabledMask','buyPrice','liquidityBounds'])baseline[f]=await soft(()=>a[f]());
+   baseline.vaults=[];for(let i=0;i<5;i++)baseline.vaults.push(await a.vaults(i));
+   baseline.allocations=[];for(let i=0;i<7;i++)baseline.allocations.push(await a.allocations(i));
+   baseline.buyLevels=[];for(let i=0;i<5;i++)baseline.buyLevels.push(await a.buyLevels(i));
+   report.polBaseline=baseline;log('POL_BASELINE',baseline);
+   // Use the newly deployed SDT-denominated vault only as an isolated configuration fixture; do not assert production readiness.
+   let row=await ext(a,'setVault',[0,A.svault],EOA,{purpose:'fork-only representative configured SDT vault; not in actual proposal',check:async()=>eq(low(await a.vaults(0)),low(A.svault))});
+   if(row.status==='PASS_ASSERTED'){
+     await ext(a,'setAllocations',[[0,0,10000,0,0,0,0]],EOA,{check:async()=>eq(await a.allocations(2),10000n)});
+     await ext(a,'setModuleEnabled',[2,true,true],EOA,{check:async()=>assert((await a.allocationEnabledMask()&4n)!==0n)});
+     await fund(SDT,U,25n*W);await ext(C(p,SDT),'transfer',[manager,25n*W],U);
+     const sh=await N.svault.balanceOf(manager);row=await ext(a,'depositVault',[0,W,1n],EOA,{check:async()=>assert(await N.svault.balanceOf(manager)>sh)});
+     if(row.status==='PASS_ASSERTED'){const q=await N.svault.balanceOf(manager)-sh;await ext(a,'redeemVault',[0,q/2n,1n],EOA,{check:async()=>assert(await N.svault.balanceOf(manager)<sh+q)});}
+     await ext(a,'allocateFunds',[SDT,W],EOA,{check:async()=>assert(await N.svault.balanceOf(manager)>sh)});
+     await ext(a,'harvest',[4],EOA);
+   }
  });
 
  // ABI inventory: explicit, state-meaningful calls first; read each getter using representative live state.
