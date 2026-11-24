@@ -45,26 +45,63 @@ const ok=await safe.execTransaction.staticCall(...ar,{gasLimit:cap});assert(ok,'
 const tx=await safe.execTransaction(...ar,{gasLimit:cap});const rc=await tx.wait();assert.equal(rc.status,1);
 const r={label,gasUsed:rc.gasUsed,estimatedGasLimit:est,hash:rc.hash,nonceAfter:await safe.nonce()};log('RECEIPT',r);return r}
 async function check(s){assert.equal(await safe.nonce(),BigInt(s.nonce));const h=await safe.getTransactionHash(s.to,s.value,s.data,s.operation,s.safeTxGas,s.baseGas,s.gasPrice,s.gasToken,s.refundReceiver,s.nonce);assert.equal(h.toLowerCase(),s.safeTxHash.toLowerCase())}
-await check(stages[0]);await execute('cyvlSDT nonce 34',stages[0]);await check(stages[1]);
-let before35=await provider.send('evm_snapshot',[]);const baseline=await execute('cyvlSDT nonce 35',stages[1]);
-const n=BigInt(await provider.send('eth_getTransactionCount',[SAFE,'latest']));log('SAFE_CREATE_NONCE_AFTER_35',{nonce:n});
-const plan=makePlan(n,'CRV-first');log('DEPLOYMENT_PLAN',{addresses:plan.addresses,items:plan.items.map(({data,...x})=>x)});
-const individual=[];for(const item of plan.items){const r=await execute(item.label,{...stages[1],to:MULTI,data:batch([item])});if(item.expected){assert.notEqual(await provider.getCode(item.expected),'0x','Missing '+item.label);const code=await provider.getCode(item.expected);assert.equal(E.getBytes(code).length,item.runtimeBytes,'runtime length differs');}individual.push({...r,label:item.label,runtimeBytes:item.runtimeBytes,creationBytes:item.creationBytes});}
-const p=plan.addresses;const vaultAbi=['function owner() view returns(address)','function strategy() view returns(address)','function asset() view returns(address)'];for(const [v,s,a] of [[p.crvVault,p.crvStrategy,A.sdcrv],[p.fxVault,p.master,A.sdfxn]]){const vlt=C(v,vaultAbi);assert.equal((await vlt.owner()).toLowerCase(),SAFE.toLowerCase());assert.equal((await vlt.strategy()).toLowerCase(),s.toLowerCase());assert.equal((await vlt.asset()).toLowerCase(),a.toLowerCase());}
-const master=C(p.master,['function owner() view returns(address)','function vault() view returns(address)','function boostChild() view returns(address)','function convexChild() view returns(address)']);for(const [fn,x] of [['owner',SAFE],['vault',p.fxVault],['boostChild',p.boost],['convexChild',p.convex]])assert.equal((await master[fn]()).toLowerCase(),x.toLowerCase());
-assert.equal((await C(p.convex,['function curveLiquidityGuard() view returns(address)']).curveLiquidityGuard()).toLowerCase(),A.guard.toLowerCase());
-log('INDIVIDUAL_GAS_COMPLETE',individual);
-assert(await provider.send('evm_revert',[before35]));before35=await provider.send('evm_snapshot',[]);
+await check(stages[0]);await execute('cyvlSDT nonce 34',stages[0],stages[0].data,stages[0].to,false);
+await check(stages[1]);let before35=await provider.send('evm_snapshot',[]);
+const baseline=await execute('cyvlSDT nonce 35',stages[1],stages[1].data,stages[1].to,false);
+const n=BigInt(await provider.send('eth_getTransactionCount',[SAFE,'latest']));
+const factory='0x018D5b5A684F5DA8cb629fBB7FE8661b1c07f6D2';
+const fi=new E.Interface(['function deploy(bytes32 salt,bytes creationCode) payable returns(address)','function getDeployed(address,bytes32) view returns(address)']);
+const ci=new E.Interface(['function performCreate2(uint256 value,bytes deploymentData,bytes32 salt) returns(address)']);
 const orig=multi.decodeFunctionData('multiSend',stages[1].data)[0];
-const candidateResults=[];
-for(const order of ['CRV-first','FXN-first']){
-const q=makePlan(n,order);for(let k=1;k<=q.items.length;k++){
-const add=q.items.slice(0,k);const lower=add.reduce((v,x)=>v+BigInt(x.runtimeBytes||0)*200n,0n);if(baseline.gasUsed+lower>cap){log('PREFIX_CODE_DEPOSIT_EXCEEDS_CAP',{order,k,lower});break}
-const newData=multi.encodeFunctionData('multiSend',[E.concat([orig,packed(add)])]);
-try{await check(stages[1]);const r=await execute('Append '+order+' prefix '+k,stages[1],newData);for(const it of add.filter(x=>x.expected))assert.notEqual(await provider.getCode(it.expected),'0x');const row={order,k,labels:add.map(x=>x.label),gasUsed:r.gasUsed,estimatedGasLimit:r.estimatedGasLimit,increment:r.gasUsed-baseline.gasUsed,remaining:cap-r.gasUsed,addresses:q.addresses,createNonce:n};candidateResults.push(row);log('APPEND_PASS',row)}
-catch(e){log('APPEND_FAILED',{order,k,labels:add.map(x=>x.label),error:String(e.shortMessage||e.message).slice(0,1200)});break}
-finally{assert(await provider.send('evm_revert',[before35]));before35=await provider.send('evm_snapshot',[])}
-}}
-log('FINAL_GAS_REPORT',{initialBlock,baseline,individual,candidateResults});
+const candidates=[];
+for(const [label,name,staking,asset] of [['sdCRV strategy','StrategyConvexBoostHubStakingV5',A.sdcrvStaking,A.sdcrv],['sdFXN BoostHub child','StrategyBoostHubChildV42',A.sdfxnStaking,A.sdfxn]]){
+ for(const method of ['CREATE','CREATE2','CREATE3']){
+  const expectedBinding=E.getCreateAddress({from:SAFE,nonce:n+(method==='CREATE3'?0n:1n)});
+  const a=artifact(name);const init=E.concat([a.bytecode.object,new E.Interface(a.abi).encodeDeploy([staking,[asset,expectedBinding,A.router,SAFE],[300,1000,9000],86400,0])]);
+  const salt=E.id('CurveYield BoostHub v64 '+label+' '+method+' nonce35');
+  let item,expected;
+  if(method==='CREATE'){expected=E.getCreateAddress({from:SAFE,nonce:n});item={op:1,to:CREATE,data:creator.encodeFunctionData('performCreate',[0,init])};}
+  else if(method==='CREATE2'){expected=E.getCreate2Address(SAFE,salt,E.keccak256(init));item={op:1,to:CREATE,data:ci.encodeFunctionData('performCreate2',[0,init,salt])};}
+  else {expected=await C(factory,fi).getDeployed(SAFE,salt);item={op:0,to:factory,data:fi.encodeFunctionData('deploy',[salt,init])};}
+  candidates.push({label,method,expected,expectedBinding,item});
+ }
+}
+assert(await provider.send('evm_revert',[before35]));before35=await provider.send('evm_snapshot',[]);
+const result=[];
+for(const cand of candidates){
+ const {label,method,expected,expectedBinding,item}=cand;
+ const callData=multi.encodeFunctionData('multiSend',[E.concat([orig,packed([item])])]);
+ const ar=args(stages[1],callData);
+ const encoded=safe.interface.encodeFunctionData('execTransaction',ar);
+ const name=label+' '+method;
+ const row={name,expected,expectedBinding,gasCap:cap};
+ try{
+  await check(stages[1]);assert.equal(await provider.getCode(expected),'0x','candidate address already used');
+  try{row.estimate=await safe.execTransaction.estimateGas(...ar,{gasLimit:cap})}catch(e){row.estimateError=String(e.shortMessage||e.message).slice(0,300)}
+  const ok=await safe.execTransaction.staticCall(...ar,{gasLimit:cap});assert(ok,'Safe returned false');
+  const tx=await safe.execTransaction(...ar,{gasLimit:cap});const rc=await tx.wait();assert.equal(rc.status,1);assert.notEqual(await provider.getCode(expected),'0x');
+  row.pass=true;row.gasUsed=rc.gasUsed;row.increment=rc.gasUsed-baseline.gasUsed;row.remaining=cap-rc.gasUsed;
+  row.binding=await C(expected,['function vault() view returns(address)']).vault();assert.equal(row.binding.toLowerCase(),expectedBinding.toLowerCase());
+  row.calldataHash=E.keccak256(callData);row.txHash=rc.hash;
+ }catch(e){
+  row.pass=false;row.error=String(e.shortMessage||e.message).slice(0,500);
+  try{
+   const t=await provider.send('debug_traceCall',[{from:OWNER,to:SAFE,data:encoded,gas:E.toQuantity(cap)},'latest',{tracer:'callTracer'}]);
+   const f=[];function walk(x,depth=0){if(x.error||x.revertReason)f.push({depth,type:x.type,to:x.to,gas:x.gas,gasUsed:x.gasUsed,error:x.error,reason:x.revertReason,output:(x.output||'').slice(0,240)});for(const c of x.calls||[])walk(c,depth+1)}walk(t);row.trace=f.slice(-12);
+  }catch(t){row.traceError=String(t.shortMessage||t.message).slice(0,350)}
+  if(method==='CREATE'&&label==='sdCRV strategy'){
+   try{
+    const high=cap+1500000n;const ok=await safe.execTransaction.staticCall(...ar,{gasLimit:high});
+    row.highGasStaticSuccess=ok;
+    if(ok){let low=cap,hi=high;while(hi-low>1000n){let mid=(hi+low)/2n;try{if(await safe.execTransaction.staticCall(...ar,{gasLimit:mid}))hi=mid;else low=mid}catch{low=mid}}row.minimumGasBracket=[low,hi];
+     try{const tx=await safe.execTransaction(...ar,{gasLimit:hi});const rc=await tx.wait();row.aboveCapDiagnostic={status:rc.status,gasLimit:hi,gasUsed:rc.gasUsed,tx:rc.hash}}catch(te){row.aboveCapSendError=String(te.shortMessage||te.message).slice(0,500)}
+    }
+   }catch(he){row.highGasError=String(he.shortMessage||he.message).slice(0,500)}
+  }
+ }
+ log('APPEND_DIAGNOSTIC',row);result.push(row);
+ assert(await provider.send('evm_revert',[before35]));before35=await provider.send('evm_snapshot',[]);
+}
+log('FINAL_APPEND_DIAGNOSTICS',{baseline,createNonce:n,result});
 }
 main().catch(e=>{console.error('FATAL',e);process.exitCode=1});
