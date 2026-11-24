@@ -30,10 +30,11 @@ AUTOPROVER_REPO = "https://github.com/Certora/AutoProver.git"
 AUTOPROVER_COMMIT = "81d9626c249a70c0a0f0648a89de175443c0344c"
 AUTOPROVER_GRAPHCORE_COMMIT = "c03be3aa9c1cbad4f89dddd0bf2f784bbe77f4bc"
 UV_RELEASE = "0.13.9"
+FORMAL_INITIAL_OUTPUT_TOKENS = 2 * 128_000
 
 # Exact model identities and launch configurations proven in the public DAI
 # replay benchmarks. The existing trusted formal/inference workflows share
-# this immutable allowlist; the default MiMo configuration is unchanged.
+# this immutable model allowlist and native context limits.
 FORMAL_MODELS = {
     "mimo": {
         "alias": "lite-solo-mimo-v1",
@@ -42,7 +43,7 @@ FORMAL_MODELS = {
         "revision": "4371da10c84fb26da3592d4cf312d24aa82b7b65",
         "sha256": "4bca6f18c73f72270c7a20c2ea2bea581de8246e318714277120369d34048c81",
         "context": 262144,
-        "flags": "--ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on"
+        "flags": "--ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on --no-context-shift --reasoning-budget -1"
     },
     "gpt-oss-20b": {
         "alias": "lite-solo-gpt-oss-20b-v1",
@@ -50,8 +51,8 @@ FORMAL_MODELS = {
         "repo": "ggml-org/gpt-oss-20b-GGUF",
         "revision": "b97cbb20d1995efd41dce8c4dd1ddf86e8db375b",
         "sha256": "27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901",
-        "context": 32768,
-        "flags": "--ctx-size 32768 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on --jinja --reasoning-effort low --reasoning-budget 2048"
+        "context": 131072,
+        "flags": "--ctx-size 131072 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on --jinja --no-context-shift --reasoning-effort high --reasoning-budget -1"
     },
     "qwen-coder-7b": {
         "alias": "lite-solo-qwen-coder-7b-v1",
@@ -60,7 +61,7 @@ FORMAL_MODELS = {
         "revision": "13fb94bfda8c8cf22497dc57b78f391a9acb426a",
         "sha256": "509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c",
         "context": 32768,
-        "flags": "--ctx-size 32768 --jinja"
+        "flags": "--ctx-size 32768 --jinja --no-context-shift"
     }
 }
 
@@ -1468,7 +1469,9 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         "modelRequestCount": None,
         "nativeProofsProved": None,
         "maxPropertyInferenceRoundsPerComponent": "UPSTREAM_DEFAULT",
-        "initialResponseTokenBudget": 16384,
+        "initialResponseTokenBudget": FORMAL_INITIAL_OUTPUT_TOKENS,
+        "modelContextTokens": model["context"],
+        "maximumResponseTokensBeforePrompt": min(FORMAL_INITIAL_OUTPUT_TOKENS, model["context"]),
         "nativeModelStreaming": True,
     }
     def persist():
@@ -1691,6 +1694,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "PREAUDIT_LOCAL_LLM_BASE_URL": endpoint,
             "PREAUDIT_LOCAL_LLM_MODEL": model["alias"],
             "CURVEYIELD_FORMAL_MODEL": model_profile,
+            "CURVEYIELD_FORMAL_INITIAL_OUTPUT_TOKENS": str(FORMAL_INITIAL_OUTPUT_TOKENS),
             "CURVEYIELD_FORMAL_PROJECT_ROOT": str(project),
             "CURVEYIELD_FORMAL_TARGET_INDEX": str(index + 1),
         })
@@ -1725,7 +1729,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "--max-concurrent", "1",
             "--max-cpu-tasks", "1",
             "--run-mode", "comprehensive",
-            "--tokens", "16384",
+            "--tokens", str(FORMAL_INITIAL_OUTPUT_TOKENS),
             # Native cache/checkpoint recovery, isolated to this source, run,
             # attempt and target; no second graph or invented resume engine.
             "--cache-ns", f"cy-{origin}-{attempt}-{mapping['source']['archiveSha256'][:16]}-{index}",
