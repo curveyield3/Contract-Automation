@@ -116,6 +116,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield-cyvlSDT-Safe-Proposals-v72
+          name: CurveYield-cyvlSDT-Safe-Proposals-v73
           path: /tmp/v72-report/
           if-no-files-found: error
