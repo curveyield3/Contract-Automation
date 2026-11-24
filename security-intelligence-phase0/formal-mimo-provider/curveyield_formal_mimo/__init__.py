@@ -379,9 +379,14 @@ def _prepare_native_payload(payload: dict) -> tuple[dict, str]:
                               {"type": "text", "text": evidence}]
     omit = {"write_rough_draft", "read_rough_draft"}
     if complete:
-        # This stage has every required source file. Constrain the result
-        # directly to the original native schema, not a voluntary tool choice.
-        # Keep reasoning available for accurate component/interaction analysis.
+        # Diagnostic rule (DAI r10/r11): examine the actual transmitted prompt,
+        # actual model-generated content and native result schema/validator feedback
+        # FIRST. Token counters, heartbeats, successful HTTP transport and reasoning
+        # volume do not demonstrate meaningful result progress. Do not wait for
+        # repeated operator requests before comparing the exact three surfaces.
+        # A generation constraint alone need not make the schema visible to the
+        # model. Supply the same original schema in both the prompt and API.
+        # Keep substantive reasoning available; do not invent a response limit.
         messages[0]["content"] = (
             "Analyze the authenticated Solidity implementation and any supplied design document. "
             "Return exactly one JSON object conforming to the supplied result schema. "
@@ -389,12 +394,24 @@ def _prepare_native_payload(payload: dict) -> tuple[dict, str]:
             "check each function's actual modifiers, state mutations and authorization. "
             "Distinguish external actors from EVM primitives and internal inheritance. "
             "Use exact source identifiers and project-relative paths. Do not invent design "
-            "requirements, guarantees, actors or interactions. Review for factual accuracy."
+            "requirements, guarantees, actors or interactions. The JSON Schema below is the "
+            "authoritative output contract. Follow its exact property names, nesting, required "
+            "fields, enums and types; do not design an alternative structure. Use empty arrays "
+            "where evidence supports no entries and null only where the schema permits it. "
+            "Do not add fields outside the schema. Review source facts, then emit the JSON directly."
         )
+        # Serialize the complete native schema once; reuse that object for constrained
+        # sampling. No hand-maintained approximation of the result structure.
+        result_schema = result["parameters"]
         messages[1]["content"][0]["text"] = task.replace(
             "Submit the complete result directly, using the provided native result schema.",
             "Return the complete application model as a JSON object matching the supplied schema."
         )
+        messages[1]["content"].insert(1, {
+            "type": "text",
+            "text": "EXACT NATIVE AUTOPROVER RESULT JSON SCHEMA:\n"
+                    + json.dumps(result_schema, ensure_ascii=False, separators=(",", ":")),
+        })
         # Native validation errors arrive as tool messages. Present the actual
         # prior model JSON and exact validator feedback as conversational text,
         # since this schema-only API request offers no executable tools.
@@ -421,7 +438,7 @@ def _prepare_native_payload(payload: dict) -> tuple[dict, str]:
         payload["response_format"] = {
             "type": "json_schema",
             "json_schema": {"name": "result", "strict": True,
-                            "schema": result["parameters"]},
+                            "schema": result_schema},
         }
         payload["chat_template_kwargs"] = {
             **(payload.get("chat_template_kwargs") or {}), "enable_thinking": True}
