@@ -1,15 +1,16 @@
-name: StableSwap NG ERC4626 redemption rate fork evidence v2
+name: Actual cyvlSDT three-coin StableSwap oracle fork v1
 on:
   push:
     branches: [cyvlsdt-v69-postdeploy-simulation-v1]
-    paths: ['.github/workflows/lite-phase0-source-zip-smoke-v1.yml']
+    paths: ['.github/workflows/lite-phase0-source-zip-smoke-v1.yml', 'github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json', 'github-native-sim/cyvlsdt-runtime-compare-v1/v69-postdeploy-suite-v1.cjs']
 permissions:
   contents: read
 jobs:
-  oracle-fork:
+  fork-gas:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 90
     env:
+      FOUNDRY_OPTIMIZER_RUNS: '25'
       UPSTREAM_RPC: ${{ secrets.RPC_ETHEREUM }}
     steps:
       - uses: actions/checkout@v4
@@ -21,86 +22,109 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Run isolated historical fork experiment
+      - name: Materialize exact v64 source and benchmark-only optimization candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL 'https://raw.githubusercontent.com/curveyield3/Smart-Contracts/6b058498554f58936daf1216c222d554ee666f5e/Audit-Intake/CurveYield-cyvlSDT-Deployment-Package-v64.zip' -o /tmp/cyv64.zip
+          echo 'a2d46ab6bf63a760efecf914f36419b8ec271c0e36f9b3ee9821cd842ea0d7ee  /tmp/cyv64.zip' | sha256sum -c -
+          mkdir -p /tmp/cyv64 /tmp/cyv65
+          unzip -q /tmp/cyv64.zip -d /tmp/cyv64
+          cp -a /tmp/cyv64/contracts /tmp/cyv65/
+          mkdir -p /tmp/cyv-deps
+          npm install --prefix /tmp/cyv-deps --ignore-scripts --no-audit --no-fund --no-save '@openzeppelin/contracts@5.4.0' '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts-upgradeable@4.9.6' 'ethers@6.17.0'
+          ln -s /tmp/cyv-deps/node_modules /tmp/cyv64/node_modules
+          ln -s /tmp/cyv-deps/node_modules /tmp/cyv65/node_modules
+          for ROOT in /tmp/cyv64 /tmp/cyv65; do
+            rm -f "$ROOT/contracts/PoL_Manager_Contract_v22.sol" "$ROOT/contracts/VoteMarketSingleGaugeBribeAllocator.sol"
+            rm -rf "$ROOT/contracts/external_guard_v8"
+            cat > "$ROOT/foundry.toml" <<'EOF'
+          [profile.default]
+          src = "contracts"
+          out = "out"
+          libs = ["node_modules"]
+          remappings = ["@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/", "@openzeppelin-4/contracts/=node_modules/@openzeppelin-4/contracts/", "@openzeppelin/contracts-upgradeable/=node_modules/@openzeppelin/contracts-upgradeable/"]
+          solc_version = "0.8.28"
+          optimizer = true
+          optimizer_runs = 200
+          via_ir = true
+          evm_version = "cancun"
+          EOF
+          done
+          python3 - <<'PY'
+          import json,pathlib
+          p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
+          exec(compile(p['transform'],'v65-transform','exec'))
+          exec(compile(p['unifiedTransform'],'v66-transform','exec'))
+          exec(compile(p['packingTransform'],'v67-transform','exec'))
+          PY
+      - name: Compile pinned original proposal artifacts and updated vault and SDT strategy
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v72-report
+          FOUNDRY_OUT=out-25-v69 forge build --root /tmp/cyv65 --force --skip test --skip script
+          python3 - <<'PY'
+          import json,pathlib,re,difflib
+          p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
+          exec(compile(p['vaultEmergencyCapabilityPatch'],'v70-vault-capability','exec'))
+          exec(compile(p['vaultMintAllowancePatch'],'v71-mint-allowance','exec'))
+          f=pathlib.Path('/tmp/cyv65/contracts/StrategyCurveSDTYearnRebindable.sol')
+          before=f.read_text()
+          after,n=re.subn(r'(\bCURVE_LP_SLIPPAGE_BPS\s*=\s*)200\b',r'\g<1>100',before)
+          assert n==1,('expected exactly one 200 bps SDT slippage constant',n)
+          assert re.search(r'quoteDeposit\s*\([^;]*CURVE_LP_SLIPPAGE_BPS',after)
+          assert re.search(r'quoteWithdraw\s*\([^;]*CURVE_LP_SLIPPAGE_BPS',after)
+          f.write_text(after)
+          diff=''.join(difflib.unified_diff(before.splitlines(keepends=True),after.splitlines(keepends=True),fromfile='v71/'+f.name,tofile='v72/'+f.name))
+          print('SDT_SLIPPAGE_SOURCE_DIFF\n'+diff,flush=True)
+          out=pathlib.Path('/tmp/v72-report')
+          (out/'StrategyCurveSDTYearnRebindable-v72.sol').write_text(after)
+          (out/'SDT-slippage-diff-v1.patch').write_text(diff)
+          (out/'BeefyVaultCurveYieldV8cyvlSDT-v71.sol').write_text(pathlib.Path('/tmp/cyv65/contracts/BeefyVaultCurveYieldV8cyvlSDT.sol').read_text())
+          pathlib.Path('/tmp/cyv64/replay.cjs').write_text(p['replay'])
+          PY
+          FOUNDRY_OUT=out-25-v72 forge build --root /tmp/cyv65 --force --skip test --skip script
+          python3 - <<'PY'
+          import pathlib,json
+          root=pathlib.Path('/tmp/cyv65')
+          report={}
+          for name in ['BeefyVaultCurveYieldV8cyvlSDT','StrategyCurveSDTYearnRebindable']:
+              a=json.loads((root/'out-25-v69'/(name+'.sol')/(name+'.json')).read_text())
+              b=json.loads((root/'out-25-v72'/(name+'.sol')/(name+'.json')).read_text())
+              sizes=lambda v:{k:len(bytes.fromhex(v[k]['object'].removeprefix('0x'))) for k in ['bytecode','deployedBytecode']}
+              report[name]={'before':sizes(a),'after':sizes(b)}
+              assert report[name]['after']['deployedBytecode']<=24576
+          pathlib.Path('/tmp/v72-report/Compiled-size-v72.json').write_text(json.dumps(report,indent=2))
+          print('COMPILED_SIZE_V72',json.dumps(report))
+          PY
+      - name: Replay exact queued Safe payloads and functional suite
         shell: bash
         run: |
           set -euo pipefail
           test -n "$UPSTREAM_RPC"
-          mkdir -p /tmp/curve-oracle-v2
-          npm install --prefix /tmp/curve-oracle-v2 --ignore-scripts --no-audit --no-fund --no-save ethers@6.17.0
-          anvil --fork-url "$UPSTREAM_RPC" --fork-block-number 26484637 --host 127.0.0.1 --port 8545 --silent >/tmp/anvil-oracle-v2.log 2>&1 &
+          export FORK_BLOCK=26484022
+          anvil --fork-url "$UPSTREAM_RPC" --fork-block-number "$FORK_BLOCK" --host 127.0.0.1 --port 8545 --silent >/tmp/anvil.log 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
             if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
             sleep 1
           done
-          cat >/tmp/curve-oracle-v2/run.cjs <<'JS'
-          const {ethers:E}=require('ethers'),assert=require('node:assert/strict'),fs=require('node:fs');
-          const p=new E.JsonRpcProvider('http://127.0.0.1:8545',undefined,{cacheTimeout:-1});
-          const W=10n**18n, R=10n**27n;
-          const factory='0x6a8cbed756804b16e05e741edabd5cb544ae21bf',pool='0xce6431d21e3fb1036ce9973a3312368ed96f5ce7',implementation='0xdcc91f930b42619377c200ba05b7513f2958b202',vault='0x83f20f44975d03b1b09e64809b757c47f942beea',frax='0x853d955acef822db058eb8505911ed77f175b99e',holder='0x029bb414c7d2e2798f7de8185d8e5d2fa7e84117';
-          const C=(a,b)=>new E.Contract(a,b,p),low=x=>x.toLowerCase(),j=x=>JSON.stringify(x,(_,v)=>typeof v==='bigint'?v.toString():v);
-          const erc=['function balanceOf(address) view returns(uint256)','function approve(address,uint256) returns(bool)'];
-          const f=C(factory,['function pool_implementations(uint256) view returns(address)','function get_implementation_address(address) view returns(address)','function get_pool_asset_types(address) view returns(uint8[])']);
-          const c=C(pool,['function coins(uint256) view returns(address)','function stored_rates() view returns(uint256[])','function price_oracle(uint256) view returns(uint256)','function get_p(uint256) view returns(uint256)','function get_dy(int128,int128,uint256) view returns(uint256)','function exchange(int128,int128,uint256,uint256) returns(uint256)','function balances(uint256) view returns(uint256)','function fee() view returns(uint256)']);
-          const v=C(vault,[...erc,'function convertToAssets(uint256) view returns(uint256)','function pot() view returns(address)']),a=C(frax,erc);
-          const evidence={forkBlock:26484637,factory,pool,implementation,vault,frax,holder,observations:[],swaps:[]};
-          function save(){fs.writeFileSync('/tmp/curve-oracle-v2/evidence.json',j(evidence))}
-          async function read(label){
-            const [shareRate,rates,ema,spot,quote10,quote01,b0,b1]=await Promise.all([v.convertToAssets(W),c.stored_rates(),c.price_oracle(0),c.get_p(0),c.get_dy(1,0,W),c.get_dy(0,1,W),c.balances(0),c.balances(1)]);
-            const adjusted=ema*rates[1]/rates[0],adjustedSpot=spot*rates[1]/rates[0];
-            const o={label,block:await p.getBlockNumber(),shareRate,rates:Array.from(rates),ema,spot,quote10,quote01,adjusted,adjustedSpot,rawInverse:W*W/ema,adjustedInverse:W*W/adjusted,poolBalances:[b0,b1]};
-            evidence.observations.push(o);save();console.log('ORACLE_OBSERVATION',j(o));return o;
-          }
-          async function trade(label,s,i,k){
-            const tokens=[a,v],inp=tokens[i],out=tokens[k];
-            const amount=W,quote=await c.get_dy(i,k,amount);
-            const b=await Promise.all([inp.balanceOf(holder),out.balanceOf(holder),inp.balanceOf(pool),out.balanceOf(pool)]);
-            assert(b[0]>=amount,'fixture balance');
-            const rec=await (await c.connect(s).exchange(i,k,amount,quote*999n/1000n,{gasLimit:2000000})).wait();
-            const z=await Promise.all([inp.balanceOf(holder),out.balanceOf(holder),inp.balanceOf(pool),out.balanceOf(pool)]);
-            const row={label,fromIndex:i,toIndex:k,amount,quote,hash:rec.hash,status:rec.status,before:b,after:z,actualInput:b[0]-z[0],actualOutput:z[1]-b[1],poolInput:z[2]-b[2],poolOutput:b[3]-z[3]};
-            assert.equal(rec.status,1);assert.equal(row.actualInput,amount);row.quoteError=row.actualOutput>quote?row.actualOutput-quote:quote-row.actualOutput;assert(row.quoteError*10000n<=quote,'quote drift exceeds 1 bp');assert.equal(row.poolInput,amount);assert.equal(row.poolOutput,row.actualOutput);
-            evidence.swaps.push(row);save();console.log('FORK_SWAP',j(row));
-          }
-          async function main(){
-            assert.equal(await p.getBlockNumber(),26484637);
-            assert.equal(low(await f.pool_implementations(0)),implementation);assert.equal(low(await f.get_implementation_address(pool)),implementation);
-            assert.deepEqual(Array.from(await f.get_pool_asset_types(pool)),[0n,3n]);assert.equal(low(await c.coins(0)),frax);assert.equal(low(await c.coins(1)),vault);
-            evidence.assetTypes=[0,3];
-            await p.send('anvil_impersonateAccount',[holder]);await p.send('anvil_setBalance',[holder,E.toQuantity(10n*W)]);
-            const s=await p.getSigner(holder);
-            await (await v.connect(s).approve(pool,E.MaxUint256)).wait();await (await a.connect(s).approve(pool,E.MaxUint256)).wait();
-            const baseline=await read('baseline');
-            const snap=await p.send('evm_snapshot',[]);
-            await trade('baseline share to FRAX',s,1,0);await trade('baseline FRAX to share',s,0,1);
-            assert(await p.send('evm_revert',[snap]));
-            const pot=low(await v.pot()),pc=C(pot,['function chi() view returns(uint256)','function dsr() view returns(uint256)']);
-            const chi=await pc.chi();
-            // Only isolated Anvil fixture state is changed. Validate the verified layout against the live getter first.
-            const slot=E.toBeHex(4,32);assert.equal(BigInt(await p.getStorage(pot,slot)),chi);
-            const next=chi*110n/100n;
-            await p.send('anvil_setStorageAt',[pot,slot,E.toBeHex(next,32)]);
-            await p.send('evm_mine',[]);
-            assert.equal(await pc.chi(),next);
-            const changed=await read('redemption value raised 10 percent; before Curve interaction');
-            assert(changed.shareRate*1000n/baseline.shareRate>=1099n);assert(changed.shareRate*1000n/baseline.shareRate<=1101n);
-            await trade('appreciated share to FRAX',s,1,0);await trade('appreciated FRAX to share',s,0,1);
-            await read('after actual exchanges');
-            await p.send('evm_increaseTime',[3600]);await p.send('evm_mine',[]);
-            const final=await read('after one hour of EMA adjustment');
-            const dist=(x,y)=>x>y?x-y:y-x;
-            evidence.comparison={rawErrorBefore:dist(baseline.ema,baseline.quote10),adjustedErrorBefore:dist(baseline.adjusted,baseline.quote10),rawErrorImmediately:dist(changed.ema,changed.quote10),adjustedErrorImmediately:dist(changed.adjusted,changed.quote10),rawErrorAfterEMA:dist(final.ema,final.quote10),adjustedErrorAfterEMA:dist(final.adjusted,final.quote10),shareRateChangeBps:(changed.shareRate-baseline.shareRate)*10000n/baseline.shareRate,rawOracleChangeBps:(changed.ema-baseline.ema)*10000n/baseline.ema,quoteChangeBps:(changed.quote10-baseline.quote10)*10000n/baseline.quote10};
-            save();console.log('ORACLE_COMPARISON',j(evidence.comparison));
-          }
-          main().catch(e=>{console.error(e);save();process.exitCode=1});
-          JS
-          node /tmp/curve-oracle-v2/run.cjs
-      - name: Retain experiment evidence
+          python3 - <<'PY'
+          import pathlib
+          f=pathlib.Path('/tmp/cyv64/replay.cjs')
+          s=f.read_text()
+          old=' await post.run(p,A,SAFE,EOA,artifactForSuite,current,POL);'
+          assert s.count(old)==1
+          experiment=" const W=10n**18n, q=W/1000n, lower=x=>x.toLowerCase();\n const faddr='0x6a8cbed756804b16e05e741edabd5cb544ae21bf';\n const erc=['function balanceOf(address) view returns(uint256)','function approve(address,uint256) returns(bool)','function transfer(address,uint256) returns(bool)','function decimals() view returns(uint8)'];\n const tokens=[SDT,A.token,A.rvault];\n await p.send('anvil_impersonateAccount',[SAFE]);await p.send('anvil_setBalance',[SAFE,E.toQuantity(100n*W)]);\n const ss=await p.getSigner(SAFE),tc=tokens.map(x=>new E.Contract(x,erc,ss));\n const vault=new E.Contract(A.rvault,[...erc,'function deposit(uint256,address) returns(uint256)','function asset() view returns(address)','function totalAssets() view returns(uint256)','function totalSupply() view returns(uint256)','function convertToAssets(uint256) view returns(uint256)'],ss);\n const locker=new E.Contract(A.locker,artifactForSuite(current,contracts.locker).abi,ss);\n const f=new E.Contract(faddr,['function deploy_plain_pool(string,string,address[],uint256,uint256,uint256,uint256,uint256,uint8[],bytes4[],address[]) returns(address)','function pool_count() view returns(uint256)','function pool_list(uint256) view returns(address)','function pool_implementations(uint256) view returns(address)','function get_implementation_address(address) view returns(address)','function get_pool_asset_types(address) view returns(uint8[])'],ss);\n const evidence={forkBlock:Number(process.env.FORK_BLOCK),tokens,addresses:A,observations:[],transactions:[],swaps:[]};\n const save=()=>fs.writeFileSync(output+'/cyvlSDT-curve-oracle-v1.json',J(evidence));\n let poolAddress;\n async function balances(){const accounts=[SAFE,A.rvault,A.revenue,A.locker,A.staking,POL,...(poolAddress?[poolAddress]:[])];return Promise.all(tokens.map(async(token,i)=>({token,balances:await Promise.all(accounts.map(async account=>({account,balance:await tc[i].balanceOf(account)})))})))}\n async function tx(label,send){const before=await balances();const r=await (await send()).wait();assert.equal(r.status,1);const after=await balances();const row={label,hash:r.hash,gas:r.gasUsed,before,after};evidence.transactions.push(row);save();log('POOL_ACTION',{label,hash:r.hash,gas:r.gasUsed});return r}\n assert.equal(lower(await vault.asset()),lower(A.token));for(const t of tc)assert.equal(await t.decimals(),18n);\n assert(await tc[0].balanceOf(SAFE)>=21n*W,'Safe SDT funding');\n await tx('approve SDT locker',()=>tc[0].approve(A.locker,20n*W));\n await tx('lock 20 SDT',()=>locker.deposit(20n*W,SAFE,{gasLimit:6000000}));\n await tx('approve 10 cyvlSDT to vault',()=>tc[1].approve(A.rvault,10n*W));\n await tx('deposit 10 cyvlSDT',()=>vault.deposit(10n*W,SAFE,{gasLimit:6000000}));\n const count=await f.pool_count(),impl=await f.pool_implementations(0);\n const params=['CurveYield SDT cyvlSDT cyvlSDTav','cySDT-3',tokens,500n,20000000n,25000000000n,300n,0n,[0,0,3],['0x00000000','0x00000000','0x00000000'],[E.ZeroAddress,E.ZeroAddress,E.ZeroAddress]];\n await tx('create specified StableSwap NG pool',()=>f.deploy_plain_pool(...params,{gasLimit:10000000}));\n assert.equal(await f.pool_count(),count+1n);poolAddress=await f.pool_list(count);\n const pool=new E.Contract(poolAddress,['function add_liquidity(uint256[],uint256) returns(uint256)','function exchange(int128,int128,uint256,uint256) returns(uint256)','function coins(uint256) view returns(address)','function stored_rates() view returns(uint256[])','function price_oracle(uint256) view returns(uint256)','function get_p(uint256) view returns(uint256)','function get_dy(int128,int128,uint256) view returns(uint256)','function A() view returns(uint256)','function fee() view returns(uint256)','function offpeg_fee_multiplier() view returns(uint256)','function ma_exp_time() view returns(uint256)','function balances(uint256) view returns(uint256)'],ss);\n assert.equal(lower(await f.get_implementation_address(poolAddress)),lower(impl));assert.deepEqual(Array.from(await f.get_pool_asset_types(poolAddress)),[0n,0n,3n]);for(let i=0;i<3;i++)assert.equal(lower(await pool.coins(i)),lower(tokens[i]));\n assert.equal(await pool.A(),500n);assert.equal(await pool.fee(),20000000n);assert.equal(await pool.offpeg_fee_multiplier(),25000000000n);\n evidence.pool=poolAddress;evidence.implementation=impl;evidence.config={params,maExpTime:await pool.ma_exp_time()};save();log('ACTUAL_POOL_CONFIG',{pool:poolAddress,...evidence.config});\n for(let i=0;i<3;i++){assert(await tc[i].balanceOf(SAFE)>=W);await tx('approve seed token '+i,()=>tc[i].approve(poolAddress,E.MaxUint256));}\n await tx('seed one unit of each coin',()=>pool.add_liquidity([W,W,W],1n,{gasLimit:6000000}));\n async function read(label){\n  const rate=await vault.convertToAssets(W),rates=Array.from(await pool.stored_rates()),ema=[await pool.price_oracle(0),await pool.price_oracle(1)],spot=[await pool.get_p(0),await pool.get_p(1)];\n  let index2;try{index2={value:await pool.price_oracle(2)}}catch(e){index2={reverted:true,message:e.shortMessage}};\n  const normalized=[W,...ema],adjusted=normalized.map((x,i)=>x*rates[i]/rates[0]);\n  const pairs=[];for(let i=0;i<3;i++)for(let k=0;k<3;k++)if(i!==k)pairs.push({i,j:k,amount:q,quote:await pool.get_dy(i,k,q),rawPrediction:q*normalized[i]/normalized[k],adjustedPrediction:q*adjusted[i]/adjusted[k]});\n  const row={label,block:await p.getBlockNumber(),rate,rates,ema,spot,index2,totalAssets:await vault.totalAssets(),totalSupply:await vault.totalSupply(),poolBalances:await Promise.all([0,1,2].map(i=>pool.balances(i))),pairs};evidence.observations.push(row);save();log('ACTUAL_POOL_ORACLE',row);return row;\n }\n async function swaps(label){for(let i=0;i<3;i++)for(let k=0;k<3;k++)if(i!==k){\n  const snap=await p.send('evm_snapshot',[]),quote=await pool.get_dy(i,k,q),b=await Promise.all([tc[i].balanceOf(SAFE),tc[k].balanceOf(SAFE),tc[i].balanceOf(poolAddress),tc[k].balanceOf(poolAddress)]);\n  const r=await (await pool.exchange(i,k,q,quote*999n/1000n,{gasLimit:2000000})).wait();\n  const z=await Promise.all([tc[i].balanceOf(SAFE),tc[k].balanceOf(SAFE),tc[i].balanceOf(poolAddress),tc[k].balanceOf(poolAddress)]);\n  const row={label,i,j:k,quote,hash:r.hash,before:b,after:z,actualInput:b[0]-z[0],actualOutput:z[1]-b[1],poolInput:z[2]-b[2],poolOutput:b[3]-z[3]};assert.equal(r.status,1);assert.equal(row.actualInput,q);assert.equal(row.poolInput,q);assert.equal(row.poolOutput,row.actualOutput);assert(row.actualOutput>=quote*999n/1000n);evidence.swaps.push(row);save();log('ACTUAL_POOL_SWAP',row);assert(await p.send('evm_revert',[snap]));\n }}\n const before=await read('baseline');await swaps('baseline');\n const donation=before.totalAssets/10n;assert(donation>0n);assert(await tc[1].balanceOf(SAFE)>=donation+q);\n await tx('donate cyvlSDT to actual revenue vault to increase assets by 10 percent',()=>tc[1].transfer(A.rvault,donation));\n const after=await read('after vault appreciation before pool interaction');\n assert.equal(after.totalSupply,before.totalSupply);assert(after.rate*1000n/before.rate>=1099n&&after.rate*1000n/before.rate<=1101n,'actual vault share rate did not increase 10 percent');\n await swaps('appreciated');\n await tx('small pool exchange to update EMA observation',()=>pool.exchange(0,1,q,1n,{gasLimit:2000000}));\n await p.send('evm_increaseTime',[1800]);await p.send('evm_mine',[]);\n const settled=await read('after EMA settling');await swaps('settled');\n evidence.complete=true;save();log('ACTUAL_POOL_COMPLETE',{pool:poolAddress,rateBefore:before.rate,rateAfter:after.rate,observations:evidence.observations.length,swaps:evidence.swaps.length});\n"
+          f.write_text(s.replace(old,experiment))
+          PY
+          node /tmp/cyv64/replay.cjs
+      - name: Retain verified proposal payload and source evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Curve-ERC4626-oracle-fork-v2
-          path: /tmp/curve-oracle-v2/evidence.json
-          if-no-files-found: warn
+          name: CurveYield-cyvlSDT-Curve-oracle-fork-v1
+          path: /tmp/v72-report/
+          if-no-files-found: error
