@@ -39,11 +39,11 @@ from composer.llm.types import CacheLevel
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
-MODEL_ID = "lite-solo-mimo-v1"
+MODEL_ID = "lite-solo-qwen-coder-7b-v1"
 TAILNET = IPv4Network("100.64.0.0/10")
-# The current pinned certora_qa llama-server command specifies --ctx-size 262144.
+# The current pinned certora_qa llama-server command specifies --ctx-size 32768.
 # The upstream compaction policy reserves half the total context.
-MIMO_CONTEXT_SIZE = 262144
+MIMO_CONTEXT_SIZE = 32768
 
 
 def _private_chat_completions_base_url() -> str:
