@@ -9,7 +9,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: security-preflight-${{ github.ref }}${{ contains(github.event.head_commit.message, '[parallel-formal]') && format('-{0}', github.run_id) || '' }}
+  group: security-preflight-${{ github.ref }}${{ contains(github.event.head_commit.message, '[replace-45341282359]') && '-45341282359' || contains(github.event.head_commit.message, '[parallel-formal]') && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 jobs:
   admit:
@@ -720,12 +720,12 @@ jobs:
           from composer.llm.registry import get_provider_for
           from curveyield_formal_mimo import (
               MODEL_ID, MiMoModelProvider, configure_local_mimo_runtime,
-              mimo_autoprover_model_args,
+              mimo_autoprover_model_args, FORMAL_QUALIFICATION_OUTPUT_TOKENS,
           )
 
           @dataclass
           class ModelOptions:
-              tokens: int = 256
+              tokens: int = FORMAL_QUALIFICATION_OUTPUT_TOKENS
               thinking_tokens: int | None = None
               memory_tool: bool = False
               interleaved_thinking: bool = False
@@ -785,7 +785,7 @@ jobs:
               upstream._init_local_client(), MODEL_ID,
               [{"role":"user","content":
                  'Return exactly the JSON object {"stage":"I05.2","ready":true}.'}],
-              256, 0.0, NativeSchema, 2, False,
+              FORMAL_QUALIFICATION_OUTPUT_TOKENS, 0.0, NativeSchema, 2, False,
           )
           if not isinstance(autosetup, NativeSchema) or autosetup.stage != "I05.2" or autosetup.ready is not True:
               raise RuntimeError("Native AutoSetup local structured completion failed")
