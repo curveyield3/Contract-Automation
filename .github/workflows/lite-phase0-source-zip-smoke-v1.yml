@@ -63,7 +63,6 @@ jobs:
           set -euo pipefail
           forge build --root /tmp/cyv64 --skip test --skip script
           FOUNDRY_OPTIMIZER_RUNS=25 FOUNDRY_OUT=out-25 forge build --root /tmp/cyv65 --force --skip test --skip script
-          FOUNDRY_OPTIMIZER_RUNS=1 FOUNDRY_OUT=out-1 forge build --root /tmp/cyv65 --force --skip test --skip script
       - name: Sequential original and optimized Safe batch simulations
         shell: bash
         run: |
