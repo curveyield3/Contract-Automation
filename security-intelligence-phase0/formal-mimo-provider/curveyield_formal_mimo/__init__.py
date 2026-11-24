@@ -398,7 +398,14 @@ def _prepare_native_payload(payload: dict) -> tuple[dict, str]:
             "authoritative output contract. Follow its exact property names, nesting, required "
             "fields, enums and types; do not design an alternative structure. Use empty arrays "
             "where evidence supports no entries and null only where the schema permits it. "
-            "Do not add fields outside the schema. Review source facts, then emit the JSON directly."
+            "Do not add fields outside the schema. The compiler-derived callable/modifier rows "
+            "and exact source excerpts are authoritative observations. In requirements about authorization "
+            "or logging, preserve the exact applied modifier list and source assignment indices; "
+            "do not infer modifiers from names or assume that every function uses a common modifier. "
+            "Distinguish modifier checks from conditional checks inside function bodies. "
+            "An inherited implementation is not a separately deployed actor. State only supported "
+            "requirements and use source identifiers or exact expressions rather than speculative "
+            "generalizations. Review source facts, then emit the JSON directly."
         )
         # Serialize the complete native schema once; reuse that object for constrained
         # sampling. No hand-maintained approximation of the result structure.
@@ -412,6 +419,12 @@ def _prepare_native_payload(payload: dict) -> tuple[dict, str]:
             "text": "EXACT NATIVE AUTOPROVER RESULT JSON SCHEMA:\n"
                     + json.dumps(result_schema, ensure_ascii=False, separators=(",", ":")),
         })
+        # Put the existing source-bound context document after the complete
+        # source, making exact compiler observations the last evidence before
+        # the response. Keep the native entry-point instruction unchanged.
+        blocks = messages[1]["content"]
+        source_block = blocks.pop()
+        blocks.insert(2, source_block)
         # Native validation errors arrive as tool messages. Present the actual
         # prior model JSON and exact validator feedback as conversational text,
         # since this schema-only API request offers no executable tools.

@@ -785,6 +785,104 @@ def prepare_authenticated_target_map(*, work_dir: Path, source_zip: Path,
             f"- Public ABI methods (compiler observed): {', '.join(funcs)}",
             "",
         ])
+    # Reuse the already collected source intelligence, not an AI-generated
+    # summary. The DAI r12 wire showed wrong modifier scope and assignment
+    # targets despite a structurally correct response. These compact facts
+    # make the precise source evidence salient to the component analysis.
+    facts_name = "SOURCE_INTELLIGENCE_AUTOMATED_v1.json"
+    if facts_name in expected_hashes:
+        facts_path = artifacts_file.with_name(facts_name)
+        if digest(facts_path) != expected_hashes[facts_name]:
+            raise RuntimeError("I04.1 preflight source intelligence checksum mismatch")
+        facts = json.loads(facts_path.read_text())
+        if (facts.get("schemaVersion") != "curveyield-v7-source-intelligence-technical-bundle-v1"
+                or facts.get("requestIdentity", {}).get("requestId") != req["requestId"]
+                or any(facts.get("sourceIdentity", {}).get(key) != declared.get(key)
+                       for key in ("repository", "commit", "archivePath", "archiveSha256"))
+                or facts.get("completion", {}).get("exactSourceBound") is not True
+                or facts.get("completion", {}).get("exactBuildBound") is not True):
+            raise RuntimeError("I04.1 source intelligence is not bound to the admitted source/build")
+        contract_names = {c["contractId"]: c["qualifiedName"]
+                          for c in facts.get("contracts", [])
+                          if isinstance(c, dict) and "contractId" in c and "qualifiedName" in c}
+        source_hashes = {f["path"]: f["sha256"] for f in facts.get("sourceFiles", [])
+                         if isinstance(f, dict) and "path" in f and "sha256" in f
+                         and f.get("scopeStatus") == "IN_SCOPE_ADMITTED_SOURCE"}
+        source_bytes: dict[str, bytes] = {}
+        def exact_source(path: str) -> bytes | None:
+            if path not in source_hashes:
+                return None
+            if path not in source_bytes:
+                local = (extracted / path).resolve(strict=True)
+                if not local.is_relative_to(extracted.resolve()) or not local.is_file():
+                    raise RuntimeError("I04.1 source intelligence path outside admitted source")
+                content = local.read_bytes()
+                if hashlib.sha256(content).hexdigest() != source_hashes[path]:
+                    raise RuntimeError("I04.1 source intelligence source digest mismatch")
+                source_bytes[path] = content
+            return source_bytes[path]
+        callsites: dict[str, list[str]] = {}
+        for edge in facts.get("callGraph", []):
+            if not isinstance(edge, dict) or edge.get("memberOrName") not in ("require", "assert", "revert"):
+                continue
+            site = edge.get("sourceCallsite") or {}
+            path = site.get("sourcePath")
+            span = str(site.get("astSourceSpan", "")).split(":")
+            if (not isinstance(path, str) or len(span) != 3
+                    or not span[0].isdigit() or not span[1].isdigit()
+                    or site.get("sourceDigestSha256") != source_hashes.get(path)):
+                continue
+            raw_source = exact_source(path)
+            if raw_source is None:
+                continue
+            offset, size = int(span[0]), int(span[1])
+            if offset + size > len(raw_source):
+                raise RuntimeError("I04.1 source intelligence callsite outside source")
+            expression = raw_source[offset:offset + size].decode("utf-8")
+            expression = " ".join(expression.split())
+            callsites.setdefault(str(edge.get("callerFunctionId")), []).append(expression)
+        context.extend([
+            "## Compiler-derived callable and modifier facts (from the same-run Source Intelligence artifact)",
+            "Each row names the exact declaration and applied modifiers. An empty modifier list does NOT establish unrestricted execution; inspect body checks and conditional branches. Do not apply a modifier to functions absent from its actual invocation list.",
+            "The quoted snippets and require/assert/revert expressions below are source excerpts, not inferred security conclusions. Preserve exact assignment indices, caller conditions and parameter names.",
+            "",
+        ])
+        for f in facts.get("functions", []):
+            if (not isinstance(f, dict)
+                    or f.get("confidenceClass") not in ("COMPILER_FACT", "SOURCE_SYNTAX_FACT")):
+                continue
+            qname = contract_names.get(f.get("contractId"))
+            if not qname or qname not in seen or not isinstance(f.get("signature"), str):
+                continue
+            mods = f.get("modifiers")
+            if not isinstance(mods, list) or any(not isinstance(m, str) for m in mods):
+                continue
+            loc = str(f.get("sourceLocation", ""))
+            context.append(
+                f"- {qname}::{f['signature']} | {f.get('visibility')} | "
+                f"mutability={f.get('stateMutability')} | applied modifiers={json.dumps(mods)} | {loc}"
+            )
+            # Exact declarations/bodies of modifier definitions and guarded
+            # functions expose what their modifier actually checks and what
+            # state index their function actually writes, without guessing.
+            match = re.fullmatch(r"(.+):([0-9]+)-([0-9]+)", loc)
+            if match and (mods or f.get("visibility") == "MODIFIER"):
+                path, first, last = match.group(1), int(match.group(2)), int(match.group(3))
+                raw_source = exact_source(path)
+                if raw_source is not None:
+                    lines = raw_source.decode("utf-8").splitlines()
+                    if not 1 <= first <= last <= len(lines):
+                        raise RuntimeError("I04.1 source intelligence declaration span invalid")
+                    context.append("  Exact declaration/body: " + " ".join(
+                        line.strip() for line in lines[first - 1:last] if line.strip()))
+            for expression in callsites.get(str(f.get("functionId")), []):
+                context.append("  Exact source call: " + expression)
+        for edge in facts.get("inheritanceGraph", []):
+            derived = contract_names.get(edge.get("derivedContractId"))
+            base = contract_names.get(edge.get("baseContractId"))
+            if derived and base:
+                context.append(f"- Compiler inheritance: {derived} inherits {base}. Inheritance alone is not a call to a separately deployed external contract.")
+        context.append("")
     target_doc = root / "source-context-v1.md"
     target_doc.write_text("\n".join(context), encoding="utf-8")
     target_doc.chmod(0o600)
