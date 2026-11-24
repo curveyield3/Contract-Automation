@@ -117,7 +117,7 @@ permissions:
   id-token: write
   actions: write
 concurrency:
-  group: lite-solo-ai-${{ github.ref_name }}-${{ inputs.mode }}-${{ (inputs.mode == 'campaign' || inputs.mode == 'autonomous') && inputs.campaign_id || inputs.mode == 'autonomous_start' && inputs.source_url || inputs.source_path }}-${{ inputs.mode == 'certora_qa' && inputs.source_run_id || '' }}
+  group: lite-solo-ai-replay-repair-${{ github.ref_name }}-${{ inputs.mode }}-${{ (inputs.mode == 'campaign' || inputs.mode == 'autonomous') && inputs.campaign_id || inputs.mode == 'autonomous_start' && inputs.source_url || inputs.source_path }}-${{ inputs.mode == 'certora_qa' && inputs.source_run_id || '' }}
   cancel-in-progress: false
 env:
   MACHINE_INTELLIGENCE_WORKER_URL: ${{ vars.MACHINE_INTELLIGENCE_WORKER_URL || 'https://lite-solo-api.jamesnexus9999.workers.dev' }}
@@ -1320,12 +1320,13 @@ jobs:
           retention-days: 7
 
   granite-dai-replay:
-    name: Granite 4.2 8B - exact DAI r12 AutoProver replay v1
+    name: Granite 4.2 8B - exact DAI r12 AutoProver replay v3
     if: github.event_name == 'push' && github.ref_name == 'granite-autoprover-dai-replay-v1'
     runs-on: ubuntu-latest
     timeout-minutes: 55
     permissions:
       contents: read
+      actions: write
     env:
       REPLAY_FILE: process/agent-upload/DAI_r12_MiMo_request_1_exact_v1.json
       REPLAY_SHA256: a78712fc1e6c09a9dc060728d8190c8efb838018159b56a877e59f1791227095
@@ -1339,6 +1340,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Cancel superseded silent replay after checking exact run identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          old=45311880627
+          info="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$old")"
+          jq -e --arg branch "$GITHUB_REF_NAME" --arg sha '7b7236851e45160262d363e729537ec6dc6247cf' '.head_branch==$branch and .head_sha==$sha and (.path|startswith(".github/workflows/lite-solo-ai-inference-v1.yml"))' <<< "$info" >/dev/null
+          status="$(jq -r .status <<< "$info")"
+          if [ "$status" != completed ]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$old/cancel" || {
+              status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$old" --jq .status)"
+              test "$status" = completed
+            }
+          fi
+          echo "SUPERSEDED_RUN $old cancellation requested or already completed"
       - name: Verify exact public request before any installation
         shell: bash
         run: |
@@ -1397,7 +1415,7 @@ jobs:
           out="$RUNNER_TEMP/granite-replay"
           "$RUNNER_TEMP/llama-build/bin/llama-server" --model "$RUNNER_TEMP/granite-4.2-8b-Q4_K_M.gguf" \
             --alias lite-solo-mimo-v1 --host 127.0.0.1 --port 8080 \
-            --ctx-size 32768 --threads 4 --parallel 1 --n-gpu-layers 0 --jinja \
+            --ctx-size 32768 --threads 4 --parallel 1 --n-gpu-layers 0 --jinja --metrics --slots --reasoning-budget 2048 \
             > "$out/server-v1.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
@@ -1409,7 +1427,7 @@ jobs:
           done
           if [ "$ready" != 1 ]; then tail -100 "$out/server-v1.log"; exit 1; fi
           "$RUNNER_TEMP/AutoProver/.venv/bin/python" -u - <<'PY'
-          import hashlib, json, os, re, time, traceback, urllib.request
+          import hashlib, json, os, re, time, traceback, urllib.request, threading, signal
           from pathlib import Path
           from composer.spec.system_model import SourceApplication
           from composer.spec.system_analysis import validate_solidity_connectivity
@@ -1432,6 +1450,40 @@ jobs:
           summary = {"model": "IBM Granite 4.2 8B Q4_K_M", "requestSha256": hashlib.sha256(raw).hexdigest(), "nativeValidatorCommit": os.environ["AUTOPROVER_SHA"], "modelSha256": os.environ["GRANITE_SHA256"], "context": 32768, "threads": 4, "status": "REJECTED"}
           start = time.monotonic()
           last_report = start
+          stop_watchdog = threading.Event()
+          def abort_stall(signum, frame):
+              raise TimeoutError("No observed prompt/token progress for 180 seconds; server slot counters and SSE payload checked")
+          signal.signal(signal.SIGUSR1, abort_stall)
+          def watch_activity():
+              last_change = time.monotonic()
+              previous = None
+              while not stop_watchdog.wait(5):
+                  now = time.monotonic()
+                  slot = {}
+                  error = None
+                  try:
+                      with urllib.request.urlopen("http://127.0.0.1:8080/slots", timeout=4) as r:
+                          slots = json.load(r)
+                      slot = slots[0] if slots else {}
+                  except Exception as exc:
+                      error = str(exc)
+                  token_info = slot.get("next_token") or [{}]
+                  decoded = token_info[0].get("n_decoded", 0) if isinstance(token_info, list) else 0
+                  progress = (slot.get("n_prompt_tokens_processed", 0), decoded, sum(map(len, stream.content)), sum(map(len, stream.reasoning)), stream.prompt.get("processed", 0))
+                  if previous is None or any(a > b for a,b in zip(progress,previous)):
+                      last_change = now
+                  if previous is None:
+                      previous = progress
+                  else:
+                      previous = tuple(max(a,b) for a,b in zip(progress,previous))
+                  quiet = now-last_change
+                  report = {"event": "REPLAY_LIVE_ACTIVITY", "promptProcessed": progress[0], "promptTotal": slot.get("n_prompt_tokens"), "generatedTokens": decoded, "answerCharacters": progress[2], "reasoningCharacters": progress[3], "ssePromptProcessed": progress[4], "isProcessing": slot.get("is_processing"), "secondsSinceProgress": round(quiet,1), "elapsedSeconds": round(now-start,1), "slotError": error}
+                  _progress_event(report)
+                  if quiet >= 180 and not stop_watchdog.is_set():
+                      _progress_event({**report, "event": "REPLAY_STALLED_NO_TOKEN_PROGRESS"})
+                      os.kill(os.getpid(), signal.SIGUSR1)
+                      return
+          watcher = threading.Thread(target=watch_activity, daemon=True)
           answer_index = reasoning_index = 0
           def live_output(force=False):
               global last_report, answer_index, reasoning_index
@@ -1448,6 +1500,7 @@ jobs:
               _wire_body("AUTOPROVER_TO_MIMO", 1, raw)
               _progress_event({"event": "REPLAY_REQUEST", "model": summary["model"], "requestNumber": 1, "requestSha256": summary["requestSha256"]})
               print("EXACT_REQUEST_SENT", summary["requestSha256"], flush=True)
+              watcher.start()
               try:
                   with urllib.request.urlopen(http, timeout=180) as response, (out / "wire-response-v1.sse").open("wb") as wire:
                       print("HTTP", response.status, flush=True)
@@ -1462,6 +1515,8 @@ jobs:
                   _wire_body("MIMO_TO_AUTOPROVER", 1, error_bytes, status=err.code)
                   raise
               finally:
+                  stop_watchdog.set()
+                  watcher.join(timeout=5)
                   live_output(force=True)
                   stream.report(final=False)
                   (out / "model-output-v1.json").write_text("".join(stream.content))
@@ -1483,7 +1538,8 @@ jobs:
               traceback.print_exc()
               raise
           finally:
-              summary.update(elapsedSeconds=round(time.monotonic()-start, 2), finishReason=stream.finish_reason, usage=stream.usage, timings=stream.timings)
+              stop_watchdog.set()
+              summary.update(reasoningBudget=2048, elapsedSeconds=round(time.monotonic()-start, 2), finishReason=stream.finish_reason, usage=stream.usage, timings=stream.timings)
               (out / "validation-v1.json").write_text(json.dumps(summary, indent=2))
               print("REPLAY_RESULT", json.dumps(summary), flush=True)
           PY
@@ -1491,7 +1547,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: granite-dai-replay-v1
+          name: granite-dai-replay-v3
           path: |
             ${{ runner.temp }}/granite-replay/*.json
             ${{ runner.temp }}/granite-replay/*.sse
