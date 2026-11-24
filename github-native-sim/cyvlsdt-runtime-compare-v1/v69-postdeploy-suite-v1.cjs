@@ -5,7 +5,7 @@ const SDT='0x73968b9a57c6e53d41345fd57a6e6ae27d6cdb2f',USDC='0xa0b86991c6218b36c
 const erc=['function balanceOf(address) view returns(uint256)','function totalSupply() view returns(uint256)','function transfer(address,uint256) returns(bool)','function transferFrom(address,address,uint256) returns(bool)','function approve(address,uint256) returns(bool)','function allowance(address,address) view returns(uint256)','function decimals() view returns(uint8)'];
 const ercI=new E.Interface(erc),transferTopic=E.id('Transfer(address,address,uint256)'),approvalTopic=E.id('Approval(address,address,uint256)');
 const J=x=>JSON.stringify(x,(_,v)=>typeof v==='bigint'?v.toString():v);
-const report={version:1,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
+const report={version:2,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
 const cleanError=e=>({message:String(e.shortMessage||e.message||e).slice(0,2000),data:e.data||e.info?.error?.data||null});
 const low=x=>String(x).toLowerCase();
 fs.mkdirSync(OUT,{recursive:true});
@@ -54,7 +54,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    let who=[...new Set([caller,U,V,SAFE,EOA,A[k]].filter(Boolean))];
    if(t){for(const f of ['owner','pendingOwner','totalSupply','totalAssets','getPricePerFullShare','balanceOf()','grossBalanceOf','totalActiveStake','totalQueuedStake','grossSDTPrincipalForBase','reservedWithdrawalAssets','nextWithdrawalId','pendingConversionCount','poLDepositShareBps','lockedProfit','childBalances','allocationTargets','convexEligible','paused','rewardTokenCount','strategy','adminFeeReceiver','depositFeeBps','withdrawalFeeBps','systemConfigured','merchantDelegableBoost'])if(t.interface.hasFunction(f)){items[f]=await soft(()=>t[f]());}
     for(const a of who)for(const f of ['balanceOf(address)','activeBalance','queuedBalance','pendingWithdrawal'])if(t.interface.hasFunction(f)){items[f+':'+a]=await soft(()=>t[f](a));}}
-   const localTokens=k==='locker'||k==='staking'||k==='merchant'||k==='revenue'||k==='token'?[SDT,USDC,A.token]:k==='rvault'?[A.token,A.rvault]:k==='svault'||k==='yearn'?[SDT,A.svault]:k==='crvVault'||k==='crv'?[CRV,A.crvVault]:k==='fxnVault'||k==='fxn'?[SDFXN,FXN,A.fxnVault]:[];
+   const localTokens=k==='pol'?[SDT,USDC,A.token]:k==='locker'||k==='staking'||k==='merchant'||k==='revenue'||k==='token'?[SDT,USDC,A.token]:k==='rvault'?[A.token,A.rvault]:k==='svault'||k==='yearn'?[SDT,A.svault]:k==='crvVault'||k==='crv'?[CRV,A.crvVault]:k==='fxnVault'||k==='fxn'?[SDFXN,FXN,A.fxnVault]:[];
    items.balances=await Promise.all(localTokens.flatMap(token=>who.map(async account=>({token,account,balance:await balance(p,token,account)}))));
    return items;
  }
@@ -83,7 +83,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
  async function need(k,f,args,caller=U,opts={}){const r=await act(k,f,args,caller,opts);if(!['PASS_ASSERTED','EXECUTED_TRANSFER_UNASSERTED','EXECUTED_NO_TRANSFER','EXPECTED_REVERT'].includes(r.status))throw Error('prerequisite '+k+'.'+f+' '+r.status);return r;}
  async function ext(t,f,args,caller=U,opts={}){return act('external:'+await t.getAddress(),f,args,caller,{...opts,contract:t});}
  async function scenario(label,fn){
-   scenarioName=label;let snap=await p.send('evm_snapshot',[]),start=report.actions.length;
+   if(!label.startsWith('SUPPLEMENT '))return;scenarioName=label;let snap=await p.send('evm_snapshot',[]),start=report.actions.length;
    try{await fn();report.scenarios.push({label,status:'COMPLETED',actions:report.actions.length-start});}
    catch(e){report.scenarios.push({label,status:'BLOCKED_OR_FAILED',error:cleanError(e),actions:report.actions.length-start});log('SCENARIO_ERROR',{label,error:cleanError(e)});}
    finally{await p.send('evm_revert',[snap]);signers.clear();save();}
@@ -98,6 +98,22 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    for(const from of cand){if(low(from)===low(to)||excluded.has(low(from)))continue;let b=await soft(()=>t.balanceOf(from));if(typeof b==='bigint'&&b>=amount-have){const row=await ext(t,'transfer',[to,amount-have],from,{purpose:'real fork token funding',check:async()=>eq(await t.balanceOf(to),amount)});if(row.status==='PASS_ASSERTED'){report.fixtures.push({token,to,amount:amount-have,method:'actual existing balance transfer',from});return;}}}
    // Only a dedicated fork test account's balance slot is provisioned; never pool/strategy storage.
    // Verify the slot with balanceOf, restore every rejected candidate, and record the fixture explicitly.
+   // Try real holders sampled from pinned-block Transfer events first; never debit pool or protocol custody.
+   if(low(token)===low(A.token))throw Error('cyvlSDT must be minted through locker; fixture forbidden');
+   const head=Number(process.env.FORK_BLOCK),seen=new Set();
+   for(let n=0;n<4;n++){
+     const logs=await soft(()=>p.getLogs({address:token,topics:[transferTopic],fromBlock:head-n*150-149,toBlock:head-n*150}));
+     if(!Array.isArray(logs))continue;
+     const candidates=logs.flatMap(l=>l.topics.slice(1,3).map(x=>'0x'+x.slice(-40)));
+     for(const from of candidates){
+       if(seen.has(low(from))||excluded.has(low(from))||low(from)===low(to)||from===ZERO)continue;seen.add(low(from));
+       if(await p.getCode(from)!=='0x')continue;
+       let b=await soft(()=>t.balanceOf(from));
+       if(typeof b!=='bigint'||b<amount-have)continue;
+       const row=await ext(t,'transfer',[to,amount-have],from,{purpose:'actual existing historical EOA token funding',check:async()=>eq(await t.balanceOf(to),amount)});
+       if(row.status==='PASS_ASSERTED'){report.fixtures.push({token,to,amount:amount-have,method:'actual existing balance transfer',from});return;}
+     }
+   }
    const candidates=[];const h=E.zeroPadValue(to,32);for(let i=0;i<128;i++)candidates.push(E.keccak256(E.concat([h,E.zeroPadValue(E.toBeHex(i),32)])));
    let callTrace=await soft(()=>p.send('debug_traceCall',[{to:token,data:ercI.encodeFunctionData('balanceOf',[to])},'latest',{tracer:'prestateTracer'}]));
    for(const [addr,info] of Object.entries(callTrace||{}))if(low(addr)===low(token)&&info?.storage)candidates.unshift(...Object.keys(info.storage));
@@ -123,7 +139,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    await need('token','transfer',[V,W],U,{check:async()=>{eq(await N.token.balanceOf(U),u-W);eq(await N.token.balanceOf(V),v+W);}});
    await need('token','approve',[V,2n*W],U,{check:async()=>eq(await N.token.allowance(U,V),2n*W)});
    await act('token','transferFrom',[U,V,W],V,{check:async()=>eq(await N.token.allowance(U,V),W)});
-   await act('token','mint',[U,W],U,{reject:'NotLocker'});
+   await act('token','mint',[U,W],U,{reject:'OnlyLocker'});
    await act('token','setLocker',[A.locker],EOA,{check:async()=>eq(low(await N.token.locker()),low(A.locker))});
  });
  await scenario('staking principal, immediate fee, queue maturity and replay rejection',async()=>{
@@ -233,7 +249,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    await act(k,'transferOwnership',[V],U,{reject:authError(k)});
    if(N[k].interface.hasFunction('acceptOwnership()')){
      await need(k,'transferOwnership',[V],o,{check:async()=>eq(low(await N[k].pendingOwner()),low(V))});
-     await act(k,'acceptOwnership',[],U,{reject:N[k].interface.hasFunction('OwnableUnauthorizedAccount')?'OwnableUnauthorizedAccount':'Ownable2Step: caller is not the new owner'});
+     await act(k,'acceptOwnership',[],U,{reject:N[k].interface.hasError('OwnableUnauthorizedAccount')?'OwnableUnauthorizedAccount':'Ownable2Step: caller is not the new owner'});
      await act(k,'acceptOwnership',[],V,{check:async()=>eq(low(await N[k].owner()),low(V))});
    }else await act(k,'transferOwnership',[V],o,{check:async()=>eq(low(await N[k].owner()),low(V))});
    await act(k,'renounceOwnership',[],V,{check:async()=>eq(await N[k].owner(),ZERO)});
@@ -306,6 +322,161 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
     });
    }
  }
+
+ // Positive offer paths using the verified live BoostMarketplace ABI.
+ await scenario('SUPPLEMENT actual marketplace offers, direct lease and routing',async()=>{
+   const maddr=await N.merchant.MARKETPLACE(),market=C(p,maddr,[
+     'function minOrderAmount() view returns(uint256)','function minFillAmount() view returns(uint256)','function feeBps() view returns(uint256)',
+     'function createOffer(uint256,uint256,uint256,address,uint256,address) returns(uint256)',
+     'function getOffer(uint256) view returns(tuple(address buyer,uint96 pricePerWeek,address paymentToken,uint32 duration,uint64 expiry,address recipient,uint128 amount,uint128 filled))',
+     'function getListing(uint256) view returns(tuple(address seller,uint96 pricePerWeek,address paymentToken,uint32 maxDuration,uint64 expiry,uint128 amount,uint128 filled,uint32 minDuration))',
+     'function createListing(uint256,uint256,uint256,uint256,address,uint256) returns(uint256)','function cancelOffer(uint256)','function fillListing(uint256,uint256,uint256,uint256,uint256,address)']);
+   const minOrder=await market.minOrderAmount(),minFill=await market.minFillAmount(),qty=minOrder>minFill?minOrder:minFill;
+   await lock(qty*100n+100n*W);
+   await own('merchant','setMinimumLeaseBoost',[qty],async()=>eq(await N.merchant.minimumLeaseBoost(),qty));
+   const minSDT=await soft(()=>N.merchant.aladdinMinimumPriceInSDT());
+   const rate=typeof minSDT==='bigint'?minSDT*4n*10n**6n/(100n*W)+1000000n:1000000n;
+   await own('merchant','setSaleRates',[rate,rate,100n*W],async()=>eq(await N.merchant.minimumFillPricePerWeek(),rate));
+   const cap=await N.locker.merchantDelegableBoost(),daoCap=await N.locker.daoDelegableBoost(),expiry=(await now())+WEEK,end=(Math.floor((await now())/WEEK)+2)*WEEK;
+   assert(cap>qty*4n&&daoCap>=qty,'insufficient real capacity');
+   const payment=qty*rate/W*4n+10n**6n;
+   await fund(USDC,V,payment*8n);await approve(USDC,maddr,V);await approve(USDC,A.merchant,V);
+   let makeOffer=async()=>{const row=await ext(market,'createOffer',[qty,rate*2n,1,USDC,expiry,V],V,{check:async row=>eq(low((await market.getOffer(row.staticResult)).buyer),low(V))});if(row.status!=='PASS_ASSERTED')throw Error('offer create failed');return row.staticResult;};
+   let id=await makeOffer(),before=await market.getOffer(id);
+   await act('merchant','fillProfitableOffer',[id,qty,0n,2*WEEK],U,{check:async()=>eq((await market.getOffer(id)).filled,before.filled+qty)});
+   id=await makeOffer();before=await market.getOffer(id);
+   await act('locker','marketplaceAcceptOffer',[id,qty,0n,2*WEEK,true],EOA,{check:async()=>eq((await market.getOffer(id)).filled,before.filled+qty)});
+   id=await makeOffer();before=await market.getOffer(id);
+   await act('merchant','executeBestRoute',[[id,qty,0n,expiry,1,2,end]],EOA,{check:async()=>eq((await market.getOffer(id)).filled,before.filled+qty)});
+   let quote=await soft(()=>N.merchant.quoteLease(qty,1));if(Array.isArray(quote))await act('merchant','leaseBoost',[qty,1,V,quote[2]*2n+1n,expiry],V,{check:async row=>assert(row.staticResult[0]>0n)});
+   await own('merchant','setPostListingIfNoAcceptableOffer',[true],async()=>assert(await N.merchant.postListingIfNoAcceptableOffer()));
+   let l=await act('merchant','executeBestRoute',[[0,qty,0n,expiry,1,2,end]],EOA,{check:async row=>assert(await N.merchant.createdListings(row.staticResult[1]))});
+   if(l.status==='PASS_ASSERTED'){let id=l.staticResult[1];await act('merchant','refreshMarketplaceListing',[id,qty],EOA,{check:async()=>eq((await market.getListing(id)).amount,qty)});await act('merchant','cancelMarketplaceListing',[id],EOA,{check:async()=>eq(await N.merchant.createdListings(id),false)});}
+   await own('merchant','setPostListingIfNoAcceptableOffer',[false],async()=>assert(!(await N.merchant.postListingIfNoAcceptableOffer())));
+   await act('merchant','executeBestRoute',[[0,qty,0n,expiry,1,2,end]],EOA,{check:async row=>assert((await N.locker.merchantBoostCommitments(row.staticResult[1])).active)});
+ });
+ // Supply positive non-empty external routes for strategies and delegated ERC4626 callers.
+ for(const [k,t,strat] of [['rvault',A.token,'revenue'],['svault',SDT,'yearn'],['crvVault',CRV,'crv'],['fxnVault',SDFXN,'fxn']]){
+  await scenario('SUPPLEMENT '+k+' donation, fee, delegated exit, emergency and exact asset accounting',async()=>{
+   if(k==='rvault')await lock(100n*W);else await fund(t,U,100n*W);
+   await approve(t,A[k],U);await own(k,'setDepositFeeBps',[100],async()=>eq(await N[k].depositFeeBps(),100n));
+   const feeReceiver=await N[k].adminFeeReceiver(),bfee=await C(p,t).balanceOf(feeReceiver),bU=await C(p,t).balanceOf(U),q=10n*W;
+   await need(k,'deposit(uint256,address)',[q,U],U,{check:async()=>{eq(await C(p,t).balanceOf(U),bU-q);eq(await C(p,t).balanceOf(feeReceiver),bfee+q/100n);assert(await N[k].balanceOf(U)>0n);}});
+   let b=await N[k].balanceOf(U),shares=b/20n;
+   await act(k,'approve',[V,shares],U,{check:async()=>eq(await N[k].allowance(U,V),shares)});
+   const vpre=await C(p,t).balanceOf(V);await act(k,'redeem',[shares,V,U],V,{check:async()=>{eq(await N[k].balanceOf(U),b-shares);eq(await N[k].allowance(U,V),0n);assert(await C(p,t).balanceOf(V)>vpre);}});
+   await act(k,'deposit(uint256,address)',[0n,U],U,{reject:'VaultZeroDeposit'});await act(k,'deposit(uint256,address)',[W,ZERO],U,{reject:'VaultInvalidReceiver'});
+   await act(k,'mint(uint256,address)',[0n,U],U,{reject:'VaultZeroShares'});
+   await act(k,'redeem',[1n,ZERO,U],U,{reject:'VaultInvalidReceiver'});await act(k,'withdraw(uint256,address,address)',[0n,U,U],U,{reject:'VaultZeroAssets'});
+   b=await N[k].balanceOf(U);await act(k,'redeem',[b+1n,U,U],U,{reject:'VaultInsufficientShares'});
+   await act(k,'emergencyWithdraw',[b/20n,MAX],U,{reject:'VaultEmergencyMinAssetsOut'});
+   await act(k,'emergencyWithdraw',[b/20n,0n],U,{check:async()=>eq(await N[k].balanceOf(U),b-b/20n)});
+   if(k==='rvault'){
+     b=await N[k].balanceOf(U);await act(k,'requestWithdrawal',[b/10n],U,{check:async()=>assert((await N[k].pendingWithdrawal(U)).shares>0n)});
+     await act(k,'requestWithdrawal',[b/10n],U,{reject:'VaultPendingWithdrawalExists'});await act(k,'withdrawQueuedImmediate',[],U,{check:async()=>eq((await N[k].pendingWithdrawal(U)).shares,0n)});
+   }
+   // Real share-vault donation, no token supply manipulation in the tested vault.
+   const oldPps=await N[k].getPricePerFullShare(),oldBal=await N[k].totalAssets();
+   await ext(C(p,t),'transfer',[A[k],W/10n],U,{check:async()=>eq(await N[k].totalAssets(),oldBal+W/10n)});
+   await act(k,'earn',[],V,{check:async()=>assert(await N[k].getPricePerFullShare()>0n)});
+   await warp(43201);await act(k,'updateAPY',[],U,{check:async()=>assert(await N[k].apyCount()>0n)});
+  });
+ }
+ await scenario('SUPPLEMENT staking PoL escrow, distinct reward streams and protocol-only callbacks',async()=>{
+   await lock(100n*W);await stake(40n*W);await fund(SDT,U,40n*W);await fund(USDC,U,20n*10n**6n);
+   await own('locker','setPoLDepositShare',[0,ZERO],async()=>eq(await N.locker.poLDepositShareBps(),0n));
+   await own('staking','setLpBribeRevenueShare',[1000,V],async()=>eq(await N.staking.lpBribeRevenueShareBps(),1000n));
+   for(const [t,q] of [[SDT,10n*W],[SDT,5n*W],[USDC,10n*10n**6n]]){
+     await ext(C(p,t),'transfer',[A.locker,q],U,{check:async()=>assert(await C(p,t).balanceOf(A.locker)>=q)});
+     await act('locker','forwardRevenue',[],V,{check:async()=>eq(await C(p,t).balanceOf(A.locker),0n)});
+   }
+   const pending=await N.staking.pendingPoLRevenue(SDT);await own('locker','setPoLDepositShare',[2500,manager],async()=>eq(await N.locker.poLDepositShareBps(),2500n));
+   let pre=await C(p,SDT).balanceOf(manager);await act('staking','forwardPendingPoLRevenue',[SDT],U,{check:async()=>{eq(await C(p,SDT).balanceOf(manager),pre+pending);eq(await N.staking.pendingPoLRevenue(SDT),0n);}});
+   let count=await N.staking.pendingConversionCount();
+   for(let i=0n;i<count;i++){let a=await act('staking','convertExcess',[i],U,{check:async()=>assert((await N.staking.pendingConversions(i)).converted)});if(a.status==='PASS_ASSERTED')await act('staking','convertExcess',[i],U,{reject:'NoPendingExcess'});}
+   await warp(WEEK+1);const before=await N.staking.earned(U,A.token);await act('staking','claimRewardsSelf',[],U,{check:async()=>{eq(await N.staking.earned(U,A.token),0n);assert(before>=0n);}});
+   await act('staking','forwardPendingPoLRevenue',[A.token],U,{reject:'InvalidUnderlyingToken'});
+ });
+ // Owner controls on the actual existing PoL manager, not a replacement/mock.
+ await scenario('SUPPLEMENT live PoL manager configuration and guarded investment paths',async()=>{
+   const a=C(p,manager,[
+     'error Unauthorized()','error Invalid()','error State()','error Slippage()',
+     'function owner() view returns(address)','function pendingOwner() view returns(address)','function guardian() view returns(address)','function paused() view returns(bool)','function operators(address) view returns(bool)',
+     'function setOperator(address,bool)','function setGuardian(address)','function setPaused(bool)','function setProfitRecipient(address)','function profitRecipient() view returns(address)','function setProfitFee(uint16)','function profitFeeBps() view returns(uint16)','function setSafetyLimits(uint16,uint16)','function setLiquidityBounds(address)','function liquidityBounds() view returns(address)','function setCurveSlippageBps(uint16)','function curveSlippageBps() view returns(uint16)','function setUniSlippageBps(uint16)','function uniSlippageBps() view returns(uint16)',
+     'function configureCurvePool(address,address)','function configureCurveGauge(address)','function configureUniswapPosition(address,uint256)','function curvePool() view returns(address)','function curveLp() view returns(address)','function curveGauge() view returns(address)','function uniNftManager() view returns(address)','function uniTokenId() view returns(uint256)',
+     'function setAllocations(uint16[7])','function allocations(uint256) view returns(uint16)','function setModuleEnabled(uint8,bool,bool)','function allocationEnabledMask() view returns(uint8)','function harvestEnabledMask() view returns(uint8)','function setVault(uint8,address)','function vaults(uint256) view returns(address)','function setMorphoV2(uint8,bool)','function morphoV2(uint256) view returns(bool)',
+     'function depositCurve(uint256) returns(uint256)','function withdrawCurve(uint256,bool) returns(uint256)','function depositVault(uint8,uint256,uint256) returns(uint256)','function redeemVault(uint8,uint256,uint256) returns(uint256)','function currentPPS(uint8) view returns(uint256)','function addUniLiquidity(uint256,uint256) returns(uint128,uint256,uint256)','function removeUniLiquidity(uint256) returns(uint256,uint256)','function rebalanceUniTokens(address,uint256) returns(uint256)','function withdrawUniNFT(address)','function allocateFunds(address,uint256)','function migrate((uint8,uint8,uint256,uint256)) returns(uint256)','function harvest(uint8) returns(uint256)',
+     'function setBuyLevels(uint256[5],uint256[5])','function buyLevels(uint256) view returns(uint256,uint256)','function resetSwapRateAllocationWatermark()','function buySpentSDT() view returns(uint256)','function swapForCyvlSDT(uint256) returns(uint256,uint256,uint256)','function rescueToken(address,address,uint256)','function proposeOwner(address)','function acceptOwner()','function onERC721Received(address,address,uint256,bytes) returns(bytes4)'
+   ]);
+   const ownPol=async(f,args,check)=>{await ext(a,f,args,U,{reject:'Unauthorized'});return ext(a,f,args,EOA,{check});};
+   await ownPol('setOperator',[K,true],async()=>assert(await a.operators(K)));await ownPol('setGuardian',[V],async()=>eq(low(await a.guardian()),low(V)));
+   await ext(a,'setPaused',[true],V,{check:async()=>assert(await a.paused())});await ext(a,'setPaused',[false],V,{reject:'Unauthorized'});await ownPol('setPaused',[false],async()=>assert(!(await a.paused())));
+   await ownPol('setProfitRecipient',[A.locker],async()=>eq(low(await a.profitRecipient()),low(A.locker)));
+   await ownPol('setProfitFee',[500],async()=>eq(await a.profitFeeBps(),500n));await ownPol('setSafetyLimits',[100,100]);
+   await ownPol('setLiquidityBounds',[await a.liquidityBounds()],async()=>assert((await a.liquidityBounds())!==ZERO));
+   await ownPol('setCurveSlippageBps',[75],async()=>eq(await a.curveSlippageBps(),75n));await ownPol('setUniSlippageBps',[75],async()=>eq(await a.uniSlippageBps(),75n));
+   let cp=await a.curvePool(),lp=await a.curveLp(),cg=await a.curveGauge();
+   await ownPol('configureCurvePool',[cp,lp]);await ownPol('configureCurveGauge',[cg]);await ownPol('configureUniswapPosition',[await a.uniNftManager(),await a.uniTokenId()]);
+   let allocations=[];for(let i=0;i<7;i++)allocations.push(await a.allocations(i));await ownPol('setAllocations',[allocations]);
+   await ownPol('setModuleEnabled',[0,true,true],async()=>assert((await a.allocationEnabledMask())&1n));
+   await fund(SDT,U,100n*W);await ext(C(p,SDT),'transfer',[manager,100n*W],U,{check:async()=>assert(await C(p,SDT).balanceOf(manager)>=100n*W)});
+   let dep=await ext(a,'depositCurve',[W],K,{check:async row=>assert(row.staticResult>0n)});
+   if(dep.status==='PASS_ASSERTED')await ext(a,'withdrawCurve',[dep.staticResult/10n,true],K,{check:async row=>assert(row.staticResult>0n)});
+   for(let i=0;i<5;i++){let v=await a.vaults(i);if(v===ZERO)continue;await ownPol('setVault',[i,v]);await ownPol('setMorphoV2',[i,await a.morphoV2(i)]);const t=await soft(()=>C(p,v,['function asset() view returns(address)']).asset());if(typeof t!=='string')continue;
+      let d=await C(p,t).decimals();let amount=10n**BigInt(d);await fund(t,U,amount);await ext(C(p,t),'transfer',[manager,amount],U);
+      let row=await ext(a,'depositVault',[i,amount,1n],K,{check:async r=>assert(r.staticResult>0n)});if(row.status==='PASS_ASSERTED')await ext(a,'redeemVault',[i,row.staticResult/10n,1n],K,{check:async r=>assert(r.staticResult>0n)});
+   }
+   await ext(a,'allocateFunds',[SDT,W],K);await ext(a,'harvest',[await a.harvestEnabledMask()],K);
+   await ext(a,'swapForCyvlSDT',[W],K);await ownPol('resetSwapRateAllocationWatermark',[],async()=>eq(await a.buySpentSDT(),0n));
+   let prices=[],limits=[];for(let i=0;i<5;i++){let r=await a.buyLevels(i);prices.push(r[0]);limits.push(r[1]);}await ownPol('setBuyLevels',[prices,limits]);
+   await ext(a,'migrate',[[0,1,W/10n,1]],K);
+   await ext(a,'addUniLiquidity',[W/100n,W/100n],K);await ext(a,'rebalanceUniTokens',[SDT,W/100n],K);await ext(a,'removeUniLiquidity',[1],K);
+   await ext(a,'onERC721Received',[U,U,await a.uniTokenId(),'0x'],U,{reject:'Invalid'});
+   await ownPol('rescueToken',[SDT,V,W/100n]);await ownPol('withdrawUniNFT',[V]);
+   await ownPol('proposeOwner',[V],async()=>eq(low(await a.pendingOwner()),low(V)));await ext(a,'acceptOwner',[],V,{check:async()=>eq(low(await a.owner()),low(V))});
+ });
+ // Compare unmanipulated victim and attacker-only round trip to real sandwich with deposit and redemption.
+ for(const [k,strat,t,slip] of [['svault','yearn',SDT,200],['fxnVault','fxn',SDFXN,75]]){
+  for(const direction of [0,1])for(const bps of [100,500,1500])for(const mode of ['deposit','redeem']){
+   await scenario('SUPPLEMENT guarded '+mode+' '+k+' direction '+direction+' reserve bps '+bps,async()=>{
+    const poolAddr=strat==='yearn'?await N.yearn.CURVE_LP():await N.fxn.curvePool(),guardAddr=await N[strat].curveLiquidityGuard(),idx=strat==='yearn'?'uint256':'int128';
+    const pool=C(p,poolAddr,['function coins(uint256) view returns(address)','function balances(uint256) view returns(uint256)','function price_oracle() view returns(uint256)','function calc_token_amount(uint256[2],bool) view returns(uint256)','function calc_withdraw_one_coin(uint256,'+idx+') view returns(uint256)','function exchange('+idx+','+idx+',uint256,uint256) returns(uint256)']);
+    const guard=C(p,guardAddr,guardABI);
+    if(k==='fxnVault')await own('fxn','setAllocationTargets',[0,10000],async()=>eq((await N.fxn.allocationTargets())[1],10000n));
+    await fund(t,U,100n*W);await approve(t,A[k],U);
+    const q=10n*W;let shares=0n;
+    if(mode==='redeem'){await need(k,'deposit(uint256,address)',[q*2n,U],U,{check:async()=>assert(await N[k].balanceOf(U)>0n)});shares=(await N[k].balanceOf(U))/2n;if(k==='fxnVault'&&await N.fxn.lpBalance()===0n)throw Error('Convex position not invested; cannot prove guarded redemption');}
+    const input=await pool.coins(direction),output=await pool.coins(1-direction),reserve=await pool.balances(direction),size=reserve*BigInt(bps)/10000n;
+    await fund(input,X,size);await approve(input,poolAddr,X);await approve(output,poolAddr,X);
+    const base=await p.send('evm_snapshot',[]),baseIn=await C(p,input).balanceOf(X),baseOut=await C(p,output).balanceOf(X);
+    const functionName=mode==='deposit'?'deposit(uint256,address)':'redeem(uint256,address,address)',args=mode==='deposit'?[q,U]:[shares,U,U];
+    const initialAsset=await C(p,t).balanceOf(U),initialShare=await N[k].balanceOf(U);
+    const quoteSize=mode==='deposit'?q:(strat==='yearn'?await N.yearn.totalCurveLp():await N.fxn.lpBalance())/2n;
+    const readQuote=async()=>mode==='deposit'?soft(()=>guard.quoteDeposit(poolAddr,1,quoteSize,slip)):soft(()=>guard.quoteWithdraw(poolAddr,1,quoteSize,slip));
+    const baseQuote=await readQuote(),baseSpot=await soft(()=>mode==='deposit'?pool.calc_token_amount([0n,quoteSize],true):pool.calc_withdraw_one_coin(quoteSize,1)),oracleBefore=await soft(()=>pool.price_oracle());
+    let control=await act(k,functionName,args,U,{check:async()=>assert(mode==='deposit'?await N[k].balanceOf(U)>initialShare:await C(p,t).balanceOf(U)>initialAsset)});
+    const controlDelta=mode==='deposit'?await N[k].balanceOf(U)-initialShare:await C(p,t).balanceOf(U)-initialAsset;
+    await p.send('evm_revert',[base]);signers.clear();
+    const attackControl=await p.send('evm_snapshot',[]);
+    const front=async()=>ext(pool,'exchange',[direction,1-direction,size,0],X,{check:async()=>assert(await C(p,output).balanceOf(X)>baseOut)});
+    const back=async()=>{const obtained=await C(p,output).balanceOf(X)-baseOut;if(obtained<=0n)throw Error('no swap output');return ext(pool,'exchange',[1-direction,direction,obtained,0],X,{check:async()=>assert(await C(p,input).balanceOf(X)>baseIn-size)});};
+    let r=await front();if(r.status!=='PASS_ASSERTED')throw Error('front-run control failed');r=await back();if(r.status!=='PASS_ASSERTED')throw Error('back-run control failed');
+    const controlAttacker=await C(p,input).balanceOf(X)-baseIn;
+    await p.send('evm_revert',[attackControl]);signers.clear();
+    r=await front();if(r.status!=='PASS_ASSERTED')throw Error('front-run failed');
+    const movedQuote=await readQuote(),movedSpot=await soft(()=>mode==='deposit'?pool.calc_token_amount([0n,quoteSize],true):pool.calc_withdraw_one_coin(quoteSize,1)),oracleMoved=await soft(()=>pool.price_oracle()),peg=await soft(()=>N.fxn.sdFxnToFxnWad());
+    const victim=await act(k,functionName,args,U,{check:async()=>assert(mode==='deposit'?await N[k].balanceOf(U)>initialShare:await C(p,t).balanceOf(U)>initialAsset)});
+    const victimDelta=mode==='deposit'?await N[k].balanceOf(U)-initialShare:await C(p,t).balanceOf(U)-initialAsset,rollback=(await C(p,t).balanceOf(U))===initialAsset&&(await N[k].balanceOf(U))===initialShare;
+    const backRun=await back(),attackerNet=await C(p,input).balanceOf(X)-baseIn;
+    const incrementalProfit=attackerNet-controlAttacker;
+    const adverseBps=controlDelta>0n?(controlDelta-victimDelta)*10000n/controlDelta:null;
+    const classification=control.status!=='PASS_ASSERTED'?'INCONCLUSIVE_CONTROL_FAILED':victim.status==='FAIL'&&rollback?'VICTIM_REVERTED_ATOMICALLY_CHECK_REVERT_CAUSE':victim.status==='PASS_ASSERTED'&&incrementalProfit<=0n?'EXECUTED_NO_INCREMENTAL_ATTACKER_GAIN':victim.status==='PASS_ASSERTED'&&incrementalProfit>0n?'EXECUTED_INCREMENTAL_ATTACKER_GAIN_REVIEW':'INCONCLUSIVE';
+    const result={k,strat,mode,direction,bps,size,input,output,slip,baseQuote,movedQuote,baseSpot,movedSpot,oracleBefore,oracleMoved,peg,controlStatus:control.status,controlDelta,victimStatus:victim.status,victimDelta,victimError:victim.error,rollback,backRunStatus:backRun.status,controlAttacker,attackerNet,incrementalProfit,adverseBps,classification};
+    report.sandwich.push(result);log('SANDWICH',result);
+   });
+  }
+ }
+
  // ABI inventory: explicit, state-meaningful calls first; read each getter using representative live state.
  scenarioName='ABI inventory';const abiRows=[];
  for(const [k,t] of Object.entries(N)){
