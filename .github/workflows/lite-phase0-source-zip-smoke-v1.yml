@@ -1,16 +1,15 @@
-name: PoL manager v26 five generic vault slots and consolidation
+name: StableSwap NG ERC4626 redemption rate fork evidence v1
 on:
   push:
     branches: [cyvlsdt-v69-postdeploy-simulation-v1]
-    paths: ['.github/workflows/lite-phase0-source-zip-smoke-v1.yml', 'github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json', 'github-native-sim/cyvlsdt-runtime-compare-v1/v69-postdeploy-suite-v1.cjs']
+    paths: ['.github/workflows/lite-phase0-source-zip-smoke-v1.yml']
 permissions:
   contents: read
 jobs:
-  fork-gas:
+  oracle-fork:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 12
     env:
-      FOUNDRY_OPTIMIZER_RUNS: '25'
       UPSTREAM_RPC: ${{ secrets.RPC_ETHEREUM }}
     steps:
       - uses: actions/checkout@v4
@@ -22,44 +21,86 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Compile v25 and v26 with identical production settings
+      - name: Run isolated historical fork experiment
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/pol-v26-report
-          python3 - <<'PY'
-          import json,pathlib,difflib
-          c=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())['polManagerV26']
-          out=pathlib.Path('/tmp/pol-v26-report')
-          for version,part in [('v25',c['baseline']),('v26',c['candidate'])]:
-              root=pathlib.Path('/tmp/pol-'+version);root.mkdir(exist_ok=True)
-              f=root/part['path'];f.parent.mkdir(exist_ok=True);f.write_text(part['source'])
-              (out/f.name).write_text(part['source'])
-              (root/'foundry.toml').write_text('[profile.default]\nsrc="contracts"\nsolc_version="0.8.28"\noptimizer=true\noptimizer_runs=25\nvia_ir=true\nevm_version="cancun"\n')
-          (out/'PoL-v26-source-diff.patch').write_text(''.join(difflib.unified_diff(c['baseline']['source'].splitlines(keepends=True),c['candidate']['source'].splitlines(keepends=True),fromfile=c['baseline']['path'],tofile=c['candidate']['path'])))
-          (out/'PoL-v26-config.json').write_text(json.dumps(c['intendedConfig'],indent=2))
-          PY
-          FOUNDRY_OPTIMIZER_RUNS=25 forge build --root /tmp/pol-v25 --skip test --skip script
-          FOUNDRY_OPTIMIZER_RUNS=25 forge build --root /tmp/pol-v26 --skip test --skip script
-          python3 - <<'PY'
-          import json,pathlib
-          out=pathlib.Path('/tmp/pol-v26-report')
-          def read(v):return json.loads(pathlib.Path('/tmp/pol-'+v+'/out/PoL_Manager_Contract_'+v+'.sol/PoLManager.json').read_text())
-          a,b=read('v25'),read('v26')
-          def size(o):return {k:len(bytes.fromhex(o[k]['object'].removeprefix('0x'))) for k in ['bytecode','deployedBytecode']}
-          def signatures(o):return {f['name']+'('+','.join(x['type'] for x in f['inputs'])+')' for f in o['abi'] if f['type']=='function'}
-          x,y=size(a),size(b)
-          assert x=={'bytecode':25886,'deployedBytecode':22873},x
-          assert y['deployedBytecode']<=24576
-          result={'baseline':x,'candidate':y,'delta':{k:y[k]-x[k] for k in x},'removed':sorted(signatures(a)-signatures(b)),'added':sorted(signatures(b)-signatures(a)),'compiler':'0.8.28','optimizerRuns':25,'viaIR':True,'evmVersion':'cancun','testsExecuted':False}
-          (out/'PoL-v26-compilation.json').write_text(json.dumps(result,indent=2))
-          (out/'PoLManager-v26-artifact.json').write_text(json.dumps(b))
-          print('POL_V26_COMPILE',json.dumps(result),flush=True)
-          PY
-      - name: Retain PoL source and compilation evidence
+          test -n "$UPSTREAM_RPC"
+          mkdir -p /tmp/curve-oracle-v1
+          npm install --prefix /tmp/curve-oracle-v1 --ignore-scripts --no-audit --no-fund --no-save ethers@6.17.0
+          anvil --fork-url "$UPSTREAM_RPC" --fork-block-number 26484637 --host 127.0.0.1 --port 8545 --silent >/tmp/anvil-oracle-v1.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          cat >/tmp/curve-oracle-v1/run.cjs <<'JS'
+          const {ethers:E}=require('ethers'),assert=require('node:assert/strict'),fs=require('node:fs');
+          const p=new E.JsonRpcProvider('http://127.0.0.1:8545',undefined,{cacheTimeout:-1});
+          const W=10n**18n, R=10n**27n;
+          const factory='0x6a8cbed756804b16e05e741edabd5cb544ae21bf',pool='0xce6431d21e3fb1036ce9973a3312368ed96f5ce7',implementation='0xdcc91f930b42619377c200ba05b7513f2958b202',vault='0x83f20f44975d03b1b09e64809b757c47f942beea',frax='0x853d955acef822db058eb8505911ed77f175b99e',holder='0x029bb414c7d2e2798f7de8185d8e5d2fa7e84117';
+          const C=(a,b)=>new E.Contract(a,b,p),low=x=>x.toLowerCase(),j=x=>JSON.stringify(x,(_,v)=>typeof v==='bigint'?v.toString():v);
+          const erc=['function balanceOf(address) view returns(uint256)','function approve(address,uint256) returns(bool)'];
+          const f=C(factory,['function pool_implementations(uint256) view returns(address)','function get_implementation_address(address) view returns(address)','function get_pool_asset_types(address) view returns(uint8[])']);
+          const c=C(pool,['function coins(uint256) view returns(address)','function stored_rates() view returns(uint256[])','function price_oracle(uint256) view returns(uint256)','function get_p(uint256) view returns(uint256)','function get_dy(int128,int128,uint256) view returns(uint256)','function exchange(int128,int128,uint256,uint256) returns(uint256)','function balances(uint256) view returns(uint256)','function fee() view returns(uint256)']);
+          const v=C(vault,[...erc,'function convertToAssets(uint256) view returns(uint256)','function pot() view returns(address)']),a=C(frax,erc);
+          const evidence={forkBlock:26484637,factory,pool,implementation,vault,frax,holder,observations:[],swaps:[]};
+          function save(){fs.writeFileSync('/tmp/curve-oracle-v1/evidence.json',j(evidence))}
+          async function read(label){
+            const [shareRate,rates,ema,spot,quote10,quote01,b0,b1]=await Promise.all([v.convertToAssets(W),c.stored_rates(),c.price_oracle(0),c.get_p(0),c.get_dy(1,0,W),c.get_dy(0,1,W),c.balances(0),c.balances(1)]);
+            const adjusted=ema*rates[1]/rates[0],adjustedSpot=spot*rates[1]/rates[0];
+            const o={label,block:await p.getBlockNumber(),shareRate,rates:Array.from(rates),ema,spot,quote10,quote01,adjusted,adjustedSpot,rawInverse:W*W/ema,adjustedInverse:W*W/adjusted,poolBalances:[b0,b1]};
+            evidence.observations.push(o);save();console.log('ORACLE_OBSERVATION',j(o));return o;
+          }
+          async function trade(label,s,i,k){
+            const tokens=[a,v],inp=tokens[i],out=tokens[k];
+            const amount=W,quote=await c.get_dy(i,k,amount);
+            const b=await Promise.all([inp.balanceOf(holder),out.balanceOf(holder),inp.balanceOf(pool),out.balanceOf(pool)]);
+            assert(b[0]>=amount,'fixture balance');
+            const rec=await (await c.connect(s).exchange(i,k,amount,quote*999n/1000n,{gasLimit:2000000})).wait();
+            const z=await Promise.all([inp.balanceOf(holder),out.balanceOf(holder),inp.balanceOf(pool),out.balanceOf(pool)]);
+            const row={label,fromIndex:i,toIndex:k,amount,quote,hash:rec.hash,status:rec.status,before:b,after:z,actualInput:b[0]-z[0],actualOutput:z[1]-b[1],poolInput:z[2]-b[2],poolOutput:b[3]-z[3]};
+            assert.equal(rec.status,1);assert.equal(row.actualInput,amount);assert.equal(row.actualOutput,quote);assert.equal(row.poolInput,amount);assert.equal(row.poolOutput,row.actualOutput);
+            evidence.swaps.push(row);save();console.log('FORK_SWAP',j(row));
+          }
+          async function main(){
+            assert.equal(await p.getBlockNumber(),26484637);
+            assert.equal(low(await f.pool_implementations(0)),implementation);assert.equal(low(await f.get_implementation_address(pool)),implementation);
+            assert.deepEqual(Array.from(await f.get_pool_asset_types(pool)),[0n,3n]);assert.equal(low(await c.coins(0)),frax);assert.equal(low(await c.coins(1)),vault);
+            evidence.assetTypes=[0,3];
+            await p.send('anvil_impersonateAccount',[holder]);await p.send('anvil_setBalance',[holder,E.toQuantity(10n*W)]);
+            const s=await p.getSigner(holder);
+            await (await v.connect(s).approve(pool,E.MaxUint256)).wait();await (await a.connect(s).approve(pool,E.MaxUint256)).wait();
+            const baseline=await read('baseline');
+            const snap=await p.send('evm_snapshot',[]);
+            await trade('baseline share to FRAX',s,1,0);await trade('baseline FRAX to share',s,0,1);
+            assert(await p.send('evm_revert',[snap]));
+            const pot=low(await v.pot()),pc=C(pot,['function chi() view returns(uint256)','function dsr() view returns(uint256)']);
+            const chi=await pc.chi();
+            // Only isolated Anvil fixture state is changed. Validate the verified layout against the live getter first.
+            const slot=E.toBeHex(4,32);assert.equal(BigInt(await p.getStorage(pot,slot)),chi);
+            const next=chi*110n/100n;
+            await p.send('anvil_setStorageAt',[pot,slot,E.toBeHex(next,32)]);
+            await p.send('evm_mine',[]);
+            assert.equal(await pc.chi(),next);
+            const changed=await read('redemption value raised 10 percent; before Curve interaction');
+            assert(changed.shareRate*1000n/baseline.shareRate>=1099n);assert(changed.shareRate*1000n/baseline.shareRate<=1101n);
+            await trade('appreciated share to FRAX',s,1,0);await trade('appreciated FRAX to share',s,0,1);
+            await read('after actual exchanges');
+            await p.send('evm_increaseTime',[3600]);await p.send('evm_mine',[]);
+            const final=await read('after one hour of EMA adjustment');
+            const dist=(x,y)=>x>y?x-y:y-x;
+            evidence.comparison={rawErrorBefore:dist(baseline.ema,baseline.quote10),adjustedErrorBefore:dist(baseline.adjusted,baseline.quote10),rawErrorImmediately:dist(changed.ema,changed.quote10),adjustedErrorImmediately:dist(changed.adjusted,changed.quote10),rawErrorAfterEMA:dist(final.ema,final.quote10),adjustedErrorAfterEMA:dist(final.adjusted,final.quote10),shareRateChangeBps:(changed.shareRate-baseline.shareRate)*10000n/baseline.shareRate,rawOracleChangeBps:(changed.ema-baseline.ema)*10000n/baseline.ema,quoteChangeBps:(changed.quote10-baseline.quote10)*10000n/baseline.quote10};
+            save();console.log('ORACLE_COMPARISON',j(evidence.comparison));
+          }
+          main().catch(e=>{console.error(e);save();process.exitCode=1});
+          JS
+          node /tmp/curve-oracle-v1/run.cjs
+      - name: Retain experiment evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CurveYield-PoL-Manager-v26
-          path: /tmp/pol-v26-report/
-          if-no-files-found: error
+          name: Curve-ERC4626-oracle-fork-v1
+          path: /tmp/curve-oracle-v1/evidence.json
+          if-no-files-found: warn
