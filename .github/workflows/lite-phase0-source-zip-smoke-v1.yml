@@ -1,7 +1,7 @@
-name: cyvlSDT v66 unified FXN and shared vault Safe fork
+name: cyvlSDT v67 strict two-batch maximum packing
 on:
   push:
-    branches: [cyvlsdt-v66-unified-fxn-safe-fork-v1]
+    branches: [cyvlsdt-v67-two-batch-max-v1]
     paths: ['github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json']
 permissions:
   contents: read
@@ -55,6 +55,7 @@ jobs:
           p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
           exec(compile(p['transform'],'v65-transform','exec'))
           exec(compile(p['unifiedTransform'],'v66-transform','exec'))
+          exec(compile(p['packingTransform'],'v67-transform','exec'))
           PY
       - name: Compile original and revised artifacts and optimizer sweep
         shell: bash
@@ -62,6 +63,7 @@ jobs:
           set -euo pipefail
           forge build --root /tmp/cyv64 --skip test --skip script
           FOUNDRY_OPTIMIZER_RUNS=25 FOUNDRY_OUT=out-25 forge build --root /tmp/cyv65 --force --skip test --skip script
+          FOUNDRY_OPTIMIZER_RUNS=1 FOUNDRY_OUT=out-1 forge build --root /tmp/cyv65 --force --skip test --skip script
       - name: Sequential original and optimized Safe batch simulations
         shell: bash
         run: |
