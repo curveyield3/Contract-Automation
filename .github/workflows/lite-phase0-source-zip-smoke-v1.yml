@@ -1,14 +1,14 @@
-name: cyvlSDT v67 strict two-batch maximum packing
+name: cyvlSDT v69 comprehensive post-deployment usage simulation
 on:
   push:
-    branches: [cyvlsdt-v67-two-batch-max-v1]
-    paths: ['github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json']
+    branches: [cyvlsdt-v69-postdeploy-simulation-v1]
+    paths: ['.github/workflows/lite-phase0-source-zip-smoke-v1.yml', 'github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json', 'github-native-sim/cyvlsdt-runtime-compare-v1/v69-postdeploy-suite-v1.cjs']
 permissions:
   contents: read
 jobs:
   fork-gas:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 90
     env:
       UPSTREAM_RPC: ${{ secrets.RPC_ETHEREUM }}
     steps:
@@ -63,12 +63,12 @@ jobs:
           set -euo pipefail
           forge build --root /tmp/cyv64 --skip test --skip script
           FOUNDRY_OPTIMIZER_RUNS=25 FOUNDRY_OUT=out-25 forge build --root /tmp/cyv65 --force --skip test --skip script
-      - name: Sequential original and optimized Safe batch simulations
+      - name: Exact Safe batch deployment, EOA setup and post-deployment fork scenarios
         shell: bash
         run: |
           set -euo pipefail
           test -n "$UPSTREAM_RPC"
-          BLOCK=$(cast block-number --rpc-url "$UPSTREAM_RPC")
+          BLOCK=26482950
           echo "FORK_BLOCK=$BLOCK"
           export FORK_BLOCK="$BLOCK"
           anvil --fork-url "$UPSTREAM_RPC" --fork-block-number "$BLOCK" --host 127.0.0.1 --port 8545 --silent >/tmp/anvil.log 2>&1 &
@@ -85,3 +85,10 @@ jobs:
           pathlib.Path('/tmp/cyv64/stages.json').write_text(json.dumps(p['stages']))
           PY
           node /tmp/cyv64/replay.cjs
+      - name: Retain complete post-deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CurveYield-cyvlSDT-PostDeployment-Simulation-v1
+          path: /tmp/v69-report/
+          if-no-files-found: warn
