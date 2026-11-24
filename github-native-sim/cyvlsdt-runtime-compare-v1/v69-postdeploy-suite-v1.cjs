@@ -5,7 +5,7 @@ const SDT='0x73968b9a57c6e53d41345fd57a6e6ae27d6cdb2f',USDC='0xa0b86991c6218b36c
 const erc=['function balanceOf(address) view returns(uint256)','function totalSupply() view returns(uint256)','function transfer(address,uint256) returns(bool)','function transferFrom(address,address,uint256) returns(bool)','function approve(address,uint256) returns(bool)','function allowance(address,address) view returns(uint256)','function decimals() view returns(uint8)'];
 const ercI=new E.Interface(erc),transferTopic=E.id('Transfer(address,address,uint256)'),approvalTopic=E.id('Approval(address,address,uint256)');
 const J=x=>JSON.stringify(x,(_,v)=>typeof v==='bigint'?v.toString():v);
-const report={version:6,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
+const report={version:7,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
 const cleanError=e=>({message:String(e.shortMessage||e.message||e).slice(0,2000),data:e.data||e.info?.error?.data||null});
 const low=x=>String(x).toLowerCase();
 fs.mkdirSync(OUT,{recursive:true});
@@ -88,7 +88,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
  async function need(k,f,args,caller=U,opts={}){const r=await act(k,f,args,caller,opts);if(!['PASS_ASSERTED','EXECUTED_TRANSFER_UNASSERTED','EXECUTED_NO_TRANSFER','EXPECTED_REVERT'].includes(r.status))throw Error('prerequisite '+k+'.'+f+' '+r.status);return r;}
  async function ext(t,f,args,caller=U,opts={}){return act('external:'+await t.getAddress(),f,args,caller,{...opts,contract:t});}
  async function scenario(label,fn){
-   if(!label.startsWith('DEPENDENCY '))return;scenarioName=label;let snap=await p.send('evm_snapshot',[]),start=report.actions.length;
+   if(!label.startsWith('SUPPLEMENT guarded redeem svault ')||!label.includes('victim bps 500'))return;scenarioName=label;let snap=await p.send('evm_snapshot',[]),start=report.actions.length;
    try{await fn();report.scenarios.push({label,status:'COMPLETED',actions:report.actions.length-start});}
    catch(e){report.scenarios.push({label,status:'BLOCKED_OR_FAILED',error:cleanError(e),actions:report.actions.length-start});log('SCENARIO_ERROR',{label,error:cleanError(e)});}
    finally{await p.send('evm_revert',[snap]);signers.clear();save();}
@@ -450,7 +450,18 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
     if(k==='fxnVault')await own('fxn','setAllocationTargets',[0,10000],async()=>eq((await N.fxn.allocationTargets())[1],10000n));
     const q=(await pool.balances(1))*BigInt(victimBps)/10000n;assert(q>10n*W);await fund(t,U,q*4n);await approve(t,A[k],U);
     let shares=0n;
-    if(mode==='redeem'){await need(k,'deposit(uint256,address)',[q*2n,U],U,{check:async()=>assert(await N[k].balanceOf(U)>0n)});shares=(await N[k].balanceOf(U))/2n;if(k==='fxnVault'&&await N.fxn.lpBalance()===0n)throw Error('Convex position not invested; cannot prove guarded redemption');}
+    if(mode==='redeem'){
+       const step=q/5n;
+       for(let i=0;i<10;i++){
+         let pre=await N[k].balanceOf(U);
+         let row=await act(k,'deposit(uint256,address)',[step,U],U,{purpose:'staged initial position, not a victim trade',check:async()=>assert(await N[k].balanceOf(U)>pre)});
+         if(row.status!=='PASS_ASSERTED')break;
+         await warp(3601);
+       }
+       const held=await N[k].balanceOf(U),target=await N[k].convertToShares(q);
+       if(held<target)throw Error('Staged guarded deposits could not establish the full requested redemption position');
+       shares=target;
+     }
     const input=await pool.coins(direction),output=await pool.coins(1-direction),reserve=await pool.balances(direction),size=reserve*BigInt(bps)/10000n;
     await fund(input,X,size);await approve(input,poolAddr,X);await approve(output,poolAddr,X);
     const base=await p.send('evm_snapshot',[]),baseIn=await C(p,input).balanceOf(X),baseOut=await C(p,output).balanceOf(X);
