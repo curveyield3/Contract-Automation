@@ -1,7 +1,7 @@
-name: cyvlSDT v65 isolated deployment optimization fork v1
+name: cyvlSDT v66 unified FXN and shared vault Safe fork
 on:
   push:
-    branches: [cyvlsdt-v65-deployment-optimization-fork-v1]
+    branches: [cyvlsdt-v66-unified-fxn-safe-fork-v1]
     paths: ['github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json']
 permissions:
   contents: read
@@ -54,21 +54,22 @@ jobs:
           import json,pathlib
           p=json.loads(pathlib.Path('github-native-sim/cyvlsdt-runtime-compare-v1/config-safe-mainnet-v51.json').read_text())
           exec(compile(p['transform'],'v65-transform','exec'))
+          exec(compile(p['unifiedTransform'],'v66-transform','exec'))
           PY
       - name: Compile original and revised artifacts and optimizer sweep
         shell: bash
         run: |
           set -euo pipefail
           forge build --root /tmp/cyv64 --skip test --skip script
-          for RUNS in 200 1 25 50; do
-            FOUNDRY_OPTIMIZER_RUNS="$RUNS" FOUNDRY_OUT="out-$RUNS" forge build --root /tmp/cyv65 --force --skip test --skip script
-          done
+          FOUNDRY_OPTIMIZER_RUNS=25 FOUNDRY_OUT=out-25 forge build --root /tmp/cyv65 --force --skip test --skip script
       - name: Sequential original and optimized Safe batch simulations
         shell: bash
         run: |
           set -euo pipefail
           test -n "$UPSTREAM_RPC"
-          BLOCK=26481652
+          BLOCK=$(cast block-number --rpc-url "$UPSTREAM_RPC")
+          echo "FORK_BLOCK=$BLOCK"
+          export FORK_BLOCK="$BLOCK"
           anvil --fork-url "$UPSTREAM_RPC" --fork-block-number "$BLOCK" --host 127.0.0.1 --port 8545 --silent >/tmp/anvil.log 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
