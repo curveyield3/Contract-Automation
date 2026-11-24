@@ -1320,7 +1320,7 @@ jobs:
           retention-days: 7
 
   dai-inference-benchmark:
-    name: ${{ matrix.model.label }} / ${{ matrix.config.id }} - exact DAI r12 benchmark v1
+    name: ${{ matrix.model.label }} / ${{ matrix.config.id }} - exact DAI r12 benchmark retry v2
     if: github.event_name == 'push' && github.ref_name == 'autoprover-dai-inference-benchmark-v1'
     runs-on: ubuntu-latest
     timeout-minutes: 150
@@ -1329,13 +1329,9 @@ jobs:
       max-parallel: 5
       matrix:
         config:
-          - {"id":"01-deterministic","temp":"0.0","top_p":"1.0","top_k":1,"budget":0,"effort":"low","passes":1}
-          - {"id":"02-conservative","temp":"0.1","top_p":"0.9","top_k":20,"budget":1024,"effort":"low","passes":1}
-          - {"id":"03-balanced","temp":"0.3","top_p":"0.95","top_k":40,"budget":2048,"effort":"medium","passes":1}
-          - {"id":"04-extended","temp":"0.2","top_p":"0.95","top_k":40,"budget":8192,"effort":"high","passes":1}
-          - {"id":"05-self-correction","temp":"0.1","top_p":"0.9","top_k":20,"budget":2048,"effort":"medium","passes":2}
+          - {"id":"04-extended","temp":"0.2","top_p":"0.95","top_k":40,"budget":1024,"effort":"high","passes":1}
+          - {"id":"05-self-correction","temp":"0.1","top_p":"0.9","top_k":20,"budget":768,"effort":"medium","passes":2}
         model:
-          - {"id":"qwen","label":"Qwen2.5-Coder-7B-Instruct","repo":"Qwen/Qwen2.5-Coder-7B-Instruct-GGUF","revision":"13fb94bfda8c8cf22497dc57b78f391a9acb426a","file":"qwen2.5-coder-7b-instruct-q4_k_m.gguf","sha":"509287f78cb4d4cf6b3843734733b914b2c158e43e22a7f4bf5e963800894d3c"}
           - {"id":"gpt-oss","label":"GPT-OSS-20B","repo":"ggml-org/gpt-oss-20b-GGUF","revision":"b97cbb20d1995efd41dce8c4dd1ddf86e8db375b","file":"gpt-oss-20b-MXFP4.gguf","sha":"27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901"}
     permissions:
       contents: read
@@ -1476,6 +1472,9 @@ jobs:
           def abort_stall(signum, frame):
               raise TimeoutError("No observed prompt/token progress for 180 seconds")
           signal.signal(signal.SIGUSR1, abort_stall)
+          def abort_answer_stall(signum, frame):
+              raise TimeoutError("No final-answer growth for 600 seconds; reasoning activity does not count")
+          signal.signal(signal.SIGUSR2, abort_answer_stall)
           def token_estimate(text):
               if not text:
                   return 0
@@ -1487,13 +1486,18 @@ jobs:
                   return None
           def replay(number, payload):
               request = json.loads(payload)
+              base_sha = hashlib.sha256(payload).hexdigest()
+              # Only transport/inference settings are added. Messages and schema stay intact.
+              request["reasoning_control"] = True
+              request["reasoning_budget_tokens"] = int(env["BENCH_BUDGET"])
+              payload = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode()
               stream = _NativeStream(number, "component_analysis_schema", request)
               start = time.monotonic()
               before = resources()
               stop = threading.Event()
               last_report = start
               answer_index = reasoning_index = 0
-              result = {"pass": number, "status": "REJECTED", "requestSha256": hashlib.sha256(payload).hexdigest()}
+              result = {"pass": number, "status": "REJECTED", "baseRequestSha256": base_sha, "requestSha256": hashlib.sha256(payload).hexdigest(), "reasoningControlEnabled": True, "reasoningBudget": int(env["BENCH_BUDGET"]), "reasoningControlEvents": []}
               def live_output(force=False):
                   nonlocal last_report, answer_index, reasoning_index
                   now = time.monotonic()
@@ -1506,6 +1510,11 @@ jobs:
                   last_report = now
               def watchdog():
                   last_change = start
+                  last_answer = start
+                  answer_chars = 0
+                  thinking_since = None
+                  control_attempts = 0
+                  next_control = start
                   previous = None
                   task = None
                   while not stop.wait(5):
@@ -1527,8 +1536,35 @@ jobs:
                           previous = progress
                           task = current_task
                       quiet = now - last_change
-                      report = {"event": "REPLAY_LIVE_ACTIVITY", "pass": number, "promptProcessed": progress[0], "promptTotal": slot.get("n_prompt_tokens"), "generatedTokens": decoded, "answerCharacters": progress[2], "reasoningCharacters": progress[3], "ssePromptProcessed": progress[4], "isProcessing": slot.get("is_processing"), "secondsSinceProgress": round(quiet,1), "elapsedSeconds": round(now-start,1), "slotError": error, **resources()}
+                      if progress[2] > answer_chars:
+                          answer_chars = progress[2]
+                          last_answer = now
+                      answer_quiet = now - last_answer
+                      if progress[3] and thinking_since is None:
+                          thinking_since = now
+                      # Preserve time for the JSON answer, independent of the native budget sampler.
+                      # A control response is evidence of the request, not of analytical completion.
+                      if (not answer_chars and thinking_since is not None and stream.meta.get("id")
+                              and control_attempts < 2 and now >= next_control
+                              and (decoded >= int(env["BENCH_BUDGET"]) or now - thinking_since >= 150 or answer_quiet >= 450)):
+                          control_attempts += 1
+                          next_control = now + 30
+                          control_result = {"attempt": control_attempts, "generatedTokens": decoded, "elapsedSeconds": round(now-start,1)}
+                          try:
+                              data = json.dumps({"id": stream.meta["id"], "action": "reasoning_end"}).encode()
+                              control_request = urllib.request.Request("http://127.0.0.1:8080/v1/chat/completions/control", data=data, headers={"Content-Type": "application/json"}, method="POST")
+                              with urllib.request.urlopen(control_request, timeout=8) as r:
+                                  control_result["response"] = json.load(r)
+                          except Exception as exc:
+                              control_result["error"] = str(exc)
+                          result["reasoningControlEvents"].append(control_result)
+                          _progress_event({"event": "REASONING_END_CONTROL", "pass": number, **control_result})
+                      report = {"event": "REPLAY_LIVE_ACTIVITY", "pass": number, "promptProcessed": progress[0], "promptTotal": slot.get("n_prompt_tokens"), "generatedTokens": decoded, "answerCharacters": progress[2], "reasoningCharacters": progress[3], "ssePromptProcessed": progress[4], "isProcessing": slot.get("is_processing"), "secondsSinceProgress": round(quiet,1), "secondsSinceAnswerProgress": round(answer_quiet,1), "elapsedSeconds": round(now-start,1), "slotError": error, **resources()}
                       _progress_event(report)
+                      if answer_quiet >= 600 and not stop.is_set():
+                          _progress_event({**report, "event": "REPLAY_STALLED_NO_ANSWER_PROGRESS"})
+                          os.kill(os.getpid(), signal.SIGUSR2)
+                          return
                       if quiet >= 180 and not stop.is_set():
                           _progress_event({**report, "event": "REPLAY_STALLED_NO_TOKEN_PROGRESS"})
                           os.kill(os.getpid(), signal.SIGUSR1)
@@ -1539,7 +1575,7 @@ jobs:
                   http = urllib.request.Request("http://127.0.0.1:8080/v1/chat/completions", data=payload, headers={"Content-Type":"application/json"}, method="POST")
                   _wire_body("AUTOPROVER_TO_MIMO", number, payload)
                   _progress_event({"event":"REPLAY_REQUEST","requestNumber":number,"requestSha256":result["requestSha256"],"model":env["BENCH_MODEL"],"configuration":env["BENCH_CONFIG"]})
-                  print("EXACT_REQUEST_SENT" if number == 1 else "REVIEW_REQUEST_SENT", result["requestSha256"], flush=True)
+                  print("INFERENCE_CONFIGURED_REQUEST_SENT" if number == 1 else "REVIEW_REQUEST_SENT", result["requestSha256"], "BASE_REQUEST_SHA256", base_sha, flush=True)
                   watcher.start()
                   try:
                       with urllib.request.urlopen(http, timeout=240) as response, (out / f"wire-pass{number}-v1.sse").open("wb") as wire:
@@ -1602,7 +1638,7 @@ jobs:
               else:
                   passes.append({"pass":2,"status":"REJECTED","error":"No completed draft available for self-correction"})
           final = passes[-1]
-          summary = {"model":env["BENCH_MODEL_LABEL"],"configuration":env["BENCH_CONFIG"],"temperature":float(env["BENCH_TEMP"]),"topP":float(env["BENCH_TOP_P"]),"topK":int(env["BENCH_TOP_K"]),"repetitionPenalty":1.0,"seed":42,"reasoningBudgetRequested":int(env["BENCH_BUDGET"]),"reasoningBudgetApplied":int(env["BENCH_BUDGET"]) if env["BENCH_MODEL"]=="gpt-oss" else None,"reasoningEffort":env["BENCH_EFFORT"] if env["BENCH_MODEL"]=="gpt-oss" else None,"requestSha256":env["REPLAY_SHA256"],"nativeValidatorCommit":env["AUTOPROVER_SHA"],"modelSha256":env["BENCH_SHA256"],"status":final["status"],"elapsedSeconds":round(time.monotonic()-started,2),"resources":resources(),"passes":passes}
+          summary = {"model":env["BENCH_MODEL_LABEL"],"configuration":env["BENCH_CONFIG"],"temperature":float(env["BENCH_TEMP"]),"topP":float(env["BENCH_TOP_P"]),"topK":int(env["BENCH_TOP_K"]),"repetitionPenalty":1.0,"seed":42,"originalReasoningBudget":8192 if env["BENCH_CONFIG"]=="04-extended" else 2048,"answerInactivityLimitSeconds":600,"reasoningBudgetRequested":int(env["BENCH_BUDGET"]),"reasoningBudgetApplied":int(env["BENCH_BUDGET"]) if env["BENCH_MODEL"]=="gpt-oss" else None,"reasoningEffort":env["BENCH_EFFORT"] if env["BENCH_MODEL"]=="gpt-oss" else None,"requestSha256":env["REPLAY_SHA256"],"nativeValidatorCommit":env["AUTOPROVER_SHA"],"modelSha256":env["BENCH_SHA256"],"status":final["status"],"elapsedSeconds":round(time.monotonic()-started,2),"resources":resources(),"passes":passes}
           (out / "validation-v1.json").write_text(json.dumps(summary,indent=2))
           print("REPLAY_RESULT",json.dumps(summary),flush=True)
           if final["status"] != "NATIVE_VALIDATORS_ACCEPTED":
@@ -1612,7 +1648,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-${{ matrix.model.id }}-${{ matrix.config.id }}-v1
+          name: benchmark-${{ matrix.model.id }}-${{ matrix.config.id }}-v2
           path: |
             ${{ runner.temp }}/benchmark/*.json
             ${{ runner.temp }}/benchmark/*.sse
