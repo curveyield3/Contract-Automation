@@ -43,7 +43,8 @@ FORMAL_MODELS = {
         "revision": "4371da10c84fb26da3592d4cf312d24aa82b7b65",
         "sha256": "4bca6f18c73f72270c7a20c2ea2bea581de8246e318714277120369d34048c81",
         "context": 262144,
-        "flags": "--ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on --no-context-shift --reasoning-budget -1"
+        "outputTokens": 24576,
+        "flags": "--ctx-size 262144 --cache-type-k q4_0 --cache-type-v q4_0 --flash-attn on --no-context-shift --reasoning-budget 8192"
     },
     "gpt-oss-20b": {
         "alias": "lite-solo-gpt-oss-20b-v1",
@@ -1377,6 +1378,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
     head = os.environ["GITHUB_SHA"]
     model_profile = os.environ.get("CURVEYIELD_FORMAL_MODEL", "mimo")
     model = FORMAL_MODELS[model_profile]
+    initial_output_tokens = model.get("outputTokens", FORMAL_INITIAL_OUTPUT_TOKENS)
     if (mapping.get("status") != "AUTHENTICATED_SOURCE_TARGETS_READY"
             or native.get("status") != "LOCAL_TOOLCHAIN_STARTUP_VERIFIED"
             or native.get("proverGitCommit") != PROVER_COMMIT
@@ -1469,9 +1471,9 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         "modelRequestCount": None,
         "nativeProofsProved": None,
         "maxPropertyInferenceRoundsPerComponent": "UPSTREAM_DEFAULT",
-        "initialResponseTokenBudget": FORMAL_INITIAL_OUTPUT_TOKENS,
+        "initialResponseTokenBudget": initial_output_tokens,
         "modelContextTokens": model["context"],
-        "maximumResponseTokensBeforePrompt": min(FORMAL_INITIAL_OUTPUT_TOKENS, model["context"]),
+        "maximumResponseTokensBeforePrompt": min(initial_output_tokens, model["context"]),
         "nativeModelStreaming": True,
     }
     def persist():
@@ -1694,7 +1696,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "PREAUDIT_LOCAL_LLM_BASE_URL": endpoint,
             "PREAUDIT_LOCAL_LLM_MODEL": model["alias"],
             "CURVEYIELD_FORMAL_MODEL": model_profile,
-            "CURVEYIELD_FORMAL_INITIAL_OUTPUT_TOKENS": str(FORMAL_INITIAL_OUTPUT_TOKENS),
+            "CURVEYIELD_FORMAL_INITIAL_OUTPUT_TOKENS": str(initial_output_tokens),
             "CURVEYIELD_FORMAL_PROJECT_ROOT": str(project),
             "CURVEYIELD_FORMAL_TARGET_INDEX": str(index + 1),
         })
@@ -1729,7 +1731,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "--max-concurrent", "1",
             "--max-cpu-tasks", "1",
             "--run-mode", "comprehensive",
-            "--tokens", str(FORMAL_INITIAL_OUTPUT_TOKENS),
+            "--tokens", str(initial_output_tokens),
             # Native cache/checkpoint recovery, isolated to this source, run,
             # attempt and target; no second graph or invented resume engine.
             "--cache-ns", f"cy-{origin}-{attempt}-{mapping['source']['archiveSha256'][:16]}-{index}",
