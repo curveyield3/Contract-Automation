@@ -43,9 +43,18 @@ if TYPE_CHECKING:
 # Keep the native model identifier and prompt compaction limit synchronized.
 MODEL_ID, MIMO_CONTEXT_SIZE = {
     "mimo": ("lite-solo-mimo-v1", 262144),
-    "gpt-oss-20b": ("lite-solo-gpt-oss-20b-v1", 32768),
+    "gpt-oss-20b": ("lite-solo-gpt-oss-20b-v1", 131072),
     "qwen-coder-7b": ("lite-solo-qwen-coder-7b-v1", 32768),
 }[os.environ.get("CURVEYIELD_FORMAL_MODEL", "mimo")]
+FORMAL_INITIAL_OUTPUT_TOKENS = int(os.environ.get("CURVEYIELD_FORMAL_INITIAL_OUTPUT_TOKENS", "256000"))
+FORMAL_QUALIFICATION_OUTPUT_TOKENS = FORMAL_INITIAL_OUTPUT_TOKENS // 8
+
+
+def _model_output_budget(requested: int) -> int:
+    # The pinned server enforces its actual remaining context with context shift disabled.
+    return min(requested, MIMO_CONTEXT_SIZE)
+
+
 TAILNET = IPv4Network("100.64.0.0/10")
 
 
@@ -951,7 +960,7 @@ def configure_local_mimo_runtime() -> dict[str, str]:
         response = llm._local_retry_transient(
             lambda: client.chat.completions.create(
                 model=MODEL_ID, messages=messages,
-                max_tokens=max_tokens, temperature=temperature,
+                max_tokens=_model_output_budget(max(max_tokens, FORMAL_QUALIFICATION_OUTPUT_TOKENS)), temperature=temperature,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
@@ -985,7 +994,7 @@ def configure_local_mimo_runtime() -> dict[str, str]:
         response = await llm._local_retry_transient_async(
             lambda: client.chat.completions.create(
                 model=MODEL_ID, messages=messages,
-                max_tokens=max_tokens, temperature=temperature,
+                max_tokens=_model_output_budget(max(max_tokens, FORMAL_QUALIFICATION_OUTPUT_TOKENS)), temperature=temperature,
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
@@ -1128,14 +1137,12 @@ class MiMoModelProvider:
             base_url=private_url,
             api_key=SecretStr("local-network-only"),
             use_responses_api=False,
-            max_tokens=self.options.tokens,
+            max_tokens=_model_output_budget(self.options.tokens),
             timeout=3600.0,
             max_retries=2,
             streaming=False,
             disable_streaming=True,  # native SDK receives fully validated JSON; transport streams MiMo.
-            extra_body=({"chat_template_kwargs": {"enable_thinking": False},
-                         "reasoning_effort": "none"} if disable_thinking and
-                        os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT") else None),
+            extra_body=({"reasoning_effort": "high"} if MODEL_ID == "lite-solo-gpt-oss-20b-v1" else None),
             # Ignore ambient HTTP(S)_PROXY and other inherited proxy settings.
             http_client=_trusted_http_client(),
             http_async_client=_trusted_async_http_client(),
