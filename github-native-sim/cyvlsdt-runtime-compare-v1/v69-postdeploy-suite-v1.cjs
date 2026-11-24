@@ -1,11 +1,11 @@
 'use strict';
 const fs=require('fs'),assert=require('node:assert/strict'),{ethers:E}=require('/tmp/cyv-deps/node_modules/ethers');
-const OUT='/tmp/v69-report',ZERO=E.ZeroAddress,MAX=E.MaxUint256,W=10n**18n,WEEK=604800;
+const OUT='/tmp/v72-report/postdeploy-v2',ZERO=E.ZeroAddress,MAX=E.MaxUint256,W=10n**18n,WEEK=604800;
 const SDT='0x73968b9a57c6e53d41345fd57a6e6ae27d6cdb2f',USDC='0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',WETH='0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',CRV='0xd1b5651e55d4ceed36251c61c50c889b36f6abb5',SDFXN='0xe19d1c837b8a1c83a56cd9165b2c0256d39653ad',FXN='0x365accfca291e7d3914637abf1f7635db165bb09';
 const erc=['function balanceOf(address) view returns(uint256)','function totalSupply() view returns(uint256)','function transfer(address,uint256) returns(bool)','function transferFrom(address,address,uint256) returns(bool)','function approve(address,uint256) returns(bool)','function allowance(address,address) view returns(uint256)','function decimals() view returns(uint8)'];
 const ercI=new E.Interface(erc),transferTopic=E.id('Transfer(address,address,uint256)'),approvalTopic=E.id('Approval(address,address,uint256)');
 const J=x=>JSON.stringify(x,(_,v)=>typeof v==='bigint'?v.toString():v);
-const report={version:8,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
+const report={version:9,forkBlock:Number(process.env.FORK_BLOCK),actions:[],scenarios:[],views:[],coverage:[],sandwich:[],fixtures:[],deployment:[],failures:[]};
 const cleanError=e=>({message:String(e.shortMessage||e.message||e).slice(0,2000),data:e.data||e.info?.error?.data||null});
 const low=x=>String(x).toLowerCase();
 fs.mkdirSync(OUT,{recursive:true});
@@ -40,12 +40,13 @@ async function observe(p,r,label,extra={}){
  return {label,hash:r.hash,block:r.blockNumber,status:r.status,gas:r.gasUsed,events,balances,approvals,conservation,calls,traceError:trace?.error||null,...extra};
 }
 async function deploymentReceipt(p,r,label){const item=await observe(p,r,label);report.deployment.push(item);log('DEPLOYMENT_STATE',{label,hash:r.hash,transferEvents:item.events.length,accountChecks:item.balances.length,discrepancies:item.conservation.filter(x=>!x.match).length});}
-async function run(p,A,SAFE,EOA,artifact,root,manager){
+async function run(p,A,SAFE,originalEOA,artifact,root,manager){
+ const EOA=SAFE;
  const names={impl:'BeefyVaultCurveYieldV8cyvlSDT',rvault:'BeefyVaultCurveYieldV8cyvlSDT',svault:'BeefyVaultCurveYieldV8cyvlSDT',crvVault:'BeefyVaultCurveYieldV8cyvlSDT',fxnVault:'BeefyVaultCurveYieldV8cyvlSDT',token:'CurveYieldVlSDTToken',locker:'CurveYieldVlSDTLocker',staking:'CurveYieldvlSDTStaking',revenue:'CurveYieldRevenueStrategyV8',merchant:'CurveYieldVlSDTBoostMerchant',yearn:'StrategyCurveSDTYearnRebindable',crv:'StrategyConvexBoostHubStakingDirectV66',fxn:'StrategyDualFXNUnifiedV43'};
  const U='0x000000000000000000000000000000000000a111',V='0x000000000000000000000000000000000000a222',K='0x000000000000000000000000000000000000a333',X='0x000000000000000000000000000000000000a444';
  const N=Object.fromEntries(Object.entries(names).map(([k,n])=>[k,C(p,A[k],artifact(root,n).abi)]));
  const trackedTokens=[SDT,USDC,WETH,CRV,SDFXN,FXN,A.token,A.rvault,A.svault,A.crvVault,A.fxnVault];
- const trackedAccounts=[U,V,K,X,EOA,SAFE,manager,...Object.values(A)];
+ const trackedAccounts=[U,V,K,X,originalEOA,SAFE,manager,...Object.values(A)];
  let scenarioName='setup',signers=new Map();
  async function signer(addr){if(!signers.has(low(addr))){await p.send('anvil_impersonateAccount',[addr]);signers.set(low(addr),await p.getSigner(addr));}if(await p.getBalance(addr)<W/10n)await p.send('anvil_setBalance',[addr,E.toQuantity(100n*W)]);return signers.get(low(addr));}
  for(const a of [U,V,K,X,SAFE,EOA])await signer(a);
@@ -56,7 +57,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
  const warp=async sec=>{await p.send('evm_increaseTime',[sec]);await p.send('evm_mine',[]);};
  async function state(k,caller){
    let t=N[k],items={};
-   let who=[...new Set([caller,U,V,SAFE,EOA,A[k]].filter(Boolean))];
+   let who=[...new Set([caller,U,V,SAFE,originalEOA,A[k]].filter(Boolean))];
    if(t){for(const f of ['owner','pendingOwner','totalSupply','totalAssets','getPricePerFullShare','balanceOf()','grossBalanceOf','totalActiveStake','totalQueuedStake','grossSDTPrincipalForBase','reservedWithdrawalAssets','nextWithdrawalId','pendingConversionCount','poLDepositShareBps','lockedProfit','childBalances','allocationTargets','convexEligible','paused','rewardTokenCount','strategy','adminFeeReceiver','depositFeeBps','withdrawalFeeBps','systemConfigured','merchantDelegableBoost'])if(t.interface.hasFunction(f)){items[f]=await soft(()=>t[f]());}
     for(const a of who)for(const f of ['balanceOf(address)','activeBalance','queuedBalance','pendingWithdrawal'])if(t.interface.hasFunction(f)){items[f+':'+a]=await soft(()=>t[f](a));}}
    const localTokens=k==='pol'?[SDT,USDC,A.token]:k==='locker'||k==='staking'||k==='merchant'||k==='revenue'||k==='token'?[SDT,USDC,A.token]:k==='rvault'?[A.token,A.rvault]:k==='svault'||k==='yearn'?[SDT,A.svault]:k==='crvVault'||k==='crv'?[CRV,A.crvVault]:k==='fxnVault'||k==='fxn'?[SDFXN,FXN,A.fxnVault]:[];
@@ -75,6 +76,15 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
      if(opts.reject){row.status='FAIL_UNEXPECTED_SUCCESS';report.actions.push(row);log('CASE',{...row,before:undefined});return row;}
      const tx=await s.sendTransaction({to:addr,data,gasLimit:16000000n,value:opts.value||0n});receipt=await tx.wait();row.tx=await observe(p,receipt,scenarioName+':'+k+'.'+sig);
      assert.equal(receipt.status,1);row.after=await state(k,caller);
+     if(['rvault','svault','crvVault','fxnVault'].includes(k)&&['deposit','depositAll','mint'].includes(frag.name)){
+       const pre=row.before,after=row.after;
+       assert(typeof pre.totalAssets==='bigint'&&typeof pre.totalSupply==='bigint'&&typeof after.totalAssets==='bigint'&&typeof after.totalSupply==='bigint','vault NAV/supply accounting unavailable');
+       const lhs=pre.totalSupply===0n?after.totalAssets:after.totalAssets*pre.totalSupply;
+       const rhs=pre.totalSupply===0n?after.totalSupply:pre.totalAssets*after.totalSupply;
+       row.ppsInvariant={beforeAssets:pre.totalAssets,beforeSupply:pre.totalSupply,afterAssets:after.totalAssets,afterSupply:after.totalSupply,pass:lhs>=rhs};
+       assert(lhs>=rhs,'deposit or mint reduced vault PPS');
+       if(frag.name==='mint')assert.equal(after.totalSupply-pre.totalSupply,BigInt(args[0]),'exact mint supply delta');
+     }
      if(opts.check){await opts.check(row);row.status='PASS_ASSERTED';}else row.status=row.tx.events.length?'EXECUTED_TRANSFER_UNASSERTED':'EXECUTED_NO_TRANSFER';
      if(row.tx.conservation.some(x=>!x.match)){row.status='FAIL_TRANSFER_RECONCILIATION';}else if(row.tx.balances.some(x=>typeof x.before!=='bigint'||typeof x.after!=='bigint')){row.status='INCOMPLETE_ACCOUNTING_READ';}
    }catch(e){
@@ -210,13 +220,13 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    for(const k of ['rvault','svault','crvVault','fxnVault']){
      await own(k,'setDepositFeeBps',[50n],async()=>eq(await N[k].depositFeeBps(),50n));await act(k,'setDepositFeeBps',[101n],EOA,{reject:'VaultDepositFeeExceeds1'});
      const strat=await N[k].strategy();
-     if(k==='rvault'||k==='svault')await own(k,'setStrategy',[strat],async()=>eq(low(await N[k].strategy()),low(strat)));
-     else await act(k,'setStrategy',[strat],EOA,{reject:'StrategyFixed'});
+     if(k==='rvault'||k==='svault')await own(k,'setStrategy',[strat,true],async()=>eq(low(await N[k].strategy()),low(strat)));
+     else await act(k,'setStrategy',[strat,k==='fxnVault'],EOA,{reject:'StrategyFixed'});
      const feeReceiver=await N[k].adminFeeReceiver();await act(k,'proposeAdminFeeReceiver',[V],U,{reject:'VaultFeeReceiverOnly'});
      await need(k,'proposeAdminFeeReceiver',[V],feeReceiver,{check:async()=>eq(low(await N[k].pendingAdminFeeReceiver()),low(V))});
      await act(k,'executeAdminFeeReceiverChange',[],feeReceiver,{reject:'VaultSevenDayDelay'});await warp(WEEK+1);
      await act(k,'executeAdminFeeReceiverChange',[],feeReceiver,{check:async()=>eq(low(await N[k].adminFeeReceiver()),low(V))});
-     await act(k,'initialize',[strat,'reinit','X',0,V,EOA,false,false],EOA,{reject:'Initializable: contract is already initialized'});
+     await act(k,'initialize',[strat,'reinit','X',0,V,EOA,false,false,false],EOA,{reject:'Initializable: contract is already initialized'});
    }
  });
  await scenario('core administrative setters, changed values and authorization',async()=>{
@@ -254,7 +264,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    await act(k,'transferOwnership',[V],U,{reject:authError(k)});
    if(N[k].interface.hasFunction('acceptOwnership()')){
      await need(k,'transferOwnership',[V],o,{check:async()=>eq(low(await N[k].pendingOwner()),low(V))});
-     await act(k,'acceptOwnership',[],U,{reject:N[k].interface.hasError('OwnableUnauthorizedAccount')?'OwnableUnauthorizedAccount':'Ownable2Step: caller is not the new owner'});
+     await act(k,'acceptOwnership',[],U,{reject:!!N[k].interface.getError('OwnableUnauthorizedAccount')?'OwnableUnauthorizedAccount':'Ownable2Step: caller is not the new owner'});
      await act(k,'acceptOwnership',[],V,{check:async()=>eq(low(await N[k].owner()),low(V))});
    }else await act(k,'transferOwnership',[V],o,{check:async()=>eq(low(await N[k].owner()),low(V))});
    await act(k,'renounceOwnership',[],V,{check:async()=>eq(await N[k].owner(),ZERO)});
@@ -579,7 +589,7 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
    }
  });
  await scenario('DEPENDENCY shared implementation direct initialization disabled',async()=>{
-   const args=[A.revenue,'reinit','X',0,V,EOA,false,false];
+   const args=[A.revenue,'reinit','X',0,V,EOA,false,false,true];
    await act('impl','initialize',args,U,{reject:'Initializable: contract is already initialized'});
    await act('impl','initialize',args,EOA,{reject:'Initializable: contract is already initialized'});
  });
@@ -608,6 +618,13 @@ async function run(p,A,SAFE,EOA,artifact,root,manager){
  fs.writeFileSync(OUT+'/action-checklist.csv',['scenario,contract,function,caller,parameters,expected,result,error,hash,transfer_events,account_checks',...report.actions.map(r=>[r.scenario,r.contract,r.function,r.caller,r.params,r.expect,r.status,r.error,r.tx?.hash,r.tx?.events?.length,r.tx?.balances?.length].map(q).join(','))].join('\n'));
  fs.writeFileSync(OUT+'/sandwich-checklist.json',J(report.sandwich));
  fs.writeFileSync(OUT+'/summary.json',J({forkBlock:report.forkBlock,counts,totalABI:abiRows.length,actions:report.actions.length,scenarios:report.scenarios,sandwich:report.sandwich,fixtures:report.fixtures.length}));
- log('POSTDEPLOY_SUMMARY',{counts,totalABI:abiRows.length,actions:report.actions.length,scenarios:report.scenarios.length,sandwich:report.sandwich.length,fixtures:report.fixtures.length});
+ const actionCounts={};for(const a of report.actions)actionCounts[a.status]=(actionCounts[a.status]||0)+1;
+ const perContract={};for(const a of report.actions){const k=perContract[a.contract]??={};k[a.status]=(k[a.status]||0)+1;}
+ const accounting={transferEvents:0,accountChecks:0,conservationChecks:0,discrepancies:0,unreadable:0};
+ for(const r of [...report.deployment,...report.actions.flatMap(x=>x.tx?[x.tx]:[])]){accounting.transferEvents+=r.events.length;accounting.accountChecks+=r.balances.length;accounting.conservationChecks+=r.conservation.length;accounting.discrepancies+=r.conservation.filter(x=>!x.match).length;accounting.unreadable+=r.balances.filter(x=>typeof x.before!=='bigint'||typeof x.after!=='bigint').length;}
+ const ppsChecks=report.actions.filter(a=>a.ppsInvariant).map(a=>({contract:a.contract,method:a.function,params:a.params,status:a.status,...a.ppsInvariant}));
+ const result={counts,actionCounts,perContract,accounting,ppsChecks,totalABI:abiRows.length,actions:report.actions.length,scenarios:report.scenarios,fixtures:report.fixtures.length,deployment:report.deployment.map(x=>({label:x.label,hash:x.hash,status:x.status,gas:x.gas,transfers:x.events.length,accountChecks:x.balances.length}))};
+ fs.writeFileSync(OUT+'/summary.json',J(result));
+ log('POSTDEPLOY_SUMMARY',{...result,ppsChecks:{total:ppsChecks.length,failed:ppsChecks.filter(x=>!x.pass).length}});
 }
 module.exports={run,deploymentReceipt,save};
