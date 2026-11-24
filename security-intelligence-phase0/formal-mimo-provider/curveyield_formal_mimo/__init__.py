@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import hashlib
 import itertools
 import json
+import re
 from functools import cache, wraps
 from pathlib import Path
 import time
@@ -76,29 +77,51 @@ def _private_chat_completions_base_url() -> str:
 # authorization headers, endpoint credentials, or non-DAI campaign payloads.
 _TRACE_LOCK = threading.RLock()
 _TRACE_SEQUENCE = itertools.count(1)
-_TRACE_PREFIX = "CURVEYIELD_DAI_WIRE_V1 "
+_RETRY_HINTS: dict[str, str] = {}
 
 
 def _trace_enabled() -> bool:
     return os.environ.get("CURVEYIELD_PUBLIC_DAI_WIRE_TRACE") == "1"
 
 
-def _wire_event(event: dict) -> None:
+def _append_observation(event: dict, path_variable: str) -> bool:
+    """Write a complete record directly to private scratch, not mixed stdout.
+    Observer failures cannot abort the underlying native inference request.
+    """
+    try:
+        path = os.environ[path_variable]
+        record = {**event, "targetIndex": int(os.environ["CURVEYIELD_FORMAL_TARGET_INDEX"]),
+                  "producerPid": os.getpid()}
+        raw = (json.dumps(record, ensure_ascii=True, separators=(",", ":")) + "\n").encode("utf-8")
+        with _TRACE_LOCK:
+            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CLOEXEC)
+            try:
+                if os.write(fd, raw) != len(raw):
+                    os.write(fd, b"\n")
+                    raise OSError("short observation write")
+            finally:
+                os.close(fd)
+        return True
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        try:
+            print("CURVEYIELD_OBSERVATION_WARNING " + json.dumps({
+                "event": "OBSERVATION_WRITE_FAILED", "channel": path_variable,
+                "exceptionType": type(exc).__name__, "requestNumber": event.get("requestNumber"),
+            }, separators=(",", ":")), file=sys.stderr, flush=True)
+        except (OSError, ValueError):
+            pass
+        return False
+
+
+def _wire_event(event: dict) -> bool:
     if not _trace_enabled():
-        return
-    with _TRACE_LOCK:
-        print(_TRACE_PREFIX + json.dumps(event, ensure_ascii=False, separators=(",", ":")),
-              file=sys.stderr, flush=True)
+        return True
+    return _append_observation(event, "CURVEYIELD_DAI_WIRE_PATH")
 
 
 def _wire_body(direction: str, request_number: int, raw: bytes,
                status: int | None = None) -> None:
-    """Stream every byte of an exact HTTP JSON body, with no truncation.
-
-    Chunking keeps GitHub Actions log lines small. Join the payload fields
-    in chunk-index order, encode UTF-8, and verify the reported SHA-256 to
-    reconstruct the exact wire body. Non-UTF8 error responses use base64.
-    """
+    """Capture the exact body in one record; no mixed-log chunk reassembly."""
     if not _trace_enabled():
         return
     try:
@@ -108,24 +131,10 @@ def _wire_body(direction: str, request_number: int, raw: bytes,
         import base64
         payload = base64.b64encode(raw).decode("ascii")
         encoding = "base64"
-    chunks = [payload[i:i + 6000] for i in range(0, len(payload), 6000)]
-    with _TRACE_LOCK:
-        prefix = {"requestNumber": request_number, "direction": direction}
-        for event in (
-            {**prefix, "event": "BEGIN", "encoding": encoding,
-             "byteCount": len(raw), "chunkCount": len(chunks),
-             "sha256": hashlib.sha256(raw).hexdigest(), "httpStatus": status},
-        ):
-            print(_TRACE_PREFIX + json.dumps(event, separators=(",", ":")),
-                  file=sys.stderr, flush=True)
-        for idx, part in enumerate(chunks):
-            print(_TRACE_PREFIX + json.dumps(
-                {**prefix, "event": "CHUNK", "chunkIndex": idx, "payload": part},
-                ensure_ascii=False, separators=(",", ":")),
-                file=sys.stderr, flush=True)
-        print(_TRACE_PREFIX + json.dumps(
-            {**prefix, "event": "END", "chunkCount": len(chunks)},
-            separators=(",", ":")), file=sys.stderr, flush=True)
+    _wire_event({"event": "COMPLETE_BODY", "requestNumber": request_number,
+                 "direction": direction, "encoding": encoding, "chunkCount": 1,
+                 "byteCount": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
+                 "httpStatus": status, "payload": payload})
 
 
 def _log_request(request: httpx.Request) -> None:
@@ -194,6 +203,13 @@ def validate_mimo_chat_completion(body: dict, request: dict) -> None:
             raise MiMoProtocolError("MiMo function arguments must be a JSON object")
     if raw_calls and request.get("tool_choice") == "none":
         raise MiMoProtocolError("Model invoked tools explicitly prohibited by AutoProver")
+    choice_rule = request.get("tool_choice")
+    if choice_rule == "required" and not raw_calls:
+        raise MiMoProtocolError("MiMo omitted a required tool call")
+    if isinstance(choice_rule, dict) and choice_rule.get("type") == "function":
+        required_name = (choice_rule.get("function") or {}).get("name")
+        if not raw_calls or any(c["function"]["name"] != required_name for c in raw_calls):
+            raise MiMoProtocolError("MiMo omitted the specified required tool call")
     content = msg.get("content")
     if not raw_calls and (not isinstance(content, str) or not content.strip()):
         raise MiMoProtocolError("MiMo returned no textual answer or tool calls")
@@ -260,13 +276,17 @@ async def _async_local_response(response: httpx.Response) -> None:
 # Only the authenticated native execution sets the project root. The existing
 # I05.2 handshake retains its exact previously qualified non-stream protocol.
 _PROGRESS_PREFIX = "CURVEYIELD_MIMO_PROGRESS_V1 "
-_PROGRESS_SEQUENCE = itertools.count(1)
+_PROGRESS_SEQUENCE = _TRACE_SEQUENCE
 
 
 def _progress_event(event: dict) -> None:
     if os.environ.get("CURVEYIELD_FORMAL_PROJECT_ROOT"):
-        print(_PROGRESS_PREFIX + json.dumps(event, separators=(",", ":")),
-              file=sys.stderr, flush=True)
+        if not _append_observation(event, "CURVEYIELD_FORMAL_PROGRESS_PATH"):
+            try:
+                print(_PROGRESS_PREFIX + json.dumps(event, separators=(",", ":")),
+                      file=sys.stderr, flush=True)
+            except (OSError, ValueError):
+                pass
 
 
 @cache
@@ -334,6 +354,14 @@ def _prepare_native_payload(payload: dict) -> tuple[dict, str]:
         and "get_file" in names
     )
     if not is_analysis:
+        if "items" in fields and "result" in names and isinstance(system, str) and messages:
+            messages = [dict(m) for m in messages]
+            messages[0]["content"] += (
+                "\nSubmit distinct, source-supported items only. Do not repeat the same "
+                "property or attack description under different numbered titles. "
+                "Use the native result schema and the required tool."
+            )
+            payload["messages"] = messages
         return payload, "native"
     original_user = messages[1].get("content")
     if not isinstance(original_user, list) or not original_user:
@@ -475,8 +503,10 @@ class _NativeStream:
     exact normal OpenAI completion shape expected by the qualified SDK.
     No tool is delivered to AutoProver before full envelope validation.
     """
-    def __init__(self, number: int, mode: str, request: dict):
+    def __init__(self, number: int, mode: str, request: dict, request_key: str):
         self.number, self.mode, self.request = number, mode, request
+        self.request_key = request_key
+        self.wire_complete = False
         self.content, self.reasoning = [], []
         self.calls = {}
         self.meta, self.usage, self.timings, self.prompt = {}, {}, {}, {}
@@ -544,6 +574,69 @@ class _NativeStream:
                     self.finish_reason = choice["finish_reason"]
         if time.monotonic() - self.last_report >= 15:
             self.report()
+            self._reject_repetition()
+
+    def _reject_repetition(self):
+        # r13 request 17 repeated identical attack-vector descriptions under
+        # numbered titles for 78 minutes. Do not reject slow or long answers.
+        fields = next((t.get("function", {}).get("parameters", {}).get("properties", {})
+                       for t in self.request.get("tools") or []
+                       if t.get("function", {}).get("name") == "result"), {})
+        if "items" in fields:
+            for call in self.calls.values():
+                fn = call["function"]
+                if fn["name"] != "result":
+                    continue
+                previous, repeats = None, 0
+                for match in re.finditer(r'"description"\s*:\s*("(?:\\.|[^"\\])*")',
+                                         fn["arguments"]):
+                    try:
+                        value = " ".join(json.loads(match.group(1)).split()).casefold()
+                    except (ValueError, TypeError):
+                        continue
+                    repeats = repeats + 1 if value == previous and len(value) >= 40 else 1
+                    previous = value
+                    if repeats >= 4:
+                        raise MiMoProtocolError("MiMo repeated identical property descriptions")
+        for parts in (self.reasoning, self.content):
+            previous, repeats = None, 0
+            for line in "".join(parts).splitlines():
+                value = " ".join(line.split())
+                if not value:
+                    continue
+                repeats = repeats + 1 if value == previous and len(value) >= 80 else 1
+                previous = value
+                if repeats >= 4:
+                    raise MiMoProtocolError("MiMo repeated identical generated paragraphs")
+
+    def failed(self, exc: Exception):
+        self.report()
+        if not self.wire_complete:
+            _wire_event({"event": "STREAM_ABORTED", "requestNumber": self.number,
+                         "direction": "MIMO_TO_AUTOPROVER", "byteCount": len(self.wire),
+                         "sha256": hashlib.sha256(self.wire).hexdigest(),
+                         "exceptionType": type(exc).__name__})
+        if isinstance(exc, MiMoProtocolError):
+            message = str(exc)
+            if "repeated identical" in message or "truncated or filtered" in message:
+                hint = ("The previous attempt repeated entries or reached the output limit. "
+                        "Submit only distinct, source-supported claims. Do not repeat descriptions "
+                        "with numbered titles, and do not omit required schema fields.")
+            elif "required tool call" in message:
+                hint = ("The previous answer omitted the required tool call. Use the exact "
+                        "offered tool and its declared argument schema; do not return prose instead.")
+            else:
+                hint = ("The previous response failed native transport or tool-envelope validation. "
+                        "Return a complete valid response using the exact supplied tool/schema.")
+            with _TRACE_LOCK:
+                _RETRY_HINTS[self.request_key] = hint
+                if len(_RETRY_HINTS) > 64:
+                    _RETRY_HINTS.pop(next(iter(_RETRY_HINTS)))
+        _progress_event({"event": "MODEL_COMPLETION", "requestNumber": self.number,
+                         "mode": self.mode, "outcome": "REJECTED",
+                         "exceptionType": type(exc).__name__,
+                         "failureReason": str(exc) if isinstance(exc, MiMoProtocolError)
+                                          else "transport or response exception"})
 
     def report(self, final=False):
         # Actual partial wire bytes, not a reconstructed paraphrase. Only
@@ -554,11 +647,12 @@ class _NativeStream:
             # Keep private log lines manageable; the parent stores all deltas.
             for offset in range(self.last_published, end, 6000):
                 part = bytes(self.wire[offset:min(offset + 6000, end)])
-                _wire_event({"event": "STREAM_BYTES", "requestNumber": self.number,
-                             "direction": "MIMO_TO_AUTOPROVER", "offset": offset,
-                             "byteCount": len(part), "encoding": "base64",
-                             "payload": base64.b64encode(part).decode("ascii")})
-            self.last_published = end
+                if not _wire_event({"event": "STREAM_BYTES", "requestNumber": self.number,
+                                    "direction": "MIMO_TO_AUTOPROVER", "offset": offset,
+                                    "byteCount": len(part), "encoding": "base64",
+                                    "payload": base64.b64encode(part).decode("ascii")}):
+                    break
+                self.last_published = offset + len(part)
         reasoning = sum(map(len, self.reasoning))
         answer = sum(map(len, self.content))
         tool_chars = sum(len(c["function"]["arguments"]) for c in self.calls.values())
@@ -578,6 +672,7 @@ class _NativeStream:
 
     def finish(self) -> dict:
         self.report(final=True)
+        self._reject_repetition()
         if self.pending.strip() or not self.done or self.finish_reason is None:
             raise MiMoProtocolError("Incomplete MiMo SSE completion")
         if self.meta.get("model") != MODEL_ID:
@@ -597,6 +692,7 @@ class _NativeStream:
         _wire_event({"event": "STREAM_COMPLETE", "requestNumber": self.number,
                      "direction": "MIMO_TO_AUTOPROVER", "byteCount": len(self.wire),
                      "sha256": hashlib.sha256(self.wire).hexdigest()})
+        self.wire_complete = True
         validate_mimo_chat_completion(body, self.request)
         if self.mode == "component_analysis_schema":
             # The server generated the native schema object as JSON text.
@@ -644,7 +740,18 @@ class _NativeStream:
 
 def _native_stream_request(request: httpx.Request):
     payload = json.loads(request.read())
+    request_key = hashlib.sha256(json.dumps(payload, sort_keys=True,
+                                           separators=(",", ":")).encode("utf-8")).hexdigest()
     payload, mode = _prepare_native_payload(payload)
+    with _TRACE_LOCK:
+        hint = _RETRY_HINTS.pop(request_key, None)
+    if hint:
+        messages = [dict(m) for m in payload.get("messages") or []]
+        if messages and messages[0].get("role") == "system" and isinstance(messages[0].get("content"), str):
+            messages[0]["content"] += "\n\nRetry feedback: " + hint
+        else:
+            messages.insert(0, {"role": "system", "content": "Retry feedback: " + hint})
+        payload["messages"] = messages
     payload["stream"] = True
     payload["stream_options"] = {"include_usage": True}
     payload["return_progress"] = True
@@ -665,7 +772,7 @@ def _native_stream_request(request: httpx.Request):
                      "maxCompletionTokens": payload.get("max_completion_tokens",
                                                         payload.get("max_tokens")),
                      "stream": True})
-    return actual, _NativeStream(number, mode, payload)
+    return actual, _NativeStream(number, mode, payload, request_key)
 
 
 def _native_stream_response(status: int, body: dict) -> httpx.Response:
@@ -680,7 +787,11 @@ class _NativeSyncTransport(httpx.BaseTransport):
         if request.url.path != "/v1/chat/completions":
             raise MiMoProtocolError("Unexpected native MiMo API path")
         actual, stream = _native_stream_request(request)
-        response = self.inner.handle_request(actual)
+        try:
+            response = self.inner.handle_request(actual)
+        except httpx.TransportError as exc:
+            stream.failed(exc)
+            raise
         response.request = actual
         try:
             if response.status_code >= 400:
@@ -694,10 +805,7 @@ class _NativeSyncTransport(httpx.BaseTransport):
                     stream.feed(chunk)
                 return _native_stream_response(response.status_code, stream.finish())
             except Exception as exc:
-                stream.report()
-                _progress_event({"event": "MODEL_COMPLETION", "requestNumber": stream.number,
-                                 "mode": stream.mode, "outcome": "REJECTED",
-                                 "exceptionType": type(exc).__name__})
+                stream.failed(exc)
                 raise
         finally:
             response.close()
@@ -713,7 +821,11 @@ class _NativeAsyncTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request):
         await request.aread()
         actual, stream = _native_stream_request(request)
-        response = await self.inner.handle_async_request(actual)
+        try:
+            response = await self.inner.handle_async_request(actual)
+        except httpx.TransportError as exc:
+            stream.failed(exc)
+            raise
         response.request = actual
         try:
             if response.status_code >= 400:
@@ -727,10 +839,7 @@ class _NativeAsyncTransport(httpx.AsyncBaseTransport):
                     stream.feed(chunk)
                 return _native_stream_response(response.status_code, stream.finish())
             except Exception as exc:
-                stream.report()
-                _progress_event({"event": "MODEL_COMPLETION", "requestNumber": stream.number,
-                                 "mode": stream.mode, "outcome": "REJECTED",
-                                 "exceptionType": type(exc).__name__})
+                stream.failed(exc)
                 raise
         finally:
             await response.aclose()

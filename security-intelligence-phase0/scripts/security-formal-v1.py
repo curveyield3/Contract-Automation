@@ -1331,7 +1331,7 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             if state in ("queued", "in_progress", "waiting", "pending", "requested"):
                 return "active", state
             return "unavailable", "unknown-status"
-        except (OSError, ValueError, subprocess.TimeoutExpired):
+        except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
             return "unavailable", "api-unavailable"
 
     mapping = json.loads(target_map_file.read_text())
@@ -1438,82 +1438,171 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         tmp.replace(output_file)
         output_file.chmod(0o600)
     persist()
-    # GitHub clips live log lines and eventually the entire step. Keep the
-    # exact authorized DAI transcript in the existing Actions artifact service.
-    # Two rolling names preserve the preceding snapshot while its successor
-    # uploads; no per-message artifact-count ceiling or public source leakage
-    # for any other campaign. Only the trusted parent receives runtime tokens.
+    # The provider appends directly to private scratch. Publish immutable
+    # snapshots independently of native stdout, execution and acceptance.
     wire_path = private / "public-dai-wire-transcript-v1.jsonl"
+    wire_upload_path = private / "wire-publication" / wire_path.name
     wire_sequence = 0
+    wire_last_size = 0
+    wire_last_attempt = -1e30
+    wire_upload = None
 
-    def publish_dai_wire_snapshot() -> None:
-        nonlocal wire_sequence
-        node = Path(os.environ.get("CURVEYIELD_ARTIFACT_NODE", ""))
-        uploader = (runner_temp.parent / "_actions" / "actions" /
-                    "upload-artifact" / "v4" / "dist" / "upload" / "index.js")
-        if (not node.is_file() or not uploader.is_file()
-                or not os.environ.get("ACTIONS_RUNTIME_TOKEN")
-                or not os.environ.get("ACTIONS_RESULTS_URL")):
-            raise RuntimeError("DAI_LIVE_ARTIFACT_RUNTIME_UNAVAILABLE")
-        slot = "a" if wire_sequence % 2 == 0 else "b"
-        name = f"certora-dai-wire-v1-{origin}-{attempt}-{slot}"
-        output = private / "wire-artifact-output.txt"
-        output.write_text("")
-        output.chmod(0o600)
-        # Reuse the exact upload-artifact v4 bundle downloaded for the
-        # existing formal artifact step; no extra service or repository writes.
-        upload_env = {
-            k: os.environ[k] for k in (
-                "PATH", "HOME", "TMPDIR", "LANG", "RUNNER_TEMP",
-                "GITHUB_WORKSPACE", "GITHUB_REPOSITORY", "GITHUB_RUN_ID",
-                "GITHUB_RUN_ATTEMPT", "GITHUB_SERVER_URL", "GITHUB_API_URL",
-                "ACTIONS_RUNTIME_TOKEN", "ACTIONS_RUNTIME_URL",
-                "ACTIONS_RESULTS_URL", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
-            ) if k in os.environ
-        }
-        upload_env.update({
-            "GITHUB_OUTPUT": str(output),
-            "INPUT_NAME": name,
-            "INPUT_PATH": str(wire_path),
-            "INPUT_IF-NO-FILES-FOUND": "error",
-            "INPUT_RETENTION-DAYS": "1",
-            "INPUT_COMPRESSION-LEVEL": "6",
-            "INPUT_OVERWRITE": "true",
-            "INPUT_INCLUDE-HIDDEN-FILES": "false",
-        })
-        result = subprocess.run([str(node), str(uploader)], env=upload_env,
-                                capture_output=True, text=True, timeout=180,
-                                check=False)
-        if result.returncode:
-            raise RuntimeError("DAI_LIVE_ARTIFACT_UPLOAD_FAILED_" + str(result.returncode))
-        match = re.search(r"(?m)^artifact-id(?:=|<<[^\n]+\n)([0-9]+)$",
-                          output.read_text())
-        if not match:
-            raise RuntimeError("DAI_LIVE_ARTIFACT_ID_MISSING")
-        artifact_id = int(match.group(1))
-        wire_sequence += 1
-        outcome["liveDaiWireSnapshot"] = {
-            "sequence": wire_sequence, "artifactId": artifact_id,
-            "artifactName": name, "transcriptSha256": digest(wire_path),
-            "byteCount": wire_path.stat().st_size,
-        }
-        persist()
-        print(json.dumps({
-            "event": "DAI_LIVE_WIRE_SNAPSHOT", **outcome["liveDaiWireSnapshot"],
-            "url": (f"https://github.com/curveyield3/Contract-Automation/"
-                    f"actions/runs/{origin}/artifacts/{artifact_id}"),
-        }, sort_keys=True), flush=True)
+    def observer_warning(code: str, exc: Exception | None = None) -> None:
+        warnings = outcome.setdefault("observationWarnings", {})
+        warnings[code] = warnings.get(code, 0) + 1
+        if warnings[code] == 1 or warnings[code] % 10 == 0:
+            print(json.dumps({"stage": "I06.2", "event": code, "count": warnings[code],
+                              "exceptionType": type(exc).__name__ if exc else None},
+                             sort_keys=True), flush=True)
+
+    def persist_observation() -> None:
+        try:
+            persist()
+        except OSError as exc:
+            observer_warning("FORMAL_OBSERVATION_PERSIST_FAILED", exc)
+
+    def finish_wire_upload(wait: bool = False) -> bool:
+        nonlocal wire_upload, wire_sequence, wire_last_size
+        if wire_upload is None:
+            return True
+        process, begun_upload, metadata, output = wire_upload
+        try:
+            if wait:
+                try:
+                    process.wait(timeout=max(1, 180 - (time.monotonic() - begun_upload)))
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=10)
+                    raise RuntimeError("DAI_LIVE_ARTIFACT_UPLOAD_TIMEOUT")
+            elif process.poll() is None:
+                if time.monotonic() - begun_upload < 180:
+                    return False
+                process.kill()
+                process.wait(timeout=10)
+                raise RuntimeError("DAI_LIVE_ARTIFACT_UPLOAD_TIMEOUT")
+            if process.returncode:
+                raise RuntimeError("DAI_LIVE_ARTIFACT_UPLOAD_FAILED")
+            match = re.search(r"(?m)^artifact-id(?:=|<<[^\n]+\n)([0-9]+)$",
+                              output.read_text())
+            if not match:
+                raise RuntimeError("DAI_LIVE_ARTIFACT_ID_MISSING")
+            artifact_id = int(match.group(1))
+            wire_sequence += 1
+            wire_last_size = metadata["byteCount"]
+            outcome["liveDaiWireSnapshot"] = {
+                **metadata, "sequence": wire_sequence, "artifactId": artifact_id,
+            }
+            outcome["liveDaiWirePublicationStatus"] = "PUBLISHED"
+            persist_observation()
+            print(json.dumps({
+                "event": "DAI_LIVE_WIRE_SNAPSHOT", **outcome["liveDaiWireSnapshot"],
+                "url": (f"https://github.com/curveyield3/Contract-Automation/"
+                        f"actions/runs/{origin}/artifacts/{artifact_id}"),
+            }, sort_keys=True), flush=True)
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            outcome["liveDaiWirePublicationStatus"] = "DEGRADED_RETRY_PENDING"
+            observer_warning("DAI_LIVE_WIRE_PUBLICATION_FAILED", exc)
+            persist_observation()
+        finally:
+            if process.poll() is not None:
+                wire_upload = None
+        return wire_upload is None
+
+    def publish_dai_wire_snapshot(wait: bool = False) -> None:
+        nonlocal wire_upload, wire_last_attempt
+        if not trace_public_dai or not finish_wire_upload(wait):
+            return
+        if not wait and time.monotonic() - wire_last_attempt < 15:
+            return
+        wire_last_attempt = time.monotonic()
+        try:
+            size = wire_path.stat().st_size
+            if size <= wire_last_size:
+                return
+            node = Path(os.environ.get("CURVEYIELD_ARTIFACT_NODE", ""))
+            uploader = (runner_temp.parent / "_actions" / "actions" /
+                        "upload-artifact" / "v4" / "dist" / "upload" / "index.js")
+            if (not node.is_file() or not uploader.is_file()
+                    or not os.environ.get("ACTIONS_RUNTIME_TOKEN")
+                    or not os.environ.get("ACTIONS_RESULTS_URL")):
+                raise RuntimeError("DAI_LIVE_ARTIFACT_RUNTIME_UNAVAILABLE")
+            wire_upload_path.parent.mkdir(mode=0o700, exist_ok=True)
+            # Freeze the observed prefix. The provider may continue writing
+            # while the existing Actions uploader processes this snapshot.
+            with wire_path.open("rb") as src:
+                snapshot = src.read(size)
+            if not snapshot.endswith(b"\n"):
+                snapshot = snapshot[:snapshot.rfind(b"\n") + 1]
+            if len(snapshot) <= wire_last_size:
+                return
+            wire_upload_path.write_bytes(snapshot)
+            wire_upload_path.chmod(0o600)
+            slot = "a" if wire_sequence % 2 == 0 else "b"
+            name = f"certora-dai-wire-v1-{origin}-{attempt}-{slot}"
+            output = private / "wire-artifact-output.txt"
+            output.write_text("")
+            output.chmod(0o600)
+            upload_env = {
+                k: os.environ[k] for k in (
+                    "PATH", "HOME", "TMPDIR", "LANG", "RUNNER_TEMP",
+                    "GITHUB_WORKSPACE", "GITHUB_REPOSITORY", "GITHUB_RUN_ID",
+                    "GITHUB_RUN_ATTEMPT", "GITHUB_SERVER_URL", "GITHUB_API_URL",
+                    "ACTIONS_RUNTIME_TOKEN", "ACTIONS_RUNTIME_URL",
+                    "ACTIONS_RESULTS_URL", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+                ) if k in os.environ
+            }
+            upload_env.update({
+                "GITHUB_OUTPUT": str(output), "INPUT_NAME": name,
+                "INPUT_PATH": str(wire_upload_path),
+                "INPUT_IF-NO-FILES-FOUND": "error", "INPUT_RETENTION-DAYS": "1",
+                "INPUT_COMPRESSION-LEVEL": "6", "INPUT_OVERWRITE": "true",
+                "INPUT_INCLUDE-HIDDEN-FILES": "false",
+            })
+            metadata = {"artifactName": name,
+                        "transcriptSha256": hashlib.sha256(snapshot).hexdigest(),
+                        "byteCount": len(snapshot)}
+            proc = subprocess.Popen([str(node), str(uploader)], env=upload_env,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            wire_upload = (proc, time.monotonic(), metadata, output)
+            if wait:
+                finish_wire_upload(True)
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            outcome["liveDaiWirePublicationStatus"] = "DEGRADED_RETRY_PENDING"
+            observer_warning("DAI_LIVE_WIRE_PUBLICATION_FAILED", exc)
+            persist_observation()
 
     if trace_public_dai:
-        # Publish before launching the model client. A missing live channel
-        # is an execution failure, not a silent return to truncated logs.
-        wire_path.write_text(json.dumps({
-            "event": "TRANSCRIPT_BEGIN", "schemaVersion": "curveyield-dai-wire-v1",
-            "originRunId": origin, "originRunAttempt": attempt, "originCommit": head,
-            "requestId": mapping["requestId"], "source": mapping["source"],
-        }, sort_keys=True) + "\n", encoding="utf-8")
-        wire_path.chmod(0o600)
+        # The exact immutable public-DAI allowlist above remains authoritative.
+        outcome["liveDaiWireIntegrityStatus"] = "RECORDING"
+        try:
+            wire_path.write_text(json.dumps({
+                "event": "TRANSCRIPT_BEGIN", "schemaVersion": "curveyield-dai-wire-v1",
+                "originRunId": origin, "originRunAttempt": attempt, "originCommit": head,
+                "requestId": mapping["requestId"], "source": mapping["source"],
+            }, sort_keys=True) + "\n", encoding="utf-8")
+            wire_path.chmod(0o600)
+        except OSError as exc:
+            outcome["liveDaiWireIntegrityStatus"] = "DEGRADED"
+            observer_warning("DAI_LIVE_WIRE_INITIALIZATION_FAILED", exc)
         publish_dai_wire_snapshot()
+    def stop_native_process(process) -> None:
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        try:
+            process.wait(timeout=12)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired as exc:
+                observer_warning("NATIVE_PROCESS_CLEANUP_TIMEOUT", exc)
+
     begun = time.monotonic()
     # 330-minute Actions formal job includes source collection, native setup,
     # DB/RAG bootstrap and cleanup. Reserve time for the remaining runner steps.
@@ -1562,9 +1651,19 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "PREAUDIT_LOCAL_LLM_BASE_URL": endpoint,
             "PREAUDIT_LOCAL_LLM_MODEL": "lite-solo-mimo-v1",
             "CURVEYIELD_FORMAL_PROJECT_ROOT": str(project),
+            "CURVEYIELD_FORMAL_TARGET_INDEX": str(index + 1),
         })
+        progress_path = wire_path if trace_public_dai else project.parent / "native-progress.jsonl"
+        if not trace_public_dai:
+            try:
+                progress_path.write_text("")
+                progress_path.chmod(0o600)
+            except OSError as exc:
+                observer_warning("FORMAL_PROGRESS_INITIALIZATION_FAILED", exc)
+        env["CURVEYIELD_FORMAL_PROGRESS_PATH"] = str(progress_path)
         if trace_public_dai:
             env["CURVEYIELD_PUBLIC_DAI_WIRE_TRACE"] = "1"
+            env["CURVEYIELD_DAI_WIRE_PATH"] = str(wire_path)
         # Run the actual pinned console-autoprove main after activating the
         # MiMo-only AutoSetup adapter in the same process. Starting a separate
         # CLI process would lose its fail-closed runtime patch.
@@ -1586,6 +1685,9 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "--max-cpu-tasks", "1",
             "--run-mode", "comprehensive",
             "--tokens", "16384",
+            # Native cache/checkpoint recovery, isolated to this source, run,
+            # attempt and target; no second graph or invented resume engine.
+            "--cache-ns", f"cy-{origin}-{attempt}-{mapping['source']['archiveSha256'][:16]}-{index}",
         ]
         logfile = project.parent / "native-autoprover-private.log"
         original_spec_digests = {
@@ -1601,94 +1703,125 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         heartbeat_seconds = 60
         last_activity = started
         last_heartbeat = started - heartbeat_seconds
-        # Reassemble each complete native request/response from its original
-        # trace chunks; publish only after exact byte count and SHA-256 match.
-        # A short log pointer remains readable even on very long conversations.
-        trace_offset = 0
+        # Dedicated observations are checked independently of native work.
+        # Retain damaged records as evidence, report their integrity accurately,
+        # and let the actual upstream validators decide analytical acceptance.
+        try:
+            trace_offset = progress_path.stat().st_size
+        except OSError:
+            trace_offset = 0
         trace_remainder = b""
-        trace_pending: dict[tuple[int, str], dict] = {}
+        log_warning_offset = 0
+        log_warning_remainder = b""
         model_progress: dict[str, object] = {}
-        stream_digests: dict[int, tuple[object, int]] = {}
+        stream_digests: dict[tuple[int, int], tuple[object, int]] = {}
+        request_keys: set[tuple[int, int]] = set()
+        completed_keys: set[tuple[int, int]] = set()
+        request_bodies: set[tuple[int, int]] = set()
+        native_completions: set[tuple[int, int]] = set()
+        rejected_keys: set[tuple[int, int]] = set()
+        record["modelRequests"] = 0
+        record["modelResponsesCompleted"] = 0
+        record["modelResponsesRejected"] = 0
+        record["nativeComponentAnalysisAccepted"] = False
+        outcome["activeTarget"] = record
+        persist_observation()
+
+        def integrity_warning(code: str, exc: Exception | None = None) -> None:
+            if trace_public_dai:
+                outcome["liveDaiWireIntegrityStatus"] = "DEGRADED"
+            record["observationIntegrity"] = "DEGRADED"
+            observer_warning(code, exc)
 
         def forward_dai_wire_trace() -> None:
-            nonlocal trace_offset, trace_remainder
+            nonlocal trace_offset, trace_remainder, log_warning_offset, log_warning_remainder
             import base64
-            with logfile.open("rb") as log_reader:
-                log_reader.seek(trace_offset)
-                new_bytes = log_reader.read()
-                trace_offset = log_reader.tell()
-            lines = (trace_remainder + new_bytes).split(b"\n")
-            trace_remainder = lines.pop()
-            completed = []
-            for row in lines:
-                if row.startswith(b"CURVEYIELD_MIMO_PROGRESS_V1 "):
-                    status = json.loads(row.split(b" ", 1)[1])
-                    model_progress.update(status)
-                    print(json.dumps({"stage": "I06.2", "targetIndex": index + 1,
-                                      **status}, sort_keys=True), flush=True)
-                    if trace_public_dai:
-                        completed.append({**status, "targetIndex": index + 1})
-                    continue
-                if not trace_public_dai or not row.startswith(b"CURVEYIELD_DAI_WIRE_V1 "):
-                    continue
-                item = json.loads(row.split(b" ", 1)[1])
-                event = item["event"]
-                if event == "STREAM_BYTES":
-                    number = item["requestNumber"]
-                    h, offset = stream_digests.get(number, (hashlib.sha256(), 0))
-                    raw_part = base64.b64decode(item["payload"], validate=True)
-                    if item["offset"] != offset or item["byteCount"] != len(raw_part):
-                        raise RuntimeError("DAI_LIVE_SSE_OFFSET_INVALID")
-                    h.update(raw_part)
-                    stream_digests[number] = (h, offset + len(raw_part))
-                    completed.append({**item, "targetIndex": index + 1})
-                    continue
-                if event == "STREAM_COMPLETE":
-                    h, size = stream_digests.pop(item["requestNumber"])
-                    if size != item["byteCount"] or h.hexdigest() != item["sha256"]:
-                        raise RuntimeError("DAI_LIVE_SSE_DIGEST_MISMATCH")
-                if event in ("BEGIN", "CHUNK", "END"):
-                    key = (item["requestNumber"], item["direction"])
-                    if event == "BEGIN":
-                        if key in trace_pending:
-                            raise RuntimeError("DAI_LIVE_DUPLICATE_WIRE_BEGIN")
-                        trace_pending[key] = {"meta": item, "chunks": []}
-                    elif event == "CHUNK":
-                        pending = trace_pending[key]
-                        if item["chunkIndex"] != len(pending["chunks"]):
-                            raise RuntimeError("DAI_LIVE_WIRE_CHUNK_ORDER_INVALID")
-                        pending["chunks"].append(item["payload"])
-                    else:
-                        pending = trace_pending.pop(key)
-                        meta = pending["meta"]
-                        chunks = pending["chunks"]
-                        if len(chunks) != meta["chunkCount"] or len(chunks) != item["chunkCount"]:
-                            raise RuntimeError("DAI_LIVE_WIRE_CHUNK_COUNT_INVALID")
-                        payload = "".join(chunks)
-                        if meta["encoding"] == "utf-8":
-                            raw = payload.encode("utf-8")
-                        elif meta["encoding"] == "base64":
-                            raw = base64.b64decode(payload, validate=True)
-                        else:
-                            raise RuntimeError("DAI_LIVE_WIRE_ENCODING_INVALID")
-                        if (len(raw) != meta["byteCount"]
-                                or hashlib.sha256(raw).hexdigest() != meta["sha256"]):
-                            raise RuntimeError("DAI_LIVE_WIRE_BODY_DIGEST_MISMATCH")
-                        completed.append({**meta, "event": "COMPLETE_BODY",
-                                          "targetIndex": index + 1, "payload": payload})
-                else:
-                    completed.append({**item, "targetIndex": index + 1})
-            if completed:
-                with wire_path.open("a", encoding="utf-8") as transcript:
-                    for item in completed:
-                        transcript.write(json.dumps(item, ensure_ascii=True) + "\n")
+            # Only look for capture failures in the mixed native log; do not
+            # reconstruct wire records or expose its private contents.
+            try:
+                with logfile.open("rb") as reader:
+                    reader.seek(log_warning_offset)
+                    data = reader.read()
+                    log_warning_offset = reader.tell()
+                lines = (log_warning_remainder + data).split(b"\n")
+                log_warning_remainder = lines.pop()
+                for row in lines:
+                    if b"CURVEYIELD_OBSERVATION_WARNING " in row:
+                        integrity_warning("FORMAL_PROVIDER_OBSERVATION_WRITE_FAILED")
+            except OSError as exc:
+                observer_warning("FORMAL_OBSERVATION_WARNING_READ_FAILED", exc)
+            try:
+                with progress_path.open("rb") as reader:
+                    reader.seek(trace_offset)
+                    data = reader.read()
+                    trace_offset = reader.tell()
+            except OSError as exc:
+                integrity_warning("FORMAL_OBSERVATION_READ_FAILED", exc)
                 publish_dai_wire_snapshot()
-                for item in completed:
-                    # Progress is emitted above. Do not flood the viewer with
-                    # repeated per-token frames or duplicate progress records.
-                    if item["event"] in ("COMPLETE_BODY", "STREAM_COMPLETE", "RESPONSE_VALIDATION"):
-                        print(json.dumps({k: v for k, v in item.items() if k != "payload"},
-                                         sort_keys=True), flush=True)
+                return
+            lines = (trace_remainder + data).split(b"\n")
+            trace_remainder = lines.pop()
+            changed = False
+            for row in lines:
+                try:
+                    item = json.loads(row)
+                    event = item["event"]
+                    if item.get("targetIndex") != index + 1:
+                        raise ValueError("observation target mismatch")
+                    key = (item.get("producerPid"), item.get("requestNumber"))
+                    if event == "STREAM_BYTES":
+                        h, offset = stream_digests.get(key, (hashlib.sha256(), 0))
+                        raw = base64.b64decode(item["payload"], validate=True)
+                        if item["offset"] != offset or item["byteCount"] != len(raw):
+                            integrity_warning("DAI_LIVE_SSE_OFFSET_INVALID")
+                            continue
+                        h.update(raw)
+                        stream_digests[key] = (h, offset + len(raw))
+                    elif event in ("STREAM_COMPLETE", "STREAM_ABORTED"):
+                        h, size = stream_digests.pop(key, (hashlib.sha256(), 0))
+                        if size != item["byteCount"] or h.hexdigest() != item["sha256"]:
+                            integrity_warning("DAI_LIVE_SSE_DIGEST_MISMATCH")
+                        completed_keys.add(key)
+                    elif event == "COMPLETE_BODY":
+                        if item["encoding"] == "utf-8":
+                            raw = item["payload"].encode("utf-8")
+                        elif item["encoding"] == "base64":
+                            raw = base64.b64decode(item["payload"], validate=True)
+                        else:
+                            raise ValueError("unknown wire encoding")
+                        if len(raw) != item["byteCount"] or hashlib.sha256(raw).hexdigest() != item["sha256"]:
+                            integrity_warning("DAI_LIVE_WIRE_BODY_DIGEST_MISMATCH")
+                        if item["direction"] == "AUTOPROVER_TO_MIMO":
+                            request_bodies.add(key)
+                    elif event == "MODEL_REQUEST":
+                        request_keys.add(key)
+                        record["modelRequests"] = len(request_keys)
+                        changed = True
+                    elif event == "MODEL_COMPLETION":
+                        native_completions.add(key)
+                        record["modelResponsesCompleted"] = len(native_completions)
+                        if item.get("outcome") == "REJECTED":
+                            rejected_keys.add(key)
+                        record["modelResponsesRejected"] = len(rejected_keys)
+                        changed = True
+                    elif event == "NATIVE_COMPONENT_ANALYSIS_ACCEPTED":
+                        record["nativeComponentAnalysisAccepted"] = True
+                        record["nativeAcceptedComponentCount"] = item.get("components")
+                        changed = True
+                    if event == "MODEL_STREAM_PROGRESS":
+                        model_progress.update(item)
+                    if event != "STREAM_BYTES":
+                        print(json.dumps({"stage": "I06.2", **{
+                            k: v for k, v in item.items() if k != "payload"
+                        }}, sort_keys=True), flush=True)
+                except (ValueError, TypeError, KeyError, AttributeError, OSError) as exc:
+                    integrity_warning("FORMAL_OBSERVATION_RECORD_INVALID", exc)
+            if changed:
+                outcome["modelRequestCount"] = (
+                    sum(r.get("modelRequests", 0) for r in outcome["results"])
+                    + record["modelRequests"])
+                persist_observation()
+            publish_dai_wire_snapshot()
 
         model_idle_since: float | None = None
         previous_cpu: int | None = None
@@ -1725,26 +1858,30 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                         last_mimo_check = now
                         mimo_monitor_errors = (mimo_monitor_errors + 1
                                                if mimo_run_state == "unavailable" else 0)
-                        if mimo_run_state == "completed" or mimo_monitor_errors >= 3:
-                            record["status"] = ("MIMO_DEPENDENCY_TERMINATED" if
-                                                mimo_run_state == "completed" else
-                                                "MIMO_MONITOR_UNAVAILABLE")
-                            record["mimoTerminalReason"] = mimo_run_reason
-                            print(json.dumps({
-                                "stage": "I06.2", "event": "MIMO_DEPENDENCY_FAILURE",
-                                "targetIndex": index + 1, "targetCount": len(target_list),
-                                "mimoState": mimo_run_state, "reason": mimo_run_reason,
-                            }, sort_keys=True), flush=True)
-                            os.killpg(process.pid, signal.SIGTERM)
-                            try:
-                                process.wait(timeout=12)
-                            except subprocess.TimeoutExpired:
-                                os.killpg(process.pid, signal.SIGKILL)
-                                process.wait(timeout=10)
-                            record["nativeExitCode"] = process.returncode
-                            break
-                    cpu, changed = local_progress(process.pid, project, logfile)
+                        if mimo_run_state == "unavailable":
+                            observer_warning("MIMO_WORKFLOW_STATUS_UNAVAILABLE")
+                    # A metadata outage alone cannot prove the service failed.
+                    # Only end a target when the matched workflow is terminal
+                    # AND the actual authenticated model is no longer reachable.
                     model_state, model_counters = private_model_progress(ip)
+                    if mimo_run_state == "completed" and model_state == "unknown":
+                        record["status"] = "MIMO_DEPENDENCY_TERMINATED"
+                        record["mimoTerminalReason"] = mimo_run_reason
+                        print(json.dumps({
+                            "stage": "I06.2", "event": "MIMO_DEPENDENCY_FAILURE",
+                            "targetIndex": index + 1, "targetCount": len(target_list),
+                            "mimoState": mimo_run_state, "reason": mimo_run_reason,
+                        }, sort_keys=True), flush=True)
+                        stop_native_process(process)
+                        record["nativeExitCode"] = process.returncode
+                        break
+                    try:
+                        cpu, changed = local_progress(process.pid, project, logfile)
+                    except OSError as exc:
+                        observer_warning("NATIVE_PROGRESS_READ_FAILED", exc)
+                        cpu, changed = previous_cpu or 0, previous_files or (0, 0, 0)
+                        # A failed observation is not proof of inactivity.
+                        last_activity = now
                     local_cpu_advanced = previous_cpu is not None and cpu > previous_cpu
                     local_files_advanced = previous_files is not None and changed != previous_files
                     model_advanced = (previous_model is not None and model_counters is not None and
@@ -1784,36 +1921,39 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
                         }
                         print(json.dumps(heartbeat, sort_keys=True), flush=True)
                         record["lastProgress"] = heartbeat
-                        persist()
+                        persist_observation()
                         last_heartbeat = now
                     # Do not equate a silent, busy MiMo request with a dead model:
                     # long prefill or native proving can legitimately be quiet.
                     # Terminate only after *both* the local group is motionless
                     # and the authenticated model has confirmed it is idle.
-                    if (quiet_for >= idle_stall_seconds and model_idle_since is not None
-                            and now - model_idle_since >= 120):
-                        record["status"] = "TARGET_STALLED_LOCAL_AND_MIMO_IDLE"
+                    budget_exhausted = now >= deadline
+                    if (budget_exhausted or
+                            (quiet_for >= idle_stall_seconds and model_idle_since is not None
+                             and now - model_idle_since >= 120)):
+                        record["status"] = ("TARGET_GLOBAL_TIME_BUDGET_EXHAUSTED" if budget_exhausted
+                                            else "TARGET_STALLED_LOCAL_AND_MIMO_IDLE")
                         record["watchdogIdleSeconds"] = quiet_for
                         print(json.dumps({
-                            "stage": "I06.2", "event": "WATCHDOG_CONFIRMED_STALL",
+                            "stage": "I06.2", "event": ("NATIVE_TIME_BUDGET_EXHAUSTED" if budget_exhausted
+                                                         else "WATCHDOG_CONFIRMED_STALL"),
                             "targetIndex": index + 1, "targetCount": len(target_list),
                             "idleSeconds": quiet_for, "modelState": model_state,
                         }, sort_keys=True), flush=True)
-                        os.killpg(process.pid, signal.SIGTERM)
-                        try:
-                            process.wait(timeout=12)
-                        except subprocess.TimeoutExpired:
-                            os.killpg(process.pid, signal.SIGKILL)
-                            process.wait(timeout=10)
+                        stop_native_process(process)
                         record["nativeExitCode"] = process.returncode
                         break
             finally:
                 if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=10)
+                    stop_native_process(process)
         forward_dai_wire_trace()
-        if trace_pending or trace_remainder.startswith(b"CURVEYIELD_DAI_WIRE_V1 "):
-            raise RuntimeError("DAI_LIVE_WIRE_INCOMPLETE_AT_TARGET_EXIT")
+        if trace_remainder or (trace_public_dai and (
+                stream_digests or request_keys - request_bodies or request_keys - native_completions)):
+            integrity_warning("FORMAL_OBSERVATION_INCOMPLETE_AT_TARGET_EXIT")
+        if trace_public_dai and request_keys - completed_keys:
+            record["wireRequestsWithoutStreamEnd"] = len(request_keys - completed_keys)
+        if trace_public_dai and record.get("observationIntegrity") != "DEGRADED":
+            record["observationIntegrity"] = "COMPLETE_OBSERVED_RECORDS"
         logfile.chmod(0o600)
         if record["status"] == "NATIVE_AUTOPROVER_FAILED":
             # The full upstream trace remains private. Publish only a narrow
@@ -1851,6 +1991,13 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
         }
         record["finalSpecDigests"] = final_specs
         record["generatedSpecCount"] = len(set(final_specs) - set(original_spec_digests))
+        # Pinned CLI supports --predefined-properties only after its own
+        # property set is written. Record that native boundary without
+        # inventing a completed property set from partial model text.
+        native_property_set = project / "certora" / "ap_report" / "property_set.json"
+        if native_property_set.is_file():
+            record["nativePropertySetSha256"] = digest(native_property_set)
+            record["nativePropertySetAvailableInPrivateScratch"] = True
         internal = project / ".certora_internal" / "autoProve"
         run_index = internal / "components_to_prover_runs.json"
         if run_index.is_file():
@@ -1934,8 +2081,10 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             else:
                 record["status"] = "NATIVE_RULE_VERDICTS_CAPTURED"
         outcome["results"].append(record)
+        outcome.pop("activeTarget", None)
         persist()
-        if record["status"] in ("MIMO_DEPENDENCY_TERMINATED", "MIMO_MONITOR_UNAVAILABLE"):
+        if record["status"] == "MIMO_DEPENDENCY_TERMINATED":
+            publish_dai_wire_snapshot(wait=True)
             outcome["status"] = record["status"]
             outcome["elapsedSeconds"] = round(time.monotonic() - begun, 2)
             persist()
@@ -1949,6 +2098,10 @@ def run_authenticated_autoprover(*, target_map_file: Path, native_toolchain_file
             "nativeFailureSignatures": record.get("nativeFailureSignatures"),
             "nativeFailureUpstreamFrame": record.get("nativeFailureUpstreamFrame"),
         }, sort_keys=True), flush=True)
+    publish_dai_wire_snapshot(wait=True)
+    if trace_public_dai and outcome.get("liveDaiWireIntegrityStatus") == "RECORDING":
+        outcome["liveDaiWireIntegrityStatus"] = "COMPLETE_OBSERVED_RECORDS"
+    outcome["modelRequestCount"] = sum(r.get("modelRequests", 0) for r in outcome["results"])
     observed = sum(len(r.get("nativePropertyVerdicts", [])) for r in outcome["results"])
     outcome["observedNativePropertyVerdicts"] = observed
     outcome["status"] = ("NATIVE_RULE_VERDICTS_OBSERVED" if observed
