@@ -1,4 +1,4 @@
-name: cyvlSDT gross NAV pool fork simulation v1
+name: cyvlSDT gross NAV 100-unit withdrawal matrix v2
 on:
   push:
     branches: [cyvlsdt-gross-nav-pool-fork-v1]
@@ -83,7 +83,7 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Deploy and seed on pinned Ethereum Anvil fork
+      - name: Execute eight independent withdrawal scenarios on pinned Ethereum fork
         shell: bash
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
@@ -219,42 +219,75 @@ jobs:
             assert.equal(await read(VAULT,vaultI,'totalSupply'),0n);
             assert.equal(await read(VAULT,vaultI,'depositFeeBps'),0n);
             assert.equal(await read(LOCKER,lockerI,'poLDepositShareBps'),2500n);
-            assert((await read(SDT,erc,'allowance',[SAFE,LOCKER]))>=TWENTY);
-            await call('04-locker',LOCKER,lockerI,'deposit',[TWENTY,SAFE]);
-            assert.equal(await bal(WANT,SAFE),TWENTY);
-            await call('05-vault-approval',WANT,erc,'approve',[VAULT,TEN]);
-            const preview=await read(VAULT,vaultI,'previewDeposit',[TEN]);
-            await call('06-deposit',VAULT,vaultI,'deposit',[TEN,SAFE]);
-            const shares=await bal(VAULT,SAFE),nav=await read(VAULT,vaultI,'totalAssets'),active=await read(STAKING,stakingI,'activeBalance',[STRATEGY]),rate=await read(VAULT,vaultI,'convertToAssets',[W]);
-            const remaining=await bal(WANT,SAFE);
-            const deposit={preview,shares,nav,active,rate,remaining};
-            fs.writeFileSync('evidence/deposit-result.json',J(deposit));
-            console.log('DEPOSIT_RESULT',J(deposit));
-            assert.equal(shares,TEN);assert.equal(nav,TEN);assert.equal(active,TEN);assert.equal(rate,W);assert.equal(remaining,TEN);
-            const pooldata='0x5bcd3d83000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000001f40000000000000000000000000000000000000000000000000000000001312d0000000000000000000000000000000000000000000000000000000005d21dba00000000000000000000000000000000000000000000000000000000000000012c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000026000000000000000000000000000000000000000000000000000000000000002e00000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000002043757276655969656c6420534454206379766c534454206379766c5344546176000000000000000000000000000000000000000000000000000000000000000763795344542d3300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000073968b9a57c6e53d41345fd57a6e6ae27d6cdb2f0000000000000000000000004abc523b4eab1fad413018711de14ccd8843d83900000000000000000000000048ce7408e14251d40ef2dc9da64b971bb60e318d000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'.replace(OLD.slice(2),VAULT.slice(2).toLowerCase());
-            assert(pooldata!== '0x5bcd3d83000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000001f40000000000000000000000000000000000000000000000000000000001312d0000000000000000000000000000000000000000000000000000000005d21dba00000000000000000000000000000000000000000000000000000000000000012c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000026000000000000000000000000000000000000000000000000000000000000002e00000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000002043757276655969656c6420534454206379766c534454206379766c5344546176000000000000000000000000000000000000000000000000000000000000000763795344542d3300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000073968b9a57c6e53d41345fd57a6e6ae27d6cdb2f0000000000000000000000004abc523b4eab1fad413018711de14ccd8843d83900000000000000000000000048ce7408e14251d40ef2dc9da64b971bb60e318d000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000');
-            const idx=await read(FACTORY,factoryI,'pool_count');
-            await send('07-create-pool',FACTORY,pooldata);
-            const POOL=await read(FACTORY,factoryI,'pool_list',[idx]);
-            console.log('NEW_POOL='+POOL);
-            assert.notEqual(await p.getCode(POOL),'0x');
-            for(const [i,t] of [SDT,WANT,VAULT].entries())eqaddr(await read(POOL,poolI,'coins',[i]),t);
-            const types=Array.from(await read(FACTORY,factoryI,'get_pool_asset_types',[POOL]));
-            assert.deepEqual(types,[0n,0n,3n]);
-            for(const [i,t] of [SDT,WANT,VAULT].entries())await call('08-approve-'+i,t,erc,'approve',[POOL,10000n*W]);
-            await call('09-add-liquidity',POOL,poolI,'add_liquidity',[[TEN,TEN,TEN],297n*W/10n,POL]);
-            const amounts=await Promise.all([SDT,WANT,VAULT].map(t=>bal(t,POOL))),lp=await bal(POOL,POL);
-            const rates=Array.from(await read(POOL,poolI,'stored_rates'));
-            const finalNav=await read(VAULT,vaultI,'totalAssets'),finalRate=await read(VAULT,vaultI,'convertToAssets',[W]);
-            const result={vault:VAULT,strategy:STRATEGY,pool:POOL,deposit,poolSDT:amounts[0],poolCyvlSDT:amounts[1],poolCyvlSDTav:amounts[2],lp,rates,types,finalNav,finalRate,actions,totalGas:actions.reduce((s,a)=>s+a.gas,0n)};
-            fs.writeFileSync('evidence/result.json',J(result));console.log('POOL_RESULT',J(result));
-            assert.deepEqual(amounts,[TEN,TEN,TEN]);assert.deepEqual(rates,[W,W,W]);assert.equal(finalNav,TEN);assert.equal(finalRate,W);assert(lp>=297n*W/10n);
-            console.log('SIMULATION_PASS');
+            const HUNDRED=100n*W;
+            assert((await read(SDT,erc,'allowance',[SAFE,LOCKER]))>=HUNDRED);
+            assert((await bal(SDT,SAFE))>=HUNDRED);
+            await call('04-locker',LOCKER,lockerI,'deposit',[HUNDRED,SAFE]);
+            assert.equal(await bal(WANT,SAFE),HUNDRED);
+            await call('05-vault-approval',WANT,erc,'approve',[VAULT,HUNDRED]);
+            await call('06-deposit',VAULT,vaultI,'deposit',[HUNDRED,SAFE]);
+            const exitI=new E.Interface(['function redeem(uint256,address,address) returns(uint256)','function requestWithdrawal(uint256) returns(uint256,uint256)','function completeWithdrawal() returns(uint256)','function pendingWithdrawal(address) view returns(uint256 shares,uint256 grossAssets,uint256 strategyRequestId,uint64 unlockTime,address sourceStrategy,bool finalHolder)','function previewRedeem(uint256) view returns(uint256)','function previewQueuedRedeem(uint256) view returns(uint256)','function stakingExitFeePpm() view returns(uint256)','function withdrawalFeeBps() view returns(uint256)','function maxRedeem(address) view returns(uint256)','function maxWithdraw(address) view returns(uint256)']);
+            const stI=new E.Interface(['function activeBalance(address) view returns(uint256)','function queuedBalance(address) view returns(uint256)','function immediateWithdrawFeePpm() view returns(uint32)']);
+            const stratI=new E.Interface(['function grossBalanceOf() view returns(uint256)','function balanceOf() view returns(uint256)','function reservedWithdrawalAssets() view returns(uint256)']);
+            const fullRead=async(to,I,f,args=[])=>I.decodeFunctionResult(f,await p.call({to,data:I.encodeFunctionData(f,args)}));
+            const state=async()=>({userAssets:await bal(WANT,SAFE),userShares:await bal(VAULT,SAFE),adminAssets:await bal(WANT,ADMIN),vaultIdle:await bal(WANT,VAULT),strategyIdle:await bal(WANT,STRATEGY),active:await read(STAKING,stI,'activeBalance',[STRATEGY]),queued:await read(STAKING,stI,'queuedBalance',[STRATEGY]),nav:await read(VAULT,vaultI,'totalAssets'),supply:await read(VAULT,vaultI,'totalSupply'),rate:await read(VAULT,vaultI,'convertToAssets',[W]),strategyGross:await read(STRATEGY,stratI,'grossBalanceOf'),strategyNav:await read(STRATEGY,stratI,'balanceOf'),reserved:await read(STRATEGY,stratI,'reservedWithdrawalAssets')});
+            const baseline=await state();
+            assert.equal(baseline.userAssets,0n);assert.equal(baseline.userShares,HUNDRED);assert.equal(baseline.nav,HUNDRED);assert.equal(baseline.active,HUNDRED);assert.equal(baseline.rate,W);
+            const fees={backendPpm:await read(STAKING,stI,'immediateWithdrawFeePpm'),vaultQuotePpm:await read(VAULT,exitI,'stakingExitFeePpm'),vaultBps:await read(VAULT,exitI,'withdrawalFeeBps')};
+            console.log('BASELINE',J({baseline,fees}));
+            const rows=[];
+            const save=()=>fs.writeFileSync('evidence/withdrawal-results-v2.json',J({vault:VAULT,strategy:STRATEGY,baseline,fees,rows}));
+            save();
+            let snapshot=await p.send('evm_snapshot',[]);
+            for(const mode of ['instant','queued'])for(const units of [10,20,50,90]){
+              const amount=BigInt(units)*W,label=mode+'-'+units;
+              const before=await state();assert.deepEqual(before,baseline);
+              const row={mode,units,amount,before,preview:await read(VAULT,exitI,mode==='instant'?'previewRedeem':'previewQueuedRedeem',[amount]),maxRedeem:await read(VAULT,exitI,'maxRedeem',[SAFE]),maxWithdraw:await read(VAULT,exitI,'maxWithdraw',[SAFE])};
+              try{
+                if(mode==='instant'){
+                  await call(label,VAULT,exitI,'redeem',[amount,SAFE,SAFE]);
+                }else{
+                  await call(label+'-request',VAULT,exitI,'requestWithdrawal',[amount]);
+                  const pend=await fullRead(VAULT,exitI,'pendingWithdrawal',[SAFE]);
+                  row.pending={shares:pend[0],grossAssets:pend[1],strategyRequestId:pend[2],unlockTime:pend[3],sourceStrategy:pend[4],finalHolder:pend[5]};
+                  row.afterRequest=await state();
+                  assert.equal(pend[0],amount);assert.equal(pend[1],amount);assert.equal(row.afterRequest.userAssets,before.userAssets);assert.equal(row.afterRequest.userShares,HUNDRED-amount);assert.equal(row.afterRequest.queued,amount);
+                  const now=BigInt((await p.getBlock('latest')).timestamp);
+                  row.cooldownSeconds=pend[3]-now;
+                  assert(row.cooldownSeconds>0n);
+                  try{await p.call({from:SAFE,to:VAULT,data:exitI.encodeFunctionData('completeWithdrawal')});row.earlyCompletionBlocked=false;}catch(e){row.earlyCompletionBlocked=true;row.earlyError=e.data||e.shortMessage;}
+                  assert(row.earlyCompletionBlocked,'premature settlement accepted');
+                  await p.send('evm_setNextBlockTimestamp',[Number(pend[3]+1n)]);
+                  await p.send('evm_mine',[]);
+                  await call(label+'-complete',VAULT,exitI,'completeWithdrawal',[]);
+                  const clear=await fullRead(VAULT,exitI,'pendingWithdrawal',[SAFE]);assert.equal(clear[0],0n);
+                }
+                row.after=await state();
+                row.payout=row.after.userAssets-before.userAssets;
+                row.adminFee=row.after.adminAssets-before.adminAssets;
+                row.retainedNavDelta=row.after.nav-(HUNDRED-amount);
+                row.backendCost=HUNDRED-row.after.nav-row.payout-row.adminFee;
+                row.totalExitCost=amount-row.payout;
+                row.previewMatches=row.payout===row.preview;
+                row.remainingNAVPreserved=row.after.nav>=HUNDRED-amount;
+                assert.equal(row.after.userShares,HUNDRED-amount);
+                assert.equal(row.after.supply,HUNDRED-amount);
+                assert.equal(row.after.queued,0n);
+                row.status='EXECUTED';
+              }catch(e){row.status='FAILED';row.error={message:e.shortMessage||e.message,data:e.data||e.info?.error?.data||null};row.after=await state().catch(()=>null);}
+              rows.push(row);save();console.log('WITHDRAWAL_RESULT',J(row));
+              assert.equal(await p.send('evm_revert',[snapshot]),true);
+              snapshot=await p.send('evm_snapshot',[]);
+            }
+            const count=rows.filter(x=>x.status==='EXECUTED').length;
+            console.log('WITHDRAWAL_SUMMARY',J({executed:count,requested:8,rows:rows.map(({mode,units,status,payout,totalExitCost,adminFee,backendCost,retainedNavDelta,previewMatches,remainingNAVPreserved,cooldownSeconds,error})=>({mode,units,status,payout,totalExitCost,adminFee,backendCost,retainedNavDelta,previewMatches,remainingNAVPreserved,cooldownSeconds,error}))}));
+            assert.equal(rows.length,8);
+            assert.equal(count,8,'one or more requested withdrawals failed');
           })().catch(e=>{console.error('SIMULATION_FAILURE',e.shortMessage||e.message);process.exitCode=1;}).finally(()=>p.destroy());
           JS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: cyvlsdt-gross-nav-pool-fork-v1
+          name: cyvlsdt-gross-nav-withdrawals-v2
           path: ${{ runner.temp }}/gross-nav/evidence/
           if-no-files-found: warn
