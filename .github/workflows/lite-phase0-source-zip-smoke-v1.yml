@@ -44,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/gross-nav"
-          npm install --ignore-scripts --no-audit --no-fund --save-exact solc@0.8.28
+          npm install --ignore-scripts --no-audit --no-fund --save-exact solc@0.8.28 ethers@6.17.0
       - name: Compile strategy and retain exact compiler evidence
         shell: bash
         run: |
@@ -164,70 +164,91 @@ jobs:
           })().catch(e=>{console.error(String(e.message).replace(/https?:\S+/g,'[redacted]'));process.exit(1)});
           JS
           echo "VERIFIED FORK block=$BLOCK hash=$HASH"
-          cast rpc anvil_impersonateAccount "$SAFE" >/dev/null
-          # Fork-only gas funding; no token balance modifications.
-          cast rpc anvil_setBalance "$SAFE" 0x8ac7230489e80000 >/dev/null
-          # Every subsequent cast invocation explicitly targets the local fork.
-          cast() { command cast "$@" --rpc-url "$ETH_RPC_URL"; }
-          send() {
-            local label="$1"; shift
-            cast send --from "$SAFE" --unlocked --json "$@" > "evidence/$label.json"
-            jq -e '.status=="0x1" or .status==1 or .status=="1"' "evidence/$label.json" >/dev/null
-            printf '%s gas=%s tx=%s\n' "$label" "$(jq -r .gasUsed "evidence/$label.json")" "$(jq -r .transactionHash "evidence/$label.json")"
+          export ADMIN POL TEN TWENTY APPROVE
+          node <<'JS'
+          const E=require('ethers'), fs=require('fs'), assert=require('node:assert/strict');
+          const p=new E.JsonRpcProvider('http://127.0.0.1:8545',1,{staticNetwork:true,cacheTimeout:-1});
+          const W=10n**18n,TEN=10n*W,TWENTY=20n*W,SAFE=process.env.SAFE;
+          const {SDT,WANT,LOCKER,STAKING,ROUTER,OLD,TEMPLATE,FACTORY,ADMIN,POL}=process.env;
+          const J=x=>JSON.stringify(x,(_,v)=>typeof v==='bigint'?v.toString():v);
+          const artifact=JSON.parse(fs.readFileSync('strategy-artifact.json','utf8'));
+          const erc=new E.Interface(['function balanceOf(address) view returns(uint256)','function approve(address,uint256) returns(bool)','function allowance(address,address) view returns(uint256)']);
+          const vaultI=new E.Interface(['function initialize(address,string,string,uint256,address,address,bool,bool,bool)','function strategy() view returns(address)','function totalSupply() view returns(uint256)','function depositFeeBps() view returns(uint256)','function previewDeposit(uint256) view returns(uint256)','function deposit(uint256,address) returns(uint256)','function totalAssets() view returns(uint256)','function convertToAssets(uint256) view returns(uint256)','function name() view returns(string)']);
+          const lockerI=new E.Interface(['function deposit(uint256,address) returns(uint256)','function poLDepositShareBps() view returns(uint16)']);
+          const stakingI=new E.Interface(['function activeBalance(address) view returns(uint256)']);
+          const factoryI=new E.Interface(['function pool_count() view returns(uint256)','function pool_list(uint256) view returns(address)','function get_pool_asset_types(address) view returns(uint8[])']);
+          const poolI=new E.Interface(['function coins(uint256) view returns(address)','function add_liquidity(uint256[],uint256,address) returns(uint256)','function stored_rates() view returns(uint256[])']);
+          const read=async(to,I,f,args=[])=>I.decodeFunctionResult(f,await p.call({to,data:I.encodeFunctionData(f,args)}))[0];
+          const bal=(t,a)=>read(t,erc,'balanceOf',[a]);
+          const lower=x=>x.toLowerCase();
+          const eqaddr=(a,b)=>assert.equal(lower(a),lower(b));
+          const actions=[];
+          async function send(label,to,data){
+            const tx={from:SAFE,data,gas:'0xf42400',...(to?{to}:{})};
+            console.log('EXECUTE',label);
+            try {
+              await p.send('eth_call',[tx,'latest']);
+              const hash=await p.send('eth_sendTransaction',[tx]);
+              const receipt=await p.send('eth_getTransactionReceipt',[hash]);
+              assert(receipt,label+' missing receipt');
+              fs.writeFileSync('evidence/'+label+'.json',J(receipt));
+              assert.equal(BigInt(receipt.status),1n,label+' reverted');
+              actions.push({label,hash,gas:BigInt(receipt.gasUsed)});
+              console.log('MINED',label,hash,'gas='+BigInt(receipt.gasUsed));
+              return receipt;
+            }catch(e){console.error('FAILED',label,J({message:e.shortMessage||e.message,data:e.data||e.info?.error?.data}));throw e;}
           }
-          num() { cast call "$@" | awk 'NR==1 {print $1}'; }
-          bal() { num "$1" 'balanceOf(address)(uint256)' "$2"; }
-          echo "BEFORE SDT=$(bal "$SDT" "$SAFE") cyvlSDT=$(bal "$WANT" "$SAFE")"
-          send 01-vault-clone --create "0x3d602d80600a3d3981f3363d3d373d3d3d363d73${TEMPLATE:2}5af43d82803e903d91602b57fd5bf3"
-          VAULT="$(jq -r .contractAddress evidence/01-vault-clone.json)"
-          test "$(cast code "$VAULT")" = "$(cast code "$OLD")"
-          echo "NEW_VAULT=$VAULT"
-          CTOR="$(cast abi-encode 'constructor(address,address,address,address,address,address,address,uint16,uint16)' "$SAFE" "$VAULT" "$WANT" "$SDT" "$STAKING" "$LOCKER" "$ROUTER" 390 10)"
-          INIT="0x$(jq -r .evm.bytecode.object strategy-artifact.json)${CTOR:2}"
-          send 02-revenue-strategy --create "$INIT"
-          STRATEGY="$(jq -r .contractAddress evidence/02-revenue-strategy.json)"
-          echo "NEW_STRATEGY=$STRATEGY"
-          send 03-initialize "$VAULT" 'initialize(address,string,string,uint256,address,address,bool,bool,bool)' "$STRATEGY" 'CurveYield vlSDT Vault' cyvlSDTav 10 "$ADMIN" "$SAFE" true false true
-          test "$(cast call "$VAULT" 'strategy()(address)' | tr A-F a-f)" = "$(echo "$STRATEGY" | tr A-F a-f)"
-          test "$(num "$VAULT" 'totalSupply()(uint256)')" = 0
-          test "$(num "$VAULT" 'depositFeeBps()(uint256)')" = 0
-          # Existing live locker allowance covers this operation.
-          echo "LOCKER_POL_BPS=$(num "$LOCKER" 'poLDepositShareBps()(uint16)')"
-          send 04-locker "$LOCKER" 'deposit(uint256,address)' "$TWENTY" "$SAFE"
-          echo "LOCKER_MINT=$(bal "$WANT" "$SAFE")"
-          test "$(bal "$WANT" "$SAFE")" = "$TWENTY"
-          send 05-vault-approval "$WANT" 'approve(address,uint256)' "$VAULT" "$TEN"
-          echo "PREVIEW_DEPOSIT=$(num "$VAULT" 'previewDeposit(uint256)(uint256)' "$TEN")"
-          send 06-deposit "$VAULT" 'deposit(uint256,address)' "$TEN" "$SAFE"
-          SHARES="$(bal "$VAULT" "$SAFE")"
-          NAV="$(num "$VAULT" 'totalAssets()(uint256)')"
-          ACTIVE="$(num "$STAKING" 'activeBalance(address)(uint256)' "$STRATEGY")"
-          RATE="$(num "$VAULT" 'convertToAssets(uint256)(uint256)' 1000000000000000000)"
-          echo "DEPOSIT_RESULT shares=$SHARES nav=$NAV active=$ACTIVE rate=$RATE remaining_cyvlSDT=$(bal "$WANT" "$SAFE")"
-          test "$SHARES" = "$TEN"
-          test "$NAV" = "$TEN"
-          test "$ACTIVE" = "$TEN"
-          test "$RATE" = 1000000000000000000
-          test "$(bal "$WANT" "$SAFE")" = "$TEN"
-          POOLDATA='0x5bcd3d83000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000001f40000000000000000000000000000000000000000000000000000000001312d0000000000000000000000000000000000000000000000000000000005d21dba00000000000000000000000000000000000000000000000000000000000000012c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000026000000000000000000000000000000000000000000000000000000000000002e00000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000002043757276655969656c6420534454206379766c534454206379766c5344546176000000000000000000000000000000000000000000000000000000000000000763795344542d3300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000073968b9a57c6e53d41345fd57a6e6ae27d6cdb2f0000000000000000000000004abc523b4eab1fad413018711de14ccd8843d83900000000000000000000000048ce7408e14251d40ef2dc9da64b971bb60e318d000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
-          POOLDATA="${POOLDATA/48ce7408e14251d40ef2dc9da64b971bb60e318d/$(echo "${VAULT:2}" | tr A-F a-f)}"
-          IDX="$(num "$FACTORY" 'pool_count()(uint256)')"
-          send 07-create-pool "$FACTORY" "$POOLDATA"
-          POOL="$(cast call "$FACTORY" 'pool_list(uint256)(address)' "$IDX")"
-          echo "NEW_POOL=$POOL"
-          test "$(cast code "$POOL")" != 0x
-          test "$(cast call "$POOL" 'coins(uint256)(address)' 2 | tr A-F a-f)" = "$(echo "$VAULT" | tr A-F a-f)"
-          for tok in "$SDT" "$WANT" "$VAULT"; do send "08-approve-${tok:2:8}" "$tok" 'approve(address,uint256)' "$POOL" "$APPROVE"; done
-          send 09-add-liquidity "$POOL" 'add_liquidity(uint256[],uint256,address)' "[$TEN,$TEN,$TEN]" 29700000000000000000 "$POL"
-          A="$(bal "$SDT" "$POOL")"; B="$(bal "$WANT" "$POOL")"; C="$(bal "$VAULT" "$POOL")"
-          LP="$(bal "$POOL" "$POL")"
-          echo "POOL_RESULT SDT=$A cyvlSDT=$B cyvlSDTav=$C LP=$LP"
-          test "$A" = "$TEN"; test "$B" = "$TEN"; test "$C" = "$TEN"
-          echo "POOL_STORED_RATES:"
-          cast call "$POOL" 'stored_rates()(uint256[])'
-          echo "FINAL_VAULT_NAV=$(num "$VAULT" 'totalAssets()(uint256)') FINAL_VAULT_RATE=$(num "$VAULT" 'convertToAssets(uint256)(uint256)' 1000000000000000000)"
-          jq -n --arg vault "$VAULT" --arg strategy "$STRATEGY" --arg pool "$POOL" --arg shares "$SHARES" --arg nav "$NAV" --arg active "$ACTIVE" --arg rate "$RATE" --arg sdt "$A" --arg cyvl "$B" --arg av "$C" --arg lp "$LP" '{vault:$vault,strategy:$strategy,pool:$pool,shares:$shares,nav:$nav,active:$active,rate:$rate,poolSDT:$sdt,poolCyvlSDT:$cyvl,poolCyvlSDTav:$av,lp:$lp}' > evidence/result.json
-          echo 'SIMULATION_PASS'
+          const call=(label,to,I,f,args)=>send(label,to,I.encodeFunctionData(f,args));
+          (async()=>{
+            assert.equal(await p.getBlockNumber(),Number(process.env.BLOCK));
+            await p.send('anvil_impersonateAccount',[SAFE]);
+            await p.send('anvil_setBalance',[SAFE,E.toQuantity(10n*W)]);
+            console.log('BEFORE',J({SDT:await bal(SDT,SAFE),cyvlSDT:await bal(WANT,SAFE)}));
+            const cloneCode='0x3d602d80600a3d3981f3363d3d373d3d3d363d73'+TEMPLATE.slice(2)+'5af43d82803e903d91602b57fd5bf3';
+            const VAULT=(await send('01-vault-clone',null,cloneCode)).contractAddress;
+            assert.equal(await p.getCode(VAULT),await p.getCode(OLD));
+            const ctor=E.AbiCoder.defaultAbiCoder().encode(['address','address','address','address','address','address','address','uint16','uint16'],[SAFE,VAULT,WANT,SDT,STAKING,LOCKER,ROUTER,390,10]);
+            const init=E.concat(['0x'+artifact.evm.bytecode.object,ctor]);
+            const STRATEGY=(await send('02-revenue-strategy',null,init)).contractAddress;
+            console.log('NEW_VAULT='+VAULT,'NEW_STRATEGY='+STRATEGY);
+            await call('03-initialize',VAULT,vaultI,'initialize',[STRATEGY,'CurveYield vlSDT Vault','cyvlSDTav',10n,ADMIN,SAFE,true,false,true]);
+            eqaddr(await read(VAULT,vaultI,'strategy'),STRATEGY);
+            assert.equal(await read(VAULT,vaultI,'totalSupply'),0n);
+            assert.equal(await read(VAULT,vaultI,'depositFeeBps'),0n);
+            assert.equal(await read(LOCKER,lockerI,'poLDepositShareBps'),2500n);
+            assert((await read(SDT,erc,'allowance',[SAFE,LOCKER]))>=TWENTY);
+            await call('04-locker',LOCKER,lockerI,'deposit',[TWENTY,SAFE]);
+            assert.equal(await bal(WANT,SAFE),TWENTY);
+            await call('05-vault-approval',WANT,erc,'approve',[VAULT,TEN]);
+            const preview=await read(VAULT,vaultI,'previewDeposit',[TEN]);
+            await call('06-deposit',VAULT,vaultI,'deposit',[TEN,SAFE]);
+            const shares=await bal(VAULT,SAFE),nav=await read(VAULT,vaultI,'totalAssets'),active=await read(STAKING,stakingI,'activeBalance',[STRATEGY]),rate=await read(VAULT,vaultI,'convertToAssets',[W]);
+            const remaining=await bal(WANT,SAFE);
+            const deposit={preview,shares,nav,active,rate,remaining};
+            fs.writeFileSync('evidence/deposit-result.json',J(deposit));
+            console.log('DEPOSIT_RESULT',J(deposit));
+            assert.equal(shares,TEN);assert.equal(nav,TEN);assert.equal(active,TEN);assert.equal(rate,W);assert.equal(remaining,TEN);
+            const pooldata='0x5bcd3d83000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000001f40000000000000000000000000000000000000000000000000000000001312d0000000000000000000000000000000000000000000000000000000005d21dba00000000000000000000000000000000000000000000000000000000000000012c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000026000000000000000000000000000000000000000000000000000000000000002e00000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000002043757276655969656c6420534454206379766c534454206379766c5344546176000000000000000000000000000000000000000000000000000000000000000763795344542d3300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000073968b9a57c6e53d41345fd57a6e6ae27d6cdb2f0000000000000000000000004abc523b4eab1fad413018711de14ccd8843d83900000000000000000000000048ce7408e14251d40ef2dc9da64b971bb60e318d000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'.replace(OLD.slice(2),VAULT.slice(2).toLowerCase());
+            assert(pooldata!== '0x5bcd3d83000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000001f40000000000000000000000000000000000000000000000000000000001312d0000000000000000000000000000000000000000000000000000000005d21dba00000000000000000000000000000000000000000000000000000000000000012c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000026000000000000000000000000000000000000000000000000000000000000002e00000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000002043757276655969656c6420534454206379766c534454206379766c5344546176000000000000000000000000000000000000000000000000000000000000000763795344542d3300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000073968b9a57c6e53d41345fd57a6e6ae27d6cdb2f0000000000000000000000004abc523b4eab1fad413018711de14ccd8843d83900000000000000000000000048ce7408e14251d40ef2dc9da64b971bb60e318d000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000');
+            const idx=await read(FACTORY,factoryI,'pool_count');
+            await send('07-create-pool',FACTORY,pooldata);
+            const POOL=await read(FACTORY,factoryI,'pool_list',[idx]);
+            console.log('NEW_POOL='+POOL);
+            assert.notEqual(await p.getCode(POOL),'0x');
+            for(const [i,t] of [SDT,WANT,VAULT].entries())eqaddr(await read(POOL,poolI,'coins',[i]),t);
+            const types=Array.from(await read(FACTORY,factoryI,'get_pool_asset_types',[POOL]));
+            assert.deepEqual(types,[0n,0n,3n]);
+            for(const [i,t] of [SDT,WANT,VAULT].entries())await call('08-approve-'+i,t,erc,'approve',[POOL,10000n*W]);
+            await call('09-add-liquidity',POOL,poolI,'add_liquidity',[[TEN,TEN,TEN],297n*W/10n,POL]);
+            const amounts=await Promise.all([SDT,WANT,VAULT].map(t=>bal(t,POOL))),lp=await bal(POOL,POL);
+            const rates=Array.from(await read(POOL,poolI,'stored_rates'));
+            const finalNav=await read(VAULT,vaultI,'totalAssets'),finalRate=await read(VAULT,vaultI,'convertToAssets',[W]);
+            const result={vault:VAULT,strategy:STRATEGY,pool:POOL,deposit,poolSDT:amounts[0],poolCyvlSDT:amounts[1],poolCyvlSDTav:amounts[2],lp,rates,types,finalNav,finalRate,actions,totalGas:actions.reduce((s,a)=>s+a.gas,0n)};
+            fs.writeFileSync('evidence/result.json',J(result));console.log('POOL_RESULT',J(result));
+            assert.deepEqual(amounts,[TEN,TEN,TEN]);assert.deepEqual(rates,[W,W,W]);assert.equal(finalNav,TEN);assert.equal(finalRate,W);assert(lp>=297n*W/10n);
+            console.log('SIMULATION_PASS');
+          })().catch(e=>{console.error('SIMULATION_FAILURE',e.shortMessage||e.message);process.exitCode=1;}).finally(()=>p.destroy());
+          JS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
