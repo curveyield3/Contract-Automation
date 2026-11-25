@@ -102,8 +102,25 @@ jobs:
           PY
           test -n "$ETHEREUM_FORK_RPC_URL" || { echo 'RPC_ETHEREUM unavailable'; exit 1; }
           echo 'PREFLIGHT: source authenticated; resolving upstream block'
-          BLOCK="$(cast block-number --rpc-url "$ETHEREUM_FORK_RPC_URL")"
-          HASH="$(cast block "$BLOCK" --rpc-url "$ETHEREUM_FORK_RPC_URL" --json | jq -er .hash)"
+          mkdir -p evidence
+          node <<'JS' > evidence/upstream-pin.json
+          const url=process.env.ETHEREUM_FORK_RPC_URL;
+          async function rpc(method,params) {
+            for(let i=0;i<3;i++){
+              try{
+                const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(20000)});
+                if(!r.ok) throw Error('HTTP '+r.status);
+                const j=await r.json();
+                if(j.error) throw Error('RPC code '+j.error.code);
+                if(j.result==null) throw Error('empty result');
+                return j.result;
+              }catch(e){console.error(method+' attempt '+(i+1)+': '+String(e.message).replace(/https?:\S+/g,'[redacted]'));if(i===2)throw Error('upstream RPC failed');await new Promise(r=>setTimeout(r,2000));}
+            }
+          }
+          (async()=>{const chain=await rpc('eth_chainId',[]);if(BigInt(chain)!==1n)throw Error('wrong chain');const b=await rpc('eth_getBlockByNumber',['latest',false]);if(!/^0x[0-9a-f]{64}$/i.test(b.hash))throw Error('invalid hash');console.log(JSON.stringify({block:Number(BigInt(b.number)),hash:b.hash}));})().catch(e=>{console.error(e.message);process.exit(1)});
+          JS
+          BLOCK="$(jq -er .block evidence/upstream-pin.json)"
+          HASH="$(jq -er .hash evidence/upstream-pin.json)"
           printf 'UPSTREAM_PIN block=%s hash=%s\n' "$BLOCK" "$HASH"
           SAFE=0x47623c62f281807d615eeb4a2ceee9d97f9d3c49
           SDT=0x73968b9a57c6e53d41345fd57a6e6ae27d6cdb2f
@@ -121,12 +138,9 @@ jobs:
           APPROVE=10000000000000000000000
           export ETH_RPC_URL=http://127.0.0.1:8545
           mkdir -p evidence
-          echo "PREFLIGHT: verify upstream chain"
-          test "$(cast chain-id --rpc-url "$ETHEREUM_FORK_RPC_URL")" = 1
-          test "$(cast block "$BLOCK" --rpc-url "$ETHEREUM_FORK_RPC_URL" --json | jq -r .hash)" = "$HASH"
           anvil --fork-url "$ETHEREUM_FORK_RPC_URL" --fork-block-number "$BLOCK" --chain-id 1 --host 127.0.0.1 --port 8545 --silent > /tmp/gross-nav-anvil.log 2>&1 &
           PID=$!
-          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          trap 'kill "$PID" 2>/dev/null || true; cp /tmp/gross-nav-anvil.log evidence/anvil.log 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do if cast chain-id >/dev/null 2>&1; then break; fi; sleep 1; done
           echo "PREFLIGHT: verify local chain and historical block"
           test "$(cast chain-id)" = 1
