@@ -129,7 +129,7 @@ jobs:
           STAKING=0x8003fa826f5414a7c6cf0aa9fd3c73df97e77bac
           ROUTER=0xa4a533025fef8d3446e7cb8a434824e1ee865b00
           OLD=0x48ce7408e14251d40ef2dc9da64b971bb60e318d
-          TEMPLATE=0x00f63308ebb429f0967aa36a0def66ec1074975b5a
+          TEMPLATE=0x00f63308ebb429f0967aa36a0def66ec1074975b
           FACTORY=0x6a8cbed756804b16e05e741edabd5cb544ae21bf
           ADMIN=0x9f2b20a772246960810045905b7daccf960ee288
           POL=0xad60c84f4addec612ce6bd329435d5718a4d9b7a
@@ -156,6 +156,7 @@ jobs:
             const chain=await rpc(local,'eth_chainId',[]), number=await rpc(local,'eth_blockNumber',[]), b=await rpc(local,'eth_getBlockByNumber',[tag,false]);
             console.log('FORK IDENTITY',JSON.stringify({chain,number,hash:b?.hash,expected:process.env.HASH}));
             assert.equal(BigInt(chain),1n);assert.equal(BigInt(number),BigInt(tag));assert.equal(b?.hash,process.env.HASH);
+            assert.equal((await rpc(local,'eth_getCode',[process.env.OLD,tag])).slice(22,62),process.env.TEMPLATE.slice(2));
             for(const key of ['SAFE','SDT','WANT','LOCKER','STAKING','ROUTER','OLD','TEMPLATE','FACTORY']){
               const a=process.env[key], x=await rpc(local,'eth_getCode',[a,tag]), y=await rpc(upstream,'eth_getCode',[a,tag]);
               assert.notEqual(x,'0x',key+' empty code');assert.equal(x,y,key+' code mismatch');console.log('CODE VERIFIED',key,a);
@@ -166,6 +167,8 @@ jobs:
           cast rpc anvil_impersonateAccount "$SAFE" >/dev/null
           # Fork-only gas funding; no token balance modifications.
           cast rpc anvil_setBalance "$SAFE" 0x8ac7230489e80000 >/dev/null
+          # Every subsequent cast invocation explicitly targets the local fork.
+          cast() { command cast "$@" --rpc-url "$ETH_RPC_URL"; }
           send() {
             local label="$1"; shift
             cast send --from "$SAFE" --unlocked --json "$@" > "evidence/$label.json"
