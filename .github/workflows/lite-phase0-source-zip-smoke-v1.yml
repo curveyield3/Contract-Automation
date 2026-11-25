@@ -1,4 +1,4 @@
-name: cyvlSDT complete installation and replacement vault nonce37 v3
+name: cySDT-ETH deposit withdrawal PPS invariant matrix v1
 on:
   push:
     branches: [cyvlsdt-gross-nav-pool-fork-v1]
@@ -83,7 +83,7 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Simulate exact complete Safe installation batch
+      - name: Replay installation and execute SDT-ETH PPS matrix
         shell: bash
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
@@ -117,7 +117,7 @@ jobs:
               }catch(e){console.error(method+' attempt '+(i+1)+': '+String(e.message).replace(/https?:\S+/g,'[redacted]'));if(i===2)throw Error('upstream RPC failed');await new Promise(r=>setTimeout(r,2000));}
             }
           }
-          (async()=>{const chain=await rpc('eth_chainId',[]);if(BigInt(chain)!==1n)throw Error('wrong chain');const b=await rpc('eth_getBlockByNumber',['latest',false]);if(!/^0x[0-9a-f]{64}$/i.test(b.hash))throw Error('invalid hash');console.log(JSON.stringify({block:Number(BigInt(b.number)),hash:b.hash}));})().catch(e=>{console.error(e.message);process.exit(1)});
+          (async()=>{const chain=await rpc('eth_chainId',[]);if(BigInt(chain)!==1n)throw Error('wrong chain');const b=await rpc('eth_getBlockByNumber',['0x19439e8',false]);if(b.hash!=='0x06389c2c158ed957b772932387b399a43c645a2d5e9874683f6f1b360f54c25a')throw Error('prior successful fork hash mismatch');if(!/^0x[0-9a-f]{64}$/i.test(b.hash))throw Error('invalid hash');console.log(JSON.stringify({block:Number(BigInt(b.number)),hash:b.hash}));})().catch(e=>{console.error(e.message);process.exit(1)});
           JS
           BLOCK="$(jq -er .block evidence/upstream-pin.json)"
           HASH="$(jq -er .hash evidence/upstream-pin.json)"
@@ -258,12 +258,94 @@ jobs:
             eqaddr(await read(YEARN,vi,'strategy'),yearn);assert((await bal(YEARN,POL))>0n);
             const result={safe:SAFE,nonce:37,safeHash,to:MULTI,operation:1,vault:VAULT,strategy:STRATEGY,yearn,yearnVault:YEARN,pool,nftId,gasEstimate,gasUsed:BigInt(receipt.gasUsed),bytes:E.dataLength(data),calls:list.map(x=>x.label),after:{sdt:await bal(SDT),cyvlSDT:await bal(WANT),vaultShares:await bal(VAULT),vaultNAV:await read(VAULT,vi,'totalAssets'),poolLP:await bal(pool,POL),yearnShares:await bal(YEARN,POL),polSDT:await bal(SDT,POL)},txHash:hash};
             fs.writeFileSync('evidence/proposal-v3.json',J({...result,data,transactions:list}));console.log('INSTALLATION_PASS',J(result));
-            for(let i=0;i<data.length;i+=4000)console.log('PROPOSAL_CHUNK',i/4000,data.slice(i,i+4000));
+            // All further operations run exclusively against the local Anvil fork.
+            assert.equal(safeHash,'0x383ea84d9035d9ba5ba42f7c616121fb4cac9b30e5a8e9130f76b50d4599d2ad');
+            const V=YEARN, U=SAFE, B=ADMIN;
+            const I=new E.Interface([
+              'function deposit(uint256)','function deposit(uint256,address) returns(uint256)','function depositAll()','function mint(uint256,address) returns(uint256)',
+              'function withdraw(uint256)','function withdraw(uint256,address,address) returns(uint256)','function redeem(uint256,address,address) returns(uint256)','function withdrawAll()','function emergencyWithdraw(uint256,uint256)',
+              'function requestWithdrawal(uint256) returns(uint256,uint256)','function completeWithdrawal() returns(uint256)','function withdrawQueuedImmediate() returns(uint256)',
+              'function previewDeposit(uint256) view returns(uint256)','function previewMint(uint256) view returns(uint256)','function previewRedeem(uint256) view returns(uint256)','function previewWithdraw(uint256) view returns(uint256)','function maxWithdraw(address) view returns(uint256)','function maxRedeem(address) view returns(uint256)',
+              'function totalAssets() view returns(uint256)','function totalSupply() view returns(uint256)','function getPricePerFullShare() view returns(uint256)','function available() view returns(uint256)','function depositFeeBps() view returns(uint256)','function withdrawalFeeBps() view returns(uint256)','function setDepositFeeBps(uint256)','function earn()',
+              'error QueueDisabled()','error VaultZeroShares()','error VaultZeroAssets()','error VaultZeroDeposit()','error VaultMintExecutionShortfall()','error VaultNoNetAssetsAdded()','error VaultInsufficientShares()','error VaultStrategyWithdrawalShortfall()','error VaultInsufficientNetAssets()','error VaultFinalExitMustRedeemAll()','error VaultEmergencyMinAssetsOut()']);
+            const T=new E.Interface(['function transfer(address,uint256) returns(bool)','function approve(address,uint256) returns(bool)','function balanceOf(address) view returns(uint256)']);
+            const S=new E.Interface(['function balanceOf() view returns(uint256)']);
+            const err=e=>{let d=e.data||e.info?.error?.data||e.error?.data||null;if(typeof d==='object')d=d.data||null;let name=null;try{name=I.parseError(d)?.name}catch{}return {name,data:d,message:String(e.shortMessage||e.message).slice(0,350)};};
+            const readV=(f,args=[])=>read(V,I,f,args);
+            async function txLocal(label,from,to,calldata){
+              const obj={from,to,data:calldata,gas:'0x989680'};
+              let quote=null,preflightError=null;
+              try{quote=await p.send('eth_call',[obj,'latest']);}catch(e){preflightError=err(e);}
+              if(preflightError)return {status:'REVERTED_PREFLIGHT',error:preflightError};
+              let h;try{h=await p.send('eth_sendTransaction',[obj]);}catch(e){return {status:'SEND_ERROR',error:err(e)};}
+              let rc=await p.send('eth_getTransactionReceipt',[h]);if(!rc)await p.send('evm_mine',[]);
+              for(let i=0;i<80&&!rc;i++){await new Promise(r=>setTimeout(r,250));rc=await p.send('eth_getTransactionReceipt',[h]);}
+              if(!rc)throw Error(label+' missing receipt');
+              fs.writeFileSync('evidence/pps-'+label+'.json',J(rc));
+              return {status:BigInt(rc.status)===1n?'EXECUTED':'REVERTED_MINED',hash:h,gas:BigInt(rc.gasUsed),returnData:quote};
+            }
+            async function must(label,from,to,iface,f,args){
+              const out=await txLocal(label,from,to,iface.encodeFunctionData(f,args));if(out.status!=='EXECUTED')throw Error(label+' '+J(out));return out;
+            }
+            const state=async()=>({nav:await readV('totalAssets'),supply:await readV('totalSupply'),pps:await readV('getPricePerFullShare'),idle:await readV('available'),strategyNav:await read(yearn,S,'balanceOf'),uAssets:await bal(SDT,U),uShares:await bal(V,U),bAssets:await bal(SDT,B),bShares:await bal(V,B),polShares:await bal(V,POL),fee:await readV('depositFeeBps'),withdrawFee:await readV('withdrawalFeeBps')});
+            const rows=[],baselines={};
+            const save=()=>fs.writeFileSync('evidence/sdt-eth-pps-results-v1.json',J({vault:V,strategy:yearn,proposalHash:safeHash,block:process.env.BLOCK,baselines,rows}));
+            async function scenario(regime,label,from,method,args,expectedRevert=false){
+              const before=await state();const result=await txLocal(regime+'-'+label,from,V,I.encodeFunctionData(method,args));const after=await state();
+              const delta=after.pps-before.pps, cross=after.nav*before.supply-before.nav*after.supply;
+              const success=result.status==='EXECUTED',empty=after.supply===0n;
+              const status=success?(expectedRevert?'UNEXPECTED_SUCCESS':(empty?'FULL_EXIT':(delta<0n||cross<0n?'PPS_REDUCTION':'PASS'))):(result.status.startsWith('REVERTED')?(J(before)===J(after)?(expectedRevert?'EXPECTED_REVERT':'REVERTED_NO_CHANGE'):'REVERT_CHANGED_STATE'):'HARNESS_ERROR');
+              const row={regime,label,method,args,from,status,result,before,after,delta,cross,empty,expectedRevert};rows.push(row);save();console.log('PPS_CASE',J({regime,label,method,status,beforePPS:before.pps,afterPPS:after.pps,delta,cross,navBefore:before.nav,navAfter:after.nav,supplyBefore:before.supply,supplyAfter:after.supply,error:result.error||null}));return row;
+            }
+            await p.send('anvil_impersonateAccount',[U]);await p.send('anvil_setBalance',[U,E.toQuantity(100n*W)]);
+            await must('fund-b',U,SDT,T,'transfer',[B,20n*W]);
+            for(const [who,tag] of [[U,'a'],[B,'b']])await must('approve-'+tag,who,SDT,T,'approve',[V,E.MaxUint256]);
+            assert.equal(await readV('depositFeeBps'),0n);assert.equal(await readV('withdrawalFeeBps'),50n);
+            await scenario('setup','deposit-a',U,'deposit(uint256,address)',[15n*W,U]);
+            await scenario('setup','deposit-b',B,'deposit(uint256,address)',[10n*W,B]);
+            assert((await bal(V,U))>0n);assert((await bal(V,B))>0n);
+            let base=await p.send('evm_snapshot',[]);
+            for(const regime of ['standard','appreciated-idle','deposit-fee-1pct']){
+              assert.equal(await p.send('evm_revert',[base]),true);base=await p.send('evm_snapshot',[]);
+              if(regime==='appreciated-idle')await must('appreciation',U,SDT,T,'transfer',[V,W]);
+              if(regime==='deposit-fee-1pct')await must('fee-setting',U,V,I,'setDepositFeeBps',[100n]);
+              baselines[regime]=await state();console.log('PPS_BASELINE',J({regime,state:baselines[regime]}));save();
+              let snap=await p.send('evm_snapshot',[]);
+              const sh=await bal(V,U), asset=await bal(SDT,U), max=await readV('maxWithdraw',[U]);
+              const cases=[];
+              for(const [tag,n] of [['dust',1n],['small',W/100n],['regular',W],['large',10n*W]]){
+                if(n<=asset)cases.push(['deposit-'+tag,U,'deposit(uint256)',[n]]);
+                if(n<=asset)cases.push(['deposit-to-'+tag,U,'deposit(uint256,address)',[n,B]]);
+                if(n<=sh)cases.push(['mint-'+tag,U,'mint(uint256,address)',[n,B]]);
+              }
+              cases.push(['deposit-all',B,'depositAll()',[]]);
+              for(const [tag,n] of [['dust',1n],['small',W/100n],['regular',W],['large',sh*9n/10n]]){
+                if(n>0n&&n<=sh){cases.push(['withdraw-shares-'+tag,U,'withdraw(uint256)',[n]]);cases.push(['redeem-'+tag,U,'redeem(uint256,address,address)',[n,B,U]]);cases.push(['emergency-'+tag,U,'emergencyWithdraw(uint256,uint256)',[n,0n]]);}
+              }
+              for(const [tag,n] of [['dust',1n],['small',W/100n],['regular',W],['large',max*9n/10n]])if(n>0n&&n<=max)cases.push(['withdraw-assets-'+tag,U,'withdraw(uint256,address,address)',[n,B,U]]);
+              cases.push(['withdraw-all',U,'withdrawAll()',[]]);
+              cases.push(['queue-disabled',U,'requestWithdrawal(uint256)',[W],true],['complete-disabled',U,'completeWithdrawal()',[],true],['early-queue-disabled',U,'withdrawQueuedImmediate()',[],true]);
+              for(const [label,from,method,a,expect] of cases){
+                await scenario(regime,label,from,method,a,expect||false);
+                assert.equal(await p.send('evm_revert',[snap]),true);snap=await p.send('evm_snapshot',[]);
+              }
+              // Consecutive actions share state, unlike the independent matrix.
+              for(const [label,from,method,a] of [['sequence-deposit',B,'deposit(uint256,address)',[W,U]],['sequence-mint',U,'mint(uint256,address)',[W,B]],['sequence-redeem',U,'redeem(uint256,address,address)',[W,B,U]],['sequence-withdraw',B,'withdraw(uint256,address,address)',[W/2n,U,B]]])await scenario(regime,label,from,method,a);
+            }
+            assert.equal(await p.send('evm_revert',[base]),true);
+            // Full vault exit: consolidate shares by normal transfers before calling withdrawAll.
+            await p.send('anvil_impersonateAccount',[POL]);await p.send('anvil_setBalance',[POL,E.toQuantity(10n*W)]);
+            for(const [who,tag] of [[B,'b'],[POL,'pol']]){const n=await bal(V,who);if(n)await must('full-transfer-'+tag,who,V,T,'transfer',[U,n]);}
+            assert.equal(await bal(V,U),await readV('totalSupply'));
+            await scenario('full-exit','withdraw-all-shares',U,'withdrawAll()',[]);
+            const counts=Object.fromEntries([...new Set(rows.map(x=>x.status))].map(k=>[k,rows.filter(x=>x.status===k).length]));
+            save();console.log('PPS_SUMMARY',J({total:rows.length,counts,byRegime:Object.fromEntries(Object.keys(baselines).map(k=>[k,rows.filter(x=>x.regime===k).length]))}));
+            const bad=rows.filter(x=>['PPS_REDUCTION','UNEXPECTED_SUCCESS','REVERT_CHANGED_STATE','HARNESS_ERROR'].includes(x.status));if(bad.length)process.exitCode=1;
           })().catch(e=>{console.error('SIMULATION_FAILURE',J({message:e.shortMessage||e.message,data:e.data||e.info?.error?.data}));process.exitCode=1;}).finally(()=>p.destroy());
           JS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: cyvlsdt-installation-nonce37-v3
+          name: cySDT-ETH-pps-results-v1
           path: ${{ runner.temp }}/gross-nav/evidence/
           if-no-files-found: warn
