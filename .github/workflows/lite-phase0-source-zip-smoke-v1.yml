@@ -189,8 +189,11 @@ jobs:
             try {
               await p.send('eth_call',[tx,'latest']);
               const hash=await p.send('eth_sendTransaction',[tx]);
-              const receipt=await p.send('eth_getTransactionReceipt',[hash]);
-              assert(receipt,label+' missing receipt');
+              let receipt=await p.send('eth_getTransactionReceipt',[hash]);
+              if(!receipt) await p.send('evm_mine',[]);
+              for(let i=0;i<40&&!receipt;i++){await new Promise(r=>setTimeout(r,250));receipt=await p.send('eth_getTransactionReceipt',[hash]);}
+              if(!receipt) console.error('PENDING_TRANSACTION',label,hash,J(await p.send('eth_getTransactionByHash',[hash])));
+              assert(receipt,label+' missing receipt after bounded mining wait');
               fs.writeFileSync('evidence/'+label+'.json',J(receipt));
               assert.equal(BigInt(receipt.status),1n,label+' reverted');
               actions.push({label,hash,gas:BigInt(receipt.gasUsed)});
