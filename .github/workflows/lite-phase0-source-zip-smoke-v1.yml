@@ -141,17 +141,27 @@ jobs:
           anvil --fork-url "$ETHEREUM_FORK_RPC_URL" --fork-block-number "$BLOCK" --chain-id 1 --host 127.0.0.1 --port 8545 --silent > /tmp/gross-nav-anvil.log 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true; cp /tmp/gross-nav-anvil.log evidence/anvil.log 2>/dev/null || true' EXIT
-          for i in $(seq 1 30); do if cast chain-id >/dev/null 2>&1; then break; fi; sleep 1; done
-          echo "PREFLIGHT: verify local chain and historical block"
-          test "$(cast chain-id)" = 1
-          test "$(cast block-number)" = "$BLOCK"
-          test "$(cast block "$BLOCK" --json | jq -r .hash)" = "$HASH"
-          for a in "$SAFE" "$SDT" "$WANT" "$LOCKER" "$STAKING" "$ROUTER" "$OLD" "$TEMPLATE" "$FACTORY"; do
-            echo "PREFLIGHT: code identity $a"
-            local_code="$(cast code "$a")"
-            test "$local_code" != 0x
-            test "$local_code" = "$(cast code "$a" --block "$BLOCK" --rpc-url "$ETHEREUM_FORK_RPC_URL")"
-          done
+          for i in $(seq 1 30); do if cast chain-id --rpc-url "$ETH_RPC_URL" >/dev/null 2>&1; then break; fi; sleep 1; done
+          echo "PREFLIGHT: verify local chain, historical block and code"
+          export BLOCK HASH SAFE SDT WANT LOCKER STAKING ROUTER OLD TEMPLATE FACTORY
+          node <<'JS'
+          const assert=require('node:assert/strict');
+          async function rpc(url,method,params){
+            const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(20000)});
+            if(!r.ok)throw Error(method+' HTTP '+r.status);
+            const j=await r.json();if(j.error)throw Error(method+' RPC '+j.error.code);return j.result;
+          }
+          (async()=>{
+            const local='http://127.0.0.1:8545', upstream=process.env.ETHEREUM_FORK_RPC_URL, tag='0x'+BigInt(process.env.BLOCK).toString(16);
+            const chain=await rpc(local,'eth_chainId',[]), number=await rpc(local,'eth_blockNumber',[]), b=await rpc(local,'eth_getBlockByNumber',[tag,false]);
+            console.log('FORK IDENTITY',JSON.stringify({chain,number,hash:b?.hash,expected:process.env.HASH}));
+            assert.equal(BigInt(chain),1n);assert.equal(BigInt(number),BigInt(tag));assert.equal(b?.hash,process.env.HASH);
+            for(const key of ['SAFE','SDT','WANT','LOCKER','STAKING','ROUTER','OLD','TEMPLATE','FACTORY']){
+              const a=process.env[key], x=await rpc(local,'eth_getCode',[a,tag]), y=await rpc(upstream,'eth_getCode',[a,tag]);
+              assert.notEqual(x,'0x',key+' empty code');assert.equal(x,y,key+' code mismatch');console.log('CODE VERIFIED',key,a);
+            }
+          })().catch(e=>{console.error(String(e.message).replace(/https?:\S+/g,'[redacted]'));process.exit(1)});
+          JS
           echo "VERIFIED FORK block=$BLOCK hash=$HASH"
           cast rpc anvil_impersonateAccount "$SAFE" >/dev/null
           # Fork-only gas funding; no token balance modifications.
