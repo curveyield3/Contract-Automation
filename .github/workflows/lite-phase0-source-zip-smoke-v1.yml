@@ -101,8 +101,10 @@ jobs:
           assert hashlib.sha256(s.encode()).hexdigest()=='d8b239014254bd8bbb748e2ab236faf497d1f258637382c98ffae6c0f06b38c3'
           PY
           test -n "$ETHEREUM_FORK_RPC_URL" || { echo 'RPC_ETHEREUM unavailable'; exit 1; }
-          BLOCK=26491237
-          HASH=0xa0dc143cecefbf34a18c8203246349bc162a7dc129ec4f519313033ebc4655a0
+          echo 'PREFLIGHT: source authenticated; resolving upstream block'
+          BLOCK="$(cast block-number --rpc-url "$ETHEREUM_FORK_RPC_URL")"
+          HASH="$(cast block "$BLOCK" --rpc-url "$ETHEREUM_FORK_RPC_URL" --json | jq -er .hash)"
+          printf 'UPSTREAM_PIN block=%s hash=%s\n' "$BLOCK" "$HASH"
           SAFE=0x47623c62f281807d615eeb4a2ceee9d97f9d3c49
           SDT=0x73968b9a57c6e53d41345fd57a6e6ae27d6cdb2f
           WANT=0x4abc523b4eab1fad413018711de14ccd8843d839
@@ -119,16 +121,19 @@ jobs:
           APPROVE=10000000000000000000000
           export ETH_RPC_URL=http://127.0.0.1:8545
           mkdir -p evidence
+          echo "PREFLIGHT: verify upstream chain"
           test "$(cast chain-id --rpc-url "$ETHEREUM_FORK_RPC_URL")" = 1
           test "$(cast block "$BLOCK" --rpc-url "$ETHEREUM_FORK_RPC_URL" --json | jq -r .hash)" = "$HASH"
           anvil --fork-url "$ETHEREUM_FORK_RPC_URL" --fork-block-number "$BLOCK" --chain-id 1 --host 127.0.0.1 --port 8545 --silent > /tmp/gross-nav-anvil.log 2>&1 &
           PID=$!
           trap 'kill "$PID" 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do if cast chain-id >/dev/null 2>&1; then break; fi; sleep 1; done
+          echo "PREFLIGHT: verify local chain and historical block"
           test "$(cast chain-id)" = 1
           test "$(cast block-number)" = "$BLOCK"
           test "$(cast block "$BLOCK" --json | jq -r .hash)" = "$HASH"
           for a in "$SAFE" "$SDT" "$WANT" "$LOCKER" "$STAKING" "$ROUTER" "$OLD" "$TEMPLATE" "$FACTORY"; do
+            echo "PREFLIGHT: code identity $a"
             local_code="$(cast code "$a")"
             test "$local_code" != 0x
             test "$local_code" = "$(cast code "$a" --block "$BLOCK" --rpc-url "$ETHEREUM_FORK_RPC_URL")"
