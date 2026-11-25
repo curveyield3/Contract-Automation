@@ -1,4 +1,4 @@
-name: Exact live-state nonce36 plus PoL manager v25
+name: Exact live-state nonce36 plus PoL manager v26
 on:
   push:
     branches: [cyvlsdt-v69-postdeploy-simulation-v1]
@@ -75,7 +75,7 @@ jobs:
             const artifact=JSON.parse(require('fs').readFileSync('/tmp/header-evidence/artifacts/PoLManager/header.json'));
             assert.equal(E.dataLength(artifact.bytecode.object),25759);assert.equal(E.dataLength(artifact.deployedBytecode.object),22674);
             const pi=new E.Interface(artifact.abi),ci=new E.Interface(['function performCreate(uint256 value,bytes deploymentData) returns(address)']);
-            const cfg=[SAFE,Array(5).fill(E.ZeroAddress),0,'0xd533a94974bb3306d119cc777fa900ba034cd52',token.target,sdt.target,'0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48','0xa4a533025fef8d3446e7cb8a434824e1ee865b00'];
+            const cfg=[SAFE,Array(5).fill(E.ZeroAddress),0,'0xd533a949740bb3306d119cc777fa900ba034cd52',token.target,sdt.target,'0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48','0xa4a533025fef8d3446e7cb8a434824e1ee865b00'];
             const creation=ci.encodeFunctionData('performCreate',[0,E.concat([artifact.bytecode.object,pi.encodeDeploy([cfg])])]);
             const extra=E.solidityPacked(['uint8','address','uint256','uint256','bytes'],[1,'0x9b35af71d77eaf8d7e40252370304687390a1a52',0,E.dataLength(creation),creation]);
             const data=ms.encodeFunctionData('multiSend',[E.concat([ms.decodeFunctionData('multiSend',baseData)[0],extra])]);labels.push('Deploy PoL Manager v26 for new cyvlSDT');
