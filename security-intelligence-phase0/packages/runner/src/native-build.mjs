@@ -384,9 +384,10 @@ export async function compileRepoNativeHardhat({
           'const {extendConfig}=require("hardhat/config");',
           'extendConfig(config=>{',
           '  for(const compiler of [...config.solidity.compilers,...Object.values(config.solidity.overrides)]){',
-          '    const output=compiler.settings.outputSelection;',
-          '    output["*"]??={}; output["*"]["*"]??=[];',
+          '    const output=compiler.settings.outputSelection??={};',
+          '    output["*"]??={}; output["*"]["*"]??=[]; output["*"][""]??=[];',
           '    if(!output["*"]["*"].includes("storageLayout"))output["*"]["*"].push("storageLayout");',
+          '    if(!output["*"][""].includes("ast"))output["*"][""].push("ast");',
           '  }',
           '});',
           'module.exports=original;'
@@ -394,6 +395,11 @@ export async function compileRepoNativeHardhat({
         await fsApi.writeFile(candidate,wrapper,{flag:'wx'});
         layoutConfig=candidate;
         args.push('--config',name);
+        // OpenZeppelin documents cleaning the previous artifacts before
+        // compiling with the extended output selection. This operates only
+        // on the isolated extracted project, never on the admitted ZIP.
+        const clean=await runCommand({command:'npx',args:['--no-install','hardhat','clean','--config',name],cwd:projectRoot});
+        if(!clean||clean.exitCode!==0)throw commandFailure('Hardhat clean before layout-enabled compilation failed',clean);
       }
     }
     compile=await runCommand({command:'npx',args,cwd:projectRoot});
