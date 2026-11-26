@@ -13,7 +13,10 @@ const engineSpecs=[
   ['slither','SLITHER_v1.json','/detectors'],
   ['wake','WAKE_v1.json','/detectors'],
   ['mythril','MYTHRIL_v1.json','/detectors'],
-  ['semgrep','../semgrep-review/SEMGREP_v1.json','/nativeReport/results']
+  ['semgrep','../semgrep-review/SEMGREP_v1.json','/nativeReport/results'],
+  ['solhint','SOLHINT_v1.json','/detectors'],
+  ['compiler-bugs','SOLIDITY_COMPILER_BUGS_v1.json','/detectors'],
+  ['openzeppelin-upgrades','OPENZEPPELIN_UPGRADES_v1.json','/detectors']
 ];
 function load(file,parsed){
   try{const bytes=fs.readFileSync(file);return {data:parsed??JSON.parse(bytes),sha256:sha(bytes),state:'READABLE'};}
@@ -78,6 +81,34 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
     }catch{}
     rawCache.set(p,bytes);return bytes;
   }
+  // Solhint 6.2.5 reports one-based lines and columns. A point is not a complete AST span.
+  const lineCache=new Map();
+  function lintPoint(row,version){
+    const p=row?.sourceName,bytes=sourceBytes(p);
+    const unresolved=reason=>anchor(p,null,null,'primary',null,{coordinateKind:'SOLHINT_POINT',line:row?.line??null,column:row?.column??null,locationStatus:reason});
+    if(version!=='6.2.5')return unresolved('UNQUALIFIED_COORDINATE_VERSION');
+    if(!bytes||sha(bytes)!==row?.sourceSha256)return unresolved('SOURCE_BYTES_UNAVAILABLE_OR_MISMATCH');
+    if(!Number.isSafeInteger(row.line)||row.line<1||!Number.isSafeInteger(row.column)||row.column<1)return unresolved('INVALID_LINE_COLUMN');
+    if(!lineCache.has(p)){
+      const text=bytes.toString('utf8');
+      if(!Buffer.from(text,'utf8').equals(bytes)||text.startsWith('\uFEFF')||/\r(?!\n)/.test(text))lineCache.set(p,null);
+      else{
+        let start=0;
+        lineCache.set(p,text.split('\n').map(raw=>{
+          const entry={start,text:raw.endsWith('\r')?raw.slice(0,-1):raw};
+          start+=Buffer.byteLength(raw,'utf8')+1;
+          return entry;
+        }));
+      }
+    }
+    const line=lineCache.get(p)?.[row.line-1];
+    if(!line)return unresolved('UNSUPPORTED_OR_OUT_OF_RANGE_LINE');
+    const index=row.column-1,points=Array.from(line.text);
+    // Accept a column only when Unicode code-point and UTF-16 interpretations agree.
+    if(index>=points.length||points.slice(0,index).join('').length!==index)return unresolved('AMBIGUOUS_OR_OUT_OF_RANGE_COLUMN');
+    const start=line.start+Buffer.byteLength(points.slice(0,index).join(''),'utf8');
+    return anchor(p,start,start+Buffer.byteLength(points[index],'utf8'),'primary',null,{coordinateKind:'SOLHINT_POINT',line:row.line,column:row.column,locationStatus:'SOURCE_POINT'});
+  }
   const inputs=[],observations=[],claims=[],diagnostics=[],coverage={},reports=new Map();
   function anchor(p,start,end,role,unitHint=null,extra={}){
     const file=byPath.get(p),ids=unitIdsFor(p),unit=unitHint?(ids.includes(unitHint)?unitHint:null):(ids.length===1?ids[0]:null);
@@ -95,7 +126,7 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
   for(const [engine,file,prefix] of engineSpecs){
     const loaded=load(path.join(dir,file),parsed[engine]),d=loaded.data;
     // Correlation uses the verified collection scope; native reports need not repeat source identity metadata.
-    const identity=baseVerified;
+    const identity=baseVerified&&loaded.state==='READABLE';
     const rows=engine==='semgrep'?d?.nativeReport?.results:d?.detectors;
     const status=statusOf(d);
     const count=Array.isArray(rows)?rows.length:null;
@@ -124,14 +155,29 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
         observation(input,pointer,row,[a],{ruleId:row?.check_id,severity:row?.extra?.severity,claim:row?.extra?.message??null});
       }else if(engine==='mythril'){
         const matches=arr(exec?.artifacts).filter(a=>a.qualifiedName===row?.qualifiedName&&a.deployedBytecodeDigestSha256===row?.runtimeBytecodeSha256&&(!row?.compilationUnitId||a.compilationUnitId===row.compilationUnitId));
-        observation(input,pointer,row,[],{ruleId:row?.['swc-id']??row?.title,severity:row?.severity,claim:row?.title??null,runtime:{qualifiedName:row?.qualifiedName??null,sha256:row?.runtimeBytecodeSha256??null,pc:row?.address??null,unitId:matches.length===1?matches[0].compilationUnitId:null,locationStatus:matches.length===1?'FILE_ID_TABLE_NOT_RETAINED':'AMBIGUOUS_OR_UNBOUND_RUNTIME'}});
+        const artifact=matches.length===1?matches[0]:null;
+        const hex=artifact?.deployedBytecode;
+        const verified=typeof hex==='string'&&/^0x(?:[0-9a-f]{2})+$/i.test(hex)&&sha(Buffer.from(hex.slice(2),'hex'))===row?.runtimeBytecodeSha256;
+        const pc=row?.address;
+        const validPc=verified&&Number.isSafeInteger(pc)&&pc>=0&&pc<(hex.length-2)/2;
+        // Source-map file IDs are not retained by this collector. Do not infer a
+        // source file from the contract name, a map offset, or an optimizer span.
+        const locationStatus=!verified?'AMBIGUOUS_OR_UNBOUND_RUNTIME':!validPc?'INVALID_RUNTIME_OFFSET':!artifact.deployedBytecodeSourceMap?'RUNTIME_SOURCE_MAP_UNAVAILABLE':'FILE_ID_TABLE_NOT_RETAINED';
+        observation(input,pointer,row,[],{ruleId:row?.['swc-id']??row?.title,severity:row?.severity,claim:row?.title??null,runtime:{qualifiedName:row?.qualifiedName??null,sha256:row?.runtimeBytecodeSha256??null,pc:pc??null,unitId:verified?artifact.compilationUnitId:null,bytecodeVerified:verified,locationStatus,sourceBinding:'UNRESOLVED'}});
+      }else if(engine==='solhint'){
+        observation(input,pointer,row,[lintPoint(row,input.version)],{ruleId:row?.ruleId??null,severity:row?.severity??null,claim:row?.message??null,claimKind:'LINT_OBSERVATION',metadata:{sourceName:row?.sourceName??null,sourceSha256:row?.sourceSha256??null,line:row?.line??null,column:row?.column??null}});
+      }else if(engine==='compiler-bugs'){
+        observation(input,pointer,row,[],{ruleId:row?.advisory??null,severity:row?.severity??null,claim:row?.summary??row?.advisory??null,claimKind:'COMPILER_VERSION_ADVISORY',metadata:{unitId:row?.unitId??null,compilerVersion:row?.compilerVersion??null,uid:row?.uid??null,assessment:row?.assessment??'VERSION_MATCH_ONLY_REVIEW_APPLICABILITY',metadataStatus:row?.metadataStatus??null,conditions:row?.conditions??null,officialCheckTypes:row?.officialCheckTypes??null}});
+      }else if(engine==='openzeppelin-upgrades'){
+        observation(input,pointer,row,[],{ruleId:row?.kind??null,claim:row?.message??null,claimKind:'UPGRADE_COMPATIBILITY_REPORT',metadata:{unitId:row?.unitId??null,failedContractCount:row?.failedContractCount??null}});
       }
     });
   }
   // Grouping is an additive shadow view until the planned independent qualification.
   const decisions=[],groups=[],relatedLinks=[],byAnchor=new Map(),pairs=new Map();
   for(const o of observations){
-    if(o.provenance!=='VERIFIED')continue;
+    // Newly normalized engines are inventory-only until their rules are qualified.
+    if(o.provenance!=='VERIFIED'||!['slither','wake','mythril','semgrep'].includes(o.engine))continue;
     for(const a of o.anchors){
       if(a.binding!=='RESOLVED'||a.role==='context')continue;
       const key=JSON.stringify([a.path,a.unitId,a.sourceSha256]);
