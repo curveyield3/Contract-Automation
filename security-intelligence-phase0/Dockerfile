@@ -26,15 +26,17 @@ RUN test -f node_modules/@foundry-rs/forge/bin.mjs && \
     chmod +x node_modules/@foundry-rs/forge/bin.mjs node_modules/@foundry-rs/cast/bin.mjs && \
     ln -s /opt/preflight/node_modules/@foundry-rs/forge/bin.mjs /usr/local/bin/forge && \
     ln -s /opt/preflight/node_modules/@foundry-rs/cast/bin.mjs /usr/local/bin/cast
-# Official Emscripten compiler distributions contain Z3; no external solver is installed.
-# npm is the official distribution channel; verify the compiler payload against upstream release digests.
+# Official npm release packages contain the Emscripten compiler and statically linked Z3.
+# Verify the npm tarballs against pinned npm integrity records, not standalone solc-bin hashes.
 RUN set -eu; mkdir -p /opt/preflight/smt-wasm /tmp/smt-wasm; \
-    npm pack --ignore-scripts --silent --registry=https://registry.npmjs.org --pack-destination /tmp/smt-wasm solc@0.8.28; \
-    tar -xOf /tmp/smt-wasm/solc-0.8.28.tgz package/soljson.js > /opt/preflight/smt-wasm/0.8.28.cjs; \
-    cp node_modules/solc/soljson.js /opt/preflight/smt-wasm/0.8.30.cjs; \
-    printf '%s  %s\n' \
-      72ef580a6ec5943130028e5294313f24e9435520acc89f8c9dbfd0139d9ae146 /opt/preflight/smt-wasm/0.8.28.cjs \
-      81475c98b6d2094a821fd9d7b6278556d8095ccc23e0b8a1029b1c08a89cd4b2 /opt/preflight/smt-wasm/0.8.30.cjs | sha256sum -c -; \
+    for v in 0.8.28 0.8.30; do \
+      npm pack --ignore-scripts --silent --registry=https://registry.npmjs.org --pack-destination /tmp/smt-wasm "solc@$v"; \
+    done; \
+    node -e "const fs=require('fs'),crypto=require('crypto'); for(const [v,pin] of Object.entries({'0.8.28':'sha512-AFCiJ+b4RosyyNhnfdVH4ZR1+TxiL91iluPjw0EJslIu4LXGM9NYqi2z5y8TqochC4tcH9QsHfwWhOIC9jPDKA==','0.8.30':'sha512-9Srk/gndtBmoUbg4CE6ypAzPQlElv8ntbnl6SigUBAzgXKn35v87sj04uZeoZWjtDkdzT0qKFcIo/wl63UMxdw=='})){const actual='sha512-'+crypto.createHash('sha512').update(fs.readFileSync('/tmp/smt-wasm/solc-'+v+'.tgz')).digest('base64'); if(actual!==pin)throw Error('NPM integrity mismatch '+v); console.log('Verified npm archive '+v+' '+actual)}"; \
+    for v in 0.8.28 0.8.30; do \
+      tar -xOf "/tmp/smt-wasm/solc-$v.tgz" package/soljson.js > "/opt/preflight/smt-wasm/$v.cjs"; \
+    done; \
+    sha256sum /opt/preflight/smt-wasm/*.cjs; \
     rm -rf /tmp/smt-wasm
 # Source-independent Slither, Wake, Mythril, Semgrep, Foundry and Node layers end here.
 # Only this target is exported to persistent GitHub cache; no per-source plan

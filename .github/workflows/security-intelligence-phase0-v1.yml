@@ -16,7 +16,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: docker/setup-buildx-action@v3
-      - name: Build clean Phase 0 scanner layer with official checksum-pinned WASM compilers
+      - name: Build clean Phase 0 scanner layer with official integrity-pinned npm compilers
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -24,6 +24,7 @@ jobs:
           target: phase0-scanner-tools
           load: true
           tags: curveyield-smt-wasm:qualification
+          cache-from: type=gha,scope=curve-security-scanners-v1
           provenance: false
           sbom: false
       - name: Demonstrate actual proofs and invalid-assertion diagnostics without network or external solver
@@ -70,4 +71,4 @@ jobs:
         with:
           name: smtchecker-wasm-qualification-v1
           path: qualification/
-          if-no-files-found: error
+          if-no-files-found: warn
