@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import unzipper from 'unzipper';
 import { checkoutExactSource, runProcess } from './execution.mjs';
@@ -1083,58 +1084,52 @@ async function main(){
   };
 
   const build=await withProgressStage('compile-exact-build',()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
-  // Qualification-branch-only compiler performance probe. Never emit model diagnostics,
-  // source content, transaction traces, or a security finding.
-  if(build.status!=='completed')throw Error('Exact build did not complete');
-  const i=build.compilationUnits.findIndex(u=>u.unitId==='hardhat-build-info-1'&&slitherCompilerVersion(u.compilerVersion)==='0.8.28');
-  if(i<0)throw Error('Original timed-out compiler unit absent');
-  const unit=build.compilationUnits[i],info=build.buildInfo?.[i];
-  if(!info?.path)throw Error('Exact build info absent');
-  safeRel(info.path,'Hardhat build-info');
-  const raw=await fs.readFile(path.join(detected.absolute,info.path));
-  if(sha256(raw)!==info.sha256)throw Error('Build info digest mismatch');
-  const input=JSON.parse(raw).input;
-  if(sha256(Buffer.from(JSON.stringify(input)))!==unit.compilerInputSha256)throw Error('Compiler input digest mismatch');
-  const targets=Object.create(null);
-  for(const a of unit.artifacts??[]){
-    if(!a.sourceName?.endsWith('.sol')||!sourceIsInScope(a.sourceName,auditScope)||!a.contractName)continue;
-    (targets[a.sourceName]??=[]).push(a.contractName);
-  }
-  if(Object.values(targets).flat().length!==25)throw Error('Original workload identity mismatch');
-  input.settings??={};
-  input.settings.outputSelection={'*':{'*':['abi']}};
-  input.settings.modelChecker={engine:'all',solvers:['z3'],contracts:targets,showProvedSafe:true,showUnproved:true,showUnsupported:true};
-  const inputText=JSON.stringify(input),inputFile=path.join(work,'profile-input.json');
-  await fs.writeFile(inputFile,inputText);
-  const report={sourceSha256:observed,unitId:unit.unitId,compilerInputSha256:unit.compilerInputSha256,profileInputSha256:sha256(Buffer.from(inputText)),inputBytes:Buffer.byteLength(inputText),runs:[]};
-  console.log('Profile workload identity '+JSON.stringify({unitId:report.unitId,compilerInputSha256:report.compilerInputSha256,profileInputSha256:report.profileInputSha256,inputBytes:report.inputBytes}));
-  const deadline=performance.now()+174000;
-  const child="const fs=require('node:fs');const [file,input]=process.argv.slice(1);const c=require('solc/wrapper')(require(file));console.error('PROFILE_COMPILE_ENTER '+c.version());const result=JSON.parse(c.compile(fs.readFileSync(input,'utf8')));const errors=(result.errors||[]).filter(x=>x.severity==='error').length;console.error('PROFILE_COMPILE_RETURN '+JSON.stringify({compilerErrors:errors}));if(errors)process.exitCode=2;";
-  for(const [mode,file] of [['candidate','/compiler/soljson.cjs']]){
-    if(!await exists(file))throw Error('Compiler missing: '+mode);
-    const log=path.join(work,mode+'.v8.log');
-    const cap=Math.min(145000,Math.floor(deadline-performance.now()-25000));
-    if(cap<=0)throw Error('Profile budget exhausted');
-    const t=performance.now();
-    const r=await runProcess({command:process.execPath,args:['--prof','--prof-sampling-interval=5000','--no-logfile-per-isolate','--logfile='+log,'--input-type=commonjs','-e',child,file,inputFile],cwd:'/opt/preflight',timeoutMs:cap,onStderr:chunk=>{for(const line of chunk.split('\n'))if(line.startsWith('PROFILE_COMPILE_'))console.error(mode+' '+line);}});
-    const marker=r.stderr.split('\n').find(l=>l.startsWith('PROFILE_COMPILE_RETURN '));const returned=marker?JSON.parse(marker.slice('PROFILE_COMPILE_RETURN '.length)):null;const row={mode,compilerReturned:!!returned,compilerErrors:returned?.compilerErrors??null,wallMs:Math.round(performance.now()-t),timedOut:r.timedOut,exitCode:r.exitCode,signal:r.signal,compilerSha256:sha256(await fs.readFile(file)),profileLogBytes:0,processed:false};
-    report.runs.push(row);
-    if(await exists(log)){
-      row.profileLogBytes=(await fs.stat(log)).size;
-      const budget=Math.min(20000,Math.floor(deadline-performance.now()-6500));
-      if(budget>0){
-        const decoded=await runProcess({command:process.execPath,args:['--prof-process','--call-graph-size=4',log],cwd:'/opt/preflight',timeoutMs:budget});
-        row.processed=decoded.exitCode===0&&!decoded.timedOut;
-        // Retain only aggregate sampled stack output, not the raw V8 log or source input.
-        if(decoded.stdout)await fs.writeFile(path.join(out,mode+'-cpu-profile-v1.txt'),decoded.stdout.slice(0,4000000));
-        row.processingExitCode=decoded.exitCode;row.processingTimedOut=decoded.timedOut;row.processingOutputBytes=Buffer.byteLength(decoded.stdout);row.callerProfilePresent=/\[Bottom up \(heavy\) profile\]:[\s\S]*?ticks parent  name\s*\n\s*\d+/.test(decoded.stdout);console.log('Profiler decoder '+JSON.stringify({exitCode:decoded.exitCode,timedOut:decoded.timedOut,callerProfilePresent:row.callerProfilePresent,outputBytes:row.processingOutputBytes}));
-      }
+  if(build.status!=='completed'||!build.compilationUnits?.length)throw Error('Verified build unavailable');
+  const env={...process.env,PATH:'/opt/smtchecker-z3-cli/bin:'+process.env.PATH,LD_LIBRARY_PATH:'/opt/smtchecker-z3/solver-lib'};
+  const report={sourceSha256:observed,queryTimeoutMs:25,units:[],elapsedMs:0};
+  const start=performance.now();
+  const save=async()=>{report.elapsedMs=Math.round(performance.now()-start);await fs.writeFile(path.join(out,'compiler-profile-v1.json'),JSON.stringify(report,null,2)+'\n');};
+  for(const [i,unit] of build.compilationUnits.entries()){
+    const version=slitherCompilerVersion(unit.compilerVersion);
+    const info=build.buildInfo?.[i];
+    if(!info?.path)throw Error('Missing build-info for '+unit.unitId);
+    safeRel(info.path,'Hardhat build-info');
+    const bytes=await fs.readFile(path.join(detected.absolute,info.path));
+    if(sha256(bytes)!==info.sha256)throw Error('Build-info digest mismatch');
+    const input=JSON.parse(bytes).input;
+    if(input.language!=='Solidity'||sha256(Buffer.from(JSON.stringify(input)))!==unit.compilerInputSha256)throw Error('Solidity input identity mismatch');
+    const contracts={};
+    for(const a of unit.artifacts??[]){
+      if(a.sourceName?.endsWith('.sol')&&sourceIsInScope(a.sourceName,auditScope)&&a.contractName)(contracts[a.sourceName]??=[]).push(a.contractName);
     }
-    console.log('Profile run '+JSON.stringify(row));
-    await fs.writeFile(path.join(out,'compiler-profile-v1.json'),JSON.stringify(report,null,2)+'\n');
+    const compiler='/opt/preflight/.svm/'+version+'/solc-'+version;
+    const row={unitId:unit.unitId,version,inputSha256:unit.compilerInputSha256,contractCount:Object.values(contracts).flat().length,runs:[]};
+    report.units.push(row);
+    input.settings.outputSelection={'*':{'*':['abi']}};
+    for(const engine of ['all','bmc','chc']){
+      const cap=Math.min(engine==='all'?23:15,Math.floor((175000-performance.now()+start)/1000)-1);
+      if(cap<1)throw Error('Stage budget exhausted');
+      input.settings.modelChecker={contracts,engine,solvers:['z3'],timeout:report.queryTimeoutMs,showProvedSafe:true,showUnproved:true,showUnsupported:true};
+      const t=performance.now();
+      const result=spawnSync('timeout',['--kill-after=1s',cap+'s',compiler,'--standard-json'],{env,input:JSON.stringify(input),encoding:'utf8',maxBuffer:32*1024*1024});
+      const sample={engine,wallMs:Math.round(performance.now()-t),exit:result.status,signal:result.signal,error:result.error?.message,returned:false,checks:{},diagnostics:[]};
+      if(result.status===0){
+        const output=JSON.parse(result.stdout);
+        const issues=output.errors??[];
+        for(const d of issues){
+          const message=String(d.message??'').split('\n')[0];
+          if(d.severity==='error'||/CHC:|BMC:|SMTChecker|model checker|solver|horn/i.test(message)){
+            sample.diagnostics.push({code:d.errorCode,severity:d.severity,message,sourceLocation:d.sourceLocation});
+            sample.checks[d.errorCode]=(sample.checks[d.errorCode]??0)+1;
+          }
+        }
+        sample.returned=!issues.some(d=>d.severity==='error'||/solver.*not available|analysis was not possible|no .*solver available/i.test(d.message))&&sample.diagnostics.some(d=>/^(CHC|BMC):/.test(d.message));
+      }
+      row.runs.push(sample);await save();
+      console.log('Release SMTChecker '+JSON.stringify({unit:row.unitId,engine,wallMs:sample.wallMs,exit:sample.exit,returned:sample.returned,checks:sample.checks}));
+      if(engine==='all'&&sample.returned)break;
+    }
   }
-  report.totalWallMs=174000-Math.max(0,Math.round(deadline-performance.now()));
-  await fs.writeFile(path.join(out,'compiler-profile-v1.json'),JSON.stringify(report,null,2)+'\n');
-  if(report.runs.some(x=>!x.compilerReturned||x.compilerErrors!==0||x.exitCode!==0))throw Error('Candidate compiler did not return a successful result within the bounded performance probe');
+  if(!report.units.every(u=>u.runs.some(r=>r.engine==='all'&&r.returned)))throw Error('Combined release checker did not return evidence for every admitted unit');
 }
-main().catch(error=>{console.error('Profile collection failed: '+String(error?.message??error));process.exitCode=1;});
+main().catch(error=>{console.error('Qualification failed: '+String(error?.message??error));process.exitCode=1;});

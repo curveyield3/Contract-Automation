@@ -14,8 +14,19 @@ RUN git init /opt/semgrep-rules && \
     git -C /opt/semgrep-rules checkout --detach FETCH_HEAD && \
     test "$(git -C /opt/semgrep-rules rev-parse HEAD)" = "2e878a89ac7bba1f8435e8a68e3ecb7700096cd5" && \
     test -d /opt/semgrep-rules/solidity/security && rm -rf /opt/semgrep-rules/.git
+# Solidity <=0.8.28 uses a dynamically loaded Z3 library. The upstream 0.8.28 build tests Z3 4.12.1.
+# Solidity >=0.8.29 uses the z3 executable; upstream 0.8.29/0.8.30 CI uses Z3 4.13.3.
+# Keep both toolchain dependencies separate from the other scanners.
+RUN python3 -m venv /opt/smtchecker-z3 && /opt/smtchecker-z3/bin/pip install --no-cache-dir --no-deps 'z3-solver==4.12.1.0' && \
+    mkdir -p /opt/smtchecker-z3/solver-lib && \
+    /opt/smtchecker-z3/bin/python -c "import pathlib,z3; p=pathlib.Path(z3.__file__).parent/'lib'/'libz3.so'; assert p.is_file(); d=pathlib.Path('/opt/smtchecker-z3/solver-lib'); (d/'libz3.so').symlink_to(p); (d/'libz3.so.4.12').symlink_to(p); assert z3.get_version_string() == '4.12.1'; print('SMTChecker shared library Z3 '+z3.get_version_string())"
+# Exact upstream 0.8.30 CI release archive and SHA-256, from scripts/docker/buildpack-deps/Dockerfile.ubuntu2204.
+RUN mkdir -p /opt/smtchecker-z3-cli/bin && \
+    python3 -c "import urllib.request,hashlib,zipfile,pathlib; url='https://github.com/Z3Prover/z3/releases/download/z3-4.13.3/z3-4.13.3-x64-glibc-2.35.zip'; p=pathlib.Path('/tmp/smtchecker-z3-cli.zip'); urllib.request.urlretrieve(url,p); assert hashlib.sha256(p.read_bytes()).hexdigest()=='32c7377026733c9d7b33c21cd77a68f50ba682367207b031a6bfd80140a8722f'; target=pathlib.Path('/opt/smtchecker-z3-cli/bin/z3'); target.write_bytes(zipfile.ZipFile(p).read('z3-4.13.3-x64-glibc-2.35/bin/z3')); target.chmod(0o755); p.unlink()" && \
+    /opt/smtchecker-z3-cli/bin/z3 --version | grep -F 'Z3 version 4.13.3'
 ENV PATH="/usr/local/bin:/opt/slither/bin:/opt/wake/bin:/opt/mythril/bin:/opt/semgrep/bin:/opt/preflight/node_modules/.bin:/opt/preflight/node_modules/@foundry-rs/forge:${PATH}" \
     CI="true" NODE_ENV="test" HOME="/opt/preflight"
+RUN if command -v z3 >/dev/null 2>&1; then echo "Unqualified scanner PATH Z3: $(command -v z3)"; z3 --version; else echo 'Unqualified scanner PATH Z3: absent'; fi
 WORKDIR /opt/preflight
 COPY security-intelligence-phase0/package.json security-intelligence-phase0/package-lock.json ./
 COPY security-intelligence-phase0/packages/runner/package.json ./packages/runner/package.json
@@ -26,18 +37,6 @@ RUN test -f node_modules/@foundry-rs/forge/bin.mjs && \
     chmod +x node_modules/@foundry-rs/forge/bin.mjs node_modules/@foundry-rs/cast/bin.mjs && \
     ln -s /opt/preflight/node_modules/@foundry-rs/forge/bin.mjs /usr/local/bin/forge && \
     ln -s /opt/preflight/node_modules/@foundry-rs/cast/bin.mjs /usr/local/bin/cast
-# Official npm release packages contain the Emscripten compiler and statically linked Z3.
-# Verify the npm tarballs against pinned npm integrity records, not standalone solc-bin hashes.
-RUN set -eu; mkdir -p /opt/preflight/smt-wasm /tmp/smt-wasm; \
-    for v in 0.8.28 0.8.30; do \
-      npm pack --ignore-scripts --silent --registry=https://registry.npmjs.org --pack-destination /tmp/smt-wasm "solc@$v"; \
-    done; \
-    node -e "const fs=require('fs'),crypto=require('crypto'); for(const [v,pin] of Object.entries({'0.8.28':'sha512-AFCiJ+b4RosyyNhnfdVH4ZR1+TxiL91iluPjw0EJslIu4LXGM9NYqi2z5y8TqochC4tcH9QsHfwWhOIC9jPDKA==','0.8.30':'sha512-9Srk/gndtBmoUbg4CE6ypAzPQlElv8ntbnl6SigUBAzgXKn35v87sj04uZeoZWjtDkdzT0qKFcIo/wl63UMxdw=='})){const actual='sha512-'+crypto.createHash('sha512').update(fs.readFileSync('/tmp/smt-wasm/solc-'+v+'.tgz')).digest('base64'); if(actual!==pin)throw Error('NPM integrity mismatch '+v); console.log('Verified npm archive '+v+' '+actual)}"; \
-    for v in 0.8.28 0.8.30; do \
-      tar -xOf "/tmp/smt-wasm/solc-$v.tgz" package/soljson.js > "/opt/preflight/smt-wasm/$v.cjs"; \
-    done; \
-    sha256sum /opt/preflight/smt-wasm/*.cjs; \
-    rm -rf /tmp/smt-wasm
 # Source-independent Slither, Wake, Mythril, Semgrep, Foundry and Node layers end here.
 # Only this target is exported to persistent GitHub cache; no per-source plan
 # or authenticated ZIP ever enters the reusable cache.

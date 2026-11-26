@@ -1,4 +1,4 @@
-name: SMTChecker internal CPU profiling qualification
+name: SMTChecker release engine qualification
 run-name: smtchecker-profile-${{ github.run_id }}
 on:
   push:
@@ -97,84 +97,8 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-  build_symbols:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - name: Build isolated read-only map accessor candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/solidity-profile" symbols
-          git -C "$RUNNER_TEMP/solidity-profile" init
-          git -C "$RUNNER_TEMP/solidity-profile" fetch --depth 1 https://github.com/argotorg/solidity.git 7893614a31fbeacd1966994e310ed4f760772658
-          git -C "$RUNNER_TEMP/solidity-profile" checkout --detach FETCH_HEAD
-          git -C "$RUNNER_TEMP/solidity-profile" submodule update --init --recursive --depth 1
-          test "$(git -C "$RUNNER_TEMP/solidity-profile" rev-parse HEAD)" = 7893614a31fbeacd1966994e310ed4f760772658
-          cd "$RUNNER_TEMP/solidity-profile"
-          # Read-only accessors should not copy their entire maps.
-          git grep -n -E '(\.|->)(constants|functions)\(\)' -- libsmtutil/ || true
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('libsmtutil/Z3Interface.h')
-          s=p.read_text()
-          edits={
-            'std::map<std::string, z3::expr> constants() const { return m_constants; }':
-              'std::map<std::string, z3::expr> const& constants() const { return m_constants; }',
-            'std::map<std::string, z3::func_decl> functions() const { return m_functions; }':
-              'std::map<std::string, z3::func_decl> const& functions() const { return m_functions; }',
-          }
-          for a,b in edits.items():
-            assert s.count(a)==1
-            s=s.replace(a,b,1)
-          p.write_text(s)
-          p=Path('libsmtutil/Z3CHCInterface.cpp')
-          s=p.read_text()
-          a='m_solver.register_relation(m_z3Interface->functions().at(_expr.name));'
-          b='auto declaration = m_z3Interface->functions().at(_expr.name);\n\tm_solver.register_relation(declaration);'
-          assert s.count(a)==1
-          p.write_text(s.replace(a,b,1))
-          PY
-          git diff -- libsmtutil/Z3Interface.h libsmtutil/Z3CHCInterface.cpp
-          # Keep upstream release optimization and toolchain. Only retain linker function names.
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('libsolc/CMakeLists.txt')
-          s=p.read_text()
-          needle='if (EMSCRIPTEN)'
-          assert s.count(needle)==1
-          s=s.replace(needle,needle+'\n\tset(CMAKE_EXE_LINKER_FLAGS "$'+'{CMAKE_EXE_LINKER_FLAGS} --profiling-funcs -g2")',1)
-          p.write_text(s)
-          PY
-          docker run --rm --env FORCE_RELEASE=1 --env MAKEFLAGS=-j4 \
-            --mount "type=bind,source=$PWD,target=/root/project" --workdir /root/project \
-            solbuildpackpusher/solidity-buildpack-deps@sha256:c57f2bfb8c15d70fe290629358dd1c73dc126e3760f443b54764797556b887d4 \
-            bash -c 'git config --global --add safe.directory /root/project && ./scripts/ci/build_emscripten.sh'
-          test -s upload/soljson.js
-          test -s emscripten_build/libsolc/soljson.wasm
-          # Require function names from both the Solidity compiler and the linked Z3 solver.
-          node - <<'NODE'
-          const fs=require('fs');
-          const mod=new WebAssembly.Module(fs.readFileSync('emscripten_build/libsolc/soljson.wasm'));
-          const sec=WebAssembly.Module.customSections(mod,'name');
-          if(!sec.length)throw Error('WASM function name section missing');
-          const bytes=Buffer.from(sec[0]);
-          const sol=/solidity|SMTChecker|SMTEncoder/.test(bytes.toString('latin1'));
-          const z3=/Z3_|spacer|smt::|smt[0-9]/i.test(bytes.toString('latin1'));
-          console.log(JSON.stringify({nameSectionBytes:bytes.length,soliditySymbols:sol,z3Symbols:z3}));
-          if(!sol||!z3)throw Error('Compiler and solver function symbols not both confirmed');
-          NODE
-          cp upload/soljson.js "$GITHUB_WORKSPACE/symbols/soljson.cjs"
-          sha256sum "$GITHUB_WORKSPACE/symbols/soljson.cjs" | tee "$GITHUB_WORKSPACE/symbols/sha256.txt"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: smtchecker-copy-fix-candidate-v2
-          path: symbols/
-          if-no-files-found: error
-          retention-days: 3
-
   collect:
-    needs: [admit, build_symbols]
+    needs: admit
     if: ${{ needs.admit.outputs.request_present == 'true' && needs.admit.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -221,18 +145,6 @@ jobs:
           cache-from: type=gha,scope=curve-security-scanners-v1
           provenance: false
           sbom: false
-      - name: Receive symbolized compiler
-        uses: actions/download-artifact@v4
-        with:
-          name: smtchecker-copy-fix-candidate-v2
-          path: .profile-compiler
-      - name: Verify candidate compiler artifact integrity
-        shell: bash
-        run: |
-          set -euo pipefail
-          expected=$(awk '{print $1}' .profile-compiler/sha256.txt)
-          [[ "$expected" =~ ^[a-f0-9]{64}$ ]]
-          echo "$expected  .profile-compiler/soljson.cjs" | sha256sum -c -
       - name: Receive exact source artifact; no source credentials in collector job
         uses: actions/download-artifact@v4
         with:
@@ -240,7 +152,7 @@ jobs:
           path: .preflight-input
       - name: Create writable output for sandboxed collection
         run: mkdir -p .preflight-output
-      - name: Collect internal CPU profiles in network-isolated sandbox
+      - name: Measure release SMTChecker engines on all admitted Solidity units
         shell: bash
         run: |
           set -euo pipefail
@@ -248,7 +160,6 @@ jobs:
             --security-opt no-new-privileges --pids-limit 256 --memory 6g \
             --user "$(id -u):$(id -g)" \
             --tmpfs /tmp:rw,nosuid,nodev,size=3g,mode=1777 \
-            --mount "type=bind,source=$GITHUB_WORKSPACE/.profile-compiler,target=/compiler,readonly" \
             --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-input,target=/input,readonly" \
             --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-plan,target=/toolchain-plan,readonly" \
             --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-output,target=/output" \
@@ -267,9 +178,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smtchecker-copy-fix-performance-v2
+          name: smtchecker-release-engine-evidence-v1
           path: |
             .preflight-output/evidence/compiler-profile-v1.json
-            .preflight-output/evidence/*-cpu-profile-v1.txt
           if-no-files-found: error
           retention-days: 14
