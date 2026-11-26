@@ -1182,7 +1182,7 @@ async function main(){
         report.sourceDigests.sort((a,b)=>a.sourceName.localeCompare(b.sourceName));
         if(!selected.size){report.status='NOT_APPLICABLE';report.findingCount=0;return;}
         const raw=await runProcess({command:'semgrep',args:['scan','--config',
-          '/opt/semgrep-rules/rules/solidity/security','--metrics=off','--disable-version-check',
+          '/opt/semgrep-rules/solidity/security','--metrics=off','--disable-version-check',
           '--no-git-ignore','--strict','--json','.'],cwd:stage,timeoutMs:300000,
           env:{...process.env,HOME:'/tmp',XDG_CACHE_HOME:'/tmp',CI:'true',SEMGREP_SEND_METRICS:'off'}});
         report.exitCode=raw.exitCode;
