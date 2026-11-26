@@ -1138,8 +1138,8 @@ async function main(){
   }
   // Fourth scanner: independent, source-only remediation review. Do not send
   // this report into Source Intelligence, formal jobs or automated reproduction.
-  // The request is trusted workflow metadata, not a setting from the source ZIP.
-  if(request.defensiveSemgrepReview===true){
+  // Run automatically for admitted defensive source reviews; no opt-in flag.
+  {
     const reportDir=path.join(path.dirname(out),'semgrep-review');
     const stage=path.join(out,'work','semgrep-source');
     const rulesRevision='2e878a89ac7bba1f8435e8a68e3ecb7700096cd5';
