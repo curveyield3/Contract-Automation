@@ -2,7 +2,7 @@
 pragma solidity 0.8.30;
 
 /**
- * @title CurveYield Morpho Position Module v7
+ * @title CurveYield Morpho Position Module v8
  * @notice Scoped Guardian authority for existing Morpho Bundler3 transactions.
  * @dev No financial calculations, flash callback, custody engine, position accounting,
  *      swap logic, or primary-module integration. Bundler3 and GeneralAdapter1 perform
@@ -122,15 +122,10 @@ contract CurveYieldMorphoPositionModule {
         uint256[] memory pre=new uint256[](s.tokens.length*2);
         for(uint256 i;i<s.tokens.length;++i){
             address t=s.tokens[i];
-            if(t.code.length==0) revert Invalid();
-            // Use the router's authoritative configured routes, not a secondary token registry.
-            // Start with either market token; every intermediary must connect to the preceding token.
+            // Worker supplies the ordered route, beginning with either market asset.
+            // OmniSwapper's configured route is the sole token authority.
             if(i==0){if(t!=p.loanToken&&t!=p.collateralToken) revert Unauthorized();}
-            else{
-                address prev=s.tokens[i-1];
-                if(prev==t||(ICYSwapper(SWAPPER).routeFor(prev,t).length==0&&
-                   ICYSwapper(SWAPPER).routeFor(t,prev).length==0)) revert Unauthorized();
-            }
+            else if(ICYSwapper(SWAPPER).routeFor(s.tokens[i-1],t).length==0) revert Unauthorized();
             pre[2*i]=ICYToken(t).balanceOf(BUNDLER);
             pre[2*i+1]=ICYToken(t).balanceOf(ADAPTER);
         }
@@ -158,69 +153,52 @@ contract CurveYieldMorphoPositionModule {
         locked=false;
     }
 
-    // Inspect fixed ABI heads directly. Market tuples are five static words.
-    // Canonical lengths and empty callback tails keep nested calls out of scope.
     function _validate(Scope calldata s,CYCall[] calldata calls) private view{
         for(uint256 i;i<calls.length;++i){
             CYCall calldata c=calls[i];
             if(c.value!=0||c.skipRevert||c.callbackHash!=bytes32(0)||c.data.length<4) revert Invalid();
             bytes4 sig=bytes4(c.data[:4]);
-            bytes calldata a=c.data[4:];
+            bytes calldata args=c.data[4:];
             if(c.to==ADAPTER){
-                if(sig==ICYAdapter.erc20Transfer.selector||sig==ICYAdapter.erc20TransferFrom.selector){
-                    if(a.length!=96) revert Invalid();
-                    address token=_address(a,0);
-                    address receiver=_address(a,32);
-                    _tokenIn(s,token);
-                    if(sig==ICYAdapter.erc20TransferFrom.selector){
-                        uint256 amount=_word(a,64);
-                        if(token!=s.seedToken||amount==0||amount>s.seedAmount||
-                           (receiver!=ADAPTER&&receiver!=BUNDLER)) revert Unauthorized();
-                    }else{
-                        _receiver(receiver);
-                        if(receiver==ADAPTER) revert Invalid();
-                    }
-                    continue;
-                }
-                if(a.length<160||keccak256(a[:160])!=s.market) revert Unauthorized();
                 if(sig==ICYAdapter.morphoBorrow.selector){
-                    if(a.length!=288) revert Invalid();
-                    _receiver(_address(a,256));
-                }else if(sig==ICYAdapter.morphoWithdrawCollateral.selector){
-                    if(a.length!=224) revert Invalid();
-                    _receiver(_address(a,192));
+                    (CYMarketParams memory p,,, ,address receiver)=abi.decode(args,(CYMarketParams,uint256,uint256,uint256,address));
+                    _market(s,p);_receiver(receiver);
                 }else if(sig==ICYAdapter.morphoRepay.selector){
-                    if(a.length!=352||_address(a,256)!=address(SAFE)||
-                       _word(a,288)!=320||_word(a,320)!=0) revert Invalid();
+                    (CYMarketParams memory p,,,,address owner,bytes memory nested)=abi.decode(args,(CYMarketParams,uint256,uint256,uint256,address,bytes));
+                    _market(s,p);if(owner!=address(SAFE)||nested.length!=0) revert Invalid();
                 }else if(sig==ICYAdapter.morphoSupplyCollateral.selector){
-                    if(a.length!=288||_address(a,192)!=address(SAFE)||
-                       _word(a,224)!=256||_word(a,256)!=0) revert Invalid();
+                    (CYMarketParams memory p,,address owner,bytes memory nested)=abi.decode(args,(CYMarketParams,uint256,address,bytes));
+                    _market(s,p);if(owner!=address(SAFE)||nested.length!=0) revert Invalid();
+                }else if(sig==ICYAdapter.morphoWithdrawCollateral.selector){
+                    (CYMarketParams memory p,,address receiver)=abi.decode(args,(CYMarketParams,uint256,address));
+                    _market(s,p);_receiver(receiver);
+                }else if(sig==ICYAdapter.erc20Transfer.selector){
+                    (address t,address receiver,)=abi.decode(args,(address,address,uint256));
+                    _tokenIn(s,t);_receiver(receiver);
+                    if(receiver==ADAPTER) revert Invalid();
+                }else if(sig==ICYAdapter.erc20TransferFrom.selector){
+                    (address t,address receiver,uint256 amount)=abi.decode(args,(address,address,uint256));
+                    if(t!=s.seedToken||amount==0||amount>s.seedAmount||
+                       (receiver!=ADAPTER&&receiver!=BUNDLER)) revert Invalid();
                 }else revert Unauthorized();
             }else if(c.to==SWAPPER){
-                if(sig!=ICYSwapper.swapExactInput.selector||a.length!=192) revert Unauthorized();
-                _tokenIn(s,_address(a,0));_tokenIn(s,_address(a,32));
-                _receiver(_address(a,128));
+                if(sig!=ICYSwapper.swapExactInput.selector) revert Unauthorized();
+                (address from,address to,,,address receiver,)=abi.decode(args,(address,address,uint256,uint256,address,uint256));
+                _tokenIn(s,from);_tokenIn(s,to);_receiver(receiver);
             }else{
                 _tokenIn(s,c.to);
-                if(a.length!=64) revert Invalid();
-                address target=_address(a,0);
                 if(sig==ICYToken.approve.selector){
-                    // Worker only includes this call when approval is needed.
-                    // Bundler3 is the payer; leave its maximum router allowance intact.
-                    if(target!=SWAPPER||_word(a,32)!=type(uint256).max) revert Unauthorized();
-                }else if(sig==ICYToken.transfer.selector) _receiver(target);
-                else revert Unauthorized();
+                    (address spender,uint256 amount)=abi.decode(args,(address,uint256));
+                    if(spender!=SWAPPER||amount!=type(uint256).max) revert Unauthorized();
+                }else if(sig==ICYToken.transfer.selector){
+                    (address receiver,)=abi.decode(args,(address,uint256));
+                    _receiver(receiver);
+                }else revert Unauthorized();
             }
         }
     }
-    function _word(bytes calldata a,uint256 offset) private pure returns(uint256 result){
-        if(offset+32>a.length) revert Invalid();
-        assembly ("memory-safe"){result:=calldataload(add(a.offset,offset))}
-    }
-    function _address(bytes calldata a,uint256 offset) private pure returns(address){
-        uint256 w=_word(a,offset);
-        if(w>type(uint160).max) revert Invalid();
-        return address(uint160(w));
+    function _market(Scope calldata s,CYMarketParams memory p) private pure{
+        if(keccak256(abi.encode(p))!=s.market) revert Unauthorized();
     }
     function _tokenIn(Scope calldata s,address t) private pure{
         for(uint256 i;i<s.tokens.length;++i) if(s.tokens[i]==t) return;
