@@ -20,7 +20,7 @@ The existing collector emits `SLITHER_v1.json`, `WAKE_v1.json` and `MYTHRIL_v1.j
 
 ## Independent SMTChecker correctness review
 
-The exact official npm Solidity 0.8.28 and 0.8.30 Emscripten payloads are integrity-pinned and qualified in GitHub Actions run 45831903727. Their embedded Z3 requires no external solver. The collector runs the compiler against its retained source units and scope, independently of the other scanners, with standard SMTChecker targets and both engines. Each compiler subprocess has a three-minute wall limit; timeouts, unavailable inputs and unqualified compiler releases are recorded explicitly rather than claimed as completed. The evidence is `SMTCHECKER_v1.json`; it is not a security verdict or input to automated reproduction. No finding deduplicator is used.
+The exact official npm Solidity 0.8.28 and 0.8.30 Emscripten payloads are integrity-pinned and qualified in GitHub Actions run 45831903727. Their embedded Z3 requires no external solver. The collector runs the compiler against its retained source units and scope, independently of the other scanners, with standard SMTChecker targets and both engines. The entire SMTChecker diagnostic stage shares a 180-second wall-clock budget, including the compiler-only control and process termination. Generic compiler stage timing, CPU, memory, throttling and process-state telemetry is recorded; units not reached are explicitly reported as budget-exhausted. The evidence is `SMTCHECKER_v1.json`; it is not a security verdict or input to automated reproduction. No finding deduplicator is used.
 
 ## Scope
 
