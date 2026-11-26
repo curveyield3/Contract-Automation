@@ -269,13 +269,13 @@ jobs:
           set -euo pipefail
           root="$(mktemp -d)"
           mkdir -p "$root/baseline/src" "$root/candidate/src" "$root/evidence"
-          git fetch --no-tags --depth=1 origin 957fdf50c28904cf30b90a80caec799ae3a9eab9
-          git show 957fdf50c28904cf30b90a80caec799ae3a9eab9:process/avkat-fork-simulation-v1/src/CurveYieldMorphoPositionModule_v6.sol > "$root/baseline/src/CurveYieldMorphoPositionModule_v6.sol"
-          cp "process/avkat-fork-simulation-v1/src/CurveYieldMorphoPositionModule_v8.sol" "$root/candidate/src/"
+          git fetch --no-tags --depth=1 origin d3e79c42bca0065bf1139aa4e3ee99fb2c280786
+          git show d3e79c42bca0065bf1139aa4e3ee99fb2c280786:process/avkat-fork-simulation-v1/src/CurveYieldMorphoPositionModule_v8.sol > "$root/baseline/src/CurveYieldMorphoPositionModule_v8.sol"
+          cp "process/avkat-fork-simulation-v1/src/CurveYieldMorphoPositionModule_v9.sol" "$root/candidate/src/"
           forge --version
           sha256sum "$root"/{baseline,candidate}/src/*.sol
           for kind in baseline candidate; do
-            if [ "$kind" = baseline ]; then version=v6; else version=v8; fi
+            if [ "$kind" = baseline ]; then version=v8; else version=v9; fi
             cd "$root/$kind"
             for runs in 200 1 10 25 50; do
               forge build --force --use 0.8.30 --evm-version osaka --optimize --optimizer-runs "$runs" --via-ir --sizes --skip test 2>&1 | tee "$root/evidence/${version}_${runs}.log"
@@ -283,14 +283,14 @@ jobs:
               jq -e '.bytecode.object | length > 2' "$file" >/dev/null
               jq -c --arg version "$version" --argjson runs "$runs" '{version:$version,compiler:"0.8.30",evm:"osaka",optimizerRuns:$runs,viaIR:true,runtimeBytes:((.deployedBytecode.object|length)-2)/2,creationBytes:((.bytecode.object|length)-2)/2,abiFunctions:[.abi[]|select(.type=="function")|.name]}' "$file" | sed 's/^/CY_MORPHO_COMPILE /' | tee -a "$root/evidence/measurements.txt"
               if [ "$kind" = candidate ]; then
-                cp "$file" "$root/evidence/CurveYieldMorphoPositionModule_v8_runs${runs}.json"
+                cp "$file" "$root/evidence/CurveYieldMorphoPositionModule_v9_runs${runs}.json"
               fi
             done
           done
-          cp "$root/candidate/src/CurveYieldMorphoPositionModule_v8.sol" "$root/evidence/"
+          cp "$root/candidate/src/CurveYieldMorphoPositionModule_v9.sol" "$root/evidence/"
           mkdir -p "$GITHUB_WORKSPACE/morpho-module-build"
           cp "$root/evidence/"* "$GITHUB_WORKSPACE/morpho-module-build/"
       - uses: actions/upload-artifact@v4
         with:
-          name: CurveYieldMorphoPositionModule_v8
+          name: CurveYieldMorphoPositionModule_v9
           path: morpho-module-build/
