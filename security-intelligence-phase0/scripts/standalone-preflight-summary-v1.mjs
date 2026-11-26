@@ -79,7 +79,7 @@ function identityComplete(engine,entry,report){
     Array.isArray(entry.elements)&&entry.elements.length>0&&entry.elements.every(e=>fullLocation(e?.source_mapping));
   if(engine==='wake')return nonempty(entry.detector_name)&&nonempty(entry.unitId)&&
     plainObject(entry.detection?.location)&&Object.keys(entry.detection.location).length>0&&
-    report.unitResults?.some(u=>u.unitId===entry.unitId&&u.status==='COMPLETED');
+    Array.isArray(report.unitResults)&&report.unitResults.some(u=>u?.unitId===entry.unitId&&u?.status==='COMPLETED');
   if(engine==='mythril')return nonempty(entry.qualifiedName)&&nonempty(entry.sourceName)&&
     sha256String(entry.runtimeBytecodeSha256)&&nonempty(entry['swc-id']??entry.title)&&
     Number.isSafeInteger(entry.address)&&entry.address>=0;
@@ -87,7 +87,7 @@ function identityComplete(engine,entry,report){
     const name=typeof entry.path==='string'?entry.path.replace(/^\.\//,''):'';
     return nonempty(entry.check_id)&&nonempty(name)&&Number.isSafeInteger(entry.start?.offset)&&
       entry.start.offset>=0&&Number.isSafeInteger(entry.end?.offset)&&entry.end.offset>entry.start.offset&&
-      report.sourceDigests?.some(x=>x.sourceName===name&&sha256String(x.sha256));
+      Array.isArray(report.sourceDigests)&&report.sourceDigests.some(x=>x?.sourceName===name&&sha256String(x?.sha256));
   }
   // SMTChecker diagnostics currently omit complete source identity. Equal error
   // codes, diagnostic types and solver names cannot prove equal findings.
