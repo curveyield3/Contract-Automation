@@ -128,8 +128,14 @@ jobs:
             assert s.count(a)==1
             s=s.replace(a,b,1)
           p.write_text(s)
+          p=Path('libsmtutil/Z3CHCInterface.cpp')
+          s=p.read_text()
+          a='m_solver.register_relation(m_z3Interface->functions().at(_expr.name));'
+          b='auto declaration = m_z3Interface->functions().at(_expr.name);\n\tm_solver.register_relation(declaration);'
+          assert s.count(a)==1
+          p.write_text(s.replace(a,b,1))
           PY
-          git diff -- libsmtutil/Z3Interface.h
+          git diff -- libsmtutil/Z3Interface.h libsmtutil/Z3CHCInterface.cpp
           # Keep upstream release optimization and toolchain. Only retain linker function names.
           python3 - <<'PY'
           from pathlib import Path
@@ -162,7 +168,7 @@ jobs:
           sha256sum "$GITHUB_WORKSPACE/symbols/soljson.cjs" | tee "$GITHUB_WORKSPACE/symbols/sha256.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: smtchecker-copy-fix-candidate-v1
+          name: smtchecker-copy-fix-candidate-v2
           path: symbols/
           if-no-files-found: error
           retention-days: 3
@@ -218,7 +224,7 @@ jobs:
       - name: Receive symbolized compiler
         uses: actions/download-artifact@v4
         with:
-          name: smtchecker-copy-fix-candidate-v1
+          name: smtchecker-copy-fix-candidate-v2
           path: .profile-compiler
       - name: Verify candidate compiler artifact integrity
         shell: bash
@@ -261,7 +267,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smtchecker-copy-fix-performance-v1
+          name: smtchecker-copy-fix-performance-v2
           path: |
             .preflight-output/evidence/compiler-profile-v1.json
             .preflight-output/evidence/*-cpu-profile-v1.txt
