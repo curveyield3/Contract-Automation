@@ -33,6 +33,9 @@ RUN mkdir -p /opt/phase0-maintenance && \
     git init /tmp/solidity-bug-catalogue && \
     git -C /tmp/solidity-bug-catalogue fetch --depth 1 https://github.com/argotorg/solidity.git refs/tags/v0.8.39 && \
     git -C /tmp/solidity-bug-catalogue show FETCH_HEAD:docs/bugs_by_version.json > /opt/phase0-maintenance/bugs_by_version.json && \
+    git -C /tmp/solidity-bug-catalogue show FETCH_HEAD:docs/bugs.json > /opt/phase0-maintenance/bugs.json && \
+    test "$(git hash-object /opt/phase0-maintenance/bugs_by_version.json)" = 3a7dde80e399c9c78da077b751b229e982b6d777 && \
+    test "$(git hash-object /opt/phase0-maintenance/bugs.json)" = c679b4b13e16084184079939ef31f8da597319cb && \
     git -C /tmp/solidity-bug-catalogue rev-parse FETCH_HEAD > /opt/phase0-maintenance/solidity-database-revision.txt && \
     rm -rf /tmp/solidity-bug-catalogue && \
     test -s /opt/phase0-maintenance/bugs_by_version.json && \
