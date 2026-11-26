@@ -156,6 +156,30 @@ async function detectBuildConfig(projectRoot){
   if(exactSemver(pkgSolc))candidates.push({version:exactSemver(pkgSolc),basis:'package.json solc',label:'declared solc dependency',priority:80});
   const lockSolc=lock?.packages?.['node_modules/solc']?.version;
   if(exactSemver(lockSolc))candidates.push({version:exactSemver(lockSolc),basis:'package-lock node_modules/solc',label:'locked solc package',priority:60});
+  // With Foundry auto_detect_solc=true, compiler versions are selected per
+  // Solidity compilation unit. The provisional envelope compiler below is
+  // not an assertion that all Solidity sources use the same compiler.
+  const foundryAutoDetect=/^\s*auto_detect_solc\s*=\s*true(?:\s*(?:#.*)?)?$/m.test(foundryDefault);
+  const detectedPragmaVersions=[];
+  if(!candidates.length && foundryAutoDetect){
+    const srcRoot=foundryDefault.match(/^\s*src\s*=\s*["']([^"']+)["']/m)?.[1]??'src';
+    if(srcRoot.startsWith('/')||srcRoot.split('/').includes('..'))throw new Error('unsafe Foundry source root');
+    for(const rel of (await walk(projectRoot)).filter(rel=>rel.startsWith(srcRoot+'/')&&rel.endsWith('.sol'))){
+      const raw=await readMaybe(path.join(projectRoot,...rel.split('/')));
+      for(const match of raw.matchAll(/\bpragma\s+solidity\s+([^;]+);/g)){
+        const version=exactSemver(match[1]);
+        if(version)detectedPragmaVersions.push({version,path:rel,pragma:match[1].trim()});
+      }
+    }
+    if(!detectedPragmaVersions.length)throw new Error('Foundry auto_detect_solc has no source-bound compiler pragmas');
+    const byVersion=[...new Set(detectedPragmaVersions.map(x=>x.version))].sort((left,right)=>{
+      const A=left.split('.').map(Number),B=right.split('.').map(Number);
+      return (B[0]-A[0])||(B[1]-A[1])||(B[2]-A[2]);
+    });
+    candidates.push({version:byVersion[0],basis:'foundry.toml auto_detect_solc and admitted source pragmas',
+      label:'Provisional request compiler; actual versions are compiler-unit-specific',priority:40});
+    evidence.push('foundry.toml auto_detect_solc','admitted Solidity pragmas ('+detectedPragmaVersions.length+')');
+  }
   candidates.sort((a,b)=>b.priority-a.priority||a.basis.localeCompare(b.basis));
   if(!candidates.length)throw new Error('unable to detect exact Solidity compiler version from source package');
   const topPriority=candidates[0].priority;
@@ -176,7 +200,7 @@ async function detectBuildConfig(projectRoot){
   const runs=opt?Number(opt[2]):Number(foundryDefault.match(/^\s*optimizer_runs\s*=\s*(\d+)/m)?.[1]??200); const enabled=opt?opt[1]==='true':!foundryText||foundryDefault.match(/^\s*optimizer\s*=\s*(true|false)/m)?.[1]==='true';
   const via=allText.match(/viaIR\s*:\s*(true|false)/);
   const evm=allText.match(/evmVersion\s*:\s*['"]([^'"]+)['"]/);
-  return{compilerVersion:compiler.version,compilerVersions:topVersions,compilerCandidates:candidates,optimizer:{enabled,runs},viaIR:via?via[1]==='true':foundryDefault.match(/^\s*via_ir\s*=\s*(true|false)/m)?.[1]==='true',evmVersion:evm?.[1]??foundryDefault.match(/^\s*evm_version\s*=\s*['"]([^'"]+)['"]/m)?.[1]??null,evidence};
+  return{compilerVersion:compiler.version,compilerVersions:topVersions,compilerCandidates:candidates,foundryAutoDetectSolc:foundryAutoDetect,admittedSolidityPragmas:detectedPragmaVersions,optimizer:{enabled,runs},viaIR:via?via[1]==='true':foundryDefault.match(/^\s*via_ir\s*=\s*(true|false)/m)?.[1]==='true',evmVersion:evm?.[1]??foundryDefault.match(/^\s*evm_version\s*=\s*['"]([^'"]+)['"]/m)?.[1]??null,evidence};
 }
 
 
