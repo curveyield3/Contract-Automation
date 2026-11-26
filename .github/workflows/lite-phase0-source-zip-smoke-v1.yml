@@ -1,4 +1,4 @@
-name: Exact executed nonce37 verification input v34
+name: Exact executed nonce37 verification input v35
 on:
   push:
     branches: [cyvlsdt-v69-postdeploy-simulation-v1]
@@ -27,6 +27,37 @@ jobs:
           set -euo pipefail
           gh run download 45386347328 -n CurveYield-Deployment-Headers-v1 -D /tmp/header-evidence
           npm install --prefix /tmp/verify36 --ignore-scripts --no-audit --no-fund --no-save '@openzeppelin/contracts@5.4.0' '@openzeppelin-4/contracts@npm:@openzeppelin/contracts@4.9.6' '@openzeppelin/contracts-upgradeable@4.9.6' 'ethers@6.17.0'
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Compile exact GrossNAV source package
+        run: |
+          set -euo pipefail
+          cp -a /tmp/header-evidence/compiler-inputs/cyv-header69 /tmp/grossnav
+          ln -s /tmp/verify36/node_modules /tmp/grossnav/node_modules
+          python3 - <<'PY'
+          import pathlib,hashlib
+          p=pathlib.Path('/tmp/grossnav/contracts/CurveYieldRevenueStrategyV8.sol')
+          s=p.read_text()
+          pairs=[
+              ('    /// @dev Both strategy NAV and gross-up read the current staking exit fee;\n    ///      only the vault charges its separate shareholder-retained fee.', '    /// @dev NAV is gross principal. The vault receives the exact requested amount;\n    ///      its exit-fee quote recovers the maximum backend gross-up cost.'),
+              ('uint256 fee = immediateWithdrawFeePpm();','uint256 fee = uint256(REVENUE_STAKING.immediateWithdrawFeePpm());'),
+              ('            // No fee when the configured staking fee is zero; otherwise round up\n            // the staked amount so the vault receives its requested net amount.\n            unstaked = Math.mulDiv(needed, 1_000_000, 1_000_000 - fee, Math.Rounding.Ceil);','            // Minimal gross principal whose post-fee amount covers needed.\n            // The staking fee rounds down, so net = ceil(gross * (1 - fee)).\n            unstaked = Math.mulDiv(needed - 1, 1_000_000, 1_000_000 - fee) + 1;'),
+              ('function grossBalanceOf() external view returns (uint256)','function grossBalanceOf() public view returns (uint256)'),
+              ('    /// @notice Read the exact live rate used for the staking backend\'s instant withdrawals.\n    function immediateWithdrawFeePpm() public view returns (uint256) {\n        return uint256(REVENUE_STAKING.immediateWithdrawFeePpm());','    /// @notice Vault-side recovery rate for the cost of delivering an exact net amount.\n    /// @dev The backend fee itself is unchanged. Round up the gross-up cost rate so\n    ///      ordinary partial exits do not charge this cost to remaining shareholders.\n    ///      The vault applies this amount-independent quote also to idle/early-queue exits.\n    function immediateWithdrawFeePpm() public view returns (uint256) {\n        uint256 fee = uint256(REVENUE_STAKING.immediateWithdrawFeePpm());\n        return Math.mulDiv(fee, 1_000_000, 1_000_000 - fee, Math.Rounding.Ceil);'),
+              ('        // Price active stake at its currently instant-withdrawable net value.\n        // Exclude reserved idle and queued principal: those belong to burned shares.\n        return _unreservedIdle()\n            + REVENUE_STAKING.previewImmediateWithdrawal(REVENUE_STAKING.activeBalance(address(this)));','        // Gross active principal and unreserved idle; an optional future instant\n        // exit fee is not a loss of principal. Queued assets remain excluded.\n        return grossBalanceOf();')
+          ]
+          for a,b in pairs:
+              assert s.count(a)==1, a
+              s=s.replace(a,b)
+          p.write_text(s)
+          assert hashlib.sha256(p.read_bytes()).hexdigest()=='d8b239014254bd8bbb748e2ab236faf497d1f258637382c98ffae6c0f06b38c3'
+          print('GROSSNAV_SOURCE_SHA256_MATCH')
+          PY
+          forge build --root /tmp/grossnav --force --skip test --skip script
+          mkdir -p /tmp/header-evidence/artifacts/CurveYieldRevenueStrategyV8GrossNAV
+          cp /tmp/grossnav/out/CurveYieldRevenueStrategyV8.sol/CurveYieldRevenueStrategyV8.json /tmp/header-evidence/artifacts/CurveYieldRevenueStrategyV8GrossNAV/header.json
+          cp -a /tmp/grossnav /tmp/header-evidence/compiler-inputs/grossnav
       - name: Assemble exact verified standard JSON from compiler metadata
         run: |
           set -euo pipefail
@@ -40,16 +71,16 @@ jobs:
             const a=JSON.parse(fs.readFileSync(root+'/artifacts/'+folder+'/header.json'));
             for(const d of deployments){if(d.init.toLowerCase().startsWith(a.bytecode.object.toLowerCase()))matches.push({...d,name:folder});}
           }
-          assert(matches.length>=1);assert.equal(new Set(matches.map(x=>x.address)).size,matches.length);
+          assert.equal(matches.length,2);assert.equal(new Set(matches.map(x=>x.address)).size,2);
           console.log('VERIFY37_MATCHES '+JSON.stringify(matches.map(({init,...x})=>x)));
-          for(const {name,address,init} of matches){
+          for(const {name,address,init} of matches.filter(x=>x.address==='0xcb85b940619e68da7bf1970d106fa17cc0bedbb7')){
             const a=JSON.parse(fs.readFileSync(root+'/artifacts/'+name+'/header.json'));
             const m=typeof a.metadata==='string'?JSON.parse(a.metadata):a.metadata;
             const settings={...m.settings};const target=Object.entries(settings.compilationTarget)[0];delete settings.compilationTarget;
             settings.outputSelection={'*':{'*':['abi','evm.bytecode','evm.deployedBytecode','metadata']}};
             const sources={};
             for(const [p,v] of Object.entries(m.sources)){
-              const f=p.startsWith('node_modules/')?'/tmp/verify36/'+p:root+'/compiler-inputs/'+(name==='StrategyCurveSDTYearnRebindable'||name==='BeefyVaultCurveYieldV8cyvlSDT'?'cyv-header72':'cyv-header69')+'/'+p;
+              const f=p.startsWith('node_modules/')?'/tmp/verify36/'+p:root+'/compiler-inputs/'+(name==='CurveYieldRevenueStrategyV8GrossNAV'?'grossnav':name==='StrategyCurveSDTYearnRebindable'||name==='BeefyVaultCurveYieldV8cyvlSDT'?'cyv-header72':'cyv-header69')+'/'+p;
               const content=fs.readFileSync(f,'utf8');assert.equal(E.keccak256(E.toUtf8Bytes(content)),v.keccak256,p);
               sources[p]={content};
             }
