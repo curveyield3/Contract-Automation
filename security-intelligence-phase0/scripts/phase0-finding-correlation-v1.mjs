@@ -16,33 +16,52 @@ const engineSpecs=[
   ['semgrep','../semgrep-review/SEMGREP_v1.json','/nativeReport/results'],
   ['smtchecker','SMTCHECKER_v1.json','/units']
 ];
-const escapePointer=s=>String(s).replace(/~/g,'~0').replace(/\//g,'~1');
 function load(file,parsed){
   try{const bytes=fs.readFileSync(file);return {data:parsed??JSON.parse(bytes),sha256:sha(bytes),state:'READABLE'};}
   catch(e){return {data:null,sha256:null,state:e.code==='ENOENT'?'MISSING':'MALFORMED'};}
 }
 function statusOf(d){return d?.componentStatus??d?.status??null;}
-function argumentCount(expression){
-  const m=expression.match(/\.([A-Za-z_$][\w$]*)\(/g);
-  if(!m)return null;
-  // Parse the outer call's argument boundary without evaluating source.
-  let depth=0,start=-1,end=-1,count=0;
-  for(let i=0;i<expression.length;i++){
-    const c=expression[i];
-    if(c==='('){if(depth===0){start=i;count=0;}depth++;}
-    else if(c===')'){if(--depth<0)return null;if(depth===0)end=i;}
-    else if(c===','&&depth===1)count++;
+function statementPrefix(prefix){
+  if(/^\s*$/.test(prefix))return 'STANDALONE';
+  // A bare conditional body also discards the complete result.
+  const p=prefix.trim();
+  if(!/^if\s*\(/.test(p)||!p.endsWith(')')||/['"\x60;{}]|\/[/*]/.test(p))return null;
+  let depth=0;
+  const start=p.indexOf('(');
+  for(let i=start;i<p.length;i++){
+    if(p[i]==='(')depth++;
+    else if(p[i]===')'){if(--depth<0||depth===0&&i!==p.length-1)return null;}
   }
-  if(depth!==0||start<0||end!==expression.length-1)return null;
-  const name=expression.slice(0,start).match(/\.([A-Za-z_$][\w$]*)$/)?.[1];
-  return name?{name,arity:end===start+1?0:count+1}:null;
+  return depth===0?'CONDITIONAL_BODY':null;
 }
 export function publishFindingCorrelation(dir,request,build,source,parsed={}){
   const exec=load(path.join(dir,'PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json')).data;
   const scope={requestId:request?.requestId??null,repository:request?.source?.repository??null,commit:request?.source?.commit??null,archiveSha256:request?.source?.archiveSha256??null,buildConfigurationDigestSha256:build?.build?.buildConfigurationDigestSha256??null,runId:process.env.GITHUB_RUN_ID??null,runAttempt:process.env.GITHUB_RUN_ATTEMPT??null};
-  const baseVerified=digest(scope.archiveSha256)&&digest(scope.buildConfigurationDigestSha256)&&same(scope.archiveSha256,build?.source?.archiveSha256Observed)&&same(scope.commit,build?.source?.commit)&&same(scope.repository,build?.source?.repository)&&same(scope.requestId,build?.requestId)&&same(scope.buildConfigurationDigestSha256,exec?.buildConfigurationDigestSha256)&&same(scope.archiveSha256,source?.sourceIdentity?.archiveSha256)&&same(scope.commit,source?.sourceIdentity?.commit)&&same(scope.repository,source?.sourceIdentity?.repository);
+  const baseVerified=digest(scope.archiveSha256)&&digest(scope.buildConfigurationDigestSha256)&&same(scope.archiveSha256,build?.source?.archiveSha256Observed)&&same(scope.commit,build?.source?.commit)&&same(scope.repository,build?.source?.repository)&&same(scope.requestId,build?.requestId)&&same(scope.buildConfigurationDigestSha256,exec?.buildConfigurationDigestSha256)&&same(scope.archiveSha256,source?.sourceIdentity?.archiveSha256)&&same(scope.commit,source?.sourceIdentity?.commit)&&same(scope.repository,source?.sourceIdentity?.repository)&&same(scope.archiveSha256,exec?.source?.archiveSha256)&&same(scope.commit,exec?.source?.commit)&&same(scope.repository,exec?.source?.repository)&&same(scope.requestId,exec?.requestIdentity?.requestId)&&same(scope.requestId,source?.requestIdentity?.requestId)&&same(source?.requestIdentity?.requestDigest,exec?.requestIdentity?.requestDigest);
   const units=arr(build?.build?.compilationUnits),files=arr(source?.sourceFiles);
   const byPath=new Map(files.map(f=>[f.path,f]));
+  const functionsById=new Map(arr(source?.functions).map(f=>[f.functionId,f]));
+  const contractsById=new Map(arr(source?.contracts).map(x=>[x.contractId,x]));
+  const callsBySpan=new Map();
+  for(const edge of arr(source?.callGraph)){
+    const site=edge.sourceCallsite;
+    const span=/^(\d+):(\d+):(-?\d+)$/.exec(site?.astSourceSpan??'');
+    if(!span||edge.confidenceClass!=='SOLIDITY_AST_REFERENCED_DECLARATION')continue;
+    const key=JSON.stringify([site.sourcePath,site.compilationUnitId,site.sourceDigestSha256,Number(span[1]),Number(span[1])+Number(span[2])]);
+    if(!callsBySpan.has(key))callsBySpan.set(key,[]);
+    callsBySpan.get(key).push(edge);
+  }
+  function resolvedCall(a){
+    const edges=callsBySpan.get(JSON.stringify([a.path,a.unitId,a.sourceSha256,a.start,a.end]))??[];
+    if(edges.length!==1)return null;
+    const edge=edges[0],target=functionsById.get(edge.targetFunctionId),contract=contractsById.get(edge.targetContractId);
+    if(!target||!contract||target.contractId!==contract.contractId)return null;
+    const artifacts=arr(exec?.artifacts).filter(x=>x.qualifiedName===contract.qualifiedName&&x.compilationUnitId===a.unitId);
+    if(artifacts.length!==1)return null;
+    const abi=arr(artifacts[0].abi).filter(f=>f.type==='function'&&f.name+'('+arr(f.inputs).map(x=>x.type).join(',')+')'===target.signature);
+    if(abi.length!==1||!Array.isArray(abi[0].outputs))return null;
+    return {callEdgeId:edge.callEdgeId,astNodeId:edge.sourceCallsite.astNodeId,qualifiedName:contract.qualifiedName,signature:target.signature,outputCount:abi[0].outputs.length};
+  }
   const unitIdsFor=p=>units.filter(u=>arr(u.sourceNames).includes(p)).map(u=>u.unitId);
   const root=path.join(dir,'work','archive'), rawCache=new Map();
   function sourceBytes(p){
@@ -141,7 +160,7 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
     const w=left.engine==='wake'?left:right.engine==='wake'?right:null;
     const sn=s?.anchors.filter(a=>a.role==='node')??[],wa=w?.anchors??[];
     const exact=evidence.find(e=>e.reason==='EXACT_INTERVAL'&&[e.left.role,e.right.role].includes('node')&&[e.left.role,e.right.role].includes('primary'));
-    let reason='NO_QUALIFIED_EQUALITY_RULE',eligible=false;
+    let reason='NO_QUALIFIED_EQUALITY_RULE',eligible=false,proof=null;
     if(s?.ruleId==='unused-return'&&w?.ruleId==='unchecked-return-value'){
       reason='RULE_EVIDENCE_INCOMPLETE';
       if(s.version!=='0.11.6'||w.version!=='4.21.0')reason='UNQUALIFIED_RULE_VERSION';
@@ -154,19 +173,19 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
         if(!bytes||wd.length!==1||wd[0].sha256!==a.sourceSha256||sc.length!==1)reason='SOURCE_OR_UNIT_PROVENANCE_MISSING';
         else{
           const expression=clean(bytes.subarray(a.start,a.end).toString('utf8'));
-          const native=clean(a.label),call=argumentCount(expression);
+          const native=clean(a.label),call=resolvedCall(a);
           const after=bytes.subarray(a.end,a.end+64).toString('utf8');
           const before=bytes.subarray(Math.max(0,a.start-512),a.start).toString('utf8');
           const prefix=before.slice(before.lastIndexOf('\n')+1);
-          const standalone=/^\s*$/.test(prefix)&&(/;\s*$/.test(bytes.subarray(a.start,a.end).toString('utf8'))||/^\s*;/.test(after));
-          const abi=call?arr(exec?.artifacts).filter(x=>x.compilationUnitId===a.unitId).flatMap(x=>arr(x.abi).filter(f=>f.type==='function'&&f.name===call.name&&arr(f.inputs).length===call.arity)):[];
-          if(!call||!standalone||expression!==native||w.claim!=='Unchecked return value')reason='SINGLE_DISCARDED_CALL_NOT_ESTABLISHED';
-          else if(!abi.length||abi.some(f=>!Array.isArray(f.outputs)||f.outputs.length!==1))reason='SINGLE_RETURN_NOT_ESTABLISHED';
-          else{eligible=true;reason='SAME_BOUND_SINGLE_DISCARDED_CALL';}
+          const statement=statementPrefix(prefix);
+          const terminated=/;\s*$/.test(bytes.subarray(a.start,a.end).toString('utf8'))||/^\s*;/.test(after);
+          if(!statement||!terminated||expression!==native||w.claim!=='Unchecked return value')reason='SINGLE_DISCARDED_CALL_NOT_ESTABLISHED';
+          else if(!call||call.outputCount!==1)reason='SINGLE_RESOLVED_RETURN_NOT_ESTABLISHED';
+          else{eligible=true;reason='SAME_BOUND_SINGLE_DISCARDED_CALL';proof={...call,statement,path:a.path,start:a.start,end:a.end,unitId:a.unitId,sourceSha256:a.sourceSha256};}
         }
       }
     }
-    const d={id:p.id,members:[left.id,right.id],references:[left.reference,right.reference],ruleVersion:eligible?rule:null,disposition:eligible?'SHADOW_EQUAL':'RELATED',reason,evidence};
+    const d={id:p.id,members:[left.id,right.id],references:[left.reference,right.reference],ruleVersion:eligible?rule:null,disposition:eligible?'SHADOW_EQUAL':'RELATED',reason,evidence,proof};
     decisions.push(d);
     if(eligible)possible.push(d);else relatedLinks.push({pairId:d.id,members:d.members,reason,anchors:evidence});
   }
@@ -181,10 +200,18 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
   const ids=new Set(observations.map(o=>o.id));
   if(ids.size!==observations.length||claims.length!==observations.length)throw Error('OBSERVATION_RECONCILIATION_FAILED');
   for(const input of inputs){
-    if(input.count!==null&&observations.filter(o=>o.engine===input.engine).length!==input.count)throw Error('NATIVE_POINTER_COUNT_MISMATCH:'+input.engine);
+    const report=reports.get(input.engine),native=input.engine==='semgrep'?report?.nativeReport?.results:input.engine==='smtchecker'?report?.units:report?.detectors;
+    const prefix=engineSpecs.find(x=>x[0]===input.engine)[2];
+    const expected=new Set();
+    if(Array.isArray(native))native.forEach((row,i)=>{
+      if(input.engine==='smtchecker')arr(row?.diagnostics).forEach((_,j)=>expected.add(prefix+'/'+i+'/diagnostics/'+j));
+      else expected.add(prefix+'/'+i);
+    });
+    const actual=observations.filter(o=>o.engine===input.engine).map(o=>o.reference.pointer);
+    if(actual.length!==expected.size||new Set(actual).size!==actual.length||actual.some(p=>!expected.has(p)))throw Error('NATIVE_POINTER_SET_MISMATCH:'+input.engine);
   }
   const grouped=new Set(groups.flatMap(g=>g.members));
-  const result={schemaVersion:'curveyield-phase0-finding-correlation-v1',scope,notSecurityVerdict:true,mode:'SHADOW',inputs,observations,claims,groups,relatedLinks,decisions,coverage,diagnostics,counts:{nativeObservations:observations.length,diagnostics:diagnostics.length,shadowGroups:groups.length,shadowGroupedObservations:grouped.size,confirmedGroups:0,singletons:observations.length,relatedLinks:relatedLinks.length,abstentions:decisions.filter(d=>d.disposition==='ABSTAIN').length}};
+  const result={schemaVersion:'curveyield-phase0-finding-correlation-v1',scope,notSecurityVerdict:true,mode:'SHADOW',inputs,observations,claims,groups,relatedLinks,decisions,coverage,diagnostics,counts:{nativeObservations:observations.length-diagnostics.length,diagnostics:diagnostics.length,shadowGroups:groups.length,shadowGroupedObservations:grouped.size,confirmedGroups:0,singletons:observations.length,relatedLinks:relatedLinks.length,abstentions:decisions.filter(d=>d.disposition==='ABSTAIN').length}};
   const target=path.join(dir,output),temp=target+'.tmp';
   fs.writeFileSync(temp,JSON.stringify(result,null,2)+'\n');fs.renameSync(temp,target);
   return result.counts;
