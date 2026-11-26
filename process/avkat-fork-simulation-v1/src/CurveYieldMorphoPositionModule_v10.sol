@@ -2,11 +2,12 @@
 pragma solidity 0.8.30;
 
 /**
- * @title CurveYield Morpho Position Module v9
+ * @title CurveYield Morpho Position Module v10
  * @notice Guardian authority for Worker-built Morpho Bundler3 calls.
  * @dev CurveYield uses existing DeFi primitives for all execution. This module
- *      does not construct bundles or flash loans, compute financial quantities,
- *      inspect swap routes, keep token lists, or manage temporary allowances.
+ *      does not construct bundles or flash loans, size trades, inspect swap routes,
+ *      keep token allowlists, or manage temporary allowances. It snapshots touched
+ *      shared-contract balances and enforces the LLTV buffer on worsening LTV.
  *      The Safe is the Bundler initiator and retains position ownership.
  */
 struct CYMarketParams {
@@ -25,12 +26,17 @@ struct CYCall {
 }
 interface ICYMorpho {
     function idToMarketParams(bytes32 id) external view returns(CYMarketParams memory);
+    function accrueInterest(CYMarketParams calldata p) external;
+    function position(bytes32 id,address owner) external view returns(uint256,uint128,uint128);
+    function market(bytes32 id) external view returns(uint128,uint128,uint128,uint128,uint128,uint128);
 }
 interface ICYSafe {
     function execTransactionFromModuleReturnData(address to,uint256 value,bytes calldata data,uint8 operation)
         external returns(bool,bytes memory);
 }
+interface ICYOracle { function price() external view returns(uint256); }
 interface ICYToken {
+    function balanceOf(address owner) external view returns(uint256);
     function allowance(address owner,address spender) external view returns(uint256);
     function approve(address spender,uint256 amount) external returns(bool);
     function transfer(address receiver,uint256 amount) external returns(bool);
@@ -64,10 +70,15 @@ contract CurveYieldMorphoPositionModule {
     mapping(address=>bool) public isExecutor;
     mapping(bytes32=>bool) public marketAllowed;
     bool private transient locked;
+    struct Balance {address token; uint256 bundler; uint256 adapter;}
+    struct Snapshot {Balance[] entries; uint256 count;}
+    uint256 private constant LTV_BUFFER=2e15; // 0.2 percentage points
 
     error Unauthorized();
     error Invalid();
     error Failed();
+    error BalanceChanged();
+    error LtvIncreased();
     event ExecutorSet(address indexed executor,bool enabled);
     event MarketSet(bytes32 indexed market,bool enabled);
     event Executed(bytes32 indexed market,address indexed executor,bytes32 bundleHash);
@@ -102,15 +113,28 @@ contract CurveYieldMorphoPositionModule {
            data.length<4||bytes4(data[:4])!=ICYBundler.multicall.selector) revert Invalid();
         locked=true;
         CYMarketParams memory p=MORPHO.idToMarketParams(market);
-        if(!_validate(abi.decode(data[4:],(CYCall[])),market,p.loanToken,p.collateralToken,false)) revert Invalid();
+        MORPHO.accrueInterest(p);
+        (uint256 debtBefore,uint256 valueBefore)=_position(market,p.oracle);
+        // At most one touched address per 32 bytes of original calldata, plus
+        // the two market tokens. No Worker-supplied token list or registry.
+        Snapshot memory snap=Snapshot(new Balance[](data.length/32+2),0);
+        _snapshot(snap,p.loanToken);
+        _snapshot(snap,p.collateralToken);
+        if(!_validate(abi.decode(data[4:],(CYCall[])),market,p.loanToken,p.collateralToken,false,snap)) revert Invalid();
         _safe(BUNDLER,data);
+        for(uint256 i;i<snap.count;++i){
+            Balance memory b=snap.entries[i];
+            if(ICYToken(b.token).balanceOf(BUNDLER)!=b.bundler||
+               ICYToken(b.token).balanceOf(ADAPTER)!=b.adapter) revert BalanceChanged();
+        }
+        _guardLtv(market,p,debtBefore,valueBefore);
         emit Executed(market,msg.sender,keccak256(data));
         locked=false;
     }
 
     // Validate delegated authority only. All swap eligibility and execution
     // protection is authoritative at OmniSwapper, not this wrapper.
-    function _validate(CYCall[] memory calls,bytes32 market,address loan,address collateral,bool nested)
+    function _validate(CYCall[] memory calls,bytes32 market,address loan,address collateral,bool nested,Snapshot memory snap)
         private returns(bool flashSeen)
     {
         for(uint256 i;i<calls.length;++i){
@@ -122,7 +146,7 @@ contract CurveYieldMorphoPositionModule {
                 if(nested||flashSeen) revert Invalid();
                 (address token,uint256 amount,bytes memory callback)=abi.decode(_args(d),(address,uint256,bytes));
                 if((token!=loan&&token!=collateral)||amount==0||keccak256(callback)!=c.callbackHash) revert Invalid();
-                _validate(abi.decode(callback,(CYCall[])),market,loan,collateral,true);
+                _validate(abi.decode(callback,(CYCall[])),market,loan,collateral,true,snap);
                 flashSeen=true;
                 continue;
             }
@@ -131,8 +155,9 @@ contract CurveYieldMorphoPositionModule {
                 if(sig==ICYAdapter.erc20Transfer.selector||sig==ICYAdapter.erc20TransferFrom.selector){
                     if(d.length!=100) revert Invalid();
                     address recipient=_address(d,32);
+                    address token=_address(d,0);
+                    _snapshot(snap,token);
                     if(sig==ICYAdapter.erc20TransferFrom.selector){
-                        address token=_address(d,0);
                         uint256 amount=_word(d,64);
                         // Safe allowance authority is confined to the market's assets.
                         if((token!=loan&&token!=collateral)||amount==0||amount==type(uint256).max||
@@ -160,17 +185,59 @@ contract CurveYieldMorphoPositionModule {
             }else if(c.to==SWAPPER){
                 if(sig!=ICYSwapper.swapExactInput.selector||d.length!=196) revert Unauthorized();
                 _receiver(_address(d,128));
+                _snapshot(snap,_address(d,0));
+                _snapshot(snap,_address(d,32));
             }else{
                 // These calls originate from the public Bundler, never the Safe.
                 // Only ERC20 approval to the fixed router or transfer to a custody endpoint.
                 if(c.to==address(SAFE)||c.to==BUNDLER||c.to==address(MORPHO)||
                    c.to==address(this)||d.length!=68) revert Unauthorized();
                 address recipient=_address(d,0);
+                _snapshot(snap,c.to);
                 if(sig==ICYToken.approve.selector){
                     if(recipient!=SWAPPER||_word(d,32)!=type(uint256).max) revert Unauthorized();
                 }else if(sig==ICYToken.transfer.selector) _receiver(recipient);
                 else revert Unauthorized();
             }
+        }
+    }
+    // Deduplicated, transaction-local balance snapshots of the actual bundle
+    // assets. OmniSwapper is not a monitored account.
+    function _snapshot(Snapshot memory snap,address token) private view{
+        for(uint256 i;i<snap.count;++i) if(snap.entries[i].token==token) return;
+        snap.entries[snap.count++]=Balance(token,ICYToken(token).balanceOf(BUNDLER),
+            ICYToken(token).balanceOf(ADAPTER));
+    }
+
+    // Match Morpho's conservative health-check rounding and virtual shares.
+    function _position(bytes32 market,address oracle) private view returns(uint256 debt,uint256 value){
+        (,uint128 shares,uint128 collateral)=MORPHO.position(market,address(SAFE));
+        if(shares!=0){
+            (,,uint128 assets,uint128 totalShares,,)=MORPHO.market(market);
+            // uint128 shares * (uint128 assets + 1) < 2**256.
+            debt=1+(uint256(shares)*(uint256(assets)+1)-1)/(uint256(totalShares)+1e6);
+        }
+        value=uint256(collateral)*ICYOracle(oracle).price()/1e36;
+    }
+    function _guardLtv(bytes32 market,CYMarketParams memory p,uint256 debtBefore,uint256 valueBefore) private view{
+        (uint256 debt,uint256 value)=_position(market,p.oracle);
+        if(debt==0) return;
+        uint256 limit=p.lltv>LTV_BUFFER?p.lltv-LTV_BUFFER:0;
+        if(_productLe(debt,1e18,value,limit)) return;
+        // Above the limit: allow unchanged or improved LTV, including a
+        // partial deleverage. A previously debt-free position may not cross it.
+        if(debtBefore==0||!_productLe(debt,valueBefore,debtBefore,value)) revert LtvIncreased();
+    }
+    // Compare exact 512-bit products without rounding a ratio or overflowing.
+    function _productLe(uint256 a,uint256 b,uint256 c,uint256 d) private pure returns(bool ok){
+        assembly ("memory-safe"){
+            let l:=mul(a,b)
+            let lm:=mulmod(a,b,not(0))
+            let lh:=sub(sub(lm,l),lt(lm,l))
+            let r:=mul(c,d)
+            let rm:=mulmod(c,d,not(0))
+            let rh:=sub(sub(rm,r),lt(rm,r))
+            ok:=or(lt(lh,rh),and(eq(lh,rh),iszero(gt(l,r))))
         }
     }
     function _marketId(bytes memory d) private pure returns(bytes32 id){
