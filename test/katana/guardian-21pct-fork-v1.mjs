@@ -1,4 +1,4 @@
-// Guardian v67 live-fork harness v2; exact planner/encoder, fork-only sender adapter.
+// Guardian v67 live-fork harness v3 targeted depth boundary; exact planner/encoder, fork-only sender adapter.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {Interface, AbiCoder, keccak256, toUtf8Bytes, hexlify, toBeHex, JsonRpcProvider} from 'ethers';
@@ -177,11 +177,11 @@ try{
  report.realOracle=realOracle;report.routerFeeBps=fee;
  await req('anvil_impersonateAccount',[BOT]);await req('anvil_setBalance',[BOT,'0xde0b6b3a7640000']);
  let snap=await req('evm_snapshot');
- for(const [bps,a] of [[1990,0],[2100,4000],[2250,9500],[2330,10000],[2450,10000],[2800,10000]]){
+ for(const [bps,a] of [[2331,10000]]){
   await run('independent-'+bps,bps,a,{});assert(await req('evm_revert',[snap]));snap=await req('evm_snapshot');
  }
  const state={};
- for(const [bps,a] of [[2100,4000],[2100,4000],[2250,9500],[2450,10000]])await run('cumulative-'+bps,bps,a,state);
+ // Targeted positive pool-depth boundary follow-up; prior matrix is preserved in its completed artifact.
  report.status=report.cases.some(c=>c.errors.length)?'BEHAVIOR_FAILURES':'COMPLETE';
  if(report.status!=='COMPLETE')process.exitCode=1;
 }catch(e){report.error=String(e.stack||e);report.status='HARNESS_ERROR';process.exitCode=1}finally{output()}
