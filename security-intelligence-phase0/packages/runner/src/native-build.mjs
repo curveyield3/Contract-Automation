@@ -158,6 +158,7 @@ async function listBuildInfo(projectRoot, fsApi = fs) {
   const output = [];
   for (const absolute of await buildInfoFiles(projectRoot, fsApi)) {
     let optimizerRuns = null;
+    let settings = null;
     let solcVersion = null;
     let compilerInputSha256 = null;
     let compilerOutputSha256 = null;
@@ -166,6 +167,7 @@ async function listBuildInfo(projectRoot, fsApi = fs) {
     try {
       const parsed = JSON.parse(await fsApi.readFile(absolute, 'utf8'));
       optimizerRuns = parsed?.input?.settings?.optimizer?.runs ?? null;
+      settings = parsed?.input?.settings ?? null;
       solcVersion = parsed?.solcVersion ?? parsed?.solcLongVersion ?? null;
       compilerInputSha256 = parsed?.input ? createHash('sha256').update(JSON.stringify(parsed.input)).digest('hex') : null;
       compilerOutputSha256 = parsed?.output ? createHash('sha256').update(JSON.stringify(parsed.output)).digest('hex') : null;
@@ -180,6 +182,7 @@ async function listBuildInfo(projectRoot, fsApi = fs) {
       path: path.relative(projectRoot, absolute).split(path.sep).join('/'),
       sha256: await sha256File(absolute, fsApi),
       optimizerRuns,
+      settings,
       solcVersion,
       compilerInputSha256,
       compilerOutputSha256,
@@ -364,11 +367,38 @@ export async function compileRepoNativeHardhat({
 
   const vendorRootAdapter = await materializeVendorAdapter(projectRoot, { fsApi });
 
-  const compile = await runCommand({
-    command: 'npx',
-    args: ['--no-install', 'hardhat', 'compile'],
-    cwd: projectRoot
-  });
+  // Request compiler storage-layout metadata through Hardhat's resolved
+  // configuration, without editing the admitted configuration or source files.
+  const standalone=process.env.SECURITY_PREFLIGHT_OFFLINE_COMPILERS==='1'&&process.env.SECURITY_PREFLIGHT_LOCAL_ARCHIVE;
+  let layoutConfig=null;
+  let compile;
+  try {
+    const args=['--no-install','hardhat','compile'];
+    if(standalone&&['hardhat.config.js','hardhat.config.cjs'].includes(detected.config)){
+      const manifest=JSON.parse(await fsApi.readFile(path.join(projectRoot,'package.json'),'utf8'));
+      if(detected.config.endsWith('.cjs')||manifest.type!=='module'){
+        const name='.phase0-storage-layout.config.cjs';
+        layoutConfig=path.join(projectRoot,name);
+        const wrapper=[
+          'const original=require('+JSON.stringify('./'+detected.config)+');',
+          'const {extendConfig}=require("hardhat/config");',
+          'extendConfig(config=>{',
+          '  for(const compiler of [...config.solidity.compilers,...Object.values(config.solidity.overrides)]){',
+          '    const output=compiler.settings.outputSelection;',
+          '    output["*"]??={}; output["*"]["*"]??=[];',
+          '    if(!output["*"]["*"].includes("storageLayout"))output["*"]["*"].push("storageLayout");',
+          '  }',
+          '});',
+          'module.exports=original;'
+        ].join('\n');
+        await fsApi.writeFile(layoutConfig,wrapper,{flag:'wx'});
+        args.push('--config',name);
+      }
+    }
+    compile=await runCommand({command:'npx',args,cwd:projectRoot});
+  }finally{
+    if(layoutConfig)await fsApi.rm(layoutConfig,{force:true});
+  }
   if (!compile || compile.exitCode !== 0) throw commandFailure('Repository-native Hardhat compilation failed', compile);
 
   const buildInfo = await listBuildInfo(projectRoot, fsApi);
@@ -400,7 +430,7 @@ export async function compileRepoNativeHardhat({
       profile:'hardhat-native',
       compilerVersion:info.solcVersion,
       compilerPackage:'hardhat-build-info',
-      settings:{optimizer:{runs:info.optimizerRuns}},
+      settings:info.settings,
       compilerInputSha256:info.compilerInputSha256,
       compilerOutputSha256:info.compilerOutputSha256,
       sourceContents:Object.fromEntries((info.sourceNames??[]).map(name=>[name,null])),
