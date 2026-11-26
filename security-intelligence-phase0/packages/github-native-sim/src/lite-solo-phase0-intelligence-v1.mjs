@@ -13,6 +13,7 @@ import { writeReviewInventoryOutputsV1 } from './adr-review-inventory-v1.mjs';
 import { buildExecutionArtifactBundleV2 } from './phase0-execution-input-v2.mjs';
 import { compileWithPrivateCacheV1 } from './phase0-private-build-cache-v1.mjs';
 import { loadAuditScope, sourceIsInScope } from './phase0-audit-scope-v1.mjs';
+import { collectMaintenanceChecks } from './phase0-maintenance-checks-v1.mjs';
 
 // The outer workflow owns the hard wall-clock timeout. This helper reports
 // per-stage progress without changing compilation or evidence semantics.
@@ -1239,6 +1240,9 @@ async function main(){
     ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',deployConfigExecution]
   ];
   await withProgressStage('write-machine-evidence',async()=>{for(const [name,obj] of files)await fs.writeFile(path.join(out,name),JSON.stringify(obj,null,2)+'\n');});
+  try{
+    await withProgressStage('maintenance-checks',()=>collectMaintenanceChecks({request,build,bundle:executionBuildArtifacts,projectRoot:detected.absolute,auditScope,out}));
+  }catch(error){console.error('Independent maintenance evidence incomplete: '+String(error?.message??error));}
   process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},wake:{status:wake.status,findings:wake.findingCount??0,solidityUnits:wake.solidityUnitCount},mythril:{status:mythril.status,findings:mythril.findingCount??0,eligibleContracts:mythril.eligibleCount,completedContracts:mythril.completedCount},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},deployConfigExecution:{status:deployConfigExecution.status,attempts:deployConfigExecution.attempts.length,gaps:deployConfigExecution.gaps.length},outputs:files.map(([name])=>name)},null,2)+'\n');
 }
 
