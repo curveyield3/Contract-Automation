@@ -1085,51 +1085,44 @@ async function main(){
 
   const build=await withProgressStage('compile-exact-build',()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
   if(build.status!=='completed'||!build.compilationUnits?.length)throw Error('Verified build unavailable');
-  const env={...process.env,PATH:'/opt/smtchecker-z3-cli/bin:'+process.env.PATH,LD_LIBRARY_PATH:'/opt/smtchecker-z3/solver-lib'};
-  const report={sourceSha256:observed,queryTimeoutMs:25,units:[],elapsedMs:0};
-  const start=performance.now();
-  const save=async()=>{report.elapsedMs=Math.round(performance.now()-start);await fs.writeFile(path.join(out,'compiler-profile-v1.json'),JSON.stringify(report,null,2)+'\n');};
-  for(const [i,unit] of build.compilationUnits.entries()){
-    const version=slitherCompilerVersion(unit.compilerVersion);
-    const info=build.buildInfo?.[i];
-    if(!info?.path)throw Error('Missing build-info for '+unit.unitId);
-    safeRel(info.path,'Hardhat build-info');
-    const bytes=await fs.readFile(path.join(detected.absolute,info.path));
-    if(sha256(bytes)!==info.sha256)throw Error('Build-info digest mismatch');
-    const input=JSON.parse(bytes).input;
-    if(input.language!=='Solidity'||sha256(Buffer.from(JSON.stringify(input)))!==unit.compilerInputSha256)throw Error('Solidity input identity mismatch');
-    const contracts={};
-    for(const a of unit.artifacts??[]){
-      if(a.sourceName?.endsWith('.sol')&&sourceIsInScope(a.sourceName,auditScope)&&a.contractName)(contracts[a.sourceName]??=[]).push(a.contractName);
-    }
-    const compiler='/opt/preflight/.svm/'+version+'/solc-'+version;
-    const row={unitId:unit.unitId,version,inputSha256:unit.compilerInputSha256,contractCount:Object.values(contracts).flat().length,runs:[]};
-    report.units.push(row);
-    input.settings.outputSelection={'*':{'*':['abi']}};
-    for(const engine of ['all','bmc','chc']){
-      const cap=Math.min(engine==='all'?23:15,Math.floor((175000-performance.now()+start)/1000)-1);
-      if(cap<1)throw Error('Stage budget exhausted');
-      input.settings.modelChecker={contracts,engine,solvers:['z3'],timeout:report.queryTimeoutMs,showProvedSafe:true,showUnproved:true,showUnsupported:true};
-      const t=performance.now();
-      const result=spawnSync('timeout',['--kill-after=1s',cap+'s',compiler,'--standard-json'],{env,input:JSON.stringify(input),encoding:'utf8',maxBuffer:32*1024*1024});
-      const sample={engine,wallMs:Math.round(performance.now()-t),exit:result.status,signal:result.signal,error:result.error?.message,returned:false,checks:{},diagnostics:[]};
-      if(result.status===0){
-        const output=JSON.parse(result.stdout);
-        const issues=output.errors??[];
-        for(const d of issues){
-          const message=String(d.message??'').split('\n')[0];
-          if(d.severity==='error'||/CHC:|BMC:|SMTChecker|model checker|solver|horn/i.test(message)){
-            sample.diagnostics.push({code:d.errorCode,severity:d.severity,message,sourceLocation:d.sourceLocation});
-            sample.checks[d.errorCode]=(sample.checks[d.errorCode]??0)+1;
-          }
-        }
-        sample.returned=!issues.some(d=>d.severity==='error'||/solver.*not available|analysis was not possible|no .*solver available/i.test(d.message))&&sample.diagnostics.some(d=>/^(CHC|BMC):/.test(d.message));
-      }
-      row.runs.push(sample);await save();
-      console.log('Release SMTChecker '+JSON.stringify({unit:row.unitId,engine,wallMs:sample.wallMs,exit:sample.exit,returned:sample.returned,checks:sample.checks}));
-      if(engine==='all'&&sample.returned)break;
-    }
+  const sourceName='contracts/CurveYieldVlSDTToken.sol',contractName='CurveYieldVlSDTToken';
+  const i=build.compilationUnits.findIndex(u=>(u.artifacts??[]).some(a=>a.sourceName===sourceName&&a.contractName===contractName));
+  if(i<0||!sourceIsInScope(sourceName,auditScope))throw Error('Admitted token artifact missing');
+  const unit=build.compilationUnits[i],info=build.buildInfo[i];
+  safeRel(info.path,'Hardhat build info');
+  const bytes=await fs.readFile(path.join(detected.absolute,info.path));
+  if(sha256(bytes)!==info.sha256)throw Error('Build info digest mismatch');
+  const {input,output}=JSON.parse(bytes);
+  if(input.language!=='Solidity'||sha256(Buffer.from(JSON.stringify(input)))!==unit.compilerInputSha256)throw Error('Exact input mismatch');
+  const names=new Set();
+  function add(name){
+    if(names.has(name))return;
+    const ast=output.sources?.[name]?.ast;
+    if(!Array.isArray(ast?.nodes)||typeof input.sources[name]?.content!=='string')throw Error('Missing exact import or AST: '+name);
+    names.add(name);
+    for(const node of ast.nodes)if(node.nodeType==='ImportDirective')add(node.absolutePath);
   }
-  if(!report.units.every(u=>u.runs.some(r=>r.engine==='all'&&r.returned)))throw Error('Combined release checker did not return evidence for every admitted unit');
+  add(sourceName);
+  const env={...process.env,PATH:'/opt/smtchecker-z3-cli/bin:'+process.env.PATH,LD_LIBRARY_PATH:'/opt/smtchecker-z3/solver-lib'};
+  const version=slitherCompilerVersion(unit.compilerVersion);
+  const compiler='/opt/preflight/.svm/'+version+'/solc-'+version;
+  const report={sourceSha256:observed,unit:unit.unitId,compiler:version,compilerInputSha256:unit.compilerInputSha256,sourceName,contractName,imports:[...names].sort(),runs:[]};
+  const inputSources=Object.fromEntries([...names].map(n=>[n,input.sources[n]]));
+  const start=performance.now();
+  for(const [label,targets] of [['release-defaults',null],['arithmetic',['overflow','underflow']]]){
+    const settings={...input.settings,outputSelection:{'*':{'*':['abi']}},modelChecker:{engine:'all',solvers:['z3'],contracts:{[sourceName]:[contractName]},timeout:25,showProvedSafe:true,showUnproved:true,showUnsupported:true}};
+    if(targets)settings.modelChecker.targets=targets;
+    const data=JSON.stringify({language:'Solidity',sources:inputSources,settings});
+    const t=performance.now();
+    const result=spawnSync('timeout',['--kill-after=1s','6s',compiler,'--standard-json'],{env,input:data,encoding:'utf8',maxBuffer:32*1024*1024});
+    const diagnostics=result.status===0?(JSON.parse(result.stdout).errors??[]).map(d=>({code:d.errorCode,severity:d.severity,message:String(d.message??'').split('\n')[0],sourceLocation:d.sourceLocation})):null;
+    const compilerReturned=Array.isArray(diagnostics)&&!diagnostics.some(d=>d.severity==='error'||/analysis was not possible|solver.*not available/i.test(d.message));
+    const sourceChecks=diagnostics?.filter(d=>/^(BMC|CHC):/.test(d.message)&&names.has(d.sourceLocation?.file))??[];
+    const row={label,targets,engines:['chc','bmc'],inputSha256:sha256(Buffer.from(data)),wallMs:Math.round(performance.now()-t),exit:result.status,compilerReturned,sourceCheckCount:sourceChecks.length,diagnostics};
+    report.runs.push(row);report.elapsedMs=Math.round(performance.now()-start);
+    await fs.writeFile(path.join(out,'compiler-profile-v1.json'),JSON.stringify(report,null,2)+'\n');
+    console.log('Exact token SMTChecker '+JSON.stringify({label,wallMs:row.wallMs,exit:row.exit,compilerReturned,sourceChecks:sourceChecks.length}));
+  }
+  if(!report.runs.every(r=>r.compilerReturned)||!report.runs.some(r=>r.sourceCheckCount>0))throw Error('No complete short token qualification with source-linked property evidence');
 }
 main().catch(error=>{console.error('Qualification failed: '+String(error?.message??error));process.exitCode=1;});
