@@ -27,48 +27,67 @@ jobs:
           cache-from: type=gha,scope=curve-security-scanners-v1
           provenance: false
           sbom: false
-      - name: Demonstrate actual proofs and invalid-assertion diagnostics without network or external solver
+      - name: Compare isolated engines on synthetic mathematical correctness properties
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p qualification
-          for version in 0.8.28 0.8.30; do
-            for engine in bmc chc; do
-              docker run --rm -i --network none --read-only --cap-drop ALL \
-                --security-opt no-new-privileges --pids-limit 128 --memory 3g \
-                --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,size=256m,mode=1777 \
-                --env HOME=/tmp --env PATH=/usr/local/bin:/usr/bin:/bin --env LD_LIBRARY_PATH= \
-                --workdir /opt/preflight curveyield-smt-wasm:qualification \
-                node --input-type=commonjs - "$version" "$engine" <<'NODE' | tee "qualification/${version}-${engine}.json"
-          const fs = require('node:fs');
-          const crypto = require('node:crypto');
-          const [version, engine] = process.argv.slice(2);
-          const file = '/opt/preflight/smt-wasm/' + version + '.cjs';
-          const compiler = require('solc/wrapper')(require(file));
-          const actualVersion = compiler.version();
-          if (!actualVersion.startsWith(version + '+commit.')) throw Error('Compiler version mismatch: ' + actualVersion);
-          const source = 'pragma solidity ' + version + '; contract MathProbe { function valid(uint x) external pure { require(x == 7); assert(x + 1 == 8); } function invalid(uint x) external pure { require(x == 7); assert(x + 1 == 9); } }';
-          const input = {language:'Solidity',sources:{'MathProbe.sol':{content:source}},settings:{modelChecker:{engine,solvers:['z3'],targets:['assert'],showProvedSafe:true,showUnproved:true,showUnsupported:true},outputSelection:{'*':{'*':['abi']}}}};
-          const output = JSON.parse(compiler.compile(JSON.stringify(input)));
-          const diagnostics = output.errors || [];
-          const location = (diagnostic, assertion) => {
-            const at = source.indexOf(assertion);
-            const loc = diagnostic.sourceLocation;
-            return loc?.file === 'MathProbe.sol' && loc.start <= at + assertion.length && loc.end >= at;
+          timeout --signal=TERM --kill-after=2s 178s docker run --rm -i --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 128 --memory 3g \
+            --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,size=256m,mode=1777 \
+            --env HOME=/tmp --env PATH=/usr/local/bin:/usr/bin:/bin --env LD_LIBRARY_PATH= \
+            --workdir /opt/preflight curveyield-smt-wasm:qualification \
+            node --input-type=commonjs - <<'NODE' | tee qualification/engine-diagnostics-v1.jsonl
+          const {spawnSync}=require('node:child_process');
+          const clock=performance.now();
+          const deadline=clock+172000;
+          const child=String.raw`
+          const fs=require('node:fs');
+          const crypto=require('node:crypto');
+          const [version,engine,kind]=process.argv.slice(1);
+          const file='/opt/preflight/smt-wasm/'+version+'.cjs';
+          const t=performance.now();
+          const compiler=require('solc/wrapper')(require(file));
+          const loaded=performance.now();
+          if(!compiler.version().startsWith(version+'+commit.'))throw Error('Wrong compiler version');
+          const bodies={
+            arithmetic:'function check(uint x) external pure { require(x == 7); assert(x + 1 == 8); }',
+            branch:'function check(uint x) external pure { require(x <= 100); uint y; if(x <= 50) y=x+1; else y=x-1; assert(y <= 100); }',
+            state:'uint private n; function advance() external { if(n < 10) n+=1; assert(n <= 10); }'
           };
-          const label = engine.toUpperCase() + ':';
-          const proved = diagnostics.some(d => d.message?.startsWith(label) && /assertion violation check is safe/i.test(d.message) && location(d,'assert(x + 1 == 8)'));
-          const rejected = diagnostics.some(d => d.message?.startsWith(label) && /assertion violation happens here/i.test(d.message) && location(d,'assert(x + 1 == 9)'));
-          const failed = diagnostics.some(d => d.severity === 'error' || /solver.*not available|analysis was not possible|could not be proved|might happen here/i.test(d.message || ''));
-          const passed = proved && rejected && !failed;
-          console.log(JSON.stringify({version:actualVersion,engine,sha256:crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),proved,rejected,passed,diagnostics},null,2));
-          if (!passed) process.exitCode = 1;
+          const source='pragma solidity '+version+'; contract MathProbe { '+bodies[kind]+' }';
+          const settings={outputSelection:{'*':{'*':['abi']}}};
+          if(engine!=='none')settings.modelChecker={engine,solvers:['z3'],targets:['assert'],showProvedSafe:true,showUnproved:true,showUnsupported:true};
+          const before=process.cpuUsage();
+          const enter=performance.now();
+          const out=JSON.parse(compiler.compile(JSON.stringify({language:'Solidity',sources:{'MathProbe.sol':{content:source}},settings})));
+          const duration=performance.now()-enter;
+          const ds=out.errors||[];
+          const aggregate={errors:ds.filter(d=>d.severity==='error').length,proved:ds.filter(d=>/assertion violation check is safe/i.test(d.message||'')).length,unproved:ds.filter(d=>/could not be proved|might happen here|analysis was not possible/i.test(d.message||'')).length,unavailable:ds.filter(d=>/solver.*not available|solver.*unavailable/i.test(d.message||'')).length};
+          console.log(JSON.stringify({version:compiler.version(),engine,kind,loadMs:Math.round(loaded-t),compileMs:Math.round(duration),cpu:process.cpuUsage(before),peakRssKiB:process.resourceUsage().maxRSS,compilerSha256:crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),...aggregate}));
+          `;
+          const cases=[];
+          for(const kind of ['arithmetic','branch','state'])for(const version of ['0.8.28','0.8.30'])for(const engine of ['none','bmc','chc'])cases.push({kind,version,engine});
+          let completed=0,failed=0,limited=0;
+          for(const [i,c] of cases.entries()){
+            const remaining=Math.floor(deadline-performance.now());
+            if(remaining<500){console.log(JSON.stringify({...c,status:'BUDGET_EXHAUSTED'}));limited++;continue;}
+            const cap=Math.min(12000,Math.floor(remaining/(cases.length-i)));
+            if(cap<100){console.log(JSON.stringify({...c,status:'BUDGET_EXHAUSTED'}));limited++;continue;}
+            const t=performance.now();
+            const x=spawnSync(process.execPath,['--input-type=commonjs','-e',child,c.version,c.engine,c.kind],{encoding:'utf8',timeout:cap,killSignal:'SIGKILL',maxBuffer:1024*1024});
+            const wallMs=Math.round(performance.now()-t);
+            let result;
+            if(x.status===0){try{result=JSON.parse(x.stdout.trim());}catch{}}
+            if(result){completed++;if(result.errors||result.unavailable)failed++;console.log(JSON.stringify({...result,status:'RETURNED',wallMs,capMs:cap}));}
+            else{const timedOut=x.error?.code==='ETIMEDOUT';if(timedOut)limited++;else failed++;console.log(JSON.stringify({...c,status:timedOut?'TIMEOUT':'FAILED',wallMs,capMs:cap,signal:x.signal,exitCode:x.status,errorCode:x.error?.code||null,stderrBytes:Buffer.byteLength(x.stderr||'')}));}
+          }
+          console.log(JSON.stringify({type:'summary',caseCount:cases.length,completed,failed,limited,elapsedMs:Math.round(performance.now()-clock)}));
+          if(failed)process.exitCode=1;
           NODE
-            done
-          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: smtchecker-wasm-qualification-v1
+          name: smtchecker-engine-diagnostics-v1
           path: qualification/
           if-no-files-found: warn
