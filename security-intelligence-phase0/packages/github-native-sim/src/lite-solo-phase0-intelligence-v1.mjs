@@ -2,7 +2,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
 import unzipper from 'unzipper';
 import { checkoutExactSource, runProcess } from './execution.mjs';
 import { buildProject } from '../../runner/src/build-dispatch.mjs';
@@ -1137,10 +1136,6 @@ async function main(){
       limitations:[detail],requiredSemanticReview:true};
     console.error('Mythril symbolic analysis incomplete: '+detail);
   }
-  // Bind reviewer report wrappers to the exact admitted archive and build; native detector records stay unchanged.
-  const reviewSourceIdentity={requestId:request.requestId,repository:request.source.repository,
-    commit:request.source.commit,archivePath:request.source.archivePath,archiveSha256Observed:observed,
-    buildConfigurationDigestSha256:executionBuildArtifacts.buildConfigurationDigestSha256};
   // Fourth scanner: independent, source-only remediation review. Do not send
   // this report into Source Intelligence, formal jobs or automated reproduction.
   // Run automatically for admitted defensive source reviews; no opt-in flag.
@@ -1208,211 +1203,7 @@ async function main(){
       report.error=String(error?.message??error);
       console.error('Semgrep independent review incomplete: '+report.error);
     }finally{
-      await fs.writeFile(path.join(reportDir,'SEMGREP_v1.json'),JSON.stringify({...report,reviewSourceIdentity},null,2)+'\n');
-    }
-  }
-  // Compiler-native arithmetic and assertion review of CurveYield source.
-  // Separate reviewer evidence only, without transaction counterexamples or downstream automation.
-  {
-    const reportDir=path.join(path.dirname(out),'smtchecker-review');
-    const report={schemaVersion:'curveyield-smtchecker-correctness-review-v1',backend:'solidity-smtchecker',
-      source:request.source,authoritativeFinding:false,componentStatus:'FAILED',
-      engines:['CHC','BMC'],solver:'z3',targets:['assert','underflow','overflow','divByZero'],
-      queryTimeoutMilliseconds:1000,unitWallTimeoutMilliseconds:90000,
-      units:[],limitations:[]};
-    await fs.mkdir(reportDir,{recursive:true});
-    try{
-      await withProgressStage('smtchecker-correctness-review',async()=>{
-        if(!String(request.source.repository).toLowerCase().startsWith('curveyield3/')){
-          report.componentStatus='NOT_APPLICABLE';
-          report.limitations.push('Not a CurveYield source repository');
-          return;
-        }
-        const units=Array.isArray(build.compilationUnits)&&build.compilationUnits.length
-          ?build.compilationUnits:[build];
-        const stageDir=path.join(out,'work','smtchecker');
-        await fs.mkdir(stageDir,{recursive:true});
-        const modelChecker={engine:'all',solvers:['z3'],targets:report.targets,
-          timeout:report.queryTimeoutMilliseconds,showProvedSafe:true,showUnproved:true,showUnsupported:true};
-        const probes=new Map();
-        // 0.8.28 uses the shared library; 0.8.29+ discovers the CLI on PATH.
-        // Put the compiler-specific solver first, never inherit Mythril's z3.
-        const compilerEnv={...process.env,HOME:'/tmp',
-          PATH:'/opt/smtchecker-z3-cli/bin:'+String(process.env.PATH??''),
-          LD_LIBRARY_PATH:'/opt/smtchecker-z3/solver-lib'};
-        report.solverInstallation={legacySharedLibraryVersion:'4.12.1',
-          legacySharedLibraryPath:await fs.realpath('/opt/smtchecker-z3/solver-lib/libz3.so.4.12'),
-          executablePath:'/opt/smtchecker-z3-cli/bin/z3',
-          executableVersion:null};
-        function invokeNative(compiler,args,input,timeout){
-          return new Promise((resolve,reject)=>{
-            const started=Date.now();
-            let healthTimer;
-            const child=execFile(compiler,args,{cwd:stageDir,env:compilerEnv,encoding:'utf8',
-              timeout,killSignal:'SIGKILL',maxBuffer:16*1024*1024},(error,stdout)=>{
-              clearInterval(healthTimer);
-              if(error){
-                const elapsed=Date.now()-started;
-                const failure=error.code==='ERR_CHILD_PROCESS_STDIO_MAXBUFFER'?'OUTPUT_LIMIT':
-                  error.killed&&error.signal==='SIGKILL'&&elapsed>=timeout?'WALL_TIMEOUT':'NATIVE_PROCESS_FAILURE';
-                reject(Error('Compiler invocation failed: '+failure+' elapsed_ms='+elapsed+
-                  ' exit_code='+String(error.code??'none')+' signal='+String(error.signal??'none')));
-              }else resolve(stdout);
-            });
-            // Log process health, not source, solver queries or witness output.
-            if(timeout>=60000&&child.pid){
-              healthTimer=setInterval(async()=>{
-                try{
-                  const stat=await fs.readFile('/proc/'+child.pid+'/stat','utf8');
-                  const fields=stat.slice(stat.lastIndexOf(')')+2).trim().split(/\s+/);
-                  console.error('SMTChecker process health: elapsed_ms='+(Date.now()-started)+
-                    ' state='+fields[0]+' cpu_ticks='+(Number(fields[11])+Number(fields[12]))+
-                    ' rss_pages='+fields[21]);
-                }catch{} // Process may have already exited.
-              },10000);
-              healthTimer.unref?.();
-            }
-            child.stdin?.on('error',()=>{}); // process completion owns failure reporting
-            child.stdin?.end(input);
-          });
-        }
-        async function invoke(compiler,input,timeout){
-          const stdout=await invokeNative(compiler,['--standard-json'],JSON.stringify(input),timeout);
-          const parsed=JSON.parse(stdout);
-          const diagnostics=parsed.errors??[];
-          if(!Array.isArray(diagnostics))throw Error('Invalid compiler diagnostics');
-          if(diagnostics.some(d=>d.severity==='error'))
-            throw Error('Compiler rejected model-checker input: '+diagnostics.filter(d=>d.severity==='error').map(d=>String(d.errorCode??d.type)).join(','));
-          if(diagnostics.some(d=>/solver.*not available|analysis was not possible|no .*solver available|not compiled with.*(?:z3|smt)/i.test(String(d.message))))
-            throw Error('SMT solver unavailable for this compiler');
-          return diagnostics;
-        }
-        const cliVersion=await invokeNative(report.solverInstallation.executablePath,['--version'],undefined,10000);
-        report.solverInstallation.executableVersion=cliVersion.trim();
-        if(!/^Z3 version 4\.13\.3(?:\s|$)/.test(cliVersion))
-          throw Error('Incorrect SMTChecker Z3 executable version');
-        console.error('SMTChecker solver installation: '+JSON.stringify(report.solverInstallation));
-        for(const [index,unit] of units.entries()){
-          const names=[...new Set([...Object.keys(unit.sourceContents??{}),...Object.keys(unit.sourceAsts??{}),
-            ...(unit.artifacts??[]).map(a=>a?.sourceName).filter(Boolean)])].filter(n=>typeof n==='string'&&n.endsWith('.sol'));
-          const inScope=names.filter(n=>sourceIsInScope(n,auditScope));
-          if(!inScope.length)continue;
-          const version=String(unit.compilerVersion??build.compilerVersion??'');
-          const rec={unitId:unit.unitId??String(index),compilerVersion:version,sourceCount:inScope.length,
-            status:'FAILED',sourceDigests:[],diagnosticCounts:{proved:0,unproved:0,warning:0,unsupported:0},diagnostics:[]};
-          report.units.push(rec);
-          const unitStarted=Date.now();
-          let analysisStarted=null,analysisInput=null,analysisCompiler=null;
-          try{
-            const match=version.match(/^0\.8\.(\d+)$/);
-            if(!match||Number(match[1])<14){
-              rec.status='NOT_APPLICABLE';
-              rec.reason='Modern Solidity model-checker configuration and installed Z3 ABI not supported for this version';
-              continue;
-            }
-            const compiler=path.join('/opt/preflight/.svm',version,'solc-'+version);
-            if(!probes.has(version)){
-              const actual=await invokeNative(compiler,['--version'],undefined,10000);
-              if(!actual.includes('Version: '+version+'+'))
-                throw Error('Exact native compiler unavailable');
-              const engineProbes={};
-              for(const engine of ['chc','bmc']){
-                const probe=await invoke(compiler,{language:'Solidity',sources:{'CompilerCapability.sol':{
-                  content:'// SPDX-License-Identifier: UNLICENSED\npragma solidity >=0.8.14; contract CompilerCapability { function f(uint256 x) external pure { require(x < 10); assert(x + 1 <= 10); } }'}},
-                  settings:{modelChecker:{...modelChecker,engine,targets:['assert']},outputSelection:{'*':{'*':['abi']}}}},20000);
-                const proved=probe.some(d=>{
-                  const message=String(d.message??'');
-                  return message.startsWith(engine.toUpperCase()+':')&&
-                    /check is safe|proved safe/i.test(message)&&!/not proved|unproved|could not/i.test(message);
-                });
-                engineProbes[engine]=proved?'PROVED_SAFE':'FAILED';
-                console.error('SMTChecker engine capability: '+JSON.stringify({compilerVersion:version,engine,status:engineProbes[engine]}));
-                if(!proved)throw Error('Compiler capability probe did not prove safe assertion for '+engine);
-              }
-              probes.set(version,engineProbes);
-            }
-            rec.solverProbe='PROVED_SAFE';
-            rec.engineProbes=probes.get(version);
-            rec.solverMode=Number(match[1])>=29?'EXECUTABLE':'SHARED_LIBRARY';
-            const sources=Object.create(null);
-            for(const name of names.sort()){
-              safeRel(name.replace(/^\.\//,''),'SMTChecker source unit');
-              const bytes=typeof unit.sourceContents?.[name]==='string'
-                ?Buffer.from(unit.sourceContents[name],'utf8')
-                :await fs.readFile(await resolveCompiledSourceFile(detected.absolute,name));
-              sources[name]={content:bytes.toString('utf8')};
-              rec.sourceDigests.push({sourceName:name,sha256:sha256(bytes)});
-            }
-            const contracts=Object.create(null);
-            for(const artifact of unit.artifacts??[]){
-              if(inScope.includes(artifact.sourceName)&&typeof artifact.contractName==='string'){
-                (contracts[artifact.sourceName]??=[]).push(artifact.contractName);
-              }
-            }
-            if(!Object.keys(contracts).length)throw Error('No exact in-scope compiled contract identities');
-            const settings={};
-            for(const key of ['remappings','optimizer','evmVersion','viaIR','libraries']){
-              if(unit.settings?.[key]!==undefined)settings[key]=unit.settings[key];
-            }
-            settings.modelChecker={...modelChecker,contracts};
-            settings.outputSelection={'*':{'*':['abi']}};
-            const input={language:'Solidity',sources,settings};
-            rec.inputSha256=sha256(Buffer.from(JSON.stringify(input),'utf8'));
-            rec.contractCount=Object.values(contracts).reduce((sum,entries)=>sum+entries.length,0);
-            rec.totalSourceCount=names.length;
-            rec.inputBytes=Buffer.byteLength(JSON.stringify(input),'utf8');
-            rec.preparationMilliseconds=Date.now()-unitStarted;
-            analysisInput=input;analysisCompiler=compiler;analysisStarted=Date.now();
-            console.error('SMTChecker unit start: '+JSON.stringify({unitId:rec.unitId,compilerVersion:version,
-              totalSourceCount:rec.totalSourceCount,sourceCount:rec.sourceCount,contractCount:rec.contractCount,
-              inputBytes:rec.inputBytes,preparationMilliseconds:rec.preparationMilliseconds}));
-            const diagnostics=await invoke(compiler,input,report.unitWallTimeoutMilliseconds);
-            rec.analysisMilliseconds=Date.now()-analysisStarted;
-            for(const d of diagnostics){
-              // Keep correctness status and diagnostic identity, not generated witnesses.
-              const message=String(d.message??'');
-              if(!/^(?:CHC|BMC):|SMTChecker|model checker|model checking/i.test(message))continue;
-              const kind=/check is safe|proved safe/i.test(message)&&!/unproved|not proved|could not/i.test(message)?'proved':
-                /unproved|not proved|could not|might happen|might be|unknown|timeout/i.test(message)?'unproved':
-                /unsupported|not supported/i.test(message)?'unsupported':'warning';
-              rec.diagnosticCounts[kind]++;
-              rec.diagnostics.push({kind,engine:/^CHC:/.test(message)?'CHC':/^BMC:/.test(message)?'BMC':null,
-                errorCode:d.errorCode??null,severity:d.severity??null});
-            }
-            // Execution completion is independent of the diagnostic outcome.
-            // Unproved properties and warnings are review candidates, not scanner failures.
-            rec.status='COMPLETED';
-          }catch(error){
-            rec.error=String(error?.message??error);
-            if(analysisStarted!==null)rec.analysisMilliseconds=Date.now()-analysisStarted;
-            console.error('SMTChecker unit incomplete: '+JSON.stringify({unitId:rec.unitId,analysisMilliseconds:rec.analysisMilliseconds,error:rec.error}));
-            // On a compiler wall failure compare identical compilation input with
-            // model checking disabled. This diagnostic compiles only; no new analysis.
-            if(analysisInput&&analysisCompiler&&/WALL_TIMEOUT|OUTPUT_LIMIT/.test(rec.error)){
-              const baselineStarted=Date.now();
-              try{
-                const baseline={...analysisInput,settings:{...analysisInput.settings,modelChecker:{engine:'none'}}};
-                await invoke(analysisCompiler,baseline,20000);
-                rec.compilerOnlyDiagnostic={status:'COMPLETED',elapsedMilliseconds:Date.now()-baselineStarted};
-              }catch(baselineError){
-                rec.compilerOnlyDiagnostic={status:'FAILED',elapsedMilliseconds:Date.now()-baselineStarted,
-                  error:String(baselineError?.message??baselineError)};
-              }
-              console.error('SMTChecker compiler-only diagnostic: '+JSON.stringify({unitId:rec.unitId,...rec.compilerOnlyDiagnostic}));
-            }
-          }finally{
-            rec.unitElapsedMilliseconds=Date.now()-unitStarted;
-          }
-        }
-        report.componentStatus=!report.units.length||report.units.every(u=>u.status==='NOT_APPLICABLE')?'NOT_APPLICABLE':
-          report.units.some(u=>u.status==='FAILED')?'FAILED':
-          report.units.some(u=>u.status!=='COMPLETED')?'COMPLETED_WITH_LIMITATIONS':'COMPLETED';
-      });
-    }catch(error){report.error=String(error?.message??error);console.error('SMTChecker review incomplete: '+report.error);}
-    finally{
-      await fs.writeFile(path.join(reportDir,'SMTCHECKER_v1.json'),JSON.stringify({...report,reviewSourceIdentity},null,2)+'\n');
-      console.error('SMTChecker review status: '+JSON.stringify({componentStatus:report.componentStatus,
-        units:report.units.map(u=>({compilerVersion:u.compilerVersion,status:u.status,solverProbe:u.solverProbe,diagnosticCounts:u.diagnosticCounts,error:u.error}))}));
+      await fs.writeFile(path.join(reportDir,'SEMGREP_v1.json'),JSON.stringify(report,null,2)+'\n');
     }
   }
   const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
@@ -1440,9 +1231,9 @@ async function main(){
     ['BUILD_AND_SOURCE_IDENTITY_v1.json',buildIdentity],
     ['PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json',executionBuildArtifacts],
     ['SBOM_v1.json',sbom],
-    ['SLITHER_v1.json',{...slither,reviewSourceIdentity}],
-    ['WAKE_v1.json',{...wake,reviewSourceIdentity}],
-    ['MYTHRIL_v1.json',{...mythril,reviewSourceIdentity}],
+    ['SLITHER_v1.json',slither],
+    ['WAKE_v1.json',wake],
+    ['MYTHRIL_v1.json',mythril],
     ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence],
     ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness],
     ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',deployConfigExecution]

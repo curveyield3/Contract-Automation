@@ -1,36 +1,13 @@
 {
-  "schemaVersion": "smtchecker-installation-qualification-v1",
-  "requestId": "smtchecker-native-qualification-v1",
-  "scope": "pinned upstream benign fixtures only",
+  "schemaVersion": "smtchecker-wasm-qualification-v1",
+  "requestId": "smtchecker-fresh-wasm-installation-v1",
   "compilers": [
     "0.8.28",
     "0.8.30"
   ],
-  "upstreamRef": "v0.8.30",
-  "fixtures": [
-    {
-      "name": "internal_call_with_assertion_1.sol",
-      "upstreamPath": "test/libsolidity/smtCheckerTests/functions/internal_call_with_assertion_1.sol",
-      "blob": "f42bdb7dc3f500d06522626b9ed46d42f187cbc1",
-      "engine": "chc"
-    },
-    {
-      "name": "simple_if.sol",
-      "upstreamPath": "test/libsolidity/smtCheckerTests/bmc_coverage/branches_with_return/simple_if.sol",
-      "blob": "3c9ff6097af725847acd3a283f784c0518362903",
-      "engine": "bmc"
-    },
-    {
-      "name": "loop_basic_for.sol",
-      "upstreamPath": "test/libsolidity/smtCheckerTests/invariants/loop_basic_for.sol",
-      "blob": "dcc731bf8e2036a5913c7a5660902f81bcabc473",
-      "engine": "chc"
-    },
-    {
-      "name": "branches_assert_condition_1.sol",
-      "upstreamPath": "test/libsolidity/smtCheckerTests/control_flow/branches_assert_condition_1.sol",
-      "blob": "229a93ddc2aa204fa1eedd0ce7bffe8a0a2d4a76",
-      "engine": "all"
-    }
-  ]
+  "engines": [
+    "bmc",
+    "chc"
+  ],
+  "scope": "Mathematical compiler installation qualification only; no contract archive or deployment"
 }
