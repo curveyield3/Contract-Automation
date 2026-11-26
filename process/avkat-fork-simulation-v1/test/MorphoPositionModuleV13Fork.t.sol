@@ -93,12 +93,6 @@ contract MorphoPositionModuleV13Fork {
         require(fee<=2000,"FEE_LAYOUT");
         return gross-gross*fee/10000;
     }
-    function _directRoute() private {
-        // Fork-only configuration of one multihop route using the already configured pools.
-        if(router.routeFor(WE,US).length==0){
-            vm.prank(DAO);router.setRoute(WE,US,abi.encodePacked(WE,uint24(500),W,uint24(500),UC,uint24(100),US));
-        }
-    }
     function _bundle(bytes32 id,uint256 bps,bool existingRoutes) private returns(bytes memory data,uint256 debt,uint256 col,uint256 shares){
         CYMarketParams memory p=mo.idToMarketParams(id);
         mo.accrueInterest(p);
@@ -163,7 +157,7 @@ contract MorphoPositionModuleV13Fork {
         ICYPrimary.LoopUp memory p=ICYPrimary.LoopUp(cap,0,bad?MAX:rate,0,block.timestamp+600);
         return abi.encodeCall(ICYPrimary.atomicLoopUp,(pre,p));
     }
-    function _fixtureMarket() private returns(bytes32 id){
+    function _fixtureMarket(uint256 borrowAssets) private returns(bytes32 id){
         // Only the test contract's fork-only ETH is seeded. Actual WETH, vbUSDC,
         // router and Morpho are used. A distinct oracle identifies the fixture market.
         CYMarketParams memory orig=mo.idToMarketParams(WE_ID);
@@ -171,7 +165,7 @@ contract MorphoPositionModuleV13Fork {
         V13Weth(W).deposit{value:0.06 ether}();
         require(ICYToken(W).approve(ROUTER,MAX),"FIXTURE_ROUTER_APPROVAL");
         uint256 usdc=router.swapExactInput(W,UC,0.02 ether,router.twapMinimumOut(W,UC,0.02 ether),address(this),block.timestamp+600);
-        CYMarketParams memory p=CYMarketParams(UC,W,address(new V13FixtureOracle(1600e27)),orig.irm,77e16);
+        CYMarketParams memory p=CYMarketParams(UC,W,address(new V13FixtureOracle(1600e24)),orig.irm,77e16);
         id=keccak256(abi.encode(p));mo.createMarket(p);
         require(ICYToken(UC).approve(MORPHO,MAX),"FIXTURE_LOAN_APPROVAL");
         mo.supply(p,usdc,0,address(this),"");
@@ -179,15 +173,14 @@ contract MorphoPositionModuleV13Fork {
         vm.startPrank(SAFE);
         require(ICYToken(W).approve(MORPHO,MAX),"FIXTURE_COLLATERAL_APPROVAL");
         mo.supplyCollateral(p,0.006 ether,SAFE,"");
-        mo.borrow(p,4e6,0,SAFE,address(this));
+        mo.borrow(p,borrowAssets,0,SAFE,address(this));
         mod.setMarket(id,true);
         vm.stopPrank();
         emit log_string("FORK_FIXTURE: WETH/vbUSDC with synthetic fixed oracle; actual Morpho and DEX");
     }
     function _migration(uint256 bps,uint256 cap,bool second,uint256 threshold,bool synthetic,bool rollback) private {
-        _directRoute();
         bytes32 other;
-        if(second)other=_fixtureMarket();
+        if(second)other=_fixtureMarket(4e6);
         // Configure desired production target only on the isolated fork for modeled discount cases.
         if(synthetic){
             vm.prank(SAFE);primary.setPolicy(767e15,500 ether);
@@ -211,7 +204,7 @@ contract MorphoPositionModuleV13Fork {
         emit log_named_uint("minAvkatPerKatWad",rate);
         CurveYieldMorphoPositionModule.SourceBundle[] memory bundles=new CurveYieldMorphoPositionModule.SourceBundle[](second?2:1);
         (uint256 b0,uint256 c0)=_pos(WE_ID);
-        (bytes memory first,,uint256 col0,uint256 sh0)=_bundle(WE_ID,bps,false);
+        (bytes memory first,,uint256 col0,uint256 sh0)=_bundle(WE_ID,bps,true);
         bundles[0]=CurveYieldMorphoPositionModule.SourceBundle(WE_ID,first);
         uint256 b1;uint256 c1;uint256 col1;uint256 sh1;
         if(second){
@@ -220,7 +213,9 @@ contract MorphoPositionModuleV13Fork {
             (secondData,,col1,sh1)=_bundle(other,bps,false);
             bundles[1]=CurveYieldMorphoPositionModule.SourceBundle(other,secondData);
         }
+        mo.accrueInterest(dp);
         (uint256 destB,uint256 destC)=_pos(AV_ID);
+        uint256 destDebtBefore=_debt(AV_ID,destB);
         uint256 us0=_balance(US,SAFE);uint256 kat0=_balance(KAT,SAFE);uint256 uc0=_balance(UC,SAFE);
         _report("MIGRATION_BEFORE",WE_ID);
         bytes memory loopData=_loopData(cap,rate,second,rollback);
@@ -240,6 +235,7 @@ contract MorphoPositionModuleV13Fork {
         (b,c)=_pos(AV_ID);
         require(b>destB&&c>destC,"DESTINATION_DID_NOT_LOOP");
         require(primary.ltvOf()<=primary.targetLtv(),"DEST_LTV");
+        emit log_named_uint("destinationDebtIncreaseKAT",_debt(AV_ID,b)-destDebtBefore);
         emit log_named_uint("destinationBorrowSharesIncrease",b-destB);
         emit log_named_uint("destinationCollateralIncrease",c-destC);
         _report("MIGRATION_AFTER",WE_ID);
@@ -252,11 +248,19 @@ contract MorphoPositionModuleV13Fork {
     function test_liveWeETH_25pct() public {_standalone(WE_ID,2500,true);}
     function test_liveWeETH_50pct() public {_standalone(WE_ID,5000,true);}
     function test_liveWeETH_full() public {_standalone(WE_ID,10000,true);}
-    function test_fixtureWeth_25pct() public {_standalone(_fixtureMarket(),2500,false);}
-    function test_fixtureWeth_full() public {_standalone(_fixtureMarket(),10000,false);}
+    function test_fixtureWeth_25pct() public {_standalone(_fixtureMarket(4e6),2500,false);}
+    function test_fixtureWeth_full() public {_standalone(_fixtureMarket(4e6),10000,false);}
+    function test_fixtureWeth_highLtv_50pct() public {_standalone(_fixtureMarket(7360000),5000,false);}
+    function test_fixtureWeth_highLtv_full() public {_standalone(_fixtureMarket(7360000),10000,false);}
     function test_migrate_10pct_1KAT() public {_migration(1000,1 ether,false,0,false,false);}
     function test_migrate_50pct_5KAT() public {_migration(5000,5 ether,false,0,false,false);}
     function test_migrate_full_20KAT() public {_migration(10000,20 ether,false,0,false,false);}
+    function test_migrate_full_500KAT() public {_migration(10000,500 ether,false,0,false,false);}
+    function test_migrate_target767_smallSeed_500KAT() public {
+        vm.prank(SAFE);primary.setPolicy(767e15,500 ether);
+        _migration(100,500 ether,false,0,false,false);
+        require(primary.ltvOf()>=755e15&&primary.ltvOf()<=767e15,"TARGET_NOT_APPROACHED");
+    }
     function test_migrate_twoMarkets_50pct_50KAT() public {_migration(5000,50 ether,true,0,false,false);}
     function test_modeled22pct_discount_tier21_50pct() public {_migration(5000,20 ether,false,2100,true,false);}
     function test_modeled24pct_discount_tier23_full() public {_migration(10000,100 ether,true,2300,true,false);}

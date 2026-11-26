@@ -301,7 +301,7 @@ jobs:
           set -euo pipefail
           test -n "$UPSTREAM_RPC"
           test "$(cast chain-id --rpc-url "$UPSTREAM_RPC")" = 747474
-          FORK_BLOCK=$(cast block-number --rpc-url "$UPSTREAM_RPC")
+          FORK_BLOCK=48950390
           echo "CY_V13_FORK_BLOCK $FORK_BLOCK"
           cast block "$FORK_BLOCK" --field hash --rpc-url "$UPSTREAM_RPC"
           root="$(mktemp -d)"
