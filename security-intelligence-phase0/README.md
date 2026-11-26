@@ -18,6 +18,10 @@ Mythril 0.24.8 runs offline bytecode-level symbolic execution on every executabl
 
 The existing collector emits `SLITHER_v1.json`, `WAKE_v1.json` and `MYTHRIL_v1.json` separately. Semgrep 1.187.0 executes automatically against the in-scope source in the same isolated collector and publishes `SEMGREP_v1.json` as a separate remediation-review artifact; its findings are not passed to automated reproduction. The Semgrep report records its own status and coverage. `WAKE_v1.json` includes detector descriptions and source locations, impact, confidence, suppressed flags, compilation-unit coverage and errors. `PREFLIGHT_MANIFEST_v1.json` records `wakeStatus`, Wake findings and any incomplete scanner warnings; collection is not complete when Wake or Mythril fails on an eligible Solidity project. Static detections are investigation leads, never automatic confirmed vulnerabilities.
 
+## SMTChecker installation qualification
+
+The source-blind image includes the native Z3 dependencies qualified in GitHub Actions run 45825502962: Z3 4.12.1 shared library for solc 0.8.28 and Z3 4.13.3 executable for solc 0.8.30. The isolated installation check uses the existing upstream mathematical fixtures before the source ZIP enters the collector. It explicitly selects the dedicated Z3 paths and requires positive proof results; it does not use the Mythril Z3 executable. Unsupported or absent versions are not claimed qualified. The independent qualification log is published separately, not passed into Source Intelligence or automated reproduction. This is installation evidence, not evidence of large-project SMT analysis or a security verdict.
+
 ## Scope
 
 The standalone workflow ends after source preflight and publication of detector evidence. The failed AutoProver integration and its dedicated provider were removed; no model inference or formal proof job is part of this workflow.

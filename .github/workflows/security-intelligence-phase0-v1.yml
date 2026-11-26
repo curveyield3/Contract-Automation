@@ -145,6 +145,70 @@ jobs:
           cache-from: type=gha,scope=curve-security-scanners-v1
           provenance: false
           sbom: false
+      - name: Qualify native installation using pinned upstream benign mathematical fixtures only
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 6g --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,size=3g,mode=1777 --env HOME=/tmp --workdir /tmp curveyield-security-preflight:local python3 - <<'PY' | tee qualification.log
+          import json, os, subprocess, time, hashlib, ctypes, sys
+          fixtures = [{"name":"internal_call_with_assertion_1.sol","upstreamPath":"test/libsolidity/smtCheckerTests/functions/internal_call_with_assertion_1.sol","blob":"f42bdb7dc3f500d06522626b9ed46d42f187cbc1","source":"contract C{\n    uint x;\n\tconstructor(uint y) {\n\t\tassert(x == 0);\n\t\tx = 1;\n\t}\n    function f() public {\n\t\tassert(x == 1);\n\t\t++x;\n\t\tg();\n\t\tassert(x == 1);\n    }\n\n\tfunction g() internal {\n\t\tassert(x == 2);\n\t\t--x;\n\t\tassert(x == 1);\n\t}\n}\n","engine":"chc"},{"name":"simple_if.sol","upstreamPath":"test/libsolidity/smtCheckerTests/bmc_coverage/branches_with_return/simple_if.sol","blob":"3c9ff6097af725847acd3a283f784c0518362903","source":"contract C {\n\tfunction test(uint256 a, uint256 b) public pure returns (uint256) {\n\t\tif (a == 0) {\n\t\t\treturn 0;\n\t\t}\n\t\treturn b / a; // This division is safe because of the early return in if-block.\n\t}\n}\n","engine":"bmc"},{"name":"loop_basic_for.sol","upstreamPath":"test/libsolidity/smtCheckerTests/invariants/loop_basic_for.sol","blob":"dcc731bf8e2036a5913c7a5660902f81bcabc473","source":"contract Simple {\n\tfunction f(uint x) public pure {\n\t\tuint y;\n\t\tfor (y = 0; y < x; ++y) {}\n\t\tassert(y == x);\n\t}\n}\n","engine":"chc"},{"name":"branches_assert_condition_1.sol","upstreamPath":"test/libsolidity/smtCheckerTests/control_flow/branches_assert_condition_1.sol","blob":"229a93ddc2aa204fa1eedd0ce7bffe8a0a2d4a76","source":"contract C {\n    function f(uint x) public pure {\n        if (x > 10) {\n            assert(x > 9);\n        }\n        else\n        {\n            assert(x < 11);\n        }\n    }\n}\n","engine":"all"}]
+          env = dict(os.environ, HOME='/tmp', PATH='/opt/smtchecker-z3-cli/bin:'+os.environ['PATH'], LD_LIBRARY_PATH='/opt/smtchecker-z3/solver-lib')
+          lib='/opt/smtchecker-z3/solver-lib/libz3.so.4.12'
+          z=ctypes.CDLL(lib)
+          v=[ctypes.c_uint() for _ in range(4)]
+          z.Z3_get_version(*[ctypes.byref(x) for x in v])
+          print('LIBRARY '+'.'.join(str(x.value) for x in v),flush=True)
+          exe='/opt/smtchecker-z3-cli/bin/z3'
+          print('EXECUTABLE '+subprocess.check_output([exe,'--version'],env=env,text=True).strip(),flush=True)
+          results=[]
+          with open('/opt/preflight/toolchain-plan/toolchain-plan.json') as f:
+              planned=json.load(f).get('solidityCompilerCandidates',[])
+          prepared=[v for v in ['0.8.28','0.8.30'] if v in planned]
+          print('QUALIFICATION_COMPILERS '+json.dumps(prepared),flush=True)
+          print('UNQUALIFIED_COMPILERS '+json.dumps([v for v in planned if v not in prepared]),flush=True)
+          if not prepared:
+              print('QUALIFICATION_NOT_APPLICABLE: no qualified compiler release in source-blind plan',flush=True)
+              sys.exit(0)
+          for version in prepared:
+              if not os.path.isfile('/opt/preflight/.svm/'+version+'/solc-'+version):
+                  print('QUALIFICATION_FAILED: planned compiler missing '+version,flush=True)
+                  sys.exit(1)
+          for version in prepared:
+              solc='/opt/preflight/.svm/'+version+'/solc-'+version
+              print('COMPILER '+subprocess.check_output([solc,'--version'],env=env,text=True).strip().replace('\n',' '),flush=True)
+              print('COMPILER_SHA256 '+hashlib.sha256(open(solc,'rb').read()).hexdigest(),flush=True)
+              for fixture in fixtures:
+                  for profile in ['upstream-default-resource','collector-settings']:
+                      settings={'engine':fixture['engine'],'solvers':['z3'],'showProvedSafe':True,'showUnproved':True,'showUnsupported':True}
+                      if profile=='collector-settings':
+                          settings.update({'timeout':1000,'targets':['assert','underflow','overflow','divByZero']})
+                      src={'language':'Solidity','sources':{fixture['name']:{'content':fixture['source']}},'settings':{'modelChecker':settings,'outputSelection':{'*':{'*':['abi']}}}}
+                      start=time.monotonic()
+                      row={'compiler':version,'fixture':fixture['name'],'upstreamBlob':fixture['blob'],'engine':fixture['engine'],'profile':profile}
+                      try:
+                          p=subprocess.run([solc,'--standard-json'],input=json.dumps(src),text=True,capture_output=True,env=env,timeout=25)
+                          data=json.loads(p.stdout)
+                          ds=data.get('errors',[])
+                          row.update(exitCode=p.returncode,errors=[d.get('errorCode') for d in ds if d.get('severity')=='error'],proved=sum('check is safe' in d.get('message','').lower() or 'proved safe' in d.get('message','').lower() and 'not' not in d.get('message','').lower() for d in ds),diagnosticCodes=[d.get('errorCode') for d in ds],solverUnavailable=any('not available' in d.get('message','').lower() or 'analysis was not possible' in d.get('message','').lower() for d in ds),stderrBytes=len(p.stderr))
+                          row['status']='PASS' if p.returncode==0 and not row['errors'] and not row['solverUnavailable'] and row['proved'] else 'REVIEW'
+                      except subprocess.TimeoutExpired:
+                          row['status']='TIMEOUT'
+                      except Exception as exc:
+                          row.update(status='ERROR',errorType=type(exc).__name__)
+                      row['elapsedMs']=round((time.monotonic()-start)*1000)
+                      results.append(row)
+                      print('QUALIFICATION '+json.dumps(row),flush=True)
+          print('QUALIFICATION_SUMMARY '+json.dumps({'rows':len(results),'passed':sum(r['status']=='PASS' for r in results),'review':sum(r['status']!='PASS' for r in results)}),flush=True)
+          sys.exit(0 if all(r['status']=='PASS' for r in results) else 1)
+          PY
+      - name: Publish source-blind SMTChecker installation qualification
+        if: ${{ always() && hashFiles('qualification.log') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-preflight-smtchecker-installation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: qualification.log
+          if-no-files-found: error
+          retention-days: 14
       - name: Receive exact source artifact; no source credentials in collector job
         uses: actions/download-artifact@v4
         with:
