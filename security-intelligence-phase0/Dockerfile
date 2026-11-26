@@ -26,9 +26,16 @@ RUN test -f node_modules/@foundry-rs/forge/bin.mjs && \
     chmod +x node_modules/@foundry-rs/forge/bin.mjs node_modules/@foundry-rs/cast/bin.mjs && \
     ln -s /opt/preflight/node_modules/@foundry-rs/forge/bin.mjs /usr/local/bin/forge && \
     ln -s /opt/preflight/node_modules/@foundry-rs/cast/bin.mjs /usr/local/bin/cast
-# Official Emscripten compiler distributions contain Z3; no system solver is installed.
-RUN mkdir -p /opt/preflight/smt-wasm && \
-    python3 -c "import hashlib,pathlib,urllib.request; root=pathlib.Path('/opt/preflight/smt-wasm'); releases=[('0.8.28','7893614a','72ef580a6ec5943130028e5294313f24e9435520acc89f8c9dbfd0139d9ae146'),('0.8.30','73712a01','81475c98b6d2094a821fd9d7b6278556d8095ccc23e0b8a1029b1c08a89cd4b2')]; [(lambda data: (hashlib.sha256(data).hexdigest()==digest or (_ for _ in ()).throw(ValueError('Official soljson SHA256 mismatch: '+version)), (root/(version+'.cjs')).write_bytes(data)))(urllib.request.urlopen('https://binaries.soliditylang.org/wasm/soljson-v'+version+'+commit.'+commit+'.js',timeout=60).read()) for version,commit,digest in releases]"
+# Official Emscripten compiler distributions contain Z3; no external solver is installed.
+# npm is the official distribution channel; verify the compiler payload against upstream release digests.
+RUN set -eu; mkdir -p /opt/preflight/smt-wasm /tmp/smt-wasm; \
+    npm pack --ignore-scripts --silent --registry=https://registry.npmjs.org --pack-destination /tmp/smt-wasm solc@0.8.28; \
+    tar -xOf /tmp/smt-wasm/solc-0.8.28.tgz package/soljson.js > /opt/preflight/smt-wasm/0.8.28.cjs; \
+    cp node_modules/solc/soljson.js /opt/preflight/smt-wasm/0.8.30.cjs; \
+    printf '%s  %s\n' \
+      72ef580a6ec5943130028e5294313f24e9435520acc89f8c9dbfd0139d9ae146 /opt/preflight/smt-wasm/0.8.28.cjs \
+      81475c98b6d2094a821fd9d7b6278556d8095ccc23e0b8a1029b1c08a89cd4b2 /opt/preflight/smt-wasm/0.8.30.cjs | sha256sum -c -; \
+    rm -rf /tmp/smt-wasm
 # Source-independent Slither, Wake, Mythril, Semgrep, Foundry and Node layers end here.
 # Only this target is exported to persistent GitHub cache; no per-source plan
 # or authenticated ZIP ever enters the reusable cache.
