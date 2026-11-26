@@ -2,13 +2,15 @@
 pragma solidity 0.8.30;
 
 /**
- * @title CurveYield Morpho Position Module v12
+ * @title CurveYield Morpho Position Module v13
  * @notice Guardian authority for Worker-built Morpho Bundler3 calls.
  * @dev CurveYield uses existing DeFi primitives for all execution. This module
  *      does not construct bundles or flash loans, size trades, inspect swap routes,
  *      keep token allowlists, or manage temporary allowances. It snapshots touched
  *      shared-contract balances and enforces the LLTV buffer on worsening LTV.
  *      The Safe is the Bundler initiator and retains position ownership.
+ *      Atomic migrations settle each source bundle before invoking the fixed
+ *      existing primary module's avKAT loop-up through the Safe.
  */
 struct CYMarketParams {
     address loanToken;
@@ -55,6 +57,18 @@ interface ICYAdapter {
     function erc20Transfer(address token,address receiver,uint256 amount) external;
     function erc20TransferFrom(address token,address receiver,uint256 amount) external;
 }
+interface ICYPrimary {
+    struct RangeExit {uint256 rangeId; uint128 liquidity; uint256 min0; uint256 min1; bool burnIfEmpty;}
+    struct VaultExit {address vault; uint256 shares; uint256 min0; uint256 min1;}
+    struct Swap {address tokenIn; address tokenOut; uint256 amountIn;}
+    struct PreSteps {RangeExit[] ranges; VaultExit[] vaults; Swap[] toKat;}
+    struct LoopUp {uint256 maxFlash; uint256 minFlash; uint256 minAvkatPerKatWad; uint256 maxLtv; uint256 deadline;}
+    function SAFE() external view returns(address);
+    function MORPHO() external view returns(address);
+    function LOOP_MARKET() external view returns(bytes32);
+    function SWAPPER() external view returns(address);
+    function atomicLoopUp(PreSteps calldata pre,LoopUp calldata p) external;
+}
 interface ICYSwapper {
     function swapExactInput(address from,address to,uint256 amount,uint256 minimum,address receiver,uint256 deadline)
         external returns(uint256);
@@ -67,11 +81,13 @@ contract CurveYieldMorphoPositionModule {
     address public immutable ADAPTER;
     address public immutable SWAPPER;
     bytes32 public immutable RESERVED_MARKET;
+    address public immutable PRIMARY;
     mapping(address=>bool) public isExecutor;
     mapping(bytes32=>bool) public marketAllowed;
     bool private transient locked;
     struct Balance {address token; uint256 bundler; uint256 adapter;}
     struct Snapshot {Balance[] entries; uint256 count;}
+    struct SourceBundle {bytes32 market; bytes data;}
     uint256 private constant LTV_BUFFER=2e15; // 0.2 percentage points
 
     error Unauthorized();
@@ -85,12 +101,21 @@ contract CurveYieldMorphoPositionModule {
 
     modifier onlySafe(){if(msg.sender!=address(SAFE)) revert Unauthorized();_;}
 
-    constructor(address safe,address morpho,address bundler,address adapter,address swapper,bytes32 reservedMarket){
+    modifier executionLock(){
+        if(msg.sender!=address(SAFE)&&!isExecutor[msg.sender]) revert Unauthorized();
+        if(locked) revert Invalid();
+        locked=true;_;locked=false;
+    }
+
+    constructor(address safe,address morpho,address bundler,address adapter,address swapper,bytes32 reservedMarket,address primary){
         if(safe.code.length==0||morpho.code.length==0||bundler.code.length==0||
            adapter.code.length==0||swapper.code.length==0||
-           ICYAdapter(adapter).BUNDLER3()!=bundler||ICYAdapter(adapter).MORPHO()!=morpho) revert Invalid();
+           ICYAdapter(adapter).BUNDLER3()!=bundler||ICYAdapter(adapter).MORPHO()!=morpho||
+           primary.code.length==0||ICYPrimary(primary).SAFE()!=safe||
+           ICYPrimary(primary).MORPHO()!=morpho||ICYPrimary(primary).LOOP_MARKET()!=reservedMarket||
+           ICYPrimary(primary).SWAPPER()!=swapper) revert Invalid();
         SAFE=ICYSafe(safe); MORPHO=ICYMorpho(morpho); BUNDLER=bundler; ADAPTER=adapter; SWAPPER=swapper;
-        RESERVED_MARKET=reservedMarket;
+        RESERVED_MARKET=reservedMarket; PRIMARY=primary;
     }
     function setExecutor(address executor,bool enabled) external onlySafe{
         isExecutor[executor]=enabled;emit ExecutorSet(executor,enabled);
@@ -107,11 +132,29 @@ contract CurveYieldMorphoPositionModule {
 
     /// @notice Forward the exact complete multicall calldata built by the Worker.
     /// @dev Only one flash callback level; no arbitrary Safe forwarding.
-    function execute(bytes32 market,bytes calldata data,uint256 deadline) external{
-        if(msg.sender!=address(SAFE)&&!isExecutor[msg.sender]) revert Unauthorized();
-        if(locked||block.timestamp>deadline||market==RESERVED_MARKET||!marketAllowed[market]||
+    function execute(bytes32 market,bytes calldata data,uint256 deadline) external executionLock{
+        _execute(market,data,deadline);
+    }
+
+    /// @notice Settle registered source bundles, then run the existing avKAT loop-up atomically.
+    /// @dev Only the immutable primary module's atomicLoopUp selector is accepted.
+    ///      No caller-selected Safe targets, operation types or general-purpose forwarding.
+    function migrate(SourceBundle[] calldata sources,bytes calldata loopUpData,uint256 deadline) external executionLock{
+        if(block.timestamp>deadline||loopUpData.length<4||
+           bytes4(loopUpData[:4])!=ICYPrimary.atomicLoopUp.selector) revert Invalid();
+        CYMarketParams memory destination=MORPHO.idToMarketParams(RESERVED_MARKET);
+        MORPHO.accrueInterest(destination);
+        (uint256 debtBefore,uint256 valueBefore)=_position(RESERVED_MARKET,destination.oracle);
+        for(uint256 i;i<sources.length;++i){
+            _execute(sources[i].market,sources[i].data,deadline);
+        }
+        _safe(PRIMARY,loopUpData);
+        _guardLtv(RESERVED_MARKET,destination,debtBefore,valueBefore);
+    }
+
+    function _execute(bytes32 market,bytes calldata data,uint256 deadline) private{
+        if(block.timestamp>deadline||market==RESERVED_MARKET||!marketAllowed[market]||
            data.length<4||bytes4(data[:4])!=ICYBundler.multicall.selector) revert Invalid();
-        locked=true;
         CYMarketParams memory p=MORPHO.idToMarketParams(market);
         MORPHO.accrueInterest(p);
         (uint256 debtBefore,uint256 valueBefore)=_position(market,p.oracle);
@@ -129,7 +172,6 @@ contract CurveYieldMorphoPositionModule {
         }
         _guardLtv(market,p,debtBefore,valueBefore);
         emit Executed(market,msg.sender,keccak256(data));
-        locked=false;
     }
 
     // Validate delegated authority only. All swap eligibility and execution
@@ -190,7 +232,7 @@ contract CurveYieldMorphoPositionModule {
             }else{
                 // These calls originate from the public Bundler, never the Safe.
                 // Only ERC20 approval to the fixed router or transfer to a custody endpoint.
-                if(c.to==address(SAFE)||c.to==BUNDLER||c.to==address(MORPHO)||
+                if(c.to==address(SAFE)||c.to==BUNDLER||c.to==address(MORPHO)||c.to==PRIMARY||
                    c.to==address(this)||d.length!=68) revert Unauthorized();
                 address recipient=_address(d,0);
                 _snapshot(snap,c.to);
