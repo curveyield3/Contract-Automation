@@ -1046,7 +1046,7 @@ async function collectSmtChecker({build,projectRoot,auditScope,request,out}){
   };
   const report={schemaVersion:'curveyield-smtchecker-correctness-review-v1',source:request.source,
     backend:'solidity-smtchecker-wasm',qualificationRun:45831903727,authoritativeFinding:false,
-    componentStatus:'FAILED',unitResults:[],scope:auditScope,limits:{totalWallMilliseconds:180000,compilerOnlyControlMaxMilliseconds:20000,terminationAndReportReserveMilliseconds:6500,solverQueryMilliseconds:100},
+    componentStatus:'FAILED',unitResults:[],scope:auditScope,limits:{totalWallMilliseconds:180000,compilerOnlyControlMaxMilliseconds:20000,terminationAndReportReserveMilliseconds:6500},
     meaning:'Completion means compiler returned diagnostics, not that the code is safe'};
   const started=performance.now(),deadline=started+report.limits.totalWallMilliseconds;
   const remaining=()=>Math.floor(deadline-performance.now());
@@ -1175,7 +1175,7 @@ async function collectSmtChecker({build,projectRoot,auditScope,request,out}){
         input.settings??={};
         input.settings.outputSelection={'*':{'*':['abi']}};
         input.settings.modelChecker={engine:'all',solvers:['z3'],contracts:targets,
-          timeout:report.limits.solverQueryMilliseconds,showProvedSafe:true,showUnproved:true,showUnsupported:true};
+          showProvedSafe:true,showUnproved:true,showUnsupported:true};
         const inputText=JSON.stringify(input);
         row.analysisInputSha256=sha256(Buffer.from(inputText));
         const inputFile=path.join(work,'unit-'+i+'.json');
@@ -1205,7 +1205,7 @@ async function collectSmtChecker({build,projectRoot,auditScope,request,out}){
         row.status=row.diagnostics.some(x=>/could not be proved|might happen here|unproved|timeout|unsupported/i.test(x.message))?'INCONCLUSIVE':'COMPLETED';
       }catch(error){if(row.status==='RUNNING')row.status='FAILED';row.error=String(error?.message??error).slice(0,300);}
       await persist();
-      console.error('SMTChecker unit '+JSON.stringify({unitId:row.unitId,compilerVersion:row.compilerVersion,status:row.status,diagnostics:row.diagnostics.length,elapsedMilliseconds:row.process?.elapsedMilliseconds??null,solverQueryMilliseconds:report.limits.solverQueryMilliseconds}));
+      console.error('SMTChecker unit '+JSON.stringify({unitId:row.unitId,compilerVersion:row.compilerVersion,status:row.status,diagnostics:row.diagnostics.length,elapsedMilliseconds:row.process?.elapsedMilliseconds??null}));
     }
     const applicable=report.unitResults.filter(x=>x.status!=='NOT_APPLICABLE');
     report.componentStatus=!applicable.length?'NOT_APPLICABLE':applicable.every(x=>x.status==='COMPLETED')?'COMPLETED':'PARTIAL';
