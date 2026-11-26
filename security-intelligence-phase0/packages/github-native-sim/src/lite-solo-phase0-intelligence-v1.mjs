@@ -1238,11 +1238,32 @@ async function main(){
         const compilerEnv={...process.env,HOME:'/tmp',LD_LIBRARY_PATH:'/opt/smtchecker-z3/solver-lib'};
         function invokeNative(compiler,args,input,timeout){
           return new Promise((resolve,reject)=>{
+            const started=Date.now();
+            let healthTimer;
             const child=execFile(compiler,args,{cwd:stageDir,env:compilerEnv,encoding:'utf8',
               timeout,killSignal:'SIGKILL',maxBuffer:16*1024*1024},(error,stdout)=>{
-              if(error)reject(Error('Compiler invocation failed: '+(error.killed?'wall timeout or output limit':String(error.code??error.name))));
-              else resolve(stdout);
+              clearInterval(healthTimer);
+              if(error){
+                const elapsed=Date.now()-started;
+                const failure=error.code==='ERR_CHILD_PROCESS_STDIO_MAXBUFFER'?'OUTPUT_LIMIT':
+                  error.killed&&error.signal==='SIGKILL'&&elapsed>=timeout?'WALL_TIMEOUT':'NATIVE_PROCESS_FAILURE';
+                reject(Error('Compiler invocation failed: '+failure+' elapsed_ms='+elapsed+
+                  ' exit_code='+String(error.code??'none')+' signal='+String(error.signal??'none')));
+              }else resolve(stdout);
             });
+            // Log process health, not source, solver queries or witness output.
+            if(timeout>=60000&&child.pid){
+              healthTimer=setInterval(async()=>{
+                try{
+                  const stat=await fs.readFile('/proc/'+child.pid+'/stat','utf8');
+                  const fields=stat.slice(stat.lastIndexOf(')')+2).trim().split(/\s+/);
+                  console.error('SMTChecker process health: elapsed_ms='+(Date.now()-started)+
+                    ' state='+fields[0]+' cpu_ticks='+(Number(fields[11])+Number(fields[12]))+
+                    ' rss_pages='+fields[21]);
+                }catch{} // Process may have already exited.
+              },10000);
+              healthTimer.unref?.();
+            }
             child.stdin?.on('error',()=>{}); // process completion owns failure reporting
             child.stdin?.end(input);
           });
@@ -1343,7 +1364,7 @@ async function main(){
             console.error('SMTChecker unit incomplete: '+JSON.stringify({unitId:rec.unitId,analysisMilliseconds:rec.analysisMilliseconds,error:rec.error}));
             // On a compiler wall failure compare identical compilation input with
             // model checking disabled. This diagnostic compiles only; no new analysis.
-            if(analysisInput&&analysisCompiler&&/wall timeout or output limit/.test(rec.error)){
+            if(analysisInput&&analysisCompiler&&/WALL_TIMEOUT|OUTPUT_LIMIT/.test(rec.error)){
               const baselineStarted=Date.now();
               try{
                 const baseline={...analysisInput,settings:{...analysisInput.settings,modelChecker:{engine:'none'}}};
