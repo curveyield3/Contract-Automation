@@ -20,6 +20,10 @@ The existing collector emits `SLITHER_v1.json`, `WAKE_v1.json` and `MYTHRIL_v1.j
 
 SMTChecker runs a separate source-only correctness review for CurveYield-owned Solidity. It uses the exact prepared native compiler, a local Z3 solver, a verified safe-assertion capability probe, CHC and BMC, and arithmetic/assertion targets. Its report distinguishes unsupported compiler/solver versions, inconclusive checks and failures; no witness transaction traces or downstream reproduction are generated. The report is retained as `SMTCHECKER_v1.json`.
 
+## Exact duplicate review
+
+The existing standalone summary publishes `REVIEW_DUPLICATE_INDEX_v1.json`, including native report hashes, record counts and reversible JSON-pointer groups for defensive reviewers. Automatic consolidation requires the admitted archive and commit identity, successful native execution, complete finding context and equality of the entire canonical native record within the same engine. Missing identity, differing context, incomplete reports and abbreviated SMTChecker diagnostics are retained separately. Cross-engine semantic equivalence is not inferred from rule labels, source lines or similar prose. Original reports remain unchanged and the index is not an automated reproduction input. This reports observed exact duplicates, not estimated semantic overlap.
+
 ## Scope
 
 The standalone workflow ends after source preflight and publication of detector evidence. The failed AutoProver integration and its dedicated provider were removed; no model inference or formal proof job is part of this workflow.
