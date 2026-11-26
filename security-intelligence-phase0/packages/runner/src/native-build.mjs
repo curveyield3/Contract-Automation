@@ -378,7 +378,7 @@ export async function compileRepoNativeHardhat({
       const manifest=JSON.parse(await fsApi.readFile(path.join(projectRoot,'package.json'),'utf8'));
       if(detected.config.endsWith('.cjs')||manifest.type!=='module'){
         const name='.phase0-storage-layout.config.cjs';
-        layoutConfig=path.join(projectRoot,name);
+        const candidate=path.join(projectRoot,name);
         const wrapper=[
           'const original=require('+JSON.stringify('./'+detected.config)+');',
           'const {extendConfig}=require("hardhat/config");',
@@ -391,7 +391,8 @@ export async function compileRepoNativeHardhat({
           '});',
           'module.exports=original;'
         ].join('\n');
-        await fsApi.writeFile(layoutConfig,wrapper,{flag:'wx'});
+        await fsApi.writeFile(candidate,wrapper,{flag:'wx'});
+        layoutConfig=candidate;
         args.push('--config',name);
       }
     }
