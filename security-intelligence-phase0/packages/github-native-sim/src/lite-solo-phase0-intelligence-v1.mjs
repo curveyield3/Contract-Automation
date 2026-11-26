@@ -1037,6 +1037,105 @@ async function buildContextReviewPacket({projectRoot,sourceIntelligence,projectR
   };
 }
 
+// Independent compiler-native correctness review. Use only qualified, exact
+// Emscripten compiler releases; no external solver, deployment, or reproduction.
+async function collectSmtChecker({build,projectRoot,auditScope,request,out}){
+  const qualified={
+    '0.8.28':{version:'0.8.28+commit.7893614a.Emscripten.clang',sha256:'9ef37cc1d2597ed6d2f706a960f449e33eb9eee920936cea77b11e6f43861970'},
+    '0.8.30':{version:'0.8.30+commit.73712a01.Emscripten.clang',sha256:'3bb491a777f76dff9b2fe73ce29ca20e21a971b59a2f2cf8f73415424f00be06'}
+  };
+  const report={schemaVersion:'curveyield-smtchecker-correctness-review-v1',source:request.source,
+    backend:'solidity-smtchecker-wasm',qualificationRun:45831903727,authoritativeFinding:false,
+    componentStatus:'FAILED',unitResults:[],scope:auditScope,limits:{wallMillisecondsPerUnit:180000},
+    meaning:'Completion means compiler returned diagnostics, not that the code is safe'};
+  const work=path.join(out,'work','smtchecker');
+  const checked=new Set();
+  await fs.mkdir(work,{recursive:true});
+  try{
+    if(build.status!=='completed'||!Array.isArray(build.compilationUnits)||!build.compilationUnits.length)
+      throw Error('Exact compiled source units unavailable');
+    for(const [i,unit] of build.compilationUnits.entries()){
+      const names=[...new Set([...Object.keys(unit.sourceContents??{}),...Object.keys(unit.sourceAsts??{}),
+        ...(unit.artifacts??[]).map(a=>a.sourceName).filter(Boolean)])].filter(n=>n.endsWith('.sol'));
+      if(!names.length)continue;
+      const targets=Object.create(null);
+      for(const a of unit.artifacts??[]){
+        if(!a.sourceName?.endsWith('.sol')||!sourceIsInScope(a.sourceName,auditScope)||!a.contractName)continue;
+        (targets[a.sourceName]??=[]).push(a.contractName);
+      }
+      const version=slitherCompilerVersion(unit.compilerVersion);
+      const row={unitId:unit.unitId??String(i),compilerVersion:version,originalInputSha256:unit.compilerInputSha256??null,
+        sourceCount:names.length,contractCount:Object.values(targets).flat().length,status:'FAILED',diagnostics:[]};
+      report.unitResults.push(row);
+      if(!row.contractCount){row.status='NOT_APPLICABLE';row.reason='No in-scope compiled Solidity contracts in this unit';continue;}
+      const pin=qualified[version];
+      if(!pin){row.status='UNQUALIFIED_COMPILER';row.reason='Exact release not yet installation-qualified';continue;}
+      const file='/opt/preflight/smt-wasm/'+version+'.cjs';
+      try{
+        if(!checked.has(version)){
+          if(sha256(await fs.readFile(file))!==pin.sha256)throw Error('Qualified compiler payload digest mismatch');
+          checked.add(version);
+        }
+        let input;
+        if(unit.compilerPackage==='hardhat-build-info'){
+          const info=build.buildInfo?.[i];
+          if(!info?.path)throw Error('Exact Hardhat build-info unavailable');
+          safeRel(info.path,'Hardhat build-info');
+          const raw=await fs.readFile(path.join(projectRoot,info.path));
+          if(sha256(raw)!==info.sha256)throw Error('Hardhat build-info digest mismatch');
+          input=JSON.parse(raw).input;
+          if(sha256(Buffer.from(JSON.stringify(input)))!==unit.compilerInputSha256)
+            throw Error('Hardhat compiler input digest mismatch');
+        }else{
+          input={language:'Solidity',sources:Object.fromEntries(Object.entries(unit.sourceContents??{})
+            .filter(([name])=>name.endsWith('.sol')).map(([name,content])=>[name,{content}])),
+            settings:structuredClone(unit.settings??{})};
+        }
+        if(input?.language!=='Solidity'||!input.sources||
+          names.some(n=>typeof input.sources[n]?.content!=='string')||
+          Object.values(input.sources).some(v=>typeof v?.content!=='string'))
+          throw Error('Exact inline compiler source content unavailable');
+        row.sourceDigests=Object.entries(input.sources).map(([name,v])=>({name,sha256:sha256(Buffer.from(v.content))}));
+        row.compilerSha256=pin.sha256;
+        input.settings??={};
+        input.settings.outputSelection={'*':{'*':['abi']}};
+        input.settings.modelChecker={engine:'all',solvers:['z3'],contracts:targets,
+          showProvedSafe:true,showUnproved:true,showUnsupported:true};
+        const inputText=JSON.stringify(input);
+        row.analysisInputSha256=sha256(Buffer.from(inputText));
+        const inputFile=path.join(work,'unit-'+i+'.json');
+        await fs.writeFile(inputFile,inputText);
+        // Isolate the trusted WASM compiler in a bounded child. Do not log source,
+        // model witnesses, or transaction traces; preserve native diagnostic identity.
+        const childCode="const fs=require('node:fs');const [file,input,expected]=process.argv.slice(1);"+
+          "const compiler=require('solc/wrapper')(require(file));"+
+          "if(compiler.version()!==expected)throw Error('Compiler version mismatch');"+
+          "const result=JSON.parse(compiler.compile(fs.readFileSync(input,'utf8')));"+
+          "const diagnostics=(result.errors||[]).map(d=>({severity:d.severity,errorCode:d.errorCode,type:d.type,sourceLocation:d.sourceLocation,message:String(d.message||'').split('\\n')[0]}));"+
+          "process.stdout.write(JSON.stringify({compilerVersion:compiler.version(),diagnostics}));";
+        console.error('SMTChecker unit started '+JSON.stringify({unitId:row.unitId,compilerVersion:version,contractCount:row.contractCount}));
+        const raw=await runProcess({command:process.execPath,args:['--input-type=commonjs','-e',childCode,file,inputFile,pin.version],
+          cwd:'/opt/preflight',env:{...process.env,PATH:'/usr/local/bin:/usr/bin:/bin',LD_LIBRARY_PATH:''},timeoutMs:report.limits.wallMillisecondsPerUnit});
+        row.exitCode=raw.exitCode;
+        if(raw.timedOut){row.status='TIMEOUT';throw Error('Compiler subprocess reached wall limit');}
+        if(raw.exitCode!==0)throw Error('Compiler subprocess failed (exit '+raw.exitCode+')');
+        const output=JSON.parse(raw.stdout);
+        if(output.compilerVersion!==pin.version||!Array.isArray(output.diagnostics))throw Error('Compiler result identity invalid');
+        row.diagnostics=output.diagnostics;
+        if(row.diagnostics.some(x=>x.severity==='error'||/solver.*not available|analysis was not possible|solver.*unavailable/i.test(x.message)))
+          throw Error('Compiler or solver reported failure');
+        row.status='COMPLETED';
+      }catch(error){row.error=String(error?.message??error).slice(0,300);}
+      console.error('SMTChecker unit '+JSON.stringify({unitId:row.unitId,compilerVersion:row.compilerVersion,status:row.status,diagnostics:row.diagnostics.length}));
+    }
+    const applicable=report.unitResults.filter(x=>x.status!=='NOT_APPLICABLE');
+    report.componentStatus=!applicable.length?'NOT_APPLICABLE':applicable.every(x=>x.status==='COMPLETED')?'COMPLETED':'PARTIAL';
+  }catch(error){report.error=String(error?.message??error).slice(0,300);}
+  report.diagnosticCount=report.unitResults.reduce((sum,row)=>sum+row.diagnostics.length,0);
+  await fs.writeFile(path.join(out,'SMTCHECKER_v1.json'),JSON.stringify(report,null,2)+'\n');
+  return report;
+}
+
 async function main(){
   const args=parseArgs(process.argv.slice(2));
   if(!args.request||!args.output)throw new Error('usage: --request <request.json> --output <dir>');
@@ -1239,6 +1338,7 @@ async function main(){
     ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',deployConfigExecution]
   ];
   await withProgressStage('write-machine-evidence',async()=>{for(const [name,obj] of files)await fs.writeFile(path.join(out,name),JSON.stringify(obj,null,2)+'\n');});
+  await withProgressStage('smtchecker-correctness-review',()=>collectSmtChecker({build,projectRoot:detected.absolute,auditScope,request,out}));
   process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},wake:{status:wake.status,findings:wake.findingCount??0,solidityUnits:wake.solidityUnitCount},mythril:{status:mythril.status,findings:mythril.findingCount??0,eligibleContracts:mythril.eligibleCount,completedContracts:mythril.completedCount},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},deployConfigExecution:{status:deployConfigExecution.status,attempts:deployConfigExecution.attempts.length,gaps:deployConfigExecution.gaps.length},outputs:files.map(([name])=>name)},null,2)+'\n');
 }
 
