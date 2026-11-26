@@ -51,41 +51,52 @@ async function checkSolhint(report,{build,projectRoot,auditScope,out}){
   }
   report.sourceDigests=[...selected].sort(([a],[b])=>a.localeCompare(b)).map(([sourceName,sha256])=>({sourceName,sha256}));
   if(!selected.size){report.componentStatus='NOT_APPLICABLE';report.findingCount=0;return;}
-  // The native JSON CLI formatter omits files with no messages. Use the
-  // documented per-file API and an explicit ledger instead of guessing coverage.
-  const manifest=path.join(stage,'sources.json');
-  const ledger=path.join(stage,'results.jsonl');
-  await fs.writeFile(manifest,JSON.stringify([...selected.keys()].sort()));
-  const program=[
-    "const fs=require('node:fs'),path=require('node:path');",
-    "const lint=require('/opt/phase0-maintenance/node_modules/solhint');",
-    "const [manifest,ledger]=process.argv.slice(1);",
-    "const files=JSON.parse(fs.readFileSync(manifest,'utf8'));",
-    "for(const file of files){let row;try{const r=lint.processFile(file,{extends:'solhint:recommended',cache:false,fix:false});row={filePath:file,messages:r.messages,errorCount:r.errorCount,warningCount:r.warningCount};}catch(e){row={filePath:file,error:String(e.message||e)};}fs.appendFileSync(ledger,JSON.stringify(row)+'\\n');}"
-  ].join('\n');
-  const raw=await runProcess({command:process.execPath,args:['-e',program,manifest,ledger],cwd:stage,timeoutMs:limits.solhintWallMs,env:{...process.env,CI:'true',HOME:'/tmp'}});
-  report.exitCode=raw.exitCode;report.timedOut=raw.timedOut===true;
-  report.processStderr=String(raw.stderr??'').slice(-4000);
+  // Invoke the documented CLI with a trusted recommended config. One
+  // invocation per admitted file records successful zero-message files too:
+  // Solhint's JSON formatter itself only emits messages, not file coverage.
+  const config=path.join(stage,'.solhint.json');
+  await fs.writeFile(config,JSON.stringify({extends:'solhint:recommended'})+'\n');
+  const cli=toolsRoot+'/node_modules/.bin/solhint';
+  const env={...process.env,CI:'true',HOME:'/tmp'};
+  const probe=await runProcess({command:cli,args:['--version'],cwd:stage,timeoutMs:10000,env});
+  report.observedVersion=String(probe.stdout??'').trim();
   report.expectedSourceCount=selected.size;
-  const lines=(await fs.readFile(ledger,'utf8').catch(e=>{if(e.code==='ENOENT')return '';throw e;})).split('\n').filter(Boolean);
-  const result=[];
-  for(const line of lines){try{result.push(JSON.parse(line));}catch{report.limitations.push('Incomplete lint ledger row');}}
-  report.nativeReport=result;
-  const covered=new Set(),seen=new Set();
-  for(const row of result){
-    const rel=row.filePath;
-    if(!selected.has(rel)||seen.has(rel)){report.limitations.push('Unexpected or duplicate lint ledger row');continue;}
-    seen.add(rel);
-    if(!Array.isArray(row.messages)){report.limitations.push('Lint unavailable for '+rel);continue;}
-    const parseError=row.messages.some(m=>!m.ruleId&&String(m.message).startsWith('Parse error:'));
-    if(!parseError)covered.add(rel);
-    else report.limitations.push('Parser could not analyze '+rel);
-    for(const m of row.messages)report.detectors.push({sourceName:rel,sourceSha256:selected.get(rel),ruleId:m.ruleId??null,severity:m.severity??null,line:m.line??null,column:m.column??null,message:m.message??null});
+  if(probe.exitCode!==0||report.observedVersion!==pin.solhint)throw Error('Solhint version verification failed: '+report.observedVersion);
+  const deadline=Date.now()+limits.solhintWallMs;
+  const covered=new Set();
+  report.nativeReport=[];
+  report.fileResults=[];
+  for(const rel of [...selected.keys()].sort()){
+    const row={filePath:rel,status:'FAILED',exitCode:null};
+    report.fileResults.push(row);
+    const remaining=deadline-Date.now();
+    if(remaining<=0){row.status='TIME_BUDGET_EXHAUSTED';continue;}
+    // The CLI accepts glob patterns. Refuse ambiguous glob syntax instead
+    // of accidentally attributing another file's lint report to this file.
+    if(/[\\*?[\]{}()!+@]/.test(rel)){row.status='UNSUPPORTED_GLOB_PATH';continue;}
+    const raw=await runProcess({command:cli,args:['--config',config,'--formatter','json','--disc','--noPoster','--','./'+rel],cwd:stage,timeoutMs:remaining,env});
+    row.exitCode=raw.exitCode;
+    row.timedOut=raw.timedOut===true;
+    row.stderr=String(raw.stderr??'').slice(-4000);
+    try{
+      const native=JSON.parse(raw.stdout);
+      if(!Array.isArray(native))throw Error('Expected native JSON message array');
+      report.nativeReport.push({filePath:rel,messages:native});
+      if(row.timedOut||![0,1].includes(raw.exitCode))throw Error('CLI execution incomplete');
+      const messages=native.filter(m=>typeof m?.conclusion!=='string');
+      if(messages.some(m=>typeof m?.filePath!=='string'||path.relative(stage,path.resolve(stage,m.filePath)).split(path.sep).join('/')!==rel||typeof m.message!=='string'))throw Error('Unexpected CLI message/file identity');
+      const parseError=messages.some(m=>!m.ruleId&&String(m.message).startsWith('Parse error:'));
+      for(const m of messages)report.detectors.push({sourceName:rel,sourceSha256:selected.get(rel),ruleId:m.ruleId??null,severity:m.severity??null,line:m.line??null,column:m.column??null,message:m.message});
+      row.messageCount=messages.length;
+      if(parseError){row.status='PARSE_ERROR';continue;}
+      if(raw.exitCode===1&&!messages.length)throw Error('Nonzero lint exit without findings');
+      row.status='COMPLETED';covered.add(rel);
+    }catch(e){row.error=String(e?.message??e).slice(0,2000);}
   }
   report.scannedSourceCount=covered.size;
   report.findingCount=covered.size?report.detectors.length:null;
-  report.componentStatus=!report.timedOut&&raw.exitCode===0&&covered.size===selected.size&&!report.limitations.length?'COMPLETED':'PARTIAL';
-  if(covered.size!==selected.size)report.limitations.push('Not every source was successfully linted.');
+  report.componentStatus=covered.size===selected.size?'COMPLETED':'PARTIAL';
+  if(covered.size!==selected.size)report.limitations.push('Not every source was successfully linted; inspect fileResults.');
 }
 async function checkUpgrades(report,{build,projectRoot,auditScope,out,bundle}){
   const root=await fs.realpath(projectRoot);
