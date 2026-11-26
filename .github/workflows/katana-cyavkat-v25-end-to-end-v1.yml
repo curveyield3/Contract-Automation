@@ -268,22 +268,29 @@ jobs:
         run: |
           set -euo pipefail
           root="$(mktemp -d)"
-          mkdir -p "$root/src" "$root/evidence"
-          cp "process/avkat-fork-simulation-v1/src/CurveYieldMorphoPositionModule_v4.sol" "$root/src/"
-          cd "$root"
+          mkdir -p "$root/baseline/src" "$root/candidate/src" "$root/evidence"
+          git fetch --no-tags --depth=1 origin 75b850dd17f6a0864c424f29307d539de6ac38ee
+          git show 75b850dd17f6a0864c424f29307d539de6ac38ee:process/avkat-fork-simulation-v1/src/CurveYieldMorphoPositionModule_v4.sol > "$root/baseline/src/CurveYieldMorphoPositionModule_v4.sol"
+          cp "process/avkat-fork-simulation-v1/src/CurveYieldMorphoPositionModule_v5.sol" "$root/candidate/src/"
           forge --version
-          sha256sum src/CurveYieldMorphoPositionModule_v4.sol
-          forge build --use 0.8.30 --evm-version osaka --optimize --optimizer-runs 200 --via-ir --sizes --skip test 2>&1 | tee evidence/compile.log
-          file=out/CurveYieldMorphoPositionModule_v4.sol/CurveYieldMorphoPositionModule.json
-          jq -e '.bytecode.object | length > 2' "$file"
-          jq -c '{compiler:"0.8.30",evm:"osaka",optimizerRuns:200,viaIR:true,runtimeBytes:((.deployedBytecode.object|length)-2)/2,creationBytes:((.bytecode.object|length)-2)/2,abiFunctions:[.abi[]|select(.type=="function")|.name]}' "$file" | sed 's/^/CY_MORPHO_COMPILE /'
-          cp "$file" "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v4.json"
-          cp src/CurveYieldMorphoPositionModule_v4.sol "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v4.sol"
-          cp evidence/compile.log "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v4_compile.log"
+          sha256sum "$root"/{baseline,candidate}/src/*.sol
+          for kind in baseline candidate; do
+            if [ "$kind" = baseline ]; then version=v4; else version=v5; fi
+            cd "$root/$kind"
+            for runs in 200 1 10 25 50; do
+              forge build --force --use 0.8.30 --evm-version osaka --optimize --optimizer-runs "$runs" --via-ir --sizes --skip test 2>&1 | tee "$root/evidence/${version}_${runs}.log"
+              file="out/CurveYieldMorphoPositionModule_${version}.sol/CurveYieldMorphoPositionModule.json"
+              jq -e '.bytecode.object | length > 2' "$file" >/dev/null
+              jq -c --arg version "$version" --argjson runs "$runs" '{version:$version,compiler:"0.8.30",evm:"osaka",optimizerRuns:$runs,viaIR:true,runtimeBytes:((.deployedBytecode.object|length)-2)/2,creationBytes:((.bytecode.object|length)-2)/2,abiFunctions:[.abi[]|select(.type=="function")|.name]}' "$file" | sed 's/^/CY_MORPHO_COMPILE /' | tee -a "$root/evidence/measurements.txt"
+              if [ "$kind" = candidate ]; then
+                cp "$file" "$root/evidence/CurveYieldMorphoPositionModule_v5_runs${runs}.json"
+              fi
+            done
+          done
+          cp "$root/candidate/src/CurveYieldMorphoPositionModule_v5.sol" "$root/evidence/"
+          mkdir -p "$GITHUB_WORKSPACE/morpho-module-build"
+          cp "$root/evidence/"* "$GITHUB_WORKSPACE/morpho-module-build/"
       - uses: actions/upload-artifact@v4
         with:
-          name: CurveYieldMorphoPositionModule_v4
-          path: |
-            CurveYieldMorphoPositionModule_v4.sol
-            CurveYieldMorphoPositionModule_v4.json
-            CurveYieldMorphoPositionModule_v4_compile.log
+          name: CurveYieldMorphoPositionModule_v5
+          path: morpho-module-build/
