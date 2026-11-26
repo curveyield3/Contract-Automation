@@ -13,7 +13,7 @@ RUN git init /opt/semgrep-rules && \
     git -C /opt/semgrep-rules fetch --depth 1 https://github.com/Decurity/semgrep-smart-contracts.git 2e878a89ac7bba1f8435e8a68e3ecb7700096cd5 && \
     git -C /opt/semgrep-rules checkout --detach FETCH_HEAD && \
     test "$(git -C /opt/semgrep-rules rev-parse HEAD)" = "2e878a89ac7bba1f8435e8a68e3ecb7700096cd5" && \
-    test -d /opt/semgrep-rules/rules/solidity/security && rm -rf /opt/semgrep-rules/.git
+    test -d /opt/semgrep-rules/solidity/security && rm -rf /opt/semgrep-rules/.git
 ENV PATH="/usr/local/bin:/opt/slither/bin:/opt/wake/bin:/opt/mythril/bin:/opt/semgrep/bin:/opt/preflight/node_modules/.bin:/opt/preflight/node_modules/@foundry-rs/forge:${PATH}" \
     CI="true" NODE_ENV="test" HOME="/opt/preflight"
 WORKDIR /opt/preflight
