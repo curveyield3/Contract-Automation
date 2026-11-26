@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import unzipper from 'unzipper';
 import { checkoutExactSource, runProcess } from './execution.mjs';
 import { buildProject } from '../../runner/src/build-dispatch.mjs';
@@ -1204,6 +1205,124 @@ async function main(){
       console.error('Semgrep independent review incomplete: '+report.error);
     }finally{
       await fs.writeFile(path.join(reportDir,'SEMGREP_v1.json'),JSON.stringify(report,null,2)+'\n');
+    }
+  }
+  // Compiler-native arithmetic and assertion review of CurveYield source.
+  // Separate reviewer evidence only, without transaction counterexamples or downstream automation.
+  {
+    const reportDir=path.join(path.dirname(out),'smtchecker-review');
+    const report={schemaVersion:'curveyield-smtchecker-correctness-review-v1',backend:'solidity-smtchecker',
+      source:request.source,authoritativeFinding:false,componentStatus:'FAILED',
+      engines:['CHC','BMC'],solver:'z3',targets:['assert','underflow','overflow','divByZero'],
+      units:[],limitations:[]};
+    await fs.mkdir(reportDir,{recursive:true});
+    try{
+      await withProgressStage('smtchecker-correctness-review',async()=>{
+        if(!String(request.source.repository).toLowerCase().startsWith('curveyield3/')){
+          report.componentStatus='NOT_APPLICABLE';
+          report.limitations.push('Not a CurveYield source repository');
+          return;
+        }
+        const units=Array.isArray(build.compilationUnits)&&build.compilationUnits.length
+          ?build.compilationUnits:[build];
+        const stageDir=path.join(out,'work','smtchecker');
+        await fs.mkdir(stageDir,{recursive:true});
+        const modelChecker={engine:'all',solvers:['z3'],targets:report.targets,
+          timeout:1000,showProvedSafe:true,showUnproved:true,showUnsupported:true};
+        const probes=new Map();
+        const compilerEnv={...process.env,HOME:'/tmp',LD_LIBRARY_PATH:'/opt/smtchecker-z3/solver-lib'};
+        function invoke(compiler,input,timeout){
+          const result=spawnSync(compiler,['--standard-json'],{input:JSON.stringify(input),
+            cwd:stageDir,env:compilerEnv,encoding:'utf8',timeout,maxBuffer:16*1024*1024});
+          if(result.error||result.status!==0)throw Error('Compiler invocation failed: '+String(result.error??result.status));
+          const parsed=JSON.parse(result.stdout);
+          const diagnostics=parsed.errors??[];
+          if(!Array.isArray(diagnostics))throw Error('Invalid compiler diagnostics');
+          if(diagnostics.some(d=>d.severity==='error'))
+            throw Error('Compiler rejected model-checker input: '+diagnostics.filter(d=>d.severity==='error').map(d=>String(d.errorCode??d.type)).join(','));
+          if(diagnostics.some(d=>/solver.*not available|analysis was not possible|no .*solver available|not compiled with.*(?:z3|smt)/i.test(String(d.message))))
+            throw Error('SMT solver unavailable for this compiler');
+          return diagnostics;
+        }
+        for(const [index,unit] of units.entries()){
+          const names=[...new Set([...Object.keys(unit.sourceContents??{}),...Object.keys(unit.sourceAsts??{}),
+            ...(unit.artifacts??[]).map(a=>a?.sourceName).filter(Boolean)])].filter(n=>typeof n==='string'&&n.endsWith('.sol'));
+          const inScope=names.filter(n=>sourceIsInScope(n,auditScope));
+          if(!inScope.length)continue;
+          const version=String(unit.compilerVersion??build.compilerVersion??'');
+          const rec={unitId:unit.unitId??String(index),compilerVersion:version,sourceCount:inScope.length,
+            status:'FAILED',sourceDigests:[],diagnosticCounts:{proved:0,unproved:0,warning:0,unsupported:0},diagnostics:[]};
+          report.units.push(rec);
+          try{
+            const match=version.match(/^0\.8\.(\d+)$/);
+            if(!match||Number(match[1])<14){
+              rec.status='NOT_APPLICABLE';
+              rec.reason='Modern Solidity model-checker configuration and installed Z3 ABI not supported for this version';
+              continue;
+            }
+            const compiler=path.join('/opt/preflight/.svm',version,'solc-'+version);
+            if(!probes.has(version)){
+              const actual=spawnSync(compiler,['--version'],{encoding:'utf8',env:compilerEnv,timeout:10000});
+              if(actual.status!==0||!String(actual.stdout).includes('Version: '+version+'+'))
+                throw Error('Exact native compiler unavailable');
+              const probe=invoke(compiler,{language:'Solidity',sources:{'CompilerCapability.sol':{
+                content:'// SPDX-License-Identifier: UNLICENSED\npragma solidity >=0.8.14; contract CompilerCapability { function f(uint256 x) external pure { require(x < 10); assert(x <= 10); } }'}},
+                settings:{modelChecker,outputSelection:{'*':{'*':['abi']}}}},20000);
+              const proved=probe.some(d=>/\b(?:CHC|BMC):.*(?:check is safe|proved safe)/i.test(String(d.message)));
+              if(!proved)throw Error('Compiler capability probe did not report a proved-safe assertion');
+              probes.set(version,true);
+            }
+            rec.solverProbe='PROVED_SAFE';
+            const sources=Object.create(null);
+            for(const name of names.sort()){
+              safeRel(name.replace(/^\.\//,''),'SMTChecker source unit');
+              const bytes=typeof unit.sourceContents?.[name]==='string'
+                ?Buffer.from(unit.sourceContents[name],'utf8')
+                :await fs.readFile(await resolveCompiledSourceFile(detected.absolute,name));
+              sources[name]={content:bytes.toString('utf8')};
+              rec.sourceDigests.push({sourceName:name,sha256:sha256(bytes)});
+            }
+            const contracts=Object.create(null);
+            for(const artifact of unit.artifacts??[]){
+              if(inScope.includes(artifact.sourceName)&&typeof artifact.contractName==='string'){
+                (contracts[artifact.sourceName]??=[]).push(artifact.contractName);
+              }
+            }
+            if(!Object.keys(contracts).length)throw Error('No exact in-scope compiled contract identities');
+            const settings={};
+            for(const key of ['remappings','optimizer','evmVersion','viaIR','libraries']){
+              if(unit.settings?.[key]!==undefined)settings[key]=unit.settings[key];
+            }
+            settings.modelChecker={...modelChecker,contracts};
+            settings.outputSelection={'*':{'*':['abi']}};
+            const input={language:'Solidity',sources,settings};
+            rec.inputSha256=sha256(Buffer.from(JSON.stringify(input),'utf8'));
+            rec.contractCount=Object.values(contracts).reduce((sum,entries)=>sum+entries.length,0);
+            const diagnostics=invoke(compiler,input,90000);
+            for(const d of diagnostics){
+              // Keep correctness status and diagnostic identity, not generated witnesses.
+              const message=String(d.message??'');
+              if(!/^(?:CHC|BMC):|SMTChecker|model checker|model checking/i.test(message))continue;
+              const kind=/check is safe|proved safe/i.test(message)&&!/unproved|not proved|could not/i.test(message)?'proved':
+                /unproved|not proved|could not|might happen|might be|unknown|timeout/i.test(message)?'unproved':
+                /unsupported|not supported/i.test(message)?'unsupported':'warning';
+              rec.diagnosticCounts[kind]++;
+              rec.diagnostics.push({kind,engine:/^CHC:/.test(message)?'CHC':/^BMC:/.test(message)?'BMC':null,
+                errorCode:d.errorCode??null,severity:d.severity??null});
+            }
+            rec.status=rec.diagnosticCounts.unproved||rec.diagnosticCounts.unsupported||rec.diagnosticCounts.warning
+              ?'COMPLETED_WITH_LIMITATIONS':'COMPLETED';
+          }catch(error){rec.error=String(error?.message??error);console.error('SMTChecker unit incomplete: '+rec.error);}
+        }
+        report.componentStatus=!report.units.length||report.units.every(u=>u.status==='NOT_APPLICABLE')?'NOT_APPLICABLE':
+          report.units.some(u=>u.status==='FAILED')?'FAILED':
+          report.units.some(u=>u.status!=='COMPLETED')?'COMPLETED_WITH_LIMITATIONS':'COMPLETED';
+      });
+    }catch(error){report.error=String(error?.message??error);console.error('SMTChecker review incomplete: '+report.error);}
+    finally{
+      await fs.writeFile(path.join(reportDir,'SMTCHECKER_v1.json'),JSON.stringify(report,null,2)+'\n');
+      console.error('SMTChecker review status: '+JSON.stringify({componentStatus:report.componentStatus,
+        units:report.units.map(u=>({compilerVersion:u.compilerVersion,status:u.status,solverProbe:u.solverProbe,diagnosticCounts:u.diagnosticCounts,error:u.error}))}));
     }
   }
   const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));

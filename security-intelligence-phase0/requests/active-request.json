@@ -1,12 +1,11 @@
 {
   "schemaVersion": "curveyield-security-preflight-request-v1",
   "runMode": "SOURCE_PREFLIGHT",
-  "requestId": "dai-four-scanner-benchmark-v2-0b2ac5fe0f4c",
+  "requestId": "controller-dry-run-erc20-smtchecker-v1-fdab7e73eba0",
   "source": {
     "repository": "curveyield3/Contract-Automation",
     "commit": "85724e7bbb2e3bcbd373ea2464917b62e37541c9",
-    "archivePath": "process/audit-source-initialization/dai-live-no-deploy-script-v1.zip",
-    "archiveSha256": "0b2ac5fe0f4cb5e60d2f496d517f7251f9e121c5ac21244b8c8d1ccb0b9be8df"
-  },
-  "scannerOnly": true
+    "archivePath": "process/audit-source-initialization/controller-dry-run-erc20-20261022.zip",
+    "archiveSha256": "fdab7e73eba0444cedf9e84eb6d8027cda7b288a567bdefb39470b54a8d12fb9"
+  }
 }

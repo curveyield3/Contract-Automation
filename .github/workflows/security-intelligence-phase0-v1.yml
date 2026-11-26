@@ -123,7 +123,7 @@ jobs:
                  .preflight-plan/toolchain-plan.json >/dev/null
       - name: Set up existing Docker build for source-blind scanner caching
         uses: docker/setup-buildx-action@v3
-      - name: Restore or publish pinned Slither, Wake, Mythril and Semgrep scanner layers
+      - name: Restore or publish pinned Slither, Wake, Mythril, Semgrep and SMTChecker scanner layers
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -152,7 +152,7 @@ jobs:
           path: .preflight-input
       - name: Create writable output for sandboxed collection
         run: mkdir -p .preflight-output
-      - name: Run copied compiler, Source Intelligence, inventory, Slither, Wake, Mythril and Semgrep in network-isolated sandbox
+      - name: Run copied compiler, Source Intelligence, inventory, Slither, Wake, Mythril, Semgrep and SMTChecker in network-isolated sandbox
         shell: bash
         run: |
           set -euo pipefail
@@ -201,6 +201,14 @@ jobs:
         with:
           name: security-preflight-semgrep-review-${{ github.run_id }}-${{ github.run_attempt }}
           path: .preflight-output/semgrep-review/SEMGREP_v1.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish independent SMTChecker correctness-review evidence
+        if: ${{ always() && hashFiles('.preflight-output/smtchecker-review/SMTCHECKER_v1.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-preflight-smtchecker-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .preflight-output/smtchecker-review/SMTCHECKER_v1.json
           if-no-files-found: error
           retention-days: 14
       - name: Require source-bound inventory before claiming collection success

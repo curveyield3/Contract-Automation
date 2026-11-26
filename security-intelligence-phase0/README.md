@@ -18,6 +18,8 @@ Mythril 0.24.8 runs offline bytecode-level symbolic execution on every executabl
 
 The existing collector emits `SLITHER_v1.json`, `WAKE_v1.json` and `MYTHRIL_v1.json` separately. Semgrep 1.187.0 executes automatically against the in-scope source in the same isolated collector and publishes `SEMGREP_v1.json` as a separate remediation-review artifact; its findings are not passed to automated reproduction. The Semgrep report records its own status and coverage. `WAKE_v1.json` includes detector descriptions and source locations, impact, confidence, suppressed flags, compilation-unit coverage and errors. `PREFLIGHT_MANIFEST_v1.json` records `wakeStatus`, Wake findings and any incomplete scanner warnings; collection is not complete when Wake or Mythril fails on an eligible Solidity project. Static detections are investigation leads, never automatic confirmed vulnerabilities.
 
+SMTChecker runs a separate source-only correctness review for CurveYield-owned Solidity. It uses the exact prepared native compiler, a local Z3 solver, a verified safe-assertion capability probe, CHC and BMC, and arithmetic/assertion targets. Its report distinguishes unsupported compiler/solver versions, inconclusive checks and failures; no witness transaction traces or downstream reproduction are generated. The report is retained as `SMTCHECKER_v1.json`.
+
 ## Scope
 
 The standalone workflow ends after source preflight and publication of detector evidence. The failed AutoProver integration and its dedicated provider were removed; no model inference or formal proof job is part of this workflow.

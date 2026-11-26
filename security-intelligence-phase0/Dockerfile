@@ -14,6 +14,10 @@ RUN git init /opt/semgrep-rules && \
     git -C /opt/semgrep-rules checkout --detach FETCH_HEAD && \
     test "$(git -C /opt/semgrep-rules rev-parse HEAD)" = "2e878a89ac7bba1f8435e8a68e3ecb7700096cd5" && \
     test -d /opt/semgrep-rules/solidity/security && rm -rf /opt/semgrep-rules/.git
+# Independent compiler correctness checker; keep the solver library separate from Mythril.
+RUN python3 -m venv /opt/smtchecker-z3 && /opt/smtchecker-z3/bin/pip install --no-cache-dir --no-deps 'z3-solver==4.12.5.0' && \
+    mkdir -p /opt/smtchecker-z3/solver-lib && \
+    /opt/smtchecker-z3/bin/python -c "import pathlib,z3; p=pathlib.Path(z3.__file__).parent/'lib'/'libz3.so'; assert p.is_file(); d=pathlib.Path('/opt/smtchecker-z3/solver-lib'); (d/'libz3.so').symlink_to(p); (d/'libz3.so.4.12').symlink_to(p); print(z3.get_version_string())"
 ENV PATH="/usr/local/bin:/opt/slither/bin:/opt/wake/bin:/opt/mythril/bin:/opt/semgrep/bin:/opt/preflight/node_modules/.bin:/opt/preflight/node_modules/@foundry-rs/forge:${PATH}" \
     CI="true" NODE_ENV="test" HOME="/opt/preflight"
 WORKDIR /opt/preflight
