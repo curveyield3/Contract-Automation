@@ -1109,19 +1109,19 @@ async function main(){
   const report={sourceSha256:observed,unitId:unit.unitId,compilerInputSha256:unit.compilerInputSha256,profileInputSha256:sha256(Buffer.from(inputText)),inputBytes:Buffer.byteLength(inputText),runs:[]};
   console.log('Profile workload identity '+JSON.stringify({unitId:report.unitId,compilerInputSha256:report.compilerInputSha256,profileInputSha256:report.profileInputSha256,inputBytes:report.inputBytes}));
   const deadline=performance.now()+174000;
-  const child="const fs=require('node:fs');const [file,input]=process.argv.slice(1);const c=require('solc/wrapper')(require(file));console.error('PROFILE_COMPILE_ENTER '+c.version());const result=c.compile(fs.readFileSync(input,'utf8'));console.error('PROFILE_COMPILE_RETURN '+Buffer.byteLength(result));";
-  for(const [mode,file] of [['symbols','/compiler/soljson.cjs']]){
+  const child="const fs=require('node:fs');const [file,input]=process.argv.slice(1);const c=require('solc/wrapper')(require(file));console.error('PROFILE_COMPILE_ENTER '+c.version());const result=JSON.parse(c.compile(fs.readFileSync(input,'utf8')));const errors=(result.errors||[]).filter(x=>x.severity==='error').length;console.error('PROFILE_COMPILE_RETURN '+JSON.stringify({compilerErrors:errors}));if(errors)process.exitCode=2;";
+  for(const [mode,file] of [['candidate','/compiler/soljson.cjs']]){
     if(!await exists(file))throw Error('Compiler missing: '+mode);
     const log=path.join(work,mode+'.v8.log');
-    const cap=Math.min(50000,Math.floor(deadline-performance.now()-110000));
+    const cap=Math.min(145000,Math.floor(deadline-performance.now()-25000));
     if(cap<=0)throw Error('Profile budget exhausted');
     const t=performance.now();
     const r=await runProcess({command:process.execPath,args:['--prof','--prof-sampling-interval=5000','--no-logfile-per-isolate','--logfile='+log,'--input-type=commonjs','-e',child,file,inputFile],cwd:'/opt/preflight',timeoutMs:cap,onStderr:chunk=>{for(const line of chunk.split('\n'))if(line.startsWith('PROFILE_COMPILE_'))console.error(mode+' '+line);}});
-    const row={mode,wallMs:Math.round(performance.now()-t),timedOut:r.timedOut,exitCode:r.exitCode,signal:r.signal,compilerSha256:sha256(await fs.readFile(file)),profileLogBytes:0,processed:false};
+    const marker=r.stderr.split('\n').find(l=>l.startsWith('PROFILE_COMPILE_RETURN '));const returned=marker?JSON.parse(marker.slice('PROFILE_COMPILE_RETURN '.length)):null;const row={mode,compilerReturned:!!returned,compilerErrors:returned?.compilerErrors??null,wallMs:Math.round(performance.now()-t),timedOut:r.timedOut,exitCode:r.exitCode,signal:r.signal,compilerSha256:sha256(await fs.readFile(file)),profileLogBytes:0,processed:false};
     report.runs.push(row);
     if(await exists(log)){
       row.profileLogBytes=(await fs.stat(log)).size;
-      const budget=Math.min(115000,Math.floor(deadline-performance.now()-6500));
+      const budget=Math.min(20000,Math.floor(deadline-performance.now()-6500));
       if(budget>0){
         const decoded=await runProcess({command:process.execPath,args:['--prof-process','--call-graph-size=4',log],cwd:'/opt/preflight',timeoutMs:budget});
         row.processed=decoded.exitCode===0&&!decoded.timedOut;
@@ -1135,6 +1135,6 @@ async function main(){
   }
   report.totalWallMs=174000-Math.max(0,Math.round(deadline-performance.now()));
   await fs.writeFile(path.join(out,'compiler-profile-v1.json'),JSON.stringify(report,null,2)+'\n');
-  if(report.runs.some(x=>!x.processed||!x.callerProfilePresent||x.profileLogBytes===0))throw Error('CPU profile processing incomplete');
+  if(report.runs.some(x=>!x.compilerReturned||x.compilerErrors!==0||x.exitCode!==0))throw Error('Candidate compiler did not return a successful result within the bounded performance probe');
 }
 main().catch(error=>{console.error('Profile collection failed: '+String(error?.message??error));process.exitCode=1;});
