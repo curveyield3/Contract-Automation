@@ -16,6 +16,7 @@ jobs:
     outputs:
       request_present: ${{ steps.request_present.outputs.request_present }}
       formal_model: ${{ steps.request_present.outputs.formal_model }}
+      scanner_only: ${{ steps.request_present.outputs.scanner_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -29,6 +30,12 @@ jobs:
         shell: bash
         run: |
           if [ -f security-intelligence-phase0/requests/active-request.json ]; then
+            if jq -e '.scannerOnly == true' security-intelligence-phase0/requests/active-request.json >/dev/null; then
+              echo 'scanner_only=true' >> "$GITHUB_OUTPUT"
+              echo 'request_present=true' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo 'scanner_only=false' >> "$GITHUB_OUTPUT"
             # The DAI trace adapter is imported only much later in formal.
             # Catch malformed Python BEFORE collecting source or starting MiMo.
             # Syntax compilation is not a test or source execution.
@@ -70,7 +77,6 @@ jobs:
             requestId:source.requestId,campaignId:source.requestId,
             campaignGenerationId:'preflight-'+s.archiveSha256.slice(0,20),
             source:{repository:s.repository,commit:s.commit,archivePath:s.archivePath,archiveSha256:s.archiveSha256},
-            defensiveSemgrepReview:source.defensiveSemgrepReview===true,
             destination:{repository:'curveyield3/Contract-Automation',ref:'machine-intelligence-audit-controller-v1',campaignPath:'security-intelligence-phase0'}};
           fs.writeFileSync('.preflight-input/request.json',JSON.stringify(adapted,null,2)+'\n');
           NODE
@@ -166,7 +172,7 @@ jobs:
           path: .preflight-input
       - name: Create writable output for sandboxed collection
         run: mkdir -p .preflight-output
-      - name: Run copied compiler, Source Intelligence, inventory, Slither, Wake and Mythril in network-isolated sandbox
+      - name: Run copied compiler, Source Intelligence, inventory, Slither, Wake, Mythril and Semgrep in network-isolated sandbox
         shell: bash
         run: |
           set -euo pipefail
@@ -285,7 +291,7 @@ jobs:
   formal:
     name: formal
     needs: [admit, collect]
-    if: ${{ needs.admit.result == 'success' && needs.collect.result == 'success' && needs.admit.outputs.request_present == 'true' }}
+    if: ${{ needs.admit.result == 'success' && needs.collect.result == 'success' && needs.admit.outputs.request_present == 'true' && needs.admit.outputs.scanner_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     permissions:
