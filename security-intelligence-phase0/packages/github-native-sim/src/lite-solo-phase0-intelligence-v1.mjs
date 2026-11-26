@@ -1137,6 +1137,10 @@ async function main(){
       limitations:[detail],requiredSemanticReview:true};
     console.error('Mythril symbolic analysis incomplete: '+detail);
   }
+  // Bind reviewer report wrappers to the exact admitted archive and build; native detector records stay unchanged.
+  const reviewSourceIdentity={requestId:request.requestId,repository:request.source.repository,
+    commit:request.source.commit,archivePath:request.source.archivePath,archiveSha256Observed:observed,
+    buildConfigurationDigestSha256:executionBuildArtifacts.buildConfigurationDigestSha256};
   // Fourth scanner: independent, source-only remediation review. Do not send
   // this report into Source Intelligence, formal jobs or automated reproduction.
   // Run automatically for admitted defensive source reviews; no opt-in flag.
@@ -1204,7 +1208,7 @@ async function main(){
       report.error=String(error?.message??error);
       console.error('Semgrep independent review incomplete: '+report.error);
     }finally{
-      await fs.writeFile(path.join(reportDir,'SEMGREP_v1.json'),JSON.stringify(report,null,2)+'\n');
+      await fs.writeFile(path.join(reportDir,'SEMGREP_v1.json'),JSON.stringify({...report,reviewSourceIdentity},null,2)+'\n');
     }
   }
   // Compiler-native arithmetic and assertion review of CurveYield source.
@@ -1321,7 +1325,7 @@ async function main(){
       });
     }catch(error){report.error=String(error?.message??error);console.error('SMTChecker review incomplete: '+report.error);}
     finally{
-      await fs.writeFile(path.join(reportDir,'SMTCHECKER_v1.json'),JSON.stringify(report,null,2)+'\n');
+      await fs.writeFile(path.join(reportDir,'SMTCHECKER_v1.json'),JSON.stringify({...report,reviewSourceIdentity},null,2)+'\n');
       console.error('SMTChecker review status: '+JSON.stringify({componentStatus:report.componentStatus,
         units:report.units.map(u=>({compilerVersion:u.compilerVersion,status:u.status,solverProbe:u.solverProbe,diagnosticCounts:u.diagnosticCounts,error:u.error}))}));
     }
@@ -1351,9 +1355,9 @@ async function main(){
     ['BUILD_AND_SOURCE_IDENTITY_v1.json',buildIdentity],
     ['PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json',executionBuildArtifacts],
     ['SBOM_v1.json',sbom],
-    ['SLITHER_v1.json',slither],
-    ['WAKE_v1.json',wake],
-    ['MYTHRIL_v1.json',mythril],
+    ['SLITHER_v1.json',{...slither,reviewSourceIdentity}],
+    ['WAKE_v1.json',{...wake,reviewSourceIdentity}],
+    ['MYTHRIL_v1.json',{...mythril,reviewSourceIdentity}],
     ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence],
     ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness],
     ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',deployConfigExecution]

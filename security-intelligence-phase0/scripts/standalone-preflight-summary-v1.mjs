@@ -55,8 +55,16 @@ const canonical=value=>{
 const plainObject=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const nonempty=v=>typeof v==='string'&&v.length>0;
 const sha256String=v=>typeof v==='string'&&/^[a-f0-9]{64}$/i.test(v);
-const sourceBound=sourceMatches&&sha256String(expected)&&nonempty(request?.source?.commit)&&
-  build?.source?.commit===request.source.commit&&build?.build?.status==='completed';
+const sourceBound=sourceMatches&&sha256String(expected)&&nonempty(request?.requestId)&&
+  nonempty(request?.source?.repository)&&nonempty(request?.source?.archivePath)&&
+  nonempty(request?.source?.commit)&&build?.requestId===request.requestId&&
+  build?.source?.repository===request.source.repository&&build?.source?.archivePath===request.source.archivePath&&
+  build?.source?.commit===request.source.commit&&build?.source?.checkoutCommit===request.source.commit&&
+  build?.source?.archiveSha256===expected&&build?.build?.status==='completed'&&
+  sha256String(build?.build?.buildConfigurationDigestSha256);
+const binding=sourceBound?{requestId:request.requestId,repository:request.source.repository,
+  commit:request.source.commit,archivePath:request.source.archivePath,archiveSha256Observed:expected,
+  buildConfigurationDigestSha256:build.build.buildConfigurationDigestSha256}:null;
 const reportPaths={
   slither:path.join(dir,'SLITHER_v1.json'),wake:path.join(dir,'WAKE_v1.json'),
   mythril:path.join(dir,'MYTHRIL_v1.json'),
@@ -64,9 +72,10 @@ const reportPaths={
   smtchecker:path.join(path.dirname(dir),'smtchecker-review','SMTCHECKER_v1.json')
 };
 function sourceReportMatches(report,engine){
-  if(!sourceBound||!plainObject(report))return false;
+  if(!sourceBound||!plainObject(report)||report.backend!==({smtchecker:'solidity-smtchecker'}[engine]??engine)||
+    !plainObject(report.reviewSourceIdentity)||canonical(report.reviewSourceIdentity)!==canonical(binding))return false;
   if(engine==='semgrep'||engine==='smtchecker')return report.source?.repository===request.source.repository&&
-    report.source?.commit===request.source.commit&&report.source?.archiveSha256===expected;
+    report.source?.commit===request.source.commit&&report.source?.archivePath===request.source.archivePath&&report.source?.archiveSha256===expected;
   return report.sourceCommit===request.source.commit;
 }
 function fullLocation(v){
@@ -76,13 +85,16 @@ function fullLocation(v){
 function identityComplete(engine,entry,report){
   if(!plainObject(entry))return false;
   if(engine==='slither')return build?.build?.compilationUnitCount===1&&nonempty(entry.check)&&
-    Array.isArray(entry.elements)&&entry.elements.length>0&&entry.elements.every(e=>fullLocation(e?.source_mapping));
+    nonempty(entry.id)&&Array.isArray(entry.elements)&&entry.elements.length>0&&
+    entry.elements.every(e=>fullLocation(e?.source_mapping));
   if(engine==='wake')return nonempty(entry.detector_name)&&nonempty(entry.unitId)&&
     plainObject(entry.detection?.location)&&Object.keys(entry.detection.location).length>0&&
     Array.isArray(report.unitResults)&&report.unitResults.some(u=>u?.unitId===entry.unitId&&u?.status==='COMPLETED');
   if(engine==='mythril')return nonempty(entry.qualifiedName)&&nonempty(entry.sourceName)&&
     sha256String(entry.runtimeBytecodeSha256)&&nonempty(entry['swc-id']??entry.title)&&
-    Number.isSafeInteger(entry.address)&&entry.address>=0;
+    Number.isSafeInteger(entry.address)&&entry.address>=0&&Array.isArray(report.contractResults)&&
+    report.contractResults.some(c=>c?.qualifiedName===entry.qualifiedName&&
+      c?.bytecodeDigestSha256===entry.runtimeBytecodeSha256&&c?.status==='COMPLETED');
   if(engine==='semgrep'){
     const name=typeof entry.path==='string'?entry.path.replace(/^\.\//,''):'';
     return nonempty(entry.check_id)&&nonempty(name)&&Number.isSafeInteger(entry.start?.offset)&&
@@ -100,35 +112,47 @@ function nativeEntries(engine,report){
       record,ref:'/units/'+u+'/diagnostics/'+i})));
   }
   const root=engine==='semgrep'?report?.nativeReport?.results:report?.detectors;
-  if(!Array.isArray(root))return null;
+  if(!Array.isArray(root)){
+    // Semgrep may legitimately have no eligible input and no native results.
+    if(engine==='semgrep'&&report?.status==='NOT_APPLICABLE'&&report.findingCount===0&&
+      Array.isArray(report.sourceDigests)&&report.sourceDigests.length===0)return [];
+    return null;
+  }
   return root.map((record,i)=>({record,ref:(engine==='semgrep'?'/nativeReport/results/':'/detectors/')+i}));
 }
 const dedup={schemaVersion:'curveyield-phase0-review-duplicate-index-v1',
   purpose:'Defensive reviewer presentation only',sourceArchiveSha256:expected,
-  sourceAdmissionVerified:sourceBound,notSecurityVerdict:true,
+  sourceAdmissionVerified:sourceMatches,reviewSourceBindingVerified:sourceBound,
+  reviewSourceIdentity:binding,notSecurityVerdict:true,
   policy:'SAME_ENGINE_CANONICAL_FULL_RECORD_EQUALITY_WITH_SOURCE_AND_CONTEXT',
   crossEngineAutomaticMerges:0,nativeReportsPreserved:true,engines:[]};
 for(const [engine,file] of Object.entries(reportPaths)){
-  let raw=null,report=null;
-  try{raw=fs.readFileSync(file);report=JSON.parse(raw.toString('utf8'));}catch{}
+  let raw=null,report=null,readStatus='MISSING';
+  try{raw=fs.readFileSync(file);readStatus='MALFORMED';report=JSON.parse(raw.toString('utf8'));
+    if(plainObject(report))readStatus='READABLE';
+  }catch(error){if(!raw&&error?.code!=='ENOENT')readStatus='READ_ERROR';}
   const items=nativeEntries(engine,report);
   const status=report?.componentStatus??report?.status??null;
   const bound=sourceReportMatches(report,engine);
   const valid=Array.isArray(items);
   const complete=bound&&valid&&status==='COMPLETED'&&
     (engine==='smtchecker'||report.findingCount===items.length);
-  const stats={engine,reportFile:path.basename(file),reportSha256:raw?digest(raw):null,
-    nativeStatus:status,sourceIdentityVerified:bound,recordType:engine==='smtchecker'?'diagnostic':'finding',
+  const stats={engine,reportFile:path.basename(file),
+    reportPath:path.relative(path.dirname(dir),file).split(path.sep).join('/'),reportSha256:raw?digest(raw):null,
+    reportReadStatus:readStatus,nativeStatus:status,sourceIdentityVerified:bound,
+    nativeRecordCountVerified:complete,recordType:engine==='smtchecker'?'diagnostic':'finding',
     rawRecordCount:valid?items.length:null,reviewRecordCount:valid?items.length:null,
     duplicateCount:0,eligibleRecordCount:0,unmergedIncompleteIdentityCount:0,
-    duplicateGroups:[],disposition:!valid?'UNAVAILABLE':!complete?'RETAIN_ALL_UNVERIFIED_OR_INCOMPLETE':
+    duplicateGroups:[],retainedRefs:valid?items.map(x=>x.ref):null,
+    disposition:!valid?'UNAVAILABLE':bound&&status==='NOT_APPLICABLE'&&items.length===0?'NOT_APPLICABLE':
+      !complete?'RETAIN_ALL_UNVERIFIED_OR_INCOMPLETE':
       engine==='smtchecker'?'RETAIN_ALL_ABBREVIATED_DIAGNOSTICS':'EXACT_DUPLICATE_REVIEW'};
   if(complete&&engine!=='smtchecker'){
     const seen=new Map();
     for(const {record,ref} of items){
       if(!identityComplete(engine,record,report)){stats.unmergedIncompleteIdentityCount++;continue;}
       stats.eligibleRecordCount++;
-      const key=canonical([engine,expected,request.source.commit,record]);
+      const key=canonical([engine,binding,record]);
       // Use the entire canonical string for equivalence; the digest is only
       // the stable display identifier, not the sole basis for a merge.
       const prior=seen.get(key);
@@ -138,16 +162,29 @@ for(const [engine,file] of Object.entries(reportPaths)){
       }else seen.set(key,{fingerprint:digest(key),representativeRef:ref,duplicateRefs:[]});
     }
     stats.duplicateGroups=[...seen.values()].filter(g=>g.duplicateRefs.length);
-    stats.reviewRecordCount=stats.rawRecordCount-stats.duplicateCount;
+    const mergedRefs=new Set(stats.duplicateGroups.flatMap(g=>g.duplicateRefs));
+    stats.retainedRefs=stats.retainedRefs.filter(ref=>!mergedRefs.has(ref));
+    stats.reviewRecordCount=stats.retainedRefs.length;
+    // Reconcile every record before accepting the presentation reduction.
+    if(stats.reviewRecordCount+stats.duplicateCount!==stats.rawRecordCount){
+      stats.duplicateGroups=[];stats.duplicateCount=0;
+      stats.retainedRefs=items.map(x=>x.ref);stats.reviewRecordCount=items.length;
+      stats.disposition='RETAIN_ALL_RECONCILIATION_FAILED';
+    }
   }
   dedup.engines.push(stats);
 }
 const available=dedup.engines.filter(x=>x.recordType==='finding'&&x.rawRecordCount!==null);
 dedup.totals={availableFindingReports:available.length,expectedFindingReports:4,
+  verifiedFindingReports:available.filter(x=>x.nativeRecordCountVerified).length,
+  notApplicableFindingReports:available.filter(x=>x.disposition==='NOT_APPLICABLE').length,
+  unverifiedFindingReports:available.filter(x=>!x.nativeRecordCountVerified&&x.disposition!=='NOT_APPLICABLE').length,
+  missingFindingReports:4-available.length,
   rawFindingCount:available.reduce((n,x)=>n+x.rawRecordCount,0),
   reviewFindingCount:available.reduce((n,x)=>n+x.reviewRecordCount,0),
   exactDuplicateCount:available.reduce((n,x)=>n+x.duplicateCount,0),
-  smtcheckerDiagnosticCount:dedup.engines.find(x=>x.engine==='smtchecker').rawRecordCount};
+  smtcheckerDiagnosticCount:dedup.engines.find(x=>x.engine==='smtchecker').rawRecordCount,
+  smtcheckerDiagnosticsConsolidated:0};
 fs.writeFileSync(path.join(dir,'REVIEW_DUPLICATE_INDEX_v1.json'),JSON.stringify(dedup,null,2)+'\n');
 console.log('Phase 0 exact duplicate review: '+JSON.stringify(dedup.totals));
 const names=fs.readdirSync(dir).filter(x=>x.endsWith('.json')&&x!=='PREFLIGHT_MANIFEST_v1.json').sort();
