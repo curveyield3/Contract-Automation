@@ -2,7 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import unzipper from 'unzipper';
 import { checkoutExactSource, runProcess } from './execution.mjs';
 import { buildProject } from '../../runner/src/build-dispatch.mjs';
@@ -1247,19 +1247,45 @@ async function main(){
         function invokeNative(compiler,args,input,timeout){
           return new Promise((resolve,reject)=>{
             const started=Date.now();
-            let healthTimer;
-            const child=execFile(compiler,args,{cwd:stageDir,env:compilerEnv,encoding:'utf8',
-              timeout,killSignal:'SIGKILL',maxBuffer:16*1024*1024},(error,stdout)=>{
+            const maxBuffer=16*1024*1024;
+            let healthTimer,wallTimer,failure=null,settled=false,stdoutBytes=0,stderrBytes=0;
+            const chunks=[];
+            const child=spawn(compiler,args,{cwd:stageDir,env:compilerEnv,detached:true,
+              stdio:['pipe','pipe','pipe']});
+            const terminateGroup=()=>{
+              if(!child.pid)return;
+              try{process.kill(-child.pid,'SIGKILL');}
+              catch(error){if(error.code!=='ESRCH')console.error('Native process group cleanup failed: '+String(error.code??'UNKNOWN'));}
+            };
+            const stop=reason=>{
+              if(!failure)failure=reason;
+              terminateGroup();
+            };
+            const finish=(code,signal,error)=>{
+              if(settled)return;
+              settled=true;
+              clearTimeout(wallTimer);
               clearInterval(healthTimer);
-              if(error){
-                const elapsed=Date.now()-started;
-                const failure=error.code==='ERR_CHILD_PROCESS_STDIO_MAXBUFFER'?'OUTPUT_LIMIT':
-                  error.killed&&error.signal==='SIGKILL'&&elapsed>=timeout?'WALL_TIMEOUT':'NATIVE_PROCESS_FAILURE';
-                reject(Error('Compiler invocation failed: '+failure+' elapsed_ms='+elapsed+
-                  ' exit_code='+String(error.code??'none')+' signal='+String(error.signal??'none')));
-              }else resolve(stdout);
+              if(failure||error||code!==0){
+                terminateGroup();
+                reject(Error('Compiler invocation failed: '+(failure??'NATIVE_PROCESS_FAILURE')+
+                  ' elapsed_ms='+(Date.now()-started)+' exit_code='+String(code??error?.code??'none')+
+                  ' signal='+String(signal??'none')));
+              }else resolve(Buffer.concat(chunks).toString('utf8'));
+            };
+            wallTimer=setTimeout(()=>stop('WALL_TIMEOUT'),timeout);
+            child.stdout.on('data',chunk=>{
+              stdoutBytes+=chunk.length;
+              if(stdoutBytes>maxBuffer)stop('OUTPUT_LIMIT');
+              else if(!failure)chunks.push(chunk);
             });
-            // Log process health, not source, solver queries or witness output.
+            child.stderr.on('data',chunk=>{
+              stderrBytes+=chunk.length;
+              if(stderrBytes>maxBuffer)stop('OUTPUT_LIMIT');
+            });
+            child.on('error',error=>finish(null,null,error));
+            child.on('close',(code,signal)=>finish(code,signal,null));
+            // Report only parent process health; never capture solver queries or witnesses.
             if(timeout>=60000&&child.pid){
               healthTimer=setInterval(async()=>{
                 try{
@@ -1272,8 +1298,8 @@ async function main(){
               },10000);
               healthTimer.unref?.();
             }
-            child.stdin?.on('error',()=>{}); // process completion owns failure reporting
-            child.stdin?.end(input);
+            child.stdin.on('error',()=>{}); // process completion owns failure reporting
+            child.stdin.end(input);
           });
         }
         async function invoke(compiler,input,timeout){
