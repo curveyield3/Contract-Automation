@@ -1218,7 +1218,7 @@ async function main(){
     const report={schemaVersion:'curveyield-smtchecker-correctness-review-v1',backend:'solidity-smtchecker',
       source:request.source,authoritativeFinding:false,componentStatus:'FAILED',
       engines:['CHC','BMC'],solver:'z3',targets:['assert','underflow','overflow','divByZero'],
-      queryTimeoutMilliseconds:50,unitWallTimeoutMilliseconds:90000,
+      queryTimeoutMilliseconds:1000,unitWallTimeoutMilliseconds:90000,
       units:[],limitations:[]};
     await fs.mkdir(reportDir,{recursive:true});
     try{
@@ -1267,6 +1267,8 @@ async function main(){
           const rec={unitId:unit.unitId??String(index),compilerVersion:version,sourceCount:inScope.length,
             status:'FAILED',sourceDigests:[],diagnosticCounts:{proved:0,unproved:0,warning:0,unsupported:0},diagnostics:[]};
           report.units.push(rec);
+          const unitStarted=Date.now();
+          let analysisStarted=null,analysisInput=null,analysisCompiler=null;
           try{
             const match=version.match(/^0\.8\.(\d+)$/);
             if(!match||Number(match[1])<14){
@@ -1312,7 +1314,15 @@ async function main(){
             const input={language:'Solidity',sources,settings};
             rec.inputSha256=sha256(Buffer.from(JSON.stringify(input),'utf8'));
             rec.contractCount=Object.values(contracts).reduce((sum,entries)=>sum+entries.length,0);
+            rec.totalSourceCount=names.length;
+            rec.inputBytes=Buffer.byteLength(JSON.stringify(input),'utf8');
+            rec.preparationMilliseconds=Date.now()-unitStarted;
+            analysisInput=input;analysisCompiler=compiler;analysisStarted=Date.now();
+            console.error('SMTChecker unit start: '+JSON.stringify({unitId:rec.unitId,compilerVersion:version,
+              totalSourceCount:rec.totalSourceCount,sourceCount:rec.sourceCount,contractCount:rec.contractCount,
+              inputBytes:rec.inputBytes,preparationMilliseconds:rec.preparationMilliseconds}));
             const diagnostics=await invoke(compiler,input,report.unitWallTimeoutMilliseconds);
+            rec.analysisMilliseconds=Date.now()-analysisStarted;
             for(const d of diagnostics){
               // Keep correctness status and diagnostic identity, not generated witnesses.
               const message=String(d.message??'');
@@ -1327,7 +1337,27 @@ async function main(){
             // Execution completion is independent of the diagnostic outcome.
             // Unproved properties and warnings are review candidates, not scanner failures.
             rec.status='COMPLETED';
-          }catch(error){rec.error=String(error?.message??error);console.error('SMTChecker unit incomplete: '+rec.error);}
+          }catch(error){
+            rec.error=String(error?.message??error);
+            if(analysisStarted!==null)rec.analysisMilliseconds=Date.now()-analysisStarted;
+            console.error('SMTChecker unit incomplete: '+JSON.stringify({unitId:rec.unitId,analysisMilliseconds:rec.analysisMilliseconds,error:rec.error}));
+            // On a compiler wall failure compare identical compilation input with
+            // model checking disabled. This diagnostic compiles only; no new analysis.
+            if(analysisInput&&analysisCompiler&&/wall timeout or output limit/.test(rec.error)){
+              const baselineStarted=Date.now();
+              try{
+                const baseline={...analysisInput,settings:{...analysisInput.settings,modelChecker:{engine:'none'}}};
+                await invoke(analysisCompiler,baseline,20000);
+                rec.compilerOnlyDiagnostic={status:'COMPLETED',elapsedMilliseconds:Date.now()-baselineStarted};
+              }catch(baselineError){
+                rec.compilerOnlyDiagnostic={status:'FAILED',elapsedMilliseconds:Date.now()-baselineStarted,
+                  error:String(baselineError?.message??baselineError)};
+              }
+              console.error('SMTChecker compiler-only diagnostic: '+JSON.stringify({unitId:rec.unitId,...rec.compilerOnlyDiagnostic}));
+            }
+          }finally{
+            rec.unitElapsedMilliseconds=Date.now()-unitStarted;
+          }
         }
         report.componentStatus=!report.units.length||report.units.every(u=>u.status==='NOT_APPLICABLE')?'NOT_APPLICABLE':
           report.units.some(u=>u.status==='FAILED')?'FAILED':
