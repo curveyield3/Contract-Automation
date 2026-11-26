@@ -46,9 +46,19 @@ if(!smtchecker||!['COMPLETED','NOT_APPLICABLE'].includes(smtchecker.componentSta
 const nativeReady=sourceMatches&&source&&build?.build?.status==='completed'&&slither?.componentStatus==='COMPLETED'&&
   (wakeComplete||wakeNotApplicable||wakeUnsupported)&&(mythrilComplete||mythrilNotApplicable);
 const status=!sourceMatches?'INCOMPLETE':!nativeReady?'PARTIAL':(wakeUnsupported||!['COMPLETED','NOT_APPLICABLE'].includes(smtchecker?.componentStatus))?'COLLECTED_WITH_ANALYZER_LIMITATION':'COLLECTED';
+// Correlation is derived evidence; its failure must not change native collection status.
+let correlation=null;
+try{
+  const {publishFindingCorrelation}=await import('./phase0-finding-correlation-v1.mjs');
+  correlation=publishFindingCorrelation(dir,request,build,source,{slither,wake,mythril,smtchecker});
+}catch(e){
+  fs.rmSync(path.join(dir,'PHASE0_FINDING_CORRELATION_v1.json'),{force:true});
+  fs.rmSync(path.join(dir,'PHASE0_FINDING_CORRELATION_v1.json.tmp'),{force:true});
+  warn('FINDING_CORRELATION_FAILED','PHASE0_FINDING_CORRELATION_v1.json','reversible native observation index',String(e?.message??e),'Inspect derived correlation; native reports remain authoritative');
+}
 const names=fs.readdirSync(dir).filter(x=>x.endsWith('.json')&&x!=='PREFLIGHT_MANIFEST_v1.json').sort();
 const files=names.map(name=>{const raw=fs.readFileSync(path.join(dir,name));return {name,bytes:raw.length,sha256:crypto.createHash('sha256').update(raw).digest('hex')};});
-const manifest={schemaVersion:'curveyield-security-clean-preflight-v1',status,notSecurityVerdict:true,sourceAdmissionVerified:sourceMatches,sourceOnly:build?.build?.status!=='completed',source:{repository:request?.source?.repository??null,commit:request?.source?.commit??null,archivePath:request?.source?.archivePath??null,expectedSha256:expected,observedSha256:actual},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,wakeStatus:wake?.componentStatus??wake?.status??null,wakeSolidityUnitCount:wake?.solidityUnitCount??null,wakeFindingCount:wake?.findingCount??null,mythrilStatus:mythril?.componentStatus??mythril?.status??null,mythrilEligibleCount:mythril?.eligibleCount??null,mythrilCompletedCount:mythril?.completedCount??null,mythrilFindingCount:mythril?.findingCount??null,smtcheckerStatus:smtchecker?.componentStatus??null,smtcheckerDiagnosticCount:smtchecker?.diagnosticCount??null,warnings,files};
+const manifest={schemaVersion:'curveyield-security-clean-preflight-v1',status,notSecurityVerdict:true,sourceAdmissionVerified:sourceMatches,sourceOnly:build?.build?.status!=='completed',source:{repository:request?.source?.repository??null,commit:request?.source?.commit??null,archivePath:request?.source?.archivePath??null,expectedSha256:expected,observedSha256:actual},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,wakeStatus:wake?.componentStatus??wake?.status??null,wakeSolidityUnitCount:wake?.solidityUnitCount??null,wakeFindingCount:wake?.findingCount??null,mythrilStatus:mythril?.componentStatus??mythril?.status??null,mythrilEligibleCount:mythril?.eligibleCount??null,mythrilCompletedCount:mythril?.completedCount??null,mythrilFindingCount:mythril?.findingCount??null,smtcheckerStatus:smtchecker?.componentStatus??null,smtcheckerDiagnosticCount:smtchecker?.diagnosticCount??null,correlation,warnings,files};
 fs.writeFileSync(path.join(dir,'PREFLIGHT_MANIFEST_v1.json'),JSON.stringify(manifest,null,2)+'\n');
 const lines=['# Clean standalone Phase 0 evidence','','Status: **'+status+'**','',...warnings.map(x=>'- '+x.code+': '+x.configurationField+' | expected: '+JSON.stringify(x.expected)+' | observed: '+JSON.stringify(x.observed)+' | correction: '+x.requiredCorrection),'','Not a deployed-fork proof or security verdict.'];
 fs.writeFileSync(path.join(dir,'DISCOVERY_SUMMARY_v1.md'),lines.join('\n')+'\n');
