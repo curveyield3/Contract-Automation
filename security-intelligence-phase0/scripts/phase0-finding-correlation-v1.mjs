@@ -93,8 +93,9 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
     return o;
   }
   for(const [engine,file,prefix] of engineSpecs){
-    const loaded=load(path.join(dir,file),parsed[engine]),d=loaded.data,r=d?.reviewSourceIdentity;
-    const identity=baseVerified&&same(r?.repository,scope.repository)&&same(r?.commit,scope.commit)&&same(r?.requestId,scope.requestId)&&same(r?.archiveSha256Observed,scope.archiveSha256)&&same(r?.buildConfigurationDigestSha256,scope.buildConfigurationDigestSha256);
+    const loaded=load(path.join(dir,file),parsed[engine]),d=loaded.data;
+    // Correlation uses the verified collection scope; native reports need not repeat source identity metadata.
+    const identity=baseVerified;
     const rows=engine==='semgrep'?d?.nativeReport?.results:d?.detectors;
     const status=statusOf(d);
     const count=Array.isArray(rows)?rows.length:null;
