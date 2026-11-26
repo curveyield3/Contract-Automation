@@ -13,8 +13,7 @@ const engineSpecs=[
   ['slither','SLITHER_v1.json','/detectors'],
   ['wake','WAKE_v1.json','/detectors'],
   ['mythril','MYTHRIL_v1.json','/detectors'],
-  ['semgrep','../semgrep-review/SEMGREP_v1.json','/nativeReport/results'],
-  ['smtchecker','SMTCHECKER_v1.json','/units']
+  ['semgrep','../semgrep-review/SEMGREP_v1.json','/nativeReport/results']
 ];
 function load(file,parsed){
   try{const bytes=fs.readFileSync(file);return {data:parsed??JSON.parse(bytes),sha256:sha(bytes),state:'READABLE'};}
@@ -90,17 +89,16 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
     const id=sha(JSON.stringify(reference));
     const o={id,engine:input.engine,reference,ruleId:fields.ruleId??null,version:fields.version??input.version,severity:fields.severity??null,claim:fields.claim??null,suppressed:fields.suppressed??null,anchors,provenance:input.provenance,...fields};
     observations.push(o);
-    if(input.engine==='smtchecker')diagnostics.push(id);
     claims.push({id:id+':0',observationId:id,scope:'WHOLE_NATIVE_RECORD',home:id});
     return o;
   }
   for(const [engine,file,prefix] of engineSpecs){
     const loaded=load(path.join(dir,file),parsed[engine]),d=loaded.data,r=d?.reviewSourceIdentity;
     const identity=baseVerified&&same(r?.repository,scope.repository)&&same(r?.commit,scope.commit)&&same(r?.requestId,scope.requestId)&&same(r?.archiveSha256Observed,scope.archiveSha256)&&same(r?.buildConfigurationDigestSha256,scope.buildConfigurationDigestSha256);
-    const rows=engine==='semgrep'?d?.nativeReport?.results:engine==='smtchecker'?d?.units:d?.detectors;
+    const rows=engine==='semgrep'?d?.nativeReport?.results:d?.detectors;
     const status=statusOf(d);
-    const count=Array.isArray(rows)?(engine==='smtchecker'?rows.reduce((n,u)=>n+arr(u.diagnostics).length,0):rows.length):null;
-    const reported=engine==='smtchecker'?d?.diagnosticCount:d?.findingCount;
+    const count=Array.isArray(rows)?rows.length:null;
+    const reported=d?.findingCount;
     const countMatches=reported==null?null:reported===count;
     const state=loaded.state!=='READABLE'?loaded.state:!Array.isArray(rows)?'UNSUPPORTED_LAYOUT':status==='NOT_APPLICABLE'?'NOT_APPLICABLE':String(status).includes('UNSUPPORTED')?'UNSUPPORTED':status!=='COMPLETED'||countMatches===false?'PARTIAL':count===0?'EMPTY':'COMPLETE';
     const input={engine,artifact:file,sha256:loaded.sha256,version:d?.version??null,status,state,count,reportedCount:reported??null,countMatches,provenance:identity?'VERIFIED':'UNVERIFIED',rulesRevision:d?.rulesRevision??null};
@@ -126,19 +124,13 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
       }else if(engine==='mythril'){
         const matches=arr(exec?.artifacts).filter(a=>a.qualifiedName===row?.qualifiedName&&a.deployedBytecodeDigestSha256===row?.runtimeBytecodeSha256&&(!row?.compilationUnitId||a.compilationUnitId===row.compilationUnitId));
         observation(input,pointer,row,[],{ruleId:row?.['swc-id']??row?.title,severity:row?.severity,claim:row?.title??null,runtime:{qualifiedName:row?.qualifiedName??null,sha256:row?.runtimeBytecodeSha256??null,pc:row?.address??null,unitId:matches.length===1?matches[0].compilationUnitId:null,locationStatus:matches.length===1?'FILE_ID_TABLE_NOT_RETAINED':'AMBIGUOUS_OR_UNBOUND_RUNTIME'}});
-      }else{
-        arr(row?.diagnostics).forEach((diag,j)=>{
-          const l=diag?.sourceLocation??{},a=anchor(l.file,l.start,l.end,'diagnostic',row.unitId);
-          const code=diag?.errorCode??diag?.code??null;
-          observation(input,pointer+'/diagnostics/'+j,diag,[a],{ruleId:code,version:row?.compilerVersion,severity:diag?.severity,claim:String(diag?.message??diag?.formattedMessage??'').split('\n')[0],unitStatus:row?.status??null,diagnosticClassification:diag?.severity==='error'?'ERROR':'UNCLASSIFIED_DIAGNOSTIC'});
-        });
       }
     });
   }
   // Grouping is an additive shadow view until the planned independent qualification.
   const decisions=[],groups=[],relatedLinks=[],byAnchor=new Map(),pairs=new Map();
   for(const o of observations){
-    if(o.provenance!=='VERIFIED'||o.engine==='smtchecker')continue;
+    if(o.provenance!=='VERIFIED')continue;
     for(const a of o.anchors){
       if(a.binding!=='RESOLVED'||a.role==='context')continue;
       const key=JSON.stringify([a.path,a.unitId,a.sourceSha256]);
@@ -203,18 +195,17 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
   const ids=new Set(observations.map(o=>o.id));
   if(ids.size!==observations.length||claims.length!==observations.length)throw Error('OBSERVATION_RECONCILIATION_FAILED');
   for(const input of inputs){
-    const report=reports.get(input.engine),native=input.engine==='semgrep'?report?.nativeReport?.results:input.engine==='smtchecker'?report?.units:report?.detectors;
+    const report=reports.get(input.engine),native=input.engine==='semgrep'?report?.nativeReport?.results:report?.detectors;
     const prefix=engineSpecs.find(x=>x[0]===input.engine)[2];
     const expected=new Set();
     if(Array.isArray(native))native.forEach((row,i)=>{
-      if(input.engine==='smtchecker')arr(row?.diagnostics).forEach((_,j)=>expected.add(prefix+'/'+i+'/diagnostics/'+j));
-      else expected.add(prefix+'/'+i);
+      expected.add(prefix+'/'+i);
     });
     const actual=observations.filter(o=>o.engine===input.engine).map(o=>o.reference.pointer);
     if(actual.length!==expected.size||new Set(actual).size!==actual.length||actual.some(p=>!expected.has(p)))throw Error('NATIVE_POINTER_SET_MISMATCH:'+input.engine);
   }
   const grouped=new Set(groups.flatMap(g=>g.members));
-  const result={schemaVersion:'curveyield-phase0-finding-correlation-v1',scope,notSecurityVerdict:true,mode:'SHADOW',inputs,observations,claims,groups,relatedLinks,decisions,coverage,diagnostics,counts:{nativeObservations:observations.length-diagnostics.length,diagnostics:diagnostics.length,shadowGroups:groups.length,shadowGroupedObservations:grouped.size,confirmedGroups:0,singletons:observations.length,relatedLinks:relatedLinks.length,abstentions:decisions.filter(d=>d.disposition==='ABSTAIN').length}};
+  const result={schemaVersion:'curveyield-phase0-finding-correlation-v1',scope,notSecurityVerdict:true,mode:'SHADOW',inputs,observations,claims,groups,relatedLinks,decisions,coverage,diagnostics,counts:{nativeObservations:observations.length,diagnostics:diagnostics.length,shadowGroups:groups.length,shadowGroupedObservations:grouped.size,confirmedGroups:0,singletons:observations.length,relatedLinks:relatedLinks.length,abstentions:decisions.filter(d=>d.disposition==='ABSTAIN').length}};
   const target=path.join(dir,output),temp=target+'.tmp';
   fs.writeFileSync(temp,JSON.stringify(result,null,2)+'\n');fs.renameSync(temp,target);
   return result.counts;
