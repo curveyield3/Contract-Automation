@@ -1,4 +1,4 @@
-name: Exact queued nonce37 stale-address diagnosis v31
+name: Refreshed nonce37 exact batch simulation v32
 on:
   push:
     branches: [cyvlsdt-v69-postdeploy-simulation-v1]
@@ -22,7 +22,7 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Diagnose unchanged Safe batch on isolated Ethereum fork
+      - name: Validate refreshed Safe batch on isolated Ethereum fork
         shell: bash
         run: |
           set -euo pipefail
@@ -54,18 +54,24 @@ jobs:
             assert.notEqual(await p.getCode(SAFE),'0x');assert.notEqual(await p.getCode(MULTI),'0x');
             assert.equal(await safe.nonce(),37n);assert.equal(await safe.getThreshold(),1n);assert((await safe.getOwners()).includes(OWNER));
             assert.equal(await safe.getTransactionHash(...args(ORIGINAL),37n),EXPECTED);
-            const packed=E.getBytes(mi.decodeFunctionData('multiSend',ORIGINAL)[0]);let i=0,list=[];
-            while(i<packed.length){const len=Number(E.toBigInt(packed.slice(i+53,i+85))),end=i+85+len;assert(end<=packed.length);list.push({raw:E.hexlify(packed.slice(i,end)),to:E.hexlify(packed.slice(i+1,i+21)),selector:E.hexlify(packed.slice(i+85,i+89))});i=end;}
-            assert.equal(i,packed.length);assert.equal(list.length,22);
-            const prefix=n=>mi.encodeFunctionData('multiSend',[E.concat(list.slice(0,n).map(x=>x.raw))]);assert.equal(prefix(22),ORIGINAL);
-            console.log('DIAG37_ID '+J({block:b.number,hash:b.hash,safeHash:EXPECTED,callCount:list.length,calldataHash:E.keccak256(ORIGINAL)}));
-            const tx=d=>({from:OWNER,to:SAFE,data:si.encodeFunctionData('execTransaction',[...args(d),sig]),gas:E.toQuantity(16777216)});
-            async function check(n){try{const result=await p.send('eth_call',[tx(prefix(n)),'latest']);const pass=si.decodeFunctionResult('execTransaction',result)[0];console.log('DIAG37_PREFIX '+J({n,pass,to:list[n-1].to,selector:list[n-1].selector}));return pass;}catch(e){console.log('DIAG37_PREFIX '+J({n,pass:false,to:list[n-1].to,selector:list[n-1].selector,error:String(e.shortMessage||e.message).slice(0,250),revert:e.data||e.info?.error?.data||null}));return false;}}
-            if(await check(22)){console.log('DIAG37_RESULT '+J({status:'FULL_PASS'}));return;}
-            let low=0,high=22;while(high-low>1){const mid=Math.floor((low+high)/2);if(await check(mid))low=mid;else high=mid;}
-            if(low>0)assert(await check(low));assert.equal(await check(high),false);
-            console.log('DIAG37_RESULT '+J({status:'REVERT_REPRODUCED',lastPassingPrefix:low,firstFailingCall:high,to:list[high-1].to,selector:list[high-1].selector}));
-            try{const t=await p.send('debug_traceCall',[tx(prefix(high)),'latest',{tracer:'callTracer'}]);const failed=[];function walk(x,depth=0){if(x.error||x.revertReason)failed.push({depth,to:x.to,selector:x.input?.slice(0,10),error:x.error,reason:x.revertReason,output:x.output?.slice(0,514)});for(const c of x.calls||[])walk(c,depth+1);}walk(t);console.log('DIAG37_TRACE '+J(failed));}catch(e){console.log('DIAG37_TRACE_UNAVAILABLE '+String(e.shortMessage||e.message).slice(0,250));}
+            const factory=E.getAddress('0x6a8cbed756804b16e05e741edabd5cb544ae21bf'),oldPool='0424ce0f70430cc4da40fa1a73dda4a6466c88a9',pol=E.getAddress('0xad60c84f4addec612ce6bd329435d5718a4d9b7a');
+            const factoryNonce=await p.getTransactionCount(factory),pool=E.getCreateAddress({from:factory,nonce:factoryNonce});
+            assert.equal(await p.getCode(pool),'0x');assert.equal(ORIGINAL.toLowerCase().split(oldPool).length-1,5);
+            const refreshed=ORIGINAL.toLowerCase().replaceAll(oldPool,pool.slice(2).toLowerCase());
+            const unpack=d=>{const packed=E.getBytes(mi.decodeFunctionData('multiSend',d)[0]);let i=0,list=[];while(i<packed.length){const len=Number(E.toBigInt(packed.slice(i+53,i+85))),end=i+85+len;assert(end<=packed.length);list.push(E.hexlify(packed.slice(i,end)));i=end;}assert.equal(i,packed.length);return list;};
+            const originalCalls=unpack(ORIGINAL),updatedCalls=unpack(refreshed);assert.equal(originalCalls.length,22);assert.equal(updatedCalls.length,22);
+            const changed=updatedCalls.map((c,i)=>c!==originalCalls[i]?i+1:null).filter(Boolean);assert.deepEqual(changed,[15,16,17,18,19]);
+            const hash=await safe.getTransactionHash(...args(refreshed),37n);console.log('REFRESH37_PLAN '+J({block:b.number,blockHash:b.hash,factoryNonce,pool,hash,calldataHash:E.keccak256(refreshed),changed,callCount:22}));
+            await p.send('anvil_impersonateAccount',[OWNER]);await p.send('anvil_setBalance',[OWNER,E.toQuantity(100n*10n**18n)]);
+            const signer=await p.getSigner(OWNER),wSafe=safe.connect(signer),gasLimit=16777216n;
+            const gas=await wSafe.execTransaction.estimateGas(...args(refreshed),sig,{gasLimit});assert(gas<=gasLimit);
+            assert(await wSafe.execTransaction.staticCall(...args(refreshed),sig,{gasLimit}));
+            const receipt=await(await wSafe.execTransaction(...args(refreshed),sig,{gasLimit})).wait();assert.equal(receipt.status,1);assert.equal(await safe.nonce(),38n);
+            const cp=new E.Contract(pool,['function coins(uint256) view returns(address)','function balanceOf(address) view returns(uint256)','function totalSupply() view returns(uint256)'],p);
+            const coins=await Promise.all([0,1,2].map(i=>cp.coins(i)));assert.deepEqual(coins.map(x=>x.toLowerCase()),['0x73968b9a57c6e53d41345fd57a6e6ae27d6cdb2f','0x4abc523b4eab1fad413018711de14ccd8843d839','0x24e1c62ad8c10a655da1b74e42b08a388e34e990']);
+            const manager=new E.Contract(pol,['function curvePool() view returns(address)'],p);assert.equal(await manager.curvePool(),pool);
+            const lp=await cp.balanceOf(pol);assert(lp>=297n*10n**17n);
+            console.log('REFRESH37_PASS '+J({hash,pool,gasEstimate:gas,gasUsed:receipt.gasUsed,lp,coins,localReceipt:receipt.hash}));
           }
           main().catch(e=>{console.error(e);process.exitCode=1});
           JS
