@@ -415,9 +415,14 @@ export async function compileRepoNativeHardhat({
   // view above is only a deterministic discovery index, not an AST substitute.
   const perUnitAsts = await Promise.all((await buildInfoFiles(projectRoot, fsApi)).map(async absolute => {
     const parsed = JSON.parse(await fsApi.readFile(absolute, 'utf8'));
-    return Object.fromEntries(Object.entries(parsed?.output?.sources ?? {})
-      .filter(([,source]) => source?.ast)
-      .map(([name,source]) => [name,source.ast]));
+    return {
+      asts:Object.fromEntries(Object.entries(parsed?.output?.sources ?? {})
+        .filter(([,source]) => source?.ast)
+        .map(([name,source]) => [name,source.ast])),
+      hashes:Object.fromEntries(Object.entries(parsed?.input?.sources ?? {})
+        .filter(([,source]) => typeof source?.content==='string')
+        .map(([name,source]) => [name,createHash('sha256').update(source.content,'utf8').digest('hex')]))
+    };
   }));
   const sources = await solidityInventory(projectRoot, fsApi);
   return {
@@ -443,7 +448,8 @@ export async function compileRepoNativeHardhat({
       sourceContents:Object.fromEntries((info.sourceNames??[]).map(name=>[name,null])),
       // Never substitute a different compiler unit's AST, even for identical
       // source text: node/source IDs are profile-local.
-      sourceAsts:perUnitAsts[index],
+      sourceAsts:perUnitAsts[index].asts,
+      sourceAstContentSha256:perUnitAsts[index].hashes,
       artifacts:artifacts.filter(a=>(info.artifactQualifiedNames??[]).includes(`${a.sourceName}:${a.contractName}`))
     })),
     artifacts,

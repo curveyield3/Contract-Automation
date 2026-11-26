@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { digestCanonicalV1 } from './canonical-json-v1.mjs';
 import { generateBuildSbomV1 } from './sbom-v1.mjs';
+import { collectCanonicalAstIndex } from './phase0-ast-anchors-v1.mjs';
 
 const SKIP = new Set(['.git','node_modules','artifacts','cache','out','dist','build','.audit-hermetic-build','.audit-slither-export','.deep-assurance-work','.deep-assurance-work-v2']);
 const sha256 = (v) => createHash('sha256').update(v).digest('hex');
@@ -404,12 +405,15 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
 
   if(!wake||!['COMPLETED','NOT_APPLICABLE'].includes(wake.componentStatus)) limitations.push({limitationId:`SI-TECH-LIM-${pad(limitations.length+1)}`,category:'STATIC_RECON_LIMITATION',
     affectedSections:['staticRecon.wake'],reason:`Wake native detector status was ${wake?.status??'UNAVAILABLE'}.`,downstreamRequiredAction:'Review WAKE_v1.json failures; do not treat an incomplete scan as zero findings.'});
+  let canonicalAstIndex;
+  try{canonicalAstIndex=collectCanonicalAstIndex(build,sourceFiles);}
+  catch(e){canonicalAstIndex={schemaVersion:'curveyield-canonical-ast-index-v1',status:'UNAVAILABLE',nodes:[],coverage:[],diagnostic:String(e?.message??e)};}
   const bundle={
     schemaVersion:'curveyield-v7-source-intelligence-technical-bundle-v1',artifactType:'SOURCE_INTELLIGENCE_TECHNICAL_BUNDLE',
     neutrality:{securityDisposition:'REVIEWER_REQUIRED',findingPromotion:'FORBIDDEN_BY_GENERATOR',statement:'Compiler/source/static facts and neutral candidates only; no finding, severity, exploitability, or trust conclusion.'},
     requestIdentity:{requestId:request.requestId,requestDigest:request.requestDigest,campaignId:request.campaignId,assignmentId:request.assignmentId,phaseId:request.phaseId,profileId:request.profileId},
     sourceIdentity,buildIdentity:{...buildCore,digestSha256:digestCanonicalV1(buildCore)},sourceFiles,compilerArtifacts,contracts,functions,storageLayout,inheritanceGraph,
-    callGraph,privilegeCandidates,externalInterfaces,valueFlowCandidates,eventsAndErrors,sourceAnchors,
+    callGraph,privilegeCandidates,externalInterfaces,valueFlowCandidates,eventsAndErrors,sourceAnchors,canonicalAstIndex,
     securitySurfaces:[
       {surfaceId:'SURFACE-CALLABLE',surfaceClass:'CALLABLE_SURFACE',sourceIds:sourceFiles.map(x=>x.sourceId),contractIds:contracts.map(x=>x.contractId),functionIds:functions.filter(x=>x.visibility!=='STATE_INITIALIZER').map(x=>x.functionId),
         storageIds:storageLayout.map(x=>x.storageId),externalInterfaceIds:externalInterfaces.map(x=>x.externalInterfaceId),privilegeCandidateIds:privilegeCandidates.map(x=>x.candidateId),valueFlowCandidateIds:valueFlowCandidates.map(x=>x.valueFlowCandidateId),sourceAnchorIds:sourceAnchors.map(x=>x.anchorId),

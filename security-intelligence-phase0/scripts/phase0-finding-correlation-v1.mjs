@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {createCanonicalAnchorIndex} from '../packages/github-native-sim/src/phase0-ast-anchors-v1.mjs';
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
 const arr=x=>Array.isArray(x)?x:[];
 const digest=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
@@ -226,6 +227,41 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
       }
     });
   }
+  // Optional AST annotations are an additive report-review view. Failure here
+  // must not affect native record reconciliation or the existing equality rule.
+  let canonicalAst={status:'UNAVAILABLE',indexedNodes:0,resolvedAnchors:0,unresolvedAnchors:0,candidates:[]};
+  try{
+    const index=createCanonicalAnchorIndex(baseVerified?source?.canonicalAstIndex:null,{units,files,readSource:sourceBytes});
+    const roles={variable:['VariableDeclaration'],function:['FunctionDefinition','ModifierDefinition'],contract:['ContractDefinition']};
+    const buckets=new Map();
+    for(const o of observations){
+      // Only the existing rule's detector mapping is known here. Other semantic
+      // category mappings are deliberately deferred to rule qualification.
+      const known=o.engine==='slither'&&o.version==='0.11.6'&&o.ruleId==='unused-return'||o.engine==='wake'&&o.version==='4.21.0'&&o.ruleId==='unchecked-return-value';
+      o.canonicalAnchors=[];
+      for(const [anchorIndex,a] of o.anchors.entries()){
+        const issueRole=a.role!=='context'&&(o.engine==='slither'&&a.role==='node'||o.engine==='wake'&&a.role==='primary');
+        const types=known&&issueRole?['FunctionCall']:roles[a.role]??[];
+        const result=index.resolve(a,{expectedTypes:types});
+        o.canonicalAnchors.push({anchorIndex,role:a.role,...result});
+        if(result.status==='RESOLVED'){
+          canonicalAst.resolvedAnchors++;
+          if(known&&issueRole&&result.node.nodeType==='FunctionCall'){
+            const k=JSON.stringify(['DISCARDED_RETURN',result.node.key]);
+            if(!buckets.has(k))buckets.set(k,new Map());
+            buckets.get(k).set(o.id,o.engine);
+          }
+        }else canonicalAst.unresolvedAnchors++;
+      }
+    }
+    canonicalAst.candidates=[...buckets].filter(([,members])=>new Set(members.values()).size>1)
+      .map(([identity,members])=>({identity,observationIds:[...members.keys()].sort(),disposition:'REVIEW_CANDIDATE_ONLY'}))
+      .sort((a,b)=>a.identity.localeCompare(b.identity));
+    canonicalAst={...canonicalAst,...index.stats,status:index.stats.indexedNodes?source.canonicalAstIndex.status:'UNAVAILABLE'};
+  }catch(e){
+    for(const o of observations)delete o.canonicalAnchors;
+    canonicalAst={status:'UNAVAILABLE',indexedNodes:0,resolvedAnchors:0,unresolvedAnchors:observations.reduce((n,o)=>n+o.anchors.length,0),candidates:[],diagnostic:String(e?.message??e)};
+  }
   // Grouping is an additive shadow view until the planned independent qualification.
   const decisions=[],groups=[],relatedLinks=[],byAnchor=new Map(),pairs=new Map();
   for(const o of observations){
@@ -305,7 +341,7 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
     if(actual.length!==expected.size||new Set(actual).size!==actual.length||actual.some(p=>!expected.has(p)))throw Error('NATIVE_POINTER_SET_MISMATCH:'+input.engine);
   }
   const grouped=new Set(groups.flatMap(g=>g.members));
-  const result={schemaVersion:'curveyield-phase0-finding-correlation-v1',scope,notSecurityVerdict:true,mode:'SHADOW',inputs,observations,claims,groups,relatedLinks,decisions,coverage,diagnostics,counts:{nativeObservations:observations.length,diagnostics:diagnostics.length,shadowGroups:groups.length,shadowGroupedObservations:grouped.size,confirmedGroups:0,singletons:observations.length,relatedLinks:relatedLinks.length,abstentions:decisions.filter(d=>d.disposition==='ABSTAIN').length}};
+  const result={schemaVersion:'curveyield-phase0-finding-correlation-v1',scope,notSecurityVerdict:true,mode:'SHADOW',inputs,observations,claims,groups,relatedLinks,decisions,coverage,diagnostics,canonicalAst,counts:{nativeObservations:observations.length,diagnostics:diagnostics.length,shadowGroups:groups.length,shadowGroupedObservations:grouped.size,confirmedGroups:0,singletons:observations.length,relatedLinks:relatedLinks.length,abstentions:decisions.filter(d=>d.disposition==='ABSTAIN').length}};
   const target=path.join(dir,output),temp=target+'.tmp';
   fs.writeFileSync(temp,JSON.stringify(result,null,2)+'\n');fs.renameSync(temp,target);
   return result.counts;
