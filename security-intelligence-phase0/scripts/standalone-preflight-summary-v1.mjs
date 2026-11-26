@@ -43,7 +43,7 @@ else if(!wakeComplete&&!wakeNotApplicable)warn('WAKE_INCOMPLETE','WAKE_v1.json.c
 if(!mythrilComplete&&!mythrilNotApplicable)warn('MYTHRIL_INCOMPLETE','MYTHRIL_v1.json.componentStatus','COMPLETED or no executable in-scope runtime NOT_APPLICABLE',mythril?.componentStatus??'missing','Inspect Mythril contractResults, pinned bytecode and execution limits');
 const nativeReady=sourceMatches&&source&&build?.build?.status==='completed'&&slither?.componentStatus==='COMPLETED'&&
   (wakeComplete||wakeNotApplicable||wakeUnsupported)&&(mythrilComplete||mythrilNotApplicable);
-const status=!sourceMatches?'INCOMPLETE':!nativeReady?'PARTIAL':wakeUnsupported?'COLLECTED_WITH_ANALYZER_LIMITATION':'COLLECTED';
+let status=!sourceMatches?'INCOMPLETE':!nativeReady?'PARTIAL':wakeUnsupported?'COLLECTED_WITH_ANALYZER_LIMITATION':'COLLECTED';
 // Reviewer-only exact duplicate index. Never modify native findings, infer semantic
 // equivalence from text/locations, or feed a reduced stream into automated reproduction.
 const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
@@ -174,6 +174,12 @@ for(const [engine,file] of Object.entries(reportPaths)){
   }
   dedup.engines.push(stats);
 }
+const smtReview=dedup.engines.find(x=>x.engine==='smtchecker');
+if(!smtReview?.sourceIdentityVerified||!['COMPLETED','NOT_APPLICABLE'].includes(smtReview.nativeStatus)){
+  warn('SMTCHECKER_INCOMPLETE','SMTCHECKER_v1.json.componentStatus','COMPLETED or NOT_APPLICABLE with matching provenance',
+    smtReview?.nativeStatus??'missing','Inspect SMTChecker unit execution and solver diagnostics');
+  if(status!=='INCOMPLETE')status='PARTIAL';
+}
 const available=dedup.engines.filter(x=>x.recordType==='finding'&&x.rawRecordCount!==null);
 dedup.totals={availableFindingReports:available.length,expectedFindingReports:4,
   verifiedFindingReports:available.filter(x=>x.nativeRecordCountVerified).length,
@@ -189,7 +195,7 @@ fs.writeFileSync(path.join(dir,'REVIEW_DUPLICATE_INDEX_v1.json'),JSON.stringify(
 console.log('Phase 0 exact duplicate review: '+JSON.stringify(dedup.totals));
 const names=fs.readdirSync(dir).filter(x=>x.endsWith('.json')&&x!=='PREFLIGHT_MANIFEST_v1.json').sort();
 const files=names.map(name=>{const raw=fs.readFileSync(path.join(dir,name));return {name,bytes:raw.length,sha256:crypto.createHash('sha256').update(raw).digest('hex')};});
-const manifest={schemaVersion:'curveyield-security-clean-preflight-v1',status,notSecurityVerdict:true,sourceAdmissionVerified:sourceMatches,sourceOnly:build?.build?.status!=='completed',source:{repository:request?.source?.repository??null,commit:request?.source?.commit??null,archivePath:request?.source?.archivePath??null,expectedSha256:expected,observedSha256:actual},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,wakeStatus:wake?.componentStatus??wake?.status??null,wakeSolidityUnitCount:wake?.solidityUnitCount??null,wakeFindingCount:wake?.findingCount??null,mythrilStatus:mythril?.componentStatus??mythril?.status??null,mythrilEligibleCount:mythril?.eligibleCount??null,mythrilCompletedCount:mythril?.completedCount??null,mythrilFindingCount:mythril?.findingCount??null,warnings,reviewDuplicateIndex:{file:'REVIEW_DUPLICATE_INDEX_v1.json',...dedup.totals},files};
+const manifest={schemaVersion:'curveyield-security-clean-preflight-v1',status,notSecurityVerdict:true,sourceAdmissionVerified:sourceMatches,sourceOnly:build?.build?.status!=='completed',source:{repository:request?.source?.repository??null,commit:request?.source?.commit??null,archivePath:request?.source?.archivePath??null,expectedSha256:expected,observedSha256:actual},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,wakeStatus:wake?.componentStatus??wake?.status??null,wakeSolidityUnitCount:wake?.solidityUnitCount??null,wakeFindingCount:wake?.findingCount??null,mythrilStatus:mythril?.componentStatus??mythril?.status??null,mythrilEligibleCount:mythril?.eligibleCount??null,mythrilCompletedCount:mythril?.completedCount??null,mythrilFindingCount:mythril?.findingCount??null,smtcheckerStatus:smtReview?.nativeStatus??null,warnings,reviewDuplicateIndex:{file:'REVIEW_DUPLICATE_INDEX_v1.json',...dedup.totals},files};
 fs.writeFileSync(path.join(dir,'PREFLIGHT_MANIFEST_v1.json'),JSON.stringify(manifest,null,2)+'\n');
 const lines=['# Clean standalone Phase 0 evidence','','Status: **'+status+'**','',...warnings.map(x=>'- '+x.code+': '+x.configurationField+' | expected: '+JSON.stringify(x.expected)+' | observed: '+JSON.stringify(x.observed)+' | correction: '+x.requiredCorrection),'','Reviewer-only exact duplicate consolidation: '+dedup.totals.exactDuplicateCount+' duplicate records among '+dedup.totals.rawFindingCount+' available native finding records. Cross-engine semantic equivalence is not assumed. SMTChecker abbreviated diagnostics are retained separately.','','Not a deployed-fork proof or security verdict.'];
 fs.writeFileSync(path.join(dir,'DISCOVERY_SUMMARY_v1.md'),lines.join('\n')+'\n');

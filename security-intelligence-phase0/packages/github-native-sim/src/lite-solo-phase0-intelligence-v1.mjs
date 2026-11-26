@@ -2,7 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import unzipper from 'unzipper';
 import { checkoutExactSource, runProcess } from './execution.mjs';
 import { buildProject } from '../../runner/src/build-dispatch.mjs';
@@ -1218,6 +1218,7 @@ async function main(){
     const report={schemaVersion:'curveyield-smtchecker-correctness-review-v1',backend:'solidity-smtchecker',
       source:request.source,authoritativeFinding:false,componentStatus:'FAILED',
       engines:['CHC','BMC'],solver:'z3',targets:['assert','underflow','overflow','divByZero'],
+      queryTimeoutMilliseconds:50,unitWallTimeoutMilliseconds:90000,
       units:[],limitations:[]};
     await fs.mkdir(reportDir,{recursive:true});
     try{
@@ -1232,14 +1233,23 @@ async function main(){
         const stageDir=path.join(out,'work','smtchecker');
         await fs.mkdir(stageDir,{recursive:true});
         const modelChecker={engine:'all',solvers:['z3'],targets:report.targets,
-          timeout:1000,showProvedSafe:true,showUnproved:true,showUnsupported:true};
+          timeout:report.queryTimeoutMilliseconds,showProvedSafe:true,showUnproved:true,showUnsupported:true};
         const probes=new Map();
         const compilerEnv={...process.env,HOME:'/tmp',LD_LIBRARY_PATH:'/opt/smtchecker-z3/solver-lib'};
-        function invoke(compiler,input,timeout){
-          const result=spawnSync(compiler,['--standard-json'],{input:JSON.stringify(input),
-            cwd:stageDir,env:compilerEnv,encoding:'utf8',timeout,maxBuffer:16*1024*1024});
-          if(result.error||result.status!==0)throw Error('Compiler invocation failed: '+String(result.error??result.status));
-          const parsed=JSON.parse(result.stdout);
+        function invokeNative(compiler,args,input,timeout){
+          return new Promise((resolve,reject)=>{
+            const child=execFile(compiler,args,{cwd:stageDir,env:compilerEnv,encoding:'utf8',
+              timeout,killSignal:'SIGKILL',maxBuffer:16*1024*1024},(error,stdout)=>{
+              if(error)reject(Error('Compiler invocation failed: '+(error.killed?'wall timeout or output limit':String(error.code??error.name))));
+              else resolve(stdout);
+            });
+            child.stdin?.on('error',()=>{}); // process completion owns failure reporting
+            child.stdin?.end(input);
+          });
+        }
+        async function invoke(compiler,input,timeout){
+          const stdout=await invokeNative(compiler,['--standard-json'],JSON.stringify(input),timeout);
+          const parsed=JSON.parse(stdout);
           const diagnostics=parsed.errors??[];
           if(!Array.isArray(diagnostics))throw Error('Invalid compiler diagnostics');
           if(diagnostics.some(d=>d.severity==='error'))
@@ -1266,10 +1276,10 @@ async function main(){
             }
             const compiler=path.join('/opt/preflight/.svm',version,'solc-'+version);
             if(!probes.has(version)){
-              const actual=spawnSync(compiler,['--version'],{encoding:'utf8',env:compilerEnv,timeout:10000});
-              if(actual.status!==0||!String(actual.stdout).includes('Version: '+version+'+'))
+              const actual=await invokeNative(compiler,['--version'],undefined,10000);
+              if(!actual.includes('Version: '+version+'+'))
                 throw Error('Exact native compiler unavailable');
-              const probe=invoke(compiler,{language:'Solidity',sources:{'CompilerCapability.sol':{
+              const probe=await invoke(compiler,{language:'Solidity',sources:{'CompilerCapability.sol':{
                 content:'// SPDX-License-Identifier: UNLICENSED\npragma solidity >=0.8.14; contract CompilerCapability { function f(uint256 x) external pure { require(x < 10); assert(x <= 10); } }'}},
                 settings:{modelChecker,outputSelection:{'*':{'*':['abi']}}}},20000);
               const proved=probe.some(d=>/\b(?:CHC|BMC):.*(?:check is safe|proved safe)/i.test(String(d.message)));
@@ -1302,7 +1312,7 @@ async function main(){
             const input={language:'Solidity',sources,settings};
             rec.inputSha256=sha256(Buffer.from(JSON.stringify(input),'utf8'));
             rec.contractCount=Object.values(contracts).reduce((sum,entries)=>sum+entries.length,0);
-            const diagnostics=invoke(compiler,input,90000);
+            const diagnostics=await invoke(compiler,input,report.unitWallTimeoutMilliseconds);
             for(const d of diagnostics){
               // Keep correctness status and diagnostic identity, not generated witnesses.
               const message=String(d.message??'');
