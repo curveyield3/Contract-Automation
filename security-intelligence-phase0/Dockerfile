@@ -7,7 +7,14 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 RUN python3 -m venv /opt/slither && /opt/slither/bin/pip install --no-cache-dir 'slither-analyzer==0.11.6'
 RUN python3 -m venv /opt/wake && /opt/wake/bin/pip install --no-cache-dir 'eth-wake==4.21.0'
 RUN python3 -m venv /opt/mythril && /opt/mythril/bin/pip install --no-cache-dir 'mythril==0.24.8' 'zope.interface==6.4.post2' 'zope.deferredimport==5.0' 'zope.proxy==5.2'
-ENV PATH="/usr/local/bin:/opt/slither/bin:/opt/wake/bin:/opt/mythril/bin:/opt/preflight/node_modules/.bin:/opt/preflight/node_modules/@foundry-rs/forge:${PATH}" \
+# Pinned defensive source scanner and immutable trusted rules, built before any source ZIP enters the image.
+RUN python3 -m venv /opt/semgrep && /opt/semgrep/bin/pip install --no-cache-dir 'semgrep==1.187.0'
+RUN git init /opt/semgrep-rules && \
+    git -C /opt/semgrep-rules fetch --depth 1 https://github.com/Decurity/semgrep-smart-contracts.git 2e878a89ac7bba1f8435e8a68e3ecb7700096cd5 && \
+    git -C /opt/semgrep-rules checkout --detach FETCH_HEAD && \
+    test "$(git -C /opt/semgrep-rules rev-parse HEAD)" = "2e878a89ac7bba1f8435e8a68e3ecb7700096cd5" && \
+    test -d /opt/semgrep-rules/rules/solidity/security && rm -rf /opt/semgrep-rules/.git
+ENV PATH="/usr/local/bin:/opt/slither/bin:/opt/wake/bin:/opt/mythril/bin:/opt/semgrep/bin:/opt/preflight/node_modules/.bin:/opt/preflight/node_modules/@foundry-rs/forge:${PATH}" \
     CI="true" NODE_ENV="test" HOME="/opt/preflight"
 WORKDIR /opt/preflight
 COPY security-intelligence-phase0/package.json security-intelligence-phase0/package-lock.json ./
@@ -19,7 +26,7 @@ RUN test -f node_modules/@foundry-rs/forge/bin.mjs && \
     chmod +x node_modules/@foundry-rs/forge/bin.mjs node_modules/@foundry-rs/cast/bin.mjs && \
     ln -s /opt/preflight/node_modules/@foundry-rs/forge/bin.mjs /usr/local/bin/forge && \
     ln -s /opt/preflight/node_modules/@foundry-rs/cast/bin.mjs /usr/local/bin/cast
-# Source-independent Slither, Wake, Mythril, Foundry and Node layers end here.
+# Source-independent Slither, Wake, Mythril, Semgrep, Foundry and Node layers end here.
 # Only this target is exported to persistent GitHub cache; no per-source plan
 # or authenticated ZIP ever enters the reusable cache.
 FROM phase0-scanner-tools
