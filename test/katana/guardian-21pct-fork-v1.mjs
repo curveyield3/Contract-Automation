@@ -1,4 +1,4 @@
-// Exact deployed Guardian v64 planning and encoding methods; isolated fork adapter only.
+// Guardian v67 live-fork harness v2; exact planner/encoder, fork-only sender adapter.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {Interface, AbiCoder, keccak256, toUtf8Bytes, hexlify, toBeHex, JsonRpcProvider} from 'ethers';
@@ -16,8 +16,8 @@ const SAFE='0xF39087af2107EaDBf81f10a64051740A76B6291D',BOT='0xe7355a4fca376883f
 const rpc=new JsonRpcProvider('http://127.0.0.1:8545',747474,{staticNetwork:true});
 const req=(m,p=[])=>rpc.send(m,p),tag=b=>b==null?'latest':'0x'+BigInt(b).toString(16);
 const serial=x=>JSON.parse(JSON.stringify(x,(_,v)=>typeof v==='bigint'?String(v):v));
-const report={version:'Guardian v64 / Cloudflare 152',scenario:'21% fee-adjusted discount via fork-only destination oracle fixture; pool, liquidity and positions unmodified',status:'STARTED'};
-const output=()=>{fs.writeFileSync('guardian-21pct-fork-v1-report.json',JSON.stringify(serial(report),null,2));console.log(JSON.stringify(serial(report),null,2));};
+const report={version:'Guardian v67 / Cloudflare 155 / fork harness v2',scenario:'Independent and cumulative allocation cases; fork-only destination oracle fixture',status:'STARTED'};
+const output=()=>{fs.writeFileSync('guardian-21pct-fork-v2-report.json',JSON.stringify(serial(report),null,2));console.log(JSON.stringify(serial(report),null,2));};
 let migrationCall;
 const normalize=x=>typeof x==='string'&&/^0x[0-9a-fA-F]{40}$/.test(x)?x.toLowerCase():Array.isArray(x)?Array.from(x,normalize):x;
 const callArgs=({address,to,data,account})=>({to:(address||to).toLowerCase(),data,...account?{from:account.toLowerCase()}:{}});
@@ -29,7 +29,8 @@ const pub={
  async call(o){migrationCall=callArgs(o);return req('eth_call',[migrationCall,tag(o.blockNumber)])},
  async estimateGas(o){return BigInt(await req('eth_estimateGas',[callArgs(o)]))}
 };
-class Planner{constructor(){this.pub=pub;this.env={SAFE};this.account={address:BOT}}
+class Planner{constructor(){this.pub=pub;this.env={SAFE};this.account={address:BOT};this.wallet=true}
+async guardedSend(cfg,{to,data,gas,fn}){assert.equal(fn,'migrate');assert.equal(to.toLowerCase(),'0x53877cd4111b4c041abea77cc501ed68c22630bd');assert.equal(data,migrationCall.data);assert(BigInt(gas)<=4000000n);const hash=await req('eth_sendTransaction',[{...migrationCall,gas:tag(gas)}]);let receipt;for(let i=0;i<60&&!receipt;i++){receipt=await req('eth_getTransactionReceipt',[hash]);if(!receipt)await new Promise(r=>setTimeout(r,250));}assert(receipt);this.receipt={hash,status:receipt.status,gasUsed:BigInt(receipt.gasUsed),blockNumber:BigInt(receipt.blockNumber)};return{status:receipt.status==='0x1'?'success':'reverted',transactionHash:hash,gasUsed:BigInt(receipt.gasUsed)}}
 async buildMorphoBundleV13(plan,router,blockNumber){
 const bundler="0xA8C5e23C9C0DF2b6fF716486c6bBEBB6661548C8",adapter="0x916Aa175C36E845db45fF6DDB886AE437d403B61",zero="0x"+"00".repeat(32),max=(1n<<256n)-1n;
 const component=[{name:"to",type:"address"},{name:"data",type:"bytes"},{name:"value",type:"uint256"},{name:"skipRevert",type:"bool"},{name:"callbackHash",type:"bytes32"}],tuple={type:"tuple[]",components:component};
@@ -50,7 +51,7 @@ const abi=parseAbi(["function migrate((bytes32 market,bytes data)[] sources,byte
 return encodeFunctionData({abi,functionName:"migrate",args:[sources.map(x=>({market:x.market,data:x.bundleData})),loopUpData,BigInt(deadline)]})
 }
 async spCheck(cfg,s){
-const mode="weeth-avkat-planning",tierRules=[{discountBps:2000,allocationBps:5000},{discountBps:2200,allocationBps:10000}],id="0x0a8f3fd0965bfa6e94339cca629bec6ddac99f697ac74d808aa2d9f2c46b5f68",we="0x9893989433e7a383cb313953e4c2365107dc19a7",us="0x2dca96907fde857dd3d816880a0df407eeb2d2f2",safe=this.env.SAFE,W=10n**18n,B=10000n,Q=10n**36n;
+const mode="weeth-avkat-execution",tierRules=[{discountBps:2000,allocationBps:4000},{discountBps:2200,allocationBps:9500},{discountBps:2330,allocationBps:10000}],id="0x0a8f3fd0965bfa6e94339cca629bec6ddac99f697ac74d808aa2d9f2c46b5f68",we="0x9893989433e7a383cb313953e4c2365107dc19a7",us="0x2dca96907fde857dd3d816880a0df407eeb2d2f2",safe=this.env.SAFE,W=10n**18n,B=10000n,Q=10n**36n;
 const min=(...x)=>x.reduce((a,b)=>a<b?a:b),ceil=(a,b)=>(a+b-1n)/b,serial=x=>JSON.parse(JSON.stringify(x,(_,v)=>typeof v==="bigint"?v.toString():v));
 try{
 const block=await this.pub.getBlock(),bn=block.number,read=(address,abi,functionName,args=[])=>this.pub.readContract({address,abi,functionName,args,blockNumber:bn});
@@ -85,7 +86,7 @@ const fullCapital=seed.kat+looseKat,fullMinCapital=(seed.minKat??seed.kat)+loose
 const twap=async(total)=>total?read(router,ra,"twapMinimumOut",[KAT,AVKAT,total]):0n;
 const canFlash=async(flash,capital)=>{const total=capital+flash;if(!total)return false;const out=await twap(total);return out>0n&&avDebt+flash<=(avValue+(out+looseAv)*intrinsic/Q)*target/W};
 const maxFlashFor=async(capital,cap)=>{let l=0n,h=cap;for(let i=0;i<36&&l<h;i++){const m=l+(h-l+1n)/2n;if(await canFlash(m,capital).catch(()=>false))l=m;else h=m-1n}return l};
-const fullFlash=await maxFlashFor(fullMinCapital,flashCapacity),fundedTotal=fullCapital+fullFlash;
+const depthFirst=tier.discountBps===2330,fullFlash=depthFirst?flashCapacity:await maxFlashFor(fullMinCapital,flashCapacity),fundedTotal=fullCapital+fullFlash;
 const depth=async(total)=>{if(!total)return{ok:true,out:0n,floor:0n};const q=await quote(KAT,AVKAT,total),floor=await twap(total);return{ok:!!q.net&&!!floor&&q.net>=floor&&q.net*W>=total*floorRate&&supports(q.sqrt,tier.discountBps),out:q.net,floor,sqrt:q.sqrt}};
 let lo=0n,hi=fundedTotal;
 const fullDepth=await depth(hi).catch(()=>({ok:false}));if(fullDepth.ok)lo=hi;
@@ -97,10 +98,10 @@ if(!sourceSeedNeeded)return{...snapshot,idle:"existing Safe KAT fills the source
 if(sourceSeedNeeded<seed.kat){let cl=0n,ch=availableCol;for(let i=0;i<24&&cl<ch;i++){const mid=cl+(ch-cl+1n)/2n;let x;try{x=await toSeed(mid)}catch(e){x=null}if(x&&x.kat<=sourceSeedNeeded)cl=mid;else ch=mid-1n}seed=await toSeed(cl)}
 const capital=seed.kat+looseKat,minCapital=(seed.minKat??seed.kat)+looseKat;
 if(!seed.kat||capital>=poolCapacity)return{...snapshot,idle:"no positive flash-sized migration fits quoted depth"};
-const flash=await maxFlashFor(minCapital,min(flashCapacity,poolCapacity-capital));if(!flash)return{...snapshot,idle:"no positive flash at existing target LTV"};
+const flashBound=min(flashCapacity,poolCapacity-capital),flash=depthFirst&&await canFlash(flashBound,minCapital).catch(()=>false)?flashBound:await maxFlashFor(minCapital,flashBound);if(!flash)return{...snapshot,idle:"no positive flash at existing target LTV"};
 lo=capital+flash;const q=await depth(lo);if(!q.ok)return{...snapshot,idle:"joint allocation and DEX bound requires a fresh quote"};
 const result={...q,flash};
-const plan=serial({thresholdDiscountBps:tier.discountBps,allocationBps:tier.allocationBps,allocatedCollateralCap:availableCol,unwindCollateral:seed.collateral,repayBorrowShares:seed.shares,estimatedVbUsdtDebt:seed.debt,estimatedSeedKat:seed.kat,minSeedKat:seed.minKat??seed.kat,existingSafeKat:looseKat,availableFundingKat:fullCapital,fullAllocationLeveragedKat:fundedTotal,quotedPoolCapacityKat:poolCapacity,requiredSourceSeedKat:sourceSeedNeeded,remainingSourceCollateral:sourcePos[2]-seed.collateral,maxTotalKatIn:lo,estimatedFlashKat:result.flash,estimatedAvkat:result.out,minAvkatPerKatWad:floorRate,marketFlashCapacity:flashCapacity,configuredFlashCap:policyFlash,requiresPolicyChange:result.flash>policyFlash,targetLtv:target,depthSearchRounds:28});
+const plan=serial({thresholdDiscountBps:tier.discountBps,allocationBps:tier.allocationBps,allocatedCollateralCap:availableCol,unwindCollateral:seed.collateral,repayBorrowShares:seed.shares,estimatedVbUsdtDebt:seed.debt,estimatedSeedKat:seed.kat,minSeedKat:seed.minKat??seed.kat,existingSafeKat:looseKat,availableFundingKat:fullCapital,fullAllocationLeveragedKat:fundedTotal,depthFirst,flashSearchUpperBound:flashBound,quotedPoolCapacityKat:poolCapacity,requiredSourceSeedKat:sourceSeedNeeded,remainingSourceCollateral:sourcePos[2]-seed.collateral,maxTotalKatIn:lo,estimatedFlashKat:result.flash,estimatedAvkat:result.out,minAvkatPerKatWad:floorRate,marketFlashCapacity:flashCapacity,configuredFlashCap:policyFlash,requiresPolicyChange:result.flash>policyFlash,targetLtv:target,depthSearchRounds:28});
 s.weethMigration={...snapshot,plan};
 try{
 const adapter="0x916Aa175C36E845db45fF6DDB886AE437d403B61",bundler="0xA8C5e23C9C0DF2b6fF716486c6bBEBB6661548C8",max=(1n<<256n)-1n;
@@ -124,7 +125,8 @@ const data=this.encodeMorphoMigrationV13([{market:id,bundleData:bundle.bundleDat
 if(!this.account)throw Error("Worker executor unavailable for simulation");
 await this.pub.call({account:this.account.address,to:migrationModule,data,blockNumber:bn});
 const est=await this.pub.estimateGas({account:this.account.address,to:migrationModule,data});
-s.weethMigration={...s.weethMigration,execution:"Atomic source settlement and destination migration simulated; no transaction submitted",simulation:serial({status:"passed",gasEstimate:est,sourceFlash:maxDebt,convertUs,minKat,deadline,calldataHash:keccak256(data)})};
+s.weethMigration={...s.weethMigration,execution:"Atomic migration simulation passed",simulation:serial({status:"passed",gasEstimate:est,sourceFlash:maxDebt,convertUs,minKat,deadline,calldataHash:keccak256(data)})};
+try{if(!this.wallet)throw Error("Executor wallet unavailable");if(est>BigInt(cfg.txGasCap))throw Error("Migration exceeds existing txGasCap");const gas=min(est*BigInt(100+cfg.gasMarginPct)/100n,BigInt(cfg.gasLimit));if(gas<est)throw Error("Existing gasLimit below estimate");const rc=await this.guardedSend(cfg,{to:migrationModule,data,gas,fn:"migrate"});s.weethMigration={...s.weethMigration,execution:"Atomic migration "+rc.status,broadcast:serial({status:rc.status,transactionHash:rc.transactionHash,gasUsed:rc.gasUsed})}}catch(e){s.weethMigration={...s.weethMigration,execution:"Migration sender returned an error",broadcast:{status:"error",error:errMsg(e,350)}}}
 }catch(e){s.weethMigration={...s.weethMigration,execution:"Atomic migration simulation not accepted; no transaction submitted",simulation:{status:"rejected",error:errMsg(e,350)}}}
 return s.weethMigration
 }catch(e){return{mode,tierRules,idle:"planning read or quote failed",error:errMsg(e,300),execution:"no transaction submitted"}}
@@ -132,36 +134,54 @@ return s.weethMigration
 }
 const pos=async(id)=>Array.from(await pub.readContract({address:MORPHO,abi:['function position(bytes32,address) view returns(uint256,uint128,uint128)'],functionName:'position',args:[id,SAFE]}));
 const balances=async()=>Object.fromEntries(await Promise.all([KAT,AVKAT,WETH,USDC,'0x2dca96907fde857dd3d816880a0df407eeb2d2f2'].map(async token=>[token,await pub.readContract({address:token,abi:['function balanceOf(address) view returns(uint256)'],functionName:'balanceOf',args:[SAFE]})])));
-try{
- assert.equal(await req('eth_chainId'),'0xb67d2'); // corrected by decimal check below if chain id display differs
-}catch(e){if(BigInt(await req('eth_chainId'))!==747474n)throw e}
-try{
- report.fork=await pub.getBlock();
- const read=(address,abi,functionName,args=[])=>pub.readContract({address,abi,functionName,args});
- const [t0,slot,realOracle,globalSlot]=await Promise.all([read(POOL,['function token0() view returns(address)'],'token0'),read(POOL,['function slot0() view returns(uint160,int24,uint16,uint16,uint16,uint8,bool)'],'slot0'),read(ORACLE,['function price() view returns(uint256)'],'price'),pub.getStorageAt({address:ROUTER,slot:toBeHex(1,32)})]);
- const key=keccak256(coder.encode(['address','address'],[KAT.toLowerCase(),AVKAT.toLowerCase()])),mapSlot=n=>keccak256(coder.encode(['bytes32','uint256'],[key,n]));
- const [flag,fslt]=await Promise.all([pub.getStorageAt({address:ROUTER,slot:mapSlot(4)}),pub.getStorageAt({address:ROUTER,slot:mapSlot(3)})]);
- const fee=BigInt(flag)!==0n?BigInt(fslt)&65535n:(BigInt(globalSlot)>>160n)&65535n;
- const sq=slot[0]*slot[0],q192=2n**192n,[n,d]=t0.toLowerCase()===AVKAT.toLowerCase()?[sq,q192]:[q192,sq];
- const num=n*10n**36n*1000000n*10000n*10000n,den=d*990000n*(10000n-fee)*7900n;
- const price=(num+den-1n)/den;
- report.fixture={realOracle,modeledOracle:price,routerFeeBps:fee,sqrtPriceX96:slot[0]};
- await req('anvil_setCode',[ORACLE,'0x7f'+toBeHex(price,32).slice(2)+'60005260206000f3']);
- await req('evm_mine');
- assert.equal(await read(ORACLE,['function price() view returns(uint256)'],'price'),price);
- report.before={source:await pos(SOURCE),destination:await pos(DEST),safeBalances:await balances()};
- const state={};const planner=new Planner();
- report.response=await planner.spCheck({paused:false},state);
- const res=report.response;report.status='PLANNER_IDLE_OR_REJECTED';
- if(res.allocationBps!==5000)throw Error('Expected 50% tier; response: '+JSON.stringify(res).slice(0,500));
- if(res.plan){assert(BigInt(res.plan.unwindCollateral)<=report.before.source[2]/2n);assert(BigInt(res.plan.maxTotalKatIn)<=BigInt(res.plan.quotedPoolCapacityKat));}
- if(res.simulation?.status==='passed'){
-  assert(migrationCall);report.status='ATOMIC_CALL_PASSED';
-  await req('anvil_impersonateAccount',[BOT]);await req('anvil_setBalance',[BOT,'0xde0b6b3a7640000']);
-  const hash=await req('eth_sendTransaction',[{...migrationCall,gas:tag(BigInt(res.simulation.gasEstimate)*120n/100n)}]);let receipt;for(let j=0;j<60&&!receipt;j++){receipt=await req('eth_getTransactionReceipt',[hash]);if(!receipt)await new Promise(r=>setTimeout(r,500))}
-  assert(receipt);report.receipt={hash,status:receipt.status,gasUsed:BigInt(receipt.gasUsed),blockNumber:BigInt(receipt.blockNumber)};
-  report.after={source:await pos(SOURCE),destination:await pos(DEST),safeBalances:await balances()};
-  assert.equal(receipt.status,'0x1');assert.equal(report.before.source[2]-report.after.source[2],BigInt(res.plan.unwindCollateral));assert.equal(report.before.source[1]-report.after.source[1],BigInt(res.plan.repayBorrowShares));assert(report.after.destination[2]>report.before.destination[2]);assert(report.after.destination[1]>report.before.destination[1]);report.status='ATOMIC_FORK_TRANSACTION_PASSED';
+const cfg={paused:false,txGasCap:4000000,gasLimit:4000000,gasMarginPct:10};
+const read=(address,abi,functionName,args=[])=>pub.readContract({address,abi,functionName,args});
+const snapshot=async()=>({source:await pos(SOURCE),destination:await pos(DEST),safeBalances:await balances()});
+const slotNow=()=>read(POOL,['function slot0() view returns(uint160,int24,uint16,uint16,uint16,uint8,bool)'],'slot0');
+let fee,t0,q192=2n**192n,realOracle;
+function ratio(sqrt){const sq=sqrt*sqrt;return t0.toLowerCase()===AVKAT.toLowerCase()?[sq,q192]:[q192,sq]}
+function discountBps(sqrt,price){const [n,d]=ratio(sqrt);const den=d*price*990000n*(10000n-fee);return Number((den*10000n-n*10n**36n*1000000n*10000n*10000n)/den)}
+async function fixture(bps){const slot=await slotNow();const[n,d]=ratio(slot[0]);const num=n*10n**36n*1000000n*10000n*10000n,den=d*990000n*(10000n-fee)*(10000n-BigInt(bps));const price=(num+den-1n)/den;await req('anvil_setCode',[ORACLE,'0x7f'+toBeHex(price,32).slice(2)+'60005260206000f3']);await req('evm_mine');assert.equal(await read(ORACLE,['function price() view returns(uint256)'],'price'),price);return {modeledOracle:price,sqrtPriceX96:slot[0],initialDiscountBps:discountBps(slot[0],price)}}
+const check=(v,msg,errors)=>{if(!v)errors.push(msg)};
+async function run(label,bps,allocation,state){
+ const x={label,requestedDiscountBps:bps,expectedAllocationBps:allocation,errors:[]};report.cases.push(x);
+ x.fixture=await fixture(bps);x.before=await snapshot();
+ migrationCall=undefined;const planner=new Planner();
+ x.response=await planner.spCheck(cfg,state);
+ x.receipt=planner.receipt||null;x.after=await snapshot();
+ x.finalDiscountBps=discountBps((await slotNow())[0],x.fixture.modeledOracle);
+ const res=x.response;
+ check(res.allocationBps===allocation,'wrong allocation tier',x.errors);
+ if(res.plan){const p=res.plan;check(BigInt(p.unwindCollateral)<=BigInt(p.allocatedCollateralCap),'source exceeds cumulative cap',x.errors);check(BigInt(p.maxTotalKatIn)<=BigInt(p.quotedPoolCapacityKat),'planned purchase exceeds quoted depth',x.errors);check(p.depthFirst===(allocation===10000),'incorrect depth-first flag',x.errors);x.plannedDepthUtilizationBps=String(BigInt(p.maxTotalKatIn)*10000n/BigInt(p.quotedPoolCapacityKat));}
+ if(x.receipt?.status==='0x1'){
+  check(x.before.source[2]-x.after.source[2]===BigInt(res.plan.unwindCollateral),'source collateral delta mismatch',x.errors);
+  check(x.before.source[1]-x.after.source[1]===BigInt(res.plan.repayBorrowShares),'source borrow shares delta mismatch',x.errors);
+  check(x.after.destination[2]>x.before.destination[2],'destination collateral did not increase',x.errors);
+  check(x.after.destination[1]>x.before.destination[1],'destination debt did not increase',x.errors);
+  check(x.finalDiscountBps>=res.plan.thresholdDiscountBps,'actual marginal discount fell below threshold',x.errors);
+  x.status=x.errors.length?'FAIL':'ATOMIC_FORK_TRANSACTION_PASSED';
+ }else{
+  check(JSON.stringify(serial(x.before))===JSON.stringify(serial(x.after)),'positions or token balances changed without successful receipt',x.errors);
+  x.status=x.errors.length?'FAIL':x.receipt?'ATOMIC_REVERT':'NO_TRADE';
  }
- else {report.after={source:await pos(SOURCE),destination:await pos(DEST),safeBalances:await balances()};assert.deepEqual(report.before,report.after);}
-}catch(e){report.error=String(e.stack||e);report.status='ERROR';process.exitCode=1}finally{output()}
+ if(res.broadcast?.status==='error'||res.simulation?.status==='rejected'){x.errors.push('execution rejected: '+(res.broadcast?.error||res.simulation?.error));x.status='FAIL'}
+ if(res.error){x.errors.push(res.error);x.status='FAIL'}
+ return x;
+}
+try{
+ assert.equal(BigInt(await req('eth_chainId')),747474n);
+ report.fork=await pub.getBlock();report.cases=[];
+ [t0,realOracle]=await Promise.all([read(POOL,['function token0() view returns(address)'],'token0'),read(ORACLE,['function price() view returns(uint256)'],'price')]);
+ const globalSlot=await pub.getStorageAt({address:ROUTER,slot:toBeHex(1,32)}),key=keccak256(coder.encode(['address','address'],[KAT.toLowerCase(),AVKAT.toLowerCase()])),mapSlot=n=>keccak256(coder.encode(['bytes32','uint256'],[key,n]));
+ const [flag,fslt]=await Promise.all([pub.getStorageAt({address:ROUTER,slot:mapSlot(4)}),pub.getStorageAt({address:ROUTER,slot:mapSlot(3)})]);fee=BigInt(flag)!==0n?BigInt(fslt)&65535n:(BigInt(globalSlot)>>160n)&65535n;
+ report.realOracle=realOracle;report.routerFeeBps=fee;
+ await req('anvil_impersonateAccount',[BOT]);await req('anvil_setBalance',[BOT,'0xde0b6b3a7640000']);
+ let snap=await req('evm_snapshot');
+ for(const [bps,a] of [[1990,0],[2100,4000],[2250,9500],[2330,10000],[2450,10000],[2800,10000]]){
+  await run('independent-'+bps,bps,a,{});assert(await req('evm_revert',[snap]));snap=await req('evm_snapshot');
+ }
+ const state={};
+ for(const [bps,a] of [[2100,4000],[2100,4000],[2250,9500],[2450,10000]])await run('cumulative-'+bps,bps,a,state);
+ report.status=report.cases.some(c=>c.errors.length)?'BEHAVIOR_FAILURES':'COMPLETE';
+ if(report.status!=='COMPLETE')process.exitCode=1;
+}catch(e){report.error=String(e.stack||e);report.status='HARNESS_ERROR';process.exitCode=1}finally{output()}
