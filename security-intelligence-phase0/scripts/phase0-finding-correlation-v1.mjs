@@ -86,6 +86,80 @@ export function styleClaim(o,row){
   }
   return null;
 }
+// Additional code-quality mappings: structurally implemented, but not promoted
+// without representative native records. They produce review-only pairs.
+const pendingNaming=[
+  ['contract-capwords','contract','contract','ContractDefinition','contract-name-capwords','CapWords','Contract, Structs and Enums should be in CapWords'],
+  ['struct-capwords','structure','struct','StructDefinition','contract-name-capwords','CapWords','Contract, Structs and Enums should be in CapWords'],
+  ['enum-capwords','enum','enum','EnumDefinition','contract-name-capwords','CapWords','Contract, Structs and Enums should be in CapWords'],
+  ['event-capwords','event','event','EventDefinition','event-name-capwords','CapWords','Event name must be in CapWords'],
+  ['parameter-mixedcase','parameter','variable','VariableDeclaration','func-param-name-mixedcase','mixedCase','Function param name must be in mixedCase'],
+  ['modifier-mixedcase','modifier','function','ModifierDefinition','modifier-name-mixedcase','mixedCase','Modifier name must be in mixedCase'],
+  ['constant-snakecase','variable_constant','variable','VariableDeclaration','const-name-snakecase','UPPER_CASE_WITH_UNDERSCORES','Constant name must be in capitalized SNAKE_CASE'],
+  ['forbidden-identifier','variable','variable','VariableDeclaration','use-forbidden-name','l_O_I_should_not_be_used',"Avoid to use letters 'I', 'l', 'O' as identifiers"]
+].map(([id,target,elementType,nodeType,lint,convention,message])=>({id:id+'-v1',family:'Naming convention',issueType:id,status:'PENDING_NATIVE_QUALIFICATION',detectors:[['slither','0.11.6','naming-convention'],['solhint','6.2.5',lint]],target,elementType,nodeType,convention,message,reason:'NO_REPRESENTATIVE_CROSS_PROGRAM_NATIVE_PAIR',predicate:'SAME_STYLE_DECLARATION',roles:['single declaration','single lint point'],exclusions:['wrong declaration or convention','unsupported name','ambiguous point','compound record']}));
+const pendingImport={id:'single-symbol-unused-import-v1',family:'Unused imports',issueType:'UNUSED_SINGLE_SYMBOL_IMPORT',status:'PENDING_NATIVE_QUALIFICATION',detectors:[['wake','4.21.0','unused-import'],['solhint','6.2.5','no-unused-import']],reason:'NO_REPRESENTATIVE_CROSS_PROGRAM_NATIVE_PAIR',roles:['complete import directive','single imported identifier'],predicate:'SAME_SINGLE_SYMBOL_IMPORT',exclusions:['aliases','namespace or wildcard imports','multiple symbols','different import identity']};
+const pendingPrivate={id:'unused-private-function-v1',family:'Unused functions',issueType:'UNUSED_PRIVATE_FUNCTION',status:'PENDING_NATIVE_QUALIFICATION',detectors:[['wake','4.21.0','unused-function'],['solhint','6.2.5','no-unused-private-funcs']],reason:'NO_REPRESENTATIVE_CROSS_PROGRAM_NATIVE_PAIR',roles:['private function declaration','single lint point'],predicate:'SAME_PRIVATE_DECLARATION',exclusions:['public/internal functions','ambiguous declaration','reachability-only claim']};
+const componentRule={id:'compound-inline-assembly-usage-v1',family:'Inline assembly usage',issueType:'INLINE_ASSEMBLY_USAGE_COMPONENT',status:'ACTIVE_COMPONENT_SHADOW',detectors:[['slither','0.11.6','assembly'],['solhint','6.2.5','no-inline-assembly']],predicate:'SAME_SINGLE_STYLE_BLOCK',roles:['function context','every listed assembly node','individual lint point'],exclusions:['unresolved component','unrecognized native report shape','nonunique correspondence']};
+ruleRegistry.push(...pendingNaming,pendingImport,pendingPrivate,componentRule,
+  {id:'slither-unused-import-candidate-v1',family:'Unused imports',status:'INACTIVE',reason:'PINNED_SLITHER_OUTPUT_IS_TEXT_ONLY_AGGREGATE; preserve until exact structured decomposition is available'},
+  {id:'dead-code-unused-function-candidate-v1',family:'Unused functions',status:'INACTIVE',reason:'ENTRY_POINT_REACHABILITY_IS_DISTINCT_FROM_ABSENCE_OF_REFERENCES'});
+function additionalTypes(o,a,row){
+  if(a.role==='primary'&&[pendingImport,pendingPrivate].some(r=>r.detectors.some(d=>detectorMatches(o,d))))return [detectorMatches(o,pendingImport.detectors[0])||detectorMatches(o,pendingImport.detectors[1])?'ImportDirective':'FunctionDefinition'];
+  return [...new Set(pendingNaming.filter(r=>r.detectors.some(d=>detectorMatches(o,d))&&(o.engine!=='slither'||row?.elements?.length===1&&row.elements[0]?.additional_fields?.target===r.target&&row.elements[0]?.additional_fields?.convention===r.convention)).map(r=>r.nodeType))];
+}
+function bound(o,i){
+  const a=o.anchors?.[i],c=o.canonicalAnchors?.find(x=>x.anchorIndex===i);
+  return o.provenance==='VERIFIED'&&a?.binding==='RESOLVED'&&c?.status==='RESOLVED'&&typeof c.node?.key==='string'?{a,c,n:c.node}:null;
+}
+function nameViolation(name,convention){
+  if(typeof name!=='string'||!/^[_A-Za-z][_A-Za-z0-9]*$/.test(name))return false;
+  if(convention==='CapWords')return !/^[A-Z][A-Za-z0-9]*_?$/.test(name)&&! /^[A-Z][A-Za-z0-9]*$/.test(name);
+  if(convention==='mixedCase')return commonMixedcaseViolation(name);
+  if(convention==='UPPER_CASE_WITH_UNDERSCORES')return !/^[A-Z0-9_]+$/.test(name)&&! /^_{0,2}[A-Z0-9]+[_A-Z0-9]*$/.test(name);
+  return convention==='l_O_I_should_not_be_used'&&['l','O','I'].includes(name);
+}
+export function additionalClaim(o,row,readSource){
+  if(o?.anchors?.length!==1||o.suppressed===true)return null;
+  const v=bound(o,0);if(!v)return null;
+  const {a,c,n}=v,sl=o.engine==='slither';
+  const exact=a.start===n.start&&a.end===n.end;
+  const point=a.coordinateKind==='SOLHINT_POINT';
+  const emit=(rule,subject)=>({ruleId:rule.id,identity:JSON.stringify([rule.issueType,n.key,subject]),canonical:c,anchor:a});
+  for(const rule of pendingNaming){
+    if(!rule.detectors.some(d=>detectorMatches(o,d))||n.nodeType!==rule.nodeType||!nameViolation(n.name,rule.convention))continue;
+    if(sl){const e=row?.elements?.[0];if(row?.elements?.length!==1||e?.type!==rule.elementType||e?.name!==n.name||e?.additional_fields?.target!==rule.target||e?.additional_fields?.convention!==rule.convention||!exact)continue;}
+    else if(!point||a.start!==n.start||row?.message!==rule.message)continue;
+    return emit(rule,[n.name,rule.convention]);
+  }
+  if(pendingImport.detectors.some(d=>detectorMatches(o,d))&&n.nodeType==='ImportDirective'){
+    const bytes=readSource?.(n.path);if(!Buffer.isBuffer(bytes))return null;
+    const source=bytes.subarray(n.start,n.end).toString('utf8');
+    const m=/^import\s*\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\s*from\s*(['"])[^'"\r\n]+\2\s*;$/.exec(source);
+    if(!m)return null;
+    const symbolStart=n.start+Buffer.byteLength(source.slice(0,source.indexOf(m[1],source.indexOf('{'))),'utf8');
+    if(o.engine==='wake'){if(!exact||row?.detection?.message!=='Unused import'||arr(row?.detection?.subdetections).length)return null;}
+    else if(!point||a.start!==symbolStart||row?.message!==`imported name ${m[1]} is not used`)return null;
+    return emit(pendingImport,m[1]);
+  }
+  if(pendingPrivate.detectors.some(d=>detectorMatches(o,d))&&n.nodeType==='FunctionDefinition'&&n.visibility==='private'&&n.kind==='function'&&typeof n.name==='string'&&n.name){
+    if(o.engine==='wake'){if(!exact||row?.detection?.message!=='Unused function'||arr(row?.detection?.subdetections).length)return null;}
+    else if(!point||a.start!==n.start||!row?.message?.startsWith(`Private function "${n.name}" in contract "`)||!row.message.endsWith('" is never used within its defining contract'))return null;
+    return emit(pendingPrivate,n.name);
+  }
+  return null;
+}
+export function assemblyComponents(o,row){
+  if(!detectorMatches(o,componentRule.detectors[0])||row?.elements?.length<3||row.elements.length!==o.anchors?.length||row.elements[0]?.type!=='function'||!row.elements.slice(1).every(e=>e.type==='node'))return [];
+  const ctx=bound(o,0);if(!ctx||ctx.n.nodeType!=='FunctionDefinition'||ctx.n.name!==row.elements[0].name)return [];
+  const components=[];
+  for(let i=1;i<o.anchors.length;i++){
+    const v=bound(o,i);if(!v||v.n.nodeType!=='InlineAssembly'||v.n.functionId!==ctx.n.nodeId||v.n.unitId!==ctx.n.unitId||v.n.path!==ctx.n.path||v.n.start<ctx.n.start||v.n.end>ctx.n.end||v.a.start!==v.n.start||v.a.end!==v.n.end)return [];
+    components.push({id:o.id+':component:'+i,observationId:o.id,reference:{...o.reference,pointer:o.reference.pointer+'/elements/'+i},identity:JSON.stringify(['INLINE_ASSEMBLY_USAGE',v.n.key]),canonical:v.c,disposition:'UNMATCHED'});
+  }
+  if(new Set(components.map(c=>c.identity)).size!==components.length)return [];
+  return components;
+}
 const output='PHASE0_FINDING_CORRELATION_v1.json';
 const engineSpecs=[
   ['slither','SLITHER_v1.json','/detectors'],
@@ -320,7 +394,8 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
       for(const [anchorIndex,a] of o.anchors.entries()){
         const issueRole=a.role!=='context'&&(o.engine==='slither'&&a.role==='node'||o.engine==='wake'&&a.role==='primary');
         const typed=styleTypes(o,a,nativeRow(o));
-        const types=typed.length?typed:known&&issueRole?['FunctionCall']:roles[a.role]??[];
+        const extraTypes=additionalTypes(o,a,nativeRow(o));
+        const types=typed.length?typed:extraTypes.length?extraTypes:known&&issueRole?['FunctionCall']:roles[a.role]??[];
         const result=index.resolve(a,{expectedTypes:types});
         o.canonicalAnchors.push({anchorIndex,role:a.role,...result});
         if(result.status==='RESOLVED'){
@@ -376,6 +451,25 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
     if(!pairs.has(id))pairs.set(id,{id,left:left.o,right:right.o,evidence:[]});
     const p=pairs.get(id);p.style={left:left.claim,right:right.claim};
     p.evidence.push({left:left.claim.anchor,right:right.claim.anchor,reason:'CANONICAL_STYLE_SUBJECT'});
+  }
+  // Pending mappings and component claims are intentionally not whole-record groups.
+  const pendingBuckets=new Map(),componentClaims=[],componentBuckets=new Map(),pendingRulePairs=[],componentDecisions=[];
+  for(const o of observations){
+    const row=nativeRow(o),c=additionalClaim(o,row,sourceBytes);
+    if(c){if(!pendingBuckets.has(c.identity))pendingBuckets.set(c.identity,[]);pendingBuckets.get(c.identity).push({o,c});}
+    const parts=assemblyComponents(o,row);componentClaims.push(...parts);
+    for(const part of parts){if(!componentBuckets.has(part.identity))componentBuckets.set(part.identity,[]);componentBuckets.get(part.identity).push(part);}
+  }
+  for(const bucket of pendingBuckets.values()){
+    if(bucket.length!==2||bucket[0].o.engine===bucket[1].o.engine||bucket[0].c.ruleId!==bucket[1].c.ruleId)continue;
+    pendingRulePairs.push({ruleId:bucket[0].c.ruleId,identity:bucket[0].c.identity,members:bucket.map(x=>x.o.id).sort(),disposition:'REVIEW_CANDIDATE_ONLY',references:bucket.map(x=>x.o.reference),proof:bucket.map(x=>x.c.canonical)});
+  }
+  for(const [identity,parts] of componentBuckets){
+    const lint=(styleBuckets.get(identity)??[]).filter(x=>x.o.engine==='solhint');
+    if(parts.length!==1||lint.length!==1||(styleBuckets.get(identity)??[]).length!==1)continue;
+    const [part]=parts,[other]=lint;
+    part.disposition='SHADOW_EQUIVALENT_COMPONENT';
+    componentDecisions.push({ruleId:componentRule.id,identity,componentId:part.id,otherClaimId:other.o.id+':0',references:[part.reference,other.o.reference],disposition:'SHADOW_EQUAL_COMPONENT',proof:[part.canonical,other.claim.canonical]});
   }
   const possible=[];
   for(const p of [...pairs.values()].sort((a,b)=>a.id.localeCompare(b.id))){
@@ -446,7 +540,7 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
     if(actual.length!==expected.size||new Set(actual).size!==actual.length||actual.some(p=>!expected.has(p)))throw Error('NATIVE_POINTER_SET_MISMATCH:'+input.engine);
   }
   const grouped=new Set(groups.flatMap(g=>g.members));
-  const result={schemaVersion:'curveyield-phase0-finding-correlation-v1',scope,notSecurityVerdict:true,mode:'SHADOW',inputs,observations,claims,groups,relatedLinks,decisions,coverage,diagnostics,canonicalAst,ruleRegistry,counts:{nativeObservations:observations.length,diagnostics:diagnostics.length,shadowGroups:groups.length,shadowGroupedObservations:grouped.size,confirmedGroups:0,singletons:observations.length,relatedLinks:relatedLinks.length,abstentions:decisions.filter(d=>d.disposition==='ABSTAIN').length}};
+  const result={schemaVersion:'curveyield-phase0-finding-correlation-v1',scope,notSecurityVerdict:true,mode:'SHADOW',inputs,observations,claims,groups,relatedLinks,decisions,coverage,diagnostics,canonicalAst,ruleRegistry,pendingRulePairs,componentClaims,componentDecisions,counts:{nativeObservations:observations.length,diagnostics:diagnostics.length,shadowGroups:groups.length,shadowGroupedObservations:grouped.size,confirmedGroups:0,singletons:observations.length,relatedLinks:relatedLinks.length,abstentions:decisions.filter(d=>d.disposition==='ABSTAIN').length}};
   const target=path.join(dir,output),temp=target+'.tmp';
   fs.writeFileSync(temp,JSON.stringify(result,null,2)+'\n');fs.renameSync(temp,target);
   return result.counts;

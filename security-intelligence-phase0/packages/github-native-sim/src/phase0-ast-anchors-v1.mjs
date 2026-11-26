@@ -50,7 +50,7 @@ export function collectCanonicalAstIndex(build,sourceFiles){
             const signature=typeof x.name==='string'&&x.parameters&&types.every(t=>typeof t==='string')?x.name+'('+types.join(',')+')':null;
             nodes.push({unitId:unit.unitId,path:p,sourceSha256:f.sha256,sourceFileId:s.fileId,nodeId:x.id,nodeType:x.nodeType,start:s.start,end:s.end,
               parentId:context.parentId,role,contractId,functionId,name:typeof x.name==='string'?x.name:null,
-              contractKind:x.contractKind??null,signatureHint:signature,selector:x.functionSelector??null,
+              contractKind:x.contractKind??null,visibility:x.visibility??null,kind:x.kind??null,signatureHint:signature,selector:x.functionSelector??null,
               referencedDeclaration:int(x.referencedDeclaration)?x.referencedDeclaration:null,
               linearizedBases:arr(x.linearizedBaseContracts).filter(int)});
           }
