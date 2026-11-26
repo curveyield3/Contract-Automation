@@ -63,12 +63,15 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
     return {callEdgeId:edge.callEdgeId,astNodeId:edge.sourceCallsite.astNodeId,qualifiedName:contract.qualifiedName,signature:target.signature,outputCount:abi[0].outputs.length};
   }
   const unitIdsFor=p=>units.filter(u=>arr(u.sourceNames).includes(p)).map(u=>u.unitId);
-  const root=path.join(dir,'work','archive'), rawCache=new Map();
+  const archiveRoot=path.join(dir,'work','archive'), projectPath=build?.discovery?.projectPath, rawCache=new Map();
   function sourceBytes(p){
     if(rawCache.has(p))return rawCache.get(p);
     let bytes=null;
     try{
-      const realRoot=fs.realpathSync(root),real=fs.realpathSync(path.resolve(root,p));
+      if(!same(projectPath,source?.sourceIdentity?.projectPath)||!same(projectPath,exec?.source?.projectPath))throw Error('PROJECT_ROOT_UNVERIFIED');
+      const admittedRoot=fs.realpathSync(archiveRoot),realRoot=fs.realpathSync(path.resolve(admittedRoot,projectPath));
+      if(realRoot!==admittedRoot&&!realRoot.startsWith(admittedRoot+path.sep))throw Error('PROJECT_ROOT_OUTSIDE_ARCHIVE');
+      const real=fs.realpathSync(path.resolve(realRoot,p));
       if(real.startsWith(realRoot+path.sep)&&fs.statSync(real).isFile()){
         const candidate=fs.readFileSync(real);
         if(sha(candidate)===byPath.get(p)?.sha256)bytes=candidate;
