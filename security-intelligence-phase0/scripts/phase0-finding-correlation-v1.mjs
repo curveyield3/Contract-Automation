@@ -109,6 +109,65 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
     const start=line.start+Buffer.byteLength(points.slice(0,index).join(''),'utf8');
     return anchor(p,start,start+Buffer.byteLength(points[index],'utf8'),'primary',null,{coordinateKind:'SOLHINT_POINT',line:row.line,column:row.column,locationStatus:'SOURCE_POINT'});
   }
+  // Compiler AST callsite src triples give a partial, unit-specific file-ID table.
+  // Only exact, unambiguous AST-derived mappings can supply source context.
+  const fileIds=new Map(),pathIds=new Map();
+  const put=(m,k,v)=>{if(!m.has(k))m.set(k,new Set());m.get(k).add(v);};
+  for(const edge of arr(source?.callGraph)){
+    const site=edge.sourceCallsite,span=/^(\d+):(\d+):(\d+)$/.exec(site?.astSourceSpan??'');
+    if(!span||!Number.isSafeInteger(site.astNodeId)||!unitIdsFor(site.sourcePath).includes(site.compilationUnitId))continue;
+    const id=Number(span[3]);if(!Number.isSafeInteger(id))continue;
+    put(fileIds,JSON.stringify([site.compilationUnitId,id]),site.sourcePath);
+    put(pathIds,JSON.stringify([site.compilationUnitId,site.sourcePath]),id);
+  }
+  const runtimeCache=new Map();
+  function runtimeContext(artifact,pc,version){
+    const empty=(locationStatus,extra={})=>({anchors:[],locationStatus,...extra});
+    if(version!=='0.24.8')return empty('UNQUALIFIED_RUNTIME_COORDINATE_VERSION');
+    if(!artifact)return empty('AMBIGUOUS_OR_UNBOUND_RUNTIME');
+    const key=artifact.deployedBytecodeDigestSha256+'|'+artifact.compilationUnitId+'|'+artifact.qualifiedName;
+    if(!runtimeCache.has(key)){
+      const hex=artifact.deployedBytecode;
+      const bytes=typeof hex==='string'&&/^0x(?:[0-9a-f]{2})+$/i.test(hex)?Buffer.from(hex.slice(2),'hex'):null;
+      if(!bytes||sha(bytes)!==artifact.deployedBytecodeDigestSha256)runtimeCache.set(key,null);
+      else{
+        const indices=new Map();
+        for(let i=0,n=0;i<bytes.length;n++){
+          const op=bytes[i],width=op>=0x60&&op<=0x7f?op-0x5f:0;
+          if(i+width>=bytes.length)break;
+          indices.set(i,n);i+=1+width;
+        }
+        const map=typeof artifact.deployedBytecodeSourceMap==='string'&&artifact.deployedBytecodeSourceMap.length?artifact.deployedBytecodeSourceMap.split(';'):null;
+        runtimeCache.set(key,{indices,map});
+      }
+    }
+    const runtime=runtimeCache.get(key);
+    if(!runtime)return empty('BYTECODE_DIGEST_MISMATCH');
+    const index=runtime.indices.get(pc);
+    if(!Number.isSafeInteger(index))return empty('NOT_AN_INSTRUCTION_BOUNDARY',{bytecodeVerified:true});
+    const extra={bytecodeVerified:true,instructionIndex:index};
+    if(!runtime.map||index>=runtime.map.length)return empty('RUNTIME_SOURCE_MAP_UNAVAILABLE',extra);
+    // Solidity compressed source maps inherit omitted fields from the prior entry.
+    const previous=['-1','-1','-1','',''];
+    for(let i=0;i<=index;i++){
+      const fields=runtime.map[i].split(':');
+      if(fields.length>5)return empty('MALFORMED_RUNTIME_SOURCE_MAP',extra);
+      for(let j=0;j<fields.length;j++)if(fields[j]!=='')previous[j]=fields[j];
+    }
+    if(!previous.slice(0,3).every(x=>/^-?\d+$/.test(x)))return empty('MALFORMED_RUNTIME_SOURCE_MAP',extra);
+    const [start,length,id]=previous.slice(0,3).map(Number);
+    if(![start,length,id].every(Number.isSafeInteger)||start<0||length<=0||id<0)return empty('NO_CONCRETE_SOURCE_SPAN',extra);
+    const paths=fileIds.get(JSON.stringify([artifact.compilationUnitId,id]));
+    if(paths?.size!==1)return empty('FILE_ID_UNRESOLVED',extra);
+    const p=[...paths][0],ids=pathIds.get(JSON.stringify([artifact.compilationUnitId,p]));
+    const bytes=sourceBytes(p);
+    if(ids?.size!==1||!ids.has(id)||!bytes||start+length>bytes.length)return empty('SOURCE_CONTEXT_UNVERIFIED',extra);
+    // An optimized/inlined instruction can refer to a broad or secondary span.
+    // Keep it as compiler context, never an equality or primary issue anchor.
+    const a=anchor(p,start,start+length,'context',artifact.compilationUnitId,{coordinateKind:'COMPILER_RUNTIME_CONTEXT',sourceFileId:id});
+    if(a.binding!=='RESOLVED')return empty('SOURCE_CONTEXT_UNVERIFIED',extra);
+    return {anchors:[a],locationStatus:'COMPILER_MAP_CONTEXT_ONLY',...extra};
+  }
   const inputs=[],observations=[],claims=[],diagnostics=[],coverage={},reports=new Map();
   function anchor(p,start,end,role,unitHint=null,extra={}){
     const file=byPath.get(p),ids=unitIdsFor(p),unit=unitHint?(ids.includes(unitHint)?unitHint:null):(ids.length===1?ids[0]:null);
@@ -155,15 +214,9 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
         observation(input,pointer,row,[a],{ruleId:row?.check_id,severity:row?.extra?.severity,claim:row?.extra?.message??null});
       }else if(engine==='mythril'){
         const matches=arr(exec?.artifacts).filter(a=>a.qualifiedName===row?.qualifiedName&&a.deployedBytecodeDigestSha256===row?.runtimeBytecodeSha256&&(!row?.compilationUnitId||a.compilationUnitId===row.compilationUnitId));
-        const artifact=matches.length===1?matches[0]:null;
-        const hex=artifact?.deployedBytecode;
-        const verified=typeof hex==='string'&&/^0x(?:[0-9a-f]{2})+$/i.test(hex)&&sha(Buffer.from(hex.slice(2),'hex'))===row?.runtimeBytecodeSha256;
-        const pc=row?.address;
-        const validPc=verified&&Number.isSafeInteger(pc)&&pc>=0&&pc<(hex.length-2)/2;
-        // Source-map file IDs are not retained by this collector. Do not infer a
-        // source file from the contract name, a map offset, or an optimizer span.
-        const locationStatus=!verified?'AMBIGUOUS_OR_UNBOUND_RUNTIME':!validPc?'INVALID_RUNTIME_OFFSET':!artifact.deployedBytecodeSourceMap?'RUNTIME_SOURCE_MAP_UNAVAILABLE':'FILE_ID_TABLE_NOT_RETAINED';
-        observation(input,pointer,row,[],{ruleId:row?.['swc-id']??row?.title,severity:row?.severity,claim:row?.title??null,runtime:{qualifiedName:row?.qualifiedName??null,sha256:row?.runtimeBytecodeSha256??null,pc:pc??null,unitId:verified?artifact.compilationUnitId:null,bytecodeVerified:verified,locationStatus,sourceBinding:'UNRESOLVED'}});
+        const artifact=matches.length===1?matches[0]:null,pc=row?.address;
+        const mapped=baseVerified?runtimeContext(artifact,pc,input.version):{anchors:[],locationStatus:'COLLECTION_SCOPE_UNVERIFIED'};
+        observation(input,pointer,row,mapped.anchors,{ruleId:row?.['swc-id']??row?.title,severity:row?.severity,claim:row?.title??null,runtime:{qualifiedName:row?.qualifiedName??null,sha256:row?.runtimeBytecodeSha256??null,pc:pc??null,unitId:mapped.bytecodeVerified?artifact.compilationUnitId:null,bytecodeVerified:mapped.bytecodeVerified===true,instructionIndex:mapped.instructionIndex??null,locationStatus:mapped.locationStatus,sourceBinding:mapped.anchors.length?'CONTEXT_ONLY':'UNRESOLVED'}});
       }else if(engine==='solhint'){
         observation(input,pointer,row,[lintPoint(row,input.version)],{ruleId:row?.ruleId??null,severity:row?.severity??null,claim:row?.message??null,claimKind:'LINT_OBSERVATION',metadata:{sourceName:row?.sourceName??null,sourceSha256:row?.sourceSha256??null,line:row?.line??null,column:row?.column??null}});
       }else if(engine==='compiler-bugs'){
@@ -177,9 +230,9 @@ export function publishFindingCorrelation(dir,request,build,source,parsed={}){
   const decisions=[],groups=[],relatedLinks=[],byAnchor=new Map(),pairs=new Map();
   for(const o of observations){
     // Newly normalized engines are inventory-only until their rules are qualified.
-    if(o.provenance!=='VERIFIED'||!['slither','wake','mythril','semgrep'].includes(o.engine))continue;
+    if(o.provenance!=='VERIFIED')continue;
     for(const a of o.anchors){
-      if(a.binding!=='RESOLVED'||a.role==='context')continue;
+      if(a.binding!=='RESOLVED'||a.role==='context'||a.coordinateKind==='SOLHINT_POINT')continue;
       const key=JSON.stringify([a.path,a.unitId,a.sourceSha256]);
       if(!byAnchor.has(key))byAnchor.set(key,[]);
       byAnchor.get(key).push({o,a});
