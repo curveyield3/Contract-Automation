@@ -41,9 +41,17 @@ if(!slither||slither.componentStatus!=='COMPLETED')warn('SLITHER_INCOMPLETE','SL
 if(wakeUnsupported)warn('WAKE_UNSUPPORTED_COMPILER','WAKE_v1.json.componentStatus','No Wake coverage for compiler versions below 0.6.2',wake?.componentStatus,'Wake 4.21.0 cannot compile authenticated legacy source; retain explicit coverage limitation');
 else if(!wakeComplete&&!wakeNotApplicable)warn('WAKE_INCOMPLETE','WAKE_v1.json.componentStatus','COMPLETED or legitimate zero-Solidity NOT_APPLICABLE',wake?.componentStatus??'missing','Inspect Wake native detections, compiler cache and source unit failures');
 if(!mythrilComplete&&!mythrilNotApplicable)warn('MYTHRIL_INCOMPLETE','MYTHRIL_v1.json.componentStatus','COMPLETED or no executable in-scope runtime NOT_APPLICABLE',mythril?.componentStatus??'missing','Inspect Mythril contractResults, pinned bytecode and execution limits');
+const maintenance={};
+for(const [engine,file] of [['compilerBugs','SOLIDITY_COMPILER_BUGS_v1.json'],['solhint','SOLHINT_v1.json'],['openzeppelinUpgrades','OPENZEPPELIN_UPGRADES_v1.json']]){
+  const r=read(path.join(dir,file));
+  const bound=r?.reviewSourceIdentity?.repository===request?.source?.repository&&r?.reviewSourceIdentity?.commit===request?.source?.commit&&r?.reviewSourceIdentity?.requestId===request?.requestId&&r?.reviewSourceIdentity?.archiveSha256Observed===actual&&r?.reviewSourceIdentity?.buildConfigurationDigestSha256===build?.build?.buildConfigurationDigestSha256;
+  const componentStatus=r&&sourceMatches&&bound?r.componentStatus:'UNVERIFIED_OR_MISSING';
+  maintenance[engine]={file,componentStatus,findingCount:r&&bound&&sourceMatches?r.findingCount??null:null,version:r?.version??null};
+  if(!['COMPLETED','NOT_APPLICABLE'].includes(componentStatus))warn('MAINTENANCE_CHECK_INCOMPLETE',file,'Source-bound COMPLETED or NOT_APPLICABLE',componentStatus,'Inspect independent report and its coverage limitations');
+}
 const nativeReady=sourceMatches&&source&&build?.build?.status==='completed'&&slither?.componentStatus==='COMPLETED'&&
   (wakeComplete||wakeNotApplicable||wakeUnsupported)&&(mythrilComplete||mythrilNotApplicable);
-const status=!sourceMatches?'INCOMPLETE':!nativeReady?'PARTIAL':wakeUnsupported?'COLLECTED_WITH_ANALYZER_LIMITATION':'COLLECTED';
+const status=!sourceMatches?'INCOMPLETE':!nativeReady?'PARTIAL':(wakeUnsupported||Object.values(maintenance).some(x=>!['COMPLETED','NOT_APPLICABLE'].includes(x.componentStatus)))?'COLLECTED_WITH_ANALYZER_LIMITATION':'COLLECTED';
 // Correlation is derived evidence; its failure must not change native collection status.
 let correlation=null;
 try{
@@ -56,7 +64,7 @@ try{
 }
 const names=fs.readdirSync(dir).filter(x=>x.endsWith('.json')&&x!=='PREFLIGHT_MANIFEST_v1.json').sort();
 const files=names.map(name=>{const raw=fs.readFileSync(path.join(dir,name));return {name,bytes:raw.length,sha256:crypto.createHash('sha256').update(raw).digest('hex')};});
-const manifest={schemaVersion:'curveyield-security-clean-preflight-v1',status,notSecurityVerdict:true,sourceAdmissionVerified:sourceMatches,sourceOnly:build?.build?.status!=='completed',source:{repository:request?.source?.repository??null,commit:request?.source?.commit??null,archivePath:request?.source?.archivePath??null,expectedSha256:expected,observedSha256:actual},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,wakeStatus:wake?.componentStatus??wake?.status??null,wakeSolidityUnitCount:wake?.solidityUnitCount??null,wakeFindingCount:wake?.findingCount??null,mythrilStatus:mythril?.componentStatus??mythril?.status??null,mythrilEligibleCount:mythril?.eligibleCount??null,mythrilCompletedCount:mythril?.completedCount??null,mythrilFindingCount:mythril?.findingCount??null,correlation,warnings,files};
+const manifest={schemaVersion:'curveyield-security-clean-preflight-v1',status,notSecurityVerdict:true,sourceAdmissionVerified:sourceMatches,sourceOnly:build?.build?.status!=='completed',source:{repository:request?.source?.repository??null,commit:request?.source?.commit??null,archivePath:request?.source?.archivePath??null,expectedSha256:expected,observedSha256:actual},buildStatus:build?.build?.status??null,slitherStatus:slither?.componentStatus??slither?.status??null,wakeStatus:wake?.componentStatus??wake?.status??null,wakeSolidityUnitCount:wake?.solidityUnitCount??null,wakeFindingCount:wake?.findingCount??null,mythrilStatus:mythril?.componentStatus??mythril?.status??null,mythrilEligibleCount:mythril?.eligibleCount??null,mythrilCompletedCount:mythril?.completedCount??null,mythrilFindingCount:mythril?.findingCount??null,maintenance,correlation,warnings,files};
 fs.writeFileSync(path.join(dir,'PREFLIGHT_MANIFEST_v1.json'),JSON.stringify(manifest,null,2)+'\n');
 const lines=['# Clean standalone Phase 0 evidence','','Status: **'+status+'**','',...warnings.map(x=>'- '+x.code+': '+x.configurationField+' | expected: '+JSON.stringify(x.expected)+' | observed: '+JSON.stringify(x.observed)+' | correction: '+x.requiredCorrection),'','Not a deployed-fork proof or security verdict.'];
 fs.writeFileSync(path.join(dir,'DISCOVERY_SUMMARY_v1.md'),lines.join('\n')+'\n');
