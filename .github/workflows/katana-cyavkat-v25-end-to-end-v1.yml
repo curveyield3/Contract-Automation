@@ -258,89 +258,32 @@ jobs:
     if: github.ref == 'refs/heads/avkat-v7-fork-sim-20261105'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
-    env:
-      UPSTREAM_RPC: ${{ secrets.RPC_KATANA }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-      - name: Isolated weETH loop using existing three OmniSwapper routes
+      - name: Compile CurveYield Morpho Position Module only
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$UPSTREAM_RPC"
-          test "$(cast chain-id --rpc-url "$UPSTREAM_RPC")" = 747474
-          export FORK_BLOCK=$(cast block-number --rpc-url "$UPSTREAM_RPC")
-          export FORK_HASH=$(cast block "$FORK_BLOCK" --field hash --rpc-url "$UPSTREAM_RPC")
-          anvil --fork-url "$UPSTREAM_RPC" --fork-block-number "$FORK_BLOCK" --chain-id 747474 --host 127.0.0.1 --port 8545 --silent >/tmp/anvil-loop.log 2>&1 &
-          PID=$!
-          trap 'kill "$PID" 2>/dev/null || true' EXIT
-          for i in $(seq 1 45); do
-            if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
-            sleep 1
-          done
-          npm install --prefix /tmp/katana-loop --ignore-scripts --no-audit --no-fund --no-save ethers@6.17.0
-          cd /tmp/katana-loop
-          node <<'JS'
-          const E=require('ethers'),assert=require('assert/strict');
-          const addr=x=>E.getAddress(x.toLowerCase()),Z=E.ZeroAddress,M=E.MaxUint256,WH=10n**36n;
-          const SAFE=addr('0xF39087af2107EaDBf81f10a64051740A76B6291D'),DAO=addr('0x47623C62f281807D615eeb4A2CEee9d97F9D3C49'),OWNER=addr('0x9f2b20a772246960810045905b7daccf960ee288'),MULTI=addr('0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761');
-          const WE=addr('0x9893989433e7a383cb313953e4c2365107dc19a7'),W=addr('0xEE7D8BCFb72bC1880D0Cf19822eB0A2e6577aB62'),US=addr('0x2dca96907fde857dd3d816880a0df407eeb2d2f2'),UC=addr('0x203A662b0BD271A6ed5a60EdFbd04bFce608FD36'),R=addr('0x01F9894f92ea9224fECc8C35482E20a05De13582'),MO=addr('0xD50F2DffFd62f94Ee4AEd9ca05C61d0753268aBc'),BUND=addr('0xA8C5e23C9C0DF2b6fF716486c6bBEBB6661548C8'),AD=addr('0x916Aa175C36E845db45fF6DDB886AE437d403B61'),Q=addr('0x92dea23ED1C683940fF1a2f8fE23FE98C5d3041c'),FACT=addr('0x203e8740894c8955cB8950759876d7E7E45E04c1'),V=addr('0x4284d4F9f4d61eA57B8F0943547c7C19C5B9B249'),PA=addr('0xd952175e940D97775cBC5a523977a6f091D0d702'),VA=addr('0xe8bbe0853271137501afa1097d523a614d1f9eec');
-          const ID='0x0a8f3fd0965bfa6e94339cca629bec6ddac99f697ac74d808aa2d9f2c46b5f68',P='(address loanToken,address collateralToken,address oracle,address irm,uint256 lltv)',C='(address to,bytes data,uint256 value,bool skipRevert,bytes32 callbackHash)[]',coder=E.AbiCoder.defaultAbiCoder();
-          const p=new E.JsonRpcProvider('http://127.0.0.1:8545',747474,{staticNetwork:true,cacheTimeout:-1});
-          const si=new E.Interface(['function nonce() view returns(uint256)','function getThreshold() view returns(uint256)','function getOwners() view returns(address[])','function getTransactionHash(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,uint256) view returns(bytes32)','function execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes) payable returns(bool)']);
-          const ei=new E.Interface(['function balanceOf(address) view returns(uint256)','function allowance(address,address) view returns(uint256)','function approve(address,uint256) returns(bool)','function transfer(address,uint256) returns(bool)','function deposit() payable']);
-          const ri=new E.Interface(['function owner() view returns(address)','function routeFor(address,address) view returns(bytes)','function setRoute(address,address,bytes)','function twapMinimumOut(address,address,uint256) view returns(uint256)','function swapExactInput(address,address,uint256,uint256,address,uint256) returns(uint256)']);
-          const moi=new E.Interface(['function idToMarketParams(bytes32) view returns(address,address,address,address,uint256)','function market(bytes32) view returns(uint128,uint128,uint128,uint128,uint128,uint128)','function position(bytes32,address) view returns(uint256,uint128,uint128)','function isAuthorized(address,address) view returns(bool)','event FlashLoan(address indexed caller,address indexed token,uint256 assets)','event Borrow(bytes32 indexed id,address caller,address indexed onBehalf,address indexed receiver,uint256 assets,uint256 shares)','event Repay(bytes32 indexed id,address indexed caller,address indexed onBehalf,uint256 assets,uint256 shares)']);
-          const ai=new E.Interface(['function MORPHO() view returns(address)','function BUNDLER3() view returns(address)','function WRAPPED_NATIVE() view returns(address)','function erc20Transfer(address,address,uint256)','function morphoFlashLoan(address,uint256,bytes)','function morphoSupplyCollateral('+P+',uint256,address,bytes)','function morphoBorrow('+P+',uint256,uint256,uint256,address)','function morphoRepay('+P+',uint256,uint256,uint256,address,bytes)']);
-          const bi=new E.Interface(['function multicall('+C+') payable']);
-          const pi=new E.Interface(['function vaultData(address) view returns(bool,uint64)','function isActiveAdapter(address,address) view returns(bool)','function absoluteCap(address,bytes32) view returns(uint256)','function allocateFromIdle(address,address,'+P+',uint128,uint64)']);
-          const vi=new E.Interface(['function isAllocator(address) view returns(bool)','function allocation(bytes32) view returns(uint256)','function absoluteCap(bytes32) view returns(uint256)','function relativeCap(bytes32) view returns(uint256)','function totalAssets() view returns(uint256)']);
-          const qi=new E.Interface(['function quoteExactInput(bytes,uint256) returns(uint256,uint160[],uint32[],uint256)']);
-          const fi=new E.Interface(['function getPool(address,address,uint24) view returns(address)']);
-          const mi=new E.Interface(['function multiSend(bytes)']);
-          const safe=new E.Contract(SAFE,si,p),dao=new E.Contract(DAO,si,p),r=new E.Contract(R,ri,p),mo=new E.Contract(MO,moi,p),pa=new E.Contract(PA,pi,p),v=new E.Contract(V,vi,p),ad=new E.Contract(AD,ai,p),q=new E.Contract(Q,qi,p),factory=new E.Contract(FACT,fi,p);
-          const token=t=>new E.Contract(t,ei,p),bal=(t,a)=>token(t).balanceOf(a),J=x=>JSON.stringify(x,(_,y)=>typeof y==='bigint'?y.toString():y),sig=a=>E.concat([E.zeroPadValue(a,32),E.ZeroHash,'0x01']);
-          const args=(to,data,op,value=0n)=>[to,value,data,op,0n,0n,0n,Z,Z],bcall=(to,data,value=0n,callbackHash=E.ZeroHash)=>[to,data,value,false,callbackHash];
-          const mcall=(to,data,value=0n)=>E.solidityPacked(['uint8','address','uint256','uint256','bytes'],[0,to,value,E.dataLength(data),data]);
-          const batch=c=>mi.encodeFunctionData('multiSend',[E.concat(c)]);
-          const path=(tokens,fees)=>E.solidityPacked(['address',...fees.flatMap(()=>['uint24','address'])],[tokens[0],...fees.flatMap((x,i)=>[x,tokens[i+1]])]);
-          async function main(){
-            const block=await p.getBlock(Number(process.env.FORK_BLOCK));assert.equal(await p.send('eth_chainId',[]),E.toQuantity(747474));assert.equal(block.hash.toLowerCase(),process.env.FORK_HASH.trim().toLowerCase());
-            assert.equal(await safe.getThreshold(),1n);assert((await safe.getOwners()).includes(OWNER));assert.equal(await dao.getThreshold(),1n);assert((await dao.getOwners()).includes(SAFE));assert.equal(await r.owner(),DAO);
-            assert.equal(await ad.MORPHO(),MO);assert.equal(await ad.BUNDLER3(),BUND);assert.equal(await ad.WRAPPED_NATIVE(),W);assert(await mo.isAuthorized(SAFE,AD));
-            const nonce=await safe.nonce(),daoNonce=await dao.nonce(),eth=await p.getBalance(SAFE);assert.equal(nonce,176n);assert(eth>0n);const params=Array.from(await mo.idToMarketParams(ID));assert.equal(params[0],US);assert.equal(params[1],WE);assert.equal(params[4],860000000000000000n);const oracle=new E.Contract(params[2],['function price() view returns(uint256)'],p);const price=await oracle.price();
-            const pos=await mo.position(ID,SAFE);assert.equal(pos[1],0n);assert.equal(pos[2],0n);assert.equal(await bal(WE,AD),0n);assert.equal(await bal(US,AD),0n);assert.equal(await bal(WE,BUND),0n);assert.equal(await bal(US,BUND),0n);
-            const seedPath=await r.routeFor(W,WE),p1=await r.routeFor(US,UC),p2=await r.routeFor(UC,W);for(const x of [seedPath,p1,p2])assert.notEqual(x,'0x');for(const t of [W,UC])assert.equal(await bal(t,AD),0n);assert.equal(await bal(UC,BUND),0n);const deadline=BigInt(block.timestamp+7200);
-            await p.send('anvil_impersonateAccount',[OWNER]);await p.send('anvil_setBalance',[OWNER,E.toQuantity(100n*10n**18n)]);const sw=safe.connect(await p.getSigner(OWNER));const gasLimit=15000000n;
-            async function execute(label,to,data,op){const n=await safe.nonce(),a=args(to,data,op),hash=await safe.getTransactionHash(...a,n);console.log('WEETH_LOOP_ATTEMPT '+J({label,nonce:n,hash,to,op}));const gas=await sw.execTransaction.estimateGas(...a,sig(OWNER),{gasLimit});assert(await sw.execTransaction.staticCall(...a,sig(OWNER),{gasLimit}));const rec=await(await sw.execTransaction(...a,sig(OWNER),{gasLimit})).wait();assert.equal(rec.status,1);assert.equal(await safe.nonce(),n+1n);console.log('WEETH_LOOP_EXEC '+J({label,nonce:n,hash,gasEstimate:gas,gasUsed:rec.gasUsed,receipt:rec.hash}));return {hash,rec,gas};}
-            const seedBatch=(minimum,recipient)=>[mcall(W,ei.encodeFunctionData('deposit'),eth),mcall(W,ei.encodeFunctionData('approve',[R,eth])),mcall(R,ri.encodeFunctionData('swapExactInput',[W,WE,eth,minimum,recipient,deadline]))];
-            const snap=await p.send('evm_snapshot',[]);const seedFloor=await r.twapMinimumOut(W,WE,eth);await execute('seed_quote_only',MULTI,batch(seedBatch(seedFloor,AD)),1);const seedActual=await bal(WE,AD);assert(seedActual>=seedFloor);const seedMin=seedActual*9990n/10000n;assert(seedMin>0n);
-            const quote=async(pa,amount)=>(await q.quoteExactInput.staticCall(pa,amount,{gasLimit:9000000n}))[0];
-            const globalFee=(BigInt(await p.getStorage(R,1n))>>160n)&65535n;assert.equal(globalFee,0n);
-            async function sizing(b){const swap=b*85n/100n;if(swap===0n)return {valid:false};const ucOut=await quote(p1,swap),ucMin=ucOut*9990n/10000n;if(!ucMin)return {valid:false};const wOut=await quote(p2,ucMin),wMin=wOut*9990n/10000n;if(!wMin)return {valid:false};const out=await quote(seedPath,wMin),minimum=out*9990n/10000n;if(minimum<=1n)return {valid:false};const flash=minimum-1n,collateral=seedMin+flash,borrowLimit=collateral*price*85n/(WH*100n);return {valid:b<=borrowLimit,b,swap,repay:b-swap,flash,minimum,out,borrowLimit,collateral,ucOut,ucMin,wOut,wMin};}
-            let lo=1n,hi=100000000n;assert(!(await sizing(hi)).valid);while(lo+1n<hi){const mid=(lo+hi)/2n;const x=await sizing(mid);if(x.valid)lo=mid;else hi=mid;}const size=await sizing(lo);assert(size.valid&&size.flash>0n&&!(await sizing(lo+1n)).valid);assert.equal(await p.send('evm_revert',[snap]),true);assert.equal(await safe.nonce(),nonce);
-            console.log('WEETH_LOOP_SIZING '+J({block:block.number,hash:block.hash,nonce,daoNonce,eth,seedActual,seedMin,price,globalFee,paths:[p1,p2,seedPath],size,quoteHaircutBps:10}));
-            for(const [a,b,amt,min] of [[US,UC,size.swap,size.ucMin],[UC,W,size.ucMin,size.wMin],[W,WE,size.wMin,size.minimum]])assert(await r.twapMinimumOut(a,b,amt)<=min);
-            const capId=E.keccak256(coder.encode(['string','address',P],['this/marketParams',VA,params]));const [canIdle,penalty]=await pa.vaultData(V);assert(canIdle);assert.equal(penalty,0n);assert(await pa.isActiveAdapter(V,VA));assert(await v.isAllocator(PA));const cap=await pa.absoluteCap(V,capId),allocation=await v.allocation(capId),idle=await bal(US,V);assert(cap>=allocation+size.b);assert(idle>=size.b);
-            const allocate=pi.encodeFunctionData('allocateFromIdle',[V,VA,params,size.b,penalty]);
-            const cb=[bcall(AD,ai.encodeFunctionData('morphoSupplyCollateral',[params,M,SAFE,'0x'])),bcall(AD,ai.encodeFunctionData('morphoBorrow',[params,size.b,0n,1n,BUND])),bcall(US,ei.encodeFunctionData('approve',[R,size.swap])),bcall(R,ri.encodeFunctionData('swapExactInput',[US,UC,size.swap,size.ucMin,AD,deadline])),bcall(AD,ai.encodeFunctionData('erc20Transfer',[UC,BUND,size.ucMin])),bcall(UC,ei.encodeFunctionData('approve',[R,size.ucMin])),bcall(R,ri.encodeFunctionData('swapExactInput',[UC,W,size.ucMin,size.wMin,AD,deadline])),bcall(AD,ai.encodeFunctionData('erc20Transfer',[W,BUND,size.wMin])),bcall(W,ei.encodeFunctionData('approve',[R,size.wMin])),bcall(R,ri.encodeFunctionData('swapExactInput',[W,WE,size.wMin,size.minimum,AD,deadline])),bcall(AD,ai.encodeFunctionData('erc20Transfer',[UC,SAFE,M])),bcall(AD,ai.encodeFunctionData('erc20Transfer',[W,SAFE,M])),bcall(US,ei.encodeFunctionData('transfer',[AD,size.repay])),bcall(AD,ai.encodeFunctionData('morphoRepay',[params,size.repay,0n,M,SAFE,'0x']))];
-            const callback=coder.encode([C],[cb]),bundle=bi.encodeFunctionData('multicall',[[bcall(AD,ai.encodeFunctionData('morphoFlashLoan',[WE,size.flash,callback]),0n,E.keccak256(callback)),bcall(AD,ai.encodeFunctionData('morphoSupplyCollateral',[params,M,SAFE,'0x']))]]);
-            const data=batch([...seedBatch(seedMin,AD),mcall(PA,allocate),mcall(BUND,bundle)]);const pre={eth:await p.getBalance(SAFE),safeUS:await bal(US,SAFE),safeWE:await bal(WE,SAFE),safeW:await bal(W,SAFE),safeUC:await bal(UC,SAFE),bundW:await bal(W,BUND),morphoWE:await bal(WE,MO),morphoUS:await bal(US,MO),market:Array.from(await mo.market(ID)),pos:Array.from(await mo.position(ID,SAFE))};const loopHash=await safe.getTransactionHash(...args(MULTI,data,1),nonce);
-            console.log('WEETH_LOOP_PLAN '+J({nonce,to:MULTI,data,operation:1,hash:loopHash,deadline,capId,cap,allocation,idle,size,seedMin,seedActual,pre}));
-            const lr=await execute('loop_proposal',MULTI,data,1);assert.equal(lr.hash,loopHash);const afterPos=await mo.position(ID,SAFE),afterMarket=await mo.market(ID),afterPrice=await oracle.price(),collateral=afterPos[2],debt=(afterPos[1]*(afterMarket[2]+1n)+(afterMarket[3]+1000000n)-1n)/(afterMarket[3]+1000000n);const grossLtvBps=size.b*WH*10000n/(collateral*afterPrice),finalLtvBps=debt*WH*10000n/(collateral*afterPrice);
-            assert.equal(await p.getBalance(SAFE),0n);assert.equal(await bal(US,SAFE),pre.safeUS);assert.equal(await bal(WE,SAFE),pre.safeWE);assert(await bal(W,SAFE)>=pre.safeW);assert(await bal(UC,SAFE)>=pre.safeUC);assert.equal(await bal(W,AD),0n);assert.equal(await bal(UC,AD),0n);assert.equal(await bal(UC,BUND),0n);assert.equal(await dao.nonce(),daoNonce);assert.equal(await r.routeFor(US,UC),p1);assert.equal(await r.routeFor(UC,W),p2);assert.equal(await r.routeFor(W,WE),seedPath);assert.equal(await bal(W,BUND),pre.bundW);for(const t of [WE,US])for(const a of [AD,BUND])assert.equal(await bal(t,a),0n);assert(collateral>=size.collateral);assert(debt<=size.swap+2n);assert(grossLtvBps<=8500n);assert(finalLtvBps<=7226n);
-            const events=[];for(const l of lr.rec.logs)if(l.address.toLowerCase()===MO.toLowerCase()){try{const e=moi.parseLog(l);if(e)events.push({name:e.name,args:Array.from(e.args)});}catch{}}
-            assert(events.some(e=>e.name==='FlashLoan'&&e.args[2]===size.flash));assert(events.some(e=>e.name==='Borrow'&&e.args[4]===size.b));assert(events.some(e=>e.name==='Repay'&&e.args[3]===size.repay));
-            console.log('WEETH_LOOP_PASS '+J({loopHash,collateral,debt,grossLtvBps,finalLtvBps,events,afterMarket:Array.from(afterMarket),afterPos:Array.from(afterPos),price:afterPrice,residualW:await bal(W,SAFE)-pre.safeW,residualUC:await bal(UC,SAFE)-pre.safeUC,loopGas:lr.rec.gasUsed,remainingSafeETH:await p.getBalance(SAFE)}));
-          }
-          main().catch(e=>{console.error(e);process.exitCode=1});
-          JS
+          root="$(mktemp -d)"
+          mkdir -p "$root/src" "$root/evidence"
+          cp "process/avkat-fork-simulation-v1/src/CurveYieldMorphoPositionModule_v1.sol" "$root/src/"
+          cd "$root"
+          forge --version
+          sha256sum src/CurveYieldMorphoPositionModule_v1.sol
+          forge build --use 0.8.30 --evm-version osaka --optimize --optimizer-runs 200 --via-ir --sizes --skip test 2>&1 | tee evidence/compile.log
+          file=out/CurveYieldMorphoPositionModule_v1.sol/CurveYieldMorphoPositionModule.json
+          jq -e '.bytecode.object | length > 2' "$file"
+          jq -c '{compiler:"0.8.30",evm:"osaka",optimizerRuns:200,viaIR:true,runtimeBytes:((.deployedBytecode.object|length)-2)/2,creationBytes:((.bytecode.object|length)-2)/2,abiFunctions:[.abi[]|select(.type=="function")|.name]}' "$file" | sed 's/^/CY_MORPHO_COMPILE /'
+          cp "$file" "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v1.json"
+          cp src/CurveYieldMorphoPositionModule_v1.sol "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v1.sol"
+          cp evidence/compile.log "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v1_compile.log"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CurveYieldMorphoPositionModule_v1
+          path: |
+            CurveYieldMorphoPositionModule_v1.sol
+            CurveYieldMorphoPositionModule_v1.json
+            CurveYieldMorphoPositionModule_v1_compile.log
