@@ -148,13 +148,13 @@ jobs:
       - name: Run v15 existing fuses Morpho flash plus one scheduled fulfillment and claim
         if: ${{ contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
         run: timeout 300s node test/katana/cyavkat-scheduled-recovery-v15.mjs
-      - name: Run deployed Guardian v64 21% fork scenario
+      - name: Run deployed Guardian v67 tier matrix fork scenario
         if: ${{ contains(github.event.head_commit.message, '[guardian-21pct]') }}
-        run: timeout 360s node test/katana/guardian-21pct-fork-v1.mjs
+        run: timeout 900s node test/katana/guardian-21pct-fork-v1.mjs
       - name: Show Guardian response
         if: ${{ always() && contains(github.event.head_commit.message, '[guardian-21pct]') }}
         run: |
-          test -f guardian-21pct-fork-v1-report.json && cat guardian-21pct-fork-v1-report.json
+          test -f guardian-21pct-fork-v2-report.json && cat guardian-21pct-fork-v2-report.json
       - name: Show scheduled recovery checkpoint outcomes
         if: ${{ always() && contains(github.event.head_commit.message, '[cyavkat-scheduled]') }}
         shell: bash
@@ -206,6 +206,6 @@ jobs:
             cyavkat-safe-proposal-ltv-swap-v1-report.json
             cyavkat-scheduled-recovery-v15-report.json
             cyavkat-scheduled-recovery-v15-proposal.json
-            guardian-21pct-fork-v1-report.json
+            guardian-21pct-fork-v2-report.json
           if-no-files-found: warn
           retention-days: 30
