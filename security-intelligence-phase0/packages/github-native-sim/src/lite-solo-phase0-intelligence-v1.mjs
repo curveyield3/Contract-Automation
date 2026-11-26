@@ -1110,24 +1110,24 @@ async function main(){
   console.log('Profile workload identity '+JSON.stringify({unitId:report.unitId,compilerInputSha256:report.compilerInputSha256,profileInputSha256:report.profileInputSha256,inputBytes:report.inputBytes}));
   const deadline=performance.now()+174000;
   const child="const fs=require('node:fs');const [file,input]=process.argv.slice(1);const c=require('solc/wrapper')(require(file));console.error('PROFILE_COMPILE_ENTER '+c.version());const result=c.compile(fs.readFileSync(input,'utf8'));console.error('PROFILE_COMPILE_RETURN '+Buffer.byteLength(result));";
-  for(const [mode,file] of [['release','/opt/preflight/smt-wasm/0.8.28.cjs'],['symbols','/compiler/soljson.cjs']]){
+  for(const [mode,file] of [['symbols','/compiler/soljson.cjs']]){
     if(!await exists(file))throw Error('Compiler missing: '+mode);
     const log=path.join(work,mode+'.v8.log');
-    const cap=Math.min(65000,Math.floor(deadline-performance.now()-20000));
+    const cap=Math.min(50000,Math.floor(deadline-performance.now()-110000));
     if(cap<=0)throw Error('Profile budget exhausted');
     const t=performance.now();
-    const r=await runProcess({command:process.execPath,args:['--prof','--no-logfile-per-isolate','--logfile='+log,'--input-type=commonjs','-e',child,file,inputFile],cwd:'/opt/preflight',timeoutMs:cap,onStderr:chunk=>{for(const line of chunk.split('\n'))if(line.startsWith('PROFILE_COMPILE_'))console.error(mode+' '+line);}});
+    const r=await runProcess({command:process.execPath,args:['--prof','--prof-sampling-interval=5000','--no-logfile-per-isolate','--logfile='+log,'--input-type=commonjs','-e',child,file,inputFile],cwd:'/opt/preflight',timeoutMs:cap,onStderr:chunk=>{for(const line of chunk.split('\n'))if(line.startsWith('PROFILE_COMPILE_'))console.error(mode+' '+line);}});
     const row={mode,wallMs:Math.round(performance.now()-t),timedOut:r.timedOut,exitCode:r.exitCode,signal:r.signal,compilerSha256:sha256(await fs.readFile(file)),profileLogBytes:0,processed:false};
     report.runs.push(row);
     if(await exists(log)){
       row.profileLogBytes=(await fs.stat(log)).size;
-      const budget=Math.min(15000,Math.floor(deadline-performance.now()-2000));
+      const budget=Math.min(115000,Math.floor(deadline-performance.now()-6500));
       if(budget>0){
-        const decoded=await runProcess({command:process.execPath,args:['--prof-process',log],cwd:'/opt/preflight',timeoutMs:budget});
+        const decoded=await runProcess({command:process.execPath,args:['--prof-process','--call-graph-size=4',log],cwd:'/opt/preflight',timeoutMs:budget});
         row.processed=decoded.exitCode===0&&!decoded.timedOut;
         // Retain only aggregate sampled stack output, not the raw V8 log or source input.
-        if(decoded.stdout)await fs.writeFile(path.join(out,mode+'-cpu-profile-v1.txt'),decoded.stdout.slice(0,300000));
-        row.processingExitCode=decoded.exitCode;
+        if(decoded.stdout)await fs.writeFile(path.join(out,mode+'-cpu-profile-v1.txt'),decoded.stdout.slice(0,4000000));
+        row.processingExitCode=decoded.exitCode;row.processingTimedOut=decoded.timedOut;row.processingOutputBytes=Buffer.byteLength(decoded.stdout);row.callerProfilePresent=/\[Bottom up \(heavy\) profile\]:[\s\S]*?ticks parent  name\s*\n\s*\d+/.test(decoded.stdout);console.log('Profiler decoder '+JSON.stringify({exitCode:decoded.exitCode,timedOut:decoded.timedOut,callerProfilePresent:row.callerProfilePresent,outputBytes:row.processingOutputBytes}));
       }
     }
     console.log('Profile run '+JSON.stringify(row));
@@ -1135,6 +1135,6 @@ async function main(){
   }
   report.totalWallMs=174000-Math.max(0,Math.round(deadline-performance.now()));
   await fs.writeFile(path.join(out,'compiler-profile-v1.json'),JSON.stringify(report,null,2)+'\n');
-  if(report.runs.some(x=>!x.processed||x.profileLogBytes===0))throw Error('CPU profile processing incomplete');
+  if(report.runs.some(x=>!x.processed||!x.callerProfilePresent||x.profileLogBytes===0))throw Error('CPU profile processing incomplete');
 }
 main().catch(error=>{console.error('Profile collection failed: '+String(error?.message??error));process.exitCode=1;});
