@@ -16,22 +16,61 @@ const pin={compilerDatabase:'v0.8.39',solhint:'6.2.5',upgradesCore:'1.46.0'};
 function baseReport(engine,version,request,bundle){return {schemaVersion:'curveyield-phase0-maintenance-'+engine+'-v1',engine,version,source:request.source,reviewSourceIdentity:{repository:request.source.repository,commit:request.source.commit,requestId:request.requestId,archiveSha256Observed:request.source.archiveSha256,buildConfigurationDigestSha256:bundle.buildConfigurationDigestSha256},authoritativeFinding:false,componentStatus:'FAILED',findingCount:null,detectors:[],limitations:[]};}
 async function reportFile(out,name,report){const temp=path.join(out,name+'.tmp');await fs.writeFile(temp,JSON.stringify(report,null,2)+'\n');await fs.rename(temp,path.join(out,name));}
 async function checkCompilerDatabase(report,bundle){
-  const raw=await fs.readFile(toolsRoot+'/bugs_by_version.json');
-  const data=JSON.parse(raw);
+  const [raw,metadataRaw,revision]=await Promise.all([
+    fs.readFile(toolsRoot+'/bugs_by_version.json'),
+    fs.readFile(toolsRoot+'/bugs.json'),
+    fs.readFile(toolsRoot+'/solidity-database-revision.txt','utf8')
+  ]);
+  const data=JSON.parse(raw),metadata=JSON.parse(metadataRaw);
   if(!data||typeof data!=='object'||Array.isArray(data))throw Error('Invalid official compiler-version catalogue');
-  report.database={release:pin.compilerDatabase,revision:(await fs.readFile(toolsRoot+'/solidity-database-revision.txt','utf8')).trim(),sha256:sha(raw),source:'https://github.com/argotorg/solidity/tree/v0.8.39/docs'};
+  if(!Array.isArray(metadata))throw Error('Invalid official advisory metadata catalogue');
+  report.database={release:pin.compilerDatabase,revision:revision.trim(),sha256:sha(raw),source:'https://github.com/argotorg/solidity/tree/'+pin.compilerDatabase+'/docs',
+    files:{'bugs_by_version.json':{sha256:sha(raw),versionCount:Object.keys(data).length},'bugs.json':{sha256:sha(metadataRaw),advisoryCount:metadata.length}}};
+  // Version-index entries identify advisory names, not UIDs. Several distinct
+  // official advisory records share a UID, so never join or deduplicate by UID.
+  const byName=new Map();
+  for(const advisory of metadata){
+    if(typeof advisory?.name!=='string'||typeof advisory?.uid!=='string'||typeof advisory?.severity!=='string'||byName.has(advisory.name))
+      throw Error('Invalid or ambiguous official advisory metadata identity');
+    byName.set(advisory.name,advisory);
+  }
   const units=arr(bundle.buildIdentity?.compilationUnits).filter(u=>arr(u.sourceNames).some(s=>s.endsWith('.sol')));
   report.units=units.map(u=>{
     const version=ver(u.compilerVersion),entry=version?data[version]:null;
     const known=Array.isArray(entry?.bugs);
     const names=known?entry.bugs.filter(x=>typeof x==='string'):null;
     if(known&&names.length!==entry.bugs.length)throw Error('Invalid official catalogue entry '+version);
-    return {unitId:u.unitId,compilerVersion:u.compilerVersion,lookupVersion:version,coverage:known?'KNOWN_VERSION':'VERSION_NOT_IN_CATALOGUE',advisoryCount:known?names.length:null,settings:u.settings??null,advisories:names};
+    return {unitId:u.unitId,compilerVersion:u.compilerVersion,lookupVersion:version,compilerReleased:entry?.released??null,
+      coverage:known?'KNOWN_VERSION':'VERSION_NOT_IN_CATALOGUE',advisoryCount:known?names.length:null,settings:u.settings??null,advisories:names};
   });
-  report.detectors=report.units.flatMap(u=>arr(u.advisories).map(name=>({unitId:u.unitId,compilerVersion:u.lookupVersion,advisory:name,assessment:'VERSION_MATCH_ONLY_REVIEW_APPLICABILITY'})));
+  const missing=new Set(),distinct=new Map();
+  report.detectors=report.units.flatMap(u=>arr(u.advisories).map(name=>{
+    const m=byName.get(name);
+    if(!m)missing.add(name);
+    const record={unitId:u.unitId,compilerVersion:u.lookupVersion,advisory:name,
+      metadataStatus:m?'AVAILABLE':'MISSING',
+      uid:m?.uid??null,severity:m?.severity??null,summary:m?.summary??null,
+      introduced:m?.introduced??null,fixed:m?.fixed??null,link:m?.link??null,
+      conditions:m?.conditions??null,officialCheckTypes:Object.keys(m?.check??{}).sort(),
+      assessment:'VERSION_MATCH_ONLY_REVIEW_APPLICABILITY'};
+    if(!distinct.has(name))distinct.set(name,record);
+    return record;
+  }));
+  function severityCounts(records){
+    const counts={};
+    for(const row of records){const key=row.severity??'unknown';counts[key]=(counts[key]??0)+1;}
+    return Object.fromEntries(Object.entries(counts).sort(([a],[b])=>a.localeCompare(b)));
+  }
   report.findingCount=report.detectors.length;
-  report.componentStatus=!units.length?'NOT_APPLICABLE':report.units.every(u=>u.coverage==='KNOWN_VERSION')?'COMPLETED':'PARTIAL';
+  report.distinctAdvisoryCount=distinct.size;
+  report.distinctUidCount=new Set(report.detectors.map(x=>x.uid).filter(Boolean)).size;
+  report.metadataCoverage={matched:report.detectors.filter(x=>x.metadataStatus==='AVAILABLE').length,
+    missing:report.detectors.filter(x=>x.metadataStatus==='MISSING').length,missingAdvisoryNames:[...missing].sort()};
+  report.severityCounts={versionMatches:severityCounts(report.detectors),distinctAdvisories:severityCounts(distinct.values())};
+  report.componentStatus=!units.length?'NOT_APPLICABLE':report.units.every(u=>u.coverage==='KNOWN_VERSION')&&!missing.size?'COMPLETED':'PARTIAL';
   report.limitations.push('Version membership is advisory information, not proof that source or compiler settings trigger a bug.');
+  report.limitations.push('Official conditions and check types are retained as metadata only; source-dependent applicability is not evaluated.');
+  if(missing.size)report.limitations.push('Some official version-index entries lack corresponding advisory metadata; all version matches are retained.');
 }
 async function checkSolhint(report,{build,projectRoot,auditScope,out}){
   const stage=path.join(out,'work','maintenance-solhint');
