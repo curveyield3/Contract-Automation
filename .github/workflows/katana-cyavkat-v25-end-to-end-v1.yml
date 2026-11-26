@@ -284,6 +284,10 @@ jobs:
               jq -c --arg version "$version" --argjson runs "$runs" '{version:$version,compiler:"0.8.30",evm:"osaka",optimizerRuns:$runs,viaIR:true,runtimeBytes:((.deployedBytecode.object|length)-2)/2,creationBytes:((.bytecode.object|length)-2)/2,abiFunctions:[.abi[]|select(.type=="function")|.name]}' "$file" | sed 's/^/CY_MORPHO_COMPILE /' | tee -a "$root/evidence/measurements.txt"
               if [ "$kind" = candidate ]; then
                 cp "$file" "$root/evidence/CurveYieldMorphoPositionModule_v12_runs${runs}.json"
+                if [ "$runs" = 25 ]; then
+                  jq -r '.bytecode.object' "$file" | sed 's/^0x//' | tr -d '\n' | xxd -r -p | sha256sum | grep -q "^12d617c9c118b2d8bcf9f00a1861bbd2fabe25fea1e26bc1d25743e48344767c "
+                  jq -r '.bytecode.object' "$file" | sed 's/^/CY_V12_CREATION_BYTECODE /'
+                fi
               fi
             done
           done
