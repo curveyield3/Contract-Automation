@@ -1310,8 +1310,9 @@ async function main(){
               rec.diagnostics.push({kind,engine:/^CHC:/.test(message)?'CHC':/^BMC:/.test(message)?'BMC':null,
                 errorCode:d.errorCode??null,severity:d.severity??null});
             }
-            rec.status=rec.diagnosticCounts.unproved||rec.diagnosticCounts.unsupported||rec.diagnosticCounts.warning
-              ?'COMPLETED_WITH_LIMITATIONS':'COMPLETED';
+            // Execution completion is independent of the diagnostic outcome.
+            // Unproved properties and warnings are review candidates, not scanner failures.
+            rec.status='COMPLETED';
           }catch(error){rec.error=String(error?.message??error);console.error('SMTChecker unit incomplete: '+rec.error);}
         }
         report.componentStatus=!report.units.length||report.units.every(u=>u.status==='NOT_APPLICABLE')?'NOT_APPLICABLE':
