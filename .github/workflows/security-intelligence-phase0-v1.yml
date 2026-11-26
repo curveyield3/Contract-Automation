@@ -70,6 +70,7 @@ jobs:
             requestId:source.requestId,campaignId:source.requestId,
             campaignGenerationId:'preflight-'+s.archiveSha256.slice(0,20),
             source:{repository:s.repository,commit:s.commit,archivePath:s.archivePath,archiveSha256:s.archiveSha256},
+            defensiveSemgrepReview:source.defensiveSemgrepReview===true,
             destination:{repository:'curveyield3/Contract-Automation',ref:'machine-intelligence-audit-controller-v1',campaignPath:'security-intelligence-phase0'}};
           fs.writeFileSync('.preflight-input/request.json',JSON.stringify(adapted,null,2)+'\n');
           NODE
@@ -136,7 +137,7 @@ jobs:
                  .preflight-plan/toolchain-plan.json >/dev/null
       - name: Set up existing Docker build for source-blind scanner caching
         uses: docker/setup-buildx-action@v3
-      - name: Restore or publish pinned Slither, Wake and Mythril scanner layers
+      - name: Restore or publish pinned Slither, Wake, Mythril and Semgrep scanner layers
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -206,6 +207,14 @@ jobs:
           path: |
             .preflight-output/evidence/*.json
             .preflight-output/evidence/*.md
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish independent Semgrep remediation-review evidence
+        if: ${{ always() && hashFiles('.preflight-output/semgrep-review/SEMGREP_v1.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-preflight-semgrep-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .preflight-output/semgrep-review/SEMGREP_v1.json
           if-no-files-found: error
           retention-days: 14
       - name: Require source-bound inventory before claiming collection success
