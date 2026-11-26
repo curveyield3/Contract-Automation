@@ -1235,7 +1235,15 @@ async function main(){
         const modelChecker={engine:'all',solvers:['z3'],targets:report.targets,
           timeout:report.queryTimeoutMilliseconds,showProvedSafe:true,showUnproved:true,showUnsupported:true};
         const probes=new Map();
-        const compilerEnv={...process.env,HOME:'/tmp',LD_LIBRARY_PATH:'/opt/smtchecker-z3/solver-lib'};
+        // 0.8.28 uses the shared library; 0.8.29+ discovers the CLI on PATH.
+        // Put the compiler-specific solver first, never inherit Mythril's z3.
+        const compilerEnv={...process.env,HOME:'/tmp',
+          PATH:'/opt/smtchecker-z3-cli/bin:'+String(process.env.PATH??''),
+          LD_LIBRARY_PATH:'/opt/smtchecker-z3/solver-lib'};
+        report.solverInstallation={legacySharedLibraryVersion:'4.12.1',
+          legacySharedLibraryPath:await fs.realpath('/opt/smtchecker-z3/solver-lib/libz3.so.4.12'),
+          executablePath:'/opt/smtchecker-z3-cli/bin/z3',
+          executableVersion:null};
         function invokeNative(compiler,args,input,timeout){
           return new Promise((resolve,reject)=>{
             const started=Date.now();
@@ -1279,6 +1287,11 @@ async function main(){
             throw Error('SMT solver unavailable for this compiler');
           return diagnostics;
         }
+        const cliVersion=await invokeNative(report.solverInstallation.executablePath,['--version'],undefined,10000);
+        report.solverInstallation.executableVersion=cliVersion.trim();
+        if(!/^Z3 version 4\.13\.3(?:\s|$)/.test(cliVersion))
+          throw Error('Incorrect SMTChecker Z3 executable version');
+        console.error('SMTChecker solver installation: '+JSON.stringify(report.solverInstallation));
         for(const [index,unit] of units.entries()){
           const names=[...new Set([...Object.keys(unit.sourceContents??{}),...Object.keys(unit.sourceAsts??{}),
             ...(unit.artifacts??[]).map(a=>a?.sourceName).filter(Boolean)])].filter(n=>typeof n==='string'&&n.endsWith('.sol'));
@@ -1302,14 +1315,25 @@ async function main(){
               const actual=await invokeNative(compiler,['--version'],undefined,10000);
               if(!actual.includes('Version: '+version+'+'))
                 throw Error('Exact native compiler unavailable');
-              const probe=await invoke(compiler,{language:'Solidity',sources:{'CompilerCapability.sol':{
-                content:'// SPDX-License-Identifier: UNLICENSED\npragma solidity >=0.8.14; contract CompilerCapability { function f(uint256 x) external pure { require(x < 10); assert(x <= 10); } }'}},
-                settings:{modelChecker,outputSelection:{'*':{'*':['abi']}}}},20000);
-              const proved=probe.some(d=>/\b(?:CHC|BMC):.*(?:check is safe|proved safe)/i.test(String(d.message)));
-              if(!proved)throw Error('Compiler capability probe did not report a proved-safe assertion');
-              probes.set(version,true);
+              const engineProbes={};
+              for(const engine of ['chc','bmc']){
+                const probe=await invoke(compiler,{language:'Solidity',sources:{'CompilerCapability.sol':{
+                  content:'// SPDX-License-Identifier: UNLICENSED\npragma solidity >=0.8.14; contract CompilerCapability { function f(uint256 x) external pure { require(x < 10); assert(x + 1 <= 10); } }'}},
+                  settings:{modelChecker:{...modelChecker,engine,targets:['assert']},outputSelection:{'*':{'*':['abi']}}}},20000);
+                const proved=probe.some(d=>{
+                  const message=String(d.message??'');
+                  return message.startsWith(engine.toUpperCase()+':')&&
+                    /check is safe|proved safe/i.test(message)&&!/not proved|unproved|could not/i.test(message);
+                });
+                engineProbes[engine]=proved?'PROVED_SAFE':'FAILED';
+                console.error('SMTChecker engine capability: '+JSON.stringify({compilerVersion:version,engine,status:engineProbes[engine]}));
+                if(!proved)throw Error('Compiler capability probe did not prove safe assertion for '+engine);
+              }
+              probes.set(version,engineProbes);
             }
             rec.solverProbe='PROVED_SAFE';
+            rec.engineProbes=probes.get(version);
+            rec.solverMode=Number(match[1])>=29?'EXECUTABLE':'SHARED_LIBRARY';
             const sources=Object.create(null);
             for(const name of names.sort()){
               safeRel(name.replace(/^\.\//,''),'SMTChecker source unit');
