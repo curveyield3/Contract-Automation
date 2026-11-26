@@ -293,7 +293,25 @@ jobs:
           cp "$root/candidate/src/CurveYieldMorphoPositionModule_v13.sol" "$root/evidence/"
           mkdir -p "$GITHUB_WORKSPACE/morpho-module-build"
           cp "$root/evidence/"* "$GITHUB_WORKSPACE/morpho-module-build/"
+      - name: Run v13 Katana fork-only integration matrix
+        shell: bash
+        env:
+          UPSTREAM_RPC: ${{ secrets.RPC_KATANA }}
+        run: |
+          set -euo pipefail
+          test -n "$UPSTREAM_RPC"
+          test "$(cast chain-id --rpc-url "$UPSTREAM_RPC")" = 747474
+          FORK_BLOCK=$(cast block-number --rpc-url "$UPSTREAM_RPC")
+          echo "CY_V13_FORK_BLOCK $FORK_BLOCK"
+          cast block "$FORK_BLOCK" --field hash --rpc-url "$UPSTREAM_RPC"
+          root="$(mktemp -d)"
+          mkdir -p "$root/src" "$root/test"
+          cp "process/avkat-fork-simulation-v1/src/CurveYieldMorphoPositionModule_v13.sol" "$root/src/"
+          cp "process/avkat-fork-simulation-v1/test/MorphoPositionModuleV13Fork.t.sol" "$root/test/"
+          cd "$root"
+          forge test --use 0.8.30 --evm-version osaka --optimize --optimizer-runs 25 --via-ir --fork-url "$UPSTREAM_RPC" --fork-block-number "$FORK_BLOCK" -vv --threads 1 2>&1 | tee "$GITHUB_WORKSPACE/morpho-module-build/v13_fork_matrix.log"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: CurveYieldMorphoPositionModule_v13
           path: morpho-module-build/
