@@ -2,14 +2,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {createRequire} from 'node:module';
 import {runProcess} from './execution.mjs';
 import {sourceIsInScope} from './phase0-audit-scope-v1.mjs';
 import {resolveCompiledSourceFile} from './phase0-compiled-source-resolve-v1.mjs';
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const jsonDigest=v=>sha(JSON.stringify(v));
 const toolsRoot='/opt/phase0-maintenance';
-const requireTool=createRequire(toolsRoot+'/package.json');
 const arr=x=>Array.isArray(x)?x:[];
 const ver=s=>String(s??'').match(/^(\d+\.\d+\.\d+)(?:\+|$)/)?.[1]??null;
 function safeRel(s){return typeof s==='string'&&s.length>0&&!path.isAbsolute(s)&&!s.includes('\\')&&s.split('/').every(x=>x&&x!=='.'&&x!=='..');}
@@ -21,7 +19,7 @@ async function checkCompilerDatabase(report,bundle){
   const raw=await fs.readFile(toolsRoot+'/bugs_by_version.json');
   const data=JSON.parse(raw);
   if(!data||typeof data!=='object'||Array.isArray(data))throw Error('Invalid official compiler-version catalogue');
-  report.database={release:pin.compilerDatabase,sha256:sha(raw),source:'https://github.com/argotorg/solidity/tree/v0.8.39/docs'};
+  report.database={release:pin.compilerDatabase,revision:(await fs.readFile(toolsRoot+'/solidity-database-revision.txt','utf8')).trim(),sha256:sha(raw),source:'https://github.com/argotorg/solidity/tree/v0.8.39/docs'};
   const units=arr(bundle.buildIdentity?.compilationUnits).filter(u=>arr(u.sourceNames).some(s=>s.endsWith('.sol')));
   report.units=units.map(u=>{
     const version=ver(u.compilerVersion),entry=version?data[version]:null;
@@ -53,26 +51,40 @@ async function checkSolhint(report,{build,projectRoot,auditScope,out}){
   }
   report.sourceDigests=[...selected].sort(([a],[b])=>a.localeCompare(b)).map(([sourceName,sha256])=>({sourceName,sha256}));
   if(!selected.size){report.componentStatus='NOT_APPLICABLE';report.findingCount=0;return;}
-  const config=path.join(stage,'.solhint.json');
-  // Built-in recommended configuration. Never load project config, plugins, or fix source.
-  await fs.writeFile(config,JSON.stringify({extends:'solhint:recommended'}));
-  const raw=await runProcess({command:toolsRoot+'/node_modules/.bin/solhint',args:['--config',config,'--formatter','json','**/*.sol'],cwd:stage,timeoutMs:limits.solhintWallMs,env:{...process.env,CI:'true',HOME:'/tmp'}});
+  // The native JSON CLI formatter omits files with no messages. Use the
+  // documented per-file API and an explicit ledger instead of guessing coverage.
+  const manifest=path.join(stage,'sources.json');
+  const ledger=path.join(stage,'results.jsonl');
+  await fs.writeFile(manifest,JSON.stringify([...selected.keys()].sort()));
+  const program=[
+    "const fs=require('node:fs'),path=require('node:path');",
+    "const lint=require('/opt/phase0-maintenance/node_modules/solhint');",
+    "const [manifest,ledger]=process.argv.slice(1);",
+    "const files=JSON.parse(fs.readFileSync(manifest,'utf8'));",
+    "for(const file of files){let row;try{const r=lint.processFile(file,{extends:'solhint:recommended',cache:false,fix:false});row={filePath:file,messages:r.messages,errorCount:r.errorCount,warningCount:r.warningCount};}catch(e){row={filePath:file,error:String(e.message||e)};}fs.appendFileSync(ledger,JSON.stringify(row)+'\n');}"
+  ].join('\n');
+  const raw=await runProcess({command:process.execPath,args:['-e',program,manifest,ledger],cwd:stage,timeoutMs:limits.solhintWallMs,env:{...process.env,CI:'true',HOME:'/tmp'}});
   report.exitCode=raw.exitCode;report.timedOut=raw.timedOut===true;
-  const result=JSON.parse(raw.stdout);
-  if(!Array.isArray(result))throw Error('Unexpected Solhint JSON format');
+  report.expectedSourceCount=selected.size;
+  const lines=(await fs.readFile(ledger,'utf8').catch(e=>{if(e.code==='ENOENT')return '';throw e;})).split('\n').filter(Boolean);
+  const result=[];
+  for(const line of lines){try{result.push(JSON.parse(line));}catch{report.limitations.push('Incomplete lint ledger row');}}
   report.nativeReport=result;
-  const covered=new Set();
+  const covered=new Set(),seen=new Set();
   for(const row of result){
-    const file=String(row.filePath??row.file??'');
-    const rel=path.relative(stage,path.resolve(stage,file)).split(path.sep).join('/');
-    if(!selected.has(rel)||!Array.isArray(row.messages))throw Error('Unexpected Solhint file or messages');
-    covered.add(rel);
+    const rel=row.filePath;
+    if(!selected.has(rel)||seen.has(rel)){report.limitations.push('Unexpected or duplicate lint ledger row');continue;}
+    seen.add(rel);
+    if(!Array.isArray(row.messages)){report.limitations.push('Lint unavailable for '+rel);continue;}
+    const parseError=row.messages.some(m=>!m.ruleId&&String(m.message).startsWith('Parse error:'));
+    if(!parseError)covered.add(rel);
+    else report.limitations.push('Parser could not analyze '+rel);
     for(const m of row.messages)report.detectors.push({sourceName:rel,sourceSha256:selected.get(rel),ruleId:m.ruleId??null,severity:m.severity??null,line:m.line??null,column:m.column??null,message:m.message??null});
   }
-  report.scannedSourceCount=covered.size;report.expectedSourceCount=selected.size;
+  report.scannedSourceCount=covered.size;
   report.findingCount=report.detectors.length;
-  report.componentStatus=!report.timedOut&&[0,1].includes(raw.exitCode)&&covered.size===selected.size?'COMPLETED':'PARTIAL';
-  if(covered.size!==selected.size)report.limitations.push('JSON formatter did not account for every staged source; coverage remains partial.');
+  report.componentStatus=!report.timedOut&&raw.exitCode===0&&covered.size===selected.size&&!report.limitations.length?'COMPLETED':'PARTIAL';
+  if(covered.size!==selected.size)report.limitations.push('Not every source was successfully linted.');
 }
 async function checkUpgrades(report,{build,projectRoot,auditScope,out,bundle}){
   const root=await fs.realpath(projectRoot);
@@ -102,9 +114,9 @@ async function checkUpgrades(report,{build,projectRoot,auditScope,out,bundle}){
     }
   };
   await visit(root);
-  const core=requireTool('@openzeppelin/upgrades-core');
+  const deadline=Date.now()+limits.upgradeWallMs;
   for(const [i,u] of units.entries()){
-    const row={unitId:u.unitId,compilerVersion:u.compilerVersion,status:'MISSING_EXACT_BUILD_INFO',storageComparison:'REFERENCE_REQUIRED_FOR_COMPARISON',numTotal:null,numPassed:null};
+    const row={unitId:u.unitId,compilerVersion:u.compilerVersion,status:'MISSING_EXACT_BUILD_INFO',storageComparison:'REFERENCE_DEPENDENT_SEE_NATIVE_REPORT',numTotal:null,numPassed:null};
     report.units.push(row);
     const match=matched.get(u.unitId);if(!match)continue;
     row.buildInfoSha256=match.sha256;
@@ -117,9 +129,16 @@ async function checkUpgrades(report,{build,projectRoot,auditScope,out,bundle}){
       // The official API consumes only exact retained compiler build info; do not rebuild,
       // invoke project scripts, guess references or bypass storage checks.
       const excluded=[...new Set(names.filter(x=>!sourceIsInScope(x.s,auditScope)).map(x=>x.s))];
-      const r=await core.validateUpgradeSafety(targetDir,undefined,undefined,{},undefined,excluded);
+      const remaining=deadline-Date.now();
+      if(remaining<=0){row.status='TIME_BUDGET_EXHAUSTED';continue;}
+      const program="const fs=require('node:fs');const core=require('/opt/phase0-maintenance/node_modules/@openzeppelin/upgrades-core');const [dir,excluded,file]=process.argv.slice(1);core.validateUpgradeSafety(dir,undefined,undefined,{},undefined,JSON.parse(excluded)).then(r=>fs.writeFileSync(file,JSON.stringify({ok:r.ok,numTotal:r.numTotal,numPassed:r.numPassed,report:r.explain(false)}))).catch(e=>{console.error(String(e.message||e));process.exitCode=1;});";
+      const resultFile=path.join(stage,'result-'+i+'.json');
+      const raw=await runProcess({command:process.execPath,args:['-e',program,targetDir,JSON.stringify(excluded),resultFile],cwd:stage,timeoutMs:remaining,env:{...process.env,CI:'true',HOME:'/tmp'}});
+      if(raw.timedOut||raw.exitCode!==0)throw Error(raw.timedOut?'Upgrade check exceeded time budget':String(raw.stderr??'').slice(-2000));
+      const r=JSON.parse(await fs.readFile(resultFile,'utf8'));
+      if(typeof r.ok!=='boolean'||!Number.isSafeInteger(r.numTotal)||!Number.isSafeInteger(r.numPassed)||r.numPassed<0||r.numTotal<r.numPassed)throw Error('Unexpected upgrade report format');
       row.numTotal=r.numTotal;row.numPassed=r.numPassed;
-      row.report=r.explain(false);
+      row.report=r.report;
       row.status=r.numTotal===0?'NO_UPGRADEABLE_CONTRACTS_DETECTED':'COMPLETED';
       if(r.ok===false)report.detectors.push({unitId:u.unitId,kind:'UPGRADE_VALIDATION_REPORT',message:row.report,failedContractCount:r.numTotal-r.numPassed});
     }catch(e){row.status='VALIDATION_UNAVAILABLE';row.error=String(e?.message??e).slice(0,2000);}
