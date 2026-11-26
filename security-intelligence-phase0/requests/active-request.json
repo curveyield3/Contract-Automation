@@ -1,11 +1,11 @@
 {
   "schemaVersion": "curveyield-security-preflight-request-v1",
   "runMode": "SOURCE_PREFLIGHT",
-  "requestId": "boosthub-v63-phase0-dedup-qualification-9628c2a-v2",
+  "requestId": "cyavkat-v25b-phase0-dedup-qualification-v1-20261126",
   "source": {
     "repository": "curveyield3/Smart-Contracts",
-    "commit": "4451431a0ae3aea70c945acf2525e7c9bc34b443",
-    "archivePath": "Audit-Intake/BoostHub_Contract_Stack_v63.zip",
-    "archiveSha256": "b9e407d396f5e6e9eeaf6575a15672b74e206727c3bc262ff461966771dc2549"
+    "commit": "7ea1a1f96ecb18dd9876fe697239a731697f38ed",
+    "archivePath": "Audit-Intake/cyavKATv25b_v1-1.zip",
+    "archiveSha256": "7c620ff30c79ceff532af3ad0977d184e66d76a4e00b600d61050799f5b9c8be"
   }
 }
