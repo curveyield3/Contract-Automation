@@ -1083,172 +1083,58 @@ async function main(){
   };
 
   const build=await withProgressStage('compile-exact-build',()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
-  const executionBuildArtifacts=buildExecutionArtifactBundleV2({request:pseudo,build});
-  // The native compilation units are authoritative; a mixed Hardhat build can
-  // expose only its primary version in build.compilerVersions. Preserve *all*
-  // Solidity units here, before formal analysis or model dispatch begins.
-  const compiledSolidityVersions=[...new Set(
-    (executionBuildArtifacts.buildIdentity?.compilationUnits??[])
-      .filter(unit=>(unit.sourceNames??[]).some(name=>name.endsWith('.sol')))
-      .map(unit=>unit.compilerVersion).filter(Boolean)
-  )].sort();
-  const effectiveCfg={...cfg,buildSystem:build.system,
-    compilerVersions:compiledSolidityVersions.length?compiledSolidityVersions:(build.compilerVersions??[build.compilerVersion].filter(Boolean)),
-    compilerProfiles:build.compilerProfiles??[]};
-  let slither;
-  try {
-    slither=await withProgressStage('slither-static-analysis',()=>slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit}));
-  }catch(error){
-    // Preserve the actual failure and proceed with source-bound artifact assembly.
-    // Audit-quality disposition is owned by the independent Cloudflare Worker.
-    const detail=String(error?.message??error);
-    console.error('Worker review required: Slither analysis incomplete: '+detail);
-    slither={backend:'slither',version:'0.11.6',sourceCommit:request.source.commit,
-      rawArtifactRef:'github-actions://lite-phase0/slither',
-      status:'failed',terminal:true,componentStatus:'FAILED',
-      continuationDisposition:'DELEGATED_TO_CLOUDFLARE_WORKER',
-      authoritativeFinding:false,findingCount:0,detectors:[],
-      repairAttempts:error?.attempts??[{strategy:'unhandled-failure',error:{message:detail}}],
-      inputMode:'UNRESOLVED_STATIC_ANALYSIS',
-      limitations:[detail],requiredSemanticReview:true};
+  // Qualification-branch-only compiler performance probe. Never emit model diagnostics,
+  // source content, transaction traces, or a security finding.
+  if(build.status!=='completed')throw Error('Exact build did not complete');
+  const i=build.compilationUnits.findIndex(u=>u.unitId==='hardhat-build-info-1'&&slitherCompilerVersion(u.compilerVersion)==='0.8.28');
+  if(i<0)throw Error('Original timed-out compiler unit absent');
+  const unit=build.compilationUnits[i],info=build.buildInfo?.[i];
+  if(!info?.path)throw Error('Exact build info absent');
+  safeRel(info.path,'Hardhat build-info');
+  const raw=await fs.readFile(path.join(detected.absolute,info.path));
+  if(sha256(raw)!==info.sha256)throw Error('Build info digest mismatch');
+  const input=JSON.parse(raw).input;
+  if(sha256(Buffer.from(JSON.stringify(input)))!==unit.compilerInputSha256)throw Error('Compiler input digest mismatch');
+  const targets=Object.create(null);
+  for(const a of unit.artifacts??[]){
+    if(!a.sourceName?.endsWith('.sol')||!sourceIsInScope(a.sourceName,auditScope)||!a.contractName)continue;
+    (targets[a.sourceName]??=[]).push(a.contractName);
   }
-  let wake;
-  try{
-    wake=await withProgressStage('wake-static-analysis',()=>runWakeDetectors({projectRoot:detected.absolute,build,sourceCommit:request.source.commit,out,cfg}));
-  }catch(error){
-    const detail=String(error?.message??error);
-    wake={backend:'wake',version:'4.21.0',sourceCommit:request.source.commit,status:'failed',
-      componentStatus:'FAILED',authoritativeFinding:false,inputMode:'UNRESOLVED_STATIC_ANALYSIS',
-      solidityUnitCount:null,sourceCount:0,findingCount:0,detectors:[],unitResults:[],
-      limitations:[detail],requiredSemanticReview:true};
-    console.error('Wake static analysis incomplete: '+detail);
-  }
-  let mythril;
-  try{
-    mythril=await withProgressStage('mythril-symbolic-analysis',()=>runMythrilDetectors({
-      build,sourceCommit:request.source.commit,auditScope,out}));
-  }catch(error){
-    const detail=String(error?.message??error);
-    mythril={backend:'mythril',version:'0.24.8',sourceCommit:request.source.commit,
-      status:'failed',componentStatus:'FAILED',authoritativeFinding:false,
-      inputMode:'UNRESOLVED_BYTECODE_ANALYSIS',sourceArtifactCount:null,eligibleCount:null,
-      completedCount:0,failedCount:null,findingCount:0,detectors:[],contractResults:[],
-      limitations:[detail],requiredSemanticReview:true};
-    console.error('Mythril symbolic analysis incomplete: '+detail);
-  }
-  // Fourth scanner: independent, source-only remediation review. Do not send
-  // this report into Source Intelligence, formal jobs or automated reproduction.
-  // Run automatically for admitted defensive source reviews; no opt-in flag.
-  {
-    const reportDir=path.join(path.dirname(out),'semgrep-review');
-    const stage=path.join(out,'work','semgrep-source');
-    const rulesRevision='2e878a89ac7bba1f8435e8a68e3ecb7700096cd5';
-    const report={schemaVersion:'curveyield-semgrep-defensive-review-v1',backend:'semgrep',
-      version:'1.187.0',rulesRevision,source:request.source,authoritativeFinding:false,
-      status:'FAILED',sourceDigests:[],findingCount:null,nativeReport:null};
-    await fs.mkdir(reportDir,{recursive:true});
-    try{
-      await withProgressStage('semgrep-defensive-source-review',async()=>{
-        if(!String(request.source.repository).toLowerCase().startsWith('curveyield3/'))
-          throw Error('Semgrep review requires a CurveYield repository');
-        await fs.mkdir(stage,{recursive:true});
-        const units=Array.isArray(build.compilationUnits)&&build.compilationUnits.length
-          ?build.compilationUnits:[build];
-        const selected=new Map();
-        for(const unit of units){
-          const names=[...new Set([...Object.keys(unit.sourceContents??{}),
-            ...Object.keys(unit.sourceAsts??{}),
-            ...(unit.artifacts??[]).map(a=>a?.sourceName).filter(Boolean)])];
-          for(const originalName of names){
-            if(typeof originalName!=='string'||!originalName.endsWith('.sol')||
-              !sourceIsInScope(originalName,auditScope))continue;
-            const name=originalName.startsWith('./')?originalName.slice(2):originalName;
-            safeRel(name,'Semgrep source unit');
-            const bytes=typeof unit.sourceContents?.[originalName]==='string'
-              ?Buffer.from(unit.sourceContents[originalName],'utf8')
-              :await fs.readFile(await resolveCompiledSourceFile(detected.absolute,originalName));
-            const digest=sha256(bytes);
-            if(selected.has(name)){
-              if(selected.get(name)!==digest)throw Error('Conflicting compiler source content: '+name);
-              continue;
-            }
-            selected.set(name,digest);
-            const target=path.join(stage,...name.split('/'));
-            await fs.mkdir(path.dirname(target),{recursive:true});
-            await fs.writeFile(target,bytes);
-            report.sourceDigests.push({sourceName:name,sha256:digest});
-          }
-        }
-        report.sourceDigests.sort((a,b)=>a.sourceName.localeCompare(b.sourceName));
-        if(!selected.size){report.status='NOT_APPLICABLE';report.findingCount=0;return;}
-        const raw=await runProcess({command:'semgrep',args:['scan','--config',
-          '/opt/semgrep-rules/solidity/security','--metrics=off','--disable-version-check',
-          '--no-git-ignore','--strict','--json','.'],cwd:stage,timeoutMs:300000,
-          env:{...process.env,HOME:'/tmp',XDG_CACHE_HOME:'/tmp',CI:'true',SEMGREP_SEND_METRICS:'off'}});
-        report.exitCode=raw.exitCode;
-        report.timedOut=raw.timedOut===true;
-        const parsed=(()=>{try{return JSON.parse(raw.stdout)}catch{return null}})();
-        report.nativeReport=parsed;
-        if(raw.exitCode!==0||report.timedOut||!Array.isArray(parsed?.results)||
-            !Array.isArray(parsed?.errors)||parsed.errors.length)
-          throw Error('Semgrep incomplete: '+String(raw.stderr??'').slice(-1800));
-        const scanned=new Set((parsed.paths?.scanned??[]).map(x=>String(x).startsWith('./')?String(x).slice(2):String(x)));
-        report.scannedSourceCount=[...selected.keys()].filter(x=>scanned.has(x)).length;
-        if(report.scannedSourceCount!==selected.size)
-          throw Error('Semgrep source coverage incomplete: '+report.scannedSourceCount+'/'+selected.size);
-        report.findingCount=parsed.results.length;
-        report.status='COMPLETED';
-      });
-    }catch(error){
-      report.error=String(error?.message??error);
-      console.error('Semgrep independent review incomplete: '+report.error);
-    }finally{
-      await fs.writeFile(path.join(reportDir,'SEMGREP_v1.json'),JSON.stringify(report,null,2)+'\n');
+  if(Object.values(targets).flat().length!==25)throw Error('Original workload identity mismatch');
+  input.settings??={};
+  input.settings.outputSelection={'*':{'*':['abi']}};
+  input.settings.modelChecker={engine:'all',solvers:['z3'],contracts:targets,showProvedSafe:true,showUnproved:true,showUnsupported:true};
+  const inputText=JSON.stringify(input),inputFile=path.join(work,'profile-input.json');
+  await fs.writeFile(inputFile,inputText);
+  const report={sourceSha256:observed,unitId:unit.unitId,compilerInputSha256:unit.compilerInputSha256,profileInputSha256:sha256(Buffer.from(inputText)),inputBytes:Buffer.byteLength(inputText),runs:[]};
+  console.log('Profile workload identity '+JSON.stringify({unitId:report.unitId,compilerInputSha256:report.compilerInputSha256,profileInputSha256:report.profileInputSha256,inputBytes:report.inputBytes}));
+  const deadline=performance.now()+174000;
+  const child="const fs=require('node:fs');const [file,input]=process.argv.slice(1);const c=require('solc/wrapper')(require(file));console.error('PROFILE_COMPILE_ENTER '+c.version());const result=c.compile(fs.readFileSync(input,'utf8'));console.error('PROFILE_COMPILE_RETURN '+Buffer.byteLength(result));";
+  for(const [mode,file] of [['release','/opt/preflight/smt-wasm/0.8.28.cjs'],['symbols','/compiler/soljson.cjs']]){
+    if(!await exists(file))throw Error('Compiler missing: '+mode);
+    const log=path.join(work,mode+'.v8.log');
+    const cap=Math.min(65000,Math.floor(deadline-performance.now()-20000));
+    if(cap<=0)throw Error('Profile budget exhausted');
+    const t=performance.now();
+    const r=await runProcess({command:process.execPath,args:['--prof','--no-logfile-per-isolate','--logfile='+log,'--input-type=commonjs','-e',child,file,inputFile],cwd:'/opt/preflight',timeoutMs:cap,onStderr:chunk=>{for(const line of chunk.split('\n'))if(line.startsWith('PROFILE_COMPILE_'))console.error(mode+' '+line);}});
+    const row={mode,wallMs:Math.round(performance.now()-t),timedOut:r.timedOut,exitCode:r.exitCode,signal:r.signal,compilerSha256:sha256(await fs.readFile(file)),profileLogBytes:0,processed:false};
+    report.runs.push(row);
+    if(await exists(log)){
+      row.profileLogBytes=(await fs.stat(log)).size;
+      const budget=Math.min(15000,Math.floor(deadline-performance.now()-2000));
+      if(budget>0){
+        const decoded=await runProcess({command:process.execPath,args:['--prof-process',log],cwd:'/opt/preflight',timeoutMs:budget});
+        row.processed=decoded.exitCode===0&&!decoded.timedOut;
+        // Retain only aggregate sampled stack output, not the raw V8 log or source input.
+        if(decoded.stdout)await fs.writeFile(path.join(out,mode+'-cpu-profile-v1.txt'),decoded.stdout.slice(0,300000));
+        row.processingExitCode=decoded.exitCode;
+      }
     }
+    console.log('Profile run '+JSON.stringify(row));
+    await fs.writeFile(path.join(out,'compiler-profile-v1.json'),JSON.stringify(report,null,2)+'\n');
   }
-  const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
-  const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither,wake,mythril}}));
-  await writeReviewInventoryOutputsV1({outputDir:out,projectRoot:detected.absolute,build,request,slither,policy:process.env.ADR_DETECTION_POLICY||null,reviewPolicy:process.env.ADR_DETECTION_REVIEW_POLICY||null});
-  const projectReadiness=await withProgressStage('scan-project-readiness',()=>scanProjectReadiness({projectRoot:detected.absolute,build,cfg:effectiveCfg}));
-  const deployConfigExecution=await withProgressStage('execute-local-deployment-inventory',()=>executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness}));
-
-  // Retain real failure evidence without turning GitHub into the audit judge.
-  if(!slitherSucceeded(slither))console.error('Slither incomplete; quality review delegated to Cloudflare Worker');
-  if(sourceIntelligence?.completion?.semanticReviewRequired!==true)console.error('Source Intelligence completion assessment delegated to Cloudflare Worker');
-
-  const buildIdentity={
-    schemaVersion:'curveyield-lite-phase0-build-source-identity-v1',
-    requestId:request.requestId,campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,
-    source:{...request.source,checkoutCommit:checkout.commit,archiveSha256Observed:observed},
-    discovery:{projectPath:detected.relativePath,topCandidates:detected.candidates,archiveEntryCount:extraction.entryCount,archiveExtractedBytes:extraction.extractedBytes},
-    configurationDetection:effectiveCfg,
-    auditScope,
-    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,compilerVersions:effectiveCfg.compilerVersions,compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??0,compilationUnits:executionBuildArtifacts.buildIdentity.compilationUnits,buildConfigurationDigestSha256:executionBuildArtifacts.buildConfigurationDigestSha256,embeddedBuildContract:build.embeddedBuildContract??null,foundryDependencyInstall:build.foundryDependencyInstall??[],sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
-    status:'PASS'
-  };
-
-  const files=[
-    ['BUILD_AND_SOURCE_IDENTITY_v1.json',buildIdentity],
-    ['PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json',executionBuildArtifacts],
-    ['SBOM_v1.json',sbom],
-    ['SLITHER_v1.json',slither],
-    ['WAKE_v1.json',wake],
-    ['MYTHRIL_v1.json',mythril],
-    ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence],
-    ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness],
-    ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',deployConfigExecution]
-  ];
-  await withProgressStage('write-machine-evidence',async()=>{for(const [name,obj] of files)await fs.writeFile(path.join(out,name),JSON.stringify(obj,null,2)+'\n');});
-  process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},wake:{status:wake.status,findings:wake.findingCount??0,solidityUnits:wake.solidityUnitCount},mythril:{status:mythril.status,findings:mythril.findingCount??0,eligibleContracts:mythril.eligibleCount,completedContracts:mythril.completedCount},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},deployConfigExecution:{status:deployConfigExecution.status,attempts:deployConfigExecution.attempts.length,gaps:deployConfigExecution.gaps.length},outputs:files.map(([name])=>name)},null,2)+'\n');
+  report.totalWallMs=174000-Math.max(0,Math.round(deadline-performance.now()));
+  await fs.writeFile(path.join(out,'compiler-profile-v1.json'),JSON.stringify(report,null,2)+'\n');
+  if(report.runs.some(x=>!x.processed||x.profileLogBytes===0))throw Error('CPU profile processing incomplete');
 }
-
-main().catch(error=>{
-  const failedCommand=error?.result
-    ?{exitCode:error.result.exitCode,
-      stderr:String(error.result.stderr??'').slice(-6000),
-      stdout:String(error.result.stdout??'').slice(-2000)}
-    :null;
-  console.error(JSON.stringify({status:'FAIL',message:error?.message??String(error),
-    code:error?.code??null,attempts:error?.attempts??null,failedCommand},null,2));
-  process.exitCode=1;
-});
+main().catch(error=>{console.error('Profile collection failed: '+String(error?.message??error));process.exitCode=1;});

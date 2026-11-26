@@ -1,4 +1,5 @@
-name: SMTChecker independent WASM installation qualification
+name: SMTChecker internal CPU profiling qualification
+run-name: smtchecker-profile-${{ github.run_id }}
 on:
   push:
     branches: [mi-smtchecker-installation-qualification-v1]
@@ -6,88 +7,237 @@ on:
       - 'security-intelligence-phase0/requests/active-request.json'
 permissions:
   contents: read
+  actions: read
+concurrency:
+  group: security-preflight-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  qualify:
+  admit:
+    outputs:
+      request_present: ${{ steps.request_present.outputs.request_present }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout trusted standalone workflow and copied dependencies
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: docker/setup-buildx-action@v3
-      - name: Build clean Phase 0 scanner layer with official integrity-pinned npm compilers
+      - name: Check whether an active request exists
+        id: request_present
+        shell: bash
+        run: |
+          if [ -f security-intelligence-phase0/requests/active-request.json ]; then
+            echo 'request_present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'request_present=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::Clean fork reset: no active source request; no audit started'
+          fi
+      - name: Admit source-bound request and download ZIP without running it
+        if: ${{ steps.request_present.outputs.request_present == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?GitHub Actions read token unavailable}"
+          mkdir -p .preflight-input
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const source=JSON.parse(fs.readFileSync('security-intelligence-phase0/requests/active-request.json','utf8'));
+          if(source.schemaVersion!=='curveyield-security-preflight-request-v1'||source.runMode!=='SOURCE_PREFLIGHT')throw Error('REQUEST_SCHEMA_OR_MODE_INVALID');
+          if(typeof source.requestId!=='string'||!/^[a-zA-Z0-9._-]{6,100}$/.test(source.requestId))throw Error('REQUEST_ID_INVALID');
+          const s=source.source??{};
+          if(typeof s.repository!=='string'||!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(s.repository))throw Error('SOURCE_REPOSITORY_INVALID');
+          if(typeof s.commit!=='string'||!/^[a-f0-9]{40}$/.test(s.commit))throw Error('SOURCE_COMMIT_UNPINNED');
+          if(typeof s.archiveSha256!=='string'||!/^[a-f0-9]{64}$/.test(s.archiveSha256))throw Error('SOURCE_SHA_UNPINNED');
+          if(typeof s.archivePath!=='string'||!s.archivePath.endsWith('.zip')||s.archivePath.length>512||
+             s.archivePath.startsWith('/')||s.archivePath.includes('..')||s.archivePath.includes('\\')||s.archivePath.split('/').some(x=>!x))throw Error('SOURCE_ARCHIVE_PATH_INVALID');
+          const adapted={schemaVersion:'curveyield-lite-phase0-intelligence-request-v1',
+            requestId:source.requestId,campaignId:source.requestId,
+            campaignGenerationId:'preflight-'+s.archiveSha256.slice(0,20),
+            source:{repository:s.repository,commit:s.commit,archivePath:s.archivePath,archiveSha256:s.archiveSha256},
+            destination:{repository:'curveyield3/Contract-Automation',ref:'machine-intelligence-audit-controller-v1',campaignPath:'security-intelligence-phase0'}};
+          fs.writeFileSync('.preflight-input/request.json',JSON.stringify(adapted,null,2)+'\n');
+          NODE
+          repo="$(jq -er '.source.repository' .preflight-input/request.json)"
+          commit="$(jq -er '.source.commit' .preflight-input/request.json)"
+          rel="$(jq -er '.source.archivePath' .preflight-input/request.json)"
+          expected="$(jq -er '.source.archiveSha256' .preflight-input/request.json)"
+          encoded="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe="/"))' "$rel")"
+          blob="$(gh api "repos/$repo/contents/$encoded?ref=$commit" --jq '.sha')"
+          [[ "$blob" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::SOURCE_GIT_BLOB_UNAVAILABLE"; exit 1; }
+          gh api "repos/$repo/git/blobs/$blob" --jq '.content' | base64 -d > .preflight-input/source.zip
+          test -s .preflight-input/source.zip
+          test "$(sha256sum .preflight-input/source.zip | awk '{print $1}')" = "$expected"
+          test "$(stat -c%s .preflight-input/source.zip)" -le 16777216
+          unzip -tqq .preflight-input/source.zip
+          # Parse source manifests as inert DATA, before any dependency download.
+          python3 security-intelligence-phase0/scripts/source-toolchain-plan-v1.py \
+            .preflight-input/source.zip .preflight-plan
+          test "$(jq -er .sourceZipSha256 .preflight-plan/toolchain-plan.json)" = "$expected"
+          echo "Exact ZIP and source-derived toolchain plan admitted; no source execution"
+      - name: Hand off ZIP and non-secret request to isolated collector
+        if: ${{ steps.request_present.outputs.request_present == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-preflight-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .preflight-input/
+          include-hidden-files: true
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Publish data-only toolchain manifest independently of source ZIP
+        if: ${{ steps.request_present.outputs.request_present == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-preflight-toolchain-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .preflight-plan/
+          include-hidden-files: true
+          retention-days: 3
+          if-no-files-found: error
+
+  build_symbols:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Build release-matched WASM with internal function symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/solidity-profile" symbols
+          git clone --no-checkout https://github.com/argotorg/solidity.git "$RUNNER_TEMP/solidity-profile"
+          git -C "$RUNNER_TEMP/solidity-profile" checkout --detach 7893614a31fbeacd1966994e310ed4f760772658
+          git -C "$RUNNER_TEMP/solidity-profile" submodule update --init --recursive --depth 1
+          test "$(git -C "$RUNNER_TEMP/solidity-profile" rev-parse HEAD)" = 7893614a31fbeacd1966994e310ed4f760772658
+          cd "$RUNNER_TEMP/solidity-profile"
+          # Keep upstream release optimization and toolchain. Only retain linker function names.
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('libsolc/CMakeLists.txt')
+          s=p.read_text()
+          needle='if (EMSCRIPTEN)'
+          assert s.count(needle)==1
+          s=s.replace(needle,needle+'\n\tset(CMAKE_EXE_LINKER_FLAGS "$'+'{CMAKE_EXE_LINKER_FLAGS} --profiling-funcs -g2")',1)
+          p.write_text(s)
+          PY
+          docker run --rm --env FORCE_RELEASE=1 --env MAKEFLAGS=-j4 \
+            --mount "type=bind,source=$PWD,target=/root/project" --workdir /root/project \
+            solbuildpackpusher/solidity-buildpack-deps@sha256:c57f2bfb8c15d70fe290629358dd1c73dc126e3760f443b54764797556b887d4 \
+            bash -c 'git config --global --add safe.directory /root/project && ./scripts/ci/build_emscripten.sh'
+          test -s upload/soljson.js
+          test -s emscripten_build/libsolc/soljson.wasm
+          # Require function names from both the Solidity compiler and the linked Z3 solver.
+          node - <<'NODE'
+          const fs=require('fs');
+          const mod=new WebAssembly.Module(fs.readFileSync('emscripten_build/libsolc/soljson.wasm'));
+          const sec=WebAssembly.Module.customSections(mod,'name');
+          if(!sec.length)throw Error('WASM function name section missing');
+          const bytes=Buffer.from(sec[0]);
+          const sol=/solidity|SMTChecker|SMTEncoder/.test(bytes.toString('latin1'));
+          const z3=/Z3_|spacer|smt::|smt[0-9]/i.test(bytes.toString('latin1'));
+          console.log(JSON.stringify({nameSectionBytes:bytes.length,soliditySymbols:sol,z3Symbols:z3}));
+          if(!sol||!z3)throw Error('Compiler and solver function symbols not both confirmed');
+          NODE
+          cp upload/soljson.js "$GITHUB_WORKSPACE/symbols/soljson.cjs"
+          sha256sum "$GITHUB_WORKSPACE/symbols/soljson.cjs" | tee "$GITHUB_WORKSPACE/symbols/sha256.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smtchecker-symbolized-compiler-v1
+          path: symbols/
+          if-no-files-found: error
+          retention-days: 3
+
+  collect:
+    needs: [admit, build_symbols]
+    if: ${{ needs.admit.outputs.request_present == 'true' && needs.admit.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout only trusted forked collection code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Receive only inert toolchain requirements before Docker build
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-toolchain-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .preflight-plan
+      - name: Bind toolchain plan to pinned admitted source digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .preflight-plan/toolchain-plan.json
+          jq -e '.schemaVersion=="curveyield-standalone-toolchain-plan-v1"
+                 and (.sourceZipSha256 | test("^[0-9a-f]{64}$"))' \
+                 .preflight-plan/toolchain-plan.json >/dev/null
+      - name: Set up existing Docker build for source-blind scanner caching
+        uses: docker/setup-buildx-action@v3
+      - name: Restore or publish pinned Slither, Wake, Mythril, Semgrep and SMTChecker compiler layers
         uses: docker/build-push-action@v6
         with:
           context: .
           file: security-intelligence-phase0/Dockerfile
           target: phase0-scanner-tools
           load: true
-          tags: curveyield-smt-wasm:qualification
+          tags: curveyield-security-scanners:local
+          cache-from: type=gha,scope=curve-security-scanners-v1
+          cache-to: type=gha,scope=curve-security-scanners-v1,mode=max
+          provenance: false
+          sbom: false
+      - name: Build source-blind isolated toolchain BEFORE downloading untrusted ZIP
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: security-intelligence-phase0/Dockerfile
+          load: true
+          tags: curveyield-security-preflight:local
           cache-from: type=gha,scope=curve-security-scanners-v1
           provenance: false
           sbom: false
-      - name: Compare isolated engines on synthetic mathematical correctness properties
+      - name: Receive symbolized compiler
+        uses: actions/download-artifact@v4
+        with:
+          name: smtchecker-symbolized-compiler-v1
+          path: .profile-compiler
+      - name: Receive exact source artifact; no source credentials in collector job
+        uses: actions/download-artifact@v4
+        with:
+          name: security-preflight-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .preflight-input
+      - name: Create writable output for sandboxed collection
+        run: mkdir -p .preflight-output
+      - name: Collect internal CPU profiles in network-isolated sandbox
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p qualification
-          timeout --signal=TERM --kill-after=2s 178s docker run --rm -i --network none --read-only --cap-drop ALL \
-            --security-opt no-new-privileges --pids-limit 128 --memory 3g \
-            --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,size=256m,mode=1777 \
-            --env HOME=/tmp --env PATH=/usr/local/bin:/usr/bin:/bin --env LD_LIBRARY_PATH= \
-            --workdir /opt/preflight curveyield-smt-wasm:qualification \
-            node --input-type=commonjs - <<'NODE' | tee qualification/engine-diagnostics-v1.jsonl
-          const {spawnSync}=require('node:child_process');
-          const clock=performance.now();
-          const deadline=clock+172000;
-          const child=String.raw`
-          const fs=require('node:fs');
-          const crypto=require('node:crypto');
-          const [version,engine,kind]=process.argv.slice(1);
-          const file='/opt/preflight/smt-wasm/'+version+'.cjs';
-          const t=performance.now();
-          const compiler=require('solc/wrapper')(require(file));
-          const loaded=performance.now();
-          if(!compiler.version().startsWith(version+'+commit.'))throw Error('Wrong compiler version');
-          const bodies={
-            arithmetic:'function check(uint x) external pure { require(x == 7); assert(x + 1 == 8); }',
-            branch:'function check(uint x) external pure { require(x <= 100); uint y; if(x <= 50) y=x+1; else y=x-1; assert(y <= 100); }',
-            state:'uint private n; function advance() external { if(n < 10) n+=1; assert(n <= 10); }'
-          };
-          const source='pragma solidity '+version+'; contract MathProbe { '+bodies[kind]+' }';
-          const settings={outputSelection:{'*':{'*':['abi']}}};
-          if(engine!=='none')settings.modelChecker={engine,solvers:['z3'],targets:['assert'],showProvedSafe:true,showUnproved:true,showUnsupported:true};
-          const before=process.cpuUsage();
-          const enter=performance.now();
-          const out=JSON.parse(compiler.compile(JSON.stringify({language:'Solidity',sources:{'MathProbe.sol':{content:source}},settings})));
-          const duration=performance.now()-enter;
-          const ds=out.errors||[];
-          const aggregate={errors:ds.filter(d=>d.severity==='error').length,proved:ds.filter(d=>/assertion violation check is safe/i.test(d.message||'')).length,unproved:ds.filter(d=>/could not be proved|might happen here|analysis was not possible/i.test(d.message||'')).length,unavailable:ds.filter(d=>/solver.*not available|solver.*unavailable/i.test(d.message||'')).length};
-          console.log(JSON.stringify({version:compiler.version(),engine,kind,loadMs:Math.round(loaded-t),compileMs:Math.round(duration),cpu:process.cpuUsage(before),peakRssKiB:process.resourceUsage().maxRSS,compilerSha256:crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),...aggregate}));
-          `;
-          const cases=[];
-          for(const kind of ['arithmetic','branch','state'])for(const version of ['0.8.28','0.8.30'])for(const engine of ['none','bmc','chc'])cases.push({kind,version,engine});
-          let completed=0,failed=0,limited=0;
-          for(const [i,c] of cases.entries()){
-            const remaining=Math.floor(deadline-performance.now());
-            if(remaining<500){console.log(JSON.stringify({...c,status:'BUDGET_EXHAUSTED'}));limited++;continue;}
-            const cap=Math.min(12000,Math.floor(remaining/(cases.length-i)));
-            if(cap<100){console.log(JSON.stringify({...c,status:'BUDGET_EXHAUSTED'}));limited++;continue;}
-            const t=performance.now();
-            const x=spawnSync(process.execPath,['--input-type=commonjs','-e',child,c.version,c.engine,c.kind],{encoding:'utf8',timeout:cap,killSignal:'SIGKILL',maxBuffer:1024*1024});
-            const wallMs=Math.round(performance.now()-t);
-            let result;
-            if(x.status===0){try{result=JSON.parse(x.stdout.trim());}catch{}}
-            if(result){completed++;if(result.errors||result.unavailable)failed++;console.log(JSON.stringify({...result,status:'RETURNED',wallMs,capMs:cap}));}
-            else{const timedOut=x.error?.code==='ETIMEDOUT';if(timedOut)limited++;else failed++;console.log(JSON.stringify({...c,status:timedOut?'TIMEOUT':'FAILED',wallMs,capMs:cap,signal:x.signal,exitCode:x.status,errorCode:x.error?.code||null,stderrBytes:Buffer.byteLength(x.stderr||'')}));}
-          }
-          console.log(JSON.stringify({type:'summary',caseCount:cases.length,completed,failed,limited,elapsedMs:Math.round(performance.now()-clock)}));
-          if(failed)process.exitCode=1;
-          NODE
-      - uses: actions/upload-artifact@v4
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 256 --memory 6g \
+            --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,nosuid,nodev,size=3g,mode=1777 \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/.profile-compiler,target=/compiler,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-input,target=/input,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-plan,target=/toolchain-plan,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-output,target=/output" \
+            --env SECURITY_PREFLIGHT_LOCAL_ARCHIVE=/input/source.zip \
+            --env PHASE0_PRIVATE_BUILD_CACHE_ENABLED=false \
+            --env SECURITY_PREFLIGHT_OFFLINE_COMPILERS=1 \
+            --env FOUNDRY_OFFLINE=true \
+            --env ADR_DETECTION_POLICY=audit-detection-rebuild-v1 \
+            --env CI=true --env HOME=/tmp \
+            --env XDG_CACHE_HOME=/opt/preflight/.cache \
+            --env VIRTUAL_ENV=/tmp \
+            --workdir /opt/preflight \
+            curveyield-security-preflight:local \
+            sh -c 'ln -s /opt/preflight/.svm /tmp/.svm && exec node packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs --request /input/request.json --output /output/evidence'
+      - name: Upload only compiler performance evidence
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: smtchecker-engine-diagnostics-v1
-          path: qualification/
-          if-no-files-found: warn
+          name: smtchecker-internal-profiles-v1
+          path: |
+            .preflight-output/evidence/compiler-profile-v1.json
+            .preflight-output/evidence/*-cpu-profile-v1.txt
+          if-no-files-found: error
+          retention-days: 14
