@@ -1136,6 +1136,76 @@ async function main(){
       limitations:[detail],requiredSemanticReview:true};
     console.error('Mythril symbolic analysis incomplete: '+detail);
   }
+  // Fourth scanner: independent, source-only remediation review. Do not send
+  // this report into Source Intelligence, formal jobs or automated reproduction.
+  // The request is trusted workflow metadata, not a setting from the source ZIP.
+  if(request.defensiveSemgrepReview===true){
+    const reportDir=path.join(path.dirname(out),'semgrep-review');
+    const stage=path.join(out,'work','semgrep-source');
+    const rulesRevision='2e878a89ac7bba1f8435e8a68e3ecb7700096cd5';
+    const report={schemaVersion:'curveyield-semgrep-defensive-review-v1',backend:'semgrep',
+      version:'1.187.0',rulesRevision,source:request.source,authoritativeFinding:false,
+      status:'FAILED',sourceDigests:[],findingCount:null,nativeReport:null};
+    await fs.mkdir(reportDir,{recursive:true});
+    try{
+      await withProgressStage('semgrep-defensive-source-review',async()=>{
+        if(!/^curveyield3\\//i.test(request.source.repository))
+          throw Error('Semgrep review requires a CurveYield repository');
+        await fs.mkdir(stage,{recursive:true});
+        const units=Array.isArray(build.compilationUnits)&&build.compilationUnits.length
+          ?build.compilationUnits:[build];
+        const selected=new Map();
+        for(const unit of units){
+          const names=[...new Set([...Object.keys(unit.sourceContents??{}),
+            ...Object.keys(unit.sourceAsts??{}),
+            ...(unit.artifacts??[]).map(a=>a?.sourceName).filter(Boolean)])];
+          for(const originalName of names){
+            if(typeof originalName!=='string'||!originalName.endsWith('.sol')||
+              !sourceIsInScope(originalName,auditScope))continue;
+            const name=originalName.replace(/^\\.\\//,'');
+            safeRel(name,'Semgrep source unit');
+            const bytes=typeof unit.sourceContents?.[originalName]==='string'
+              ?Buffer.from(unit.sourceContents[originalName],'utf8')
+              :await fs.readFile(await resolveCompiledSourceFile(detected.absolute,originalName));
+            const digest=sha256(bytes);
+            if(selected.has(name)){
+              if(selected.get(name)!==digest)throw Error('Conflicting compiler source content: '+name);
+              continue;
+            }
+            selected.set(name,digest);
+            const target=path.join(stage,...name.split('/'));
+            await fs.mkdir(path.dirname(target),{recursive:true});
+            await fs.writeFile(target,bytes);
+            report.sourceDigests.push({sourceName:name,sha256:digest});
+          }
+        }
+        report.sourceDigests.sort((a,b)=>a.sourceName.localeCompare(b.sourceName));
+        if(!selected.size){report.status='NOT_APPLICABLE';report.findingCount=0;return;}
+        const raw=await runProcess({command:'semgrep',args:['scan','--config',
+          '/opt/semgrep-rules/rules/solidity/security','--metrics=off','--disable-version-check',
+          '--no-git-ignore','--strict','--json','.'],cwd:stage,timeoutMs:300000,
+          env:{...process.env,HOME:'/tmp',XDG_CACHE_HOME:'/tmp',CI:'true',SEMGREP_SEND_METRICS:'off'}});
+        report.exitCode=raw.exitCode;
+        report.timedOut=raw.timedOut===true;
+        const parsed=(()=>{try{return JSON.parse(raw.stdout)}catch{return null}})();
+        report.nativeReport=parsed;
+        if(raw.exitCode!==0||report.timedOut||!Array.isArray(parsed?.results)||
+            !Array.isArray(parsed?.errors)||parsed.errors.length)
+          throw Error('Semgrep incomplete: '+String(raw.stderr??'').slice(-1800));
+        const scanned=new Set((parsed.paths?.scanned??[]).map(x=>String(x).replace(/^\\.\\//,'')));
+        report.scannedSourceCount=[...selected.keys()].filter(x=>scanned.has(x)).length;
+        if(report.scannedSourceCount!==selected.size)
+          throw Error('Semgrep source coverage incomplete: '+report.scannedSourceCount+'/'+selected.size);
+        report.findingCount=parsed.results.length;
+        report.status='COMPLETED';
+      });
+    }catch(error){
+      report.error=String(error?.message??error);
+      console.error('Semgrep independent review incomplete: '+report.error);
+    }finally{
+      await fs.writeFile(path.join(reportDir,'SEMGREP_v1.json'),JSON.stringify(report,null,2)+'\\n');
+    }
+  }
   const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
   const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither,wake,mythril}}));
   await writeReviewInventoryOutputsV1({outputDir:out,projectRoot:detected.absolute,build,request,slither,policy:process.env.ADR_DETECTION_POLICY||null,reviewPolicy:process.env.ADR_DETECTION_REVIEW_POLICY||null});
