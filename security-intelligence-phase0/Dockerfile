@@ -26,18 +26,6 @@ RUN test -f node_modules/@foundry-rs/forge/bin.mjs && \
     chmod +x node_modules/@foundry-rs/forge/bin.mjs node_modules/@foundry-rs/cast/bin.mjs && \
     ln -s /opt/preflight/node_modules/@foundry-rs/forge/bin.mjs /usr/local/bin/forge && \
     ln -s /opt/preflight/node_modules/@foundry-rs/cast/bin.mjs /usr/local/bin/cast
-# Official npm release packages contain the Emscripten compiler and statically linked Z3.
-# Verify the npm tarballs against pinned npm integrity records, not standalone solc-bin hashes.
-RUN set -eu; mkdir -p /opt/preflight/smt-wasm /tmp/smt-wasm; \
-    for v in 0.8.28 0.8.30; do \
-      npm pack --ignore-scripts --silent --registry=https://registry.npmjs.org --pack-destination /tmp/smt-wasm "solc@$v"; \
-    done; \
-    node -e "const fs=require('fs'),crypto=require('crypto'); for(const [v,pin] of Object.entries({'0.8.28':'sha512-AFCiJ+b4RosyyNhnfdVH4ZR1+TxiL91iluPjw0EJslIu4LXGM9NYqi2z5y8TqochC4tcH9QsHfwWhOIC9jPDKA==','0.8.30':'sha512-9Srk/gndtBmoUbg4CE6ypAzPQlElv8ntbnl6SigUBAzgXKn35v87sj04uZeoZWjtDkdzT0qKFcIo/wl63UMxdw=='})){const actual='sha512-'+crypto.createHash('sha512').update(fs.readFileSync('/tmp/smt-wasm/solc-'+v+'.tgz')).digest('base64'); if(actual!==pin)throw Error('NPM integrity mismatch '+v); console.log('Verified npm archive '+v+' '+actual)}"; \
-    for v in 0.8.28 0.8.30; do \
-      tar -xOf "/tmp/smt-wasm/solc-$v.tgz" package/soljson.js > "/opt/preflight/smt-wasm/$v.cjs"; \
-    done; \
-    sha256sum /opt/preflight/smt-wasm/*.cjs; \
-    rm -rf /tmp/smt-wasm
 # Source-independent Slither, Wake, Mythril, Semgrep, Foundry and Node layers end here.
 # Only this target is exported to persistent GitHub cache; no per-source plan
 # or authenticated ZIP ever enters the reusable cache.
