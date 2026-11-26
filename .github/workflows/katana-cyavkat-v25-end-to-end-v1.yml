@@ -269,21 +269,21 @@ jobs:
           set -euo pipefail
           root="$(mktemp -d)"
           mkdir -p "$root/src" "$root/evidence"
-          cp "process/avkat-fork-simulation-v1/src/CurveYieldMorphoPositionModule_v2.sol" "$root/src/"
+          cp "process/avkat-fork-simulation-v1/src/CurveYieldMorphoPositionModule_v3.sol" "$root/src/"
           cd "$root"
           forge --version
-          sha256sum src/CurveYieldMorphoPositionModule_v2.sol
+          sha256sum src/CurveYieldMorphoPositionModule_v3.sol
           forge build --use 0.8.30 --evm-version osaka --optimize --optimizer-runs 200 --via-ir --sizes --skip test 2>&1 | tee evidence/compile.log
-          file=out/CurveYieldMorphoPositionModule_v2.sol/CurveYieldMorphoPositionModule.json
+          file=out/CurveYieldMorphoPositionModule_v3.sol/CurveYieldMorphoPositionModule.json
           jq -e '.bytecode.object | length > 2' "$file"
           jq -c '{compiler:"0.8.30",evm:"osaka",optimizerRuns:200,viaIR:true,runtimeBytes:((.deployedBytecode.object|length)-2)/2,creationBytes:((.bytecode.object|length)-2)/2,abiFunctions:[.abi[]|select(.type=="function")|.name]}' "$file" | sed 's/^/CY_MORPHO_COMPILE /'
-          cp "$file" "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v2.json"
-          cp src/CurveYieldMorphoPositionModule_v2.sol "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v2.sol"
-          cp evidence/compile.log "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v2_compile.log"
+          cp "$file" "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v3.json"
+          cp src/CurveYieldMorphoPositionModule_v3.sol "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v3.sol"
+          cp evidence/compile.log "$GITHUB_WORKSPACE/CurveYieldMorphoPositionModule_v3_compile.log"
       - uses: actions/upload-artifact@v4
         with:
-          name: CurveYieldMorphoPositionModule_v2
+          name: CurveYieldMorphoPositionModule_v3
           path: |
-            CurveYieldMorphoPositionModule_v2.sol
-            CurveYieldMorphoPositionModule_v2.json
-            CurveYieldMorphoPositionModule_v2_compile.log
+            CurveYieldMorphoPositionModule_v3.sol
+            CurveYieldMorphoPositionModule_v3.json
+            CurveYieldMorphoPositionModule_v3_compile.log

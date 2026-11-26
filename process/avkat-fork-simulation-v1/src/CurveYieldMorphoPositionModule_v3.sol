@@ -2,7 +2,7 @@
 pragma solidity 0.8.30;
 
 /**
- * @title CurveYield Morpho Position Module v2
+ * @title CurveYield Morpho Position Module v3
  * @notice Secondary Safe module for Morpho positions outside the primary avKAT/KAT market.
  * @dev Reuses the deployed primary module's Safe swap entry point, router selection,
  *      and primary-market loop-up. No NFT, vault, claim, gas, routing or primary-market
@@ -60,9 +60,9 @@ interface ICYPrimary {
 }
 contract CurveYieldMorphoPositionModule {
     uint256 private constant WAD=1e18;
-    uint8 public constant UP=1;
-    uint8 public constant DOWN=2;
-    uint8 public constant MIGRATE=4;
+    uint8 private constant UP=1;
+    uint8 private constant DOWN=2;
+    uint8 private constant MIGRATE=4;
 
     ICYPrimary public immutable PRIMARY;
     ICYSafe public immutable SAFE;
@@ -86,6 +86,19 @@ contract CurveYieldMorphoPositionModule {
         uint256 minEquityOut;
         Hop[] hops;
     }
+    // fromId == 0: increase toId using seedAssets of Safe loan token.
+    // toId == 0: reduce or fully close fromId.
+    // Both nonzero: migrate fromId equity to toId atomically.
+    struct Plan {
+        bytes32 fromId;
+        bytes32 toId;
+        uint256 seedAssets;
+        DownPlan down;
+        Hop[] bridge;
+        uint256 minSeed;
+        UpPlan up;
+        uint256 deadline;
+    }
     struct State {
         uint256 collateral;
         uint256 borrowShares;
@@ -103,7 +116,6 @@ contract CurveYieldMorphoPositionModule {
         uint256 withdrawAssets;
         uint256 sellAssets;
         uint256 minimum;
-        uint256 deadline;
         bool up;
         Hop[] hops;
     }
@@ -159,35 +171,31 @@ contract CurveYieldMorphoPositionModule {
         }
         return _state(id,p,assets,m.totalBorrowShares);
     }
-    function loopUp(bytes32 id,uint256 seed,UpPlan calldata plan,uint256 deadline)
-        external operation(deadline) returns(uint256 collateralAdded)
-    {
-        return _up(id,_allowed(id,UP),seed,plan,deadline);
-    }
-    /// @notice Partial unwind or close; use max uint for all shares and collateral.
-    /// @dev If all collateral is sold, remaining loan-token equity stays in the Safe.
-    function loopDown(bytes32 id,DownPlan calldata plan,uint256 deadline)
-        external operation(deadline) returns(uint256 equity)
-    {
-        return _down(id,_allowed(id,DOWN),plan,deadline);
-    }
-    /// @notice Migrate secondary-market equity into another secondary market, or
-    ///         into the primary market using ONLY the primary module's loop-up.
-    function migratePosition(bytes32 fromId,bytes32 toId,DownPlan calldata down,
-        Hop[] calldata bridge,uint256 minSeed,UpPlan calldata up,uint256 deadline)
-        external operation(deadline) returns(uint256 added)
-    {
-        if(fromId==toId||minSeed==0) revert InvalidAmount();
-        CYMarketParams memory src=_allowed(fromId,DOWN|MIGRATE);
-        CYMarketParams memory dst=toId==PRIMARY_MARKET?_params(toId):_allowed(toId,UP|MIGRATE);
-        (,,uint128 col)=MORPHO.position(fromId,address(SAFE));
-        uint256 take=down.withdrawAssets==type(uint256).max?col:down.withdrawAssets;
-        if(down.sellAssets!=type(uint256).max&&down.sellAssets!=take) revert InvalidAmount();
-        uint256 equity=_down(fromId,src,down,deadline);
-        uint256 seed=_swap(src.loanToken,dst.loanToken,equity,bridge);
-        if(seed<minSeed) revert Slippage();
-        added=toId==PRIMARY_MARKET?_intoPrimary(dst,seed,up,deadline):_up(toId,dst,seed,up,deadline);
-        emit Migrated(fromId,toId,equity,seed,up.flash);
+    /// @notice Single entry for opening, increasing, unwinding, closing and migrating.
+    /// @dev Market ownership is the Safe. The primary market is destination-only,
+    ///      and then only through the original module's atomicLoopUp.
+    function executePosition(Plan calldata plan) external operation(plan.deadline) returns(uint256 result){
+        bytes32 from=plan.fromId;
+        bytes32 to=plan.toId;
+        if(from==to) revert InvalidAmount();
+        if(from==bytes32(0)){
+            return _up(to,_allowed(to,UP),plan.seedAssets,plan.up);
+        }
+        bool migrate=to!=bytes32(0);
+        CYMarketParams memory src=_allowed(from,migrate?DOWN|MIGRATE:DOWN);
+        if(migrate){
+            (,,uint128 col)=MORPHO.position(from,address(SAFE));
+            uint256 take=plan.down.withdrawAssets==type(uint256).max?col:plan.down.withdrawAssets;
+            if(plan.seedAssets!=0||plan.minSeed==0||
+                (plan.down.sellAssets!=type(uint256).max&&plan.down.sellAssets!=take)) revert InvalidAmount();
+        }
+        uint256 equity=_down(from,src,plan.down);
+        if(!migrate) return equity;
+        CYMarketParams memory dst=to==PRIMARY_MARKET?_params(to):_allowed(to,UP|MIGRATE);
+        uint256 seed=_swap(src.loanToken,dst.loanToken,equity,plan.bridge);
+        if(seed<plan.minSeed) revert Slippage();
+        result=to==PRIMARY_MARKET?_intoPrimary(dst,seed,plan.up,plan.deadline):_up(to,dst,seed,plan.up);
+        emit Migrated(from,to,equity,seed,plan.up.flash);
     }
     function _intoPrimary(CYMarketParams memory p,uint256 seed,UpPlan memory plan,uint256 deadline)
         private returns(uint256 added)
@@ -210,21 +218,22 @@ contract CurveYieldMorphoPositionModule {
         if(heldCol!=0) _token(p.collateralToken,abi.encodeCall(ICYToken.transfer,(address(SAFE),heldCol)));
         if(_safeBalance(p.loanToken)!=heldLoan||_safeBalance(p.collateralToken)!=heldCol) revert InvalidAmount();
     }
-    function _up(bytes32 id,CYMarketParams memory p,uint256 seed,UpPlan memory plan,uint256 deadline)
+    function _up(bytes32 id,CYMarketParams memory p,uint256 seed,UpPlan memory plan)
         private returns(uint256 added)
     {
         if(seed+plan.flash==0||plan.minRate==0||_safeBalance(p.loanToken)<seed) revert InvalidAmount();
         MORPHO.accrueInterest(p);
         (,,uint128 beforeCol)=MORPHO.position(id,address(SAFE));
         uint256 beforeLoan=_safeBalance(p.loanToken);
-        _run(p,Action(id,plan.flash,seed,0,0,0,_mulDivUp(seed+plan.flash,plan.minRate,WAD),deadline,true,plan.hops));
+        uint256 minimum=_mulDivUp(seed+plan.flash,plan.minRate,WAD);
+        _run(p,Action(id,plan.flash,seed,0,0,0,minimum,true,plan.hops));
         (,,uint128 afterCol)=MORPHO.position(id,address(SAFE));
         if(_safeBalance(p.loanToken)!=beforeLoan-seed) revert InvalidAmount();
         added=uint256(afterCol)-beforeCol;
-        if(added<_mulDivUp(seed+plan.flash,plan.minRate,WAD)) revert Slippage();
+        if(added<minimum) revert Slippage();
         emit Looped(id,seed,plan.flash,added,_checkLtv(id,p));
     }
-    function _down(bytes32 id,CYMarketParams memory p,DownPlan memory plan,uint256 deadline)
+    function _down(bytes32 id,CYMarketParams memory p,DownPlan memory plan)
         private returns(uint256 equity)
     {
         MORPHO.accrueInterest(p);
@@ -237,7 +246,7 @@ contract CurveYieldMorphoPositionModule {
         uint256 flash=_mulDivUp(shares,uint256(m.totalBorrowAssets)+1,uint256(m.totalBorrowShares)+1e6);
         if(flash>plan.maxRepayAssets) revert InvalidAmount();
         uint256 beforeLoan=_safeBalance(p.loanToken);
-        _run(p,Action(id,flash,0,shares,withdraw,sell,plan.minEquityOut,deadline,false,plan.hops));
+        _run(p,Action(id,flash,0,shares,withdraw,sell,plan.minEquityOut,false,plan.hops));
         equity=_safeBalance(p.loanToken)-beforeLoan;
         if(equity<plan.minEquityOut) revert Slippage();
         (,uint128 afterShares,uint128 afterCol)=MORPHO.position(id,address(SAFE));
@@ -259,7 +268,7 @@ contract CurveYieldMorphoPositionModule {
     function onMorphoFlashLoan(uint256 assets,bytes calldata data) external {
         if(msg.sender!=address(MORPHO)||!locked||commitment==bytes32(0)||keccak256(data)!=commitment) revert Callback();
         Action memory a=abi.decode(data,(Action));
-        if(assets!=a.flash||block.timestamp>a.deadline) revert Callback();
+        if(assets!=a.flash) revert Callback();
         commitment=bytes32(0);
         CYMarketParams memory p=_params(a.id);
         _execute(p,a);
