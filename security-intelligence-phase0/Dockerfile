@@ -26,7 +26,18 @@ RUN test -f node_modules/@foundry-rs/forge/bin.mjs && \
     chmod +x node_modules/@foundry-rs/forge/bin.mjs node_modules/@foundry-rs/cast/bin.mjs && \
     ln -s /opt/preflight/node_modules/@foundry-rs/forge/bin.mjs /usr/local/bin/forge && \
     ln -s /opt/preflight/node_modules/@foundry-rs/cast/bin.mjs /usr/local/bin/cast
-# Source-independent Slither, Wake, Mythril, Semgrep, Foundry and Node layers end here.
+# Independent compiler advisories, lint and upgrade compatibility tooling.
+RUN mkdir -p /opt/phase0-maintenance && \
+    npm install --prefix /opt/phase0-maintenance --ignore-scripts --no-audit --no-fund --save-exact \
+      solhint@6.2.5 @openzeppelin/upgrades-core@1.46.0 && \
+    git init /tmp/solidity-bug-catalogue && \
+    git -C /tmp/solidity-bug-catalogue fetch --depth 1 https://github.com/argotorg/solidity.git refs/tags/v0.8.39 && \
+    git -C /tmp/solidity-bug-catalogue show FETCH_HEAD:docs/bugs_by_version.json > /opt/phase0-maintenance/bugs_by_version.json && \
+    git -C /tmp/solidity-bug-catalogue rev-parse FETCH_HEAD > /opt/phase0-maintenance/solidity-database-revision.txt && \
+    rm -rf /tmp/solidity-bug-catalogue && \
+    test -s /opt/phase0-maintenance/bugs_by_version.json && \
+    test -x /opt/phase0-maintenance/node_modules/.bin/solhint
+# Source-independent analysis and maintenance tool layers end here.
 # Only this target is exported to persistent GitHub cache; no per-source plan
 # or authenticated ZIP ever enters the reusable cache.
 FROM phase0-scanner-tools
