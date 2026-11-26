@@ -1149,7 +1149,7 @@ async function main(){
     await fs.mkdir(reportDir,{recursive:true});
     try{
       await withProgressStage('semgrep-defensive-source-review',async()=>{
-        if(!/^curveyield3\\//i.test(request.source.repository))
+        if(!String(request.source.repository).toLowerCase().startsWith('curveyield3/'))
           throw Error('Semgrep review requires a CurveYield repository');
         await fs.mkdir(stage,{recursive:true});
         const units=Array.isArray(build.compilationUnits)&&build.compilationUnits.length
@@ -1162,7 +1162,7 @@ async function main(){
           for(const originalName of names){
             if(typeof originalName!=='string'||!originalName.endsWith('.sol')||
               !sourceIsInScope(originalName,auditScope))continue;
-            const name=originalName.replace(/^\\.\\//,'');
+            const name=originalName.startsWith('./')?originalName.slice(2):originalName;
             safeRel(name,'Semgrep source unit');
             const bytes=typeof unit.sourceContents?.[originalName]==='string'
               ?Buffer.from(unit.sourceContents[originalName],'utf8')
@@ -1192,7 +1192,7 @@ async function main(){
         if(raw.exitCode!==0||report.timedOut||!Array.isArray(parsed?.results)||
             !Array.isArray(parsed?.errors)||parsed.errors.length)
           throw Error('Semgrep incomplete: '+String(raw.stderr??'').slice(-1800));
-        const scanned=new Set((parsed.paths?.scanned??[]).map(x=>String(x).replace(/^\\.\\//,'')));
+        const scanned=new Set((parsed.paths?.scanned??[]).map(x=>String(x).startsWith('./')?String(x).slice(2):String(x)));
         report.scannedSourceCount=[...selected.keys()].filter(x=>scanned.has(x)).length;
         if(report.scannedSourceCount!==selected.size)
           throw Error('Semgrep source coverage incomplete: '+report.scannedSourceCount+'/'+selected.size);
@@ -1203,7 +1203,7 @@ async function main(){
       report.error=String(error?.message??error);
       console.error('Semgrep independent review incomplete: '+report.error);
     }finally{
-      await fs.writeFile(path.join(reportDir,'SEMGREP_v1.json'),JSON.stringify(report,null,2)+'\\n');
+      await fs.writeFile(path.join(reportDir,'SEMGREP_v1.json'),JSON.stringify(report,null,2)+'\n');
     }
   }
   const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
