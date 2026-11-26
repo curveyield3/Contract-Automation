@@ -61,10 +61,11 @@ async function checkSolhint(report,{build,projectRoot,auditScope,out}){
     "const lint=require('/opt/phase0-maintenance/node_modules/solhint');",
     "const [manifest,ledger]=process.argv.slice(1);",
     "const files=JSON.parse(fs.readFileSync(manifest,'utf8'));",
-    "for(const file of files){let row;try{const r=lint.processFile(file,{extends:'solhint:recommended',cache:false,fix:false});row={filePath:file,messages:r.messages,errorCount:r.errorCount,warningCount:r.warningCount};}catch(e){row={filePath:file,error:String(e.message||e)};}fs.appendFileSync(ledger,JSON.stringify(row)+'\n');}"
+    "for(const file of files){let row;try{const r=lint.processFile(file,{extends:'solhint:recommended',cache:false,fix:false});row={filePath:file,messages:r.messages,errorCount:r.errorCount,warningCount:r.warningCount};}catch(e){row={filePath:file,error:String(e.message||e)};}fs.appendFileSync(ledger,JSON.stringify(row)+'\\n');}"
   ].join('\n');
   const raw=await runProcess({command:process.execPath,args:['-e',program,manifest,ledger],cwd:stage,timeoutMs:limits.solhintWallMs,env:{...process.env,CI:'true',HOME:'/tmp'}});
   report.exitCode=raw.exitCode;report.timedOut=raw.timedOut===true;
+  report.processStderr=String(raw.stderr??'').slice(-4000);
   report.expectedSourceCount=selected.size;
   const lines=(await fs.readFile(ledger,'utf8').catch(e=>{if(e.code==='ENOENT')return '';throw e;})).split('\n').filter(Boolean);
   const result=[];
@@ -82,7 +83,7 @@ async function checkSolhint(report,{build,projectRoot,auditScope,out}){
     for(const m of row.messages)report.detectors.push({sourceName:rel,sourceSha256:selected.get(rel),ruleId:m.ruleId??null,severity:m.severity??null,line:m.line??null,column:m.column??null,message:m.message??null});
   }
   report.scannedSourceCount=covered.size;
-  report.findingCount=report.detectors.length;
+  report.findingCount=covered.size?report.detectors.length:null;
   report.componentStatus=!report.timedOut&&raw.exitCode===0&&covered.size===selected.size&&!report.limitations.length?'COMPLETED':'PARTIAL';
   if(covered.size!==selected.size)report.limitations.push('Not every source was successfully linted.');
 }
@@ -122,7 +123,9 @@ async function checkUpgrades(report,{build,projectRoot,auditScope,out,bundle}){
     row.buildInfoSha256=match.sha256;
     const d=JSON.parse(match.bytes);
     const names=Object.entries(d.output.contracts).flatMap(([s,c])=>Object.keys(c??{}).map(n=>({s,n,raw:c[n]})));
-    if(names.some(x=>!x.raw.storageLayout||!d.output.sources[x.s]?.ast)){row.status='MISSING_STORAGE_LAYOUT_OR_AST';continue;}
+    row.missingStorageLayoutCount=names.filter(x=>!x.raw.storageLayout).length;
+    row.missingAstCount=names.filter(x=>!d.output.sources[x.s]?.ast).length;
+    if(row.missingStorageLayoutCount||row.missingAstCount){row.status='MISSING_STORAGE_LAYOUT_OR_AST';continue;}
     const targetDir=path.join(stage,'unit-'+i);await fs.mkdir(targetDir,{recursive:true});
     await fs.writeFile(path.join(targetDir,'build-info.json'),match.bytes);
     try{
