@@ -123,7 +123,7 @@ jobs:
                  .preflight-plan/toolchain-plan.json >/dev/null
       - name: Set up existing Docker build for source-blind scanner caching
         uses: docker/setup-buildx-action@v3
-      - name: Restore or publish pinned Slither, Wake, Mythril and Semgrep compiler layers
+      - name: Restore or publish pinned Slither, Wake, Mythril, Semgrep and maintenance tool layers
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -152,7 +152,7 @@ jobs:
           path: .preflight-input
       - name: Create writable output for sandboxed collection
         run: mkdir -p .preflight-output
-      - name: Run copied compiler, Source Intelligence, inventory, Slither, Wake, Mythril and Semgrep in network-isolated sandbox
+      - name: Run copied compiler, Source Intelligence, inventory, Slither, Wake, Mythril, Semgrep and independent maintenance checks in network-isolated sandbox
         shell: bash
         run: |
           set -euo pipefail
