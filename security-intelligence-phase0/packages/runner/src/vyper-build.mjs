@@ -63,9 +63,17 @@ export async function compileVyperSources({
   const sources = await collectVyperSourceFiles(projectRoot, fsApi);
   if (sources.length === 0) throw new Error('Exact Vyper compiler requested but no .vy sources were found under contracts');
 
-  const installArgs = ['-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', `vyper==${compiler.version}`];
-  const install = await runCommand({ command: 'python3', args: installArgs, cwd: projectRoot });
-  await requireSuccess(install, `Exact Vyper ${compiler.version} installation failed`);
+  if (process.env.SECURITY_PREFLIGHT_OFFLINE_COMPILERS === '1' && process.env.SECURITY_PREFLIGHT_LOCAL_ARCHIVE) {
+    if (!/^\d+\.\d+\.\d+$/.test(compiler.version)) throw new Error('Invalid prepared Vyper version');
+    const executable = '/opt/preflight/vyper-envs/' + compiler.version + '/bin/vyper';
+    await fsApi.access(executable);
+    const run = runCommand;
+    runCommand = options => run({...options, command:executable});
+  } else {
+    const installArgs = ['-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', `vyper==${compiler.version}`];
+    const install = await runCommand({ command: 'python3', args: installArgs, cwd: projectRoot });
+    await requireSuccess(install, `Exact Vyper ${compiler.version} installation failed`);
+  }
 
   const versionResult = await runCommand({ command: 'vyper', args: ['--version'], cwd: projectRoot });
   await requireSuccess(versionResult, 'Vyper version probe failed');
