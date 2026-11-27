@@ -1,6 +1,6 @@
 name: Lite Phase 0 Archived Source ZIP Smoke v1
 
-# Isolated compile-only adaptation for the exact private DEX v5 source.
+# Isolated artifact reproduction and deployment-only Base fork for the exact private DEX v5 source.
 # The main-branch workflow remains unchanged.
 on:
   push:
@@ -87,7 +87,106 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
+          python3 - tooling/scripts/deployCurveYieldDexFresh.mjs <<'PY'
+          import pathlib, sys
+          p=pathlib.Path(sys.argv[1]); s=p.read_text()
+          def replace(old,new):
+           global s
+           assert s.count(old)==1, (old[:100],s.count(old))
+           s=s.replace(old,new,1)
+          replace('import fs from "node:fs";', 'import fs from "node:fs";\nimport { createHash, randomBytes } from "node:crypto";')
+          replace('const USE_HARDHAT_PROVIDER = process.env.CURVEYIELD_USE_HARDHAT_PROVIDER === "1";', '''const FORK_ONLY = process.argv.includes("--fork-only");
+          const USE_HARDHAT_PROVIDER = FORK_ONLY || process.env.CURVEYIELD_USE_HARDHAT_PROVIDER === "1";
+          if (FORK_ONLY && (DRY_RUN || COMPILE_ONLY || process.env.HARDHAT_DISABLE_FORK === "1")) throw new Error("Fork-only mode requires an enabled fork and cannot be combined with compile-only or dry-run");
+          const SOURCE_ARCHIVE_SHA256 = "6be6b24d09adbbf7173c9e902a88e6d770fc1aadf07c0574e13b4e38e773b177";
+          const ARTIFACT_PATH = path.join(dexRoot, "deployment-artifacts", "compiled-artifacts-v1.json");''')
+          replace('  const artifacts = compileAll();','''  const artifacts = COMPILE_ONLY ? compileAll() : loadArtifacts();
+            report.sourceArchiveSha256 = SOURCE_ARCHIVE_SHA256;''')
+          replace('  if (COMPILE_ONLY) return;\n  const privateKey = loadPrivateKey();','''  if (COMPILE_ONLY) {
+              const bundle = { formatVersion: 1, sourceArchiveSha256: SOURCE_ARCHIVE_SHA256, compilerProfiles: report.compilerProfiles, artifacts };
+              fs.writeFileSync(ARTIFACT_PATH, JSON.stringify(bundle) + "\\n");
+              report.artifactSha256 = createHash("sha256").update(fs.readFileSync(ARTIFACT_PATH)).digest("hex");
+              report.completedAt = new Date().toISOString();
+              saveReport();
+              return;
+            }
+            if (USE_HARDHAT_PROVIDER) {
+              const metadata = await hardhatRuntime.network.provider.request({ method: "hardhat_metadata", params: [] });
+              if (Number(metadata.forkedNetwork?.chainId) !== BASE_CHAIN_ID || !metadata.forkedNetwork?.forkBlockHash) throw new Error("No verified live Base fork; refusing simulation");
+              report.fork = metadata.forkedNetwork;
+              saveReport();
+            }
+            const privateKey = USE_HARDHAT_PROVIDER ? "0x" + randomBytes(32).toString("hex") : loadPrivateKey();''')
+          replace('    const gas = await estimateGasWithMargin({ account: account.address, data, value: 0n });','''    if ((data.length - 2) / 2 > 49_152) throw new Error(name + " full initcode exceeds EIP-3860");
+              const gas = await estimateGasWithMargin({ account: account.address, data, value: 0n });''')
+          replace('  report.pendingRoot = DAO;', '''  const verification = {};
+            const check = (label, ok) => { verification[label] = Boolean(ok); report.verification = verification; saveReport(); if (!ok) throw new Error("Verification failed: " + label); };
+            for (const [name, address] of Object.entries(deployments)) {
+              const code = await publicClient.getCode({ address });
+              check("runtime:" + name, code && (code.length - 2) / 2 === report.bytecodeSizes[name].runtime);
+            }
+            const read = (address, abi, functionName, args = []) => publicClient.readContract({ address, abi, functionName, args });
+            const equal = (a,b) => String(a).toLowerCase() === String(b).toLowerCase();
+            const vaultReadAbi = parseAbi(["function getAuthorizer() view returns (address)", "function getProtocolFeeController() view returns (address)"]);
+            check("vault authorizer", equal(await read(vault, vaultReadAbi, "getAuthorizer"), authorizer));
+            check("vault fee controller", equal(await read(vault, vaultReadAbi, "getProtocolFeeController"), protocolFeeController));
+            check("swap fee", await read(protocolFeeController, artifacts.ProtocolFeeController.abi, "getGlobalProtocolSwapFeePercentage") === PROTOCOL_SWAP_FEE_PERCENTAGE);
+            check("yield fee", await read(protocolFeeController, artifacts.ProtocolFeeController.abi, "getGlobalProtocolYieldFeePercentage") === PROTOCOL_YIELD_FEE_PERCENTAGE);
+            check("revenue treasury", equal(await read(revenue, artifacts.CurveYieldProtocolRevenue.abi, "treasury"), DAO));
+            check("revenue PoL share", Number(await read(revenue, artifacts.CurveYieldProtocolRevenue.abi, "polShareBps")) === Number(POL_SHARE_BPS));
+            const actionId = await read(protocolFeeController, authenticatedAbi, "getActionId", [toFunctionSelector("withdrawProtocolFees(address,address)")]);
+            check("revenue withdrawal permission", await read(authorizer, authAbi, "hasPermission", [actionId, revenue, protocolFeeController]));
+            report.pendingRoot = await read(authorizer, authAbi, "getPendingRoot");
+            report.daoIsRoot = await read(authorizer, authAbi, "isRoot", [DAO]);
+            check("root handoff", report.daoIsRoot || equal(report.pendingRoot, DAO));''')
+          replace('function compileAll() {','''function loadArtifacts() {
+            const bytes = fs.readFileSync(ARTIFACT_PATH);
+            const bundle = JSON.parse(bytes);
+            if (bundle.formatVersion !== 1 || bundle.sourceArchiveSha256 !== SOURCE_ARCHIVE_SHA256) throw new Error("Artifact source identity mismatch");
+            report.artifactSha256 = createHash("sha256").update(bytes).digest("hex");
+            report.compilerProfiles = bundle.compilerProfiles;
+            for (const name of expectedContracts) {
+              const a = bundle.artifacts?.[name];
+              if (a?.contractName !== name || !Array.isArray(a.abi) || typeof a.bytecode !== "string" || typeof a.deployedBytecode !== "string" || !a.bytecode.startsWith("0x") || !a.deployedBytecode.startsWith("0x") || a.bytecode.length <= 2 || a.deployedBytecode.length <= 2 || a.bytecode.length % 2 || a.deployedBytecode.length % 2 || !report.compilerProfiles?.[name]) throw new Error("Invalid or missing artifact: " + name);
+            }
+            return bundle.artifacts;
+          }
+          
+          function compileAll() {''')
+          p.write_text(s)
+          PY
+          node --check tooling/scripts/deployCurveYieldDexFresh.mjs
           npm run ops:compile-curveyield-dex > "$GITHUB_WORKSPACE/.source-zip-smoke/compile.log" 2>&1
+      - name: Verify reproduced bytecode sizes against successful build
+        id: reproduce
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PROJECT_DIR: ${{ steps.source.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api 'repos/curveyield3/Audit-Controller/contents/campaigns/CurveYield_DEX_Simplified_Native_Fees_v5_compile_upstream_dependency.json?ref=development/dex-simplified-native-fees-v1' --jq .content | base64 --decode > .source-zip-smoke/prior-compile-evidence.json
+          python3 - <<'PY'
+          import os,json,pathlib
+          d=pathlib.Path(os.environ['PROJECT_DIR'])/'deployment-artifacts'
+          bundle=json.loads((d/'compiled-artifacts-v1.json').read_text())
+          prior=json.loads(pathlib.Path('.source-zip-smoke/prior-compile-evidence.json').read_text())
+          report=json.loads(next(d.glob('curveyield-dex-fresh-*.json')).read_text())
+          assert prior['runId']=='45975750848' and prior['sourceSha256']==os.environ['SOURCE_SHA256']
+          assert report['bytecodeSizes']==prior['buildReport']['bytecodeSizes']
+          assert len(bundle['artifacts'])==22
+          PY
+      - name: Deploy and verify on isolated live Base fork
+        id: fork
+        env:
+          PROJECT_DIR: ${{ steps.source.outputs.project_dir }}
+          HARDHAT_FORK_URL: ${{ secrets.BASE_RPC_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          unset HARDHAT_DISABLE_FORK DEPLOYER_PRIVATE_KEY PRIVATE_KEY BASE_DEPLOYER_PRIVATE_KEY
+          node tooling/scripts/deployCurveYieldDexFresh.mjs --fork-only > "$GITHUB_WORKSPACE/.source-zip-smoke/fork.log" 2>&1
       - name: Preserve private compile evidence
         if: ${{ always() }}
         env:
@@ -96,6 +195,7 @@ jobs:
           SOURCE_STATUS: ${{ steps.source.outcome }}
           INSTALL_STATUS: ${{ steps.install.outcome }}
           COMPILE_STATUS: ${{ steps.compile.outcome }}
+          FORK_STATUS: ${{ steps.fork.outcome }}
         shell: bash
         run: |
           set -euo pipefail
@@ -108,13 +208,64 @@ jobs:
           def log(name):
               p=d/name
               return p.read_text(errors="replace")[-150000:] if p.exists() else None
-          result=dict(sourceBlob=os.environ["SOURCE_BLOB"],sourceSha256=os.environ["SOURCE_SHA256"],sourceCommit=os.environ["SOURCE_COMMIT"],runId=os.environ["GITHUB_RUN_ID"],runAttempt=os.environ["GITHUB_RUN_ATTEMPT"],sourceStatus=os.environ["SOURCE_STATUS"],installStatus=os.environ["INSTALL_STATUS"],compileStatus=os.environ["COMPILE_STATUS"],installLog=log("install.log"),compileLog=log("compile.log"),buildReport=json.loads(reports[-1].read_text()) if reports else None)
+          result=dict(sourceBlob=os.environ["SOURCE_BLOB"],sourceSha256=os.environ["SOURCE_SHA256"],sourceCommit=os.environ["SOURCE_COMMIT"],runId=os.environ["GITHUB_RUN_ID"],runAttempt=os.environ["GITHUB_RUN_ATTEMPT"],sourceStatus=os.environ["SOURCE_STATUS"],installStatus=os.environ["INSTALL_STATUS"],compileStatus=os.environ["COMPILE_STATUS"],installLog=log("install.log"),compileLog=log("compile.log"),forkStatus=os.environ["FORK_STATUS"],forkLog=log("fork.log"),buildReport=json.loads(reports[-1].read_text()) if reports else None)
           (d/"compile-evidence.json").write_text(json.dumps(result,indent=2)+"\n")
           PY
-          target="campaigns/CurveYield_DEX_Simplified_Native_Fees_v5_compile_upstream_dependency.json"
+          target="campaigns/CurveYield_DEX_Simplified_Native_Fees_v6_deployment_evidence_v1.json"
           ref="development/dex-simplified-native-fees-v1"
           old="$(gh api "repos/curveyield3/Audit-Controller/contents/$target?ref=$ref" --jq .sha 2>/dev/null || true)"
           base64 -w0 .source-zip-smoke/compile-evidence.json > .source-zip-smoke/evidence.b64
           jq -n --arg branch "$ref" --arg old "$old" --arg msg "Record DEX v5 upstream dependency compile evidence (run $GITHUB_RUN_ID)" --rawfile content .source-zip-smoke/evidence.b64 '{branch:$branch,message:$msg,content:$content} + (if $old=="" then {} else {sha:$old} end)' > .source-zip-smoke/upload.json
           gh api --method PUT "repos/curveyield3/Audit-Controller/contents/$target" --input .source-zip-smoke/upload.json --silent
           echo "Private evidence recorded. Source: $SOURCE_STATUS; install: $INSTALL_STATUS; compile: $COMPILE_STATUS"
+
+      - name: Package exact source, exported bytecode and fork evidence privately
+        if: ${{ always() && steps.reproduce.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PROJECT_DIR: ${{ steps.source.outputs.project_dir }}
+          FORK_STATUS: ${{ steps.fork.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, pathlib, zipfile, json, hashlib, csv, io
+          project=pathlib.Path(os.environ['PROJECT_DIR'])
+          root='CurveYield_DEX_Simplified_Native_Fees_v6'
+          oldroot='CurveYield_DEX_Simplified_Native_Fees_v5'
+          d=pathlib.Path('.source-zip-smoke')
+          with zipfile.ZipFile(d/'source.zip') as z:
+              files={n.split('/',1)[1]:z.read(n) for n in z.namelist() if not n.endswith('/') and n.startswith(oldroot+'/')}
+          prefix='workspace/contracts-repo/CurveYield DEX/'
+          files[prefix+'tooling/scripts/deployCurveYieldDexFresh.mjs']=(project/'tooling/scripts/deployCurveYieldDexFresh.mjs').read_bytes()
+          for p in (project/'deployment-artifacts').glob('*.json'): files[prefix+'deployment-artifacts/'+p.name]=p.read_bytes()
+          for n in ['prior-compile-evidence.json','compile-evidence.json','compile.log','fork.log','install.log']:
+              if (d/n).exists(): files['evidence/'+n]=(d/n).read_bytes()
+          reports=[json.loads(v) for k,v in files.items() if k.startswith(prefix+'deployment-artifacts/curveyield-dex-fresh-')]
+          build=next(r for r in reports if r['mode']=='compile-only')
+          fork=next((r for r in reports if r['mode']=='hardhat-fork-simulation'),{})
+          passed=os.environ['FORK_STATUS']=='success' and bool(fork.get('completedAt')) and all(fork.get('verification',{}).values()) and len(fork.get('deployments',{}))==22
+          meta=json.loads(files['PACKAGE_METADATA.json']); meta.update(version='v6',status='FORK_DEPLOYMENT_VERIFIED' if passed else 'COMPILED_FORK_NOT_VERIFIED',compiled=True,tests_run=bool(fork),broadcast=False,source_v5_sha256=os.environ['SOURCE_SHA256'],artifact_sha256=build['artifactSha256'],reproduction_run=os.environ['GITHUB_RUN_ID'],fork_status=os.environ['FORK_STATUS'])
+          files['PACKAGE_METADATA.json']=(json.dumps(meta,indent=2)+'\n').encode()
+          files['BUILD_AND_DEPLOYMENT_STATUS.md']=(f'# Build and deployment status v6\n\nReproduced the exact v5 source using OpenZeppelin 5.4.0 and matched all 22 prior compiler bytecode sizes. Vault runtime: {build["bytecodeSizes"]["Vault"]["runtime"]} bytes. Artifact SHA-256: {build["artifactSha256"]}. Fork deployment verified: {passed}. Fork step: {os.environ["FORK_STATUS"]}. No live broadcast. Run: {os.environ["GITHUB_RUN_ID"]}.\n').encode()
+          original=files['README.md'].decode(); original=original.replace('# CurveYield DEX — simplified native-fee deployment v5','# CurveYield DEX — simplified native-fee deployment v6').replace('**Status: source candidate; not compiled, audited, simulated or deployed.**',f'**Status: compiled; fork deployment verified: {passed}; not audited or broadcast.**')
+          note='\n## v6 deployment artifact and fork entrypoint\n\nSee BUILD_AND_DEPLOYMENT_STATUS.md and evidence/ for authoritative status; historical v5 statements below refer to the original candidate. The compiled bundle is in the DEX workspace deployment-artifacts/compiled-artifacts-v1.json. The successful build replaced the installed OpenZeppelin dependency with 5.4.0; the vendored historical snapshot and original lock remain unchanged. Use the existing script with --fork-only for isolated Base fork deployment using the saved artifacts. It uses a disposable signer and verifies fork metadata, bytecode lengths, fee values, revenue permission and root handoff. Actual DAO root claim remains a separate action. No protocol source or fee parameters changed.\n'
+          files['README.md']=(original+note).encode()
+          files.pop('FILE_INVENTORY.csv',None); files.pop('SHA256SUMS.txt',None)
+          rows=[(k,len(v),hashlib.sha256(v).hexdigest()) for k,v in sorted(files.items())]
+          out=io.StringIO(); w=csv.writer(out); w.writerow(['path','size_bytes','sha256']); w.writerows(rows)
+          files['FILE_INVENTORY.csv']=out.getvalue().encode(); files['SHA256SUMS.txt']=''.join(f'{h}  {k}\n' for k,_,h in rows).encode()
+          target=d/'CurveYield_DEX_Simplified_Native_Fees_v6_deployment_package.zip'
+          with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED,compresslevel=9) as z:
+              for n,v in sorted(files.items()): z.writestr(root+'/'+n,v)
+          with zipfile.ZipFile(target) as z: assert z.testzip() is None
+          print('Prepared private deployment package; fork verified:',passed)
+          PY
+          target='campaigns/CurveYield_DEX_Simplified_Native_Fees_v6_deployment_package.zip'
+          ref='development/dex-simplified-native-fees-v1'
+          archive='.source-zip-smoke/CurveYield_DEX_Simplified_Native_Fees_v6_deployment_package.zip'
+          old="$(gh api "repos/curveyield3/Audit-Controller/contents/$target?ref=$ref" --jq .sha 2>/dev/null || true)"
+          base64 -w0 "$archive" > .source-zip-smoke/package.b64
+          jq -n --arg branch "$ref" --arg old "$old" --arg msg "Preserve DEX v6 private deployment package (run $GITHUB_RUN_ID)" --rawfile content .source-zip-smoke/package.b64 '{branch:$branch,message:$msg,content:$content} + (if $old=="" then {} else {sha:$old} end)' > .source-zip-smoke/package-upload.json
+          gh api --method PUT "repos/curveyield3/Audit-Controller/contents/$target" --input .source-zip-smoke/package-upload.json --silent
+          echo 'Private deployment package preserved.'
