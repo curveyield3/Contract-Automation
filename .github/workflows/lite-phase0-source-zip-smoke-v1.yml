@@ -1,6 +1,6 @@
 name: Lite Phase 0 Archived Source ZIP Smoke v1
 
-# Isolated compile-only adaptation for the exact private DEX v4 source.
+# Isolated compile-only adaptation for the exact private DEX v5 source.
 # The main-branch workflow remains unchanged.
 on:
   push:
@@ -21,9 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      SOURCE_BLOB: 22e4c11a756071341af5c0d8cee2fe65f4b808d1
-      SOURCE_SHA256: 2d4d866ec885eb29e9a7a60fb8ce218b7529b0bdd3d42a9cfe9ca462e5e35bde
-      SOURCE_COMMIT: 3ba9ebd8e61dbe1112672b959c8dea7f5b042c43
+      SOURCE_BLOB: 17bc0b4eeb2dfa74bca525e2a173f9deafdea5e6
+      SOURCE_SHA256: 6be6b24d09adbbf7173c9e902a88e6d770fc1aadf07c0574e13b4e38e773b177
+      SOURCE_COMMIT: 5a7f43fb1b18be601844aa85c1e97f0fa900db71
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,7 +53,7 @@ jobs:
                   p = pathlib.PurePosixPath(m.filename)
                   assert not p.is_absolute() and ".." not in p.parts
               z.extractall(dest)
-          project = dest / "CurveYield_DEX_Simplified_Native_Fees_v4" / "workspace" / "contracts-repo" / "CurveYield DEX"
+          project = dest / "CurveYield_DEX_Simplified_Native_Fees_v5" / "workspace" / "contracts-repo" / "CurveYield DEX"
           assert (project / "package-lock.json").is_file()
           assert (project / "tooling/scripts/deployCurveYieldDexFresh.mjs").is_file()
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
@@ -71,6 +71,7 @@ jobs:
           set -euo pipefail
           cd "$PROJECT_DIR"
           npm ci --no-audit --no-fund --ignore-scripts > "$GITHUB_WORKSPACE/.source-zip-smoke/install.log" 2>&1
+          npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund solc-0.8.26@npm:solc@0.8.26 solc-0.8.27@npm:solc@0.8.27 >> "$GITHUB_WORKSPACE/.source-zip-smoke/install.log" 2>&1
       - name: Compile DEX with its existing deployment compiler
         id: compile
         env:
@@ -103,10 +104,10 @@ jobs:
           result=dict(sourceBlob=os.environ["SOURCE_BLOB"],sourceSha256=os.environ["SOURCE_SHA256"],sourceCommit=os.environ["SOURCE_COMMIT"],runId=os.environ["GITHUB_RUN_ID"],runAttempt=os.environ["GITHUB_RUN_ATTEMPT"],sourceStatus=os.environ["SOURCE_STATUS"],installStatus=os.environ["INSTALL_STATUS"],compileStatus=os.environ["COMPILE_STATUS"],installLog=log("install.log"),compileLog=log("compile.log"),buildReport=json.loads(reports[-1].read_text()) if reports else None)
           (d/"compile-evidence.json").write_text(json.dumps(result,indent=2)+"\n")
           PY
-          target="campaigns/CurveYield_DEX_Simplified_Native_Fees_v4_compile.json"
+          target="campaigns/CurveYield_DEX_Simplified_Native_Fees_v5_compile.json"
           ref="development/dex-simplified-native-fees-v1"
           old="$(gh api "repos/curveyield3/Audit-Controller/contents/$target?ref=$ref" --jq .sha 2>/dev/null || true)"
           base64 -w0 .source-zip-smoke/compile-evidence.json > .source-zip-smoke/evidence.b64
-          jq -n --arg branch "$ref" --arg old "$old" --arg msg "Record DEX v4 compile evidence (run $GITHUB_RUN_ID)" --rawfile content .source-zip-smoke/evidence.b64 '{branch:$branch,message:$msg,content:$content} + (if $old=="" then {} else {sha:$old} end)' > .source-zip-smoke/upload.json
+          jq -n --arg branch "$ref" --arg old "$old" --arg msg "Record DEX v5 compile evidence (run $GITHUB_RUN_ID)" --rawfile content .source-zip-smoke/evidence.b64 '{branch:$branch,message:$msg,content:$content} + (if $old=="" then {} else {sha:$old} end)' > .source-zip-smoke/upload.json
           gh api --method PUT "repos/curveyield3/Audit-Controller/contents/$target" --input .source-zip-smoke/upload.json --silent
           echo "Private evidence recorded. Source: $SOURCE_STATUS; install: $INSTALL_STATUS; compile: $COMPILE_STATUS"
