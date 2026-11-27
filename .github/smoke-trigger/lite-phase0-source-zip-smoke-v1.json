@@ -1,8 +1,8 @@
 {
   "schemaVersion": "curveyield-phase0-source-zip-smoke-trigger-v1",
-  "mode": "SOURCE_ONLY_BUILD_SMOKE",
+  "mode": "ARTIFACT_REPRODUCTION_AND_BASE_FORK_DEPLOYMENT",
   "controllerRef": "06f915dbcfef77db47ba56e560737520192437b0",
   "archive": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v5.zip",
   "sourceSha256": "6be6b24d09adbbf7173c9e902a88e6d770fc1aadf07c0574e13b4e38e773b177",
-  "triggerNonce": "dex-v5-restore-production-profile-pinned-oz540"
+  "triggerNonce": "dex-v5-artifact-export-and-fork-v1"
 }
