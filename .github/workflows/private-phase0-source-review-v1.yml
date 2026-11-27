@@ -1,0 +1,277 @@
+name: Private Phase 0 source review v1
+run-name: Phase 0 · ${{ github.event.head_commit.message }}
+on:
+  push:
+    branches: [machine-intelligence-audit-controller-v1]
+    paths: ['security-intelligence-phase0/controller-dispatch/*.json']
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: 'false'
+      DOCKER_BUILD_SUMMARY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: security-intelligence-phase0/controller-dispatch
+      - name: Resolve immutable controller request
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          marker=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[] | select(.status=="added" and (.filename|startswith("security-intelligence-phase0/controller-dispatch/"))) | .filename')
+          [[ "$marker" =~ ^security-intelligence-phase0/controller-dispatch/([a-f0-9]{40})\.json$ ]]
+          ref=${BASH_REMATCH[1]}
+          test "$(jq -er .requestCommit "$marker")" = "$ref"
+          repo=curveyield3/Audit-Controller
+          test "$(gh api "repos/$repo" --jq .private)" = true
+          file=$(gh api "repos/$repo/commits/$ref" --jq '.files[] | select(.status=="added" and (.filename|startswith("Phase 0 initialization data/")) and (.filename|endswith("/00-request.json"))) | .filename')
+          [[ "$file" =~ ^Phase\ 0\ initialization\ data/[a-zA-Z0-9._\ -]+/00-request\.json$ ]]
+          echo "::add-mask::$file"
+          echo "::add-mask::${file%/*}"
+          printf '%s' "$file" > "$RUNNER_TEMP/controller-path"
+          gh api "repos/$repo/contents/${file// /%20}?ref=$ref" --jq .content | base64 -d > "$RUNNER_TEMP/private-request.json"
+          echo "commit=$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: 022f53e720dfa0de20275bb787bf513ed55d08ed
+          persist-credentials: false
+      - name: Load admitted request
+        run: cp "$RUNNER_TEMP/private-request.json" security-intelligence-phase0/requests/active-request.json
+      - name: Admit source-bound request and download ZIP without running it
+        id: admission
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?GitHub Actions read token unavailable}"
+          mkdir -p .preflight-input
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const source=JSON.parse(fs.readFileSync('security-intelligence-phase0/requests/active-request.json','utf8'));
+          if(source.schemaVersion!=='curveyield-security-preflight-request-v1'||source.runMode!=='SOURCE_PREFLIGHT')throw Error('REQUEST_SCHEMA_OR_MODE_INVALID');
+          if(typeof source.requestId!=='string'||!/^[a-zA-Z0-9._-]{6,100}$/.test(source.requestId))throw Error('REQUEST_ID_INVALID');
+          const s=source.source??{};
+          if(typeof s.repository!=='string'||!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(s.repository))throw Error('SOURCE_REPOSITORY_INVALID');
+          if(typeof s.commit!=='string'||!/^[a-f0-9]{40}$/.test(s.commit))throw Error('SOURCE_COMMIT_UNPINNED');
+          if(typeof s.archiveSha256!=='string'||!/^[a-f0-9]{64}$/.test(s.archiveSha256))throw Error('SOURCE_SHA_UNPINNED');
+          if(typeof s.archivePath!=='string'||!s.archivePath.endsWith('.zip')||s.archivePath.length>512||
+             s.archivePath.startsWith('/')||s.archivePath.includes('..')||s.archivePath.includes('\\')||s.archivePath.split('/').some(x=>!x))throw Error('SOURCE_ARCHIVE_PATH_INVALID');
+          if(!['curveyield3/Contract-Automation','curveyield3/Smart-Contracts','curveyield3/Audit-Controller'].includes(s.repository))throw Error('SOURCE_OUTSIDE_SCOPE');
+          const adapted={schemaVersion:'curveyield-lite-phase0-intelligence-request-v1',
+            requestId:source.requestId,campaignId:source.requestId,
+            campaignGenerationId:'preflight-'+s.archiveSha256.slice(0,20),
+            source:{repository:s.repository,commit:s.commit,archivePath:s.archivePath,archiveSha256:s.archiveSha256},
+            destination:{repository:'curveyield3/Audit-Controller',ref:'machine-intelligence-audit-controller-v1',campaignPath:'Phase 0 initialization data'}};
+          fs.writeFileSync('.preflight-input/request.json',JSON.stringify(adapted,null,2)+'\n');
+          NODE
+          repo="$(jq -er '.source.repository' .preflight-input/request.json)"
+          commit="$(jq -er '.source.commit' .preflight-input/request.json)"
+          rel="$(jq -er '.source.archivePath' .preflight-input/request.json)"
+          expected="$(jq -er '.source.archiveSha256' .preflight-input/request.json)"
+          encoded="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe="/"))' "$rel")"
+          blob="$(gh api "repos/$repo/contents/$encoded?ref=$commit" --jq '.sha')"
+          [[ "$blob" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::SOURCE_GIT_BLOB_UNAVAILABLE"; exit 1; }
+          gh api "repos/$repo/git/blobs/$blob" --jq '.content' | base64 -d > .preflight-input/source.zip
+          test -s .preflight-input/source.zip
+          test "$(sha256sum .preflight-input/source.zip | awk '{print $1}')" = "$expected"
+          test "$(stat -c%s .preflight-input/source.zip)" -le 16777216
+          unzip -tqq .preflight-input/source.zip
+          # Parse source manifests as inert DATA, before any dependency download.
+          python3 security-intelligence-phase0/scripts/source-toolchain-plan-v1.py \
+            .preflight-input/source.zip .preflight-plan
+          test "$(jq -er .sourceZipSha256 .preflight-plan/toolchain-plan.json)" = "$expected"
+          echo "Exact ZIP and source-derived toolchain plan admitted; no source execution"
+      - name: Keep source outside the Docker context
+        run: mv .preflight-input "$RUNNER_TEMP/private-input" && rm security-intelligence-phase0/requests/active-request.json
+      - name: Bind toolchain plan to pinned admitted source digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .preflight-plan/toolchain-plan.json
+          jq -e '.schemaVersion=="curveyield-standalone-toolchain-plan-v1"
+                 and (.sourceZipSha256 | test("^[0-9a-f]{64}$"))' \
+                 .preflight-plan/toolchain-plan.json >/dev/null
+      - name: Set up existing Docker build for source-blind scanner caching
+        uses: docker/setup-buildx-action@v3
+      - name: Restore or publish pinned Slither, Wake, Mythril, Semgrep and maintenance tool layers
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: security-intelligence-phase0/Dockerfile
+          target: phase0-scanner-tools
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=curve-security-scanners-v1
+          cache-to: type=gha,scope=curve-security-scanners-v1,mode=max
+          provenance: false
+          sbom: false
+      - name: Build source-blind isolated toolchain BEFORE downloading untrusted ZIP
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: security-intelligence-phase0/Dockerfile
+          load: true
+          tags: curveyield-security-preflight:local
+          cache-from: type=gha,scope=curve-security-scanners-v1
+          provenance: false
+          sbom: false
+      - name: Restore source for isolated collection
+        run: mv "$RUNNER_TEMP/private-input" .preflight-input
+      - name: Create writable output for sandboxed collection
+        run: mkdir -p .preflight-output
+      - name: Run copied compiler, Source Intelligence, inventory, Slither, Wake, Mythril, Semgrep and independent maintenance checks in network-isolated sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 256 --memory 6g \
+            --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,nosuid,nodev,size=3g,mode=1777 \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-input,target=/input,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-plan,target=/toolchain-plan,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/.preflight-output,target=/output" \
+            --env SECURITY_PREFLIGHT_LOCAL_ARCHIVE=/input/source.zip \
+            --env PHASE0_PRIVATE_BUILD_CACHE_ENABLED=false \
+            --env SECURITY_PREFLIGHT_OFFLINE_COMPILERS=1 \
+            --env FOUNDRY_OFFLINE=true \
+            --env ADR_DETECTION_POLICY=audit-detection-rebuild-v1 \
+            --env CI=true --env HOME=/tmp \
+            --env XDG_CACHE_HOME=/opt/preflight/.cache \
+            --env VIRTUAL_ENV=/tmp \
+            --workdir /opt/preflight \
+            curveyield-security-preflight:local \
+            sh -c 'ln -s /opt/preflight/.svm /tmp/.svm && exec node packages/github-native-sim/src/lite-solo-phase0-intelligence-v1.mjs --request /input/request.json --output /output/evidence' > "$RUNNER_TEMP/collection.log" 2>&1
+      - name: Produce reader-facing discovery and cryptographic evidence index
+        if: ${{ !cancelled() && steps.admission.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .preflight-output/evidence
+          cp .preflight-plan/toolchain-plan.json .preflight-output/evidence/TOOLCHAIN_REQUIREMENTS_v1.json
+          node security-intelligence-phase0/scripts/standalone-preflight-summary-v1.mjs \
+            .preflight-output/evidence .preflight-input/request.json >> "$RUNNER_TEMP/collection.log" 2>&1
+          # Remove the untrusted, extracted working copy; upload only analytical evidence.
+          rm -rf .preflight-output/evidence/work
+      - name: Require source-bound inventory before claiming collection success
+        if: ${{ !cancelled() && steps.admission.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json
+          # Wake must produce a real native evidence artifact, including explicit
+          # zero-Solidity non-applicability; absence is never an all-clear.
+          test -s .preflight-output/evidence/WAKE_v1.json
+          # Mythril must retain per-contract runtime bytecode coverage and bounded symbolic results.
+          test -s .preflight-output/evidence/MYTHRIL_v1.json
+          # Source-only collection is a valid PARTIAL data handoff, never an
+          # ABI, AST, Slither, Wake, Mythril, or security-coverage success claim.
+          jq -e '.source.expectedSha256 == .source.observedSha256 and
+                   .sourceAdmissionVerified == true and
+                   (.status=="COLLECTED" or .status=="COLLECTED_WITH_ANALYZER_LIMITATION" or .status=="PARTIAL")' \
+                   .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
+          if jq -e '.sourceOnly == true' .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null; then
+            jq -e '.buildStatus=="UNAVAILABLE" and .status=="PARTIAL" and
+                   .admittedSourceCount>0' \
+                   .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
+            echo "::warning::Source-only structural inventory preserved; compilation and AST evidence unavailable"
+          else
+            jq -e '((.componentStatus=="COMPLETED" and .solidityUnitCount>0 and
+                        (.unitResults|length)==.solidityUnitCount and
+                        (.unitResults|all(.status=="COMPLETED"))) or
+                       (.componentStatus=="NOT_APPLICABLE" and .solidityUnitCount==0) or
+                        (.componentStatus=="UNSUPPORTED_COMPILER" and .solidityUnitCount>0 and
+                         (.unitResults|length)==.solidityUnitCount and
+                         (.unitResults|all(.status=="UNSUPPORTED_COMPILER" and
+                           .unsupportedReason=="WAKE_HARD_MIN_SOLC_0.6.2" and
+                           .supportedMinimum=="0.6.2" and .exitCode==1))))' \
+              .preflight-output/evidence/WAKE_v1.json >/dev/null
+            jq -e '((.componentStatus=="COMPLETED" and .eligibleCount>0 and
+                        .completedCount==.eligibleCount and .failedCount==0 and
+                        ([.contractResults[] | select(.status=="COMPLETED")]|length)==.eligibleCount) or
+                       (.componentStatus=="NOT_APPLICABLE" and .eligibleCount==0 and
+                        (.contractResults|length)==.sourceArtifactCount))' \
+              .preflight-output/evidence/MYTHRIL_v1.json >/dev/null
+            test -s .preflight-output/evidence/REVIEW_INVENTORY_v1.json
+            jq -e --slurpfile inv .preflight-output/evidence/REVIEW_INVENTORY_v1.json '
+              .buildStatus=="completed" and
+              .sourceOnly==false and
+              ($inv[0].payload.sourceUnits | type=="array") and
+              ([$inv[0].payload.sourceUnits[] | select(.scopeTier=="IN_SCOPE")] | length>0) and
+              (all($inv[0].payload.sourceUnits[];
+                .scopeTier != "IN_SCOPE" or .astStatus == "AVAILABLE" or
+                (. as $unit |
+                  .astStatus == "UNSUPPORTED_LANGUAGE" and
+                  (.path | endswith(".vy")) and
+                  any($inv[0].payload.limitations[];
+                    .code == "UNSUPPORTED_LANGUAGE_FILE_FALLBACK" and
+                    .path == $unit.path)
+                ) or
+                (. as $unit |
+                  .astStatus == "AVAILABLE_VYPER_AST" and
+                  (.path | endswith(".vy")) and
+                  any($inv[0].payload.limitations[];
+                    .code == "VYPER_AST_STRUCTURAL_STATIC_ONLY" and
+                    .path == $unit.path)
+                )
+              ))' .preflight-output/evidence/PREFLIGHT_MANIFEST_v1.json >/dev/null
+            echo "Compiled source-bound evidence accepted with recorded limitations; no security verdict"
+          fi
+
+
+      - name: Publish source and evidence to Audit-Controller
+        if: ${{ !cancelled() && steps.resolve.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          ADMISSION: ${{ steps.admission.outcome }}
+          COLLECTION: ${{ job.status }}
+          REQUEST_COMMIT: ${{ steps.resolve.outputs.commit }}
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/controller"
+          dest=$(dirname "$(cat "$RUNNER_TEMP/controller-path")")
+          gh auth setup-git
+          git clone -q --filter=blob:none --no-checkout --depth 1 --branch "$GITHUB_REF_NAME" https://github.com/curveyield3/Audit-Controller.git "$root"
+          git -C "$root" sparse-checkout set --cone -- "$dest" > /dev/null
+          git -C "$root" checkout -q
+          cmp "$RUNNER_TEMP/private-request.json" "$root/$dest/00-request.json"
+          src=.preflight-input/source.zip
+          [[ -f "$src" ]] || src="$RUNNER_TEMP/private-input/source.zip"
+          if [[ -f "$src" ]]; then
+            expected=$(jq -er .source.archiveSha256 "$RUNNER_TEMP/private-request.json")
+            test "$(sha256sum "$src" | cut -d' ' -f1)" = "$expected"
+            filename=$(jq -er '.source.archivePath | split("/") | last' "$RUNNER_TEMP/private-request.json")
+            mkdir -p "$root/$dest/source"
+            cp -- "$src" "$root/$dest/source/$filename"
+          fi
+          if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then dest="$dest/attempt-$GITHUB_RUN_ATTEMPT"; fi
+          dir="$root/$dest"
+          mkdir -p "$dir"
+          for family in evidence semgrep-review; do
+            from=".preflight-output/$family"
+            [[ -d "$from" && ! -L "$from" ]] || continue
+            to="$dir"
+            [[ "$family" == evidence ]] || to="$dir/semgrep-review"
+            mkdir -p "$to"
+            find "$from" -maxdepth 1 -type f \( -name '*.json' -o -name '*.md' \) -exec cp -- {} "$to/" \;
+            (cd "$from" && find . -maxdepth 1 -type f \( -name '*.json' -o -name '*.md' \) -print0 | xargs -0 -r zip -q "$dir/$family.zip")
+          done
+          if [[ -f "$RUNNER_TEMP/collection.log" ]]; then cp "$RUNNER_TEMP/collection.log" "$dir/collection.log"; fi
+          if [[ "$COLLECTION" == success ]]; then test -s "$dir/evidence.zip"; fi
+          jq -n --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --arg commit "$REQUEST_COMMIT" --arg admission "$ADMISSION" --arg collection "$COLLECTION" '{run:$run,requestCommit:$commit,admission:$admission,collection:$collection}' > "$dir/status.json"
+          cd "$root"
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git add -- "$(dirname "$(cat "$RUNNER_TEMP/controller-path")")"
+          git diff --cached --quiet && exit 0
+          git commit -qm "Publish Phase 0 evidence for Contract-Automation run $GITHUB_RUN_ID"
+          for attempt in 1 2 3 4 5; do
+            git push -q origin "HEAD:refs/heads/$GITHUB_REF_NAME" && exit 0
+            git pull -q --rebase origin "$GITHUB_REF_NAME"
+          done
+          exit 1
