@@ -71,7 +71,10 @@ jobs:
           set -euo pipefail
           cd "$PROJECT_DIR"
           npm ci --no-audit --no-fund --ignore-scripts > "$GITHUB_WORKSPACE/.source-zip-smoke/install.log" 2>&1
-          npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund solc-0.8.26@npm:solc@0.8.26 solc-0.8.27@npm:solc@0.8.27 >> "$GITHUB_WORKSPACE/.source-zip-smoke/install.log" 2>&1
+          compiler_dir="$(mktemp -d)"
+          npm install --prefix "$compiler_dir" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund solc-0.8.26@npm:solc@0.8.26 solc-0.8.27@npm:solc@0.8.27 >> "$GITHUB_WORKSPACE/.source-zip-smoke/install.log" 2>&1
+          ln -s "$compiler_dir/node_modules/solc-0.8.26" node_modules/solc-0.8.26
+          ln -s "$compiler_dir/node_modules/solc-0.8.27" node_modules/solc-0.8.27
       - name: Compile DEX with its existing deployment compiler
         id: compile
         env:

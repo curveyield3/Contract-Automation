@@ -4,5 +4,5 @@
   "controllerRef": "5a7f43fb1b18be601844aa85c1e97f0fa900db71",
   "archive": "campaigns/CurveYield_DEX_Simplified_Native_Fees_v5.zip",
   "sourceSha256": "6be6b24d09adbbf7173c9e902a88e6d770fc1aadf07c0574e13b4e38e773b177",
-  "triggerNonce": "dex-v5-upstream-profile-compile"
+  "triggerNonce": "dex-v5-isolated-compiler-deps"
 }
