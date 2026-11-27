@@ -494,6 +494,45 @@ export async function detectNativeFoundry(projectRoot, {fsApi=fs}={}) {
   return {system:'foundry-native',src,config:'foundry.toml'};
 }
 
+function standaloneOfflineBuild() {
+  return process.env.SECURITY_PREFLIGHT_OFFLINE_COMPILERS === '1' && Boolean(process.env.SECURITY_PREFLIGHT_LOCAL_ARCHIVE);
+}
+
+async function usePreparedFoundryDependencies(root, names, fsApi) {
+  const image = '/opt/preflight';
+  const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+  const planBytes = await fsApi.readFile(path.join(image, 'toolchain-plan/toolchain-plan.json'));
+  const plan = JSON.parse(planBytes);
+  const status = JSON.parse(await fsApi.readFile(path.join(image, 'toolchain-status.json'), 'utf8'));
+  if (status.sourcePlanSha256 !== digest(planBytes)) throw new Error('Prepared Foundry toolchain plan mismatch');
+  const manifestPath = path.join(root, 'package.json');
+  if (!await exists(manifestPath, fsApi)) throw new Error('Missing dependency manifest for ' + names.join(', ') + ' at ' + manifestPath);
+  const manifestSha = digest(await fsApi.readFile(manifestPath));
+  let lock = null;
+  for (const name of LOCKFILES) {
+    if (await exists(path.join(root,name), fsApi)) {lock = name; break;}
+  }
+  const lockSha = lock ? digest(await fsApi.readFile(path.join(root, lock))) : null;
+  const index = plan.packages.findIndex(entry => entry.manifestSha256 === manifestSha && entry.lockSha256 === lockSha);
+  const entry = plan.packages[index];
+  if (!entry || entry.preparedPath !== 'packages/' + index ||
+      !status.packages.some(p => p.index === index && p.status === 'PREPARED')) {
+    throw new Error('No matching prepared install for ' + names.join(', ') + ' at ' + root);
+  }
+  const prepared = path.join(image, 'prepared-packages', String(index), 'node_modules');
+  const modules = path.join(root, 'node_modules');
+  for (const name of names) {
+    if (!await exists(path.join(prepared, name, 'package.json'), fsApi)) throw new Error('Prepared package missing: ' + name + ' for ' + root);
+  }
+  await fsApi.cp(prepared, modules, {recursive:true, force:false, verbatimSymlinks:true});
+  console.error('FOUNDRY_PREPARED_DEPENDENCIES ' + entry.root + ' ' + names.join(', '));
+  return Promise.all(names.map(async name => {
+    const bytes = await fsApi.readFile(path.join(modules, name, 'package.json'));
+    return {package:name, version:JSON.parse(bytes).version, packageManifestSha256:digest(bytes),
+      sourceLockfile:lock, resolution:lock ? 'SOURCE_NPM_LOCK' : 'EXACT_DECLARED_DEPENDENCIES', isolatedRunnerOnly:true};
+  }));
+}
+
 function foundryNpmDependencyRoots(projectRoot,toml){
   const locations=new Map();
   for(const match of toml.matchAll(/["'](@[A-Za-z0-9_-]+\/[^"']*?)=([^"']+)["']/g)){
@@ -526,6 +565,10 @@ export async function installNativeFoundryDependencies({projectRoot,runCommand=r
       if(!await exists(path.join(root,'node_modules',...name.split('/'),'package.json'),fsApi))absent.push(name);
     }
     if(!absent.length)continue;
+    if (standaloneOfflineBuild()) {
+      installs.push(...await usePreparedFoundryDependencies(root, absent, fsApi));
+      continue;
+    }
     // Honor the source lock, when provided, before using explicit bounded
     // runner pins. Never run dependency lifecycle scripts.
     const lock=path.join(root,'package-lock.json');
@@ -577,8 +620,16 @@ export async function compileRepoNativeFoundry({projectRoot,runCommand=runProces
   if(vyperPragmas.size>1)throw new Error('Conflicting exact Vyper compiler versions in Foundry source tree');
   if(vyperPragmas.size===1){
     const version=[...vyperPragmas][0];
-    const install=await runCommand({command:'python3',args:['-m','pip','install','--disable-pip-version-check','--no-input',`vyper==${version}`],cwd:projectRoot});
-    if(install?.exitCode!==0)throw new Error('Exact source-bound Vyper installation failed: '+String(install?.stderr??install?.stdout??'').slice(-2000));
+    if (standaloneOfflineBuild()) {
+      const bin = '/opt/preflight/vyper-envs/' + version + '/bin';
+      if (!await exists(path.join(bin, 'vyper'), fsApi)) throw new Error('Missing prepared Vyper ' + version);
+      const run = runCommand;
+      runCommand = options => run({...options, env:{...process.env, ...options.env,
+        SECURITY_PREFLIGHT_VYPER_VERSION:version, PATH:bin + path.delimiter + (options.env?.PATH ?? process.env.PATH)}});
+    } else {
+      const install=await runCommand({command:'python3',args:['-m','pip','install','--disable-pip-version-check','--no-input',`vyper==${version}`],cwd:projectRoot});
+      if(install?.exitCode!==0)throw new Error('Exact source-bound Vyper installation failed: '+String(install?.stderr??install?.stdout??'').slice(-2000));
+    }
     const probe=await runCommand({command:'vyper',args:['--version'],cwd:projectRoot});
     if(probe?.exitCode!==0||!String(probe?.stdout??'').trim().startsWith(version))
       throw new Error('Installed Vyper version does not match source pragma '+version);
