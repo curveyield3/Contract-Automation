@@ -323,7 +323,7 @@ jobs:
             sleep 1
           done
           test "$(cast chain-id --rpc-url http://127.0.0.1:8546)" = 8453
-          anvil --fork-url http://127.0.0.1:8546 --fork-block-number "$PINNED_BLOCK" --chain-id 8453 --host 127.0.0.1 --port 8545 --compute-units-per-second 30 --retries 2 --fork-retry-backoff 10000 --fork-request-timeout 180000 --silent > "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log" 2>&1 &
+          anvil --fork-url http://127.0.0.1:8546 --fork-block-number "$PINNED_BLOCK" --chain-id 8453 --host 127.0.0.1 --port 8545 --compute-units-per-second 30 --retries 2 --fork-retry-backoff 10000 --silent > "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log" 2>&1 &
           anvil_pid=$!
           trap 'kill "$anvil_pid" "$pacing_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do
