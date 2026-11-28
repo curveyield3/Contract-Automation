@@ -384,7 +384,7 @@ jobs:
             RPC_CHECK_URL="$1" node --input-type=module -e 'const r=await fetch(process.env.RPC_CHECK_URL,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_getBlockByNumber",params:["0x"+BigInt(process.env.PINNED_BLOCK).toString(16),false]})}); if(!r.ok)throw new Error("Block RPC HTTP failure"); const j=await r.json(); const hash=j.result?.hash; if(!/^0x[0-9a-fA-F]{64}$/.test(hash||""))throw new Error("Missing authoritative block hash");process.stdout.write(hash.toLowerCase());'
           }
 
-          anvil --fork-url "$RPC_BASE" --fork-block-number "$PINNED_BLOCK" --chain-id 8453 --host 127.0.0.1 --port 8545 --accounts 0 --compute-units-per-second 12 --retries 8 --fork-retry-backoff 2000 --silent > "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log" 2>&1 &
+          anvil --fork-url "$RPC_BASE" --fork-block-number "$PINNED_BLOCK" --chain-id 8453 --host 127.0.0.1 --port 8545 --accounts 0 --compute-units-per-second 12 --retries 8 --fork-retry-backoff 2000 > "$GITHUB_WORKSPACE/.source-zip-smoke/anvil.log" 2>&1 &
           anvil_pid=$!
           trap 'kill "$anvil_pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do
